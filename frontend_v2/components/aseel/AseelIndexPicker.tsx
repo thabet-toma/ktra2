@@ -91,7 +91,6 @@ export function AseelIndexPicker<T>({
   return (
     <div
       className="aseel-picker-mask"
-      data-skin="aseel"
       data-aseel-modal="1"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();

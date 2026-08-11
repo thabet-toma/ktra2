@@ -199,7 +199,7 @@ export const TaskList: React.FC<TaskListProps> = ({
       <div className="flex justify-center items-center h-64">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <p className="mt-2 text-gray-600 dark:text-gray-400">جاري تحميل الفئات...</p>
+          <p className="mt-2 text-[var(--color-text-muted)]">جاري تحميل الفئات...</p>
         </div>
       </div>
     );
@@ -210,16 +210,16 @@ export const TaskList: React.FC<TaskListProps> = ({
       {/* العنوان والإحصائيات */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
+          <h2 className="text-2xl font-bold text-[var(--color-text)]">
             المهام المسندة ({filteredTasks.length}/{userTasks.length})
           </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">
             قم بتصفية المهام حسب حالتها، فئتها، أو ابحث عن مهمة معينة
           </p>
         </div>
         
         <div className="flex items-center gap-2 text-sm">
-          <span className="text-gray-600 dark:text-gray-300">الإحصائيات:</span>
+          <span className="text-[var(--color-text-muted)]">الإحصائيات:</span>
           <div className="flex flex-wrap gap-2">
             <span className="px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded-full text-xs">
               قيد التنفيذ: {taskStats.in_progress}
@@ -242,18 +242,18 @@ export const TaskList: React.FC<TaskListProps> = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="ابحث عن مهمة بالاسم أو الوصف..."
-            className="w-full px-4 py-3 pr-12 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:focus:ring-blue-400 text-gray-800 dark:text-gray-200"
+            className="w-full px-4 py-3 pr-12 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:focus:ring-blue-400 text-[var(--color-text)]"
           />
           <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
             {searchQuery ? (
               <button
                 onClick={() => setSearchQuery('')}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]"
               >
                 ✕
               </button>
             ) : (
-              <span className="text-gray-400">🔍</span>
+              <span className="text-[var(--color-text-muted)]">🔍</span>
             )}
           </div>
         </div>
@@ -264,7 +264,7 @@ export const TaskList: React.FC<TaskListProps> = ({
         <div className="flex flex-col md:flex-row gap-4">
           {/* فلتر الحالة */}
           <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
               تصفية حسب الحالة:
             </label>
             <div className="flex flex-wrap gap-2">
@@ -275,7 +275,7 @@ export const TaskList: React.FC<TaskListProps> = ({
                   className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                     statusFilter === option.value
                       ? `bg-${option.color}-100 text-${option.color}-800 dark:bg-${option.color}-900 dark:text-${option.color}-200 border border-${option.color}-300 dark:border-${option.color}-700`
-                      : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                      : 'bg-[var(--color-surface-3)] text-[var(--color-text)] hover:bg-[var(--color-surface-3)]'
                   }`}
                 >
                   {option.label} {option.value !== 'all' && `(${taskStats[option.value]})`}
@@ -286,7 +286,7 @@ export const TaskList: React.FC<TaskListProps> = ({
 
 {/* فلتر الفئة - قائمة اختيار متقدمة */}
 <div className="flex-1">
-  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+  <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
     تصفية حسب الفئة:
   </label>
   
@@ -295,7 +295,7 @@ export const TaskList: React.FC<TaskListProps> = ({
       <select
         value={categoryFilter}
         onChange={(e) => setCategoryFilter(e.target.value as CategoryFilter)}
-        className="w-full px-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:focus:ring-blue-400 text-gray-800 dark:text-gray-200 appearance-none cursor-pointer pr-10"
+        className="w-full px-4 py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:focus:ring-blue-400 text-[var(--color-text)] appearance-none cursor-pointer pr-10"
       >
         <option value="all" className="py-2">
           جميع الفئات
@@ -318,7 +318,7 @@ export const TaskList: React.FC<TaskListProps> = ({
       
       {/* سهم القائمة */}
       <div className="absolute left-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-        <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className="w-4 h-4 text-[var(--color-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </div>
@@ -327,7 +327,7 @@ export const TaskList: React.FC<TaskListProps> = ({
     {/* عرض الفئة المختارة */}
     {categoryFilter !== 'all' && (
       <div className="mt-2 flex items-center justify-between">
-        <span className="text-sm text-gray-600 dark:text-gray-400">
+        <span className="text-sm text-[var(--color-text-muted)]">
           الفئة المحددة: <span className="font-semibold text-blue-600 dark:text-blue-400">
             {categoryOptions.find(opt => opt.value === categoryFilter)?.label}
           </span>
@@ -350,7 +350,7 @@ export const TaskList: React.FC<TaskListProps> = ({
           <div className="flex justify-end">
             <button
               onClick={resetFilters}
-              className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 flex items-center gap-2"
+              className="px-4 py-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] flex items-center gap-2"
             >
               <span>↺</span>
               إعادة تعيين جميع الفلاتر
@@ -374,13 +374,13 @@ export const TaskList: React.FC<TaskListProps> = ({
           ))}
         </div>
       ) : (
-        <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border dark:border-gray-700">
-          <h3 className="text-xl font-semibold text-gray-700 dark:text-gray-300">
+        <div className="text-center py-16 bg-[var(--color-surface)] rounded-2xl shadow-sm border dark:border-gray-700">
+          <h3 className="text-xl font-semibold text-[var(--color-text)]">
             {userTasks.length === 0 
               ? "لا توجد مهام مسندة حاليًا." 
               : "لا توجد مهام تطابق معايير البحث."}
           </h3>
-          <p className="text-gray-500 dark:text-gray-400 mt-2">
+          <p className="text-[var(--color-text-muted)] mt-2">
             {userTasks.length === 0 
               ? "استمتع بوقتك!" 
               : "جرب تغيير معايير البحث أو الفلاتر."}

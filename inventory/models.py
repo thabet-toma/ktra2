@@ -81,6 +81,17 @@ class Product(models.Model):
         help_text='إن عُطّل، يُرفض الصرف إذا تجاوزت الكمية المتاحة (الافتراضي: مرفوض)',
     )
     is_serialized = models.BooleanField(default=False, db_column='IsSerialized')
+    # THA-24: سياسة الكفالة على الصنف — لا حالة. النسخة الفعلية لكل وحدة مباعة
+    # تعيش في `after_sales.WarrantyCard`، وتغيير السياسة لا يمسّ بطاقة صُرفت.
+    # فارغ أو صفر = لا كفالة، فلا تُنشأ بطاقة تلقائية عند ترحيل البيع.
+    warranty_months = models.PositiveSmallIntegerField(
+        null=True, blank=True, db_column='WarrantyMonths',
+        help_text='مدة كفالة الزبون بالأشهر (فارغ = بلا كفالة)',
+    )
+    supplier_warranty_months = models.PositiveSmallIntegerField(
+        null=True, blank=True, db_column='SupplierWarrantyMonths',
+        help_text='مدة كفالة المورد لنا بالأشهر — تُحسب من تاريخ فاتورة الشراء',
+    )
     is_service = models.BooleanField(
         default=False,
         db_column='IsService',
@@ -99,6 +110,13 @@ class Product(models.Model):
     avg_cost = models.DecimalField(
         max_digits=18, decimal_places=4, default=0, db_column='AvgCost',
         help_text='Weighted average cost per unit (base currency)',
+    )
+    # كرت الصنف: «سعر البيع» بجانب «سعر التكلفة» — سعر البيع الافتراضي المعتمد
+    # للصنف (بالعملة الأساسية). فارغ = لا سعر محفوظ، فتُظهر البطاقة آخر سعر بيع
+    # فعلي بدلاً منه. لا أثر محاسبي — مرجع تسعير يقترحه المستند.
+    sale_price = models.DecimalField(
+        max_digits=18, decimal_places=4, blank=True, null=True, db_column='SalePrice',
+        help_text='سعر البيع الافتراضي للوحدة (العملة الأساسية) — فارغ يعني الرجوع لآخر سعر بيع',
     )
     # ── N8-T10: Account overrides (6 FKs) ──────────────────────
     sale_account_override = models.ForeignKey(
@@ -199,6 +217,13 @@ class StockMovement(models.Model):
         ('PURCHASE_INVOICE', 'فاتورة شراء'),
         ('WAREHOUSE_TRANSFER', 'تحويل مستودعي'),
         ('STOCKTAKE', 'جرد'),
+        # مستندا الاستلام/التسليم المستقلان (بلا فاتورة مرتبطة بعد).
+        ('GOODS_RECEIPT', 'سند استلام'),
+        ('DELIVERY_NOTE', 'سند تسليم'),
+        # THA-24: صرف قطع غيار مغطاة بالكفالة — نوعٌ مستقل عن STOCK_ISSUE عمداً:
+        # خريطة تكلفة المبيعات تفلتر SALE/STOCK_ISSUE وحدهما، فمصروف الكفالة لا
+        # يدخل تكلفة المبيع (مصروف تشغيلي لا COGS) ولا يتقاطع فضاء معرّفاته معها.
+        ('SERVICE_ISSUE', 'صرف قطع كفالة'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='MovementID')
@@ -231,7 +256,7 @@ class StockMovement(models.Model):
 
     # تقسيم المخزن: مصدر البضاعة محلي (فاتورة شراء عادية) أو دولي (مسار الاستيراد).
     IMPORT_REFERENCE_TYPES = ('SHIPMENT', 'DEAL', 'CLEARANCE')
-    LOCAL_REFERENCE_TYPES = ('PURCHASE_INVOICE',)
+    LOCAL_REFERENCE_TYPES = ('PURCHASE_INVOICE', 'GOODS_RECEIPT')
 
     class Meta:
         db_table = 'stock_movements'
@@ -283,6 +308,67 @@ class ProductPriceTier(models.Model):
     def __str__(self):
         return f"{self.product} — {self.tier_type} #{self.tier_number}: {self.price}"
 
+
+class ProductSerial(models.Model):
+    """وحدة واحدة مُرقَّمة من صنف يتتبّع أرقامه التسلسلية (`Product.is_serialized`).
+
+    سجلّ الوحدة الفعلية لا نيّةَ المستخدم: تُنشأ حين تدخل البضاعة المخزن باستلام
+    الشراء، وتُوسم «مُباع» حين تُرحَّل فاتورة بيعها — فيُجاب سؤال «أي وحدة ذهبت
+    لأي زبون» من الجانبين. الأرقام المدخلة على بند المستند تبقى على البند نفسه
+    (`serials`) كنيّةٍ تُتَرجَم إلى صفوف هنا عند الاستلام/الترحيل، تماماً كما
+    تُترجَم الكمية إلى `StockMovement`.
+
+    الروابط قابلة للإفراغ: تعديل مستند غير مرحّل يحذف بنوده ويعيد إنشاءها، ووحدةٌ
+    موجودة في المخزن فعلاً لا تُمحى لأن ورقتها تغيّرت.
+    """
+
+    STATUS_IN_STOCK = 'in_stock'
+    STATUS_SOLD = 'sold'
+    STATUS_CHOICES = [
+        (STATUS_IN_STOCK, 'في المخزن'),
+        (STATUS_SOLD, 'مُباع'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='ProductSerialID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, db_column='ProductID',
+        related_name='serials',
+    )
+    serial = models.CharField(max_length=100, db_column='Serial')
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_IN_STOCK,
+        db_column='Status',
+    )
+    purchase_item = models.ForeignKey(
+        'logistics.PurchaseInvoiceItem', on_delete=models.SET_NULL,
+        null=True, blank=True, db_column='PurchaseInvoiceItemID',
+        # `serial_units` لا `serials`: البند يحمل حقلاً بهذا الاسم للأرقام المُعلَنة
+        # (نيّة)، وهذه هي الوحدات الفعلية (حالة) — الاسمان يجب أن يتفرّقا.
+        related_name='serial_units',
+        help_text='بند فاتورة الشراء الذي أدخل هذه الوحدة للمخزن',
+    )
+    sales_line = models.ForeignKey(
+        'sales.SalesInvoiceLine', on_delete=models.SET_NULL,
+        null=True, blank=True, db_column='SalesInvoiceLineID',
+        related_name='serial_units',
+        help_text='بند فاتورة البيع الذي استهلك هذه الوحدة',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'product_serials'
+        managed = True
+        unique_together = [['tenant', 'product', 'serial']]
+        indexes = [
+            models.Index(
+                fields=['tenant', 'product', 'status'],
+                name='prodserial_tenant_prod_stat',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.serial} ({self.get_status_display()})"
 
 
 # ════════════════════════════════════════════════════════════════════

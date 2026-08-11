@@ -1,42 +1,52 @@
 import React, { useEffect, useState } from "react";
 import { History } from "lucide-react";
 import { CollapsibleSection } from "@/components/ui/CollapsibleSection";
-import { getEntityActivity } from "@/services/activityService";
+import { DocRefCell } from "@/components/shared/LedgerTable";
+import { getEntityActivity, getPartnerActivity } from "@/services/activityService";
+import { clientLogger } from "@/services/logger";
 import type { ActivityLogEntry } from "@/types/activity";
-import { actionMeta, formatActivityTime } from "./activityMeta";
+import { actionMeta, entityLabel, formatActivityTime } from "./activityMeta";
+import { ActivityChanges } from "./ActivityChanges";
 
 interface EntityActivityLogProps {
   /** sales_invoice | purchase_invoice | deal | customer_payment */
-  entityType: string;
-  entityId: number | string;
+  entityType?: string;
+  entityId?: number | string;
+  /** بديل لنطاق المستند: كل نشاطات الجهة المرتبطة. */
+  partnerId?: number | string;
   defaultOpen?: boolean;
+  title?: string;
   /** أعِد الجلب عند تغيّر هذا المفتاح (مثلاً بعد ترحيل/تعديل). */
   refreshKey?: number | string;
 }
 
 /** سجل نشاط مستند واحد — يظهر داخل شاشة تحرير الفاتورة/الصفقة. */
 export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
-  entityType, entityId, defaultOpen = false, refreshKey,
+  entityType, entityId, partnerId, defaultOpen = false, title, refreshKey,
 }) => {
   const [rows, setRows] = useState<ActivityLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!entityId) return;
+    if (!partnerId && (!entityType || !entityId)) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getEntityActivity(entityType, entityId)
+    const request = partnerId
+      ? getPartnerActivity(partnerId)
+      : getEntityActivity(entityType!, entityId!);
+    if (partnerId) clientLogger.info("partner.activity_open", { partnerId });
+    request
       .then((data) => { if (!cancelled) setRows(data); })
       .catch(() => { if (!cancelled) setError("تعذّر تحميل سجل النشاط."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [entityType, entityId, refreshKey]);
+  }, [entityType, entityId, partnerId, refreshKey]);
 
   return (
     <CollapsibleSection
-      title="سجل نشاط المستند"
+      title={title || (partnerId ? "سجل نشاطات الجهة" : "سجل نشاط المستند")}
       icon={History}
       defaultOpen={defaultOpen}
       badge={rows.length ? String(rows.length) : undefined}
@@ -63,9 +73,22 @@ export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${meta.badge}`}>{r.action_label || meta.label}</span>
                     <span className="font-medium aseel-text-ink dark:text-white">{r.user_name}</span>
+                    {partnerId && (
+                      <span className="text-xs aseel-text-soft">
+                        <DocRefCell
+                          referenceType={r.entity_type}
+                          referenceId={r.entity_id}
+                          label={`${entityLabel(r.entity_type)} ${r.entity_label || (r.entity_id != null ? `#${r.entity_id}` : "")}`}
+                        />
+                      </span>
+                    )}
                   </div>
-                  {r.description && (
-                    <p className="text-sm aseel-text-soft mt-0.5">{r.description}</p>
+                  {r.metadata?.changes?.length ? (
+                    <div className="mt-1"><ActivityChanges changes={r.metadata.changes} /></div>
+                  ) : (
+                    r.description && (
+                      <p className="text-sm aseel-text-soft mt-0.5">{r.description}</p>
+                    )
                   )}
                 </div>
                 <div className="text-xs aseel-text-soft whitespace-nowrap">

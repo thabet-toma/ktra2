@@ -3,7 +3,15 @@
  */
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
 import { apiFetch, toPagedList } from "./restApi";
+import { humanizeDrfError } from "../utils/drfError";
 import { tenantScopedOfflineKey } from "../utils/offlineTenantScope";
+import type {
+  BankAccountDto,
+  BankBranchDto,
+  BankDto,
+  BankReconciliationSummaryDto,
+  BankStatementDto,
+} from "../types/accounting";
 
 // كل نداءات هذا العميل القديمة تمر الآن من دورة الطلب المحدودة والموحّدة.
 const fetch = apiFetch;
@@ -30,9 +38,9 @@ async function handle(res: Response, ctx: string): Promise<void> {
   let msg = `${ctx}: ${res.status}`;
   try {
     const j = await res.json();
-    if (typeof j.error === "string") msg = j.error;
-    else if (typeof j.detail === "string") msg = j.detail;
-    else if (j.detail != null) msg = JSON.stringify(j.detail);
+    // T-CHQ3: أخطاء الحقول ({"tenant":["مطلوب"]}) كانت تسقط هنا فيرى المستخدم
+    // «createCheque: 400» بلا سبب — تمرّ الآن على الطبقة الموحّدة.
+    msg = humanizeDrfError(j) || msg;
   } catch {
     const t = await res.text();
     if (t) msg = t.slice(0, 400);
@@ -169,12 +177,19 @@ export const accountingApi = {
   // cache_meta. When it's down, we serve the last known snapshot so dropdowns
   // and pickers keep working offline. Read errors here are non-fatal — the
   // caller still gets [] if nothing has ever been cached.
-  getPartners: async () => {
+  //
+  // T-PARTYPURE: `partnerType` يفلتر على الخادم — شاشة الزبائن لا تعرض موردين
+  // وبالعكس. الفلترة هنا لا في كل شاشة، فلا تتكرر القاعدة ولا تُنسى في واحدة.
+  getPartners: async (partnerType?: string) => {
     const db = (await import("./offline/db")).default;
     const tenantId = resolveTenantId();
-    const cacheMetaKey = tenantScopedOfflineKey(tenantId, "partners:list");
+    const cacheMetaKey = tenantScopedOfflineKey(
+      tenantId, partnerType ? `partners:list:${partnerType}` : "partners:list");
     try {
-      const data = await fetch(`${API_BASE}/partners/lookup/?limit=500`, { headers: headers() }).then(asList);
+      const query = partnerType
+        ? `?limit=500&partner_type=${encodeURIComponent(partnerType)}`
+        : "?limit=500";
+      const data = await fetch(`${API_BASE}/partners/lookup/${query}`, { headers: headers() }).then(asList);
       try {
         const now = new Date().toISOString();
         for (const p of data as Array<Record<string, unknown>>) {
@@ -196,7 +211,9 @@ export const accountingApi = {
       // Network failed — fall back to the last cached snapshot.
       try {
         const cached = await db.partners.where("tenant_id").equals(tenantId).toArray();
-        return cached.map((c) => JSON.parse(c.data));
+        return cached
+          .filter((c) => !partnerType || c.partner_type === partnerType)
+          .map((c) => JSON.parse(c.data));
       } catch {
         return [];
       }
@@ -206,8 +223,166 @@ export const accountingApi = {
   getCostCenters: () =>
     fetch(`${ACC}/cost-centers/`, { headers: headers() }).then(asList),
 
+  /* ── T-BANKS: البنوك وفروعها وحساباتها والمطابقة البنكية ── */
+
+  getBanks: (activeOnly = false) =>
+    fetch(`${ACC}/banks/${activeOnly ? "?active_only=1" : ""}`, { headers: headers() }).then(asList),
+
+  createBank: async (body: Record<string, unknown>): Promise<BankDto> => {
+    const res = await fetch(`${ACC}/banks/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createBank");
+    return res.json();
+  },
+
+  updateBank: async (id: number, body: Record<string, unknown>): Promise<BankDto> => {
+    const res = await fetch(`${ACC}/banks/${id}/`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "updateBank");
+    return res.json();
+  },
+
+  deleteBank: async (id: number) => {
+    const res = await fetch(`${ACC}/banks/${id}/`, { method: "DELETE", headers: headers() });
+    await handle(res, "deleteBank");
+  },
+
+  getBankBranches: (bankId?: number) =>
+    fetch(`${ACC}/bank-branches/${bankId ? `?bank=${bankId}` : ""}`, { headers: headers() }).then(asList),
+
+  createBankBranch: async (body: Record<string, unknown>): Promise<BankBranchDto> => {
+    const res = await fetch(`${ACC}/bank-branches/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createBankBranch");
+    return res.json();
+  },
+
+  updateBankBranch: async (id: number, body: Record<string, unknown>): Promise<BankBranchDto> => {
+    const res = await fetch(`${ACC}/bank-branches/${id}/`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "updateBankBranch");
+    return res.json();
+  },
+
+  deleteBankBranch: async (id: number) => {
+    const res = await fetch(`${ACC}/bank-branches/${id}/`, { method: "DELETE", headers: headers() });
+    await handle(res, "deleteBankBranch");
+  },
+
+  getBankAccounts: (params: { bank?: number; activeOnly?: boolean } = {}) => {
+    const q = new URLSearchParams();
+    if (params.bank) q.set("bank", String(params.bank));
+    if (params.activeOnly) q.set("active_only", "1");
+    const qs = q.toString();
+    return fetch(`${ACC}/bank-accounts/${qs ? `?${qs}` : ""}`, { headers: headers() }).then(asList);
+  },
+
+  createBankAccount: async (body: Record<string, unknown>): Promise<BankAccountDto> => {
+    const res = await fetch(`${ACC}/bank-accounts/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createBankAccount");
+    return res.json();
+  },
+
+  updateBankAccount: async (id: number, body: Record<string, unknown>): Promise<BankAccountDto> => {
+    const res = await fetch(`${ACC}/bank-accounts/${id}/`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "updateBankAccount");
+    return res.json();
+  },
+
+  deleteBankAccount: async (id: number) => {
+    const res = await fetch(`${ACC}/bank-accounts/${id}/`, { method: "DELETE", headers: headers() });
+    await handle(res, "deleteBankAccount");
+  },
+
+  getBankStatement: async (
+    id: number,
+    params: { start_date?: string; end_date?: string } = {},
+  ): Promise<BankStatementDto> => {
+    const q = new URLSearchParams();
+    if (params.start_date) q.set("start_date", params.start_date);
+    if (params.end_date) q.set("end_date", params.end_date);
+    const qs = q.toString();
+    const res = await fetch(`${ACC}/bank-accounts/${id}/statement/${qs ? `?${qs}` : ""}`, {
+      headers: headers(),
+    });
+    await handle(res, "bankStatement");
+    return res.json();
+  },
+
+  getBankReconciliations: (bankAccountId?: number) =>
+    fetch(`${ACC}/bank-reconciliations/${bankAccountId ? `?bank_account=${bankAccountId}` : ""}`, {
+      headers: headers(),
+    }).then(asList),
+
+  createBankReconciliation: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${ACC}/bank-reconciliations/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createBankReconciliation");
+    return res.json();
+  },
+
+  getBankReconciliationSummary: async (id: number): Promise<BankReconciliationSummaryDto> => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/summary/`, { headers: headers() });
+    await handle(res, "bankReconciliationSummary");
+    return res.json();
+  },
+
+  toggleBankReconciliationLine: async (
+    id: number, journalLine: number, cleared: boolean,
+  ): Promise<BankReconciliationSummaryDto> => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/toggle-line/`, {
+      method: "POST", headers: headers(),
+      body: JSON.stringify({ journal_line: journalLine, cleared }),
+    });
+    await handle(res, "toggleBankReconciliationLine");
+    return res.json();
+  },
+
+  closeBankReconciliation: async (id: number): Promise<BankReconciliationSummaryDto> => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/close/`, {
+      method: "POST", headers: headers(), body: "{}",
+    });
+    await handle(res, "closeBankReconciliation");
+    return res.json();
+  },
+
+  reopenBankReconciliation: async (id: number): Promise<BankReconciliationSummaryDto> => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/reopen/`, {
+      method: "POST", headers: headers(), body: "{}",
+    });
+    await handle(res, "reopenBankReconciliation");
+    return res.json();
+  },
+
+  deleteBankReconciliation: async (id: number) => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/`, {
+      method: "DELETE", headers: headers(),
+    });
+    await handle(res, "deleteBankReconciliation");
+  },
+
   getCheques: () =>
     fetch(`${ACC}/cheques/`, { headers: headers() }).then(asList),
+
+  /** T-CHQ2: محفظة الشيكات — الأوراق المفتوحة بالحالة وبآجال الاستحقاق. */
+  getChequeWallet: async () => {
+    const res = await fetch(`${ACC}/cheques/wallet/`, { headers: headers() });
+    await handle(res, "getChequeWallet");
+    return res.json();
+  },
+
+  /** T-CHQ2: مسار الشيك — حركاته بالترتيب. */
+  getChequeMovements: (id: number) =>
+    fetch(`${ACC}/cheques/${id}/movements/`, { headers: headers() }).then(asList),
 
   createCheque: async (body: Record<string, unknown>) => {
     const res = await fetch(`${ACC}/cheques/`, {

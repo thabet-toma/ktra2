@@ -11,9 +11,9 @@ export const DetailRow: React.FC<DetailRowProps> = ({
   value,
 }) => (
   <div className="flex justify-between py-2">
-    <span className="font-semibold text-gray-700 dark:text-gray-300">
+    <span className="font-semibold text-[var(--color-text)]">
       {label}:
     </span>
-    <span className="text-gray-600 dark:text-gray-200 text-left">{value}</span>
+    <span className="text-[var(--color-text-muted)] text-left">{value}</span>
   </div>
 );

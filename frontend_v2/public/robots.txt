@@ -1,0 +1,54 @@
+User-agent: *
+Allow: /
+Allow: /about-us
+Allow: /contact
+Allow: /gallery
+
+# مسارات التطبيق الداخلية (خلف تسجيل الدخول) — لا فائدة من فهرستها، ولزائر
+# غير مسجَّل تعرض صفحة الهبوط نفسها فتتكرر النتيجة على عناوين مختلفة.
+Disallow: /dashboard
+Disallow: /tasks
+Disallow: /task-management
+Disallow: /assistant
+Disallow: /users
+Disallow: /attendance
+Disallow: /employee-notes
+Disallow: /points-management
+Disallow: /points-history
+Disallow: /permissions
+Disallow: /sales/
+Disallow: /purchase-invoices
+Disallow: /purchase-returns
+Disallow: /purchase-settings
+Disallow: /supplier-payments
+Disallow: /suppliers
+Disallow: /international-invoices
+Disallow: /old-invoices
+Disallow: /price-offers
+Disallow: /deals
+Disallow: /items
+Disallow: /import-flow
+Disallow: /shipments
+Disallow: /clearance
+Disallow: /local-shipping
+Disallow: /stock-levels
+Disallow: /stock-movements
+Disallow: /warehouses
+Disallow: /warehouse-transfer
+Disallow: /stocktake
+Disallow: /product-cost
+Disallow: /product-group
+Disallow: /accounting/
+Disallow: /property-rental
+Disallow: /cash-boxes
+Disallow: /reports
+Disallow: /settings
+Disallow: /sourcing
+Disallow: /group-constants
+Disallow: /aseel-kit
+Disallow: /aseel-sales
+# كتلة عرض المتجر معطّلة في App.tsx، فالمسار يعرض صفحة الهبوط نفسها ⇒ محتوى
+# مكرر على عنوان مختلف. يُعاد فتحه عند تفعيل الكتلة.
+Disallow: /store
+
+Sitemap: https://ktraerp.servebeer.com/sitemap.xml

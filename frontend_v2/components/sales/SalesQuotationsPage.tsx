@@ -2,46 +2,50 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import {
-  FileText,
-  Plus,
   Trash2,
   Save,
-  CheckCircle,
   Loader2,
-  ChevronRight,
-  ChevronLeft,
-  ChevronsRight,
-  ChevronsLeft,
   Printer,
-  FileDown,
-  ArrowRight,
-  RefreshCw,
+  X,
 } from "lucide-react";
-import { AseelSpinner } from "../aseel/AseelStates";
 import {
   listQuotationsPage,
   getQuotation,
   createQuotation,
   updateQuotation,
   deleteQuotation,
-  convertQuotationToInvoice,
+  convertQuotation,
+  cancelQuotation,
   getCustomerPriceList,
+  getSalesSettings,
   type SalesQuotationRow,
   type SalesQuotationDetail,
 } from "../../services/salesApi";
+import { useToast } from "../../contexts/ToastContext";
+import { ConvertTargetDialog } from "./ConvertTargetDialog";
 import { clientLogger } from "../../services/logger";
 import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
+import { listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { formatQuantity } from "../../utils/formatNumber";
 import type { SqlProduct } from "../../types/inventory";
 import {
-  AseelDocumentShell,
   useRecordNavigation,
   useAseelKeymap,
-  AseelAutocomplete,
 } from "../aseel";
 import { SalesProductPickerModal, type SalesProductPickerItem, formatProductPrimaryName } from "./SalesProductPickerModal";
+import { SalesOrdersPage } from "./SalesOrdersPage";
+import {
+  CommercialDocumentEditor,
+  type CommercialHeaderField,
+  type CommercialLineColumn,
+  type CommercialToolbarAction,
+} from "../shared/CommercialDocumentEditor";
+import {
+  CommercialDocumentsList,
+  type CommercialListColumn,
+} from "../shared/CommercialDocumentsList";
 
 type Partner = { id: number; name: string };
 type Product = SalesProductPickerItem & { name: string; unit_price?: string };
@@ -59,6 +63,12 @@ type LineState = {
 
 export const SalesQuotationsPage: React.FC = () => {
   const confirm = useConfirm();
+  const toast = useToast();
+  // T-ORDERS: صلاحية العرض ومدة الحجز وإظهار الحذف — كلها من إعدادات الشركة.
+  const [quotationValidDays, setQuotationValidDays] = useState(14);
+  const [allowDelete, setAllowDelete] = useState(true);
+  // العرض المطلوب تحويله — يفتح حوار «طلبية أم فاتورة؟» داخل الموقع (لا حوار متصفح).
+  const [convertId, setConvertId] = useState<number | null>(null);
   const [quotations, setQuotations] = useState<SalesQuotationRow[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -252,10 +262,10 @@ export const SalesQuotationsPage: React.FC = () => {
       // (getAccounts) بدل الأصناف — يُصحَّح إلى أصناف المخزون (inventory/products).
       const tenantId = resolveTenantId();
       const [parts, prods] = await Promise.all([
-        accountingApi.getPartners() as Promise<Partner[]>,
-        apiGetList<SqlProduct & { sale_price?: string; selling_price?: string }>(
-          "inventory/products/",
-          { tenantId }
+        // T-PARTYPURE: عرض سعر بيع = زبائن فقط.
+        accountingApi.getPartners("Customer") as Promise<Partner[]>,
+        listPickerProducts<SqlProduct & { sale_price?: string; selling_price?: string }>(
+          tenantId,
         ),
       ]);
       setPartners(parts || []);
@@ -264,7 +274,7 @@ export const SalesQuotationsPage: React.FC = () => {
           id: p.id,
           sku: p.sku || "",
           barcode: p.barcode,
-          quantity_on_hand: String(p.quantity_on_hand || "0"),
+          quantity_on_hand: String(p.available_quantity ?? p.quantity_on_hand ?? "0"),
           name_ar: p.name_ar || p.name || "",
           name_en: p.name_en || "",
           name: p.name_ar || p.name_en || p.name || p.sku || `#${p.id}`,
@@ -282,11 +292,32 @@ export const SalesQuotationsPage: React.FC = () => {
 
   useEffect(() => { void loadMasterData(); }, [loadMasterData]);
 
+  // T-ORDERS: صلاحية العرض وإظهار «حذف» من إعدادات الشركة (لا قيم مثبّتة بالكود).
+  useEffect(() => {
+    let alive = true;
+    getSalesSettings()
+      .then((st) => {
+        if (!alive) return;
+        setQuotationValidDays(Number(st.quotation_valid_days ?? 14));
+        setAllowDelete(st.allow_document_delete !== false);
+      })
+      .catch(() => { /* الافتراضيات تكفي */ });
+    return () => { alive = false; };
+  }, []);
+
+  /** T-ORDERS: العرض فعّال افتراضياً حتى (اليوم + أيام الإعداد، 14 يوماً). */
+  const defaultValidUntil = useCallback((from?: string) => {
+    if (!quotationValidDays) return "";
+    const base = from ? new Date(from) : new Date();
+    base.setDate(base.getDate() + quotationValidDays);
+    return base.toISOString().slice(0, 10);
+  }, [quotationValidDays]);
+
   const resetForm = () => {
     setSelectedId(null);
     setFormCustomer("");
     setFormDate(new Date().toISOString().slice(0, 10));
-    setFormValidUntil("");
+    setFormValidUntil(defaultValidUntil());
     setFormNotes("");
     setFormLines([{
       id: undefined, product_id: "", product_name: "", quantity: "1", unit_price: "", discount: "0", tax_rate: "0", total: "0"
@@ -373,14 +404,36 @@ export const SalesQuotationsPage: React.FC = () => {
     }
   };
 
-  const handleConvert = async (id: number) => {
-    if (!window.confirm("هل تريد تحويل هذا العرض إلى فاتورة؟")) return;
+  /** T-ORDERS: التحويل يختار وجهته — طلبية (تحجز الكمية) أو فاتورة. */
+  const handleConvert = async (id: number, target: "invoice" | "order") => {
+    setConvertId(null);
     try {
-      const result = await convertQuotationToInvoice(id);
-      alert(`✅ تم التحويل — فاتورة رقم: ${result.invoice_number}`);
+      const result = await convertQuotation(id, target);
+      toast(
+        target === "order"
+          ? `تم التحويل — طلبية رقم ${result.order?.order_number ?? ""}`
+          : `تم التحويل — فاتورة رقم ${result.invoice?.invoice_number ?? ""}`,
+        "success",
+      );
       await loadQuotations();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحويل");
+    }
+  };
+
+  /** إلغاء بلا حذف — المستند وسجلّه يبقيان. */
+  const handleCancel = async (id: number) => {
+    if (!(await confirm({
+      title: "إلغاء عرض السعر",
+      message: "سيُعلَّم العرض «ملغى» ويبقى في السجل (لن يُحذف). متابعة؟",
+      confirmText: "إلغاء العرض",
+    }))) return;
+    try {
+      await cancelQuotation(id);
+      toast("تم إلغاء العرض", "success");
+      await loadQuotations();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "فشل الإلغاء");
     }
   };
 
@@ -401,6 +454,8 @@ export const SalesQuotationsPage: React.FC = () => {
       accepted: "مقبول",
       rejected: "مرفوض",
       converted: "مُحوَّل",
+      cancelled: "ملغى",
+      expired: "منتهي الصلاحية",
     };
     return map[s] || s;
   };
@@ -412,321 +467,365 @@ export const SalesQuotationsPage: React.FC = () => {
       accepted: "bg-green-100 text-green-700",
       rejected: "aseel-bg-panel aseel-text-state",
       converted: "aseel-bg-panel aseel-text-ink",
+      cancelled: "bg-amber-100 text-amber-700",
+      expired: "aseel-bg-panel aseel-text-soft",
     };
     return map[s] || "aseel-bg-panel aseel-text-ink";
   };
 
-  const productOptions = React.useMemo(
-    () => products.map((p) => ({
-      id: p.id,
-      label: formatProductPrimaryName(p),
-    })),
-    [products]
-  );
-
   const subtotal = formLines.reduce((s, l) => s + (Number(l.total) || 0), 0);
-
-  return (
-    <div
-      data-skin="aseel"
-      style={{ minHeight: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
-    >
-    <AseelDocumentShell
-      title="العروض والطلبيات"
-      state={selectedId ? `عرض #${selectedId}` : 'عروض'}
-      nav={nav}
-      actions={[
-        {
-          key: 'new',
-          label: 'عرض جديد',
-          icon: <Plus />,
-          onClick: () => { resetForm(); setShowForm(true); },
-        },
-        {
-          key: 'reload',
-          label: 'تحديث',
-          icon: <RefreshCw />,
-          onClick: () => loadQuotations(),
-          separatorBefore: true,
-        },
-        {
-          key: 'print',
-          label: 'طباعة',
-          icon: <Printer />,
-          onClick: () => window.print(),
-        },
-      ]}
-      header={<></>}
-      status={
-        <>
-          <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
-          <span className="aseel-status-item">{quotations.length} من {totalQuotations} عرض</span>
-        </>
-      }
-    >
-    <div className="p-4 space-y-4" style={{ height: '100%', overflow: 'auto', background: '#ffffff' }}>
-      <div className="flex justify-between items-center">
-        <h2 className="text-xl font-bold">العروض والطلبيات</h2>
-        <button
-          onClick={() => { resetForm(); setShowForm(true); }}
-          className="flex items-center gap-2 px-4 py-2 aseel-btn-primary"
-        >
-          <Plus className="w-4 h-4" /> عرض جديد
+  const lineDiscountTotal = formLines.reduce((sum, line) => sum + (Number(line.discount) || 0), 0);
+  const grossSubtotal = formLines.reduce(
+    (sum, line) => sum + (Number(line.quantity) || 0) * (Number(line.unit_price) || 0),
+    0,
+  );
+  const taxTotal = Math.max(0, subtotal - (grossSubtotal - lineDiscountTotal));
+  const selectedQuotation = quotations.find((quotation) => quotation.id === selectedId);
+  const toolbarActions: CommercialToolbarAction[] = [
+    {
+      key: "save",
+      label: saving ? "جاري الحفظ…" : "تخزين (F12)",
+      icon: saving ? <Loader2 className="animate-spin" /> : <Save />,
+      onClick: saving ? undefined : () => void handleSave(),
+      disabled: saving,
+    },
+    {
+      key: "cancel",
+      label: "إلغاء",
+      icon: <X />,
+      onClick: () => { setShowForm(false); setSelectedId(null); },
+      danger: true,
+      separatorBefore: true,
+    },
+    { key: "print", label: "طباعة", icon: <Printer />, onClick: () => window.print() },
+  ];
+  const headerFields: CommercialHeaderField[] = [
+    {
+      key: "number",
+      label: "رقم العرض",
+      control: <input className="aseel-input aseel-input--hl" readOnly
+        value={selectedQuotation?.quotation_number || (selectedId ? `#${selectedId}` : "تلقائي")} />,
+    },
+    {
+      key: "date",
+      label: "التاريخ",
+      control: <input className="aseel-input" type="date" value={formDate}
+        onChange={(event) => setFormDate(event.target.value)} />,
+    },
+    {
+      key: "validUntil",
+      label: "صالح حتى",
+      control: <input className="aseel-input" type="date" value={formValidUntil}
+        onChange={(event) => setFormValidUntil(event.target.value)} />,
+    },
+    {
+      key: "type",
+      label: "نوع المستند",
+      control: <input className="aseel-input" readOnly value="عرض سعر صادر للزبون" />,
+    },
+    {
+      key: "customer",
+      label: "الزبون / الحساب",
+      control: (
+        <select className="aseel-input" value={formCustomer}
+          onChange={(event) => setFormCustomer(event.target.value)} data-aseel-key="1">
+          <option value="">— اختر الزبون —</option>
+          {partners.map((partner) => (
+            <option key={partner.id} value={partner.id}>{partner.name}</option>
+          ))}
+        </select>
+      ),
+    },
+    {
+      key: "customerName",
+      label: "الاسم",
+      control: <input className="aseel-input" readOnly
+        value={partners.find((partner) => String(partner.id) === formCustomer)?.name || ""} />,
+    },
+    {
+      key: "address",
+      label: "عنوان الزبون",
+      control: <input className="aseel-input" value={formCustomerAddress}
+        onChange={(event) => setFormCustomerAddress(event.target.value)} />,
+    },
+    {
+      key: "taxNumber",
+      label: "الرقم الضريبي",
+      control: <input className="aseel-input font-mono" value={formCustomerTaxNumber}
+        onChange={(event) => setFormCustomerTaxNumber(event.target.value)} />,
+    },
+    {
+      key: "status",
+      label: "الحالة",
+      control: <input className="aseel-input" readOnly
+        value={selectedQuotation ? statusLabel(selectedQuotation.status) : "مسودة"} />,
+    },
+  ];
+  const editorColumns: CommercialLineColumn<LineState>[] = [
+    { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
+    {
+      key: "name",
+      header: "بيان الصنف",
+      width: "35%",
+      render: (line, index) => (
+        <button type="button" className="flex w-full items-center justify-between gap-2 px-1 text-right"
+          onClick={() => setProductPickerLineIdx(index)}>
+          <span className={line.product_name ? "aseel-text-ink" : "aseel-text-soft"}>
+            {line.product_name || "اختر صنفاً…"}
+          </span>
+          <span className="aseel-text-accent">…</span>
         </button>
-      </div>
-
-      {err && <div className="p-3 aseel-bg-panel aseel-text-state rounded-lg">{err}</div>}
-
-      {loading ? (
-        <AseelSpinner />
-      ) : (
-        <div className="aseel-bg-field rounded-lg shadow overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="aseel-bg-panel">
-              <tr>
-                <th className="text-right p-3">رقم العرض</th>
-                <th className="text-right p-3">العميل</th>
-                <th className="text-right p-3">التاريخ</th>
-                <th className="text-right p-3">صالحة حتى</th>
-                <th className="text-right p-3">الإجمالي</th>
-                <th className="text-right p-3">الحالة</th>
-                <th className="text-right p-3">إجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {quotations.length === 0 ? (
-                <tr><td colSpan={7} className="p-6 text-center aseel-text-soft">لا توجد عروض</td></tr>
-              ) : quotations.map((q) => (
-                <React.Fragment key={q.id}>
-                <tr className="border-t hover:aseel-bg-panel">
-                  <td className="p-3 font-mono">
-                    <button
-                      type="button"
-                      onClick={() => toggleExpand(q.id)}
-                      className="aseel-text-accent hover:underline"
-                      title="عرض بنود عرض السعر"
-                    >{expandedId === q.id ? "▾ " : "▸ "}{q.quotation_number}</button>
-                  </td>
-                  <td className="p-3">{q.customer_name || "-"}</td>
-                  <td className="p-3">{q.quotation_date}</td>
-                  <td className="p-3">{q.valid_until || "-"}</td>
-                  <td className="p-3">{Number(q.grand_total).toLocaleString()}</td>
-                  <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded text-xs ${statusColor(q.status)}`}>
-                      {statusLabel(q.status)}
-                    </span>
-                  </td>
-                  <td className="p-3 flex gap-2">
-                    <button onClick={() => openQuotation(q.id)} className="aseel-text-accent hover:underline text-xs">تعديل</button>
-                    {q.status !== "converted" && (
-                      <button onClick={() => handleConvert(q.id)} className="text-green-600 hover:underline text-xs">تحويل</button>
-                    )}
-                    <button onClick={() => handleDelete(q.id)} className="aseel-text-state hover:underline text-xs">حذف</button>
-                  </td>
-                </tr>
-                {expandedId === q.id && (
-                  <tr className="aseel-bg-panel">
-                    <td colSpan={7} className="p-3">
-                      {!expandedLines[q.id] ? (
-                        <div className="text-xs aseel-text-soft">جارٍ التحميل…</div>
-                      ) : expandedLines[q.id].length === 0 ? (
-                        <div className="text-xs aseel-text-soft">لا بنود في هذا العرض.</div>
-                      ) : (
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="aseel-text-soft">
-                              <th className="text-right p-1">الصنف</th>
-                              <th className="text-right p-1">الكمية</th>
-                              <th className="text-right p-1">السعر</th>
-                              <th className="text-right p-1">الإجمالي</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {expandedLines[q.id].map((ln, i) => (
-                              <tr key={i} className="border-t">
-                                <td className="p-1">{ln.name}</td>
-                                <td className="p-1">{formatQuantity(ln.quantity)}</td>
-                                <td className="p-1">{Number(ln.unit_price).toLocaleString()}</td>
-                                <td className="p-1">{Number(ln.line_total).toLocaleString()}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </td>
-                  </tr>
-                )}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-          {totalQuotations > pageSize && (
-            <div className="aseel-pagination">
-              <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>السابق</button>
-              <span>صفحة {page} من {Math.ceil(totalQuotations / pageSize)} ({totalQuotations} سجل)</span>
-              <button
-                disabled={page >= Math.ceil(totalQuotations / pageSize)}
-                onClick={() => setPage((p) => p + 1)}
-              >التالي</button>
-            </div>
+      ),
+    },
+    { key: "quantity", header: "الكمية", width: "90px", align: "center", type: "number" },
+    { key: "unit_price", header: "سعر الوحدة", width: "110px", align: "center", type: "number" },
+    { key: "discount", header: "الخصم", width: "90px", align: "center", type: "number" },
+    { key: "tax_rate", header: "الضريبة %", width: "90px", align: "center", type: "number" },
+    { key: "total", header: "الإجمالي", width: "110px", align: "center", readOnly: true },
+    {
+      key: "del",
+      header: "",
+      width: "36px",
+      align: "center",
+      render: (_line, index) => (
+        <button type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+          onClick={() => handleRemoveLine(index)} title="حذف السطر">
+          <Trash2 className="h-3 w-3" />
+        </button>
+      ),
+    },
+  ];
+  const listColumns: CommercialListColumn<SalesQuotationRow>[] = [
+    {
+      key: "quotation_number",
+      header: "رقم العرض",
+      width: "130px",
+      render: (quotation) => (
+        <button type="button" className="aseel-text-accent hover:underline"
+          onClick={() => void toggleExpand(quotation.id)}>
+          {expandedId === quotation.id ? "▾ " : "▸ "}{quotation.quotation_number}
+        </button>
+      ),
+    },
+    { key: "customer", header: "الزبون", render: (quotation) => <>{quotation.customer_name || "—"}</> },
+    { key: "date", header: "التاريخ", width: "110px", render: (quotation) => <>{quotation.quotation_date}</> },
+    { key: "valid", header: "صالحة حتى", width: "110px", render: (quotation) => <>{quotation.valid_until || "—"}</> },
+    { key: "total", header: "الإجمالي", width: "120px", numeric: true,
+      render: (quotation) => <>{Number(quotation.grand_total).toLocaleString()}</> },
+    {
+      key: "status",
+      header: "الحالة",
+      width: "110px",
+      render: (quotation) => (
+        <span className={`rounded px-2 py-0.5 text-xs ${statusColor(quotation.status)}`}>
+          {statusLabel(quotation.status)}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "إجراءات",
+      width: "210px",
+      render: (quotation) => (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <button onClick={() => void openQuotation(quotation.id)} className="aseel-text-accent hover:underline">تعديل</button>
+          {quotation.status !== "converted" && quotation.status !== "cancelled" && (
+            <>
+              <button onClick={() => setConvertId(quotation.id)} className="text-green-600 hover:underline">تحويل</button>
+              <button onClick={() => void handleCancel(quotation.id)} className="text-amber-600 hover:underline">إلغاء</button>
+            </>
+          )}
+          {allowDelete && (
+            <button onClick={() => void handleDelete(quotation.id)} className="aseel-text-state hover:underline">حذف</button>
           )}
         </div>
-      )}
+      ),
+    },
+  ];
 
-      {/* Form Modal */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="aseel-bg-field rounded-xl shadow-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">{selectedId ? "تعديل العرض" : "عرض جديد"}</h3>
-              <button onClick={() => setShowForm(false)} className="p-1 hover:aseel-bg-panel rounded"><FileDown className="w-5 h-5" /></button>
-            </div>
+  if (showForm) {
+    return (
+      <CommercialDocumentEditor<LineState>
+        title="عرض سعر بيع"
+        state={selectedQuotation ? `${statusLabel(selectedQuotation.status)} — ${selectedQuotation.quotation_number}` : "مسودة — عرض جديد"}
+        nav={nav}
+        actions={toolbarActions}
+        headerFields={headerFields}
+        lines={formLines}
+        lineColumns={editorColumns}
+        getLineCell={(line, key) => {
+          const index = formLines.indexOf(line);
+          if (key === "seq") return index + 1;
+          if (key === "quantity") return line.quantity;
+          if (key === "unit_price") return line.unit_price;
+          if (key === "discount") return line.discount;
+          if (key === "tax_rate") return line.tax_rate;
+          if (key === "total") return Number(line.total).toLocaleString();
+          return "";
+        }}
+        getLineKey={(line, index) => line.id ?? `new-${index}`}
+        onLineChange={(index, key, value) => handleLineChange(index, key, value)}
+        onAddLine={handleAddLine}
+        banner={err ? <div className="aseel-banner aseel-banner--err">{err}</div> : undefined}
+        tabs={[
+          {
+            key: "notes",
+            label: "الملاحظات",
+            content: <div className="px-1 py-2">
+              <textarea className="aseel-input w-full" rows={4} value={formNotes}
+                onChange={(event) => setFormNotes(event.target.value)} placeholder="ملاحظات العرض…" />
+            </div>,
+          },
+          {
+            key: "settings",
+            label: "إعدادات العرض",
+            content: <div className="flex flex-wrap gap-4 px-1 py-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={formIsActive}
+                  onChange={(event) => setFormIsActive(event.target.checked)} />
+                العرض فعّال
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={formPricesIncludeTax}
+                  onChange={(event) => setFormPricesIncludeTax(event.target.checked)} />
+                الأسعار تشمل ض.ق.م
+              </label>
+              {formValidUntil && new Date(formValidUntil) < new Date() && (
+                <span className="text-xs font-semibold aseel-text-state">منتهي الصلاحية</span>
+              )}
+            </div>,
+          },
+        ]}
+        totals={
+          <>
+            <div className="aseel-total-row"><span>مجموع البنود</span><span className="aseel-total-value">{grossSubtotal.toLocaleString()}</span></div>
+            <div className="aseel-total-row"><span>الخصم</span><span className="aseel-total-value">{lineDiscountTotal.toLocaleString()}</span></div>
+            <div className="aseel-total-row"><span>الضريبة</span><span className="aseel-total-value">{taxTotal.toLocaleString()}</span></div>
+            <div className="aseel-total-row aseel-total-row--grand"><span>إجمالي العرض</span><span className="aseel-total-value">{subtotal.toLocaleString()}</span></div>
+          </>
+        }
+        status={<>
+          <span className="aseel-status-item">عدد الأصناف <b>{formLines.length}</b></span>
+          <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+        </>}
+        overlay={productPickerLineIdx !== null ? (
+          <SalesProductPickerModal
+            isOpen
+            products={products}
+            onSelect={(productId) => {
+              const product = products.find((item) => item.id === productId);
+              handleLineUpdate(productPickerLineIdx, {
+                product_id: String(productId),
+                ...(product ? {
+                  product_name: formatProductPrimaryName(product),
+                  unit_price: quotePriceFor(productId, product.unit_price),
+                } : {}),
+              });
+              setProductPickerLineIdx(null);
+            }}
+            onClose={() => setProductPickerLineIdx(null)}
+          />
+        ) : undefined}
+      />
+    );
+  }
 
-            <div className="grid grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">العميل</label>
-                <select
-                  value={formCustomer}
-                  onChange={(e) => setFormCustomer(e.target.value)}
-                  className="w-full border rounded-lg p-2"
-                  data-aseel-key="1"
-                >
-                  <option value="">-- اختر --</option>
-                  {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">التاريخ</label>
-                <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded-lg p-2" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">فعال حتى تاريخ</label>
-                <input type="date" value={formValidUntil} onChange={(e) => setFormValidUntil(e.target.value)} className="w-full border rounded-lg p-2" />
-              </div>
-              {/* N4-T6: فعال + الأسعار تشمل ض.ق.م + الاسم/العنوان/الضريبي */}
-              <div className="col-span-2 flex flex-wrap gap-4 items-center aseel-bg-panel border aseel-border-soft rounded p-2">
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={formIsActive} onChange={(e) => setFormIsActive(e.target.checked)} />
-                  العرض فعّال
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={formPricesIncludeTax} onChange={(e) => setFormPricesIncludeTax(e.target.checked)} />
-                  الأسعار تشمل ض.ق.م
-                </label>
-                {formValidUntil && new Date(formValidUntil) < new Date() && (
-                  <span className="text-xs aseel-text-state font-semibold">⚠️ منتهي الصلاحية</span>
-                )}
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">عنوان الزبون</label>
-                <input type="text" value={formCustomerAddress} onChange={(e) => setFormCustomerAddress(e.target.value)} className="w-full border rounded-lg p-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">مشتغل مرخص (رقم ضريبي)</label>
-                <input type="text" value={formCustomerTaxNumber} onChange={(e) => setFormCustomerTaxNumber(e.target.value)} className="w-full border rounded-lg p-2 text-sm font-mono" />
-              </div>
-              <div className="col-span-2">
-                <label className="block text-sm font-medium mb-1">ملاحظات</label>
-                <input type="text" value={formNotes} onChange={(e) => setFormNotes(e.target.value)} className="w-full border rounded-lg p-2" />
-              </div>
-            </div>
-
-            <div className="mb-4">
-              <div className="flex justify-between items-center mb-2">
-                <h4 className="font-medium">البنود</h4>
-                <button onClick={handleAddLine} className="aseel-text-accent text-sm hover:underline">+ إضافة بند</button>
-              </div>
-              <table className="w-full text-sm border">
-                <thead className="aseel-bg-panel">
-                  <tr>
-                    <th className="text-right p-2" style={{ minWidth: "250px" }}>المنتج</th>
-                    <th className="text-right p-2">الكمية</th>
-                    <th className="text-right p-2">السعر</th>
-                    <th className="text-right p-2">الخصم</th>
-                    <th className="text-right p-2">الضريبة %</th>
-                    <th className="text-right p-2">الإجمالي</th>
-                    <th className="text-right p-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {formLines.map((l, idx) => (
-                    <tr key={idx} className="border-t">
-                      <td className="p-2">
-                        <div style={{ display: "flex", alignItems: "center", gap: 2, minWidth: "250px" }}>
-                          <AseelAutocomplete
-                            value={(() => {
-                              const pr = products.find(p => String(p.id) === String(l.product_id));
-                              return pr ? formatProductPrimaryName(pr) : l.product_name;
-                            })()}
-                            options={productOptions}
-                            disabled={false}
-                            placeholder="اكتب اسم الصنف…"
-                            onPick={(id) => {
-                              const prod = products.find(p => String(p.id) === String(id));
-                              if (prod) {
-                                handleLineUpdate(idx, {
-                                  product_id: String(id),
-                                  product_name: formatProductPrimaryName(prod),
-                                  unit_price: quotePriceFor(Number(id), prod.unit_price)
-                                });
-                              } else {
-                                handleLineUpdate(idx, { product_id: String(id) });
-                              }
-                            }}
-                          />
-                          <button
-                            type="button"
-                            className="px-2 border rounded aseel-bg-field hover:aseel-bg-panel text-sm"
-                            onClick={() => setProductPickerLineIdx(idx)}
-                            title="فهرس الأصناف الكامل (+)"
-                          >…</button>
-                        </div>
-                      </td>
-                      <td className="p-2"><input type="number" value={l.quantity} onChange={(e) => handleLineChange(idx, "quantity", e.target.value)} className="w-full border rounded p-1 text-sm" /></td>
-                      <td className="p-2"><input type="number" value={l.unit_price} onChange={(e) => handleLineChange(idx, "unit_price", e.target.value)} className="w-full border rounded p-1 text-sm" /></td>
-                      <td className="p-2"><input type="number" value={l.discount} onChange={(e) => handleLineChange(idx, "discount", e.target.value)} className="w-full border rounded p-1 text-sm" /></td>
-                      <td className="p-2"><input type="number" value={l.tax_rate} onChange={(e) => handleLineChange(idx, "tax_rate", e.target.value)} className="w-full border rounded p-1 text-sm" /></td>
-                      <td className="p-2 font-mono">{Number(l.total).toLocaleString()}</td>
-                      <td className="p-2"><button onClick={() => handleRemoveLine(idx)} className="aseel-text-soft hover:aseel-text-state"><Trash2 className="w-4 h-4" /></button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="text-left mt-2 font-bold">الإجمالي: {subtotal.toLocaleString()}</div>
-            </div>
-
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setShowForm(false)} className="px-4 py-2 aseel-bg-panel rounded-lg hover:aseel-bg-grid-head">إلغاء</button>
-              <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-4 py-2 aseel-btn-primary disabled:opacity-50">
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {saving ? "جاري الحفظ..." : "حفظ"}
-              </button>
-            </div>
-            
-            {productPickerLineIdx !== null && (
-              <SalesProductPickerModal
-                isOpen={true}
-                products={products}
-                onSelect={(productId) => {
-                  const prod = products.find(p => p.id === productId);
-                  handleLineUpdate(productPickerLineIdx, {
-                    product_id: String(productId),
-                    ...(prod ? {
-                      product_name: formatProductPrimaryName(prod),
-                      unit_price: quotePriceFor(productId, prod.unit_price),
-                    } : {}),
-                  });
-                  setProductPickerLineIdx(null);
-                }}
-                onClose={() => setProductPickerLineIdx(null)}
-              />
-            )}
-            
-          </div>
-        </div>
+  const detailPanel = expandedId != null ? (
+    <div className="border-t aseel-border-soft p-3">
+      {!expandedLines[expandedId] ? (
+        <div className="text-xs aseel-text-soft">جارٍ تحميل البنود…</div>
+      ) : expandedLines[expandedId].length === 0 ? (
+        <div className="text-xs aseel-text-soft">لا بنود في هذا العرض.</div>
+      ) : (
+        <table className="aseel-grid text-xs" data-variant="list">
+          <thead><tr><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
+          <tbody>
+            {expandedLines[expandedId].map((line, index) => (
+              <tr key={index}>
+                <td>{line.name}</td>
+                <td>{formatQuantity(line.quantity)}</td>
+                <td>{Number(line.unit_price).toLocaleString()}</td>
+                <td>{Number(line.line_total).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
-    </AseelDocumentShell>
+  ) : undefined;
+
+  return (
+    <>
+      <CommercialDocumentsList<SalesQuotationRow>
+        title="عروض وطلبيات البيع"
+        state="عروض الأسعار"
+        rows={quotations}
+        columns={listColumns}
+        getRowKey={(quotation) => quotation.id}
+        loading={loading}
+        error={err}
+        emptyHint="لا توجد عروض"
+        countLabel={`${quotations.length} من ${totalQuotations} عرض`}
+        onNew={() => { resetForm(); setShowForm(true); }}
+        onReload={() => void loadQuotations()}
+        newLabel="عرض جديد"
+        nav={nav}
+        onRowDoubleClick={(quotation) => void openQuotation(quotation.id)}
+        pagination={totalQuotations > pageSize ? {
+          page,
+          pageSize,
+          total: totalQuotations,
+          onChange: setPage,
+        } : undefined}
+        detailPanel={detailPanel}
+      />
+      {convertId != null && (
+        <ConvertTargetDialog
+          title="تحويل عرض السعر"
+          onPick={(target) => void handleConvert(convertId, target)}
+          onClose={() => setConvertId(null)}
+        />
+      )}
+    </>
+  );
+};
+
+export const SalesDocumentsPage: React.FC<{
+  initialTab?: "quotations" | "orders";
+}> = ({ initialTab = "quotations" }) => {
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => setActiveTab(initialTab), [initialTab]);
+
+  return (
+    <div dir="rtl" className="flex h-full min-h-0 flex-col gap-3 p-3">
+      <div className="flex w-fit items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab("quotations")}
+          className={`rounded-md px-4 py-2 text-sm font-semibold ${
+            activeTab === "quotations"
+              ? "bg-[var(--color-primary)] text-[var(--color-primary-foreground)]"
+              : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+          }`}
+        >
+          عروض الأسعار
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("orders")}
+          className={`rounded-md px-4 py-2 text-sm font-semibold ${
+            activeTab === "orders"
+              ? "bg-[var(--color-primary)] text-[var(--color-primary-foreground)]"
+              : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+          }`}
+        >
+          طلبيات الزبائن
+        </button>
+      </div>
+      <div className="min-h-0 flex-1">
+        {activeTab === "quotations" ? <SalesQuotationsPage /> : <SalesOrdersPage />}
+      </div>
     </div>
   );
 };

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Task, User } from '../types';
+import { formatDateLocalized, formatDateValue, formatTimeValue } from "../utils/formatDate";
 
 interface TaskCardProps {
     task: Task;
@@ -23,7 +24,7 @@ const CategoryBadge: React.FC<{
         electronics: 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300',
         electrical: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300',
         clothing: 'bg-pink-100 text-pink-800 dark:bg-pink-900/50 dark:text-pink-300',
-    }[category] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
+    }[category] || 'bg-[var(--color-surface-3)] text-[var(--color-text)]';
 
     // استخدام categoryName إذا كان متاحاً، وإلا استخدام القيمة الافتراضية
     const text = categoryName || {
@@ -42,13 +43,13 @@ const CategoryBadge: React.FC<{
 // مكون بادج الحالة - محسن
 export const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
      const style = {
-        NEW: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
+        NEW: 'bg-[var(--color-surface-3)] text-[var(--color-text)]',
         ACCEPTED: 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300',
         IN_PROGRESS: 'bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/50 dark:text-[var(--color-primary)]',
         WAITING_FOR_REVIEW: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300',
         COMPLETED: 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300',
         REJECTED: 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300',
-    }[status] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
+    }[status] || 'bg-[var(--color-surface-3)] text-[var(--color-text)]';
 
     const text = {
         NEW: 'جديدة',
@@ -99,7 +100,7 @@ const AssignmentInfo: React.FC<{
     
     return (
         <div className="flex items-center justify-between">
-            <span className="font-semibold text-gray-800 dark:text-gray-100">المعينون:</span>
+            <span className="font-semibold text-[var(--color-text)]">المعينون:</span>
             <div className="flex items-center gap-2">
                 <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
                     {assignedCount} موظف
@@ -124,7 +125,7 @@ const UserTaskStatus: React.FC<{
             case 'not_started':
                 return { 
                     text: 'لم تبدأ', 
-                    color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300', 
+                    color: 'bg-[var(--color-surface-3)] text-[var(--color-text)]', 
                     icon: '⚪' 
                 };
             case 'in_progress':
@@ -154,7 +155,7 @@ const UserTaskStatus: React.FC<{
             default:
                 return { 
                     text: 'غير معروفة', 
-                    color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300', 
+                    color: 'bg-[var(--color-surface-3)] text-[var(--color-text)]', 
                     icon: '⚪' 
                 };
         }
@@ -199,7 +200,7 @@ const TimeRemaining: React.FC<{ dueDate: string }> = ({ dueDate }) => {
     
     return (
         <div className="flex items-center justify-between">
-            <span className="font-semibold text-gray-800 dark:text-gray-100">الوقت المتبقي:</span>
+            <span className="font-semibold text-[var(--color-text)]">الوقت المتبقي:</span>
             <span className={`text-xs font-medium ${color}`}>
                 {text}
             </span>
@@ -251,19 +252,19 @@ export const TaskCard: React.FC<TaskCardProps> = ({
     };
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col transition-all duration-300 hover:shadow-lg hover:-translate-y-1 p-5 space-y-4">
+        <div className="bg-[var(--color-surface)] rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col transition-all duration-300 hover:shadow-lg hover:-translate-y-1 p-5 space-y-4">
             {/* العنوان والحالة */}
             <div className="flex justify-between items-start">
-                <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100 truncate" title={task.title}>
+                <h3 className="text-xl font-bold text-[var(--color-text)] truncate" title={task.title}>
                     {task.title}
                 </h3>
             </div>
           
             {/* معلومات المهمة */}
-            <div className="space-y-3 text-gray-600 dark:text-gray-300 text-sm">
+            <div className="space-y-3 text-[var(--color-text-muted)] text-sm">
                 {/* حالة الموظف في هذه المهمة */}
                 <div className="flex items-center justify-between">
-                    <span className="font-semibold text-gray-800 dark:text-gray-100">حالتك:</span>
+                    <span className="font-semibold text-[var(--color-text)]">حالتك:</span>
                     <UserTaskStatus 
                         status={userTaskStatus.status} 
                         submissionCount={userTaskStatus.submissionCount} 
@@ -278,7 +279,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 
                 {/* الفئة */}
                 <div className="flex items-center justify-between">
-                    <span className="font-semibold text-gray-800 dark:text-gray-100">الفئة:</span>
+                    <span className="font-semibold text-[var(--color-text)]">الفئة:</span>
                     <CategoryBadge 
                         category={task.category} 
                         categoryName={categoryName}
@@ -287,7 +288,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 
                 {/* الأولوية */}
                 <div className="flex items-center justify-between">
-                    <span className="font-semibold text-gray-800 dark:text-gray-100">الأولوية:</span>
+                    <span className="font-semibold text-[var(--color-text)]">الأولوية:</span>
                     <PriorityIndicator priority={task.priority} />
                 </div>
                 
@@ -296,14 +297,14 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 
                 {/* تاريخ التسليم */}
                 <div className="flex items-center justify-between">
-                    <span className="font-semibold text-gray-800 dark:text-gray-100">تاريخ التسليم:</span>
-                    <span className="text-xs">{task.dueDate}</span>
+                    <span className="font-semibold text-[var(--color-text)]">تاريخ التسليم:</span>
+                    <span className="text-xs">{formatDateLocalized(task.dueDate)}</span>
                 </div>
                 
                 {/* السعر المستهدف */}
                 {task.targetPrice && (
                     <div className="flex items-center justify-between">
-                        <span className="font-semibold text-gray-800 dark:text-gray-100">السعر المستهدف:</span>
+                        <span className="font-semibold text-[var(--color-text)]">السعر المستهدف:</span>
                         <span className="text-green-600 dark:text-green-400 font-bold">
                             ${task.targetPrice}
                         </span>
@@ -327,7 +328,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                         قيد التنفيذ
                         {task.workStartTime && (
                             <span className="text-xs font-normal">
-                                (بدأت في {new Date(task.workStartTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})
+                                (بدأت في {formatTimeValue(task.workStartTime)})
                             </span>
                         )}
                     </p>
@@ -335,7 +336,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
             )}
 
             {/* زر العمل */}
-            <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
+            <div className="pt-4 border-t border-[var(--color-border)]">
                 <button
                     onClick={() => onSelectTask(task)}
                     className={`w-full text-white font-semibold py-3 px-5 rounded-lg transition-colors duration-300 ${getButtonStyle()}`}
@@ -344,9 +345,9 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 </button>
                 
                 {/* معلومات إضافية */}
-                <div className="flex items-center justify-between mt-3 text-xs text-gray-500 dark:text-gray-400">
+                <div className="flex items-center justify-between mt-3 text-xs text-[var(--color-text-muted)]">
                     <span>
-                        أنشئت في: {new Date(task.createdAt).toLocaleDateString()}
+                        أنشئت في: {formatDateValue(task.createdAt)}
                     </span>
                     {userTaskStatus.submissionCount > 0 && (
                         <span>

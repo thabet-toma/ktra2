@@ -6,7 +6,7 @@
 import { clientLogger } from "./logger";
 import { humanizeDrfError, extractDrfFieldErrors } from "../utils/drfError";
 import { resolveBranchId } from "../utils/tenantContext";
-import { emitSessionExpired, emitUserActivity } from "../utils/sessionEvents";
+import { emitEngagementRevoked, emitSessionExpired, emitUserActivity } from "../utils/sessionEvents";
 import { isUserActivityRequest, writeLastActivity } from "../utils/idleSession";
 import {
   remainingRequestBudgetMs,
@@ -215,8 +215,14 @@ async function readListCache<T>(key: string): Promise<T[] | null> {
 }
 
 async function handleResponseError(res: Response, path: string): Promise<never> {
-  const traceId = res.headers.get("X-Trace-ID") || undefined;
   const data = await parseJsonSafe(res);
+  // T-CHQ3/و: الخادم يضع `trace_id` في **جسم** استجابة الـ500 (لا في ترويسة)،
+  // وقراءة الترويسة وحدها كانت تُسقطه — فيصل المستخدم برسالة «حدث خطأ داخلي في
+  // الخادم» بلا أي مفتاح يربطها بسطر اللوغ الذي يحمل الاستثناء.
+  const traceId =
+    res.headers.get("X-Trace-ID")
+    || (data as { trace_id?: string } | null)?.trace_id
+    || undefined;
   // G2: أخطاء DRF تُحوَّل لنص عربي مربوط بالحقل (utils/drfError) بدل JSON خام.
   let msg = humanizeDrfError(data) || `تعذّر إتمام العملية (${res.status})`;
   // 401 = التوكن مفقود أو أُبطل (تبويب آخر أنهى الجلسة). رسالة الخادم
@@ -225,6 +231,16 @@ async function handleResponseError(res: Response, path: string): Promise<never> 
   if (res.status === 401) {
     msg = "انتهت الجلسة. الرجاء تسجيل الدخول من جديد للمتابعة.";
     emitSessionExpired();
+  }
+  const responseCode = (data as { code?: string } | null)?.code;
+  if (responseCode === "engagement_revoked" || responseCode === "engagement_inactive") {
+    emitEngagementRevoked();
+  }
+  // الخطأ الداخلي بلا مسار = بلاغ لا يمكن تشخيصه («بضرب إيرور» — أيّ نداء؟).
+  // و`error` يرسله الخادم في وضع التطوير وحده = نوع الاستثناء ونصّه.
+  if (responseCode === "internal_error") {
+    const serverError = (data as { error?: string } | null)?.error;
+    msg = `${msg} (${path})${serverError ? ` — ${serverError}` : ""}`;
   }
   if (traceId) {
     msg = `${msg} [Trace ID: ${traceId}]`;
@@ -397,6 +413,29 @@ export async function apiPostFormData<T = any>(
   }
 
   return (await res.json()) as T;
+}
+
+/** POST يُعيد ملفاً (CSV مثلاً) بدل JSON — نفس ترويسات المصادقة والشركة. */
+export async function apiPostForBlob(
+  path: string,
+  body: Record<string, any>,
+  opts?: { tenantId?: number }
+): Promise<Blob> {
+  const url = `${API_BASE}/${path.replace(/^\/+/, "")}`;
+  const res = await apiFetch(url, {
+    method: "POST",
+    headers: getHeaders(
+      opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : undefined,
+      true
+    ),
+    body: JSON.stringify(body ?? {}),
+  });
+
+  if (!res.ok) {
+    await handleResponseError(res, path);
+  }
+
+  return await res.blob();
 }
 
 export async function apiPatchObject<T = any>(

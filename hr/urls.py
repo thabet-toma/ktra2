@@ -1,6 +1,13 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import TaskViewSet, AttendanceRecordViewSet, PointsHistoryViewSet
+from .views import (
+    TaskViewSet, AttendanceRecordViewSet, PointsHistoryViewSet, PersonalExpenseViewSet,
+    PersonalExpenseCategoryViewSet, PersonalExpenseSheetViewSet,
+)
+from .payroll_api import (
+    AttendanceAdjustmentViewSet, EmployeeViewSet, PayrollPaymentViewSet,
+    PayslipViewSet, WorkLogViewSet,
+)
 from .auth_api import (
     login_view,
     logout_view,
@@ -14,6 +21,15 @@ router = DefaultRouter()
 router.register(r'tasks', TaskViewSet)
 router.register(r'attendance', AttendanceRecordViewSet)
 router.register(r'points', PointsHistoryViewSet)
+router.register(r'personal-expenses', PersonalExpenseViewSet, basename='personal-expense')
+router.register(r'personal-expense-sheets', PersonalExpenseSheetViewSet, basename='personal-expense-sheet')
+router.register(r'personal-expense-categories', PersonalExpenseCategoryViewSet, basename='personal-expense-category')
+# الرواتب — الموظفون وساعاتهم وغياباتهم وكشوفهم وصرفها.
+router.register(r'employees', EmployeeViewSet, basename='payroll-employee')
+router.register(r'work-logs', WorkLogViewSet, basename='payroll-work-log')
+router.register(r'attendance-adjustments', AttendanceAdjustmentViewSet, basename='payroll-adjustment')
+router.register(r'payslips', PayslipViewSet, basename='payroll-payslip')
+router.register(r'payroll-payments', PayrollPaymentViewSet, basename='payroll-payment')
 
 urlpatterns = [
     path('auth/login/', login_view),

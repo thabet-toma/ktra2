@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { PriceOffer } from '../../../types';
 import { X, Search, FileText, Calendar, DollarSign, ArrowRight, Building, CheckCircle, Users, Package, TrendingUp, Info, Truck } from 'lucide-react';
+import { formatDateValue } from "../../../utils/formatDate";
 
 interface PriceOfferSelectionModalProps {
     isOpen: boolean;
@@ -151,7 +152,7 @@ export const PriceOfferSelectionModal: React.FC<PriceOfferSelectionModalProps> =
 
                                                 <div className="text-xs aseel-text-soft dark:aseel-text-soft flex items-center gap-1">
                                                     <Calendar className="w-3 h-3" />
-                                                    {new Date(offer.createdAt).toLocaleDateString('ar-SA')}
+                                                    {formatDateValue(offer.createdAt)}
                                                 </div>
                                             </div>
 

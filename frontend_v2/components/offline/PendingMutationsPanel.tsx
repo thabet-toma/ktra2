@@ -4,6 +4,14 @@ import db, { type MutationEntry } from '../../services/offline/db';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { isOfflineRecordForTenant } from '../../utils/offlineTenantScope';
+import { formatDateTimeValue } from '../../utils/formatDate';
+
+/** بصمة الطابور: المعرّف والحالة ونص الخطأ — ما تعرضه اللوحة فعلاً. */
+const sameQueue = (a: MutationEntry[], b: MutationEntry[]) =>
+  a.length === b.length
+  && a.every((row, i) => row.id === b[i].id
+    && row.status === b[i].status
+    && row.error === b[i].error);
 
 export default function PendingMutationsPanel() {
   const [open, setOpen] = useState(false);
@@ -17,7 +25,9 @@ export default function PendingMutationsPanel() {
       .anyOf(['pending', 'syncing', 'failed'])
       .filter((m) => isOfflineRecordForTenant(m, tenantId))
       .toArray();
-    setMutations(items);
+    // الطابور فارغ في الاستعمال العادي: مصفوفة جديدة كل 5 ثوانٍ كانت تُعيد رسم
+    // اللوحة (وهي مركّبة في `App`) بلا أي تغيّر فعلي في المحتوى.
+    setMutations((current) => (sameQueue(current, items) ? current : items));
   }, []);
 
   useEffect(() => {
@@ -50,7 +60,7 @@ export default function PendingMutationsPanel() {
       case 'pending': return 'bg-yellow-100 text-yellow-700';
       case 'syncing': return 'bg-blue-100 text-blue-700';
       case 'failed': return 'bg-red-100 text-red-700';
-      default: return 'bg-gray-100 text-gray-700';
+      default: return 'bg-[var(--color-surface-3)] text-[var(--color-text)]';
     }
   };
 
@@ -60,7 +70,7 @@ export default function PendingMutationsPanel() {
   let chipDot = "bg-green-500";
 
   if (!online && pendingCount === 0 && failedCount === 0 && syncingCount === 0) {
-    chipBg = "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400";
+    chipBg = "bg-[var(--color-surface-3)] text-[var(--color-text)]";
     chipText = "منقطع / أوفلاين";
     chipDot = "bg-gray-400";
   } else if (failedCount > 0) {
@@ -86,7 +96,7 @@ export default function PendingMutationsPanel() {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700 ${chipBg}`}
+          className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold transition-all border border-transparent hover:border-[var(--color-border)] ${chipBg}`}
           aria-label={`حالة المزامنة: ${chipText}`}
         >
           <span className={`w-2 h-2 rounded-full ${chipDot}`} />
@@ -96,7 +106,7 @@ export default function PendingMutationsPanel() {
 
       <AseelSidePanel open={open} onClose={() => setOpen(false)} title="العمليات المعلقة" width={420}>
         {mutations.length === 0 ? (
-          <div className="text-center text-gray-400 py-12 text-sm">لا توجد عمليات معلقة</div>
+          <div className="text-center text-[var(--color-text-muted)] py-12 text-sm">لا توجد عمليات معلقة</div>
         ) : (
           <div className="space-y-2">
             {mutations.map((m) => (
@@ -105,9 +115,9 @@ export default function PendingMutationsPanel() {
                   <span className={`px-2 py-0.5 rounded-full font-medium ${statusBadge(m.status)}`}>
                     {m.status === 'pending' ? 'معلق' : m.status === 'syncing' ? 'قيد المزامنة' : 'فشل'}
                   </span>
-                  <span className="text-gray-400">{new Date(m.created_at).toLocaleString('ar-SA')}</span>
+                  <span className="text-[var(--color-text-muted)]">{formatDateTimeValue(m.created_at)}</span>
                 </div>
-                <div className="text-gray-600">
+                <div className="text-[var(--color-text-muted)]">
                   <span className="font-medium">{m.method}</span>
                   <span className="mr-1">{m.endpoint}</span>
                 </div>

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { User, Task, TaskCategory, TaskPriority, Category } from '../types';
 import { cloudinaryService } from '../services/cloudinaryService';
 import { getCategories } from '../services/firestoreService';
+import { usePasteImageUpload } from '../utils/clipboardImage';
 
 interface CreateTaskModalProps {
     isOpen: boolean;
@@ -75,16 +76,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         }
     }, [isOpen, propCategories, category]);
 
-    if (!isOpen) return null;
-
-    // معالجة اختيار الصور
-    const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (!files) return;
-
-        const newFiles = Array.from(files);
-        
-        // التحقق من عدد الصور
+    // معالجة إضافة صور (من اختيار ملف أو لصق من الحافظة) — يُبقي حد 10 صور نفسه.
+    const addImageFiles = (newFiles: File[]) => {
+        if (newFiles.length === 0) return;
         if (selectedImages.length + newFiles.length > 10) {
             alert('يمكنك رفع最多 10 صور فقط');
             return;
@@ -92,24 +86,34 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
         setSelectedImages(prev => [...prev, ...newFiles]);
 
-        // إنشاء معاينات للصور
         newFiles.forEach((file: File) => {
             const reader = new FileReader();
-            
+
             reader.onload = (event: ProgressEvent<FileReader>) => {
                 const target = event.target;
                 if (target && target.result && typeof target.result === 'string') {
                     setImagePreviews(prev => [...prev, target.result as string]);
                 }
             };
-            
+
             reader.onerror = () => {
                 // console suppressed
             };
-            
+
             reader.readAsDataURL(file);
         });
+    };
 
+    // لصق صورة من الحافظة (Ctrl+V) — قبل أي return مبكر (isOpen) للحفاظ على ترتيب الـ hooks.
+    usePasteImageUpload(addImageFiles, isOpen);
+
+    if (!isOpen) return null;
+
+    // معالجة اختيار الصور
+    const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files) return;
+        addImageFiles(Array.from(files));
         // إعادة تعيين حقل الإدخال
         if (fileInputRef.current) {
             fileInputRef.current.value = '';
@@ -229,18 +233,18 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             onClick={onClose}
         >
             <div 
-                className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-2xl p-8 space-y-6 transform transition-all max-h-[90vh] overflow-y-auto"
+                className="bg-[var(--color-surface)] rounded-2xl shadow-xl w-full max-w-2xl p-8 space-y-6 transform transition-all max-h-[90vh] overflow-y-auto"
                 onClick={e => e.stopPropagation()}
             >
                 <div className="flex justify-between items-center">
-                    <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">إنشاء مهمة جديدة</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-3xl">&times;</button>
+                    <h2 className="text-2xl font-bold text-[var(--color-text)]">إنشاء مهمة جديدة</h2>
+                    <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] text-3xl">&times;</button>
                 </div>
                
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label htmlFor="taskName" className="block text-md font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label htmlFor="taskName" className="block text-md font-medium text-[var(--color-text)] mb-1">
                                 عنوان المهمة *
                             </label>
                             <input 
@@ -248,13 +252,13 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                                 id="taskName" 
                                 value={title} 
                                 onChange={e => setTitle(e.target.value)} 
-                                className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200" 
+                                className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]" 
                                 required 
                                 disabled={uploading}
                             />
                         </div>
                         <div>
-                            <label htmlFor="dueDate" className="block text-md font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label htmlFor="dueDate" className="block text-md font-medium text-[var(--color-text)] mb-1">
                                 تاريخ التسليم *
                             </label>
                             <input 
@@ -262,7 +266,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                                 id="dueDate" 
                                 value={dueDate} 
                                 onChange={e => setDueDate(e.target.value)} 
-                                className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200" 
+                                className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]" 
                                 required 
                                 disabled={uploading}
                             />
@@ -270,7 +274,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     </div>
                     
                     <div>
-                        <label htmlFor="description" className="block text-md font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label htmlFor="description" className="block text-md font-medium text-[var(--color-text)] mb-1">
                             وصف المهمة *
                         </label>
                         <textarea 
@@ -278,7 +282,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                             value={description} 
                             onChange={e => setDescription(e.target.value)} 
                             rows={3} 
-                            className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200" 
+                            className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]" 
                             required
                             disabled={uploading}
                         ></textarea>
@@ -286,9 +290,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
                     {/* قسم رفع الصور */}
                     <div>
-                        <label className="block text-md font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <label className="block text-md font-medium text-[var(--color-text)] mb-2">
                             صور المهمة (اختياري)
-                            <span className="text-sm text-gray-500 dark:text-gray-400 mr-2">
+                            <span className="text-sm text-[var(--color-text-muted)] mr-2">
                                 ({selectedImages.length} / 10 صور)
                             </span>
                         </label>
@@ -315,7 +319,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                                 <span>📷</span>
                                 <span className="mr-2">اختر الصور</span>
                             </label>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            <p className="text-sm text-[var(--color-text-muted)] mt-1">
                                 يمكنك رفع حتى 10 صور (JPEG, PNG, GIF)
                             </p>
                         </div>
@@ -327,7 +331,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                                         <img
                                             src={preview}
                                             alt={`معاينة ${index + 1}`}
-                                            className="w-full h-24 object-cover rounded-lg border border-gray-200 dark:border-gray-600"
+                                            className="w-full h-24 object-cover rounded-lg border border-[var(--color-border)]"
                                         />
                                         <button
                                             type="button"
@@ -337,7 +341,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                                         >
                                             ×
                                         </button>
-                                        <div className="text-xs text-gray-500 truncate mt-1">
+                                        <div className="text-xs text-[var(--color-text-muted)] truncate mt-1">
                                             {selectedImages[index].name}
                                         </div>
                                     </div>
@@ -348,9 +352,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     
                     {/* قسم إسناد المهمة */}
                     <div>
-                        <label className="block text-md font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        <label className="block text-md font-medium text-[var(--color-text)] mb-2">
                             إسناد إلى الموظفين *
-                            <span className="text-sm text-gray-500 dark:text-gray-400 mr-2">
+                            <span className="text-sm text-[var(--color-text-muted)] mr-2">
                                 ({assignedTo.length} / {employees.length} محددين)
                             </span>
                         </label>
@@ -363,25 +367,25 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                                 className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
                                     assignedTo.length === employees.length
                                         ? 'bg-green-500 text-white'
-                                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                                        : 'bg-[var(--color-surface-3)] text-[var(--color-text)] hover:bg-gray-300 dark:hover:bg-gray-600'
                                 } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 {assignedTo.length === employees.length ? 'إلغاء تحديد الكل' : 'تحديد جميع الموظفين'}
                             </button>
                         </div>
                         
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-40 overflow-y-auto p-2 border border-gray-200 dark:border-gray-600 rounded-lg">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-40 overflow-y-auto p-2 border border-[var(--color-border)] rounded-lg">
                             {employees.map(emp => (
-                                <label key={emp.id} className="flex items-center space-x-3 p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer">
+                                <label key={emp.id} className="flex items-center space-x-3 p-2 hover:bg-[var(--color-surface-2)] rounded cursor-pointer">
                                     <input 
                                         type="checkbox"
                                         checked={assignedTo.includes(emp.id)}
                                         onChange={() => handleEmployeeSelect(emp.id)}
-                                        className="h-5 w-5 rounded border-gray-300 dark:border-gray-500 text-blue-600 focus:ring-blue-500" 
+                                        className="h-5 w-5 rounded border-[var(--color-border)] text-blue-600 focus:ring-blue-500" 
                                         disabled={uploading}
                                     />
-                                    <span className="flex-1 text-gray-700 dark:text-gray-300">{emp.name}</span>
-                                    <span className="text-xs text-gray-500">{emp.email}</span>
+                                    <span className="flex-1 text-[var(--color-text)]">{emp.name}</span>
+                                    <span className="text-xs text-[var(--color-text-muted)]">{emp.email}</span>
                                 </label>
                             ))}
                         </div>
@@ -393,7 +397,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label htmlFor="targetPrice" className="block text-md font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label htmlFor="targetPrice" className="block text-md font-medium text-[var(--color-text)] mb-1">
                                 السعر المستهدف ($)
                             </label>
                             <input 
@@ -401,19 +405,19 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                                 id="targetPrice" 
                                 value={targetPrice} 
                                 onChange={e => setTargetPrice(e.target.value)} 
-                                className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200" 
+                                className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]" 
                                 disabled={uploading}
                             />
                         </div>
                         <div>
-                            <label htmlFor="priority" className="block text-md font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label htmlFor="priority" className="block text-md font-medium text-[var(--color-text)] mb-1">
                                 الأولوية
                             </label>
                             <select 
                                 id="priority" 
                                 value={priority} 
                                 onChange={e => setPriority(e.target.value as TaskPriority)} 
-                                className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200"
+                                className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]"
                                 disabled={uploading}
                             >
                                 <option value="low">منخفضة</option>
@@ -426,20 +430,20 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label htmlFor="category" className="block text-md font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label htmlFor="category" className="block text-md font-medium text-[var(--color-text)] mb-1">
                                 فئة المهمة *
                             </label>
                             {loadingCategories ? (
-                                <div className="flex items-center justify-center p-4 border border-gray-300 dark:border-gray-600 rounded-lg">
+                                <div className="flex items-center justify-center p-4 border border-[var(--color-border)] rounded-lg">
                                     <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mr-2"></div>
-                                    <span className="text-gray-500 dark:text-gray-400">جاري تحميل الفئات...</span>
+                                    <span className="text-[var(--color-text-muted)]">جاري تحميل الفئات...</span>
                                 </div>
                             ) : categories.length > 0 ? (
                                 <select 
                                     id="category" 
                                     value={category} 
                                     onChange={e => setCategory(e.target.value as TaskCategory)} 
-                                    className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200"
+                                    className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]"
                                     disabled={uploading}
                                     required
                                 >
@@ -461,14 +465,14 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     </div>
 
                     <div>
-                        <label className="block text-md font-medium text-gray-700 dark:text-gray-300 mb-2">المواقع المسموح بها</label>
+                        <label className="block text-md font-medium text-[var(--color-text)] mb-2">المواقع المسموح بها</label>
                         <div className="flex items-center gap-4">
                             <label className="flex items-center space-x-2">
                                 <input 
                                     type="checkbox" 
                                     checked={allowedSites.includes('alibaba.com')} 
                                     onChange={() => handleSiteChange('alibaba.com')} 
-                                    className="h-5 w-5 rounded border-gray-300 dark:border-gray-500 text-blue-600 focus:ring-blue-500" 
+                                    className="h-5 w-5 rounded border-[var(--color-border)] text-blue-600 focus:ring-blue-500" 
                                     disabled={uploading}
                                 />
                                 <span>alibaba.com</span>
@@ -478,7 +482,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                                     type="checkbox" 
                                     checked={allowedSites.includes('1688.com')} 
                                     onChange={() => handleSiteChange('1688.com')} 
-                                    className="h-5 w-5 rounded border-gray-300 dark:border-gray-500 text-blue-600 focus:ring-blue-500" 
+                                    className="h-5 w-5 rounded border-[var(--color-border)] text-blue-600 focus:ring-blue-500" 
                                     disabled={uploading}
                                 />
                                 <span>1688.com</span>
@@ -491,7 +495,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                             type="button" 
                             onClick={onClose} 
                             disabled={uploading}
-                            className="bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200 font-bold py-2 px-6 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition disabled:opacity-50"
+                            className="bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold py-2 px-6 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition disabled:opacity-50"
                         >
                             إلغاء
                         </button>

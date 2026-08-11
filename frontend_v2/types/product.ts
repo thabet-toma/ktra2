@@ -56,6 +56,10 @@ export interface Item {
     storeName?: string;
     storeDescription?: string;
     salePrice?: number;
+    /** T-SERIAL: باركود الصنف — مصدر البحث السريع بالماسح في مستندات الشراء. */
+    barcode?: string;
+    /** T-SERIAL: الصنف يتتبّع وحداته برقم تسلسلي (`Product.is_serialized`). */
+    isSerialized?: boolean;
 }
 
 export interface GeminiAnalysis {

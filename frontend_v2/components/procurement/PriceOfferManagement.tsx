@@ -8,11 +8,31 @@ import {
   itemsService,
   suppliersService,
   priceOffersService,
+  type PriceOfferScope,
 } from "../../services/firestoreService";
-import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import type { DenseColumn } from "../aseel/AseelDenseTable";
 import { PriceOfferForm } from "./price-offers/PriceOfferForm";
-import { StatusChangeModal } from "./price-offers/StatusChangeModal";
-import { Plus, RefreshCw } from "lucide-react";
+import { CommercialDocumentsList } from "../shared/CommercialDocumentsList";
+import { FilePreviewModal } from "../shared/FilePreviewModal";
+import { ImageIcon, Paperclip } from "lucide-react";
+import type { PriceOfferAttachment } from "../../types/offer";
+import {
+  cancelPurchaseOrder,
+  confirmPurchaseOrder,
+  convertPurchaseOrderToInvoice,
+  convertSupplierQuotationToImportDeal,
+  convertSupplierQuotationToPurchaseInvoice,
+  convertSupplierQuotationToPurchaseOrder,
+} from "../../services/procurementDocumentsApi";
+import { ConvertTargetDialog, type ConvertTarget } from "../sales/ConvertTargetDialog";
+import { openInNewTab } from "../../utils/openInNewTab";
+import { useToast } from "../../contexts/ToastContext";
+import {
+  canConvertImportOffer,
+  isOfferStruckThrough,
+  procurementDocKind,
+  procurementStatusLabel,
+} from "../../utils/documentBadges";
 
 const STATUS_LABELS: Record<string, string> = {
   initial: "مسودة",
@@ -20,6 +40,15 @@ const STATUS_LABELS: Record<string, string> = {
   under_discussion: "قيد المناقشة",
   approved_for_shipping: "معتمد للشحن",
   rejected: "مرفوض",
+};
+
+/** T-IMPOFFER: نطاق الاستيراد يقرأ الحالة كقرار ملاءمة (انظر PriceOfferForm). */
+const IMPORT_STATUS_LABELS: Record<string, string> = {
+  initial: "مسودة",
+  pending_info: "بانتظار معلومات",
+  under_discussion: "قيد المناقشة",
+  approved_for_shipping: "ملائم",
+  rejected: "غير ملائم",
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -32,19 +61,29 @@ const STATUS_COLORS: Record<string, string> = {
 
 const fmtDate = (d: string | undefined) => {
   if (!d) return "—";
-  try { return new Date(d).toLocaleDateString("ar"); } catch { return d; }
+  return formatDateValue(d);
 };
 
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateValue } from "../../utils/formatDate";
 const fmtAmt = (n: number | undefined) => formatMoney(n);
 
-export const PriceOfferManagement: React.FC = () => {
+interface Props {
+  scope?: PriceOfferScope;
+}
+
+export const PriceOfferManagement: React.FC<Props> = (props) => {
+  const scope: PriceOfferScope = props.scope ?? "purchase";
+  const statusLabels = scope === "import" ? IMPORT_STATUS_LABELS : STATUS_LABELS;
+  const toast = useToast();
   const [viewMode, setViewMode] = useState<"list" | "form">("list");
   const [offers, setOffers] = useState<PriceOffer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<PriceOfferStatus | "all">("all");
@@ -54,27 +93,80 @@ export const PriceOfferManagement: React.FC = () => {
     taxRate: 0, taxAmount: 0, grandTotal: 0, internalNotes: "",
   });
   const [isReadOnly, setIsReadOnly] = useState(false);
-  const [statusModalOpen, setStatusModalOpen] = useState(false);
-  const [targetStatusOffer, setTargetStatusOffer] = useState<PriceOffer | null>(null);
-  const [newStatusTarget, setNewStatusTarget] = useState<PriceOfferStatus | null>(null);
+  // T-IMPOFFER: معاينة ملف العرض من القائمة نفسها — بلا فتح المستند.
+  const [previewFile, setPreviewFile] = useState<PriceOfferAttachment | null>(null);
+  // T-PLINEAGE: العرض المحلي له وجهتان (طلبية / فاتورة) — الاختيار داخل الموقع.
+  const [convertOffer, setConvertOffer] = useState<PriceOffer | null>(null);
 
   useEffect(() => {
-    const u1 = priceOffersService.subscribeToPriceOffers(setOffers);
-    const u2 = itemsService.subscribeToItems(setItems);
-    const u3 = suppliersService.subscribeToSuppliers(setSuppliers);
-    setLoading(false);
-    return () => { u1(); u2(); u3(); };
-  }, []);
+    setLoading(true);
+    setError(null);
+    let active = true;
+    const pending = new Set(["offers", "items", "suppliers"]);
+    const settle = (key: string) => {
+      pending.delete(key);
+      if (active && pending.size === 0) setLoading(false);
+    };
+    const fail = (key: string, message: string) => (cause: unknown) => {
+      if (active) {
+        setError(cause instanceof Error ? `${message}: ${cause.message}` : message);
+      }
+      settle(key);
+    };
+    const u1 = priceOffersService.subscribeToPriceOffers(
+      (rows) => { if (active) setOffers(rows); settle("offers"); },
+      scope,
+      fail("offers", "تعذّر تحميل العروض"),
+    );
+    const u2 = itemsService.subscribeToItems(
+      (rows) => { if (active) setItems(rows); settle("items"); },
+      fail("items", "تعذّر تحميل الأصناف"),
+    );
+    // T-IMPOFFER: الموردون مفصولون — شاشة الاستيراد تعرض الدوليين (مع غير
+    // المصنَّفين) وشاشة الشراء المحليين، فلا يُختار مصنع صيني لطلبية محلية.
+    const u3 = suppliersService.subscribeToSuppliers(
+      (rows) => { if (active) setSuppliers(rows); settle("suppliers"); },
+      fail("suppliers", "تعذّر تحميل الموردين"),
+      scope === "import" ? "international" : "local",
+    );
+    return () => {
+      active = false;
+      u1();
+      u2();
+      u3();
+    };
+  }, [scope, reloadKey]);
+
+  // T-PLINEAGE: `?doc=quote-12` يفتح المستند مباشرةً — رابط الفاتورة إلى مصدرها
+  // يجب أن يصل إلى المستند نفسه لا إلى قائمة يبحث فيها المستخدم عنه.
+  const [pendingDocId, setPendingDocId] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get("doc"),
+  );
+  const syncOpenDocumentPath = (documentId?: string) => {
+    const url = new URL(window.location.href);
+    if (documentId) url.searchParams.set("doc", documentId);
+    else url.searchParams.delete("doc");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+  useEffect(() => {
+    if (!pendingDocId || loading) return;
+    const target = offers.find((offer) => offer.id === pendingDocId);
+    if (!target) return;
+    setPendingDocId(null);
+    void openEdit(target);
+  }, [pendingDocId, loading, offers]);
 
   const filtered = useMemo(() => {
     const s = search.toLowerCase();
     return offers.filter((o) => {
       if (filterStatus !== "all" && o.status !== filterStatus) return false;
       if (s) {
-        const sup = suppliers.find((x) => x.id === o.supplierId)?.name || "";
+        const sup = suppliers.find((x) => x.id === o.supplierId)?.tradeName || "";
         return (
           sup.toLowerCase().includes(s) ||
-          (o.offerNumber || "").toLowerCase().includes(s)
+          (o.offerNumber || "").toLowerCase().includes(s) ||
+          (o.orderName || "").toLowerCase().includes(s) ||
+          (o.orderDescription || "").toLowerCase().includes(s)
         );
       }
       return true;
@@ -82,6 +174,7 @@ export const PriceOfferManagement: React.FC = () => {
   }, [offers, suppliers, search, filterStatus]);
 
   const openNew = () => {
+    syncOpenDocumentPath();
     setCurrentOffer({
       status: "initial", items: [], subtotal: 0, discountAmount: 0,
       taxRate: 0, taxAmount: 0, grandTotal: 0, internalNotes: "",
@@ -90,70 +183,311 @@ export const PriceOfferManagement: React.FC = () => {
     setViewMode("form");
   };
 
-  const openEdit = (offer: PriceOffer, readOnly = false) => {
-    setCurrentOffer(offer);
-    setIsReadOnly(readOnly);
-    setViewMode("form");
+  const openEdit = async (offer: PriceOffer, readOnly = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const detail = await priceOffersService.getPriceOfferById(offer.id, scope);
+      const resolved = detail || offer;
+      setCurrentOffer(resolved);
+      setIsReadOnly(
+        readOnly
+        || resolved.backendStatus === "converted"
+        || resolved.backendStatus === "confirmed"
+        || resolved.backendStatus === "cancelled"
+        || resolved.backendStatus === "invoiced"
+        || resolved.backendStatus === "closed"
+      );
+      setViewMode("form");
+      syncOpenDocumentPath(resolved.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذّر فتح المستند");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSave = async (offerData: Partial<PriceOffer>) => {
     setSaving(true);
     try {
       if (offerData.id) {
-        await priceOffersService.updatePriceOfferInDb(offerData as PriceOffer);
+        const updatedOffer = offerData as PriceOffer;
+        const saved = await priceOffersService.updatePriceOfferInDb(updatedOffer, scope);
+        setOffers((prev) => prev.map((row) => row.id === updatedOffer.id ? saved : row));
       } else {
         const newOffer: PriceOffer = {
           ...(offerData as PriceOffer),
-          id: `offer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          offerNumber: offerData.offerNumber || await priceOffersService.getNextOfferNumber(),
+          id: "",
+          offerNumber: offerData.offerNumber || "",
           createdAt: offerData.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        await priceOffersService.addPriceOfferToDb(newOffer);
+        const saved = await priceOffersService.addPriceOfferToDb(newOffer, scope);
+        setOffers((prev) => [saved, ...prev]);
       }
+      setError(null);
       setViewMode("list");
-    } catch (e) {
-      // console suppressed
+      syncOpenDocumentPath();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "فشل حفظ المستند");
+      throw e;
     } finally {
       setSaving(false);
     }
   };
 
-  const handleStatusChange = async (offerId: string, newStatus: PriceOfferStatus) => {
-    const target = offers.find((o) => o.id === offerId);
-    if (!target) { setStatusModalOpen(false); return; }
-    await priceOffersService.updatePriceOfferInDb({
-      ...target,
-      status: newStatus,
-      updatedAt: new Date().toISOString(),
-    });
-    setStatusModalOpen(false);
+  /**
+   * إجراءات دورة المستند (تأكيد/تحويل/إلغاء).
+   *
+   * كان النجاح صامتاً: يُعاد التحميل فقط، والحالة تُعرض بنفس النص قبله وبعده
+   * («معتمد للشحن») ⇒ يبدو التحويل كأنه لم يحدث. الآن يُعلن الناتج باسم المستند
+   * المُنشأ، ويُسمّى المستند الجديد في الرسالة.
+   */
+  const runLifecycleAction = async (
+    action: () => Promise<unknown>,
+    successMessage?: (result: unknown) => string,
+  ) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await action();
+      setReloadKey((key) => key + 1);
+      if (successMessage) toast(successMessage(result), "success");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "تعذّر تنفيذ الإجراء";
+      setError(message);
+      toast(message, "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /** مسار المستند الناتج — الرقم بلا رابط يُلزم المستخدم بالبحث عنه يدوياً. */
+  const linkedDocPath = (offer: PriceOffer): string | null => {
+    if (!offer.linkedDocId) return null;
+    if (offer.linkedDocKind === "invoice") return `/purchase-invoices/${offer.linkedDocId}`;
+    if (offer.linkedDocKind === "deal") return `/deals/${offer.linkedDocId}`;
+    return null;
+  };
+
+  /** تحويل العرض المحلي إلى الوجهة المختارة (طلبية تسبق التسليم، فاتورة تُثبت الذمّة). */
+  const convertLocalOffer = (offer: PriceOffer, target: ConvertTarget) => {
+    const id = Number(offer.id.replace("quote-", ""));
+    setConvertOffer(null);
+    void runLifecycleAction(
+      () => target === "invoice"
+        ? convertSupplierQuotationToPurchaseInvoice(id)
+        : convertSupplierQuotationToPurchaseOrder(id),
+      (result) => {
+        const payload = result as {
+          order?: { order_number?: string };
+          invoice?: { invoice_number?: string };
+        };
+        return target === "invoice"
+          ? `تم تحويل العرض إلى فاتورة شراء ${payload?.invoice?.invoice_number || ""}`.trim()
+          : `تم تحويل العرض إلى طلبية شراء ${payload?.order?.order_number || ""}`.trim();
+      },
+    );
   };
 
   const columns: DenseColumn<PriceOffer>[] = [
-    { key: "offerNumber", header: "رقم العرض", width: "120px",
-      render: (o) => <b>{o.offerNumber || o.id.slice(0, 8)}</b> },
+    // T-IMPOFFER: «وإذا غير ملائم يكون معلَّم على أنه مشطوب» — الشطب على رقم
+    // المستند نفسه فيُقرأ القرار من مسح الصفوف بلا فتح أي عرض.
+    { key: "offerNumber", header: "رقم المستند", width: "150px",
+      render: (o) => {
+        const firstImage = (o.attachments || []).find((file) =>
+          (file.type || "").toLowerCase().startsWith("image/")
+          || /\.(png|jpe?g|webp|gif)(?:\?.*)?$/i.test(file.url || ""),
+        );
+        return (
+          <div className="flex items-center gap-2">
+            {firstImage ? (
+              <button type="button" className="shrink-0" title={`عرض «${firstImage.name || "الصورة"}»`}
+                onClick={(e) => { e.stopPropagation(); setPreviewFile(firstImage); }}>
+                <img src={firstImage.url} alt="" className="h-9 w-9 rounded border border-[var(--color-border)] object-cover" />
+              </button>
+            ) : (
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-dashed border-[var(--color-border)] aseel-text-soft"
+                title="لا توجد صورة توضيحية">
+                <ImageIcon className="h-4 w-4" aria-hidden="true" />
+              </span>
+            )}
+            <b style={isOfferStruckThrough(o.backendStatus)
+              ? { textDecoration: "line-through", opacity: 0.6 }
+              : undefined}>
+              {o.offerNumber || o.id.slice(0, 8)}
+            </b>
+          </div>
+        );
+      } },
+    { key: "orderSummary", header: "اسم ووصف الطلبية", width: "240px",
+      render: (o) => (
+        <div className="min-w-0 leading-tight">
+          <div className="truncate font-semibold text-[var(--color-text)]" title={o.orderName || ""}>
+            {o.orderName || "—"}
+          </div>
+          {o.orderDescription && (
+            <div className="mt-0.5 line-clamp-2 text-[10px] aseel-text-soft" title={o.orderDescription}>
+              {o.orderDescription}
+            </div>
+          )}
+        </div>
+      ) },
     { key: "supplier", header: "المورد",
-      render: (o) => <>{suppliers.find((s) => s.id === o.supplierId)?.name || "—"}</> },
+      render: (o) => (
+        <span style={isOfferStruckThrough(o.backendStatus)
+          ? { textDecoration: "line-through", opacity: 0.6 }
+          : undefined}>
+          {suppliers.find((s) => s.id === o.supplierId)?.tradeName || o.factoryName || "—"}
+        </span>
+      ) },
     { key: "date", header: "التاريخ", width: "100px",
       render: (o) => <>{fmtDate(o.createdAt)}</> },
     { key: "items", header: "الأصناف", width: "70px", align: "center",
       render: (o) => <>{(o.items || []).length}</> },
+    // T-IMPOFFER: ملف العرض ظاهر في القائمة، والنقر عليه يفتح معاينة وسط الشاشة.
+    { key: "files", header: "الملف", width: "60px", align: "center",
+      render: (o) => {
+        const files = o.attachments || [];
+        if (files.length === 0) return <span className="aseel-text-soft">—</span>;
+        return (
+          <button
+            type="button"
+            className="aseel-text-accent inline-flex items-center gap-0.5"
+            title={`عرض «${files[0].name || "الملف"}»`}
+            onClick={(e) => { e.stopPropagation(); setPreviewFile(files[0]); }}
+          >
+            <Paperclip className="h-3.5 w-3.5" />
+            {files.length > 1 && <span className="text-[10px]">{files.length}</span>}
+          </button>
+        );
+      } },
     { key: "total", header: "الإجمالي", width: "120px", align: "center", numeric: true,
       render: (o) => <>{fmtAmt(o.grandTotal)}</> },
-    { key: "status", header: "الحالة", width: "150px",
-      render: (o) => (
-        <span style={{ color: STATUS_COLORS[o.status] || "inherit" }}>
-          {STATUS_LABELS[o.status] || o.status}
-        </span>
-      )
+    // الحالة من حالة الخادم الحقيقية لا من قاموس العرض القديم: «مؤكَّدة» و«محوَّلة
+    // إلى فاتورة» كانتا تظهران «معتمد للشحن» كلتاهما، والمستند المرتبط لا يظهر.
+    // T-OFFERSTATE: العمود «الحالة» في الجانبين — «القرار» يفترض أن كل صف حُسم،
+    // بينما «بانتظار معلومات» و«قيد المناقشة» حالتان قبل أي قرار.
+    { key: "status", header: "الحالة", width: "190px",
+      render: (o) => {
+        const kind = procurementDocKind(o.id, scope);
+        return (
+          <div className="flex flex-col leading-tight">
+            <span style={{ color: STATUS_COLORS[o.status] || "inherit" }}>
+              {procurementStatusLabel(kind, o.backendStatus, statusLabels[o.status])}
+            </span>
+            {o.linkedDocNumber && (
+              linkedDocPath(o) ? (
+                <button
+                  type="button"
+                  className="aseel-text-accent text-[10px] text-right hover:underline"
+                  title={`فتح ${o.linkedDocNumber}`}
+                  onClick={(e) => { e.stopPropagation(); openInNewTab(linkedDocPath(o)!); }}
+                >
+                  ← {o.linkedDocNumber}
+                </button>
+              ) : (
+                <span className="text-[10px] aseel-text-soft">← {o.linkedDocNumber}</span>
+              )
+            )}
+            {/* التفصيل بجانب الحالة: «غير ملائم» بلا سبب — أو «بانتظار معلومات»
+                بلا ما يُنتظَر — لا يعلّم أحداً شيئاً عند مسح القائمة. */}
+            {o.decisionReason && (
+              <span className="text-[10px] aseel-text-soft" title={o.decisionReason}>
+                {o.backendStatus === "pending_info" ? "بانتظار: " : "السبب: "}
+                {o.decisionReason}
+              </span>
+            )}
+          </div>
+        );
+      }
     },
-    { key: "actions", header: "", width: "60px", align: "center",
+    { key: "actions", header: "إجراءات", width: "250px", align: "center",
       render: (o) => (
-        <button className="aseel-toolbtn" style={{ fontSize: "var(--aseel-fs-sm)", padding: "2px 6px" }}
-          onClick={(e) => { e.stopPropagation(); openEdit(o); }}>
-          تعديل
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
+          <button className="aseel-text-accent hover:underline"
+            onClick={(e) => { e.stopPropagation(); void openEdit(o); }}>
+            {o.backendStatus === "converted" ? "عرض" : "تعديل"}
+          </button>
+          {o.id.startsWith("quote-") && canConvertImportOffer(o.backendStatus) && (
+            <button className="text-green-600 hover:underline" disabled={saving}
+              onClick={(e) => {
+                e.stopPropagation();
+                // الاستيراد وجهته واحدة (الصفقة هي الطلبية التشغيلية)، والشراء
+                // المحلي وجهتان فيُسأل عنهما بدل فرض المرور بطلبية.
+                if (scope === "import") {
+                  void runLifecycleAction(
+                    () => convertSupplierQuotationToImportDeal(
+                      Number(o.id.replace("quote-", "")),
+                    ),
+                    (result) => `تم تحويل العرض إلى صفقة استيراد ${
+                      (result as { deal?: { ref_number?: string } })?.deal?.ref_number || ""
+                    }`.trim(),
+                  );
+                  return;
+                }
+                setConvertOffer(o);
+              }}>
+              {scope === "import" ? "تحويل إلى صفقة" : "تحويل…"}
+            </button>
+          )}
+          {/* T-IMPOFFER: العرض غير الملائم لا يُحوَّل — نقول ذلك بدل إخفاء الزر بصمت. */}
+          {o.id.startsWith("quote-")
+            && scope === "import"
+            && o.backendStatus !== "accepted"
+            && o.backendStatus !== "converted" && (
+            <span className="aseel-text-soft text-[10px]" title="حوّل العرض بعد اعتباره ملائماً">
+              {isOfferStruckThrough(o.backendStatus)
+                ? "غير ملائم — لا يُحوَّل"
+                : "يلزمه قرار «ملائم» للتحويل"}
+            </span>
+          )}
+          {o.id.startsWith("order-") && o.backendStatus === "draft" && (
+            <button className="text-green-600 hover:underline" disabled={saving}
+              onClick={(e) => {
+                e.stopPropagation();
+                void runLifecycleAction(
+                  () => confirmPurchaseOrder(Number(o.id.replace("order-", ""))),
+                  () => `تم تأكيد الطلبية ${o.offerNumber}`,
+                );
+              }}>
+              تأكيد
+            </button>
+          )}
+          {o.id.startsWith("order-") && o.backendStatus === "confirmed" && (
+            <>
+              <button className="text-blue-600 hover:underline" disabled={saving}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void runLifecycleAction(
+                    () => convertPurchaseOrderToInvoice(
+                      Number(o.id.replace("order-", "")),
+                    ),
+                    (result) => {
+                      const payload = result as {
+                        invoice?: { invoice_number?: string };
+                      };
+                      return `تم تحويل الطلبية إلى فاتورة شراء ${
+                        payload?.invoice?.invoice_number || ""
+                      }`.trim();
+                    },
+                  );
+                }}>
+                تحويل لفاتورة
+              </button>
+              <button className="text-amber-600 hover:underline" disabled={saving}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void runLifecycleAction(
+                    () => cancelPurchaseOrder(Number(o.id.replace("order-", ""))),
+                    () => `تم إلغاء الطلبية ${o.offerNumber}`,
+                  );
+                }}>
+                إلغاء
+              </button>
+            </>
+          )}
+        </div>
       )
     },
   ];
@@ -164,63 +498,55 @@ export const PriceOfferManagement: React.FC = () => {
         offer={currentOffer}
         items={items}
         suppliers={suppliers}
+        scope={scope}
         isReadOnly={isReadOnly}
         saving={saving}
         onSave={handleSave}
-        onCancel={() => setViewMode("list")}
-        onStatusChangeRequest={(offer, newStatus) => {
-          setTargetStatusOffer(offer as PriceOffer);
-          setNewStatusTarget(newStatus as PriceOfferStatus);
-          setStatusModalOpen(true);
+        onCancel={() => {
+          setViewMode("list");
+          syncOpenDocumentPath();
         }}
       />
     );
   }
 
   return (
-    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }} data-skin="aseel">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
-          عروض الأسعار
-        </strong>
-        <span className="aseel-status-item">الإجمالي: <b>{offers.length}</b></span>
-        <div style={{ flex: 1 }} />
-        <input className="aseel-input" style={{ width: 180 }}
-          placeholder="بحث بالمورد / رقم العرض…"
-          value={search} onChange={(e) => setSearch(e.target.value)} />
-        <select className="aseel-input" style={{ width: 160 }}
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value as PriceOfferStatus | "all")}>
-          <option value="all">كل الحالات</option>
-          {Object.entries(STATUS_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
-        </select>
-        <button className="aseel-toolbtn" title="تحديث">
-          <RefreshCw className="h-4 w-4" />
-        </button>
-        <button className="aseel-toolbtn" onClick={openNew} title="عرض جديد (Ctrl+Ins)">
-          <Plus className="h-4 w-4" /> عرض جديد
-        </button>
-      </div>
-
-      <AseelDenseTable<PriceOffer>
-        columns={columns}
+    <>
+      <CommercialDocumentsList<PriceOffer>
+        title={scope === "import" ? "عروض وطلبيات الاستيراد" : "عروض وطلبيات الشراء"}
+        state={scope === "import" ? "مستندات الاستيراد" : "مستندات الشراء"}
         rows={filtered}
-        getRowKey={(o) => o.id}
+        columns={columns}
+        getRowKey={(offer) => offer.id}
         loading={loading}
-        emptyHint="لا توجد عروض أسعار"
-        onRowDoubleClick={(o) => openEdit(o)}
+        error={error}
+        emptyHint="لا توجد عروض أو طلبيات"
+        countLabel={`${offers.length} مستند`}
+        searchValue={search}
+        searchPlaceholder="بحث بالرقم / اسم أو وصف الطلبية / المورد…"
+        onSearchChange={setSearch}
+        statusValue={filterStatus}
+        statusOptions={[
+          { value: "all", label: "كل الحالات" },
+          ...Object.entries(statusLabels).map(([value, label]) => ({ value, label })),
+        ]}
+        onStatusChange={(value) => setFilterStatus(value as PriceOfferStatus | "all")}
+        onNew={openNew}
+        onReload={() => setReloadKey((key) => key + 1)}
+        newLabel="عرض / طلبية جديدة"
+        onRowDoubleClick={(offer) => void openEdit(offer)}
       />
-
-      {statusModalOpen && targetStatusOffer && newStatusTarget && (
-        <StatusChangeModal
-          offer={targetStatusOffer}
-          newStatus={newStatusTarget}
-          onConfirm={(id, status) => void handleStatusChange(id, status as PriceOfferStatus)}
-          onCancel={() => setStatusModalOpen(false)}
+      <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      {convertOffer && (
+        <ConvertTargetDialog
+          title={`تحويل عرض السعر ${convertOffer.offerNumber || ""}`.trim()}
+          hint="اختر الوجهة — الطلبية التزام شراء يسبق التسليم، والفاتورة تُثبت الذمّة للمورد."
+          orderDescription="طلبية شراء للمورد تُؤكَّد ثم تُحوَّل إلى فاتورة — بلا قيد محاسبي."
+          invoiceDescription="فاتورة شراء مسودة مباشرةً — تُثبت ذمّة المورد عند ترحيلها."
+          onPick={(target) => convertLocalOffer(convertOffer, target)}
+          onClose={() => setConvertOffer(null)}
         />
       )}
-    </div>
+    </>
   );
 };

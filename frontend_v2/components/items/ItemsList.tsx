@@ -144,7 +144,7 @@ export const ItemsList: React.FC<ItemsListProps> = ({
                                 <th className="px-6 py-4"></th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                        <tbody className="divide-y divide-[var(--color-border)]">
                             {filteredItems.map(item => (
                                 <tr
                                     key={item.id}

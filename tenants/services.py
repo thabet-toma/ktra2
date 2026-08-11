@@ -1,5 +1,6 @@
 import logging
-from django.db import transaction
+from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 from tenants.models import Branch, Tenant, TenantSettings, TenantBook, UserCompanyMembership
 from accounting.models import Account, Currency
@@ -44,6 +45,10 @@ COA_DATA = [
     ('2106', 'ذمم وكلاء الشحن (Freight Forwarders Payable)', 'Liability', '21'),
     ('2107', 'ذمم المخلصين الجمركيين (Customs Brokers Payable)', 'Liability', '21'),
     ('2108', 'ذمم النقل المحلي (Local Transporters Payable)', 'Liability', '21'),
+    ('2109', 'ذمم الناقلين (Carriers Payable)', 'Liability', '21'),
+    # T-CHQ2: مرآة 1107 للجانب الصادر — الشيك الصادر التزام حتى يُصرف من
+    # حسابنا. كان يُطابَق بالاسم فقط فيفشل ترحيل أي سند صرف بشيك.
+    ('2111', 'شيكات برسم الدفع (Cheques Payable)', 'Liability', '21'),
     ('22', 'الالتزامات غير المتداولة (Non-current Liabilities)', 'Liability', '2'),
     ('2201', 'قروض طويلة الأجل (Long-term Loans)', 'Liability', '22'),
 
@@ -82,12 +87,12 @@ def ensure_operational_accounts(tenant) -> list[str]:
     """task13 M2 — يضمن وجود الحسابات التشغيلية في شجرة قائمة (idempotent).
 
     الشركات المبذورة قبل task13 تنقصها حسابات تتوقعها مسارات الترحيل:
-    1107 شيكات برسم التحصيل، 1110 صناديق النقدية، 2106-2108 ذمم شركاء
-    اللوجستيات. لا يُنشأ حساب إذا غاب أبوه (شجرة غير معيارية) — لا دمج أعمى.
-    يعيد قائمة الأكواد المُنشأة.
+    1107 شيكات برسم التحصيل، 1110 صناديق النقدية، 2106-2109 ذمم شركاء
+    اللوجستيات، 2111 شيكات برسم الدفع. لا يُنشأ حساب إذا غاب أبوه (شجرة غير
+    معيارية) — لا دمج أعمى. يعيد قائمة الأكواد المُنشأة.
     """
     needed = [row for row in COA_DATA if row[0] in
-              ("1107", "1110", "2106", "2107", "2108")]
+              ("1107", "1110", "2106", "2107", "2108", "2109", "2111")]
     created = []
     for code, acc_name, acc_type, parent_code in needed:
         if Account.objects.filter(tenant=tenant, code=code).exists():
@@ -105,6 +110,89 @@ def ensure_operational_accounts(tenant) -> list[str]:
         )
         created.append(code)
     return created
+
+
+def ensure_operational_account(tenant, code: str):
+    """يضمن حساباً تشغيلياً واحداً ويعيده — يُنشئه ولو غاب أبوه المعياري.
+
+    `ensure_operational_accounts` يتخطّى الحساب إن غاب أبوه (لا دمج أعمى في
+    شجرة غير معيارية)، لكن مسارات الترحيل التي تستهلكه — كترحيل سند فيه شيك —
+    تتوقّف عندها عمل المستخدم وتطلب منه تعيين الحساب يدوياً. فهنا نتدرّج في
+    الأب: الأب المعياري ← جذر نوعه ← بلا أب، ولا نردّ المستخدم أبداً.
+    """
+    row = next((r for r in COA_DATA if r[0] == code), None)
+    if row is None:
+        return None
+    _, acc_name, acc_type, parent_code = row
+
+    def _existing():
+        # بالكود أولاً، ثم بالاسم المعياري مهما كان نوعه أو حالته: الحساب
+        # المعطَّل أو المصنَّف خطأً موجودٌ فعلاً، وإنشاء ثانٍ باسمه يكرّر الشجرة
+        # (ويصطدم بقيد فريد على (tenant, name) في القواعد المُرحَّلة من 0001).
+        return (
+            Account.objects.filter(tenant=tenant, code=code).first()
+            or Account.objects.filter(tenant=tenant, name=acc_name).first()
+        )
+
+    existing = _existing()
+    if existing is not None:
+        return existing
+
+    parent = (
+        Account.objects.filter(tenant=tenant, code=parent_code).first()
+        or Account.objects.filter(tenant=tenant, code=parent_code[:1]).first()
+    )
+    if parent is None:
+        logger.warning(
+            "ensure_operational_account: tenant=%s creating %s without a parent "
+            "(non-standard tree)", tenant.TenantID, code,
+        )
+    try:
+        account = Account.objects.create(
+            tenant=tenant, code=code, name=acc_name,
+            account_type=acc_type, parent=parent, is_active=True,
+        )
+    except IntegrityError:
+        # قيد فريد قديم أو سباق بين طلبين — لا يجوز أن يتحول إلى 500 في وجه
+        # المستخدم وهو يحفظ سنداً. نعيد القراءة ونستعمل الموجود.
+        logger.warning(
+            "ensure_operational_account: tenant=%s insert of %s hit a unique "
+            "constraint — reusing the existing account", tenant.TenantID, code,
+        )
+        return _existing()
+    logger.info(
+        "ensure_operational_account: tenant=%s created %s (%s) parent=%s",
+        tenant.TenantID, code, acc_name, parent.code if parent else "-",
+    )
+    return account
+
+
+DEFAULT_CURRENCIES = [
+    # (Code, Name, Symbol) — الأول هو الأساسي عند غياب أي عملة أساسية
+    ('ILS', 'شيكل', '₪'),
+    ('USD', 'دولار', '$'),
+]
+
+
+def ensure_base_currencies():
+    """يضمن وجود العملات الافتراضية ويعيد العملة الأساسية (idempotent).
+
+    جدول العملات عام (بلا tenant) ولا تزرعه أي هجرة، فأي قاعدة تُبنى من صفر
+    تبقى بجدول فارغ: نموذج فاتورة الشراء يرسل الرمز 'ILS' نصاً ثابتاً فيرفضه
+    الخادم بـ «عنصر ب Code=ILS غير موجود». نزرعها هنا فلا تتكرر المصيدة.
+    لا نغيّر عملة أساسية قائمة — إن وُجدت نحترمها كما هي.
+    """
+    for code, cur_name, symbol in DEFAULT_CURRENCIES:
+        Currency.objects.get_or_create(
+            Code=code, defaults={'Name': cur_name, 'Symbol': symbol},
+        )
+    base = Currency.objects.filter(IsBaseCurrency=True).first()
+    if base is None:
+        base = Currency.objects.filter(Code=DEFAULT_CURRENCIES[0][0]).first()
+        if base is not None:
+            base.IsBaseCurrency = True
+            base.save(update_fields=['IsBaseCurrency'])
+    return base
 
 
 def create_company(name: str, creator_user) -> Tenant:
@@ -126,7 +214,7 @@ def create_company(name: str, creator_user) -> Tenant:
 
         # 2. Create TenantSettings
         # Find base currency if available
-        base_currency = Currency.objects.filter(IsBaseCurrency=True).first()
+        base_currency = ensure_base_currencies()
         TenantSettings.objects.create(
             tenant=tenant,
             company_name_primary=tenant.CompanyName,
@@ -172,7 +260,9 @@ def create_company(name: str, creator_user) -> Tenant:
 
         # 5. Create UserCompanyMembership
         # If this is the user's only company, make it the default
-        is_first = not UserCompanyMembership.objects.filter(user=creator_user).exists()
+        is_first = not UserCompanyMembership.objects.filter(
+            user=creator_user, is_example_access=False,
+        ).exists()
         UserCompanyMembership.objects.create(
             user=creator_user,
             tenant=tenant,
@@ -186,6 +276,87 @@ def create_company(name: str, creator_user) -> Tenant:
 
         logger.info("Successfully booted new company '%s' (ID: %d) for user %s", tenant.CompanyName, tenant.TenantID, creator_user.username)
         return tenant
+
+
+def set_example_company(tenant: Tenant | None) -> None:
+    """يعيّن شركة المثال الوحيدة ويزامن عضويات الوصول التلقائية بأمان."""
+    user_model = get_user_model()
+    with transaction.atomic():
+        # التعيين نادر ومنصة-فقط؛ قفل صفوف الشركات كلها يمنع طلبين متزامنين من
+        # تعيين شركتين عندما لا تكون هناك شركة مثال سابقة لقفلها.
+        list(Tenant.objects.select_for_update().values_list("pk", flat=True))
+        Tenant.objects.filter(is_example=True).exclude(
+            pk=getattr(tenant, "pk", None)
+        ).update(is_example=False)
+        UserCompanyMembership.objects.filter(is_example_access=True).delete()
+
+        if tenant is None:
+            logger.info("Example company cleared")
+            return
+
+        if not tenant.is_example:
+            tenant.is_example = True
+            tenant.save(update_fields=["is_example"])
+
+        existing_user_ids = set(
+            UserCompanyMembership.objects.filter(tenant=tenant)
+            .values_list("user_id", flat=True)
+        )
+        UserCompanyMembership.objects.bulk_create([
+            UserCompanyMembership(
+                user_id=user_id,
+                tenant=tenant,
+                role="staff",
+                is_example_access=True,
+            )
+            for user_id in user_model.objects.exclude(pk__in=existing_user_ids)
+            .values_list("pk", flat=True)
+        ])
+        logger.info("Example company assigned tenant=%s", tenant.pk)
+
+
+def ensure_example_company_access(user) -> None:
+    """يلحق المستخدمين الذين سُجّلوا بعد التعيين بشركة المثال عند أول تحميل."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return
+    example = Tenant.objects.filter(is_example=True).first()
+    if example is None:
+        return
+    _, created = UserCompanyMembership.objects.get_or_create(
+        user=user,
+        tenant=example,
+        defaults={"role": "staff", "is_example_access": True},
+    )
+    if created:
+        logger.info("Example company access granted tenant=%s user=%s", example.pk, user.pk)
+
+
+def member_payload(m: UserCompanyMembership) -> dict:
+    """تمثيل عضوية موحّد — تستهلكه إدارة الشركة (المدير) ولوحة المنصة (السوبر أدمن)."""
+    return {
+        "membership_id": m.id,
+        "user_id": m.user_id,
+        "username": m.user.username,
+        "email": m.user.email or "",
+        "full_name": (f"{m.user.first_name} {m.user.last_name}").strip(),
+        "role": m.role,
+        "is_default": m.is_default,
+        "can_access_import": m.can_access_import,
+        "is_active": m.user.is_active,
+        "created_at": m.created_at,
+    }
+
+
+def is_last_manager(tenant: Tenant, membership: UserCompanyMembership) -> bool:
+    """هل هذه العضوية آخر مدير في الشركة؟ (كل طبقة ترفع خطأها الخاص)."""
+    if membership.role != "manager":
+        return False
+    return not (
+        UserCompanyMembership.objects
+        .filter(tenant=tenant, role="manager")
+        .exclude(id=membership.id)
+        .exists()
+    )
 
 
 def create_branch(tenant: Tenant, name: str, code: str) -> Branch:

@@ -169,6 +169,66 @@ def test_price_list_ignores_drafts(env):
     assert Decimal(out[product.id]["unit_price"]) == Decimal("100.0000")
 
 
+def test_price_list_last_is_supplier_scoped_lowest_is_global(env):
+    # طلب المالك: «أقل شراء» عام لكل الموردين، و«آخر شراء» للمورد المحدد وحده.
+    tenant, ils, _usd, sup_a, product = env
+    sup_b = Partner.objects.create(tenant=tenant, name="مورد ب", partner_type="Supplier")
+    _posted_pi(tenant, sup_a, ils, product, number="A-1", date="2026-06-01", price=100)
+    _posted_pi(tenant, sup_b, ils, product, number="B-1", date="2026-06-15", price=80)
+
+    out = purchase_price_list(tenant_id=tenant.TenantID, supplier_id=sup_a.id)
+    prices = {p["source_label"]: Decimal(p["unit_price"]) for p in out[product.id]["prices"]}
+    # آخر شراء = من المورد «أ» فقط (لا 80 الأحدث من المورد «ب»)
+    assert prices.get("آخر شراء من المورد") == Decimal("100.0000")
+    # أقل شراء = الأدنى عبر كل الموردين
+    assert prices.get("أقل شراء") == Decimal("80.0000")
+    # الخلية تُعبَّأ بآخر سعر للمورد نفسه
+    assert Decimal(out[product.id]["unit_price"]) == Decimal("100.0000")
+
+
+def test_price_list_falls_back_to_lowest_when_supplier_has_no_history(env):
+    tenant, ils, _usd, sup_a, product = env
+    sup_b = Partner.objects.create(tenant=tenant, name="مورد ب", partner_type="Supplier")
+    _posted_pi(tenant, sup_a, ils, product, number="A-1", date="2026-06-01", price=100)
+
+    out = purchase_price_list(tenant_id=tenant.TenantID, supplier_id=sup_b.id)
+    labels = [p["source_label"] for p in out[product.id]["prices"]]
+    assert "آخر شراء من المورد" not in labels
+    assert Decimal(out[product.id]["unit_price"]) == Decimal("100.0000")
+
+
+def test_resolve_last_purchase_scoped_to_supplier(env):
+    tenant, ils, _usd, sup_a, product = env
+    sup_b = Partner.objects.create(tenant=tenant, name="مورد ب", partner_type="Supplier")
+    _posted_pi(tenant, sup_a, ils, product, number="A-1", date="2026-06-01", price=100)
+    _posted_pi(tenant, sup_b, ils, product, number="B-1", date="2026-06-15", price=80)
+
+    data = resolve_purchase_price(
+        tenant_id=tenant.TenantID, product_id=product.id,
+        strategy=PriceStrategy.LAST_PURCHASE, supplier_id=sup_a.id)
+    assert Decimal(data["unit_price"]) == Decimal("100.0000")
+    assert data["source"]["document_number"] == "A-1"
+
+    # بلا مورد → السلوك القديم (آخر شراء عبر كل الموردين)
+    globl = resolve_purchase_price(
+        tenant_id=tenant.TenantID, product_id=product.id,
+        strategy=PriceStrategy.LAST_PURCHASE)
+    assert Decimal(globl["unit_price"]) == Decimal("80.0000")
+
+
+def test_resolve_falls_back_to_lowest_when_supplier_has_no_history(env):
+    tenant, ils, _usd, sup_a, product = env
+    sup_b = Partner.objects.create(tenant=tenant, name="مورد ب", partner_type="Supplier")
+    _posted_pi(tenant, sup_a, ils, product, number="A-1", date="2026-06-01", price=100)
+    _posted_pi(tenant, sup_a, ils, product, number="A-2", date="2026-06-20", price=140)
+
+    data = resolve_purchase_price(
+        tenant_id=tenant.TenantID, product_id=product.id,
+        strategy=PriceStrategy.LAST_PURCHASE, supplier_id=sup_b.id)
+    assert Decimal(data["unit_price"]) == Decimal("100.0000")
+    assert data["strategy_used"] == PriceStrategy.LOWEST_PURCHASE
+
+
 class PurchasePriceEndpointTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
@@ -218,3 +278,19 @@ class PurchasePriceEndpointTest(APITestCase):
         row = next(r for r in res.json() if r["product_id"] == self.product.id)
         assert Decimal(row["unit_price"]) == Decimal("130.0000")
         assert row["source_label"] == "آخر شراء"
+
+    def test_price_list_endpoint_scopes_last_to_supplier(self):
+        # ?supplier= يحصر «آخر شراء» بذلك المورد ويُبقي «أقل شراء» عاماً.
+        other = Partner.objects.create(
+            tenant=self.tenant, name="مورد ب", partner_type="Supplier")
+        _posted_pi(self.tenant, other, self.ils, self.product,
+                   number="B-1", date="2026-07-01", price=60)  # الأحدث والأقل — مورد آخر
+        res = self.client.get(
+            f"/api/logistics/purchase-invoices/price-list/?supplier={self.sup.id}",
+            **self._auth())
+        assert res.status_code == 200, res.content
+        row = next(r for r in res.json() if r["product_id"] == self.product.id)
+        assert Decimal(row["unit_price"]) == Decimal("130.0000")
+        prices = {p["source_label"]: Decimal(p["unit_price"]) for p in row["prices"]}
+        assert prices.get("آخر شراء من المورد") == Decimal("130.0000")
+        assert prices.get("أقل شراء") == Decimal("60.0000")

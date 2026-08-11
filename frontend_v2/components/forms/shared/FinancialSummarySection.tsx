@@ -51,10 +51,10 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
     };
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3 w-full max-w-sm"> {/* زيادة العرض */}
+        <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-3 w-full max-w-sm"> {/* زيادة العرض */}
             {/* العنوان مع الإجمالي في سطر واحد */}
             <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-semibold text-gray-900 dark:text-white flex items-center gap-2 whitespace-nowrap">
+                <h3 className="text-base font-semibold text-[var(--color-text)] flex items-center gap-2 whitespace-nowrap">
                     <DollarSign className="w-5 h-5 text-blue-500 flex-shrink-0" />
                     <span>الملخص المالي</span>
                 </h3>
@@ -67,13 +67,13 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
             <div className="space-y-2 text-sm"> {/* زيادة حجم الخط */}
                 {/* سعر المنتجات */}
                 <div className="flex justify-between items-center py-1">
-                    <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap">سعر المنتجات</span>
+                    <span className="text-[var(--color-text)] whitespace-nowrap">سعر المنتجات</span>
                     <span className="font-medium">${formatMoney(subtotal)}</span>
                 </div>
 
                 {/* الخصم - مع إمكانية التعديل */}
                 <div className="flex justify-between items-center py-1">
-                    <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                    <div className="flex items-center gap-2 text-[var(--color-text)] whitespace-nowrap">
                         <Tag className="w-4 h-4 text-red-500" />
                         الخصم
                         {!readOnly && (
@@ -112,7 +112,7 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                                         }
                                     }}
                                 />
-                                <span className="text-gray-500 text-sm">$</span>
+                                <span className="text-[var(--color-text-muted)] text-sm">$</span>
                             </div>
                         ) : discountAmount > 0 ? (
                             <div className="flex flex-col items-end">
@@ -120,21 +120,21 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                                     -${formatMoney(discountAmount)}
                                 </span>
                                 {discountPercentage > 0 && (
-                                    <span className="text-xs text-gray-500">
+                                    <span className="text-xs text-[var(--color-text-muted)]">
                                         ({formatNumber(discountPercentage, { maxDecimals: 1 })}%)
                                     </span>
                                 )}
                             </div>
                         ) : (
-                            <span className="text-gray-400 text-sm">-</span>
+                            <span className="text-[var(--color-text-muted)] text-sm">-</span>
                         )}
                     </div>
                 </div>
 
                 {/* الضريبة - مع إمكانية التعديل */}
                 <div className="flex justify-between items-center py-1">
-                    <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                        <Percent className="w-4 h-4 text-gray-500" />
+                    <div className="flex items-center gap-2 text-[var(--color-text)] whitespace-nowrap">
+                        <Percent className="w-4 h-4 text-[var(--color-text-muted)]" />
                         الضريبة
                         {!readOnly && (
                             <button
@@ -171,14 +171,14 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                                         }
                                     }}
                                 />
-                                <span className="text-gray-500 text-sm">%</span>
+                                <span className="text-[var(--color-text-muted)] text-sm">%</span>
                             </div>
                         ) : taxAmount > 0 ? (
                             <div className="flex flex-col items-end">
                                 <span className="font-medium">
                                     ${formatMoney(taxAmount)}
                                 </span>
-                                <span className="text-xs text-gray-500">
+                                <span className="text-xs text-[var(--color-text-muted)]">
                                     ({formatNumber(taxRate, { maxDecimals: 4 })}%)
                                 </span>
                             </div>
@@ -193,7 +193,7 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                 {/* الشحن */}
                 {(shippingCost > 0 || data.shippingIncluded) && (
                     <div className="flex justify-between items-center py-1">
-                        <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                        <span className="text-[var(--color-text)] whitespace-nowrap">
                             الشحن {data.shippingIncluded && <span className="text-xs text-green-600">(متضمن)</span>}
                         </span>
                         <span className="font-medium">
@@ -203,28 +203,28 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                 )}
 
                 {/* خط فاصل */}
-                <div className="border-t border-gray-200 dark:border-gray-700 my-2"></div>
+                <div className="border-t border-[var(--color-border)] my-2"></div>
 
                 {/* الإجمالي */}
                 <div className="flex justify-between items-center py-1">
-                    <span className="font-bold text-gray-900 dark:text-white text-base whitespace-nowrap">الإجمالي</span>
+                    <span className="font-bold text-[var(--color-text)] text-base whitespace-nowrap">الإجمالي</span>
                     <span className="text-lg font-bold text-green-600 whitespace-nowrap">
                         ${formatMoney(grandTotal)}
                     </span>
                 </div>
 
                 {/* خط فاصل */}
-                <div className="border-t border-gray-200 dark:border-gray-700 my-2"></div>
+                <div className="border-t border-[var(--color-border)] my-2"></div>
 
                 {/* المدفوع */}
                 <div className="flex justify-between items-center py-1">
-                    <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap">المدفوع</span>
+                    <span className="text-[var(--color-text)] whitespace-nowrap">المدفوع</span>
                     <span className="font-bold text-green-600 text-sm">${formatMoney(paidAmount)}</span>
                 </div>
 
                 {/* المتبقي */}
                 <div className="flex justify-between items-center py-1">
-                    <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap">المتبقي</span>
+                    <span className="text-[var(--color-text)] whitespace-nowrap">المتبقي</span>
                     <span className="font-bold text-orange-600 text-sm">
                         ${formatMoney(remainingAmount)}
                     </span>
@@ -233,12 +233,12 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
 
             {/* شريط التقدم للمدفوعات */}
             {grandTotal > 0 && (
-                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                    <div className="flex justify-between text-sm text-gray-500 dark:text-gray-400 mb-1">
+                <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
+                    <div className="flex justify-between text-sm text-[var(--color-text-muted)] mb-1">
                         <span className="whitespace-nowrap">تقدم الدفع</span>
                         <span>{Math.round((paidAmount / grandTotal) * 100)}%</span>
                     </div>
-                    <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                    <div className="h-2 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
                         <div
                             className="h-full bg-green-500 transition-all duration-300"
                             style={{ width: `${(paidAmount / grandTotal) * 100}%` }}
@@ -249,8 +249,8 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
 
             {/* ملاحظات عن الخصم والضريبة */}
             {(discountAmount > 0 || taxRate > 0) && (
-                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                    <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
+                <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
+                    <div className="text-xs text-[var(--color-text-muted)] space-y-1">
                         {discountAmount > 0 && (
                             <div className="flex justify-between">
                                 <span>قيمة الخصم:</span>

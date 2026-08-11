@@ -45,7 +45,7 @@ export const TaskImagesGallery: React.FC<TaskImagesGalleryProps> = ({ images }) 
   return (
     <>
       <div className="mt-4">
-        <h4 className="font-semibold text-gray-700 dark:text-gray-300 mb-3">
+        <h4 className="font-semibold text-[var(--color-text)] mb-3">
           صور المهمة ({images.length})
         </h4>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
@@ -58,7 +58,7 @@ export const TaskImagesGallery: React.FC<TaskImagesGalleryProps> = ({ images }) 
               <img
                 src={imageUrl}
                 alt={`صورة المهمة ${index + 1}`}
-                className="w-full h-24 object-cover rounded-lg border border-gray-200 dark:border-gray-600 hover:border-blue-500 transition-colors"
+                className="w-full h-24 object-cover rounded-lg border border-[var(--color-border)] hover:border-blue-500 transition-colors"
               />
               <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all rounded-lg flex items-center justify-center">
                 <span className="text-white opacity-0 group-hover:opacity-100 text-2xl">

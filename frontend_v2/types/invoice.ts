@@ -77,6 +77,8 @@ export interface InvoiceItem {
     landedUnitPriceIls?: number;
     /** إجمالي السطر بالشيقل شامل التوزيع */
     landedLineTotalIls?: number;
+    /** T-SERIAL: أرقام وحدات هذا البند — تُجسَّد في المخزن عند الاستلام. */
+    serials?: string[];
 }
 
 /** مصدر استيراد الفاتورة من تخليص + شحنة (نفس منطق ربط الصفقات بالشحنة) */
@@ -263,9 +265,40 @@ export interface Invoice {
     /** رقم الفاتورة الأصلية المرتبطة بالمرجع (W7a). */
     originalInvoiceId?: string;
     originalInvoiceNumber?: string;
+    /** T-PLINEAGE: المستند الذي وُلدت منه الفاتورة (عرض سعر أو طلبية شراء). */
+    sourceDocument?: {
+        kind: 'order' | 'quotation';
+        id: number;
+        number: string;
+        originKind?: 'quotation' | null;
+        originId?: number | null;
+        originNumber?: string | null;
+    };
     /** ضرائب ورسوم إضافية مهيكلة تُرحّل فوق إجمالي الفاتورة الأساسي. */
     fees?: PurchaseInvoiceFeeLine[];
     feesTotal?: number;
     payableTotal?: number;
+    amountPaid?: number;
+    remainingBalance?: number;
+    paymentStatus?: 'paid' | 'partially_paid' | 'unpaid';
+    paymentStatusDisplay?: string;
+    /** حالة استلام البضاعة للمخزن — مستقلة عن الحالة المالية. */
+    receiptStatus?: 'not_received' | 'partially_received' | 'received';
+    receiptStatusDisplay?: string;
+    partnerBalance?: number;
+    partnerBalanceBeforeInvoice?: number;
+    partnerBalanceAfterInvoice?: number;
+    paymentDetails?: Array<{
+        source: 'supplier_payment' | 'purchase_invoice_payment';
+        id: number;
+        paymentDate: string;
+        amount: number;
+        currencyCode: string;
+        exchangeRate: number;
+        cashOrBankAccountName?: string;
+        isPosted: boolean;
+        journalId?: number;
+        notes?: string;
+    }>;
     invoiceType?: 'local' | 'international';
 }

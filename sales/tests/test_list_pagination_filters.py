@@ -7,9 +7,11 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
-from accounting.models import Account
+from accounting.models import Account, JournalHeader, JournalLine
 from partners.models import Partner
-from sales.models import CustomerPayment, SalesInvoice, SalesQuotation, SupplierPayment
+from sales.models import (
+    CustomerPayment, PaymentAllocation, SalesInvoice, SalesQuotation, SupplierPayment,
+)
 from tenants.models import Currency, Tenant, UserCompanyMembership
 
 
@@ -128,6 +130,138 @@ class SalesListPaginationFilterTest(APITestCase):
     def test_invoice_list_query_count_is_constant_as_page_grows(self):
         self.assertEqual(self._invoice_query_count(5), self._invoice_query_count(20))
 
+    def test_invoice_list_reads_partner_balance_in_one_grouped_query(self):
+        """رصيد العميل لا يُحسب كاستعلام فرعي مرتبط داخل استعلام القائمة.
+
+        الشكل السابق (`annotate_partner_posted_balance` على صف القائمة) يولّد
+        DEPENDENT SUBQUERY فيه GROUP BY، فتبني MySQL جدولاً مؤقتاً **لكل صف**:
+        قياس على بيانات حقيقية (927 فاتورة) أعطى 15–20 ثانية للقائمة، وثانية
+        كاملة لصفحة الخمسين. المطلوب: استعلام تجميعي واحد لأطراف الصفحة.
+        """
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(
+                "/api/sales/invoices/?page=1&page_size=20", **self.headers,
+            )
+        self.assertEqual(response.status_code, 200, response.content[:300])
+
+        statements = [q["sql"] for q in captured]
+        page_sql = [s for s in statements if "sales_module_invoices" in s]
+        self.assertTrue(page_sql)
+        for sql in page_sql:
+            self.assertNotIn(
+                "journal_lines", sql,
+                "استعلام صفحة الفواتير يحمل استعلام رصيد فرعياً لكل صف.",
+            )
+        grouped = [
+            s for s in statements
+            if "journal_lines" in s and "GROUP BY" in s.upper()
+        ]
+        self.assertEqual(
+            len(grouped), 1,
+            "الرصيد يجب أن يُجلب باستعلام تجميعي واحد لأطراف الصفحة.",
+        )
+
+    def test_invoice_list_exposes_payment_summary_partner_balance_and_filter(self):
+        partial = SalesInvoice.objects.get(
+            tenant=self.tenant, invoice_number="INV-BOUND-10",
+        )
+        partial.amount_paid = Decimal("5.00")
+        partial.save(update_fields=["amount_paid"])
+        paid = SalesInvoice.objects.get(
+            tenant=self.tenant, invoice_number="INV-BOUND-11",
+        )
+        paid.amount_paid = paid.grand_total
+        paid.save(update_fields=["amount_paid"])
+        journal = JournalHeader.objects.create(
+            tenant=self.tenant, transaction_date=date(2026, 7, 20),
+            description="رصيد عميل القائمة", is_posted=True,
+        )
+        JournalLine.objects.create(
+            tenant=self.tenant, journal=journal, account=self.cash_account,
+            partner=self.customer, debit=Decimal("321.00"), credit=Decimal("0"),
+            base_debit=Decimal("321.00"), base_credit=Decimal("0"),
+        )
+
+        partial_response = self.client.get(
+            "/api/sales/invoices/?page=1&payment_status=partially_paid",
+            **self.headers,
+        )
+        self.assertEqual(partial_response.status_code, 200, partial_response.content[:300])
+        self.assertEqual(partial_response.json()["count"], 1)
+        row = partial_response.json()["results"][0]
+        self.assertEqual(row["invoice_number"], partial.invoice_number)
+        self.assertEqual(Decimal(row["remaining_balance"]), Decimal("6.00"))
+        self.assertEqual(row["payment_status"], "partially_paid")
+        self.assertEqual(row["payment_status_display"], "مدفوعة جزئياً")
+        self.assertEqual(Decimal(row["customer_balance"]), Decimal("321.00"))
+
+        paid_response = self.client.get(
+            "/api/sales/invoices/?page=1&payment_status=paid", **self.headers,
+        )
+        self.assertEqual(paid_response.json()["count"], 1)
+        self.assertEqual(paid_response.json()["results"][0]["invoice_number"], paid.invoice_number)
+
+    def test_invoice_detail_exposes_balance_before_after_and_payment_details(self):
+        opening_journal = JournalHeader.objects.create(
+            tenant=self.tenant, transaction_date=date(2026, 7, 1),
+            description="رصيد سابق", is_posted=True,
+        )
+        JournalLine.objects.create(
+            tenant=self.tenant, journal=opening_journal, account=self.cash_account,
+            partner=self.customer, debit=Decimal("200.00"), credit=Decimal("0"),
+        )
+        invoice_journal = JournalHeader.objects.create(
+            tenant=self.tenant, transaction_date=date(2026, 7, 2),
+            description="فاتورة تفصيلية", is_posted=True,
+        )
+        JournalLine.objects.create(
+            tenant=self.tenant, journal=invoice_journal, account=self.cash_account,
+            partner=self.customer, debit=Decimal("1000.00"), credit=Decimal("0"),
+        )
+        payment_journal = JournalHeader.objects.create(
+            tenant=self.tenant, transaction_date=date(2026, 7, 3),
+            description="سند قبض تفصيلي", is_posted=True,
+        )
+        JournalLine.objects.create(
+            tenant=self.tenant, journal=payment_journal, account=self.cash_account,
+            partner=self.customer, debit=Decimal("0"), credit=Decimal("400.00"),
+        )
+        invoice = SalesInvoice.objects.create(
+            tenant=self.tenant, invoice_number="INV-INNER-1",
+            customer=self.customer, invoice_date=date(2026, 7, 2),
+            invoice_type="credit", status="posted", currency=self.currency,
+            exchange_rate=Decimal("1"), grand_total=Decimal("1000.00"),
+            amount_paid=Decimal("400.00"), journal=invoice_journal,
+        )
+        payment = CustomerPayment.objects.create(
+            tenant=self.tenant, partner=self.customer, payment_date=date(2026, 7, 3),
+            amount=Decimal("400.00"), currency=self.currency,
+            cash_or_bank_account=self.cash_account, journal=payment_journal, is_posted=True,
+            notes="سند قبض مرتبط",
+        )
+        PaymentAllocation.objects.create(
+            tenant=self.tenant, payment=payment, invoice=invoice,
+            amount=Decimal("400.00"), amount_in_invoice_currency=Decimal("400.00"),
+            conversion_rate=Decimal("1"),
+        )
+
+        response = self.client.get(
+            f"/api/sales/invoices/{invoice.id}/", **self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.content[:300])
+        data = response.json()
+        self.assertEqual(Decimal(data["customer_balance"]), Decimal("800.00"))
+        self.assertEqual(Decimal(data["customer_balance_before_invoice"]), Decimal("200.00"))
+        self.assertEqual(Decimal(data["customer_balance_after_invoice"]), Decimal("800.00"))
+        self.assertEqual(data["payment_status"], "partially_paid")
+        self.assertEqual(Decimal(data["amount_paid"]), Decimal("400.00"))
+        self.assertEqual(Decimal(data["remaining_balance"]), Decimal("600.00"))
+        self.assertEqual(len(data["payment_details"]), 1)
+        self.assertEqual(data["payment_details"][0]["id"], payment.id)
+        self.assertEqual(Decimal(data["payment_details"][0]["allocated_amount"]), Decimal("400.00"))
+        self.assertTrue(data["payment_details"][0]["is_posted"])
+        self.assertEqual(data["payment_details"][0]["journal"], payment_journal.id)
+
     def test_quotation_server_filters_apply_before_pagination(self):
         response = self.client.get(
             "/api/sales/quotations/?page=1&page_size=3&search=QT-BOUND&status=sent"
@@ -139,6 +273,8 @@ class SalesListPaginationFilterTest(APITestCase):
         self.assertLessEqual(len(payload["results"]), 3)
         self.assertEqual(payload["count"], 4)
         self.assertTrue(all(row["status"] == "sent" for row in payload["results"]))
+        # كرت الزبون كان يعرض المفتاح الخام («sent») — الحالة تأتي معرَّبة كالطلبية.
+        self.assertTrue(all(row["status_display"] == "أُرسل" for row in payload["results"]))
 
     @staticmethod
     def _result_ids(response):

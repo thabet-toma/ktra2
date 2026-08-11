@@ -8,6 +8,7 @@ import { List, Eye, CheckCircle, XCircle, Clock, FileText, RefreshCw, Plus } fro
 import { AllSubmissionsView } from './tasks/AllSubmissionsView';
 import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from './aseel/useAseelIndexKeymap';
+import { formatDateLocalized } from "../utils/formatDate";
 
 interface TaskManagementProps {
     allTasks: Task[];
@@ -96,7 +97,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
 
     if (viewMode === 'submissions' && selectedTaskForSubmissions && onUpdateSubmissionStatus) {
         return (
-            <div dir="rtl" data-skin="aseel" style={{ padding: '8px 12px' }}>
+            <div dir="rtl" style={{ padding: '8px 12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                     <button className="aseel-toolbtn" onClick={() => { setViewMode('list'); setSelectedTaskForSubmissions(null); }}>← رجوع</button>
                     <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>
@@ -167,7 +168,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
             width: '100px',
             render: (t) => {
                 const isOverdue = new Date(t.dueDate) < new Date();
-                return <span style={{ color: isOverdue ? 'var(--aseel-danger, #c00)' : 'inherit' }}>{t.dueDate}</span>;
+                return <span style={{ color: isOverdue ? 'var(--aseel-danger, #c00)' : 'inherit' }}>{formatDateLocalized(t.dueDate)}</span>;
             },
         },
         {
@@ -201,7 +202,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
     ];
 
     return (
-        <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
+        <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
             {/* شريط العنوان */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
                 <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>إدارة المهام</strong>

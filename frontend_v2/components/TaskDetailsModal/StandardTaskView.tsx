@@ -7,6 +7,7 @@ import { TaskImagesGallery } from "../common/TaskImagesGallery";
 import { SubmissionHistoryList } from "../common/SubmissionHistoryList";
 import { formatMillisecondsToWords } from "../utils/formatters";
 import { StatusBadge } from "../TaskCard";
+import { formatDateTimeValue } from "../../utils/formatDate";
 import { TaskDetailsModalProps } from "./TaskDetailsModal.types";
 import SubmissionForm from "../modals/SubmissionForm";
 import { getUserTaskStatus } from "../modals/TaskDetailsModal.helpers";
@@ -114,16 +115,16 @@ export const StandardTaskView: React.FC<StandardViewProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-40 flex items-start sm:items-center justify-center p-0 sm:p-4 animate-fade-in overflow-y-auto" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 w-full max-w-4xl transform transition-all flex flex-col mt-4 sm:mt-0 max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] sm:rounded-2xl shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-[var(--color-surface)] w-full max-w-4xl transform transition-all flex flex-col mt-4 sm:mt-0 max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] sm:rounded-2xl shadow-xl" onClick={(e) => e.stopPropagation()}>
         
         {/* Header */}
-        <header className="flex justify-between items-center p-4 sm:p-5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 bg-white dark:bg-gray-800 sm:rounded-t-2xl sticky top-0 z-10">
+        <header className="flex justify-between items-center p-4 sm:p-5 border-b border-[var(--color-border)] flex-shrink-0 bg-[var(--color-surface)] sm:rounded-t-2xl sticky top-0 z-10">
            <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0">
              {/* زر العودة للوحة القيادة */}
              {onBackToDashboard && (
                <button 
                  onClick={onBackToDashboard}
-                 className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition text-gray-700 dark:text-gray-300"
+                 className="p-2 bg-[var(--color-surface-3)] rounded-full hover:bg-[var(--color-surface-3)] transition text-[var(--color-text)]"
                  title="العودة لجميع التسليمات"
                >
                  <LayoutDashboard className="w-5 h-5" />
@@ -131,9 +132,9 @@ export const StandardTaskView: React.FC<StandardViewProps> = ({
              )}
              
              <div className="space-y-1 overflow-hidden">
-               <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-100 truncate flex items-center gap-2">
+               <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-[var(--color-text)] truncate flex items-center gap-2">
                  {task.title}
-                 {selectedUser.id !== user.id && <span className="text-sm font-normal text-gray-500">({selectedUser.name})</span>}
+                 {selectedUser.id !== user.id && <span className="text-sm font-normal text-[var(--color-text-muted)]">({selectedUser.name})</span>}
                </h2>
                <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
                  <StatusBadge status={selectedUserTaskStatus.status} />
@@ -141,15 +142,15 @@ export const StandardTaskView: React.FC<StandardViewProps> = ({
                </div>
              </div>
            </div>
-           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl px-2">&times;</button>
+           <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] text-2xl px-2">&times;</button>
         </header>
 
         {/* User Selector for Admins */}
         {isReviewer && assignedUsers.length > 0 && (
-          <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700 sticky top-[73px] z-10">
+          <div className="px-4 py-3 bg-[var(--color-surface-2)] border-b border-[var(--color-border)] sticky top-[73px] z-10">
              <div className="flex flex-wrap gap-2">
                {assignedUsers.map(u => (
-                 <button key={u.id} onClick={() => setSelectedUserId(u.id)} className={`px-3 py-1 rounded-full text-xs transition ${selectedUserId === u.id ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-700"}`}>
+                 <button key={u.id} onClick={() => setSelectedUserId(u.id)} className={`px-3 py-1 rounded-full text-xs transition ${selectedUserId === u.id ? "bg-blue-600 text-white" : "bg-[var(--color-surface-3)] text-[var(--color-text)]"}`}>
                     {u.name} {u.id === user.id && " (أنت)"}
                  </button>
                ))}
@@ -162,8 +163,8 @@ export const StandardTaskView: React.FC<StandardViewProps> = ({
            {/* Task Info Column */}
            <div className="space-y-6">
               <div>
-                 <h3 className="text-lg font-bold mb-2 text-gray-800 dark:text-gray-100 border-b pb-1">تفاصيل المهمة</h3>
-                 <div className="divide-y divide-gray-200 dark:divide-gray-700 text-sm">
+                 <h3 className="text-lg font-bold mb-2 text-[var(--color-text)] border-b pb-1">تفاصيل المهمة</h3>
+                 <div className="divide-y divide-[var(--color-border)] text-sm">
                     <DetailRow label="الوقت المنقضي" value={
                         <div className="flex items-center gap-2">
                             <span>{formatMillisecondsToWords(getCurrentElapsedTime())}</span>
@@ -172,7 +173,7 @@ export const StandardTaskView: React.FC<StandardViewProps> = ({
                     } />
                     <DetailRow label="تاريخ التسليم" value={task.dueDate} />
                  </div>
-                 <p className="mt-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm whitespace-pre-wrap">{task.description}</p>
+                 <p className="mt-3 p-3 bg-[var(--color-surface-2)] rounded-lg text-sm whitespace-pre-wrap">{task.description}</p>
                  <TaskImagesGallery images={task.images || []} />
                  {selectedUserTaskStatus.status === "rejected" && task.rejectReason && (
                     <div className="mt-3 p-3 bg-red-50 text-red-800 rounded-lg border border-red-300">
@@ -216,23 +217,23 @@ export const StandardTaskView: React.FC<StandardViewProps> = ({
 
            {/* Activity Log Column */}
            <div className="border-t md:border-t-0 md:border-r md:pr-4 pt-4 md:pt-0">
-              <h3 className="text-lg font-bold mb-3 text-gray-800 dark:text-gray-100">سجل النشاط</h3>
+              <h3 className="text-lg font-bold mb-3 text-[var(--color-text)]">سجل النشاط</h3>
               <ul className="space-y-4 text-sm max-h-[300px] md:max-h-full overflow-y-auto">
                  {(task.logs || []).slice().reverse().map(log => (
-                    <li key={log.id} className="relative pr-4 border-r-2 border-gray-200">
+                    <li key={log.id} className="relative pr-4 border-r-2 border-[var(--color-border)]">
                        <div className="absolute -right-[5px] top-1 w-2 h-2 bg-blue-500 rounded-full"></div>
                        <p className="font-bold">{usersMap[log.userId] || "System"}</p>
-                       <span className="text-xs text-gray-500 block mb-1">{new Date(log.timestamp).toLocaleString()}</span>
-                       <p className="text-gray-600">{log.action} {log.newValue && `: ${log.newValue}`}</p>
+                       <span className="text-xs text-[var(--color-text-muted)] block mb-1">{formatDateTimeValue(log.timestamp)}</span>
+                       <p className="text-[var(--color-text-muted)]">{log.action} {log.newValue && `: ${log.newValue}`}</p>
                     </li>
                  ))}
               </ul>
            </div>
         </main>
 
-        <footer className="p-4 bg-gray-50 border-t flex flex-col sm:flex-row gap-3">
+        <footer className="p-4 bg-[var(--color-surface-2)] border-t flex flex-col sm:flex-row gap-3">
            <div className="w-full sm:flex-1">{renderActionButtons()}</div>
-           <button onClick={onClose} className="bg-gray-200 text-gray-800 font-bold py-3 px-6 rounded-lg hover:bg-gray-300">إغلاق</button>
+           <button onClick={onClose} className="bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold py-3 px-6 rounded-lg hover:bg-gray-300">إغلاق</button>
         </footer>
       </div>
     </div>

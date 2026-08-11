@@ -67,13 +67,13 @@ export const CustomerQuickAddModal: React.FC<Props> = ({ isOpen, onClose, onSave
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
       dir="rtl"
     >
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md border border-gray-200 dark:border-gray-700">
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+      <div className="bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-md border border-[var(--color-border)]">
+        <div className="p-4 border-b border-[var(--color-border)] flex justify-between items-center">
+          <h2 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
             <UserPlus className="w-5 h-5 text-blue-500" />
             إضافة عميل جديد
           </h2>
-          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-full">
+          <button onClick={onClose} className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] rounded-full">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -92,7 +92,7 @@ export const CustomerQuickAddModal: React.FC<Props> = ({ isOpen, onClose, onSave
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); }}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500"
               placeholder="اسم العميل"
             />
           </div>
@@ -100,25 +100,25 @@ export const CustomerQuickAddModal: React.FC<Props> = ({ isOpen, onClose, onSave
             <div>
               <label className="block text-sm font-medium mb-1">الهاتف</label>
               <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" />
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">حد الائتمان</label>
               <input type="number" value={creditLimit} onChange={(e) => setCreditLimit(e.target.value)}
                 placeholder="0.00"
-                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" />
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">البريد الإلكتروني</label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" />
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500" />
           </div>
         </div>
 
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
+        <div className="p-4 border-t border-[var(--color-border)] flex justify-end gap-2">
           <button onClick={onClose}
-            className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 font-medium">
+            className="px-4 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] rounded-lg hover:bg-[var(--color-surface-2)] font-medium">
             إلغاء
           </button>
           <button onClick={handleSave} disabled={saving}

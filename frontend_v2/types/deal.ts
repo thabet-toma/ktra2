@@ -156,6 +156,8 @@ export interface Deal {
     shippingWorkflowStatus?: ShippingWorkflowStatus | null;
     /** الشحنة المرتبطة (إن وُجدت) — لعرض خريطة المسار ورابط رحلة الاستيراد */
     linkedShipment?: { id: number; shipmentNumber: string; shipmentName: string } | null;
+    /** فاتورة الشراء الناتجة عن تحويل الصفقة (إن وُجدت) — لرابط «فتح الفاتورة» بجانب حالة «محوّلة» */
+    linkedInvoice?: { id: number; invoiceNumber: string } | null;
     installments: DealInstallment[];
     installmentPlanEnabled: boolean;
     currentInstallmentNumber?: number;
@@ -164,8 +166,13 @@ export interface Deal {
     totalAmount: number;
     remainingAmount: number;
     postedPaidAmount?: number;
+    unpostedRegisteredAmount?: number;
     amountOutstanding?: number;
     supplierAdvance?: number;
+    paymentStatusSummary?: 'paid' | 'partially_paid' | 'unpaid';
+    supplierBalanceCurrent?: number;
+    supplierBalanceBeforeDealPayments?: number;
+    supplierBalanceAfterDealPayments?: number;
     subtotal: number;
     shippingCost: number;
     shippingIncluded: boolean;

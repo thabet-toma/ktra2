@@ -10,6 +10,7 @@ import {
 import type { AseelToolbarAction, AseelTab, DenseColumn, ReportColumn } from "../aseel";
 import { Plus, Search, FileText } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 // Placeholder type for future VAT statements (N8-T13 backend not yet done)
 interface VatStatement {
@@ -79,7 +80,7 @@ export const VatStatementsPage: React.FC = () => {
     : [];
 
   const previewColumns: ReportColumn<VatLine>[] = [
-    { key: "date", header: "التاريخ", render: (r) => r.date || "—" },
+    { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) || "—" },
     { key: "vat_type", header: "نوع", render: (r) => r.vat_type },
     { key: "journal_id", header: "رقم", render: (r) => `#${r.journal_id}` },
     { key: "description", header: "البيان", render: (r) => r.description },
@@ -182,7 +183,7 @@ export const VatStatementsPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="كشوف الضريبة المضافة"
         actions={shellActions}

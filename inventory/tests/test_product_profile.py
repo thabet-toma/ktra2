@@ -252,3 +252,86 @@ class ProductProfileEndpointTest(APITestCase):
         assert r.status_code == 200, r.content
         body = r.json()
         assert "invoices" in body and "average_cost" in body
+
+
+def test_profile_exposes_sale_price_and_margin(env):
+    """كرت الصنف: «سعر البيع» حقل محفوظ بجانب «سعر التكلفة»، والربح والهامش
+    مشتقّان منهما — لا تُحسب في الواجهة فيختلف رقمان لحقيقة واحدة."""
+    tenant, _ils, sup, product = env
+    inv = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number="P-SP", partner=sup, currency=_ils,
+        invoice_date="2026-06-01", is_posted=True)
+    PurchaseInvoiceItem.objects.create(
+        invoice=inv, product=product, name="صنف",
+        quantity=Decimal("10"), unit_price=Decimal("100"), total_price=Decimal("1000"))
+    set_avg_cost_from_purchases(product)
+    product.sale_price = Decimal("150")
+    product.save(update_fields=["sale_price"])
+
+    prof = product_profile(tenant_id=tenant.TenantID, product_id=product.id)
+    assert Decimal(prof["sale_price"]) == Decimal("150")
+    assert Decimal(prof["avg_cost"]) == Decimal("100")
+    assert Decimal(prof["profit_per_unit"]) == Decimal("50")
+    assert Decimal(prof["profit_margin_pct"]) == Decimal("33.33")
+    assert prof["sale_price_source"] == "product"
+    # آخر سعر شراء من الفاتورة المرحّلة (لا من متوسط التكلفة)
+    assert Decimal(prof["last_purchase_price"]) == Decimal("100")
+
+
+def test_profile_sale_price_falls_back_to_last_invoice(env):
+    """بلا سعر بيع محفوظ: البطاقة تعرض آخر سعر بيع فعلي كسعر معتمد وتوسمه بمصدره."""
+    from datetime import date
+
+    from partners.models import Partner as _Partner
+    from sales.models import SalesInvoice, SalesInvoiceLine
+
+    tenant, ils, _sup, product = env
+    customer = _Partner.objects.create(
+        tenant=tenant, name="زبون السعر", partner_type="Customer")
+    sinv = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="S-SP", customer=customer, currency=ils,
+        invoice_date=date(2026, 6, 10), status=SalesInvoice.STATUS_POSTED)
+    SalesInvoiceLine.objects.create(
+        tenant=tenant, invoice=sinv, product=product,
+        quantity=Decimal("1"), unit_price=Decimal("180"))
+
+    prof = product_profile(tenant_id=tenant.TenantID, product_id=product.id)
+    assert prof["sale_price"] is None
+    assert Decimal(prof["last_sale_price"]) == Decimal("180")
+    assert Decimal(prof["effective_sale_price"]) == Decimal("180")
+    assert prof["sale_price_source"] == "last_invoice"
+
+
+def test_product_profile_exposes_active_reservation(env):
+    """T-RESERVE: كرت الصنف يُظهر المحجوز والمتاح — الحجز لا يُرى إلا إن عُرض.
+
+    الحجز مشتقّ من طلبيات مؤكَّدة سارية (`sales.reserved_quantity_map`) — نفس
+    مصدر جدول الأصناف، فلا رقمان لحقيقة واحدة.
+    """
+    from datetime import date, timedelta
+
+    from partners.models import Partner as _Partner
+    from sales.models import SalesOrder, SalesOrderLine
+
+    tenant, ils, _sup, product = env
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("10"),
+        unit_cost=Decimal("5"), movement_date="2026-06-01", tenant=tenant)
+
+    profile = product_profile(tenant_id=tenant.TenantID, product_id=product.id)
+    assert Decimal(profile["reserved_quantity"]) == Decimal("0")
+    assert Decimal(profile["available_quantity"]) == Decimal("10")
+
+    customer = _Partner.objects.create(
+        tenant=tenant, name="زبون الحجز", partner_type="Customer")
+    order = SalesOrder.objects.create(
+        tenant=tenant, order_number="ORD-RES-1", customer=customer, currency=ils,
+        order_date=date.today(), status=SalesOrder.STATUS_CONFIRMED,
+        reserved_until=date.today() + timedelta(days=7))
+    SalesOrderLine.objects.create(
+        tenant=tenant, order=order, product=product,
+        quantity=Decimal("3"), unit_price=Decimal("20"))
+
+    profile = product_profile(tenant_id=tenant.TenantID, product_id=product.id)
+    assert Decimal(profile["reserved_quantity"]) == Decimal("3")
+    assert Decimal(profile["available_quantity"]) == Decimal("7")

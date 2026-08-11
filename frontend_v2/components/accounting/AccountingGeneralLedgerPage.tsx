@@ -8,6 +8,8 @@ import {
 } from "../aseel";
 import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
 import { Search } from "lucide-react";
+import { formatDateLocalized } from "../../utils/formatDate";
+import { AccountTreeField } from "./AccountTreePicker";
 
 type LedgerRow = GeneralLedgerResponse["transactions"][number];
 
@@ -102,7 +104,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
   const ledgerRows: LedgerRow[] = data?.transactions || [];
 
   const columns: ReportColumn<LedgerRow>[] = [
-    { key: "date", header: "التاريخ", render: (r) => r.date },
+    { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) },
     { key: "journal_id", header: "رقم القيد", render: (r) => `#${r.journal_id}` },
     { key: "description", header: "البيان", render: (r) => r.description },
     { key: "debit", header: "مدين", numeric: true, render: (r) => fmt(Number(r.debit)) },
@@ -123,12 +125,12 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
       <div className="aseel-field" style={{ flex: "1", minWidth: "200px" }}>
         <label className="aseel-field-label">الحساب</label>
-        <select className="aseel-input" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-          <option value="">— اختر —</option>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
-          ))}
-        </select>
+        <AccountTreeField
+          accounts={accounts}
+          value={accountId === "" ? "" : Number(accountId)}
+          onChange={(id) => setAccountId(id == null ? "" : String(id))}
+          title="اختيار الحساب من الشجرة"
+        />
       </div>
       <div className="aseel-field">
         <label className="aseel-field-label">من</label>
@@ -195,7 +197,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="الأستاذ العام"
         actions={shellActions}

@@ -30,8 +30,8 @@ export const TasksDistributionChart: React.FC<TasksDistributionChartProps> = ({ 
     }, [tasks]);
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 h-[400px]">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">توزيع المهام</h3>
+        <div className="bg-[var(--color-surface)] rounded-2xl shadow-sm border border-[var(--color-border)] p-6 h-[400px]">
+            <h3 className="text-lg font-bold text-[var(--color-text)] mb-4">توزيع المهام</h3>
             <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                     <Pie

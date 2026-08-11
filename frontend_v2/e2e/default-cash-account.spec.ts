@@ -1,26 +1,64 @@
 import { test, expect } from '@playwright/test';
 
 test('New Customer Payment modal selects default cash account from purchase settings', async ({ page }) => {
-  // Go to purchase settings and set a default cash account first?
-  // Or just go to customer payments and expect it not to be empty.
-  await page.goto('http://localhost:3000/sales/customer-payments');
-  
-  // Open the modal
-  const newPaymentBtn = page.locator('button:has-text("دفعة جديدة")');
-  await newPaymentBtn.waitFor({ state: 'visible', timeout: 15000 });
-  await newPaymentBtn.click();
+  const requestedPaths: string[] = [];
 
-  // Find the cash account select
-  const cashSelect = page.locator('select').nth(3); // The fourth select based on the DOM order: Partner, Currency, Cash Account
-  // Actually, we can locate it by label
-  const cashSelectLabel = page.locator('label', { hasText: 'الصندوق / البنك' });
-  const cashSelectByLabel = cashSelectLabel.locator('..').locator('select');
+  await page.addInitScript(() => {
+    localStorage.setItem('token', 'default-cash-account-e2e-token');
+    localStorage.setItem('userId', 'default-cash-account-e2e-user');
+    localStorage.setItem('tenantId', '1');
+  });
+  await page.route('**/*', async (route) => {
+    const url = new URL(route.request().url());
+    const isApi = url.hostname === 'api.smart.ktragroup.com'
+      || url.port === '8000'
+      || url.pathname.startsWith('/api/');
+    if (!isApi) return route.continue();
 
-  // Since it should be prefilled from settings, it should not have the value "" (which is "اختر...")
-  const value = await cashSelectByLabel.inputValue();
-  
-  // The test might fail initially if the code is not implemented (will be "")
-  // Once implemented, if the backend has a default, it will be the default ID.
-  // Note: if backend has NO default, this test might still fail. We assume there's a default.
-  expect(value).not.toBe("");
+    requestedPaths.push(url.pathname);
+    let body: unknown = [];
+    if (url.pathname.endsWith('/hr/users/default-cash-account-e2e-user/')) {
+      body = {
+        id: 'default-cash-account-e2e-user',
+        name: 'Default Cash Account Tester',
+        role: 'manager',
+        email: 'default-cash-account@example.test',
+        employmentStatus: 'active',
+        isApproved: true,
+        isEmailVerified: true,
+      };
+    } else if (url.pathname.endsWith('/accounting/accounts/')) {
+      body = [
+        { id: 411, code: '110001', name: 'صندوق احتياطي', account_type: 'cash' },
+        { id: 412, code: '110002', name: 'الصندوق الافتراضي للاختبار', account_type: 'cash' },
+      ];
+    } else if (url.pathname.endsWith('/accounting/currencies/')) {
+      body = [{ CurrencyID: 1, Code: 'ILS', Name: 'شيكل' }];
+    } else if (url.pathname.endsWith('/sales/settings/current/')) {
+      // Force the page to exercise its documented purchase-settings fallback.
+      body = { default_cash_account: null };
+    } else if (url.pathname.endsWith('/logistics/purchase-settings/current/')) {
+      body = {
+        purchase_default_price_strategy: 'last_purchase',
+        default_cash_account: 412,
+      };
+    }
+
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(body),
+    });
+  });
+
+  await page.goto('/sales/customer-payments');
+  await expect.poll(() => requestedPaths).toContain('/api/sales/settings/current/');
+  await expect.poll(() => requestedPaths).toContain('/api/logistics/purchase-settings/current/');
+
+  await page.getByRole('button', { name: 'دفعة جديدة', exact: true }).click();
+
+  const cashSelect = page.getByText('الصندوق / البنك *', { exact: true })
+    .locator('..')
+    .locator('select');
+  await expect(cashSelect).toHaveValue('412');
+  await expect(cashSelect.locator('option:checked')).toHaveText('110002 الصندوق الافتراضي للاختبار');
 });

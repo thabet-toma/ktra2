@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { PriceOffer, Supplier, PriceOfferStatus } from '../../../types';
 import { formatMoney } from '../../../utils/formatNumber';
 import { StatusBadge } from './StatusBadge';
+import { formatDateValue, formatTimeValue } from "../../../utils/formatDate";
 import {
     FileText, Search, Plus, Calendar,
     Package, DollarSign, Edit2, Eye, CheckCircle, AlertCircle, Clock, MessageSquare,
@@ -212,13 +213,9 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        <tbody className="divide-y divide-[var(--color-border)]">
                             {filteredOffers.map((offer) => {
-                                const formattedDate = new Date(offer.createdAt).toLocaleDateString('ar-EG', {
-                                    year: 'numeric',
-                                    month: 'short',
-                                    day: 'numeric'
-                                });
+                                const formattedDate = formatDateValue(offer.createdAt);
 
                                 return (
                                     <tr
@@ -262,10 +259,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                             <div className="flex flex-col">
                                                 <span className="aseel-text-ink dark:text-white">{formattedDate}</span>
                                                 <span className="text-xs aseel-text-soft dark:aseel-text-soft">
-                                                    {new Date(offer.createdAt).toLocaleTimeString('ar-EG', {
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    })}
+                                                    {formatTimeValue(offer.createdAt)}
                                                 </span>
                                             </div>
                                         </td>

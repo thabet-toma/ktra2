@@ -18,6 +18,7 @@ import { apiGetList, apiPostObject, apiPatchObject } from "../../services/restAp
 import { formatMoney } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { accountingApi } from "../../services/accountingApi";
+import { clientLogger } from "../../services/logger";
 import {
   AseelDocumentShell,
   useRecordNavigation,
@@ -25,6 +26,7 @@ import {
   AseelTabs,
 } from "../aseel";
 import { RefreshCw } from "lucide-react";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 const tid = () => resolveTenantId();
 const BASE = "sales/credit-debit-notes";
@@ -132,7 +134,8 @@ export const CreditDebitNotesPage: React.FC = () => {
     try {
       const [ns, parts] = await Promise.all([
         apiGetList<NoteRow>(BASE, { tenantId: tid() }),
-        accountingApi.getPartners() as Promise<Partner[]>,
+        // T-PARTYPURE: الإشعار المدين/الدائن على حساب زبون — لا موردين في القائمة.
+        accountingApi.getPartners("Customer") as Promise<Partner[]>,
       ]);
       setNotes(ns || []);
       setPartners(parts || []);
@@ -218,7 +221,6 @@ export const CreditDebitNotesPage: React.FC = () => {
 
   return (
     <div
-      data-skin="aseel"
       style={{ minHeight: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
     >
     <AseelDocumentShell
@@ -291,11 +293,11 @@ export const CreditDebitNotesPage: React.FC = () => {
                   <td className="p-3 font-mono">{n.note_number}</td>
                   <td className="p-3">
                     <span className={`px-2 py-0.5 rounded text-xs ${n.note_type === "credit" ? "bg-green-100 text-green-700" : "aseel-bg-panel aseel-text-state"}`}>
-                      {n.note_type === "credit" ? "دائن" : "مدين"}
+                      {n.note_type === "credit" ? "دائن — ينقص على العميل" : "مدين — يزيد على العميل"}
                     </span>
                   </td>
                   <td className="p-3">{n.customer_name || "-"}</td>
-                  <td className="p-3">{n.note_date}</td>
+                  <td className="p-3">{formatDateLocalized(n.note_date)}</td>
                   <td className="p-3">{Number(n.amount).toLocaleString()}</td>
                   <td className="p-3">
                     <span className={`px-2 py-0.5 rounded text-xs ${statusColor(n.status)}`}>
@@ -338,17 +340,32 @@ export const CreditDebitNotesPage: React.FC = () => {
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium mb-1">النوع</label>
-                        <select value={formType} onChange={(e) => setFormType(e.target.value as "credit" | "debit")} className="w-full border rounded p-1.5 text-sm" data-aseel-key="1">
-                          <option value="credit">إشعار دائن</option>
-                          <option value="debit">إشعار مدين</option>
+                        <select
+                          aria-label="النوع"
+                          value={formType}
+                          onChange={(e) => {
+                            const value = e.target.value as "credit" | "debit";
+                            clientLogger.info("credit_debit_note.type_changed", { noteType: value });
+                            setFormType(value);
+                          }}
+                          className="w-full border rounded p-1.5 text-sm"
+                          data-aseel-key="1"
+                        >
+                          <option value="credit">إشعار دائن — ينقص المطلوب</option>
+                          <option value="debit">إشعار مدين — يزيد المطلوب</option>
                         </select>
+                      </div>
+                      <div className={`col-span-2 rounded border p-3 text-sm ${formType === "credit" ? "border-green-200 bg-green-50 text-green-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                        {formType === "credit"
+                          ? "ينقص المبلغ المطلوب من العميل — صار عليه أقل، مثل خصم أو مرتجع."
+                          : "يزيد المبلغ المطلوب من العميل — صار عليه أكثر، مثل مبلغ أو تكلفة إضافية."}
                       </div>
                       <div>
                         <label className="block text-xs font-medium mb-1">التاريخ</label>
                         <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded p-1.5 text-sm" />
                       </div>
                       <div className="col-span-2">
-                        <label className="block text-xs font-medium mb-1">الحساب (العميل/المورد)</label>
+                        <label className="block text-xs font-medium mb-1">العميل</label>
                         <select value={formCustomer} onChange={(e) => setFormCustomer(e.target.value)} className="w-full border rounded p-1.5 text-sm" data-aseel-key="1">
                           <option value="">-- اختر (+) --</option>
                           {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}

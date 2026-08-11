@@ -6,17 +6,24 @@
 - حسابات وكلاء الشحن/المخلصين/النقل المحلي كانت تُنشأ تحت
   قروض/مستحقات/ضريبة المخرجات (2102/2103/2104).
 """
+import importlib
 from decimal import Decimal
 
+from django.apps import apps as django_apps
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
 from accounting.cashbox import get_cash_box_parent_account
-from accounting.models import Account, Cheque, JournalLine
+from accounting.models import Account, Cheque, JournalHeader, JournalLine
 from accounting.services import create_fiscal_year, transfer_cheque
+from logistics.services import (
+    GR_IR_ACCOUNT_CODE,
+    GR_IR_ACCOUNT_NAME,
+    _resolve_gr_ir_account,
+)
 from partners.models import Partner
 from tenants.models import Currency
-from tenants.services import create_company, ensure_operational_accounts
+from tenants.services import COA_DATA, create_company, ensure_operational_accounts
 
 
 class OperationalAccountsTest(APITestCase):
@@ -30,6 +37,41 @@ class OperationalAccountsTest(APITestCase):
     def test_seed_contains_operational_accounts(self):
         codes = set(Account.objects.filter(tenant=self.tenant).values_list("code", flat=True))
         assert {"1107", "1110", "2106", "2107", "2108"} <= codes
+
+    def test_gr_ir_account_does_not_collide_with_seeded_freight_payables(self):
+        freight_payables = Account.objects.get(tenant=self.tenant, code="2106")
+        gr_ir = _resolve_gr_ir_account(self.tenant)
+        seeded_codes = {code for code, _name, _type, _parent in COA_DATA}
+
+        assert gr_ir != freight_payables
+        assert gr_ir.code == GR_IR_ACCOUNT_CODE
+        assert gr_ir.name == GR_IR_ACCOUNT_NAME
+        assert gr_ir.code not in seeded_codes
+
+    def test_gr_ir_data_migration_moves_only_clearing_references(self):
+        freight_payables = Account.objects.get(tenant=self.tenant, code="2106")
+        gr_ir_journal = JournalHeader.objects.create(
+            tenant=self.tenant, reference_type="PURCHASE_INVOICE", reference_id=91,
+        )
+        freight_journal = JournalHeader.objects.create(
+            tenant=self.tenant, reference_type="LOGISTICS_PAYMENT", reference_id=92,
+        )
+        gr_ir_line = JournalLine.objects.create(
+            tenant=self.tenant, journal=gr_ir_journal, account=freight_payables,
+            debit=Decimal("125.00"), credit=Decimal("0"),
+        )
+        freight_line = JournalLine.objects.create(
+            tenant=self.tenant, journal=freight_journal, account=freight_payables,
+            debit=Decimal("0"), credit=Decimal("80.00"),
+        )
+
+        migration = importlib.import_module("logistics.migrations.0068_split_gr_ir_account")
+        migration.split_gr_ir_account(django_apps, None)
+
+        gr_ir_line.refresh_from_db()
+        freight_line.refresh_from_db()
+        assert gr_ir_line.account.code == GR_IR_ACCOUNT_CODE
+        assert freight_line.account.code == "2106"
 
     def test_cashbox_parent_resolves_to_dedicated_node(self):
         parent = get_cash_box_parent_account(self.tenant)

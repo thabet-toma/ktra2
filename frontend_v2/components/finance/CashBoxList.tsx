@@ -6,6 +6,7 @@ import { accountingApi, type CashBoxLedgerLink } from '../../services/accounting
 import { CreateCashBoxModal } from './modals/CreateCashBoxModal';
 import { EditCashBoxModal } from './modals/EditCashBoxModal';
 import { FundFxBoxModal } from './modals/FundFxBoxModal';
+import { formatDateValue } from "../../utils/formatDate";
 
 interface CashBoxListProps {
     onSelectCashBox: (cashBox: CashBox) => void;
@@ -57,7 +58,7 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold dark:text-white">صناديق الكاش</h1>
-                    <p className="text-gray-500 dark:text-gray-400">
+                    <p className="text-[var(--color-text-muted)]">
                         كل صندوق له حساب نقدية في شجرة المحاسبة بنفس الاسم — يُستخدم في قيود الدفع.
                     </p>
                 </div>
@@ -74,7 +75,7 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                 {cashBoxes.map((box) => (
                     <div
                         key={box.id}
-                        className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition cursor-pointer"
+                        className="bg-[var(--color-surface)] rounded-xl shadow-sm border border-[var(--color-border)] p-6 hover:shadow-md transition cursor-pointer"
                         onClick={() => onSelectCashBox(box)}
                     >
                         <div className="flex justify-between items-start mb-4">
@@ -100,7 +101,7 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                                     <button
                                         type="button"
                                         title="تعديل الصندوق"
-                                        className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300"
+                                        className="p-2 rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             setEditBox(box);
@@ -130,21 +131,21 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                                 <span className="font-mono">{ledgerByExt[box.id].account_code}</span>
                             </p>
                         ) : (
-                            <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">
+                            <p className="text-xs text-[var(--color-text-muted)] mb-1">
                                 بلا حساب في الشجرة
                             </p>
                         )}
-                        <p className="text-sm text-gray-500 mb-4">تم الإنشاء: {new Date(box.createdAt).toLocaleDateString('ar-EG')}</p>
+                        <p className="text-sm text-[var(--color-text-muted)] mb-4">تم الإنشاء: {formatDateValue(box.createdAt)}</p>
 
-                        <div className="flex justify-between items-end border-t border-gray-100 dark:border-gray-700 pt-4">
+                        <div className="flex justify-between items-end border-t border-[var(--color-border)] pt-4">
                             <div>
-                                <p className="text-xs text-gray-400 mb-1">الرصيد الحالي</p>
-                                <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                                <p className="text-xs text-[var(--color-text-muted)] mb-1">الرصيد الحالي</p>
+                                <p className="text-2xl font-bold text-[var(--color-text)]">
                                     {/* task16 E16: الرصيد من دفتر الأستاذ (إن وُجد حساب مربوط) بدل الرصيد المخزّن الذي يبقى صفراً */}
                                     {(ledgerByExt[box.id]?.balance != null
                                         ? Number(ledgerByExt[box.id].balance)
                                         : box.currentBalance
-                                    ).toLocaleString()} <span className="text-sm font-normal text-gray-500">{box.currency}</span>
+                                    ).toLocaleString()} <span className="text-sm font-normal text-[var(--color-text-muted)]">{box.currency}</span>
                                 </p>
                             </div>
                             <div className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center">
@@ -155,7 +156,7 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                 ))}
 
                 {cashBoxes.length === 0 && (
-                    <div className="col-span-full flex flex-col items-center justify-center p-12 text-gray-400 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl">
+                    <div className="col-span-full flex flex-col items-center justify-center p-12 text-[var(--color-text-muted)] border-2 border-dashed border-[var(--color-border)] rounded-xl">
                         <Wallet className="w-12 h-12 mb-4 opacity-50" />
                         <p>لا توجد صناديق كاش حالياً</p>
                         <button

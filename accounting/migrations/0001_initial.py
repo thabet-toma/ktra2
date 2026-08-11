@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'chartofaccounts',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -42,7 +42,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'accounting_audit_logs',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -56,7 +56,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'fiscal_periods',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -71,7 +71,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'journal_headers',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -84,7 +84,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'journal_lines',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(

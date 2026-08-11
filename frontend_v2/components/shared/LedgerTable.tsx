@@ -8,7 +8,7 @@
  */
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { invoicePathForReference } from "../../utils/entityLinks";
+import { entityPathForReference } from "../../utils/entityLinks";
 
 export interface LedgerColumn<Row = Record<string, unknown>> {
   key: string;
@@ -28,6 +28,14 @@ export interface LedgerTableProps<Row = Record<string, unknown>> {
   onPage?: (newOffset: number) => void;
   emptyText?: string;
   summaryRow?: React.ReactNode;
+  /** تمييز لوني للصف حسب نوع الحركة (كشف الحساب: فاتورة أحمر، سند أخضر). */
+  rowClassName?: (row: Row) => string;
+  /**
+   * مفتاح الربط: الصفوف ذات المفتاح نفسه تُعرَض متجاورة داخل إطار واحد
+   * (فاتورة + سندها). مرساة كل مجموعة موضع أول ظهور لها فيبقى ترتيب الصفحة
+   * محفوظاً، والصف بلا مفتاح يبقى مفرداً بلا إطار.
+   */
+  rowGroupKey?: (row: Row) => string | null | undefined;
 }
 
 /** خلية مرجع مستند قابلة للنقر — مصدر حقيقة واحد لكل البطاقات. */
@@ -37,7 +45,7 @@ export const DocRefCell: React.FC<{
   label?: React.ReactNode;
 }> = ({ referenceType, referenceId, label }) => {
   const navigate = useNavigate();
-  const path = invoicePathForReference(referenceType, referenceId);
+  const path = entityPathForReference(referenceType, referenceId);
   const text = label ?? (referenceId != null ? `#${referenceId}` : "—");
   if (!path) return <span>{text}</span>;
   return (
@@ -62,10 +70,42 @@ export function LedgerTable<Row = Record<string, unknown>>({
   onPage,
   emptyText = "لا توجد حركات.",
   summaryRow,
+  rowClassName,
+  rowGroupKey,
 }: LedgerTableProps<Row>) {
   const canPaginate = onPage != null && limit != null && count != null;
   const hasPrev = canPaginate && offset > 0;
   const hasNext = canPaginate && offset + (limit ?? 0) < (count ?? 0);
+
+  // الصفوف مجمَّعة بالمفتاح مع الحفاظ على ترتيب أول ظهور لكل مجموعة.
+  const groups = React.useMemo(() => {
+    const order: string[] = [];
+    const map = new Map<string, Row[]>();
+    rows.forEach((row, i) => {
+      const key = (rowGroupKey ? rowGroupKey(row) : null) || `__solo_${i}`;
+      if (!map.has(key)) {
+        map.set(key, []);
+        order.push(key);
+      }
+      map.get(key)!.push(row);
+    });
+    return order.map((key) => ({ key, rows: map.get(key)! }));
+  }, [rows, rowGroupKey]);
+
+  const renderRow = (row: Row, key: React.Key) => (
+    <tr
+      key={key}
+      className={`border-b border-[var(--aseel-border)] hover:bg-black/5 ${
+        rowClassName ? rowClassName(row) : ""
+      }`}
+    >
+      {columns.map((c) => (
+        <td key={c.key} style={{ textAlign: c.align ?? "right" }} className="px-2 py-1">
+          {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? "")}
+        </td>
+      ))}
+    </tr>
+  );
 
   return (
     <div className="aseel-dense-table overflow-x-auto" dir="rtl">
@@ -83,39 +123,43 @@ export function LedgerTable<Row = Record<string, unknown>>({
             ))}
           </tr>
         </thead>
-        <tbody>
-          {loading ? (
-            <tr>
-              <td colSpan={columns.length} className="p-4 text-center text-[var(--aseel-ink-soft)]">
-                جاري التحميل…
-              </td>
-            </tr>
-          ) : error ? (
-            <tr>
-              <td colSpan={columns.length} className="p-4 text-center text-[var(--aseel-danger)]">
-                {error}
-              </td>
-            </tr>
-          ) : rows.length === 0 ? (
-            <tr>
-              <td colSpan={columns.length} className="p-4 text-center text-[var(--aseel-ink-soft)]">
-                {emptyText}
-              </td>
-            </tr>
-          ) : (
-            rows.map((row, i) => (
-              <tr key={i} className="border-b border-[var(--aseel-border)] hover:bg-black/5">
-                {columns.map((c) => (
-                  <td key={c.key} style={{ textAlign: c.align ?? "right" }} className="px-2 py-1">
-                    {c.render
-                      ? c.render(row)
-                      : String((row as Record<string, unknown>)[c.key] ?? "")}
-                  </td>
-                ))}
+        {loading || error || rows.length === 0 ? (
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={columns.length} className="p-4 text-center text-[var(--aseel-ink-soft)]">
+                  جاري التحميل…
+                </td>
               </tr>
-            ))
-          )}
-        </tbody>
+            ) : error ? (
+              <tr>
+                <td colSpan={columns.length} className="p-4 text-center text-[var(--aseel-danger)]">
+                  {error}
+                </td>
+              </tr>
+            ) : (
+              <tr>
+                <td colSpan={columns.length} className="p-4 text-center text-[var(--aseel-ink-soft)]">
+                  {emptyText}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        ) : (
+          // كل مجموعة في <tbody> مستقل: المجموعة المترابطة تأخذ إطاراً يفصلها بصرياً.
+          groups.map((group) => (
+            <tbody
+              key={group.key}
+              className={
+                group.rows.length > 1
+                  ? "border-2 border-[var(--aseel-accent,#2563eb)]"
+                  : undefined
+              }
+            >
+              {group.rows.map((row, i) => renderRow(row, `${group.key}-${i}`))}
+            </tbody>
+          ))
+        )}
         {summaryRow && (
           <tfoot>
             {summaryRow}

@@ -31,15 +31,15 @@ export default function OfflineCoachmark() {
   return createPortal(
     <div className="fixed inset-0 z-[9999] bg-black/40 flex items-center justify-center p-4">
       <div
-        className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative"
+        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl max-w-md w-full p-6 relative"
         role="dialog"
         aria-modal="true"
         aria-labelledby="coachmark-title"
       >
-        <h2 id="coachmark-title" className="text-lg font-bold text-gray-800 mb-3">
+        <h2 id="coachmark-title" className="text-lg font-bold text-[var(--color-text)] mb-3">
           أنت الآن بدون اتصال
         </h2>
-        <p className="text-sm font-semibold text-gray-600 mb-3">ماذا يعمل / لا يعمل؟</p>
+        <p className="text-sm font-semibold text-[var(--color-text-muted)] mb-3">ماذا يعمل / لا يعمل؟</p>
         <div className="space-y-2 text-sm mb-4">
           <div className="flex items-center gap-2 text-green-700">
             <span>✅</span>
@@ -58,7 +58,7 @@ export default function OfflineCoachmark() {
             <span>توليد التقارير الضريبية</span>
           </div>
         </div>
-        <label className="flex items-center gap-2 text-xs text-gray-500 mb-4">
+        <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] mb-4">
           <input
             type="checkbox"
             checked={dontShowAgain}

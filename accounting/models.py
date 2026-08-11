@@ -259,7 +259,26 @@ class Cheque(models.Model):
     id = models.AutoField(primary_key=True, db_column='ChequeID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     cheque_number = models.CharField(max_length=50, db_column='ChequeNumber')
+    # T-BANKS: البنك المسحوب عليه صار كياناً مستقلاً؛ الحقول النصية تبقى
+    # لقطة (snapshot) للشيكات القديمة ولأي بنك غير مسجَّل.
+    bank = models.ForeignKey(
+        'Bank', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='BankID', related_name='cheques',
+        help_text='البنك المسحوب عليه الشيك',
+    )
+    bank_branch_ref = models.ForeignKey(
+        'BankBranch', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='BankBranchID', related_name='cheques',
+        help_text='فرع البنك المسحوب عليه',
+    )
+    deposit_bank_account = models.ForeignKey(
+        'BankAccount', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='DepositBankAccountID', related_name='cheques',
+        help_text='حساب الشركة البنكي الذي أُودع/صُرف منه الشيك',
+    )
     bank_name = models.CharField(max_length=100, null=True, blank=True, db_column='BankName')
+    account_number = models.CharField(max_length=50, null=True, blank=True, db_column='AccountNumber')
+    bank_branch = models.CharField(max_length=100, null=True, blank=True, db_column='BankBranch')
     amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount', default=0.00)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT, default=1, db_column='CurrencyID')
     due_date = models.DateField(db_column='DueDate', null=True, blank=True)
@@ -286,6 +305,14 @@ class Cheque(models.Model):
         db_column='CustomerPaymentID',
         related_name='cheques',
     )
+    # T-ONEPAY: شيك صادر داخل سند صرف (مرآة customer_payment للجانب الدائن).
+    supplier_payment = models.ForeignKey(
+        'sales.SupplierPayment',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column='SupplierPaymentID',
+        related_name='cheques',
+    )
     # P-H-1: link to purchase invoice (mirror of sales_invoice)
     purchase_invoice = models.ForeignKey(
         'logistics.PurchaseInvoice',
@@ -306,6 +333,14 @@ class Cheque(models.Model):
         'Bounced': ['Draft', 'Under_Collection', 'Returned'],
         'Returned': [],
     }
+
+    def save(self, *args, **kwargs):
+        """T-BANKS: لقطة اسم البنك/الفرع من السجل المرتبط للعرض التاريخي."""
+        if self.bank_id and not (self.bank_name or '').strip():
+            self.bank_name = (self.bank.name or '')[:100]
+        if self.bank_branch_ref_id and not (self.bank_branch or '').strip():
+            self.bank_branch = (self.bank_branch_ref.name or '')[:100]
+        super().save(*args, **kwargs)
 
     def change_status(self, new_status, *, notes='', user=None):
         """P-H-4: تغيير حالة الشيك مع تسجيل الحركة والتحقق من الانتقال الصحيح.
@@ -349,6 +384,9 @@ class ChequeMovement(models.Model):
     MOVEMENT_TYPES = [
         ('deposit', 'إيداع'),
         ('withdraw', 'صرف'),
+        # T-CHQ2: `transfer_cheque` تكتب 'collect' منذ task11 وهي ليست ضمن
+        # الخيارات، فيعرضها `get_movement_type_display` خاماً بالإنجليزية.
+        ('collect', 'تحصيل'),
         ('bounce', 'رفض'),
         ('return_to_customer', 'إرجاع للعميل'),
         ('settle', 'تسوية'),
@@ -466,6 +504,154 @@ class CashBoxFxLot(models.Model):
 
     def __str__(self):
         return f"Lot {self.id}: {self.remaining_fc}/{self.original_fc} @ {self.rate}"
+
+
+class Bank(models.Model):
+    """T-BANKS: بنك تتعامل معه الشركة — مظلّة لفروعه وحساباته.
+
+    البنك نفسه بلا حساب في الشجرة؛ الحسابات البنكية (BankAccount) هي ما يُربط
+    بحساب أستاذ تحت «1102 البنوك».
+    """
+
+    id = models.AutoField(primary_key=True, db_column='BankID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    name = models.CharField(max_length=150, db_column='Name')
+    code = models.CharField(max_length=30, null=True, blank=True, db_column='Code',
+                            help_text='رمز البنك المحلي (اختياري)')
+    swift_code = models.CharField(max_length=20, null=True, blank=True, db_column='SwiftCode')
+    country = models.CharField(max_length=80, null=True, blank=True, db_column='Country')
+    notes = models.TextField(null=True, blank=True, db_column='Notes')
+    is_active = models.BooleanField(default=True, db_column='IsActive')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'banks'
+        managed = True
+        unique_together = [['tenant', 'name']]
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class BankBranch(models.Model):
+    """فرع بنك — عنوان الفرع الذي يُفتح فيه الحساب أو يُسحب عليه الشيك."""
+
+    id = models.AutoField(primary_key=True, db_column='BankBranchID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    bank = models.ForeignKey(Bank, on_delete=models.CASCADE, db_column='BankID',
+                             related_name='branches')
+    name = models.CharField(max_length=150, db_column='Name')
+    branch_code = models.CharField(max_length=30, null=True, blank=True, db_column='BranchCode')
+    address = models.CharField(max_length=255, null=True, blank=True, db_column='Address')
+    phone = models.CharField(max_length=50, null=True, blank=True, db_column='Phone')
+    is_active = models.BooleanField(default=True, db_column='IsActive')
+
+    class Meta:
+        db_table = 'bank_branches'
+        managed = True
+        unique_together = [['bank', 'name']]
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.bank.name} — {self.name}"
+
+
+class BankAccount(models.Model):
+    """حساب الشركة لدى بنك — بعملته وحسابه في شجرة الحسابات.
+
+    الحساب في الشجرة (`account`) يُنشأ تلقائياً تحت «1102 البنوك» عند إنشاء
+    الحساب البنكي، فكل حركة بنكية تُرحَّل على حسابها الخاص لا على حساب عام.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='BankAccountID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    bank = models.ForeignKey(Bank, on_delete=models.PROTECT, db_column='BankID',
+                             related_name='accounts')
+    branch = models.ForeignKey(BankBranch, on_delete=models.SET_NULL, null=True, blank=True,
+                               db_column='BankBranchID', related_name='accounts')
+    name = models.CharField(max_length=150, db_column='Name',
+                            help_text='تسمية الحساب كما تظهر في الشجرة والتقارير')
+    account_number = models.CharField(max_length=50, null=True, blank=True, db_column='AccountNumber')
+    iban = models.CharField(max_length=50, null=True, blank=True, db_column='IBAN')
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, db_column='CurrencyID',
+                                 related_name='bank_accounts')
+    account = models.OneToOneField(Account, on_delete=models.PROTECT, db_column='AccountID',
+                                   related_name='bank_account')
+    is_default = models.BooleanField(default=False, db_column='IsDefault')
+    is_active = models.BooleanField(default=True, db_column='IsActive')
+    notes = models.TextField(null=True, blank=True, db_column='Notes')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        # `bank_accounts` محجوز لجدول legacy فارغ من السكيما الأصلية (بلا موديل
+        # ولا مستهلك) — لا نلمسه، فاسم جدولنا مستقل.
+        db_table = 'company_bank_accounts'
+        managed = True
+        ordering = ['bank__name', 'name']
+
+    def __str__(self):
+        return f"{self.bank.name} — {self.name} ({self.currency.Code})"
+
+
+class BankReconciliation(models.Model):
+    """مطابقة بنكية: كشف البنك مقابل الدفاتر حتى تاريخ معيّن.
+
+    الأسطر المؤشَّرة (BankReconciliationLine) هي حركات الدفاتر التي ظهرت في
+    كشف البنك. الفرق = رصيد الكشف − (رصيد الدفاتر المؤشَّر). لا تُغلق المطابقة
+    إلا بفرق صفر — كما في البرامج المهنية.
+    """
+
+    STATUS_OPEN = 'Open'
+    STATUS_CLOSED = 'Closed'
+    STATUS_CHOICES = [
+        (STATUS_OPEN, 'مفتوحة'),
+        (STATUS_CLOSED, 'مُقفلة'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='BankReconciliationID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    bank_account = models.ForeignKey(BankAccount, on_delete=models.CASCADE,
+                                     db_column='BankAccountID', related_name='reconciliations')
+    statement_date = models.DateField(db_column='StatementDate')
+    statement_balance = models.DecimalField(max_digits=18, decimal_places=2,
+                                            db_column='StatementBalance', default=0.00)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_OPEN,
+                              db_column='Status')
+    notes = models.TextField(null=True, blank=True, db_column='Notes')
+    created_by = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+                                   db_column='CreatedBy_UserID')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    closed_at = models.DateTimeField(null=True, blank=True, db_column='ClosedAt')
+
+    class Meta:
+        db_table = 'bank_reconciliations'
+        managed = True
+        ordering = ['-statement_date', '-id']
+
+    def __str__(self):
+        return f"مطابقة {self.bank_account_id} حتى {self.statement_date}"
+
+
+class BankReconciliationLine(models.Model):
+    """سطر دفاتر مؤشَّر أنه ظهر في كشف البنك.
+
+    `journal_line` فريد عالمياً: الحركة تُطابَق مرة واحدة فقط.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='BankReconciliationLineID')
+    reconciliation = models.ForeignKey(BankReconciliation, on_delete=models.CASCADE,
+                                       db_column='BankReconciliationID', related_name='lines')
+    journal_line = models.OneToOneField(JournalLine, on_delete=models.CASCADE,
+                                        db_column='JLineID', related_name='bank_reconciliation_line')
+    cleared_at = models.DateTimeField(auto_now_add=True, db_column='ClearedAt')
+
+    class Meta:
+        db_table = 'bank_reconciliation_lines'
+        managed = True
+
+    def __str__(self):
+        return f"سطر {self.journal_line_id} ← مطابقة {self.reconciliation_id}"
 
 
 class FiscalPeriod(models.Model):

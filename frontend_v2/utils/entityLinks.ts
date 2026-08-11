@@ -25,6 +25,53 @@ export function invoicePathForReference(
   return null;
 }
 
+/** مسار مستند/حركة من سجل النشاط أو كشف الحساب — مصدر تنقّل واحد. */
+export function entityPathForReference(
+  referenceType?: string | null,
+  referenceId?: number | null
+): string | null {
+  const invoicePath = invoicePathForReference(referenceType, referenceId);
+  if (invoicePath) return invoicePath;
+  if (referenceId == null) return null;
+  const t = (referenceType || "").toUpperCase();
+  if (t === "DEAL" || t === "LOGISTICS_DEAL") return `/deals/${referenceId}`;
+  if (t === "SHIPMENT" || t === "LOGISTICS_SHIPMENT") return `/import-flow/${referenceId}`;
+  if (t === "CUSTOMER_PAYMENT") return `/sales/customer-payments?payment_id=${referenceId}`;
+  if (t === "SUPPLIER_PAYMENT") return `/supplier-payments?payment_id=${referenceId}`;
+  return null;
+}
+
+export interface PlatformNoteTarget {
+  target_type: string;
+  target_id: string;
+  target_label: string;
+  target_path: string;
+}
+
+/** رابط داخلي آمن للتنقّل من إشعار؛ يُعاد فحصه أمامياً حتى لو عُدّلت بيانات الإشعار. */
+export function isSafeInternalPath(path: string): boolean {
+  return path.startsWith('/')
+    && !path.startsWith('//')
+    && !path.includes('\\')
+    && !Array.from(path).some((char) => char.charCodeAt(0) < 32);
+}
+
+/** هدف افتراضي لملاحظة عامة: الصفحة الحالية كاملةً، بما فيها معرّف السجل في query. */
+export function platformNoteTarget(
+  pathname: string,
+  search: string,
+  label: string,
+): PlatformNoteTarget {
+  const candidate = `${pathname || '/'}${search || ''}`;
+  const targetPath = isSafeInternalPath(candidate) ? candidate : '/dashboard';
+  return {
+    target_type: 'page',
+    target_id: targetPath,
+    target_label: label.trim() || 'الصفحة الحالية',
+    target_path: targetPath,
+  };
+}
+
 /**
  * كشف الحساب: تسمية عربية واضحة لنوع الحركة بدل رمز `reference_type` الإنجليزي الخام
  * (SALES_INVOICE / CUSTOMER_PAYMENT …). مصدر حقيقة واحد يخدم كشف الحساب ونافذة التفاصيل.
@@ -53,6 +100,41 @@ export function referenceTypeLabel(referenceType?: string | null): string {
   if (t === "PARTNER_OPENING") return "رصيد افتتاحي";
   if (t === "JOURNAL_REVERSAL") return "عكس قيد";
   return "قيد يومية";
+}
+
+/**
+ * كشف الحساب: نبرة الحركة للتمييز اللوني. ما يُنشئ ذمّة على الطرف (فاتورة/مستحق)
+ * أحمر، وما يسدّدها (سند قبض/صرف) أخضر، وما عداه محايد. مصدر حقيقة واحد كي لا
+ * تختلف الألوان بين بطاقة العميل والمورد.
+ */
+export type StatementTone = "invoice" | "payment" | "neutral";
+
+export function statementMovementTone(referenceType?: string | null): StatementTone {
+  const t = (referenceType || "").toUpperCase();
+  if (!t) return "neutral";
+  if (t.includes("PAYMENT")) return "payment";
+  if (
+    t.includes("SALES_INVOICE") ||
+    t.includes("PURCHASE_INVOICE") ||
+    t.includes("SALES_DELIVERY") ||
+    t === "SALE" ||
+    t === "STOCK_ISSUE" ||
+    t === "PURCHASE_RECEIPT" ||
+    t === "LOGISTICS_CLEARANCE" ||
+    t === "LOCAL_SHIPMENT" ||
+    t === "SHIPMENT_FREIGHT_ACCRUAL"
+  ) {
+    return "invoice";
+  }
+  return "neutral";
+}
+
+/** صنف خلفية الصف حسب نبرة الحركة — يخدم كشف الحساب في كل البطاقات. */
+export function statementToneRowClass(referenceType?: string | null): string {
+  const tone = statementMovementTone(referenceType);
+  if (tone === "payment") return "bg-emerald-50 dark:bg-emerald-900/20";
+  if (tone === "invoice") return "bg-red-50 dark:bg-red-900/20";
+  return "";
 }
 
 /**

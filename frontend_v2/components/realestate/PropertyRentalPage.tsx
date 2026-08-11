@@ -14,17 +14,17 @@ import {
 import { Building2, Zap, Home, Warehouse, Plus, RefreshCw, ClipboardList, Users } from "lucide-react";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { useAseelIndexKeymap } from "../aseel/useAseelIndexKeymap";
+import { formatDateLocalized } from "../../utils/formatDate";
+import { formatNumber } from "../../utils/formatNumber";
 
+// G1: العرض عبر المُنسّق الموحّد — `toLocaleString("ar-EG")` كان يُخرج أرقاماً
+// هندية (٠١٢…) على الأجهزة ذات بيانات ICU الكاملة فتظهر «بأحرف غير مفهومة».
 function fmtMoney(s: string | number) {
-  const n = typeof s === "string" ? parseFloat(s) : s;
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("ar-EG", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return formatNumber(s, { maxDecimals: 2, group: true, fallback: "—" });
 }
 
 function fmtKwh(s: string | number) {
-  const n = typeof s === "string" ? parseFloat(s) : s;
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("ar-EG", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  return formatNumber(s, { maxDecimals: 3, group: true, fallback: "—" });
 }
 
 type ReadingWithDelta = MeterReadingRow & { delta: number | null };
@@ -186,11 +186,11 @@ export const PropertyRentalPage: React.FC = () => {
     { key: 'unit', header: 'الوحدة', width: '80px', render: l => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{l.unit_code}</span> },
     { key: 'phone', header: 'الجوال', width: '110px', render: l => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{l.renter_phone || '—'}</span> },
     { key: 'rent', header: 'الإيجار', width: '90px', align: 'center', render: l => <b style={{ color: 'var(--aseel-ok, #267346)', fontFamily: 'monospace' }}>{fmtMoney(l.monthly_rent)}</b> },
-    { key: 'start', header: 'من تاريخ', width: '100px', render: l => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{l.start_date || '—'}</span> },
+    { key: 'start', header: 'من تاريخ', width: '100px', render: l => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{formatDateLocalized(l.start_date) || '—'}</span> },
   ];
 
   const readingCols: DenseColumn<ReadingWithDelta>[] = [
-    { key: 'date', header: 'التاريخ', width: '100px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{r.reading_date}</span> },
+    { key: 'date', header: 'التاريخ', width: '100px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{formatDateLocalized(r.reading_date)}</span> },
     { key: 'meter', header: 'العداد', width: '120px', render: r => <>{r.meter_label ?? `#${r.meter}`}</> },
     { key: 'kwh', header: 'القراءة', width: '100px', align: 'center', render: r => <span style={{ fontFamily: 'monospace' }}>{fmtKwh(r.kwh_value)}</span> },
     {
@@ -207,7 +207,7 @@ export const PropertyRentalPage: React.FC = () => {
   const formRow: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 };
 
   return (
-    <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 0, padding: '8px 12px', overflowY: 'auto' }}>
+    <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 0, padding: '8px 12px', overflowY: 'auto' }}>
       {/* Header */}
       <div style={{ paddingBottom: 8, borderBottom: '1px solid var(--aseel-border)', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

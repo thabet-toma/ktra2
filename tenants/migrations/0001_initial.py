@@ -22,7 +22,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'currencies',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -37,7 +37,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'tenants',
-                'managed': False,
+                'managed': True,
             },
         ),
     ]

@@ -171,7 +171,7 @@ export const BranchSwitcher: React.FC = () => {
 
             <form onSubmit={handleCreate} className="space-y-3">
               {error && (
-                <div className="p-2.5 text-xs bg-red-50 text-red-700 rounded-lg border border-red-200 font-semibold">
+                <div className="p-2.5 text-xs bg-[color-mix(in_srgb,var(--color-danger)_10%,transparent)] text-[var(--color-danger)] rounded-lg border border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] font-semibold">
                   {error}
                 </div>
               )}

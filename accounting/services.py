@@ -7,6 +7,7 @@ from .models import Account, ExchangeRate, JournalHeader, JournalLine, Accountin
 from decimal import Decimal
 from partners.models import Partner
 from tenants.models import Currency, TenantBook
+from core.hooks import run_tax_period_guards
 
 logger = logging.getLogger(__name__)
 
@@ -507,6 +508,7 @@ def post_journal(
 
     # ── 1) Validate fiscal period + journal balance (pre-atomic — fast fail) ──
     validate_fiscal_period(tenant_id, transaction_date)
+    run_tax_period_guards(tenant_id, transaction_date)
     mock_hdr = JournalHeader(tenant_id=tenant_id, transaction_date=transaction_date)
     validate_journal_entry(mock_hdr, lines_data)
 
@@ -911,6 +913,45 @@ STATUS_MAP = {
 }
 
 
+# T-DEFACC: أكواد الصندوق/البنك في الشجرة المعيارية — 1101 النقدية، 1102 البنوك،
+# 1110 صناديق النقدية. تُستعمل حين تكون الإعدادات فارغة كي لا يبقى أي مستند بلا صندوق.
+DEFAULT_CASH_ACCOUNT_CODES = ("1101", "1102", "1110")
+
+
+def resolve_default_cash_account(tenant_id: int):
+    """حساب الصندوق/البنك الافتراضي للشركة — مصدر واحد لكل المستندات.
+
+    فاتورة البيع، فاتورة الشراء، سند القبض وسند الصرف كانت كلٌّ منها تحلّ
+    الصندوق بطريقتها (أو تترك الحقل فارغاً فيرفض الحفظ). الترتيب الآن:
+    إعدادات المبيعات ← إعدادات الشراء ← 1101/1102/1110 ← أول حساب أصل باسم نقدي.
+    يُعيد None فقط إن كانت الشجرة بلا أي حساب نقدي.
+    """
+    from django.db.models import Q
+    from sales.models import SalesSettings
+    from logistics.models import PurchaseSettings
+
+    ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
+    if ss and ss.default_cash_account_id:
+        return ss.default_cash_account
+    ps = PurchaseSettings.objects.filter(tenant_id=tenant_id).first()
+    if ps and ps.default_cash_account_id:
+        return ps.default_cash_account
+    base = Account.objects.filter(
+        tenant_id=tenant_id, account_type="Asset", is_active=True,
+    )
+    for code in DEFAULT_CASH_ACCOUNT_CODES:
+        hit = base.filter(code=code).first()
+        if hit:
+            return hit
+    return (
+        base.filter(
+            Q(name__icontains="صندوق") | Q(name__icontains="نقد") | Q(name__icontains="بنك")
+        )
+        .order_by("code")
+        .first()
+    )
+
+
 def _resolve_cheque_under_collection_account(tenant_id: int):
     """حساب «شيكات برسم التحصيل» — نفس منطق ترحيل الفاتورة (M2-T3).
 
@@ -932,15 +973,14 @@ def _resolve_cheque_under_collection_account(tenant_id: int):
 
 def _resolve_cheque_cash_account(tenant_id: int, account_id=None):
     """حساب الصندوق/البنك لوجهة التحصيل — صريح أو افتراضي الإعدادات."""
-    from sales.models import SalesSettings
     if account_id:
         acc = Account.objects.filter(pk=account_id, tenant_id=tenant_id, is_active=True).first()
         if not acc:
             raise ValidationError("حساب الصندوق/البنك المحدد غير موجود أو لا يتبع هذه الشركة.")
         return acc
-    ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
-    if ss and ss.default_cash_account_id:
-        return ss.default_cash_account
+    acc = resolve_default_cash_account(tenant_id)
+    if acc:
+        return acc
     raise ValidationError(
         "حدّد حساب الصندوق/البنك للتحويل، أو عيّن default_cash_account في إعدادات المبيعات."
     )
@@ -962,8 +1002,110 @@ def _resolve_cheque_ar_account(cheque):
     raise ValidationError("لا يوجد حساب ذمم للعميل المرتبط بالشيك.")
 
 
+def _resolve_cheque_payable_account(tenant_id: int):
+    """T-CHQ2: حساب «شيكات برسم الدفع» — مصدر واحد مع ترحيل سند الصرف."""
+    from sales.services import resolve_cheques_payable_account
+    return resolve_cheques_payable_account(tenant_id)
+
+
+def _resolve_cheque_supplier_account(cheque):
+    """T-CHQ2: حساب ذمم المورد لارتداد/تسوية شيك صادر — مرآة حساب العميل."""
+    from logistics.services import _resolve_ap_account
+    partner = cheque.partner or (
+        cheque.supplier_payment.partner if cheque.supplier_payment_id else None
+    )
+    if partner is None:
+        raise ValidationError("الشيك الصادر بلا مورد مرتبط — لا يمكن تحديد حساب الذمم.")
+    return _resolve_ap_account(partner), partner
+
+
+def cheque_is_linked_to_document(cheque) -> bool:
+    """الشيك داخل الدفاتر عبر سند قبض/صرف أو فاتورة — قيده مُرحَّل من هناك.
+
+    T-CHQ3: لا يوجد مسار ترحيل خاص بالشيك: الورقة تدخل الدفاتر ضمن سندها
+    (أو فاتورتها) كما في الأنظمة المهنية، فما يُرحَّل هنا حركاتها لاحقاً فقط.
+    """
+    if cheque.direction == 'Outgoing':
+        return bool(cheque.supplier_payment_id or cheque.purchase_invoice_id)
+    return bool(cheque.sales_invoice_id or cheque.customer_payment_id)
+
+
+def _cheque_movement_gl(cheque, movement_type, account_id=None):
+    """طرفا قيد حركة الشيك ووصفه — مصدر واحد لـ`transfer_cheque` وللترحيل الرجعي.
+
+    يُرجع (مدين، دائن، شريك المدين، شريك الدائن، الوصف).
+    الشريك يُحمَّل على سطر الذمم وحده. كان يُحمَّل على السطرين، فسطرا الارتداد
+    (ذمم + شيكات برسم التحصيل) يتعادلان داخل كشف العميل فلا يعود الدين يظهر
+    عليه بعد ارتداد شيكه (نفس عطل task32).
+    """
+    dr_partner_id = cr_partner_id = None
+    if cheque.direction == 'Outgoing':
+        payable = _resolve_cheque_payable_account(cheque.tenant_id)
+        if movement_type in ('collect', 'withdraw'):
+            cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+            dr, cr = payable, cash
+            desc = f"صرف شيك صادر {cheque.cheque_number}"
+        elif movement_type == 'bounce':
+            ap, partner = _resolve_cheque_supplier_account(cheque)
+            dr, cr = payable, ap
+            desc = f"ارتداد شيك صادر {cheque.cheque_number} — إعادة الذمم للمورد"
+            cr_partner_id = partner.pk
+        else:  # settle
+            ap, partner = _resolve_cheque_supplier_account(cheque)
+            cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+            dr, cr = ap, cash
+            desc = f"تسوية شيك صادر مرتد {cheque.cheque_number}"
+            dr_partner_id = partner.pk
+    elif movement_type in ('collect', 'withdraw'):
+        uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
+        if not uc:
+            raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
+        cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+        dr, cr = cash, uc
+        desc = f"تحصيل شيك {cheque.cheque_number}"
+    elif movement_type == 'bounce':
+        uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
+        if not uc:
+            raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
+        ar, partner = _resolve_cheque_ar_account(cheque)
+        dr, cr = ar, uc
+        desc = f"ارتداد شيك {cheque.cheque_number} — إعادة الذمم على العميل"
+        dr_partner_id = partner.pk
+    else:  # settle
+        ar, partner = _resolve_cheque_ar_account(cheque)
+        cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+        dr, cr = cash, ar
+        desc = f"تسوية شيك مرتد {cheque.cheque_number}"
+        cr_partner_id = partner.pk
+    return dr, cr, dr_partner_id, cr_partner_id, desc
+
+
+def post_cheque_movement_journal(cheque, movement_type, *, when, user=None,
+                                 account_id=None, branch_id=None):
+    """ترحيل قيد حركة شيك واحدة — Idempotent عبر (CHEQUE_<MOVE>, cheque_id)."""
+    amount = Decimal(str(cheque.amount or 0)).quantize(Decimal("0.01"))
+    dr, cr, dr_partner_id, cr_partner_id, desc = _cheque_movement_gl(
+        cheque, movement_type, account_id)
+    return post_journal(
+        tenant_id=cheque.tenant_id,
+        transaction_date=when,
+        reference_type=f"CHEQUE_{movement_type.upper()}",
+        reference_id=cheque.pk,
+        description=desc,
+        lines_data=[
+            {"account": dr.pk, "partner": dr_partner_id,
+             "debit": amount, "credit": Decimal("0"), "description": desc},
+            {"account": cr.pk, "partner": cr_partner_id,
+             "debit": Decimal("0"), "credit": amount, "description": desc},
+        ],
+        currency=cheque.currency,
+        user=user,
+        branch_id=branch_id,
+    )
+
+
 def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
-                    account_id=None, movement_date=None):
+                    account_id=None, movement_date=None, bank_account_id=None):
     """task11 R2-A3 — تحويل حالة شيك مع القيد المحاسبي المرافق.
 
     كانت آلة الحالات بلا قيود محاسبية (والواجهة تتجاوزها أصلاً بـ PATCH خام)
@@ -972,8 +1114,15 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
       - bounce             : مدين ذمم العميل ÷ دائن شيكات برسم التحصيل
       - settle             : مدين صندوق/بنك ÷ دائن ذمم العميل
       - deposit / return_to_customer : حركة ورقية — بلا قيد
+
+    T-CHQ2: الجانب الصادر مرآة كاملة — كان بلا قيد إطلاقاً، فيبقى التزام
+    «شيكات برسم الدفع» في الميزانية حتى بعد أن يصرف المورد الشيك:
+      - collect / withdraw : مدين شيكات برسم الدفع ÷ دائن صندوق/بنك
+      - bounce             : مدين شيكات برسم الدفع ÷ دائن ذمم المورد
+      - settle             : مدين ذمم المورد ÷ دائن صندوق/بنك
+
     يُرحَّل القيد فقط إذا كان الشيك داخل الدفاتر أصلاً (مربوط بفاتورة أو
-    سند قبض) — الشيكات المستقلة legacy تتحول حالتها فقط مع تحذير في اللوغ.
+    سند) — الشيكات المستقلة legacy تتحول حالتها فقط مع تحذير في اللوغ.
     Idempotent عبر (CHEQUE_<MOVE>, cheque_id).
     """
     import datetime as _dt
@@ -981,6 +1130,7 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
 
     cheque = Cheque.objects.select_related(
         'tenant', 'partner', 'partner__group', 'sales_invoice', 'currency',
+        'supplier_payment', 'supplier_payment__partner',
     ).get(pk=cheque_id)
     allowed = VALID_TRANSITIONS.get(cheque.status, set())
     if movement_type not in allowed:
@@ -991,11 +1141,27 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
     when = movement_date or _dt.date.today()
     amount = Decimal(str(cheque.amount or 0)).quantize(Decimal("0.01"))
 
-    # GL يخص الشيكات الواردة المسجلة دفترياً فقط
-    in_books = bool(cheque.sales_invoice_id or cheque.customer_payment_id)
+    # T-BANKS: وجهة الإيداع/الصرف حساب بنكي مسجَّل — حسابه في الشجرة هو
+    # الطرف النقدي للقيد، ويُسجَّل على الشيك ليظهر في كشف البنك ومطابقته.
+    deposit_account_changed = False
+    if bank_account_id:
+        from .models import BankAccount
+        ba = (
+            BankAccount.objects
+            .filter(pk=bank_account_id, tenant_id=cheque.tenant_id, is_active=True)
+            .select_related('account').first()
+        )
+        if ba is None:
+            raise ValidationError("الحساب البنكي المحدد غير موجود أو لا يتبع هذه الشركة.")
+        account_id = ba.account_id
+        if cheque.deposit_bank_account_id != ba.pk:
+            cheque.deposit_bank_account = ba
+            deposit_account_changed = True
+
+    # GL يخص الشيكات المسجَّلة دفترياً فقط — كل اتجاه ومستنداته.
+    in_books = cheque_is_linked_to_document(cheque)
     needs_gl = (
         movement_type in ('collect', 'withdraw', 'bounce', 'settle')
-        and cheque.direction == 'Incoming'
         and amount > 0
     )
     if needs_gl and not in_books:
@@ -1008,45 +1174,11 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
     journal = None
     with transaction.atomic():
         if needs_gl:
-            branch_id = cheque.sales_invoice.branch_id if cheque.sales_invoice_id else None
-            if movement_type in ('collect', 'withdraw'):
-                uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
-                if not uc:
-                    raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
-                cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
-                dr, cr = cash, uc
-                desc = f"تحصيل شيك {cheque.cheque_number}"
-                partner_id = cheque.partner_id
-            elif movement_type == 'bounce':
-                uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
-                if not uc:
-                    raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
-                ar, partner = _resolve_cheque_ar_account(cheque)
-                dr, cr = ar, uc
-                desc = f"ارتداد شيك {cheque.cheque_number} — إعادة الذمم على العميل"
-                partner_id = partner.pk
-            else:  # settle
-                ar, partner = _resolve_cheque_ar_account(cheque)
-                cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
-                dr, cr = cash, ar
-                desc = f"تسوية شيك مرتد {cheque.cheque_number}"
-                partner_id = partner.pk
-
-            journal = post_journal(
-                tenant_id=cheque.tenant_id,
-                transaction_date=when,
-                reference_type=f"CHEQUE_{movement_type.upper()}",
-                reference_id=cheque.pk,
-                description=desc,
-                lines_data=[
-                    {"account": dr.pk, "partner": partner_id,
-                     "debit": amount, "credit": Decimal("0"), "description": desc},
-                    {"account": cr.pk, "partner": partner_id,
-                     "debit": Decimal("0"), "credit": amount, "description": desc},
-                ],
-                currency=cheque.currency,
-                user=user,
-                branch_id=branch_id,
+            journal = post_cheque_movement_journal(
+                cheque, movement_type, when=when, user=user,
+                account_id=account_id,
+                branch_id=(cheque.sales_invoice.branch_id
+                           if cheque.sales_invoice_id else None),
             )
 
         ChequeMovement.objects.create(
@@ -1056,7 +1188,9 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             created_by=user,
         )
         cheque.status = next_status
-        cheque.save(update_fields=['status'])
+        cheque.save(update_fields=(
+            ['status', 'deposit_bank_account'] if deposit_account_changed else ['status']
+        ))
         create_audit_log(
             tenant=cheque.tenant,
             user=user,
@@ -1071,13 +1205,353 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
     return cheque
 
 
+# T-CHQ2 — محفظة الشيكات: الحالات التي ما تزال الورقة فيها «في اليد»
+# (لم تُحصَّل ولم تُردّ ولم تُسوَّ) هي وحدها ما يشكّل رصيد المحفظة.
+CHEQUE_OPEN_STATUSES = ('Draft', 'Under_Collection', 'Bounced')
+
+CHEQUE_DUE_BUCKETS = (
+    ('overdue', 'متأخرة'),
+    ('due_7', 'تستحق خلال 7 أيام'),
+    ('due_30', 'تستحق خلال 30 يوماً'),
+    ('later', 'لاحقاً'),
+    ('no_due_date', 'بلا تاريخ استحقاق'),
+)
+
+
+def _cheque_due_bucket(due_date, today):
+    """يصنّف تاريخ الاستحقاق إلى دلو واحد — مصدر واحد للواجهة والتقارير."""
+    if due_date is None:
+        return 'no_due_date'
+    delta = (due_date - today).days
+    if delta < 0:
+        return 'overdue'
+    if delta <= 7:
+        return 'due_7'
+    if delta <= 30:
+        return 'due_30'
+    return 'later'
+
+
+def cheque_wallet(tenant_id: int, *, today=None) -> dict:
+    """T-CHQ2 — محفظة الشيكات: أين مال الشيكات المفتوحة الآن وما يستحق قريباً.
+
+    كانت شاشة الشيكات قائمة صفوف فقط، فلا أحد يعرف كم في اليد ولا ما تأخّر.
+    التجميعة على مستوى الشركة (لا تسرّب بين الشركات) وبالحالة وبتاريخ
+    الاستحقاق، لكل اتجاه على حدة، و`net_open` = وارد مفتوح − صادر مفتوح.
+    """
+    import datetime as _dt
+    from .models import Cheque
+
+    today = today or _dt.date.today()
+    rows = list(
+        Cheque.objects
+        .filter(tenant_id=tenant_id, status__in=CHEQUE_OPEN_STATUSES)
+        .values_list('direction', 'status', 'due_date', 'amount')
+    )
+
+    def side(direction):
+        mine = [r for r in rows if r[0] == direction]
+        by_status: dict[str, list] = {}
+        by_due: dict[str, list] = {}
+        for _dir, status, due_date, amount in mine:
+            by_status.setdefault(status, []).append(amount or Decimal('0'))
+            by_due.setdefault(_cheque_due_bucket(due_date, today), []).append(
+                amount or Decimal('0'))
+        total = sum((a for _d, _s, _dd, a in mine), Decimal('0'))
+        return {
+            'open_total': str(Decimal(total).quantize(Decimal('0.01'))),
+            'open_count': len(mine),
+            'buckets': [
+                {
+                    'status': status,
+                    'count': len(amounts),
+                    'amount': str(sum(amounts, Decimal('0')).quantize(Decimal('0.01'))),
+                }
+                for status, amounts in sorted(by_status.items())
+            ],
+            'due_buckets': [
+                {
+                    'key': key,
+                    'label': label,
+                    'count': len(by_due.get(key, [])),
+                    'amount': str(
+                        sum(by_due.get(key, []), Decimal('0')).quantize(Decimal('0.01'))),
+                }
+                for key, label in CHEQUE_DUE_BUCKETS
+            ],
+        }
+
+    incoming, outgoing = side('Incoming'), side('Outgoing')
+    net = Decimal(incoming['open_total']) - Decimal(outgoing['open_total'])
+    logger.info(
+        "cheque_wallet: tenant=%s incoming=%s outgoing=%s",
+        tenant_id, incoming['open_total'], outgoing['open_total'],
+    )
+    return {
+        'as_of': today.isoformat(),
+        'incoming': incoming,
+        'outgoing': outgoing,
+        'net_open': str(net.quantize(Decimal('0.01'))),
+    }
+
+
+# ─────────────────────────────────────────────────────────
+#  T-BANKS: البنوك وحساباتها والمطابقة البنكية
+# ─────────────────────────────────────────────────────────
+
+BANK_PARENT_ACCOUNT_CODE = "1102"
+
+
+def get_bank_parent_account(tenant):
+    """حساب الأب «البنوك» في الشجرة — يُنشأ تحت الأصول المتداولة إن غاب.
+
+    بلا أب لا مكان لحسابات البنوك، وإنشاؤه مرة واحدة أفضل من رفض العملية
+    على شركة قديمة بُذرت قبل هذا الحساب.
+    """
+    acc = Account.objects.filter(tenant=tenant, code=BANK_PARENT_ACCOUNT_CODE).first()
+    if acc:
+        return acc
+    current_assets = Account.objects.filter(tenant=tenant, code="11").first()
+    if current_assets is None:
+        return (
+            Account.objects.filter(tenant=tenant, account_type="Asset",
+                                   code__startswith="11").order_by("code").first()
+            or Account.objects.filter(tenant=tenant, account_type="Asset").order_by("code").first()
+        )
+    acc = Account.objects.create(
+        tenant=tenant, code=BANK_PARENT_ACCOUNT_CODE, name="البنوك (Banks)",
+        parent=current_assets, account_type="Asset", is_active=True,
+    )
+    logger.info("get_bank_parent_account: created 1102 for tenant=%s", getattr(tenant, "TenantID", tenant))
+    return acc
+
+
+def create_bank_account(*, tenant, bank, name, currency, branch=None, account_number=None,
+                        iban=None, is_default=False, notes=None, user=None):
+    """ينشئ حساباً بنكياً وحسابه في الشجرة تحت «1102 البنوك» في معاملة واحدة."""
+    from .cashbox import allocate_child_account_code
+    from .models import BankAccount
+
+    parent = get_bank_parent_account(tenant)
+    if parent is None:
+        raise ValidationError(
+            "لا يوجد حساب أب للبنوك في شجرة الحسابات — أنشئ «11 الأصول المتداولة» أولاً."
+        )
+    label = (name or "").strip()
+    if not label:
+        raise ValidationError("اسم الحساب البنكي مطلوب.")
+    with transaction.atomic():
+        code = allocate_child_account_code(
+            parent, tenant,
+            marker="K",
+            seed=BankAccount.objects.filter(tenant=tenant).count() + 1,
+            fallback_prefix=BANK_PARENT_ACCOUNT_CODE,
+        )
+        gl = Account.objects.create(
+            tenant=tenant, code=code, name=f"{bank.name} — {label}"[:100],
+            parent=parent, account_type=parent.account_type or "Asset", is_active=True,
+        )
+        if is_default:
+            BankAccount.objects.filter(tenant=tenant, is_default=True).update(is_default=False)
+        ba = BankAccount.objects.create(
+            tenant=tenant, bank=bank, branch=branch, name=label[:150],
+            account_number=(account_number or None), iban=(iban or None),
+            currency=currency, account=gl, is_default=bool(is_default),
+            notes=(notes or None),
+        )
+    logger.info(
+        "create_bank_account: tenant=%s bank=%s account=%s gl=%s(%s)",
+        getattr(tenant, "TenantID", tenant), bank.pk, ba.pk, gl.pk, code,
+    )
+    return ba
+
+
+def bank_account_statement(bank_account, *, start_date=None, end_date=None, posted_only=True):
+    """حركة الحساب البنكي من دفتر الأستاذ + حالة المطابقة لكل سطر.
+
+    يعيد: opening (رصيد ما قبل start_date)، rows، وbook_balance (رصيد الدفاتر
+    حتى end_date)، وcleared_balance (المؤشَّر منه فقط).
+    """
+    from django.db.models import Sum
+
+    qs = (
+        JournalLine.objects
+        .filter(tenant_id=bank_account.tenant_id, account_id=bank_account.account_id)
+        .select_related("journal", "partner")
+    )
+    if posted_only:
+        qs = qs.filter(journal__is_posted=True)
+
+    opening = Decimal("0.00")
+    if start_date:
+        agg = qs.filter(journal__transaction_date__lt=start_date).aggregate(
+            d=Sum("debit"), c=Sum("credit"),
+        )
+        opening = (agg["d"] or Decimal("0")) - (agg["c"] or Decimal("0"))
+        qs = qs.filter(journal__transaction_date__gte=start_date)
+    if end_date:
+        qs = qs.filter(journal__transaction_date__lte=end_date)
+
+    rows = []
+    balance = opening
+    cleared = opening
+    for line in qs.order_by("journal__transaction_date", "journal_id", "id"):
+        movement = (line.debit or Decimal("0")) - (line.credit or Decimal("0"))
+        balance += movement
+        rec_line = getattr(line, "bank_reconciliation_line", None)
+        if rec_line is not None:
+            cleared += movement
+        rows.append({
+            "journal_line_id": line.id,
+            "journal_id": line.journal_id,
+            "date": line.journal.transaction_date,
+            "description": line.description or line.journal.description or "",
+            "partner": line.partner.name if line.partner_id else None,
+            "debit": line.debit,
+            "credit": line.credit,
+            "balance": balance,
+            "is_cleared": rec_line is not None,
+            "reconciliation_id": rec_line.reconciliation_id if rec_line is not None else None,
+        })
+    return {
+        "opening_balance": opening,
+        "book_balance": balance,
+        "cleared_balance": cleared,
+        "rows": rows,
+    }
+
+
+def bank_reconciliation_summary(reconciliation):
+    """ملخص المطابقة: رصيد الدفاتر، المؤشَّر، رصيد الكشف، والفرق."""
+    stmt = bank_account_statement(
+        reconciliation.bank_account, end_date=reconciliation.statement_date,
+    )
+    statement_balance = Decimal(str(reconciliation.statement_balance or 0))
+    cleared = stmt["cleared_balance"]
+    return {
+        "book_balance": stmt["book_balance"],
+        "cleared_balance": cleared,
+        "statement_balance": statement_balance,
+        "difference": (statement_balance - cleared).quantize(Decimal("0.01")),
+        "uncleared_count": sum(1 for r in stmt["rows"] if not r["is_cleared"]),
+        "rows": stmt["rows"],
+    }
+
+
+def close_bank_reconciliation(reconciliation, *, user=None):
+    """إقفال المطابقة — يُرفض ما لم يكن الفرق صفراً."""
+    from django.utils import timezone
+    from .models import BankReconciliation
+
+    if reconciliation.status == BankReconciliation.STATUS_CLOSED:
+        return reconciliation
+    summary = bank_reconciliation_summary(reconciliation)
+    if abs(summary["difference"]) >= Decimal("0.01"):
+        raise ValidationError(
+            f"لا يمكن إقفال المطابقة والفرق {summary['difference']} — "
+            "أشِّر باقي الحركات أو صحّح رصيد الكشف."
+        )
+    reconciliation.status = BankReconciliation.STATUS_CLOSED
+    reconciliation.closed_at = timezone.now()
+    reconciliation.save(update_fields=["status", "closed_at"])
+    create_audit_log(
+        tenant=reconciliation.tenant, user=user, action="POST",
+        model_name="BankReconciliation", object_id=reconciliation.pk,
+        change_details=(
+            f"إقفال مطابقة الحساب {reconciliation.bank_account_id} "
+            f"حتى {reconciliation.statement_date} برصيد {reconciliation.statement_balance}"
+        ),
+    )
+    logger.info(
+        "close_bank_reconciliation: id=%s bank_account=%s balance=%s",
+        reconciliation.pk, reconciliation.bank_account_id, reconciliation.statement_balance,
+    )
+    return reconciliation
+
+
 # ─────────────────────────────────────────────────────────
 #  task18 DEF-C1: رصيد الشريك من دفتر الأستاذ الفرعي (subledger)
 # ─────────────────────────────────────────────────────────
 
+def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
+    """يربط حركات كشف الحساب بمستند المرساة (الفاتورة) — استعلامات بالدفعة لا لكل صف.
+
+    الفاتورة مرساة مجموعتها، وسند القبض/الصرف ينضمّ لمجموعة الفاتورة التي وُزّع
+    عليها؛ فتُعرَض الحركتان متجاورتين في الواجهة. سند موزَّع على أكثر من فاتورة
+    يبقى بلا مرساة واحدة (link_key=None) ويحمل عددها في link_count. يعدّل `rows`
+    في مكانها.
+    """
+    invoice_type = "PURCHASE_INVOICE" if is_supplier else "SALES_INVOICE"
+    payment_type = "SUPPLIER_PAYMENT" if is_supplier else "CUSTOMER_PAYMENT"
+    invoice_ids = {
+        r["reference_id"] for r in rows
+        if r["reference_type"] == invoice_type and r["reference_id"]
+    }
+    payment_ids = {
+        r["reference_id"] for r in rows
+        if r["reference_type"] == payment_type and r["reference_id"]
+    }
+
+    by_payment: dict[int, list[int]] = {}
+    if payment_ids:
+        if is_supplier:
+            from sales.models import SupplierPayment, SupplierPaymentAllocation
+            allocations = SupplierPaymentAllocation.objects.filter(
+                payment_id__in=payment_ids,
+            ).values_list("payment_id", "invoice_id")
+        else:
+            from sales.models import PaymentAllocation
+            allocations = PaymentAllocation.objects.filter(
+                payment_id__in=payment_ids,
+            ).values_list("payment_id", "invoice_id")
+        for pay_id, inv_id in allocations:
+            by_payment.setdefault(pay_id, []).append(inv_id)
+        if is_supplier:
+            # سندات الصرف القديمة مربوطة بالحقل المفرد لا بجدول التوزيعات.
+            legacy = SupplierPayment.objects.filter(
+                id__in=[p for p in payment_ids if p not in by_payment],
+                purchase_invoice__isnull=False,
+            ).values_list("id", "purchase_invoice_id")
+            for pay_id, inv_id in legacy:
+                by_payment.setdefault(pay_id, []).append(inv_id)
+        invoice_ids.update(inv_id for links in by_payment.values() for inv_id in links)
+
+    numbers: dict[int, str] = {}
+    if invoice_ids:
+        if is_supplier:
+            from logistics.models import PurchaseInvoice
+            source = PurchaseInvoice.objects.filter(id__in=invoice_ids)
+        else:
+            from sales.models import SalesInvoice
+            source = SalesInvoice.objects.filter(id__in=invoice_ids)
+        numbers = dict(source.values_list("id", "invoice_number"))
+
+    for row in rows:
+        ref_id = row["reference_id"]
+        row["document_number"] = None
+        row["link_key"] = None
+        row["link_label"] = None
+        row["link_count"] = 0
+        if not ref_id:
+            continue
+        if row["reference_type"] == invoice_type:
+            row["document_number"] = numbers.get(ref_id) or f"#{ref_id}"
+            row["link_key"] = f"{invoice_type}:{ref_id}"
+            row["link_label"] = row["document_number"]
+            row["link_count"] = 1
+        elif row["reference_type"] == payment_type:
+            links = by_payment.get(ref_id, [])
+            row["link_count"] = len(links)
+            if len(links) == 1:
+                row["link_key"] = f"{invoice_type}:{links[0]}"
+                row["link_label"] = numbers.get(links[0]) or f"#{links[0]}"
+            elif links:
+                row["link_label"] = f"{len(links)} فواتير"
+
+
 def partner_account_statement(
     *, tenant_id: int, partner_id: int, is_supplier: bool,
-    limit: int = 50, offset: int = 0,
+    limit: int = 50, offset: int = 0, ordering: str = "newest",
 ) -> dict:
     """FEAT-4: كشف حساب الشريك من أسطر القيود المرحَّلة — مع رصيد جارٍ لكل سطر.
 
@@ -1102,7 +1576,9 @@ def partner_account_statement(
         running_by_id[lid] = running
     closing = running
 
-    page_ids = [lid for lid, _d, _c in ordered[offset:offset + limit]]
+    normalized_ordering = "oldest" if ordering == "oldest" else "newest"
+    display_order = ordered if normalized_ordering == "oldest" else list(reversed(ordered))
+    page_ids = [lid for lid, _d, _c in display_order[offset:offset + limit]]
     page = (
         JournalLine.objects.filter(id__in=page_ids)
         .select_related("journal")
@@ -1125,11 +1601,13 @@ def partner_account_statement(
             "credit": str(jl.base_credit),
             "running_balance": str(running_by_id[lid]),
         })
+    _attach_statement_document_links(rows, is_supplier=is_supplier)
     return {
         "results": rows,
         "count": total,
         "limit": limit,
         "offset": offset,
+        "ordering": normalized_ordering,
         "closing_balance": str(closing),
     }
 
@@ -1149,4 +1627,112 @@ def partner_posted_balance(tenant_id: int, partner_id: int) -> tuple[Decimal, De
     debit = Decimal(str(agg["d"] or 0))
     credit = Decimal(str(agg["c"] or 0))
     return debit, credit
+
+
+def partner_posted_journal_effect(
+    tenant_id: int,
+    partner_id: int,
+    journal_ids,
+    *,
+    supplier: bool,
+) -> Decimal:
+    """صافي أثر مجموعة قيود مرحّلة على رصيد شريك بالعملة الأساسية."""
+    from django.db.models import Sum
+
+    ids = [journal_id for journal_id in journal_ids if journal_id]
+    if not ids:
+        return Decimal("0.00")
+    agg = JournalLine.objects.filter(
+        tenant_id=tenant_id,
+        partner_id=partner_id,
+        journal_id__in=ids,
+        journal__is_posted=True,
+    ).aggregate(d=Sum("base_debit"), c=Sum("base_credit"))
+    debit = Decimal(str(agg["d"] or 0))
+    credit = Decimal(str(agg["c"] or 0))
+    return (credit - debit if supplier else debit - credit).quantize(Decimal("0.01"))
+
+
+def attach_partner_posted_balance(rows, partner_id_field: str, *, supplier: bool, attr: str):
+    """يضع رصيد الطرف المرحّل على صفوف **صفحة محمَّلة** باستعلام تجميعي واحد.
+
+    البديل `annotate_partner_posted_balance` أدنى يولّد DEPENDENT SUBQUERY فيه
+    GROUP BY، فتبني MySQL جدولاً مؤقتاً **لكل صف**: قياس على بيانات حقيقية
+    (927 فاتورة، 11 ألف سطر قيد) أعطى 15–20 ثانية للقائمة و~1 ثانية لصفحة
+    الخمسين — بينما هذا الشكل 27 ملّي ثانية للخمسين و129 للكل. الفهرسة لا
+    تُصلحه: الجدول المؤقت لكل صف يبقى مهما فُهرِس (تُحقّق بـEXPLAIN).
+
+    يُستعمل بعد الترقيم فقط: عدد الأطراف محدودٌ بحجم الصفحة، فالاستعلام واحد
+    مهما كثرت الصفوف. الصفحة الفارغة لا تستعلم إطلاقاً.
+    """
+    from django.db.models import DecimalField, F, Sum
+
+    rows = list(rows)
+    tenant_ids = {getattr(row, "tenant_id", None) for row in rows} - {None}
+    partner_ids = {getattr(row, partner_id_field, None) for row in rows} - {None}
+    if not partner_ids or not tenant_ids:
+        for row in rows:
+            setattr(row, attr, Decimal("0.00"))
+        return rows
+
+    money = DecimalField(max_digits=18, decimal_places=2)
+    balance_expression = (
+        F("base_credit") - F("base_debit")
+        if supplier
+        else F("base_debit") - F("base_credit")
+    )
+    grouped = (
+        JournalLine.objects
+        .filter(
+            tenant_id__in=tenant_ids,
+            partner_id__in=partner_ids,
+            journal__is_posted=True,
+        )
+        .values("tenant_id", "partner_id")
+        .annotate(total=Sum(balance_expression, output_field=money))
+    )
+    totals = {
+        (row["tenant_id"], row["partner_id"]): Decimal(str(row["total"] or 0))
+        for row in grouped
+    }
+    for row in rows:
+        key = (getattr(row, "tenant_id", None), getattr(row, partner_id_field, None))
+        setattr(row, attr, totals.get(key, Decimal("0.00")))
+    return rows
+
+
+def annotate_partner_posted_balance(queryset, partner_id_field: str, *, supplier: bool, alias: str):
+    """يضيف رصيد الشريك المرحّل إلى queryset واحد بلا استعلام لكل صف.
+
+    ⚠ للصف الواحد (المستند المفتوح) أو للفلترة/الترتيب فقط — لا للقوائم:
+    الاستعلام الفرعي المرتبط يُعاد تنفيذه لكل صف. للقوائم استعمل
+    `attach_partner_posted_balance` أعلاه.
+    """
+    from django.db.models import DecimalField, F, OuterRef, Subquery, Sum, Value
+    from django.db.models.functions import Coalesce
+
+    money = DecimalField(max_digits=18, decimal_places=2)
+    balance_expression = (
+        F("base_credit") - F("base_debit")
+        if supplier
+        else F("base_debit") - F("base_credit")
+    )
+    balance = (
+        JournalLine.objects
+        .filter(
+            tenant_id=OuterRef("tenant_id"),
+            partner_id=OuterRef(partner_id_field),
+            journal__is_posted=True,
+        )
+        .values("partner_id")
+        .annotate(total=Sum(balance_expression, output_field=money))
+        .values("total")[:1]
+    )
+    return queryset.annotate(**{
+        alias: Coalesce(
+            Subquery(balance, output_field=money),
+            Value(Decimal("0.00"), output_field=money),
+            output_field=money,
+        ),
+    })
 

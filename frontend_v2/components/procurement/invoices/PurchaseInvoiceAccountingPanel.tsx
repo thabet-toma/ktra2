@@ -2,7 +2,7 @@
  * لوحة محاسبة فاتورة الشراء — فصلاً عن نموذج الفاتورة الرئيسي.
  *
  * الغرض: ضمان ترحيل صحيح للمحاسبة مع:
- *  - اختيار نوع الدفع (آجل/نقدي) + حساب الصندوق عند النقدي
+ *  - مربع «مدفوعة» (مؤشَّر = نقدي) + حساب الصندوق عند التأشير
  *  - إدارة الرسوم الإضافية (شحن/تخليص/جمركي/…) مع اختيار حساب لكل رسم
  *  - معاينة القيد المحاسبي قبل الترحيل
  *  - زر ترحيل يستدعي post-to-accounting الآمن (مع تحقق توازن)
@@ -32,7 +32,10 @@ import type {
   ReceiptStatus,
 } from "@/types/purchaseInvoice";
 import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
+import { SettleFromOnAccountModal } from "@/components/shared/SettleFromOnAccountModal";
 import { useConfirm } from "@/contexts/ConfirmContext";
+import { AccountTreeField } from "@/components/accounting/AccountTreePicker";
+import { isCashAccount } from "@/utils/accountTree";
 
 const RECEIPT_BADGE: Record<ReceiptStatus, { label: string; cls: string }> = {
   not_received: { label: "غير مستلمة", cls: "aseel-text-state" },
@@ -44,6 +47,7 @@ interface AccountDto {
   id: number;
   code?: string;
   name?: string;
+  parent?: number | null;
   account_type?: string;
   is_active?: boolean;
 }
@@ -55,14 +59,6 @@ interface Props {
 }
 
 type PaymentType = "credit" | "cash";
-
-const ACCOUNT_TYPE_LABELS: Record<string, string> = {
-  Asset: "أصل",
-  Liability: "التزام",
-  Equity: "حقوق ملكية",
-  Revenue: "إيراد",
-  Expense: "مصروف",
-};
 
 export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   invoiceId,
@@ -82,6 +78,8 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showReceive, setShowReceive] = useState(false);
+  // T-ONACC: تسديد الفاتورة من رصيد المورد «على الحساب» (سندات صرف غير موزَّعة).
+  const [showSettleModal, setShowSettleModal] = useState(false);
   // وصل دفع للمورد (Feature 2)
   const [payAmount, setPayAmount] = useState("");
   const [payAccountId, setPayAccountId] = useState<number | null>(null);
@@ -125,23 +123,17 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         .sort((a, b) => (a.code || "").localeCompare(b.code || "")),
     [accounts]
   );
-  const cashAccountOptions = useMemo(
-    () =>
-      accounts
-        .filter(
-          (a) =>
-            a.is_active !== false &&
-            a.account_type === "Asset" &&
-            a.code &&
-            (a.code.startsWith("1101") ||
-              a.code.startsWith("1102") ||
-              (a.name || "").toLowerCase().includes("صندوق") ||
-              (a.name || "").toLowerCase().includes("بنك") ||
-              (a.name || "").toLowerCase().includes("cash") ||
-              (a.name || "").toLowerCase().includes("bank"))
-        )
-        .sort((a, b) => (a.code || "").localeCompare(b.code || "")),
-    [accounts]
+  // T-DEFACC: شرط الصندوق من المصدر المشترك — لا نسخة ثالثة منه هنا.
+  const isSelectableCash = useCallback(
+    (a: AccountDto) => a.is_active !== false && isCashAccount(a),
+    []
+  );
+  const isSelectableExpense = useCallback(
+    (a: AccountDto) =>
+      a.is_active !== false &&
+      (a.account_type === "Expense" || a.account_type === "Asset") &&
+      !!a.code,
+    []
   );
 
   // ─── تفاعل المستخدم مع الرسوم ──────────────────────────────────────────
@@ -273,11 +265,14 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
     try {
       await purchaseInvoiceApi.addSupplierPayment({
         partner: invoice.partner,
+        purchase_invoice: invoiceId,
         payment_date: new Date().toISOString().slice(0, 10),
         amount: amt.toFixed(2),
         currency: invoice.currency ?? null,
         cash_or_bank_account: payAccountId,
         notes: `وصل دفع فاتورة ${invoice.invoice_number || invoice.id}`,
+        // T-AUTOPOST: وصل الدفع من داخل الفاتورة يُرحَّل دائماً (لا مسودة) مهما كان إعداد الشركة.
+        auto_post: true,
       });
       setSuccess("✅ تم تسجيل وصل الدفع وترحيله (مدين ذمم المورد / دائن الصندوق).");
       setPayAmount("");
@@ -413,6 +408,9 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="إجمالي الفاتورة">
             الإجمالي: {Number(invoice.grand_total || 0).toLocaleString()} {invoice.currency_code || ""}
           </span>
+          <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="المبلغ المدفوع المرحّل">
+            المدفوع: {Number(invoice.amount_paid || 0).toLocaleString()} {invoice.currency_code || ""}
+          </span>
           <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="المبلغ المتبقي">
             المتبقي: {Number(invoice.remaining_balance ?? invoice.grand_total ?? 0).toLocaleString()} {invoice.currency_code || ""}
           </span>
@@ -493,17 +491,20 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-1.5">
-              نوع الدفع
+              حالة الدفع
             </label>
-            <select
-              value={paymentType}
-              onChange={(e) => setPaymentType(e.target.value as PaymentType)}
-              disabled={disableEdit}
-              className="w-full h-11 px-3 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white disabled:opacity-60"
-            >
-              <option value="credit">آجل — على ذمم المورد</option>
-              <option value="cash">نقدي — من صندوق/بنك</option>
-            </select>
+            {/* «مدفوعة» بدل قائمة آجل/نقدي — مربع اختيار: مؤشَّر = مدفوعة من
+                صندوق/بنك، فارغ = على ذمم المورد. القيم الخادمية كما هي. */}
+            <label className="flex items-center gap-2 h-11 aseel-text-ink dark:text-white cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-emerald-600"
+                checked={paymentType === "cash"}
+                onChange={(e) => setPaymentType((e.target.checked ? "cash" : "credit") as PaymentType)}
+                disabled={disableEdit}
+              />
+              مدفوعة
+            </label>
             <p className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
               {paymentType === "credit"
                 ? "الدائن = حساب ذمم المورد المربوط."
@@ -515,21 +516,15 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
               <label className="block text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-1.5">
                 حساب الصندوق / البنك *
               </label>
-              <select
-                value={cashAccountId ?? ""}
-                onChange={(e) =>
-                  setCashAccountId(e.target.value ? Number(e.target.value) : null)
-                }
+              <AccountTreeField
+                accounts={accounts}
+                value={cashAccountId}
+                onChange={(id) => setCashAccountId(id)}
+                isSelectable={isSelectableCash}
                 disabled={disableEdit}
+                title="اختيار الصندوق / البنك"
                 className="w-full h-11 px-3 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white disabled:opacity-60"
-              >
-                <option value="">— اختر حساب —</option>
-                {cashAccountOptions.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} — {a.name}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
           )}
         </div>
@@ -563,19 +558,16 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                     <td className="px-3 py-2">{item.name}</td>
                     <td className="px-3 py-2">{formatMoney(item.total_price)}</td>
                     <td className="px-3 py-2">
-                      <select
-                        value={item.expense_account || ""}
-                        onChange={(e) => updateItemAccount(idx, e.target.value ? Number(e.target.value) : null)}
+                      <AccountTreeField
+                        accounts={accounts}
+                        value={item.expense_account ?? ""}
+                        onChange={(id) => updateItemAccount(idx, id)}
+                        isSelectable={isSelectableExpense}
                         disabled={disableEdit}
+                        placeholder="— حساب المخزون الافتراضي —"
+                        title="اختيار حساب البند"
                         className="w-full h-9 px-2 border aseel-border-soft dark:aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-xs"
-                      >
-                        <option value="">— حساب المخزون الافتراضي —</option>
-                        {expenseAccountOptions.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.code} — {a.name}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </td>
                   </tr>
                 ))}
@@ -640,25 +632,15 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                       />
                     </td>
                     <td className="px-3 py-2">
-                      <select
-                        value={fee.expense_account || ""}
-                        onChange={(e) =>
-                          updateFee(idx, {
-                            expense_account: Number(e.target.value),
-                          })
-                        }
+                      <AccountTreeField
+                        accounts={accounts}
+                        value={fee.expense_account ?? ""}
+                        onChange={(id) => updateFee(idx, { expense_account: id ?? 0 })}
+                        isSelectable={isSelectableExpense}
                         disabled={disableEdit}
+                        title="اختيار حساب الرسم"
                         className="w-full h-9 px-2 border aseel-border-soft dark:aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-xs"
-                      >
-                        <option value="">— اختر —</option>
-                        {expenseAccountOptions.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.code} — {a.name}{" "}
-                            {a.account_type &&
-                              `(${ACCOUNT_TYPE_LABELS[a.account_type] || a.account_type})`}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </td>
                     <td className="px-3 py-2 w-32">
                       <input
@@ -730,7 +712,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                   <th className="px-4 py-2 text-right font-medium w-32">دائن</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="divide-y divide-[var(--color-border)]">
                 {preview.lines.map((l, i) => (
                   <tr key={i}>
                     <td className="px-4 py-2 aseel-text-ink dark:aseel-text-soft">
@@ -845,18 +827,14 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
               </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="aseel-text-soft">حساب الصندوق/البنك</span>
-                <select
-                  value={payAccountId ?? ""}
-                  onChange={(e) => setPayAccountId(e.target.value ? Number(e.target.value) : null)}
+                <AccountTreeField
+                  accounts={accounts}
+                  value={payAccountId}
+                  onChange={(id) => setPayAccountId(id)}
+                  isSelectable={isSelectableCash}
+                  title="اختيار الصندوق / البنك"
                   className="px-3 py-2 rounded-lg border aseel-border-soft aseel-bg-panel min-w-[12rem]"
-                >
-                  <option value="">— اختر حساب —</option>
-                  {cashAccountOptions.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} — {a.name}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
               <button
                 onClick={addSupplierPayment}
@@ -871,14 +849,44 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                 )}
                 تسجيل وصل الدفع
               </button>
+              {/* T-ONACC: تسديد من رصيد المورد «على الحساب» (سندات صرف غير موزَّعة). */}
+              {Number(invoice.remaining_balance ?? 0) > 0.009 && (
+                <button
+                  onClick={() => setShowSettleModal(true)}
+                  className="flex items-center gap-2 px-5 py-2 rounded-lg font-medium border aseel-border-soft"
+                  title="تسديد الفاتورة من رصيدنا عند المورد"
+                >
+                  <Receipt className="w-4 h-4" />
+                  تسديد من الرصيد
+                </button>
+              )}
             </div>
           </div>
         )}
       </div>
 
+      {/* T-ONACC: تسديد فاتورة الشراء من رصيدنا عند المورد (سند صرف غير موزَّع). */}
+      {showSettleModal && invoice && (
+        <SettleFromOnAccountModal
+          kind="supplier"
+          partnerId={invoice.partner}
+          partnerLabel={invoice.partner_name || ""}
+          invoiceId={invoiceId}
+          invoiceLabel={`فاتورة ${invoice.invoice_number || invoiceId}`}
+          remaining={Number(invoice.remaining_balance ?? 0)}
+          onClose={() => setShowSettleModal(false)}
+          onSettled={async () => {
+            setShowSettleModal(false);
+            setSuccess("✅ تم تسديد الفاتورة من الرصيد على حساب المورد.");
+            await reload();
+          }}
+        />
+      )}
+
       {showReceive && (
         <ReceiveGoodsModal
-          invoice={invoice}
+          invoiceId={invoice.id as number}
+          invoiceNumber={invoice.invoice_number}
           onClose={() => setShowReceive(false)}
           onReceived={async () => {
             setShowReceive(false);

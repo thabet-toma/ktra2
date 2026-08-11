@@ -15,6 +15,7 @@ from rest_framework.test import APIClient
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
 
+from accounting.models import Account, JournalHeader, JournalLine
 from tenants.models import Tenant, Currency, UserCompanyMembership
 from partners.models import Partner
 from inventory.models import Product
@@ -241,3 +242,36 @@ class DealNotPostedDocTest(_Base):
         )
         self.assertEqual(resp.status_code, 200, resp.content)
         self.assertTrue(LogisticsPayment.objects.filter(pk=pay.pk).exists())
+
+    def test_detail_separates_posted_pending_and_supplier_balance(self):
+        ap = Account.objects.create(
+            tenant=self.tenant, code="AP-DEAL", name="ذمم المورد",
+            account_type="Liability", is_active=True,
+        )
+        self.partner.linked_account = ap
+        self.partner.save(update_fields=["linked_account"])
+        deal = self._mk_deal("D-0824", total="1000")
+        posted = self._mk_payment(deal, number=1, amount="400", posted=True)
+        self._mk_payment(deal, number=2, amount="200", posted=False)
+        journal = JournalHeader.objects.create(
+            tenant=self.tenant, transaction_date="2026-07-05",
+            reference_type="LOGISTICS_PAYMENT", reference_id=posted.id,
+            description="دفعة صفقة", is_posted=True,
+        )
+        JournalLine.objects.create(
+            tenant=self.tenant, journal=journal, account=ap, partner=self.partner,
+            debit=Decimal("400.00"), credit=Decimal("0"),
+        )
+        posted.journal = journal
+        posted.save(update_fields=["journal"])
+
+        response = self.client.get(f"/api/logistics/deals/{deal.id}/")
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        self.assertEqual(Decimal(data["posted_paid_amount"]), Decimal("400.00"))
+        self.assertEqual(Decimal(data["unposted_registered_amount"]), Decimal("200.00"))
+        self.assertEqual(Decimal(data["amount_outstanding"]), Decimal("600.00"))
+        self.assertEqual(data["payment_status_summary"], "partially_paid")
+        self.assertEqual(Decimal(data["supplier_balance_before_deal_payments"]), Decimal("0.00"))
+        self.assertEqual(Decimal(data["supplier_balance_after_deal_payments"]), Decimal("-400.00"))
+        self.assertEqual(Decimal(data["supplier_balance_current"]), Decimal("-400.00"))

@@ -47,6 +47,8 @@ class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     uom_name = serializers.CharField(source='uom_id', read_only=True)
     attachments = serializers.SerializerMethodField()
+    reserved_quantity = serializers.SerializerMethodField()
+    available_quantity = serializers.SerializerMethodField()
 
     stock_status = serializers.SerializerMethodField()
     # تجميع البراندات: مفتاح الصنف الفرعي (للشجرة/الجرد/الجدول) + اسم العرض (الاسم+
@@ -70,8 +72,14 @@ class ProductSerializer(serializers.ModelSerializer):
             'category', 'category_name', 'uom_id', 'uom_name',
             'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level',
             'is_serialized', 'is_service',
+            # THA-24: سياسة الكفالة على الصنف — تقرأها الكفالة عند ترحيل البيع،
+            # ويحرّرها المستخدم من كرت الصنف. بلا إدراجها هنا يبتلع DRF قيمتها
+            # في الكتابة بصمت فيبدو الحقل محفوظاً وهو ليس كذلك.
+            'warranty_months', 'supplier_warranty_months',
             'is_for_sale_online', 'online_price', 'online_description',
-            'quantity_on_hand', 'avg_cost',
+            'quantity_on_hand', 'reserved_quantity', 'available_quantity', 'avg_cost',
+            # كرت الصنف: سعر البيع الافتراضي — قابل للتحرير بجانب التكلفة المحسوبة.
+            'sale_price',
             'purchased_qty', 'avg_monthly_sales',
             'stock_status', 'group_key', 'display_name', 'has_group',
             'created_at',
@@ -82,6 +90,15 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_group_key(self, obj):
         from .services import product_group_key
         return product_group_key(obj)
+
+    def get_reserved_quantity(self, obj):
+        reserved = self.context.get('reserved_quantity_map', {}).get(obj.id, 0)
+        return str(reserved)
+
+    def get_available_quantity(self, obj):
+        from decimal import Decimal as _D
+        reserved = _D(str(self.context.get('reserved_quantity_map', {}).get(obj.id, 0)))
+        return str((_D(str(obj.quantity_on_hand or 0)) - reserved).quantize(_D('0.0001')))
 
     def get_display_name(self, obj):
         from .services import product_display_name
@@ -113,7 +130,42 @@ class ProductSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'name_ar': 'اسم الصنف مطلوب — أدخل الاسم بالعربية أو بالإنجليزية.'}
             )
+        self._validate_barcode_unique(attrs)
         return attrs
+
+    def _validate_barcode_unique(self, attrs):
+        """الباركود يجب أن يميّز صنفاً واحداً في الشركة — وإلا فقد معناه.
+
+        العمود ليس فريداً في المخطّط ولن يُجعَل كذلك: بياناتٌ قديمة تحمل تكراراً،
+        وقيدٌ فريد يمنع حفظ أي صنف منها. الحرس هنا على **ما يُكتَب**: تكرارٌ قائم
+        يبقى كما هو حتى يُحرَّر صاحبه.
+        """
+        if 'barcode' not in attrs:
+            return
+        barcode = (attrs.get('barcode') or '').strip()
+        if not barcode:
+            return
+        tenant_id = getattr(self.instance, 'tenant_id', None)
+        if tenant_id is None:
+            request = self.context.get('request')
+            if request is None:
+                return
+            from core.tenant_utils import get_tenant
+            tenant = get_tenant(request)
+            if tenant is None:
+                return
+            tenant_id = tenant.TenantID
+        clash = Product.objects.filter(tenant_id=tenant_id, barcode=barcode)
+        if self.instance is not None:
+            clash = clash.exclude(pk=self.instance.pk)
+        other = clash.only('sku', 'name_ar', 'name_en').first()
+        if other is not None:
+            raise serializers.ValidationError({
+                'barcode': (
+                    f'الباركود «{barcode}» مستخدم للصنف '
+                    f'«{other.name_ar or other.name_en or other.sku}».'
+                )
+            })
 
     def get_attachments(self, obj):
         attachment_map = self.context.get('product_attachments')
@@ -141,13 +193,23 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class ProductLookupSerializer(ProductSerializer):
-    """Small, explicit contract for invoice/deal product pickers."""
+    """Small, explicit contract for invoice/deal product pickers.
+
+    يجب أن يغطّي **كل** ما تقرؤه شاشات الفواتير من الصنف، وإلا رجعت تلك الشاشات
+    إلى العقد الكامل فتجلب لكل صنف تحليلاتٍ وحقولَ كرتٍ لا تعرضها (قياس على
+    1490 صنفاً: 1,145 كيلوبايت / 1,249 مِلّي ثانية مقابل 609 / 331).
+    """
 
     class Meta(ProductSerializer.Meta):
         fields = [
-            'id', 'sku', 'name_ar', 'name_en', 'display_name',
+            'id', 'sku', 'barcode', 'name_ar', 'name_en', 'display_name',
             'category', 'category_name', 'hs_code', 'min_stock_level',
-            'quantity_on_hand', 'avg_cost', 'is_for_sale_online',
+            'quantity_on_hand', 'reserved_quantity', 'available_quantity',
+            'avg_cost', 'sale_price', 'is_service', 'is_serialized',
+            # THA-24: نافذة البطاقة اليدوية تملأ المدة من سياسة الصنف المختار،
+            # فلا يعيد المستخدم كتابة ما تعرفه المنظومة.
+            'warranty_months', 'supplier_warranty_months',
+            'is_for_sale_online',
             'online_price', 'online_description', 'attachments',
         ]
 

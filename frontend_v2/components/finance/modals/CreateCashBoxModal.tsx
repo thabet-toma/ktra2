@@ -58,22 +58,22 @@ export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, 
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
+            <div className="bg-[var(--color-surface)] rounded-lg p-6 w-full max-w-md">
                 <div className="flex justify-between items-center mb-4">
                     <div>
                         <h2 className="text-xl font-bold dark:text-white">إنشاء صندوق كاش جديد</h2>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
                             يُنشأ الصندوق هنا، ويُنشأ له تلقائياً حساب في شجرة المحاسبة بنفس الاسم (حساب نقدية).
                         </p>
                     </div>
-                    <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">
+                    <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
                         <X className="w-6 h-6" />
                     </button>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
                             اسم الصندوق
                         </label>
                         <input
@@ -87,7 +87,7 @@ export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, 
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
                             العملة
                         </label>
                         <select
@@ -105,7 +105,7 @@ export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, 
                         <button
                             type="button"
                             onClick={onClose}
-                            className="mr-2 px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md dark:text-gray-300 dark:hover:bg-gray-700"
+                            className="mr-2 px-4 py-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] rounded-md"
                         >
                             إلغاء
                         </button>

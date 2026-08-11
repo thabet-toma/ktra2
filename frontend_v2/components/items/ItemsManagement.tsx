@@ -34,6 +34,7 @@ const ORDER_FIELD: Record<string, string> = {
   name_ar: "name_ar",
   qty: "quantity_on_hand",
   avg_cost: "avg_cost",
+  sale_price: "sale_price",
   min: "min_stock_level",
 };
 
@@ -258,12 +259,35 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         return <span title="المخزون الحالي" style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
       }
     },
+    // T-RESERVE: المحجوز لطلبيات الزبائن المؤكَّدة السارية — البيع من «المتاح» لا
+    // من الرصيد، فبقاؤه مخفياً كان يجعل الحجز غير مرئي في شاشة الأصناف.
+    { key: "reserved", header: "محجوز", width: "80px", align: "center", numeric: true,
+      render: (p) => {
+        const reserved = Number(p.reserved_quantity || 0);
+        if (!reserved) return <span className="text-[var(--aseel-ink-soft)]">—</span>;
+        return (
+          <span title="محجوز بطلبيات زبائن مؤكَّدة سارية"
+            style={{ color: "var(--aseel-warn, #b06800)", fontWeight: 600 }}>
+            {formatQuantity(reserved)}
+          </span>
+        );
+      }
+    },
+    { key: "available", header: "المتاح", width: "80px", align: "center", numeric: true,
+      render: (p) => (
+        <span title="المتاح للبيع = الكمية المتبقية − المحجوز">
+          {formatQuantity(p.available_quantity ?? p.quantity_on_hand)}
+        </span>
+      )
+    },
     { key: "name_ar", header: "اسم الصنف", sortable: true, render: (p) => (
       // FEAT-3: اسم الصنف يفتح بطاقة الصنف (الفواتير المرتبطة + دفتر الحركة).
       <button
         type="button"
         className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
         title="عرض بطاقة الصنف"
+        data-ctx-item-id={p.id}
+        data-ctx-item-name={p.display_name || p.name_ar || p.name_en || ""}
         onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
       >
         {p.display_name || p.name_ar || p.name_en || "—"}
@@ -279,6 +303,13 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     ) },
     { key: "avg_cost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true, sortable: true,
       render: (p) => <>{fmt(p.avg_cost)}</> },
+    // كرت الصنف: سعر البيع المحفوظ — يُقرأ بجانب التكلفة بلا فتح الكرت.
+    { key: "sale_price", header: "سعر البيع", width: "100px", align: "center", numeric: true, sortable: true,
+      render: (p) => (
+        <span title="سعر البيع الافتراضي المحفوظ على الصنف">
+          {p.sale_price != null && p.sale_price !== "" ? formatMoney(p.sale_price) : "—"}
+        </span>
+      ) },
     { key: "min", header: "الحد الأدنى", width: "90px", align: "center", sortable: true,
       render: (p) => <>{p.min_stock_level ?? "—"}</> },
     { key: "status", header: "الحالة", width: "80px", align: "center",
@@ -317,7 +348,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   }
 
   return (
-    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", padding: "8px 12px" }} data-skin="aseel">
+    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", padding: "8px 12px" }}>
       {/* Tabs Header */}
       <div style={{ display: "flex", gap: "16px", borderBottom: "1px solid var(--aseel-border)", marginBottom: "8px" }}>
         <button

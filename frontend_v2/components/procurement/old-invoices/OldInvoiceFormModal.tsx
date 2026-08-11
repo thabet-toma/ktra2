@@ -5,6 +5,7 @@ import {
     Calculator, ExternalLink, Building // ✅ تمت إضافة Building
 } from 'lucide-react';
 import { cloudinaryService } from '@/services/cloudinaryService';
+import { usePasteImageUpload } from '@/utils/clipboardImage';
 import { SupplierSearch } from './SupplierSearch';
 import { ItemSearchModal } from '../price-offers/ItemSearchModal';
 import { ItemsTableSection } from '../../forms/shared/ItemsTableSection';
@@ -256,12 +257,9 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
     };
 
     // File Uploads
-    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (!e.target.files || e.target.files.length === 0) return;
+    const uploadImageFiles = async (files: File[]) => {
         setUploadingImages(true);
-        const files: File[] = Array.from(e.target.files);
         const newUrls: string[] = [];
-
         try {
             for (const file of files) {
                 if (!file.type.startsWith('image/')) continue;
@@ -274,9 +272,17 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
             alert("فشل رفع الصور");
         } finally {
             setUploadingImages(false);
-            e.target.value = '';
         }
     };
+
+    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files || e.target.files.length === 0) return;
+        await uploadImageFiles(Array.from(e.target.files));
+        e.target.value = '';
+    };
+
+    // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف — قبل أي return مبكر (isOpen) للحفاظ على ترتيب الـ hooks.
+    usePasteImageUpload((files) => { void uploadImageFiles(files); }, isOpen && !uploadingImages);
 
     const convertFileToBase64 = (file: File): Promise<string> => {
         return new Promise((resolve, reject) => {

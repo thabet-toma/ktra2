@@ -6,6 +6,7 @@ import { User, DailyPoints, ActivityStatus } from '../types';
 import { pointsHistoryService, activityService } from '../services/firestoreService';
 import { autoDisableScheduler } from '../services/autoDisableScheduler';
 import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
+import { formatDateValue, formatWeekdayName } from '../utils/formatDate';
 
 interface EmployeePointsManagementProps {
     users: User[];
@@ -117,7 +118,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
 
     const getTotalStats = (userId: string) => userStats[userId] || { totalPoints: 0, totalActivityPoints: 0, totalTaskPoints: 0 };
 
-    const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', calendar: 'gregory' });
+    const formatDate = (dateStr: string) => `${formatWeekdayName(dateStr)} ${formatDateValue(dateStr)}`.trim();
 
     const sortedDailyUsers = useMemo(() => {
         return [...dailyUsersPoints].sort((a, b) => {
@@ -148,7 +149,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
     ];
 
     return (
-        <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px', height: '100%' }}>
+        <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px', height: '100%' }}>
             {/* العنوان */}
             <div style={{ paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
                 <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>إدارة نقاط الموظفين</strong>
@@ -279,7 +280,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
             {/* مودال تعديل النقاط */}
             {showAdjustModal && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }}>
-                    <div dir="rtl" data-skin="aseel" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, padding: 20, width: '100%', maxWidth: 400 }}>
+                    <div dir="rtl" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, padding: 20, width: '100%', maxWidth: 400 }}>
                         <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>تعديل النقاط لـ {selectedUser?.name}</strong>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
                             <div>
@@ -306,7 +307,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
             {/* مودال الإعدادات العامة */}
             {showGlobalSettingsModal && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }}>
-                    <div dir="rtl" data-skin="aseel" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, padding: 20, width: '100%', maxWidth: 400 }}>
+                    <div dir="rtl" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, padding: 20, width: '100%', maxWidth: 400 }}>
                         <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>إعداد التعطيل اليومي العام</strong>
                         <p style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)', marginTop: 8 }}>سيُطبَّق على زر النشاط لجميع الموظفين يومياً.</p>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>

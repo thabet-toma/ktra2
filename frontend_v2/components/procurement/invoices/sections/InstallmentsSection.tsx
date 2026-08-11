@@ -7,6 +7,7 @@ import {
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
 import { formatMoney } from '@/utils/formatNumber';
 import { useToast } from '@/contexts/ToastContext';
+import { cloudinaryService } from '@/services/cloudinaryService';
 import type { LocalPayments } from '@/types';
 import {
   clearanceAndLogisticsFeesForGrandTotal,
@@ -134,37 +135,15 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
   const remainingAmount = grandTotal - totalPaidAmount;
   const progressPercentage = grandTotal > 0 ? Math.round((totalPaidAmount / grandTotal) * 100) : 0;
 
-  // دالة الرفع إلى Cloudinary (نفسها)
+  // دالة الرفع إلى Cloudinary عبر مسار الخادم الموحّد (/api/media/upload/)
   const handleFileUpload = async (file: File, index: number) => {
     if (!file) return;
 
-    const CLOUD_NAME = "YOUR_CLOUD_NAME";
-    const UPLOAD_PRESET = "YOUR_UPLOAD_PRESET";
-
     setUploadingIndex(index);
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("upload_preset", UPLOAD_PRESET);
-
     try {
-      const response = await fetch(
-        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
-
-      const data = await response.json();
-
-      if (data.secure_url) {
-        onUpdateInstallment(index, 'bankSlipUrl', data.secure_url);
-      } else {
-        toast("فشل رفع الصورة", "error");
-      }
+      const url = await cloudinaryService.uploadFile(file);
+      onUpdateInstallment(index, 'bankSlipUrl', url);
     } catch (error) {
-      // console suppressed
       toast("حدث خطأ أثناء رفع الصورة", "error");
     } finally {
       setUploadingIndex(null);

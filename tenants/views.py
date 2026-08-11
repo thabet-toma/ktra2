@@ -10,6 +10,8 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
+from core.access import require_perm
+from core.plans import enforce_limits
 from core.tenant_utils import get_tenant
 from .models import Branch, Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
 from .serializers import BranchSerializer, TenantBookSerializer, TenantSettingsSerializer, TenantSerializer, UserCompanyMembershipSerializer
@@ -67,11 +69,20 @@ class TenantSettingsViewSet(viewsets.ModelViewSet):
         if request.method == "GET":
             return Response(TenantSettingsSerializer(settings_obj).data)
 
-        # PUT / PATCH
+        # PUT / PATCH — T-PERM: الكتابة تتطلب «إعدادات الشركة العامة».
+        require_perm(request, "admin.settings.manage", tenant=tenant)
         partial = request.method == "PATCH"
         ser = TenantSettingsSerializer(settings_obj, data=request.data, partial=partial)
         ser.is_valid(raise_exception=True)
+        old_start_day = settings_obj.dashboard_month_start_day
         ser.save()
+        if ser.instance.dashboard_month_start_day != old_start_day:
+            logger.info(
+                "dashboard_month_start updated tenant=%s start_day=%s by_user=%s",
+                tenant.TenantID,
+                ser.instance.dashboard_month_start_day,
+                getattr(request.user, "pk", None),
+            )
         return Response(ser.data)
 
 
@@ -162,20 +173,16 @@ class BranchViewSet(viewsets.ModelViewSet):
         return Response(BranchSerializer(self.get_queryset(), many=True).data)
 
     def _require_manager(self, request, tenant):
-        user = request.user
-        if user.is_superuser:
-            return
-        is_manager = UserCompanyMembership.objects.filter(
-            user=user, tenant=tenant, role="manager"
-        ).exists()
-        if not is_manager:
-            raise PermissionDenied("فقط مدير الشركة يمكنه إدارة الفروع.")
+        # T-PERM: الفروع جزء من إعدادات الشركة.
+        require_perm(request, "admin.settings.manage", tenant=tenant)
 
     def create(self, request, *args, **kwargs):
         tenant = get_tenant(request)
         if not tenant:
             raise DRFValidationError({"tenant": "لا يوجد شركة محددة."})
         self._require_manager(request, tenant)
+        # T-PLANLIMITS: عدد الفروع المسموح به من خطة الشركة.
+        enforce_limits(tenant, "company.branches")
         from .services import create_branch
         try:
             branch = create_branch(
@@ -227,10 +234,17 @@ class TenantViewSet(viewsets.ModelViewSet):
         memberships yet may create their first company. Superusers always may."""
         if user.is_superuser:
             return True
-        memberships = UserCompanyMembership.objects.filter(user=user)
-        if not memberships.exists():
+        # عضوية شركة المثال وصول عام، ولا تُحسب كشركة يملكها المستخدم؛ وإلا
+        # تمنعه من إنشاء شركته الحقيقية الأولى.
+        memberships = UserCompanyMembership.objects.filter(
+            user=user, is_example_access=False,
+        )
+        # الارتباطات الخارجية لا تعني أن المحاسب يملك شركة؛ لذلك لا تمنعه من
+        # إنشاء مكتبه (Tenant مستقل يصبح مديره) للمرة الأولى.
+        owned_memberships = memberships.exclude(role="legal_accountant")
+        if not owned_memberships.exists():
             return True  # bootstrapping the first company
-        return memberships.filter(role="manager").exists()
+        return owned_memberships.filter(role="manager").exists()
 
     def create(self, request, *args, **kwargs):
         if not self._can_create_company(request.user):
@@ -248,20 +262,19 @@ class TenantViewSet(viewsets.ModelViewSet):
         return Response(TenantSerializer(tenant).data, status=status.HTTP_201_CREATED)
 
     # ── إدارة الشركة (task12 M4) ──
-    def _require_company_manager(self, request, tenant):
-        user = request.user
-        if user.is_superuser:
-            return
-        if not UserCompanyMembership.objects.filter(user=user, tenant=tenant, role="manager").exists():
-            raise PermissionDenied("فقط مدير الشركة يمكنه تنفيذ هذا الإجراء.")
+    def _require_company_manager(self, request, tenant, key="admin.members.manage"):
+        """T-PERM: الحَكَم صار الصلاحية لا اسم الدور — فمن يمنحه المدير
+        «إدارة الأعضاء» يديرهم دون أن يصير مديراً. الشركة تُمرَّر صراحةً (من
+        مسار الطلب) فلا يفتح ترويسة X-Tenant-Id باباً لشركة أخرى."""
+        require_perm(request, key, tenant=tenant)
 
     def update(self, request, *args, **kwargs):
         """تعديل بيانات الشركة (الاسم…) — كان مفتوحاً لأي عضو (T12-B3)."""
-        self._require_company_manager(request, self.get_object())
+        self._require_company_manager(request, self.get_object(), "admin.settings.manage")
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
-        self._require_company_manager(request, self.get_object())
+        self._require_company_manager(request, self.get_object(), "admin.settings.manage")
         return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
@@ -270,17 +283,8 @@ class TenantViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _member_payload(m):
-        return {
-            "membership_id": m.id,
-            "user_id": m.user_id,
-            "username": m.user.username,
-            "email": m.user.email or "",
-            "full_name": (f"{m.user.first_name} {m.user.last_name}").strip(),
-            "role": m.role,
-            "is_default": m.is_default,
-            "can_access_import": m.can_access_import,
-            "created_at": m.created_at,
-        }
+        from .services import member_payload
+        return member_payload(m)
 
     @action(detail=True, methods=["get", "post"], url_path="members")
     def members(self, request, pk=None):
@@ -294,6 +298,8 @@ class TenantViewSet(viewsets.ModelViewSet):
             return Response([self._member_payload(m) for m in qs])
 
         self._require_company_manager(request, tenant)
+        # T-PLANLIMITS: عدد أعضاء الشركة المسموح به من خطتها.
+        enforce_limits(tenant, "company.members")
         from django.contrib.auth.models import User as AuthUser
         from django.db.models import Q
 
@@ -302,6 +308,10 @@ class TenantViewSet(viewsets.ModelViewSet):
         valid_roles = {r for r, _ in UserCompanyMembership.ROLE_CHOICES}
         if role not in valid_roles:
             raise DRFValidationError({"role": f"دور غير صالح. المسموح: {sorted(valid_roles)}"})
+        if role == "legal_accountant":
+            raise DRFValidationError({
+                "role": "يُنشأ دور المحاسب القانوني من دورة الارتباط المحمية فقط."
+            })
         if not ident:
             raise DRFValidationError({"username_or_email": "اسم المستخدم أو البريد مطلوب."})
         target = AuthUser.objects.filter(Q(username__iexact=ident) | Q(email__iexact=ident)).first()
@@ -327,10 +337,8 @@ class TenantViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _assert_not_last_manager(tenant, membership):
-        if membership.role != "manager":
-            return
-        others = UserCompanyMembership.objects.filter(tenant=tenant, role="manager").exclude(id=membership.id)
-        if not others.exists():
+        from .services import is_last_manager
+        if is_last_manager(tenant, membership):
             raise DRFValidationError({"detail": "لا يمكن إزالة/تخفيض آخر مدير في الشركة."})
 
     @action(detail=True, methods=["post"], url_path="members/change-role")
@@ -343,6 +351,10 @@ class TenantViewSet(viewsets.ModelViewSet):
         valid_roles = {r for r, _ in UserCompanyMembership.ROLE_CHOICES}
         if role not in valid_roles:
             raise DRFValidationError({"role": f"دور غير صالح. المسموح: {sorted(valid_roles)}"})
+        if role == "legal_accountant":
+            raise DRFValidationError({
+                "role": "يُنشأ دور المحاسب القانوني من دورة الارتباط المحمية فقط."
+            })
         if role != "manager":
             self._assert_not_last_manager(tenant, m)
         m.role = role
@@ -407,6 +419,8 @@ class TenantViewSet(viewsets.ModelViewSet):
         user = request.user
         if not user or not user.is_authenticated:
             return Response([])
+        from .services import ensure_example_company_access
+        ensure_example_company_access(user)
         qs = UserCompanyMembership.objects.filter(user=user).select_related("tenant").order_by("tenant__CompanyName")
         return Response(UserCompanyMembershipSerializer(qs, many=True).data)
 

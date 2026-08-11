@@ -42,6 +42,9 @@ export interface AseelAutocompleteProps {
   onInfo?: (id: string | number) => void;
   /** عند توفره: خيار «+ إضافة …» يثبت النص المكتوب كصنف حر/جديد */
   onFreeText?: (text: string) => void;
+  /** نص خيار النص الحر — الافتراضي «إضافة … كصنف جديد». يُمرَّر له النص المكتوب
+   *  كي تصف كل شاشة ما سيحدث فعلاً (مورد مبدئي، بند نصّي…) لا «صنف» دائماً. */
+  createLabel?: (text: string) => string;
   placeholder?: string;
   disabled?: boolean;
   maxResults?: number;
@@ -74,6 +77,7 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
   onPick,
   onInfo,
   onFreeText,
+  createLabel,
   placeholder = 'اكتب للبحث…',
   disabled,
   maxResults = MAX_DEFAULT,
@@ -258,7 +262,11 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
               onMouseDown={(e) => { e.preventDefault(); commit(matches.length); }}
             >
               <Plus className="h-3 w-3" />
-              <span>إضافة «{(query ?? '').trim()}» كصنف جديد</span>
+              <span>
+                {createLabel
+                  ? createLabel((query ?? '').trim())
+                  : `إضافة «${(query ?? '').trim()}» كصنف جديد`}
+              </span>
             </button>
           )}
         </div>,

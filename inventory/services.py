@@ -74,6 +74,65 @@ def product_display_name(product) -> str:
 INBOUND_TYPES = {'IN', 'ADJUST_IN', 'RETURN_IN'}
 OUTBOUND_TYPES = {'OUT', 'ADJUST_OUT', 'RETURN_OUT'}
 
+
+def warehouse_stock_summary(*, tenant_id: int, warehouse_id: int) -> dict:
+    """رصيد مستودع وقيمته بالتكلفة المتوسطة الحالية للصنف."""
+    from django.db.models import Sum
+
+    movement_totals = (
+        StockMovement.objects.filter(
+            tenant_id=tenant_id,
+            warehouse_id=warehouse_id,
+            product__tenant_id=tenant_id,
+        )
+        .values('product_id', 'movement_type')
+        .annotate(total_quantity=Sum('quantity'))
+    )
+    balances: dict[int, Decimal] = {}
+    for row in movement_totals:
+        quantity = Decimal(str(row['total_quantity'] or 0))
+        sign = Decimal('1') if row['movement_type'] in INBOUND_TYPES else Decimal('-1')
+        balances[row['product_id']] = (
+            balances.get(row['product_id'], Decimal('0')) + (sign * quantity)
+        )
+
+    products = Product.objects.filter(
+        tenant_id=tenant_id,
+        id__in=[product_id for product_id, quantity in balances.items() if quantity],
+    ).in_bulk()
+    items = []
+    total_value = Decimal('0')
+    for product_id, quantity in balances.items():
+        if quantity == 0:
+            continue
+        product = products.get(product_id)
+        if product is None:
+            continue
+        quantity = quantity.quantize(Decimal('0.0001'))
+        avg_cost = Decimal(str(product.avg_cost or 0)).quantize(Decimal('0.0001'))
+        stock_value = (quantity * avg_cost).quantize(Decimal('0.01'))
+        total_value += stock_value
+        items.append({
+            'product_id': product.id,
+            'sku': product.sku,
+            'name': product_display_name(product),
+            'quantity': str(quantity),
+            'avg_cost': str(avg_cost),
+            'stock_value': str(stock_value),
+        })
+    items.sort(key=lambda item: (item['sku'], item['product_id']))
+    logger.info(
+        "warehouse_stock_summary tenant=%s warehouse=%s item_count=%s",
+        tenant_id, warehouse_id, len(items),
+    )
+    return {
+        'items': items,
+        'item_count': len(items),
+        'total_value': str(total_value.quantize(Decimal('0.01'))),
+        'valuation_method': 'moving_average_cost',
+    }
+
+
 # task14 M2 (DEF-A2/A4): توليد رقم صنف خادمي قصير — أرقام صرفة تسلسلية لكل شركة
 SKU_PAD = 6
 
@@ -284,6 +343,8 @@ _REFERENCE_LABELS = {
     "CLEARANCE": "تخليص جمركي",
     "WAREHOUSE_TRANSFER": "تحويل مستودعي",
     "STOCKTAKE": "جرد",
+    "GOODS_RECEIPT": "سند استلام",
+    "DELIVERY_NOTE": "سند تسليم",
     "MANUAL": "حركة يدوية",
 }
 
@@ -676,12 +737,69 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
         net = Decimal(str(out_q)) - Decimal(str(ret_q))
         return (net / Decimal(divisor)).quantize(Decimal('0.01'))
 
+    # T-RESERVE: المحجوز بطلبيات الزبائن المؤكَّدة السارية — نفس مصدر جدول الأصناف
+    # (`ProductSerializer`) فلا رقمان لحقيقة واحدة، والمتاح = الرصيد − المحجوز.
+    from sales.services import reserved_quantity_map
+    reserved = Decimal(str(
+        reserved_quantity_map(tenant_id, [product_id]).get(product_id, 0)))
+
+    # كرت الصنف الاحترافي: سعر البيع (المحفوظ أو آخر سعر فعلي) مقابل التكلفة،
+    # فالربح والهامش يُشتقّان خادمياً — لا تحسبهما الواجهة فيختلف رقمان لحقيقة واحدة.
+    from sales.services import last_sale_price as _last_sale_price
+    from core.pricing import PriceStrategy, resolve_purchase_price
+
+    sale_price = Decimal(str(p.sale_price)) if p.sale_price is not None else None
+    last_sale = _last_sale_price(tenant_id=tenant_id, product_id=product_id)
+    last_sale_val = Decimal(last_sale['unit_price']) if last_sale['unit_price'] else None
+
+    last_purchase = resolve_purchase_price(
+        tenant_id=tenant_id, product_id=product_id, strategy=PriceStrategy.LAST_PURCHASE)
+    # الرجوع لمتوسط التكلفة ليس «آخر سعر شراء» — فبلا تاريخ شراء يبقى فارغاً.
+    last_purchase_val = (
+        Decimal(last_purchase['unit_price'])
+        if last_purchase['unit_price'] and last_purchase['strategy_used'] != PriceStrategy.DEFAULT
+        else None
+    )
+
+    if sale_price is not None:
+        effective_sale, sale_source = sale_price, 'product'
+    elif last_sale_val is not None:
+        effective_sale, sale_source = last_sale_val, 'last_invoice'
+    else:
+        effective_sale, sale_source = None, None
+
+    profit = (effective_sale - avg_cost) if effective_sale is not None else None
+    margin = (
+        (profit / effective_sale * 100).quantize(Decimal('0.01'))
+        if profit is not None and effective_sale else None
+    )
+
     return {
         'id': p.id,
         'sku': p.sku,
         'name': p.name_ar or p.name_en or p.sku,
+        'brand': (p.brand or '').strip() or None,
+        'uom': p.uom_legacy or None,
+        'barcode': p.barcode or None,
+        'is_service': p.is_service,
+        'min_stock_level': p.min_stock_level,
         'category': p.category.name if p.category_id else None,
+        'sale_price': str(sale_price) if sale_price is not None else None,
+        'last_sale_price': str(last_sale_val) if last_sale_val is not None else None,
+        'last_sale_invoice': last_sale['invoice_number'],
+        'last_sale_date': last_sale['invoice_date'],
+        'last_purchase_price': str(last_purchase_val) if last_purchase_val is not None else None,
+        'effective_sale_price': str(effective_sale) if effective_sale is not None else None,
+        'sale_price_source': sale_source,
+        'profit_per_unit': str(profit) if profit is not None else None,
+        'profit_margin_pct': str(margin) if margin is not None else None,
+        'sale_valuation': (
+            str((on_hand * effective_sale).quantize(Decimal('0.01')))
+            if effective_sale is not None else None
+        ),
         'quantity_on_hand': str(on_hand),
+        'reserved_quantity': str(reserved),
+        'available_quantity': str((on_hand - reserved).quantize(Decimal('0.0001'))),
         'avg_cost': str(avg_cost),
         'inventory_valuation': str((on_hand * avg_cost).quantize(Decimal('0.01'))),
         'purchased_qty': str(purchased['q'] or 0),

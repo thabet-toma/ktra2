@@ -1,6 +1,10 @@
 /**
  * N5-T4 — ItemFormAseel (F6) — inside-out نمط Aseel مع 6 صفحات
  * المرجع: المخازن.txt:11-25، القالب: SalesInvoiceEditor.tsx
+ *
+ * كرت الصنف الموحّد: صار هذا المكوّن هو الكرت الوحيد — الإضافة والتعديل والعرض.
+ * تبويبات «نظرة عامة» و«الفواتير المرتبطة» و«حركة المخزون» تأتي من
+ * `useProductInsights` (كانت حبيسة صفحة `ProductProfilePage` المنفصلة).
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
@@ -17,6 +21,10 @@ import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Info, Upload
 import { CategoryPicker } from "../inventory/CategoryPicker";
 import { ValuePicker } from "../inventory/ValuePicker";
 import { cloudinaryService } from "../../services/cloudinaryService";
+import { usePasteImageUpload } from "../../utils/clipboardImage";
+import { useProductInsights } from "./ProductInsightTabs";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { completeEan13, ean13Svg, isValidEan13, printBarcodeLabels } from "../../utils/barcode";
 
 const pendingN8 = (msg: string) => (
   <div className="aseel-banner" style={{
@@ -33,9 +41,16 @@ const pendingN8 = (msg: string) => (
 type Props = {
   productId: number | null;
   duplicateId?: number | null;
+  /** سجلّات التنقّل (Ctrl+PgUp/PgDn) — تُترك فارغة حين يُفتح الكرت بمساره المباشر. */
   products: SqlProduct[];
   onSaved: () => void;
   onCancel: () => void;
+  /** أزرار إضافية على الشريط (مثل «تكلفة المنتجات» حين يُفتح الكرت كصفحة). */
+  extraActions?: AseelToolbarAction[];
+  /** نصّ زر الإلغاء — «عودة» حين يكون الكرت صفحة قائمة بذاتها. */
+  cancelLabel?: string;
+  /** التبويب الابتدائي (روابط «ذكر لمنتج» تفتح حركة المخزون مباشرةً). */
+  initialTab?: string;
 };
 
 type PriceTier = { price: string; currency: string; tax_inclusive: boolean };
@@ -56,10 +71,20 @@ const extractDatasheets = (p: Record<string, unknown>): DatasheetRef[] =>
 type FormState = {
   sku: string; catalog_no: string; name_ar: string; name_en: string;
   brand: string;
+  /** T-SERIAL: باركود الصنف (EAN-13) — فريد داخل الشركة، يحرسه الخادم. */
+  barcode: string;
+  /** T-SERIAL: تتبّع وحدات الصنف بأرقام تسلسلية. */
+  is_serialized: boolean;
+  /** THA-24: سياسة كفالة الزبون بالأشهر — فارغ = بلا كفالة، فلا بطاقة تلقائية. */
+  warranty_months: string;
+  /** THA-24: كفالة المورد لنا بالأشهر — تُحسب من تاريخ فاتورة الشراء. */
+  supplier_warranty_months: string;
   description: string; location: string;
   uom_primary: string; uom2: string; uom2_factor: string;
   uom3: string; uom3_factor: string;
   min_stock_level: string; max_stock_level: string; reorder_level: string;
+  /** سعر البيع الافتراضي المحفوظ على الصنف (بجانب سعر التكلفة المحسوب). */
+  sale_price: string;
   sale_tiers: PriceTier[];
   purchase_tiers: PriceTier[];
   sale_account: string; sale_return_account: string;
@@ -74,10 +99,13 @@ type FormState = {
 const blankForm = (): FormState => ({
   sku: "", catalog_no: "", name_ar: "", name_en: "",
   brand: "",
+  barcode: "", is_serialized: false,
+  warranty_months: "", supplier_warranty_months: "",
   description: "", location: "",
   uom_primary: "عدد", uom2: "", uom2_factor: "1",
   uom3: "", uom3_factor: "1",
   min_stock_level: "", max_stock_level: "", reorder_level: "",
+  sale_price: "",
   sale_tiers: Array.from({ length: 5 }, blankTier),
   purchase_tiers: Array.from({ length: 5 }, blankTier),
   sale_account: "", sale_return_account: "",
@@ -102,9 +130,14 @@ const ITEM_TYPES = [
   { v: "composite", l: "تجميعي" },
 ];
 
-export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, products, onSaved, onCancel }) => {
+export const ItemFormAseel: React.FC<Props> = ({
+  productId, duplicateId, products, onSaved, onCancel, extraActions = [], cancelLabel = "إلغاء",
+  initialTab,
+}) => {
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
+  // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة/أرقام تسلسلية) — يتبع الصنف المعروض.
+  const insights = useProductInsights(currentId, { isSerialized: form.is_serialized });
   // W10: صنف موجود (تعديل) — اسمه يُحرَّر مباشرةً بحقل نصّي بدل منتقي «اختر/أضف»
   // الذي كان يحبس الاسم في قائمة منسدلة (نقر «+» يمسح القيمة) فيبدو «غير قابل للتعديل».
   const isExistingProduct = productId != null;
@@ -114,10 +147,7 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
   const [lastKey, setLastKey] = useState("—");
   const [dsUploading, setDsUploading] = useState(false);
 
-  const handleDatasheetUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const uploadDatasheetFile = async (file: File) => {
     setDsUploading(true); setErr(null); setMsg(null);
     try {
       const url = await cloudinaryService.uploadFile(file);
@@ -129,6 +159,16 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
       setDsUploading(false);
     }
   };
+
+  const handleDatasheetUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    await uploadDatasheetFile(file);
+  };
+
+  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف.
+  usePasteImageUpload((files) => { void uploadDatasheetFile(files[0]); }, !dsUploading);
 
   const handleDatasheetRemove = async (index: number) => {
     const item = form.datasheets[index];
@@ -148,11 +188,59 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
   const patch = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  // ── T-SERIAL: الباركود ─────────────────────────────────────────────────
+  const [barcodeBusy, setBarcodeBusy] = useState(false);
+  const [labelCopies, setLabelCopies] = useState("1");
+  const barcodeValue = form.barcode.trim();
+  const barcodeValid = isValidEan13(barcodeValue);
+
+  /** رقم كتبه المستخدم → EAN-13 كامل. القاعدة محلّية: خانة التحقق حسابٌ لا استعلام. */
+  const handleCompleteBarcode = () => {
+    const out = completeEan13(form.barcode);
+    if (!out) { setErr("اكتب رقماً أولاً، أو استخدم «توليد تلقائي»."); return; }
+    setErr(null);
+    patch("barcode", out.code);
+    setMsg(`${out.note} احفظ (F12) لتثبيته على الصنف.`);
+  };
+
+  /** رقم عشوائي غير مستخدم — خادمي عمداً: التفرّد يُفحص على قاعدة البيانات لا على الشاشة. */
+  const handleGenerateBarcode = async () => {
+    setBarcodeBusy(true); setErr(null); setMsg(null);
+    try {
+      const barcode = await inventoryApi.generateBarcode();
+      patch("barcode", barcode);
+      setMsg("وُلِّد باركود غير مستخدم — احفظ (F12) لتثبيته على الصنف.");
+    } catch (ex: unknown) {
+      setErr(ex instanceof Error ? ex.message : "تعذّر توليد الباركود");
+    } finally {
+      setBarcodeBusy(false);
+    }
+  };
+
+  const handlePrintLabels = () => {
+    if (!barcodeValid) { setErr("لا يمكن طباعة ملصق بلا باركود صالح."); return; }
+    const ok = printBarcodeLabels([{
+      barcode: barcodeValue,
+      name: form.name_ar || form.name_en || form.sku || "—",
+      sku: form.sku || null,
+      price: formatMoney(insights.profile?.effective_sale_price ?? form.sale_price, ""),
+    }], Number(labelCopies) || 1);
+    if (!ok) setErr("الرجاء السماح بالنوافذ المنبثقة (Pop-ups) للطباعة");
+    else setErr(null);
+  };
+
   const applyProduct = useCallback((p: Record<string, unknown>, isDuplicate = false) => {
     setForm((prev) => ({
       ...prev,
       sku: isDuplicate ? "" : String(p.sku ?? ""),
-      catalog_no: isDuplicate ? "" : String(p.catalog_no ?? p.barcode ?? ""),
+      catalog_no: isDuplicate ? "" : String(p.catalog_no ?? ""),
+      // الباركود يميّز صنفاً واحداً في الشركة — النسخة تبدأ بلا باركود لا بباركود أخيها.
+      barcode: isDuplicate ? "" : String(p.barcode ?? ""),
+      is_serialized: Boolean(p.is_serialized),
+      // الكفالة سياسة الصنف لا حالة نسخةٍ منه — تُنسَخ مع النسخة لبراند آخر.
+      warranty_months: p.warranty_months != null ? String(p.warranty_months) : "",
+      supplier_warranty_months:
+        p.supplier_warranty_months != null ? String(p.supplier_warranty_months) : "",
       // التكرار (براند آخر): الاسم والتصنيف يبقيان كما هما، فيُحفظ المنتج تحت نفس
       // التصنيف بجانب إخوته؛ يُفرّغ البراند فقط ليكتبه المستخدم.
       name_ar: String(p.name_ar ?? ""),
@@ -164,9 +252,12 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
       min_stock_level: p.min_stock_level != null ? String(p.min_stock_level) : "",
       max_stock_level: p.max_stock_level != null ? String(p.max_stock_level) : "",
       reorder_level: p.reorder_level != null ? String(p.reorder_level) : "",
+      sale_price: p.sale_price != null ? String(p.sale_price) : "",
       category: p.category ? Number(p.category) : null,
       category_name: String(p.category_name ?? ""),
-      item_type: String(p.item_type ?? "goods"),
+      // is_service هو حقل الخادم الفعلي (يوجّه الترحيل لحساب مبيعات الخدمات)؛
+      // «نوع الصنف» في الواجهة يُشتقّ منه لا من حقل item_type غير الموجود خادمياً.
+      item_type: p.is_service ? "service" : "goods",
       sale_tiers: (p.sale_tiers as PriceTier[] | undefined) ?? prev.sale_tiers,
       purchase_tiers: (p.purchase_tiers as PriceTier[] | undefined) ?? prev.purchase_tiers,
       sale_account: String(p.sale_account_override ?? ""),
@@ -220,7 +311,19 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
         name_en: form.name_en || null,
         brand: form.brand.trim(),
         min_stock_level: form.min_stock_level ? Number(form.min_stock_level) : null,
+        // سعر البيع: فارغ = لا سعر محفوظ (البطاقة ترجع لآخر سعر بيع فعلي).
+        sale_price: form.sale_price.trim() ? Number(form.sale_price) : null,
         category: categoryId,
+        // is_service: الحقل الفعلي الذي يقرأه الترحيل المحاسبي (مبيعات خدمات لا بضاعة).
+        is_service: form.item_type === "service",
+        // T-SERIAL: الباركود فارغ = null لا "" — كي لا يتصادم صنفان بلا باركود.
+        barcode: form.barcode.trim() || null,
+        is_serialized: form.is_serialized,
+        // THA-24: فارغ = null لا 0 — «بلا كفالة» و«كفالة صفر شهر» شيء واحد،
+        // وnull هو ما يقرأه محرّك الكفالة فلا يُنشئ بطاقة.
+        warranty_months: form.warranty_months.trim() ? Number(form.warranty_months) : null,
+        supplier_warranty_months: form.supplier_warranty_months.trim()
+          ? Number(form.supplier_warranty_months) : null,
         // روابط الداتا شيت — يلتقطها الخادم في _handle_attachments (خارج حقول الـserializer).
         datasheet_urls: form.datasheets.map((d) => d.url),
       };
@@ -242,6 +345,8 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
         const refreshed = await inventoryApi.getProduct(savedId) as Record<string, unknown>;
         patch("datasheets", extractDatasheets(refreshed));
       } catch { /* تجاهل */ }
+      // النظرة العامة تُقرأ من الخادم — أعِد تحميلها كي يظهر سعر البيع الجديد وربحه.
+      insights.reload();
       onSaved();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
@@ -275,8 +380,12 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)",
       icon: saving ? <Loader2 className="animate-spin" /> : <Save />,
       onClick: !saving ? () => void handleSave() : undefined, disabled: saving },
-    { key: "cancel", label: "إلغاء", icon: <X />, onClick: onCancel, danger: true },
+    ...extraActions,
+    { key: "cancel", label: cancelLabel, icon: <X />, onClick: onCancel, danger: true },
   ];
+
+  // صنف جديد يفتح على حقول الإدخال؛ الصنف المحفوظ يفتح على نظرته العامة.
+  const openingTab = initialTab ?? (productId == null ? "general" : "overview");
 
   const banner = (err || msg) ? (
     <div className={`aseel-banner ${err ? "aseel-banner--err" : "aseel-banner--ok"}`}>
@@ -296,6 +405,74 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
         onChange={(e) => patch("item_type", e.target.value)}>
         {ITEM_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
       </select>)}
+      {/* T-SERIAL: الباركود — توليد (من رقم مكتوب أو عشوائي) ومعاينة وطباعة ملصق. */}
+      {fld("الباركود (EAN-13)",
+        <div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <input className="aseel-input" style={{ flex: "1 1 170px", direction: "ltr", minWidth: 150 }}
+              value={form.barcode} onChange={(e) => patch("barcode", e.target.value)}
+              placeholder="اكتب رقماً ثم «إكمال»، أو ولّد تلقائياً" inputMode="numeric" />
+            <button type="button" className="aseel-addrow" style={{ margin: 0 }}
+              title="يُكمل الرقم المكتوب إلى 13 خانة بخانة تحقق سليمة"
+              onClick={handleCompleteBarcode}>إكمال</button>
+            <button type="button" className="aseel-addrow" style={{ margin: 0 }}
+              title="باركود عشوائي غير مستخدم في هذه الشركة"
+              disabled={barcodeBusy} onClick={() => void handleGenerateBarcode()}>
+              {barcodeBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+              توليد تلقائي
+            </button>
+          </div>
+          {barcodeValue && !barcodeValid && (
+            <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-warn, #b8800a)", marginTop: 4 }}>
+              ليس باركود EAN-13 صالحاً (13 رقماً بخانة تحقق) — اضغط «إكمال» لتصحيحه.
+              يُحفَظ كما هو، لكن لا ملصق له.
+            </div>
+          )}
+          {barcodeValid && (
+            <div style={{ marginTop: 6 }}>
+              {/* المُدخَل أرقام فقط (isValidEan13) والمُخرَج نصّ SVG من الوحدة نفسها. */}
+              <div style={{ direction: "ltr", lineHeight: 0 }}
+                dangerouslySetInnerHTML={{ __html: ean13Svg(barcodeValue, { moduleWidth: 1.6, barHeight: 38, fontSize: 9 }) }} />
+              <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
+                <span style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>عدد النسخ</span>
+                <input className="aseel-input" type="number" min="1" max="200" style={{ width: 70 }}
+                  value={labelCopies} onChange={(e) => setLabelCopies(e.target.value)} />
+                <button type="button" className="aseel-addrow" style={{ margin: 0 }}
+                  onClick={handlePrintLabels}>طباعة ملصق</button>
+              </div>
+            </div>
+          )}
+        </div>, 2)}
+      {/* T-SERIAL: التتبّع بالرقم التسلسلي — بجانب «نوع الصنف» (is_service) لأنهما
+          معاً يحدّدان ما إذا كان للصنف وحدات مادّية تُتتبَّع أصلاً. */}
+      {/* غلاف span لا label: `fld` يلفّ الحقل بـ<label> أصلاً، و<label> داخل
+          <label> يوصّل النقرة مرّتين فيعود المربّع كما كان — أي زرّ لا يعمل. */}
+      {fld("تتبّع بالرقم التسلسلي",
+        <span style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 30 }}>
+          <input type="checkbox" checked={form.is_serialized}
+            disabled={form.item_type === "service"}
+            onChange={(e) => patch("is_serialized", e.target.checked)} />
+          <span style={{ fontSize: "var(--aseel-fs-sm)" }}>
+            {form.item_type === "service"
+              ? "الخدمة بلا وحدات تُتتبَّع"
+              : "كل وحدة برقمها — يظهر تبويب «الأرقام التسلسلية»"}
+          </span>
+        </span>)}
+      {/* THA-24: سياسة الكفالة — بجانب التتبّع بالرقم التسلسلي لأن البطاقة
+          التلقائية لا تُنشأ إلا لوحدةٍ مُرقَّمة: المدة بلا تتبّعٍ بالأرقام تبقى
+          سياسةً تُقرأ عند الاستقبال يدوياً. فارغ = بلا كفالة. */}
+      {fld("كفالة الزبون (أشهر)",
+        <input className="aseel-input" type="number" min="0" max="600" step="1"
+          value={form.warranty_months}
+          placeholder="فارغ = بلا كفالة"
+          title="تُنشأ بطاقة كفالة تلقائياً لكل وحدة مُرقَّمة تُباع من هذا الصنف، بدايتها تاريخ فاتورة البيع"
+          onChange={(e) => patch("warranty_months", e.target.value)} />)}
+      {fld("كفالة المورد لنا (أشهر)",
+        <input className="aseel-input" type="number" min="0" max="600" step="1"
+          value={form.supplier_warranty_months}
+          placeholder="فارغ = بلا كفالة مورد"
+          title="تُحسب من تاريخ فاتورة الشراء — يراها موظف الكاونتر فلا تتحمّل الشركة كلفة يتحمّلها المورد"
+          onChange={(e) => patch("supplier_warranty_months", e.target.value)} />)}
       {fld(isExistingProduct ? "اسم المنتج" : "اسم المنتج (اختر موجوداً لبراند آخر، أو اكتب جديداً)",
         isExistingProduct
           ? <input className="aseel-input" value={form.name_ar}
@@ -431,9 +608,39 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
     </div>
   );
 
+  // سعر البيع المحفوظ مقابل التكلفة المحسوبة — الربح والهامش يُحسبان فوراً أثناء
+  // الكتابة (معاينة فقط؛ القيمة المعتمدة بعد الحفظ تأتي من الخادم في «نظرة عامة»).
+  const avgCost = Number(insights.profile?.avg_cost ?? 0);
+  const salePriceNum = form.sale_price.trim() ? Number(form.sale_price) : null;
+  const previewProfit = salePriceNum != null && Number.isFinite(salePriceNum) ? salePriceNum - avgCost : null;
+  const previewMargin = previewProfit != null && salePriceNum ? (previewProfit / salePriceNum) * 100 : null;
+  const profitTone = previewProfit == null ? "var(--aseel-ink)"
+    : previewProfit < 0 ? "var(--aseel-danger,#c00)" : "var(--aseel-ok,#267346)";
+
   const tabPrices = (
     <div style={{ padding: "8px 4px" }}>
-      {pendingN8("هذه القيم تُعرَض ولكن لا تُحفَظ بعد — تَنتظر N8-T9 (ProductPriceTier migration).")}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 14 }}>
+        {fld("سعر البيع العام (يدوي)",
+          <input className="aseel-input aseel-input--hl" type="number" min="0" step="0.01"
+            value={form.sale_price} onChange={(e) => patch("sale_price", e.target.value)}
+            title="يُقترح في مستند البيع فقط للزبون الذي لا عرض سعر له ولا شراء سابق لهذا الصنف"
+            placeholder="للزبون بلا عرض ولا شراء سابق" />)}
+        {fld("سعر التكلفة (متوسط — محسوب)",
+          <input className="aseel-input" readOnly value={formatMoney(insights.profile?.avg_cost ?? "", "—")} />)}
+        {fld("الربح للوحدة",
+          <input className="aseel-input" readOnly style={{ color: profitTone, fontWeight: 600 }}
+            value={previewProfit != null ? formatMoney(previewProfit) : "—"} />)}
+        {fld("هامش الربح %",
+          <input className="aseel-input" readOnly style={{ color: profitTone }}
+            value={previewMargin != null ? `${formatMoney(previewMargin)}%` : "—"} />)}
+        {fld("آخر سعر بيع (فاتورة مرحّلة)",
+          <input className="aseel-input" readOnly
+            value={formatMoney(insights.profile?.last_sale_price ?? "", "—")} />)}
+        {fld("آخر سعر شراء (فاتورة مرحّلة)",
+          <input className="aseel-input" readOnly
+            value={formatMoney(insights.profile?.last_purchase_price ?? "", "—")} />)}
+      </div>
+      {pendingN8("فئات الأسعار الخمس تُعرَض ولكن لا تُحفَظ بعد — تَنتظر N8-T9 (ProductPriceTier migration).")}
       {tierTable(form.sale_tiers, "أسعار البيع (5 فئات)", (i, k, v) => {
         const next = [...form.sale_tiers];
         next[i] = { ...next[i], [k]: v };
@@ -537,8 +744,9 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
   return (
     <div dir="rtl">
       <AseelDocumentShell
-        title="كارت الصنف"
+        title="كرت الصنف"
         state={currentId ? `صنف #${currentId}` : "صنف جديد"}
+        initialTab={openingTab}
         nav={nav}
         actions={toolbarActions}
         header={
@@ -552,25 +760,43 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
             {fld("التصنيف", <input className="aseel-input" readOnly value={form.category_name || "—"} />)}
             {fld("نوع الصنف", <input className="aseel-input" readOnly
               value={ITEM_TYPES.find((t) => t.v === form.item_type)?.l ?? form.item_type} />)}
+            {/* الأرقام القيادية في شريط الرأس — تُرى قبل فتح أي تبويب. */}
+            {fld("سعر البيع", <input className="aseel-input" readOnly
+              value={formatMoney(insights.profile?.effective_sale_price ?? form.sale_price, "—")} />)}
+            {fld("سعر التكلفة", <input className="aseel-input" readOnly
+              value={formatMoney(insights.profile?.avg_cost ?? "", "—")} />)}
+            {fld("الرصيد", <input className="aseel-input" readOnly
+              value={formatQuantity(insights.profile?.quantity_on_hand ?? "", "—")} />)}
           </>
         }
         tabs={[
+          // النظرة العامة أولاً: فتح الكرت يعرض حالة الصنف كاملة قبل أي تحرير.
+          ...insights.tabs,
           { key: "general", label: "بيانات عامة", content: tabGeneral },
           { key: "balances", label: "الأرصدة والحركات", content: tabBalances },
           { key: "prices", label: "أسعار البيع والشراء", content: tabPrices },
           { key: "trading", label: "بيانات المتاجرة", content: tabTrading },
           { key: "other", label: "بيانات أخرى", content: tabOther },
           { key: "mfg", label: "معادلات التصنيع", content: tabManufacturing },
+          // آخر القائمة: تفعيل التتبّع يُلحق تبويباً ولا يزحزح فهرس تبويب قائم
+          // (الغلاف يتتبّع النشط بالفهرس) — فيبقى المستخدم حيث هو.
+          ...(insights.serialsTab ? [insights.serialsTab] : []),
         ]}
         totals={
-          <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)", padding: "4px 0" }}>
-            سعر البيع فئة 1:{" "}
-            <b>{form.sale_tiers[0]?.price || "0"} {form.sale_tiers[0]?.currency || "ILS"}</b>
+          <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)", padding: "4px 0", display: "grid", gap: 2 }}>
+            <div>سعر البيع: <b style={{ color: "var(--aseel-ink)" }}>
+              {formatMoney(insights.profile?.effective_sale_price ?? form.sale_price, "—")}</b></div>
+            <div>سعر التكلفة: <b style={{ color: "var(--aseel-ink)" }}>
+              {formatMoney(insights.profile?.avg_cost ?? "", "—")}</b></div>
+            <div>الربح للوحدة: <b style={{ color: profitTone }}>
+              {formatMoney(insights.profile?.profit_per_unit ?? (previewProfit ?? ""), "—")}</b></div>
           </div>
         }
         status={
           <>
             <span className="aseel-status-item">رقم الصنف <b>{currentId ?? "—"}</b></span>
+            <span className="aseel-status-item">الرصيد <b>{formatQuantity(insights.profile?.quantity_on_hand ?? "", "—")}</b></span>
+            <span className="aseel-status-item">المتاح <b>{formatQuantity(insights.profile?.available_quantity ?? "", "—")}</b></span>
             <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
             <span className="aseel-status-item">آخر مفتاح <b>{lastKey}</b></span>
           </>

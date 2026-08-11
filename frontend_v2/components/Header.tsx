@@ -198,7 +198,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isButtonDisabled = timeRemaining > 2 || isCheckingIn;
 
   return (
-    <header className="relative flex flex-col sm:flex-row items-center justify-between pt-4 pb-4 pr-4 pl-14 sm:pl-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50 shadow-sm gap-4 sm:gap-0">
+    <header className="relative flex flex-col sm:flex-row items-center justify-between pt-4 pb-4 pr-4 pl-14 sm:pl-16 bg-[var(--color-surface)] border-b border-[var(--color-border)] sticky top-0 z-50 shadow-sm gap-4 sm:gap-0">
 
       {/* جرس الإشعارات — أعلى يسار الشاشة (يسار مطلق) */}
       <div className="absolute left-3 top-1/2 z-[60] -translate-y-1/2">
@@ -233,7 +233,7 @@ export const Header: React.FC<HeaderProps> = ({
                     {timeRemaining > 2 ? "انتظر..." : "تأكيد الاستمرار"}
                   </span>
                   <span
-                    className={`text-xs bg-white bg-opacity-20 px-2 py-1 rounded ${getTimerColor()}`}
+                    className={`text-xs bg-[var(--color-surface)] bg-opacity-20 px-2 py-1 rounded ${getTimerColor()}`}
                   >
                     {timeRemaining} د
                   </span>
@@ -257,7 +257,7 @@ export const Header: React.FC<HeaderProps> = ({
             )}
 
             {/* مؤشر النشاط */}
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <div className="text-xs text-[var(--color-text-muted)] mt-1">
               {isActive ? "✅ نشط" : "❌ غير نشط"}
             </div>
 
@@ -268,7 +268,7 @@ export const Header: React.FC<HeaderProps> = ({
         {dailyPoints && (
           <div className="flex items-center gap-4">
             <div className="text-center">
-              <div className="text-xs text-gray-500 dark:text-gray-400">
+              <div className="text-xs text-[var(--color-text-muted)]">
                 النقاط اليوم
               </div>
               <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
@@ -278,7 +278,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             <div className="hidden sm:flex items-center gap-3">
               <div className="text-center">
-                <div className="text-xs text-gray-500 dark:text-gray-400">
+                <div className="text-xs text-[var(--color-text-muted)]">
                   النشاط
                 </div>
                 <div className="text-sm font-semibold text-green-600 dark:text-green-400">
@@ -287,7 +287,7 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
 
               <div className="text-center">
-                <div className="text-xs text-gray-500 dark:text-gray-400">
+                <div className="text-xs text-[var(--color-text-muted)]">
                   المهام
                 </div>
                 <div className="text-sm font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
@@ -311,10 +311,10 @@ export const Header: React.FC<HeaderProps> = ({
         )}
 
         <div className="text-left hidden sm:block">
-          <p className="font-semibold text-gray-700 dark:text-gray-200 text-sm">
+          <p className="font-semibold text-[var(--color-text)] text-sm">
             {user.name}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center justify-end gap-1">
+          <p className="text-xs text-[var(--color-text-muted)] flex items-center justify-end gap-1">
             {user.role === "manager" ? "مدير" : "موظف"}
             {user.isApproved && (
               <span

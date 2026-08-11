@@ -148,7 +148,7 @@ export const FiscalPeriodsPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="الفترات المالية"
         actions={actions}

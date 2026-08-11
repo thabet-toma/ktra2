@@ -365,84 +365,84 @@
 //         onClick={onClose}
 //       >
 //         <div
-//           className="bg-white dark:bg-gray-800 w-full max-w-6xl transform transition-all flex flex-col mt-4 sm:mt-0 max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] sm:rounded-2xl shadow-xl"
+//           className="bg-[var(--color-surface)] w-full max-w-6xl transform transition-all flex flex-col mt-4 sm:mt-0 max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] sm:rounded-2xl shadow-xl"
 //           onClick={(e) => e.stopPropagation()}
 //         >
 //           {/* Header */}
-//           <header className="flex justify-between items-center p-4 sm:p-5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 bg-white dark:bg-gray-800 sm:rounded-t-2xl sticky top-0 z-10">
+//           <header className="flex justify-between items-center p-4 sm:p-5 border-b border-[var(--color-border)] flex-shrink-0 bg-[var(--color-surface)] sm:rounded-t-2xl sticky top-0 z-10">
 //             <div className="space-y-1 overflow-hidden flex-1 min-w-0">
-//               <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-100 truncate">
+//               <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-[var(--color-text)] truncate">
 //                 {localTask.title} - جميع التسليمات
 //               </h2>
 //               <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
 //                 <PriorityIndicator priority={localTask.priority} />
-//                 <span className="text-gray-500 dark:text-gray-400">
+//                 <span className="text-[var(--color-text-muted)]">
 //                   تاريخ التسليم: {localTask.dueDate}
 //                 </span>
 //               </div>
 //             </div>
 //             <button
 //               onClick={onClose}
-//               className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-2xl sm:text-3xl px-2 flex-shrink-0"
+//               className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] text-2xl sm:text-3xl px-2 flex-shrink-0"
 //             >
 //               &times;
 //             </button>
 //           </header>
 
 //           {/* إحصائيات سريعة */}
-//           <div className="px-4 sm:px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+//           <div className="px-4 sm:px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)]">
 //             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-//               <div className="bg-white dark:bg-gray-700 p-3 rounded-lg border border-gray-200 dark:border-gray-600">
+//               <div className="bg-[var(--color-surface)] p-3 rounded-lg border border-[var(--color-border)]">
 //                 <div className="flex items-center gap-2">
 //                   <Users className="w-4 h-4 text-blue-500" />
 //                   <div>
-//                     <p className="text-xs text-gray-500 dark:text-gray-400">المعينين</p>
-//                     <p className="font-bold text-gray-900 dark:text-white">{stats.total}</p>
+//                     <p className="text-xs text-[var(--color-text-muted)]">المعينين</p>
+//                     <p className="font-bold text-[var(--color-text)]">{stats.total}</p>
 //                   </div>
 //                 </div>
 //               </div>
-//               <div className="bg-white dark:bg-gray-700 p-3 rounded-lg border border-gray-200 dark:border-gray-600">
+//               <div className="bg-[var(--color-surface)] p-3 rounded-lg border border-[var(--color-border)]">
 //                 <div className="flex items-center gap-2">
 //                   <FileText className="w-4 h-4 text-green-500" />
 //                   <div>
-//                     <p className="text-xs text-gray-500 dark:text-gray-400">مسلمة</p>
-//                     <p className="font-bold text-gray-900 dark:text-white">{stats.submitted}</p>
+//                     <p className="text-xs text-[var(--color-text-muted)]">مسلمة</p>
+//                     <p className="font-bold text-[var(--color-text)]">{stats.submitted}</p>
 //                   </div>
 //                 </div>
 //               </div>
-//               <div className="bg-white dark:bg-gray-700 p-3 rounded-lg border border-gray-200 dark:border-gray-600">
+//               <div className="bg-[var(--color-surface)] p-3 rounded-lg border border-[var(--color-border)]">
 //                 <div className="flex items-center gap-2">
 //                   <Clock className="w-4 h-4 text-yellow-500" />
 //                   <div>
-//                     <p className="text-xs text-gray-500 dark:text-gray-400">قيد المراجعة</p>
-//                     <p className="font-bold text-gray-900 dark:text-white">{stats.pending}</p>
+//                     <p className="text-xs text-[var(--color-text-muted)]">قيد المراجعة</p>
+//                     <p className="font-bold text-[var(--color-text)]">{stats.pending}</p>
 //                   </div>
 //                 </div>
 //               </div>
-//               <div className="bg-white dark:bg-gray-700 p-3 rounded-lg border border-gray-200 dark:border-gray-600">
+//               <div className="bg-[var(--color-surface)] p-3 rounded-lg border border-[var(--color-border)]">
 //                 <div className="flex items-center gap-2">
 //                   <Check className="w-4 h-4 text-green-500" />
 //                   <div>
-//                     <p className="text-xs text-gray-500 dark:text-gray-400">مقبول</p>
-//                     <p className="font-bold text-gray-900 dark:text-white">{stats.approved}</p>
+//                     <p className="text-xs text-[var(--color-text-muted)]">مقبول</p>
+//                     <p className="font-bold text-[var(--color-text)]">{stats.approved}</p>
 //                   </div>
 //                 </div>
 //               </div>
-//               <div className="bg-white dark:bg-gray-700 p-3 rounded-lg border border-gray-200 dark:border-gray-600">
+//               <div className="bg-[var(--color-surface)] p-3 rounded-lg border border-[var(--color-border)]">
 //                 <div className="flex items-center gap-2">
 //                   <X className="w-4 h-4 text-red-500" />
 //                   <div>
-//                     <p className="text-xs text-gray-500 dark:text-gray-400">مرفوض</p>
-//                     <p className="font-bold text-gray-900 dark:text-white">{stats.rejected}</p>
+//                     <p className="text-xs text-[var(--color-text-muted)]">مرفوض</p>
+//                     <p className="font-bold text-[var(--color-text)]">{stats.rejected}</p>
 //                   </div>
 //                 </div>
 //               </div>
-//               <div className="bg-white dark:bg-gray-700 p-3 rounded-lg border border-gray-200 dark:border-gray-600">
+//               <div className="bg-[var(--color-surface)] p-3 rounded-lg border border-[var(--color-border)]">
 //                 <div className="flex items-center gap-2">
 //                   <AlertCircle className="w-4 h-4 text-purple-500" />
 //                   <div>
-//                     <p className="text-xs text-gray-500 dark:text-gray-400">بنود جديدة</p>
-//                     <p className="font-bold text-gray-900 dark:text-white">{stats.withNewItems}</p>
+//                     <p className="text-xs text-[var(--color-text-muted)]">بنود جديدة</p>
+//                     <p className="font-bold text-[var(--color-text)]">{stats.withNewItems}</p>
 //                   </div>
 //                 </div>
 //               </div>
@@ -450,25 +450,25 @@
 //           </div>
 
 //           {/* الفلاتر */}
-//           <div className="px-4 sm:px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+//           <div className="px-4 sm:px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
 //             <div className="flex flex-col md:flex-row gap-3">
 //               <div className="flex-1 relative">
-//                 <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+//                 <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--color-text-muted)] w-4 h-4" />
 //                 <input
 //                   type="text"
 //                   value={searchTerm}
 //                   onChange={(e) => setSearchTerm(e.target.value)}
 //                   placeholder="ابحث عن موظف أو حالة..."
-//                   className="w-full pr-10 pl-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+//                   className="w-full pr-10 pl-4 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] text-sm"
 //                 />
 //               </div>
 //               <div className="w-full md:w-48">
 //                 <div className="flex items-center gap-2">
-//                   <Filter className="w-4 h-4 text-gray-400" />
+//                   <Filter className="w-4 h-4 text-[var(--color-text-muted)]" />
 //                   <select
 //                     value={statusFilter}
 //                     onChange={(e) => setStatusFilter(e.target.value)}
-//                     className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+//                     className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] text-sm"
 //                   >
 //                     <option value="all">جميع الحالات</option>
 //                     <option value="pending">قيد المراجعة</option>
@@ -482,14 +482,14 @@
 //               <div className="flex gap-2">
 //                 <button
 //                   onClick={expandAllUsers}
-//                   className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"
+//                   className="px-3 py-2 bg-[var(--color-surface-3)] text-[var(--color-text)] rounded-lg hover:bg-[var(--color-surface-3)] text-sm"
 //                 >
 //                   <ChevronDown className="w-4 h-4 inline ml-1" />
 //                   فتح الكل
 //                 </button>
 //                 <button
 //                   onClick={collapseAllUsers}
-//                   className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"
+//                   className="px-3 py-2 bg-[var(--color-surface-3)] text-[var(--color-text)] rounded-lg hover:bg-[var(--color-surface-3)] text-sm"
 //                 >
 //                   <ChevronUp className="w-4 h-4 inline ml-1" />
 //                   غلق الكل
@@ -502,31 +502,31 @@
 //           <main className="flex-1 p-4 sm:p-5 overflow-y-auto">
 //             <div className="space-y-4">
 //               {filteredSubmissionsData.map((data, index) => (
-//                 <div key={data.userId} className="bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+//                 <div key={data.userId} className="bg-[var(--color-surface-2)] rounded-lg border border-[var(--color-border)] overflow-hidden">
 //                   {/* رأس الموظف */}
 //                   <div 
-//                     className="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+//                     className="flex justify-between items-center p-4 cursor-pointer hover:bg-[var(--color-surface-3)] transition-colors"
 //                     onClick={() => toggleUserExpansion(data.userId)}
 //                   >
 //                     <div className="flex items-center gap-3 flex-1">
-//                       <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center">
-//                         <span className="font-bold text-gray-700 dark:text-gray-300">
+//                       <div className="w-10 h-10 bg-[var(--color-surface-3)] rounded-full flex items-center justify-center">
+//                         <span className="font-bold text-[var(--color-text)]">
 //                           {data.user.name?.charAt(0) || '?'}
 //                         </span>
 //                       </div>
 //                       <div className="flex-1">
-//                         <h3 className="font-bold text-gray-900 dark:text-white text-sm md:text-base">
+//                         <h3 className="font-bold text-[var(--color-text)] text-sm md:text-base">
 //                           {data.user.name}
 //                         </h3>
 //                         <div className="flex items-center gap-3 mt-1">
 //                           {data.user.email && (
-//                             <span className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+//                             <span className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
 //                               <Mail className="w-3 h-3" />
 //                               {data.user.email}
 //                             </span>
 //                           )}
 //                           {data.user.phone && (
-//                             <span className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+//                             <span className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
 //                               <Phone className="w-3 h-3" />
 //                               {data.user.phone}
 //                             </span>
@@ -550,7 +550,7 @@
 //                              data.latestSubmission.status === 'rejected' ? 'مرفوض' : 'قيد المراجعة'}
 //                           </span>
 //                         ) : (
-//                           <span className="px-3 py-1 bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded-full text-xs font-medium">
+//                           <span className="px-3 py-1 bg-[var(--color-surface-3)] text-[var(--color-text)] rounded-full text-xs font-medium">
 //                             لم يسلم
 //                           </span>
 //                         )}
@@ -564,30 +564,30 @@
 //                       )}
                       
 //                       {/* عدد التسليمات */}
-//                       <span className="text-sm text-gray-600 dark:text-gray-400">
+//                       <span className="text-sm text-[var(--color-text-muted)]">
 //                         {data.submissionCount} تسليم
 //                       </span>
                       
 //                       {/* زر التوسيع */}
 //                       <span className={`transition-transform ${data.isExpanded ? 'rotate-180' : ''}`}>
-//                         <ChevronDown className="w-5 h-5 text-gray-400" />
+//                         <ChevronDown className="w-5 h-5 text-[var(--color-text-muted)]" />
 //                       </span>
 //                     </div>
 //                   </div>
                   
 //                   {/* محتوى التسليمات (يظهر عند التوسيع) */}
 //                   {data.isExpanded && (
-//                     <div className="border-t border-gray-200 dark:border-gray-700 p-4">
+//                     <div className="border-t border-[var(--color-border)] p-4">
 //                       {data.submissions.length > 0 ? (
 //                         <div className="space-y-4">
 //                           {data.submissions.map((submission, subIndex) => (
-//                             <div key={submission.id} className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+//                             <div key={submission.id} className="bg-[var(--color-surface)] p-4 rounded-lg border border-[var(--color-border)]">
 //                               <div className="flex justify-between items-start mb-3">
 //                                 <div>
-//                                   <h4 className="font-bold text-gray-900 dark:text-white text-sm">
+//                                   <h4 className="font-bold text-[var(--color-text)] text-sm">
 //                                     التسليم #{data.submissions.length - subIndex}
 //                                   </h4>
-//                                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+//                                   <p className="text-xs text-[var(--color-text-muted)] mt-1">
 //                                     {new Date(submission.createdAt).toLocaleString('ar-EG')}
 //                                   </p>
 //                                 </div>
@@ -642,22 +642,22 @@
 //                               {/* عرض البنود */}
 //                               {submission.items && submission.items.length > 0 && (
 //                                 <div className="mt-3">
-//                                   <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+//                                   <h5 className="text-sm font-medium text-[var(--color-text)] mb-2">
 //                                     البنود ({submission.items.length})
 //                                   </h5>
 //                                   <div className="space-y-2 max-h-40 overflow-y-auto">
 //                                     {submission.items.map((item, itemIndex) => (
-//                                       <div key={itemIndex} className="bg-gray-50 dark:bg-gray-700/50 p-2 rounded text-xs">
-//                                         <p className="font-medium text-gray-800 dark:text-gray-200">
+//                                       <div key={itemIndex} className="bg-[var(--color-surface-2)] p-2 rounded text-xs">
+//                                         <p className="font-medium text-[var(--color-text)]">
 //                                           {item.productLink || 'بند بدون رابط'}
 //                                         </p>
 //                                         {item.productPrice && (
-//                                           <p className="text-gray-600 dark:text-gray-400 mt-1">
+//                                           <p className="text-[var(--color-text-muted)] mt-1">
 //                                             السعر: {item.productPrice} $
 //                                           </p>
 //                                         )}
 //                                         {item.notes && (
-//                                           <p className="text-gray-500 dark:text-gray-400 mt-1 text-xs">
+//                                           <p className="text-[var(--color-text-muted)] mt-1 text-xs">
 //                                             {item.notes}
 //                                           </p>
 //                                         )}
@@ -678,7 +678,7 @@
 //                           ))}
 //                         </div>
 //                       ) : (
-//                         <div className="text-center py-6 text-gray-500 dark:text-gray-400">
+//                         <div className="text-center py-6 text-[var(--color-text-muted)]">
 //                           <p className="text-sm">لم يسلم هذا الموظف بعد</p>
 //                         </div>
 //                       )}
@@ -688,8 +688,8 @@
 //               ))}
               
 //               {filteredSubmissionsData.length === 0 && (
-//                 <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-//                   <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
+//                 <div className="text-center py-12 text-[var(--color-text-muted)]">
+//                   <div className="w-16 h-16 mx-auto mb-4 bg-[var(--color-surface-3)] rounded-full flex items-center justify-center">
 //                     <Search className="w-8 h-8" />
 //                   </div>
 //                   <p className="text-lg">لا توجد نتائج مطابقة</p>
@@ -700,11 +700,11 @@
 //           </main>
 
 //           {/* Footer */}
-//           <footer className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+//           <footer className="p-4 border-t border-[var(--color-border)] bg-[var(--color-surface)]">
 //             <div className="flex justify-end">
 //               <button
 //                 onClick={onClose}
-//                 className="px-6 py-2.5 bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200 font-bold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition"
+//                 className="px-6 py-2.5 bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition"
 //               >
 //                 إغلاق
 //               </button>
@@ -722,13 +722,13 @@
 //       onClick={onClose}
 //     >
 //       <div
-//         className="bg-white dark:bg-gray-800 w-full max-w-4xl transform transition-all flex flex-col mt-4 sm:mt-0 max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] sm:rounded-2xl shadow-xl"
+//         className="bg-[var(--color-surface)] w-full max-w-4xl transform transition-all flex flex-col mt-4 sm:mt-0 max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] sm:rounded-2xl shadow-xl"
 //         onClick={(e) => e.stopPropagation()}
 //       >
 //         {/* Header */}
-//         <header className="flex justify-between items-center p-4 sm:p-5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 bg-white dark:bg-gray-800 sm:rounded-t-2xl sticky top-0 z-10">
+//         <header className="flex justify-between items-center p-4 sm:p-5 border-b border-[var(--color-border)] flex-shrink-0 bg-[var(--color-surface)] sm:rounded-t-2xl sticky top-0 z-10">
 //           <div className="space-y-1 overflow-hidden flex-1 min-w-0">
-//             <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-100 truncate">
+//             <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-[var(--color-text)] truncate">
 //               {localTask.title}
 //             </h2>
 //             <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
@@ -738,7 +738,7 @@
 //           </div>
 //           <button
 //             onClick={onClose}
-//             className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-2xl sm:text-3xl px-2 flex-shrink-0"
+//             className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] text-2xl sm:text-3xl px-2 flex-shrink-0"
 //           >
 //             &times;
 //           </button>
@@ -746,8 +746,8 @@
 
 //         {(user.role === "manager" || user.role === "procurement") &&
 //           assignedUsers.length > 0 && (
-//             <div className="px-4 sm:px-5 pt-3 border-b border-gray-200 dark:border-gray-700 pb-3 bg-gray-50 dark:bg-gray-800/50 sticky top-[73px] z-10">
-//               <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 block">
+//             <div className="px-4 sm:px-5 pt-3 border-b border-[var(--color-border)] pb-3 bg-[var(--color-surface-2)] sticky top-[73px] z-10">
+//               <label className="text-sm font-semibold text-[var(--color-text)] mb-2 block">
 //                 اختر الموظف لعرض حالته:
 //               </label>
 //               <div className="flex flex-wrap gap-2">
@@ -758,7 +758,7 @@
 //                     className={`px-3 py-1 rounded-full text-xs sm:text-sm transition ${
 //                       selectedUserId === assignedUser.id
 //                         ? "bg-blue-600 text-white"
-//                         : "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-300"
+//                         : "bg-[var(--color-surface-3)] text-[var(--color-text)] hover:bg-gray-300"
 //                     }`}
 //                   >
 //                     {assignedUser.name}
@@ -773,10 +773,10 @@
 //         <main className="flex-1 p-4 sm:p-5 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 md:gap-8">
 //           <div className="space-y-4 sm:space-y-6">
 //             <div>
-//               <h3 className="text-base sm:text-lg font-bold mb-2 text-gray-800 dark:text-gray-100 border-b pb-1 dark:border-gray-700">
+//               <h3 className="text-base sm:text-lg font-bold mb-2 text-[var(--color-text)] border-b pb-1 dark:border-gray-700">
 //                 تفاصيل المهمة
 //               </h3>
-//               <div className="divide-y divide-gray-200 dark:divide-gray-700 text-xs sm:text-sm">
+//               <div className="divide-y divide-[var(--color-border)] text-xs sm:text-sm">
 //                 <DetailRow
 //                   label="الموظفين المعينين"
 //                   value={
@@ -787,7 +787,7 @@
 //                           className={`px-2 py-1 rounded text-xs ${
 //                             u.id === selectedUserId
 //                               ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-//                               : "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"
+//                               : "bg-[var(--color-surface-3)] text-[var(--color-text)]"
 //                           }`}
 //                         >
 //                           {u.name} {u.id === user.id && "(أنت)"}
@@ -845,7 +845,7 @@
 
 //               {/* عرض وصف المهمة */}
 //               <div className="mt-3">
-//                 <p className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600 text-xs sm:text-sm whitespace-pre-wrap">
+//                 <p className="p-3 bg-[var(--color-surface-2)] rounded-lg border dark:border-gray-600 text-xs sm:text-sm whitespace-pre-wrap">
 //                   {localTask.description}
 //                 </p>
 //               </div>
@@ -868,7 +868,7 @@
 
 //             <div>
 //               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-2 border-b pb-1 dark:border-gray-700">
-//                 <h3 className="text-base sm:text-lg font-bold text-gray-800 dark:text-gray-100">
+//                 <h3 className="text-base sm:text-lg font-bold text-[var(--color-text)]">
 //                   تسليم العمل{" "}
 //                   {selectedUser.id !== user.id && `- ${selectedUser.name}`}
 //                 </h3>
@@ -926,8 +926,8 @@
 //             </div>
 //           </div>
 
-//           <div className="border-t md:border-t-0 md:border-r md:pr-4 border-gray-200 dark:border-gray-700 pt-4 sm:pt-6 md:pt-0">
-//             <h3 className="text-base sm:text-lg font-bold mb-3 sm:mb-4 text-gray-800 dark:text-gray-100">
+//           <div className="border-t md:border-t-0 md:border-r md:pr-4 border-[var(--color-border)] pt-4 sm:pt-6 md:pt-0">
+//             <h3 className="text-base sm:text-lg font-bold mb-3 sm:mb-4 text-[var(--color-text)]">
 //               سجل النشاط
 //             </h3>
 //             <ul className="space-y-3 sm:space-y-4 text-xs sm:text-sm max-h-[300px] md:max-h-full overflow-y-auto">
@@ -937,16 +937,16 @@
 //                 .map((log) => (
 //                   <li
 //                     key={log.id}
-//                     className="relative pr-4 border-r-2 border-gray-200 dark:border-gray-600"
+//                     className="relative pr-4 border-r-2 border-[var(--color-border)]"
 //                   >
 //                     <div className="absolute -right-[5px] top-1 w-2 h-2 bg-blue-500 rounded-full"></div>
-//                     <p className="font-bold text-gray-800 dark:text-gray-100 text-xs sm:text-sm">
+//                     <p className="font-bold text-[var(--color-text)] text-xs sm:text-sm">
 //                       {usersMap[log.userId] || "System"}
 //                     </p>
-//                     <span className="text-xs text-gray-500 dark:text-gray-400 block mb-1">
+//                     <span className="text-xs text-[var(--color-text-muted)] block mb-1">
 //                       {new Date(log.timestamp).toLocaleString()}
 //                     </span>
-//                     <p className="text-gray-600 dark:text-gray-300 text-xs sm:text-sm">
+//                     <p className="text-[var(--color-text-muted)] text-xs sm:text-sm">
 //                       {log.action} {log.newValue && `: ${log.newValue}`}
 //                     </p>
 //                   </li>
@@ -956,11 +956,11 @@
 //         </main>
 
 //         {/* Footer */}
-//         <footer className="p-3 sm:p-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row gap-2 sm:gap-3 flex-shrink-0 sm:rounded-b-2xl sticky bottom-0 z-10">
+//         <footer className="p-3 sm:p-4 bg-[var(--color-surface-2)] border-t border-[var(--color-border)] flex flex-col sm:flex-row gap-2 sm:gap-3 flex-shrink-0 sm:rounded-b-2xl sticky bottom-0 z-10">
 //           <div className="w-full sm:flex-1">{renderActionButtons()}</div>
 //           <button
 //             onClick={onClose}
-//             className="bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200 font-bold py-3 px-4 sm:px-6 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition w-full sm:w-auto text-sm sm:text-base flex-shrink-0"
+//             className="bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold py-3 px-4 sm:px-6 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition w-full sm:w-auto text-sm sm:text-base flex-shrink-0"
 //           >
 //             إغلاق
 //           </button>

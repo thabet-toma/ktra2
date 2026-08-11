@@ -14,7 +14,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   icon,
   action,
 }) => (
-  <div className="flex flex-col items-center justify-center py-16 text-center" data-skin="aseel">
+  <div className="flex flex-col items-center justify-center py-16 text-center">
     <div className="text-[var(--color-text-muted)] mb-4">
       {icon || <FileX className="w-12 h-12 mx-auto" />}
     </div>
@@ -37,7 +37,7 @@ export const Spinner: React.FC<SpinnerProps> = ({ size = 'md', label = 'جاري
   };
 
   return (
-    <div className="flex items-center justify-center py-8" data-skin="aseel">
+    <div className="flex items-center justify-center py-8">
       <Loader2 className={`${sizeClasses[size]} animate-spin text-[var(--color-primary)]`} />
       {label && <span className="mr-2 text-sm text-[var(--color-text-muted)]">{label}</span>}
     </div>
@@ -53,7 +53,7 @@ export const ErrorState: React.FC<ErrorStateProps> = ({
   message = 'حدث خطأ أثناء تحميل البيانات',
   onRetry,
 }) => (
-  <div className="flex flex-col items-center justify-center py-16 text-center" data-skin="aseel">
+  <div className="flex flex-col items-center justify-center py-16 text-center">
     <div className="text-[var(--color-danger)] mb-4">
       <FileX className="w-12 h-12 mx-auto" />
     </div>

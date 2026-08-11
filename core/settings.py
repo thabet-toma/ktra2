@@ -64,6 +64,14 @@ ALLOWED_HOSTS = [
     '127.0.0.1'
 ]
 
+# أضِف أي مضيف إضافي (مثل IP سيرفر تطوير) دون إعادة كتابة القائمة كاملة
+_allowed_hosts_extra = os.environ.get("DJANGO_ALLOWED_HOSTS", "").strip()
+if _allowed_hosts_extra:
+    ALLOWED_HOSTS += [
+        h.strip() for h in _allowed_hosts_extra.split(",")
+        if h.strip() and h.strip() not in ALLOWED_HOSTS
+    ]
+
 # G11: رؤوس أمان قياسية (SecurityMiddleware + XFrameOptionsMiddleware مُركّبان أصلاً).
 # الآمنة دائماً (رؤوس فقط، بلا تغيير سلوك) تُفعَّل دوماً. أمان HTTPS (HSTS + كوكيز آمنة)
 # يُفعَّل في الإنتاج فقط حيث ينتهي TLS، كي لا يكسر التطوير المحلي على http.
@@ -105,6 +113,9 @@ INSTALLED_APPS = [
     'core',
     'realestate',
     'sales',
+    'accountant_portal.apps.AccountantPortalConfig',
+    'device_registry.apps.DeviceRegistryConfig',
+    'after_sales.apps.AfterSalesConfig',
 ]
 
 MIDDLEWARE = [
@@ -269,7 +280,7 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-branch-id",
 ]
 
-CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS) + ['https://api.smart.ktragroup.com']
+CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
 
 # المساعد الذكي (OpenClaw على سيرفر منفصل — ليس نفس خادم Django).
 # Django يتصل به عبر HTTP (صادر من هذا السيرفر)؛ على سيرفر OpenClaw يجب أن يكون المنفذ (مثل 18789)
@@ -306,6 +317,42 @@ OPENCLAW_WS_MESSAGES_URL = (os.environ.get("OPENCLAW_WS_MESSAGES_URL") or "").st
 _oc_ws = (os.environ.get("OPENCLAW_USE_WEBSOCKET", "0") or "0").strip().lower()
 OPENCLAW_USE_WEBSOCKET = _oc_ws in ("1", "true", "yes", "on")
 
+# ── المساعد الذكي عبر Ollama السحابي (Qwen) ────────────────────────────────
+# assistant/chat/ يوجّه للنموذج على Ollama عندما ASSISTANT_BACKEND=ollama
+# (الافتراضي). النموذج يجيب من قاعدة بيانات كترا عبر أدوات مقفولة على شركة
+# المستخدم (core/assistant_tools.py). المفتاح لا يُعرَّض للمتصفح — الطلب صادر
+# من خادم Django مع Authorization: Bearer.
+ASSISTANT_BACKEND = (os.environ.get("ASSISTANT_BACKEND", "ollama") or "ollama").strip().lower()
+# نقطة متوافقة مع OpenAI. السحابة: https://ollama.com/v1 — أو خادم Ollama محلي: http://IP:11434/v1
+OLLAMA_BASE_URL = (os.environ.get("OLLAMA_BASE_URL") or "https://ollama.com/v1").strip()
+# المفتاح سرّي — لا يُحفظ في git. يُقرأ من البيئة فقط.
+OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "").strip()
+# اسم الموديل بالضبط كما يظهر في /v1/models.
+# ملاحظة: qwen3.6 غير متاح سحابياً إطلاقاً (محلي فقط). qwen3.5:397b متاح لكنه
+# يتطلب اشتراك Ollama مدفوع (يرجع 403 على الخطة المجانية). النماذج المجانية
+# التي تدعم الأدوات: gpt-oss:120b و gpt-oss:20b — لذا الافتراضي gpt-oss:120b
+# ليعمل المساعد فوراً. للتبديل لكوين: اشترك ثم ضع OLLAMA_MODEL=qwen3.5:397b،
+# أو شغّل qwen3.6 على خادمك واضبط OLLAMA_BASE_URL على http://IP:11434/v1.
+OLLAMA_MODEL = (os.environ.get("OLLAMA_MODEL") or "gpt-oss:120b").strip()
+OLLAMA_ASSISTANT_TIMEOUT = int(os.environ.get("OLLAMA_ASSISTANT_TIMEOUT", "120") or "120")
+
+# ── واتساب ↔ المساعد الذكي عبر Evolution API (self-hosted، غير رسمي) ───────
+# core/whatsapp_views.py يستقبل الرسائل الواردة على api/assistant/whatsapp/webhook/<secret>/
+# ويرسل الردود عبر EVOLUTION_API_BASE_URL. العزل الأمني الوحيد هو جدول
+# tenants.WhatsAppContact (رقم → شركة) — رقم غير مُدرَج لا يحصل على أي رد.
+# رابط الـ webhook الكامل الذي يُضبط داخل Evolution API:
+#   https://<نطاق-خادمك>/api/assistant/whatsapp/webhook/<WHATSAPP_WEBHOOK_SECRET>/
+# السرّ إلزامي في الإنتاج — لا افتراضي، لمنع رابط webhook عام بلا حماية.
+WHATSAPP_WEBHOOK_SECRET = _environment_value(
+    "WHATSAPP_WEBHOOK_SECRET", required_in_production=True
+)
+# عنوان خادم Evolution API نفسه (وليس Django) — مثال: http://127.0.0.1:8080 أو https://evo.example.com
+EVOLUTION_API_BASE_URL = (os.environ.get("EVOLUTION_API_BASE_URL") or "").strip().rstrip("/")
+# مفتاح apikey لنسخة Evolution API (Global API Key أو مفتاح الـ instance)
+EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "").strip()
+# اسم الـ instance المُنشأ داخل Evolution API (وليس رقم الهاتف)
+EVOLUTION_INSTANCE_NAME = os.environ.get("EVOLUTION_INSTANCE_NAME", "").strip()
+
 # ── كاش الخادم (صيانة الأداء 2026-07) ──────────────────────────────────────
 # استضافة مشتركة بلا root ⇒ لا Redis/Memcached. FileBasedCache مشتركة بين كل
 # عمليات WSGI (نفس القرص) وضربة الكاش = صفر استعلامات MySQL — بعكس LocMemCache
@@ -336,8 +383,29 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
         "core.permissions.TenantRolePermission",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "accountant_signup": "5/hour",
+        "accountant_verify": "10/hour",
+        "accountant_invite": "20/hour",
+        "accountant_engagement_request": "10/hour",
+        # البحث عن شركة خطوة سابقة لطلب الارتباط — حصته أوسع، وحدُّه لمنع تخمين
+        # أسماء الشركات (T8) لا لتقنين الطلبات.
+        "accountant_company_lookup": "60/hour",
+    },
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }
+
+ACCOUNTANT_VERIFICATION_MODE = os.environ.get("ACCOUNTANT_VERIFICATION_MODE", "manual")
+ACCOUNTANT_EMAIL_TOKEN_MAX_AGE = 60 * 60 * 24
+# قرار المالك (2026-08-05): تحقق البريد **غير مطلوب**. الآلية باقية كاملةً خلف
+# هذا العَلَم لأن المنصة بلا SMTP اليوم، فاشتراطُ رسالةٍ لا تصل يقفل المحاسب
+# خارج حسابه. اضبط ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION=true بعد ضبط البريد.
+ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION = os.environ.get(
+    "ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION", "false",
+).strip().lower() in ("1", "true", "yes")
 
 # Cloudinary credentials are environment-only; production refuses missing values.
 CLOUDINARY_STORAGE = {
@@ -416,6 +484,7 @@ LOGGING = {
         "core.request_tracing": {"handlers": ["queue"], "level": LOG_LEVEL, "propagate": False},
         "core.exception_handler": {"handlers": ["queue"], "level": "INFO", "propagate": False},
         "core.health": {"handlers": ["queue"], "level": "INFO", "propagate": False},
+        "hr.auth_api": {"handlers": ["queue"], "level": "INFO", "propagate": False},
         "client_logs": {"handlers": ["queue"], "level": "INFO", "propagate": False},
         "django.request": {"handlers": ["queue"], "level": "ERROR", "propagate": False},
     },

@@ -75,12 +75,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       <input
         ref={ref}
         className={`
-          h-7 px-2 text-[var(--font-size-sm)] rounded-md
-          bg-[var(--color-surface)] text-[var(--color-text)]
-          border border-[var(--color-border)] transition-colors
-          placeholder:text-[var(--color-text-muted)]
-          focus:outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)]
-          disabled:opacity-50 disabled:cursor-not-allowed
+          h-7 px-2 text-[var(--font-size-sm)] rounded-md bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] transition-colors placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed
           ${error ? 'border-[var(--color-danger)]' : ''}
           ${className}
         `}
@@ -112,11 +107,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
       <select
         ref={ref}
         className={`
-          h-7 px-2 text-[var(--font-size-sm)] rounded-md
-          bg-[var(--color-surface)] text-[var(--color-text)]
-          border border-[var(--color-border)] transition-colors
-          focus:outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)]
-          disabled:opacity-50 disabled:cursor-not-allowed
+          h-7 px-2 text-[var(--font-size-sm)] rounded-md bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] transition-colors focus:outline-none focus:border-[var(--color-primary)] focus:ring-1 focus:ring-[var(--color-primary)] disabled:opacity-50 disabled:cursor-not-allowed
           ${error ? 'border-[var(--color-danger)]' : ''}
           ${className}
         `}

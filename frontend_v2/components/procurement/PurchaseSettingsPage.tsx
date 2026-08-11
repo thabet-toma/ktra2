@@ -10,8 +10,15 @@ import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
+import { AccountTreeField } from "../accounting/AccountTreePicker";
+import { isCashAccount } from "../../utils/accountTree";
+import {
+  SERIAL_ENTRY_MODE_HINT,
+  SERIAL_ENTRY_MODE_OPTIONS,
+  type SerialEntryMode,
+} from "../../types/inventory";
 
-type AccountOpt = { id: number; code?: string | null; name?: string | null; account_type?: string | null; is_active?: boolean };
+type AccountOpt = { id: number; code?: string | null; name?: string | null; parent?: number | null; account_type?: string | null; is_active?: boolean };
 
 const STRATEGIES: { value: string; label: string; hint: string }[] = [
   {
@@ -30,6 +37,15 @@ const PurchaseSettingsPage: React.FC = () => {
   const [strategy, setStrategy] = useState<string>("LAST_PURCHASE");
   // T-A4: الصندوق الافتراضي لفواتير الشراء.
   const [cashAccount, setCashAccount] = useState<number | null>(null);
+  // استلام البضاعة للمخزن مع الترحيل، أو تأجيله لنافذة الاستلام ببنودها.
+  const [receiveOnPost, setReceiveOnPost] = useState(true);
+  // مستند الاستلام: تسميتاه (مرتبط/مستقل) وإتاحة المستقل والتعديل.
+  const [receiptLabel, setReceiptLabel] = useState("إرسالية شراء");
+  const [standaloneLabel, setStandaloneLabel] = useState("سند استلام");
+  const [allowStandalone, setAllowStandalone] = useState(true);
+  const [allowEditReceipt, setAllowEditReceipt] = useState(true);
+  // T-SERIAL: نمط إدخال الرقم التسلسلي في بنود الشراء.
+  const [serialMode, setSerialMode] = useState<SerialEntryMode>("off");
   const [accounts, setAccounts] = useState<AccountOpt[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -44,6 +60,12 @@ const PurchaseSettingsPage: React.FC = () => {
       ]);
       setStrategy(s.purchase_default_price_strategy || "LAST_PURCHASE");
       setCashAccount(s.default_cash_account ?? null);
+      setReceiveOnPost(s.receive_on_post !== false);
+      setReceiptLabel(s.receipt_doc_label || "إرسالية شراء");
+      setStandaloneLabel(s.standalone_receipt_label || "سند استلام");
+      setAllowStandalone(s.allow_standalone_receipt !== false);
+      setAllowEditReceipt(s.allow_edit_receipt !== false);
+      setSerialMode(s.serial_entry_mode || "off");
       setAccounts(accs || []);
     } catch (e) {
       setBanner({ ok: false, msg: e instanceof Error ? e.message : String(e) });
@@ -52,12 +74,8 @@ const PurchaseSettingsPage: React.FC = () => {
     }
   }, []);
 
-  const cashAccounts = (accounts || [])
-    .filter((a) => a.is_active !== false)
-    .filter((a) => {
-      const t = (a.account_type || "").toLowerCase();
-      return t === "asset" || t === "cash" || t === "bank";
-    });
+  // T-DEFACC: الشجرة تُعرض كاملة، والصناديق وحدها قابلة للاختيار منها.
+  const isSelectableCash = (a: AccountOpt) => a.is_active !== false && isCashAccount(a);
 
   useEffect(() => {
     load();
@@ -70,6 +88,12 @@ const PurchaseSettingsPage: React.FC = () => {
       await purchaseInvoiceApi.updateSettings({
         purchase_default_price_strategy: strategy,
         default_cash_account: cashAccount,
+        receive_on_post: receiveOnPost,
+        receipt_doc_label: receiptLabel.trim() || "إرسالية شراء",
+        standalone_receipt_label: standaloneLabel.trim() || "سند استلام",
+        allow_standalone_receipt: allowStandalone,
+        allow_edit_receipt: allowEditReceipt,
+        serial_entry_mode: serialMode,
       });
       setBanner({ ok: true, msg: "حُفظت إعدادات الشراء بنجاح." });
     } catch (e) {
@@ -77,7 +101,10 @@ const PurchaseSettingsPage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [strategy, cashAccount]);
+  }, [
+    strategy, cashAccount, receiveOnPost, receiptLabel, standaloneLabel,
+    allowStandalone, allowEditReceipt, serialMode,
+  ]);
 
   const actions: AseelToolbarAction[] = [
     {
@@ -90,7 +117,7 @@ const PurchaseSettingsPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel" className="min-h-[calc(100vh-5rem)]">
+    <div className="min-h-[calc(100vh-5rem)]">
       <AseelDocumentShell title="إعدادات الشراء" actions={actions}>
         {banner && (
           <div
@@ -148,6 +175,105 @@ const PurchaseSettingsPage: React.FC = () => {
             </div>
           )}
 
+          {/* استلام البضاعة مع الترحيل — مرآة «خصم المخزون عند الترحيل» في المبيعات. */}
+          <div className="mt-6 pt-4 border-t border-[var(--aseel-border)]">
+            <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">استلام البضاعة مع الترحيل</h3>
+            <p className="text-sm text-[var(--aseel-ink-soft)] mb-2 flex items-start gap-1">
+              <Info className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                مفعّلاً: ترحيل فاتورة الشراء يُدخل كل بنودها للمستودع الافتراضي فوراً.
+                معطّلاً: الترحيل محاسبي فقط، وتُستلَم البنود لاحقاً من زر «استلام
+                البضاعة» داخل الفاتورة — يفتح كل البنود بالكامل ويمكن تعديل ما استُلم.
+              </span>
+            </p>
+            <label className="flex items-center gap-2 cursor-pointer select-none text-[var(--aseel-ink)]">
+              <input
+                type="checkbox"
+                disabled={loading}
+                checked={receiveOnPost}
+                onChange={(e) => setReceiveOnPost(e.target.checked)}
+              />
+              <span>استلام بضاعة الفاتورة للمخزن تلقائياً عند الترحيل</span>
+            </label>
+          </div>
+
+          {/* مستند الاستلام: التسمية حرّة لكل شركة، والسند المستقل والتعديل اختياريان. */}
+          <div className="mt-6 pt-4 border-t border-[var(--aseel-border)]">
+            <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">مستند الاستلام</h3>
+            <p className="text-sm text-[var(--aseel-ink-soft)] mb-3 flex items-start gap-1">
+              <Info className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                سمِّ المستند كما تسميه شركتك — الاسم يظهر في الشاشات والطباعة. المستند
+                المرتبط بفاتورة اسم، والمستند بلا فاتورة (بضاعة وصلت قبل فاتورتها) اسم آخر.
+              </span>
+            </p>
+            <div className="grid sm:grid-cols-2 gap-3 max-w-2xl">
+              <label className="block">
+                <span className="block text-sm text-[var(--aseel-ink-soft)] mb-1">
+                  اسم المستند المرتبط بفاتورة
+                </span>
+                <input
+                  className="aseel-input w-full"
+                  disabled={loading}
+                  value={receiptLabel}
+                  onChange={(e) => setReceiptLabel(e.target.value)}
+                  placeholder="إرسالية شراء"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-sm text-[var(--aseel-ink-soft)] mb-1">
+                  اسم المستند بلا فاتورة
+                </span>
+                <input
+                  className="aseel-input w-full"
+                  disabled={loading || !allowStandalone}
+                  value={standaloneLabel}
+                  onChange={(e) => setStandaloneLabel(e.target.value)}
+                  placeholder="سند استلام"
+                />
+              </label>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer select-none text-[var(--aseel-ink)] mt-3">
+              <input
+                type="checkbox"
+                disabled={loading}
+                checked={allowStandalone}
+                onChange={(e) => setAllowStandalone(e.target.checked)}
+              />
+              <span>السماح بمستند استلام بلا فاتورة مرتبطة</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer select-none text-[var(--aseel-ink)] mt-2">
+              <input
+                type="checkbox"
+                disabled={loading}
+                checked={allowEditReceipt}
+                onChange={(e) => setAllowEditReceipt(e.target.checked)}
+              />
+              <span>السماح بتعديل/إلغاء الإرسالية بعد حفظها (يعكس أثرها ويعيد تطبيقه)</span>
+            </label>
+          </div>
+
+          {/* T-SERIAL: نمط الأرقام التسلسلية في بنود الشراء — يخصّ الأصناف المتتبَّعة وحدها. */}
+          <div className="mt-6 pt-4 border-t border-[var(--aseel-border)]">
+            <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">
+              إدخال الأرقام التسلسلية في فاتورة الشراء
+            </h3>
+            <p className="text-sm text-[var(--aseel-ink-soft)] mb-2 flex items-start gap-1">
+              <Info className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{SERIAL_ENTRY_MODE_HINT}</span>
+            </p>
+            <select
+              className="aseel-input w-full max-w-md"
+              disabled={loading}
+              value={serialMode}
+              onChange={(e) => setSerialMode(e.target.value as SerialEntryMode)}
+            >
+              {SERIAL_ENTRY_MODE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+
           {/* T-A4: الصندوق الافتراضي لفواتير الشراء النقدية (مرآة إعدادات المبيعات). */}
           <div className="mt-6 pt-4 border-t border-[var(--aseel-border)]">
             <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">حساب الصندوق الافتراضي (للنقدي)</h3>
@@ -155,19 +281,17 @@ const PurchaseSettingsPage: React.FC = () => {
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
               <span>يُستخدم تلقائياً للدفعات النقدية في فواتير الشراء بدل اختيار صندوق لكل فاتورة.</span>
             </p>
-            <select
-              className="aseel-input w-full max-w-md"
-              disabled={loading}
-              value={cashAccount ?? ""}
-              onChange={(e) => setCashAccount(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">— لا شيء —</option>
-              {cashAccounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {(a.code || "") + " — " + (a.name || "")}
-                </option>
-              ))}
-            </select>
+            <div className="w-full max-w-md">
+              <AccountTreeField
+                accounts={accounts}
+                value={cashAccount}
+                onChange={(id) => setCashAccount(id)}
+                isSelectable={isSelectableCash}
+                disabled={loading}
+                placeholder="— لا شيء —"
+                title="اختيار الصندوق / البنك"
+              />
+            </div>
           </div>
         </div>
       </AseelDocumentShell>

@@ -17,12 +17,26 @@ import OfflineGuard from "@/components/offline/OfflineGuard";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { formatMoney } from "@/utils/formatNumber";
 import { getImportJourneyGuidance, getMissingDealMeasureRefs, type ImportJourneyAction } from "./importJourneyGuidance";
+import { ImportPartyDuesPanel, type ImportPartyDue } from "./ImportPartyDuesPanel";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { shipmentsService } from "@/services/shipmentsService";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { captureScrollPosition, restoreScrollPosition as applyScrollPosition, type ScrollPositionSnapshot } from "@/utils/scrollPosition";
+import { formatDateLocalized } from "../../utils/formatDate";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
+
+/** أسماء افتراضية لأنواع بنود التخليص — تُقترَح كـ«بيان» عند اختيار النوع لبند بلا بيان. */
+const CLEARANCE_LINE_TYPE_LABELS: Record<string, string> = {
+  vat: "ضريبة القيمة المضافة",
+  declaration_fee: "رسوم البيان",
+  terminal: "محطة الشحن",
+  permits: "تصاريح",
+  broker_commission: "عمولة المخلص",
+  customs_system: "نظام الجمارك",
+  "شحن محلي": "شحن محلي",
+  other: "أخرى",
+};
 
 // G6: تحقّق حقلي — عند تمرير `error` يُحاط الحقل بإطار أحمر وتظهر الرسالة أسفله.
 const fld = (label: string, node: React.ReactNode, error?: string | null) => (
@@ -338,7 +352,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // الناقلون المحليون (بدل إدخال «رقم الناقل» يدوياً)
   const [carriers, setCarriers] = useState<Array<{ id: number; name: string; partner_type?: string }>>([]);
   // إنشاء سريع لوكيل شحن / مخلص جمركي — الحقلان كانا readOnly بلا أي مسار إنشاء (ج7)
-  const [quickAddType, setQuickAddType] = useState<null | "FreightForwarder" | "CustomsBroker">(null);
+  const [quickAddType, setQuickAddType] = useState<null | "FreightForwarder" | "CustomsBroker" | "LocalTransporter">(null);
   const [quickAddName, setQuickAddName] = useState("");
   const scrollPositionRef = React.useRef<ScrollPositionSnapshot | null>(null);
   // Empty nav (single-record view) — shell expects a nav prop but we don't browse here yet.
@@ -584,6 +598,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         cost_lines: (f.lines || []).map((l) => ({
           label: l.description,
           amount: (l.debit || 0) - (l.credit || 0),
+          type: l.line_type,
         })),
       });
       setClearance(patched);
@@ -881,10 +896,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setCarriers((prev) => [...prev, row]);
       if (quickAddType === "FreightForwarder") {
         setSF({ shipping_agent: created.id, agent_name: row.name } as Partial<ShipmentApiRow>);
+      } else if (quickAddType === "LocalTransporter") {
+        setLocalForm((prev) => (prev ? { ...prev, carrier: created.id } : prev));
       } else {
         setCF({ customs_broker: created.id, broker_name: row.name } as Partial<ClearanceRow>);
       }
-      toast(`تمت إضافة ${quickAddType === "FreightForwarder" ? "وكيل الشحن" : "المخلِّص"} «${row.name}» واختياره`, "success");
+      const typeLabel = quickAddType === "FreightForwarder" ? "وكيل الشحن" : quickAddType === "LocalTransporter" ? "الناقل المحلي" : "المخلِّص";
+      toast(`تمت إضافة ${typeLabel} «${row.name}» واختياره`, "success");
       setQuickAddType(null);
       setQuickAddName("");
     } catch (e) {
@@ -1697,10 +1715,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const clearanceContent = clearanceForm ? (
     <div style={{ padding: "4px 8px" }}>
-      <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-3">
-        <div><span className="block text-xs text-slate-500">إجمالي الاستحقاق</span><b>{fmt(clearanceCostTotal)} ₪</b></div>
-        <div><span className="block text-xs text-slate-500">المدفوع للمخلّص</span><b className="text-emerald-700">{fmt(paidClearance)} ₪</b></div>
-        <div><span className="block text-xs text-slate-500">المتبقي</span><b className="text-amber-700">{fmt(clearanceRemaining)} ₪</b></div>
+      <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 sm:grid-cols-3">
+        <div><span className="block text-xs text-[var(--color-text-muted)]">إجمالي الاستحقاق</span><b>{fmt(clearanceCostTotal)} ₪</b></div>
+        <div><span className="block text-xs text-[var(--color-text-muted)]">المدفوع للمخلّص</span><b className="text-emerald-700">{fmt(paidClearance)} ₪</b></div>
+        <div><span className="block text-xs text-[var(--color-text-muted)]">المتبقي</span><b className="text-amber-700">{fmt(clearanceRemaining)} ₪</b></div>
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {!clearanceForm.journal ? (
@@ -1720,7 +1738,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         >
           تسجيل دفعة للمخلّص
         </button>
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-[var(--color-text-muted)]">
           {clearanceForm.journal
             ? "الإفراج وإثبات الاستحقاق لا يتطلبان دفع المبلغ كاملاً."
             : "الاستحقاق يُثبَّت تلقائياً عند ترحيل الشحنة إلى فاتورة — أو أثبِته الآن يدوياً."}
@@ -1800,7 +1818,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       </div>
       {/* بنود التكلفة ببساطة: بند + مبلغ. مدين/دائن شأن القيد المحاسبي الداخلي لا المستخدم
           (شكوى المالك: «شو هاد دائن ومدين — كان بنود») — المبلغ يُخزَّن debit والخادم يحوّله. */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-xs">
         <span>
           {clearanceForm.lines?.length
             ? `${clearanceForm.lines.length} بند تفصيلي · المجموع ${fmt(clearanceCostTotal)} ₪`
@@ -1822,7 +1840,18 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           {(clearanceForm.lines || []).map((l, i) => (
             <tr key={l.id ?? i}>
               <td style={{ padding: "2px 4px" }}>
-                <select className="aseel-input" value={l.line_type} onChange={(e) => updateClearanceLine(i, { line_type: e.target.value })}>
+                <select
+                  className="aseel-input"
+                  value={l.line_type}
+                  onChange={(e) => {
+                    const nextType = e.target.value;
+                    // بند بلا بيان بعد: اقترح اسماً افتراضياً من النوع (يبقى قابلاً للتعديل).
+                    const nextDescription = l.description.trim()
+                      ? l.description
+                      : (CLEARANCE_LINE_TYPE_LABELS[nextType] || l.description);
+                    updateClearanceLine(i, { line_type: nextType, description: nextDescription });
+                  }}
+                >
                   <option value="vat">ضريبة القيمة المضافة</option>
                   <option value="declaration_fee">رسوم البيان</option>
                   <option value="terminal">محطة الشحن</option>
@@ -1951,7 +1980,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </p>
       )}
       {payingLocalId && (
-        <div className="my-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div className="my-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
           <h5 className="mb-2 text-sm font-semibold">تسجيل دفعة للناقل · نقل #{payingLocalId}</h5>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
             {fld("المبلغ", <input className="aseel-input" type="number" step="0.01" value={localPayAmount} onChange={(e) => setLocalPayAmount(e.target.value)} />)}
@@ -1972,14 +2001,23 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           </h5>
           <div className="mb-1 grid grid-cols-1 gap-x-2 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
             {fld("الناقل", carriers.length > 0 ? (
-              <select className="aseel-input" value={localForm.carrier ? String(localForm.carrier) : ""} onChange={(e) => setLF({ carrier: Number(e.target.value) || 0 })}>
-                <option value="">— اختر الناقل —</option>
-                {carriers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}{c.partner_type === "LocalTransporter" ? " (ناقل محلي)" : c.partner_type === "FreightForwarder" ? " (وكيل شحن)" : ""}
-                  </option>
-                ))}
-              </select>
+              <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <select className="aseel-input" value={localForm.carrier ? String(localForm.carrier) : ""} onChange={(e) => setLF({ carrier: Number(e.target.value) || 0 })}>
+                  <option value="">— اختر الناقل المحلي —</option>
+                  {carriers.filter((c) => c.partner_type === "LocalTransporter").map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                  {/* الناقل المحفوظ سابقاً قد يكون من نوع مختلف (بيانات قديمة) — أبقِه ظاهراً كي لا يُفقَد. */}
+                  {localForm.carrier &&
+                    !carriers.some((c) => c.partner_type === "LocalTransporter" && c.id === localForm.carrier) &&
+                    carriers.some((c) => c.id === localForm.carrier) && (
+                      <option value={String(localForm.carrier)}>
+                        {carriers.find((c) => c.id === localForm.carrier)?.name}
+                      </option>
+                    )}
+                </select>
+                <button type="button" className="aseel-ellipsis" title="إضافة ناقل محلي جديد" onClick={() => { setQuickAddType("LocalTransporter"); setQuickAddName(""); }}>+</button>
+              </span>
             ) : (
               <input className="aseel-input" type="number" placeholder="رقم الناقل (لم تُحمَّل قائمة الشركاء)" value={localForm.carrier ?? ""} onChange={(e) => setLF({ carrier: Number(e.target.value) })} />
             ))}
@@ -2017,8 +2055,66 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     </div>
   );
 
+  /* ذمم أطراف الاستيراد الثلاثة بلغة واحدة (مستحق ← مدفوع ← متبقٍ). المصادر
+     هي نفسها التي تغذّي الجداول أدناه — بلا حساب موازٍ ينحرف عنها. */
+  const localDueTotal = localShipments.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const localPaidTotal = localShipments.reduce((sum, row) => sum + Number(row.amount_paid || 0), 0);
+  const importPartyDues: ImportPartyDue[] = [
+    {
+      key: "freight",
+      role: "وكيل الشحن الدولي",
+      party: s.agent_name || null,
+      symbol: "$",
+      due: freightTotalUsd,
+      paid: freightPaidUsd,
+      accrued: freightCostEstablished,
+      note: freightTotalUsd <= 0
+        ? "لا تكلفة شحن على هذه الشحنة."
+        : freightAccrued
+          ? `سعر الاستحقاق ${fmt(Number(s.freight_exchange_rate) || 0)} ₪/$ هو الذي يحكم التكلفة.`
+          : "أثبت الاستحقاق بسعر الصرف — الدفع لاحقاً ولا يشترطه الاستيراد.",
+      accrueLabel: "أثبت استحقاق الشحن",
+      onAccrue: freightTotalUsd > 0 ? () => void handlePostFreightAccrual() : undefined,
+      onPay: freightTotalUsd > 0
+        ? () => {
+            setShowAgentPayForm(true);
+            const remaining = Math.max(0, freightTotalUsd - freightPaidUsd);
+            setAgentPayAmount(remaining > 0 ? String(Math.round(remaining * 100) / 100) : "");
+          }
+        : undefined,
+    },
+    ...(clearance ? [{
+      key: "broker",
+      role: "المخلّص الجمركي",
+      party: clearanceForm?.broker_name || null,
+      symbol: "₪",
+      due: clearanceCostTotal,
+      paid: paidClearance,
+      accrued: Boolean(clearanceForm?.journal),
+      note: clearanceCostTotal <= 0 ? "أدخل تكلفة التخليص أولاً." : undefined,
+      accrueLabel: "أثبت استحقاق التخليص",
+      onAccrue: clearanceCostTotal > 0 ? () => void handlePostClearance() : undefined,
+      onPay: clearanceForm?.customs_broker ? openClearancePayment : undefined,
+    } as ImportPartyDue] : []),
+    ...(localShipments.length > 0 ? [{
+      key: "carrier",
+      role: "الناقل المحلي",
+      party: localShipments.map((row) => row.carrier_name).filter(Boolean).join("، ") || null,
+      symbol: "₪",
+      due: localDueTotal,
+      paid: localPaidTotal,
+      accrued: localShipments.every((row) => row.is_posted),
+      note: "التكلفة تدخل حصص الفواتير، والدفع للناقل يبقى مستقلاً.",
+      payLabel: "إدارة النقل والدفعات",
+      onPay: () => setActiveTab("local"),
+    } as ImportPartyDue] : []),
+  ];
+
   const paymentsContent = (
     <div style={{ padding: "4px 8px" }}>
+      {/* ملخّص واحد لأطراف الاستيراد الثلاثة — كان المستخدم يجمعه من تبويبين */}
+      <ImportPartyDuesPanel busy={saving} parties={importPartyDues} />
+
       {/* ── ٠) استحقاق شحن الوكيل — منفصل عن الدفع، وهو ما يثبّت التكلفة ── */}
       <div style={{ marginBottom: 10, border: "1px solid var(--aseel-border, #ddd)", borderRadius: 4, padding: 8 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
@@ -2190,7 +2286,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         {clearance && <button type="button" className="aseel-toolbtn" onClick={openClearancePayment} disabled={saving}><Plus size={14} /> تسجيل دفعة للمخلّص</button>}
       </div>
       {clearance && (
-        <div className="mb-2 flex flex-wrap gap-4 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+        <div className="mb-2 flex flex-wrap gap-4 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-xs">
           <span>إجمالي الاستحقاق: <b>{fmt(clearanceCostTotal)} ₪</b></span>
           <span>المدفوع: <b className="text-emerald-700">{fmt(paidClearance)} ₪</b></span>
           {/* الفائض عن الاستحقاق دفعة مقدمة: المخلّص يصير مديناً لنا، فنعرضه
@@ -2200,7 +2296,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           ) : (
             <span>المتبقي: <b className="text-amber-700">{fmt(clearanceRemaining)} ₪</b></span>
           )}
-          <span className="text-slate-500">الدفع لا يغيّر مرحلة الإفراج ولا يشترط لإصدار الفاتورة الدولية.</span>
+          <span className="text-[var(--color-text-muted)]">الدفع لا يغيّر مرحلة الإفراج ولا يشترط لإصدار الفاتورة الدولية.</span>
         </div>
       )}
       {showPaymentForm && (
@@ -2246,7 +2342,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           <tbody>
             {clearancePayments.map((p) => (
               <tr key={p.id}>
-                <td style={{ padding: "2px 4px" }}>{p.payment_date || "—"}</td>
+                <td style={{ padding: "2px 4px" }}>{formatDateLocalized(p.payment_date) || "—"}</td>
                 <td style={{ padding: "2px 4px" }}>{p.payment_purpose || "—"}</td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(p.amount)}</td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.is_posted ? "✓" : "—"}</td>
@@ -2297,19 +2393,19 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const financialContent = (
     <div className="space-y-3 p-2">
-      <section className="rounded-lg border border-slate-200 bg-white">
-        <h4 className="border-b border-slate-200 px-3 py-2 text-sm font-semibold">ملخص القيود وإجراءات التراجع</h4>
+      <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+        <h4 className="border-b border-[var(--color-border)] px-3 py-2 text-sm font-semibold">ملخص القيود وإجراءات التراجع</h4>
         {accountsContent}
       </section>
       {s.id > 0 && (
-        <section className="rounded-lg border border-slate-200 bg-white">
-          <h4 className="border-b border-slate-200 px-3 py-2 text-sm font-semibold">حركات الشحنة المالية</h4>
+        <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <h4 className="border-b border-[var(--color-border)] px-3 py-2 text-sm font-semibold">حركات الشحنة المالية</h4>
           <DocumentPaymentsTab referenceType="SHIPMENT" referenceId={s.id} searchQuery={s.shipment_number || ""} />
         </section>
       )}
       {clearance?.id && (
-        <section className="rounded-lg border border-slate-200 bg-white">
-          <h4 className="border-b border-slate-200 px-3 py-2 text-sm font-semibold">حركات التخليص المالية</h4>
+        <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <h4 className="border-b border-[var(--color-border)] px-3 py-2 text-sm font-semibold">حركات التخليص المالية</h4>
           <DocumentPaymentsTab referenceType="CLEARANCE" referenceId={clearance.id} searchQuery={clearance.declaration_number || ""} />
         </section>
       )}
@@ -2442,8 +2538,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <span className="text-xs font-semibold text-blue-700">الخطوة التالية · {guidance.step} من 6</span>
-          <h3 className="mt-1 text-base font-bold text-slate-900">{guidance.title}</h3>
-          <p className="mt-1 text-sm text-slate-600">{guidance.description}</p>
+          <h3 className="mt-1 text-base font-bold text-[var(--color-text)]">{guidance.title}</h3>
+          <p className="mt-1 text-sm text-[var(--color-text-muted)]">{guidance.description}</p>
         </div>
         <button
           type="button"
@@ -2463,16 +2559,16 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               : `$${fmt(freightPaidUsd)} من $${fmt(freightTotalUsd)}`
           }
         </span>
-        <span className={`rounded-full px-3 py-1 font-medium ${clearanceCostTotal > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>
+        <span className={`rounded-full px-3 py-1 font-medium ${clearanceCostTotal > 0 ? "bg-emerald-100 text-emerald-800" : "bg-[var(--color-surface-3)] text-[var(--color-text-muted)]"}`}>
           التخليص: {clearanceCostTotal > 0 ? `${fmt(clearanceCostTotal)} ₪` : "بانتظار التكلفة"}
         </span>
-        <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-600">النقل المحلي: اختياري</span>
+        <span className="rounded-full bg-[var(--color-surface-3)] px-3 py-1 font-medium text-[var(--color-text-muted)]">النقل المحلي: اختياري</span>
       </div>
     </div>
   );
 
   const journeyStrip = (
-    <div className="grid grid-cols-2 gap-1 border-b border-slate-200 px-2 pb-2 sm:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-2 gap-1 border-b border-[var(--color-border)] px-2 pb-2 sm:grid-cols-3 xl:grid-cols-6">
       {journeySteps.map((st) => (
         <button
           key={st.key}
@@ -2484,7 +2580,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               ? "border-blue-500 bg-blue-50 text-blue-900 ring-1 ring-blue-200"
               : st.state === "done"
                 ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                : "border-slate-200 bg-white text-slate-600"
+                : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)]"
           }`}
           title={st.sub}
         >
@@ -2497,8 +2593,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   );
 
   const routeTimeline = (
-    <details className="mx-2 mb-2 rounded-lg border border-slate-200 bg-white text-xs">
-      <summary className="cursor-pointer px-3 py-2 font-semibold text-slate-700">عرض مسار حركة الشحنة والميناء</summary>
+    <details className="mx-2 mb-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-xs">
+      <summary className="cursor-pointer px-3 py-2 font-semibold text-[var(--color-text)]">عرض مسار حركة الشحنة والميناء</summary>
       <CompactTimeline steps={timelineSteps} />
     </details>
   );
@@ -2535,7 +2631,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         >
           <div style={{ background: "var(--aseel-panel, #fff)", borderRadius: 8, padding: 16, minWidth: 320, boxShadow: "0 8px 30px rgba(0,0,0,0.25)" }}>
             <h3 style={{ fontWeight: 700, marginBottom: 8 }}>
-              {quickAddType === "FreightForwarder" ? "إضافة وكيل شحن جديد" : "إضافة مخلِّص جمركي جديد"}
+              {quickAddType === "FreightForwarder" ? "إضافة وكيل شحن جديد" : quickAddType === "LocalTransporter" ? "إضافة ناقل محلي جديد" : "إضافة مخلِّص جمركي جديد"}
             </h3>
             <input
               className="aseel-input"

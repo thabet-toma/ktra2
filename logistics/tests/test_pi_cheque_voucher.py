@@ -38,8 +38,10 @@ class PiChequeVoucherTest(TestCase):
             cash_amount=2000,
             cash_account_id=self.cash_account.id,
             cheques=[
-                {"cheque_number": "CHQ-001", "amount": "3000", "bank_name": "بنك أ"},
-                {"cheque_number": "CHQ-002", "amount": "5000", "bank_name": "بنك ب"},
+                {"cheque_number": "CHQ-001", "amount": "3000", "bank_name": "بنك أ",
+                 "due_date": "2026-09-01"},
+                {"cheque_number": "CHQ-002", "amount": "5000", "bank_name": "بنك ب",
+                 "due_date": "2026-10-01"},
             ],
         )
         self.invoice.refresh_from_db()
@@ -68,7 +70,7 @@ class PiChequeVoucherTest(TestCase):
             self.invoice,
             cash_amount=0,
             cheques=[
-                {"cheque_number": "NEW-CHQ", "amount": "5000"},
+                {"cheque_number": "NEW-CHQ", "amount": "5000", "due_date": "2026-09-01"},
             ],
         )
         cheques = Cheque.objects.filter(purchase_invoice=self.invoice)

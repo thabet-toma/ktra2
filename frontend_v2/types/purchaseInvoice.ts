@@ -15,6 +15,8 @@ export interface PurchaseInvoiceItemDto {
   expense_account?: number | null;
   expense_account_code?: string | null;
   expense_account_name?: string | null;
+  /** T-SERIAL: أرقام وحدات البند (نيّة على البند؛ الوحدات تُنشأ عند الاستلام). */
+  serials?: string[] | null;
 }
 
 export type ReceiptStatus =
@@ -63,6 +65,11 @@ export interface PurchaseInvoiceListDto {
   grand_total: number;
   fees_total?: string;
   payable_total?: string;
+  amount_paid?: string;
+  remaining_balance?: string;
+  payment_status?: "paid" | "partially_paid" | "unpaid";
+  payment_status_display?: string;
+  supplier_balance?: string;
   status: string;
   status_display: string;
   receipt_status?: ReceiptStatus;
@@ -90,6 +97,15 @@ export interface PurchaseInvoiceDto {
   shipment_number?: string | null;
   shipment_name?: string | null;
   clearance?: number | null;
+  /** T-PLINEAGE: المستند الذي وُلدت منه الفاتورة (عرض سعر أو طلبية شراء). */
+  source_document?: {
+    kind: "order" | "quotation";
+    id: number;
+    number: string;
+    origin_kind?: "quotation" | null;
+    origin_id?: number | null;
+    origin_number?: string | null;
+  } | null;
   currency?: number | null;
   currency_code?: string | null;
   exchange_rate?: number;
@@ -116,6 +132,21 @@ export interface PurchaseInvoiceDto {
   remaining_balance?: string;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payment_status_display?: string;
+  supplier_balance_current?: string;
+  supplier_balance_before_invoice?: string;
+  supplier_balance_after_invoice?: string;
+  payment_details?: Array<{
+    source: "supplier_payment" | "purchase_invoice_payment";
+    id: number;
+    payment_date: string;
+    amount: string;
+    currency_code: string;
+    exchange_rate: string;
+    cash_or_bank_account_name?: string | null;
+    is_posted: boolean;
+    journal: number | null;
+    notes?: string;
+  }>;
   notes?: string | null;
   supplier_invoice_number?: string | null;
   factory_name?: string | null;

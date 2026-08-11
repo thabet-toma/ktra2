@@ -7,8 +7,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, PackageCheck, X } from "lucide-react";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
+import { getReceivableLines } from "@/services/goodsReceiptsApi";
 import { inventoryApi } from "@/services/inventoryApi";
-import type { PurchaseInvoiceDto } from "@/types/purchaseInvoice";
 
 interface WarehouseDto {
   id: number;
@@ -18,7 +18,9 @@ interface WarehouseDto {
 }
 
 interface Props {
-  invoice: PurchaseInvoiceDto;
+  /** معرّف الفاتورة — البنود تُجلب دائماً طازجة من الخادم. */
+  invoiceId: number;
+  invoiceNumber?: string;
   onClose: () => void;
   onReceived: () => void;
 }
@@ -30,16 +32,20 @@ interface Row {
   received: number;
   remaining: number;
   qty: number;
+  /** مؤشَّر افتراضياً لكل بند له متبقٍ — الاستلام الكامل هو الحالة الغالبة. */
+  selected: boolean;
   warehouse_id: number | null;
 }
 
 export const ReceiveGoodsModal: React.FC<Props> = ({
-  invoice,
+  invoiceId,
+  invoiceNumber,
   onClose,
   onReceived,
 }) => {
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
+  const [number, setNumber] = useState(invoiceNumber || "");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,40 +54,40 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
     setLoading(true);
     setError(null);
     try {
-      // إعادة جلب الفاتورة لضمان معرّفات بنود حديثة — تعديل الفاتورة يحذف
-      // البنود ويعيد إنشاءها (معرّفات جديدة)، فالنسخة الممرّرة قد تكون قديمة.
+      // البنود تُجلب طازجة دائماً: تعديل الفاتورة يحذف بنودها ويعيد إنشاءها
+      // بمعرّفات جديدة، وقد استُلم بعضها منذ آخر عرض.
       const [whs, fresh] = await Promise.all([
         inventoryApi.getWarehouses({ active_only: "true" }) as Promise<
           WarehouseDto[]
         >,
-        purchaseInvoiceApi.get(invoice.id as number),
+        getReceivableLines(invoiceId),
       ]);
       setWarehouses(whs);
+      setNumber(fresh.invoice_number || invoiceNumber || "");
       const defaultWh =
         whs.find((w) => w.is_default)?.id ?? whs[0]?.id ?? null;
-      const productRows: Row[] = (fresh.items || [])
-        .filter((it) => it.product)
-        .map((it) => {
-          const ordered = Number(it.quantity) || 0;
-          const received = Number(it.received_quantity) || 0;
-          const remaining = Math.max(0, ordered - received);
-          return {
-            item_id: it.id as number,
-            name: it.product_name || it.name,
-            ordered,
-            received,
-            remaining,
-            qty: remaining,
-            warehouse_id: defaultWh,
-          };
-        });
+      const productRows: Row[] = (fresh.lines || []).map((l) => {
+        const ordered = Number(l.quantity) || 0;
+        const received = Number(l.received_quantity) || 0;
+        const remaining = Math.max(0, Number(l.remaining_quantity) || 0);
+        return {
+          item_id: l.item_id,
+          name: l.product_name || l.name,
+          ordered,
+          received,
+          remaining,
+          qty: remaining,
+          selected: remaining > 0,
+          warehouse_id: defaultWh,
+        };
+      });
       setRows(productRows);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر تحميل المستودعات");
+      setError(e instanceof Error ? e.message : "تعذر تحميل بنود الفاتورة");
     } finally {
       setLoading(false);
     }
-  }, [invoice]);
+  }, [invoiceId, invoiceNumber]);
 
   useEffect(() => {
     void load();
@@ -91,27 +97,40 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
     setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
 
   const hasReceivable = useMemo(
-    () => rows.some((r) => r.qty > 0 && r.remaining > 0),
+    () => rows.some((r) => r.selected && r.qty > 0 && r.remaining > 0),
     [rows]
   );
+
+  const selectableCount = useMemo(
+    () => rows.filter((r) => r.remaining > 0).length,
+    [rows]
+  );
+  const allSelected = useMemo(
+    () => selectableCount > 0 && rows.every((r) => r.remaining <= 0 || r.selected),
+    [rows, selectableCount]
+  );
+  const toggleAll = (checked: boolean) =>
+    setRows((rs) =>
+      rs.map((r) => (r.remaining > 0 ? { ...r, selected: checked } : r))
+    );
 
   const submit = async () => {
     setSaving(true);
     setError(null);
     try {
       const lines = rows
-        .filter((r) => r.qty > 0 && r.warehouse_id)
+        .filter((r) => r.selected && r.qty > 0 && r.warehouse_id)
         .map((r) => ({
           item_id: r.item_id,
           quantity: r.qty,
           warehouse_id: r.warehouse_id as number,
         }));
       if (!lines.length) {
-        setError("حدّد كمية ومستودعاً لبند واحد على الأقل.");
+        setError("اختر بنداً واحداً على الأقل بكمية ومستودع.");
         setSaving(false);
         return;
       }
-      await purchaseInvoiceApi.receive(invoice.id as number, lines);
+      await purchaseInvoiceApi.receive(invoiceId, lines);
       onReceived();
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر الاستلام");
@@ -140,7 +159,7 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
                 استلام البضاعة للمخزن
               </h3>
               <p className="text-xs aseel-text-soft">
-                فاتورة {invoice.invoice_number}
+                فاتورة {number}
               </p>
             </div>
           </div>
@@ -179,8 +198,18 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
               <table className="w-full text-sm min-w-[480px]">
                 <thead className="aseel-bg-panel aseel-text-soft text-xs">
                   <tr>
+                    <th className="px-2 py-2 text-center font-medium w-10">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        disabled={selectableCount === 0}
+                        onChange={(e) => toggleAll(e.target.checked)}
+                        aria-label="تحديد الكل"
+                      />
+                    </th>
                     <th className="px-3 py-2 text-right font-medium">الصنف</th>
                     <th className="px-2 py-2 text-center font-medium">المطلوب</th>
+                    <th className="px-2 py-2 text-center font-medium">المستلَم</th>
                     <th className="px-2 py-2 text-center font-medium">المتبقي</th>
                     <th className="px-2 py-2 text-center font-medium w-24">استلام</th>
                     <th className="px-3 py-2 text-right font-medium">المستودع</th>
@@ -194,6 +223,17 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
                         key={r.item_id}
                         className="border-t aseel-border-soft"
                       >
+                        <td className="px-2 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={r.selected}
+                            disabled={done}
+                            onChange={(e) =>
+                              updateRow(idx, { selected: e.target.checked })
+                            }
+                            aria-label={`استلام ${r.name}`}
+                          />
+                        </td>
                         <td className="px-3 py-2 aseel-text-ink dark:aseel-text-soft">
                           {r.name}
                           {done && (
@@ -206,6 +246,9 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
                           {r.ordered}
                         </td>
                         <td className="px-2 py-2 text-center font-mono">
+                          {r.received}
+                        </td>
+                        <td className="px-2 py-2 text-center font-mono">
                           {r.remaining}
                         </td>
                         <td className="px-2 py-2">
@@ -215,7 +258,7 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
                             max={r.remaining}
                             step="0.0001"
                             value={r.qty}
-                            disabled={done}
+                            disabled={done || !r.selected}
                             onChange={(e) => {
                               const v = Math.max(
                                 0,
@@ -229,7 +272,7 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
                         <td className="px-3 py-2">
                           <select
                             value={r.warehouse_id ?? ""}
-                            disabled={done}
+                            disabled={done || !r.selected}
                             onChange={(e) =>
                               updateRow(idx, {
                                 warehouse_id: e.target.value

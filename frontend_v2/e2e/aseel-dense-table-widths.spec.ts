@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 test('AseelDenseTable saves column width to localStorage on resize', async ({ page }) => {
-  // We navigate to a page that has AseelDenseTable (e.g., partners page)
-  await page.goto('http://localhost:3000/partners');
+  // The component story is public and deterministic; authenticated partner data is not.
+  await page.goto('/aseel-kit');
   
   // Wait for the table to load
   const table = page.locator('.aseel-dense-table');
@@ -12,24 +12,19 @@ test('AseelDenseTable saves column width to localStorage on resize', async ({ pa
   const resizableHeader = page.locator('.aseel-dense-table th:has(span[title="اسحب لتغيير عرض العمود"])').first();
   await expect(resizableHeader).toBeVisible();
 
-  // Get initial width
-  const initialBox = await resizableHeader.boundingBox();
-  expect(initialBox).not.toBeNull();
+  const initialWidth = await resizableHeader.evaluate((element) => (element as HTMLElement).style.width);
   
   const handle = resizableHeader.locator('span[title="اسحب لتغيير عرض العمود"]');
-  const handleBox = await handle.boundingBox();
-  expect(handleBox).not.toBeNull();
+  // Dispatch the same document-level mouse sequence used by the component.
+  await handle.dispatchEvent('mousedown', { clientX: 100, clientY: 10, button: 0 });
+  await page.evaluate(() => {
+    document.dispatchEvent(new MouseEvent('mousemove', { clientX: 150, clientY: 10, bubbles: true }));
+    document.dispatchEvent(new MouseEvent('mouseup', { clientX: 150, clientY: 10, bubbles: true }));
+  });
 
-  // Drag the handle to resize
-  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
-  await page.mouse.down();
-  // move mouse right by 50px
-  await page.mouse.move(handleBox!.x + 50, handleBox!.y + handleBox!.height / 2);
-  await page.mouse.up();
-
-  // Check new width
-  const newBox = await resizableHeader.boundingBox();
-  expect(newBox!.width).not.toEqual(initialBox!.width);
+  await expect.poll(() => resizableHeader.evaluate((element) => (element as HTMLElement).style.width))
+    .not.toBe(initialWidth);
+  const resizedWidth = await resizableHeader.evaluate((element) => (element as HTMLElement).style.width);
 
   // Reload page
   await page.reload();
@@ -37,8 +32,6 @@ test('AseelDenseTable saves column width to localStorage on resize', async ({ pa
 
   // Check if width is preserved
   const reloadedHeader = page.locator('.aseel-dense-table th:has(span[title="اسحب لتغيير عرض العمود"])').first();
-  const reloadedBox = await reloadedHeader.boundingBox();
-  
-  // The new width should be within 10 pixels of the resized width due to layout shifting
-  expect(Math.abs(reloadedBox!.width - newBox!.width)).toBeLessThan(10);
+  await expect.poll(() => reloadedHeader.evaluate((element) => (element as HTMLElement).style.width))
+    .toBe(resizedWidth);
 });

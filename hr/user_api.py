@@ -37,7 +37,13 @@ def list_users(request):
     token = Token.objects.filter(key=auth).select_related("user").first()
     if not token:
         return JsonResponse({"detail": "Unauthorized"}, status=401)
-    
+
+    # This endpoint exposes platform-wide account identifiers. Company managers
+    # administer memberships through an exact username/email lookup instead;
+    # they must never be able to enumerate unrelated platform accounts.
+    if not token.user.is_superuser:
+        return JsonResponse({"detail": "Forbidden"}, status=403)
+
     users = User.objects.filter(is_active=True).values("id", "username", "email", "first_name", "last_name")
     
     result = []

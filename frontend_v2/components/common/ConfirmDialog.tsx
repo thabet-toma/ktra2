@@ -37,7 +37,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       onClick={onCancel}
     >
       <div
-        className="w-full max-w-md rounded-2xl bg-white dark:bg-gray-800 shadow-2xl border border-gray-200 dark:border-gray-700 p-6"
+        className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] shadow-2xl border border-[var(--color-border)] p-6"
         onClick={(e) => e.stopPropagation()}
         role="alertdialog"
         aria-modal="true"
@@ -47,12 +47,12 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             <AlertTriangle className={`w-5 h-5 ${danger ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'}`} />
           </div>
           <h3 className="text-lg font-bold flex-1 dark:text-white">{title || 'تأكيد'}</h3>
-          <button onClick={onCancel} className="p-1 rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="إغلاق">
+          <button onClick={onCancel} className="p-1 rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]" aria-label="إغلاق">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="text-sm text-gray-600 dark:text-gray-300 mb-6 whitespace-pre-line leading-relaxed pr-1">
+        <div className="text-sm text-[var(--color-text-muted)] mb-6 whitespace-pre-line leading-relaxed pr-1">
           {message}
         </div>
 
@@ -61,7 +61,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+              className="px-4 py-2 text-sm font-semibold rounded-lg border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
             >
               {cancelText || 'إلغاء'}
             </button>

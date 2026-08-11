@@ -34,6 +34,19 @@ const FIELD_LABELS: Record<string, string> = {
   vat_percent: "نسبة الضريبة",
   discount_amount: "قيمة الخصم",
   discount_percent: "نسبة الخصم",
+  // الرواتب — رسالة رقمية بلا اسم حقل لا تدلّ المستخدم على مكان الخلل.
+  employee: "الموظف",
+  monthly_salary: "الراتب الشهري",
+  hourly_rate: "أجر الساعة",
+  working_days_per_month: "أيام الدوام في الشهر",
+  standard_hours_per_day: "ساعات الدوام اليومية",
+  hours: "الساعات",
+  days: "عدد الأيام",
+  minutes: "دقائق التأخير",
+  period_start: "بداية الفترة",
+  period_end: "نهاية الفترة",
+  hire_date: "تاريخ المباشرة",
+  code: "الرقم",
 };
 
 /** رسائل DRF الإنجليزية الافتراضية الشائعة → عربية (عند تشغيل الخادم بلغة إنجليزية). */
@@ -119,4 +132,20 @@ export function extractDrfFieldErrors(data: unknown): Record<string, string> {
 
   walk(data, "");
   return out;
+}
+
+/**
+ * رسالة خطأ مقروءة من أي شكل مرمي: `Error` (تُقرأ رسالته) أو جسم DRF أو نص.
+ * `humanizeDrfError` وحده يعيد "" لكائن Error لأن رسالته ليست خاصية قابلة للتعداد.
+ */
+export function humanizeThrown(e: unknown, fallback = "حدث خطأ غير متوقع"): string {
+  const raw = e instanceof Error ? e.message : e;
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (text.startsWith("{") || text.startsWith("[")) {
+      try { parsed = JSON.parse(text); } catch { parsed = raw; }
+    }
+  }
+  return humanizeDrfError(parsed) || fallback;
 }

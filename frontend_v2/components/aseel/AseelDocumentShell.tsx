@@ -52,6 +52,10 @@ export interface AseelDocumentShellProps {
   aside?: React.ReactNode;
   /** Lines / grid area. */
   children: React.ReactNode;
+  /** عند true: منطقة الشبكة تأخذ ارتفاع محتواها فقط بدل الامتداد لملء الفراغ
+   *  (يمنع فراغاً أبيض ضخماً أسفل مستند عرض قصير — بند واحد مثلاً). استخدمه
+   *  لوضع العرض القرائي (viewMode)، لا لشبكة الإدخال التي يجب أن تملأ الصفحة. */
+  gridFitContent?: boolean;
   /** Bottom tab strip (notes / accounts / other). */
   tabs?: AseelTab[];
   /** Totals & payment dock (right side of the bottom area). */
@@ -107,6 +111,7 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
   header,
   aside,
   children,
+  gridFitContent = false,
   tabs = [],
   totals,
   status,
@@ -147,7 +152,7 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
   );
 
   return (
-    <div className="aseel-doc" data-skin="aseel">
+    <div className="aseel-doc">
       {/* Title bar */}
       <div className="aseel-titlebar">
         <div className="aseel-title-grp">
@@ -195,7 +200,7 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
       {(() => {
         const band = header ? <div className="aseel-headband">{header}</div> : null;
         const grid = (
-          <div className="aseel-gridwrap">
+          <div className={`aseel-gridwrap${gridFitContent && !tabsInMain ? ' aseel-gridwrap--fit' : ''}`}>
             {tabsInMain ? (
               <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
                 {tabStrip}

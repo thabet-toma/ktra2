@@ -5,12 +5,22 @@ import { useNavigate } from 'react-router-dom';
 
 export const VIEW_LABELS: Record<AppView, string> = {
   dashboard: 'الرئيسية',
+  'super-admin': 'لوحة تحكم السوبر أدمن',
+  'development-notes': 'ملاحظات التطوير',
   tasks: 'مهامي',
   'task-management': 'إدارة المهام',
   users: 'قائمة المستخدمين',
   reports: 'التقارير',
+  'report-runner': 'تقرير',
+  'team-time-report': 'أوقات الفريق',
   'employee-notes': 'ملاحظات الموظفين',
   'points-history': 'سجل نقاطي',
+  'sales-orders': 'عروض وطلبيات البيع',
+  'personal-expenses': 'مصاريفي الشخصية',
+  payroll: 'الرواتب',
+  'company-accountant-engagements': 'واجهة المحاسب القانوني',
+  'sensitive-devices': 'تسجيل وتتبع الأجهزة الحساسة',
+  'after-sales': 'بطاقات الكفالة',
   'points-management': 'إدارة النقاط',
   settings: 'الإعدادات',
   attendance: 'الحضور والغياب',
@@ -19,12 +29,15 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'sales-customers': 'العملاء',
   'sales-settings': 'إعدادات المبيعات',
   'purchase-settings': 'إعدادات الشراء',
+  'purchase-receipts': 'إرساليات الشراء',
+  'sales-delivery-notes': 'إرساليات البيع',
   'product-profile': 'بطاقة الصنف',
   'product-group': 'كرت مجمّع (براندات)',
   'purchase-invoices': 'فواتير الشراء',
   'international-invoices': 'الفواتير الدولية',
   'old-invoices': 'أرشيف الفواتير',
   'price-offers': 'عروض الأسعار',
+  'import-offers': 'عروض وطلبيات الاستيراد',
   'deals-management': 'إدارة الصفقات',
   'items-management': 'الأصناف',
   'items-categories': 'فئات الأصناف',
@@ -39,6 +52,8 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'accounting-journals': 'دفتر اليومية',
   'accounting-journal-entry': 'قيد اليومية',
   'accounting-cheques': 'الشيكات',
+  'accounting-banks': 'البنوك وفروعها',
+  'accounting-bank-reconciliation': 'المطابقة البنكية',
   'accounting-general-ledger': 'الأستاذ العام',
   'accounting-trial-balance': 'ميزان المراجعة',
   'accounting-vat-report': 'تقرير ضريبة القيمة المضافة',
@@ -53,6 +68,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'purchase-return': 'مرجع الشراء',
   'supplier-payments': 'سندات الصرف للموردين',
   'invoice-profits': 'أرباح الفواتير',
+  'reserved-stock': 'تقرير المحجوزات',
   'partner-profile': 'ملف الشريك',
   'stock-levels': 'أرصدة المخزون',
   'stock-movements': 'حركات المخزون',
@@ -62,7 +78,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'stocktake': 'الجرد',
   'property-rental': 'تأجير العقارات',
   'sql-products': 'المنتجات (SQL)',
-  'sql-partners': 'الشركاء (SQL)',
+  'sql-partners': 'دليل الأطراف',
   'sql-deals': 'الصفقات (SQL)',
   'sql-shipments': 'الشحنات (SQL)',
   sourcing: 'البحث',
@@ -70,7 +86,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   store: 'المتجر',
   'aseel-kit': 'مكوّنات الأصيل',
   'aseel-sales': 'فاتورة المبيعات (الأصيل)',
-  'sales-quotations': 'العروض والطلبيات',
+  'sales-quotations': 'عروض وطلبيات البيع',
   'credit-debit-notes': 'الإشعارات المدينة/الدائنة',
   'sql-clearances': 'التخليص (SQL)',
   'sql-purchase-invoices': 'فواتير الشراء (SQL)',
@@ -80,6 +96,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   clearance: 'التخليص الجمركي',
   'group-constants': 'ثوابت المجموعة',
   'activity-log': 'سجل النشاط',
+  'permissions': 'الصلاحيات والأدوار',
   'about-us': 'من نحن',
   contact: 'تواصل معنا',
 };
@@ -108,7 +125,7 @@ export const Breadcrumb: React.FC<{ activeView: AppView }> = ({ activeView }) =>
           console.log('[Routing] Back button clicked: Navigating back');
           navigate(-1);
         }}
-        className="px-3 py-1.5 rounded-lg bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold transition-all flex items-center gap-1.5 border border-gray-200 dark:border-gray-700 shadow-sm"
+        className="px-3 py-1.5 rounded-lg bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold transition-all flex items-center gap-1.5 border border-[var(--color-border)] shadow-sm"
         title="رجوع للصفحة السابقة"
         aria-label="رجوع"
       >
@@ -116,7 +133,7 @@ export const Breadcrumb: React.FC<{ activeView: AppView }> = ({ activeView }) =>
         <span className="text-sm">رجوع</span>
       </button>
 
-      <nav aria-label="breadcrumb" className="flex items-center gap-1 text-[var(--font-size-sm)] border-s border-gray-300 dark:border-gray-600 ps-2">
+      <nav aria-label="breadcrumb" className="flex items-center gap-1 text-[var(--font-size-sm)] border-s border-[var(--color-border)] ps-2">
         {crumbs.map((crumb, i) => (
           <React.Fragment key={i}>
             {i > 0 && <ChevronLeft className="h-3 w-3 text-[var(--color-text-muted)]" />}

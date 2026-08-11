@@ -197,7 +197,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                             <th className="w-10 py-1 px-0 text-center"> </th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    <tbody className="divide-y divide-[var(--color-border)]">
                         <tr className="align-middle aseel-bg-panel/50 dark:aseel-bg-panel/25">
                             <td className="py-0.5 px-1 font-bold aseel-text-ink dark:aseel-text-soft">
                                 بند القيمة المضافة

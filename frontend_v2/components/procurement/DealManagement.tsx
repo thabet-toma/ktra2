@@ -12,6 +12,7 @@ import { DealPrintView } from './deals/DealPrintView';
 import { Plus, FileInput, Printer, Trash2, RefreshCw, Ship } from 'lucide-react';
 import { LoadingSpinner } from '../LoadingSpinner';
 import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModal';
+import { convertSupplierQuotationToImportDeal } from '../../services/procurementDocumentsApi';
 import { CreateShipmentFromDealsModal } from '../import-flow/CreateShipmentFromDealsModal';
 import { FirstDealWizard } from './deals/FirstDealWizard';
 import { Sparkles } from 'lucide-react';
@@ -52,11 +53,12 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateValue } from "../../utils/formatDate";
 const fmtAmt = (n: number) => formatMoney(n);
 
 const fmtDate = (s: string | undefined) => {
     if (!s) return '—';
-    try { return new Date(s).toLocaleDateString('ar'); } catch { return s; }
+    return formatDateValue(s);
 };
 
 export const DealManagement: React.FC<DealManagementProps> = ({
@@ -148,9 +150,9 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     useEffect(() => {
         const unsubOffers = priceOffersService.subscribeToPriceOffers((offers) => {
             setPriceOffers(offers.filter(o =>
-                o.status === 'approved_for_shipping' || o.status === 'under_discussion'
+                o.offerType === 'incoming_offer' && o.status === 'approved_for_shipping'
             ));
-        });
+        }, 'import');
         const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers);
         return () => { unsubOffers(); unsubSuppliers(); };
     }, []);
@@ -267,38 +269,12 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         const selectedOffer = priceOffers.find(o => o.id === priceOfferId);
         if (!selectedOffer) return;
         try {
-            const dealNumber = await dealsService.getNextDealNumber();
-            const dealData: Partial<Deal> = {
-                priceOfferId: selectedOffer.id,
-                originalOfferNumber: selectedOffer.offerNumber,
-                dealNumber,
-                supplierId: selectedOffer.supplierId,
-                factoryName: selectedOffer.factoryName || '',
-                totalAmount: selectedOffer.grandTotal,
-                remainingAmount: selectedOffer.grandTotal,
-                subtotal: selectedOffer.subtotal,
-                shippingCost: selectedOffer.shippingCost || 0,
-                status: 'initial',
-                internalNotes: selectedOffer.internalNotes || '',
-                items: selectedOffer.items?.map(item => ({
-                    ...item,
-                    id: crypto.randomUUID(),
-                    itemId: item.itemId || item.id,
-                } as DealItem)) || [],
-                payments: [],
-                statusHistory: [{
-                    status: 'initial',
-                    timestamp: new Date().toISOString(),
-                    notes: 'تم إنشاء الصفقة من عرض السعر',
-                    changedBy: currentUser.id
-                }],
-                quoteImages: selectedOffer.quote_images || [],
-                quotePdfs: selectedOffer.quote_pdfs || []
-            };
-            newFormInitRef.current = false;
-            navigate('/deals/new', { state: { draftDeal: dealData } });
+            const match = /^quote-(\d+)$/.exec(selectedOffer.id);
+            if (!match) throw new Error('عرض الاستيراد المحدد غير مرتبط بقاعدة البيانات.');
+            const result = await convertSupplierQuotationToImportDeal(Number(match[1]));
+            navigate(`/deals/${encodeURIComponent(String(result.deal.id))}`);
         } catch (error) {
-            // console suppressed
+            setLoadError(error instanceof Error ? error.message : 'تعذّر تحويل العرض إلى طلبية استيراد.');
         }
     };
 
@@ -378,10 +354,35 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         {
             key: 'status',
             header: 'الحالة',
-            width: '90px',
+            width: '160px',
             render: (d) => (
-                <span style={{ color: STATUS_COLORS[d.status] || 'inherit', fontWeight: 500 }}>
-                    {STATUS_LABELS[d.status] || d.status}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ color: STATUS_COLORS[d.status] || 'inherit', fontWeight: 500 }}>
+                        {STATUS_LABELS[d.status] || d.status}
+                    </span>
+                    {/* «تحولت إلى فاتورة» — رابط بجانب الحالة يفتح فاتورة الشراء الناتجة */}
+                    {d.linkedInvoice && (
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/purchase-invoices/${d.linkedInvoice!.id}`);
+                            }}
+                            title="فتح الفاتورة الناتجة عن الصفقة"
+                            style={{
+                                color: 'var(--aseel-accent, #2563eb)',
+                                textDecoration: 'underline',
+                                fontWeight: 500,
+                                fontSize: '0.72rem',
+                                background: 'none',
+                                border: 'none',
+                                padding: 0,
+                                cursor: 'pointer',
+                            }}
+                        >
+                            ↗ تحولت إلى فاتورة{d.linkedInvoice.invoiceNumber ? ` #${d.linkedInvoice.invoiceNumber}` : ''}
+                        </button>
+                    )}
                 </span>
             ),
         },
@@ -511,7 +512,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     }
 
     return (
-        <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
+        <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
             {/* شريط العنوان والأدوات */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
                 <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>
@@ -525,7 +526,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 {/* بحث (F6 = focus) */}
                 <input
                     ref={searchInputRef}
-                    className="aseel-input"
+                    className="aseel-input aseel-print-hidden"
                     style={{ width: 200 }}
                     placeholder="بحث برقم الصفقة، المورد، المنتج… (F6)"
                     value={search}
@@ -533,7 +534,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 />
                 {/* فلتر الحالة */}
                 <select
-                    className="aseel-input"
+                    className="aseel-input aseel-print-hidden"
                     style={{ width: 150 }}
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
@@ -544,14 +545,14 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                     ))}
                 </select>
                 <button
-                    className="aseel-toolbtn"
+                    className="aseel-toolbtn aseel-print-hidden"
                     onClick={() => { setSearch(''); setStatusFilter('all'); void reloadDeals(); }}
                     title="تحديث القائمة وإعادة تعيين الفلاتر"
                 >
                     <RefreshCw style={{ width: 14, height: 14 }} />
                 </button>
                 <button
-                    className="aseel-toolbtn"
+                    className="aseel-toolbtn aseel-print-hidden"
                     onClick={() => setIsOfferModalOpen(true)}
                     title="إنشاء من عرض سعر"
                 >
@@ -560,21 +561,21 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                     من عرض
                 </button>
                 <button
-                    className="aseel-toolbtn"
+                    className="aseel-toolbtn aseel-print-hidden"
                     onClick={() => setIsShipmentModalOpen(true)}
                     title="إنشاء شحنة من صفقات جاهزة للشحن (اختيار متعدد)"
                 >
                     <Ship style={{ width: 14, height: 14 }} /> شحنة من الصفقات
                 </button>
                 <button
-                    className="aseel-toolbtn"
+                    className="aseel-toolbtn aseel-print-hidden"
                     onClick={() => setShowWizard(true)}
                     title="معالِج موجّه لإنشاء أول صفقة (3 خطوات مبسّطة)"
                 >
                     <Sparkles style={{ width: 14, height: 14 }} /> معالِج الصفقة
                 </button>
                 <button
-                    className="aseel-toolbtn"
+                    className="aseel-toolbtn aseel-print-hidden"
                     onClick={handleCreateNew}
                     title="صفقة جديدة (Ctrl+Ins)"
                 >
@@ -601,7 +602,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 }
             />
             {hasNextPage && (
-                <button className="aseel-toolbtn" onClick={() => void loadMoreDeals()}>
+                <button className="aseel-toolbtn aseel-print-hidden" onClick={() => void loadMoreDeals()}>
                     تحميل المزيد ({deals.length} من {totalCount})
                 </button>
             )}

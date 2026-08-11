@@ -5,6 +5,7 @@ import { invoicesService, itemsService, suppliersService } from '../services/fir
 import { Plus, Archive, Package } from 'lucide-react';
 import { collection, query, where, orderBy, getDocs, limit, onSnapshot, db } from "../services/sqlApiClient";
 import { LoadingSpinner } from './LoadingSpinner';
+import { formatDateValue } from '../utils/formatDate';
 
 // New Components
 import { OldInvoiceList } from './procurement/old-invoices/OldInvoiceList';
@@ -81,7 +82,7 @@ export const OldPurchaseInvoice: React.FC = () => {
                 supplierInvoiceNumber: invoice.invoiceNumber || "",
 
                 // معلومات إضافية
-                notes: (invoice.notes || "") + "\n---\nتم التحويل من الأرشيف في: " + new Date().toLocaleDateString('ar-EG'),
+                notes: (invoice.notes || "") + "\n---\nتم التحويل من الأرشيف في: " + formatDateValue(new Date()),
 
                 // إضافة dealInfo إذا لم يكن موجوداً
                 dealInfo: invoice.dealInfo || {
@@ -366,18 +367,18 @@ export const OldPurchaseInvoice: React.FC = () => {
     return (
         <div className="p-6 md:p-8 max-w-[1600px] mx-auto space-y-6">
             {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[var(--color-surface)] p-6 rounded-2xl shadow-sm border border-[var(--color-border)]">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
+                    <h1 className="text-2xl font-bold text-[var(--color-text)] flex items-center gap-3">
                         <Archive className="w-8 h-8 text-blue-600" />
                         أرشيف الفواتير القديمة
                     </h1>
-                    <p className="text-gray-500 dark:text-gray-400 mt-2">
+                    <p className="text-[var(--color-text-muted)] mt-2">
                         إدارة الفواتير السابقة وإدخال البيانات التاريخية
                     </p>
                 </div>
                 <div className="flex items-center gap-4">
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                    <div className="text-sm text-[var(--color-text-muted)]">
                         <span className="font-bold text-blue-600 dark:text-blue-400">{filteredInvoices.length}</span>
                         من أصل <span className="font-bold">{invoices.length}</span> فاتورة
                         {selectedItemIds.length > 0 && (
@@ -412,15 +413,15 @@ export const OldPurchaseInvoice: React.FC = () => {
 
             {/* Search Suggestions */}
             {searchTerm.trim() && suggestedItems.length > 0 && (
-                <div className="bg-white dark:bg-gray-800 rounded-xl border border-blue-100 dark:border-blue-900/30 p-4">
+                <div className="bg-[var(--color-surface)] rounded-xl border border-blue-100 dark:border-blue-900/30 p-4">
                     <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                             <Package className="w-4 h-4 text-blue-500" />
-                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            <span className="text-sm font-medium text-[var(--color-text)]">
                                 منتجات مطابقة للبحث: "{searchTerm}"
                             </span>
                         </div>
-                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                        <span className="text-xs text-[var(--color-text-muted)]">
                             {suggestedItems.length} منتج
                         </span>
                     </div>
@@ -436,15 +437,15 @@ export const OldPurchaseInvoice: React.FC = () => {
                                 }}
                                 className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${selectedItemIds.includes(item.id)
                                     ? 'bg-blue-100 dark:bg-blue-900/30 border-blue-300 dark:border-blue-700'
-                                    : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20'
+                                    : 'bg-[var(--color-surface-2)] border-[var(--color-border)] hover:bg-blue-50 dark:hover:bg-blue-900/20'
                                     }`}
                             >
                                 <div className="text-right">
-                                    <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                    <div className="text-sm font-medium text-[var(--color-text)]">
                                         {item.name}
                                     </div>
                                     {item.modelNumber && (
-                                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                                        <div className="text-xs text-[var(--color-text-muted)]">
                                             موديل: {item.modelNumber}
                                         </div>
                                     )}
@@ -456,8 +457,8 @@ export const OldPurchaseInvoice: React.FC = () => {
                         ))}
                     </div>
 
-                    <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                    <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
+                        <div className="text-xs text-[var(--color-text-muted)]">
                             • انقر على منتج لإضافته إلى الفلترة
                             • البحث يشمل: أسماء المنتجات ورقم المودل
                             • تم العثور على {searchResultItems.length} منتج في نتائج البحث
@@ -468,10 +469,10 @@ export const OldPurchaseInvoice: React.FC = () => {
 
             {/* Filter Summary */}
             {(selectedItemIds.length > 0 || selectedSupplierId || searchTerm || dateRange.start || dateRange.end) && (
-                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] p-4">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">ملخص الفلترة:</span>
+                            <span className="text-sm font-medium text-[var(--color-text)]">ملخص الفلترة:</span>
                             {searchTerm && (
                                 <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-2 py-1 rounded">
                                     بحث: "{searchTerm}"
@@ -508,10 +509,10 @@ export const OldPurchaseInvoice: React.FC = () => {
 
                     {/* Selected Items Summary */}
                     {selectedItemIds.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                        <div className="mt-3 pt-3 border-t border-[var(--color-border)]">
                             <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">المنتجات المختارة:</span>
-                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                <span className="text-sm font-medium text-[var(--color-text)]">المنتجات المختارة:</span>
+                                <span className="text-xs text-[var(--color-text-muted)]">
                                     تظهر {filteredInvoices.length} فاتورة تحتوي على هذه المنتجات
                                 </span>
                             </div>
@@ -519,19 +520,19 @@ export const OldPurchaseInvoice: React.FC = () => {
                                 {selectedItems.map(item => (
                                     <div
                                         key={item.id}
-                                        className="flex items-center justify-between bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg"
+                                        className="flex items-center justify-between bg-[var(--color-surface-2)] p-2 rounded-lg"
                                     >
                                         <div className="flex items-center gap-2">
                                             <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded flex items-center justify-center">
                                                 <Package className="w-4 h-4 text-blue-500" />
                                             </div>
                                             <div className="text-right">
-                                                <div className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
+                                                <div className="text-sm font-medium text-[var(--color-text)] truncate">
                                                     {item.name}
                                                 </div>
                                                 <div className="flex flex-col">
                                                     {item.modelNumber && (
-                                                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                        <div className="text-xs text-[var(--color-text-muted)]">
                                                             موديل: {item.modelNumber}
                                                         </div>
                                                     )}
@@ -543,7 +544,7 @@ export const OldPurchaseInvoice: React.FC = () => {
                                         </div>
                                         <button
                                             onClick={() => setSelectedItemIds(prev => prev.filter(id => id !== item.id))}
-                                            className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                                            className="p-1 text-[var(--color-text-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
                                         >
                                             <Plus className="w-3 h-3 rotate-45" />
                                         </button>
@@ -557,10 +558,10 @@ export const OldPurchaseInvoice: React.FC = () => {
 
             {/* Search Results Info */}
             {searchTerm.trim() && filteredInvoices.length > 0 && (
-                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] p-4">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            <span className="text-sm font-medium text-[var(--color-text)]">
                                 نتائج البحث عن "{searchTerm}":
                             </span>
                             <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-2 py-1 rounded">
@@ -572,7 +573,7 @@ export const OldPurchaseInvoice: React.FC = () => {
                                 </span>
                             )}
                         </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                        <div className="text-xs text-[var(--color-text-muted)]">
                             البحث يشمل: رقم الفاتورة، المورد، أسماء المنتجات، رقم المودل
                         </div>
                     </div>

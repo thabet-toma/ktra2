@@ -9,6 +9,7 @@ export interface ActivityQuery {
   action?: string;
   entity_type?: string;
   entity_id?: number | string;
+  partner_id?: number | string;
   date?: string;        // YYYY-MM-DD (يوم واحد)
   date_from?: string;
   date_to?: string;
@@ -24,6 +25,7 @@ export async function getActivityLog(params: ActivityQuery = {}): Promise<Activi
     action: params.action,
     entity_type: params.entity_type,
     entity_id: params.entity_id,
+    partner_id: params.partner_id,
     date: params.date,
     date_from: params.date_from,
     date_to: params.date_to,
@@ -42,6 +44,16 @@ export async function getEntityActivity(
   return apiGetList<ActivityLogEntry>("activity/", {
     tenantId: getTenantId(),
     query: { entity_type: entityType, entity_id: entityId, page_size: 200 },
+  });
+}
+
+/** سجل نشاط كل المستندات المرتبطة بعميل/مورد/وكيل. */
+export async function getPartnerActivity(
+  partnerId: number | string,
+): Promise<ActivityLogEntry[]> {
+  return apiGetList<ActivityLogEntry>("activity/", {
+    tenantId: getTenantId(),
+    query: { partner_id: partnerId, page_size: 200 },
   });
 }
 

@@ -16,6 +16,7 @@ import {
   type SalesInvoiceRow,
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
+import { listPickerProducts } from "../../services/inventoryApi";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
@@ -87,8 +88,9 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
     try {
       const [invs, parts, prods] = await Promise.allSettled([
         apiGetList<SalesInvoiceRow>("sales/invoices/lookup/?limit=500&status=posted", { tenantId }),
-        apiGetList<Partner>("partners/lookup/?limit=500", { tenantId }),
-        apiGetList<Product>("inventory/products/", { tenantId }),
+        // T-PARTYPURE: مرجع البيع على عميل — الموردون لا مكان لهم في قائمته.
+        apiGetList<Partner>("partners/lookup/?limit=500&partner_type=Customer", { tenantId }),
+        listPickerProducts<Product>(tenantId),
       ]);
       if (invs.status === "fulfilled") {
         // Only posted invoices are eligible for return
@@ -341,7 +343,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
   ];
 
   return (
-    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
+    <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="مرجع البيع (Sale Return)"
         state={originalInvoiceId ? `للفاتورة #${originalInvoiceId}` : "مرجع جديد"}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Invoice,
   InvoiceItem,
@@ -25,14 +25,20 @@ import {
   CheckCircle2,
   ExternalLink,
   Info,
+  Banknote,
+  PackageCheck,
+  Truck,
 } from "lucide-react";
 import { ProductCardModal } from "../../shared/ProductCardModal";
+import { SerialEntryModal } from "../../shared/SerialEntryModal";
+import type { SerialEntryMode } from "@/types/inventory";
 import { AseelDatePicker } from "../../ui/AseelDatePicker";
 import {
   suppliersService,
 } from "@/services/firestoreService";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { accountingApi } from "@/services/accountingApi";
+import { AccountTreeField } from "@/components/accounting/AccountTreePicker";
 import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 import { SupplierModal } from "@/components/common/SupplierModal";
@@ -54,7 +60,6 @@ import { openInNewTab } from "@/utils/openInNewTab";
 import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
 import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
 
-import { getPartnerBalance, type PartnerBalanceResponse } from "@/services/salesApi";
 import {
   InvoiceBasicInfo,
   DealInfoSection,
@@ -68,9 +73,12 @@ import {
 import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
 import { PurchaseInvoiceAccountingPanel } from "./PurchaseInvoiceAccountingPanel";
+import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
+import { NewSupplierPaymentModal } from "../../sales/NewSupplierPaymentModal";
 import { InvoicePrintView } from "./InvoicePrintView";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { EntityActivityLog } from "@/components/activity/EntityActivityLog";
+import { PartnerNoteAlert } from "@/components/partners/PartnerNoteAlert";
 import {
   AseelDocumentShell,
   AseelDocumentView,
@@ -89,7 +97,11 @@ import {
 } from "@/utils/invoiceConversionUtils";
 import { useToast } from "@/contexts/ToastContext";
 import { useConfirm } from "@/contexts/ConfirmContext";
+import { usePermissions } from "@/contexts/PermissionsContext";
+import { clientLogger } from "@/services/logger";
+import { invoiceActionPermissions } from "@/utils/viewPermissions";
 import { getPurchaseInvoiceFeeEditorState } from "./purchaseInvoiceFeeEditorState";
+import { formatDateLocalized } from "../../../utils/formatDate";
 
 interface InvoiceFormProps {
   invoice: Partial<Invoice> | null;
@@ -102,6 +114,16 @@ interface InvoiceFormProps {
   readOnly?: boolean;
 }
 
+type FeeAccountRow = {
+  id: number; code?: string; name?: string; parent?: number | null;
+  account_type?: string; is_active?: boolean;
+};
+
+/** حسابات صالحة لرسوم فاتورة الشراء (مصروف أو أصل نشط). */
+const isFeeAccount = (account: FeeAccountRow) =>
+  account.is_active !== false
+  && ["Expense", "Asset"].includes(String(account.account_type || ""));
+
 export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   invoice: initialInvoice,
   currentUser,
@@ -113,9 +135,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
+  const { can: canPerm } = usePermissions();
   const [formData, setFormData] = useState<Partial<Invoice>>(
     initialInvoice || {}
   );
+  const invoicePermissions = invoiceActionPermissions("purchase", !formData.id, canPerm);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [saving, setSaving] = useState(false);
   // M2: ترحيل/تراجع داخل المحرر — توحيداً مع شاشة المبيعات (شريط أدوات واحد).
@@ -155,24 +179,40 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [cardSuggestedPrice, setCardSuggestedPrice] = useState<number | null>(null);
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
+  // نافذة استلام البضاعة (تُنشئ إرسالية بالبنود المؤشَّرة).
+  const [showReceive, setShowReceive] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
+  // T-ONEPAY: نافذة «سند صرف» (نقد + شيكات) المفتوحة من داخل فاتورة الشراء.
+  const [showSupplierVoucher, setShowSupplierVoucher] = useState(false);
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
   // task18 DEF-B1/B3: إنشاء صنف جديد inline من خلية اسم الصنف (النص المكتوب يُمرَّر مسبقاً)
   const [inlineCreate, setInlineCreate] = useState<{ rowIndex: number; name: string } | null>(null);
-  // task18 DEF-C1: رصيد المورد (قبل/بعد) عند اختيار مورد — يطابق شاشة المبيعات.
-  const [supplierBalance, setSupplierBalance] = useState<PartnerBalanceResponse | null>(null);
-  const [feeAccounts, setFeeAccounts] = useState<Array<{ id: number; code?: string; name?: string; account_type?: string }>>([]);
+  // T-DEFACC: الشجرة تحتاج القائمة كاملة (الآباء منها) — و`feeAccounts` تبقى
+  // المجموعة القابلة للاختيار التي يستعملها الاختيار التلقائي للرسوم.
+  const [allAccounts, setAllAccounts] = useState<FeeAccountRow[]>([]);
+  const feeAccounts = useMemo(() => allAccounts.filter(isFeeAccount), [allAccounts]);
 
   useEffect(() => {
     accountingApi.getAccounts()
-      .then((rows) => setFeeAccounts(
-        rows.filter((account: any) => account.is_active !== false && ["Expense", "Asset"].includes(String(account.account_type || ""))),
-      ))
+      .then((rows) => setAllAccounts(rows as FeeAccountRow[]))
       .catch((error) => {
         console.error("[PurchaseInvoiceFees] Failed to load fee accounts", error);
-        setFeeAccounts([]);
+        setAllAccounts([]);
       });
   }, []);
+
+  /* T-SERIAL: نمط إدخال الرقم التسلسلي في الشراء. `off` (الافتراضي، وحال تعذّر
+     قراءة الإعدادات) ⇒ لا عمود ولا نافذة ولا حقل في الحمولة. */
+  const [serialMode, setSerialMode] = useState<SerialEntryMode>("off");
+  useEffect(() => {
+    let cancelled = false;
+    purchaseInvoiceApi.getSettings()
+      .then((s) => { if (!cancelled) setSerialMode(s.serial_entry_mode || "off"); })
+      .catch(() => { /* بلا إعدادات: يبقى «معطّل» — الشاشة كما كانت */ });
+    return () => { cancelled = true; };
+  }, []);
+  /** بند مفتوح في نافذة الأرقام التسلسلية (بفهرس السطر). */
+  const [serialRowIndex, setSerialRowIndex] = useState<number | null>(null);
 
   // حارس التغييرات غير المحفوظة (Dirty state tracking)
   const [viewMode, setViewMode] = useState<boolean>(!!initialInvoice?.id);
@@ -181,20 +221,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const markDirty = () => {
     dirtyRef.current = true;
   };
-  useEffect(() => {
-    const sid = formData.supplierId;
-    if (!sid) {
-      setSupplierBalance(null);
-      return;
-    }
-    const t = window.setTimeout(() => {
-      const feesTotal = (formData.fees || []).reduce((sum, fee) => sum + (Number(fee.amount) || 0), 0);
-      getPartnerBalance({ partnerId: sid, proposedTotal: (formData.grandTotal ?? 0) + feesTotal })
-        .then(setSupplierBalance)
-        .catch(() => setSupplierBalance(null));
-    }, 400);
-    return () => window.clearTimeout(t);
-  }, [formData.supplierId, formData.grandTotal, formData.fees]);
   /** بيانات الفاتورة والمورد — تُعرض من رأس الصفحة عند الضغط على «تفاصيل» */
   const [invoiceHeaderDetailsOpen, setInvoiceHeaderDetailsOpen] = useState(false);
   /** وصف الصفقة من SQL عند غيابه في الفاتورة المحمّلة */
@@ -224,6 +250,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   // M4-T1: Aseel Navigation for invoices
   const [invoicesList, setInvoicesList] = useState<any[]>([]);
+  const invoicesListRequestedRef = useRef(false);
 
   const nav = useRecordNavigation<any>({
     items: invoicesList,
@@ -261,6 +288,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         return;
       }
     }
+    if (initialInvoice?.id && !viewMode) {
+      // فاتورة محفوظة كانت قيد التحرير: الإلغاء يتراجع عن التعديلات ويعيد وضع
+      // العرض داخل نفس الفاتورة، لا يغادرها لقائمة الفواتير.
+      setFormData(initialInvoice);
+      setInstallments(initialInvoice.installments || []);
+      setInstallmentPlanEnabled(initialInvoice.installmentPlanEnabled || false);
+      setDealInfo(initialInvoice.dealInfo || dealData || { createdBy: currentUser.id, createdAt: new Date().toISOString() });
+      dirtyRef.current = false;
+      setViewMode(true);
+      return;
+    }
     onCancel();
   };
 
@@ -281,7 +319,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   useAseelKeymap({
     F2: () => setShowPrintView(true),
     F6: () => {
-      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      // كان المحدِّد يشير إلى حقل غير موجود في هذه الشاشة — صار على صندوق
+      // الباركود نفسه المستعمل في المبيعات.
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="barcode"]');
       el?.focus();
     },
     F12: () => handleSave(),
@@ -305,6 +345,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   // Load invoices list for navigation
   useEffect(() => {
+    if (invoicesListRequestedRef.current) return;
+    invoicesListRequestedRef.current = true;
     const loadInvoices = async () => {
       try {
         const list = await purchaseInvoiceApi.list();
@@ -446,6 +488,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   }, [dealInfo, installments, installmentPlanEnabled]);
 
   const handleSave = async () => {
+    if (!invoicePermissions.canSave) {
+      toast("لا تملك صلاحية حفظ هذه الفاتورة.", "error");
+      return;
+    }
     if (!formData.supplierId) {
       toast("الرجاء اختيار المورد", "error");
       return;
@@ -552,6 +598,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               item.landedLineTotalIls != null && item.landedLineTotalIls !== ""
                 ? roundSqlMoney2(item.landedLineTotalIls)
                 : null,
+            // T-SERIAL: تُرسَل دائماً — الفارغة تمسح إدخالاً سابقاً بدل أن يبقى
+            // معلّقاً على البند بلا ظهور في الشاشة.
+            serials: Array.isArray(item.serials) ? item.serials : [],
           })),
       };
 
@@ -606,6 +655,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       if (onSave) onSave({ id: savedSqlId });
       toast("تم حفظ الفاتورة بنجاح", "success");
       dirtyRef.current = false;
+      return savedSqlId;
     } catch (error) {
       // console suppressed
       const msg =
@@ -619,10 +669,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   /** M2: إعادة تحميل الفاتورة من الخادم بعد ترحيل/تراجع لتحديث الحالة والقيد. */
-  const reloadInvoice = async () => {
-    if (!formData.id) return;
+  const reloadInvoice = async (idOverride?: string | number) => {
+    const targetId = idOverride ?? formData.id;
+    if (!targetId) return;
     try {
-      const loaded = await purchaseInvoiceApi.get(Number(formData.id));
+      const loaded = await purchaseInvoiceApi.get(Number(targetId));
       const mapped = mapPurchaseInvoiceDtoToInvoice(loaded);
       setFormData(mapped);
       setDealInfo(mapped.dealInfo || { createdBy: currentUser.id, createdAt: new Date().toISOString() });
@@ -632,19 +683,26 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   // M2: ترحيل الفاتورة من شريط الأدوات (موحَّد مع شاشة المبيعات).
-  const handlePost = async () => {
-    if (!formData.id || posting) return;
+  const handlePost = async (idOverride?: string | number) => {
+    if (!invoicePermissions.canPost) {
+      setAccErr("لا تملك صلاحية ترحيل فاتورة الشراء.");
+      return false;
+    }
+    const targetId = idOverride ?? formData.id;
+    if (!targetId || posting) return false;
     setAccErr(null);
     setAccMsg(null);
     setPosting(true);
     try {
-      const res = await purchaseInvoiceApi.postToAccounting(Number(formData.id));
+      const res = await purchaseInvoiceApi.postToAccounting(Number(targetId));
       setAccMsg(res.message || `تم الترحيل — قيد محاسبي #${res.journal_id}`);
       setViewMode(true);
-      await reloadInvoice();
-      if (onSave) onSave({ id: String(formData.id) });
+      await reloadInvoice(targetId);
+      if (onSave) onSave({ id: String(targetId) });
+      return true;
     } catch (e) {
       setAccErr(e instanceof Error ? e.message : "تعذّر ترحيل الفاتورة");
+      return false;
     } finally {
       setPosting(false);
     }
@@ -687,14 +745,40 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     const pid = Number(productId);
     if (!pid) return 0;
     try {
-      // التعبئة دائماً بآخر سعر شراء (بغضّ النظر عن استراتيجية الإعدادات) — القائمة
-      // تعرض «أقل» و«آخر» معاً للاطلاع، لكن الحقل يُعبّأ بالأخير.
-      const r = await purchaseInvoiceApi.resolvePrice({ product: pid, strategy: "LAST_PURCHASE" });
+      // التعبئة دائماً بآخر سعر شراء **من مورد الفاتورة** (بغضّ النظر عن استراتيجية
+      // الإعدادات) — القائمة تعرض «أقل شراء» العام و«آخر شراء من المورد» معاً
+      // للاطلاع، لكن الحقل يُعبّأ بالأخير (وبأقل سعر عام إن لم يسبق شراء منه).
+      const r = await purchaseInvoiceApi.resolvePrice({
+        product: pid,
+        strategy: "LAST_PURCHASE",
+        supplier: formData.supplierId || null,
+      });
       return r.unit_price != null ? Number(r.unit_price) || 0 : 0;
     } catch (err) {
       console.error("resolvePrice failed", err);
       return 0;
     }
+  };
+
+  /* بحث سريع/باركود — نفس سلوك `handleBarcodeEnter` في محرر المبيعات: الماسح
+     يكتب الرقم ويضغط ⏎ فيهبط الصنف على أول سطر فارغ، وإلا على سطر جديد.
+     كانت الشاشتان غير متكافئتين: البيع يمسح والشراء لا. */
+  const [barcodeQuery, setBarcodeQuery] = useState("");
+  const handleBarcodeEnter = async (raw: string) => {
+    const t = raw.trim();
+    if (!t) return;
+    const hit = allDbItems.find(
+      (i) => (i.barcode || "").trim() === t || (i.modelNumber || "").trim() === t || String(i.id) === t,
+    );
+    if (!hit) {
+      toast(`لا صنف بالباركود/الرقم «${t}».`, "error");
+      return;
+    }
+    const items = formData.items || [];
+    const emptyIdx = items.findIndex((i) => !i.itemId);
+    const price = await resolveSuggestedPrice(hit.id);
+    await applyItemAt(emptyIdx >= 0 ? emptyIdx : null, hit, price);
+    setBarcodeQuery("");
   };
 
   const applyItemAt = async (index: number | null, item: Item, lastPrice?: number, qtyOverride?: number) => {
@@ -1127,6 +1211,25 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     finalCostFeesTotal,
   ]);
 
+  /* T-SERIAL: من يتتبّع وحداته؟ الجواب من كتالوج الأصناف (`view=lookup`)، فالبند
+     نفسه لا يحمل العَلَم. الخدمة مستثناة — بلا مخزون فبلا وحدات. */
+  const dbItemsById = useMemo(() => {
+    const m = new Map<string, Item>();
+    allDbItems.forEach((it) => m.set(String(it.id), it));
+    return m;
+  }, [allDbItems]);
+  const itemTracksSerials = useCallback(
+    (row: InvoiceItem) => {
+      if (serialMode === "off" || !row.itemId) return false;
+      return Boolean(dbItemsById.get(String(row.itemId))?.isSerialized);
+    },
+    [serialMode, dbItemsById],
+  );
+  const anySerializedItem = useMemo(
+    () => (formData.items || []).some(itemTracksSerials),
+    [formData.items, itemTracksSerials],
+  );
+
   const itemColumns: AseelGridColumn<InvoiceItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     { key: "itemId", header: "رقم الصنف", width: "100px" },
@@ -1165,6 +1268,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       )
     },
     { key: "quantity", header: "الكمية", width: "80px", align: "center", type: "number" },
+    // T-SERIAL: عمود الأرقام على الأصناف التسلسلية وحدها، ويختفي بنمط «معطّل».
+    ...(anySerializedItem ? [{
+      key: "serials", header: "الأرقام التسلسلية", width: "120px", align: "center" as const, readOnly: true,
+    }] : []),
     { key: "unitPrice", header: isShipmentLinkedImport ? "قبل ض.ق.م والرسوم/وحدة" : costLabels.unitPrice, width: isShipmentLinkedImport ? "160px" : "100px", align: "center", type: "number" },
     { key: "totalPrice", header: isShipmentLinkedImport ? "قبل ض.ق.م والرسوم/سطر" : costLabels.lineTotal, width: isShipmentLinkedImport ? "160px" : "100px", align: "center", readOnly: true },
     ...(isShipmentLinkedImport ? [{ key: "finalUnitCost", header: "التكلفة النهائية/وحدة", width: "160px", align: "center" as const, readOnly: true }] : []),
@@ -1263,14 +1370,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
 
   /* task24: خريطة سعر الشراء المقترح (آخر/أقل شراء أو متوسط التكلفة) لكامل
-     الكتالوج — تُجلب دفعة واحدة لعرض السعر داخل خيارات المنتقي بلا نقر. */
+     الكتالوج — تُجلب دفعة واحدة لعرض السعر داخل خيارات المنتقي بلا نقر.
+     تُعاد الجلبة عند تغيّر المورد: «آخر شراء» يُحصر بمورد الفاتورة بينما «أقل
+     شراء» يبقى عاماً لكل الموردين. */
   const [purchasePriceMap, setPurchasePriceMap] = useState<
     Map<number, { price: string; label: string; prices?: any[] }>
   >(new Map());
   useEffect(() => {
     let cancelled = false;
     purchaseInvoiceApi
-      .priceList()
+      .priceList(formData.supplierId || null)
       .then((rows) => {
         if (cancelled) return;
         const m = new Map<number, { price: string; label: string; prices?: any[] }>();
@@ -1283,7 +1392,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       })
       .catch(() => { /* بلا تاريخ شراء — تُعرض الخيارات بلا سعر */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [formData.supplierId]);
 
   /* task13 M5: منتقي مدمج في خلية اسم الصنف (يحل محل المودال كمسار أساسي) */
   const itemOptions = useMemo(
@@ -1344,6 +1453,29 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     );
   };
 
+  /* T-SERIAL: زر أرقام البند — العدد مقابل الكمية، وأحمر حين ينقص في النمط
+     الإجباري. المنع نفسه عند الاستلام/الترحيل على الخادم. */
+  const renderSerialsCell = (row: InvoiceItem, rowIndex: number) => {
+    if (!itemTracksSerials(row)) return <span className="aseel-text-soft">—</span>;
+    const entered = row.serials?.length ?? 0;
+    const qty = Math.max(0, Math.trunc(Number(row.quantity) || 0));
+    const incomplete = serialMode === "required" && entered !== qty;
+    return (
+      <button
+        type="button"
+        className="aseel-toolbtn"
+        style={{
+          width: "100%", fontWeight: 600,
+          ...(incomplete ? { color: "var(--aseel-danger, #c00)" } : {}),
+        }}
+        onClick={() => setSerialRowIndex(rowIndex)}
+        title={entered > 0 ? `الأرقام: ${row.serials!.join("، ")}` : "لم تُدخَل أرقام بعد"}
+      >
+        {entered > 0 ? `${entered}/${qty}` : (serialMode === "required" ? `0/${qty}` : "إدخال")}
+      </button>
+    );
+  };
+
   const renderDeleteCell = (row: InvoiceItem) =>
     effectiveReadOnly ? null : (
       <button
@@ -1358,6 +1490,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   itemColumns[1].render = renderItemIdCell;
   itemColumns[2].render = renderItemNameCell;
+  const serialsColumn = itemColumns.find((column) => column.key === "serials");
+  if (serialsColumn) serialsColumn.render = renderSerialsCell;
   const finalUnitColumn = itemColumns.find((column) => column.key === "finalUnitCost");
   if (finalUnitColumn) {
     finalUnitColumn.render = (row) => {
@@ -1412,14 +1546,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           )}
         </div>
       )}
-      {supplierBalance && (
+      {/* ملاحظة عاجلة مستحقة على هذا المورد — تظهر لكل مستخدم قبل إتمام الفاتورة. */}
+      <PartnerNoteAlert partnerId={formData.supplierId || null} className="mb-2" />
+      {formData.supplierId && (
         <div
           className="aseel-banner"
           style={{ marginBottom: "8px", display: "flex", gap: "18px", flexWrap: "wrap", fontSize: "13px" }}
         >
-          {/* task18 DEF-C1: رصيد المورد قبل/بعد هذه الفاتورة (من الـ subledger). */}
-          <span>رصيد المورد قبل الفاتورة: <strong>{formatMoney(supplierBalance.open_balance)}</strong></span>
-          <span>الرصيد المتوقع بعدها: <strong>{formatMoney(supplierBalance.projected_balance)}</strong></span>
+          <span>رصيد المورد قبل احتساب متبقي الفاتورة (بالعملة الأساسية): <strong>{formatMoney(formData.partnerBalanceBeforeInvoice || 0)}</strong></span>
+          <span>الرصيد الحالي بعد احتسابه (بالعملة الأساسية): <strong>{formatMoney(formData.partnerBalanceAfterInvoice || 0)}</strong></span>
         </div>
       )}
       <InvoiceBasicInfo
@@ -1454,7 +1589,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const resolveImportFeeAccount = async (name: string) => {
     try {
       const account = await accountingApi.resolveImportExpenseAccount(name);
-      setFeeAccounts((prev) => (
+      setAllAccounts((prev) => (
         prev.some((a) => a.id === account.id) ? prev : [...prev, account]
       ));
       return account as { id: number; code?: string; name?: string };
@@ -1619,15 +1754,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
   const feesTab = (
     <div className="aseel-legacy-tab">
-      <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-3">
-        <div><span className="block text-xs text-slate-500">إجمالي الفاتورة الأساسي</span><b>{formatMoney(formData.grandTotal || 0)} ₪</b></div>
-        <div><span className="block text-xs text-slate-500">ضرائب ورسوم إضافية</span><b className="text-amber-700">{formatMoney(feesTotal)} ₪</b></div>
-        <div><span className="block text-xs text-slate-500">إجمالي المستحق</span><b className="text-emerald-700">{formatMoney(payableTotal)} ₪</b></div>
+      <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 sm:grid-cols-3">
+        <div><span className="block text-xs text-[var(--color-text-muted)]">إجمالي الفاتورة الأساسي</span><b>{formatMoney(formData.grandTotal || 0)} ₪</b></div>
+        <div><span className="block text-xs text-[var(--color-text-muted)]">ضرائب ورسوم إضافية</span><b className="text-amber-700">{formatMoney(feesTotal)} ₪</b></div>
+        <div><span className="block text-xs text-[var(--color-text-muted)]">إجمالي المستحق</span><b className="text-emerald-700">{formatMoney(payableTotal)} ₪</b></div>
       </div>
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
           <h4 className="text-sm font-semibold">بنود الضرائب والرسوم الإضافية</h4>
-          <p className="text-xs text-slate-500">كل بند له حساب واضح؛ ويمكن رسملته على تكلفة المخزون أو تحميله كمصروف.</p>
+          <p className="text-xs text-[var(--color-text-muted)]">كل بند له حساب واضح؛ ويمكن رسملته على تكلفة المخزون أو تحميله كمصروف.</p>
         </div>
         {feeEditorState.canAdd && (
           <div className="flex flex-wrap justify-end gap-2">
@@ -1664,13 +1799,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             {(formData.fees || []).map((fee, index) => (
               <tr key={fee.id || index}>
                 <td className="p-1"><input className="aseel-input w-full" disabled={effectiveReadOnly} value={fee.description} placeholder="مثال: رسوم فحص أو ضريبة إضافية" onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, description: e.target.value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
-                <td className="p-1"><select className="aseel-input w-full" disabled={effectiveReadOnly} value={fee.expenseAccountId || ""} onChange={(e) => { const account = feeAccounts.find((row) => row.id === Number(e.target.value)); const fees = [...(formData.fees || [])]; fees[index] = { ...fee, expenseAccountId: account?.id || null, expenseAccountCode: account?.code, expenseAccountName: account?.name }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }}><option value="">— اختر الحساب —</option>{feeAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></td>
+                <td className="p-1"><AccountTreeField accounts={allAccounts} value={fee.expenseAccountId || ""} disabled={effectiveReadOnly} isSelectable={isFeeAccount} title="اختيار حساب الرسم" onChange={(id, account) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, expenseAccountId: id, expenseAccountCode: account?.code, expenseAccountName: account?.name ?? undefined }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1"><input className="aseel-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly || fee.calculationType === "percentage"} value={fee.calculationType === "percentage" ? fee.amount : (fee.calculationValue ?? fee.amount)} onChange={(e) => { const value = Number(e.target.value) || 0; const fees = [...(formData.fees || [])]; fees[index] = { ...fee, amount: value, calculationValue: value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} checked={fee.capitalizeToInventory} onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, capitalizeToInventory: e.target.checked }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="aseel-toolbtn" onClick={() => { setFormData((prev) => ({ ...prev, fees: (prev.fees || []).filter((_, i) => i !== index) })); markDirty(); }}><Trash2 size={14} /></button>}</td>
               </tr>
             ))}
-            {(formData.fees || []).length === 0 && <tr><td colSpan={5} className="p-6 text-center text-slate-500">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
+            {(formData.fees || []).length === 0 && <tr><td colSpan={5} className="p-6 text-center text-[var(--color-text-muted)]">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1750,20 +1885,103 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
 
   const isPosted = Boolean(formData.isPosted);
-  const canPost = Boolean(formData.id) && !isPosted && !formData.isHistorical;
+  const canPostDocument = Boolean(formData.id) && !isPosted && !formData.isHistorical;
+
+  // T-ONEPAY (مرآة فاتورة البيع): مدخل واحد لدفع المورد — نقد و/أو شيكات في سند
+  // صرف واحد. التوزيع يلزمه فاتورة مرحّلة، فنحفظ ونرحّل ضمن نفس النقرة بتأكيد.
+  const supplierRemaining = Math.max(Number(formData.remainingBalance) || 0, 0);
+  const openSupplierVoucher = async () => {
+    if (!formData.supplierId) {
+      toast("اختر المورد أولاً.", "error");
+      return;
+    }
+    if (isPosted && supplierRemaining <= 0) {
+      toast("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.", "info");
+      return;
+    }
+    if (!isPosted) {
+      if (!formData.id) {
+        toast("احفظ الفاتورة أولاً ثم سجّل سند الصرف.", "error");
+        return;
+      }
+      if (!(await confirm({
+        title: "سند صرف",
+        message:
+          "لتسجيل دفعة (كاملة أو جزئية) تُرحَّل الفاتورة أولاً، ثم يُفتح سند الصرف بالمتبقي. متابعة؟",
+        confirmText: "ترحيل ثم متابعة",
+      }))) return;
+      await handlePost();
+      if (!Boolean(formData.isPosted)) {
+        // handlePost يعرض سبب الفشل في شريط الرسائل — لا نفتح السند على فاتورة غير مرحّلة.
+        const refreshed = await purchaseInvoiceApi.get(Number(formData.id)).catch(() => null);
+        if (!refreshed?.is_posted) return;
+      }
+    }
+    setShowSupplierVoucher(true);
+  };
+
+  const handleSaveAndPost = async () => {
+    clientLogger.info("invoice.save_and_post_requested", {
+      invoiceType: "purchase",
+      existingInvoice: Boolean(formData.id),
+    });
+    const savedId = await handleSave();
+    if (!savedId || !(await handlePost(savedId))) return;
+    clientLogger.info("invoice.save_and_post_completed", {
+      invoiceType: "purchase",
+      invoiceId: savedId,
+    });
+  };
+
+  // فاتورة محلية مرحّلة لم تُستلَم بضاعتها كلها ⇒ يظهر مسارا الاستلام.
+  const canReceiveGoods =
+    Boolean(formData.id)
+    && isPosted
+    && !formData.isReturn
+    && formData.invoiceType !== "international"
+    && !formData.shipment
+    && !formData.dealId
+    && !formData.clearanceId
+    && formData.receiptStatus !== "received";
 
   const toolbarActions: AseelToolbarAction[] = [
-    { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => { handleSave(); dirtyRef.current = false; } : undefined, disabled: saving || isPosted },
-    ...(viewMode && !isPosted && !formData.isHistorical ? [{ key: "edit", label: "تحرير", icon: <Pencil />, onClick: () => setViewMode(false), separatorBefore: true } as AseelToolbarAction] : []),
-    { key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true },
-    {
+    ...(invoicePermissions.canSave ? [{ key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => { handleSave(); dirtyRef.current = false; } : undefined, disabled: saving || isPosted } as AseelToolbarAction] : []),
+    ...(invoicePermissions.canSaveAndPost ? [{
+      key: "save-and-post",
+      label: saving || posting ? "...حفظ وترحيل" : "حفظ وترحيل",
+      icon: saving || posting ? <Loader2 className="animate-spin" /> : <CheckCircle2 />,
+      onClick: !saving && !posting && !isPosted && !formData.isHistorical
+        ? () => void handleSaveAndPost()
+        : undefined,
+      disabled: saving || posting || isPosted || Boolean(formData.isHistorical),
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
+    ...(viewMode && !formData.isHistorical && invoicePermissions.canSave ? [{
+      key: "edit",
+      label: "تحرير",
+      icon: <Pencil />,
+      // مرحّلة: التعديل ممنوع محاسبياً حتى التراجع عن الترحيل — نُبقي الزر ظاهراً
+      // لاكتشافه، ونوجّه المستخدم بدل إخفائه (المالك: «كبسة تحرير اختفت»).
+      onClick: () => {
+        if (isPosted) {
+          toast("الفاتورة مرحّلة — اضغط «تراجع عن الترحيل» أولاً لتعديلها.", "info");
+          return;
+        }
+        setViewMode(false);
+      },
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
+    ...(canPerm("purchase.invoice.create")
+      ? [{ key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true } as AseelToolbarAction]
+      : []),
+    ...(invoicePermissions.canPost ? [{
       key: "post",
       label: posting ? "...ترحيل" : "ترحيل",
       icon: posting ? <Loader2 className="animate-spin" /> : <Send />,
-      onClick: canPost && !posting ? () => void handlePost() : undefined,
-      disabled: !canPost || posting,
+      onClick: canPostDocument && !posting ? () => void handlePost() : undefined,
+      disabled: !canPostDocument || posting,
       separatorBefore: true,
-    },
+    } as AseelToolbarAction] : []),
     ...(!readOnly && formData.shipment && formData.id && formData.currency === "ILS" ? [{
       key: "recalculate",
       label: recalcBusy ? "..." : "إعادة حساب التكلفة",
@@ -1772,13 +1990,39 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       disabled: recalcBusy || formData.isPosted,
       separatorBefore: true,
     } as AseelToolbarAction] : []),
-    {
+    // T-PERM: «تراجع عن الترحيل» يظهر فقط لمن يملك الصلاحية (الخادم يفرضها أيضاً).
+    ...(canPerm("purchase.invoice.unpost") ? [{
       key: "unpost",
       label: posting ? "...تراجع" : "تراجع عن الترحيل",
       icon: posting ? <Loader2 className="animate-spin" /> : <Undo2 />,
       onClick: isPosted && !posting ? () => void handleUnpost() : undefined,
       disabled: !isPosted || posting,
-    },
+    } as AseelToolbarAction] : []),
+    ...(canPerm("purchase.payment.create") && (isPosted || invoicePermissions.canSaveAndPost) ? [{
+      // T-ONEPAY: «سند صرف» كمرآة «سند قبض» في فاتورة البيع — نقد و/أو شيكات.
+      key: "voucher",
+      label: isPosted && supplierRemaining <= 0 ? "مسدَّدة" : "سند صرف",
+      icon: <Banknote />,
+      onClick:
+        !(isPosted && supplierRemaining <= 0) ? () => void openSupplierVoucher() : undefined,
+      disabled: isPosted && supplierRemaining <= 0,
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
+    // الاستلام: نافذة سريعة تُنشئ إرسالية بالبنود المؤشَّرة، أو المحرّر الكامل
+    // في شاشة الإرساليات بالفاتورة نفسها مربوطةً مسبقاً.
+    ...(canReceiveGoods ? [{
+      key: "receive",
+      label: "استلام",
+      icon: <PackageCheck />,
+      onClick: () => setShowReceive(true),
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
+    ...(canReceiveGoods ? [{
+      key: "new-receipt",
+      label: "إرسالية جديدة",
+      icon: <Truck />,
+      onClick: () => openInNewTab(`/purchase-receipts/new?invoice=${formData.id}`),
+    } as AseelToolbarAction] : []),
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => setShowPrintView(true), separatorBefore: true },
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: guardedCancel, danger: true, separatorBefore: true },
   ];
@@ -1815,9 +2059,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       }
       metrics={[
         { label: "إجمالي المستحق", value: invMoney(payableTotal), tone: "info" },
-        { label: "المجموع قبل الضريبة", value: invMoney(Number(formData.subtotal) || 0) },
-        { label: "الضريبة", value: invMoney(Number(formData.taxAmount) || 0) },
-        { label: "عدد البنود", value: String(invItems.length) },
+        { label: "المدفوع المرحّل", value: invMoney(Number(formData.amountPaid) || 0), tone: "ok" },
+        { label: "المتبقي", value: invMoney(Number(formData.remainingBalance) || 0), tone: "warn" },
+        { label: "حالة الدفع", value: formData.paymentStatusDisplay || "غير مدفوعة" },
       ]}
       parties={[
         {
@@ -1846,7 +2090,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             <div>
               <span className="font-semibold">{r.name || "—"}</span>
               {r.specifications && (
-                <span className="block text-[11px] text-slate-500">{r.specifications}</span>
+                <span className="block text-[11px] text-[var(--color-text-muted)]">{r.specifications}</span>
               )}
             </div>
           ),
@@ -1870,16 +2114,70 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       rows={invItems}
       rowKey={(r, i) => r.id || i}
       emptyRowsHint="لا توجد بنود في الفاتورة"
-      totals={[
-        { label: "المجموع قبل الضريبة", value: invMoney(Number(formData.subtotal) || 0) },
-        ...((Number(formData.discountAmount) || 0) > 0
-          ? [{ label: "الخصم", value: invMoney(Number(formData.discountAmount) || 0) }]
-          : []),
-        { label: "الضريبة", value: invMoney(Number(formData.taxAmount) || 0) },
-        ...(feesTotal > 0 ? [{ label: "الرسوم", value: invMoney(feesTotal) }] : []),
-        { label: "إجمالي المستحق", value: invMoney(payableTotal), emphasis: true },
-      ]}
+      /* ملخّص التكاليف كامل داخل المستند (يُرفع لأعلى بدل دوك سفلي عالق مع فراغ
+         فوقه — طلب المالك «ليش ما ترفعو فوق»). نفس تفصيل الدوك تماماً. */
+      totals={
+        formData.conversionMetadata?.line_meta
+          ? [
+              { label: costLabels.merchandiseBase, value: fmt(formData.conversionMetadata.line_meta.subtotal_merch_ils ?? formData.conversionMetadata.deal_total_ils ?? 0) },
+              ...(!formData.shippingIncluded
+                ? [{ label: "الشحن داخل المنشأ", value: fmt(formData.conversionMetadata.line_meta.internal_shipping_ils || 0) }]
+                : []),
+              { label: "تكلفة الشحن الدولي", value: fmt(formData.conversionMetadata.line_meta.deal_ship_allocated_ils || 0) },
+              { label: "تكلفة التخليص", value: fmt(formData.conversionMetadata.line_meta.deal_clearance_allocated_ils || 0) },
+              { label: "تكلفة النقل", value: fmt(formData.conversionMetadata.deal_local_shipping_from_clearance_ils || 0) },
+              ...(transferCommissionsIls > 0
+                ? [{ label: "عمولات تحويل الدفعات", value: fmt(transferCommissionsIls) }]
+                : []),
+              ...((Number(formData.discountAmount) || 0) > 0
+                ? [{ label: "الخصم", value: fmt(Number(formData.discountAmount) || 0) }]
+                : []),
+              { label: "المجموع قبل الضريبة", value: fmt((Number(formData.subtotal) || 0) + transferCommissionsIls) },
+              { label: "الضريبة المضافة", value: fmt(Number(formData.taxAmount) || 0) },
+              ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
+              { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
+              { label: "المدفوع المرحّل", value: fmt(Number(formData.amountPaid) || 0) },
+              { label: "المتبقي", value: fmt(Number(formData.remainingBalance) || 0), tone: "warn" },
+              { label: "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
+              { label: "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
+              { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
+            ]
+          : [
+              { label: "مجموع البنود (قبل الخصم)", value: fmt(ilsMerchandiseBase - (formData.shippingIncluded ? 0 : formData.shippingCost || 0)) },
+              ...((Number(formData.discountAmount) || 0) > 0
+                ? [{ label: "الخصم", value: fmt(Number(formData.discountAmount) || 0) }]
+                : []),
+              { label: "المجموع قبل الضريبة", value: fmt(Number(formData.subtotal) || 0) },
+              { label: "الضريبة المضافة", value: fmt(Number(formData.taxAmount) || 0) },
+              ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
+              { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
+              { label: "المدفوع المرحّل", value: fmt(Number(formData.amountPaid) || 0) },
+              { label: "المتبقي", value: fmt(Number(formData.remainingBalance) || 0), tone: "warn" },
+              { label: "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
+              { label: "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
+              { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
+            ]
+      }
       sections={[
+        {
+          key: "payments",
+          title: `تفاصيل دفعات المورد (${formData.paymentDetails?.length || 0})`,
+          content: formData.paymentDetails?.length ? (
+            <AseelViewTable<NonNullable<Invoice["paymentDetails"]>[number]>
+              columns={[
+                { key: "voucher", header: "السند", render: (p) => `${p.source === "supplier_payment" ? "سند صرف" : "دفعة فاتورة"} #${p.id}` },
+                { key: "date", header: "التاريخ", width: "110px", render: (p) => formatDateLocalized(p.paymentDate) },
+                { key: "account", header: "الصندوق/البنك", render: (p) => p.cashOrBankAccountName || "—" },
+                { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (p) => `${fmt(p.amount)} ${p.currencyCode}` },
+                { key: "status", header: "الحالة", width: "100px", render: (p) => p.isPosted ? "مرحّل" : "غير مرحّل" },
+                { key: "journal", header: "القيد", width: "90px", render: (p) => p.journalId ? `#${p.journalId}` : "—" },
+              ]}
+              rows={formData.paymentDetails}
+              rowKey={(p) => `${p.source}-${p.id}`}
+              showIndex={false}
+            />
+          ) : "لا توجد دفعات مرتبطة بهذه الفاتورة.",
+        },
         ...(invFees.length > 0
           ? [
               {
@@ -1921,6 +2219,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       dir="rtl"
     >
     <AseelDocumentShell
+      gridFitContent={viewMode}
       title={formData.isReturn
         ? "مرجع شراء (إرجاع للمورد)"
         : isInternationalInvoice ? "فاتورة شراء دولية" : "فاتورة الشراء"}
@@ -1935,7 +2234,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       nav={nav}
       actions={toolbarActions}
 
-      header={
+      header={viewMode ? undefined : (
         <>
           {fld(
             "رقم الفاتورة",
@@ -1971,6 +2270,23 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               value={formData.supplierInvoiceNumber || ""}
               onChange={(e) => handleUpdateFinancial("supplierInvoiceNumber", e.target.value)}
               placeholder="رقم فاتورة المورد"
+            />
+          )}
+          {/* تكافؤ مع محرر المبيعات: الماسح يُدخل الصنف مباشرةً بلا فتح المنتقي. */}
+          {fld(
+            "بحث سريع / باركود (F6)",
+            <input
+              className="aseel-input"
+              data-aseel-field="barcode"
+              disabled={effectiveReadOnly}
+              value={barcodeQuery}
+              onChange={(e) => setBarcodeQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                void handleBarcodeEnter(barcodeQuery);
+              }}
+              placeholder="الاسم/SKU/الباركود ⏎"
             />
           )}
           {fld(
@@ -2050,6 +2366,31 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               value={formData.dealNumber}
             />
           )}
+          {/* T-PLINEAGE: الفاتورة كانت صامتة عن أصلها — الآن تقول من أين جاءت
+              وتفتح المستند الأب (والجدّ إن كانت الطلبية نفسها وليدة عرض). */}
+          {formData.sourceDocument && fld(
+            formData.sourceDocument.kind === "order" ? "أُنشئت من طلبية شراء" : "أُنشئت من عرض سعر",
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                data-testid="open-source-document"
+                className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-3 text-xs font-bold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
+                title={`فتح المستند المصدر ${formData.sourceDocument.number}`}
+                onClick={() => openInNewTab(
+                  `/price-offers?doc=${formData.sourceDocument!.kind === "order" ? "order" : "quote"}-${formData.sourceDocument!.id}`
+                )}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span>فتح المستند المصدر</span>
+                <b dir="ltr">{formData.sourceDocument.number}</b>
+              </button>
+              {formData.sourceDocument.originNumber && (
+                <span className="text-[10px] text-[var(--aseel-ink-soft)]">
+                  الطلبية نفسها من عرض السعر {formData.sourceDocument.originNumber}
+                </span>
+              )}
+            </div>
+          )}
           {shipmentLinkId && fld(
             "الشحنة المرتبطة",
             <div className="flex items-center">
@@ -2087,7 +2428,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             </span>
           </label>
         </>
-      }
+      )}
       activeTab={activeTabKey}
       onTabChange={setActiveTabKey}
       tabs={viewMode ? [] : [
@@ -2133,7 +2474,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           },
         ] : []),
       ]}
-      totals={
+      totals={viewMode ? undefined : (
         formData.conversionMetadata?.line_meta ? (
           <>
             <div className="aseel-total-row">
@@ -2232,7 +2573,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             </div>
           </>
         )
-      }
+      )}
       status={
         <>
           <span className="aseel-status-item">المستخدم <b>{currentUser?.name || "—"}</b></span>
@@ -2408,12 +2749,77 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         />
       );
     })()}
+    {/* T-SERIAL: أرقام وحدات البند — الكمية تتبع عدد الأرقام (قاعدة المالك:
+        تبدأ برقم والعدد يقود الأكواد، فلا تُدخل الكمية مرتين). */}
+    {serialRowIndex != null && (() => {
+      const row = (formData.items || [])[serialRowIndex];
+      if (!row) return null;
+      return (
+        <SerialEntryModal
+          mode="capture"
+          productId={Number(row.itemId)}
+          productName={row.name || `#${row.itemId}`}
+          quantity={Number(row.quantity) || 0}
+          value={row.serials ?? []}
+          required={serialMode === "required"}
+          readOnly={effectiveReadOnly}
+          onClose={() => setSerialRowIndex(null)}
+          onSave={(entered) => {
+            const items = [...(formData.items || [])];
+            const target = { ...items[serialRowIndex], serials: entered };
+            // قائمة فارغة لا تصفّر الكمية — المستخدم مسح الأرقام لا البند.
+            if (entered.length > 0) {
+              target.quantity = entered.length;
+              target.totalPrice = roundSqlMoney2(entered.length * (target.unitPrice || 0));
+            }
+            items[serialRowIndex] = target;
+            recalculateTotals({ items });
+            markDirty();
+            setSerialRowIndex(null);
+          }}
+        />
+      );
+    })()}
       {showPrintView && (
         <InvoicePrintView
           invoice={formData as Invoice}
           currentUser={currentUser}
           supplier={selectedSupplier}
           onClose={() => setShowPrintView(false)}
+        />
+      )}
+      {/* استلام سريع: يُنشئ إرسالية بالبنود المؤشَّرة (كلها افتراضياً). */}
+      {showReceive && formData.id && (
+        <ReceiveGoodsModal
+          invoiceId={Number(formData.id)}
+          invoiceNumber={formData.invoiceNumber}
+          onClose={() => setShowReceive(false)}
+          onReceived={() => {
+            setShowReceive(false);
+            toast("تم استلام البضاعة وإنشاء الإرسالية.", "success");
+            void reloadInvoice();
+          }}
+        />
+      )}
+      {/* T-ONEPAY: سند صرف بنقد و/أو شيكات، مربوط بهذه الفاتورة. */}
+      {showSupplierVoucher && formData.id && formData.supplierId && (
+        <NewSupplierPaymentModal
+          initialPartner={{
+            id: Number(formData.supplierId),
+            name: selectedSupplier?.name || selectedSupplier?.tradeName || "",
+          }}
+          lockPartner
+          initialInvoice={{
+            id: Number(formData.id),
+            number: formData.invoiceName || String(formData.id),
+            remaining: supplierRemaining,
+          }}
+          onClose={() => setShowSupplierVoucher(false)}
+          onSaved={async (posted) => {
+            setShowSupplierVoucher(false);
+            setAccMsg(posted ? "تم تسجيل سند الصرف وترحيله، وخُصِم من متبقي الفاتورة." : "حُفظ سند الصرف كمسودة.");
+            await reloadInvoice();
+          }}
         />
       )}
     </div>

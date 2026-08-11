@@ -3,6 +3,7 @@ import {
   Plus, Pencil, Trash2, CheckCircle2, RotateCcw, Copy,
   DollarSign, Eye, LogIn, LogOut, Activity as ActivityIcon,
 } from "lucide-react";
+import { formatDateTimeValue } from "../../utils/formatDate";
 
 /** بيانات عرض موحّدة لكل نوع إجراء — مشتركة بين سجل المستند والصفحة العامة. */
 export interface ActionMeta {
@@ -40,7 +41,13 @@ export const ENTITY_LABELS: Record<string, string> = {
   sales_invoice: "فاتورة مبيعات",
   purchase_invoice: "فاتورة شراء",
   deal: "صفقة",
+  shipment: "شحنة",
+  clearance: "تخليص جمركي",
+  local_shipment: "نقل محلي",
   customer_payment: "سند قبض",
+  supplier_payment: "سند صرف",
+  partner: "جهة",
+  product: "منتج",
   session: "جلسة",
 };
 
@@ -49,9 +56,5 @@ export function entityLabel(entityType: string): string {
 }
 
 export function formatActivityTime(ts: string): string {
-  try {
-    return new Date(ts).toLocaleString("ar-EG", { dateStyle: "short", timeStyle: "short" });
-  } catch {
-    return ts;
-  }
+  return formatDateTimeValue(ts) || ts;
 }

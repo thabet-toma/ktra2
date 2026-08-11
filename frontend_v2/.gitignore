@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# M0 visual parity baselines are generated locally and may be large.
+/e2e/parity-shots/

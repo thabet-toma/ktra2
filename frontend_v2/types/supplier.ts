@@ -23,6 +23,8 @@ export interface Supplier {
     salesRepWechat?: string;
     salesRepPhone?: string;
     type?: SupplierType;
+    /** T-IMPOFFER: نطاق المورد من الخادم. '' = غير مصنَّف (يظهر في الجانبين). */
+    supplierScope?: '' | 'local' | 'international';
     createdAt: string;
     updatedAt: string;
 }

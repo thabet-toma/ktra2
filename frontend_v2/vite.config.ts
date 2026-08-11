@@ -9,6 +9,12 @@ export default defineConfig(() => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        allowedHosts: ['ktra-pro.tech', 'www.ktra-pro.tech', '187.124.164.58', 'localhost'],
+      },
+      preview: {
+        port: 3000,
+        host: '0.0.0.0',
+        allowedHosts: ['ktra-pro.tech', 'www.ktra-pro.tech', '187.124.164.58', 'localhost'],
       },
       plugins: [
         react(),

@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
-import { resolveTenantId } from "../utils/tenantContext";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import { pickActiveMembership, storedTenantId } from "../utils/tenantContext";
 import { apiGetObject, apiPostObject } from "../services/restApi";
 import { useAuth } from "./AuthContext";
+import { clientLogger } from "../services/logger";
 
 export type Tenant = {
   TenantID: number;
@@ -10,6 +11,7 @@ export type Tenant = {
   Status: string;
   CreatedAt: string;
   import_enabled?: boolean;
+  is_example?: boolean;
 };
 
 export type CompanyMembership = {
@@ -25,10 +27,13 @@ interface CompanyContextType {
   companies: CompanyMembership[];
   currentCompany: Tenant | null;
   loading: boolean;
+  error: string | null;
   /** صلاحية وحدة الاستيراد للشركة النشطة — يشترط تفعيل الشركة للجميع (حتى السوبر أدمن). */
   canAccessImport: boolean;
   switchCompany: (companyId: number) => Promise<void>;
   createCompany: (name: string) => Promise<Tenant>;
+  /** T-IMPOFFER: الشركة التي تُفتح تلقائياً عند كل تسجيل دخول. */
+  setDefaultCompany: (companyId: number) => Promise<void>;
   refreshCompanies: () => Promise<void>;
 }
 
@@ -43,46 +48,95 @@ export const useCompany = () => {
 };
 
 export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, loading: authLoading } = useAuth();
   const [companies, setCompanies] = useState<CompanyMembership[]>([]);
   const [currentCompany, setCurrentCompany] = useState<Tenant | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const requestVersionRef = useRef(0);
+  const activeUserIdRef = useRef<string | null>(currentUser ? String(currentUser.id) : null);
+  activeUserIdRef.current = currentUser ? String(currentUser.id) : null;
 
-  const fetchCompanies = async () => {
+  const fetchCompanies = async (options?: {
+    preferredTenantId?: number;
+    commit?: boolean;
+  }): Promise<CompanyMembership[] | null> => {
+    const requestVersion = ++requestVersionRef.current;
+    const shouldCommit = options?.commit !== false;
+    if (shouldCommit) {
+      setLoading(true);
+      setError(null);
+    }
     const token = localStorage.getItem("token");
     if (!token || !currentUser) {
-      setCompanies([]);
-      setCurrentCompany(null);
-      setLoading(false);
-      return;
+      if (shouldCommit && requestVersion === requestVersionRef.current) {
+        setCompanies([]);
+        setCurrentCompany(null);
+        localStorage.removeItem("tenantId");
+        localStorage.removeItem("branchId");
+        setLoading(false);
+      }
+      return [];
     }
+    const requesterUserId = String(currentUser.id);
 
     try {
       const data = await apiGetObject<CompanyMembership[]>(
         "tenants/companies/my-companies/"
       );
+      // A response that started for a previous user/session must never restore
+      // companies or tenant storage after logout or a user switch.
+      if (
+        requestVersion !== requestVersionRef.current ||
+        activeUserIdRef.current !== requesterUserId
+      ) return null;
+      if (!shouldCommit) return data;
       setCompanies(data);
 
-      // Resolve active tenant
-      const activeTid = resolveTenantId();
-      let activeMember = data.find((m) => m.tenant.TenantID === activeTid);
-      if (!activeMember && data.length > 0) {
-        const defaultMember = data.find((m) => m.is_default);
-        activeMember = defaultMember || data[0];
-        localStorage.setItem("tenantId", String(activeMember.tenant.TenantID));
+      if (data.length === 0) {
+        localStorage.removeItem("tenantId");
+        localStorage.removeItem("branchId");
+        setCurrentCompany(null);
+        clientLogger.info("onboarding.memberships_loaded", { count: 0 });
+        return data;
       }
 
+      // Resolve active tenant. `storedTenantId` (not `resolveTenantId`) because
+      // the latter fabricates 1 when nothing is stored — that fabricated value
+      // was being honoured as an explicit choice, so a fresh login opened tenant
+      // 1 instead of the user's default company.
+      const activeMember = pickActiveMembership(
+        data,
+        options?.preferredTenantId ?? storedTenantId(),
+      );
+
+      localStorage.setItem("tenantId", String(activeMember!.tenant.TenantID));
       setCurrentCompany(activeMember ? activeMember.tenant : null);
-    } catch (e) {
-      console.error("Failed to fetch companies:", e);
+      clientLogger.info("onboarding.memberships_loaded", { count: data.length });
+      return data;
+    } catch {
+      if (
+        requestVersion !== requestVersionRef.current ||
+        activeUserIdRef.current !== requesterUserId
+      ) return null;
+      if (!shouldCommit) return null;
+      const message = "تعذّر تحميل شركاتك. تحقق من الاتصال ثم حاول مرة أخرى.";
+      setError(message);
+      setCompanies([]);
+      setCurrentCompany(null);
+      clientLogger.error("onboarding.memberships_load_failed");
+      return null;
     } finally {
-      setLoading(false);
+      if (shouldCommit && requestVersion === requestVersionRef.current) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchCompanies();
-  }, [currentUser]);
+    if (authLoading) return;
+    void fetchCompanies();
+  }, [currentUser, authLoading]);
 
   const switchCompany = async (companyId: number) => {
     setLoading(true);
@@ -90,6 +144,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       localStorage.setItem("tenantId", String(companyId));
       // task11 M4: الفرع النشط تابع للشركة — تبديل الشركة يمسحه
       localStorage.removeItem("branchId");
+      clientLogger.info("company.switch_requested", { tenantId: companyId });
       window.location.reload();
     } catch (e) {
       console.error("Failed to switch company:", e);
@@ -101,8 +156,41 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const newCompany = await apiPostObject<Tenant>("tenants/companies/", {
       CompanyName: name,
     });
-    await fetchCompanies();
-    return newCompany;
+    // Do not activate the tenant from the POST response alone. The membership
+    // read is the source of truth for onboarding completion and owner role.
+    const memberships = await fetchCompanies({ commit: false });
+    const confirmedMembership = memberships?.find(
+      (membership) =>
+        membership.tenant.TenantID === newCompany.TenantID &&
+        membership.role === "manager" &&
+        membership.is_default === true
+    );
+    if (!confirmedMembership) {
+      throw new Error("تم إرسال طلب الإنشاء، لكن تعذّر تأكيد عضوية المدير الافتراضية. أعد تحميل الصفحة للتحقق.");
+    }
+    setCompanies(memberships!);
+    setCurrentCompany(confirmedMembership.tenant);
+    localStorage.setItem("tenantId", String(confirmedMembership.tenant.TenantID));
+    localStorage.removeItem("branchId");
+    return confirmedMembership.tenant;
+  };
+
+  /**
+   * T-IMPOFFER: تثبيت الشركة الافتراضية. النقطة النهائية كانت موجودة في الخادم
+   * (`tenants/companies/set-default/`) وبلا أي مستدعٍ في الواجهة، فلم يكن للمستخدم
+   * أي طريق ليقول «هذه شركتي التي تُفتح أول ما أدخل».
+   */
+  const setDefaultCompany = async (companyId: number) => {
+    await apiPostObject("tenants/companies/set-default/", {
+      company_id: companyId,
+    });
+    clientLogger.info("company.default_changed", { tenantId: companyId });
+    setCompanies((prev) =>
+      prev.map((membership) => ({
+        ...membership,
+        is_default: membership.tenant.TenantID === companyId,
+      })),
+    );
   };
 
   // صلاحية الاستيراد للشركة النشطة (تتفاعل مع تبديل الشركة) — تفعيل الشركة شرطٌ للجميع.
@@ -125,9 +213,11 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         // `companies.length === 0` would hang the switcher forever for a user
         // with no memberships (e.g. a superuser created after the backfill).
         loading,
+        error,
         switchCompany,
         createCompany,
-        refreshCompanies: fetchCompanies,
+        setDefaultCompany,
+        refreshCompanies: async () => { await fetchCompanies(); },
       }}
     >
       {children}

@@ -91,6 +91,20 @@ class ChequeTransferJournalTest(APITestCase):
         assert lines[self.uc_acc.pk] == (Decimal("0.00"), Decimal("500.00"))
         assert lines[self.customer.linked_account_id] == (Decimal("500.00"), Decimal("0.00"))
 
+    def test_bounce_tags_only_the_receivable_line_with_the_customer(self):
+        """T-CHQ2: كان الشريك يُوسَم على سطرَي القيد، فيتعادلان داخل كشف
+        العميل ولا يعود دين الشيك المرتد يظهر عليه (نفس عطل task32)."""
+        chq = self._cheque()
+        self.client.post(
+            f"/api/accounting/cheques/{chq.pk}/transfer/",
+            {"movement_type": "bounce"}, format="json", **self._auth())
+        jh = JournalHeader.objects.get(
+            tenant=self.tenant, reference_type="CHEQUE_BOUNCE", reference_id=chq.pk)
+        self.customer.refresh_from_db()
+        partners = {l.account_id: l.partner_id for l in jh.lines.all()}
+        assert partners[self.customer.linked_account_id] == self.customer.pk
+        assert partners[self.uc_acc.pk] is None
+
     def test_invalid_transition_rejected(self):
         chq = self._cheque(status="Collected")
         res = self.client.post(

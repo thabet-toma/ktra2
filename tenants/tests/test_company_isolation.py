@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework import status
@@ -5,6 +7,7 @@ from rest_framework.test import APITestCase
 from tenants.models import Tenant, UserCompanyMembership, TenantBook
 from accounting.models import Account, Currency
 from sales.models import SalesInvoice
+from core.access import user_has_perm
 
 class CompanyIsolationTest(APITestCase):
     @classmethod
@@ -103,12 +106,194 @@ class CompanyIsolationTest(APITestCase):
         response = self.client.post("/api/tenants/companies/", {"CompanyName": "ممنوع"})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_signup_attaches_default_company(self):
-        """A fresh signup must get a membership so it isn't locked out."""
-        from hr.auth_api import _attach_default_company
-        newbie = User.objects.create_user(username="newbie", password="password123")
-        # default tenant is pk=1 (tenant_a); newbie has no membership yet
-        _attach_default_company(newbie, is_first_user=False)
-        self.assertTrue(
-            UserCompanyMembership.objects.filter(user=newbie, tenant=self.tenant_a).exists()
+    def test_user_with_only_legal_accountant_membership_can_create_own_office(self):
+        external = User.objects.create_user(username="legal-office-owner", password="pw")
+        UserCompanyMembership.objects.create(
+            user=external,
+            tenant=self.tenant_a,
+            role="legal_accountant",
         )
+        self.client.force_authenticate(user=external)
+
+        response = self.client.post(
+            "/api/tenants/companies/",
+            {"CompanyName": "مكتب المحاسب"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.content)
+        self.assertTrue(
+            UserCompanyMembership.objects.filter(
+                user=external,
+                tenant_id=response.data["TenantID"],
+                role="manager",
+            ).exists()
+        )
+
+
+
+class SignupOnboardingJourneyTest(APITestCase):
+    signup_url = "/api/hr/auth/signup/"
+    login_url = "/api/hr/auth/login/"
+    companies_url = "/api/tenants/companies/"
+    my_companies_url = "/api/tenants/companies/my-companies/"
+
+    def test_new_user_sees_example_company_with_invoice_creation_access(self):
+        example = Tenant.objects.create(
+            CompanyName="الزهور",
+            SubscriptionPlan="Enterprise",
+            Status="Active",
+            is_example=True,
+        )
+        user = User.objects.create_user(username="new-user", password="123456")
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get(self.my_companies_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["tenant"]["CompanyName"], "الزهور")
+        self.assertTrue(response.data[0]["tenant"]["is_example"])
+        self.assertEqual(response.data[0]["role"], "staff")
+        membership = UserCompanyMembership.objects.get(user=user, tenant=example)
+        self.assertTrue(membership.is_example_access)
+        self.assertTrue(user_has_perm(user, example, "sales.invoice.create"))
+        self.assertTrue(user_has_perm(user, example, "purchase.invoice.create"))
+
+        created = self.client.post(
+            self.companies_url,
+            {"CompanyName": "شركة المستخدم الحقيقية"},
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.content)
+        real_membership = UserCompanyMembership.objects.get(
+            user=user, tenant_id=created.data["TenantID"],
+        )
+        self.assertEqual(real_membership.role, "manager")
+        self.assertTrue(real_membership.is_default)
+
+    def test_signup_login_and_first_company_bootstrap(self):
+        signup = self.client.post(
+            self.signup_url,
+            {
+                "fullName": "  Ahmad   Saleh  ",
+                "email": "  FOUNDER@Example.COM ",
+                "password": "123456",
+                # Legacy fields must not affect the new minimal contract.
+                "accountType": "employee",
+                "companyName": "Ignored legacy company",
+            },
+            format="json",
+        )
+        self.assertEqual(signup.status_code, status.HTTP_201_CREATED)
+
+        user = User.objects.get(username="founder@example.com")
+        self.assertEqual(user.email, "founder@example.com")
+        self.assertEqual(user.first_name, "Ahmad")
+        self.assertEqual(user.last_name, "Saleh")
+        self.assertTrue(user.is_active)
+        self.assertFalse(UserCompanyMembership.objects.filter(user=user).exists())
+
+        login = self.client.post(
+            self.login_url,
+            {"email": "FOUNDER@EXAMPLE.COM", "password": "123456"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, status.HTTP_200_OK)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {login.json()['token']}")
+
+        empty_companies = self.client.get(self.my_companies_url)
+        self.assertEqual(empty_companies.status_code, status.HTTP_200_OK)
+        self.assertEqual(empty_companies.data, [])
+
+        created = self.client.post(
+            self.companies_url,
+            {"CompanyName": "شركة أحمد"},
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+
+        membership = UserCompanyMembership.objects.get(
+            user=user, tenant_id=created.data["TenantID"]
+        )
+        self.assertEqual(membership.role, "manager")
+        self.assertTrue(membership.is_default)
+
+        reloaded_companies = self.client.get(self.my_companies_url)
+        self.assertEqual(reloaded_companies.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(reloaded_companies.data), 1)
+        self.assertEqual(reloaded_companies.data[0]["role"], "manager")
+        self.assertTrue(reloaded_companies.data[0]["is_default"])
+
+        profile = self.client.get(f"/api/hr/users/{user.pk}/")
+        self.assertEqual(profile.status_code, status.HTTP_200_OK)
+        self.assertEqual(profile.json()["role"], "manager")
+
+    def test_signup_requires_all_three_fields(self):
+        valid = {
+            "fullName": "Ahmad Saleh",
+            "email": "founder@example.com",
+            "password": "123456",
+        }
+        for field in valid:
+            with self.subTest(field=field):
+                payload = {**valid, field: ""}
+                response = self.client.post(self.signup_url, payload, format="json")
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(response.json()["field"], field)
+        self.assertEqual(User.objects.count(), 0)
+
+    def test_signup_rejects_invalid_and_case_insensitive_duplicate_email(self):
+        invalid = self.client.post(
+            self.signup_url,
+            {"fullName": "Ahmad", "email": "not-an-email", "password": "123456"},
+            format="json",
+        )
+        self.assertEqual(invalid.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(invalid.json()["field"], "email")
+
+        User.objects.create_user(
+            username="Existing@Example.com",
+            email="Existing@Example.com",
+            password="123456",
+        )
+        duplicate = self.client.post(
+            self.signup_url,
+            {"fullName": "Another", "email": "existing@example.COM", "password": "123456"},
+            format="json",
+        )
+        self.assertEqual(duplicate.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            duplicate.json()["detail"],
+            "البريد الإلكتروني مسجل مسبقاً.",
+        )
+
+    def test_signup_password_policy_is_minimum_six_only(self):
+        short = self.client.post(
+            self.signup_url,
+            {"fullName": "Ahmad", "email": "short@example.com", "password": "12345"},
+            format="json",
+        )
+        self.assertEqual(short.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(short.json()["field"], "password")
+
+        accepted = self.client.post(
+            self.signup_url,
+            {"fullName": "Ahmad", "email": "simple@example.com", "password": "123456"},
+            format="json",
+        )
+        self.assertEqual(accepted.status_code, status.HTTP_201_CREATED)
+
+    def test_signup_rolls_back_user_when_mirror_write_fails(self):
+        payload = {
+            "fullName": "Ahmad Saleh",
+            "email": "rollback@example.com",
+            "password": "123456",
+        }
+        with patch(
+            "hr.auth_api._sync_user_mirror",
+            side_effect=RuntimeError("simulated mirror failure"),
+        ), self.assertRaises(RuntimeError):
+            self.client.post(self.signup_url, payload, format="json")
+
+        self.assertFalse(User.objects.filter(email="rollback@example.com").exists())

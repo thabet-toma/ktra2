@@ -16,11 +16,19 @@ import {
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
+import { AccountTreeField } from "../accounting/AccountTreePicker";
+import { isCashAccount } from "../../utils/accountTree";
+import {
+  SERIAL_ENTRY_MODE_HINT,
+  SERIAL_ENTRY_MODE_OPTIONS,
+  type SerialEntryMode,
+} from "../../types/inventory";
 
 type AccountOpt = {
   id: number;
   code?: string | null;
   name?: string | null;
+  parent?: number | null;
   account_type?: string | null;
   is_active?: boolean;
 };
@@ -157,9 +165,16 @@ export const SalesSettingsPage: React.FC = () => {
         default_vat_rate: rest.default_vat_rate,
         prices_include_tax: rest.prices_include_tax,
         auto_post_invoices: rest.auto_post_invoices,
+        auto_post_payments: rest.auto_post_payments,
         show_journal_preview: rest.show_journal_preview,
         warn_on_duplicate_item: rest.warn_on_duplicate_item,
         block_loss_invoices: rest.block_loss_invoices,
+        dormant_customer_days: rest.dormant_customer_days,
+        quotation_valid_days: rest.quotation_valid_days,
+        order_reserve_days: rest.order_reserve_days,
+        allow_document_delete: rest.allow_document_delete,
+        block_reserved_stock_sale: rest.block_reserved_stock_sale,
+        serial_entry_mode: rest.serial_entry_mode,
         default_shipping_origin: rest.default_shipping_origin,
         default_shipping_destination: rest.default_shipping_destination,
       };
@@ -215,24 +230,11 @@ export const SalesSettingsPage: React.FC = () => {
     );
   }
 
-  const accountsActive = accounts.filter((a) => a.is_active !== false);
-  const revenueAccounts = accountsActive.filter(
-    (a) => (a.account_type || "").toLowerCase() === "revenue"
-  );
-  const cashAccounts = accountsActive.filter((a) => {
-    const t = (a.account_type || "").toLowerCase();
-    return t === "asset" || t === "cash" || t === "bank";
-  });
-  const liabilityAccounts = accountsActive.filter(
-    (a) => (a.account_type || "").toLowerCase() === "liability"
-  );
-  const inventoryAccounts = accountsActive;
-  const cogsAccounts = accountsActive.filter(
-    (a) => (a.account_type || "").toLowerCase() === "expense"
-  );
-
-  const accountLabel = (a: AccountOpt) =>
-    `${a.code ? a.code + " — " : ""}${a.name || ""}`;
+  // T-DEFACC: الشجرة تُعرض كاملة، وهذه الشروط تحكم ما يُختار منها فقط.
+  const isActive = (a: AccountOpt) => a.is_active !== false;
+  const isTypeOf = (type: string) => (a: AccountOpt) =>
+    isActive(a) && (a.account_type || "").toLowerCase() === type;
+  const isSelectableCash = (a: AccountOpt) => isActive(a) && isCashAccount(a);
 
   const toolbarActions: AseelToolbarAction[] = [
     {
@@ -340,43 +342,23 @@ export const SalesSettingsPage: React.FC = () => {
         </FieldLabel>
 
         <FieldLabel label="حساب الصندوق الافتراضي (للنقدي)">
-          <select
-            className={input}
+          <AccountTreeField
+            accounts={accounts}
             value={settings.default_cash_account ?? ""}
-            onChange={(e) =>
-              setField(
-                "default_cash_account",
-                e.target.value ? Number(e.target.value) : null
-              )
-            }
-          >
-            <option value="">— اختر —</option>
-            {cashAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {accountLabel(a)}
-              </option>
-            ))}
-          </select>
+            onChange={(id) => setField("default_cash_account", id)}
+            isSelectable={isSelectableCash}
+            title="اختيار الصندوق / البنك"
+          />
         </FieldLabel>
 
         <FieldLabel label="حساب ذمم (AR) افتراضي">
-          <select
-            className={input}
+          <AccountTreeField
+            accounts={accounts}
             value={settings.default_ar_account ?? ""}
-            onChange={(e) =>
-              setField(
-                "default_ar_account",
-                e.target.value ? Number(e.target.value) : null
-              )
-            }
-          >
-            <option value="">— اختر —</option>
-            {accountsActive.map((a) => (
-              <option key={a.id} value={a.id}>
-                {accountLabel(a)}
-              </option>
-            ))}
-          </select>
+            onChange={(id) => setField("default_ar_account", id)}
+            isSelectable={isActive}
+            title="اختيار حساب ذمم العملاء"
+          />
         </FieldLabel>
       </Section>
 
@@ -385,23 +367,13 @@ export const SalesSettingsPage: React.FC = () => {
         description="تُستخدم عند ترحيل الفاتورة حسب نوع الصنف (منتج/خدمة)"
       >
         <FieldLabel label="حساب إيراد بيع البضائع (منتج)">
-          <select
-            className={input}
+          <AccountTreeField
+            accounts={accounts}
             value={settings.default_revenue_account_product ?? ""}
-            onChange={(e) =>
-              setField(
-                "default_revenue_account_product",
-                e.target.value ? Number(e.target.value) : null
-              )
-            }
-          >
-            <option value="">— اختر —</option>
-            {revenueAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {accountLabel(a)}
-              </option>
-            ))}
-          </select>
+            onChange={(id) => setField("default_revenue_account_product", id)}
+            isSelectable={isTypeOf("revenue")}
+            title="اختيار حساب إيراد البضائع"
+          />
           {settings.default_revenue_account_product_name && (
             <div className="text-[11px] aseel-text-soft mt-1">
               الحالي: {settings.default_revenue_account_product_name}
@@ -410,23 +382,13 @@ export const SalesSettingsPage: React.FC = () => {
         </FieldLabel>
 
         <FieldLabel label="حساب إيراد الخدمات">
-          <select
-            className={input}
+          <AccountTreeField
+            accounts={accounts}
             value={settings.default_revenue_account_service ?? ""}
-            onChange={(e) =>
-              setField(
-                "default_revenue_account_service",
-                e.target.value ? Number(e.target.value) : null
-              )
-            }
-          >
-            <option value="">— اختر —</option>
-            {revenueAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {accountLabel(a)}
-              </option>
-            ))}
-          </select>
+            onChange={(id) => setField("default_revenue_account_service", id)}
+            isSelectable={isTypeOf("revenue")}
+            title="اختيار حساب إيراد الخدمات"
+          />
           {settings.default_revenue_account_service_name && (
             <div className="text-[11px] aseel-text-soft mt-1">
               الحالي: {settings.default_revenue_account_service_name}
@@ -440,43 +402,23 @@ export const SalesSettingsPage: React.FC = () => {
         description="حسابات افتراضية تُستخدم عند عدم تحديدها على فئة المنتج"
       >
         <FieldLabel label="حساب مخزون افتراضي">
-          <select
-            className={input}
+          <AccountTreeField
+            accounts={accounts}
             value={settings.default_inventory_account ?? ""}
-            onChange={(e) =>
-              setField(
-                "default_inventory_account",
-                e.target.value ? Number(e.target.value) : null
-              )
-            }
-          >
-            <option value="">— اختر —</option>
-            {inventoryAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {accountLabel(a)}
-              </option>
-            ))}
-          </select>
+            onChange={(id) => setField("default_inventory_account", id)}
+            isSelectable={isActive}
+            title="اختيار حساب المخزون"
+          />
         </FieldLabel>
 
         <FieldLabel label="حساب تكلفة مبيعات (COGS) افتراضي">
-          <select
-            className={input}
+          <AccountTreeField
+            accounts={accounts}
             value={settings.default_cogs_account ?? ""}
-            onChange={(e) =>
-              setField(
-                "default_cogs_account",
-                e.target.value ? Number(e.target.value) : null
-              )
-            }
-          >
-            <option value="">— اختر —</option>
-            {cogsAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {accountLabel(a)}
-              </option>
-            ))}
-          </select>
+            onChange={(id) => setField("default_cogs_account", id)}
+            isSelectable={isTypeOf("expense")}
+            title="اختيار حساب تكلفة المبيعات"
+          />
         </FieldLabel>
 
         <FieldLabel label="خصم المخزون عند الترحيل (افتراضيًا)">
@@ -555,6 +497,19 @@ export const SalesSettingsPage: React.FC = () => {
           </select>
         </FieldLabel>
 
+        <FieldLabel label="ترحيل سندات القبض والصرف بعد الحفظ">
+          <select
+            className={input}
+            value={settings.auto_post_payments ? "yes" : "no"}
+            onChange={(e) =>
+              setField("auto_post_payments", e.target.value === "yes")
+            }
+          >
+            <option value="yes">«حفظ» يرحّل السند مباشرةً (موصى به)</option>
+            <option value="no">حفظ كمسودة ثم ترحيل يدوي</option>
+          </select>
+        </FieldLabel>
+
         <FieldLabel label="إظهار معاينة القيد قبل الترحيل">
           <select
             className={input}
@@ -593,6 +548,123 @@ export const SalesSettingsPage: React.FC = () => {
             <option value="no">السماح بالحفظ (افتراضي)</option>
             <option value="yes">منع الحفظ والترحيل</option>
           </select>
+        </FieldLabel>
+        {/* T-DORMANT: عتبة إشعار «عميل مختفٍ» (توقّف عن الشراء). 0 = تعطيل. */}
+        <FieldLabel label="تنبيه «عميل مختفٍ» بعد (يوم بلا شراء)">
+          <input
+            type="number"
+            min={0}
+            className={input}
+            value={settings.dormant_customer_days ?? 30}
+            onChange={(e) =>
+              setField("dormant_customer_days", Math.max(0, Number(e.target.value) || 0))
+            }
+          />
+        </FieldLabel>
+        {/* T-ORDERS: صلاحية العرض، مدة حجز الطلبية، وإظهار زر الحذف. */}
+        <FieldLabel label="صلاحية عرض السعر (يوم)">
+          <input
+            type="number"
+            min={0}
+            className={input}
+            value={settings.quotation_valid_days ?? 14}
+            onChange={(e) =>
+              setField("quotation_valid_days", Math.max(0, Number(e.target.value) || 0))
+            }
+          />
+        </FieldLabel>
+        <FieldLabel label="حجز كمية الطلبية المؤكَّدة (يوم)">
+          <input
+            type="number"
+            min={0}
+            className={input}
+            value={settings.order_reserve_days ?? 7}
+            onChange={(e) =>
+              setField("order_reserve_days", Math.max(0, Number(e.target.value) || 0))
+            }
+          />
+        </FieldLabel>
+        <FieldLabel label="إظهار زر «حذف» في العروض والطلبيات">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.allow_document_delete !== false}
+              onChange={(e) => setField("allow_document_delete", e.target.checked)}
+            />
+            <span>عند الإطفاء يبقى «إلغاء» فقط (لا يحذف المستند)</span>
+          </label>
+        </FieldLabel>
+        {/* T-RESERVEGUARD: الحجز كان عرضاً بلا أثر — فاتورة لزبون آخر كانت تسحبه. */}
+        <FieldLabel label="بيع الكمية المحجوزة لطلبية زبون آخر">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.block_reserved_stock_sale !== false}
+              onChange={(e) => setField("block_reserved_stock_sale", e.target.checked)}
+            />
+            <span>منع ترحيل فاتورة تسحب كمية محجوزة (يظهر المحجوز في «تقرير المحجوزات»)</span>
+          </label>
+        </FieldLabel>
+        {/* T-SERIAL: نمط الأرقام التسلسلية في بنود البيع — يُفعَّل على الأصناف المتتبَّعة وحدها. */}
+        <FieldLabel label="إدخال الأرقام التسلسلية في فاتورة البيع">
+          <select
+            className={input}
+            value={settings.serial_entry_mode ?? "off"}
+            onChange={(e) => setField("serial_entry_mode", e.target.value as SerialEntryMode)}
+          >
+            {SERIAL_ENTRY_MODE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <div className="text-[11px] aseel-text-soft mt-1">{SERIAL_ENTRY_MODE_HINT}</div>
+        </FieldLabel>
+      </Section>
+
+      {/* مستند التسليم: التسمية حرّة لكل شركة، والسند المستقل والتعديل اختياريان. */}
+      <Section
+        title="مستند التسليم (الإرسالية)"
+        description="سمِّ المستند كما تسميه شركتك — الاسم يظهر في الشاشات والطباعة. المستند المرتبط بفاتورة اسم، والمستند بلا فاتورة (بضاعة خرجت قبل فوترتها) اسم آخر."
+      >
+        <FieldLabel label="اسم المستند المرتبط بفاتورة">
+          <input
+            className={input}
+            value={settings.delivery_doc_label ?? ""}
+            placeholder="إرسالية بيع"
+            onChange={(e) => setField("delivery_doc_label", e.target.value)}
+          />
+        </FieldLabel>
+        <FieldLabel label="اسم المستند بلا فاتورة">
+          <input
+            className={input}
+            value={settings.standalone_delivery_label ?? ""}
+            placeholder="سند تسليم"
+            disabled={settings.allow_standalone_delivery === false}
+            onChange={(e) => setField("standalone_delivery_label", e.target.value)}
+          />
+        </FieldLabel>
+        <FieldLabel label="السماح بمستند تسليم بلا فاتورة مرتبطة">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.allow_standalone_delivery !== false}
+              onChange={(e) => setField("allow_standalone_delivery", e.target.checked)}
+            />
+            <span>يُرحَّل مقابل «بضاعة مسلَّمة لم تُفوتَر» حتى تصدر الفاتورة</span>
+          </label>
+        </FieldLabel>
+        <FieldLabel label="السماح بتعديل/إلغاء الإرسالية">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.allow_edit_delivery !== false}
+              onChange={(e) => setField("allow_edit_delivery", e.target.checked)}
+            />
+            <span>التعديل يعكس أثر الإرسالية القديم ويعيد تطبيقه</span>
+          </label>
         </FieldLabel>
       </Section>
 
@@ -672,7 +744,7 @@ export const SalesSettingsPage: React.FC = () => {
   // task11 M6: المحتوى في منطقة gridwrap الرئيسية المرنة — كان محشوراً في
   // tab سفلي بارتفاع أقصى 220px تاركاً فراغاً أبيض ضخماً وسط الشاشة.
   return (
-    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
+    <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="إعدادات فواتير المبيعات"
         state="حسابات افتراضية + ضرائب + شحن"

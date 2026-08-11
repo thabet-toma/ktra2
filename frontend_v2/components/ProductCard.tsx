@@ -16,7 +16,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onPreview }) 
   };
   
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col group transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
+    <div className="bg-[var(--color-surface)] rounded-2xl border border-gray-200/80 dark:border-gray-700 shadow-sm overflow-hidden flex flex-col group transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
       <div className="relative overflow-hidden">
         <img
           src={product.imageUrl}
@@ -28,10 +28,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onPreview }) 
         </div>
       </div>
       <div className="p-5 flex flex-col flex-grow">
-        <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 truncate" title={product.name}>
+        <h3 className="text-lg font-bold text-[var(--color-text)] truncate" title={product.name}>
           {product.name}
         </h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{product.store}</p>
+        <p className="text-sm text-[var(--color-text-muted)] mb-4">{product.store}</p>
         <div className="mt-auto flex justify-between items-center">
           <p className="text-2xl font-extrabold text-blue-600 dark:text-blue-400">${formatMoney(product.price)}</p>
           <button

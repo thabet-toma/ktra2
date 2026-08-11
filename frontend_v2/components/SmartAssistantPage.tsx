@@ -80,20 +80,20 @@ export const SmartAssistantPage: React.FC = () => {
           <Sparkles className="w-8 h-8" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <h1 className="text-2xl font-bold text-[var(--color-text)]">
             المساعد الذكي
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-xl">
-            تُرسل رسالتك من هنا إلى خادم التطبيق، فيعيد توجيهها إلى OpenClaw على سيرفر
-            منفصل بشكل آمن — معرّف المحادثة مربوط بحسابك.
+          <p className="text-sm text-[var(--color-text-muted)] mt-1 max-w-xl">
+            اسأل عن بيانات شركتك — أرصدة الأصناف، مبيعات عميل، مشتريات مورد — ويجيبك
+            من قاعدة بيانات كترا مباشرةً. البيانات محصورة بشركتك الحالية.
           </p>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/80 shadow-sm overflow-hidden min-h-[420px]">
+      <div className="flex-1 flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm overflow-hidden min-h-[420px]">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center text-center px-6 py-16 text-gray-400 dark:text-gray-500">
+            <div className="h-full flex flex-col items-center justify-center text-center px-6 py-16 text-[var(--color-text-muted)]">
               <Bot className="w-14 h-14 mb-4 opacity-40" />
               <p className="text-sm font-medium">
                 ابدأ بكتابة سؤالك أو أرفق ملف PDF من زر المرفق
@@ -122,7 +122,7 @@ export const SmartAssistantPage: React.FC = () => {
                 className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   msg.role === "user"
                     ? "bg-blue-600 text-white rounded-tr-sm"
-                    : "bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-tl-sm"
+                    : "bg-[var(--color-surface-3)] text-[var(--color-text)] rounded-tl-sm"
                 }`}
               >
                 {msg.attachmentName && msg.role === "user" && (
@@ -135,7 +135,7 @@ export const SmartAssistantPage: React.FC = () => {
             </div>
           ))}
           {sending && (
-            <div className="flex gap-3 items-center text-gray-500 dark:text-gray-400 text-sm">
+            <div className="flex gap-3 items-center text-[var(--color-text-muted)] text-sm">
               <div className="w-9 h-9 rounded-xl bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/50 flex items-center justify-center">
                 <Loader2 className="w-4 h-4 animate-spin text-[var(--color-primary)]" />
               </div>
@@ -145,9 +145,9 @@ export const SmartAssistantPage: React.FC = () => {
           <div ref={bottomRef} />
         </div>
 
-        <div className="p-4 border-t border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-900/50">
+        <div className="p-4 border-t border-[var(--color-border)] bg-gray-50/80 dark:bg-gray-900/50">
           {pendingFile && (
-            <div className="mb-2 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-600">
+            <div className="mb-2 flex items-center gap-2 text-sm text-[var(--color-text)] bg-[var(--color-surface)] rounded-lg px-3 py-2 border border-[var(--color-border)]">
               <Paperclip className="w-4 h-4 shrink-0 text-[var(--color-primary)]" />
               <span className="truncate flex-1">{pendingFile.name}</span>
               <button
@@ -156,7 +156,7 @@ export const SmartAssistantPage: React.FC = () => {
                   setPendingFile(null);
                   if (fileInputRef.current) fileInputRef.current.value = "";
                 }}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="p-1 rounded hover:bg-[var(--color-surface-3)]"
                 title="إزالة الملف"
               >
                 <X className="w-4 h-4" />
@@ -178,7 +178,7 @@ export const SmartAssistantPage: React.FC = () => {
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={sending}
-              className="h-12 w-12 shrink-0 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 flex items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
+              className="h-12 w-12 shrink-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] flex items-center justify-center hover:bg-[var(--color-surface-2)] disabled:opacity-50 transition-colors"
               title="إرفاق ملف (PDF أو صورة)"
             >
               <Paperclip className="w-5 h-5" />
@@ -195,7 +195,7 @@ export const SmartAssistantPage: React.FC = () => {
               placeholder="اكتب رسالتك… (Enter للإرسال، Shift+Enter سطر جديد)"
               rows={2}
               disabled={sending}
-              className="flex-1 resize-none rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-3 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/40 disabled:opacity-60"
+              className="flex-1 resize-none rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-sm text-[var(--color-text)] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/40 disabled:opacity-60"
             />
             <button
               type="button"

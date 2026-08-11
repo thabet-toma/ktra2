@@ -98,18 +98,18 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
+      <div className="bg-[var(--color-surface)] rounded-lg p-6 w-full max-w-md">
         <div className="flex justify-between items-start mb-4">
           <div>
             <h2 className="text-xl font-bold dark:text-white">تعديل الصندوق</h2>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
               كل صندوق مرتبط بحساب نقدية في الشجرة بنفس الاسم؛ يُستخدم في قيود الدفع.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 shrink-0"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] shrink-0"
           >
             <X className="w-6 h-6" />
           </button>
@@ -117,7 +117,7 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
               اسم الصندوق
             </label>
             <input
@@ -130,7 +130,7 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-1">
               العملة
             </label>
             <select
@@ -144,12 +144,12 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
             </select>
           </div>
 
-          <div className="rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 p-3 text-sm">
-            <p className="font-medium text-gray-800 dark:text-gray-200 mb-1">
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-sm">
+            <p className="font-medium text-[var(--color-text)] mb-1">
               الربط بالمحاسبة
             </p>
             {ledgerLink === undefined ? (
-              <p className="text-gray-500 dark:text-gray-400">جاري التحقق…</p>
+              <p className="text-[var(--color-text-muted)]">جاري التحقق…</p>
             ) : ledgerLink ? (
               <p className="text-green-800 dark:text-green-200">
                 مرتبط: حساب الشجرة{" "}
@@ -160,7 +160,7 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
               </p>
             ) : (
               <>
-                <p className="text-slate-700 dark:text-slate-300 mb-2">
+                <p className="text-[var(--color-text)] mb-2">
                   لا يوجد حساب في الشجرة لهذا الصندوق بعد.
                 </p>
                 <button
@@ -176,7 +176,7 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
             )}
           </div>
 
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-[var(--color-text-muted)]">
             الرصيد الحالي لا يُعدّل من هنا؛ يتغيّر من حركات الصندوق فقط.
           </p>
 
@@ -184,7 +184,7 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md dark:text-gray-300 dark:hover:bg-gray-700"
+              className="px-4 py-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] rounded-md"
             >
               إلغاء
             </button>

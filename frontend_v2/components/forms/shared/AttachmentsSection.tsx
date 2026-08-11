@@ -4,6 +4,7 @@ import {
   Trash2, Download, X, Upload, Loader2
 } from 'lucide-react';
 import { cloudinaryService } from '../../../services/cloudinaryService'; // تأكد من صحة المسار
+import { usePasteImageUpload } from '../../../utils/clipboardImage';
 
 interface AttachmentsProps {
   data: any; // Deal or PriceOffer data
@@ -26,19 +27,15 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
 
   // --- Handlers ---
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
+  const uploadImageFiles = async (files: File[]) => {
+    if (files.length === 0) return;
     setUploadingImages(true);
-
-    const files = Array.from(e.target.files);
     const newUrls: string[] = [];
-
     try {
       for (const file of files) {
-        const typedFile = file as File;
-        if (!typedFile.type.startsWith('image/')) continue;
+        if (!file.type.startsWith('image/')) continue;
         // ✅ نستخدم الدالة الجديدة التي تقبل أي ملف
-        const imageUrl = await cloudinaryService.uploadFile(typedFile);
+        const imageUrl = await cloudinaryService.uploadFile(file);
         if (imageUrl) newUrls.push(imageUrl);
       }
 
@@ -51,9 +48,17 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
       alert("فشل رفع الصور");
     } finally {
       setUploadingImages(false);
-      e.target.value = '';
     }
   };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    await uploadImageFiles(Array.from(e.target.files));
+    e.target.value = '';
+  };
+
+  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف — بلا تأثير على لصق النصوص العادي.
+  usePasteImageUpload((files) => { void uploadImageFiles(files); }, !readOnly);
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -114,8 +119,8 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
   // --- Render ---
 
   return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-      <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+    <div className="bg-[var(--color-surface)] p-6 rounded-xl border border-[var(--color-border)] shadow-sm">
+      <h3 className="text-lg font-bold text-[var(--color-text)] mb-6 flex items-center gap-2">
         <Paperclip className="w-5 h-5 text-blue-600" />
         الملفات والمرفقات
       </h3>
@@ -124,7 +129,7 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
 
         {/* 1. قسم ملفات PDF */}
         <div className="space-y-4">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label className="block text-sm font-medium text-[var(--color-text)]">
             ملفات PDF (عروض أسعار، كتالوجات)
           </label>
 
@@ -141,15 +146,15 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
               />
               <label
                 htmlFor="pdf-upload-section"
-                className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-[var(--color-border)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-2)] transition-colors"
               >
                 <div className="flex flex-col items-center justify-center pt-5 pb-6">
                   {uploadingPdfs ? (
                     <Loader2 className="w-8 h-8 mb-2 text-blue-500 animate-spin" />
                   ) : (
-                    <FileText className="w-8 h-8 mb-2 text-gray-400" />
+                    <FileText className="w-8 h-8 mb-2 text-[var(--color-text-muted)]" />
                   )}
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-sm text-[var(--color-text-muted)]">
                     {uploadingPdfs ? 'جاري المعالجة...' : 'اضغط لرفع ملفات PDF'}
                   </p>
                 </div>
@@ -159,7 +164,7 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
 
           <div className="space-y-2">
             {(data[pdfsKey] || []).map((file: any, idx: number) => (
-              <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-100 dark:border-gray-700 group">
+              <div key={idx} className="flex items-center justify-between p-3 bg-[var(--color-surface-2)] rounded-lg border border-[var(--color-border)] group">
                 <div className="flex items-center gap-3 overflow-hidden">
                   <div className="p-2 bg-red-100 dark:bg-red-900/20 rounded-lg flex-shrink-0">
                     <FileText className="w-5 h-5 text-red-600 dark:text-red-400" />
@@ -170,12 +175,12 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
                       href={file.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm font-medium text-gray-900 dark:text-white truncate hover:text-blue-600 hover:underline block cursor-pointer"
+                      className="text-sm font-medium text-[var(--color-text)] truncate hover:text-blue-600 hover:underline block cursor-pointer"
                       title="اضغط لفتح الملف"
                     >
                       {file.name}
                     </a>
-                    <div className="text-xs text-gray-500 flex gap-2">
+                    <div className="text-xs text-[var(--color-text-muted)] flex gap-2">
                       <span>{(file.size / 1024).toFixed(1)} KB</span>
                     </div>
                   </div>
@@ -186,7 +191,7 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
                     href={file.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+                    className="p-1 text-[var(--color-text-muted)] hover:text-blue-600 transition-colors"
                     title="فتح في تبويب جديد"
                   >
                     <Download className="w-4 h-4" />
@@ -194,7 +199,7 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
                   {!readOnly && (
                     <button
                       onClick={() => removeFile('pdf', idx)}
-                      className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                      className="p-1 text-[var(--color-text-muted)] hover:text-red-600 transition-colors"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -203,14 +208,14 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
               </div>
             ))}
             {(!data[pdfsKey] || data[pdfsKey].length === 0) && (
-              <p className="text-xs text-center text-gray-400 py-2">لا توجد ملفات PDF</p>
+              <p className="text-xs text-center text-[var(--color-text-muted)] py-2">لا توجد ملفات PDF</p>
             )}
           </div>
         </div>
 
         {/* 2. قسم الصور */}
         <div className="space-y-4">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          <label className="block text-sm font-medium text-[var(--color-text)]">
             الصور المرفقة
           </label>
 
@@ -227,15 +232,15 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
               />
               <label
                 htmlFor="image-upload-section"
-                className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-[var(--color-border)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-2)] transition-colors"
               >
                 <div className="flex flex-col items-center justify-center pt-5 pb-6">
                   {uploadingImages ? (
                     <Loader2 className="w-8 h-8 mb-2 text-blue-500 animate-spin" />
                   ) : (
-                    <ImageIcon className="w-8 h-8 mb-2 text-gray-400" />
+                    <ImageIcon className="w-8 h-8 mb-2 text-[var(--color-text-muted)]" />
                   )}
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                  <p className="text-sm text-[var(--color-text-muted)]">
                     {uploadingImages ? 'جاري الرفع...' : 'اضغط لرفع الصور'}
                   </p>
                 </div>
@@ -245,7 +250,7 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
 
           <div className="grid grid-cols-3 gap-2">
             {(data[imagesKey] || []).map((url: string, idx: number) => (
-              <div key={idx} className="relative aspect-square rounded-lg overflow-hidden group border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800">
+              <div key={idx} className="relative aspect-square rounded-lg overflow-hidden group border border-[var(--color-border)] bg-[var(--color-surface-3)]">
                 <img
                   src={url}
                   alt={`att-${idx}`}
@@ -264,7 +269,7 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
             ))}
           </div>
           {(!data[imagesKey] || data[imagesKey].length === 0) && (
-            <p className="text-xs text-center text-gray-400 py-2">لا توجد صور مرفقة</p>
+            <p className="text-xs text-center text-[var(--color-text-muted)] py-2">لا توجد صور مرفقة</p>
           )}
         </div>
 

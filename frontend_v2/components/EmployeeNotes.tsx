@@ -36,25 +36,25 @@ const NoteCard: React.FC<{ user: User; onSave: (userId: string, notes: string) =
     }
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 p-6 flex flex-col h-full transition-all hover:shadow-lg">
-            <div className="flex items-center gap-4 mb-4 border-b border-gray-100 dark:border-gray-700 pb-4">
+        <div className="bg-[var(--color-surface)] rounded-2xl shadow-md border border-[var(--color-border)] p-6 flex flex-col h-full transition-all hover:shadow-lg">
+            <div className="flex items-center gap-4 mb-4 border-b border-[var(--color-border)] pb-4">
                 <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-300 font-bold text-xl">
                     {user.name.charAt(0).toUpperCase()}
                 </div>
                 <div>
-                    <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">{user.name}</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">{user.email}</p>
+                    <h3 className="text-lg font-bold text-[var(--color-text)]">{user.name}</h3>
+                    <p className="text-sm text-[var(--color-text-muted)]">{user.email}</p>
                 </div>
             </div>
 
             <div className="flex-grow">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
                     ملاحظات خاصة (سري)
                 </label>
                 <textarea
                     value={notes}
                     onChange={handleChange}
-                    className="w-full h-40 p-3 border border-yellow-200 dark:border-yellow-900/50 rounded-lg bg-yellow-50/50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-yellow-400 focus:border-transparent resize-none text-sm leading-relaxed shadow-inner"
+                    className="w-full h-40 p-3 border border-yellow-200 dark:border-yellow-900/50 rounded-lg bg-yellow-50/50 dark:bg-gray-900 text-[var(--color-text)] focus:ring-2 focus:ring-yellow-400 focus:border-transparent resize-none text-sm leading-relaxed shadow-inner"
                     placeholder="اكتب ملاحظاتك هنا..."
                 />
             </div>
@@ -65,7 +65,7 @@ const NoteCard: React.FC<{ user: User; onSave: (userId: string, notes: string) =
                     disabled={!isDirty || isSaving}
                     className={`px-6 py-2 rounded-lg font-bold transition-all shadow-sm flex items-center gap-2 ${
                         !isDirty 
-                        ? 'bg-gray-100 text-gray-400 cursor-default dark:bg-gray-700 dark:text-gray-500' 
+                        ? 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)] cursor-default' 
                         : 'bg-yellow-500 text-white hover:bg-yellow-600 hover:shadow-md'
                     }`}
                 >
@@ -86,8 +86,8 @@ export const EmployeeNotes: React.FC<EmployeeNotesProps> = ({ users, onSaveNotes
                     <NoteIcon className="h-8 w-8 text-yellow-600 dark:text-yellow-400" />
                 </div>
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-100">ملاحظات الموظفين</h1>
-                    <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
+                    <h1 className="text-3xl font-bold text-[var(--color-text)]">ملاحظات الموظفين</h1>
+                    <p className="text-[var(--color-text-muted)] text-sm mt-1">
                         مساحة خاصة لتدوين الملاحظات الإدارية حول أداء الموظفين. هذه الملاحظات لا تظهر للموظف.
                     </p>
                 </div>
@@ -100,8 +100,8 @@ export const EmployeeNotes: React.FC<EmployeeNotesProps> = ({ users, onSaveNotes
                     ))}
                 </div>
             ) : (
-                <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700">
-                    <p className="text-gray-500 dark:text-gray-400">لا يوجد موظفين حالياً.</p>
+                <div className="text-center py-16 bg-[var(--color-surface)] rounded-2xl border dark:border-gray-700">
+                    <p className="text-[var(--color-text-muted)]">لا يوجد موظفين حالياً.</p>
                 </div>
             )}
         </div>

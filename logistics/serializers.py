@@ -2,11 +2,22 @@ import logging
 import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
+from django.db import transaction
 from django.db.models import Sum
+from django.utils import timezone
 from rest_framework import serializers
 
-from sales.models import SupplierPayment
+from accounting.models import Account
+from sales.models import SupplierPayment, SupplierPaymentAllocation
+from sales.serializers import CHEQUE_DUE_DATE_REQUIRED
+from core.payments import (
+    apply_default_cash_account,
+    document_partner_balance_summary,
+    document_payment_summary,
+)
+from core.tenant_utils import get_tenant
 
+from .services import purchase_invoice_payment_summary
 from .text_utils import has_arabic as _has_arabic
 from .text_utils import (
     is_english_payment_or_legal_boilerplate as _english_payment_boilerplate,
@@ -194,6 +205,10 @@ def _sync_shipment_agent_payments(shipment, payments_data):
 
 
 from .models import (
+    SupplierQuotation,
+    SupplierQuotationLine,
+    PurchaseOrder,
+    PurchaseOrderLine,
     LogisticsDeal,
     LogisticsDealItem,
     LogisticsShipment,
@@ -206,6 +221,8 @@ from .models import (
     PurchaseInvoiceItem,
     PurchaseInvoiceFee,
     PurchaseSettings,
+    GoodsReceipt,
+    GoodsReceiptLine,
     LocalShipment,
     LocalShipmentPayment,
 )
@@ -214,6 +231,522 @@ from partners.serializers import PartnerSerializer
 from inventory.models import Product
 
 logger = logging.getLogger(__name__)
+
+
+class SupplierQuotationLineSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name_ar', read_only=True)
+
+    class Meta:
+        model = SupplierQuotationLine
+        fields = [
+            'id', 'product', 'product_name', 'seq', 'name_snapshot',
+            'description_line', 'quantity', 'unit_price', 'line_total',
+        ]
+        read_only_fields = ['id', 'product_name', 'line_total']
+        # T-DRAFTPARTY: بند بلا صنف مسجَّل مسموح — اسمه النصّي يكفي داخل العرض.
+        extra_kwargs = {
+            'product': {'required': False, 'allow_null': True},
+        }
+
+
+class SupplierQuotationSerializer(serializers.ModelSerializer):
+    lines = SupplierQuotationLineSerializer(many=True)
+    # T-DRAFTPARTY: اسم الطرف المعروض = المورد المسجَّل أو الاسم المبدئي.
+    supplier_name = serializers.SerializerMethodField()
+    is_draft_supplier = serializers.SerializerMethodField()
+    currency_code = serializers.CharField(source='currency.Code', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    scope_display = serializers.CharField(source='get_scope_display', read_only=True)
+    converted_deal = serializers.SerializerMethodField()
+    # T-PLINEAGE: المستند الناتج عن التحويل بالاسم والمعرّف — «محوَّل» بلا وجهة
+    # لا يقود إلى شيء، والواجهة تحتاج المعرّف لفتحه بنقرة.
+    converted_order = serializers.SerializerMethodField()
+    converted_invoice = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SupplierQuotation
+        fields = [
+            'id', 'quotation_number', 'scope', 'supplier', 'supplier_name',
+            'supplier_draft_name', 'is_draft_supplier',
+            'quotation_date', 'valid_until', 'status', 'status_display',
+            'scope_display', 'currency', 'exchange_rate', 'subtotal',
+            'currency_code',
+            'discount_amount', 'tax_rate', 'tax_amount', 'grand_total',
+            'shipping_cost_estimate', 'is_shipping_included', 'incoterms',
+            'shipping_method', 'payment_method', 'production_days',
+            'delivery_days', 'total_cbm', 'total_weight_kg',
+            'order_name', 'order_description', 'notes',
+            'alibaba_link', 'supplier_contact', 'decision_reason', 'attachments',
+            'notes_log',
+            'lines', 'converted_deal', 'converted_order', 'converted_invoice',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'subtotal', 'tax_amount', 'grand_total', 'converted_deal',
+            'converted_order', 'converted_invoice', 'is_draft_supplier',
+            'created_at', 'updated_at',
+        ]
+        extra_kwargs = {
+            'quotation_number': {'required': False, 'allow_blank': True},
+            'supplier': {'required': False, 'allow_null': True},
+            'supplier_draft_name': {'required': False, 'allow_blank': True},
+        }
+
+    def get_supplier_name(self, obj):
+        if obj.supplier_id:
+            return obj.supplier.name
+        return obj.supplier_draft_name
+
+    def get_is_draft_supplier(self, obj):
+        return not obj.supplier_id and bool(obj.supplier_draft_name)
+
+    def get_converted_deal(self, obj):
+        try:
+            deal = obj.import_deal
+        except LogisticsDeal.DoesNotExist:
+            return None
+        return {'id': deal.id, 'ref_number': deal.ref_number, 'stage': deal.stage}
+
+    def get_converted_order(self, obj):
+        try:
+            order = obj.local_order
+        except PurchaseOrder.DoesNotExist:
+            return None
+        return {'id': order.id, 'order_number': order.order_number, 'status': order.status}
+
+    def get_converted_invoice(self, obj):
+        """الفاتورة الناتجة — مباشرةً من العرض أو عبر الطلبية التي وُلدت منه."""
+        try:
+            invoice = obj.local_invoice
+        except PurchaseInvoice.DoesNotExist:
+            invoice = None
+        if invoice is None:
+            try:
+                invoice = obj.local_order.invoice
+            except PurchaseOrder.DoesNotExist:
+                invoice = None
+        if invoice is None:
+            return None
+        return {
+            'id': invoice.id,
+            'invoice_number': invoice.invoice_number,
+            'status': invoice.status,
+        }
+
+    def _stamp_notes_log(self, notes_log, instance):
+        """T-OFFERSTATE: ختم تاريخ كل ملاحظة **في الخادم**.
+
+        ساعة المتصفح ليست مصدراً موثوقاً لتاريخ ملاحظة تُقرأ بعد أشهر. الملاحظة
+        التي وصلت بتاريخ سابق تحتفظ به (إعادة حفظ النموذج لا تُعيد تأريخ القديم)،
+        والجديدة تُختم بوقت الخادم وباسم كاتبها.
+        """
+        if not isinstance(notes_log, list):
+            raise serializers.ValidationError({
+                'notes_log': 'الملاحظات يجب أن تكون قائمة.',
+            })
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        author = (
+            user.get_username()
+            if user is not None and getattr(user, 'is_authenticated', False)
+            else ''
+        )
+        now = timezone.now().isoformat()
+        known_dates = {
+            str(entry.get('at') or '')
+            for entry in (getattr(instance, 'notes_log', None) or [])
+            if isinstance(entry, dict)
+        }
+        stamped = []
+        for entry in notes_log:
+            if not isinstance(entry, dict):
+                raise serializers.ValidationError({
+                    'notes_log': 'كل ملاحظة يجب أن تكون كائناً يحمل نصاً.',
+                })
+            text = str(entry.get('text') or '').strip()
+            if not text:
+                raise serializers.ValidationError({
+                    'notes_log': 'الملاحظة الفارغة لا تُحفظ.',
+                })
+            at = str(entry.get('at') or '')
+            keep_original = at in known_dates and at != ''
+            stamped.append({
+                'text': text,
+                'at': at if keep_original else now,
+                'by': str(entry.get('by') or '') if keep_original else author,
+            })
+        return stamped
+
+    def validate(self, attrs):
+        tenant = get_tenant(self.context.get('request'))
+        if tenant is None:
+            raise serializers.ValidationError({'tenant': 'لا يوجد شركة محددة لهذا الطلب.'})
+
+        instance = self.instance
+        if instance and instance.status == SupplierQuotation.STATUS_CONVERTED:
+            raise serializers.ValidationError('عرض السعر المحوّل لا يمكن تعديله.')
+
+        supplier = attrs.get('supplier', getattr(instance, 'supplier', None))
+        if supplier and supplier.tenant_id != tenant.pk:
+            raise serializers.ValidationError({'supplier': 'المورد لا يتبع الشركة الحالية.'})
+        if supplier and supplier.partner_type != 'Supplier':
+            raise serializers.ValidationError({'supplier': 'الشريك المحدد ليس مورداً.'})
+
+        # T-DRAFTPARTY: مورد مسجَّل **أو** اسم مبدئي — لا عرضَ بلا طرف، ولا اسمَ
+        # مبدئياً معلّقاً بجانب مورد مسجَّل (فأيّهما الطرف حينها؟).
+        draft_name = str(attrs.get(
+            'supplier_draft_name', getattr(instance, 'supplier_draft_name', ''),
+        ) or '').strip()
+        if supplier is None and not draft_name:
+            raise serializers.ValidationError({
+                'supplier': 'اختر مورداً مسجَّلاً أو اكتب اسم مورد مبدئي.',
+            })
+        if supplier is not None:
+            draft_name = ''
+        if 'supplier_draft_name' in attrs or supplier is not None:
+            attrs['supplier_draft_name'] = draft_name
+
+        scope = attrs.get('scope', getattr(instance, 'scope', SupplierQuotation.SCOPE_LOCAL))
+        tax_rate = attrs.get('tax_rate', getattr(instance, 'tax_rate', Decimal('0')))
+        if scope == SupplierQuotation.SCOPE_IMPORT and Decimal(str(tax_rate or 0)) != 0:
+            raise serializers.ValidationError({
+                'tax_rate': 'عرض الاستيراد لا يتضمن الضريبة؛ تُسجل الضريبة عند التخليص.',
+            })
+
+        status_value = attrs.get('status', getattr(instance, 'status', SupplierQuotation.STATUS_DRAFT))
+        if status_value == SupplierQuotation.STATUS_CONVERTED:
+            raise serializers.ValidationError({
+                'status': 'حالة converted تُعيّن فقط بواسطة عملية التحويل.',
+            })
+
+        # T-IMPOFFER: «غير ملائم» يلزمه سبب — في نطاق **الاستيراد** وحده، حيث
+        # القرار مطلبٌ صريح للمالك. عرض الشراء المحلي يبقى كما كان (سبب اختياري)
+        # فلا يتغيّر سلوك شاشة قائمة لم يُطلب تغييرها.
+        # T-OFFERSTATE: و«بانتظار معلومات» يلزمها **بانتظار ماذا** — حالة انتظار
+        # بلا مُنتظَر لا تقول شيئاً لمن يفتح القائمة بعد أسبوع.
+        # وأي حالة أخرى تمحو التفصيل القديم كي لا يبقى عرضٌ مقبول حاملاً سبب رفض.
+        reason = attrs.get(
+            'decision_reason', getattr(instance, 'decision_reason', ''),
+        )
+        if status_value in (
+            SupplierQuotation.STATUS_REJECTED, SupplierQuotation.STATUS_PENDING_INFO,
+        ):
+            if scope == SupplierQuotation.SCOPE_IMPORT and not str(reason or '').strip():
+                raise serializers.ValidationError({
+                    'decision_reason': (
+                        'اذكر سبب اعتبار العرض غير ملائم.'
+                        if status_value == SupplierQuotation.STATUS_REJECTED
+                        else 'اذكر ما يُنتظَر وصوله من المورد.'
+                    ),
+                })
+        elif str(reason or '').strip():
+            attrs['decision_reason'] = ''
+
+        notes_log = attrs.get('notes_log')
+        if notes_log is not None:
+            attrs['notes_log'] = self._stamp_notes_log(notes_log, instance)
+
+        attachments = attrs.get('attachments')
+        if attachments is not None:
+            if not isinstance(attachments, list):
+                raise serializers.ValidationError({
+                    'attachments': 'المرفقات يجب أن تكون قائمة ملفات.',
+                })
+            for entry in attachments:
+                if not isinstance(entry, dict) or not str(entry.get('url') or '').strip():
+                    raise serializers.ValidationError({
+                        'attachments': 'كل مرفق يجب أن يحمل رابط ملف (url).',
+                    })
+
+        quotation_date = attrs.get(
+            'quotation_date', getattr(instance, 'quotation_date', None),
+        )
+        valid_until = attrs.get('valid_until', getattr(instance, 'valid_until', None))
+        if quotation_date and valid_until and valid_until < quotation_date:
+            raise serializers.ValidationError({
+                'valid_until': 'تاريخ الصلاحية يجب ألا يسبق تاريخ العرض.',
+            })
+
+        lines = attrs.get('lines')
+        if instance is None and not lines:
+            raise serializers.ValidationError({'lines': 'يجب إضافة صنف واحد على الأقل.'})
+        if lines is not None:
+            seen_seq = set()
+            for index, line in enumerate(lines, start=1):
+                product = line.get('product')
+                if product is not None and product.tenant_id != tenant.pk:
+                    raise serializers.ValidationError({
+                        'lines': f'الصنف في السطر {index} لا يتبع الشركة الحالية.',
+                    })
+                # T-DRAFTPARTY: السطر بلا صنف مسجّل يلزمه اسم نصّي يبقى داخل العرض.
+                if product is None and not str(line.get('name_snapshot') or '').strip():
+                    raise serializers.ValidationError({
+                        'lines': f'اكتب اسم الصنف في السطر {index} أو اختره من الأصناف.',
+                    })
+                seq = line.get('seq', index)
+                if seq in seen_seq:
+                    raise serializers.ValidationError({
+                        'lines': f'رقم ترتيب السطر {seq} مكرر.',
+                    })
+                seen_seq.add(seq)
+
+        discount = Decimal(str(attrs.get(
+            'discount_amount', getattr(instance, 'discount_amount', 0),
+        ) or 0))
+        shipping = Decimal(str(attrs.get(
+            'shipping_cost_estimate',
+            getattr(instance, 'shipping_cost_estimate', 0),
+        ) or 0))
+        if discount < 0:
+            raise serializers.ValidationError({'discount_amount': 'الخصم لا يمكن أن يكون سالباً.'})
+        if shipping < 0:
+            raise serializers.ValidationError({
+                'shipping_cost_estimate': 'تكلفة الشحن لا يمكن أن تكون سالبة.',
+            })
+        return attrs
+
+    @staticmethod
+    def _line_values(quotation, line, index):
+        product = line.get('product')
+        quantity = Decimal(str(line['quantity']))
+        unit_price = Decimal(str(line['unit_price']))
+        return {
+            **line,
+            'tenant': quotation.tenant,
+            'quotation': quotation,
+            'product': product,
+            'seq': line.get('seq') or index,
+            'name_snapshot': line.get('name_snapshot')
+            or getattr(product, 'name_ar', '')
+            or getattr(product, 'name_en', ''),
+            'line_total': (quantity * unit_price).quantize(Decimal('0.01')),
+        }
+
+    @staticmethod
+    def _recalculate(quotation):
+        subtotal = sum(
+            (line.line_total for line in quotation.lines.all()),
+            Decimal('0'),
+        ).quantize(Decimal('0.01'))
+        discount = Decimal(str(quotation.discount_amount or 0))
+        if discount > subtotal:
+            raise serializers.ValidationError({
+                'discount_amount': 'الخصم لا يمكن أن يتجاوز مجموع البنود.',
+            })
+        taxable = subtotal - discount
+        tax_amount = (
+            taxable * Decimal(str(quotation.tax_rate or 0)) / Decimal('100')
+        ).quantize(Decimal('0.01'))
+        shipping = (
+            Decimal('0')
+            if quotation.is_shipping_included
+            else Decimal(str(quotation.shipping_cost_estimate or 0))
+        )
+        quotation.subtotal = subtotal
+        quotation.tax_amount = tax_amount
+        quotation.grand_total = (taxable + tax_amount + shipping).quantize(Decimal('0.01'))
+        quotation.save(update_fields=['subtotal', 'tax_amount', 'grand_total', 'updated_at'])
+
+    @transaction.atomic
+    def create(self, validated_data):
+        lines = validated_data.pop('lines')
+        quotation = SupplierQuotation.objects.create(**validated_data)
+        SupplierQuotationLine.objects.bulk_create([
+            SupplierQuotationLine(**self._line_values(quotation, line, index))
+            for index, line in enumerate(lines, start=1)
+        ])
+        self._recalculate(quotation)
+        return quotation
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        lines = validated_data.pop('lines', None)
+        instance = super().update(instance, validated_data)
+        if lines is not None:
+            instance.lines.all().delete()
+            SupplierQuotationLine.objects.bulk_create([
+                SupplierQuotationLine(**self._line_values(instance, line, index))
+                for index, line in enumerate(lines, start=1)
+            ])
+        self._recalculate(instance)
+        return instance
+
+
+class PurchaseOrderLineSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name_ar', read_only=True)
+
+    class Meta:
+        model = PurchaseOrderLine
+        fields = [
+            'id', 'product', 'product_name', 'seq', 'name_snapshot',
+            'description_line', 'quantity', 'unit_price', 'line_total',
+        ]
+        read_only_fields = ['id', 'product_name', 'line_total']
+
+
+class PurchaseOrderSerializer(serializers.ModelSerializer):
+    lines = PurchaseOrderLineSerializer(many=True)
+    supplier_name = serializers.CharField(source='supplier.name', read_only=True)
+    currency_code = serializers.CharField(source='currency.Code', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    quotation_number = serializers.CharField(
+        source='quotation.quotation_number', read_only=True, default=None,
+    )
+    invoice_number = serializers.CharField(
+        source='invoice.invoice_number', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = PurchaseOrder
+        fields = [
+            'id', 'order_number', 'supplier', 'supplier_name',
+            'quotation', 'quotation_number', 'invoice', 'invoice_number',
+            'order_date', 'expected_delivery_date', 'status', 'status_display',
+            'currency', 'currency_code', 'exchange_rate', 'subtotal',
+            'discount_amount', 'tax_rate', 'tax_amount', 'grand_total',
+            'shipping_cost', 'is_shipping_included', 'shipping_method',
+            'payment_method', 'delivery_days', 'notes', 'cancel_reason',
+            'lines', 'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'status', 'invoice', 'subtotal', 'tax_amount', 'grand_total',
+            'cancel_reason', 'created_at', 'updated_at',
+        ]
+        extra_kwargs = {
+            'order_number': {'required': False, 'allow_blank': True},
+        }
+
+    def validate(self, attrs):
+        tenant = get_tenant(self.context.get('request'))
+        if tenant is None:
+            raise serializers.ValidationError({'tenant': 'لا يوجد شركة محددة لهذا الطلب.'})
+
+        instance = self.instance
+        if instance and instance.status != PurchaseOrder.STATUS_DRAFT:
+            raise serializers.ValidationError('لا يمكن تعديل طلبية ليست مسودة.')
+
+        supplier = attrs.get('supplier', getattr(instance, 'supplier', None))
+        if supplier and supplier.tenant_id != tenant.pk:
+            raise serializers.ValidationError({'supplier': 'المورد لا يتبع الشركة الحالية.'})
+        if supplier and supplier.partner_type != 'Supplier':
+            raise serializers.ValidationError({'supplier': 'الشريك المحدد ليس مورداً.'})
+
+        quotation = attrs.get('quotation', getattr(instance, 'quotation', None))
+        if quotation:
+            if quotation.tenant_id != tenant.pk or quotation.scope != SupplierQuotation.SCOPE_LOCAL:
+                raise serializers.ValidationError({
+                    'quotation': 'عرض السعر لا يتبع مشتريات الشركة المحلية.',
+                })
+            if supplier and quotation.supplier_id != supplier.pk:
+                raise serializers.ValidationError({
+                    'quotation': 'مورد الطلبية لا يطابق مورد عرض السعر.',
+                })
+
+        order_date = attrs.get('order_date', getattr(instance, 'order_date', None))
+        expected = attrs.get(
+            'expected_delivery_date',
+            getattr(instance, 'expected_delivery_date', None),
+        )
+        if order_date and expected and expected < order_date:
+            raise serializers.ValidationError({
+                'expected_delivery_date': 'تاريخ التسليم يجب ألا يسبق تاريخ الطلبية.',
+            })
+
+        lines = attrs.get('lines')
+        if instance is None and not lines:
+            raise serializers.ValidationError({'lines': 'يجب إضافة صنف واحد على الأقل.'})
+        if lines is not None:
+            seen_seq = set()
+            for index, line in enumerate(lines, start=1):
+                product = line['product']
+                if product.tenant_id != tenant.pk:
+                    raise serializers.ValidationError({
+                        'lines': f'الصنف في السطر {index} لا يتبع الشركة الحالية.',
+                    })
+                seq = line.get('seq', index)
+                if seq in seen_seq:
+                    raise serializers.ValidationError({
+                        'lines': f'رقم ترتيب السطر {seq} مكرر.',
+                    })
+                seen_seq.add(seq)
+
+        discount = Decimal(str(attrs.get(
+            'discount_amount', getattr(instance, 'discount_amount', 0),
+        ) or 0))
+        shipping = Decimal(str(attrs.get(
+            'shipping_cost', getattr(instance, 'shipping_cost', 0),
+        ) or 0))
+        if discount < 0:
+            raise serializers.ValidationError({'discount_amount': 'الخصم لا يمكن أن يكون سالباً.'})
+        if shipping < 0:
+            raise serializers.ValidationError({'shipping_cost': 'تكلفة الشحن لا يمكن أن تكون سالبة.'})
+        return attrs
+
+    @staticmethod
+    def _line_values(order, line, index):
+        product = line['product']
+        quantity = Decimal(str(line['quantity']))
+        unit_price = Decimal(str(line['unit_price']))
+        return {
+            **line,
+            'tenant': order.tenant,
+            'order': order,
+            'seq': line.get('seq') or index,
+            'name_snapshot': line.get('name_snapshot')
+            or getattr(product, 'name_ar', '')
+            or getattr(product, 'name_en', ''),
+            'line_total': (quantity * unit_price).quantize(Decimal('0.01')),
+        }
+
+    @staticmethod
+    def _recalculate(order):
+        subtotal = sum(
+            (line.line_total for line in order.lines.all()),
+            Decimal('0'),
+        ).quantize(Decimal('0.01'))
+        discount = Decimal(str(order.discount_amount or 0))
+        if discount > subtotal:
+            raise serializers.ValidationError({
+                'discount_amount': 'الخصم لا يمكن أن يتجاوز مجموع البنود.',
+            })
+        taxable = subtotal - discount
+        tax_amount = (
+            taxable * Decimal(str(order.tax_rate or 0)) / Decimal('100')
+        ).quantize(Decimal('0.01'))
+        shipping = (
+            Decimal('0')
+            if order.is_shipping_included
+            else Decimal(str(order.shipping_cost or 0))
+        )
+        order.subtotal = subtotal
+        order.tax_amount = tax_amount
+        order.grand_total = (taxable + tax_amount + shipping).quantize(Decimal('0.01'))
+        order.save(update_fields=['subtotal', 'tax_amount', 'grand_total', 'updated_at'])
+
+    @transaction.atomic
+    def create(self, validated_data):
+        lines = validated_data.pop('lines')
+        order = PurchaseOrder.objects.create(**validated_data)
+        PurchaseOrderLine.objects.bulk_create([
+            PurchaseOrderLine(**self._line_values(order, line, index))
+            for index, line in enumerate(lines, start=1)
+        ])
+        self._recalculate(order)
+        return order
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        lines = validated_data.pop('lines', None)
+        instance = super().update(instance, validated_data)
+        if lines is not None:
+            instance.lines.all().delete()
+            PurchaseOrderLine.objects.bulk_create([
+                PurchaseOrderLine(**self._line_values(instance, line, index))
+                for index, line in enumerate(lines, start=1)
+            ])
+        self._recalculate(instance)
+        return instance
+
 
 class LogisticsPaymentSerializer(serializers.ModelSerializer):
     journal_id_display = serializers.IntegerField(source='journal.id', read_only=True)
@@ -274,9 +807,19 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
     # ج7: الصفقة تعرف شحنتها — لعرض خريطة مسار الشحنة ورابط «رحلة الاستيراد»
     # داخل شاشة الصفقة (خريطة موحّدة صفقة→فاتورة).
     linked_shipment = serializers.SerializerMethodField()
+    # G-import: الصفقة «المحوّلة إلى فاتورة» يجب أن تشير لرقمها مباشرة (بدل نص حالة
+    # بلا رابط) — انظر get_linked_invoice.
+    linked_invoice = serializers.SerializerMethodField()
     posted_paid_amount = serializers.SerializerMethodField()
     amount_outstanding = serializers.SerializerMethodField()
     supplier_advance = serializers.SerializerMethodField()
+    unposted_registered_amount = serializers.SerializerMethodField()
+    payment_status_summary = serializers.SerializerMethodField()
+    supplier_balance_current = serializers.DecimalField(
+        source='supplier_balance', max_digits=18, decimal_places=2, read_only=True,
+    )
+    supplier_balance_before_deal_payments = serializers.SerializerMethodField()
+    supplier_balance_after_deal_payments = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsDeal
@@ -303,12 +846,61 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
+    def get_linked_invoice(self, obj):
+        try:
+            pi = obj.purchase_invoices.order_by('-id').first()
+            if not pi:
+                return None
+            return {
+                'id': pi.id,
+                'invoice_number': pi.invoice_number or '',
+            }
+        except Exception:
+            return None
+
+    @staticmethod
+    def _payments(obj):
+        return list(obj.payments.all())
+
     @staticmethod
     def _posted_paid_total(obj):
-        return (
-            obj.payments.filter(is_posted=True).aggregate(total=Sum('amount'))['total']
-            or Decimal('0')
+        return sum(
+            (Decimal(str(payment.amount or 0)) for payment in LogisticsDealSerializer._payments(obj) if payment.is_posted),
+            Decimal('0'),
         ).quantize(Decimal('0.01'))
+
+    def get_unposted_registered_amount(self, obj):
+        return str(sum(
+            (Decimal(str(payment.amount or 0)) for payment in self._payments(obj) if not payment.is_posted),
+            Decimal('0'),
+        ).quantize(Decimal('0.01')))
+
+    def get_payment_status_summary(self, obj):
+        return document_payment_summary(
+            obj.total_amount, self._posted_paid_total(obj),
+        )['payment_status']
+
+    def _supplier_balance_summary(self, obj):
+        from accounting.services import partner_posted_journal_effect
+
+        cached = getattr(obj, '_deal_supplier_balance_summary', None)
+        if cached is not None:
+            return cached
+        current = Decimal(str(getattr(obj, 'supplier_balance', 0) or 0))
+        effect = partner_posted_journal_effect(
+            obj.tenant_id,
+            obj.partner_id,
+            [payment.journal_id for payment in self._payments(obj) if payment.is_posted],
+            supplier=True,
+        )
+        obj._deal_supplier_balance_summary = (current - effect, current)
+        return obj._deal_supplier_balance_summary
+
+    def get_supplier_balance_before_deal_payments(self, obj):
+        return str(self._supplier_balance_summary(obj)[0])
+
+    def get_supplier_balance_after_deal_payments(self, obj):
+        return str(self._supplier_balance_summary(obj)[1])
 
     def get_posted_paid_amount(self, obj):
         return str(self._posted_paid_total(obj))
@@ -439,6 +1031,9 @@ class LogisticsDealListSerializer(serializers.ModelSerializer):
         source='partner.legal_name', read_only=True, allow_null=True, default=None
     )
     linked_shipment = serializers.SerializerMethodField()
+    # G-import: «تحولت إلى فاتورة» في قائمة الصفقات — رابط لرقم الفاتورة بجانب
+    # الحالة. يجب أن يكون في serializer القائمة (لا التفصيل) وإلا لا يظهر شيء.
+    linked_invoice = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsDeal
@@ -452,7 +1047,7 @@ class LogisticsDealListSerializer(serializers.ModelSerializer):
             'tax_rate', 'tax_amount', 'tax_type', 'shipping_method', 'payment_method',
             'production_days', 'delivery_days', 'total_cbm', 'total_weight',
             'total_weight_kg', 'certificates', 'shipping_workflow_status',
-            'created_by', 'created_at', 'linked_shipment',
+            'created_by', 'created_at', 'linked_shipment', 'linked_invoice',
         ]
         read_only_fields = fields
 
@@ -466,6 +1061,14 @@ class LogisticsDealListSerializer(serializers.ModelSerializer):
             'shipment_number': shipment.shipment_number or '',
             'shipment_name': shipment.shipment_name or '',
         }
+
+    def get_linked_invoice(self, obj):
+        # prefetch-aware: يستهلك prefetch الـviewset (purchase_invoices) بلا استعلام لكل صف
+        invoices = list(obj.purchase_invoices.all())
+        if not invoices:
+            return None
+        pi = max(invoices, key=lambda inv: inv.id)
+        return {'id': pi.id, 'invoice_number': pi.invoice_number or ''}
 
 class LogisticsDealShipmentSummarySerializer(serializers.ModelSerializer):
     """The fields a shipment detail needs about a linked deal, without its document."""
@@ -655,6 +1258,7 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
             {
                 "label": (r.get("description") or ""),
                 "amount": float((r.get("debit") or 0)) - float((r.get("credit") or 0)),
+                "type": r.get("line_type") or "other",
             }
             for r in rows
         ]
@@ -761,18 +1365,24 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
             return self._default_cost_lines()
         if not isinstance(value, list):
             raise serializers.ValidationError("cost_lines يجب أن تكون قائمة")
+        valid_types = {c[0] for c in LogisticsClearanceLine.LINE_TYPE_CHOICES}
         out = []
         for row in value:
             if not isinstance(row, dict):
                 continue
             label = str(row.get("label") or "").strip()
-            if not label:
-                continue
+            line_type = str(row.get("type") or "").strip()
+            if line_type not in valid_types:
+                line_type = ""
             try:
                 amt = float(row.get("amount", 0) or 0)
             except (TypeError, ValueError):
                 amt = 0.0
-            out.append({"label": label[:220], "amount": round(amt, 2)})
+            # بند بلا بيان ولا نوع صريح ولا مبلغ = صف فارغ فعلاً — لا معنى لحفظه.
+            # لكن بند اختير له نوع أو له مبلغ لا يُسقَط لمجرد أن «البيان» بقي فارغاً.
+            if not label and not line_type and amt == 0:
+                continue
+            out.append({"label": label[:220], "amount": round(amt, 2), "type": line_type})
         return out if out else self._default_cost_lines()
 
     def validate(self, attrs):
@@ -795,6 +1405,7 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
     }
 
     def _sync_lines_from_cost_lines(self, instance, cost_lines):
+        valid_types = {c[0] for c in LogisticsClearanceLine.LINE_TYPE_CHOICES}
         instance.lines.all().delete()
         for idx, item in enumerate(cost_lines):
             label = str(item.get('label', '') or '')
@@ -805,7 +1416,11 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
                 amount = 0
             debit = abs(amount) if amount > 0 else 0
             credit = abs(amount) if amount < 0 else 0
-            line_type = self.LABEL_TO_LINE_TYPE.get(label, 'other')
+            # النوع الصريح الوارد من الواجهة (اختيار المستخدم) له الأولوية؛ التخمين من
+            # البيان (LABEL_TO_LINE_TYPE) للتوافق مع طلبات قديمة لا ترسل نوعاً.
+            line_type = str(item.get('type') or '').strip()
+            if line_type not in valid_types:
+                line_type = self.LABEL_TO_LINE_TYPE.get(label, 'other')
             instance.lines.create(
                 seq=idx + 1,
                 line_type=line_type,
@@ -863,11 +1478,16 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
             'landed_unit_price_ils', 'landed_line_total_ils',
             'seq', 'catalog_number', 'name_snapshot', 'description_line', 'unit', 'warehouse',
             'extra_qty', 'batch_number', 'serial_number', 'manufacture_number', 'expiry_date',
+            'serials',
             'line_currency', 'line_exchange_rate', 'second_date', 'is_taxable', 'vat_percent',
             'discount_percent', 'discount_amount',
             'expense_account', 'expense_account_code', 'expense_account_name',
         ]
         read_only_fields = ['id', 'received_quantity']
+
+    def validate_serials(self, value):
+        from inventory.serials import normalize_serials
+        return normalize_serials(value)
 
     def get_product_name(self, obj):
         if obj.product:
@@ -924,9 +1544,33 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     shipment_name = serializers.CharField(source='shipment.shipment_name', read_only=True, default=None)
     # اسم الصفقة المحوَّلة — نفس مصدر قائمة الصفقات (بلا تكرار منطق الاشتقاق).
     deal_title = serializers.SerializerMethodField()
+    fees_total = serializers.DecimalField(
+        source='list_fees_total', max_digits=18, decimal_places=2, read_only=True,
+    )
+    payable_total = serializers.DecimalField(
+        source='list_payable_total', max_digits=18, decimal_places=2, read_only=True,
+    )
+    amount_paid = serializers.DecimalField(
+        source='list_amount_paid', max_digits=18, decimal_places=2, read_only=True,
+    )
+    remaining_balance = serializers.DecimalField(
+        source='list_remaining_balance', max_digits=18, decimal_places=2, read_only=True,
+    )
+    payment_status = serializers.CharField(source='list_payment_status', read_only=True)
+    payment_status_display = serializers.SerializerMethodField()
+    supplier_balance = serializers.DecimalField(
+        max_digits=18, decimal_places=2, read_only=True,
+    )
 
     def get_deal_title(self, obj):
         return _deal_title_for_list_preview(obj.deal) if obj.deal_id else ''
+
+    def get_payment_status_display(self, obj):
+        return {
+            'paid': 'مدفوعة بالكامل',
+            'partially_paid': 'مدفوعة جزئياً',
+            'unpaid': 'غير مدفوعة',
+        }.get(obj.list_payment_status, 'غير مدفوعة')
 
     class Meta:
         model = PurchaseInvoice
@@ -939,6 +1583,9 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'currency', 'currency_code', 'exchange_rate',
             'subtotal', 'discount_amount', 'tax_rate', 'tax_amount',
             'grand_total', 'status', 'status_display',
+            'fees_total', 'payable_total',
+            'amount_paid', 'remaining_balance',
+            'payment_status', 'payment_status_display', 'supplier_balance',
             'receipt_status', 'receipt_status_display',
             'is_posted', 'is_return', 'original_invoice', 'journal_id_display',
             'items_count',
@@ -1006,6 +1653,9 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
     is_local = serializers.SerializerMethodField()
+    # T-PLINEAGE: المستند الذي وُلدت منه الفاتورة (عرض سعر أو طلبية) — الفاتورة
+    # كانت صامتة عن أصلها، فلا سبيل للرجوع إلى العرض الذي سعّرها.
+    source_document = serializers.SerializerMethodField()
     # W7a: رقم الفاتورة الأصلية — لعرض رابط «الفاتورة الأصلية #» في مستند المرجع.
     original_invoice_number = serializers.CharField(
         source='original_invoice.invoice_number', read_only=True, default=None,
@@ -1017,6 +1667,12 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     payment_status_display = serializers.SerializerMethodField()
     fees_total = serializers.SerializerMethodField()
     payable_total = serializers.SerializerMethodField()
+    supplier_balance_current = serializers.DecimalField(
+        source='supplier_balance', max_digits=18, decimal_places=2, read_only=True,
+    )
+    supplier_balance_before_invoice = serializers.SerializerMethodField()
+    supplier_balance_after_invoice = serializers.SerializerMethodField()
+    payment_details = serializers.SerializerMethodField()
     cash_or_bank_account_name = serializers.CharField(
         source='cash_or_bank_account.name', read_only=True, default=None,
     )
@@ -1062,7 +1718,10 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             # firestore_id: dropped in P-K-3 (migration 0042).
             'status', 'status_display', 'notes',
             'receipt_status', 'receipt_status_display', 'is_local',
+            'source_document',
             'amount_paid', 'remaining_balance', 'payment_status', 'payment_status_display',
+            'supplier_balance_current', 'supplier_balance_before_invoice',
+            'supplier_balance_after_invoice', 'payment_details',
             'fees_total', 'payable_total',
             'supplier_invoice_number', 'factory_name',
             'is_posted', 'is_return', 'original_invoice', 'original_invoice_number',
@@ -1077,6 +1736,35 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         """فاتورة محلية = غير مستوردة (بلا صفقة/شحنة/تخليص) — قابلة للاستلام للمخزن."""
         return not (obj.deal_id or obj.shipment_id or obj.clearance_id)
 
+    def get_source_document(self, obj):
+        """المستند الأب: طلبية شراء أو عرض سعر محوَّل مباشرةً — بالرقم والمعرّف.
+
+        الطلبية المولودة من عرض تحمل جدّها في `origin_*`، فيصل المستخدم إلى
+        العرض الذي بدأ السلسلة بنقرة واحدة بدل تتبّعه يدوياً.
+        """
+        order = getattr(obj, 'source_purchase_order', None)
+        if order is not None:
+            return {
+                'kind': 'order',
+                'id': order.id,
+                'number': order.order_number,
+                'origin_kind': 'quotation' if order.quotation_id else None,
+                'origin_id': order.quotation_id,
+                'origin_number': (
+                    order.quotation.quotation_number if order.quotation_id else None
+                ),
+            }
+        if obj.source_quotation_id:
+            return {
+                'kind': 'quotation',
+                'id': obj.source_quotation_id,
+                'number': obj.source_quotation.quotation_number,
+                'origin_kind': None,
+                'origin_id': None,
+                'origin_number': None,
+            }
+        return None
+
     def get_quote_images(self, obj):
         return read_document_images(obj.tenant_id, 'purchase_invoices', obj.id)
 
@@ -1084,29 +1772,14 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         return read_document_pdfs(obj.tenant_id, 'purchase_invoices', obj.id)
 
     def _computed_amount_paid(self, obj) -> Decimal:
-        """المدفوع = نقدي مرفق + دفعات صريحة؛ والفاتورة النقدية المرحَّلة مدفوعة بالكامل."""
-        payable = self._payable_total(obj)
-        paid = Decimal(str(obj.attached_cash_amount or 0))
-        try:
-            paid += sum((Decimal(str(p.amount or 0)) for p in obj.payments.all()), Decimal('0'))
-        except Exception:
-            pass
-        if obj.payment_type == 'cash' and obj.is_posted:
-            # تسوية الشراء النقدي (Section B) تُفرّغ ذمم المورد بالكامل
-            paid = max(paid, payable)
-        if payable and paid > payable:
-            paid = payable
-        return paid.quantize(Decimal('0.01'))
+        return purchase_invoice_payment_summary(obj)['amount_paid']
 
     @staticmethod
     def _fees_total(obj) -> Decimal:
-        return sum(
-            (Decimal(str(f.amount or 0)) for f in obj.fees.all()),
-            Decimal('0'),
-        ).quantize(Decimal('0.01'))
+        return purchase_invoice_payment_summary(obj)['fees_total']
 
     def _payable_total(self, obj) -> Decimal:
-        return (Decimal(str(obj.grand_total or 0)) + self._fees_total(obj)).quantize(Decimal('0.01'))
+        return purchase_invoice_payment_summary(obj)['payable_total']
 
     def get_fees_total(self, obj):
         return str(self._fees_total(obj))
@@ -1118,25 +1791,59 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         return str(self._computed_amount_paid(obj))
 
     def get_remaining_balance(self, obj):
-        return str((self._payable_total(obj) - self._computed_amount_paid(obj)).quantize(Decimal('0.01')))
+        return str(purchase_invoice_payment_summary(obj)['remaining_balance'])
 
     def get_payment_status(self, obj):
-        grand = self._payable_total(obj)
-        paid = self._computed_amount_paid(obj)
-        if grand <= 0:
-            return 'unpaid'
-        if paid >= grand - Decimal('0.01'):
-            return 'paid'
-        if paid > 0:
-            return 'partially_paid'
-        return 'unpaid'
+        return purchase_invoice_payment_summary(obj)['payment_status']
 
     def get_payment_status_display(self, obj):
-        return {
-            'paid': 'مدفوعة',
-            'partially_paid': 'مدفوعة جزئياً',
-            'unpaid': 'غير مدفوعة',
-        }.get(self.get_payment_status(obj), 'غير مدفوعة')
+        return purchase_invoice_payment_summary(obj)['payment_status_display']
+
+    def _balance_summary(self, obj):
+        summary = purchase_invoice_payment_summary(obj)
+        return document_partner_balance_summary(
+            getattr(obj, 'supplier_balance', 0),
+            summary['remaining_balance'],
+            obj.exchange_rate,
+            is_posted=obj.is_posted,
+            direction=-1 if obj.is_return else 1,
+        )
+
+    def get_supplier_balance_before_invoice(self, obj):
+        return str(self._balance_summary(obj)['balance_before'])
+
+    def get_supplier_balance_after_invoice(self, obj):
+        return str(self._balance_summary(obj)['balance_after'])
+
+    def get_payment_details(self, obj):
+        details = []
+        for payment in obj.supplier_payments.all():
+            details.append({
+                'source': 'supplier_payment',
+                'id': payment.id,
+                'payment_date': payment.payment_date,
+                'amount': str(payment.amount),
+                'currency_code': payment.currency.Code,
+                'exchange_rate': str(payment.exchange_rate),
+                'cash_or_bank_account_name': payment.cash_or_bank_account.name,
+                'is_posted': payment.is_posted,
+                'journal': payment.journal_id,
+                'notes': payment.notes or '',
+            })
+        for payment in obj.payments.all():
+            details.append({
+                'source': 'purchase_invoice_payment',
+                'id': payment.id,
+                'payment_date': payment.payment_date,
+                'amount': str(payment.amount),
+                'currency_code': payment.currency.Code,
+                'exchange_rate': str(payment.exchange_rate),
+                'cash_or_bank_account_name': payment.cash_or_bank_account.name,
+                'is_posted': payment.is_posted,
+                'journal': payment.journal_id,
+                'notes': payment.notes or '',
+            })
+        return sorted(details, key=lambda row: (row['payment_date'], row['id']), reverse=True)
 
     def validate(self, attrs):
         payment_type = attrs.get('payment_type') or (
@@ -1150,6 +1857,16 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'cash_or_bank_account': 'الدفع النقدي يتطلب اختيار حساب صندوق/بنك.'
             })
+        # نمط «بدون» في إعدادات الشراء: لا تُخزَّن أرقام تسلسلية على البنود إطلاقاً.
+        from core.tenant_utils import get_tenant
+        from inventory.serials import purchase_serial_mode, strip_serials_when_off
+
+        request = self.context.get('request')
+        tenant = get_tenant(request) if request is not None else None
+        if tenant is not None and attrs.get('items'):
+            strip_serials_when_off(
+                attrs['items'], purchase_serial_mode(tenant.TenantID),
+            )
         return attrs
 
     def get_cheques(self, obj):
@@ -1484,31 +2201,208 @@ class PurchaseSettingsSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseSettings
-        fields = ['id', 'purchase_default_price_strategy', 'default_cash_account', 'updated_at']
+        fields = ['id', 'purchase_default_price_strategy', 'default_cash_account',
+                  'receive_on_post', 'receipt_doc_label', 'standalone_receipt_label',
+                  'allow_standalone_receipt', 'allow_edit_receipt',
+                  'serial_entry_mode', 'updated_at']
         read_only_fields = ['id', 'updated_at']
+
+
+class GoodsReceiptLineSerializer(serializers.ModelSerializer):
+    """بند إرسالية شراء — المفوتر والمستلَم تراكمياً والباقي، لسياق المراجعة."""
+
+    product_name = serializers.SerializerMethodField(read_only=True)
+    item_name = serializers.CharField(source='item.name', read_only=True, default=None)
+    ordered_quantity = serializers.SerializerMethodField()
+    received_total = serializers.SerializerMethodField()
+    remaining_quantity = serializers.SerializerMethodField()
+    warehouse_name = serializers.CharField(
+        source='warehouse.name', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = GoodsReceiptLine
+        fields = [
+            'id', 'item', 'item_name', 'product', 'product_name',
+            'ordered_quantity', 'received_total', 'remaining_quantity',
+            'quantity', 'unit_price', 'warehouse', 'warehouse_name',
+        ]
+        read_only_fields = fields
+
+    def get_product_name(self, obj):
+        return str(obj.product) if obj.product_id else None
+
+    def get_ordered_quantity(self, obj):
+        # السند المستقل بلا بند فاتورة ⇒ المفوتر = المستلَم نفسه (لا باقي).
+        return str(obj.item.quantity if obj.item_id else obj.quantity)
+
+    def get_received_total(self, obj):
+        return str(obj.item.received_quantity if obj.item_id else obj.quantity)
+
+    def get_remaining_quantity(self, obj):
+        if not obj.item_id:
+            return '0'
+        ordered = Decimal(str(obj.item.quantity or 0))
+        received = Decimal(str(obj.item.received_quantity or 0))
+        return str(max(Decimal('0'), ordered - received))
+
+
+class GoodsReceiptListSerializer(serializers.ModelSerializer):
+    invoice_number = serializers.CharField(
+        source='invoice.invoice_number', read_only=True, default=None,
+    )
+    partner_name = serializers.SerializerMethodField()
+    is_standalone = serializers.BooleanField(read_only=True)
+    doc_label = serializers.SerializerMethodField()
+    lines_count = serializers.SerializerMethodField()
+    total_quantity = serializers.SerializerMethodField()
+    total_remaining = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GoodsReceipt
+        fields = [
+            'id', 'receipt_number', 'receipt_date', 'invoice', 'invoice_number',
+            'partner', 'partner_name', 'supplier_ref', 'is_standalone', 'doc_label',
+            'auto_created', 'journal', 'notes',
+            'lines_count', 'total_quantity', 'total_remaining', 'created_at',
+        ]
+        read_only_fields = fields
+
+    def _labels(self, obj):
+        cached = getattr(self, '_label_cache', None)
+        if cached is None:
+            from logistics.services import get_or_create_purchase_settings
+            ps = get_or_create_purchase_settings(obj.tenant_id)
+            cached = (ps.receipt_doc_label, ps.standalone_receipt_label)
+            self._label_cache = cached
+        return cached
+
+    def get_doc_label(self, obj):
+        linked, standalone = self._labels(obj)
+        return standalone if obj.invoice_id is None else linked
+
+    def get_partner_name(self, obj):
+        if obj.partner_id:
+            return obj.partner.name
+        return obj.invoice.partner.name if obj.invoice_id else ''
+
+    def get_lines_count(self, obj):
+        return obj.lines.count()
+
+    def get_total_quantity(self, obj):
+        return str(sum((line.quantity for line in obj.lines.all()), Decimal('0')))
+
+    def get_total_remaining(self, obj):
+        """الباقي على الفاتورة المرتبطة بعد هذه الإرسالية (0 للسند المستقل)."""
+        if obj.invoice_id is None:
+            return '0'
+        total = Decimal('0')
+        for item in obj.invoice.items.all():
+            if not item.product_id:
+                continue
+            ordered = Decimal(str(item.quantity or 0))
+            received = Decimal(str(item.received_quantity or 0))
+            total += max(Decimal('0'), ordered - received)
+        return str(total)
+
+
+class GoodsReceiptSerializer(GoodsReceiptListSerializer):
+    lines = GoodsReceiptLineSerializer(many=True, read_only=True)
+
+    class Meta(GoodsReceiptListSerializer.Meta):
+        fields = GoodsReceiptListSerializer.Meta.fields + ['lines']
+        read_only_fields = fields
+
+
+class SupplierPaymentAllocationSerializer(serializers.ModelSerializer):
+    invoice_number = serializers.CharField(source='invoice.invoice_number', read_only=True)
+
+    class Meta:
+        model = SupplierPaymentAllocation
+        fields = ['id', 'invoice', 'invoice_number', 'amount',
+                  'amount_in_invoice_currency', 'conversion_rate']
+        read_only_fields = fields
+
+
+class _SupplierChequeInputSerializer(serializers.Serializer):
+    """شيك صادر داخل سند الصرف — مبلغه جزء من مبلغ السند لا إضافة عليه."""
+    cheque_number = serializers.CharField(max_length=50)
+    amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, min_value=Decimal('0.01'))
+    bank_name = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
+    account_number = serializers.CharField(max_length=50, required=False, allow_blank=True, default='')
+    bank_branch = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
+    # T-CHQ3/ط: مرآة الجانب الوارد — لا شيك بلا موعد استحقاق (نفس الرسالة).
+    due_date = serializers.DateField(
+        error_messages={
+            'null': CHEQUE_DUE_DATE_REQUIRED,
+            'required': CHEQUE_DUE_DATE_REQUIRED,
+            'invalid': CHEQUE_DUE_DATE_REQUIRED,
+        },
+    )
+    issue_date = serializers.DateField(required=False, allow_null=True)
+    payee_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default='')
+    notes = serializers.CharField(required=False, allow_blank=True, default='')
 
 
 class SupplierPaymentSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source='partner.name', read_only=True)
+    # T-ONEPAY: شيكات السند (كتابة عند الإنشاء، قراءة من الشيكات المرتبطة).
+    cheques = _SupplierChequeInputSerializer(many=True, required=False, write_only=True)
+    attached_cheques = serializers.SerializerMethodField()
+
+    def get_attached_cheques(self, obj) -> list:
+        return [
+            {
+                'id': c.id, 'cheque_number': c.cheque_number,
+                'bank_name': c.bank_name or '', 'amount': str(c.amount),
+                'due_date': c.due_date, 'status': c.status,
+            }
+            for c in obj.cheques.all()
+        ]
     currency_code = serializers.CharField(source='currency.Code', read_only=True, default=None)
     cash_account_name = serializers.CharField(
         source='cash_or_bank_account.name', read_only=True, default=None,
     )
+    # T-DEFACC: اختياري في الإدخال — `validate` يملؤه من افتراضي الشركة.
+    cash_or_bank_account = serializers.PrimaryKeyRelatedField(
+        queryset=Account.objects.all(), required=False, allow_null=True,
+    )
+    # T-ONACC: التوزيع على فواتير الشراء + المتبقّي «على الحساب» (مرآة سند القبض).
+    allocations = SupplierPaymentAllocationSerializer(many=True, read_only=True)
+    allocated_amount = serializers.SerializerMethodField()
+    unallocated_amount = serializers.SerializerMethodField()
+
+    def _allocated(self, obj) -> Decimal:
+        return sum(
+            (Decimal(str(a.amount)) for a in obj.allocations.all()), Decimal('0')
+        )
+
+    def get_allocated_amount(self, obj) -> str:
+        return str(self._allocated(obj))
+
+    def get_unallocated_amount(self, obj) -> str:
+        return str(Decimal(str(obj.amount)) - self._allocated(obj))
 
     class Meta:
         model = SupplierPayment
         fields = [
             'id',
             'partner', 'partner_name',
+            'purchase_invoice',
             'payment_date',
             'amount',
             'currency', 'currency_code', 'exchange_rate',
             'cash_or_bank_account', 'cash_account_name',
             'is_posted', 'journal',
             'notes',
+            'cheques', 'attached_cheques',
+            'allocations', 'allocated_amount', 'unallocated_amount',
             'created_at',
         ]
-        read_only_fields = ['id', 'is_posted', 'journal', 'created_at']
+        read_only_fields = ['id', 'is_posted', 'journal', 'created_at',
+                            'attached_cheques',
+                            'allocations', 'allocated_amount', 'unallocated_amount']
 
     def validate(self, attrs):
         try:
@@ -1518,6 +2412,55 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'amount': 'قيمة غير صالحة.'})
         if not attrs.get('payment_date'):
             raise serializers.ValidationError({'payment_date': 'تاريخ الدفعة مطلوب.'})
-        if not attrs.get('cash_or_bank_account'):
-            raise serializers.ValidationError({'cash_or_bank_account': 'الصندوق/البنك مطلوب.'})
+        # T-DEFACC: الصندوق يُملأ من افتراضي الشركة بدل رفض السند لفراغه.
+        attrs = apply_default_cash_account(self, attrs)
+        invoice = attrs.get(
+            'purchase_invoice',
+            self.instance.purchase_invoice if self.instance else None,
+        )
+        partner = attrs.get('partner', self.instance.partner if self.instance else None)
+        if invoice:
+            from core.tenant_utils import get_tenant
+            request = self.context.get('request')
+            tenant = get_tenant(request) if request else None
+            if tenant and invoice.tenant_id != tenant.TenantID:
+                raise serializers.ValidationError({
+                    'purchase_invoice': 'فاتورة الشراء لا تتبع الشركة الحالية.',
+                })
+            if partner and invoice.partner_id != partner.id:
+                raise serializers.ValidationError({
+                    'purchase_invoice': 'فاتورة الشراء لا تتبع المورد المحدد.',
+                })
+        cheques_total = sum(
+            (Decimal(str(c['amount'])) for c in attrs.get('cheques', [])), Decimal('0'),
+        )
+        if cheques_total > Decimal(str(attrs.get('amount', 0))):
+            raise serializers.ValidationError({
+                'cheques': 'مجموع الشيكات لا يجوز أن يتجاوز مبلغ السند.',
+            })
         return attrs
+
+    def create(self, validated_data):
+        from accounting.models import Cheque
+
+        cheques = validated_data.pop('cheques', [])
+        payment = super().create(validated_data)
+        for c in cheques:
+            Cheque.objects.create(
+                tenant=payment.tenant,
+                supplier_payment=payment,
+                partner=payment.partner,
+                direction='Outgoing',
+                status='Draft',  # يصير «برسم الدفع» عند ترحيل السند
+                cheque_number=c['cheque_number'].strip(),
+                amount=c['amount'],
+                currency=payment.currency,
+                bank_name=c.get('bank_name') or '',
+                account_number=c.get('account_number') or '',
+                bank_branch=c.get('bank_branch') or '',
+                due_date=c.get('due_date') or None,
+                issue_date=c.get('issue_date') or None,
+                payee_name=c.get('payee_name') or '',
+                notes=c.get('notes') or '',
+            )
+        return payment

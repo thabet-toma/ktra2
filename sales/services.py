@@ -9,25 +9,34 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
-from accounting.models import Account
+from accounting.models import Account, JournalLine
 from accounting.services import (
     convert_amount,
     create_audit_log,
     post_journal,
     resolve_forex_account,
+    unpost_document,
     validate_fiscal_period,
     validate_journal_entry,
 )
 from inventory.models import Product, StockMovement
+from inventory.serials import (
+    consume_sales_serials,
+    release_sales_serials,
+    restore_returned_sales_serials,
+)
 from inventory.services import record_stock_movement
 from partners.models import Partner, PartnerGroup
+from partners.signals import ensure_partner_linked_account
+from tenants.models import Tenant
 
 from .models import (
     CreditDebitNote,
     CustomerPayment,
     DeliveryOrder,
+    DeliveryOrderLine,
     PaymentAllocation,
     SalesInvoice,
     SalesInvoiceLine,
@@ -79,15 +88,89 @@ def get_or_create_default_customer(tenant) -> Partner:
     )
 
 
+def resolve_default_account(
+    tenant_id, code_prefixes=None, acc_type=None, name_kw=None, *, allow_any_of_type=True
+):
+    """أفضل حساب مطابق من شجرة الشركة: الكود، ثم النوع+الاسم، ثم أول حساب من النوع.
+
+    `allow_any_of_type=False` يمنع الرجوع الأعمى لأول حساب من النوع (قد يكون
+    حساباً رئيسياً لا يصلح للترحيل) — يُستخدم عند تعبئة الافتراضيات تلقائياً.
+    """
+    qs = Account.objects.filter(tenant_id=tenant_id, is_active=True)
+    for cp in (code_prefixes or []):
+        hit = qs.filter(code__startswith=cp).order_by("code").first()
+        if hit:
+            return hit
+    if acc_type:
+        typed = qs.filter(account_type=acc_type)
+        if name_kw:
+            hit = typed.filter(name__icontains=name_kw).order_by("code").first()
+            if hit:
+                return hit
+        if allow_any_of_type:
+            return typed.order_by("code").first()
+    return None
+
+
+def _fill_missing_default_accounts(settings_obj: SalesSettings, tenant_id) -> list[str]:
+    """يملأ الحسابات الافتراضية الفارغة من الشجرة — يعيد الحقول المعدّلة.
+
+    تركها NULL كان يوقف ترحيل أي فاتورة مبيعات في شركة جديدة برسالة «عيّن حساب
+    تكلفة المبيعات والمخزون…»، مع أن شجرة الحسابات القياسية تحوي الحسابات أصلاً.
+    T-DEFACC: الصندوق والذمم انضمّا للقائمة — كانا يبقيان فارغين فيُجبَر المستخدم
+    على اختيار الصندوق يدوياً في كل سند.
+    """
+    filled: list[str] = []
+    if settings_obj.default_cogs_account_id is None:
+        acc = resolve_default_account(
+            tenant_id, ["5101", "51"], "Expense", "تكلفة", allow_any_of_type=False
+        )
+        if acc:
+            settings_obj.default_cogs_account = acc
+            filled.append("default_cogs_account")
+    if settings_obj.default_inventory_account_id is None:
+        acc = resolve_default_account(
+            tenant_id, ["1104"], "Asset", "مخزون", allow_any_of_type=False
+        )
+        if acc:
+            settings_obj.default_inventory_account = acc
+            filled.append("default_inventory_account")
+    if settings_obj.default_cash_account_id is None:
+        acc = resolve_default_account(
+            tenant_id, ["1101", "1102", "1110"], "Asset", "صندوق", allow_any_of_type=False
+        )
+        if acc:
+            settings_obj.default_cash_account = acc
+            filled.append("default_cash_account")
+    if settings_obj.default_ar_account_id is None:
+        # 1103 = المدينون التجاريون (أب حسابات الزبائن). القائمة القديمة كانت
+        # ["1201", "1106"] — أراضٍ ودفعات موردين، لا علاقة لهما بذمم العملاء.
+        acc = resolve_default_account(
+            tenant_id, ["1103"], "Asset", "مدينون", allow_any_of_type=False
+        )
+        if acc:
+            settings_obj.default_ar_account = acc
+            filled.append("default_ar_account")
+    if filled:
+        logger.info(
+            "sales.settings.defaults_filled tenant=%s fields=%s", tenant_id, filled,
+        )
+    return filled
+
+
 def get_or_create_sales_settings(tenant) -> SalesSettings:
     """يُعيد (أو يُنشئ) إعدادات المبيعات للشركة، ويضبط قيمًا افتراضية ذكية."""
     tenant_id = getattr(tenant, "TenantID", tenant)
     settings_obj = SalesSettings.objects.filter(tenant_id=tenant_id).first()
     if settings_obj:
+        updates: list[str] = []
         # تأكد أن العميل الافتراضي موجود
         if settings_obj.default_customer_id is None:
             settings_obj.default_customer = get_or_create_default_customer(tenant_id)
-            settings_obj.save(update_fields=["default_customer"])
+            updates.append("default_customer")
+        updates += _fill_missing_default_accounts(settings_obj, tenant_id)
+        if updates:
+            settings_obj.save(update_fields=updates)
         return settings_obj
 
     default_customer = get_or_create_default_customer(tenant_id)
@@ -134,7 +217,82 @@ def get_or_create_sales_settings(tenant) -> SalesSettings:
         default_revenue_account_service=default_rev,
         default_vat_rate=default_vat,
     )
+    filled = _fill_missing_default_accounts(settings_obj, tenant_id)
+    if filled:
+        settings_obj.save(update_fields=filled)
     return settings_obj
+
+
+def dormant_customers(*, tenant_id: int, days: int | None = None) -> list[dict]:
+    """T-DORMANT: العملاء الذين توقّفوا عن الشراء منذ `days` يوماً أو أكثر.
+
+    «حركة العميل» تُشتقّ من فواتير البيع **المرحّلة** وحدها (لا مسودات ولا مراجع
+    بيع) — لا مخزن حركات موازٍ، فالنتيجة تتصالح دائماً مع دفتر المبيعات.
+    من لم يشترِ قطّ لا يُعدّ «مختفياً» (لم يكن حاضراً أصلاً)، ومن انتهى تعامله
+    (`end_of_dealing_date` حلّ) مستثنى — توقّفه معروف لا مفاجئ.
+    `days=None` ⇒ العتبة من إعدادات المبيعات
+    (`dormant_customer_days`)، و0 يعطّل التنبيه فتُعاد قائمة فارغة.
+
+    يُعاد [{partner_id, partner_name, last_sale_date, last_invoice_number,
+    days_since}] مرتّباً بالأطول صمتاً أولاً — يستهلكه مولّد إشعارات الموقع.
+    """
+    from datetime import date, timedelta
+
+    from django.db.models import Max
+
+    if days is None:
+        days = get_or_create_sales_settings(tenant_id).dormant_customer_days
+    days = int(days or 0)
+    if days <= 0:
+        logger.info("dormant_customers tenant=%s disabled (days=0)", tenant_id)
+        return []
+
+    today = date.today()
+    cutoff = today - timedelta(days=days)
+    latest = (
+        SalesInvoice.objects.filter(
+            tenant_id=tenant_id,
+            status=SalesInvoice.STATUS_POSTED,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+        )
+        .exclude(customer__end_of_dealing_date__lte=today)
+        .values("customer_id", "customer__name")
+        .annotate(last_sale_date=Max("invoice_date"))
+        .filter(last_sale_date__lte=cutoff)
+        .order_by("last_sale_date")
+    )
+
+    rows: list[dict] = []
+    for entry in latest:
+        last_date = entry["last_sale_date"]
+        # رقم آخر فاتورة — للعرض داخل الإشعار (لا يُستعلم إلا للمختفين فعلاً).
+        last_number = (
+            SalesInvoice.objects.filter(
+                tenant_id=tenant_id,
+                customer_id=entry["customer_id"],
+                status=SalesInvoice.STATUS_POSTED,
+                invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+                invoice_date=last_date,
+            )
+            .order_by("-id")
+            .values_list("invoice_number", flat=True)
+            .first()
+        )
+        rows.append(
+            {
+                "partner_id": entry["customer_id"],
+                "partner_name": entry["customer__name"],
+                "last_sale_date": last_date.isoformat(),
+                "last_invoice_number": last_number,
+                "days_since": (today - last_date).days,
+            }
+        )
+
+    logger.info(
+        "dormant_customers tenant=%s days=%s -> %s customers",
+        tenant_id, days, len(rows),
+    )
+    return rows
 
 
 def line_net(line: SalesInvoiceLine) -> Decimal:
@@ -201,12 +359,16 @@ def _resolve_ar_account(invoice: SalesInvoice) -> Account:
     if invoice.accounts_receivable_account_id:
         return invoice.accounts_receivable_account
     p: Partner = invoice.customer
+    # T-DEFACC: حساب الزبون نفسه في الشجرة أولاً. حساب المجموعة هو أب الذمم العام
+    # (المدينون التجاريون) — استعماله كان يخلط كل الزبائن في حساب واحد فيضيع
+    # كشف الحساب التفصيلي، مع أن للزبون حسابه المولَّد تحت الأب أصلاً.
+    p = ensure_partner_linked_account(p) or p
+    if p.linked_account_id:
+        return p.linked_account
     if p.group_id:
         g = PartnerGroup.objects.filter(pk=p.group_id).first()
         if g and g.account_receivable_id:
             return g.account_receivable
-    if p.linked_account_id:
-        return p.linked_account
     # fallback إلى إعدادات المبيعات
     ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
     if ss and ss.default_ar_account_id:
@@ -217,8 +379,55 @@ def _resolve_ar_account(invoice: SalesInvoice) -> Account:
     )
 
 
+def resolve_service_revenue_account(tenant_id: int) -> Account:
+    """T-SERVICELINE: حساب «إيرادات الخدمات» — يُطابَق من الشجرة أو يُنشأ ويُثبَّت.
+
+    كان بيع الخدمة يرتدّ إلى حساب إيراد **البضائع** متى كان الإعداد فارغاً (وهو
+    حاله في كل شركة لم تُضبط يدوياً)، فيضيع الفصل الذي هو غرض بند الخدمة أصلاً.
+    التثبيت على الإعدادات يمنع إنشاء حساب ثانٍ في المرة التالية.
+    """
+    ss = get_or_create_sales_settings(tenant_id)
+    if ss.default_revenue_account_service_id:
+        return ss.default_revenue_account_service
+
+    account = resolve_default_account(
+        tenant_id, ["4102", "42"], "Revenue", "خدمات", allow_any_of_type=False
+    )
+    if account is None:
+        parent = (
+            Account.objects.filter(
+                tenant_id=tenant_id, account_type="Revenue", is_active=True,
+            )
+            .order_by("code")
+            .first()
+        )
+        # get_or_create على (الشركة، الكود): كودٌ معطَّل بنفس الرقم موجود أصلاً
+        # يُعاد استعماله بدل أن يصطدم بقيد التفرّد.
+        account, created = Account.objects.get_or_create(
+            tenant_id=tenant_id,
+            code="4102",
+            defaults={
+                "name": "إيرادات الخدمات",
+                "account_type": "Revenue",
+                "is_active": True,
+                "parent": parent.parent if parent else None,
+            },
+        )
+        if created:
+            logger.info(
+                "sales.service_revenue_account.created tenant=%s account=%s",
+                tenant_id, account.pk,
+            )
+    ss.default_revenue_account_service = account
+    ss.save(update_fields=["default_revenue_account_service"])
+    return account
+
+
 def _default_revenue_account(tenant_id: int, *, is_service: bool = False) -> Account:
     """يفضّل الحساب من إعدادات المبيعات (منتج/خدمة)، ثم أول حساب إيرادات نشط."""
+    # T-SERVICELINE: الخدمة لها حسابها دائماً — لا ارتداد إلى إيراد البضائع.
+    if is_service:
+        return resolve_service_revenue_account(tenant_id)
     ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
     if ss:
         if is_service and ss.default_revenue_account_service_id:
@@ -298,18 +507,28 @@ def _build_cogs_journal_line_dicts(
     invoice: SalesInvoice,
     lines: list[SalesInvoiceLine],
     products_by_id: dict[int, Product],
+    quantities: dict[int, Decimal] | None = None,
 ) -> list[dict]:
-    """Dr COGS / Cr Inventory — مبالغ من متوسط التكلفة قبل الصرف (نفس منطق حركة المخزون)."""
-    ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
-    fb_cogs = ss.default_cogs_account_id if ss else None
-    fb_inv = ss.default_inventory_account_id if ss else None
+    """Dr COGS / Cr Inventory — مبالغ من متوسط التكلفة قبل الصرف (نفس منطق حركة المخزون).
+
+    quantities: كمية بديلة لكل سطر (بمعرّف السطر) — يستعملها التسليم الجزئي كي
+    تكون التكلفة على المُسلَّم فعلاً لا على كامل السطر. None = كامل الكمية.
+    """
+    # يعبّئ الحسابين الافتراضيين إن كانا فارغين بدل إسقاط الترحيل
+    ss = get_or_create_sales_settings(invoice.tenant_id)
+    fb_cogs = ss.default_cogs_account_id
+    fb_inv = ss.default_inventory_account_id
 
     pair_totals: dict[tuple[int, int], Decimal] = defaultdict(Decimal)
     for line in lines:
         p = products_by_id[line.product_id]
         if getattr(p, 'is_service', False):
             continue
-        qty = Decimal(str(line.quantity))
+        qty = Decimal(str(
+            line.quantity if quantities is None else quantities.get(line.id, 0)
+        ))
+        if qty <= 0:
+            continue
         avg = Decimal(str(p.avg_cost))
         amt = (qty * avg).quantize(DEC)
         if amt <= 0:
@@ -467,6 +686,74 @@ def _build_tax_buckets(lines: list[SalesInvoiceLine]) -> dict[int, Decimal]:
 # M2-T3 — Invoice-attached payment voucher (cash + cheques)
 # ─────────────────────────────────────────────────────────────────────────
 
+def resolve_cheques_under_collection_account(tenant_id: int) -> Account:
+    """حساب «شيكات برسم التحصيل» للشركة — مصدر واحد لقيود الشيكات الواردة.
+
+    يستهلكه ترحيل الفاتورة (شيكات مرفقة) وترحيل سند القبض (شيكات داخل السند)،
+    فلا تختلف وجهة الشيك باختلاف الشاشة التي أُدخِل منها.
+
+    الاحتياط لا يُخمّن بالكود وحده: في الشجرة الاحترافية 1106 =
+    «دفعات مقدمة للموردين»، فقبولُه بالكود كان يُهبِط أموال الشيكات في حساب
+    لا علاقة له بها. الشرط: اسم الحساب يذكر «شيكات» — وإلا فخطأ صريح.
+    """
+    ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
+    uc_acc = ss.default_cheques_under_collection_account if ss else None
+    if not uc_acc:
+        uc_acc = (
+            Account.objects.filter(
+                tenant_id=tenant_id,
+                account_type="Asset",
+                is_active=True,
+                name__icontains="شيكات",
+            )
+            .order_by("code")
+            .first()
+        )
+    if not uc_acc:
+        # T-CHQ3/هـ: كان يُرفض الترحيل ويُطلب من المستخدم تعيين الحساب بنفسه،
+        # فيقف عمله عند أول شيك في شركة شجرتها ناقصة. الحساب المعياري يُنشأ
+        # من الكود، ويبقى قابلاً للتغيير من إعدادات المبيعات.
+        from tenants.services import ensure_operational_account
+        uc_acc = ensure_operational_account(
+            ss.tenant if ss else Tenant.objects.get(pk=tenant_id), "1107")
+    if not uc_acc:
+        raise ValidationError(
+            "توجد شيكات واردة لكن تعذّر إنشاء حساب «شيكات برسم التحصيل». "
+            "عيّن `default_cheques_under_collection_account` في إعدادات المبيعات."
+        )
+    # يُثبَّت في الإعدادات كي يظهر للمالك ويغيّره إن أراد حساباً آخر.
+    if ss and not ss.default_cheques_under_collection_account_id:
+        ss.default_cheques_under_collection_account = uc_acc
+        ss.save(update_fields=["default_cheques_under_collection_account"])
+    return uc_acc
+
+
+def resolve_cheques_payable_account(tenant_id: int) -> Account:
+    """حساب «شيكات برسم الدفع» — مرآة حساب الشيكات الواردة للجانب الدائن.
+
+    الشيك الصادر ليس نقداً خرج من الصندوق بل التزام حتى يُصرف، فيُدائَن حساب
+    التزام مستقل. T-CHQ2: الحساب المبذور 2111 أولاً (مرآة 1107 للوارد) ثم
+    مطابقة الاسم للشجرات القديمة، وبلا حساب مطابق يُرفض الترحيل صراحةً بدل
+    تحميل الصندوق ما لم يخرج منه.
+    """
+    base = Account.objects.filter(
+        tenant_id=tenant_id, account_type="Liability", is_active=True,
+    )
+    acc = (
+        base.filter(code="2111").first()
+        or base.filter(name__icontains="شيكات").order_by("code").first()
+    )
+    if not acc:
+        # T-CHQ3/هـ: مرآة حساب الوارد — يُنشأ من الكود بدل ردّ المستخدم.
+        from tenants.services import ensure_operational_account
+        acc = ensure_operational_account(Tenant.objects.get(pk=tenant_id), "2111")
+    if not acc:
+        raise ValidationError(
+            "يوجد شيك صادر لكن تعذّر إنشاء حساب «شيكات برسم الدفع»."
+        )
+    return acc
+
+
 def attach_payment_voucher(
     invoice: SalesInvoice,
     *,
@@ -602,6 +889,210 @@ def attach_voucher_and_post(
     return invoice
 
 
+def _auto_settlement_note(invoice: SalesInvoice) -> str:
+    """توقيع سند التسوية النقدية التلقائي — يُطابَق عليه في البيانات القديمة."""
+    return f"تحصيل نقدي تلقائي — فاتورة {invoice.invoice_number}"
+
+
+def posted_allocations_total(invoice_id: int) -> Decimal:
+    """T-ARINT: مجموع توزيعات السندات **المرحّلة** على فاتورة (بعملة الفاتورة).
+
+    مصدر الحقيقة لما دُفع فعلاً — بخلاف `amount_paid` الذي تُصفّره مسارات إلغاء
+    الترحيل من الخارج فيفقد أي قدرة على حراسة الازدواج.
+    """
+    total = Decimal("0")
+    rows = PaymentAllocation.objects.filter(
+        invoice_id=invoice_id, payment__is_posted=True,
+    ).values_list("amount", "amount_in_invoice_currency")
+    for amount, in_inv_currency in rows:
+        total += Decimal(str(in_inv_currency if in_inv_currency is not None else amount))
+    return total.quantize(DEC)
+
+
+def guard_invoice_allocation_total(invoice: SalesInvoice, *, incoming: Decimal) -> None:
+    """T-ARINT: يمنع تجاوز مجموع التوزيعات المرحّلة إجماليَّ الفاتورة.
+
+    يُستدعى دائماً **داخل معاملة وبعد قفل صفّ الفاتورة** (select_for_update) —
+    نفس نمط `post_customer_payment` — فلا يتسلّل سندان متزامنان على نفس الفاتورة.
+    """
+    grand = Decimal(str(invoice.grand_total or 0)).quantize(DEC)
+    total = (posted_allocations_total(invoice.pk) + Decimal(str(incoming))).quantize(DEC)
+    if total > grand + DEC:
+        raise ValidationError(
+            f"مجموع التوزيعات المرحّلة على الفاتورة #{invoice.invoice_number} "
+            f"({total}) يتجاوز إجماليها ({grand}). راجع سندات القبض المرتبطة بها."
+        )
+
+
+def invoice_journal_debits_ar(invoice: SalesInvoice) -> bool:
+    """هل يحتوي قيد الفاتورة سطراً مديناً على حساب ذمم العميل؟
+
+    فواتير نقدية قديمة رُحّلت بنمط «Dr صندوق / Cr مبيعات» بلا سطر ذمم إطلاقاً؛
+    إنشاء سند قبض لها يُدائن ذمماً لم تُمدَّن (ازدواج نقدية + دائن بلا مقابل).
+    """
+    if not invoice.journal_id:
+        return False
+    try:
+        ar = _resolve_ar_account(invoice)
+    except ValidationError:
+        return False
+    return JournalLine.objects.filter(
+        journal_id=invoice.journal_id, account_id=ar.id, debit__gt=0,
+    ).exists()
+
+
+def is_auto_cash_settlement(payment: CustomerPayment, invoice: SalesInvoice) -> bool:
+    """هل هذا السند هو تسوية الفاتورة النقدية التلقائية (لا سند مستخدم)؟
+
+    العلامة الصريحة (`auto_settled_invoice`) هي المرجع. البيانات السابقة لها
+    تُطابَق بتوقيع صارم: نصّ الملاحظات الذي يولّده الكود + توزيع وحيد على هذه
+    الفاتورة نفسها — فلا يُلتقط سند مستخدم بالخطأ.
+    """
+    if payment.auto_settled_invoice_id == invoice.pk:
+        return True
+    if (payment.notes or "").strip() != _auto_settlement_note(invoice):
+        return False
+    allocs = list(payment.allocations.all())
+    return len(allocs) == 1 and allocs[0].invoice_id == invoice.pk
+
+
+def guard_invoice_payments_before_unpost(
+    invoice: SalesInvoice, *, action_label: str = "إلغاء ترحيل"
+) -> None:
+    """T-ARINT: يمنع إلغاء ترحيل فاتورة عليها سندات قبض مرحّلة.
+
+    الجذر المُصلَح: إلغاء الترحيل كان يصفّر `amount_paid` ويحذف قيود الفاتورة
+    وحدها، فيبقى سند القبض مرحّلاً وقيده يُدائن ذمم العميل بلا مقابل، ويبقى صفّ
+    التوزيع يتيماً يُدفع مرة ثانية عند أي تسوية لاحقة. مرآةُ حارس الاعتمادية
+    الموجود في `unpost_document` لحركات المخزون.
+    """
+    rows = list(
+        PaymentAllocation.objects.filter(
+            invoice=invoice, payment__is_posted=True,
+        ).select_related("payment")
+    )
+    if not rows:
+        return
+    listing = "، ".join(
+        f"سند #{r.payment_id} ({Decimal(str(r.amount)).quantize(DEC)})" for r in rows
+    )
+    logger.warning(
+        "unpost blocked for invoice %s: %d posted payment allocation(s)",
+        invoice.invoice_number, len(rows),
+    )
+    raise ValidationError(
+        f"تعذّر {action_label} الفاتورة {invoice.invoice_number}: توجد سندات قبض "
+        f"مرحّلة موزّعة عليها ({listing}). ألغِ ترحيل هذه السندات (أو احذفها) "
+        f"أولاً ثم أعد المحاولة."
+    )
+
+
+def release_auto_cash_settlement(invoice: SalesInvoice, *, user=None) -> list[int]:
+    """يحرّر سند التسوية النقدية التلقائي قبل إلغاء ترحيل فاتورته.
+
+    هذا السند من إنتاج الترحيل نفسه (`_auto_settle_cash_sale`) لا من إنشاء
+    المستخدم، فيُحذف مع قيوده ضمن نفس معاملة إلغاء الترحيل ويُعاد إنشاؤه عند
+    إعادة الترحيل — وإلا بقي معلّقاً وتضاعف عند كل إعادة ترحيل. سندات المستخدم
+    لا تُمَسّ: يحرسها `guard_invoice_payments_before_unpost`.
+    """
+    candidates = (
+        CustomerPayment.objects.filter(tenant_id=invoice.tenant_id)
+        .filter(
+            Q(auto_settled_invoice_id=invoice.pk)
+            | Q(allocations__invoice_id=invoice.pk)
+        )
+        .distinct()
+        .prefetch_related("allocations")
+    )
+    released: list[int] = []
+    for payment in candidates:
+        if not is_auto_cash_settlement(payment, invoice):
+            continue
+        if payment.is_posted:
+            unpost_document(
+                tenant_id=payment.tenant_id,
+                reference_id=payment.id,
+                journal_reference_types=["CUSTOMER_PAYMENT"],
+                user=user,
+                document_label=f"سند قبض تلقائي #{payment.id}",
+            )
+        payment_id = payment.id
+        payment.delete()  # صفوف التوزيع تُحذف تلقائياً (CASCADE)
+        released.append(payment_id)
+        logger.info(
+            "Released auto cash settlement %s of invoice %s (unpost).",
+            payment_id, invoice.invoice_number,
+        )
+    return released
+
+
+def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:
+    """التراجع عن ترحيل سند قبض: حذف قيوده وإرجاع ما سدّده من الفواتير.
+
+    المخرج الذي تُحيل إليه رسالة `guard_invoice_payments_before_unpost` — وبدونه
+    يبقى المستخدم عالقاً بين فاتورة لا تُلغى وسند لا يُتراجع عنه. يعكس أيضاً
+    `amount_paid` على كل فاتورة وُزِّع عليها (بعملة الفاتورة) فلا تبقى «مدفوعة»
+    بلا تحصيل، ويعيد شيكات السند إلى مسودة كما تفعل الفاتورة.
+    """
+    if not payment.is_posted:
+        raise ValidationError("السند غير مرحّل.")
+    with transaction.atomic():
+        payment = CustomerPayment.objects.select_for_update().get(pk=payment.pk)
+        if not payment.is_posted:
+            raise ValidationError("السند غير مرحّل.")
+        result = unpost_document(
+            tenant_id=payment.tenant_id,
+            reference_id=payment.id,
+            journal_reference_types=["CUSTOMER_PAYMENT"],
+            user=user,
+            document_label=f"سند قبض #{payment.id}",
+        )
+        allocations = list(payment.allocations.all())
+        inv_ids = sorted({a.invoice_id for a in allocations})
+        locked = {
+            inv.pk: inv
+            for inv in SalesInvoice.objects.select_for_update().filter(pk__in=inv_ids)
+        }
+        for alloc in allocations:
+            inv = locked.get(alloc.invoice_id)
+            if inv is None:
+                continue
+            back = Decimal(str(
+                alloc.amount_in_invoice_currency
+                if alloc.amount_in_invoice_currency is not None else alloc.amount
+            ))
+            inv.amount_paid = max(
+                Decimal(str(inv.amount_paid or 0)) - back, Decimal("0")
+            ).quantize(DEC)
+            inv.save(update_fields=["amount_paid"])
+        payment.is_posted = False
+        payment.journal = None
+        payment.save(update_fields=["is_posted", "journal"])
+
+        from accounting.models import Cheque
+        Cheque.objects.filter(
+            customer_payment=payment, status="Under_Collection"
+        ).update(status="Draft")
+
+        create_audit_log(
+            tenant=payment.tenant,
+            user=user,
+            action="UNPOST",
+            model_name="CustomerPayment",
+            object_id=payment.id,
+            change_details=(
+                f"Unposted customer payment {payment.id}: "
+                f"{result['journals_deleted']} journal(s), "
+                f"{len(allocations)} allocation(s) reversed"
+            ),
+        )
+    logger.info(
+        "Unposted customer payment %s (journals=%s, allocations=%s).",
+        payment.id, result["journals_deleted"], len(allocations),
+    )
+    return result
+
+
 def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
     """T-CASH2: البيع النقدي مدفوع فوراً — تسوية تلقائية فور الترحيل.
 
@@ -613,24 +1104,48 @@ def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
     البيع النقدي مديناً للأبد. لا يلمس قيد الفاتورة، فيبقى اختبار التوجيه الفرعي
     (`test_subledger_routing`) سليماً: التسوية قيد منفصل.
 
-    آمن: يقتصر على فواتير **البيع النقدية** (لا المراجيع/الآجل)، ويعتمد على
-    المتبقّي (grand − amount_paid) فلا يُسوّي مرتين عند إعادة الترحيل/الشيكات.
+    آمن: يقتصر على فواتير **البيع النقدية** (لا المراجيع/الآجل)، ويقتصر على
+    الفواتير التي مُدِّنت ذممها في قيدها فعلاً.
+
+    T-ARINT: المتبقّي (grand − amount_paid) وحده **لا يكفي** حارساً — فـ
+    `amount_paid` يُصفَّر من الخارج عند إلغاء الترحيل، فكان كل إعادة ترحيل تُنشئ
+    سنداً إضافياً يُدائن الذمم مرّة أخرى. الحارسان الفعليان:
+      1. وجود أي توزيع سند **مرحّل** على الفاتورة ⇒ سُوِّيت فعلاً، لا تُسوَّ ثانيةً.
+      2. خلوّ قيد الفاتورة من مدين على حساب ذمم العميل (نمط قديم سوّى الصندوق
+         داخل قيدها) ⇒ سندٌ هنا يُدائن ذمماً لم تُمدَّن.
     إن غاب حساب الصندوق يُسجَّل تحذير ويُتخطّى دون كسر الترحيل.
     """
     if invoice.invoice_type != SalesInvoice.INVOICE_CASH:
         return
     if (invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE) != SalesInvoice.INVOICE_KIND_SALE:
         return
+    settled = posted_allocations_total(invoice.pk)
+    if settled > 0:
+        logger.info(
+            "Cash sale %s already has posted payment allocations (%s) — "
+            "auto-settlement skipped.", invoice.invoice_number, settled,
+        )
+        return
     remaining = (
         Decimal(str(invoice.grand_total or 0)) - Decimal(str(invoice.amount_paid or 0))
     ).quantize(DEC)
     if remaining <= DEC:
         return
+    if not invoice_journal_debits_ar(invoice):
+        logger.warning(
+            "Cash sale %s has no AR debit in its journal (legacy direct-cash "
+            "posting) — auto-settlement skipped to avoid crediting untouched AR.",
+            invoice.invoice_number,
+        )
+        return
     # حساب الصندوق: حساب الفاتورة النقدي → النقدي المرفق → افتراضي الإعدادات.
     cash_account_id = invoice.cash_or_bank_account_id or invoice.attached_cash_account_id
     if not cash_account_id:
-        ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
-        cash_account_id = ss.default_cash_account_id if ss else None
+        # T-DEFACC: مصدر الصندوق الافتراضي واحد لكل المعاملات.
+        from accounting.services import resolve_default_cash_account
+
+        default_cash = resolve_default_cash_account(invoice.tenant_id)
+        cash_account_id = default_cash.pk if default_cash else None
     if not cash_account_id:
         logger.warning(
             "Cash sale %s posted without a cash account — customer left as debtor "
@@ -646,7 +1161,10 @@ def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
         currency_id=invoice.currency_id,
         exchange_rate=invoice.exchange_rate or Decimal("1"),
         cash_or_bank_account_id=cash_account_id,
-        notes=f"تحصيل نقدي تلقائي — فاتورة {invoice.invoice_number}",
+        # T-ARINT: العلامة تجعل السند مملوكاً للفاتورة — يُحرَّر معها عند إلغاء
+        # ترحيلها بدل أن يبقى معلّقاً ويتكرّر عند إعادته.
+        auto_settled_invoice=invoice,
+        notes=_auto_settlement_note(invoice),
     )
     PaymentAllocation.objects.create(
         tenant_id=invoice.tenant_id,
@@ -655,6 +1173,17 @@ def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
         amount=remaining,
     )
     post_customer_payment(payment, user=user)
+    from core.activity import log_activity
+    log_activity(
+        action="payment", entity_type="customer_payment", entity_id=payment.id,
+        entity_label=f"#{payment.id}", description="سند قبض نقدي تلقائي",
+        partner_ids=[payment.partner_id], tenant=invoice.tenant, user=user,
+    )
+    log_activity(
+        action="post", entity_type="customer_payment", entity_id=payment.id,
+        entity_label=f"#{payment.id}", description="ترحيل سند قبض نقدي تلقائي",
+        partner_ids=[payment.partner_id], tenant=invoice.tenant, user=user,
+    )
     logger.info(
         "Auto-settled cash sale %s via customer payment %s (amount %s).",
         invoice.invoice_number, payment.id, remaining,
@@ -745,6 +1274,10 @@ def post_sales_invoice(
         # منع فاتورة الخسارة (إعداد اختياري، على مستوى السطر) — بعد قفل الأصناف والإجماليات.
         guard_loss_invoice(invoice, lines, products_by_id)
 
+        # T-RESERVEGUARD: الكمية المحجوزة لطلبية زبون آخر ليست متاحة للبيع —
+        # يُفحص بعد قفل الأصناف كي لا تسبق فاتورتان بعضهما على نفس الحجز.
+        guard_reserved_stock(invoice, lines, products_by_id)
+
         journal_lines: list[dict] = []
 
         # ── M2-T3: Attached payment voucher (cash + cheques) ─────────────────
@@ -814,28 +1347,7 @@ def post_sales_invoice(
 
         # تسوية الشيكات عبر الذمم (مدين شيكات برسم التحصيل / دائن ذمم)
         if cheques_total > 0:
-            ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
-            uc_acc = (
-                ss.default_cheques_under_collection_account if ss else None
-            )
-            if not uc_acc:
-                # Fall back to any Asset account named «شيكات…» or coded 1106.
-                from django.db.models import Q
-                uc_acc = (
-                    Account.objects.filter(
-                        tenant_id=invoice.tenant_id,
-                        account_type="Asset",
-                        is_active=True,
-                    )
-                    .filter(Q(code__startswith="1106") | Q(name__icontains="شيكات"))
-                    .first()
-                )
-            if not uc_acc:
-                raise ValidationError(
-                    "فاتورة بها شيكات مرفقة لكن لا يوجد حساب «شيكات برسم التحصيل». "
-                    "عيّن `default_cheques_under_collection_account` في إعدادات "
-                    "المبيعات، أو أنشئ حساب Asset بكود يبدأ بـ 1106."
-                )
+            uc_acc = resolve_cheques_under_collection_account(invoice.tenant_id)
             journal_lines.append(
                 {
                     "account": uc_acc.id,
@@ -1027,6 +1539,29 @@ def post_sales_invoice(
                     )
             else:
                 _post_stock_out_for_invoice(invoice, lines, user=user)
+            # البضاعة خرجت مع الترحيل ⇒ الفاتورة مسلَّمة بالكامل، وتُوثَّق
+            # بإرسالية تلقائية بكامل الكمية (مرآة إرسالية الشراء التلقائية).
+            for line in lines:
+                if getattr(line.product, "is_service", False):
+                    continue
+                line.delivered_quantity = line.quantity
+            SalesInvoiceLine.objects.bulk_update(lines, ["delivered_quantity"])
+            _create_auto_delivery_document(invoice, lines)
+        sync_invoice_delivery_status(invoice, lines)
+
+        # الوحدة المُرقَّمة تُستهلَك بترحيل فاتورتها لا بخروجها من المستودع: البيع
+        # هو ما يُسند الوحدة لزبون، ويبقى السؤال «أي وحدة ذهبت لمن» مُجاباً حتى
+        # حين يتأخّر التسليم (`stock_on_post=False`). ومرجع البيع يعكسها: البضاعة
+        # رجعت للمخزن (RETURN_IN) فوحداتها تعود «في المخزن» بترتيب استهلاكها.
+        if kind == SalesInvoice.INVOICE_KIND_SALE:
+            consume_sales_serials(invoice, lines)
+            # THA-24: بطاقة الكفالة نسخةٌ تُصرف للوحدة التي ذهبت للزبون، فلا
+            # تُنشأ إلا بعد استهلاك الوحدات أعلاه. صفر أثر لشركة غير مرخّصة.
+            from after_sales.services import create_auto_warranty_cards
+
+            create_auto_warranty_cards(invoice)
+        elif kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+            restore_returned_sales_serials(invoice, lines)
 
         create_audit_log(
             tenant=invoice.tenant,
@@ -1108,67 +1643,576 @@ def issue_stock_from_invoice(invoice: SalesInvoice, *, user=None):
             raise ValidationError(f"خطأ في إذن الصرف لصنف {line.product.sku}: {e}")
 
 
-def deliver_delivery_order(delivery: DeliveryOrder, *, user=None) -> DeliveryOrder:
-    """تسليم أمر إخراج وخصم المخزون إذا كانت الفاتورة بدون خصم عند الترحيل + قيد COGS عندها فقط."""
-    inv = delivery.invoice
-    if delivery.status == DeliveryOrder.STATUS_DELIVERED:
-        raise ValidationError("تم التسليم مسبقاً.")
-    if inv.status != SalesInvoice.STATUS_POSTED:
+def _create_auto_delivery_document(
+    invoice: SalesInvoice, lines: list[SalesInvoiceLine],
+) -> DeliveryOrder | None:
+    """إرسالية تلقائية بكامل الكمية للفاتورة التي تخصم المخزون عند الترحيل.
+
+    توثيق فقط — لا حركة مخزون ولا قيد هنا (الترحيل أنجزهما)، فلا ازدواج.
+    """
+    goods = [l for l in lines if not getattr(l.product, "is_service", False)]
+    if not goods:
+        return None
+    from django.utils import timezone
+
+    delivery = DeliveryOrder.objects.create(
+        tenant=invoice.tenant,
+        branch=invoice.branch,
+        delivery_number=next_delivery_number(invoice.tenant_id, invoice.branch),
+        delivery_date=invoice.invoice_date,
+        invoice=invoice,
+        auto_created=True,
+        status=DeliveryOrder.STATUS_DELIVERED,
+        delivered_at=timezone.now(),
+        notes="إرسالية تلقائية مع ترحيل الفاتورة",
+    )
+    for line in goods:
+        DeliveryOrderLine.objects.create(
+            tenant=invoice.tenant,
+            delivery=delivery,
+            invoice_line=line,
+            product=line.product,
+            quantity=line.quantity,
+        )
+    return delivery
+
+
+def _resolve_delivery_warehouse(tenant_id: int, raw: dict):
+    """مستودع سطر الإرسالية — يُتحقَّق من تبعيته للشركة (مرآة استلام الشراء).
+
+    اختياري خلافاً للشراء: حركة الخروج عند ترحيل الفاتورة بلا مستودع أصلاً، وشركة
+    بلا مستودعات يجب أن تبقى قادرة على التسليم. المُرسَل يُعتمد ويُثبَّت على السطر.
+    """
+    from inventory.models import Warehouse
+
+    wh_id = raw.get("warehouse_id")
+    if not wh_id:
+        return None
+    wh = Warehouse.objects.filter(pk=wh_id, tenant_id=tenant_id).first()
+    if wh is None:
+        raise ValidationError(f"المستودع المحدد ({wh_id}) غير موجود في هذه الشركة.")
+    return wh
+
+
+def _delivery_movement_type(invoice: SalesInvoice) -> str:
+    """اتجاه حركة المخزون عند التسليم — نفس قاعدة الترحيل (نوع الفاتورة يحكمه)."""
+    kind = invoice.invoice_kind
+    if kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+        return "RETURN_IN"
+    if kind == SalesInvoice.INVOICE_KIND_PURCHASE_RETURN:
+        return "RETURN_OUT"
+    return "OUT"
+
+
+def sync_invoice_delivery_status(
+    invoice: SalesInvoice,
+    lines: list[SalesInvoiceLine] | None = None,
+    *,
+    save: bool = True,
+) -> str:
+    """يشتقّ حالة التسليم من الكميات المسلَّمة — مصدر حقيقة واحد لا حقل يدوي.
+
+    بنود الخدمات لا تُسلَّم مادياً فتُستثنى؛ فاتورة خدمات صرفة تُعدّ مسلَّمة.
+    """
+    if lines is None:
+        lines = list(invoice.lines.select_related("product"))
+    goods = [l for l in lines if not getattr(l.product, "is_service", False)]
+    if not goods:
+        new_status = SalesInvoice.DELIVERY_FULL
+    elif all(
+        Decimal(str(l.delivered_quantity or 0)) >= Decimal(str(l.quantity or 0))
+        for l in goods
+    ):
+        new_status = SalesInvoice.DELIVERY_FULL
+    elif any(Decimal(str(l.delivered_quantity or 0)) > 0 for l in goods):
+        new_status = SalesInvoice.DELIVERY_PARTIAL
+    else:
+        new_status = SalesInvoice.DELIVERY_NOT
+    if save and invoice.delivery_status != new_status:
+        invoice.delivery_status = new_status
+        invoice.save(update_fields=["delivery_status"])
+    else:
+        invoice.delivery_status = new_status
+    return new_status
+
+
+def next_delivery_number(tenant_id: int, branch=None) -> str:
+    """رقم إرسالية البيع التالي — عبر دفاتر الترقيم المركزية (DN-0001)."""
+    from accounting.services import next_document_number
+
+    seq = next_document_number(
+        tenant_id, "delivery_note", branch_id=branch.id if branch else None,
+    )
+    return f"DN-{seq:04d}"
+
+
+def deliver_invoice_lines(
+    invoice: SalesInvoice,
+    *,
+    lines,
+    user=None,
+    notes: str = "",
+    delivery: DeliveryOrder | None = None,
+    delivery_date=None,
+) -> DeliveryOrder:
+    """تسليم بنود فاتورة بيع للعميل (إرسالية) — خصم المخزون وقيد التكلفة للمُسلَّم فقط.
+
+    lines: قائمة [{'line_id': int, 'quantity': Decimal, 'warehouse_id': int|None}].
+    الكمية أكبر من المتبقي مرفوضة، فإعادة الإرسال لا تُكرّر الخصم. المستودع
+    اختياري ويُثبَّت على الحركة والسطر (مرآة استلام الشراء).
+
+    حصري للفواتير المرحّلة التي **لا** تخصم المخزون عند الترحيل — الفاتورة التي
+    تخصمه عند الترحيل سُلّمت بالكامل لحظتها (مرآة استلام فاتورة الشراء).
+
+    العملية ذرّية: حركات المخزون + قيد التكلفة + بنود الإرسالية معاً أو لا شيء.
+    """
+    if invoice.status != SalesInvoice.STATUS_POSTED:
         raise ValidationError("الفاتورة غير مرحّلة.")
+    if invoice.stock_on_post:
+        raise ValidationError(
+            "هذه الفاتورة تخصم المخزون عند الترحيل — بنودها مسلَّمة بالفعل."
+        )
+    if not lines:
+        raise ValidationError("حدّد البنود والكميات المراد تسليمها.")
+
+    mv_type = _delivery_movement_type(invoice)
+    is_return = invoice.invoice_kind in (
+        SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        SalesInvoice.INVOICE_KIND_PURCHASE_RETURN,
+    )
 
     with transaction.atomic():
-        lines = list(
-            inv.lines.select_related(
+        inv_lines = list(
+            invoice.lines.select_related(
                 "product",
                 "product__category",
                 "product__category__cogs_account",
                 "product__category__inventory_account",
             )
         )
-        products_by_id = _lock_products_for_lines(lines)
-        for line in lines:
+        products_by_id = _lock_products_for_lines(inv_lines)
+        for line in inv_lines:
             line.product = products_by_id[line.product_id]
+        lines_by_id = {l.id: l for l in inv_lines}
 
-        if not inv.stock_on_post:
-            _post_stock_out_for_invoice(inv, lines, user=user)
-            cogs_rows = _build_cogs_journal_line_dicts(inv, lines, products_by_id)
-            if cogs_rows:
-                post_journal(
-                    tenant_id=inv.tenant_id,
-                    transaction_date=inv.invoice_date,
-                    reference_type="SALES_DELIVERY_COGS",
-                    reference_id=inv.id,
-                    description=(f"تكلفة مبيعات عند التسليم — {inv.invoice_number}")[:500],
-                    lines_data=cogs_rows,
-                    currency=inv.currency,
-                    exchange_rate=inv.exchange_rate,
-                    user=user,
-                    branch_id=inv.branch_id,
+        delivered_now: dict[int, Decimal] = {}
+        warehouse_by_line: dict[int, object] = {}
+        for raw in lines:
+            line_id = raw.get("line_id")
+            line = lines_by_id.get(int(line_id)) if line_id is not None else None
+            if not line:
+                raise ValidationError(f"البند {line_id} لا ينتمي لهذه الفاتورة.")
+            try:
+                qty = Decimal(str(raw.get("quantity", 0)))
+            except Exception:
+                raise ValidationError(f"كمية غير صالحة للبند «{line.product}».")
+            if qty <= 0:
+                continue
+            if getattr(line.product, "is_service", False):
+                raise ValidationError(
+                    f"البند «{line.product}» خدمة — لا يُسلَّم من المخزن."
                 )
+            ordered = Decimal(str(line.quantity or 0))
+            already = Decimal(str(line.delivered_quantity or 0))
+            remaining = ordered - already
+            if qty > remaining:
+                raise ValidationError(
+                    f"البند «{line.product}»: الكمية المطلوب تسليمها ({qty}) "
+                    f"تتجاوز المتبقي ({remaining})."
+                )
+            delivered_now[line.id] = delivered_now.get(line.id, Decimal("0")) + qty
+            # سطر مُرسَل مرتين: الكميات تُجمع والمستودع الأخير المحدَّد هو المعتمد.
+            warehouse_by_line[line.id] = (
+                _resolve_delivery_warehouse(invoice.tenant_id, raw)
+                or warehouse_by_line.get(line.id)
+            )
+
+        if not delivered_now:
+            raise ValidationError("لا يوجد ما يُسلَّم — تحقق من الكميات.")
+
+        if delivery is None:
+            delivery = DeliveryOrder.objects.create(
+                tenant=invoice.tenant,
+                branch=invoice.branch,
+                delivery_number=next_delivery_number(invoice.tenant_id, invoice.branch),
+                delivery_date=delivery_date or invoice.invoice_date,
+                invoice=invoice,
+                notes=(notes or "")[:500],
+            )
+        elif delivery.status == DeliveryOrder.STATUS_DELIVERED:
+            raise ValidationError("تم تسليم هذه الإرسالية مسبقاً.")
+        elif not delivery.delivery_number:
+            # إرسالية قديمة أُنشئت قبل الترقيم — تُرقَّم عند تسليمها.
+            delivery.delivery_number = next_delivery_number(
+                invoice.tenant_id, invoice.branch,
+            )
+            delivery.delivery_date = delivery.delivery_date or invoice.invoice_date
+            delivery.save(update_fields=["delivery_number", "delivery_date"])
+
+        for line_id, qty in delivered_now.items():
+            line = lines_by_id[line_id]
+            warehouse = warehouse_by_line.get(line_id)
+            try:
+                movement = record_stock_movement(
+                    product=line.product,
+                    movement_type=mv_type,
+                    quantity=qty,
+                    reference_type="SALE",
+                    reference_id=invoice.id,
+                    partner=invoice.customer,
+                    movement_date=invoice.invoice_date,
+                    notes=(
+                        f"تسليم إرسالية {delivery.delivery_number or f'#{delivery.id}'} "
+                        f"— فاتورة {invoice.invoice_number}"
+                    ),
+                    tenant=invoice.tenant,
+                    branch=invoice.branch,
+                    warehouse=warehouse,
+                )
+            except ValidationError as e:
+                raise ValidationError(f"مخزون الصنف {line.product.sku}: {e}")
+            DeliveryOrderLine.objects.create(
+                tenant=invoice.tenant,
+                delivery=delivery,
+                invoice_line=line,
+                product=line.product,
+                warehouse=warehouse,
+                quantity=qty,
+                movement=movement,
+            )
+            line.delivered_quantity = (
+                Decimal(str(line.delivered_quantity or 0)) + qty
+            )
+            line.save(update_fields=["delivered_quantity"])
+
+        # قيد تكلفة المبيعات للكمية المسلَّمة في هذه الإرسالية وحدها.
+        cogs_rows = _build_cogs_journal_line_dicts(
+            invoice, inv_lines, products_by_id, quantities=delivered_now,
+        )
+        cogs_journal = None
+        if cogs_rows:
+            if is_return:
+                for row in cogs_rows:
+                    row["debit"], row["credit"] = row["credit"], row["debit"]
+            cogs_journal = post_journal(
+                tenant_id=invoice.tenant_id,
+                transaction_date=invoice.invoice_date,
+                reference_type="SALES_DELIVERY_COGS",
+                reference_id=invoice.id,
+                description=(
+                    f"تكلفة مبيعات عند التسليم — {invoice.invoice_number} "
+                    f"(إرسالية {delivery.delivery_number or f'#{delivery.id}'})"
+                )[:500],
+                lines_data=cogs_rows,
+                currency=invoice.currency,
+                exchange_rate=invoice.exchange_rate,
+                user=user,
+                branch_id=invoice.branch_id,
+                # كل إرسالية قيد تكلفة مستقل — بلا هذا يُعاد أول قيد للإرسالية الثانية.
+                idempotent=False,
+            )
 
         delivery.status = DeliveryOrder.STATUS_DELIVERED
         from django.utils import timezone
 
         delivery.delivered_at = timezone.now()
-        delivery.save(update_fields=["status", "delivered_at"])
+        delivery.journal = cogs_journal
+        delivery.save(update_fields=["status", "delivered_at", "journal"])
+
+        sync_invoice_delivery_status(invoice, inv_lines)
+
         create_audit_log(
-            tenant=inv.tenant,
+            tenant=invoice.tenant,
             user=user,
             action="UPDATE",
             model_name="DeliveryOrder",
             object_id=delivery.id,
-            change_details=f"Delivered DO for invoice {inv.invoice_number}",
+            change_details=(
+                f"Delivered {len(delivered_now)} line(s) for invoice "
+                f"{invoice.invoice_number} → {invoice.delivery_status}"
+            ),
         )
+
+    logger.info(
+        "Sales invoice #%s delivery #%s: %d line(s), delivery_status=%s",
+        invoice.id, delivery.id, len(delivered_now), invoice.delivery_status,
+    )
     return delivery
 
 
+def resolve_goods_delivered_unbilled_account(tenant_id: int) -> Account:
+    """حساب «بضاعة مسلَّمة لم تُفوتَر» (كود 1108) — مرآة وسيط الاستلام 2106.
+
+    يستقبل تكلفة البضاعة التي خرجت بسند تسليم مستقل قبل فوترتها، فحين تُفوتَر
+    لاحقاً يُدائنه قيدُ تكلفة الفاتورة فيُصفَّر. يُنشأ تلقائياً إن لم يوجد.
+    """
+    acc = Account.objects.filter(tenant_id=tenant_id, code="1108").first()
+    if acc:
+        return acc
+    parent = Account.objects.filter(tenant_id=tenant_id, code="11").first()
+    acc, _ = Account.objects.get_or_create(
+        tenant_id=tenant_id,
+        code="1108",
+        defaults={
+            "name": "بضاعة مسلَّمة لم تُفوتَر",
+            "account_type": "Asset",
+            "parent": parent,
+            "is_active": True,
+        },
+    )
+    return acc
+
+
+def create_standalone_delivery_note(
+    tenant, *, partner, lines, branch=None, user=None, delivery_date=None,
+    notes="", customer_ref="", delivery=None,
+):
+    """سند تسليم مستقل — بضاعة خرجت قبل فوترتها (مرآة سند الاستلام).
+
+    lines: [{'product_id': int, 'quantity': Decimal, 'warehouse_id': int|None}]
+    القيد: مدين «بضاعة مسلَّمة لم تُفوتَر» (1108) / دائن المخزون بمتوسط التكلفة —
+    لا إيراد هنا، الإيراد يأتي مع الفاتورة لاحقاً.
+    """
+    import datetime
+    from django.utils import timezone
+
+    if not lines:
+        raise ValidationError("حدّد الأصناف والكميات المسلَّمة.")
+    if partner is None:
+        raise ValidationError("حدّد العميل لسند التسليم المستقل.")
+
+    movement_date = delivery_date or datetime.date.today()
+    tenant_id = getattr(tenant, "TenantID", tenant)
+    products = {
+        p.id: p
+        for p in Product.objects.select_for_update()
+        .select_related("category", "category__inventory_account")
+        .filter(
+            tenant_id=tenant_id,
+            pk__in=[row.get("product_id") for row in lines if row.get("product_id")],
+        )
+    }
+
+    planned = []
+    for raw in lines:
+        product = products.get(int(raw.get("product_id") or 0))
+        if product is None:
+            raise ValidationError(f"الصنف {raw.get('product_id')} غير موجود في هذه الشركة.")
+        if getattr(product, "is_service", False):
+            raise ValidationError(f"الصنف «{product}» خدمة — لا يُسلَّم من المخزن.")
+        try:
+            qty = Decimal(str(raw.get("quantity", 0)))
+        except Exception:
+            raise ValidationError(f"كمية غير صالحة للصنف «{product}».")
+        if qty <= 0:
+            continue
+        planned.append({
+            "product": product,
+            "qty": qty,
+            "cost": (qty * Decimal(str(product.avg_cost or 0))).quantize(DEC),
+            "warehouse": _resolve_delivery_warehouse(tenant_id, raw),
+        })
+
+    if not planned:
+        raise ValidationError("لا يوجد ما يُسلَّم — تحقق من الكميات.")
+
+    total_cost = sum((p["cost"] for p in planned), Decimal("0"))
+
+    with transaction.atomic():
+        doc = delivery
+        if doc is None:
+            doc = DeliveryOrder.objects.create(
+                tenant=tenant,
+                branch=branch,
+                delivery_number=next_delivery_number(tenant_id, branch),
+                delivery_date=movement_date,
+                invoice=None,
+                partner=partner,
+                customer_ref=(customer_ref or "")[:100],
+                status=DeliveryOrder.STATUS_DELIVERED,
+                delivered_at=timezone.now(),
+                notes=(notes or "")[:500],
+            )
+        else:
+            doc.lines.all().delete()
+            doc.delivery_date = movement_date
+            doc.partner = partner
+            doc.customer_ref = (customer_ref or "")[:100]
+            doc.notes = (notes or "")[:500]
+            doc.save(update_fields=[
+                "delivery_date", "partner", "customer_ref", "notes",
+            ])
+
+        for p in planned:
+            try:
+                movement = record_stock_movement(
+                    product=p["product"],
+                    movement_type="OUT",
+                    quantity=p["qty"],
+                    reference_type="DELIVERY_NOTE",
+                    reference_id=doc.id,
+                    partner=partner,
+                    movement_date=movement_date,
+                    notes=f"سند تسليم {doc.delivery_number}",
+                    tenant=tenant,
+                    branch=branch,
+                    warehouse=p["warehouse"],
+                )
+            except ValidationError as e:
+                raise ValidationError(f"مخزون الصنف {p['product'].sku}: {e}")
+            DeliveryOrderLine.objects.create(
+                tenant=tenant,
+                delivery=doc,
+                invoice_line=None,
+                product=p["product"],
+                warehouse=p["warehouse"],
+                quantity=p["qty"],
+                movement=movement,
+            )
+
+        journal = None
+        if total_cost > 0:
+            ss = get_or_create_sales_settings(tenant_id)
+            clearing = resolve_goods_delivered_unbilled_account(tenant_id)
+            rows = []
+            for p in planned:
+                if p["cost"] <= 0:
+                    continue
+                cat = p["product"].category
+                inv_id = (
+                    cat.inventory_account_id
+                    if cat and cat.inventory_account_id
+                    else ss.default_inventory_account_id
+                )
+                if not inv_id:
+                    raise ValidationError(
+                        f"الصنف «{p['product']}»: عيّن حساب المخزون في فئة المنتج "
+                        "أو حساباً افتراضياً في إعدادات المبيعات."
+                    )
+                rows.append({
+                    "account": inv_id, "partner": None,
+                    "debit": Decimal("0"), "credit": p["cost"],
+                    "description": f"تخفيض مخزون — سند تسليم {doc.delivery_number}"[:500],
+                })
+            rows.insert(0, {
+                "account": clearing.id, "partner": None,
+                "debit": total_cost, "credit": Decimal("0"),
+                "description": f"بضاعة مسلَّمة لم تُفوتَر — {doc.delivery_number}"[:500],
+            })
+            journal = post_journal(
+                tenant_id=tenant_id,
+                transaction_date=movement_date,
+                reference_type="DELIVERY_NOTE",
+                reference_id=doc.id,
+                description=f"سند تسليم {doc.delivery_number} | {partner.name}"[:500],
+                lines_data=rows,
+                user=user,
+                branch_id=branch.id if branch else None,
+                idempotent=False,
+            )
+            doc.journal = journal
+            doc.save(update_fields=["journal"])
+
+    logger.info(
+        "Standalone delivery note %s: %d line(s), cost=%s, journal=%s",
+        doc.delivery_number, len(planned), total_cost, journal.id if journal else None,
+    )
+    return doc
+
+
+def void_delivery_note(delivery: DeliveryOrder, *, user=None) -> dict:
+    """يعكس أثر إرسالية بيع واحدة: حركاتها وقيدها وكمياتها المسلَّمة — دون غيرها.
+
+    التتبّع عبر `DeliveryOrderLine.movement`، فلا تُمسّ إرساليات أخرى لنفس الفاتورة.
+    """
+    from accounting.models import JournalHeader
+    from inventory.services import _recompute_product_stock
+
+    with transaction.atomic():
+        lines = list(delivery.lines.select_related("invoice_line", "product", "movement"))
+        movement_ids = [l.movement_id for l in lines if l.movement_id]
+        products = {l.product_id: l.product for l in lines if l.product_id}
+
+        if movement_ids:
+            StockMovement.objects.filter(pk__in=movement_ids).delete()
+        if delivery.journal_id:
+            JournalHeader.objects.filter(pk=delivery.journal_id).delete()
+
+        invoice = delivery.invoice
+        if invoice is not None:
+            for line in lines:
+                if line.invoice_line_id is None:
+                    continue
+                inv_line = line.invoice_line
+                inv_line.delivered_quantity = max(
+                    Decimal("0"),
+                    Decimal(str(inv_line.delivered_quantity or 0))
+                    - Decimal(str(line.quantity or 0)),
+                )
+                inv_line.save(update_fields=["delivered_quantity"])
+
+        number = delivery.delivery_number or f"#{delivery.id}"
+        delivery.delete()
+
+        for product in products.values():
+            _recompute_product_stock(product)
+
+        if invoice is not None:
+            sync_invoice_delivery_status(invoice)
+
+    logger.info(
+        "Delivery note %s voided: %d movement(s) reversed", number, len(movement_ids),
+    )
+    return {"movements_reversed": len(movement_ids)}
+
+
+def remaining_delivery_lines(invoice: SalesInvoice) -> list[dict]:
+    """بنود الفاتورة مع (المفوتر · المسلَّم · المتبقي) — يغذّي نافذة التسليم.
+
+    مصدر حقيقة واحد مع حارس التسليم، فلا تعرض الواجهة ما يرفضه الخادم.
+    """
+    rows: list[dict] = []
+    for line in invoice.lines.select_related("product"):
+        if getattr(line.product, "is_service", False):
+            continue
+        ordered = Decimal(str(line.quantity or 0))
+        delivered = Decimal(str(line.delivered_quantity or 0))
+        rows.append({
+            "line_id": line.id,
+            "product": line.product_id,
+            "product_name": str(line.product),
+            "quantity": ordered,
+            "delivered_quantity": delivered,
+            "remaining_quantity": max(Decimal("0"), ordered - delivered),
+        })
+    return rows
+
+
+def deliver_delivery_order(delivery: DeliveryOrder, *, user=None) -> DeliveryOrder:
+    """تسليم إرسالية قائمة بكامل المتبقي من بنود فاتورتها (المسار القديم).
+
+    يُفوِّض لـ`deliver_invoice_lines` كي لا يوجد منطق تسليم مكرّر.
+    """
+    inv = delivery.invoice
+    if delivery.status == DeliveryOrder.STATUS_DELIVERED:
+        raise ValidationError("تم التسليم مسبقاً.")
+    lines = [
+        {"line_id": r["line_id"], "quantity": r["remaining_quantity"]}
+        for r in remaining_delivery_lines(inv)
+        if r["remaining_quantity"] > 0
+    ]
+    return deliver_invoice_lines(inv, lines=lines, user=user, delivery=delivery)
+
+
 def _resolve_ar_account_for_partner(partner: Partner) -> Account:
+    # T-DEFACC: نفس ترتيب `_resolve_ar_account` — حساب الزبون قبل أب المجموعة.
+    partner = ensure_partner_linked_account(partner) or partner
+    if partner.linked_account_id:
+        return partner.linked_account
     if partner.group_id:
         g = PartnerGroup.objects.filter(pk=partner.group_id).first()
         if g and g.account_receivable_id:
             return g.account_receivable
-    if partner.linked_account_id:
-        return partner.linked_account
     # Fallback to sales settings (matches _resolve_ar_account)
     ss = SalesSettings.objects.filter(tenant_id=partner.tenant_id).first()
     if ss and ss.default_ar_account_id:
@@ -1196,8 +2240,11 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         PaymentAllocation.objects.filter(payment=payment).aggregate(t=Sum("amount"))["t"]
         or Decimal("0")
     )
-    if allocated != payment.amount:
-        raise ValidationError("مجموع التوزيعات يجب أن يساوي مبلغ الدفعة.")
+    # T-ONACC: التوزيع اختياري — ما لم يُوزَّع يُرحَّل «على الحساب» (Dr صندوق /
+    # Cr ذمم العميل) فيؤثّر على كشف حسابه بلا تسديد أي فاتورة، ويُوزَّع لاحقاً
+    # عبر allocate_customer_payment. الممنوع فقط: توزيع يتجاوز مبلغ الدفعة.
+    if allocated > payment.amount + DEC:
+        raise ValidationError("مجموع التوزيعات لا يجوز أن يتجاوز مبلغ الدفعة.")
 
     # ── التحقق من التوزيعات + تحويل العملات مسبقاً ──
     payment_currency_id = payment.currency_id
@@ -1231,6 +2278,50 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         alloc_conversions.append((alloc, amount_in_inv_curr, conv_rate))
 
     ar = _resolve_ar_account_for_partner(payment.partner)
+
+    # ── شيكات داخل السند ─────────────────────────────────────────────────
+    # مبلغ السند = نقد + شيكات. الجزء المُغطّى بشيكات لا يدخل الصندوق بل
+    # «شيكات برسم التحصيل» حتى تُحصَّل. الاستهلاك بالترتيب على قيود السند
+    # (قيد لكل فاتورة ثم قيد «على الحساب») كي يبقى كل قيد متوازناً وحده.
+    payment_cheques = list(payment.cheques.all()) if payment.pk else []
+    cheques_pool = sum(
+        (Decimal(str(c.amount or 0)) for c in payment_cheques), Decimal("0")
+    ).quantize(DEC)
+    if cheques_pool > Decimal(str(payment.amount)) + DEC:
+        raise ValidationError(
+            f"مجموع الشيكات ({cheques_pool}) يتجاوز مبلغ السند ({payment.amount})."
+        )
+    uc_account = (
+        resolve_cheques_under_collection_account(payment.tenant_id)
+        if cheques_pool > 0 else None
+    )
+
+    def _debit_lines(amount: Decimal, description: str) -> list[dict]:
+        """يقسم الجانب المدين بين الصندوق والشيكات برسم التحصيل."""
+        nonlocal cheques_pool
+        from_cheques = min(cheques_pool, amount).quantize(DEC)
+        cheques_pool = (cheques_pool - from_cheques).quantize(DEC)
+        cash_part = (amount - from_cheques).quantize(DEC)
+        rows: list[dict] = []
+        if cash_part > 0:
+            rows.append({
+                # T-CASH2: سطر الصندوق لا يَحمل الشريك (لا يُحسب على ذمم العميل).
+                "account": payment.cash_or_bank_account_id,
+                "partner": None,
+                "debit": cash_part,
+                "credit": Decimal("0"),
+                "description": description,
+            })
+        if from_cheques > 0:
+            rows.append({
+                # شيكات برسم التحصيل أصل لا حساب رقابي للذمم — بلا شريك.
+                "account": uc_account.id,
+                "partner": None,
+                "debit": from_cheques,
+                "credit": Decimal("0"),
+                "description": f"شيكات — {description}",
+            })
+        return rows
 
     with transaction.atomic():
         # T-SPLIT: قفل صفّ الدفعة وإعادة فحص الترحيل — إذ نُنشئ قيداً لكل فاتورة
@@ -1266,6 +2357,9 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                     f"مبلغ التوزيع المحوّل ({total_increment} بعملة الفاتورة) "
                     f"يتجاوز المتبقي على الفاتورة #{inv.invoice_number} ({remaining})."
                 )
+            # T-ARINT: حارس ثانٍ مستقلّ عن amount_paid (يُصفَّر من الخارج) —
+            # مجموع توزيعات السندات المرحّلة نفسه لا يتجاوز إجمالي الفاتورة.
+            guard_invoice_allocation_total(inv, incoming=total_increment)
 
         # ── بناء أسطر القيد المحاسبي ──
         # فرق العملة (I4-03): إذا اختلفت عملة الدفعة عن عملة الفاتورة نحسب
@@ -1327,16 +2421,9 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             cash_amt = cash_by_invoice[inv_id].quantize(DEC)
             ar_amt = ar_by_invoice[inv_id].quantize(DEC)
             forex_diff = (cash_amt - ar_amt).quantize(DEC)  # >0 ربح، <0 خسارة
-            inv_lines: list[dict] = [
-                {
-                    # T-CASH2: سطر الصندوق لا يَحمل الشريك (لا يُحسب على ذمم العميل).
-                    "account": payment.cash_or_bank_account_id,
-                    "partner": None,
-                    "debit": cash_amt,
-                    "credit": Decimal("0"),
-                    "description": f"تحصيل عميل — فاتورة {inv.invoice_number}",
-                },
-            ]
+            inv_lines: list[dict] = _debit_lines(
+                cash_amt, f"تحصيل عميل — فاتورة {inv.invoice_number}"
+            )
             if forex_acc and abs(forex_diff) > DEC:
                 # الذمم تُسدَّد بقيمة الفاتورة المحوّلة، والفرق لحساب فروقات العملة.
                 inv_lines.append({
@@ -1384,11 +2471,55 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             )
             journals.append(jh)
 
+        # T-ONACC: الجزء غير الموزَّع (أو كامل المبلغ حين لا توزيع) يُرحَّل بقيد
+        # واحد «على الحساب»: Dr صندوق / Cr ذمم العميل — يظهر في كشف الحساب
+        # كرصيد لصالح العميل ويُوزَّع على الفواتير لاحقاً بلا قيد إضافي.
+        unallocated = (Decimal(str(payment.amount)) - allocated).quantize(DEC)
+        if unallocated >= DEC:
+            jh = post_journal(
+                tenant_id=payment.tenant_id,
+                transaction_date=payment.payment_date,
+                reference_type="CUSTOMER_PAYMENT",
+                reference_id=payment.id,
+                description=(
+                    (payment.notes or f"تحصيل عميل {payment.partner.name}")
+                    + " — على الحساب"
+                )[:500],
+                lines_data=[
+                    *_debit_lines(
+                        unallocated, f"تحصيل على الحساب — {payment.partner.name}"
+                    ),
+                    {
+                        "account": ar.id,
+                        "partner": payment.partner_id,
+                        "debit": Decimal("0"),
+                        "credit": unallocated,
+                        "description": f"دفعة على الحساب — {payment.partner.name}",
+                    },
+                ],
+                currency=payment.currency,
+                exchange_rate=payment.exchange_rate,
+                user=user,
+                idempotent=False,
+            )
+            journals.append(jh)
+            logger.info(
+                "Payment %s posted on-account remainder %s (allocated=%s of %s)",
+                payment.id, unallocated, allocated, payment.amount,
+            )
+
         # payment.journal حقل مفرد — نخزّن أول قيد للمرجعية؛ التراجع يعتمد
-        # reference_id فيشمل كل القيود. (حارس: بلا توزيعات لا قيد.)
+        # reference_id فيشمل كل القيود.
         payment.journal = journals[0] if journals else None
         payment.is_posted = True
         payment.save(update_fields=["journal", "is_posted"])
+
+        # شيكات السند تنتقل من مسودة إلى «برسم التحصيل» بترحيله (كما في الفاتورة).
+        if payment_cheques:
+            from accounting.models import Cheque
+            Cheque.objects.filter(
+                customer_payment=payment, status="Draft"
+            ).update(status="Under_Collection")
 
         # ── حفظ مبلغ/سعر تحويل كل توزيع للمرجعية ──
         for alloc, amount_in_inv_curr, conv_rate in alloc_conversions:
@@ -1414,8 +2545,112 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             model_name="CustomerPayment",
             object_id=payment.id,
             change_details=(
-                f"Customer payment posted journal={jh.id} "
-                f"currency={payment.currency_id} amount={payment.amount}"
+                f"Customer payment posted journal={payment.journal_id} "
+                f"currency={payment.currency_id} amount={payment.amount} "
+                f"allocated={allocated}"
+            ),
+        )
+
+    return payment
+
+
+def allocate_customer_payment(
+    payment: CustomerPayment, allocations: list[dict], *, user=None
+) -> CustomerPayment:
+    """T-ONACC: توزيع سند قبض (كامله أو جزء منه) على فواتير — بعد الترحيل أو قبله.
+
+    قرار المالك: التوزيع اللاحق **ربط فقط بلا قيد جديد** — لأن ترحيل السند خفّض
+    ذمم العميل أصلاً (على الحساب)، فالتوزيع لا يغيّر أي رصيد دفتري؛ يُحدِّث
+    `amount_paid` على الفاتورة ويربط السند بها فقط. إن لم يكن السند مرحّلاً بعد
+    فالصفوف تُنشأ فحسب ويتولّى `post_customer_payment` القيود و`amount_paid`.
+
+    allocations: [{"invoice": <id>, "amount": <Decimal|str>}, ...]
+    """
+    rows = [
+        (int(a["invoice"]), Decimal(str(a.get("amount") or "0")))
+        for a in (allocations or [])
+    ]
+    if not rows:
+        raise ValidationError("لا توزيعات مُرسَلة.")
+    if any(amt <= 0 for _inv_id, amt in rows):
+        raise ValidationError("مبلغ التوزيع يجب أن يكون أكبر من صفر.")
+
+    with transaction.atomic():
+        payment = CustomerPayment.objects.select_for_update().get(pk=payment.pk)
+        already = (
+            PaymentAllocation.objects.filter(payment=payment).aggregate(t=Sum("amount"))["t"]
+            or Decimal("0")
+        )
+        total_new = sum((amt for _inv_id, amt in rows), Decimal("0"))
+        if already + total_new > Decimal(str(payment.amount)) + DEC:
+            raise ValidationError(
+                f"مجموع التوزيعات ({already + total_new}) يتجاوز مبلغ السند "
+                f"({payment.amount}). المتاح للتوزيع: {Decimal(str(payment.amount)) - already}."
+            )
+
+        invoices = {
+            inv.pk: inv
+            for inv in SalesInvoice.objects.select_for_update().filter(
+                pk__in={inv_id for inv_id, _amt in rows}, tenant_id=payment.tenant_id
+            )
+        }
+        for inv_id, amt in rows:
+            inv = invoices.get(inv_id)
+            if inv is None:
+                raise ValidationError(f"الفاتورة #{inv_id} غير موجودة في هذه الشركة.")
+            if inv.customer_id != payment.partner_id:
+                raise ValidationError(
+                    f"الفاتورة #{inv.invoice_number} لا تخص نفس العميل."
+                )
+            if inv.status != SalesInvoice.STATUS_POSTED:
+                raise ValidationError(f"الفاتورة #{inv.invoice_number} غير مرحّلة.")
+
+            if payment.currency_id == inv.currency_id:
+                amount_in_inv_curr, conv_rate = amt, Decimal("1")
+            else:
+                amount_in_inv_curr, conv_rate = convert_amount(
+                    amount=amt,
+                    from_currency_id=payment.currency_id,
+                    to_currency_id=inv.currency_id,
+                    tenant_id=payment.tenant_id,
+                    effective_date=payment.payment_date,
+                )
+            remaining = inv.grand_total - Decimal(str(inv.amount_paid))
+            if amount_in_inv_curr > remaining + DEC:
+                raise ValidationError(
+                    f"مبلغ التوزيع ({amount_in_inv_curr}) يتجاوز المتبقي على "
+                    f"الفاتورة #{inv.invoice_number} ({remaining})."
+                )
+            # T-ARINT: نفس الحارس المستقلّ عن amount_paid المطبَّق في الترحيل.
+            # قبل ترحيل السند لا يُحتسب توزيعه بعد — يحرسه `post_customer_payment`.
+            if payment.is_posted:
+                guard_invoice_allocation_total(inv, incoming=amount_in_inv_curr)
+
+            PaymentAllocation.objects.create(
+                tenant_id=payment.tenant_id,
+                payment=payment,
+                invoice=inv,
+                amount=amt,
+                amount_in_invoice_currency=amount_in_inv_curr,
+                conversion_rate=conv_rate,
+            )
+            if payment.is_posted:
+                inv.amount_paid = Decimal(str(inv.amount_paid)) + amount_in_inv_curr
+                inv.save(update_fields=["amount_paid"])
+            logger.info(
+                "Payment %s allocated %s → invoice %s (posted=%s)",
+                payment.id, amt, inv.invoice_number, payment.is_posted,
+            )
+
+        create_audit_log(
+            tenant=payment.tenant,
+            user=user,
+            action="ALLOCATE",
+            model_name="CustomerPayment",
+            object_id=payment.id,
+            change_details=(
+                f"Allocated {total_new} to {len(rows)} invoice(s); "
+                f"total allocated={already + total_new} of {payment.amount}"
             ),
         )
 
@@ -1447,6 +2682,46 @@ def credit_preview_for_sale(
     }
 
 
+def sales_cogs_map(
+    *,
+    tenant_id: int,
+    invoice_ids,
+) -> dict[tuple[int, int], dict]:
+    """THA-60 M1: قاعدة تكلفة المبيع التاريخية الموحَّدة — مستهلك واحد للحقيقة.
+
+    تُرجع `{(invoice_id, product_id): {"cost": Decimal, "qty": Decimal}}` بتجميع
+    حركات مخزون البيع (`SALE`/`STOCK_ISSUE`) المرتبطة بالفواتير المُمرَّرة، في
+    **استعلام تجميعي واحد** (لا استعلام داخل حلقة).
+
+    التكلفة هنا تاريخية بحقّ: `record_stock_movement` يخزّن الصادر بكمية موجبة
+    و`total_cost = qty × avg_cost_before` لحظة الترحيل/التسليم، فمجموعها هو
+    تكلفة البضاعة المباعة كما كانت يومها — لا يحرّكها شراء لاحق يرفع المتوسط.
+    حركة التسليم نفسها `reference_type="SALE"` (قيد `SALES_DELIVERY_COGS` قيدٌ لا
+    حركة)، فتكلفة التسليم داخلة في القاعدة تلقائياً.
+
+    محصورة بالشركة؛ `invoice_ids` فارغة ⇒ `{}` بلا استعلام.
+    """
+    ids = list(invoice_ids or [])
+    if not ids:
+        return {}
+    rows = (
+        StockMovement.objects.filter(
+            tenant_id=tenant_id,
+            reference_type__in=("SALE", "STOCK_ISSUE"),
+            reference_id__in=ids,
+        )
+        .values("reference_id", "product_id")
+        .annotate(cost=Sum("total_cost"), qty=Sum("quantity"))
+    )
+    return {
+        (r["reference_id"], r["product_id"]): {
+            "cost": Decimal(str(r["cost"] or "0")),
+            "qty": Decimal(str(r["qty"] or "0")),
+        }
+        for r in rows
+    }
+
+
 def invoice_profits(
     *,
     tenant_id: int,
@@ -1458,15 +2733,20 @@ def invoice_profits(
     """task18 DEF-C4: تقرير أرباح الفواتير المرحَّلة.
 
     الإيراد = صافي البنود قبل الضريبة (subtotal_excl_tax − خصم الفاتورة) — يطابق
-    الدائن في قيد الإيراد. التكلفة = مجموع `total_cost` لحركات مخزون البيع
-    (SALE/STOCK_ISSUE) المسجَّلة وقت الترحيل بمتوسط التكلفة آنذاك (تكلفة تاريخية
-    دقيقة لا تتأثر بانجراف WAC لاحقاً). الربح = الإيراد − التكلفة.
-    محصور بالشركة (والفرع غير الرئيسي إن مُرّر) وبفواتير البيع فقط (لا مراجيع).
+    الدائن في قيد الإيراد. التكلفة من `sales_cogs_map` (THA-60 M1) — القاعدة
+    التاريخية الموحَّدة نفسها التي تقرأها تقارير «حسب الصنف/الماركة»، فلا يوجد
+    رقما ربح متنافسان في المنصة. الربح = الإيراد − التكلفة.
+
+    محصور بالشركة (والفرع غير الرئيسي إن مُرّر) وبفواتير البيع (لا مراجيع)، مع
+    التسامح مع الصفوف القديمة بلا نوع (null/"") التي لا تنشأ إلا من مسارات SQL
+    خام سابقة لهجرة 0012 — تُعامَل مبيعاتٍ كما يعاملها قسم التقارير.
     """
     qs = SalesInvoice.objects.filter(
         tenant_id=tenant_id,
         status=SalesInvoice.STATUS_POSTED,
-        invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+    ).filter(
+        Q(invoice_kind=SalesInvoice.INVOICE_KIND_SALE) | Q(invoice_kind__isnull=True)
+        | Q(invoice_kind=""),
     )
     if branch is not None and not getattr(branch, "is_main", False):
         qs = qs.filter(branch=branch)
@@ -1480,18 +2760,10 @@ def invoice_profits(
 
     invoice_ids = list(qs.values_list("id", flat=True))
     cogs_map: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
-    if invoice_ids:
-        mv = (
-            StockMovement.objects.filter(
-                tenant_id=tenant_id,
-                reference_type__in=("SALE", "STOCK_ISSUE"),
-                reference_id__in=invoice_ids,
-            )
-            .values("reference_id")
-            .annotate(c=Sum("total_cost"))
-        )
-        for r in mv:
-            cogs_map[r["reference_id"]] = Decimal(str(r["c"] or "0"))
+    for (inv_id, _product_id), cell in sales_cogs_map(
+        tenant_id=tenant_id, invoice_ids=invoice_ids,
+    ).items():
+        cogs_map[inv_id] += cell["cost"]
 
     rows: list[dict] = []
     tot_rev = Decimal("0")
@@ -1657,6 +2929,16 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
                 "document_id": q.id,
                 "invoice_number": None,
             })
+        # آخر مصدر: «سعر البيع» العام في كرت الصنف — يظهر فقط حين لا شراء سابق
+        # لهذا الزبون ولا عرض له. تبقى الخانة قابلة للتحرير لحفظ عرض خاص به.
+        if not prices and p.sale_price is not None and Decimal(str(p.sale_price)) > 0:
+            prices.append({
+                "label": "سعر عام (كرت الصنف)",
+                "unit_price": str(p.sale_price),
+                "source_type": "PRODUCT",
+                "document_id": None,
+                "invoice_number": None,
+            })
 
         if prices:
             rows.append({
@@ -1664,9 +2946,14 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
                 "sku": p.sku,
                 "name": name,
                 "price": prices[0]["unit_price"],
-                "source": "last_invoice" if prices[0]["source_type"] == "SALES_INVOICE" else "quote",
+                "source": (
+                    "last_invoice" if prices[0]["source_type"] == "SALES_INVOICE"
+                    else "default" if prices[0]["source_type"] == "PRODUCT"
+                    else "quote"
+                ),
                 "source_label": prices[0]["label"],
-                "editable": prices[0]["source_type"] == "QUOTE",
+                # السعر العام ليس عرضاً للزبون — يبقى قابلاً للتحرير ليُحفظ عرضه الخاص.
+                "editable": prices[0]["source_type"] in ("QUOTE", "PRODUCT"),
                 "invoice_number": prices[0]["invoice_number"],
                 "prices": prices,
             })
@@ -1807,6 +3094,523 @@ def preview_next_invoice_number(tenant_id: int, book_number: int = 0, branch=Non
 
     next_num = (book.last_used_number + 1) if book else 1
     return f"{_invoice_number_prefix(tenant_id, book_number, branch)}{next_num}"
+
+
+def next_order_number(tenant_id: int) -> str:
+    """رقم الطلبية التالي — تسلسل مستقل عن العروض والفواتير."""
+    from accounting.services import next_document_number
+
+    seq = next_document_number(tenant_id, 'sales_order', book_number=0)
+    return f"ORD-{seq}"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# T-ORDERS — عروض الأسعار وطلبيات الزبائن (صلاحية، حجز، عربون، إلغاء)
+# ─────────────────────────────────────────────────────────────────────────
+
+def _sales_settings(tenant_id: int):
+    from .models import SalesSettings
+
+    return SalesSettings.objects.filter(tenant_id=tenant_id).first()
+
+
+def default_quotation_valid_until(tenant_id: int, from_date=None):
+    """تاريخ انتهاء صلاحية العرض افتراضياً (إعداد الشركة، 14 يوماً افتراضاً).
+
+    0 يوم = بلا انتهاء (None) — لمن لا يريد صلاحية على عروضه.
+    """
+    from datetime import date as _date, timedelta
+
+    base = from_date or _date.today()
+    ss = _sales_settings(tenant_id)
+    days = ss.quotation_valid_days if ss else 14
+    if not days:
+        return None
+    return base + timedelta(days=int(days))
+
+
+def default_order_reserved_until(tenant_id: int, from_date=None):
+    """آخر يوم يحجز فيه الطلب الكمية (إعداد الشركة، 7 أيام افتراضاً)."""
+    from datetime import date as _date, timedelta
+
+    base = from_date or _date.today()
+    ss = _sales_settings(tenant_id)
+    days = ss.order_reserve_days if ss else 7
+    if not days:
+        return None
+    return base + timedelta(days=int(days))
+
+
+def document_delete_allowed(tenant_id: int) -> bool:
+    """هل يُسمح بحذف العروض/الطلبيات لهذه الشركة (الإلغاء متاح دائماً)؟"""
+    ss = _sales_settings(tenant_id)
+    return True if ss is None else bool(ss.allow_document_delete)
+
+
+def _active_reservation_lines(tenant_id: int, product_ids=None):
+    """بنود الحجز السارية — تعريف واحد يخدم الخريطة والحارس والتقرير معاً."""
+    from datetime import date as _date
+
+    from .models import SalesOrder, SalesOrderLine
+
+    qs = SalesOrderLine.objects.filter(
+        tenant_id=tenant_id,
+        order__status=SalesOrder.STATUS_CONFIRMED,
+        order__reserved_until__gte=_date.today(),
+    )
+    if product_ids is not None:
+        qs = qs.filter(product_id__in=list(product_ids))
+    return qs
+
+
+def reserved_quantity_map(
+    tenant_id: int, product_ids=None, *, exclude_customer_id: int | None = None,
+) -> dict:
+    """الكمية المحجوزة لكل صنف = بنود طلبيات مؤكَّدة لم ينتهِ حجزها.
+
+    مشتقّة بالكامل من الطلبيات (لا عمود على المنتج): الانتهاء يحرّر الكمية من
+    تلقاء نفسه بلا مهمة خلفية، والإلغاء/التحويل يخرجان من الحالة المؤكَّدة.
+
+    `exclude_customer_id`: يتجاهل حجوزات زبون بعينه — حجزُه لا يمنعه هو.
+    """
+    from django.db.models import Sum
+
+    qs = _active_reservation_lines(tenant_id, product_ids)
+    if exclude_customer_id is not None:
+        qs = qs.exclude(order__customer_id=exclude_customer_id)
+    rows = qs.values("product_id").annotate(total=Sum("quantity"))
+    return {r["product_id"]: r["total"] for r in rows if r["total"]}
+
+
+def reserved_stock_rows(
+    tenant_id: int, *, product_id=None, customer_id=None, date_from=None, date_to=None,
+) -> list[dict]:
+    """«تقرير المحجوزات»: سطر لكل بند طلبية مؤكَّدة ما زال حجزه سارياً.
+
+    يقرأ من نفس مصدر `reserved_quantity_map` كي لا ينحرف التقرير عن الحارس:
+    ما يمنعه الترحيل هو بعينه ما يظهر هنا.
+
+    `date_from`/`date_to`: نافذة **«الحجز حتى»** — «ما ينتهي هذا الأسبوع» سؤال
+    تشغيلي لا يُجاب بقراءة كل الصفوف بالعين.
+    """
+    from datetime import date as _date
+
+    qs = (
+        _active_reservation_lines(tenant_id, [product_id] if product_id else None)
+        .select_related("order", "order__customer", "product")
+        .order_by("order__reserved_until", "order__order_number", "id")
+    )
+    if customer_id:
+        qs = qs.filter(order__customer_id=customer_id)
+    if date_from:
+        qs = qs.filter(order__reserved_until__gte=date_from)
+    if date_to:
+        qs = qs.filter(order__reserved_until__lte=date_to)
+    lines = list(qs)
+    reserved_totals = reserved_quantity_map(
+        tenant_id, product_ids={line.product_id for line in lines} or None)
+    today = _date.today()
+    rows = []
+    for line in lines:
+        product = line.product
+        on_hand = Decimal(str(product.quantity_on_hand or 0))
+        reserved_total = Decimal(str(reserved_totals.get(line.product_id, 0)))
+        rows.append({
+            "order_id": line.order_id,
+            "order_number": line.order.order_number,
+            "order_date": line.order.order_date,
+            "reserved_until": line.order.reserved_until,
+            "days_left": (line.order.reserved_until - today).days
+            if line.order.reserved_until else None,
+            "customer_id": line.order.customer_id,
+            "customer_name": line.order.customer.name,
+            "product_id": line.product_id,
+            "product_sku": product.sku,
+            "product_name": product.name_ar or product.name_en or product.sku,
+            "quantity": str(line.quantity),
+            "unit_price": str(line.unit_price),
+            "line_total": str(line.line_total),
+            "quantity_on_hand": str(on_hand),
+            "reserved_quantity": str(reserved_total),
+            "available_quantity": str(on_hand - reserved_total),
+        })
+    logger.debug(
+        "reserved_stock.report tenant=%s rows=%s product=%s customer=%s window=%s..%s",
+        tenant_id, len(rows), product_id, customer_id, date_from, date_to,
+    )
+    return rows
+
+
+def guard_reserved_stock(
+    invoice: SalesInvoice,
+    lines: list[SalesInvoiceLine],
+    products_by_id: dict[int, Product],
+) -> None:
+    """T-RESERVEGUARD: يمنع ترحيل فاتورة تسحب كمية محجوزة لطلبية **زبون آخر**.
+
+    الحجز كان عرضاً بلا أثر: تُحجز الكمية بطلبية مؤكَّدة، ثم تُرحَّل فاتورة لزبون
+    ثانٍ فتخصمها ويبقى صاحب الطلبية بوعدٍ لا رصيد له. الحارس هنا يقارن كمية
+    الفاتورة بالمتاح **بعد** حجوزات الآخرين، ويسمّي الطلبيات الحاجزة.
+
+    مُعفى منه: المراجيع، الخدمات، الأصناف التي تسمح بالسالب، وفاتورة صاحب الحجز
+    نفسه. ويتوقف كلياً عند إطفاء `block_reserved_stock_sale`.
+    """
+    from collections import defaultdict
+
+    kind = invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE
+    if kind != SalesInvoice.INVOICE_KIND_SALE or not invoice.stock_on_post:
+        return
+    ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
+    if ss is not None and not ss.block_reserved_stock_sale:
+        return
+
+    requested = defaultdict(lambda: Decimal("0"))
+    for line in lines:
+        product = products_by_id.get(line.product_id) or line.product
+        if getattr(product, "is_service", False) or getattr(product, "allow_negative_stock", False):
+            continue
+        requested[line.product_id] += Decimal(str(line.quantity or 0))
+    if not requested:
+        return
+
+    others = reserved_quantity_map(
+        invoice.tenant_id,
+        product_ids=requested.keys(),
+        exclude_customer_id=invoice.customer_id,
+    )
+    if not others:
+        return
+
+    shortages = []
+    for product_id, quantity in requested.items():
+        reserved = Decimal(str(others.get(product_id, 0)))
+        if not reserved:
+            continue
+        product = products_by_id.get(product_id)
+        available = Decimal(str(product.quantity_on_hand or 0)) - reserved
+        if quantity <= available:
+            continue
+        blocking = _active_reservation_lines(invoice.tenant_id, [product_id]).exclude(
+            order__customer_id=invoice.customer_id
+        ).select_related("order", "order__customer")
+        holders = "، ".join(
+            f"{line.order.order_number} ({line.order.customer.name})" for line in blocking
+        )
+        shortages.append(
+            f"«{product.name_ar or product.name_en or product.sku}»: المطلوب {quantity} "
+            f"والمتاح بعد الحجز {available} — محجوز بـ{holders}"
+        )
+    if not shortages:
+        return
+
+    logger.warning(
+        "Blocked invoice %s over reserved stock — %s",
+        invoice.invoice_number, "؛ ".join(shortages),
+    )
+    raise ValidationError(
+        "لا يمكن ترحيل الفاتورة: الكمية محجوزة لطلبية زبون آخر. "
+        + "؛ ".join(shortages)
+        + ". ألغِ الحجز أو عدّل الكمية أو أطفئ «منع بيع الكمية المحجوزة» من إعدادات المبيعات."
+    )
+
+
+def _recalculate_order_totals(order) -> None:
+    """يعيد حساب إجماليات الطلبية من بنودها (بلا ضريبة سطرية بعد — مسجّل)."""
+    subtotal = Decimal("0.00")
+    for line in order.lines.all():
+        line_total = (
+            Decimal(str(line.quantity)) * Decimal(str(line.unit_price))
+            - Decimal(str(line.line_discount or 0))
+        ).quantize(DEC)
+        if line.line_total != line_total:
+            line.line_total = line_total
+            line.save(update_fields=["line_total"])
+        subtotal += line_total
+    order.subtotal = subtotal.quantize(DEC)
+    order.grand_total = (
+        subtotal - Decimal(str(order.discount_amount or 0)) + Decimal(str(order.tax_amount or 0))
+    ).quantize(DEC)
+    order.save(update_fields=["subtotal", "grand_total"])
+
+
+def confirm_sales_order(order, *, user=None):
+    """تأكيد الطلبية بعد حجز الكمية فعلياً ومنع تجاوز المتاح.
+
+    تُقفل الطلبية والأصناف داخل معاملة واحدة، ثم يُطرح حجز الطلبيات المؤكدة
+    الأخرى من الرصيد الحالي. الخدمات والأصناف التي تسمح بالسالب لا تعيق التأكيد.
+    """
+    from collections import defaultdict
+
+    from .models import SalesOrder
+
+    with transaction.atomic():
+        locked = (
+            SalesOrder.objects.select_for_update()
+            .prefetch_related("lines__product")
+            .get(pk=order.pk)
+        )
+        if locked.status in (SalesOrder.STATUS_CONVERTED, SalesOrder.STATUS_CANCELLED):
+            raise ValidationError("لا يمكن تأكيد طلبية محوّلة أو ملغاة.")
+        if locked.status == SalesOrder.STATUS_CONFIRMED:
+            return locked
+
+        requested = defaultdict(lambda: Decimal("0"))
+        for line in locked.lines.all():
+            requested[line.product_id] += Decimal(str(line.quantity))
+        products = {
+            product.pk: product
+            for product in Product.objects.select_for_update().filter(
+                tenant_id=locked.tenant_id, pk__in=requested.keys())
+        }
+        existing_reservations = reserved_quantity_map(
+            locked.tenant_id, product_ids=requested.keys())
+        shortages = []
+        for product_id, quantity in requested.items():
+            product = products.get(product_id)
+            if product is None:
+                shortages.append(f"الصنف #{product_id} غير متاح في الشركة الحالية")
+                continue
+            if product.is_service or product.allow_negative_stock:
+                continue
+            available = (
+                Decimal(str(product.quantity_on_hand or 0))
+                - Decimal(str(existing_reservations.get(product_id, 0)))
+            )
+            if quantity > available:
+                shortages.append(
+                    f"{product}: المطلوب {quantity} والمتاح بعد الحجوزات {available}"
+                )
+        if shortages:
+            raise ValidationError(
+                "لا يمكن تأكيد الطلبية لعدم كفاية الكمية: " + "؛ ".join(shortages)
+            )
+
+        locked.status = SalesOrder.STATUS_CONFIRMED
+        locked.reserved_until = default_order_reserved_until(locked.tenant_id)
+        locked.save(update_fields=["status", "reserved_until"])
+
+    log_order_activity(
+        locked, action="update", description="تأكيد طلبية وحجز الكمية", user=user)
+    logger.info(
+        "sales_order.confirm order=%s tenant=%s reserved_until=%s",
+        locked.id, locked.tenant_id, locked.reserved_until,
+    )
+    return locked
+
+
+def convert_quotation_to_order(quotation, *, user=None):
+    """عرض سعر → طلبية مؤكَّدة تحجز الكمية حتى `reserved_until`.
+
+    idempotent: العرض المحوَّل أو الملغى لا يُحوَّل ثانيةً.
+    """
+    from .models import SalesOrder, SalesOrderLine, SalesQuotation
+
+    if quotation.status in (SalesQuotation.STATUS_CONVERTED, SalesQuotation.STATUS_CANCELLED):
+        raise ValidationError(
+            f"عرض السعر {quotation.quotation_number} بحالة "
+            f"«{quotation.get_status_display()}» — لا يقبل التحويل."
+        )
+
+    tenant_id = quotation.tenant_id
+    with transaction.atomic():
+        order = SalesOrder.objects.create(
+            tenant=quotation.tenant,
+            order_number=next_order_number(tenant_id),
+            customer=quotation.customer,
+            order_date=quotation.quotation_date,
+            reserved_until=default_order_reserved_until(tenant_id),
+            status=SalesOrder.STATUS_CONFIRMED,
+            currency=quotation.currency,
+            exchange_rate=quotation.exchange_rate,
+            discount_amount=quotation.discount_amount,
+            tax_amount=quotation.tax_amount,
+            quotation=quotation,
+            notes=quotation.notes or "",
+            created_by=user if (user and getattr(user, "is_authenticated", False)) else None,
+        )
+        for ln in quotation.lines.all():
+            SalesOrderLine.objects.create(
+                tenant=quotation.tenant,
+                order=order,
+                product=ln.product,
+                quantity=ln.quantity,
+                unit_price=ln.unit_price,
+                line_discount=ln.line_discount,
+                tax_rate=ln.tax_rate,
+            )
+        _recalculate_order_totals(order)
+        quotation.status = SalesQuotation.STATUS_CONVERTED
+        quotation.save(update_fields=["status"])
+
+    log_order_activity(
+        order, action="create", description="طلبية من عرض سعر", user=user)
+    logger.info(
+        "sales_order.from_quotation order=%s quotation=%s tenant=%s reserved_until=%s",
+        order.id, quotation.id, tenant_id, order.reserved_until,
+    )
+    return order
+
+
+def convert_order_to_invoice(order, *, user=None):
+    """طلبية → فاتورة بيع (مسودة). التحويل ينهي الحجز — البضاعة صارت مفوترة."""
+    from .models import SalesInvoice, SalesOrder
+    from .serializers import SalesInvoiceSerializer
+
+    if order.status == SalesOrder.STATUS_CONVERTED and order.invoice_id:
+        raise ValidationError(
+            f"الطلبية {order.order_number} محوّلة أصلاً إلى فاتورة "
+            f"#{order.invoice.invoice_number}."
+        )
+    if order.status == SalesOrder.STATUS_CANCELLED:
+        raise ValidationError(f"الطلبية {order.order_number} ملغاة — لا تُحوَّل.")
+
+    lines_data = [
+        {
+            "product": ln.product_id,
+            "quantity": ln.quantity,
+            "unit_price": ln.unit_price,
+            "line_discount": ln.line_discount,
+            "tax_rate": ln.tax_rate_id,
+        }
+        for ln in order.lines.all()
+    ]
+    inv_ser = SalesInvoiceSerializer(data={
+        "invoice_number": next_invoice_number(order.tenant_id),
+        "customer": order.customer_id,
+        "invoice_date": order.order_date,
+        "currency": order.currency_id,
+        "exchange_rate": order.exchange_rate,
+        "invoice_type": "credit",
+        "invoice_discount": order.discount_amount,
+        "lines": lines_data,
+    })
+    if not inv_ser.is_valid():
+        raise ValidationError(f"بيانات الفاتورة غير صالحة: {inv_ser.errors}")
+
+    with transaction.atomic():
+        invoice = inv_ser.save(
+            tenant=order.tenant,
+            created_by=user if (user and getattr(user, "is_authenticated", False)) else None,
+        )
+        order.invoice = invoice
+        order.status = SalesOrder.STATUS_CONVERTED
+        # انتهاء الحجز: الكمية لم تعد محجوزة بل مفوترة.
+        order.reserved_until = None
+        order.save(update_fields=["invoice", "status", "reserved_until"])
+
+    log_order_activity(
+        order, action="convert", description=f"تحويل طلبية إلى فاتورة {invoice.invoice_number}",
+        user=user)
+    logger.info(
+        "sales_order.to_invoice order=%s invoice=%s tenant=%s",
+        order.id, invoice.id, order.tenant_id,
+    )
+    return invoice
+
+
+def cancel_sales_order(order, *, user=None, reason: str = ""):
+    """إلغاء طلبية — تبقى في السجل ويُفرَج عن حجزها فوراً (لا حذف)."""
+    from .models import SalesOrder
+
+    if order.status == SalesOrder.STATUS_CONVERTED:
+        raise ValidationError("الطلبية محوّلة إلى فاتورة — ألغِ الفاتورة بدلاً منها.")
+    if order.status == SalesOrder.STATUS_CANCELLED:
+        return order
+    order.status = SalesOrder.STATUS_CANCELLED
+    order.cancel_reason = (reason or "")[:250]
+    order.reserved_until = None
+    order.save(update_fields=["status", "cancel_reason", "reserved_until"])
+    log_order_activity(order, action="cancel", description=reason or "إلغاء طلبية", user=user)
+    logger.info("sales_order.cancel order=%s tenant=%s", order.id, order.tenant_id)
+    return order
+
+
+def cancel_quotation(quotation, *, user=None, reason: str = ""):
+    """إلغاء عرض سعر — بديل الحذف: المستند وسجلّه يبقيان."""
+    from .models import SalesQuotation
+
+    if quotation.status == SalesQuotation.STATUS_CONVERTED:
+        raise ValidationError("عرض السعر محوَّل — ألغِ المستند الناتج عنه بدلاً منه.")
+    if quotation.status == SalesQuotation.STATUS_CANCELLED:
+        return quotation
+    quotation.status = SalesQuotation.STATUS_CANCELLED
+    quotation.save(update_fields=["status"])
+    from core.activity import log_activity
+    log_activity(
+        action="cancel", entity_type="sales_quotation", entity_id=quotation.id,
+        entity_label=quotation.quotation_number, description=reason or "إلغاء عرض سعر",
+        partner_ids=[quotation.customer_id], user=user, tenant=quotation.tenant,
+    )
+    logger.info("sales_quotation.cancel id=%s tenant=%s", quotation.id, quotation.tenant_id)
+    return quotation
+
+
+def record_order_deposit(order, *, amount, cash_account_id, user=None, payment_date=None):
+    """عربون الطلبية = سند قبض «على الحساب» مرحَّل ومربوط بها.
+
+    لا قيد خاص بالطلبية: العربون مالٌ قُبض فعلاً، فيمرّ من نفس محرّك سندات
+    القبض (Dr صندوق / Cr ذمم العميل) ويظهر في كشف حسابه كأي دفعة مقدمة.
+    """
+    from datetime import date as _date
+
+    from .models import CustomerPayment, SalesOrder
+
+    amount = Decimal(str(amount or 0)).quantize(DEC)
+    if amount <= 0:
+        raise ValidationError("مبلغ العربون يجب أن يكون أكبر من صفر.")
+    if not cash_account_id:
+        raise ValidationError("اختر حساب الصندوق/البنك لقبض العربون.")
+
+    with transaction.atomic():
+        order = SalesOrder.objects.select_for_update().get(pk=order.pk)
+        if order.status == SalesOrder.STATUS_CANCELLED:
+            raise ValidationError("الطلبية ملغاة — لا يُسجَّل عليها عربون.")
+        if order.status == SalesOrder.STATUS_CONVERTED:
+            raise ValidationError(
+                "الطلبية محوّلة إلى فاتورة — سجّل الدفعة على الفاتورة الناتجة."
+            )
+        already = (
+            order.deposits.filter(is_posted=True).aggregate(total=Sum("amount"))["total"]
+            or Decimal("0")
+        )
+        if already + amount > Decimal(str(order.grand_total or 0)) + DEC:
+            raise ValidationError(
+                f"العربون ({already + amount}) يتجاوز إجمالي الطلبية ({order.grand_total})."
+            )
+        payment = CustomerPayment.objects.create(
+            tenant=order.tenant,
+            partner=order.customer,
+            payment_date=payment_date or _date.today(),
+            amount=amount,
+            currency=order.currency,
+            exchange_rate=order.exchange_rate,
+            cash_or_bank_account_id=cash_account_id,
+            sales_order=order,
+            notes=f"عربون طلبية {order.order_number}"[:500],
+        )
+        post_customer_payment(payment, user=user)
+        payment.refresh_from_db()
+        order.deposit_amount = (already + amount).quantize(DEC)
+        order.save(update_fields=["deposit_amount"])
+
+    log_order_activity(
+        order, action="payment", description=f"عربون {amount}", user=user)
+    logger.info(
+        "sales_order.deposit order=%s payment=%s tenant=%s",
+        order.id, payment.id, order.tenant_id,
+    )
+    return payment
+
+
+def log_order_activity(order, *, action: str, description: str = "", user=None) -> None:
+    """سجل نشاط موحّد للطلبية — يظهر في السجل العام وفي كرت الزبون."""
+    from core.activity import log_activity
+
+    log_activity(
+        action=action, entity_type="sales_order", entity_id=order.id,
+        entity_label=order.order_number, description=description,
+        partner_ids=[order.customer_id], user=user, tenant=order.tenant,
+    )
 
 
 def convert_quotation_to_invoice(quotation, user=None):
@@ -2013,6 +3817,41 @@ def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'Supplier
     from logistics.services import _resolve_ap_account
     ap_account = _resolve_ap_account(payment.partner)
 
+    # T-ONEPAY: شيكات داخل السند — مبلغها جزء من مبلغ السند لا إضافة عليه، ولا
+    # يخرج من الصندوق بل يصير التزاماً على «شيكات برسم الدفع» حتى يُصرف.
+    total = Decimal(str(payment.amount)).quantize(DEC)
+    payment_cheques = list(payment.cheques.all()) if payment.pk else []
+    cheques_total = sum(
+        (Decimal(str(c.amount or 0)) for c in payment_cheques), Decimal("0")
+    ).quantize(DEC)
+    if cheques_total > total + DEC:
+        raise ValidationError(
+            f"مجموع الشيكات ({cheques_total}) يتجاوز مبلغ السند ({total})."
+        )
+    cash_part = (total - cheques_total).quantize(DEC)
+
+    credit_lines: list[dict] = []
+    if cash_part > 0:
+        credit_lines.append({
+            "account": payment.cash_or_bank_account_id,
+            # T-CASH2: حساب الصندوق/البنك لا يَحمل المورد — وإلا حُسبت
+            # حركة النقدية ضمن ذمم المورد فلا يُصفّر السند رصيده. فقط
+            # سطر الذمم (AP) يَحمل الشريك.
+            "partner": None,
+            "debit": Decimal("0"),
+            "credit": cash_part,
+            "description": f"من الصندوق — {payment.partner.name}",
+        })
+    if cheques_total > 0:
+        payable_acc = resolve_cheques_payable_account(payment.tenant_id)
+        credit_lines.append({
+            "account": payable_acc.id,
+            "partner": None,
+            "debit": Decimal("0"),
+            "credit": cheques_total,
+            "description": f"شيكات صادرة — {payment.partner.name}",
+        })
+
     with transaction.atomic():
         jh = post_journal(
             tenant_id=payment.tenant_id,
@@ -2024,20 +3863,11 @@ def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'Supplier
                 {
                     "account": ap_account.id,
                     "partner": payment.partner_id,
-                    "debit": Decimal(str(payment.amount)),
+                    "debit": total,
                     "credit": Decimal("0"),
                     "description": f"دفع مورد — {payment.partner.name}",
                 },
-                {
-                    "account": payment.cash_or_bank_account_id,
-                    # T-CASH2: حساب الصندوق/البنك لا يَحمل المورد — وإلا حُسبت
-                    # حركة النقدية ضمن ذمم المورد فلا يُصفّر السند رصيده. فقط
-                    # سطر الذمم (AP) يَحمل الشريك.
-                    "partner": None,
-                    "debit": Decimal("0"),
-                    "credit": Decimal(str(payment.amount)),
-                    "description": f"من الصندوق — {payment.partner.name}",
-                },
+                *credit_lines,
             ],
             currency=payment.currency,
             exchange_rate=payment.exchange_rate,
@@ -2046,6 +3876,12 @@ def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'Supplier
         payment.journal = jh
         payment.is_posted = True
         payment.save(update_fields=["journal", "is_posted"])
+        # الشيكات الصادرة تخرج من المسودة بترحيل السند (كما في الجانب الوارد).
+        if payment_cheques:
+            from accounting.models import Cheque
+            Cheque.objects.filter(
+                supplier_payment=payment, status="Draft"
+            ).update(status="Under_Collection")
         create_audit_log(
             tenant=payment.tenant,
             user=user,
@@ -2054,6 +3890,108 @@ def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'Supplier
             object_id=payment.id,
             change_details=f"Posted supplier payment journal={jh.id}",
         )
+    return payment
+
+
+def allocate_supplier_payment(
+    payment: 'SupplierPayment', allocations: list[dict], *, user=None
+) -> 'SupplierPayment':
+    """T-ONACC (المورد): توزيع سند صرف على فواتير شراء — مرآة
+    `allocate_customer_payment`.
+
+    بعد الترحيل التوزيع **ربط فقط بلا قيد جديد**: ذمم المورد دُينت وقت الترحيل
+    (Dr AP / Cr صندوق) فالتوزيع لا يغيّر أي رصيد دفتري — يحدّد فقط أي فاتورة
+    استهلكت أي جزء من السند (يقود `purchase_invoice_payment_summary`).
+    """
+    from logistics.models import PurchaseInvoice
+    from logistics.services import purchase_invoice_payment_summary
+    from sales.models import SupplierPayment as SP, SupplierPaymentAllocation
+
+    rows = [
+        (int(a["invoice"]), Decimal(str(a.get("amount") or "0")))
+        for a in (allocations or [])
+    ]
+    if not rows:
+        raise ValidationError("لا توزيعات مُرسَلة.")
+    if any(amt <= 0 for _inv_id, amt in rows):
+        raise ValidationError("مبلغ التوزيع يجب أن يكون أكبر من صفر.")
+
+    with transaction.atomic():
+        payment = SP.objects.select_for_update().get(pk=payment.pk)
+        already = (
+            SupplierPaymentAllocation.objects.filter(payment=payment).aggregate(
+                t=Sum("amount")
+            )["t"]
+            or Decimal("0")
+        )
+        total_new = sum((amt for _inv_id, amt in rows), Decimal("0"))
+        if already + total_new > Decimal(str(payment.amount)) + DEC:
+            raise ValidationError(
+                f"مجموع التوزيعات ({already + total_new}) يتجاوز مبلغ السند "
+                f"({payment.amount}). المتاح للتوزيع: {Decimal(str(payment.amount)) - already}."
+            )
+
+        invoices = {
+            inv.pk: inv
+            for inv in PurchaseInvoice.objects.select_for_update().filter(
+                pk__in={inv_id for inv_id, _amt in rows}, tenant_id=payment.tenant_id
+            )
+        }
+        for inv_id, amt in rows:
+            inv = invoices.get(inv_id)
+            if inv is None:
+                raise ValidationError(f"فاتورة الشراء #{inv_id} غير موجودة في هذه الشركة.")
+            if inv.partner_id != payment.partner_id:
+                raise ValidationError(
+                    f"فاتورة الشراء #{inv.invoice_number} لا تخص نفس المورد."
+                )
+            if not inv.is_posted:
+                raise ValidationError(f"فاتورة الشراء #{inv.invoice_number} غير مرحّلة.")
+
+            if payment.currency_id == inv.currency_id:
+                amount_in_inv_curr, conv_rate = amt, Decimal("1")
+            else:
+                amount_in_inv_curr, conv_rate = convert_amount(
+                    amount=amt,
+                    from_currency_id=payment.currency_id,
+                    to_currency_id=inv.currency_id,
+                    tenant_id=payment.tenant_id,
+                    effective_date=payment.payment_date,
+                )
+            remaining = purchase_invoice_payment_summary(inv)["remaining_balance"]
+            if amount_in_inv_curr > remaining + DEC:
+                raise ValidationError(
+                    f"مبلغ التوزيع ({amount_in_inv_curr}) يتجاوز المتبقي على "
+                    f"فاتورة الشراء #{inv.invoice_number} ({remaining})."
+                )
+
+            SupplierPaymentAllocation.objects.create(
+                tenant_id=payment.tenant_id,
+                payment=payment,
+                invoice=inv,
+                amount=amt,
+                amount_in_invoice_currency=amount_in_inv_curr,
+                conversion_rate=conv_rate,
+            )
+            # ملخّص الدفع مُخزَّن على الكائن — نُبطله كي يعكس التوزيع الجديد.
+            inv._payment_summary_cache = None
+            logger.info(
+                "Supplier payment %s allocated %s → purchase invoice %s",
+                payment.id, amt, inv.invoice_number,
+            )
+
+        create_audit_log(
+            tenant=payment.tenant,
+            user=user,
+            action="ALLOCATE",
+            model_name="SupplierPayment",
+            object_id=payment.id,
+            change_details=(
+                f"Allocated {total_new} to {len(rows)} purchase invoice(s); "
+                f"total allocated={already + total_new} of {payment.amount}"
+            ),
+        )
+
     return payment
 
 

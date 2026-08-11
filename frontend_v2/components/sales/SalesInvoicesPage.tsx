@@ -15,14 +15,15 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   listSalesInvoicesPage,
   postSalesInvoice,
-  createDeliveryOrder,
-  deliverOrder,
   deleteSalesInvoice,
   getSalesSettings,
+  type DeliveryStatus,
   type SalesInvoiceRow,
   type SalesSettings,
 } from "../../services/salesApi";
+import { DeliverGoodsModal } from "./DeliverGoodsModal";
 import { apiGetList } from "../../services/restApi";
+import { listPickerProducts } from "../../services/inventoryApi";
 import {
   Loader2,
   RefreshCw,
@@ -31,15 +32,19 @@ import {
   Trash2,
   Plus,
   Printer,
+  FileText,
 } from "lucide-react";
 import { SalesInvoiceEditor, type PartnerRow, type ProductRow } from "./SalesInvoiceEditor";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { eventBus } from "../../utils/eventBus";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { isOfflineRecordForTenant } from "../../utils/offlineTenantScope";
+import { clientLogger } from "../../services/logger";
+import { PaymentStatusBadge } from "../shared/PaymentStatusBadge";
 import {
   AseelDocumentShell,
   AseelDenseTable,
+  AseelDateInput,
   useAseelIndexKeymap,
   type DenseColumn,
   type AseelToolbarAction,
@@ -67,7 +72,15 @@ const TYPE_OPTIONS = [
   { v: "credit", l: "آجل" },
 ];
 
+/** شارات حالة التسليم — نفس ألوان الحالات في باقي الشاشات. */
+const DELIVERY_BADGE: Record<DeliveryStatus, { label: string; color: string }> = {
+  not_delivered: { label: "غير مسلَّمة", color: "var(--aseel-warn, #b06800)" },
+  partially_delivered: { label: "مسلَّمة جزئياً", color: "var(--aseel-accent, #2563eb)" },
+  delivered: { label: "مسلَّمة", color: "var(--aseel-ok, #2d7d46)" },
+};
+
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateLocalized } from "../../utils/formatDate";
 const fmtNum = (s: string | number | undefined | null) => formatMoney(s, "—");
 
 type SalesInvoicesPageProps = {
@@ -104,10 +117,13 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
 
   const [draftToEditId, setDraftToEditId] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  // الفاتورة المفتوحة في نافذة التسليم (إرسالية) — null = مغلقة.
+  const [deliverFor, setDeliverFor] = useState<ExtRow | null>(null);
 
   // filters
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterPaymentStatus, setFilterPaymentStatus] = useState("");
   const [filterType, setFilterType] = useState("");
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
@@ -125,6 +141,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
         page_size: pageSize,
         search: search.trim() || undefined,
         status: filterStatus || undefined,
+        payment_status: filterPaymentStatus || undefined,
         invoice_type: filterType || undefined,
         date_from: filterFrom || undefined,
         date_to: filterTo || undefined,
@@ -136,14 +153,14 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [filterFrom, filterStatus, filterTo, filterType, page, search]);
+  }, [filterFrom, filterPaymentStatus, filterStatus, filterTo, filterType, page, search]);
 
   const loadMasterData = useCallback(async () => {
     const tenantId = resolveTenantId();
     const parts = ["العملاء", "الأصناف", "العملات", "الحسابات", "الضرائب"] as const;
     const settled = await Promise.allSettled([
       apiGetList<PartnerRow>("partners/lookup/", { tenantId, query: { limit: 500 } }),
-      apiGetList<ProductRow>("inventory/products/", { tenantId }),
+      listPickerProducts<ProductRow>(tenantId),
       apiGetList<CurrOpt>("accounting/currencies/", { tenantId }),
       apiGetList<AccountOpt>("accounting/accounts/", { tenantId }),
       apiGetList<{
@@ -199,7 +216,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       } else if (event.type === "partners") {
         apiGetList<PartnerRow>("partners/lookup/", { tenantId, query: { limit: 500 } }).then(setPartners).catch(() => {});
       } else if (event.type === "products") {
-        apiGetList<ProductRow>("inventory/products/", { tenantId }).then(setProducts).catch(() => {});
+        listPickerProducts<ProductRow>(tenantId).then(setProducts).catch(() => {});
       }
     });
     return unsubscribe;
@@ -315,21 +332,11 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     }
   };
 
-  const handleDelivery = async (invoiceId: number, deliverNow = false) => {
+  const handleDelivered = async (message: string) => {
+    setDeliverFor(null);
     setErr(null);
-    setMsg(null);
-    try {
-      const created = await createDeliveryOrder(invoiceId);
-      if (deliverNow && created && typeof created.id === "number") {
-        await deliverOrder(created.id);
-        setMsg(`أمر إخراج #${created.id} — تسليم + COGS`);
-      } else {
-        setMsg(`أمر إخراج #${created.id} (قيد التنفيذ)`);
-      }
-      await loadRows();
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل أمر الإخراج");
-    }
+    setMsg(message);
+    await loadRows();
   };
 
   const handleDeleteDraft = async (id: number) => {
@@ -383,7 +390,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       header: "التاريخ",
       width: "100px",
       align: "center",
-      render: (r) => <span className="text-xs">{r.invoice_date || "—"}</span>,
+      render: (r) => <span className="text-xs">{formatDateLocalized(r.invoice_date) || "—"}</span>,
     },
     {
       key: "customer",
@@ -393,6 +400,9 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
         <button
           type="button"
           className="text-xs text-blue-700 hover:underline"
+          data-ctx-partner-id={r.customer ?? undefined}
+          data-ctx-partner-name={r.customer_name || ""}
+          data-ctx-partner-kind="customer"
           onClick={(e) => { e.stopPropagation(); navigate(`/partners/${r.customer}`); }}
           title="فتح ملف العميل"
         >
@@ -432,12 +442,45 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       ),
     },
     {
+      key: "delivery_status",
+      header: "التسليم",
+      width: "100px",
+      align: "center",
+      render: (r) => {
+        const st = (r.delivery_status || "not_delivered") as DeliveryStatus;
+        return (
+          <span
+            style={{
+              fontSize: "11px",
+              fontWeight: 600,
+              color: DELIVERY_BADGE[st].color,
+            }}
+            title="حالة تسليم البضاعة للعميل"
+          >
+            {r.delivery_status_display || DELIVERY_BADGE[st].label}
+          </span>
+        );
+      },
+    },
+    {
       key: "grand_total",
       header: "الإجمالي",
       width: "110px",
       align: "left",
       numeric: true,
       render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmtNum(r.grand_total)}</span>,
+    },
+    {
+      key: "payment_status",
+      header: "حالة الدفع",
+      width: "125px",
+      align: "center",
+      render: (r) => (
+        <PaymentStatusBadge
+          status={r.payment_status}
+          label={r.payment_status_display}
+        />
+      ),
     },
     {
       key: "amount_paid",
@@ -454,7 +497,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       align: "left",
       numeric: true,
       render: (r) => {
-        const bal = Number(r.grand_total || 0) - Number(r.amount_paid || 0);
+        const bal = Number(r.remaining_balance ?? (Number(r.grand_total || 0) - Number(r.amount_paid || 0)));
         return (
           <span
             className="aseel-num font-mono text-xs font-semibold"
@@ -466,6 +509,14 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           </span>
         );
       },
+    },
+    {
+      key: "customer_balance",
+      header: "رصيد العميل",
+      width: "110px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.customer_balance)}</span>,
     },
     {
       key: "vat_statement",
@@ -507,32 +558,29 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               </button>
             </>
           )}
-          {r.status === "posted" && (
+          {r.status === "posted" && !r.stock_on_post && r.delivery_status !== "delivered" && (
             <>
-              {!r.stock_on_post && (
-                <button
-                  type="button"
-                  className="aseel-toolbtn"
-                  style={{ fontSize: "10px", padding: "2px 6px" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm("تسليم الآن؟ خصم مخزون + قيد COGS.")) {
-                      handleDelivery(r.id, true);
-                    }
-                  }}
-                  title="تسليم"
-                >
-                  <Truck className="w-3 h-3" /> تسليم
-                </button>
-              )}
               <button
                 type="button"
                 className="aseel-toolbtn"
                 style={{ fontSize: "10px", padding: "2px 6px" }}
-                onClick={(e) => { e.stopPropagation(); handleDelivery(r.id, false); }}
-                title="أمر إخراج"
+                onClick={(e) => { e.stopPropagation(); setDeliverFor(r); }}
+                title="تسليم سريع (اختيار البنود)"
               >
-                <Truck className="w-3 h-3" />
+                <Truck className="w-3 h-3" /> تسليم
+              </button>
+              {/* المحرّر الكامل في شاشة الإرساليات بهذه الفاتورة مربوطةً مسبقاً. */}
+              <button
+                type="button"
+                className="aseel-toolbtn"
+                style={{ fontSize: "10px", padding: "2px 6px" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/sales/delivery-notes/new?invoice=${r.id}`);
+                }}
+                title="إرسالية جديدة"
+              >
+                <FileText className="w-3 h-3" />
               </button>
             </>
           )}
@@ -542,7 +590,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   ];
 
   const filterBar = (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
+    <div className="aseel-print-hidden" style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
       <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
         <span className="aseel-field-label">بحث (رقم / عميل)</span>
         <input
@@ -565,13 +613,31 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           {STATUS_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
       </label>
+      <label className="aseel-field" style={{ minWidth: "125px" }}>
+        <span className="aseel-field-label">حالة الدفع</span>
+        <select
+          className="aseel-input"
+          value={filterPaymentStatus}
+          onChange={(e) => {
+            const value = e.target.value;
+            clientLogger.info("sales_invoice.payment_filter_changed", { paymentStatus: value || "all" });
+            setFilterPaymentStatus(value);
+            setPage(1);
+          }}
+        >
+          <option value="">الكل</option>
+          <option value="unpaid">غير مدفوعة</option>
+          <option value="partially_paid">مدفوعة جزئياً</option>
+          <option value="paid">مدفوعة بالكامل</option>
+        </select>
+      </label>
       <label className="aseel-field">
         <span className="aseel-field-label">من تاريخ</span>
-        <input type="date" className="aseel-input" value={filterFrom} onChange={(e) => { setFilterFrom(e.target.value); setPage(1); }} />
+        <AseelDateInput value={filterFrom} onChange={(value) => { clientLogger.info("sales_invoice.date_filter_changed", { boundary: "from", hasValue: Boolean(value) }); setFilterFrom(value); setPage(1); }} />
       </label>
       <label className="aseel-field">
         <span className="aseel-field-label">إلى تاريخ</span>
-        <input type="date" className="aseel-input" value={filterTo} onChange={(e) => { setFilterTo(e.target.value); setPage(1); }} />
+        <AseelDateInput value={filterTo} onChange={(value) => { clientLogger.info("sales_invoice.date_filter_changed", { boundary: "to", hasValue: Boolean(value) }); setFilterTo(value); setPage(1); }} />
       </label>
     </div>
   );
@@ -596,7 +662,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   // task11 M6: جدول الفواتير في منطقة gridwrap الرئيسية المرنة — كان محشوراً
   // في tab سفلي بارتفاع أقصى 220px تاركاً فراغاً أبيض ضخماً وسط الشاشة.
   return (
-    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)", display: "flex", flexDirection: "column" }}>
+    <div style={{ minHeight: "calc(100vh - 5rem)", display: "flex", flexDirection: "column" }}>
       {!editorOpen ? (
         <AseelDocumentShell
           title="فواتير المبيعات"
@@ -672,6 +738,14 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             initialCustomerId={new URLSearchParams(location.search).get("customer_id") ? Number(new URLSearchParams(location.search).get("customer_id")) : undefined}
           />
         </div>
+      )}
+      {deliverFor && (
+        <DeliverGoodsModal
+          invoiceId={deliverFor.id}
+          invoiceNumber={deliverFor.invoice_number}
+          onClose={() => setDeliverFor(null)}
+          onDelivered={handleDelivered}
+        />
       )}
     </div>
   );

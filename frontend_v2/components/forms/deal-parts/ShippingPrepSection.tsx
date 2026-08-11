@@ -30,7 +30,7 @@
 
 //     return (
 //         <div className="bg-orange-50 dark:bg-orange-900/20 p-6 rounded-xl border border-orange-200 dark:border-orange-800 space-y-6">
-//             <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+//             <h3 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
 //                 <Truck className="w-5 h-5 text-orange-500" /> تجهيز الشحنة والدفعة الثانية
 //             </h3>
 
@@ -47,13 +47,13 @@
 //                 </div>
 //                 <div>
 //                     <label className="block text-sm font-medium mb-1 dark:text-gray-300">صورة الشحنة (الكراتين)</label>
-//                     <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg h-32 flex items-center justify-center relative bg-white dark:bg-gray-800">
+//                     <div className="border-2 border-dashed border-[var(--color-border)] rounded-lg h-32 flex items-center justify-center relative bg-[var(--color-surface)]">
 //                         {data.shippingDetails?.shipmentImageUrl ? (
 //                             <img src={data.shippingDetails.shipmentImageUrl} className="h-full w-full object-contain rounded-lg" alt="shipment" />
 //                         ) : (
 //                             <label className="cursor-pointer flex flex-col items-center">
-//                                 {uploading ? <Loader2 className="animate-spin text-orange-500" /> : <Upload className="text-gray-400" />}
-//                                 <span className="text-xs text-gray-500 mt-1">اضغط لرفع صورة الشحنة</span>
+//                                 {uploading ? <Loader2 className="animate-spin text-orange-500" /> : <Upload className="text-[var(--color-text-muted)]" />}
+//                                 <span className="text-xs text-[var(--color-text-muted)] mt-1">اضغط لرفع صورة الشحنة</span>
 //                                 <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
 //                             </label>
 //                         )}

@@ -3,6 +3,7 @@
 ترتيب حتمي + بحث + فلتر فترة + ترقيم صفحات opt-in، وعزل الشركات.
 """
 import datetime
+from decimal import Decimal
 
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
+from core.models import ActivityLog
 from inventory.models import Product, ProductCategory, StockMovement, UnitOfMeasure
 from tenants.services import create_company
 
@@ -44,6 +46,13 @@ class ProductApiTest(APITestCase):
         data = res.json()
         assert data["sku"] == "000001"
         assert data["created_at"]
+
+        activity = ActivityLog.objects.get(
+            tenant=self.t_a, entity_type="product", entity_id=data["id"], action="create",
+        )
+        assert activity.user_id == self.owner_a.id
+        assert activity.entity_label == "صنف بالاسم فقط"
+        assert activity.description == "أضاف المنتج «صنف بالاسم فقط»"
 
     def test_sku_sequence_increments_and_ignores_legacy_fb(self):
         self._auth()
@@ -146,6 +155,30 @@ class ProductApiTest(APITestCase):
             "avg_cost", "is_for_sale_online", "online_price",
             "online_description", "attachments",
         }.issubset(row) for row in res.json())
+
+    def test_lookup_list_carries_every_field_the_invoice_picker_reads(self):
+        """منتقي الصنف في الفواتير يحتاج الباركود وسعر البيع وعلَم الخدمة.
+
+        بدونها كانت شاشات البيع تجلب العقد **الكامل** لكل الأصناف: قياس على
+        بيانات حقيقية (1490 صنفاً) أعطى 1,145 كيلوبايت و1,249 ملّي ثانية عند
+        كل فتح للشاشة، مقابل عقد المنتقي 609 كيلوبايت و331 ملّي ثانية.
+        """
+        Product.objects.create(
+            tenant=self.t_a, sku="PICK-1", name_ar="صنف المنتقي",
+            barcode="6291001", sale_price="12.50", is_service=False,
+        )
+        self._auth()
+
+        res = self._get("?view=lookup")
+
+        assert res.status_code == 200, res.content[:300]
+        row = next(r for r in res.json() if r["sku"] == "PICK-1")
+        assert row["barcode"] == "6291001"
+        assert Decimal(row["sale_price"]) == Decimal("12.50")
+        assert row["is_service"] is False
+        # وما زال العقد أضيق من الكامل — لا تحليلات ولا حقول الكرت.
+        assert "purchased_qty" not in row
+        assert "avg_monthly_sales" not in row
 
     def test_category_tree_query_count_is_constant(self):
         root = ProductCategory.objects.create(tenant=self.t_a, name="جذر")
@@ -343,3 +376,51 @@ class ProductApiTest(APITestCase):
         assert res.status_code in (200, 202), res.content[:300]
         p = Product.objects.get(pk=pid)
         assert p.name_ar == "الاسم الجديد"
+        activity = ActivityLog.objects.get(
+            tenant=self.t_a, entity_type="product", entity_id=pid, action="update",
+        )
+        assert activity.description == "غيّر اسم المنتج من «الاسم القديم» إلى «الاسم الجديد»"
+        assert activity.metadata["changes"] == [{
+            "field": "name_ar",
+            "label": "اسم المنتج",
+            "old": "الاسم القديم",
+            "new": "الاسم الجديد",
+        }]
+
+    # ── كرت الصنف: «سعر البيع» يُحفظ من نفس نموذج الكرت (لا شاشة منفصلة) ──
+    def test_sale_price_round_trips_through_api(self):
+        self._auth()
+        created = self._post({"name_ar": "صنف بسعر بيع", "sale_price": "150.5"}).json()
+        assert created["sale_price"] == "150.5000"
+        res = self.client.patch(
+            f"{PRODUCTS_URL}{created['id']}/", {"sale_price": "175"},
+            format="json", HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert res.status_code in (200, 202), res.content[:300]
+        from decimal import Decimal
+        assert Product.objects.get(pk=created["id"]).sale_price == Decimal("175")
+        activity = ActivityLog.objects.filter(
+            tenant=self.t_a, entity_type="product", entity_id=created["id"], action="update",
+        ).latest("id")
+        # G1: بلا أصفار زائدة في نصّ السجل — «150.5» لا «150.5000».
+        assert activity.description == (
+            "عدّل سعر البيع للمنتج «صنف بسعر بيع» من 150.5 إلى 175"
+        )
+        assert activity.metadata["changes"] == [{
+            "field": "sale_price",
+            "label": "سعر البيع",
+            "old": "150.5",
+            "new": "175",
+        }]
+
+        before = ActivityLog.objects.filter(
+            tenant=self.t_a, entity_type="product", entity_id=created["id"], action="update",
+        ).count()
+        same = self.client.patch(
+            f"{PRODUCTS_URL}{created['id']}/", {"sale_price": "175"},
+            format="json", HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert same.status_code in (200, 202), same.content[:300]
+        assert ActivityLog.objects.filter(
+            tenant=self.t_a, entity_type="product", entity_id=created["id"], action="update",
+        ).count() == before

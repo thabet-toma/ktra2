@@ -95,7 +95,7 @@ const TONE_CLASS: Record<AseelViewTone, string> = {
   warn: "bg-amber-100 text-amber-800 border-amber-200",
   danger: "bg-rose-100 text-rose-800 border-rose-200",
   info: "bg-sky-100 text-sky-800 border-sky-200",
-  muted: "bg-slate-100 text-slate-700 border-slate-200",
+  muted: "bg-[var(--color-surface-3)] text-[var(--color-text)] border-[var(--color-border)]",
 };
 
 const METRIC_VALUE_TONE: Record<AseelViewTone, string> = {
@@ -103,7 +103,7 @@ const METRIC_VALUE_TONE: Record<AseelViewTone, string> = {
   warn: "text-amber-700",
   danger: "text-rose-700",
   info: "text-sky-700",
-  muted: "text-slate-700",
+  muted: "text-[var(--color-text)]",
 };
 
 function FieldRow({ field }: { field: AseelViewField; key?: React.Key }) {
@@ -115,8 +115,8 @@ function FieldRow({ field }: { field: AseelViewField; key?: React.Key }) {
           : "flex items-baseline justify-between gap-3"
       }
     >
-      <span className="text-[11px] text-slate-500 shrink-0">{field.label}</span>
-      <span className="text-[12px] font-semibold text-slate-800 dark:text-slate-100 text-left break-words">
+      <span className="text-[11px] text-[var(--color-text-muted)] shrink-0">{field.label}</span>
+      <span className="text-[12px] font-semibold text-[var(--color-text)] text-left break-words">
         {field.value ?? "—"}
       </span>
     </div>
@@ -144,7 +144,7 @@ export function AseelViewTable<T>({
     align === "center" ? "text-center" : align === "left" ? "text-left" : "text-right";
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+    <div className="overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm">
       <table className="w-full border-collapse text-right">
         <thead>
           <tr className="bg-slate-800 text-[11px] font-bold text-white">
@@ -174,7 +174,7 @@ export function AseelViewTable<T>({
             rows.map((row, index) => (
               <tr
                 key={rowKey ? rowKey(row, index) : index}
-                className="border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-900/30"
+                className="border-b border-slate-100 last:border-0 hover:bg-[var(--color-surface-2)] dark:border-slate-700"
               >
                 {showIndex && (
                   <td className="px-2 py-2 text-center text-slate-400">{index + 1}</td>
@@ -218,13 +218,13 @@ export function AseelDocumentView<T>({
   return (
     <div dir="rtl" className="aseel-doc-view flex flex-col gap-3 p-3 overflow-auto">
       {/* ── الترويسة ─────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      <div className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 shadow-sm">
         <div className="flex items-center gap-3">
           {identity?.logo_url ? (
             <img
               src={identity.logo_url}
               alt="شعار الشركة"
-              className="h-12 w-12 rounded-xl border border-slate-200 object-cover"
+              className="h-12 w-12 rounded-xl border border-[var(--color-border)] object-cover"
             />
           ) : (
             <div className="rounded-xl bg-slate-800 p-2.5 text-white">
@@ -233,11 +233,11 @@ export function AseelDocumentView<T>({
           )}
           <div>
             {identity?.company_name_primary && (
-              <div className="text-sm font-black leading-tight text-slate-900 dark:text-white">
+              <div className="text-sm font-black leading-tight text-[var(--color-text)]">
                 {identity.company_name_primary}
               </div>
             )}
-            <h2 className="text-lg font-black leading-tight text-slate-900 dark:text-white">
+            <h2 className="text-lg font-black leading-tight text-[var(--color-text)]">
               {title}
             </h2>
             {subtitle && (
@@ -249,8 +249,8 @@ export function AseelDocumentView<T>({
         <div className="flex items-center gap-3">
           {documentNumber && (
             <div className="text-left">
-              <span className="block text-[11px] text-slate-500">رقم المستند</span>
-              <span className="font-mono text-base font-bold text-slate-900 dark:text-white" dir="ltr">
+              <span className="block text-[11px] text-[var(--color-text-muted)]">رقم المستند</span>
+              <span className="font-mono text-base font-bold text-[var(--color-text)]" dir="ltr">
                 {documentNumber}
               </span>
             </div>
@@ -273,9 +273,9 @@ export function AseelDocumentView<T>({
           {metrics.map((m, i) => (
             <div
               key={`${m.label}-${i}`}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-800"
+              className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 shadow-sm"
             >
-              <span className="block text-[11px] text-slate-500">{m.label}</span>
+              <span className="block text-[11px] text-[var(--color-text-muted)]">{m.label}</span>
               <span
                 className={`block text-base font-bold ${
                   METRIC_VALUE_TONE[m.tone || "muted"]
@@ -294,9 +294,9 @@ export function AseelDocumentView<T>({
           {parties?.map((p) => (
             <div
               key={p.title}
-              className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
+              className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm"
             >
-              <div className="flex items-center gap-1.5 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+              <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs font-bold text-[var(--color-text)]">
                 {p.icon}
                 {p.title}
               </div>
@@ -308,8 +308,8 @@ export function AseelDocumentView<T>({
             </div>
           ))}
           {meta && meta.length > 0 && (
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
-              <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+            <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm">
+              <div className="border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs font-bold text-[var(--color-text)]">
                 بيانات المستند
               </div>
               <div className="space-y-1.5 p-3">
@@ -333,21 +333,21 @@ export function AseelDocumentView<T>({
       {/* ── المجاميع ─────────────────────────────────────────────── */}
       {totals && totals.length > 0 && (
         <div className="flex justify-start">
-          <div className="w-full max-w-sm overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+          <div className="w-full max-w-sm overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm">
             {totals.map((t, i) => (
               <div
                 key={`${t.label}-${i}`}
                 className={`flex items-baseline justify-between gap-4 px-4 py-2 ${
                   t.emphasis
-                    ? "border-t-2 border-slate-800 bg-slate-50 dark:bg-slate-900/40"
+                    ? "border-t-2 border-slate-800 bg-[var(--color-surface-2)]"
                     : "border-b border-slate-100 last:border-0 dark:border-slate-700"
                 }`}
               >
                 <span
                   className={
                     t.emphasis
-                      ? "text-sm font-black text-slate-900 dark:text-white"
-                      : "text-[12px] text-slate-500"
+                      ? "text-sm font-black text-[var(--color-text)]"
+                      : "text-[12px] text-[var(--color-text-muted)]"
                   }
                 >
                   {t.label}
@@ -356,7 +356,7 @@ export function AseelDocumentView<T>({
                   dir="ltr"
                   className={`font-mono ${
                     t.emphasis
-                      ? "text-lg font-black text-slate-900 dark:text-white"
+                      ? "text-lg font-black text-[var(--color-text)]"
                       : `text-[13px] font-semibold ${METRIC_VALUE_TONE[t.tone || "muted"]}`
                   }`}
                 >
@@ -372,16 +372,16 @@ export function AseelDocumentView<T>({
       {sections?.map((s) => (
         <div
           key={s.key}
-          className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800"
+          className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm"
         >
-          <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200">
+          <div className="border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs font-bold text-[var(--color-text)]">
             {s.title}
           </div>
           <div className="p-3 text-[12px]">{s.content}</div>
         </div>
       ))}
 
-      {footer && <div className="text-[11px] text-slate-500">{footer}</div>}
+      {footer && <div className="text-[11px] text-[var(--color-text-muted)]">{footer}</div>}
     </div>
   );
 }

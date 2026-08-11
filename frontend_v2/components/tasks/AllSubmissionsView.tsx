@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Task, User, Submission } from '../../types';
 import { Check, X, Download, Eye, Clock, AlertCircle, Filter, Search, ExternalLink, Mail, Phone } from 'lucide-react';
+import { formatDateValue, formatTimeValue } from "../../utils/formatDate";
 
 interface AllSubmissionsViewProps {
   task: Task;
@@ -119,21 +120,21 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 md:p-6">
+    <div className="bg-[var(--color-surface)] rounded-xl shadow-sm border border-[var(--color-border)] p-4 md:p-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+          <h2 className="text-2xl font-bold text-[var(--color-text)]">
             تسليمات المهمة: {task.title}
           </h2>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">
+          <p className="text-[var(--color-text-muted)] mt-1">
             عرض جميع تسليمات الموظفين في صفحة واحدة
           </p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={handleDownloadAllSubmissions}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface-3)] text-[var(--color-text)] rounded-lg hover:bg-[var(--color-surface-3)] transition-colors"
           >
             <Download className="w-4 h-4" />
             تحميل الكل
@@ -149,8 +150,8 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
               <span className="text-blue-600 dark:text-blue-400 font-bold">{stats.total}</span>
             </div>
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">المعينين</p>
-              <p className="font-bold text-gray-900 dark:text-white">الكل</p>
+              <p className="text-xs text-[var(--color-text-muted)]">المعينين</p>
+              <p className="font-bold text-[var(--color-text)]">الكل</p>
             </div>
           </div>
         </div>
@@ -160,8 +161,8 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
               <span className="text-green-600 dark:text-green-400 font-bold">{stats.approved}</span>
             </div>
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">مقبول</p>
-              <p className="font-bold text-gray-900 dark:text-white">مقبول</p>
+              <p className="text-xs text-[var(--color-text-muted)]">مقبول</p>
+              <p className="font-bold text-[var(--color-text)]">مقبول</p>
             </div>
           </div>
         </div>
@@ -171,8 +172,8 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
               <span className="text-yellow-600 dark:text-yellow-400 font-bold">{stats.pending}</span>
             </div>
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">قيد المراجعة</p>
-              <p className="font-bold text-gray-900 dark:text-white">قيد المراجعة</p>
+              <p className="text-xs text-[var(--color-text-muted)]">قيد المراجعة</p>
+              <p className="font-bold text-[var(--color-text)]">قيد المراجعة</p>
             </div>
           </div>
         </div>
@@ -182,8 +183,8 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
               <span className="text-red-600 dark:text-red-400 font-bold">{stats.rejected}</span>
             </div>
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">مرفوض</p>
-              <p className="font-bold text-gray-900 dark:text-white">مرفوض</p>
+              <p className="text-xs text-[var(--color-text-muted)]">مرفوض</p>
+              <p className="font-bold text-[var(--color-text)]">مرفوض</p>
             </div>
           </div>
         </div>
@@ -193,8 +194,8 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
               <span className="text-purple-600 dark:text-purple-400 font-bold">{stats.submitted}</span>
             </div>
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">مسلمة</p>
-              <p className="font-bold text-gray-900 dark:text-white">مسلمة</p>
+              <p className="text-xs text-[var(--color-text-muted)]">مسلمة</p>
+              <p className="font-bold text-[var(--color-text)]">مسلمة</p>
             </div>
           </div>
         </div>
@@ -204,8 +205,8 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
               <span className="text-orange-600 dark:text-orange-400 font-bold">{stats.overdue}</span>
             </div>
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">متأخر</p>
-              <p className="font-bold text-gray-900 dark:text-white">متأخر</p>
+              <p className="text-xs text-[var(--color-text-muted)]">متأخر</p>
+              <p className="font-bold text-[var(--color-text)]">متأخر</p>
             </div>
           </div>
         </div>
@@ -215,8 +216,8 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
               <span className="text-indigo-600 dark:text-indigo-400 font-bold">{stats.withNewItems}</span>
             </div>
             <div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">جديد</p>
-              <p className="font-bold text-gray-900 dark:text-white">بنود جديدة</p>
+              <p className="text-xs text-[var(--color-text-muted)]">جديد</p>
+              <p className="font-bold text-[var(--color-text)]">بنود جديدة</p>
             </div>
           </div>
         </div>
@@ -225,22 +226,22 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
       {/* Filters */}
       <div className="flex flex-col md:flex-row gap-4 mb-6">
         <div className="flex-1 relative">
-          <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+          <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--color-text-muted)] w-5 h-5" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="ابحث عن موظف أو حالة..."
-            className="w-full pr-10 pl-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+            className="w-full pr-10 pl-4 py-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] focus:ring-2 focus:ring-blue-500"
           />
         </div>
         <div className="w-full md:w-64">
           <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-gray-400" />
+            <Filter className="w-4 h-4 text-[var(--color-text-muted)]" />
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              className="w-full px-4 py-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)]"
             >
               <option value="all">جميع الحالات</option>
               <option value="pending">قيد المراجعة</option>
@@ -256,54 +257,54 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
       {/* Users Table */}
       <div className="overflow-x-auto">
         <table className="w-full min-w-max">
-          <thead className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-[var(--color-surface-2)] border-b border-[var(--color-border)]">
             <tr>
-              <th className="py-3 px-4 text-right font-semibold text-gray-700 dark:text-gray-300">
+              <th className="py-3 px-4 text-right font-semibold text-[var(--color-text)]">
                 الموظف
               </th>
-              <th className="py-3 px-4 text-right font-semibold text-gray-700 dark:text-gray-300">
+              <th className="py-3 px-4 text-right font-semibold text-[var(--color-text)]">
                 حالة التسليم
               </th>
-              <th className="py-3 px-4 text-right font-semibold text-gray-700 dark:text-gray-300">
+              <th className="py-3 px-4 text-right font-semibold text-[var(--color-text)]">
                 آخر تسليم
               </th>
-              <th className="py-3 px-4 text-right font-semibold text-gray-700 dark:text-gray-300">
+              <th className="py-3 px-4 text-right font-semibold text-[var(--color-text)]">
                 عدد البنود
               </th>
-              <th className="py-3 px-4 text-right font-semibold text-gray-700 dark:text-gray-300">
+              <th className="py-3 px-4 text-right font-semibold text-[var(--color-text)]">
                 الإجراءات
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+          <tbody className="divide-y divide-[var(--color-border)]">
             {filteredData.map((data) => (
               <tr 
                 key={data.userId} 
-                className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors ${
+                className={`hover:bg-[var(--color-surface-2)] transition-colors ${
                   selectedUser === data.userId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
                 }`}
                 onClick={() => setSelectedUser(data.userId === selectedUser ? null : data.userId)}
               >
                 <td className="py-4 px-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
-                      <span className="font-bold text-gray-700 dark:text-gray-300">
+                    <div className="w-10 h-10 bg-[var(--color-surface-3)] rounded-full flex items-center justify-center">
+                      <span className="font-bold text-[var(--color-text)]">
                         {data.user?.name?.charAt(0) || '?'}
                       </span>
                     </div>
                     <div>
-                      <h4 className="font-bold text-gray-900 dark:text-white">
+                      <h4 className="font-bold text-[var(--color-text)]">
                         {data.user?.name}
                       </h4>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {data.user?.email && (
-                          <span className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                          <span className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
                             <Mail className="w-3 h-3" />
                             {data.user.email}
                           </span>
                         )}
                         {data.user?.phone && (
-                          <span className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                          <span className="flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
                             <Phone className="w-3 h-3" />
                             {data.user.phone}
                           </span>
@@ -342,7 +343,7 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
                       مسلمة
                     </span>
                   ) : (
-                    <span className="px-3 py-1 bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded-full text-xs font-medium">
+                    <span className="px-3 py-1 bg-[var(--color-surface-3)] text-[var(--color-text)] rounded-full text-xs font-medium">
                       لم يسلم
                     </span>
                   )}
@@ -350,34 +351,34 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
                 <td className="py-4 px-4">
                   {data.latestSubmission ? (
                     <div className="space-y-1">
-                      <span className="text-sm text-gray-900 dark:text-white block">
-                        {new Date(data.latestSubmission.createdAt).toLocaleDateString('ar-EG')}
+                      <span className="text-sm text-[var(--color-text)] block">
+                        {formatDateValue(data.latestSubmission.createdAt)}
                       </span>
-                      <span className="text-xs text-gray-500 dark:text-gray-400 block">
-                        {new Date(data.latestSubmission.createdAt).toLocaleTimeString('ar-EG')}
+                      <span className="text-xs text-[var(--color-text-muted)] block">
+                        {formatTimeValue(data.latestSubmission.createdAt)}
                       </span>
                       {data.latestSubmission.reviewedAt && (
-                        <span className="text-xs text-gray-500 dark:text-gray-400 block">
-                          مراجعة: {new Date(data.latestSubmission.reviewedAt).toLocaleDateString('ar-EG')}
+                        <span className="text-xs text-[var(--color-text-muted)] block">
+                          مراجعة: {formatDateValue(data.latestSubmission.reviewedAt)}
                         </span>
                       )}
                     </div>
                   ) : (
-                    <span className="text-gray-500 dark:text-gray-400">لا يوجد</span>
+                    <span className="text-[var(--color-text-muted)]">لا يوجد</span>
                   )}
                 </td>
                 <td className="py-4 px-4">
                   {data.latestSubmission ? (
                     <div className="space-y-1">
-                      <span className="font-medium text-gray-900 dark:text-white block">
+                      <span className="font-medium text-[var(--color-text)] block">
                         {data.submissionCount} تسليم
                       </span>
-                      <span className="text-sm text-gray-600 dark:text-gray-300 block">
+                      <span className="text-sm text-[var(--color-text-muted)] block">
                         {data.latestSubmission.items?.length || 0} بند
                       </span>
                     </div>
                   ) : (
-                    <span className="text-gray-500 dark:text-gray-400">0</span>
+                    <span className="text-[var(--color-text-muted)]">0</span>
                   )}
                 </td>
                 <td className="py-4 px-4">
@@ -425,7 +426,7 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
                             e.stopPropagation();
                             window.open(`/tasks/${task.id}/submissions/${data.latestSubmission!.id}`, '_blank');
                           }}
-                          className="p-2 text-gray-600 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                          className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] rounded-lg transition-colors"
                           title="فتح في نافذة جديدة"
                         >
                           <ExternalLink className="w-4 h-4" />
@@ -453,8 +454,8 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
       </div>
 
       {filteredData.length === 0 && (
-        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-          <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
+        <div className="text-center py-12 text-[var(--color-text-muted)]">
+          <div className="w-16 h-16 mx-auto mb-4 bg-[var(--color-surface-3)] rounded-full flex items-center justify-center">
             <Search className="w-8 h-8" />
           </div>
           <p className="text-lg">لا توجد نتائج مطابقة</p>

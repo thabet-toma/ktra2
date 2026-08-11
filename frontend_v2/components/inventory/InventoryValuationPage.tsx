@@ -235,7 +235,6 @@ export const InventoryValuationPage: React.FC = () => {
     <div
       dir="rtl"
       style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }}
-      data-skin="aseel"
     >
       {/* Header bar */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
