@@ -42,6 +42,7 @@
 | P0-9 | تقرير أعمار الدائنين: ≥6 استعلامات لكل فاتورة على كل الفواتير المرحّلة منذ النشأة (بلا فلتر تاريخ) — ~20 ألف استعلام/طلب | `core/reports.py:921-928` → `logistics/services.py:479,489-490,497-498,506` | نصف يوم (prefetch أو تجميع SQL) | أداء |
 | P0-10 | فهارس `StockMovement` — أضخم جدول بلا أي فهرس مركّب، وقائمته بلا `order_by` حتمي | `inventory/models.py:261-264` · استعلامات: `inventory/views.py:694-733`، `inventory/services.py:901-903`، `core/reports.py:1180-1190` | نصف يوم (migration واحد) | أداء |
 | P0-11 | فهارس `JournalLine` — فهرس واحد `(tenant,account)` لأكبر جدول محاسبي؛ تقرير أرصدة الشركاء = full scan | `accounting/models.py:152-155` · `core/reports.py:999-1006` · `accounting/views.py:622-655` | ضمن migration P0-10 | أداء |
+| 🆕 P0-13 | نقطة تسجيل الدخول **خارج سلسلة throttle كلياً**: دالة Django عادية لا view من DRF ⇒ لا `DEFAULT_THROTTLE_CLASSES` يمسّها، ولا قفل حساب في المشروع ⇒ تخمين كلمات مرور بلا سقف + استنزاف CPU على PBKDF2 | `hr/auth_api.py:165` · `hr/urls.py:35` · التفصيل في §1.7 | ساعتان | **أمن — مكتشَف في المرحلة 5، مفتوح** |
 | P0-12 | شاشة الأصناف: حلقة تجلب كل الصفحات (`page_size=200`) وترندر كل الصفوف بلا virtualization، ويُعاد كل ذلك على كل حرف بحث (debounce 250ms) — 1490 صنفاً = 8 طلبات متسلسلة × كل دورة بحث | `frontend_v2/components/items/ItemsManagement.tsx:102,148-152` · `frontend_v2/services/inventoryApi.ts:124-139` | يوم | واجهة |
 
 ## جدول P1 — يبطّئ بوضوح
@@ -115,6 +116,13 @@ def paginate_queryset(self, queryset, request, view=None):
 
 ### 1.6 Throttle — accountant_portal فقط
 6 مواضع كلها في `accountant_portal/views.py` (`:171,254,275,458,490,591`) بمعدلات 5–60/ساعة. **صفر throttle على بقية النظام** (تحقق بـgrep). وعدّادات الـthrottle الموجودة على FileBasedCache ⇒ عرضة للسباق والحذف العشوائي (§1.1).
+
+**تحديث المرحلة 5 (P0-7 منفّذ 2026-08-11):** `UserRateThrottle`/`AnonRateThrottle` صارا في `DEFAULT_THROTTLE_CLASSES` بمعدّلات `300/min` و`60/min` (قابلة للضبط بـ`THROTTLE_RATE_USER`/`THROTTLE_RATE_ANON`). حقيقتان انكشفتا أثناء التنفيذ وتغيّران قراءة هذا البند:
+- **نطاق `anon` أضيق مما يبدو:** `APIView.initial` ينفّذ `check_permissions` **قبل** `check_throttles`، فالطلب المجهول على نقطة تتطلب مصادقة يُردّ 401 ولا يُحتسَب في العدّاد. النقطة الوحيدة بـ`AllowAny` في المشروع كله هي `CurrencyViewSet` (`accounting/views.py:1884`) — فـ`anon` عملياً يحرسها وحدها ويبقى احتياطاً لأي نقطة عامة مستقبلية. (مغطّى باختبارين في `core/tests/test_global_throttle.py`.)
+- **النافذة بالدقيقة لا بالساعة عمداً:** `SimpleRateThrottle` يخزّن طابعاً زمنياً لكل طلب داخل النافذة ويقرأ/يكتب القائمة كاملة عند كل طلب — نافذة `3000/hour` تعني pickle بـ3000 عنصراً لكل طلب على FileBasedCache، أي أن الحارس نفسه يصير الاختناق.
+
+### 1.7 نقطة تسجيل الدخول خارج سلسلة الـthrottle كلياً — **مكتشَف في المرحلة 5**
+`hr/auth_api.py:165` (`login_view`، المربوطة على `api/hr/auth/login/`) **ليست view من DRF** — دالة Django عادية بـ`@csrf_exempt` تُرجِع `JsonResponse`. لا `DEFAULT_THROTTLE_CLASSES` يمسّها ولا أي آلية قفل حساب في المشروع (grep على `ratelimit`/`lockout`/`axes` = صفر نتائج). النتيجة: **تخمين كلمات المرور بلا أي سقف**، وكل محاولة = استعلام `User` + `check_password` (تجزئة PBKDF2 مقصودة البطء) ⇒ سطح استنزاف CPU أيضاً. الإصلاح ليس في `DEFAULT_THROTTLE_RATES` بل حدّ صريح على النقطة نفسها (تحويلها لـ`@api_view` بـ`ScopedRateThrottle`، أو حدّ يدوي على الكاش بمفتاح IP+بريد). مسجَّل كـ**P0-13** في الجدول أعلاه.
 
 ---
 

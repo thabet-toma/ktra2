@@ -408,10 +408,31 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
         "core.permissions.TenantRolePermission",
     ],
+    # المرحلة 5 / P0-7 (SCALABILITY_AUDIT §1.6): قبل هذا كان الـthrottle
+    # مقتصراً على 6 نقاط في accountant_portal، فكل مسارات ERP الفعلية بلا أي
+    # حدّ معدّل ⇒ عميل واحد عالق في حلقة إعادة جلب يشبع كل الـworkers.
+    # ScopedRateThrottle يبقى أولاً (لا يعترض إلا الـviews التي تعرّف
+    # throttle_scope)، ويليه الحدّان العامّان.
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.ScopedRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
     ],
+    # النافذة بالدقيقة لا بالساعة عن قصد: SimpleRateThrottle يخزّن طابعاً زمنياً
+    # لكل طلب داخل النافذة ويقرأ/يكتب القائمة كاملة في الكاش عند كل طلب، فنافذة
+    # «3000/hour» تعني pickle بـ3000 عنصراً لكل طلب — الحارس نفسه يصير اختناقاً.
+    # الحدّ هنا يمنع الإشباع (سقف الطلبات المتزامنة ~20 بعد P0-1) لا الاستخدام:
+    # 300/دقيقة = 5 طلبات/ثانية لمستخدم واحد، أضعاف ما تُصدره أثقل شاشة.
+    "NUM_PROXIES": (
+        int(os.environ["DRF_NUM_PROXIES"])
+        if os.environ.get("DRF_NUM_PROXIES", "").strip().isdigit()
+        else None
+    ),
     "DEFAULT_THROTTLE_RATES": {
+        # قابلان للضبط من البيئة كي يُوسَّعا بلا نشر كود لو ضيّقا على استخدام فعلي.
+        "user": os.environ.get("THROTTLE_RATE_USER", "300/min"),
+        # المجهول = تسجيل الدخول وصفحات العرض العامة؛ أضيق لأنه سطح إساءة الاستخدام.
+        "anon": os.environ.get("THROTTLE_RATE_ANON", "60/min"),
         "accountant_signup": "5/hour",
         "accountant_verify": "10/hour",
         "accountant_invite": "20/hour",
