@@ -272,16 +272,19 @@ class ReportEngineTest(APITestCase):
     # ── القصّ لا يكذب ────────────────────────────────────────────────
     def test_truncation_trims_rows_but_never_the_totals(self):
         """التقرير الضخم يُقصّ للعرض؛ الإجمالي يبقى على الصفوف كلها."""
-        from core import reports as reports_module
+        # بعد تفكيك core/reports إلى حزمة (المرحلة 3): run_report وMAX_ROWS في
+        # core.reports._framework، وrun_report يقرأ MAX_ROWS من فضاء اسمها هناك —
+        # فالـpatch على الموضع الذي تُقرأ منه القيمة فعلاً (لا على إعادة التصدير).
+        from core.reports import _framework as reports_framework
 
-        original = reports_module.MAX_ROWS
-        reports_module.MAX_ROWS = 2
+        original = reports_framework.MAX_ROWS
+        reports_framework.MAX_ROWS = 2
         try:
             for day in range(1, 5):
                 self._post_line(f"2026-07-0{day}", Decimal("10"), Decimal("0"))
             res = self._run("general-journal")
         finally:
-            reports_module.MAX_ROWS = original
+            reports_framework.MAX_ROWS = original
 
         self.assertTrue(res.data["truncated"])
         self.assertEqual(len(res.data["rows"]), 2)

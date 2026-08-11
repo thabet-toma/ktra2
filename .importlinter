@@ -134,7 +134,8 @@ ignore_imports =
     accountant_portal.services -> accounting.models
     core.dashboard_api -> accounting.models
     core.platform_admin_api -> accounting.models
-    core.reports -> accounting.models
+    # المرحلة 3: core/reports.py صار حزمة — استيراد accounting.models كسول في وحداتها
+    core.reports.* -> accounting.models
     hr.payroll -> accounting.models
     inventory.services -> accounting.models
     inventory.management.commands.recompute_moving_wac_cogs -> accounting.models
