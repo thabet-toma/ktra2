@@ -33,7 +33,7 @@
 |---|---|---|---|---|
 | ✅ P0-1 | gunicorn: 3 sync workers، بلا `--timeout` مخصص (مهلة المساعد 60–120ث > مهلة gunicorn 30ث)، إعادة تشغيل بـ`pkill` (انقطاع كامل) | `deploy.ps1:189-195` · `core/settings.py:302-304,329` | ساعة | نشر |
 | ✅ P0-2 | نقطة SQL خام بلا مصادقة ولا فلترة tenant — قراءة بيانات كل الشركات بمفتاح ثابت واحد، والمرشّح قائمة سوداء regex قابلة للتجاوز | `core/agent_db_view.py:48-51,24-32,81` · `core/urls.py:54` | ساعة (حذف/تقييد) | **أمن — منفّذ** |
-| ⚠️ P0-3 | مجموعات bridge «عالمية» مشتركة: أي مستخدم من أي شركة يقرأ `attendanceRecords`/`pointsHistory`/`attendanceSessions`/`departments` لكل الشركات | `bridge/views.py:21-29,43-44,200-202` | **يحتاج هجرة نسبة (userId↔tenant)** لا سطر تهيئة — راجع REFACTOR_PROMPTS «درس مراجعة الكود» | **أمن — مؤجَّل (مفتوح)** |
+| ✅ P0-3 | مجموعات bridge «عالمية» مشتركة: أي مستخدم من أي شركة يقرأ `attendanceRecords`/`pointsHistory`/`attendanceSessions` لكل الشركات | `bridge/views.py` · `bridge/migrations/0005_*` | هجرة نسبة تستخرج المالك من بنية الوثيقة نفسها (مسار `pointsHistory`، أو `userId`/`createdBy` في الحمولة) ثم `UserCompanyMembership`. ما لا يُحسم مالكه يبقى NULL ⇒ لا تقرؤه أي شركة. `departments` محتوى عام فعلاً فبقيت عالمية — لم تكن يوماً جزءاً من التسريب | **أمن — منفّذ 2026-08-11** |
 | ✅ P0-4 | bridge يتبنّى الوثائق يتيمة الـtenant: أي وثيقة `tenant_id=NULL` مقروءة وقابلة للكتابة والاستيلاء من أي شركة | `bridge/views.py:353-359,417-420,458-461` | ساعتان | **أمن — منفّذ** |
 | ✅ P0-5 | الترقيم opt-in — فرضه على endpoints الفئة أ (حركات مخزون، قيود، فواتير بيع/شراء، صفقات، مدفوعات) مع تعديل مستهلكي الواجهة | `core/pagination.py:16-19` · القائمة الكاملة في §2 | 2-3 أيام (backend+frontend معاً) | أداء |
 | ✅ P0-6 | Redis بدل FileBasedCache (أو على الأقل LocMemCache+رفع MAX_ENTRIES مرحلياً) — الكاش الحالي يتصرف كأنه معطّل تحت الحمل وعدّادات الـthrottle عليه | `core/settings.py:352-358` | نصف يوم | أداء |
@@ -47,42 +47,49 @@
 
 ## جدول P1 — يبطّئ بوضوح
 
+> **تحديث 2026-08-11 (جلسة «كل النواقص»):** كل بنود P1 القابلة للتنفيذ نُفِّذت.
+> المتبقّي منها ثلاثة فقط وبأسباب موثّقة: **P1-11** (مؤجَّل بقرار)، و**P1-12/P1-13**
+> (قرارهما Celery وهو معلَّق على قياس المرحلة 6).
+
 | # | البند | الدليل | الجهد |
 |---|---|---|---|
-| P1-1 | N+1 في قائمة إرساليات البيع: `partner` خارج `select_related` و`invoice__lines` خارج `prefetch` = استعلانان لكل صف | `sales/serializers.py:901-904,912-921` · الإصلاح سطران في `sales/views.py:737-739` | ساعة |
-| P1-2 | تقرير Landed Cost: N+1 متداخل ثلاثي ≈ 4,000 استعلام/طلب | `logistics/views.py:4588-4650` | نصف يوم |
-| P1-3 | دفتر الأستاذ العام: توسيع شجرة الحسابات تعاودياً (استعلانان/حساب) + `journal.currency` غير مسبّق (استعلام/سطر) + بلا ترقيم إطلاقاً | `accounting/views.py:594-614,682` | نصف يوم |
-| P1-4 | فهارس المدفوعات: `CustomerPayment`/`SupplierPayment` بلا `indexes` إطلاقاً؛ `PurchaseInvoice` فهارسه لا تطابق أنماط الفلترة الفعلية؛ `Partner` الجدول الأساسي بلا فهارس؛ `SalesInvoice` فهرسه لا يخدم الترتيب `-invoice_date,-id` | `sales/models.py:818-820,862-864,543-545` · `logistics/models.py:1618-1622` · `partners/models.py:76` | ضمن migration الفهارس |
-| P1-5 | `LogisticsPayment` بلا حقل tenant أصلاً — العزل بـ`OR` عبر جدولين (union/scan) | `logistics/models.py:746-801` · `logistics/views.py:1332-1336` · `core/dashboard_api.py:285-287` | يوم (migration بيانات) |
+| ✅ P1-1 | N+1 في قائمة إرساليات البيع: `partner` خارج `select_related` و`invoice__lines` خارج `prefetch` = استعلانان لكل صف | `sales/serializers.py:901-904,912-921` · الإصلاح سطران في `sales/views.py:737-739` | ساعة |
+| ✅ P1-2 | تقرير Landed Cost: N+1 متداخل ثلاثي ≈ 4,000 استعلام/طلب — *(قِيس: 3 شحنات = 41 استعلاماً مقابل 17 لشحنة واحدة؛ صار ثابتاً. `tenant` كان أيضاً خارج select_related)* | `logistics/views/reports.py` | نصف يوم |
+| ✅ P1-3 | دفتر الأستاذ العام: توسيع شجرة الحسابات تعاودياً (استعلانان/حساب) + `journal.currency` غير مسبّق (استعلام/سطر) + بلا ترقيم إطلاقاً — *(قِيس: جذر شجرة من ٧ حسابات = 23 استعلاماً مقابل 13 لورقة؛ صار ثابتاً. السقف 5000 سطر مع `truncated`/`total_count` معلَنين)* | `accounting/views.py:594-614,682` | نصف يوم |
+| ✅ P1-4 | فهارس المدفوعات: `CustomerPayment`/`SupplierPayment` بلا `indexes` إطلاقاً؛ `PurchaseInvoice` فهارسه لا تطابق أنماط الفلترة الفعلية؛ `Partner` الجدول الأساسي بلا فهارس؛ `SalesInvoice` فهرسه لا يخدم الترتيب `-invoice_date,-id` | `sales/models.py` · `logistics/models.py` · `partners/models.py` | ضمن migration الفهارس |
+| ✅ P1-5 | `LogisticsPayment` بلا حقل tenant أصلاً — العزل بـ`OR` عبر جدولين (union/scan) — *(الحقل مشتقّ في `save()` من الصفقة/الشحنة فلا موضع إنشاء يحتاج تعديلاً؛ mig 0072+0073)* | `logistics/models.py` · `logistics/views/deals.py` · `core/dashboard_api.py` | يوم (migration بيانات) |
 | ✅ P1-6 | فحص عكس القيد بلا tenant: full scan على قيود كل المنصة + تسريب معلومات جانبي + خلل وظيفي (تصادم reference_id بين شركات) | `accounting/views.py:410` | ساعة |
 | ✅ P1-7 | 4 مواضع `get_queryset` بلا `.none()` عند غياب tenant (نفس نمط ثغرة task11 M7 المُصلَحة سابقاً) + `realestate.TenantScopedViewSet` لا يفلتر بنفسه | `tenants/views.py:52,103` · `sales/views.py:751,1567` · `realestate/views.py:20-33` | ساعتان |
 | ✅ P1-8 | `PrimaryKeyRelatedField` بـ`objects.all()` يقبل pk من أي شركة عند الكتابة (الـget_queryset يحمي القراءة فقط) | `sales/serializers.py:243` — نمط يستحق مسحاً شاملاً | نصف يوم |
-| P1-9 | واجهة: `listPickerProducts` بلا حدّ (609KB × 9 شاشات، موثّق في الكود نفسه) + إعادة جلب الجداول الكاملة على كل `focus`/`visibilitychange` لكل تبويب مفتوح | `frontend_v2/services/inventoryApi.ts:471-480` · `firestoreService.ts:1406-1411` · `sqlApiClient.ts:224-226` | يوم |
-| 🟨 P1-10 | واجهة: شاشات تجلب جداول كاملة — *(تحديث المرحلة 5: تقييم المخزون صار تجميعاً خادمياً، شاشة القيد أحدث 200، وفخّ `page_size` بلا `page` زال بالترقيم الإلزامي — المتبقي `activityService.ts` وأشباهه خارج الفئة أ)* | `InventoryValuationPage.tsx:130-136` · `AccountingJournalEntryPage.tsx:291` · `activityService.ts:34` · `GoodsReceiptsPage.tsx:167` | يوم |
-| P1-11 | لا virtualization في أي جدول (صفر نتائج بحث عن react-window وأشباهه) — 10 آلاف صنف ≈ 80 ألف عقدة DOM | `AseelDenseTable.tsx:232` · `GroupedItemsTable.tsx:59` | يوم-يومان |
-| P1-12 | ترحيل/إلغاء ترحيل دفعي لفواتير الشحنة داخل طلب واحد و`transaction.atomic` طويلة؛ واستلام مخزون الشحنة داخل signal (مئات الحركات لحفظة واحدة) | `logistics/views.py:3260-3360` · `logistics/signals.py:244-261` → `inventory/services.py:431-528` | مرشّح Celery (المرحلة 6) |
-| P1-13 | `_recompute_product_stock`: `select_for_update()` + إعادة تشغيل كل حركات الصنف — تنازع أقفال لا-خطي على الأصناف الشائعة | `inventory/services.py:268-299,323-324` | مرشّح Celery/إعادة تصميم |
-| P1-14 | `BrowsableAPIRenderer` مفعّل في الإنتاج (لا `DEFAULT_RENDERER_CLASSES`) | `core/settings.py:363-391` | نصف ساعة |
-| P1-15 | توليد المراجع التسلسلية بتحميل كل الأرقام في بايثون + سباق تحت التزامن | `logistics/views.py:500-510,1459-1473` · `accounting/services.py:226-228` (حتى 9000 `exists()`) | نصف يوم |
+| ✅ P1-9 | واجهة: `listPickerProducts` بلا حدّ (609KB × 9 شاشات، موثّق في الكود نفسه) + إعادة جلب الجداول الكاملة على كل `focus`/`visibilitychange` لكل تبويب مفتوح — *(نافذة 60ث لكل شركة + دمج الطلبات المتزامنة + إفراغ صريح من كل مسارات كتابة الأصناف؛ وتهدئة 60ث على `focus`/`visibilitychange` — عودة تبويب واحدة كانت تُطلق **جلبتين** لأن الحدثين يقعان معاً)* | `frontend_v2/services/inventoryApi.ts` · `firestoreService.ts` · `sqlApiClient.ts` | يوم |
+| ✅ P1-10 | واجهة: شاشات تجلب جداول كاملة — **فُحص فوجِد مُغلقاً سلفاً، بلا تغيير:** `GoodsReceiptsPage` يمرّر `page=1` منذ `7460459`، و`activityService` على `PageNumberPagination` عادي (يُرقّم دائماً) فـ`page_size=200` سقفٌ فعلي لا فخّ | `activityService.ts:34` · `GoodsReceiptsPage.tsx:167` | — |
+| ⬜ P1-11 | لا virtualization في أي جدول — **مؤجَّل بقرار:** `AseelDenseTable` هدف طباعة (`aseel-print-hidden`)، والنافذة المرئية تعني طباعة ~20 صفاً بدل الجدول كاملاً؛ وقيمته استُهلكت أصلاً بـP0-5/P0-12 (الشاشات صارت 50-200 صفاً خادمياً لا 10 آلاف) | `AseelDenseTable.tsx:232` · `GroupedItemsTable.tsx:59` | يوم-يومان |
+| ⬜ P1-12 | ترحيل/إلغاء ترحيل دفعي لفواتير الشحنة داخل طلب واحد و`transaction.atomic` طويلة؛ واستلام مخزون الشحنة داخل signal (مئات الحركات لحفظة واحدة) | `logistics/views/` · `logistics/signals.py` → `inventory/services.py` | **مرشّح Celery — القرار معلَّق على قياس المرحلة 6** |
+| ⬜ P1-13 | `_recompute_product_stock`: `select_for_update()` + إعادة تشغيل كل حركات الصنف — تنازع أقفال لا-خطي على الأصناف الشائعة | `inventory/services.py:268-299,323-324` | **مرشّح Celery — نفس القرار** |
+| ✅ P1-14 | `BrowsableAPIRenderer` مفعّل في الإنتاج (لا `DEFAULT_RENDERER_CLASSES`) | `core/settings.py` | نصف ساعة |
+| ✅ P1-15 | توليد المراجع التسلسلية بتحميل كل الأرقام في بايثون + سباق تحت التزامن — *(الأقصى صار في القاعدة بـ`Cast(Substr(...))`؛ وحلقة الـ9000 `exists()` حُذفت لأن `subtree` يعرف المشغول أصلاً، والحارس الصحيح صار قيد الفريدة مع إعادة محاولة — الفحص المسبق لم يكن يمنع السباق أصلاً)* | `logistics/views/deals.py` · `accounting/services.py` | نصف يوم |
 
 ## جدول P2 — دين تقني
 
+> **تحديث 2026-08-11 (جلسة «كل النواقص»):** نُفِّذ 11 من 14. المتبقي ثلاثة،
+> اثنان منها **مفتوحان بقرار** لا بإهمال (P2-1 و P2-14) وواحد منفَّذ جزئياً (P2-2).
+
 | # | البند | الدليل |
 |---|---|---|
-| P2-1 | `NoStoreAPIMiddleware` يضع `no-store` على كل `/api/` — صفر كاش متصفح حتى للثوابت (عملات، تصنيفات) | `core/cache_control_middleware.py:16-30` |
-| P2-2 | استعلام DB للتوكن كل طلب (TokenAuthentication قياسي بلا كاش) + جلسات في القاعدة + `Tenant.objects.count()` مرتين في المسار الساخن | `core/settings.py:368-371` · `core/tenant_utils.py:46,89,96` |
-| P2-3 | لا كاش على أي تقرير أو قائمة — `core/reports.py` (2,350 سطراً) بلا سطر كاش واحد؛ `MAX_ROWS=5000` يقصّ **بعد** بناء كل الصفوف في الذاكرة | `core/reports.py:200-211` |
-| P2-4 | `init_command` يعطّل `foreign_key_checks` على كل اتصال إنتاجي | `core/settings.py:176` |
-| P2-5 | تناقض النشر: `deploy.ps1` يطالب بـPython 3.12 «لأن المشروع Django 6» بينما requirements يثبّت 5.1 لأن السيرفر 3.10 | `deploy.ps1:228-231` · `requirements.txt:9-11` |
-| P2-6 | لا `SECURE_PROXY_SSL_HEADER`/`SECURE_SSL_REDIRECT` خلف الخادم الأمامي؛ CORS regex يسمح بأي منفذ localhost حتى في الإنتاج | `core/settings.py:75-79,264-267` |
-| P2-7 | `puppeteer` (~300MB) في `dependencies` بدل `devDependencies` | `frontend_v2/package.json` |
-| P2-8 | `firestoreService` (2,600+ سطر) مستورَد ثابتاً في shell الواجهة — منطق المشتريات كله في الـmain chunk | `frontend_v2/App.tsx:32-47` |
-| P2-9 | ~10 طلبات إقلاع مبعثرة قبل رسم أي شاشة (4 منها قابلة للدمج في bootstrap واحد) + لا caching/dedup طلبات (كاش IndexedDB يُكتب دائماً ولا يُقرأ إلا أوفلاين) | `frontend_v2/contexts/*.tsx` · `restApi.ts:184-215,292` |
-| P2-10 | ثلاث طبقات HTTP متوازية في الواجهة — 109 استدعاء `fetch` خام بلا مهلة/retry في `inventoryApi`/`accountingApi` | `frontend_v2/services/inventoryApi.ts` · `accountingApi.ts` |
-| P2-11 | `hr/user_api.py` — `user_detail` متاح لأي `is_staff` عبر الشركات | `hr/user_api.py:23-26` |
-| P2-12 | مواضع `order_by` غير حتمي تمنع ترقيماً مستقراً | `inventory/views.py:694` · `accounting/views.py:81,182` |
-| P2-13 | ترتيب أعمار الذمم المدينة: حلقة على كل فواتير الآجل منذ البداية بلا فلتر تاريخ | `sales/views.py:1259-1288` |
-| P2-14 | قائمة أسعار العميل: تحميل كل بنود فواتير العميل + كل عروضه + كل منتجات الشركة | `sales/views.py:1228-1236` → `sales/services.py:2860-2960` |
+| ⬜ P2-1 | `NoStoreAPIMiddleware` يضع `no-store` على كل `/api/` — صفر كاش متصفح حتى للثوابت. **مفتوح بقرار:** الوسيط ضابط أمني مقصود وموثّق (بيانات مالية حسّاسة لا تُكتب على قرص المتصفح) وُضع أصلاً لعلاج بلاغ «بيانات قديمة بعد الترحيل». إسقاط `no-store` يشتري توفير نطاق مقابل تنازل أمني — قرار المالك لا المنفّذ | `core/cache_control_middleware.py:16-30` |
+| 🟨 P2-2 | استعلام DB للتوكن كل طلب + جلسات في القاعدة + `Tenant.objects.count()` مرتين في المسار الساخن. **نُفِّذ شقّ الشركة:** `get_tenant` كانت تعيد استعلام الشركة عند كل استدعاء داخل الطلب الواحد (والطلب يستدعيها مراراً)، وتعدّ الشركات على كل طلب في النشر أحادي الشركة — كلاهما محفوظ على الطلب الآن. **بقي كاش التوكن:** يغيّر دلالة إبطال الجلسة (توكن مسحوب يبقى صالحاً طوال النافذة) فيستحق قراراً مستقلاً | `core/tenant_utils.py` |
+| 🟨 P2-3 | لا كاش على أي تقرير + `MAX_ROWS` يقصّ بعد البناء. **نُفِّذ شقّ الكاش** (نافذة 60ث بمفتاح يحمل الشركة والمستخدم، `REPORT_CACHE_SECONDS=0` يعطّله). **وشقّ MAX_ROWS لا يُلمَس عمداً:** القصّ بعد البناء مقصود وموثّق — الإجماليات تُحسب على الصفوف كاملةً قبله، فدفعه داخل الاستعلام يجعل المجموع يكذب | `core/reports_api.py` · `core/reports/_framework.py:198` |
+| ✅ P2-4 | `init_command` يعطّل `foreign_key_checks` على كل اتصال إنتاجي — *(الفرض صار الافتراضي مع مخرج طوارئ `MYSQL_DISABLE_FK_CHECKS=1`. ⚠️ يحتاج تحقق دخان على MySQL: اختبارات المشروع على SQLite لا تكشف قيود المفاتيح الأجنبية)* | `core/settings.py` |
+| ✅ P2-5 | تناقض النشر: `deploy.ps1` يطالب بـPython 3.12 «لأن المشروع Django 6» بينما requirements يثبّت 5.1 لأن السيرفر 3.10 — *(البوابة كانت تمنع النشر على البيئة الصحيحة نفسها)* | `deploy.ps1` |
+| ✅ P2-6 | لا `SECURE_PROXY_SSL_HEADER`/`SECURE_SSL_REDIRECT` خلف الخادم الأمامي؛ CORS regex يسمح بأي منفذ localhost حتى في الإنتاج — *(`SECURE_SSL_REDIRECT` خلف عَلَم: بلا الترويسة يُنتج حلقة توجيه لا نهائية)* | `core/settings.py` |
+| ✅ P2-7 | `puppeteer` (~300MB) في `dependencies` بدل `devDependencies` — *(مستهلكه الوحيد `check.cjs`، سكربت تطويري لا يستورده كود التطبيق)* | `frontend_v2/package.json` |
+| ✅ P2-8 | `firestoreService` (2,600+ سطر) مستورَد ثابتاً في shell الواجهة — *(**الحزمة الرئيسية 360.59 kB ← 313.63 kB**؛ `AuthContext` كان المرساة الثانية الخفية)* | `frontend_v2/App.tsx` |
+| ✅ P2-9 | ~10 طلبات إقلاع مبعثرة قبل رسم أي شاشة (4 منها قابلة للدمج) — *(`tenants/settings/current/` كانت تُجلب **أربع مرات**: سياقا المظهر والجلسة + الخطّاف مرتين. مصدر مشترك واحد، بلا أي تغيير خادمي)* | `frontend_v2/services/tenantSettingsApi.ts` |
+| ✅ P2-10 | ثلاث طبقات HTTP متوازية — 109 `fetch` خام بلا مهلة/retry. **فُحص فوجِد مُغلقاً سلفاً، بلا تغيير:** الملفان يُظلّلان `fetch` بـ`apiFetch` (مهلة 30ث + إعادة محاولة لـGET). سطر التدقيق قديم | `inventoryApi.ts` · `accountingApi.ts` |
+| ✅ P2-11 | `hr/user_api.py` — `user_detail` متاح لأي `is_staff` عبر الشركات — *(تحقّق سلبي: قبل الإصلاح ردّ 200 ببريد عضو شركة أخرى واسمه ودوره)* | `hr/user_api.py` |
+| ✅ P2-12 | مواضع `order_by` غير حتمي تمنع ترقيماً مستقراً — *(`StockMovement` كان قد عولج ضمن P0-5؛ بقي الشيكات والحسابات)* | `accounting/views.py` |
+| ✅ P2-13 | ترتيب أعمار الذمم المدينة: حلقة على كل فواتير الآجل منذ البداية بلا فلتر تاريخ — *(شرط «المتبقي > 0» صار في القاعدة + مدى تاريخ اختياري)* | `sales/views.py` |
+| ⬜ P2-14 | قائمة أسعار العميل: تحميل كل بنود فواتير العميل + كل عروضه + كل منتجات الشركة. **مفتوح بقرار:** ليست N+1 بل ثلاثة استعلامات محدودة، فالكلفة نطاقٌ لا استعلامات. وإصلاحها الحقيقي (ترقيم/بحث خادمي) **يكسر عقد العميل**: `getCustomerPriceList` يتوقّع مصفوفة كاملة (`salesApi.ts:447`)، وإضافة باراميتر بحث لا يستعمله أحد = كود ميت. يحتاج تغييراً منسّقاً واجهةً وخادماً | `sales/services/pricing.py:208` → `salesApi.ts:447` |
 
 ---
 
