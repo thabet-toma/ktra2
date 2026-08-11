@@ -1280,16 +1280,30 @@ class SalesReportViewSet(viewsets.ViewSet):
         tenant = get_tenant(request)
         if not tenant:
             return Response([])
+        # P2-13 (SCALABILITY_AUDIT): كانت الحلقة تجلب **كل** فواتير الآجل
+        # المرحّلة منذ نشأة الشركة ثم تُسقط المسدَّدة في بايثون — فالمُهمَل
+        # يُنقَل عبر الشبكة كاملاً، وهو الأغلبية في شركة عاملة. الشرط صار في
+        # القاعدة، ومدى التاريخ اختياري (from/to) لمن يريد تضييقه.
+        from django.utils.dateparse import parse_date
+
         qs = SalesInvoice.objects.filter(
             tenant_id=tenant.TenantID,
             status=SalesInvoice.STATUS_POSTED,
             invoice_type=SalesInvoice.INVOICE_CREDIT,
-        )
+        ).annotate(
+            _remaining=models.F("grand_total") - models.F("amount_paid"),
+        ).filter(_remaining__gt=0)
+
+        date_from = parse_date(request.query_params.get("from") or "")
+        date_to = parse_date(request.query_params.get("to") or "")
+        if date_from:
+            qs = qs.filter(invoice_date__gte=date_from)
+        if date_to:
+            qs = qs.filter(invoice_date__lte=date_to)
+
         rows = []
-        for inv in qs.select_related("customer"):
+        for inv in qs.select_related("customer").order_by("invoice_date", "id"):
             remaining = inv.grand_total - inv.amount_paid
-            if remaining <= 0:
-                continue
             rows.append(
                 {
                     "invoice_id": inv.id,
