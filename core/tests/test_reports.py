@@ -7,12 +7,15 @@
 from decimal import Decimal
 
 from django.contrib.auth.models import User
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
 from accounting.models import Account, JournalHeader, JournalLine
 from accounting.services import create_fiscal_year, partner_posted_balance
 from core.reports import REPORTS, report_catalog
 from inventory.models import Product, StockMovement
+from logistics.models import PurchaseInvoice
 from partners.models import Partner
 from sales.models import CustomerPayment, SalesInvoice, SalesInvoiceLine
 from tenants.models import Currency
@@ -307,3 +310,74 @@ class ReportEngineTest(APITestCase):
         res = self._run("sales-invoices")
         numbers = [r["invoice_number"] for r in res.data["rows"]]
         self.assertEqual(numbers, ["SI-OTHER"])
+
+
+class PayablesAgingTest(APITestCase):
+    """المرحلة 5 / P0-9: أعمار الدائنين — الصحّة أولاً ثم كلفة الاستعلامات.
+
+    التقرير كان يقرأ المفتاح `remaining` من `purchase_invoice_payment_summary`،
+    وهو مفتاح **غير موجود** في القاموس العائد (المفتاح الفعلي
+    `remaining_balance` — `core/payments.py:196-205`). النتيجة: كل سطر يُقيَّم
+    بمتبقٍّ صفر فيُستبعَد، فالتقرير كان يعود فارغاً دائماً — بعد أن ينفّذ ≥6
+    استعلامات لكل فاتورة مرحّلة منذ نشأة الشركة.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="payables", password="x")
+        cls.tenant = create_company("شركة الدائنين", cls.user)
+        cls.currency, _ = Currency.objects.get_or_create(
+            Code="PAY", defaults={"Name": "Payables", "Symbol": "P"})
+        cls.supplier = Partner.objects.create(
+            tenant=cls.tenant, name="مورد الأعمار", partner_type="Supplier")
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+
+    def _invoice(self, number, date, total):
+        return PurchaseInvoice.objects.create(
+            tenant=self.tenant, invoice_number=number, partner=self.supplier,
+            currency=self.currency, invoice_date=date,
+            grand_total=Decimal(total), is_posted=True, is_return=False,
+        )
+
+    def _run(self):
+        return self.client.get(
+            "/api/reports/payables-aging/", {"as_of": "2026-12-31"},
+            HTTP_X_TENANT_ID=str(self.tenant.TenantID),
+        )
+
+    def test_unpaid_posted_invoice_appears_with_its_remaining(self):
+        """الحارس الأساسي: فاتورة مرحّلة غير مدفوعة تظهر بمتبقّيها لا بصفر."""
+        self._invoice("PI-AGE-1", "2026-06-10", "300")
+        res = self._run()
+        self.assertEqual(res.status_code, 200, res.data)
+        row = next(
+            r for r in res.data["rows"] if r["partner_name"] == "مورد الأعمار")
+        self.assertEqual(Decimal(row["total"]), Decimal("300"))
+        # 2026-06-10 ← 2026-12-31 = أكثر من 90 يوماً
+        self.assertEqual(Decimal(row["b3"]), Decimal("300"))
+        self.assertEqual(Decimal(row["b0"]), Decimal("0"))
+
+    def test_query_count_does_not_grow_with_invoice_count(self):
+        """تثبيت كلفة P0-9: العدّ نفسه لفاتورة واحدة ولستّ فواتير.
+
+        قبل الإصلاح كان كل صف يضيف ≥6 استعلامات، فالفارق بين الحالتين ≥30.
+        بعده الملخّص كله subqueries داخل استعلام القائمة الواحد.
+        """
+        self._invoice("PI-N-1", "2026-06-10", "100")
+        with CaptureQueriesContext(connection) as one_invoice:
+            self.assertEqual(self._run().status_code, 200)
+
+        for i in range(2, 8):
+            self._invoice(f"PI-N-{i}", "2026-06-10", "100")
+        with CaptureQueriesContext(connection) as seven_invoices:
+            res = self._run()
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(
+            Decimal(next(r for r in res.data["rows"])["total"]), Decimal("700"))
+        self.assertEqual(
+            len(seven_invoices), len(one_invoice),
+            f"عدد الاستعلامات نما مع عدد الفواتير: "
+            f"{len(one_invoice)} → {len(seven_invoices)}",
+        )

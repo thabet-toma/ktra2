@@ -128,6 +128,19 @@ def paginate_queryset(self, queryset, request, view=None):
 
 ## §2 N+1 — أسوأ الحالات (مرتّبة بالأثر)
 
+> **تحديث المرحلة 5 (P0-9 منفّذ 2026-08-11):** البند 1 أدناه مُصلَح في
+> `core/reports/financial.py` (الملف صار حزمة في المرحلة 3) عبر
+> `annotate_purchase_invoice_payment_summary` — الملخّص كله subqueries داخل
+> استعلام القائمة الواحد، وهي نفس الدالة المستخدَمة أصلاً في قائمة فواتير
+> الشراء فالحساب واحد لا اثنان.
+> **وانكشف خلل وظيفي أخطر من الأداء:** التقرير كان يقرأ المفتاح `remaining`
+> من `purchase_invoice_payment_summary`، وهو **مفتاح غير موجود** (الفعلي
+> `remaining_balance` — `core/payments.py:196-205`) ⇒ كل سطر يُقيَّم بمتبقٍّ صفر
+> فيُستبعَد، أي أن **تقرير أعمار الدائنين كان يعود فارغاً دائماً** بعد تنفيذ
+> ~20 ألف استعلام. مغطّى الآن بحارسين في `core/tests/test_reports.py`
+> (`PayablesAgingTest`): صحّة القيمة، وثبات عدّ الاستعلامات بين فاتورة واحدة
+> وسبع فواتير.
+
 1. **🔴 تقرير أعمار الدائنين** — `core/reports.py:921-928` يستدعي `purchase_invoice_payment_summary` (`logistics/services.py:473-518`) لكل فاتورة: `fees` + `supplier_payments`×`allocations` + `payment_allocations`×`payment` + `payments` = ≥6 استعلامات/فاتورة على **كل** الفواتير المرحّلة (بلا فلتر تاريخ — `as_of` للتصنيف فقط `core/reports.py:902`). 3,000 فاتورة ⇒ ~20,000 استعلام/طلب.
 2. **🔴 إرساليات البيع** — `sales/serializers.py:901-904` (`obj.partner.name` بلا select_related) و`:912-921` (`obj.invoice.lines.all()` بلا prefetch) = استعلانان/صف على قائمة غير مرقّمة. الإصلاح سطران في `sales/views.py:737-739`.
 3. **🔴 Landed Cost** — `logistics/views.py:4612` حلقة 200 شحنة → `:4629` links/شحنة → `:4639` items/صفقة → `:4648-4650` أربعة استعلامات فاتورة/صفقة ⇒ ~4,000 استعلام.

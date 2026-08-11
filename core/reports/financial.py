@@ -78,14 +78,23 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
         )
     else:
         from logistics.models import PurchaseInvoice
-        from logistics.services import purchase_invoice_payment_summary
+        from logistics.services import annotate_purchase_invoice_payment_summary
 
-        docs = PurchaseInvoice.objects.filter(
-            tenant_id=tenant_id, is_posted=True, is_return=False,
-        ).select_related("partner")
+        # المرحلة 5 / P0-9 (SCALABILITY_AUDIT §2 بند 1): كان هذا يستدعي
+        # purchase_invoice_payment_summary لكل فاتورة، وهي ≥6 استعلامات
+        # (fees + supplier_payments×allocations + payment_allocations×payment
+        # + payments) على **كل** الفواتير المرحّلة منذ النشأة ⇒ ~20 ألف استعلام
+        # في الطلب الواحد. النسخة المُعلَّمة تحسب الملخص نفسه بـsubqueries داخل
+        # استعلام واحد، وهي المستخدَمة أصلاً في قائمة فواتير الشراء
+        # (logistics/views/invoices.py:152) فالحساب واحد لا اثنان.
+        docs = annotate_purchase_invoice_payment_summary(
+            PurchaseInvoice.objects.filter(
+                tenant_id=tenant_id, is_posted=True, is_return=False,
+            ).select_related("partner")
+        )
         rows_src = (
             (d.partner_id, d.partner.name if d.partner_id else "", d.invoice_date,
-             Decimal(str(purchase_invoice_payment_summary(d).get("remaining", 0) or 0)))
+             Decimal(str(d.list_remaining_balance or 0)))
             for d in docs
         )
 
