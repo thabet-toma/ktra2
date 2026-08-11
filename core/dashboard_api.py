@@ -282,8 +282,10 @@ def trade_dashboard(request):
             tenant=tenant, is_deleted=False
         )
         shipments_qs = LogisticsShipment.objects.filter(tenant=tenant)
-        payments_qs = LogisticsPayment.objects.filter(is_deleted=False).filter(
-            Q(deal__tenant=tenant) | Q(shipment__tenant=tenant)
+        # P1-5: كان `Q(deal__tenant) | Q(shipment__tenant)` — ضمّتان وOR على
+        # المسار الساخن للداشبورد. الحقل المباشر يغني عن الضمّتين.
+        payments_qs = LogisticsPayment.objects.filter(
+            is_deleted=False, tenant=tenant,
         )
         payload["import_operations"] = {
             "deals": {

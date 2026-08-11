@@ -759,6 +759,19 @@ class LogisticsPayment(SoftDeleteMixin, models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='PaymentID')
+    # P1-5 (SCALABILITY_AUDIT): الدفعة كانت بلا حقل شركة إطلاقاً، فالعزل يتم
+    # بـ`Q(deal__tenant=…) | Q(shipment__tenant=…)` — ضمّتان وOR يُترجمان عادةً
+    # إلى union/scan، على المسار الساخن للداشبورد. الحقل مشتقّ لا مُدخَل:
+    # `save()` أدناه يملؤه من الصفقة أو الشحنة، فلا موضع إنشاء يحتاج تعديلاً
+    # ولا صفّ جديد يولد بلا مالك.
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        db_column='TenantID',
+        null=True,
+        blank=True,
+        related_name='logistics_payments',
+    )
     deal = models.ForeignKey(
         LogisticsDeal,
         on_delete=models.CASCADE,
@@ -807,6 +820,28 @@ class LogisticsPayment(SoftDeleteMixin, models.Model):
     class Meta:
         db_table = 'logistics_payments'
         managed = True
+        indexes = [
+            models.Index(fields=['tenant', 'status'], name='idx_lpay_tenant_status'),
+        ]
+
+    def save(self, *args, **kwargs):
+        """P1-5: الشركة مشتقّة من الوثيقة الأم، لا يُطلَب من المستدعي تمريرها.
+
+        وضعها هنا لا في كل موضع إنشاء هو ما يجعل الحقل جديراً بالثقة: أي مسار
+        كتابة — واجهة، أمر إدارة، اختبار — ينتج صفّاً مملوكاً. وإن غاب الأبوان
+        معاً يبقى NULL كما كان (الفلترة الجديدة تستثنيه، وهو ما كان يفعله الـOR
+        القديم أصلاً).
+        """
+        if self.tenant_id is None:
+            if self.deal_id:
+                self.tenant_id = self.deal.tenant_id
+            elif self.shipment_id:
+                self.tenant_id = self.shipment.tenant_id
+            if self.tenant_id is not None and 'update_fields' in kwargs:
+                update_fields = kwargs.get('update_fields')
+                if update_fields is not None:
+                    kwargs['update_fields'] = list(set(update_fields) | {'tenant'})
+        super().save(*args, **kwargs)
 
     def __str__(self):
         if self.deal_id:

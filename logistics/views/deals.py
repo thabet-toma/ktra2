@@ -1023,8 +1023,11 @@ class LogisticsPaymentViewSet(BaseTenantViewSet):
         if tenant:
             # نشمل دفعات الصفقات ودفعات الشحنات (deal=None) معاً
             # perf: select_related('journal') يقتل N+1 على journal_id_display لكل صف.
+            # P1-5: كان العزل بـ`Q(deal__tenant) | Q(shipment__tenant)` — ضمّتان
+            # وOR على كل قراءة. الحقل المباشر (يملؤه save من الوثيقة الأم) يطابق
+            # النتيجة نفسها بعمود مفهرس واحد.
             return LogisticsPayment.objects.filter(
-                Q(deal__tenant=tenant) | Q(shipment__tenant=tenant)
+                tenant=tenant
             ).select_related('journal').order_by('-created_at', '-id')
         return LogisticsPayment.objects.none()
 
