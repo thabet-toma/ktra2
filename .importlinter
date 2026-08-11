@@ -97,8 +97,8 @@ forbidden_modules =
 # بـpartners.signals (المستوردون تحولوا إلى accounting.api) — بقي اثنان
 # مؤجلان عمداً (docs/REFACTOR_PROMPTS.md «ديون مؤجلة»)
 ignore_imports =
-    logistics.serializers -> partners.serializers
-    logistics.serializers -> sales.serializers
+    logistics.serializers.* -> partners.serializers
+    logistics.serializers.* -> sales.serializers
 
 # ─────────────────────────────────────────────────────────────────────────────
 # العقد 2 — ممنوع استيراد accounting.models من خارج accounting
@@ -142,7 +142,8 @@ ignore_imports =
     logistics.landed_cost -> accounting.models
     logistics.models -> accounting.models
     logistics.payment_posting_diagnostics -> accounting.models
-    logistics.serializers -> accounting.models
+    # المرحلة 3: logistics/serializers.py صار حزمة — نفس الاستيراد موزّع على وحداتها
+    logistics.serializers.* -> accounting.models
     logistics.services -> accounting.models
     # المرحلة 3: logistics/views.py صار حزمة — نفس الاستيراد موزّع على وحداتها
     logistics.views.* -> accounting.models
