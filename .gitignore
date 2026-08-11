@@ -32,6 +32,11 @@ Thumbs.db
 # Claude Code working state (worktrees, local agent state)
 .claude/
 
+# THA-102: أثر تشغيل الوكلاء المحلي — يُعاد إنتاجه كل جولة، ولا يخصّ المنصة.
+# لقطات الشاشة والتذاكر الداخلية وسكربتات التصفّح وحالة الديمون.
+.agent_context/
+.multica/
+
 # Logs & misc
 *.log
 .cache/

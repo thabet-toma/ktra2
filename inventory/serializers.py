@@ -72,6 +72,10 @@ class ProductSerializer(serializers.ModelSerializer):
             'category', 'category_name', 'uom_id', 'uom_name',
             'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level',
             'is_serialized', 'is_service',
+            # THA-24: سياسة الكفالة على الصنف — تقرأها الكفالة عند ترحيل البيع،
+            # ويحرّرها المستخدم من كرت الصنف. بلا إدراجها هنا يبتلع DRF قيمتها
+            # في الكتابة بصمت فيبدو الحقل محفوظاً وهو ليس كذلك.
+            'warranty_months', 'supplier_warranty_months',
             'is_for_sale_online', 'online_price', 'online_description',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity', 'avg_cost',
             # كرت الصنف: سعر البيع الافتراضي — قابل للتحرير بجانب التكلفة المحسوبة.
@@ -202,6 +206,9 @@ class ProductLookupSerializer(ProductSerializer):
             'category', 'category_name', 'hs_code', 'min_stock_level',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity',
             'avg_cost', 'sale_price', 'is_service', 'is_serialized',
+            # THA-24: نافذة البطاقة اليدوية تملأ المدة من سياسة الصنف المختار،
+            # فلا يعيد المستخدم كتابة ما تعرفه المنظومة.
+            'warranty_months', 'supplier_warranty_months',
             'is_for_sale_online',
             'online_price', 'online_description', 'attachments',
         ]

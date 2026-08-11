@@ -16,14 +16,14 @@ import {
   CalendarDays, CalendarX, ArrowLeftRight, Boxes, BarChart3, Building2,
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck, Wallet,
-  Gauge, TableProperties,
+  Gauge, TableProperties, ShieldAlert, Wrench,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { enterOfficeShell } from "../utils/officeShell";
 import { clientLogger } from "../services/logger";
 import { useCompany } from "../contexts/CompanyContext";
 import { usePermissions } from "../contexts/PermissionsContext";
-import { moduleAllowsView } from "../utils/viewPermissions";
+import { devicesNavPlacement, moduleAllowsView } from "../utils/viewPermissions";
 import { groupVisible, visibleLinks } from "../utils/navAccess";
 import { permForView } from "../utils/viewPermissions";
 import { useTenantSettings } from "../hooks/useTenantSettings";
@@ -53,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const [reportsExpanded, setReportsExpanded] = useState(false);
   const [accountingExpanded, setAccountingExpanded] = useState(false);
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
+  const [afterSalesExpanded, setAfterSalesExpanded] = useState(false);
   const [platformExpanded, setPlatformExpanded] = useState(true);
 
   const accountingLinks: { view: AppView; label: string; icon: React.ReactNode; perm?: string }[] = [
@@ -162,6 +163,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "accounting-vat-report", label: "تقرير ض.ق.م", icon: <Receipt className="h-4 w-4" />, path: "/accounting/vat-report", newTab: true },
   ];
 
+  // THA-24: خدمة ما بعد البيع — وحدة مرخّصة، مُلحَقة **آخر** قسم الوحدات كما
+  // أُلحقت الأجهزة الحساسة قبلها: القسم الجديد في الوسط يزحزح ما تعوّده المستخدم.
+  // بند «الأجهزة الحساسة» ينتقل إلى هنا حين تُرخَّص الوحدتان معاً (قرار المالك:
+  // السجل إجراء ضمن هذا النظام)، ويبقى مستقلاً حين تُرخَّص وحدته وحدها.
+  const devicesPlacement = devicesNavPlacement(modules);
+  const afterSalesLinks: NavLink[] = [
+    { view: "after-sales", label: "بطاقات الكفالة", icon: <ShieldCheck className="h-4 w-4" /> },
+    ...(devicesPlacement === "after-sales"
+      ? [{ view: "sensitive-devices" as AppView, label: "الأجهزة الحساسة", icon: <ShieldAlert className="h-4 w-4" /> }]
+      : []),
+  ];
+
   // فتح المجموعة التي تحتوي الشاشة النشطة تلقائياً.
   useEffect(() => {
     const inAny = (links: NavLink[]) => links.some((l) => l.view === activeView);
@@ -172,6 +185,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     if (inAny(importLinks)) setImportExpanded(true);
     if (inAny(financeLinks)) setFinanceExpanded(true);
     if (activeView.startsWith("accounting-") || activeView === "property-rental") setAccountingExpanded(true);
+    if (inAny(afterSalesLinks)) setAfterSalesExpanded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView]);
 
@@ -366,6 +380,28 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
               {showText && <span className="mr-3 text-right flex-1">واجهة المحاسب القانوني</span>}
             </button>
           )}
+
+          {/* THA-45: سجل الأجهزة الحساسة — وحدة مرخّصة. مُلحَق في آخر قسم
+              الوحدات المرخّصة: بلا ترخيص لا يظهر البند أصلاً، وبلا صلاحية
+              العرض لا يظهر ولو كانت الوحدة مرخّصة.
+              THA-24: حين تُرخَّص «خدمة ما بعد البيع» أيضاً ينتقل البند إلى
+              قسمها أدناه — بندٌ واحد لا اثنان. */}
+          {permissions.has("devices.registry.view") && devicesPlacement === "standalone" && (
+            <button
+              onClick={() => { setView("sensitive-devices"); if (isMobile) setIsMobileMenuOpen(false); }}
+              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("sensitive-devices") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+              title="تسجيل وتتبع الأجهزة الحساسة"
+            >
+              <ShieldAlert className="h-5 w-5 flex-shrink-0" />
+              {showText && <span className="mr-3 text-right flex-1">الأجهزة الحساسة</span>}
+            </button>
+          )}
+
+          {/* THA-24: خدمة ما بعد البيع — قسم وحدةٍ مرخّصة، مُلحَق آخر أقسام
+              الوحدات. الترخيص يُفحَص هنا مرة واحدة، والصلاحية داخل كل بند. */}
+          {moduleAllowsView("after-sales", modules) &&
+            groupVisible(withPerms(afterSalesLinks), can, user.role) &&
+            renderGroup("خدمة ما بعد البيع", <Wrench className="h-5 w-5 flex-shrink-0" />, afterSalesExpanded, () => setAfterSalesExpanded(!afterSalesExpanded), afterSalesLinks)}
 
           <button
             onClick={() => { setView("settings"); if (isMobile) setIsMobileMenuOpen(false); }}

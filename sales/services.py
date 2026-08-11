@@ -1555,6 +1555,11 @@ def post_sales_invoice(
         # رجعت للمخزن (RETURN_IN) فوحداتها تعود «في المخزن» بترتيب استهلاكها.
         if kind == SalesInvoice.INVOICE_KIND_SALE:
             consume_sales_serials(invoice, lines)
+            # THA-24: بطاقة الكفالة نسخةٌ تُصرف للوحدة التي ذهبت للزبون، فلا
+            # تُنشأ إلا بعد استهلاك الوحدات أعلاه. صفر أثر لشركة غير مرخّصة.
+            from after_sales.services import create_auto_warranty_cards
+
+            create_auto_warranty_cards(invoice)
         elif kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
             restore_returned_sales_serials(invoice, lines)
 

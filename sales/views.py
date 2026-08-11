@@ -345,6 +345,11 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                 # الوحدات المُرقَّمة تعود للمخزن مع مخزونها؛ ما اختاره المستخدم يبقى
                 # على البند فتستهلك إعادة الترحيل الوحدات ذاتها.
                 release_sales_serials(invoice)
+                # THA-24: بطاقات الكفالة التلقائية من إنتاج هذا الترحيل — تُحذف
+                # معه وتعود بإعادته (نمط الحذف نفسه). اليدوية لا تُمَسّ.
+                from after_sales.services import delete_auto_warranty_cards
+
+                delete_auto_warranty_cards(invoice)
                 result = unpost_document(
                     tenant_id=invoice.tenant_id,
                     reference_id=invoice.id,
