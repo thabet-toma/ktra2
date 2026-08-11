@@ -270,8 +270,12 @@ require mysqldump
 [[ -x "$PIP" ]] || { echo "pip not found: $PIP" >&2; exit 4; }
 [[ -x "$GUNICORN" ]] || { echo "gunicorn not found: $GUNICORN" >&2; exit 4; }
 
-if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)'; then
-  echo "This project uses Django 6 and requires Python 3.12+. The server venv reports: $($PYTHON --version 2>&1)" >&2
+# P2-5 (SCALABILITY_AUDIT): كانت البوابة تطلب 3.12+ بحجة «المشروع Django 6»،
+# بينما requirements.txt يثبّت Django 5.1 LTS عمداً لأن السيرفر على Python 3.10.
+# النتيجة: بوابة تمنع النشر على البيئة الصحيحة نفسها. الأرضية الحقيقية هي أدنى
+# نسخة يدعمها Django 5.1 — أي 3.10. أي رفع هنا يجب أن يتبع رفع requirements.txt.
+if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+  echo "This project pins Django 5.1 LTS, which requires Python 3.10+. The server venv reports: $($PYTHON --version 2>&1)" >&2
   exit 5
 fi
 
