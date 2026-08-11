@@ -345,17 +345,50 @@ EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "").strip()
 # اسم الـ instance المُنشأ داخل Evolution API (وليس رقم الهاتف)
 EVOLUTION_INSTANCE_NAME = os.environ.get("EVOLUTION_INSTANCE_NAME", "").strip()
 
-# ── كاش الخادم (صيانة الأداء 2026-07) ──────────────────────────────────────
-# استضافة مشتركة بلا root ⇒ لا Redis/Memcached. FileBasedCache مشتركة بين كل
-# عمليات WSGI (نفس القرص) وضربة الكاش = صفر استعلامات MySQL — بعكس LocMemCache
-# (معزولة لكل عملية) وDatabaseCache (تعود لنفس MySQL المشتبه ببطئه).
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
-        "LOCATION": BASE_DIR / "django_cache",
-        "TIMEOUT": 300,
+# ── كاش الخادم (صيانة الأداء 2026-07 · المرحلة 5 / P0-6 2026-08-11) ────────
+# الأصل: FileBasedCache لأن الاستضافة المشتركة بلا root ⇒ لا Redis/Memcached.
+# تدقيق التوسّع (SCALABILITY_AUDIT §1.1) أثبت أنها تتصرّف كأنها معطّلة تحت الحمل:
+# MAX_ENTRIES الافتراضي 300 مدخلاً فقط، وCULL_FREQUENCY=3 يحذف ثلث الكاش عشوائياً
+# عند الامتلاء (وكل _cull = os.listdir كامل)؛ ومع عدّادات الـthrottle على نفس
+# الكاش (P0-7) يصير read-modify-write بلا قفل بين العمليات.
+#
+# الحل: الخلفية تُختار من البيئة، والافتراضي يبقى صالحاً للاستضافة الحالية.
+#   REDIS_URL مضبوط  ⇒ django-redis (عدّادات ذرّية، مشتركة بين كل الـworkers).
+#   غير مضبوط        ⇒ FileBasedCache نفسها لكن بسقف واقعي بدل الـ300.
+# core/test_settings.py يتجاوز هذا كلّه بـDummyCache — لا اختبار يعتمد على Redis.
+REDIS_URL = os.environ.get("REDIS_URL", "").strip()
+
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "TIMEOUT": 300,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+                # الكاش مساعد لا مصدر حقيقة: انقطاع Redis يجب ألا يُسقط الطلب.
+                "IGNORE_EXCEPTIONS": True,
+            },
+            # بادئة تفصل بيئات متعددة تتشارك نفس نسخة Redis.
+            "KEY_PREFIX": os.environ.get("REDIS_KEY_PREFIX", "ktra"),
+        }
     }
-}
+    DJANGO_REDIS_IGNORE_EXCEPTIONS = True
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+            "LOCATION": BASE_DIR / "django_cache",
+            "TIMEOUT": 300,
+            "OPTIONS": {
+                # مفاتيح الداشبورد وحدها = (عدد الشركات × عدد الفترات)، ويُضاف
+                # إليها مفتاح throttle لكل مستخدم/نطاق ⇒ 300 تُتجاوز فوراً.
+                "MAX_ENTRIES": 20000,
+                # 1/20 بدل 1/3: كل عملية حذف تلمس 5% من الكاش لا ثلثه.
+                "CULL_FREQUENCY": 20,
+            },
+        }
+    }
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
