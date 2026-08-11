@@ -77,6 +77,19 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    # P2-6 (SCALABILITY_AUDIT §6): TLS ينتهي عند الخادم الأمامي، فـDjango يرى
+    # اتصالاً عادياً ⇒ `request.is_secure()` تُرجع False على الإنتاج. النتيجة:
+    # الكوكيز الآمنة أعلاه تُرسَل لكن Django لا يعرف أن القناة مشفّرة، وأي
+    # منطق يعتمد على is_secure()/build_absolute_uri يبني http.
+    # الترويسة موثوقة هنا لأن الوصول للتطبيق يمرّ حصراً عبر الخادم الأمامي
+    # (ALLOWED_HOSTS قائمة صلبة، و127.0.0.1:8000 غير منشور).
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    # إعادة التوجيه لـHTTPS تبقى خلف عَلَم: إن لم يمرّر الخادم الأمامي
+    # X-Forwarded-Proto فتفعيلها يُنتج حلقة إعادة توجيه لا نهائية. فعّلها بعد
+    # التأكد من الترويسة على السيرفر.
+    SECURE_SSL_REDIRECT = os.environ.get(
+        "DJANGO_SSL_REDIRECT", "0"
+    ).lower() in ("1", "true", "yes")
 
 
 # Application definition
@@ -173,7 +186,18 @@ DATABASES = {
         "CONN_HEALTH_CHECKS": True,
         "OPTIONS": {
             "charset": "utf8mb4",
-            "init_command": "SET foreign_key_checks = 0; SET sql_mode='STRICT_TRANS_TABLES', innodb_strict_mode=1;",
+            # P2-4 (SCALABILITY_AUDIT): كان `foreign_key_checks = 0` ثابتاً على
+            # **كل** اتصال إنتاجي — أي أن قاعدة البيانات لم تكن تفرض ولا مفتاح
+            # أجنبي واحد طوال عمر النظام: صفّ يتيم يُكتب بلا اعتراض، وحذف أب
+            # يترك أبناءه معلّقين. الفرض الآن هو الافتراضي، مع مخرج طوارئ
+            # فوري: MYSQL_DISABLE_FK_CHECKS=1 يعيد السلوك القديم بلا نشر جديد
+            # (لازم لعمليات استيراد قديمة تكتب بترتيب غير طبيعي — إن ظهرت).
+            "init_command": (
+                ("SET foreign_key_checks = 0; " if os.environ.get(
+                    "MYSQL_DISABLE_FK_CHECKS", "0"
+                ).lower() in ("1", "true", "yes") else "")
+                + "SET sql_mode='STRICT_TRANS_TABLES', innodb_strict_mode=1;"
+            ),
             "connect_timeout": 10,
             "read_timeout": 30,
             "write_timeout": 30,
@@ -261,10 +285,13 @@ CORS_ALLOW_ALL_ORIGINS = os.environ.get("DJANGO_CORS_ALLOW_ALL", "").lower() in 
 
 # حل دائم للتطوير المحلي: السماح لأي بورت على localhost/127.0.0.1
 # (حتى لا تنكسر CORS عند تغيّر بورت Vite/CRA من 3000 إلى 5173 أو العكس)
+# P2-6 (SCALABILITY_AUDIT): كان هذا مفعّلاً في الإنتاج أيضاً — أي صفحة يفتحها
+# الموظف على جهازه من خادم محلي (أداة، إضافة، مشروع تجريبي) تصير أصلاً مسموحاً
+# له مخاطبة API الإنتاج بكوكيز الجلسة. التخفيف هنا مجاني: التطوير وحده يحتاجه.
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^http://localhost:\d+$",
     r"^http://127\.0\.0\.1:\d+$",
-]
+] if DEBUG else []
 
 # Allow custom tenant and branch headers used by frontend SQL pages.
 CORS_ALLOW_HEADERS = list(default_headers) + [
@@ -398,6 +425,16 @@ REST_FRAMEWORK = {
     # فكل الاستهلاكات القائمة (قوائم منسدلة/autocomplete بلا ?page=) تبقى كما هي.
     "DEFAULT_PAGINATION_CLASS": "core.pagination.OptionalPageNumberPagination",
     "PAGE_SIZE": 50,
+    # P1-14 (SCALABILITY_AUDIT): بلا هذا المفتاح يُفعَّل `BrowsableAPIRenderer`
+    # الافتراضي على الإنتاج — يبني صفحة HTML كاملة (ونماذج بكل الخيارات) لكل
+    # استجابة يطلبها متصفح، فيحوّل نقطةً ثمنها استعلام إلى تصيير ثقيل، ويعرض
+    # سطح استكشاف للـAPI لا لزوم له. الواجهة تستهلك JSON حصراً.
+    "DEFAULT_RENDERER_CLASSES": (
+        ["rest_framework.renderers.JSONRenderer",
+         "rest_framework.renderers.BrowsableAPIRenderer"]
+        if DEBUG else
+        ["rest_framework.renderers.JSONRenderer"]
+    ),
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",

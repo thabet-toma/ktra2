@@ -75,9 +75,20 @@ def get_tenant(request=None, *, raise_on_missing: bool = False):
         # Check if user has a tenant_id attribute (via profile or direct field)
         user_tenant_id = getattr(user, 'tenant_id', None)
         if user_tenant_id:
+            # P2-2 (SCALABILITY_AUDIT §1.5): مسار الترويسة أعلاه يحفظ النتيجة على
+            # الطلب (`_resolved_tenant`) فلا يتكرّر استعلامه، أما هذا المسار فكان
+            # يعيد `Tenant.objects.get` من الصفر عند **كل** استدعاء لـget_tenant —
+            # والطلب الواحد يستدعيها مرات (viewset + serializer + services).
+            cached_tenant = getattr(request, '_resolved_tenant', None)
+            if (
+                cached_tenant is not None
+                and str(getattr(cached_tenant, 'TenantID', '')) == str(user_tenant_id)
+            ):
+                return cached_tenant
             try:
                 tenant = Tenant.objects.get(TenantID=int(user_tenant_id))
                 _validate_user_tenant_access(request, tenant)
+                request._resolved_tenant = tenant
                 return tenant
             except (Tenant.DoesNotExist, ValueError, TypeError):
                 pass
@@ -92,9 +103,15 @@ def get_tenant(request=None, *, raise_on_missing: bool = False):
         _single_tenant_checked = True
 
     if _single_tenant_cache is not None:
-        # Re-verify it's still the only one (invalidate cache if more were added)
-        if Tenant.objects.count() == 1:
+        # Re-verify it's still the only one (invalidate cache if more were added).
+        # P2-2 (SCALABILITY_AUDIT §1.5): هذا العدّ كان يُنفَّذ على **كل** طلب في
+        # النشر أحادي الشركة (الحالة الشائعة) — استعلام كامل على جدول الشركات
+        # لمجرد تأكيد ما لا يتغيّر إلا عند إنشاء شركة. الآن يُعاد التحقق مرة لكل
+        # طلب لا مرة لكل استدعاء، وإنشاء الشركة الثانية يبطل الكاش في الطلب التالي.
+        recheck_done = getattr(request, '_single_tenant_rechecked', False) if request is not None else False
+        if recheck_done or Tenant.objects.count() == 1:
             if request is not None:
+                request._single_tenant_rechecked = True
                 _validate_user_tenant_access(request, _single_tenant_cache)
             return _single_tenant_cache
         else:
