@@ -6,8 +6,12 @@
 النقطتان رقيقتان عمداً — كل المعرفة في `core.reports`، فالتقرير الجديد لا يمسّ
 هذا الملف ولا الروابط.
 """
+import hashlib
+import json
 import logging
+import os
 
+from django.core.cache import cache
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
@@ -16,6 +20,23 @@ from core.reports import REPORTS, report_catalog, run_report
 from core.tenant_utils import get_tenant
 
 logger = logging.getLogger(__name__)
+
+# P2-3 (SCALABILITY_AUDIT): لم يكن على أي تقرير سطر كاش واحد — وإعادة تشغيل
+# التقرير نفسه (تغيير الفرز، رجوع، طباعة) تُعيد تنفيذ كل استعلاماته من الصفر.
+# النافذة قصيرة عمداً وعلى نمط الداشبورد الموجود أصلاً (60ث): تكفي لابتلاع
+# إعادة التشغيل المتلاحقة، ولا تُبقي تقريراً مالياً قديماً بعد ترحيل مستند.
+# المفتاح يحمل المستخدم أيضاً لأن التقارير محكومة بالصلاحيات — لا تُقدَّم
+# نسخة مستخدمٍ لآخر مهما تطابقت المعاملات. صفر يعطّل الكاش كلياً.
+REPORT_CACHE_SECONDS = int(os.environ.get("REPORT_CACHE_SECONDS", "60"))
+
+
+def _report_cache_key(key, tenant_id, user_id, params):
+    payload = json.dumps(
+        {"k": key, "t": tenant_id, "u": user_id, "p": params},
+        sort_keys=True, ensure_ascii=False,
+    )
+    digest = hashlib.md5(payload.encode("utf-8")).hexdigest()
+    return f"report:{tenant_id}:{key}:{digest}"
 
 
 @api_view(["GET"])
@@ -46,9 +67,20 @@ def report_run(request, key: str):
         return Response({"error": "لا يوجد شركة (tenant)."}, status=400)
     if spec.permission:
         require_perm(request, spec.permission, tenant=tenant)
+    params = request.query_params.dict()
+    cache_key = None
+    if REPORT_CACHE_SECONDS > 0:
+        cache_key = _report_cache_key(
+            key, tenant.TenantID, getattr(request.user, "id", None), params,
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
     try:
-        payload = run_report(key, tenant.TenantID, request.query_params.dict())
+        payload = run_report(key, tenant.TenantID, params)
     except Exception:
         logger.exception("reports.run_failed key=%s tenant=%s", key, tenant.TenantID)
         return Response({"error": f"تعذّر توليد تقرير «{spec.title}»."}, status=500)
+    if cache_key is not None:
+        cache.set(cache_key, payload, REPORT_CACHE_SECONDS)
     return Response(payload)

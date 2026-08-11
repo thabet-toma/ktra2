@@ -20,8 +20,22 @@ def user_detail(request, pk):
         pk_int = int(pk)
     except (TypeError, ValueError):
         return JsonResponse({"detail": "Not found"}, status=404)
-    if token.user_id != pk_int and not token.user.is_staff:
-        return JsonResponse({"detail": "Forbidden"}, status=403)
+    # P2-11 (SCALABILITY_AUDIT §4): كان `is_staff` وحده يكفي لقراءة **أي** حساب
+    # في المنصّة كلها عبر الشركات — وهي علامة Django عامة لا صلة لها بعضوية
+    # الشركة، تُمنَح لأي مستخدم يدخل لوحة الإدارة. النتيجة: بريد أي مستخدم
+    # واسمه ودوره مقروءان من خارج شركته. القراءة الآن مقصورة على: النفس، أو
+    # السوبر أدمن، أو من يشارك المستهدَفَ عضويةَ شركة واحدة على الأقل — وهو
+    # النطاق الذي تحتاجه شاشات إدارة الأعضاء فعلاً.
+    if token.user_id != pk_int and not token.user.is_superuser:
+        from tenants.models import UserCompanyMembership
+        shared = UserCompanyMembership.objects.filter(
+            user_id=token.user_id,
+            tenant_id__in=UserCompanyMembership.objects.filter(
+                user_id=pk_int,
+            ).values("tenant_id"),
+        ).exists()
+        if not shared:
+            return JsonResponse({"detail": "Forbidden"}, status=403)
     try:
         user = User.objects.get(pk=pk)
     except User.DoesNotExist:
