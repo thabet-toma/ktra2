@@ -284,12 +284,16 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     },
   }, { enabled: !showAccountPicker });
 
-  // Load journals list for navigation
+  // P0-5: قائمة التنقّل (الأول/السابق/التالي) كانت تجلب **كل** القيود —
+  // صارت أحدث 200 قيد (القائمة مُرقَّمة إلزامياً خادمياً). فتح قيد أقدم
+  // مباشرةً بالرابط يبقى شغّالاً؛ التنقّل التسلسلي يغطي الأحدث.
   useEffect(() => {
     const loadJournals = async () => {
       try {
-        const list = await accountingApi.getJournals();
-        setJournalsList(list);
+        const paged = await accountingApi.getJournalsPaged({
+          page: "1", page_size: "200",
+        });
+        setJournalsList(paged.results);
       } catch (err) {
         // console suppressed
       }

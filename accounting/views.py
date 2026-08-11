@@ -11,6 +11,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from core.access import require_perm, requires_perm
+from core.pagination import EnforcedPageNumberPagination
 from core.api_defaults import ApiAuthAndUser
 from partners.models import Partner
 from tenants.models import Tenant, Currency
@@ -279,6 +280,9 @@ class JournalViewSet(viewsets.ModelViewSet):
     permission_classes = ApiAuthAndUser["permission_classes"]
     queryset = JournalHeader.objects.all()
     serializer_class = JournalHeaderSerializer
+    # P0-5: ترقيم إلزامي — أكبر جدول محاسبي. المستهلكان: شاشة القيد (تنقّل
+    # السجلات صار صفحةً أحدث 200) وDocumentPaymentsTab (بحث مرجعي مصغّر).
+    pagination_class = EnforcedPageNumberPagination
 
     def get_serializer_class(self):
         if getattr(self, "action", None) == "list":

@@ -38,9 +38,11 @@ export const DocumentPaymentsTab: React.FC<Props> = ({ referenceType, referenceI
         reference_id: String(referenceId),
       };
       
+      // P0-5: القائمة مُرقَّمة إلزامياً — البحث المرجعي الدقيق صغير بطبيعته،
+      // والبحث النصي يكتفي بأفضل 200 مطابقة (asList يفكّ غلاف results).
       const [exactData, searchData] = await Promise.all([
-        accountingApi.getJournals(exactParams),
-        searchQuery ? accountingApi.getJournals({ search: searchQuery }) : Promise.resolve([])
+        accountingApi.getJournals({ ...exactParams, page_size: "200" }),
+        searchQuery ? accountingApi.getJournals({ search: searchQuery, page_size: "200" }) : Promise.resolve([])
       ]);
 
       // Merge and deduplicate by journal ID
