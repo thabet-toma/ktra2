@@ -28,14 +28,17 @@
 # 1. البيئة — الحاوية لا تأتي بـDjango، وmysqlclient يفشل بناؤه (لا حاجة له، الاختبارات SQLite):
 pip install Django==5.1.15 djangorestframework==3.16.1 django-cors-headers==4.9.0 \
   python-dotenv django-cloudinary-storage cloudinary Pillow requests \
-  websocket-client sqlglot pytest pytest-django
-# 2. الفرع:
-git fetch origin newktra && git checkout newktra
+  websocket-client sqlglot pytest pytest-django import-linter
+# 2. الفرع — ⚠️ تحقّق أنك عليه فعلاً، ولا تفترض أن النسخة المحلية تحتويه:
+#    كثير من الجلسات تُنشأ على فرع مشتقّ من main، وnewktra غير مجلوب أصلاً.
+git fetch origin newktra && git checkout newktra && git branch --show-current
 # 3. تحقق الخط الأساسي (~2 دقيقة، المتوقع بعد المرحلة 5: 1,046 OK + skipped=2):
 python manage.py test --settings=core.test_settings
 # (ملاحظة: manage.py test لا يجمع 8 اختبارات pytest حمراء قديمة في
 #  sales/tests/test_quotation_* — دين مستقل، ليست من عملك؛ راجع «ديون جانبية».)
 ```
+
+**موضع هذا الملف:** `docs/REFACTOR_PROMPTS.md` — **لا في جذر المشروع**. البحث عنه باسمه المجرّد في الجذر يفشل.
 
 ## سجلّ التنفيذ
 
@@ -162,7 +165,25 @@ python manage.py test --settings=core.test_settings
 1. **خلل وظيفي في تقرير أعمار الدائنين** كان مختبئاً خلف بند أداء: التقرير يقرأ المفتاح `remaining` وهو **غير موجود** (الفعلي `remaining_balance`)، فكل سطر يُقيَّم بصفر ويُستبعَد ⇒ **التقرير كان يعود فارغاً دائماً** بعد دفع كلفة العشرين ألف استعلام كاملةً. لم يكشفه أي اختبار لأن `test_every_report_runs_without_error` يفحص 200 فقط.
 2. **ثغرة أمنية جديدة P0-13:** `hr/auth_api.py:165` (`login_view`) دالة Django عادية لا view من DRF ⇒ **خارج سلسلة الـthrottle كلياً**، ولا آلية قفل حساب في المشروع ⇒ تخمين كلمات مرور بلا سقف. وانكشف معها أن نطاق `AnonRateThrottle` أضيق مما يبدو: DRF ينفّذ `check_permissions` **قبل** `check_throttles`، فالمجهول على نقطة محمية يُردّ 401 ولا يُحتسَب.
 
-**قيد تقني يستحق التذكّر:** `SimpleRateThrottle.THROTTLE_RATES` سمة صنف تُقيَّم مرة واحدة عند الاستيراد — `override_settings(REST_FRAMEWORK=...)` لا يصلها. اختبارات المعدّلات تستخدم `mock.patch.dict` عليها مباشرةً (`core/tests/test_global_throttle.py`).
+**سجلّ التحقق (ما شُغِّل فعلاً، لا ما يُفترض):**
+
+| commit | التحقق |
+|---|---|
+| خط الأساس قبل البدء | 1,040 OK (skipped=2) — مطابق للمُعلَن |
+| `eb50e92` P0-6 | 1,040 OK |
+| `0c4153c` P0-7 | 1,044 OK (+4) |
+| `0884e15` P0-1 | `bash -n` على السكربت المُستخرَج من الـhere-string + 1,044 OK |
+| `2ccf769` فهارس | `makemigrations --check` ⇒ No changes · تشغيل **سلسلة الهجرات كاملة** على SQLite نظيفة ثم قراءة `sqlite_master` ⇒ الفهارس السبعة موجودة فعلاً · 1,044 OK |
+| `b7ea11f` P0-9 | الاختباران **يفشلان قبل الإصلاح** (`StopIteration` — صفر صفوف) ثم يمرّان · 1,046 OK (+2) |
+| `385a173` P0-12 | `npx tsc --noEmit` نظيف · `npm run build` ناجح |
+
+**ملاحظات تشغيلية اكتُسبت في هذه الجلسة (توفّر وقتاً على التالية):**
+
+1. **`makemigrations` يفشل في الحاوية** — `core.settings` يحمّل MySQL و`mysqlclient` غير مثبّت، و`core.test_settings` يعطّل الهجرات (`MIGRATION_MODULES` تُرجِع None) فلا يولّد شيئاً. الحل: ملف إعدادات مؤقّت خارج الريبو يرث `core.settings` ويستبدل `DATABASES` بـSQLite **مع إبقاء الهجرات**، ثم `--settings=<الملف>` مع `PYTHONPATH` يشير لمجلده.
+2. **التحقق من الواجهة** — `node_modules` غير موجودة افتراضياً. `npm install --ignore-scripts` (يتجاوز تنزيل Chromium الخاص بـpuppeteer، وهو في `dependencies` بلا داعٍ — P2-7)، ثم `npx tsc --noEmit` و`npm run build`. لا يوجد سكربت `typecheck` في `package.json` — استدعِ `tsc` مباشرةً.
+3. **`SimpleRateThrottle.THROTTLE_RATES`** سمة صنف تُقيَّم مرة واحدة عند الاستيراد — `override_settings(REST_FRAMEWORK=...)` لا يصلها. اختبارات المعدّلات تستخدم `mock.patch.dict` عليها مباشرةً (`core/tests/test_global_throttle.py`).
+4. **مفتاح الشركة `Tenant.TenantID` لا `Tenant.id`** — نمط متكرّر يكسر الاختبارات الجديدة بصمت.
+5. **الاختبارات على DummyCache** — أي سلوك يعتمد على الكاش (throttle، عدّادات، TTL) يمرّ «أخضر» بلا أن يكون مركّباً أصلاً. افرض `LocMemCache` بـ`override_settings` في اختباره وإلا فالاختبار لا يختبر شيئاً.
 
 #### 🔜 المتبقّي: P0-5 (فرض الترقيم) — خريطة التسليم
 
