@@ -99,7 +99,7 @@ export const SettleFromOnAccountModal: React.FC<Props> = ({
     let alive = true;
     setLoading(true);
     const load = isCustomer
-      ? listCustomerPayments({ partner: partnerId }).then((rows) =>
+      ? listCustomerPayments({ partner: partnerId, page: 1, page_size: 200 }).then((rows) =>
           (rows || []).map((p) => ({
             id: p.id,
             payment_date: p.payment_date,

@@ -20,6 +20,7 @@ from core.activity import (
     snapshot_document_lines,
     snapshot_fields,
 )
+from core.pagination import EnforcedPageNumberPagination
 from core.api_defaults import ApiAuthAndUser, PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.plans import enforce_limits
 from core.tenant_utils import get_branch, get_tenant
@@ -113,6 +114,9 @@ def _invoice_line_snapshot(invoice):
 
 
 class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
+    # P0-5: ترقيم إلزامي — SalesInvoicesPage مُرقَّمة أصلاً، والمحرّرات على
+    # نقطة lookup المحدودة (مصفوفة خام بسقف 500، لا يمسّها ترقيم القائمة).
+    pagination_class = EnforcedPageNumberPagination
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
     partner_balance_spec = ("customer_id", False, "customer_balance")
@@ -724,6 +728,9 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
 
 
 class DeliveryOrderViewSet(viewsets.ModelViewSet):
+    # P0-5: ترقيم إلزامي — DeliveryNotesPage صارت على أحدث 200 مع بحث خادمي،
+    # وoutstanding نقطة action مستقلة.
+    pagination_class = EnforcedPageNumberPagination
     """إرساليات البيع — مستند تسليم البضاعة المرتبط بفاتورة.
 
     الإنشاء **هو** فعل التسليم: يمرّ عبر `deliver_invoice_lines` نفسه الذي
@@ -963,6 +970,9 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
 
 
 class CustomerPaymentViewSet(viewsets.ModelViewSet):
+    # P0-5: ترقيم إلزامي — الشاشة الرئيسية على أحدث 200، والاستدعاءات
+    # المفلترة بشريك بسقف صريح.
+    pagination_class = EnforcedPageNumberPagination
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
 

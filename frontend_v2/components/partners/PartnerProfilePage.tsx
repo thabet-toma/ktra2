@@ -220,7 +220,7 @@ export const PartnerProfilePage: React.FC = () => {
             unallocated_amount: p.unallocated_amount,
           })),
         )
-      : listCustomerPayments({ partner: id }).then((rows) =>
+      : listCustomerPayments({ partner: id, page: 1, page_size: 200 }).then((rows) =>
           (rows || []).map((p) => ({
             id: p.id,
             payment_date: p.payment_date,

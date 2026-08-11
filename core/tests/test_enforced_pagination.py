@@ -21,6 +21,9 @@ ENFORCED_ENDPOINTS = [
     "/api/logistics/deals/",
     "/api/inventory/stock-movements/",
     "/api/accounting/journals/",
+    "/api/sales/invoices/",
+    "/api/sales/delivery-orders/",
+    "/api/sales/payments/",
 ]
 
 

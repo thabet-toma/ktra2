@@ -141,7 +141,9 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     setErr(null);
     try {
       const [pays, parts, accs, currs, ag, pSettings, sSettings] = await Promise.all([
-        listCustomerPayments(),
+        // P0-5: القائمة مُرقَّمة إلزامياً — أحدث 200 سند (البحث المحلي يعمل
+        // على هذه النافذة؛ الأقدم يُفتح من كشف حساب الشريك).
+        listCustomerPayments({ page: 1, page_size: 200 }),
         // T-PARTYPURE: سند قبض من زبون — قائمة الأطراف زبائن فقط.
         accountingApi.getPartners("Customer") as Promise<Partner[]>,
         accountingApi.getAccounts() as Promise<Account[]>,

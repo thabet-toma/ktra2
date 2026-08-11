@@ -572,7 +572,16 @@ export type CustomerPaymentRow = {
 export async function listCustomerPayments(
   query?: Record<string, string | number | boolean | undefined>,
 ): Promise<CustomerPaymentRow[]> {
+  // P0-5: القائمة مُرقَّمة إلزامياً — apiGetList يفكّ غلاف results (صفحة
+  // واحدة). مرِّر page/page_size صراحةً؛ الاستدعاءات المفلترة بشريك تكتفي
+  // بسقف 200.
   return apiGetList(`${BASE}/payments/`, { tenantId: tid(), query });
+}
+
+export async function listCustomerPaymentsPage(
+  query?: Record<string, string | number | boolean | undefined>,
+): Promise<{ results: CustomerPaymentRow[]; count: number; hasNext: boolean }> {
+  return apiGetPagedList(`${BASE}/payments/`, { tenantId: tid(), query });
 }
 
 export async function getCustomerPayment(id: number): Promise<CustomerPaymentRow> {

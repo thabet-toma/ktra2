@@ -19,7 +19,7 @@ import {
   getOutstandingDeliveryLines,
   getSalesSettings,
   listDeliveryNotes,
-  listSalesInvoices,
+  type SalesInvoiceRow,
   updateDeliveryNote,
   type DeliveryLineRow,
   type DeliveryNoteDto,
@@ -127,7 +127,8 @@ export const DeliveryNotesPage: React.FC = () => {
     setLoading(true);
     setErr(null);
     try {
-      setRows(await listDeliveryNotes(search ? { search } : undefined));
+      // P0-5: القائمة مُرقَّمة إلزامياً — أحدث 200 إرسالية (البحث خادمي يضيّق).
+      setRows(await listDeliveryNotes({ ...(search ? { search } : {}), page: 1, page_size: 200 }));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "فشل تحميل الإرساليات");
     } finally {
@@ -167,7 +168,9 @@ export const DeliveryNotesPage: React.FC = () => {
     try {
       const tenantId = resolveTenantId();
       const [invs, parts, prods, whs] = await Promise.all([
-        listSalesInvoices({ status: "posted" }),
+        // P0-5: منتقي الفواتير على نقطة lookup المحدودة (مصفوفة خام بسقف 500)
+        // — قائمة الفواتير نفسها صارت مُرقَّمة إلزامياً.
+        apiGetList<SalesInvoiceRow>("sales/invoices/lookup/?limit=500&status=posted", { tenantId }),
         apiGetList<PartnerOpt>("partners/lookup/", {
           tenantId,
           query: { limit: 500 },
