@@ -280,3 +280,72 @@ class WarehouseDetailApiTest(APITestCase):
             f"/api/inventory/warehouses/{self.warehouse.id}/stock/",
         )
         self.assertEqual(response.status_code, 403)
+
+
+class StockValuationActionTest(TestCase):
+    """P0-5: تقييم المخزون الخادمي — التجميعات تطابق دلالة الشاشة حرفياً."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth.models import User
+        from rest_framework.authtoken.models import Token
+        from tenants.services import create_company
+
+        cls.user = User.objects.create_user(username="valuator", password="x")
+        cls.tenant = create_company("شركة التقييم", cls.user)
+        cls.token = Token.objects.create(user=cls.user)
+        cls.product = Product.objects.create(
+            tenant=cls.tenant, sku="VAL-1", name_ar="صنف التقييم",
+            quantity_on_hand=Decimal("7"), avg_cost=Decimal("12"))
+        mk = StockMovement.objects.create
+        # IN بـ10 ثم IN بـ20 ثم OUT بـ15 ثم ADJUST_IN بـ0 (لا يدخل المتوسط)
+        mk(tenant=cls.tenant, product=cls.product, movement_type="IN",
+           quantity=Decimal("5"), unit_cost=Decimal("10"),
+           movement_date="2026-01-10")
+        mk(tenant=cls.tenant, product=cls.product, movement_type="IN",
+           quantity=Decimal("5"), unit_cost=Decimal("20"),
+           movement_date="2026-02-10")
+        mk(tenant=cls.tenant, product=cls.product, movement_type="OUT",
+           quantity=Decimal("3"), unit_cost=Decimal("15"),
+           movement_date="2026-03-10")
+        mk(tenant=cls.tenant, product=cls.product, movement_type="ADJUST_IN",
+           quantity=Decimal("1"), unit_cost=Decimal("0"),
+           movement_date="2026-03-15")
+
+    def _get(self, **params):
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        return client.get(
+            "/api/inventory/stock-movements/valuation/", params,
+            HTTP_X_TENANT_ID=str(self.tenant.TenantID))
+
+    def test_aggregates_match_screen_semantics(self):
+        res = self._get()
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        row = next(r for r in res.data["rows"] if r["sku"] == "VAL-1")
+        self.assertEqual(Decimal(row["first_in_cost"]), Decimal("10"))   # FIFO
+        self.assertEqual(Decimal(row["last_in_cost"]), Decimal("0"))     # LIFO — آخر داخل ADJUST_IN
+        self.assertEqual(Decimal(row["avg_in_cost"]), Decimal("15"))     # (10+20)/2، صفر الكلفة مستبعد
+        self.assertEqual(Decimal(row["avg_out_cost"]), Decimal("15"))
+        # صافي الحركات: +5 +5 -3 +1 = 8 (ADJUST_IN داخل، مثل includes("IN"))
+        self.assertEqual(Decimal(row["moves_qty_delta"]), Decimal("8"))
+
+    def test_as_of_filters_the_aggregates(self):
+        res = self._get(as_of="2026-01-31")
+        row = next(r for r in res.data["rows"] if r["sku"] == "VAL-1")
+        self.assertEqual(Decimal(row["last_in_cost"]), Decimal("10"))
+        self.assertEqual(Decimal(row["moves_qty_delta"]), Decimal("5"))
+        self.assertIsNone(row["avg_out_cost"])
+
+    def test_movement_list_is_paginated_by_default(self):
+        """P0-5: قائمة الحركات تعيد غلاف {results,count} بلا ?page=."""
+        from rest_framework.test import APIClient
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        res = client.get(
+            "/api/inventory/stock-movements/",
+            HTTP_X_TENANT_ID=str(self.tenant.TenantID))
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("results", res.data)
+        self.assertEqual(res.data["count"], 4)

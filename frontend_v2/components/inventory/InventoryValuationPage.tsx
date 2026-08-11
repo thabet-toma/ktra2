@@ -5,7 +5,22 @@
  */
 import React, { useState, useMemo, useCallback } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
-import type { SqlProduct, StockMovementDto } from "../../types/inventory";
+
+/** P0-5: صف التقييم الخادمي — تجميعات لكل صنف بدل كل حركات المخزون. */
+interface ValuationServerRow {
+  id: number;
+  sku: string;
+  name_ar: string;
+  name_en: string;
+  category_name: string;
+  quantity_on_hand: string;
+  avg_cost: string;
+  first_in_cost: string | null;
+  last_in_cost: string | null;
+  avg_in_cost: string | null;
+  avg_out_cost: string | null;
+  moves_qty_delta: string | null;
+}
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { RefreshCw, BarChart2, Info } from "lucide-react";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
@@ -51,41 +66,21 @@ const BONUS_LABELS: Record<BonusCalc, string> = {
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
 const fmt = (n: number) => formatMoney(n, "0");
 
-/**
- * يَحسب سعر الوحدة لصنف معيَّن حسب الطريقة المختارة.
- * - avg_cost: متوسط التكلفة الحالي (المخزون في كل حركة)
- * - fifo: تكلفة أقدم حركة IN لم تَستهلك بعد (تَقدير من الحركات)
- * - lifo: تكلفة أحدث حركة IN
- * - avg_purchase: المتوسط الحسابي لكل unit_cost في حركات IN
- * - avg_sale: المتوسط الحسابي لكل unit_cost في حركات OUT
- * - selected_price: avg_cost (placeholder حتى N8-T9 يَفتح price tiers)
- */
-function computeUnitPrice(
-  product: SqlProduct,
-  method: ValuationMethod,
-  movements: StockMovementDto[],
-): number {
-  const avgCost = Number(product.avg_cost) || 0;
-  const productMoves = movements.filter((m) => m.product === product.id);
-  const ins = productMoves.filter((m) => m.movement_type.includes("IN"));
-  const outs = productMoves.filter((m) => m.movement_type.includes("OUT"));
-
-  const avgOf = (arr: StockMovementDto[]): number => {
-    const valid = arr.map((m) => Number(m.unit_cost)).filter((n) => n > 0);
-    return valid.length ? valid.reduce((s, n) => s + n, 0) / valid.length : 0;
-  };
-
+function computeUnitPrice(row: ValuationServerRow, method: ValuationMethod): number {
+  // P0-5: كانت تُحسب من كل الحركات في المتصفح — صارت قراءةً من تجميعات
+  // الخادم بنفس الدلالة حرفياً (fallback إلى avg_cost حيث لا قيمة).
+  const avgCost = Number(row.avg_cost) || 0;
   switch (method) {
     case "avg_cost":
       return avgCost;
     case "fifo":
-      return Number(ins[0]?.unit_cost) || avgCost;
+      return Number(row.first_in_cost) || avgCost;
     case "lifo":
-      return Number(ins[ins.length - 1]?.unit_cost) || avgCost;
+      return Number(row.last_in_cost) || avgCost;
     case "avg_purchase":
-      return avgOf(ins) || avgCost;
+      return Number(row.avg_in_cost) || avgCost;
     case "avg_sale":
-      return avgOf(outs) || avgCost;
+      return Number(row.avg_out_cost) || avgCost;
     case "selected_price":
       return avgCost;
     default:
@@ -93,26 +88,13 @@ function computeUnitPrice(
   }
 }
 
-function applyBonusQty(
-  product: SqlProduct,
-  baseQty: number,
-  bonus: BonusCalc,
-  movements: StockMovementDto[],
-): number {
-  if (bonus === "none") return baseQty;
-  if (bonus === "from_movements") {
-    const productMoves = movements.filter((m) => m.product === product.id);
-    return productMoves.reduce((s, m) => {
-      const q = Number(m.quantity) || 0;
-      return s + (m.movement_type.includes("IN") ? q : -q);
-    }, 0);
-  }
+function applyBonusQty(row: ValuationServerRow, baseQty: number, bonus: BonusCalc): number {
+  if (bonus === "from_movements") return Number(row.moves_qty_delta) || 0;
   return baseQty;
 }
 
 export const InventoryValuationPage: React.FC = () => {
-  const [products, setProducts] = useState<SqlProduct[]>([]);
-  const [movements, setMovements] = useState<StockMovementDto[]>([]);
+  const [serverRows, setServerRows] = useState<ValuationServerRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [hasRun, setHasRun] = useState(false);
@@ -127,14 +109,11 @@ export const InventoryValuationPage: React.FC = () => {
     setLoading(true);
     setErr(null);
     try {
-      const [all, moves] = await Promise.all([
-        inventoryApi.getProducts(),
-        inventoryApi.getStockMovements(
-          asOfDate ? { date_to: asOfDate } : undefined,
-        ),
-      ]);
-      setProducts(all as SqlProduct[]);
-      setMovements(moves as StockMovementDto[]);
+      // P0-5: نداء تجميعي واحد (~صف/صنف) بدل جلب كل الأصناف + كل الحركات.
+      const res = await inventoryApi.getStockValuation(
+        asOfDate ? { as_of: asOfDate } : undefined,
+      );
+      setServerRows(res.rows);
       setHasRun(true);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "خطأ في التحميل");
@@ -144,13 +123,13 @@ export const InventoryValuationPage: React.FC = () => {
   }, [asOfDate]);
 
   const categories = useMemo(() => {
-    const set = new Set(products.map((p) => p.category_name || "").filter(Boolean));
+    const set = new Set(serverRows.map((p) => p.category_name || "").filter(Boolean));
     return Array.from(set).sort();
-  }, [products]);
+  }, [serverRows]);
 
   const rows: ValuationRow[] = useMemo(() => {
     const s = search.toLowerCase();
-    return products
+    return serverRows
       .filter((p) => {
         if (filterCategory && p.category_name !== filterCategory) return false;
         if (s) {
@@ -164,8 +143,8 @@ export const InventoryValuationPage: React.FC = () => {
       })
       .map((p) => {
         const baseQty = Number(p.quantity_on_hand) || 0;
-        const qty = applyBonusQty(p, baseQty, bonusCalc, movements);
-        const unitPrice = computeUnitPrice(p, method, movements);
+        const qty = applyBonusQty(p, baseQty, bonusCalc);
+        const unitPrice = computeUnitPrice(p, method);
         return {
           id: p.id,
           sku: p.sku,
@@ -178,7 +157,7 @@ export const InventoryValuationPage: React.FC = () => {
         };
       })
       .filter((r) => r.quantity > 0);
-  }, [products, movements, method, bonusCalc, filterCategory, search]);
+  }, [serverRows, method, bonusCalc, filterCategory, search]);
 
   const grandTotal = useMemo(() => rows.reduce((s, r) => s + r.totalValue, 0), [rows]);
 

@@ -388,6 +388,18 @@ export const inventoryApi = {
     return res.json();
   },
 
+  /** P0-5: تقييم المخزون التجميعي — صف واحد لكل صنف بدل كل الحركات. */
+  getStockValuation: async (params?: Record<string, string>) => {
+    const q = params && Object.keys(params).length
+      ? `?${new URLSearchParams(params)}`
+      : "";
+    const res = await fetch(`${INV}/stock-movements/valuation/${q}`, {
+      headers: headers(),
+    });
+    await handle(res, "getStockValuation");
+    return res.json();
+  },
+
   getStockSummary: async () => {
     const res = await fetch(`${INV}/stock-movements/summary/`, {
       headers: headers(),

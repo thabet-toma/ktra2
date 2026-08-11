@@ -19,6 +19,7 @@ from tenants.services import create_company
 ENFORCED_ENDPOINTS = [
     "/api/logistics/payments/",
     "/api/logistics/deals/",
+    "/api/inventory/stock-movements/",
 ]
 
 

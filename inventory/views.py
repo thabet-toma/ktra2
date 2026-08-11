@@ -25,6 +25,7 @@ from .services import (
 )
 from tenants.models import Tenant
 from core.access import requires_perm
+from core.pagination import EnforcedPageNumberPagination
 from core.activity import build_activity_changes, log_activity, log_view
 from core.tenant_utils import get_tenant
 # صيانة الأداء 2026-07: الكلاس انتقل إلى core/pagination.py ليصبح الافتراضي
@@ -690,6 +691,10 @@ class StockMovementViewSet(viewsets.ModelViewSet):
     queryset = StockMovement.objects.all().select_related('product', 'partner')
     serializer_class = StockMovementSerializer
     http_method_names = ['get', 'post', 'head', 'options']
+    # P0-5: ترقيم إلزامي — أضخم جدول في النظام. المستهلكان:
+    # StockMovementsPage مُرقَّمة أصلاً، وشاشة التقييم صارت على action
+    # `valuation` التجميعي (لا تلمس القائمة). Meta.ordering يضمن ترتيباً حتمياً.
+    pagination_class = EnforcedPageNumberPagination
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -731,6 +736,76 @@ class StockMovementViewSet(viewsets.ModelViewSet):
         if dt:
             qs = qs.filter(movement_date__lte=dt)
         return qs
+
+    @action(detail=False, methods=['get'], url_path='valuation')
+    def valuation(self, request):
+        """P0-5: تقييم المخزون خادمياً — صف تجميعي واحد لكل صنف.
+
+        كانت شاشة التقييم تجلب **كل حركات المخزون** إلى المتصفح وتحسب هناك
+        (أضخم جدول في النظام). هنا تُحسب التجميعات نفسها بـsubqueries على
+        الفهرس (tenant, product, movement_date) وتعود ~صف/صنف، وتبديل طريقة
+        التقييم في الشاشة يبقى client-side فورياً على هذه التجميعات:
+        - first/last IN unit_cost (بترتيب movement_date,id) — لطريقتَي FIFO/LIFO.
+        - متوسط unit_cost>0 للداخل والخارج — avg_purchase/avg_sale.
+        - صافي الكمية (IN موجب وكل ما عداه سالب) — bonus «من الحركات»؛
+          نفس دلالة includes("IN") في الواجهة حرفياً: ADJUST_IN/RETURN_IN داخل.
+        """
+        from django.db.models import Avg, Case, OuterRef, Subquery, When
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=400)
+        as_of = request.query_params.get('as_of')
+
+        moves = StockMovement.objects.filter(
+            tenant=tenant, product=OuterRef('pk'))
+        if as_of:
+            moves = moves.filter(movement_date__lte=as_of)
+        ins = moves.filter(movement_type__contains='IN')
+        outs = moves.filter(movement_type__contains='OUT')
+        money = DecimalField(max_digits=18, decimal_places=4)
+
+        def _agg(qs, expr):
+            return Subquery(
+                qs.values('product').annotate(v=expr).values('v')[:1],
+                output_field=money,
+            )
+
+        products = Product.objects.filter(tenant=tenant).select_related(
+            'category',
+        ).annotate(
+            first_in_cost=Subquery(
+                ins.order_by('movement_date', 'id').values('unit_cost')[:1],
+                output_field=money),
+            last_in_cost=Subquery(
+                ins.order_by('-movement_date', '-id').values('unit_cost')[:1],
+                output_field=money),
+            avg_in_cost=_agg(ins.filter(unit_cost__gt=0), Avg('unit_cost')),
+            avg_out_cost=_agg(outs.filter(unit_cost__gt=0), Avg('unit_cost')),
+            moves_qty_delta=_agg(moves, Sum(Case(
+                When(movement_type__contains='IN', then=F('quantity')),
+                default=-F('quantity'),
+            ))),
+        ).order_by('sku')
+
+        rows = [
+            {
+                'id': p.id,
+                'sku': p.sku,
+                'name_ar': p.name_ar,
+                'name_en': p.name_en,
+                'category_name': p.category.name if p.category_id else '',
+                'quantity_on_hand': str(p.quantity_on_hand),
+                'avg_cost': str(p.avg_cost),
+                'first_in_cost': str(p.first_in_cost) if p.first_in_cost is not None else None,
+                'last_in_cost': str(p.last_in_cost) if p.last_in_cost is not None else None,
+                'avg_in_cost': str(p.avg_in_cost) if p.avg_in_cost is not None else None,
+                'avg_out_cost': str(p.avg_out_cost) if p.avg_out_cost is not None else None,
+                'moves_qty_delta': str(p.moves_qty_delta) if p.moves_qty_delta is not None else None,
+            }
+            for p in products
+        ]
+        return Response({'as_of': as_of, 'rows': rows})
 
     def create(self, request, *args, **kwargs):
         data = request.data
