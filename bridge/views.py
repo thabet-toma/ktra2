@@ -14,24 +14,22 @@ from .models import FirestoreMirrorDoc
 
 logger = logging.getLogger(__name__)
 
-# Collections that are NOT company-scoped (auth / HR / public content).
+# Collections that are NOT company-scoped (auth / public content only).
 # Everything else stored through /api/mapper/ belongs to exactly one company.
 # task11 M7: «tasks» أصبحت tenant-scoped — كانت global فظهرت مهام الشركة
 # القديمة في الصفحة الرئيسية لأي شركة جديدة.
+# الجلسة الأمنية 2026-08-11 (P0-3): أُخرجت بيانات الحضور والنقاط والأقسام من
+# القائمة العالمية — كانت مقروءة عبر كل الشركات لأي مستخدم. الواجهة تقرأها من
+# Firebase مباشرةً لا من الـmapper، فالنسخة هنا دفاعية والتقييد بلا كسر مستهلك.
 GLOBAL_COLLECTIONS = {
     'users',
-    'attendanceSessions',
-    'attendanceRecords',
-    'pointsHistory',
     'publicGallery',
-    'departments',
     'aboutLinks',
 }
 
 # Collections that can be read by unauthenticated users (GET only)
 PUBLIC_COLLECTIONS = {
     'publicGallery',
-    'departments',
     'aboutLinks',
 }
 
@@ -356,10 +354,12 @@ class MapperView(View):
             doc = FirestoreMirrorDoc.objects.get(path=path)
         except FirestoreMirrorDoc.DoesNotExist:
             return None, JsonResponse({'detail': 'Not found'}, status=404)
-        if _is_tenant_scoped(path) and doc.tenant_id is not None \
-                and tenant is not None and doc.tenant_id != tenant.pk:
-            # Hide other tenants' docs entirely.
-            return None, JsonResponse({'detail': 'Not found'}, status=404)
+        # P0-4 (الجلسة الأمنية 2026-08-11): وثيقة مُنطاقة بلا مالك (tenant NULL)
+        # لا تخصّ أحداً — لا تُعرَض ولا يجوز لأي شركة الاستيلاء عليها. المملوكة
+        # تُطابَق مع شركة المستدعي فقط. (كان NULL يمرّ لأي شركة = خرق عزل.)
+        if _is_tenant_scoped(path):
+            if doc.tenant_id is None or tenant is None or doc.tenant_id != tenant.pk:
+                return None, JsonResponse({'detail': 'Not found'}, status=404)
         return doc, None
 
     def get(self, request, subpath):
@@ -415,9 +415,11 @@ class MapperView(View):
         data['id'] = doc_id
 
         existing = FirestoreMirrorDoc.objects.filter(path=full_path).first()
-        if existing is not None and _is_tenant_scoped(full_path) \
-                and existing.tenant_id is not None and tenant is not None \
-                and existing.tenant_id != tenant.pk:
+        # P0-4: لا كتابة فوق وثيقة مُنطاقة تخصّ شركة أخرى أو بلا مالك.
+        if existing is not None and _is_tenant_scoped(full_path) and (
+            existing.tenant_id is None or tenant is None
+            or existing.tenant_id != tenant.pk
+        ):
             return JsonResponse({'detail': 'Not found'}, status=404)
 
         # Auto-sync mirror suppliers to SQL partners
@@ -456,8 +458,12 @@ class MapperView(View):
 
         doc = FirestoreMirrorDoc.objects.filter(path=path).first()
         if doc is not None:
-            if _is_tenant_scoped(path) and doc.tenant_id is not None \
-                    and tenant is not None and doc.tenant_id != tenant.pk:
+            # P0-4: وثيقة مُنطاقة تخصّ شركة أخرى أو يتيمة (NULL) لا تُكتَب — لا
+            # استيلاء. الوثيقة الجديدة (else) تولَد مملوكة لشركة المستدعي مباشرةً.
+            if _is_tenant_scoped(path) and (
+                doc.tenant_id is None or tenant is None
+                or doc.tenant_id != tenant.pk
+            ):
                 return JsonResponse({'detail': 'Not found'}, status=404)
         else:
             doc = FirestoreMirrorDoc(
@@ -466,8 +472,6 @@ class MapperView(View):
                 tenant=tenant if _is_tenant_scoped(path) else None,
             )
 
-        if _is_tenant_scoped(path) and doc.tenant_id is None and tenant is not None:
-            doc.tenant = tenant  # adopt legacy/unowned docs on first write
         if merge:
             doc.data = {**doc.data, **body}
         else:

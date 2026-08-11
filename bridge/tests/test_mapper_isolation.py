@@ -147,3 +147,44 @@ class MapperIsolationTest(APITestCase):
         self._as(self.token_b, self.tenant_a.TenantID)
         res = self.client.get("/api/mapper/invoices/")
         self.assertEqual(res.status_code, 403)
+
+    # ── الجلسة الأمنية 2026-08-11 — P0-3: الحضور/النقاط/الأقسام مُنطاقة الآن ──
+    def test_attendance_collections_are_tenant_scoped(self):
+        """كانت attendanceRecords عالمية ⇒ مقروءة عبر كل الشركات. الآن مُنطاقة."""
+        FirestoreMirrorDoc.objects.create(
+            path="attendanceRecords/rec-a",
+            data={"id": "rec-a", "userId": "7"}, tenant=self.tenant_a)
+
+        # شركة B لا ترى سجل حضور شركة A
+        self._as(self.token_b, self.tenant_b.TenantID)
+        self.assertEqual(self.client.get("/api/mapper/attendanceRecords/").json(), [])
+        self.assertEqual(
+            self.client.get("/api/mapper/attendanceRecords/rec-a/").status_code, 404)
+
+        # شركة A ترى سجلها
+        self._as(self.token_a, self.tenant_a.TenantID)
+        ids = [r["id"] for r in self.client.get("/api/mapper/attendanceRecords/").json()]
+        self.assertIn("rec-a", ids)
+
+    # ── P0-4: الوثائق اليتيمة (tenant NULL) لا تُقرأ ولا تُتبنّى ──
+    def test_orphan_scoped_doc_is_not_readable(self):
+        FirestoreMirrorDoc.objects.create(
+            path="invoices/orphan", data={"id": "orphan", "total": 5}, tenant=None)
+        self._as(self.token_b, self.tenant_b.TenantID)
+        self.assertEqual(
+            self.client.get("/api/mapper/invoices/orphan/").status_code, 404)
+        self.assertNotIn(
+            "orphan",
+            [r["id"] for r in self.client.get("/api/mapper/invoices/").json()])
+
+    def test_orphan_scoped_doc_cannot_be_adopted_on_write(self):
+        FirestoreMirrorDoc.objects.create(
+            path="invoices/orphan2", data={"id": "orphan2", "total": 5}, tenant=None)
+        self._as(self.token_b, self.tenant_b.TenantID)
+        res = self.client.put(
+            "/api/mapper/invoices/orphan2/", {"total": 999}, format="json")
+        self.assertEqual(res.status_code, 404)
+        # لم تُتبنَّ ولا تغيّرت
+        doc = FirestoreMirrorDoc.objects.get(path="invoices/orphan2")
+        self.assertIsNone(doc.tenant_id)
+        self.assertEqual(doc.data.get("total"), 5)
