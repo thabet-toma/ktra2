@@ -506,6 +506,10 @@ export const inventoryApi = {
 const PICKER_PRODUCTS_TTL_MS = 60_000;
 const pickerProductsCache = new Map<string, { at: number; rows: unknown[] }>();
 const pickerProductsInFlight = new Map<string, Promise<unknown[]>>();
+// عدّاد أجيال: الإفراغ وحده لا يكفي — طلبٌ طائر لحظة الإفراغ كان يهبط بعده
+// فيعيد ملء النافذة بصفوف ما قبل التعديل، فيغيب الصنف الجديد 60 ثانية كاملة.
+// الجيل يُلتقط عند إطلاق الطلب، ولا يكتب في النافذة من هبط بجيلٍ أقدم.
+let pickerProductsGeneration = 0;
 
 // المفتاح يعكس ما أُرسِل فعلاً لا ما نظنّه: المستدعي الذي يترك الشركة فارغة
 // لا يُرسل ترويسة X-Tenant-Id فيحسمها الخادم، فلا يجوز أن يتقاسم نتيجته مع
@@ -518,7 +522,11 @@ const pickerCacheKey = (tenantId?: number) =>
  * منتقي الفاتورة التي أُنشئ من داخلها.
  */
 export const invalidatePickerProducts = (): void => {
+  pickerProductsGeneration += 1;
   pickerProductsCache.clear();
+  // الطلب الطائر يبقى يخدم منتظريه، لكنه لن يُعبّئ النافذة (جيله أقدم)،
+  // وحذفه هنا يجعل أول استدعاء تالٍ يطلق جلبة نظيفة بعد التعديل.
+  pickerProductsInFlight.clear();
 };
 
 /**
@@ -540,13 +548,18 @@ export const listPickerProducts = <T>(tenantId?: number): Promise<T[]> => {
   }
   let req = pickerProductsInFlight.get(key);
   if (!req) {
+    const generationAtLaunch = pickerProductsGeneration;
     req = apiGetList<T>("inventory/products/", { tenantId, query: { view: "lookup" } })
       .then((rows) => {
-        pickerProductsCache.set(key, { at: Date.now(), rows: rows as unknown[] });
+        if (generationAtLaunch === pickerProductsGeneration) {
+          pickerProductsCache.set(key, { at: Date.now(), rows: rows as unknown[] });
+        }
         return rows as unknown[];
       })
       .finally(() => {
-        pickerProductsInFlight.delete(key);
+        if (pickerProductsInFlight.get(key) === req) {
+          pickerProductsInFlight.delete(key);
+        }
       });
     pickerProductsInFlight.set(key, req);
   }

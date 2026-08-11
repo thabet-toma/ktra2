@@ -215,8 +215,14 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
     """
     from sales.models import CustomerProductQuote
 
-    last_by_product: dict[int, SalesInvoiceLine] = {}
-    lowest_by_product: dict[int, SalesInvoiceLine] = {}
+    # P2-14 (تخفيف — SCALABILITY_AUDIT): كان `select_related("invoice")` يبني
+    # نموذج بند كاملاً + صفّ فاتورة كاملاً لكل سطر باعه العميل يوماً — آلاف
+    # الصفوف الممتلئة لعميل قديم، والمستهلَك منها خمسة أعمدة. الإسقاط بـvalues
+    # يبقي نفس الاستعلام ونفس الترتيب ونفس دلالة «الأول يفوز»، ويقصّ النقل
+    # وبناء الكائنات. (الإصلاح الجذري — ترقيم/بحث خادمي — يكسر عقد
+    # getCustomerPriceList فيبقى قراراً منسّقاً واجهةً وخادماً.)
+    last_by_product: dict[int, dict] = {}
+    lowest_by_product: dict[int, dict] = {}
     lines = (
         SalesInvoiceLine.objects.filter(
             tenant_id=tenant_id,
@@ -224,14 +230,15 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
             invoice__status=SalesInvoice.STATUS_POSTED,
             invoice__invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
         )
-        .select_related("invoice")
         .order_by("product_id", "-invoice__invoice_date", "-invoice_id", "-id")
+        .values("product_id", "unit_price", "invoice_id", "invoice__invoice_number")
     )
     for ln in lines:
-        if ln.product_id not in last_by_product:
-            last_by_product[ln.product_id] = ln
-        if ln.product_id not in lowest_by_product or ln.unit_price < lowest_by_product[ln.product_id].unit_price:
-            lowest_by_product[ln.product_id] = ln
+        pid = ln["product_id"]
+        if pid not in last_by_product:
+            last_by_product[pid] = ln
+        if pid not in lowest_by_product or ln["unit_price"] < lowest_by_product[pid]["unit_price"]:
+            lowest_by_product[pid] = ln
 
     quotes = {
         q.product_id: q
@@ -242,51 +249,53 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
     # في القائمة (وخيارات الفاتورة) حتى للعروض القديمة التي لم تُعبّئ كرت الزبون.
     from sales.models import SalesQuotationLine
 
-    sq_by_product: dict[int, SalesQuotationLine] = {}
+    sq_by_product: dict[int, dict] = {}
     for sl in (
         SalesQuotationLine.objects.filter(
             tenant_id=tenant_id, quotation__customer_id=customer_id,
         )
-        .select_related("quotation")
         .order_by("product_id", "-quotation__quotation_date", "-quotation_id", "-id")
+        .values("product_id", "unit_price", "quotation__quotation_number")
     ):
-        if sl.product_id not in sq_by_product:
-            sq_by_product[sl.product_id] = sl
+        if sl["product_id"] not in sq_by_product:
+            sq_by_product[sl["product_id"]] = sl
 
     rows: list[dict] = []
-    products = Product.objects.filter(tenant_id=tenant_id).order_by("name_ar", "sku")
+    products = Product.objects.filter(tenant_id=tenant_id).only(
+        "id", "sku", "name_ar", "name_en", "sale_price",
+    ).order_by("name_ar", "sku")
     for p in products:
         ln_last = last_by_product.get(p.id)
         ln_lowest = lowest_by_product.get(p.id)
         q = quotes.get(p.id)
         sq = sq_by_product.get(p.id)
         name = p.name_ar or p.name_en or p.sku or f"#{p.id}"
-        
+
         prices = []
         if ln_last:
             prices.append({
                 "label": "آخر فاتورة",
-                "unit_price": str(ln_last.unit_price),
+                "unit_price": str(ln_last["unit_price"]),
                 "source_type": "SALES_INVOICE",
-                "document_id": ln_last.invoice_id,
-                "invoice_number": ln_last.invoice.invoice_number,
+                "document_id": ln_last["invoice_id"],
+                "invoice_number": ln_last["invoice__invoice_number"],
             })
-        if ln_lowest and (not ln_last or ln_lowest.invoice_id != ln_last.invoice_id):
+        if ln_lowest and (not ln_last or ln_lowest["invoice_id"] != ln_last["invoice_id"]):
             prices.append({
                 "label": "أقل سعر",
-                "unit_price": str(ln_lowest.unit_price),
+                "unit_price": str(ln_lowest["unit_price"]),
                 "source_type": "SALES_INVOICE",
-                "document_id": ln_lowest.invoice_id,
-                "invoice_number": ln_lowest.invoice.invoice_number,
+                "document_id": ln_lowest["invoice_id"],
+                "invoice_number": ln_lowest["invoice__invoice_number"],
             })
-            
-        if not prices and sq is not None and Decimal(str(sq.unit_price)) > 0:
+
+        if not prices and sq is not None and Decimal(str(sq["unit_price"])) > 0:
             prices.append({
                 "label": "عرض السعر",
-                "unit_price": str(sq.unit_price),
+                "unit_price": str(sq["unit_price"]),
                 "source_type": "QUOTE",
                 "document_id": None,  # عرض (لا فاتورة) — نتفادى رابط فاتورة خاطئ
-                "invoice_number": sq.quotation.quotation_number,
+                "invoice_number": sq["quotation__quotation_number"],
             })
         if not prices and q is not None:
             prices.append({

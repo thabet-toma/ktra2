@@ -18,10 +18,15 @@ const TENANT_SETTINGS_TTL_MS = 60_000;
 
 let cached: { key: string; at: number; data: unknown } | null = null;
 let inFlight: { key: string; promise: Promise<unknown> } | null = null;
+// عدّاد أجيال: الإفراغ وحده لا يكفي — طلبٌ طائر لحظة الإفراغ كان يهبط بعده
+// فيعيد ملء النافذة بالقيمة القديمة، فيقرأ المستهلك التالي ما سبق تغييره.
+let generation = 0;
 
 /** تُستدعى بعد كل PATCH على الإعدادات كي تُقرأ القيمة الجديدة لا المحفوظة. */
 export function invalidateTenantSettings(): void {
+  generation += 1;
   cached = null;
+  inFlight = null;
 }
 
 export function getTenantSettings<T = Record<string, unknown>>(
@@ -37,14 +42,18 @@ export function getTenantSettings<T = Record<string, unknown>>(
     return inFlight.promise as Promise<T>;
   }
 
-  const promise = apiGetObject<T>("tenants/settings/current/", { tenantId: id })
+  const generationAtLaunch = generation;
+  const entry: { key: string; promise: Promise<unknown> } = { key, promise: Promise.resolve() };
+  entry.promise = apiGetObject<T>("tenants/settings/current/", { tenantId: id })
     .then((data) => {
-      cached = { key, at: Date.now(), data };
+      if (generationAtLaunch === generation) {
+        cached = { key, at: Date.now(), data };
+      }
       return data as unknown;
     })
     .finally(() => {
-      if (inFlight?.key === key) inFlight = null;
+      if (inFlight === entry) inFlight = null;
     });
-  inFlight = { key, promise };
-  return promise as Promise<T>;
+  inFlight = entry;
+  return entry.promise as Promise<T>;
 }

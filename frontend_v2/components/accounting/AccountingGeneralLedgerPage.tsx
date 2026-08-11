@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
-import { formatMoney, formatBalanceWithSide } from "../../utils/formatNumber";
+import { formatMoney, formatBalanceWithSide, formatNumber } from "../../utils/formatNumber";
 import type { AccountingAccount, GeneralLedgerResponse, CurrencyDto } from "../../types/accounting";
 import {
   AseelDocumentShell,
@@ -162,6 +162,13 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
   const reportContent = (
     <>
       {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      {data?.truncated && (
+        <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>
+          الكشف مقصوص: عُرض {formatNumber(data.max_rows ?? 0)} سطراً من أصل{" "}
+          {formatNumber(data.total_count ?? 0)} — الرصيد الختامي أدناه يخصّ المعروض فقط.
+          ضيّق مدى التاريخ لعرض الكشف كاملاً.
+        </div>
+      )}
       {data && (
         <div style={{ padding: "8px 0", fontSize: "0.85rem", color: "var(--aseel-ink-soft)" }}>
           <strong>{data.account_code} — {data.account_name}</strong>

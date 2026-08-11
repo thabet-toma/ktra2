@@ -61,8 +61,9 @@ export const SessionSettingsProvider: React.FC<{ children: React.ReactNode }> = 
   /** حفظ التفضيل خادمياً (per-company). غير حظري — لا يُعطّل الواجهة. */
   const persist = useCallback((minutes: number) => {
     if (!hasToken()) return; // زائر — cache محلي فقط
-    invalidateTenantSettings();
+    // الإفراغ بعد نجاح الكتابة لا قبلها — نفس علّة AppearanceContext.
     void apiPatchObject('tenants/settings/current/', { idle_timeout_minutes: minutes }, { tenantId })
+      .then(() => invalidateTenantSettings())
       .catch((e) => clientLogger.warn('session.idle_persist_failed', { error: String(e) }));
   }, [tenantId]);
 

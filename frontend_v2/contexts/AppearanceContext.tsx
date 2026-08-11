@@ -120,8 +120,10 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   /** حفظ التفضيل خادمياً (per-company). غير حظري — لا يُعطّل الواجهة. */
   const persist = useCallback((patch: { font_scale?: FontScale; font_family?: FontFamilyId }) => {
     if (!hasToken()) return; // زائر (صفحة الهبوط/الدخول) — cache محلي فقط
-    invalidateTenantSettings();
+    // الإفراغ بعد نجاح الكتابة لا قبلها: إفراغٌ مبكر يترك نافذةً يهبط فيها
+    // GET متزامن فيعيد تعبئة النافذة بالقيمة القديمة قبل أن يصل الـPATCH.
     void apiPatchObject('tenants/settings/current/', patch, { tenantId })
+      .then(() => invalidateTenantSettings())
       .catch((e) => clientLogger.warn('appearance.persist_failed', { error: String(e) }));
   }, [tenantId]);
 

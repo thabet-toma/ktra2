@@ -244,6 +244,10 @@ export interface GeneralLedgerResponse {
   account_code: string | null;
   opening_balance: number;
   closing_balance: number;
+  /** P1-3: الخادم يقصّ الكشف عند max_rows — القصّ معلَن لا صامت. */
+  total_count?: number;
+  truncated?: boolean;
+  max_rows?: number;
   transactions: Array<{
     id: number;
     date: string;

@@ -155,6 +155,12 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
     class Meta:
         db_table = 'supplier_quotations'
         ordering = ['-quotation_date', '-id']
+        # P1-4 (استدراك مراجعة الجلسة): كان ضمن قائمة «logistics بلا فهارس» في
+        # التدقيق وسقط من الدفعة الأولى — نفس نمط الصفقات/الشحنات.
+        indexes = [
+            models.Index(fields=['tenant', 'status', '-quotation_date'],
+                         name='idx_sq_tenant_status'),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=['tenant', 'scope', 'quotation_number'],
@@ -329,6 +335,11 @@ class PurchaseOrder(SoftDeleteMixin, models.Model):
     class Meta:
         db_table = 'purchase_orders'
         ordering = ['-order_date', '-id']
+        # P1-4 (استدراك مراجعة الجلسة): نفس استدراك SupplierQuotation.
+        indexes = [
+            models.Index(fields=['tenant', 'status', '-order_date'],
+                         name='idx_po_tenant_status'),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=['tenant', 'order_number'],
@@ -839,7 +850,9 @@ class LogisticsPayment(SoftDeleteMixin, models.Model):
                 self.tenant_id = self.shipment.tenant_id
             if self.tenant_id is not None and 'update_fields' in kwargs:
                 update_fields = kwargs.get('update_fields')
-                if update_fields is not None:
+                # قائمة فارغة = «لا تكتب شيئاً» بعقد Django — إلحاق tenant بها
+                # يقلب الحفظ الصوري إلى كتابة فعلية، فلا نتدخل إلا في كتابة قائمة.
+                if update_fields:
                     kwargs['update_fields'] = list(set(update_fields) | {'tenant'})
         super().save(*args, **kwargs)
 
