@@ -149,9 +149,24 @@ class JournalLine(models.Model):
         db_table = 'journal_lines'
         managed = True
         # صيانة الأداء 2026-07: كشوف الحساب/الميزان تفلتر (tenant, account) معاً.
+        # المرحلة 5 / P0-11 (SCALABILITY_AUDIT §3): أكبر جدول محاسبي كان بفهرس
+        # واحد، فتقرير أرصدة الشركاء (أثقل تجميع في النظام) = full scan.
         indexes = [
             models.Index(fields=['tenant', 'account'],
                          name='idx_jl_tenant_account'),
+            # أرصدة الشركاء وكشف حساب الشريك: core/reports/financial.py
+            # (تجميع debit/credit لكل شريك على كل أسطر الشركة).
+            models.Index(fields=['tenant', 'partner'],
+                         name='idx_jl_tenant_partner'),
+            # ضمّ الأسطر إلى رؤوسها في تجميعات الميزان: accounting/views.py:735+.
+            models.Index(fields=['tenant', 'journal'],
+                         name='idx_jl_tenant_journal'),
+            # دفتر الأستاذ لحساب داخل مدى قيود: accounting/views.py:650-655.
+            # ملاحظة للمتابعة: هذا يجعل idx_jl_tenant_account بادئةً صارمة منه
+            # ⇒ مرشّح للحذف في بند لاحق (توفير كلفة كتابة على أسخن مسار كتابة
+            # في النظام). لم يُحذف هنا لأن نطاق البند «إضافة ما حدّده التدقيق».
+            models.Index(fields=['tenant', 'account', 'journal'],
+                         name='idx_jl_tenant_acc_jrn'),
         ]
         constraints = [
             models.CheckConstraint(

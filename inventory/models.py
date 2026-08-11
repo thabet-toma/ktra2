@@ -262,6 +262,26 @@ class StockMovement(models.Model):
         db_table = 'stock_movements'
         managed = True
         ordering = ['-movement_date', '-id']
+        # المرحلة 5 / P0-10 (SCALABILITY_AUDIT §3): أضخم جدول في المشروع كان
+        # بلا أي فهرس — كل استعلام حركة = full scan. كل فهرس أدناه مربوط
+        # باستعلام قائم، والعمود القائد tenant دائماً (كل قراءة مُنطاقة).
+        indexes = [
+            # كشف حركات صنف/إعادة حساب رصيده: inventory/services.py:901،
+            # inventory/views.py:401.
+            models.Index(fields=['tenant', 'product', 'movement_date'],
+                         name='idx_sm_tenant_prod_date'),
+            # قائمة الحركات وتقرير الحركات — نفس ترتيب Meta.ordering:
+            # inventory/views.py:733، core/reports.py (تقرير حركات المخزون).
+            models.Index(fields=['tenant', '-movement_date', '-id'],
+                         name='idx_sm_tenant_date_id'),
+            # التتبّع العكسي للمستند المصدر (ترحيل/إلغاء ترحيل، تشخيص):
+            # inventory/services.py:312,385,476 · logistics/views المشتريات.
+            models.Index(fields=['tenant', 'reference_type', 'reference_id'],
+                         name='idx_sm_tenant_ref'),
+            # تقييم المخزون لكل مستودع: core/reports (تقرير أرصدة المستودعات).
+            models.Index(fields=['tenant', 'warehouse', 'product'],
+                         name='idx_sm_tenant_wh_prod'),
+        ]
 
     def __str__(self):
         return f"{self.get_movement_type_display()} | {self.product} | {self.quantity}"
