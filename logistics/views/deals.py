@@ -9,10 +9,10 @@ from rest_framework.exceptions import ValidationError
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, IntegrityError
 from django.db.models import (
-    Count, DecimalField, F, IntegerField, OuterRef, Prefetch, Q, Subquery, Sum,
-    Value,
+    Count, DecimalField, F, IntegerField, Max, OuterRef, Prefetch, Q, Subquery,
+    Sum, Value,
 )
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Cast, Coalesce, Substr
 from django.utils.dateparse import parse_date
 from logistics.models import (
     SupplierQuotation,
@@ -178,15 +178,23 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
 
     @staticmethod
     def _next_deal_ref(tenant):
-        """D-#### تالٍ لكل الشركة — يشمل المحذوف ناعماً لأن قيد الفريدة يشمله."""
-        import re
-        nums = [0]
-        refs = LogisticsDeal.all_objects.filter(tenant=tenant).values_list('ref_number', flat=True)
-        for r in refs:
-            m = re.match(r'^D-(\d+)$', str(r or ''))
-            if m:
-                nums.append(int(m.group(1)))
-        return f"D-{max(nums) + 1:04d}"
+        """D-#### تالٍ لكل الشركة — يشمل المحذوف ناعماً لأن قيد الفريدة يشمله.
+
+        P1-15 (SCALABILITY_AUDIT): كانت الدالة تسحب **كل** أرقام صفقات الشركة
+        إلى بايثون وتمرّ عليها بـregex لإيجاد الأقصى — آلاف الصفوف عبر الشبكة
+        في كل استدعاء، وتُستدعى عند كل فتح لشاشة صفقة جديدة وعند كل إنشاء.
+        الأقصى يُحسب الآن في القاعدة ويُعاد صفٌّ واحد.
+
+        `Cast(Substr(...))` لا الترتيب النصّي: الترتيب المعجمي يصحّ ما دام
+        الرقم أربع خانات، وينقلب عند تجاوز 9999 (`D-10000` < `D-9999` نصّياً).
+        """
+        top = (
+            LogisticsDeal.all_objects
+            .filter(tenant=tenant, ref_number__regex=r'^D-[0-9]+$')
+            .annotate(_seq=Cast(Substr('ref_number', 3), IntegerField()))
+            .aggregate(top=Max('_seq'))['top']
+        )
+        return f"D-{(top or 0) + 1:04d}"
 
     @action(detail=False, methods=['get'], url_path='next-ref')
     def next_ref(self, request):

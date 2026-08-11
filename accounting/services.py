@@ -2,7 +2,7 @@ import datetime
 import logging
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from .models import Account, ExchangeRate, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter, VoidedJournal
 from decimal import Decimal
 from partners.models import Partner
@@ -222,23 +222,32 @@ def resolve_import_expense_account(tenant_id: int, name: str):
         code = str(account.code or "")
         if code.startswith(IMPORT_EXPENSE_PARENT_CODE) and code[2:].isdigit():
             used.add(int(code[2:]))
+    # P1-15 (SCALABILITY_AUDIT): كانت حلقةٌ تصل إلى 9000 دورة، كل دورة استعلام
+    # `exists()` مستقل — على قاعدة بعيدة هذا آلاف الرحلات لتخصيص رقم واحد. وهي
+    # زائدة أصلاً: `subtree` أعلاه يجلب **كل** حسابات «53*»، فمجموعة `used`
+    # تعرف المشغول كاملاً بلا استعلام إضافي.
+    # ويبقى السباق: طلبان متزامنان يحسبان الرقم نفسه. الحارس الصحيح هو قيد
+    # الفريدة (tenant, code) في القاعدة لا الفحص المسبق — فنُعيد المحاولة على
+    # IntegrityError بدل أن نراهن على أن أحداً لم يسبقنا بين الفحص والكتابة.
     serial = max(used) + 1 if used else 1
-    for _ in range(9000):
+    for _ in range(50):
         candidate = f"{IMPORT_EXPENSE_PARENT_CODE}{serial:02d}"
-        if not Account.objects.filter(tenant_id=tenant_id, code=candidate).exists():
+        try:
+            with transaction.atomic():
+                account = Account.objects.create(
+                    tenant_id=tenant_id,
+                    code=candidate,
+                    name=clean,
+                    parent=parent,
+                    account_type="Expense",
+                    is_active=True,
+                )
             break
-        serial += 1
+        except IntegrityError:
+            # سبقنا طلبٌ آخر لهذا الرقم — جرّب التالي.
+            serial += 1
     else:  # pragma: no cover - مساحة الترقيم لا تنفد عملياً
         raise ValueError("تعذّر تخصيص رقم حساب جديد تحت «مصاريف الاستيراد».")
-
-    account = Account.objects.create(
-        tenant_id=tenant_id,
-        code=candidate,
-        name=clean,
-        parent=parent,
-        account_type="Expense",
-        is_active=True,
-    )
     logger.info(
         "import expense account created tenant=%s code=%s name=%s",
         tenant_id, account.code, account.name,
