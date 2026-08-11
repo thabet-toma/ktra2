@@ -564,6 +564,13 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
                 name='unique_tenant_deal_ref',
             ),
         ]
+        # P1-4 (SCALABILITY_AUDIT §3): جداول اللوجستيات الرئيسية بلا أي فهرس
+        # رغم أن قوائمها تفلتر بـ(tenant, status) وترتّب بالتاريخ
+        # (logistics/views.py:436-450).
+        indexes = [
+            models.Index(fields=['tenant', 'status', '-created_at'],
+                         name='idx_deal_tenant_status'),
+        ]
 
     # ── State Machine: valid transitions for shipping_workflow_status ──
     # المراحل الثلاث الأولى يدوية بعقد الواجهة («اختيار يدوي للمراحل الثلاث
@@ -981,6 +988,12 @@ class LogisticsShipment(SoftDeleteMixin, models.Model):
     class Meta:
         db_table = 'logistics_shipments'
         managed = True
+        # P1-4: قائمة الشحنات تفلتر بـ(tenant, status) وترتّب بتاريخ الوصول
+        # (logistics/views.py:1363-1405).
+        indexes = [
+            models.Index(fields=['tenant', 'status', '-arrival_date'],
+                         name='idx_shipment_tenant_status'),
+        ]
 
     # ── State Machine: valid transitions for status ──
     # القيم تطابق STATUS_CHOICES حرفياً (In-Transit بشرطة).
@@ -1110,6 +1123,11 @@ class LogisticsClearance(models.Model):
     class Meta:
         db_table = 'logistics_clearance'
         managed = True
+        # P1-4: قائمة البيانات الجمركية — نفس النمط (logistics/views.py:2204+).
+        indexes = [
+            models.Index(fields=['tenant', 'status', '-clearance_date'],
+                         name='idx_clearance_tenant_status'),
+        ]
 
     # M4/D2: the `cost_lines` @property shim was removed. Its {label, amount} shape
     # is now built where needed — logistics.landed_cost.clearance_cost_line_dicts()
@@ -1620,6 +1638,13 @@ class PurchaseInvoice(models.Model):
             models.Index(fields=['partner']),
             models.Index(fields=['deal']),
             models.Index(fields=['status']),
+            # P1-4 (SCALABILITY_AUDIT §3): الفهارس أعلاه لا تطابق الفلترة الفعلية
+            # (logistics/views.py:2750-2790، core/reports.py:734,921) — وفهرس
+            # `status` المفرد عديم القيمة (انتقائيته شبه معدومة وبلا tenant قائداً).
+            models.Index(fields=['tenant', 'status', '-created_at'],
+                         name='idx_pi_tenant_status_created'),
+            models.Index(fields=['tenant', 'is_posted', 'is_return'],
+                         name='idx_pi_tenant_posted_return'),
         ]
 
     def __str__(self):

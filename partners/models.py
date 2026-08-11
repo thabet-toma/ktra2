@@ -110,6 +110,13 @@ class Partner(models.Model):
     class Meta:
         db_table = 'partners'
         managed = True
+        # P1-4 (SCALABILITY_AUDIT §3): الجدول الأساسي للعملاء والموردين كان بلا
+        # أي فهرس رغم أن كل شاشة تقريباً تفلتره بـ(tenant, partner_type)
+        # (partners/views.py:185-199، وكل القوائم المنسدلة).
+        indexes = [
+            models.Index(fields=['tenant', 'partner_type', '-created_at'],
+                         name='idx_partner_tenant_type'),
+        ]
 
     def __str__(self):
         return self.name

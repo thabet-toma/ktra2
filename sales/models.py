@@ -543,6 +543,14 @@ class SalesInvoice(models.Model):
         indexes = [
             models.Index(fields=["tenant", "status", "invoice_date"]),
             models.Index(fields=["customer"]),
+            # P1-4 (SCALABILITY_AUDIT §3): الفهرس الأول أعلاه لا يخدم القائمة
+            # الافتراضية — عمود `status` في وسطه، وقائمة الفواتير تفلتر بـtenant
+            # وترتّب بـ(-invoice_date,-id) بلا status (sales/views.py:129-180)،
+            # فتُترك «فجوة عمود أوسط» تعطّل الفهرس. هذان يطابقان الاستعلامين فعلاً.
+            models.Index(fields=["tenant", "-invoice_date", "-id"],
+                         name="idx_si_tenant_date"),
+            models.Index(fields=["tenant", "branch", "-invoice_date"],
+                         name="idx_si_tenant_branch_date"),
         ]
 
     def __str__(self):
@@ -818,6 +826,15 @@ class CustomerPayment(models.Model):
     class Meta:
         db_table = "sales_module_customer_payments"
         managed = True
+        # P1-4 (SCALABILITY_AUDIT §3): جدول السندات كان بلا فهرس واحد — وكل قراءة
+        # له مُنطاقة بـtenant ومرتّبة بالتاريخ (sales/views.py:972-985) أو مفلترة
+        # بالشريك (كشف حساب الطرف، core/reports.py:1282-1311).
+        indexes = [
+            models.Index(fields=["tenant", "-payment_date", "-id"],
+                         name="idx_cp_tenant_date"),
+            models.Index(fields=["tenant", "partner", "-payment_date"],
+                         name="idx_cp_tenant_partner_date"),
+        ]
 
 
 class SupplierPayment(models.Model):
@@ -862,6 +879,14 @@ class SupplierPayment(models.Model):
     class Meta:
         db_table = "sales_module_supplier_payments"
         managed = True
+        # P1-4: مرآة CustomerPayment — نفس أنماط القراءة
+        # (logistics/views.py:4148-4162 وكشف حساب المورد).
+        indexes = [
+            models.Index(fields=["tenant", "-payment_date", "-id"],
+                         name="idx_sp_tenant_date"),
+            models.Index(fields=["tenant", "partner", "-payment_date"],
+                         name="idx_sp_tenant_partner_date"),
+        ]
 
     def __str__(self):
         return f"SupplierPayment #{self.id} — {self.partner_id} ({self.amount})"
