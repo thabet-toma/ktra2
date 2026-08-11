@@ -29,7 +29,7 @@ from inventory.serials import (
 )
 from inventory.services import record_stock_movement
 from partners.models import Partner, PartnerGroup
-from partners.signals import ensure_partner_linked_account
+from accounting.api import ensure_partner_account
 from tenants.models import Tenant
 
 from .models import (
@@ -362,7 +362,7 @@ def _resolve_ar_account(invoice: SalesInvoice) -> Account:
     # T-DEFACC: حساب الزبون نفسه في الشجرة أولاً. حساب المجموعة هو أب الذمم العام
     # (المدينون التجاريون) — استعماله كان يخلط كل الزبائن في حساب واحد فيضيع
     # كشف الحساب التفصيلي، مع أن للزبون حسابه المولَّد تحت الأب أصلاً.
-    p = ensure_partner_linked_account(p) or p
+    p = ensure_partner_account(p) or p
     if p.linked_account_id:
         return p.linked_account
     if p.group_id:
@@ -2206,7 +2206,7 @@ def deliver_delivery_order(delivery: DeliveryOrder, *, user=None) -> DeliveryOrd
 
 def _resolve_ar_account_for_partner(partner: Partner) -> Account:
     # T-DEFACC: نفس ترتيب `_resolve_ar_account` — حساب الزبون قبل أب المجموعة.
-    partner = ensure_partner_linked_account(partner) or partner
+    partner = ensure_partner_account(partner) or partner
     if partner.linked_account_id:
         return partner.linked_account
     if partner.group_id:

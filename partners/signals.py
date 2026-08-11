@@ -12,11 +12,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 import logging
 
-from accounting.api import (
-    create_partner_opening_balance,
-    ensure_partner_account,
-    sync_partner_accounting,
-)
+from accounting.api import sync_partner_accounting
 from .models import Partner
 
 logger = logging.getLogger(__name__)
@@ -29,10 +25,3 @@ def manage_partner_account(sender, instance, created, **kwargs):
     Handles account creation and opening balance journal entries.
     """
     sync_partner_accounting(instance)
-
-
-# توافق خلفي مؤقت: الاسمان القديمان كانا يُستوردان من هذه الوحدة
-# (logistics/accruals، logistics/views، logistics/services، sales/services) —
-# يُحذفان بعد تحويل المستوردين إلى accounting.api (المرحلة 2-د).
-ensure_partner_linked_account = ensure_partner_account
-create_opening_balance_entry = create_partner_opening_balance

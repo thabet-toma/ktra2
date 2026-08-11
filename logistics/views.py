@@ -40,7 +40,6 @@ from .serializers import (
 from accounting.models import Account, TaxRate
 from inventory.models import StockMovement
 from partners.models import Partner
-from partners.signals import ensure_partner_linked_account
 from tenants.models import Tenant, Currency
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting import api as accounting_api
@@ -1689,7 +1688,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         # نفس إشارة الشريك: إنشاء حساب دائن تلقائياً تحت 2101/2102 إن أمكن
-        ensure_partner_linked_account(shipment.shipping_agent)
+        accounting_api.ensure_partner_account(shipment.shipping_agent)
         agent = Partner.objects.select_related("linked_account").get(
             pk=shipment.shipping_agent_id
         )
@@ -4280,7 +4279,7 @@ class LocalShipmentViewSet(BaseTenantViewSet):
         carrier = payload.get('carrier')
         if carrier:
             try:
-                ensure_partner_linked_account(carrier)
+                accounting_api.ensure_partner_account(carrier)
             except Exception:
                 pass
 

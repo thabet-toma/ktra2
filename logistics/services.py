@@ -651,9 +651,9 @@ def _resolve_ap_account(partner) -> Account:
     """
     # T-DEFACC: المورد بلا حساب مربوط يُنشأ له حسابه تحت «الدائنون» أولاً — بلا
     # هذا كان القيد يقع على الأب العام فيختلط كل الموردين في حساب واحد.
-    from partners.signals import ensure_partner_linked_account
+    from accounting.api import ensure_partner_account
 
-    partner = ensure_partner_linked_account(partner) or partner
+    partner = ensure_partner_account(partner) or partner
     if partner.linked_account_id:
         return partner.linked_account
     if partner.group_id:

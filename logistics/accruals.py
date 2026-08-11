@@ -17,8 +17,8 @@ from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
 from accounting.models import Account, JournalHeader
+from accounting.api import ensure_partner_account
 from accounting.services import create_audit_log, post_journal, validate_fiscal_period
-from partners.signals import ensure_partner_linked_account
 from tenants.models import Currency
 
 logger = logging.getLogger(__name__)
@@ -57,9 +57,9 @@ def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
     if not broker:
         raise AccrualSkipped('حدّد المخلّص الجمركي قبل إثبات الاستحقاق.')
     try:
-        ensure_partner_linked_account(broker)
+        ensure_partner_account(broker)
     except Exception:
-        logger.exception('ensure_partner_linked_account failed broker=%s', broker.pk)
+        logger.exception('ensure_partner_account failed broker=%s', broker.pk)
     if not broker.linked_account_id:
         raise AccrualSkipped('المخلّص غير مربوط بحساب ذمم في المحاسبة.')
 
@@ -140,9 +140,9 @@ def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
         raise AccrualSkipped('لا يوجد حساب مصروف للشحن المحلي (5305).')
 
     try:
-        ensure_partner_linked_account(shipment.carrier)
+        ensure_partner_account(shipment.carrier)
     except Exception:
-        logger.exception('ensure_partner_linked_account failed carrier=%s', shipment.carrier_id)
+        logger.exception('ensure_partner_account failed carrier=%s', shipment.carrier_id)
     credit_account = getattr(shipment.carrier, 'linked_account', None)
     if not credit_account:
         raise AccrualSkipped('الناقل لا يملك حساب محاسبي مرتبط.')
@@ -204,9 +204,9 @@ def post_freight_accrual(shipment, rate, user=None) -> Optional[JournalHeader]:
     if not agent:
         raise AccrualSkipped('حدّد وكيل الشحن قبل إثبات الاستحقاق.')
     try:
-        ensure_partner_linked_account(agent)
+        ensure_partner_account(agent)
     except Exception:
-        logger.exception('ensure_partner_linked_account failed agent=%s', agent.pk)
+        logger.exception('ensure_partner_account failed agent=%s', agent.pk)
     if not agent.linked_account_id:
         raise AccrualSkipped('وكيل الشحن غير مربوط بحساب ذمم في المحاسبة.')
 

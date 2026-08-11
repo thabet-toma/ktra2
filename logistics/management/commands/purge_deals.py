@@ -15,7 +15,8 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from accounting.models import JournalHeader, JournalLine
+from accounting.api import purge_journals
+from accounting.models import JournalHeader
 
 
 def _split_refs(raw: str) -> list[str]:
@@ -76,11 +77,9 @@ def _null_all_journal_fks(journal_ids: set[int]) -> None:
 
 
 def _delete_journal_headers(journal_ids: set[int]) -> int:
-    if not journal_ids:
-        return 0
-    JournalLine.objects.filter(journal_id__in=journal_ids).delete()
-    cnt, _ = JournalHeader.objects.filter(pk__in=journal_ids).delete()
-    return int(cnt)
+    # المرحلة 2: الحذف الجماعي للقيود عبر واجهة accounting.api —
+    # جمع المعرّفات (قراءة) يبقى هنا، والكتابة الوحيدة تمرّ من الواجهة.
+    return purge_journals(journal_ids)
 
 
 class Command(BaseCommand):

@@ -93,12 +93,10 @@ forbidden_modules =
     accountant_portal.signals
     accountant_portal.admin
     accountant_portal.urls
-# baseline 2026-08-11 — 6 انتهاكات قائمة، موثّقة في docs/DEPENDENCIES.md §3
+# baseline 2026-08-11 — كانت 6 انتهاكات؛ المرحلة 2-د فكّت الأربعة الخاصة
+# بـpartners.signals (المستوردون تحولوا إلى accounting.api) — بقي اثنان
+# مؤجلان عمداً (docs/REFACTOR_PROMPTS.md «ديون مؤجلة»)
 ignore_imports =
-    logistics.accruals -> partners.signals
-    logistics.services -> partners.signals
-    logistics.views -> partners.signals
-    sales.services -> partners.signals
     logistics.serializers -> partners.serializers
     logistics.serializers -> sales.serializers
 
@@ -146,11 +144,9 @@ ignore_imports =
     logistics.payment_posting_diagnostics -> accounting.models
     logistics.serializers -> accounting.models
     logistics.services -> accounting.models
-    logistics.signals -> accounting.models
     logistics.views -> accounting.models
     logistics.management.commands.audit_freight_accruals -> accounting.models
     logistics.management.commands.purge_deals -> accounting.models
-    partners.signals -> accounting.models
     sales.models -> accounting.models
     sales.serializers -> accounting.models
     sales.services -> accounting.models
