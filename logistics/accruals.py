@@ -16,7 +16,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 from typing import List, Optional
 
-from accounting.models import Account, JournalHeader, JournalLine
+from accounting.models import Account, JournalHeader
 from accounting.services import create_audit_log, post_journal, validate_fiscal_period
 from partners.signals import ensure_partner_linked_account
 from tenants.models import Currency
@@ -152,26 +152,32 @@ def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
 
     # تسمية القيود: المدين «استحقاق نقل» والدائن «ارسالية» (مصطلح المالك) —
     # الأستاذ العام يعرض وصف السطر الخام، فالتفريق يجب أن يكون في النص نفسه.
-    journal = JournalHeader.objects.create(
-        tenant=tenant,
+    # المرحلة 2: عبر post_journal مثل بقية استحقاقات الملف — يستعيد idempotency
+    # المرجع (LOCAL_SHIPMENT, pk) وقفل السباق بدل الإنشاء اليدوي.
+    journal = post_journal(
+        tenant_id=tenant.TenantID,
         transaction_date=td,
-        description=f"ارسالية {shipment.shipment_number} | {shipment.carrier.name}"[:500],
         reference_type='LOCAL_SHIPMENT',
         reference_id=shipment.pk,
-        is_posted=True,
+        description=f"ارسالية {shipment.shipment_number} | {shipment.carrier.name}"[:500],
+        lines_data=[
+            {
+                'account': expense_account.id, 'partner': shipment.carrier_id,
+                'debit': amt, 'credit': Decimal('0'),
+                'description': f"استحقاق نقل محلي — {shipment.shipment_number}"[:255],
+            },
+            {
+                'account': credit_account.id, 'partner': shipment.carrier_id,
+                'debit': Decimal('0'), 'credit': amt,
+                'description': (
+                    f"ارسالية {shipment.shipment_number} — {shipment.carrier.name}"
+                )[:255],
+            },
+        ],
         currency=shipment.currency,
         exchange_rate=shipment.exchange_rate,
+        user=user,
     )
-    for account, debit, credit, desc in (
-        (expense_account, amt, Decimal('0'), f"استحقاق نقل محلي — {shipment.shipment_number}"),
-        (credit_account, Decimal('0'), amt,
-         f"ارسالية {shipment.shipment_number} — {shipment.carrier.name}"),
-    ):
-        JournalLine.objects.create(
-            tenant=tenant, journal=journal, account=account,
-            partner=shipment.carrier, description=desc[:255],
-            debit=debit, credit=credit,
-        )
     shipment.is_posted = True
     shipment.journal = journal
     shipment.save(update_fields=['is_posted', 'journal'])

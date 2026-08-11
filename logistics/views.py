@@ -2543,8 +2543,6 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
     @requires_perm('import.doc.unpost')
     def unpost_payment(self, request, pk=None):
         """إلغاء ترحيل دفعة تخليص جمركي — قيد عكسي."""
-        from accounting.services import validate_fiscal_period
-
         clearance = self.get_object()
         payment_id = request.data.get('payment_id')
         if not payment_id:
@@ -2578,32 +2576,20 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                 except ValueError:
                     rev_date = datetime.date.today()
 
-                validate_fiscal_period(orig.tenant_id, rev_date)
-
-                rev = JournalHeader.objects.create(
-                    tenant=orig.tenant,
+                # المرحلة 2: القيد العكسي عبر accounting.api (يفحص الفترة
+                # والتوازن) مع نسخ عملة الأصل وسعر صرفه — الأصل يبقى مرحّلاً.
+                rev = accounting_api.reverse_journal(
+                    orig,
+                    reference_type="CLEARANCE_PAYMENT_UNPOST",
+                    reference_id=payment.id,
                     transaction_date=rev_date,
                     description=(
                         f"[إلغاء ترحيل] دفع تخليص #{payment.id} — "
                         f"عكس القيد #{orig.id}"
-                    )[:500],
-                    reference_type="CLEARANCE_PAYMENT_UNPOST",
-                    reference_id=payment.id,
-                    is_posted=True,
-                    currency=orig.currency,
-                    exchange_rate=orig.exchange_rate,
+                    ),
+                    line_description_prefix=f"عكس #{orig.id}: ",
+                    copy_currency=True,
                 )
-                for line in orig.lines.all():
-                    JournalLine.objects.create(
-                        tenant=line.tenant,
-                        journal=rev,
-                        account=line.account,
-                        debit=line.credit or Decimal('0'),
-                        credit=line.debit or Decimal('0'),
-                        partner=line.partner,
-                        cost_center=line.cost_center,
-                        description=(f"عكس #{orig.id}: {line.description or ''}")[:500],
-                    )
                 # نُبقي رابط القيد الأصلي للتدقيق (أيّ قيد رحّل هذه الدفعة)؛
                 # حارس إعادة الدخول يعتمد is_posted=False لمنع إلغاء ترحيل مزدوج.
                 payment.is_posted = False

@@ -16,8 +16,6 @@ from .models import (
     LogisticsClearance,
     PurchaseInvoice,
 )
-from accounting.models import JournalHeader, JournalLine
-
 logger = logging.getLogger(__name__)
 
 
