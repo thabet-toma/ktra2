@@ -38,6 +38,7 @@ from logistics.serializers import (
     GoodsReceiptListSerializer,
 )
 from accounting.models import Account, TaxRate
+from core.pagination import EnforcedPageNumberPagination
 from inventory.models import StockMovement
 from partners.models import Partner
 from tenants.models import Tenant, Currency
@@ -97,7 +98,8 @@ logger = logging.getLogger("logistics.views")
 
 
 class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
-    queryset = LogisticsDeal.objects.all().order_by('-order_date')
+    # P0-5: كاسر تعادل -id — ترتيب حتمي شرط مسبق للترقيم المستقر.
+    queryset = LogisticsDeal.objects.all().order_by('-order_date', '-id')
     serializer_class = LogisticsDealSerializer
     partner_balance_spec = ("partner_id", True, "supplier_balance")
 
@@ -957,8 +959,11 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
 
 class LogisticsPaymentViewSet(BaseTenantViewSet):
     """ViewSet مستقل للدفعات للاستعلام وإدارة الفواتير"""
-    queryset = LogisticsPayment.objects.all().order_by('-created_at')
+    # P0-5: ترقيم إلزامي — الجدول ينمو بلا حد ولا مستهلك واجهة يعتمد على
+    # المصفوفة الخام (تحقق grep على frontend_v2 — صفر استدعاءات لقائمته).
+    queryset = LogisticsPayment.objects.all().order_by('-created_at', '-id')
     serializer_class = LogisticsPaymentSerializer
+    pagination_class = EnforcedPageNumberPagination
 
     def get_queryset(self):
         from django.db.models import Q
@@ -968,7 +973,7 @@ class LogisticsPaymentViewSet(BaseTenantViewSet):
             # perf: select_related('journal') يقتل N+1 على journal_id_display لكل صف.
             return LogisticsPayment.objects.filter(
                 Q(deal__tenant=tenant) | Q(shipment__tenant=tenant)
-            ).select_related('journal').order_by('-created_at')
+            ).select_related('journal').order_by('-created_at', '-id')
         return LogisticsPayment.objects.none()
 
     def perform_create(self, serializer):

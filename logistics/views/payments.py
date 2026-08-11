@@ -102,7 +102,7 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
     def get_queryset(self):
         qs = SupplierPayment.objects.all().select_related(
             'partner', 'purchase_invoice', 'currency', 'cash_or_bank_account', 'journal',
-        ).prefetch_related('allocations__invoice').order_by('-created_at')
+        ).prefetch_related('allocations__invoice').order_by('-created_at', '-id')
         tenant = get_tenant(self.request)
         if not tenant:
             return qs.none()
