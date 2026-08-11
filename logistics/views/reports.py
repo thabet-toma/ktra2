@@ -164,15 +164,27 @@ class LandedCostReportViewSet(viewsets.ViewSet):
         if end_date:
             qs = qs.filter(arrival_date__lte=end_date)
 
-        qs = qs.select_related('shipping_agent').prefetch_related(
+        # P1-2: `tenant` كان خارج select_related رغم أن باني الملخّص يقرأ
+        # `shipment.tenant` أول سطر ⇒ استعلام إضافي لكل شحنة.
+        qs = qs.select_related('shipping_agent', 'tenant').prefetch_related(
             'clearance',
             'clearance__payments',
             'deals',
         ).order_by('-arrival_date', '-id')
 
+        # P1-2 (SCALABILITY_AUDIT §2-3): كان البناء يستعلم لكل شحنة على حدة —
+        # روابط الصفقات (1) + بنود كل صفقة (1/رابط) + فاتورة الشراء المطابقة
+        # بجلبها المسبق (4/رابط) ⇒ ~4,000 استعلام للـ200 شحنة. الآن كل ذلك
+        # يُجلَب دفعةً واحدة قبل الحلقة، والحلقة تقرأ من خرائط في الذاكرة.
+        shipments = list(qs[:200])  # safety limit
+        links_map, pi_map = _prefetch_landed_cost_context(tenant, shipments)
+
         out = []
-        for sh in qs[:200]:  # safety limit
-            out.append(_build_landed_cost_summary(sh, detailed=bool(shipment_id)))
+        for sh in shipments:
+            out.append(_build_landed_cost_summary(
+                sh, detailed=bool(shipment_id),
+                links_map=links_map, pi_map=pi_map,
+            ))
 
         return Response({
             'shipments': out,
@@ -181,16 +193,63 @@ class LandedCostReportViewSet(viewsets.ViewSet):
         })
 
 
-def _build_landed_cost_summary(shipment, *, detailed=False):
-    """يبني ملخّص Landed Cost لشحنة واحدة."""
+def _prefetch_landed_cost_context(tenant, shipments):
+    """P1-2: يجلب روابط الصفقات وفواتير الشراء لكل الشحنات باستعلامات ثابتة العدد.
+
+    يُرجع خريطتين تقرأ منهما حلقة البناء بلا أي استعلام إضافي:
+      - ``links_map``: shipment_id → [LogisticsShipmentDeal] (بصفقاتها وبنودها)
+      - ``pi_map``: (shipment_id, deal_id) → PurchaseInvoice (ببنودها ورسومها)
+
+    بنود الصفقة تُجلب عبر ``to_attr`` لأن ``deal.items.filter(is_deleted=False)``
+    يتجاوز ذاكرة الـprefetch ويعيد الاستعلام لكل صفقة.
+    """
+    shipment_ids = [sh.id for sh in shipments]
+    if not shipment_ids:
+        return {}, {}
+
+    links = (
+        LogisticsShipmentDeal.objects
+        .filter(shipment_id__in=shipment_ids)
+        .select_related('deal', 'deal__partner', 'deal__currency')
+        .prefetch_related(Prefetch(
+            'deal__items',
+            queryset=LogisticsDealItem.objects.filter(is_deleted=False)
+                                              .select_related('product'),
+            to_attr='_landed_active_items',
+        ))
+    )
+    links_map = {}
+    for link in links:
+        links_map.setdefault(link.shipment_id, []).append(link)
+
+    invoices = (
+        PurchaseInvoice.objects
+        .filter(tenant=tenant, shipment_id__in=shipment_ids)
+        .select_related('currency')
+        .prefetch_related('items', 'fees', 'fees__expense_account')
+    )
+    pi_map = {(pi.shipment_id, pi.deal_id): pi for pi in invoices}
+
+    return links_map, pi_map
+
+
+def _build_landed_cost_summary(shipment, *, detailed=False, links_map=None, pi_map=None):
+    """يبني ملخّص Landed Cost لشحنة واحدة.
+
+    ``links_map``/``pi_map`` اختياريتان: تمرّرهما القائمة بعد جلب جماعي واحد
+    (P1-2)، وغيابهما يُبقي المسار المستقل (شحنة واحدة) يستعلم لنفسه.
+    """
     from decimal import Decimal
 
     tenant = shipment.tenant
 
     # الصفقات المرتبطة
-    links = LogisticsShipmentDeal.objects.filter(shipment=shipment).select_related(
-        'deal', 'deal__partner', 'deal__currency',
-    )
+    if links_map is not None:
+        links = links_map.get(shipment.id, [])
+    else:
+        links = LogisticsShipmentDeal.objects.filter(shipment=shipment).select_related(
+            'deal', 'deal__partner', 'deal__currency',
+        )
 
     deals_data = []
     total_merchandise = Decimal('0')
@@ -198,7 +257,10 @@ def _build_landed_cost_summary(shipment, *, detailed=False):
 
     for link in links:
         deal = link.deal
-        items = deal.items.select_related('product').filter(is_deleted=False) if hasattr(deal, 'items') else []
+        # P1-2: البنود مجلوبة مسبقاً في `_landed_active_items` عند المرور الجماعي.
+        items = getattr(deal, '_landed_active_items', None)
+        if items is None:
+            items = deal.items.select_related('product').filter(is_deleted=False) if hasattr(deal, 'items') else []
         deal_merch = sum(
             (Decimal(str(i.quantity or 0)) * Decimal(str(i.unit_price or 0)) for i in items),
             Decimal('0'),
@@ -207,9 +269,14 @@ def _build_landed_cost_summary(shipment, *, detailed=False):
         total_allocated_shipping += Decimal(str(link.allocated_shipping_cost or 0))
 
         # فاتورة الشراء المرتبطة بهذه الصفقة + الشحنة
-        pi = PurchaseInvoice.objects.filter(
-            tenant=tenant, shipment=shipment, deal=deal,
-        ).prefetch_related('items', 'fees', 'fees__expense_account').first()
+        if pi_map is not None:
+            pi = pi_map.get((shipment.id, deal.id))
+        else:
+            pi = PurchaseInvoice.objects.filter(
+                tenant=tenant, shipment=shipment, deal=deal,
+            ).select_related('currency').prefetch_related(
+                'items', 'fees', 'fees__expense_account',
+            ).first()
 
         pi_items_rows = []
         pi_fees_rows = []
