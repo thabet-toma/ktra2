@@ -144,7 +144,8 @@ ignore_imports =
     logistics.payment_posting_diagnostics -> accounting.models
     logistics.serializers -> accounting.models
     logistics.services -> accounting.models
-    logistics.views -> accounting.models
+    # المرحلة 3: logistics/views.py صار حزمة — نفس الاستيراد موزّع على وحداتها
+    logistics.views.* -> accounting.models
     logistics.management.commands.audit_freight_accruals -> accounting.models
     logistics.management.commands.purge_deals -> accounting.models
     sales.models -> accounting.models
