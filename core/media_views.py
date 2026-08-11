@@ -3,8 +3,11 @@
 الواجهة ترسل الملف (multipart: file) ونعيد الرابط الآمن (secure_url). السرّ يبقى
 في الخادم (settings.CLOUDINARY_STORAGE) ولا يُعرَّض للمتصفح إطلاقاً.
 
-مفتوح للجميع (AllowAny) مطابقةً لسلوك الـ upload preset السابق (كان قابلاً للنداء من
-العالم)، لكنه الآن يمرّ عبر الخادم بالسرّ المضبوط ⇒ أفضل: يخفي المفاتيح ويفرض حداً للحجم.
+تقييد أمني (الجلسة الأمنية 2026-08-11 — P0-8 في docs/SCALABILITY_AUDIT.md):
+كانت النقطة `AllowAny` بلا مصادقة ولا throttle ⇒ أي زائر يقدر يشغّل رفع
+Cloudinary متزامناً حتى 25MB فيقفل worker (وسقف الـworkers = 3). الآن تتطلب
+مصادقة Token وتخضع لـthrottle مخصص. (قسم الرفع في PublicGallery للزوار أُخفي
+في نفس الجلسة — لا مستهلك مجهول باقٍ.)
 """
 from __future__ import annotations
 
@@ -15,19 +18,24 @@ from django.conf import settings
 from rest_framework import status
 from rest_framework.decorators import (
     api_view,
-    authentication_classes,
     parser_classes,
     permission_classes,
+    throttle_classes,
 )
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 
 logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB
 
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg")
+
+
+class MediaUploadThrottle(UserRateThrottle):
+    scope = "media_upload"
 
 
 def _resource_type(name: str, content_type: str | None) -> str:
@@ -42,8 +50,8 @@ def _resource_type(name: str, content_type: str | None) -> str:
 
 
 @api_view(["POST"])
-@authentication_classes([])  # نقطة عامة — نتفادى مصادقة الجلسة/CSRF للرفع المجهول
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])  # P0-8: لا رفع مجهول — يقفل الـworker
+@throttle_classes([MediaUploadThrottle])
 @parser_classes([MultiPartParser, FormParser])
 def media_upload(request):
     """

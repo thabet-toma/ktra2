@@ -31,6 +31,10 @@ type LocalFile = {
 const PAGE_SIZE = 20;
 
 const PublicGallery: React.FC = () => {
+  // رفع الوسائط صار يتطلب مصادقة (الجلسة الأمنية 2026-08-11 — P0-8): الزائر
+  // غير المسجّل يرى المعرض للقراءة فقط، وقسم الرفع يظهر للمستخدمين المسجّلين.
+  const canUpload = typeof window !== 'undefined' && !!localStorage.getItem('token');
+
   // --- Upload State ---
   const [localFiles, setLocalFiles] = useState<LocalFile[]>([]);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -269,7 +273,8 @@ const PublicGallery: React.FC = () => {
           </div>
         </header>
 
-        {/* --- Upload Section --- */}
+        {/* --- Upload Section (مسجّلون فقط — P0-8) --- */}
+        {canUpload && (
         <section className="mb-12 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
           <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50">
             <h3 className="text-xl font-bold flex items-center gap-2 text-gray-800 dark:text-white">
@@ -392,6 +397,7 @@ const PublicGallery: React.FC = () => {
             )}
           </div>
         </section>
+        )}
 
         {/* --- Gallery Section --- */}
         <section className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden min-h-[500px]">

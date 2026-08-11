@@ -1,19 +1,36 @@
 """نقطة الرفع الموحّدة ‎/api/media/upload/‎ — ترفع إلى Cloudinary (الخادم يحمل السرّ)
-وتعيد الرابط. مفتوحة للجميع (تُعيد استخدام سلوك preset السابق) بحدّ حجم.
-Cloudinary مُموّه (mock) — لا اتصال شبكي فعلي في الاختبار.
+وتعيد الرابط. الجلسة الأمنية 2026-08-11 (P0-8): صارت تتطلب مصادقة Token وخاضعة
+لـthrottle — لا رفع مجهول يقفل worker. Cloudinary مُموّه (mock) — لا اتصال شبكي.
 """
 from unittest.mock import patch
 
+from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 UPLOAD_URL = "/api/media/upload/"
 
 
 class MediaUploadTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="uploader", password="x")
+        cls.token = Token.objects.create(user=cls.user)
+
     def setUp(self):
+        cache.clear()  # عدّادات الـthrottle بين الاختبارات
         self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+
+    def test_anonymous_upload_rejected(self):
+        # P0-8: بلا توكن ⇒ 401/403، ولا يُستدعى Cloudinary إطلاقاً
+        anon = APIClient()
+        f = SimpleUploadedFile("x.png", b"\x89PNG fake", content_type="image/png")
+        res = anon.post(UPLOAD_URL, {"file": f}, format="multipart")
+        assert res.status_code in (401, 403), res.content[:300]
 
     @patch("cloudinary.uploader.upload")
     def test_pdf_upload_returns_secure_url_as_raw(self, mock_upload):
