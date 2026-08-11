@@ -1,0 +1,190 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# حاجز الاعتماديات بين الـDjango apps — المرحلة 1 من docs/REFACTOR_PROMPTS.md
+#
+# الهدف: منع تشابك *جديد* — الانتهاكات القائمة مسجّلة كـbaseline في
+# ignore_imports أدناه وموثّقة في docs/DEPENDENCIES.md.
+# أي استيراد جديد يخالف عقداً هنا سيُفشِل `lint-imports`.
+#
+# التشغيل (من جذر المشروع): lint-imports
+# ملاحظة: التحليل ثابت (static) — لا يحتاج إعدادات Django ولا قاعدة بيانات.
+#
+# قاعدة الصيانة: لا تُضِف سطراً لـ ignore_imports لتمرير كود جديد —
+# الصحيح أن يمرّ الكود الجديد عبر services/api. الإضافة الوحيدة المقبولة
+# هي أثناء فكّ الـbaseline نفسه (حذف أسطر، لا إضافتها).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[importlinter]
+root_packages =
+    accountant_portal
+    accounting
+    after_sales
+    bridge
+    core
+    device_registry
+    hr
+    inventory
+    logistics
+    partners
+    realestate
+    sales
+    tenants
+
+# ─────────────────────────────────────────────────────────────────────────────
+# العقد 1 — ممنوع استيراد داخليات app آخر (serializers/views/signals/admin/urls)
+# هذه ليست واجهات عامة. الواجهة العامة = services / api / models(مؤقتاً).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[importlinter:contract:no-cross-app-internals]
+name = داخليات الـapps (serializers/views/signals/admin/urls) ليست واجهات عامة
+type = forbidden
+source_modules =
+    accountant_portal
+    accounting
+    after_sales
+    bridge
+    core
+    device_registry
+    hr
+    inventory
+    logistics
+    partners
+    realestate
+    sales
+    tenants
+allow_indirect_imports = True
+forbidden_modules =
+    accounting.serializers
+    accounting.views
+    accounting.signals
+    accounting.admin
+    accounting.urls
+    sales.serializers
+    sales.views
+    sales.signals
+    sales.admin
+    sales.urls
+    logistics.serializers
+    logistics.views
+    logistics.signals
+    logistics.admin
+    logistics.urls
+    inventory.serializers
+    inventory.views
+    inventory.signals
+    inventory.admin
+    inventory.urls
+    partners.serializers
+    partners.views
+    partners.signals
+    partners.admin
+    partners.urls
+    tenants.serializers
+    tenants.views
+    tenants.signals
+    tenants.admin
+    tenants.urls
+    hr.serializers
+    hr.views
+    hr.signals
+    hr.admin
+    hr.urls
+    accountant_portal.serializers
+    accountant_portal.views
+    accountant_portal.signals
+    accountant_portal.admin
+    accountant_portal.urls
+# baseline 2026-08-11 — 6 انتهاكات قائمة، موثّقة في docs/DEPENDENCIES.md §3
+ignore_imports =
+    logistics.accruals -> partners.signals
+    logistics.services -> partners.signals
+    logistics.views -> partners.signals
+    sales.services -> partners.signals
+    logistics.serializers -> partners.serializers
+    logistics.serializers -> sales.serializers
+
+# ─────────────────────────────────────────────────────────────────────────────
+# العقد 2 — ممنوع استيراد accounting.models من خارج accounting
+# نقطة الدخول الوحيدة للمحاسبة: accounting.services (ومستقبلاً accounting.api —
+# المرحلة 2). أي كود جديد يحتاج Account/JournalHeader/JournalLine يمرّ عبرها.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[importlinter:contract:no-direct-accounting-models]
+name = accounting.models ليس واجهة عامة — استعمل accounting.services
+type = forbidden
+source_modules =
+    accountant_portal
+    after_sales
+    bridge
+    core
+    device_registry
+    hr
+    inventory
+    logistics
+    partners
+    realestate
+    sales
+    tenants
+allow_indirect_imports = True
+forbidden_modules =
+    accounting.models
+# baseline 2026-08-11 — موثّق ومصنّف (قراءة/كتابة) في docs/DEPENDENCIES.md §4
+# الاختبارات مستثناة بـwildcard — العدّ التفصيلي في docs/DEPENDENCIES.md §2
+ignore_imports =
+    *.tests.* -> accounting.models
+    accountant_portal.audit -> accounting.models
+    accountant_portal.readiness -> accounting.models
+    accountant_portal.services -> accounting.models
+    core.dashboard_api -> accounting.models
+    core.platform_admin_api -> accounting.models
+    core.reports -> accounting.models
+    hr.payroll -> accounting.models
+    inventory.services -> accounting.models
+    inventory.management.commands.recompute_moving_wac_cogs -> accounting.models
+    logistics.accruals -> accounting.models
+    logistics.landed_cost -> accounting.models
+    logistics.models -> accounting.models
+    logistics.payment_posting_diagnostics -> accounting.models
+    logistics.serializers -> accounting.models
+    logistics.services -> accounting.models
+    logistics.signals -> accounting.models
+    logistics.views -> accounting.models
+    logistics.management.commands.audit_freight_accruals -> accounting.models
+    logistics.management.commands.purge_deals -> accounting.models
+    partners.signals -> accounting.models
+    sales.models -> accounting.models
+    sales.serializers -> accounting.models
+    sales.services -> accounting.models
+    sales.views -> accounting.models
+    sales.management.commands.fix_legacy_cash_partner_tags -> accounting.models
+    tenants.services -> accounting.models
+    tenants.management.commands.heal_company_seed -> accounting.models
+
+# ─────────────────────────────────────────────────────────────────────────────
+# العقد 3 — الاتجاه المعكوس: inventory لا يعتمد على sales/logistics
+# قرار «السماح بالمخزون السالب» يسكن في sales.SalesSettings ويستورده
+# inventory.services كسولاً — اتجاه معكوس موثّق في ARCHITECTURE.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[importlinter:contract:inventory-independent-of-sales-logistics]
+name = inventory لا يستورد sales أو logistics (اتجاه معكوس)
+type = forbidden
+source_modules =
+    inventory
+allow_indirect_imports = True
+forbidden_modules =
+    sales
+    logistics
+# baseline 2026-08-11 — الاتجاه المعكوس القائم، موثّق في docs/DEPENDENCIES.md §3
+ignore_imports =
+    inventory.tests.* -> logistics.models
+    inventory.tests.* -> logistics.services
+    inventory.tests.* -> sales.models
+    inventory.tests.* -> sales.services
+    inventory.serials -> logistics.models
+    inventory.serials -> sales.models
+    inventory.services -> logistics.models
+    inventory.services -> sales.models
+    inventory.services -> sales.services
+    inventory.views -> sales.services
+    inventory.management.commands.backfill_stock -> logistics.models
+    inventory.management.commands.recompute_moving_wac_cogs -> sales.models

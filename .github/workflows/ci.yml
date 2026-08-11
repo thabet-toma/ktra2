@@ -24,6 +24,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Import contracts (import-linter)
+        # حاجز الاعتماديات بين الـapps — العقود والـbaseline في .importlinter
+        # يمنع تشابكاً *جديداً* فقط؛ الانتهاكات القائمة موثّقة في docs/DEPENDENCIES.md
+        run: lint-imports
+
       - name: Run pytest
         run: coverage run -m pytest
         env:

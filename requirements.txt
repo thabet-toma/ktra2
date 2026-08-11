@@ -37,3 +37,6 @@ gunicorn==23.0.0
 pytest>=8.0
 pytest-django>=4.8
 coverage>=7.4
+
+# ── حاجز الاعتماديات بين الـapps (lint-imports، العقود في .importlinter) ──
+import-linter>=2.0
