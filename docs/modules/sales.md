@@ -13,7 +13,7 @@
 ## أهم الملفات
 | الملف | الغرض | أسطر |
 |---|---|---|
-| `sales/services.py` | كل منطق الترحيل/التحصيل/التسليم/التحويل بين المستندات | 4087 |
+| `sales/services/` | **حزمة (المرحلة 3)** — 7 وحدات لا-دورية (foundation/pricing/numbering/calc/flow/orders/supplier_vat)؛ `__init__` يعيد تصدير كل الأسماء فـ`from sales.services import X` يبقى شغّالاً | ~4087 (كان services.py) |
 | `sales/views.py` | ViewSets وإجراءات post/unpost/deliver/allocate | 1588 |
 | `sales/models.py` | 15 موديل: الإعدادات، الفاتورة وبنودها، الإرسالية، السندات، العروض والطلبيات | 1500 |
 | `sales/serializers.py` | تحقّق الحمولة وكتابة البنود المتداخلة | 1454 |

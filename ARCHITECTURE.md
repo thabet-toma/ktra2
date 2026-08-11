@@ -133,9 +133,9 @@ python manage.py test --settings=core.test_settings   # 1,025 اختباراً �
 
 | الدين | الموقع | المرجع |
 |---|---|---|
-| قيود تُكتب يدوياً متجاوزةً `post_journal` | `logistics/views.py:1223`, `partners/signals.py:202` | `docs/REFACTOR_PROMPTS.md` مرحلة 2 |
-| `logistics` يستورد داخليات `sales.serializers` | `logistics/serializers.py:11-12` | `docs/REFACTOR_PROMPTS.md` |
+| ~~قيود تُكتب يدوياً متجاوزةً `post_journal`~~ ✅ عولج (المرحلة 2) | كل الكتابة عبر `accounting.api`/`post_journal` | `docs/REFACTOR_PROMPTS.md` مرحلة 2 |
+| `logistics` يستورد داخليات `sales.serializers` | `logistics/serializers/_helpers.py` (`CHEQUE_DUE_DATE_REQUIRED`) | `docs/REFACTOR_PROMPTS.md` (دين مؤجل) |
 | 5 نماذج دفع منفصلة | `logistics/`, `sales/`, `accounting/` | `docs/decisions/payment_model_unification.md` |
 | مرفقات كحقول URL متفرّقة بلا نموذج موحّد | `logistics/models.py` | `docs/decisions/attachments_model.md` |
-| ملفات عملاقة (`logistics/views.py` 5,050 سطر) | — | `docs/REFACTOR_PROMPTS.md` مرحلة 3 |
+| ~~ملفات عملاقة~~ ✅ عولج (المرحلة 3) — الأربعة الكبرى صارت حزماً | `logistics/views/`, `sales/services/`, `logistics/serializers/`, `core/reports/` | `docs/REFACTOR_PROMPTS.md` مرحلة 3 |
 | اختناقات التوسّع (كاش ملفّي، ترقيم opt-in، فهارس ناقصة) | `core/settings.py` | `docs/REFACTOR_PROMPTS.md` مراحل 4-6 |

@@ -25,8 +25,8 @@
 ## أهم الملفات
 | الملف | الغرض | أسطر |
 |---|---|---|
-| `logistics/views.py` | كل الـViewSets والإجراءات والترحيل المحاسبي | 5050 |
-| `logistics/serializers.py` | تمثيل المستندات + حسابات العرض | 2466 |
+| `logistics/views/` | **حزمة (المرحلة 3)** — كل الـViewSets موزّعة على 10 وحدات دومين؛ `__init__` يعيد التصدير فـ`from logistics.views import X` يبقى شغّالاً | ~5000 (كان views.py) |
+| `logistics/serializers/` | **حزمة (المرحلة 3)** — 10 وحدات بنفس تقسيم الviews | ~2466 (كان serializers.py) |
 | `logistics/models.py` | 20 model + آلتا حالة (صفقة/شحنة) مفروضتان على `save()` | 2009 |
 | `logistics/services.py` | التحويلات بين المستندات + الاستلام + المرجع + الإعدادات | 1797 |
 | `logistics/landed_cost.py` | محرّك التكلفة المستوردة بالشيكل + التتبّع العكسي | 1423 |
