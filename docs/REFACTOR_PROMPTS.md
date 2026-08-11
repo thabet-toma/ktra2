@@ -17,7 +17,7 @@
 | 1 — خريطة اعتماديات + حاجز | ✅ منفّذة 2026-08-11 | `newktra` / `bba8f77` | 1,025 اختباراً خضراء · `lint-imports`: 3 kept, 0 broken |
 | 2 — accounting facade | ⬜ | — | — |
 | 3 — تفكيك الملفات العملاقة | ⬜ | — | — |
-| 4 — تدقيق جاهزية 500 مستخدم | ⬜ | — | — |
+| 4 — تدقيق جاهزية 500 مستخدم | ✅ منفّذة 2026-08-11 | `claude/refactor-prompts-review-83dcs5` | 1,025 اختباراً خضراء قبل التدقيق · صفر تعديل كود · الخرج: `docs/SCALABILITY_AUDIT.md` |
 | 5 — تنفيذ P0 | ⬜ | — | — |
 | 6 — اختبار حمل + قرار Celery | ⬜ | — | — |
 
@@ -33,7 +33,16 @@
 - **للمرحلة 2:** المتجاوزون لـ`post_journal` المؤكّدون: `logistics/views.py:1223-1265` و`:2633-2660` (قيد عكسي يدوي + `.update(is_posted=False)`)، و`partners/signals.py:202` (`create_opening_balance_entry` يكتب `is_posted=True` مباشرةً بلا فحص فترة ولا audit log، وأكواد حسابات hardcoded: `2101/1103/2106-2109` والرصيد الافتتاحي `3300`، و`Account.DoesNotExist` تُبتلع بـ`pass`).
 - **للمرحلتين 1-2:** اعتماد معكوس الاتجاه: قرار «السماح بالمخزون السالب» يسكن في `sales.SalesSettings`، فتستورده `inventory.services.record_stock_movement` كسولاً (`inventory/services.py:208`) — inventory يعتمد على sales لا العكس.
 - **للمرحلة 3:** `hr` لا يملك `services.py` — منطقه في `hr/payroll.py`؛ و`partners` بلا `services.py` إطلاقاً (منطقه في views/signals).
-- **بيئة التنفيذ:** حاوية الوكيل لا تأتي بـDjango مثبّتاً — أول أمر في أي جلسة تنفيذ: `pip install -r requirements.txt` (يكفي: Django, DRF, cors-headers, dotenv, cloudinary×2, Pillow, requests, websocket-client, sqlglot, pytest, pytest-django). الاختبارات تأخذ ~3.5 دقيقة.
+- ### نتائج المرحلة 4 (تعدّل مدخلات المرحلة 5 — اقرأ `docs/SCALABILITY_AUDIT.md` كاملاً)
+
+- **بند المرحلة 5 رقم 3 يُشطب:** `CONN_MAX_AGE=60` + `CONN_HEALTH_CHECKS=True` موجودان فعلاً (`core/settings.py:172-173`).
+- **بنود P0 جديدة غير متوقعة في الخطة الأصلية:** 3 ثغرات عزل tenant حرجة (SQL خام بلا مصادقة في `core/agent_db_view.py`، مجموعات bridge مشتركة بين الشركات، تبنّي وثائق يتيمة في bridge) + رفع وسائط مجهول بلا throttle (`core/media_views.py:44`) — تُنفَّذ أولاً في المرحلة 5.
+- **الاختناق الأكبر ليس في كود Python:** gunicorn بـ3 sync workers (`deploy.ps1:189-195`) = سقف 3 طلبات متزامنة. إصلاحه سطر في سكربت النشر.
+- عدد الفهارس الفعلي 56 `models.Index` (لا ~34)، لكن `StockMovement` (أضخم جدول) بلا أي فهرس و`JournalLine` بفهرس واحد.
+- أسوأ endpoint منفرد: تقرير أعمار الدائنين ~20 ألف استعلام/طلب (`core/reports.py:921-928`).
+- الواجهة: 131 استدعاء قائمة غير مرقّم مقابل 16 مرقّماً — فرض الترقيم (بند المرحلة 5 رقم 2) يجب أن يمشي endpoint-by-endpoint مع تعديل المستهلك في نفس الـcommit.
+
+**بيئة التنفيذ:** حاوية الوكيل لا تأتي بـDjango مثبّتاً — أول أمر في أي جلسة تنفيذ: `pip install -r requirements.txt` (يكفي: Django, DRF, cors-headers, dotenv, cloudinary×2, Pillow, requests, websocket-client, sqlglot, pytest, pytest-django). الاختبارات تأخذ ~3.5 دقيقة.
 
 ---
 
