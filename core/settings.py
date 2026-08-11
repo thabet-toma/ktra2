@@ -386,6 +386,12 @@ REST_FRAMEWORK = {
         # البحث عن شركة خطوة سابقة لطلب الارتباط — حصته أوسع، وحدُّه لمنع تخمين
         # أسماء الشركات (T8) لا لتقنين الطلبات.
         "accountant_company_lookup": "60/hour",
+        # الجلسة الأمنية 2026-08-11 (P0-2): نقطة SQL الخام للوكيل — سقف تقنين
+        # حتى مع مصادقة superuser + مفتاح، فلا تتحول لأداة تفريغ قاعدة البيانات.
+        "agent_query": "120/hour",
+        # الجلسة الأمنية 2026-08-11 (P0-8): رفع الوسائط — كل رفع يقفل worker
+        # طوال رفع Cloudinary المتزامن، فالسقف يمنع إشباع الـworkers الثلاثة.
+        "media_upload": "120/hour",
     },
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }

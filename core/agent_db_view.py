@@ -1,8 +1,18 @@
 """
 واجهة برمجية للـ AI Agent لتنفيذ استعلامات SELECT على قاعدة البيانات.
-- مسموح فقط بـ SELECT (قراءة فقط — لا تعديل ولا حذف).
-- يتطلب مفتاح API في الهيدر: X-Agent-Key
-- الحد الأقصى للنتائج: 200 صف لكل استعلام.
+
+تقييد أمني (الجلسة الأمنية 2026-08-11 — P0-2 في docs/SCALABILITY_AUDIT.md):
+كانت النقطة بلا مصادقة إطلاقاً وبحارس وحيد = مفتاح ثابت مشترك + قائمة سوداء
+regex قابلة للتجاوز ⇒ قراءة بيانات كل الشركات لمن يملك المفتاح (المكشوف قديماً
+في تاريخ git). الآن ثلاث طبقات، كلها fail-closed:
+
+1. مصادقة Token لمستخدم **superuser** (وكيل المنصة يُعطى توكن superuser).
+2. مفتاح `X-Agent-Key` يطابق `AGENT_DB_API_KEY` (غيابه من البيئة = 401 دائماً).
+3. تحليل نحوي بـsqlglot: **عبارة واحدة** من نوع SELECT (مع WITH/UNION) بلا
+   INTO — القائمة السوداء القديمة تبقى طبقة رابعة لا الحارس الوحيد.
+
+- مسموح فقط بالقراءة، والحد الأقصى للنتائج: 200 صف لكل استعلام.
+- throttle مخصص: DEFAULT_THROTTLE_RATES["agent_query"].
 """
 
 import logging
@@ -10,20 +20,43 @@ import re
 
 from django.conf import settings
 from django.db import connection
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import (
+    api_view,
+    authentication_classes,
+    permission_classes,
+    throttle_classes,
+)
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 from rest_framework import status
 
 logger = logging.getLogger(__name__)
 
 MAX_ROWS = 200
 
-# الكلمات المحجوزة التي يجب أن لا تظهر في الاستعلام (حماية من التلاعب)
+
+class IsSuperUser(BasePermission):
+    """نقطة SQL الخام لمشغّل المنصة فقط — لا staff ولا مدراء شركات."""
+
+    message = "هذه النقطة تتطلب مستخدم superuser."
+
+    def has_permission(self, request, view):
+        u = getattr(request, "user", None)
+        return bool(u and u.is_authenticated and u.is_superuser)
+
+
+class AgentQueryThrottle(UserRateThrottle):
+    scope = "agent_query"
+
+
+# الكلمات المحجوزة التي يجب أن لا تظهر في الاستعلام (طبقة دفاع إضافية —
+# الحارس الأساسي هو التحليل النحوي أدناه)
 _FORBIDDEN_KEYWORDS = re.compile(
     r'\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|REPLACE|GRANT|REVOKE'
-    r'|LOAD\s+DATA|INTO\s+OUTFILE|EXEC|EXECUTE|CALL|XP_|SP_|SLEEP|BENCHMARK'
+    r'|LOAD\s+DATA|LOAD_FILE|INTO\s+OUTFILE|INTO\s+DUMPFILE|EXEC|EXECUTE|CALL'
+    r'|XP_|SP_|SLEEP|BENCHMARK'
     r'|INFORMATION_SCHEMA\.SCHEMATA|SHOW\s+DATABASES)\b',
     re.IGNORECASE,
 )
@@ -42,20 +75,48 @@ def _validate_sql(sql: str) -> str | None:
     match = _FORBIDDEN_KEYWORDS.search(cleaned)
     if match:
         return f"الكلمة المحجوزة «{match.group()}» غير مسموح بها في استعلامات القراءة."
+
+    # الحارس الأساسي: تحليل نحوي — عبارة واحدة نوعها قراءة، بلا INTO.
+    # (regex القائمة السوداء وحدها قابلة للتجاوز — P0-2.)
+    try:
+        import sqlglot
+        from sqlglot import exp
+    except Exception:  # pragma: no cover — sqlglot في requirements
+        return "تعذّر تحميل محلّل SQL على الخادم."
+    try:
+        statements = [s for s in sqlglot.parse(cleaned, read="mysql") if s is not None]
+    except Exception:
+        return "تعذّر تحليل الاستعلام — مسموح فقط بـSELECT صالح النحو."
+    if len(statements) != 1:
+        return "مسموح بعبارة واحدة فقط في كل استعلام."
+    stmt = statements[0]
+    read_types = tuple(
+        t for t in (
+            getattr(exp, "Select", None),
+            getattr(exp, "Union", None),
+            getattr(exp, "Intersect", None),
+            getattr(exp, "Except", None),
+        ) if t is not None
+    )
+    if not isinstance(stmt, read_types):
+        return "مسموح فقط باستعلامات SELECT."
+    if stmt.find(exp.Into) is not None:
+        return "INTO غير مسموح في استعلامات القراءة."
     return None
 
 
 @api_view(["POST"])
-@authentication_classes([])
-@permission_classes([])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsSuperUser])
+@throttle_classes([AgentQueryThrottle])
 def agent_query(request):
     """
     POST /api/agent/query/
-    Headers: X-Agent-Key: <AGENT_DB_API_KEY>
+    Headers: Authorization: Token <superuser-token> · X-Agent-Key: <AGENT_DB_API_KEY>
     Body:    {"sql": "SELECT ...", "params": [...]}
     Response: {"columns": [...], "rows": [...], "count": N}
     """
-    # ─── التحقق من مفتاح API ───
+    # ─── الطبقة الثانية: مفتاح API (fail-closed: غياب الضبط = رفض دائم) ───
     expected_key = getattr(settings, "AGENT_DB_API_KEY", "")
     provided_key = request.headers.get("X-Agent-Key", "").strip()
     if not expected_key or provided_key != expected_key:
@@ -92,7 +153,10 @@ def agent_query(request):
 
         result_rows = [[_safe(cell) for cell in row] for row in rows]
 
-        logger.info("[AgentQuery] rows=%d sql_start=%s", len(result_rows), sql[:80])
+        logger.info(
+            "[AgentQuery] user=%s rows=%d sql_start=%s",
+            request.user.pk, len(result_rows), sql[:80],
+        )
         return Response(
             {
                 "columns": columns,
