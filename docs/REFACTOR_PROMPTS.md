@@ -11,12 +11,11 @@
 
 ## ⬅️ الحالة الآن — تعليمات الجلسة القادمة (آخر تحديث: 2026-08-11)
 
-**المُنجَز:** المراحل 0، 1، 4 (انظر سجلّ التنفيذ أدناه). الفرع المعتمد لكل العمل: **`newktra`**.
+**المُنجَز:** المراحل 0، 1، 2، 4 (انظر سجلّ التنفيذ أدناه). الفرع المعتمد لكل العمل: **`newktra`**.
 
-**المهمة التالية: المرحلة 2 — accounting facade.** انسخ برومت المرحلة 2 أدناه كاملاً في جلسة جديدة. قبلها اقرأ:
-1. «نتائج المرحلة 0» أدناه — فيها المتجاوزون المؤكّدون لـ`post_journal` (مدخل المرحلة 2 المباشر)
-2. `docs/DEPENDENCIES.md` — تصنيف كل استيرادات `accounting.models` (خرج المرحلة 1)
-3. «نتائج المرحلة 4» أدناه — فيها تعديلات إلزامية على بنود المرحلة 5
+**المهمة التالية: المرحلة 3 — تفكيك الملفات العملاقة.** انسخ برومت المرحلة 3 أدناه كاملاً في جلسة جديدة. قبلها اقرأ:
+1. «نتائج المرحلة 2» أدناه — أرقام أسطر `logistics/views.py` تزحزحت بعد الترحيل (الملف الآن 4,985 سطراً)، والقيود الجديدة على أي كود منقول: كتابة القيود عبر `accounting.api`/`post_journal` فقط
+2. «نتائج المرحلة 4» أدناه — فيها تعديلات إلزامية على بنود المرحلة 5
 
 **⚠️ قرار معلّق يحتاج موافقة صاحب المشروع:** المرحلة 4 كشفت 3 ثغرات عزل tenant حرجة (P0-2/P0-3/P0-4 في `docs/SCALABILITY_AUDIT.md`: SQL خام بلا مصادقة في `core/agent_db_view.py`، مجموعات bridge مشتركة بين الشركات، تبنّي وثائق يتيمة). هي خارج نطاق المرحلتين 2 و3، وترتيبها الطبيعي في المرحلة 5، لكن خطورتها أمنية لا أدائية — يُنصح بتنفيذها في جلسة مستقلة **قبل** المرحلة 5 إذا وافق صاحب المشروع.
 
@@ -38,7 +37,7 @@ python manage.py test --settings=core.test_settings
 |---|---|---|---|
 | 0 — فصل السياق | ✅ منفّذة 2026-08-11 | `newktra` / `7a23fbf` | 1,025 اختباراً خضراء قبل وبعد · صفر تعديل على `.py`/`.ts`/`.tsx` |
 | 1 — خريطة اعتماديات + حاجز | ✅ منفّذة 2026-08-11 | `newktra` / `bba8f77` | 1,025 اختباراً خضراء · `lint-imports`: 3 kept, 0 broken |
-| 2 — accounting facade | ⬜ | — | — |
+| 2 — accounting facade | ✅ منفّذة 2026-08-11 | `newktra` / `9801487`→`37efdd1` (5 commits) | 1,025 اختباراً خضراء بعد **كل** commit · +13 اختباراً لـ`api.py` (pytest) · `lint-imports`: 3 kept, 0 broken بعد حذف 6 أسطر baseline |
 | 3 — تفكيك الملفات العملاقة | ⬜ | — | — |
 | 4 — تدقيق جاهزية 500 مستخدم | ✅ منفّذة 2026-08-11 | `newktra` / `83dba7f` | 1,025 اختباراً خضراء قبل التدقيق · صفر تعديل كود · الخرج: `docs/SCALABILITY_AUDIT.md` |
 | 5 — تنفيذ P0 | ⬜ | — | — |
@@ -55,8 +54,42 @@ python manage.py test --settings=core.test_settings
 **اكتشافات معمارية للمراحل القادمة:**
 - **للمرحلة 2:** المتجاوزون لـ`post_journal` المؤكّدون: `logistics/views.py:1223-1265` و`:2633-2660` (قيد عكسي يدوي + `.update(is_posted=False)`)، و`partners/signals.py:202` (`create_opening_balance_entry` يكتب `is_posted=True` مباشرةً بلا فحص فترة ولا audit log، وأكواد حسابات hardcoded: `2101/1103/2106-2109` والرصيد الافتتاحي `3300`، و`Account.DoesNotExist` تُبتلع بـ`pass`).
 - **للمرحلتين 1-2:** اعتماد معكوس الاتجاه: قرار «السماح بالمخزون السالب» يسكن في `sales.SalesSettings`، فتستورده `inventory.services.record_stock_movement` كسولاً (`inventory/services.py:208`) — inventory يعتمد على sales لا العكس.
-- **للمرحلة 3:** `hr` لا يملك `services.py` — منطقه في `hr/payroll.py`؛ و`partners` بلا `services.py` إطلاقاً (منطقه في views/signals).
-- ### نتائج المرحلة 4 (تعدّل مدخلات المرحلة 5 — اقرأ `docs/SCALABILITY_AUDIT.md` كاملاً)
+- **للمرحلة 3:** `hr` لا يملك `services.py` — منطقه في `hr/payroll.py`؛ و`partners` بلا `services.py` إطلاقاً (منطقه في views/signals — *تحديث المرحلة 2:* الجانب المحاسبي من signals انتقل لـ`accounting/api.py`؛ بقي في partners الـviews فقط).
+
+### نتائج المرحلة 2 (accounting facade — 5 commits: `9801487`→`37efdd1`)
+
+**المُنجَز — `accounting/api.py` (481 سطراً) هو الواجهة العامة الوحيدة لكتابة القيود من خارج accounting:**
+- `post_document(...)` — تفويض مباشر لـ`services.post_journal` بكل ضماناته.
+- `reverse_journal(original, *, ...)` — نمط «القيد العكسي اليدوي» المنسوخ في logistics صار دالة واحدة داخل accounting بنفس السلوك حرفياً (قفل الأصل، فحص الفترة/الأسطر/التوازن بسماحية 0.02 وبنفس نصوص الرسائل، قلب مدين/دائن، خيارات نسخ العملة/`project_id` وإلغاء ترحيل الأصل مع وسمه). **ليست idempotent عمداً** — حارس إعادة الدخول على مستوى المستند (مثل `payment.is_posted`).
+- `purge_journals(ids)` — الحذف الجماعي الإداري (كان في `purge_deals`).
+- `get_account_by_code(tenant, code, *, active_only)` — قراءة حساب بالكود.
+- `sync_partner_accounting` / `ensure_partner_account` / `create_partner_opening_balance` — منطق partners/signals المحاسبي منقولاً حرفياً (نفس الأكواد: آباء 2101/1103/2106-2109، رصيد افتتاحي 3300).
+- 13 اختباراً جديداً في `accounting/tests/test_api.py` (**pytest-style — تعمل بـ`python -m pytest` لا بـ`manage.py test`**، مثل بقية ملفات pytest في المشروع).
+
+**النقاط المرحّلة (كلها بصفر تغيير سلوك، اختبارات خضراء بعد كل commit):**
+| commit | الموضع | ما تغيّر |
+|---|---|---|
+| `0771ea6` (2-أ) | عكس قيد دفعة الصفقة (كان `logistics/views.py:1223`) | `reverse_journal(..., copy_project=True, unpost_original=True)` |
+| `f6cda5f` (2-ب) | عكس قيد دفعة التخليص (كان `:2633`) | `reverse_journal(..., copy_currency=True)` |
+| `f6cda5f` (2-ب) | استحقاق الشحن المحلي (كان `logistics/accruals.py:155`) | عبر `post_journal` — **استعاد idempotency المرجع `(LOCAL_SHIPMENT, pk)` وقفل السباق** وفحص طبيعة الحساب |
+| `f6cda5f` (2-ب) | `logistics/signals.py:19` | حذف الاستيراد الميت لـ`accounting.models` |
+| `4be8c90` (2-ج) | `partners/signals.py` | صار 27 سطراً — الـsignal ينادي `sync_partner_accounting` فقط |
+| `37efdd1` (2-د) | المستوردون الأربعة + `purge_deals` + baseline | `ensure_partner_account` من `accounting.api`؛ حذف 6 أسطر من `.importlinter` (4 انتهاكات `partners.signals` + 2 من عقد `accounting.models`) |
+
+**ما تُرك عمداً ولماذا:**
+- **FKs المباشرة** على `accounting.models` في `sales/logistics` — خارج نطاق المرحلة نصاً (لا models ولا migrations).
+- **قراءات `accounting.models`** (التقارير، accountant_portal، serializers، وقراءات `purge_deals` لجمع معرّفات القيود) — تحتاج واجهة قراءة (`DEPENDENCIES.md §5` بند 6)، قيمتها تنظيمية لا سلوكية.
+- **إنشاء `Account` في** `tenants/services` (زرع الشجرة)، `sales/services:406,1953`، `logistics/services:824`، `hr/payroll:75,129` — كتابة حسابات لا قيود؛ مرشّحة للانتقال التدريجي لـ`accounting.api` عند لمس هذه الملفات (المرحلة 3 فرصة طبيعية).
+- **استيرادا `logistics/serializers.py`** من داخليات sales/partners — في «الديون المؤجلة» أصلاً.
+- **دورة `accounting → sales/logistics`** — تحتاج reference-resolver (`DEPENDENCIES.md §5` بند 5).
+
+**⚠️ ديون محاسبية اكتُشفت ووُثّقت بلا إصلاح (قاعدة المرحلة: صفر تغيير سلوك):**
+1. **قيد الرصيد الافتتاحي** (`accounting/api.py::create_partner_opening_balance`): يكتب `is_posted=True` مباشرةً **بلا فحص فترة مالية، بلا audit log، بلا فحص توازن post_journal**، وفحص التكرار (`exists`) خارج قفل — سباقان متزامنان قد يكرران القيد؛ والأخطاء تُبتلع بالتسجيل فقط. نقله لـ`post_journal` يغيّر السلوك (قد يرفض تاريخاً في فترة مقفلة كان يمرّ) — يحتاج قرار منتج.
+2. **القيود العكسية خارج فحص طبيعة الحساب**: `reverse_journal` لا يمرّ بفحص `debit_only/credit_only` (العكس يقلب الأطراف فحساب «مدين فقط» سيستقبل دائناً) — هذا سلوك المواضع الأصلية نفسه، لكنه الآن موثّق في مكان واحد.
+3. **نمطا عكس غير متسقين لنفس المفهوم**: إلغاء ترحيل دفعة الصفقة يلغي ترحيل القيد الأصلي ويصفّر `journal_id`، بينما دفعة التخليص تُبقي الأصل مرحّلاً ورابطه قائماً — فرق جوهري في أثر التقارير للفترة الأصلية؛ توحيدهما قرار منتج.
+4. **8 اختبارات pytest حمراء سابقة للمرحلة** (مؤكّدة على `63dbaa1` قبل أي تعديل): `sales/tests/test_quotation_{create,convert,pricing_link}.py` تفشل بـ«لا توجد شركة محددة» من `SalesQuotationSerializer` — لا تظهر في `manage.py test` (لا يجمع pytest-fixtures) فلم تدخل عدّاد 1,025. تحتاج جلسة إصلاح مستقلة.
+
+### نتائج المرحلة 4 (تعدّل مدخلات المرحلة 5 — اقرأ `docs/SCALABILITY_AUDIT.md` كاملاً)
 
 - **بند المرحلة 5 رقم 3 يُشطب:** `CONN_MAX_AGE=60` + `CONN_HEALTH_CHECKS=True` موجودان فعلاً (`core/settings.py:172-173`).
 - **بنود P0 جديدة غير متوقعة في الخطة الأصلية:** 3 ثغرات عزل tenant حرجة (SQL خام بلا مصادقة في `core/agent_db_view.py`، مجموعات bridge مشتركة بين الشركات، تبنّي وثائق يتيمة في bridge) + رفع وسائط مجهول بلا throttle (`core/media_views.py:44`) — تُنفَّذ أولاً في المرحلة 5.
@@ -164,7 +197,7 @@ python manage.py test --settings=core.test_settings
 
 ---
 
-## المرحلة 2 — accounting facade (3-5 ساعات · الجراحة الأهم)
+## المرحلة 2 — accounting facade (3-5 ساعات · الجراحة الأهم) — ✅ منفّذة (`newktra` / `9801487`→`37efdd1`)
 
 ```text
 أنشئ واجهة عامة واحدة لموديول المحاسبة وارحّل إليها كل الأماكن اللي بتنشئ قيوداً

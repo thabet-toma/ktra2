@@ -13,6 +13,7 @@
 ## أهم الملفات
 | الملف | الغرض | أسطر |
 |---|---|---|
+| `accounting/api.py` | **الواجهة العامة للكتابة من خارج accounting** (المرحلة 2): `post_document`، `reverse_journal`، `purge_journals`، `get_account_by_code`، والجانب المحاسبي للشريك (`sync_partner_accounting`/`ensure_partner_account`/`create_partner_opening_balance`) | 481 |
 | `accounting/services.py` | كل منطق الترحيل والتحقق: `post_journal`، `unpost_document`، الشيكات، البنوك، أرصدة الأطراف | 1738 |
 | `accounting/views.py` | 18 ViewSet: الحسابات، القيود، الشيكات، الميزان، الأستاذ، الضريبة، البنوك | 1892 |
 | `accounting/models.py` | 17 موديلاً محاسبياً (Account، Journal*، Cheque، Bank*، FiscalPeriod، TaxRate…) | 737 |
@@ -95,6 +96,7 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 
 ## قواعد لا يجوز كسرها
 - **كل قيد يمرّ عبر `post_journal`** — هي وحدها تفرض الفترة المفتوحة والتوازن والـidempotency وقفل `select_for_update` (`accounting/services.py:479-636`). أي كتابة مباشرة لـ`JournalHeader`/`JournalLine` تتجاوز كل ذلك.
+- **من خارج accounting الكتابة عبر `accounting.api` فقط** (المرحلة 2): `post_document` للقيود، `reverse_journal` للعكس (ومعه التجاوز الوحيد المشروع لغارد القيد المرحّل عند `unpost_original=True`)، `purge_journals` للتطهير الإداري — عقد `no-direct-accounting-models` في `.importlinter` يمنع أي استيراد جديد لـ`accounting.models`.
 - **لا تعديل على قيد مرحّل**: `JournalHeader.save` يرمي `ValidationError` إن كان `is_posted` سابقاً (`accounting/models.py:110-120`) — أنشئ قيداً عكسياً.
 - **التوازن دقيق بعد `quantize('0.01')`** ولا يُقبل قيد بمجموع صفر (`accounting/services.py:387-401`).
 - **`base_debit`/`base_credit` تُحسب في `JournalLine.save` من `exchange_rate` الرأس**، وسعر مفقود أو ≤ 0 يفشل بصوت عالٍ لا يسقط إلى 1 (`accounting/models.py:167-201`).

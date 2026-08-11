@@ -3,6 +3,12 @@
 > المرحلة 1 من `docs/REFACTOR_PROMPTS.md` — تحليل ثابت (AST) للكود بتاريخ 2026-08-11.
 > **عند تعارض هذا الملف مع الكود، الكود هو المرجع.**
 >
+> ⚠️ **تحديث المرحلة 2 (نفس اليوم):** المواضع الكاتبة الخمسة في §4-أ رُحّلت كلها إلى
+> `accounting.api` / `post_journal`، و`ensure_partner_linked_account` صارت
+> `accounting.api.ensure_partner_account` (§3 بند 6 مُنفَّذ)، والاستيراد الميت (§3
+> بند 15) حُذف — baseline `.importlinter` نقص 6 أسطر. الأعداد التفصيلية أدناه
+> تعكس لقطة ما قبل المرحلة 2؛ التفاصيل في «نتائج المرحلة 2» بـ`REFACTOR_PROMPTS.md`.
+>
 > المنهجية: مسح كل ملفات `.py` في الـ13 app واستخراج كل `import` يعبر حدود app،
 > مصنّفاً إلى: **(أ)** استيراد services/api وما شابه — مقبول ·
 > **(ب)** استيراد `models` مباشرة — تشابك ·
@@ -209,9 +215,12 @@
 - **الإعداد:** `.importlinter` في جذر المشروع — 3 عقود، كلها على الاستيراد
   **المباشر** فقط (`allow_indirect_imports = True`):
   1. `no-cross-app-internals` — داخليات (serializers/views/signals/admin/urls)
-     ليست واجهات عامة. baseline: **6 انتهاكات** (§3 بنود 6، 8، 9).
+     ليست واجهات عامة. baseline: كان **6 انتهاكات** (§3 بنود 6، 8، 9) —
+     **بعد المرحلة 2: بقي 2** (استيرادا `logistics.serializers` المؤجلان).
   2. `no-direct-accounting-models` — `accounting.models` ليس واجهة عامة.
-     baseline: **27 وحدة مستورِدة** (كل مواضع §4) + استثناء wildcard للاختبارات.
+     baseline: كان **27 وحدة مستورِدة** (كل مواضع §4) + استثناء wildcard
+     للاختبارات — **بعد المرحلة 2: بقي 25** (حُذف `logistics.signals` الميت
+     و`partners.signals` المرحَّل؛ الباقي قراءات وFKs موثّقة).
   3. `inventory-independent-of-sales-logistics` — الاتجاه المعكوس لا يتمدد.
      baseline: **8 وحدات** (§3 بنود 7، 13).
 - **الوضع:** «تحذير موثّق» — الانتهاكات القائمة مسجّلة كـ`ignore_imports`

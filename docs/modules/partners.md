@@ -5,16 +5,17 @@
 ## الغرض
 `partners` يحمل الكيان المشترك بين كل الوحدات: `Partner` بستة أنواع في `PARTNER_TYPES`
 (عميل، مورد، وكيل شحن، مخلّص جمركي، ناقل محلي، ناقل) مع حساباته البنكية وملاحظاته
-(CRM). الـapp نفسه بلا `services.py`؛ منطقه الثقيل في `partners/signals.py`: إشارة
-`post_save` تُنشئ للطرف حساباً في شجرة الحسابات المحاسبية تلقائياً وتُرحّل قيد رصيده
-الافتتاحي. الأرصدة وكشوف الحساب لا تُخزَّن هنا بل تُقرأ من `accounting.services`
-حتى يبقى دفتر الأستاذ المصدر الوحيد للحقيقة.
+(CRM). الـapp نفسه بلا `services.py`. منذ المرحلة 2 (accounting facade) صار
+`partners/signals.py` واجهة رقيقة: إشارة `post_save` تنادي
+`accounting.api.sync_partner_accounting` التي تُنشئ للطرف حساباً في الشجرة
+وتُرحّل قيد رصيده الافتتاحي. الأرصدة وكشوف الحساب لا تُخزَّن هنا بل تُقرأ من
+`accounting.services` حتى يبقى دفتر الأستاذ المصدر الوحيد للحقيقة.
 
 ## أهم الملفات
 | الملف | الغرض | أسطر |
 |---|---|---|
 | `partners/views.py` | `PartnerViewSet` + `CustomerNoteViewSet` وإجراءات البطاقة (رصيد/بروفايل/كشف/فواتير) | 572 |
-| `partners/signals.py` | `post_save` ينشئ الحساب المحاسبي ويرحّل الرصيد الافتتاحي | 219 |
+| `partners/signals.py` | `post_save` ينادي `accounting.api.sync_partner_accounting` فقط (المنطق في `accounting/api.py`) | 27 |
 | `partners/models.py` | `Partner`، `PartnerGroup`، `PartnerBankAccount`، `CustomerNote` | 206 |
 | `partners/serializers.py` | عقود الـAPI + كشف الأرقام الشبيهة (T-DUPID) | 196 |
 | `partners/urls.py` | تسجيل `partners/` و`customer-notes/` | 11 |
@@ -29,16 +30,14 @@
 | `CustomerNote` | `title`، `body`، `remind_on`، `is_done`، `priority`، `target_type/id/label/path` | `partner` (CASCADE، nullable)، `created_by`؛ 4 فهارس مركّبة تبدأ بـ`tenant` |
 
 ## دوال الـservices العامة
-لا يوجد `partners/services.py`. الدوال العامة موزّعة على `signals.py` و`serializers.py`:
+لا يوجد `partners/services.py`. المنطق المحاسبي انتقل إلى `accounting/api.py`
+(المرحلة 2)، والباقي في `serializers.py`:
 
 ```python
-# partners/signals.py — منسوخة حرفياً
-@receiver(post_save, sender=Partner)
-def manage_partner_account(sender, instance, created, **kwargs):  # ينشئ/يزامن حساب الطرف ويرحّل الرصيد الافتتاحي
-def ensure_partner_linked_account(partner: Optional[Partner]) -> Optional[Partner]:  # يضمن وجود الحساب المربوط عبر إعادة save()
-def create_opening_balance_entry(partner):  # قيد PARTNER_OPENING مقابل حساب «3300»
-def _expected_parent_code_for_partner_type(partner_type: str) -> str | None:  # خريطة النوع → كود الأب في الشجرة
-def _normalize_account_name(value: str) -> str:  # اسم مُطبَّع للمقارنة
+# accounting/api.py — الواجهة المحاسبية للشريك (كانت في partners/signals قبل المرحلة 2)
+def sync_partner_accounting(partner) -> None:  # ينشئ/يزامن حساب الطرف ويرحّل الرصيد الافتتاحي (يستدعيه signal الـpost_save)
+def ensure_partner_account(partner):  # يضمن وجود الحساب المربوط عبر إعادة save()
+def create_partner_opening_balance(partner) -> None:  # قيد PARTNER_OPENING مقابل حساب «3300»
 
 # partners/serializers.py — منسوخة حرفياً
 def normalize_identifier(value) -> str:  # صورة الرقم القابلة للمقارنة (أرقام وحروف لاتينية بحالة موحّدة)
@@ -62,7 +61,7 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 
 ## الاعتماديات
 **يعتمد على:**
-- `accounting` — **models مباشرة وبقوة**: `partners/signals.py:10` (`from accounting.models import Account, JournalHeader, JournalLine`). الإشارة تُنشئ `Account` وتكتب `JournalHeader`/`JournalLine` مباشرةً بأكواد حسابات **hardcoded**: `2101`/`1103`/`2106`/`2107`/`2108`/`2109` في `_expected_parent_code_for_partner_type` (`signals.py:20-30`) وحساب الأرصدة الافتتاحية `3300` تحت جذر حقوق الملكية `3` (`signals.py:183-194`). كود الحساب الجديد = `parent.code + str(partner.id).zfill(4)` (`signals.py:101`).
+- `accounting` — **api**: `partners/signals.py:15` (`from accounting.api import sync_partner_accounting`). المنطق نفسه (بأكواده الـhardcoded: `2101`/`1103`/`2106`-`2109` في `_expected_parent_code_for_partner_type` بـ`accounting/api.py:262`، و`3300` تحت جذر `3` بـ`api.py:440-450`، وكود الحساب الجديد = `parent.code + str(partner.id).zfill(4)` بـ`api.py:346`) يسكن الآن داخل accounting.
 - `accounting` — **services**: `partners/views.py:47,73` (`partner_posted_balance`) و`partners/views.py:118` (`partner_account_statement`) — الأرصدة لا تُحسب هنا.
 - `tenants` — **models**: `partners/models.py:2` (`Tenant, Currency`).
 - `core` — **services**: `partners/views.py:12-14` (`ApiAuthAndUser`، `enforce_limits`، `get_tenant`) والحدّ `partners.records` عند الإنشاء (`views.py:421`)، و`core.payments.document_payment_summary` (`views.py:143`).
@@ -72,11 +71,11 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 
 ## قواعد لا يجوز كسرها
 - **`partners/apps.py:7-8` يستورد `partners.signals` داخل `ready()`** — إزالته تُعطّل إنشاء حسابات الأطراف والأرصدة الافتتاحية بصمت.
-- **`create_opening_balance_entry` يكتب القيد يدوياً بـ`is_posted=True`** عبر `JournalHeader.objects.create` + `JournalLine.objects.create` (`signals.py:202-216`) — أي أنه **يتجاوز `accounting.services.post_journal`**، فلا فحص فترة مالية ولا فحص طبيعة الحساب ولا `create_audit_log`. الحماية الوحيدة من التكرار هي فحص وجود `reference_type='PARTNER_OPENING'` مع `reference_id=partner.id` (`signals.py:145-152`) — لا تكسر هذا الفحص.
-- **أكواد الشجرة `2101`/`1103`/`2106`/`2107`/`2108`/`2109` و`3300` و`3` مربوطة نصّاً بالكود** (`signals.py:23-30, 183-194`): إعادة ترقيم شجرة الحسابات في `seed_*_coa` تُسقط ربط الأطراف صامتاً (`Account.DoesNotExist` تُبتلع بـ`pass`).
-- **الشركة تأتي من الطرف نفسه لا من تخمين**: بلا `tenant` تُسجَّل رسالة خطأ ويُتخطّى إنشاء الحساب (`signals.py:41-47`, `176-181`).
-- **الإشارة تُعيد استخدام حساب موجود بنفس الاسم تحت الأب نفسه** إن لم يكن مربوطاً بطرف آخر بدل إنشاء تكرار (`signals.py:86-98`).
-- **تغيير `partner_type` يعيد نقل الحساب لأبيه المتوقّع** ويغيّر `account_type` تبعاً له (`signals.py:129-141`) — لا تُعدّل `parent` يدوياً في مكان آخر.
+- **`create_partner_opening_balance` (في `accounting/api.py:425`) يكتب القيد يدوياً بـ`is_posted=True`** — أي أنه **يتجاوز `post_journal`**، فلا فحص فترة مالية ولا فحص طبيعة الحساب ولا `create_audit_log` (دين موثّق في نتائج المرحلة 2 بـ`docs/REFACTOR_PROMPTS.md`). الحماية الوحيدة من التكرار هي فحص وجود `reference_type='PARTNER_OPENING'` مع `reference_id=partner.id` (`api.py:392-401`) — لا تكسر هذا الفحص.
+- **أكواد الشجرة `2101`/`1103`/`2106`/`2107`/`2108`/`2109` و`3300` و`3` مربوطة نصّاً بالكود** (`accounting/api.py:262-272, 440-450`): إعادة ترقيم شجرة الحسابات في `seed_*_coa` تُسقط ربط الأطراف صامتاً (`Account.DoesNotExist` تُبتلع بـ`pass`).
+- **الشركة تأتي من الطرف نفسه لا من تخمين**: بلا `tenant` تُسجَّل رسالة خطأ ويُتخطّى إنشاء الحساب (`api.py:289-295`, `430-436`).
+- **الإشارة تُعيد استخدام حساب موجود بنفس الاسم تحت الأب نفسه** إن لم يكن مربوطاً بطرف آخر بدل إنشاء تكرار (`api.py:330-343`).
+- **تغيير `partner_type` يعيد نقل الحساب لأبيه المتوقّع** ويغيّر `account_type` تبعاً له (`api.py:376-390`) — لا تُعدّل `parent` يدوياً في مكان آخر.
 - **`supplier_scope=''` (غير مصنَّف) يظهر في قائمتي المحلي والدولي معاً** (`views.py:197-199`، `models.py:58-64`) — تضييق الفلتر يُخفي موردين قائمين (اختبار `test_supplier_scope`).
 - **`get_queryset` يُرجع `.none()` عند غياب الشركة** في `PartnerViewSet` و`CustomerNoteViewSet` (`views.py:188-191`، `486-488`).
 - **لا رقم ضريبي ولا رقم حساب بنكي «شبيه» لطرفين** — المقارنة بعد التطبيع في بايثون لا في SQL (`serializers.py:155-170`، `views.py:306-325`)، وحساب بنكي افتراضي واحد فقط ويجب أن يكون فعّالاً (`views.py:346-371`).
