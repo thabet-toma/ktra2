@@ -95,6 +95,16 @@
 
 ## §1 الاختناقات المؤكدة في البنية التحتية
 
+> **تحديث 2026-08-11 (بلاغ ميداني):** غياب القفل الموصوف أدناه لم يبقَ نظرياً —
+> بعد P0-7 صار الـthrottle يلمس الكاش عند **كل** طلب، فشاشة تُطلق عشرة طلبات
+> متوازية سبّبت سباق حذف/قراءة على مدخل منتهٍ، و`FileBasedCache._delete` يلتقط
+> `FileNotFoundError` وحدها ⇒ `PermissionError: [Errno 13]` صعد للمستخدم **500**
+> على `accounting/accounts/` (ويندوز؛ على لينكس `unlink` على ملف مفتوح ينجح فلم
+> يظهر). عولج بطبقتين: التطوير على `LocMemCache` (خادم واحد، بلا نظام ملفات)،
+> والإنتاج على `core.cache_backends.ResilientFileBasedCache` التي تعامل أخطاء
+> نظام الملفات كإخفاقة كاش لا كخطأ خادم — مطابقةً لما يفعله فرع Redis أصلاً
+> (`IGNORE_EXCEPTIONS`). الحارس: `core/tests/test_cache_resilience.py`.
+
 ### 1.1 الكاش — `core/settings.py:352-358`
 `FileBasedCache` على `BASE_DIR/django_cache` بـTTL 300ث. بلا `MAX_ENTRIES` مخصص ⇒ الافتراضي **300 مدخل** و`CULL_FREQUENCY=3` (حذف ثلث الكاش عشوائياً عند الامتلاء، وكل `_cull` = `os.listdir` كامل). بلا قفل بين العمليات ⇒ عدّادات الـthrottle (تُخزَّن في نفس الكاش) عرضة لسباق. مع 3+ workers ومفاتيح dashboard لكل tenant/فترة، السقف يُتجاوز فوراً.
 **جرد الاستخدامات (كلها معزولة بـtenant ✅):** dashboard (`core/dashboard_api.py:110-115,316`، TTL 60ث) · modules (`core/modules.py:44-45,76-83`) · plan_limits (`core/plans.py:227-244`) · reauth (`accountant_portal/services.py:53,69`) · ذاكرة المساعد (`core/assistant_memory.py:23-46`). `@cache_page` غير مستخدم إطلاقاً. **التغطية ضيقة جداً — لا كاش على أي قائمة أو تقرير.**

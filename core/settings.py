@@ -401,10 +401,28 @@ if REDIS_URL:
         }
     }
     DJANGO_REDIS_IGNORE_EXCEPTIONS = True
-else:
+elif DEBUG:
+    # التطوير المحلي: خادم واحد ⇒ لا حاجة لكاش مشترك بين العمليات، والذاكرة
+    # أسرع وبلا نظام ملفات أصلاً. وهذا يزيل سبب بلاغ 500 المحلي جذرياً: خلفية
+    # الملفات بلا قفل بين العمليات (تدقيق §1.1)، وبعد أن صار الـthrottle يلمس
+    # الكاش في كل طلب (P0-7) صارت الشاشة التي تُطلق عشرة طلبات متوازية تتسبّب
+    # بسباق حذف/قراءة على نفس الملف — يفشل على ويندوز بـPermissionError.
     CACHES = {
         "default": {
-            "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "ktra-dev",
+            "TIMEOUT": 300,
+            "OPTIONS": {"MAX_ENTRIES": 20000, "CULL_FREQUENCY": 20},
+        }
+    }
+else:
+    CACHES = {
+        # ResilientFileBasedCache لا FileBasedCache القياسية: الأخيرة تُسقط
+        # الطلب كاملاً عند أي تعثّر لنظام الملفات (`_delete` يلتقط
+        # FileNotFoundError وحدها)، بينما فرع Redis أعلاه يتجاهل أعطاله
+        # (IGNORE_EXCEPTIONS). التفاوت كان يجعل أضعف خلفية أشدَّ هشاشة.
+        "default": {
+            "BACKEND": "core.cache_backends.ResilientFileBasedCache",
             "LOCATION": BASE_DIR / "django_cache",
             "TIMEOUT": 300,
             "OPTIONS": {
