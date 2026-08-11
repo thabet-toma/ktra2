@@ -150,7 +150,8 @@ ignore_imports =
     logistics.management.commands.purge_deals -> accounting.models
     sales.models -> accounting.models
     sales.serializers -> accounting.models
-    sales.services -> accounting.models
+    # المرحلة 3: sales/services.py صار حزمة — نفس الاستيراد موزّع على وحداتها
+    sales.services.* -> accounting.models
     sales.views -> accounting.models
     sales.management.commands.fix_legacy_cash_partner_tags -> accounting.models
     tenants.services -> accounting.models

@@ -78,11 +78,12 @@ class VoucherAtomicityTest(TestCase):
         )
 
     def test_post_failure_removes_cheques(self):
-        # Patch where post_journal is *used* in sales.services (it's imported
-        # directly there, so patching accounting.services.post_journal would
-        # not intercept the call).
+        # Patch where post_journal is *used*: بعد تفكيك sales/services إلى حزمة
+        # (المرحلة 3) صارت attach_voucher_and_post في sales.services.flow، وهي
+        # تربط post_journal في فضاء اسمها هناك — فالـpatch على موضع الاستخدام.
+        # (patching accounting.services.post_journal لا يعترض لأنه مستورد مباشرة.)
         with patch(
-            "sales.services.post_journal",
+            "sales.services.flow.post_journal",
             side_effect=ValueError("فشل الترحيل"),
         ):
             with self.assertRaises(ValueError):
