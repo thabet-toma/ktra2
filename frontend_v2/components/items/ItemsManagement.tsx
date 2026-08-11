@@ -70,6 +70,9 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [duplicateId, setDuplicateId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [total, setTotal] = useState(0);
+  // المرحلة 5 / P0-12: ترقيم خادمي فعلي للعرض الجدولي.
+  const [page, setPage] = useState(1);
+  const [hasNext, setHasNext] = useState(false);
   // جدول الأصناف: فلتر حالة المخزون + ترتيب حسب العمود (خادمي) + قائمة التصدير.
   const [statusFilter, setStatusFilter] = useState<StockStatus>("");
   const [sortKey, setSortKey] = useState<string>("");
@@ -88,8 +91,12 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
 
   const load = useCallback(async (opts: {
     search?: string; status?: StockStatus; ordering?: string;
+    page?: number; mode?: "tree" | "table";
   } = {}) => {
-    const { search: currentSearch = "", status = "", ordering = "" } = opts;
+    const {
+      search: currentSearch = "", status = "", ordering = "",
+      page = 1, mode = "table",
+    } = opts;
     const tenantId = resolveTenantId();
     const cacheMetaKey = tenantScopedOfflineKey(tenantId, "products:list");
     setLoading(true);
@@ -99,9 +106,26 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       if (currentSearch) params.search = currentSearch;
       if (status) params.stock_status = status;
       if (ordering) params.ordering = ordering;
-      const allRows = await inventoryApi.getAllProducts(params);
-      setProducts(allRows as SqlProduct[]);
-      setTotal(allRows.length);
+      // المرحلة 5 / P0-12: العرض الجدولي (الافتراضي) يجلب **صفحة واحدة** —
+      // كان يدور على كل الصفحات (page_size=200) فيُصدر 8 طلبات متسلسلة لـ1490
+      // صنفاً، ويُعيد ذلك كاملاً بعد كل دورة بحث (debounce 250ms).
+      // العرض الشجري يجمّع حسب التصنيف فيحتاج المجموعة كاملة بطبيعته — يبقى
+      // على الجلب الكامل، وهو ليس الوضع الافتراضي.
+      let allRows: SqlProduct[];
+      if (mode === "tree") {
+        allRows = await inventoryApi.getAllProducts(params) as SqlProduct[];
+        setProducts(allRows);
+        setTotal(allRows.length);
+        setHasNext(false);
+      } else {
+        const paged = await inventoryApi.getProductsPaged({
+          ...params, page, page_size: pageSize,
+        });
+        allRows = paged.results as SqlProduct[];
+        setProducts(allRows);
+        setTotal(paged.count);
+        setHasNext(paged.hasNext);
+      }
       // شجرة التصنيفات (لعرض الجدول الشجري) — غير حظري.
       try {
         const cats = await inventoryApi.getCategories() as Array<{ id: number; name: string; parent: number | null }>;
@@ -131,6 +155,10 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         const cached = await db.products.where("tenant_id").equals(tenantId).toArray();
         if (cached.length > 0) {
           setProducts(cached.map((c) => JSON.parse(c.data) as SqlProduct));
+          // أوفلاين: المعروض هو لقطة الكاش كاملةً، فالإجمالي هو طولها — وإلا
+          // بقي العدّاد على count الخادم من آخر اتصال ناجح فأشار لعدد غير معروض.
+          setTotal(cached.length);
+          setHasNext(false);
           const meta = await db.cache_meta.get(cacheMetaKey);
           setLastSync(meta?.updated_at ?? cached[0].updated_at);
           setFromCache(true);
@@ -144,18 +172,30 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     }
   }, [pageSize]);
 
-  // مصدر تحميل واحد: يتفاعل مع البحث (debounced) + فلتر الحالة + الترتيب.
+  // تغيّر البحث/الفلتر/الترتيب يعيدنا للصفحة الأولى — وإلا بقينا على صفحة 7
+  // من نتيجة لم تعد موجودة. مفصول عن تأثير الجلب كي لا يجلب مرتين.
+  useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter, orderingParam, displayMode]);
+
+  // مصدر تحميل واحد: البحث (debounced) + فلتر الحالة + الترتيب + الصفحة.
   useEffect(() => {
     const t = setTimeout(() => {
-      load({ search, status: statusFilter, ordering: orderingParam });
+      load({
+        search, status: statusFilter, ordering: orderingParam,
+        page, mode: displayMode,
+      });
     }, 250);
     return () => clearTimeout(t);
-  }, [load, search, statusFilter, orderingParam]);
+  }, [load, search, statusFilter, orderingParam, page, displayMode]);
 
-  // إعادة تحميل يدوي (زر التحديث / بعد الحفظ) يحافظ على الفلاتر الحالية.
+  // إعادة تحميل يدوي (زر التحديث / بعد الحفظ) يحافظ على الفلاتر والصفحة الحالية.
   const reload = useCallback(() => {
-    load({ search, status: statusFilter, ordering: orderingParam });
-  }, [load, search, statusFilter, orderingParam]);
+    load({
+      search, status: statusFilter, ordering: orderingParam,
+      page, mode: displayMode,
+    });
+  }, [load, search, statusFilter, orderingParam, page, displayMode]);
 
   // تصدير PDF للطباعة بخيارات: الكل / ما نفذ / المنخفضة — يجلب كل الصفحات المطابقة
   // (لا الصفحة الحالية فقط) ثم يفتح نافذة طباعة بنفس نمط تقرير أرصدة المخزون (DRY).
@@ -391,7 +431,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
               إدارة الأصناف
             </strong>
-            <span className="aseel-status-item">الإجمالي: <b>{products.length}</b></span>
+            {/* P0-12: الإجمالي من الخادم (count) لا من طول الصفحة المعروضة. */}
+            <span className="aseel-status-item">الإجمالي: <b>{total}</b></span>
         {/* Phase 2 wiring — freshness/cache indicator */}
         <StalenessBadge updatedAt={lastSync} />
         {fromCache && (
@@ -494,6 +535,35 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           sortDir={sortDir}
           onSort={(key, dir) => { setSortKey(key); setSortDir(dir); }}
         />
+      )}
+
+      {/* المرحلة 5 / P0-12: تنقّل الصفحات — للعرض الجدولي وحده (الشجري يجمّع
+          المجموعة كاملةً فلا معنى لتصفّحه). يظهر فقط عند وجود أكثر من صفحة. */}
+      {displayMode !== "tree" && (page > 1 || hasNext) && (
+        <div
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            gap: 12, padding: "6px 0",
+          }}
+        >
+          <button
+            className="aseel-btn"
+            disabled={page <= 1 || loading}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            السابق
+          </button>
+          <span className="aseel-status-item">
+            صفحة <b>{page}</b> من <b>{Math.max(1, Math.ceil(total / pageSize))}</b>
+          </span>
+          <button
+            className="aseel-btn"
+            disabled={!hasNext || loading}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            التالي
+          </button>
+        </div>
       )}
         </div>
       )}

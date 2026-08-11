@@ -121,6 +121,23 @@ export const inventoryApi = {
     });
   },
 
+  /**
+   * صفحة واحدة من الأصناف (المرحلة 5 / P0-12).
+   * الخادم يدعم search/stock_status/ordering أصلاً (ProductViewSet)، فالبحث
+   * والفرز خادميّان ولا حاجة لسحب الجدول كله لتصفيته في المتصفح.
+   */
+  getProductsPaged: async (params: Record<string, string | number>) => {
+    const q = `?${new URLSearchParams(params as unknown as Record<string, string>)}`;
+    const res = await fetch(`${INV}/products/${q}`, { headers: headers() });
+    await handle(res, "getProductsPaged");
+    return toPagedList<any>(await res.json());
+  },
+
+  /**
+   * كل الأصناف عبر حلقة صفحات. **لا تستخدمها لعرض قائمة** — بقيت لعمليات
+   * تحتاج المجموعة كاملةً بطبيعتها (التصدير للطباعة، والعرض الشجري الذي
+   * يجمّع حسب التصنيف). العرض الجدولي يستخدم getProductsPaged.
+   */
   getAllProducts: async (params?: Record<string, string | number>) => {
     const allRows: any[] = [];
     let pg = 1;
