@@ -349,7 +349,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     invoicesListRequestedRef.current = true;
     const loadInvoices = async () => {
       try {
-        const list = await purchaseInvoiceApi.list();
+        // P0-5: قائمة التنقّل صارت أحدث 200 (القائمة مُرقَّمة إلزامياً).
+        const list = await purchaseInvoiceApi.list({ page: "1", page_size: "200" });
         setInvoicesList(list);
       } catch (err) {
         // console suppressed

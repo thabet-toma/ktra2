@@ -104,7 +104,8 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
     const tenantId = resolveTenantId();
     try {
       const [invs, prods] = await Promise.allSettled([
-        apiGetList<PurchaseInvoice>("logistics/purchase-invoices/", { tenantId }),
+        // P0-5: أحدث 200 فاتورة (القائمة مُرقَّمة إلزامياً) — منتقي الأصل.
+        apiGetList<PurchaseInvoice>("logistics/purchase-invoices/", { tenantId, query: { page: 1, page_size: 200, is_posted: "true" } }),
         listPickerProducts<Product>(tenantId),
       ]);
       if (invs.status === "fulfilled") {

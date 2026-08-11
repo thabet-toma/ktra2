@@ -252,7 +252,7 @@ export const PartnerProfilePage: React.FC = () => {
       if (isSupplier) {
         // فواتير الشراء المفتوحة لهذا المورد.
         const rows = await purchaseInvoiceApi.list({
-          partner: String(id), is_posted: 'true',
+          partner: String(id), is_posted: 'true', page: '1', page_size: '200',
         }) as Array<{ id: number; invoice_number?: string; remaining_balance?: string }>;
         setAllocDocs(
           (rows || [])

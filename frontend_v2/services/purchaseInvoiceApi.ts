@@ -283,7 +283,8 @@ export const purchaseInvoiceApi = {
    * `partner` فلتر خادم — لا تُسحب سندات الشركة كلها.
    */
   listSupplierPayments: async (partnerId?: number | string): Promise<SupplierPaymentDto[]> => {
-    const qs = partnerId ? `?partner=${partnerId}` : "";
+    // P0-5: القائمة مُرقَّمة إلزامياً — سقف 200 صريح (المفلتر بمورد صغير عملياً).
+    const qs = partnerId ? `?partner=${partnerId}&page=1&page_size=200` : "?page=1&page_size=200";
     const res = await safeFetch(`${API_BASE}/logistics/supplier-payments/${qs}`, {
       headers: headers(),
     });

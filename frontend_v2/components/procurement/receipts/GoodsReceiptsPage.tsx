@@ -164,7 +164,9 @@ export const GoodsReceiptsPage: React.FC = () => {
     try {
       const tenantId = resolveTenantId();
       const [invs, whs, parts, prods] = await Promise.all([
-        purchaseInvoiceApi.list({ page_size: "200" }),
+        // P0-5: كان page_size بلا page لا يقيّد شيئاً (الترقيم اختياري) —
+        // مع الترقيم الإلزامي صار فعلاً «أحدث 200».
+        purchaseInvoiceApi.list({ page: "1", page_size: "200" }),
         inventoryApi.getWarehouses({ active_only: "true" }) as Promise<WarehouseOpt[]>,
         apiGetList<PartnerOpt>("partners/lookup/", {
           tenantId,

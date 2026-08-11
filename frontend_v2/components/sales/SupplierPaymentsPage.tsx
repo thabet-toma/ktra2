@@ -80,7 +80,8 @@ export const SupplierPaymentsPage: React.FC = () => {
       const [pays, parts, accs] = await Promise.allSettled([
         // T-V1: المسار الصحيح المُسجَّل (api/logistics/supplier-payments/) —
         // كان يستدعي purchase/payments/ غير الموجود فيفشل بـ 404 عند الفتح.
-        apiGetList<SupplierPaymentRow>("logistics/supplier-payments/", { tenantId }),
+        // P0-5: القائمة مُرقَّمة إلزامياً — أحدث 200 سند صرف.
+        apiGetList<SupplierPaymentRow>("logistics/supplier-payments/", { tenantId, query: { page: 1, page_size: 200 } }),
         accountingApi.getPartners() as Promise<Partner[]>,
         accountingApi.getAccounts() as Promise<Account[]>,
       ]);
@@ -125,6 +126,7 @@ export const SupplierPaymentsPage: React.FC = () => {
       const rows = await purchaseInvoiceApi.list({
         partner: String(row.partner),
         is_posted: "true",
+        page: "1", page_size: "200",
       }) as Array<{ id: number; invoice_number?: string; remaining_balance?: string }>;
       setAllocDocs(
         (rows || [])

@@ -66,6 +66,7 @@ from core.activity import (
     snapshot_document_lines,
     snapshot_fields,
 )
+from core.pagination import EnforcedPageNumberPagination
 from core.api_defaults import PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.access import require_perm, requires_perm
 from core.user_roles import user_can_unpost_logistics_deal_payment
@@ -97,6 +98,8 @@ logger = logging.getLogger("logistics.views")
 
 
 class SupplierPaymentViewSet(BaseTenantViewSet):
+    # P0-5: ترقيم إلزامي — الشاشة الرئيسية أحدث 200، والمفلتر بمورد بسقف صريح.
+    pagination_class = EnforcedPageNumberPagination
     serializer_class = SupplierPaymentSerializer
 
     def get_queryset(self):

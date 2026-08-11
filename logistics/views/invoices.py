@@ -66,6 +66,7 @@ from core.activity import (
     snapshot_document_lines,
     snapshot_fields,
 )
+from core.pagination import EnforcedPageNumberPagination
 from core.api_defaults import PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.access import require_perm, requires_perm
 from core.user_roles import user_can_unpost_logistics_deal_payment
@@ -130,6 +131,9 @@ def _purchase_item_snapshot(invoice):
 
 
 class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
+    # P0-5: ترقيم إلزامي — الشاشة الرئيسية مُرقَّمة أصلاً (listPage)، وبقية
+    # المستهلكين صاروا بسقف 200 صريح (منتقيات ومحرّرات).
+    pagination_class = EnforcedPageNumberPagination
     serializer_class = PurchaseInvoiceSerializer
     partner_balance_spec = ("partner_id", True, "supplier_balance")
 
