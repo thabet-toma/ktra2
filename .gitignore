@@ -118,3 +118,7 @@ frontend/
 
 # Playwright run metadata (root-level)
 /test-results/
+
+# Load-test artifacts (المرحلة 6) — بيان البذر ونتائج locust المحلية
+/load_tests/seed_manifest.json
+/load_tests/results/
