@@ -13,7 +13,12 @@ from accounting.services import create_fiscal_year
 from inventory.models import Product, StockMovement
 from partners.models import Partner
 from sales.models import SalesInvoice, SalesInvoiceLine
-from sales.services import get_or_create_sales_settings, invoice_profits, post_sales_invoice
+from sales.services import (
+    get_or_create_sales_settings,
+    invoice_profits,
+    post_sales_invoice,
+    sales_cogs_map,
+)
 from tenants.models import Currency
 from tenants.services import create_company
 
@@ -105,3 +110,54 @@ def test_isolated_per_tenant(env):
     other = create_company("شركة أخرى", other_owner)
     data = invoice_profits(tenant_id=other.TenantID)
     assert data["totals"]["count"] == 0
+
+
+# ── THA-60 M1: القاعدة الموحّدة ومجتمع الفواتير المتسامح ──────────────────
+
+def test_legacy_invoice_kind_blank_is_counted_as_sale(env):
+    """فاتورة مرحّلة بلا نوع (صفوف SQL خام قديمة) كانت تغيب عن التقرير."""
+    tenant, cur, customer, product = env
+    inv = _post_sale(tenant, cur, customer, product, number="P-LEG", qty=3, price=100)
+    # محاكاة صفّ قديم دخل عبر SQL خام قبل تعبئة هجرة 0012 — تحديث مباشر لا يمسّ الترحيل.
+    SalesInvoice.objects.filter(pk=inv.id).update(invoice_kind="")
+
+    data = invoice_profits(tenant_id=tenant.TenantID)
+    assert data["totals"]["count"] == 1
+    row = data["rows"][0]
+    assert row["invoice"] == inv.id
+    assert Decimal(row["revenue"]) == Decimal("300.00")
+    assert Decimal(row["cost"]) == Decimal("30.00")
+
+
+def test_cogs_map_keyed_by_invoice_and_product(env):
+    tenant, cur, customer, product = env
+    other_product = Product.objects.create(
+        tenant=tenant, sku="PR-2", name_ar="صنف آخر",
+        quantity_on_hand=50, avg_cost=Decimal("4"))
+    inv = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="P-MAP", customer=customer,
+        currency=cur, invoice_date="2026-06-15",
+        invoice_type=SalesInvoice.INVOICE_CASH, stock_on_post=True,
+    )
+    SalesInvoiceLine.objects.create(
+        tenant=tenant, invoice=inv, product=product,
+        quantity=Decimal("5"), unit_price=Decimal("100"))
+    SalesInvoiceLine.objects.create(
+        tenant=tenant, invoice=inv, product=other_product,
+        quantity=Decimal("2"), unit_price=Decimal("20"))
+    post_sales_invoice(inv)
+
+    cmap = sales_cogs_map(tenant_id=tenant.TenantID, invoice_ids=[inv.id])
+    assert cmap[(inv.id, product.id)] == {"cost": Decimal("50.00"), "qty": Decimal("5.0000")}
+    assert cmap[(inv.id, other_product.id)] == {"cost": Decimal("8.00"), "qty": Decimal("2.0000")}
+    # قائمة فارغة ⇒ خريطة فارغة، بلا استعلام.
+    assert sales_cogs_map(tenant_id=tenant.TenantID, invoice_ids=[]) == {}
+
+
+def test_cogs_map_is_tenant_scoped(env):
+    tenant, cur, customer, product = env
+    inv = _post_sale(tenant, cur, customer, product, number="P-1", qty=5, price=100)
+
+    other_owner = User.objects.create_user(username="other-map", password="x")
+    other = create_company("شركة أخرى للخريطة", other_owner)
+    assert sales_cogs_map(tenant_id=other.TenantID, invoice_ids=[inv.id]) == {}

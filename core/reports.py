@@ -403,24 +403,48 @@ register(ReportSpec(
 def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[dict]:
     """تجميع أسطر فواتير البيع حسب الصنف أو الماركة — قاعدة واحدة لتقريرين.
 
-    الربح = صافي البيع − (الكمية × متوسط تكلفة الصنف). متوسط التكلفة لحظي (لا
-    تاريخي)، وهذا مذكور في وصف التقرير كي لا يُقرأ على أنه تكلفة وقت البيع.
+    THA-60: التكلفة تُقرأ من حركات المخزون المسجَّلة لحظة الترحيل/التسليم عبر
+    `sales_cogs_map` — القاعدة الموحّدة نفسها التي يستهلكها «أرباح الفواتير»،
+    لا `avg_cost` اللحظي. الفرق جوهري: المتوسط يتحرّك مع كل شراء لاحق، فكان
+    ربح فواتير مضت ورُحّلت يتغيّر بلا أن يُمسّ أي مستند.
+
+    الإيراد = صافي السطر ناقص نصيبه التناسبي من خصم الفاتورة — كي يطابق مجموعُ
+    الأصناف ربحَ «أرباح الفواتير» على الفواتير نفسها (يطرح الخصم مرّة واحدة على
+    مستوى الفاتورة). التراكم بلا تقريب وسيط، والتقريب في النهاية وحدها.
+
+    ما لا حركة له (مستورَد بلا حركات، أو بند لم يُسلَّم بعد) يُعلَن في عمود
+    «كمية بلا تكلفة» بدل أن يمرّ كتكلفة صفر صامتة. الخدمات مستثناة — بلا تكلفة
+    مخزون بحقّ. ثلاثة استعلامات إجمالاً: الفواتير، الأسطر، خريطة التكلفة.
     """
     from sales.models import SalesInvoiceLine
+    from sales.services import sales_cogs_map
 
-    invoices = _posted_sales(tenant_id, params).values_list("id", flat=True)
+    inv_rows = list(
+        _posted_sales(tenant_id, params).values(
+            "id", "subtotal_excl_tax", "invoice_discount",
+        )
+    )
+    invoice_ids = [r["id"] for r in inv_rows]
+    # نصيب السطر من خصم الفاتورة يُحسب بنسبة السطر إلى مجموع أسطرها.
+    discounts = {
+        r["id"]: (
+            Decimal(str(r["invoice_discount"] or 0)),
+            Decimal(str(r["subtotal_excl_tax"] or 0)),
+        )
+        for r in inv_rows
+    }
+
     qs = SalesInvoiceLine.objects.filter(
-        tenant_id=tenant_id, invoice_id__in=list(invoices),
+        tenant_id=tenant_id, invoice_id__in=invoice_ids,
     ).select_related("product")
     product = _int_param(params, "product")
     if product:
         qs = qs.filter(product_id=product)
 
-    buckets: dict = {}
-    for line in qs:
-        prod = line.product
+    def _bucket_of(prod, product_id):
+        """دلو الصنف أو الماركة — مفتاحه ولافتته من المنتج نفسه."""
         if group == "product":
-            key = line.product_id
+            key = product_id
             label = {
                 "sku": getattr(prod, "sku", "") or "",
                 "name": getattr(prod, "name_ar", "") or getattr(prod, "name_en", "") or "",
@@ -428,14 +452,53 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
         else:
             key = (getattr(prod, "brand", "") or "— بلا ماركة —")
             label = {"sku": "", "name": key}
-        bucket = buckets.setdefault(key, {
-            **label, "quantity": ZERO, "net_sales": ZERO, "tax_amount": ZERO, "cost": ZERO,
+        return buckets.setdefault(key, {
+            **label, "quantity": ZERO, "net_sales": ZERO, "tax_amount": ZERO,
+            "cost": ZERO, "uncosted_qty": ZERO,
         })
+
+    buckets: dict = {}
+    # كمية البضائع لكل (فاتورة، صنف) — أساس مقارنة المُكلَّف بالمُباع.
+    goods_qty: dict[tuple[int, int], Decimal] = {}
+    bucket_of_product: dict[int, dict] = {}
+    for line in qs:
+        prod = line.product
+        bucket = _bucket_of(prod, line.product_id)
+        bucket_of_product[line.product_id] = bucket
         qty = Decimal(str(line.quantity or 0))
+        net = Decimal(str(line.line_total_excl_tax or 0))
+        discount, subtotal = discounts.get(line.invoice_id, (ZERO, ZERO))
+        if discount and subtotal:
+            net -= discount * net / subtotal
         bucket["quantity"] += qty
-        bucket["net_sales"] += Decimal(str(line.line_total_excl_tax or 0))
+        bucket["net_sales"] += net
         bucket["tax_amount"] += Decimal(str(line.line_tax_amount or 0))
-        bucket["cost"] += qty * Decimal(str(getattr(prod, "avg_cost", 0) or 0))
+        if not getattr(prod, "is_service", False):
+            key = (line.invoice_id, line.product_id)
+            goods_qty[key] = goods_qty.get(key, ZERO) + qty
+
+    # تمريرة ثانية على خريطة التكلفة — لا استعلام داخل حلقة الأسطر.
+    cogs = sales_cogs_map(tenant_id=tenant_id, invoice_ids=invoice_ids)
+    if product:
+        cogs = {k: v for k, v in cogs.items() if k[1] == product}
+    # حركة لصنف لا سطر له في الفاتورة: تكلفتها حقيقية ولا يجوز إسقاطها، فيُجلب
+    # منتجها في استعلام واحد احتياطي بدل تجاهل المبلغ.
+    missing = {pid for (_, pid) in cogs if pid not in bucket_of_product}
+    if missing:
+        from inventory.models import Product
+
+        for prod in Product.objects.filter(tenant_id=tenant_id, id__in=missing):
+            bucket_of_product[prod.id] = _bucket_of(prod, prod.id)
+
+    for key in set(goods_qty) | set(cogs):
+        bucket = bucket_of_product.get(key[1])
+        if bucket is None:
+            continue
+        moved = cogs.get(key) or {}
+        bucket["cost"] += Decimal(str(moved.get("cost") or 0))
+        uncosted = goods_qty.get(key, ZERO) - Decimal(str(moved.get("qty") or 0))
+        if uncosted > 0:
+            bucket["uncosted_qty"] += uncosted
 
     rows = []
     for bucket in buckets.values():
@@ -450,6 +513,7 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
             "cost": _money(bucket["cost"]),
             "profit": _money(profit),
             "margin": _money(margin),
+            "uncosted_qty": _qty(bucket["uncosted_qty"]),
         })
     rows.sort(key=lambda r: Decimal(r["net_sales"]), reverse=True)
     return rows
@@ -464,13 +528,18 @@ _PRODUCT_SALES_COLUMNS = (
     ReportColumn("cost", "التكلفة", KIND_MONEY, total=True),
     ReportColumn("profit", "الربح", KIND_MONEY, total=True),
     ReportColumn("margin", "الهامش %", KIND_NUMBER, width="90px"),
+    # كمية بيعت بلا حركة مخزون تحمل تكلفتها — تُعلَن ولا تمرّ كتكلفة صفر صامتة.
+    ReportColumn("uncosted_qty", "كمية بلا تكلفة", KIND_NUMBER, total=True, width="120px"),
 )
 
 register(ReportSpec(
     key="sales-by-product",
     title="المبيعات حسب الصنف",
     category="sales",
-    description="كمّ بيع كل صنف وربحه. التكلفة بمتوسط التكلفة الحالي للصنف.",
+    description=(
+        "كمّ بيع كل صنف وربحه. التكلفة من حركات المخزون لحظة الترحيل/التسليم — "
+        "تاريخية لا يحرّكها شراء لاحق. «كمية بلا تكلفة» ما لم تُسجَّل له حركة بعد."
+    ),
     filters=DATE_FILTERS + (ReportFilter("product", "الصنف", "product"),),
     columns=_PRODUCT_SALES_COLUMNS,
     permission="sales.invoice.view",
@@ -481,7 +550,10 @@ register(ReportSpec(
     key="sales-by-brand",
     title="المبيعات حسب الماركة",
     category="sales",
-    description="أي ماركة تبيع أكثر وأيّها أربح — تجميع أسطر البيع على ماركة الصنف.",
+    description=(
+        "أي ماركة تبيع أكثر وأيّها أربح — تجميع أسطر البيع على ماركة الصنف. "
+        "التكلفة تاريخية من حركات المخزون، لا بمتوسط التكلفة اليوم."
+    ),
     filters=DATE_FILTERS,
     columns=tuple(c for c in _PRODUCT_SALES_COLUMNS if c.key != "sku"),
     permission="sales.invoice.view",

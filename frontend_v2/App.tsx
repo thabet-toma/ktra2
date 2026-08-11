@@ -165,6 +165,10 @@ const PayrollPage = lazyPage(() => import("./components/hr/PayrollPage"));
 const AccountantSignupPage = lazyPage(() => import("./components/accountant/AccountantSignupPage"));
 const CompanyAccountantEngagementsPage = lazyPage(() => import("./components/accountant/CompanyAccountantEngagementsPage"));
 const AccountantOfficeApp = lazyPage(() => import("./components/accountant/office/AccountantOfficeApp"));
+// THA-45: سجل الأجهزة الحساسة — وحدة مرخّصة، خلف نفس حارس الترخيص.
+const SensitiveDevicesScreen = lazyPage(() => import("./components/devices/SensitiveDevicesScreen"));
+// THA-24: بطاقات الكفالة — وحدة «خدمة ما بعد البيع» المرخّصة، بنفس الحارس.
+const WarrantyCardsScreen = lazyPage(() => import("./components/aftersales/WarrantyCardsScreen"));
 
 type SourcingView = "search" | "loading" | "results";
 type AuthView = "landing" | "login" | "signup" | "accountant-signup";
@@ -173,13 +177,16 @@ type AuthView = "landing" | "login" | "signup" | "accountant-signup";
  * حارس ترخيص الوحدة — يقرأ عَلَم `/api/permissions/me` (طلب قائم أصلاً، بلا شبكة
  * إضافية) ويفشل **مغلقاً**. يسبق عرض الشاشة الكسولة، فلا يُطلب chunk الوحدة
  * أصلاً للشركة غير المرخّصة.
+ *
+ * THA-45: صار عاماً لكل الوحدات المرخّصة (كان خاصاً ببوابة المحاسب) — الرسالة
+ * وحدها تتغيّر، فحارسٌ باسم وحدةٍ بعينها يلفّ شاشةَ وحدةٍ أخرى نصٌّ يكذب.
  */
-const AccountantModuleGuard: React.FC<{ view: string; children: React.ReactNode }> = ({ view, children }) => {
+const ModuleLicenseGuard: React.FC<{ view: string; message: string; children: React.ReactNode }> = ({ view, message, children }) => {
   const { modules, loading } = usePermissions();
 
   if (loading) return <div className="flex justify-center py-16"><LoadingSpinner /></div>;
   if (!moduleAllowsView(view, modules)) {
-    return <div role="alert" className="mx-auto max-w-xl rounded-2xl border border-amber-300 bg-amber-50 p-8 text-center font-bold text-amber-900">بوابة المحاسب غير مفعّلة لهذه الشركة أو لا تملك صلاحية الوصول.</div>;
+    return <div role="alert" className="mx-auto max-w-xl rounded-2xl border border-amber-300 bg-amber-50 p-8 text-center font-bold text-amber-900">{message}</div>;
   }
   return <>{children}</>;
 };
@@ -206,6 +213,8 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "personal-expenses": "/personal-expenses",
   payroll: "/payroll",
   "company-accountant-engagements": "/accountant/company/engagements",
+  "sensitive-devices": "/sensitive-devices",
+  "after-sales": "/after-sales",
   "sales-invoices": "/sales/invoices",
   "sales-quotations": "/sales/quotations",
   "sales-orders": "/sales/orders",
@@ -1408,9 +1417,35 @@ const App: React.FC = () => {
           return <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية إدارة ارتباطات المحاسبين (403).</div>;
         }
         return (
-          <AccountantModuleGuard view={appView}>
+          <ModuleLicenseGuard view={appView} message="بوابة المحاسب غير مفعّلة لهذه الشركة أو لا تملك صلاحية الوصول.">
             <CompanyAccountantEngagementsPage />
-          </AccountantModuleGuard>
+          </ModuleLicenseGuard>
+        );
+
+      case "sensitive-devices":
+        // الترخيص أولاً ثم الصلاحية — نفس ترتيب الخادم
+        // (`device_registry/views.py::initial`): مفاتيح صلاحيات الوحدة تُحذف من
+        // كتالوج الشركة غير المرخّصة، فالفحص المعكوس كان يقول «لا تملك صلاحية»
+        // لشركةٍ ينقصها الترخيص لا الصلاحية.
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة تسجيل وتتبع الأجهزة الحساسة غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <SensitiveDevicesScreen />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض سجل الأجهزة الحساسة (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "after-sales":
+        // نفس ترتيب THA-45 والخادم (`after_sales/views.py::initial`): الترخيص
+        // أولاً ثم الصلاحية — مفاتيح صلاحيات الوحدة تُحذف أصلاً من كتالوج
+        // الشركة غير المرخّصة، فالفحص المعكوس يقول «لا تملك صلاحية» لشركةٍ
+        // ينقصها الترخيص لا الصلاحية.
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة خدمة ما بعد البيع غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <WarrantyCardsScreen />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض بطاقات الكفالة (403).</div>}
+          </ModuleLicenseGuard>
         );
 
       case "super-admin":

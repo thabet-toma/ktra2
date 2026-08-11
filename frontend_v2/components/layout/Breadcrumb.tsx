@@ -19,6 +19,8 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'personal-expenses': 'مصاريفي الشخصية',
   payroll: 'الرواتب',
   'company-accountant-engagements': 'واجهة المحاسب القانوني',
+  'sensitive-devices': 'تسجيل وتتبع الأجهزة الحساسة',
+  'after-sales': 'بطاقات الكفالة',
   'points-management': 'إدارة النقاط',
   settings: 'الإعدادات',
   attendance: 'الحضور والغياب',

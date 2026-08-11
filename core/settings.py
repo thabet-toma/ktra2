@@ -114,6 +114,8 @@ INSTALLED_APPS = [
     'realestate',
     'sales',
     'accountant_portal.apps.AccountantPortalConfig',
+    'device_registry.apps.DeviceRegistryConfig',
+    'after_sales.apps.AfterSalesConfig',
 ]
 
 MIDDLEWARE = [

@@ -36,6 +36,8 @@ GROUP_IMPORT = "الاستيراد"
 GROUP_HR = "شؤون الموظفين"
 GROUP_ADMIN = "الإدارة والإعدادات"
 GROUP_TAX = "الضريبة والمراجعة"
+GROUP_DEVICES = "الأجهزة الحساسة"
+GROUP_AFTERSALES = "خدمة ما بعد البيع"
 
 PERMISSIONS: list[dict] = [
     # المبيعات
@@ -110,6 +112,20 @@ PERMISSIONS: list[dict] = [
     {"key": "review.query.create", "label": "إنشاء طلب توضيح", "group": GROUP_TAX, "module": "accountant_portal"},
     {"key": "review.query.respond", "label": "الرد على طلب توضيح", "group": GROUP_TAX, "module": "accountant_portal"},
     {"key": "finance.export.package", "label": "تصدير حزمة المراجعة", "group": GROUP_TAX, "module": "accountant_portal"},
+    # تسجيل وتتبع الأجهزة الحساسة — لا تظهر إلا للشركات المرخّصة للوحدة.
+    {"key": "devices.registry.view", "label": "عرض سجل الأجهزة الحساسة", "group": GROUP_DEVICES, "module": "sensitive_devices"},
+    {"key": "devices.registry.create", "label": "تسجيل جهاز حسّاس", "group": GROUP_DEVICES, "module": "sensitive_devices"},
+    {"key": "devices.registry.edit", "label": "تعديل سجل جهاز حسّاس", "group": GROUP_DEVICES, "module": "sensitive_devices"},
+    {"key": "devices.registry.delete", "label": "حذف واسترجاع سجل جهاز حسّاس", "group": GROUP_DEVICES, "module": "sensitive_devices"},
+    {"key": "devices.audit.view", "label": "عرض سجل تدقيق الأجهزة", "group": GROUP_DEVICES, "module": "sensitive_devices"},
+    # خدمة ما بعد البيع — لا تظهر إلا للشركات المرخّصة للوحدة.
+    {"key": "aftersales.warranty.view", "label": "عرض بطاقات الكفالة", "group": GROUP_AFTERSALES, "module": "after_sales"},
+    {"key": "aftersales.warranty.manage", "label": "إنشاء بطاقة كفالة وتمديدها", "group": GROUP_AFTERSALES, "module": "after_sales"},
+    {"key": "aftersales.order.view", "label": "عرض أوامر الصيانة", "group": GROUP_AFTERSALES, "module": "after_sales"},
+    {"key": "aftersales.order.create", "label": "استقبال جهاز وفتح أمر صيانة", "group": GROUP_AFTERSALES, "module": "after_sales"},
+    {"key": "aftersales.order.edit", "label": "تعديل أمر صيانة ونقل حالته", "group": GROUP_AFTERSALES, "module": "after_sales"},
+    {"key": "aftersales.order.post", "label": "ترحيل قطع الكفالة وتوليد فاتورة الصيانة", "group": GROUP_AFTERSALES, "module": "after_sales"},
+    {"key": "aftersales.order.unpost", "label": "التراجع عن ترحيل قطع الكفالة", "group": GROUP_AFTERSALES, "module": "after_sales"},
 ]
 
 # القراءة المجرّدة — ما يملكه «المستعرض» ويرثه كل دور أعلى منه.
@@ -128,7 +144,14 @@ _ACCOUNTING_VIEW = {
     "accounting.report.view",
 }
 
-_SALES_EMPLOYEE = _VIEW_ONLY | {
+# قراءة ما بعد البيع: «موظف فصاعداً» — المستعرض وحده خارجها. تُذكر صراحةً في كل
+# دور لأن الأدوار تبني على `_VIEW_ONLY` لا على `_STAFF`، فلا وراثة بينها.
+_AFTERSALES_READ = {
+    "aftersales.warranty.view",
+    "aftersales.order.view",
+}
+
+_SALES_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | {
     "hr.attendance.view",
     "sales.invoice.create",
     "sales.invoice.edit",
@@ -137,9 +160,14 @@ _SALES_EMPLOYEE = _VIEW_ONLY | {
     "sales.payment.post",
     "sales.quotation.manage",
     "sales.customer.manage",
+    # الكفالة وأمر الصيانة عملُ واجهة الزبون — البيع يفتحه ويحرّكه، والمال فيه
+    # (ترحيل القطع المغطاة والفوترة) للمحاسب وحده.
+    "aftersales.warranty.manage",
+    "aftersales.order.create",
+    "aftersales.order.edit",
 }
 
-_PROCUREMENT_EMPLOYEE = _VIEW_ONLY | {
+_PROCUREMENT_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | {
     "hr.attendance.view",
     "purchase.invoice.create",
     "purchase.invoice.edit",
@@ -154,7 +182,7 @@ _PROCUREMENT_EMPLOYEE = _VIEW_ONLY | {
     "import.shipment.manage",
 }
 
-_ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | {
+_ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | {
     "hr.attendance.view",
     "sales.invoice.post",
     "sales.invoice.unpost",
@@ -180,6 +208,10 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | {
     "hr.payroll.view",
     "hr.payroll.manage",
     "hr.payroll.post",
+    # صرف قطع الكفالة قيدٌ في الدفاتر، وفاتورة الصيانة إيراد — كلاهما للمحاسب.
+    "aftersales.warranty.manage",
+    "aftersales.order.post",
+    "aftersales.order.unpost",
 }
 
 _LEGAL_ACCOUNTANT = {
@@ -196,12 +228,17 @@ _LEGAL_ACCOUNTANT = {
 }
 
 # موظف عام (الدور الافتراضي للعضو الجديد): إدخال بيانات بلا ترحيل ولا حذف.
-_STAFF = _VIEW_ONLY | {
+_STAFF = _VIEW_ONLY | _AFTERSALES_READ | {
     "hr.attendance.view",
     "sales.invoice.create",
     "sales.invoice.edit",
     "purchase.invoice.create",
     "purchase.invoice.edit",
+    # استقبال الجهاز عند الكاونتر عملُ موظف — التعديل والحذف والتدقيق للمدير.
+    "devices.registry.view",
+    "devices.registry.create",
+    # استقبال جهاز للصيانة عملُ كاونتر كذلك — بلا تعديل ولا ترحيل.
+    "aftersales.order.create",
 }
 
 ROLE_DEFAULTS: dict[str, object] = {

@@ -81,6 +81,17 @@ class Product(models.Model):
         help_text='إن عُطّل، يُرفض الصرف إذا تجاوزت الكمية المتاحة (الافتراضي: مرفوض)',
     )
     is_serialized = models.BooleanField(default=False, db_column='IsSerialized')
+    # THA-24: سياسة الكفالة على الصنف — لا حالة. النسخة الفعلية لكل وحدة مباعة
+    # تعيش في `after_sales.WarrantyCard`، وتغيير السياسة لا يمسّ بطاقة صُرفت.
+    # فارغ أو صفر = لا كفالة، فلا تُنشأ بطاقة تلقائية عند ترحيل البيع.
+    warranty_months = models.PositiveSmallIntegerField(
+        null=True, blank=True, db_column='WarrantyMonths',
+        help_text='مدة كفالة الزبون بالأشهر (فارغ = بلا كفالة)',
+    )
+    supplier_warranty_months = models.PositiveSmallIntegerField(
+        null=True, blank=True, db_column='SupplierWarrantyMonths',
+        help_text='مدة كفالة المورد لنا بالأشهر — تُحسب من تاريخ فاتورة الشراء',
+    )
     is_service = models.BooleanField(
         default=False,
         db_column='IsService',
@@ -209,6 +220,10 @@ class StockMovement(models.Model):
         # مستندا الاستلام/التسليم المستقلان (بلا فاتورة مرتبطة بعد).
         ('GOODS_RECEIPT', 'سند استلام'),
         ('DELIVERY_NOTE', 'سند تسليم'),
+        # THA-24: صرف قطع غيار مغطاة بالكفالة — نوعٌ مستقل عن STOCK_ISSUE عمداً:
+        # خريطة تكلفة المبيعات تفلتر SALE/STOCK_ISSUE وحدهما، فمصروف الكفالة لا
+        # يدخل تكلفة المبيع (مصروف تشغيلي لا COGS) ولا يتقاطع فضاء معرّفاته معها.
+        ('SERVICE_ISSUE', 'صرف قطع كفالة'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='MovementID')

@@ -1555,6 +1555,11 @@ def post_sales_invoice(
         # رجعت للمخزن (RETURN_IN) فوحداتها تعود «في المخزن» بترتيب استهلاكها.
         if kind == SalesInvoice.INVOICE_KIND_SALE:
             consume_sales_serials(invoice, lines)
+            # THA-24: بطاقة الكفالة نسخةٌ تُصرف للوحدة التي ذهبت للزبون، فلا
+            # تُنشأ إلا بعد استهلاك الوحدات أعلاه. صفر أثر لشركة غير مرخّصة.
+            from after_sales.services import create_auto_warranty_cards
+
+            create_auto_warranty_cards(invoice)
         elif kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
             restore_returned_sales_serials(invoice, lines)
 
@@ -2677,6 +2682,46 @@ def credit_preview_for_sale(
     }
 
 
+def sales_cogs_map(
+    *,
+    tenant_id: int,
+    invoice_ids,
+) -> dict[tuple[int, int], dict]:
+    """THA-60 M1: قاعدة تكلفة المبيع التاريخية الموحَّدة — مستهلك واحد للحقيقة.
+
+    تُرجع `{(invoice_id, product_id): {"cost": Decimal, "qty": Decimal}}` بتجميع
+    حركات مخزون البيع (`SALE`/`STOCK_ISSUE`) المرتبطة بالفواتير المُمرَّرة، في
+    **استعلام تجميعي واحد** (لا استعلام داخل حلقة).
+
+    التكلفة هنا تاريخية بحقّ: `record_stock_movement` يخزّن الصادر بكمية موجبة
+    و`total_cost = qty × avg_cost_before` لحظة الترحيل/التسليم، فمجموعها هو
+    تكلفة البضاعة المباعة كما كانت يومها — لا يحرّكها شراء لاحق يرفع المتوسط.
+    حركة التسليم نفسها `reference_type="SALE"` (قيد `SALES_DELIVERY_COGS` قيدٌ لا
+    حركة)، فتكلفة التسليم داخلة في القاعدة تلقائياً.
+
+    محصورة بالشركة؛ `invoice_ids` فارغة ⇒ `{}` بلا استعلام.
+    """
+    ids = list(invoice_ids or [])
+    if not ids:
+        return {}
+    rows = (
+        StockMovement.objects.filter(
+            tenant_id=tenant_id,
+            reference_type__in=("SALE", "STOCK_ISSUE"),
+            reference_id__in=ids,
+        )
+        .values("reference_id", "product_id")
+        .annotate(cost=Sum("total_cost"), qty=Sum("quantity"))
+    )
+    return {
+        (r["reference_id"], r["product_id"]): {
+            "cost": Decimal(str(r["cost"] or "0")),
+            "qty": Decimal(str(r["qty"] or "0")),
+        }
+        for r in rows
+    }
+
+
 def invoice_profits(
     *,
     tenant_id: int,
@@ -2688,15 +2733,20 @@ def invoice_profits(
     """task18 DEF-C4: تقرير أرباح الفواتير المرحَّلة.
 
     الإيراد = صافي البنود قبل الضريبة (subtotal_excl_tax − خصم الفاتورة) — يطابق
-    الدائن في قيد الإيراد. التكلفة = مجموع `total_cost` لحركات مخزون البيع
-    (SALE/STOCK_ISSUE) المسجَّلة وقت الترحيل بمتوسط التكلفة آنذاك (تكلفة تاريخية
-    دقيقة لا تتأثر بانجراف WAC لاحقاً). الربح = الإيراد − التكلفة.
-    محصور بالشركة (والفرع غير الرئيسي إن مُرّر) وبفواتير البيع فقط (لا مراجيع).
+    الدائن في قيد الإيراد. التكلفة من `sales_cogs_map` (THA-60 M1) — القاعدة
+    التاريخية الموحَّدة نفسها التي تقرأها تقارير «حسب الصنف/الماركة»، فلا يوجد
+    رقما ربح متنافسان في المنصة. الربح = الإيراد − التكلفة.
+
+    محصور بالشركة (والفرع غير الرئيسي إن مُرّر) وبفواتير البيع (لا مراجيع)، مع
+    التسامح مع الصفوف القديمة بلا نوع (null/"") التي لا تنشأ إلا من مسارات SQL
+    خام سابقة لهجرة 0012 — تُعامَل مبيعاتٍ كما يعاملها قسم التقارير.
     """
     qs = SalesInvoice.objects.filter(
         tenant_id=tenant_id,
         status=SalesInvoice.STATUS_POSTED,
-        invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+    ).filter(
+        Q(invoice_kind=SalesInvoice.INVOICE_KIND_SALE) | Q(invoice_kind__isnull=True)
+        | Q(invoice_kind=""),
     )
     if branch is not None and not getattr(branch, "is_main", False):
         qs = qs.filter(branch=branch)
@@ -2710,18 +2760,10 @@ def invoice_profits(
 
     invoice_ids = list(qs.values_list("id", flat=True))
     cogs_map: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
-    if invoice_ids:
-        mv = (
-            StockMovement.objects.filter(
-                tenant_id=tenant_id,
-                reference_type__in=("SALE", "STOCK_ISSUE"),
-                reference_id__in=invoice_ids,
-            )
-            .values("reference_id")
-            .annotate(c=Sum("total_cost"))
-        )
-        for r in mv:
-            cogs_map[r["reference_id"]] = Decimal(str(r["c"] or "0"))
+    for (inv_id, _product_id), cell in sales_cogs_map(
+        tenant_id=tenant_id, invoice_ids=invoice_ids,
+    ).items():
+        cogs_map[inv_id] += cell["cost"]
 
     rows: list[dict] = []
     tot_rev = Decimal("0")

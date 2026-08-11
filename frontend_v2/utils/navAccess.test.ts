@@ -2,10 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { visibleLinks, groupVisible, type NavAccessLink } from './navAccess.ts';
 import {
+  devicesNavPlacement,
   invoiceActionPermissions,
   memberOverrideForCheckbox,
   moduleAllowsView,
   moduleForView,
+  permForView,
 } from './viewPermissions.ts';
 import { iconForShortcut, SHORTCUTABLE_VIEWS } from './quickShortcuts.ts';
 
@@ -95,6 +97,76 @@ test('تبويب المحاسب القانوني يُمنع قبل أي import �
   assert.equal(moduleAllowsView('company-accountant-engagements', {}), false);
   assert.equal(moduleAllowsView('company-accountant-engagements', { accountant_portal: false }), false);
   assert.equal(moduleAllowsView('company-accountant-engagements', { accountant_portal: true }), true);
+});
+
+test('شاشة الأجهزة الحساسة تُمنع قبل أي import ما لم يصل عَلَم ترخيص وحدتها', () => {
+  assert.equal(moduleForView('sensitive-devices'), 'sensitive_devices');
+  assert.equal(permForView('sensitive-devices'), 'devices.registry.view');
+  // فشل مغلق كسابقتها: بلا أعلام، أو بعَلَم مطفأ، أو بحمولة لا تحمل المفتاح.
+  assert.equal(moduleAllowsView('sensitive-devices', null), false);
+  assert.equal(moduleAllowsView('sensitive-devices', {}), false);
+  assert.equal(moduleAllowsView('sensitive-devices', { sensitive_devices: false }), false);
+  // ترخيص وحدةٍ أخرى لا يفتح هذه.
+  assert.equal(moduleAllowsView('sensitive-devices', { accountant_portal: true }), false);
+  assert.equal(moduleAllowsView('sensitive-devices', { sensitive_devices: true }), true);
+});
+
+test('بند الأجهزة الحساسة يلزمه الترخيص والصلاحية معاً', () => {
+  const link: NavAccessLink[] = [
+    { key: 'sensitive-devices', perm: permForView('sensitive-devices') },
+  ];
+  // الصلاحية وحدها لا تكفي — الترخيص يُفحَص بجانبها في الشريط الجانبي.
+  assert.equal(visibleLinks(link, canOf(['devices.registry.view'])).length, 1);
+  assert.equal(visibleLinks(link, canOf([])).length, 0);
+  assert.equal(
+    visibleLinks(link, canOf(['devices.registry.view'])).length === 1
+      && moduleAllowsView('sensitive-devices', { sensitive_devices: false }),
+    false,
+  );
+});
+
+test('شاشة بطاقات الكفالة تُمنع قبل أي import ما لم يصل عَلَم ترخيص وحدتها', () => {
+  assert.equal(moduleForView('after-sales'), 'after_sales');
+  assert.equal(permForView('after-sales'), 'aftersales.warranty.view');
+  // فشل مغلق: بلا أعلام، أو بعَلَم مطفأ، أو بحمولة لا تحمل المفتاح.
+  assert.equal(moduleAllowsView('after-sales', null), false);
+  assert.equal(moduleAllowsView('after-sales', {}), false);
+  assert.equal(moduleAllowsView('after-sales', { after_sales: false }), false);
+  // ترخيص وحدة الأجهزة الحساسة لا يفتح خدمة ما بعد البيع — وحدتان مستقلتان.
+  assert.equal(moduleAllowsView('after-sales', { sensitive_devices: true }), false);
+  assert.equal(moduleAllowsView('after-sales', { after_sales: true }), true);
+});
+
+test('بند بطاقات الكفالة يلزمه الترخيص والصلاحية معاً', () => {
+  const link: NavAccessLink[] = [
+    { key: 'after-sales', perm: permForView('after-sales') },
+  ];
+  assert.equal(visibleLinks(link, canOf(['aftersales.warranty.view'])).length, 1);
+  assert.equal(visibleLinks(link, canOf([])).length, 0);
+  // الصلاحية وحدها لا تكفي — الترخيص يُفحَص بجانبها في الشريط الجانبي.
+  assert.equal(
+    visibleLinks(link, canOf(['aftersales.warranty.view'])).length === 1
+      && moduleAllowsView('after-sales', { after_sales: false }),
+    false,
+  );
+});
+
+test('موضع بند الأجهزة الحساسة يتبع ترخيص الوحدتين — بند واحد لا اثنان', () => {
+  // بلا ترخيص سجل الأجهزة لا يظهر البند أصلاً، ولو رُخِّصت ما بعد البيع.
+  assert.equal(devicesNavPlacement(null), 'hidden');
+  assert.equal(devicesNavPlacement({}), 'hidden');
+  assert.equal(devicesNavPlacement({ after_sales: true }), 'hidden');
+  // سجل الأجهزة وحده ⇒ يبقى حيث هو اليوم (عقد THA-45: تُطفأ وتُشغَّل باستقلال).
+  assert.equal(devicesNavPlacement({ sensitive_devices: true }), 'standalone');
+  assert.equal(
+    devicesNavPlacement({ sensitive_devices: true, after_sales: false }),
+    'standalone',
+  );
+  // الوحدتان معاً ⇒ ينتقل تحت «خدمة ما بعد البيع» (طلب المالك: السجل إجراء ضمن النظام).
+  assert.equal(
+    devicesNavPlacement({ sensitive_devices: true, after_sales: true }),
+    'after-sales',
+  );
 });
 
 test('الشركة التجارية لا تحمل أي شاشة من شاشات مكتب المحاسبة', () => {

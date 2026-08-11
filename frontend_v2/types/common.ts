@@ -99,6 +99,8 @@ export type AppView =
     | "personal-expenses"
     | "payroll"
     | "company-accountant-engagements"
+    | "sensitive-devices"
+    | "after-sales"
     | "about-us"
     | "contact";
 

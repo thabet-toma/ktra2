@@ -75,6 +75,10 @@ type FormState = {
   barcode: string;
   /** T-SERIAL: تتبّع وحدات الصنف بأرقام تسلسلية. */
   is_serialized: boolean;
+  /** THA-24: سياسة كفالة الزبون بالأشهر — فارغ = بلا كفالة، فلا بطاقة تلقائية. */
+  warranty_months: string;
+  /** THA-24: كفالة المورد لنا بالأشهر — تُحسب من تاريخ فاتورة الشراء. */
+  supplier_warranty_months: string;
   description: string; location: string;
   uom_primary: string; uom2: string; uom2_factor: string;
   uom3: string; uom3_factor: string;
@@ -96,6 +100,7 @@ const blankForm = (): FormState => ({
   sku: "", catalog_no: "", name_ar: "", name_en: "",
   brand: "",
   barcode: "", is_serialized: false,
+  warranty_months: "", supplier_warranty_months: "",
   description: "", location: "",
   uom_primary: "عدد", uom2: "", uom2_factor: "1",
   uom3: "", uom3_factor: "1",
@@ -232,6 +237,10 @@ export const ItemFormAseel: React.FC<Props> = ({
       // الباركود يميّز صنفاً واحداً في الشركة — النسخة تبدأ بلا باركود لا بباركود أخيها.
       barcode: isDuplicate ? "" : String(p.barcode ?? ""),
       is_serialized: Boolean(p.is_serialized),
+      // الكفالة سياسة الصنف لا حالة نسخةٍ منه — تُنسَخ مع النسخة لبراند آخر.
+      warranty_months: p.warranty_months != null ? String(p.warranty_months) : "",
+      supplier_warranty_months:
+        p.supplier_warranty_months != null ? String(p.supplier_warranty_months) : "",
       // التكرار (براند آخر): الاسم والتصنيف يبقيان كما هما، فيُحفظ المنتج تحت نفس
       // التصنيف بجانب إخوته؛ يُفرّغ البراند فقط ليكتبه المستخدم.
       name_ar: String(p.name_ar ?? ""),
@@ -310,6 +319,11 @@ export const ItemFormAseel: React.FC<Props> = ({
         // T-SERIAL: الباركود فارغ = null لا "" — كي لا يتصادم صنفان بلا باركود.
         barcode: form.barcode.trim() || null,
         is_serialized: form.is_serialized,
+        // THA-24: فارغ = null لا 0 — «بلا كفالة» و«كفالة صفر شهر» شيء واحد،
+        // وnull هو ما يقرأه محرّك الكفالة فلا يُنشئ بطاقة.
+        warranty_months: form.warranty_months.trim() ? Number(form.warranty_months) : null,
+        supplier_warranty_months: form.supplier_warranty_months.trim()
+          ? Number(form.supplier_warranty_months) : null,
         // روابط الداتا شيت — يلتقطها الخادم في _handle_attachments (خارج حقول الـserializer).
         datasheet_urls: form.datasheets.map((d) => d.url),
       };
@@ -444,6 +458,21 @@ export const ItemFormAseel: React.FC<Props> = ({
               : "كل وحدة برقمها — يظهر تبويب «الأرقام التسلسلية»"}
           </span>
         </span>)}
+      {/* THA-24: سياسة الكفالة — بجانب التتبّع بالرقم التسلسلي لأن البطاقة
+          التلقائية لا تُنشأ إلا لوحدةٍ مُرقَّمة: المدة بلا تتبّعٍ بالأرقام تبقى
+          سياسةً تُقرأ عند الاستقبال يدوياً. فارغ = بلا كفالة. */}
+      {fld("كفالة الزبون (أشهر)",
+        <input className="aseel-input" type="number" min="0" max="600" step="1"
+          value={form.warranty_months}
+          placeholder="فارغ = بلا كفالة"
+          title="تُنشأ بطاقة كفالة تلقائياً لكل وحدة مُرقَّمة تُباع من هذا الصنف، بدايتها تاريخ فاتورة البيع"
+          onChange={(e) => patch("warranty_months", e.target.value)} />)}
+      {fld("كفالة المورد لنا (أشهر)",
+        <input className="aseel-input" type="number" min="0" max="600" step="1"
+          value={form.supplier_warranty_months}
+          placeholder="فارغ = بلا كفالة مورد"
+          title="تُحسب من تاريخ فاتورة الشراء — يراها موظف الكاونتر فلا تتحمّل الشركة كلفة يتحمّلها المورد"
+          onChange={(e) => patch("supplier_warranty_months", e.target.value)} />)}
       {fld(isExistingProduct ? "اسم المنتج" : "اسم المنتج (اختر موجوداً لبراند آخر، أو اكتب جديداً)",
         isExistingProduct
           ? <input className="aseel-input" value={form.name_ar}

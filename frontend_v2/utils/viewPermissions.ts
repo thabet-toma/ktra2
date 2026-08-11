@@ -88,6 +88,10 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "activity-log": "admin.activity.view",
   permissions: "admin.permissions.manage",
   "company-accountant-engagements": "admin.members.manage",
+  // THA-45: وحدة الأجهزة الحساسة — مشروطة أيضاً بترخيص الوحدة أدناه.
+  "sensitive-devices": "devices.registry.view",
+  // THA-24: بطاقات الكفالة — وحدة «خدمة ما بعد البيع» المرخّصة.
+  "after-sales": "aftersales.warranty.view",
   // «الرئيسية» تختار بين اللوحة التجارية والشخصية — لا تُدرَج هنا كي لا تُحجب
   // الشاشة كلياً؛ الاختيار يتم بدور manager الفعلي في App.tsx.
 };
@@ -104,6 +108,11 @@ export const VIEW_MODULES: Record<string, string> = {
   // شاشة واحدة فقط داخل النظام التجاري: «واجهة المحاسب القانوني». بقية شاشات
   // المحاسب تعيش في قشرة المكتب المستقلة ولا تخصّ الشركة التجارية أصلاً.
   "company-accountant-engagements": "accountant_portal",
+  // THA-45: سجل الأجهزة الحساسة. الخادم يرد 404 لا 403 على شركةٍ غير مرخّصة،
+  // وهذا المدخل يمنع حتى تنزيل chunk الشاشة عندها.
+  "sensitive-devices": "sensitive_devices",
+  // THA-24: خدمة ما بعد البيع — نفس العقد: 404 خادمياً، وبلا العَلَم لا يُطلب chunk.
+  "after-sales": "after_sales",
 };
 
 /** صلاحية الشاشة إن وُجدت، وإلا undefined (شاشة مفتوحة). */
@@ -124,6 +133,27 @@ export const moduleAllowsView = (
 ): boolean => {
   const key = VIEW_MODULES[view];
   return !key || modules?.[key] === true;
+};
+
+/** أين يظهر بند «الأجهزة الحساسة» في الشريط الجانبي. */
+export type DevicesNavPlacement = "hidden" | "standalone" | "after-sales";
+
+/**
+ * THA-24: بندٌ واحد للأجهزة الحساسة لا اثنان.
+ *
+ * المالك يعدّ سجل الأجهزة الحساسة إجراءً ضمن نظام ما بعد البيع، فحين تُرخَّص
+ * الوحدتان معاً ينتقل البند تحت قسم «خدمة ما بعد البيع»؛ وحين تُرخَّص وحدة
+ * الأجهزة وحدها يبقى حيث هو اليوم — عقد THA-45 يقول إنها تُطفأ وتُشغَّل
+ * باستقلال، فلا يختفي بندها لغياب وحدةٍ أخرى.
+ *
+ * القرار هنا لا داخل JSX: `tsc` لا يفحص خصائص JSX في هذا المستودع، فقاعدةٌ
+ * مدفونة في الشرط لا يحرسها شيء.
+ */
+export const devicesNavPlacement = (
+  modules?: Record<string, boolean> | null,
+): DevicesNavPlacement => {
+  if (!moduleAllowsView("sensitive-devices", modules)) return "hidden";
+  return moduleAllowsView("after-sales", modules) ? "after-sales" : "standalone";
 };
 
 export type InvoicePermissionScope = "sales" | "purchase";

@@ -11,10 +11,20 @@ MODULES = {
         "plans": ("Pro", "Enterprise"),
         "legacy_flag": None,
     },
+    "after_sales": {
+        "label": "خدمة ما بعد البيع",
+        "plans": ("Pro", "Enterprise"),
+        "legacy_flag": None,
+    },
     "import": {
         "label": "الاستيراد والشحن والتخليص",
         "plans": ("Enterprise",),
         "legacy_flag": "import_enabled",
+    },
+    "sensitive_devices": {
+        "label": "تسجيل وتتبع الأجهزة الحساسة",
+        "plans": ("Pro", "Enterprise"),
+        "legacy_flag": None,
     },
 }
 
