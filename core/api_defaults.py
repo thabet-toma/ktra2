@@ -2,6 +2,7 @@
 إعدادات DRF المشتركة للواجهات التي يجب أن تكون مصادقاً عليها.
 يُفضّل ربط كل ViewSet حساس (محاسبة، شركاء، …) بـ Token أو جلسة Django.
 """
+from rest_framework import serializers
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -20,6 +21,40 @@ ApiAuthAndUser = {
 POSTED_DOC_WARNING = (
     "هذا المستند مرحَّل. يجب التراجع عن الترحيل قبل تعديله أو حذفه."
 )
+
+
+class TenantScopedPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
+    """P1-8 (المرحلة 5): حقل pk يقبل كائنات الشركة الحالية فقط عند الكتابة.
+
+    `PrimaryKeyRelatedField(queryset=X.objects.all())` كان يقبل pk من أي شركة —
+    `get_queryset` في الـviewset يحمي القراءة فقط، والكتابة تمرّ من الحقل
+    مباشرةً. هذا الصنف يعيد تقييد الـqueryset بشركة الطلب وقت الحلّ، فيصير
+    الـpk الأجنبي «غير موجود» (نفس رسالة DRF القياسية — لا يكشف وجود الكائن).
+
+    الشركة تُحلّ من request في context (المسار الإنتاجي)، أو من
+    context={"tenant": ...} للاستخدام البرمجي. غيابهما = queryset فارغ
+    (fail-closed). `tenant_field` يسمّي حقل الشركة في الموديل الهدف
+    (الافتراضي "tenant").
+    """
+
+    def __init__(self, *args, tenant_field: str = "tenant", **kwargs):
+        self._tenant_field = tenant_field
+        super().__init__(*args, **kwargs)
+
+    def get_queryset(self):
+        from core.tenant_utils import get_tenant
+
+        qs = super().get_queryset()
+        if qs is None:  # read_only — لا حلّ للكتابة أصلاً
+            return qs
+        request = self.context.get("request")
+        tenant = (
+            get_tenant(request) if request is not None
+            else self.context.get("tenant")
+        )
+        if tenant is None:
+            return qs.none()
+        return qs.filter(**{self._tenant_field: tenant})
 
 
 class PagePartnerBalanceMixin:

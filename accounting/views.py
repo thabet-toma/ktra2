@@ -407,7 +407,13 @@ class JournalViewSet(viewsets.ModelViewSet):
             )
 
         # Idempotency: reject if already reversed
-        if JournalHeader.objects.filter(reference_type='JOURNAL_REVERSAL', reference_id=orig.id).exists():
+        # P1-6 (المرحلة 5): فلتر الشركة كان غائباً ⇒ full scan على قيود كل
+        # المنصة (الفهرس idx_jh_tenant_ref عموده القائد tenant فلا يعمل بدونه)
+        # + خلل وظيفي: تصادم reference_id بين شركتين يمنع عكس قيد مشروع.
+        if JournalHeader.objects.filter(
+            tenant_id=orig.tenant_id,
+            reference_type='JOURNAL_REVERSAL', reference_id=orig.id,
+        ).exists():
             return Response(
                 {'error': 'تم عكس هذا القيد مسبقاً.'},
                 status=status.HTTP_400_BAD_REQUEST,

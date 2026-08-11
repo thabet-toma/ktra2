@@ -5,6 +5,7 @@ from .models import (
     Bank, BankBranch, BankAccount, BankReconciliation,
 )
 from partners.models import Partner
+from core.api_defaults import TenantScopedPrimaryKeyRelatedField
 
 class AccountSerializer(serializers.ModelSerializer):
     """يُرجع معلومات المورد المرتبط بالحساب (الاسم التجاري / المستعار) إن وُجد."""
@@ -46,14 +47,16 @@ class CostCenterSerializer(serializers.ModelSerializer):
 class JournalLineSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
     # Use PrimaryKeyRelatedField for strict ID validation
-    partner = serializers.PrimaryKeyRelatedField(
+    # P1-8: مقيّدان بشركة الطلب — سطر القيد اليدوي كان يقبل شريكاً/مركز
+    # كلفة من أي شركة (post_journal لا يتحقق من ذلك — SCALABILITY_AUDIT §4).
+    partner = TenantScopedPrimaryKeyRelatedField(
         queryset=Partner.objects.all(),
-        many=False, 
+        many=False,
         read_only=False,
-        required=False, 
+        required=False,
         allow_null=True
     )
-    cost_center = serializers.PrimaryKeyRelatedField(
+    cost_center = TenantScopedPrimaryKeyRelatedField(
         queryset=CostCenter.objects.all(),
         many=False,
         read_only=False,

@@ -7,6 +7,7 @@ from accounting.models import Account, Cheque
 from inventory.models import Product
 from partners.models import Partner
 from tenants.models import Currency
+from core.api_defaults import TenantScopedPrimaryKeyRelatedField
 from core.payments import (
     apply_default_cash_account,
     document_partner_balance_summary,
@@ -239,7 +240,8 @@ class SalesInvoiceSerializer(
         choices=SalesInvoice.INVOICE_KIND_CHOICES,
         default=SalesInvoice.INVOICE_KIND_SALE, required=False,
     )
-    original_invoice = serializers.PrimaryKeyRelatedField(
+    # P1-8: مقيّد بشركة الطلب — كان يقبل فاتورة أي شركة كأصلٍ للمرتجع.
+    original_invoice = TenantScopedPrimaryKeyRelatedField(
         queryset=SalesInvoice.objects.all(), required=False, allow_null=True,
     )
     original_invoice_number = serializers.CharField(
@@ -632,7 +634,8 @@ class CustomerPaymentSerializer(serializers.ModelSerializer):
 
     # T-DEFACC: الصندوق يُملأ من افتراضي الشركة حين لا يُرسَل — سند القبض
     # كان يُرفَض بـ«هذا الحقل مطلوب» في كل شاشة تنسى تمرير الحساب.
-    cash_or_bank_account = serializers.PrimaryKeyRelatedField(
+    # P1-8: مقيّد بشركة الطلب — كان يقبل حساب صندوق/بنك من أي شركة.
+    cash_or_bank_account = TenantScopedPrimaryKeyRelatedField(
         queryset=Account.objects.all(), required=False, allow_null=True,
     )
 

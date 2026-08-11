@@ -47,11 +47,14 @@ class TenantSettingsViewSet(viewsets.ModelViewSet):
     serializer_class = TenantSettingsSerializer
 
     def get_queryset(self):
+        # P1-7 (المرحلة 5): غياب الشركة كان يُرجِع إعدادات كل الشركات — نفس
+        # نمط ثغرة task11 M7. .none() عند الغياب، كبقية المشروع.
         tenant = get_tenant(self.request)
-        qs = TenantSettings.objects.select_related("currency", "default_freight_credit_account")
-        if tenant:
-            qs = qs.filter(tenant=tenant)
-        return qs
+        if not tenant:
+            return TenantSettings.objects.none()
+        return TenantSettings.objects.select_related(
+            "currency", "default_freight_credit_account"
+        ).filter(tenant=tenant)
 
     @action(detail=False, methods=["get", "put", "patch"], url_path="current")
     def current(self, request):
@@ -98,11 +101,12 @@ class TenantBookViewSet(viewsets.ModelViewSet):
     serializer_class = TenantBookSerializer
 
     def get_queryset(self):
+        # P1-7 (المرحلة 5): .none() عند غياب الشركة بدل إرجاع دفاتر الجميع.
         tenant = get_tenant(self.request)
-        qs = TenantBook.objects.all().order_by("document_type", "book_number")
-        if tenant:
-            qs = qs.filter(tenant=tenant)
-        return qs
+        if not tenant:
+            return TenantBook.objects.none()
+        return TenantBook.objects.filter(tenant=tenant).order_by(
+            "document_type", "book_number")
 
     def list(self, request, *args, **kwargs):
         """Plain list (no pagination)."""

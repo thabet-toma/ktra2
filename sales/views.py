@@ -747,9 +747,11 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        # P1-7 (المرحلة 5): .none() عند غياب الشركة بدل إرساليات كل الشركات.
         tenant = get_tenant(self.request)
-        if tenant:
-            qs = qs.filter(tenant_id=tenant.TenantID)
+        if not tenant:
+            return qs.none()
+        qs = qs.filter(tenant_id=tenant.TenantID)
         invoice_id = self.request.query_params.get("invoice")
         if invoice_id:
             qs = qs.filter(invoice_id=invoice_id)
@@ -1562,11 +1564,13 @@ class CreditDebitNoteViewSet(viewsets.ModelViewSet):
     serializer_class = CreditDebitNoteSerializer
 
     def get_queryset(self):
+        # P1-7 (المرحلة 5): .none() عند غياب الشركة بدل إشعارات كل الشركات.
         tenant = get_tenant(self.request)
-        qs = CreditDebitNote.objects.select_related("customer", "related_invoice", "journal")
-        if tenant:
-            qs = qs.filter(tenant=tenant)
-        return qs.order_by("-note_date", "-id")
+        if not tenant:
+            return CreditDebitNote.objects.none()
+        return CreditDebitNote.objects.select_related(
+            "customer", "related_invoice", "journal"
+        ).filter(tenant=tenant).order_by("-note_date", "-id")
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)

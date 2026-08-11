@@ -15,6 +15,7 @@ from core.payments import (
     document_partner_balance_summary,
     document_payment_summary,
 )
+from core.api_defaults import TenantScopedPrimaryKeyRelatedField
 from core.tenant_utils import get_tenant
 
 from logistics.services import purchase_invoice_payment_summary
@@ -172,7 +173,8 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
         source='cash_or_bank_account.name', read_only=True, default=None,
     )
     # T-DEFACC: اختياري في الإدخال — `validate` يملؤه من افتراضي الشركة.
-    cash_or_bank_account = serializers.PrimaryKeyRelatedField(
+    # P1-8: مقيّد بشركة الطلب — كان يقبل حساب صندوق/بنك من أي شركة.
+    cash_or_bank_account = TenantScopedPrimaryKeyRelatedField(
         queryset=Account.objects.all(), required=False, allow_null=True,
     )
     # T-ONACC: التوزيع على فواتير الشراء + المتبقّي «على الحساب» (مرآة سند القبض).

@@ -18,6 +18,10 @@ from .serializers import (
 
 
 class TenantScopedViewSet(viewsets.ModelViewSet):
+    """P1-7 (المرحلة 5): الصنف كان يوفّر ‎_tenant()‎ فقط ويترك الفلترة للوارث
+    بنمط ‎filter(tenant=None)‎ الهش عند غياب الشركة (يُرجِع صفوف tenant IS NULL
+    اليتيمة بدل لا شيء). كل ‎get_queryset‎ وارث يبدأ الآن بحارس ‎.none()‎."""
+
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
 
@@ -30,6 +34,8 @@ class BuildingViewSet(TenantScopedViewSet):
 
     def get_queryset(self):
         tenant = self._tenant()
+        if tenant is None:
+            return Building.objects.none()
         qs = Building.objects.filter(tenant=tenant).annotate(units_count=Count("units", distinct=True))
         main_sub = (
             ElectricMeter.objects.filter(
@@ -50,6 +56,8 @@ class RentalUnitViewSet(TenantScopedViewSet):
 
     def get_queryset(self):
         tenant = self._tenant()
+        if tenant is None:
+            return RentalUnit.objects.none()
         qs = RentalUnit.objects.filter(building__tenant=tenant).select_related("building")
         bid = self.request.query_params.get("building")
         if bid:
@@ -62,6 +70,8 @@ class LeaseViewSet(TenantScopedViewSet):
 
     def get_queryset(self):
         tenant = self._tenant()
+        if tenant is None:
+            return Lease.objects.none()
         qs = Lease.objects.filter(unit__building__tenant=tenant).select_related("unit", "unit__building")
         bid = self.request.query_params.get("building")
         uid = self.request.query_params.get("unit")
@@ -77,6 +87,8 @@ class ElectricMeterViewSet(TenantScopedViewSet):
 
     def get_queryset(self):
         tenant = self._tenant()
+        if tenant is None:
+            return ElectricMeter.objects.none()
         qs = ElectricMeter.objects.filter(building__tenant=tenant).select_related(
             "building", "rental_unit"
         )
@@ -96,6 +108,8 @@ class MeterReadingViewSet(TenantScopedViewSet):
 
     def get_queryset(self):
         tenant = self._tenant()
+        if tenant is None:
+            return MeterReading.objects.none()
         qs = MeterReading.objects.filter(meter__building__tenant=tenant).select_related(
             "meter", "meter__rental_unit"
         )
