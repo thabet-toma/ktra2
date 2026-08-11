@@ -135,3 +135,29 @@ class DealPaymentUnpostCycleTest(APITestCase):
             account=self.partner.linked_account,
         ).aggregate(d=Sum("debit"), c=Sum("credit"))
         self.assertEqual(agg["d"] - agg["c"], D("3500.00"))
+
+    def test_deal_unpost_after_cycle_leaves_no_dangling_reversal(self):
+        """مراجعة 2026-08-11: إلغاء ترحيل الصفقة بعد دورة (ترحيل→إلغاء→إعادة)
+        يجب أن يحذف القيد العكسي LOGISTICS_PAYMENT_UNPOST أيضاً، وإلا بقي
+        معلّقاً وحده بأثر وهمي على الدفاتر المرحّلة."""
+        pay = self._payment()
+        self.assertEqual(self._post(pay).status_code, 200)
+        self.assertEqual(self._unpost(pay).status_code, 200)
+        pay.refresh_from_db(); pay.status = "Confirmed"
+        pay.save(update_fields=["status"])
+        self.assertEqual(self._post(pay).status_code, 200)
+        # الآن: LOGISTICS_PAYMENT ×2 مرحّلان + LOGISTICS_PAYMENT_UNPOST ×1 مرحّل
+        self.assertTrue(JournalHeader.objects.filter(
+            reference_type="LOGISTICS_PAYMENT_UNPOST", reference_id=pay.id).exists())
+
+        resp = self.client.post(
+            f"/api/logistics/deals/{self.deal.pk}/unpost/", {}, format="json", **self._auth())
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+        # لا يبقى أي قيد للدفعة — لا أصلي ولا عكسي معلّق
+        self.assertFalse(JournalHeader.objects.filter(
+            reference_id=pay.id,
+            reference_type__in=["LOGISTICS_PAYMENT", "LOGISTICS_PAYMENT_UNPOST"],
+        ).exists())
+        pay.refresh_from_db()
+        self.assertFalse(pay.is_posted)

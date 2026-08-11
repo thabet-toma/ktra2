@@ -148,25 +148,19 @@ class MapperIsolationTest(APITestCase):
         res = self.client.get("/api/mapper/invoices/")
         self.assertEqual(res.status_code, 403)
 
-    # ── الجلسة الأمنية 2026-08-11 — P0-3: الحضور/النقاط/الأقسام مُنطاقة الآن ──
-    def test_attendance_collections_are_tenant_scoped(self):
-        """كانت attendanceRecords عالمية ⇒ مقروءة عبر كل الشركات. الآن مُنطاقة."""
+    # ── الحضور مجموعة عالمية (تسريب P0-3 مؤجَّل — راجع bridge/views.py) ──
+    def test_attendance_collection_stays_global(self):
+        """attendanceRecords عالمية عمداً حتى تُنفَّذ هجرة النسبة الصحيحة —
+        تقييدها كان يمحو تاريخ الشركات ويكسر الصفحة العامة. تبقى مقروءة عبر
+        الشركات (تسريب موثّق) لكن الوثيقة اليتيمة لا تُتبنّى (P0-4 منفصل)."""
         FirestoreMirrorDoc.objects.create(
-            path="attendanceRecords/rec-a",
-            data={"id": "rec-a", "userId": "7"}, tenant=self.tenant_a)
-
-        # شركة B لا ترى سجل حضور شركة A
+            path="attendanceRecords/rec-a", data={"id": "rec-a", "userId": "7"}, tenant=None)
         self._as(self.token_b, self.tenant_b.TenantID)
-        self.assertEqual(self.client.get("/api/mapper/attendanceRecords/").json(), [])
-        self.assertEqual(
-            self.client.get("/api/mapper/attendanceRecords/rec-a/").status_code, 404)
-
-        # شركة A ترى سجلها
-        self._as(self.token_a, self.tenant_a.TenantID)
+        # عالمية ⇒ مقروءة من أي شركة (السلوك القائم، غير مقيَّد بعد)
         ids = [r["id"] for r in self.client.get("/api/mapper/attendanceRecords/").json()]
         self.assertIn("rec-a", ids)
 
-    # ── P0-4: الوثائق اليتيمة (tenant NULL) لا تُقرأ ولا تُتبنّى ──
+    # ── P0-4: الوثائق اليتيمة المُنطاقة (tenant NULL) لا تُقرأ ولا تُتبنّى ──
     def test_orphan_scoped_doc_is_not_readable(self):
         FirestoreMirrorDoc.objects.create(
             path="invoices/orphan", data={"id": "orphan", "total": 5}, tenant=None)

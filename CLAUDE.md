@@ -58,7 +58,7 @@
 ### قواعد Django
 - استخدم `core.test_settings` في الاختبارات
 - الـ migrations في مجلد `migrations/` داخل كل app
-- الـ models والـ views والـ serializers والـ services في **جذر كل app** (`sales/views.py`) — لا مجلد `api/`
+- الـ models والـ views والـ serializers والـ services في **جذر كل app** (`sales/views.py`) — لا مجلد `api/`. استثناء (المرحلة 3): الملفات التي كبرت جداً صارت **حِزَماً** بنفس الاسم في نفس الموضع (`logistics/views/`، `sales/services/`، `logistics/serializers/`، `core/reports/`) مع `__init__.py` يعيد تصدير كل الأسماء العامة — لا تُعِدها ملفاتٍ مفردة، وأضف الكود الجديد لوحدة الدومين المناسبة داخل الحزمة
 - الاختبارات في `<app>/tests/`
 - **كل قيد محاسبي يمرّ عبر `accounting.services.post_journal`** — لا كتابة مباشرة لـ`JournalHeader`/`JournalLine`
 - **كل تغيير مخزون يمرّ عبر `inventory.services.record_stock_movement`**

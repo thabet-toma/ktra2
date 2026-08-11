@@ -14,22 +14,34 @@ from .models import FirestoreMirrorDoc
 
 logger = logging.getLogger(__name__)
 
-# Collections that are NOT company-scoped (auth / public content only).
+# Collections that are NOT company-scoped (auth / HR / public content).
 # Everything else stored through /api/mapper/ belongs to exactly one company.
 # task11 M7: «tasks» أصبحت tenant-scoped — كانت global فظهرت مهام الشركة
 # القديمة في الصفحة الرئيسية لأي شركة جديدة.
-# الجلسة الأمنية 2026-08-11 (P0-3): أُخرجت بيانات الحضور والنقاط والأقسام من
-# القائمة العالمية — كانت مقروءة عبر كل الشركات لأي مستخدم. الواجهة تقرأها من
-# Firebase مباشرةً لا من الـmapper، فالنسخة هنا دفاعية والتقييد بلا كسر مستهلك.
+#
+# ⚠️ تسريب عزل معروف (مؤجَّل عمداً — راجع docs/SCALABILITY_AUDIT.md P0-3):
+# attendanceSessions/attendanceRecords/pointsHistory عالمية ⇒ مقروءة عبر كل
+# الشركات. محاولة تقييدها في الجلسة الأمنية (2026-08-11) رُوجعت لأن الواجهة
+# تقرأ هذه المجموعات عبر الـmapper نفسه (`services/sqlApiClient.ts` — عميل
+# Firestore-شكلاً على `/api/mapper/`، لا Firebase)، وتقييدها كان:
+#   (أ) يكسر صفحة «تواصل معنا» العامة (تقرأ departments بلا سياق شركة)،
+#   (ب) والهجرة التي تنسب اليتيمة لشركة #1 تمحو تاريخ حضور/نقاط بقية الشركات.
+# الإصلاح الصحيح = هجرة تنسب كل وثيقة لشركة مالكها الحقيقي (عبر userId ↔
+# UserCompanyMembership) ثم التقييد — جلسة بيانات مستقلة، لا تغيير تهيئة سطر.
 GLOBAL_COLLECTIONS = {
     'users',
+    'attendanceSessions',
+    'attendanceRecords',
+    'pointsHistory',
     'publicGallery',
+    'departments',
     'aboutLinks',
 }
 
 # Collections that can be read by unauthenticated users (GET only)
 PUBLIC_COLLECTIONS = {
     'publicGallery',
+    'departments',
     'aboutLinks',
 }
 

@@ -447,7 +447,11 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                     r = unpost_document(
                         tenant_id=deal.tenant_id,
                         reference_id=pay.id,
-                        journal_reference_types=['LOGISTICS_PAYMENT'],
+                        # يُحذف قيد الدفعة وأي قيود عكسية مرحّلة من دورات إلغاء/إعادة
+                        # سابقة (نمط العكس صار يُبقي الأصل مرحّلاً — 3358bf7)؛ بلا
+                        # LOGISTICS_PAYMENT_UNPOST يبقى القيد العكسي معلّقاً وحده
+                        # فيُحدث أثراً وهمياً. مطابق لـpurge_deals.py.
+                        journal_reference_types=['LOGISTICS_PAYMENT', 'LOGISTICS_PAYMENT_UNPOST'],
                         user=request.user,
                         document_label=f"دفعة صفقة {deal.ref_number}",
                     )

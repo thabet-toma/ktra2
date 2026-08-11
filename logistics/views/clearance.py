@@ -205,7 +205,12 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                     r = unpost_document(
                         tenant_id=clearance.tenant_id,
                         reference_id=pay.id,
-                        journal_reference_types=['CLEARANCE_PAYMENT', 'LOGISTICS_CLEARANCE_PAYMENT'],
+                        # يشمل القيد العكسي CLEARANCE_PAYMENT_UNPOST كي لا يبقى
+                        # معلّقاً وحده بأثر وهمي (نمط العكس يُبقي الأصل مرحّلاً).
+                        journal_reference_types=[
+                            'CLEARANCE_PAYMENT', 'LOGISTICS_CLEARANCE_PAYMENT',
+                            'CLEARANCE_PAYMENT_UNPOST',
+                        ],
                         user=request.user,
                         document_label=f"دفعة تخليص #{clearance.id}",
                     )

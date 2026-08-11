@@ -9,8 +9,14 @@
 # هذه تبقى tenant=NULL عمداً (مصادقة/محتوى عام).
 from django.db import migrations
 
-# يجب أن تطابق GLOBAL_COLLECTIONS في bridge/views.py بعد P0-3.
-_GLOBAL_ROOTS = {'users', 'publicGallery', 'aboutLinks'}
+# يجب أن تطابق GLOBAL_COLLECTIONS في bridge/views.py — المجموعات العالمية
+# (تبقى tenant=NULL عمداً) تُستثنى من النسبة. تشمل الحضور/النقاط/الأقسام لأن
+# تقييدها رُوجع (راجع تعليق P0-3 في bridge/views.py) — نسبتها لشركة #1 كان
+# سيمحو تاريخ بقية الشركات.
+_GLOBAL_ROOTS = {
+    'users', 'attendanceSessions', 'attendanceRecords', 'pointsHistory',
+    'publicGallery', 'departments', 'aboutLinks',
+}
 
 
 def attribute_orphans(apps, schema_editor):

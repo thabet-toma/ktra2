@@ -102,7 +102,28 @@ def _validate_sql(sql: str) -> str | None:
         return "مسموح فقط باستعلامات SELECT."
     if stmt.find(exp.Into) is not None:
         return "INTO غير مسموح في استعلامات القراءة."
+    # FOR UPDATE / LOCK IN SHARE MODE يأخذ أقفالاً على صفوف — ممنوع على نقطة قراءة.
+    lock_type = getattr(exp, "Lock", None)
+    if lock_type is not None and stmt.find(lock_type) is not None:
+        return "FOR UPDATE / قفل الصفوف غير مسموح — النقطة للقراءة فقط."
     return None
+
+
+def _enforce_row_cap(sql: str) -> str:
+    """يضمن سقف الصفوف بنيوياً (لا نصّياً): إن لم يكن للاستعلام LIMIT علوي،
+    يُغلَّف في استعلام فرعي بسقف — فلا يتجاوزه تعليق سطري لاحق ولا FOR UPDATE.
+    (الإلحاق النصّي القديم كان يُبتلع داخل `-- comment` أو يكسر ترتيب FOR UPDATE.)
+    """
+    import sqlglot
+    try:
+        stmt = sqlglot.parse_one(sql, read="mysql")
+    except Exception:
+        stmt = None
+    has_top_limit = stmt is not None and stmt.args.get("limit") is not None
+    if has_top_limit:
+        return sql
+    # سطر جديد قبل الإغلاق يُنهي أي تعليق سطري زائف داخل الاستعلام.
+    return f"SELECT * FROM (\n{sql.rstrip(';')}\n) AS _agent_capped LIMIT {MAX_ROWS}"
 
 
 @api_view(["POST"])
@@ -133,9 +154,8 @@ def agent_query(request):
     if err:
         return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ─── إضافة LIMIT تلقائية إن لم تكن موجودة ───
-    if not re.search(r'\bLIMIT\b', sql, re.IGNORECASE):
-        sql = f"{sql.rstrip(';')} LIMIT {MAX_ROWS}"
+    # ─── فرض سقف الصفوف بنيوياً (comment-proof) ───
+    sql = _enforce_row_cap(sql)
 
     try:
         with connection.cursor() as cursor:
