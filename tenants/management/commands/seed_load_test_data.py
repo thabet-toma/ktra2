@@ -46,6 +46,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 COMPANY_PREFIX = "LOADTEST"
+#: تُنشئها هجرة `tenants/migrations/0005_backfill_default_company.py` على كل قاعدة.
+DEFAULT_TENANT_NAME = "Default Company"
 COMPANY_NAME_TEMPLATE = COMPANY_PREFIX + " — شركة {n}"
 USER_EMAIL_TEMPLATE = "loadtest+t{n}@ktra.invalid"
 SAFE_DB_MARKERS = ("loadtest", "load_test")
@@ -169,8 +171,13 @@ class Command(BaseCommand):
             )
 
         # الحارس الحقيقي: أي بيانات ليست من صنع هذا الأمر ⇒ توقف.
+        # استثناء واحد: «Default Company» تُنشئها هجرات جانغو نفسها
+        # (`tenants/migrations/0005_backfill_default_company.py`) على **كل** قاعدة،
+        # فبدونه كانت القاعدة النظيفة — وهي بالضبط الحالة التي بُني هذا الحارس
+        # ليسمح بها — مرفوضةً بالتعريف (P1-16). ليست بيانات مستخدمين فلا تحمي شيئاً.
         foreign_tenants = list(
             Tenant.objects.exclude(CompanyName__startswith=COMPANY_PREFIX)
+            .exclude(CompanyName=DEFAULT_TENANT_NAME)
             .values_list("TenantID", "CompanyName")[:5]
         )
         if foreign_tenants:

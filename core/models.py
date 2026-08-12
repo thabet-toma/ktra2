@@ -12,7 +12,13 @@ class SystemAttachment(models.Model):
 
     class Meta:
         db_table = 'system_attachments'
-        managed = False
+        # كان `managed = False` — النموذج الوحيد كذلك في المشروع (P0-14).
+        # الأثر لم يكن نظرياً: جانغو يسجّل `core.0001_initial` مطبَّقةً ولا يُصدِر
+        # CREATE TABLE لنموذج غير مُدار، فأي قاعدة مبنيّة من الهجرات تنفجر
+        # بـ(1146) عند أول لمسة للجدول — والإنتاج نجا لأن جدوله أُنشئ يدوياً
+        # خارج جانغو. وأسوأ من ذلك: مُكتشِف الهجرات **يتجاهل حقول** النماذج غير
+        # المُدارة، فحقل `tenant` أعلاه عاش خارج الهجرة تماماً.
+        managed = True
 
 
 class ActivityLog(models.Model):

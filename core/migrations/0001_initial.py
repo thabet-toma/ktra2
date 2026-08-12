@@ -24,10 +24,17 @@ class Migration(migrations.Migration):
                 ('file_type', models.CharField(blank=True, db_column='FileType', max_length=50, null=True)),
                 ('file_path', models.CharField(db_column='FilePath', max_length=500)),
                 ('uploaded_at', models.DateTimeField(auto_now_add=True, db_column='UploadedAt')),
+                # `tenant` كان غائباً عن هذه الهجرة رغم وجوده في النموذج منذ
+                # البداية: مُكتشِف الهجرات لا يتتبّع حقول النماذج غير المُدارة،
+                # فقلبُ managed وحده كان سيُنشئ جدولاً بلا عمود TenantID (P0-14).
+                ('tenant', models.ForeignKey(db_column='TenantID', on_delete=django.db.models.deletion.CASCADE, to='tenants.tenant')),
             ],
             options={
                 'db_table': 'system_attachments',
-                'managed': False,
+                # آمن على الإنتاج: هذه الهجرة مسجَّلة في django_migrations فلا
+                # تُنفَّذ ثانيةً — الأثر محصور في البناء من صفر. نفس النمط
+                # المطبَّق سلفاً على partners و tenants.
+                'managed': True,
             },
         ),
         migrations.CreateModel(
