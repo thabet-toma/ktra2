@@ -158,6 +158,12 @@ ignore_imports =
     sales.management.commands.fix_legacy_cash_partner_tags -> accounting.models
     tenants.services -> accounting.models
     tenants.management.commands.heal_company_seed -> accounting.models
+    # 2026-08-12: أمر تهيئة بيانات اختبار الحمل — نفس فئة `heal_company_seed`
+    # أعلاه (تهيئة شركة تبني صفوف شجرة حسابات). كل القراءات حُوِّلت إلى
+    # `accounting.api.get_account_by_code`؛ الباقي إنشاءُ حساب 5101 وTaxRate
+    # ولا دالة إنشاء عامة لهما. أُضيف السطر بعد أن أظهرته أول تشغيلة CI على
+    # `newktra` — دخل في 25417c8 بعد كتابة الـbaseline فلم يره أحد.
+    tenants.management.commands.seed_load_test_data -> accounting.models
 
 # ─────────────────────────────────────────────────────────────────────────────
 # العقد 3 — الاتجاه المعكوس: inventory لا يعتمد على sales/logistics

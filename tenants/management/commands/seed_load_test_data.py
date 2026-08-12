@@ -210,6 +210,9 @@ class Command(BaseCommand):
 
     # ── شركة واحدة ────────────────────────────────────────────────────────
     def _seed_tenant(self, n: int, currency, uom, opt) -> dict:
+        from accounting.api import get_account_by_code
+        # القراءة عبر الواجهة العامة؛ ويبقى `Account` للإنشاء وحده (5101) —
+        # لا توجد دالة إنشاء عامة، وهذا أمر تهيئة لا مسار طلبٍ إنتاجي.
         from accounting.models import Account
         from accounting.services import create_fiscal_year
         from inventory.models import Warehouse
@@ -232,7 +235,7 @@ class Command(BaseCommand):
         call_command("heal_company_seed", tenant=tenant.TenantID, verbosity=0)
 
         # 2) حساب COGS ورقي تحت «51» (الشجرة القياسية تعطي الأب فقط)
-        parent_51 = Account.objects.filter(tenant=tenant, code="51").first()
+        parent_51 = get_account_by_code(tenant, "51")
         if parent_51:
             Account.objects.get_or_create(
                 tenant=tenant, code="5101",
@@ -297,9 +300,10 @@ class Command(BaseCommand):
 
     # ── لبنات ─────────────────────────────────────────────────────────────
     def _ensure_tax_rate(self, tenant):
-        from accounting.models import Account, TaxRate
+        from accounting.api import get_account_by_code
+        from accounting.models import TaxRate
 
-        vat_out = Account.objects.filter(tenant=tenant, code="2104").first()
+        vat_out = get_account_by_code(tenant, "2104")
         if vat_out is None:
             return None
         tax_rate, _ = TaxRate.objects.get_or_create(
@@ -327,12 +331,12 @@ class Command(BaseCommand):
         return user
 
     def _ensure_categories(self, tenant):
-        from accounting.models import Account
+        from accounting.api import get_account_by_code
         from inventory.models import ProductCategory
 
-        revenue = Account.objects.filter(tenant=tenant, code="4101").first()
-        cogs = Account.objects.filter(tenant=tenant, code="5101").first()
-        inventory = Account.objects.filter(tenant=tenant, code="1104").first()
+        revenue = get_account_by_code(tenant, "4101")
+        cogs = get_account_by_code(tenant, "5101")
+        inventory = get_account_by_code(tenant, "1104")
         out = []
         for cname in CATEGORY_NAMES:
             category, _ = ProductCategory.objects.get_or_create(
