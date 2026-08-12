@@ -10,6 +10,9 @@ export interface SalesPrintData {
   invoiceDate: string;
   dueDate: string;
   invoiceType: "cash" | "credit";
+  /** T-RETURNUI: مرجع بيع — ترويسة «مرجع بيع / إشعار دائن» وإخفاء أقسام الدفع. */
+  isReturn?: boolean;
+  originalInvoiceNumber?: string | null;
   customer?: PartnerRow;
   lines: DraftLine[];
   productsById: Map<number, ProductRow>;
@@ -72,7 +75,7 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
 
             <div className="fixed top-4 right-4 flex gap-2 no-print z-[60]">
                 <button onClick={handlePrint} className="flex items-center gap-2 aseel-bg-panel text-white px-4 py-2 rounded-full shadow-lg hover:aseel-bg-panel font-bold text-sm border aseel-border-soft">
-                    <Printer size={16} /> طباعة الفاتورة
+                    <Printer size={16} /> {data.isReturn ? 'طباعة المرجع' : 'طباعة الفاتورة'}
                 </button>
 
                 <button onClick={onClose} className="flex items-center gap-2 aseel-bg-field aseel-text-ink px-4 py-2 rounded-full shadow-lg hover:aseel-bg-panel border aseel-border-soft font-bold text-sm">
@@ -104,13 +107,18 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                                     {[identity?.address, identity?.phone && `هاتف: ${identity.phone}`].filter(Boolean).join(' — ')}
                                 </div>
                             )}
-                            <h1 className={`font-black aseel-text-ink leading-none ${identity?.company_name_primary ? 'text-base mt-1' : 'text-2xl'}`}>فاتورة مبيعات</h1>
-                            <p className="text-xs font-bold aseel-text-soft mt-1">SALES INVOICE</p>
+                            <h1 className={`font-black leading-none ${data.isReturn ? 'text-red-700' : 'aseel-text-ink'} ${identity?.company_name_primary ? 'text-base mt-1' : 'text-2xl'}`}>
+                                {data.isReturn ? 'مرجع بيع / إشعار دائن' : 'فاتورة مبيعات'}
+                            </h1>
+                            <p className="text-xs font-bold aseel-text-soft mt-1">{data.isReturn ? 'SALES RETURN / CREDIT NOTE' : 'SALES INVOICE'}</p>
                         </div>
                     </div>
 
                     <div className="text-left text-xs space-y-1">
-                        <div className="flex gap-2 justify-end"><span className="font-bold aseel-text-ink text-sm">{data.invoiceNumber || 'مسودة'}</span> <span className="aseel-text-soft">رقم الفاتورة:</span></div>
+                        <div className="flex gap-2 justify-end"><span className="font-bold aseel-text-ink text-sm">{data.invoiceNumber || 'مسودة'}</span> <span className="aseel-text-soft">{data.isReturn ? 'رقم المرجع:' : 'رقم الفاتورة:'}</span></div>
+                        {data.isReturn && data.originalInvoiceNumber && (
+                            <div className="flex gap-2 justify-end"><span className="font-bold aseel-text-ink" dir="ltr">{data.originalInvoiceNumber}</span> <span className="aseel-text-soft">مرجع للفاتورة:</span></div>
+                        )}
                         <div className="flex gap-2 justify-end"><span className="font-medium aseel-text-ink">{formatDate(data.invoiceDate)}</span> <span className="aseel-text-soft">التاريخ:</span></div>
                         <div className="flex gap-2 justify-end"><span className="font-medium aseel-text-ink">{data.currentUserName || '-'}</span> <span className="aseel-text-soft">المستخدم:</span></div>
                     </div>
@@ -132,8 +140,14 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                             <span className="font-bold flex items-center gap-1.5"><FileText size={14} /> تفاصيل إضافية</span>
                         </div>
                         <div className="p-3 space-y-2">
-                            <div className="flex justify-between"><span className="aseel-text-soft">نوع الفاتورة:</span> <span className="font-bold">{data.invoiceType === 'cash' ? 'نقدي' : 'ذمم'}</span></div>
-                            <div className="flex justify-between"><span className="aseel-text-soft">تاريخ الاستحقاق:</span> <span className="font-bold">{formatDate(data.dueDate)}</span></div>
+                            {data.isReturn ? (
+                                <div className="flex justify-between"><span className="aseel-text-soft">نوع المستند:</span> <span className="font-bold text-red-700">مرجع بيع</span></div>
+                            ) : (
+                                <>
+                                    <div className="flex justify-between"><span className="aseel-text-soft">نوع الفاتورة:</span> <span className="font-bold">{data.invoiceType === 'cash' ? 'نقدي' : 'ذمم'}</span></div>
+                                    <div className="flex justify-between"><span className="aseel-text-soft">تاريخ الاستحقاق:</span> <span className="font-bold">{formatDate(data.dueDate)}</span></div>
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -194,21 +208,26 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                                 </div>
                             )}
                             <div className="flex justify-between pt-2 font-black text-lg aseel-bg-panel -mx-3 px-3 border-t aseel-border-soft text-white">
-                                <span>الإجمالي:</span>
+                                <span>{data.isReturn ? 'إجمالي المرجوع:' : 'الإجمالي:'}</span>
                                 <span className="font-mono" dir="ltr">{formatMoney(data.totals.grandTotal)} {curr}</span>
                             </div>
-                            <div className="flex justify-between pt-1.5">
-                                <span className="aseel-text-soft">المدفوع المرحّل:</span>
-                                <span className="font-mono font-bold" dir="ltr">{formatMoney(data.amountPaid)} {curr}</span>
-                            </div>
-                            <div className="flex justify-between pt-1.5">
-                                <span className="aseel-text-soft">المتبقي:</span>
-                                <span className="font-mono font-bold" dir="ltr">{formatMoney(data.remainingBalance)} {curr}</span>
-                            </div>
-                            <div className="flex justify-between pt-1.5">
-                                <span className="aseel-text-soft">حالة الدفع:</span>
-                                <span className="font-bold">{data.paymentStatusDisplay}</span>
-                            </div>
+                            {/* T-RETURNUI: الدفع مفهوم فاتورة — المرجع يخفّض ذمم العميل مباشرةً */}
+                            {!data.isReturn && (
+                                <>
+                                    <div className="flex justify-between pt-1.5">
+                                        <span className="aseel-text-soft">المدفوع المرحّل:</span>
+                                        <span className="font-mono font-bold" dir="ltr">{formatMoney(data.amountPaid)} {curr}</span>
+                                    </div>
+                                    <div className="flex justify-between pt-1.5">
+                                        <span className="aseel-text-soft">المتبقي:</span>
+                                        <span className="font-mono font-bold" dir="ltr">{formatMoney(data.remainingBalance)} {curr}</span>
+                                    </div>
+                                    <div className="flex justify-between pt-1.5">
+                                        <span className="aseel-text-soft">حالة الدفع:</span>
+                                        <span className="font-bold">{data.paymentStatusDisplay}</span>
+                                    </div>
+                                </>
+                            )}
                             <div className="flex justify-between pt-1.5">
                                 <span className="aseel-text-soft">رصيد العميل قبل احتساب المتبقي (بالعملة الأساسية):</span>
                                 <span className="font-mono font-bold" dir="ltr">{formatMoney(data.customerBalanceBeforeInvoice)}</span>
@@ -225,7 +244,7 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                     </div>
                 </div>
 
-                {data.paymentDetails.length > 0 && (
+                {!data.isReturn && data.paymentDetails.length > 0 && (
                     <div className="mb-4 border aseel-border-soft rounded-lg overflow-hidden">
                         <div className="aseel-bg-panel px-3 py-2 border-b aseel-border-soft font-bold">تفاصيل سندات القبض</div>
                         <table className="w-full text-[10px]">

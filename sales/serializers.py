@@ -193,6 +193,8 @@ class SalesInvoiceListSerializer(
         fields = [
             "id",
             "invoice_number",
+            # T-RETURNUI: القائمة تميّز مرجع البيع عن الفاتورة (شارة/فلتر).
+            "invoice_kind",
             "customer",
             "customer_name",
             "invoice_date",

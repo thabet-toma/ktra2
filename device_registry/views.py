@@ -100,7 +100,8 @@ def _audit(request, tenant, action_key, *, device=None, details=None) -> None:
         action=mirrored_action,
         entity_type="sensitive_device",
         entity_id=getattr(device, "pk", None),
-        entity_label=getattr(device, "imei", "") or "",
+        # IMEI صار اختيارياً — السجل بلا IMEI يُعنون برقمه التسلسلي.
+        entity_label=getattr(device, "imei", "") or getattr(device, "serial_number", "") or "",
         description=description,
         metadata=details or {},
         request=request,
@@ -185,6 +186,9 @@ class SensitiveDeviceViewSet(viewsets.ModelViewSet):
 
     def _duplicate_matches(self, imei, exclude_id=None):
         """التكرار داخل الشركة وعلى السجلات الحيّة فقط — فحصٌ عابر للشركات تسريب."""
+        # IMEI اختياري: فراغ يطابق كل السجلات الفارغة — ليس تكراراً بل ضجيج.
+        if not (imei or "").strip():
+            return []
         queryset = SensitiveDevice.objects.filter(tenant=self.tenant, imei=imei)
         if exclude_id:
             queryset = queryset.exclude(pk=exclude_id)

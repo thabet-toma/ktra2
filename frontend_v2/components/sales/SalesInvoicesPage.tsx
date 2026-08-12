@@ -413,10 +413,26 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     {
       key: "invoice_type",
       header: "النوع",
-      width: "60px",
+      width: "90px",
       align: "center",
       render: (r) => (
-        <span style={{ fontSize: "11px" }}>{r.invoice_type === "cash" ? "نقدي" : "آجل"}</span>
+        // T-RETURNUI: مرجع البيع يُميَّز بشارة حمراء — لا يُقرأ كفاتورة عادية.
+        r.invoice_kind === "sale_return" ? (
+          <span
+            style={{
+              fontSize: "11px",
+              fontWeight: 700,
+              color: "var(--aseel-err, #c0392b)",
+              border: "1px solid currentColor",
+              borderRadius: "4px",
+              padding: "0 4px",
+            }}
+          >
+            مرجع بيع
+          </span>
+        ) : (
+          <span style={{ fontSize: "11px" }}>{r.invoice_type === "cash" ? "نقدي" : "آجل"}</span>
+        )
       ),
     },
     {

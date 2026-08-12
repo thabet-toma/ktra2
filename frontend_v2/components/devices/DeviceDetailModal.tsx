@@ -110,7 +110,10 @@ export const DeviceDetailModal: React.FC<Props> = ({
     if (!isValidPhone(draft.customer_phone)) problems.push("رقم الهاتف غير صالح");
     if (!draft.model_name.trim()) problems.push("موديل الجهاز مطلوب");
     if (!draft.serial_number.trim()) problems.push("الرقم التسلسلي مطلوب");
-    if (imeiState(draft.imei) !== "valid") problems.push("رقم IMEI غير صالح (15 خانة تجتاز Luhn)");
+    // IMEI اختياري — الفراغ يمرّ، وما أُدخل يجب أن يكون 15 خانة تجتاز Luhn.
+    if (!["valid", "empty"].includes(imeiState(draft.imei))) {
+      problems.push("رقم IMEI غير صالح (15 خانة تجتاز Luhn) — أو اتركه فارغاً");
+    }
     return problems;
   }, [draft]);
 
@@ -163,7 +166,7 @@ export const DeviceDetailModal: React.FC<Props> = ({
     if (!device) return;
     const ok = await confirm({
       title: "حذف سجل الجهاز",
-      message: `سيُخفى سجل «${device.model_name}» (IMEI ${device.imei}) من القائمة، ويبقى محفوظاً في قاعدة البيانات مع أثره الكامل ويمكن استرجاعه. الحذف النهائي غير متاح في هذه الوحدة.`,
+      message: `سيُخفى سجل «${device.model_name}» (${device.imei ? `IMEI ${device.imei}` : `SN ${device.serial_number}`}) من القائمة، ويبقى محفوظاً في قاعدة البيانات مع أثره الكامل ويمكن استرجاعه. الحذف النهائي غير متاح في هذه الوحدة.`,
       confirmText: "حذف السجل",
       cancelText: "تراجع",
       danger: true,
@@ -201,7 +204,7 @@ export const DeviceDetailModal: React.FC<Props> = ({
           <div className="flex min-w-0 items-center gap-2">
             <ShieldAlert className="h-5 w-5 shrink-0 text-[var(--color-primary)]" />
             <span className="truncate font-bold text-[var(--color-text)]">
-              {device ? `${device.model_name} — ${device.imei}` : "معاينة السجل"}
+              {device ? `${device.model_name} — ${device.imei || device.serial_number}` : "معاينة السجل"}
             </span>
           </div>
           <button

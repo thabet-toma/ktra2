@@ -297,6 +297,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   // T-SLINEAGE: المستند الأب (طلبية/عرض) — يُعرض في بيانات المستند برابط يفتحه.
   const [sourceDocument, setSourceDocument] =
     useState<SalesInvoiceDetail["source_document"]>(null);
+  // T-RETURNUI: مرجع البيع يُفتح من نفس المحرر لكنه مستند مختلف — عنوان وشارة
+  // ورابط للفاتورة الأصلية، وأقسام الدفع/التسليم لا تنطبق عليه.
+  const [invoiceKind, setInvoiceKind] = useState<string>("sale");
+  const [originalInvoiceId, setOriginalInvoiceId] = useState<number | null>(null);
+  const [originalInvoiceNumber, setOriginalInvoiceNumber] = useState<string | null>(null);
+  const isReturn = invoiceKind === "sale_return";
   const [creatingReceipt, setCreatingReceipt] = useState(false);
   // T-ONACC: نافذة «تسديد» — تسدّد الفاتورة من رصيد العميل على الحساب أو تفتح سنداً جديداً.
   const [showSettleModal, setShowSettleModal] = useState(false);
@@ -775,6 +781,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setCustomerBalanceAfterInvoice(Number(d.customer_balance_after_invoice || 0));
     setPaymentDetails(d.payment_details || []);
     setSourceDocument(d.source_document ?? null);
+    setInvoiceKind(d.invoice_kind || "sale");
+    setOriginalInvoiceId(d.original_invoice ?? null);
+    setOriginalInvoiceNumber(d.original_invoice_number ?? null);
     setProductPickerLineKey(null);
     setTaxEditKey(null);
     setTaxPercentDraft({});
@@ -1293,6 +1302,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setCustomerBalanceAfterInvoice(0);
     setPaymentDetails([]);
     setSourceDocument(null);
+    setInvoiceKind("sale");
+    setOriginalInvoiceId(null);
+    setOriginalInvoiceNumber(null);
     // تطبيق العميل الافتراضي من الإعدادات
     setCustomerId(salesSettings?.default_customer ?? "");
     setInvDate(new Date().toISOString().slice(0, 10));
@@ -2322,7 +2334,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       disabled: isPosted,
       danger: true,
     },
-    ...(canPerm("sales.payment.create") && (isPosted || invoicePermissions.canSaveAndPost) ? [{
+    // T-RETURNUI: التحصيل والتسليم مفاهيم فاتورة البيع — لا تُعرض على مرجع.
+    ...(!isReturn && canPerm("sales.payment.create") && (isPosted || invoicePermissions.canSaveAndPost) ? [{
       // T-ONEPAY: زر واحد للتحصيل في كل الحالات — على المسودة يحفظ ويرحّل ثم
       // يفتح السند، وعلى المرحّلة يفتح النافذة الذكية (رصيد على الحساب أولاً،
       // ثم سند جديد بنقد و/أو شيكات).
@@ -2342,14 +2355,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     } as AseelToolbarAction] : []),
     // التسليم: نافذة سريعة تُنشئ إرسالية بالبنود المؤشَّرة، أو المحرّر الكامل
     // في شاشة الإرساليات بالفاتورة نفسها مربوطةً مسبقاً (مرآة فاتورة الشراء).
-    ...(canDeliverGoods ? [{
+    ...(!isReturn && canDeliverGoods ? [{
       key: "deliver",
       label: "تسليم",
       icon: <Truck />,
       onClick: () => setShowDeliver(true),
       separatorBefore: true,
     } as AseelToolbarAction] : []),
-    ...(canDeliverGoods ? [{
+    ...(!isReturn && canDeliverGoods ? [{
       key: "new-delivery-note",
       label: "إرسالية جديدة",
       icon: <ClipboardList />,
@@ -2590,23 +2603,36 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const documentView = (
     <AseelDocumentView<DraftLine>
-      title="فاتورة مبيعات"
-      subtitle="SALES INVOICE"
+      title={isReturn ? "مرجع بيع" : "فاتورة مبيعات"}
+      subtitle={isReturn ? "SALES RETURN / CREDIT NOTE" : "SALES INVOICE"}
       documentNumber={invoiceNumber || (draftId ? `#${draftId}` : "مسودة")}
       status={
         isPosted
-          ? { label: "مرحّلة", tone: "ok" }
+          ? { label: isReturn ? "مرحَّل" : "مرحّلة", tone: "ok" }
           : { label: "مسودة", tone: "warn" }
       }
       metrics={[
-        { label: "الإجمالي", value: money(totals.grandTotal), tone: "info" },
-        { label: "المدفوع المرحّل", value: money(paidAmount), tone: "ok" },
-        { label: "المتبقي", value: money(Math.max(savedGrandTotal - paidAmount, 0)), tone: "warn" },
-        { label: "حالة الدفع", value: paymentStatusDisplay },
-        // التسليم بُعد مستقل — يُعرض فقط حين لا يُخصم المخزون مع الترحيل.
-        ...(isPosted && !stockOnPost
-          ? [{ label: "حالة التسليم", value: deliveryStatusDisplay }]
-          : []),
+        {
+          label: isReturn ? "إجمالي المرجوع" : "الإجمالي",
+          value: money(totals.grandTotal),
+          tone: isReturn ? "warn" : "info",
+        },
+        // T-RETURNUI: المرجع يعكس الاتجاه — الدفع/المتبقي/التسليم مفاهيم
+        // الفاتورة لا المرجع (قيمته تخفّض ذمم العميل وتعيد الكمية للمخزون).
+        ...(!isReturn
+          ? [
+            { label: "المدفوع المرحّل", value: money(paidAmount), tone: "ok" as const },
+            { label: "المتبقي", value: money(Math.max(savedGrandTotal - paidAmount, 0)), tone: "warn" as const },
+            { label: "حالة الدفع", value: paymentStatusDisplay },
+            // التسليم بُعد مستقل — يُعرض فقط حين لا يُخصم المخزون مع الترحيل.
+            ...(isPosted && !stockOnPost
+              ? [{ label: "حالة التسليم", value: deliveryStatusDisplay }]
+              : []),
+          ]
+          : [{
+            label: "أثر الترحيل",
+            value: "يعيد الكمية للمخزون ويخفّض ذمم العميل",
+          }]),
       ]}
       parties={[
         {
@@ -2620,9 +2646,26 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         },
       ]}
       meta={[
-        { label: "تاريخ الفاتورة", value: invDate || "—" },
-        { label: "تاريخ الاستحقاق", value: dueDate || "—" },
+        { label: isReturn ? "تاريخ المرجع" : "تاريخ الفاتورة", value: invDate || "—" },
+        ...(!isReturn ? [{ label: "تاريخ الاستحقاق", value: dueDate || "—" }] : []),
         { label: "العملة", value: currencyCode || "—" },
+        // T-RETURNUI: المرجع يقول أي فاتورة يعود إليها — والرقم يفتحها.
+        ...(isReturn && originalInvoiceId != null
+          ? [{
+            label: "مرجع للفاتورة",
+            value: (
+              <button
+                type="button"
+                className="aseel-text-accent inline-flex items-center gap-1 hover:underline"
+                title={`فتح الفاتورة الأصلية ${originalInvoiceNumber || `#${originalInvoiceId}`}`}
+                onClick={() => openInNewTab(`/sales/invoices/${originalInvoiceId}`)}
+              >
+                <ExternalLink className="h-3 w-3" />
+                <b dir="ltr">{originalInvoiceNumber || `#${originalInvoiceId}`}</b>
+              </button>
+            ),
+          }]
+          : []),
         ...(postedJournalId != null
           ? [{ label: "قيد اليومية", value: `#${postedJournalId}` }]
           : []),
@@ -2701,17 +2744,26 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       totals={[
         { label: "المجموع قبل الضريبة", value: money(totals.subtotalExclTax) },
         ...(Number(invoiceDiscount) > 0
-          ? [{ label: "خصم الفاتورة", value: money(Number(invoiceDiscount)) }]
+          ? [{ label: isReturn ? "خصم المرجع" : "خصم الفاتورة", value: money(Number(invoiceDiscount)) }]
           : []),
         { label: "الضريبة", value: money(totals.taxAmount) },
-        { label: "الإجمالي", value: money(totals.grandTotal), emphasis: true },
-        { label: "المدفوع المرحّل", value: money(paidAmount) },
-        { label: "المتبقي", value: money(Math.max(savedGrandTotal - paidAmount, 0)), tone: "warn" },
+        {
+          label: isReturn ? "إجمالي المرجوع" : "الإجمالي",
+          value: money(totals.grandTotal),
+          emphasis: true,
+        },
+        // T-RETURNUI: المدفوع/المتبقي مفاهيم فاتورة — لا معنى لهما على مرجع.
+        ...(!isReturn
+          ? [
+            { label: "المدفوع المرحّل", value: money(paidAmount) },
+            { label: "المتبقي", value: money(Math.max(savedGrandTotal - paidAmount, 0)), tone: "warn" as const },
+          ]
+          : []),
         { label: "رصيد العميل قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(customerBalanceBeforeInvoice) },
         { label: "رصيد العميل الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(customerBalanceAfterInvoice), emphasis: true },
       ]}
       sections={[
-        {
+        ...(isReturn ? [] : [{
           key: "payments",
           title: `تفاصيل سندات القبض (${paymentDetails?.length || 0})`,
           content: paymentDetails?.length ? (
@@ -2755,8 +2807,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               </table>
             </div>
           ) : "لا توجد سندات قبض مخصصة لهذه الفاتورة.",
-        },
-        ...(notes ? [{ key: "notes", title: "ملاحظات", content: notes }] : []),
+        }]),
+        ...(notes ? [{ key: "notes", title: isReturn ? "سبب المرجوع / ملاحظات" : "ملاحظات", content: notes }] : []),
       ]}
     />
   );
@@ -2769,7 +2821,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     >
       <AseelDocumentShell
         gridFitContent={viewMode}
-        title="فاتورة مبيعات"
+        title={isReturn ? "مرجع بيع" : "فاتورة مبيعات"}
         state={docState}
         company={
           postedJournalId != null ? `قيد محاسبي #${postedJournalId}` : undefined
@@ -3376,6 +3428,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             invoiceDate: invDate,
             dueDate,
             invoiceType: invType,
+            isReturn,
+            originalInvoiceNumber,
             customer: customerId !== "" ? customers.find((c) => c.id === Number(customerId)) : undefined,
             lines,
             productsById,

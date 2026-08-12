@@ -93,13 +93,29 @@ class ImeiValidationTest(DeviceRegistryTestBase):
         self.assertEqual(response.data["imei"], IMEI_A)
 
     def test_short_letters_and_luhn_failure_are_field_errors(self):
-        for bad in ("49015420323751", "49015420323751A", IMEI_LUHN_FAIL, ""):
+        for bad in ("49015420323751", "49015420323751A", IMEI_LUHN_FAIL):
             with self.subTest(imei=bad):
                 response = self.client.post(
                     BASE, self.payload(imei=bad), format="json", **self.headers(),
                 )
                 self.assertEqual(response.status_code, 400, response.content)
                 self.assertIn("imei", response.data)
+
+    def test_empty_imei_is_accepted_without_duplicate_noise(self):
+        """IMEI اختياري: أجهزة بلا شريحة (لابتوب/ساعة) تُسجَّل بالسيريال وحده،
+        وفراغان لا يُعدّان تكراراً لبعضهما."""
+        first = self.client.post(
+            BASE, self.payload(imei=""), format="json", **self.headers(),
+        )
+        self.assertEqual(first.status_code, 201, first.content)
+        self.assertEqual(first.data["imei"], "")
+
+        second = self.client.post(
+            BASE, self.payload(imei="", serial_number="SN-EMPTY-2"),
+            format="json", **self.headers(),
+        )
+        self.assertEqual(second.status_code, 201, second.content)
+        self.assertEqual(second.data["duplicate_of"], [])
 
     def test_phone_is_normalized_and_a_bad_phone_is_rejected(self):
         response = self.create_device()

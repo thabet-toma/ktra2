@@ -20,9 +20,14 @@ export type DeliveryStatus =
   | "partially_delivered"
   | "delivered";
 
+/** N8-T11: نوع المستند الموحّد — فاتورة بيع/شراء أو مرجعهما. */
+export type InvoiceKind = "sale" | "sale_return" | "purchase" | "purchase_return";
+
 export type SalesInvoiceRow = {
   id: number;
   invoice_number: string;
+  /** T-RETURNUI: يميّز مرجع البيع عن الفاتورة في القائمة والعرض. */
+  invoice_kind?: InvoiceKind;
   customer: number;
   customer_name?: string;
   invoice_date: string;
@@ -59,6 +64,9 @@ export type AttachedCheque = {
 };
 
 export type SalesInvoiceDetail = SalesInvoiceRow & {
+  /** T-RETURNUI: الفاتورة الأصلية التي يعود إليها المرجع (للمراجيع فقط). */
+  original_invoice?: number | null;
+  original_invoice_number?: string | null;
   /** T-SLINEAGE: المستند الذي وُلدت منه الفاتورة (طلبية زبون أو عرض سعر). */
   source_document?: {
     kind: "order" | "quotation";
@@ -622,6 +630,15 @@ export async function postCustomerPayment(id: number): Promise<CustomerPaymentRo
 
 export async function deleteCustomerPayment(id: number): Promise<void> {
   return apiDelete(`${BASE}/payments/${id}/`, { tenantId: tid() });
+}
+
+/**
+ * التراجع عن ترحيل سند قبض: يحذف قيوده ويُرجِع ما سدّده من الفواتير
+ * (فكّ التوزيعات) ويعيد شيكاته إلى مسودة — السند نفسه يبقى مسودةً قابلة
+ * للتعديل أو الحذف. الصلاحية: sales.payment.unpost.
+ */
+export async function unpostCustomerPayment(id: number): Promise<CustomerPaymentRow> {
+  return apiPostObject(`${BASE}/payments/${id}/unpost/`, {}, { tenantId: tid() });
 }
 
 /**

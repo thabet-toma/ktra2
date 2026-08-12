@@ -22,11 +22,13 @@ import {
   X,
   Printer,
   RefreshCw,
+  Undo2,
 } from "lucide-react";
 import {
   listCustomerPayments,
   createCustomerPayment,
   postCustomerPayment,
+  unpostCustomerPayment,
   deleteCustomerPayment,
   allocateCustomerPayment,
   suggestFifoAllocations,
@@ -39,6 +41,7 @@ import { accountingApi } from "../../services/accountingApi";
 import { apiGetObject } from "../../services/restApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import {
   AseelDocumentShell,
   AseelDenseTable,
@@ -93,6 +96,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const toast = useToast();
+  const { can: canPerm } = usePermissions();
   const [payments, setPayments] = useState<CustomerPaymentRow[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -234,6 +238,31 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     }
   };
 
+  // T-UNPOSTRV: التراجع عن ترحيل سند مرحّل — الخادم يحذف قيوده ويفكّ توزيعاته
+  // على الفواتير ويعيد شيكاته إلى مسودة؛ السند يبقى مسودةً قابلة للتعديل/الحذف.
+  const handleUnpost = async (p: CustomerPaymentRow) => {
+    const allocCount = (p.allocations || []).length;
+    const ok = await confirm({
+      title: "التراجع عن ترحيل السند",
+      message:
+        `سيُحذف القيد المحاسبي للسند #${p.id} (${fmt(p.amount)})` +
+        (allocCount > 0
+          ? `، وستُفكّ توزيعاته على ${allocCount} فاتورة فتعود «غير مسدَّدة» بقيمتها`
+          : "") +
+        "، ويعود السند مسودةً يمكن تعديلها أو حذفها. متابعة؟",
+      confirmText: "تراجع عن الترحيل",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await unpostCustomerPayment(p.id);
+      toast("تم التراجع عن ترحيل السند — عاد مسودة", "success");
+      await loadAll();
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "فشل التراجع عن الترحيل", "error");
+    }
+  };
+
   const handleDelete = async (p: CustomerPaymentRow) => {
     if (p.is_posted) {
       toast("لا يمكن حذف سند مرحّل. ألغِ الترحيل أولاً.", "error");
@@ -331,6 +360,11 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
           {!r.is_posted && (
             <button type="button" className="aseel-toolbtn" title="ترحيل" onClick={() => void handlePost(r)}>
               <Check className="w-3 h-3" />
+            </button>
+          )}
+          {r.is_posted && canPerm("sales.payment.unpost") && (
+            <button type="button" className="aseel-toolbtn" title="تراجع عن الترحيل" onClick={() => void handleUnpost(r)}>
+              <Undo2 className="w-3 h-3" />
             </button>
           )}
           <button

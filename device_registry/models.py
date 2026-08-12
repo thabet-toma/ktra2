@@ -53,6 +53,10 @@ def imei_is_valid(imei: str) -> bool:
 
 
 def validate_imei(value) -> None:
+    # الحقل اختياري — أجهزة كثيرة (لابتوبات، ساعات، أجهزة بلا شريحة) لا تحمل
+    # IMEI أصلاً. الفراغ يمرّ؛ وما أُدخل فعلاً يجب أن يكون سليماً.
+    if not (value or "").strip():
+        return
     if not imei_is_valid(value):
         raise ValidationError(
             "رقم IMEI غير صالح — يجب أن يكون 15 خانة رقمية تجتاز خوارزمية Luhn."
@@ -82,7 +86,9 @@ class SensitiveDevice(models.Model):
     customer_phone = models.CharField(max_length=32, validators=[validate_phone])
     model_name = models.CharField(max_length=120)
     serial_number = models.CharField(max_length=100)
-    imei = models.CharField(max_length=15, validators=[validate_imei])
+    imei = models.CharField(
+        max_length=15, blank=True, default="", validators=[validate_imei],
+    )
     technical_notes = models.TextField(blank=True, default="")
     photo_url = models.CharField(max_length=500, blank=True, default="")
     status = models.CharField(max_length=20, choices=STATUSES, default="registered")
@@ -115,7 +121,7 @@ class SensitiveDevice(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.model_name} — {self.imei}"
+        return f"{self.model_name} — {self.imei or self.serial_number}"
 
 
 class DeviceAuditLog(models.Model):

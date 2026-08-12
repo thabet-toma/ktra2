@@ -23,6 +23,7 @@ import { usePermissions } from "../../contexts/PermissionsContext";
 import { useToast } from "../../contexts/ToastContext";
 import { DeviceDetailModal } from "./DeviceDetailModal";
 import { statusPillClass } from "./deviceStatus";
+import { BarcodeScannerModal } from "../shared/BarcodeScannerModal";
 
 /**
  * THA-45 M2 — «تسجيل وتتبع الأجهزة الحساسة»: ثلاث مناطق فوق بعضها كما في نموذج
@@ -94,6 +95,8 @@ export const SensitiveDevicesScreen: React.FC = () => {
   const [savedDuplicates, setSavedDuplicates] = useState<DeviceDuplicateMatch[] | null>(null);
   const [modelNames, setModelNames] = useState<string[]>([]);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+  // الحقل الذي يستقبل قراءة الكاميرا — يفتح BarcodeScannerModal حتى يُغلق.
+  const [scanTarget, setScanTarget] = useState<"serial_number" | "imei" | null>(null);
 
   // ── البحث والفلترة ─────────────────────────────────────────────────────
   const [searchText, setSearchText] = useState("");
@@ -205,7 +208,10 @@ export const SensitiveDevicesScreen: React.FC = () => {
     if (!isValidPhone(draft.customer_phone)) problems.push("رقم الهاتف غير صالح (7–15 رقماً)");
     if (!draft.model_name.trim()) problems.push("موديل الجهاز مطلوب");
     if (!draft.serial_number.trim()) problems.push("الرقم التسلسلي مطلوب");
-    if (currentImeiState !== "valid") problems.push(`رقم IMEI يجب أن يكون ${IMEI_LENGTH} خانة تجتاز Luhn`);
+    // IMEI اختياري — يُرفض فقط ما أُدخل ناقصاً أو ساقطاً في Luhn، والفراغ يمرّ.
+    if (currentImeiState !== "valid" && currentImeiState !== "empty") {
+      problems.push(`رقم IMEI يجب أن يكون ${IMEI_LENGTH} خانة تجتاز Luhn — أو اتركه فارغاً`);
+    }
     return problems;
   }, [draft, currentImeiState]);
 
@@ -234,7 +240,12 @@ export const SensitiveDevicesScreen: React.FC = () => {
         technical_notes: draft.technical_notes,
         photo_url: draft.photo_url,
       });
-      toast(`تم تسجيل الجهاز — IMEI ${created.imei}`, "success");
+      toast(
+        created.imei
+          ? `تم تسجيل الجهاز — IMEI ${created.imei}`
+          : `تم تسجيل الجهاز — SN ${created.serial_number}`,
+        "success",
+      );
       setSavedDuplicates(created.duplicate_of?.length ? created.duplicate_of : null);
       setDraft({ ...EMPTY_DRAFT });
       setImeiMatches([]);
@@ -252,7 +263,7 @@ export const SensitiveDevicesScreen: React.FC = () => {
     setRestoringId(row.id);
     try {
       await restoreDevice(row.id);
-      toast(`تم استرجاع سجل ${row.imei}`, "success");
+      toast(`تم استرجاع سجل ${row.imei || row.serial_number}`, "success");
       await load();
     } catch (e) {
       setListErr(messageOf(e, "تعذّر استرجاع السجل"));
@@ -346,25 +357,37 @@ export const SensitiveDevicesScreen: React.FC = () => {
 
             <div>
               <label className={labelClass} htmlFor="device-serial">الرقم التسلسلي (SN)</label>
-              <input
-                id="device-serial"
-                className={inputClass}
-                placeholder="امسح الباركود أو اكتب الرقم"
-                autoComplete="off"
-                disabled={!canCreate}
-                value={draft.serial_number}
-                onChange={(e) => setDraft({ ...draft, serial_number: e.target.value })}
-                // الماسح الضوئي ينهي القراءة بـEnter — لا يُرسل النموذج قبل اكتماله.
-                onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
-              />
+              <div className="relative">
+                <input
+                  id="device-serial"
+                  className={`${inputClass} pl-9`}
+                  placeholder="امسح الباركود أو اكتب الرقم"
+                  autoComplete="off"
+                  disabled={!canCreate}
+                  value={draft.serial_number}
+                  onChange={(e) => setDraft({ ...draft, serial_number: e.target.value })}
+                  // الماسح الضوئي ينهي القراءة بـEnter — لا يُرسل النموذج قبل اكتماله.
+                  onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+                />
+                <button
+                  type="button"
+                  disabled={!canCreate}
+                  onClick={() => setScanTarget("serial_number")}
+                  className="absolute inset-y-0 left-1 my-auto flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-primary)] disabled:opacity-40"
+                  title="مسح السيريال بكاميرا الجهاز"
+                  aria-label="مسح السيريال بكاميرا الجهاز"
+                >
+                  <Camera className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             <div>
-              <label className={labelClass} htmlFor="device-imei">رقم الـ IMEI</label>
+              <label className={labelClass} htmlFor="device-imei">رقم الـ IMEI (اختياري)</label>
               <div className="relative">
                 <input
                   id="device-imei"
-                  className={`${inputClass} pl-9 ${
+                  className={`${inputClass} pl-16 ${
                     currentImeiState === "invalid"
                       ? "border-red-500"
                       : currentImeiState === "valid" && imeiMatches.length === 0
@@ -379,7 +402,7 @@ export const SensitiveDevicesScreen: React.FC = () => {
                   onChange={(e) => setDraft({ ...draft, imei: imeiDigits(e.target.value) })}
                   onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
                 />
-                <span className="absolute inset-y-0 left-2 flex items-center">
+                <span className="absolute inset-y-0 left-9 flex items-center">
                   {imeiChecking && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-text-muted)]" />}
                   {!imeiChecking && currentImeiState === "valid" && imeiMatches.length === 0 && (
                     <Check className="h-4 w-4 text-emerald-600" />
@@ -388,6 +411,16 @@ export const SensitiveDevicesScreen: React.FC = () => {
                     <X className="h-4 w-4 text-red-600" />
                   )}
                 </span>
+                <button
+                  type="button"
+                  disabled={!canCreate}
+                  onClick={() => setScanTarget("imei")}
+                  className="absolute inset-y-0 left-1 my-auto flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-primary)] disabled:opacity-40"
+                  title="مسح الـ IMEI بكاميرا الجهاز"
+                  aria-label="مسح الـ IMEI بكاميرا الجهاز"
+                >
+                  <Camera className="h-4 w-4" />
+                </button>
               </div>
               {currentImeiState === "partial" && (
                 <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
@@ -638,7 +671,7 @@ export const SensitiveDevicesScreen: React.FC = () => {
                   </td>
                   <td className="hidden md:table-cell">{row.model_name}</td>
                   <td className="hidden md:table-cell">{row.serial_number}</td>
-                  <td className="whitespace-nowrap font-mono">{row.imei}</td>
+                  <td className="whitespace-nowrap font-mono">{row.imei || "—"}</td>
                   <td className="hidden lg:table-cell">{row.created_by_name}</td>
                   <td>
                     <span className={statusPillClass(row.status)}>{row.status_label}</span>
@@ -717,6 +750,20 @@ export const SensitiveDevicesScreen: React.FC = () => {
           </div>
         )}
       </section>
+
+      {scanTarget && (
+        <BarcodeScannerModal
+          title={scanTarget === "imei" ? "مسح الـ IMEI بالكاميرا" : "مسح السيريال بالكاميرا"}
+          onDetect={(value) => {
+            setDraft((d) =>
+              scanTarget === "imei"
+                ? { ...d, imei: imeiDigits(value) }
+                : { ...d, serial_number: value },
+            );
+          }}
+          onClose={() => setScanTarget(null)}
+        />
+      )}
 
       {openId != null && (
         <DeviceDetailModal
