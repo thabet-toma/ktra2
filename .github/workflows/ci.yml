@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main, claude/task6, claude/task7]
+    # newktra هو فرع العمل المعتمد (docs/REFACTOR_PROMPTS.md) — كانت CI على main
+    # وحده وmain متوقف منذ 2026-07-19، فلا شيء كان يفحص العمل الفعلي آلياً.
+    # (أُزيل claude/task6 و claude/task7 — فرعان تاريخيان متوقفان.)
+    branches: [main, newktra]
   pull_request:
-    branches: [main]
+    branches: [main, newktra]
 
 jobs:
   backend:

@@ -100,7 +100,10 @@ try {
 
     if (-not $SkipTests) {
         Write-Step "Running Django regression tests"
-        Invoke-Native $Python @("manage.py", "test", "--settings=core.test_settings")
+        # pytest لا manage.py test: الأخير يكتشف أصناف TestCase وحدها ويفوّت 253
+        # اختباراً بنمط الدوال (docs/CHANGELOG.md 2026-08-12) — بوابة النشر يجب
+        # أن تكون الأكمل لا الأنقص. الإعدادات من pytest.ini (core.test_settings).
+        Invoke-Native $Python @("-m", "pytest", "-q", "-n", "auto")
         Invoke-Native $Python @("manage.py", "makemigrations", "--check", "--dry-run")
         Invoke-Native $Python @("manage.py", "check")
     } else {
