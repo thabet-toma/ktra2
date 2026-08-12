@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { addWarrantyMonths } from "../utils/warranty";
 
 /**
  * THA-24 م2 — بوابة وحدة «خدمة ما بعد البيع» وشاشة بطاقات الكفالة.
@@ -101,16 +102,11 @@ const AUTO_CARD = {
 
 type CardRow = Record<string, unknown>;
 
-/** الشهور تقويمية — نفس قاعدة `after_sales.models.add_months`. */
-function addMonths(iso: string, months: number): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const total = y * 12 + (m - 1) + months;
-  const year = Math.floor(total / 12);
-  const month = (total % 12) + 1;
-  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const day = Math.min(d, lastDay);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
+/**
+ * الشهور تقويمية — القاعدة نفسها المستوردة من `utils/warranty`، لا نسخةً ثالثة
+ * منها هنا: خادم يحسبها، وواجهة تعاينها، ومحاكي اختبارٍ يخالفهما = عطبٌ يمرّ.
+ */
+const addMonths = addWarrantyMonths;
 
 /** أُنشئت الملفات المطلوبة: أعلام الوحدات + المخزن + عدّاد طلبات chunk الشاشة. */
 async function mockTenant(

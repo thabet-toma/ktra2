@@ -179,7 +179,10 @@ export const WarrantyCardModal: React.FC<Props> = ({
         serial: draft.serial.trim(),
         customer_name: draft.customer_name.trim(),
         customer_phone: draft.customer_phone.trim(),
-        end_date: draft.end_date || previewEnd || null,
+        // ما كتبه المستخدم بيده وحده يُرسَل. المعاينة المشتقّة (`previewEnd`)
+        // تبقى معاينة: إرسالها كان يجعل الواجهة مؤلّفةً ثانيةً لتاريخٍ الخادمُ
+        // مؤلّفه — تتفق القاعدتان اليوم، وأول انحراف بينهما يمرّ صامتاً.
+        end_date: draft.end_date || null,
       };
       if (card) {
         // التلقائية: لا نرسل إلا ما يقبله الخادم عليها، فلا نصطدم بحارسه.

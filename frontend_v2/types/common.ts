@@ -101,6 +101,7 @@ export type AppView =
     | "company-accountant-engagements"
     | "sensitive-devices"
     | "after-sales"
+    | "service-orders"
     | "about-us"
     | "contact";
 

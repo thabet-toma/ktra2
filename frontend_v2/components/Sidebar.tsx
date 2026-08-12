@@ -170,6 +170,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const devicesPlacement = devicesNavPlacement(modules);
   const afterSalesLinks: NavLink[] = [
     { view: "after-sales", label: "بطاقات الكفالة", icon: <ShieldCheck className="h-4 w-4" /> },
+    { view: "service-orders", label: "أوامر الصيانة", icon: <Wrench className="h-4 w-4" /> },
     ...(devicesPlacement === "after-sales"
       ? [{ view: "sensitive-devices" as AppView, label: "الأجهزة الحساسة", icon: <ShieldAlert className="h-4 w-4" /> }]
       : []),

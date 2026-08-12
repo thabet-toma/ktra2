@@ -67,6 +67,19 @@ def resolve_labour_product(tenant_id):  # صنف خدمة «أجرة صيانة�
 | POST | `service-orders/{id}/note/` · `approve/` | `add_note` · `approve` |
 | GET | `service-orders/lookup/?serial=` | `ServiceOrderViewSet.lookup` |
 
+## الواجهة (`frontend_v2/`)
+| الملف | الغرض |
+|---|---|
+| `frontend_v2/components/aftersales/WarrantyCardsScreen.tsx` | قائمة بطاقات الكفالة والبحث والبطاقة اليدوية |
+| `frontend_v2/components/aftersales/ServiceOrdersScreen.tsx` | قائمة أوامر الصيانة، وفتح المستند، وزر الاستقبال |
+| `frontend_v2/components/aftersales/ServiceOrderDocument.tsx` | المستند: الملف · قطع الغيار (ترحيل/فوترة) · السجل الزمني |
+| `frontend_v2/components/aftersales/ServiceOrderIntakeModal.tsx` | الاستقبال بالبحث الموحّد والتعبئة من نتائجه |
+| `frontend_v2/utils/serviceOrder.ts` · `frontend_v2/utils/warranty.ts` | القواعد الصرفة (بلا React) — مرآة قواعد الخادم |
+| `frontend_v2/services/afterSalesApi.ts` | عميل REST الوحيد للوحدة |
+
+شاشتان في خريطة الشاشات: `after-sales` (الكفالات) و`service-orders` (أوامر الصيانة)،
+لكلٍّ مفتاح صلاحية مستقل وكلتاهما خلف وحدة `after_sales` في `frontend_v2/utils/viewPermissions.ts`.
+
 ## الاعتماديات
 **يعتمد على:**
 - `accounting` — **api فقط**: `after_sales/service_orders.py` (`post_document`، `unpost_document`، `ensure_account`). لا استيراد لـ`accounting.models` إطلاقاً — يحرسه `.importlinter`.

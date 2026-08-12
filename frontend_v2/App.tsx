@@ -161,6 +161,7 @@ const AccountantOfficeApp = lazyPage(() => import("./components/accountant/offic
 const SensitiveDevicesScreen = lazyPage(() => import("./components/devices/SensitiveDevicesScreen"));
 // THA-24: بطاقات الكفالة — وحدة «خدمة ما بعد البيع» المرخّصة، بنفس الحارس.
 const WarrantyCardsScreen = lazyPage(() => import("./components/aftersales/WarrantyCardsScreen"));
+const ServiceOrdersScreen = lazyPage(() => import("./components/aftersales/ServiceOrdersScreen"));
 
 type SourcingView = "search" | "loading" | "results";
 type AuthView = "landing" | "login" | "signup" | "accountant-signup";
@@ -207,6 +208,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "company-accountant-engagements": "/accountant/company/engagements",
   "sensitive-devices": "/sensitive-devices",
   "after-sales": "/after-sales",
+  "service-orders": "/after-sales/service-orders",
   "sales-invoices": "/sales/invoices",
   "sales-quotations": "/sales/quotations",
   "sales-orders": "/sales/orders",
@@ -1441,6 +1443,16 @@ const App: React.FC = () => {
             {canView(appView)
               ? <WarrantyCardsScreen />
               : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض بطاقات الكفالة (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "service-orders":
+        // نفس ترتيب البوابتين — الوحدة واحدة والصلاحية مستقلة عن الكفالات.
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة خدمة ما بعد البيع غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <ServiceOrdersScreen onOpenInvoice={() => setViewAndSyncPath("sales-invoices")} />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض أوامر الصيانة (403).</div>}
           </ModuleLicenseGuard>
         );
 

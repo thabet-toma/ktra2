@@ -92,6 +92,9 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "sensitive-devices": "devices.registry.view",
   // THA-24: بطاقات الكفالة — وحدة «خدمة ما بعد البيع» المرخّصة.
   "after-sales": "aftersales.warranty.view",
+  // THA-24 م4: أوامر الصيانة — نفس الوحدة، ومفتاح صلاحيتها مستقل: من يرى
+  // الكفالات لا يرى بالضرورة ملفات الصيانة (مفاتيح الخادم السبعة منفصلة).
+  "service-orders": "aftersales.order.view",
   // «الرئيسية» تختار بين اللوحة التجارية والشخصية — لا تُدرَج هنا كي لا تُحجب
   // الشاشة كلياً؛ الاختيار يتم بدور manager الفعلي في App.tsx.
 };
@@ -113,6 +116,7 @@ export const VIEW_MODULES: Record<string, string> = {
   "sensitive-devices": "sensitive_devices",
   // THA-24: خدمة ما بعد البيع — نفس العقد: 404 خادمياً، وبلا العَلَم لا يُطلب chunk.
   "after-sales": "after_sales",
+  "service-orders": "after_sales",
 };
 
 /** صلاحية الشاشة إن وُجدت، وإلا undefined (شاشة مفتوحة). */

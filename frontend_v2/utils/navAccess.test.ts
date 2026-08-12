@@ -151,6 +151,29 @@ test('بند بطاقات الكفالة يلزمه الترخيص والصلا�
   );
 });
 
+test('شاشة أوامر الصيانة خلف ترخيص الوحدة نفسها ومفتاح صلاحية مستقل', () => {
+  assert.equal(moduleForView('service-orders'), 'after_sales');
+  // مفتاحان لا واحد: من يرى الكفالات لا يرى بالضرورة ملفات الصيانة.
+  assert.equal(permForView('service-orders'), 'aftersales.order.view');
+  assert.notEqual(permForView('service-orders'), permForView('after-sales'));
+  // فشل مغلق كأختها — بلا عَلَم صريح لا يُنزَّل chunk الشاشة أصلاً.
+  assert.equal(moduleAllowsView('service-orders', null), false);
+  assert.equal(moduleAllowsView('service-orders', {}), false);
+  assert.equal(moduleAllowsView('service-orders', { after_sales: false }), false);
+  assert.equal(moduleAllowsView('service-orders', { sensitive_devices: true }), false);
+  assert.equal(moduleAllowsView('service-orders', { after_sales: true }), true);
+});
+
+test('بند أوامر الصيانة يلزمه الترخيص والصلاحية معاً', () => {
+  const link: NavAccessLink[] = [
+    { key: 'service-orders', perm: permForView('service-orders') },
+  ];
+  assert.equal(visibleLinks(link, canOf(['aftersales.order.view'])).length, 1);
+  assert.equal(visibleLinks(link, canOf([])).length, 0);
+  // صلاحية الكفالات لا تفتح أوامر الصيانة — المفتاحان منفصلان على الخادم أيضاً.
+  assert.equal(visibleLinks(link, canOf(['aftersales.warranty.view'])).length, 0);
+});
+
 test('موضع بند الأجهزة الحساسة يتبع ترخيص الوحدتين — بند واحد لا اثنان', () => {
   // بلا ترخيص سجل الأجهزة لا يظهر البند أصلاً، ولو رُخِّصت ما بعد البيع.
   assert.equal(devicesNavPlacement(null), 'hidden');

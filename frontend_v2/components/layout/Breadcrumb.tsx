@@ -21,6 +21,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'company-accountant-engagements': 'واجهة المحاسب القانوني',
   'sensitive-devices': 'تسجيل وتتبع الأجهزة الحساسة',
   'after-sales': 'بطاقات الكفالة',
+  'service-orders': 'أوامر الصيانة',
   'points-management': 'إدارة النقاط',
   settings: 'الإعدادات',
   attendance: 'الحضور والغياب',
