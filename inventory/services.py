@@ -346,6 +346,7 @@ _REFERENCE_LABELS = {
     "STOCKTAKE": "جرد",
     "GOODS_RECEIPT": "سند استلام",
     "DELIVERY_NOTE": "سند تسليم",
+    "SERVICE_ISSUE": "أمر صيانة (قطع كفالة)",
     "MANUAL": "حركة يدوية",
 }
 

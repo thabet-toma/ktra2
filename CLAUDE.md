@@ -28,7 +28,7 @@
 
 المتاح:
 <!-- AUTO:module_index:START -->
-`accountant_portal` · `accounting` · `core` · `frontend` · `hr` · `inventory` · `logistics` · `partners` · `sales` · `tenants`
+`accountant_portal` · `accounting` · `after_sales` · `core` · `frontend` · `hr` · `inventory` · `logistics` · `partners` · `sales` · `tenants`
 <!-- AUTO:module_index:END -->
 
 عند الحاجة فقط:

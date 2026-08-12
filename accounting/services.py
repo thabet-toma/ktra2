@@ -669,6 +669,10 @@ def unpost_document(
     استخدامه نصّاً عند إعادة الترحيل. القيود الفرعية (تكلفة المبيعات/الاستلام)
     تُحذف دون حجز لأنها تُولَّد من جديد عند إعادة الترحيل.
 
+    المستندات التي تمرّ من هنا (7): فاتورة بيع · مرجع بيع · فاتورة شراء · مرجع
+    شراء · سند قبض · سند صرف · **أمر صيانة** (صرف قطع الكفالة —
+    `after_sales.service_orders.unpost_covered_parts`).
+
     Returns: dict فيه عدد القيود وحركات المخزون المحذوفة.
     """
     from inventory.services import find_stock_dependents, reverse_stock_movements

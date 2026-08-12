@@ -36,6 +36,7 @@ __all__ = [
     "unpost_document",
     "purge_journals",
     "get_account_by_code",
+    "ensure_account",
     "ensure_partner_account",
     "sync_partner_accounting",
     "create_partner_opening_balance",
@@ -251,6 +252,45 @@ def get_account_by_code(tenant, code: str, *, active_only: bool = False) -> Opti
     if active_only:
         qs = qs.filter(is_active=True)
     return qs.first()
+
+
+def ensure_account(
+    *,
+    tenant_id: int,
+    code: str,
+    name: str,
+    account_type: str,
+    parent_code: str | None = None,
+) -> Account:
+    """حساب الشركة بالكود، يُنشأ تحت أبيه المعياري إن غاب — نقطة الإنشاء العامة.
+
+    نمط «الحساب يُنشأ من الكود ويُثبَّت في الإعدادات» (حسابات الشيكات): المستخدم
+    الذي لا يعرف رقم الحساب لن يعرفه لأننا سألناه، والوحدة الجديدة لا يجوز أن
+    تتوقّف عند أول ترحيل بانتظار ضبطٍ يدوي.
+
+    `get_or_create` على (الشركة، الكود) لا على الاسم: كودٌ معطَّل بنفس الرقم
+    موجود أصلاً يُعاد استعماله بدل الاصطدام بقيد التفرّد. غياب الأب لا يمنع
+    الإنشاء — يُنشأ الحساب في جذر الشجرة (شجرة غير معيارية لا تُعطِّل الترحيل).
+    """
+    parent = None
+    if parent_code:
+        parent = Account.objects.filter(tenant_id=tenant_id, code=parent_code).first()
+    account, created = Account.objects.get_or_create(
+        tenant_id=tenant_id,
+        code=code,
+        defaults={
+            "name": name,
+            "account_type": account_type,
+            "parent": parent,
+            "is_active": True,
+        },
+    )
+    if created:
+        logger.info(
+            "ensure_account: created tenant=%s code=%s type=%s parent=%s",
+            tenant_id, code, account_type, parent_code,
+        )
+    return account
 
 
 # ─────────────────────────────────────────────────────────

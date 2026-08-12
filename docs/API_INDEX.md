@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **404**
+عدد النقاط: **416**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -109,6 +109,18 @@
 | `/api/activity/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/activity/users/` | `ActivityLogViewSet` | `core/activity_views.py` |
 | `/api/activity/{pk}/` | `ActivityLogViewSet` | `core/activity_views.py` |
+| `/api/after-sales/service-orders/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/lookup/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/approve/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/detach-invoice/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/generate-invoice/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/note/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/parts/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/parts/{part_id}/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/post-covered/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/transition/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/unpost-covered/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/check/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/` | `WarrantyCardViewSet` | `after_sales/views.py` |
