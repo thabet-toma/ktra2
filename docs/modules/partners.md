@@ -19,6 +19,7 @@
 | `partners/models.py` | `Partner`، `PartnerGroup`، `PartnerBankAccount`، `CustomerNote` | 206 |
 | `partners/serializers.py` | عقود الـAPI + كشف الأرقام الشبيهة (T-DUPID) | 196 |
 | `partners/urls.py` | تسجيل `partners/` و`customer-notes/` | 11 |
+| `partners/agent_api.py` | نقطتا بوت الفواتير للأطراف (`/api/agent/suppliers/` و`/api/agent/customers/`، مسجَّلتان في `core/urls.py`). تسكنان هنا لا في `core` لأن `.importlinter` يمنع `core` من استيراد `partners.serializers`؛ `partner_type` مثبَّت خادمياً ولا مسار تعديل أو حذف | 158 |
 | `partners/apps.py` | `ready()` يستورد `partners.signals` — بدونه لا يعمل أي شيء تلقائي | 8 |
 
 ## الـModels

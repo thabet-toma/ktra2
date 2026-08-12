@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **416**
+عدد النقاط: **423**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -125,7 +125,14 @@
 | `/api/after-sales/warranties/check/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/extend/` | `WarrantyCardViewSet` | `after_sales/views.py` |
+| `/api/agent/customers/` | `agent_customers` | `partners/agent_api.py` |
+| `/api/agent/invoices/` | `agent_list_invoices` | `sales/agent_api.py` |
+| `/api/agent/invoices/draft/` | `agent_create_draft_invoice` | `sales/agent_api.py` |
+| `/api/agent/invoices/draft/<int:pk>/` | `agent_draft_invoice_detail` | `sales/agent_api.py` |
+| `/api/agent/last-price/` | `agent_last_price` | `sales/agent_api.py` |
+| `/api/agent/products/` | `agent_products` | `inventory/agent_api.py` |
 | `/api/agent/query/` | `agent_query` | `core/agent_db_view.py` |
+| `/api/agent/suppliers/` | `agent_suppliers` | `partners/agent_api.py` |
 | `/api/assistant/chat/` | `assistant_chat` | `core/assistant_views.py` |
 | `/api/assistant/files/` | `assistant_upload` | `core/assistant_views.py` |
 | `/api/assistant/openclaw-status/` | `assistant_openclaw_status` | `core/assistant_views.py` |

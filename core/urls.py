@@ -24,6 +24,9 @@ from core import (
 )
 from core.activity_views import ActivityLogViewSet
 from core.platform_admin_api import DevelopmentNoteViewSet
+from inventory import agent_api as inventory_agent_api
+from partners import agent_api as partners_agent_api
+from sales import agent_api as sales_agent_api
 
 _activity_router = DefaultRouter()
 _activity_router.register(r'', ActivityLogViewSet, basename='activity')
@@ -51,13 +54,18 @@ urlpatterns = [
     # النسخة بشرطة مائلة أيضاً احتياطاً.
     path('api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>', whatsapp_views.whatsapp_webhook),
     path('api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>/', whatsapp_views.whatsapp_webhook),
+    # واجهة الوكيل — المسارات ثابتة بحرفها (بوت خارجي يناديها)، لكن كل نقطة
+    # تسكن في الـapp المالكة لبياناتها: `core` ممنوع من استيراد سيريالايزر app
+    # آخر (`.importlinter`). وحدها `agent_query` تبقى في `core` — لا سيريالايزر
+    # لها أصلاً، وحراستها superuser لا مفتاح (P0-2).
     path('api/agent/query/', agent_db_view.agent_query),
-    path('api/agent/invoices/draft/', agent_db_view.agent_create_draft_invoice),
-    path('api/agent/invoices/draft/<int:pk>/', agent_db_view.agent_draft_invoice_detail),
-    path('api/agent/invoices/', agent_db_view.agent_list_invoices),
-    path('api/agent/suppliers/', agent_db_view.agent_suppliers),
-    path('api/agent/customers/', agent_db_view.agent_customers),
-    path('api/agent/products/', agent_db_view.agent_products),
+    path('api/agent/invoices/draft/', sales_agent_api.agent_create_draft_invoice),
+    path('api/agent/invoices/draft/<int:pk>/', sales_agent_api.agent_draft_invoice_detail),
+    path('api/agent/invoices/', sales_agent_api.agent_list_invoices),
+    path('api/agent/last-price/', sales_agent_api.agent_last_price),
+    path('api/agent/suppliers/', partners_agent_api.agent_suppliers),
+    path('api/agent/customers/', partners_agent_api.agent_customers),
+    path('api/agent/products/', inventory_agent_api.agent_products),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.
     path('api/reports/', reports_api.reports_catalog),

@@ -203,6 +203,9 @@ class ProductLookupSerializer(ProductSerializer):
     class Meta(ProductSerializer.Meta):
         fields = [
             'id', 'sku', 'barcode', 'name_ar', 'name_en', 'display_name',
+            # وكيل الفواتير يطبع الماركة في كل سطر تشخيص وفي أسباب استبعاد
+            # الأصناف؛ بدونها كان يطبع أقواساً فارغة: «❌ 205/65/16 () — رصيد 0».
+            'brand',
             'category', 'category_name', 'hs_code', 'min_stock_level',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity',
             'avg_cost', 'sale_price', 'is_service', 'is_serialized',

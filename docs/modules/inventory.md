@@ -19,6 +19,7 @@
 | `inventory/models.py` | 11 موديل: الصنف، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد | 465 |
 | `inventory/serializers.py` | تمثيل الصنف والحركة والمستندات | 353 |
 | `inventory/urls.py` | 8 routers مركّبة على `/api/inventory/` (`core/urls.py`) | 21 |
+| `inventory/agent_api.py` | نقطة بوت الفواتير للأصناف (`/api/agent/products/`، مسجَّلة في `core/urls.py`). تسكن هنا لا في `core` لأن `.importlinter` يمنع `core` من استيراد `inventory.serializers`؛ ولا تستورد `sales`/`logistics` (عقد الاتجاه المعكوس) | 115 |
 
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
