@@ -122,3 +122,8 @@ frontend/
 # Load-test artifacts (المرحلة 6) — بيان البذر ونتائج locust المحلية
 /load_tests/seed_manifest.json
 /load_tests/results/
+
+# عدّة codebase-memory-mcp المحلية — أداة مطوّر لا كود مشروع، ومكانها جذر
+# المستودع بحكم تشغيلها فقط (نفس منطق تجاهل `.claude/` أعلاه).
+/.cbmignore
+/install.ps1
