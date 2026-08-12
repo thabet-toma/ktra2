@@ -164,4 +164,19 @@ python -m pytest -q -n auto          # البوابة قبل أي commit (‎~80
 | 5 نماذج دفع منفصلة | `logistics/`, `sales/`, `accounting/` | `docs/decisions/payment_model_unification.md` |
 | مرفقات كحقول URL متفرّقة بلا نموذج موحّد | `logistics/models.py` | `docs/decisions/attachments_model.md` |
 | ~~ملفات عملاقة~~ ✅ عولج (المرحلة 3) — الأربعة الكبرى صارت حزماً | `logistics/views/`, `sales/services/`, `logistics/serializers/`, `core/reports/` | `docs/REFACTOR_PROMPTS.md` مرحلة 3 |
-| اختناقات التوسّع (كاش ملفّي، ترقيم opt-in، فهارس ناقصة) | `core/settings.py` | `docs/REFACTOR_PROMPTS.md` مراحل 4-6 |
+| ~~اختناقات التوسّع (كاش ملفّي، ترقيم opt-in، فهارس ناقصة)~~ ✅ عولجت (المرحلة 5) — و**قِيست** في المرحلة 6: الاختناق المتبقي **واحد فقط وهو سعة الـworkers لا الكود** | `core/settings.py` | `docs/LOAD_TEST_RESULTS.md` |
+| ~~القاعدة لا تُبنى من الهجرات~~ ✅ عولج 2026-08-12 — انظر الملاحظة أسفل الجدول | `core/models.py` (`SystemAttachment`) | `docs/SCALABILITY_AUDIT.md` (P0-14) |
+
+> ### ✅ البناء من صفر يعمل — وكان مكسوراً حتى 2026-08-12
+> `SystemAttachment` (`core/models.py`) كان معرَّفاً بـ**`managed = False`** —
+> النموذج الوحيد كذلك في المشروع. جانغو يسجّل `core/migrations/0001_initial.py`
+> مطبَّقةً `[X]` **بلا أن يُنشئ جدول `system_attachments` إطلاقاً**، والإنتاج نجا
+> لأن جدوله أُنشئ يدوياً خارج جانغو.
+>
+> **والأخطر أن مُكتشِف الهجرات يتجاهل حقول النماذج غير المُدارة**، فحقل `tenant`
+> عاش في النموذج ولم يدخل الهجرة قطّ — أي أن قلب `managed` وحده كان سيُنشئ
+> جدولاً بلا عمود `TenantID`. أُصلح الأمران معاً، وتُحقّق بـ`migrate` كامل على
+> قاعدة MySQL فارغة: الجدول يُبنى بأعمدته السبعة ومفتاحه الأجنبي إلى `tenants`.
+>
+> القلب آمن على الإنتاج لأن الهجرة مسجَّلة في `django_migrations` فلا تُنفَّذ
+> ثانيةً — نفس النمط المطبَّق سلفاً على `partners` و`tenants`.
