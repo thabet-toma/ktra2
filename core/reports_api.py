@@ -65,6 +65,13 @@ def report_run(request, key: str):
     tenant = get_tenant(request)
     if not tenant:
         return Response({"error": "لا يوجد شركة (tenant)."}, status=400)
+    # الترخيص قبل الصلاحية — تقرير وحدةٍ غير مرخّصة «غير معروف» لا «ممنوع»،
+    # فلا يكشف ردُّه وجودها (نفس ترتيب `after_sales/views.py::initial`).
+    if spec.module:
+        from core.modules import module_enabled
+
+        if not module_enabled(tenant, spec.module):
+            return Response({"error": "تقرير غير معروف."}, status=404)
     if spec.permission:
         require_perm(request, spec.permission, tenant=tenant)
     params = request.query_params.dict()

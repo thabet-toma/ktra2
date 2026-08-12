@@ -67,6 +67,20 @@ def resolve_labour_product(tenant_id):  # صنف خدمة «أجرة صيانة�
 | POST | `service-orders/{id}/note/` · `approve/` | `add_note` · `approve` |
 | GET | `service-orders/lookup/?serial=` | `ServiceOrderViewSet.lookup` |
 
+## التقارير
+ثلاثة في `core/reports/after_sales.py` تحت فئة «خدمة ما بعد البيع»، تُعرض في
+شاشة التقارير العامّة بلا شاشة خاصة:
+
+| المفتاح | ما يجيبه | الصلاحية |
+|---|---|---|
+| `after-sales-warranties-expiring` | كفالات سارية تنتهي خلال نافذة (`days`، افتراضها 30) | `aftersales.warranty.view` |
+| `after-sales-open-orders` | كل جهاز ما زال عندنا بعمره بالأيام وما ينقص لإغلاقه | `aftersales.order.view` |
+| `after-sales-warranty-cost` | ما صُرف على الكفالة من حركات `SERVICE_ISSUE` بتكلفته التاريخية | `aftersales.order.view` |
+
+الثلاثة تحمل `module="after_sales"` — الحقل الذي أُضيف لـ`ReportSpec` في هذا
+المعلم — فيردّ `core/reports_api.py` (`report_run`) **404 لا 403** لشركةٍ غير
+مرخّصة، وتختفي من الفهرس أصلاً لأن مفاتيح صلاحياتها تسقط من كتالوجها.
+
 ## الواجهة (`frontend_v2/`)
 | الملف | الغرض |
 |---|---|

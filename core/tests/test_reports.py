@@ -13,6 +13,7 @@ from rest_framework.test import APITestCase
 
 from accounting.models import Account, JournalHeader, JournalLine
 from accounting.services import create_fiscal_year, partner_posted_balance
+from core.models import TenantModule
 from core.reports import REPORTS, report_catalog
 from inventory.models import Product, StockMovement
 from logistics.models import PurchaseInvoice
@@ -32,6 +33,16 @@ class ReportEngineTest(APITestCase):
         cls.tenant = create_company("شركة التقارير", cls.user)
         cls.other_tenant = create_company("شركة أخرى", cls.other_user)
         create_fiscal_year(cls.tenant, 2026)
+        # تقارير الوحدات المرخّصة تُردّ 404 بلا ترخيصها. تُرخَّص كلها هنا كي يبقى
+        # «كل تقرير في السجل يُنفَّذ» حارساً شاملاً فعلاً — استثناؤها من الحارس
+        # كان سيترك تقارير بلا أي تغطية. (بوابة الترخيص نفسها تُختبر في
+        # `after_sales/tests/test_reports.py`.)
+        for module_key in {
+            spec.module for spec in REPORTS.values() if spec.module
+        }:
+            TenantModule.objects.create(
+                tenant=cls.tenant, module_key=module_key, enabled=True,
+            )
 
         cls.customer = Partner.objects.create(
             tenant=cls.tenant, name="زبون التقارير", partner_type="Customer")
