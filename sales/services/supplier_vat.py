@@ -141,6 +141,59 @@ def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'Supplier
     return payment
 
 
+def unpost_supplier_payment(payment: 'SupplierPayment', *, user=None) -> dict:
+    """التراجع عن ترحيل سند صرف: حذف قيوده وإعادة شيكاته إلى مسودة — مرآة
+    `unpost_customer_payment`.
+
+    بخلاف الجانب الوارد لا مبالغ تُعكس على فواتير الشراء: «المدفوع» هناك مشتق
+    لا مخزَّن — `purchase_invoice_payment_summary` ونظيرتها SQL
+    (`annotate_purchase_invoice_payment_summary`) كلتاهما تفلتران على
+    `is_posted=True`، فقلبُ الراية يكفي المكانين معاً وتعود الفواتير الموزَّع
+    عليها «غير مسدَّدة» تلقائياً. التوزيعات تبقى (ربط بلا قيد) فتُحتسب من جديد
+    عند إعادة الترحيل.
+    """
+    from sales.models import SupplierPayment as SP
+    if not payment.is_posted:
+        raise ValidationError("السند غير مرحّل.")
+    with transaction.atomic():
+        payment = SP.objects.select_for_update().get(pk=payment.pk)
+        if not payment.is_posted:
+            raise ValidationError("السند غير مرحّل.")
+        result = unpost_document(
+            tenant_id=payment.tenant_id,
+            reference_id=payment.id,
+            journal_reference_types=["SUPPLIER_PAYMENT"],
+            user=user,
+            document_label=f"سند صرف #{payment.id}",
+        )
+        payment.is_posted = False
+        payment.journal = None
+        payment.save(update_fields=["is_posted", "journal"])
+
+        # الشيكات الصادرة تعود مسودةً (عكسُ ما فعله الترحيل تماماً).
+        from accounting.models import Cheque
+        Cheque.objects.filter(
+            supplier_payment=payment, status="Under_Collection"
+        ).update(status="Draft")
+
+        create_audit_log(
+            tenant=payment.tenant,
+            user=user,
+            action="UNPOST",
+            model_name="SupplierPayment",
+            object_id=payment.id,
+            change_details=(
+                f"Unposted supplier payment {payment.id}: "
+                f"{result['journals_deleted']} journal(s)"
+            ),
+        )
+    logger.info(
+        "Unposted supplier payment %s (journals=%s).",
+        payment.id, result["journals_deleted"],
+    )
+    return result
+
+
 def allocate_supplier_payment(
     payment: 'SupplierPayment', allocations: list[dict], *, user=None
 ) -> 'SupplierPayment':

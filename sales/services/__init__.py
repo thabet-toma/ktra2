@@ -100,6 +100,7 @@ from .orders import (
 )
 from .supplier_vat import (
     post_supplier_payment,
+    unpost_supplier_payment,
     allocate_supplier_payment,
     build_vat_statement,
 )
@@ -185,6 +186,7 @@ __all__ = [
     "next_credit_debit_note_number",
     "post_credit_debit_note",
     "post_supplier_payment",
+    "unpost_supplier_payment",
     "allocate_supplier_payment",
     "build_vat_statement",
 ]

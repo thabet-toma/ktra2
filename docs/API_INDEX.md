@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **423**
+عدد النقاط: **424**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -309,6 +309,7 @@
 | `/api/logistics/supplier-payments/{pk}/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/allocate/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/post/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
+| `/api/logistics/supplier-payments/{pk}/unpost/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-quotations/` | `SupplierQuotationViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/supplier-quotations/{pk}/` | `SupplierQuotationViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/supplier-quotations/{pk}/convert-to-import-deal/` | `SupplierQuotationViewSet` | `logistics/views/procurement.py` |

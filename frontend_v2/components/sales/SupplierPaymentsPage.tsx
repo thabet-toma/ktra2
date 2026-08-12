@@ -23,8 +23,10 @@ import {
   type AseelToolbarAction,
   type AseelTab,
 } from "../aseel";
-import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split } from "lucide-react";
+import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split, Undo2 } from "lucide-react";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
+import { useConfirm } from "../../contexts/ConfirmContext";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import { VoucherAllocationModal } from "../shared/VoucherAllocationModal";
 import { NewSupplierPaymentModal } from "./NewSupplierPaymentModal";
 
@@ -58,6 +60,8 @@ const fmt = (n: string | number) => formatMoney(n);
 
 export const SupplierPaymentsPage: React.FC = () => {
   const navigate = useNavigate();
+  const confirm = useConfirm();
+  const { can: canPerm } = usePermissions();
   const [payments, setPayments] = useState<SupplierPaymentRow[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -154,6 +158,33 @@ export const SupplierPaymentsPage: React.FC = () => {
     }
   };
 
+  // T-UNPOSTRV (مرآة المورد): التراجع عن ترحيل سند مرحّل — الخادم يحذف قيوده
+  // ويعيد شيكاته إلى مسودة، وتعود فواتير الشراء الموزَّع عليها «غير مسدَّدة»
+  // تلقائياً (المدفوع مشتق من التوزيعات المرحّلة). السند يبقى مسودةً.
+  const handleUnpost = async (p: SupplierPaymentRow) => {
+    const allocCount = (p.allocations || []).length;
+    const ok = await confirm({
+      title: "التراجع عن ترحيل السند",
+      message:
+        `سيُحذف القيد المحاسبي للسند #${p.id} (${fmt(p.amount)})` +
+        (allocCount > 0
+          ? `، وستعود ${allocCount} فاتورة شراء «غير مسدَّدة» بقيمة توزيعها`
+          : "") +
+        "، ويعود السند مسودةً يمكن تعديلها أو حذفها. متابعة؟",
+      confirmText: "تراجع عن الترحيل",
+      danger: true,
+    });
+    if (!ok) return;
+    setErr(null);
+    try {
+      await purchaseInvoiceApi.unpostSupplierPayment(p.id);
+      setMsg("✓ تم التراجع عن ترحيل السند — عاد مسودة");
+      await load();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "فشل التراجع عن الترحيل");
+    }
+  };
+
   const partnerName = (id: number) => partners.find((p) => p.id === id)?.name || `#${id}`;
   const accountName = (id: number) => {
     const a = accounts.find((x) => x.id === id);
@@ -214,6 +245,11 @@ export const SupplierPaymentsPage: React.FC = () => {
           {!r.is_posted && (
             <button type="button" className="aseel-toolbtn" title="ترحيل" onClick={() => void handlePost(r.id)}>
               <Check className="w-3 h-3" />
+            </button>
+          )}
+          {r.is_posted && canPerm("purchase.payment.unpost") && (
+            <button type="button" className="aseel-toolbtn" title="تراجع عن الترحيل" onClick={() => void handleUnpost(r)}>
+              <Undo2 className="w-3 h-3" />
             </button>
           )}
           <button

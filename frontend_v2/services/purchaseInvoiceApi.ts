@@ -320,6 +320,21 @@ export const purchaseInvoiceApi = {
     return res.json();
   },
 
+  /**
+   * التراجع عن ترحيل سند صرف: يحذف قيوده ويعيد شيكاته إلى مسودة، وتعود
+   * فواتير الشراء الموزَّع عليها «غير مسدَّدة» تلقائياً (المدفوع مشتق من
+   * التوزيعات المرحّلة). الصلاحية: purchase.payment.unpost —
+   * مرآة `unpostCustomerPayment`.
+   */
+  unpostSupplierPayment: async (id: number): Promise<{ id: number; is_posted: boolean }> => {
+    const res = await safeFetch(`${API_BASE}/logistics/supplier-payments/${id}/unpost/`, {
+      method: "POST",
+      headers: headers(),
+    });
+    await handle(res, "unpostSupplierPayment");
+    return res.json();
+  },
+
   previewClearanceImport: async (body: {
     clearance_id: number;
     deal_ids: number[];

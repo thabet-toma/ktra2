@@ -174,6 +174,19 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
     def destroy(self, request, *args, **kwargs):
         payment = self.get_object()
         payment_id, partner_id = payment.id, payment.partner_id
+        # T-ARINT (مرآة المورد): حذف سند مرحّل كان يترك قيوده (مدين ذمم المورد)
+        # يتيمة وفواتيره «مدفوعة» بلا صرف. الحذف الآن يتراجع عن الترحيل أولاً —
+        # نفس عقد نظيره في sales/views.py (CustomerPayment.destroy).
+        if payment.is_posted:
+            require_perm(request, 'purchase.payment.unpost')
+            try:
+                from sales.services import unpost_supplier_payment
+                unpost_supplier_payment(payment, user=request.user)
+            except DjangoValidationError as e:
+                return Response(
+                    {'error': '؛ '.join(e.messages)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         response = super().destroy(request, *args, **kwargs)
         log_activity(
             action='delete', entity_type='supplier_payment', entity_id=payment_id,
@@ -223,5 +236,32 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
         )
         ser = SupplierPaymentSerializer(payment, context={'request': request})
         return Response(ser.data)
+
+    @action(detail=True, methods=['post'], url_path='unpost')
+    @requires_perm('purchase.payment.unpost')
+    def unpost_from_accounting(self, request, pk=None):
+        """التراجع عن ترحيل سند صرف: حذف قيوده وإعادة شيكاته إلى مسودة.
+
+        «المدفوع» على فواتير الشراء مشتق من التوزيعات المرحّلة، فتعود الفواتير
+        «غير مسدَّدة» تلقائياً — مرآة `/api/sales/payments/{id}/unpost/`.
+        """
+        payment = self.get_object()
+        try:
+            from sales.services import unpost_supplier_payment
+            result = unpost_supplier_payment(payment, user=request.user)
+        except DjangoValidationError as e:
+            return Response(
+                {'error': '؛ '.join(e.messages)}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:  # noqa: BLE001
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        payment.refresh_from_db()
+        log_activity(
+            action='unpost', entity_type='supplier_payment', entity_id=payment.id,
+            entity_label=f'#{payment.id}', description='التراجع عن ترحيل سند صرف مورد',
+            partner_ids=[payment.partner_id], request=request,
+        )
+        ser = SupplierPaymentSerializer(payment, context={'request': request})
+        return Response({**ser.data, 'unpost_result': result})
 
 

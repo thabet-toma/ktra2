@@ -42,6 +42,7 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
 def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:  # التراجع عن سند قبض (1029)
 def allocate_customer_payment(payment: CustomerPayment, allocations: list[dict], *, user=None) -> CustomerPayment:  # (2557)
 def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'SupplierPayment':  # يستدعيه logistics (3808)
+def unpost_supplier_payment(payment: 'SupplierPayment', *, user=None) -> dict:  # التراجع عن سند صرف — مرآة unpost_customer_payment؛ «المدفوع» على فواتير الشراء مشتق فلا مبالغ تُعكس
 def allocate_supplier_payment(payment: 'SupplierPayment', allocations: list[dict], *, user=None) -> 'SupplierPayment':  # (3896)
 def attach_voucher_and_post(invoice: SalesInvoice, *, cash_amount=0, cash_account_id=None, cheques=None, user=None) -> SalesInvoice:  # (859)
 def confirm_sales_order(order, *, user=None):  # تأكيد الطلبية = حجز بلا قيد (3336)
