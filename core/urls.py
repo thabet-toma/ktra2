@@ -52,6 +52,12 @@ urlpatterns = [
     path('api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>', whatsapp_views.whatsapp_webhook),
     path('api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>/', whatsapp_views.whatsapp_webhook),
     path('api/agent/query/', agent_db_view.agent_query),
+    path('api/agent/invoices/draft/', agent_db_view.agent_create_draft_invoice),
+    path('api/agent/invoices/draft/<int:pk>/', agent_db_view.agent_draft_invoice_detail),
+    path('api/agent/invoices/', agent_db_view.agent_list_invoices),
+    path('api/agent/suppliers/', agent_db_view.agent_suppliers),
+    path('api/agent/customers/', agent_db_view.agent_customers),
+    path('api/agent/products/', agent_db_view.agent_products),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.
     path('api/reports/', reports_api.reports_catalog),
