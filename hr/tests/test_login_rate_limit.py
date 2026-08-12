@@ -19,12 +19,10 @@ LOGIN_URL = "/api/hr/auth/login/"
 _LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
 
-@override_settings(
-    CACHES=_LOCMEM,
-    # ‏~30 محاولة دخول في هذه الحزمة — PBKDF2 الإنتاجي يجعلها ~27ث؛ المُجزّئ
-    # السريع يخصّ الاختبار ولا يغيّر ما يُختبر (منطق العدّ لا التجزئة).
-    PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"],
-)
+# المُجزّئ السريع كان مفروضاً هنا محلياً (‏~30 محاولة دخول في هذه الحزمة ⇒ ‎~27ث
+# بـPBKDF2). صار في `core/test_settings.py` للمجموعة كلها فأُزيل التكرار — لا
+# يبقى مصدران للقاعدة نفسها، أحدهما يوحي بأن العام لا يزال بطيئاً.
+@override_settings(CACHES=_LOCMEM)
 class LoginRateLimitTest(TestCase):
     @classmethod
     def setUpTestData(cls):

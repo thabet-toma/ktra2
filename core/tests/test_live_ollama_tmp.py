@@ -18,9 +18,17 @@ from tenants.services import create_company
 pytestmark = pytest.mark.django_db
 
 LIVE_KEY = os.environ.get("OLLAMA_API_KEY", "").strip()
+#: اشتراكٌ صريح لا مجرّد وجود مفتاح: مَن يشغّل المساعد محلياً يضبط
+#: `OLLAMA_API_KEY` في بيئته، فكان هذا الاختبار يخرج من التخطّي ويضرب واجهة
+#: مدفوعة في كل تشغيل — والخطة المجانية تردّ 403 على `qwen3.5:397b` ⇒ بوابةٌ
+#: حمراء بسببٍ لا علاقة له بالكود. CI بلا مفتاح فكانت تتخطّاه ولا ترى العطل.
+LIVE_OPT_IN = os.environ.get("OLLAMA_LIVE_TEST", "").strip() == "1"
 
 
-@pytest.mark.skipif(not LIVE_KEY, reason="no OLLAMA_API_KEY in env")
+@pytest.mark.skipif(
+    not (LIVE_KEY and LIVE_OPT_IN),
+    reason="اختبار حيّ: يلزمه OLLAMA_API_KEY و OLLAMA_LIVE_TEST=1",
+)
 def test_live_chat_calls_tool_and_answers(settings):
     settings.OLLAMA_BASE_URL = "https://ollama.com/v1"
     settings.OLLAMA_API_KEY = LIVE_KEY

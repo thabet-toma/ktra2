@@ -12,6 +12,7 @@ from django.db import transaction
 from django.core.exceptions import ValidationError
 
 from .models import Product, StockMovement
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -447,7 +448,7 @@ def receive_shipment_stock(shipment, movement_date=None):
     from logistics.models import LogisticsShipmentDeal, PurchaseInvoice, PurchaseInvoiceItem
 
     if movement_date is None:
-        movement_date = shipment.arrival_date or datetime.date.today()
+        movement_date = shipment.arrival_date or timezone.localdate()
 
     links = LogisticsShipmentDeal.objects.filter(
         shipment=shipment,
@@ -726,7 +727,7 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
     # أسبوعي = صافي (OUT − RETURN_IN) خلال 28 يوماً ÷ 4؛ شهري = 90 يوماً ÷ 3.
     import datetime as _dt
     from .models import StockMovement
-    today = _dt.date.today()
+    today = timezone.localdate()
 
     def _net_rate(days: int, divisor: str) -> Decimal:
         cutoff = today - _dt.timedelta(days=days)
@@ -1164,7 +1165,7 @@ def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = Fal
                 ]
             # تاريخ التسوية = آخر تاريخ بيع (ضمن فترة البيانات/الفترة المحاسبية المفتوحة).
             sale_dates = [m.movement_date for m in out_moves if m.movement_date]
-            txn_date = max(sale_dates) if sale_dates else datetime.date.today()
+            txn_date = max(sale_dates) if sale_dates else timezone.localdate()
             journal = post_journal(
                 tenant_id=tenant_id,
                 transaction_date=txn_date,

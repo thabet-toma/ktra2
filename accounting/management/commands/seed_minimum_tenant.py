@@ -3,6 +3,7 @@ from django.db import transaction
 from tenants.models import Tenant, Currency
 from accounting.models import Account, FiscalPeriod
 from datetime import date
+from django.utils import timezone
 
 ACCOUNT_TREE = [
     ('1000', 'الأصول', 'Asset', None),
@@ -73,7 +74,7 @@ class Command(BaseCommand):
                     acc.save()
                     self.stdout.write(f'  Account updated: {code} {name}')
 
-        today = date.today()
+        today = timezone.localdate()
         year = today.year
         fp, fp_created = FiscalPeriod.objects.get_or_create(
             tenant=tenant, name=str(year),

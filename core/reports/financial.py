@@ -20,6 +20,7 @@ from typing import Callable
 
 from django.db.models import Case, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 logger = logging.getLogger("core.reports")
 
@@ -61,7 +62,7 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
     الأساس هو المتبقّي على المستندات المرحّلة نفسها (لا رصيد الحساب) كي يبقى
     التقرير قابلاً للتفسير سطراً سطراً.
     """
-    today = _parse_date(params.get("as_of")) or datetime.date.today()
+    today = _parse_date(params.get("as_of")) or timezone.localdate()
     buckets: dict = {}
 
     if side == "customer":

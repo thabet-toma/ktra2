@@ -15,6 +15,7 @@ from datetime import date
 from core.modules import module_enabled
 
 from .models import AfterSalesSettings, WarrantyCard, add_months
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +177,7 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
     """
     from inventory.models import ProductSerial
 
-    today = today or date.today()
+    today = today or timezone.localdate()
     serial = (serial or "").strip()
     if not serial:
         return {"serial": "", "covered": False, "cards": [], "unit": None}

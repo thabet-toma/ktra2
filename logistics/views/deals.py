@@ -92,6 +92,7 @@ from logistics.services import (
     convert_import_quotation_to_deal,
     convert_purchase_order_to_invoice,
 )
+from django.utils import timezone
 
 logger = logging.getLogger("logistics.views")
 
@@ -705,7 +706,7 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 if not ok_cap:
                     return Response({"error": cap_err}, status=status.HTTP_400_BAD_REQUEST)
 
-                payment_date = payment_locked.transfer_date or datetime.date.today()
+                payment_date = payment_locked.transfer_date or timezone.localdate()
                 foreign_amount = payment_locked.amount
 
                 deal_currency = deal_locked.currency
@@ -930,9 +931,9 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                     try:
                         rev_date = datetime.datetime.strptime(raw_rev[:10], "%Y-%m-%d").date()
                     except ValueError:
-                        rev_date = datetime.date.today()
+                        rev_date = timezone.localdate()
                 else:
-                    rev_date = datetime.date.today()
+                    rev_date = timezone.localdate()
 
                 tenant = orig.tenant
 

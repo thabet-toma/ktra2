@@ -18,6 +18,7 @@ from .serializers import (
     CustomerNoteSerializer, PartnerBankAccountSerializer, PartnerListSerializer,
     PartnerSerializer, find_partner_with_similar_bank_account, normalize_identifier,
 )
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -514,7 +515,7 @@ class CustomerNoteViewSet(viewsets.ModelViewSet):
         qs = CustomerNote.objects.filter(
             tenant=tenant, partner_id=partner_id, is_done=False,
             priority=CustomerNote.PRIORITY_URGENT,
-            remind_on__isnull=False, remind_on__lte=date.today(),
+            remind_on__isnull=False, remind_on__lte=timezone.localdate(),
         ).order_by('remind_on', 'id')
         return Response([
             {
@@ -551,7 +552,7 @@ class CustomerNoteViewSet(viewsets.ModelViewSet):
             return Response([])
         qs = CustomerNote.objects.filter(
             tenant=tenant, is_done=False,
-            remind_on__isnull=False, remind_on__lte=date.today(),
+            remind_on__isnull=False, remind_on__lte=timezone.localdate(),
         ).select_related('partner').order_by('remind_on')
         return Response([
             {

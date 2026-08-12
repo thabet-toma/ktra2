@@ -91,6 +91,7 @@ from logistics.services import (
     convert_import_quotation_to_deal,
     convert_purchase_order_to_invoice,
 )
+from django.utils import timezone
 
 logger = logging.getLogger("logistics.views")
 
@@ -319,10 +320,10 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
             payment_date = (
                 datetime.date.fromisoformat(str(pd_raw)[:10])
                 if pd_raw
-                else datetime.date.today()
+                else timezone.localdate()
             )
         except Exception:
-            payment_date = datetime.date.today()
+            payment_date = timezone.localdate()
         notes = str(request.data.get("notes") or "").strip()
 
         cost_lines = clearance_cost_line_dicts(clearance)
@@ -521,10 +522,10 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                     rev_date = (
                         datetime.datetime.strptime(str(rev_date_raw)[:10], "%Y-%m-%d").date()
                         if rev_date_raw
-                        else datetime.date.today()
+                        else timezone.localdate()
                     )
                 except ValueError:
-                    rev_date = datetime.date.today()
+                    rev_date = timezone.localdate()
 
                 # المرحلة 2: القيد العكسي عبر accounting.api (يفحص الفترة
                 # والتوازن) مع نسخ عملة الأصل وسعر صرفه — الأصل يبقى مرحّلاً.

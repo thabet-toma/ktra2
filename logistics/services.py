@@ -12,6 +12,7 @@ from django.db import transaction
 
 from accounting.models import Account, Cheque
 from core.payments import document_payment_summary
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -929,7 +930,7 @@ def create_goods_receipt_document(
     if not lines and not allow_empty:
         return None
     tenant_id = getattr(tenant, 'TenantID', tenant)
-    default_date = (invoice.invoice_date if invoice else None) or datetime.date.today()
+    default_date = (invoice.invoice_date if invoice else None) or timezone.localdate()
     if receipt is None:
         receipt = GoodsReceipt.objects.create(
             tenant=tenant,
@@ -1010,7 +1011,7 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
         raise ValidationError("حدّد البنود والكميات المراد استلامها.")
 
     if movement_date is None:
-        movement_date = invoice.invoice_date or datetime.date.today()
+        movement_date = invoice.invoice_date or timezone.localdate()
 
     base_factor = Decimal(str(invoice.exchange_rate or 1))
     items_by_id = {it.id: it for it in invoice.items.select_related('product').all()}
@@ -1285,7 +1286,7 @@ def create_standalone_goods_receipt(
     if partner is None:
         raise ValidationError('حدّد المورد لسند الاستلام المستقل.')
 
-    movement_date = receipt_date or datetime.date.today()
+    movement_date = receipt_date or timezone.localdate()
     tenant_id = getattr(tenant, 'TenantID', tenant)
     products = {
         p.id: p for p in Product.objects.filter(
@@ -1550,7 +1551,7 @@ def create_purchase_return(
     from .models import PurchaseInvoice, PurchaseInvoiceItem
 
     if return_date is None:
-        return_date = datetime.date.today()
+        return_date = timezone.localdate()
     if partner is None:
         raise ValidationError("المورد مطلوب لمرجع الشراء.")
     if partner.tenant_id != tenant.TenantID:
@@ -1707,7 +1708,7 @@ def post_purchase_return(invoice, *, user=None):
 
     tenant = invoice.tenant
     partner = invoice.partner
-    return_date = invoice.invoice_date or datetime.date.today()
+    return_date = invoice.invoice_date or timezone.localdate()
     base_factor = _D(str(invoice.exchange_rate or 1))
 
     with transaction.atomic():

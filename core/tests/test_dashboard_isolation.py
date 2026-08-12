@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from accounting.models import Account, Currency, JournalHeader, JournalLine
@@ -47,14 +48,14 @@ class DashboardIsolationTest(APITestCase):
         partner = Partner.objects.create(tenant=cls.t_a, name="مورد قديم", partner_type="Supplier")
         deal = LogisticsDeal.objects.create(
             tenant=cls.t_a, ref_number="D-0001", partner=partner, currency=currency,
-            status="Open", total_amount=1000, order_date=datetime.date.today(),
+            status="Open", total_amount=1000, order_date=timezone.localdate(),
         )
         LogisticsPayment.objects.create(deal=deal, amount=250, is_posted=True,
-                                        transfer_date=datetime.date.today())
+                                        transfer_date=timezone.localdate())
         LogisticsShipment.objects.create(tenant=cls.t_a, shipment_number="SH-1", status="In-Transit")
         PurchaseInvoice.objects.create(
             tenant=cls.t_a, invoice_number="INV-1", partner=partner, currency=currency,
-            invoice_date=datetime.date.today(), status="draft", grand_total=500,
+            invoice_date=timezone.localdate(), status="draft", grand_total=500,
         )
         Product.objects.create(tenant=cls.t_a, sku="OLD-1", name_ar="صنف قديم",
                                quantity_on_hand=10, avg_cost=7)
@@ -65,7 +66,7 @@ class DashboardIsolationTest(APITestCase):
             tenant=cls.t_a,
             invoice_number="SALE-1",
             customer=customer,
-            invoice_date=datetime.date.today(),
+            invoice_date=timezone.localdate(),
             currency=currency,
             status=SalesInvoice.STATUS_POSTED,
             grand_total=900,
@@ -78,7 +79,7 @@ class DashboardIsolationTest(APITestCase):
         )
         journal = JournalHeader.objects.create(
             tenant=cls.t_a,
-            transaction_date=datetime.date.today(),
+            transaction_date=timezone.localdate(),
             is_posted=True,
             currency=currency,
             exchange_rate=1,
@@ -102,7 +103,7 @@ class DashboardIsolationTest(APITestCase):
             currency=currency,
             status="Open",
             total_amount=777,
-            order_date=datetime.date.today(),
+            order_date=timezone.localdate(),
         )
         PurchaseInvoice.objects.create(
             tenant=cls.t_b,

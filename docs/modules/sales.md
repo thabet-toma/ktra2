@@ -17,7 +17,7 @@
 | `sales/views.py` | ViewSets وإجراءات post/unpost/deliver/allocate | 1588 |
 | `sales/models.py` | 15 موديل: الإعدادات، الفاتورة وبنودها، الإرسالية، السندات، العروض والطلبيات | 1500 |
 | `sales/serializers.py` | تحقّق الحمولة وكتابة البنود المتداخلة | 1454 |
-| `sales/urls.py` | تسجيل 8 routers + 3 مسارات تقارير (مركّبة على `/api/sales/`، `core/urls.py:86`) | 43 |
+| `sales/urls.py` | تسجيل 8 routers + 3 مسارات تقارير (مركّبة على `/api/sales/`، `core/urls.py`) | 43 |
 
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
@@ -63,11 +63,11 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 ```
 
 ## أهم الـAPI endpoints
-كلها تحت البادئة `/api/sales/` (`core/urls.py:86`).
+كلها تحت البادئة `/api/sales/` (`core/urls.py`).
 
 | Method | المسار | الـview |
 |---|---|---|
-| GET/POST | `invoices/` | `SalesInvoiceViewSet` (`views.py:115`) |
+| GET/POST | `invoices/` | `SalesInvoiceViewSet` (`views.py`) |
 | POST | `invoices/{id}/post/` | `SalesInvoiceViewSet.post_invoice` (473) |
 | POST | `invoices/{id}/unpost/` | `SalesInvoiceViewSet.unpost_invoice` (328) |
 | POST | `invoices/{id}/deliver/` · `invoices/{id}/delivery-order/` | `deliver` (681) · `create_delivery_order` (655) |
@@ -81,22 +81,22 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 
 ## الاعتماديات
 **يعتمد على:**
-- `accounting` — **models مباشرةً كـFKs**: `sales/models.py:5` يستورد `Account, JournalHeader, TaxRate` على مستوى الوحدة (لا lazy). و`services` أيضاً: `sales/services.py:14-23` (`post_journal`, `unpost_document`, `validate_fiscal_period`, `convert_amount`…).
-- `inventory` — models + services: `sales/models.py:6-7` (`Product`, `SERIAL_MODE_CHOICES`)، و`sales/services.py:30` (`record_stock_movement`) و`:26-28` (`consume_sales_serials`, `release_sales_serials`, `restore_returned_sales_serials`).
-- `partners` (`sales/services.py:31-32`: `Partner`, `PartnerGroup`, `ensure_partner_linked_account`)، `tenants` (Tenant/Currency/Branch)، و`after_sales` عبر استيراد كسول داخل الترحيل (`views.py:351`, `services.py` عند `create_auto_warranty_cards`).
+- `accounting` — **models مباشرةً كـFKs**: `sales/models.py` يستورد `Account, JournalHeader, TaxRate` على مستوى الوحدة (لا lazy). و`services` أيضاً: `sales/services.py:14-23` (`post_journal`, `unpost_document`, `validate_fiscal_period`, `convert_amount`…).
+- `inventory` — models + services: `sales/models.py:6-7` (`Product`, `SERIAL_MODE_CHOICES`)، و`sales/services/` (`record_stock_movement`، `consume_sales_serials`, `release_sales_serials`, `restore_returned_sales_serials`).
+- `partners` (`sales/services.py:31-32`: `Partner`, `PartnerGroup`, `ensure_partner_linked_account`)، `tenants` (Tenant/Currency/Branch)، و`after_sales` عبر استيراد كسول داخل الترحيل (`views.py`, `services.py` عند `create_auto_warranty_cards`).
 
-**يعتمد عليه:** `logistics` (`views.py:26` + `post_supplier_payment` / `allocate_supplier_payment`)، `accounting` (`services.py:1007`, `serializers.py:151`, `views.py:356`)، `inventory` (`services.py:742,748` و`views.py:126` و`serials.py:162`)، `core` (`reports.py:420,1061,1234`, `payments.py:160`)، `accountant_portal` (`services.py:707`)، `after_sales`، `tenants`.
+**يعتمد عليه:** `logistics` (`views.py` + `post_supplier_payment` / `allocate_supplier_payment`)، `accounting` (`services.py`, `serializers.py`, `views.py`)، `inventory` (`services.py:742,748` و`views.py` و`serials.py`)، `core` (`reports.py:420,1061,1234`, `payments.py`)، `accountant_portal` (`services.py`)، `after_sales`، `tenants`.
 
 ## قواعد لا يجوز كسرها
-- **لا تعديل ولا حذف لفاتورة غير مسودة**: `views.py:273` و`:306` يرفضان بـ`POSTED_DOC_WARNING` مع `can_unpost: True`؛ ونفس المنع في `serializers.py:513`.
-- **لا إلغاء ترحيل (ولا حذف) لفاتورة عليها سند قبض مرحّل**: `guard_invoice_payments_before_unpost` (`services.py:959`) يُستدعى من `views.py:344` و`:314`. الاستثناء الوحيد هو سند التسوية النقدية التلقائي الذي يُحرَّر أولاً بـ`release_auto_cash_settlement` (`services.py:990`).
+- **لا تعديل ولا حذف لفاتورة غير مسودة**: `views.py` و`:306` يرفضان بـ`POSTED_DOC_WARNING` مع `can_unpost: True`؛ ونفس المنع في `serializers.py`.
+- **لا إلغاء ترحيل (ولا حذف) لفاتورة عليها سند قبض مرحّل**: `guard_invoice_payments_before_unpost` (`services.py`) يُستدعى من `views.py` و`:314`. الاستثناء الوحيد هو سند التسوية النقدية التلقائي الذي يُحرَّر أولاً بـ`release_auto_cash_settlement` (`services.py`).
 - **إلغاء الترحيل ذرّي وكامل**: داخل `transaction.atomic` واحد يُحرَّر السند التلقائي، تُعاد التسلسلات (`release_sales_serials`)، تُحذف بطاقات الكفالة التلقائية، ثم `unpost_document(journal_reference_types=["SALES_INVOICE","SALES_DELIVERY_COGS"], stock_reference_types=["SALE","STOCK_ISSUE"])`، وتُصفَّر `amount_paid` و`delivered_quantity` وتُحذف الإرساليات وتعود الشيكات `Under_Collection → Draft` (`views.py:340-379`).
-- **مجموع التوزيعات المرحّلة لا يتجاوز إجمالي الفاتورة**: `guard_invoice_allocation_total` (`services.py:912`) يُستدعى دائماً داخل معاملة بعد `select_for_update` على الفاتورة.
-- **خصم المخزون idempotent**: `_post_stock_out_for_invoice` (`services.py:1582`) يعود مبكراً إن وُجدت حركة `reference_type="SALE"` لنفس الفاتورة؛ ومثله `issue_stock_from_invoice` لـ`STOCK_ISSUE`.
-- **`delivery_status` مشتقّ لا يُحرَّر يدوياً**: `sync_invoice_delivery_status` (`services.py:1707`) هو المصدر الوحيد، وبنود الخدمات تُستثنى.
-- **الكمية المحجوزة لطلبية زبون آخر ليست متاحة**: `guard_reserved_stock` (`services.py:3244`) بعد قفل الأصناف، ومفتاحه `block_reserved_stock_sale`.
-- **رقم الفاتورة فريد داخل الشركة**: `UniqueConstraint(["tenant","invoice_number"])` (`models.py:536`).
-- **العميل والصنف يجب أن يتبعا نفس الـtenant** — يُفحص عند الترحيل (`services.py:1223` للعميل، `:1597` للصنف).
+- **مجموع التوزيعات المرحّلة لا يتجاوز إجمالي الفاتورة**: `guard_invoice_allocation_total` (`services.py`) يُستدعى دائماً داخل معاملة بعد `select_for_update` على الفاتورة.
+- **خصم المخزون idempotent**: `_post_stock_out_for_invoice` (`services.py`) يعود مبكراً إن وُجدت حركة `reference_type="SALE"` لنفس الفاتورة؛ ومثله `issue_stock_from_invoice` لـ`STOCK_ISSUE`.
+- **`delivery_status` مشتقّ لا يُحرَّر يدوياً**: `sync_invoice_delivery_status` (`services.py`) هو المصدر الوحيد، وبنود الخدمات تُستثنى.
+- **الكمية المحجوزة لطلبية زبون آخر ليست متاحة**: `guard_reserved_stock` (`services.py`) بعد قفل الأصناف، ومفتاحه `block_reserved_stock_sale`.
+- **رقم الفاتورة فريد داخل الشركة**: `UniqueConstraint(["tenant","invoice_number"])` (`models.py`).
+- **العميل والصنف يجب أن يتبعا نفس الـtenant** — يُفحص عند الترحيل (`services.py` للعميل، `:1597` للصنف).
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |

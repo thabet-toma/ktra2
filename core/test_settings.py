@@ -33,6 +33,15 @@ CLOUDINARY_STORAGE = {
 }
 
 
+# تهشير سريع — نفس منطق تعطيل الهجرات أعلاه: سرعةٌ بلا تنازل عن الصحة.
+# PBKDF2 بطيء **عمداً** (1,200,000 تكرار ⇒ قِيست 1,287 مللي للتهشيرة الواحدة على
+# جهاز التطوير)، والمجموعة تستدعي `create_user`/`create_superuser` أكثر من 300 مرة
+# ⇒ ~390 ثانية من زمن التشغيل تُحرَق في التهشير لا في اختبار سلوك. لا اختبار يعتمد
+# على الخوارزمية نفسها (`hr/tests/test_login_rate_limit.py` كان يفرض MD5 محلياً
+# لهذا السبب بالذات). `core/settings.py` الإنتاجي لا يُمسّ ويبقى على PBKDF2.
+PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
+
 class _DisableMigrations:
     """تُرجِع None لكل تطبيق ⇒ Django يعدّه بلا هجرات فيبني جداوله من النماذج (syncdb)."""
 

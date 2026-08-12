@@ -42,6 +42,7 @@ from sales.models import (
     SalesInvoiceLine,
     SalesSettings,
 )
+from django.utils import timezone
 
 logger = logging.getLogger("sales.services")
 
@@ -1281,7 +1282,7 @@ def create_standalone_delivery_note(
     if partner is None:
         raise ValidationError("حدّد العميل لسند التسليم المستقل.")
 
-    movement_date = delivery_date or datetime.date.today()
+    movement_date = delivery_date or timezone.localdate()
     tenant_id = getattr(tenant, "TenantID", tenant)
     products = {
         p.id: p

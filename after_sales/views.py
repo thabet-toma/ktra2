@@ -82,7 +82,7 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
 
         status_filter = (params.get("status") or "").strip()
         if status_filter in ("active", "expired"):
-            today = date.today()
+            today = timezone.localdate()
             queryset = (
                 queryset.filter(end_date__gte=today)
                 if status_filter == "active"
@@ -103,7 +103,7 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
 
         expiring = (params.get("expiring_within_days") or "").strip()
         if expiring.isdigit():
-            today = date.today()
+            today = timezone.localdate()
             queryset = queryset.filter(
                 end_date__gte=today,
                 end_date__lte=today + timedelta(days=int(expiring)),

@@ -18,6 +18,7 @@ from logistics.models import (
     LogisticsShipmentDeal,
 )
 from inventory.models import Product, ProductCategory, UnitOfMeasure
+from django.utils import timezone
 
 
 def _parse_date(v) -> datetime.date | None:
@@ -355,7 +356,7 @@ class Command(BaseCommand):
                 continue
 
             ref_number = d.get("dealNumber") or deal_doc.id
-            order_date = _parse_date(d.get("dealDate")) or datetime.date.today()
+            order_date = _parse_date(d.get("dealDate")) or timezone.localdate()
             total_amount = _to_decimal(d.get("totalAmount", 0))
             deal_status = _map_deal_status(d.get("status"))
             currency = get_currency_from_deal_or_default(d)

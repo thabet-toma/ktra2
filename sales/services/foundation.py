@@ -42,6 +42,7 @@ from sales.models import (
     SalesInvoiceLine,
     SalesSettings,
 )
+from django.utils import timezone
 
 logger = logging.getLogger("sales.services")
 
@@ -248,7 +249,7 @@ def dormant_customers(*, tenant_id: int, days: int | None = None) -> list[dict]:
         logger.info("dormant_customers tenant=%s disabled (days=0)", tenant_id)
         return []
 
-    today = date.today()
+    today = timezone.localdate()
     cutoff = today - timedelta(days=days)
     latest = (
         SalesInvoice.objects.filter(

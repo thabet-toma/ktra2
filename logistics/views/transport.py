@@ -91,6 +91,7 @@ from logistics.services import (
     convert_import_quotation_to_deal,
     convert_purchase_order_to_invoice,
 )
+from django.utils import timezone
 
 logger = logging.getLogger("logistics.views")
 
@@ -237,9 +238,9 @@ class LocalShipmentViewSet(BaseTenantViewSet):
             return Response({'error': 'اختر صندوقاً مربوطاً بحساب محاسبي.'}, status=status.HTTP_400_BAD_REQUEST)
         raw_date = request.data.get('payment_date')
         try:
-            payment_date = datetime.date.fromisoformat(str(raw_date)[:10]) if raw_date else datetime.date.today()
+            payment_date = datetime.date.fromisoformat(str(raw_date)[:10]) if raw_date else timezone.localdate()
         except (TypeError, ValueError):
-            payment_date = datetime.date.today()
+            payment_date = timezone.localdate()
         currency = shipment.currency or Currency.objects.filter(Code__iexact='ILS').first()
         exchange_rate = Decimal(str(shipment.exchange_rate or 1))
         try:

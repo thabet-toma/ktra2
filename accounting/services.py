@@ -8,6 +8,7 @@ from decimal import Decimal
 from partners.models import Partner
 from tenants.models import Currency, TenantBook
 from core.hooks import run_tax_period_guards
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ def get_exchange_rate(
         return Decimal("1")
 
     if effective_date is None:
-        effective_date = datetime.date.today()
+        effective_date = timezone.localdate()
     if isinstance(effective_date, str):
         effective_date = datetime.datetime.strptime(effective_date, "%Y-%m-%d").date()
 
@@ -1147,7 +1148,7 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             f"لا يمكن تنفيذ «{movement_type}» على شيك بحالة «{cheque.status}»."
         )
     next_status = STATUS_MAP[movement_type]
-    when = movement_date or _dt.date.today()
+    when = movement_date or timezone.localdate()
     amount = Decimal(str(cheque.amount or 0)).quantize(Decimal("0.01"))
 
     # T-BANKS: وجهة الإيداع/الصرف حساب بنكي مسجَّل — حسابه في الشجرة هو
@@ -1251,7 +1252,7 @@ def cheque_wallet(tenant_id: int, *, today=None) -> dict:
     import datetime as _dt
     from .models import Cheque
 
-    today = today or _dt.date.today()
+    today = today or timezone.localdate()
     rows = list(
         Cheque.objects
         .filter(tenant_id=tenant_id, status__in=CHEQUE_OPEN_STATUSES)

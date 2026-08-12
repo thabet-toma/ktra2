@@ -3,6 +3,11 @@
 > المرحلة 1 من `docs/REFACTOR_PROMPTS.md` — تحليل ثابت (AST) للكود بتاريخ 2026-08-11.
 > **عند تعارض هذا الملف مع الكود، الكود هو المرجع.**
 >
+> 📌 **هذا الملف لقطة تحليلية مؤرَّخة، لا وثيقة تنقّل.** ما يُنفَّذ منه صار
+> **مفروضاً آلياً** في `.importlinter` (ثلاثة عقود تعمل في CI) — فالعقود هناك هي
+> الحقيقة الحيّة، وهذا الملف يشرح «لماذا» ويحفظ ترتيب فكّ التشابك. للتنقّل
+> اليومي: `ARCHITECTURE.md` ثم `docs/modules/`.
+>
 > ⚠️ **تحديث المرحلة 2 (نفس اليوم):** المواضع الكاتبة الخمسة في §4-أ رُحّلت كلها إلى
 > `accounting.api` / `post_journal`، و`ensure_partner_linked_account` صارت
 > `accounting.api.ensure_partner_account` (§3 بند 6 مُنفَّذ)، والاستيراد الميت (§3
@@ -134,16 +139,16 @@
 | 3 | `logistics/views.py:2633-2660` | نفس النمط العكسي اليدوي — موضع ثانٍ | نفس ما سبق؛ نسخ-لصق يوحي بمواضع مستقبلية |
 | 4 | `logistics/accruals.py:155-174` | **موضع كتابة ثالث غير موثّق سابقاً**: ترحيل شحنة محلية بإنشاء قيد يدوي `is_posted=True` | يفحص الفترة ويسجّل audit يدوياً، لكنه يفوّت idempotency الـ`(reference_type, reference_id)` في `post_journal` — والمفارقة أن نفس الملف يستخدم `post_journal` في `:102` و`:226` |
 | 5 | `logistics/management/commands/purge_deals.py:81-82` | حذف `JournalLine`/`JournalHeader` جماعي مباشر | مسار الحذف الوحيد للقيود خارج accounting — أمر إدارة، لكنه يعمل على بيانات إنتاج |
-| 6 | `partners/signals.py` كـservice بحكم الواقع | `ensure_partner_linked_account` مستورد من `logistics/services.py:654`, `logistics/views.py:43`, `logistics/accruals.py:21`, `sales/services.py:32` | منطق أعمال يسكن في وحدة signals — 4 apps تعتمد على «أثر جانبي» كواجهة؛ مرشّح أول للانتقال لـ`accounting.api` (مرحلة 2-ج) |
-| 7 | `inventory/services.py:208` | `record_stock_movement` (الدالة الحرجة) يستورد `sales.SalesSettings` كسولاً لقرار المخزون السالب | **اتجاه معكوس**: inventory (طبقة سفلى) يعتمد على sales؛ القرار يخص المخزون ومكانه الطبيعي inventory |
-| 8 | `logistics/serializers.py:12` | `from sales.serializers import CHEQUE_DUE_DATE_REQUIRED` | استيراد ثابت من داخليات serializers لـapp آخر — مذكور في «الديون المؤجلة» |
-| 9 | `logistics/serializers.py:230` | `from partners.serializers import PartnerSerializer` | إعادة استخدام serializer عبر الحدود تربط عقد API الخاص بـlogistics بشكل partners الداخلي |
-| 10 | `sales/models.py:5` + `logistics/models.py:6` | FKs على مستوى الوحدة إلى `Account`/`JournalHeader`/`TaxRate` | ربط سكيمة: أي تغيير في accounting.models يموّج migrations في 4 apps (موثّق في ARCHITECTURE.md) |
+| 6 | `partners/signals.py` كـservice بحكم الواقع | `ensure_partner_linked_account` مستورد من `logistics/services.py`، `logistics/views/`، `logistics/accruals.py`، `sales/services/` | منطق أعمال يسكن في وحدة signals — 4 apps تعتمد على «أثر جانبي» كواجهة؛ مرشّح أول للانتقال لـ`accounting.api` (مرحلة 2-ج) |
+| 7 | `inventory/services.py` | `record_stock_movement` (الدالة الحرجة) يستورد `sales.SalesSettings` كسولاً لقرار المخزون السالب | **اتجاه معكوس**: inventory (طبقة سفلى) يعتمد على sales؛ القرار يخص المخزون ومكانه الطبيعي inventory |
+| 8 | `logistics/serializers/` | `from sales.serializers import CHEQUE_DUE_DATE_REQUIRED` | استيراد ثابت من داخليات serializers لـapp آخر — مذكور في «الديون المؤجلة» |
+| 9 | `logistics/serializers/` | `from partners.serializers import PartnerSerializer` | إعادة استخدام serializer عبر الحدود تربط عقد API الخاص بـlogistics بشكل partners الداخلي |
+| 10 | `sales/models.py` + `logistics/models.py` | FKs على مستوى الوحدة إلى `Account`/`JournalHeader`/`TaxRate` | ربط سكيمة: أي تغيير في accounting.models يموّج migrations في 4 apps (موثّق في ARCHITECTURE.md) |
 | 11 | `accounting/services.py:930-1013, 1498-1525` | accounting يستورد `sales.models`/`logistics.models`/`sales.services`/`logistics.services` | **دورة كاملة**: الطبقة التي يفترض أنها الأساس تستدعي من فوقها — تمنع أي فصل مستقبلي لـaccounting كحزمة مستقلة |
 | 12 | `accounting/serializers.py:75-167` + `accounting/views.py:313-365, 1355` | accounting يقرأ `LogisticsPayment`/`SalesInvoice`/`CustomerPayment` لعرض مراجع القيود | نفس الدورة من جهة العرض — فكّها يحتاج reference-resolver عام بدل استيراد مباشر |
 | 13 | `inventory/services.py:447,681,941,997` + `inventory/serials.py:150,162` | inventory يقرأ `logistics.models` و`sales.models` في مسارات التقارير والتسلسلات | اتجاه معكوس إضافي — inventory يعرف تفاصيل فواتير الشراء والبيع |
-| 14 | `core/reports.py` (7 مواضع: `:993-1774`) + `core/dashboard_api.py:13` | قراءة `JournalLine`/`JournalHeader`/`Cheque` مباشرة للتقارير | قراءة فقط، لكنها تربط التقارير بسكيمة القيود — أي تعديل سكيمة يكسر التقارير بصمت |
-| 15 | `logistics/signals.py:19` | `from accounting.models import JournalHeader, JournalLine` — **استيراد ميت** (غير مستخدم في الملف) | صفر أثر تشغيلي، لكنه يظهر في كل تحليل ويضخّم الغراف — حذفه سطر واحد في المرحلة 2-ب |
+| 14 | `core/reports/` + `core/dashboard_api.py` | قراءة `JournalLine`/`JournalHeader`/`Cheque` مباشرة للتقارير | قراءة فقط، لكنها تربط التقارير بسكيمة القيود — أي تعديل سكيمة يكسر التقارير بصمت |
+| 15 | `logistics/signals.py` | `from accounting.models import JournalHeader, JournalLine` — **استيراد ميت** (غير مستخدم في الملف) | صفر أثر تشغيلي، لكنه يظهر في كل تحليل ويضخّم الغراف — حذفه سطر واحد في المرحلة 2-ب |
 
 ## §4 — تصنيف استيرادات `accounting.models` (مدخل المرحلة 2)
 
@@ -166,20 +171,20 @@
 |---|---|
 | `partners/signals.py:104, 187` | `Account.objects.get_or_create/create` لحساب الشريك وحساب الرصيد الافتتاحي (أكواد hardcoded) |
 | `tenants/services.py:107, 151, 241` | زرع شجرة الحسابات عند إنشاء شركة (bootstrap مشروع، لكنه يثبّت الأكواد خارج accounting) |
-| `tenants/management/commands/heal_company_seed.py:61` | ترميم شجرة ناقصة |
-| `logistics/services.py:824` | `Account.objects.get_or_create` (حساب وسيط) |
+| `tenants/management/commands/heal_company_seed.py` | ترميم شجرة ناقصة |
+| `logistics/services.py` | `Account.objects.get_or_create` (حساب وسيط) |
 | `sales/services.py:406, 1953` | `Account.objects.get_or_create` |
 | `hr/payroll.py:75, 129` | `Account.objects.create` لحسابات الرواتب/السلف |
 
 ### 👁 قراءة فقط (كل البقية)
 
-- **`accountant_portal`**: `services.py:867-1168` (5 مواضع `JournalLine` aggregate)، `readiness.py:179`، `audit.py:27` (`AccountingAuditLog`).
-- **`core`**: `reports.py:993,1360,1420,1474,1630,1701,1774` · `dashboard_api.py:13` · `platform_admin_api.py:16`.
-- **`hr`**: `payroll.py:31` (`JournalLine` قراءة؛ الترحيل نفسه عبر `post_journal` — `payroll.py:277,355` ✅).
-- **`inventory`**: `services.py:590` (`Account` قراءة) · `management/commands/recompute_moving_wac_cogs.py:51`.
-- **`logistics`**: `serializers.py:10,2444` · `landed_cost.py:332` (`ExchangeRate`) · `services.py:13,884,1409` (قراءة — الترحيل عبر `post_journal`: `services.py:1190,1360,1770` ✅) · `payment_posting_diagnostics.py:10` · `models.py:6` (FKs) · `signals.py:19` (**ميت**) · `views.py:40,45,889` (قراءة + المواضع الكاتبة المذكورة أعلاه) · `management/commands/audit_freight_accruals.py:11`.
-- **`sales`**: `models.py:5` (FKs) · `serializers.py:6` · `services.py:14,201,784,1072,1513,2128,2519,3881` (قراءة `Cheque`/`TaxRate`/`JournalLine`؛ الترحيل عبر `post_journal`: `services.py:1482,1897,2102,2457,2479,3779,3856` ✅) · `views.py:376` · `management/commands/fix_legacy_cash_partner_tags.py:29`.
-- **`tenants`**: `services.py:6` (`Account`, `Currency` — للزرع أعلاه).
+- **`accountant_portal`**: `services.py:867-1168` (5 مواضع `JournalLine` aggregate)، `readiness.py`، `audit.py` (`AccountingAuditLog`).
+- **`core`**: `reports.py:993,1360,1420,1474,1630,1701,1774` · `dashboard_api.py` · `platform_admin_api.py`.
+- **`hr`**: `payroll.py` (`JournalLine` قراءة؛ الترحيل نفسه عبر `post_journal` — `payroll.py:277,355` ✅).
+- **`inventory`**: `services.py` (`Account` قراءة) · `management/commands/recompute_moving_wac_cogs.py`.
+- **`logistics`**: `serializers.py:10,2444` · `landed_cost.py` (`ExchangeRate`) · `services.py:13,884,1409` (قراءة — الترحيل عبر `post_journal`: `services.py:1190,1360,1770` ✅) · `payment_posting_diagnostics.py` · `models.py` (FKs) · `signals.py` (**ميت**) · `views.py:40,45,889` (قراءة + المواضع الكاتبة المذكورة أعلاه) · `management/commands/audit_freight_accruals.py`.
+- **`sales`**: `models.py` (FKs) · `serializers.py` · `services.py:14,201,784,1072,1513,2128,2519,3881` (قراءة `Cheque`/`TaxRate`/`JournalLine`؛ الترحيل عبر `post_journal`: `services.py:1482,1897,2102,2457,2479,3779,3856` ✅) · `views.py` · `management/commands/fix_legacy_cash_partner_tags.py`.
+- **`tenants`**: `services.py` (`Account`, `Currency` — للزرع أعلاه).
 
 > **خلاصة للمرحلة 2:** المسار الصحيح (`post_journal`) مستخدم فعلاً في sales وhr
 > ومعظم logistics — المخالفون الفعليون 4 مواضع تشغيلية فقط (§4-أ)، وهم هدف الترحيل
@@ -190,8 +195,8 @@
 
 1. **المواضع الكاتبة الأربعة (§4-أ) → `accounting.api`** — أصغر جراحة وأكبر أثر:
    توحيد نقطة كتابة القيود يعيد ضمانات الفترة/التوازن/الـidempotency للجميع.
-   ترتيبها الداخلي: `logistics/views.py:1223` (الأوضح) ← `logistics/views.py:2633`
-   ← `logistics/accruals.py:155` ← `partners/signals.py:202` (الأعقد — يحمل أيضاً
+   ترتيبها الداخلي: `logistics/views/` (الأوضح)
+   ← `logistics/accruals.py` ← `partners/signals.py` (الأعقد — يحمل أيضاً
    إنشاء حسابات بأكواد hardcoded).
 2. **`ensure_partner_linked_account` من `partners/signals` إلى واجهة عامة** —
    يفكّ 4 استيرادات فئة (ج) دفعة واحدة (`logistics×3` + `sales×1`) ويحرّر
@@ -199,12 +204,12 @@
 3. **الاستيرادان في `logistics/serializers.py:12,230`** — نقل الثابت
    `CHEQUE_DUE_DATE_REQUIRED` لموضع محايد وفكّ `PartnerSerializer` — يصفّر فئة (ج).
 4. **قرار المخزون السالب من `sales.SalesSettings` إلى inventory**
-   (`inventory/services.py:208`) — يفكّ أخطر اتجاه معكوس. يحتاج قرار منتج:
+   (`inventory/services.py`) — يفكّ أخطر اتجاه معكوس. يحتاج قرار منتج:
    نقل الحقل بـmigration أو واجهة قراءة — خارج نطاق المرحلة 2، وثّق فيها فقط.
 5. **دورة `accounting → sales/logistics`** (`accounting/services.py:930-1525`,
    `accounting/serializers.py:75-167`) — الأصعب: يحتاج نمط resolver/registry
    للمراجع بدل الاستيراد المباشر. يؤجَّل لما بعد استقرار `accounting.api`.
-6. **قراءات التقارير** (`core/reports.py`, `accountant_portal/services.py`) —
+6. **قراءات التقارير** (`core/reports/`، `accountant_portal/services.py`) —
    واجهة قراءة (`accounting.api.get_ledger_lines(...)`) — قيمتها تنظيمية أكثر منها
    سلوكية، آخر الأولويات.
 
@@ -235,5 +240,5 @@
 
 ## التحقق
 
-- `python manage.py test --settings=core.test_settings` → **1,025 اختباراً، OK (skipped=2)** قبل التغيير وبعده (التغيير لم يلمس أي `.py`).
+- `python manage.py test --settings=core.test_settings` → أخضر قبل التغيير وبعده (التغيير لم يلمس أي `.py`). العدد وقتها كان 1,025 وهو يتغيّر كل جلسة — العدد الحالي في `ARCHITECTURE.md` مولَّداً.
 - `lint-imports` → `Contracts: 3 kept, 0 broken` (مطابق للـbaseline أعلاه).

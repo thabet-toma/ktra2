@@ -26,6 +26,7 @@ from .services import (
     unpost_document,
     validate_fiscal_period,
 )
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ def reverse_journal(
     دائناً في العكس، وفرض الفحص كان سيجعل قيوداً مشروعة غير قابلة للعكس.
     """
     if transaction_date is None:
-        transaction_date = datetime.date.today()
+        transaction_date = timezone.localdate()
 
     with transaction.atomic():
         orig = (
@@ -465,7 +466,7 @@ def create_partner_opening_balance(partner) -> None:
         if not opening_offset_account:
             return
 
-        date = partner.opening_balance_date or datetime.date.today()
+        date = partner.opening_balance_date or timezone.localdate()
         amount = Decimal(str(partner.opening_balance))
         description = f"Opening Balance for {partner.name}"
         partner_line = {

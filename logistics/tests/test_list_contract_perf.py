@@ -229,6 +229,42 @@ class LogisticsListContractPerformanceTest(TestCase):
         self.assertEqual(detail.status_code, 200, detail.content)
         self.assertEqual(len(detail.data["items"]), 1)
 
+    def test_purchase_invoice_list_count_query_stays_flat(self):
+        """عدّ الترقيم يجب أن يبقى COUNT بسيطاً بلا GROUP BY.
+
+        أي تجميعة على مستوى الصفّ (`Count('items')` سابقاً) تفرض GROUP BY فيمنع
+        جانغو من تقليم التعليقات في استعلام العدّ، فتُنفَّذ استعلامات ملخّص الدفع
+        الفرعية لكل صفّ لا لصفوف الصفحة — قِيست 14 ثانية للعدّ وحده على مستأجر
+        بـ1,261 فاتورة، فتجاوزت مهلة قراءة MySQL (30 ثانية) وردّت 500.
+        """
+        empty_invoice = PurchaseInvoice.objects.create(
+            tenant=self.tenant,
+            invoice_number="PI-PERF-EMPTY",
+            invoice_name="Empty lines purchase",
+            invoice_date="2026-05-20",
+            partner=self.partner,
+            currency=self.currency,
+            grand_total=0,
+        )
+
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(
+                "/api/logistics/purchase-invoices/?page=1&page_size=2&invoice_type=local"
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+        count_queries = [
+            q["sql"] for q in captured if q["sql"].lstrip().startswith("SELECT COUNT(*)")
+        ]
+        self.assertEqual(len(count_queries), 1, count_queries)
+        self.assertNotIn("GROUP BY", count_queries[0].upper(), count_queries[0])
+
+        empty_row = self.client.get(
+            "/api/logistics/purchase-invoices/?page=1&search=Empty%20lines%20purchase"
+        ).data["results"][0]
+        self.assertEqual(empty_row["id"], empty_invoice.id)
+        # الاستعلام الفرعي يُرجع NULL لفاتورة بلا بنود — الـCoalesce يبقيها 0.
+        self.assertEqual(empty_row["items_count"], 0)
+
     def test_purchase_invoice_list_exposes_linked_payment_summary_and_supplier_balance(self):
         partial = self.purchase_invoices[0]
         paid = self.purchase_invoices[1]

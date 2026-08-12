@@ -87,12 +87,12 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 
 ## الاعتماديات
 **يعتمد على:**
-- `partners` — **models مباشرة**: `accounting/models.py:4` (`from partners.models import Partner`) لبناء `JournalLine.partner` (`models.py:143`) و`Cheque.partner` (`models.py:287`)، ويتحقق منه في `services.py` داخل `validate_journal_entry`.
-- `tenants` — **models مباشرة**: `accounting/models.py:2` (`Tenant, Currency`) و`accounting/services.py:9` (`Currency, TenantBook` لترقيم المستندات).
-- `core` — **services**: `accounting/services.py:10` (`from core.hooks import run_tax_period_guards`)، و`accounting/views.py:13-17` (`core.access`، `core.api_defaults`، `core.tenant_utils`).
-- استيرادات كسولة داخل الدوال (لكسر الدوران): `inventory.services` في `services.py:664`، `sales.models`/`logistics.models` في `services.py:930-931`، `sales.services`/`logistics.services` في `services.py:1007,1013`.
+- `partners` — **models مباشرة**: `accounting/models.py` (`from partners.models import Partner`) لبناء `JournalLine.partner` (`models.py`) و`Cheque.partner` (`models.py`)، ويتحقق منه في `services.py` داخل `validate_journal_entry`.
+- `tenants` — **models مباشرة**: `accounting/models.py` (`Tenant, Currency`) و`accounting/services.py` (`Currency, TenantBook` لترقيم المستندات).
+- `core` — **services**: `accounting/services.py` (`from core.hooks import run_tax_period_guards`)، و`accounting/views.py:13-17` (`core.access`، `core.api_defaults`، `core.tenant_utils`).
+- استيرادات كسولة داخل الدوال (لكسر الدوران): `inventory.services` في `services.py`، `sales.models`/`logistics.models` في `services.py:930-931`، `sales.services`/`logistics.services` في `services.py:1007,1013`.
 
-**يعتمد عليه:** `sales` (`sales/services.py:14-15`)، `logistics` (`logistics/services.py:13`، `logistics/services.py:999,1280,1699` لـ`post_journal`)، `inventory` (`inventory/services.py:1118,1281`)، `partners` (`partners/signals.py:10`، `partners/views.py:47`)، `core`، `hr`، `tenants`، `accountant_portal`.
+**يعتمد عليه:** `sales` (`sales/services.py:14-15`)، `logistics` (`logistics/services.py`، `logistics/services.py:999,1280,1699` لـ`post_journal`)، `inventory` (`inventory/services.py:1118,1281`)، `partners` (`partners/signals.py`، `partners/views.py`)، `core`، `hr`، `tenants`، `accountant_portal`.
 
 ## قواعد لا يجوز كسرها
 - **كل قيد يمرّ عبر `post_journal`** — هي وحدها تفرض الفترة المفتوحة والتوازن والـidempotency وقفل `select_for_update` (`accounting/services.py:479-636`). أي كتابة مباشرة لـ`JournalHeader`/`JournalLine` تتجاوز كل ذلك.
@@ -101,10 +101,10 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 - **التوازن دقيق بعد `quantize('0.01')`** ولا يُقبل قيد بمجموع صفر (`accounting/services.py:387-401`).
 - **`base_debit`/`base_credit` تُحسب في `JournalLine.save` من `exchange_rate` الرأس**، وسعر مفقود أو ≤ 0 يفشل بصوت عالٍ لا يسقط إلى 1 (`accounting/models.py:167-201`).
 - **`nature` الحساب مفروضة على الترحيل**: `debit_only` يرفض أي دائن و`credit_only` يرفض أي مدين (`accounting/services.py:593-607`).
-- **`JournalLine.account` بـ`PROTECT`** — لا يُحذف حساب له حركة (`accounting/models.py:126`)؛ و`debit`/`credit` بقيدَي `CheckConstraint` غير سالبين (`models.py:156-165`).
+- **`JournalLine.account` بـ`PROTECT`** — لا يُحذف حساب له حركة (`accounting/models.py`)؛ و`debit`/`credit` بقيدَي `CheckConstraint` غير سالبين (`models.py:156-165`).
 - **كل قراءة مُنطاقة بالشركة**: `tenant is None ⇒ .none()` في `JournalViewSet.get_queryset` و`AccountViewSet.get_queryset` (`accounting/views.py:288-291`, `81-84`).
 - **الشيك لا يتحرك خارج `VALID_TRANSITIONS`** — `Cheque.change_status` يرفض الانتقال غير المسموح ويسجّل `ChequeMovement` (`accounting/models.py:329-376`).
-- **لا تُقفل مطابقة بنكية بفرق ≥ 0.01** (`accounting/services.py:1441-1452`)، وكل `JournalLine` تُطابَق مرة واحدة (`models.py:645`).
+- **لا تُقفل مطابقة بنكية بفرق ≥ 0.01** (`accounting/services.py:1441-1452`)، وكل `JournalLine` تُطابَق مرة واحدة (`models.py`).
 - **`create_audit_log` يجب أن يبقى معزولاً** — سطر تدقيق فاشل لا يجوز أن يُرجِع معاملة المستدعي (سبب اختبار `test_audit_log_isolation`).
 
 ## الاختبارات المهمة

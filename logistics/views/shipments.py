@@ -91,6 +91,7 @@ from logistics.services import (
     convert_import_quotation_to_deal,
     convert_purchase_order_to_invoice,
 )
+from django.utils import timezone
 
 logger = logging.getLogger("logistics.views")
 
@@ -575,7 +576,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 if not ok_cap:
                     return Response({'error': cap_err}, status=status.HTTP_400_BAD_REQUEST)
 
-                payment_date = payment_locked.transfer_date or datetime.date.today()
+                payment_date = payment_locked.transfer_date or timezone.localdate()
                 foreign_amount = payment_locked.amount
 
                 usd_currency = Currency.objects.filter(Code__iexact='USD').first()
@@ -768,7 +769,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
         try:
             journal = post_journal(
                 tenant_id=tenant.TenantID,
-                transaction_date=shipment.departure_date or datetime.date.today(),
+                transaction_date=shipment.departure_date or timezone.localdate(),
                 reference_type='LOGISTICS_SHIPMENT',
                 reference_id=shipment.id,
                 description=f"تكلفة شحن | شحنة: {shipment.shipment_number} | وكيل: {shipment.shipping_agent.name}",

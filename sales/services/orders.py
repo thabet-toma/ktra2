@@ -53,6 +53,7 @@ DEC = Decimal("0.01")
 from .numbering import default_order_reserved_until, next_invoice_number, next_order_number, reserved_quantity_map
 from .calc import _default_revenue_account, _resolve_ar_account
 from .flow import post_customer_payment
+from django.utils import timezone
 
 def _recalculate_order_totals(order) -> None:
     """يعيد حساب إجماليات الطلبية من بنودها (بلا ضريبة سطرية بعد — مسجّل)."""
@@ -320,7 +321,7 @@ def record_order_deposit(order, *, amount, cash_account_id, user=None, payment_d
         payment = CustomerPayment.objects.create(
             tenant=order.tenant,
             partner=order.customer,
-            payment_date=payment_date or _date.today(),
+            payment_date=payment_date or timezone.localdate(),
             amount=amount,
             currency=order.currency,
             exchange_rate=order.exchange_rate,

@@ -20,6 +20,7 @@ from accounting.models import Account, JournalHeader
 from accounting.api import ensure_partner_account
 from accounting.services import create_audit_log, post_journal, validate_fiscal_period
 from tenants.models import Currency
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
         'description': f"استحقاق تخليص — {clearance.shipment.shipment_number}"[:500],
     })
 
-    transaction_date = clearance.clearance_date or datetime.date.today()
+    transaction_date = clearance.clearance_date or timezone.localdate()
     validate_fiscal_period(clearance.tenant, transaction_date)
     journal = post_journal(
         tenant_id=clearance.tenant_id,
@@ -147,7 +148,7 @@ def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
     if not credit_account:
         raise AccrualSkipped('الناقل لا يملك حساب محاسبي مرتبط.')
 
-    td = shipment.delivery_date or shipment.pickup_date or datetime.date.today()
+    td = shipment.delivery_date or shipment.pickup_date or timezone.localdate()
     validate_fiscal_period(tenant, td)
 
     # تسمية القيود: المدين «استحقاق نقل» والدائن «ارسالية» (مصطلح المالك) —
@@ -225,7 +226,7 @@ def post_freight_accrual(shipment, rate, user=None) -> Optional[JournalHeader]:
     if not expense_account:
         raise AccrualSkipped('لا يوجد حساب «مصاريف الشحن الدولي» (5301) في شجرة الحسابات.')
 
-    td = shipment.departure_date or shipment.arrival_date or datetime.date.today()
+    td = shipment.departure_date or shipment.arrival_date or timezone.localdate()
     validate_fiscal_period(tenant, td)
 
     desc = f"استحقاق شحن دولي | شحنة: {shipment.shipment_number} | وكيل: {agent.name}"

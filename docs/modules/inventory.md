@@ -18,7 +18,7 @@
 | `inventory/serials.py` | كل منطق الأرقام التسلسلية للشراء والبيع (وحدة مستقلة عن services) | 765 |
 | `inventory/models.py` | 11 موديل: الصنف، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد | 465 |
 | `inventory/serializers.py` | تمثيل الصنف والحركة والمستندات | 353 |
-| `inventory/urls.py` | 8 routers مركّبة على `/api/inventory/` (`core/urls.py:82`) | 21 |
+| `inventory/urls.py` | 8 routers مركّبة على `/api/inventory/` (`core/urls.py`) | 21 |
 
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
@@ -88,11 +88,11 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 ```
 
 ## أهم الـAPI endpoints
-كلها تحت البادئة `/api/inventory/` (`core/urls.py:82`).
+كلها تحت البادئة `/api/inventory/` (`core/urls.py`).
 
 | Method | المسار | الـview |
 |---|---|---|
-| GET/POST | `products/` | `ProductViewSet` (`views.py:81`) |
+| GET/POST | `products/` | `ProductViewSet` (`views.py`) |
 | GET | `products/{id}/profile/` · `products/{id}/stock-ledger/` · `products/{id}/cost-breakdown/` | (405) · (411) · (433) |
 | GET | `products/{id}/stock-movements/` · `products/{id}/invoices/` | (398) · (426) |
 | GET | `products/{id}/serials/` · POST `products/{id}/serials/register/` | (559) · (570) |
@@ -107,21 +107,21 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 
 ## الاعتماديات
 **يعتمد على:** (كل الاستيرادات عبر أبواب أخرى **كسولة داخل الدوال** — الملف يستورد على مستوى الوحدة من `tenants` و`partners` فقط، `models.py:2-3`)
-- `sales.models.SalesSettings` — لقرار السماح بالمخزون السالب داخل `record_stock_movement` (`inventory/services.py:208`)، ولنمط الأرقام التسلسلية (`inventory/serials.py:162`)، ولنموذج التكلفة (`inventory/services.py:1097`).
-- `sales.services` — `reserved_quantity_map` و`last_sale_price` في بطاقة الصنف (`inventory/services.py:742` و`:748`)، و`reserved_quantity_map` في العرض (`inventory/views.py:126`).
-- `logistics.models` — `PurchaseInvoice/PurchaseInvoiceItem/PurchaseSettings` (`inventory/services.py:447,681,941` و`serials.py:150`)؛ و`accounting.services.post_journal` لقيد الجرد والتحويل (`services.py:1118`, `:1281`).
+- `sales.models.SalesSettings` — لقرار السماح بالمخزون السالب داخل `record_stock_movement` (`inventory/services.py`)، ولنمط الأرقام التسلسلية (`inventory/serials.py`)، ولنموذج التكلفة (`inventory/services.py`).
+- `sales.services` — `reserved_quantity_map` و`last_sale_price` في بطاقة الصنف (`inventory/services.py` و`:748`)، و`reserved_quantity_map` في العرض (`inventory/views.py`).
+- `logistics.models` — `PurchaseInvoice/PurchaseInvoiceItem/PurchaseSettings` (`inventory/services.py:447,681,941` و`serials.py`)؛ و`accounting.services.post_journal` لقيد الجرد والتحويل (`services.py`, `:1281`).
 - `accounting.models.Account` عبر FKs بسلسلة نصية (`'accounting.Account'`) في `ProductCategory` و`Product` — لا استيراد مباشر.
 
-**يعتمد عليه:** `sales` (`models.py:6-7`, `services.py:26-30`)، `logistics` (`models.py:4-5`, `services.py:996-998,1278-1281,1697-1698`, `views.py:3455-4123`)، `accounting` (`services.py:664`)، `core` (`dashboard_api.py:17`, `reports.py`, `pricing.py`, `plans.py`)، `after_sales` (`services.py:57,177`)، `bridge`.
+**يعتمد عليه:** `sales` (`models.py:6-7`, `services.py:26-30`)، `logistics` (`models.py:4-5`, `services.py:996-998,1278-1281,1697-1698`, `views.py:3455-4123`)، `accounting` (`services.py`)، `core` (`dashboard_api.py`, `reports.py`, `pricing.py`, `plans.py`)، `after_sales` (`services.py:57,177`)، `bridge`.
 
 ## قواعد لا يجوز كسرها
 - **لا يُعدَّل `quantity_on_hand` أو `avg_cost` إلا عبر `record_stock_movement`** (أو `_recompute_product_stock` بعد حذف حركات). هي الدالة الوحيدة التي تقفل الصنف بـ`select_for_update` داخل `transaction.atomic` (`services.py:187-188`) وتحفظ لقطات before/after على الحركة.
-- **الكمية موجبة دائماً**: `record_stock_movement` يرفض `quantity <= 0` (`services.py:180`) — الاتجاه يأتي من `movement_type` لا من إشارة الكمية.
+- **الكمية موجبة دائماً**: `record_stock_movement` يرفض `quantity <= 0` (`services.py`) — الاتجاه يأتي من `movement_type` لا من إشارة الكمية.
 - **معادلة WAC**: الوارد يعدّل المتوسط `new_avg = (old_qty*old_avg + qty*cost) / new_qty`؛ **الصادر لا يغيّر `avg_cost` إطلاقاً** ويأخذ تكلفته من المتوسط الحالي (`services.py:226-229`). و`_recompute_product_stock` يعيد تطبيق نفس المعادلة بالترتيب الزمني (`:287-296`).
 - **المخزون السالب**: يُرفض الصرف إن `qty_before < quantity` إلا إذا سمح `SalesSettings.allow_negative_stock_default` أو `Product.allow_negative_stock` (`services.py:206-224`) — أي أن قرار مخزون يعيش في `sales` لا هنا.
 - **`RETURN_IN` بلا تكلفة يأخذ المتوسط الحالي** كي لا ينحرف WAC (`services.py:195-196`).
 - **عكس الحركات محصور بالمستند**: `reverse_stock_movements` يفلتر بـ`(tenant, reference_id, reference_type ∈ types)` ثم يُعيد احتساب كل صنف متأثر (`services.py:311-324`) — فلا تُمَسّ حركات مستند آخر.
-- **نموذج التكلفة قرارٌ في مكان واحد**: `apply_purchase_cost_model` (`services.py:1087`) — إن كانت الشركة على WAC المتحرك فلا يُدهَس `avg_cost` الذي بناه `record_stock_movement`؛ وإلا يُضبط من متوسط المشتريات.
+- **نموذج التكلفة قرارٌ في مكان واحد**: `apply_purchase_cost_model` (`services.py`) — إن كانت الشركة على WAC المتحرك فلا يُدهَس `avg_cost` الذي بناه `record_stock_movement`؛ وإلا يُضبط من متوسط المشتريات.
 - **الوحدة المُرقَّمة تُستهلَك بترحيل البيع لا بخروجها**: `consume_sales_serials` يتخطّى البند الذي استُهلكت وحداته فعلاً (`serials.py:532-535`) فإعادة الترحيل idempotent؛ والمختار صريحاً يجب أن يكون `in_stock` ولنفس الصنف وإلا رُفض (`:549-555`)، و`required` يرفض النقص (`:570-574`).
 - **الترقيم يصف مخزوناً قائماً ولا يخلقه**: `register_existing_serials` سقفه رصيد الصنف ولا يُنشئ حركة مخزون ولا قيداً (`serials.py:247-259`).
 - **التحويل بين المستودعات بلا قيد محاسبي** — صافي أثره على إجمالي الشركة صفر (`models.py:382-384`).

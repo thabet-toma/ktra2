@@ -15,6 +15,7 @@ from datetime import date
 from django.db import models
 
 from tenants.models import Tenant
+from django.utils import timezone
 
 
 def add_months(start: date, months: int) -> date:
@@ -120,10 +121,10 @@ class WarrantyCard(models.Model):
 
     # ── الحالة مشتقّة، لا مخزّنة ──────────────────────────────────────────
     def is_active_on(self, today: date | None = None) -> bool:
-        return self.end_date >= (today or date.today())
+        return self.end_date >= (today or timezone.localdate())
 
     def days_remaining(self, today: date | None = None) -> int:
-        return (self.end_date - (today or date.today())).days
+        return (self.end_date - (today or timezone.localdate())).days
 
     def status_on(self, today: date | None = None) -> str:
         return "active" if self.is_active_on(today) else "expired"
@@ -131,7 +132,7 @@ class WarrantyCard(models.Model):
     def supplier_active_on(self, today: date | None = None) -> bool:
         if self.supplier_warranty_end_date is None:
             return False
-        return self.supplier_warranty_end_date >= (today or date.today())
+        return self.supplier_warranty_end_date >= (today or timezone.localdate())
 
 
 class ServiceOrder(models.Model):

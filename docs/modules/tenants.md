@@ -11,22 +11,22 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 ## آلية عزل الشركات (القاعدة العابرة للنظام)
 **لا يوجد middleware للشركة** (`core/settings.py:113-125`). العزل ثلاثي الطبقات، وكلّه على مستوى الطلب:
 
-1. **الحل (Resolution)** — `core/tenant_utils.py:25` `get_tenant(request)`: يقرأ ترويسة **`X-Tenant-Id`** أولاً؛ ثم `user.tenant_id`؛
+1. **الحل (Resolution)** — `core/tenant_utils.py` `get_tenant(request)`: يقرأ ترويسة **`X-Tenant-Id`** أولاً؛ ثم `user.tenant_id`؛
    ثم auto-resolve إن كانت في القاعدة شركة واحدة فقط. **لا سقوط عشوائي إلى شركة**؛ الفشل يُرجِع `None` (أو `PermissionDenied` مع `raise_on_missing=True`).
-2. **التحقق من العضوية** — `core/tenant_utils.py:118` `_validate_user_tenant_access`: يبحث عن `UserCompanyMembership(user, tenant)`؛
+2. **التحقق من العضوية** — `core/tenant_utils.py` `_validate_user_tenant_access`: يبحث عن `UserCompanyMembership(user, tenant)`؛
    غيابها ⇒ `PermissionDenied` مع تسجيل `SECURITY ALERT` (`:136-143`). السوبر يُوزر يتجاوز. شركة `Status='suspended'` تُرفض لغير السوبر أدمن (`:167-177`).
    الدور المُكتشَف يُخزَّن على الطلب في `request._tenant_membership_role` (`:165`) لتستعمله طبقة الصلاحيات بلا استعلام ثانٍ.
 3. **فلترة الـqueryset** — `core/mixins.py:7-20` `TenantQuerySetMixin.get_queryset` يُطبّق `qs.filter(tenant=tenant)`، **ويُرجع `.none()` إن لم تُحَل الشركة**؛
    و`TenantCreateMixin.perform_create` (`core/mixins.py:22-33`) يحقن الشركة عند الإنشاء ويرفع 400 بدل السقوط إلى `tenant_id=1`.
-   `BaseTenantViewSet` (`core/mixins.py:35`) يجمع الاثنين وترثه ViewSets كل الـapps.
+   `BaseTenantViewSet` (`core/mixins.py`) يجمع الاثنين وترثه ViewSets كل الـapps.
 
 فوق ذلك، `DEFAULT_PERMISSION_CLASSES = [IsAuthenticated, core.permissions.TenantRolePermission]` (`core/settings.py:374-377`) —
-و`TenantRolePermission` (`core/permissions.py:16`) يمنع أي كتابة من دور `viewer` ويقيّد `legal_accountant` بمسارات `/api/accountant/` فقط.
+و`TenantRolePermission` (`core/permissions.py`) يمنع أي كتابة من دور `viewer` ويقيّد `legal_accountant` بمسارات `/api/accountant/` فقط.
 
 **الأدوار والصلاحيات** — `UserCompanyMembership.role` من سبعة: manager / accountant / legal_accountant / sales / procurement / staff / viewer (`tenants/models.py:280-288`).
-الترتيب النهائي للصلاحية (`core/access.py:352-383`): **افتراضي الدور** (`ROLE_DEFAULTS`, `core/access.py:244`) ← **تجاوز الدور** (`RolePermission`) ← **تجاوز العضو** (`MemberPermission`, الأعلى).
-المدير مستثنى من كل تجاوز فلا يُقفَل خارج نظامه (`core/access.py:359-361`). الإنفاذ خادمي عبر `require_perm` / `@requires_perm` (`core/access.py:389`, `:408`)؛
-`/api/permissions/me` للعرض فقط. وحدة الاستيراد طبقة ثانية مستقلة: `Tenant.import_enabled` (سوبر أدمن) × `UserCompanyMembership.can_access_import` (مدير الشركة) — `core/import_access.py:40`.
+الترتيب النهائي للصلاحية (`core/access.py:352-383`): **افتراضي الدور** (`ROLE_DEFAULTS`, `core/access.py`) ← **تجاوز الدور** (`RolePermission`) ← **تجاوز العضو** (`MemberPermission`, الأعلى).
+المدير مستثنى من كل تجاوز فلا يُقفَل خارج نظامه (`core/access.py:359-361`). الإنفاذ خادمي عبر `require_perm` / `@requires_perm` (`core/access.py`, `:408`)؛
+`/api/permissions/me` للعرض فقط. وحدة الاستيراد طبقة ثانية مستقلة: `Tenant.import_enabled` (سوبر أدمن) × `UserCompanyMembership.can_access_import` (مدير الشركة) — `core/import_access.py`.
 
 ## أهم الملفات
 | الملف | الغرض | أسطر |
@@ -92,26 +92,26 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 
 ## الاعتماديات
 **يعتمد على:**
-- `accounting` (models مباشرة) — `tenants/services.py:6` `from accounting.models import Account, Currency`؛ `create_company` يزرع شجرة الحسابات صفاً صفاً (`services.py:11-89`, `:245-258`).
-- `inventory` (models مباشرة، استيراد مؤجَّل داخل الدالة) — `tenants/services.py:256` `from inventory.models import Warehouse` لإنشاء المستودع الافتراضي.
-- `core` — `tenants/views.py:13` `from core.access import require_perm`؛ و`tenants/services.py:274` `from core.tenant_utils import invalidate_tenant_cache`.
-- `accountant_portal` (استيراد مؤجَّل من `core/tenant_utils.py:145`) لفحص ارتباط المحاسب القانوني.
+- `accounting` (models مباشرة) — `tenants/services.py` `from accounting.models import Account, Currency`؛ `create_company` يزرع شجرة الحسابات صفاً صفاً (`services.py:11-89`, `:245-258`).
+- `inventory` (models مباشرة، استيراد مؤجَّل داخل الدالة) — `tenants/services.py` `from inventory.models import Warehouse` لإنشاء المستودع الافتراضي.
+- `core` — `tenants/views.py` `from core.access import require_perm`؛ و`tenants/services.py` `from core.tenant_utils import invalidate_tenant_cache`.
+- `accountant_portal` (استيراد مؤجَّل من `core/tenant_utils.py`) لفحص ارتباط المحاسب القانوني.
 - `tenants/models.py` نفسه بلا اعتماديات على apps أخرى (Django فقط) — لذا يصحّ استيراده من الجميع بلا دورة.
 
 **يعتمد عليه:** فعلياً **كل app**: `sales`, `logistics`, `accounting`, `inventory`, `partners`, `hr`, `realestate`, `after_sales`, `bridge`, `device_registry`, `accountant_portal`, `core`.
-أمثلة: `logistics/models.py:2` · `accounting/models.py:2` (يستورد `Tenant, Currency` ويعيد تصديرهما فعلياً) · `hr/models.py` · `realestate/models.py` · `sales/models.py`.
+أمثلة: `logistics/models.py` · `accounting/models.py` (يستورد `Tenant, Currency` ويعيد تصديرهما فعلياً) · `hr/models.py` · `realestate/models.py` · `sales/models.py`.
 
 ## قواعد لا يجوز كسرها
-- **كل model يحمل `tenant` FK، وكل ViewSet يفلتر عليه.** استخدم `BaseTenantViewSet` (`core/mixins.py:35`) ولا تكتب `get_queryset` بلا فلتر شركة.
-- **لا سقوط افتراضي إلى شركة**: `get_tenant` يُرجع `None` لا شركةً عشوائية (`core/tenant_utils.py:104-114`)، و`TenantQuerySetMixin` يُرجع `.none()` عندها (`core/mixins.py:19`) — لا `tenant_id=1` (`core/mixins.py:28-31`).
-- **العضوية شرط الوصول**: `_validate_user_tenant_access` يرفع `PermissionDenied` لغير العضو (`core/tenant_utils.py:143`)، والسوبر يوزر وحده يتجاوز (`:126-127`).
-- **الصلاحية تُفحص خادمياً** بـ`require_perm`/`@requires_perm` (`core/access.py:389`, `:408`) — إخفاء زر في الواجهة ليس حماية (موثَّق في `core/access.py:17-18`).
+- **كل model يحمل `tenant` FK، وكل ViewSet يفلتر عليه.** استخدم `BaseTenantViewSet` (`core/mixins.py`) ولا تكتب `get_queryset` بلا فلتر شركة.
+- **لا سقوط افتراضي إلى شركة**: `get_tenant` يُرجع `None` لا شركةً عشوائية (`core/tenant_utils.py:104-114`)، و`TenantQuerySetMixin` يُرجع `.none()` عندها (`core/mixins.py`) — لا `tenant_id=1` (`core/mixins.py:28-31`).
+- **العضوية شرط الوصول**: `_validate_user_tenant_access` يرفع `PermissionDenied` لغير العضو (`core/tenant_utils.py`)، والسوبر يوزر وحده يتجاوز (`:126-127`).
+- **الصلاحية تُفحص خادمياً** بـ`require_perm`/`@requires_perm` (`core/access.py`, `:408`) — إخفاء زر في الواجهة ليس حماية (موثَّق في `core/access.py:17-18`).
 - **المدير لا يُجرَّد بصلاحية**: `user_permissions` يعود مبكراً للمدير قبل تطبيق أي تجاوز (`core/access.py:359-361`).
-- **لا يُترك تينانت بلا مدير**: `is_last_manager` (`services.py:352`) + `_assert_not_last_manager` (`views.py:339`).
+- **لا يُترك تينانت بلا مدير**: `is_last_manager` (`services.py`) + `_assert_not_last_manager` (`views.py`).
 - **حذف الشركة ممنوع من الـAPI** نهائياً (`tenants/views.py:280-282`).
 - **ترقيم المستندات عبر `TenantBook.get_next_number` فقط** — قفل صف `select_for_update` داخل `transaction.atomic` (`models.py:244-273`)؛ لا تحسب `last_used_number + 1` يدوياً.
 - **الفرع يشارك الشجرة/الأصناف/الشركاء ويعزل الفواتير والمخزون والقيود** عبر بُعد `branch` (`models.py:141-149`, `services.py:374-380`) — لا تنسخ شجرة حسابات لفرع.
-- **`viewer` قراءة فقط** على مستوى المنصة (`core/permissions.py:84`)، و`legal_accountant` يكتب من `/api/accountant/` فقط (`core/permissions.py:74-81`).
+- **`viewer` قراءة فقط** على مستوى المنصة (`core/permissions.py`)، و`legal_accountant` يكتب من `/api/accountant/` فقط (`core/permissions.py:74-81`).
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |

@@ -16,6 +16,7 @@ from core.api_defaults import ApiAuthAndUser
 from partners.models import Partner
 from tenants.models import Tenant, Currency
 from core.tenant_utils import get_branch, get_tenant
+from django.utils import timezone
 
 
 def _branch_journal_q(request, tenant, prefix='journal__branch'):
@@ -433,9 +434,9 @@ class JournalViewSet(viewsets.ModelViewSet):
             try:
                 rev_date = datetime.datetime.fromisoformat(str(raw_date).replace('Z', '+00:00')).date()
             except ValueError:
-                rev_date = datetime.date.today()
+                rev_date = timezone.localdate()
         else:
-            rev_date = datetime.date.today()
+            rev_date = timezone.localdate()
 
         lines = list(orig.lines.all())
         if not lines:
@@ -764,7 +765,7 @@ class TrialBalanceView(viewsets.ViewSet):
         show_all = request.query_params.get('show_all', 'true') == 'true'
 
         if not all([start_date, end_date]):
-            today = datetime.date.today()
+            today = timezone.localdate()
             start_date = f"{today.year}-01-01"
             end_date = f"{today.year}-12-31"
 
@@ -934,7 +935,7 @@ class VatReportView(viewsets.ViewSet):
         end_date = request.query_params.get('end_date')
         include_unposted = request.query_params.get('include_unposted') == 'true'
         if not all([start_date, end_date]):
-            today = datetime.date.today()
+            today = timezone.localdate()
             start_date = f"{today.year}-01-01"
             end_date = f"{today.year}-12-31"
 
@@ -1123,7 +1124,7 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
         try:
             return datetime.date.fromisoformat(str(raw)[:10])
         except (TypeError, ValueError):
-            return datetime.date.today()
+            return timezone.localdate()
 
     @action(detail=True, methods=["get"], url_path="fx-lots")
     def fx_lots(self, request, pk=None):
@@ -1210,10 +1211,10 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
             td = (
                 datetime.date.fromisoformat(str(raw_td)[:10])
                 if raw_td
-                else datetime.date.today()
+                else timezone.localdate()
             )
         except ValueError:
-            td = datetime.date.today()
+            td = timezone.localdate()
 
         desc = str(request.data.get("description") or "").strip() or "إيداع صندوق"
         fs_tx = str(request.data.get("firestore_transaction_id") or "").strip()
@@ -1376,9 +1377,9 @@ class PurchaseReceiptViewSet(viewsets.ViewSet):
             try:
                 td = datetime.datetime.fromisoformat(str(raw_td).replace("Z", "+00:00")).date()
             except ValueError:
-                td = datetime.date.today()
+                td = timezone.localdate()
         else:
-            td = datetime.date.today()
+            td = timezone.localdate()
 
         ref_note = f" | مرجع فاتورة: {invoice_ref}" if invoice_ref else ""
         ref_id = None

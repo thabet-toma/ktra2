@@ -1,47 +1,18 @@
-# AGENTS.md — K.T.R.A Project
+# AGENTS.md — K.T.R.A
 
-## قواعد السلوك (مُطبَّقة دائماً)
+**المرجع الوحيد لتعليمات الوكلاء هو [`CLAUDE.md`](CLAUDE.md) — اقرأه كاملاً وطبّقه حرفياً.**
+هذا الملف مؤشّر فقط؛ كانت هنا نسخة ثانية من التعليمات فتفرّعت عن الحقيقة
+(قالت إن الـviews في `api/` — عكس الواقع) فاختُصرت عمداً. لا تُعِد كتابة
+التعليمات هنا.
 
-- نفّذ ما طُلب فقط — لا أقل ولا أكثر
-- لا تنشئ ملفات إلا إذا كانت ضرورية تماماً
-- افضّل دائماً تعديل ملف موجود على إنشاء ملف جديد
-- لا تنشئ ملفات docs أو README تلقائياً إلا إذا طُلب صراحةً
-- اقرأ الملف دائماً قبل تعديله
-- لا تحفظ أسرار أو credentials أو ملفات .env في git
+القواعد الحديدية الثلاث (نفسها في `CLAUDE.md`، تُكرَّر هنا لأن بعض الأدوات لا
+تقرأ غير هذا الملف):
 
-## التوازي — قاعدة أساسية
+1. كل model يحمل `tenant` FK وكل ViewSet يفلتر عليه — `get_queryset` بلا فلتر
+   شركة = تسريب بيانات.
+2. كل قيد محاسبي يمرّ عبر `accounting.services` (`post_journal`) — لا كتابة
+   مباشرة لـ`JournalHeader`/`JournalLine`.
+3. كل تغيير مخزون يمرّ عبر `inventory.services` (`record_stock_movement`).
 
-جميع العمليات غير المترابطة **يجب** تنفيذها بشكل متوازٍ في رسالة واحدة:
-
-- دائماً اجمع ALL قراءات/كتابات الملفات في رسالة واحدة
-- دائماً اجمع ALL أوامر terminal في رسالة واحدة
-- استخدم `Task` tool لإطلاق Agents متوازية لأي مهمة معقدة
-
----
-
-## إعدادات مشروع K.T.R.A
-
-### Tech Stack
-- **Backend:** Django 5.1.15 (requirements.txt), DRF 3.16, MySQL (prod) / SQLite (test)
-  — لا تستعمل ميزةً حصريةً بـ6.0
-- **Frontend:** React 19.2, TypeScript 5.8, Vite 6.2, Tailwind CSS 4.3
-- **Tests:** pytest-django (70 tests) · `python manage.py test --settings=core.test_settings`
-
-### بنية المجلدات الرئيسية
-| مجلد | الغرض |
-|------|--------|
-| `accounting/` | محاسبة — قيود، فواتير، مدفوعات |
-| `sales/` | المبيعات والعملاء |
-| `inventory/` | المخزون والمنتجات |
-| `partners/` | العملاء والموردين |
-| `frontend_v2/` | React SPA (TypeScript) |
-
-### قواعد Django
-- استخدم `core.test_settings` في الاختبارات
-- الـ migrations في مجلد `migrations/` داخل كل app
-- الـ serializers والـ views في `api/` داخل كل app
-
-### قواعد Frontend
-- الملفات في `frontend_v2/` مباشرةً (`components/`، `services/`، `utils/`) — لا وجود لـ`src/`
-- استخدم `restApi.ts` كـ base client
-- CSS عبر Tailwind فقط — لا inline styles
+خريطة القراءة: `ARCHITECTURE.md` ← `docs/modules/<الموديول>.md` — التفاصيل في
+قسم «قراءة السياق» داخل `CLAUDE.md`.

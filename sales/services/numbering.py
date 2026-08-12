@@ -42,6 +42,7 @@ from sales.models import (
     SalesInvoiceLine,
     SalesSettings,
 )
+from django.utils import timezone
 
 logger = logging.getLogger("sales.services")
 
@@ -162,7 +163,7 @@ def default_quotation_valid_until(tenant_id: int, from_date=None):
     """
     from datetime import date as _date, timedelta
 
-    base = from_date or _date.today()
+    base = from_date or timezone.localdate()
     ss = _sales_settings(tenant_id)
     days = ss.quotation_valid_days if ss else 14
     if not days:
@@ -174,7 +175,7 @@ def default_order_reserved_until(tenant_id: int, from_date=None):
     """آخر يوم يحجز فيه الطلب الكمية (إعداد الشركة، 7 أيام افتراضاً)."""
     from datetime import date as _date, timedelta
 
-    base = from_date or _date.today()
+    base = from_date or timezone.localdate()
     ss = _sales_settings(tenant_id)
     days = ss.order_reserve_days if ss else 7
     if not days:
@@ -197,7 +198,7 @@ def _active_reservation_lines(tenant_id: int, product_ids=None):
     qs = SalesOrderLine.objects.filter(
         tenant_id=tenant_id,
         order__status=SalesOrder.STATUS_CONFIRMED,
-        order__reserved_until__gte=_date.today(),
+        order__reserved_until__gte=timezone.localdate(),
     )
     if product_ids is not None:
         qs = qs.filter(product_id__in=list(product_ids))
@@ -250,7 +251,7 @@ def reserved_stock_rows(
     lines = list(qs)
     reserved_totals = reserved_quantity_map(
         tenant_id, product_ids={line.product_id for line in lines} or None)
-    today = _date.today()
+    today = timezone.localdate()
     rows = []
     for line in lines:
         product = line.product

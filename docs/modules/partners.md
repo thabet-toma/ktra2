@@ -61,17 +61,17 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 
 ## الاعتماديات
 **يعتمد على:**
-- `accounting` — **api**: `partners/signals.py:15` (`from accounting.api import sync_partner_accounting`). المنطق نفسه (بأكواده الـhardcoded: `2101`/`1103`/`2106`-`2109` في `_expected_parent_code_for_partner_type` بـ`accounting/api.py:262`، و`3300` تحت جذر `3` بـ`api.py:440-450`، وكود الحساب الجديد = `parent.code + str(partner.id).zfill(4)` بـ`api.py:346`) يسكن الآن داخل accounting.
-- `accounting` — **services**: `partners/views.py:47,73` (`partner_posted_balance`) و`partners/views.py:118` (`partner_account_statement`) — الأرصدة لا تُحسب هنا.
-- `tenants` — **models**: `partners/models.py:2` (`Tenant, Currency`).
-- `core` — **services**: `partners/views.py:12-14` (`ApiAuthAndUser`، `enforce_limits`، `get_tenant`) والحدّ `partners.records` عند الإنشاء (`views.py:421`)، و`core.payments.document_payment_summary` (`views.py:143`).
+- `accounting` — **api**: `partners/signals.py` (`from accounting.api import sync_partner_accounting`). المنطق نفسه (بأكواده الـhardcoded: `2101`/`1103`/`2106`-`2109` في `_expected_parent_code_for_partner_type` بـ`accounting/api.py`، و`3300` تحت جذر `3` بـ`api.py:440-450`، وكود الحساب الجديد = `parent.code + str(partner.id).zfill(4)` بـ`api.py`) يسكن الآن داخل accounting.
+- `accounting` — **services**: `partners/views.py:47,73` (`partner_posted_balance`) و`partners/views.py` (`partner_account_statement`) — الأرصدة لا تُحسب هنا.
+- `tenants` — **models**: `partners/models.py` (`Tenant, Currency`).
+- `core` — **services**: `partners/views.py:12-14` (`ApiAuthAndUser`، `enforce_limits`، `get_tenant`) والحدّ `partners.records` عند الإنشاء (`views.py`)، و`core.payments.document_payment_summary` (`views.py`).
 - `sales` / `logistics` — **models كسولة داخل الإجراءات فقط**: `views.py:74-75` و`views.py:141-144` (`SalesInvoice`، `PurchaseInvoice`) — استيراد داخل الدالة عمداً لكسر الدوران.
 
-**يعتمد عليه:** `accounting` (`accounting/models.py:4`)، `sales` (`sales/models.py:8`)، `inventory` (`inventory/models.py:3`)، `logistics` (`logistics/models.py:3`)، `core` (`core/plans.py:98`)، `bridge` (`bridge/views.py:66`). عملياً كل موديل فاتورة أو حركة في المشروع يحمل FK إلى `Partner`.
+**يعتمد عليه:** `accounting` (`accounting/models.py`)، `sales` (`sales/models.py`)، `inventory` (`inventory/models.py`)، `logistics` (`logistics/models.py`)، `core` (`core/plans.py`)، `bridge` (`bridge/views.py`). عملياً كل موديل فاتورة أو حركة في المشروع يحمل FK إلى `Partner`.
 
 ## قواعد لا يجوز كسرها
 - **`partners/apps.py:7-8` يستورد `partners.signals` داخل `ready()`** — إزالته تُعطّل إنشاء حسابات الأطراف والأرصدة الافتتاحية بصمت.
-- **`create_partner_opening_balance` (في `accounting/api.py:425`) يكتب القيد يدوياً بـ`is_posted=True`** — أي أنه **يتجاوز `post_journal`**، فلا فحص فترة مالية ولا فحص طبيعة الحساب ولا `create_audit_log` (دين موثّق في نتائج المرحلة 2 بـ`docs/REFACTOR_PROMPTS.md`). الحماية الوحيدة من التكرار هي فحص وجود `reference_type='PARTNER_OPENING'` مع `reference_id=partner.id` (`api.py:392-401`) — لا تكسر هذا الفحص.
+- **`create_partner_opening_balance` (في `accounting/api.py`) يكتب القيد يدوياً بـ`is_posted=True`** — أي أنه **يتجاوز `post_journal`**، فلا فحص فترة مالية ولا فحص طبيعة الحساب ولا `create_audit_log` (دين موثّق في نتائج المرحلة 2 بـ`docs/REFACTOR_PROMPTS.md`). الحماية الوحيدة من التكرار هي فحص وجود `reference_type='PARTNER_OPENING'` مع `reference_id=partner.id` (`api.py:392-401`) — لا تكسر هذا الفحص.
 - **أكواد الشجرة `2101`/`1103`/`2106`/`2107`/`2108`/`2109` و`3300` و`3` مربوطة نصّاً بالكود** (`accounting/api.py:266-276, 452-462`): إعادة ترقيم شجرة الحسابات في `seed_*_coa` تُسقط ربط الأطراف صامتاً (`Account.DoesNotExist` تُبتلع بـ`pass`).
 - **الشركة تأتي من الطرف نفسه لا من تخمين**: بلا `tenant` تُسجَّل رسالة خطأ ويُتخطّى إنشاء الحساب (`api.py:294-300`, `444-450`).
 - **قيد الرصيد الافتتاحي عبر `post_journal`** (قرار 2026-08-11، `3358bf7`): idempotent على `(PARTNER_OPENING, partner.id)` وآمن تحت السباق، ويتطلب **فترة مالية مفتوحة** عند تاريخ الرصيد — وإلا يُسجَّل الخطأ ويُتخطى القيد بلا إسقاط حفظ الشريك؛ تصحيح التاريخ وإعادة الحفظ يعيدان المحاولة (`accounting/tests/test_api.py`).
@@ -80,7 +80,7 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 - **`supplier_scope=''` (غير مصنَّف) يظهر في قائمتي المحلي والدولي معاً** (`views.py:197-199`، `models.py:58-64`) — تضييق الفلتر يُخفي موردين قائمين (اختبار `test_supplier_scope`).
 - **`get_queryset` يُرجع `.none()` عند غياب الشركة** في `PartnerViewSet` و`CustomerNoteViewSet` (`views.py:188-191`، `486-488`).
 - **لا رقم ضريبي ولا رقم حساب بنكي «شبيه» لطرفين** — المقارنة بعد التطبيع في بايثون لا في SQL (`serializers.py:155-170`، `views.py:306-325`)، وحساب بنكي افتراضي واحد فقط ويجب أن يكون فعّالاً (`views.py:346-371`).
-- **`enforce_limits(tenant, 'partners.records')` قبل أي إنشاء** (`views.py:421`).
+- **`enforce_limits(tenant, 'partners.records')` قبل أي إنشاء** (`views.py`).
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |

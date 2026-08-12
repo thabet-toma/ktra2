@@ -92,6 +92,7 @@ from logistics.services import (
     convert_import_quotation_to_deal,
     convert_purchase_order_to_invoice,
 )
+from django.utils import timezone
 
 logger = logging.getLogger("logistics.views")
 
@@ -152,7 +153,28 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 qs, "partner_id", supplier=True, alias="supplier_balance",
             )
         if self.action == 'list':
-            qs = qs.annotate(items_count=Count('items'))
+            # عدّ البنود باستعلام فرعي لا بـ`Count('items')`: التجميعة تفرض
+            # GROUP BY فيمنع جانغو من تقليم التعليقات في استعلام COUNT الخاص
+            # بالترقيم، فتُنفَّذ استعلامات ملخّص الدفع الفرعية لكل صفّ — 14 ثانية
+            # للعدّ وحده على مستأجرٍ بألف فاتورة، وقطعُ اتصال MySQL عند المهلة.
+            # نفس نمط `deals_count`/`payments_count` في قائمة الشحنات.
+            items_summary = (
+                PurchaseInvoiceItem.objects
+                .filter(invoice_id=OuterRef('pk'))
+                .values('invoice_id')
+                .annotate(row_count=Count('id'))
+            )
+            qs = qs.annotate(
+                items_count=Coalesce(
+                    Subquery(
+                        items_summary.values('row_count')[:1],
+                        output_field=IntegerField(),
+                    ),
+                    # فاتورة بلا بنود: الاستعلام الفرعي يُرجع NULL بينما
+                    # `Count` كانت تُرجع 0 — والسيريالايزر يعرضه رقماً.
+                    Value(0),
+                ),
+            )
             qs = annotate_purchase_invoice_payment_summary(qs)
         else:
             qs = qs.prefetch_related(
@@ -1015,7 +1037,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 # فيفشل الترحيل بفارق يساوي العمولة تماماً.
                 use_landed = True
 
-        td = invoice.invoice_date or datetime.date.today()
+        td = invoice.invoice_date or timezone.localdate()
 
         # ─── GR/IR: الفاتورة المحلية → قيدان منفصلان عبر الحساب الوسيط ──────────
         # بند البضاعة في قيد الفاتورة يدين «الوسيط» بدل المخزون مباشرةً؛ ويُنشأ
@@ -1386,7 +1408,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             tenant=invoice.tenant,
             partner=invoice.partner,
             purchase_invoice=invoice,
-            payment_date=invoice.invoice_date or datetime.date.today(),
+            payment_date=invoice.invoice_date or timezone.localdate(),
             amount=amount,
             currency=invoice.currency,
             exchange_rate=invoice.exchange_rate or Decimal('1'),

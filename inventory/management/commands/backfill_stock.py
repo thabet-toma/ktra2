@@ -13,6 +13,7 @@ from django.db import transaction
 
 from inventory.models import Product, StockMovement
 from logistics.models import LogisticsShipment, LogisticsShipmentDeal
+from django.utils import timezone
 
 
 class Command(BaseCommand):
@@ -66,7 +67,7 @@ class Command(BaseCommand):
                         movement_date = (
                             shipment.arrival_date
                             or deal.order_date
-                            or datetime.date.today()
+                            or timezone.localdate()
                         )
 
                         with transaction.atomic():

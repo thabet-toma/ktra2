@@ -63,7 +63,7 @@ def unpost_payroll_payment(payment: PayrollPayment, *, user=None) -> dict:  # ي
 
 ## أهم الـAPI endpoints
 
-مركّبة تحت `api/hr/` (`core/urls.py:84`).
+مركّبة تحت `api/hr/` (`core/urls.py`).
 
 | Method | المسار | الـview |
 |---|---|---|
@@ -83,43 +83,43 @@ def unpost_payroll_payment(payment: PayrollPayment, *, user=None) -> dict:  # ي
 ## الاعتماديات
 
 **يعتمد على:**
-- `accounting` — **عبر services لا كتابة مباشرة للقيود**: `hr/payroll.py:32` يستورد
+- `accounting` — **عبر services لا كتابة مباشرة للقيود**: `hr/payroll.py` يستورد
   `post_journal`، `resolve_default_cash_account`، `unpost_document`؛ ويستورد نماذج `Account`
-  و`JournalLine` للقراءة وبناء الحسابات (`hr/payroll.py:31`)، و`allocate_child_account_code`
-  من `accounting.cashbox` (`hr/payroll.py:30`).
-- `tenants` — `ensure_operational_account` لضمان حساب المصروف 5201 (`hr/payroll.py:33`)،
-  ونموذج `Tenant` (`hr/models.py:5`).
+  و`JournalLine` للقراءة وبناء الحسابات (`hr/payroll.py`)، و`allocate_child_account_code`
+  من `accounting.cashbox` (`hr/payroll.py`).
+- `tenants` — `ensure_operational_account` لضمان حساب المصروف 5201 (`hr/payroll.py`)،
+  ونموذج `Tenant` (`hr/models.py`).
 - `core` — `BaseTenantViewSet`، `get_tenant`، `require_perm` (`hr/payroll_api.py:21-23`).
 - `accountant_portal` — `LegalAccountantRoutePermission` لحجب المحاسب الخارجي
-  (`hr/views.py:22`، `hr/payroll_api.py:20`).
-- `bridge` — `FirestoreMirrorDoc` في `hr/auth_api.py:16`.
+  (`hr/views.py`، `hr/payroll_api.py`).
+- `bridge` — `FirestoreMirrorDoc` في `hr/auth_api.py`.
 
-**يعتمد عليه:** `core/reports.py` يستورد `hr.models.Payslip` (سطر 2227) و`hr.models.PayrollPayment`
+**يعتمد عليه:** `core/reports/hr.py` يستورد `hr.models.Payslip` و`hr.models.PayrollPayment`
 (سطر 2289) لتقارير الرواتب. الواجهة `frontend_v2` تستهلك مسارات `/api/hr/`
 (مثال: `frontend_v2/services/personalExpensesApi.ts`).
 
 ## قواعد لا يجوز كسرها
 
 - **لا مسار محاسبي موازٍ**: كل قيد رواتب يمرّ بـ`post_journal` وكل تراجع بـ`unpost_document`
-  (`hr/payroll.py:1-21`، `hr/payroll.py:277`، `hr/payroll.py:311`) — لا تكتب `JournalLine` مباشرةً.
+  (`hr/payroll.py:1-21`، `hr/payroll.py`، `hr/payroll.py`) — لا تكتب `JournalLine` مباشرةً.
 - **قيد اعتماد الكشف سطران فقط**: مدين 5201 (المصروف) ودائن حساب الموظف 2112x بقيمة `net`
   (`hr/payroll.py:283-288`). وقيد الصرف: مدين حساب الموظف ودائن الصندوق/البنك (`hr/payroll.py:361-366`).
 - **الاحتساب خادمي دائماً**: `perform_create`/`perform_update` تستدعيان `apply_computation`
-  (`hr/payroll_api.py:200`, `210`)، والمعاينة تستدعي `compute_payslip` نفسها (`hr/payroll_api.py:237`)
+  (`hr/payroll_api.py`, `210`)، والمعاينة تستدعي `compute_payslip` نفسها (`hr/payroll_api.py`)
   — مصدر أرقام واحد لا اثنان (اختبار `test_preview_matches_the_saved_slip`).
-- **الكشف المرحّل مجمَّد**: لا تعديل (`hr/payroll_api.py:206`)، لا حذف (`hr/payroll_api.py:215`)،
-  ولا إعادة احتساب (`hr/payroll.py:245`)؛ ولا يُرحَّل كشف صافيه ≤ 0 (`hr/payroll.py:266`).
+- **الكشف المرحّل مجمَّد**: لا تعديل (`hr/payroll_api.py`)، لا حذف (`hr/payroll_api.py`)،
+  ولا إعادة احتساب (`hr/payroll.py`)؛ ولا يُرحَّل كشف صافيه ≤ 0 (`hr/payroll.py`).
 - **لا إلغاء ترحيل كشف صُرفت منه دفعات** (`hr/payroll.py:307-310`).
 - **موظف دخل الدفاتر يُعطَّل ولا يُحذف** (`hr/payroll_api.py:123-126`).
 - **سند الصرف يُرحَّل مع الحفظ في صفقة واحدة** ولا يُعدَّل — يُحذف ويُنشأ غيره
   (`hr/payroll_api.py:276-281`، `hr/payroll_api.py:290-294`).
-- **صلاحيات ثلاث**: `hr.payroll.view` للقراءة، `hr.payroll.manage` للكتابة (`hr/payroll_api.py:49`)،
-  و`hr.payroll.post` للترحيل وكل كتابة على سندات الصرف (`hr/payroll_api.py:246`, `251`, `268`).
+- **صلاحيات ثلاث**: `hr.payroll.view` للقراءة، `hr.payroll.manage` للكتابة (`hr/payroll_api.py`)،
+  و`hr.payroll.post` للترحيل وكل كتابة على سندات الصرف (`hr/payroll_api.py`, `251`, `268`).
 - **الكتابة لا تقبل موظف شركة أخرى** حتى لو مرّ المعرّف في الجسم (`hr/serializers.py:214-228`).
 - **المصاريف الشخصية معزولة بالمستخدم لا بالشركة**، ولا تُنتج قيداً، ومدير الشركة ليس استثناءً
   (`hr/views.py:160-168`، `hr/models.py:81-92`).
 - **`PersonalExpenseCategory.key` خادمي** — يُولَّد بـ`next_key` ولا يُعدَّل من العميل
-  (`hr/views.py:137`، اختبار `test_key_is_server_owned_and_cannot_be_rewritten`).
+  (`hr/views.py`، اختبار `test_key_is_server_owned_and_cannot_be_rewritten`).
 - **المحاسب القانوني الخارجي محجوب عن `/api/hr/`** عدا `/api/hr/auth/`
   (`accountant_portal/permissions.py:47-57`).
 

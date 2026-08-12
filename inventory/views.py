@@ -32,6 +32,7 @@ from core.tenant_utils import get_tenant
 # العام في REST_FRAMEWORK — يبقى الاستيراد هنا لأي مرجع قائم.
 from core.pagination import OptionalPageNumberPagination
 from core.plans import enforce_limits
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         # W8: تجميعات محسوبة من StockMovement (المصدر الوحيد) — منقّطة، لا N+1.
         # الوارد التراكمي (المشتريات) = مجموع حركات IN. متوسط المبيعات الشهري = صافي
         # (OUT − RETURN_IN) خلال آخر 90 يوماً ÷ 3 (يُحسب في السيريالايزر من المجاميع).
-        cutoff_90 = datetime.date.today() - datetime.timedelta(days=90)
+        cutoff_90 = timezone.localdate() - datetime.timedelta(days=90)
         _zero = Value(Decimal('0'), output_field=DecimalField(max_digits=18, decimal_places=4))
         qs = qs.annotate(
             purchased_qty=Coalesce(
@@ -835,7 +836,7 @@ class StockMovementViewSet(viewsets.ModelViewSet):
         except Exception:
             return Response({'error': 'قيم غير صالحة'}, status=status.HTTP_400_BAD_REQUEST)
 
-        movement_date = data.get('movement_date') or datetime.date.today()
+        movement_date = data.get('movement_date') or timezone.localdate()
         partner_id = data.get('partner')
         partner = None
         if partner_id:

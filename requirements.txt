@@ -43,6 +43,8 @@ django-redis==5.4.0
 # ── Testing / coverage ──────────────────────────────────────────
 pytest>=8.0
 pytest-django>=4.8
+# البوابة الكاملة (`pytest -n auto`) بـ‎80ث بدل 114 — والسرعة هي ما يمنع تخطّيها.
+pytest-xdist>=3.5
 coverage>=7.4
 
 # ── حاجز الاعتماديات بين الـapps (lint-imports، العقود في .importlinter) ──

@@ -24,6 +24,7 @@ from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.utils import timezone
 
 DEC = Decimal("0.01")
 Q4 = Decimal("0.0001")
@@ -174,7 +175,7 @@ class Command(BaseCommand):
                     ]
                 last = (StockMovement.objects.filter(tenant_id=tid, reference_type='SALE')
                         .order_by('-movement_date').values_list('movement_date', flat=True).first())
-                txn_date = last or datetime.date.today()
+                txn_date = last or timezone.localdate()
                 journal = post_journal(
                     tenant_id=tid, transaction_date=txn_date,
                     reference_type='COGS_MOVING_WAC', reference_id=tid,

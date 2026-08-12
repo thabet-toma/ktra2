@@ -79,6 +79,7 @@ from .services import (
     suggest_fifo_allocations,
     unpost_customer_payment,
 )
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -417,7 +418,7 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                     invoice_number=next_invoice_number(
                         tenant.TenantID, getattr(src, "book_number", 0), branch=dup_branch),
                     customer=src.customer,
-                    invoice_date=date.today(),
+                    invoice_date=timezone.localdate(),
                     due_date=src.due_date,
                     invoice_type=src.invoice_type,
                     currency=src.currency,

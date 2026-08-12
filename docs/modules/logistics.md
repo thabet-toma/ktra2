@@ -8,7 +8,7 @@
 ودفعات كل طرف (مورّد، وكيل شحن، مخلّص، ناقل) مع ترحيلها المحاسبي.
 
 ## رحلة الاستيراد (المسار الأهم)
-المرحلة القانونية الموحّدة هي `LogisticsDeal.stage` (`models.py:534-556`)، وكل انتقال يمرّ عبر `advance_deal_stage` (`domain/stages.py:74`). الحقل القديم `shipping_workflow_status` ما زال يُكتب بالتوازي (نافذة إضافية).
+المرحلة القانونية الموحّدة هي `LogisticsDeal.stage` (`models.py:534-556`)، وكل انتقال يمرّ عبر `advance_deal_stage` (`domain/stages.py`). الحقل القديم `shipping_workflow_status` ما زال يُكتب بالتوازي (نافذة إضافية).
 
 | # | المرحلة | الـstage | ما يُنشئه الكود | المُشغِّل |
 |---|---|---|---|---|
@@ -112,21 +112,21 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 
 ## الاعتماديات
 **يعتمد على:**
-- `tenants` (models مباشرة) — `logistics/models.py:2` `from tenants.models import Tenant, Currency`؛ كل model يحمل `tenant` FK.
+- `tenants` (models مباشرة) — `logistics/models.py` `from tenants.models import Tenant, Currency`؛ كل model يحمل `tenant` FK.
 - `accounting` (models **و** services) — `logistics/views.py:47-55`: `post_journal`, `unpost_document`, `validate_fiscal_period`, `next_document_number`, `get_exchange_rate`, `create_audit_log`.
-- `sales` (models + serializers) — `logistics/serializers.py:11-12` يستورد `SupplierPayment`, `SupplierPaymentAllocation` والثابت `CHEQUE_DUE_DATE_REQUIRED` من `sales.serializers`؛ و`logistics/views.py:26` يستورد `SupplierPayment` ويعرضه عبر `SupplierPaymentViewSet`. أي تغيير في عقد `sales` للشيكات يكسر فواتير الشراء.
-- `partners` (models + signals): `models.py:3`, `views.py:42-43` · `inventory` (models + services): `models.py:4-5`, `views.py:41` · `core` (access/mixins/tenant_utils/activity/plans): `views.py:60-74`.
-**يعتمد عليه:** `sales/services.py:3817,3906-3907` · `accounting/services.py:931,1013,1522` · `accounting/views.py:313,342,1355` · `accounting/serializers.py:75,129` · `inventory/services.py:447,681,941,997` · `inventory/serials.py:150` · `partners/views.py:75,142-144` · `after_sales` (اختبارات).
+- `sales` (models + serializers) — `logistics/serializers/` يستورد `SupplierPayment`, `SupplierPaymentAllocation` والثابت `CHEQUE_DUE_DATE_REQUIRED` من `sales.serializers`؛ و`logistics/views/` يستورد `SupplierPayment` ويعرضه عبر `SupplierPaymentViewSet`. أي تغيير في عقد `sales` للشيكات يكسر فواتير الشراء.
+- `partners` (models + signals): `models.py`, `views.py:42-43` · `inventory` (models + services): `models.py:4-5`, `views.py` · `core` (access/mixins/tenant_utils/activity/plans): `views.py:60-74`.
+**يعتمد عليه:** `sales/services.py:3817,3906-3907` · `accounting/services.py:931,1013,1522` · `accounting/views.py:313,342,1355` · `accounting/serializers.py:75,129` · `inventory/services.py:447,681,941,997` · `inventory/serials.py` · `partners/views.py:75,142-144` · `after_sales` (اختبارات).
 
 ## قواعد لا يجوز كسرها
 - **كل انتقال مرحلة عبر `advance_deal_stage`** — لا `.update(stage=…)` مباشراً؛ حتى الـsignals تمرّ عبره (`signals.py:180-188`). جدول الانتقالات الوحيد في `domain/stages.py:24-34`.
-- **الصفقة على شحنة واحدة كحد أقصى**: رفض صريح في `domain/shipment_builder.py:103-109` + `unique_together (shipment, deal)` (`models.py:1064`).
+- **الصفقة على شحنة واحدة كحد أقصى**: رفض صريح في `domain/shipment_builder.py:103-109` + `unique_together (shipment, deal)` (`models.py`).
 - **`Σ allocated ≡ total` بدقّة الأغورة** في أي توزيع — استخدم `domain/allocation.py:reconcile` (:44) ولا تُقرِّب يدوياً.
 - **سعر شحن > 0 على صفقة بلا CBM/KG مرفوض** (وإلا حصّتها صفر صامتة): `domain/shipment_builder.py:43-59`، ونفس الحارس في `views.py:1582-1588`.
-- **لا فاتورة استيراد قبل**: إثبات تكلفة الشحن (`landed_cost.py:996`) + اكتمال دفع الصفقة بالدولار (`:1029`) + عدم تحويلها سابقاً (`:1018`).
+- **لا فاتورة استيراد قبل**: إثبات تكلفة الشحن (`landed_cost.py`) + اكتمال دفع الصفقة بالدولار (`:1029`) + عدم تحويلها سابقاً (`:1018`).
 - **المستند المرحّل لا يُعدَّل ولا يُحذف**: `_shipment_is_posted` (views.py:2044)، `_clearance_is_posted` (views.py:2228)، وحارس `transit_journal` في `set_freight` (views.py:1558-1562).
-- **الفاتورة المرحّلة مُجمَّدة على قيمها المحفوظة**؛ غير المرحّلة تُعاد حسابها حيّاً عند القراءة (`landed_cost.py:1280`).
-- **العزل بالشركة إلزامي** (كل ViewSet يرث `BaseTenantViewSet`، `core/mixins.py:35`)، و**إلغاء الترحيل يحتاج** `import.doc.unpost` (views.py:760, 2104, 2176, 2275, 2296, 2593).
+- **الفاتورة المرحّلة مُجمَّدة على قيمها المحفوظة**؛ غير المرحّلة تُعاد حسابها حيّاً عند القراءة (`landed_cost.py`).
+- **العزل بالشركة إلزامي** (كل ViewSet يرث `BaseTenantViewSet`، `core/mixins.py`)، و**إلغاء الترحيل يحتاج** `import.doc.unpost` (views.py:760, 2104, 2176, 2275, 2296, 2593).
 
 ## إلغاء ترحيل الدفعات (وُحِّد في المرحلة 2 + معالجتها 2026-08-11)
 إلغاء ترحيل دفعة صفقة (`unpost_payment_from_accounting`) ودفعة تخليص (`unpost_payment`)

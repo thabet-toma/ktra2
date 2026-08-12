@@ -77,7 +77,7 @@ def update_portal_settings(*, tenant, actor, data)  # لمدير الشركة و
 
 ## أهم الـAPI endpoints
 
-مركّبة تحت `api/accountant/` (`core/urls.py:87`).
+مركّبة تحت `api/accountant/` (`core/urls.py`).
 
 | Method | المسار | الـview |
 |---|---|---|
@@ -105,8 +105,8 @@ def update_portal_settings(*, tenant, actor, data)  # لمدير الشركة و
 
 ## كيف يُمنَح المحاسب وصولاً لشركة
 
-1. **ملف مهني** شرط دائم؛ تحقق البريد اختياري خلف `ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION` (افتراضه false — `core/settings.py:398`، `services.py:83-90`).
-2. **ارتباط** بطلب المحاسب أو بدعوة الشركة (الرمز يُخزَّن مجزّأً SHA-256 فقط، `services.py:296`).
+1. **ملف مهني** شرط دائم؛ تحقق البريد اختياري خلف `ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION` (افتراضه false — `core/settings.py`، `services.py:83-90`).
+2. **ارتباط** بطلب المحاسب أو بدعوة الشركة (الرمز يُخزَّن مجزّأً SHA-256 فقط، `services.py`).
 3. **التفعيل** حصراً بـ`_activate_locked` (`services.py:306-333`): ترخيص الوحدة، الحالة `pending`، الدعوة غير منتهية، المحاسب غير ممنوع، حدّ الارتباطات النشطة، ثم النطاق والتدقيق.
 4. **العضوية**: `_replace_membership_scope` (`services.py:207-231`) ينشئ `UserCompanyMembership` بدور `legal_accountant` + `MemberPermission` لكل مفتاح مرئي غير محرّم؛ ومن له عضوية داخلية في الشركة نفسها لا يُمَسّ دورها ولا تخصيصاتها (`services.py:101-116`).
 5. **الفحص عند كل طلب**: `core/tenant_utils.py:144-163` يرفع `EngagementInactive` لعضو `legal_accountant` بلا ارتباط نشط أو بلا ترخيص وحدة — هذا مصدر الحقيقة لا اللقطة.
@@ -114,24 +114,24 @@ def update_portal_settings(*, tenant, actor, data)  # لمدير الشركة و
 
 ## الاعتماديات
 
-**يعتمد على:** `core` — `permission_keys`/`require_perm`/`user_tenant_role` (`services.py:21`، `views.py:78`)، `guard_module_surface`/`require_module`/`module_enabled` (`views.py:79`)، `log_activity` (`services.py:22`)، `core.hooks.register_tax_period_guard` (`guards.py:50`) · `tenants` — نماذج `MemberPermission`/`UserCompanyMembership` مباشرةً (`services.py:24`) · `accounting` — `AccountingAuditLog` (`audit.py:27`) و`JournalLine` قراءةً (`services.py:867`، `905`، `1036`) · `sales` — `build_vat_statement` (`services.py:707`) و`SalesInvoice` قراءةً (`services.py:602`، `827`).
+**يعتمد على:** `core` — `permission_keys`/`require_perm`/`user_tenant_role` (`services.py`، `views.py`)، `guard_module_surface`/`require_module`/`module_enabled` (`views.py`)، `log_activity` (`services.py`)، `core.hooks.register_tax_period_guard` (`guards.py`) · `tenants` — نماذج `MemberPermission`/`UserCompanyMembership` مباشرةً (`services.py`) · `accounting` — `AccountingAuditLog` (`audit.py`) و`JournalLine` قراءةً (`services.py`، `905`، `1036`) · `sales` — `build_vat_statement` (`services.py`) و`SalesInvoice` قراءةً (`services.py`، `827`).
 
-**يعتمد عليه:** `core/tenant_utils.py:144-163` (فحص الارتباط النشط)، `core/permissions.py:26` و`core/access.py:379` و`core/permissions_api.py:122,220,248` (تنقية الصلاحيات المحرّمة)، `core/platform_admin_api.py`، و`hr/views.py:22` + `hr/payroll_api.py:20` + `hr/auth_api.py:26`.
+**يعتمد عليه:** `core/tenant_utils.py:144-163` (فحص الارتباط النشط)، `core/permissions.py` و`core/access.py` و`core/permissions_api.py:122,220,248` (تنقية الصلاحيات المحرّمة)، `core/platform_admin_api.py`، و`hr/views.py` + `hr/payroll_api.py` + `hr/auth_api.py`.
 
 ## قواعد لا يجوز كسرها
 
 - **العزل بين الشركات هو المخاطرة الأولى هنا**: المحاسب الواحد يحمل عضويات في عدة شركات، فأي مسار يقرأ بيانات دون `get_tenant` + `require_module` + `require_perm` (`TenantScopedView.tenant_for`، `views.py:701-711`) هو تسريب بين شركات. كل استعلام في `services.py` يبدأ بـ`tenant=` — لا استثناء، ولا فلترة بمعرّف قادم من العميل وحده.
 - **ربط كيان بطلب توضيح يُتحقق من ملكيته للشركة** (`services.py:452-465`) وبنفس رسالة «غير موجود» لمنع التعداد (T2/IDOR).
 - **البحث عن شركة بالمطابقة التامة فقط ولا يعيد قائمة** (`views.py:447-474`) — منعاً لتعداد شركات المنصة (T8).
-- **الصلاحيات المحرّمة** (`permissions.py:12-33`، منها `hr.*` و`admin.*` و`import.*`) لا تُمنح بأي طريق: `validate_scope` (`services.py:189`)، `default_engagement_scope` (`services.py:180`)، `_replace_membership_scope` (`services.py:228`)، وتصفية `core/access.py:378-381`.
+- **الصلاحيات المحرّمة** (`permissions.py:12-33`، منها `hr.*` و`admin.*` و`import.*`) لا تُمنح بأي طريق: `validate_scope` (`services.py`)، `default_engagement_scope` (`services.py`)، `_replace_membership_scope` (`services.py`)، وتصفية `core/access.py:378-381`.
 - **`/api/inventory/` و`/api/hr/` و`/api/logistics/` محجوبة** عن المحاسب (`permissions.py:47-57`)، وكل كتابة له خارج `/api/accountant/` مرفوضة (`core/permissions.py:74-81`).
 - **رمز الدعوة لا يُخزَّن خاماً** — sha256 فقط، ويُستهلك مرة واحدة تحت `select_for_update` (`services.py:337-349`).
 - **ملف الزبون قراءة فقط** — لا مسار كتابة على مستنداته في هذه الوحدة (`views.py:801-802`).
 - **الفترة المقدَّمة مقفلة نهائياً**: `submit_tax_period` يضع `locked`، وإعادة الفتح ترفض `submitted`/`locked` (`services.py:760-761`)، وحارس `tax_period_lock_guard` يمنع أي ترحيل بتاريخ داخلها ما لم تُطفئ الشركة `lock_blocks_posting` (`guards.py:32-46`).
 - **لا اعتماد مع موانع مفتوحة** (`services.py:745-746`)، ولا تقديم قبل الاعتماد (`services.py:787-788`)، وسبب إعادة الفتح إلزامي (`services.py:765-766`).
-- **الأفعال الحسّاسة تلزمها إعادة كلمة المرور**: الاعتماد والتقديم وتعديل النطاق (`services.py:743`، `789`، `views.py:675`)، ولا تُسجَّل كلمة المرور ولا طولها (`services.py:58`).
+- **الأفعال الحسّاسة تلزمها إعادة كلمة المرور**: الاعتماد والتقديم وتعديل النطاق (`services.py`، `789`، `views.py`)، ولا تُسجَّل كلمة المرور ولا طولها (`services.py`).
 - **كل فعل حسّاس يكتب صفّ تدقيق بكود من `AUDIT_ACTION_CODES`** والمجهول يرفع `ValueError` (`audit.py:24-25`)؛ وكل قيمة مستخدم تدخل السجل تُنقّى من CR/LF (`services.py:234-236`).
-- **إعدادات البوابة لمدير الشركة وحده** (`admin.settings.manage`، `views.py:1126`) — والمحاسب لا يملك هذا المفتاح أبداً لأنه محرّم عليه.
+- **إعدادات البوابة لمدير الشركة وحده** (`admin.settings.manage`، `views.py`) — والمحاسب لا يملك هذا المفتاح أبداً لأنه محرّم عليه.
 - **الشركة غير المرخّصة لا ترى المسار** — `guard_module_surface` في `PortalAPIView` (`views.py:100-102`).
 
 ## الاختبارات المهمة
