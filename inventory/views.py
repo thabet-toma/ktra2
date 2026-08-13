@@ -162,6 +162,12 @@ class ProductViewSet(viewsets.ModelViewSet):
                 min_stock_level__gt=0,
                 quantity_on_hand__lte=F('min_stock_level'),
             )
+        # ST-3: شاشة «متجري» تعرض المنشور وحده، وتحتاج عدده قبل فتح المتجر أول
+        # مرة. بلا هذا الفلتر كان عليها تحميل الكتالوج كاملاً وتصفيته في
+        # المتصفح — على 1490 صنفاً ذلك ميغابايت لعرض صفّين.
+        published = params.get('is_for_sale_online')
+        if published in ('true', 'false'):
+            qs = qs.filter(is_for_sale_online=(published == 'true'))
         # محددات الأصناف في الفواتير/الصفقات لا تعرض التحليلات؛ تجنّب ثلاث
         # aggregations على جدول الحركات الكبير عند طلب view=lookup. عقد القائمة
         # الكامل يبقى كما هو افتراضياً لجدول إدارة الأصناف.

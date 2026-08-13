@@ -85,6 +85,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   sourcing: 'البحث',
   'smart-assistant': 'المساعد الذكي',
   store: 'المتجر',
+  'store-settings': 'متجري',
   'aseel-kit': 'مكوّنات الأصيل',
   'aseel-sales': 'فاتورة المبيعات (الأصيل)',
   'sales-quotations': 'عروض وطلبيات البيع',

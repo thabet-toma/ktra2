@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **424**
+عدد النقاط: **428**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -411,6 +411,9 @@
 | `/api/sales/reports/reserved-stock/` | `SalesReportViewSet` | `sales/views.py` |
 | `/api/sales/settings/current/` | `SalesSettingsViewSet` | `sales/views.py` |
 | `/api/sales/settings/restore-defaults/` | `SalesSettingsViewSet` | `sales/views.py` |
+| `/api/store/<slug:slug>/` | `StoreProfileView` | `store/views.py` |
+| `/api/store/<slug:slug>/products/` | `StoreProductListView` | `store/views.py` |
+| `/api/store/<slug:slug>/products/<int:pk>/` | `StoreProductDetailView` | `store/views.py` |
 | `/api/tenants/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/tenants/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/tenants/books/` | `TenantBookViewSet` | `tenants/views.py` |
@@ -427,6 +430,7 @@
 | `/api/tenants/companies/{pk}/members/remove/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/members/set-import-access/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/set-import-enabled/` | `TenantViewSet` | `tenants/views.py` |
+| `/api/tenants/companies/{pk}/set-store-slug/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/currencies/` | `CurrencyViewSet` | `tenants/views.py` |
 | `/api/tenants/currencies/{pk}/` | `CurrencyViewSet` | `tenants/views.py` |
 | `/api/tenants/settings/` | `TenantSettingsViewSet` | `tenants/views.py` |

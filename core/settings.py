@@ -121,6 +121,7 @@ INSTALLED_APPS = [
     'accountant_portal.apps.AccountantPortalConfig',
     'device_registry.apps.DeviceRegistryConfig',
     'after_sales.apps.AfterSalesConfig',
+    'store.apps.StoreConfig',
 ]
 
 MIDDLEWARE = [
@@ -508,6 +509,11 @@ REST_FRAMEWORK = {
         # الجلسة الأمنية 2026-08-11 (P0-8): رفع الوسائط — كل رفع يقفل worker
         # طوال رفع Cloudinary المتزامن، فالسقف يمنع إشباع الـworkers الثلاثة.
         "media_upload": "120/hour",
+        # ST-1: المتجر العام (`store/views.py`) — سقفٌ خاص به فوق `anon`، لأن
+        # زائراً واحداً يتصفّح متجراً يُصدِر طلبات أكثر بكثير من زائرٍ يفتح
+        # صفحة دخول، وهو ما قيس عليه `anon`. الحدّان يعملان معاً والأضيق نافذ:
+        # هذا المقبض يضيّق على المتجر وحده بلا لمس بقية المنصة.
+        "store_public": os.environ.get("THROTTLE_RATE_STORE", "120/min"),
     },
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }

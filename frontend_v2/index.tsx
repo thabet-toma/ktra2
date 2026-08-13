@@ -1,7 +1,7 @@
 // index.tsx - تحديث المسارات
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import App from './App';
 
 import { AuthProvider } from './contexts/AuthContext';
@@ -24,8 +24,48 @@ import './styles/index.css';
 applySkinOnBoot();
 applyThemeOnBoot();
 
-const StorePage = React.lazy(() => import('./components/store/StorePage').then((module) => ({ default: module.StorePage })));
-const ProductDetailPage = React.lazy(() => import('./components/store/ProductDetailPage').then((module) => ({ default: module.ProductDetailPage })));
+// المتجر العام: خارج `AuthProvider`/`CompanyProvider` عمداً — زائرٌ بلا جلسة لا
+// ينتظر إقلاع مساحة عمل لا تخصّه، ولا يحمّل chunk لوحة التحكم كي يرى صنفاً.
+// `ToastProvider` وحده مطلوب هنا (نسخ الرابط)، وهو قانون المشروع بدل `alert`.
+const StoreIndexPage = React.lazy(() => import('./components/store/StoreIndexPage').then((module) => ({ default: module.StoreIndexPage })));
+const StorefrontPage = React.lazy(() => import('./components/store/StorefrontPage').then((module) => ({ default: module.StorefrontPage })));
+const StoreProductPage = React.lazy(() => import('./components/store/StoreProductPage').then((module) => ({ default: module.StoreProductPage })));
+
+const PublicStoreShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <ToastProvider>{children}</ToastProvider>
+);
+
+/** `/store` وحده: صفحة تعريف، أو تحويلٌ إلى متجر المجموعة إن ضُبط في البيئة. */
+const StoreIndexRoute: React.FC = () => {
+  const fallbackSlug = String(import.meta.env.VITE_DEFAULT_STORE_SLUG || '').trim();
+  if (fallbackSlug) return <Navigate to={`/store/${encodeURIComponent(fallbackSlug)}`} replace />;
+  return <StoreIndexPage />;
+};
+
+// شاشات المتجر لا تعرف المسارات ولا تستورد `react-router`: المحوِّلان هنا
+// يحوّلان معاملات المسار إلى props، فيبقى التوجيه في ملف واحد.
+const StorefrontRoute: React.FC = () => {
+  const { slug = '' } = useParams();
+  const navigate = useNavigate();
+  return (
+    <StorefrontPage
+      slug={slug}
+      onOpenProduct={(productId) => navigate(`/store/${encodeURIComponent(slug)}/p/${productId}`)}
+    />
+  );
+};
+
+const StoreProductRoute: React.FC = () => {
+  const { slug = '', productId = '' } = useParams();
+  const navigate = useNavigate();
+  return (
+    <StoreProductPage
+      slug={slug}
+      productId={productId}
+      onBack={() => navigate(`/store/${encodeURIComponent(slug)}`)}
+    />
+  );
+};
 
 const ApplicationProviders: React.FC = () => (
   <ThemeProvider>
@@ -108,8 +148,9 @@ root.render(
           <Route path="/*" element={<AuthProvider><CompanyProvider><ApplicationBoundary /></CompanyProvider></AuthProvider>} />
 
           {/* الصفحات العامة المنفصلة بالكامل */}
-          <Route path="/store" element={<StorePage />} />
-          <Route path="/store/product/:id" element={<ProductDetailPage />} />
+          <Route path="/store" element={<PublicStoreShell><StoreIndexRoute /></PublicStoreShell>} />
+          <Route path="/store/:slug" element={<PublicStoreShell><StorefrontRoute /></PublicStoreShell>} />
+          <Route path="/store/:slug/p/:productId" element={<PublicStoreShell><StoreProductRoute /></PublicStoreShell>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

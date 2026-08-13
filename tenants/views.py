@@ -418,6 +418,46 @@ class TenantViewSet(viewsets.ModelViewSet):
                     m.id, m.can_access_import, request.user.pk)
         return Response(self._member_payload(m))
 
+    # ── ST-1: معرّف المتجر العام ──
+    @action(detail=True, methods=["post"], url_path="set-store-slug")
+    def set_store_slug(self, request, pk=None):
+        """يفتح متجر الشركة أو يغيّر معرّفه أو يقفله — بصلاحية `store.manage`.
+
+        body: {"store_slug": "alpha"} — أو نصّ فارغ/غياب القيمة لإقفال المتجر.
+
+        القيمة نفسها هي مفتاح التفعيل: NULL = مقفل. فلا حقل «مفعّل» ثانٍ يمكن
+        أن يتناقض مع المعرّف، ولا حالة «متجر مفعّل بلا رابط».
+        """
+        tenant = self.get_object()
+        # ST-3: الحارس مفتاح مستقل — فتح متجر عام قرارٌ تجاري لا إعداد شركة،
+        # ومَن يضبط الشعار والعنوان لا يفتح به واجهةً تعرض الأسعار للملأ.
+        self._require_company_manager(request, tenant, "store.manage")
+
+        raw = request.data.get("store_slug")
+        slug = (str(raw).strip().lower() if raw is not None else "")
+        if not slug:
+            tenant.store_slug = None
+            tenant.save(update_fields=["store_slug"])
+            logger.info("store-slug: tenant=%s closed by_user=%s",
+                        tenant.pk, request.user.pk)
+            return Response({"TenantID": tenant.pk, "store_slug": None})
+
+        from .models import validate_store_slug
+        try:
+            validate_store_slug(slug)
+        except DjangoValidationError as e:
+            raise DRFValidationError({"store_slug": e.messages})
+        taken = Tenant.objects.filter(store_slug=slug).exclude(pk=tenant.pk).exists()
+        if taken:
+            raise DRFValidationError(
+                {"store_slug": "هذا المعرّف محجوز لشركة أخرى. اختر معرّفاً غيره."})
+
+        tenant.store_slug = slug
+        tenant.save(update_fields=["store_slug"])
+        logger.info("store-slug: tenant=%s slug=%s by_user=%s",
+                    tenant.pk, slug, request.user.pk)
+        return Response({"TenantID": tenant.pk, "store_slug": tenant.store_slug})
+
     @action(detail=False, methods=["get"], url_path="my-companies")
     def my_companies(self, request):
         user = request.user

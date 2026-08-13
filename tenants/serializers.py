@@ -79,8 +79,12 @@ class TenantBookSerializer(serializers.ModelSerializer):
 class TenantSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
-        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled", "is_example"]
-        read_only_fields = ["import_enabled", "is_example"]
+        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled", "is_example", "store_slug"]
+        # ST-1: `store_slug` معروض للقراءة فقط عمداً. كتابته تمرّ من
+        # `TenantViewSet.set_store_slug` وحدها لأنها تحمل تحقّق الشكل والكلمات
+        # المحجوزة؛ لو كان قابلاً للكتابة هنا لصار PATCH عادي على الشركة باباً
+        # خلفياً يضع أي قيمة (`api`, `ADMIN`, نصّاً فارغاً) بلا أي فحص.
+        read_only_fields = ["import_enabled", "is_example", "store_slug"]
 
 
 class UserCompanyMembershipSerializer(serializers.ModelSerializer):

@@ -99,6 +99,22 @@ test('تبويب المحاسب القانوني يُمنع قبل أي import �
   assert.equal(moduleAllowsView('company-accountant-engagements', { accountant_portal: true }), true);
 });
 
+test('شاشة «متجري» خلف مفتاحها المستقل، لا خلف إعدادات الشركة ولا خلف ترخيص وحدة', () => {
+  assert.equal(permForView('store-settings'), 'store.manage');
+  // مفتاح مستقل عمداً: مَن يضبط العنوان والشعار لا يفتح بذلك واجهةً عامة.
+  assert.notEqual(permForView('store-settings'), 'admin.settings.manage');
+  // المتجر متاح لكل الشركات — ليس وحدة مرخّصة، فلا عَلَم يحجبه.
+  assert.equal(moduleForView('store-settings'), undefined);
+  assert.equal(moduleAllowsView('store-settings', null), true);
+
+  const link: NavAccessLink[] = [
+    { key: 'store-settings', perm: permForView('store-settings') },
+  ];
+  assert.equal(visibleLinks(link, canOf(['store.manage'])).length, 1);
+  assert.equal(visibleLinks(link, canOf(['admin.settings.manage'])).length, 0);
+  assert.equal(visibleLinks(link, canOf([])).length, 0);
+});
+
 test('شاشة الأجهزة الحساسة تُمنع قبل أي import ما لم يصل عَلَم ترخيص وحدتها', () => {
   assert.equal(moduleForView('sensitive-devices'), 'sensitive_devices');
   assert.equal(permForView('sensitive-devices'), 'devices.registry.view');

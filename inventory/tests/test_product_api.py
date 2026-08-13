@@ -312,6 +312,34 @@ class ProductApiTest(APITestCase):
         rows = self._get("?stock_status=in_stock").json()
         assert {r["sku"] for r in rows} == {"ST-OK"}
 
+    # ── ST-3: فلتر «المنشور في المتجر» — الذي تُبنى عليه شاشة «متجري» ──
+    def _seed_publishing_mix(self):
+        Product.objects.create(tenant=self.t_a, sku="ON-1", name_ar="معروض",
+                               is_for_sale_online=True)
+        Product.objects.create(tenant=self.t_a, sku="OFF-1", name_ar="غير معروض",
+                               is_for_sale_online=False)
+        # صنف شركة أخرى منشور — الفلتر يُطبَّق بعد فلترة الشركة لا قبلها.
+        Product.objects.create(tenant=self.t_b, sku="ON-B", name_ar="جار منشور",
+                               is_for_sale_online=True)
+
+    def test_published_filter_returns_only_this_tenants_published_items(self):
+        self._auth()
+        self._seed_publishing_mix()
+        rows = self._get("?is_for_sale_online=true").json()
+        assert {r["sku"] for r in rows} == {"ON-1"}
+
+    def test_published_filter_false_returns_the_unpublished_ones(self):
+        self._auth()
+        self._seed_publishing_mix()
+        assert {r["sku"] for r in self._get("?is_for_sale_online=false").json()} == {"OFF-1"}
+
+    def test_an_absent_or_junk_publishing_filter_does_not_narrow_the_list(self):
+        """قيمة غير مفهومة لا تُصفّي بصمت — الجدول العام يبقى كما هو."""
+        self._auth()
+        self._seed_publishing_mix()
+        assert {r["sku"] for r in self._get().json()} == {"ON-1", "OFF-1"}
+        assert {r["sku"] for r in self._get("?is_for_sale_online=maybe").json()} == {"ON-1", "OFF-1"}
+
     def test_ordering_by_quantity_and_min_stock_level(self):
         self._auth()
         self._seed_stock_mix()

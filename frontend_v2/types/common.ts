@@ -40,6 +40,7 @@ export type AppView =
     | "cash-box-details"
     | "gallery"
     | "store"
+    | "store-settings"
     | "accounting-coa"
     | "accounting-journals"
     | "accounting-journal-entry"

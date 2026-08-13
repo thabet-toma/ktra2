@@ -12,6 +12,12 @@ export type Tenant = {
   CreatedAt: string;
   import_enabled?: boolean;
   is_example?: boolean;
+  /**
+   * ST-3: معرّف المتجر العام — `null` أو غياب = المتجر مقفل، فلا حقل تفعيل
+   * ثانٍ. للقراءة فقط هنا: كتابته تمرّ من `set-store-slug` وحدها
+   * (`services/storeAdminApi.ts`)، ثم `refreshCompanies()` لتحديث هذه القيمة.
+   */
+  store_slug?: string | null;
 };
 
 export type CompanyMembership = {

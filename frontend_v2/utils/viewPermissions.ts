@@ -87,6 +87,8 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "task-management": "hr.tasks.manage",
   "activity-log": "admin.activity.view",
   permissions: "admin.permissions.manage",
+  // ST-3: «متجري» — فتح المتجر العام واختيار رابطه وتحديد ما يُنشر فيه.
+  "store-settings": "store.manage",
   "company-accountant-engagements": "admin.members.manage",
   // THA-45: وحدة الأجهزة الحساسة — مشروطة أيضاً بترخيص الوحدة أدناه.
   "sensitive-devices": "devices.registry.view",

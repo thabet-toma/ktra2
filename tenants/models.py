@@ -1,5 +1,40 @@
+import re
+
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+
+# ── ST-1: معرّف المتجر العام (`Tenant.store_slug`) ─────────────────────────
+#: الشكل المسموح — حروف لاتينية صغيرة وأرقام وشرطات، 3..40 محرفاً. الرابط
+#: يُرسَل على واتساب ويظهر في نتائج البحث، فالمقروئية أهم من العتامة.
+STORE_SLUG_RE = re.compile(r"^[a-z0-9-]{3,40}$")
+
+#: كلمات محجوزة: لا يصير معرّف متجرٍ ما قد يلتبس بمسار من مسارات المنصة نفسها
+#: (`/api/…`, `/store/…`) أو بصفحةٍ عامة قائمة. الحجز تطبيقي لا يعتمد على ترتيب
+#: مطابقة المسارات — فإعادة ترتيب `core/urls.py` لاحقاً لا تفتح ثغرة.
+RESERVED_STORE_SLUGS = frozenset({
+    "api", "admin", "store", "app", "www", "static", "media", "assets",
+    "login", "logout", "signup", "register", "settings", "dashboard",
+    "about", "about-us", "gallery", "health", "docs", "support",
+})
+
+
+def validate_store_slug(value):
+    """يتحقق من شكل معرّف المتجر ومن أنه ليس كلمة محجوزة.
+
+    يُستعمل في موضعين: مُحقِّقاً على الحقل (فيحرس `full_clean` وdjango-admin)
+    وفي نقطة الكتابة في `tenants/views.py` (`TenantViewSet.set_store_slug`) —
+    قاعدةٌ واحدة في موضع واحد، لا نسختان تنزاحان.
+    """
+    text = (value or "").strip()
+    if not STORE_SLUG_RE.match(text):
+        raise ValidationError(
+            "معرّف المتجر يقبل الحروف الإنجليزية الصغيرة والأرقام والشرطة فقط، "
+            "وطوله بين 3 و40 محرفاً."
+        )
+    if text in RESERVED_STORE_SLUGS:
+        raise ValidationError(f"«{text}» معرّف محجوز — اختر معرّفاً آخر.")
+
 
 class Currency(models.Model):
     CurrencyID = models.AutoField(primary_key=True)
@@ -40,6 +75,16 @@ class Tenant(models.Model):
     import_enabled = models.BooleanField(default=False, db_column='ImportEnabled')
     # شركة مشتركة للتجربة؛ تعيينها من لوحة السوبر أدمن يمنح الجميع عضوية staff.
     is_example = models.BooleanField(default=False, db_column='IsExample')
+    # ST-1: معرّف المتجر العام — هو نفسه مفتاح التفعيل. **NULL = المتجر مقفل**،
+    # فلا حقل `store_enabled` منفصل يمكن أن يتناقض معه، ولا backfill للشركات
+    # القائمة: المتجر opt-in يختار المدير معرّفه عند أول فتح لشاشة «متجري».
+    # ملاحظة MySQL: قيد unique لا يمنع تكرار NULL — نفس ما وثّقناه في TenantBook،
+    # وهو المطلوب هنا بالضبط (كل الشركات مقفلة المتجر تتعايش).
+    store_slug = models.CharField(
+        max_length=40, unique=True, null=True, blank=True, db_column='StoreSlug',
+        validators=[validate_store_slug],
+        help_text='معرّف المتجر العام في الرابط /store/<slug> — فارغ يعني أن المتجر مقفل',
+    )
 
     class Meta:
         db_table = 'tenants'

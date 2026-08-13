@@ -22,10 +22,14 @@ from rest_framework.throttling import SimpleRateThrottle
 from tenants.services import create_company
 
 CATALOG_URL = "/api/reports/"
-# النقطة الوحيدة في المشروع بـ`AllowAny` (accounting/views.py::CurrencyViewSet).
-# اختيارها مقصود: DRF ينفّذ check_permissions **قبل** check_throttles، فطلبٌ
-# مجهول على نقطة تتطلب مصادقة يُردّ 401 ولا يصل الـthrottle أصلاً — قياس
-# AnonRateThrottle عليها كان سيقيس شيئاً آخر.
+# نقطة `AllowAny`. اختيارها مقصود: DRF ينفّذ check_permissions **قبل**
+# check_throttles، فطلبٌ مجهول على نقطة تتطلب مصادقة يُردّ 401 ولا يصل الـthrottle
+# أصلاً — قياس AnonRateThrottle عليها كان سيقيس شيئاً آخر.
+#
+# ST-1 (2026-08-13): لم تعد `CurrencyViewSet` النقطةَ العامة الوحيدة — نقاط
+# المتجر الثلاث في `store/views.py` عامة كذلك. تُقاس هنا العملاتُ عمداً: نقاط
+# المتجر تحمل `throttle_scope = "store_public"` فوق `anon`، فقياسُ سلة `anon`
+# عليها كان سيخلط الحدَّين. سقفُ المتجر نفسه محروسٌ في `store/tests/`.
 PUBLIC_URL = "/api/accounting/currencies/"
 
 _LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}

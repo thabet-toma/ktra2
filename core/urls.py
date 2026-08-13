@@ -105,4 +105,8 @@ urlpatterns = [
     path('api/after-sales/', include('after_sales.urls')),
     # N0-T4: Group Constants (F11) — tenant-level settings + books + currencies
     path('api/tenants/', include('tenants.urls')),
+    # ST-1: المتجر العام — **كل** نقطة خلفه بلا مصادقة (`AllowAny`)، والشركة
+    # تأتي من الـslug في المسار لا من ترويسة. مجموعة في app واحدة عمداً كي
+    # يُقرأ سطحُ المنصة العام كاملاً في ملف واحد: `store/views.py`.
+    path('api/store/', include('store.urls')),
 ]

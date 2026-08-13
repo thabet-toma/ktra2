@@ -104,7 +104,6 @@ const PublicGallery = lazyPage(() => import("./components/PublicGallery"));
 const OldPurchaseInvoice = lazyPage(() => import("./components/OldPurchaseInvoice").then((m) => ({ default: m.OldPurchaseInvoice })));
 const CashBoxList = lazyPage(() => import("./components/finance/CashBoxList").then((m) => ({ default: m.CashBoxList })));
 const CashBoxStatement = lazyPage(() => import("./components/finance/CashBoxStatement").then((m) => ({ default: m.CashBoxStatement })));
-const StorePage = lazyPage(() => import("./components/store/StorePage").then((m) => ({ default: m.StorePage })));
 const AccountingCoaPage = lazyPage(() => import("./components/accounting/AccountingCoaPage").then((m) => ({ default: m.AccountingCoaPage })));
 const AccountingJournalListPage = lazyPage(() => import("./components/accounting/AccountingJournalListPage").then((m) => ({ default: m.AccountingJournalListPage })));
 const AccountingJournalEntryPage = lazyPage(() => import("./components/accounting/AccountingJournalEntryPage").then((m) => ({ default: m.AccountingJournalEntryPage })));
@@ -146,6 +145,8 @@ const SalesCustomerPaymentsPage = lazyPage(() => import("./components/sales/Sale
 const SalesSettingsPage = lazyPage(() => import("./components/sales/SalesSettingsPage"));
 // T-PERM: شاشة الصلاحيات (مصفوفة دور × صلاحية) — مدير الشركة فقط.
 const PermissionsPage = lazyPage(() => import("./components/settings/PermissionsPage"));
+// ST-3: «متجري» — فتح المتجر العام واختيار رابطه وتحديد ما يُعرض فيه.
+const StoreSettingsPage = lazyPage(() => import("./components/settings/StoreSettingsPage"));
 const PurchaseSettingsPage = lazyPage(() => import("./components/procurement/PurchaseSettingsPage"));
 const GoodsReceiptsPage = lazyPage(() => import("./components/procurement/receipts/GoodsReceiptsPage"));
 const DeliveryNotesPage = lazyPage(() => import("./components/sales/DeliveryNotesPage"));
@@ -270,7 +271,11 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   contact: "/contact",
   settings: "/settings",
   sourcing: "/sourcing",
-  store: "/store",
+  // `store` ليست شاشة في هذا التطبيق: `/store` وما تحته يُخدَم من `index.tsx`
+  // خارج المصادقة كلياً — إبقاؤه هنا كان سيعيد ربط مسارٍ عام بشاشة لا وجود لها.
+  // ST-3: «متجري» عكسها — شاشة مصادَق عليها داخل القشرة، ومسارها لا يبدأ بـ
+  // `/store/` كي لا يزاحم مسارات المتجر العام في `index.tsx`.
+  "store-settings": "/store-settings",
   "group-constants": "/group-constants",
   "aseel-kit": "/aseel-kit",
   "aseel-sales": "/aseel-sales",
@@ -350,8 +355,6 @@ const App: React.FC = () => {
       ? "تواصل معنا — نظام K.T.R.A"
       : appView === "gallery"
       ? "معرض الصور — نظام K.T.R.A"
-      : appView === "store"
-      ? "المتجر الإلكتروني — K.T.R.A"
       : authView === "login"
       ? "تسجيل الدخول — نظام K.T.R.A"
       : authView === "signup"
@@ -568,10 +571,10 @@ const App: React.FC = () => {
   // مسارات الصفقات + ?view= القديم؛ لا نفرض شاشة الدور عند كل زيارة لـ /
   useEffect(() => {
     const path = (location.pathname || "/").replace(/\/$/, "") || "/";
+    // `/store*` لا يصل إلى هنا إطلاقاً: المتجر العام يُوجَّه في `index.tsx`
+    // خارج `AuthProvider` كلياً، فلا شاشة متجر داخل هذا التطبيق ولا حالة له.
     if (path.startsWith("/settings")) {
       setAppView("settings");
-    } else if (path.startsWith("/store")) {
-      setAppView("store");
     } else if (path.startsWith("/about-us")) {
       setAppView("about-us");
     } else if (path.startsWith("/contact")) {
@@ -1585,6 +1588,12 @@ const App: React.FC = () => {
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
+      case "store-settings":
+        if (canView(appView)) {
+          return <StoreSettingsPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
       case "sales-settings":
         if (canView(appView)) {
           return <SalesSettingsPage />;
@@ -2049,28 +2058,6 @@ const App: React.FC = () => {
     }
   };
 
-  // 1. Handle Store View (Public & Private)
-  // if (appView === 'store') {
-  //   return (
-  //     <div>
-  //       <StorePage
-  //         currentUser={currentUser}
-  //         onLoginSuccess={(user) => {
-  //           setCurrentUser(user);
-  //           // If user is employee/manager, maybe redirect to dashboard? 
-  //           // Or stay in store? Let's stay in store for now, user can click Dashboard.
-  //           if (user.role !== 'store_guest') {
-  //             // setAppView('dashboard'); // Optional
-  //           }
-  //         }}
-  //         onNavigateToLogin={() => {
-  //           setAppView('dashboard'); // Will trigger !currentUser check -> result in Login Page
-  //         }}
-  //       />
-  //     </div>
-  //   );
-  // }
-
   // Dev kit — no auth required
   if (appView === "aseel-kit") {
     return <AseelKitStory />;
@@ -2137,7 +2124,7 @@ const App: React.FC = () => {
         <div>
           <LoginPage
             onNavigateToSignup={() => setAuthView("signup")}
-            onGoToStore={() => setAppView('store')}
+            onGoToStore={() => navigate("/store")}
           />
         </div>
       );
@@ -2148,7 +2135,7 @@ const App: React.FC = () => {
         <LandingPage
           onLogin={() => setAuthView("login")}
           onSignup={() => setAuthView("signup")}
-          onGoToStore={() => setAppView('store')}
+          onGoToStore={() => navigate("/store")}
         />
       </div>
     );

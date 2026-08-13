@@ -100,6 +100,11 @@ PERMISSIONS: list[dict] = [
     {"key": "admin.permissions.manage", "label": "إدارة الصلاحيات", "group": GROUP_ADMIN},
     {"key": "admin.settings.manage", "label": "إعدادات الشركة العامة", "group": GROUP_ADMIN},
     {"key": "admin.activity.view", "label": "سجل نشاط المستخدمين", "group": GROUP_ADMIN},
+    # ST-3: المتجر العام — فتحه وإقفاله واختيار رابطه وتحديد ما يُعرض فيه.
+    # مفتاح مستقل عن «إعدادات الشركة العامة» عمداً: مَن يضبط العنوان والشعار لا
+    # يفتح بذلك واجهةً تعرض أسعار الشركة لكل زائر بلا جلسة. المدير يملكه ضمناً
+    # («*») ويمنحه لمن يدير المتجر من شاشة الصلاحيات القائمة.
+    {"key": "store.manage", "label": "إدارة المتجر العام", "group": GROUP_ADMIN},
     # بوابة المحاسب القانوني — لا تظهر إلا للشركات المرخّصة للوحدة.
     {"key": "tax.period.view", "label": "عرض فترات المراجعة الضريبية", "group": GROUP_TAX, "module": "accountant_portal"},
     {"key": "tax.period.prepare", "label": "تجهيز الفترة وتشغيل قائمة الجاهزية", "group": GROUP_TAX, "module": "accountant_portal"},

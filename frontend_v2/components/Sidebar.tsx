@@ -16,7 +16,7 @@ import {
   CalendarDays, CalendarX, ArrowLeftRight, Boxes, BarChart3, Building2,
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck, Wallet,
-  Gauge, TableProperties, ShieldAlert, Wrench,
+  Gauge, TableProperties, ShieldAlert, Wrench, Store,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { enterOfficeShell } from "../utils/officeShell";
@@ -403,6 +403,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           {moduleAllowsView("after-sales", modules) &&
             groupVisible(withPerms(afterSalesLinks), can, user.role) &&
             renderGroup("خدمة ما بعد البيع", <Wrench className="h-5 w-5 flex-shrink-0" />, afterSalesExpanded, () => setAfterSalesExpanded(!afterSalesExpanded), afterSalesLinks)}
+
+          {/* ST-3: «متجري» — واجهة الشركة العامة. بندٌ مستقل لا داخل «الإعدادات»
+              لأنه ليس ضبطاً بل قناة بيع يفتحها صاحبها ويشارك رابطها؛ ولأن
+              `store.manage` مفتاح مستقل يُمنح لمن يدير المتجر وحده. وبلا هذه
+              الصلاحية لا يظهر: المتجر واجهة الشركة للعالم لا إعدادٌ يعبث به كل
+              عضو. **بندٌ واحد** — كان مكرّراً حرفياً حتى فحص ST-4. */}
+          {permissions.has("store.manage") && (
+            <button
+              onClick={() => { setView("store-settings"); if (isMobile) setIsMobileMenuOpen(false); }}
+              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("store-settings") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+              title="متجري — الواجهة العامة لأصنافك"
+            >
+              <Store className="h-5 w-5 flex-shrink-0" />
+              {showText && <span className="mr-3 text-right flex-1">متجري</span>}
+            </button>
+          )}
 
           <button
             onClick={() => { setView("settings"); if (isMobile) setIsMobileMenuOpen(false); }}
