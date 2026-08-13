@@ -230,7 +230,6 @@ async function installAuthenticatedApiMocks(page: Page) {
   await page.route("**/*", async (route: Route) => {
     const url = new URL(route.request().url());
     const isApi =
-      url.hostname === "api.smart.ktragroup.com" ||
       url.port === "8000" ||
       url.pathname.startsWith("/api/");
 

@@ -27,7 +27,6 @@ test("one transient health failure does not show the offline banner", async ({ p
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     const isApiRequest =
-      url.hostname === "api.smart.ktragroup.com" ||
       url.port === "8000" ||
       url.pathname.startsWith("/api/");
 
@@ -78,7 +77,6 @@ test("confirmed API failure still shows actionable offline state", async ({ page
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     const isApiRequest =
-      url.hostname === "api.smart.ktragroup.com" ||
       url.port === "8000" ||
       url.pathname.startsWith("/api/");
     if (!isApiRequest) {

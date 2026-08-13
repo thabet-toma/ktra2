@@ -100,8 +100,7 @@ const install = async (page: Page, state: ServerState) => {
   await page.route('**/*', async (route: Route) => {
     const req = route.request();
     const url = new URL(req.url());
-    const isApi = url.hostname === 'api.smart.ktragroup.com'
-      || url.port === '8000'
+    const isApi = url.port === '8000'
       || url.pathname.startsWith('/api/');
     if (!isApi) return route.continue();
 

@@ -14,8 +14,8 @@ function _hash(str: string): string {
 }
 const BUILD_VERSION = _hash(manifestEntries.map((e) => e.revision || e.url).join('|') || 'dev');
 const STATIC_CACHE = `ktra-static-${BUILD_VERSION}`;
-// صيانة 2026-07: أُزيلت MASTER_DATA_CACHE/API_CACHE — كانتا كوداً ميتاً (انظر
-// حارس same-origin أدناه)، وإزالتهما من هذه المجموعة تجعل activate يمسح أي
+// صيانة 2026-07: أُزيلت MASTER_DATA_CACHE/API_CACHE — لا كاش لردود الـ API (انظر
+// حارس المسار في معالج fetch)، وإزالتهما من هذه المجموعة تجعل activate يمسح أي
 // نسخة قديمة منهما عالقة في متصفحات المستخدمين.
 const CURRENT_CACHES = new Set([STATIC_CACHE]);
 
@@ -38,19 +38,43 @@ self.addEventListener('activate', (event) => {
         // امسح أي كاش لا ينتمي للنسخة الحالية (يشمل كاش الكود القديم بنسخته السابقة).
         keys.filter((k) => !CURRENT_CACHES.has(k)).map((k) => caches.delete(k))
       )
-    )
+    ).then(purgeCachedApiResponses)
   );
   self.clients.claim();
 });
 
+/** يمسح ردود `/api/` التي تسرّبت إلى الكاش قبل استثناء المسار في معالج fetch.
+ *
+ * الاستثناء يمنع تخزيناً جديداً ولا يلمس ما تراكم على أجهزة المستخدمين. ولا يكفي
+ * أن اسم الكاش مشتقّ من بصمة البناء: تعديل `sw.ts` وحده لا يغيّر بصمة الأصول
+ * المبنية ⇒ نفس اسم الكاش ⇒ يبقى المسرَّب. فالمسح صريح ومستقلّ عن البصمة.
+ */
+async function purgeCachedApiResponses(): Promise<void> {
+  const cache = await caches.open(STATIC_CACHE);
+  const requests = await cache.keys();
+  await Promise.all(
+    requests
+      .filter((request) => new URL(request.url).pathname.startsWith('/api/'))
+      .map((request) => cache.delete(request))
+  );
+}
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET') return;
+
+  // ── لا كاش لردود الـ API، أبداً ─────────────────────────────────────────────
+  // الحارس على **المسار** لا على الأصل، عمداً. الـ API اليوم على **نفس أصل**
+  // الصفحة (`ktra-pro.tech/api/`) بعد الانتقال إلى nginx واحد؛ الحارس السابق كان
+  // يعتمد على كونه نطاقاً فرعياً منفصلاً، فسقطت الحماية بلا إشارة لحظة النشر —
+  // وهي حماية عزلٍ لا تحسين: مفتاح `Cache API` هو الرابط وحده، والشركة تأتي من
+  // التوكن لا من المسار، أي أن `/api/products/` للشركة أ هو حرفياً مفتاح الشركة ب.
+  // فأي سقوط للكاش (انقطاع أو تجاوز مهلة الثماني ثوانٍ) كان يعرض بيانات شركة على
+  // مستخدم شركة أخرى. حارس المسار لا يتأثر بانتقال استضافة ولا بتغيير دومين.
+  if (url.pathname.startsWith('/api/')) return;
+
   // لا تتدخّل في طلبات أصل آخر — اترك المتصفح يديرها مباشرة كي لا يُقدَّم رد قديم
-  // من الكاش بدل الخادم. ملاحظة مهمة: في الإنتاج الـ API على نطاق فرعي مختلف
-  // (api.smart.ktragroup.com مقابل smart.ktragroup.com) وفي التطوير على بورت آخر
-  // (:8000) — أي أن **كل** نداءات /api/ عابرة للأصل وتتجاوز هذا الـ SW بالكامل.
-  // لذلك حُذف أي منطق كاش لمسارات /api/ من هذا الملف (كان كوداً ميتاً لا يُنفَّذ).
+  // من الكاش بدل الخادم (يغطّي أيضاً الـ API على بورت آخر في التطوير: ‎:8000).
   if (url.origin !== self.location.origin) return;
 
   // التنقّل (طلب صفحة) → الشبكة أولاً ليصل index.html الأحدث بمراجع الـ chunks

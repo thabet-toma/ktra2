@@ -14,7 +14,6 @@ test("authenticated shell does not wait for non-critical activity data", async (
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     const isApiRequest =
-      url.hostname === "api.smart.ktragroup.com" ||
       url.port === "8000" ||
       url.pathname.startsWith("/api/");
     if (!isApiRequest) {
@@ -81,7 +80,6 @@ test("idle authenticated shell does not poll mapper collections every five secon
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     const isApiRequest =
-      url.hostname === "api.smart.ktragroup.com" ||
       url.port === "8000" ||
       url.pathname.startsWith("/api/");
     if (!isApiRequest) {

@@ -20,7 +20,6 @@ export async function installAuthenticatedOfflineApp(page: Page) {
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url());
     const isApiRequest =
-      url.hostname === 'api.smart.ktragroup.com' ||
       url.port === '8000' ||
       url.pathname.startsWith('/api/');
 

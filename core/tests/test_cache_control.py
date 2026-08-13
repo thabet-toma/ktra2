@@ -21,7 +21,7 @@ class CorsPreflightTest(TestCase):
     def test_active_branch_header_is_allowed(self):
         resp = self.client.options(
             "/api/health/",
-            HTTP_ORIGIN="https://smart.ktragroup.com",
+            HTTP_ORIGIN="https://ktra-pro.tech",
             HTTP_ACCESS_CONTROL_REQUEST_METHOD="GET",
             HTTP_ACCESS_CONTROL_REQUEST_HEADERS="authorization,x-branch-id,x-tenant-id",
         )

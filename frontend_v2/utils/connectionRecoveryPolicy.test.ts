@@ -14,13 +14,13 @@ test("manual recovery selects only K.T.R.A cache names", () => {
 });
 
 test("manual recovery selects only a same-origin scope covering the page", () => {
-  const page = "https://smart.ktragroup.com/app/invoices/42";
+  const page = "https://ktra-pro.tech/app/invoices/42";
   assert.equal(
-    serviceWorkerScopeCoversPage("https://smart.ktragroup.com/app/", page),
+    serviceWorkerScopeCoversPage("https://ktra-pro.tech/app/", page),
     true,
   );
   assert.equal(
-    serviceWorkerScopeCoversPage("https://smart.ktragroup.com/store/", page),
+    serviceWorkerScopeCoversPage("https://ktra-pro.tech/store/", page),
     false,
   );
   assert.equal(

@@ -58,8 +58,8 @@ SECRET_KEY = _environment_value(
 DEBUG = os.environ.get("DJANGO_DEBUG", "0").lower() in ("1", "true", "yes")
 
 ALLOWED_HOSTS = [
-    'smart.ktragroup.com',
-    'api.smart.ktragroup.com',
+    'ktra-pro.tech',
+    'www.ktra-pro.tech',
     'localhost',
     '127.0.0.1'
 ]
@@ -265,7 +265,8 @@ _DEFAULT_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://smart.ktragroup.com",
+    "https://ktra-pro.tech",
+    "https://www.ktra-pro.tech",
 ]
 _origins_env = os.environ.get("DJANGO_CORS_ALLOWED_ORIGINS", "").strip()
 if _origins_env:
@@ -305,7 +306,7 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-branch-id",
 ]
 
-CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS) + ['https://api.smart.ktragroup.com']
+CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
 
 # المساعد الذكي (OpenClaw على سيرفر منفصل — ليس نفس خادم Django).
 # Django يتصل به عبر HTTP (صادر من هذا السيرفر)؛ على سيرفر OpenClaw يجب أن يكون المنفذ (مثل 18789)

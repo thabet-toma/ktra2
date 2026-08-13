@@ -112,7 +112,7 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    const isApi = url.hostname === "api.smart.ktragroup.com" || url.port === "8000" || url.pathname.startsWith("/api/");
+    const isApi = url.port === "8000" || url.pathname.startsWith("/api/");
     if (!isApi) return route.continue();
 
     if (url.pathname.endsWith("/hr/users/platform-e2e-user/")) {

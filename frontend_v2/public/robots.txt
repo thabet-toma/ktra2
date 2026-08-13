@@ -49,4 +49,4 @@ Disallow: /group-constants
 Disallow: /aseel-kit
 Disallow: /aseel-sales
 
-Sitemap: https://smart.ktragroup.com/sitemap.xml
+Sitemap: https://ktra-pro.tech/sitemap.xml
