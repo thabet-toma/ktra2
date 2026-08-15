@@ -96,10 +96,12 @@ export const IncomeStatementPage: React.FC = () => {
     {
       key: "revenue", header: "الإيرادات", numeric: true,
       render: (r) => r.revenue > 0 ? fmt(r.revenue) : "—",
+      exportValue: (r) => r.revenue,
     },
     {
       key: "expense", header: "المصروفات", numeric: true,
       render: (r) => r.expense > 0 ? fmt(r.expense) : "—",
+      exportValue: (r) => r.expense,
     },
     {
       key: "net", header: "الصافي", numeric: true,
@@ -108,6 +110,7 @@ export const IncomeStatementPage: React.FC = () => {
           {fmt(r.net)}
         </span>
       ),
+      exportValue: (r) => r.net,
     },
   ];
 
@@ -142,6 +145,7 @@ export const IncomeStatementPage: React.FC = () => {
         rows={rows}
         totals={totals}
         exportable={true}
+        exportFilename={`income-statement-${start}_${end}`}
         loading={loading}
         emptyHint="لا بيانات إيرادات أو مصروفات في الفترة"
         getRowKey={(r, idx) => `${r.code || idx}`}

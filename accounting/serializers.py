@@ -207,6 +207,8 @@ SOURCE_LABEL_MAP = {
     "LOGISTICS_CLEARANCE_PAYMENT": "دفعة تخليص",
     "JOURNAL_REVERSAL": "عكس قيد",
     "MANUAL": "قيد يدوي",
+    # A3: قيد يدوي وسمه المحاسب «تسوية» — يُصفّى وحده في دفتر اليومية.
+    "ADJUSTMENT": "قيد تسوية",
 }
 
 
@@ -229,6 +231,7 @@ class JournalHeaderListSerializer(serializers.ModelSerializer):
     currency_code = serializers.SerializerMethodField(read_only=True)
     tenant_name = serializers.SerializerMethodField(read_only=True)
     source_label = serializers.SerializerMethodField(read_only=True)
+    created_by_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = JournalHeader
@@ -246,10 +249,20 @@ class JournalHeaderListSerializer(serializers.ModelSerializer):
             "currency_code",
             "tenant_name",
             "source_label",
+            "created_by",
+            "created_by_name",
         ]
 
     def get_currency_code(self, obj):
         return obj.currency.Code if obj.currency_id else None
+
+    def get_created_by_name(self, obj):
+        """A3: عمود «المستخدم» في دفتر اليومية. القيود القديمة بلا مستخدم → None
+        (الواجهة تعرض «—»)."""
+        if not obj.created_by_id:
+            return None
+        u = obj.created_by
+        return f"{u.first_name} {u.last_name}".strip() or u.get_username()
 
     def get_reference_summary(self, obj):
         return build_journal_reference_summary(
@@ -544,7 +557,9 @@ class FiscalPeriodSerializer(serializers.ModelSerializer):
     class Meta:
         model = FiscalPeriod
         fields = ['id', 'name', 'start_date', 'end_date', 'status', 'is_closed']
-        read_only_fields = ['id']
+        # THA-197: حالة الإقفال تتغيّر عبر `close/` و`reopen/` وحدهما — لا عبر
+        # كتابة مباشرة على الحقل.
+        read_only_fields = ['id', 'status', 'is_closed']
 
 
 class TaxRateSerializer(serializers.ModelSerializer):

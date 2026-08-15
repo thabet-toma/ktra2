@@ -85,6 +85,12 @@ class JournalHeader(models.Model):
     exchange_rate = models.DecimalField(
         max_digits=18, decimal_places=6, default=1.0, db_column='ExchangeRate',
     )
+    # A3: مَن أنشأ القيد — دفتر اليومية يُصفَّى بالمستخدم، والمحاسب يعرف صاحب
+    # كل قيد. NULL = قيود ما قبل هذا العمود، أو قيد ولّده مسار آلي بلا مستخدم.
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID',
+    )
 
     class Meta:
         db_table = 'journal_headers'

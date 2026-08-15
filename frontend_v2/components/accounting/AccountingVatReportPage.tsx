@@ -76,8 +76,8 @@ export const AccountingVatReportPage: React.FC = () => {
     { key: "journal_id", header: "رقم", render: (r) => `#${r.journal_id}` },
     { key: "description", header: "البيان", render: (r) => r.description },
     { key: "partner", header: "الشريك", render: (r) => r.partner || "—" },
-    { key: "debit", header: "مدين", numeric: true, render: (r) => fmt(r.debit) },
-    { key: "credit", header: "دائن", numeric: true, render: (r) => fmt(r.credit) },
+    { key: "debit", header: "مدين", numeric: true, render: (r) => fmt(r.debit), exportValue: (r) => r.debit ?? 0 },
+    { key: "credit", header: "دائن", numeric: true, render: (r) => fmt(r.credit), exportValue: (r) => r.credit ?? 0 },
   ];
 
   const totals = lines.length > 0 ? {
@@ -138,6 +138,7 @@ export const AccountingVatReportPage: React.FC = () => {
         rows={lines}
         totals={totals}
         exportable={true}
+        exportFilename={`vat-report-${start}_${end}`}
         loading={loading}
         emptyHint="لا توجد حركات في الفترة"
         getRowKey={(r, idx) => `${r.journal_id}-${idx}`}

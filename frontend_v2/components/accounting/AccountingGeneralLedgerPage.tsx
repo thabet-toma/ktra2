@@ -16,11 +16,17 @@ type LedgerRow = GeneralLedgerResponse["transactions"][number];
 export interface AccountingGeneralLedgerPageProps {
   initialAccountId?: number | null;
   onInitialAccountConsumed?: () => void;
+  /**
+   * التنقيب: نقر رقم القيد يفتحه. الحساب المعروض يُمرَّر معه كي يعود المستخدم
+   * إلى الكشف نفسه لا إلى شاشة فارغة.
+   */
+  onOpenJournal?: (journalId: number, accountId: number | null) => void;
 }
 
 export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPageProps> = ({
   initialAccountId,
   onInitialAccountConsumed,
+  onOpenJournal,
 }) => {
   const [accounts, setAccounts] = useState<AccountingAccount[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyDto[]>([]);
@@ -105,12 +111,29 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
 
   const columns: ReportColumn<LedgerRow>[] = [
     { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) },
-    { key: "journal_id", header: "رقم القيد", render: (r) => `#${r.journal_id}` },
+    {
+      key: "journal_id", header: "رقم القيد",
+      // القفزة الثانية في التنقيب: من سطر الأستاذ إلى القيد الذي أنشأه.
+      render: (r) =>
+        onOpenJournal ? (
+          <button
+            type="button"
+            className="text-blue-700 hover:underline"
+            title="فتح القيد"
+            onClick={() => onOpenJournal(r.journal_id, accountId ? Number(accountId) : null)}
+          >
+            #{r.journal_id}
+          </button>
+        ) : (
+          `#${r.journal_id}`
+        ),
+    },
     { key: "description", header: "البيان", render: (r) => r.description },
-    { key: "debit", header: "مدين", numeric: true, render: (r) => fmt(Number(r.debit)) },
-    { key: "credit", header: "دائن", numeric: true, render: (r) => fmt(Number(r.credit)) },
+    { key: "debit", header: "مدين", numeric: true, render: (r) => fmt(Number(r.debit)), exportValue: (r) => Number(r.debit) },
+    { key: "credit", header: "دائن", numeric: true, render: (r) => fmt(Number(r.credit)), exportValue: (r) => Number(r.credit) },
     // الجانب صريح: «1,112 دائن» — الإشارة وحدها تُرسم في نهاية الرقم بـRTL فتلتبس.
-    { key: "balance", header: "الرصيد المتراكم", numeric: true, render: (r) => fmtBalance(Number(r.balance)) },
+    // التصدير يحمل الرصيد الموقّع الخام (لا نص الجانب) كي يُعاد حسابه آلياً.
+    { key: "balance", header: "الرصيد المتراكم", numeric: true, render: (r) => fmtBalance(Number(r.balance)), exportValue: (r) => Number(r.balance) },
   ];
 
   const totalDebit = ledgerRows.reduce((s, r) => s + Number(r.debit), 0);
@@ -182,6 +205,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
         rows={ledgerRows}
         totals={totals}
         exportable={true}
+        exportFilename={`general-ledger-${start}_${end}`}
         loading={loading}
         emptyHint={
           data

@@ -26,7 +26,7 @@
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
 | `Account` | `code`، `name`، `account_type`، `nature`، `is_active` | `parent` (self, SET_NULL)، `tenant`؛ `unique_together (tenant, code)` |
-| `JournalHeader` | `transaction_date`، `reference_type`، `reference_id`، `is_posted`، `exchange_rate` | `tenant`، `branch` (PROTECT)، `currency` (PROTECT)، `lines` |
+| `JournalHeader` | `transaction_date`، `reference_type`، `reference_id`، `is_posted`، `exchange_rate` | `tenant`، `branch` (PROTECT)، `currency` (PROTECT)، `created_by` (auth.User, SET_NULL — NULL في القيود الأقدم من العمود)، `lines` |
 | `JournalLine` | `debit`، `credit`، `base_debit`، `base_credit`، `description` | `journal` (CASCADE)، `account` (PROTECT)، `partner` (SET_NULL)، `cost_center` |
 | `VoidedJournal` | `original_journal_id`، `reference_type`، `reference_id` | فريد على `(tenant, reference_type, reference_id)` |
 | `Cheque` | `cheque_number`، `amount`، `due_date`، `status`، `direction`، `VALID_TRANSITIONS` | `partner` (RESTRICT)، `bank`، `deposit_bank_account`، `sales_invoice`، `customer_payment`، `supplier_payment`، `purchase_invoice` |
@@ -43,9 +43,12 @@
 ```python
 # التوقيعات فقط — منسوخة حرفياً من accounting/services.py
 def post_journal(*, tenant_id: int, transaction_date, reference_type: str, reference_id: int | None, description: str, lines_data: list[dict], currency=None, exchange_rate=Decimal("1"), user=None, idempotent: bool = True, branch_id: int | None = None) -> JournalHeader:  # المسار الوحيد لإنشاء + ترحيل أي قيد
-def unpost_document(*, tenant_id: int, reference_id: int, journal_reference_types, stock_reference_types=(), user=None, document_label: str = "", recycle: bool = False) -> dict:  # حذف كل قيود مستند + عكس حركات مخزونه ذرّياً
+def unpost_document(*, tenant_id: int, reference_id: int, journal_reference_types, stock_reference_types=(), user=None, document_label: str = "", recycle: bool = False) -> dict:  # حذف كل قيود مستند + عكس حركات مخزونه ذرّياً — بعد حارس الفترة على تواريخ المستند
 def validate_journal_entry(header, lines_data):  # توازن + حساب فعّال + نفس الشركة + فترة مفتوحة
 def validate_fiscal_period(tenant_id, transaction_date):  # يرمي ValidationError إن كانت الفترة مقفلة
+def assert_period_open_for_unpost(tenant_id, transaction_date, document_label=""):  # نفس حرّاس post_journal، برسالة تراجع
+def create_fiscal_year(tenant, year, granularity='monthly') -> list[FiscalPeriod]:  # 12 شهراً (افتراضي) أو فترة `FY <year>` واحدة — idempotent
+def assert_no_period_overlap(tenant_id, start_date, end_date, exclude_pk=None):  # فترتان متقاطعتان لنفس الشركة تُرفضان
 def post_journal_entry(journal_id, user=None):  # ترحيل قيد موجود بالـid
 def year_end_close(*, tenant_id: int, fiscal_year: int, retained_earnings_account_id: int, user=None) -> dict:  # تصفير الإيراد/المصروف إلى الأرباح المحتجزة
 def next_document_number(tenant_id: int, document_type: str, book_number: int = 0, branch_id: int | None = None) -> int:  # ترقيم المستندات عبر TenantBook مع select_for_update
@@ -72,7 +75,8 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 |---|---|---|
 | GET/POST | `accounts/` | `AccountViewSet` |
 | POST | `accounts/resolve-import-expense/` | `AccountViewSet.resolve_import_expense` |
-| GET/POST | `journals/` | `JournalViewSet` (ترقيم اختياري بـ`?page=`) |
+| GET/POST | `journals/` | `JournalViewSet` (ترقيم اختياري بـ`?page=`؛ فلاتر: `reference_type`، `date_from`/`date_to`، `search`، `account` (سطر على هذا الحساب — `Exists` بلا `distinct`)، `user` (منشئ القيد)) |
+| GET | `journals/users/` | `JournalViewSet.journal_users` — خيارات فلتر «المستخدم» من قيود الشركة وحدها |
 | POST | `journals/{id}/post/` | `JournalViewSet.post_entry` — يتطلب `accounting.journal.post` |
 | POST | `journals/{id}/reverse/` | `JournalViewSet.reverse_entry` — يتطلب `accounting.journal.unpost` |
 | GET/POST | `cheques/` | `ChequeViewSet` |
@@ -81,30 +85,37 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | GET | `general-ledger/` · `trial-balance/` · `vat-report/` | `GeneralLedgerView` · `TrialBalanceView` · `VatReportView` |
 | GET | `bank-accounts/{id}/statement/` | `BankAccountViewSet` |
 | POST | `bank-reconciliations/{id}/toggle-line/` · `close/` · `reopen/` | `BankReconciliationViewSet` |
-| POST | `fiscal-periods/create-year/` · `{id}/close/` · `{id}/reopen/` · `year-end-close/` | `FiscalPeriodViewSet` |
+| POST | `fiscal-periods/create-year/` (`granularity` = `monthly` افتراضاً \| `yearly`؛ **يردّ قائمة فترات** لا فترة واحدة — 12 صفاً في الحالة الشهرية) · `{id}/close/` (409 مع قيود غير مرحّلة ما لم يُمرَّر `force`) · `{id}/reopen/` (`reason` إلزامي، يُحفظ في سجل التدقيق) · `year-end-close/` | `FiscalPeriodViewSet` — كلها بـ`accounting.period.manage` |
+| GET/POST/PATCH/DELETE | `fiscal-periods/` · `fiscal-periods/{id}/` | `FiscalPeriodViewSet` — الكتابة كلها بـ`accounting.period.manage`؛ المُقفَلة لا تُعدَّل ولا تُحذف، والحذف مرفوض إن كان في مداها قيد مرحّل؛ `status`/`is_closed` للقراءة فقط (تتغيّر عبر `close/`+`reopen/` وحدهما)، وكل تعديل أو حذف يُكتب في `AccountingAuditLog` |
 | GET | `exchange-rates/get-rate/` | `ExchangeRateViewSet` |
 | GET/POST | `cost-centers/` · `tax-rates/` · `banks/` · `bank-branches/` · `cash-box-accounts/` · `purchase-receipts/` · `currencies/` | حسب `urls.py` |
+
+**«قيد التسوية» ليس نوعاً ثانياً من القيود ولا شاشةً مستقلة** — هو وسمٌ على القيد اليدوي
+نفسه: `reference_type='ADJUSTMENT'` بتسميته العربية في `accounting/serializers.py`
+(`SOURCE_LABEL_MAP`)، يُصفّى بفلتر `reference_type` القائم ويمرّ بدورة المسودّة/الترحيل
+وقاعدة التوازن نفسها بلا استثناء.
 
 ## الاعتماديات
 **يعتمد على:**
 - `partners` — **models مباشرة**: `accounting/models.py` (`from partners.models import Partner`) لبناء `JournalLine.partner` (`models.py`) و`Cheque.partner` (`models.py`)، ويتحقق منه في `services.py` داخل `validate_journal_entry`.
 - `tenants` — **models مباشرة**: `accounting/models.py` (`Tenant, Currency`) و`accounting/services.py` (`Currency, TenantBook` لترقيم المستندات).
-- `core` — **services**: `accounting/services.py` (`from core.hooks import run_tax_period_guards`)، و`accounting/views.py:13-17` (`core.access`، `core.api_defaults`، `core.tenant_utils`).
-- استيرادات كسولة داخل الدوال (لكسر الدوران): `inventory.services` في `services.py`، `sales.models`/`logistics.models` في `services.py:930-931`، `sales.services`/`logistics.services` في `services.py:1007,1013`.
+- `core` — **services**: `accounting/services.py` (`run_tax_period_guards`) من `core.hooks`، و`accounting/views.py` (`core.access`، `core.api_defaults`، `core.tenant_utils`).
+- استيرادات كسولة داخل الدوال (لكسر الدوران): `inventory.services` في `services.py`، و`sales.models`/`logistics.models` و`sales.services`/`logistics.services` داخل `accounting/services.py` (`unpost_document`).
 
-**يعتمد عليه:** `sales` (`sales/services.py:14-15`)، `logistics` (`logistics/services.py`، `logistics/services.py:999,1280,1699` لـ`post_journal`)، `inventory` (`inventory/services.py:1118,1281`)، `partners` (`partners/signals.py`، `partners/views.py`)، `core`، `hr`، `tenants`، `accountant_portal`.
+**يعتمد عليه:** `sales` (`sales/services/`)، `logistics` (`logistics/services.py` لـ`post_journal`)، `inventory` (`inventory/services.py`)، `partners` (`partners/signals.py`، `partners/views.py`)، `core`، `hr`، `tenants`، `accountant_portal`.
 
 ## قواعد لا يجوز كسرها
-- **كل قيد يمرّ عبر `post_journal`** — هي وحدها تفرض الفترة المفتوحة والتوازن والـidempotency وقفل `select_for_update` (`accounting/services.py:479-636`). أي كتابة مباشرة لـ`JournalHeader`/`JournalLine` تتجاوز كل ذلك.
+- **كل قيد يمرّ عبر `post_journal`** — هي وحدها تفرض الفترة المفتوحة والتوازن والـidempotency وقفل `select_for_update` (`accounting/services.py` (`post_journal`)). أي كتابة مباشرة لـ`JournalHeader`/`JournalLine` تتجاوز كل ذلك.
 - **من خارج accounting الكتابة عبر `accounting.api` فقط** (المرحلة 2): `post_document` للقيود، `reverse_journal` للعكس (ومعه التجاوز الوحيد المشروع لغارد القيد المرحّل عند `unpost_original=True`)، `purge_journals` للتطهير الإداري — عقد `no-direct-accounting-models` في `.importlinter` يمنع أي استيراد جديد لـ`accounting.models`.
-- **لا تعديل على قيد مرحّل**: `JournalHeader.save` يرمي `ValidationError` إن كان `is_posted` سابقاً (`accounting/models.py:110-120`) — أنشئ قيداً عكسياً.
-- **التوازن دقيق بعد `quantize('0.01')`** ولا يُقبل قيد بمجموع صفر (`accounting/services.py:387-401`).
-- **`base_debit`/`base_credit` تُحسب في `JournalLine.save` من `exchange_rate` الرأس**، وسعر مفقود أو ≤ 0 يفشل بصوت عالٍ لا يسقط إلى 1 (`accounting/models.py:167-201`).
-- **`nature` الحساب مفروضة على الترحيل**: `debit_only` يرفض أي دائن و`credit_only` يرفض أي مدين (`accounting/services.py:593-607`).
-- **`JournalLine.account` بـ`PROTECT`** — لا يُحذف حساب له حركة (`accounting/models.py`)؛ و`debit`/`credit` بقيدَي `CheckConstraint` غير سالبين (`models.py:156-165`).
-- **كل قراءة مُنطاقة بالشركة**: `tenant is None ⇒ .none()` في `JournalViewSet.get_queryset` و`AccountViewSet.get_queryset` (`accounting/views.py:288-291`, `81-84`).
-- **الشيك لا يتحرك خارج `VALID_TRANSITIONS`** — `Cheque.change_status` يرفض الانتقال غير المسموح ويسجّل `ChequeMovement` (`accounting/models.py:329-376`).
-- **لا تُقفل مطابقة بنكية بفرق ≥ 0.01** (`accounting/services.py:1441-1452`)، وكل `JournalLine` تُطابَق مرة واحدة (`models.py`).
+- **لا تعديل على قيد مرحّل**: `JournalHeader.save` يرمي `ValidationError` إن كان `is_posted` سابقاً (`accounting/models.py` (`JournalHeader`)) — أنشئ قيداً عكسياً.
+- **التوازن دقيق بعد `quantize('0.01')`** ولا يُقبل قيد بمجموع صفر (`accounting/services.py` (`validate_journal_entry`)).
+- **`base_debit`/`base_credit` تُحسب في `JournalLine.save` من `exchange_rate` الرأس**، وسعر مفقود أو ≤ 0 يفشل بصوت عالٍ لا يسقط إلى 1 (`accounting/models.py` (`JournalLine`)).
+- **`nature` الحساب مفروضة على الترحيل**: `debit_only` يرفض أي دائن و`credit_only` يرفض أي مدين (`accounting/services.py` (`post_journal`)).
+- **`JournalLine.account` بـ`PROTECT`** — لا يُحذف حساب له حركة، و`debit`/`credit` بقيدَي `CheckConstraint` غير سالبين (`accounting/models.py` (`JournalLine`)).
+- **كل قراءة مُنطاقة بالشركة**: `tenant is None ⇒ .none()` في `accounting/views.py` (`JournalViewSet`) و`accounting/views.py` (`AccountViewSet`).
+- **الشيك لا يتحرك خارج `VALID_TRANSITIONS`** — `Cheque.change_status` يرفض الانتقال غير المسموح ويسجّل `ChequeMovement` (`accounting/models.py` (`change_status`)).
+- **لا تُقفل مطابقة بنكية بفرق ≥ 0.01** (`accounting/services.py` (`close_bank_reconciliation`))، وكل `JournalLine` تُطابَق مرة واحدة (`accounting/models.py` (`BankReconciliationLine`)).
+- **الفترة المُقفَلة لا تتغيّر إلا عبر `reopen/` بسبب مسجَّل** — `FiscalPeriodViewSet.perform_update`/`perform_destroy` (`accounting/views.py`) يرفضان أي تعديل أو حذف عليها، ويمنعان حذف فترة في مداها قيد مرحّل (تاريخٌ بلا فترة تغطّيه يشلّ الترحيل وإلغاءه معاً)، وكل تعديل أو حذف ناجح يُكتب في سجل التدقيق.
 - **`create_audit_log` يجب أن يبقى معزولاً** — سطر تدقيق فاشل لا يجوز أن يُرجِع معاملة المستدعي (سبب اختبار `test_audit_log_isolation`).
 
 ## الاختبارات المهمة
@@ -122,3 +133,5 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | `accounting/tests/test_audit_log_isolation.py` | سطر التدقيق لا يُسقط عملية المستدعي |
 | `accounting/tests/test_fx_fifo.py` | طبقات FIFO لصندوق العملة الأجنبية |
 | `accounting/tests/test_journal_pagination.py` · `test_journal_reference_perf.py` · `test_account_list_perf.py` | عقد الترقيم وغياب N+1 |
+| `accounting/tests/test_fiscal_period_lock.py` | قفل الشهر المالي من كل مسار: الترحيل وإلغاؤه والتداخل و`close/`+`reopen/`، وCRUD الفترة (صلاحية، مُقفَلة غير قابلة للتعديل أو الحذف، سجل تدقيق) |
+| `accounting/tests/test_journal_filters.py` | تصفية الدفتر بالحساب (بلا تكرار عبر الصفحات) وبالمستخدم، وختم `created_by` من مسارَي الإنشاء، ودورة قيد التسوية |

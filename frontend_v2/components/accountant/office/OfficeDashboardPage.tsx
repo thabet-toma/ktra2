@@ -2,7 +2,13 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CalendarClock, Receipt, TrendingUp, Users } from 'lucide-react';
 
 import { getPracticeOverview, type PracticeClientRow } from '../../../services/accountantApi';
+import {
+  getPracticeDeadlines,
+  type PracticeDeadlineItem,
+  type PracticeDeadlines,
+} from '../../../services/accountantPracticeApi';
 import { formatNumber } from '../../../utils/formatNumber';
+import { DeadlinesStrip } from './OfficeDeadlines';
 import { OfficeCard, OfficeEmpty, OfficeError, OfficeSkeleton, OfficeStat } from './OfficeUi';
 
 /**
@@ -13,21 +19,37 @@ import { OfficeCard, OfficeEmpty, OfficeError, OfficeSkeleton, OfficeStat } from
 export const OfficeDashboardPage: React.FC<{
   onOpenClient: (client: { tenant_id: number; company_name: string }) => void;
   onGoToClients: () => void;
-}> = ({ onOpenClient, onGoToClients }) => {
+  onGoToAgenda: () => void;
+  onOpenPracticeClient: (clientId: number) => void;
+}> = ({ onOpenClient, onGoToClients, onGoToAgenda, onOpenPracticeClient }) => {
   const [data, setData] = useState<Awaited<ReturnType<typeof getPracticeOverview>> | null>(null);
+  const [deadlines, setDeadlines] = useState<PracticeDeadlines | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    getPracticeOverview()
-      .then(setData)
+    // الأجندة قسمٌ مستقل من اللوحة: تعثّرها لا يُسقط أرقام الشهر كلها، فتُبتلع
+    // هنا ويبقى الشريط فارغاً بدل شاشة خطأ كاملة.
+    Promise.all([
+      getPracticeOverview(),
+      getPracticeDeadlines().catch(() => null),
+    ])
+      .then(([overview, agenda]) => { setData(overview); setDeadlines(agenda); })
       .catch(() => setError('تعذّر تحميل لوحة المكتب.'))
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(load, [load]);
+
+  const openDeadline = (item: PracticeDeadlineItem) => {
+    if (item.kind === 'filing' && item.tenant_id) {
+      onOpenClient({ tenant_id: item.tenant_id, company_name: item.client_name });
+      return;
+    }
+    if (item.client_id) onOpenPracticeClient(item.client_id);
+  };
 
   if (loading) return <OfficeSkeleton rows={6} />;
   if (error) return <OfficeError message={error} onRetry={load} />;
@@ -64,6 +86,15 @@ export const OfficeDashboardPage: React.FC<{
           tone={data.totals.needs_attention > 0 ? 'negative' : 'positive'}
         />
       </div>
+
+      {deadlines && (
+        <DeadlinesStrip
+          items={deadlines.items}
+          overdue={deadlines.totals.overdue}
+          onOpen={openDeadline}
+          onSeeAll={onGoToAgenda}
+        />
+      )}
 
       {attention.length > 0 && (
         <OfficeCard title="يحتاج انتباهك الآن">

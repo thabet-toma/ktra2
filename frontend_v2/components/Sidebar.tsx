@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { enterOfficeShell } from "../utils/officeShell";
+import { readAccountantMode, writeAccountantMode } from "../utils/accountantMode";
 import { clientLogger } from "../services/logger";
 import { useCompany } from "../contexts/CompanyContext";
 import { usePermissions } from "../contexts/PermissionsContext";
@@ -43,6 +44,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const { identity } = useTenantSettings();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  // A5: «وضع المحاسب» — ترتيبُ عرضٍ محفوظ لصاحب هذا المتصفح، يضع المحاسبة أولاً.
+  const [accountantMode, setAccountantMode] = useState<boolean>(readAccountantMode);
   // Phase 5 (Section 9): مجموعات تنقّل رئيسية كبيرة، كلٌّ بأيقونته الخاصة.
   const [salesExpanded, setSalesExpanded] = useState(false);
   const [customersExpanded, setCustomersExpanded] = useState(false);
@@ -51,7 +54,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const [importExpanded, setImportExpanded] = useState(false);
   const [financeExpanded, setFinanceExpanded] = useState(false);
   const [reportsExpanded, setReportsExpanded] = useState(false);
-  const [accountingExpanded, setAccountingExpanded] = useState(false);
+  // A5: في «وضع المحاسب» تبدأ المحاسبة مفتوحة — وهي أول ما جاء المستخدم لأجله.
+  const [accountingExpanded, setAccountingExpanded] = useState(accountantMode);
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
   const [afterSalesExpanded, setAfterSalesExpanded] = useState(false);
   const [platformExpanded, setPlatformExpanded] = useState(true);
@@ -191,6 +195,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   }, [activeView]);
 
 
+  // A5: تبديل «وضع المحاسب». الأثر فوري ومرئي — المحاسبة تُفتح، والمبيعات
+  // والاستيراد يُطويان — كي يرى المستخدم ما فعله زرّه لا أن يثق به.
+  // عرضٌ فقط: لا صلاحية تتغيّر، ولا مسار، ولا بند يظهر أو يختفي.
+  const toggleAccountantMode = () => {
+    const next = !accountantMode;
+    setAccountantMode(next);
+    writeAccountantMode(next);
+    if (next) {
+      setAccountingExpanded(true);
+      setSalesExpanded(false);
+      setImportExpanded(false);
+    }
+    clientLogger.info("sidebar.accountant_mode", { enabled: next });
+  };
+
   const isViewActive = (view: string) => activeView === view;
 
   // T-PERM: صلاحية كل رابط من الخريطة الموحّدة (نفسها التي يحرس بها App.tsx
@@ -245,6 +264,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
         )}
       </div>
     );
+
+    // A5: المحاسبة مجموعةٌ واحدة تُبنى مرة وتُوضع في أحد موضعين — أول القائمة في
+    // «وضع المحاسب»، وموضعها المعتاد خلافه. نسخة واحدة لا اثنتان تفترقان لاحقاً.
+    const accountingGroup = groupVisible(withPerms(accountingLinks), can, user.role)
+      ? renderGroup("المحاسبة", <Calculator className="h-5 w-5 flex-shrink-0" />, accountingExpanded, () => setAccountingExpanded(!accountingExpanded), accountingLinks)
+      : null;
 
     return (
       <div className="flex flex-col h-full bg-[var(--color-surface-2)] border-l border-[var(--color-border)] transition-all duration-300 relative">
@@ -317,6 +342,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             </button>
           )}
 
+          {/* A5: «وضع المحاسب» — المحاسبة أول القائمة بعد الرئيسية. */}
+          {accountantMode && accountingGroup}
+
           {/* 2) المبيعات */}
           {groupVisible(withPerms(salesLinks), can, user.role) &&
             renderGroup("المبيعات", <ShoppingCart className="h-5 w-5 flex-shrink-0" />, salesExpanded, () => setSalesExpanded(!salesExpanded), salesLinks)}
@@ -341,9 +369,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           {groupVisible(withPerms(financeLinks), can, user.role) &&
             renderGroup("المالية", <Landmark className="h-5 w-5 flex-shrink-0" />, financeExpanded, () => setFinanceExpanded(!financeExpanded), financeLinks)}
 
-          {/* المحاسبة — محفوظة للوصول الكامل للعمليات المحاسبية (خارج تبسيط Section 9، لا تُكسر ميزة) */}
-          {groupVisible(withPerms(accountingLinks), can, user.role) &&
-            renderGroup("المحاسبة", <Calculator className="h-5 w-5 flex-shrink-0" />, accountingExpanded, () => setAccountingExpanded(!accountingExpanded), accountingLinks)}
+          {/* المحاسبة — محفوظة للوصول الكامل للعمليات المحاسبية (خارج تبسيط Section 9، لا تُكسر ميزة).
+              A5: موضعها المعتاد — تنتقل لأول القائمة في «وضع المحاسب» وحده. */}
+          {!accountantMode && accountingGroup}
 
           {/* 8) التقارير — كل تقرير يفتح في تبويبه الخاص (G2) */}
           {groupVisible(withPerms(reportsLinks), can, user.role) &&
@@ -491,6 +519,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
         {/* User Profile */}
         <div className="p-4 border-t border-[var(--color-border)] bg-[var(--color-surface-2)]">
+          {/* A5: «وضع المحاسب» — مبدّل ترتيبٍ لصاحب هذا المتصفح وحده، في ذيل
+              القائمة حيث تعيش تفضيلات العرض لا بنود التنقّل. */}
+          <button
+            type="button"
+            onClick={toggleAccountantMode}
+            aria-pressed={accountantMode}
+            className={`flex items-center w-full p-2 mb-2 rounded-lg transition-all ${isCollapsed && !isMobile ? "justify-center" : ""} ${accountantMode ? "bg-[var(--color-surface-3)] text-[var(--color-primary-emphasis)]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"}`}
+            title="وضع المحاسب — يضع المحاسبة أول القائمة"
+          >
+            <Calculator className="h-4 w-4 flex-shrink-0" />
+            {showText && <span className="mr-2 flex-1 text-right text-xs font-semibold">وضع المحاسب</span>}
+            {showText && (
+              <span className={`flex items-center w-8 h-4 p-0.5 rounded-full flex-shrink-0 transition-colors ${accountantMode ? "bg-[var(--color-primary)] justify-end" : "bg-[var(--color-border)] justify-start"}`}>
+                <span className="w-3 h-3 rounded-full bg-white shadow-sm" />
+              </span>
+            )}
+          </button>
           <div className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center' : ''} p-2 rounded-xl`}>
             <div className="w-10 h-10 rounded-full bg-[var(--color-primary)] flex items-center justify-center text-[var(--color-primary-foreground)] font-bold flex-shrink-0 shadow-sm">
               {user.name?.charAt(0)}

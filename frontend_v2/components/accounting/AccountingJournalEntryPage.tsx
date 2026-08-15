@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { accountingApi } from "../../services/accountingApi";
 import { formatMoney, formatNumber } from "../../utils/formatNumber";
 import type {
@@ -33,6 +34,7 @@ import {
 } from "../aseel";
 import { AccountTreePicker } from "./AccountTreePicker";
 import OfflineGuard from "../offline/OfflineGuard";
+import { entityPathForReference } from "../../utils/entityLinks";
 import {
   buildHeaderNarration,
   buildLineNarration,
@@ -95,6 +97,9 @@ const REF_TYPE_LABELS: Record<string, string> = {
   JOURNAL_REVERSAL: "عكس قيد",
   LOGISTICS_EXPENSE: "مصروف لوجستي",
   MANUAL: "قيد يدوي",
+  // A3: قيد يدوي وسمه المحاسب «تسوية» — لا شاشة مستقلة له عمداً: نفس الشاشة
+  // ونفس قواعد التوازن، ووسمٌ يجعله قابلاً للتصفية في دفتر اليومية.
+  ADJUSTMENT: "قيد تسوية",
 };
 
 function refTypeLabel(t: string, description?: string, sourceLabel?: string) {
@@ -123,6 +128,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   onNavigateToDeal,
   onNavigateToShipment,
 }) => {
+  const navigate = useNavigate();
   const [accounts, setAccounts] = useState<AccountingAccount[]>([]);
   const [partners, setPartners] = useState<AccountingPartner[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterDto[]>([]);
@@ -688,6 +694,23 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       : null
   );
 
+  /**
+   * مسار المستند المصدر (فاتورة/سند/قيد أصلي). `reference_id` نصّ في الحالة،
+   * والمرجع غير الرقمي لا مسار له فيسقط إلى null.
+   */
+  const sourceRefId = Number(header.reference_id);
+  const sourceDocumentPath =
+    header.reference_type && Number.isFinite(sourceRefId) && sourceRefId > 0
+      ? entityPathForReference(header.reference_type, sourceRefId)
+      : null;
+
+  /** A3: قيد كتبه المستخدم بيده (لا مستند مصدر) — وحده يقبل وسم «تسوية». */
+  const isManualEntry =
+    !header.reference_type ||
+    header.reference_type === 'MANUAL' ||
+    header.reference_type === 'ADJUSTMENT';
+  const isAdjustment = header.reference_type === 'ADJUSTMENT';
+
   const isShipmentLink =
     relatedKind === "shipment" ||
     (relatedKind == null &&
@@ -799,6 +822,29 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
                 : '—'}
             />
           </label>
+          {/* A3: وسم «قيد تسوية» — يدويٌّ فقط، ويجعل القيد قابلاً للتصفية في الدفتر */}
+          {isManualEntry && (
+            <label className="aseel-field">
+              <span className="aseel-field-label">قيد تسوية</span>
+              <div
+                className="aseel-input"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', minHeight: '28px' }}
+              >
+                <input
+                  type="checkbox"
+                  disabled={posted}
+                  checked={isAdjustment}
+                  onChange={(e) =>
+                    setHeader((h) => ({
+                      ...h,
+                      reference_type: e.target.checked ? 'ADJUSTMENT' : 'MANUAL',
+                    }))
+                  }
+                />
+                <span style={{ fontSize: '11px' }}>قيد تسوية محاسبية</span>
+              </div>
+            </label>
+          )}
           {/* البيان الإجمالي — يتولد من الحسابات ما لم يُكتب يدوياً */}
           <label className="aseel-field" style={{ gridColumn: 'span 2' }}>
             <span className="aseel-field-label">
@@ -895,10 +941,24 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       <div className="aseel-input" style={{ display: 'flex', alignItems: 'center', minHeight: '28px', marginBottom: '8px', background: 'var(--aseel-surface-2, #f4ede0)' }}>
         <Info className="w-3 h-3" style={{ marginInlineEnd: '6px', color: 'var(--aseel-ink-soft)' }} />
         <span style={{ fontSize: '12px' }}>
-          {header.reference_type && header.reference_type !== 'MANUAL'
+          {!isManualEntry
             ? `مصدر القيد: ${refTypeLabel(header.reference_type, header.description, header.source_label)}${header.reference_id ? ' · #' + header.reference_id : ''}`
-            : 'قيد يدوي — لا مستند مصدر'}
+            : isAdjustment
+              ? 'قيد تسوية يدوي — لا مستند مصدر'
+              : 'قيد يدوي — لا مستند مصدر'}
         </span>
+        {/* القفزة الثالثة في التنقيب: من القيد إلى المستند الذي أنشأه. */}
+        {sourceDocumentPath && (
+          <button
+            type="button"
+            className="aseel-toolbtn"
+            style={{ marginInlineStart: 'auto' }}
+            title="فتح المستند المصدر"
+            onClick={() => navigate(sourceDocumentPath)}
+          >
+            <ExternalLink className="w-3 h-3" /> فتح المستند
+          </button>
+        )}
       </div>
 
       {/* ── AseelGrid لبنود القيد ── */}

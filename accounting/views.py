@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction as db_transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from rest_framework import serializers as drf_serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -59,6 +59,8 @@ from .serializers import (
     TaxRateSerializer,
 )
 from .services import (
+    GRANULARITY_MONTHLY,
+    assert_no_period_overlap,
     bank_account_statement,
     bank_reconciliation_summary,
     close_bank_reconciliation,
@@ -302,11 +304,32 @@ class JournalViewSet(viewsets.ModelViewSet):
         qs = JournalHeader.objects.none() if tenant is None else JournalHeader.objects.filter(tenant=tenant)
         # صيانة الأداء 2026-07: الـ serializer يقرأ tenant.CompanyName وcurrency.Code
         # لكل صف ⇒ بدون select_related كل قيد = استعلامان إضافيان (N+1).
-        qs = qs.select_related("tenant", "currency").order_by("-transaction_date", "-id")
+        qs = qs.select_related("tenant", "currency", "created_by").order_by(
+            "-transaction_date", "-id")
         params = getattr(self.request, "query_params", {})
         rt = (params.get("reference_type") or "").strip()
         if rt:
             qs = qs.filter(reference_type=rt)
+        # A3: تصفية بالحساب — «أرِني قيود هذا الحساب وحده». استعلام Exists على
+        # الأسطر لا join+distinct: الضمّ يكرّر رأس القيد بعدد أسطره على الحساب،
+        # وdistinct عليه يفسد الترقيم (count ≠ عدد الصفوف المبثوثة).
+        acc = (params.get("account") or "").strip()
+        if acc:
+            try:
+                qs = qs.filter(
+                    Exists(JournalLine.objects.filter(
+                        journal=OuterRef("pk"), account_id=int(acc)))
+                )
+            except ValueError:
+                qs = qs.none()
+        # A3: تصفية بالمستخدم — مَن أنشأ القيد (قيود ما قبل العمود created_by
+        # فارغة، فلا تظهر تحت أي مستخدم).
+        usr = (params.get("user") or "").strip()
+        if usr:
+            try:
+                qs = qs.filter(created_by_id=int(usr))
+            except ValueError:
+                qs = qs.none()
         df = (params.get("date_from") or "").strip()
         dt = (params.get("date_to") or "").strip()
         if df:
@@ -389,6 +412,30 @@ class JournalViewSet(viewsets.ModelViewSet):
         if page is not None:
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='users')
+    def journal_users(self, request):
+        """A3: خيارات فلتر «المستخدم» — مَن أنشأ قيوداً في هذه الشركة وحدها.
+
+        نفس شكل `core/activity_views.py` (`users`) كي يقرأه الفرونت بلا تحويل،
+        لكن مصدره القيود نفسها لا سجلّ النشاط.
+        """
+        from django.contrib.auth.models import User
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response([])
+        user_ids = (
+            JournalHeader.objects.filter(tenant=tenant, created_by__isnull=False)
+            .values_list('created_by_id', flat=True)
+            .distinct()
+        )
+        out = [
+            {'id': u.id, 'name': f"{u.first_name} {u.last_name}".strip() or u.username}
+            for u in User.objects.filter(id__in=list(user_ids))
+        ]
+        out.sort(key=lambda x: x['name'])
+        return Response(out)
 
     @action(detail=True, methods=['post'], url_path='post')
     @requires_perm('accounting.journal.post')
@@ -551,7 +598,8 @@ class JournalViewSet(viewsets.ModelViewSet):
 
         try:
             with db_transaction.atomic():
-                header = serializer.save(tenant=tenant)
+                # A3: صاحب القيد اليدوي — نفس ما يفعله post_journal للقيود الآلية.
+                header = serializer.save(tenant=tenant, created_by=self.request.user)
 
             header.refresh_from_db()
 
@@ -1788,10 +1836,86 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
         return FiscalPeriod.objects.none()
 
     def perform_create(self, serializer):
+        # THA-197: مسارات CRUD كانت مفتوحة لأي عضو بينما `close/` و`reopen/`
+        # محميّتان — فكان القفل يُلتفّ حوله بـPATCH أو DELETE عاديّين.
+        require_perm(self.request, 'accounting.period.manage')
         tenant = get_tenant(self.request)
         if not tenant:
             raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        # THA-185: الفترات لا تتقاطع — الحارس هنا يغطّي الـPOST المباشر، ونظيره
+        # داخل `create_fiscal_year` يغطّي إجراء «إنشاء سنة».
+        self._guard_overlap(
+            tenant, serializer.validated_data['start_date'],
+            serializer.validated_data['end_date'],
+        )
         serializer.save(tenant=tenant)
+
+    def perform_update(self, serializer):
+        require_perm(self.request, 'accounting.period.manage')
+        period = serializer.instance
+        # THA-197: الفترة المُقفَلة لا تُعدَّل إطلاقاً عبر التحديث — لا حالتها ولا
+        # حدودها؛ تحريك `start_date`/`end_date` يفتح أياماً داخل شهر مُقفَل بلا
+        # سبب مسجَّل. `reopen/` هو المسار المُعلَن الوحيد.
+        if period.is_closed:
+            raise ValidationError(
+                {"error": "الفترة مغلقة — أعد فتحها بسبب مسجَّل قبل تعديلها."}
+            )
+        self._guard_overlap(
+            period.tenant,
+            serializer.validated_data.get('start_date', period.start_date),
+            serializer.validated_data.get('end_date', period.end_date),
+            exclude_pk=period.pk,
+        )
+        changed = ", ".join(sorted(serializer.validated_data.keys())) or "—"
+        period = serializer.save()
+        create_audit_log(
+            tenant=period.tenant,
+            user=self.request.user,
+            action='UPDATE',
+            model_name='FiscalPeriod',
+            object_id=period.id,
+            change_details=f"Period {period.name} updated (fields: {changed})",
+        )
+
+    def perform_destroy(self, instance):
+        require_perm(self.request, 'accounting.period.manage')
+        # THA-197: الحذف ثم إعادة الإنشاء مفتوحاً = إعادة فتح بلا سبب ولا سجل،
+        # وواقعة الإقفال نفسها تضيع.
+        if instance.is_closed:
+            raise ValidationError(
+                {"error": "لا يمكن حذف فترة مغلقة — أعد فتحها بسبب مسجَّل أولاً."}
+            )
+        # وحذف فترة عليها قيود مرحّلة لا يفتح ثغرة بل يشلّ المدى: تواريخ بلا فترة
+        # تغطّيها يرفضها الترحيل وإلغاء الترحيل معاً (`validate_fiscal_period`).
+        if JournalHeader.objects.filter(
+            tenant=instance.tenant,
+            transaction_date__gte=instance.start_date,
+            transaction_date__lte=instance.end_date,
+            is_posted=True,
+        ).exists():
+            raise ValidationError(
+                {"error": (
+                    f"لا يمكن حذف الفترة «{instance.name}» — توجد قيود مرحّلة "
+                    f"مؤرَّخة داخلها."
+                )}
+            )
+        tenant, period_id, name = instance.tenant, instance.id, instance.name
+        instance.delete()
+        create_audit_log(
+            tenant=tenant,
+            user=self.request.user,
+            action='DELETE',
+            model_name='FiscalPeriod',
+            object_id=period_id,
+            change_details=f"Period {name} deleted (open, no posted journals)",
+        )
+
+    @staticmethod
+    def _guard_overlap(tenant, start_date, end_date, exclude_pk=None):
+        try:
+            assert_no_period_overlap(tenant.pk, start_date, end_date, exclude_pk=exclude_pk)
+        except DjangoValidationError as exc:
+            raise ValidationError({"error": exc.messages})
 
     @action(detail=False, methods=['post'], url_path='create-year')
     @requires_perm('accounting.period.manage')
@@ -1803,11 +1927,18 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
             year = int(year)
         except (TypeError, ValueError):
             return Response({'error': 'year يجب أن يكون رقماً'}, status=status.HTTP_400_BAD_REQUEST)
+        granularity = request.data.get('granularity') or GRANULARITY_MONTHLY
         tenant = get_tenant(self.request)
         if not tenant:
             return Response({'error': 'لا يوجد مستأجر'}, status=status.HTTP_400_BAD_REQUEST)
-        period = create_fiscal_year(tenant, year)
-        return Response(FiscalPeriodSerializer(period).data, status=status.HTTP_201_CREATED)
+        try:
+            periods = create_fiscal_year(tenant, year, granularity=granularity)
+        except DjangoValidationError as exc:
+            return Response({'error': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            FiscalPeriodSerializer(periods, many=True).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=['post'], url_path='close')
     @requires_perm('accounting.period.manage')
@@ -1815,13 +1946,28 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
         period = self.get_object()
         if period.is_closed:
             return Response({'error': 'الفترة مغلقة مسبقاً'}, status=status.HTTP_400_BAD_REQUEST)
-        # Warn about unposted journals in this period
+        # A2: مسوّدة داخل الفترة تعني رقماً لم يدخل الدفاتر بعد؛ إغلاقها يدفنه.
+        # كان تحذيراً في جسم الرد لا يوقف شيئاً — صار حاجزاً يُتجاوَز عمداً
+        # بـ force، والتجاوز يُكتب في سجل التدقيق.
         unposted_count = JournalHeader.objects.filter(
             tenant=period.tenant,
             transaction_date__gte=period.start_date,
             transaction_date__lte=period.end_date,
             is_posted=False,
         ).count()
+        forced = str(request.data.get('force', '')).lower() in ('true', '1', 'yes')
+        if unposted_count > 0 and not forced:
+            return Response(
+                {
+                    'error': (
+                        f"يوجد {unposted_count} قيد غير مرحّل في الفترة «{period.name}». "
+                        f"رحّلها أو احذفها قبل الإغلاق، أو أغلق رغم ذلك."
+                    ),
+                    'unposted_count': unposted_count,
+                    'requires_force': True,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         period.status = 'Closed'
         period.is_closed = True
         period.save(update_fields=['status', 'is_closed'])
@@ -1831,12 +1977,13 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
             action='POST',
             model_name='FiscalPeriod',
             object_id=period.id,
-            change_details=f"Period {period.name} closed (unposted journals: {unposted_count})",
+            change_details=(
+                f"Period {period.name} closed"
+                + (f" (FORCED over {unposted_count} unposted journal(s))" if forced and unposted_count
+                   else " (no unposted journals)")
+            ),
         )
-        resp = FiscalPeriodSerializer(period).data
-        if unposted_count > 0:
-            resp['warning'] = f"يوجد {unposted_count} قيد غير مرحّل في هذه الفترة."
-        return Response(resp)
+        return Response(FiscalPeriodSerializer(period).data)
 
     @action(detail=True, methods=['post'], url_path='reopen')
     @requires_perm('accounting.period.manage')
@@ -1844,6 +1991,14 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
         period = self.get_object()
         if not period.is_closed:
             return Response({'error': 'الفترة مفتوحة أصلاً'}, status=status.HTTP_400_BAD_REQUEST)
+        # A2: «صلاحية استثناء مسجَّلة» — إعادة الفتح هي المسار المُعلَن الوحيد
+        # للتعديل داخل شهر مُقفَل، فلا تمرّ بلا سبب مكتوب يُحفظ في سجل التدقيق.
+        reason = (request.data.get('reason') or '').strip()
+        if not reason:
+            return Response(
+                {'error': 'سبب إعادة الفتح مطلوب — يُحفظ في سجل التدقيق.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         period.status = 'Open'
         period.is_closed = False
         period.save(update_fields=['status', 'is_closed'])
@@ -1853,7 +2008,7 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
             action='UPDATE',
             model_name='FiscalPeriod',
             object_id=period.id,
-            change_details=f"Period {period.name} reopened",
+            change_details=f"Period {period.name} reopened — السبب: {reason[:400]}",
         )
         return Response(FiscalPeriodSerializer(period).data)
 

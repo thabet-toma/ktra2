@@ -38,6 +38,11 @@ export function entityPathForReference(
   if (t === "SHIPMENT" || t === "LOGISTICS_SHIPMENT") return `/import-flow/${referenceId}`;
   if (t === "CUSTOMER_PAYMENT") return `/sales/customer-payments?payment_id=${referenceId}`;
   if (t === "SUPPLIER_PAYMENT") return `/supplier-payments?payment_id=${referenceId}`;
+  // مستند قيد العكس هو القيد الأصلي نفسه — `reference_id` رقمه (accounting/views.py `reverse`).
+  if (t === "JOURNAL_REVERSAL") return `/accounting/journals/${referenceId}`;
+  // LOGISTICS_PAYMENT عمداً بلا مسار هنا: `reference_id` رقم الدفعة لا رقم الصفقة
+  // (logistics/views/deals.py) — فـ`/deals/<id>` سيفتح صفقة خاطئة. الصفقة تُفتح من
+  // شريط «مرتبط بصفقة» في شاشة القيد، وهو يستعمل `deal_ref_number` من الخادم.
   return null;
 }
 
@@ -99,6 +104,8 @@ export function referenceTypeLabel(referenceType?: string | null): string {
   if (t === "CREDIT_DEBIT_NOTE") return "إشعار مدين/دائن";
   if (t === "PARTNER_OPENING") return "رصيد افتتاحي";
   if (t === "JOURNAL_REVERSAL") return "عكس قيد";
+  // A3: قيد يدوي وسمه المحاسب «تسوية» — يُميَّز عن القيد اليدوي العادي.
+  if (t === "ADJUSTMENT") return "قيد تسوية";
   return "قيد يومية";
 }
 

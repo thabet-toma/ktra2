@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useId, useRef } from 'react';
+import { X } from 'lucide-react';
 
 /**
  * عناصر واجهة مكتب المحاسبة القانونية — هويّة بصرية **مستقلة تماماً** عن النظام
@@ -39,6 +40,101 @@ export const OfficeStat: React.FC<{
       <p className="text-sm font-bold text-slate-500 dark:text-slate-400">{label}</p>
       <p className={`mt-2 text-2xl font-black ${tones[tone]}`} style={{ direction: 'ltr' }}>{value}</p>
       {hint && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
+    </div>
+  );
+};
+
+/** وسم صغير — نوع الزبون، حالة برنامج، صنف موعد. */
+export const OfficeBadge: React.FC<{ tone: string; children: React.ReactNode }> = ({ tone, children }) => (
+  <span className={`inline-block rounded-lg px-2 py-1 text-xs font-bold ${tone}`}>{children}</span>
+);
+
+const CONTROL_CLASS =
+  'w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950';
+
+/**
+ * حقل نموذج المكتب: التسمية مربوطة بالعنصر عبر `useId` — كل حقل هنا يُنطق باسمه
+ * لقارئ الشاشة بلا `aria-label` مكرّر على كل استدعاء.
+ */
+export const OfficeField: React.FC<{
+  label: string;
+  hint?: string;
+  required?: boolean;
+  className?: string;
+  children: (id: string) => React.ReactNode;
+}> = ({ label, hint, required, className = '', children }) => {
+  const id = useId();
+  return (
+    <div className={className}>
+      <label htmlFor={id} className="mb-1 block text-xs font-bold text-slate-600 dark:text-slate-300">
+        {label} {required && <span className="text-red-600">*</span>}
+      </label>
+      {children(id)}
+      {hint && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
+    </div>
+  );
+};
+
+export const OfficeInput: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (props) => (
+  <input {...props} className={`${CONTROL_CLASS} ${props.className || ''}`} />
+);
+
+export const OfficeSelect: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (props) => (
+  <select {...props} className={`${CONTROL_CLASS} ${props.className || ''}`} />
+);
+
+export const OfficeTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement>> = (props) => (
+  <textarea {...props} className={`${CONTROL_CLASS} ${props.className || ''}`} />
+);
+
+/**
+ * حوار المكتب — الخروج منه مضمون دائماً: Escape، أو النقر خارجه، أو زر الإغلاق.
+ * أي نموذج هنا حالةٌ لها طريق عودة، لا شاشة يعلق فيها المحاسب.
+ */
+export const OfficeModal: React.FC<{
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  wide?: boolean;
+}> = ({ title, onClose, children, footer, wide = false }) => {
+  const titleId = useId();
+  const panel = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    panel.current?.focus();
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/60 p-4 sm:p-8"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <div
+        ref={panel}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        dir="rtl"
+        className={`w-full rounded-2xl bg-white shadow-2xl outline-none dark:bg-slate-900 ${wide ? 'max-w-3xl' : 'max-w-xl'}`}
+      >
+        <header className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+          <h2 id={titleId} className="text-base font-black text-slate-900 dark:text-white">{title}</h2>
+          <button type="button" onClick={onClose} aria-label="إغلاق" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+        <div className="max-h-[70vh] overflow-y-auto p-5">{children}</div>
+        {footer && (
+          <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-100 px-5 py-4 dark:border-slate-800">
+            {footer}
+          </footer>
+        )}
+      </div>
     </div>
   );
 };

@@ -129,6 +129,12 @@ export const accountingApi = {
     return toPagedList(await res.json());
   },
 
+  /** A3: مستخدمو دفتر اليومية — خيارات فلتر «المستخدم» في الشركة الحالية. */
+  getJournalUsers: () =>
+    fetch(`${ACC}/journals/users/`, { headers: headers() }).then(asList) as Promise<
+      Array<{ id: number; name: string }>
+    >,
+
   getJournal: async (id: number) => {
     const res = await fetch(`${ACC}/journals/${id}/`, { headers: headers() });
     await handle(res, "getJournal");
@@ -614,29 +620,38 @@ export const accountingApi = {
     return res.json();
   },
 
-  createFiscalYear: async (year: number) => {
+  /** `granularity` الافتراضي شهريّ — 12 فترة تُقفَل واحدةً واحدة. */
+  createFiscalYear: async (year: number, granularity: "monthly" | "yearly" = "monthly") => {
     const res = await fetch(`${ACC}/fiscal-periods/create-year/`, {
       method: "POST",
       headers: headers(),
-      body: JSON.stringify({ year }),
+      body: JSON.stringify({ year, granularity }),
     });
     await handle(res, "createFiscalYear");
     return res.json();
   },
 
-  closeFiscalPeriod: async (id: number) => {
+  /** 409 = قيود غير مرحّلة داخل الفترة؛ يعيدها للواجهة لتسأل ثم تُعيد بـforce. */
+  closeFiscalPeriod: async (id: number, force = false) => {
     const res = await fetch(`${ACC}/fiscal-periods/${id}/close/`, {
       method: "POST",
       headers: headers(),
+      body: JSON.stringify({ force }),
     });
+    if (res.status === 409) {
+      const body = await res.json().catch(() => ({}));
+      return { requires_force: true as const, error: body.error as string | undefined };
+    }
     await handle(res, "closeFiscalPeriod");
     return res.json();
   },
 
-  reopenFiscalPeriod: async (id: number) => {
+  /** `reason` إلزامي — يُحفظ في سجل التدقيق كصلاحية استثناء مسجَّلة. */
+  reopenFiscalPeriod: async (id: number, reason: string) => {
     const res = await fetch(`${ACC}/fiscal-periods/${id}/reopen/`, {
       method: "POST",
       headers: headers(),
+      body: JSON.stringify({ reason }),
     });
     await handle(res, "reopenFiscalPeriod");
     return res.json();

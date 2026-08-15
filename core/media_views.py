@@ -38,6 +38,15 @@ class MediaUploadThrottle(UserRateThrottle):
     scope = "media_upload"
 
 
+class MediaUploadError(Exception):
+    """فشل رفع يحمل حالته ورسالته العربية — كي يردّها كل مستهلك بنفس الصياغة."""
+
+    def __init__(self, detail: str, status_code: int):
+        self.detail = detail
+        self.status_code = status_code
+        super().__init__(detail)
+
+
 def _resource_type(name: str, content_type: str | None) -> str:
     """image للصور، raw للـPDF/المستندات (يتفادى مشاكل الرفع الموقّع)، auto لغيرها."""
     ct = (content_type or "").lower()
@@ -47,6 +56,59 @@ def _resource_type(name: str, content_type: str | None) -> str:
     if "pdf" in ct or n.endswith(".pdf"):
         return "raw"
     return "auto"
+
+
+def upload_media_file(f, folder: str = "ktra_uploads") -> str:
+    """يرفع ملفاً واحداً إلى Cloudinary ويعيد رابطه الآمن.
+
+    قلب الرفع مشترك: النقطة العامة `/api/media/upload/` ومسار مستندات مكتب
+    المحاسبة كلاهما ينادي هذه الدالة، فحدُّ الحجم وفحص الاعتماد وصياغة الفشل
+    تبقى نسخةً واحدة. الفشل يخرج كـ`MediaUploadError` بحالته، والمستهلك يردّه.
+    """
+    size = getattr(f, "size", 0) or 0
+    if size > MAX_UPLOAD_BYTES:
+        raise MediaUploadError(
+            f"حجم الملف يتجاوز الحد ({MAX_UPLOAD_BYTES // (1024 * 1024)}MB).",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    cfg = getattr(settings, "CLOUDINARY_STORAGE", {}) or {}
+    cloud_name = (cfg.get("CLOUD_NAME") or "").strip()
+    api_key = (cfg.get("API_KEY") or "").strip()
+    api_secret = (cfg.get("API_SECRET") or "").strip()
+    if not all([cloud_name, api_key, api_secret]):
+        raise MediaUploadError(
+            "لم تُضبط بيانات Cloudinary على الخادم.",
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    try:
+        import cloudinary
+        import cloudinary.uploader
+
+        cloudinary.config(cloud_name=cloud_name, api_key=api_key, api_secret=api_secret)
+        f.seek(0)
+        result = cloudinary.uploader.upload(
+            f,
+            resource_type=_resource_type(
+                getattr(f, "name", ""), getattr(f, "content_type", None)
+            ),
+            folder=folder,
+        )
+    except Exception as exc:  # فشل الرفع لا يُسقط الطلب بـ 500 غامض
+        logger.warning("media_upload failed name=%s err=%s", getattr(f, "name", "?"), exc)
+        raise MediaUploadError(
+            f"فشل رفع الملف إلى Cloudinary: {exc}", status.HTTP_502_BAD_GATEWAY,
+        ) from exc
+
+    url = result.get("secure_url") or result.get("url")
+    if not url:
+        raise MediaUploadError(
+            "لم يُعَد رابط الملف من Cloudinary.", status.HTTP_502_BAD_GATEWAY,
+        )
+
+    logger.info("media_upload ok name=%s -> %s", getattr(f, "name", "?"), url[:80])
+    return url
 
 
 @api_view(["POST"])
@@ -62,51 +124,11 @@ def media_upload(request):
     if not f:
         return Response({"detail": "حقل file مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
 
-    size = getattr(f, "size", 0) or 0
-    if size > MAX_UPLOAD_BYTES:
-        return Response(
-            {"detail": f"حجم الملف يتجاوز الحد ({MAX_UPLOAD_BYTES // (1024 * 1024)}MB)."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    cfg = getattr(settings, "CLOUDINARY_STORAGE", {}) or {}
-    cloud_name = (cfg.get("CLOUD_NAME") or "").strip()
-    api_key = (cfg.get("API_KEY") or "").strip()
-    api_secret = (cfg.get("API_SECRET") or "").strip()
-    if not all([cloud_name, api_key, api_secret]):
-        return Response(
-            {"detail": "لم تُضبط بيانات Cloudinary على الخادم."},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-
     try:
-        import cloudinary
-        import cloudinary.uploader
+        url = upload_media_file(f)
+    except MediaUploadError as exc:
+        return Response({"detail": exc.detail}, status=exc.status_code)
 
-        cloudinary.config(cloud_name=cloud_name, api_key=api_key, api_secret=api_secret)
-        f.seek(0)
-        result = cloudinary.uploader.upload(
-            f,
-            resource_type=_resource_type(
-                getattr(f, "name", ""), getattr(f, "content_type", None)
-            ),
-            folder="ktra_uploads",
-        )
-    except Exception as exc:  # فشل الرفع لا يُسقط الطلب بـ 500 غامض
-        logger.warning("media_upload failed name=%s err=%s", getattr(f, "name", "?"), exc)
-        return Response(
-            {"detail": f"فشل رفع الملف إلى Cloudinary: {exc}"},
-            status=status.HTTP_502_BAD_GATEWAY,
-        )
-
-    url = result.get("secure_url") or result.get("url")
-    if not url:
-        return Response(
-            {"detail": "لم يُعَد رابط الملف من Cloudinary."},
-            status=status.HTTP_502_BAD_GATEWAY,
-        )
-
-    logger.info("media_upload ok name=%s -> %s", getattr(f, "name", "?"), url[:80])
     return Response({"url": url})
 
 

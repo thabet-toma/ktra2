@@ -9,6 +9,11 @@ def default_export_formats():
     return ["csv", "pdf"]
 
 
+def default_service_types():
+    """خدمات المكتب الافتراضية — قائمة قابلة للتعديل من إعدادات المكتب."""
+    return ["ض.ق.م شهرية", "ضريبة دخل سنوية", "مراجعة سنوية", "رواتب"]
+
+
 class AccountantProfile(models.Model):
     PROFESSIONAL_TYPES = [
         ("lawyer", "محامٍ"),
@@ -345,3 +350,174 @@ class ReviewQuery(models.Model):
             models.Index(fields=["tenant", "status", "severity"], name="acct_q_tenant_status"),
             models.Index(fields=["tenant", "entity_type", "entity_id"], name="acct_q_tenant_entity"),
         ]
+
+
+# ── مكتب المحاسبة: سجلّ الممارسة المهنية ─────────────────────────────────────
+#
+# **الجدار:** الزبون الخارجي **سجلّ ممارسة لا دفترَ حسابات**. لا نموذج من نماذج
+# هذا القسم يحمل `tenant`، ولا يصل منه طريق إلى `post_journal` ولا إلى
+# `record_stock_movement`. قراءة دفاتر زبون حقيقي تبقى حصراً على مسارات
+# الارتباط النشط (`AccountantEngagement`) — وهذا وحده ما يمنع زبوناً خارجياً من
+# التسرّب إلى دفاتر شركة فعلية. الملكية هنا للمحاسب: كل استعلام يبدأ بـ
+# `accountant=`.
+
+
+class PracticeClient(models.Model):
+    """زبون مكتب المحاسبة — يُدخله المحاسب يدوياً، بشركة على المنصة أو بدونها."""
+
+    STATUSES = [("active", "نشط"), ("archived", "مؤرشف")]
+
+    accountant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="practice_clients",
+    )
+    trade_name = models.CharField(max_length=200)
+    contact_first = models.CharField(max_length=100, blank=True, default="")
+    contact_last = models.CharField(max_length=100, blank=True, default="")
+    phone = models.CharField(max_length=30, blank=True, default="")
+    mobile = models.CharField(max_length=30, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    address = models.TextField(blank=True, default="")
+    sector = models.CharField(max_length=120, blank=True, default="")
+    tax_number = models.CharField(max_length=50, blank=True, default="")
+    status = models.CharField(max_length=10, choices=STATUSES, default="active")
+    notes = models.TextField(blank=True, default="")
+    # الربط بشركة على المنصة **اختياري**: وجوده يعني أن لهذا الزبون دفاتر تُقرأ
+    # من مسارات الارتباط، وغيابه هو الحالة الشائعة «زبون من برا».
+    engagement = models.ForeignKey(
+        AccountantEngagement,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="practice_clients",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "acct_portal_practice_clients"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["accountant", "trade_name"],
+                name="uniq_practice_client_name",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["accountant", "status"], name="acct_pc_user_status"),
+        ]
+
+
+class PracticeProgram(models.Model):
+    """برنامج خدمة متكرر لزبون — «التأخر» مشتقّ من التاريخ لا حالةً مخزَّنة."""
+
+    FREQUENCIES = [("annual", "سنوي"), ("monthly", "شهري"), ("once", "مرة واحدة")]
+    STATUSES = [
+        ("planned", "مخطط"),
+        ("in_progress", "قيد التنفيذ"),
+        ("done", "منجز"),
+    ]
+
+    accountant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="practice_programs",
+    )
+    client = models.ForeignKey(
+        PracticeClient,
+        on_delete=models.CASCADE,
+        related_name="programs",
+    )
+    service_type = models.CharField(max_length=120)
+    frequency = models.CharField(max_length=10, choices=FREQUENCIES, default="monthly")
+    team_note = models.TextField(blank=True, default="")
+    due_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=12, choices=STATUSES, default="planned")
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "acct_portal_practice_programs"
+        indexes = [
+            models.Index(fields=["accountant", "status"], name="acct_pp_user_status"),
+            models.Index(fields=["accountant", "due_date"], name="acct_pp_user_due"),
+        ]
+
+
+class PracticeTask(models.Model):
+    """موعد أو استحقاق في أجندة المكتب — بزبون أو بلا زبون."""
+
+    STATUSES = [("open", "مفتوح"), ("done", "منجز")]
+    KINDS = [("appointment", "موعد"), ("deadline", "استحقاق")]
+
+    accountant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="practice_tasks",
+    )
+    client = models.ForeignKey(
+        PracticeClient,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tasks",
+    )
+    title = models.CharField(max_length=200)
+    due_at = models.DateTimeField()
+    status = models.CharField(max_length=6, choices=STATUSES, default="open")
+    kind = models.CharField(max_length=12, choices=KINDS, default="appointment")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "acct_portal_practice_tasks"
+        indexes = [
+            models.Index(fields=["accountant", "status", "due_at"], name="acct_pt_user_due"),
+        ]
+
+
+class PracticeDocument(models.Model):
+    """مستند في ملف الزبون — رابط مخزَّن، والرفع نفسه من مسار المكتب."""
+
+    accountant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="practice_documents",
+    )
+    client = models.ForeignKey(
+        PracticeClient,
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
+    program = models.ForeignKey(
+        PracticeProgram,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+    name = models.CharField(max_length=200)
+    url = models.CharField(max_length=500)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "acct_portal_practice_documents"
+        indexes = [
+            models.Index(fields=["accountant", "client"], name="acct_pd_user_client"),
+        ]
+
+
+class PracticeSettings(models.Model):
+    """إعدادات المكتب — الصفّ كسول، وغيابه يعني الافتراضات كاملةً."""
+
+    profile = models.OneToOneField(
+        AccountantProfile,
+        on_delete=models.CASCADE,
+        related_name="practice_settings",
+    )
+    default_program_due_days = models.PositiveSmallIntegerField(default=15)
+    service_types = models.JSONField(default=default_service_types)
+
+    class Meta:
+        db_table = "acct_portal_practice_settings"

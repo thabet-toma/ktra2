@@ -27,6 +27,8 @@ export type DenseColumn<T> = {
   render?: (row: T, rowIndex: number) => React.ReactNode;
   sortable?: boolean;
   numeric?: boolean;
+  /** Raw value for CSV export (plain digits, dot decimal). Falls back to row[key] for numeric columns, else the rendered text. */
+  exportValue?: (row: T) => string | number;
 };
 
 export type DensePagination = {
@@ -146,7 +148,13 @@ export function AseelDenseTable<T extends Record<string, any>>({
       ...rows.map((row) =>
         columns
           .map((col) => {
-            const val = col.render ? String(col.render(row, 0)) : String(row[col.key] ?? '');
+            const val = col.exportValue
+              ? String(col.exportValue(row))
+              : col.numeric
+                ? String(row[col.key] ?? '')
+                : col.render
+                  ? String(col.render(row, 0))
+                  : String(row[col.key] ?? '');
             return `"${val.replace(/"/g, '""')}"`;
           })
           .join(',')

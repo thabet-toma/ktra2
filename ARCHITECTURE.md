@@ -25,9 +25,9 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | `logistics` | الاستيراد والمشتريات: صفقة ← شحنة ← تخليص ← نقل ← فاتورة دولية + التكلفة المستوردة | 17,400 | 8,300 | `/api/logistics/` |
 | `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة، الداشبورد، المساعد الذكي | 11,600 | 5,200 | `/api/` (متفرّق) |
 | `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 10,000 | 6,100 | `/api/sales/` |
-| `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 9,600 | 2,800 | `/api/accounting/` |
+| `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 9,900 | 3,500 | `/api/accounting/` |
+| `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية — وفوقها **طبقة مكتب** بنطاق `accountant=` لا `tenant=`: زبائن المكتب (ولو لم يكونوا شركات على المنصة) وبرامجه ومواعيده ومستنداته | 4,600 | 3,700 | `/api/accountant/` |
 | `inventory` | الأصناف والمستودعات و`StockMovement` (المصدر الوحيد للرصيد ومتوسط التكلفة) والأرقام التسلسلية | 4,500 | 2,600 | `/api/inventory/` |
-| `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية | 3,400 | 2,900 | `/api/accountant/` |
 | `hr` | الموظفون والرواتب والحضور والمهام | 2,200 | 900 | `/api/hr/` |
 | `after_sales` | بطاقات الكفالة وأوامر الصيانة — **وحدة مرخّصة** | 2,200 | 1,600 | `/api/after-sales/` |
 | `tenants` | تعريف الشركة وعزلها: الأعضاء، الأدوار، الفروع، دفاتر الترقيم، إقلاع شركة جديدة | 2,000 | 1,200 | `/api/tenants/` |
@@ -83,7 +83,8 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 
 ### 3. الترحيل المحاسبي
 **كل قيد يمرّ عبر `accounting.services` (`post_journal`)** — هي وحدها تفرض الفترة المفتوحة والتوازن الدقيق والـidempotency وقفل `select_for_update`.
-إلغاء الترحيل عبر `unpost_document`. القيد المرحّل لا يُعدَّل (`accounting/models.py` — حارس في `JournalHeader.save`) — الحل قيد عكسي.
+إلغاء الترحيل عبر `unpost_document` — ويمرّ بحرّاس الفترة نفسها (`validate_fiscal_period` + `run_tax_period_guards`) بتاريخ المستند قبل أن يعكس شيئاً: الحذف من شهر مُقفَل تعديلٌ عليه كالإضافة. القيد المرحّل لا يُعدَّل (`accounting/models.py` — حارس في `JournalHeader.save`) — الحل قيد عكسي.
+الفترات المالية تُنشأ شهرية افتراضياً (`create_fiscal_year`)، **لا تتقاطع** (`assert_no_period_overlap`)، وإعادة فتح فترة مغلقة تشترط سبباً يُحفظ في `AccountingAuditLog` — هي الاستثناء المُعلَن الوحيد من القفل.
 
 المخالفات التاريخية (كتابة قيود مباشرة متجاوزةً `post_journal`) **عولجت في المرحلة 2** — كل الكتابة الخارجية الآن عبر `accounting/api.py`، ويحرسها عقد `no-direct-accounting-models` في `.importlinter`.
 
@@ -118,6 +119,7 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 | شركة جديدة / أعضاء / أدوار | `modules/tenants.md` | `tenants/services.py` (`create_company`) |
 | صلاحيات | `modules/tenants.md` | `core/access.py` |
 | محاسب خارجي / ارتباطات | `modules/accountant_portal.md` | `accountant_portal/services.py` |
+| مكتب المحاسب: زبائنه وبرامجه ومواعيده | `modules/accountant_portal.md` | `accountant_portal/practice.py` (`list_practice_clients`) |
 | تقارير | `modules/core.md` | `core/reports/` (`run_report`), `core/reports_api.py` |
 | عزل الشركة / حلّ الـtenant | `modules/core.md` + هذا الملف §1 | `core/tenant_utils.py` (`get_tenant`) |
 | صلاحيات / وحدات مرخّصة / كاش | `modules/core.md` | `core/access.py`, `core/modules.py` |

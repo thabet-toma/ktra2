@@ -1875,6 +1875,8 @@ const App: React.FC = () => {
                 ? "/deals"
                 : accountingJournalBackView === "shipments-management"
                   ? "/shipments"
+                : accountingJournalBackView === "accounting-general-ledger"
+                  ? "/accounting/general-ledger"
                 : "/accounting/journals";
               navigate(backPath);
               setAppView(accountingJournalBackView);
@@ -1908,6 +1910,15 @@ const App: React.FC = () => {
           <AccountingGeneralLedgerPage
             initialAccountId={accountingGlAccountId}
             onInitialAccountConsumed={() => setAccountingGlAccountId(null)}
+            onOpenJournal={(journalId, accountId) => {
+              // الرجوع من القيد يعيد الكشف على الحساب نفسه لا على شاشة فارغة.
+              setAccountingGlAccountId(accountId);
+              setAccountingJournalRelatedKind(null);
+              setAccountingJournalBackView("accounting-general-ledger");
+              setAccountingJournalId(journalId);
+              setAccountingJournalDealRef(null);
+              setViewAndSyncPath("accounting-journal-entry", String(journalId));
+            }}
           />
         );
 
@@ -1915,7 +1926,14 @@ const App: React.FC = () => {
         if (currentUser!.role !== "manager") {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
-        return <AccountingTrialBalancePage />;
+        return (
+          <AccountingTrialBalancePage
+            onOpenAccount={(id) => {
+              setAccountingGlAccountId(id);
+              setViewAndSyncPath("accounting-general-ledger");
+            }}
+          />
+        );
 
       case "accounting-vat-report":
         if (currentUser!.role !== "manager") {

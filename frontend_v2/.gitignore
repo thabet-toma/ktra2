@@ -25,3 +25,6 @@ dist-ssr
 
 # M0 visual parity baselines are generated locally and may be large.
 /e2e/parity-shots/
+
+# B3 office walkthrough screenshots — دليل تسليم يُولَّد محلياً، لا مصدر.
+/e2e/office-walk-shots/

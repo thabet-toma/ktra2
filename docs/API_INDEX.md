@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **428**
+عدد النقاط: **441**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -34,7 +34,19 @@
 | `/api/accountant/engagements/request/` | `RequestEngagementView` | `accountant_portal/views.py` |
 | `/api/accountant/me/` | `AccountantMeView` | `accountant_portal/views.py` |
 | `/api/accountant/me/submit-verification/` | `SubmitProfileVerificationView` | `accountant_portal/views.py` |
+| `/api/accountant/practice/clients/` | `PracticeClientListView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/clients/<int:client_id>/` | `PracticeClientDetailView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/clients/<int:client_id>/restore/` | `PracticeClientRestoreView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/deadlines/` | `PracticeDeadlinesView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/documents/` | `PracticeDocumentListView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/documents/<int:document_id>/` | `PracticeDocumentDetailView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/documents/upload/` | `PracticeDocumentUploadView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/practice/overview/` | `PracticeOverviewView` | `accountant_portal/views.py` |
+| `/api/accountant/practice/programs/` | `PracticeProgramListView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/programs/<int:program_id>/` | `PracticeProgramDetailView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/settings/` | `PracticeSettingsView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/tasks/` | `PracticeTaskListView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/tasks/<int:task_id>/` | `PracticeTaskDetailView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/resend-verification/` | `ResendVerificationView` | `accountant_portal/views.py` |
 | `/api/accountant/review/export/` | `ReviewPackageExportView` | `accountant_portal/views.py` |
 | `/api/accountant/review/queries/` | `ReviewQueryListCreateView` | `accountant_portal/views.py` |
@@ -96,6 +108,7 @@
 | `/api/accounting/fiscal-periods/{pk}/reopen/` | `FiscalPeriodViewSet` | `accounting/views.py` |
 | `/api/accounting/general-ledger/` | `GeneralLedgerView` | `accounting/views.py` |
 | `/api/accounting/journals/` | `JournalViewSet` | `accounting/views.py` |
+| `/api/accounting/journals/users/` | `JournalViewSet` | `accounting/views.py` |
 | `/api/accounting/journals/{pk}/` | `JournalViewSet` | `accounting/views.py` |
 | `/api/accounting/journals/{pk}/post/` | `JournalViewSet` | `accounting/views.py` |
 | `/api/accounting/journals/{pk}/reverse/` | `JournalViewSet` | `accounting/views.py` |

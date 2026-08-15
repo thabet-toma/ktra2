@@ -9,7 +9,14 @@ import {
 import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
 import { Search, CheckCircle2, AlertTriangle } from "lucide-react";
 
-export const AccountingTrialBalancePage: React.FC = () => {
+export interface AccountingTrialBalancePageProps {
+  /** التنقيب: نقر صف الحساب يفتح الأستاذ العام مفلتراً عليه. */
+  onOpenAccount?: (accountId: number) => void;
+}
+
+export const AccountingTrialBalancePage: React.FC<AccountingTrialBalancePageProps> = ({
+  onOpenAccount,
+}) => {
   const today = new Date();
   const [start, setStart] = useState(`${today.getFullYear()}-01-01`);
   const [end, setEnd] = useState(today.toISOString().split("T")[0]);
@@ -89,19 +96,38 @@ export const AccountingTrialBalancePage: React.FC = () => {
   const cc = totals?.closing_credit || 0;
 
   const columns: ReportColumn<TrialBalanceRow>[] = [
-    { key: "code", header: "كود", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.code}</span> },
+    {
+      key: "code", header: "كود",
+      // الكود بلون رابط حين يكون الصف قابلاً للتنقيب — وإلا بقيت النقرة سرّاً لا يكتشفه أحد.
+      render: (r) => (
+        <span
+          style={{ fontFamily: "monospace" }}
+          className={onOpenAccount ? "text-blue-700 hover:underline" : undefined}
+        >
+          {r.code}
+        </span>
+      ),
+    },
     { key: "name", header: "الاسم", render: (r) => r.name },
     { key: "account_type", header: "النوع", render: (r) => r.account_type },
     {
       key: "period_debit", header: "مدين الفترة", numeric: true,
       render: (r) => fmt(r.period_debit ?? r.total_debit ?? 0),
+      exportValue: (r) => r.period_debit ?? r.total_debit ?? 0,
     },
     {
       key: "period_credit", header: "دائن الفترة", numeric: true,
       render: (r) => fmt(r.period_credit ?? r.total_credit ?? 0),
+      exportValue: (r) => r.period_credit ?? r.total_credit ?? 0,
     },
-    { key: "closing_debit", header: "مدين الختامي", numeric: true, render: (r) => fmt(r.closing_debit) },
-    { key: "closing_credit", header: "دائن الختامي", numeric: true, render: (r) => fmt(r.closing_credit) },
+    {
+      key: "closing_debit", header: "مدين الختامي", numeric: true, render: (r) => fmt(r.closing_debit),
+      exportValue: (r) => r.closing_debit ?? 0,
+    },
+    {
+      key: "closing_credit", header: "دائن الختامي", numeric: true, render: (r) => fmt(r.closing_credit),
+      exportValue: (r) => r.closing_credit ?? 0,
+    },
   ];
 
   const reportTotals = {
@@ -156,9 +182,12 @@ export const AccountingTrialBalancePage: React.FC = () => {
         rows={rows}
         totals={rows.length > 0 ? reportTotals : undefined}
         exportable={true}
+        exportFilename={`trial-balance-${start}_${end}`}
         loading={loading}
         emptyHint="لا بيانات"
         getRowKey={(r) => r.id}
+        onRowClick={onOpenAccount ? (r) => onOpenAccount(r.id) : undefined}
+        rowTitle="فتح الأستاذ العام لهذا الحساب"
       />
     </>
   );

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import type { FiscalPeriodDto } from "../../types/accounting";
 import {
   AseelDocumentShell,
@@ -8,13 +9,20 @@ import {
 import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
 import { Plus, Lock, Unlock } from "lucide-react";
 
+type Granularity = "monthly" | "yearly";
+
 export const FiscalPeriodsPage: React.FC = () => {
   const [periods, setPeriods] = useState<FiscalPeriodDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [newYear, setNewYear] = useState(new Date().getFullYear().toString());
+  const [granularity, setGranularity] = useState<Granularity>("monthly");
   const [busy, setBusy] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
+  // إعادة الفتح تحتاج سبباً مكتوباً — لوحة سطرية لأن حوار التأكيد بلا حقل إدخال.
+  const [reopenTarget, setReopenTarget] = useState<FiscalPeriodDto | null>(null);
+  const [reopenReason, setReopenReason] = useState("");
+  const confirm = useConfirm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -37,8 +45,9 @@ export const FiscalPeriodsPage: React.FC = () => {
     const y = parseInt(newYear, 10);
     if (!y || y < 2000 || y > 2100) return;
     setBusy(true);
+    setErr(null);
     try {
-      await accountingApi.createFiscalYear(y);
+      await accountingApi.createFiscalYear(y, granularity);
       setShowAddForm(false);
       await load();
     } catch (e: unknown) {
@@ -48,14 +57,46 @@ export const FiscalPeriodsPage: React.FC = () => {
     }
   };
 
-  const togglePeriod = async (p: FiscalPeriodDto) => {
+  const sendClose = async (p: FiscalPeriodDto, force: boolean) => {
     setBusy(true);
+    setErr(null);
     try {
-      if (p.is_closed) {
-        await accountingApi.reopenFiscalPeriod(p.id);
-      } else {
-        await accountingApi.closeFiscalPeriod(p.id);
+      return await accountingApi.closeFiscalPeriod(p.id, force);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** الإغلاق يتوقف عند القيود غير المرحّلة (409) ويسأل قبل التجاوز. */
+  const closePeriod = async (p: FiscalPeriodDto) => {
+    try {
+      const res = await sendClose(p, false);
+      if ((res as { requires_force?: boolean })?.requires_force) {
+        const message = (res as { error?: string }).error
+          ?? `توجد قيود غير مرحّلة في الفترة «${p.name}».`;
+        const ok = await confirm({
+          title: "قيود غير مرحّلة",
+          message: `${message}\nالإغلاق رغم ذلك يُسجَّل في سجل التدقيق باسمك.`,
+          confirmText: "أغلق رغم ذلك",
+        });
+        if (!ok) return;
+        await sendClose(p, true);
       }
+      await load();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "خطأ");
+    }
+  };
+
+  const submitReopen = async () => {
+    const reason = reopenReason.trim();
+    if (!reopenTarget || !reason) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await accountingApi.reopenFiscalPeriod(reopenTarget.id, reason);
+      setReopenTarget(null);
+      setReopenReason("");
       await load();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "خطأ");
@@ -92,7 +133,15 @@ export const FiscalPeriodsPage: React.FC = () => {
           type="button"
           className="aseel-toolbtn"
           disabled={busy}
-          onClick={(e) => { e.stopPropagation(); togglePeriod(p); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (p.is_closed) {
+              setReopenReason("");
+              setReopenTarget(p);
+            } else {
+              closePeriod(p);
+            }
+          }}
         >
           {p.is_closed ? <><Unlock className="w-3 h-3" /> إعادة فتح</> : <><Lock className="w-3 h-3" /> إغلاق</>}
         </button>
@@ -119,14 +168,64 @@ export const FiscalPeriodsPage: React.FC = () => {
           onChange={(e) => setNewYear(e.target.value)}
         />
       </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">تقسيم السنة</label>
+        <div style={{ display: "flex", gap: "12px", alignItems: "center", height: "30px" }}>
+          {([["monthly", "12 شهراً"], ["yearly", "سنة واحدة"]] as [Granularity, string][]).map(
+            ([value, label]) => (
+              <label key={value} style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.8rem" }}>
+                <input
+                  type="radio"
+                  name="fiscal-granularity"
+                  value={value}
+                  checked={granularity === value}
+                  onChange={() => setGranularity(value)}
+                />
+                {label}
+              </label>
+            ),
+          )}
+        </div>
+      </div>
       <button type="button" className="aseel-toolbtn" disabled={busy} onClick={createYear}
         style={{ marginTop: "18px" }}>
         <Plus className="w-4 h-4" />
-        إنشاء FY {newYear}
+        {granularity === "monthly" ? `إنشاء أشهر ${newYear}` : `إنشاء FY ${newYear}`}
       </button>
       <span style={{ marginTop: "22px", fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
-        يناير 1 — ديسمبر 31
+        {granularity === "monthly"
+          ? `${newYear}-01 … ${newYear}-12 — يُقفَل كل شهر على حدة`
+          : "يناير 1 — ديسمبر 31 — فترة واحدة تُقفَل كاملة"}
       </span>
+    </div>
+  ) : <></>;
+
+  const reopenBand = reopenTarget ? (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "12px" }}>
+      <div className="aseel-field" style={{ flex: "1 1 320px" }}>
+        <label className="aseel-field-label">
+          سبب إعادة فتح «{reopenTarget.name}» — يُحفظ في سجل التدقيق
+        </label>
+        <input
+          type="text"
+          className="aseel-input"
+          autoFocus
+          placeholder="مثال: تصحيح فاتورة مورّد وردت متأخرة"
+          value={reopenReason}
+          onChange={(e) => setReopenReason(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submitReopen(); }}
+        />
+      </div>
+      <button type="button" className="aseel-toolbtn" disabled={busy || !reopenReason.trim()}
+        onClick={submitReopen} style={{ marginTop: "18px" }}>
+        <Unlock className="w-4 h-4" />
+        إعادة الفتح
+      </button>
+      <button type="button" className="aseel-toolbtn" disabled={busy}
+        onClick={() => { setReopenTarget(null); setReopenReason(""); }}
+        style={{ marginTop: "18px" }}>
+        إلغاء
+      </button>
     </div>
   ) : <></>;
 
@@ -152,7 +251,7 @@ export const FiscalPeriodsPage: React.FC = () => {
       <AseelDocumentShell
         title="الفترات المالية"
         actions={actions}
-        header={addYearBand}
+        header={<>{addYearBand}{reopenBand}</>}
         tabs={tabs}
         status={
           <span className="aseel-status-item">{periods.length} فترة</span>

@@ -1,3 +1,4 @@
+import calendar
 import datetime
 import logging
 
@@ -302,26 +303,87 @@ def validate_fiscal_period(tenant_id, transaction_date):
     )
 
 
-def create_fiscal_year(tenant, year):
+GRANULARITY_MONTHLY = 'monthly'
+GRANULARITY_YEARLY = 'yearly'
+FISCAL_GRANULARITIES = (GRANULARITY_MONTHLY, GRANULARITY_YEARLY)
+
+
+def assert_no_period_overlap(tenant_id, start_date, end_date, exclude_pk=None):
+    """A2/THA-185 — يمنع فترتين ماليتين تتقاطعان لنفس الشركة.
+
+    تداخل الفترات يجعل القفل بلا معنى: `validate_fiscal_period` تلتقط أول فترة
+    تغطّي التاريخ، فتكفي فترة مفتوحة متداخلة لتمرير قيد إلى شهر مُقفَل. النطاق
+    محصور بالشركة — فترة شركة أخرى ليست تداخلاً.
     """
-    Creates a calendar-year fiscal period (Jan 1 – Dec 31) if it doesn't exist.
-    Returns the existing or newly created FiscalPeriod.
-    """
-    start = datetime.date(year, 1, 1)
-    end = datetime.date(year, 12, 31)
-    existing = FiscalPeriod.objects.filter(
-        tenant=tenant, start_date=start, end_date=end,
-    ).first()
-    if existing:
-        return existing
-    return FiscalPeriod.objects.create(
-        tenant=tenant,
-        name=f"FY {year}",
-        start_date=start,
-        end_date=end,
-        status='Open',
-        is_closed=False,
+    if start_date > end_date:
+        raise ValidationError(
+            f"تاريخ بداية الفترة ({start_date}) يجب ألا يتجاوز تاريخ نهايتها ({end_date})."
+        )
+    clash = FiscalPeriod.objects.filter(
+        tenant_id=tenant_id,
+        start_date__lte=end_date,
+        end_date__gte=start_date,
     )
+    if exclude_pk is not None:
+        clash = clash.exclude(pk=exclude_pk)
+    existing = clash.order_by('start_date').first()
+    if existing:
+        raise ValidationError(
+            f"الفترة المطلوبة ({start_date} — {end_date}) تتداخل مع الفترة "
+            f"«{existing.name}» ({existing.start_date} — {existing.end_date}). "
+            f"الفترات المالية لا تتقاطع."
+        )
+
+
+def _month_ranges(year):
+    """(البداية، النهاية، الاسم) لكل شهر في السنة — النهاية آخر يوم فعلي فيه."""
+    for month in range(1, 13):
+        start = datetime.date(year, month, 1)
+        last_day = calendar.monthrange(year, month)[1]
+        yield start, datetime.date(year, month, last_day), f"{year}-{month:02d}"
+
+
+def create_fiscal_year(tenant, year, granularity=GRANULARITY_MONTHLY):
+    """ينشئ فترات السنة المالية — 12 شهراً افتراضياً، أو فترة سنة واحدة.
+
+    الافتراض شهريّ لأن المحاسب يُقفِل شهراً بعد شهر (دفترة · Odoo · Zoho Books
+    كلها تُنشئ الأشهر مع السنة)؛ فترةٌ سنوية واحدة تعني أن القفل كل شيء أو لا
+    شيء. `granularity='yearly'` تُبقي السلوك القديم (فترة `FY <year>` واحدة).
+
+    idempotent: الفترة الموجودة بنفس المدى تُعاد كما هي؛ أي مدى آخر متداخل
+    يُرفض عبر `assert_no_period_overlap`.
+
+    تُرجع دائماً list[FiscalPeriod] مرتّبة بتاريخ البداية.
+    """
+    if granularity not in FISCAL_GRANULARITIES:
+        raise ValidationError(
+            f"تفصيل الفترة «{granularity}» غير معروف — المسموح: "
+            f"{'، '.join(FISCAL_GRANULARITIES)}."
+        )
+    if granularity == GRANULARITY_YEARLY:
+        ranges = [(datetime.date(year, 1, 1), datetime.date(year, 12, 31), f"FY {year}")]
+    else:
+        ranges = list(_month_ranges(year))
+
+    periods = []
+    with transaction.atomic():
+        for start, end, name in ranges:
+            existing = FiscalPeriod.objects.filter(
+                tenant=tenant, start_date=start, end_date=end,
+            ).first()
+            if existing:
+                periods.append(existing)
+                continue
+            assert_no_period_overlap(tenant.pk, start, end)
+            periods.append(FiscalPeriod.objects.create(
+                tenant=tenant,
+                name=name,
+                start_date=start,
+                end_date=end,
+                status='Open',
+                is_closed=False,
+            ))
+    return periods
 
 def validate_journal_entry(header, lines_data):
     """
@@ -571,6 +633,11 @@ def post_journal(
             is_posted=True,
             currency=currency,
             exchange_rate=exchange_rate,
+            # A3: المستخدم كان يصل إلى سطر التدقيق فقط ويسقط عن القيد نفسه —
+            # فدفتر اليومية لا يعرف صاحب أي قيد. نفس شرط create_audit_log
+            # (مستخدم مجهول/غائب ⇒ NULL) كي لا يختلف المصدران.
+            created_by=user if user is not None and getattr(
+                user, 'is_authenticated', False) else None,
         )
 
         jh = None
@@ -643,6 +710,26 @@ def post_journal(
     return jh
 
 
+def assert_period_open_for_unpost(tenant_id, transaction_date, document_label=""):
+    """A2/THA-184 — إلغاء الترحيل تعديلٌ على الفترة، فيمرّ بحرّاسها نفسهم.
+
+    `post_journal` وحده كان يستدعي `validate_fiscal_period` +
+    `run_tax_period_guards`؛ أما `unpost_document` فكان يحذف قيود مستند مؤرَّخ
+    داخل شهر مُقفَل ويعيد حركات مخزونه بلا أي حارس — قفلٌ يمنع الإضافة ويسمح
+    بالحذف ليس قفلاً. الاستثناء الوحيد مسارٌ مُعلَن: إعادة فتح الفترة بسبب
+    مسجَّل (`FiscalPeriodViewSet.reopen_period`) ثم التراجع.
+    """
+    prefix = f"تعذّر التراجع عن ترحيل {document_label or 'هذا المستند'}: "
+    try:
+        validate_fiscal_period(tenant_id, transaction_date)
+        run_tax_period_guards(tenant_id, transaction_date)
+    except ValidationError as exc:
+        detail = "؛ ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
+        raise ValidationError(
+            f"{prefix}{detail} أعد فتح الفترة بسبب مسجَّل إن كان التعديل ضرورياً."
+        ) from exc
+
+
 def unpost_document(
     *,
     tenant_id: int,
@@ -712,6 +799,23 @@ def unpost_document(
         )
         header_ids = [h.id for h in headers]
         lines_deleted = JournalLine.objects.filter(journal_id__in=header_ids).count() if header_ids else 0
+
+        # THA-184: حارس الفترة — تواريخ المستند هي تواريخ ما سيُحذَف فعلاً
+        # (القيود، ثم حركات المخزون إن لم يكن للمستند قيد). كلها تُفحص قبل أن
+        # يُمَسّ أي صف، فالرفض يُجهض المعاملة كاملة.
+        affected_dates = {h.transaction_date for h in headers if h.transaction_date}
+        if not affected_dates and stock_reference_types:
+            from inventory.models import StockMovement
+
+            affected_dates = set(
+                StockMovement.objects.filter(
+                    tenant_id=tenant_id,
+                    reference_id=reference_id,
+                    reference_type__in=list(stock_reference_types),
+                ).values_list("movement_date", flat=True)
+            )
+        for txn_date in sorted(d for d in affected_dates if d):
+            assert_period_open_for_unpost(tenant_id, txn_date, document_label)
 
         # Feature 2: حجز رقم القيد الأساسي في سلّة المحذوفات قبل الحذف.
         if recycle and primary_ref_type:

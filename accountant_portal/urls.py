@@ -1,6 +1,6 @@
 from django.urls import path
 
-from accountant_portal import views
+from accountant_portal import practice_views, views
 
 
 urlpatterns = [
@@ -18,6 +18,19 @@ urlpatterns = [
     path("engagements/<int:engagement_id>/withdraw/", views.WithdrawEngagementView.as_view(), name="accountant-withdraw"),
     path("engagements/<int:engagement_id>/resign/", views.ResignEngagementView.as_view(), name="accountant-resign"),
     path("practice/overview/", views.PracticeOverviewView.as_view(), name="accountant-practice-overview"),
+    # سطح مكتب المحاسبة (B2) — خلف `settings.ACCOUNTANT_PRACTICE_ENABLED`.
+    path("practice/clients/", practice_views.PracticeClientListView.as_view(), name="practice-clients"),
+    path("practice/clients/<int:client_id>/", practice_views.PracticeClientDetailView.as_view(), name="practice-client-detail"),
+    path("practice/clients/<int:client_id>/restore/", practice_views.PracticeClientRestoreView.as_view(), name="practice-client-restore"),
+    path("practice/programs/", practice_views.PracticeProgramListView.as_view(), name="practice-programs"),
+    path("practice/programs/<int:program_id>/", practice_views.PracticeProgramDetailView.as_view(), name="practice-program-detail"),
+    path("practice/tasks/", practice_views.PracticeTaskListView.as_view(), name="practice-tasks"),
+    path("practice/tasks/<int:task_id>/", practice_views.PracticeTaskDetailView.as_view(), name="practice-task-detail"),
+    path("practice/documents/", practice_views.PracticeDocumentListView.as_view(), name="practice-documents"),
+    path("practice/documents/upload/", practice_views.PracticeDocumentUploadView.as_view(), name="practice-document-upload"),
+    path("practice/documents/<int:document_id>/", practice_views.PracticeDocumentDetailView.as_view(), name="practice-document-detail"),
+    path("practice/settings/", practice_views.PracticeSettingsView.as_view(), name="practice-settings"),
+    path("practice/deadlines/", practice_views.PracticeDeadlinesView.as_view(), name="practice-deadlines"),
     path("client/documents/", views.ClientDocumentsView.as_view(), name="accountant-client-documents"),
     path("client/statements/", views.ClientStatementsView.as_view(), name="accountant-client-statements"),
     path("client/trend/", views.ClientTrendView.as_view(), name="accountant-client-trend"),

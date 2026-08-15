@@ -50,6 +50,8 @@ const REF_LABELS: Record<string, string> = {
   CUSTOMER_PAYMENT: "تحصيل عميل",
   PURCHASE_INVOICE: "فاتورة شراء",
   MANUAL: "قيد يدوي",
+  // A3: القيد الذي وسمه المحاسب «تسوية» — نوع مرجع مستقل ليُصفّى وحده.
+  ADJUSTMENT: "قيد تسوية",
 };
 function refLabel(rt: string | null | undefined) {
   return REF_LABELS[rt || ""] || (rt ? rt : "عام / يدوي");
@@ -103,6 +105,11 @@ export const AccountingJournalListPage: React.FC<Props> = ({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [refType, setRefType] = useState("");
+  // A3: تصفية بالحساب وبالمستخدم — سؤالا المحاسب الأولان على دفتر اليومية.
+  const [accountId, setAccountId] = useState("");
+  const [userId, setUserId] = useState("");
+  const [accounts, setAccounts] = useState<Array<{ id: number; code?: string | null; name?: string | null }>>([]);
+  const [users, setUsers] = useState<Array<{ id: number; name: string }>>([]);
   const [selectedKey, setSelectedKey] = useState<number | null>(null);
   const searchRef = useRef(search);
   searchRef.current = search;
@@ -123,10 +130,12 @@ export const AccountingJournalListPage: React.FC<Props> = ({
     if (dateFrom.trim()) params.date_from = dateFrom.trim();
     if (dateTo.trim()) params.date_to = dateTo.trim();
     if (refType.trim()) params.reference_type = refType.trim();
+    if (accountId.trim()) params.account = accountId.trim();
+    if (userId.trim()) params.user = userId.trim();
     const sq = searchRef.current.trim();
     if (sq) params.search = sq;
     return params;
-  }, [dateFrom, dateTo, refType]);
+  }, [dateFrom, dateTo, refType, accountId, userId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,6 +171,18 @@ export const AccountingJournalListPage: React.FC<Props> = ({
   }, [buildParams, loadingMore]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // A3: خيارات فلترَي الحساب والمستخدم — تُجلب مرة واحدة، وفشلها لا يعطّل الدفتر.
+  useEffect(() => {
+    void (async () => {
+      const [acc, usr] = await Promise.all([
+        accountingApi.getAccounts().catch(() => []),
+        accountingApi.getJournalUsers().catch(() => []),
+      ]);
+      setAccounts(acc as Array<{ id: number; code?: string | null; name?: string | null }>);
+      setUsers(usr);
+    })();
+  }, []);
 
   const openSelected = useCallback(() => {
     if (selectedKey == null) return;
@@ -208,6 +229,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       align: "left",
       numeric: true,
       render: (r) => <span className="text-xs aseel-num font-mono font-semibold">{fmtAmount(journalAmount(r))}</span>,
+      exportValue: (r) => journalAmount(r),
     },
     {
       key: "currency",
@@ -355,6 +377,52 @@ export const AccountingJournalListPage: React.FC<Props> = ({
           ))}
         </select>
       </label>
+      {/* A3: الحساب — «أرِني قيود هذا الحساب وحده» */}
+      <label className="aseel-field" style={{ minWidth: "180px" }}>
+        <span className="aseel-field-label">الحساب</span>
+        <select
+          className="aseel-input"
+          value={accountId}
+          onChange={(e) => setAccountId(e.target.value)}
+        >
+          <option value="">كل الحسابات</option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.code ? `${a.code} — ` : ""}{a.name || `#${a.id}`}
+            </option>
+          ))}
+        </select>
+      </label>
+      {/* A3: المستخدم — مَن أنشأ القيد (القيود الأقدم من هذا العمود بلا مستخدم) */}
+      <label className="aseel-field">
+        <span className="aseel-field-label">المستخدم</span>
+        <select
+          className="aseel-input"
+          value={userId}
+          onChange={(e) => setUserId(e.target.value)}
+        >
+          <option value="">كل المستخدمين</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>{u.name}</option>
+          ))}
+        </select>
+      </label>
+      {/* A3: شارة قيود التسوية — سؤال يتكرر كل إقفال، فلا يُدفن في قائمة الأنواع */}
+      <button
+        type="button"
+        className="aseel-toolbtn"
+        aria-pressed={refType === "ADJUSTMENT"}
+        title="عرض قيود التسوية وحدها"
+        onClick={() => setRefType((t) => (t === "ADJUSTMENT" ? "" : "ADJUSTMENT"))}
+        style={{
+          alignSelf: "flex-end",
+          fontWeight: refType === "ADJUSTMENT" ? 700 : undefined,
+          borderColor: refType === "ADJUSTMENT" ? "var(--aseel-ok, #2d7d46)" : undefined,
+          color: refType === "ADJUSTMENT" ? "var(--aseel-ok, #2d7d46)" : undefined,
+        }}
+      >
+        قيود التسوية {refType === "ADJUSTMENT" ? "✓" : ""}
+      </button>
       <button
         type="button"
         className="aseel-toolbtn"
@@ -390,6 +458,8 @@ export const AccountingJournalListPage: React.FC<Props> = ({
               selectedKey={selectedKey}
               onSelect={(k) => setSelectedKey(k as number | null)}
               onRowDoubleClick={(r) => onOpen(r.id, r.deal_ref_number, r.reference_summary)}
+              exportable
+              exportFilename={`daybook-${dateFrom || "all"}_${dateTo || "all"}`}
             />
           </div>
           {hasNext && (

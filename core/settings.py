@@ -527,6 +527,13 @@ ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION = os.environ.get(
     "ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION", "false",
 ).strip().lower() in ("1", "true", "yes")
 
+# سطح «مكتب المحاسبة» (`/api/accountant/practice/…`) كاملاً خلف عَلَم واحد.
+# مُشغَّل افتراضياً؛ وإطفاؤه يُخفي المسارات بـ404 لا 403 — الردّ الذي يقول
+# «ممنوع» يكشف أن هناك سطحاً مُطفأً أصلاً.
+ACCOUNTANT_PRACTICE_ENABLED = os.environ.get(
+    "ACCOUNTANT_PRACTICE_ENABLED", "true",
+).strip().lower() not in ("0", "false", "no")
+
 # Cloudinary credentials are environment-only; production refuses missing values.
 CLOUDINARY_STORAGE = {
     "CLOUD_NAME": _environment_value(

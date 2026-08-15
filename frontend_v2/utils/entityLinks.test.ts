@@ -2,11 +2,48 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  entityPathForReference,
   isSafeInternalPath,
   platformNoteTarget,
+  referenceTypeLabel,
   statementMovementTone,
   statementToneRowClass,
 } from "./entityLinks.ts";
+
+/* ── A1 (THA-195): القفزة الثالثة — من القيد إلى مستنده المصدر ── */
+
+test("القيد يقود إلى فاتورته وسنده — المسارات التي تقرأ المعرّف فعلاً", () => {
+  assert.equal(entityPathForReference("SALES_INVOICE", 12), "/sales/invoices/12");
+  assert.equal(entityPathForReference("SALES_DELIVERY_COGS", 12), "/sales/invoices/12");
+  assert.equal(entityPathForReference("PURCHASE_INVOICE", 7), "/purchase-invoices/7");
+  // الشاشتان تقرآن ?payment_id (SupplierPaymentsPage / SalesCustomerPaymentsPage)
+  assert.equal(entityPathForReference("SUPPLIER_PAYMENT", 5), "/supplier-payments?payment_id=5");
+  assert.equal(
+    entityPathForReference("CUSTOMER_PAYMENT", 5),
+    "/sales/customer-payments?payment_id=5",
+  );
+});
+
+test("مستند قيد العكس هو القيد الأصلي — reference_id رقمه", () => {
+  assert.equal(entityPathForReference("JOURNAL_REVERSAL", 44), "/accounting/journals/44");
+});
+
+/* ── A3 (THA-188): قيد التسوية يُعرَّف نفسه ── */
+
+test("قيد التسوية له تسميته العربية، ولا يُخلط بالقيد اليدوي العام", () => {
+  assert.equal(referenceTypeLabel("ADJUSTMENT"), "قيد تسوية");
+  assert.equal(referenceTypeLabel("MANUAL"), "قيد يومية");
+});
+
+test("LOGISTICS_PAYMENT بلا مسار عمداً: reference_id رقم الدفعة لا رقم الصفقة", () => {
+  // ربطه بـ/deals/<id> يفتح صفقة أخرى بالكامل — الصفقة تُفتح من deal_ref_number.
+  assert.equal(entityPathForReference("LOGISTICS_PAYMENT", 92), null);
+});
+
+test("المرجع بلا معرّف لا يُنتج مساراً", () => {
+  assert.equal(entityPathForReference("SALES_INVOICE", null), null);
+  assert.equal(entityPathForReference(null, 3), null);
+});
 
 test("سند القبض والصرف نبرتهما «دفعة» (أخضر)", () => {
   assert.equal(statementMovementTone("CUSTOMER_PAYMENT"), "payment");
