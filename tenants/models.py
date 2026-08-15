@@ -333,6 +333,11 @@ class UserCompanyMembership(models.Model):
         ('viewer', 'مستعرض (Viewer)'),
     ]
 
+    UI_MODE_CHOICES = [
+        ('simple', 'الوضع السهل'),
+        ('advanced', 'الواجهة المتقدمة'),
+    ]
+
     user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='company_memberships', db_column='UserID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='memberships', db_column='TenantID')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='staff', db_column='Role')
@@ -342,6 +347,12 @@ class UserCompanyMembership(models.Model):
     can_access_import = models.BooleanField(default=False, db_column='CanAccessImport')
     # عضوية أنشأها تعيين «شركة المثال» وليست دعوة أصلية من مدير الشركة.
     is_example_access = models.BooleanField(default=False, db_column='IsExampleAccess')
+    # وضع عرض الواجهة لهذا العضو في هذه الشركة — «سهل» يقلّم القائمة والنماذج
+    # ولا يمسّ صلاحية ولا منطقاً محاسبياً. تفضيل شخصي لكل (مستخدم × شركة): نفس
+    # الشخص قد يكون سهلاً في شركته ومتقدماً في شركة يحاسب لها. الافتراضي
+    # «متقدم» كي لا تتبدّل تجربة عضو قائم صامتاً.
+    ui_mode = models.CharField(
+        max_length=10, choices=UI_MODE_CHOICES, default='advanced', db_column='UiMode')
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 
     class Meta:

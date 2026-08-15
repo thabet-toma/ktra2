@@ -1,4 +1,5 @@
 import { resolveTenantId } from "../utils/tenantContext";
+import type { UiMode } from "../utils/uiMode";
 import { apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "./restApi";
 
 const tid = () => resolveTenantId();
@@ -15,6 +16,11 @@ export type MyPermissions = {
   permissions: string[];
   /** T-EXTACCT: ترخيص الوحدات لهذه الشركة — حقل واحد يخدم كل الوحدات. */
   modules?: Record<string, boolean>;
+  /**
+   * THA-110: وضع عرض الواجهة لهذا المستخدم في هذه الشركة. اختياري كي يبقى
+   * التعامل مع خادمٍ أقدم سليماً — الغياب يُطبَّع إلى `advanced`.
+   */
+  ui_mode?: UiMode;
 };
 
 export type PermissionsMatrix = {
@@ -26,6 +32,19 @@ export type PermissionsMatrix = {
 
 export async function getMyPermissions(): Promise<MyPermissions> {
   return apiGetObject("permissions/me/", { tenantId: tid() });
+}
+
+/**
+ * THA-110: حفظ وضع العرض على **عضوية المستدعي نفسه** في الشركة النشطة. تفضيلٌ
+ * شخصي لا إعداد شركة، فلا يمرّ ببوابة `admin.settings.manage` — الشركة تُحلّ من
+ * رأس الطلب لا من جسمه (`tenants/views.py` — `TenantViewSet.set_ui_mode`).
+ */
+export async function setMyUiMode(mode: UiMode): Promise<{ ui_mode: UiMode }> {
+  return apiPostObject(
+    "tenants/companies/set-ui-mode/",
+    { ui_mode: mode },
+    { tenantId: tid() },
+  );
 }
 
 export async function getPermissionsMatrix(): Promise<PermissionsMatrix> {

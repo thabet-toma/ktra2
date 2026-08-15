@@ -310,6 +310,28 @@ def role_default_permissions(role: str, tenant=None) -> frozenset:
     return frozenset(granted) & permission_keys(tenant)
 
 
+def user_ui_mode(user, tenant) -> str:
+    """THA-110: وضع عرض الواجهة لهذا المستخدم في هذه الشركة.
+
+    تفضيل عرض لا صلاحية — يقلّم القائمة والنماذج ولا يحجب مساراً. غياب العضوية
+    (سوبر أدمن، أو بلا سياق شركة) يعني «لا وضع محفوظاً» فيسقط على «متقدم»:
+    الافتراضي هو التجربة الكاملة، والتبسيط اختيارٌ صريح.
+    """
+    from tenants.models import UserCompanyMembership
+
+    default_mode = UserCompanyMembership._meta.get_field("ui_mode").default
+    if tenant is None or user is None or not getattr(user, "is_authenticated", False):
+        return default_mode
+
+    membership = (
+        UserCompanyMembership.objects
+        .filter(user=user, tenant_id=getattr(tenant, "TenantID", tenant))
+        .only("ui_mode")
+        .first()
+    )
+    return membership.ui_mode if membership is not None else default_mode
+
+
 def user_tenant_role(user, tenant) -> str:
     """دور المستخدم الفعلي داخل الشركة.
 

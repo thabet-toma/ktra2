@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { visibleLinks, groupVisible, type NavAccessLink } from './navAccess.ts';
+import { visibleLinks, groupVisible, linkVisible, type NavAccessLink } from './navAccess.ts';
+import { SIMPLE_VIEWS } from './uiMode.ts';
 import {
   devicesNavPlacement,
   invoiceActionPermissions,
@@ -221,5 +222,87 @@ test('كل اختصار في الشريط العلوي يملك رمزاً دل�
   assert.equal(iconForShortcut('purchase-invoices'), 'purchase-invoice');
   for (const shortcut of SHORTCUTABLE_VIEWS) {
     assert.notEqual(iconForShortcut(shortcut.view), 'zap');
+  }
+});
+
+/* ── THA-110 · الوضع السهل: قناع فوق الصلاحيات لا بديلٌ عنها ───────────── */
+
+/** روابط تخلط المُدرَج في الوضع السهل بغير المُدرَج، وبرابطٍ مفتوح بلا صلاحية. */
+const modeLinks: NavAccessLink[] = [
+  { key: 'sales-invoices', perm: 'sales.invoice.view' },
+  { key: 'cheques', perm: 'accounting.cheque.view' },
+  { key: 'journal-entries', perm: 'accounting.journal.view' },
+  { key: 'gallery' },
+];
+
+test('الوضع السهل يخفي الشاشة غير المُدرَجة ولو ملك المستخدم صلاحيتها', () => {
+  const all = canOf(['sales.invoice.view', 'accounting.cheque.view', 'accounting.journal.view']);
+  assert.deepEqual(
+    visibleLinks(modeLinks, all, undefined, 'simple').map((l) => l.key),
+    ['sales-invoices'],
+  );
+  // الرابط المفتوح بلا صلاحية ليس استثناءً: القناع يقلّم بالقائمة لا بالصلاحية.
+  assert.equal(linkVisible({ key: 'gallery' }, all, undefined, 'simple'), false);
+});
+
+test('الصلاحية تبقى الحارس الصلب في الوضع السهل — شاشة مُدرَجة بلا صلاحيتها تظل مخفية', () => {
+  assert.equal(
+    linkVisible({ key: 'sales-invoices', perm: 'sales.invoice.view' }, canOf([]), undefined, 'simple'),
+    false,
+  );
+  // ولا القناع يمنح ما لم تمنحه الصلاحية: التقاطع لا الاتحاد.
+  assert.deepEqual(
+    visibleLinks(modeLinks, canOf(['accounting.cheque.view']), undefined, 'simple').map((l) => l.key),
+    [],
+  );
+});
+
+test('الأدوار القديمة تبقى شرطاً مستقلاً في الوضع السهل', () => {
+  const link: NavAccessLink = { key: 'dashboard', roles: ['manager'] };
+  assert.equal(linkVisible(link, canOf([]), 'manager', 'simple'), true);
+  assert.equal(linkVisible(link, canOf([]), 'employee', 'simple'), false);
+});
+
+test('الوضع المتقدم مطابق تماماً لحذف الوسيط — لا سلوك واحد يتغيّر', () => {
+  const grants = [
+    [],
+    ['sales.invoice.view'],
+    ['accounting.cheque.view', 'accounting.journal.view'],
+    ['sales.invoice.view', 'accounting.cheque.view', 'accounting.journal.view'],
+  ];
+  const roles = [undefined, 'manager', 'employee'];
+  const legacy: NavAccessLink[] = [
+    ...modeLinks,
+    { key: 'points-history', roles: ['manager', 'employee'] },
+    { key: 'users', perm: 'admin.members.manage', roles: ['manager'] },
+  ];
+
+  for (const granted of grants) {
+    for (const role of roles) {
+      const can = canOf(granted);
+      const today = visibleLinks(legacy, can, role).map((l) => l.key);
+      assert.deepEqual(visibleLinks(legacy, can, role, 'advanced').map((l) => l.key), today);
+      assert.deepEqual(visibleLinks(legacy, can, role, undefined).map((l) => l.key), today);
+      assert.equal(groupVisible(legacy, can, role, 'advanced'), groupVisible(legacy, can, role));
+      for (const link of legacy) {
+        assert.equal(linkVisible(link, can, role, 'advanced'), linkVisible(link, can, role));
+      }
+    }
+  }
+});
+
+test('المجموعة تختفي في الوضع السهل إن لم يبقَ فيها بند مُدرَج', () => {
+  const advancedGroup = modeLinks.slice(1, 3); // شيكات + قيود، وكلاهما خارج القائمة
+  const can = canOf(['accounting.cheque.view', 'accounting.journal.view']);
+  assert.equal(groupVisible(advancedGroup, can), true);
+  assert.equal(groupVisible(advancedGroup, can, undefined, 'simple'), false);
+  // ومجموعة فيها بندٌ مُدرَج تبقى ظاهرة.
+  assert.equal(groupVisible(modeLinks, canOf(['sales.invoice.view']), undefined, 'simple'), true);
+});
+
+test('كل شاشة في القائمة السهلة تمرّ فعلاً من نقطة التركيب الوحيدة', () => {
+  // حارس ضد انفصال القائمة عن الدالة التي تستهلكها.
+  for (const view of SIMPLE_VIEWS) {
+    assert.equal(linkVisible({ key: view }, canOf([]), undefined, 'simple'), true);
   }
 });

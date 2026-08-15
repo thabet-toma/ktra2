@@ -16,7 +16,7 @@ import {
   CalendarDays, CalendarX, ArrowLeftRight, Boxes, BarChart3, Building2,
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck, Wallet,
-  Gauge, TableProperties, ShieldAlert, Wrench, Store,
+  Gauge, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { enterOfficeShell } from "../utils/officeShell";
@@ -26,6 +26,9 @@ import { useCompany } from "../contexts/CompanyContext";
 import { usePermissions } from "../contexts/PermissionsContext";
 import { devicesNavPlacement, moduleAllowsView } from "../utils/viewPermissions";
 import { groupVisible, visibleLinks } from "../utils/navAccess";
+import { SIMPLE_VIEWS } from "../utils/uiMode";
+import { FieldHint } from "./ui/FieldHint";
+import type { SimpleHintKey } from "../constants/simpleHints";
 import { permForView } from "../utils/viewPermissions";
 import { useTenantSettings } from "../hooks/useTenantSettings";
 
@@ -40,7 +43,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   // صلاحية الاستيراد للشركة النشطة (تتفاعل مع تبديل الشركة) — لا تعتمد على علم ثابت من تسجيل الدخول.
   const { canAccessImport } = useCompany();
   // T-PERM: القائمة مشتقّة من الصلاحيات؛ ملخص الأعمال استثناء للمدير فقط.
-  const { can, isManager, permissions, modules } = usePermissions();
+  // THA-110: `uiMode` تفضيل عرضٍ لا صلاحية — يُقلّم ما يُعرَض أولاً ولا يحجب مساراً.
+  const { can, isManager, permissions, modules, uiMode, setUiMode } = usePermissions();
+  const isSimpleMode = uiMode === 'simple';
   const { identity } = useTenantSettings();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -180,6 +185,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
       : []),
   ];
 
+  // THA-110: بنود «الوضع السهل» — لا شاشة جديدة، بل نفس الشاشات القائمة بعنوانها
+  // وأيقونتها المعتادتين. الخريطة `Record` فوق `SIMPLE_VIEWS`: أي بندٍ يُضاف أو
+  // يُحذف في `utils/uiMode.ts` يكسر البناء هنا بدل أن يمرّ صامتاً، والترتيب من
+  // هناك أيضاً — مصدرٌ واحد لا نسخة ثانية تفترق لاحقاً.
+  const simpleViewMeta: Record<(typeof SIMPLE_VIEWS)[number], { label: string; icon: React.ReactNode }> = {
+    "dashboard": { label: "الرئيسية", icon: <Home className="h-5 w-5 flex-shrink-0" /> },
+    "sales-invoices": { label: "فواتير المبيعات", icon: <FileText className="h-5 w-5 flex-shrink-0" /> },
+    "purchase-invoices": { label: "فواتير الشراء", icon: <NoteIcon className="h-5 w-5 flex-shrink-0" /> },
+    "stock-levels": { label: "أرصدة المخزون", icon: <BarChart3 className="h-5 w-5 flex-shrink-0" /> },
+    "items-management": { label: "الأصناف", icon: <Boxes className="h-5 w-5 flex-shrink-0" /> },
+    "supplier-management": { label: "الموردين", icon: <UsersIcon className="h-5 w-5 flex-shrink-0" /> },
+    "sales-customers": { label: "العملاء", icon: <Users className="h-5 w-5 flex-shrink-0" /> },
+    "settings": { label: "الإعدادات", icon: <SettingsIcon className="h-5 w-5 flex-shrink-0" /> },
+  };
+  // «الرئيسية» تبقى للمدير وحده كما هي في الوضع المتقدم — الوضع يُرتّب ولا يمنح.
+  // T5: مفتاح التلميح مشتقّ من اسم الشاشة نفسه، فلا قائمة مفاتيح ثانية تفترق.
+  const simpleLinks: (NavLink & { hint: SimpleHintKey })[] = SIMPLE_VIEWS
+    .filter((view) => view !== "dashboard" || isManager)
+    .map((view) => ({ view: view as AppView, hint: `nav.${view}` as const, ...simpleViewMeta[view] }));
+
   // فتح المجموعة التي تحتوي الشاشة النشطة تلقائياً.
   useEffect(() => {
     const inAny = (links: NavLink[]) => links.some((l) => l.view === activeView);
@@ -278,6 +303,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           <div className="flex items-center overflow-hidden">
             <LogoIcon className="h-6 w-6 text-[var(--color-primary)] flex-shrink-0" />
             {showText && <span className="mr-2 text-sm font-bold text-[var(--color-text)] truncate">K.T.R.A</span>}
+            {/* THA-110: شارة الوضع السهل — لونٌ هادئ يقول «أنت هنا» بلا إعادة
+                تلوين الواجهة (إعادة التلوين خارج نطاق المهمة بنصّ المالك). */}
+            {isSimpleMode && showText && (
+              <span className="mr-2 flex-shrink-0 whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
+                الوضع السهل
+              </span>
+            )}
           </div>
           {isMobile && (
             <button onClick={() => setIsMobileMenuOpen(false)} className="p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] rounded" title="إغلاق القائمة" aria-label="إغلاق القائمة">
@@ -292,6 +324,28 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           style={{ msOverflowStyle: 'none', scrollbarWidth: 'none' }}
         >
           <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; }`}</style>
+
+          {/* THA-110: الوضع السهل — قائمة مسطّحة بلا مجموعات، مرشّحة بنفس دالة
+              الصلاحيات (`visibleLinks`) فلا يظهر بندٌ لا يملكه المستخدم. شرطٌ
+              واحد يفصلها عن القائمة المتقدمة أدناه، وتلك تبقى كما كانت حرفياً. */}
+          {isSimpleMode ? (
+            visibleLinks(withPerms(simpleLinks), can, user.role, uiMode).map((link) => (
+              // T5: «؟» شقيقةُ الزرّ لا ابنته — زرٌّ داخل زرٍّ لا يصحّ، وكانت
+              // ضغطة الشرح ستفتح الشاشة بدل أن تشرحها. وتختفي مع النصّ حين
+              // تنكمش القائمة إلى أيقوناتها.
+              <div key={link.view} data-simple-nav className="flex items-center gap-1">
+                <button
+                  onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
+                  className={`flex items-center flex-1 min-w-0 p-3 rounded-lg transition-all ${isViewActive(link.view) ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+                  title={link.label}
+                >
+                  {link.icon}
+                  {showText && <span className="mr-3 text-right flex-1 font-semibold">{link.label}</span>}
+                </button>
+                {showText && <FieldHint hint={link.hint} align="end" />}
+              </div>
+            ))
+          ) : (<>
 
           {user.isSuperAdmin && (
             <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50/70 p-1 dark:border-blue-900 dark:bg-blue-950/20">
@@ -515,12 +569,35 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
               {showText && <span className="mr-3 text-right flex-1 font-semibold">{can("hr.tasks.manage") ? "إدارة المهام" : "مهامي"}</span>}
             </button>
           </div>
+          </>)}
         </nav>
 
         {/* User Profile */}
         <div className="p-4 border-t border-[var(--color-border)] bg-[var(--color-surface-2)]">
+          {/* THA-110: مبدّل الواجهة — **ظاهر دائماً وفي الوضعين**، لأن طريق
+              العودة يجب ألا يمرّ بشاشةٍ يخفيها القناع نفسه: ضغطةٌ واحدة تكفي
+              للرجوع من حيث ما كان المستخدم. */}
+          <button
+            type="button"
+            onClick={() => setUiMode(isSimpleMode ? 'advanced' : 'simple')}
+            aria-pressed={isSimpleMode}
+            className={`flex items-center w-full p-2 mb-2 rounded-lg border transition-all ${isCollapsed && !isMobile ? "justify-center" : ""} ${isSimpleMode ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300" : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"}`}
+            title={isSimpleMode ? "العودة للواجهة المتقدمة — كل الشاشات" : "الواجهة السهلة — الأساسيات فقط"}
+          >
+            {isSimpleMode
+              ? <LayoutGrid className="h-4 w-4 flex-shrink-0" />
+              : <Sparkles className="h-4 w-4 flex-shrink-0" />}
+            {showText && (
+              <span className="mr-2 flex-1 text-right text-xs font-semibold">
+                {isSimpleMode ? "الواجهة المتقدمة" : "الواجهة السهلة"}
+              </span>
+            )}
+          </button>
+
           {/* A5: «وضع المحاسب» — مبدّل ترتيبٍ لصاحب هذا المتصفح وحده، في ذيل
-              القائمة حيث تعيش تفضيلات العرض لا بنود التنقّل. */}
+              القائمة حيث تعيش تفضيلات العرض لا بنود التنقّل.
+              THA-110: يختفي في الوضع السهل — ترتيبُ قائمةٍ لا وجود لها. */}
+          {!isSimpleMode && (
           <button
             type="button"
             onClick={toggleAccountantMode}
@@ -536,6 +613,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
               </span>
             )}
           </button>
+          )}
           <div className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center' : ''} p-2 rounded-xl`}>
             <div className="w-10 h-10 rounded-full bg-[var(--color-primary)] flex items-center justify-center text-[var(--color-primary-foreground)] font-bold flex-shrink-0 shadow-sm">
               {user.name?.charAt(0)}

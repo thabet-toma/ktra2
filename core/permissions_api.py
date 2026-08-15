@@ -21,6 +21,7 @@ from core.access import (
     role_default_permissions,
     user_permissions,
     user_tenant_role,
+    user_ui_mode,
     visible_role_labels,
 )
 from core.modules import MODULES, module_enabled
@@ -76,6 +77,9 @@ def my_permissions(request):
         "permissions": sorted(user_permissions(request.user, tenant)),
         # حقل واحد يخدم كل الوحدات — الواجهة تحرس شاشاتها به قبل أي import().
         "modules": {key: module_enabled(tenant, key) for key in MODULES},
+        # THA-110: وضع العرض يركب هذه الحمولة نفسها (تُحمَّل عند الإقلاع) فلا
+        # يكلّف طلباً شبكياً إضافياً. عرضٌ فقط — لا يحجب مساراً ولا يمنح صلاحية.
+        "ui_mode": user_ui_mode(request.user, tenant),
     })
 
 

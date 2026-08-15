@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **441**
+عدد النقاط: **442**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -437,6 +437,7 @@
 | `/api/tenants/companies/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/my-companies/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/set-default/` | `TenantViewSet` | `tenants/views.py` |
+| `/api/tenants/companies/set-ui-mode/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/members/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/members/change-role/` | `TenantViewSet` | `tenants/views.py` |

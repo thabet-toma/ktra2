@@ -72,11 +72,16 @@ const ApplicationProviders: React.FC = () => (
     <AppearanceProvider>
       <SessionSettingsProvider>
         <PriceVisibilityProvider>
-          <PermissionsProvider>
-            <ConfirmProvider>
-              <ToastProvider><App /></ToastProvider>
-            </ConfirmProvider>
-          </PermissionsProvider>
+          {/* THA-110: `ToastProvider` فوق `PermissionsProvider` لا تحته — الأخير
+              يحتاج `useToast` ليخبر المستخدم أن وضع العرض لم يُحفَظ عبر الأجهزة
+              (و`useToast` يرمي بلا مزوّد). توسيعٌ صرف: كل مستهلك قائم يبقى داخله. */}
+          <ToastProvider>
+            <PermissionsProvider>
+              <ConfirmProvider>
+                <App />
+              </ConfirmProvider>
+            </PermissionsProvider>
+          </ToastProvider>
         </PriceVisibilityProvider>
       </SessionSettingsProvider>
     </AppearanceProvider>

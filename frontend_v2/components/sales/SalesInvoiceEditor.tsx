@@ -27,6 +27,7 @@ import { SettleFromOnAccountModal } from "../shared/SettleFromOnAccountModal";
 import { EntityActivityLog } from "../activity/EntityActivityLog";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
+import { FieldHint } from "../ui/FieldHint";
 
 import { ProductCardModal } from "../shared/ProductCardModal";
 import { SerialEntryModal } from "../shared/SerialEntryModal";
@@ -241,7 +242,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   initialCustomerId,
 }) => {
   const confirm = useConfirm();
-  const { can: canPerm } = usePermissions();
+  const { can: canPerm, uiMode } = usePermissions();
   // الربح الإجمالي يتبع زر العين (الخصوصية): يختفي حين تُخفى الأسعار/الأرباح.
   const { visible: profitVisible } = usePriceVisibility();
   const [draftId, setDraftId] = useState<number | null>(null);
@@ -925,6 +926,30 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const isPosted = invoiceStatus === "posted";
   const readOnly = isPosted || viewMode;
   const invoicePermissions = invoiceActionPermissions("sales", draftId == null, canPerm);
+
+  /* ───────────── THA-110: قناع «الوضع السهل» ─────────────
+     إخفاءٌ عرضيٌّ بحت: العنصر المخفيّ يحتفظ بقيمته وحالته كما هما، فتبقى حمولة
+     `buildPayload` من الوضع السهل مطابقةً لحمولة الوضع المتقدّم حين يترك مستخدمه
+     الافتراضيات — لا يتغيّر قيدٌ ولا سطرٌ واحد، ولا سطر خادميّ واحد تغيَّر.
+     يسمّر هذا التطابقَ `sales/tests/test_simple_mode_journal_parity.py`.
+
+     وقاعدة السقوط للأمان فوق قائمة الإخفاء كلها: **حقلٌ مطلوبٌ لم يُحَلّ افتراضيُه
+     يظهر رغم الوضع** — لا فشل صامت، ولا حالة بلا مخرج. */
+  const simpleMode = uiMode === "simple";
+  /** افتراضٌ مطلوبٌ لم يُحَلّ ⇒ `validateClient` سيرفض الحفظ، فلا يُخفى تفسيرُه. */
+  const unresolvedRequiredDefault =
+    (invType === "cash" && cashAccountId === "") || revenueAccountId === "";
+  /** العملة تُخفى فقط حين حسمها افتراضُ الإعدادات فعلاً. */
+  const showCurrencyField =
+    !simpleMode || !salesSettings?.default_currency || currencyId === "";
+  /** «شامل الضريبة» يبقى على افتراضي الإعدادات — والقيمة تُرسَل كما هي. */
+  const showTaxInclusiveToggle = !simpleMode;
+  /** الفاتورة «مدفوعة» لا استحقاق لها — يظهر الحقل للآجلة. */
+  const showDueDateField = !simpleMode || invType !== "cash";
+  /** التبويبات المتقدّمة (القيد/الحركات/السجل) — تُطوى في الوضع السهل. */
+  const showAdvancedTabs = !simpleMode;
+  /** «بيانات أخرى» يحمل تحذيرات الإعداد: يبقى ظاهراً ما دام تحذيرٌ حيّاً. */
+  const showOtherTab = !simpleMode || unresolvedRequiredDefault;
 
   const buildPayload = useCallback(() => {
     const body: Record<string, unknown> = {
@@ -2839,6 +2864,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               <div className="flex-1 flex flex-col gap-1 xl:border-l border-[var(--color-border)] pl-2 w-full">
                 <div className="flex items-center gap-1">
                   <span className="font-bold text-[var(--color-text)] min-w-[35px] text-xs">العميل</span>
+                  <FieldHint hint="invoice.customer" />
                   <div className="flex-1 relative min-w-[120px]">
                     <input 
                       className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-emerald-500 outline-none cursor-pointer"
@@ -2874,6 +2900,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                     />
                     مدفوعة
                   </label>
+                  {/* خارج الـ`label` قصداً: زرٌّ داخلها كان سيُبدّل خانة الاختيار. */}
+                  <FieldHint hint="invoice.paid" />
                 </div>
 
                 {selectedCustomer && creditHint && (() => {
@@ -2923,6 +2951,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               <div className="w-full xl:w-[250px] shrink-0 flex flex-col gap-0.5 xl:border-l border-[var(--color-border)] pl-2 justify-center">
                  <div className="flex justify-between items-end">
                    <label className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400">بحث سريع / باركود (F6)</label>
+                   <FieldHint hint="invoice.barcode" />
                  </div>
                  <div className="relative">
                    <div className="absolute inset-y-0 right-0 flex items-center pr-1.5 pointer-events-none">
@@ -2954,26 +2983,37 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 <div className="flex gap-1">
                   <div className="flex items-center gap-1 flex-1">
                     <span className="text-[var(--color-text-muted)] text-[10px] min-w-[30px]">تاريخ</span>
+                    <FieldHint hint="invoice.date" />
                     <input type="date" className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-emerald-500 text-[11px]" disabled={readOnly} value={invDate} onChange={(e) => { setInvDate(e.target.value); markDirty(); }} />
                   </div>
-                  <div className="flex items-center gap-1 flex-1">
-                    <span className="text-[var(--color-text-muted)] text-[10px] min-w-[35px]">استحقاق</span>
-                    <input type="date" className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-emerald-500 text-[11px]" disabled={readOnly} value={dueDate} onChange={(e) => { setDueDate(e.target.value); markDirty(); }} />
-                  </div>
+                  {showDueDateField && (
+                    <div className="flex items-center gap-1 flex-1">
+                      <span className="text-[var(--color-text-muted)] text-[10px] min-w-[35px]">استحقاق</span>
+                      <FieldHint hint="invoice.due-date" />
+                      <input type="date" className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-emerald-500 text-[11px]" disabled={readOnly} value={dueDate} onChange={(e) => { setDueDate(e.target.value); markDirty(); }} />
+                    </div>
+                  )}
                 </div>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-1">
-                    <span className="text-[var(--color-text-muted)] text-[10px] min-w-[30px]">عملة</span>
-                    <select className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 text-[11px] outline-none focus:ring-1 focus:ring-emerald-500" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}>
-                      <option value="">—</option>
-                      {currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>))}
-                    </select>
+                {(showCurrencyField || showTaxInclusiveToggle) && (
+                  <div className="flex justify-between items-center">
+                    {showCurrencyField && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-[var(--color-text-muted)] text-[10px] min-w-[30px]">عملة</span>
+                        <FieldHint hint="invoice.currency" />
+                        <select className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 text-[11px] outline-none focus:ring-1 focus:ring-emerald-500" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}>
+                          <option value="">—</option>
+                          {currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>))}
+                        </select>
+                      </div>
+                    )}
+                    {showTaxInclusiveToggle && (
+                      <label className="flex items-center gap-1 text-[11px] font-bold cursor-pointer text-[var(--color-text)]">
+                        <input type="checkbox" className="rounded text-emerald-600 focus:ring-emerald-500 w-3 h-3" disabled={readOnly} checked={pricesIncludeTax} onChange={(e) => { setPricesIncludeTax(e.target.checked); markDirty(); }} />
+                        شامل الضريبة
+                      </label>
+                    )}
                   </div>
-                  <label className="flex items-center gap-1 text-[11px] font-bold cursor-pointer text-[var(--color-text)]">
-                    <input type="checkbox" className="rounded text-emerald-600 focus:ring-emerald-500 w-3 h-3" disabled={readOnly} checked={pricesIncludeTax} onChange={(e) => { setPricesIncludeTax(e.target.checked); markDirty(); }} /> 
-                    شامل الضريبة
-                  </label>
-                </div>
+                )}
               </div>
 
             </div>
@@ -3017,13 +3057,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               </div>
             ),
           },
-          {
+          ...(showAdvancedTabs ? [{
             key: "accounts",
             label: "الحسابات / مركز التكلفة",
             content: journalTab,
-          },
-          { key: "other", label: "بيانات أخرى", content: otherTab },
-          ...(draftId && Number(draftId) > 0 ? [{
+          }] : []),
+          ...(showOtherTab ? [{ key: "other", label: "بيانات أخرى", content: otherTab }] : []),
+          ...(showAdvancedTabs && draftId && Number(draftId) > 0 ? [{
             key: "financial_movements",
             label: "الحركات المالية المرتبطة",
             content: (
@@ -3034,7 +3074,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               />
             ),
           }] : []),
-          ...(draftId && Number(draftId) > 0 ? [{
+          ...(showAdvancedTabs && draftId && Number(draftId) > 0 ? [{
             key: "activity_log",
             label: "سجل النشاط",
             content: <EntityActivityLog entityType="sales_invoice" entityId={draftId} defaultOpen refreshKey={isPosted ? "posted" : "draft"} />,
@@ -3139,7 +3179,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               </div>
             )}
             <div className="aseel-total-row aseel-total-row--grand">
-              <span>مبلغ الفاتورة الإجمالي</span>
+              <span>مبلغ الفاتورة الإجمالي <FieldHint hint="invoice.total" /></span>
               <span className="aseel-total-value">{fmt(totals.grandTotal)}</span>
             </div>
             <div className="aseel-total-row">
@@ -3203,9 +3243,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             />
             {/* DEF-006: السطر الجديد يُضاف فقط عبر هذا الزر الصريح (لا من نقر خارجي/شجرة). */}
             {!readOnly && (
-              <button type="button" className="aseel-addrow" onClick={addRow}>
-                <Plus className="h-3 w-3" /> إضافة سطر
-              </button>
+              // الزرّ يبقى ممتداً كما كان (`flex-1`)، و«؟» بجانبه تشرح الجدول
+              // كلّه — فهذا مدخل البنود لا زرٌّ ثانوي.
+              <div className="flex items-center gap-1">
+                <button type="button" className="aseel-addrow flex-1" onClick={addRow}>
+                  <Plus className="h-3 w-3" /> إضافة سطر
+                </button>
+                <FieldHint hint="invoice.lines" />
+              </div>
             )}
 
             {/* INLINE FOOTER: الملاحظات + خلاصة التحصيل.
@@ -3214,7 +3259,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             <div style={{ display: "flex", gap: "16px", background: "var(--aseel-panel)", padding: "8px", border: "1px solid var(--aseel-border)" }}>
               <div style={{ flex: 1 }}>
                 <label className="aseel-field">
-                  <span className="aseel-field-label">الملاحظات</span>
+                  <span className="aseel-field-label">الملاحظات <FieldHint hint="invoice.notes" /></span>
                   <textarea
                     className="aseel-input"
                     rows={2}

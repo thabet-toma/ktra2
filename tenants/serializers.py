@@ -92,5 +92,6 @@ class UserCompanyMembershipSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserCompanyMembership
-        fields = ["id", "tenant", "role", "is_default", "created_at", "can_access_import"]
+        fields = ["id", "tenant", "role", "is_default", "created_at", "can_access_import",
+                  "ui_mode"]
 

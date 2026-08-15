@@ -47,6 +47,7 @@ get_branch(request)                              # X-Branch-Id، يرفض فرع
 user_has_perm(user, tenant, key) -> bool
 require_perm(request, key, tenant=None)          # يرفع 403
 @requires_perm(key)                              # مزخرِف على الـaction
+user_ui_mode(user, tenant) -> str                # وضع عرض الواجهة للعضوية — تفضيل عرض لا صلاحية؛ بلا عضوية ⇒ 'advanced'
 
 # core/reports/_framework.py — التقارير
 register(spec: ReportSpec)                       # تسجيل تقرير جديد
@@ -59,12 +60,12 @@ validate_payment(ctx) · post_payment(...) · document_payment_summary(total, pa
 
 ## أهم الـAPI endpoints
 
-الفهرس الكامل (692 نقطة) في `docs/API_INDEX.md` — مولَّد.
+الفهرس الكامل في `docs/API_INDEX.md` — مولَّد، وعدد النقاط يُقرأ من الملف نفسه.
 
 | المسار | الغرض |
 |---|---|
 | `/api/reports/` · `/api/reports/<key>/` | فهرس التقارير وتشغيلها |
-| `/api/permissions/me/` | أعلام الصلاحيات — **للعرض فقط، لا تحمي endpoint** |
+| `/api/permissions/me/` | حمولة الإقلاع الواحدة: الدور · الصلاحيات · الوحدات المرخّصة · `ui_mode` — **كلّها للعرض فقط، لا تحمي endpoint** |
 | `/api/dashboard/` | تجميع الداشبورد |
 | `/api/platform/…` | لوحة السوبر أدمن |
 
@@ -78,7 +79,8 @@ validate_payment(ctx) · post_payment(...) · document_payment_summary(total, pa
 1. **`get_queryset` بلا فلتر شركة = تسريب بيانات.** عند غياب الشركة أعِد `.none()`
    لا queryset غير مفلتر.
 2. **أعلام الصلاحيات في الواجهة للعرض فقط** — إخفاء زر ليس حماية؛ الإنفاذ خادمي
-   بـ`require_perm`.
+   بـ`require_perm`. وينطبق ذلك على `ui_mode` من باب أولى: **وضع عرض لا يدخل أي
+   قرار خادمي** — لا يُقرأ في قيدٍ ولا في حركة مخزون ولا في حارس صلاحية.
 3. **الوحدة المرخّصة غير المفعّلة ترد 404 لا 403** (`core/modules.py`) — 403 يكشف
    وجود الوحدة.
 4. **الكاش مُسرِّع لا مصدر حقيقة** — تعثّره لا يُسقط طلباً أبداً

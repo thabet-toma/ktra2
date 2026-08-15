@@ -487,3 +487,30 @@ class TenantViewSet(viewsets.ModelViewSet):
             
         return Response({"status": "success", "message": "تم تعيين الشركة الافتراضية بنجاح."})
 
+    @action(detail=False, methods=["post"], url_path="set-ui-mode")
+    def set_ui_mode(self, request):
+        """THA-110: وضع عرض الواجهة لهذا المستخدم في الشركة النشطة.
+
+        كتابة ذاتية بلا صلاحية إدارية — تفضيلٌ شخصي لا إعداد شركة، ولو خُزّن في
+        `TenantSettings` لَما استطاع غير المدير حفظه (بوابة admin.settings.manage).
+        الشركة تُحلّ من سياق الطلب لا من جسمه، والعضوية المكتوب عليها هي عضوية
+        المستدعي وحدها.
+        """
+        mode = str(request.data.get("ui_mode") or "").strip()
+        if mode not in {m for m, _ in UserCompanyMembership.UI_MODE_CHOICES}:
+            raise DRFValidationError(
+                {"ui_mode": "وضع غير صالح. القيم المسموحة: simple أو advanced."})
+
+        tenant = get_tenant(request)
+        if not tenant:
+            raise DRFValidationError({"tenant": "لا يوجد شركة محددة."})
+
+        membership = UserCompanyMembership.objects.filter(
+            user=request.user, tenant=tenant).first()
+        if not membership:
+            raise DRFValidationError({"tenant": "ليس لديك عضوية في هذه الشركة."})
+
+        membership.ui_mode = mode
+        membership.save(update_fields=["ui_mode"])
+        return Response({"ui_mode": membership.ui_mode})
+

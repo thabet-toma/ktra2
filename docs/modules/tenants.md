@@ -28,6 +28,13 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 المدير مستثنى من كل تجاوز فلا يُقفَل خارج نظامه (`core/access.py:359-361`). الإنفاذ خادمي عبر `require_perm` / `@requires_perm` (`core/access.py`, `:408`)؛
 `/api/permissions/me` للعرض فقط. وحدة الاستيراد طبقة ثانية مستقلة: `Tenant.import_enabled` (سوبر أدمن) × `UserCompanyMembership.can_access_import` (مدير الشركة) — `core/import_access.py`.
 
+**وضع عرض الواجهة (`ui_mode`) — تفضيل شخصي لا صلاحية.** يسكن العضوية نفسها لأنها أصلاً صفٌّ لكل
+(مستخدم × شركة): الشخص نفسه قد يكون «سهلاً» في شركته و«متقدماً» في شركة يحاسب لها. الافتراضي
+`advanced` بلا backfill — لا تُبدَّل تجربة عضو قائم صامتاً. يُقرأ بـ`core/access.py` (`user_ui_mode`)
+ويُنشر في حمولة `/api/permissions/me/`، ويُكتب بـ`tenants/views.py` (`set_ui_mode`) على عضوية
+**المستدعي وحده** في الشركة المحلولة من سياق الطلب. لم يُخزَّن في `TenantSettings` عمداً: الكتابة
+هناك تشترط `admin.settings.manage` فما كان غير المدير ليحفظ وضعه أصلاً.
+
 ## أهم الملفات
 | الملف | الغرض | أسطر |
 |---|---|---|
@@ -47,7 +54,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 | `TenantSettings` (:54) | `default_vat_rate` (16.00), `fiscal_period_*`, `dashboard_month_start_day`, `font_scale`/`font_family`, `idle_timeout_minutes` (5..1440), `licensed_dealer_no` | `tenant` **OneToOne**, `currency`, `default_freight_credit_account`→Account |
 | `Branch` (:141) | `name`, `code`, `is_main`, `is_active` | `tenant`, `unique_together (tenant, code)`؛ يشارك الشجرة والأصناف والشركاء ويعزل الفواتير/المخزون/القيود |
 | `TenantBook` (:203) | `document_type` (15 نوعاً), `book_number`, `last_used_number`, `is_active` | `tenant`, `branch` (NULL = دفتر شركة)، `unique_together (tenant, branch, document_type, book_number)` |
-| `UserCompanyMembership` (:279) | `role` (7 أدوار), `is_default`, `can_access_import`, `is_example_access` | `user`→auth.User, `tenant`, `unique_together (user, tenant)` |
+| `UserCompanyMembership` (:279) | `role` (7 أدوار), `is_default`, `can_access_import`, `is_example_access`, `ui_mode` (`simple`/`advanced`، افتراضي `advanced`) | `user`→auth.User, `tenant`, `unique_together (user, tenant)` |
 | `RolePermission` (:312) | `role`, `permission_key`, `allowed` | `tenant`, `unique_together (tenant, role, permission_key)` |
 | `MemberPermission` (:339) | `permission_key`, `allowed` | `membership`, `unique_together (membership, permission_key)` |
 | `WhatsAppContact` (:170) | `phone_number` (unique), `is_active` | `tenant` — حارس العزل الوحيد على مسار واتساب |
@@ -88,6 +95,7 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 | POST | `companies/{pk}/members/set-import-access/` | `set_member_import_access` (views.py:401) — مدير الشركة |
 | GET | `companies/my-companies/` | `my_companies` (views.py:418) |
 | POST | `companies/set-default/` | `set_default` (views.py:428) |
+| POST | `companies/set-ui-mode/` | `set_ui_mode` — وضع عرض المستدعي في الشركة النشطة؛ بلا صلاحية إدارية، قيمة غير صالحة أو بلا عضوية ⇒ 400، و`viewer` ⇒ 403 من حارس المنصة |
 | GET/POST | `branches/` | `BranchViewSet` (views.py:153) — الإنشاء يتطلب `admin.settings.manage` (views.py:175-177) |
 
 ## الاعتماديات
@@ -112,6 +120,7 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 - **ترقيم المستندات عبر `TenantBook.get_next_number` فقط** — قفل صف `select_for_update` داخل `transaction.atomic` (`models.py:244-273`)؛ لا تحسب `last_used_number + 1` يدوياً.
 - **الفرع يشارك الشجرة/الأصناف/الشركاء ويعزل الفواتير والمخزون والقيود** عبر بُعد `branch` (`models.py:141-149`, `services.py:374-380`) — لا تنسخ شجرة حسابات لفرع.
 - **`viewer` قراءة فقط** على مستوى المنصة (`core/permissions.py`)، و`legal_accountant` يكتب من `/api/accountant/` فقط (`core/permissions.py:74-81`).
+- **`ui_mode` تفضيل عرض لا صلاحية**: لا يمنح وصولاً ولا يحجب مساراً ولا يُستشار في أي قرار خادمي. كتابته ذاتية على عضوية المستدعي وحدها (`tenants/views.py` — `set_ui_mode`)، ولم يُثقَب لأجله حارس `viewer`: رفضه 403 مقبول ومعالَج في الواجهة (`docs/modules/frontend.md`).
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -125,3 +134,4 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 | `tests/test_tenant_book_concurrent.py` (61) | ذرّية `get_next_number` تحت التزامن |
 | `tests/test_operational_accounts.py` (124) | شركة جديدة جاهزة تشغيلياً بلا حساب يدوي (1107/1110/2106-2109/2111) |
 | `tests/test_session_settings.py` (79) · `test_appearance_settings.py` (65) | مهلة الخمول والمظهر: محفوظة خادمياً، معزولة لكل شركة، ضمن نطاق صالح |
+| `tests/test_ui_mode.py` | وضع العرض: الافتراضي `advanced`، الكتابة تمسّ عضوية المستدعي في الشركة النشطة وحدها، وضعان لنفس الشخص في شركتين، قيمة غير صالحة/بلا عضوية ⇒ 400، `viewer` ما زال ممنوعاً من الكتابة، والحمولة `/permissions/me` تعكس المحفوظ (وسوبر أدمن بلا عضوية ⇒ `advanced`) |
