@@ -1,9 +1,16 @@
+import re
+from datetime import datetime, time, timedelta
+
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
+from django.db import connection
 from django.test import RequestFactory, override_settings
+from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from tenants.models import Tenant, UserCompanyMembership
+from core.models import ActivityLog, TenantAsset, TenantLimit
+from tenants.models import Branch, Tenant, UserCompanyMembership
 
 
 class PlatformAdminApiTest(APITestCase):
@@ -717,3 +724,465 @@ class SuspendedCompanyAccessTest(APITestCase):
             get_tenant(self._request(self.member, self.running)).pk, self.running.pk)
         self.assertEqual(
             get_tenant(self._request(self.superuser, self.suspended)).pk, self.suspended.pk)
+
+
+def _seed_company(index, *, plan="Pro", branches=1, members=1, asset_bytes=()):
+    """شركة بفروعها وأعضائها وأصولها وحدث نشاطٍ واحد — وقود جدول اللوحة."""
+    tenant = Tenant.objects.create(
+        CompanyName=f"شركة الحمل {index}", SubscriptionPlan=plan, Status="Active",
+    )
+    for number in range(branches):
+        Branch.objects.create(
+            tenant=tenant, name=f"فرع {index}-{number}", code=f"B{index}-{number}",
+        )
+    for number in range(members):
+        user = User.objects.create_user(
+            username=f"seed-{index}-{number}", password="x",
+        )
+        UserCompanyMembership.objects.create(user=user, tenant=tenant, role="staff")
+    for number, size in enumerate(asset_bytes):
+        TenantAsset.objects.create(
+            tenant=tenant, public_id=f"seed/{index}/{number}", bytes=size,
+        )
+    ActivityLog.objects.create(
+        tenant=tenant, action="create", entity_type="sales_invoice", entity_id=1,
+    )
+    return tenant
+
+
+def _stamp_activity(activity, *, days_ago):
+    """`timestamp` بـ`auto_now_add` — التأريخ للخلف يمرّ بـ`update` لا بالحفظ."""
+    ActivityLog.objects.filter(pk=activity.pk).update(
+        timestamp=timezone.now() - timedelta(days=days_ago),
+    )
+
+
+class PlatformDashboardAggregatesTest(APITestCase):
+    """جدول الشركات والمؤشرات — قيمٌ صحيحة بعدد استعلامات لا يتبع عدد الشركات."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.superuser = User.objects.create_superuser(
+            username="aggregates-root", email="agg@example.com", password="x",
+        )
+        cls.watched = _seed_company(
+            0, branches=2, members=3, asset_bytes=(500, 1500),
+        )
+        # أصلٌ بلا شركة: صورة ملاحظة تطوير — «غير منسوب» لا يُحمَّل على أحد.
+        TenantAsset.objects.create(tenant=None, public_id="platform/note", bytes=700)
+        cls.login_event = ActivityLog.objects.create(
+            tenant=cls.watched, action="login", entity_type="session",
+        )
+        cls.view_event = ActivityLog.objects.create(
+            tenant=cls.watched, action="view", entity_type="sales_invoice",
+            entity_id=1, is_view=True,
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(self.superuser)
+
+    def _row(self, payload, tenant):
+        return {row["id"]: row for row in payload["company_rows"]}[tenant.pk]
+
+    def test_query_count_is_the_same_for_five_companies_and_fifty(self):
+        for index in range(1, 5):
+            _seed_company(index, asset_bytes=(100,))
+        with CaptureQueriesContext(connection) as five:
+            small = self.client.get("/api/platform/dashboard/")
+        self.assertEqual(small.status_code, 200, small.content)
+        self.assertEqual(small.data["companies"]["total"], 5)
+
+        for index in range(5, 50):
+            _seed_company(index, asset_bytes=(100,))
+
+        with self.assertNumQueries(len(five)):
+            large = self.client.get("/api/platform/dashboard/")
+
+        self.assertEqual(large.status_code, 200, large.content)
+        self.assertEqual(large.data["companies"]["total"], 50)
+
+    def test_row_carries_branches_seats_storage_documents_and_timestamps(self):
+        from inventory.models import Product
+        from partners.models import Partner
+        from sales.models import SalesInvoice
+        from tenants.models import Currency
+
+        currency = Currency.objects.create(
+            Code="AGG", Name="عملة اللوحة", IsBaseCurrency=False,
+        )
+        customer = Partner.objects.create(
+            tenant=self.watched, name="عميل اللوحة", partner_type="Customer",
+        )
+        Product.objects.create(
+            tenant=self.watched, sku="AGG-1", name_ar="صنف اللوحة",
+            quantity_on_hand=1, avg_cost=1,
+        )
+        SalesInvoice.objects.create(
+            tenant=self.watched, invoice_number="AGG-INV-1", customer=customer,
+            invoice_date=timezone.localdate(), currency=currency,
+        )
+        # فاتورة الشهر الماضي خارج النافذة — النافذة على `created_at` لا على
+        # تاريخ المستند الذي يكتبه المستخدم.
+        stale = SalesInvoice.objects.create(
+            tenant=self.watched, invoice_number="AGG-INV-0", customer=customer,
+            invoice_date=timezone.localdate(), currency=currency,
+        )
+        last_month_day = timezone.localdate().replace(day=1) - timedelta(days=1)
+        SalesInvoice.objects.filter(pk=stale.pk).update(
+            created_at=timezone.make_aware(
+                datetime.combine(last_month_day, time(12, 0)),
+            ),
+        )
+
+        response = self.client.get("/api/platform/dashboard/")
+        row = self._row(response.data, self.watched)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(row["branch_count"], 2)
+        self.assertEqual(row["member_count"], 3)
+        self.assertEqual(row["storage_bytes"], 2000)
+        self.assertEqual(row["storage_asset_count"], 2)
+        self.assertEqual(row["document_count"], 1)
+        self.assertIsNotNone(row["last_login_at"])
+        self.assertIsNotNone(row["last_activity_at"])
+
+    def test_last_activity_ignores_view_events_and_last_login_only_logins(self):
+        for seeded in ActivityLog.objects.filter(tenant=self.watched, action="create"):
+            _stamp_activity(seeded, days_ago=20)
+        _stamp_activity(self.login_event, days_ago=9)
+        _stamp_activity(self.view_event, days_ago=0)
+        real_action = ActivityLog.objects.create(
+            tenant=self.watched, action="post", entity_type="sales_invoice", entity_id=2,
+        )
+        _stamp_activity(real_action, days_ago=3)
+
+        row = self._row(self.client.get("/api/platform/dashboard/").data, self.watched)
+
+        # حدث العرض اليوم أحدث من الجميع، ولا يُحتسب نشاطاً: «آخر نشاط» يبقى
+        # على الترحيل قبل ثلاثة أيام، و«آخر دخول» على حدث الدخول وحده.
+        self.assertEqual(
+            row["last_activity_at"].date(),
+            (timezone.now() - timedelta(days=3)).date(),
+        )
+        self.assertEqual(
+            row["last_login_at"].date(),
+            (timezone.now() - timedelta(days=9)).date(),
+        )
+
+    def test_storage_block_separates_the_platform_own_bytes(self):
+        payload = self.client.get("/api/platform/dashboard/").data
+
+        self.assertEqual(payload["storage"]["ledger_total_bytes"], 2700)
+        self.assertEqual(payload["storage"]["unattributed_bytes"], 700)
+        self.assertEqual(
+            sum(row["storage_bytes"] for row in payload["company_rows"]), 2000,
+        )
+
+    def test_near_limit_flags_eighty_percent_and_never_flags_unlimited(self):
+        TenantLimit.objects.create(
+            tenant=self.watched, limit_key="company.members", max_value=3,
+        )
+        near_row = self._row(
+            self.client.get("/api/platform/dashboard/").data, self.watched)
+
+        near = {row["key"]: row for row in near_row["near_limit"]}
+        self.assertIn("company.members", near)
+        self.assertEqual(near["company.members"]["usage"], 3)
+        self.assertEqual(near["company.members"]["limit"], 3)
+        self.assertEqual(near["company.members"]["label"], "أعضاء الشركة")
+        # الأقرب إلى حدّه أولاً — أوّل عنصر هو ما تعرضه اللوحة كأسوأ حدّ.
+        self.assertEqual(near_row["near_limit"][0]["key"], "company.members")
+
+        self.watched.SubscriptionPlan = "Enterprise"
+        self.watched.save(update_fields=["SubscriptionPlan"])
+        TenantLimit.objects.filter(tenant=self.watched).update(max_value=None)
+        unlimited_row = self._row(
+            self.client.get("/api/platform/dashboard/").data, self.watched)
+
+        self.assertEqual(unlimited_row["near_limit"], [])
+
+    def test_kpis_report_idle_top_storage_and_near_limit_companies(self):
+        idle = _seed_company(90, asset_bytes=(9_000,))
+        _stamp_activity(
+            ActivityLog.objects.filter(tenant=idle).first(), days_ago=45,
+        )
+        TenantLimit.objects.create(
+            tenant=self.watched, limit_key="company.branches", max_value=2,
+        )
+
+        kpis = self.client.get("/api/platform/dashboard/").data["kpis"]
+
+        self.assertEqual(kpis["active_companies"], 2)
+        self.assertEqual(kpis["idle_companies"]["days"], 30)
+        self.assertEqual(kpis["idle_companies"]["count"], 1)
+        self.assertEqual(
+            [row["name"] for row in kpis["idle_companies"]["companies"]],
+            [idle.CompanyName],
+        )
+        self.assertEqual(
+            [row["id"] for row in kpis["top_storage"]], [idle.pk, self.watched.pk],
+        )
+        self.assertEqual(kpis["top_storage"][0]["storage_bytes"], 9_000)
+        self.assertEqual(kpis["near_limit_companies"]["count"], 1)
+        worst = kpis["near_limit_companies"]["companies"][0]
+        self.assertEqual(worst["id"], self.watched.pk)
+        self.assertEqual(worst["key"], "company.branches")
+        self.assertEqual((worst["usage"], worst["limit"]), (2, 2))
+
+    def test_existing_payload_keys_survive_the_extension(self):
+        payload = self.client.get("/api/platform/dashboard/").data
+        row = self._row(payload, self.watched)
+
+        self.assertEqual(
+            set(payload) >= {
+                "companies", "users", "memberships", "status_distribution",
+                "plan_distribution", "company_rows",
+            },
+            True,
+        )
+        self.assertEqual(
+            set(row) >= {
+                "id", "name", "plan", "status", "import_enabled", "is_example",
+                "member_count", "created_at",
+            },
+            True,
+        )
+
+
+class PlatformCompanyActivityTest(APITestCase):
+    """كرت الشركة الواحدة: فروعها وتخزينها، وآخر أحداثها — بما فعله السوبر أدمن بها."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.superuser = User.objects.create_superuser(
+            username="feed-root", email="feed@example.com", password="x",
+        )
+        cls.member = User.objects.create_user(username="feed-member", password="x")
+        cls.company = _seed_company(70, branches=2, asset_bytes=(400, 600))
+        UserCompanyMembership.objects.create(
+            user=cls.member, tenant=cls.company, role="manager",
+        )
+        cls.seeded_event = ActivityLog.objects.get(tenant=cls.company)
+
+    def setUp(self):
+        self.client.force_authenticate(self.superuser)
+
+    def _detail_url(self, tenant=None):
+        return f"/api/platform/companies/{(tenant or self.company).pk}/"
+
+    def _feed_url(self, tenant=None):
+        return f"/api/platform/companies/{(tenant or self.company).pk}/activity/"
+
+    def test_detail_carries_branches_storage_and_last_real_activity(self):
+        _stamp_activity(self.seeded_event, days_ago=3)
+        view_event = ActivityLog.objects.create(
+            tenant=self.company, action="view", entity_type="sales_invoice",
+            entity_id=1, is_view=True,
+        )
+        _stamp_activity(view_event, days_ago=0)
+
+        response = self.client.get(self._detail_url())
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            [row["code"] for row in response.data["branches"]], ["B70-0", "B70-1"],
+        )
+        self.assertEqual(set(response.data["branches"][0]), {"id", "name", "code"})
+        self.assertEqual(response.data["storage_bytes"], 1000)
+        # حدث العرض اليوم أحدث، ولا يُحتسب نشاطاً — الكرت يبقى على حدثٍ حقيقي.
+        self.assertEqual(
+            response.data["last_activity_at"].date(),
+            (timezone.now() - timedelta(days=3)).date(),
+        )
+        # الحقول القديمة لم تتزحزح.
+        self.assertEqual(
+            set(response.data) >= {"id", "name", "plan", "status", "members"}, True,
+        )
+
+    def test_feed_is_closed_to_a_company_manager_and_404s_on_an_unknown_company(self):
+        self.client.force_authenticate(self.member)
+        self.assertEqual(self.client.get(self._feed_url()).status_code, 403)
+
+        self.client.force_authenticate(self.superuser)
+        self.assertEqual(self.client.get("/api/platform/companies/999999/activity/").status_code, 404)
+
+    def test_feed_caps_at_a_hundred_newest_events_and_drops_view_events(self):
+        ActivityLog.objects.bulk_create([
+            ActivityLog(
+                tenant=self.company, action="post", entity_type="sales_invoice",
+                entity_id=number,
+            )
+            for number in range(1, 106)
+        ])
+        ActivityLog.objects.create(
+            tenant=self.company, action="view", entity_type="sales_invoice",
+            entity_id=999, is_view=True,
+        )
+
+        rows = self.client.get(self._feed_url()).data["results"]
+
+        self.assertEqual(len(rows), 100)
+        self.assertNotIn("عرض", {row["action_label"] for row in rows})
+        # الأحدث أولاً: الحدث ١٠٥ حاضر، والأول (وهو خارج المئة) غائب.
+        self.assertEqual(rows[0]["entity_type"], "sales_invoice")
+        self.assertEqual(rows[0]["action_label"], "ترحيل")
+        self.assertEqual(
+            set(rows[0]),
+            {"timestamp", "user_name", "action", "action_label", "entity_type",
+             "entity_label", "description"},
+        )
+
+    def test_feed_is_scoped_to_its_own_company(self):
+        other = _seed_company(71)
+        ActivityLog.objects.create(
+            tenant=other, action="delete", entity_type="sales_invoice", entity_id=5,
+        )
+
+        rows = self.client.get(self._feed_url()).data["results"]
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["action"], "create")
+
+    def test_a_limit_change_shows_in_the_company_own_feed(self):
+        response = self.client.post(
+            f"/api/platform/companies/{self.company.pk}/limits/",
+            {"limit_key": "company.branches", "max_value": 7}, format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        top = self.client.get(self._feed_url()).data["results"][0]
+        self.assertEqual(top["entity_type"], "tenant_limit")
+        self.assertEqual(top["entity_label"], "الفروع")
+        self.assertEqual(top["action_label"], "تعديل")
+        self.assertEqual(top["user_name"], "feed-root")
+
+        event = ActivityLog.objects.get(tenant=self.company, entity_type="tenant_limit")
+        self.assertEqual(event.metadata["event_code"], "LIMIT_CHANGED")
+        # القيمة السابقة هي الحدّ الفعّال قبل الكتابة — افتراضي خطة Pro للفروع.
+        self.assertEqual(event.metadata["previous_limit"], 3)
+        self.assertEqual(event.metadata["new_limit"], 7)
+
+        restored = self.client.post(
+            f"/api/platform/companies/{self.company.pk}/limits/",
+            {"limit_key": "company.branches", "reset": True}, format="json",
+        )
+        self.assertEqual(restored.status_code, 200, restored.content)
+        reset_event = ActivityLog.objects.filter(
+            tenant=self.company, entity_type="tenant_limit",
+        ).order_by("-id").first()
+        self.assertEqual(
+            (reset_event.metadata["previous_limit"], reset_event.metadata["new_limit"]),
+            (7, 3),
+        )
+        self.assertTrue(reset_event.metadata["reset"])
+
+    def test_plan_and_status_changes_are_recorded_once_and_a_rename_is_not(self):
+        changed = self.client.patch(
+            self._detail_url(), {"plan": "Enterprise", "status": "Suspended"},
+            format="json",
+        )
+        self.assertEqual(changed.status_code, 200, changed.content)
+
+        events = {
+            row.metadata["event_code"]: row.metadata
+            for row in ActivityLog.objects.filter(
+                tenant=self.company, entity_type="tenant",
+            )
+        }
+        self.assertEqual(
+            (events["PLAN_CHANGED"]["previous"], events["PLAN_CHANGED"]["new"]),
+            ("Pro", "Enterprise"),
+        )
+        self.assertEqual(
+            (events["STATUS_CHANGED"]["previous"], events["STATUS_CHANGED"]["new"]),
+            ("Active", "Suspended"),
+        )
+
+        before = ActivityLog.objects.filter(
+            tenant=self.company, entity_type="tenant").count()
+        self.client.patch(self._detail_url(), {"name": "شركة باسم جديد"}, format="json")
+        # إعادة إرسال نفس الخطة ليست قراراً — حفظةٌ بلا فرق لا تكتب حدثاً.
+        self.client.patch(self._detail_url(), {"plan": "Enterprise"}, format="json")
+        self.assertEqual(
+            ActivityLog.objects.filter(
+                tenant=self.company, entity_type="tenant").count(),
+            before,
+        )
+
+
+def _platform_routes():
+    """كل مسار تحت `/api/platform/` كما يراه الـURLconf — لا قائمة مكتوبة بيد.
+
+    القائمة المكتوبة يدوياً تتقادم بصمت: نقطةٌ جديدة تُضاف بلا حارس ولا يلاحظ
+    الاختبار. المصدر هنا هو `core/urls.py` نفسه.
+    """
+    from core.urls import urlpatterns
+
+    def walk(patterns, prefix=""):
+        for entry in patterns:
+            route = prefix + str(entry.pattern)
+            if hasattr(entry, "url_patterns"):
+                yield from walk(entry.url_patterns, route)
+            else:
+                yield route
+
+    urls = []
+    for route in walk(urlpatterns):
+        route = route.replace("^", "").replace("$", "")
+        if not route.startswith("api/platform/"):
+            continue
+        if "format" in route:  # نسخة الامتداد `.json` تشير إلى نفس الـview
+            continue
+        route = re.sub(r"<int:[^>]+>", "1", route)
+        route = re.sub(r"<str:[^>]+>", "x", route)
+        route = re.sub(r"\(\?P<\w+>[^)]+\)", "1", route)
+        if "<" in route or "(" in route:
+            continue
+        urls.append("/" + route)
+    return sorted(set(urls))
+
+
+class PlatformRouteGuardTest(APITestCase):
+    """`IsPlatformAdmin` هو الجدار الوحيد بين هذه النقاط وتسريبٍ عابر للشركات.
+
+    الحارس يُنسى على نقطةٍ جديدة، والنسيان لا يُرى: النقطة تعمل، وتعمل للجميع.
+    فالفحص يمرّ على **كل** مسار تحت `/api/platform/` مجموعاً من الـURLconf.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.member = User.objects.create_user(username="guard-member", password="x")
+        cls.tenant = Tenant.objects.create(
+            CompanyName="شركة الحارس", SubscriptionPlan="Basic", Status="Active",
+        )
+        UserCompanyMembership.objects.create(
+            user=cls.member, tenant=cls.tenant, role="manager",
+        )
+
+    def test_every_platform_route_is_closed_to_an_authenticated_non_super_admin(self):
+        routes = _platform_routes()
+        self.assertGreaterEqual(len(routes), 12, routes)
+        self.assertIn("/api/platform/dashboard/", routes)
+        # جذر الراوتر أيضاً — يسرد خريطة نقاط المنصة لمن يصله.
+        self.assertIn("/api/platform/", routes)
+
+        self.client.force_authenticate(self.member)
+        for route in routes:
+            for method in ("get", "post", "patch", "put", "delete"):
+                with self.subTest(route=route, method=method):
+                    response = getattr(self.client, method)(route)
+                    self.assertEqual(
+                        response.status_code, 403,
+                        f"{method.upper()} {route} → {response.status_code}",
+                    )
+
+    def test_the_same_routes_answer_the_super_admin(self):
+        """الحارس يُغلق على غير السوبر أدمن، لا على الجميع — 403 للكل ليس نجاحاً."""
+        superuser = User.objects.create_superuser(
+            username="guard-root", email="guard@example.com", password="x",
+        )
+        self.client.force_authenticate(superuser)
+
+        for route in ("/api/platform/", "/api/platform/dashboard/"):
+            with self.subTest(route=route):
+                self.assertEqual(self.client.get(route).status_code, 200)

@@ -27,6 +27,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
+from core.import_access import is_super_admin
+from core.tenant_utils import get_tenant
+
 logger = logging.getLogger(__name__)
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB
@@ -58,12 +61,67 @@ def _resource_type(name: str, content_type: str | None) -> str:
     return "auto"
 
 
-def upload_media_file(f, folder: str = "ktra_uploads") -> str:
+def _record_asset(result: dict, *, folder: str, tenant, uploaded_by) -> None:
+    """يسجّل الأصل المرفوع في `core.TenantAsset` — أفضل-جهد لا يُسقط رفعاً ناجحاً.
+
+    البايتات والـ`public_id` يأتيان من ردّ Cloudinary نفسه، فالسجلّ **بلا نداء
+    شبكي إضافي**. وهو `update_or_create` لا `create` لأن `public_id` فريد: إعادة
+    رفعٍ على نفس المعرّف أو صفٌّ كتبه الاسترجاع الأثري لا يجوز أن يرفع
+    `IntegrityError` في وجه مستخدمٍ رفعُه نجح.
+
+    الفشل هنا يُسجَّل ERROR ولا يُرمى: الملف صار عند Cloudinary فعلاً، وإخفاء
+    رابطه يخسره على المستخدم بلا فائدة — والاسترجاع الأثري يداوي السجلّ لاحقاً.
+    """
+    public_id = (result.get("public_id") or "").strip()
+    if not public_id:
+        logger.error("tenant_asset ledger skipped: no public_id in cloudinary result")
+        return
+    try:
+        from core.models import TenantAsset
+
+        TenantAsset.objects.update_or_create(
+            public_id=public_id[:191],
+            defaults={
+                "tenant": tenant,
+                "bytes": int(result.get("bytes") or 0),
+                "resource_type": (result.get("resource_type") or "")[:20],
+                "folder": folder[:200],
+                "source": "upload",
+                "uploaded_by": (
+                    uploaded_by
+                    if getattr(uploaded_by, "is_authenticated", False)
+                    else None
+                ),
+            },
+        )
+    except Exception as exc:
+        logger.error(
+            "tenant_asset ledger write failed public_id=%s err=%s", public_id[:120], exc)
+
+
+def _forget_asset(public_id: str) -> None:
+    """يمحو سطر السجلّ بعد حذف الأصل فعلياً — أفضل-جهد كالحذف نفسه."""
+    try:
+        from core.models import TenantAsset
+
+        TenantAsset.objects.filter(public_id=public_id).delete()
+    except Exception as exc:
+        logger.warning(
+            "tenant_asset ledger delete failed public_id=%s err=%s", public_id[:120], exc)
+
+
+def upload_media_file(
+    f, folder: str = "ktra_uploads", *, tenant=None, uploaded_by=None,
+) -> str:
     """يرفع ملفاً واحداً إلى Cloudinary ويعيد رابطه الآمن.
 
     قلب الرفع مشترك: النقطة العامة `/api/media/upload/` ومسار مستندات مكتب
     المحاسبة كلاهما ينادي هذه الدالة، فحدُّ الحجم وفحص الاعتماد وصياغة الفشل
     تبقى نسخةً واحدة. الفشل يخرج كـ`MediaUploadError` بحالته، والمستهلك يردّه.
+
+    ولأنها نقطة الاختناق الوحيدة، فهي أيضاً المكان الوحيد الذي يُقاس فيه
+    استهلاك التخزين: `tenant` يضع الملف في مجلّد شركته
+    (`{folder}/t{id}`) ويكتب سطر `core.TenantAsset` بحجمه ومالكه.
     """
     size = getattr(f, "size", 0) or 0
     if size > MAX_UPLOAD_BYTES:
@@ -82,6 +140,8 @@ def upload_media_file(f, folder: str = "ktra_uploads") -> str:
             status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
+    target_folder = f"{folder}/t{tenant.pk}" if tenant is not None else folder
+
     try:
         import cloudinary
         import cloudinary.uploader
@@ -93,7 +153,7 @@ def upload_media_file(f, folder: str = "ktra_uploads") -> str:
             resource_type=_resource_type(
                 getattr(f, "name", ""), getattr(f, "content_type", None)
             ),
-            folder=folder,
+            folder=target_folder,
         )
     except Exception as exc:  # فشل الرفع لا يُسقط الطلب بـ 500 غامض
         logger.warning("media_upload failed name=%s err=%s", getattr(f, "name", "?"), exc)
@@ -107,6 +167,7 @@ def upload_media_file(f, folder: str = "ktra_uploads") -> str:
             "لم يُعَد رابط الملف من Cloudinary.", status.HTTP_502_BAD_GATEWAY,
         )
 
+    _record_asset(result, folder=target_folder, tenant=tenant, uploaded_by=uploaded_by)
     logger.info("media_upload ok name=%s -> %s", getattr(f, "name", "?"), url[:80])
     return url
 
@@ -119,13 +180,26 @@ def media_upload(request):
     """
     رفع ملف واحد (حقل النموذج: file) إلى Cloudinary وإرجاع رابطه.
     الرد الناجح: { "url": "https://res.cloudinary.com/..." }
+
+    حقل اختياري `scope=platform`: يجعل الملف أصلاً **منصّياً** لا يتبع شركة —
+    صور ملاحظات التطوير يرفعها سوبر أدمن وشركةٌ ما نشطةٌ في ترويسته، فنسبُها
+    إليها يحمّل شركةً بريئةً بايتاتٍ لا تراها. وهو قدرةُ سوبر أدمن حصراً:
+    من غيره يُتجاهل الحقل ويُنسب الملف لشركته كالمعتاد.
     """
     f = request.FILES.get("file")
     if not f:
         return Response({"detail": "حقل file مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
 
+    platform_scope = (
+        str(request.data.get("scope") or "").strip().lower() == "platform"
+        and is_super_admin(request.user)
+    )
+    # بلا شركة وبلا نطاق منصّي: الرفع يمرّ ويُسجَّل بلا نسبة («غير منسوب») —
+    # القياس ناقصٌ صراحةً أهون من رفعٍ يفشل في وجه مستخدم.
+    tenant = None if platform_scope else get_tenant(request)
+
     try:
-        url = upload_media_file(f)
+        url = upload_media_file(f, tenant=tenant, uploaded_by=request.user)
     except MediaUploadError as exc:
         return Response({"detail": exc.detail}, status=exc.status_code)
 
@@ -169,6 +243,7 @@ def destroy_cloudinary_asset(url: str) -> bool:
 
         cloudinary.config(cloud_name=cloud_name, api_key=api_key, api_secret=api_secret)
         cloudinary.uploader.destroy(public_id, resource_type=rtype, invalidate=True)
+        _forget_asset(public_id)  # البايتات لم تعد محسوبةً على أحد
         logger.info("destroy_cloudinary_asset ok public_id=%s rtype=%s", public_id, rtype)
         return True
     except Exception as exc:

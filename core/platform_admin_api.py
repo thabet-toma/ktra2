@@ -1,9 +1,10 @@
 """واجهات إدارة المنصة — عالمية ومحروسة بالسوبر أدمن فقط."""
 import logging
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Case, Count, IntegerField, Q, Value, When
+from django.db.models import Case, Count, IntegerField, Max, Q, Sum, Value, When
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
@@ -12,15 +13,21 @@ from rest_framework.decorators import (
 )
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
+from rest_framework.routers import APIRootView, DefaultRouter
 
 from accounting.models import AccountingAuditLog
+from core.activity import log_activity
 from core.import_access import is_super_admin, super_admin_emails
 from core.models import (
-    DevelopmentNote, DevelopmentNoteComment, TenantLimit, TenantModule,
+    ActivityLog, DevelopmentNote, DevelopmentNoteComment, TenantAsset,
+    TenantLimit, TenantModule,
 )
 from core.modules import MODULES, invalidate_module_cache
-from core.plans import LIMITS, invalidate_limit_cache, limit_rows, plan_default
-from tenants.models import Tenant, UserCompanyMembership
+from core.plans import (
+    LIMITS, bulk_overrides, bulk_usage, invalidate_limit_cache, limit_rows,
+    limit_value, near_limit_rows, plan_default,
+)
+from tenants.models import Branch, Tenant, UserCompanyMembership
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +39,21 @@ class IsPlatformAdmin(BasePermission):
 
     def has_permission(self, request, view):
         return is_super_admin(request.user)
+
+
+class PlatformAPIRootView(APIRootView):
+    """جذر راوتر المنصة — محروسٌ كبقية مساراته.
+
+    الجذر الافتراضي يرث صلاحيات الإعدادات (`IsAuthenticated`)، فيسرد لأي مستخدم
+    مسجَّل خريطةَ نقاط لوحة المنصة. لا بيانات شركات فيه، لكن **كل** ما تحت
+    `/api/platform/` يجب أن يردّ 403 لغير السوبر أدمن بلا استثناء يُتذكَّر.
+    """
+
+    permission_classes = [IsPlatformAdmin]
+
+
+class PlatformRouter(DefaultRouter):
+    APIRootView = PlatformAPIRootView
 
 
 MAX_NOTE_IMAGES = 10
@@ -310,15 +332,138 @@ def _company_payload(tenant, member_count=None):
     }
 
 
+# «بلا نشاط» = لم يُسجَّل لها أي فعل (غير العرض) منذ هذه المدة — شركةٌ دفعت
+# ولا تستعمل النظام هي أوّل من يُلغي اشتراكه، فظهورها بالاسم لا بالعدد وحده.
+IDLE_COMPANY_DAYS = 30
+TOP_STORAGE_COMPANIES = 5
+
+
+def _last_timestamp_by_tenant(queryset):
+    """{tenant_id: آخر طابع زمني} — استعلامٌ واحد مهما بلغ عدد الشركات."""
+    return {
+        row['tenant_id']: row['last']
+        for row in (
+            queryset.values('tenant_id').order_by().annotate(last=Max('timestamp'))
+        )
+    }
+
+
+def _storage_by_tenant():
+    """استهلاك التخزين المجمَّع من سجلّ البايتات: لكل شركة، وللمنصة، وغير المنسوب.
+
+    استعلام واحد يخدم الثلاثة: مجموعة `tenant_id = NULL` هي «غير منسوب» (أصول
+    المنصة ومكتب المحاسبة)، ومجموع المجموعات كلها هو إجمالي السجلّ. إجمالي
+    Cloudinary نفسه **لا يُطلب هنا** — لا نداء خارجي على تحميل صفحة؛ الفارق
+    الدقيق مع المزوّد يسكن في تقرير التخزين.
+    """
+    per_tenant, counts = {}, {}
+    ledger_total = unattributed = 0
+    rows = (
+        TenantAsset.objects
+        .values('tenant_id')
+        .order_by()
+        .annotate(total_bytes=Sum('bytes'), asset_count=Count('id'))
+    )
+    for row in rows:
+        total = row['total_bytes'] or 0
+        ledger_total += total
+        if row['tenant_id'] is None:
+            unattributed += total
+            continue
+        per_tenant[row['tenant_id']] = total
+        counts[row['tenant_id']] = row['asset_count']
+    return per_tenant, counts, ledger_total, unattributed
+
+
+def _dashboard_kpis(company_rows, status_counts):
+    """مؤشرات اللوحة — مشتقّة من الصفوف المحسوبة أعلاه، بصفر استعلام إضافي."""
+    idle_before = timezone.now() - timedelta(days=IDLE_COMPANY_DAYS)
+    idle = [
+        row for row in company_rows
+        if row['last_activity_at'] is None or row['last_activity_at'] < idle_before
+    ]
+    near = [row for row in company_rows if row['near_limit']]
+    top_storage = sorted(
+        (row for row in company_rows if row['storage_bytes']),
+        key=lambda row: row['storage_bytes'],
+        reverse=True,
+    )[:TOP_STORAGE_COMPANIES]
+    return {
+        'active_companies': status_counts.get('Active', 0),
+        'idle_companies': {
+            'days': IDLE_COMPANY_DAYS,
+            'count': len(idle),
+            'companies': [
+                {
+                    'id': row['id'],
+                    'name': row['name'],
+                    'last_activity_at': row['last_activity_at'],
+                }
+                for row in idle
+            ],
+        },
+        'top_storage': [
+            {
+                'id': row['id'],
+                'name': row['name'],
+                'storage_bytes': row['storage_bytes'],
+                'storage_asset_count': row['storage_asset_count'],
+            }
+            for row in top_storage
+        ],
+        'near_limit_companies': {
+            'count': len(near),
+            # `near_limit` مرتَّب بالأقرب إلى حدّه أولاً، فأوّل عنصر هو أسوأ حدّ.
+            'companies': [
+                {'id': row['id'], 'name': row['name'], **row['near_limit'][0]}
+                for row in near
+            ],
+        },
+    }
+
+
 @api_view(['GET'])
 @authentication_classes([TokenAuthentication, SessionAuthentication])
 @permission_classes([IsPlatformAdmin])
 def platform_dashboard(request):
-    """مؤشرات تشغيل المنصة بلا بيانات مالية داخلية للشركات."""
-    companies = Tenant.objects.annotate(member_count=Count('memberships')).order_by('-CreatedAt')
-    company_rows = [
-        _company_payload(tenant, tenant.member_count) for tenant in companies
-    ]
+    """مؤشرات تشغيل المنصة بلا بيانات مالية داخلية للشركات.
+
+    كل عمود في جدول الشركات يأتي من قاموسٍ مبنيّ باستعلامٍ مجمَّع واحد، فعدد
+    الاستعلامات ثابت سواءٌ كانت الشركات خمساً أو خمسمئة. النداء الفردي
+    (`limit_rows` / `current_usage` لكل شركة) هو ما يحوّل هذه الصفحة إلى مئات
+    الاستعلامات، ويحرسه اختبارٌ يقارن جولة ٥ شركات بجولة ٥٠.
+    """
+    companies = list(
+        Tenant.objects.annotate(member_count=Count('memberships')).order_by('-CreatedAt')
+    )
+    tenant_ids = [tenant.pk for tenant in companies]
+
+    usage = bulk_usage(tenant_ids=tenant_ids)
+    overrides = bulk_overrides(tenant_ids)
+    storage_bytes, storage_counts, ledger_total_bytes, unattributed_bytes = (
+        _storage_by_tenant()
+    )
+    last_login = _last_timestamp_by_tenant(ActivityLog.objects.filter(action='login'))
+    last_activity = _last_timestamp_by_tenant(ActivityLog.objects.filter(is_view=False))
+
+    company_rows = []
+    for tenant in companies:
+        tenant_usage = {key: counts.get(tenant.pk, 0) for key, counts in usage.items()}
+        company_rows.append({
+            **_company_payload(tenant, tenant.member_count),
+            'branch_count': tenant_usage['company.branches'],
+            'storage_bytes': storage_bytes.get(tenant.pk, 0),
+            'storage_asset_count': storage_counts.get(tenant.pk, 0),
+            # نافذة المستندات هي نافذة الحدّ نفسها (الشهر الجاري بـ`created_at`):
+            # عمودٌ يقيس شيئاً وحدٌّ يقيس آخر يجعل «قريب من الحدّ» غير مفهوم.
+            'document_count': tenant_usage['documents.invoices'],
+            'last_login_at': last_login.get(tenant.pk),
+            'last_activity_at': last_activity.get(tenant.pk),
+            'near_limit': near_limit_rows(
+                tenant.SubscriptionPlan, overrides.get(tenant.pk, {}), tenant_usage,
+            ),
+        })
+
     status_counts = {
         row['Status']: row['count']
         for row in Tenant.objects.values('Status').annotate(count=Count('TenantID'))
@@ -342,6 +487,11 @@ def platform_dashboard(request):
         'status_distribution': status_counts,
         'plan_distribution': plan_counts,
         'company_rows': company_rows,
+        'kpis': _dashboard_kpis(company_rows, status_counts),
+        'storage': {
+            'ledger_total_bytes': ledger_total_bytes,
+            'unattributed_bytes': unattributed_bytes,
+        },
     })
 
 
@@ -447,8 +597,6 @@ def platform_company_modules(request, pk):
             audit_object_id = row.pk
             entity_id = row.pk
 
-        from core.activity import log_activity
-
         AccountingAuditLog.objects.create(
             tenant=tenant,
             user=request.user,
@@ -529,6 +677,9 @@ def platform_company_limits(request, pk):
     limit_key = serializer.validated_data['limit_key']
     reset = serializer.validated_data['reset']
     note = serializer.validated_data['note']
+    # الحدّ الفعّال **قبل** الكتابة — بعدها يضيع الفرق: صفّ التجاوز يُحذف أو
+    # يُستبدل، ولا يبقى في السجل ما يقول من أي قيمة تحرّك.
+    previous_limit = limit_value(tenant, limit_key)
 
     with transaction.atomic():
         if reset:
@@ -554,6 +705,23 @@ def platform_company_limits(request, pk):
             change_details=(
                 f'limit={limit_key}; value={"plan_default" if reset else new_value}'
             ),
+        )
+        log_activity(
+            action='update',
+            entity_type='tenant_limit',
+            entity_id=tenant.pk,
+            entity_label=LIMITS[limit_key].label,
+            description='تم تعديل حدّ من حدود خطة الشركة.',
+            metadata={
+                'event_code': 'LIMIT_CHANGED',
+                'limit': limit_key,
+                'previous_limit': previous_limit,
+                'new_limit': new_value,
+                'reset': reset,
+            },
+            request=request,
+            tenant=tenant,
+            user=request.user,
         )
         transaction.on_commit(
             lambda tenant_id=tenant.pk: invalidate_limit_cache(tenant_id)
@@ -789,6 +957,66 @@ def _apply_company_changes(tenant, data):
     return changed
 
 
+# حدثٌ في سجل الشركة لكل قرار إداري يغيّر ما تدفعه أو ما تراه: تغيير الخطة
+# وإيقاف الشركة يظهران في اللوحة نفسها كأي حدث آخر، فلا يبقى فعل السوبر أدمن
+# وحده خارج الحكاية. الاسم و`import_enabled` لا حدث لهما — تصحيحٌ إداري لا يغيّر
+# ما للشركة من حقوق.
+_COMPANY_EVENT_FIELDS = {
+    'SubscriptionPlan': ('PLAN_CHANGED', 'خطة الاشتراك', 'تم تغيير خطة اشتراك الشركة.'),
+    'Status': ('STATUS_CHANGED', 'حالة الشركة', 'تم تغيير حالة الشركة.'),
+}
+
+
+def _log_company_changes(request, tenant, changed, previous):
+    """يسجّل حدثاً لكل حقلٍ ذي أثر **تغيّرت** قيمته فعلاً — لا حدث لحفظةٍ بلا فرق."""
+    for field, (event_code, label, description) in _COMPANY_EVENT_FIELDS.items():
+        if field not in changed:
+            continue
+        new_value = getattr(tenant, field)
+        if new_value == previous[field]:
+            continue
+        log_activity(
+            action='update',
+            entity_type='tenant',
+            entity_id=tenant.pk,
+            entity_label=label,
+            description=description,
+            metadata={
+                'event_code': event_code,
+                'field': field,
+                'previous': previous[field],
+                'new': new_value,
+            },
+            request=request,
+            tenant=tenant,
+            user=request.user,
+        )
+
+
+def _company_activity_extras(tenant):
+    """فروع الشركة وتخزينها وآخر نشاطها — ثلاثة استعلامات مقيّدة لشركة واحدة."""
+    branches = list(
+        Branch.objects
+        .filter(tenant=tenant)
+        .order_by('-is_main', 'name')
+        .values('id', 'name', 'code')
+    )
+    storage_bytes = (
+        TenantAsset.objects.filter(tenant=tenant).aggregate(total=Sum('bytes'))['total']
+        or 0
+    )
+    last_activity_at = (
+        ActivityLog.objects
+        .filter(tenant=tenant, is_view=False)
+        .aggregate(last=Max('timestamp'))['last']
+    )
+    return {
+        'branches': branches,
+        'storage_bytes': storage_bytes,
+        'last_activity_at': last_activity_at,
+    }
+
+
 @api_view(['GET', 'PATCH'])
 @authentication_classes([TokenAuthentication, SessionAuthentication])
 @permission_classes([IsPlatformAdmin])
@@ -800,9 +1028,13 @@ def platform_company_detail(request, pk):
 
     if request.method == 'PATCH':
         with transaction.atomic():
+            previous = {
+                field: getattr(tenant, field) for field in _COMPANY_EVENT_FIELDS
+            }
             changed = _apply_company_changes(tenant, request.data)
             if changed:
                 tenant.save(update_fields=changed)
+                _log_company_changes(request, tenant, changed, previous)
             if 'is_example' in request.data:
                 from tenants.services import set_example_company
 
@@ -818,7 +1050,49 @@ def platform_company_detail(request, pk):
                             tenant.pk, ','.join(changed), request.user.pk)
         return Response(_company_payload(tenant))
 
-    return Response({**_company_payload(tenant), 'members': _member_rows(tenant)})
+    return Response({
+        **_company_payload(tenant),
+        **_company_activity_extras(tenant),
+        'members': _member_rows(tenant),
+    })
+
+
+# آخر مئة حدث تكفي لقراءة «ماذا يجري في هذه الشركة» بلا ترقيم صفحات ولا حِمل:
+# السجل الكامل للشركة مكانه صفحة النشاط داخلها، لا كرتُ اللوحة.
+COMPANY_ACTIVITY_LIMIT = 100
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_company_activity(request, pk):
+    """آخر أحداث الشركة كما تراها لوحة المنصة — أحداث العرض مستبعدة.
+
+    `is_view=True` هو فتحُ مستندٍ لا فعلٌ عليه؛ تركُه هنا يُغرق آخر مئة حدث بفتحٍ
+    وتصفّح فيختفي القرار الإداري الذي جاء القارئ يبحث عنه.
+    """
+    tenant = Tenant.objects.filter(pk=pk).first()
+    if tenant is None:
+        return Response({'detail': 'الشركة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
+
+    rows = (
+        ActivityLog.objects
+        .filter(tenant=tenant, is_view=False)
+        .select_related('user')
+        .order_by('-timestamp', '-id')[:COMPANY_ACTIVITY_LIMIT]
+    )
+    return Response({'results': [
+        {
+            'timestamp': row.timestamp,
+            'user_name': _user_display_name(row.user) or '—',
+            'action': row.action,
+            'action_label': row.get_action_display(),
+            'entity_type': row.entity_type,
+            'entity_label': row.entity_label,
+            'description': row.description,
+        }
+        for row in rows
+    ]})
 
 
 @api_view(['GET', 'POST'])

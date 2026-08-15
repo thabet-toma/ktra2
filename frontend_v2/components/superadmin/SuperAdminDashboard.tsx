@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from "react";
 import {
-  Building2, CheckCircle2, CirclePause, ClipboardList, RefreshCw, Settings2,
-  ShieldCheck, Trash2, UserPlus, Users,
+  Building2, CalendarClock, CheckCircle2, CirclePause, ClipboardList, HardDrive,
+  RefreshCw, Settings2, ShieldCheck, Trash2, TriangleAlert, UserPlus, Users,
 } from "lucide-react";
 
 import {
   getPlatformDashboard, grantSuperAdmin, listPendingAccountants, listSuperAdmins,
   openAccountantWorkspace, revokeSuperAdmin, updatePlatformCompany, verifyAccountant,
-  type PlatformAccountantProfile, type PlatformDashboardData, type PlatformSuperAdmin,
+  type PlatformAccountantProfile, type PlatformDashboardCompanyRow,
+  type PlatformDashboardData, type PlatformSuperAdmin,
 } from "../../services/platformAdminApi";
 import {
   COMPANY_PLAN_LABELS, COMPANY_STATUS_LABELS, PlatformCompanyPanel,
@@ -16,7 +17,9 @@ import { enterOfficeShell } from "../../utils/officeShell";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import type { AppView } from "../../types";
+import { formatBytes } from "../../utils/formatBytes";
 import { formatDateValue } from "../../utils/formatDate";
+import { formatNumber } from "../../utils/formatNumber";
 
 
 interface Props {
@@ -24,6 +27,71 @@ interface Props {
 }
 
 const statusLabel = (status: string) => COMPANY_STATUS_LABELS[status] || status;
+
+/** خمسة أسماء ثم «+N» — الكرت يقول مَن، لا يستنسخ الجدول تحته. */
+const MAX_LISTED_COMPANIES = 5;
+
+interface InsightEntry {
+  id: number;
+  name: string;
+  /** رقمٌ أو تسميةٌ تشرح لماذا ظهر هذا الاسم هنا (يُعرض بجانبه). */
+  hint: string;
+  title?: string;
+}
+
+/** قائمة الشركات المعنيّة داخل كرت مؤشّر — مقصوصة بسقفٍ ثابت ومصرَّحٌ بالباقي. */
+const InsightList: React.FC<{ rows: InsightEntry[]; empty: string }> = ({ rows, empty }) => {
+  if (rows.length === 0) {
+    return <p className="mt-2 text-xs aseel-text-soft">{empty}</p>;
+  }
+  const shown = rows.slice(0, MAX_LISTED_COMPANIES);
+  const rest = rows.length - shown.length;
+  return (
+    <ul className="mt-2 space-y-1">
+      {shown.map((row) => (
+        <li key={row.id} className="flex items-center justify-between gap-2 text-xs" title={row.title}>
+          <span className="truncate text-[var(--color-text)]">{row.name}</span>
+          <span className="shrink-0 aseel-text-soft">{row.hint}</span>
+        </li>
+      ))}
+      {rest > 0 && (
+        <li className="text-xs aseel-text-soft">+{formatNumber(rest)} شركة أخرى</li>
+      )}
+    </ul>
+  );
+};
+
+const InsightCard: React.FC<{
+  title: string;
+  value: string;
+  caption: string;
+  icon: React.ElementType;
+  tone: string;
+  children: React.ReactNode;
+}> = ({ title, value, caption, icon: Icon, tone, children }) => (
+  <article className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+    <div className="flex items-center gap-3">
+      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${tone}`}>
+        <Icon className="h-5 w-5" aria-hidden="true" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-xs aseel-text-soft">{title}</p>
+        <p className="text-2xl font-bold text-[var(--color-text)]">{value}</p>
+      </div>
+    </div>
+    <p className="mt-2 text-[11px] aseel-text-soft">{caption}</p>
+    {children}
+  </article>
+);
+
+/** «آخر نشاط» بلا حدث مسجَّل ليس تاريخاً فارغاً — هو خبرٌ في ذاته. */
+const activityLabel = (value: string | null) =>
+  value ? formatDateValue(value) : "لا نشاط مسجَّل";
+
+const nearLimitTitle = (company: PlatformDashboardCompanyRow) =>
+  company.near_limit
+    .map((row) => `${row.label}: ${formatNumber(row.usage)} من ${formatNumber(row.limit)}`)
+    .join(" · ");
 
 export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
   const toast = useToast();
@@ -217,6 +285,62 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
         ))}
       </section>
 
+      <section aria-label="مؤشرات التشغيل" className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <InsightCard
+          title={`بلا نشاط ${formatNumber(data.kpis.idle_companies.days)} يوماً`}
+          value={formatNumber(data.kpis.idle_companies.count)}
+          caption="لم يُسجَّل لها أي فعل (غير العرض) منذ هذه المدة"
+          icon={CalendarClock}
+          tone="text-slate-600 bg-slate-100 dark:bg-slate-800/60"
+        >
+          <InsightList
+            empty="كل الشركات تحرّكت خلال المدة"
+            rows={data.kpis.idle_companies.companies.map((company) => ({
+              id: company.id,
+              name: company.name,
+              hint: activityLabel(company.last_activity_at),
+              title: `آخر نشاط: ${activityLabel(company.last_activity_at)}`,
+            }))}
+          />
+        </InsightCard>
+
+        <InsightCard
+          title="أعلى استهلاك للتخزين"
+          value={formatBytes(data.storage.ledger_total_bytes)}
+          caption="إجمالي سجلّ البايتات على المنصة — أعلى خمس شركات"
+          icon={HardDrive}
+          tone="text-indigo-600 bg-indigo-50 dark:bg-indigo-950/30"
+        >
+          <InsightList
+            empty="لا بايتات مقيسة بعد في السجلّ"
+            rows={data.kpis.top_storage.map((company) => ({
+              id: company.id,
+              name: company.name,
+              hint: formatBytes(company.storage_bytes),
+              title: `${formatNumber(company.storage_asset_count)} ملف`,
+            }))}
+          />
+        </InsightCard>
+
+        <InsightCard
+          title="قريبة من حدّ الخطة"
+          value={formatNumber(data.kpis.near_limit_companies.count)}
+          caption="بلغ استهلاكها أربعة أخماس أحد حدود خطتها — الأقرب أولاً"
+          icon={TriangleAlert}
+          tone="text-amber-600 bg-amber-50 dark:bg-amber-950/30"
+        >
+          <InsightList
+            empty="لا شركة قاربت حدّاً من حدودها"
+            rows={data.kpis.near_limit_companies.companies.map((company) => ({
+              id: company.id,
+              name: company.name,
+              hint: `${company.label} ${formatNumber(company.usage)}/${formatNumber(company.limit)}`,
+              title: `${company.label}: ${formatNumber(company.usage)} من ${formatNumber(company.limit)}`,
+            }))}
+          />
+        </InsightCard>
+      </section>
+
       <section aria-label="سوبر أدمن المنصة" className="mt-5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-3">
           <div>
@@ -340,22 +464,53 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-sm">
+          <table className="w-full min-w-[1200px] text-sm">
             <thead className="bg-[var(--color-surface-2)] aseel-text-soft"><tr>
               <th className="px-3 py-2 text-right">الشركة</th><th className="px-3 py-2 text-right">الخطة</th>
               <th className="px-3 py-2 text-right">الحالة</th><th className="px-3 py-2 text-center">الأعضاء</th>
+              <th className="px-3 py-2 text-center">الفروع</th>
+              {/* النافذة في العنوان: العدّ للشهر الجاري كنافذة الحدّ نفسها، و«المستندات»
+                  وحدها تُقرأ إجمالاً تاريخياً فتكذب بصمت. */}
+              <th className="px-3 py-2 text-center">المستندات هذا الشهر</th>
+              <th className="px-3 py-2 text-center">التخزين</th>
+              <th className="px-3 py-2 text-right">آخر نشاط</th>
               <th className="px-3 py-2 text-center">الاستيراد</th><th className="px-3 py-2 text-right">تاريخ الإنشاء</th>
               <th className="px-3 py-2 text-center">تحكم</th>
             </tr></thead>
             <tbody>
               {data.company_rows.length === 0 ? (
-                <tr><td colSpan={7} className="px-3 py-10 text-center aseel-text-soft">لا توجد شركات بعد</td></tr>
+                <tr><td colSpan={11} className="px-3 py-10 text-center aseel-text-soft">لا توجد شركات بعد</td></tr>
               ) : data.company_rows.map((company) => (
                 <tr key={company.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-2)]">
-                  <td className="px-3 py-2 font-semibold text-[var(--color-text)]">{company.name}{company.is_example ? " (مثال)" : ""}</td>
+                  <td className="px-3 py-2">
+                    {/* المحتوى داخل عنصر ابن: قاعدة `tbody td` غير المُطبَّقة في
+                        `styles/index.css` تغلب أصناف Tailwind على الخلية نفسها. */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-[var(--color-text)]">{company.name}{company.is_example ? " (مثال)" : ""}</span>
+                      {company.near_limit.length > 0 && (
+                        <span
+                          className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                          title={nearLimitTitle(company)}
+                        >
+                          <TriangleAlert className="h-3 w-3" aria-hidden="true" />
+                          قرب الحدّ: {company.near_limit[0].label}
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-3 py-2">{COMPANY_PLAN_LABELS[company.plan] || company.plan}</td>
                   <td className="px-3 py-2">{statusLabel(company.status)}</td>
-                  <td className="px-3 py-2 text-center">{company.member_count}</td>
+                  <td className="px-3 py-2 text-center">{formatNumber(company.member_count)}</td>
+                  <td className="px-3 py-2 text-center">{formatNumber(company.branch_count)}</td>
+                  <td className="px-3 py-2 text-center">{formatNumber(company.document_count)}</td>
+                  <td
+                    className="px-3 py-2 text-center whitespace-nowrap"
+                    title={`${formatNumber(company.storage_asset_count)} ملف مسجَّل`}
+                  >{formatBytes(company.storage_bytes)}</td>
+                  <td
+                    className="px-3 py-2 whitespace-nowrap"
+                    title={`آخر دخول: ${company.last_login_at ? formatDateValue(company.last_login_at) : "لا دخول مسجَّل"}`}
+                  >{activityLabel(company.last_activity_at)}</td>
                   <td className="px-3 py-2 text-center">{company.import_enabled ? "مفعّل" : "غير مفعّل"}</td>
                   <td className="px-3 py-2 whitespace-nowrap">{formatDateValue(company.created_at)}</td>
                   <td className="px-3 py-2 text-center">
@@ -374,6 +529,23 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
             </tbody>
           </table>
         </div>
+        {/* بايتات `tenant = NULL`: رفوعات المنصة وما لم يُنسب بعد. تُسمّى بما هي
+            عليه — «غير منسوب» محجوزة في تقرير `backfill_tenant_assets` لكمّية
+            أخرى (إجمالي Cloudinary ناقص السجلّ كلّه)، ولفظٌ واحد لا يعني رقمين.
+            تُخفى عند الصفر: سطرٌ يقول «صفر» ضجيجٌ لا خبر. */}
+        {data.storage.unattributed_bytes > 0 && (
+          <div className="border-t border-[var(--color-border)] px-4 py-3">
+            <p className="text-sm text-[var(--color-text)]">
+              تخزين مرفوع لا يخصّ شركة بعينها:{" "}
+              <span className="font-bold">{formatBytes(data.storage.unattributed_bytes)}</span>
+            </p>
+            <p className="mt-1 text-xs aseel-text-soft">
+              رفوعات على مستوى المنصة (صور ملاحظات التطوير ومستندات مكتب المحاسبة) وملفات
+              وصلت بلا شركة. نسبة الأرشيف القديم لأصحابه تأتي من قاعدة البيانات
+              عبر الاسترجاع الأثري (source='backfill').
+            </p>
+          </div>
+        )}
       </section>
 
       {managedCompanyId !== null && (

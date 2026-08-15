@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **442**
+عدد النقاط: **443**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -344,12 +344,13 @@
 | `/api/permissions/member/` | `member_permissions` | `core/permissions_api.py` |
 | `/api/permissions/members/` | `permission_members` | `core/permissions_api.py` |
 | `/api/permissions/roles/` | `permission_roles` | `core/permissions_api.py` |
-| `/api/platform/` | `APIRootView` | `rest_framework/routers.py` |
-| `/api/platform/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
+| `/api/platform/` | `PlatformAPIRootView` | `core/platform_admin_api.py` |
+| `/api/platform/<drf_format_suffix:format>` | `PlatformAPIRootView` | `core/platform_admin_api.py` |
 | `/api/platform/accountant-workspace/` | `platform_accountant_workspace` | `core/platform_admin_api.py` |
 | `/api/platform/accountants/<int:profile_id>/verify/` | `platform_accountant_verify` | `core/platform_admin_api.py` |
 | `/api/platform/accountants/pending/` | `platform_accountants_pending` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/` | `platform_company_detail` | `core/platform_admin_api.py` |
+| `/api/platform/companies/<int:pk>/activity/` | `platform_company_activity` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/limits/` | `platform_company_limits` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/members/` | `platform_company_members` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/members/<int:membership_id>/` | `platform_company_member_detail` | `core/platform_admin_api.py` |

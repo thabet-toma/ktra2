@@ -53,7 +53,26 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
     id: 42, name: "شركة الاختبار", plan: "Enterprise", status: "Active",
     import_enabled: true, is_example: false, member_count: 2, created_at: "2026-07-22T00:00:00Z",
     members: companyMembers.map((member) => ({ ...member })),
+    branches: [
+      { id: 1, name: "الفرع الرئيسي", code: "MAIN" },
+      // بلا رمز عمداً — الرمز اختياري في تعريف الفرع فلا يُطبع فاصلٌ يتيم بعده.
+      { id: 2, name: "فرع دمشق", code: "" },
+    ],
+    storage_bytes: 5242880,
+    last_activity_at: "2026-08-09T07:30:00Z",
   };
+  const companyActivity = [
+    {
+      timestamp: "2026-08-09T07:30:00Z", user_name: "سوبر أدمن", action: "update",
+      action_label: "تعديل", entity_type: "tenant_limit", entity_label: "الفروع",
+      description: "الحدّ: 3 ← 5",
+    },
+    {
+      timestamp: "2026-08-08T10:00:00Z", user_name: "ندى", action: "post",
+      action_label: "ترحيل", entity_type: "sales_invoice", entity_label: "INV-1001",
+      description: "",
+    },
+  ];
   // مبعثرة عمداً (المكتملة أولاً والأقدم في الوسط) — الشاشة تُرتّبها بنفسها:
   // الأهمّ أولاً، والأقدم أولاً داخل الأولوية الواحدة، والمكتملة في قسمها.
   const developmentNotes = [
@@ -135,6 +154,13 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
         role: "manager", is_manager: true, permissions: [],
       }) });
     }
+    // بلا هذا المحاكي يبتلع الردّ الافتراضي (`[]`) النداءَ فتصل `results`
+    // معدومة، وتموت اللوحة كلها على `pendingAccountants.length` قبل أن تُرسم.
+    if (url.pathname.endsWith("/platform/accountants/pending/")) {
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({
+        results: [], count: 0,
+      }) });
+    }
     if (url.pathname.endsWith("/platform/dashboard/")) {
       return route.fulfill({ contentType: "application/json", body: JSON.stringify({
         companies: { total: 3, active: 2, trial: 1, suspended: 0 },
@@ -146,7 +172,36 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
           id: 42, name: "شركة الاختبار", plan: "Enterprise", status: "Active",
           import_enabled: true, is_example: company.is_example,
           member_count: 4, created_at: "2026-07-22T00:00:00Z",
+          branch_count: 3, storage_bytes: 5242880, storage_asset_count: 12,
+          document_count: 180, last_login_at: "2026-08-13T08:00:00Z",
+          last_activity_at: "2026-08-14T09:30:00Z",
+          near_limit: [{ key: "company.branches", label: "الفروع", usage: 3, limit: 3 }],
+        }, {
+          // شركة ساكنة بلا بايتات — الحالة الفارغة تُختبر كما يُختبر الرقم.
+          id: 43, name: "شركة الظلّ", plan: "Basic", status: "Trial",
+          import_enabled: false, is_example: false, member_count: 1,
+          created_at: "2026-05-02T00:00:00Z", branch_count: 1,
+          storage_bytes: 0, storage_asset_count: 0, document_count: 0,
+          last_login_at: null, last_activity_at: null, near_limit: [],
         }],
+        kpis: {
+          active_companies: 2,
+          idle_companies: {
+            days: 30, count: 1,
+            companies: [{ id: 43, name: "شركة الظلّ", last_activity_at: null }],
+          },
+          top_storage: [{
+            id: 42, name: "شركة الاختبار", storage_bytes: 5242880, storage_asset_count: 12,
+          }],
+          near_limit_companies: {
+            count: 1,
+            companies: [{
+              id: 42, name: "شركة الاختبار", key: "company.branches",
+              label: "الفروع", usage: 3, limit: 3,
+            }],
+          },
+        },
+        storage: { ledger_total_bytes: 6291456, unattributed_bytes: 1048576 },
       }) });
     }
     if (/\/platform\/companies\/\d+\/members\/\d+\/$/.test(url.pathname)) {
@@ -154,6 +209,13 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
       const member = company.members.find((row) => url.pathname.includes(`/${row.membership_id}/`));
       Object.assign(member!, calls.memberPatch);
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(member) });
+    }
+    if (/\/platform\/companies\/\d+\/activity\/$/.test(url.pathname)) {
+      // عدّاد لا قيمة: يثبت أن القائمة لا تُجلب إلا عند فتح القسم.
+      calls.activityHits = (calls.activityHits ?? 0) + 1;
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({
+        results: companyActivity,
+      }) });
     }
     if (/\/platform\/companies\/\d+\/$/.test(url.pathname)) {
       if (request.method() === "PATCH") {
@@ -260,6 +322,45 @@ test("super admin gets a separate platform dashboard and development notes sheet
   await page.getByLabel("العنوان *").fill("إضافة تقرير هامش الربح");
   await page.getByRole("button", { name: "إضافة الملاحظة" }).click();
   await expect(page.getByText("إضافة تقرير هامش الربح", { exact: true })).toBeVisible();
+});
+
+test("لوحة المنصة: مؤشرات التشغيل، وأعمدة القياس في جدول الشركات", async ({ page }) => {
+  await installMocks(page, true);
+  await page.goto("/super-admin");
+  await expect(page.getByRole("heading", { name: "لوحة تحكم السوبر أدمن" })).toBeVisible();
+
+  // كروت المؤشرات تسمّي الشركات المعنيّة، لا عددها وحده
+  const insights = page.locator('section[aria-label="مؤشرات التشغيل"]');
+  await expect(insights.getByText("بلا نشاط 30 يوماً")).toBeVisible();
+  await expect(insights.getByText("شركة الظلّ")).toBeVisible();
+  await expect(insights.getByText("لا نشاط مسجَّل")).toBeVisible();
+  // إجمالي السجلّ (٦ م.ب) غير أعلى شركة فيه (٥ م.ب) — الكرت يعرض الاثنين
+  await expect(insights.getByText("6 م.ب", { exact: true })).toBeVisible();
+  await expect(insights.getByText("5 م.ب", { exact: true })).toBeVisible();
+  await expect(insights.getByText("الفروع 3/3")).toBeVisible();
+
+  const table = page.locator("table").first();
+  await expect(table.locator("thead th")).toHaveText([
+    "الشركة", "الخطة", "الحالة", "الأعضاء", "الفروع", "المستندات هذا الشهر",
+    "التخزين", "آخر نشاط", "الاستيراد", "تاريخ الإنشاء", "تحكم",
+  ]);
+
+  const row = (index: number) => table.locator("tbody tr").nth(index);
+  await expect(row(0).locator("td").nth(4)).toHaveText("3");
+  await expect(row(0).locator("td").nth(5)).toHaveText("180");
+  await expect(row(0).locator("td").nth(6)).toHaveText("5 م.ب");
+  await expect(row(0).locator("td").nth(7)).toHaveText("14/08/2026");
+  await expect(row(0)).toContainText("قرب الحدّ: الفروع");
+  // الشركة بلا بايتات مقيسة: «—» لا صفر مُختلَق، وسكونها يُقال صراحةً
+  await expect(row(1).locator("td").nth(6)).toHaveText("—");
+  await expect(row(1).locator("td").nth(7)).toHaveText("لا نشاط مسجَّل");
+  await expect(row(1)).not.toContainText("قرب الحدّ");
+
+  // سطر تخزين المنصة أسفل الجدول — باسمه هو، و«غير منسوب» تبقى محجوزة لتقرير
+  // الاسترجاع الأثري (كمّية أخرى: إجمالي Cloudinary ناقص السجلّ كلّه)
+  await expect(page.getByText("تخزين مرفوع لا يخصّ شركة بعينها:")).toBeVisible();
+  await expect(page.getByText("1 م.ب", { exact: true })).toBeVisible();
+  await expect(page.getByText("غير منسوب")).toHaveCount(0);
 });
 
 /** القسم من عنوانه — للصفحة قسمان لكلٍّ جدوله، فلا تُخلط صفوفهما. */
@@ -432,6 +533,43 @@ test("super admin controls a company and its members from the platform panel", a
   await page.getByRole("button", { name: "إيقاف الحساب" }).click();
   await expect.poll(() => calls.setActive?.is_active).toBe(false);
   await expect(page.getByRole("button", { name: "تفعيل حساب sami" })).toBeVisible();
+});
+
+test("company panel reads branches, and fetches the activity feed only when it is opened", async ({ page }) => {
+  const calls = await installMocks(page, true);
+  await page.goto("/super-admin");
+
+  await page.getByRole("button", { name: "تحكم بـشركة الاختبار" }).click();
+  await expect(page.getByRole("heading", { name: /تحكم المنصة بالشركة/ })).toBeVisible();
+
+  // التخزين المستهلَك في ترويسة اللوحة — الرقم نفسه يظهر خلفها في جدول الشركات،
+  // فالتأكيد على فقرة الترويسة لا على النص وحده.
+  await expect(page.getByText(/التخزين المستهلَك/)).toContainText("5 م.ب");
+
+  const branches = page.locator('section[aria-label="فروع الشركة"]');
+  await expect(branches.getByRole("heading", { name: "الفروع (2)" })).toBeVisible();
+  await expect(branches.getByText("الفرع الرئيسي")).toBeVisible();
+  await expect(branches.getByText("MAIN")).toBeVisible();
+
+  // القسم موجود ولم تُطلب مئة الحركة مع فتح اللوحة
+  const feed = page.locator('section[aria-label="آخر حركات الشركة"]');
+  await expect(feed.getByRole("heading", { name: "آخر الحركات" })).toBeVisible();
+  expect(calls.activityHits ?? 0).toBe(0);
+
+  await feed.getByRole("button", { name: /عرض آخر 100 حركة/ }).click();
+  await expect(feed.getByText("INV-1001")).toBeVisible();
+  await expect(feed.getByText("الحدّ: 3 ← 5")).toBeVisible();
+  await expect(feed.getByText("فاتورة مبيعات INV-1001")).toBeVisible();
+  // نوع المستند يُعرَّب — لا يُطبع مفتاحه الإنجليزي في شاشة عربية
+  await expect(feed.getByText("حدّ خطة الفروع")).toBeVisible();
+  await expect.poll(() => calls.activityHits).toBe(1);
+
+  // الطيّ ثم البسط يعرضان المجلوب نفسه بلا نداء ثانٍ
+  await feed.getByRole("button", { name: /إخفاء/ }).click();
+  await expect(feed.getByText("INV-1001")).toHaveCount(0);
+  await feed.getByRole("button", { name: /عرض آخر 100 حركة/ }).click();
+  await expect(feed.getByText("INV-1001")).toBeVisible();
+  expect(calls.activityHits).toBe(1);
 });
 
 test("super admin assigns the example company and sees its label", async ({ page }) => {

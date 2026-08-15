@@ -263,7 +263,9 @@ export const DevelopmentNotesPage: React.FC = () => {
     setUploading(true);
     setError(null);
     try {
-      const urls = await cloudinaryService.uploadMultipleFiles(Array.from(files));
+      // `platform`: صورة ملاحظة تطوير أصلٌ للمنصة لا للشركة النشطة في ترويسة
+      // السوبر أدمن — بلا هذا النطاق تُحمَّل بايتاتها على شركةٍ لا شأن لها بها.
+      const urls = await cloudinaryService.uploadMultipleFiles(Array.from(files), "platform");
       setForm((current) => ({
         ...current, images: [...current.images, ...urls.map((url) => ({ url, caption: "" }))],
       }));

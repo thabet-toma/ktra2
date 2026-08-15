@@ -16,13 +16,70 @@ export interface PlatformCompanyRow {
   created_at: string;
 }
 
+/** حدٌّ بلغ استهلاكه عتبة التحذير — يصل مرتَّباً بالأقرب إلى حدّه أولاً. */
+export interface PlatformNearLimit {
+  key: string;
+  label: string;
+  usage: number;
+  limit: number;
+}
+
+/**
+ * صفّ الشركة في لوحة المنصة — أوسع من كرت الشركة: أعمدة القياس (تخزين · فروع ·
+ * مستندات · آخر نشاط) يبنيها `platform_dashboard` باستعلامات مجمَّعة، ولا يعيدها
+ * نداءُ شركةٍ واحدة. لذلك هي نوعٌ مستقلّ لا توسعةٌ لـ`PlatformCompanyRow`.
+ */
+export interface PlatformDashboardCompanyRow extends PlatformCompanyRow {
+  branch_count: number;
+  storage_bytes: number;
+  storage_asset_count: number;
+  /** فواتير **الشهر الجاري** (بيع + شراء) — نافذة الحدّ نفسها، لا إجمالاً تاريخياً. */
+  document_count: number;
+  last_login_at: string | null;
+  last_activity_at: string | null;
+  near_limit: PlatformNearLimit[];
+}
+
+export interface PlatformIdleCompany {
+  id: number;
+  name: string;
+  last_activity_at: string | null;
+}
+
+export interface PlatformStorageCompany {
+  id: number;
+  name: string;
+  storage_bytes: number;
+  storage_asset_count: number;
+}
+
+export interface PlatformDashboardKpis {
+  active_companies: number;
+  /** الشركات التي لم يُسجَّل لها أي فعل (غير العرض) منذ `days` يوماً. */
+  idle_companies: { days: number; count: number; companies: PlatformIdleCompany[] };
+  top_storage: PlatformStorageCompany[];
+  /** لكل شركة أسوأ حدودها فقط — الخادم يرسل أوّل صفوف `near_limit` مفرودةً. */
+  near_limit_companies: {
+    count: number;
+    companies: ({ id: number; name: string } & PlatformNearLimit)[];
+  };
+}
+
 export interface PlatformDashboardData {
   companies: { total: number; active: number; trial: number; suspended: number };
   users: { total: number; active: number };
   memberships: number;
   status_distribution: Record<string, number>;
   plan_distribution: Record<string, number>;
-  company_rows: PlatformCompanyRow[];
+  company_rows: PlatformDashboardCompanyRow[];
+  kpis: PlatformDashboardKpis;
+  /**
+   * `unattributed_bytes` = مجموع صفوف `tenant = NULL` (رفوعات المنصة وما لم
+   * يُنسب). **ليست** «غير المنسوب» في تقرير `backfill_tenant_assets` — ذاك
+   * إجمالي Cloudinary ناقص السجلّ كلّه. الشاشة تسمّيها باسمها كي لا يعني لفظٌ
+   * واحد رقمين.
+   */
+  storage: { ledger_total_bytes: number; unattributed_bytes: number };
 }
 
 export interface PlatformCompanyMember {
@@ -39,8 +96,30 @@ export interface PlatformCompanyMember {
   created_at: string;
 }
 
+/** فرع الشركة كما تراه لوحة المنصة — التعريف الكامل مكانه إعدادات الشركة نفسها. */
+export interface PlatformCompanyBranch {
+  id: number;
+  name: string;
+  code: string;
+}
+
 export interface PlatformCompanyDetail extends PlatformCompanyRow {
   members: PlatformCompanyMember[];
+  /** الرئيسي أولاً ثم بالاسم — الترتيب من الخادم، لا تُعاد ترتيبها هنا. */
+  branches: PlatformCompanyBranch[];
+  storage_bytes: number;
+  last_activity_at: string | null;
+}
+
+/** صفٌّ من سجل حركة الشركة — أحداث العرض مستبعدة من المصدر. */
+export interface PlatformActivityRow {
+  timestamp: string;
+  user_name: string;
+  action: string;
+  action_label: string;
+  entity_type: string;
+  entity_label: string;
+  description: string;
 }
 
 export interface PlatformCompanyPatch {
@@ -120,6 +199,13 @@ export const revokeSuperAdmin = (id: number) =>
 /** كرت الشركة في لوحة المنصة — بياناتها وأعضاؤها في نداء واحد. */
 export const getPlatformCompany = (id: number) =>
   apiGetObject<PlatformCompanyDetail>(`platform/companies/${id}/`);
+
+/**
+ * آخر مئة حركة للشركة — نداء مستقلّ عن كرت الشركة عمداً: اللوحة تفتح على ثلاثة
+ * نداءات أصلاً، وقائمةُ مئةِ صفٍّ لا يطلبها القارئ في كل فتحة تُحمَّل عند طلبها.
+ */
+export const getPlatformCompanyActivity = (id: number) =>
+  apiGetObject<{ results: PlatformActivityRow[] }>(`platform/companies/${id}/activity/`);
 
 export const updatePlatformCompany = (id: number, patch: PlatformCompanyPatch) =>
   apiPatchObject<PlatformCompanyRow>(`platform/companies/${id}/`, { ...patch });

@@ -254,6 +254,61 @@ class DevelopmentNoteComment(models.Model):
         return self.body[:80]
 
 
+class TenantAsset(models.Model):
+    """سجلّ البايتات: صفٌّ لكل ملف مرفوع عبر نقطة الاختناق، بمالكه وحجمه.
+
+    استهلاك التخزين لكل شركة لم يكن موجوداً في أي مكان: الرفع يذهب إلى Cloudinary
+    ويُحفظ **الرابط** فقط، متناثراً في عشرات الأعمدة، بلا شركة وبلا حجم. وCloudinary
+    نفسه لا يعطي حجم مجلّد إلا بسرد موارده وجمعها تحت سقف معدّل — فالقياس يُكتب هنا
+    **لحظة الرفع** من ردّ Cloudinary ذاته (يحمل `bytes` و`public_id`) بلا نداء
+    إضافي واحد، ويُقرأ لاحقاً بـ`SUM(bytes) GROUP BY tenant` — استعلامٌ واحد مفهرس.
+
+    `tenant = NULL` ليست ثغرة بل حالة صريحة: أصول المنصة نفسها (صور ملاحظات
+    التطوير) ومستندات مكتب المحاسبة لا تتبع شركةً بعينها، فتظهر في «غير منسوب»
+    بدل أن تُحمَّل ظلماً على شركةٍ لا تراها ولا تملك حذفها.
+
+    `public_id` فريد لأنه هوية الأصل عند Cloudinary: الحذف من التطبيق يمحو الصفّ
+    به، وأي استرجاع أثري (backfill) يتعرّف على ما سُجّل من قبل فلا يزدوج.
+    """
+
+    SOURCES = [('upload', 'رفع'), ('backfill', 'استرجاع أثري')]
+
+    id = models.AutoField(primary_key=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='assets',
+        db_column='TenantID',
+    )
+    # 191 = سقف فهرس utf8mb4 في MySQL؛ المعرّفات الحقيقية ٤٠–٨٠ محرفاً.
+    public_id = models.CharField(max_length=191, unique=True)
+    bytes = models.BigIntegerField(default=0)
+    resource_type = models.CharField(max_length=20, blank=True, default='')
+    folder = models.CharField(max_length=200, blank=True, default='')
+    source = models.CharField(max_length=20, choices=SOURCES, default='upload')
+    uploaded_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='uploaded_assets',
+        db_column='UploadedBy_UserID',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tenant_assets'
+        managed = True
+        indexes = [
+            models.Index(fields=['tenant', '-created_at'], name='asset_tenant_created_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id or 'platform'}:{self.public_id} ({self.bytes}B)"
+
+
 class ActivityLogPartner(models.Model):
     """يربط حدث النشاط الواحد بكل الجهات المتأثرة دون نسخ الحدث."""
 

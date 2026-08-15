@@ -49,6 +49,11 @@ export const ENTITY_LABELS: Record<string, string> = {
   partner: "جهة",
   product: "منتج",
   session: "جلسة",
+  // أفعال سوبر أدمن على الشركة نفسها — تظهر في «آخر الحركات» بلوحة المنصة،
+  // وبلا اسمٍ عربي هنا كانت تُطبع بمفتاحها الإنجليزي داخل شاشة عربية.
+  tenant: "الشركة",
+  tenant_module: "وحدة مرخَّصة",
+  tenant_limit: "حدّ خطة",
 };
 
 export function entityLabel(entityType: string): string {

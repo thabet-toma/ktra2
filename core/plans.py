@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from django.core.cache import cache
+from django.db.models import Count
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -30,21 +31,46 @@ PERIOD_LABELS = {
 
 _CACHE_TTL_SECONDS = 300
 
+# «قريب من الحدّ» = بلغ الاستهلاك أربعة أخماس الحدّ الفعّال. تحذيرٌ مبكّر يكفي
+# لترقية خطة أو رفع حدّ قبل أن يُمنع المستخدم من إنشاء المستند التالي.
+NEAR_LIMIT_RATIO = 0.8
+
 
 @dataclass(frozen=True)
 class LimitSpec:
-    """تعريف حدّ واحد: مفتاحه، وصفه للمستخدم، ومن أين يُعدّ استهلاكه."""
+    """تعريف حدّ واحد: مفتاحه، وصفه للمستخدم، ومن أين يُعدّ استهلاكه.
+
+    لكل حدّ عدّادان متطابقا القاعدة: `count` لشركة واحدة، و`bulk` توأمه المجمَّع
+    لعدّة شركات في استعلام واحد (`values('tenant_id').annotate(Count)`). لوحة
+    المنصة تقرأ الثاني: العدّ الفردي في حلقة على الشركات هو مصدر انفجار
+    الاستعلامات، لا الحلّ.
+    """
 
     key: str
     label: str
     unit: str
     period: str
     count: Callable[[int, object], int]
+    bulk: Callable[[object, object], dict]
 
 
 def _month_start():
     """أول يوم في الشهر الحالي بتوقيت الخادم — بداية نافذة العدّ الشهري."""
     return timezone.localdate().replace(day=1)
+
+
+def _grouped_count(queryset, tenant_ids) -> dict:
+    """{tenant_id: عدد} في استعلام واحد — الشركة بلا صفوف تغيب عن القاموس.
+
+    `order_by()` ليس تجميلاً: ترتيب `Meta` الافتراضي يدخل `GROUP BY` فيشظّي
+    المجموعات ويعيد صفّاً لكل قيمة ترتيب بدل صفّ لكل شركة.
+    """
+    if tenant_ids is not None:
+        queryset = queryset.filter(tenant_id__in=tenant_ids)
+    return {
+        row["tenant_id"]: row["n"]
+        for row in queryset.values("tenant_id").order_by().annotate(n=Count("pk"))
+    }
 
 
 def _count_sales_invoices(tenant_id, since):
@@ -55,12 +81,28 @@ def _count_sales_invoices(tenant_id, since):
     ).count()
 
 
+def _bulk_sales_invoices(tenant_ids, since):
+    from sales.models import SalesInvoice
+
+    return _grouped_count(
+        SalesInvoice.objects.filter(created_at__date__gte=since), tenant_ids,
+    )
+
+
 def _count_purchase_invoices(tenant_id, since):
     from logistics.models import PurchaseInvoice
 
     return PurchaseInvoice.objects.filter(
         tenant_id=tenant_id, created_at__date__gte=since,
     ).count()
+
+
+def _bulk_purchase_invoices(tenant_ids, since):
+    from logistics.models import PurchaseInvoice
+
+    return _grouped_count(
+        PurchaseInvoice.objects.filter(created_at__date__gte=since), tenant_ids,
+    )
 
 
 def _count_all_invoices(tenant_id, since):
@@ -70,10 +112,23 @@ def _count_all_invoices(tenant_id, since):
     )
 
 
+def _bulk_all_invoices(tenant_ids, since):
+    merged = dict(_bulk_sales_invoices(tenant_ids, since))
+    for tenant_id, count in _bulk_purchase_invoices(tenant_ids, since).items():
+        merged[tenant_id] = merged.get(tenant_id, 0) + count
+    return merged
+
+
 def _count_warehouses(tenant_id, since):
     from inventory.models import Warehouse
 
     return Warehouse.objects.filter(tenant_id=tenant_id).count()
+
+
+def _bulk_warehouses(tenant_ids, since):
+    from inventory.models import Warehouse
+
+    return _grouped_count(Warehouse.objects.all(), tenant_ids)
 
 
 def _count_members(tenant_id, since):
@@ -82,10 +137,22 @@ def _count_members(tenant_id, since):
     return UserCompanyMembership.objects.filter(tenant_id=tenant_id).count()
 
 
+def _bulk_members(tenant_ids, since):
+    from tenants.models import UserCompanyMembership
+
+    return _grouped_count(UserCompanyMembership.objects.all(), tenant_ids)
+
+
 def _count_branches(tenant_id, since):
     from tenants.models import Branch
 
     return Branch.objects.filter(tenant_id=tenant_id).count()
+
+
+def _bulk_branches(tenant_ids, since):
+    from tenants.models import Branch
+
+    return _grouped_count(Branch.objects.all(), tenant_ids)
 
 
 def _count_products(tenant_id, since):
@@ -94,10 +161,22 @@ def _count_products(tenant_id, since):
     return Product.objects.filter(tenant_id=tenant_id).count()
 
 
+def _bulk_products(tenant_ids, since):
+    from inventory.models import Product
+
+    return _grouped_count(Product.objects.all(), tenant_ids)
+
+
 def _count_partners(tenant_id, since):
     from partners.models import Partner
 
     return Partner.objects.filter(tenant_id=tenant_id).count()
+
+
+def _bulk_partners(tenant_ids, since):
+    from partners.models import Partner
+
+    return _grouped_count(Partner.objects.all(), tenant_ids)
 
 
 LIMITS = {
@@ -109,6 +188,7 @@ LIMITS = {
             unit="فاتورة",
             period=PERIOD_MONTH,
             count=_count_sales_invoices,
+            bulk=_bulk_sales_invoices,
         ),
         LimitSpec(
             key="purchase.invoices",
@@ -116,6 +196,7 @@ LIMITS = {
             unit="فاتورة",
             period=PERIOD_MONTH,
             count=_count_purchase_invoices,
+            bulk=_bulk_purchase_invoices,
         ),
         LimitSpec(
             key="documents.invoices",
@@ -123,6 +204,7 @@ LIMITS = {
             unit="فاتورة",
             period=PERIOD_MONTH,
             count=_count_all_invoices,
+            bulk=_bulk_all_invoices,
         ),
         LimitSpec(
             key="inventory.warehouses",
@@ -130,6 +212,7 @@ LIMITS = {
             unit="مستودع",
             period=PERIOD_TOTAL,
             count=_count_warehouses,
+            bulk=_bulk_warehouses,
         ),
         LimitSpec(
             key="company.members",
@@ -137,6 +220,7 @@ LIMITS = {
             unit="عضو",
             period=PERIOD_TOTAL,
             count=_count_members,
+            bulk=_bulk_members,
         ),
         LimitSpec(
             key="company.branches",
@@ -144,6 +228,7 @@ LIMITS = {
             unit="فرع",
             period=PERIOD_TOTAL,
             count=_count_branches,
+            bulk=_bulk_branches,
         ),
         LimitSpec(
             key="inventory.products",
@@ -151,6 +236,7 @@ LIMITS = {
             unit="صنف",
             period=PERIOD_TOTAL,
             count=_count_products,
+            bulk=_bulk_products,
         ),
         LimitSpec(
             key="partners.records",
@@ -158,6 +244,7 @@ LIMITS = {
             unit="طرف",
             period=PERIOD_TOTAL,
             count=_count_partners,
+            bulk=_bulk_partners,
         ),
     )
 }
@@ -290,6 +377,72 @@ def limit_rows(tenant) -> list[dict]:
             "effective": effective,
             "usage": current_usage(tenant, key),
         })
+    return rows
+
+
+def bulk_usage(keys=None, tenant_ids=None) -> dict:
+    """{key: {tenant_id: استهلاك}} — استعلامٌ لكل مصدر عدّ، لا استعلام لكل شركة.
+
+    توأم `current_usage` للوحة المنصة: قراءة صفٍّ لخمسين شركة عبر `current_usage`
+    تعني خمسين ضرب عدد الحدود من الاستعلامات. النافذة الشهرية هي نفسها هنا
+    (`created_at`)، والشركة بلا صفوف تغيب عن القاموس فاستهلاكها صفر.
+    """
+    selected = tuple(LIMITS) if keys is None else tuple(k for k in keys if k in LIMITS)
+    month_start = _month_start()
+    usage = {}
+    for key in selected:
+        spec = LIMITS[key]
+        since = month_start if spec.period == PERIOD_MONTH else None
+        usage[key] = spec.bulk(tenant_ids, since)
+    return usage
+
+
+def bulk_overrides(tenant_ids=None) -> dict:
+    """{tenant_id: {key: max_value}} في استعلام واحد — بلا كاش ولا `_plan_of`.
+
+    `tenant_overrides` مُخزَّن مؤقتاً لشركةٍ واحدة تُقرأ مراراً؛ اللوحة تقرأ كل
+    الشركات مرةً واحدة، فالكاش هناك يصير خمسين قراءةً بلا فائدة. وجود المفتاح هو
+    الإشارة: `max_value = None` تجاوزٌ صريح بمعنى **بلا حدّ**، لا «غير مضبوط».
+    """
+    from core.models import TenantLimit
+
+    rows = TenantLimit.objects.all()
+    if tenant_ids is not None:
+        rows = rows.filter(tenant_id__in=tenant_ids)
+    overrides: dict = {}
+    for tenant_id, key, max_value in rows.values_list(
+        "tenant_id", "limit_key", "max_value",
+    ):
+        overrides.setdefault(tenant_id, {})[key] = max_value
+    return overrides
+
+
+def near_limit_rows(plan: str, overrides: dict, usage: dict) -> list[dict]:
+    """حدود هذه الشركة التي بلغ استهلاكها `NEAR_LIMIT_RATIO` — الأقربُ أولاً.
+
+    دالة حسابٍ خالصة: تأخذ ما قرأه `bulk_usage`/`bulk_overrides` ولا تلمس قاعدة
+    البيانات، فتصلح لخمسين شركة بلا استعلامٍ واحد. «بلا حدّ» (`None`) لا يقترب
+    أبداً — لا نسبة له أصلاً.
+    """
+    rows = []
+    for key, spec in LIMITS.items():
+        limit = overrides[key] if key in overrides else plan_default(plan, key)
+        if limit is None:
+            continue
+        used = usage.get(key, 0)
+        if used >= limit * NEAR_LIMIT_RATIO:
+            rows.append({
+                "key": key,
+                "label": spec.label,
+                "usage": used,
+                "limit": limit,
+            })
+    # الأقرب إلى حدّه أولاً كي يقرأ من يعرض الصفّ أسوأ حدٍّ من أول عنصر.
+    # حدّ صفر مبلوغٌ بطبيعته — نسبته 1.0 لا قسمةٌ على صفر.
+    rows.sort(
+        key=lambda row: (row["usage"] / row["limit"]) if row["limit"] else 1.0,
+        reverse=True,
+    )
     return rows
 
 

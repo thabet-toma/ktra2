@@ -1,16 +1,24 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Loader2, RotateCcw, Save, ShieldOff, ShieldCheck, Trash2, UserPlus, X } from "lucide-react";
+import {
+  ChevronDown, ChevronLeft, Loader2, RotateCcw, Save, ShieldOff, ShieldCheck, Trash2,
+  UserPlus, X,
+} from "lucide-react";
 
 import {
-  addPlatformCompanyMember, getPlatformCompany, listCompanyLimits, listCompanyModules,
-  removePlatformCompanyMember, setCompanyLimit, setCompanyModule, setPlatformUserActive,
-  updatePlatformCompany, updatePlatformCompanyMember,
-  type PlatformCompanyDetail, type PlatformCompanyMember, type PlatformCompanyPatch,
-  type PlatformLimitRow, type PlatformModuleRow,
+  addPlatformCompanyMember, getPlatformCompany, getPlatformCompanyActivity, listCompanyLimits,
+  listCompanyModules, removePlatformCompanyMember, setCompanyLimit, setCompanyModule,
+  setPlatformUserActive, updatePlatformCompany, updatePlatformCompanyMember,
+  type PlatformActivityRow, type PlatformCompanyDetail, type PlatformCompanyMember,
+  type PlatformCompanyPatch, type PlatformLimitRow, type PlatformModuleRow,
 } from "../../services/platformAdminApi";
 import { ROLE_LABELS } from "../layout/CompanyManagementModal";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
+import { formatBytes } from "../../utils/formatBytes";
+import { formatDateValue } from "../../utils/formatDate";
+// شكل الحركة الواحدة (شارة الإجراء · اسم النوع · صيغة الوقت) مصدره واحد مع سجل
+// المستند والصفحة العامة — لا صيغة ثالثة تخصّ لوحة المنصة.
+import { actionMeta, entityLabel, formatActivityTime } from "../activity/activityMeta";
 
 /** لوحة تحكم الشركة — سوبر أدمن المنصة فقط.
  * كانت صلاحيات المنصة موزّعة على «إدارة الشركة» (نافذة المدير) فلا يطال السوبر
@@ -56,6 +64,13 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
   const [limits, setLimits] = useState<PlatformLimitRow[]>([]);
   const [limitDraft, setLimitDraft] = useState<Record<string, string>>({});
   const [limitBusy, setLimitBusy] = useState<string | null>(null);
+  // «آخر الحركات» — تُجلب عند أول فتح للقسم لا مع فتح اللوحة: اللوحة تفتح على ثلاثة
+  // نداءات أصلاً، ومئةُ صفٍّ لا يطلبها كل قارئ حِملٌ لا يدفعه من جاء يبدّل خطة.
+  // `feed === null` تعني «لم تُجلب بعد» وتميّزها عن «جُلبت فكانت فارغة».
+  const [feedOpen, setFeedOpen] = useState(false);
+  const [feed, setFeed] = useState<PlatformActivityRow[] | null>(null);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedError, setFeedError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,6 +100,33 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
   }, [companyId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /** شركة أخرى = سجلٌّ آخر: يُطوى ويُفرَّغ فلا تُقرأ حركات الشركة السابقة تحت اسم الجديدة. */
+  useEffect(() => {
+    setFeedOpen(false);
+    setFeed(null);
+    setFeedError(null);
+  }, [companyId]);
+
+  const loadFeed = useCallback(async () => {
+    setFeedLoading(true);
+    setFeedError(null);
+    try {
+      const data = await getPlatformCompanyActivity(companyId);
+      setFeed(data.results ?? []);
+    } catch (cause) {
+      setFeedError(cause instanceof Error ? cause.message : "تعذّر تحميل آخر الحركات");
+    } finally {
+      setFeedLoading(false);
+    }
+  }, [companyId]);
+
+  /** أول فتح يجلب، وما بعده طيٌّ وبسطٌ بلا نداء — والإخفاق يُعاد منه بزرّ صريح. */
+  const toggleFeed = () => {
+    const next = !feedOpen;
+    setFeedOpen(next);
+    if (next && feed === null && !feedLoading) void loadFeed();
+  };
 
   const run = async (fn: () => Promise<void>, okMsg?: string) => {
     setError(null);
@@ -241,6 +283,14 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
             <p className="text-xs aseel-text-soft">
               صلاحيات سوبر أدمن — تسري على هذه الشركة دون الحاجة لعضوية فيها
             </p>
+            {detail && (
+              <p className="mt-1 text-[11px] aseel-text-soft">
+                التخزين المستهلَك:{" "}
+                <span className="font-bold text-[var(--color-text)]">{formatBytes(detail.storage_bytes)}</span>
+                {" · "}آخر نشاط:{" "}
+                {detail.last_activity_at ? formatDateValue(detail.last_activity_at) : "لا نشاط مسجَّل"}
+              </p>
+            )}
           </div>
           <button type="button" onClick={onClose} className="aseel-iconbtn" aria-label="إغلاق">
             <X className="h-4 w-4" />
@@ -574,6 +624,115 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                 </div>
                 <p className="mt-2 text-[11px] aseel-text-soft">
                   «إيقاف الحساب» يمنع الدخول إلى المنصة كلها، و«الإخراج» يزيل العضوية من هذه الشركة فقط. لا يمكن إخراج أو تخفيض آخر مدير قبل تعيين بديل.
+                </p>
+              </section>
+
+              <section aria-label="فروع الشركة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
+                <h3 className="mb-3 text-sm font-bold text-[var(--color-text)]">
+                  الفروع ({detail.branches.length})
+                </h3>
+                {detail.branches.length === 0 ? (
+                  <p className="text-xs aseel-text-soft">لا فروع</p>
+                ) : (
+                  <ul className="flex flex-wrap gap-2">
+                    {detail.branches.map((branch) => (
+                      <li
+                        key={branch.id}
+                        className="rounded border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)]"
+                      >
+                        <span className="font-semibold">{branch.name}</span>
+                        {branch.code && <span className="text-[11px] aseel-text-soft"> · {branch.code}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-2 text-[11px] aseel-text-soft">
+                  الفروع تُنشأ وتُعدَّل من داخل الشركة نفسها — تُقرأ هنا فقط، وعددها يحدّه بند «الفروع» في «حدود الاستخدام» أعلاه.
+                </p>
+              </section>
+
+              <section aria-label="آخر حركات الشركة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
+                <button
+                  type="button"
+                  onClick={toggleFeed}
+                  aria-expanded={feedOpen}
+                  className="flex w-full items-center justify-between gap-2 text-right"
+                >
+                  <h3 className="text-sm font-bold text-[var(--color-text)]">آخر الحركات</h3>
+                  <span className="flex items-center gap-1 text-[11px] aseel-text-soft">
+                    {feedOpen ? "إخفاء" : "عرض آخر 100 حركة"}
+                    {feedOpen
+                      ? <ChevronDown className="h-4 w-4" />
+                      : <ChevronLeft className="h-4 w-4" />}
+                  </span>
+                </button>
+
+                {feedOpen && (
+                  <div className="mt-3">
+                    {feedLoading ? (
+                      <div className="flex items-center justify-center gap-2 py-6 text-sm aseel-text-soft" role="status">
+                        <Loader2 className="h-4 w-4 animate-spin" /> جارٍ تحميل آخر الحركات…
+                      </div>
+                    ) : feedError ? (
+                      <div
+                        className="flex flex-wrap items-center justify-between gap-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+                        role="alert"
+                      >
+                        <span>{feedError}</span>
+                        <button type="button" onClick={() => void loadFeed()} className="aseel-btn">
+                          <RotateCcw className="h-4 w-4" /> إعادة المحاولة
+                        </button>
+                      </div>
+                    ) : !feed || feed.length === 0 ? (
+                      <p className="py-6 text-center text-sm aseel-text-soft">
+                        لا حركات مسجَّلة لهذه الشركة — أحداث فتح المستندات لا تُحتسب.
+                      </p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[640px] text-sm">
+                          <thead className="bg-[var(--color-surface-2)] aseel-text-soft">
+                            <tr>
+                              <th className="px-3 py-2 text-right w-40">التاريخ</th>
+                              <th className="px-3 py-2 text-right w-40">المستخدم</th>
+                              <th className="px-3 py-2 text-right w-28">الإجراء</th>
+                              <th className="px-3 py-2 text-right">المستند</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {feed.map((row, index) => {
+                              const meta = actionMeta(row.action);
+                              return (
+                                <tr key={`${row.timestamp}-${index}`} className="border-t border-[var(--color-border)]">
+                                  <td className="px-3 py-2 whitespace-nowrap aseel-text-soft">
+                                    {formatActivityTime(row.timestamp)}
+                                  </td>
+                                  <td className="px-3 py-2">{row.user_name}</td>
+                                  <td className="px-3 py-2">
+                                    <span className={`rounded-full px-2 py-0.5 text-xs ${meta.badge}`}>
+                                      {row.action_label || meta.label}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <div className="text-[var(--color-text)]">
+                                      {entityLabel(row.entity_type)}
+                                      {row.entity_label ? ` ${row.entity_label}` : ""}
+                                    </div>
+                                    {row.description && (
+                                      <div className="text-[11px] aseel-text-soft">{row.description}</div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <p className="mt-2 text-[11px] aseel-text-soft">
+                  آخر مئة حركة على الشركة — تشمل ما فعله سوبر أدمن بها (الخطة، الحالة، الحدود، الوحدات). السجل الكامل مكانه صفحة «سجل النشاط» داخل الشركة.
                 </p>
               </section>
             </>

@@ -23,14 +23,15 @@ from core import (
     permissions_api, platform_admin_api, reports_api, whatsapp_views,
 )
 from core.activity_views import ActivityLogViewSet
-from core.platform_admin_api import DevelopmentNoteViewSet
+from core.platform_admin_api import DevelopmentNoteViewSet, PlatformRouter
 from inventory import agent_api as inventory_agent_api
 from partners import agent_api as partners_agent_api
 from sales import agent_api as sales_agent_api
 
 _activity_router = DefaultRouter()
 _activity_router.register(r'', ActivityLogViewSet, basename='activity')
-_platform_router = DefaultRouter()
+# راوتر المنصة بجذرٍ محروس — لا نقطة تحت `/api/platform/` تُقرأ بغير سوبر أدمن.
+_platform_router = PlatformRouter()
 _platform_router.register(
     r'development-notes', DevelopmentNoteViewSet, basename='platform-development-notes',
 )
@@ -76,6 +77,7 @@ urlpatterns = [
     path('api/platform/companies/<int:pk>/', platform_admin_api.platform_company_detail),
     path('api/platform/companies/<int:pk>/modules/', platform_admin_api.platform_company_modules),
     path('api/platform/companies/<int:pk>/limits/', platform_admin_api.platform_company_limits),
+    path('api/platform/companies/<int:pk>/activity/', platform_admin_api.platform_company_activity),
     path('api/platform/accountant-workspace/', platform_admin_api.platform_accountant_workspace),
     path('api/platform/accountants/pending/', platform_admin_api.platform_accountants_pending),
     path('api/platform/accountants/<int:profile_id>/verify/', platform_admin_api.platform_accountant_verify),

@@ -233,7 +233,13 @@ class PracticeDocumentUploadView(PracticeView):
         # المتزامن، فلا يُدفع ثمنه لزبون ليس زبونك.
         client = get_practice_client(accountant=self.accountant, client_id=data.get("client_id"))
         try:
-            url = upload_media_file(upload, folder="ktra_practice_documents")
+            # بلا `tenant`: مستند المكتب يملكه المحاسب لا زبونه — وزبون المكتب
+            # قد لا يكون شركةً على المنصة أصلاً. نسبُ بايتاته لشركة الزبون
+            # تحمّلها تخزيناً لا تراه ولا تملك حذفه، فيُسجَّل باسم رافعه ويظهر
+            # ضمن «غير منسوب» بمجلّده `ktra_practice_documents`.
+            url = upload_media_file(
+                upload, folder="ktra_practice_documents", uploaded_by=request.user,
+            )
         except MediaUploadError as exc:
             return _error("upload_failed", exc.detail, exc.status_code)
         document = create_practice_document(

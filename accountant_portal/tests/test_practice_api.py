@@ -23,6 +23,7 @@ from accountant_portal.models import (
     PracticeProgram,
     PracticeTask,
 )
+from core.models import TenantAsset
 
 BASE = "/api/accountant/practice"
 
@@ -307,6 +308,29 @@ class PracticeDocumentUploadApiTest(PracticeApiBase):
         self.assertEqual(mock_upload.call_args.kwargs.get("resource_type"), "raw")
         listed = self.api_a.get(f"{BASE}/documents/?client_id={self.client_id}")
         self.assertEqual(listed.json()["count"], 1)
+
+    @patch("cloudinary.uploader.upload")
+    def test_an_office_document_is_recorded_under_its_uploader_not_a_company(self, mock_upload):
+        mock_upload.return_value = {
+            "secure_url": "https://res.cloudinary.com/x/raw/upload/ktra_practice_documents/s.pdf",
+            "public_id": "ktra_practice_documents/s.pdf",
+            "bytes": 4096,
+            "resource_type": "raw",
+        }
+        upload = SimpleUploadedFile("s.pdf", b"%PDF-1.4 fake", content_type="application/pdf")
+
+        self.api_a.post(
+            f"{BASE}/documents/upload/",
+            {"file": upload, "client_id": self.client_id},
+            format="multipart",
+        )
+
+        asset = TenantAsset.objects.get(public_id="ktra_practice_documents/s.pdf")
+        # مستند المكتب يملكه المحاسب: بايتاته لا تُحمَّل على شركة زبونه
+        self.assertIsNone(asset.tenant_id)
+        self.assertEqual(asset.uploaded_by_id, self.office_a.pk)
+        self.assertEqual(asset.bytes, 4096)
+        self.assertEqual(asset.folder, "ktra_practice_documents")
 
     @patch("cloudinary.uploader.upload")
     def test_the_file_name_stands_in_when_no_name_is_sent(self, mock_upload):
