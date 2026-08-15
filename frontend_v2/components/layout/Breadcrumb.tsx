@@ -16,7 +16,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'employee-notes': 'ملاحظات الموظفين',
   'points-history': 'سجل نقاطي',
   'sales-orders': 'عروض وطلبيات البيع',
-  'personal-expenses': 'مصاريفي الشخصية',
+  'my-account': 'حسابي',
   payroll: 'الرواتب',
   'company-accountant-engagements': 'واجهة المحاسب القانوني',
   'sensitive-devices': 'تسجيل وتتبع الأجهزة الحساسة',

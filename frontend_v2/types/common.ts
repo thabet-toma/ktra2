@@ -97,7 +97,7 @@ export type AppView =
     | "import-flow"
     | "activity-log"
     | "permissions"
-    | "personal-expenses"
+    | "my-account"
     | "payroll"
     | "company-accountant-engagements"
     | "sensitive-devices"

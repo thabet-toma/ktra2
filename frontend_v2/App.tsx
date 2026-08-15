@@ -151,8 +151,9 @@ const PurchaseSettingsPage = lazyPage(() => import("./components/procurement/Pur
 const GoodsReceiptsPage = lazyPage(() => import("./components/procurement/receipts/GoodsReceiptsPage"));
 const DeliveryNotesPage = lazyPage(() => import("./components/sales/DeliveryNotesPage"));
 const LocalShippingPage = lazyPage(() => import("./components/logistics/LocalShippingPage"));
-// مصاريف شخصية — شاشة خاصة بالمستخدم، مفتوحة للجميع (العزل خادمي بالمستخدم).
-const PersonalExpensesPage = lazyPage(() => import("./components/personal/PersonalExpensesPage"));
+// «حسابي» — صفحة المستخدم نفسه (وفيها دفتر مصاريفه الشخصي)، مفتوحة للجميع:
+// العزل خادميّ بالمستخدم لا بالشركة، فلا صلاحية شركة تحرسها ولا تُدرَج في قوائمها.
+const MyAccountPage = lazyPage(() => import("./components/personal/MyAccountPage"));
 // الرواتب — موظفون وساعات وغيابات وكشوف، مرتبطة بشجرة الحسابات.
 const PayrollPage = lazyPage(() => import("./components/hr/PayrollPage"));
 const AccountantSignupPage = lazyPage(() => import("./components/accountant/AccountantSignupPage"));
@@ -204,7 +205,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "employee-notes": "/employee-notes",
   "points-management": "/points-management",
   "points-history": "/points-history",
-  "personal-expenses": "/personal-expenses",
+  "my-account": "/my-account",
   payroll: "/payroll",
   "company-accountant-engagements": "/accountant/company/engagements",
   "sensitive-devices": "/sensitive-devices",
@@ -591,6 +592,12 @@ const App: React.FC = () => {
     }
 
     if (!currentUser?.isApproved) return;
+    // الرابط القديم لدفتر المصاريف الشخصي — صار قسماً داخل «حسابي». يبقى عاملاً
+    // كي لا تسقط إشارةٌ محفوظة في متصفّح المستخدم على صفحةٍ لا وجود لها.
+    if (path === "/personal-expenses") {
+      navigate("/my-account", { replace: true });
+      return;
+    }
     const params = new URLSearchParams(location.search);
     const idLegacy = params.get("id");
     const viewParam = params.get("view") as AppView | null;
@@ -1538,9 +1545,9 @@ const App: React.FC = () => {
       case "points-history":
         return <PointsHistoryPage user={currentUser} />;
 
-      // مصاريف شخصية — بلا صلاحية في الخريطة: لكل مستخدم دفتره وحده.
-      case "personal-expenses":
-        return <PersonalExpensesPage />;
+      // «حسابي» — بلا صلاحية في الخريطة: لكل مستخدم صفحته ودفتره وحده.
+      case "my-account":
+        return <MyAccountPage user={currentUser!} onNavigate={setViewAndSyncPath} />;
 
       case "payroll":
         if (!canView(appView)) {

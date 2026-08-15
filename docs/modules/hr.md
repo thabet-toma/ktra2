@@ -118,6 +118,9 @@ def unpost_payroll_payment(payment: PayrollPayment, *, user=None) -> dict:  # ي
 - **الكتابة لا تقبل موظف شركة أخرى** حتى لو مرّ المعرّف في الجسم (`hr/serializers.py:214-228`).
 - **المصاريف الشخصية معزولة بالمستخدم لا بالشركة**، ولا تُنتج قيداً، ومدير الشركة ليس استثناءً
   (`hr/views.py:160-168`، `hr/models.py:81-92`).
+- **شاشتها تسكن «حسابي» لا قوائم الشركة** (`frontend_v2/components/personal/MyAccountPage.tsx`،
+  مسار `/my-account`، مدخلها بطاقة المستخدم أسفل الشريط الجانبي). إعادة بندها إلى قائمة
+  الشركة تُوهم أنها مصروف شركة — وهي ليست كذلك لا بياناً ولا محاسبةً.
 - **`PersonalExpenseCategory.key` خادمي** — يُولَّد بـ`next_key` ولا يُعدَّل من العميل
   (`hr/views.py`، اختبار `test_key_is_server_owned_and_cannot_be_rewritten`).
 - **المحاسب القانوني الخارجي محجوب عن `/api/hr/`** عدا `/api/hr/auth/`

@@ -15,7 +15,7 @@ import {
   Calculator, BookMarked, Scale, BookOpen, Banknote,
   CalendarDays, CalendarX, ArrowLeftRight, Boxes, BarChart3, Building2,
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
-  ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck, Wallet,
+  ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck,
   Gauge, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
@@ -440,15 +440,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             {showText && <span className="mr-3 text-right flex-1">صالة الصور</span>}
           </button>
 
-          {/* مصاريف شخصية — دفتر جيب كل مستخدم، بلا صلاحية (يراه صاحبه فقط) */}
-          <button
-            onClick={() => { setView("personal-expenses"); if (isMobile) setIsMobileMenuOpen(false); }}
-            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("personal-expenses") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
-            title="مصاريفي الشخصية"
-          >
-            <Wallet className="h-5 w-5 flex-shrink-0" />
-            {showText && <span className="mr-3 text-right flex-1">مصاريفي الشخصية</span>}
-          </button>
+          {/* THA-108: «مصاريفي الشخصية» لم تعد بنداً هنا — دفتر الجيب ليس شاشة
+              شركة، وموضعه بين «صناديق الكاش» و«فواتير الشراء» كان يوحي بأنه
+              مصروف شركة. صار داخل «حسابي» (بطاقة المستخدم أسفل القائمة). */}
 
           {/* T-EXTACCT: الشركة التجارية لها تبويب واحد لا أكثر — مَن المحاسب
               الماسك ملفنا، وماذا طلب، وما الصلاحيات التي منحناه. لا تصير الشركة
@@ -614,19 +608,31 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             )}
           </button>
           )}
-          <div className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center' : ''} p-2 rounded-xl`}>
+          {/* THA-108: بطاقة المستخدم هي مدخل «حسابي» — ما يخصّ الشخص يُدخَل من
+              اسمه لا من قائمة الشركة، وهو موضعه في المنتجات المحترفة (Odoo:
+              My Profile خلف صورة المستخدم · Zoho Books: حساب المستخدم منفصل عن
+              إعدادات المنظّمة). **خارج شرط الوضع السهل** فيبقى دفتر المستخدم
+              الشخصي في متناوله في الوضعين. */}
+          <button
+            type="button"
+            onClick={() => { setView("my-account"); if (isMobile) setIsMobileMenuOpen(false); }}
+            className={`flex items-center w-full ${isCollapsed && !isMobile ? 'justify-center' : ''} p-2 rounded-xl transition-all ${isViewActive("my-account") ? "bg-[var(--color-surface-3)] ring-1 ring-[var(--color-primary)]" : "hover:bg-[var(--color-surface-3)]"}`}
+            title="حسابي — صفحتك الشخصية ومصاريفك الخاصة"
+            aria-current={isViewActive("my-account") ? "page" : undefined}
+          >
             <div className="w-10 h-10 rounded-full bg-[var(--color-primary)] flex items-center justify-center text-[var(--color-primary-foreground)] font-bold flex-shrink-0 shadow-sm">
               {user.name?.charAt(0)}
             </div>
             {showText && (
-              <div className="mr-3 overflow-hidden">
+              <div className="mr-3 overflow-hidden text-right">
                 <p className="text-sm font-bold text-[var(--color-text)] truncate">{user.name}</p>
                 <p className="text-[10px] text-[var(--color-primary)] font-medium tracking-wider">
                   {user.isSuperAdmin ? "سوبر أدمن المنصة" : user.role}
                 </p>
+                <p className="text-[10px] text-[var(--color-text-muted)]">حسابي ومصاريفي الشخصية</p>
               </div>
             )}
-          </div>
+          </button>
         </div>
       </div>
     );
