@@ -26,6 +26,7 @@ import {
   getSupplierQuotation,
 } from "../../services/procurementDocumentsApi";
 import { quotationToDraftDeal } from "../../utils/quotationToDraftDeal";
+import { elideDocumentNumber } from "../../utils/documentNumberDisplay";
 import { ConvertTargetDialog, type ConvertTarget } from "../sales/ConvertTargetDialog";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { useToast } from "../../contexts/ToastContext";
@@ -341,12 +342,19 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
           (file.type || "").toLowerCase().startsWith("image/")
           || /\.(png|jpe?g|webp|gif)(?:\?.*)?$/i.test(file.url || ""),
         );
+        const number = o.offerNumber || o.id.slice(0, 8);
         return (
           <div className="flex items-center gap-2">
+            {/* المربّع نفسه هو الحاوية (`h-9 w-9 overflow-hidden`) والصورة تملأه
+                بـ`h-full w-full object-cover`: صورة عمودية أو أعرض من مربّعها
+                تُقصّ ولا تُترك بهامش. الخلفية المحايدة للصور الشفافة — بلا
+                خلفية يظهر تناوب ألوان الصفوف من خلف الصورة. */}
             {firstImage ? (
-              <button type="button" className="shrink-0" title={`عرض «${firstImage.name || "الصورة"}»`}
+              <button type="button"
+                className="block h-9 w-9 shrink-0 overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+                title={`عرض «${firstImage.name || "الصورة"}»`}
                 onClick={(e) => { e.stopPropagation(); setPreviewFile(firstImage); }}>
-                <img src={firstImage.url} alt="" className="h-9 w-9 rounded border border-[var(--color-border)] object-cover" />
+                <img src={firstImage.url} alt="" className="h-full w-full object-cover" />
               </button>
             ) : (
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-dashed border-[var(--color-border)] aseel-text-soft"
@@ -354,10 +362,18 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
                 <ImageIcon className="h-4 w-4" aria-hidden="true" />
               </span>
             )}
-            <b style={isOfferStruckThrough(o.backendStatus)
-              ? { textDecoration: "line-through", opacity: 0.6 }
-              : undefined}>
-              {o.offerNumber || o.id.slice(0, 8)}
+            {/* الرقم لا يزاحم الصورة: الصورة `shrink-0` والرقم `min-w-0 truncate`
+                فالفائض يُقصّ داخل الخلية بدل أن يوسّعها على حساب جارتها. القصّ
+                المرئي يقرّره `elideDocumentNumber` لا `text-overflow` وحده —
+                هذا يأكل الذيل، وذيل الرقم هو مميِّزه. وبلا `.aseel-cell-clip`:
+                قيده بالبكسل لا يتبع سحب حدّ العمود (THA-347)، و`min-w-0` داخل
+                صفّ مرن يتبعه. */}
+            <b dir="auto" title={number}
+              className="min-w-0 truncate tabular-nums"
+              style={isOfferStruckThrough(o.backendStatus)
+                ? { textDecoration: "line-through", opacity: 0.6 }
+                : undefined}>
+              {elideDocumentNumber(number)}
             </b>
           </div>
         );
