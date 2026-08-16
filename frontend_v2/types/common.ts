@@ -95,6 +95,7 @@ export type AppView =
     | "reserved-stock"
     | "partner-profile"
     | "import-flow"
+    | "import-file-guide"
     | "activity-log"
     | "permissions"
     | "my-account"

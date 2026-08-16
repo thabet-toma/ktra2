@@ -169,6 +169,66 @@ test("رحلة مكتملة: الخطوة الأخيرة منجزة وتفتح �
   assert.equal(invoice.route, "/purchase-invoices/88");
 });
 
+/* ══════════════════════════════════════════════════════════════════════════
+   شارة ملف الاستيراد — وحدة مرخّصة، فمفتاحها قد يغيب بالكامل
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** ما يرسله الخادم لصفقةٍ فُتح ملفها: بنودها وبنود شحنتها بمراحلها. */
+const FILE_PROGRESS = {
+  offer: { done: 0, total: 2 },
+  deal: { done: 1, total: 2 },
+  shipment: { done: 2, total: 4 },
+  clearance: { done: 0, total: 2 },
+} as const;
+
+const withShipmentSummary = (over: Partial<ImportJourneyDealFacts> = {}) =>
+  summary({
+    deals: { rows: [deal({ shipment_id: 5, ...over })], without_shipment: 0 },
+    shipments: [shipment({ freight_is_posted: true })],
+  });
+
+test("ملف مسجَّل: أرقام الخادم تُعلَّق على مراحلها كما هي، ولا رقم لمرحلة بلا بنود", () => {
+  const view = buildImportJourney(withShipmentSummary({ file_progress: { ...FILE_PROGRESS } }));
+
+  assert.equal(view.file.state, "tracked");
+  assert.equal(view.file.route, "/deals/7?tab=import_file");
+  assert.deepEqual(stepOf(view, "shipment").fileProgress, { done: 2, total: 4 });
+  assert.deepEqual(stepOf(view, "clearance").fileProgress, { done: 0, total: 2 });
+  // مرحلة بلا بنود في الملف لا تحمل شارة — الصفر هنا كذبة لا معلومة
+  assert.equal(stepOf(view, "freight").fileProgress, undefined);
+  assert.equal(stepOf(view, "local").fileProgress, undefined);
+});
+
+test("ملف لم يُفتح بعد ({}): دعوةٌ صريحة لا شارة صامتة ولا ٠/٠", () => {
+  const view = buildImportJourney(withShipmentSummary({ file_progress: {} }));
+
+  assert.equal(view.file.state, "unopened");
+  assert.equal(view.file.route, "/deals/7?tab=import_file");
+  assert.equal(view.steps.some((s) => s.fileProgress !== undefined), false);
+});
+
+test("بلا ترخيص (المفتاح غائب): الخطوات مطابقة حرفياً لما كانت عليه", () => {
+  const licensed = buildImportJourney(withShipmentSummary({ file_progress: { ...FILE_PROGRESS } }));
+  const unlicensed = buildImportJourney(withShipmentSummary());
+
+  assert.equal(unlicensed.file.state, "absent");
+  // إسقاط الشارة وحدها يُعيد الخطوة كما هي — فالإضافة إضافةٌ لا تعديل
+  assert.deepEqual(
+    unlicensed.steps,
+    licensed.steps.map(({ fileProgress: _ignored, ...step }) => step),
+  );
+});
+
+test("شحنة بلا صفقة في البؤرة: الشارة من صفّ الشحنة وبلا وجهة تُفتح", () => {
+  const view = buildImportJourney(summary({
+    shipments: [shipment({ file_progress: { shipment: { done: 1, total: 4 } } })],
+  }));
+
+  assert.equal(view.file.state, "tracked");
+  assert.equal(view.file.route, null);
+  assert.deepEqual(stepOf(view, "shipment").fileProgress, { done: 1, total: 4 });
+});
+
 test("التبديل بين الرحلات: كل شحنة وكل صفقة بلا شحنة خيارٌ مستقل", () => {
   const view = buildImportJourney(summary({
     deals: { rows: [deal(), deal({ id: 9, ref: "D-9", shipment_id: 5 })], without_shipment: 1 },

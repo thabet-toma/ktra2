@@ -21,6 +21,11 @@ MODULES = {
         "plans": ("Enterprise",),
         "legacy_flag": "import_enabled",
     },
+    "import_file": {
+        "label": "ملف الاستيراد",
+        "plans": ("Enterprise",),
+        "legacy_flag": None,
+    },
     "sensitive_devices": {
         "label": "تسجيل وتتبع الأجهزة الحساسة",
         "plans": ("Pro", "Enterprise"),

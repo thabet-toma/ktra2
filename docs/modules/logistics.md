@@ -121,7 +121,9 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 - `accounting` (models **و** services) — `logistics/views.py:47-55`: `post_journal`, `unpost_document`, `validate_fiscal_period`, `next_document_number`, `get_exchange_rate`, `create_audit_log`.
 - `sales` (models + serializers) — `logistics/serializers/` يستورد `SupplierPayment`, `SupplierPaymentAllocation` والثابت `CHEQUE_DUE_DATE_REQUIRED` من `sales.serializers`؛ و`logistics/views/` يستورد `SupplierPayment` ويعرضه عبر `SupplierPaymentViewSet`. أي تغيير في عقد `sales` للشيكات يكسر فواتير الشراء.
 - `partners` (models + signals): `models.py`, `views.py:42-43` · `inventory` (models + services): `models.py:4-5`, `views.py` · `core` (access/mixins/tenant_utils/activity/plans): `views.py:60-74`.
-**يعتمد عليه:** `sales/services.py:3817,3906-3907` · `accounting/services.py:931,1013,1522` · `accounting/views.py:313,342,1355` · `accounting/serializers.py:75,129` · `inventory/services.py:447,681,941,997` · `inventory/serials.py` · `partners/views.py:75,142-144` · `after_sales` (اختبارات).
+**يعتمد عليه:** `sales/services.py:3817,3906-3907` · `accounting/services.py:931,1013,1522` · `accounting/views.py:313,342,1355` · `accounting/serializers.py:75,129` · `inventory/services.py:447,681,941,997` · `inventory/serials.py` · `partners/views.py:75,142-144` · `after_sales` (اختبارات) · `import_file` (وحدة مرخّصة تقرأ الصفقة والشحنة اتجاهاً أُحادياً — لا FK ولا عمود منها في أي جدول هنا).
+
+**الاستثناء الوحيد في الاتجاه المعاكس** — `logistics/views/reports.py` (`ImportJourneyViewSet.list`) يستورد `import_file.services` (`attach_file_progress`) **استيراداً كسولاً داخل حارس الترخيص**، فيُثري ملخّص رحلة الاستيراد بـ`file_progress` للشركة المرخّصة وحدها. بلا ترخيص الحمولة مطابقة حرفياً لما كانت عليه، و`logistics/import_journey.py` يبقى جاهلاً بالوحدة تماماً. تفصيل الوحدة في `docs/modules/import_file.md`.
 
 ## قواعد لا يجوز كسرها
 - **كل انتقال مرحلة عبر `advance_deal_stage`** — لا `.update(stage=…)` مباشراً؛ حتى الـsignals تمرّ عبره (`signals.py:180-188`). جدول الانتقالات الوحيد في `domain/stages.py:24-34`.

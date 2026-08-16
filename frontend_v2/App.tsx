@@ -164,6 +164,8 @@ const SensitiveDevicesScreen = lazyPage(() => import("./components/devices/Sensi
 // THA-24: بطاقات الكفالة — وحدة «خدمة ما بعد البيع» المرخّصة، بنفس الحارس.
 const WarrantyCardsScreen = lazyPage(() => import("./components/aftersales/WarrantyCardsScreen"));
 const ServiceOrdersScreen = lazyPage(() => import("./components/aftersales/ServiceOrdersScreen"));
+// THA-114: شرح مستندات الاستيراد — وحدة «ملف الاستيراد» المرخّصة، بنفس الحارس.
+const ImportFileGuideScreen = lazyPage(() => import("./components/import-file/ImportFileGuideScreen").then((m) => ({ default: m.ImportFileGuideScreen })));
 
 type SourcingView = "search" | "loading" | "results";
 type AuthView = "landing" | "login" | "signup" | "accountant-signup";
@@ -238,6 +240,8 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "supplier-management": "/suppliers",
   "sql-partners": "/partners-directory",
   "import-flow": "/import-flow",
+  // THA-114: شرح المستندات — يُفتح في تبويب جديد من لوحة ملف الاستيراد.
+  "import-file-guide": "/import-file/guide",
   "shipments-management": "/shipments",
   "customs-clearance": "/clearance",
   "local-shipping": "/local-shipping",
@@ -1463,6 +1467,17 @@ const App: React.FC = () => {
             {canView(appView)
               ? <ServiceOrdersScreen onOpenInvoice={() => setViewAndSyncPath("sales-invoices")} />
               : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض أوامر الصيانة (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "import-file-guide":
+        // THA-114: نفس ترتيب البوابتين — الترخيص أولاً ثم الصلاحية، ومفاتيح
+        // صلاحيات الوحدة محذوفة أصلاً من كتالوج الشركة غير المرخّصة.
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة ملف الاستيراد غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <ImportFileGuideScreen />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض ملف الاستيراد (403).</div>}
           </ModuleLicenseGuard>
         );
 

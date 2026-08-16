@@ -123,6 +123,9 @@ PERMISSIONS: list[dict] = [
     {"key": "devices.registry.edit", "label": "تعديل سجل جهاز حسّاس", "group": GROUP_DEVICES, "module": "sensitive_devices"},
     {"key": "devices.registry.delete", "label": "حذف واسترجاع سجل جهاز حسّاس", "group": GROUP_DEVICES, "module": "sensitive_devices"},
     {"key": "devices.audit.view", "label": "عرض سجل تدقيق الأجهزة", "group": GROUP_DEVICES, "module": "sensitive_devices"},
+    # ملف الاستيراد — لا تظهر إلا للشركات المرخّصة للوحدة.
+    {"key": "importfile.file.view", "label": "عرض ملف الاستيراد ومستنداته", "group": GROUP_IMPORT, "module": "import_file"},
+    {"key": "importfile.file.manage", "label": "إدارة بنود ملف الاستيراد ومرفقاته", "group": GROUP_IMPORT, "module": "import_file"},
     # خدمة ما بعد البيع — لا تظهر إلا للشركات المرخّصة للوحدة.
     {"key": "aftersales.warranty.view", "label": "عرض بطاقات الكفالة", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.warranty.manage", "label": "إنشاء بطاقة كفالة وتمديدها", "group": GROUP_AFTERSALES, "module": "after_sales"},
@@ -185,6 +188,10 @@ _PROCUREMENT_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | {
     "inventory.doc.post",
     "import.deal.manage",
     "import.shipment.manage",
+    # ملف الاستيراد يتبع من يمشي الرحلة: المشتريات وحدها من غير المدير تملك
+    # `import.*`، فهي وحدها التي ترفع أوراقها وتغلق بنودها.
+    "importfile.file.view",
+    "importfile.file.manage",
 }
 
 _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | {
@@ -209,6 +216,9 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | {
     "accounting.period.manage",
     "finance.cashbox.manage",
     "import.doc.unpost",
+    # المحاسب يطابق الفاتورة الدولية بالبوليصة والبيان الجمركي — يقرأ الملف
+    # ولا يرفع أوراقه.
+    "importfile.file.view",
     # الرواتب مصروفٌ يمسّ الدفاتر — المحاسب صاحبها كسائر المستندات المالية.
     "hr.payroll.view",
     "hr.payroll.manage",

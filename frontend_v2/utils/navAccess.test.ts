@@ -191,6 +191,18 @@ test('بند أوامر الصيانة يلزمه الترخيص والصلاح�
   assert.equal(visibleLinks(link, canOf(['aftersales.warranty.view'])).length, 0);
 });
 
+test('شاشة شرح مستندات الاستيراد تُمنع قبل أي import ما لم يصل عَلَم ترخيص وحدتها', () => {
+  assert.equal(moduleForView('import-file-guide'), 'import_file');
+  assert.equal(permForView('import-file-guide'), 'importfile.file.view');
+  // فشل مغلق كسابقاتها — بلا عَلَم صريح لا يُنزَّل chunk الشاشة أصلاً.
+  assert.equal(moduleAllowsView('import-file-guide', null), false);
+  assert.equal(moduleAllowsView('import-file-guide', {}), false);
+  assert.equal(moduleAllowsView('import-file-guide', { import_file: false }), false);
+  // ترخيص الاستيراد نفسه وحدةٌ أخرى: `import` القديمة لا تفتح «ملف الاستيراد».
+  assert.equal(moduleAllowsView('import-file-guide', { import: true }), false);
+  assert.equal(moduleAllowsView('import-file-guide', { import_file: true }), true);
+});
+
 test('موضع بند الأجهزة الحساسة يتبع ترخيص الوحدتين — بند واحد لا اثنان', () => {
   // بلا ترخيص سجل الأجهزة لا يظهر البند أصلاً، ولو رُخِّصت ما بعد البيع.
   assert.equal(devicesNavPlacement(null), 'hidden');

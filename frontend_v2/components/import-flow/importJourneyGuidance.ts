@@ -134,6 +134,17 @@ export const IMPORT_JOURNEY_STAGES: readonly ImportStageDef[] = [
   { key: "invoice", order: 8, label: "فاتورة الشراء الدولية", purpose: "الإفراج: تتحول الشحنة إلى فاتورة، فتدخل البضاعة المخزون بتكلفتها الحقيقية.", fallbackRoute: "/international-invoices" },
 ] as const;
 
+/**
+ * اكتمال ملف الاستيراد لكل مرحلة — `{stage: {done, total}}` كما يحسبه الخادم
+ * (`import_file/services.py` — `stage_progress`).
+ *
+ * **المفتاح اختياري بالكامل**: يضيفه الخادم للشركة المرخّصة بوحدة «ملف
+ * الاستيراد» وحدها، وحمولة غيرها مطابقة حرفياً لما كانت عليه. فغيابه ليس حالة
+ * خطأ ولا صفراً — هو «لا وحدة»، ولا تُرسم له شارة.
+ */
+export type ImportFileStageProgress = { done: number; total: number };
+export type ImportFileProgressByStage = Partial<Record<ImportStageKey, ImportFileStageProgress>>;
+
 export interface ImportJourneyDealFacts {
   id: number;
   ref: string;
@@ -148,6 +159,7 @@ export interface ImportJourneyDealFacts {
   pending_payments_count: number;
   shipment_id: number | null;
   shipment_label?: string | null;
+  file_progress?: ImportFileProgressByStage;
 }
 
 export interface ImportJourneyShipmentFacts {
@@ -166,6 +178,7 @@ export interface ImportJourneyShipmentFacts {
   invoices_count: number;
   invoice_id: number | null;
   remaining_deals: number;
+  file_progress?: ImportFileProgressByStage;
 }
 
 export interface ImportJourneySummaryFacts {
@@ -184,6 +197,11 @@ export interface ImportJourneyStep extends ImportStageDef {
   ctaLabel: string;
   /** وجهة الزر — دائماً المكان الذي يُنفَّذ فيه الإجراء فعلاً. */
   route: string;
+  /**
+   * أوراق هذه المرحلة كما يحسبها الخادم — تُعرض كما هي ولا تُحسب هنا ثانيةً.
+   * غائبة حين لا وحدة، وحين لا بند مسجَّلاً في هذه المرحلة بالذات.
+   */
+  fileProgress?: ImportFileStageProgress;
 }
 
 export interface ImportJourneyFocus {
@@ -193,6 +211,27 @@ export interface ImportJourneyFocus {
   label: string;
 }
 
+/**
+ * حالة ملف الاستيراد لهذه الرحلة — ثلاث حالات لا حالتان، والفرق بينها معنىً لا
+ * تنسيق:
+ *
+ * - `absent`  — لا مفتاح `file_progress` أصلاً: الوحدة غير مرخّصة ⇒ لا شيء يُعرض.
+ * - `unopened`— المفتاح موجود وفارغ (`{}`): الوحدة مرخّصة والملف لم يُفتح بعد،
+ *   فلا بنود مزروعة. التزريع يقع عند فتح الملف وحده (`ensure_file_items`) كي لا
+ *   تكتب قراءةُ المرشد لكل صفقة نشطة في كل تحميل صفحة.
+ * - `tracked` — بنود مسجَّلة وأرقامها في `fileProgress` على خطواتها.
+ *
+ * إخفاء `unopened` صامتاً كان يقول للمستخدم «لا أوراق مطلوبة» — عكس الحقيقة
+ * تماماً، وهو الخلل الذي وُجدت هذه الوحدة لإزالته. لذلك تُعرض دعوةً صريحة.
+ */
+export type ImportFileState = "absent" | "unopened" | "tracked";
+
+export interface ImportJourneyFile {
+  state: ImportFileState;
+  /** أين يُفتح الملف — تبويب «ملف الاستيراد» داخل الصفقة، أو null بلا صفقة. */
+  route: string | null;
+}
+
 export interface ImportJourneyView {
   focus: ImportJourneyFocus;
   steps: ImportJourneyStep[];
@@ -200,6 +239,8 @@ export interface ImportJourneyView {
   current: ImportJourneyStep;
   /** الخيارات المتاحة للتبديل بين الرحلات النشطة. */
   options: ImportJourneyFocus[];
+  /** ملف الاستيراد: حالته ووجهته — وحدة مرخّصة، فقد تغيب بالكامل. */
+  file: ImportJourneyFile;
 }
 
 const num = (value: string | number | null | undefined): number => {
@@ -342,6 +383,16 @@ export function buildImportJourney(
       ? { kind: "deal", shipmentId: null, dealId: deal.id, label: `صفقة ${deal.ref}${deal.title ? ` — ${deal.title}` : ""}` }
       : { kind: "empty", shipmentId: null, dealId: null, label: "لا توجد رحلة نشطة" };
 
+  // صفّ الصفقة يحمل بنودها **وبنود شحنتها** — وهو بعينه ما تعرضه لوحة الملف،
+  // فلا يُقرأ صفّ الشحنة إلا حين لا صفقة في البؤرة أصلاً.
+  const fileProgress = deal?.file_progress ?? shipment?.file_progress;
+  const file: ImportJourneyFile = {
+    state: !fileProgress
+      ? "absent"
+      : Object.keys(fileProgress).length === 0 ? "unopened" : "tracked",
+    route: deal ? `/deals/${deal.id}?tab=${IMPORT_FILE_TAB}` : null,
+  };
+
   const steps = dealSteps(deal, summary.offers.awaiting_decision);
 
   if (!shipment) {
@@ -366,7 +417,8 @@ export function buildImportJourney(
         route: joinRoute,
       })),
     );
-    return { focus, steps, current: pickCurrent(steps), options };
+    const early = withFileProgress(steps, fileProgress);
+    return { focus, steps: early, current: pickCurrent(early), options, file };
   }
 
   const freightTotal = num(shipment.freight_total_usd);
@@ -459,7 +511,7 @@ export function buildImportJourney(
   // عن المرشد داخل شاشة الشحنة. أما دفعات الصفقة فبُعد مالي مستقل عن المراحل
   // (قرار معماري مثبت): تبقى ظاهرة كنقص قائم ولا تُعلَن «منجزة» لمجرد تقدّم الشحن.
   const guidedIndex = steps.findIndex((s) => s.key === guidedStage);
-  const resolved = steps.map((step, i) => {
+  const resolved = withFileProgress(steps, fileProgress).map((step, i) => {
     if (i < DEAL_PHASE_LENGTH) {
       return step.state === "current" && guidedIndex > i
         ? { ...step, state: "todo" as ImportStepState }
@@ -472,11 +524,40 @@ export function buildImportJourney(
     if (step.state === "current") return { ...step, state: (step.optional ? "optional" : "todo") as ImportStepState };
     return step;
   });
-  return { focus, steps: resolved, current: resolved[guidedIndex] || pickCurrent(resolved), options };
+  return {
+    focus,
+    steps: resolved,
+    current: resolved[guidedIndex] || pickCurrent(resolved),
+    options,
+    file,
+  };
 }
 
 /** عدد خطوات ما قبل الشحنة (عرض السعر، الصفقة، دفعاتها). */
 const DEAL_PHASE_LENGTH = 3;
+
+/**
+ * مفتاح تبويب «ملف الاستيراد» داخل الصفقة — يقرأه `DealForm.tsx` من
+ * `?tab=` ويفتح عليه. اسمٌ واحد للطرفين، فرابطٌ يقود إلى تبويب غير موجود يفتح
+ * «البيانات الأساسية» بصمت ويترك المستخدم يبحث.
+ */
+export const IMPORT_FILE_TAB = "import_file";
+
+/**
+ * يعلّق أرقام الملف على خطواتها كما جاءت من الخادم — **بلا أي حساب**.
+ * حسابها هنا كان يعني مصدراً ثالثاً لرقمٍ له مصدر واحد مختبَر، فتقول الشارة
+ * شيئاً وتقول اللوحة شيئاً آخر عن الصفقة نفسها.
+ */
+function withFileProgress(
+  steps: ImportJourneyStep[],
+  progress: ImportFileProgressByStage | undefined,
+): ImportJourneyStep[] {
+  if (!progress) return steps;
+  return steps.map((step) => {
+    const stageProgress = progress[step.key];
+    return stageProgress ? { ...step, fileProgress: stageProgress } : step;
+  });
+}
 
 function pickCurrent(steps: ImportJourneyStep[]): ImportJourneyStep {
   return steps.find((s) => s.state === "current") || steps.find((s) => s.state === "todo") || steps[0];

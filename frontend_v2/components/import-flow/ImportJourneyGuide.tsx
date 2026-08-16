@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Compass, ChevronDown, RefreshCw, Check, ArrowLeft } from "lucide-react";
+import { Compass, ChevronDown, RefreshCw, Check, ArrowLeft, FolderOpen } from "lucide-react";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { fetchImportJourneySummary } from "../../services/importJourneyApi";
 import { clientLogger } from "../../services/logger";
@@ -239,6 +239,18 @@ export const ImportJourneyGuide: React.FC = () => {
           {view.current.ctaLabel}
           <ArrowLeft className="h-3.5 w-3.5" />
         </button>
+        {/* الملف لم يُفتح بعد: دعوة صريحة لا شارةٌ غائبة. الغياب الصامت يقول
+            «لا أوراق مطلوبة» — عكس الحقيقة، وهو ما وُجدت الوحدة لإزالته. */}
+        {view.file.state === "unopened" && view.file.route && (
+          <button
+            type="button"
+            onClick={() => go(view.file.route as string)}
+            className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-900 transition-colors hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200 dark:hover:bg-amber-900/50"
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            لم يُفتح ملف الاستيراد بعد — افتحه لتعرف الأوراق المطلوبة
+          </button>
+        )}
       </div>
 
       <ol className="flex-1 overflow-y-auto px-2 py-2">
@@ -268,6 +280,19 @@ export const ImportJourneyGuide: React.FC = () => {
                     </span>
                     {step.optional && <span className="text-[9px] text-[var(--color-text-muted)]">اختيارية</span>}
                     {here && <span className="rounded bg-[var(--color-surface-3)] px-1 text-[9px] text-[var(--color-text-muted)]">أنت هنا</span>}
+                    {/* أرقام الخادم كما هي — لا حساب هنا (المصدر واحد مع اللوحة). */}
+                    {step.fileProgress && (
+                      <span
+                        className={`rounded px-1 text-[9px] font-semibold ${
+                          step.fileProgress.done >= step.fileProgress.total
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
+                            : "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+                        }`}
+                        title="أوراق ملف الاستيراد المطلوبة في هذه المرحلة"
+                      >
+                        المستندات {step.fileProgress.done} من {step.fileProgress.total}
+                      </span>
+                    )}
                   </span>
                   <span className="mt-0.5 block text-[11px] leading-relaxed text-[var(--color-text-muted)]">{step.detail}</span>
                   <span className="mt-0.5 block text-[10px] font-semibold text-blue-700 dark:text-blue-300">{step.ctaLabel} ←</span>

@@ -67,6 +67,8 @@ import { PaymentProgress } from "./PaymentProgress";
 import { SupplierViewModal } from "@/components/common/SupplierViewModal";
 import { useToast } from "@/contexts/ToastContext";
 import { useConfirm } from "@/contexts/ConfirmContext";
+import { usePermissions } from "@/contexts/PermissionsContext";
+import { IMPORT_FILE_TAB } from "@/components/import-flow/importJourneyGuidance";
 import { DealPrintView } from "./DealPrintView";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 import { mergeSupplier } from "@/utils/supplierList";
@@ -91,6 +93,12 @@ type PaymentStatus =
   | "payment_pending_confirmation"
   | "partially_paid"
   | "paid";
+
+/* THA-114: لوحة «ملف الاستيراد» — وحدة مرخّصة. كسولة خلف حارس عَلَم الوحدة:
+   التبويب نفسه لا يُبنى لشركة غير مرخّصة، فلا يُطلب chunkه أصلاً. */
+const ImportFilePanel = React.lazy(() =>
+  import("@/components/import-file/ImportFilePanel").then((m) => ({ default: m.ImportFilePanel })),
+);
 
 interface DealFormProps {
   deal: Partial<Deal> | null;
@@ -164,6 +172,8 @@ export const DealForm: React.FC<DealFormProps> = ({
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
+  /* THA-114: ترخيص وحدة «ملف الاستيراد» — يفشل مغلقاً (غياب العَلَم = مطفأة). */
+  const { modules: licensedModules } = usePermissions();
   /* مرشد الاستيراد يقود إلى تبويب بعينه (`/deals/7?tab=payments`) — بدون هذا
      كان الرابط يفتح الصفقة على «البيانات الأساسية» ويترك المستخدم يبحث. */
   const [dealSearchParams] = useSearchParams();
@@ -180,6 +190,10 @@ export const DealForm: React.FC<DealFormProps> = ({
   });
 
   const [formData, setFormData] = useState<Partial<Deal>>(deal || {});
+  /* THA-114: معرّف الصفقة رقماً — `Deal.id` نصّ، ونقطة الملف ترسو على PK رقمي. */
+  const importFileDealId = Number(formData.id);
+  const importFileEnabled =
+    licensedModules.import_file === true && Number.isInteger(importFileDealId) && importFileDealId > 0;
   const [items, setItems] = useState<DealItem[]>(
     deal?.items?.length ? deal.items : deal?.id ? [] : [makeEmptyItem()]
   );
@@ -1267,6 +1281,20 @@ export const DealForm: React.FC<DealFormProps> = ({
           { key: "terms", label: "الشروط والشحن", content: termsAndShippingTab },
           { key: "payments", label: "الدفعات", content: paymentsTab },
           { key: "stages", label: "المراحل والشحن", content: stagesTab },
+          /* الملف ملف صفقة محفوظة: الصفقة الجديدة بلا معرّف لا ملف لها بعد،
+             ونقطة الخادم ترسو على `deals/{id}/file/` — فمعرّفٌ غير رقمي يعني
+             نداءً يرتدّ 404 بلا سبب مفهوم، ولا تبويب أفضل من تبويبٍ يفشل. */
+          ...(importFileEnabled ? [{
+            key: IMPORT_FILE_TAB,
+            label: "ملف الاستيراد",
+            content: (
+              <div className="aseel-legacy-tab">
+                <React.Suspense fallback={<p className="aseel-hint">جارٍ تحميل ملف الاستيراد…</p>}>
+                  <ImportFilePanel dealId={importFileDealId} />
+                </React.Suspense>
+              </div>
+            ),
+          }] : []),
           { key: "notes", label: "الملاحظات", content: notesTab },
           { key: "attachments", label: "المرفقات", content: attachmentsTab },
           { key: "activity", label: "سجل النشاطات", content: activityTab },

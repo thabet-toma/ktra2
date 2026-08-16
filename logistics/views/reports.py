@@ -68,6 +68,7 @@ from core.activity import (
 )
 from core.api_defaults import PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.access import require_perm, requires_perm
+from core.modules import module_enabled
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
 from core.mixins import BaseTenantViewSet
@@ -120,7 +121,13 @@ class ImportJourneyViewSet(viewsets.ViewSet):
         if not tenant:
             return Response({'error': 'لا يوجد مستأجر.'}, status=status.HTTP_400_BAD_REQUEST)
         require_perm(request, 'import.deal.manage', tenant=tenant)
-        return Response(build_import_journey_summary(tenant))
+        summary = build_import_journey_summary(tenant)
+        if module_enabled(tenant, 'import_file'):
+            # استيراد كسول: بلا وحدة «ملف الاستيراد» في INSTALLED_APPS يبقى
+            # `logistics` مستورَداً نظيفاً، وتبقى الحمولة هي نفسها حرفياً.
+            from import_file.services import attach_file_progress
+            attach_file_progress(summary, tenant)
+        return Response(summary)
 
 
 class LandedCostReportViewSet(viewsets.ViewSet):

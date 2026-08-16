@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **442**
+عدد النقاط: **447**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -203,6 +203,11 @@
 | `/api/hr/users/<str:pk>/` | `user_detail` | `hr/user_api.py` |
 | `/api/hr/work-logs/` | `WorkLogViewSet` | `hr/payroll_api.py` |
 | `/api/hr/work-logs/{pk}/` | `WorkLogViewSet` | `hr/payroll_api.py` |
+| `/api/import-file/deals/{pk}/file/` | `DealImportFileViewSet` | `import_file/views.py` |
+| `/api/import-file/documents/{pk}/` | `ImportFileDocumentViewSet` | `import_file/views.py` |
+| `/api/import-file/items/` | `ImportFileItemViewSet` | `import_file/views.py` |
+| `/api/import-file/items/{pk}/` | `ImportFileItemViewSet` | `import_file/views.py` |
+| `/api/import-file/items/{pk}/documents/` | `ImportFileItemViewSet` | `import_file/views.py` |
 | `/api/inventory/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/inventory/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/inventory/categories/` | `CategoryViewSet` | `inventory/views.py` |

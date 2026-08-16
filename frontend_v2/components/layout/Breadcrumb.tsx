@@ -95,6 +95,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   shipments: 'الشحنات',
   'shipment-management': 'إدارة الشحنات',
   'import-flow': 'رحلة الاستيراد',
+  'import-file-guide': 'مستندات ملف الاستيراد',
   clearance: 'التخليص الجمركي',
   'group-constants': 'ثوابت المجموعة',
   'activity-log': 'سجل النشاط',

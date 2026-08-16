@@ -38,6 +38,8 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "deals-management": "import.deal.manage",
   "old-invoices": "import.deal.manage",
   "import-flow": "import.deal.manage",
+  // THA-114: شرح مستندات ملف الاستيراد — مشروط أيضاً بترخيص الوحدة أدناه.
+  "import-file-guide": "importfile.file.view",
   "shipments-management": "import.shipment.manage",
   "shipment-management": "import.shipment.manage",
   shipments: "import.shipment.manage",
@@ -119,6 +121,10 @@ export const VIEW_MODULES: Record<string, string> = {
   // THA-24: خدمة ما بعد البيع — نفس العقد: 404 خادمياً، وبلا العَلَم لا يُطلب chunk.
   "after-sales": "after_sales",
   "service-orders": "after_sales",
+  // THA-114: ملف الاستيراد — نفس العقد: 404 خادمياً (`import_file/views.py`)،
+  // وبلا العَلَم لا يُطلب chunk الشاشة. لوحة الملف داخل الصفقة محروسة بالعَلَم
+  // نفسه في `DealForm.tsx` — تبويب لا يُبنى أصلاً بلا ترخيص.
+  "import-file-guide": "import_file",
 };
 
 /** صلاحية الشاشة إن وُجدت، وإلا undefined (شاشة مفتوحة). */
