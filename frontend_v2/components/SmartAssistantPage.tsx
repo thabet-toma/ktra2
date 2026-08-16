@@ -1,9 +1,11 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Send, Sparkles, User, Bot, Loader2, Paperclip, X } from "lucide-react";
 import {
   sendAssistantMessage,
   uploadAssistantFile,
 } from "@/services/assistantApi";
+import { usePasteZone } from "@/utils/clipboardImage";
+import { useToast } from "@/contexts/ToastContext";
 
 type Role = "user" | "assistant";
 
@@ -19,12 +21,38 @@ export const SmartAssistantPage: React.FC = () => {
   const [input, setInput] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  const toast = useToast();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
+
+  /**
+   * محرّر الرسالة يقبل ملفاً واحداً مرفقاً بها، فيُرفق أوّل ملف مقبول ويُهمَل الباقي.
+   * لا نستعمل `FileDropZone` هنا: لوحة متقطّعة لا مكان لها في محرّر محادثة —
+   * الزرّ يبقى كما هو، ويُضاف إليه السحب واللصق على مساحة المحرّر نفسها.
+   */
+  const attachFile = useCallback((files: File[]) => {
+    const file = files.find((f) => f.type === "application/pdf" || f.type.startsWith("image/"));
+    if (!file) {
+      toast("المساعد يقبل ملفات PDF والصور فقط.", "error");
+      return;
+    }
+    if (sending) {
+      toast("جارٍ الإرسال الآن — انتظر انتهاءه ثم أرفق الملف.", "info");
+      return;
+    }
+    setPendingFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [sending, toast]);
+
+  // اللصق (Ctrl+V) داخل المحرّر — حتى والمؤشّر في مربّع النصّ: لصق نصّ عادي يمرّ
+  // كما هو، ولا يُعترَض إلا ما كان صورة في الحافظة.
+  usePasteZone(composerRef, attachFile);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -96,7 +124,10 @@ export const SmartAssistantPage: React.FC = () => {
             <div className="h-full flex flex-col items-center justify-center text-center px-6 py-16 text-[var(--color-text-muted)]">
               <Bot className="w-14 h-14 mb-4 opacity-40" />
               <p className="text-sm font-medium">
-                ابدأ بكتابة سؤالك أو أرفق ملف PDF من زر المرفق
+                ابدأ بكتابة سؤالك، أو أرفق ملف PDF أو صورة من زر المرفق
+              </p>
+              <p className="text-xs mt-1">
+                ويمكنك سحب الملف إلى محرّر الرسالة أو لصق الصورة فيه (Ctrl+V)
               </p>
             </div>
           )}
@@ -145,7 +176,19 @@ export const SmartAssistantPage: React.FC = () => {
           <div ref={bottomRef} />
         </div>
 
-        <div className="p-4 border-t border-[var(--color-border)] bg-gray-50/80 dark:bg-gray-900/50">
+        <div
+          ref={composerRef}
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={(e) => { e.preventDefault(); setDragging(false); }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            attachFile(Array.from(e.dataTransfer.files));
+          }}
+          className={`p-4 border-t bg-gray-50/80 dark:bg-gray-900/50 transition-colors ${
+            dragging ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10" : "border-[var(--color-border)]"
+          }`}
+        >
           {pendingFile && (
             <div className="mb-2 flex items-center gap-2 text-sm text-[var(--color-text)] bg-[var(--color-surface)] rounded-lg px-3 py-2 border border-[var(--color-border)]">
               <Paperclip className="w-4 h-4 shrink-0 text-[var(--color-primary)]" />
@@ -169,10 +212,7 @@ export const SmartAssistantPage: React.FC = () => {
               type="file"
               accept=".pdf,application/pdf,image/*"
               className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                setPendingFile(f ?? null);
-              }}
+              onChange={(e) => attachFile(Array.from(e.target.files ?? []))}
             />
             <button
               type="button"

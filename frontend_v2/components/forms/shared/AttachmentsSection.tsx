@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import {
-  Paperclip, FileText, Image as ImageIcon,
-  Trash2, Download, X, Upload, Loader2
+  Paperclip, FileText,
+  Trash2, Download, X
 } from 'lucide-react';
 import { cloudinaryService } from '../../../services/cloudinaryService'; // تأكد من صحة المسار
-import { usePasteImageUpload } from '../../../utils/clipboardImage';
+import { FileDropZone } from '../../ui/FileDropZone';
+import { useToast } from '../../../contexts/ToastContext';
 
 interface AttachmentsProps {
   data: any; // Deal or PriceOffer data
@@ -15,6 +16,7 @@ interface AttachmentsProps {
 export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, readOnly }) => {
   const [uploadingImages, setUploadingImages] = useState(false);
   const [uploadingPdfs, setUploadingPdfs] = useState(false);
+  const toast = useToast();
 
   // --- Helpers --
 
@@ -27,13 +29,13 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
 
   // --- Handlers ---
 
+  // فحص النوع والحجم صار داخل `FileDropZone` (برسالة toast)، فما يصل هنا مقبول.
   const uploadImageFiles = async (files: File[]) => {
     if (files.length === 0) return;
     setUploadingImages(true);
     const newUrls: string[] = [];
     try {
       for (const file of files) {
-        if (!file.type.startsWith('image/')) continue;
         // ✅ نستخدم الدالة الجديدة التي تقبل أي ملف
         const imageUrl = await cloudinaryService.uploadFile(file);
         if (imageUrl) newUrls.push(imageUrl);
@@ -45,46 +47,30 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
       }));
     } catch (error) {
       // console suppressed
-      alert("فشل رفع الصور");
+      toast('فشل رفع الصور', 'error');
     } finally {
       setUploadingImages(false);
     }
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    await uploadImageFiles(Array.from(e.target.files));
-    e.target.value = '';
-  };
-
-  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف — بلا تأثير على لصق النصوص العادي.
-  usePasteImageUpload((files) => { void uploadImageFiles(files); }, !readOnly);
-
-  const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
+  const uploadPdfFiles = async (files: File[]) => {
+    if (files.length === 0) return;
     setUploadingPdfs(true);
 
-    const files = Array.from(e.target.files);
     const newPdfFiles: any[] = [];
 
     try {
       for (const file of files) {
-        const typedFile = file as File;
-        if (typedFile.type !== 'application/pdf') {
-          alert(`الملف ${typedFile.name} ليس PDF.`);
-          continue;
-        }
-
         // ✅ التعديل الجوهري هنا:
         // نرفع الملف مباشرة إلى كلاودنري ونحصل على الرابط
-        const pdfUrl = await cloudinaryService.uploadFile(typedFile);
+        const pdfUrl = await cloudinaryService.uploadFile(file);
 
         if (pdfUrl) {
           newPdfFiles.push({
-            name: typedFile.name,
+            name: file.name,
             url: pdfUrl, // الآن الرابط يبدأ بـ https:// وليس data:image...
-            size: typedFile.size,
-            type: typedFile.type
+            size: file.size,
+            type: file.type
           });
         }
       }
@@ -95,10 +81,9 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
       }));
     } catch (error) {
       // console suppressed
-      alert("حدث خطأ أثناء رفع ملفات PDF");
+      toast('حدث خطأ أثناء رفع ملفات PDF', 'error');
     } finally {
       setUploadingPdfs(false);
-      e.target.value = '';
     }
   };
 
@@ -134,32 +119,14 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
           </label>
 
           {!readOnly && (
-            <div className="relative">
-              <input
-                type="file"
-                accept=".pdf"
-                multiple
-                onChange={handlePdfUpload}
-                className="hidden"
-                id="pdf-upload-section"
-                disabled={uploadingPdfs}
-              />
-              <label
-                htmlFor="pdf-upload-section"
-                className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-[var(--color-border)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-2)] transition-colors"
-              >
-                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                  {uploadingPdfs ? (
-                    <Loader2 className="w-8 h-8 mb-2 text-blue-500 animate-spin" />
-                  ) : (
-                    <FileText className="w-8 h-8 mb-2 text-[var(--color-text-muted)]" />
-                  )}
-                  <p className="text-sm text-[var(--color-text-muted)]">
-                    {uploadingPdfs ? 'جاري المعالجة...' : 'اضغط لرفع ملفات PDF'}
-                  </p>
-                </div>
-              </label>
-            </div>
+            <FileDropZone
+              onFiles={(files) => { void uploadPdfFiles(files); }}
+              accept="pdf"
+              multiple
+              busy={uploadingPdfs}
+              hint="اضغط لرفع ملفات PDF، أو اسحبها إلى هنا"
+              className="h-32"
+            />
           )}
 
           <div className="space-y-2">
@@ -220,32 +187,13 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
           </label>
 
           {!readOnly && (
-            <div className="relative">
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleImageUpload}
-                className="hidden"
-                id="image-upload-section"
-                disabled={uploadingImages}
-              />
-              <label
-                htmlFor="image-upload-section"
-                className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-[var(--color-border)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-2)] transition-colors"
-              >
-                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                  {uploadingImages ? (
-                    <Loader2 className="w-8 h-8 mb-2 text-blue-500 animate-spin" />
-                  ) : (
-                    <ImageIcon className="w-8 h-8 mb-2 text-[var(--color-text-muted)]" />
-                  )}
-                  <p className="text-sm text-[var(--color-text-muted)]">
-                    {uploadingImages ? 'جاري الرفع...' : 'اضغط لرفع الصور'}
-                  </p>
-                </div>
-              </label>
-            </div>
+            <FileDropZone
+              onFiles={(files) => { void uploadImageFiles(files); }}
+              accept="image"
+              multiple
+              busy={uploadingImages}
+              className="h-32"
+            />
           )}
 
           <div className="grid grid-cols-3 gap-2">

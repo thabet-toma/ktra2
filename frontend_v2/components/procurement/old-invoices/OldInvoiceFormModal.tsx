@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Invoice, InvoiceItem, Item, Supplier, SupplierItemPrice, DealInvoiceInfo } from '../../../types';
 import {
-    X, Save, FileText, Paperclip, ImageIcon, Trash2,
+    X, Save, FileText, Paperclip, Trash2,
     Calculator, ExternalLink, Building // ✅ تمت إضافة Building
 } from 'lucide-react';
 import { cloudinaryService } from '@/services/cloudinaryService';
-import { usePasteImageUpload } from '@/utils/clipboardImage';
+import { FileDropZone } from '../../ui/FileDropZone';
+import { useToast } from '../../../contexts/ToastContext';
 import { SupplierSearch } from './SupplierSearch';
 import { ItemSearchModal } from '../price-offers/ItemSearchModal';
 import { ItemsTableSection } from '../../forms/shared/ItemsTableSection';
@@ -74,6 +75,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
     const [showItemSearchModal, setShowItemSearchModal] = useState(false);
     const [currentItemIndex, setCurrentItemIndex] = useState<number | null>(null);
     const [itemSearchQuery, setItemSearchQuery] = useState('');
+    const toast = useToast();
 
     // Load initial data
     useEffect(() => {
@@ -256,33 +258,24 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
         setCurrentItemIndex(null);
     };
 
-    // File Uploads
+    // File Uploads — الاختيار والسحب واللصق (Ctrl+V) صارت كلها داخل `FileDropZone`،
+    // وفحص النوع والحجم يقع فيها، فما يصل إلى هاتين الدالتين مقبول أصلاً.
     const uploadImageFiles = async (files: File[]) => {
         setUploadingImages(true);
         const newUrls: string[] = [];
         try {
             for (const file of files) {
-                if (!file.type.startsWith('image/')) continue;
                 const imageUrl = await cloudinaryService.uploadImage(file);
                 if (imageUrl) newUrls.push(imageUrl);
             }
             setImageUrls(prev => [...prev, ...newUrls]);
         } catch (error) {
             // console suppressed
-            alert("فشل رفع الصور");
+            toast('فشل رفع الصور.', 'error');
         } finally {
             setUploadingImages(false);
         }
     };
-
-    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (!e.target.files || e.target.files.length === 0) return;
-        await uploadImageFiles(Array.from(e.target.files));
-        e.target.value = '';
-    };
-
-    // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف — قبل أي return مبكر (isOpen) للحفاظ على ترتيب الـ hooks.
-    usePasteImageUpload((files) => { void uploadImageFiles(files); }, isOpen && !uploadingImages);
 
     const convertFileToBase64 = (file: File): Promise<string> => {
         return new Promise((resolve, reject) => {
@@ -293,18 +286,13 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
         });
     };
 
-    const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (!e.target.files || e.target.files.length === 0) return;
+    const addPdfFiles = async (files: File[]) => {
+        if (files.length === 0) return;
         setUploadingPdfs(true);
-        const files: File[] = Array.from(e.target.files);
         const newPdfFiles: Array<{ name: string; url: string; size: number; type: string }> = [];
 
         try {
             for (const file of files) {
-                if (file.type !== 'application/pdf') {
-                    alert(`الملف ${file.name} ليس PDF.`);
-                    continue;
-                }
                 const base64Data = await convertFileToBase64(file);
                 newPdfFiles.push({
                     name: file.name,
@@ -316,10 +304,9 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
             setPdfFiles(prev => [...prev, ...newPdfFiles]);
         } catch (error) {
             // console suppressed
-            alert("حدث خطأ أثناء معالجة ملفات PDF");
+            toast('حدث خطأ أثناء معالجة ملفات PDF.', 'error');
         } finally {
             setUploadingPdfs(false);
-            e.target.value = '';
         }
     };
 
@@ -553,28 +540,24 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                                     {/* Image Upload */}
-                                    <label className={`
-                                        flex flex-col items-center justify-center p-4 border-2 border-dashed rounded-xl cursor-pointer transition-all
-                                        ${uploadingImages ? 'border-green-400 bg-green-50' : 'aseel-border-soft hover:border-green-500 hover:bg-green-50 dark:aseel-border-soft dark:hover:aseel-bg-panel'}
-                                     `}>
-                                        <ImageIcon className={`w-8 h-8 mb-2 ${uploadingImages ? 'text-green-500 animate-pulse' : 'aseel-text-soft'}`} />
-                                        <span className="text-sm font-medium aseel-text-soft dark:aseel-text-soft">
-                                            {uploadingImages ? 'جاري الرفع...' : 'رفع صور'}
-                                        </span>
-                                        <input type="file" multiple accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploadingImages} />
-                                    </label>
+                                    <FileDropZone
+                                        onFiles={(files) => { void uploadImageFiles(files); }}
+                                        accept="image"
+                                        multiple
+                                        busy={uploadingImages}
+                                        variant="compact"
+                                        hint="صور: اضغط، اسحب، أو الصق (Ctrl+V)"
+                                    />
 
                                     {/* PDF Upload */}
-                                    <label className={`
-                                        flex flex-col items-center justify-center p-4 border-2 border-dashed rounded-xl cursor-pointer transition-all
-                                        ${uploadingPdfs ? 'aseel-border-soft aseel-bg-accent-bg' : 'aseel-border-soft hover:aseel-border-soft hover:aseel-bg-accent-bg dark:aseel-border-soft dark:hover:aseel-bg-panel'}
-                                     `}>
-                                        <FileText className={`w-8 h-8 mb-2 ${uploadingPdfs ? 'aseel-text-soft animate-pulse' : 'aseel-text-soft'}`} />
-                                        <span className="text-sm font-medium aseel-text-soft dark:aseel-text-soft">
-                                            {uploadingPdfs ? 'جاري الرفع...' : 'رفع PDF'}
-                                        </span>
-                                        <input type="file" multiple accept=".pdf,application/pdf" className="hidden" onChange={handlePdfUpload} disabled={uploadingPdfs} />
-                                    </label>
+                                    <FileDropZone
+                                        onFiles={(files) => { void addPdfFiles(files); }}
+                                        accept="pdf"
+                                        multiple
+                                        busy={uploadingPdfs}
+                                        variant="compact"
+                                        hint="PDF: اضغط أو اسحب الملف إلى هنا"
+                                    />
                                 </div>
 
                                 {/* File List */}

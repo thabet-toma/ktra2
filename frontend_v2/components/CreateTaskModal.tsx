@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, Task, TaskCategory, TaskPriority, Category } from '../types';
 import { cloudinaryService } from '../services/cloudinaryService';
 import { getCategories } from '../services/firestoreService';
-import { usePasteImageUpload } from '../utils/clipboardImage';
+import { FileDropZone } from './ui/FileDropZone';
+import { useToast } from '../contexts/ToastContext';
 
 interface CreateTaskModalProps {
     isOpen: boolean;
@@ -35,8 +36,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
     const [uploading, setUploading] = useState(false);
     const [loadingCategories, setLoadingCategories] = useState(false);
     const [categories, setCategories] = useState<Category[]>([]);
-    
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const toast = useToast();
 
     // جلب الفئات إذا لم تكن ممررة
     useEffect(() => {
@@ -76,11 +76,13 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         }
     }, [isOpen, propCategories, category]);
 
-    // معالجة إضافة صور (من اختيار ملف أو لصق من الحافظة) — يُبقي حد 10 صور نفسه.
+    // معالجة إضافة صور (اختيار ملف، سحب، أو لصق من الحافظة) — يُبقي حد 10 صور نفسه.
+    // فحص النوع والحجم صار داخل `FileDropZone` (برسالة toast)، فما يصل هنا مقبول.
+    // الصور مؤجّلة: تبقى ملفات محلية بمعاينة، وتُرفع عند إنشاء المهمة.
     const addImageFiles = (newFiles: File[]) => {
         if (newFiles.length === 0) return;
         if (selectedImages.length + newFiles.length > 10) {
-            alert('يمكنك رفع最多 10 صور فقط');
+            toast('يمكنك إرفاق 10 صور كحدّ أقصى للمهمة الواحدة.', 'info');
             return;
         }
 
@@ -104,21 +106,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         });
     };
 
-    // لصق صورة من الحافظة (Ctrl+V) — قبل أي return مبكر (isOpen) للحفاظ على ترتيب الـ hooks.
-    usePasteImageUpload(addImageFiles, isOpen);
-
+    // الاختيار والسحب واللصق (Ctrl+V) صارت كلها داخل `FileDropZone` أدناه.
     if (!isOpen) return null;
-
-    // معالجة اختيار الصور
-    const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (!files) return;
-        addImageFiles(Array.from(files));
-        // إعادة تعيين حقل الإدخال
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-        }
-    };
 
     // حذف صورة محددة
     const removeImage = (index: number) => {
@@ -298,30 +287,19 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                         </label>
                         
                         <div className="mb-3">
-                            <input
-                                ref={fileInputRef}
-                                type="file"
+                            <FileDropZone
+                                onFiles={addImageFiles}
+                                accept="image"
                                 multiple
-                                accept="image/*"
-                                onChange={handleImageSelect}
-                                className="hidden"
-                                id="image-upload"
-                                disabled={uploading}
+                                busy={uploading}
+                                disabled={selectedImages.length >= 10}
+                                hint={
+                                    selectedImages.length >= 10
+                                        ? 'اكتمل الحد الأقصى (10 صور)'
+                                        : 'اضغط لاختيار الصور، اسحبها إلى هنا، أو الصق (Ctrl+V)'
+                                }
+                                subHint="يمكنك رفع حتى 10 صور (JPEG, PNG, GIF)"
                             />
-                            <label
-                                htmlFor="image-upload"
-                                className={`inline-flex items-center px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-                                    uploading 
-                                        ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
-                                        : 'bg-blue-500 text-white hover:bg-blue-600'
-                                }`}
-                            >
-                                <span>📷</span>
-                                <span className="mr-2">اختر الصور</span>
-                            </label>
-                            <p className="text-sm text-[var(--color-text-muted)] mt-1">
-                                يمكنك رفع حتى 10 صور (JPEG, PNG, GIF)
-                            </p>
                         </div>
 
                         {imagePreviews.length > 0 && (

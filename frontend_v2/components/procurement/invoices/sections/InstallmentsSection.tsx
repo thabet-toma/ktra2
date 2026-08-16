@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import {
   CreditCard, Calculator, Plus, Trash2, CheckCircle2,
   DollarSign, FileText, ChevronRight, AlertCircle,
-  Calendar, UploadCloud, Loader2, Eye, X
+  Calendar, Eye, X
 } from 'lucide-react';
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
+import { FileDropZone } from '@/components/ui/FileDropZone';
 import { formatMoney } from '@/utils/formatNumber';
 import { useToast } from '@/contexts/ToastContext';
 import type { LocalPayments } from '@/types';
@@ -385,32 +386,18 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
                             )}
                           </div>
                         ) : (
-                          <div className="relative">
-                            <input
-                              type="file"
-                              id={`slip-upload-${idx}`}
-                              className="hidden"
-                              accept="image/*"
-                              onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], idx)}
-                              disabled={readOnly || uploadingIndex === idx}
-                            />
-                            <label
-                              htmlFor={`slip-upload-${idx}`}
-                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all
-                                 ${uploadingIndex === idx
-                                  ? 'aseel-bg-panel aseel-text-soft cursor-not-allowed'
-                                  : 'aseel-bg-accent-bg aseel-text-accent hover:aseel-bg-accent-bg border aseel-border-accent dark:aseel-bg-panel/20 dark:aseel-text-soft dark:aseel-border-soft'
-                                }
-                               `}
-                            >
-                              {uploadingIndex === idx ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <UploadCloud className="w-3.5 h-3.5" />
-                              )}
-                              <span>{uploadingIndex === idx ? 'جاري الرفع...' : 'سليب البنك'}</span>
-                            </label>
-                          </div>
+                          // صفوف متكرّرة: `interactionRequired` يمنع صفّاً من خطف لصقة
+                          // جاره — اللصق يصل الصفّ بعد نقر/سحب داخل منطقته فقط.
+                          <FileDropZone
+                            onFiles={(files) => { void handleFileUpload(files[0], idx); }}
+                            accept="image"
+                            busy={uploadingIndex === idx}
+                            disabled={readOnly}
+                            variant="compact"
+                            interactionRequired
+                            hint="سليب البنك"
+                            className="min-w-[9rem]"
+                          />
                         )}
                       </div>
 

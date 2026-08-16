@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  ChevronDown, ImagePlus, MessageSquare, Pencil, Plus, RefreshCw, Save, Send,
+  ChevronDown, MessageSquare, Pencil, Plus, RefreshCw, Save, Send,
   Trash2, X,
 } from "lucide-react";
 
@@ -20,6 +20,7 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { AseelDateInput } from "../aseel/AseelDateInput";
 import { AseelDenseTable } from "../aseel";
 import type { DenseColumn } from "../aseel";
+import { FileDropZone } from "../ui/FileDropZone";
 
 /** ملاحظة جديدة: التاريخ يُملأ بتاريخ اليوم تلقائياً — يُعدَّل إن أراد المستخدم. */
 const emptyNote = (): DevelopmentNoteWrite => ({
@@ -258,14 +259,15 @@ export const DevelopmentNotesPage: React.FC = () => {
     }
   };
 
-  const addImages = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+  // فحص النوع والحجم صار داخل `FileDropZone` (برسالة toast)، فما يصل هنا مقبول.
+  const addImages = async (files: File[]) => {
+    if (files.length === 0) return;
     setUploading(true);
     setError(null);
     try {
       // `platform`: صورة ملاحظة تطوير أصلٌ للمنصة لا للشركة النشطة في ترويسة
       // السوبر أدمن — بلا هذا النطاق تُحمَّل بايتاتها على شركةٍ لا شأن لها بها.
-      const urls = await cloudinaryService.uploadMultipleFiles(Array.from(files), "platform");
+      const urls = await cloudinaryService.uploadMultipleFiles(files, "platform");
       setForm((current) => ({
         ...current, images: [...current.images, ...urls.map((url) => ({ url, caption: "" }))],
       }));
@@ -614,24 +616,20 @@ export const DevelopmentNotesPage: React.FC = () => {
                       />
                     </button>
                   ))}
-                  <label
-                    className="flex h-20 w-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]"
-                    title="إدراج صورة توضيحية"
-                  >
-                    {uploading
-                      ? <RefreshCw className="h-5 w-5 animate-spin" />
-                      : <ImagePlus className="h-5 w-5" />}
-                    <span className="text-[11px]">إدراج صورة</span>
-                    <input
-                      type="file" accept="image/*" multiple className="sr-only"
-                      aria-label="إدراج صورة توضيحية"
-                      onChange={(event) => {
-                        void addImages(event.target.files);
-                        event.target.value = "";
-                      }}
-                    />
-                  </label>
+                  <FileDropZone
+                    onFiles={(files) => { void addImages(files); }}
+                    accept="image"
+                    multiple
+                    busy={uploading}
+                    variant="compact"
+                    hint="إدراج صورة"
+                    className="h-20 w-20"
+                  />
                 </div>
+                {/* المربّع أضيق من أن يحمل العبارة كاملة، فالتلميح تحت الصفّ. */}
+                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                  اضغط المربّع، اسحب الصورة إليه، أو الصق (Ctrl+V)
+                </p>
               </div>
 
               {editor.mode === "edit" ? (

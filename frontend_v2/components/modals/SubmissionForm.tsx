@@ -2,7 +2,8 @@ import React, { useState, useEffect } from "react";
 import { Submission, SubmissionItem } from "../../types";
 import { DeleteIcon } from "../icons/DeleteIcon";
 import { cloudinaryService } from "../../services/cloudinaryService";
-import { usePasteImageUpload } from "../../utils/clipboardImage";
+import { FileDropZone } from "../ui/FileDropZone";
+import { useToast } from "../../contexts/ToastContext";
 
 interface SubmissionFormProps {
   initialData?: Submission;
@@ -36,6 +37,7 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const toast = useToast();
 
   const storageKey =
     taskId && userId ? `submission_draft_${taskId}_${userId}` : null;
@@ -112,27 +114,20 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
     }
   };
 
-  // معالجة اختيار الصور
-  // معالجة إضافة صور (من اختيار ملف أو لصق من الحافظة) — يُبقي حد 3 صور والتحقق من النوع.
+  // معالجة إضافة صور (اختيار ملف، سحب، أو لصق من الحافظة) — يُبقي حدّ 3 صور.
+  // فحص النوع والحجم صار داخل `FileDropZone` (برسالة toast)، فما يصل هنا مقبول.
+  // الصور مؤجّلة: تبقى ملفات محلية بمعاينة، وتُرفع عند «إضافة البند».
   const addImageFiles = (newFiles: File[]) => {
     if (newFiles.length === 0) return;
 
     if (selectedImages.length + newFiles.length > 3) {
-      alert("يمكنك رفع最多 3 صور فقط");
+      toast("يمكنك إرفاق 3 صور كحدّ أقصى للبند الواحد.", "info");
       return;
     }
 
-    const validFiles = newFiles.filter((file: File) => {
-      const isValidType = file.type.startsWith("image/");
-      if (!isValidType) {
-        alert(`الملف ${file.name} ليس صورة`);
-      }
-      return isValidType;
-    });
+    setSelectedImages((prev) => [...prev, ...newFiles]);
 
-    setSelectedImages((prev) => [...prev, ...validFiles]);
-
-    validFiles.forEach((file: File) => {
+    newFiles.forEach((file: File) => {
       const reader = new FileReader();
       reader.onload = (event: ProgressEvent<FileReader>) => {
         const target = event.target;
@@ -144,21 +139,6 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
     });
 
     setCurrentAttachment(null);
-  };
-
-  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف.
-  usePasteImageUpload(addImageFiles);
-
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    addImageFiles(Array.from(files));
-
-    // إعادة تعيين حقل الإدخال
-    const fileInput = document.getElementById(
-      "submission-images-input"
-    ) as HTMLInputElement;
-    if (fileInput) fileInput.value = "";
   };
 
   // حذف صورة محددة
@@ -219,7 +199,7 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
       resetCurrentItem();
     } catch (error) {
       // console suppressed
-      alert("حدث خطأ أثناء رفع الصور. يرجى المحاولة مرة أخرى.");
+      toast("حدث خطأ أثناء رفع الصور. يرجى المحاولة مرة أخرى.", "error");
     } finally {
       setUploading(false);
     }
@@ -233,16 +213,11 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
     setSelectedImages([]);
     setImagePreviews([]);
 
-    // إعادة تعيين حقول الإدخال
+    // إعادة تعيين حقل المرفق. حقل الصور صار داخل `FileDropZone` ويمسح نفسه بعد كل اختيار.
     const fileInput = document.getElementById(
       "submission-file-input"
     ) as HTMLInputElement;
     if (fileInput) fileInput.value = "";
-
-    const imageInput = document.getElementById(
-      "submission-images-input"
-    ) as HTMLInputElement;
-    if (imageInput) imageInput.value = "";
   };
 
   const handleRemoveItem = (id: string) => {
@@ -505,16 +480,19 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
                 <label className="text-xs font-semibold text-[var(--color-text-muted)]">
                   صور المنتج (اختياري - 3 صور)
                 </label>
-                <div className="relative">
-                  <input
-                    id="submission-images-input"
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={handleImageSelect}
-                    className="block w-full text-xs text-[var(--color-text-muted)] file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 dark:file:bg-gray-700 dark:file:text-gray-300 cursor-pointer"
-                  />
-                </div>
+                <FileDropZone
+                  onFiles={addImageFiles}
+                  accept="image"
+                  multiple
+                  busy={uploading}
+                  disabled={selectedImages.length >= 3}
+                  variant="compact"
+                  hint={
+                    selectedImages.length >= 3
+                      ? "اكتمل الحد الأقصى (3 صور)"
+                      : "اضغط لاختيار الصور، اسحبها إلى هنا، أو الصق (Ctrl+V)"
+                  }
+                />
 
                 {/* معاينات الصور */}
                 {imagePreviews.length > 0 && (

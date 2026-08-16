@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { cloudinaryService } from '../services/cloudinaryService';
+import { FileDropZone } from './ui/FileDropZone';
 // تأكد من أن مسار الاستيراد صحيح لدوال السيرفس التي قمنا بإنشائها سابقاً
 import { createGalleryItem, getGalleryChunk, getGalleryCount } from '../services/firestoreService';
 import { formatDateValue } from "../utils/formatDate";
@@ -37,10 +38,7 @@ const PublicGallery: React.FC = () => {
 
   // --- Upload State ---
   const [localFiles, setLocalFiles] = useState<LocalFile[]>([]);
-  const [globalError, setGlobalError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const dragRef = useRef<HTMLDivElement>(null);
 
   // --- Pagination & Gallery State ---
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
@@ -135,32 +133,20 @@ const PublicGallery: React.FC = () => {
     };
   }, [localFiles]);
 
-  const processFiles = useCallback((files: FileList | File[]): void => {
-    setGlobalError(null);
-    if (!files || files.length === 0) return;
-
-    const newFiles: LocalFile[] = [];
-    Array.from(files).forEach((file) => {
-      if (!file.type.startsWith('image/')) {
-        setGlobalError(`الملف "${file.name}" ليس صورة. يرجى اختيار ملفات صور فقط.`);
-        return;
-      }
-      newFiles.push({
+  // فحص النوع والحجم صار داخل `FileDropZone` (برسالة toast)، فما يصل هنا مقبول.
+  const processFiles = useCallback((files: File[]): void => {
+    if (files.length === 0) return;
+    setLocalFiles(prev => [
+      ...prev,
+      ...files.map<LocalFile>((file) => ({
         file,
         preview: URL.createObjectURL(file),
         description: '',
         id: crypto.randomUUID(),
         status: 'ready'
-      });
-    });
-
-    setLocalFiles(prev => [...prev, ...newFiles]);
+      }))
+    ]);
   }, []);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    processFiles(e.target.files as FileList);
-    e.currentTarget.value = ''; 
-  };
 
   const handleDescriptionChange = (id: string, value: string) => {
     setLocalFiles(prev => prev.map(f => f.id === id ? { ...f, description: value } : f));
@@ -174,30 +160,12 @@ const PublicGallery: React.FC = () => {
     });
   };
 
-  // --- Drag & Drop / Paste ---
-  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); if (!isDragging) setIsDragging(true); }, [isDragging]);
-  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }, []);
-  const handleDrop = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); processFiles(e.dataTransfer.files); }, [processFiles]);
-  
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    setGlobalError(null);
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    const files: File[] = [];
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.indexOf('image') !== -1) {
-        const file = items[i].getAsFile();
-        if (file) files.push(new File([file], `Pasted_Image_${Date.now()}.png`, { type: file.type }));
-      }
-    }
-    if (files.length > 0) { processFiles(files); e.preventDefault(); }
-  }, [processFiles]);
+  // السحب والإفلات واللصق (Ctrl+V) صارا داخل `FileDropZone` — لا معالجات هنا.
 
   // --- Upload Function ---
   const uploadAll = async () => {
     if (localFiles.length === 0) return;
     setIsUploading(true);
-    setGlobalError(null);
 
     const newLocalFiles = [...localFiles];
     let uploadCount = 0;
@@ -249,11 +217,7 @@ const PublicGallery: React.FC = () => {
 
   // --- Render ---
   return (
-    <div 
-        className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300"
-        onPaste={handlePaste}
-        tabIndex={0}
-    >
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
       <div className="max-w-7xl mx-auto p-4 sm:p-8">
         {/* --- Header --- */}
         <header className="mb-10 relative flex flex-col items-center">
@@ -263,12 +227,10 @@ const PublicGallery: React.FC = () => {
               <Camera className="w-8 h-8 sm:w-10 sm:h-10" />
               صالة عرض الشركة
             </h2>
+            {/* تلميح اللصق انتقل إلى داخل منطقة الرفع نفسها: الزائر غير المسجّل لا يرفع،
+                فلا معنى لإعلانه في الترويسة. */}
             <p className="text-gray-500 dark:text-gray-400 max-w-lg mx-auto">
               مساحة مشتركة لصور المنتجات والمشاريع.
-              <br />
-              <span className="text-xs sm:text-sm bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 px-2 py-1 rounded mt-2 inline-block">
-                نصيحة: يمكنك لصق الصور مباشرة (Ctrl+V)
-              </span>
             </p>
           </div>
         </header>
@@ -284,48 +246,14 @@ const PublicGallery: React.FC = () => {
           </div>
           
           <div className="p-6">
-            {/* Drag Drop Area */}
-            <div 
-                ref={dragRef}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                className={`
-                  relative border-3 border-dashed rounded-xl p-8 text-center transition-all duration-300
-                  ${isDragging 
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 scale-[1.01]' 
-                      : 'border-gray-300 dark:border-gray-600 hover:border-blue-400 dark:hover:border-blue-500 bg-gray-50 dark:bg-gray-800/50'
-                  }
-                `}
-            >
-                <input 
-                    id="file-upload"
-                    type="file" 
-                    accept="image/*" 
-                    multiple 
-                    onChange={handleFileChange} 
-                    className="hidden"
-                    disabled={isUploading}
-                />
-                <label htmlFor="file-upload" className="cursor-pointer flex flex-col items-center justify-center w-full h-full">
-                    <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center mb-4 text-blue-600 dark:text-blue-400">
-                      <Cloud className="w-8 h-8" />
-                    </div>
-                    <p className="text-lg font-medium text-gray-700 dark:text-gray-200">
-                        {isDragging ? 'أفلت الصور هنا!' : 'اضغط لاختيار الصور أو اسحبها هنا'}
-                    </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                        يدعم JPG, PNG, WEBP (بحد أقصى 5MB)
-                    </p>
-                </label>
-            </div>
-
-            {globalError && (
-                <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 rounded-lg flex items-center gap-2 animate-pulse">
-                    <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-                    <span>{globalError}</span>
-                </div>
-            )}
+            <FileDropZone
+              onFiles={processFiles}
+              accept="image"
+              multiple
+              busy={isUploading}
+              maxSizeMB={5}
+              subHint="يدعم JPG, PNG, WEBP (بحد أقصى 5 م.ب)"
+            />
 
             {/* Local Files List */}
             {localFiles.length > 0 && (

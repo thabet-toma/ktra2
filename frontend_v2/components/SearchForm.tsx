@@ -1,7 +1,8 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SearchQuery, Task } from '../types';
-import { UploadIcon } from './icons/UploadIcon';
+import { FileDropZone } from './ui/FileDropZone';
+import { useToast } from '../contexts/ToastContext';
 
 interface SearchFormProps {
   onSearch: (query: SearchQuery) => void;
@@ -14,7 +15,7 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, activeTask, on
   const [preview, setPreview] = useState<string | null>(null);
   const [description, setDescription] = useState('');
   const [targetPrice, setTargetPrice] = useState('');
-  const [isDragging, setIsDragging] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     if (activeTask) {
@@ -28,18 +29,21 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, activeTask, on
     }
   }, [activeTask]);
 
-  const handleFileChange = (files: FileList | null) => {
-    if (files && files[0]) {
-      const file = files[0];
-      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-        alert('Unsupported file type.');
-        return;
-      }
-      setImage(file);
-      const reader = new FileReader();
-      reader.onloadend = () => setPreview(reader.result as string);
-      reader.readAsDataURL(file);
+  // الاختيار والسحب واللصق (Ctrl+V) صارت كلها داخل `FileDropZone`؛ يبقى هنا حصر
+  // الصيغ الثلاث التي يقبلها محرّك التحليل — أضيق ممّا تقبله المنطقة (`image/*`).
+  const ANALYZABLE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+  const handleFiles = (files: File[]) => {
+    const file = files[0];
+    if (!file) return;
+    if (!ANALYZABLE_TYPES.includes(file.type)) {
+      toast('صيغة غير مدعومة — الصيغ المقبولة للتحليل: JPG أو PNG أو WEBP.', 'error');
+      return;
     }
+    setImage(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setPreview(reader.result as string);
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -47,17 +51,9 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, activeTask, on
     if (image && description && targetPrice) {
       onSearch({ image, description, targetPrice: parseFloat(targetPrice) });
     } else {
-      alert('يرجى تعبئة جميع الحقول ورفع صورة.');
+      toast('يرجى تعبئة جميع الحقول ورفع صورة.', 'error');
     }
   };
-
-  // Drag and Drop handlers...
-  const handleDragEnter = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(true); }, []);
-  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); setIsDragging(false); }, []);
-  const handleDrop = useCallback((e: React.DragEvent) => { 
-      e.preventDefault(); setIsDragging(false); 
-      if(e.dataTransfer.files?.length) handleFileChange(e.dataTransfer.files); 
-  }, []);
 
   return (
     <div className="max-w-5xl mx-auto bg-[var(--color-surface)] rounded-2xl shadow-lg border border-[var(--color-border)] animate-fade-in overflow-hidden">
@@ -79,30 +75,28 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, activeTask, on
             {/* Image Upload Area */}
             <div className="w-full">
                 <label className="block text-lg font-medium text-[var(--color-text)] mb-3">صورة المنتج</label>
-                <label
-                    onDragEnter={handleDragEnter}
-                    onDragLeave={handleDragLeave}
-                    onDragOver={e => e.preventDefault()}
-                    onDrop={handleDrop}
-                    className={`w-full aspect-video sm:aspect-square lg:aspect-[4/3] border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${isDragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)]'}`}
-                >
-                    <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileChange(e.target.files)} />
-                    
-                    {preview ? (
+                {preview ? (
                     <>
-                        <img src={preview} alt="Preview" className="w-full h-full object-contain p-4 z-10" />
-                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                            <p className="text-white font-bold">تغيير الصورة</p>
+                        <div className="w-full aspect-video sm:aspect-square lg:aspect-[4/3] rounded-2xl border-2 border-[var(--color-border)] bg-[var(--color-surface-2)] overflow-hidden">
+                            <img src={preview} alt="معاينة صورة المنتج" className="w-full h-full object-contain p-4" />
                         </div>
+                        <FileDropZone
+                            onFiles={handleFiles}
+                            accept="image"
+                            variant="compact"
+                            hint="تغيير الصورة — اضغط، اسحب، أو الصق (Ctrl+V)"
+                            className="mt-2"
+                        />
                     </>
-                    ) : (
-                    <div className="text-center p-6">
-                        <UploadIcon className="mx-auto h-12 w-12 text-[var(--color-text-muted)] mb-3" />
-                        <p className="text-[var(--color-text-muted)] font-medium">اضغط لرفع صورة</p>
-                        <p className="text-sm text-[var(--color-text-muted)] mt-1">أو اسحب الصورة هنا</p>
-                    </div>
-                    )}
-                </label>
+                ) : (
+                    <FileDropZone
+                        onFiles={handleFiles}
+                        accept="image"
+                        hint="اضغط لرفع صورة، اسحبها إلى هنا، أو الصق (Ctrl+V)"
+                        subHint="الصيغ المقبولة للتحليل: JPG أو PNG أو WEBP"
+                        className="w-full aspect-video sm:aspect-square lg:aspect-[4/3]"
+                    />
+                )}
             </div>
 
             {/* Form Fields */}

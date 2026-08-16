@@ -6,7 +6,7 @@
  * تبويبات «نظرة عامة» و«الفواتير المرتبطة» و«حركة المخزون» تأتي من
  * `useProductInsights` (كانت حبيسة صفحة `ProductProfilePage` المنفصلة).
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
 import {
@@ -21,7 +21,7 @@ import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Info, Upload
 import { CategoryPicker } from "../inventory/CategoryPicker";
 import { ValuePicker } from "../inventory/ValuePicker";
 import { cloudinaryService } from "../../services/cloudinaryService";
-import { usePasteImageUpload } from "../../utils/clipboardImage";
+import { usePasteZone } from "../../utils/clipboardImage";
 import { useProductInsights } from "./ProductInsightTabs";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { completeEan13, ean13Svg, isValidEan13, printBarcodeLabels } from "../../utils/barcode";
@@ -61,6 +61,11 @@ const newCmpKey = () => `cmp-${Date.now()}-${Math.random().toString(36).slice(2,
 
 // الداتا شيت: المحفوظ له id (للحذف من SQL/Cloudinary)، والمرفوع حديثاً id=null.
 type DatasheetRef = { id: number | null; url: string };
+
+// الداتا شيت يقبل PDF وصوراً معاً، ولا يُحتفَظ بنوع MIME بعد الرفع — فالامتداد في
+// الرابط هو ما يميّز الصورة، لتُعرض مصغَّرةً بدل اسم ملفٍ لا يقول شيئاً عن محتواه.
+const IMAGE_URL_PATTERN = /\.(png|jpe?g|gif|webp|bmp|svg)(\?|#|$)/i;
+const isImageUrl = (url: string): boolean => IMAGE_URL_PATTERN.test(url);
 const extractDatasheets = (p: Record<string, unknown>): DatasheetRef[] =>
   Array.isArray(p.attachments)
     ? (p.attachments as Array<{ id?: number; file_path?: string; file_type?: string }>)
@@ -146,6 +151,7 @@ export const ItemFormAseel: React.FC<Props> = ({
   const [err, setErr] = useState<string | null>(null);
   const [lastKey, setLastKey] = useState("—");
   const [dsUploading, setDsUploading] = useState(false);
+  const datasheetRef = useRef<HTMLDivElement>(null);
 
   const uploadDatasheetFile = async (file: File) => {
     setDsUploading(true); setErr(null); setMsg(null);
@@ -167,8 +173,9 @@ export const ItemFormAseel: React.FC<Props> = ({
     await uploadDatasheetFile(file);
   };
 
-  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف.
-  usePasteImageUpload((files) => { void uploadDatasheetFile(files[0]); }, !dsUploading);
+  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف — المنطقة معرَّفة بحقل الداتا شيت
+  // نفسه، واللصق في أي مكان آخر من الكرت يصلها أيضاً (لا منطقة أخرى تزاحمها).
+  usePasteZone(datasheetRef, (files) => { void uploadDatasheetFile(files[0]); }, { enabled: !dsUploading });
 
   const handleDatasheetRemove = async (index: number) => {
     const item = form.datasheets[index];
@@ -506,7 +513,7 @@ export const ItemFormAseel: React.FC<Props> = ({
       {fld("معامل الوحدة 3", <input className="aseel-input" type="number" min="0" step="0.001"
         value={form.uom3_factor} onChange={(e) => patch("uom3_factor", e.target.value)} />)}
       {fld("ملفات الداتا شيت (PDF أو صور)",
-        <div>
+        <div ref={datasheetRef}>
           <label className="aseel-input" style={{
             display: "inline-flex", alignItems: "center", gap: 6, cursor: dsUploading ? "wait" : "pointer",
             width: "max-content",
@@ -516,6 +523,9 @@ export const ItemFormAseel: React.FC<Props> = ({
             <input type="file" accept="application/pdf,image/*" hidden disabled={dsUploading}
               onChange={handleDatasheetUpload} />
           </label>
+          <span style={{ marginInlineStart: 8, color: "var(--aseel-ink-soft)", fontSize: "var(--aseel-fs-sm)" }}>
+            أو الصق الصورة (Ctrl+V)
+          </span>
           {form.datasheets.length === 0 ? (
             <span style={{ marginInlineStart: 8, color: "var(--aseel-ink-soft)", fontSize: "var(--aseel-fs-sm)" }}>
               لا ملفات بعد
@@ -524,7 +534,14 @@ export const ItemFormAseel: React.FC<Props> = ({
             <ul style={{ listStyle: "none", margin: "6px 0 0", padding: 0, display: "grid", gap: 4 }}>
               {form.datasheets.map((d, i) => (
                 <li key={d.url} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <FileText className="h-3.5 w-3.5 shrink-0" />
+                  {isImageUrl(d.url) ? (
+                    <img src={d.url} alt="معاينة الملف" style={{
+                      width: 28, height: 28, objectFit: "cover", borderRadius: 4,
+                      flexShrink: 0, border: "1px solid var(--aseel-line, #d7d7d7)",
+                    }} />
+                  ) : (
+                    <FileText className="h-3.5 w-3.5 shrink-0" />
+                  )}
                   <a href={d.url} target="_blank" rel="noreferrer"
                     style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {decodeURIComponent(d.url.split("/").pop() || d.url)}

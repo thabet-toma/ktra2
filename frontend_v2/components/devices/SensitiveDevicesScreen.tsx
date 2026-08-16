@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ShieldAlert, Camera, Loader2, Check, AlertTriangle, Search, RotateCcw, Eye,
   Trash2, X, ImageOff, ChevronRight, ChevronLeft,
@@ -24,6 +24,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { DeviceDetailModal } from "./DeviceDetailModal";
 import { statusPillClass } from "./deviceStatus";
 import { BarcodeScannerModal } from "../shared/BarcodeScannerModal";
+import { FileDropZone } from "../ui/FileDropZone";
 
 /**
  * THA-45 M2 — «تسجيل وتتبع الأجهزة الحساسة»: ثلاث مناطق فوق بعضها كما في نموذج
@@ -94,7 +95,6 @@ export const SensitiveDevicesScreen: React.FC = () => {
   const [imeiChecking, setImeiChecking] = useState(false);
   const [savedDuplicates, setSavedDuplicates] = useState<DeviceDuplicateMatch[] | null>(null);
   const [modelNames, setModelNames] = useState<string[]>([]);
-  const photoInputRef = useRef<HTMLInputElement | null>(null);
   // الحقل الذي يستقبل قراءة الكاميرا — يفتح BarcodeScannerModal حتى يُغلق.
   const [scanTarget, setScanTarget] = useState<"serial_number" | "imei" | null>(null);
 
@@ -198,7 +198,6 @@ export const SensitiveDevicesScreen: React.FC = () => {
       toast(`${messageOf(e, "تعذّر رفع الصورة")} — يمكن التسجيل بلا صورة`, "error");
     } finally {
       setPhotoBusy(false);
-      if (photoInputRef.current) photoInputRef.current.value = "";
     }
   };
 
@@ -220,7 +219,6 @@ export const SensitiveDevicesScreen: React.FC = () => {
     setFormErr(null);
     setImeiMatches([]);
     setSavedDuplicates(null);
-    if (photoInputRef.current) photoInputRef.current.value = "";
   };
 
   const submit = async () => {
@@ -249,7 +247,6 @@ export const SensitiveDevicesScreen: React.FC = () => {
       setSavedDuplicates(created.duplicate_of?.length ? created.duplicate_of : null);
       setDraft({ ...EMPTY_DRAFT });
       setImeiMatches([]);
-      if (photoInputRef.current) photoInputRef.current.value = "";
       setPage(1);
       await Promise.all([load(), loadModelNames()]);
     } catch (e) {
@@ -447,50 +444,49 @@ export const SensitiveDevicesScreen: React.FC = () => {
             </div>
           </div>
 
-          {/* صورة الجهاز — التقاط مباشر من كاميرا الجهاز المحمول */}
+          {/* صورة الجهاز — التقاط مباشر من كاميرا الجهاز المحمول (`capture="environment"`
+              يُمرَّر إلى `input` داخل المنطقة)، أو سحب، أو لصق (Ctrl+V). */}
           <div className="w-full shrink-0 md:w-44">
             <span className={labelClass}>صورة الجهاز</span>
-            <div className="flex h-36 w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)]">
-              {draft.photo_url ? (
-                <img src={draft.photo_url} alt="صورة الجهاز" className="h-full w-full object-cover" />
-              ) : photoBusy ? (
-                <Loader2 className="h-6 w-6 animate-spin text-[var(--color-text-muted)]" />
-              ) : (
-                <div className="flex flex-col items-center gap-1 text-[var(--color-text-muted)]">
-                  <Camera className="h-7 w-7" />
-                  <span className="text-[11px]">صورة الجهاز</span>
+            {draft.photo_url ? (
+              <>
+                <div className="flex h-36 w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)]">
+                  <img src={draft.photo_url} alt="صورة الجهاز" className="h-full w-full object-cover" />
                 </div>
-              )}
-            </div>
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              id="device-photo-input"
-              onChange={(e) => void pickPhoto(e.target.files?.[0] ?? null)}
-            />
-            <div className="mt-1 flex items-center gap-2">
-              <label
-                htmlFor="device-photo-input"
-                className={`flex-1 cursor-pointer rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-center text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-2)] ${
-                  !canCreate || photoBusy ? "pointer-events-none opacity-50" : ""
-                }`}
-              >
-                {photoBusy ? "جارٍ الرفع…" : draft.photo_url ? "تغيير الصورة" : "رفع صورة"}
-              </label>
-              {draft.photo_url && (
-                <button
-                  type="button"
-                  className="rounded-lg p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
-                  title="إزالة الصورة"
-                  onClick={() => setDraft({ ...draft, photo_url: "" })}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              )}
-            </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <FileDropZone
+                    onFiles={(files) => { void pickPhoto(files[0]); }}
+                    accept="image"
+                    capture="environment"
+                    variant="compact"
+                    busy={photoBusy}
+                    disabled={!canCreate}
+                    hint="تغيير الصورة"
+                    className="flex-1"
+                  />
+                  <button
+                    type="button"
+                    className="rounded-lg p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+                    title="إزالة الصورة"
+                    onClick={() => setDraft({ ...draft, photo_url: "" })}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <FileDropZone
+                onFiles={(files) => { void pickPhoto(files[0]); }}
+                accept="image"
+                capture="environment"
+                variant="compact"
+                busy={photoBusy}
+                disabled={!canCreate}
+                hint="صورة الجهاز — اضغط أو التقطها"
+                subHint="أو اسحب الصورة إلى هنا، أو الصق (Ctrl+V)"
+                className="h-36 w-full"
+              />
+            )}
           </div>
         </div>
 

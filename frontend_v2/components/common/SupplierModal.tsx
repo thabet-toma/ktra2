@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Supplier } from '../../types';
 import { suppliersService } from '../../services/firestoreService';
 import { cloudinaryService } from '../../services/cloudinaryService';
-import { usePasteImageUpload } from '../../utils/clipboardImage';
+import { FileDropZone } from '../ui/FileDropZone';
 import { LoadingSpinner } from '../LoadingSpinner';
 import {
     X, Save, Building, User, MapPin, Wallet, ImageIcon, ArrowRight, Tag, Edit2, AlertTriangle
@@ -71,10 +71,8 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
         }
     };
 
-    // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف — فقط والنافذة مفتوحة. يجب استدعاء
-    // الـ hook قبل أي return مبكر (isOpen) حفاظاً على ترتيب الـ hooks بين التصييرات.
-    usePasteImageUpload((files) => { void uploadLogoFile(files[0]); }, isOpen && !uploadingLogo);
-
+    // الاختيار والسحب واللصق (Ctrl+V) صارت كلها داخل `FileDropZone` أدناه، ولا تُسجَّل
+    // منطقة اللصق إلا والنافذة مفتوحة لأن المكوّن نفسه لا يُركَّب قبل ذلك.
     if (!isOpen) return null;
 
     const handleSave = async () => {
@@ -153,11 +151,6 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
             setSaving(false);
         }
     };
-    const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (!e.target.files || e.target.files.length === 0) return;
-        await uploadLogoFile(e.target.files[0]);
-    };
-
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-[var(--color-border)]">
@@ -216,11 +209,13 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                             <p className="text-sm text-[var(--color-text-muted)] mb-4">
                                 يفضل استخدام صورة مربعة بحجم 500x500 بكسل. الصيغ المدعومة: PNG, JPG
                             </p>
-                            <label className="inline-flex cursor-pointer items-center gap-2 px-4 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg text-sm font-medium hover:bg-[var(--color-surface-2)] transition-colors shadow-sm">
-                                <ImageIcon className="w-4 h-4 text-blue-500" />
-                                رفع صورة
-                                <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
-                            </label>
+                            <FileDropZone
+                                onFiles={(files) => { void uploadLogoFile(files[0]); }}
+                                accept="image"
+                                busy={uploadingLogo}
+                                variant="compact"
+                                hint="اضغط لاختيار الشعار، اسحبه إلى هنا، أو الصق (Ctrl+V)"
+                            />
                         </div>
                     </div>
 

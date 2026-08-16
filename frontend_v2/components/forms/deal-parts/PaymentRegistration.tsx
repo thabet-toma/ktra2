@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   DollarSign,
-  Upload,
   X,
-  Loader2,
   CheckCircle,
   Calendar,
   Lock,
@@ -22,6 +20,8 @@ import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { validatePaymentInput } from "@/utils/usePaymentForm";
 import { BANK_SWIFT_IMAGE_REQUIRED, isAwaitingSupplierConfirmation } from "@/utils/dealPaymentFlow";
 import { formatDateValue } from "../../../utils/formatDate";
+import { FileDropZone } from "../../ui/FileDropZone";
+import { useToast } from "../../../contexts/ToastContext";
 
 /** ربط صندوق (external_id = معرف Firestore) برصيد حسابه في ميزان المراجعة */
 async function fetchSqlBalanceByCashBoxExternalId(): Promise<Record<string, number>> {
@@ -102,6 +102,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
   const [supplierImage, setSupplierImage] = useState("");
   const [supplierNotes, setSupplierNotes] = useState("");
   const [isUploading, setIsUploading] = useState<string | null>(null);
+  const toast = useToast();
   const [cashBoxes, setCashBoxes] = useState<any[]>([]);
   const [sqlBalanceByCashBoxId, setSqlBalanceByCashBoxId] = useState<Record<string, number>>({});
   const sqlBalanceRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -193,8 +194,9 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
     };
   }, [scheduleSqlBalanceRefresh]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, setter: (url: string) => void) => {
-    const file = e.target.files?.[0];
+  // فحص النوع والحجم صار داخل `FileDropZone` (برسالة toast)، فما يصل هنا مقبول.
+  const handleUpload = async (files: File[], setter: (url: string) => void) => {
+    const file = files[0];
     if (!file) return;
 
     setIsUploading("uploading");
@@ -204,7 +206,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
     } catch (err) {
       // كان يبتلع السبب الحقيقي (مثل «لم تُضبط بيانات Cloudinary على الخادم»)
       // فيبدو الخلل عطلاً في السحابة بينما هو إعداد ناقص على الخادم.
-      alert(`فشل رفع الصورة: ${err instanceof Error ? err.message : String(err)}`);
+      toast(`فشل رفع الصورة: ${err instanceof Error ? err.message : String(err)}`, "error");
     } finally {
       setIsUploading(null);
     }
@@ -586,28 +588,14 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 </div>
               </div>
             ) : (
-              <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-blue-300 rounded-lg cursor-pointer bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/10 dark:border-blue-700 dark:hover:bg-blue-900/20 transition-colors">
-                {isUploading === "uploading" ? (
-                  <>
-                    <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-2" />
-                    <p className="text-blue-600 dark:text-blue-400">جاري رفع الصورة...</p>
-                  </>
-                ) : (
-                  <>
-                    <div className="p-3 bg-blue-100 dark:bg-blue-900/20 rounded-full mb-3">
-                      <Upload className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-                    </div>
-                    <p className="font-medium text-blue-700 dark:text-blue-300 mb-1">اضغط لرفع صورة المطالبة</p>
-                    <p className="text-sm text-blue-600 dark:text-blue-400">يُفضل صورة واضحة من موقع علي بابا</p>
-                  </>
-                )}
-                <input
-                  type="file"
-                  className="hidden"
-                  accept="image/*"
-                  onChange={(e) => handleUpload(e, setClaimImage)}
-                />
-              </label>
+              <FileDropZone
+                onFiles={(files) => { void handleUpload(files, setClaimImage); }}
+                accept="image"
+                busy={isUploading === "uploading"}
+                hint="اضغط لرفع صورة المطالبة، أو اسحبها، أو الصقها (Ctrl+V)"
+                subHint="يُفضل صورة واضحة من موقع علي بابا"
+                className="h-48"
+              />
             )}
           </div>
 
@@ -772,28 +760,14 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 </div>
               </div>
             ) : (
-              <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-green-300 rounded-lg cursor-pointer bg-green-50 hover:bg-green-100 dark:bg-green-900/10 dark:border-green-700 dark:hover:bg-green-900/20 transition-colors">
-                {isUploading === "uploading" ? (
-                  <>
-                    <Loader2 className="w-10 h-10 text-green-500 animate-spin mb-2" />
-                    <p className="text-green-600 dark:text-green-400">جاري رفع الصورة...</p>
-                  </>
-                ) : (
-                  <>
-                    <div className="p-3 bg-green-100 dark:bg-green-900/20 rounded-full mb-3">
-                      <Upload className="w-8 h-8 text-green-600 dark:text-green-400" />
-                    </div>
-                    <p className="font-medium text-green-700 dark:text-green-300 mb-1">أضف صورة السليب البنكي إن كانت متاحة</p>
-                    <p className="text-sm text-green-600 dark:text-green-400">يمكن إرفاقها لاحقاً؛ لا تمنع تسجيل التحويل</p>
-                  </>
-                )}
-                <input
-                  type="file"
-                  className="hidden"
-                  accept="image/*"
-                  onChange={(e) => handleUpload(e, setSwiftImage)}
-                />
-              </label>
+              <FileDropZone
+                onFiles={(files) => { void handleUpload(files, setSwiftImage); }}
+                accept="image"
+                busy={isUploading === "uploading"}
+                hint="أضف صورة السليب البنكي — اضغط، اسحب، أو الصق (Ctrl+V)"
+                subHint="يمكن إرفاقها لاحقاً؛ لا تمنع تسجيل التحويل"
+                className="h-48"
+              />
             )}
           </div>
 
@@ -916,19 +890,14 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 </button>
               </div>
             ) : (
-              <label className="flex items-center justify-center w-full h-32 border-2 border-dashed border-[var(--color-border)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-2)] transition-colors">
-                <div className="text-center">
-                  <Upload className="w-8 h-8 text-[var(--color-text-muted)] mx-auto mb-2" />
-                  <p className="text-[var(--color-text-muted)]">رفع صورة التأكيد</p>
-                  <p className="text-xs text-[var(--color-text-muted)]">مثل: إشعار استلام، بريد إلكتروني، واتساب</p>
-                </div>
-                <input
-                  type="file"
-                  className="hidden"
-                  accept="image/*"
-                  onChange={(e) => handleUpload(e, setSupplierImage)}
-                />
-              </label>
+              <FileDropZone
+                onFiles={(files) => { void handleUpload(files, setSupplierImage); }}
+                accept="image"
+                busy={isUploading === "uploading"}
+                hint="رفع صورة التأكيد — اضغط، اسحب، أو الصق (Ctrl+V)"
+                subHint="مثل: إشعار استلام، بريد إلكتروني، واتساب"
+                className="h-32"
+              />
             )}
           </div>
 

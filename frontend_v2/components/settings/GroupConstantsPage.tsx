@@ -322,6 +322,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
                 e.target.value = "";
               }} />
           </label>
+          <span className="aseel-hint">أو الصق الصورة (Ctrl+V)</span>
         </span>
       ))}
       {fld("رقم المشتغل المرخص", (

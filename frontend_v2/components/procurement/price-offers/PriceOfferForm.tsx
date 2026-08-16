@@ -15,14 +15,14 @@ import {
 } from "../../aseel";
 import {
   Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Search, Info,
-  FileText, Upload, Link2, Plus,
+  FileText, Link2, Plus,
 } from "lucide-react";
 import { formatDateValue } from "../../../utils/formatDate";
 import { ItemSearchModal } from "./ItemSearchModal";
 import { ProductCardModal } from "../../shared/ProductCardModal";
 import { FilePreviewModal } from "../../shared/FilePreviewModal";
 import { cloudinaryService } from "../../../services/cloudinaryService";
-import { usePasteImageUpload } from "../../../utils/clipboardImage";
+import { FileDropZone } from "../../ui/FileDropZone";
 import {
   CommercialDocumentEditor,
   type CommercialHeaderField,
@@ -348,14 +348,7 @@ export const PriceOfferForm: React.FC<Props> = ({
     }
   };
 
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files: File[] = Array.from(event.target.files ?? []) as File[];
-    event.target.value = "";
-    await uploadAttachmentFiles(files);
-  };
-
-  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف.
-  usePasteImageUpload((files) => { void uploadAttachmentFiles(files); }, !uploading);
+  // الاختيار والسحب واللصق (Ctrl+V) صارت كلها داخل `FileDropZone` في تبويب الملفات.
 
   const removeAttachment = (index: number) =>
     setAttachments((prev) => prev.filter((_, i) => i !== index));
@@ -610,20 +603,15 @@ export const PriceOfferForm: React.FC<Props> = ({
   const attachmentsTab = (
     <div className="space-y-2 px-1 py-2">
       {!isReadOnly && (
-        <div>
-          <input id="price-offer-file" type="file" multiple className="hidden"
-            accept=".pdf,image/*"
-            disabled={uploading} onChange={(e) => void handleUpload(e)} />
-          <label htmlFor="price-offer-file"
-            className="flex h-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-[var(--color-border)] text-xs hover:bg-[var(--color-surface-2)]">
-            {uploading
-              ? <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
-              : <Upload className="h-5 w-5 text-[var(--color-text-muted)]" />}
-            <span className="text-[var(--color-text-muted)]">
-              {uploading ? "جاري الرفع…" : "اضغط لرفع ملف عرض السعر (PDF أو صورة)"}
-            </span>
-          </label>
-        </div>
+        <FileDropZone
+          onFiles={(files) => { void uploadAttachmentFiles(files); }}
+          accept="image-pdf"
+          multiple
+          busy={uploading}
+          variant="compact"
+          hint="اضغط لرفع ملف عرض السعر، اسحبه إلى هنا، أو الصق صورة (Ctrl+V)"
+          subHint="PDF أو صورة"
+        />
       )}
       {attachments.length === 0 ? (
         <p className="aseel-hint text-center">لا توجد ملفات مرفوعة لهذا العرض</p>

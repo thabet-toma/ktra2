@@ -3,8 +3,12 @@ import { Item, Category, SubCategory, Brand, User } from '@/types';
 import { itemsService } from '@/services/firestoreService';
 import { cloudinaryService } from '@/services/cloudinaryService';
 
-import { ArrowRight, Plus, Shield, Save, Upload, X, Loader2, StoreIcon } from 'lucide-react';
+import { ArrowRight, Plus, Shield, Save, X, StoreIcon } from 'lucide-react';
 import { AseelTabs } from '../aseel';
+import { FileDropZone } from '../ui/FileDropZone';
+import { useToast } from '../../contexts/ToastContext';
+import { usePasteZone } from '../../utils/clipboardImage';
+import { fillFirstEmptySlots } from '../../utils/imageSlots';
 
 interface ItemFormProps {
     initialItem: Partial<Item>;
@@ -25,6 +29,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({
 }) => {
     const [currentItem, setCurrentItem] = useState<Partial<Item>>(initialItem);
     const [uploadingImages, setUploadingImages] = useState<boolean[]>([false, false, false]);
+    const toast = useToast();
 
     const [activeTab, setActiveTab] = useState<'details' | 'store'>('details');
 
@@ -75,24 +80,39 @@ export const ItemForm: React.FC<ItemFormProps> = ({
         }
     };
 
-    const handleImageUpload = async (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
-        if (!e.target.files || e.target.files.length === 0) return;
-        const newUploading = [...uploadingImages];
-        newUploading[index] = true;
-        setUploadingImages(newUploading);
+    const setSlotUploading = (index: number, value: boolean) =>
+        setUploadingImages(prev => prev.map((flag, i) => (i === index ? value : flag)));
 
+    // رفع فوري لخانة بعينها — نفس المسار لاختيار الملف، للسحب، وللّصق.
+    const uploadToSlot = async (index: number, file: File) => {
+        setSlotUploading(index, true);
         try {
-            const url = await cloudinaryService.uploadImage(e.target.files[0]);
-            const newImages = [...(currentItem.imageUrls || ['', '', ''])];
-            newImages[index] = url;
-            setCurrentItem(prev => ({ ...prev, imageUrls: newImages }));
+            const url = await cloudinaryService.uploadImage(file);
+            setCurrentItem(prev => {
+                const newImages = [...(prev.imageUrls || ['', '', ''])];
+                newImages[index] = url;
+                return { ...prev, imageUrls: newImages };
+            });
         } catch (error) {
-            alert("فشل رفع الصورة");
+            toast('فشل رفع الصورة', 'error');
         } finally {
-            newUploading[index] = false;
-            setUploadingImages(newUploading);
+            setSlotUploading(index, false);
         }
     };
+
+    // اللصق لا يقصد خانةً بعينها: يملأ أول الخانات الفارغة بالترتيب (`fillFirstEmptySlots`).
+    // منطقة على مستوى الشاشة (بلا عنصر) — مناطق الخانات تسبقها فقط حين يُلصق داخلها.
+    usePasteZone(null, (files) => {
+        const { assignments, dropped } = fillFirstEmptySlots(currentItem.imageUrls || ['', '', ''], files);
+        if (assignments.length === 0) {
+            toast('لا توجد خانة صورة فارغة — احذف صورة أولاً.', 'info');
+            return;
+        }
+        if (dropped > 0) {
+            toast(`الخانات الفارغة لا تكفي — لم تُرفع ${dropped} صورة.`, 'info');
+        }
+        assignments.forEach(({ index, file }) => { void uploadToSlot(index, file); });
+    });
 
     return (
         <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-sm h-full flex flex-col">
@@ -121,29 +141,32 @@ export const ItemForm: React.FC<ItemFormProps> = ({
                         <label className="block text-sm font-medium mb-2 dark:aseel-text-soft">صور الصنف</label>
                         <div className="space-y-3">
                             {(currentItem.imageUrls || ['', '', '']).map((url, index) => (
-                                <div key={index} className="relative aspect-square aseel-bg-panel dark:aseel-bg-panel rounded-lg border border-dashed aseel-border-soft dark:aseel-border-soft overflow-hidden hover:aseel-border-soft transition-colors group">
-                                    {url ? (
-                                        <>
-                                            <img src={url} alt="" className="w-full h-full object-cover" />
-                                            <button
-                                                onClick={() => {
-                                                    const newImages = [...(currentItem.imageUrls || [])];
-                                                    newImages[index] = '';
-                                                    setCurrentItem({ ...currentItem, imageUrls: newImages });
-                                                }}
-                                                className="absolute top-1 right-1 p-1 aseel-bg-panel text-white rounded shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                                            >
-                                                <X className="w-3 h-3" />
-                                            </button>
-                                        </>
-                                    ) : (
-                                        <label className="flex flex-col items-center justify-center w-full h-full cursor-pointer">
-                                            {uploadingImages[index] ? <Loader2 className="animate-spin aseel-text-soft" /> : <Upload className="w-6 h-6 aseel-text-soft" />}
-                                            <span className="text-xs aseel-text-soft mt-2">صورة {index + 1}</span>
-                                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(index, e)} />
-                                        </label>
-                                    )}
-                                </div>
+                                url ? (
+                                    <div key={index} className="relative aspect-square aseel-bg-panel dark:aseel-bg-panel rounded-lg border border-dashed aseel-border-soft dark:aseel-border-soft overflow-hidden hover:aseel-border-soft transition-colors group">
+                                        <img src={url} alt="" className="w-full h-full object-cover" />
+                                        <button
+                                            onClick={() => {
+                                                const newImages = [...(currentItem.imageUrls || [])];
+                                                newImages[index] = '';
+                                                setCurrentItem({ ...currentItem, imageUrls: newImages });
+                                            }}
+                                            className="absolute top-1 right-1 p-1 aseel-bg-panel text-white rounded shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <FileDropZone
+                                        key={index}
+                                        onFiles={(files) => { void uploadToSlot(index, files[0]); }}
+                                        accept="image"
+                                        busy={uploadingImages[index]}
+                                        variant="compact"
+                                        hint={`صورة ${index + 1}`}
+                                        subHint="اضغط أو اسحب أو الصق (Ctrl+V)"
+                                        className="aspect-square"
+                                    />
+                                )
                             ))}
                         </div>
                     </div>

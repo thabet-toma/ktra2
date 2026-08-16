@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarPlus, CheckCircle2, FileUp, Paperclip, Pencil, Plus, Trash2 } from 'lucide-react';
 
 import {
@@ -21,6 +21,7 @@ import {
   type PracticeTaskRecord,
 } from '../../../services/accountantPracticeApi';
 import { useConfirm } from '../../../contexts/ConfirmContext';
+import { usePasteZone } from '../../../utils/clipboardImage';
 import { useToast } from '../../../contexts/ToastContext';
 import { formatDateTimeValue, formatDateValue } from '../../../utils/formatDate';
 import { formatNumber } from '../../../utils/formatNumber';
@@ -364,6 +365,19 @@ export const DocumentsPanel: React.FC<{ clientId: number }> = ({ clientId }) => 
   const [uploading, setUploading] = useState(false);
   // إعادة بناء حقل الملف بعد الرفع — بلا مفتاح متغيّر يبقى اسم الملف القديم معروضاً.
   const [fileKey, setFileKey] = useState(0);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  // لصق (Ctrl+V) فقط، بلا منطقة إفلات: الشاشة تقبل مستندات غير الصور أيضاً، فمنطقة
+  // «صور» كاملة تُسيء وصف ما يقبله الحقل. الحقل العامّ يبقى كما هو، واللصق يضيف
+  // طريقاً ثالثاً لا يضيّق الأول. حقل الملف لا يعرض ملفاً لم يأتِ منه، فيُعاد بناؤه
+  // ويُذكر الاسم تحته صراحةً.
+  usePasteZone(formRef, (files) => {
+    const pasted = files[0];
+    if (!pasted || uploading) return;
+    setFile(pasted);
+    setFileKey((key) => key + 1);
+    toast(`أُرفقت الصورة الملصقة «${pasted.name}» — اضغط «ارفع».`, 'success');
+  });
 
   const load = useCallback(() => {
     setLoading(true);
@@ -427,16 +441,23 @@ export const DocumentsPanel: React.FC<{ clientId: number }> = ({ clientId }) => 
   return (
     <div className="space-y-5">
       <OfficeCard title="رفع مستند">
-        <form onSubmit={upload} className="grid items-end gap-4 sm:grid-cols-4">
-          <OfficeField label="الملف" required className="sm:col-span-2">
+        <form ref={formRef} onSubmit={upload} className="grid items-end gap-4 sm:grid-cols-4">
+          <OfficeField label="الملف" required className="sm:col-span-2" hint="أو الصق صورة (Ctrl+V) داخل هذا النموذج.">
             {(id) => (
-              <OfficeInput
-                key={fileKey}
-                id={id}
-                type="file"
-                onChange={(event) => setFile(event.target.files?.[0] || null)}
-                className="file:ml-3 file:rounded-lg file:border-0 file:bg-slate-200 file:px-3 file:py-1.5 file:text-sm file:font-bold dark:file:bg-slate-800 dark:file:text-slate-200"
-              />
+              <>
+                <OfficeInput
+                  key={fileKey}
+                  id={id}
+                  type="file"
+                  onChange={(event) => setFile(event.target.files?.[0] || null)}
+                  className="file:ml-3 file:rounded-lg file:border-0 file:bg-slate-200 file:px-3 file:py-1.5 file:text-sm file:font-bold dark:file:bg-slate-800 dark:file:text-slate-200"
+                />
+                {file && (
+                  <p className="mt-1 truncate text-xs font-bold text-slate-600 dark:text-slate-300">
+                    المختار: {file.name}
+                  </p>
+                )}
+              </>
             )}
           </OfficeField>
           <OfficeField label="الاسم" hint="يُترك فارغاً ⇒ اسم الملف.">
