@@ -968,6 +968,18 @@ tbody td {
    Inline style="text-align:right" on the <td> still wins, keeping per-cell overrides intact. */
 :root[data-skin] .aseel-num { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* نصّ حرّ طويل داخل خلية قائمة: سطر واحد + «…» + التلميح الكامل على `title`.
+   القيد يقع على عنصر داخل الخلية لا على `<td>` نفسه: الجدول `table-layout: auto`
+   فـ`max-width` على الخلية مجرّد اقتراح يتجاوزه المتصفح متى طال المحتوى — فكان
+   وصفٌ طويل واحد يسرق عرض بقية الأعمدة ويكسر الصف على سطرين. العرض الأقصى
+   يمرَّر بـ`style={{ maxWidth }}` من العمود لأنه يختلف باختلاف الجدول. */
+:root[data-skin] .aseel-cell-clip {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Bottom tabs + totals dock ── */
 /* task13 M3: بلا max-height ولا سكرول داخلي — محتوى التبويبات يكبر بطبيعته */
 :root[data-skin] .aseel-bottom { display: flex; align-items: stretch; gap: 6px; background: var(--aseel-panel); border-top: 1px solid var(--aseel-border-soft); padding: 2px 6px 3px; flex-shrink: 0; }

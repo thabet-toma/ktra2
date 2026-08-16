@@ -29,6 +29,7 @@ import { CustomerNotesTab } from '../partners/CustomerNotesTab';
 // استيراد مباشر لا عبر barrel الـimport-flow: البرميل يجرّ ImportDocumentScreen
 // كاملةً إلى حزمة القشرة ويُبطل تقسيم الحِزَم.
 import { ImportJourneyGuide } from '../import-flow/ImportJourneyGuide';
+import { IMPORT_GUIDE_SLOT_ID } from '../../utils/importGuidePref';
 import { platformNoteTarget, type PlatformNoteTarget } from '../../utils/entityLinks';
 import {
   User as UserIcon,
@@ -301,6 +302,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                 })}
               </div>
             )}
+            {/* مرسى زرّ «مرشد الرحلة» — يملؤه ImportJourneyGuide بـportal حين
+                يكون مطويّاً ومتاحاً لهذا المستخدم، ويبقى فارغاً بلا عرض للآخرين. */}
+            <div id={IMPORT_GUIDE_SLOT_ID} className="aseel-toolgrp relative z-10 flex items-center py-1 ms-2" />
           </div>
           <main className="app-content overflow-auto flex-1">
             {children}

@@ -1,9 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Compass, ChevronDown, RefreshCw, Check, ArrowLeft, FolderOpen } from "lucide-react";
 import { usePermissions } from "../../contexts/PermissionsContext";
+import { useAuth } from "../../contexts/AuthContext";
 import { fetchImportJourneySummary } from "../../services/importJourneyApi";
 import { clientLogger } from "../../services/logger";
+import {
+  IMPORT_GUIDE_SLOT_ID,
+  readImportGuideOpen,
+  writeImportGuideOpen,
+} from "../../utils/importGuidePref";
 import {
   buildImportJourney,
   matchImportStage,
@@ -13,17 +20,21 @@ import {
 } from "./importJourneyGuidance";
 
 /**
- * مرشد رحلة الاستيراد — لوح ثابت يظهر في **كل** الشاشات.
+ * مرشد رحلة الاستيراد — لوح متاح في **كل** الشاشات، ومطويّ حتى يُطلَب.
  *
  * السبب: الرحلة تمتدّ على ست شاشات مستقلة (عرض، صفقة، شحنة، تخليص، نقل محلي،
  * فاتورة)، وكل شاشة كانت تعرف خطوتها هي فقط. فمن يقف في شاشة الأصناف أو
  * المحاسبة لا يعرف أن شحنته تنتظر إثبات استحقاق الشحن. اللوح يحمل الجواب معه:
  * أين نحن، ما التالي، وأين يُنفَّذ — بزر واحد يقود إلى مكان الإجراء نفسه.
  *
+ * لكنه **مرافق لا مقيم**: لوحٌ ثابت مفتوح فوق كل شاشة يزاحم عمل من لا يستورد
+ * اليوم. فمطويّاً لا يبقى منه على الشاشة شيء — يبقى زرّ «مرشد الرحلة» في شريط
+ * الرأس (portal إلى مرساه في `AppLayout`)، والتفضيل يُحفظ لكل مستخدم على حدة
+ * (`utils/importGuidePref.ts`).
+ *
  * القرار ليس هنا: كل منطق المراحل في `importJourneyGuidance.ts` (مُختبَر وحده).
  */
 
-const OPEN_KEY = "ktra.importGuide.open";
 const FOCUS_KEY = "ktra.importGuide.focus";
 /** لا نعيد الجلب أكثر من مرة كل دقيقة عند العودة للتبويب. */
 const REFRESH_COOLDOWN_MS = 60_000;
@@ -33,15 +44,6 @@ const STATE_DOT: Record<ImportJourneyStep["state"], string> = {
   current: "bg-blue-600",
   todo: "bg-amber-400",
   optional: "bg-[var(--color-border)]",
-};
-
-/** مفتوح افتراضياً (المطلوب مرشدٌ يُرى، لا يُبحث عنه) ويُحترَم طيّ المستخدم بعدها. */
-const readOpen = (): boolean => {
-  try {
-    return localStorage.getItem(OPEN_KEY) !== "0";
-  } catch {
-    return true;
-  }
 };
 
 const readFocus = (): { shipmentId?: number | null; dealId?: number | null } => {
@@ -55,14 +57,28 @@ const readFocus = (): { shipmentId?: number | null; dealId?: number | null } => 
 
 export const ImportJourneyGuide: React.FC = () => {
   const { can } = usePermissions();
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [open, setOpen] = useState(readOpen);
+  const userId = currentUser?.id ?? null;
+  const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState<ImportJourneySummaryFacts | null>(null);
   const [available, setAvailable] = useState(true);
   const [loading, setLoading] = useState(false);
   const [focus, setFocus] = useState(readFocus);
+  // مرسى زرّ الرأس يُركَّب بعد أول رسم (نفس شجرة `AppLayout`)، فيُقرأ في تأثير
+  // لا أثناء الرسم — وقراءته أثناء الرسم كانت تعطي null دائماً فيختفي الزر.
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   const allowed = can("import.deal.manage");
+
+  // التفضيل يتبع المستخدم لا الجهاز: تبديل الحساب على الجهاز نفسه يعيد القراءة.
+  useEffect(() => {
+    setOpen(readImportGuideOpen(localStorage, userId));
+  }, [userId]);
+
+  useEffect(() => {
+    setSlot(document.getElementById(IMPORT_GUIDE_SLOT_ID));
+  }, [location.pathname]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -105,9 +121,7 @@ export const ImportJourneyGuide: React.FC = () => {
   const toggle = () => {
     setOpen((value) => {
       const next = !value;
-      try {
-        localStorage.setItem(OPEN_KEY, next ? "1" : "0");
-      } catch { /* التخزين المحظور لا يمنع اللوح من العمل */ }
+      writeImportGuideOpen(localStorage, userId, next);
       return next;
     });
   };
@@ -148,26 +162,34 @@ export const ImportJourneyGuide: React.FC = () => {
   const pending = view.steps.filter((s) => s.state === "todo").length;
 
   if (!open) {
-    return (
+    // مطويّاً: لا شيء يطفو فوق المحتوى. الزرّ في شريط الرأس حيث تُطلَب الأدوات،
+    // ويحمل الخطوة الحالية كي يبقى مفيداً بلا فتح. وإن غاب المرسى (شاشة خارج
+    // القشرة) يعود الزرّ عائماً صغيراً — أفضل من مرشدٍ لا طريق إليه.
+    const reopen = (
       <button
         type="button"
         onClick={toggle}
-        className="fixed bottom-3 z-[60] flex items-center gap-2 rounded-full border border-blue-300 bg-white/95 px-3 py-2 text-xs font-semibold text-blue-900 shadow-lg backdrop-blur transition-colors hover:bg-blue-50 dark:border-blue-800 dark:bg-slate-900/95 dark:text-blue-200 dark:hover:bg-slate-800"
-        style={{ insetInlineEnd: 12 }}
-        title="مرشد رحلة الاستيراد — أين أنا وما الخطوة التالية"
+        className={
+          slot
+            ? "flex items-center gap-1.5 rounded-lg border border-blue-200/80 bg-white/75 px-2.5 py-1.5 text-[11px] font-semibold text-blue-900 shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-300 hover:bg-white hover:shadow-md dark:border-blue-900/60 dark:bg-slate-900/55 dark:text-blue-200 dark:hover:border-blue-700 dark:hover:bg-slate-900"
+            : "fixed bottom-3 z-[60] flex items-center gap-1.5 rounded-full border border-blue-300 bg-white/95 px-3 py-2 text-xs font-semibold text-blue-900 shadow-lg backdrop-blur transition-colors hover:bg-blue-50 dark:border-blue-800 dark:bg-slate-900/95 dark:text-blue-200 dark:hover:bg-slate-800"
+        }
+        style={slot ? undefined : { insetInlineEnd: 12 }}
+        title={`مرشد رحلة الاستيراد — ${view.focus.label} · الخطوة ${view.current.order}: ${view.current.label}`}
       >
-        <Compass className="h-4 w-4" />
-        <span>مرشد الاستيراد</span>
-        <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[10px] text-white">
+        <Compass className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-300" />
+        <span className="whitespace-nowrap">مرشد الرحلة</span>
+        <span className="whitespace-nowrap rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">
           {view.current.order}. {view.current.label}
         </span>
         {pending > 0 && (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+          <span className="whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
             {pending} ناقصة
           </span>
         )}
       </button>
     );
+    return slot ? createPortal(reopen, slot) : reopen;
   }
 
   return (
@@ -217,6 +239,7 @@ export const ImportJourneyGuide: React.FC = () => {
               <option
                 key={`${option.kind}-${option.shipmentId ?? option.dealId}`}
                 value={option.shipmentId ? `s:${option.shipmentId}` : `d:${option.dealId}`}
+                title={option.label}
               >
                 {option.label}
               </option>
@@ -226,8 +249,12 @@ export const ImportJourneyGuide: React.FC = () => {
       )}
 
       <div className="border-b border-[var(--color-border)] bg-blue-50/60 px-3 py-2 dark:bg-blue-950/30">
-        <div className="text-[10px] font-semibold text-blue-700 dark:text-blue-300">
-          {view.focus.label} · الخطوة {view.current.order} من {view.steps.length}
+        {/* اسم الصفقة نصّ حرّ يكتبه المستخدم وقد يطول: يُقصّ إلى سطر واحد مع
+            التلميح الكامل، ولا يُزيح «الخطوة س من ص» إلى سطر ثانٍ ولا يدفعها
+            خارج اللوح. */}
+        <div className="flex items-baseline gap-1.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300">
+          <span className="min-w-0 flex-1 truncate" title={view.focus.label}>{view.focus.label}</span>
+          <span className="shrink-0">الخطوة {view.current.order} من {view.steps.length}</span>
         </div>
         <div className="mt-0.5 text-sm font-bold text-[var(--color-text)]">{view.current.label}</div>
         <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">{view.current.detail}</p>

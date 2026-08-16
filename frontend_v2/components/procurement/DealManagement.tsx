@@ -62,6 +62,24 @@ const fmtDate = (s: string | undefined) => {
     return formatDateValue(s);
 };
 
+/**
+ * خلية نصّ حرّ (اسم المورد، وصف الصفقة): سطر واحد مقصوص بـ«…» والنصّ الكامل في
+ * التلميح. بلا قيدٍ صريح كان وصفٌ طويل واحد يبتلع عرض «الحالة» و«المرحلة»
+ * ويكسر الصفّ على سطرين — والقيد يقع هنا لا على `<td>` لأن الجدول تلقائي العرض
+ * (`.aseel-cell-clip` في `styles/index.css` يشرح السبب).
+ */
+const ClippedCell: React.FC<{ text: string; maxWidth: number; muted?: boolean }> = ({
+    text, maxWidth, muted,
+}) => (
+    <span
+        className="aseel-cell-clip"
+        style={{ maxWidth, color: muted ? 'var(--aseel-ink-soft)' : undefined }}
+        title={text}
+    >
+        {text}
+    </span>
+);
+
 export const DealManagement: React.FC<DealManagementProps> = ({
     currentUser,
     onOpenAccountingJournal,
@@ -377,16 +395,20 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         {
             key: 'supplier',
             header: 'المورد',
+            width: '220px',
             render: (d) => {
                 const sup = suppliers.find(s => s.id === d.supplierId);
-                if (sup) return <>{sup.alias && sup.alias.trim() ? `${sup.tradeName} (${sup.alias})` : sup.tradeName}</>;
-                return <>{d.factoryName || d.supplierSnapshot?.tradeName || '—'}</>;
+                const name = sup
+                    ? (sup.alias && sup.alias.trim() ? `${sup.tradeName} (${sup.alias})` : sup.tradeName)
+                    : (d.factoryName || d.supplierSnapshot?.tradeName || '—');
+                return <ClippedCell text={name} maxWidth={210} />;
             },
         },
         {
             key: 'description',
             header: 'الوصف',
-            render: (d) => <span style={{ color: 'var(--aseel-ink-soft)' }}>{d.dealDescription || '—'}</span>,
+            width: '300px',
+            render: (d) => <ClippedCell text={d.dealDescription || '—'} maxWidth={290} muted />,
         },
         {
             key: 'status',
