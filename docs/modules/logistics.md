@@ -12,13 +12,15 @@
 
 | # | المرحلة | الـstage | ما يُنشئه الكود | المُشغِّل |
 |---|---|---|---|---|
-| 0 | عرض مورّد استيراد | — | `SupplierQuotation(scope='import')` | `convert_import_quotation_to_deal` (services.py:367) |
+| 0 | عرض مورّد استيراد | — | `SupplierQuotation(scope='import')` | حفظ الصفقة ومعها `source_quotation` — `views/deals.py` (`LogisticsDealViewSet._save_deal_claiming_quotation`) |
 | 1 | صفقة | `draft` → `ready_to_ship` | `LogisticsDeal` + `LogisticsDealItem` + `LogisticsPayment` | يدوي |
 | 2 | شحنة | `in_shipment` | `LogisticsShipment` + `LogisticsShipmentDeal` (حصة الشحن USD) | `create_shipment_from_deals` (domain/shipment_builder.py:62) |
 | 3 | تخليص | `at_clearance` | `LogisticsClearance` + `…Line` + `…Payment` | signal `sync_deal_workflow_on_clearance` (signals.py:200) |
 | 4 | نقل محلي (اختياري) | `in_transport` | `LocalShipment` + `LocalShipmentPayment` | يدوي |
 | 5 | فاتورة دولية | `invoiced` | `PurchaseInvoice(invoice_type='international')` + بنودها | `import_invoices_from_clearance` (landed_cost.py:962) |
 | 6 | إغلاق/إلغاء | `closed` / `cancelled` | — | يدوي |
+
+**الواجهة في المرحلة 0:** «تحويل إلى صفقة» (شاشة عروض الاستيراد ومودال «من عرض» في الصفقات) يقرأ العرض ثم يفتح محرّر الصفقة معبّأً وغير محفوظ عبر `frontend_v2/utils/quotationToDraftDeal.ts` (`quotationToDraftDeal`)؛ المورد المبدئي والصنف المكتوب يدوياً يصلان بلا معرّف فيلزمان المستخدم بحلّهما قبل «حفظ» — لا شريك ولا صنف يُنشأ تلقائياً في مسار الصفقة.
 
 بوّابات المرحلة 5 (كلها في `landed_cost.py`): تكلفة الشحن **مُثبتة** (استحقاق مرحّل أو دفع كامل أو صفر) وإلا `ValueError` (`:996`)؛ والصفقة **مكتملة الدفع بالدولار** (`:1029`)؛ ولا تُحوَّل صفقة مرتين (`:1018`). تجاوز شرط الشحن (`allow_unpaid_freight`) يتطلب صلاحية مدير (`views.py:3202-3208`).
 
@@ -57,7 +59,10 @@
 ## دوال الـservices العامة
 ```python
 # logistics/services.py — التحويلات وسير الشراء المحلي
-def convert_import_quotation_to_deal(quotation, *, user=None):          # عرض استيراد مقبول → LogisticsDeal (ذرّي، idempotent)
+# ملاحظة: لا توجد دالة تحويل «عرض استيراد → صفقة». المسار ينتقل عبر الواجهة:
+# «تحويل إلى صفقة» يفتح محرّر صفقة **غير محفوظ** معبّأً من العرض (قراءات فقط:
+# تفاصيل العرض + `deals/next-ref/`)، والحفظ وحده يُنشئ الصفقة ويطالب بالعرض —
+# انظر `views/deals.py` (`LogisticsDealViewSet._save_deal_claiming_quotation`).
 def convert_local_quotation_to_order(quotation, *, user=None):          # عرض محلي مقبول → طلبية شراء
 def convert_local_quotation_to_invoice(quotation, *, user=None):        # عرض محلي → فاتورة مسودة مباشرةً (بلا طلبية)
 def convert_purchase_order_to_invoice(order, *, user=None):             # طلبية → فاتورة شراء مسودة

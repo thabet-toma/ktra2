@@ -159,19 +159,9 @@ export async function deleteSupplierQuotation(id: number): Promise<void> {
   });
 }
 
-export async function convertSupplierQuotationToImportDeal(
-  id: number,
-): Promise<{
-  status: "converted";
-  created: boolean;
-  deal: { id: number; ref_number: string };
-}> {
-  return apiPostObject(
-    `${BASE}/supplier-quotations/${id}/convert-to-import-deal/`,
-    {},
-    { tenantId: tenantId() },
-  );
-}
+/* T113-2: `convertSupplierQuotationToImportDeal` حُذفت — لم يعد هناك تحويلٌ
+   بضغطة. العرض المقبول يُقرأ بـ`getSupplierQuotation` ويُفتح محرَّراً غير محفوظ
+   (`utils/quotationToDraftDeal`)، والصفقة تُنشأ عند «حفظ» فتطالب بعرضها المصدر. */
 
 export type PurchaseOrderStatus =
   | "draft"

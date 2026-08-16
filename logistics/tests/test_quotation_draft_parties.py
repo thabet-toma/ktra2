@@ -1,8 +1,11 @@
 """T-DRAFTPARTY: مورد وأصناف **مبدئية** داخل عرض السعر.
 
 القاعدة: العرض يقبل اسم مورد لم يُسجَّل واسم صنف غير موجود، ولا يُنشئ منهما شيئاً
-في دفتر الشركاء ولا في فهرس الأصناف — الإنشاء يقع **لحظة التحويل** فقط، وبمطابقة
-الاسم أولاً كي لا يتضاعف مورد أو صنف قائم.
+في دفتر الشركاء ولا في فهرس الأصناف.
+
+المسار المحلي (طلبية/فاتورة) ما يزال يُجسّدهما لحظة التحويل بمطابقة الاسم أولاً.
+مسار **الصفقة** لم يعد كذلك منذ T113-1: العرض يُفتح محرّراً غير محفوظ، ويُحلّ
+المورد والصنف صراحةً قبل «حفظ» — فلا سجل ضمنيّ ولا سجل قبل الحفظ أصلاً.
 """
 from decimal import Decimal
 
@@ -113,53 +116,57 @@ class QuotationDraftPartiesTest(APITestCase):
         self.assertEqual(quotation.supplier_draft_name, '')
         self.assertFalse(response.data['is_draft_supplier'])
 
-    def test_import_conversion_materializes_supplier_and_product(self):
+    def deal_payload(self, quotation_id, **overrides):
+        payload = {
+            'source_quotation': quotation_id,
+            'partner': self.supplier.id,
+            'order_date': '2026-07-26',
+            'currency': self.currency.pk,
+            'items': [{
+                'product': self.product.id, 'seq': 1,
+                'quantity': '2.000', 'unit_price': '10.0000',
+                'name_snapshot': 'صنف مكتوب يدوياً',
+            }],
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_deal_creation_never_creates_a_partner_or_a_product(self):
+        """T113-1 عكس القاعدة القديمة: مسار الصفقة لم يعد يُجسّد شيئاً ضمنياً.
+
+        المورد والصنف يُحلّان **صراحةً في المحرّر** قبل «حفظ»؛ الخادم لا يخترع
+        شريكاً ولا صنفاً من اسمٍ مكتوب — فلا يتضاعف دفتر الشركاء بلا قرار.
+        """
         created = self.create_quotation()
         quotation_id = created.data['id']
 
         response = self.client.post(
-            f'/api/logistics/supplier-quotations/{quotation_id}/convert-to-import-deal/',
-            {}, format='json',
+            '/api/logistics/deals/', self.deal_payload(quotation_id), format='json',
         )
         self.assertEqual(response.status_code, 201, response.content)
 
-        quotation = SupplierQuotation.objects.get(pk=quotation_id)
-        self.assertIsNotNone(quotation.supplier_id)
-        self.assertEqual(quotation.supplier.name, 'مصنع لم نتعامل معه بعد')
-        self.assertEqual(
-            quotation.supplier.supplier_scope, Partner.SUPPLIER_SCOPE_INTERNATIONAL,
-        )
-        self.assertEqual(quotation.supplier_draft_name, '')
-        line = quotation.lines.get()
-        self.assertIsNotNone(line.product_id)
-        self.assertEqual(line.product.name_ar, 'صنف مكتوب يدوياً')
+        self.assertEqual(Partner.objects.filter(tenant=self.tenant).count(), 1)
+        self.assertEqual(Product.objects.filter(tenant=self.tenant).count(), 1)
         deal = LogisticsDeal.objects.get(source_quotation_id=quotation_id)
-        self.assertEqual(deal.partner_id, quotation.supplier_id)
-        self.assertEqual(deal.items.get().product_id, line.product_id)
+        self.assertEqual(deal.partner_id, self.supplier.id)
+        self.assertEqual(deal.items.get().product_id, self.product.id)
 
-    def test_conversion_reuses_existing_records_matched_by_name(self):
-        created = self.create_quotation(
-            supplier_draft_name='مورد مسجَّل',
-            lines=[{
-                'seq': 1,
-                'name_snapshot': 'صنف مسجَّل',
-                'quantity': '1.000',
-                'unit_price': '7.0000',
-            }],
-        )
+    def test_deal_creation_leaves_the_quotation_as_it_was_written(self):
+        """العرض أرشيف ما سُعِّر: الاسم المبدئي وبنوده تبقى كما كُتبت، والحالة وحدها تنقلب."""
+        created = self.create_quotation()
         quotation_id = created.data['id']
 
         response = self.client.post(
-            f'/api/logistics/supplier-quotations/{quotation_id}/convert-to-import-deal/',
-            {}, format='json',
+            '/api/logistics/deals/', self.deal_payload(quotation_id), format='json',
         )
         self.assertEqual(response.status_code, 201, response.content)
 
         quotation = SupplierQuotation.objects.get(pk=quotation_id)
-        self.assertEqual(quotation.supplier_id, self.supplier.id)
-        self.assertEqual(quotation.lines.get().product_id, self.product.id)
-        self.assertEqual(Partner.objects.filter(tenant=self.tenant).count(), 1)
-        self.assertEqual(Product.objects.filter(tenant=self.tenant).count(), 1)
+        self.assertIsNone(quotation.supplier_id)
+        self.assertEqual(quotation.supplier_draft_name, 'مصنع لم نتعامل معه بعد')
+        self.assertIsNone(quotation.lines.get().product_id)
+        self.assertEqual(quotation.lines.get().name_snapshot, 'صنف مكتوب يدوياً')
+        self.assertEqual(quotation.status, SupplierQuotation.STATUS_CONVERTED)
 
     def test_local_order_conversion_materializes_too(self):
         created = self.create_quotation(scope='local')

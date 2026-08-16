@@ -36,6 +36,7 @@ from logistics.serializers import (
     PurchaseSettingsSerializer,
     GoodsReceiptSerializer,
     GoodsReceiptListSerializer,
+    quotation_already_claimed_message,
 )
 from accounting.models import Account, TaxRate
 from core.pagination import EnforcedPageNumberPagination
@@ -89,7 +90,6 @@ from logistics.services import (
     attach_pi_payment_voucher,
     convert_local_quotation_to_invoice,
     convert_local_quotation_to_order,
-    convert_import_quotation_to_deal,
     convert_purchase_order_to_invoice,
 )
 from django.utils import timezone
@@ -237,6 +237,53 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 })
         return Response({'is_unique': True})
 
+    @staticmethod
+    def _save_deal_claiming_quotation(serializer, kwargs, quotation):
+        """T113-1: الصفقة تطالب بعرضها المصدر — تحقّق وإنشاء وقلبُ حالة في معاملة واحدة.
+
+        لم يعد هناك تحويلٌ بضغطة: العرض يُفتح محرَّراً غير محفوظ، ولحظةُ «حفظ»
+        هي وحدها التي تُنشئ الصفقة وتقلب العرض إلى «محوَّل». قفل صف العرض يغلق
+        نافذة السباق بين تحقّق الـserializer والحفظ (تبويبان مفتوحان على العرض
+        نفسه)، وقيد الـOneToOne في القاعدة هو الضامن الأخير خلفه.
+        """
+        with transaction.atomic():
+            locked = (
+                SupplierQuotation.objects.select_for_update()
+                .filter(pk=quotation.pk).first()
+            )
+            if locked is None:
+                raise ValidationError({'source_quotation': 'عرض السعر المصدر غير موجود.'})
+            claimed = (
+                LogisticsDeal.all_objects
+                .filter(source_quotation_id=locked.pk).only('id', 'ref_number').first()
+            )
+            if claimed is not None:
+                raise ValidationError({
+                    'source_quotation': quotation_already_claimed_message(locked, claimed),
+                })
+            if locked.status != SupplierQuotation.STATUS_ACCEPTED:
+                raise ValidationError({
+                    'source_quotation': 'يجب اعتماد عرض الاستيراد قبل تحويله إلى صفقة.',
+                })
+            try:
+                # نقطة حفظ داخلية: انفجار القيد الفريد يتراجع وحده فتبقى المعاملة
+                # صالحة لقراءة الصفقة الفائزة وتسمية رقمها في الرسالة.
+                with transaction.atomic():
+                    deal = serializer.save(**kwargs)
+            except IntegrityError:
+                claimed = (
+                    LogisticsDeal.all_objects
+                    .filter(source_quotation_id=locked.pk).only('id', 'ref_number').first()
+                )
+                if claimed is None:
+                    raise
+                raise ValidationError({
+                    'source_quotation': quotation_already_claimed_message(locked, claimed),
+                })
+            locked.status = SupplierQuotation.STATUS_CONVERTED
+            locked.save(update_fields=['status', 'updated_at'])
+        return deal
+
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
         kwargs = {'tenant': tenant}
@@ -247,12 +294,24 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         ref = str(serializer.validated_data.get('ref_number') or '').strip()
         if not ref or LogisticsDeal.all_objects.filter(tenant=tenant, ref_number=ref).exists():
             kwargs['ref_number'] = self._next_deal_ref(tenant)
-        deal = serializer.save(**kwargs)
+        quotation = serializer.validated_data.get('source_quotation')
+        if quotation is None:
+            deal = serializer.save(**kwargs)
+        else:
+            deal = self._save_deal_claiming_quotation(serializer, kwargs, quotation)
         log_activity(
             action='create', entity_type='deal', entity_id=deal.id,
             entity_label=deal.ref_number, description='إنشاء صفقة', request=self.request,
             partner_ids=[deal.partner_id],
         )
+        if quotation is not None:
+            log_activity(
+                action='convert', entity_type='supplier_quotation',
+                entity_id=quotation.pk, entity_label=quotation.quotation_number,
+                description=f'تحويل عرض السعر إلى صفقة {deal.ref_number}',
+                request=self.request, partner_ids=[deal.partner_id],
+                metadata={'deal_id': deal.id, 'deal_ref_number': deal.ref_number},
+            )
 
     def retrieve(self, request, *args, **kwargs):
         response = super().retrieve(request, *args, **kwargs)

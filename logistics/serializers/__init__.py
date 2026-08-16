@@ -22,6 +22,7 @@ from .procurement import (
     PurchaseOrderSerializer,
 )
 from .deals import (
+    quotation_already_claimed_message,
     LogisticsPaymentSerializer,
     LogisticsDealItemSerializer,
     LogisticsDealSerializer,

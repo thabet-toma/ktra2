@@ -134,6 +134,18 @@ class LogisticsPaymentSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['id', 'created_at', 'is_posted', 'journal']
 
+def quotation_already_claimed_message(quotation, deal):
+    """رسالة «العرض محجوز» الواحدة — يشترك فيها تحقّق الـserializer وحارس القفل.
+
+    رقم الصفقة القائمة جزء من الرسالة لا زينة: المستخدم الذي فتح تبويبين يحتاج
+    أن يعرف **أين** ذهب عرضه، لا أن يُقال له «مرفوض».
+    """
+    return (
+        f'العرض {quotation.quotation_number} محوَّل بالفعل إلى '
+        f'الصفقة {deal.ref_number}.'
+    )
+
+
 class LogisticsDealItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name_ar', read_only=True)
     total_price = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
@@ -172,6 +184,13 @@ class LogisticsDealItemSerializer(serializers.ModelSerializer):
 
 class LogisticsDealSerializer(serializers.ModelSerializer):
     items = LogisticsDealItemSerializer(many=True)
+    # `validators=[]` يُسقط UniqueValidator المولَّد عن الـOneToOne: تحققه يسبق
+    # `validate()` فيبتلع رسالتنا ويردّ «هذه القيمة مستخدمة بالفعل» بلا رقم
+    # الصفقة التي أخذت العرض. القيد نفسه باقٍ في القاعدة كضامن أخير.
+    source_quotation = serializers.PrimaryKeyRelatedField(
+        queryset=SupplierQuotation.objects.all(),
+        required=False, allow_null=True, validators=[],
+    )
     # ج8: الدفعات مورد مستقل (deals/{id}/payments/) — القراءة فقط هنا.
     # الكتابة المتداخلة كانت جذر «هذا المستند مرحَّل»: أي PATCH كامل للصفقة
     # يصطدم بحارس الترحيل بعد أول دفعة مرحّلة.
@@ -205,6 +224,80 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'tenant', 'created_by', 'is_posted', 'journal', 'total_amount']
         # الترقيم خادمي عند الغياب/التكرار (T12-B4) — perform_create يولّد D-####
         extra_kwargs = {'ref_number': {'required': False, 'allow_blank': True}}
+
+    def validate(self, attrs):
+        """عزل الشركة على علاقات الكتابة + قواعد المطالبة بالعرض المصدر (T113-1).
+
+        كانت الواجهة تقبل `partner` / `source_quotation` / `items[].product` من
+        شركة أخرى بلا أي فحص — تسريب اسم شريك و«حرق» عرض شركة أخرى عبر قيد
+        الـOneToOne. النمط هنا هو نفسه المطبَّق في serializer عروض الأسعار.
+
+        العرض المصدر يُطالَب به عند **الإنشاء فقط**: الصفقة تنسخ بيانات العرض
+        لحظة الحفظ، فتعديل المصدر لاحقاً يعيد كتابة نسبٍ لا يمكن التحقق منه.
+        """
+        tenant = get_tenant(self.context.get('request'))
+        if tenant is None:
+            raise serializers.ValidationError({'tenant': 'لا يوجد شركة محددة لهذا الطلب.'})
+
+        instance = self.instance
+        partner = attrs.get('partner', getattr(instance, 'partner', None))
+        if partner is not None and partner.tenant_id != tenant.pk:
+            raise serializers.ValidationError({'partner': 'المورد لا يتبع الشركة الحالية.'})
+
+        for item in (attrs.get('items') or []):
+            product = item.get('product')
+            if product is not None and product.tenant_id != tenant.pk:
+                raise serializers.ValidationError({
+                    'items': 'أحد الأصناف لا يتبع الشركة الحالية.',
+                })
+
+        if instance is not None:
+            if 'source_quotation' in attrs:
+                incoming = attrs['source_quotation']
+                if (incoming.pk if incoming else None) != instance.source_quotation_id:
+                    raise serializers.ValidationError({
+                        'source_quotation': 'عرض السعر المصدر يُربط عند إنشاء الصفقة فقط.',
+                    })
+                attrs.pop('source_quotation')
+            return attrs
+
+        quotation = attrs.get('source_quotation')
+        if quotation is None:
+            return attrs
+
+        if quotation.tenant_id != tenant.pk:
+            raise serializers.ValidationError({
+                'source_quotation': 'عرض السعر لا يتبع الشركة الحالية.',
+            })
+        if quotation.scope != SupplierQuotation.SCOPE_IMPORT:
+            raise serializers.ValidationError({
+                'source_quotation': 'يمكن تحويل عروض الاستيراد فقط إلى صفقة.',
+            })
+        # المحذوف ناعماً يبقى محتجزاً لقيد الـOneToOne — all_objects لا objects.
+        claimed = (
+            LogisticsDeal.all_objects
+            .filter(source_quotation_id=quotation.pk)
+            .only('id', 'ref_number')
+            .first()
+        )
+        if claimed is not None:
+            raise serializers.ValidationError({
+                'source_quotation': quotation_already_claimed_message(quotation, claimed),
+            })
+        if quotation.status != SupplierQuotation.STATUS_ACCEPTED:
+            raise serializers.ValidationError({
+                'source_quotation': 'يجب اعتماد عرض الاستيراد قبل تحويله إلى صفقة.',
+            })
+        if quotation.tax_rate or quotation.tax_amount:
+            raise serializers.ValidationError({
+                'source_quotation': 'عرض الاستيراد لا يجوز أن يتضمن ضريبة قبل التخليص.',
+            })
+
+        # أثر المستند يُشتق من العرض لا من العميل: رقم العرض ومعرّفه شهادة نسبٍ،
+        # ولو قُبلا من الطلب لأمكن أن تحمل الصفقة رقم عرضٍ ليس مصدرها.
+        attrs['price_offer_id'] = str(quotation.pk)
+        attrs['original_offer_number'] = quotation.quotation_number
+        return attrs
 
     def get_linked_shipment(self, obj):
         try:

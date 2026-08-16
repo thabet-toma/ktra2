@@ -111,6 +111,29 @@ class SupplierQuotationAPITest(APITestCase):
         self.assertEqual(product_response.status_code, 400, product_response.content)
         self.assertIn('lines', product_response.data)
 
+    def deal_payload(self, quotation_id, **overrides):
+        """حمولة «حفظ» في محرّر الصفقة: الصفقة كاملة ومعها عرضها المصدر (T113-1)."""
+        payload = {
+            'source_quotation': quotation_id,
+            'partner': self.supplier.id,
+            'order_date': '2026-07-26',
+            'currency': self.currency.pk,
+            'currency_rate': '3.650000',
+            'discount_amount': '2.00',
+            'shipping_cost_estimate': '3.00',
+            'is_shipping_included': False,
+            'items': [{
+                'product': self.product.id,
+                'seq': 1,
+                'quantity': '2.500',
+                'unit_price': '10.0000',
+                'name_snapshot': 'صنف عرض',
+                'description_line': 'تفصيل الصنف',
+            }],
+        }
+        payload.update(overrides)
+        return payload
+
     def test_import_conversion_is_atomic_and_idempotent(self):
         create_response = self.client.post(
             '/api/logistics/supplier-quotations/',
@@ -119,21 +142,22 @@ class SupplierQuotationAPITest(APITestCase):
         )
         self.assertEqual(create_response.status_code, 201, create_response.content)
         quotation_id = create_response.data['id']
-        url = (
-            f'/api/logistics/supplier-quotations/{quotation_id}/'
-            'convert-to-import-deal/'
+
+        first = self.client.post(
+            '/api/logistics/deals/', self.deal_payload(quotation_id), format='json',
         )
-
-        first = self.client.post(url, {}, format='json')
         self.assertEqual(first.status_code, 201, first.content)
-        self.assertTrue(first.data['created'])
-        deal_id = first.data['deal']['id']
+        deal_id = first.data['id']
 
-        second = self.client.post(url, {}, format='json')
-        self.assertEqual(second.status_code, 200, second.content)
-        self.assertFalse(second.data['created'])
-        self.assertEqual(second.data['deal']['id'], deal_id)
-        self.assertEqual(LogisticsDeal.objects.filter(source_quotation_id=quotation_id).count(), 1)
+        # الحفظ الثاني لنفس المصدر (تبويب ثانٍ) يرتد ومعه رقم الصفقة القائمة.
+        second = self.client.post(
+            '/api/logistics/deals/', self.deal_payload(quotation_id), format='json',
+        )
+        self.assertEqual(second.status_code, 400, second.content)
+        self.assertIn(first.data['ref_number'], str(second.data['source_quotation']))
+        self.assertEqual(
+            LogisticsDeal.objects.filter(source_quotation_id=quotation_id).count(), 1,
+        )
 
         quotation = SupplierQuotation.objects.get(pk=quotation_id)
         deal = LogisticsDeal.objects.get(pk=deal_id)
@@ -152,12 +176,12 @@ class SupplierQuotationAPITest(APITestCase):
         )
         self.assertEqual(local.status_code, 201, local.content)
         local_convert = self.client.post(
-            f"/api/logistics/supplier-quotations/{local.data['id']}/"
-            'convert-to-import-deal/',
-            {},
+            '/api/logistics/deals/',
+            self.deal_payload(local.data['id']),
             format='json',
         )
         self.assertEqual(local_convert.status_code, 400, local_convert.content)
+        self.assertIn('source_quotation', local_convert.data)
 
         draft = self.client.post(
             '/api/logistics/supplier-quotations/',
@@ -166,9 +190,10 @@ class SupplierQuotationAPITest(APITestCase):
         )
         self.assertEqual(draft.status_code, 201, draft.content)
         draft_convert = self.client.post(
-            f"/api/logistics/supplier-quotations/{draft.data['id']}/"
-            'convert-to-import-deal/',
-            {},
+            '/api/logistics/deals/',
+            self.deal_payload(draft.data['id']),
             format='json',
         )
         self.assertEqual(draft_convert.status_code, 400, draft_convert.content)
+        self.assertIn('source_quotation', draft_convert.data)
+        self.assertEqual(LogisticsDeal.objects.count(), 0)

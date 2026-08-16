@@ -28,6 +28,8 @@ export type DealStatus =
 export interface DealItem {
     id: string;
     itemId: string;
+    /** ترتيب البند داخل المستند — يُنقل من العرض المصدر ويُحفظ في seq */
+    seq?: number;
     name: string;
     modelNumber?: string;
     categoryId: string;
@@ -139,6 +141,12 @@ export interface Deal {
     dealNumber: string;
     priceOfferId: string;
     originalOfferNumber?: string;
+    /** عرض السعر المصدر (source_quotation) — يُربط عند إنشاء الصفقة فقط */
+    sourceQuotationId?: string;
+    /** عملة الصفقة ومعامل تحويلها — تُنقلان من العرض المصدر */
+    currencyId?: number;
+    currencyRate?: number;
+    incoterms?: string;
     supplierId: string;
     factoryName: string;
     supplierInvoiceNumber?: string;

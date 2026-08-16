@@ -207,15 +207,28 @@ class ImportQuotationSuitabilityTest(APITestCase):
             f'/api/logistics/supplier-quotations/{quote_id}/',
             {'status': 'accepted'}, format='json',
         )
-        converted = self.client.post(
-            f'/api/logistics/supplier-quotations/{quote_id}/convert-to-import-deal/',
-            {}, format='json',
-        )
+        # T113-1: الصفقة تُحفظ من المحرّر ومعها مصدرها — لا تحويل بضغطة.
+        converted = self.client.post('/api/logistics/deals/', {
+            'source_quotation': quote_id,
+            'partner': self.supplier.id,
+            'order_date': '2026-07-30',
+            'currency': self.currency.pk,
+            'shipping_cost_estimate': '150.00',
+            'is_shipping_included': False,
+            'alibaba_link': 'https://www.alibaba.com/product-detail/x.html',
+            'items': [{
+                'product': self.product.id, 'seq': 1,
+                'quantity': '2.000', 'unit_price': '100.0000',
+            }],
+        }, format='json')
         self.assertEqual(converted.status_code, 201, converted.content)
         deal = LogisticsDeal.objects.get(source_quotation_id=quote_id)
         self.assertEqual(deal.alibaba_link,
                          'https://www.alibaba.com/product-detail/x.html')
         self.assertEqual(deal.shipping_cost_estimate, Decimal('150.00'))
+        # النسب يُشتق من العرض خادمياً لا من حمولة العميل.
+        self.assertEqual(deal.original_offer_number, created.data['quotation_number'])
+        self.assertEqual(deal.price_offer_id, str(quote_id))
 
         # المستند المحوَّل يعرض رقم الصفقة الناتجة كي لا يبدو التحويل صامتاً.
         reread = self.client.get(f'/api/logistics/supplier-quotations/{quote_id}/')

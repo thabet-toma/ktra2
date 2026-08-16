@@ -12,7 +12,8 @@ import { DealPrintView } from './deals/DealPrintView';
 import { Plus, FileInput, Printer, Trash2, RefreshCw, Ship } from 'lucide-react';
 import { LoadingSpinner } from '../LoadingSpinner';
 import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModal';
-import { convertSupplierQuotationToImportDeal } from '../../services/procurementDocumentsApi';
+import { getSupplierQuotation } from '../../services/procurementDocumentsApi';
+import { quotationToDraftDeal } from '../../utils/quotationToDraftDeal';
 import { CreateShipmentFromDealsModal } from '../import-flow/CreateShipmentFromDealsModal';
 import { FirstDealWizard } from './deals/FirstDealWizard';
 import { Sparkles } from 'lucide-react';
@@ -214,9 +215,18 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         handledPathRef.current = pathKey;
         if (draft) {
             newFormInitRef.current = true;
-            setCurrentDeal(draft);
-            setViewMode('form');
             navigate('/deals/new', { replace: true, state: {} });
+            void (async () => {
+                // رقم معاينة فقط — الرقم النهائي يولّده/يصحّحه الخادم عند «حفظ»،
+                // فلا يُحرَق رقم من التسلسل على صفقة قد لا تُحفظ أبداً.
+                let dealNumber = draft.dealNumber;
+                if (!dealNumber) {
+                    try { dealNumber = await dealsService.getNextDealNumber(); }
+                    catch { /* الرقم يُولَّد خادمياً عند الحفظ */ }
+                }
+                setCurrentDeal(dealNumber ? { ...draft, dealNumber } : draft);
+                setViewMode('form');
+            })();
             return;
         }
         if (newFormInitRef.current) return;
@@ -264,17 +274,44 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         navigate('/deals/new');
     };
 
+    /**
+     * T113-2: العرض يفتح صفقة معبّأة **غير محفوظة** — نفس سلوك زر «تحويل إلى صفقة»
+     * في شاشة العروض. لا يُنشأ شيء (صفقة/مورد/صنف) قبل «حفظ» داخل المحرّر.
+     */
     const handleCreateFromPriceOffer = async (priceOfferId: string) => {
         setIsOfferModalOpen(false);
         const selectedOffer = priceOffers.find(o => o.id === priceOfferId);
         if (!selectedOffer) return;
+        const match = /^quote-(\d+)$/.exec(selectedOffer.id);
+        if (!match) {
+            toast('عرض الاستيراد المحدد غير مرتبط بقاعدة البيانات.', 'error');
+            return;
+        }
         try {
-            const match = /^quote-(\d+)$/.exec(selectedOffer.id);
-            if (!match) throw new Error('عرض الاستيراد المحدد غير مرتبط بقاعدة البيانات.');
-            const result = await convertSupplierQuotationToImportDeal(Number(match[1]));
-            navigate(`/deals/${encodeURIComponent(String(result.deal.id))}`);
+            const quotation = await getSupplierQuotation(Number(match[1]));
+            if (quotation.status !== 'accepted') {
+                const claimedBy = quotation.converted_deal?.ref_number;
+                toast(
+                    claimedBy
+                        ? `العرض ${quotation.quotation_number} محوَّل بالفعل إلى الصفقة ${claimedBy}.`
+                        : `العرض ${quotation.quotation_number} يلزمه قرار «ملائم» قبل تحويله إلى صفقة.`,
+                    'error',
+                );
+                return;
+            }
+            newFormInitRef.current = false;
+            navigate('/deals/new', {
+                state: {
+                    draftDeal: quotationToDraftDeal(
+                        quotation,
+                        suppliers.map(s => ({ id: s.id, name: s.tradeName, alias: s.alias })),
+                    ),
+                },
+            });
         } catch (error) {
-            setLoadError(error instanceof Error ? error.message : 'تعذّر تحويل العرض إلى طلبية استيراد.');
+            const message = error instanceof Error ? error.message : 'تعذّر فتح صفقة من هذا العرض.';
+            setLoadError(message);
+            toast(message, 'error');
         }
     };
 

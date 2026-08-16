@@ -236,7 +236,8 @@ function mapItemFromSql(i: any, idx: number) {
         return {
     id: String(i?.id ?? `i-${idx}`),
     itemId: String(i?.product ?? i?.id ?? ""),
-    name: i?.product_name || "صنف",
+    seq: i?.seq ?? idx + 1,
+    name: i?.product_name || i?.name_snapshot || "صنف",
     categoryId: "",
     categoryName: "",
     specifications: i?.notes || "",
@@ -280,6 +281,11 @@ function mapDealFromSql(d: SqlDeal): Deal {
     id: String(d?.id),
     dealNumber: d?.ref_number || `D-${d?.id}`,
     priceOfferId: d?.price_offer_id || "",
+    /* T113-2: أثر المستند — العرض المصدر يُعرض كرابط في ترويسة الصفقة. */
+    sourceQuotationId: d?.source_quotation != null ? String(d.source_quotation) : undefined,
+    currencyId: Number(d?.currency) || undefined,
+    currencyRate: Number(d?.currency_rate) || undefined,
+    incoterms: d?.incoterms || undefined,
     originalOfferNumber: pickFirst(
       d?.original_offer_number,
       d?.originalOfferNumber,
@@ -430,26 +436,50 @@ function mapSinglePaymentToSqlPayload(
   };
 }
 
-function mapDealToSqlPayload(deal: Partial<Deal>): Record<string, any> {
-  const items = (deal.items || []).map((i: any) => ({
+/**
+ * T113-2: `create` يرسل `source_quotation` — الخادم يقبله عند الإنشاء فقط
+ * (تعديله لاحقاً يعيد كتابة نسبٍ لا يمكن التحقق منه، فيرفضه بـ400).
+ */
+function mapDealToSqlPayload(
+  deal: Partial<Deal>,
+  opts?: { create?: boolean }
+): Record<string, any> {
+  // T113-2: العملة ومعاملها ينتقلان من العرض المصدر ويبقيان مع البنود —
+  // كانت `currency: 1` ثابتة، فأي تعديل لصفقة بعملة أخرى يعيدها إلى الأولى.
+  const currency = Number(deal.currencyId) > 0 ? Number(deal.currencyId) : 1;
+  const currencyRate = Number(deal.currencyRate) > 0 ? Number(deal.currencyRate) : 1;
+  const items = (deal.items || []).map((i: any, idx: number) => ({
     id: i.id && /^\d+$/.test(String(i.id)) ? Number(i.id) : undefined,
     product: i.itemId && /^\d+$/.test(String(i.itemId)) ? Number(i.itemId) : undefined,
+    seq: Number(i.seq) > 0 ? Number(i.seq) : idx + 1,
+    // اسم البند كما كُتب لحظة الحفظ: تغيير اسم الصنف لاحقاً لا يعيد كتابة المستند.
+    name_snapshot: String(i.name || "").slice(0, 255),
+    description_line: String(i.specifications || i.notes || "").slice(0, 500),
     quantity: Number(i.quantity || 0),
     unit_price: Number(i.unitPrice || 0),
+    line_currency: currency,
+    line_exchange_rate: currencyRate,
     notes: i.notes || i.specifications || "",
   }));
 
   const supplierRaw = (deal.supplierId || "").toString();
   const partner = /^\d+$/.test(supplierRaw) ? Number(supplierRaw) : undefined;
+  const sourceQuotationRaw = String(deal.sourceQuotationId || "");
+  const sourceQuotation =
+    opts?.create && /^\d+$/.test(sourceQuotationRaw) ? Number(sourceQuotationRaw) : undefined;
 
   return {
+    ...(sourceQuotation ? { source_quotation: sourceQuotation } : {}),
+    ...(deal.incoterms ? { incoterms: deal.incoterms } : {}),
+    currency_rate: currencyRate,
+    is_shipping_included: Boolean(deal.shippingIncluded),
     ref_number: deal.dealNumber,
     partner,
     order_date: (deal.dealDate || new Date().toISOString().slice(0, 10)).slice(0, 10),
     status: mapStatusToSql(deal.status),
     description: String(deal.dealDescription ?? "").trim().slice(0, 255),
     notes: deal.internalNotes || "",
-    currency: 1,
+    currency,
     items,
     // ج8: الدفعات مورد مستقل (deals/{id}/payments/) — لا تُرسَل داخل payload الصفقة
     // (الخادم يتجاهلها read_only، والواجهة تكتبها عبر endpoints الدفعة المخصّصة).
@@ -611,7 +641,7 @@ export const dealsService = {
       dealNumber: dealData.dealNumber || (await this.getNextDealNumber()),
     };
     // ج8: الدفعات لا تُنشأ مع الصفقة — تُضاف لاحقاً عبر addPayment (endpoint مستقل).
-    const payload = mapDealToSqlPayload(toCreate);
+    const payload = mapDealToSqlPayload(toCreate, { create: true });
     if (!payload.partner) {
       throw new Error("المورد غير مرتبط بمعرف SQL صحيح");
     }

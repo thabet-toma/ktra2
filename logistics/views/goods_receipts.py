@@ -88,7 +88,6 @@ from logistics.services import (
     attach_pi_payment_voucher,
     convert_local_quotation_to_invoice,
     convert_local_quotation_to_order,
-    convert_import_quotation_to_deal,
     convert_purchase_order_to_invoice,
 )
 

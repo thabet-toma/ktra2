@@ -88,7 +88,6 @@ from logistics.services import (
     attach_pi_payment_voucher,
     convert_local_quotation_to_invoice,
     convert_local_quotation_to_order,
-    convert_import_quotation_to_deal,
     convert_purchase_order_to_invoice,
 )
 
@@ -195,40 +194,10 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
             raise ValidationError('عرض السعر المحوّل لا يمكن حذفه.')
         super().perform_destroy(instance)
 
-    @action(detail=True, methods=['post'], url_path='convert-to-import-deal')
-    def convert_to_import_deal(self, request, pk=None):
-        quotation = self.get_object()
-        try:
-            deal, created = convert_import_quotation_to_deal(
-                quotation,
-                user=request.user,
-            )
-        except DjangoValidationError as exc:
-            detail = getattr(exc, 'message_dict', None) or getattr(
-                exc, 'messages', None,
-            ) or [str(exc)]
-            raise ValidationError(detail)
-
-        if created:
-            log_activity(
-                action='convert',
-                entity_type='supplier_quotation',
-                entity_id=quotation.id,
-                entity_label=quotation.quotation_number,
-                description=f'تحويل عرض السعر إلى طلبية {deal.ref_number}',
-                request=request,
-                partner_ids=[deal.partner_id],
-                metadata={'deal_id': deal.id, 'deal_ref_number': deal.ref_number},
-            )
-        payload = {
-            'status': 'converted',
-            'created': created,
-            'deal': LogisticsDealSerializer(deal, context={'request': request}).data,
-        }
-        return Response(
-            payload,
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-        )
+    # T113-1: «تحويل إلى صفقة» بضغطة حُذف. الصفقة تُنشأ من `POST /api/logistics/deals/`
+    # ومعها `source_quotation`، فتطالب بالعرض وتقلبه «محوَّلاً» في المعاملة نفسها
+    # (`logistics/views/deals.py` — `LogisticsDealViewSet._save_deal_claiming_quotation`).
+    # لا سجل يُخلق قبل ضغطة «حفظ» في المحرّر.
 
     @action(detail=True, methods=['post'], url_path='convert-to-purchase-order')
     def convert_to_purchase_order(self, request, pk=None):

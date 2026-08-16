@@ -3,6 +3,7 @@
  * المرجع: العروض والطلبيات.txt:4-9
  */
 import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { PriceOffer, Item, Supplier, PriceOfferStatus } from "../../types";
 import {
   itemsService,
@@ -20,10 +21,11 @@ import {
   cancelPurchaseOrder,
   confirmPurchaseOrder,
   convertPurchaseOrderToInvoice,
-  convertSupplierQuotationToImportDeal,
   convertSupplierQuotationToPurchaseInvoice,
   convertSupplierQuotationToPurchaseOrder,
+  getSupplierQuotation,
 } from "../../services/procurementDocumentsApi";
+import { quotationToDraftDeal } from "../../utils/quotationToDraftDeal";
 import { ConvertTargetDialog, type ConvertTarget } from "../sales/ConvertTargetDialog";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { useToast } from "../../contexts/ToastContext";
@@ -76,6 +78,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
   const scope: PriceOfferScope = props.scope ?? "purchase";
   const statusLabels = scope === "import" ? IMPORT_STATUS_LABELS : STATUS_LABELS;
   const toast = useToast();
+  const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<"list" | "form">("list");
   const [offers, setOffers] = useState<PriceOffer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -290,6 +293,45 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     );
   };
 
+  /**
+   * T113-2: «تحويل إلى صفقة» لم يعد ينشئ شيئاً — يفتح محرّر صفقة معبّأً من العرض
+   * وغير محفوظ. لا صفقة ولا مورد ولا صنف قبل أن يضغط المستخدم «حفظ» في المحرّر.
+   * تُقرأ نسخة طازجة من العرض قبل الفتح: القائمة قد تكون قديمة، وتحويل عرضٍ
+   * حُوّل في تبويب آخر يجب أن يقول أين ذهب لا أن يفتح محرّراً مصيره الرفض.
+   */
+  const openDraftDealFromOffer = async (offer: PriceOffer) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const quotation = await getSupplierQuotation(Number(offer.id.replace("quote-", "")));
+      if (quotation.status !== "accepted") {
+        const claimedBy = quotation.converted_deal?.ref_number;
+        toast(
+          claimedBy
+            ? `العرض ${quotation.quotation_number} محوَّل بالفعل إلى الصفقة ${claimedBy}.`
+            : `العرض ${quotation.quotation_number} يلزمه قرار «ملائم» قبل تحويله إلى صفقة.`,
+          "error",
+        );
+        setReloadKey((key) => key + 1);
+        return;
+      }
+      navigate("/deals/new", {
+        state: {
+          draftDeal: quotationToDraftDeal(
+            quotation,
+            suppliers.map((s) => ({ id: s.id, name: s.tradeName, alias: s.alias })),
+          ),
+        },
+      });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "تعذّر فتح صفقة من هذا العرض";
+      setError(message);
+      toast(message, "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const columns: DenseColumn<PriceOffer>[] = [
     // T-IMPOFFER: «وإذا غير ملائم يكون معلَّم على أنه مشطوب» — الشطب على رقم
     // المستند نفسه فيُقرأ القرار من مسح الصفوف بلا فتح أي عرض.
@@ -416,18 +458,14 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
                 // الاستيراد وجهته واحدة (الصفقة هي الطلبية التشغيلية)، والشراء
                 // المحلي وجهتان فيُسأل عنهما بدل فرض المرور بطلبية.
                 if (scope === "import") {
-                  void runLifecycleAction(
-                    () => convertSupplierQuotationToImportDeal(
-                      Number(o.id.replace("quote-", "")),
-                    ),
-                    (result) => `تم تحويل العرض إلى صفقة استيراد ${
-                      (result as { deal?: { ref_number?: string } })?.deal?.ref_number || ""
-                    }`.trim(),
-                  );
+                  void openDraftDealFromOffer(o);
                   return;
                 }
                 setConvertOffer(o);
-              }}>
+              }}
+              title={scope === "import"
+                ? "يفتح صفقة معبّأة من العرض — لا تُنشأ حتى تضغط «حفظ»"
+                : undefined}>
               {scope === "import" ? "تحويل إلى صفقة" : "تحويل…"}
             </button>
           )}

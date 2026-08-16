@@ -72,6 +72,7 @@ import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 import { mergeSupplier } from "@/utils/supplierList";
 import { BANK_SWIFT_IMAGE_REQUIRED } from "@/utils/dealPaymentFlow";
 import { formatDateLocalized } from "../../../utils/formatDate";
+import { openInNewTab } from "@/utils/openInNewTab";
 import { useSearchParams } from "react-router-dom";
 
 type OperationalStatus =
@@ -611,15 +612,35 @@ export const DealForm: React.FC<DealFormProps> = ({
           createdBy: currentUser.id, updatedBy: currentUser.id, status: "initial",
           installments: finalFormData.installments || [], installmentPlanEnabled: finalFormData.installmentPlanEnabled || false,
         };
-        const optionalFields = ["priceOfferId", "dealDescription", "originalOfferNumber", "alibabaOrderLink", "internalNotes", "notes", "invoiceLink", "supplierInvoiceNumber", "supplierName", "shippingMethod", "productionDays", "deliveryDays", "quoteImages", "quotePdfs", "quote_images", "quote_pdfs", "productionTime", "paymentMethod", "deliveryTime", "warrantyDuration", "certificates", "shipping_method_id", "shippingMethodCode", "shippingMethodName", "shipmentNotes", "totalWeight", "totalVolume", "isReadyStock", "shippingDetails", "productionPath"];
+        // T113-2: العرض المصدر وعملته يُرسَلان مع الإنشاء — بدونهما تُحفظ الصفقة
+        // بلا نسبٍ إلى عرضها وبالعملة الأولى مهما كانت عملة العرض.
+        const optionalFields = ["sourceQuotationId", "currencyId", "currencyRate", "incoterms", "totalWeightKg", "priceOfferId", "dealDescription", "originalOfferNumber", "alibabaOrderLink", "internalNotes", "notes", "invoiceLink", "supplierInvoiceNumber", "supplierName", "shippingMethod", "productionDays", "deliveryDays", "quoteImages", "quotePdfs", "quote_images", "quote_pdfs", "productionTime", "paymentMethod", "deliveryTime", "warrantyDuration", "certificates", "shipping_method_id", "shippingMethodCode", "shippingMethodName", "shipmentNotes", "totalWeight", "totalVolume", "isReadyStock", "shippingDetails", "productionPath"];
         optionalFields.forEach((field) => { if (formData[field as keyof Deal] !== undefined && formData[field as keyof Deal] !== null) createData[field] = formData[field as keyof Deal]; });
         const dealId = await dealsService.createDeal(createData);
         const createdDeal = await dealsService.getDeal(dealId);
         setFormData(createdDeal); setItems(createdDeal.items || []); setInstallments(createdDeal.installments || []); setInstallmentPlanEnabled(createdDeal.installmentPlanEnabled || false);
         await loadActivities();
-        toast(`تم إنشاء الصفقة بنجاح برقم: ${createdDeal.dealNumber}`, "success");
+        // الصفقة المولودة من عرض: الرسالة تسمّي الطرفين، فيُغلَق مسار «حوّلت ولا
+        // أرى أثراً» بلا فتح شاشة أخرى للتأكد.
+        toast(
+          createdDeal.sourceQuotationId && createdDeal.originalOfferNumber
+            ? `تم إنشاء الصفقة ${createdDeal.dealNumber} من العرض ${createdDeal.originalOfferNumber}`
+            : `تم إنشاء الصفقة بنجاح برقم: ${createdDeal.dealNumber}`,
+          "success",
+        );
       }
-    } catch (e: any) { console.error("❌ Save Error:", e); toast(`فشل الحفظ: ${e.message}`, "error"); }
+    } catch (e: any) {
+      console.error("❌ Save Error:", e);
+      // رسالة الخادم عن العرض المصدر («محوَّل بالفعل إلى الصفقة D-…») تُعرض كما
+      // هي: هي وحدها التي تقول أين ذهب العرض، وتصديرها بـ«فشل الحفظ» يُخفيها.
+      const serverMessage = String(e?.message || "").trim();
+      toast(
+        formData.sourceQuotationId && serverMessage
+          ? serverMessage
+          : `فشل الحفظ: ${e.message}`,
+        "error",
+      );
+    }
     finally { setSaving(false); }
   };
 
@@ -1041,7 +1062,21 @@ export const DealForm: React.FC<DealFormProps> = ({
       ]}
       meta={[
         { label: "تاريخ الصفقة", value: formData.dealDate || "—" },
-        { label: "رقم العرض الأصلي", value: formData.originalOfferNumber || "—" },
+        {
+          label: "رقم العرض الأصلي",
+          /* T113-2: الصفقة المولودة من عرض تفتح عرضها بنقرة — الرقم وحده كان
+             يُلزم المستخدم بالبحث عنه يدوياً في شاشة العروض. */
+          value: formData.sourceQuotationId && formData.originalOfferNumber ? (
+            <button
+              type="button"
+              className="aseel-text-accent hover:underline"
+              title={`فتح عرض السعر المصدر ${formData.originalOfferNumber}`}
+              onClick={() => openInNewTab(`/price-offers?doc=quote-${formData.sourceQuotationId}`)}
+            >
+              ← {formData.originalOfferNumber}
+            </button>
+          ) : (formData.originalOfferNumber || "—"),
+        },
         { label: "طريقة الشحن", value: formData.shippingMethod || "—" },
         { label: "أيام الإنتاج", value: formData.productionDays ? String(formData.productionDays) : "—" },
         { label: "أيام التسليم", value: formData.deliveryDays ? String(formData.deliveryDays) : "—" },
