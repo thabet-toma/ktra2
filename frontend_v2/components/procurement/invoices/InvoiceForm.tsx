@@ -39,6 +39,7 @@ import {
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { accountingApi } from "@/services/accountingApi";
 import { AccountTreeField } from "@/components/accounting/AccountTreePicker";
+import type { AccountPurpose } from "@/utils/accountTree";
 import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 import { SupplierModal } from "@/components/common/SupplierModal";
@@ -119,10 +120,15 @@ type FeeAccountRow = {
   account_type?: string; is_active?: boolean;
 };
 
-/** حسابات صالحة لرسوم فاتورة الشراء (مصروف أو أصل نشط). */
+/** حسابات صالحة لرسوم فاتورة الشراء (مصروف أو أصل نشط).
+ *  THA-111: المنتقي صار يقرأ الغرض `FEE_PURPOSE`؛ وتبقى هذه للاختيار التلقائي
+ *  للرسم — أول حساب مناسب حين يضيف المستخدم رسماً جديداً. */
 const isFeeAccount = (account: FeeAccountRow) =>
   account.is_active !== false
   && ["Expense", "Asset"].includes(String(account.account_type || ""));
+
+/** رسوم الشراء: مصروف أو أصل. ثابتٌ خارج المكوّن كي لا يُعاد بناء الشجرة مع كل رسم. */
+const FEE_PURPOSE: readonly AccountPurpose[] = ["expense", "asset"];
 
 export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   invoice: initialInvoice,
@@ -1800,7 +1806,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             {(formData.fees || []).map((fee, index) => (
               <tr key={fee.id || index}>
                 <td className="p-1"><input className="aseel-input w-full" disabled={effectiveReadOnly} value={fee.description} placeholder="مثال: رسوم فحص أو ضريبة إضافية" onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, description: e.target.value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
-                <td className="p-1"><AccountTreeField accounts={allAccounts} value={fee.expenseAccountId || ""} disabled={effectiveReadOnly} isSelectable={isFeeAccount} title="اختيار حساب الرسم" onChange={(id, account) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, expenseAccountId: id, expenseAccountCode: account?.code, expenseAccountName: account?.name ?? undefined }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
+                <td className="p-1"><AccountTreeField accounts={allAccounts} value={fee.expenseAccountId || ""} disabled={effectiveReadOnly} purpose={FEE_PURPOSE} title="اختيار حساب الرسم" onChange={(id, account) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, expenseAccountId: id, expenseAccountCode: account?.code, expenseAccountName: account?.name ?? undefined }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1"><input className="aseel-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly || fee.calculationType === "percentage"} value={fee.calculationType === "percentage" ? fee.amount : (fee.calculationValue ?? fee.amount)} onChange={(e) => { const value = Number(e.target.value) || 0; const fees = [...(formData.fees || [])]; fees[index] = { ...fee, amount: value, calculationValue: value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} checked={fee.capitalizeToInventory} onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, capitalizeToInventory: e.target.checked }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="aseel-toolbtn" onClick={() => { setFormData((prev) => ({ ...prev, fees: (prev.fees || []).filter((_, i) => i !== index) })); markDirty(); }}><Trash2 size={14} /></button>}</td>

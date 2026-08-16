@@ -16,6 +16,8 @@ export interface AccountNodeLike {
   name?: string | null;
   parent?: number | null;
   account_type?: string | null;
+  /** التصنيف الوظيفي المخزَّن في الخادم (`Account.sub_type`) حين تعرضه الشاشة. */
+  sub_type?: string | null;
   is_active?: boolean;
 }
 
@@ -100,24 +102,58 @@ export const searchMatchIds = <T extends AccountNodeLike>(
   return keep;
 };
 
-export interface VisibleRowsOptions {
+/**
+ * معرّفات الحسابات القابلة للاختيار مع كل آبائها — بها تُقصّ الشجرة إلى فروع
+ * الغرض وحدها: الأب غير المطابق يبقى ليُرى الموقع، وما ليس مطابقاً ولا أباً
+ * لمطابق لا يُرسم إطلاقاً. نفس ميكانيكية `searchMatchIds`.
+ */
+export const selectableMatchIds = <T extends AccountNodeLike>(
+  accounts: T[],
+  index: AccountIndex<T>,
+  isSelectable: (account: T) => boolean,
+): Set<number> => {
+  const keep = new Set<number>();
+  for (const a of accounts) {
+    if (!isSelectable(a)) continue;
+    keep.add(a.id);
+    for (const id of ancestorIdsOf(index, a.id)) keep.add(id);
+  }
+  return keep;
+};
+
+export interface VisibleRowsOptions<T extends AccountNodeLike = AccountNodeLike> {
   /** نص البحث؛ حين لا يكون فارغاً تُفتح الفروع المطابقة كلها. */
   query?: string;
   /** الفروع المفتوحة يدوياً (تُتجاهل أثناء البحث). */
   expanded?: ReadonlySet<number>;
+  /**
+   * شرط الانتقاء؛ حين يُمرَّر تُقصّ الشجرة إلى القابل للاختيار وآبائه.
+   * غيابه = سلوك اليوم بالضبط: الشجرة كاملة.
+   */
+  isSelectable?: (account: T) => boolean;
 }
 
 /**
  * صفوف الشجرة الظاهرة بالترتيب (أب ثم أبناؤه) مع عمق كل صف.
- * أثناء البحث تُعرض المطابقات وآباؤها مفتوحةً كلها.
+ * أثناء البحث تُعرض المطابقات وآباؤها مفتوحةً كلها، ومع شرط انتقاء تُقصّ الشجرة
+ * إلى فروعه — والقصّان يتقاطعان حين يجتمعان.
  */
 export const visibleAccountRows = <T extends AccountNodeLike>(
   accounts: T[],
   index: AccountIndex<T>,
-  { query = '', expanded }: VisibleRowsOptions = {},
+  { query = '', expanded, isSelectable }: VisibleRowsOptions<T> = {},
 ): AccountTreeRow<T>[] => {
   const searching = query.trim().length > 0;
-  const keep = searching ? searchMatchIds(accounts, index, query) : null;
+  const searchKeep = searching ? searchMatchIds(accounts, index, query) : null;
+  // صفر حساب قابل للاختيار ⇒ لا قصّ: شجرة فارغة طريق مسدود لا يخرج منه المستخدم.
+  const selectableKeep = isSelectable
+    ? selectableMatchIds(accounts, index, isSelectable)
+    : null;
+  const pruneKeep = selectableKeep && selectableKeep.size > 0 ? selectableKeep : null;
+  const keep =
+    searchKeep && pruneKeep
+      ? new Set([...searchKeep].filter((id) => pruneKeep.has(id)))
+      : searchKeep ?? pruneKeep;
   const rows: AccountTreeRow<T>[] = [];
 
   const walk = (parentId: number | null, depth: number) => {
@@ -136,21 +172,120 @@ export const visibleAccountRows = <T extends AccountNodeLike>(
   return rows;
 };
 
+/**
+ * غرض الحقل الذي يُملأ: مصدر واحد لسؤال «أي الحسابات تصلح هنا؟». كانت كل شاشة
+ * تعرّف الشرط بنفسها فتختلف الإجابة للحقل الواحد بين شاشة وأخرى.
+ */
+export type AccountPurpose =
+  | 'cash' | 'bank' | 'receivable' | 'payable' | 'inventory'
+  | 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
+  | 'any';
+
+/** الأغراض التي يجيب عنها التصنيف الوظيفي المخزَّن؛ البقية من `account_type`. */
+const PURPOSE_SUB_TYPES: Record<string, string[]> = {
+  cash: ['cash_box', 'bank'],
+  bank: ['bank'],
+  receivable: ['receivable'],
+  payable: ['payable'],
+  inventory: ['inventory'],
+};
+
 /** جذور النقدية في الشجرة المعيارية: النقدية، البنوك، صناديق النقدية. */
 const CASH_CODE_ROOTS = ['1101', '1102', '1110'];
 
 /**
- * هل يصلح الحساب صندوقاً/بنكاً؟ كان لكل شاشة نسختها من هذا الشرط (وثلاث منها
- * تختلف عن بعضها) فيظهر الصندوق في سند ويغيب عن سند. والشرط القديم `^110`
- * كان يبتلع 1103 المدينون و1104 المخزون و1105 الضريبة — حسابات لا تُدفع منها.
+ * الشرط القديم للصندوق — يبقى للحساب الذي لم يصنّفه الخادم بعد (شركة لم يمرّ
+ * عليها الاشتقاق، أو شاشة لا تجلب `sub_type`). الشرط `^110` الأقدم كان يبتلع
+ * 1103 المدينون و1104 المخزون و1105 الضريبة — حسابات لا تُدفع منها.
  */
-export const isCashAccount = (a: AccountNodeLike): boolean => {
+const looksLikeCash = (a: AccountNodeLike): boolean => {
   const type = (a.account_type || '').toLowerCase();
   if (type === 'cash' || type === 'bank') return true;
   if (type !== 'asset') return false;
   const code = codeOf(a);
   if (CASH_CODE_ROOTS.some((root) => code.startsWith(root))) return true;
   return /صندوق|بنك|نقدية|cash|bank/i.test(a.name ?? '');
+};
+
+/**
+ * هل يصلح الحساب لهذا الغرض؟ التصنيف المخزَّن هو الحجّة الأولى — وهو ما يجعل
+ * «صندوق العهدة» المصنَّف مخزوناً لا يظهر في حقل الصندوق مهما كان اسمه.
+ * تقبل مصفوفة للحقول المركّبة (رسوم الشراء = مصروف أو أصل).
+ */
+export const accountMatchesPurpose = (
+  a: AccountNodeLike,
+  purpose: AccountPurpose | readonly AccountPurpose[],
+): boolean => {
+  if (Array.isArray(purpose)) return purpose.some((p) => accountMatchesPurpose(a, p));
+  const one = purpose as AccountPurpose;
+  if (one === 'any') return true;
+  const wanted = PURPOSE_SUB_TYPES[one];
+  if (!wanted) return (a.account_type || '').toLowerCase() === one;
+  const sub = (a.sub_type || '').toLowerCase();
+  if (sub) return wanted.includes(sub);
+  // بلا تصنيف مخزَّن: للنقدية وحدها شرطٌ قديم مشترك نسقط إليه، وبقية الأغراض
+  // لا جواب لها إلا التصنيف — والشجرة الكاملة (fallback المنتقي) تنقذ المستخدم.
+  return one === 'cash' ? looksLikeCash(a) : false;
+};
+
+/**
+ * هل يصلح الحساب صندوقاً/بنكاً؟ يبقى الشرط المشترك حتى تسحبه الشاشات إلى
+ * `purpose="cash"`.
+ */
+export const isCashAccount = (a: AccountNodeLike): boolean =>
+  accountMatchesPurpose(a, 'cash');
+
+export interface AccountSelectableOptions<T extends AccountNodeLike> {
+  /** غرض الحقل؛ غيابه يعني أن الشاشة لم تصرّح بشرط. */
+  purpose?: AccountPurpose | readonly AccountPurpose[];
+  /**
+   * السماح باختيار حساب أب — لفلاتر التقارير ودفتر الأستاذ: هي تختار نطاق عرض
+   * لا هدف ترحيل. الافتراضي `false`: الترحيل لا يقع إلا على ورقة.
+   */
+  allowParents?: boolean;
+  /** شرط خاص بالشاشة (قائمة يحدّدها الخادم مثلاً) يُركَّب فوق الافتراضي. */
+  isSelectable?: (account: T) => boolean;
+}
+
+/**
+ * شرط الانتقاء الواحد للمنتقي: مطابقٌ للغرض ونشطٌ وورقة، وفوقه شرط الشاشة إن
+ * وُجد. يعود `undefined` حين لا شرط أصلاً — فيبقى كل شيء قابلاً للاختيار وتُعرض
+ * الشجرة كاملة، أي سلوك اليوم بلا تغيير.
+ */
+export const buildAccountSelectable = <T extends AccountNodeLike>(
+  index: AccountIndex<T>,
+  { purpose, allowParents = false, isSelectable }: AccountSelectableOptions<T> = {},
+): ((account: T) => boolean) | undefined => {
+  if (!purpose && !isSelectable) return undefined;
+  return (account: T) => {
+    if (isSelectable && !isSelectable(account)) return false;
+    if (!purpose) return true;
+    if (!accountMatchesPurpose(account, purpose)) return false;
+    if (account.is_active === false) return false;
+    if (!allowParents && (index.childrenOf.get(account.id)?.length ?? 0) > 0) return false;
+    return true;
+  };
+};
+
+/**
+ * شرط الانتقاء الفعليّ بعد قياسه على الحسابات الحاضرة — وهو ما تستعمله الشاشات.
+ *
+ * `buildAccountSelectable` يصف الشرط المثالي؛ هذه تتحقّق أن له مطابقاً واحداً
+ * على الأقل. حين لا يطابقه شيء — شركة لم يصنّف الخادم شجرتها بعد — يسقط الغرض
+ * ويبقى شرط الشاشة وحده. بدون هذا السقوط كانت الشجرة تُعرض كاملة (لأن القصّ
+ * يتعطّل) بينما يبقى الانتقاء على شرط الغرض، فيرى المستخدم كل حساباته ولا
+ * يستطيع اختيار واحد: طريق مسدود يراه ولا يفهمه.
+ *
+ * شرط الشاشة لا يسقط أبداً: قائمةٌ يحدّدها الخادم تبقى ملزِمة ولو خلت.
+ */
+export const resolveAccountSelectable = <T extends AccountNodeLike>(
+  accounts: readonly T[],
+  index: AccountIndex<T>,
+  options: AccountSelectableOptions<T> = {},
+): ((account: T) => boolean) | undefined => {
+  const strict = buildAccountSelectable(index, options);
+  if (!strict || accounts.some(strict)) return strict;
+  return buildAccountSelectable(index, { isSelectable: options.isSelectable });
 };
 
 /** أنواع الحسابات ذات الطبيعة المدينة؛ البقية دائنة. */

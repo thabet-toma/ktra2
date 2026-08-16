@@ -15,7 +15,7 @@ class AccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Account
         fields = [
-            'id', 'code', 'name', 'parent', 'account_type', 'is_active',
+            'id', 'code', 'name', 'parent', 'account_type', 'sub_type', 'is_active',
             'linked_partner',
         ]
 

@@ -35,7 +35,11 @@ import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
 import { SettleFromOnAccountModal } from "@/components/shared/SettleFromOnAccountModal";
 import { useConfirm } from "@/contexts/ConfirmContext";
 import { AccountTreeField } from "@/components/accounting/AccountTreePicker";
-import { isCashAccount } from "@/utils/accountTree";
+import type { AccountPurpose } from "@/utils/accountTree";
+
+/** رسوم الشراء تُحمَّل على مصروف أو تُرسمل على أصل — غرضٌ واحد بوجهين.
+ *  ثابتٌ خارج المكوّن كي لا تُعاد الشجرة بناءً مع كل رسم. */
+const FEE_PURPOSE: readonly AccountPurpose[] = ["expense", "asset"];
 
 const RECEIPT_BADGE: Record<ReceiptStatus, { label: string; cls: string }> = {
   not_received: { label: "غير مستلمة", cls: "aseel-text-state" },
@@ -123,19 +127,6 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         .sort((a, b) => (a.code || "").localeCompare(b.code || "")),
     [accounts]
   );
-  // T-DEFACC: شرط الصندوق من المصدر المشترك — لا نسخة ثالثة منه هنا.
-  const isSelectableCash = useCallback(
-    (a: AccountDto) => a.is_active !== false && isCashAccount(a),
-    []
-  );
-  const isSelectableExpense = useCallback(
-    (a: AccountDto) =>
-      a.is_active !== false &&
-      (a.account_type === "Expense" || a.account_type === "Asset") &&
-      !!a.code,
-    []
-  );
-
   // ─── تفاعل المستخدم مع الرسوم ──────────────────────────────────────────
   const addFee = () => {
     const firstExp =
@@ -520,7 +511,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                 accounts={accounts}
                 value={cashAccountId}
                 onChange={(id) => setCashAccountId(id)}
-                isSelectable={isSelectableCash}
+                purpose="cash"
                 disabled={disableEdit}
                 title="اختيار الصندوق / البنك"
                 className="w-full h-11 px-3 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white disabled:opacity-60"
@@ -562,7 +553,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                         accounts={accounts}
                         value={item.expense_account ?? ""}
                         onChange={(id) => updateItemAccount(idx, id)}
-                        isSelectable={isSelectableExpense}
+                        purpose={FEE_PURPOSE}
                         disabled={disableEdit}
                         placeholder="— حساب المخزون الافتراضي —"
                         title="اختيار حساب البند"
@@ -636,7 +627,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                         accounts={accounts}
                         value={fee.expense_account ?? ""}
                         onChange={(id) => updateFee(idx, { expense_account: id ?? 0 })}
-                        isSelectable={isSelectableExpense}
+                        purpose={FEE_PURPOSE}
                         disabled={disableEdit}
                         title="اختيار حساب الرسم"
                         className="w-full h-9 px-2 border aseel-border-soft dark:aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-xs"
@@ -831,7 +822,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                   accounts={accounts}
                   value={payAccountId}
                   onChange={(id) => setPayAccountId(id)}
-                  isSelectable={isSelectableCash}
+                  purpose="cash"
                   title="اختيار الصندوق / البنك"
                   className="px-3 py-2 rounded-lg border aseel-border-soft aseel-bg-panel min-w-[12rem]"
                 />

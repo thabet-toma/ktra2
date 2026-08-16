@@ -28,7 +28,6 @@ import { resolveTenantId } from "../../utils/tenantContext";
 import { getSalesSettings, updateSalesSettings, type SalesSettings } from "../../services/salesApi";
 import { cloudinaryService } from "../../services/cloudinaryService";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
-import { isCashAccount } from "../../utils/accountTree";
 import { usePasteImageUpload } from "../../utils/clipboardImage";
 import { Save, RefreshCw, Database, X, Upload } from "lucide-react";
 
@@ -144,10 +143,6 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
 
   // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف.
   usePasteImageUpload((files) => { void uploadLogoFile(files[0]); }, !uploadingLogo);
-
-  /** Account helpers */
-  // T-DEFACC: الشجرة تُعرض كاملة والنوع يحدّد ما يُختار منها فقط.
-  const isType = (type: string) => (a: AccountRow) => a.account_type === type;
 
   /** Load everything in parallel. Each call is fault-tolerant. */
   const loadData = useCallback(async () => {
@@ -462,36 +457,37 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
   );
 
   /** ── Tab 3: حسابات افتراضية ───────────────────────────────────────── */
+  // THA-111: غرض الحقل يقود ما تعرضه الشجرة وما يُختار منه — لا شرط محلي هنا.
   const accountsTab = (
     <AseelFormSection title="الحسابات المحاسبية الافتراضية" cols={2}>
       {fld("حساب الإيراد (منتج)", (
         <AccountTreeField accounts={accounts} value={salesSettings?.default_revenue_account_product || ""}
-          onChange={(id) => updSales("default_revenue_account_product", id)} isSelectable={isType("Revenue")} title="حساب الإيراد (منتج)" />
+          onChange={(id) => updSales("default_revenue_account_product", id)} purpose="revenue" allowParents title="حساب الإيراد (منتج)" />
       ))}
       {fld("حساب الإيراد (خدمة)", (
         <AccountTreeField accounts={accounts} value={salesSettings?.default_revenue_account_service || ""}
-          onChange={(id) => updSales("default_revenue_account_service", id)} isSelectable={isType("Revenue")} title="حساب الإيراد (خدمة)" />
+          onChange={(id) => updSales("default_revenue_account_service", id)} purpose="revenue" allowParents title="حساب الإيراد (خدمة)" />
       ))}
       {fld("حساب الصندوق الافتراضي", (
         <AccountTreeField accounts={accounts} value={salesSettings?.default_cash_account || ""}
-          onChange={(id) => updSales("default_cash_account", id)} isSelectable={isCashAccount} title="حساب الصندوق الافتراضي" />
+          onChange={(id) => updSales("default_cash_account", id)} purpose="cash" allowParents title="حساب الصندوق الافتراضي" />
       ))}
       {fld("حساب ذمم العملاء الافتراضي", (
         <AccountTreeField accounts={accounts} value={salesSettings?.default_ar_account || ""}
-          onChange={(id) => updSales("default_ar_account", id)} isSelectable={isType("Asset")} title="حساب ذمم العملاء" />
+          onChange={(id) => updSales("default_ar_account", id)} purpose="receivable" allowParents title="حساب ذمم العملاء" />
       ))}
       {fld("حساب المخزون", (
         <AccountTreeField accounts={accounts} value={salesSettings?.default_inventory_account || ""}
-          onChange={(id) => updSales("default_inventory_account", id)} isSelectable={isType("Asset")} title="حساب المخزون" />
+          onChange={(id) => updSales("default_inventory_account", id)} purpose="inventory" allowParents title="حساب المخزون" />
       ))}
       {fld("حساب تكلفة المبيعات (COGS)", (
         <AccountTreeField accounts={accounts} value={salesSettings?.default_cogs_account || ""}
-          onChange={(id) => updSales("default_cogs_account", id)} isSelectable={isType("Expense")}
+          onChange={(id) => updSales("default_cogs_account", id)} purpose="expense" allowParents
           title="حساب تكلفة المبيعات" />
       ))}
       {fld("حساب أجرة الشحن (دائن)", (
         <AccountTreeField accounts={accounts} value={settings?.default_freight_credit_account || ""}
-          onChange={(id) => upd("default_freight_credit_account", id)} isSelectable={isType("Liability")}
+          onChange={(id) => upd("default_freight_credit_account", id)} purpose="liability" allowParents
           title="حساب أجرة الشحن (دائن)" />
       ))}
     </AseelFormSection>

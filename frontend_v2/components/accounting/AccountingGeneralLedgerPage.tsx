@@ -148,10 +148,13 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
       <div className="aseel-field" style={{ flex: "1", minWidth: "200px" }}>
         <label className="aseel-field-label">الحساب</label>
+        {/* THA-111: فلتر عرض لا هدف ترحيل — يُسمح فيه باختيار حساب أب. */}
         <AccountTreeField
           accounts={accounts}
           value={accountId === "" ? "" : Number(accountId)}
           onChange={(id) => setAccountId(id == null ? "" : String(id))}
+          purpose="any"
+          allowParents
           title="اختيار الحساب من الشجرة"
         />
       </div>

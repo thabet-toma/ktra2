@@ -17,7 +17,6 @@ import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
-import { isCashAccount } from "../../utils/accountTree";
 import {
   SERIAL_ENTRY_MODE_HINT,
   SERIAL_ENTRY_MODE_OPTIONS,
@@ -230,12 +229,6 @@ export const SalesSettingsPage: React.FC = () => {
     );
   }
 
-  // T-DEFACC: الشجرة تُعرض كاملة، وهذه الشروط تحكم ما يُختار منها فقط.
-  const isActive = (a: AccountOpt) => a.is_active !== false;
-  const isTypeOf = (type: string) => (a: AccountOpt) =>
-    isActive(a) && (a.account_type || "").toLowerCase() === type;
-  const isSelectableCash = (a: AccountOpt) => isActive(a) && isCashAccount(a);
-
   const toolbarActions: AseelToolbarAction[] = [
     {
       key: "save",
@@ -346,7 +339,8 @@ export const SalesSettingsPage: React.FC = () => {
             accounts={accounts}
             value={settings.default_cash_account ?? ""}
             onChange={(id) => setField("default_cash_account", id)}
-            isSelectable={isSelectableCash}
+            purpose="cash"
+            allowParents
             title="اختيار الصندوق / البنك"
           />
         </FieldLabel>
@@ -356,7 +350,8 @@ export const SalesSettingsPage: React.FC = () => {
             accounts={accounts}
             value={settings.default_ar_account ?? ""}
             onChange={(id) => setField("default_ar_account", id)}
-            isSelectable={isActive}
+            purpose="receivable"
+            allowParents
             title="اختيار حساب ذمم العملاء"
           />
         </FieldLabel>
@@ -371,7 +366,8 @@ export const SalesSettingsPage: React.FC = () => {
             accounts={accounts}
             value={settings.default_revenue_account_product ?? ""}
             onChange={(id) => setField("default_revenue_account_product", id)}
-            isSelectable={isTypeOf("revenue")}
+            purpose="revenue"
+            allowParents
             title="اختيار حساب إيراد البضائع"
           />
           {settings.default_revenue_account_product_name && (
@@ -386,7 +382,8 @@ export const SalesSettingsPage: React.FC = () => {
             accounts={accounts}
             value={settings.default_revenue_account_service ?? ""}
             onChange={(id) => setField("default_revenue_account_service", id)}
-            isSelectable={isTypeOf("revenue")}
+            purpose="revenue"
+            allowParents
             title="اختيار حساب إيراد الخدمات"
           />
           {settings.default_revenue_account_service_name && (
@@ -406,7 +403,8 @@ export const SalesSettingsPage: React.FC = () => {
             accounts={accounts}
             value={settings.default_inventory_account ?? ""}
             onChange={(id) => setField("default_inventory_account", id)}
-            isSelectable={isActive}
+            purpose="inventory"
+            allowParents
             title="اختيار حساب المخزون"
           />
         </FieldLabel>
@@ -416,7 +414,8 @@ export const SalesSettingsPage: React.FC = () => {
             accounts={accounts}
             value={settings.default_cogs_account ?? ""}
             onChange={(id) => setField("default_cogs_account", id)}
-            isSelectable={isTypeOf("expense")}
+            purpose="expense"
+            allowParents
             title="اختيار حساب تكلفة المبيعات"
           />
         </FieldLabel>

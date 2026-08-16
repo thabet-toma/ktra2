@@ -11,7 +11,6 @@ import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
-import { isCashAccount } from "../../utils/accountTree";
 import {
   SERIAL_ENTRY_MODE_HINT,
   SERIAL_ENTRY_MODE_OPTIONS,
@@ -73,9 +72,6 @@ const PurchaseSettingsPage: React.FC = () => {
       setLoading(false);
     }
   }, []);
-
-  // T-DEFACC: الشجرة تُعرض كاملة، والصناديق وحدها قابلة للاختيار منها.
-  const isSelectableCash = (a: AccountOpt) => a.is_active !== false && isCashAccount(a);
 
   useEffect(() => {
     load();
@@ -286,7 +282,8 @@ const PurchaseSettingsPage: React.FC = () => {
                 accounts={accounts}
                 value={cashAccount}
                 onChange={(id) => setCashAccount(id)}
-                isSelectable={isSelectableCash}
+                purpose="cash"
+                allowParents
                 disabled={loading}
                 placeholder="— لا شيء —"
                 title="اختيار الصندوق / البنك"

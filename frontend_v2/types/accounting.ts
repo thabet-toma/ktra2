@@ -12,6 +12,8 @@ export interface AccountingAccount {
   name: string | null;
   parent: number | null;
   account_type: string | null;
+  /** THA-111: التصنيف الوظيفي المخزَّن — يقود ما تعرضه منتقيات الحسابات. */
+  sub_type?: string | null;
   is_active: boolean;
   /** حساب مرتبط بمورد: الاسم التجاري (المستعار) للعرض في الشجرة */
   linked_partner?: AccountingLinkedPartner | null;

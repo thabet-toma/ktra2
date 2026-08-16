@@ -1046,13 +1046,16 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       )}
     </div>
 
-    {/* ── T-DEFACC: شجرة الحسابات (تُفتح بـ + على خلية الحساب) ── */}
+    {/* ── T-DEFACC: شجرة الحسابات (تُفتح بـ + على خلية الحساب) ──
+        THA-111: أي حساب يصلح لسطر القيد، لكن الترحيل لا يقع إلا على ورقة نشطة —
+        الحساب الأب يظهر للتصفّح ولا يُختار. */}
     <AccountTreePicker
       open={showAccountPicker}
       accounts={accounts}
       value={pickerTargetLine != null && lines[pickerTargetLine]?.accountId
         ? Number(lines[pickerTargetLine].accountId)
         : null}
+      purpose="any"
       title="شجرة الحسابات"
       onSelect={(a) => {
         if (pickerTargetLine != null) {

@@ -32,7 +32,6 @@ import { formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { isReservationActive } from "../../utils/documentBadges";
-import { isCashAccount } from "../../utils/accountTree";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -620,7 +619,7 @@ export const SalesOrdersPage: React.FC = () => {
                   accounts={accounts}
                   value={depositAccount}
                   onChange={(id) => setDepositAccount(id ?? "")}
-                  isSelectable={isCashAccount}
+                  purpose="cash"
                   className={inputClass}
                   title="اختيار الصندوق / البنك"
                 />

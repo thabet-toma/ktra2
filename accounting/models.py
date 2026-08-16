@@ -1,7 +1,12 @@
+import logging
+
 from django.db import models
 from tenants.models import Tenant, Currency
 from core.base_models import SoftDeleteMixin, TimeStampMixin
 from partners.models import Partner
+from .account_classification import SUB_TYPE_CHOICES, sub_type_for_account
+
+logger = logging.getLogger(__name__)
 
 class CostCenter(models.Model):
     id = models.AutoField(primary_key=True, db_column='CostCenterID')
@@ -42,6 +47,16 @@ class Account(models.Model):
     name = models.CharField(max_length=100, null=True, blank=True, db_column='Name')
     parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, db_column='ParentID', related_name='children')
     account_type = models.CharField(max_length=20, choices=ACCOUNT_TYPES, null=True, blank=True, db_column='Type')
+    # THA-111: الغرض الوظيفي للحساب — «صندوق» و«ذمم عملاء» و«مخزون» كلها
+    # `Asset`، فكان كل منتقي حساب يخمّن الغرض ببادئة الرقم أو بالاسم ويصل إلى
+    # إجابات متضاربة. NULL = حساب عادي يكفيه `account_type`. مفصول عن
+    # `ACCOUNT_TYPES` عمداً: تلك الخمسة تقود الطبيعة والحساب الختامي والتقارير،
+    # وإضافة قيمة إليها تكسرها بصمت. الاشتقاق في `account_classification.py`.
+    sub_type = models.CharField(
+        max_length=20, choices=SUB_TYPE_CHOICES, null=True, blank=True,
+        db_column='SubType',
+        help_text='التصنيف الوظيفي: صندوق/بنك/ذمم مدينة/ذمم دائنة/مخزون. فارغ = حساب عادي.',
+    )
     nature = models.CharField(
         max_length=20, choices=NATURE_CHOICES, null=True, blank=True,
         db_column='Nature',
@@ -64,6 +79,24 @@ class Account(models.Model):
 
     def __str__(self):
         return f"{self.code} - {self.name}"
+
+    def save(self, *args, **kwargs):
+        """يشتقّ التصنيف الوظيفي عند الإنشاء وحده، وبلا أن يعترض طريق الحفظ.
+
+        نقطةٌ واحدة عمداً بدل ترقيع كل موضع يُنشئ حساباً (بذر شجرة شركة، حساب
+        الطرف التلقائي، الحساب التشغيلي، الـAPI): مسارٌ جديد يُضاف غداً يرث
+        الاشتقاق بلا أن يتذكّره أحد. الاشتقاق لا يعمل إلا حين يكون التصنيف
+        فارغاً، فالتصحيح اليدوي من بطاقة الحساب — وأي تصنيف صريح — يبقى أقوى
+        منه، وتحديث حسابٍ قائم لا يعيد فتح ما استقرّ.
+        """
+        if self._state.adding and not self.sub_type:
+            try:
+                self.sub_type = sub_type_for_account(self)
+            except Exception:  # noqa: BLE001 — تصنيفٌ فاشل لا يمنع إنشاء حساب
+                logger.exception(
+                    "account.sub_type derivation failed for code=%s", self.code,
+                )
+        super().save(*args, **kwargs)
 
 class JournalHeader(models.Model):
     id = models.AutoField(primary_key=True, db_column='JournalID')

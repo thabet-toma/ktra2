@@ -19,6 +19,8 @@
 | `frontend_v2/utils/navAccess.ts` | اشتقاق القائمة: الصلاحية + قناع «الوضع السهل» — **نقطة التركيب الوحيدة** |
 | `frontend_v2/utils/uiMode.ts` | «الوضع السهل»: `SIMPLE_VIEWS` و`viewVisibleInSimpleMode` وcache بمفتاح الشركة |
 | `frontend_v2/components/ui/FieldHint.tsx` · `frontend_v2/constants/simpleHints.ts` | أيقونة «؟» ونصوصها — **كل النصوص في الملف الثاني وحده** |
+| `frontend_v2/components/accounting/AccountTreePicker.tsx` | **اختيار الحساب في كل الشاشات**: `AccountTreePicker` (النافذة) و`AccountTreeField` (بديل `<select>`) |
+| `frontend_v2/utils/accountTree.ts` | منطق الشجرة: الفهرس، البحث، القصّ بالغرض (`accountMatchesPurpose`, `buildAccountSelectable`) |
 | `frontend_v2/utils/formatNumber.ts` | **كل عرض رقمي يمرّ من هنا** |
 | `frontend_v2/utils/formatDate.ts` | التواريخ — لا `toLocaleDateString` بلغة عربية |
 | `frontend_v2/services/tenantSettingsApi.ts` | مصدر مشترك لإعدادات الشركة (نافذة 60ث) |
@@ -76,6 +78,52 @@
 - **ترتيب المزوّدات مقصود**: `ToastProvider` **فوق** `PermissionsProvider` في
   `frontend_v2/index.tsx` — الأخير يحتاج `useToast` (وهو يرمي بلا مزوّد). لا تُعِد الترتيب.
 - الرحلة كاملةً يحرسها `frontend_v2/e2e/simple-ui-mode.spec.ts`.
+
+## اختيار الحساب — الغرض لا شرطٌ لكل شاشة
+
+أي حقل حساب يستعمل `AccountTreeField` (أو `AccountTreePicker` مباشرةً)، ويصرّح
+بغرضه بدل أن يكتب شرطه بنفسه: `purpose="cash" | "bank" | "receivable" |
+"payable" | "inventory"` تُقرأ من التصنيف المخزَّن `Account.sub_type` الذي
+يشتقّه الخادم (`accounting/account_classification.py`)، و`"asset" | "liability"
+| "equity" | "revenue" | "expense"` من `account_type`، و`"any"` تقبل الكل.
+الحقل المركّب يمرّر مصفوفة (`purpose={['expense','asset']}`).
+
+- **الشجرة تُقصّ لا تُعتّم**: يُعرض القابل للاختيار **وآباؤه** فقط (الآباء
+  رماديون للتوجيه)، وما ليس مطابقاً ولا أباً لمطابق لا يُرسم — المخزون لا يظهر
+  في حقل الصندوق.
+- **الافتراضي مع الغرض**: مطابقٌ **ونشط وورقة**. `allowParents` ترفع شرط الورقة
+  وحده (الغرض يبقى) وتأخذها فئتان: فلاتر التقارير ودفتر الأستاذ لأنها تختار
+  نطاق عرض لا هدف ترحيل، **وحقول الحسابات الافتراضية في شاشات الإعدادات** لأنها
+  حسابات تحكّم يرحّل عليها النظام أصلاً — `sales/services/foundation.py` يبذر
+  `1103` في «ذمم العملاء» وهو حساب أب في كل الشركات، فقاعدة «ورقة فقط» كانت
+  تعرض المحفوظ ولا تسمح باختياره ثانيةً. التضييق يبقى على منتقيات سطور الحركة.
+- **لا طريق مسدود**: صفر حساب مصنَّف لهذا الغرض ⇒ تُعرض الشجرة كاملة **ويسقط
+  الغرض عن الانتقاء أيضاً** (`accountTree.ts` (`resolveAccountSelectable`)) —
+  إسقاطه عن الرسم وحده كان يترك المستخدم يرى كل حساباته ولا يستطيع اختيار واحد.
+  وشرط الشاشة الخادمي لا يسقط أبداً. وزر «عرض الكل» متاح دوماً للخروج من القصّ.
+- `isSelectable` تبقى للشرط الخاص بالشاشة (قائمة يحدّدها الخادم) وتُركَّب فوق
+  الغرض؛ وحدها كافية لتفعيل القصّ.
+
+**من يصرّح بماذا** (لا شرط حساب محلي باقٍ في أي شاشة):
+
+| الشاشة | الغرض |
+|---|---|
+| `GroupConstantsPage` · `SalesSettingsPage` | `revenue` · `cash` · `receivable` · `inventory` · `expense` · `liability` حسب الحقل — **كلها `allowParents`** (حسابات تحكّم) |
+| `PurchaseSettingsPage` | `cash` + `allowParents` |
+| `SalesOrdersPage` · `SalesCustomerPaymentsPage` · `NewSupplierPaymentModal` · `PurchaseInvoiceAccountingPanel` | `cash` (ورقة نشطة) |
+| `PurchaseInvoiceAccountingPanel` (حساب البند والرسم) · `InvoiceForm` (حساب الرسم) | `['expense','asset']` |
+| `ReportRunnerPage` | `cash` لفلتر `cash_account`، و`any` + `allowParents` لبقية فلاتر الحساب |
+| `AccountingGeneralLedgerPage` | `any` + `allowParents` |
+| `AccountingJournalEntryPage` (حساب السطر) | `any` — ورقة نشطة، فلا يُرحَّل على حساب عنوان |
+| `SettleFromOnAccountModal` | لا غرض: `isSelectable` من قائمة الخادم، ويكسب القصّ بها |
+
+`SalesInvoiceEditor` لا يستعمل المنتقي (قائمة مسطّحة)، لكنه يسأل
+`accountMatchesPurpose(a, "cash")` — لا نسخة ثانية من الشرط.
+
+**تصحيح تصنيف حساب**: بطاقة الحساب في `AccountingCoaPage.tsx` فيها «التصنيف
+الوظيفي» — قائمة بالقيم الخمس و«—»، تكتب `sub_type` عبر `PATCH
+/api/accounting/accounts/<id>/`. هي مخرج صاحب الشركة حين يصنّف الاشتقاق حساباً
+خطأً، فلا يبقى الحقل رهينة تخمينٍ لا يُردّ.
 
 ## قواعد لا يجوز كسرها
 

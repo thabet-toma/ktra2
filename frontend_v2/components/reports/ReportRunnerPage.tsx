@@ -33,7 +33,7 @@ import {
 } from "../../utils/reportFormat";
 import { formatDateLocalized } from "../../utils/formatDate";
 import { printReport } from "../../utils/printReport";
-import { isCashAccount, type AccountNodeLike } from "../../utils/accountTree";
+import type { AccountNodeLike } from "../../utils/accountTree";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { AseelDocumentShell, AseelReportTable } from "../aseel";
 import type { AseelTab, AseelToolbarAction, ReportColumn } from "../aseel";
@@ -213,13 +213,16 @@ export const ReportRunnerPage: React.FC = () => {
     }
     if (ACCOUNT_KINDS.has(filter.kind)) {
       // T-DEFACC: اختيار الحساب من الشجرة هنا أيضاً — لا قائمة مسطّحة.
+      // THA-111: فلتر الصندوق يقصّ الشجرة على الصناديق، وبقية فلاتر الحساب
+      // تسمح باختيار حساب أب: الفلتر نطاق عرض لا هدف ترحيل.
       return (
         <div style={{ minWidth: "220px" }}>
           <AccountTreeField
             accounts={accounts}
             value={value === "" ? "" : Number(value)}
             onChange={(id) => setValue(filter.key, id == null ? "" : String(id))}
-            isSelectable={filter.kind === "cash_account" ? isCashAccount : undefined}
+            purpose={filter.kind === "cash_account" ? "cash" : "any"}
+            allowParents={filter.kind !== "cash_account"}
             placeholder="الكل"
             title={filter.label}
           />

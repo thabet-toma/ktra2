@@ -20,6 +20,7 @@ from typing import Optional
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from .account_classification import sub_type_for_partner
 from .models import Account, JournalHeader, JournalLine
 from .services import (
     post_journal,
@@ -402,7 +403,10 @@ def sync_partner_accounting(partner) -> None:
                             'name': partner.name,
                             'account_type': parent_acc.account_type,
                             'parent': parent_acc,
-                            'is_active': True
+                            'is_active': True,
+                            # نوع الطرف هو الرابط الموثوق — أقوى من السلالة
+                            # والاسم، وهو نفسه ما اعتمده الـbackfill.
+                            'sub_type': sub_type_for_partner(partner.partner_type),
                         }
                     )
 
@@ -430,7 +434,15 @@ def sync_partner_accounting(partner) -> None:
                 new_parent = Account.objects.get(code=expected_parent_code, tenant=partner.tenant)
                 partner.linked_account.parent = new_parent
                 partner.linked_account.account_type = new_parent.account_type
-                partner.linked_account.save(update_fields=['parent', 'account_type'])
+                # التصنيف ينتقل مع الأب والنوع: مورّدٌ صار عميلاً كان يبقى
+                # مصنَّفاً `payable` فيغيب عن حقول الذمم المدينة ويظهر في
+                # الدائنة — والحساب نفسه انتقل تحت المدينين.
+                partner.linked_account.sub_type = sub_type_for_partner(
+                    partner.partner_type
+                )
+                partner.linked_account.save(
+                    update_fields=['parent', 'account_type', 'sub_type']
+                )
             except Account.DoesNotExist:
                 pass
 

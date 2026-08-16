@@ -65,6 +65,20 @@ const ACCOUNT_TYPES = [
   { v: "Expense", l: "مصروفات" },
 ];
 
+/**
+ * THA-111: التصنيف الوظيفي (`Account.sub_type`) — «صندوق» و«ذمم» و«مخزون» كلها
+ * `Asset`، والنوع وحده لا يعرف أيّها. يشتقّه الخادم مرة واحدة، وهذا الحقل هو
+ * تصحيح صاحب الشركة لحسابٍ صنّفه الاشتقاق خطأً.
+ */
+const SUB_TYPES = [
+  { v: "", l: "—" },
+  { v: "cash_box", l: "صندوق نقدية" },
+  { v: "bank", l: "حساب بنكي" },
+  { v: "receivable", l: "ذمم مدينة (عملاء)" },
+  { v: "payable", l: "ذمم دائنة (موردون)" },
+  { v: "inventory", l: "مخزون" },
+];
+
 /** حقول مشتقّة تُعرض للقراءة فقط — لا تُدخَل يدوياً (نمط الأصيل). */
 const NATURE_LABEL = { debit: "مدين", credit: "دائن" } as const;
 const STATEMENT_LABEL = { balance: "ميزانية", income: "أرباح وخسائر" } as const;
@@ -126,6 +140,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
     name: "",
     code: "",
     account_type: "Asset",
+    sub_type: "",
     parent: null as number | null,
     is_active: true,
   });
@@ -248,6 +263,8 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
         name: "",
         code: nextChildCode(index, parent?.id ?? null),
         account_type: parent?.account_type || "Asset",
+        // الحساب الجديد تحت صندوق/ذمم يرث تصنيف أبيه — أقرب جواب صحيح.
+        sub_type: parent?.sub_type || "",
         parent: parent?.id ?? null,
         is_active: true,
       });
@@ -266,6 +283,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
       name: selected.name || "",
       code: selected.code || "",
       account_type: selected.account_type || "Asset",
+      sub_type: selected.sub_type || "",
       parent: selected.parent,
       is_active: selected.is_active,
     });
@@ -290,6 +308,8 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
         name: form.name.trim(),
         code: form.code.trim(),
         account_type: form.account_type,
+        // «—» يعني حساباً عادياً يكفيه نوعه؛ الخادم يقبل NULL لا نصاً فارغاً.
+        sub_type: form.sub_type || null,
         parent: form.parent,
         is_active: form.is_active,
       };
@@ -574,6 +594,25 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
               ))}
             </select>
           </div>
+          {/* THA-111: الغرض الذي يظهر فيه الحساب داخل منتقيات الحسابات. */}
+          <div className="aseel-field" style={{ marginTop: "6px" }}>
+            <label className="aseel-field-label" style={{ minWidth: "110px" }}>التصنيف الوظيفي</label>
+            <select
+              className="aseel-input"
+              value={editing ? form.sub_type : selected?.sub_type || ""}
+              disabled={readOnly}
+              onChange={(e) => setForm((f) => ({ ...f, sub_type: e.target.value }))}
+            >
+              {SUB_TYPES.map((t) => (
+                <option key={t.v} value={t.v}>{t.l}</option>
+              ))}
+            </select>
+          </div>
+          <p className="mt-1 text-[11px] text-[var(--aseel-ink-soft)]">
+            يحدّد في أي الحقول يُعرض هذا الحساب — حقل الصندوق يعرض الصناديق والبنوك
+            وحدها، وهكذا. «—» يعني حساباً عادياً يكفيه نوعه.
+          </p>
+
           {/* حقول مشتقّة — تُعرض ولا تُدخَل (الأصيل يشتقّها من نوع الحساب). */}
           <div className="aseel-field" style={{ marginTop: "6px" }}>
             <label className="aseel-field-label" style={{ minWidth: "110px" }}>نوع الحساب الختامي</label>

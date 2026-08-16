@@ -25,7 +25,6 @@ import { formatMoney, formatNumber } from "@/utils/formatNumber";
 import { buildVoucherEntryPreview } from "../../utils/voucherEntryPreview";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
-import { isCashAccount } from "../../utils/accountTree";
 import {
   ChequeGrid,
   PaymentFinanceFields,
@@ -264,7 +263,7 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
             accounts={accounts}
             value={cashAccountId}
             onChange={(id) => setCashAccountId(id ?? "")}
-            isSelectable={isCashAccount}
+            purpose="cash"
             title="اختيار الصندوق / البنك"
           />
         </label>

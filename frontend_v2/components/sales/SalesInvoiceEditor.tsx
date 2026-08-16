@@ -43,7 +43,7 @@ import {
 } from "../../utils/reservedStock";
 import { formatMoney, formatQuantity, formatNumber } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
-import { isCashAccount } from "../../utils/accountTree";
+import { accountMatchesPurpose } from "../../utils/accountTree";
 import { entityPathForReference } from "../../utils/entityLinks";
 import { DeliverGoodsModal } from "./DeliverGoodsModal";
 import { clientLogger } from "../../services/logger";
@@ -207,12 +207,12 @@ type Props = {
 };
 
 /** هل الحساب صندوق/بنك مناسب لاستلام نقد؟
- *  T-DEFACC: القاعدة من `utils/accountTree` — كانت النسخة هنا تعدّ 1103
- *  (المدينون التجاريون) صندوقاً، فيظهر حساب الذمم في قائمة الصناديق.
- *  يبقى `till/petty` استثناءً محلياً لتسميات قديمة في هذه الشاشة.
+ *  THA-111: الغرض هو الحكم الآن — يقرأ التصنيف الوظيفي المخزَّن في الخادم.
+ *  استثناء `till/petty` الذي كان هنا انتقل إلى اشتقاق التصنيف نفسه، فلم يعد
+ *  لهذه الشاشة إجابة خاصة بها عن سؤال «ما الصندوق؟».
  */
 const isCashboxAccount = (a: AccountRow): boolean =>
-  isCashAccount(a) || /till|petty/i.test(a.name || "");
+  accountMatchesPurpose(a, "cash");
 
 /** هل الحساب حساب إيراد مناسب لفاتورة مبيعات؟ */
 const isRevenueAccount = (a: AccountRow): boolean => {

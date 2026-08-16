@@ -58,7 +58,6 @@ import {
   type ChequeLine,
 } from "./PaymentVoucherParts";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
-import { isCashAccount } from "../../utils/accountTree";
 import { VoucherAllocationModal } from "../shared/VoucherAllocationModal";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { formatDateLocalized } from "../../utils/formatDate";
@@ -879,7 +878,7 @@ export const NewPaymentModal: React.FC<{
             accounts={accounts}
             value={cashAccountId}
             onChange={(id) => setCashAccountId(id ?? "")}
-            isSelectable={isCashAccount}
+            purpose="cash"
             title="اختيار الصندوق / البنك"
           />
         </label>

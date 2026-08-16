@@ -33,6 +33,7 @@ def _branch_journal_q(request, tenant, prefix='journal__branch'):
         return Q(**{prefix: branch}) | Q(**{f'{prefix}__isnull': True})
     return Q(**{prefix: branch})
 
+from .account_classification import SUB_TYPE_CASH_BOX
 from .cashbox import (
     allocate_cash_box_account_code,
     get_cash_box_capital_account,
@@ -1139,6 +1140,9 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
                     parent=parent,
                     account_type=parent.account_type,
                     is_active=True,
+                    # THA-111: صندوقٌ بحكم إنشائه — التصنيف يُكتب هنا فلا يحتاج
+                    # الصندوق الجديد اشتقاقاً لاحقاً من رمزه أو اسمه.
+                    sub_type=SUB_TYPE_CASH_BOX,
                 )
                 link = CashBoxLedgerAccount.objects.create(
                     tenant=tenant,

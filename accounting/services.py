@@ -1447,6 +1447,7 @@ def get_bank_parent_account(tenant):
 def create_bank_account(*, tenant, bank, name, currency, branch=None, account_number=None,
                         iban=None, is_default=False, notes=None, user=None):
     """ينشئ حساباً بنكياً وحسابه في الشجرة تحت «1102 البنوك» في معاملة واحدة."""
+    from .account_classification import SUB_TYPE_BANK
     from .cashbox import allocate_child_account_code
     from .models import BankAccount
 
@@ -1468,6 +1469,9 @@ def create_bank_account(*, tenant, bank, name, currency, branch=None, account_nu
         gl = Account.objects.create(
             tenant=tenant, code=code, name=f"{bank.name} — {label}"[:100],
             parent=parent, account_type=parent.account_type or "Asset", is_active=True,
+            # THA-111: التصنيف يواكب البيانات الجديدة بلا backfill ثانٍ — هذا
+            # الحساب بنكيٌّ بحكم إنشائه، لا بحكم رمزه أو اسمه.
+            sub_type=SUB_TYPE_BANK,
         )
         if is_default:
             BankAccount.objects.filter(tenant=tenant, is_default=True).update(is_default=False)

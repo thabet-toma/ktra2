@@ -20,12 +20,13 @@
 | `accounting/serializers.py` | عقود الـAPI + ملخّص مرجع القيد (`build_journal_reference_summary`) | 576 |
 | `accounting/fx_fifo.py` | طبقات FIFO لصناديق العملة الأجنبية | 185 |
 | `accounting/cashbox.py` | حلّ حسابات الصناديق النقدية وتوليد أكواد أبناء | 103 |
+| `accounting/account_classification.py` | اشتقاق `Account.sub_type` (`classify_tenant_accounts`، `backfill_account_sub_types`) | 168 |
 | `accounting/urls.py` | تسجيل الـrouter (18 مسار) | 45 |
 
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `Account` | `code`، `name`، `account_type`، `nature`، `is_active` | `parent` (self, SET_NULL)، `tenant`؛ `unique_together (tenant, code)` |
+| `Account` | `code`، `name`، `account_type`، `sub_type`، `nature`، `is_active` | `parent` (self, SET_NULL)، `tenant`؛ `unique_together (tenant, code)` |
 | `JournalHeader` | `transaction_date`، `reference_type`، `reference_id`، `is_posted`، `exchange_rate` | `tenant`، `branch` (PROTECT)، `currency` (PROTECT)، `created_by` (auth.User, SET_NULL — NULL في القيود الأقدم من العمود)، `lines` |
 | `JournalLine` | `debit`، `credit`، `base_debit`، `base_credit`، `description` | `journal` (CASCADE)، `account` (PROTECT)، `partner` (SET_NULL)، `cost_center` |
 | `VoidedJournal` | `original_journal_id`، `reference_type`، `reference_id` | فريد على `(tenant, reference_type, reference_id)` |
@@ -38,6 +39,37 @@
 | `ExchangeRate` | `rate`، `effective_date` | `from_currency`/`to_currency` (PROTECT)؛ فريد مع `(tenant, effective_date)` |
 | `TaxRate` | `code`، `rate`، `direction` | `tax_account` (PROTECT)؛ `unique_together (tenant, code)` |
 | `CostCenter` / `AccountingAuditLog` | `code`/`action`، `model_name`، `object_id` | `tenant` |
+
+### `Account.sub_type` — التصنيف الوظيفي
+`account_type` الخمسة تقود الطبيعة والحساب الختامي والتقارير، ولا تقول **غرض**
+الحساب: الصندوق والذمم والمخزون كلها `Asset`. `sub_type`
+(`cash_box | bank | receivable | payable | inventory`، وNULL = حساب عادي) هو
+الجواب المخزَّن الذي تفلتر عليه منتقيات الحسابات بدل تخمين الرقم أو الاسم في كل
+شاشة. يُشتقّ في `accounting/account_classification.py`
+(`classify_tenant_accounts`) بترتيب حجّية: روابط الخادم
+(`BankAccount.account`، `CashBoxLedgerAccount.account`، `Partner.linked_account`)
+← سلالة الشجرة المعيارية (1101/1110، 1102، 1103، 1104) ← اسم الحساب (للأصول
+وحدها). `backfill_account_sub_types` يملأ الفارغ فقط، فلا يمحو تصحيحاً يدوياً
+وإعادة تشغيله آمنة.
+
+**الـbackfill يصنّف حسابات اليوم؛ والحياة بعده على `Account.save()`** — يشتقّ
+التصنيف عند الإنشاء وحده وحين يكون فارغاً (`account_classification.py`
+(`sub_type_for_account`)): تصنيف الأب ← سلالة الكود ← الاسم. نقطة واحدة عمداً،
+فكل مسار يُنشئ حساباً — بذر شجرة شركة، الحساب التلقائي للطرف، الحساب التشغيلي،
+الـAPI — يرثها بلا أن يتذكّرها أحد، ولولاها لمات الاشتقاق لحظة تطبيق الهجرة.
+ولا تُصدر استعلاماً: لا تقرأ الأب إلا إن كان محمّلاً في الذاكرة أصلاً
+(`_parent_in_memory`)، وإلا اكتفت بسلالة الكود — استعلامٌ في الحفظ يصير N+1 في
+بذر شجرة كاملة. التصنيف الصريح — ومنه التصحيح اليدوي من بطاقة الحساب — أقوى من
+الاشتقاق دائماً.
+
+حسابات الأطراف تأخذ تصنيفها من نوع الطرف (`sub_type_for_partner`)، وهو الرابط
+الموثوق: `accounting/api.py` (`sync_partner_accounting`) يكتبه عند الإنشاء
+**وينقله مع الأب والنوع عند تغيير نوع الطرف** — مورّدٌ صار عميلاً كان يبقى
+`payable` بعد انتقال حسابه تحت المدينين. النقطتان اللتان تنشئان حسابات بأنفسهما
+(`accounting/services.py` (`create_bank_account`) و
+`accounting/views.py` (`CashBoxLedgerViewSet.create`)) تكتبان التصنيف عند
+الإنشاء. **لا تُضاف قيم إلى `ACCOUNT_TYPES`** بدلاً من ذلك — تلك الخمسة تكسر
+`accountNature`/`accountStatement` والتقارير بصمت.
 
 ## دوال الـservices العامة
 ```python
