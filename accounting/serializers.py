@@ -11,6 +11,14 @@ class AccountSerializer(serializers.ModelSerializer):
     """يُرجع معلومات المورد المرتبط بالحساب (الاسم التجاري / المستعار) إن وُجد."""
 
     linked_partner = serializers.SerializerMethodField()
+    # THA-292: الأب مقيّد بشركة الطلب — الحقل المولَّد تلقائياً كان
+    # `queryset=Account.objects.all()` فيقبل أباً من شركة أخرى وينشئ فرعاً
+    # عابراً للشركات (`get_queryset` في الـviewset يحمي القراءة فقط).
+    parent = TenantScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(),
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = Account

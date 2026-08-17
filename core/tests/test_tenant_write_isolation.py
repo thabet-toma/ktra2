@@ -84,6 +84,46 @@ class WriteScopedPKFieldTest(_TwoTenantBase):
         )
         self.assertEqual(res.status_code, 400, res.content[:300])
 
+    def test_account_create_rejects_foreign_parent(self):
+        """THA-292: أبٌ من شركة أخرى يعلّق الحساب تحت شجرة لا تراها شركته."""
+        foreign_parent = Account.objects.filter(tenant=self.other_tenant).first()
+        self.assertIsNotNone(foreign_parent)
+        res = self.client.post(
+            "/api/accounting/accounts/",
+            {
+                "code": "9971", "name": "حساب بأبٍ أجنبي",
+                "account_type": "Asset", "parent": foreign_parent.id,
+            },
+            format="json", **self._h(),
+        )
+        self.assertEqual(res.status_code, 400, res.content[:300])
+        self.assertIn("parent", res.json())
+
+    def test_account_update_rejects_foreign_parent(self):
+        """THA-292: نفس الحارس على التعديل — لا يكفي حماية الإنشاء."""
+        mine = Account.objects.filter(tenant=self.tenant).first()
+        foreign_parent = Account.objects.filter(tenant=self.other_tenant).first()
+        res = self.client.patch(
+            f"/api/accounting/accounts/{mine.id}/",
+            {"parent": foreign_parent.id}, format="json", **self._h(),
+        )
+        self.assertEqual(res.status_code, 400, res.content[:300])
+        self.assertIn("parent", res.json())
+
+    def test_account_accepts_parent_from_same_tenant(self):
+        """الحارس لا يكسر الاستخدام المشروع — أب من شركة الطلب يمرّ."""
+        parent = Account.objects.filter(tenant=self.tenant).first()
+        res = self.client.post(
+            "/api/accounting/accounts/",
+            {
+                "code": "9972", "name": "حساب بأبٍ محلي",
+                "account_type": "Asset", "parent": parent.id,
+            },
+            format="json", **self._h(),
+        )
+        self.assertIn(res.status_code, (200, 201), res.content[:300])
+        self.assertEqual(res.json()["parent"], parent.id)
+
     def test_same_tenant_partner_still_accepted_on_line(self):
         """الحارس لا يكسر الاستخدام المشروع — شريك الشركة نفسها يمرّ."""
         partner = Partner.objects.create(

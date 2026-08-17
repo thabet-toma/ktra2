@@ -145,6 +145,7 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 - **`nature` الحساب مفروضة على الترحيل**: `debit_only` يرفض أي دائن و`credit_only` يرفض أي مدين (`accounting/services.py` (`post_journal`)).
 - **`JournalLine.account` بـ`PROTECT`** — لا يُحذف حساب له حركة، و`debit`/`credit` بقيدَي `CheckConstraint` غير سالبين (`accounting/models.py` (`JournalLine`)).
 - **كل قراءة مُنطاقة بالشركة**: `tenant is None ⇒ .none()` في `accounting/views.py` (`JournalViewSet`) و`accounting/views.py` (`AccountViewSet`).
+- **وكل مرساة تُكتب مُنطاقة بها أيضاً**: `get_queryset` يحمي القراءة وحدها، فحقول الـpk الكاتبة تُعلَن `TenantScopedPrimaryKeyRelatedField` (`core/api_defaults.py`) — أب الحساب (`accounting/serializers.py` (`AccountSerializer`)) وشريك السطر ومركز كلفته (`JournalLineSerializer`). معرّف شركة أخرى يعود «غير موجود»، فلا شجرةَ تُعلَّق تحت شركة غيرها ولا كشفَ لوجود المعرّف.
 - **الشيك لا يتحرك خارج `VALID_TRANSITIONS`** — `Cheque.change_status` يرفض الانتقال غير المسموح ويسجّل `ChequeMovement` (`accounting/models.py` (`change_status`)).
 - **لا تُقفل مطابقة بنكية بفرق ≥ 0.01** (`accounting/services.py` (`close_bank_reconciliation`))، وكل `JournalLine` تُطابَق مرة واحدة (`accounting/models.py` (`BankReconciliationLine`)).
 - **الفترة المُقفَلة لا تتغيّر إلا عبر `reopen/` بسبب مسجَّل** — `FiscalPeriodViewSet.perform_update`/`perform_destroy` (`accounting/views.py`) يرفضان أي تعديل أو حذف عليها، ويمنعان حذف فترة في مداها قيد مرحّل (تاريخٌ بلا فترة تغطّيه يشلّ الترحيل وإلغاءه معاً)، وكل تعديل أو حذف ناجح يُكتب في سجل التدقيق.
