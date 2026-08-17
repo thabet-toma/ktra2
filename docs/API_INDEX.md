@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **448**
+عدد النقاط: **453**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -112,6 +112,11 @@
 | `/api/accounting/journals/{pk}/` | `JournalViewSet` | `accounting/views.py` |
 | `/api/accounting/journals/{pk}/post/` | `JournalViewSet` | `accounting/views.py` |
 | `/api/accounting/journals/{pk}/reverse/` | `JournalViewSet` | `accounting/views.py` |
+| `/api/accounting/opening-balance/` | `OpeningBalanceViewSet` | `accounting/views.py` |
+| `/api/accounting/opening-balance/lines/` | `OpeningBalanceViewSet` | `accounting/views.py` |
+| `/api/accounting/opening-balance/partners/{partner_id}/reverse/` | `OpeningBalanceViewSet` | `accounting/views.py` |
+| `/api/accounting/opening-balance/post/` | `OpeningBalanceViewSet` | `accounting/views.py` |
+| `/api/accounting/opening-balance/unpost/` | `OpeningBalanceViewSet` | `accounting/views.py` |
 | `/api/accounting/purchase-receipts/` | `PurchaseReceiptViewSet` | `accounting/views.py` |
 | `/api/accounting/tax-rates/` | `TaxRateViewSet` | `accounting/views.py` |
 | `/api/accounting/tax-rates/{pk}/` | `TaxRateViewSet` | `accounting/views.py` |

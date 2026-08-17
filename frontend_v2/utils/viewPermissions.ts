@@ -80,6 +80,9 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "team-time-report": "hr.employees.manage",
   "accounting-fiscal-periods": "accounting.period.manage",
   "accounting-year-end-close": "accounting.period.manage",
+  // الأرصدة الافتتاحية: إدخالٌ يُنتج قيداً — الترحيل وإلغاؤه محروسان خادمياً
+  // بصلاحيتَيهما، وهذا مفتاح رؤية الشاشة لا إذن الترحيل.
+  "accounting-opening-balances": "accounting.journal.create",
   // شؤون الموظفين والإدارة
   users: "hr.employees.manage",
   "employee-notes": "hr.employees.manage",

@@ -447,7 +447,10 @@ def sync_partner_accounting(partner) -> None:
                 pass
 
     # 2. Opening Balance Journal Entry
-    if partner.opening_balance and partner.opening_balance > 0 and partner.linked_account:
+    # الرصيد السالب مقبول: عميلٌ دفع مقدّماً (نحن مدينون له) أو مورّدٌ دفعنا له
+    # سلفاً — `create_partner_opening_balance` يقلب طرفَي القيد. الصفر وحده
+    # يعني «لا قيد افتتاحي أصلاً».
+    if partner.opening_balance and partner.linked_account:
         exists = JournalHeader.objects.filter(
             tenant=partner.tenant,
             reference_type='PARTNER_OPENING',
@@ -482,8 +485,16 @@ def ensure_partner_account(partner):
 def create_partner_opening_balance(partner) -> None:
     """قيد الرصيد الافتتاحي للشريك: طرفه حساب الشريك وقابله «3300 أرصدة افتتاحية».
 
-    عميل ⇒ مدين على حسابه / دائن على 3300؛ غير العميل ⇒ العكس.
+    عميل ⇒ مدين على حسابه / دائن على 3300؛ غير العميل ⇒ العكس. **والرصيد السالب
+    يقلب الاتجاهين**: عميلٌ دفع مقدّماً يُقيَّد دائناً على حسابه ومديناً على 3300،
+    ومورّدٌ دفعنا له سلفاً مرآته — لا مبلغ سالب في أي سطر، الاتجاه يُعبَّر عنه
+    بالطرف وحده كي يبقى ميزان المراجعة وكشف الحساب مقروءين.
     يُنشئ 3300 تحت جذر حقوق الملكية «3» إن لم يوجد.
+
+    **تاريخ الرصيد**: تاريخ الطرف إن أُدخل، وإلا تاريخ القيد الافتتاحي للشركة
+    (`OpeningBalance.entry_date`) كي تتوحّد تواريخ أرجل الافتتاح كلها، وإلا
+    تاريخ اليوم. التاريخ المستعمل يُثبَّت على الطرف بعد نجاح الترحيل فيقرأ
+    المستخدم في بطاقته نفس تاريخ قيده.
 
     قرار 2026-08-11 (معالجة ديون المرحلة 2): يمرّ عبر `post_journal` فيكسب
     فحص الفترة المالية والتوازن وaudit log وidempotency ذرّية على المرجع
@@ -502,24 +513,29 @@ def create_partner_opening_balance(partner) -> None:
             )
             return
 
-        opening_offset_account = Account.objects.filter(tenant=tenant, code='3300').first()
-        if not opening_offset_account:
-            equity_root = Account.objects.filter(tenant=tenant, code='3').first()
-            if equity_root:
-                opening_offset_account = Account.objects.create(
-                    tenant=tenant,
-                    code='3300',
-                    name='أرصدة افتتاحية (Opening Balances)',
-                    account_type='Equity',
-                    parent=equity_root,
-                    is_active=True
-                )
+        # حلٌّ واحد لحساب الموازنة يخدم أرصدة الأطراف والقيد الافتتاحي الموحّد
+        # معاً (`accounting/opening_balance.py`)، فتتجمّع كل أرجل الافتتاح في
+        # حساب واحد. الاستيراد كسول لكسر الدوران (تلك الوحدة تستورد
+        # `ensure_account` من هنا). كان المنطق مكرراً هنا ويستسلم بصمت إن غاب
+        # جذر حقوق الملكية «3» — فلا يُرحَّل رصيد الطرف أصلاً؛ `ensure_account`
+        # يُنشئ الحساب في جذر الشجرة بدل أن يتوقف.
+        from .opening_balance import (
+            company_opening_entry_date,
+            resolve_opening_offset_account,
+        )
 
-        if not opening_offset_account:
+        # الصفر يخرج قبل أي كتابة: «لا رصيد افتتاحي» لا يُنشئ حتى حساب الموازنة.
+        amount = Decimal(str(partner.opening_balance or 0))
+        if amount == 0:
             return
 
-        date = partner.opening_balance_date or timezone.localdate()
-        amount = Decimal(str(partner.opening_balance))
+        opening_offset_account = resolve_opening_offset_account(tenant.pk)
+
+        date = (
+            partner.opening_balance_date
+            or company_opening_entry_date(tenant.pk)
+            or timezone.localdate()
+        )
         description = f"Opening Balance for {partner.name}"
         partner_line = {
             'account': partner.linked_account_id,
@@ -527,16 +543,20 @@ def create_partner_opening_balance(partner) -> None:
             'description': description,
         }
         offset_line = {'account': opening_offset_account.id, 'description': description}
-        if partner.partner_type == 'Customer':
-            partner_line.update(debit=amount, credit=Decimal('0'))
-            offset_line.update(debit=Decimal('0'), credit=amount)
+        # اتجاه الرصيد على حساب الطرف: العميل الموجب مدين، والمورّد الموجب دائن،
+        # والسالب يقلب الاثنين. الطرف يُشتقّ من إشارة واحدة فلا تتكرر الحالات.
+        partner_amount = amount if partner.partner_type == 'Customer' else -amount
+        side = abs(partner_amount)
+        if partner_amount > 0:
+            partner_line.update(debit=side, credit=Decimal('0'))
+            offset_line.update(debit=Decimal('0'), credit=side)
             lines_data = [partner_line, offset_line]
         else:
-            offset_line.update(debit=amount, credit=Decimal('0'))
-            partner_line.update(debit=Decimal('0'), credit=amount)
+            offset_line.update(debit=side, credit=Decimal('0'))
+            partner_line.update(debit=Decimal('0'), credit=side)
             lines_data = [offset_line, partner_line]
 
-        post_journal(
+        journal = post_journal(
             tenant_id=tenant.pk,
             transaction_date=date,
             reference_type='PARTNER_OPENING',
@@ -544,6 +564,14 @@ def create_partner_opening_balance(partner) -> None:
             description=description,
             lines_data=lines_data,
         )
+
+        # تثبيت تاريخ القيد على الطرف حين لم يُدخله المستخدم — تحديث مباشر بلا
+        # `save()` كي لا يُعيد `post_save` الدورة على نفسها.
+        if partner.opening_balance_date is None and journal.transaction_date:
+            type(partner).objects.filter(pk=partner.pk).update(
+                opening_balance_date=journal.transaction_date,
+            )
+            partner.opening_balance_date = journal.transaction_date
 
     except Exception:
         logger.exception("Failed to create opening balance for partner id=%s", partner.id)

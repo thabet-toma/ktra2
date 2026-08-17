@@ -88,6 +88,7 @@ export type AppView =
     | "accounting-income-statement"
     | "accounting-vat-statements"
     | "accounting-year-end-close"
+    | "accounting-opening-balances"
     | "sales-return"
     | "purchase-return"
     | "supplier-payments"

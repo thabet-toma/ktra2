@@ -44,6 +44,14 @@ from .models import (
     CostCenter, ExchangeRate, FiscalPeriod, TaxRate,
     Bank, BankBranch, BankAccount, BankReconciliation, BankReconciliationLine,
 )
+from .opening_balance import (
+    get_or_create_opening,
+    opening_balance_summary,
+    post_opening_balance,
+    reverse_partner_opening,
+    save_opening_lines,
+    unpost_opening_balance,
+)
 from .serializers import (
     AccountSerializer,
     BankSerializer,
@@ -57,6 +65,9 @@ from .serializers import (
     CostCenterSerializer,
     ExchangeRateSerializer,
     FiscalPeriodSerializer,
+    OpeningBalanceAccountLineSerializer,
+    OpeningBalanceLinesInputSerializer,
+    OpeningBalanceStockLineSerializer,
     TaxRateSerializer,
 )
 from .services import (
@@ -2074,6 +2085,124 @@ class TaxRateViewSet(viewsets.ModelViewSet):
         if not tenant:
             raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
         serializer.save(tenant=tenant)
+
+
+class OpeningBalanceViewSet(viewsets.ViewSet):
+    """الأرصدة الافتتاحية — مستند واحد لكل شركة، فالمسارات كلها بلا معرّف.
+
+    القراءة تُرجع الحالة والبنود والمجاميع وأرصدة الأطراف معاً (`GET`)، والحفظ
+    استبدالٌ جماعي للمسودة (`PUT lines/`)، والترحيل وإلغاؤه إجراءان صريحان
+    بصلاحيتَي ترحيل القيد وإلغائه القائمتين — لا مفاتيح صلاحيات جديدة.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def _tenant(self, request):
+        tenant = get_tenant(request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        return tenant
+
+    @staticmethod
+    def _payload(tenant):
+        """حمولة الشاشة — المبالغ نصوصاً والتواريخ ISO.
+
+        `opening_balance_summary` يُرجع `Decimal`/`date` (حقيقة الخدمة)، ومُرمِّز
+        DRF يحوّل `Decimal` إلى **float** — فالتحويل هنا صريح: لا عوائم في المال.
+        """
+        def _date(value):
+            return value.isoformat() if value else None
+
+        summary = opening_balance_summary(tenant)
+        return {
+            **summary,
+            'start_date': _date(summary['start_date']),
+            'entry_date': _date(summary['entry_date']),
+            'posted_at': summary['posted_at'].isoformat() if summary['posted_at'] else None,
+            'account_lines': OpeningBalanceAccountLineSerializer(
+                summary['account_lines'], many=True,
+            ).data,
+            'stock_lines': OpeningBalanceStockLineSerializer(
+                summary['stock_lines'], many=True,
+            ).data,
+            'partners': [
+                {
+                    **row,
+                    'opening_balance': str(row['opening_balance']),
+                    'opening_balance_date': _date(row['opening_balance_date']),
+                    'posted_amount': (
+                        str(row['posted_amount'])
+                        if row['posted_amount'] is not None else None
+                    ),
+                }
+                for row in summary['partners']
+            ],
+            'totals': {k: str(v) for k, v in summary['totals'].items()},
+        }
+
+    def list(self, request):
+        return Response(self._payload(self._tenant(request)))
+
+    @action(detail=False, methods=['put'], url_path='lines')
+    def save_lines(self, request):
+        tenant = self._tenant(request)
+        serializer = OpeningBalanceLinesInputSerializer(
+            data=request.data, context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        opening = get_or_create_opening(tenant)
+        try:
+            save_opening_lines(
+                opening,
+                start_date=data.get('start_date'),
+                account_lines=data.get('account_lines'),
+                stock_lines=data.get('stock_lines'),
+            )
+        except DjangoValidationError as exc:
+            return Response({'error': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._payload(tenant))
+
+    @action(detail=False, methods=['post'], url_path='post')
+    @requires_perm('accounting.journal.post')
+    def post_opening(self, request):
+        tenant = self._tenant(request)
+        opening = get_or_create_opening(tenant)
+        try:
+            post_opening_balance(opening, user=request.user)
+        except DjangoValidationError as exc:
+            return Response({'error': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._payload(tenant))
+
+    @action(detail=False, methods=['post'], url_path='unpost')
+    @requires_perm('accounting.journal.unpost')
+    def unpost_opening(self, request):
+        tenant = self._tenant(request)
+        opening = get_or_create_opening(tenant)
+        try:
+            unpost_opening_balance(opening, user=request.user)
+        except DjangoValidationError as exc:
+            return Response({'error': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._payload(tenant))
+
+    @action(
+        detail=False, methods=['post'],
+        url_path=r'partners/(?P<partner_id>\d+)/reverse',
+    )
+    @requires_perm('accounting.journal.unpost')
+    def reverse_partner(self, request, partner_id=None):
+        """عكس قيد الرصيد الافتتاحي لطرف واحد — يعيد رصيده قابلاً للتعديل.
+
+        بصلاحية إلغاء ترحيل القيد نفسها: ما يُحذف قيدٌ مرحّل، فلا يجوز أن يكون
+        أسهل من إلغاء ترحيل أي قيد آخر.
+        """
+        tenant = self._tenant(request)
+        try:
+            reverse_partner_opening(tenant, int(partner_id), user=request.user)
+        except DjangoValidationError as exc:
+            return Response({'error': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._payload(tenant))
 
 
 class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):

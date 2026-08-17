@@ -393,6 +393,13 @@ export const ItemFormAseel: React.FC<Props> = ({
 
   // صنف جديد يفتح على حقول الإدخال؛ الصنف المحفوظ يفتح على نظرته العامة.
   const openingTab = initialTab ?? (productId == null ? "general" : "overview");
+  /**
+   * THA-411: الكرت يتتبّع تبويبه النشط **بالمفتاح** لا بفهرس الغلاف.
+   * تبويب «الأرقام التسلسلية» يُلحق بعد وصول بيانات الصنف (`is_serialized`)، وفهرس
+   * الغلاف يُثبَّت عند أول رسم — فرابطٌ يقصده (`/products/{id}?tab=serials`) كان
+   * يهبط على أول تبويب. المفتاح يصمد حتى لو تأخّر تبويبه، والنقر يبقى كما هو.
+   */
+  const [activeTab, setActiveTab] = useState(openingTab);
 
   const banner = (err || msg) ? (
     <div className={`aseel-banner ${err ? "aseel-banner--err" : "aseel-banner--ok"}`}>
@@ -763,7 +770,8 @@ export const ItemFormAseel: React.FC<Props> = ({
       <AseelDocumentShell
         title="كرت الصنف"
         state={currentId ? `صنف #${currentId}` : "صنف جديد"}
-        initialTab={openingTab}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
         nav={nav}
         actions={toolbarActions}
         header={

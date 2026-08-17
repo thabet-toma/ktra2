@@ -13,6 +13,7 @@ from .views import (
     TrialBalanceView,
     VatReportView,
     CashBoxLedgerViewSet,
+    OpeningBalanceViewSet,
     PurchaseReceiptViewSet,
     ExchangeRateViewSet,
     FiscalPeriodViewSet,
@@ -36,6 +37,7 @@ router.register(r'cash-box-accounts', CashBoxLedgerViewSet, basename='cash-box-a
 router.register(r'purchase-receipts', PurchaseReceiptViewSet, basename='purchase-receipts')
 router.register(r'exchange-rates', ExchangeRateViewSet, basename='exchange-rates')
 router.register(r'fiscal-periods', FiscalPeriodViewSet, basename='fiscal-periods')
+router.register(r'opening-balance', OpeningBalanceViewSet, basename='opening-balance')
 router.register(r'tax-rates', TaxRateViewSet, basename='tax-rates')
 router.register(r'currencies', CurrencyViewSet, basename='currencies')
 

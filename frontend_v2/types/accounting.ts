@@ -385,3 +385,102 @@ export interface BankReconciliationSummaryDto extends BankReconciliationDto {
   uncleared_count: number;
   rows: BankStatementRowDto[];
 }
+
+/* ── الأرصدة الافتتاحية (THA-119) ───────────────────────────────────────── */
+/** كل المبالغ نصوص: الخادم يُرسل Decimal نصاً عمداً — لا عوائم في المال. */
+
+export interface OpeningBalanceAccountLineDto {
+  id: number;
+  account: number;
+  account_code: string;
+  account_name: string;
+  debit: string;
+  credit: string;
+  notes: string;
+}
+
+export interface OpeningBalanceStockLineDto {
+  id: number;
+  product: number;
+  product_sku: string;
+  product_name: string;
+  warehouse: number;
+  warehouse_name: string;
+  quantity: string;
+  unit_cost: string;
+  /** الكمية × تكلفة الوحدة — يحسبها الخادم فلا يفترق رقم الشاشة عن رقم القيد. */
+  value: string;
+}
+
+/**
+ * THA-411: صنف من بضاعة أول المدة يتتبّع أرقاماً تسلسلية — أعدادٌ صحيحة لا مال.
+ * الافتتاح يُدخل الكمية ولا يُنشئ وحدةً مُرقَّمة، والبيع بنمط «إجباري» يرفض بضاعةً
+ * بلا أرقام؛ فهذه الصفوف تقول النقص وتدلّ على مسار الترقيم. صفٌّ لكل **صنف**
+ * (مجموع كميته في كل المستودعات) لأن الوحدة المُرقَّمة بلا مستودع.
+ */
+export interface OpeningBalanceSerialItemDto {
+  product: number;
+  product_sku: string;
+  product_name: string;
+  /** وحدات الافتتاح المطلوب ترقيمها. */
+  quantity: number;
+  /** وحدات الصنف المُرقَّمة فعلاً بأي حالة — بيعُ وحدة لا يُنقص المُسجَّل. */
+  serials_registered: number;
+}
+
+export interface OpeningBalancePartnerRowDto {
+  id: number;
+  name: string;
+  partner_type: string;
+  /** المُدخل في بطاقة الطرف. */
+  opening_balance: string;
+  opening_balance_date: string | null;
+  linked_account: number | null;
+  is_posted: boolean;
+  journal: number | null;
+  /**
+   * المرحَّل فعلاً في الدفاتر — يختلف عن `opening_balance` حين عُدِّل الرصيد بعد
+   * ترحيله (المفتاح idempotent فلا يُعاد الترحيل). عرض الرقمين هو ما يمنع
+   * تصديق أن التعديل وصل الأستاذ.
+   */
+  posted_amount: string | null;
+}
+
+export interface OpeningBalanceDto {
+  id: number;
+  /** تاريخ بدء التشغيل كما يُدخله المحاسب. */
+  start_date: string | null;
+  /** `start_date − 1` — يشتقّه الخادم، وهو تاريخ القيد الافتتاحي. */
+  entry_date: string | null;
+  status: "draft" | "posted";
+  journal: number | null;
+  posted_at: string | null;
+  account_lines: OpeningBalanceAccountLineDto[];
+  stock_lines: OpeningBalanceStockLineDto[];
+  serial_items: OpeningBalanceSerialItemDto[];
+  partners: OpeningBalancePartnerRowDto[];
+  totals: {
+    accounts_debit: string;
+    accounts_credit: string;
+    stock_value: string;
+    /** «صافي حقوق الملكية الافتتاحية» — سطر الموازنة على حساب 3300. */
+    equity_plug: string;
+  };
+  offset_account_code: string;
+}
+
+export interface OpeningBalanceLinesInput {
+  start_date?: string | null;
+  account_lines?: Array<{
+    account: number;
+    debit: string;
+    credit: string;
+    notes?: string;
+  }>;
+  stock_lines?: Array<{
+    product: number;
+    warehouse: number;
+    quantity: string;
+    unit_cost: string;
+  }>;
+}

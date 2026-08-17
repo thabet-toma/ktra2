@@ -1,9 +1,13 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 from .models import (
     Account, JournalHeader, JournalLine, Cheque, ChequeMovement, CostCenter,
     CashBoxLedgerAccount, ExchangeRate, FiscalPeriod, TaxRate,
     Bank, BankBranch, BankAccount, BankReconciliation,
+    OpeningBalanceAccountLine, OpeningBalanceStockLine,
 )
+from inventory.models import Product, Warehouse
 from partners.models import Partner
 from core.api_defaults import TenantScopedPrimaryKeyRelatedField
 
@@ -217,6 +221,7 @@ SOURCE_LABEL_MAP = {
     "MANUAL": "قيد يدوي",
     # A3: قيد يدوي وسمه المحاسب «تسوية» — يُصفّى وحده في دفتر اليومية.
     "ADJUSTMENT": "قيد تسوية",
+    "OPENING_BALANCE": "قيد افتتاحي",
 }
 
 
@@ -600,3 +605,60 @@ class TaxRateSerializer(serializers.ModelSerializer):
                     ),
                 })
         return attrs
+
+
+# ── الأرصدة الافتتاحية ────────────────────────────────────────────────────
+class OpeningBalanceAccountLineSerializer(serializers.ModelSerializer):
+    account_code = serializers.CharField(source='account.code', read_only=True)
+    account_name = serializers.CharField(source='account.name', read_only=True)
+
+    class Meta:
+        model = OpeningBalanceAccountLine
+        fields = ['id', 'account', 'account_code', 'account_name', 'debit', 'credit', 'notes']
+
+
+class OpeningBalanceStockLineSerializer(serializers.ModelSerializer):
+    product_sku = serializers.CharField(source='product.sku', read_only=True)
+    product_name = serializers.SerializerMethodField(read_only=True)
+    warehouse_name = serializers.CharField(source='warehouse.name', read_only=True)
+    value = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = OpeningBalanceStockLine
+        fields = [
+            'id', 'product', 'product_sku', 'product_name',
+            'warehouse', 'warehouse_name', 'quantity', 'unit_cost', 'value',
+        ]
+
+    def get_product_name(self, obj):
+        p = obj.product
+        return p.name_ar or p.name_en or p.sku or ''
+
+    def get_value(self, obj):
+        return str(
+            (Decimal(str(obj.quantity)) * Decimal(str(obj.unit_cost))).quantize(Decimal('0.01'))
+        )
+
+
+class OpeningBalanceAccountLineInputSerializer(serializers.Serializer):
+    """بند حساب وارد من الشاشة — الحساب مقيَّد بشركة الطلب عند الكتابة."""
+
+    account = TenantScopedPrimaryKeyRelatedField(queryset=Account.objects.all())
+    debit = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, default=0)
+    credit = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, default=0)
+    notes = serializers.CharField(max_length=500, required=False, allow_blank=True, default='')
+
+
+class OpeningBalanceStockLineInputSerializer(serializers.Serializer):
+    product = TenantScopedPrimaryKeyRelatedField(queryset=Product.objects.all())
+    warehouse = TenantScopedPrimaryKeyRelatedField(queryset=Warehouse.objects.all())
+    quantity = serializers.DecimalField(max_digits=18, decimal_places=4)
+    unit_cost = serializers.DecimalField(max_digits=18, decimal_places=4)
+
+
+class OpeningBalanceLinesInputSerializer(serializers.Serializer):
+    """حفظ جماعي لمسودة الافتتاح — الرِّجل الغائبة عن الطلب لا تُمَسّ."""
+
+    start_date = serializers.DateField(required=False, allow_null=True)
+    account_lines = OpeningBalanceAccountLineInputSerializer(many=True, required=False)
+    stock_lines = OpeningBalanceStockLineInputSerializer(many=True, required=False)

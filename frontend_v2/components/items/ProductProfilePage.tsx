@@ -17,6 +17,8 @@ const TAB_ALIASES: Record<string, string> = {
   overview: 'overview',
   invoices: 'invoices',
   ledger: 'ledger',
+  // THA-411: لوحة الأرصدة الافتتاحية تُرسل المستخدم إلى هنا ليُرقّم بضاعة الافتتاح.
+  serials: 'serials',
 };
 
 export const ProductProfilePage: React.FC = () => {

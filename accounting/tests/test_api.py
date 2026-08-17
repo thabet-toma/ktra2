@@ -16,8 +16,12 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError as DjangoValidationError
 
+from django.db.models import Q
+
 from accounting import api
-from accounting.models import Account, JournalHeader, JournalLine
+from accounting.models import (
+    Account, JournalHeader, JournalLine, OpeningBalance,
+)
 from accounting.services import create_fiscal_year
 from partners.models import Partner
 from tenants.models import Currency
@@ -372,3 +376,94 @@ def test_create_partner_opening_balance_requires_open_period(env):
         tenant=tenant, reference_type="PARTNER_OPENING", reference_id=partner.id)
     assert header.is_posted is True
     assert str(header.transaction_date) == "2026-05-01"
+
+
+# ── T119-2: الرصيد الافتتاحي الدائن، وتوحيد التاريخ ──────────────────────────
+
+def test_create_partner_opening_balance_supports_credit_side(env):
+    """رصيد سالب = عميل دفع مقدّماً أو مورّد دفعنا له مقدّماً — يقلب طرفَي القيد.
+
+    العميل السالب: دائن على حسابه ومدين على 3300 (نحن مدينون له بما دفع)،
+    والمورّد السالب مرآته. لا مبلغ سالب في أي سطر — الاتجاه يُعبَّر عنه بالطرف.
+    """
+    tenant, owner, ils, usd, ar, rev = env
+    prepaid_customer = Partner.objects.create(
+        tenant=tenant, name="عميل دفع مقدّماً", partner_type="Customer",
+        opening_balance=D("-500"))
+    prepaid_customer.refresh_from_db()
+
+    header = JournalHeader.objects.get(
+        tenant=tenant, reference_type="PARTNER_OPENING",
+        reference_id=prepaid_customer.id)
+    offset = Account.objects.get(tenant=tenant, code="3300")
+    assert header.lines.filter(
+        account=prepaid_customer.linked_account, credit=D("500.00"),
+        partner_id=prepaid_customer.id).exists()
+    assert header.lines.filter(account=offset, debit=D("500.00")).exists()
+
+    advanced_supplier = Partner.objects.create(
+        tenant=tenant, name="مورد مدفوع سلفاً", partner_type="Supplier",
+        opening_balance=D("-300"))
+    advanced_supplier.refresh_from_db()
+
+    sheader = JournalHeader.objects.get(
+        tenant=tenant, reference_type="PARTNER_OPENING",
+        reference_id=advanced_supplier.id)
+    assert sheader.lines.filter(
+        account=advanced_supplier.linked_account, debit=D("300.00"),
+        partner_id=advanced_supplier.id).exists()
+    assert sheader.lines.filter(account=offset, credit=D("300.00")).exists()
+
+    # لا سطر بمبلغ سالب في أيٍّ من القيدين
+    assert not JournalLine.objects.filter(
+        journal__in=[header, sheader],
+    ).filter(Q(debit__lt=0) | Q(credit__lt=0)).exists()
+
+
+def test_partner_opening_balance_zero_creates_no_journal(env):
+    """صفر يبقى «لا قيد افتتاحي أصلاً» — لا قيد بمبلغ صفر ولا سطر يتيم."""
+    tenant, owner, ils, usd, ar, rev = env
+    partner = Partner.objects.create(
+        tenant=tenant, name="طرف بلا رصيد", partner_type="Customer",
+        opening_balance=D("0"))
+    partner.refresh_from_db()
+    assert partner.linked_account_id is not None
+    assert not JournalHeader.objects.filter(
+        tenant=tenant, reference_type="PARTNER_OPENING", reference_id=partner.id,
+    ).exists()
+
+
+def test_partner_opening_balance_date_defaults_to_company_entry_date(env):
+    """طرفٌ بلا تاريخ رصيد يتبع تاريخ القيد الافتتاحي للشركة لا تاريخ اليوم.
+
+    كل أرجل الافتتاح على تاريخ واحد، والتاريخ المستعمل يُثبَّت على الطرف كي
+    يقرأ المستخدم في بطاقته نفس تاريخ قيده.
+    """
+    tenant, owner, ils, usd, ar, rev = env
+    OpeningBalance.objects.create(tenant=tenant, start_date=datetime.date(2026, 3, 1))
+
+    partner = Partner.objects.create(
+        tenant=tenant, name="عميل بلا تاريخ", partner_type="Customer",
+        opening_balance=D("700"))
+    partner.refresh_from_db()
+
+    header = JournalHeader.objects.get(
+        tenant=tenant, reference_type="PARTNER_OPENING", reference_id=partner.id)
+    assert header.transaction_date == datetime.date(2026, 2, 28)
+    assert partner.opening_balance_date == datetime.date(2026, 2, 28)
+
+
+def test_partner_opening_balance_keeps_its_own_date_when_given(env):
+    """تاريخٌ مُدخل صراحةً لا يُداس بتاريخ الشركة — الإدخال اليدوي أعلى."""
+    tenant, owner, ils, usd, ar, rev = env
+    OpeningBalance.objects.create(tenant=tenant, start_date=datetime.date(2026, 3, 1))
+
+    partner = Partner.objects.create(
+        tenant=tenant, name="عميل بتاريخه", partner_type="Customer",
+        opening_balance=D("200"), opening_balance_date=datetime.date(2026, 5, 1))
+    partner.refresh_from_db()
+
+    header = JournalHeader.objects.get(
+        tenant=tenant, reference_type="PARTNER_OPENING", reference_id=partner.id)
+    assert header.transaction_date == datetime.date(2026, 5, 1)
+    assert partner.opening_balance_date == datetime.date(2026, 5, 1)

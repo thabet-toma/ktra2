@@ -11,6 +11,8 @@ import type {
   BankDto,
   BankReconciliationSummaryDto,
   BankStatementDto,
+  OpeningBalanceDto,
+  OpeningBalanceLinesInput,
 } from "../types/accounting";
 
 // كل نداءات هذا العميل القديمة تمر الآن من دورة الطلب المحدودة والموحّدة.
@@ -664,6 +666,77 @@ export const accountingApi = {
       body: JSON.stringify(body),
     });
     await handle(res, "yearEndClose");
+    return res.json();
+  },
+
+  // ─── الأرصدة الافتتاحية (THA-119) ───
+  // مستند واحد لكل شركة، فالمسارات كلها بلا معرّف. كل نداء يُرجع الحمولة كاملة
+  // (الحالة + البنود + الأطراف + المجاميع) — فلا تحتاج الشاشة إعادة قراءة بعد كل
+  // كتابة، ولا يمكن أن يفترق ما تعرضه عمّا في الخادم.
+
+  getOpeningBalance: async (): Promise<OpeningBalanceDto> => {
+    const res = await fetch(`${ACC}/opening-balance/`, { headers: headers() });
+    await handle(res, "getOpeningBalance");
+    return res.json();
+  },
+
+  /** حفظ جماعي للمسودة — الرِّجل الغائبة عن الجسم لا تُمَسّ. */
+  saveOpeningBalanceLines: async (body: OpeningBalanceLinesInput): Promise<OpeningBalanceDto> => {
+    const res = await fetch(`${ACC}/opening-balance/lines/`, {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "saveOpeningBalanceLines");
+    return res.json();
+  },
+
+  postOpeningBalance: async (): Promise<OpeningBalanceDto> => {
+    const res = await fetch(`${ACC}/opening-balance/post/`, {
+      method: "POST",
+      headers: headers(),
+      body: "{}",
+    });
+    await handle(res, "postOpeningBalance");
+    return res.json();
+  },
+
+  unpostOpeningBalance: async (): Promise<OpeningBalanceDto> => {
+    const res = await fetch(`${ACC}/opening-balance/unpost/`, {
+      method: "POST",
+      headers: headers(),
+      body: "{}",
+    });
+    await handle(res, "unpostOpeningBalance");
+    return res.json();
+  },
+
+  /** عكس قيد الرصيد الافتتاحي لطرف واحد — الطريق الوحيد لتعديل رصيد مرحّل. */
+  reversePartnerOpeningBalance: async (partnerId: number): Promise<OpeningBalanceDto> => {
+    const res = await fetch(`${ACC}/opening-balance/partners/${partnerId}/reverse/`, {
+      method: "POST",
+      headers: headers(),
+      body: "{}",
+    });
+    await handle(res, "reversePartnerOpeningBalance");
+    return res.json();
+  },
+
+  /**
+   * رصيد الطرف الافتتاحي يُكتب في بطاقة الطرف نفسها (`PATCH /api/partners/{id}/`)
+   * — الآلية القائمة تُرحِّله بإشارة الحفظ. تركُ التاريخ فارغاً يجعله يتبع تاريخ
+   * القيد الافتتاحي للشركة، فتتوحّد تواريخ كل أرجل الافتتاح.
+   */
+  savePartnerOpeningBalance: async (
+    partnerId: number,
+    body: { opening_balance: string; opening_balance_date?: string | null },
+  ) => {
+    const res = await fetch(`${API_BASE}/partners/${partnerId}/`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "savePartnerOpeningBalance");
     return res.json();
   },
 

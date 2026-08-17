@@ -1,3 +1,4 @@
+import datetime
 import logging
 
 from django.db import models
@@ -789,3 +790,160 @@ class TaxRate(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.rate}%) [{self.direction}]"
+
+
+class OpeningBalance(models.Model):
+    """مستند الأرصدة الافتتاحية للشركة — أرصدة الحسابات وبضاعة أول المدة معاً.
+
+    مستندٌ واحد لكل شركة (لا لكل سنة): السنوات اللاحقة يخدمها `year_end_close`.
+    ترحيله يُنتج **قيداً موحّداً واحداً** بمرجع `OPENING_BALANCE` مقابل حساب
+    الموازنة `3300` (نفس حساب أرصدة الأطراف الافتتاحية، فتتجمّع كل أرجل الافتتاح
+    في دلو حقوق ملكية واحد)، ويسجّل بضاعة أول المدة حركاتِ مخزون بنفس المرجع.
+    أرصدة الأطراف تبقى على آليتها القائمة (`PARTNER_OPENING`، قيد لكل طرف) فلا
+    يزدوج حساب الذمم — ولذلك يرفض `accounting/opening_balance.py` أي حساب ذمم أو
+    مخزون في بنود الحسابات.
+
+    `entry_date` مخزَّن ومشتقّ = `start_date − 1` (نمط Xero/Odoo): أرصدة الافتتاح
+    هي أرصدة الإقفال في اليوم السابق لبدء التشغيل. حارس الفترة المالية يبقى
+    مفروضاً عليه عبر `post_journal` — لا انزلاق صامت للتاريخ.
+
+    «قيد افتتاحي مرحّل واحد لكل شركة» مفروضٌ في `post_opening_balance` داخل
+    المعاملة تحت `select_for_update`، لا بقيد فريد شرطي: MySQL لا يدعم الفهارس
+    الجزئية (`supports_partial_indexes = False`) فكان القيد سيوجد في قاعدة
+    الاختبارات (SQLite) ويغيب بصمت عن الإنتاج.
+    """
+
+    STATUS_DRAFT = 'draft'
+    STATUS_POSTED = 'posted'
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, 'مسودة'),
+        (STATUS_POSTED, 'مرحّل'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='OpeningBalanceID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='opening_balances',
+    )
+    start_date = models.DateField(
+        null=True, blank=True, db_column='StartDate',
+        help_text='تاريخ بدء التشغيل على النظام — أول يوم عمل فعلي',
+    )
+    entry_date = models.DateField(
+        null=True, blank=True, db_column='EntryDate',
+        help_text='تاريخ القيد الافتتاحي = تاريخ البدء ناقص يوماً (يُشتقّ تلقائياً)',
+    )
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT,
+        db_column='Status',
+    )
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='opening_balances',
+    )
+    posted_at = models.DateTimeField(null=True, blank=True, db_column='PostedAt')
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID', related_name='opening_balances',
+    )
+
+    class Meta:
+        db_table = 'opening_balances'
+        managed = True
+        ordering = ['-id']
+
+    def __str__(self):
+        return f"أرصدة افتتاحية {self.entry_date or '—'} ({self.get_status_display()})"
+
+    def save(self, *args, **kwargs):
+        """يشتقّ `entry_date` من `start_date` — نقطة واحدة تضمن العلاقة من كل مسار."""
+        if self.start_date:
+            self.entry_date = self.start_date - datetime.timedelta(days=1)
+        else:
+            self.entry_date = None
+        super().save(*args, **kwargs)
+
+
+class OpeningBalanceAccountLine(models.Model):
+    """رصيد افتتاحي لحساب واحد — طرف واحد فقط (مدين أو دائن)."""
+
+    id = models.AutoField(primary_key=True, db_column='OpeningBalanceLineID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    opening = models.ForeignKey(
+        OpeningBalance, on_delete=models.CASCADE, db_column='OpeningBalanceID',
+        related_name='account_lines',
+    )
+    account = models.ForeignKey(
+        Account, on_delete=models.PROTECT, db_column='AccountID',
+        related_name='opening_balance_lines',
+    )
+    debit = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='Debit')
+    credit = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='Credit')
+    notes = models.CharField(max_length=500, blank=True, default='', db_column='Notes')
+
+    class Meta:
+        db_table = 'opening_balance_account_lines'
+        managed = True
+        constraints = [
+            models.UniqueConstraint(
+                fields=['opening', 'account'],
+                name='uniq_opening_account',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(debit__gte=0),
+                name='opening_account_debit_non_negative',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(credit__gte=0),
+                name='opening_account_credit_non_negative',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.account}: {self.debit} / {self.credit}"
+
+
+class OpeningBalanceStockLine(models.Model):
+    """بضاعة أول المدة: كمية صنف في مستودع بتكلفة وحدتها.
+
+    المستودع إلزامي — جردٌ افتتاحي بلا موقع لا معنى له، والقيد الفريد
+    `(opening, product, warehouse)` لا يعمل على عمود يقبل NULL في MySQL.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='OpeningBalanceStockLineID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    opening = models.ForeignKey(
+        OpeningBalance, on_delete=models.CASCADE, db_column='OpeningBalanceID',
+        related_name='stock_lines',
+    )
+    product = models.ForeignKey(
+        'inventory.Product', on_delete=models.PROTECT, db_column='ProductID',
+        related_name='opening_balance_lines',
+    )
+    warehouse = models.ForeignKey(
+        'inventory.Warehouse', on_delete=models.PROTECT, db_column='WarehouseID',
+        related_name='opening_balance_lines',
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
+    unit_cost = models.DecimalField(max_digits=18, decimal_places=4, db_column='UnitCost')
+
+    class Meta:
+        db_table = 'opening_balance_stock_lines'
+        managed = True
+        constraints = [
+            models.UniqueConstraint(
+                fields=['opening', 'product', 'warehouse'],
+                name='uniq_opening_product_warehouse',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(quantity__gt=0),
+                name='opening_stock_quantity_positive',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(unit_cost__gte=0),
+                name='opening_stock_unit_cost_non_negative',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.product}: {self.quantity} × {self.unit_cost}"

@@ -17,6 +17,7 @@ import {
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck,
   Gauge, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
+  PlayCircle,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { enterOfficeShell } from "../utils/officeShell";
@@ -76,6 +77,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "accounting-vat-report", label: "تقرير ضريبة القيمة المضافة", icon: <Receipt className="h-4 w-4" /> },
     { view: "accounting-landed-cost", label: "تقرير التكلفة المستوردة", icon: <Ship className="h-4 w-4" /> },
     { view: "accounting-fiscal-periods", label: "الفترات المالية", icon: <CalendarDays className="h-4 w-4" /> },
+    { view: "accounting-opening-balances", label: "الأرصدة الافتتاحية", icon: <PlayCircle className="h-4 w-4" /> },
     { view: "accounting-exchange-rates", label: "أسعار الصرف", icon: <ArrowLeftRight className="h-4 w-4" /> },
     { view: "accounting-balance-sheet", label: "الميزانية العمومية", icon: <BarChart3 className="h-4 w-4" /> },
     { view: "accounting-income-statement", label: "قائمة الدخل", icon: <TrendingUp className="h-4 w-4" /> },

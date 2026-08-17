@@ -122,6 +122,7 @@ const InvoiceProfitsPage = lazyPage(() => import("./components/accounting/Invoic
 const ReservedStockReportPage = lazyPage(() => import("./components/sales/ReservedStockReportPage").then((m) => ({ default: m.ReservedStockReportPage })));
 const VatStatementsPage = lazyPage(() => import("./components/accounting/VatStatementsPage").then((m) => ({ default: m.VatStatementsPage })));
 const YearEndClosePage = lazyPage(() => import("./components/accounting/YearEndClosePage").then((m) => ({ default: m.YearEndClosePage })));
+const OpeningBalancesPage = lazyPage(() => import("./components/accounting/OpeningBalancesPage").then((m) => ({ default: m.OpeningBalancesPage })));
 const SqlProductsPage = lazyPage(() => import("./components/sql/SqlProductsPage").then((m) => ({ default: m.SqlProductsPage })));
 const SqlPartnersPage = lazyPage(() => import("./components/sql/SqlPartnersPage").then((m) => ({ default: m.SqlPartnersPage })));
 const SqlDealsPage = lazyPage(() => import("./components/sql/SqlDealsPage").then((m) => ({ default: m.SqlDealsPage })));
@@ -267,6 +268,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "accounting-income-statement": "/accounting/income-statement",
   "accounting-vat-statements": "/accounting/vat-statements",
   "accounting-year-end-close": "/accounting/year-end-close",
+  "accounting-opening-balances": "/accounting/opening-balances",
   "property-rental": "/property-rental",
   "cash-boxes": "/cash-boxes",
   reports: "/reports",
@@ -2004,6 +2006,12 @@ const App: React.FC = () => {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <YearEndClosePage />;
+
+      case "accounting-opening-balances":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <OpeningBalancesPage />;
 
       case "stock-levels":
         return <StockLevelsPage />;

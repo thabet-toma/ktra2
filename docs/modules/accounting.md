@@ -13,15 +13,16 @@
 ## أهم الملفات
 | الملف | الغرض | أسطر |
 |---|---|---|
-| `accounting/api.py` | **الواجهة العامة للكتابة من خارج accounting** (المرحلة 2): `post_document`، `reverse_journal`، `purge_journals`، `get_account_by_code`، والجانب المحاسبي للشريك (`sync_partner_accounting`/`ensure_partner_account`/`create_partner_opening_balance`) | 481 |
+| `accounting/api.py` | **الواجهة العامة للكتابة من خارج accounting** (المرحلة 2): `post_document`، `reverse_journal`، `purge_journals`، `get_account_by_code`، والجانب المحاسبي للشريك (`sync_partner_accounting`/`ensure_partner_account`/`create_partner_opening_balance`) | 467 |
 | `accounting/services.py` | كل منطق الترحيل والتحقق: `post_journal`، `unpost_document`، الشيكات، البنوك، أرصدة الأطراف | 1738 |
-| `accounting/views.py` | 18 ViewSet: الحسابات، القيود، الشيكات، الميزان، الأستاذ، الضريبة، البنوك | 1892 |
-| `accounting/models.py` | 17 موديلاً محاسبياً (Account، Journal*، Cheque، Bank*، FiscalPeriod، TaxRate…) | 737 |
-| `accounting/serializers.py` | عقود الـAPI + ملخّص مرجع القيد (`build_journal_reference_summary`) | 576 |
+| `accounting/views.py` | 19 ViewSet: الحسابات، القيود، الشيكات، الميزان، الأستاذ، الضريبة، البنوك، الأرصدة الافتتاحية | 1963 |
+| `accounting/models.py` | 20 موديلاً محاسبياً (Account، Journal*، Cheque، Bank*، FiscalPeriod، TaxRate، OpeningBalance*…) | 824 |
+| `accounting/serializers.py` | عقود الـAPI + ملخّص مرجع القيد (`build_journal_reference_summary`) | 553 |
+| `accounting/opening_balance.py` | الأرصدة الافتتاحية: المستند وحفظه وترحيله وعكسه وملخّصه (`post_opening_balance`، `unpost_opening_balance`، `opening_balance_summary`) | 422 |
 | `accounting/fx_fifo.py` | طبقات FIFO لصناديق العملة الأجنبية | 185 |
 | `accounting/cashbox.py` | حلّ حسابات الصناديق النقدية وتوليد أكواد أبناء | 103 |
 | `accounting/account_classification.py` | اشتقاق `Account.sub_type` (`classify_tenant_accounts`، `backfill_account_sub_types`) | 168 |
-| `accounting/urls.py` | تسجيل الـrouter (18 مسار) | 45 |
+| `accounting/urls.py` | تسجيل الـrouter (19 مسار) | 44 |
 
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
@@ -39,6 +40,9 @@
 | `ExchangeRate` | `rate`، `effective_date` | `from_currency`/`to_currency` (PROTECT)؛ فريد مع `(tenant, effective_date)` |
 | `TaxRate` | `code`، `rate`، `direction` | `tax_account` (PROTECT)؛ `unique_together (tenant, code)` |
 | `CostCenter` / `AccountingAuditLog` | `code`/`action`، `model_name`، `object_id` | `tenant` |
+| `OpeningBalance` | `start_date`، `entry_date` (= البدء − يوم، مشتقّ في `save`)، `status` (`draft`/`posted`)، `posted_at` | `tenant`، `journal` (SET_NULL)، `created_by`؛ مستند واحد لكل شركة |
+| `OpeningBalanceAccountLine` | `debit`/`credit` (غير سالبين، طرف واحد)، `notes` | `opening` (CASCADE)، `account` (PROTECT)؛ فريد `(opening, account)` |
+| `OpeningBalanceStockLine` | `quantity` (> 0)، `unit_cost` (≥ 0) | `opening` (CASCADE)، `product`/`warehouse` (PROTECT، والمستودع إلزامي)؛ فريد `(opening, product, warehouse)` |
 
 ### `Account.sub_type` — التصنيف الوظيفي
 `account_type` الخمسة تقود الطبيعة والحساب الختامي والتقارير، ولا تقول **غرض**
@@ -71,7 +75,75 @@
 الإنشاء. **لا تُضاف قيم إلى `ACCOUNT_TYPES`** بدلاً من ذلك — تلك الخمسة تكسر
 `accountNature`/`accountStatement` والتقارير بصمت.
 
+### الأرصدة الافتتاحية — قيد موحّد واحد لكل شركة
+بدء التشغيل على النظام يحتاج ثلاث أرجل: أرصدة الحسابات، وأرصدة الأطراف، وبضاعة
+أول المدة. `accounting/opening_balance.py` يملك **الرجلين الأولى والثالثة**:
+مستند `OpeningBalance` يُرحَّل مرة واحدة فيُنتج قيداً واحداً بمرجع
+`OPENING_BALANCE` عبر `post_journal`، ويسجّل بضاعة أول المدة حركاتِ `IN` عبر
+`record_stock_movement` بنفس المرجع **وبتاريخ `entry_date`** — لا `today`، وإلا
+دخلت الحركة فترةً أخرى ورُتّبت خطأً أمام أول شراء فعلي في حساب متوسط التكلفة.
+
+**الرِّجل الثانية لم تتغيّر**: أرصدة الأطراف تبقى على آليتها القائمة — قيد لكل
+طرف بمرجع `PARTNER_OPENING` (`accounting/api.py`
+(`create_partner_opening_balance`)) — لأن شركات إنتاج لديها قيوداً منها مرحّلة
+فعلاً. ولذلك يرفض `assert_account_allowed` أي حساب `sub_type ∈ (receivable,
+payable, inventory)`، وحساب الموازنة نفسه، وأي حساب مربوط بطرف: أرقام تلك
+الحسابات تأتي من رِجل أخرى، وإدخالها هنا يضاعف الرصيد. الحارس يعمل عند الحفظ
+وعند الترحيل معاً — إخفاء الحساب في الواجهة ليس منعاً.
+
+**تاريخ القيد `= start_date − 1`** (نمط Xero/Odoo): أرصدة الافتتاح هي أرصدة
+الإقفال في اليوم السابق للبدء. حارس الفترة المالية يبقى مفروضاً عليه — إن لم
+تغطِّ `entry_date` فترةٌ مفتوحة يفشل الترحيل برسالة تدلّ على شاشة الفترات، ولا
+ينزلق التاريخ صامتاً.
+
+**حساب الموازنة `3300 أرصدة افتتاحية`** يستقبل الفرق تلقائياً بدل منع الترحيل
+حتى يوازن المستخدم يدوياً: رِجلا المخزون والأطراف يحسبهما النظام، والفرق **هو**
+«صافي حقوق الملكية الافتتاحية». يُحلّ عبر `resolve_opening_offset_account`
+(فوقها `accounting/api.py` (`ensure_account`)) — وهي نفسها نقطة الحلّ التي صار
+`create_partner_opening_balance` يستعملها، فتتجمّع كل أرجل الافتتاح في حساب
+واحد. **التعادل بين المخزون والأستاذ يثبت بالبناء**: قيمة القيد على حسابات
+المخزون = مجموع (كمية × تكلفة) = قيمة الحركات المسجَّلة، مصدرٌ واحد لا مصدران.
+
+العكس يمرّ من `unpost_document` فيرث حارس `find_stock_dependents`: إن بيعت بضاعة
+الافتتاح يُرفض بقائمة المستندات المعتمِدة بدل أن يُيتّمها.
+
+**الأصناف المتتبَّعة تسلسلياً في بضاعة الافتتاح** (`_serial_items`): الافتتاح
+يُدخل الكمية للمخزن ولا يُنشئ وحدةً مُرقَّمة واحدة — `ProductSerial` تُنشأ من
+استلام الشراء — فشركةٌ نمط بيعها «إجباري» تُمنع من بيع بضاعة افتتاحها عند
+`inventory/serials.py` (`consume_sales_serials`) برسالة «المتوفر في المخزن 0
+والمطلوب N» لا تقول أين تُرقَّم. لذلك يحمل الملخّص `serial_items`: صفٌّ لكل صنف
+متتبَّع في بنود الافتتاح بالمُسجَّل والمطلوب، تعرضه الشاشة بعد الترحيل برابطٍ إلى
+مسار الترقيم القائم `products/{id}/serials/register/`. **إرشاد لا حارس**: الافتتاح
+صحيح بلا أرقام والبيع وحده هو ما يحتاجها، فلا يُمنع الترحيل. التجميع بالصنف لا
+بالبند (الوحدة المُرقَّمة بلا مستودع)، و«المُسجَّل» كل وحدات الصنف بأي حالة لا
+«في المخزن» وحدها — فبيعُ وحدة لا يُعيد صنفاً أُتمّ ترقيمه ناقصاً. استعلام واحد
+مهما كثرت البنود، مفلترٌ بالشركة.
+
+**الشاشة**: `frontend_v2/components/accounting/OpeningBalancesPage.tsx` — مسار
+`/accounting/opening-balances` تحت قائمة «المحاسبة». ثلاثة تبويبات (حسابات ·
+أطراف · مخزون) ورأسٌ يعرض تاريخ البدء وتاريخ القيد المشتقّ منه والحالة و«صافي
+حقوق الملكية الافتتاحية». الترحيل يحفظ المسودة أولاً ثم يرحّل — فالمرحَّل هو ما
+تراه الشاشة لا آخر مسودة محفوظة — وهو وإلغاؤه خلف حوار تأكيد. تبويب الأطراف
+يعرض لكل طرف المُدخل والمرحَّل معاً وزرّ عكس قيده، ومنتقي الحسابات يُخفي ما
+يرفضه `assert_account_allowed` (والخادم يبقى هو الحارس). خطأ الفترة المالية
+يظهر بزرّ ينقل إلى شاشة الفترات. وتبويب المخزون بعد الترحيل يعرض لوحة الأصناف
+المتتبَّعة تسلسلياً (المُسجَّل/المطلوب) بزرّ يفتح كرت الصنف على تبويب «الأرقام
+التسلسلية» (`/products/{id}?tab=serials`) — و`ItemFormAseel` يتتبّع تبويبه النشط
+بالمفتاح لا بفهرس الغلاف كي يصمد الرابط حتى وقد لحق التبويب متأخراً. عميلها في
+`frontend_v2/services/accountingApi.ts`.
+
 ## دوال الـservices العامة
+```python
+# التوقيعات فقط — منسوخة حرفياً من accounting/opening_balance.py
+def opening_balance_summary(tenant) -> dict:  # الحالة + البنود + المجاميع + أرصدة الأطراف وحالة ترحيل كلٍّ منها
+def save_opening_lines(opening, *, start_date=None, account_lines=None, stock_lines=None) -> OpeningBalance:  # حفظ جماعي للمسودة (None = لا تلمس هذه الرِّجل)
+def post_opening_balance(opening, *, user=None) -> OpeningBalance:  # حركات المخزون + القيد الموحّد + سطر الموازنة، ذرّياً
+def unpost_opening_balance(opening, *, user=None) -> dict:  # حذف القيد وعكس حركاته عبر unpost_document
+def resolve_opening_offset_account(tenant_id: int) -> Account:  # «3300» للشركة، يُنشأ إن غاب
+def assert_account_allowed(account, *, offset_account_id: int) -> None:  # يرفض الذمم/المخزون/3300/حساب طرف
+def get_or_create_opening(tenant) -> OpeningBalance:  # مستند الافتتاح الحالي للشركة
+```
+
 ```python
 # التوقيعات فقط — منسوخة حرفياً من accounting/services.py
 def post_journal(*, tenant_id: int, transaction_date, reference_type: str, reference_id: int | None, description: str, lines_data: list[dict], currency=None, exchange_rate=Decimal("1"), user=None, idempotent: bool = True, branch_id: int | None = None) -> JournalHeader:  # المسار الوحيد لإنشاء + ترحيل أي قيد
@@ -119,6 +191,9 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | POST | `bank-reconciliations/{id}/toggle-line/` · `close/` · `reopen/` | `BankReconciliationViewSet` |
 | POST | `fiscal-periods/create-year/` (`granularity` = `monthly` افتراضاً \| `yearly`؛ **يردّ قائمة فترات** لا فترة واحدة — 12 صفاً في الحالة الشهرية) · `{id}/close/` (409 مع قيود غير مرحّلة ما لم يُمرَّر `force`) · `{id}/reopen/` (`reason` إلزامي، يُحفظ في سجل التدقيق) · `year-end-close/` | `FiscalPeriodViewSet` — كلها بـ`accounting.period.manage` |
 | GET/POST/PATCH/DELETE | `fiscal-periods/` · `fiscal-periods/{id}/` | `FiscalPeriodViewSet` — الكتابة كلها بـ`accounting.period.manage`؛ المُقفَلة لا تُعدَّل ولا تُحذف، والحذف مرفوض إن كان في مداها قيد مرحّل؛ `status`/`is_closed` للقراءة فقط (تتغيّر عبر `close/`+`reopen/` وحدهما)، وكل تعديل أو حذف يُكتب في `AccountingAuditLog` |
+| GET | `opening-balance/` | `OpeningBalanceViewSet.list` — الحالة والبنود والمجاميع وأرصدة الأطراف؛ المبالغ نصوصاً والتواريخ ISO |
+| PUT | `opening-balance/lines/` | `OpeningBalanceViewSet.save_lines` — استبدال جماعي للمسودة؛ الرِّجل الغائبة عن الطلب لا تُمَسّ، والمستند المرحَّل يُرفض تعديله |
+| POST | `opening-balance/post/` · `opening-balance/unpost/` | `OpeningBalanceViewSet` — بصلاحيتَي `accounting.journal.post` / `accounting.journal.unpost` القائمتين (لا مفاتيح جديدة) |
 | GET | `exchange-rates/get-rate/` | `ExchangeRateViewSet` |
 | GET/POST | `cost-centers/` · `tax-rates/` · `banks/` · `bank-branches/` · `cash-box-accounts/` · `purchase-receipts/` · `currencies/` | حسب `urls.py` |
 
@@ -150,6 +225,9 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 - **لا تُقفل مطابقة بنكية بفرق ≥ 0.01** (`accounting/services.py` (`close_bank_reconciliation`))، وكل `JournalLine` تُطابَق مرة واحدة (`accounting/models.py` (`BankReconciliationLine`)).
 - **الفترة المُقفَلة لا تتغيّر إلا عبر `reopen/` بسبب مسجَّل** — `FiscalPeriodViewSet.perform_update`/`perform_destroy` (`accounting/views.py`) يرفضان أي تعديل أو حذف عليها، ويمنعان حذف فترة في مداها قيد مرحّل (تاريخٌ بلا فترة تغطّيه يشلّ الترحيل وإلغاءه معاً)، وكل تعديل أو حذف ناجح يُكتب في سجل التدقيق.
 - **`create_audit_log` يجب أن يبقى معزولاً** — سطر تدقيق فاشل لا يجوز أن يُرجِع معاملة المستدعي (سبب اختبار `test_audit_log_isolation`).
+- **قيد افتتاحي مرحّل واحد لكل شركة** — مفروضٌ في `accounting/opening_balance.py` (`post_opening_balance`) داخل المعاملة تحت `select_for_update`، **لا بقيد فريد شرطي**: MySQL لا يدعم الفهارس الجزئية، فقيدٌ بـ`condition=` يوجد في قاعدة الاختبارات (SQLite) ويغيب بصمت عن الإنتاج. لا قيد افتتاحي ثانٍ إلا بعد عكس الأول صراحةً.
+- **أرصدة الذمم والمخزون لا تُدخل في بنود حسابات الافتتاح** — `assert_account_allowed` يرفضها (ومعها حساب `3300` نفسه وأي حساب مربوط بطرف) عند الحفظ وعند الترحيل معاً؛ أرقامها تأتي من `PARTNER_OPENING` ومن بنود المخزون، وإدخالها هنا يضاعف الرصيد.
+- **بضاعة أول المدة تُسجَّل بتاريخ `entry_date` لا `today`** (`accounting/opening_balance.py` (`post_opening_balance`)) — تاريخٌ آخر يضع الحركة في فترة أخرى ويرتّبها خطأً أمام أول شراء فعلي في متوسط التكلفة.
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -168,3 +246,4 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | `accounting/tests/test_journal_pagination.py` · `test_journal_reference_perf.py` · `test_account_list_perf.py` | عقد الترقيم وغياب N+1 |
 | `accounting/tests/test_fiscal_period_lock.py` | قفل الشهر المالي من كل مسار: الترحيل وإلغاؤه والتداخل و`close/`+`reopen/`، وCRUD الفترة (صلاحية، مُقفَلة غير قابلة للتعديل أو الحذف، سجل تدقيق) |
 | `accounting/tests/test_journal_filters.py` | تصفية الدفتر بالحساب (بلا تكرار عبر الصفحات) وبالمستخدم، وختم `created_by` من مسارَي الإنشاء، ودورة قيد التسوية |
+| `accounting/tests/test_opening_balance.py` | القيد الافتتاحي الموحّد: تاريخه وتوازنه وسطر `3300`، ومطابقة حسابات المخزون في الأستاذ لإجمالي تقرير «تقييم المخزون» بالرقم، ومنع القيد الثاني قبل العكس، والعكس وحارس الاعتمادية، والحسابات الممنوعة، والفترة الغائبة/المغلقة بلا حالة جزئية، وعزل الشركات |
