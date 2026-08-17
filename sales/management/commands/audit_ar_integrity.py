@@ -7,35 +7,49 @@
 
 يفحص كل شركة ويطبع أربعة أقسام:
   1. فواتير مجموع توزيعاتها المرحّلة > إجماليها (ازدواج تحصيل).
-  2. فواتير `amount_paid` لا يساوي مجموع توزيعاتها المرحّلة.
+  2. فواتير `amount_paid` لا يساوي مجموع توزيعاتها المرحّلة — **مصنّفةً**
+     (انظر أدناه).
   3. فواتير عليها توزيعات مرحّلة وهي «مسودة» (يتيمة بعد إلغاء ترحيل).
   4. عملاء (partner_type='Customer' فقط) برصيد ذمم دائن — أرصدة الموردين
      الدائنة طبيعية فلا تُفحص إطلاقاً.
   ويُلحق بها: فواتير نقدية سُوّيت داخل قيدها (بلا مدين ذمم) ومع ذلك أُنشئ لها
   سند قبض ⇒ ازدواج نقدية.
 
-الإصلاح (`--fix`) محافظ ولا يلمس إلا ما توقيعه مؤكَّد:
+T3 — العقد الذي يحرسه القسم 2: **`amount_paid` = `posted_allocations_total`**.
+الحقل مخزنٌ مُشتقّ (يقرؤه كشف الحساب والتقارير والأعمار)، وكلّ كاتب اليوم يزيده
+مقروناً بصفّ `PaymentAllocation`. فحصُ الفرق هنا هو ما يُثبت بقاءَ العقد صحيحاً،
+وهو يصنّف كل فاتورة مختلّة إلى صنفين لا ثالث لهما:
+  - **قديم** — قيد الفاتورة نفسه يحمل التسوية (دائن ذمم داخله، أو نقديّةُ ما قبل
+    الميزة 2 بقيدٍ بلا مدين ذمم إطلاقاً). القيد متوازن وصحيح والمال دخل الدفاتر
+    فعلاً؛ لفّه بسند لاحق يُدائن الذمم مرّتين. **يُبلَّغ ولا يُصلَح أبداً.**
+  - **يتيم** — `amount_paid` بلا توزيع وبلا تسوية داخل القيد: لا شيء يُثبته.
+    هذا وحده ما يُعيده `--fix` إلى مجموع التوزيعات المرحّلة.
+الأمر يصحّح عموداً مُشتقّاً فقط — **لا يلمس قيداً ولا ينشئ سنداً**.
+
+الإصلاح (`--fix`، ومرادفه `--apply`) محافظ ولا يلمس إلا ما توقيعه مؤكَّد:
   - سند التسوية النقدية التلقائي الزائد/الخاطئ ⇒ يُلغى ترحيله ويُحذف (قيوده معه).
   - صفّ توزيع على فاتورة مسودة ⇒ يُحذف الصفّ وحده، فيبقى السند مرحّلاً «على
     الحساب» (تحصيلٌ حصل فعلاً) ويُوزَّع يدوياً لاحقاً.
-  - `amount_paid` ⇒ يُعاد احتسابه من التوزيعات المرحّلة.
-ما عدا ذلك (سندات مستخدم زائدة) يُبلَّغ عنه ويُترك للمراجعة اليدوية.
+  - `amount_paid` **اليتيم** ⇒ يُعاد احتسابه من التوزيعات المرحّلة.
+ما عدا ذلك (سندات مستخدم زائدة، والصنف القديم) يُبلَّغ عنه ويُترك للمراجعة اليدوية.
 
     python manage.py audit_ar_integrity                 # عرض فقط (dry-run افتراضي)
     python manage.py audit_ar_integrity --fix           # تطبيق الإصلاح
-    python manage.py audit_ar_integrity --fix --tenant 6
+    python manage.py audit_ar_integrity --apply --tenant 6
 """
 import logging
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.db.models import Q
 
 from accounting.services import partner_posted_balance
 from partners.models import Partner
 from sales.models import CustomerPayment, PaymentAllocation, SalesInvoice
 from sales.services import (
     invoice_journal_debits_ar,
+    invoice_journal_settlement_credit,
     is_auto_cash_settlement,
     posted_allocations_total,
     unpost_customer_payment,
@@ -53,17 +67,23 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--fix', action='store_true', help='طبّق الإصلاح فعلياً.')
         parser.add_argument(
+            '--apply', action='store_true',
+            help='مرادف لـ--fix (اصطلاح بقية أوامر الصيانة).')
+        parser.add_argument(
             '--dry-run', action='store_true',
             help='عرض فقط (السلوك الافتراضي — يُذكر للتصريح).')
         parser.add_argument('--tenant', type=int, default=None, help='حصر بشركة واحدة (TenantID).')
 
     def handle(self, *args, **opts):
-        fix = opts['fix'] and not opts['dry_run']
+        fix = (opts['fix'] or opts['apply']) and not opts['dry_run']
         tenants = Tenant.objects.all().order_by("TenantID")
         if opts['tenant']:
             tenants = tenants.filter(TenantID=opts['tenant'])
 
-        totals = {"over": 0, "mismatch": 0, "orphan": 0, "credit": 0, "cash": 0, "fixed": 0}
+        totals = {
+            "over": 0, "mismatch": 0, "legacy": 0, "orphan": 0,
+            "credit": 0, "cash": 0, "fixed": 0,
+        }
         for tenant in tenants:
             totals_before = dict(totals)
             self.stdout.write(f"\n=== شركة {tenant.TenantID}: {tenant.CompanyName} ===")
@@ -72,7 +92,8 @@ class Command(BaseCommand):
                 self.stdout.write("  لا ملاحظات.")
 
         self.stdout.write(self.style.SUCCESS(
-            f"\nالمجموع — ازدواج: {totals['over']}، تباين مدفوع: {totals['mismatch']}، "
+            f"\nالمجموع — ازدواج: {totals['over']}، مدفوع يتيم: {totals['mismatch']}، "
+            f"مدفوع قديم (لا يُصلَح): {totals['legacy']}، "
             f"توزيعات يتيمة: {totals['orphan']}، نقدية مزدوجة: {totals['cash']}، "
             f"عملاء برصيد دائن: {totals['credit']}."
         ))
@@ -95,7 +116,6 @@ class Command(BaseCommand):
         for inv in invoices:
             allocated = posted_allocations_total(inv.pk)
             grand = Decimal(str(inv.grand_total or 0)).quantize(DEC)
-            paid = Decimal(str(inv.amount_paid or 0)).quantize(DEC)
 
             if allocated > grand + DEC:
                 totals["over"] += 1
@@ -134,23 +154,72 @@ class Command(BaseCommand):
                     totals["fixed"] += self._detach_allocations(inv)
                     allocated = posted_allocations_total(inv.pk)
 
-            inv.refresh_from_db()
-            paid = Decimal(str(inv.amount_paid or 0)).quantize(DEC)
-            if inv.status == SalesInvoice.STATUS_POSTED and paid != allocated:
-                totals["mismatch"] += 1
-                self.stdout.write(self.style.WARNING(
-                    f"  [تباين مدفوع] {inv.invoice_number}: amount_paid {paid} ≠ "
-                    f"توزيعات {allocated}"
-                ))
-                if fix:
-                    SalesInvoice.objects.filter(pk=inv.pk).update(amount_paid=allocated)
-                    totals["fixed"] += 1
-                    logger.info(
-                        "audit_ar_integrity: invoice %s amount_paid %s → %s",
-                        inv.invoice_number, paid, allocated,
-                    )
-
+        self._audit_amount_paid_drift(tenant, fix, totals)
         self._report_credit_customers(tenant, totals)
+
+    # ── القسم 2: فرق «المدفوع» عن التوزيعات، مصنَّفاً ────────────────────────
+    def _audit_amount_paid_drift(self, tenant, fix, totals):
+        """يُثبت العقد `amount_paid == posted_allocations_total` أو يُسمّي كاسره.
+
+        يمسح كل فاتورة مرحّلة عليها «مدفوع» **أو** توزيع مرحّل — الفواتير التي
+        زاد مدفوعها بلا توزيع إطلاقاً هي بالضبط ما يفوت مسحَ القسم الأول (الذي
+        يبدأ من التوزيعات)، وهي الحالة التي وُضع لها هذا القسم.
+        """
+        invoices = (
+            SalesInvoice.objects.filter(
+                tenant_id=tenant.TenantID, status=SalesInvoice.STATUS_POSTED,
+            )
+            .filter(
+                Q(amount_paid__gt=0) | Q(payment_allocations__payment__is_posted=True)
+            )
+            .select_related("customer", "journal")
+            .distinct()
+            .order_by("id")
+        )
+        for inv in invoices:
+            allocated = posted_allocations_total(inv.pk)
+            paid = Decimal(str(inv.amount_paid or 0)).quantize(DEC)
+            if paid == allocated:
+                continue
+            kind, note = self._classify_amount_paid_drift(inv, allocated, paid)
+            if kind == "legacy":
+                totals["legacy"] += 1
+                self.stdout.write(
+                    f"  [مدفوع قديم] {inv.invoice_number}: amount_paid {paid} ≠ "
+                    f"توزيعات {allocated} — {note} ⇒ صحيح محاسبياً، لا يُصلَح."
+                )
+                continue
+            totals["mismatch"] += 1
+            self.stdout.write(self.style.WARNING(
+                f"  [مدفوع يتيم] {inv.invoice_number}: amount_paid {paid} ≠ "
+                f"توزيعات {allocated} — {note}"
+            ))
+            if fix:
+                SalesInvoice.objects.filter(pk=inv.pk).update(amount_paid=allocated)
+                totals["fixed"] += 1
+                self.stdout.write(f"    ↳ أُعيد amount_paid إلى {allocated}.")
+                logger.info(
+                    "audit_ar_integrity: tenant %s invoice %s amount_paid %s → %s "
+                    "(true orphan — no allocation, no in-journal settlement)",
+                    tenant.TenantID, inv.invoice_number, paid, allocated,
+                )
+
+    def _classify_amount_paid_drift(self, inv, allocated: Decimal, paid: Decimal):
+        """«قديم» (سُوّي داخل قيد الفاتورة) أم «يتيم» (لا شيء يُثبته)؟
+
+        الصنف القديم يقتضي فائضاً في `amount_paid` **وشاهداً في القيد نفسه**:
+        دائنُ ذمم داخله (الشيكات المرفقة قبل T1)، أو غيابُ مدين الذمم كلّياً
+        (نقديّة ما قبل الميزة 2: مدين صندوق ÷ دائن إيراد). ما دون ذلك يتيم —
+        ومنه النقصُ في `amount_paid` عن التوزيعات، فلا رواية قديمة تفسّره.
+        """
+        if paid > allocated:
+            settled = invoice_journal_settlement_credit(inv)
+            if settled > 0:
+                return "legacy", f"قيدها يحمل تسوية بمقدار {settled}"
+            if inv.journal_id and not invoice_journal_debits_ar(inv):
+                return "legacy", "قيد نقدي مباشر بلا مدين ذمم"
+            return "orphan", "بلا توزيع وبلا تسوية داخل القيد"
+        return "orphan", "المدفوع أقلّ من التوزيعات المرحّلة"
 
     # ── عملاء برصيد دائن (بلا الموردين) ─────────────────────────────────────
     def _report_credit_customers(self, tenant, totals):

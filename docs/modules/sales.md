@@ -24,7 +24,7 @@
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
 | `SalesSettings` | `default_payment_type`, `stock_on_post_default`, `allow_negative_stock_default`, `use_moving_average_cost`, `block_loss_invoices`, `block_reserved_stock_sale`, `auto_post_payments`, `serial_entry_mode` | `OneToOne` مع `Tenant`؛ ~10 FKs على `accounting.Account` كحسابات افتراضية |
-| `SalesInvoice` | `invoice_number`, `invoice_kind`, `invoice_type`, `status` (draft/posted/cancelled), `delivery_status`, `stock_on_post`, `grand_total`, `amount_paid`, `attached_cash_amount` | `customer→Partner` (PROTECT)، `journal→accounting.JournalHeader`، `original_invoice→self`، `branch→tenants.Branch`، `vat_statement` |
+| `SalesInvoice` | `invoice_number`, `invoice_kind`, `invoice_type`, `status` (draft/posted/cancelled), `delivery_status`, `stock_on_post`, `grand_total`, `amount_paid`، و`attached_cash_amount` **عمود قديم للقراءة فقط** (لم يعد يُكتب ولا يُرحَّل — التحصيل صار سنداً حقيقياً) | `customer→Partner` (PROTECT)، `journal→accounting.JournalHeader`، `original_invoice→self`، `branch→tenants.Branch`، `vat_statement` |
 | `SalesInvoiceLine` | `quantity`, `delivered_quantity`, `unit_price`, `line_discount`, `line_total_excl_tax`, `serials` (JSON) | `product→inventory.Product` (PROTECT)، `tax_rate→accounting.TaxRate` |
 | `DeliveryOrder` / `DeliveryOrderLine` | `delivery_number`, `status`, `auto_created`, `quantity` | `invoice` قابل لـNULL (سند تسليم مستقل، `is_standalone` سطر 694)؛ `movement→inventory.StockMovement` |
 | `CustomerPayment` / `PaymentAllocation` | `amount`, `is_posted`, `auto_settled_invoice` | توزيع على `SalesInvoice` بمبلغ + `conversion_rate` |
@@ -44,7 +44,8 @@ def allocate_customer_payment(payment: CustomerPayment, allocations: list[dict],
 def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'SupplierPayment':  # يستدعيه logistics (3808)
 def unpost_supplier_payment(payment: 'SupplierPayment', *, user=None) -> dict:  # التراجع عن سند صرف — مرآة unpost_customer_payment؛ «المدفوع» على فواتير الشراء مشتق فلا مبالغ تُعكس
 def allocate_supplier_payment(payment: 'SupplierPayment', allocations: list[dict], *, user=None) -> 'SupplierPayment':  # (3896)
-def attach_voucher_and_post(invoice: SalesInvoice, *, cash_amount=0, cash_account_id=None, cheques=None, user=None) -> SalesInvoice:  # (859)
+def collect_invoice_payment(invoice: SalesInvoice, *, cash=None, cash_account_id=None, cheques=None, from_on_account=None, post_invoice=False, payment_date=None, user=None) -> CustomerPayment | None:  # منسّق التحصيل: ترحيل + سند قبض واحد + خصم من رصيد العميل، ذرّياً
+def attach_voucher_and_post(invoice: SalesInvoice, *, cash_amount=0, cash_account_id=None, cheques=None, user=None) -> SalesInvoice:  # غلاف فوق المنسّق — شكل قديم محفوظ
 def confirm_sales_order(order, *, user=None):  # تأكيد الطلبية = حجز بلا قيد (3336)
 def convert_quotation_to_order(quotation, *, user=None):  # (3401)
 def convert_order_to_invoice(order, *, user=None):  # (3454)
@@ -75,7 +76,8 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 | POST | `invoices/{id}/deliver/` · `invoices/{id}/delivery-order/` | `deliver` (681) · `create_delivery_order` (655) |
 | GET | `invoices/{id}/delivery-lines/` · `invoices/lookup/` · `invoices/next-number/` | (666) · (189) · (640) |
 | GET | `invoices/last-price/` · `invoices/resolve-price/` · `invoices/profits/` · `invoices/credit-preview/` | (577) · (594) · (623) · (551) |
-| POST | `invoices/{id}/payment-voucher/` · `invoices/{id}/duplicate/` | (498) · (400) |
+| POST | `invoices/{id}/collect/` | `collect` — التحصيل من داخل الفاتورة (نقد/شيكات/رصيد العميل)، صلاحية `sales.payment.create` (+`sales.invoice.post` مع `post_invoice`) |
+| POST | `invoices/{id}/payment-voucher/` · `invoices/{id}/duplicate/` | (498) · (400) — الأولى غلاف قديم فوق `collect` |
 | POST | `payments/{id}/post/` · `payments/{id}/unpost/` · `payments/{id}/allocate/` | `CustomerPaymentViewSet` (1099/1074/1117) |
 | POST | `quotations/{id}/convert/` · `orders/{id}/confirm/` · `orders/{id}/convert/` · `orders/{id}/deposit/` | (1396) · (1505) · (1526) · (1539) |
 | GET/PUT | `settings/current/` · POST `settings/restore-defaults/` | `SalesSettingsViewSet` (1169/1183) |
@@ -91,7 +93,11 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 
 ## قواعد لا يجوز كسرها
 - **لا تعديل ولا حذف لفاتورة غير مسودة**: `views.py` و`:306` يرفضان بـ`POSTED_DOC_WARNING` مع `can_unpost: True`؛ ونفس المنع في `serializers.py`.
-- **لا إلغاء ترحيل (ولا حذف) لفاتورة عليها سند قبض مرحّل**: `guard_invoice_payments_before_unpost` (`services.py`) يُستدعى من `views.py` و`:314`. الاستثناء الوحيد هو سند التسوية النقدية التلقائي الذي يُحرَّر أولاً بـ`release_auto_cash_settlement` (`services.py`).
+- **قيد الفاتورة لا يُسوّي شيئاً ولا يزيد «المدفوع»**: `post_sales_invoice` (`sales/services/flow.py`) يدين الذمم بكامل الإجمالي ويدائن الإيراد/الضريبة فقط — لا سطر صندوق ولا سطر «شيكات برسم التحصيل» داخله، ولا لمسَ لـ`amount_paid`. ما وصل مرفقاً مع الفاتورة (شيكات، ونقد البيع النقدي) يُحصَّل داخل نفس المعاملة بسند قبض حقيقي: `_settle_attached_cheques` ثم `_auto_settle_cash_sale`، وكلاهما يمرّ من `post_customer_payment`. وحين يأتي التحصيل مفصَّلاً من `collect_invoice_payment` تُكبَت التسويتان معاً (`suppress_auto_settlement=True`) فيحلّ محلّهما سندٌ واحد — وإلّا خطفت التلقائيةُ كاملَ المتبقّي فخرج سندان.
+- **التحصيل من داخل الفاتورة نقطة واحدة**: `collect_invoice_payment` (`sales/services/flow.py`) — تركيبُ خدمات قائمة بلا أي منطق ترحيل جديد: `post_sales_invoice` ← `post_customer_payment` (نقد + شيكات في سند واحد، توزيعٌ مقصوص على المتبقّي وما زاد «على الحساب») ← `allocate_customer_payment` لكل خصمٍ من رصيد العميل (ربطٌ بلا قيد جديد). كلّه في `transaction.atomic` واحد: لا فاتورةٌ مرحّلة بسندٍ نصف مولود. `attach_payment_voucher` لم يعد يقبل نقداً (كان يُسجَّل ولا يُرحَّل)، و`attach_voucher_and_post` والنقطة `payment-voucher` غلافان فوق المنسّق.
+- **الفاتورة النقدية لا تبقى ناقصة التحصيل**: نقدٌ غير مذكور يُكمَّل تلقائياً في نفس السند، ونقصٌ بعد نقدٍ **مذكور** يَرفض العمليةَ كلَّها («اجعلها فاتورة ذمم أو أكمل المبلغ») — `collect_invoice_payment`.
+- **`amount_paid` = مجموع توزيعات السندات المرحّلة**: كل زيادة عليه تأتي من `post_customer_payment` مقرونةً بصفّ `PaymentAllocation`، ويُثبته `posted_allocations_total` (`sales/services/flow.py`). الحقل مخزنٌ مُشتقّ عمداً — تقرأه التقارير وكشف الحساب والأعمار بجمع SQL — فثمنُه أن يُبرهَن لا أن يُفترض: `python manage.py audit_ar_integrity` (`sales/management/commands/audit_ar_integrity.py`) يمسح كل فاتورة مرحّلة عليها «مدفوع» أو توزيع، ويصنّف كل فرق إلى **قديم** (قيد الفاتورة نفسه يحمل التسوية — دائنُ ذمم داخله بدلالة `invoice_journal_settlement_credit`، أو نقديّةُ ما قبل الميزة 2 بقيدٍ بلا مدين ذمم: متوازنٌ وصحيح، يُبلَّغ ولا يُصلَح أبداً) أو **يتيم** (لا توزيع ولا تسوية داخل القيد — وحده ما يُعيده `--fix`/`--apply` إلى مجموع التوزيعات). الأمر عرضٌ فقط افتراضياً ولا يلمس قيداً إطلاقاً؛ والصنف القديم يحرسه الحارسان معاً (المتبقي على `amount_paid` + `guard_invoice_allocation_total`) فلا يُحصَّل مرّتين.
+- **لا إلغاء ترحيل (ولا حذف) لفاتورة عليها سند قبض مرحّل**: `guard_invoice_payments_before_unpost` (`services.py`) يُستدعى من `views.py` و`:314`. الاستثناء الوحيد هو السند الذي أنتجه الترحيل نفسه (الموسوم بـ`auto_settled_invoice`: التسوية النقدية التلقائية أو تحصيل الشيكات المرفقة) ويُحرَّر أولاً بـ`release_auto_cash_settlement` (`services.py`).
 - **إلغاء الترحيل ذرّي وكامل**: داخل `transaction.atomic` واحد يُحرَّر السند التلقائي، تُعاد التسلسلات (`release_sales_serials`)، تُحذف بطاقات الكفالة التلقائية، ثم `unpost_document(journal_reference_types=["SALES_INVOICE","SALES_DELIVERY_COGS"], stock_reference_types=["SALE","STOCK_ISSUE"])`، وتُصفَّر `amount_paid` و`delivered_quantity` وتُحذف الإرساليات وتعود الشيكات `Under_Collection → Draft` (`views.py:340-379`).
 - **مجموع التوزيعات المرحّلة لا يتجاوز إجمالي الفاتورة**: `guard_invoice_allocation_total` (`services.py`) يُستدعى دائماً داخل معاملة بعد `select_for_update` على الفاتورة.
 - **خصم المخزون idempotent**: `_post_stock_out_for_invoice` (`services.py`) يعود مبكراً إن وُجدت حركة `reference_type="SALE"` لنفس الفاتورة؛ ومثله `issue_stock_from_invoice` لـ`STOCK_ISSUE`.
@@ -103,7 +109,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
 |---|---|
-| `sales/tests/test_ar_integrity.py` | سلامة الذمم: منع ازدواج التحصيل وبقاء السندات معلّقة بعد إلغاء الترحيل |
+| `sales/tests/test_ar_integrity.py` | سلامة الذمم: منع ازدواج التحصيل وبقاء السندات معلّقة بعد إلغاء الترحيل، وتصنيف فرق «المدفوع» (قديمٌ لا يُمسّ ÷ يتيمٌ يُصلَح) |
 | `sales/tests/test_sales_post_unpost_stock.py` | تماثل post → unpost → repost للمخزون والقيد معاً |
 | `sales/tests/test_reserved_stock_guard.py` | حجز الطلبية يمنع بيع الكمية لزبون آخر (4 قواعد) |
 | `sales/tests/test_invoice_delivery.py` | حالة التسليم والتسليم الجزئي ببنوده |
@@ -111,3 +117,5 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 | `sales/tests/test_subledger_routing.py` | قيد الفاتورة يدين الذمم بالكامل ولا يُسوّي النقدية |
 | `sales/tests/test_block_loss_invoice.py` | رفض فاتورة فيها أي سطر بخسارة عند تفعيل المفتاح |
 | `sales/tests/test_payment_cheques.py` · `test_voucher_atomicity.py` | الشيكات المرفقة وذرّية السند |
+| `sales/tests/test_invoice_journal_purity.py` | قيد الفاتورة نقيّ من التسوية، و«المدفوع» لا يزيد بلا توزيع |
+| `sales/tests/test_invoice_collect.py` | التحصيل من داخل الفاتورة: 60 نقداً + 40 شيكاً ⇒ سند واحد وذمم صفر، الفائض على الحساب، كبت التسوية التلقائية، والتراجع الكامل عند الفشل |

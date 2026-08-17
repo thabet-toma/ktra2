@@ -50,6 +50,7 @@ from .serializers import (
 from .services import (
     allocate_customer_payment,
     attach_payment_voucher,
+    collect_invoice_payment,
     cancel_quotation,
     cancel_sales_order,
     confirm_sales_order,
@@ -500,9 +501,68 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
         return Response(ser.data)
 
+    @action(detail=True, methods=["post"], url_path="collect")
+    @requires_perm("sales.payment.create")
+    def collect(self, request, pk=None):
+        """T2 — تحصيل الفاتورة من داخلها: نقد + شيكات + رصيد العميل، بعملية ذرّية.
+
+        Body:
+            {
+                "cash": "60.00",
+                "cash_account_id": 12,
+                "cheques": [
+                    {"cheque_number": "12345", "amount": "40",
+                     "due_date": "2026-09-01", "bank_name": "..."}
+                ],
+                "from_on_account": [{"payment_id": 7, "amount": "20"}],
+                "post_invoice": true,
+                "payment_date": "2026-07-01"
+            }
+
+        يُنتج **سند قبض واحداً مرحّلاً** بكل ما دُفع نقداً وشيكاتٍ، ويخصم ما
+        اختير من رصيد العميل ربطاً بلا قيد جديد. الفشل في أي خطوة يُرجع كل شيء.
+        """
+        invoice = self.get_object()
+        want_post = bool(request.data.get("post_invoice"))
+        if want_post:
+            require_perm(request, "sales.invoice.post")
+        try:
+            payment = collect_invoice_payment(
+                invoice,
+                cash=request.data.get("cash"),
+                cash_account_id=request.data.get("cash_account_id"),
+                cheques=request.data.get("cheques") or [],
+                from_on_account=request.data.get("from_on_account") or [],
+                post_invoice=want_post,
+                payment_date=request.data.get("payment_date") or None,
+                user=request.user,
+            )
+        except ValidationError as e:
+            # رسائل الحُرّاس عربية موجّهة للمستخدم — تُعاد جملةً لا ['...'].
+            return Response(
+                {"error": e.message if hasattr(e, "message") else "؛ ".join(e.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        invoice.refresh_from_db()
+        log_activity(
+            action="payment", entity_type="sales_invoice", entity_id=invoice.id,
+            entity_label=invoice.invoice_number,
+            description="تحصيل من داخل الفاتورة" + (" + ترحيل" if want_post else ""),
+            partner_ids=[invoice.customer_id],
+            request=request,
+        )
+        ser = SalesInvoiceSerializer(invoice, context={"request": request})
+        return Response({
+            **ser.data,
+            "payment_id": payment.pk if payment is not None else None,
+        })
+
     @action(detail=True, methods=["post"], url_path="payment-voucher")
+    @requires_perm("sales.payment.create")
     def payment_voucher(self, request, pk=None):
-        """M2-T3 — Attach the financial voucher (cash + cheques) to the invoice.
+        """M2-T3 — Attach the financial voucher (cheques) to the invoice.
 
         Body:
             {
@@ -519,9 +579,16 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
         P-H-5: pass `"post": true` in the body to atomically attach + post in
         a single `transaction.atomic()` so a post failure rolls the cheques
         back too. Default `post: false` preserves the prior two-step flow.
+
+        T2: شكل النقطة محفوظ لأي مستهلك خارجي، لكنها صارت غلافاً فوق منسّق
+        التحصيل — فالنقد يصير سند قبض حقيقياً بدل عمود لا يُرحَّل — واكتسبت فحص
+        الصلاحية الذي كانت وحدها بين أخواتها بلا فحص. المفضَّل للجديد:
+        `invoices/{id}/collect/`.
         """
         invoice = self.get_object()
         want_post = bool(request.data.get("post"))
+        if want_post:
+            require_perm(request, "sales.invoice.post")
         try:
             if want_post:
                 from sales.services import attach_voucher_and_post

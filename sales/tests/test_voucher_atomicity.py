@@ -7,7 +7,7 @@ from django.test import TestCase
 from accounting.models import Account, Cheque, FiscalPeriod, JournalHeader
 from inventory.models import Product
 from partners.models import Partner
-from sales.models import SalesInvoice, SalesInvoiceLine
+from sales.models import CustomerPayment, SalesInvoice, SalesInvoiceLine
 from sales.services import attach_voucher_and_post
 from tenants.models import Currency, Tenant
 
@@ -103,6 +103,14 @@ class VoucherAtomicityTest(TestCase):
         self.assertEqual(cheque_count, 0)
 
     def test_successful_attach_and_post(self):
+        """T2: النقدي المرفق صار سند قبض حقيقياً — لا رقماً في عمود لا يُرحَّل.
+
+        كان هذا الفحص `assertIn(status, ("posted", "draft"))` — شرطٌ لا يمكن أن
+        يسقط؛ ثم صار في T1 يُثبّت أن `attached_cash_amount` «يُسجَّل ولا
+        يُرحَّل». وذاك بالضبط العيب: مالٌ يدخل الصندوق ولا أثر له في الدفاتر.
+        العقد الآن: قيد الفاتورة يبقى نقيّاً، والنقد يُحصَّل بسند مرحّل واحد،
+        والعمود القديم يُصفَّر.
+        """
         attach_voucher_and_post(
             self.invoice,
             cash_amount=5000,
@@ -111,4 +119,66 @@ class VoucherAtomicityTest(TestCase):
             user=None,
         )
         self.invoice.refresh_from_db()
-        self.assertIn(self.invoice.status, ("posted", "draft"))
+        self.assertEqual(self.invoice.status, SalesInvoice.STATUS_POSTED)
+        self.assertEqual(self.invoice.attached_cash_amount, Decimal("0.00"))
+
+        lines = list(self.invoice.journal.lines.all())
+        self.assertEqual(sum(l.debit for l in lines), sum(l.credit for l in lines))
+        # لا سطر صندوق داخل قيد الفاتورة — التحصيل مستند مستقل
+        self.assertEqual(
+            sum(l.debit for l in lines if l.account_id == self.cash_account.id),
+            Decimal("0"),
+        )
+        # الذمم تُدين بكامل الإجمالي ولا تُسوَّى داخل القيد نفسه
+        self.assertEqual(
+            sum(l.debit for l in lines if l.account_id == self.ar_account.id),
+            self.invoice.grand_total,
+        )
+        self.assertEqual(
+            sum(l.credit for l in lines if l.account_id == self.ar_account.id),
+            Decimal("0"),
+        )
+        # النقد المرفق: سند قبض واحد مرحّل بتوزيع كامل يُسدّد الفاتورة
+        payment = CustomerPayment.objects.get(auto_settled_invoice=self.invoice)
+        self.assertTrue(payment.is_posted)
+        self.assertEqual(payment.amount, Decimal("5000.00"))
+        self.assertEqual(self.invoice.amount_paid, Decimal("5000.00"))
+        pay_lines = [
+            l for jh in JournalHeader.objects.filter(
+                tenant=self.tenant, reference_type="CUSTOMER_PAYMENT",
+                reference_id=payment.pk)
+            for l in jh.lines.all()
+        ]
+        self.assertEqual(
+            sum(l.debit for l in pay_lines if l.account_id == self.cash_account.id),
+            Decimal("5000.00"),
+        )
+        self.assertEqual(
+            sum(l.credit for l in pay_lines if l.account_id == self.ar_account.id),
+            Decimal("5000.00"),
+        )
+
+    def test_attached_cheques_are_swept_into_a_posted_voucher(self):
+        """T1: الشيك المرفق لا يُسوَّى داخل قيد الفاتورة بل بسند قبض مرحَّل."""
+        attach_voucher_and_post(
+            self.invoice,
+            cash_amount=0,
+            cash_account_id=None,
+            cheques=[{"cheque_number": "CHQ-ATOM-2", "amount": "3000",
+                      "due_date": "2026-09-01"}],
+            user=None,
+        )
+        self.invoice.refresh_from_db()
+
+        uc = Account.objects.get(tenant=self.tenant, code="1106")
+        lines = list(self.invoice.journal.lines.all())
+        self.assertEqual(
+            sum(l.debit for l in lines if l.account_id == uc.id), Decimal("0"),
+        )
+        payment = CustomerPayment.objects.get(auto_settled_invoice=self.invoice)
+        self.assertTrue(payment.is_posted)
+        self.assertEqual(payment.amount, Decimal("3000.00"))
+        self.assertEqual(self.invoice.amount_paid, Decimal("3000.00"))
+        cheque = Cheque.objects.get(sales_invoice=self.invoice)
+        self.assertEqual(cheque.customer_payment_id, payment.pk)
+        self.assertEqual(cheque.status, "Under_Collection")

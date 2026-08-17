@@ -98,6 +98,32 @@ async function installMocks(page: Page) {
       await route.fulfill({ contentType: "application/json", body: "{}" });
       return;
     }
+    // T4: تحصيل الفاتورة من لوحتها — الردّ هو الفاتورة بعد التحصيل + رقم السند.
+    if (url.pathname.endsWith("/sales/invoices/145/collect/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: 145,
+          invoice_number: "SI-6-145",
+          invoice_date: "2026-07-22",
+          customer: 8,
+          invoice_type: "credit",
+          status: "posted",
+          currency: 1,
+          exchange_rate: "1",
+          grand_total: "1000.00",
+          amount_paid: "700.00",
+          remaining_balance: "300.00",
+          payment_status: "partially_paid",
+          payment_status_display: "مدفوعة جزئياً",
+          journal: 41,
+          lines: [],
+          payment_details: [],
+          payment_id: 93,
+        }),
+      });
+      return;
+    }
     if (url.pathname.endsWith("/sales/payments/")) {
       if (route.request().method() === "POST") {
         await route.fulfill({
@@ -395,60 +421,29 @@ test("invoice and deal documents show posted pending remaining balances and paym
   await expect(receiptPage).toHaveURL(/\/sales\/customer-payments\?payment_id=77$/);
   await receiptPage.close();
 
+  /* T4: التحصيل صار داخل الشاشة لا في نافذة — الزر يُنزل إلى اللوحة، والنقد
+     والرصيد على الحساب يخرجان في نداء `collect/` واحد بدل نداءين. */
   await page.getByRole("button", { name: "سند قبض", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: /تسديد فاتورة/ })).toBeVisible();
-  await expect(page.getByLabel("مبلغ الدفعة الآن")).toHaveValue("600.00");
-  await expect(page.getByLabel("الصندوق أو البنك")).toHaveValue("10");
-  await expect(page.getByLabel("المبلغ من الرصيد")).toHaveValue("300.00");
-  await expect(page.getByRole("heading", { name: "سند قبض جديد", exact: true })).toHaveCount(0);
+  const collectPanel = page.getByTestId("invoice-collect-panel");
+  await expect(collectPanel).toBeVisible();
+  await expect(page.getByTestId("collect-remaining")).toHaveText("600");
 
-  const receiptAmountBox = await page.getByLabel("مبلغ الدفعة الآن").boundingBox();
-  const receiptAccountBox = await page.getByLabel("الصندوق أو البنك").boundingBox();
-  const receiveButtonBox = await page.getByRole("button", { name: "استلم دفعة الآن", exact: true }).boundingBox();
-  const receiptSectionBox = await page
-    .getByRole("heading", { name: "استلم دفعة الآن", exact: true })
-    .locator("xpath=ancestor::section")
-    .boundingBox();
-  const balanceSectionBox = await page
-    .getByRole("heading", { name: "سدّد من رصيد العميل", exact: true })
-    .locator("xpath=ancestor::section")
-    .boundingBox();
-  if (!receiptAmountBox || !receiptAccountBox || !receiveButtonBox || !receiptSectionBox || !balanceSectionBox) {
-    throw new Error("تعذّر قياس عناصر نافذة التسديد");
-  }
-  expect(receiptAmountBox.width).toBeGreaterThanOrEqual(150);
-  expect(receiptAccountBox.width).toBeGreaterThanOrEqual(200);
-  expect(receiptAmountBox.height).toBeGreaterThanOrEqual(40);
-  expect(receiveButtonBox.height).toBeGreaterThanOrEqual(40);
-  expect(balanceSectionBox.y).toBeGreaterThanOrEqual(receiptSectionBox.y + receiptSectionBox.height);
+  await collectPanel.getByLabel("المدفوع نقداً").fill("175");
+  await expect(page.getByTestId("collect-remaining")).toHaveText("425");
+  await collectPanel.getByLabel("من رصيد العميل").fill("125");
+  await expect(page.getByTestId("collect-remaining")).toHaveText("300");
 
-  await page.getByLabel("مبلغ الدفعة الآن").fill("700");
-  await expect(page.getByRole("button", { name: "استلم دفعة الآن", exact: true })).toBeDisabled();
-  await page.getByLabel("مبلغ الدفعة الآن").fill("175");
-  const receiptRequest = page.waitForRequest((request) =>
-    request.method() === "POST" && new URL(request.url()).pathname.endsWith("/sales/payments/"),
+  const collectRequest = page.waitForRequest((request) =>
+    request.method() === "POST"
+    && new URL(request.url()).pathname.endsWith("/sales/invoices/145/collect/"),
   );
-  await page.getByRole("button", { name: "استلم دفعة الآن", exact: true }).click();
-  const receiptPayload = (await receiptRequest).postDataJSON();
-  expect(receiptPayload).toMatchObject({
-    partner: 8,
-    amount: "175.00",
-    currency: 1,
-    cash_or_bank_account: 10,
-    auto_post: true,
-    allocations: [{ invoice: 145, amount: "175.00" }],
-  });
-
-  await page.getByRole("button", { name: "سند قبض", exact: true }).first().click();
-  await page.getByLabel("المبلغ من الرصيد").fill("301");
-  await expect(page.getByRole("button", { name: "سدّد من الرصيد", exact: true })).toBeDisabled();
-  await page.getByLabel("المبلغ من الرصيد").fill("125");
-  const allocationRequest = page.waitForRequest((request) =>
-    request.method() === "POST" && new URL(request.url()).pathname.endsWith("/sales/payments/91/allocate/"),
-  );
-  await page.getByRole("button", { name: "سدّد من الرصيد", exact: true }).click();
-  expect((await allocationRequest).postDataJSON()).toEqual({
-    allocations: [{ invoice: 145, amount: "125.00" }],
+  await page.getByTestId("collect-submit").click();
+  expect((await collectRequest).postDataJSON()).toEqual({
+    cash: "175.00",
+    cash_account_id: 10,
+    cheques: [],
+    from_on_account: [{ payment_id: 91, amount: "125.00" }],
+    post_invoice: false,
   });
 
   await page.goto("/purchase-invoices/15");

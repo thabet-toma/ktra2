@@ -116,8 +116,13 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
   discount_percent?: string;
   // M2-T3: Financial instrument + attached voucher
   financial_document_no?: string;
-  attached_cash_amount?: string;
-  attached_cash_account?: number | null;
+  /**
+   * T2: عمودان قديمان صارا **للقراءة فقط** في الخادم — النقد لم يعد يُكتب على
+   * الفاتورة (كان يُحفظ ولا يُرحَّل)، وإنما يمرّ من `collectSalesInvoice`. يبقى
+   * النوع لأن القراءات ما زالت تُعيدهما على الفواتير القديمة.
+   */
+  readonly attached_cash_amount?: string;
+  readonly attached_cash_account?: number | null;
   cheques?: AttachedCheque[];
   customer_balance_before_invoice?: string;
   customer_balance_after_invoice?: string;
@@ -180,6 +185,43 @@ export async function patchSalesInvoice(
 
 export async function postSalesInvoice(id: number): Promise<SalesInvoiceDetail> {
   return apiPostObject(`${BASE}/invoices/${id}/post/`, {}, { tenantId: tid() });
+}
+
+/** T4: شيك داخل تحصيل الفاتورة — تاريخ الاستحقاق إلزامي (يفرضه الخادم أيضاً). */
+export type InvoiceCollectCheque = {
+  cheque_number: string;
+  amount: string;
+  due_date: string;
+  bank_name?: string;
+};
+
+export type InvoiceCollectPayload = {
+  /**
+   * «غير مذكور» ≠ «صفر»: يُحذف المفتاح حين لا نقد أصلاً — فالفاتورة النقدية
+   * يُكمّل الخادم نقدها، أمّا `"0"` فإعلانُ نيّةٍ بعدم دفع نقد يُحاسَب عليه.
+   */
+  cash?: string;
+  cash_account_id?: number;
+  cheques?: InvoiceCollectCheque[];
+  /** خصمٌ من رصيد العميل «على الحساب» — ربطُ سندٍ مرحّل، بلا قيد جديد. */
+  from_on_account?: Array<{ payment_id: number; amount: string }>;
+  post_invoice?: boolean;
+  payment_date?: string;
+};
+
+/**
+ * T4: تحصيل الفاتورة من داخلها — نقد و/أو شيكات و/أو رصيد العميل في نداءٍ
+ * **واحد ذرّي** يُنتج سند قبض واحداً مرحّلاً (`invoices/{id}/collect/`). على
+ * المسودة يُمرَّر `post_invoice: true` فتُرحَّل وتُحصَّل معاً.
+ *
+ * الردّ = الفاتورة كاملةً بعد التحصيل + `payment_id`، فتُحدَّث الشاشة منه بلا
+ * جلبٍ ثانٍ. الفشل يُعيد 400 برسالة عربية جاهزة تُعرض كما هي.
+ */
+export async function collectSalesInvoice(
+  id: number,
+  body: InvoiceCollectPayload,
+): Promise<SalesInvoiceDetail & { payment_id: number | null }> {
+  return apiPostObject(`${BASE}/invoices/${id}/collect/`, body, { tenantId: tid() });
 }
 
 /** التراجع عن ترحيل الفاتورة: حذف قيودها وحركات مخزونها وإرجاعها مسودة (Feature 1). */

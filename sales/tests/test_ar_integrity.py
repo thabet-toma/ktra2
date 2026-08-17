@@ -381,6 +381,81 @@ def test_audit_command_detects_over_allocation_and_credit_customers(env, capsys)
     assert _net_balance(tenant, customer) == Decimal("0.00")
 
 
+# ── المطلب 6: «المدفوع» مسنودٌ بتوزيع — والقديم يُصنَّف ولا يُلمس ─────────────
+def _legacy_in_journal_settled_invoice(
+    tenant, cur, customer, ar, rev, product, *, total="400.00", number="SI-LEGACY"
+):
+    """الشكل السابق لـT1: قيد الفاتورة نفسه يحمل التسوية — مدين «شيكات برسم
+    التحصيل» ÷ دائن ذمم — و`amount_paid` زاد بلا صفّ توزيع. القيد متوازن وصحيح."""
+    grand = Decimal(total)
+    under_collection = Account.objects.create(
+        tenant=tenant, code="1120-AR", name="شيكات برسم التحصيل",
+        account_type="Asset", is_active=True)
+    inv = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number=number, customer=customer, currency=cur,
+        invoice_date="2026-06-14", invoice_type=SalesInvoice.INVOICE_CREDIT,
+        stock_on_post=False, status=SalesInvoice.STATUS_POSTED,
+        grand_total=grand, amount_paid=grand)
+    SalesInvoiceLine.objects.create(
+        tenant=tenant, invoice=inv, product=product,
+        quantity=Decimal("1"), unit_price=grand)
+    jh = JournalHeader.objects.create(
+        tenant=tenant, transaction_date="2026-06-14", is_posted=True,
+        exchange_rate=Decimal("1"), reference_type="SALES_INVOICE", reference_id=inv.id)
+    JournalLine.objects.create(
+        tenant=tenant, journal=jh, account=ar, partner=customer,
+        debit=grand, credit=Decimal("0"), description=f"ذمم — {number}")
+    JournalLine.objects.create(
+        tenant=tenant, journal=jh, account=rev, partner=None,
+        debit=Decimal("0"), credit=grand, description=f"مبيعات — {number}")
+    JournalLine.objects.create(
+        tenant=tenant, journal=jh, account=under_collection, partner=None,
+        debit=grand, credit=Decimal("0"), description=f"شيكات — {number}")
+    JournalLine.objects.create(
+        tenant=tenant, journal=jh, account=ar, partner=customer,
+        debit=Decimal("0"), credit=grand, description=f"تسوية داخل القيد — {number}")
+    inv.journal = jh
+    inv.save(update_fields=["journal"])
+    return inv
+
+
+def test_audit_repairs_amount_paid_that_no_allocation_backs(env, capsys):
+    """«مدفوع» بلا سند ولا تسوية داخل القيد ⇒ يتيم حقيقي: يُبلَّغ ثم يُصلَح."""
+    tenant, owner, cur, ar, cash, rev, customer, product = env
+    inv = _invoice(tenant, cur, customer, product, total="600", number="SI-DRIFT")
+    post_sales_invoice(inv)
+    SalesInvoice.objects.filter(pk=inv.pk).update(amount_paid=Decimal("600"))
+
+    call_command("audit_ar_integrity")
+    out = capsys.readouterr().out
+    assert "SI-DRIFT" in out
+    inv.refresh_from_db()
+    assert inv.amount_paid == Decimal("600.00")  # العرض وحده لا يكتب
+
+    call_command("audit_ar_integrity", "--apply")
+    inv.refresh_from_db()
+    assert inv.amount_paid == Decimal("0.00")
+    assert inv.amount_paid == _posted_allocations_total(inv)
+
+
+def test_audit_reports_legacy_in_journal_settlement_without_repairing_it(env, capsys):
+    """قيدٌ يحمل تسويته متوازنٌ وصحيح — يُصنَّف «قديم» ولا يُمسّ `amount_paid`."""
+    tenant, owner, cur, ar, cash, rev, customer, product = env
+    legacy = _legacy_in_journal_settled_invoice(tenant, cur, customer, ar, rev, product)
+    # والشكل الثاني: نقدية ما قبل الميزة 2 — قيدها بلا مدين ذمم إطلاقاً
+    direct_cash = _legacy_cash_invoice(tenant, cur, customer, cash, rev, product)
+    SalesInvoice.objects.filter(pk=direct_cash.pk).update(amount_paid=Decimal("250"))
+
+    call_command("audit_ar_integrity", "--apply")
+    out = capsys.readouterr().out
+
+    assert "SI-LEGACY" in out and "قديم" in out
+    legacy.refresh_from_db()
+    direct_cash.refresh_from_db()
+    assert legacy.amount_paid == Decimal("400.00")
+    assert direct_cash.amount_paid == Decimal("250.00")
+
+
 def test_audit_command_ignores_supplier_credit_balances(env, capsys):
     """أرصدة الموردين الدائنة طبيعية — يجب ألا تُبلَّغ كخطأ."""
     tenant, owner, cur, ar, cash, rev, customer, product = env

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **447**
+عدد النقاط: **448**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -401,6 +401,7 @@
 | `/api/sales/invoices/profits/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/resolve-price/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/` | `SalesInvoiceViewSet` | `sales/views.py` |
+| `/api/sales/invoices/{pk}/collect/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/deliver/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/delivery-lines/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/delivery-order/` | `SalesInvoiceViewSet` | `sales/views.py` |

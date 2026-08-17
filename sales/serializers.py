@@ -390,6 +390,11 @@ class SalesInvoiceSerializer(
             "delivery_status",  # مشتقّ من الكميات المسلَّمة — لا يُحرَّر يدوياً
             "delivery_status_display",
             "cheques",  # mutated only via /payment-voucher endpoint
+            # T2: كانا يُقبلان كتابةً من الـAPI ولا يُرحَّلان شيئاً — مالٌ يدخل
+            # الصندوق بلا أثر في الدفاتر. التحصيل صار من `/collect/` بسند قبض
+            # حقيقي، والعمودان للقراءة القديمة فقط.
+            "attached_cash_amount",
+            "attached_cash_account",
         ]
 
     def validate(self, attrs):
