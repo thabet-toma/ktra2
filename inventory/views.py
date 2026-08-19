@@ -28,6 +28,7 @@ from core.access import requires_perm
 from core.pagination import EnforcedPageNumberPagination
 from core.activity import build_activity_changes, log_activity, log_view
 from core.tenant_utils import get_tenant
+from store.cache import InvalidatesStoreCacheMixin
 # صيانة الأداء 2026-07: الكلاس انتقل إلى core/pagination.py ليصبح الافتراضي
 # العام في REST_FRAMEWORK — يبقى الاستيراد هنا لأي مرجع قائم.
 from core.pagination import OptionalPageNumberPagination
@@ -80,7 +81,7 @@ class UnitOfMeasureViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = UnitOfMeasure.objects.filter(is_active=True)
     serializer_class = UnitOfMeasureSerializer
 
-class ProductViewSet(viewsets.ModelViewSet):
+class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     # task14 M2 (DEF-A5): ترتيب افتراضي حتمي «الأحدث أولاً» + بحث/فرز/ترقيم خادمي
     queryset = Product.objects.all().select_related('category')
     serializer_class = ProductSerializer
@@ -137,6 +138,14 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Product.objects.none()
         qs = super().get_queryset().filter(tenant=tenant)
         params = self.request.query_params
+
+        # استبعاد الأصناف الخاصة بالمتجر فقط من الكتالوج المخزني ومحددات الفواتير
+        store_only_param = params.get('is_store_only')
+        if store_only_param == 'true':
+            qs = qs.filter(is_store_only=True)
+        elif store_only_param != 'all':
+            qs = qs.filter(is_store_only=False)
+
         category_id = params.get('category')
         if category_id:
             qs = qs.filter(category_id=category_id)

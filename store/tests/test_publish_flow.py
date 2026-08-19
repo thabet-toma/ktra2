@@ -8,8 +8,9 @@
    أن `is_for_sale_online` علمٌ قديم سابق للمتجر (ورفيقه `online_price` تقرؤه
    الفوترة)، فقد يكون معلَّماً على أصناف بلا نيّة نشر، وتصير علنيةً لحظةَ
    اختيار المعرّف.
-2. **تأخّر الظهور** — قائمة المتجر تُكاش ٦٠ ثانية، فالنشر لا يظهر فوراً. هذا
-   ما وعدت به التذكرة («خلال دقيقة») ويجب أن يُثبَت لا أن يُكتشَف شكوى.
+2. **فورية الظهور** — قائمة المتجر تُكاش ٦٠ ثانية، لكن كتابات النشر تُبطل
+   الكاش (THA-423، `store/cache.py`)، فالنشر يظهر فوراً. كان يتأخّر دقيقةً
+   قبل الإبطال، وهو ما كان يجعل الناشر يظنّ الحفظ فشل فيعيد الكرّة.
 3. **الاتجاه العكسي** — إلغاء النشر يُخفي الصنف فعلاً؛ لا قيمة لمفتاحٍ يفتح
    ولا يُغلق.
 """
@@ -91,20 +92,17 @@ class StorePublishFlowTest(APITestCase):
         self.assertEqual(self._public_names(), {"صنف مُسعَّر قديماً"})
 
     # ── ٢) تأخّر الظهور بمقدار عمر الكاش ─────────────────────────────────
-    def test_a_freshly_published_item_appears_only_after_the_list_cache_expires(self):
-        """«خلال دقيقة» في التذكرة ليست تقريباً — هذا مصدرها.
+    def test_a_freshly_published_item_appears_immediately(self):
+        """النشر يظهر فوراً — الكاش لا يحجبه دقيقةً بعد الحفظ.
 
-        الصنف يُنشر فوراً في القاعدة، لكن قائمة المتجر مكاشة ٦٠ ثانية بمفتاح
-        يحمل الـslug. فمن ينشر ثم يفتح الرابط في نفس اللحظة لا يراه — وهو
-        سلوكٌ مقبول ما دام معروفاً، ومربكٌ لو اكتُشِف من شكوى.
+        كان يتأخّر إلى انتهاء الـTTL: مفاتيح القائمة بصمةُ معاملات لا تُمسح
+        بنمط، فلم يكن للنشر ما يُبطلها. صار المفتاح يحمل رقم نسخةٍ لكل شركة
+        (`store/cache.py`) وكلُّ كتابة نشرٍ ترفعه، فتُهجَر الحمولة القديمة.
         """
         self._open_store()
         self.assertEqual(self._public_names(), {"صنف مُسعَّر قديماً"})  # يملأ الكاش
 
         self._publish(self.fresh, True, online_price="33.00")
-        self.assertEqual(self._public_names(), {"صنف مُسعَّر قديماً"})
-
-        cache.clear()  # يقوم مقام مرور الـTTL
         self.assertEqual(
             self._public_names(), {"صنف مُسعَّر قديماً", "صنف لم يُنشر بعد"})
 
@@ -114,8 +112,7 @@ class StorePublishFlowTest(APITestCase):
         self.assertEqual(self._public_names(), {"صنف مُسعَّر قديماً"})
 
         self._publish(self.legacy, False)
-        cache.clear()
-        self.assertEqual(self._public_names(), set())
+        self.assertEqual(self._public_names(), set())  # بلا انتظار TTL
 
         # والصفحة المباشرة للصنف تصير 404 — لا صفحةٌ يتيمة يبقى رابطها حيّاً.
         self.assertEqual(

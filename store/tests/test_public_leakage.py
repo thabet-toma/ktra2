@@ -30,11 +30,21 @@ from tenants.models import Tenant, TenantSettings
 #: العقد العام للمنتج — كل مفتاح هنا قرارٌ واعٍ بنشره للعالم.
 PUBLIC_WHITELIST = {
     "id", "name_ar", "name_en", "brand", "category_name", "uom_name",
-    "price", "availability", "description", "images",
+    "price", "availability", "description", "images", "cover_overlay",
 }
 
-#: الحالات النصية الثلاث — التوفّر حالة لا رقم.
-AVAILABILITY_STATES = {"available", "limited", "out"}
+#: الحالات النصية للتوفّر — حالة لا رقم.
+AVAILABILITY_STATES = {"available", "limited", "out", "preorder"}
+
+#: العقد العام لبطاقة الشركة وإعدادات المظهر والهوية العامة.
+PROFILE_WHITELIST = {
+    "slug", "name", "logo_url", "phone", "address", "currency",
+    "hero_title", "hero_subtitle", "announcement_bar", "show_announcement",
+    "theme_preset", "primary_color", "accent_color", "background_color",
+    "background_image_url", "background_style", "banner_image_url",
+    "instagram_url", "tiktok_url", "facebook_url", "snapchat_url",
+    "whatsapp_number", "catalog_mode_default", "allow_cart",
+}
 
 #: تمثيلات الرصيد (7) والتكلفة (5) التي قد تخرج بها من ORM/DRF.
 FORBIDDEN_VALUES = {
@@ -210,10 +220,7 @@ class StorePublicLeakageTest(TestCase):
     def test_store_profile_carries_the_contact_card_only(self):
         res = self.client.get("/api/store/alpha/")
         self.assertEqual(res.status_code, 200, res.content[:400])
-        self.assertEqual(
-            set(res.json().keys()),
-            {"slug", "name", "logo_url", "phone", "address", "currency"},
-        )
+        self.assertEqual(set(res.json().keys()), PROFILE_WHITELIST)
         self.assertEqual(res.json()["name"], "شركة ألفا للتجارة")
 
     def test_store_profile_of_a_closed_store_is_404(self):

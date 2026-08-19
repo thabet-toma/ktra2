@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **453**
+عدد النقاط: **464**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -436,8 +436,19 @@
 | `/api/sales/settings/current/` | `SalesSettingsViewSet` | `sales/views.py` |
 | `/api/sales/settings/restore-defaults/` | `SalesSettingsViewSet` | `sales/views.py` |
 | `/api/store/<slug:slug>/` | `StoreProfileView` | `store/views.py` |
+| `/api/store/<slug:slug>/collections/` | `StoreCollectionListView` | `store/views.py` |
+| `/api/store/<slug:slug>/collections/<slug:collection_slug>/` | `StoreCollectionDetailView` | `store/views.py` |
 | `/api/store/<slug:slug>/products/` | `StoreProductListView` | `store/views.py` |
 | `/api/store/<slug:slug>/products/<int:pk>/` | `StoreProductDetailView` | `store/views.py` |
+| `/api/store/admin/collection-items/` | `StoreCollectionItemAdminViewSet` | `store/views.py` |
+| `/api/store/admin/collection-items/{pk}/` | `StoreCollectionItemAdminViewSet` | `store/views.py` |
+| `/api/store/admin/collections/` | `StoreCollectionAdminViewSet` | `store/views.py` |
+| `/api/store/admin/collections/{pk}/` | `StoreCollectionAdminViewSet` | `store/views.py` |
+| `/api/store/admin/product-images/` | `StoreProductImageAdminViewSet` | `store/views.py` |
+| `/api/store/admin/product-images/{pk}/` | `StoreProductImageAdminViewSet` | `store/views.py` |
+| `/api/store/admin/products/` | `StoreProductAdminViewSet` | `store/views.py` |
+| `/api/store/admin/products/{pk}/` | `StoreProductAdminViewSet` | `store/views.py` |
+| `/api/store/admin/settings/` | `StoreSettingsAdminView` | `store/views.py` |
 | `/api/tenants/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/tenants/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/tenants/books/` | `TenantBookViewSet` | `tenants/views.py` |

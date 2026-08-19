@@ -220,9 +220,13 @@ class StoreBrowseTest(TestCase):
 
         view = StoreProductListView()
         empty = QueryDict("")
-        alpha, beta = view._cache_key("alpha", empty), view._cache_key("beta", empty)
+        alpha = view._cache_key(self.tenant, "alpha", empty)
+        beta = view._cache_key(self.tenant, "beta", empty)
         self.assertTrue(alpha.startswith("store:alpha:"))
         self.assertNotEqual(alpha, beta)
+        # والمفتاح يحمل رقم نسخةٍ أيضاً (THA-423): رفعُه يُهجر الحمولة القديمة
+        # عند النشر بدل انتظار الـTTL.
+        self.assertIn(":products:v", alpha)
 
     # ── بطاقة الشركة ─────────────────────────────────────────────────────
     def test_a_store_without_a_settings_row_still_has_a_name(self):

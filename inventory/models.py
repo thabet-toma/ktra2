@@ -98,6 +98,16 @@ class Product(models.Model):
         help_text='إذا مفعّل: يُعامل الصنف كخدمة — لا يُخصم من المخزون ويُرحّل لحساب مبيعات الخدمات',
     )
     is_for_sale_online = models.BooleanField(default=False, db_column='IsForSaleOnline')
+    is_store_only = models.BooleanField(
+        default=False,
+        db_column='IsStoreOnly',
+        help_text='صنف خاص بالمتجر الإلكتروني فقط — لا يظهر في شاشة الأصناف المخزنية أو محددات فواتير البيع',
+    )
+    allow_preorder = models.BooleanField(
+        default=False,
+        db_column='AllowPreorder',
+        help_text='إتاحة بيع الصنف كطلب مسبق / عند الطلب حتى لو كان الرصيد صفراً',
+    )
     online_price = models.DecimalField(max_digits=18, decimal_places=2, blank=True, null=True, db_column='OnlinePrice')
     online_description = models.TextField(blank=True, null=True, db_column='OnlineDescription')
 

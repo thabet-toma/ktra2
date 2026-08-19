@@ -1,19 +1,12 @@
 /**
- * عميل المتجر العام — النقاط الوحيدة التي يُطلَبها زائرٌ بلا جلسة.
+ * عميل المتجر العام — النقاط الوحيدة التي يُطلبها زائرٌ بلا جلسة.
  *
  * الخادم `store/views.py`: بلا مصادقة إطلاقاً (`authentication_classes = []`)،
- * والشركة تأتي من الـslug في المسار لا من ترويسة، وكل «غير موجود» **404** — لا
- * فرق بين متجر مقفل وslug مجهول وصنف غير منشور، وهذا مقصود فلا يُستدل على وجود
- * شركة بتخمين المعرّفات. لذلك `isStoreNotFound` هي كل ما تحتاجه الشاشات.
- *
- * الترقيم **إلزامي** على القائمة (`EnforcedPageNumberPagination`) خلافاً
- * لافتراضي المشروع الاختياري: نقطة مجهولة بلا ترقيم تبثّ الكتالوج كاملاً بكل
- * طلب. فالرد دائماً `{count, next, previous, results}` ولا وجود لشاشة بلا زر
- * «عرض المزيد».
+ * والشركة تأتي من الـslug في المسار لا من ترويسة، وكل «غير موجود» **404**.
  */
 import { apiGetObject, apiGetPagedList, type PagedList } from "./restApi";
 
-/** بطاقة الشركة كما يراها زائر — مَن هي وكيف يتواصل معها، لا أكثر. */
+/** بطاقة الشركة وإعدادات المظهر والهوية كما يراها زائر. */
 export interface StoreProfile {
   slug: string;
   name: string;
@@ -22,10 +15,35 @@ export interface StoreProfile {
   address: string | null;
   /** رمز العملة التي تُقرأ بها كل أسعار هذا المتجر — `null` إن لم تُضبَط. */
   currency: string | null;
+  // إعدادات المظهر والهوية
+  hero_title?: string | null;
+  hero_subtitle?: string | null;
+  announcement_bar?: string | null;
+  show_announcement?: boolean;
+  theme_preset?: string;
+  primary_color?: string;
+  accent_color?: string;
+  background_color?: string;
+  background_image_url?: string | null;
+  background_style?: "cover" | "repeat_pattern" | "soft_blur" | string;
+  banner_image_url?: string | null;
+  instagram_url?: string | null;
+  tiktok_url?: string | null;
+  facebook_url?: string | null;
+  snapchat_url?: string | null;
+  whatsapp_number?: string | null;
+  catalog_mode_default?: "grid" | "slideshow" | "compact" | string;
+  allow_cart?: boolean;
 }
 
-/** حالة التوفّر نصّية دائماً — الرقم الخام لا يغادر الخادم بنيوياً. */
-export type StoreAvailability = "available" | "limited" | "out";
+/** حالة التوفّر نصّية دائماً: متوفر، كمية محدودة، غير متوفر، أو طلب مسبق. */
+export type StoreAvailability = "available" | "limited" | "out" | "preorder";
+
+export interface StoreImageOverlayData {
+  text: string;
+  style?: "diagonal_ribbon" | "bottom_banner" | "pill_badge" | "glass_tag" | string;
+  color?: "red_fire" | "gold_luxury" | "emerald_fresh" | "blue_pro" | "neon_purple" | "dark_glass" | string;
+}
 
 /** الحمولة العامة كاملةً — عشرة حقول، وما ليس هنا لا يُرسله الخادم. */
 export interface StoreProduct {
@@ -39,6 +57,7 @@ export interface StoreProduct {
   availability: StoreAvailability;
   description: string | null;
   images: string[];
+  cover_overlay?: StoreImageOverlayData | null;
 }
 
 export type StoreSort = "" | "price_asc" | "price_desc";
@@ -49,6 +68,34 @@ export interface StoreProductQuery {
   category?: string;
   sort?: StoreSort;
   page?: number;
+}
+
+/** المجموعة والحملة الإعلانية كما تظهر في القائمة العامة. */
+export interface StoreCollection {
+  id: number;
+  title: string;
+  slug: string;
+  description: string | null;
+  banner_image_url: string | null;
+  badge_text: string | null;
+  featured_product_id: number | null;
+  items_count: number;
+}
+
+/** تفاصيل الحملة الإعلانية / صفحة الهبوط. */
+export interface StoreCollectionDetail {
+  id: number;
+  title: string;
+  slug: string;
+  description: string | null;
+  banner_image_url: string | null;
+  badge_text: string | null;
+  featured_product: StoreProduct | null;
+}
+
+export interface StoreCampaignResponse {
+  collection: StoreCollectionDetail;
+  products: PagedList<StoreProduct>;
 }
 
 /** حجم الصفحة: يملأ شبكة أربعة أعمدة ست مرات، وتحته سقف الخادم (200). */
@@ -64,6 +111,7 @@ export const AVAILABILITY_LABEL: Record<StoreAvailability, string> = {
   available: "متوفر",
   limited: "كمية محدودة",
   out: "غير متوفر حالياً",
+  preorder: "طلب مسبق / عند الطلب",
 };
 
 /** اسم الصنف المعروض: العربي أولاً — الواجهة والزبون عربيان. */
@@ -85,8 +133,6 @@ export function getStoreProducts(
     query: {
       page: query.page ?? 1,
       page_size: STORE_PAGE_SIZE,
-      // القيم الفارغة تُحذف في `restApi` فقط إن كانت `undefined` — لا `""`،
-      // وإلا صار مفتاح كاش الخادم مختلفاً لكل بحثٍ أُفرِغ ثم أُعيد.
       q: query.q?.trim() || undefined,
       brand: query.brand?.trim() || undefined,
       category: query.category?.trim() || undefined,
@@ -102,7 +148,42 @@ export function getStoreProduct(slug: string, productId: string | number): Promi
   );
 }
 
+/** عدد الحملات المجلوبة في نداءٍ واحد — الترويسة تعرض شريطاً لا كتالوجاً. */
+export const STORE_COLLECTIONS_PAGE_SIZE = 50;
+
+/** المجموعات والحملات الإعلانية الترويجية للمتجر — مُرقَّمة كقائمة المنتجات. */
+export function getStoreCollections(
+  slug: string,
+  page = 1,
+): Promise<PagedList<StoreCollection>> {
+  return apiGetPagedList<StoreCollection>(`${base(slug)}collections/`, {
+    query: { page, page_size: STORE_COLLECTIONS_PAGE_SIZE },
+  });
+}
+
+/** صفحة الهبوط لحملة إعلانية / مجموعة. */
+export function getStoreCollectionDetail(
+  slug: string,
+  collectionSlug: string,
+  query: StoreProductQuery = {},
+): Promise<StoreCampaignResponse> {
+  return apiGetObject<StoreCampaignResponse>(
+    `${base(slug)}collections/${encodeURIComponent(collectionSlug)}/`,
+    {
+      query: {
+        page: query.page ?? 1,
+        page_size: STORE_PAGE_SIZE,
+        q: query.q?.trim() || undefined,
+        brand: query.brand?.trim() || undefined,
+        category: query.category?.trim() || undefined,
+        sort: query.sort || undefined,
+      },
+    },
+  );
+}
+
 /** 404 = لا متجر بهذا الاسم، أو صنف غير منشور — حالة عرضٍ لا خطأ يُشتكى منه. */
 export function isStoreNotFound(error: unknown): boolean {
   return (error as { status?: number } | null)?.status === 404;
 }
+

@@ -1,36 +1,49 @@
 /**
- * واجهة متجر شركة واحدة — `/store/<slug>` لزائر بلا جلسة.
+ * واجهة متجر شركة واحدة — `/store/<slug>`
  *
- * ثلاث حالات نهائية لا حالتان: متجرٌ فيه أصناف، ومتجرٌ لا أصناف منشورة فيه،
- * و**متجرٌ غير موجود** (404: slug مجهول أو متجر مقفل أو شركة أخرى). الثالثة
- * ليست شاشة فارغة: الرابط يصل الزائرَ عبر واتساب، فصفحةٌ بيضاء تجعله يظنّ
- * الشبكة عطلت بينما الرابط نفسه خطأ.
- *
- * قوائم البراند والتصنيف تُبنى ممّا وصل من نتائج (اتحاد لا يتقلّص): الخادم
- * لا يقدّم نقطة facets، والقائمة المشتقّة من الصفحة الحالية وحدها كانت
- * ستُفرِغ نفسها بمجرّد أن يختار الزائر تصفية.
+ * مظهر مخصص، شريط إعلانات، مجموعات وحملات، وضع الشرائح / الكتالوج، وسلة مشتريات تفاعلية.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Copy, MessageCircle, MapPin, Search, Store as StoreIcon, X } from "lucide-react";
+import {
+  Copy,
+  Flame,
+  Grid,
+  Layers,
+  MapPin,
+  Megaphone,
+  MessageCircle,
+  Search,
+  Share2,
+  ShoppingBag,
+  SlidersHorizontal,
+  Store as StoreIcon,
+  X,
+} from "lucide-react";
 
 import { LoadingSpinner } from "../LoadingSpinner";
+import { useStoreCart } from "../../contexts/StoreCartContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useDocumentDescription, useDocumentTitle } from "../../hooks/useDocumentTitle";
 import {
+  getStoreCollections,
   getStoreProducts,
   getStoreProfile,
   isStoreNotFound,
   STORE_SORTS,
+  type StoreCollection,
   type StoreProduct,
   type StoreProfile,
   type StoreSort,
 } from "../../services/storeApi";
 import { whatsappLink } from "../../utils/storeLinks";
+import { StoreCartDrawer } from "./StoreCartDrawer";
+import { StoreCatalogSlider } from "./StoreCatalogSlider";
 import { StoreProductCard } from "./StoreProductCard";
 
 interface StorefrontPageProps {
   slug: string;
   onOpenProduct: (productId: number) => void;
+  onOpenCollection?: (collectionSlug: string) => void;
 }
 
 interface Facets {
@@ -51,10 +64,16 @@ function mergeFacets(previous: Facets, products: StoreProduct[]): Facets {
   };
 }
 
-export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug, onOpenProduct }) => {
+export const StorefrontPage: React.FC<StorefrontPageProps> = ({
+  slug,
+  onOpenProduct,
+  onOpenCollection,
+}) => {
   const toast = useToast();
+  const { totalCount, setIsCartOpen } = useStoreCart();
 
   const [profile, setProfile] = useState<StoreProfile | null>(null);
+  const [collections, setCollections] = useState<StoreCollection[]>([]);
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [facets, setFacets] = useState<Facets>({ brands: [], categories: [] });
   const [count, setCount] = useState(0);
@@ -64,6 +83,9 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug, onOpenProd
   const [missing, setMissing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // وضع العرض (شبكة أم كتالوج شرائح)
+  const [viewMode, setViewMode] = useState<"grid" | "slideshow">("grid");
+
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [brand, setBrand] = useState("");
@@ -71,19 +93,16 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug, onOpenProd
   const [sort, setSort] = useState<StoreSort>("");
 
   const pageRef = useRef(1);
-  // كل تحميلٍ يحمل رقمه: ردٌّ بطيء لتصفيةٍ أُلغيت كان سيهبط بعد الردّ الحالي
-  // فيعرض نتائج لا تطابق ما تُظهره الحقول.
   const requestRef = useRef(0);
 
   const storeName = profile?.name || "المتجر";
   useDocumentTitle(profile ? `${storeName} — المتجر الإلكتروني` : "المتجر الإلكتروني");
   useDocumentDescription(
     profile
-      ? `تصفّح منتجات ${storeName} وأسعارها${profile.address ? ` — ${profile.address}` : ""}. للطلب تواصل معنا مباشرة.`
+      ? (profile.hero_subtitle || `تصفّح منتجات ${storeName} وأسعارها${profile.address ? ` — ${profile.address}` : ""}. للطلب تواصل معنا مباشرة.`)
       : "متجر إلكتروني على منصة K.T.R.A.",
   );
 
-  // بحثٌ مؤجَّل: طلبٌ لكل ضغطة حرف على نقطة مجهولة يستهلك سقف الخنق نفسه.
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(searchInput.trim()), 350);
     return () => window.clearTimeout(timer);
@@ -92,14 +111,28 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug, onOpenProd
   useEffect(() => {
     let alive = true;
     setProfile(null);
-    getStoreProfile(slug)
-      .then((data) => { if (alive) setProfile(data); })
+    Promise.all([
+      getStoreProfile(slug),
+      getStoreCollections(slug)
+        .then((paged) => paged.results)
+        .catch(() => [] as StoreCollection[]),
+    ])
+      .then(([profData, colsData]) => {
+        if (!alive) return;
+        setProfile(profData);
+        setCollections(colsData);
+        if (profData.catalog_mode_default === "slideshow") {
+          setViewMode("slideshow");
+        }
+      })
       .catch((e: unknown) => {
         if (!alive) return;
         if (isStoreNotFound(e)) setMissing(true);
         else setError(e instanceof Error ? e.message : "تعذّر فتح المتجر");
       });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [slug]);
 
   const load = useCallback(async () => {
@@ -124,7 +157,9 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug, onOpenProd
     }
   }, [slug, search, brand, category, sort]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore) return;
@@ -153,7 +188,6 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug, onOpenProd
       await navigator.clipboard.writeText(window.location.href);
       toast("تم نسخ رابط المتجر", "success");
     } catch {
-      // الحافظة ممنوعة (اتصال غير آمن أو رفض المستخدم) — نقول ذلك بدل الصمت.
       toast("تعذّر النسخ — انسخ الرابط من شريط العنوان", "error");
     }
   }, [toast]);
@@ -174,8 +208,8 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug, onOpenProd
 
   if (missing) {
     return (
-      <div dir="rtl" className="flex min-h-screen items-center justify-center bg-slate-100 p-6 dark:bg-slate-900">
-        <div className="w-full max-w-lg rounded-3xl bg-white p-8 text-center shadow-xl dark:bg-slate-800">
+      <div dir="rtl" className="flex min-h-screen items-center justify-center bg-slate-100 p-6 dark:bg-slate-950 font-sans">
+        <div className="w-full max-w-lg rounded-3xl bg-white p-8 text-center shadow-xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
           <StoreIcon className="mx-auto h-14 w-14 text-slate-300 dark:text-slate-600" />
           <h1 className="mt-4 text-xl font-black text-slate-900 dark:text-white">لا يوجد متجر بهذا الرابط</h1>
           <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">
@@ -183,72 +217,199 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug, onOpenProd
             تأكّد من نسخه كاملاً كما وصلك، أو اطلب من الشركة رابط متجرها من جديد.
           </p>
           <a
-            href="/store"
-            className="mt-6 inline-block rounded-xl bg-blue-600 px-6 py-3 font-bold text-white transition hover:bg-blue-700"
+            href="/"
+            className="mt-6 inline-block rounded-2xl bg-blue-600 px-6 py-3 text-xs font-bold text-white transition hover:bg-blue-700"
           >
-            ما هي متاجر K.T.R.A؟
+            العودة للرئيسية
           </a>
         </div>
       </div>
     );
   }
 
+  // إذا تم تفعيل وضع الكتالوج بالشرائح
+  if (viewMode === "slideshow" && products.length > 0) {
+    return (
+      <StoreCatalogSlider
+        products={products}
+        profile={profile}
+        slug={slug}
+        onCloseCatalog={() => setViewMode("grid")}
+        onOpenProductDetail={onOpenProduct}
+      />
+    );
+  }
+
   return (
-    <div dir="rtl" className="min-h-screen bg-slate-100 dark:bg-slate-900">
-      <header className="bg-white shadow-sm dark:bg-slate-800">
-        <div className="mx-auto max-w-7xl px-4 py-6">
-          <div className="flex flex-wrap items-center gap-4">
+    <div
+      dir="rtl"
+      className="min-h-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100"
+      style={
+        profile?.background_image_url
+          ? {
+              backgroundImage: `url(${profile.background_image_url})`,
+              backgroundSize: profile.background_style === "cover" ? "cover" : "auto",
+              backgroundRepeat: profile.background_style === "repeat_pattern" ? "repeat" : "no-repeat",
+              backgroundAttachment: "fixed",
+            }
+          : undefined
+      }
+    >
+      {/* شريط الإعلانات الترويجي العلوي */}
+      {profile?.show_announcement && profile?.announcement_bar && (
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-center text-xs font-bold text-white shadow-sm flex items-center justify-center gap-2">
+          <Megaphone className="h-3.5 w-3.5" />
+          <span>{profile.announcement_bar}</span>
+        </div>
+      )}
+
+      {/* الترويسة الأنيقة */}
+      <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-900/90">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
             {profile?.logo_url ? (
-              <img src={profile.logo_url} alt={storeName} className="h-16 w-16 rounded-2xl object-contain" />
+              <img
+                src={profile.logo_url}
+                alt={storeName}
+                className="h-11 w-11 rounded-2xl object-cover border border-slate-200 dark:border-slate-700"
+              />
             ) : (
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-white">
-                <StoreIcon className="h-8 w-8" />
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-600/20">
+                <StoreIcon className="h-6 w-6" />
               </div>
             )}
-            <div className="flex-1">
-              <h1 className="text-2xl font-black text-slate-900 dark:text-white">{storeName}</h1>
-              {profile?.address ? (
-                <p className="mt-1 flex items-center gap-1 text-sm text-slate-500 dark:text-slate-400">
-                  <MapPin className="h-4 w-4" />
-                  {profile.address}
+            <div>
+              <h1 className="text-base font-black text-slate-900 dark:text-white leading-tight">
+                {storeName}
+              </h1>
+              {profile?.address && (
+                <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  <MapPin className="h-3 w-3" />
+                  <span className="truncate max-w-[180px] sm:max-w-xs">{profile.address}</span>
                 </p>
-              ) : null}
+              )}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {storeWhatsapp ? (
-                <a
-                  href={storeWhatsapp}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white transition hover:bg-emerald-700"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  تواصل واتساب
-                </a>
-              ) : profile?.phone ? (
-                <a
-                  href={`tel:${profile.phone}`}
-                  className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  {profile.phone}
-                </a>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => void copyStoreLink()}
-                className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200"
+          </div>
+
+          {/* الأزرار العلوية */}
+          <div className="flex items-center gap-2">
+            {/* زر تبديل لوضع الكتالوج بالشرائح */}
+            <button
+              type="button"
+              onClick={() => setViewMode("slideshow")}
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              title="عرض الكتالوج بالشرائح التفاعلية"
+            >
+              <Layers className="h-4 w-4 text-blue-500" />
+              <span>وضع الكتالوج</span>
+            </button>
+
+            {storeWhatsapp ? (
+              <a
+                href={storeWhatsapp}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700"
               >
-                <Copy className="h-4 w-4" />
-                نسخ الرابط
-              </button>
-            </div>
+                <MessageCircle className="h-4 w-4 fill-current" />
+                <span className="hidden sm:inline">واتساب</span>
+              </a>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => void copyStoreLink()}
+              className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">مشاركة</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsCartOpen(true)}
+              className="relative inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-blue-600/20 transition hover:bg-blue-700"
+            >
+              <ShoppingBag className="h-4 w-4" />
+              <span className="hidden sm:inline">السلة</span>
+              {totalCount > 0 && (
+                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-[10px] font-black text-white">
+                  {totalCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
       </header>
 
-      <div className="border-b border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center">
+      {/* البانر الترويجي والعنوان المميز */}
+      {profile?.banner_image_url && (
+        <div className="mx-auto max-w-7xl px-4 pt-4 sm:px-6">
+          <div className="relative overflow-hidden rounded-3xl border border-slate-200 shadow-sm dark:border-slate-800">
+            <img
+              src={profile.banner_image_url}
+              alt={storeName}
+              className="h-36 w-full object-cover sm:h-56 md:h-72"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* الترحيب والعنوان الرئيسي */}
+      {(profile?.hero_title || profile?.hero_subtitle) && (
+        <div className="mx-auto max-w-7xl px-4 pt-6 text-center sm:px-6">
+          {profile.hero_title && (
+            <h2 className="text-xl font-black text-slate-900 dark:text-white sm:text-3xl">
+              {profile.hero_title}
+            </h2>
+          )}
+          {profile.hero_subtitle && (
+            <p className="mx-auto mt-2 max-w-2xl text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+              {profile.hero_subtitle}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* شريط المجموعات والحملات الإعلانية (Campaigns / Collections Bar) */}
+      {collections.length > 0 && (
+        <div className="mx-auto max-w-7xl px-4 pt-6 sm:px-6">
+          <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+            <span className="shrink-0 text-xs font-bold text-slate-500 dark:text-slate-400">
+              المجموعات المميزة:
+            </span>
+            {collections.map((col) => (
+              <button
+                key={col.id}
+                type="button"
+                onClick={() => {
+                  if (onOpenCollection) {
+                    onOpenCollection(col.slug);
+                  } else {
+                    window.location.href = `/store/${encodeURIComponent(slug)}/c/${encodeURIComponent(col.slug)}`;
+                  }
+                }}
+                className="group shrink-0 flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-white/90 px-3.5 py-1.5 text-xs font-bold text-slate-700 shadow-sm backdrop-blur transition hover:border-blue-500 hover:bg-blue-50/60 dark:border-slate-800 dark:bg-slate-900/90 dark:text-slate-200 dark:hover:border-blue-500"
+              >
+                {col.badge_text ? (
+                  <span className="flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.2 text-[10px] font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                    <Flame className="h-3 w-3 fill-current" />
+                    {col.badge_text}
+                  </span>
+                ) : null}
+                <span>{col.title}</span>
+                <span className="rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500 dark:bg-slate-800">
+                  {col.items_count}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* شريط البحث والتصفية */}
+      <div className="mx-auto max-w-7xl px-4 pt-6 sm:px-6">
+        <div className="flex flex-col gap-3 rounded-3xl border border-slate-200/80 bg-white/90 p-3 shadow-sm backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/90 lg:flex-row lg:items-center">
           <div className="relative flex-1">
             <input
               type="search"
@@ -256,99 +417,111 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug, onOpenProd
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="ابحث بالاسم أو الماركة…"
               aria-label="بحث في منتجات المتجر"
-              className="min-h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+              className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 pr-10 text-xs text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             />
             <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {facets.brands.length > 0 ? (
+            {facets.brands.length > 0 && (
               <select
                 value={brand}
                 onChange={(e) => setBrand(e.target.value)}
                 aria-label="تصفية بالماركة"
-                className="min-h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                className="h-10 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
                 <option value="">كل الماركات</option>
                 {facets.brands.map((value) => (
                   <option key={value} value={value}>{value}</option>
                 ))}
               </select>
-            ) : null}
+            )}
 
-            {facets.categories.length > 0 ? (
+            {facets.categories.length > 0 && (
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 aria-label="تصفية بالتصنيف"
-                className="min-h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+                className="h-10 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
               >
                 <option value="">كل التصنيفات</option>
                 {facets.categories.map((value) => (
                   <option key={value} value={value}>{value}</option>
                 ))}
               </select>
-            ) : null}
+            )}
 
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as StoreSort)}
               aria-label="ترتيب النتائج"
-              className="min-h-11 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+              className="h-10 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
             >
               {STORE_SORTS.map((option) => (
                 <option key={option.key} value={option.key}>{option.label}</option>
               ))}
             </select>
 
-            {filtersActive ? (
+            {filtersActive && (
               <button
                 type="button"
                 onClick={clearFilters}
-                className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-red-200 bg-red-50 px-3 text-sm font-bold text-red-700 transition hover:bg-red-100 dark:border-red-900 dark:bg-red-900/20 dark:text-red-300"
+                className="inline-flex h-10 items-center gap-1 rounded-2xl border border-red-200 bg-red-50 px-3 text-xs font-bold text-red-700 transition hover:bg-red-100 dark:border-red-900 dark:bg-red-900/20 dark:text-red-300"
               >
-                <X className="h-4 w-4" />
-                إلغاء التصفية
+                <X className="h-3.5 w-3.5" />
+                <span>إلغاء التصفية</span>
               </button>
-            ) : null}
+            )}
           </div>
         </div>
       </div>
 
-      <main className="mx-auto max-w-7xl px-4 py-6">
-        {error ? (
+      {/* المنتجات المعروضة */}
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+        {error && (
           <div role="alert" className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-center font-bold text-red-800 dark:border-red-900 dark:bg-red-900/20 dark:text-red-300">
             {error}
           </div>
-        ) : null}
+        )}
 
         {loading ? (
-          <div className="flex justify-center py-20"><LoadingSpinner showText={false} /></div>
+          <div className="flex justify-center py-20">
+            <LoadingSpinner showText={false} />
+          </div>
         ) : products.length === 0 ? (
           <div className="py-20 text-center">
             <StoreIcon className="mx-auto h-16 w-16 text-slate-300 dark:text-slate-600" />
-            <h2 className="mt-4 text-lg font-bold text-slate-700 dark:text-slate-200">
+            <h2 className="mt-4 text-base font-bold text-slate-700 dark:text-slate-200">
               {filtersActive ? "لا نتائج مطابقة لبحثك" : "لا توجد منتجات معروضة بعد"}
             </h2>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
               {filtersActive ? "جرّب كلمة أخرى أو ألغِ التصفية." : "هذا المتجر لم ينشر أصنافاً حتى الآن — عُد لاحقاً."}
             </p>
-            {filtersActive ? (
+            {filtersActive && (
               <button
                 type="button"
                 onClick={clearFilters}
-                className="mt-6 rounded-xl bg-blue-600 px-6 py-3 font-bold text-white transition hover:bg-blue-700"
+                className="mt-6 rounded-2xl bg-blue-600 px-6 py-2.5 text-xs font-bold text-white transition hover:bg-blue-700"
               >
                 عرض كل المنتجات
               </button>
-            ) : null}
+            )}
           </div>
         ) : (
           <>
-            <p className="mb-4 text-sm font-bold text-slate-500 dark:text-slate-400">
-              {`عرض ${products.length} من ${count} منتجاً`}
-            </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 sm:gap-6">
+            <div className="mb-4 flex items-center justify-between text-xs font-bold text-slate-500 dark:text-slate-400">
+              <span>عرض {products.length} من {count} منتجاً</span>
+              <button
+                type="button"
+                onClick={() => setViewMode("slideshow")}
+                className="inline-flex items-center gap-1 text-blue-600 hover:underline dark:text-blue-400"
+              >
+                <Layers className="h-3.5 w-3.5" />
+                <span>عرض كشرائح كتالوج</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 sm:gap-6">
               {products.map((product) => (
                 <StoreProductCard
                   key={product.id}
@@ -359,30 +532,67 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({ slug, onOpenProd
               ))}
             </div>
 
-            {hasNext ? (
+            {hasNext && (
               <div className="mt-10 text-center">
                 <button
                   type="button"
                   onClick={() => void loadMore()}
                   disabled={loadingMore}
-                  className="rounded-xl border-2 border-blue-600 bg-white px-8 py-3 font-bold text-blue-600 transition hover:bg-blue-50 disabled:opacity-60 dark:bg-slate-800 dark:text-blue-400"
+                  className="rounded-2xl border-2 border-blue-600 bg-white px-8 py-3 text-xs font-bold text-blue-600 shadow-sm transition hover:bg-blue-50 disabled:opacity-60 dark:bg-slate-900 dark:text-blue-400 dark:hover:bg-slate-800"
                 >
-                  {loadingMore ? "جارٍ التحميل…" : "عرض المزيد"}
+                  {loadingMore ? "جارٍ التحميل…" : "عرض المزيد من المنتجات"}
                 </button>
               </div>
-            ) : null}
+            )}
           </>
         )}
       </main>
 
-      <footer className="mt-8 border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-        <p>{storeName} — الأسعار والتوفّر قابلة للتغيير. للطلب تواصل مع المتجر مباشرة.</p>
-        <p className="mt-1">
-          متجر على منصة <a href="/" className="font-bold text-blue-600 hover:underline dark:text-blue-400">K.T.R.A</a>
-        </p>
+      {/* تذييل الصفحة مع روابط السوشيال ميديا */}
+      <footer className="mt-16 border-t border-slate-200/80 bg-white/80 py-8 text-center text-xs text-slate-500 backdrop-blur dark:border-slate-800/80 dark:bg-slate-900/80 dark:text-slate-400">
+        <div className="mx-auto max-w-7xl px-4 space-y-3">
+          {/* أيقونات السوشيال ميديا إذا وُجدت */}
+          {(profile?.instagram_url || profile?.tiktok_url || profile?.facebook_url || profile?.snapchat_url) && (
+            <div className="flex justify-center gap-4 py-2">
+              {profile.instagram_url && (
+                <a href={profile.instagram_url} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-pink-600 transition">
+                  Instagram
+                </a>
+              )}
+              {profile.tiktok_url && (
+                <a href={profile.tiktok_url} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-black dark:hover:text-white transition">
+                  TikTok
+                </a>
+              )}
+              {profile.facebook_url && (
+                <a href={profile.facebook_url} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-blue-600 transition">
+                  Facebook
+                </a>
+              )}
+              {profile.snapchat_url && (
+                <a href={profile.snapchat_url} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:text-amber-500 transition">
+                  Snapchat
+                </a>
+              )}
+            </div>
+          )}
+
+          <p>{storeName} — الأسعار والتوفّر قابلة للتغيير. للطلب تواصل مع المتجر مباشرة.</p>
+          <p>
+            متجر مدعوم بنظام <a href="/" className="font-bold text-blue-600 hover:underline dark:text-blue-400">K.T.R.A</a>
+          </p>
+        </div>
       </footer>
+
+      {/* درج السلة التفاعلي */}
+      <StoreCartDrawer
+        storeName={storeName}
+        storePhone={profile?.phone}
+        currency={profile?.currency ?? null}
+      />
     </div>
   );
 };
 
 export default StorefrontPage;
+

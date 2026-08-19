@@ -27,13 +27,23 @@ applyThemeOnBoot();
 // المتجر العام: خارج `AuthProvider`/`CompanyProvider` عمداً — زائرٌ بلا جلسة لا
 // ينتظر إقلاع مساحة عمل لا تخصّه، ولا يحمّل chunk لوحة التحكم كي يرى صنفاً.
 // `ToastProvider` وحده مطلوب هنا (نسخ الرابط)، وهو قانون المشروع بدل `alert`.
+import { StoreCartProvider } from './contexts/StoreCartContext';
+
 const StoreIndexPage = React.lazy(() => import('./components/store/StoreIndexPage').then((module) => ({ default: module.StoreIndexPage })));
 const StorefrontPage = React.lazy(() => import('./components/store/StorefrontPage').then((module) => ({ default: module.StorefrontPage })));
 const StoreProductPage = React.lazy(() => import('./components/store/StoreProductPage').then((module) => ({ default: module.StoreProductPage })));
+const StoreCampaignPage = React.lazy(() => import('./components/store/StoreCampaignPage').then((module) => ({ default: module.StoreCampaignPage })));
 
-const PublicStoreShell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <ToastProvider>{children}</ToastProvider>
-);
+const PublicStoreShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { slug = 'default' } = useParams();
+  return (
+    <ToastProvider>
+      <StoreCartProvider slug={slug}>
+        {children}
+      </StoreCartProvider>
+    </ToastProvider>
+  );
+};
 
 /** `/store` وحده: صفحة تعريف، أو تحويلٌ إلى متجر المجموعة إن ضُبط في البيئة. */
 const StoreIndexRoute: React.FC = () => {
@@ -51,6 +61,7 @@ const StorefrontRoute: React.FC = () => {
     <StorefrontPage
       slug={slug}
       onOpenProduct={(productId) => navigate(`/store/${encodeURIComponent(slug)}/p/${productId}`)}
+      onOpenCollection={(collectionSlug) => navigate(`/store/${encodeURIComponent(slug)}/c/${encodeURIComponent(collectionSlug)}`)}
     />
   );
 };
@@ -63,6 +74,19 @@ const StoreProductRoute: React.FC = () => {
       slug={slug}
       productId={productId}
       onBack={() => navigate(`/store/${encodeURIComponent(slug)}`)}
+    />
+  );
+};
+
+const StoreCampaignRoute: React.FC = () => {
+  const { slug = '', collectionSlug = '' } = useParams();
+  const navigate = useNavigate();
+  return (
+    <StoreCampaignPage
+      slug={slug}
+      collectionSlug={collectionSlug}
+      onNavigateHome={() => navigate(`/store/${encodeURIComponent(slug)}`)}
+      onOpenProduct={(productId) => navigate(`/store/${encodeURIComponent(slug)}/p/${productId}`)}
     />
   );
 };
@@ -156,6 +180,7 @@ root.render(
           <Route path="/store" element={<PublicStoreShell><StoreIndexRoute /></PublicStoreShell>} />
           <Route path="/store/:slug" element={<PublicStoreShell><StorefrontRoute /></PublicStoreShell>} />
           <Route path="/store/:slug/p/:productId" element={<PublicStoreShell><StoreProductRoute /></PublicStoreShell>} />
+          <Route path="/store/:slug/c/:collectionSlug" element={<PublicStoreShell><StoreCampaignRoute /></PublicStoreShell>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
