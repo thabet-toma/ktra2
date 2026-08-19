@@ -13,6 +13,7 @@ import os
 
 from django.core.cache import cache
 from rest_framework.decorators import api_view
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from core.access import require_perm, user_has_perm
@@ -37,6 +38,22 @@ def _report_cache_key(key, tenant_id, user_id, params):
     )
     digest = hashlib.md5(payload.encode("utf-8")).hexdigest()
     return f"report:{tenant_id}:{key}:{digest}"
+
+
+def _validation_message(exc: ValidationError) -> str:
+    """رسالة واحدة من تفصيل DRF — قائمةً كان أو قاموساً أو نصّاً."""
+    detail = exc.detail
+    while isinstance(detail, (list, tuple, dict)):
+        if not detail:
+            return "مُدخل غير صالح."
+        detail = next(iter(detail.values())) if isinstance(detail, dict) else detail[0]
+    return str(detail)
+
+
+def _user_display(user) -> str:
+    if not user or not getattr(user, "is_authenticated", False):
+        return ""
+    return user.get_full_name() or user.username
 
 
 @api_view(["GET"])
@@ -85,9 +102,17 @@ def report_run(request, key: str):
             return Response(cached)
     try:
         payload = run_report(key, tenant.TenantID, params)
+    except ValidationError as exc:
+        # مُدخل مرفوض لا عطل: تقريرٌ يحرس فترته (كشف الساعات يرفض ما فوق 31
+        # يوماً) كان يظهر للمستخدم «تعذّر توليد التقرير» — رسالة عطلٍ عن خطأٍ
+        # يستطيع إصلاحه بنفسه. تعود رسالته كما كتبها التقرير.
+        return Response({"error": _validation_message(exc)}, status=400)
     except Exception:
         logger.exception("reports.run_failed key=%s tenant=%s", key, tenant.TenantID)
         return Response({"error": f"تعذّر توليد تقرير «{spec.title}»."}, status=500)
+    # مَن ولّد التقرير — يُطبع في ترويسته وملفّه. آمن داخل الكاش: مفتاحه يحمل
+    # المستخدم أصلاً، فلا تُقدَّم نسخة مستخدمٍ لآخر.
+    payload["generated_by"] = _user_display(getattr(request, "user", None))
     if cache_key is not None:
         cache.set(cache_key, payload, REPORT_CACHE_SECONDS)
     return Response(payload)

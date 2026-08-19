@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  dateRangeSeed,
   datePresetRange,
   formatReportCell,
   initialFilterValues,
@@ -153,4 +154,30 @@ test('السطر الذي ينقصه مفتاح القالب لا يصير را�
   assert.equal(resolveRowLink('/accounting/journals/{id}', { id: null }), null);
   assert.equal(resolveRowLink('/accounting/journals/{id}', {}), null);
   assert.equal(resolveRowLink(null, { id: 3 }), null);
+});
+
+test('التقرير الذي يعلن نطاقه المفضّل يُفتح عليه لا على «هذه السنة»', () => {
+  const today = new Date(2026, 7, 20);
+  const withDefault = dateRangeSeed(
+    [{ key: 'from', label: 'من', kind: 'date', default: 'month' },
+     { key: 'to', label: 'إلى', kind: 'date', default: 'month' }],
+    'year', today,
+  );
+  assert.deepEqual(withDefault, { from: '2026-08-01', to: '2026-08-31' });
+});
+
+test('وبلا إعلانٍ يبقى الافتراض العام — لا سلوك جديد للتقارير القائمة', () => {
+  const today = new Date(2026, 7, 20);
+  assert.deepEqual(
+    dateRangeSeed([{ key: 'from', label: 'من', kind: 'date' },
+                   { key: 'to', label: 'إلى', kind: 'date' }], 'year', today),
+    { from: '2026-01-01', to: '2026-12-31' },
+  );
+});
+
+test('تقرير بلا فلتري تاريخ لا يُبذر بنطاق أصلاً', () => {
+  assert.deepEqual(
+    dateRangeSeed([{ key: 'status', label: 'الحالة', kind: 'select' }]),
+    { from: '', to: '' },
+  );
 });

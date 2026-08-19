@@ -199,11 +199,17 @@ class ReportEngineTest(APITestCase):
         self.assertEqual(Decimal(row["b3"]), Decimal("150"))
         self.assertEqual(Decimal(row["b0"]), Decimal("0"))
 
+    #: تقارير لها حدٌّ على الفترة ترفض النطاق العريض الافتراضي هنا عن حق —
+    #: يُشغَّل كلٌّ منها بنطاقه بدل تعطيل الحارس عنه.
+    NARROW_PERIOD_REPORTS = {
+        "timesheet-daily": {"from": "2026-08-01", "to": "2026-08-31"},
+    }
+
     def test_every_report_runs_without_error(self):
         """حارس شامل: أي تقرير في السجل ينفَّذ على شركة حقيقية بلا استثناء."""
         for key in REPORTS:
             with self.subTest(report=key):
-                res = self._run(key)
+                res = self._run(key, **self.NARROW_PERIOD_REPORTS.get(key, {}))
                 self.assertEqual(res.status_code, 200, f"{key}: {res.data}")
                 self.assertIn("rows", res.data)
                 self.assertIn("columns", res.data)
@@ -392,3 +398,82 @@ class PayablesAgingTest(APITestCase):
             f"عدد الاستعلامات نما مع عدد الفواتير: "
             f"{len(one_invoice)} → {len(seven_invoices)}",
         )
+
+
+class DynamicColumnsTest(APITestCase):
+    """الأعمدة المحسوبة عند التشغيل — عقد `ReportSpec.columns_for`.
+
+    تقريرٌ عمودُه يتبع البيانات (عمود لكل يوم في الفترة) لا يستطيع إعلان أعمدته
+    عند التسجيل. الحارس هنا على العقد لا على تقريرٍ بعينه: أعمدة **الناتج** هي
+    المحسوبة، والإجمالي يُجمع عليها، والفهرس يبقى على المعلَن لأنه يُطلب بلا
+    مستأجرٍ ولا فترة.
+    """
+
+    KEY = "test-dynamic-columns"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="dyn", password="x")
+        cls.tenant = create_company("شركة الأعمدة", cls.user)
+
+    def setUp(self):
+        from rest_framework.exceptions import ValidationError
+
+        from core.reports import _framework as fw
+
+        self.client.force_authenticate(user=self.user)
+
+        def columns_for(tenant_id, params):
+            if params.get("boom"):
+                raise ValidationError("اختر فترة لا تتجاوز 31 يوماً.")
+            return (
+                fw.ReportColumn("name", "الاسم"),
+                *(
+                    fw.ReportColumn(f"d{i}", f"يوم {i}", fw.KIND_NUMBER, total=True)
+                    for i in range(1, int(params.get("days", 2)) + 1)
+                ),
+            )
+
+        fw.register(fw.ReportSpec(
+            key=self.KEY,
+            title="تقرير الأعمدة الديناميكية",
+            category="hr",
+            description="اختباري.",
+            columns=(fw.ReportColumn("name", "الاسم"),),
+            columns_for=columns_for,
+            build=lambda tenant_id, params: [
+                {"name": "أ", "d1": "3", "d2": "4"},
+                {"name": "ب", "d1": "1", "d2": "2"},
+            ],
+        ))
+        self.addCleanup(fw.REPORTS.pop, self.KEY, None)
+
+    def _run(self, **params):
+        return self.client.get(
+            f"/api/reports/{self.KEY}/", params,
+            HTTP_X_TENANT_ID=str(self.tenant.TenantID),
+        )
+
+    def test_payload_carries_the_computed_columns_and_totals_them(self):
+        res = self._run(days=2)
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(
+            [c["key"] for c in res.data["columns"]], ["name", "d1", "d2"])
+        # الإجمالي على أعمدة التشغيل — لو جُمع على المعلَنة لجاء فارغاً.
+        self.assertEqual(Decimal(res.data["totals"]["d1"]), Decimal("4"))
+        self.assertEqual(Decimal(res.data["totals"]["d2"]), Decimal("6"))
+
+    def test_catalog_keeps_the_declared_columns(self):
+        """الفهرس يُطلب بلا فترة — فيَعِد بما يعرفه فقط، ولا يخمّن."""
+        catalog = {r["key"]: r for c in report_catalog() for r in c["reports"]}
+        self.assertEqual([c["key"] for c in catalog[self.KEY]["columns"]], ["name"])
+
+    def test_a_rejected_input_is_400_with_its_own_message_not_500(self):
+        """حارس التقرير خطأ مستخدم يُصلحه بنفسه، لا عطل خادم بلا معنى."""
+        res = self._run(boom="1")
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertEqual(res.data["error"], "اختر فترة لا تتجاوز 31 يوماً.")
+
+    def test_payload_names_who_generated_it(self):
+        res = self._run(days=1)
+        self.assertEqual(res.data["generated_by"], "dyn")

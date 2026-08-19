@@ -64,6 +64,8 @@ export interface ReportResultDto {
   total_rows?: number;
   truncated?: boolean;
   generated_at: string;
+  /** مَن ولّد التقرير — يأتي من الخادم، ويُطبع في ترويسة الملف والمطبوع. */
+  generated_by?: string;
 }
 
 /** الأعمدة الرقمية تُحاذى وتُعرض بخط جدولي — قرار واحد لا شرط في كل شاشة. */
@@ -172,6 +174,30 @@ export const datePresetRange = (
     default:
       return { from: '', to: '' };
   }
+};
+
+/**
+ * نطاق الفترة الذي يُفتح عليه التقرير.
+ *
+ * «هذه السنة» افتراضٌ عام صالح لتقرير سجلّي، وخاطئ لتقريرٍ يحرس فترته: كشف
+ * الساعات عمودٌ لكل يوم ويرفض ما فوق الشهر، فبذره بسنةٍ كاملة يفتحه على رسالة
+ * خطأ قبل أن يفعل المستخدم شيئاً. فحين يُعلن التقرير نطاقه المفضّل في
+ * `default` — وهي مفتاح نطاق جاهز — يُحترَم، وإلا فالعام.
+ */
+export const dateRangeSeed = (
+  filters: ReportFilterDto[],
+  fallback: DatePresetKey = 'year',
+  today: Date = new Date(),
+): { from: string; to: string } => {
+  const declared = filters.find((f) => f.key === 'from')?.default;
+  const preset = DATE_PRESETS.some((p) => p.key === declared)
+    ? (declared as DatePresetKey)
+    : fallback;
+  const range = datePresetRange(preset, today);
+  return {
+    from: filters.some((f) => f.key === 'from') ? range.from : '',
+    to: filters.some((f) => f.key === 'to') ? range.to : '',
+  };
 };
 
 /** مسار المستند خلف صفٍّ بعينه، أو null إن نقص أحد مفاتيح القالب. */

@@ -165,6 +165,7 @@ user_ui_mode(user, tenant) -> str                # وضع عرض الواجهة 
 register(spec: ReportSpec)                       # تسجيل تقرير جديد
 run_report(key, tenant_id, params) -> dict       # أعمدة + صفوف + إجماليات
 report_catalog() -> list                         # الفهرس مجمَّعاً بالفئات
+ReportSpec.columns_for(tenant_id, params)        # أعمدة تُحسب عند التشغيل (عمود لكل يوم)
 
 # core/payments.py — الدفع المشترك
 validate_payment(ctx) · post_payment(...) · document_payment_summary(total, paid)
@@ -201,6 +202,14 @@ validate_payment(ctx) · post_payment(...) · document_payment_summary(total, pa
    `core/reports/` — لا تلمس `core/reports_api.py`.
 6. **سقف صفوف التقرير يُقصّ بعد حساب الإجماليات** — الإجمالي يُحسب على الصفوف
    كاملةً، فالمعروض ينقص والمجموع لا يكذب.
+6.1. **أعمدة التقرير الديناميكي تُقرأ من ناتج التشغيل لا من الفهرس.** التقرير
+   الذي يُعلن `columns_for` (كشف الساعات: عمود لكل يوم) لا يستطيع الفهرس أن
+   يَعِد بأعمدته — يُطلب بلا مستأجرٍ ولا فترة — فيُعلن أعمدة ملخّصه الثابتة
+   وحدها. كل مستهلك (الشاشة العامة، CSV، Excel، الطباعة) يقرأ
+   `ReportResultDto.columns`.
+6.2. **مُدخل التقرير المرفوض 400 برسالته لا 500.** تقريرٌ يحرس فترته يرفع
+   `ValidationError` فتعود رسالته كما كتبها (`core/reports_api.py`) — «تعذّر
+   توليد التقرير» عن خطأٍ يصلحه المستخدم بنفسه رسالةُ عطلٍ كاذبة.
 7. **كل رفع ملف يمرّ بـ`core/media_views.py` (`upload_media_file`).** رفعٌ مباشر
    إلى Cloudinary من أي مكان آخر يعني بايتاتٍ لا يعرف أحدٌ صاحبها — والقياس لا
    يُسترجَع بعد الرفع. وفشل كتابة السجلّ **لا يُسقط** رفعاً نجح.

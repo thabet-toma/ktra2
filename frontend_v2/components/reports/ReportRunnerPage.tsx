@@ -7,7 +7,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, Download, Printer, Search } from "lucide-react";
+import { ArrowRight, Download, FileSpreadsheet, Printer, Search } from "lucide-react";
 
 import { reportsApi } from "../../services/reportsApi";
 import { accountingApi } from "../../services/accountingApi";
@@ -23,6 +23,7 @@ import {
   initialFilterValues,
   isNumericKind,
   reportFileName,
+  dateRangeSeed,
   reportToCsv,
   resolveRowLink,
   type DatePresetKey,
@@ -98,12 +99,9 @@ export const ReportRunnerPage: React.FC = () => {
       }
       if (!alive) return;
       setFilters(specFilters);
-      // الافتراضي: هذه السنة — تقرير بلا نطاق يجرّ كل تاريخ الشركة.
-      const thisYear = datePresetRange("year");
-      setValues(initialFilterValues(specFilters, {
-        from: specFilters.some((f) => f.key === "from") ? thisYear.from : "",
-        to: specFilters.some((f) => f.key === "to") ? thisYear.to : "",
-      }));
+      // الافتراضي: هذه السنة — تقرير بلا نطاق يجرّ كل تاريخ الشركة؛ إلا أن
+      // يعلن التقرير نطاقاً أضيق يفتح عليه (كشف الساعات: هذا الشهر).
+      setValues(initialFilterValues(specFilters, dateRangeSeed(specFilters)));
       setSpecLoaded(true);
     })();
     return () => { alive = false; };
@@ -341,15 +339,21 @@ export const ReportRunnerPage: React.FC = () => {
     return out;
   }, [result]);
 
-  const exportCsv = useCallback(() => {
-    if (!result) return;
-    const blob = new Blob([reportToCsv(result)], { type: "text/csv;charset=utf-8;" });
+  const download = (blob: Blob, name: string) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = reportFileName(result);
+    link.download = name;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  const exportCsv = useCallback(() => {
+    if (!result) return;
+    download(
+      new Blob([reportToCsv(result)], { type: "text/csv;charset=utf-8;" }),
+      reportFileName(result),
+    );
   }, [result]);
 
   /** الفترة كما تُقرأ في الترويسة — لا تقرير مطبوع بلا نطاقه. */
@@ -361,6 +365,33 @@ export const ReportRunnerPage: React.FC = () => {
     if (to) return `الفترة حتى ${to}`;
     return "كل الفترات";
   }, [values.from, values.to]);
+
+  /**
+   * تصدير Excel — ملف `.xlsx` بأرقامٍ حقيقية لا CSV منسَّق: المحاسب يفتح
+   * الملف ليعيد الحساب فيه، و`SUM` لا تعمل على نصّ. المكتبة تُحمَّل عند أول
+   * ضغطة فلا تثقل من لا يصدّر.
+   */
+  const exportXlsx = useCallback(() => {
+    if (!result) return;
+    void (async () => {
+      try {
+        const { reportToXlsxBuffer } = await import("../../utils/reportXlsx");
+        const buffer = await reportToXlsxBuffer(result, {
+          company: currentCompany?.CompanyName,
+          period: periodLabel,
+          generatedBy: result.generated_by,
+        });
+        download(
+          new Blob([buffer], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          }),
+          reportFileName(result, "xlsx"),
+        );
+      } catch {
+        toast("تعذّر توليد ملف Excel — جرّب تصدير CSV.", "error");
+      }
+    })();
+  }, [result, currentCompany, periodLabel, toast]);
 
   /**
    * الطباعة بترويسة الشركة والفترة والإجماليات — لا `window.print()` على
@@ -401,7 +432,9 @@ export const ReportRunnerPage: React.FC = () => {
         value: (row: ReportRow) => formatReportCell(row[col.key], col.kind),
       })),
       rows: result.rows,
-      meta: applied,
+      meta: result.generated_by
+        ? [...applied, { label: "ولّده", value: result.generated_by }]
+        : applied,
       totals: totals
         ? result.columns.map((col, i) => (totals[col.key] ?? (i === 0 ? "الإجمالي" : "")))
         : undefined,
@@ -443,6 +476,7 @@ export const ReportRunnerPage: React.FC = () => {
   const actions: AseelToolbarAction[] = [
     { key: "back", label: "كل التقارير", icon: <ArrowRight />, onClick: () => navigate("/reports") },
     { key: "run", label: "تشغيل", icon: <Search />, onClick: () => void run() },
+    { key: "export-xlsx", label: "تصدير Excel", icon: <FileSpreadsheet />, onClick: exportXlsx },
     { key: "export", label: "تصدير CSV", icon: <Download />, onClick: exportCsv },
     { key: "print", label: "طباعة / PDF", icon: <Printer />, onClick: print },
   ];

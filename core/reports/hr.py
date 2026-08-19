@@ -20,6 +20,7 @@ from typing import Callable
 
 from django.db.models import Case, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 logger = logging.getLogger("core.reports")
 
@@ -78,8 +79,13 @@ def _payslips(tenant_id: int, params: dict) -> list[dict]:
             "period_start": p.period_start,
             "period_end": p.period_end,
             "pay_type": "شهري" if p.pay_type == "monthly" else "بالساعة",
+            "worked_hours": _qty(p.worked_hours),
+            "absence_days": _qty(p.absence_days),
             "gross": _money(p.gross),
             "allowances": _money(p.allowances),
+            "absence_deduction": _money(p.absence_deduction),
+            "late_deduction": _money(p.late_deduction),
+            "other_deductions": _money(p.other_deductions),
             "deductions": _money(deductions),
             "net": _money(p.net),
             "state": "مرحّل" if p.status == "posted" else "مسودّة",
@@ -98,14 +104,22 @@ register(ReportSpec(
             options=(("", "الكل"), ("posted", "المرحّلة"), ("draft", "المسودّات")),
         ),
     ),
+    # الخصم مفكَّك لا مدموجاً: المراجع لا يسأل «كم خُصم» بل «خُصم مقابل ماذا»،
+    # وعمودٌ واحد يجمع الغياب والتأخير وما اتُّفق عليه يُجبره على فتح كل كشف
+    # ليعرف. المجموع المدموج يبقى عموداً بجانبها لمن يريد الرقم الواحد.
     columns=(
         ReportColumn("employee_name", "الموظف"),
         ReportColumn("period_start", "من", KIND_DATE, width="110px"),
         ReportColumn("period_end", "إلى", KIND_DATE, width="110px"),
         ReportColumn("pay_type", "نوع الأجر", width="90px"),
+        ReportColumn("worked_hours", "ساعات", KIND_NUMBER, total=True, width="80px"),
+        ReportColumn("absence_days", "أيام غياب", KIND_NUMBER, total=True, width="80px"),
         ReportColumn("gross", "الأساسي", KIND_MONEY, total=True),
         ReportColumn("allowances", "بدلات", KIND_MONEY, total=True),
-        ReportColumn("deductions", "خصومات", KIND_MONEY, total=True),
+        ReportColumn("absence_deduction", "خصم غياب", KIND_MONEY, total=True),
+        ReportColumn("late_deduction", "خصم تأخير", KIND_MONEY, total=True),
+        ReportColumn("other_deductions", "خصومات أخرى", KIND_MONEY, total=True),
+        ReportColumn("deductions", "مجموع الخصم", KIND_MONEY, total=True),
         ReportColumn("net", "الصافي", KIND_MONEY, total=True),
         ReportColumn("state", "الحالة", width="90px"),
     ),
@@ -148,6 +162,173 @@ register(ReportSpec(
     ),
     permission="hr.payroll.view",
     build=_payroll_payments,
+))
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  كشف الساعات اليومي
+# ══════════════════════════════════════════════════════════════════════
+#
+# **الموظفون أسطراً والأيام أعمدة** — لا العكس. عدد الأيام محدود بطبعه (شهر =
+# 31 عموداً على الأكثر) وعدد الموظفين ليس كذلك: الأسطر تتدرّج عمودياً بلا كلفة،
+# بينما خمسون موظفاً أعمدةً جدولٌ لا يُقرأ ولا يُطبع. وهو عرف سجلّ الحضور الذي
+# يعرفه المحاسب من Excel أصلاً.
+#
+# والكشف يُراجَع بالعين قبل الاعتماد، فالخانة تقول **ماذا حدث** لا رقماً فقط:
+# ساعات اليوم للجزئي، و«غ» للغياب و«ت» للتأخير للدائم — وهي مادة خصمه.
+
+#: من الإثنين إلى الأحد كترتيب `date.weekday()`.
+_WEEKDAYS = ("إث", "ثل", "أر", "خم", "جم", "سب", "أح")
+
+#: سقف الفترة: عمودٌ لكل يوم، وما فوق الشهر جدولٌ لا يُقرأ ولا يُطبع.
+TIMESHEET_MAX_DAYS = 31
+
+
+def _timesheet_period(params: dict) -> tuple[datetime.date, datetime.date]:
+    """فترة الكشف — الشهر الحالي حين لا يُحدَّد شيء، ومحروسةً بسقف الأعمدة."""
+    from rest_framework.exceptions import ValidationError
+
+    start, end = _date_range(params)
+    if not start or not end:
+        # `localdate` لا `date.today`: الخادم بتوقيت UTC يقلب «هذا الشهر» يوماً
+        # كاملاً حول رأس الشهر — مصدر «اليوم» واحد في المشروع كله.
+        today = timezone.localdate()
+        start = today.replace(day=1)
+        end = (start + datetime.timedelta(days=32)).replace(day=1) \
+            - datetime.timedelta(days=1)
+    if end < start:
+        raise ValidationError("نهاية الفترة قبل بدايتها.")
+    if (end - start).days + 1 > TIMESHEET_MAX_DAYS:
+        raise ValidationError(
+            f"اختر فترة لا تتجاوز {TIMESHEET_MAX_DAYS} يوماً — الكشف عمودٌ لكل يوم.")
+    return start, end
+
+
+def _timesheet_days(params: dict) -> list[datetime.date]:
+    start, end = _timesheet_period(params)
+    return [start + datetime.timedelta(days=i) for i in range((end - start).days + 1)]
+
+
+def _timesheet_columns(tenant_id: int, params: dict) -> tuple[ReportColumn, ...]:
+    days = _timesheet_days(params)
+    one_month = days[0].month == days[-1].month and days[0].year == days[-1].year
+    return (
+        ReportColumn("employee", "الموظف", width="150px"),
+        *(
+            ReportColumn(
+                f"d{i}",
+                # داخل شهرٍ واحد يكفي اليوم واسمه — واسم اليوم هو ما يجعل خانةً
+                # فارغة يوم الجمعة عاديّةً وفارغةً يوم الثلاثاء سؤالاً.
+                f"{day.day} {_WEEKDAYS[day.weekday()]}" if one_month
+                else f"{day.day}/{day.month}",
+                KIND_TEXT, width="58px",
+            )
+            for i, day in enumerate(days, start=1)
+        ),
+        ReportColumn("total_hours", "مجموع الساعات", KIND_NUMBER, total=True, width="100px"),
+        ReportColumn("overtime_hours", "فوق الدوام", KIND_NUMBER, total=True, width="90px"),
+        ReportColumn("absence_days", "أيام الغياب", KIND_NUMBER, total=True, width="90px"),
+        ReportColumn("late_minutes", "دقائق التأخير", KIND_NUMBER, total=True, width="100px"),
+    )
+
+
+def _timesheet_daily(tenant_id: int, params: dict) -> list[dict]:
+    from hr.models import AttendanceAdjustment, Employee, WorkLog
+
+    days = _timesheet_days(params)
+    start, end = days[0], days[-1]
+    day_index = {day: i for i, day in enumerate(days, start=1)}
+
+    # ثلاثة استعلامات مهما بلغ عدد الموظفين أو الأيام — الشبكة تُبنى في الذاكرة.
+    logs = list(WorkLog.objects.filter(
+        tenant_id=tenant_id, date__gte=start, date__lte=end,
+    ).values("employee_id", "date", "hours"))
+    adjustments = list(AttendanceAdjustment.objects.filter(
+        tenant_id=tenant_id, date__gte=start, date__lte=end,
+    ).values("employee_id", "date", "kind", "days", "minutes"))
+
+    # النشطون كلهم — الصفر الظاهر معلومة («لم يُسجَّل له شيء») والغياب من
+    # الكشف ليس معلومة. ومعهم كل من له سجلّ في الفترة وإن عُطِّل بعدها.
+    with_records = ({row["employee_id"] for row in logs}
+                    | {row["employee_id"] for row in adjustments})
+    employees = list(Employee.objects.filter(tenant_id=tenant_id).filter(
+        Q(is_active=True) | Q(id__in=with_records),
+    ).order_by("name", "id"))
+
+    cells: dict[int, dict[int, list[str]]] = {}
+    hours: dict[int, Decimal] = {}
+    overtime: dict[int, Decimal] = {}
+    absence: dict[int, Decimal] = {}
+    late: dict[int, int] = {}
+    standard = {e.id: (e.standard_hours_per_day or ZERO) for e in employees}
+
+    for row in logs:
+        index = day_index.get(row["date"])
+        if index is None:
+            continue
+        employee_id = row["employee_id"]
+        worked = Decimal(str(row["hours"] or 0))
+        hours[employee_id] = hours.get(employee_id, ZERO) + worked
+        agreed = standard.get(employee_id) or ZERO
+        if agreed and worked > agreed:
+            overtime[employee_id] = overtime.get(employee_id, ZERO) + (worked - agreed)
+        cells.setdefault(employee_id, {}).setdefault(index, []).append(_qty(worked))
+
+    for row in adjustments:
+        index = day_index.get(row["date"])
+        if index is None:
+            continue
+        employee_id = row["employee_id"]
+        if row["kind"] == AttendanceAdjustment.KIND_ABSENCE:
+            value = Decimal(str(row["days"] or 0))
+            absence[employee_id] = absence.get(employee_id, ZERO) + value
+            mark = "غ" if value == 1 else f"غ {_qty(value)}"
+        else:
+            minutes = int(row["minutes"] or 0)
+            late[employee_id] = late.get(employee_id, 0) + minutes
+            mark = f"ت {minutes}"
+        cells.setdefault(employee_id, {}).setdefault(index, []).append(mark)
+
+    rows = []
+    for employee in employees:
+        grid = cells.get(employee.id, {})
+        row = {
+            "id": employee.id,
+            "employee": employee.name,
+            "total_hours": _qty(hours.get(employee.id, ZERO)),
+            "overtime_hours": _qty(overtime.get(employee.id, ZERO)),
+            "absence_days": _qty(absence.get(employee.id, ZERO)),
+            "late_minutes": _qty(late.get(employee.id, 0)),
+        }
+        for index in day_index.values():
+            row[f"d{index}"] = " · ".join(grid.get(index, ()))
+        rows.append(row)
+    return rows
+
+
+register(ReportSpec(
+    key="timesheet-daily",
+    title="كشف الساعات اليومي",
+    category="hr",
+    description="صفٌّ لكل موظف وعمودٌ لكل يوم: ساعاته وغياباته وتأخيراته، "
+                "ومجاميعها التي تُراجَع قبل اعتماد الرواتب.",
+    filters=(
+        # «هذا الشهر» افتراضاً: فترةٌ أوسع تصطدم بحارس الأعمدة فوراً، فيُستقبَل
+        # التقرير برسالة خطأ بدل أن يُفتح على الشهر الذي يريده المستخدم أصلاً.
+        ReportFilter("from", "من تاريخ", "date", default="month"),
+        ReportFilter("to", "إلى تاريخ", "date", default="month"),
+    ),
+    # المعلَن في الفهرس أعمدة الملخّص وحدها — أعمدة الأيام لا تُعرف إلا بفترة.
+    columns=(
+        ReportColumn("employee", "الموظف", width="150px"),
+        ReportColumn("total_hours", "مجموع الساعات", KIND_NUMBER, total=True, width="100px"),
+        ReportColumn("overtime_hours", "فوق الدوام", KIND_NUMBER, total=True, width="90px"),
+        ReportColumn("absence_days", "أيام الغياب", KIND_NUMBER, total=True, width="90px"),
+        ReportColumn("late_minutes", "دقائق التأخير", KIND_NUMBER, total=True, width="100px"),
+    ),
+    columns_for=_timesheet_columns,
+    permission="hr.payroll.view",
+    build=_timesheet_daily,
 ))
 
 

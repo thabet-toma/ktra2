@@ -90,6 +90,15 @@ class ReportSpec:
     #: مسار المستند خلف السطر، بقوالب من مفاتيح الصف — «/sales/invoices/{id}».
     #: وجوده يجعل السطر قابلاً للفتح في الشاشة العامّة (لا شاشة تعرف مستنداتها).
     row_link: str | None = None
+    #: أعمدة تُحسب عند التشغيل بدل إعلانها ثابتةً — لتقريرٍ عمودُه يتبع البيانات
+    #: (عمود لكل يوم في الفترة مثلاً). تُستدعى بـ`(tenant_id, params)` وتُعيد
+    #: الأعمدة الفعلية، فتُبنى الحمولة والإجماليات عليها.
+    #:
+    #: الفهرس (`report_catalog`) يبقى على `columns` الثابتة — فهو يُطلب بلا
+    #: مستأجرٍ ولا فترة، فلا يستطيع أن يعرف أعمدة تشغيلٍ لم يحدث. المستهلك
+    #: الوحيد اليوم (`ReportRunnerPage` وCSV والطباعة) يقرأ أعمدة **الناتج** لا
+    #: الفهرس، فالتقرير الديناميكي يعلن في الفهرس أعمدة ملخّصه الثابتة فقط.
+    columns_for: Callable[[int, dict], tuple[ReportColumn, ...]] | None = None
 
 
 REPORTS: dict[str, ReportSpec] = {}
@@ -212,7 +221,12 @@ MAX_ROWS = 5000
 def run_report(key: str, tenant_id: int, params: dict) -> dict:
     """ينفّذ تقريراً ويُعيد الحمولة الكاملة (أعمدة + صفوف + إجماليات)."""
     spec = REPORTS[key]
-    rows = spec.build(tenant_id, params or {})
+    params = params or {}
+    if spec.columns_for is not None:
+        # الأعمدة الفعلية تحلّ محلّ المعلنة قبل أي شيء آخر، فيمرّ باقي المسار
+        # (البناء، `compute_totals`، الحمولة) على نسخةٍ واحدة لا فرعين.
+        spec = dataclasses.replace(spec, columns=tuple(spec.columns_for(tenant_id, params)))
+    rows = spec.build(tenant_id, params)
     total_rows = len(rows)
     totals = compute_totals(spec, rows)
     truncated = total_rows > MAX_ROWS

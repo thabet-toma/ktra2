@@ -27,6 +27,8 @@ export type PrintReportOptions<T> = {
   footer?: string;
   /** رسالة عند غياب الصفوف. */
   emptyHint?: string;
+  /** ورقة عرضية — جدولٌ عريض (كشف الساعات: عمود لكل يوم) لا يسع الطولية. */
+  landscape?: boolean;
 };
 
 const esc = (v: unknown) =>
@@ -40,7 +42,10 @@ const esc = (v: unknown) =>
  * الشاشة رسالة بدل الصمت.
  */
 export function printReport<T>(options: PrintReportOptions<T>): boolean {
-  const { title, subtitle, columns, rows, meta = [], totals, footer, emptyHint } = options;
+  const {
+    title, subtitle, columns, rows, meta = [], totals, footer, emptyHint,
+    landscape = columns.length > 10,
+  } = options;
   const win = window.open("", "_blank");
   if (!win) return false;
 
@@ -102,7 +107,16 @@ export function printReport<T>(options: PrintReportOptions<T>): boolean {
           tfoot .totals td { background-color: #f3f4f6; font-weight: 700; border-top: 2px solid #d1d5db; }
           .empty { text-align: center; color: #6b7280; }
           .footer { margin-top: 28px; font-size: 13px; color: #374151; }
-          @media print { body { padding: 0; } @page { margin: 1.5cm; } }
+          @media print {
+            body { padding: 0; }
+            @page { margin: 1.5cm; size: ${landscape ? "landscape" : "auto"}; }
+            /* الرأس يتكرّر في كل صفحة: بدونه تُقرأ الصفحة الثانية من كشفٍ
+               طويل بلا عناوين أعمدة — أرقامٌ لا يُعرف ماذا تعني. الافتراضي
+               في المتصفحات هذا السلوك، لكنه غير مضمون فيُصرَّح به. */
+            thead { display: table-header-group; }
+            tfoot { display: table-footer-group; }
+            tr, td, th { break-inside: avoid; page-break-inside: avoid; }
+          }
         </style>
       </head>
       <body>
