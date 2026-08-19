@@ -90,13 +90,37 @@ def _price_expression():
     )
 
 
+def _hidden_price_expression():
+    """السعر محجوب — ثابتُ `NULL` لا يقرأ عمودَي السعر من القاعدة أصلاً.
+
+    الحجب هنا لا في العرض ولا في الواجهة: ما لا يُقرَّر نشره لا يغادر القاعدة،
+    وهي القاعدة نفسها التي تحرس الرصيد والتكلفة في `PUBLIC_PRODUCT_COLUMNS`.
+    """
+    return Value(None, output_field=DecimalField(max_digits=18, decimal_places=2))
+
+
+def _prices_are_public(tenant) -> bool:
+    """هل يُعلن هذا المتجر أسعاره؟ غياب صفّ الإعدادات يعني نعم (الافتراضي)."""
+    return getattr(
+        getattr(tenant, "store_theme_settings", None), "show_prices", True
+    )
+
+
 def published_products(tenant):
-    """أصناف الشركة المنشورة في متجرها — الاستعلام المقيَّد بنيوياً."""
+    """أصناف الشركة المنشورة في متجرها — الاستعلام المقيَّد بنيوياً.
+
+    بوابةٌ واحدة تمرّ منها المسارات الثلاثة (القائمة، الصنف، صفحة الحملة)،
+    فحجبُ السعر هنا يغطّيها كلَّها بالبناء لا بثلاثة شروط تُنسى إحداها.
+    """
+    price = (
+        _price_expression() if _prices_are_public(tenant)
+        else _hidden_price_expression()
+    )
     return (
         Product.objects
         .filter(tenant=tenant, is_for_sale_online=True)
         .select_related("category", "uom")
-        .annotate(availability=_availability_expression(), price=_price_expression())
+        .annotate(availability=_availability_expression(), price=price)
         .only(*PUBLIC_PRODUCT_COLUMNS)
     )
 
@@ -225,6 +249,8 @@ class StoreProfileView(StorePublicView):
             "whatsapp_number": getattr(theme_row, "whatsapp_number", None),
             "catalog_mode_default": getattr(theme_row, "catalog_mode_default", "grid") or "grid",
             "allow_cart": getattr(theme_row, "allow_cart", True),
+            # الواجهة تحتاج معرفة الحالة لتُخفي الفرز بالسعر ومبالغ السلة.
+            "show_prices": getattr(theme_row, "show_prices", True),
         }
         return Response(StoreProfileSerializer(payload).data)
 

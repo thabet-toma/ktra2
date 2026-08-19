@@ -107,6 +107,12 @@ class StoreSettings(models.Model):
     allow_cart = models.BooleanField(
         default=True, db_column="AllowCart"
     )
+    # `sale_price` حقلٌ تشغيلي تقرؤه الفوترة — وجودُه ليس إذناً بإعلانه.
+    # متاجر الجملة تعرض كتالوجاً بلا أسعار وتترك السعر لمحادثة.
+    # الافتراضي `True` كي لا يفقد متجرٌ قائم أسعاره بمجرّد الترقية.
+    show_prices = models.BooleanField(
+        default=True, db_column="ShowPrices"
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
     updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
 

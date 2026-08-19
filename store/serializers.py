@@ -53,6 +53,7 @@ class StoreProfileSerializer(serializers.Serializer):
     whatsapp_number = serializers.CharField(read_only=True, allow_null=True)
     catalog_mode_default = serializers.CharField(read_only=True, default="grid")
     allow_cart = serializers.BooleanField(read_only=True, default=True)
+    show_prices = serializers.BooleanField(read_only=True, default=True)
 
 
 class StoreProductSerializer(serializers.Serializer):
@@ -137,7 +138,7 @@ class StoreSettingsAdminSerializer(serializers.ModelSerializer):
             "accent_color", "background_color", "background_image_url",
             "background_style", "banner_image_url", "instagram_url",
             "tiktok_url", "facebook_url", "snapchat_url", "whatsapp_number",
-            "catalog_mode_default", "allow_cart",
+            "catalog_mode_default", "allow_cart", "show_prices",
         ]
 
 
@@ -204,6 +205,16 @@ class StoreCollectionAdminSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
 
+#: ما تملك لوحة المتجر تعديله على صنفٍ **مخزني**. `store.manage` صلاحية
+#: تسويقية: تنشر الصنف وتسحبه وتصف واجهته، ولا تُعيد تعريفه. `sale_price`
+#: و`sku` و`name_ar` تقرؤها الفوترة والتقارير، وتغييرها من هنا يجعل مسؤول
+#: تسويق يصيب سعر البيع المعتمَد بلا أن يدري. صنف المتجر الخالص
+#: (`is_store_only`) ملكُ اللوحة كاملاً فلا يخضع لهذا الحصر.
+STORE_EDITABLE_ON_INVENTORY = frozenset({
+    "is_for_sale_online", "allow_preorder", "online_price", "online_description",
+})
+
+
 class StoreProductAdminSerializer(serializers.ModelSerializer):
     """إدارة وإنشاء منتجات المتجر الإلكتروني مباشرة."""
 
@@ -261,19 +272,70 @@ class StoreProductAdminSerializer(serializers.ModelSerializer):
             ).values_list("file_path", flat=True)
         )
 
-    def create(self, validated_data):
-        import uuid
+    def validate(self, attrs):
+        """الصنف المخزني: حقول المتجر وحدها. والرمز المُدخل: فريد داخل الشركة."""
+        instance = self.instance
+        if instance is not None and not instance.is_store_only:
+            refused = sorted(set(attrs) - STORE_EDITABLE_ON_INVENTORY)
+            if refused:
+                raise serializers.ValidationError({
+                    field: (
+                        "هذا صنف مخزني — لا يُعدَّل هذا الحقل من لوحة المتجر. "
+                        "عدّله من شاشة الأصناف بصلاحيتها."
+                    )
+                    for field in refused
+                })
 
+        sku = (attrs.get("sku") or "").strip()
+        if sku:
+            # عند الإنشاء لا يكون `tenant` في `attrs` بعد — يحقنه العرض عند
+            # `save()` — فيُقرأ من سياق الطلب وإلا مرّ التحقّق على لا شيء.
+            tenant = (
+                attrs.get("tenant")
+                or getattr(instance, "tenant", None)
+                or get_tenant(self.context.get("request"))
+            )
+            clash = Product.objects.filter(tenant=tenant, sku=sku)
+            if instance is not None:
+                clash = clash.exclude(pk=instance.pk)
+            if clash.exists():
+                # القيد `unique(tenant, sku)` كان يفجّر IntegrityError أي 500 في
+                # وجه المستخدم — وهو خطأ إدخالٍ لا انهيار خادم.
+                raise serializers.ValidationError(
+                    {"sku": "رقم الصنف مستخدم مسبقاً لهذه الشركة."}
+                )
+        return attrs
+
+    @staticmethod
+    def _next_store_sku(tenant):
+        """رمزٌ تسلسلي عبر عدّاد المنصة نفسه — لا عشوائيٌّ يتصادم.
+
+        `TenantBook.get_next_number` هو الآلية الذرّية (`select_for_update`)
+        التي تُرقّم بها كل مستندات المنصة. التخطّي المحدود يعالج رقماً حجزه
+        المستخدم يدوياً بنفس الصيغة.
+        """
+        from tenants.models import TenantBook
+
+        for _ in range(20):
+            number = TenantBook.get_next_number(tenant.pk, "store_product", 0)
+            candidate = f"ST-{number:06d}"
+            if not Product.objects.filter(tenant=tenant, sku=candidate).exists():
+                return candidate
+        raise serializers.ValidationError(
+            {"sku": "تعذّر توليد رقم صنف — أدخله يدوياً."}
+        )
+
+    def create(self, validated_data):
         initial_images = validated_data.pop("initial_images", [])
         tenant = validated_data.get("tenant")
 
-        if not validated_data.get("sku"):
-            short_id = uuid.uuid4().hex[:6].upper()
-            validated_data["sku"] = f"ST-{short_id}"
+        if not (validated_data.get("sku") or "").strip():
+            validated_data["sku"] = self._next_store_sku(tenant)
 
         validated_data.setdefault("is_store_only", True)
         validated_data.setdefault("is_for_sale_online", True)
-        validated_data.setdefault("allow_preorder", True)
+        # `allow_preorder` لا يُفرض: «طلب مسبق» وعدٌ تجاري بتوفير الصنف عند
+        # الطلب — قرارُ صاحب المتجر لا افتراضُ الكود. يسود افتراضي النموذج.
 
         product = super().create(validated_data)
 

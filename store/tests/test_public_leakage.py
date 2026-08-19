@@ -43,7 +43,7 @@ PROFILE_WHITELIST = {
     "theme_preset", "primary_color", "accent_color", "background_color",
     "background_image_url", "background_style", "banner_image_url",
     "instagram_url", "tiktok_url", "facebook_url", "snapchat_url",
-    "whatsapp_number", "catalog_mode_default", "allow_cart",
+    "whatsapp_number", "catalog_mode_default", "allow_cart", "show_prices",
 }
 
 #: تمثيلات الرصيد (7) والتكلفة (5) التي قد تخرج بها من ORM/DRF.

@@ -34,6 +34,8 @@ export interface StoreProfile {
   whatsapp_number?: string | null;
   catalog_mode_default?: "grid" | "slideshow" | "compact" | string;
   allow_cart?: boolean;
+  /** `false` ⇒ المتجر كتالوج بلا أسعار: `price` يصل `null` من الخادم. */
+  show_prices?: boolean;
 }
 
 /** حالة التوفّر نصّية دائماً: متوفر، كمية محدودة، غير متوفر، أو طلب مسبق. */
