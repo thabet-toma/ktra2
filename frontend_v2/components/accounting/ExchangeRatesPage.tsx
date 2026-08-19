@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import { formatNumber } from "../../utils/formatNumber";
+import { humanizeThrown } from "../../utils/drfError";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import type { ExchangeRateDto, CurrencyDto } from "../../types/accounting";
 import {
   AseelDocumentShell,
@@ -15,6 +17,7 @@ export const ExchangeRatesPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const confirm = useConfirm();
 
   const [fromCur, setFromCur] = useState("");
   const [toCur, setToCur] = useState("");
@@ -43,7 +46,7 @@ export const ExchangeRatesPage: React.FC = () => {
         if (ils) setToCur(String(ils.CurrencyID));
       }
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "خطأ");
+      setErr(humanizeThrown(e));
     } finally {
       setLoading(false);
     }
@@ -71,20 +74,20 @@ export const ExchangeRatesPage: React.FC = () => {
       setRate("");
       await load();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "خطأ");
+      setErr(humanizeThrown(e));
     } finally {
       setBusy(false);
     }
   };
 
   const deleteRate = async (id: number) => {
-    if (!confirm("حذف سعر الصرف؟")) return;
+    if (!(await confirm({ message: "حذف سعر الصرف؟" }))) return;
     setBusy(true);
     try {
       await accountingApi.deleteExchangeRate(id);
       await load();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "خطأ");
+      setErr(humanizeThrown(e));
     } finally {
       setBusy(false);
     }

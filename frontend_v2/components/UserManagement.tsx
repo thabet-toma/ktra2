@@ -10,6 +10,9 @@ import {
   activityService,
 } from "../services/firestoreService";
 import { Filter, UserCheck, Briefcase, Activity } from 'lucide-react'; // استيراد أيقونات الفلاتر
+import { useConfirm } from "../contexts/ConfirmContext";
+import { useToast } from "../contexts/ToastContext";
+import { humanizeThrown } from "../utils/drfError";
 
 // إضافة نوع لحالة التوظيف للاستخدام المحلي
 type EmploymentStatus = "probation" | "permanent" | "intern";
@@ -98,6 +101,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   onUpdateUser,
   onDeleteUser,
 }) => {
+  const confirm = useConfirm();
+  const toast = useToast();
+  // SAVE-3: يمنع النقر المزدوج على «تفعيل»/«رفض» من إرسال العملية مرتين.
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -246,27 +253,42 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   };
 
   const handleApproveUser = async (user: User) => {
-    if (confirm(`هل أنت متأكد من تفعيل حساب ${user.name}؟`)) {
-      const updatedUser = {
-        ...user,
-        isApproved: true,
-        employmentStatus: user.employmentStatus || "probation",
-      };
+    if (!(await confirm({ message: `هل أنت متأكد من تفعيل حساب ${user.name}؟` }))) return;
+    const updatedUser = {
+      ...user,
+      isApproved: true,
+      employmentStatus: user.employmentStatus || "probation",
+    };
+    setBusyUserId(user.id);
+    try {
       await updateUserInDb(updatedUser);
       onUpdateUser(updatedUser as User);
+      toast(`تم تفعيل حساب ${user.name}.`, "success");
       setIsDetailsModalOpen(false);
+    } catch (e) {
+      // الفشل لا يُغلق النافذة: المستخدم يرى السبب ويعيد المحاولة من مكانه.
+      toast(humanizeThrown(e, "تعذّر تفعيل الحساب"), "error");
+    } finally {
+      setBusyUserId(null);
     }
   };
 
   const handleRejectUser = async (userId: string) => {
-    if (
-      confirm(
-        "هل أنت متأكد من رفض وحذف هذا المستخدم نهائياً؟ سيتم حذف السيرة الذاتية أيضاً."
-      )
-    ) {
+    const ok = await confirm({
+      message:
+        "هل أنت متأكد من رفض وحذف هذا المستخدم نهائياً؟ سيتم حذف السيرة الذاتية أيضاً.",
+    });
+    if (!ok) return;
+    setBusyUserId(userId);
+    try {
       await deleteUserFromDb(userId);
       onDeleteUser(userId);
+      toast("تم حذف المستخدم.", "success");
       setIsDetailsModalOpen(false);
+    } catch (e) {
+      toast(humanizeThrown(e, "تعذّر حذف المستخدم"), "error");
+    } finally {
+      setBusyUserId(null);
     }
   };
 
@@ -493,9 +515,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                         {!user.isApproved && (
                           <button
                             onClick={() => handleApproveUser(user)}
-                            className="bg-green-500 text-white px-3 py-1 rounded text-xs hover:bg-green-600 transition"
+                            disabled={busyUserId === user.id}
+                            className="bg-green-500 text-white px-3 py-1 rounded text-xs hover:bg-green-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            قبول
+                            {busyUserId === user.id ? "جارٍ..." : "قبول"}
                           </button>
                         )}
 
@@ -509,7 +532,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                         <button
                           onClick={() => handleRejectUser(user.id)}
-                          className="text-red-500 hover:text-red-700 p-1"
+                          disabled={busyUserId === user.id}
+                          className="text-red-500 hover:text-red-700 p-1 disabled:opacity-50 disabled:cursor-not-allowed"
                           title={user.isApproved ? "حذف" : "رفض وحذف"}
                         >
                           <DeleteIcon className="h-5 w-5" />

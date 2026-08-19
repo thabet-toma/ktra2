@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../types';
 import { NoteIcon } from './icons/NoteIcon';
+import { useToast } from '../contexts/ToastContext';
+import { humanizeThrown } from '../utils/drfError';
 
 interface EmployeeNotesProps {
     users: User[];
@@ -8,6 +10,7 @@ interface EmployeeNotesProps {
 }
 
 const NoteCard: React.FC<{ user: User; onSave: (userId: string, notes: string) => Promise<void> }> = ({ user, onSave }) => {
+    const toast = useToast();
     const [notes, setNotes] = useState(user.notes || '');
     const [isSaving, setIsSaving] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
@@ -24,7 +27,7 @@ const NoteCard: React.FC<{ user: User; onSave: (userId: string, notes: string) =
             setIsDirty(false);
         } catch (error) {
             // console suppressed
-            alert("حدث خطأ أثناء حفظ الملاحظات");
+            toast(humanizeThrown(error), 'error');
         } finally {
             setIsSaving(false);
         }

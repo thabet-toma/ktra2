@@ -10,6 +10,7 @@
  * ويُوزَّع لاحقاً عبر «توزيع» — ربط فقط بلا قيد جديد.
  */
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { humanizeThrown } from "../../utils/drfError";
 import { formatMoney, formatNumber } from "../../utils/formatNumber";
 import { useNavigate } from "react-router-dom";
 import {
@@ -172,7 +173,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       }
       if (sSettings) setAutoPostPayments(!!sSettings.auto_post_payments);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل التحميل");
+      setErr(humanizeThrown(e, "فشل التحميل"));
     } finally {
       setLoading(false);
     }
@@ -233,7 +234,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       toast("تم ترحيل السند", "success");
       await loadAll();
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : "فشل الترحيل", "error");
+      toast(humanizeThrown(e, "فشل الترحيل"), "error");
     }
   };
 
@@ -258,7 +259,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       toast("تم التراجع عن ترحيل السند — عاد مسودة", "success");
       await loadAll();
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : "فشل التراجع عن الترحيل", "error");
+      toast(humanizeThrown(e, "فشل التراجع عن الترحيل"), "error");
     }
   };
 
@@ -273,7 +274,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       setPayments((ps) => ps.filter((x) => x.id !== p.id));
       toast("تم حذف السند", "success");
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : "فشل الحذف", "error");
+      toast(humanizeThrown(e, "فشل الحذف"), "error");
     }
   };
 
@@ -631,7 +632,7 @@ export const NewPaymentModal: React.FC<{
         if (salesSettings) setLoadedAutoPost(!!salesSettings.auto_post_payments);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "فشل تحميل إعدادات السند");
+        if (!cancelled) setError(humanizeThrown(e, "فشل تحميل إعدادات السند"));
       });
 
     return () => { cancelled = true; };
@@ -735,7 +736,7 @@ export const NewPaymentModal: React.FC<{
       );
       setError(null);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "فشل اقتراح التوزيع");
+      setError(humanizeThrown(e, "فشل اقتراح التوزيع"));
     }
   };
 
@@ -828,7 +829,7 @@ export const NewPaymentModal: React.FC<{
       }
       onSaved();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "فشل الإنشاء");
+      setError(humanizeThrown(e, "فشل الإنشاء"));
     } finally {
       setSubmitting(false);
     }

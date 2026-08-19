@@ -36,6 +36,29 @@ const NETWORK_HINT =
   "تعذر الاتصال بالخادم (شبكة/CORS). تحقق: (1) تشغيل Django (2) VITE_API_URL يشير إلى جذر الخادم أو ينتهي بـ /api " +
   `(المُحلّى: ${API_BASE}) (3) سجّل الدخول ليُرسل التوكن`;
 
+// SAVE-1: رسائل الكتابة تُخاطب المستخدم لا المطوّر، وتقول له بوضوح ماذا حلّ ببياناته.
+// `NETWORK_HINT` أعلاه يبقى للقراءة وحدها (لغته تشخيصية — مرفوعة كملاحظة THA-451).
+//
+// التمييز بين الرسالتين ليس تجميلاً: فشل الاتصال يعني أنّ الطلب **لم يغادر**، فلا شيء
+// حُفظ وإعادة المحاولة آمنة. أمّا انتهاء المهلة فيعني أنّ الرد لم يصل — وقد يكون الخادم
+// نفّذ العملية فعلاً. قول «لم يُحفَظ شيء» بعد مهلةٍ على فاتورة أو سند كذبٌ يُنتج قيداً
+// مكرّراً، فلها رسالتها الخاصة التي تطلب التحقّق قبل الإعادة.
+const WRITE_NETWORK_HINT =
+  "لم يصل الطلب إلى الخادم — لم يُحفَظ شيء وبياناتك ما زالت أمامك. تحقّق من الاتصال ثم أعد المحاولة.";
+
+const WRITE_TIMEOUT_HINT =
+  "انتهت مهلة انتظار الخادم (30 ثانية) قبل وصول الرد — قد تكون العملية قد تمّت على الخادم. "
+  + "بياناتك ما زالت أمامك؛ تحقّق من السجل أولاً كي لا تتكرّر العملية.";
+
+const READ_TIMEOUT_HINT =
+  "انتهت مهلة انتظار الخادم (30 ثانية). تحقق من الاتصال، ثم أعد المحاولة.";
+
+/** طلب كتابة = أي method غير GET/HEAD. يحدّد أيّ رسالة يراها المستخدم عند الفشل. */
+function isWriteRequest(init?: RequestInit): boolean {
+  const method = (init?.method || "GET").toUpperCase();
+  return method !== "GET" && method !== "HEAD";
+}
+
 // سقف واضح لمسارات التطبيق العادية: يكفي لتذبذب الاستضافة المشتركة، ولا يترك
 // المستخدم أمام spinner لدقيقتين. التقارير الثقيلة ينبغي أن تعطي تقدماً بدلاً
 // من إبقاء طلب واجهة عادي مفتوحاً بلا تفسير.
@@ -60,6 +83,9 @@ export async function apiFetch(url: string, init?: RequestInit): Promise<Respons
     emitUserActivity();
   }
   const canRetry = isSafeToRetry(init);
+  const isWrite = isWriteRequest(init);
+  const timeoutHint = isWrite ? WRITE_TIMEOUT_HINT : READ_TIMEOUT_HINT;
+  const networkHint = isWrite ? WRITE_NETWORK_HINT : NETWORK_HINT;
   const maxAttempts = canRetry ? MAX_FETCH_ATTEMPTS : 1;
   // هذا deadline للطلب كله، لا لكل محاولة. سابقاً كانت كل محاولة تحصل على
   // 30 ثانية مستقلة، فكان النص يقول 30 ثانية بينما الانتظار قد يصل 91.6 ثانية.
@@ -73,9 +99,7 @@ export async function apiFetch(url: string, init?: RequestInit): Promise<Respons
     let timedOut = false;
     const remainingMs = remainingRequestBudgetMs(deadlineMs);
     if (remainingMs <= 0) {
-      throw new NetworkError(
-        "انتهت مهلة انتظار الخادم (30 ثانية). تحقق من الاتصال، ثم أعد المحاولة."
-      );
+      throw new NetworkError(timeoutHint);
     }
     const abortFromCaller = () => controller.abort(callerSignal?.reason);
     if (callerSignal?.aborted) abortFromCaller();
@@ -107,18 +131,14 @@ export async function apiFetch(url: string, init?: RequestInit): Promise<Respons
           await new Promise((r) => setTimeout(r, retryDelayMs));
           continue;
         }
-        throw new NetworkError(
-          "انتهت مهلة انتظار الخادم (30 ثانية). تحقق من الاتصال، ثم أعد المحاولة."
-        );
+        throw new NetworkError(timeoutHint);
       }
 
       if (isTimeout) {
-        throw new NetworkError(
-          "انتهت مهلة انتظار الخادم (30 ثانية). تحقق من الاتصال، ثم أعد المحاولة."
-        );
+        throw new NetworkError(timeoutHint);
       }
       if (isNetwork) {
-        throw new NetworkError(NETWORK_HINT);
+        throw new NetworkError(networkHint);
       }
       throw e;
     } finally {
@@ -127,7 +147,7 @@ export async function apiFetch(url: string, init?: RequestInit): Promise<Respons
     }
   }
   // لا يُفترض الوصول هنا (الحلقة إمّا تُرجع استجابة أو ترمي خطأً)
-  throw new NetworkError(NETWORK_HINT);
+  throw new NetworkError(networkHint);
 }
 
 function getHeaders(extra?: Record<string, string>, withJsonContentType: boolean = true) {

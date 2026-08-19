@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { humanizeThrown } from "../../utils/drfError";
+import { useToast } from "../../contexts/ToastContext";
 import { accountingApi } from "../../services/accountingApi";
 import { formatMoney } from "../../utils/formatNumber";
 import type { VatReportResponse, VatReportLine } from "../../types/accounting";
@@ -34,6 +36,7 @@ export const VatStatementsPage: React.FC = () => {
   const [previewData, setPreviewData] = useState<VatReportResponse | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
+  const toast = useToast();
   const [showNewForm, setShowNewForm] = useState(false);
 
   // Statements list (empty until N8-T13)
@@ -49,7 +52,7 @@ export const VatStatementsPage: React.FC = () => {
       });
       setPreviewData(resp as VatReportResponse);
     } catch (e: unknown) {
-      setPreviewErr(e instanceof Error ? e.message : "فشل التحميل");
+      setPreviewErr(humanizeThrown(e, "فشل التحميل"));
       setPreviewData(null);
     } finally {
       setPreviewLoading(false);
@@ -156,7 +159,7 @@ export const VatStatementsPage: React.FC = () => {
               type="button"
               className="aseel-toolbtn"
               onClick={() => {
-                alert("إنشاء الكشف سيكون متاحاً بعد تنفيذ N8-T13 في الخادم.");
+                toast("إنشاء الكشف غير متاح بعد — ينتظر تنفيذ N8-T13 في الخادم.", "info");
               }}
             >
               <FileText className="w-4 h-4" />إصدار الكشف

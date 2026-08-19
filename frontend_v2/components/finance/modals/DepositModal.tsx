@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, ArrowDownLeft } from 'lucide-react';
 import { cashBoxTransactionsService } from '../../../services/firestoreService';
 import { accountingApi } from '../../../services/accountingApi';
 import { CashBox } from '../../../types';
+import { useToast } from '../../../contexts/ToastContext';
+import { humanizeThrown } from '../../../utils/drfError';
 
 interface DepositModalProps {
     isOpen: boolean;
@@ -23,6 +25,23 @@ export const DepositModal: React.FC<DepositModalProps> = ({
     const [reference, setReference] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [isLoading, setIsLoading] = useState(false);
+    const toast = useToast();
+    const [formError, setFormError] = useState<string | null>(null);
+    const [partialWarning, setPartialWarning] = useState<string | null>(null);
+
+    // المكوّن يبقى محمَّلاً بعد الإغلاق (`isOpen` + `return null`)، فحالته تعيش
+    // بين فتحة وأخرى. وبدون هذا التصفير كان تحذيرُ فشلٍ جزئي واحد يقفل زرّ
+    // الإرسال **إلى الأبد**: يفتح المستخدم النافذة لإيداع جديد مشروع فيجدها
+    // مقفلة تحمل تحذير إيداع قديم، ولا مخرج إلا إعادة تحميل الصفحة.
+    useEffect(() => {
+        if (!isOpen) return;
+        setPartialWarning(null);
+        setFormError(null);
+        setAmount('');
+        setDescription('');
+        setReference('');
+        setDate(new Date().toISOString().split('T')[0]);
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
@@ -31,6 +50,8 @@ export const DepositModal: React.FC<DepositModalProps> = ({
         if (!amount || amount <= 0 || !description) return;
 
         setIsLoading(true);
+        setFormError(null);
+        setPartialWarning(null);
         try {
             const txId = await cashBoxTransactionsService.addTransaction({
                 cashBoxId: cashBox.id,
@@ -50,26 +71,29 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                     description: description.trim(),
                     firestore_transaction_id: txId,
                 });
+                toast('تم تسجيل الإيداع وقيده في المحاسبة.', 'success');
+                onDepositComplete?.();
+                onClose();
+                setAmount('');
+                setDescription('');
+                setReference('');
+                setDate(new Date().toISOString().split('T')[0]);
             } catch (je) {
-                // console suppressed
-                const msg =
-                    je instanceof Error
-                        ? je.message
-                        : 'تعذّر إنشاء قيد المحاسبة (تحقق من ربط الصندوق وحساب رأس المال والفترة المالية).';
-                alert(
-                    `تم حفظ الإيداع في الصندوق، لكن فشل قيد رأس المال:\n${msg}\n\nيمكنك إنشاء القيد يدوياً أو إعادة المحاولة بعد إصلاح الإعدادات.`
+                // نجاح جزئي وخطير محاسبياً: النقد دخل الصندوق وقيد رأس المال لم
+                // يُسجَّل، فالدفاتر غير متوازنة حتى يتدخّل المستخدم. رسالة عابرة
+                // تضيع، فتبقى لافتة ثابتة والنافذة مفتوحة. ولا نصفّر المدخلات كي
+                // يُنشئ القيد يدوياً بالأرقام نفسها. الإيداع نفسه محفوظ، فيُقفل
+                // زرّ الإرسال منعاً لإيداع مكرّر.
+                setPartialWarning(
+                    'تم حفظ الإيداع في الصندوق، لكن فشل قيد رأس المال:\n'
+                    + humanizeThrown(je, 'تعذّر إنشاء قيد المحاسبة (تحقق من ربط الصندوق وحساب رأس المال والفترة المالية).')
+                    + '\n\nالمبلغ في الصندوق ولم يُقيَّد في الدفاتر بعد — أنشئ القيد يدوياً أو أصلح الإعدادات ثم أعد القيد. لا تُعِد الإيداع.'
                 );
+                onDepositComplete?.();
             }
-            onDepositComplete?.();
-            onClose();
-            // Reset form
-            setAmount('');
-            setDescription('');
-            setReference('');
-            setDate(new Date().toISOString().split('T')[0]);
         } catch (error) {
-            // console suppressed
-            alert("حدث خطأ أثناء عملية الإيداع");
+            // فشل كامل: لا إيداع ولا قيد. المدخلات تبقى ليصحّح ويعيد المحاولة.
+            setFormError(humanizeThrown(error, 'تعذّر تنفيذ الإيداع'));
         } finally {
             setIsLoading(false);
         }
@@ -87,6 +111,17 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                         <X className="w-6 h-6" />
                     </button>
                 </div>
+
+                {formError && (
+                    <div className="mb-3 rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                        {formError}
+                    </div>
+                )}
+                {partialWarning && (
+                    <div className="mb-3 whitespace-pre-line rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                        {partialWarning}
+                    </div>
+                )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
@@ -155,7 +190,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                         </button>
                         <button
                             type="submit"
-                            disabled={isLoading}
+                            disabled={isLoading || partialWarning !== null}
                             className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
                         >
                             {isLoading ? 'جاري التنفيذ...' : 'تأكيد الإيداع'}

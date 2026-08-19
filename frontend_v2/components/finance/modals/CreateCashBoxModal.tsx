@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { cashBoxesService } from '../../../services/firestoreService';
 import { accountingApi } from '../../../services/accountingApi';
 import { Currency } from '../../../types';
+import { useToast } from '../../../contexts/ToastContext';
+import { humanizeThrown } from '../../../utils/drfError';
 
 interface CreateCashBoxModalProps {
     isOpen: boolean;
@@ -10,9 +12,22 @@ interface CreateCashBoxModalProps {
 }
 
 export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, onClose }) => {
+    const toast = useToast();
     const [name, setName] = useState('');
     const [currency, setCurrency] = useState<Currency>('USD');
     const [isLoading, setIsLoading] = useState(false);
+    const [formError, setFormError] = useState<string | null>(null);
+    const [partialWarning, setPartialWarning] = useState<string | null>(null);
+
+    // انظر التعليق نفسه في `DepositModal`: بلا تصفير، تحذيرُ فشلٍ جزئي واحد
+    // يقفل زرّ الإنشاء إلى الأبد على نموذج فارغ.
+    useEffect(() => {
+        if (!isOpen) return;
+        setPartialWarning(null);
+        setFormError(null);
+        setName('');
+        setCurrency('USD');
+    }, [isOpen]);
 
     if (!isOpen) return null;
 
@@ -21,6 +36,8 @@ export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, 
         if (!name) return;
 
         setIsLoading(true);
+        setFormError(null);
+        setPartialWarning(null);
         try {
             const boxId = await cashBoxesService.createCashBox({
                 name,
@@ -33,24 +50,27 @@ export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, 
                     name,
                     currency_code: currency,
                 });
-                alert(
-                    "✅ تم إنشاء الصندوق.\n\nفي المحاسبة: وُلد له تلقائياً حساب في شجرة الحسابات بنفس اسم الصندوق (تحت مجموعة النقدية)، ويُستخدم في قيود الدفع."
+                toast(
+                    "تم إنشاء الصندوق، ووُلد له حساب في شجرة الحسابات بنفس الاسم تحت مجموعة النقدية.",
+                    'success'
                 );
+                onClose();
+                setName('');
+                setCurrency('USD');
             } catch (glErr) {
                 console.warn("Cash box GL link failed:", glErr);
-                const m = glErr instanceof Error ? glErr.message : String(glErr);
-                alert(
-                    "تم إنشاء الصندوق فقط.\n\nلم يُنشأ حسابه في الشجرة بعد:\n" +
-                        m +
-                        "\n\nافتح «تعديل» على هذا الصندوق واضغط «إنشاء حساب في الشجرة»، أو تأكد من وجود حساب أب للصناديق (مثل 1110) وتسجيل الدخول للـ API."
+                // نجاح جزئي: الصندوق أُنشئ وحسابه لا. لا نُغلق ولا نصفّر — الرسالة
+                // تحمل خطوة تصحيحية يجب أن تبقى مقروءة، وزرّ الإنشاء يُقفل كي لا
+                // يُنشئ المستخدم صندوقاً ثانياً بالاسم نفسه.
+                setPartialWarning(
+                    "تم إنشاء الصندوق، لكن لم يُنشأ حسابه في شجرة الحسابات:\n"
+                    + humanizeThrown(glErr)
+                    + "\n\nافتح «تعديل» على هذا الصندوق واضغط «إنشاء حساب في الشجرة»، أو تأكد من وجود حساب أب للصناديق (مثل 1110) ومن تسجيل الدخول."
                 );
             }
-            onClose();
-            setName('');
-            setCurrency('USD');
         } catch (error) {
-            // console suppressed
-            alert("حدث خطأ أثناء إنشاء الصندوق");
+            // فشل كامل: لا شيء أُنشئ، والمدخلات تبقى أمام المستخدم ليصحّح ويعيد.
+            setFormError(humanizeThrown(error, "تعذّر إنشاء الصندوق"));
         } finally {
             setIsLoading(false);
         }
@@ -70,6 +90,17 @@ export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, 
                         <X className="w-6 h-6" />
                     </button>
                 </div>
+
+                {formError && (
+                    <div className="mb-3 rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                        {formError}
+                    </div>
+                )}
+                {partialWarning && (
+                    <div className="mb-3 whitespace-pre-line rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                        {partialWarning}
+                    </div>
+                )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
@@ -111,7 +142,7 @@ export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, 
                         </button>
                         <button
                             type="submit"
-                            disabled={isLoading}
+                            disabled={isLoading || partialWarning !== null}
                             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
                         >
                             {isLoading ? 'جاري الإنشاء...' : 'إنشاء الصندوق'}

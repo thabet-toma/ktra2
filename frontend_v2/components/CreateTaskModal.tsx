@@ -4,6 +4,7 @@ import { cloudinaryService } from '../services/cloudinaryService';
 import { getCategories } from '../services/firestoreService';
 import { FileDropZone } from './ui/FileDropZone';
 import { useToast } from '../contexts/ToastContext';
+import { humanizeThrown } from '../utils/drfError';
 
 interface CreateTaskModalProps {
     isOpen: boolean;
@@ -135,12 +136,12 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         e.preventDefault();
         
         if (!title || !description || assignedTo.length === 0 || !dueDate) {
-            alert('يرجى ملء جميع الحقول وتحديد موظف واحد على الأقل');
+            toast('يرجى ملء جميع الحقول وتحديد موظف واحد على الأقل', 'error');
             return;
         }
 
         if (!category) {
-            alert('يرجى اختيار فئة للمهمة');
+            toast('يرجى اختيار فئة للمهمة', 'error');
             return;
         }
 
@@ -175,7 +176,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             
         } catch (error) {
             // console suppressed
-            alert('حدث خطأ أثناء إنشاء المهمة. يرجى المحاولة مرة أخرى.');
+            toast(humanizeThrown(error), 'error');
         } finally {
             setUploading(false);
         }

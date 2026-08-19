@@ -7,6 +7,7 @@ import {
 import { cloudinaryService } from '@/services/cloudinaryService';
 import { FileDropZone } from '../../ui/FileDropZone';
 import { useToast } from '../../../contexts/ToastContext';
+import { humanizeThrown } from '../../../utils/drfError';
 import { SupplierSearch } from './SupplierSearch';
 import { ItemSearchModal } from '../price-offers/ItemSearchModal';
 import { ItemsTableSection } from '../../forms/shared/ItemsTableSection';
@@ -326,7 +327,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
     // Submit
     const handleSubmit = async () => {
         if (!invoiceDate || !supplierId || !invoiceNumber || invoiceItems.length === 0) {
-            alert('يرجى تعبئة الحقول الأساسية: التاريخ، المورد، رقم الفاتورة، وبند واحد على الأقل.');
+            toast("يرجى تعبئة الحقول الأساسية: التاريخ، المورد، رقم الفاتورة، وبند واحد على الأقل.", "error");
             return;
         }
 
@@ -366,7 +367,8 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
             await onSave(invoiceData);
         } catch (error) {
             // console suppressed
-            alert('حدث خطأ أثناء الحفظ');
+            // السبب الحقيقي بدل جملة عامة؛ النافذة تبقى مفتوحة بمدخلاتها.
+            toast(humanizeThrown(error, "تعذّر حفظ الفاتورة"), "error");
         } finally {
             setIsSaving(false);
         }

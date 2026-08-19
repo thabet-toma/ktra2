@@ -21,7 +21,9 @@ import { validatePaymentInput } from "@/utils/usePaymentForm";
 import { BANK_SWIFT_IMAGE_REQUIRED, isAwaitingSupplierConfirmation } from "@/utils/dealPaymentFlow";
 import { formatDateValue } from "../../../utils/formatDate";
 import { FileDropZone } from "../../ui/FileDropZone";
+import { humanizeThrown } from "../../../utils/drfError";
 import { useToast } from "../../../contexts/ToastContext";
+import { useConfirm } from "../../../contexts/ConfirmContext";
 
 /** ربط صندوق (external_id = معرف Firestore) برصيد حسابه في ميزان المراجعة */
 async function fetchSqlBalanceByCashBoxExternalId(): Promise<Record<string, number>> {
@@ -103,6 +105,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
   const [supplierNotes, setSupplierNotes] = useState("");
   const [isUploading, setIsUploading] = useState<string | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
   const [cashBoxes, setCashBoxes] = useState<any[]>([]);
   const [sqlBalanceByCashBoxId, setSqlBalanceByCashBoxId] = useState<Record<string, number>>({});
   const sqlBalanceRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -206,7 +209,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
     } catch (err) {
       // كان يبتلع السبب الحقيقي (مثل «لم تُضبط بيانات Cloudinary على الخادم»)
       // فيبدو الخلل عطلاً في السحابة بينما هو إعداد ناقص على الخادم.
-      toast(`فشل رفع الصورة: ${err instanceof Error ? err.message : String(err)}`, "error");
+      toast(`فشل رفع الصورة: ${humanizeThrown(err)}`, "error");
     } finally {
       setIsUploading(null);
     }
@@ -215,12 +218,12 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
   // ⭐ دالة محسنة لحفظ المطالبة مع التاريخ
   const handleSaveClaim = () => {
     if (!claimImage) {
-      alert("يرجى رفع صورة المطالبة");
+      toast("يرجى رفع صورة المطالبة", "error");
       return;
     }
 
     if (amount <= 0) {
-      alert("❌ المبلغ يجب أن يكون أكبر من صفر");
+      toast("❌ المبلغ يجب أن يكون أكبر من صفر", "error");
       return;
     }
 
@@ -246,22 +249,22 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
   };
 
   // ⭐ دالة محسنة لحفظ التحويل مع التواريخ
-  const handleSaveSwift = () => {
+  const handleSaveSwift = async () => {
     const vErr = validatePaymentInput({
       amount: String(amount), date: paymentDate, exchangeRate: usdToIls,
     });
     if (vErr.amount || vErr.date || vErr.exchangeRate) {
-      alert(vErr.amount || vErr.date || vErr.exchangeRate);
+      toast(vErr.amount || vErr.date || vErr.exchangeRate, "error");
       return;
     }
 
     if (BANK_SWIFT_IMAGE_REQUIRED && !swiftImage) {
-      alert("يرجى رفع صورة السليب");
+      toast("يرجى رفع صورة السليب", "error");
       return;
     }
 
     if (!selectedCashBoxId) {
-      alert("يرجى اختيار صندوق مالي");
+      toast("يرجى اختيار صندوق مالي", "error");
       return;
     }
 
@@ -271,7 +274,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
     // تحقق من وجود رصيد كافي في الصندوق
     const selectedCashBox = cashBoxes.find(cb => cb.id === selectedCashBoxId);
     if (!selectedCashBox) {
-      alert("❌ الصندوق المحدد غير موجود");
+      toast("❌ الصندوق المحدد غير موجود", "error");
       return;
     }
 
@@ -311,7 +314,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
     if (transferFee > 0) {
       const confirmMessage = `هل أنت متأكد من خصم المبلغ الإجمالي $${totalAmount.toLocaleString()} من صندوق "${selectedCashBox.name}"؟\n\n- المبلغ الأساسي: $${amount.toLocaleString()}\n- تكلفة الحوالة: $${transferFee.toLocaleString()}`;
 
-      if (!window.confirm(confirmMessage)) {
+      if (!(await confirm({ title: "تأكيد الخصم", message: confirmMessage }))) {
         return;
       }
     }

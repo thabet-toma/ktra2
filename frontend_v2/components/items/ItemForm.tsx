@@ -7,6 +7,7 @@ import { ArrowRight, Plus, Shield, Save, X, StoreIcon } from 'lucide-react';
 import { AseelTabs } from '../aseel';
 import { FileDropZone } from '../ui/FileDropZone';
 import { useToast } from '../../contexts/ToastContext';
+import { humanizeThrown } from '../../utils/drfError';
 import { usePasteZone } from '../../utils/clipboardImage';
 import { fillFirstEmptySlots } from '../../utils/imageSlots';
 
@@ -44,7 +45,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({
 
     const handleSave = async () => {
         if (!currentItem.name || !currentItem.categoryId) {
-            alert('يرجى تعبئة الحقول الأساسية (الاسم والتصنيف)');
+            toast('يرجى تعبئة الحقول الأساسية (الاسم والتصنيف)', 'error');
             return;
         }
 
@@ -76,7 +77,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({
             onSave();
         } catch (error) {
             // console suppressed
-            alert("حدث خطأ أثناء الحفظ");
+            toast(humanizeThrown(error), 'error');
         }
     };
 

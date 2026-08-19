@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../../types';
 import { formatDateValue } from "../../utils/formatDate";
+import { useToast } from '../../contexts/ToastContext';
+import { humanizeThrown } from '../../utils/drfError';
 
 interface EmployeeDetailsModalProps {
     isOpen: boolean;
@@ -19,6 +21,7 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
     onReject,
     onSaveNotes
 }) => {
+    const toast = useToast();
     const [notes, setNotes] = useState(user.notes || '');
     const [isSavingNotes, setIsSavingNotes] = useState(false);
 
@@ -36,7 +39,7 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
             // Optional: Show success indication visually if needed
         } catch (error) {
             // console suppressed
-            alert("فشل حفظ الملاحظات");
+            toast(humanizeThrown(error), 'error');
         } finally {
             setIsSavingNotes(false);
         }

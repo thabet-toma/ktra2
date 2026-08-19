@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { humanizeThrown } from "../../utils/drfError";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import {
   FileText,
   Plus,
@@ -53,6 +55,7 @@ export const CreditDebitNotesPage: React.FC = () => {
   const [partners, setPartners] = useState<Partner[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const confirm = useConfirm();
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -140,7 +143,7 @@ export const CreditDebitNotesPage: React.FC = () => {
       setNotes(ns || []);
       setPartners(parts || []);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل التحميل");
+      setErr(humanizeThrown(e, "فشل التحميل"));
     } finally {
       setLoading(false);
     }
@@ -189,19 +192,19 @@ export const CreditDebitNotesPage: React.FC = () => {
       setShowForm(false);
       await loadAll();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل الحفظ");
+      setErr(humanizeThrown(e, "فشل الحفظ"));
     } finally {
       setSaving(false);
     }
   };
 
   const handlePost = async (id: number) => {
-    if (!window.confirm("هل تريد ترحيل هذا الإشعار؟")) return;
+    if (!(await confirm({ message: "هل تريد ترحيل هذا الإشعار؟" }))) return;
     try {
       await apiPostObject(`${BASE}/${id}/post/`, {}, { tenantId: tid() });
       await loadAll();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل الترحيل");
+      setErr(humanizeThrown(e, "فشل الترحيل"));
     }
   };
 

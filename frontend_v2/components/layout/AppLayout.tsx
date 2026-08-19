@@ -26,6 +26,7 @@ import { GlobalContextMenu } from './GlobalContextMenu';
 import { NotificationCenter } from '../notifications/NotificationCenter';
 import { WhatsNewButton } from './WhatsNewButton';
 import { CustomerNotesTab } from '../partners/CustomerNotesTab';
+import { useConfirm } from '../../contexts/ConfirmContext';
 // استيراد مباشر لا عبر barrel الـimport-flow: البرميل يجرّ ImportDocumentScreen
 // كاملةً إلى حزمة القشرة ويُبطل تقسيم الحِزَم.
 import { ImportJourneyGuide } from '../import-flow/ImportJourneyGuide';
@@ -134,6 +135,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   onOpenGroupConstants,
 }) => {
   const { logout } = useAuth();
+  const confirm = useConfirm();
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [notesTarget, setNotesTarget] = useState<PlatformNoteTarget | null>(null);
 
@@ -253,8 +255,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </button>
           <div className="w-px h-4 bg-[var(--color-border)] mx-1"></div>
           <button
-            onClick={() => {
-              if (window.confirm('هل تريد تأكيد تسجيل الخروج؟')) {
+            onClick={async () => {
+              if (await confirm({ message: 'هل تريد تأكيد تسجيل الخروج؟' })) {
                 logout();
               }
             }}

@@ -13,6 +13,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiGetList } from "../../services/restApi";
+import { humanizeThrown } from "../../utils/drfError";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { accountingApi } from "../../services/accountingApi";
 import {
@@ -23,7 +24,7 @@ import {
   type AseelToolbarAction,
   type AseelTab,
 } from "../aseel";
-import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split, Undo2 } from "lucide-react";
+import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split, Undo2, Loader2 } from "lucide-react";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
@@ -67,6 +68,9 @@ export const SupplierPaymentsPage: React.FC = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // الترحيل/التراجع يولّدان قيداً محاسبياً؛ بلا قفل الزرّ نقرتان سريعتان
+  // ترسلان طلبين. يُقفل السطر الجاري تنفيذه وحده لا الجدول كلّه.
+  const [busyId, setBusyId] = useState<number | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [search, setSearch] = useState(
     () => new URLSearchParams(window.location.search).get("payment_id") || "",
@@ -93,10 +97,10 @@ export const SupplierPaymentsPage: React.FC = () => {
       if (parts.status === "fulfilled") setPartners(parts.value || []);
       if (accs.status === "fulfilled") setAccounts(accs.value || []);
       if (pays.status === "rejected") {
-        setErr(pays.reason instanceof Error ? pays.reason.message : "فشل تحميل سندات الصرف");
+        setErr(humanizeThrown(pays.reason, "فشل تحميل سندات الصرف"));
       }
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل التحميل");
+      setErr(humanizeThrown(e, "فشل التحميل"));
     } finally {
       setLoading(false);
     }
@@ -143,18 +147,22 @@ export const SupplierPaymentsPage: React.FC = () => {
       );
       setAllocating(row);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "تعذّر جلب فواتير الشراء المفتوحة");
+      setErr(humanizeThrown(e, "تعذّر جلب فواتير الشراء المفتوحة"));
     }
   };
 
   const handlePost = async (id: number) => {
+    if (busyId != null) return;
     setErr(null);
+    setBusyId(id);
     try {
       await purchaseInvoiceApi.postSupplierPayment(id);
       setMsg("✓ تم ترحيل سند الصرف");
       await load();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل الترحيل");
+      setErr(humanizeThrown(e, "فشل الترحيل"));
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -176,12 +184,15 @@ export const SupplierPaymentsPage: React.FC = () => {
     });
     if (!ok) return;
     setErr(null);
+    setBusyId(p.id);
     try {
       await purchaseInvoiceApi.unpostSupplierPayment(p.id);
       setMsg("✓ تم التراجع عن ترحيل السند — عاد مسودة");
       await load();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل التراجع عن الترحيل");
+      setErr(humanizeThrown(e, "فشل التراجع عن الترحيل"));
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -243,13 +254,13 @@ export const SupplierPaymentsPage: React.FC = () => {
       render: (r) => (
         <div style={{ display: "flex", gap: "2px", justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
           {!r.is_posted && (
-            <button type="button" className="aseel-toolbtn" title="ترحيل" onClick={() => void handlePost(r.id)}>
-              <Check className="w-3 h-3" />
+            <button type="button" className="aseel-toolbtn" title="ترحيل" disabled={busyId != null} onClick={() => void handlePost(r.id)}>
+              {busyId === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
             </button>
           )}
           {r.is_posted && canPerm("purchase.payment.unpost") && (
-            <button type="button" className="aseel-toolbtn" title="تراجع عن الترحيل" onClick={() => void handleUnpost(r)}>
-              <Undo2 className="w-3 h-3" />
+            <button type="button" className="aseel-toolbtn" title="تراجع عن الترحيل" disabled={busyId != null} onClick={() => void handleUnpost(r)}>
+              {busyId === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Undo2 className="w-3 h-3" />}
             </button>
           )}
           <button

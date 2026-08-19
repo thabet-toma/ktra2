@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { PromptDialog } from '../../common/PromptDialog';
 import { Deal, DealInstallment, DealPayment, User } from '@/types';
 import { formatNumber } from '@/utils/formatNumber';
 import {
@@ -70,6 +71,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [showDetailsModal, setShowDetailsModal] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
+    const [journalLinkTarget, setJournalLinkTarget] = useState<{ type: string; paymentId: string } | null>(null);
 
     const openImageInPopup = (imageUrl: string) => {
         window.open(imageUrl, '_blank', 'width=800,height=600');
@@ -596,25 +598,10 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                         <button
                                             type="button"
                                             title="إن أنشأت القيد يدوياً في المحاسبة ولم يظهر رابط الدفتر — أدخل رقم القيد"
-                                            onClick={() => {
-                                                const raw = window.prompt(
-                                                    "رقم قيد اليومية المرحّل (Journal ID) من شاشة المحاسبة:",
-                                                    ""
-                                                );
-                                                if (raw == null || String(raw).trim() === "") return;
-                                                const n = parseInt(String(raw).trim(), 10);
-                                                if (!Number.isFinite(n) || n <= 0) {
-                                                    toast("رقم غير صالح.", "error");
-                                                    return;
-                                                }
-                                                onPaymentOperation(
-                                                    "linkJournal",
-                                                    `دفعة_${installment.installmentNumber}`,
-                                                    { journalId: n },
-                                                    String(payment.id)
-                                                );
-                                                setRefreshKey((k) => k + 1);
-                                            }}
+                                            onClick={() => setJournalLinkTarget({
+                                                type: `دفعة_${installment.installmentNumber}`,
+                                                paymentId: String(payment.id),
+                                            })}
                                             className="shrink-0 rounded-md border aseel-border-soft aseel-bg-field px-2 py-1.5 text-xs font-semibold aseel-text-ink hover:aseel-bg-panel dark:aseel-border-soft dark:aseel-bg-panel dark:aseel-text-soft dark:hover:aseel-bg-panel"
                                         >
                                             ربط قيد
@@ -722,6 +709,28 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
             })()}
 
             {renderDetailsModal()}
+
+            {/* SAVE-3: كان `window.prompt` داخل onClick — بلا RTL ولا تمييز للرقم. */}
+            <PromptDialog
+                isOpen={journalLinkTarget !== null}
+                title="ربط قيد يومية"
+                message="رقم قيد اليومية المرحّل (Journal ID) من شاشة المحاسبة:"
+                type="number"
+                confirmText="ربط"
+                onCancel={() => setJournalLinkTarget(null)}
+                onSubmit={(raw) => {
+                    const target = journalLinkTarget;
+                    setJournalLinkTarget(null);
+                    if (!target || raw.trim() === "") return;
+                    const n = parseInt(raw.trim(), 10);
+                    if (!Number.isFinite(n) || n <= 0) {
+                        toast("رقم غير صالح.", "error");
+                        return;
+                    }
+                    onPaymentOperation("linkJournal", target.type, { journalId: n }, target.paymentId);
+                    setRefreshKey((k) => k + 1);
+                }}
+            />
         </div>
     );
 };

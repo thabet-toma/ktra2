@@ -5,6 +5,7 @@ import type {
 import type { SerialEntryMode } from "../types/inventory";
 import { resolveTenantId } from "../utils/tenantContext";
 import { apiFetch } from "./restApi";
+import { humanizeDrfError, extractDrfFieldErrors } from "../utils/drfError";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const BASE = `${API_BASE}/logistics/purchase-invoices`;
@@ -88,34 +89,37 @@ const headers = (): HeadersInit => {
   };
 };
 
-function formatDrfErrors(j: Record<string, unknown>): string | null {
-  const parts: string[] = [];
-  for (const [k, v] of Object.entries(j)) {
-    if (k === "detail" || k === "error") continue;
-    if (Array.isArray(v) && v.every((x) => typeof x === "string"))
-      parts.push(`${k}: ${(v as string[]).join(" — ")}`);
-    else if (typeof v === "object" && v !== null)
-      parts.push(`${k}: ${JSON.stringify(v).slice(0, 200)}`);
-  }
-  return parts.length ? parts.join("\n") : null;
-}
-
+/**
+ * SAVE-4: كانت هنا `formatDrfErrors` — نسخة ثانية أضعف من `humanizeDrfError`:
+ * تطبع اسم الحقل التقني كما هو (`supplier: This field is required.`) بلا تسمية
+ * عربية ولا ترجمة لرسائل DRF الإنجليزية، وتقذف JSON خاماً للأخطاء المتداخلة.
+ * فكان مستخدم فاتورة الشراء يقرأ رسالة إنجليزية باسم عمود في قاعدة البيانات.
+ *
+ * حُذفت لصالح القاعدة الواحدة المختبَرة في `utils/drfError`، وصار الاستثناء
+ * يحمل `fieldErrors` تماماً كما يفعل `restApi.handleResponseError` — وبدونها
+ * كان عرضُ الخطأ بجانب حقله في `InvoiceForm` لا يجد ما يعرضه أبداً.
+ */
 async function handle(res: Response, ctx: string): Promise<void> {
   if (res.ok) return;
+  let data: unknown = null;
   let msg = `${ctx}: ${res.status}`;
   try {
-    const j = (await res.json()) as Record<string, unknown>;
-    if (typeof j.error === "string") msg = j.error;
-    else if (typeof j.detail === "string") msg = j.detail;
-    else {
-      const joined = formatDrfErrors(j);
-      if (joined) msg = joined;
-    }
+    data = await res.json();
+    const humanized = humanizeDrfError(data);
+    if (humanized) msg = humanized;
   } catch {
     const t = await res.text();
     if (t) msg = t.slice(0, 400);
   }
-  throw new Error(msg);
+  const err = new Error(msg) as Error & {
+    fieldErrors?: Record<string, string>;
+    status?: number;
+    data?: unknown;
+  };
+  err.fieldErrors = extractDrfFieldErrors(data);
+  err.status = res.status;
+  err.data = data;
+  throw err;
 }
 
 async function asList(res: Response): Promise<PurchaseInvoiceListDto[]> {

@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { X, Delete, History as HistoryIcon, Trash2 } from "lucide-react";
 import { evaluateArithmeticExpression } from "../../utils/arithmetic";
+import { useToast } from "../../contexts/ToastContext";
+import { humanizeThrown } from "../../utils/drfError";
 
 /** T-C1: ذاكرة العمليات السابقة — تُحفظ محلياً وتبقى بين الجلسات. */
 const HISTORY_KEY = "aseel_calc_history";
@@ -56,6 +58,7 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
   standalone = false,
   anchorRect = null,
 }) => {
+  const toast = useToast();
   const [expression, setExpression] = useState(() => {
     const v = Number(initialValue);
     return isNaN(v) || v === 0 ? "" : String(v);
@@ -161,8 +164,8 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
         pushHistory(expression.trim(), rounded);
       }
       return rounded;
-    } catch {
-      alert("تعبير غير صالح");
+    } catch (e) {
+      toast(humanizeThrown(e), 'error');
       return null;
     }
   };

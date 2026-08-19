@@ -3,6 +3,9 @@ import React, { useState, useEffect } from 'react';
 import DepartmentCard from '../DepartmentCard';
 import DepartmentModal from './DepartmentModal';
 import { departmentsService, Department } from '../../services/firestoreService';
+import { useToast } from '../../contexts/ToastContext';
+import { useConfirm } from '../../contexts/ConfirmContext';
+import { humanizeThrown } from '../../utils/drfError';
 
 // مكون بسيط لأيقونات التواصل الاجتماعي (SVG)
 const SocialIcon = ({ path, href, colorClass }: { path: string; href: string; colorClass: string }) => (
@@ -19,6 +22,8 @@ const SocialIcon = ({ path, href, colorClass }: { path: string; href: string; co
 );
 
 export const Contact: React.FC<{ currentUser?: any }> = ({ currentUser }) => {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingDept, setEditingDept] = useState<Department | null>(null);
@@ -64,14 +69,14 @@ export const Contact: React.FC<{ currentUser?: any }> = ({ currentUser }) => {
       setEditingDept(null);
     } catch (err) {
       console.error(err);
-      alert('حدث خطأ أثناء الحفظ');
+      toast(humanizeThrown(err), 'error');
     }
   };
 
   // تنظيف التكرارات القائمة: يحذف كل وثائق الأقسام ثم يعيد زرع المجموعة الافتراضية
   // بمعرّفات ثابتة. للمدير فقط — إجراء صريح (لا يعمل تلقائياً) لتفادي أي حذف غير مقصود.
   const handleResetDepartments = async () => {
-    if (!window.confirm('سيُعاد ضبط الأقسام للوضع الافتراضي وتُحذف أي بطاقات مكرّرة. متابعة؟')) return;
+    if (!(await confirm({ message: 'سيُعاد ضبط الأقسام للوضع الافتراضي وتُحذف أي بطاقات مكرّرة. متابعة؟' }))) return;
     try {
       const existingDeps = await departmentsService.getDepartments();
       for (const dept of existingDeps) {
@@ -85,7 +90,7 @@ export const Contact: React.FC<{ currentUser?: any }> = ({ currentUser }) => {
       }
     } catch (err) {
       console.error(err);
-      alert('حدث خطأ أثناء إعادة التعيين');
+      toast(humanizeThrown(err), 'error');
     }
   };
   return (

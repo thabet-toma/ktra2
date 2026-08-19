@@ -402,6 +402,8 @@ export function DataGrid<T>({
 
 // ── Export all as named exports for tree-shaking ─────────────────
 export { Field } from './Field';
+// SAVE-1: خطأ الخادم بجانب حقله بدل سحقه في لافتة واحدة.
+export { FieldError } from './FieldError';
 // M5-T4: unified Aseel-skinned states. `EmptyState`/`Spinner` already exist in
 // this barrel from D1-03 — to avoid name clashes, the Aseel variants are
 // exposed via a namespace import: `import { AseelStates } from '@/components/ui'`.

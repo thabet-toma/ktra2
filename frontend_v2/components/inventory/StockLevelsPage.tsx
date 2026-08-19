@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
+import { humanizeThrown } from "../../utils/drfError";
+import { useToast } from "../../contexts/ToastContext";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct, StockSummaryResponse } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
@@ -12,6 +14,7 @@ const fmt = (n: number | string) => formatMoney(n, "0");
 
 export const StockLevelsPage: React.FC = () => {
   const [products, setProducts] = useState<SqlProduct[]>([]);
+  const toast = useToast();
   const [summary, setSummary] = useState<StockSummaryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -34,7 +37,7 @@ export const StockLevelsPage: React.FC = () => {
       setProducts(prods as SqlProduct[]);
       setSummary(sum as StockSummaryResponse);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "خطأ في التحميل");
+      setErr(humanizeThrown(e, "خطأ في التحميل"));
     } finally {
       setLoading(false);
     }
@@ -95,7 +98,7 @@ export const StockLevelsPage: React.FC = () => {
 
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
-      alert('الرجاء السماح بالنوافذ المنبثقة (Pop-ups) للطباعة');
+      toast("الرجاء السماح بالنوافذ المنبثقة (Pop-ups) للطباعة", "error");
       return;
     }
 

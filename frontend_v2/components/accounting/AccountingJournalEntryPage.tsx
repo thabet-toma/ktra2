@@ -2,6 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { accountingApi } from "../../services/accountingApi";
 import { formatMoney, formatNumber } from "../../utils/formatNumber";
+import { humanizeThrown } from "../../utils/drfError";
+import { useToast } from "../../contexts/ToastContext";
 import type {
   AccountingAccount,
   AccountingPartner,
@@ -136,6 +138,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const toast = useToast();
   const [posted, setPosted] = useState(false);
 
   const [header, setHeader] = useState({
@@ -353,7 +356,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         }
       }
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل التحميل");
+      setErr(humanizeThrown(e, "فشل التحميل"));
     } finally {
       setLoading(false);
     }
@@ -490,9 +493,12 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       const payload = buildPayload();
       if (journalId != null) await accountingApi.updateJournal(journalId, payload);
       else await accountingApi.createJournal(payload);
+      // الشاشة تُغلق فوراً بعد الحفظ، فلافتة النجاح داخلها لا تُرى — التأكيد
+      // يخرج كـ toast كي ينجو من الانتقال بدل أن يُحفظ القيد بلا أي إشعار.
+      toast(journalId != null ? "تم حفظ القيد" : "تم إنشاء القيد", "success");
       onBack();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل الحفظ");
+      setErr(humanizeThrown(e, "فشل الحفظ"));
     } finally { setSaving(false); }
   };
 
@@ -510,9 +516,10 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         id = created.id;
       }
       if (id != null) await accountingApi.postJournal(id);
+      toast("تم حفظ القيد وترحيله", "success");
       onBack();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل الحفظ أو الترحيل");
+      setErr(humanizeThrown(e, "فشل الحفظ أو الترحيل"));
     } finally { setSaving(false); }
   };
 

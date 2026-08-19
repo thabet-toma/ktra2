@@ -7,7 +7,8 @@
  * {@link NewPaymentModal} و{@link NewSupplierPaymentModal} فتخرج النافذتان
  * بنفس الهيكل والألوان تماماً.
  */
-import React from "react";
+import React, { useState } from "react";
+import { PromptDialog } from "../common/PromptDialog";
 import { formatMoney, formatNumber } from "@/utils/formatNumber";
 import { Plus, Save, Trash2, X } from "lucide-react";
 import { applyBlankDefaults } from "@/utils/partnerChequeDefaults";
@@ -204,14 +205,25 @@ export const ChequeGrid: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newLineDefaults]);
 
+  // SAVE-3: كان `window.prompt` — يولّد شيكات (التزامات مالية) من نافذة متصفح
+  // بلا RTL ولا حقل رقمي. الحوار المشترك يقابله بالسلوك نفسه.
+  const [askingMonths, setAskingMonths] = useState(false);
+
   const fillSimilar = () => {
     const last = cheques[cheques.length - 1];
     if (!last || !last.bank_name) {
       onError?.("أضف شيكاً واحداً بكل البيانات أولاً");
       return;
     }
-    const months = Number(window.prompt("عدد الشيكات المتتالية (شهور)؟", "3") || "0");
-    if (months <= 0) return;
+    setAskingMonths(true);
+  };
+
+  const applyFillSimilar = (raw: string) => {
+    setAskingMonths(false);
+    const last = cheques[cheques.length - 1];
+    if (!last) return;
+    const months = Number(raw || "0");
+    if (!Number.isFinite(months) || months <= 0) return;
     const baseDate = new Date(last.due_date || new Date().toISOString().slice(0, 10));
     const extra: ChequeLine[] = [];
     for (let i = 1; i <= months; i++) {
@@ -298,6 +310,17 @@ export const ChequeGrid: React.FC<{
         </table>
         </div>
       )}
+
+      <PromptDialog
+        isOpen={askingMonths}
+        title="تعبئة شيكات متشابهة"
+        message="عدد الشيكات المتتالية (شهور)؟"
+        initialValue="3"
+        type="number"
+        confirmText="تعبئة"
+        onCancel={() => setAskingMonths(false)}
+        onSubmit={applyFillSimilar}
+      />
     </div>
   );
 };

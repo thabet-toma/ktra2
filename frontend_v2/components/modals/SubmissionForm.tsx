@@ -4,6 +4,7 @@ import { DeleteIcon } from "../icons/DeleteIcon";
 import { cloudinaryService } from "../../services/cloudinaryService";
 import { FileDropZone } from "../ui/FileDropZone";
 import { useToast } from "../../contexts/ToastContext";
+import { useConfirm } from "../../contexts/ConfirmContext";
 
 interface SubmissionFormProps {
   initialData?: Submission;
@@ -38,6 +39,7 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
   const [uploading, setUploading] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const toast = useToast();
+  const confirm = useConfirm();
 
   const storageKey =
     taskId && userId ? `submission_draft_${taskId}_${userId}` : null;
@@ -89,13 +91,13 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       ];
       if (!allowedTypes.includes(file.type)) {
-        alert("يُسمح فقط بملفات PDF و Word");
+        toast("يُسمح فقط بملفات PDF و Word", "error");
         return;
       }
 
       // التحقق من حجم الملف (10MB كحد أقصى)
       if (file.size > 10 * 1024 * 1024) {
-        alert("حجم الملف كبير جداً. الحد الأقصى 10MB");
+        toast("حجم الملف كبير جداً. الحد الأقصى 10MB", "error");
         return;
       }
 
@@ -149,11 +151,11 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
 
   const handleAddItem = async () => {
     if (!currentLink.trim()) {
-      alert("رابط المنتج مطلوب");
+      toast("رابط المنتج مطلوب", "error");
       return;
     }
     if (!currentPrice.trim()) {
-      alert("سعر المنتج مطلوب");
+      toast("سعر المنتج مطلوب", "error");
       return;
     }
 
@@ -252,11 +254,11 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
     const newItemsCount = getNewItems().length;
 
     if (totalItems === 0) {
-      alert("لا يمكنك تسليم المهمة بدون إضافة بند واحد على الأقل.");
+      toast("لا يمكنك تسليم المهمة بدون إضافة بند واحد على الأقل.", "error");
       return;
     }
     if (isEditMode && newItemsCount === 0) {
-      alert("لم تقم بإضافة أي بنود جديدة.");
+      toast("لم تقم بإضافة أي بنود جديدة.", "error");
       return;
     }
     setShowConfirmDialog(true);
@@ -275,12 +277,12 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
     setShowConfirmDialog(false);
   };
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
     const hasNewItems = getNewItems().length > 0;
     if (hasNewItems) {
-      const confirmCancel = window.confirm(
-        "هل تريد حقاً إلغاء العملية؟ البنود التي أضفتها محفوظة محلياً."
-      );
+      const confirmCancel = await confirm({
+        message: "هل تريد حقاً إلغاء العملية؟ البنود التي أضفتها محفوظة محلياً.",
+      });
       if (confirmCancel) onCancel();
     } else {
       onCancel();

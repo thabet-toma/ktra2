@@ -14,12 +14,14 @@ import { usePriceVisibility } from '../contexts/PriceVisibilityContext';
 import { useAppearance, FONT_SCALE_OPTIONS, FONT_FAMILY_OPTIONS } from '../contexts/AppearanceContext';
 import { useSessionSettings, IDLE_MIN_MINUTES, IDLE_MAX_MINUTES } from '../contexts/SessionSettingsContext';
 import { getSkin, setSkin, UiSkin } from '../styles/skin';
+import { useToast } from '../contexts/ToastContext';
 
 interface SettingsPageProps {
     user: User;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
+    const toast = useToast();
     const [profileForm, setProfileForm] = useState({
         name: user.name,
         phone: user.phone || '',
@@ -379,7 +381,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                     onClick={async () => {
                         const { cleanOldCache } = await import('../services/offline/cacheCleaner');
                         const n = await cleanOldCache(7);
-                        alert(`تم حذف ${n} سجل قديم`);
+                        toast(`تم حذف ${n} سجل قديم`, 'error');
                     }}
                     style={{ padding: '5px 16px', fontWeight: 700 }}
                 >

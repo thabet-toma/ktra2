@@ -2,6 +2,8 @@
 // import { Truck, Upload, Loader2 } from 'lucide-react';
 // import { cloudinaryService } from '@/services/cloudinaryService';
 // import { PaymentRegistration } from './PaymentRegistration';
+// import { useToast } from '../../../contexts/ToastContext';
+// import { humanizeThrown } from '../../../utils/drfError';
 
 // interface ShippingProps {
 //     data: any;
@@ -16,6 +18,7 @@
 // }
 
 // export const ShippingPrepSection: React.FC<ShippingProps> = ({ data, setData, onSecondPaymentConfirm, onPrepareShipping, paymentType, onSaveClaim, onSavePayment, onConfirmSupplier, currentUser }) => {
+//     const toast = useToast();
 //     const [uploading, setUploading] = useState(false);
 
 //     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -24,7 +27,7 @@
 //         try {
 //             const url = await cloudinaryService.uploadImage(e.target.files[0]);
 //             setData((prev: any) => ({ ...prev, shippingDetails: { ...prev.shippingDetails, shipmentImageUrl: url } }));
-//         } catch (err) { alert('فشل الرفع'); }
+//         } catch (err) { toast(humanizeThrown(err), 'error'); }
 //         finally { setUploading(false); }
 //     };
 

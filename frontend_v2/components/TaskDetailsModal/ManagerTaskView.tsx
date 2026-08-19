@@ -5,6 +5,7 @@ import { PriorityIndicator } from "../common/PriorityIndicator";
 import { Users, ChevronDown, ChevronUp, Check, X, Eye, Filter, Search, Mail, Phone, Clock, AlertCircle, FileText, ImageIcon } from 'lucide-react';
 import { TaskDetailsModalProps } from "./TaskDetailsModal.types";
 import { formatDateTimeValue } from "../../utils/formatDate";
+import { RejectReasonModal } from "../modals/RejectReasonModal";
 
 interface ManagerViewProps extends TaskDetailsModalProps {
   stats: any;
@@ -27,6 +28,9 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
 }) => {
   // حالة لتخزين رابط الصورة المراد تكبيرها (Lightbox)
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  // SAVE-3: سبب الرفض كان يُؤخذ بـ`prompt` داخل onClick — نافذة متصفح بلا RTL
+  // ولا تحقّق. نعيد استعمال `RejectReasonModal` القائم.
+  const [rejectingSubmissionId, setRejectingSubmissionId] = useState<string | null>(null);
   
   const isAssignedToMe = Array.isArray(task.assignedTo) 
     ? task.assignedTo.includes(user.id) 
@@ -191,7 +195,7 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
                                  {submission.status === 'pending' && (
                                    <>
                                      <button onClick={() => onUpdateSubmissionStatus(task.id, submission.id, 'approved', 'تمت الموافقة')} className="p-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200" title="موافقة"><Check className="w-4 h-4" /></button>
-                                     <button onClick={() => { const r = prompt('سبب الرفض:'); if(r) onUpdateSubmissionStatus(task.id, submission.id, 'rejected', r); }} className="p-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200" title="رفض"><X className="w-4 h-4" /></button>
+                                     <button onClick={() => setRejectingSubmissionId(submission.id)} className="p-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200" title="رفض"><X className="w-4 h-4" /></button>
                                    </>
                                  )}
                                  <button onClick={() => onViewDetails(data.userId, submission.id)} className="p-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200" title="عرض التفاصيل"><Eye className="w-4 h-4" /></button>
@@ -270,6 +274,17 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
           />
         </div>
       )}
+
+      <RejectReasonModal
+        isOpen={rejectingSubmissionId !== null}
+        onClose={() => setRejectingSubmissionId(null)}
+        onSubmit={(reason) => {
+          if (rejectingSubmissionId) {
+            onUpdateSubmissionStatus(task.id, rejectingSubmissionId, 'rejected', reason);
+          }
+          setRejectingSubmissionId(null);
+        }}
+      />
     </>
   );
 };

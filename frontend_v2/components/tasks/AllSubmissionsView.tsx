@@ -3,6 +3,9 @@ import React, { useState, useMemo } from 'react';
 import { Task, User, Submission } from '../../types';
 import { Check, X, Download, Eye, Clock, AlertCircle, Filter, Search, ExternalLink, Mail, Phone } from 'lucide-react';
 import { formatDateValue, formatTimeValue } from "../../utils/formatDate";
+import { useConfirm } from '../../contexts/ConfirmContext';
+import { useToast } from '../../contexts/ToastContext';
+import { RejectReasonModal } from '../modals/RejectReasonModal';
 
 interface AllSubmissionsViewProps {
   task: Task;
@@ -27,6 +30,12 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const confirm = useConfirm();
+  const toast = useToast();
+  // SAVE-3: سبب الرفض كان يُؤخذ بـ`prompt` — نافذة متصفح بلا تنسيق ولا RTL
+  // ولا تحقّق من الفراغ. `RejectReasonModal` القائم يفعلها بالشكل نفسه المستعمل
+  // في بقية الشاشات، فلا داعي لنافذة ثانية تفعل الشيء نفسه.
+  const [rejectingSubmissionId, setRejectingSubmissionId] = useState<string | null>(null);
 
   // تجميع بيانات جميع الموظفين مع تسليماتهم
   const userSubmissionsData = useMemo(() => {
@@ -93,30 +102,28 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
   }, [userSubmissionsData]);
 
   // دالة للموافقة/الرفض السريع
-  const handleQuickApprove = (submissionId: string, userId: string) => {
-    if (confirm('هل تريد الموافقة على هذا التسليم؟')) {
+  const handleQuickApprove = async (submissionId: string, userId: string) => {
+    if (await confirm({ message: 'هل تريد الموافقة على هذا التسليم؟' })) {
       onUpdateSubmissionStatus(task.id, submissionId, 'approved', 'تمت الموافقة من العرض الكلي');
     }
   };
 
   const handleQuickReject = (submissionId: string, userId: string) => {
-    const reason = prompt('يرجى كتابة سبب الرفض:');
-    if (reason) {
-      onUpdateSubmissionStatus(task.id, submissionId, 'rejected', reason);
-    }
+    setRejectingSubmissionId(submissionId);
   };
 
   // دالة لإرسال تذكير
-  const handleSendReminder = (userId: string) => {
-    if (onSendReminder && confirm('هل تريد إرسال تذكير لهذا الموظف؟')) {
+  const handleSendReminder = async (userId: string) => {
+    if (onSendReminder && (await confirm({ message: 'هل تريد إرسال تذكير لهذا الموظف؟' }))) {
       onSendReminder(userId);
     }
   };
 
   // دالة لتحميل جميع التسليمات
   const handleDownloadAllSubmissions = () => {
-    // يمكن تنفيذ منطق تحميل جميع التسليمات هنا
-    alert('سيتم تحميل جميع التسليمات');
+    // التحميل الجماعي غير منفَّذ — الزرّ كان يعرض «سيتم تحميل…» فيظنّ المستخدم
+    // أنّ التحميل جارٍ ثم لا ينزل شيء. نقولها كما هي بدل وعدٍ لا يتحقّق.
+    toast('التحميل الجماعي للتسليمات غير متاح بعد.', 'info');
   };
 
   return (
@@ -462,6 +469,17 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
           <p className="text-sm mt-2">حاول تغيير كلمات البحث أو الفلاتر</p>
         </div>
       )}
+
+      <RejectReasonModal
+        isOpen={rejectingSubmissionId !== null}
+        onClose={() => setRejectingSubmissionId(null)}
+        onSubmit={(reason) => {
+          if (rejectingSubmissionId) {
+            onUpdateSubmissionStatus(task.id, rejectingSubmissionId, 'rejected', reason);
+          }
+          setRejectingSubmissionId(null);
+        }}
+      />
     </div>
   );
 };

@@ -9,6 +9,7 @@ import { AllSubmissionsView } from './tasks/AllSubmissionsView';
 import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from './aseel/useAseelIndexKeymap';
 import { formatDateLocalized } from "../utils/formatDate";
+import { useToast } from '../contexts/ToastContext';
 
 interface TaskManagementProps {
     allTasks: Task[];
@@ -51,6 +52,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
     onSelectTask,
     onUpdateSubmissionStatus,
 }) => {
+    const toast = useToast();
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [statusFilter, setStatusFilter] = useState('All');
     const [employeeFilter, setEmployeeFilter] = useState('All');
@@ -109,7 +111,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
                     users={employees}
                     onUpdateSubmissionStatus={onUpdateSubmissionStatus}
                     onOpenSubmissionDetail={(s) => console.log('submission detail', s)}
-                    onSendReminder={(uid) => alert(`تم إرسال تذكير للموظف ${usersMap[uid] || uid}`)}
+                    onSendReminder={(uid) => toast(`تم إرسال تذكير للموظف ${usersMap[uid] || uid}`, 'error')}
                 />
             </div>
         );

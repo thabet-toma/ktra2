@@ -1,6 +1,7 @@
 // SubmissionHistoryList.tsx
-import React from "react";
+import React, { useState } from "react";
 import { Submission } from "../../types";
+import { RejectReasonModal } from "../modals/RejectReasonModal";
 import { SubmissionItemGallery } from "./SubmissionItemGallery";
 import { StatusBadge } from "../TaskCard";
 import { formatDateTimeValue, formatDateValue } from "../../utils/formatDate";
@@ -27,6 +28,8 @@ export const SubmissionHistoryList: React.FC<SubmissionHistoryListProps> = ({
   selectedUserName,
   onAddTaskPoints, // إضافة الـ prop الجديد
 }) => {
+  const [rejectingSubmissionId, setRejectingSubmissionId] = useState<string | null>(null);
+
   const userSubmissions = submissions.filter(
     (sub) => sub.userId === currentUserId
   );
@@ -53,12 +56,11 @@ const handleApprove = async (submissionId: string) => {
   onUpdateSubmissionStatus?.(submissionId, "approved");
 };
 
+  // SAVE-3: كان `prompt` — نافذة متصفح بلا RTL ولا تحقّق من الفراغ. نعيد استعمال
+  // `RejectReasonModal` القائم بدل بناء نافذة ثانية تفعل الشيء نفسه.
   const handleReject = (submissionId: string) => {
     if (!submissionId) return;
-    const notes = prompt("أدخل سبب الرفض:");
-    if (notes) {
-      onUpdateSubmissionStatus?.(submissionId, "rejected", notes);
-    }
+    setRejectingSubmissionId(submissionId);
   };
 
   return (
@@ -202,6 +204,17 @@ const handleApprove = async (submissionId: string) => {
           </div>
         );
       })}
+
+      <RejectReasonModal
+        isOpen={rejectingSubmissionId !== null}
+        onClose={() => setRejectingSubmissionId(null)}
+        onSubmit={(reason) => {
+          if (rejectingSubmissionId) {
+            onUpdateSubmissionStatus?.(rejectingSubmissionId, "rejected", reason);
+          }
+          setRejectingSubmissionId(null);
+        }}
+      />
     </div>
   );
 };

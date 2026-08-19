@@ -83,6 +83,8 @@ import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProduc
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
 import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
 import { formatDateLocalized, formatDateTimeValue } from "../../utils/formatDate";
+import { humanizeThrown } from "../../utils/drfError";
+import { FieldError } from "../ui/FieldError";
 import {
   AseelDocumentShell,
   AseelDocumentView,
@@ -340,6 +342,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [posting, setPosting] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [localErr, setLocalErr] = useState<string | null>(null);
+  // SAVE-3 (إضافة لا إعادة هيكلة): المحرّر كان يعرض سبب الفشل في لافتة ويبقى
+  // مفتوحاً — وهذا صحيح أصلاً. الناقص كان أخطاء الحقول التي يرسلها الخادم مع
+  // كل رفض (`err.fieldErrors`) وتُسحق في نصّ واحد. نعرضها مفصّلة تحت اللافتة.
+  const [saveFieldErrors, setSaveFieldErrors] = useState<Record<string, string>>({});
   const [creditHint, setCreditHint] = useState<CreditPreviewResponse | null>(null);
   const [showPreview, setShowPreview] = useState(true);
   /** آخر مفتاح اختصار ضُغط (يُعرض في شريط الحالة — سلوك الأصيل). */
@@ -906,7 +912,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         setLocalErr(null);
       } catch (e) {
         if (!cancelled) {
-          const raw = e instanceof Error ? e.message : "فشل تحميل الفاتورة";
+          const raw = humanizeThrown(e, "فشل تحميل الفاتورة");
           const friendly =
             /not found|404|غير موجود/i.test(raw) || /^\.?\s*not\s*found/i.test(raw)
               ? "الفاتورة غير موجودة أو حُذفت."
@@ -1237,6 +1243,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const handleSaveDraft = async (): Promise<{ id: number; posted: boolean } | undefined> => {
     setLocalErr(null);
     setMsg(null);
+    setSaveFieldErrors({});
     if (!invoicePermissions.canSave) {
       setLocalErr("لا تملك صلاحية حفظ هذه الفاتورة.");
       return;
@@ -1283,7 +1290,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       onInvoiceSaved();
       return { id: activeDraftId as number, posted: savedInvoice.status === "posted" };
     } catch (e) {
-      setLocalErr(e instanceof Error ? e.message : "فشل الحفظ");
+      setLocalErr(humanizeThrown(e, "فشل الحفظ"));
+      setSaveFieldErrors(
+        (e as { fieldErrors?: Record<string, string> })?.fieldErrors ?? {},
+      );
     } finally {
       setSaving(false);
     }
@@ -1336,7 +1346,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       onInvoiceSaved();
       return true;
     } catch (e) {
-      setLocalErr(e instanceof Error ? e.message : "فشل الترحيل");
+      setLocalErr(humanizeThrown(e, "فشل الترحيل"));
       return false;
     } finally {
       setPosting(false);
@@ -1362,7 +1372,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       setMsg("تم التراجع عن الترحيل وحذف القيود. الفاتورة الآن مسودة.");
       onInvoiceSaved();
     } catch (e) {
-      setLocalErr(e instanceof Error ? e.message : "تعذر التراجع عن الترحيل");
+      setLocalErr(humanizeThrown(e, "تعذر التراجع عن الترحيل"));
     } finally {
       setPosting(false);
     }
@@ -1543,7 +1553,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       onInvoiceSaved();
       updateLine(lineKey, { tax_rate: created.id });
     } catch (e) {
-      setLocalErr(e instanceof Error ? e.message : "فشل حفظ نسبة الضريبة");
+      setLocalErr(humanizeThrown(e, "فشل حفظ نسبة الضريبة"));
     } finally {
       setTaxSavingKey(null);
     }
@@ -1763,7 +1773,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         const d = await getSalesInvoice(id);
         applyDetail(d);
       } catch (e) {
-        setLocalErr(e instanceof Error ? e.message : "فشل تحميل الفاتورة");
+        setLocalErr(humanizeThrown(e, "فشل تحميل الفاتورة"));
       } finally {
         navLoadingRef.current = false;
       }
@@ -2451,7 +2461,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       );
       onInvoiceSaved();
     } catch (e) {
-      setLocalErr(e instanceof Error ? e.message : "فشل التحصيل");
+      setLocalErr(humanizeThrown(e, "فشل التحصيل"));
     } finally {
       setCollecting(false);
     }
@@ -2608,7 +2618,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         ) : (
           <CheckCircle2 className="h-4 w-4 shrink-0" />
         )}
-        <span>{localErr || msg}</span>
+        <span className="flex flex-col gap-0.5">
+          <span>{localErr || msg}</span>
+          {localErr &&
+            Object.entries(saveFieldErrors).map(([field, text]) => (
+              <FieldError key={field} message={text} />
+            ))}
+        </span>
       </div>
     ) : null;
 

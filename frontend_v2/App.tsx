@@ -49,6 +49,8 @@ import { PublicNavbar } from "./components/layout/PublicNavbar";
 import { useLocation, useNavigate } from "react-router-dom";
 import { apiGetObject } from "./services/restApi";
 import { clientLogger } from "./services/logger";
+import { useToast } from "./contexts/ToastContext";
+import { humanizeThrown } from "./utils/drfError";
 
 // ── تقسيم الحزمة حسب الشاشة (صيانة الأداء 2026-07) ─────────────────────────
 // كانت كل الصفحات (~85 مكوّناً) مستورَدة ثابتاً ⇒ حزمة واحدة 3.2MB تحجب أول
@@ -306,6 +308,7 @@ const IMPORT_VIEWS = new Set<AppView>([
 ]);
 
 const App: React.FC = () => {
+  const toast = useToast();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -905,7 +908,7 @@ const App: React.FC = () => {
       }
     } catch (error) {
       // console suppressed
-      alert("حدث خطأ أثناء تحديث حالة المهمة");
+      toast(humanizeThrown(error, "تعذّر تحديث حالة المهمة"), "error");
     }
   };
 
@@ -969,7 +972,7 @@ const App: React.FC = () => {
       setSelectedTaskDetails(null);
     } catch (e) {
       // console suppressed
-      alert("حدث خطأ أثناء حفظ التسليم. الرجاء المحاولة مرة أخرى.");
+      toast(humanizeThrown(e, "تعذّر حفظ التسليم"), "error");
     }
   };
 
@@ -1007,7 +1010,7 @@ const App: React.FC = () => {
       }
     } catch (e) {
       // console suppressed
-      alert("حدث خطأ أثناء تعديل التسليم.");
+      toast(humanizeThrown(e, "تعذّر تعديل التسليم"), "error");
     }
   };
 
@@ -1144,7 +1147,7 @@ const App: React.FC = () => {
       await (await legacyData()).updateTaskInDb(updatedTask);
     } catch (error) {
       // console suppressed
-      alert("حدث خطأ أثناء تحديث حالة التسليم");
+      toast(humanizeThrown(error, "تعذّر تحديث حالة التسليم"), "error");
     }
   };
 

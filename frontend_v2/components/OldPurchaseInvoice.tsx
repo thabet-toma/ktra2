@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Invoice, Item, Supplier } from '../types';
 import { useConfirm } from '../contexts/ConfirmContext';
+import { useToast } from '../contexts/ToastContext';
+import { humanizeThrown } from '../utils/drfError';
 import { invoicesService, itemsService, suppliersService } from '../services/firestoreService';
 import { Plus, Archive, Package } from 'lucide-react';
 import { collection, query, where, orderBy, getDocs, limit, onSnapshot, db } from "../services/sqlApiClient";
@@ -16,6 +18,7 @@ import { SupplierModal } from './common/SupplierModal';
 
 export const OldPurchaseInvoice: React.FC = () => {
     const confirm = useConfirm();
+    const toast = useToast();
     // --- Data States ---
     const [invoices, setInvoices] = useState<Invoice[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -105,7 +108,7 @@ export const OldPurchaseInvoice: React.FC = () => {
             await invoicesService.updateInvoiceInDb(updatedOriginalInvoice as Invoice);
 
             // إظهار رسالة نجاح
-            alert(`تم تحويل الفاتورة ${invoice.invoiceNumber} إلى فواتير رئيسية بنجاح!`);
+            toast(`تم تحويل الفاتورة ${invoice.invoiceNumber} إلى فواتير رئيسية.`, "success");
 
             // إعادة تحميل الصفحة بعد ثانيتين لعرض التغييرات
             setTimeout(() => {
@@ -114,7 +117,7 @@ export const OldPurchaseInvoice: React.FC = () => {
 
         } catch (error) {
             // console suppressed
-            alert("حدث خطأ أثناء تحويل الفاتورة");
+            toast(humanizeThrown(error, "تعذّر تحويل الفاتورة"), "error");
         } finally {
             setIsConverting(false);
             setConvertingInvoice(null);
@@ -147,7 +150,7 @@ export const OldPurchaseInvoice: React.FC = () => {
             await invoicesService.deleteInvoiceFromDb(invoice.id);
 
             // إظهار رسالة نجاح
-            alert(`تم حذف الفاتورة ${invoice.invoiceNumber} نهائياً`);
+            toast(`تم حذف الفاتورة ${invoice.invoiceNumber} نهائياً.`, "success");
 
             // إعادة تحميل الصفحة بعد نصف ثانية
             setTimeout(() => {
@@ -156,7 +159,7 @@ export const OldPurchaseInvoice: React.FC = () => {
 
         } catch (error) {
             // console suppressed
-            alert("حدث خطأ أثناء حذف الفاتورة");
+            toast(humanizeThrown(error, "تعذّر حذف الفاتورة"), "error");
         }
     };
 

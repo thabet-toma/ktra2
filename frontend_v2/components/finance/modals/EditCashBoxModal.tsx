@@ -3,6 +3,8 @@ import { X, Link2 } from "lucide-react";
 import { cashBoxesService } from "../../../services/firestoreService";
 import { accountingApi, type CashBoxLedgerLink } from "../../../services/accountingApi";
 import { CashBox, Currency } from "../../../types";
+import { useToast } from "../../../contexts/ToastContext";
+import { humanizeThrown } from "../../../utils/drfError";
 
 interface EditCashBoxModalProps {
   isOpen: boolean;
@@ -18,6 +20,8 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
   onClose,
   onLedgersMaybeChanged,
 }) => {
+  const toast = useToast();
+  const [formError, setFormError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [currency, setCurrency] = useState<Currency>("USD");
   const [isLoading, setIsLoading] = useState(false);
@@ -54,16 +58,18 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
     e.preventDefault();
     if (!name.trim()) return;
     setIsLoading(true);
+    setFormError(null);
     try {
       await cashBoxesService.updateCashBox(cashBox.id, {
         name: name.trim(),
         currency,
       });
+      toast("تم حفظ تعديل الصندوق.", "success");
       onLedgersMaybeChanged?.();
       onClose();
     } catch (error) {
-      // console suppressed
-      alert("حدث خطأ أثناء تعديل الصندوق");
+      // الفشل يبقي النافذة مفتوحة بمدخلاتها ويعرض السبب.
+      setFormError(humanizeThrown(error, "تعذّر تعديل الصندوق"));
     } finally {
       setIsLoading(false);
     }
@@ -71,10 +77,11 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
 
   const handleCreateGlAccount = async () => {
     if (!name.trim()) {
-      alert("اكتب اسماً للصندوق أولاً — سيُستخدم كاسم الحساب في الشجرة.");
+      setFormError("اكتب اسماً للصندوق أولاً — سيُستخدم كاسم الحساب في الشجرة.");
       return;
     }
     setLinkLoading(true);
+    setFormError(null);
     try {
       await accountingApi.registerCashBoxLedger({
         external_id: cashBox.id,
@@ -85,12 +92,9 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
       const hit = rows.find((r) => String(r.external_id) === String(cashBox.id));
       setLedgerLink(hit ?? null);
       onLedgersMaybeChanged?.();
-      alert(
-        "✅ تم إنشاء حساب في شجرة المحاسبة بنفس اسم الصندوق، وربطه بهذا الصندوق."
-      );
+      toast("تم إنشاء حساب في شجرة المحاسبة بنفس اسم الصندوق وربطه به.", "success");
     } catch (e) {
-      const m = e instanceof Error ? e.message : String(e);
-      alert("تعذّر إنشاء الحساب: " + m);
+      setFormError(humanizeThrown(e, "تعذّر إنشاء الحساب"));
     } finally {
       setLinkLoading(false);
     }
@@ -114,6 +118,12 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
             <X className="w-6 h-6" />
           </button>
         </div>
+
+        {formError && (
+          <div className="mb-3 rounded-md border border-red-300 bg-red-50 p-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+            {formError}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

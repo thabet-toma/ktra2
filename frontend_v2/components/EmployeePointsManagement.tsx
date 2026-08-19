@@ -7,6 +7,8 @@ import { pointsHistoryService, activityService } from '../services/firestoreServ
 import { autoDisableScheduler } from '../services/autoDisableScheduler';
 import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
 import { formatDateValue, formatWeekdayName } from '../utils/formatDate';
+import { useToast } from '../contexts/ToastContext';
+import { humanizeThrown } from '../utils/drfError';
 
 interface EmployeePointsManagementProps {
     users: User[];
@@ -17,6 +19,7 @@ interface DailyUserPoints { userId: string; userName: string; dailyPoints: Daily
 interface DailyDisableSettings { startTime: string; endTime: string; isEnabled: boolean }
 
 export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> = ({ users }) => {
+    const toast = useToast();
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
     const [userPoints, setUserPoints] = useState<DailyPoints[]>([]);
     const [userActivity, setUserActivity] = useState<ActivityStatus | null>(null);
@@ -95,7 +98,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
             await pointsHistoryService.updatePointsManually(selectedUser.id, selectedDate, manualPoints);
             setShowAdjustModal(false);
             loadUserData();
-        } catch { alert('حدث خطأ أثناء تعديل النقاط'); }
+        } catch (e) { toast(humanizeThrown(e), 'error'); }
     };
 
     const handleToggleCheckInButton = async (enabled: boolean) => {
@@ -103,8 +106,8 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
         try {
             await activityService.toggleCheckInButton(selectedUser.id, enabled);
             setUserActivity(prev => prev ? { ...prev, checkInButtonEnabled: enabled } : null);
-            alert(`تم ${enabled ? 'تفعيل' : 'تعطيل'} زر التأكيد للموظف`);
-        } catch { alert('حدث خطأ أثناء تعديل إعدادات الزر'); }
+            toast(`تم ${enabled ? 'تفعيل' : 'تعطيل'} زر التأكيد للموظف`, 'error');
+        } catch (e) { toast(humanizeThrown(e), 'error'); }
     };
 
     const handleSaveGlobalDailyDisableSettings = async () => {
@@ -112,8 +115,8 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
             await activityService.setGlobalDailyDisableSchedule(globalDailyDisableSettings.startTime, globalDailyDisableSettings.endTime, globalDailyDisableSettings.isEnabled);
             setShowGlobalSettingsModal(false);
             await loadGlobalSettings();
-            alert('تم حفظ إعدادات التعطيل اليومي العامة بنجاح');
-        } catch { alert('حدث خطأ أثناء حفظ الإعدادات'); }
+            toast('تم حفظ إعدادات التعطيل اليومي العامة بنجاح', 'error');
+        } catch (e) { toast(humanizeThrown(e), 'error'); }
     };
 
     const getTotalStats = (userId: string) => userStats[userId] || { totalPoints: 0, totalActivityPoints: 0, totalTaskPoints: 0 };
@@ -171,7 +174,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
                 </span>
                 <div style={{ flex: 1 }} />
                 <button className="aseel-toolbtn" onClick={() => setShowGlobalSettingsModal(true)}>تعديل الإعدادات</button>
-                <button className="aseel-toolbtn" onClick={() => autoDisableScheduler.manualCheck().then(() => alert('تم التحقق يدوياً'))}>تحقق الآن</button>
+                <button className="aseel-toolbtn" onClick={() => autoDisableScheduler.manualCheck().then(() => toast('تم التحقق يدوياً', 'error'))}>تحقق الآن</button>
                 <button
                     className="aseel-toolbtn"
                     style={{ color: autoDisableScheduler.getStatus().isRunning ? 'var(--aseel-danger, #c00)' : 'var(--aseel-ok, #267346)' }}

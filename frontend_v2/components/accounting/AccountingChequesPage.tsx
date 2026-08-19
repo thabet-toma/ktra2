@@ -1,4 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
+import { humanizeThrown } from "../../utils/drfError";
+import { useToast } from "../../contexts/ToastContext";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { accountingApi } from "../../services/accountingApi";
 import { formatMoney } from "../../utils/formatNumber";
 import type {
@@ -15,7 +18,7 @@ import {
   AseelDenseTable,
 } from "../aseel";
 import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
-import { Plus, X, ArrowRightLeft } from "lucide-react";
+import { Plus, X, ArrowRightLeft, Loader2 } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
 import { formatDateLocalized, formatDateTimeValue } from "../../utils/formatDate";
 
@@ -44,6 +47,11 @@ export const AccountingChequesPage: React.FC = () => {
   const [bankAccounts, setBankAccounts] = useState<BankAccountDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const toast = useToast();
+  // الحذف والتحويل يولّدان حركة محاسبية على الشيك؛ قفل أثناء التنفيذ يمنع
+  // إرسال الطلب مرتين، وتأكيد النجاح يمنع ظنّ المستخدم أن شيئاً لم يحدث.
+  const [busy, setBusy] = useState(false);
+  const confirm = useConfirm();
   // T-CHQ3: أي سند يُفتح للإدخال — سند قبض للوارد وسند صرف للصادر.
   const [voucher, setVoucher] = useState<"Incoming" | "Outgoing" | null>(null);
 
@@ -121,7 +129,7 @@ export const AccountingChequesPage: React.FC = () => {
       setPartners(pr as AccountingPartner[]);
       setBankAccounts(ba as BankAccountDto[]);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل التحميل");
+      setErr(humanizeThrown(e, "فشل التحميل"));
     } finally {
       setLoading(false);
     }
@@ -132,17 +140,23 @@ export const AccountingChequesPage: React.FC = () => {
   }, [load]);
 
   const remove = async (id: number) => {
-    if (!confirm("حذف الشيك؟")) return;
+    if (busy) return;
+    if (!(await confirm({ message: "حذف الشيك؟" }))) return;
+    setBusy(true);
     try {
       await accountingApi.deleteCheque(id);
+      toast("تم حذف الشيك", "success");
       await load();
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "فشل الحذف");
+      setErr(humanizeThrown(e, "فشل الحذف"));
+    } finally {
+      setBusy(false);
     }
   };
 
   const doTransfer = async () => {
-    if (!transferCheque || !newMovement) return;
+    if (!transferCheque || !newMovement || busy) return;
+    setBusy(true);
     try {
       await accountingApi.transferCheque(transferCheque.id, {
         movement_type: newMovement,
@@ -154,9 +168,12 @@ export const AccountingChequesPage: React.FC = () => {
       setTransferNotes("");
       setTransferBankAccount("");
       setWalletKey((k) => k + 1);
+      toast("تم تحويل حالة الشيك", "success");
       await load();
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "فشل التحويل");
+      setErr(humanizeThrown(e, "فشل التحويل"));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -434,8 +451,8 @@ export const AccountingChequesPage: React.FC = () => {
                 action="تحويل حالة الشيك"
                 warningMessage="تَحويل حالة الشيك يتطلب اتصالاً — state machine يَنفَّذ على الـserver"
               >
-                <button type="button" className="aseel-toolbtn" onClick={doTransfer}>
-                  <ArrowRightLeft className="w-4 h-4" />تحويل
+                <button type="button" className="aseel-toolbtn" disabled={busy} onClick={doTransfer}>
+                  {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}تحويل
                 </button>
               </OfflineGuard>
             </div>

@@ -6,6 +6,8 @@
  * انتقلت إلى GroupConstantsPage (N0-T4).
  */
 import React, { useCallback, useEffect, useState } from "react";
+import { humanizeThrown } from "../../utils/drfError";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { Loader2, Save, Info } from "lucide-react";
 import {
   getSalesSettings,
@@ -84,6 +86,7 @@ export const SalesSettingsPage: React.FC = () => {
   const [taxRates, setTaxRates] = useState<TaxRateRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const confirm = useConfirm();
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -124,7 +127,7 @@ export const SalesSettingsPage: React.FC = () => {
       if (taxesRes.status === "rejected") setErr((prev) => (prev ? prev + " | " : "") + "الضرائب لم تُحمل");
 
     } catch (e: unknown) {
-      setErr((prev) => (prev ? prev + " | " : "") + (e instanceof Error ? e.message : String(e)));
+      setErr((prev) => (prev ? prev + " | " : "") + humanizeThrown(e, "فشل تحميل الإعدادات"));
     } finally {
       setLoading(false);
     }
@@ -182,7 +185,7 @@ export const SalesSettingsPage: React.FC = () => {
       setMsg("تم حفظ الإعدادات بنجاح");
       window.setTimeout(() => setMsg(null), 2500);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(humanizeThrown(e, "فشل الحفظ"));
     } finally {
       setSaving(false);
     }
@@ -190,9 +193,10 @@ export const SalesSettingsPage: React.FC = () => {
 
   // T-S3: استعادة خريطة القيد الافتراضية (الحسابات الافتراضية لكل نوع فاتورة).
   const handleRestoreDefaults = async () => {
-    if (!window.confirm(
-      "استعادة خريطة القيد الافتراضية؟ سيُعاد ضبط الحسابات الافتراضية (صندوق/ذمم/إيراد/مخزون/تكلفة) من شجرة الحسابات."
-    )) return;
+    if (!(await confirm({
+      message:
+        "استعادة خريطة القيد الافتراضية؟ سيُعاد ضبط الحسابات الافتراضية (صندوق/ذمم/إيراد/مخزون/تكلفة) من شجرة الحسابات.",
+    }))) return;
     setSaving(true); setMsg(null); setErr(null);
     try {
       const updated = await restoreSalesSettingsDefaults();
@@ -200,7 +204,7 @@ export const SalesSettingsPage: React.FC = () => {
       setMsg("تمت استعادة خريطة القيد الافتراضية");
       window.setTimeout(() => setMsg(null), 2500);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(humanizeThrown(e, "فشلت استعادة الإعدادات الافتراضية"));
     } finally {
       setSaving(false);
     }

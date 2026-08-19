@@ -97,6 +97,8 @@ import {
   getPurchaseInvoiceCostLabels,
 } from "@/utils/invoiceConversionUtils";
 import { useToast } from "@/contexts/ToastContext";
+import { humanizeThrown } from "@/utils/drfError";
+import { FieldError } from "@/components/ui/FieldError";
 import { useConfirm } from "@/contexts/ConfirmContext";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { clientLogger } from "@/services/logger";
@@ -151,6 +153,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // M2: ترحيل/تراجع داخل المحرر — توحيداً مع شاشة المبيعات (شريط أدوات واحد).
   const [posting, setPosting] = useState(false);
   const [accMsg, setAccMsg] = useState<string | null>(null);
+  // SAVE-3: سبب فشل الحفظ كان يُعرض في toast يختفي بعد ثوانٍ، فيبقى المستخدم
+  // أمام نموذج ممتلئ بلا تفسير. الآن يبقى في لافتة ثابتة حتى الحفظ التالي،
+  // ومعه أخطاء الحقول التي يرسلها الخادم (`err.fieldErrors`) وكانت تُهمَل.
+  const [saveError, setSaveError] = useState<
+    { message: string; fieldErrors: Record<string, string> } | null
+  >(null);
   const [accErr, setAccErr] = useState<string | null>(null);
   const [activeTabKey, setActiveTabKey] = useState<string>("basic");
   const [recalcBusy, setRecalcBusy] = useState(false);
@@ -658,6 +666,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         }
       }
       setAccMsg(null);
+      setSaveError(null);
       setViewMode(true);
       if (onSave) onSave({ id: savedSqlId });
       toast("تم حفظ الفاتورة بنجاح", "success");
@@ -665,10 +674,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       return savedSqlId;
     } catch (error) {
       // console suppressed
-      const msg =
-        error instanceof Error && error.message?.trim()
-          ? error.message.trim()
-          : "حدث خطأ أثناء الحفظ";
+      const msg = humanizeThrown(error, "حدث خطأ أثناء الحفظ");
+      // النموذج لا يُغلق ولا تُمسح مدخلاته ولا مرفقاته — السبب يبقى أمام المستخدم.
+      setSaveError({
+        message: msg,
+        fieldErrors:
+          (error as { fieldErrors?: Record<string, string> })?.fieldErrors ?? {},
+      });
       toast(msg, "error");
     } finally {
       setSaving(false);
@@ -708,7 +720,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       if (onSave) onSave({ id: String(targetId) });
       return true;
     } catch (e) {
-      setAccErr(e instanceof Error ? e.message : "تعذّر ترحيل الفاتورة");
+      setAccErr(humanizeThrown(e, "تعذّر ترحيل الفاتورة"));
       return false;
     } finally {
       setPosting(false);
@@ -734,7 +746,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       await reloadInvoice();
       if (onSave) onSave({ id: String(formData.id) });
     } catch (e) {
-      setAccErr(e instanceof Error ? e.message : "تعذّر التراجع عن الترحيل");
+      setAccErr(humanizeThrown(e, "تعذّر التراجع عن الترحيل"));
     } finally {
       setPosting(false);
     }
@@ -1022,7 +1034,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       toast(msg, res?.updated ? "success" : "info");
     } catch (e) {
       // console suppressed
-      toast(e instanceof Error ? e.message : "تعذّر إعادة الحساب", "error");
+      toast(humanizeThrown(e, "تعذّر إعادة الحساب"), "error");
     } finally {
       setRecalcBusy(false);
     }
@@ -1134,10 +1146,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     (s: number, it: any) => s + (Number(it.quantity) || 0), 0,
   );
 
-  const fld = (label: string, node: React.ReactNode) => (
+  /** خطأ الحقل كما أرسله الخادم، بمفتاح DRF التقني. */
+  const fe = (name: string): string | undefined => saveError?.fieldErrors[name];
+
+  const fld = (label: string, node: React.ReactNode, error?: string) => (
     <label className="aseel-field">
       <span className="aseel-field-label">{label}</span>
       {node}
+      <FieldError message={error} />
     </label>
   );
 
@@ -2034,6 +2050,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: guardedCancel, danger: true, separatorBefore: true },
   ];
 
+  const saveErrorBanner = saveError ? (
+    <div className="aseel-banner aseel-banner--err" role="alert" data-testid="save-error">
+      <AlertCircle className="h-4 w-4 shrink-0" />
+      {/* `message` يحمل أسطر الحقول مُسمّاة أصلاً (عبر `humanizeDrfError`)، وما
+          له حقل مرئي يُعرض بجانبه كذلك عبر `fld`. تكرارها هنا بلا تسمية كان
+          يُري المستخدم السطر مرتين، إحداهما بلا اسم حقل. */}
+      <span>{saveError.message}</span>
+    </div>
+  ) : null;
+
   const accBanner = (accErr || accMsg) ? (
     <div className={`aseel-banner ${accErr ? "aseel-banner--err" : "aseel-banner--ok"}`}>
       {accErr ? <AlertCircle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
@@ -2278,6 +2304,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               onChange={(e) => handleUpdateFinancial("supplierInvoiceNumber", e.target.value)}
               placeholder="رقم فاتورة المورد"
             />
+            ,
+            fe("supplier_invoice_number")
           )}
           {/* تكافؤ مع محرر المبيعات: الماسح يُدخل الصنف مباشرةً بلا فتح المنتقي. */}
           {fld(
@@ -2318,7 +2346,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               >
                 …
               </button>
-            </div>
+            </div>,
+            fe("supplier")
           )}
           {fld(
             "الاسم",
@@ -2594,6 +2623,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </>
       }
     >
+      {saveErrorBanner}
       {accBanner}
       {/* وضع القراءة: مستند مُنسَّق بدل شبكة الإدخال المعطّلة. */}
       {viewMode && invoiceDocumentView}

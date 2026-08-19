@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { Category } from '@/types';
 import { categoriesService, brandsService } from '@/services/firestoreService';
 import { subCategoriesService } from '@/services/subCategoriesService';
+import { useToast } from '../../contexts/ToastContext';
 
 interface ModalProps {
     isOpen: boolean;
@@ -62,6 +63,7 @@ interface SubCategoryModalProps extends ModalProps {
 }
 
 export const SubCategoryModal: React.FC<SubCategoryModalProps> = ({ isOpen, onClose, onSuccess, categories, initialCategoryId }) => {
+    const toast = useToast();
     const [name, setName] = useState('');
     const [categoryId, setCategoryId] = useState(initialCategoryId || '');
 
@@ -74,7 +76,7 @@ export const SubCategoryModal: React.FC<SubCategoryModalProps> = ({ isOpen, onCl
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!categoryId) return alert('الرجاء اختيار فئة رئيسية');
+        if (!categoryId) { toast('الرجاء اختيار فئة رئيسية', 'error'); return; }
 
         try {
             await subCategoriesService.addSubCategoryToDb({

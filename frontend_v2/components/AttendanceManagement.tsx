@@ -10,6 +10,8 @@ import { RefreshCw } from 'lucide-react';
 import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from './aseel/useAseelIndexKeymap';
 import { formatTimeValue } from '../utils/formatDate';
+import { useToast } from '../contexts/ToastContext';
+import { humanizeThrown } from '../utils/drfError';
 
 interface AttendanceManagementProps {
     users: User[];
@@ -17,6 +19,7 @@ interface AttendanceManagementProps {
 }
 
 export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ users, currentUser }) => {
+    const toast = useToast();
     const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null);
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
@@ -53,12 +56,12 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
     };
 
     const handleStartSession = async () => {
-        try { setLoading(true); await attendanceService.startAttendanceSession(currentUser.id); await loadActiveSession(); } catch { alert('حدث خطأ أثناء بدء جلسة الحضور'); } finally { setLoading(false); }
+        try { setLoading(true); await attendanceService.startAttendanceSession(currentUser.id); await loadActiveSession(); } catch (e) { toast(humanizeThrown(e), 'error'); } finally { setLoading(false); }
     };
 
     const handleEndSession = async () => {
         if (!activeSession) return;
-        try { setLoading(true); await attendanceService.endAttendanceSession(activeSession.id); setActiveSession(null); setTimeLeft(0); } catch { alert('حدث خطأ أثناء إنهاء جلسة الحضور'); } finally { setLoading(false); }
+        try { setLoading(true); await attendanceService.endAttendanceSession(activeSession.id); setActiveSession(null); setTimeLeft(0); } catch (e) { toast(humanizeThrown(e), 'error'); } finally { setLoading(false); }
     };
 
     const handleManualAttendance = async (userId: string, attended: boolean) => {
@@ -66,8 +69,8 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
             setLoading(true);
             await attendanceService.updateAttendanceManually(userId, selectedDate, attended);
             await loadAttendanceRecords();
-            alert(attended ? 'تم تسجيل الحضور بنجاح! +10 نقاط ✅' : 'تم إلغاء الحضور بنجاح! -10 نقاط ❌');
-        } catch { alert('حدث خطأ أثناء تعديل الحضور'); } finally { setLoading(false); }
+            toast(attended ? 'تم تسجيل الحضور بنجاح! +10 نقاط ✅' : 'تم إلغاء الحضور بنجاح! -10 نقاط ❌', 'error');
+        } catch (e) { toast(humanizeThrown(e), 'error'); } finally { setLoading(false); }
     };
 
     const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;

@@ -1,4 +1,5 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
+import { PromptDialog } from "../../common/PromptDialog";
 import { Deal, DealPayment } from "@/types";
 import { dealsService } from "@/services/dealsService";
 import { formatMoney } from "@/utils/formatNumber";
@@ -92,6 +93,7 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
 }) => {
   const toast = useToast();
   const confirmDialog = useConfirm();
+  const [journalLinkTarget, setJournalLinkTarget] = useState<DealPayment | null>(null);
   const showManagerUnpost = isManagerUser(currentUser);
   const payments = deal.payments || [];
 
@@ -135,18 +137,22 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
     }
   };
 
+  // SAVE-3: كان `window.prompt` — بلا RTL ولا تمييز للرقم، في مسار يربط دفعة
+  // بقيد يومية. الحوار المشترك يقابله بالسلوك نفسه.
   const linkManualJournal = (payment: DealPayment) => {
-    const raw = window.prompt(
-      "أدخل رقم قيد اليومية المرحّل (Journal ID) الظاهر في شاشة المحاسبة:",
-      ""
-    );
-    if (raw == null || String(raw).trim() === "") return;
-    const n = parseInt(String(raw).trim(), 10);
+    setJournalLinkTarget(payment);
+  };
+
+  const submitManualJournal = (raw: string) => {
+    const target = journalLinkTarget;
+    setJournalLinkTarget(null);
+    if (!target || raw.trim() === "") return;
+    const n = parseInt(raw.trim(), 10);
     if (!Number.isFinite(n) || n <= 0) {
       toast("أدخل رقماً صحيحاً.", "error");
       return;
     }
-    onPaymentOperation("linkJournal", payment.type, { journalId: n }, payment.id);
+    onPaymentOperation("linkJournal", target.type, { journalId: n }, target.id);
   };
 
   const unpostPayment = async (payment: DealPayment) => {
@@ -418,6 +424,16 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
           </tfoot>
         </table>
       </div>
+
+      <PromptDialog
+        isOpen={journalLinkTarget !== null}
+        title="ربط قيد يومية"
+        message="أدخل رقم قيد اليومية المرحّل (Journal ID) الظاهر في شاشة المحاسبة:"
+        type="number"
+        confirmText="ربط"
+        onCancel={() => setJournalLinkTarget(null)}
+        onSubmit={submitManualJournal}
+      />
     </div>
   );
 };

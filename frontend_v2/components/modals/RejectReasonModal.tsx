@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useToast } from '../../contexts/ToastContext';
 
 interface RejectReasonModalProps {
     isOpen: boolean;
@@ -7,6 +8,7 @@ interface RejectReasonModalProps {
 }
 
 export const RejectReasonModal: React.FC<RejectReasonModalProps> = ({ isOpen, onClose, onSubmit }) => {
+    const toast = useToast();
     const [reason, setReason] = useState('');
 
     if (!isOpen) return null;
@@ -14,7 +16,7 @@ export const RejectReasonModal: React.FC<RejectReasonModalProps> = ({ isOpen, on
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!reason.trim()) {
-            alert('يرجى إدخال سبب الرفض.');
+            toast('يرجى إدخال سبب الرفض.', 'error');
             return;
         }
         onSubmit(reason);
