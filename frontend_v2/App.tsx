@@ -21,6 +21,7 @@ import OfflineBanner from "./components/offline/OfflineBanner";
 import UpdatePrompt from "./components/offline/UpdatePrompt";
 import PendingMutationsPanel from "./components/offline/PendingMutationsPanel";
 import OfflineCoachmark from "./components/offline/OfflineCoachmark";
+import DidYouKnow from "./components/ui/DidYouKnow";
 import StatusMessage from "./components/offline/StatusMessage";
 import { processMutationQueue, registerConflictListener, type ConflictPayload, type ConflictResolution } from "./services/offline/cachedApi";
 import StorageQuotaGuard from "./components/offline/StorageQuotaGuard";
@@ -2249,6 +2250,9 @@ const App: React.FC = () => {
           <React.Suspense fallback={<div className="flex justify-center py-16"><LoadingSpinner /></div>}>
             {renderMainContent()}
           </React.Suspense>
+          {/* THA-121: «هل تعلم» — تركيبٌ واحد لكل الشاشات؛ تختار تلميح الشاشة
+              الحالية، وتختفي كلياً إن لم يبقَ لها متّسع أسفل المحتوى. */}
+          <DidYouKnow view={appView} onNavigate={setViewAndSyncPath} />
         </main>
       </AppLayout>
 
