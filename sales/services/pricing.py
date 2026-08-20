@@ -47,6 +47,12 @@ logger = logging.getLogger("sales.services")
 
 DEC = Decimal("0.01")
 
+# حركات المخزون التي تُنسب إلى فاتورة بيع: الخصم عند الترحيل (`SALE`) وإذن
+# الصرف الصريح (`STOCK_ISSUE`). حركة التسليم نفسها `SALE` (قيد
+# `SALES_DELIVERY_COGS` قيدٌ لا حركة). ثابتٌ واحد لأن قاعدةَ الانتساب هذه
+# يقرأها مستهلكان: خريطة تكلفة المبيع، وتبويب أثر الفاتورة على المخزون —
+# ونسختان منها تنحرفان بصمت حين يُضاف نوعٌ ثالث.
+SALES_STOCK_REFERENCE_TYPES = ("SALE", "STOCK_ISSUE")
 
 
 def sales_cogs_map(
@@ -74,7 +80,7 @@ def sales_cogs_map(
     rows = (
         StockMovement.objects.filter(
             tenant_id=tenant_id,
-            reference_type__in=("SALE", "STOCK_ISSUE"),
+            reference_type__in=SALES_STOCK_REFERENCE_TYPES,
             reference_id__in=ids,
         )
         .values("reference_id", "product_id")

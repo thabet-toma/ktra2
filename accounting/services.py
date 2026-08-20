@@ -2241,6 +2241,8 @@ def partner_account_statement(
     *, tenant_id: int, partner_id: int, is_supplier: bool,
     limit: int = 50, offset: int = 0, ordering: str = "newest",
     only_payments: bool = False,
+    anchor_reference_type: str | None = None,
+    anchor_reference_id: int | None = None,
 ) -> dict:
     """FEAT-4: كشف حساب الشريك من أسطر القيود المرحَّلة — مع رصيد جارٍ لكل سطر.
 
@@ -2250,6 +2252,12 @@ def partner_account_statement(
     THA-128: كل سطر يحمل `balance_before` (الرصيد قبل أثره) إلى جانب
     `running_balance` (بعده) — ليسا حساباً ثانياً بل لقطتان من الحلقة نفسها، فما
     يعرضه «تبويب المال» يطابق كشف الحساب بالبناء لا بالمصادفة.
+
+    THA-132: `anchor_reference_type`/`anchor_reference_id` يُرسيان الصفحة على
+    مستندٍ بعينه بدل «أحدث N» — فيرى المستندُ حركةَ حسابه حول نفسه ولو كان
+    قديماً تلته مئة حركة. المرساة **لا تغيّر الحساب**: الرصيد الجاري يُحسب على
+    الحلقة الزمنية كاملةً كما هو، وهي تحكم النافذة المعروضة وحدها. وبلا
+    تمريرهما السلوك حرفياً كما كان (المستهلكون القائمون لا يتأثرون).
 
     `only_payments` يحصر **المعروض** بحركات التسوية دون الفاتورة نفسها. استثناءُ
     الفاتورة لا قائمةُ أنواعٍ مسموحة: القائمة المسموحة تُسقط بصمت كل نوعٍ جديد
@@ -2266,11 +2274,12 @@ def partner_account_statement(
     # خفيف: عمودان عشريان ونوع المستند فقط لحساب الرصيد الجاري بالترتيب
     # (بحدود أسطر الشريك). النوع لازمٌ للترشيح، ويأتي في الاستعلام نفسه.
     ordered = list(base.values_list(
-        "id", "base_debit", "base_credit", "journal__reference_type"))
+        "id", "base_debit", "base_credit",
+        "journal__reference_type", "journal__reference_id"))
     running = Decimal("0")
     running_by_id: dict[int, Decimal] = {}
     before_by_id: dict[int, Decimal] = {}
-    for lid, d, c, _ref_type in ordered:
+    for lid, d, c, _ref_type, _ref_id in ordered:
         d = Decimal(str(d or 0))
         c = Decimal(str(c or 0))
         # اللقطة قبل الأثر ثم بعده — من الحلقة ذاتها، بلا مرور ثانٍ.
@@ -2289,6 +2298,27 @@ def partner_account_statement(
 
     normalized_ordering = "oldest" if ordering == "oldest" else "newest"
     display_order = visible if normalized_ordering == "oldest" else list(reversed(visible))
+
+    # THA-132: المرساة — أسطر المستند المطلوب بترتيبها الزمني (قد تكون أكثر من
+    # سطر على حساب الطرف نفسه). تُحسب من `ordered` لا من `display_order` كي
+    # يبقى «قبل» أوّلَها زمنياً و«بعد» آخرَها مهما كان اتجاه العرض.
+    anchor_ids: list[int] = []
+    if anchor_reference_type and anchor_reference_id:
+        anchor_ids = [
+            row[0] for row in ordered
+            if row[3] == anchor_reference_type and row[4] == anchor_reference_id
+        ]
+
+    if anchor_ids:
+        # النافذة تتمركز على المرساة بدل أن تبدأ من الطرف: مستندٌ قديم تلته
+        # مئة حركة كان يقع خارج الصفحة الأولى دائماً.
+        anchor_set = set(anchor_ids)
+        positions = [i for i, row in enumerate(display_order) if row[0] in anchor_set]
+        if positions:
+            span = positions[-1] - positions[0] + 1
+            pad = max((limit - span) // 2, 0)
+            offset = max(positions[0] - pad, 0)
+
     page_ids = [row[0] for row in display_order[offset:offset + limit]]
     page = (
         JournalLine.objects.filter(id__in=page_ids)
@@ -2296,12 +2326,13 @@ def partner_account_statement(
     )
     by_id = {jl.id: jl for jl in page}
     rows = []
+    anchor_set = set(anchor_ids)
     for lid in page_ids:
         jl = by_id.get(lid)
         if jl is None:
             continue
         j = jl.journal
-        rows.append({
+        row = {
             "id": jl.id,
             "journal_id": j.id,
             "date": j.transaction_date.isoformat() if j.transaction_date else None,
@@ -2312,9 +2343,12 @@ def partner_account_statement(
             "credit": str(jl.base_credit),
             "balance_before": str(before_by_id[lid]),
             "running_balance": str(running_by_id[lid]),
-        })
+        }
+        if anchor_reference_type:
+            row["is_anchor"] = lid in anchor_set
+        rows.append(row)
     _attach_statement_document_links(rows, is_supplier=is_supplier)
-    return {
+    out = {
         "results": rows,
         "count": total,
         "limit": limit,
@@ -2322,6 +2356,23 @@ def partner_account_statement(
         "ordering": normalized_ordering,
         "closing_balance": str(closing),
     }
+    if anchor_reference_type:
+        # «ماذا فعل هذا المستند بالحساب؟» — من لقطتَي الحلقة نفسها لا بحسابٍ
+        # ثانٍ: الرصيد قبل أوّل أسطره، وبعد آخرها، والفرق هو أثره الفعلي على
+        # الذمم (كامل القيد، لا «المتبقّي» منه).
+        out["anchor"] = (
+            {
+                "line_ids": anchor_ids,
+                "balance_before": str(before_by_id[anchor_ids[0]]),
+                "balance_after": str(running_by_id[anchor_ids[-1]]),
+                "effect": str(
+                    running_by_id[anchor_ids[-1]] - before_by_id[anchor_ids[0]]
+                ),
+            }
+            if anchor_ids
+            else None
+        )
+    return out
 
 
 def partner_posted_balance(tenant_id: int, partner_id: int) -> tuple[Decimal, Decimal]:

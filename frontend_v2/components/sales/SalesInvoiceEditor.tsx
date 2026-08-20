@@ -26,6 +26,11 @@ import { useStaleConfirm } from "../offline/StaleDataConfirm";
 import { DocumentPaymentsTab } from "../shared/DocumentPaymentsTab";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { EntityActivityLog } from "../activity/EntityActivityLog";
+import {
+  InvoiceStockTab,
+  InvoiceCustomerLedgerTab,
+  InvoiceAttachmentsTab,
+} from "./InvoiceContextTabs";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
 import { FieldHint } from "../ui/FieldHint";
@@ -309,6 +314,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [deliveryStatus, setDeliveryStatus] = useState<string>("not_delivered");
   const [customerBalanceBeforeInvoice, setCustomerBalanceBeforeInvoice] = useState(0);
   const [customerBalanceAfterInvoice, setCustomerBalanceAfterInvoice] = useState(0);
+  /** THA-132: رقم الحركة المخزنية — يُعرض في شريط الحالة كما في الأصيل. */
+  const [stockMovementNo, setStockMovementNo] = useState<number | null>(null);
   const [paymentDetails, setPaymentDetails] = useState<SalesInvoiceDetail["payment_details"]>([]);
   // T-SLINEAGE: المستند الأب (طلبية/عرض) — يُعرض في بيانات المستند برابط يفتحه.
   const [sourceDocument, setSourceDocument] =
@@ -841,6 +848,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setDeliveryStatus(d.delivery_status || "not_delivered");
     setCustomerBalanceBeforeInvoice(Number(d.customer_balance_before_invoice || 0));
     setCustomerBalanceAfterInvoice(Number(d.customer_balance_after_invoice || 0));
+    setStockMovementNo(d.stock_movement_no ?? null);
     setPaymentDetails(d.payment_details || []);
     setSourceDocument(d.source_document ?? null);
     setInvoiceKind(d.invoice_kind || "sale");
@@ -1399,6 +1407,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setDeliveryStatus("not_delivered");
     setCustomerBalanceBeforeInvoice(0);
     setCustomerBalanceAfterInvoice(0);
+    setStockMovementNo(null);
     setPaymentDetails([]);
     setSourceDocument(null);
     setInvoiceKind("sale");
@@ -3009,8 +3018,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             { label: "المتبقي", value: money(Math.max(savedGrandTotal - paidAmount, 0)), tone: "warn" as const },
           ]
           : []),
-        { label: "رصيد العميل قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(customerBalanceBeforeInvoice) },
-        { label: "رصيد العميل الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(customerBalanceAfterInvoice), emphasis: true },
+        /* THA-132: أُزيل هنا سطرا «رصيد العميل قبل/بعد». كانا يُشتقّان من
+           «المتبقّي» مطروحاً من رصيد **اليوم**، فلا يطابقان كشف الحساب: قيد
+           الفاتورة يدين الذمم بكامل الإجمالي (التحصيل قيد منفصل)، فالفاتورة
+           المدفوعة بالكامل كانت تُظهر أثراً صفرياً وهي ليست كذلك. الجواب
+           الصحيح — من كشف الحساب نفسه — في تبويب «حساب العميل». */
       ]}
       sections={[
         ...(isReturn ? [] : [{
@@ -3565,6 +3577,31 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             label: "سجل النشاط",
             content: <EntityActivityLog entityType="sales_invoice" entityId={draftId} defaultOpen refreshKey={isPosted ? "posted" : "draft"} />,
           }] : []),
+          /* THA-132 — تبويبات السياق. تُلحق **آخر** القائمة: الغلاف يتتبّع
+             التبويب بالفهرس، فإدراج تبويب في الوسط يقفز بالمستخدم. ولا شيء
+             منها يُجلَب حتى يُفتح تبويبه (الغلاف يركّب المحتوى النشط وحده). */
+          ...(showAdvancedTabs && draftId && Number(draftId) > 0 ? [{
+            key: "stock_impact",
+            label: "حركة المخزون",
+            content: <InvoiceStockTab invoiceId={Number(draftId)} />,
+          }] : []),
+          ...(showAdvancedTabs && draftId && Number(draftId) > 0 ? [{
+            key: "customer_ledger",
+            label: "حساب العميل",
+            content: <InvoiceCustomerLedgerTab invoiceId={Number(draftId)} />,
+          }] : []),
+          /* المرفقات خارج `showAdvancedTabs` وحدها: إرفاق صورة إيصال فعلٌ
+             أساسي لا متقدّم، ويحتاجه الوضع السهل قبل غيره. */
+          ...(draftId && Number(draftId) > 0 ? [{
+            key: "attachments",
+            label: "المرفقات",
+            content: (
+              <InvoiceAttachmentsTab
+                invoiceId={Number(draftId)}
+                readOnly={!invoicePermissions.canSave}
+              />
+            ),
+          }] : []),
         ]}
         totals={viewMode ? undefined : (
           <>
@@ -3699,6 +3736,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             </span>
             <span className="aseel-status-item">
               رقم القيد <b>{postedJournalId ?? "—"}</b>
+            </span>
+            {/* THA-132: «رقم الحركة» المخزنية بجانب رقم القيد — سلوك الأصيل
+                نفسه (`invoices.txt`: «رقم الحركة المخزنية المسلسل… يمكن
+                استخدام هذا الحقل للاستعلام عن الحركات»). يُملأ من تبويب حركة
+                المخزون حين يُفتح، فلا يكلّف فتحَ الفاتورة نداءً. */}
+            <span className="aseel-status-item">
+              رقم الحركة <b>{stockMovementNo ?? "—"}</b>
             </span>
             <span className="aseel-status-item">
               الحالة <b>{isPosted ? "مرحّلة" : draftId ? "مسودة" : "جديدة"}</b>

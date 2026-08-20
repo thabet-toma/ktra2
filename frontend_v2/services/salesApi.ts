@@ -124,8 +124,15 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
   readonly attached_cash_amount?: string;
   readonly attached_cash_account?: number | null;
   cheques?: AttachedCheque[];
+  /**
+   * THA-132 — تقريبٌ **لا يطابق كشف الحساب**: يطرح «المتبقّي» من رصيد اليوم،
+   * فالفاتورة المدفوعة بالكامل تُظهر أثراً صفرياً وهي دائنةُ ذمم بكامل
+   * إجماليها. الجواب الصحيح في `getInvoiceCustomerLedger` (تبويب حساب العميل).
+   */
   customer_balance_before_invoice?: string;
   customer_balance_after_invoice?: string;
+  /** «رقم الحركة» المخزنية — يُعرض في شريط الحالة (سلوك الأصيل). */
+  stock_movement_no?: number | null;
   payment_details?: Array<{
     id: number;
     payment_date: string;
@@ -280,6 +287,122 @@ export async function getDeliveryLines(
   return apiGetObject(`${BASE}/invoices/${invoiceId}/delivery-lines/`, {
     tenantId: tid(),
   });
+}
+
+/* ── THA-132: تبويبات سياق الفاتورة ─────────────────────────────────────────
+   ثلاث نقاط قراءة تُطلب **عند فتح تبويبها فقط** — لا شيء منها يُنادى مع فتح
+   الفاتورة. يحرس ذلك `e2e/sales-invoice-context-tabs.spec.ts` بعدّ النداءات. */
+
+/** صفّ حركة مخزون سبّبتها هذه الفاتورة («رقم الحركة» في مرجع الأصيل). */
+export type InvoiceStockMovementRow = {
+  id: number;
+  date: string | null;
+  movement_type: string;
+  movement_type_label: string;
+  reference_type: string | null;
+  product_id: number;
+  product_name: string;
+  warehouse: string | null;
+  qty_in: string;
+  qty_out: string;
+  quantity_before: string;
+  running_balance: string;
+  unit_cost: string;
+  total_cost: string;
+};
+
+export type InvoiceStockMovementsResponse = {
+  results: InvoiceStockMovementRow[];
+  count: number;
+  total_cost: string;
+  /** سبب الفراغ يصل مع الحمولة — جدولٌ فارغ بلا تفسير يُقرأ كعطل. */
+  is_posted: boolean;
+  stock_on_post: boolean;
+  delivery_status: DeliveryStatus;
+  delivery_status_display?: string;
+};
+
+export async function getInvoiceStockMovements(
+  invoiceId: number
+): Promise<InvoiceStockMovementsResponse> {
+  return apiGetObject(`${BASE}/invoices/${invoiceId}/stock-movements/`, {
+    tenantId: tid(),
+  });
+}
+
+/** صفّ من كشف حساب العميل، بنفس شكل صفوف بطاقة الطرف (مصدر واحد). */
+export type InvoiceLedgerRow = {
+  id: number;
+  journal_id: number;
+  date: string | null;
+  reference_type: string | null;
+  reference_id: number | null;
+  description: string;
+  debit: string;
+  credit: string;
+  balance_before: string;
+  running_balance: string;
+  is_anchor?: boolean;
+};
+
+export type InvoiceLedgerResponse = {
+  results: InvoiceLedgerRow[];
+  count: number;
+  closing_balance: string;
+  customer_name?: string | null;
+  /** null = الفاتورة لم تمسّ الحساب بعد (مسودّة) — حالة معلنة لا خطأ. */
+  anchor: {
+    line_ids: number[];
+    balance_before: string;
+    balance_after: string;
+    effect: string;
+  } | null;
+  reason?: string;
+};
+
+export async function getInvoiceCustomerLedger(
+  invoiceId: number,
+  limit = 20
+): Promise<InvoiceLedgerResponse> {
+  return apiGetObject(`${BASE}/invoices/${invoiceId}/customer-ledger/`, {
+    tenantId: tid(),
+    query: { limit },
+  });
+}
+
+export type InvoiceAttachmentRow = {
+  id: number;
+  url: string;
+  file_type: string;
+  filename: string;
+  uploaded_at: string | null;
+};
+
+export async function listInvoiceAttachments(
+  invoiceId: number
+): Promise<InvoiceAttachmentRow[]> {
+  return apiGetList(`${BASE}/invoices/${invoiceId}/attachments/`, {
+    tenantId: tid(),
+  });
+}
+
+export async function addInvoiceAttachment(
+  invoiceId: number,
+  url: string
+): Promise<InvoiceAttachmentRow> {
+  return apiPostObject(
+    `${BASE}/invoices/${invoiceId}/attachments/`, { url }, { tenantId: tid() },
+  );
+}
+
+export async function deleteInvoiceAttachment(
+  invoiceId: number,
+  attachmentId: number
+): Promise<void> {
+  await apiDelete(
+    `${BASE}/invoices/${invoiceId}/attachments/${attachmentId}/`,
+    { tenantId: tid() },
+  );
 }
 
 /** إرسالية بيع كما يعيدها الخادم (مستند التسليم المرتبط بفاتورة). */

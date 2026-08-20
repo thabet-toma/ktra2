@@ -54,16 +54,16 @@ export const SupplierSearch: React.FC<SupplierSearchProps> = ({
       return supplier.tradeName;
     }
 
-    // كخيار أخير نعرض الاسم الأساسي
-    return supplier.tradeName || "";
+    return "";
   };
 
-  // ✅ دالة للحصول على الاسم الفرعي
+  // ✅ دالة للحصول على الاسم الفرعي — الاسم الآخر لا نسخة مكرّرة منه
   const getSubName = (supplier: Supplier) => {
-    // إذا كان هناك اسم مستعار، نعرض الاسم التجاري كاسم فرعي
-    if (supplier.alias && supplier.alias.trim() !== "") {
-      return supplier.tradeName || "";
-    }
+    const alias = (supplier.alias || "").trim();
+    const trade = (supplier.tradeName || "").trim();
+
+    // إذا كان هناك اسم مستعار (وهو المعروض)، نعرض الاسم الرسمي كاسم فرعي
+    if (alias && trade && alias !== trade) return trade;
 
     // إذا لم يكن هناك اسم مستعار، لا نعرض شيئاً كاسم فرعي
     return "";
@@ -71,10 +71,12 @@ export const SupplierSearch: React.FC<SupplierSearchProps> = ({
 
   // ✅ تصفية الموردين بناءً على البحث + النوع
   const filteredSuppliers = suppliers.filter((s) => {
-    // البحث في الاسم البارز (المستعار) والاسم التجاري
+    // الاسمان مستقلان (`name` و`legal_name`)، فالبحث يطابقهما معاً — البحث
+    // بالاسم العربي يجب أن يجد المورد ولو كان المعروض اسمه الأجنبي.
+    const term = supplierSearch.toLowerCase();
     const matchesSearch =
-      getDisplayName(s).toLowerCase().includes(supplierSearch.toLowerCase()) ||
-      (s.tradeName?.toLowerCase() || "").includes(supplierSearch.toLowerCase())
+      (s.alias?.toLowerCase() || "").includes(term) ||
+      (s.tradeName?.toLowerCase() || "").includes(term)
 
     // شرط النوع (إذا تم تمرير type)
     const matchesType = type ? s.type === type : true;

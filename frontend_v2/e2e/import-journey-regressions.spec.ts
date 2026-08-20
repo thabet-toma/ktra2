@@ -34,6 +34,49 @@ async function installAuthenticatedApiMocks(page: Page, responder: ApiResponder)
       });
       return;
     }
+    // القناع العام `[]` في ذيل هذا الموجّه كان يردّ على `/permissions/me/` أيضاً،
+    // فتصير `res.permissions` غير معرّفة والمجموعة فارغة بينما `loaded` صحيح ⇒
+    // `can()` كاذبة لكل مفتاح، فيردّ `canView` شاشةَ الصفقات إلى لوحة التحكم قبل
+    // ظهور أي حقل. المفاتيح بعينها في `utils/viewPermissions.ts`.
+    if (url.pathname.endsWith("/permissions/me/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          role: "manager",
+          is_manager: true,
+          modules: {},
+          ui_mode: "advanced",
+          permissions: ["import.deal.manage", "import.shipment.manage"],
+        }),
+      });
+      return;
+    }
+    // وبلا عضوية شركةٍ مفعَّلٍ فيها الاستيراد يبقى `canAccessImport` كاذباً،
+    // فيوجّه `App.tsx` كل مسار استيراد (`/deals/*`, `/import-flow/*`) إلى
+    // `/dashboard` — حارسٌ ثانٍ مستقل عن الصلاحيات، وسقوطه وحده يكفي لإفشال الأربعة.
+    if (url.pathname.endsWith("/tenants/companies/my-companies/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            id: 1,
+            tenant: {
+              TenantID: 1,
+              CompanyName: "شركة الاختبار",
+              SubscriptionPlan: "basic",
+              Status: "active",
+              CreatedAt: "2026-01-01T00:00:00Z",
+              import_enabled: true,
+            },
+            role: "manager",
+            is_default: true,
+            created_at: "2026-01-01T00:00:00Z",
+            can_access_import: true,
+          },
+        ]),
+      });
+      return;
+    }
     if (await responder(route, url)) return;
     if (url.pathname.includes("/mapper/activityStatus/")) {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ isCurrentlyActive: true }) });

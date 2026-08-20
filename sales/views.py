@@ -756,6 +756,157 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
             ],
         })
 
+    @action(detail=True, methods=["get"], url_path="stock-movements")
+    def stock_movements(self, request, pk=None):
+        """THA-132: أثر هذه الفاتورة على المخزون — تبويب «حركة المخزون».
+
+        `get_object` هو حارس العزل (فاتورة شركة أخرى لا تُبلَغ أصلاً)، والخدمة
+        تُنطَّق فوقه بـ`tenant_id`.
+
+        الحمولة تحمل معها **سبب الفراغ** لا الصفوف وحدها: مسودّةٌ لم تُرحَّل،
+        أو فاتورة `stock_on_post=False` تنتظر التسليم — حالتان صحيحتان تُقرآن
+        كعطل إن عُرض لهما جدولٌ فارغ بلا تفسير.
+        """
+        from inventory.services import document_stock_movements
+        from .services import SALES_STOCK_REFERENCE_TYPES
+
+        invoice = self.get_object()
+        data = document_stock_movements(
+            tenant_id=invoice.tenant_id,
+            reference_types=SALES_STOCK_REFERENCE_TYPES,
+            reference_id=invoice.id,
+        )
+        data["is_posted"] = invoice.status == SalesInvoice.STATUS_POSTED
+        data["stock_on_post"] = invoice.stock_on_post
+        data["delivery_status"] = invoice.delivery_status
+        data["delivery_status_display"] = invoice.get_delivery_status_display()
+        return Response(data)
+
+    @action(detail=True, methods=["get"], url_path="customer-ledger")
+    def customer_ledger(self, request, pk=None):
+        """THA-132: حركة حساب العميل حول هذه الفاتورة — رصيد قبلها وبعدها.
+
+        يستهلك `partner_account_statement` نفسه الذي يغذّي كشف الحساب في بطاقة
+        الطرف، مُمرَّراً إليه مرساةَ هذه الفاتورة. المطابقة **بالبناء**: نفس
+        الدالة ونفس الحلقة الزمنية — لا حساب ثانٍ يمكن أن ينحرف.
+
+        فاتورة بلا قيد (مسودّة) ⇒ `anchor = None` وحالةٌ معلنة: لم تمسّ الحساب
+        بعد. ليست خطأً ولا صفراً.
+        """
+        from accounting.services import partner_account_statement
+
+        invoice = self.get_object()
+        if not invoice.customer_id:
+            return Response({
+                "results": [], "count": 0, "anchor": None,
+                "closing_balance": "0", "customer_name": None,
+                "reason": "no_customer",
+            })
+        try:
+            limit = min(int(request.query_params.get("limit", 20)), 200)
+        except (TypeError, ValueError):
+            limit = 20
+        data = partner_account_statement(
+            tenant_id=invoice.tenant_id,
+            partner_id=invoice.customer_id,
+            is_supplier=False,
+            limit=limit,
+            anchor_reference_type="SALES_INVOICE",
+            anchor_reference_id=invoice.id,
+        )
+        data["customer_name"] = invoice.customer.name if invoice.customer_id else None
+        return Response(data)
+
+    # ── THA-132: مرفقات الفاتورة ────────────────────────────────────────────
+    # تُحفظ **فوراً** لا مع حفظ الفاتورة: الفاتورة المرحّلة لا تُعدَّل
+    # (`POSTED_DOC_WARNING`)، فربطُ المرفق بمسار PATCH كان يعني عملياً أن لا
+    # أحد يُرفق إيصالاً بعد الترحيل — وهو أكثر وقت يُحتاج فيه الإرفاق.
+    ATTACHMENT_TABLE = "sales_invoices"
+
+    @staticmethod
+    def _attachment_row(att):
+        return {
+            "id": att.id,
+            "url": att.file_path,
+            "file_type": att.file_type or "Image",
+            # الاسم غير مخزَّن في `SystemAttachment` — يُشتقّ من ذيل الرابط.
+            "filename": (att.file_path or "").rsplit("/", 1)[-1] or "مرفق",
+            "uploaded_at": att.uploaded_at.isoformat() if att.uploaded_at else None,
+        }
+
+    @action(detail=True, methods=["get", "post"], url_path="attachments")
+    def attachments(self, request, pk=None):
+        """مرفقات الفاتورة: قراءةً للجميع، وكتابةً بصلاحية التعديل.
+
+        الرفع نفسه يمرّ من `core/media_views.py` (نقطة الاختناق الوحيدة، قاعدة
+        `core.md` #7) فتُقاس بايتاته؛ هذه النقطة تربط الرابط الناتج بالفاتورة.
+        """
+        from core.models import SystemAttachment
+
+        invoice = self.get_object()
+        if request.method == "POST":
+            require_perm(request, "sales.invoice.edit")
+            url = str(request.data.get("url") or "").strip()
+            if not url.startswith(("http://", "https://")):
+                return Response(
+                    {"error": "رابط المرفق غير صالح."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            file_type = "PDF" if url.lower().endswith(".pdf") else "Image"
+            att, _created = SystemAttachment.objects.get_or_create(
+                tenant_id=invoice.tenant_id,
+                related_table=self.ATTACHMENT_TABLE,
+                related_id=invoice.id,
+                file_path=url,
+                defaults={"file_type": file_type},
+            )
+            log_activity(
+                action="update", entity_type="sales_invoice", entity_id=invoice.id,
+                entity_label=invoice.invoice_number, description="إرفاق ملف بالفاتورة",
+                partner_ids=[invoice.customer_id], request=request,
+            )
+            return Response(
+                self._attachment_row(att), status=status.HTTP_201_CREATED,
+            )
+
+        rows = SystemAttachment.objects.filter(
+            tenant_id=invoice.tenant_id,
+            related_table=self.ATTACHMENT_TABLE,
+            related_id=invoice.id,
+        ).order_by("id")
+        return Response([self._attachment_row(a) for a in rows])
+
+    @action(
+        detail=True, methods=["delete"],
+        url_path=r"attachments/(?P<attachment_id>[0-9]+)",
+    )
+    def delete_attachment(self, request, pk=None, attachment_id=None):
+        """حذف مرفق واحد — مُنطاقٌ بالفاتورة وشركتها معاً.
+
+        الفلترة بالشركة **وبالفاتورة** لا بالمعرّف وحده: معرّفٌ من فاتورة أخرى
+        يعود «غير موجود» بدل أن يُحذف.
+        """
+        from core.models import SystemAttachment
+
+        invoice = self.get_object()
+        require_perm(request, "sales.invoice.edit")
+        deleted, _ = SystemAttachment.objects.filter(
+            id=attachment_id,
+            tenant_id=invoice.tenant_id,
+            related_table=self.ATTACHMENT_TABLE,
+            related_id=invoice.id,
+        ).delete()
+        if not deleted:
+            return Response(
+                {"error": "المرفق غير موجود."}, status=status.HTTP_404_NOT_FOUND,
+            )
+        log_activity(
+            action="update", entity_type="sales_invoice", entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description="حذف مرفق من الفاتورة",
+            partner_ids=[invoice.customer_id], request=request,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @action(detail=True, methods=["post"], url_path="deliver")
     @requires_perm("sales.invoice.post")
     def deliver(self, request, pk=None):

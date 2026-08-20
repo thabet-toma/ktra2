@@ -296,7 +296,36 @@ class SalesInvoiceSerializer(
             }
         return None
 
+    # THA-132: «رقم الحركة» — يضعه الأصيل على وجه الفاتورة مدخلاً «للاستعلام عن
+    # الحركات» (`docs/aseel_reference/invoices.txt`). استعلامٌ واحد مفهرس على
+    # المستند المفتوح وحده (لا يمسّ سيريالايزر القائمة).
+    stock_movement_no = serializers.SerializerMethodField()
+
+    def get_stock_movement_no(self, obj):
+        from inventory.models import StockMovement
+        from .services import SALES_STOCK_REFERENCE_TYPES
+
+        return (
+            StockMovement.objects
+            .filter(
+                tenant_id=obj.tenant_id,
+                reference_type__in=SALES_STOCK_REFERENCE_TYPES,
+                reference_id=obj.id,
+            )
+            .order_by("id")
+            .values_list("id", flat=True)
+            .first()
+        )
+
     def _balance_summary(self, obj):
+        # THA-132 — **تقريبٌ لا يطابق كشف الحساب؛ لا تعرضه على أنه «قبل/بعد».**
+        # `document_partner_balance_summary` يطرح «المتبقّي» من رصيد **اليوم**،
+        # وكلا الأساسين خاطئ للفاتورة المرحّلة: قيدها يدين الذمم بكامل الإجمالي
+        # (التحصيل قيدٌ منفصل) فالمدفوعةُ بالكامل تُظهر أثراً صفرياً وهي ليست
+        # كذلك؛ ومرساتُه اليومُ لا موضعُ الفاتورة زمنياً. الجواب الصحيح في
+        # `GET /api/sales/invoices/{id}/customer-ledger/` — من
+        # `partner_account_statement` نفسه الذي يبني كشف الحساب.
+        # الحقلان باقيان لعقد الـAPI وحده (مسار المسودّة إسقاطٌ مشروع).
         summary = self._payment_summary(obj)
         direction = -1 if obj.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN else 1
         return document_partner_balance_summary(
@@ -340,6 +369,7 @@ class SalesInvoiceSerializer(
             "customer_balance",
             "customer_balance_before_invoice",
             "customer_balance_after_invoice",
+            "stock_movement_no",
             "payment_details",
             "revenue_account",
             "cash_or_bank_account",
@@ -382,6 +412,7 @@ class SalesInvoiceSerializer(
             "customer_balance",
             "customer_balance_before_invoice",
             "customer_balance_after_invoice",
+            "stock_movement_no",
             "payment_details",
             "created_at",
             "journal",

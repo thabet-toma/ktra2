@@ -58,6 +58,7 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:  # بطاقة �
 def product_group_profile(*, tenant_id: int, product_ids: list[int]) -> dict:  # الكرت المجمّع (823)
 def product_stock_ledger(*, tenant_id, product_id=None, product_ids=None, limit=50, offset=0) -> dict:  # (887)
 def partner_stock_movements(*, tenant_id, partner_id, limit=50, offset=0) -> dict:  # حركات مخزون الشريك مجمَّعةً تحت المستند المسبِّب (تبويب «المال» في كرته)
+def document_stock_movements(*, tenant_id, reference_types, reference_id) -> dict:  # المحور الثالث: حركات **مستندٍ واحد** — أثر الفاتورة على المخزون داخل شاشتها، بلقطتَي `quantity_before`/`quantity_after` المخزَّنتين. بلا ترقيم: بنود المستند محدودة بطبعها
 def product_linked_invoices(*, tenant_id, product_id=None, product_ids=None) -> list[dict]:  # (929)
 def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:  # (986)
 def set_avg_cost_from_purchases(product) -> Decimal:  # النموذج الدوري: متوسط كل المشتريات (1070)

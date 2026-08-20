@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **465**
+عدد النقاط: **469**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -407,13 +407,17 @@
 | `/api/sales/invoices/profits/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/resolve-price/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/` | `SalesInvoiceViewSet` | `sales/views.py` |
+| `/api/sales/invoices/{pk}/attachments/` | `SalesInvoiceViewSet` | `sales/views.py` |
+| `/api/sales/invoices/{pk}/attachments/{attachment_id}/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/collect/` | `SalesInvoiceViewSet` | `sales/views.py` |
+| `/api/sales/invoices/{pk}/customer-ledger/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/deliver/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/delivery-lines/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/delivery-order/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/duplicate/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/payment-voucher/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/post/` | `SalesInvoiceViewSet` | `sales/views.py` |
+| `/api/sales/invoices/{pk}/stock-movements/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/unpost/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/orders/` | `SalesOrderViewSet` | `sales/views.py` |
 | `/api/sales/orders/{pk}/` | `SalesOrderViewSet` | `sales/views.py` |

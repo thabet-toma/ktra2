@@ -1603,7 +1603,9 @@ export const suppliersService = {
       p?.partnerName ||
       `Supplier ${p?.id ?? ""}`;
     const legalName = p?.legal_name || p?.legalName || p?.LegalName || "";
-    const displayName = legalName || name;
+    // الاسم الرسمي (`name`) والاسم المستعار (`legal_name`) حقلان مستقلان: كان
+    // `legal_name` يبتلع `name` فيضيع الاسم العربي من كائن المورد كلياً، فلا
+    // يجده البحث ولا يظهر سطراً فرعياً في المنتقي.
     const alias =
       p?.alias ||
       p?.Alias ||
@@ -1616,7 +1618,7 @@ export const suppliersService = {
       "";
     return {
       id: String(p?.id ?? ""),
-      tradeName: displayName,
+      tradeName: name,
       alias,
       phone: p?.phone || "",
       mobile: p?.mobile || "",
@@ -1704,7 +1706,8 @@ export const suppliersService = {
               typeof rawPartner === "object" && rawPartner !== null ? String(rawPartner.id || "") : String(d?.partner || "");
             const legalName =
               (typeof rawPartner === "object" ? (rawPartner?.legal_name || rawPartner?.legalName || rawPartner?.alias) : "") || "";
-            const partnerName = legalName || d?.partner_name || (typeof rawPartner === "object" ? rawPartner?.name : "") || d?.factory_name || "";
+            // الاسم الرسمي أولاً؛ اللقب (`legal_name`) يبقى في `alias` وحده.
+            const partnerName = (typeof rawPartner === "object" ? rawPartner?.name : "") || d?.partner_name || d?.factory_name || legalName || "";
             if (!partnerName) return;
             const key = partnerId || partnerName;
             if (!byName.has(key)) {
@@ -1739,10 +1742,10 @@ export const suppliersService = {
                 ? (rawPartner.legal_name || rawPartner.legalName || rawPartner.alias || "")
                 : "";
             const partnerName =
-              legalName ||
-              d?.partner_name ||
               (typeof rawPartner === "object" ? rawPartner?.name : "") ||
+              d?.partner_name ||
               d?.factory_name ||
+              legalName ||
               "";
             if (!partnerName) return;
             const key = String(partnerId || partnerName);

@@ -15,6 +15,7 @@ from .foundation import (
     dormant_customers,
 )
 from .pricing import (
+    SALES_STOCK_REFERENCE_TYPES,
     sales_cogs_map,
     invoice_profits,
     last_sale_price,
@@ -114,6 +115,7 @@ __all__ = [
     "_fill_missing_default_accounts",
     "get_or_create_sales_settings",
     "dormant_customers",
+    "SALES_STOCK_REFERENCE_TYPES",
     "sales_cogs_map",
     "invoice_profits",
     "last_sale_price",

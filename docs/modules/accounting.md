@@ -164,7 +164,7 @@ def cheque_wallet(tenant_id: int, *, today=None) -> dict:  # محفظة الشي
 def create_bank_account(*, tenant, bank, name, currency, branch=None, account_number=None, iban=None, is_default=False, notes=None, user=None):  # حساب بنكي + حسابه في الشجرة تحت «1102»
 def bank_account_statement(bank_account, *, start_date=None, end_date=None, posted_only=True):  # حركة الحساب البنكي + حالة المطابقة
 def close_bank_reconciliation(reconciliation, *, user=None):  # يُرفض الإقفال ما لم يكن الفرق صفراً
-def partner_account_statement(*, tenant_id: int, partner_id: int, is_supplier: bool, limit: int = 50, offset: int = 0, ordering: str = "newest", only_payments: bool = False) -> dict:  # كشف حساب الطرف برصيد قبل الحركة وبعدها؛ only_payments يستثني الفاتورة من المعروض ولا يمسّ الحساب
+def partner_account_statement(*, tenant_id: int, partner_id: int, is_supplier: bool, limit: int = 50, offset: int = 0, ordering: str = "newest", only_payments: bool = False, anchor_reference_type: str | None = None, anchor_reference_id: int | None = None) -> dict:  # كشف حساب الطرف برصيد قبل الحركة وبعدها؛ only_payments يستثني الفاتورة من المعروض ولا يمسّ الحساب؛ والمرساة تُركّز النافذة على مستندٍ بعينه وتُرجع `anchor` (قبل/بعد/الأثر) بلا أن تمسّ الحساب
 def partner_posted_balance(tenant_id: int, partner_id: int) -> tuple[Decimal, Decimal]:  # (debit, credit) من الأسطر المرحّلة بالعملة الأساسية
 def attach_partner_posted_balance(rows, partner_id_field: str, *, supplier: bool, attr: str):  # أرصدة صفحة محمَّلة باستعلام واحد (للقوائم)
 def annotate_partner_posted_balance(queryset, partner_id_field: str, *, supplier: bool, alias: str):  # للصف الواحد/الفلترة فقط — لا للقوائم
@@ -242,6 +242,7 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | `accounting/tests/test_journal_tenant_scoping.py` | رفض شريك/مركز تكلفة من شركة أخرى في `validate_journal_entry` |
 | `accounting/tests/test_accounting_permissions.py` | إنفاذ مفاتيح `accounting.*` على القيد والشجرة والفترات |
 | `accounting/tests/test_partner_statement.py` | مطابقة الرصيد الجاري في كشف الحساب مع `partner_posted_balance` |
+| `sales/tests/test_invoice_context_tabs.py` | **المرساة** (`anchor_*`): نافذةٌ تتمركز على المستند فيبقى ظاهراً ولو تلته عشراتُ الحركات، و«قبل/بعد» يطابقان سطرَه في الكشف الكامل، وبلا تمريرها الحمولة كما كانت حرفياً (بلا `anchor` ولا `is_anchor`) |
 | `accounting/tests/test_audit_log_isolation.py` | سطر التدقيق لا يُسقط عملية المستدعي |
 | `accounting/tests/test_fx_fifo.py` | طبقات FIFO لصندوق العملة الأجنبية |
 | `accounting/tests/test_journal_pagination.py` · `test_journal_reference_perf.py` · `test_account_list_perf.py` | عقد الترقيم وغياب N+1 |

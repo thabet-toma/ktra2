@@ -172,7 +172,8 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 o.offerType === 'incoming_offer' && o.status === 'approved_for_shipping'
             ));
         }, 'import');
-        const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers);
+        // T-IMPOFFER: قائمة الصفقات تعرض أسماء موردي الاستيراد وحدهم.
+        const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers, undefined, 'international');
         return () => { unsubOffers(); unsubSuppliers(); };
     }, []);
 

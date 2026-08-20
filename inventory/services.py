@@ -975,6 +975,67 @@ def partner_stock_movements(
     return {'results': groups, 'count': total, 'limit': limit, 'offset': offset}
 
 
+def document_stock_movements(
+    *, tenant_id: int, reference_types, reference_id: int,
+) -> dict:
+    """THA-132: أثر مستندٍ واحد على المخزون — الحركات التي سبّبها **هو**.
+
+    ليست تاريخَ الصنف (ذاك `product_stock_ledger` في كرت الصنف) ولا حركاتِ
+    الطرف (`partner_stock_movements` في كرته)، بل المحور الثالث: المستند.
+    مرجع «الأصيل» يضع «رقم الحركة المخزنية» على وجه الفاتورة ويجعله مدخلاً
+    «للاستعلام عن الحركات» (`docs/aseel_reference/invoices.txt`) — وهذه الدالة
+    هي ذلك المدخل.
+
+    لا يُنشأ هنا ربطٌ جديد: `reference_type`/`reference_id` مخزَّنان في
+    `StockMovement` أصلاً، والناقص كان القراءة من جهة المستند.
+
+    `quantity_before`/`quantity_after` لقطتان مخزَّنتان لحظة الحركة (A4)، فرصيد
+    الصنف قبل هذه الفاتورة وبعدها يُقرأ ولا يُحسب — لا مصدر حقيقة موازٍ.
+
+    بلا ترقيم عمداً: بنود مستندٍ واحد محدودة بطبعها (سقفها بنود الفاتورة)،
+    والترقيم هنا تعقيدٌ بلا مقابل.
+    """
+    rows_qs = (
+        StockMovement.objects
+        .filter(
+            tenant_id=tenant_id,
+            reference_type__in=tuple(reference_types),
+            reference_id=reference_id,
+        )
+        .select_related('warehouse', 'product')
+        .order_by('movement_date', 'id')
+    )
+    results = []
+    total_cost = Decimal('0')
+    for m in rows_qs:
+        qty = Decimal(str(m.quantity or 0))
+        is_in = m.movement_type in _STOCK_IN_TYPES
+        cost = Decimal(str(m.total_cost or 0))
+        total_cost += cost
+        results.append({
+            # رقم الحركة = مسلسل الأصيل نفسه؛ يظهر في الشاشة وشريط الحالة.
+            'id': m.id,
+            'date': m.movement_date.isoformat() if m.movement_date else None,
+            'movement_type': m.movement_type,
+            'movement_type_label': m.get_movement_type_display(),
+            'reference_type': m.reference_type,
+            'product_id': m.product_id,
+            'product_name': product_display_name(m.product),
+            'warehouse': m.warehouse.name if m.warehouse_id else None,
+            'qty_in': str(qty) if is_in else '0',
+            'qty_out': str(qty) if not is_in else '0',
+            'quantity_before': str(m.quantity_before),
+            'running_balance': str(m.quantity_after),
+            'unit_cost': str(m.unit_cost or 0),
+            'total_cost': str(cost),
+        })
+    return {
+        'results': results,
+        'count': len(results),
+        'total_cost': str(total_cost.quantize(Decimal('0.01'))),
+    }
+
+
 def product_linked_invoices(
     *, tenant_id: int, product_id: int | None = None,
     product_ids: list[int] | None = None,

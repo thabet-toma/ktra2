@@ -330,7 +330,9 @@ export const DealForm: React.FC<DealFormProps> = ({
   };
 
   useEffect(() => {
-    const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers);
+    // T-IMPOFFER: الصفقة استيراد بطبيعتها — الموردون الدوليون (ومعهم غير
+    // المصنَّفين) دون المحليين.
+    const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers, undefined, "international");
     const unsubItems = itemsService.subscribeToItems(setAllDbItems);
     return () => { unsubSuppliers(); unsubItems(); };
   }, []);
