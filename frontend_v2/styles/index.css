@@ -1141,18 +1141,22 @@ tbody td {
   border-radius: 4px;
 }
 
-/* ── Index picker modal ── */
+/* ── Index picker modal ──
+   THA-131: القائمة تُحاذى **بداية** السطر لا نهايته. الصفحة كلها `dir="rtl"`،
+   فـ`flex-end` كان يرميها إلى يسار الشاشة بعيداً عن الحقل الذي فتحها ومسار
+   العين. `flex-start` = يمين في RTL، ويسار تلقائياً لو صار في الموقع اتجاه
+   LTR يوماً — ولذلك الحدّ صار منطقياً (`inline-end`) لا `left` ثابتاً. */
 :root[data-skin] .aseel-picker-mask {
   position: fixed; inset: 0; z-index: 70;
   background: var(--aseel-mask);
-  display: flex; align-items: stretch; justify-content: flex-end;
+  display: flex; align-items: stretch; justify-content: flex-start;
 }
 :root[data-skin] .aseel-picker {
   width: 380px;
   max-height: 100vh;
   display: flex; flex-direction: column;
   background: var(--aseel-panel);
-  border-left: 1px solid var(--aseel-border);
+  border-inline-end: 1px solid var(--aseel-border);
   box-shadow: var(--aseel-shadow-panel);
   font-family: var(--aseel-font);
   direction: rtl;

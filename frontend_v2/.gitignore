@@ -28,3 +28,7 @@ dist-ssr
 
 # B3 office walkthrough screenshots — دليل تسليم يُولَّد محلياً، لا مصدر.
 /e2e/office-walk-shots/
+
+# لقطات تحقّق يدويّة — تُولَّد محلياً من specs مُتتبَّعة، لا مصدر.
+/e2e/cheque-lifecycle-shots/
+/e2e/collect-panel-shots/
