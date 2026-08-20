@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { History } from "lucide-react";
+import { History, ChevronDown, ChevronLeft } from "lucide-react";
 import { CollapsibleSection } from "@/components/ui/CollapsibleSection";
 import { DocRefCell } from "@/components/shared/LedgerTable";
 import { getEntityActivity, getPartnerActivity } from "@/services/activityService";
 import { clientLogger } from "@/services/logger";
+import { formatNumber } from "@/utils/formatNumber";
 import type { ActivityLogEntry } from "@/types/activity";
 import { actionMeta, entityLabel, formatActivityTime } from "./activityMeta";
 import { ActivityChanges } from "./ActivityChanges";
@@ -27,6 +28,8 @@ export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
   const [rows, setRows] = useState<ActivityLogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** الصفوف المطويّة المفتوحة — الطيّ عرضٌ فقط، والخام متاح بضغطة. */
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     if (!partnerId && (!entityType || !entityId)) return;
@@ -66,12 +69,20 @@ export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
         <ol className="relative space-y-3">
           {rows.map((r) => {
             const meta = actionMeta(r.action);
+            const count = r.group_count ?? 1;
+            const folded = count > 1;
+            const isOpen = Boolean(expanded[r.id]);
             return (
               <li key={r.id} className="flex items-start gap-3 border-b aseel-border-soft last:border-b-0 pb-3 last:pb-0">
                 <div className="mt-0.5">{meta.icon}</div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${meta.badge}`}>{r.action_label || meta.label}</span>
+                    {folded && (
+                      <span className="text-xs px-1.5 py-0.5 rounded-full aseel-bg-panel aseel-text-soft font-bold">
+                        ×{formatNumber(count)}
+                      </span>
+                    )}
                     <span className="font-medium aseel-text-ink dark:text-white">{r.user_name}</span>
                     {partnerId && (
                       <span className="text-xs aseel-text-soft">
@@ -83,7 +94,31 @@ export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
                       </span>
                     )}
                   </div>
-                  {r.metadata?.changes?.length ? (
+                  {folded ? (
+                    /* حدث مكرَّر مطويّ: سطر واحد بعدّاد وآخر وقت، يُفتح على الخام. */
+                    <>
+                      <button
+                        type="button"
+                        className="mt-0.5 flex items-center gap-1 text-sm aseel-text-soft hover:underline"
+                        aria-expanded={isOpen}
+                        onClick={() => setExpanded((prev) => ({ ...prev, [r.id]: !prev[r.id] }))}
+                      >
+                        {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+                        <span>
+                          {r.description || meta.label} ×{formatNumber(count)} — آخرها {formatActivityTime(r.timestamp)}
+                        </span>
+                      </button>
+                      {isOpen && (
+                        <ul className="mt-1 space-y-0.5 border-s ps-2 aseel-border-soft">
+                          {(r.group_rows || []).map((g) => (
+                            <li key={g.id} className="text-xs aseel-text-soft">
+                              {formatActivityTime(g.timestamp)}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  ) : r.metadata?.changes?.length ? (
                     <div className="mt-1"><ActivityChanges changes={r.metadata.changes} /></div>
                   ) : (
                     r.description && (

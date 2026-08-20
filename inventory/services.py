@@ -928,6 +928,53 @@ def product_stock_ledger(
     return {'results': rows, 'count': total, 'limit': limit, 'offset': offset}
 
 
+def partner_stock_movements(
+    *, tenant_id: int, partner_id: int, limit: int = 50, offset: int = 0,
+) -> dict:
+    """THA-128: حركات مخزون الشريك مجمَّعةً تحت المستند المسبِّب.
+
+    الربط بالمستند قائمٌ أصلاً في `StockMovement` (`reference_type`/`reference_id`)
+    ولا يُنشأ هنا شيء — الناقص كان العرض بجانب مال الشريك. والرصيد الجاري يبقى
+    `quantity_after` المخزَّن (A4: لا حساب موازٍ يخالف رصيد الصنف).
+
+    التجميع بعد الترقيم لا قبله: الصفحة هي ما يُعرض، وعليها تُبنى المجموعات.
+    """
+    base = (
+        StockMovement.objects
+        .filter(tenant_id=tenant_id, partner_id=partner_id)
+        .select_related('warehouse', 'product')
+        .order_by('-movement_date', '-id')
+    )
+    total = base.count()
+    groups: list[dict] = []
+    index: dict = {}
+    for m in base[offset:offset + limit]:
+        qty = Decimal(str(m.quantity or 0))
+        is_in = m.movement_type in _STOCK_IN_TYPES
+        key = (m.reference_type, m.reference_id)
+        group = index.get(key)
+        if group is None:
+            group = {
+                'reference_type': m.reference_type,
+                'reference_id': m.reference_id,
+                'movements': [],
+            }
+            index[key] = group
+            groups.append(group)
+        group['movements'].append({
+            'id': m.id,
+            'date': m.movement_date.isoformat() if m.movement_date else None,
+            'movement_type': m.movement_type,
+            'movement_type_label': m.get_movement_type_display(),
+            'product_name': product_display_name(m.product),
+            'warehouse': m.warehouse.name if m.warehouse_id else None,
+            'qty_in': str(qty) if is_in else '0',
+            'qty_out': str(qty) if not is_in else '0',
+            'running_balance': str(m.quantity_after),
+        })
+    return {'results': groups, 'count': total, 'limit': limit, 'offset': offset}
+
+
 def product_linked_invoices(
     *, tenant_id: int, product_id: int | None = None,
     product_ids: list[int] | None = None,

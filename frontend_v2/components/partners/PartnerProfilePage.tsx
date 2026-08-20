@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
 import { apiGetObject } from '../../services/restApi';
-import { formatMoney } from '../../utils/formatNumber';
+import { formatMoney, formatQuantity } from '../../utils/formatNumber';
 import { formatDateLocalized, todayIso } from '../../utils/formatDate';
 import { isReservationActive } from '../../utils/documentBadges';
 import { resolveTenantId } from '../../utils/tenantContext';
@@ -76,12 +76,30 @@ interface StatementRow {
   debit: string;
   credit: string;
   running_balance: string;
+  /** THA-128: الرصيد قبل أثر هذه الحركة — لقطةٌ من حلقة الكشف نفسها. */
+  balance_before?: string;
   /** رقم المستند حين تكون الحركة فاتورة. */
   document_number?: string | null;
   /** مفتاح الربط: الفاتورة وسندها يتشاركانه ⇒ يُعرَضان متجاورين بإطار واحد. */
   link_key?: string | null;
   link_label?: string | null;
   link_count?: number;
+}
+
+/** حركات مخزون مستندٍ واحد، كما يجمعها الخادم تحت المستند المسبِّب. */
+interface StockMovementGroup {
+  reference_type: string | null;
+  reference_id: number | null;
+  movements: Array<{
+    id: number;
+    date: string | null;
+    movement_type_label: string;
+    product_name: string;
+    warehouse: string | null;
+    qty_in: string;
+    qty_out: string;
+    running_balance: string;
+  }>;
 }
 
 /** سند «على الحساب» موحَّد الشكل بين العميل (قبض) والمورد (صرف). */
@@ -137,6 +155,13 @@ export const PartnerProfilePage: React.FC = () => {
   // statement (party ledger) — paginated
   const [stmt, setStmt] = useState<{ rows: StatementRow[]; count: number }>({ rows: [], count: 0 });
   const [stmtOffset, setStmtOffset] = useState(0);
+  /* THA-128 — تبويب «المال»: حركات التسوية وحدها من الكشف نفسه (المصدر ذاته،
+     فلا معادلة ثانية للرصيد)، ومعها حركات المخزون تحت مستندها المسبِّب. */
+  const [money, setMoney] = useState<{ rows: StatementRow[]; count: number }>({ rows: [], count: 0 });
+  const [moneyOffset, setMoneyOffset] = useState(0);
+  const [moneyLoading, setMoneyLoading] = useState(false);
+  const [stockGroups, setStockGroups] = useState<StockMovementGroup[]>([]);
+  const [stockLoading, setStockLoading] = useState(false);
   const [stmtLoading, setStmtLoading] = useState(false);
   const [stmtOrdering, setStmtOrdering] = useState<StatementOrdering>('newest');
   // ربط الفاتورة بسندها: يجمع الحركتين متجاورتين داخل إطار واحد (ضمن الصفحة).
@@ -336,6 +361,32 @@ export const PartnerProfilePage: React.FC = () => {
     loadStatement(stmtOffset);
   }, [loadStatement, stmtOffset]);
 
+  // تبويب «المال»: نفس نقطة الكشف بـ only_payments — الرصيد قبل/بعد يصل محسوباً
+  // على الحساب كلّه، فما يُعرض هنا يطابق كشف الحساب في اللحظات نفسها.
+  useEffect(() => {
+    if (!id) return;
+    setMoneyLoading(true);
+    apiGetObject<{ results: StatementRow[]; count: number }>(
+      `partners/${id}/statement/?limit=${PAGE}&offset=${moneyOffset}&ordering=${stmtOrdering}&only_payments=true`,
+      { tenantId },
+    )
+      .then((d) => setMoney({ rows: d.results, count: d.count }))
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setMoneyLoading(false));
+  }, [id, tenantId, stmtOrdering, moneyOffset, paymentsRefreshKey]);
+
+  useEffect(() => {
+    if (!id) return;
+    setStockLoading(true);
+    apiGetObject<{ results: StockMovementGroup[] }>(
+      `partners/${id}/stock-movements/?limit=${PAGE}`,
+      { tenantId },
+    )
+      .then((d) => setStockGroups(Array.isArray(d.results) ? d.results : []))
+      .catch(() => setStockGroups([]))
+      .finally(() => setStockLoading(false));
+  }, [id, tenantId]);
+
   useEffect(() => {
     if (!id) return;
     setInvLoading(true);
@@ -392,6 +443,37 @@ export const PartnerProfilePage: React.FC = () => {
           تفاصيل
         </button>
       ),
+    },
+  ];
+
+  const moneyColumns: LedgerColumn<StatementRow>[] = [
+    { key: 'date', header: 'التاريخ', render: (r) => formatDateLocalized(r.date) || '—' },
+    {
+      key: 'reference',
+      header: 'الحركة',
+      render: (r) => (
+        <DocRefCell
+          referenceType={r.reference_type}
+          referenceId={r.reference_id}
+          label={`${referenceTypeLabel(r.reference_type)}${
+            r.reference_id != null ? ` #${r.reference_id}` : ''
+          }`}
+        />
+      ),
+    },
+    { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="aseel-num">{r?.debit ?? ''}</span> },
+    { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="aseel-num">{r?.credit ?? ''}</span> },
+    {
+      key: 'balance_before',
+      header: 'الرصيد قبل',
+      align: 'right',
+      render: (r) => <span className="aseel-num">{formatMoney(r?.balance_before ?? '')}</span>,
+    },
+    {
+      key: 'balance_after',
+      header: 'الرصيد بعد',
+      align: 'right',
+      render: (r) => <b className="aseel-num">{formatMoney(r?.running_balance ?? '')}</b>,
     },
   ];
 
@@ -630,6 +712,86 @@ export const PartnerProfilePage: React.FC = () => {
               ) : undefined
             }
           />
+        </div>
+      ),
+    },
+    {
+      key: 'money',
+      label: 'المال',
+      content: (
+        <div className="p-2">
+          <div className="mb-2 text-[11px] text-[var(--aseel-ink-soft)]">
+            حركات التسوية وحدها (بلا الفاتورة نفسها)، وكلٌّ منها برصيد الحساب قبلها
+            وبعدها. الرصيدان محسوبان على الحساب كلّه لا على المعروض، فيطابقان كشف
+            الحساب في اللحظات نفسها.
+          </div>
+          <LedgerTable<StatementRow>
+            columns={moneyColumns}
+            rows={money.rows}
+            loading={moneyLoading}
+            count={money.count}
+            limit={PAGE}
+            offset={moneyOffset}
+            onPage={setMoneyOffset}
+            rowClassName={(r) => statementToneRowClass(r.reference_type)}
+            emptyText="لا توجد حركات مالية على حساب هذا الشريك بعد."
+          />
+
+          <h3 className="mt-5 mb-2 text-sm font-bold text-[var(--aseel-ink)]">
+            حركات المخزون المرتبطة
+          </h3>
+          {stockLoading ? (
+            <div className="py-4 text-sm text-[var(--aseel-ink-soft)]">جارٍ التحميل…</div>
+          ) : stockGroups.length === 0 ? (
+            <div className="py-4 text-sm text-[var(--aseel-ink-soft)]">
+              لا توجد حركات مخزون مرتبطة بمستندات هذا الشريك.
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {stockGroups.map((g) => (
+                <div
+                  key={`${g.reference_type}:${g.reference_id}`}
+                  className="rounded-lg border border-[var(--aseel-border)] p-2"
+                >
+                  <div className="mb-1 text-xs font-bold">
+                    <DocRefCell
+                      referenceType={g.reference_type}
+                      referenceId={g.reference_id}
+                      label={`${referenceTypeLabel(g.reference_type)}${
+                        g.reference_id != null ? ` #${g.reference_id}` : ''
+                      }`}
+                    />
+                  </div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-[var(--aseel-ink-soft)]">
+                        <th className="px-2 py-1 text-right">التاريخ</th>
+                        <th className="px-2 py-1 text-right">الصنف</th>
+                        <th className="px-2 py-1 text-right">الحركة</th>
+                        <th className="px-2 py-1 text-right">المستودع</th>
+                        <th className="px-2 py-1 text-right">وارد</th>
+                        <th className="px-2 py-1 text-right">صادر</th>
+                        <th className="px-2 py-1 text-right">الرصيد بعدها</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.movements.map((m) => (
+                        <tr key={m.id}>
+                          <td className="px-2 py-1">{formatDateLocalized(m.date) || '—'}</td>
+                          <td className="px-2 py-1">{m.product_name}</td>
+                          <td className="px-2 py-1">{m.movement_type_label}</td>
+                          <td className="px-2 py-1">{m.warehouse || '—'}</td>
+                          <td className="px-2 py-1 aseel-num">{formatQuantity(m.qty_in)}</td>
+                          <td className="px-2 py-1 aseel-num">{formatQuantity(m.qty_out)}</td>
+                          <td className="px-2 py-1 aseel-num font-bold">{formatQuantity(m.running_balance)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       ),
     },

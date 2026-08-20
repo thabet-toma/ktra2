@@ -53,7 +53,8 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 | GET | `partners/lookup/` | `PartnerViewSet.lookup` — مصفوفة خام محدودة (افتراضي 200، حد أقصى 500) |
 | GET | `partners/{id}/balance/` | `PartnerViewSet.balance` — رصيد حالي + `projected_balance` بعد `?proposed_total=` |
 | GET | `partners/{id}/profile/` | `PartnerViewSet.profile` — Dr/Cr + إجمالي المبيعات/المشتريات + آخر معاملة |
-| GET | `partners/{id}/statement/` | `PartnerViewSet.statement` (`limit` ≤ 200، `offset`، `ordering`) |
+| GET | `partners/{id}/statement/` | `PartnerViewSet.statement` (`limit` ≤ 200، `offset`، `ordering`، `only_payments`) — كل صفّ يحمل `balance_before` و`running_balance`: الرصيد قبل الحركة وبعدها. `only_payments=true` يستثني الفاتورة نفسها ويُبقي كل ما عداها (سند · ارتداد شيك · إشعار دائن) — الترشيح يحكم المعروض لا الحساب |
+| GET | `partners/{id}/stock-movements/` | `PartnerViewSet.stock_movements` → `inventory/services.py` (`partner_stock_movements`) — حركات مخزون الشريك مجمَّعةً تحت المستند المسبِّب |
 | GET | `partners/{id}/invoices/` | `PartnerViewSet.invoices` — فواتير البيع والشراء بحالة الدفع |
 | GET | `partners/{id}/payment-defaults/` | `PartnerViewSet.payment_defaults` (`?direction=Incoming\|Outgoing`) |
 | GET/POST | `customer-notes/` | `CustomerNoteViewSet` (فلاتر `partner`، `target_type`، `target_id`) |
@@ -91,6 +92,7 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 |---|---|
 | `partners/tests/test_customer_notes.py` | إنشاء الملاحظة مع `created_by`، الفلترة بـ`?partner`، العزل بين الشركات، `reminders-due` و`alerts` |
 | `partners/tests/test_partner_card_payment_clarity.py` | `invoices/` يطابق حالة الدفع في شاشة الفواتير، و`link_key` يربط الحركة بمستندها في كشف الحساب |
+| `partners/tests/test_partner_stock_movements.py` | حركات مخزون الشريك مجمَّعةً تحت مستندها، وعزلها عن الشركات الأخرى (العدد تسريبٌ أيضاً) |
 | `partners/tests/test_partner_duplicate_identifiers.py` | رفض الرقم الضريبي/البنكي الشبيه، مُنطاقاً بالشركة وعبر كل الأنواع |
 | `partners/tests/test_supplier_scope.py` | غير المصنَّف يظهر في الجانبين — الفصل لا يُخفي مورداً قائماً |
 | `partners/tests/test_partner_list_pagination.py` | حدود `list`/`lookup` والفلترة والعزل وعدد الاستعلامات |

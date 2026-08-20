@@ -29,6 +29,14 @@ export interface ActivityLogEntry {
   user_name: string;
   ip_address: string | null;
   timestamp: string;
+  /** عدد الأحداث المطويّة في هذا الصف (١ = صفّ مفرد). سجل المستند فقط. */
+  group_count?: number;
+  /** معرّفات الأحداث الخام المطويّة — الخام يبقى كاملاً في الخادم. */
+  group_ids?: number[];
+  /** الأحداث المطويّة نفسها، للفتح. غائبة حين يكون الصفّ مفرداً. */
+  group_rows?: ActivityLogEntry[];
+  /** وقت أقدم حدث في المجموعة؛ `timestamp` هو أحدثها. */
+  first_timestamp?: string;
 }
 
 export interface ActivityUserOption {

@@ -81,6 +81,48 @@ def _partner_activity_filter(tenant, partner_id):
     )
 
 
+def _fold_view_events(rows):
+    """يطوي أحداث العرض المتتالية لنفس المستخدم في صفّ واحد بعدّاد.
+
+    الطيّ **عند القراءة**: مسار الكتابة (core.activity) عقدُه أنه لا يعطّل الطلب
+    أبداً، فلا يُقحَم فيه قفلُ صفٍّ ولا سباقٌ على عدّاد. الصفوف الخام تبقى كاملة في
+    قاعدة البيانات، والمعروض مشتقّ منها: `group_rows` يحمل المطويّات كي تُفتح.
+
+    التتالي شرط: تعديلٌ بين عرضين يفصلهما، فلا يبتلع الطيّ ترتيب الأحداث — وهو
+    أهمّ ما في سجل تدقيق. الطيّ يجري على الصفحة المعروضة، فالعدّاد عدّاد صفحتها.
+    """
+    folded = []
+    for row in rows:
+        prev = folded[-1] if folded else None
+        same_actor_view = (
+            row.get("is_view")
+            and prev is not None
+            and prev.get("is_view")
+            and prev.get("user") == row.get("user")
+            and prev.get("action") == row.get("action")
+            and prev.get("entity_type") == row.get("entity_type")
+            and prev.get("entity_id") == row.get("entity_id")
+        )
+        if same_actor_view:
+            prev["group_count"] += 1
+            prev["group_ids"].append(row["id"])
+            prev["group_rows"].append(row)
+            # الترتيب تنازليّ زمنياً، فآخر ما يُضاف هو الأقدم في المجموعة.
+            prev["first_timestamp"] = row["timestamp"]
+            continue
+        new_row = dict(row)
+        new_row["group_count"] = 1
+        new_row["group_ids"] = [row["id"]]
+        new_row["group_rows"] = [row]
+        new_row["first_timestamp"] = row["timestamp"]
+        folded.append(new_row)
+    # الصفّ المفرد لا يحمل نسخةً من نفسه — الحمولة تبقى بحجم الصفحة لا ضعفها.
+    for row in folded:
+        if row["group_count"] == 1:
+            row.pop("group_rows", None)
+    return folded
+
+
 class ActivityLogSerializer(serializers.ModelSerializer):
     user_name = serializers.SerializerMethodField()
     action_label = serializers.CharField(source="get_action_display", read_only=True)
@@ -125,7 +167,7 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         partner_id = p.get("partner_id")
 
         # صلاحية: سجل مستند/جهة متاح للعضو؛ السجل العام للمدير فقط.
-        is_document_scoped = bool(entity_type and entity_id)
+        is_document_scoped = self._is_document_scoped()
         is_partner_scoped = bool(partner_id)
         is_scoped = is_document_scoped or is_partner_scoped
         if not is_scoped and not user_is_admin(self.request.user):
@@ -186,6 +228,27 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         return qs.order_by("-timestamp", "-id")
+
+    def _is_document_scoped(self) -> bool:
+        """سجل مستند واحد = نوع الكيان ومعرّفه معاً؛ وهو وحده ما يُطوى."""
+        p = self.request.query_params
+        return bool(p.get("entity_type") and p.get("entity_id"))
+
+    def list(self, request, *args, **kwargs):
+        """سجل المستند يُطوى قبل بثّه؛ الصفحة العامة تبقى صفوفاً خاماً.
+
+        الطيّ بعد الترقيم لا قبله: الصفحة هي ما يراه المستخدم، وعليها يُحسب
+        العدّاد — بلا استعلام إضافي على الجدول كاملاً.
+        """
+        response = super().list(request, *args, **kwargs)
+        if not self._is_document_scoped():
+            return response
+        data = response.data
+        if isinstance(data, dict) and "results" in data:
+            data["results"] = _fold_view_events(data["results"])
+        else:
+            response.data = _fold_view_events(data)
+        return response
 
     @action(detail=False, methods=["get"], url_path="users")
     def users(self, request):

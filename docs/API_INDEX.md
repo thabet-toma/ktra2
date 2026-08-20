@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **464**
+عدد النقاط: **465**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -347,6 +347,7 @@
 | `/api/partners/{pk}/payment-defaults/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/{pk}/profile/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/{pk}/statement/` | `PartnerViewSet` | `partners/views.py` |
+| `/api/partners/{pk}/stock-movements/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/permissions/matrix/` | `permissions_matrix` | `core/permissions_api.py` |
 | `/api/permissions/matrix/reset/` | `reset_permissions_matrix` | `core/permissions_api.py` |
 | `/api/permissions/me/` | `my_permissions` | `core/permissions_api.py` |

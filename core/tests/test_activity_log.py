@@ -315,3 +315,84 @@ class SessionEventTest(APITestCase):
         assert out.status_code == 200, out.content
         assert ActivityLog.objects.filter(
             tenant=tenant, user=user, action="logout", entity_type="session").exists()
+
+
+class ViewEventFoldingTest(APITestCase):
+    """طيّ أحداث العرض المكرَّرة في سجل المستند — سطر واحد بعدّاد، والخام يبقى.
+
+    الطيّ عند القراءة لا عند الكتابة: مسار الكتابة غير حاظر بعقده، ولا يُقحَم فيه
+    قفلُ صفٍّ ولا سباقٌ على عدّاد. الأحداث الخام تبقى كاملة (append-only).
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.manager = User.objects.create_user(username="folder", password="x")
+        cls.tenant = create_company("شركة الطيّ", cls.manager)
+
+    def _h(self):
+        self.client.force_authenticate(user=self.manager)
+        return {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def test_twelve_views_fold_into_one_row_with_counter(self):
+        for _ in range(12):
+            log_view(entity_type="sales_invoice", entity_id=55, entity_label="INV-55",
+                     tenant=self.tenant, user=self.manager)
+
+        # الخام كما هو: اثنتا عشرة حركة محفوظة، لا شيء يُدمج في قاعدة البيانات.
+        assert ActivityLog.objects.filter(
+            tenant=self.tenant, entity_type="sales_invoice", entity_id=55,
+            is_view=True).count() == 12
+
+        res = self.client.get(
+            "/api/activity/?entity_type=sales_invoice&entity_id=55", **self._h())
+        assert res.status_code == 200, res.content
+        rows = res.json().get("results", res.json())
+
+        view_rows = [r for r in rows if r["action"] == "view"]
+        assert len(view_rows) == 1, f"توقّعنا صفاً واحداً مطوياً، وجدنا {len(view_rows)}"
+        assert view_rows[0]["group_count"] == 12
+        # آخر وقت هو الأحدث بين المطويّات، والمعرّفات الخام متاحة للفتح.
+        assert len(view_rows[0]["group_ids"]) == 12
+        assert view_rows[0]["timestamp"] == max(r["timestamp"] for r in view_rows[0]["group_rows"])
+
+    def test_edits_between_views_are_not_folded_together(self):
+        """التعديل يفصل: عرضٌ ثم تعديل ثم عرض = ثلاثة سطور، لا سطر واحد بعدّاد ٢."""
+        log_view(entity_type="sales_invoice", entity_id=56, entity_label="INV-56",
+                 tenant=self.tenant, user=self.manager)
+        log_activity(action="update", entity_type="sales_invoice", entity_id=56,
+                     entity_label="INV-56", description="تعديل",
+                     tenant=self.tenant, user=self.manager)
+        log_view(entity_type="sales_invoice", entity_id=56, entity_label="INV-56",
+                 tenant=self.tenant, user=self.manager)
+
+        res = self.client.get(
+            "/api/activity/?entity_type=sales_invoice&entity_id=56", **self._h())
+        rows = res.json().get("results", res.json())
+        assert len(rows) == 3
+        assert all(r.get("group_count", 1) == 1 for r in rows)
+
+    def test_two_users_viewing_are_not_folded_into_one(self):
+        """الطيّ لا يبتلع هوية الفاعل: مستخدمان = سطران."""
+        other = User.objects.create_user(username="other_viewer", password="x")
+        UserCompanyMembership.objects.create(user=other, tenant=self.tenant, role="staff")
+        for _ in range(3):
+            log_view(entity_type="sales_invoice", entity_id=57, entity_label="INV-57",
+                     tenant=self.tenant, user=self.manager)
+        for _ in range(2):
+            log_view(entity_type="sales_invoice", entity_id=57, entity_label="INV-57",
+                     tenant=self.tenant, user=other)
+
+        res = self.client.get(
+            "/api/activity/?entity_type=sales_invoice&entity_id=57", **self._h())
+        rows = res.json().get("results", res.json())
+        assert sorted(r["group_count"] for r in rows) == [2, 3]
+
+    def test_non_document_scoped_feed_is_not_folded(self):
+        """الصفحة العامة تبقى صفوفاً خاماً — الطيّ لسجل المستند وحده."""
+        for _ in range(4):
+            log_activity(action="update", entity_type="sales_invoice", entity_id=58,
+                         entity_label="INV-58", description="تعديل",
+                         tenant=self.tenant, user=self.manager)
+        res = self.client.get("/api/activity/", **self._h())
+        rows = res.json().get("results", res.json())
+        assert len([r for r in rows if r["entity_id"] == 58]) == 4

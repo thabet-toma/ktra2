@@ -17,11 +17,11 @@ from tenants.services import create_company
 pytestmark = pytest.mark.django_db
 
 
-def _journal(tenant, *, date, lines):
+def _journal(tenant, *, date, lines, ref_type="SALES_INVOICE"):
     """lines: list of (account, debit, credit, partner)."""
     jh = JournalHeader.objects.create(
         tenant=tenant, transaction_date=date, is_posted=True, exchange_rate=Decimal("1"),
-        reference_type="SALES_INVOICE", reference_id=1)
+        reference_type=ref_type, reference_id=1)
     for acc, d, c, partner in lines:
         JournalLine.objects.create(
             tenant=tenant, journal=jh, account=acc,
@@ -136,3 +136,71 @@ class PartnerProfileEndpointTest(APITestCase):
         r = self.client.get(f"/api/partners/{self.customer.id}/statement/", **self._auth())
         assert r.status_code == 200, r.content
         assert Decimal(r.json()["closing_balance"]) == Decimal("250")
+
+
+# ── THA-128: الرصيد قبل/بعد، وعرض الدفعات وحدها ──────────────────────────────
+
+
+def test_balance_before_is_the_previous_rows_balance(env):
+    """«الرصيد قبل» ليس حساباً ثانياً — هو الرصيد الجاري قبل أثر هذا السطر."""
+    tenant, ar, rev, cash, customer = env
+    _journal(tenant, date="2026-06-01",
+             lines=[(ar, 100, 0, customer), (rev, 0, 100, None)])
+    _journal(tenant, date="2026-06-05", ref_type="CUSTOMER_PAYMENT",
+             lines=[(cash, 30, 0, None), (ar, 0, 30, customer)])
+
+    st = partner_account_statement(
+        tenant_id=tenant.TenantID, partner_id=customer.id, is_supplier=False,
+        ordering="oldest")
+    rows = st["results"]
+    assert [Decimal(r["balance_before"]) for r in rows] == [Decimal("0"), Decimal("100")]
+    assert [Decimal(r["running_balance"]) for r in rows] == [Decimal("100"), Decimal("70")]
+    # قبلَ كل سطر = بعدَ سابقه؛ لا فجوة ولا مصدر ثانٍ.
+    for prev, cur in zip(rows, rows[1:]):
+        assert Decimal(cur["balance_before"]) == Decimal(prev["running_balance"])
+
+
+def test_payments_only_view_keeps_the_true_balance(env):
+    """الترشيح يحكم ما يُعرض لا كيف يُحسب: الدفعة تبقى 100 ← 70 لا 0 ← −30."""
+    tenant, ar, rev, cash, customer = env
+    _journal(tenant, date="2026-06-01",
+             lines=[(ar, 100, 0, customer), (rev, 0, 100, None)])
+    _journal(tenant, date="2026-06-05", ref_type="CUSTOMER_PAYMENT",
+             lines=[(cash, 30, 0, None), (ar, 0, 30, customer)])
+
+    st = partner_account_statement(
+        tenant_id=tenant.TenantID, partner_id=customer.id, is_supplier=False,
+        ordering="oldest", only_payments=True)
+    assert st["count"] == 1, "الفاتورة تخرج من العرض"
+    row = st["results"][0]
+    assert row["reference_type"] == "CUSTOMER_PAYMENT"
+    assert Decimal(row["balance_before"]) == Decimal("100")
+    assert Decimal(row["running_balance"]) == Decimal("70")
+    # الإقفال يبقى إقفال الحساب كلّه، لا مجموع المعروض.
+    assert Decimal(st["closing_balance"]) == Decimal("70")
+    debit, credit = partner_posted_balance(tenant.TenantID, customer.id)
+    assert (debit - credit) == Decimal(st["closing_balance"])
+
+
+def test_payments_only_does_not_hide_a_bounced_cheque(env):
+    """ارتداد الشيك يزيد الذمة مجدداً — إخفاؤه من شاشة المال يكذب على صاحبها.
+
+    لذلك الترشيح يستثني الفاتورة نفسها ولا يسمح بقائمةِ أنواعٍ مسموحة: قائمةٌ
+    كهذه تُسقط بصمت كل نوعٍ جديد يمسّ المال (ارتداد · تظهير · إشعار دائن).
+    """
+    tenant, ar, rev, cash, customer = env
+    _journal(tenant, date="2026-06-01",
+             lines=[(ar, 100, 0, customer), (rev, 0, 100, None)])
+    _journal(tenant, date="2026-06-05", ref_type="CUSTOMER_PAYMENT",
+             lines=[(cash, 30, 0, None), (ar, 0, 30, customer)])
+    _journal(tenant, date="2026-06-09", ref_type="CHEQUE_BOUNCE",
+             lines=[(ar, 30, 0, customer), (cash, 0, 30, None)])
+
+    st = partner_account_statement(
+        tenant_id=tenant.TenantID, partner_id=customer.id, is_supplier=False,
+        ordering="oldest", only_payments=True)
+    kinds = [r["reference_type"] for r in st["results"]]
+    assert kinds == ["CUSTOMER_PAYMENT", "CHEQUE_BOUNCE"]
+    bounce = st["results"][-1]
+    assert Decimal(bounce["balance_before"]) == Decimal("70")
+    assert Decimal(bounce["running_balance"]) == Decimal("100")

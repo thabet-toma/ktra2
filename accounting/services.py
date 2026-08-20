@@ -2240,11 +2240,22 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
 def partner_account_statement(
     *, tenant_id: int, partner_id: int, is_supplier: bool,
     limit: int = 50, offset: int = 0, ordering: str = "newest",
+    only_payments: bool = False,
 ) -> dict:
     """FEAT-4: كشف حساب الشريك من أسطر القيود المرحَّلة — مع رصيد جارٍ لكل سطر.
 
     الرصيد الجاري يُحسب خادمياً بالترتيب الزمني ويُطابق `partner_posted_balance`
     (لا مصدر حقيقة موازٍ — A4). للعميل: مدين−دائن؛ للمورد: دائن−مدين. مُرقَّم.
+
+    THA-128: كل سطر يحمل `balance_before` (الرصيد قبل أثره) إلى جانب
+    `running_balance` (بعده) — ليسا حساباً ثانياً بل لقطتان من الحلقة نفسها، فما
+    يعرضه «تبويب المال» يطابق كشف الحساب بالبناء لا بالمصادفة.
+
+    `only_payments` يحصر **المعروض** بحركات التسوية دون الفاتورة نفسها. استثناءُ
+    الفاتورة لا قائمةُ أنواعٍ مسموحة: القائمة المسموحة تُسقط بصمت كل نوعٍ جديد
+    يمسّ المال (ارتداد شيك · تظهير · إشعار دائن)، وإخفاء حركةٍ ماليّة من شاشة
+    المال أسوأ من إظهار حركةٍ زائدة. والحساب لا يتأثر بالترشيح إطلاقاً: الرصيد
+    الجاري و`closing_balance` يُحسبان على الحساب كلّه.
     """
     base = (
         JournalLine.objects.filter(
@@ -2252,21 +2263,33 @@ def partner_account_statement(
         )
         .order_by("journal__transaction_date", "journal_id", "id")
     )
-    # خفيف: عمودان عشريان فقط لحساب الرصيد الجاري بالترتيب (بحدود أسطر الشريك).
-    ordered = list(base.values_list("id", "base_debit", "base_credit"))
-    total = len(ordered)
+    # خفيف: عمودان عشريان ونوع المستند فقط لحساب الرصيد الجاري بالترتيب
+    # (بحدود أسطر الشريك). النوع لازمٌ للترشيح، ويأتي في الاستعلام نفسه.
+    ordered = list(base.values_list(
+        "id", "base_debit", "base_credit", "journal__reference_type"))
     running = Decimal("0")
     running_by_id: dict[int, Decimal] = {}
-    for lid, d, c in ordered:
+    before_by_id: dict[int, Decimal] = {}
+    for lid, d, c, _ref_type in ordered:
         d = Decimal(str(d or 0))
         c = Decimal(str(c or 0))
+        # اللقطة قبل الأثر ثم بعده — من الحلقة ذاتها، بلا مرور ثانٍ.
+        before_by_id[lid] = running
         running += (c - d) if is_supplier else (d - c)
         running_by_id[lid] = running
     closing = running
 
+    # الترشيح بعد الحساب: يحكم ما يُعرض لا كيف يُحسب.
+    if only_payments:
+        invoice_type = "PURCHASE_INVOICE" if is_supplier else "SALES_INVOICE"
+        visible = [row for row in ordered if row[3] != invoice_type]
+    else:
+        visible = ordered
+    total = len(visible)
+
     normalized_ordering = "oldest" if ordering == "oldest" else "newest"
-    display_order = ordered if normalized_ordering == "oldest" else list(reversed(ordered))
-    page_ids = [lid for lid, _d, _c in display_order[offset:offset + limit]]
+    display_order = visible if normalized_ordering == "oldest" else list(reversed(visible))
+    page_ids = [row[0] for row in display_order[offset:offset + limit]]
     page = (
         JournalLine.objects.filter(id__in=page_ids)
         .select_related("journal")
@@ -2287,6 +2310,7 @@ def partner_account_statement(
             "description": jl.description or j.description or "",
             "debit": str(jl.base_debit),
             "credit": str(jl.base_credit),
+            "balance_before": str(before_by_id[lid]),
             "running_balance": str(running_by_id[lid]),
         })
     _attach_statement_document_links(rows, is_supplier=is_supplier)

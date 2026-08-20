@@ -128,9 +128,34 @@ class PartnerViewSet(viewsets.ModelViewSet):
         except (TypeError, ValueError):
             offset = 0
         ordering = request.query_params.get("ordering", "newest")
+        # THA-128: تبويب «المال» يطلب حركات التسوية وحدها من الكشف نفسه.
+        only_payments = str(
+            request.query_params.get("only_payments", "")).lower() in ("1", "true", "yes")
         return Response(partner_account_statement(
             tenant_id=partner.tenant_id, partner_id=partner.id,
-            is_supplier=is_supplier, limit=limit, offset=offset, ordering=ordering))
+            is_supplier=is_supplier, limit=limit, offset=offset, ordering=ordering,
+            only_payments=only_payments))
+
+    @action(detail=True, methods=["get"], url_path="stock-movements")
+    def stock_movements(self, request, pk=None):
+        """حركات مخزون الشريك مجمَّعةً تحت مستندها — تبويب «المال» في كرته.
+
+        `get_object` هو حارس العزل: شريك شركةٍ أخرى لا يُبلَغ أصلاً، والخدمة
+        تُنطَّق فوقه بـ`tenant_id` — العدد تسريبٌ أيضاً لا الأسماء وحدها.
+        """
+        from inventory.services import partner_stock_movements
+        partner = self.get_object()
+        try:
+            limit = min(int(request.query_params.get("limit", 50)), 200)
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            offset = max(int(request.query_params.get("offset", 0)), 0)
+        except (TypeError, ValueError):
+            offset = 0
+        return Response(partner_stock_movements(
+            tenant_id=partner.tenant_id, partner_id=partner.id,
+            limit=limit, offset=offset))
 
     @action(detail=True, methods=["get"], url_path="invoices")
     def invoices(self, request, pk=None):

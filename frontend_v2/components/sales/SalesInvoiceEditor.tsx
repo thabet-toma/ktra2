@@ -1005,8 +1005,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     !simpleMode || !salesSettings?.default_currency || currencyId === "";
   /** «شامل الضريبة» يبقى على افتراضي الإعدادات — والقيمة تُرسَل كما هي. */
   const showTaxInclusiveToggle = !simpleMode;
-  /** الفاتورة «مدفوعة» لا استحقاق لها — يظهر الحقل للآجلة. */
-  const showDueDateField = !simpleMode || invType !== "cash";
+  /* THA-131: حقلا الحالة يتبعان الحالة نفسها لا وضعَ الواجهة — الاستحقاق مفهومٌ
+     آجلٌ بحت، والصندوق مفهومٌ نقديٌّ بحت. فتبديل «نقدي» يبدّل الحقلين فوراً في
+     الوضعين. القيمة المخفيّة تبقى كما هي (قانون قناع THA-110 أعلاه)، فلا حمولة
+     تتغيّر بمجرّد الإخفاء. */
+  /** الفاتورة النقدية مدفوعةٌ عند الترحيل فلا استحقاق لها — الحقل للآجلة. */
+  const showDueDateField = invType !== "cash";
+  /** الصندوق وجهةُ نقد الفاتورة النقدية — والوضع السهل يُخفيه: افتراضُه محلولٌ
+   *  دائماً (الإعدادات ثم أول صندوق في الشجرة)، وحين لا يُحلّ فلأنه لا صندوق في
+   *  الشجرة أصلاً — وحقلُ اختيارٍ بلا خيارات لا يُخرج من ذلك، بل تحذيرُ
+   *  «بيانات أخرى» الذي يفرضه `unresolvedRequiredDefault`. */
+  const showCashAccountField = invType === "cash" && !simpleMode;
   /** التبويبات المتقدّمة (القيد/الحركات/السجل) — تُطوى في الوضع السهل. */
   const showAdvancedTabs = !simpleMode;
   /** «بيانات أخرى» يحمل تحذيرات الإعداد: يبقى ظاهراً ما دام تحذيرٌ حيّاً. */
@@ -2329,7 +2338,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   /* الفاتورة النقدية مدفوعةٌ بالتعريف عند الخادم: تحصيلٌ لا يغطّيها يُرفض ويرتدّ
      كلُّ شيء. فنمنع الإرسال هنا ونقول للمستخدم مخرجيه — إكمال المبلغ، أو رفع
-     علامة «مدفوعة» فتصير على الذمم. رفضٌ كان بالإمكان منعه شاشةٌ سيّئة لا حارس. */
+     علامة «نقدي» فتصير آجلةً على الذمم. رفضٌ كان بالإمكان منعه شاشةٌ سيّئة لا حارس. */
   const cashInvoiceShortfall =
     invType === "cash" && collectPaidNow > 0.009 && collectRemainingAfter > 0.009
       ? collectRemainingAfter
@@ -2402,7 +2411,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     }
     if (cashInvoiceShortfall > 0) {
       setLocalErr(
-        "الفاتورة نقدية — المدفوع لا يغطي الإجمالي؛ أكمل المبلغ أو ارفع علامة «مدفوعة» لتصير على ذمم العميل.",
+        "الفاتورة نقدية — المدفوع لا يغطي الإجمالي؛ أكمل المبلغ أو ارفع علامة «نقدي» لتصير آجلةً على ذمم العميل.",
       );
       return;
     }
@@ -2883,7 +2892,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       ]}
       meta={[
         { label: isReturn ? "تاريخ المرجع" : "تاريخ الفاتورة", value: invDate || "—" },
-        ...(!isReturn ? [{ label: "تاريخ الاستحقاق", value: dueDate || "—" }] : []),
+        // THA-131: نوع الدفع مرئيٌّ في العرض كما في التحرير — والاستحقاق يتبعه،
+        // فلا يقرأ أحدٌ «الاستحقاق —» على فاتورة نقدية ويظنّه بياناً ناقصاً.
+        ...(!isReturn ? [{ label: "نوع الدفع", value: invType === "cash" ? "نقدي" : "آجل" }] : []),
+        ...(!isReturn && invType !== "cash"
+          ? [{ label: "تاريخ الاستحقاق", value: dueDate || "—" }]
+          : []),
         { label: "العملة", value: currencyCode || "—" },
         // T-RETURNUI: المرجع يقول أي فاتورة يعود إليها — والرقم يفتحها.
         ...(isReturn && originalInvoiceId != null
@@ -3259,7 +3273,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       {cashInvoiceShortfall > 0 && (
         <div className="aseel-note aseel-note--err text-[11px]" data-testid="collect-cash-guard">
           الفاتورة نقدية — المدفوع لا يغطي الإجمالي. أكمل {fmt(cashInvoiceShortfall)} أو ارفع
-          علامة «مدفوعة» لتصير الفاتورة على ذمم العميل.
+          علامة «نقدي» لتصير الفاتورة آجلةً على ذمم العميل.
           <button
             type="button"
             className="aseel-toolbtn mr-2 text-[11px]"
@@ -3342,11 +3356,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                       بطاقة
                     </button>
                   )}
-                  {/* «مدفوعة» بدل قائمة نقدي/أجل — مربع اختيار: مؤشَّر = بيع مدفوع
-                      (نقدي، يُسوّى تلقائياً عند الترحيل)، فارغ = على ذمم العميل. */}
+                  {/* مربع اختيار واحد بدل قائمة نقدي/أجل: مؤشَّر = بيع نقدي
+                      (مدفوع، يُسوّى تلقائياً عند الترحيل بسند قبض مستقل)،
+                      فارغ = آجل على ذمم العميل. */}
                   <label
                     className="flex items-center gap-1 text-xs text-[var(--color-text)] cursor-pointer select-none shrink-0"
-                    title="مؤشَّر = الفاتورة مدفوعة (تُسوّى تلقائياً عند الترحيل) · فارغ = على ذمم العميل"
+                    title="مؤشَّر = فاتورة نقدية مدفوعة (تُسوّى تلقائياً عند الترحيل) · فارغ = آجلة على ذمم العميل"
                   >
                     <input
                       type="checkbox"
@@ -3355,8 +3370,21 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                       checked={invType === "cash"}
                       onChange={(e) => { setInvType(e.target.checked ? "cash" : "credit"); markDirty(); }}
                     />
-                    مدفوعة
+                    نقدي
                   </label>
+                  {/* THA-131: الحالة مشتقّة ومرئية — مربّعٌ صامت لا يقول للمستخدم
+                      ماذا صارت الفاتورة. الشارة تُسمّي الحالة الناتجة فور النقر،
+                      قبل أي حفظ، وهي وحقلا الرأس (الصندوق/الاستحقاق) وجهٌ واحد. */}
+                  <span
+                    data-testid="invoice-payment-type-badge"
+                    className={`shrink-0 rounded border px-1.5 py-px text-[10px] font-bold ${
+                      invType === "cash"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300"
+                        : "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
+                    }`}
+                  >
+                    {invType === "cash" ? "نقدي" : "آجل"}
+                  </span>
                   {/* خارج الـ`label` قصداً: زرٌّ داخلها كان سيُبدّل خانة الاختيار. */}
                   <FieldHint hint="invoice.paid" />
                 </div>
@@ -3451,6 +3479,27 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                     </div>
                   )}
                 </div>
+                {/* THA-131: وجهة النقد كانت تُحسم بصمت من الإعدادات ولا تُعرض —
+                    فيقبض المستخدم على صندوقٍ لم يره ولا يملك تبديله من الفاتورة.
+                    نفس حقل الشجرة المستعمل في لوحة التحصيل، بنفس قصّ الصناديق. */}
+                {showCashAccountField && (
+                  <div className="flex items-center gap-1">
+                    <span className="text-[var(--color-text-muted)] text-[10px] min-w-[30px]">الصندوق</span>
+                    <div className="flex-1 min-w-0">
+                      <AccountTreeField
+                        className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-emerald-500 text-[11px]"
+                        accounts={accounts}
+                        value={cashAccountId}
+                        disabled={readOnly}
+                        allowClear={false}
+                        isSelectable={(account) => cashboxAccounts.some((row) => row.id === account.id)}
+                        onChange={(id) => { setCashAccountId(id ?? ""); markDirty(); }}
+                        placeholder="الصندوق / البنك"
+                        title="حساب الصندوق أو البنك الذي يدخله نقد هذه الفاتورة"
+                      />
+                    </div>
+                  </div>
+                )}
                 {(showCurrencyField || showTaxInclusiveToggle) && (
                   <div className="flex justify-between items-center">
                     {showCurrencyField && (
@@ -3492,26 +3541,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 value={notes}
                 onChange={(e) => { setNotes(e.target.value); markDirty(); }}
               />
-            ),
-          },
-          {
-            // task18: تبويب «أرصدة العميل» (الرصيد الحالي/بعد الفاتورة من الـ subledger).
-            key: "balances",
-            label: "أرصدة العميل",
-            content: (
-              <div className="text-sm" style={{ padding: "8px", display: "flex", flexDirection: "column", gap: "6px" }}>
-                {!selectedCustomer ? (
-                  <span className="text-[var(--color-text-muted)]">اختر عميلاً لعرض رصيده.</span>
-                ) : creditHint ? (
-                  <>
-                    <div className="aseel-total-row"><span>الرصيد الحالي</span><span className="aseel-total-value">{fmt(Number(creditHint.open_balance))}</span></div>
-                    <div className="aseel-total-row"><span>الرصيد المتوقع بعد الفاتورة</span><span className="aseel-total-value">{fmt(Number(creditHint.projected_balance))}</span></div>
-                    {creditHint.would_exceed && <span className="aseel-err-text">⚠ يتجاوز حد الائتمان</span>}
-                  </>
-                ) : (
-                  <span className="text-[var(--color-text-muted)]">جارٍ حساب الرصيد…</span>
-                )}
-              </div>
             ),
           },
           ...(showAdvancedTabs ? [{
@@ -3629,7 +3658,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   creditHint.would_exceed ? "aseel-total-row--warn" : ""
                 }`}
               >
-                <span>الرصيد بعد الفاتورة</span>
+                <span>
+                  الرصيد بعد الفاتورة
+                  {creditHint.would_exceed && (
+                    <span className="aseel-err-text ms-1">⚠ يتجاوز حد الائتمان</span>
+                  )}
+                </span>
                 <span className="aseel-total-value">
                   {fmt(Number(creditHint.projected_balance))}
                 </span>
