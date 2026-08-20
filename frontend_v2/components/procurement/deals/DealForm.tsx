@@ -1321,9 +1321,23 @@ export const DealForm: React.FC<DealFormProps> = ({
             {/* ج8: الصفقة دولية = بضاعة المورد + شحن داخل الصين − خصم. الضريبة
                 تُدفع بالتخليص (لا تدخل إجمالي الصفقة ولا سقف دفعات المورد). */}
             <div className="aseel-total-row"><span>مجموع البنود (قبل الخصم)</span><span className="aseel-total-value">{fmt(calculateSubtotal())}</span></div>
-            {(formData.discountAmount || 0) > 0 && <div className="aseel-total-row"><span>الخصم</span><span className="aseel-total-value">{fmt(formData.discountAmount || 0)}</span></div>}
-            {!formData.shippingIncluded && (formData.shippingCost || 0) > 0 && (
-              <div className="aseel-total-row"><span>شحن داخل الصين</span><span className="aseel-total-value">{fmt(formData.shippingCost || 0)}</span></div>
+            {/* الخصم والشحن حقلا إدخال لا عرضاً: refactor سابق أسقط
+                `onUpdateFinancial` مع `ItemsTableSection`، فبقيت المعادلة أعلاه
+                تقرؤهما بلا نقطة كتابة واحدة — أي صفراً أبداً. يُكتبان عبر
+                `recalculateTotals` كبقية الحقول ليبقى الإجمالي مشتقّاً لا مُدخَلاً. */}
+            <div className="aseel-total-row">
+              <span>الخصم</span>
+              <input className="aseel-total-value" data-testid="deal-discount-input" type="number" min={0} step="0.01"
+                disabled={isDealLocked} placeholder="0" value={formData.discountAmount || ""}
+                onChange={(e) => recalculateTotals(items, { discountAmount: Math.max(0, parseFloat(e.target.value) || 0) })} />
+            </div>
+            {!formData.shippingIncluded && (
+              <div className="aseel-total-row">
+                <span>شحن داخل الصين</span>
+                <input className="aseel-total-value" data-testid="deal-china-freight-input" type="number" min={0} step="0.01"
+                  disabled={isDealLocked} placeholder="0" value={formData.shippingCost || ""}
+                  onChange={(e) => recalculateTotals(items, { shippingCost: Math.max(0, parseFloat(e.target.value) || 0) })} />
+              </div>
             )}
             <div className="aseel-total-row aseel-total-row--grand"><span>مبلغ الصفقة الإجمالي (للمورد)</span><span className="aseel-total-value">{fmt(calculateGrandTotal())}</span></div>
             <div className="aseel-total-row"><span>المدفوع والمرحّل</span><span className="aseel-total-value">{fmt(dealStats.paidAmount)}</span></div>
