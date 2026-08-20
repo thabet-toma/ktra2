@@ -14,7 +14,7 @@ from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
 from accounting.cashbox import get_cash_box_parent_account
-from accounting.models import Account, Cheque, JournalHeader, JournalLine
+from accounting.models import Account, Cheque, ChequeMovement, JournalHeader, JournalLine
 from accounting.services import create_fiscal_year, transfer_cheque
 from logistics.services import (
     GR_IR_ACCOUNT_CODE,
@@ -94,8 +94,10 @@ class OperationalAccountsTest(APITestCase):
         )
         cash = Account.objects.get(tenant=self.tenant, code="1101")
         transfer_cheque(chq.id, "collect", account_id=cash.id)
+        movement = ChequeMovement.objects.get(cheque=chq, movement_type="collect")
         lines = JournalLine.objects.filter(
-            journal__reference_type="CHEQUE_COLLECT", journal__reference_id=chq.id)
+            journal__reference_type="CHEQUE_COLLECT",
+            journal__reference_id=movement.pk)
         assert lines.exists(), "no journal posted for cheque collection"
         credit_codes = {l.account.code for l in lines if l.credit > 0}
         assert credit_codes == {"1107"}, f"credited {credit_codes} instead of 1107"

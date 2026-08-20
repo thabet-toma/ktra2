@@ -406,6 +406,11 @@ class ChequeSerializer(serializers.ModelSerializer):
     bank_display = serializers.SerializerMethodField(read_only=True)
     bank_branch_display = serializers.SerializerMethodField(read_only=True)
     deposit_bank_account_name = serializers.SerializerMethodField(read_only=True)
+    # CHQ-3: الحالة بتسميتها الصحيحة حسب الاتجاه، والحركات المتاحة الآن —
+    # من جدولَي الانتقالات في `accounting/services.py`. كانت الواجهة تحمل
+    # نسختها من الجدول والتسميات، فتفترق النسختان بلا أن يشعر أحد.
+    status_label = serializers.SerializerMethodField(read_only=True)
+    allowed_movements = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Cheque
@@ -442,22 +447,56 @@ class ChequeSerializer(serializers.ModelSerializer):
     def get_deposit_bank_account_name(self, obj):
         return str(obj.deposit_bank_account) if obj.deposit_bank_account_id else None
 
+    def get_status_label(self, obj):
+        from .services import status_label
+        return status_label(obj.direction, obj.status)
+
+    def get_allowed_movements(self, obj):
+        from .services import allowed_movement_options
+        return allowed_movement_options(obj)
+
 
 class ChequeMovementSerializer(serializers.ModelSerializer):
     """T-CHQ2: سجل حركة الشيك — كان يُكتب ولا يُقرأ من أي واجهة."""
     movement_type_display = serializers.CharField(
         source='get_movement_type_display', read_only=True)
     created_by_name = serializers.SerializerMethodField(read_only=True)
+    # CHQ-3: تسمية الحركة بدلالة الاتجاه — «تحصيل» على ورقةٍ تخرج من حسابنا
+    # كانت تقرأ عكس ما حدث. `movement_type_display` يبقى (تسمية الموديل
+    # المحايدة) كي لا ينكسر أي مستهلك قائم.
+    movement_type_label = serializers.SerializerMethodField(read_only=True)
+    # CHQ-3: أي قيد أنتجته هذه الخطوة. **رقم القيد ومرجعه فقط، بلا مبلغه**:
+    # سند قبض موزَّع على فاتورتين يشقّ مبلغ الشيك على قيدين (THA-489)، فمبلغ
+    # القيد قد لا يساوي مبلغ الشيك — الرابط يقود إلى القيد ليُقرأ كاملاً، ولا
+    # يزعم أن هذا القيد «هو قيد مبلغ هذا الشيك».
+    journal_number = serializers.SerializerMethodField(read_only=True)
+    journal_reference = serializers.SerializerMethodField(read_only=True)
+    journal_date = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = ChequeMovement
         fields = [
             'id', 'cheque', 'movement_type', 'movement_type_display',
+            'movement_type_label', 'journal', 'journal_number',
+            'journal_reference', 'journal_date',
             'notes', 'created_at', 'created_by', 'created_by_name',
         ]
 
     def get_created_by_name(self, obj):
         return obj.created_by.get_username() if obj.created_by_id else None
+
+    def get_movement_type_label(self, obj):
+        from .services import movement_label
+        return movement_label(obj.cheque.direction, obj.movement_type)
+
+    def get_journal_number(self, obj):
+        return f"#{obj.journal_id}" if obj.journal_id else None
+
+    def get_journal_reference(self, obj):
+        return obj.journal.reference_type if obj.journal_id else None
+
+    def get_journal_date(self, obj):
+        return obj.journal.transaction_date if obj.journal_id else None
 
 
 class BankBranchSerializer(serializers.ModelSerializer):

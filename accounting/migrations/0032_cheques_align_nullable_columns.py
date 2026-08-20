@@ -27,6 +27,11 @@ NULLABLE_COLUMNS = [
     "AccountNumber", "BankBranch", "DueDate", "IssueDate", "PayeeName",
     "PartnerID", "CreatedBy_UserID", "Notes", "SalesInvoiceID",
     "CustomerPaymentID", "SupplierPaymentID", "PurchaseInvoiceID",
+    # CHQ-1: عمود جديد تنشئه الهجرة 0037 قابلاً للفراغ أصلاً، فلا انحراف له
+    # ليُصحَّح — يدخل القائمة لأن الحارس يشترط تغطية كل حقل nullable على الشيك
+    # (`accounting/tests/test_cheques_column_alignment.py`)، والمواءمة لا تلمس
+    # إلا عموداً وجدته NOT NULL فعلاً.
+    "EndorsedToPartnerID",
 ]
 
 

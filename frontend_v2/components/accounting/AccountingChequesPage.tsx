@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { humanizeThrown } from "../../utils/drfError";
 import { useToast } from "../../contexts/ToastContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
@@ -11,6 +12,7 @@ import type {
   ChequeMovementDto,
 } from "../../types/accounting";
 import { ChequeWalletPanel } from "./ChequeWalletPanel";
+import { ChequeMaturityPanel } from "./ChequeMaturityPanel";
 import { NewPaymentModal } from "../sales/SalesCustomerPaymentsPage";
 import { NewSupplierPaymentModal } from "../sales/NewSupplierPaymentModal";
 import {
@@ -22,18 +24,6 @@ import { Plus, X, ArrowRightLeft, Loader2 } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
 import { formatDateLocalized, formatDateTimeValue } from "../../utils/formatDate";
 
-const CHEQUE_STATUSES = [
-  { v: "Draft", l: "مسودة" },
-  { v: "Under_Collection", l: "قيد التحصيل" },
-  { v: "Collected", l: "محصّل" },
-  { v: "Bounced", l: "مرتد" },
-  { v: "Returned", l: "معاد للعميل" },
-  { v: "Settled", l: "مسوّى نقداً" },
-];
-
-/** حركات تُدخل/تُخرج المال من حساب بنكي فعلي — تحتاج تحديد الحساب. */
-const NEEDS_BANK_ACCOUNT = ["collect", "withdraw", "settle"];
-
 const DIRECTIONS = [
   { v: "", l: "الكل" },
   { v: "Incoming", l: "وارد" },
@@ -41,8 +31,11 @@ const DIRECTIONS = [
 ];
 
 export const AccountingChequesPage: React.FC = () => {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<ChequeDto[]>([]);
   const [partners, setPartners] = useState<AccountingPartner[]>([]);
+  // CHQ-4: التظهير يُسدَّد به مورد — قيدُه مدين ذممه، فالقائمة موردون لا كل الأطراف.
+  const [suppliers, setSuppliers] = useState<AccountingPartner[]>([]);
   // T-BANKS: حساب الإيداع/الصرف يُختار من حسابات الشركة عند التحويل.
   const [bankAccounts, setBankAccounts] = useState<BankAccountDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,64 +63,63 @@ export const AccountingChequesPage: React.FC = () => {
   const [transferDate, setTransferDate] = useState(new Date().toISOString().split("T")[0]);
   const [transferNotes, setTransferNotes] = useState("");
   const [transferBankAccount, setTransferBankAccount] = useState("");
+  // CHQ-4: المستفيد من التظهير — يُطلب فقط حين تعلن الحركة `requires_endorsee`.
+  const [transferEndorsee, setTransferEndorsee] = useState("");
   // T-CHQ2: مسار الشيك — الحركات كانت تُسجَّل في الخادم ولا تُعرض في أي مكان.
   const [movements, setMovements] = useState<ChequeMovementDto[]>([]);
   const [walletKey, setWalletKey] = useState(0);
 
-  // T-CHQ2: الحركة نفسها معناها مختلف حسب الاتجاه — كانت التسميات واردةً دوماً
-  // فيقرأ المستخدم «تحصيل — دخل الصندوق» على شيك يخرج من حسابه.
-  const CHEQUE_MOVES: Record<string, Record<string, { v: string; l: string }[]>> = {
-    Incoming: {
-      Draft: [
-        { v: "deposit", l: "إيداع للتحصيل (بنك)" },
-        { v: "withdraw", l: "تحصيل مباشر" },
-      ],
-      Under_Collection: [
-        { v: "collect", l: "تحصيل — دخل الصندوق/البنك" },
-        { v: "bounce", l: "ارتداد — إعادة الذمم على العميل" },
-      ],
-      Bounced: [
-        { v: "return_to_customer", l: "إعادة الورقة للعميل" },
-        { v: "settle", l: "تسوية نقدية" },
-      ],
-      Collected: [],
-      Returned: [],
-      Settled: [],
-    },
-    Outgoing: {
-      Draft: [
-        { v: "deposit", l: "تسليم الشيك للمورد" },
-        { v: "withdraw", l: "صرف مباشر من حسابنا" },
-      ],
-      Under_Collection: [
-        { v: "collect", l: "صُرف من حسابنا — إغلاق الالتزام" },
-        { v: "bounce", l: "ارتداد — عاد الدين على المورد" },
-      ],
-      Bounced: [
-        { v: "return_to_customer", l: "استرجاع الورقة من المورد" },
-        { v: "settle", l: "تسوية نقدية للمورد" },
-      ],
-      Collected: [],
-      Returned: [],
-      Settled: [],
-    },
-  };
+  // CHQ-4: لا جدول انتقالات ولا جدول تسميات في الواجهة بعد اليوم. الحركات
+  // المتاحة وتسمياتها وما تطلبه من مدخلات تصل مع كل شيك (`allowed_movements`)،
+  // فحالةٌ جديدة في الخادم تظهر هنا، وحركةٌ مُنعت هناك تختفي من الشاشة بدل أن
+  // تبقى زرّاً يعطي 400.
+  const moves = transferCheque?.allowed_movements ?? [];
+  const selectedMove = moves.find((m) => m.value === newMovement) || null;
 
-  const movesFor = (cheque: ChequeDto) =>
-    (CHEQUE_MOVES[cheque.direction] || CHEQUE_MOVES.Incoming)[cheque.status] || [];
+  // CHQ-4: تسمية الحالة بدلالة الاتجاه — تُقرأ من الشيكات المحمّلة نفسها
+  // (`status_label` من الخادم)، فالمحفظة والقائمة والنافذة تنطق بتسمية واحدة.
+  const statusLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of rows) {
+      if (r.status_label) map.set(`${r.direction}|${r.status}`, r.status_label);
+    }
+    return map;
+  }, [rows]);
+
+  const statusLabelFor = useCallback(
+    (direction: string, status: string) =>
+      statusLabels.get(`${direction}|${status}`) || status,
+    [statusLabels],
+  );
+
+  // فلتر الحالة يعرض الحالات الموجودة فعلاً في هذا الاتجاه — بتسمياتها الصحيحة.
+  // حالةٌ مختارة لم تعد ضمنها تبقى معروضة كي لا يتغيّر فلتر المستخدم من تحته.
+  const statusOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const r of rows) {
+      if (filterDirection && r.direction !== filterDirection) continue;
+      if (!seen.has(r.status)) seen.set(r.status, r.status_label || r.status);
+    }
+    if (filterStatus && !seen.has(filterStatus)) {
+      seen.set(filterStatus, statusLabelFor(filterDirection || "Incoming", filterStatus));
+    }
+    return [...seen.entries()].map(([v, l]) => ({ v, l }));
+  }, [rows, filterDirection, filterStatus, statusLabelFor]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      const [ch, pr, ba] = await Promise.all([
+      const [ch, pr, ba, sup] = await Promise.all([
         accountingApi.getCheques(),
         accountingApi.getPartners().catch(() => []),
         accountingApi.getBankAccounts({ activeOnly: true }).catch(() => []),
+        accountingApi.getPartners("Supplier").catch(() => []),
       ]);
       setRows(ch as ChequeDto[]);
       setPartners(pr as AccountingPartner[]);
       setBankAccounts(ba as BankAccountDto[]);
+      setSuppliers(sup as AccountingPartner[]);
     } catch (e: unknown) {
       setErr(humanizeThrown(e, "فشل التحميل"));
     } finally {
@@ -143,6 +135,7 @@ export const AccountingChequesPage: React.FC = () => {
     if (busy) return;
     if (!(await confirm({ message: "حذف الشيك؟" }))) return;
     setBusy(true);
+    setErr(null);
     try {
       await accountingApi.deleteCheque(id);
       toast("تم حذف الشيك", "success");
@@ -157,16 +150,21 @@ export const AccountingChequesPage: React.FC = () => {
   const doTransfer = async () => {
     if (!transferCheque || !newMovement || busy) return;
     setBusy(true);
+    setErr(null);
     try {
       await accountingApi.transferCheque(transferCheque.id, {
         movement_type: newMovement,
         movement_date: transferDate,
         notes: transferNotes,
-        ...(transferBankAccount ? { bank_account: parseInt(transferBankAccount, 10) } : {}),
+        ...(selectedMove?.requires_bank_account && transferBankAccount
+          ? { bank_account: parseInt(transferBankAccount, 10) } : {}),
+        ...(selectedMove?.requires_endorsee && transferEndorsee
+          ? { endorsed_to: parseInt(transferEndorsee, 10) } : {}),
       });
       setTransferCheque(null);
       setTransferNotes("");
       setTransferBankAccount("");
+      setTransferEndorsee("");
       setWalletKey((k) => k + 1);
       toast("تم تحويل حالة الشيك", "success");
       await load();
@@ -226,7 +224,7 @@ export const AccountingChequesPage: React.FC = () => {
     },
     {
       key: "status", header: "الحالة",
-      render: (r) => <span>{CHEQUE_STATUSES.find((s) => s.v === r.status)?.l || r.status}</span>,
+      render: (r) => <span>{r.status_label || r.status}</span>,
     },
     {
       key: "actions", header: "",
@@ -238,9 +236,12 @@ export const AccountingChequesPage: React.FC = () => {
           onClick={(e) => {
             e.stopPropagation();
             setTransferCheque(r);
+            setErr(null);
             setNewMovement("");
             setTransferDate(new Date().toISOString().split("T")[0]);
             setTransferNotes("");
+            setTransferBankAccount("");
+            setTransferEndorsee("");
             setMovements([]);
             accountingApi.getChequeMovements(r.id)
               .then((rows) => setMovements(rows as ChequeMovementDto[]))
@@ -281,7 +282,7 @@ export const AccountingChequesPage: React.FC = () => {
         <label className="aseel-field-label">الحالة</label>
         <select className="aseel-input" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option value="">الكل</option>
-          {CHEQUE_STATUSES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+          {statusOptions.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
         </select>
       </div>
       <div className="aseel-field">
@@ -320,6 +321,7 @@ export const AccountingChequesPage: React.FC = () => {
       content: (
         <ChequeWalletPanel
           refreshKey={walletKey}
+          statusLabel={statusLabelFor}
           onPickStatus={(direction, status) => {
             setFilterDirection(direction);
             setFilterStatus(status);
@@ -328,10 +330,25 @@ export const AccountingChequesPage: React.FC = () => {
         />
       ),
     },
+    // CHQ-4: المحفظة تقول كم في اليد، وهذا التبويب يقول **متى** — أسبوعاً
+    // بأسبوع بصافٍ تراكمي، من تقرير `cheques-maturity` كما يبنيه الخادم.
+    {
+      key: "maturity",
+      label: "الاستحقاق والسيولة",
+      content: <ChequeMaturityPanel refreshKey={walletKey} />,
+    },
   ];
 
   return (
     <div>
+      {/* CHQ-5: رفض الخادم كان يُكتب في `err` ولا يُعرض في أي مكان — والحارس
+          الجديد (سند غير مرحّل، انتقال غير مسموح) يردّ هنا. الرسالة تظهر داخل
+          نافذة التحويل حين تكون مفتوحة لأن النافذة تغطّي الصفحة، وعلى الصفحة
+          نفسها حين يكون الفشل في التحميل أو الحذف. */}
+      {err && !transferCheque && (
+        <div className="aseel-banner aseel-banner--err" data-testid="cheque-page-error"
+          style={{ marginBottom: "8px" }}>{err}</div>
+      )}
       <AseelDocumentShell
         title="الشيكات"
         actions={actions}
@@ -363,7 +380,8 @@ export const AccountingChequesPage: React.FC = () => {
 
       {/* Transfer dialog */}
       {transferCheque && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
+          data-testid="cheque-transfer-dialog">
           <div style={{
             background: "var(--aseel-surface)", borderRadius: "var(--aseel-radius)",
             boxShadow: "0 8px 32px #0004", maxWidth: "420px", width: "100%",
@@ -378,26 +396,28 @@ export const AccountingChequesPage: React.FC = () => {
             <div style={{ display: "grid", gap: "10px" }}>
               <div style={{ fontSize: "0.85rem", color: "var(--aseel-ink-soft)" }}>
                 {transferCheque.direction === "Incoming" ? "شيك وارد" : "شيك صادر"} ·
-                الحالة الحالية: <strong>{CHEQUE_STATUSES.find((s) => s.v === transferCheque.status)?.l || transferCheque.status}</strong>
+                الحالة الحالية: <strong>{transferCheque.status_label || transferCheque.status}</strong>
               </div>
               <div className="aseel-field">
                 <label className="aseel-field-label">الحركة</label>
-                <select className="aseel-input" value={newMovement} onChange={(e) => setNewMovement(e.target.value)}>
+                <select className="aseel-input" data-testid="cheque-move-select"
+                  value={newMovement} onChange={(e) => setNewMovement(e.target.value)}>
                   <option value="">— اختر الحركة —</option>
-                  {movesFor(transferCheque).map((m) => (
-                    <option key={m.v} value={m.v}>{m.l}</option>
+                  {moves.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
                   ))}
                 </select>
-                {movesFor(transferCheque).length === 0 && (
+                {moves.length === 0 && (
                   <span style={{ fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
-                    حالة نهائية — لا حركات متاحة من «{CHEQUE_STATUSES.find((s) => s.v === transferCheque.status)?.l}»
+                    حالة نهائية — لا حركات متاحة من «{transferCheque.status_label || transferCheque.status}»
                   </span>
                 )}
               </div>
-              {NEEDS_BANK_ACCOUNT.includes(newMovement) && (
+              {selectedMove?.requires_bank_account && (
                 <div className="aseel-field">
                   <label className="aseel-field-label">حساب الإيداع/التحصيل البنكي</label>
-                  <select className="aseel-input" value={transferBankAccount}
+                  <select className="aseel-input" data-testid="cheque-bank-select"
+                    value={transferBankAccount}
                     onChange={(e) => setTransferBankAccount(e.target.value)}>
                     <option value="">— الصندوق الافتراضي —</option>
                     {bankAccounts.map((a) => (
@@ -406,6 +426,26 @@ export const AccountingChequesPage: React.FC = () => {
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+              {/* CHQ-4: التظهير يسدّد مورداً بالورقة بدل النقد — بلا مستفيدٍ لا
+                  يكون للحركة قيد ذمم، فالحقل شرطٌ لا اختيار. */}
+              {selectedMove?.requires_endorsee && (
+                <div className="aseel-field">
+                  <label className="aseel-field-label">المورد المستفيد من التظهير</label>
+                  <select className="aseel-input" data-testid="cheque-endorsee-select"
+                    value={transferEndorsee}
+                    onChange={(e) => setTransferEndorsee(e.target.value)}>
+                    <option value="">— اختر المورد —</option>
+                    {suppliers.map((sup) => (
+                      <option key={sup.id} value={sup.id}>{sup.name}</option>
+                    ))}
+                  </select>
+                  {!transferEndorsee && (
+                    <span style={{ fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
+                      تنخفض ذمة هذا المورد بقيمة الشيك عند التظهير.
+                    </span>
+                  )}
                 </div>
               )}
               <div className="aseel-field">
@@ -418,7 +458,10 @@ export const AccountingChequesPage: React.FC = () => {
                 <textarea className="aseel-input" rows={2} value={transferNotes}
                   onChange={(e) => setTransferNotes(e.target.value)} />
               </div>
-              {/* T-CHQ2: مسار الشيك — كل حركة سابقة بتاريخها ومنفّذها. */}
+              {/* T-CHQ2 · CHQ-4: مسار الشيك — كل خطوة بتاريخها ومنفّذها **وقيدها**.
+                  رقم القيد رابطٌ إلى شاشة القيد ولا مبلغ بجانبه عمداً: سند قبض
+                  موزَّع على فاتورتين يشقّ مبلغ الشيك على قيدين (THA-489)، فرقمٌ
+                  هنا كان سيزعم أنه «قيد مبلغ هذا الشيك». القيد يتكلّم عن نفسه. */}
               <div style={{ borderTop: "1px solid var(--aseel-border)", paddingTop: "8px" }}>
                 <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--aseel-ink-soft)", marginBottom: "4px" }}>
                   مسار الشيك
@@ -430,13 +473,27 @@ export const AccountingChequesPage: React.FC = () => {
                 ) : (
                   <ol style={{ display: "grid", gap: "2px", fontSize: "0.8rem" }}>
                     {movements.map((m) => (
-                      <li key={m.id} style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+                      <li key={m.id} data-testid="cheque-movement-row"
+                        style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
                         <span>
-                          {m.movement_type_display}
+                          {m.movement_type_label || m.movement_type_display}
                           {m.notes ? ` — ${m.notes}` : ""}
                           {m.created_by_name ? ` (${m.created_by_name})` : ""}
                         </span>
-                        <span style={{ color: "var(--aseel-ink-soft)", whiteSpace: "nowrap" }}>
+                        <span style={{ color: "var(--aseel-ink-soft)", whiteSpace: "nowrap", display: "flex", gap: "8px" }}>
+                          {m.journal ? (
+                            <button
+                              type="button"
+                              data-testid="cheque-journal-link"
+                              className="text-[var(--color-accent,#2563eb)] underline-offset-2 hover:underline"
+                              title={`فتح القيد${m.journal_date ? ` — ${formatDateLocalized(m.journal_date)}` : ""}`}
+                              onClick={() => navigate(`/accounting/journals/${m.journal}`)}
+                            >
+                              قيد {m.journal_number}
+                            </button>
+                          ) : (
+                            <span title="خطوة لم تمسّ الدفاتر — لا قيد لها">بلا قيد</span>
+                          )}
                           {formatDateTimeValue(m.created_at)}
                         </span>
                       </li>
@@ -445,13 +502,23 @@ export const AccountingChequesPage: React.FC = () => {
                 )}
               </div>
             </div>
+            {err && (
+              <div className="aseel-banner aseel-banner--err" data-testid="cheque-transfer-error"
+                style={{ marginTop: "12px" }}>{err}</div>
+            )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
               <button type="button" className="aseel-toolbtn" onClick={() => setTransferCheque(null)}>إلغاء</button>
               <OfflineGuard
                 action="تحويل حالة الشيك"
                 warningMessage="تَحويل حالة الشيك يتطلب اتصالاً — state machine يَنفَّذ على الـserver"
               >
-                <button type="button" className="aseel-toolbtn" disabled={busy} onClick={doTransfer}>
+                <button
+                  type="button"
+                  className="aseel-toolbtn"
+                  data-testid="cheque-transfer-submit"
+                  disabled={busy || !newMovement || (selectedMove?.requires_endorsee === true && !transferEndorsee)}
+                  onClick={doTransfer}
+                >
                   {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}تحويل
                 </button>
               </OfflineGuard>

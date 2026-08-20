@@ -82,9 +82,11 @@ class WrapOrphanChequesTest(TestCase):
         from accounting.services import transfer_cheque
         transfer_cheque(chq.pk, "collect", user=self.user,
                         movement_date="2026-08-07")
+        from accounting.models import ChequeMovement
+        movement = ChequeMovement.objects.get(cheque=chq, movement_type="collect")
         self.assertTrue(JournalHeader.objects.filter(
             tenant=self.tenant, reference_type="CHEQUE_COLLECT",
-            reference_id=chq.pk).exists())
+            reference_id=movement.pk).exists())
 
     def test_skips_cheque_already_inside_a_document(self):
         """التشغيل مرتين لا ينشئ سنداً ثانياً للورقة نفسها."""

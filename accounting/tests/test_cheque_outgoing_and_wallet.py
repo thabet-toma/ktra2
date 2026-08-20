@@ -37,10 +37,13 @@ class OutgoingChequeCycleTest(APITestCase):
         )
 
     def setUp(self):
+        # CHQ-1: السند مُرحَّل — وهو شرط أي حركة على شيكه الآن. الشيك يبلغ
+        # `Under_Collection` أصلاً بترحيل السند، فسندٌ غير مرحّل بشيك متحرك
+        # حالةٌ لا وجود لها في الإنتاج، وكانت هذه التهيئة تصنعها.
         self.payment = SupplierPayment.objects.create(
             tenant=self.tenant, partner=self.supplier, currency=self.ils,
             payment_date="2026-06-11", amount=Decimal("400.00"),
-            cash_or_bank_account=self.cash,
+            cash_or_bank_account=self.cash, is_posted=True,
         )
 
     def _cheque(self, status="Under_Collection"):
@@ -65,8 +68,11 @@ class OutgoingChequeCycleTest(APITestCase):
         chq.refresh_from_db()
         assert chq.status == "Collected"
 
+        movement = ChequeMovement.objects.get(
+            cheque=chq, movement_type="collect")
         jh = JournalHeader.objects.get(
-            tenant=self.tenant, reference_type="CHEQUE_COLLECT", reference_id=chq.pk)
+            tenant=self.tenant, reference_type="CHEQUE_COLLECT",
+            reference_id=movement.pk)
         lines = {l.account_id: (l.debit, l.credit) for l in jh.lines.all()}
         assert lines[self.payable_acc.pk] == (Decimal("400.00"), Decimal("0.00"))
         assert lines[self.cash.pk] == (Decimal("0.00"), Decimal("400.00"))
@@ -80,8 +86,11 @@ class OutgoingChequeCycleTest(APITestCase):
             format="json", **self._auth())
         assert res.status_code == 200, res.content
 
+        movement = ChequeMovement.objects.get(
+            cheque=chq, movement_type="bounce")
         jh = JournalHeader.objects.get(
-            tenant=self.tenant, reference_type="CHEQUE_BOUNCE", reference_id=chq.pk)
+            tenant=self.tenant, reference_type="CHEQUE_BOUNCE",
+            reference_id=movement.pk)
         self.supplier.refresh_from_db()
         lines = {l.account_id: (l.debit, l.credit) for l in jh.lines.all()}
         assert lines[self.payable_acc.pk] == (Decimal("400.00"), Decimal("0.00"))
@@ -95,8 +104,11 @@ class OutgoingChequeCycleTest(APITestCase):
             format="json", **self._auth())
         assert res.status_code == 200, res.content
 
+        movement = ChequeMovement.objects.get(
+            cheque=chq, movement_type="settle")
         jh = JournalHeader.objects.get(
-            tenant=self.tenant, reference_type="CHEQUE_SETTLE", reference_id=chq.pk)
+            tenant=self.tenant, reference_type="CHEQUE_SETTLE",
+            reference_id=movement.pk)
         self.supplier.refresh_from_db()
         lines = {l.account_id: (l.debit, l.credit) for l in jh.lines.all()}
         assert lines[self.supplier.linked_account_id] == (Decimal("400.00"), Decimal("0.00"))
@@ -115,7 +127,10 @@ class OutgoingChequeCycleTest(APITestCase):
         chq.refresh_from_db()
         assert chq.status == "Collected"
         assert not JournalHeader.objects.filter(
-            reference_type="CHEQUE_COLLECT", reference_id=chq.pk).exists()
+            reference_type="CHEQUE_COLLECT",
+            reference_id__in=ChequeMovement.objects.filter(cheque=chq)
+                                                   .values_list("pk", flat=True),
+        ).exists()
 
     def test_movements_endpoint_lists_the_cheque_history(self):
         chq = self._cheque()

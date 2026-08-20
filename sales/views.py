@@ -378,11 +378,17 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                 # الإرساليات المبنية عليها (تُعاد بالتسليم بعد إعادة الترحيل).
                 invoice.lines.update(delivered_quantity=0)
                 invoice.delivery_orders.all().delete()
-                # إعادة الشيكات المرفقة إلى مسودة (عكس ترقيتها عند الترحيل)
+                # إعادة الشيكات المرفقة إلى مسودة (عكس ترقيتها عند الترحيل).
+                # CHQ-2: عبر خدمة الشيكات — تسجّل الرجوع في سجل الشيك وتغطّي
+                # «مستلَم» أيضاً. الشيك المتحرك منعه الحارس أعلاه أصلاً.
                 from accounting.models import Cheque
-                Cheque.objects.filter(
-                    sales_invoice=invoice, status="Under_Collection"
-                ).update(status="Draft")
+                from accounting.services import record_document_cheque_unposting
+
+                record_document_cheque_unposting(
+                    list(Cheque.objects.filter(
+                        tenant_id=invoice.tenant_id, sales_invoice=invoice)),
+                    user=request.user,
+                )
         except ValidationError as e:
             # رسائل الحُرّاس عربية موجّهة للمستخدم — تُعاد نصّاً لا ['...'].
             return Response(

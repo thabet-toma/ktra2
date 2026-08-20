@@ -54,6 +54,18 @@ export interface AccountingPartner {
   legal_name?: string | null;
 }
 
+/**
+ * CHQ-3: حركة متاحة الآن على الشيك — رمزها وتسميتها وما تطلبه من مدخلات.
+ * تأتي جاهزةً من `allowed_movement_options` في `accounting/services.py`:
+ * الواجهة لا تملك جدول انتقالات ولا تعرف أي حركة تحتاج حساباً بنكياً.
+ */
+export interface ChequeMovementOption {
+  value: string;
+  label: string;
+  requires_bank_account: boolean;
+  requires_endorsee: boolean;
+}
+
 export interface ChequeDto {
   id: number;
   cheque_number: string;
@@ -72,8 +84,14 @@ export interface ChequeDto {
   issue_date?: string | null;
   payee_name?: string | null;
   status: string;
+  /** CHQ-3: تسمية الحالة بدلالة الاتجاه — «مصروف» على الصادر لا «محصَّل». */
+  status_label?: string;
+  /** CHQ-3: ما يمكن فعله بالورقة الآن — مصدره آلة الحالات في الخادم. */
+  allowed_movements?: ChequeMovementOption[];
   direction: string;
   partner?: number | null;
+  /** CHQ-1: الطرف الذي ظُهِّر له الشيك. */
+  endorsed_to?: number | null;
   currency: number;
   notes?: string | null;
 }
@@ -84,6 +102,13 @@ export interface ChequeMovementDto {
   cheque: number;
   movement_type: string;
   movement_type_display: string;
+  /** CHQ-3: تسمية الحركة بدلالة الاتجاه — تُفضَّل على `movement_type_display`. */
+  movement_type_label?: string;
+  /** CHQ-3: القيد الذي أنتجته الخطوة. رقمه ومرجعه فقط — بلا مبلغ (THA-489). */
+  journal?: number | null;
+  journal_number?: string | null;
+  journal_reference?: string | null;
+  journal_date?: string | null;
   notes?: string | null;
   created_at: string;
   created_by_name?: string | null;

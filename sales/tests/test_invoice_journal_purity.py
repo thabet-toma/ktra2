@@ -161,17 +161,19 @@ class InvoiceJournalPurityTest(APITestCase):
         cheque = Cheque.objects.get(sales_invoice=inv)
         assert cheque.customer_payment_id == payment.pk, \
             "الشيك ينتقل إلى ملكية السند"
-        assert cheque.status == "Under_Collection"
+        # CHQ-2: الورقة في المحفظة (1109) بعد الاستلام.
+        assert cheque.status == "Received"
 
         # قيد السند هو الذي يحمل التسوية: مدين شيكات برسم التحصيل / دائن ذمم
         pay_lines = JournalLine.objects.filter(
             journal__reference_type="CUSTOMER_PAYMENT",
             journal__reference_id=payment.pk,
         )
+        in_hand = Account.objects.get(tenant=self.tenant, code="1109")
         assert {
             (l.account_id, l.debit, l.credit) for l in pay_lines
         } == {
-            (self.uc.pk, Decimal("400.00"), Decimal("0.00")),
+            (in_hand.pk, Decimal("400.00"), Decimal("0.00")),
             (self.ar.pk, Decimal("0.00"), Decimal("400.00")),
         }
 
@@ -197,11 +199,12 @@ class InvoiceJournalPurityTest(APITestCase):
             journal__reference_type="CUSTOMER_PAYMENT",
             journal__reference_id=payment.pk,
         )
+        in_hand = Account.objects.get(tenant=self.tenant, code="1109")
         assert {
             (l.account_id, l.debit, l.credit) for l in pay_lines
         } == {
             (self.cash.pk, Decimal("600.00"), Decimal("0.00")),
-            (self.uc.pk, Decimal("400.00"), Decimal("0.00")),
+            (in_hand.pk, Decimal("400.00"), Decimal("0.00")),
             (self.ar.pk, Decimal("0.00"), Decimal("1000.00")),
         }
         # وقيد الفاتورة نفسه بقي نقيّاً

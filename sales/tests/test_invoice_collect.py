@@ -145,7 +145,8 @@ class InvoiceCollectTest(APITestCase):
         cheques = list(Cheque.objects.filter(customer_payment=payment))
         assert len(cheques) == 1
         assert cheques[0].amount == Decimal("40.00")
-        assert cheques[0].status == "Under_Collection"
+        # CHQ-2: الورقة في المحفظة بعد الاستلام؛ الإيداع حدث لاحق له قيده.
+        assert cheques[0].status == "Received"
 
         assert inv.amount_paid == Decimal("100.00")
         assert inv.amount_paid == posted_allocations_total(inv.pk)
@@ -168,11 +169,12 @@ class InvoiceCollectTest(APITestCase):
             journal__reference_type="CUSTOMER_PAYMENT",
             journal__reference_id=payment.pk,
         )
+        in_hand = Account.objects.get(tenant=self.tenant, code="1109")
         assert {
             (l.account_id, l.debit, l.credit) for l in pay_lines
         } == {
             (self.cash.pk, Decimal("60.00"), Decimal("0.00")),
-            (self.uc.pk, Decimal("40.00"), Decimal("0.00")),
+            (in_hand.pk, Decimal("40.00"), Decimal("0.00")),
             (self.ar.pk, Decimal("0.00"), Decimal("100.00")),
         }
 

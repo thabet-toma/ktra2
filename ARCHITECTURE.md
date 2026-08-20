@@ -23,9 +23,9 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | App | المسؤولية | كود | اختبار | مسار الـAPI |
 |---|---|---:|---:|---|
 | `logistics` | الاستيراد والمشتريات: صفقة ← شحنة ← تخليص ← نقل ← فاتورة دولية + التكلفة المستوردة | 17,400 | 8,700 | `/api/logistics/` |
-| `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة، الداشبورد، المساعد الذكي | 13,000 | 6,200 | `/api/` (متفرّق) |
-| `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 11,200 | 4,800 | `/api/accounting/` |
-| `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 10,600 | 7,200 | `/api/sales/` |
+| `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة، الداشبورد، المساعد الذكي | 13,100 | 6,200 | `/api/` (متفرّق) |
+| `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 11,800 | 5,400 | `/api/accounting/` |
+| `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 10,700 | 7,500 | `/api/sales/` |
 | `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية — وفوقها **طبقة مكتب** بنطاق `accountant=` لا `tenant=`: زبائن المكتب (ولو لم يكونوا شركات على المنصة) وبرامجه ومواعيده ومستنداته | 4,600 | 3,800 | `/api/accountant/` |
 | `inventory` | الأصناف والمستودعات و`StockMovement` (المصدر الوحيد للرصيد ومتوسط التكلفة) والأرقام التسلسلية | 4,500 | 2,600 | `/api/inventory/` |
 | `hr` | الموظفون والرواتب والحضور والمهام | 2,200 | 1,200 | `/api/hr/` |
@@ -115,7 +115,7 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 |---|---|---|
 | فاتورة بيع: إنشاء/ترحيل/إلغاء ترحيل | `modules/sales.md` + `modules/accounting.md` | `sales/services/` (`post_sales_invoice`), `sales/views.py` |
 | قيد محاسبي أو شجرة حسابات | `modules/accounting.md` | `accounting/services.py` (`post_journal`) |
-| شيكات / بنوك / مطابقة | `modules/accounting.md` | `accounting/services.py`, `accounting/models.py` (`Cheque.VALID_TRANSITIONS`) |
+| شيكات / بنوك / مطابقة | `modules/accounting.md` | `accounting/services.py` (`transfer_cheque`), `accounting/services.py` (`INCOMING_TRANSITIONS`) |
 | حركة مخزون أو تكلفة | `modules/inventory.md` | `inventory/services.py` (`record_stock_movement`) |
 | أرقام تسلسلية | `modules/inventory.md` | `inventory/serials.py` |
 | رحلة استيراد / مرحلة صفقة | `modules/logistics.md` | `logistics/domain/stages.py` (`advance_deal_stage`) |

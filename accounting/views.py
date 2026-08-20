@@ -273,6 +273,8 @@ class ChequeViewSet(viewsets.ModelViewSet):
                 account_id=request.data.get("account_id"),
                 movement_date=request.data.get("movement_date") or None,
                 bank_account_id=request.data.get("bank_account") or None,
+                # CHQ-1: المستفيد من التظهير — بدونه لا يكون للحركة قيد ذمم.
+                endorsed_to_id=request.data.get("endorsed_to") or None,
             )
         except DjangoValidationError as e:
             raise ValidationError(
@@ -284,7 +286,11 @@ class ChequeViewSet(viewsets.ModelViewSet):
         """T-CHQ2: مسار الشيك كاملاً — كان يُسجَّل في الجدول ولا يُعرض أبداً."""
         from .serializers import ChequeMovementSerializer
         cheque = self.get_object()
-        rows = cheque.movements.select_related("created_by").order_by("id")
+        # CHQ-3: القيد واتجاه الشيك يُقرآن لكل صف (رقم القيد وتسمية الحركة) —
+        # بلا هذين الوصلين استعلامان إضافيان على كل حركة.
+        rows = (cheque.movements
+                .select_related("created_by", "journal", "cheque")
+                .order_by("id"))
         return Response(ChequeMovementSerializer(rows, many=True).data)
 
     @action(detail=False, methods=["get"], url_path="wallet")

@@ -110,7 +110,7 @@ export const TIPS: readonly Tip[] = [
       'الربط بلا قيدٍ جديد — الرصيد ينزل والفاتورة تُقفل.',
     ],
   },
-  // accounting/models.py (`Cheque.VALID_TRANSITIONS`)
+  // accounting/services.py (`INCOMING_TRANSITIONS` / `OUTGOING_TRANSITIONS`)
   {
     key: 'accounting.cheque-lifecycle',
     view: 'accounting-cheques',

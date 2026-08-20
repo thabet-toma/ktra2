@@ -313,7 +313,20 @@ def guard_invoice_payments_before_unpost(
     وحدها، فيبقى سند القبض مرحّلاً وقيده يُدائن ذمم العميل بلا مقابل، ويبقى صفّ
     التوزيع يتيماً يُدفع مرة ثانية عند أي تسوية لاحقة. مرآةُ حارس الاعتمادية
     الموجود في `unpost_document` لحركات المخزون.
+
+    CHQ-2: ويحرس معه شيكات الفاتورة المرفقة — سندُ تسويتها التلقائي يُحرَّر
+    بالحذف (`release_auto_cash_settlement`) لا عبر `unpost_customer_payment`،
+    فحارس السند لا يمرّ عليها وتبقى الثغرة مفتوحة من باب الفاتورة.
     """
+    from accounting.models import Cheque
+    from accounting.services import guard_document_cheques_before_unpost
+
+    guard_document_cheques_before_unpost(
+        list(Cheque.objects.filter(
+            tenant_id=invoice.tenant_id, sales_invoice=invoice)),
+        document_label=f"الفاتورة {invoice.invoice_number}",
+        action_label=action_label,
+    )
     rows = list(
         PaymentAllocation.objects.filter(
             invoice=invoice, payment__is_posted=True,
@@ -388,6 +401,15 @@ def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:
         payment = CustomerPayment.objects.select_for_update().get(pk=payment.pk)
         if not payment.is_posted:
             raise ValidationError("السند غير مرحّل.")
+        # CHQ-2: قبل حذف أي قيد — شيكٌ تحرّك بعد الترحيل يجعل الحذف عطلاً
+        # مالياً صامتاً (حساب الشيكات سالباً والعميل مديناً رغم دخول النقد).
+        from accounting.services import (
+            guard_document_cheques_before_unpost,
+            record_document_cheque_unposting,
+        )
+        payment_cheques = list(payment.cheques.all())
+        guard_document_cheques_before_unpost(
+            payment_cheques, document_label=f"سند القبض #{payment.id}")
         result = unpost_document(
             tenant_id=payment.tenant_id,
             reference_id=payment.id,
@@ -417,10 +439,7 @@ def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:
         payment.journal = None
         payment.save(update_fields=["is_posted", "journal"])
 
-        from accounting.models import Cheque
-        Cheque.objects.filter(
-            customer_payment=payment, status="Under_Collection"
-        ).update(status="Draft")
+        record_document_cheque_unposting(payment_cheques, user=user)
 
         create_audit_log(
             tenant=payment.tenant,
@@ -1977,37 +1996,61 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         raise ValidationError(
             f"مجموع الشيكات ({cheques_pool}) يتجاوز مبلغ السند ({payment.amount})."
         )
-    uc_account = (
-        resolve_cheques_under_collection_account(payment.tenant_id)
-        if cheques_pool > 0 else None
-    )
+
+    # CHQ-2: الورقة تدخل الدفاتر على حساب **حالتها**، لا على حساب واحد للجميع.
+    # الشيك المسودة يصير «مستلَماً في المحفظة» ⇒ 1109 (فيصير الإيداع لاحقاً
+    # حدثاً له قيده: 1107 ÷ 1109 — وهو ما طلبه المالك). أما ورقة legacy وصلت
+    # `Under_Collection` قبل هذا التغيير (يضمّها `wrap_orphan_cheques_in_vouchers`
+    # مثلاً) فتبقى على 1107 حرفياً — قاعدة الـcutover نفسها: الحالة هي المميِّز.
+    def _pool_of(statuses) -> Decimal:
+        return sum(
+            (Decimal(str(c.amount or 0)) for c in payment_cheques
+             if (c.status == 'Draft') is statuses),
+            Decimal("0"),
+        ).quantize(DEC)
+
+    cheque_pools: list[list] = []
+    in_hand_pool = _pool_of(True)
+    legacy_pool = _pool_of(False)
+    if in_hand_pool > 0:
+        from accounting.services import _resolve_cheque_in_hand_account
+        cheque_pools.append([
+            _resolve_cheque_in_hand_account(payment.tenant_id).id, in_hand_pool,
+        ])
+    if legacy_pool > 0:
+        cheque_pools.append([
+            resolve_cheques_under_collection_account(payment.tenant_id).id, legacy_pool,
+        ])
 
     def _debit_lines(amount: Decimal, description: str) -> list[dict]:
-        """يقسم الجانب المدين بين الصندوق والشيكات برسم التحصيل."""
-        nonlocal cheques_pool
-        from_cheques = min(cheques_pool, amount).quantize(DEC)
-        cheques_pool = (cheques_pool - from_cheques).quantize(DEC)
-        cash_part = (amount - from_cheques).quantize(DEC)
+        """يقسم الجانب المدين بين الصندوق وحسابات الشيكات."""
         rows: list[dict] = []
-        if cash_part > 0:
+        left = amount
+        cheque_rows: list[dict] = []
+        for pool in cheque_pools:
+            take = min(pool[1], left).quantize(DEC)
+            if take <= 0:
+                continue
+            pool[1] = (pool[1] - take).quantize(DEC)
+            left = (left - take).quantize(DEC)
+            cheque_rows.append({
+                # حساب الشيكات أصل لا حساب رقابي للذمم — بلا شريك.
+                "account": pool[0],
+                "partner": None,
+                "debit": take,
+                "credit": Decimal("0"),
+                "description": f"شيكات — {description}",
+            })
+        if left > 0:
             rows.append({
                 # T-CASH2: سطر الصندوق لا يَحمل الشريك (لا يُحسب على ذمم العميل).
                 "account": payment.cash_or_bank_account_id,
                 "partner": None,
-                "debit": cash_part,
+                "debit": left,
                 "credit": Decimal("0"),
                 "description": description,
             })
-        if from_cheques > 0:
-            rows.append({
-                # شيكات برسم التحصيل أصل لا حساب رقابي للذمم — بلا شريك.
-                "account": uc_account.id,
-                "partner": None,
-                "debit": from_cheques,
-                "credit": Decimal("0"),
-                "description": f"شيكات — {description}",
-            })
-        return rows
+        return rows + cheque_rows
 
     with transaction.atomic():
         # T-SPLIT: قفل صفّ الدفعة وإعادة فحص الترحيل — إذ نُنشئ قيداً لكل فاتورة
@@ -2200,12 +2243,14 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         payment.is_posted = True
         payment.save(update_fields=["journal", "is_posted"])
 
-        # شيكات السند تنتقل من مسودة إلى «برسم التحصيل» بترحيله (كما في الفاتورة).
+        # CHQ-2: شيكات السند تنتقل من مسودة إلى «مستلَم» بترحيله، ومعها صفّ
+        # حركة مربوط بقيده — بدل `.update()` أخرس كان يُسقط أهمّ حدث في حياة
+        # الشيك من سجلّه. القيد المرجعي هو `payment.journal` (أول القيود) كما
+        # في كل ما يشير إلى هذا السند؛ الحذف يبقى عبر `reference_id` فيشملها كلها.
         if payment_cheques:
-            from accounting.models import Cheque
-            Cheque.objects.filter(
-                customer_payment=payment, status="Draft"
-            ).update(status="Under_Collection")
+            from accounting.services import record_document_cheque_posting
+            record_document_cheque_posting(
+                payment_cheques, journal=payment.journal, user=user)
 
         # ── حفظ مبلغ/سعر تحويل كل توزيع للمرجعية ──
         for alloc, amount_in_inv_curr, conv_rate in alloc_conversions:

@@ -66,8 +66,10 @@ class ChequeTransferJournalTest(APITestCase):
         chq.refresh_from_db()
         assert chq.status == "Collected"
 
+        movement = ChequeMovement.objects.get(cheque=chq, movement_type="collect")
         jh = JournalHeader.objects.get(
-            tenant=self.tenant, reference_type="CHEQUE_COLLECT", reference_id=chq.pk)
+            tenant=self.tenant, reference_type="CHEQUE_COLLECT",
+            reference_id=movement.pk)
         lines = {l.account_id: (l.debit, l.credit) for l in jh.lines.all()}
         assert lines[self.cash.pk] == (Decimal("500.00"), Decimal("0.00"))
         assert lines[self.uc_acc.pk] == (Decimal("0.00"), Decimal("500.00"))
@@ -83,8 +85,10 @@ class ChequeTransferJournalTest(APITestCase):
         chq.refresh_from_db()
         assert chq.status == "Bounced"
 
+        movement = ChequeMovement.objects.get(cheque=chq, movement_type="bounce")
         jh = JournalHeader.objects.get(
-            tenant=self.tenant, reference_type="CHEQUE_BOUNCE", reference_id=chq.pk)
+            tenant=self.tenant, reference_type="CHEQUE_BOUNCE",
+            reference_id=movement.pk)
         # دائن: شيكات برسم التحصيل · مدين: ذمم العميل (linked_account أنشأه signal)
         self.customer.refresh_from_db()
         lines = {l.account_id: (l.debit, l.credit) for l in jh.lines.all()}
@@ -98,8 +102,10 @@ class ChequeTransferJournalTest(APITestCase):
         self.client.post(
             f"/api/accounting/cheques/{chq.pk}/transfer/",
             {"movement_type": "bounce"}, format="json", **self._auth())
+        movement = ChequeMovement.objects.get(cheque=chq, movement_type="bounce")
         jh = JournalHeader.objects.get(
-            tenant=self.tenant, reference_type="CHEQUE_BOUNCE", reference_id=chq.pk)
+            tenant=self.tenant, reference_type="CHEQUE_BOUNCE",
+            reference_id=movement.pk)
         self.customer.refresh_from_db()
         partners = {l.account_id: l.partner_id for l in jh.lines.all()}
         assert partners[self.customer.linked_account_id] == self.customer.pk
@@ -140,4 +146,7 @@ class ChequeTransferJournalTest(APITestCase):
         chq.refresh_from_db()
         assert chq.status == "Collected"
         assert not JournalHeader.objects.filter(
-            reference_type="CHEQUE_COLLECT", reference_id=chq.pk).exists()
+            reference_type="CHEQUE_COLLECT",
+            reference_id__in=ChequeMovement.objects.filter(cheque=chq)
+                                                   .values_list("pk", flat=True),
+        ).exists()

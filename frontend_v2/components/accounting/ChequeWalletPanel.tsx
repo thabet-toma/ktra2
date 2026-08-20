@@ -12,19 +12,23 @@ import type { ChequeWalletDto, ChequeWalletSide } from "../../types/accounting";
  * تأخّرت. المحفظة تجمع الأوراق **المفتوحة** وحدها (مسودة/برسم التحصيل/مرتدة)
  * — المحصّلة والمُعادة والمسوّاة خرجت من اليد فلا مكان لها في الرصيد.
  */
-const STATUS_LABELS: Record<string, string> = {
-  Draft: "مسودة",
-  Under_Collection: "قيد التحصيل",
-  Bounced: "مرتد",
-};
+/**
+ * CHQ-4: تسمية الحالة لم تعد جدولاً هنا. الرمز واحد والدلالة تختلف بالاتجاه
+ * («برسم التحصيل» للوارد مقابل «مسلَّم — بانتظار الصرف» للصادر)، والتسمية
+ * الصحيحة تأتي مع كل شيك من الخادم (`status_label`) — فالشاشة تمرّرها هنا،
+ * ويبقى الرمز نفسه احتياطاً إن لم تُعرف الحالة.
+ */
+type StatusLabelFn = (direction: string, status: string) => string;
 
 const Side: React.FC<{
   title: string;
   hint: string;
   side: ChequeWalletSide;
   tone: string;
+  direction: string;
+  statusLabel: StatusLabelFn;
   onPick?: (status: string) => void;
-}> = ({ title, hint, side, tone, onPick }) => (
+}> = ({ title, hint, side, tone, direction, statusLabel, onPick }) => (
   <div
     className="rounded-lg border border-[var(--aseel-border)] p-3"
     style={{ background: "var(--aseel-panel)" }}
@@ -55,7 +59,7 @@ const Side: React.FC<{
             title="عرض هذه الحالة في القائمة"
           >
             <span>
-              {STATUS_LABELS[bucket.status] || bucket.status}
+              {statusLabel(direction, bucket.status)}
               <span className="text-xs text-[var(--aseel-ink-soft)]"> ({bucket.count})</span>
             </span>
             <span className="font-mono">{formatMoney(bucket.amount)}</span>
@@ -92,8 +96,10 @@ const Side: React.FC<{
 
 export const ChequeWalletPanel: React.FC<{
   refreshKey?: number;
+  /** تسمية الحالة بدلالة الاتجاه — من `status_label` الذي يصل مع الشيكات. */
+  statusLabel?: StatusLabelFn;
   onPickStatus?: (direction: string, status: string) => void;
-}> = ({ refreshKey = 0, onPickStatus }) => {
+}> = ({ refreshKey = 0, statusLabel = (_d, status) => status, onPickStatus }) => {
   const [wallet, setWallet] = useState<ChequeWalletDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -139,6 +145,8 @@ export const ChequeWalletPanel: React.FC<{
           hint="أوراق العملاء التي لم تُحصَّل بعد"
           side={wallet.incoming}
           tone="var(--aseel-ok, #16a34a)"
+          direction="Incoming"
+          statusLabel={statusLabel}
           onPick={(status) => onPickStatus?.("Incoming", status)}
         />
         <Side
@@ -146,6 +154,8 @@ export const ChequeWalletPanel: React.FC<{
           hint="التزامات لم تُصرف من حسابنا بعد"
           side={wallet.outgoing}
           tone="var(--aseel-danger, #dc2626)"
+          direction="Outgoing"
+          statusLabel={statusLabel}
           onPick={(status) => onPickStatus?.("Outgoing", status)}
         />
       </div>

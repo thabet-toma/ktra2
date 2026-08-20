@@ -15,7 +15,7 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from accounting.models import Account, Bank, Cheque, JournalHeader
+from accounting.models import Account, Bank, Cheque, ChequeMovement, JournalHeader
 from accounting.services import create_fiscal_year
 from partners.models import Partner
 from sales.models import CustomerPayment, SalesSettings
@@ -120,15 +120,18 @@ class ChequeCreateApiTest(APITestCase):
         self.assertFalse(Cheque.objects.filter(cheque_number="1233").exists())
 
     def test_voucher_without_allocation_posts_on_account(self):
-        """بلا توزيع: مدين «شيكات برسم التحصيل» ÷ دائن ذمم العميل."""
+        """CHQ-2: بلا توزيع — مدين «شيكات في المحفظة» (1109) ÷ دائن ذمم العميل.
+
+        كان 1107؛ الورقة تدخل المحفظة بالاستلام وتغادرها إلى 1107 بالإيداع.
+        """
         payment = self._voucher()
         payment.refresh_from_db()
         self.assertTrue(payment.is_posted)
         chq = payment.cheques.get()
-        self.assertEqual(chq.status, "Under_Collection")
+        self.assertEqual(chq.status, "Received")
         lines = list(payment.journal.lines.select_related("account"))
         debit = next(ln for ln in lines if ln.debit > 0)
-        self.assertEqual(debit.account.code, "1107")
+        self.assertEqual(debit.account.code, "1109")
         self.assertEqual(debit.debit, Decimal("4444.00"))
 
     def test_cheque_inside_a_voucher_can_close_its_cycle(self):
@@ -140,9 +143,10 @@ class ChequeCreateApiTest(APITestCase):
             {"movement_type": "collect", "movement_date": "2026-08-07"},
             format="json", **self._auth())
         self.assertEqual(res.status_code, 200, res.content)
+        movement = ChequeMovement.objects.get(cheque=chq, movement_type="collect")
         self.assertTrue(JournalHeader.objects.filter(
             tenant=self.tenant, reference_type="CHEQUE_COLLECT",
-            reference_id=chq.pk).exists())
+            reference_id=movement.pk).exists())
 
     def test_legacy_cheque_without_bank_stays_editable(self):
         """شيكات قديمة بلا بنك — شرط البنك لا يمنع تعديل حقولها الأخرى."""

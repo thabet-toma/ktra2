@@ -302,13 +302,19 @@ class Cheque(models.Model):
         ('Incoming', 'Incoming'), # From Customer
         ('Outgoing', 'Outgoing'), # To Supplier
     ]
+    # CHQ-1: رموز الحالات القديمة لا تتغير أبداً (صفوف مال حية تحملها)، وتُضاف
+    # ثلاث حالات فقط. التسمية العربية تختلف حسب الاتجاه — الصادر يقرأ
+    # `Under_Collection` بمعنى «مسلَّم» و`Collected` بمعنى «مصروف».
     STATUS_CHOICES = [
         ('Draft', 'Draft'),
+        ('Received', 'Received'),          # وارد: الورقة في المحفظة، لم تُودَع
         ('Under_Collection', 'Under Collection'),
         ('Collected', 'Collected'),
         ('Bounced', 'Bounced'),
         ('Returned', 'Returned'),
         ('Settled', 'Settled'),
+        ('Endorsed', 'Endorsed'),          # وارد: ظُهِّر لطرف ثالث
+        ('Cancelled', 'Cancelled'),        # صادر: أُلغي/أُوقف قبل صرفه
     ]
 
     id = models.AutoField(primary_key=True, db_column='ChequeID')
@@ -368,6 +374,13 @@ class Cheque(models.Model):
         db_column='SupplierPaymentID',
         related_name='cheques',
     )
+    # CHQ-1: المستفيد من التظهير — الشيك الوارد يُسدَّد به مورد بدل النقد،
+    # فتنخفض ذمته بقيد مدين ذممه ÷ دائن «شيكات في المحفظة».
+    endorsed_to = models.ForeignKey(
+        Partner, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='EndorsedToPartnerID', related_name='endorsed_cheques',
+        help_text='الطرف الذي ظُهِّر له الشيك',
+    )
     # P-H-1: link to purchase invoice (mirror of sales_invoice)
     purchase_invoice = models.ForeignKey(
         'logistics.PurchaseInvoice',
@@ -381,14 +394,6 @@ class Cheque(models.Model):
         db_table = 'cheques'
         managed = True
 
-    VALID_TRANSITIONS = {
-        'Draft': ['Under_Collection', 'Bounced', 'Returned'],
-        'Under_Collection': ['Collected', 'Bounced', 'Returned'],
-        'Collected': ['Bounced', 'Returned'],
-        'Bounced': ['Draft', 'Under_Collection', 'Returned'],
-        'Returned': [],
-    }
-
     def save(self, *args, **kwargs):
         """T-BANKS: لقطة اسم البنك/الفرع من السجل المرتبط للعرض التاريخي."""
         if self.bank_id and not (self.bank_name or '').strip():
@@ -397,38 +402,12 @@ class Cheque(models.Model):
             self.bank_branch = (self.bank_branch_ref.name or '')[:100]
         super().save(*args, **kwargs)
 
-    def change_status(self, new_status, *, notes='', user=None):
-        """P-H-4: تغيير حالة الشيك مع تسجيل الحركة والتحقق من الانتقال الصحيح.
-
-        Returns: ChequeMovement that was created.
-        Raises: ValidationError if transition is invalid.
-        """
-        from django.core.exceptions import ValidationError
-
-        if new_status == self.status:
-            return None
-        allowed = self.VALID_TRANSITIONS.get(self.status, [])
-        if new_status not in allowed:
-            raise ValidationError(
-                f"لا يمكن تغيير حالة الشيك من {self.status} إلى {new_status}. "
-                f"الانتقالات المسموحة من {self.status}: {', '.join(allowed) if allowed else '—'}."
-            )
-        self.status = new_status
-        self.save(update_fields=['status'])
-        from django.utils import timezone
-        movement_type_map = {
-            'Under_Collection': 'deposit',
-            'Collected': 'settle',
-            'Bounced': 'bounce',
-            'Returned': 'return_to_customer',
-        }
-        movement_type = movement_type_map.get(new_status, new_status.lower())
-        return ChequeMovement.objects.create(
-            cheque=self,
-            movement_type=movement_type,
-            notes=notes or '',
-            created_by=user if user and not getattr(user, 'is_anonymous', False) else None,
-        )
+    # CHQ-1: `VALID_TRANSITIONS` و`change_status` حُذفا. كانا جدولاً ثانياً
+    # للانتقالات يناقض جدول الخدمات (الموديل يسمح Bounced→Under_Collection،
+    # الخدمات لا)، وميتَين إنتاجياً: لا مستدعي لهما خارج اختبارهما، لأن الحالة
+    # تتغير حصراً عبر `accounting.services.transfer_cheque` التي ترحّل القيد
+    # وتكتب الحركة. المصدر الواحد الآن: `INCOMING_TRANSITIONS` /
+    # `OUTGOING_TRANSITIONS` في `accounting/services.py`.
 
     def __str__(self):
         return f"Cheque {self.cheque_number} - {self.amount}"
@@ -436,14 +415,25 @@ class Cheque(models.Model):
 
 class ChequeMovement(models.Model):
     """N8-T14: سجل حركة الشيك (إيداع، صرف، رفض، إرجاع، تسوية)."""
+    # CHQ-2: ترحيل السند نفسه صار يكتب حركته بدل `.update()` الأخرس — فأهمّ
+    # حدث في حياة الشيك (دخوله الدفاتر) لم يعد غائباً عن سجلّه. قيد هذه
+    # الحركات هو **قيد السند** فتُربط به مباشرة:
+    #   `receive` وارد ← Received · `issue` صادر ← Under_Collection ·
+    #   `revert` عكسهما عند إلغاء الترحيل (بلا قيد — قيد السند حُذف).
+    # `issue` و`revert` من إنتاج المستند وحده: خارج `STATUS_MAP` وخارج جدولَي
+    # الانتقالات، فلا تُستدعيان من الـAPI.
     MOVEMENT_TYPES = [
+        ('receive', 'استلام'),
+        ('issue', 'تسليم شيك صادر'),
+        ('revert', 'إلغاء ترحيل السند'),
         ('deposit', 'إيداع'),
+        ('redeposit', 'إعادة إيداع'),
         ('withdraw', 'صرف'),
-        # T-CHQ2: `transfer_cheque` تكتب 'collect' منذ task11 وهي ليست ضمن
-        # الخيارات، فيعرضها `get_movement_type_display` خاماً بالإنجليزية.
         ('collect', 'تحصيل'),
+        ('endorse', 'تظهير'),
         ('bounce', 'رفض'),
         ('return_to_customer', 'إرجاع للعميل'),
+        ('cancel', 'إلغاء'),
         ('settle', 'تسوية'),
     ]
     id = models.AutoField(primary_key=True, db_column='ChequeMovementID')
@@ -452,6 +442,12 @@ class ChequeMovement(models.Model):
         related_name='movements',
     )
     movement_type = models.CharField(max_length=30, choices=MOVEMENT_TYPES, db_column='MovementType')
+    # CHQ-1: قيد الحركة مربوطاً بها — كان السجل يقول «ماذا ومتى» ولا يقول
+    # «أي قيد»، فأهمّ حدث في حياة الشيك (دخوله الدفاتر) غير قابل للتتبّع.
+    journal = models.ForeignKey(
+        'JournalHeader', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='cheque_movements',
+    )
     notes = models.TextField(null=True, blank=True, db_column='Notes')
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
     created_by = models.ForeignKey(

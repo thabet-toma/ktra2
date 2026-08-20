@@ -125,11 +125,11 @@ def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'Supplier
         payment.is_posted = True
         payment.save(update_fields=["journal", "is_posted"])
         # الشيكات الصادرة تخرج من المسودة بترحيل السند (كما في الجانب الوارد).
+        # CHQ-2: الحساب يبقى 2111 حرفياً — المتغيّر أن الحركة صارت تُسجَّل
+        # مربوطةً بقيد السند بدل `.update()` أخرس بلا أثر في سجل الشيك.
         if payment_cheques:
-            from accounting.models import Cheque
-            Cheque.objects.filter(
-                supplier_payment=payment, status="Draft"
-            ).update(status="Under_Collection")
+            from accounting.services import record_document_cheque_posting
+            record_document_cheque_posting(payment_cheques, journal=jh, user=user)
         create_audit_log(
             tenant=payment.tenant,
             user=user,
@@ -159,6 +159,15 @@ def unpost_supplier_payment(payment: 'SupplierPayment', *, user=None) -> dict:
         payment = SP.objects.select_for_update().get(pk=payment.pk)
         if not payment.is_posted:
             raise ValidationError("السند غير مرحّل.")
+        # CHQ-2: مرآة الجانب الوارد — شيكٌ صُرف من البنك (أو أُلغي) بعد ترحيل
+        # السند يجعل حذف قيده يترك 2111 معلَّقاً والمورد دائناً مرتين.
+        from accounting.services import (
+            guard_document_cheques_before_unpost,
+            record_document_cheque_unposting,
+        )
+        payment_cheques = list(payment.cheques.all())
+        guard_document_cheques_before_unpost(
+            payment_cheques, document_label=f"سند الصرف #{payment.id}")
         result = unpost_document(
             tenant_id=payment.tenant_id,
             reference_id=payment.id,
@@ -171,10 +180,7 @@ def unpost_supplier_payment(payment: 'SupplierPayment', *, user=None) -> dict:
         payment.save(update_fields=["is_posted", "journal"])
 
         # الشيكات الصادرة تعود مسودةً (عكسُ ما فعله الترحيل تماماً).
-        from accounting.models import Cheque
-        Cheque.objects.filter(
-            supplier_payment=payment, status="Under_Collection"
-        ).update(status="Draft")
+        record_document_cheque_unposting(payment_cheques, user=user)
 
         create_audit_log(
             tenant=payment.tenant,

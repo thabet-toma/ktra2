@@ -181,4 +181,5 @@ class VoucherAtomicityTest(TestCase):
         self.assertEqual(self.invoice.amount_paid, Decimal("3000.00"))
         cheque = Cheque.objects.get(sales_invoice=self.invoice)
         self.assertEqual(cheque.customer_payment_id, payment.pk)
-        self.assertEqual(cheque.status, "Under_Collection")
+        # CHQ-2: الترحيل يضع الورقة في المحفظة — «مستلَم» لا «برسم التحصيل».
+        self.assertEqual(cheque.status, "Received")

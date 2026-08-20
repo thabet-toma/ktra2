@@ -115,6 +115,17 @@ class SalesSettings(models.Model):
         related_name="sales_settings_cheques_uc",
         help_text="حساب شيكات برسم التحصيل (Asset). يستقبل الشيكات الواردة المرفقة بفواتير المبيعات.",
     )
+    # CHQ-1: حساب الورقة **في اليد** قبل إيداعها (1109) — الفصل بينه وبين
+    # «برسم التحصيل» هو ما يجعل قيد الإيداع (1107 ÷ 1109) ممكناً.
+    default_cheques_in_hand_account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column="DefaultChequesInHandAccountID",
+        related_name="sales_settings_cheques_in_hand",
+        help_text="حساب شيكات في المحفظة (Asset). يستقبل الشيك الوارد المستلَم قبل إيداعه في البنك.",
+    )
 
     # M2-T4: dedicated source-discount (withholding) receivable account.
     # Source discount is NOT a COGS — it's an amount withheld by the customer

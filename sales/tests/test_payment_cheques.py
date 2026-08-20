@@ -4,7 +4,10 @@
 شيك للخادم، فيُقيَّد مال الشيكات على الصندوق كأنه نقد، ولا يُنشأ شيك برسم
 التحصيل. هنا العقد الصحيح:
 
-    Dr صندوق (الجزء النقدي) + Dr شيكات برسم التحصيل (جزء الشيكات) = Cr ذمم العميل
+    Dr صندوق (الجزء النقدي) + Dr شيكات في المحفظة (جزء الشيكات) = Cr ذمم العميل
+
+CHQ-2: حساب الشيكات صار «في المحفظة» (1109) لا «برسم التحصيل» (1107) — الورقة
+في اليد لم تُودَع بعد، والإيداع صار حدثاً مستقلاً له قيده (1107 ÷ 1109).
 """
 from decimal import Decimal
 
@@ -117,12 +120,12 @@ class PaymentChequesTest(APITestCase):
 
         assert self._lines(payment) == {
             ("1110", "300.00", "0.00"),   # النقد فقط
-            ("1106", "200.00", "0.00"),   # الشيكات برسم التحصيل
+            ("1109", "200.00", "0.00"),   # CHQ-2: الشيكات في المحفظة
             ("1101", "0.00", "500.00"),   # ذمم العميل بالمجموع
         }
         self.invoice.refresh_from_db()
         assert self.invoice.amount_paid == Decimal("500.00")
-        assert Cheque.objects.get(customer_payment=payment).status == "Under_Collection"
+        assert Cheque.objects.get(customer_payment=payment).status == "Received"
 
     def test_cheque_only_payment_debits_no_cash(self):
         res = self.client.post(
@@ -136,7 +139,7 @@ class PaymentChequesTest(APITestCase):
         assert res.status_code == 201, res.content
         payment = CustomerPayment.objects.get(pk=res.json()["id"])
         assert self._lines(payment) == {
-            ("1106", "200.00", "0.00"),
+            ("1109", "200.00", "0.00"),
             ("1101", "0.00", "200.00"),
         }
 
@@ -148,7 +151,7 @@ class PaymentChequesTest(APITestCase):
         payment = CustomerPayment.objects.get(pk=res.json()["id"])
         assert self._lines(payment) == {
             ("1110", "300.00", "0.00"),
-            ("1106", "200.00", "0.00"),
+            ("1109", "200.00", "0.00"),
             ("1101", "0.00", "500.00"),
         }
 

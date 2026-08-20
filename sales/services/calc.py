@@ -457,6 +457,13 @@ def resolve_cheques_under_collection_account(tenant_id: int) -> Account:
     ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
     uc_acc = ss.default_cheques_under_collection_account if ss else None
     if not uc_acc:
+        # CHQ-2: «شيكات في المحفظة» (1109) صار موجوداً في كل شجرة يمرّ بها شيك
+        # وارد، واسمه يحوي «شيكات» أيضاً — فمطابقة الاسم المفتوحة قد تعيده هنا
+        # في شركة بلا 1107، فيقع قيد الإيداع (1107 ÷ 1109) بطرفيه على الحساب
+        # نفسه: **متوازن**، فلا تكشفه موازنة ولا تأكيد رصيد. يُستثنى صراحةً كما
+        # في `accounting/services.py` (`_resolve_cheque_under_collection_account`).
+        from accounting.services import CHEQUES_IN_HAND_CODE
+
         uc_acc = (
             Account.objects.filter(
                 tenant_id=tenant_id,
@@ -464,6 +471,8 @@ def resolve_cheques_under_collection_account(tenant_id: int) -> Account:
                 is_active=True,
                 name__icontains="شيكات",
             )
+            .exclude(code=CHEQUES_IN_HAND_CODE)
+            .exclude(name__icontains="المحفظة")
             .order_by("code")
             .first()
         )

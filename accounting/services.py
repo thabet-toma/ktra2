@@ -1012,23 +1012,174 @@ def year_end_close(*, tenant_id: int, fiscal_year: int, retained_earnings_accoun
 
 # ── N8-T14: Cheque movements ─────────────────────────────────
 
-VALID_TRANSITIONS = {
-    'Draft':           {'deposit', 'withdraw'},
+# CHQ-1 — المصدر الواحد لآلة حالات الشيك، جدولٌ لكل اتجاه.
+#
+# كان جدولاً واحداً مشتركاً، فالصادر يقبل «إيداعاً» بلا معنى، ولا يعرف
+# «إلغاء»، ولا يميّز الوارد بين ورقة في اليد وورقة في البنك. وكان بجانبه جدول
+# ثانٍ في الموديل يناقضه — حُذف (انظر `accounting/models.py` (`Cheque`)).
+#
+# قاعدة الـcutover: الحالة نفسها هي المميِّز. الشيك القديم في `Under_Collection`
+# (قيد استلامه دائن 1107) يكمل مساره القديم حرفياً؛ الجديد يبدأ `Received`
+# (قيد سنده دائن 1109) — لا ترحيل بيانات ولا إعادة كتابة قيد.
+INCOMING_TRANSITIONS = {
+    'Draft':            {'receive', 'deposit', 'withdraw'},
+    'Received':         {'deposit', 'collect', 'endorse', 'return_to_customer'},
     'Under_Collection': {'collect', 'bounce'},
+    'Collected':        set(),
+    'Bounced':          {'redeposit', 'return_to_customer', 'settle'},
+    'Returned':         set(),
+    'Settled':          set(),
+    'Endorsed':         set(),
+    'Cancelled':        set(),
+}
+
+OUTGOING_TRANSITIONS = {
+    # لا `deposit` ولا `endorse` ولا `redeposit` للصادر — ورقةٌ نحن كتبناها.
+    'Draft':            {'withdraw'},
+    # `Received` حالة وارد لا تُبلَغ من الصادر؛ الصفّ موجود صراحةً كي لا يصير
+    # شيكٌ وصلها باستيراد أو بمسار مستقبلي عالقاً بلا مخرج ولا رسالة تفسّر.
+    'Received':         set(),
+    'Under_Collection': {'collect', 'withdraw', 'bounce', 'cancel'},
     'Collected':        set(),
     'Bounced':          {'return_to_customer', 'settle'},
     'Returned':         set(),
     'Settled':          set(),
+    'Endorsed':         set(),
+    'Cancelled':        set(),
 }
 
+
+def transitions_for(direction: str) -> dict:
+    """جدول انتقالات الاتجاه — المدخل الوحيد للخدمات والواجهة والاختبارات."""
+    return OUTGOING_TRANSITIONS if direction == 'Outgoing' else INCOMING_TRANSITIONS
+
+
+def allowed_movements(cheque) -> set:
+    """الحركات المسموحة على هذا الشيك الآن — بحالته واتجاهه."""
+    return set(transitions_for(cheque.direction).get(cheque.status, set()))
+
+
 STATUS_MAP = {
+    'receive':            'Received',
     'deposit':            'Under_Collection',
+    'redeposit':          'Under_Collection',
     'withdraw':           'Collected',
     'collect':            'Collected',
+    'endorse':            'Endorsed',
     'bounce':             'Bounced',
     'return_to_customer': 'Returned',
+    'cancel':             'Cancelled',
     'settle':             'Settled',
 }
+
+
+# ── CHQ-3: تسميات الحالات والحركات — بدلالة الاتجاه، ومن الخادم وحده ──────
+#
+# الواجهة كانت تحمل نسختها من الجدول والتسميات (`CHEQUE_MOVES` و
+# `CHEQUE_STATUSES` في `AccountingChequesPage.tsx`)، فحالةٌ جديدة في الخادم لا
+# تظهر هناك، وحركةٌ مُنعت هنا تبقى زرّاً يعطي 400. المصدر الآن واحد: هذه
+# الجداول تسافر في الـserializer مع كل شيك.
+#
+# الرمز واحد في القاعدة والدلالة تختلف بالاتجاه: `Collected` للوارد «محصَّل»
+# (دخل المال) وللصادر «مصروف» (خرج المال) — والقارئ كان يرى «محصَّل» على ورقة
+# تخرج من حسابه.
+
+_STATUS_LABELS_BY_DIRECTION = {
+    'Incoming': {
+        'Draft':            'مسودة',
+        'Received':         'مستلَم — في المحفظة',
+        'Under_Collection': 'برسم التحصيل',
+        'Collected':        'محصَّل',
+        'Bounced':          'مرتدّ',
+        'Returned':         'مُعاد للعميل',
+        'Settled':          'مسوّى نقداً',
+        'Endorsed':         'مظهَّر لطرف ثالث',
+        'Cancelled':        'ملغى',
+    },
+    'Outgoing': {
+        'Draft':            'محرَّر',
+        'Received':         'مستلَم',
+        'Under_Collection': 'مسلَّم — بانتظار الصرف',
+        'Collected':        'مصروف',
+        'Bounced':          'مرتدّ',
+        'Returned':         'مسترجَع من المورد',
+        'Settled':          'مسوّى نقداً',
+        'Endorsed':         'مظهَّر لطرف ثالث',
+        'Cancelled':        'ملغى',
+    },
+}
+
+#: التسمية المحايدة حين لا يكون للاتجاه دلالة خاصة بالحركة.
+_MOVEMENT_LABELS_COMMON = {
+    'receive':            'استلام ضمن سند القبض',
+    'issue':              'تسليم الشيك للمورد',
+    'revert':             'إلغاء ترحيل السند',
+    'deposit':            'إيداع',
+    'redeposit':          'إعادة إيداع',
+    'withdraw':           'صرف',
+    'collect':            'تحصيل',
+    'endorse':            'تظهير',
+    'bounce':             'ارتداد',
+    'return_to_customer': 'إرجاع',
+    'cancel':             'إلغاء',
+    'settle':             'تسوية نقدية',
+}
+
+_MOVEMENT_LABELS_BY_DIRECTION = {
+    'Incoming': {
+        'deposit':            'إيداع للتحصيل (بنك)',
+        'redeposit':          'إعادة إيداع بعد الارتداد',
+        'withdraw':           'تحصيل مباشر',
+        'collect':            'تحصيل — دخل الصندوق/البنك',
+        'endorse':            'تظهير لطرف ثالث',
+        'bounce':             'ارتداد — إعادة الذمم على العميل',
+        'return_to_customer': 'إعادة الورقة للعميل',
+        'settle':             'تسوية نقدية من العميل',
+    },
+    'Outgoing': {
+        'withdraw':           'صرف مباشر من حسابنا',
+        'collect':            'صُرف من حسابنا — إغلاق الالتزام',
+        'bounce':             'ارتداد — عاد الدين على المورد',
+        'return_to_customer': 'استرجاع الورقة من المورد',
+        'cancel':             'إلغاء الشيك — إيقافه قبل صرفه',
+        'settle':             'تسوية نقدية للمورد',
+    },
+}
+
+#: الحركات التي يحلّ قيدُها طرفاً نقدياً (`_resolve_cheque_cash_account` في
+#: `_cheque_movement_gl`) — فالواجهة تسأل عن الحساب البنكي قبل الإرسال بدل أن
+#: تكتشفه من رسالة خطأ. تُشتق من القيد نفسه؛ أي تغيير هناك يُصحَّح هنا.
+CHEQUE_MOVEMENTS_NEEDING_CASH_ACCOUNT = frozenset({'collect', 'withdraw', 'settle'})
+
+#: ترتيب عرض الحركات — ترتيب دورة حياة الورقة، لا الأبجدية.
+_MOVEMENT_ORDER = tuple(STATUS_MAP)
+
+
+def status_label(direction: str, status: str) -> str:
+    """تسمية الحالة بدلالة الاتجاه — مصدر واحد للواجهة والتقارير."""
+    table = _STATUS_LABELS_BY_DIRECTION.get(
+        direction, _STATUS_LABELS_BY_DIRECTION['Incoming'])
+    return table.get(status, status)
+
+
+def movement_label(direction: str, movement_type: str) -> str:
+    """تسمية الحركة بدلالة الاتجاه، وإلا المحايدة، وإلا الرمز نفسه."""
+    specific = _MOVEMENT_LABELS_BY_DIRECTION.get(direction, {})
+    return (specific.get(movement_type)
+            or _MOVEMENT_LABELS_COMMON.get(movement_type)
+            or movement_type)
+
+
+def allowed_movement_options(cheque) -> list:
+    """الحركات المتاحة الآن جاهزةً للعرض: الرمز، تسميته، وما يلزمها من مدخلات."""
+    moves = allowed_movements(cheque)
+    ordered = [m for m in _MOVEMENT_ORDER if m in moves]
+    return [{
+        'value': move,
+        'label': movement_label(cheque.direction, move),
+        'requires_bank_account': move in CHEQUE_MOVEMENTS_NEEDING_CASH_ACCOUNT,
+        'requires_endorsee': move == 'endorse',
+    } for move in ordered]
 
 
 # T-DEFACC: أكواد الصندوق/البنك في الشجرة المعيارية — 1101 النقدية، 1102 البنوك،
@@ -1070,23 +1221,89 @@ def resolve_default_cash_account(tenant_id: int):
     )
 
 
+#: CHQ-1 — كودا حسابَي الشيكات الواردة. 1109 لا 1108: **1108 مأخوذ إنتاجياً**
+#: لحساب «بضاعة مسلَّمة لم تُفوتَر» الذي يُنشئه
+#: `sales/services/flow.py` (`resolve_goods_delivered_unbilled_account`) تلقائياً
+#: لأي شركة سلّمت بضاعة قبل فوترتها.
+CHEQUES_UNDER_COLLECTION_CODE = "1107"
+CHEQUES_IN_HAND_CODE = "1109"
+
+
 def _resolve_cheque_under_collection_account(tenant_id: int):
-    """حساب «شيكات برسم التحصيل» — نفس منطق ترحيل الفاتورة (M2-T3).
+    """حساب «شيكات برسم التحصيل» (1107) — الورقة في البنك بانتظار التحصيل.
 
     task13 M2: البحث القديم بـ code__startswith="1106" كان يلتقط
     «دفعات مقدمة للموردين» في الشجرة المعيارية ⇒ ترحيل خاطئ.
-    الآن: إعدادات المبيعات ← الحساب المبذور 1107 ← مطابقة الاسم.
+
+    CHQ-1: بدخول حساب «شيكات في المحفظة» صار في الشجرة حسابا أصلٍ اسم كليهما
+    يحوي «شيكات»، فمطابقةُ الاسم المفتوحة صارت خطراً صامتاً: قيد الإيداع
+    (1107 ÷ 1109) قد يقع بطرفيه على الحساب نفسه، **فيتوازن** ولا تكشفه أي
+    موازنة ولا أي تأكيد رصيد. لذلك: الإعدادات ← الكود 1107 بالضبط ← مطابقة اسم
+    **تستثني حساب المحفظة صراحةً** (للشجرات القديمة غير المعيارية) ← خطأ صريح.
+    لا يُعاد None أبداً — المستدعي كان يترجمه إلى رسالة عامة.
     """
-    from django.db.models import Q
     from sales.models import SalesSettings
     ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
     if ss and ss.default_cheques_under_collection_account_id:
         return ss.default_cheques_under_collection_account
     base = Account.objects.filter(tenant_id=tenant_id, account_type="Asset", is_active=True)
-    return (
-        base.filter(code="1107").first()
-        or base.filter(name__icontains="شيكات").first()
+    acc = (
+        base.filter(code=CHEQUES_UNDER_COLLECTION_CODE).first()
+        or base.filter(name__icontains="شيكات")
+              .exclude(code=CHEQUES_IN_HAND_CODE)
+              .exclude(name__icontains="المحفظة")
+              .exclude(name__icontains="in hand")
+              .order_by("code").first()
     )
+    if acc is None:
+        raise ValidationError(
+            "لا يوجد حساب «شيكات برسم التحصيل» (1107) في شجرة هذه الشركة. "
+            "أنشئه أو عيّنه في إعدادات المبيعات قبل تحريك الشيك."
+        )
+    return acc
+
+
+def _resolve_cheque_in_hand_account(tenant_id: int):
+    """حساب «شيكات في المحفظة» (1109) — الورقة في اليد، لم تُودَع بعد.
+
+    CHQ-1: الحاسم الذي يجعل «قيد الإيداع» ممكناً (1107 ÷ 1109) كما في دفترة
+    والأصيل. **صريحٌ عمداً**: الإعدادات ← الكود 1109 بالضبط ← إنشاؤه من الشجرة
+    المعيارية. لا مطابقة بالاسم إطلاقاً — «شيكات برسم التحصيل» يحوي الكلمة
+    نفسها، ومطابقةٌ خاطئة هنا تنتج قيداً متوازناً على حساب واحد لا يكشفه شيء.
+    """
+    from sales.models import SalesSettings
+    from tenants.models import Tenant
+    from tenants.services import ensure_operational_account
+
+    ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
+    if ss and ss.default_cheques_in_hand_account_id:
+        return ss.default_cheques_in_hand_account
+    acc = Account.objects.filter(
+        tenant_id=tenant_id, code=CHEQUES_IN_HAND_CODE, is_active=True,
+    ).first()
+    if acc is None:
+        # الشركات المبذورة قبل CHQ-1 لا تحمله — يُنشأ من الشجرة المعيارية بدل
+        # ردّ المستخدم وهو يودع شيكاً (نفس نهج 2111 في `resolve_cheques_payable_account`).
+        tenant = Tenant.objects.filter(pk=tenant_id).first()
+        acc = ensure_operational_account(tenant, CHEQUES_IN_HAND_CODE) if tenant else None
+    if acc is None:
+        raise ValidationError(
+            "تعذّر تحديد حساب «شيكات في المحفظة» (1109) — أنشئه في شجرة "
+            "الحسابات أو عيّنه في إعدادات المبيعات."
+        )
+    return acc
+
+
+def _resolve_incoming_cheque_asset_account(cheque):
+    """أي حساب أصلٍ تجلس عليه هذه الورقة **الآن** — قبل الحركة.
+
+    الحالة هي المميِّز، لا نوع الحركة: `Received` ⇒ المحفظة (1109)، وما عداها
+    ⇒ برسم التحصيل (1107). هكذا يكمل الشيك القديم مساره القديم حرفياً بينما
+    يمشي الجديد على المسار الجديد، بلا ترحيل بيانات ولا قيد يُعاد كتابته.
+    """
+    if cheque.status == 'Received':
+        return _resolve_cheque_in_hand_account(cheque.tenant_id)
+    return _resolve_cheque_under_collection_account(cheque.tenant_id)
 
 
 def _resolve_cheque_cash_account(tenant_id: int, account_id=None):
@@ -1137,6 +1354,19 @@ def _resolve_cheque_supplier_account(cheque):
     return _resolve_ap_account(partner), partner
 
 
+def _resolve_cheque_endorsee_account(cheque):
+    """CHQ-1: حساب ذمم المستفيد من التظهير — مرآة حساب المورد في السداد النقدي."""
+    from logistics.services import _resolve_ap_account
+    partner = cheque.endorsed_to
+    if partner is None:
+        raise ValidationError(
+            "التظهير يحتاج الطرف المستفيد — حدّد المورد الذي ظُهِّر له الشيك."
+        )
+    if partner.tenant_id != cheque.tenant_id:
+        raise ValidationError("الطرف المستفيد لا يتبع هذه الشركة.")
+    return _resolve_ap_account(partner), partner
+
+
 def cheque_is_linked_to_document(cheque) -> bool:
     """الشيك داخل الدفاتر عبر سند قبض/صرف أو فاتورة — قيده مُرحَّل من هناك.
 
@@ -1146,6 +1376,28 @@ def cheque_is_linked_to_document(cheque) -> bool:
     if cheque.direction == 'Outgoing':
         return bool(cheque.supplier_payment_id or cheque.purchase_invoice_id)
     return bool(cheque.sales_invoice_id or cheque.customer_payment_id)
+
+
+def cheque_document_is_posted(cheque):
+    """هل رُحِّل المستندُ الذي دخل الشيك الدفاتر ضمنه؟
+
+    CHQ-1: `cheque_is_linked_to_document` يفحص وجود الـFK لا الترحيل، فشيكٌ
+    داخل سند **لم يُرحَّل** كان يُحصَّل بقيد يدائن 1107 الذي لم يُدَّن أصلاً ⇒
+    الحساب يصير سالباً والعميل يبقى مديناً رغم دخول النقد. يعيد None حين لا
+    مستند أصلاً (شيك legacy يتيم — مساره القديم كما هو).
+    """
+    if cheque.direction == 'Outgoing':
+        if cheque.supplier_payment_id:
+            return bool(cheque.supplier_payment.is_posted)
+        if cheque.purchase_invoice_id:
+            return bool(cheque.purchase_invoice.is_posted)
+        return None
+    if cheque.customer_payment_id:
+        return bool(cheque.customer_payment.is_posted)
+    if cheque.sales_invoice_id:
+        from sales.models import SalesInvoice
+        return cheque.sales_invoice.status == SalesInvoice.STATUS_POSTED
+    return None
 
 
 def _cheque_movement_gl(cheque, movement_type, account_id=None):
@@ -1163,10 +1415,17 @@ def _cheque_movement_gl(cheque, movement_type, account_id=None):
             cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
             dr, cr = payable, cash
             desc = f"صرف شيك صادر {cheque.cheque_number}"
-        elif movement_type == 'bounce':
+        elif movement_type in ('bounce', 'cancel'):
+            # CHQ-1: الإلغاء والارتداد يتشاركان القيد (الالتزام يسقط والدين
+            # يعود للمورد) ويفترقان في الدلالة والسجل: الارتداد رفضٌ من البنك،
+            # والإلغاء إيقافٌ منّا قبل الصرف.
             ap, partner = _resolve_cheque_supplier_account(cheque)
             dr, cr = payable, ap
-            desc = f"ارتداد شيك صادر {cheque.cheque_number} — إعادة الذمم للمورد"
+            desc = (
+                f"ارتداد شيك صادر {cheque.cheque_number} — إعادة الذمم للمورد"
+                if movement_type == 'bounce' else
+                f"إلغاء شيك صادر {cheque.cheque_number} — إعادة الذمم للمورد"
+            )
             cr_partner_id = partner.pk
         else:  # settle
             ap, partner = _resolve_cheque_supplier_account(cheque)
@@ -1174,20 +1433,47 @@ def _cheque_movement_gl(cheque, movement_type, account_id=None):
             dr, cr = ap, cash
             desc = f"تسوية شيك صادر مرتد {cheque.cheque_number}"
             dr_partner_id = partner.pk
-    elif movement_type in ('collect', 'withdraw'):
+    elif movement_type == 'deposit':
+        # CHQ-1 — قيد الإيداع الذي طلبه المالك: الورقة تغادر المحفظة إلى البنك
+        # قبل تحصيلها الفعلي. مسموح من `Received` وحدها (الإيداع من `Draft`
+        # يبقى حركة ورقية بلا قيد كما كان — المسار legacy).
         uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
-        if not uc:
-            raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
+        in_hand = _resolve_cheque_in_hand_account(cheque.tenant_id)
+        dr, cr = uc, in_hand
+        desc = f"إيداع شيك {cheque.cheque_number} برسم التحصيل"
+    elif movement_type == 'redeposit':
+        # إعادة إيداع شيك مرتد — عكس قيد الارتداد بالضبط: الذمّة تعود على
+        # العميل مرة أخرى والورقة تعود إلى البنك.
+        uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
+        ar, partner = _resolve_cheque_ar_account(cheque)
+        dr, cr = uc, ar
+        desc = f"إعادة إيداع شيك مرتد {cheque.cheque_number}"
+        cr_partner_id = partner.pk
+    elif movement_type == 'endorse':
+        in_hand = _resolve_cheque_in_hand_account(cheque.tenant_id)
+        ap, partner = _resolve_cheque_endorsee_account(cheque)
+        dr, cr = ap, in_hand
+        desc = f"تظهير شيك {cheque.cheque_number} إلى {partner.name}"
+        dr_partner_id = partner.pk
+    elif movement_type in ('collect', 'withdraw'):
+        asset = _resolve_incoming_cheque_asset_account(cheque)
         cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
-        dr, cr = cash, uc
+        dr, cr = cash, asset
         desc = f"تحصيل شيك {cheque.cheque_number}"
     elif movement_type == 'bounce':
         uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
-        if not uc:
-            raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
         ar, partner = _resolve_cheque_ar_account(cheque)
         dr, cr = ar, uc
         desc = f"ارتداد شيك {cheque.cheque_number} — إعادة الذمم على العميل"
+        dr_partner_id = partner.pk
+    elif movement_type == 'return_to_customer':
+        # إرجاع الورقة قبل إيداعها — من `Received` وحدها له قيد (المحفظة
+        # تُفرَّغ والذمّة تعود). الإرجاع بعد الارتداد بلا قيد كما كان: قيد
+        # الارتداد أعاد الذمّة أصلاً.
+        in_hand = _resolve_cheque_in_hand_account(cheque.tenant_id)
+        ar, partner = _resolve_cheque_ar_account(cheque)
+        dr, cr = ar, in_hand
+        desc = f"إرجاع شيك {cheque.cheque_number} للعميل قبل إيداعه"
         dr_partner_id = partner.pk
     else:  # settle
         ar, partner = _resolve_cheque_ar_account(cheque)
@@ -1198,9 +1484,16 @@ def _cheque_movement_gl(cheque, movement_type, account_id=None):
     return dr, cr, dr_partner_id, cr_partner_id, desc
 
 
-def post_cheque_movement_journal(cheque, movement_type, *, when, user=None,
-                                 account_id=None, branch_id=None):
-    """ترحيل قيد حركة شيك واحدة — Idempotent عبر (CHEQUE_<MOVE>, cheque_id)."""
+def post_cheque_movement_journal(cheque, movement_type, *, when, movement_id,
+                                 user=None, account_id=None, branch_id=None):
+    """ترحيل قيد حركة شيك واحدة — Idempotent عبر (CHEQUE_<MOVE>, movement_id).
+
+    CHQ-1: كان المفتاح `(CHEQUE_<MOVE>, cheque_id)` — أي حركةٌ واحدة من كل نوع
+    لكل شيك مدى حياته. فارتدادٌ ثانٍ بعد إعادة إيداع كان يجد قيد الارتداد
+    الأول ويعيده صامتاً: الذمّة تعود مرة واحدة والمرة الثانية تضيع. المفتاح
+    الآن الحركةُ نفسها — كل حدث قيده. القيود القديمة لا تُمسّ (تحمل
+    `reference_id=cheque_id` وتبقى كما هي)؛ التغيير للأمام فقط.
+    """
     amount = Decimal(str(cheque.amount or 0)).quantize(Decimal("0.01"))
     dr, cr, dr_partner_id, cr_partner_id, desc = _cheque_movement_gl(
         cheque, movement_type, account_id)
@@ -1208,7 +1501,7 @@ def post_cheque_movement_journal(cheque, movement_type, *, when, user=None,
         tenant_id=cheque.tenant_id,
         transaction_date=when,
         reference_type=f"CHEQUE_{movement_type.upper()}",
-        reference_id=cheque.pk,
+        reference_id=movement_id,
         description=desc,
         lines_data=[
             {"account": dr.pk, "partner": dr_partner_id,
@@ -1222,26 +1515,40 @@ def post_cheque_movement_journal(cheque, movement_type, *, when, user=None,
     )
 
 
+#: CHQ-1 — الحركات التي لها قيدٌ دائماً أياً كانت الحالة المصدر.
+_CHEQUE_GL_MOVEMENTS = frozenset({
+    'collect', 'withdraw', 'bounce', 'settle', 'redeposit', 'endorse', 'cancel',
+})
+#: وحركتان قيدُهما مشروط بالحالة المصدر: من `Received` وحدها. من `Draft`
+#: (شيك legacy يتيم) أو من `Bounced` تبقيان حركة ورقية بلا قيد كما كانتا.
+_CHEQUE_GL_FROM_RECEIVED_ONLY = frozenset({'deposit', 'return_to_customer'})
+
+
 def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
-                    account_id=None, movement_date=None, bank_account_id=None):
+                    account_id=None, movement_date=None, bank_account_id=None,
+                    endorsed_to_id=None):
     """task11 R2-A3 — تحويل حالة شيك مع القيد المحاسبي المرافق.
 
     كانت آلة الحالات بلا قيود محاسبية (والواجهة تتجاوزها أصلاً بـ PATCH خام)
-    فتبقى المبالغ في «شيكات برسم التحصيل» للأبد. القيود الآن:
-      - collect / withdraw : مدين صندوق/بنك ÷ دائن شيكات برسم التحصيل
-      - bounce             : مدين ذمم العميل ÷ دائن شيكات برسم التحصيل
-      - settle             : مدين صندوق/بنك ÷ دائن ذمم العميل
-      - deposit / return_to_customer : حركة ورقية — بلا قيد
+    فتبقى المبالغ في «شيكات برسم التحصيل» للأبد. قيود الوارد الآن:
+      - deposit (من Received) : مدين شيكات برسم التحصيل ÷ دائن شيكات في المحفظة
+      - collect / withdraw    : مدين صندوق/بنك ÷ دائن حساب الورقة الحالي
+      - bounce                : مدين ذمم العميل ÷ دائن شيكات برسم التحصيل
+      - redeposit             : مدين شيكات برسم التحصيل ÷ دائن ذمم العميل
+      - endorse               : مدين ذمم المستفيد ÷ دائن شيكات في المحفظة
+      - return_to_customer (من Received) : مدين ذمم العميل ÷ دائن شيكات في المحفظة
+      - settle                : مدين صندوق/بنك ÷ دائن ذمم العميل
+      - deposit (من Draft) / return_to_customer (من Bounced) : بلا قيد
 
     T-CHQ2: الجانب الصادر مرآة كاملة — كان بلا قيد إطلاقاً، فيبقى التزام
     «شيكات برسم الدفع» في الميزانية حتى بعد أن يصرف المورد الشيك:
       - collect / withdraw : مدين شيكات برسم الدفع ÷ دائن صندوق/بنك
-      - bounce             : مدين شيكات برسم الدفع ÷ دائن ذمم المورد
+      - bounce / cancel    : مدين شيكات برسم الدفع ÷ دائن ذمم المورد
       - settle             : مدين ذمم المورد ÷ دائن صندوق/بنك
 
     يُرحَّل القيد فقط إذا كان الشيك داخل الدفاتر أصلاً (مربوط بفاتورة أو
     سند) — الشيكات المستقلة legacy تتحول حالتها فقط مع تحذير في اللوغ.
-    Idempotent عبر (CHEQUE_<MOVE>, cheque_id).
+    Idempotent عبر (CHEQUE_<MOVE>, movement_id).
     """
     import datetime as _dt
     from .models import Cheque, ChequeMovement
@@ -1249,13 +1556,35 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
     cheque = Cheque.objects.select_related(
         'tenant', 'partner', 'partner__group', 'sales_invoice', 'currency',
         'supplier_payment', 'supplier_payment__partner',
+        'customer_payment', 'purchase_invoice', 'endorsed_to',
     ).get(pk=cheque_id)
-    allowed = VALID_TRANSITIONS.get(cheque.status, set())
+    allowed = transitions_for(cheque.direction).get(cheque.status, set())
     if movement_type not in allowed:
         raise ValidationError(
             f"لا يمكن تنفيذ «{movement_type}» على شيك بحالة «{cheque.status}»."
         )
     next_status = STATUS_MAP[movement_type]
+
+    # CHQ-1: لا حركة على ورقةٍ لم يدخل سندُها الدفاتر بعد. بدون هذا الحارس
+    # يُحصَّل شيكٌ سندُه غير مرحّل فيُدائَن حسابُ الشيكات الذي لم يُدَّن قط ⇒
+    # رصيده سالب والعميل يبقى مديناً رغم أن النقد وصل.
+    if cheque_document_is_posted(cheque) is False:
+        raise ValidationError(
+            f"لا يمكن تحريك الشيك {cheque.cheque_number} قبل ترحيل السند/الفاتورة "
+            "المرتبطة به — رحّل المستند أولاً ثم أعد المحاولة."
+        )
+
+    # CHQ-1: التظهير يحتاج مستفيداً؛ يُقبل من الطلب أو من قيمة سابقة على الشيك.
+    endorsee_changed = False
+    if movement_type == 'endorse' and endorsed_to_id:
+        from partners.models import Partner
+        endorsee = Partner.objects.filter(
+            pk=endorsed_to_id, tenant_id=cheque.tenant_id).first()
+        if endorsee is None:
+            raise ValidationError("الطرف المستفيد من التظهير غير موجود أو لا يتبع هذه الشركة.")
+        if cheque.endorsed_to_id != endorsee.pk:
+            cheque.endorsed_to = endorsee
+            endorsee_changed = True
     when = movement_date or timezone.localdate()
     amount = Decimal(str(cheque.amount or 0)).quantize(Decimal("0.01"))
 
@@ -1278,9 +1607,10 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
 
     # GL يخص الشيكات المسجَّلة دفترياً فقط — كل اتجاه ومستنداته.
     in_books = cheque_is_linked_to_document(cheque)
-    needs_gl = (
-        movement_type in ('collect', 'withdraw', 'bounce', 'settle')
-        and amount > 0
+    needs_gl = amount > 0 and (
+        movement_type in _CHEQUE_GL_MOVEMENTS
+        or (movement_type in _CHEQUE_GL_FROM_RECEIVED_ONLY
+            and cheque.status == 'Received')
     )
     if needs_gl and not in_books:
         logging.getLogger(__name__).warning(
@@ -1291,24 +1621,33 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
 
     journal = None
     with transaction.atomic():
-        if needs_gl:
-            journal = post_cheque_movement_journal(
-                cheque, movement_type, when=when, user=user,
-                account_id=account_id,
-                branch_id=(cheque.sales_invoice.branch_id
-                           if cheque.sales_invoice_id else None),
-            )
-
-        ChequeMovement.objects.create(
+        # CHQ-1: الحركة تُكتب أولاً لأن مفتاح الـidempotency صار مفتاحها —
+        # وقيدها يُرحَّل قبل تغيير الحالة، فـ`_cheque_movement_gl` يقرأ الحالة
+        # المصدر (هي التي تحسم: المحفظة 1109 أم برسم التحصيل 1107).
+        movement = ChequeMovement.objects.create(
             cheque=cheque,
             movement_type=movement_type,
             notes=notes,
             created_by=user,
         )
+        if needs_gl:
+            journal = post_cheque_movement_journal(
+                cheque, movement_type, when=when, user=user,
+                movement_id=movement.pk,
+                account_id=account_id,
+                branch_id=(cheque.sales_invoice.branch_id
+                           if cheque.sales_invoice_id else None),
+            )
+            movement.journal = journal
+            movement.save(update_fields=['journal'])
+
         cheque.status = next_status
-        cheque.save(update_fields=(
-            ['status', 'deposit_bank_account'] if deposit_account_changed else ['status']
-        ))
+        update_fields = ['status']
+        if deposit_account_changed:
+            update_fields.append('deposit_bank_account')
+        if endorsee_changed:
+            update_fields.append('endorsed_to')
+        cheque.save(update_fields=update_fields)
         create_audit_log(
             tenant=cheque.tenant,
             user=user,
@@ -1323,9 +1662,133 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
     return cheque
 
 
+# ── CHQ-2: الشيك داخل سنده — الترحيل، إلغاؤه، وحارسه ────────────────────────
+
+#: حركات من إنتاج **ترحيل المستند** لا من `transfer_cheque`: قيدها هو قيد
+#: السند نفسه (أو لا قيد لها أصلاً في حالة `revert`). تُستثنى من حارس إلغاء
+#: الترحيل — وإلا منع السندُ إلغاءَ نفسه بحركته هو.
+DOCUMENT_MOVEMENT_TYPES = frozenset({'receive', 'issue', 'revert'})
+
+#: الحالة التي يبلغها الشيك بترحيل سنده، لكل اتجاه. الوارد يدخل **المحفظة**
+#: (1109) لا البنك — الاستلام غير الإيداع، وهذا ما يجعل «قيد الإيداع» ممكناً.
+#: الصادر يبقى `Under_Collection` بمعنى «مسلَّم» على 2111 كما كان حرفياً.
+DOCUMENT_POSTED_STATUS = {'Incoming': 'Received', 'Outgoing': 'Under_Collection'}
+DOCUMENT_POSTED_MOVEMENT = {'Incoming': 'receive', 'Outgoing': 'issue'}
+
+#: الحالات التي يستطيع إلغاء ترحيل المستند إرجاعها إلى `Draft` بأمان: الورقة
+#: لم تتحرك بعد بعيداً عن يد صاحبها. ما عداها يعني حدثاً مالياً مستقلاً وقع
+#: بعد الترحيل (تحصيل، ارتداد، تظهير…) وله قيده الخاص.
+DOCUMENT_REVERSIBLE_STATUSES = ('Received', 'Under_Collection')
+
+
+def record_document_cheque_posting(cheques, *, journal=None, user=None):
+    """ترحيل السند يحرّك شيكاته المسودة — الحالة **وصفّ حركة** مربوط بقيده.
+
+    CHQ-2: كان هذا `Cheque.objects.filter(...).update(status=...)` خاماً في
+    ثلاثة مواضع — أهمّ حدث في حياة الشيك (دخوله الدفاتر) غائباً عن سجلّه، ولا
+    شيء يربطه بالقيد الذي مدّن حسابه. يعيد قائمة الشيكات التي تحرّكت.
+    """
+    from .models import ChequeMovement
+
+    moved = []
+    for cheque in cheques:
+        if cheque.status != 'Draft':
+            # ورقة legacy وصلت البنك قبل هذا التغيير — مسارها القديم كما هو.
+            continue
+        next_status = DOCUMENT_POSTED_STATUS.get(cheque.direction)
+        if next_status is None:
+            continue
+        ChequeMovement.objects.create(
+            cheque=cheque,
+            movement_type=DOCUMENT_POSTED_MOVEMENT[cheque.direction],
+            journal=journal,
+            notes='ترحيل السند',
+            created_by=user,
+        )
+        cheque.status = next_status
+        cheque.save(update_fields=['status'])
+        moved.append(cheque)
+    return moved
+
+
+def record_document_cheque_unposting(cheques, *, user=None):
+    """إلغاء ترحيل السند يعيد شيكاته مسودةً — ويسجّل الرجوع بدل ابتلاعه.
+
+    بلا قيد: قيد السند حُذف، فلا شيء يُعكَس. يسبقه دائماً
+    `guard_document_cheques_before_unpost` الذي يمنع الوصول إلى هنا بورقة
+    تجاوزت `Received`/`Under_Collection`.
+    """
+    from .models import ChequeMovement
+
+    moved = []
+    for cheque in cheques:
+        if cheque.status not in DOCUMENT_REVERSIBLE_STATUSES:
+            continue
+        ChequeMovement.objects.create(
+            cheque=cheque,
+            movement_type='revert',
+            notes='إلغاء ترحيل السند',
+            created_by=user,
+        )
+        cheque.status = 'Draft'
+        cheque.save(update_fields=['status'])
+        moved.append(cheque)
+    return moved
+
+
+def guard_document_cheques_before_unpost(
+    cheques, *, document_label: str, action_label: str = 'إلغاء ترحيل',
+) -> None:
+    """يمنع إلغاء ترحيل مستندٍ تحرّك أحد شيكاته بعد ترحيله.
+
+    العطل المُصلَح: إلغاء الترحيل كان يحذف قيد السند — الذي مدّن حساب الشيكات
+    ودائَن الذمم — ويعيد **فقط** ما بقي `Under_Collection` إلى `Draft`. فشيكٌ
+    وصل `Collected` يترك قيدَ تحصيله (مدين بنك ÷ دائن حساب الشيكات) وحيداً:
+    حساب الشيكات يصير سالباً، والعميل يعود مديناً رغم أن النقد في البنك.
+
+    مانعان مستقلان:
+      1. **الحالة** — أي حالة خارج `Received`/`Under_Collection` تعني حدثاً
+         مالياً مستقلاً وقع بعد الترحيل.
+      2. **قيد حركة مرحَّل** — الورقة قد تبقى `Under_Collection` ولها قيد
+         `CHEQUE_DEPOSIT` مستقل (1107 ÷ 1109): حذف قيد السند وحده يترك 1109
+         سالباً. حركات المستند نفسه (`receive`/`issue`/`revert`) مستثناة.
+
+    الرسالة تسمّي الشيكات وحالاتها كي يعرف المستخدم ما الذي يعكسه أولاً بدل
+    أن يصطدم بجدار.
+    """
+    from .models import ChequeMovement
+
+    rows = [c for c in cheques if c.status not in DOCUMENT_REVERSIBLE_STATUSES]
+    blocked = {c.pk: c for c in rows}
+    reversible_ids = [c.pk for c in cheques if c.pk not in blocked]
+    if reversible_ids:
+        with_journal = set(
+            ChequeMovement.objects
+            .filter(cheque_id__in=reversible_ids, journal__isnull=False)
+            .exclude(movement_type__in=DOCUMENT_MOVEMENT_TYPES)
+            .values_list('cheque_id', flat=True)
+        )
+        for cheque in cheques:
+            if cheque.pk in with_journal:
+                blocked[cheque.pk] = cheque
+    if not blocked:
+        return
+    listing = "، ".join(
+        f"{c.cheque_number} ({dict(c.STATUS_CHOICES).get(c.status, c.status)})"
+        for c in sorted(blocked.values(), key=lambda c: c.pk)
+    )
+    logging.getLogger(__name__).warning(
+        "unpost blocked for %s: %d cheque(s) already moved", document_label, len(blocked),
+    )
+    raise ValidationError(
+        f"تعذّر {action_label} {document_label}: توجد شيكات تحرّكت بعد ترحيله "
+        f"({listing}). اعكس حركة هذه الشيكات أولاً (إرجاع/تسوية) ثم أعد المحاولة."
+    )
+
+
 # T-CHQ2 — محفظة الشيكات: الحالات التي ما تزال الورقة فيها «في اليد»
 # (لم تُحصَّل ولم تُردّ ولم تُسوَّ) هي وحدها ما يشكّل رصيد المحفظة.
-CHEQUE_OPEN_STATUSES = ('Draft', 'Under_Collection', 'Bounced')
+CHEQUE_OPEN_STATUSES = ('Draft', 'Received', 'Under_Collection', 'Bounced')
 
 CHEQUE_DUE_BUCKETS = (
     ('overdue', 'متأخرة'),
@@ -1410,6 +1873,109 @@ def cheque_wallet(tenant_id: int, *, today=None) -> dict:
         'incoming': incoming,
         'outgoing': outgoing,
         'net_open': str(net.quantize(Decimal('0.01'))),
+    }
+
+
+#: CHQ-3 — أفق جدول الاستحقاق: 90 يوماً أسبوعاً بأسبوع.
+CHEQUE_MATURITY_HORIZON_DAYS = 90
+
+
+def cheque_maturity_timeline(tenant_id: int, *, today=None,
+                             horizon_days: int = CHEQUE_MATURITY_HORIZON_DAYS) -> dict:
+    """CHQ-3 — خطّ زمني مؤرَّخ للشيكات المفتوحة، بصافٍ تراكمي يُظهر أثر السيولة.
+
+    `cheque_wallet` يجيب «كم في اليد ومتى تقريباً» بدلاء (متأخر/7/30/لاحقاً)؛
+    هذا يجيب سؤالاً آخر لم يكن لأحد: **ماذا يبقى في يدي أسبوعاً بعد أسبوع**
+    إذا حُصِّل كل وارد وصُرف كل صادر في موعده. الصافي التراكمي هو الجواب —
+    انقلابه إلى السالب في أسبوعٍ ما هو الإنذار الذي يشتري به المالك وقتاً.
+
+    الصفوف: `overdue` (كل ما فات موعده — لا يُسقَط، فالمال المتأخر ما زال
+    مستحقاً)، ثم أسبوع لكل سبعة أيام حتى الأفق **بما فيها الأسابيع الفارغة**
+    (خطٌّ زمني بثقوب لا يُقرأ)، ثم `beyond` لما بعد الأفق كي لا يختفي مالٌ
+    مؤرَّخ بلا ذكر. الشيكات بلا تاريخ استحقاق تعود في `undated` منفصلةً: لا
+    موضع لها على خطّ زمني، وحشرها في أي أسبوع كذبة.
+
+    المفتوح هنا هو `CHEQUE_OPEN_STATUSES` نفسه الذي تقرأه المحفظة — رقم واحد
+    بصيغة واحدة، فلا تفترق شاشتان على المبلغ ذاته.
+    """
+    import datetime as _dt
+    from .models import Cheque
+
+    today = today or timezone.localdate()
+    horizon_end = today + _dt.timedelta(days=horizon_days)
+    week_count = -(-(horizon_days + 1) // 7)
+
+    rows_src = (
+        Cheque.objects
+        .filter(tenant_id=tenant_id, status__in=CHEQUE_OPEN_STATUSES)
+        .values_list('direction', 'due_date', 'amount')
+    )
+
+    def blank():
+        return {'incoming': Decimal('0'), 'incoming_count': 0,
+                'outgoing': Decimal('0'), 'outgoing_count': 0}
+
+    buckets = {'overdue': blank(), 'beyond': blank(), 'no_due_date': blank()}
+    for index in range(1, week_count + 1):
+        buckets[f'w{index}'] = blank()
+
+    for direction, due_date, amount in rows_src:
+        if due_date is None:
+            key = 'no_due_date'
+        elif due_date < today:
+            key = 'overdue'
+        elif due_date > horizon_end:
+            key = 'beyond'
+        else:
+            key = f'w{((due_date - today).days // 7) + 1}'
+        side = 'outgoing' if direction == 'Outgoing' else 'incoming'
+        buckets[key][side] += Decimal(str(amount or 0))
+        buckets[key][f'{side}_count'] += 1
+
+    def week_span(index):
+        start = today + _dt.timedelta(days=7 * (index - 1))
+        return start, min(start + _dt.timedelta(days=6), horizon_end)
+
+    spans = [('overdue', 'متأخرة', None, today - _dt.timedelta(days=1))]
+    spans += [(f'w{i}', f'الأسبوع {i}', *week_span(i)) for i in range(1, week_count + 1)]
+    spans.append(('beyond', f'بعد {horizon_days} يوماً',
+                  horizon_end + _dt.timedelta(days=1), None))
+
+    def money(value):
+        return str(Decimal(value).quantize(Decimal('0.01')))
+
+    rows, cumulative = [], Decimal('0')
+    for key, label, start, end in spans:
+        bucket = buckets[key]
+        net = bucket['incoming'] - bucket['outgoing']
+        cumulative += net
+        rows.append({
+            'key': key, 'label': label, 'from': start, 'to': end,
+            'incoming': money(bucket['incoming']),
+            'incoming_count': bucket['incoming_count'],
+            'outgoing': money(bucket['outgoing']),
+            'outgoing_count': bucket['outgoing_count'],
+            'net': money(net),
+            'cumulative_net': money(cumulative),
+        })
+
+    undated = buckets['no_due_date']
+    logger.info(
+        "cheque_maturity_timeline: tenant=%s horizon=%s weeks=%s final_net=%s",
+        tenant_id, horizon_days, week_count, money(cumulative),
+    )
+    return {
+        'as_of': today.isoformat(),
+        'horizon_days': horizon_days,
+        'rows': rows,
+        'undated': {
+            'key': 'no_due_date', 'label': 'بلا تاريخ استحقاق',
+            'incoming': money(undated['incoming']),
+            'incoming_count': undated['incoming_count'],
+            'outgoing': money(undated['outgoing']),
+            'outgoing_count': undated['outgoing_count'],
+            'net': money(undated['incoming'] - undated['outgoing']),
+        },
     }
 
 

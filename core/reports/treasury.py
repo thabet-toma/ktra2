@@ -246,6 +246,77 @@ register(ReportSpec(
 ))
 
 
+def _cheques_maturity(tenant_id: int, params: dict) -> list[dict]:
+    """CHQ-3 — استحقاق الشيكات أسبوعاً بأسبوع بصافيها التراكمي.
+
+    الأرقام كلها من `accounting.services` (`cheque_maturity_timeline`) — نفس
+    تعريف «المفتوح» الذي تقرأه محفظة الشيكات. هنا عرضٌ فقط: لا حساب ثانٍ.
+    """
+    from accounting.services import cheque_maturity_timeline
+
+    data = cheque_maturity_timeline(
+        tenant_id, today=_parse_date(params.get("as_of")))
+    rows = [{
+        "period_key": r["key"],
+        "period": r["label"],
+        "due_from": r["from"],
+        "due_to": r["to"],
+        "incoming_count": r["incoming_count"],
+        "incoming": r["incoming"],
+        "outgoing_count": r["outgoing_count"],
+        "outgoing": r["outgoing"],
+        "net": r["net"],
+        "cumulative_net": r["cumulative_net"],
+    } for r in data["rows"]]
+
+    # الشيكات بلا تاريخ استحقاق: مبلغها يُعرض كي لا يختفي، وخانة التراكمي
+    # تبقى فارغة (تظهر «—») — ورقةٌ بلا تاريخ لا موضع لها على خطّ زمني.
+    undated = data["undated"]
+    if undated["incoming_count"] or undated["outgoing_count"]:
+        rows.append({
+            "period_key": undated["key"],
+            "period": undated["label"],
+            "due_from": None,
+            "due_to": None,
+            "incoming_count": undated["incoming_count"],
+            "incoming": undated["incoming"],
+            "outgoing_count": undated["outgoing_count"],
+            "outgoing": undated["outgoing"],
+            "net": undated["net"],
+            "cumulative_net": "",
+        })
+    return rows
+
+
+register(ReportSpec(
+    key="cheques-maturity",
+    title="استحقاق الشيكات وأثر السيولة",
+    category="finance",
+    description=(
+        "الشيكات المفتوحة أسبوعاً بأسبوع على أفق 90 يوماً — الوارد المستحق "
+        "والصادر المستحق وصافيهما، والصافي التراكمي الذي يُظهر ما يبقى في اليد "
+        "لو حُصِّل كل وارد وصُرف كل صادر في موعده. المتأخر يظهر أولاً وما بعد "
+        "الأفق آخراً؛ والشيكات بلا تاريخ استحقاق تُعرض في سطرها الأخير خارج "
+        "الخطّ الزمني."
+    ),
+    filters=(ReportFilter("as_of", "اعتباراً من", "date"),),
+    columns=(
+        ReportColumn("period", "الفترة", width="150px"),
+        ReportColumn("due_from", "من", KIND_DATE, width="110px"),
+        ReportColumn("due_to", "إلى", KIND_DATE, width="110px"),
+        ReportColumn("incoming_count", "عدد الوارد", KIND_INT, total=True, width="90px"),
+        ReportColumn("incoming", "وارد مستحق", KIND_MONEY, total=True),
+        ReportColumn("outgoing_count", "عدد الصادر", KIND_INT, total=True, width="90px"),
+        ReportColumn("outgoing", "صادر مستحق", KIND_MONEY, total=True),
+        ReportColumn("net", "الصافي", KIND_MONEY, total=True),
+        # الصافي التراكمي رصيدٌ جارٍ لا مبلغ — جمعه أسفل الجدول بلا معنى.
+        ReportColumn("cumulative_net", "الصافي التراكمي", KIND_MONEY),
+    ),
+    permission="accounting.report.view",
+    build=_cheques_maturity,
+))
+
+
 def _journal_lines(tenant_id: int, params: dict) -> list[dict]:
     from accounting.models import JournalLine
 
