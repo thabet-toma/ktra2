@@ -6,7 +6,7 @@
  * ZERO business logic — everything is a slot/prop. Consumed by M1+ screens.
  * Reference: docs/aseel_reference/invoices.txt 51–192 + owner screenshots.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   ChevronRight,
   ChevronLeft,
@@ -14,6 +14,7 @@ import {
   ChevronsLeft,
 } from 'lucide-react';
 import type { RecordNavigation } from './useRecordNavigation';
+import { resolveActiveTabKey } from '../../utils/tabSelection';
 
 export interface AseelToolbarAction {
   key: string;
@@ -119,30 +120,32 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
   activeTab: controlledTab,
   onTabChange,
 }) => {
-  const initIdx = useMemo(() => {
-    if (initialTab) { const i = tabs.findIndex((t) => t.key === initialTab); if (i >= 0) return i; }
-    return 0;
-  }, [initialTab, tabs]);
-  const [localTab, setLocalTab] = useState(initIdx);
-  const activeIdx = controlledTab != null ? tabs.findIndex((t) => t.key === controlledTab) : localTab;
-  const effectiveIdx = activeIdx >= 0 ? activeIdx : 0;
-  const tab = tabs[effectiveIdx];
+  // التتبّع بالمعرّف لا بالفهرس (utils/tabSelection.ts): كان الغلاف يحفظ رقم
+  // التبويب، فإدراجُ تبويبٍ في الوسط وقت التشغيل يزيح كل ما بعده ويقفز
+  // بالمستخدم إلى شاشة أخرى. و`initialTab` صار يُطبَّق متى ظهر تبويبه لا في
+  // أول رسمة وحدها — الشاشات التي تبني تبويباتها بعد الجلب كانت تُسقط الرابط
+  // العميق (`?tab=`) بصمت لأن المصفوفة كانت فارغة لحظة تهيئة الحالة.
+  const [pickedTab, setPickedTab] = useState<string | null>(null);
+  const activeKey = controlledTab != null
+    ? resolveActiveTabKey(tabs, controlledTab)
+    : resolveActiveTabKey(tabs, pickedTab, initialTab);
+  const tab = tabs.find((t) => t.key === activeKey);
 
   // task11 M6: بلا محتوى رئيسي حقيقي → الـ tabs تشغل المنطقة المرنة كاملة
   const tabsInMain = tabs.length > 0 && isEmptyNode(children);
 
   const tabStrip = tabs.length > 0 && (
     <div className="aseel-tabs" role="tablist">
-      {tabs.map((t, i) => (
+      {tabs.map((t) => (
         <button
           key={t.key}
           type="button"
           role="tab"
-          aria-selected={i === effectiveIdx}
-          className={`aseel-tab${i === effectiveIdx ? ' aseel-tab--active' : ''}`}
+          aria-selected={t.key === activeKey}
+          className={`aseel-tab${t.key === activeKey ? ' aseel-tab--active' : ''}`}
           onClick={() => {
             if (controlledTab != null) { onTabChange?.(t.key); }
-            else { setLocalTab(i); }
+            else { setPickedTab(t.key); }
           }}
         >
           {t.label}

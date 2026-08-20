@@ -2243,7 +2243,7 @@ const App: React.FC = () => {
 
   return (
     <div dir="rtl">
-      <AppLayout user={currentUser} activeView={appView} onNavigate={setViewAndSyncPath} onOpenGroupConstants={() => setGroupConstantsOpen(true)}>
+      <AppLayout user={currentUser} activeView={appView} onNavigate={setViewAndSyncPath} onOpenGroupConstants={() => setGroupConstantsOpen(true)} listPath={VIEW_PATHS[appView]}>
         <div className="fixed top-3 left-3 z-50">
           <PendingMutationsPanel />
         </div>

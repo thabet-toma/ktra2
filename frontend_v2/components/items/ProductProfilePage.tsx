@@ -7,9 +7,10 @@
  * حركة المخزون) وتحريرها في مكان واحد.
  */
 import React, { useMemo } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { ItemFormAseel } from './ItemFormAseel';
 import { openInNewTab } from '../../utils/openInNewTab';
+import { useAppBack } from '../../hooks/useAppBack';
 
 /** روابط قديمة تفتح البطاقة على تبويب بعينه — «kpis» صار «overview». */
 const TAB_ALIASES: Record<string, string> = {
@@ -25,7 +26,9 @@ export const ProductProfilePage: React.FC = () => {
   // App مركّب على مسار splat (/*) بلا Route فيه :id، لذا useParams().id يرجع
   // undefined. نستخرج المعرّف من المسار مباشرة (/products/:id).
   const location = useLocation();
-  const navigate = useNavigate();
+  // الكرت يُفتح في تبويب جديد من كل شاشة، فـ`navigate(-1)` فيه بلا وجهة:
+  // بلا سابقة نعود إلى «الأصناف» بدل أن تبقى الضغطة بلا أثر.
+  const back = useAppBack('/items', 'الأصناف');
   const id = useMemo(() => {
     const m = location.pathname.match(/\/products\/([^/]+)/);
     return m ? Number(m[1]) : NaN;
@@ -50,7 +53,7 @@ export const ProductProfilePage: React.FC = () => {
           { key: 'cost', label: 'تكلفة المنتجات', onClick: () => openInNewTab(`/product-cost?product=${id}`) },
         ]}
         onSaved={() => { /* الكرت يحدّث نفسه — لا قائمة خلفه لإعادة تحميلها */ }}
-        onCancel={() => navigate(-1)}
+        onCancel={back.go}
       />
     </div>
   );

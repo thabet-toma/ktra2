@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from '../Sidebar';
 import { User, AppView } from '../../types';
-import {
-  Breadcrumb,
-} from './Breadcrumb';
+import { Breadcrumb } from './Breadcrumb';
 import {
   DensitySwitch,
 } from './DensitySwitch';
@@ -32,6 +30,10 @@ import { useConfirm } from '../../contexts/ConfirmContext';
 import { ImportJourneyGuide } from '../import-flow/ImportJourneyGuide';
 import { IMPORT_GUIDE_SLOT_ID } from '../../utils/importGuidePref';
 import { platformNoteTarget, type PlatformNoteTarget } from '../../utils/entityLinks';
+import { openInNewTab, TAB_OPENED_EVENT, type TabOpenedDetail } from '../../utils/openInNewTab';
+import { setCurrentTabLabel } from '../../utils/tabLink';
+import { VIEW_LABELS } from './Breadcrumb';
+import { useToast } from '../../contexts/ToastContext';
 import {
   User as UserIcon,
   Calendar,
@@ -77,6 +79,9 @@ interface AppLayoutProps {
   children: React.ReactNode;
   /** N0-T5: callback لفتح صفحة ثوابت المجموعة (F11). */
   onOpenGroupConstants?: () => void;
+  /** مسار قائمة الشاشة الحالية (`VIEW_PATHS[activeView]`) — وجهةُ «رجوع» حين
+   *  لا سابقة في هذا التبويب (`utils/backTarget.ts`). */
+  listPath?: string;
 }
 
 const SHORTCUT_ICONS: Record<ShortcutIconName, LucideIcon> = {
@@ -133,9 +138,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   onNavigate,
   children,
   onOpenGroupConstants,
+  listPath,
 }) => {
   const { logout } = useAuth();
   const confirm = useConfirm();
+  const toast = useToast();
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [notesTarget, setNotesTarget] = useState<PlatformNoteTarget | null>(null);
 
@@ -159,6 +166,24 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       window.removeEventListener('storage', refresh);
     };
   }, []);
+
+  // وعي التبويبات: هذا التبويب يعلن اسم شاشته للتبويبات الأخرى، فيقدر تبويبٌ
+  // فُتح منه أن يقول «فُتح من: فواتير المبيعات» بلا جدول مسارات ثانٍ.
+  useEffect(() => {
+    setCurrentTabLabel(VIEW_LABELS[activeView] ?? String(activeView));
+  }, [activeView]);
+
+  // ...وفتحُ تبويبٍ جديد يُعلن عن نفسه **هنا** أيضاً: المتصفّح قد يفتحه في
+  // الخلفية فلا يرى المستخدم شيئاً ويظنّ الضغطة لم تعمل.
+  useEffect(() => {
+    const onTabOpened = (event: Event) => {
+      const detail = (event as CustomEvent<TabOpenedDetail>).detail;
+      const name = detail?.label?.trim();
+      toast(name ? `فُتح في تبويب جديد: ${name}` : 'فُتح في تبويب جديد', 'info');
+    };
+    window.addEventListener(TAB_OPENED_EVENT, onTabOpened);
+    return () => window.removeEventListener(TAB_OPENED_EVENT, onTabOpened);
+  }, [toast]);
 
   // N0-T5: F11 global keymap → يفتح GroupConstantsPage كـ modal portal
   useEffect(() => {
@@ -246,7 +271,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           <PriceVisibilityToggle />
           <ThemeToggle />
           <button
-            onClick={() => window.open(window.location.href, '_blank')}
+            onClick={() => openInNewTab(
+              window.location.pathname + window.location.search + window.location.hash,
+              VIEW_LABELS[activeView] ?? undefined,
+            )}
             className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] transition-colors flex items-center justify-center"
             title="فتح في علامة تبويب جديدة (تكرار الصفحة)"
             aria-label="تكرار الصفحة"
@@ -280,7 +308,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               aria-hidden="true"
             />
             <div className="aseel-toolgrp relative z-10">
-              <Breadcrumb activeView={activeView} />
+              <Breadcrumb activeView={activeView} listPath={listPath} />
             </div>
             {/* task16 D14: اختصارات الوصول السريع القابلة للتهيئة */}
             {shortcuts.filter(v => v !== 'dashboard' && v !== activeView).length > 0 && (

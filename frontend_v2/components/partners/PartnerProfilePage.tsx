@@ -31,6 +31,7 @@ import {
   type SalesOrderRow,
 } from '../../services/salesApi';
 import { purchaseInvoiceApi } from '../../services/purchaseInvoiceApi';
+import { useAppBack } from '../../hooks/useAppBack';
 
 interface PartnerApi {
   id: number;
@@ -141,6 +142,9 @@ export const PartnerProfilePage: React.FC = () => {
     return m ? decodeURIComponent(m[1]) : undefined;
   }, [location.search]);
   const navigate = useNavigate();
+  // كشف الحساب يُفتح في تبويب جديد من الفواتير والقوائم، فبلا سابقة
+  // تُعاد الضغطة إلى «دليل الأطراف» بدل أن تصطدم بجدار.
+  const back = useAppBack('/partners-directory', 'دليل الأطراف');
   // تبويب مُتحكَّم به: يبدأ من ?tab=، ويُتجاوَز بجسر إشعار التذكير (sessionStorage).
   const [activeTabKey, setActiveTabKey] = useState<string | undefined>(initialTab);
   const [focusNoteId, setFocusNoteId] = useState<string | null>(null);
@@ -936,7 +940,7 @@ export const PartnerProfilePage: React.FC = () => {
       <AseelDocumentShell
         title={partner ? `كشف حساب: ${partner.name}` : 'جاري التحميل...'}
         actions={[
-          { key: 'back', label: 'عودة', onClick: () => navigate(-1) },
+          { key: 'back', label: back.label === 'رجوع' ? 'عودة' : back.label, onClick: back.go },
           // التعديل كان تبويباً وحيداً بين تسعة تبويبات على صفحة عنوانها «كشف
           // حساب»، فلا يُعثر عليه — والأمر مكانه شريط الأوامر كبقية الإجراءات.
           ...(id && partner

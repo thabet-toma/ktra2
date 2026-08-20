@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
+import { openInNewTab } from "@/utils/openInNewTab";
 
 interface ShipmentDetailViewProps {
     shipment: Shipment;
@@ -206,7 +207,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                     </div>
                     <div className="flex items-center gap-2">
                         <button
-                            onClick={() => window.open(`/import-flow/${encodeURIComponent(String(shipment.id))}`, '_blank', 'noopener,noreferrer')}
+                            onClick={() => openInNewTab(`/import-flow/${encodeURIComponent(String(shipment.id))}`, 'رحلة الاستيراد')}
                             className="flex items-center gap-2 px-4 py-2 aseel-btn-primary transition-colors"
                             title="مساحة التحرير الكاملة: الصفقات، دفع الشحن، التخليص، النقل المحلي، الفواتير"
                         >

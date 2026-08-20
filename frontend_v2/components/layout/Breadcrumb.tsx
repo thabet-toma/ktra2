@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AppView } from '../../types';
 import { ChevronLeft, ArrowRight } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useAppBack } from '../../hooks/useAppBack';
+import { LinkedTabHint, TabOriginChip } from './TabAwareness';
 
 export const VIEW_LABELS: Record<AppView, string> = {
   dashboard: 'الرئيسية',
@@ -109,10 +110,19 @@ interface BreadcrumbItem {
   label: string;
 }
 
-export const Breadcrumb: React.FC<{ activeView: AppView }> = ({ activeView }) => {
-  const navigate = useNavigate();
+export interface BreadcrumbProps {
+  activeView: AppView;
+  /** مسار قائمة الشاشة الحالية (`VIEW_PATHS[activeView]` في `App.tsx`) —
+   *  وجهةُ «رجوع» حين لا سابقة في هذا التبويب. */
+  listPath?: string;
+}
+
+export const Breadcrumb: React.FC<BreadcrumbProps> = ({ activeView, listPath }) => {
   const crumbs: BreadcrumbItem[] = [];
   const label = VIEW_LABELS[activeView] ?? activeView;
+  const back = useAppBack(listPath, label);
+  // عدّاد ضغطات «رجوع» — يوقظ لمحة «لديك أيضاً» مرّةً واحدة لا مع كل رسمة.
+  const [backPresses, setBackPresses] = useState(0);
 
   if (activeView.startsWith('accounting-journal-entry')) {
     crumbs.push({ label: 'دفتر اليومية' });
@@ -122,20 +132,22 @@ export const Breadcrumb: React.FC<{ activeView: AppView }> = ({ activeView }) =>
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="relative flex items-center gap-3">
       <button
         type="button"
         onClick={() => {
-          console.log('[Routing] Back button clicked: Navigating back');
-          navigate(-1);
+          back.go();
+          setBackPresses((n) => n + 1);
         }}
         className="px-3 py-1.5 rounded-lg bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold transition-all flex items-center gap-1.5 border border-[var(--color-border)] shadow-sm"
-        title="رجوع للصفحة السابقة"
-        aria-label="رجوع"
+        title={back.hint}
+        aria-label={back.hint}
       >
         <ArrowRight className="h-4 w-4" />
-        <span className="text-sm">رجوع</span>
+        <span className="text-sm">{back.label}</span>
       </button>
+      <LinkedTabHint trigger={backPresses} />
+      <TabOriginChip />
 
       <nav aria-label="breadcrumb" className="flex items-center gap-1 text-[var(--font-size-sm)] border-s border-[var(--color-border)] ps-2">
         {crumbs.map((crumb, i) => (

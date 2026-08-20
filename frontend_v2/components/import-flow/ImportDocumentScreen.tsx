@@ -1438,10 +1438,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       if (localShipments.length === 0) handleNewLocal();
     }
     if (action === "create_invoice" && shipment?.id) {
-      window.open(`/international-invoices?import_shipment=${shipment.id}`, "_blank");
+      openInNewTab(`/international-invoices?import_shipment=${shipment.id}`, "الفاتورة الدولية");
     }
     if (action === "view_invoice" && convertedPiId) {
-      window.open(`/purchase-invoices/${convertedPiId}`, "_blank");
+      openInNewTab(`/purchase-invoices/${convertedPiId}`, "فاتورة الشراء");
     }
   };
   const shipmentPaid =
@@ -2437,11 +2437,11 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       key: "to-invoice", label: allDealsConverted ? `فتح الفاتورة #${convertedPiId}` : remainingDealsCount < shipmentDeals.length ? `إنشاء الفواتير المتبقية (${remainingDealsCount})` : "إنشاء الفاتورة الدولية", icon: <FileText />,
       onClick: () => {
         if (allDealsConverted && convertedPiId) {
-          window.open(`/purchase-invoices/${convertedPiId}`, "_blank");
+          openInNewTab(`/purchase-invoices/${convertedPiId}`, "فاتورة الشراء");
         } else if (shipment?.id) {
           // كان يفتح /purchase-invoices/new?shipment= ولا أحد يقرأ البارامتر (T12-A4)
           // — الآن يفتح مودال «استيراد من تخليص جمركي» مسبق الاختيار على هذه الشحنة.
-          window.open(`/international-invoices?import_shipment=${shipment.id}`, "_blank");
+          openInNewTab(`/international-invoices?import_shipment=${shipment.id}`, "الفاتورة الدولية");
         }
       },
       disabled: !shipment?.id || shipment?.shipment_type === "transport" || saving || (!allDealsConverted && (!clearance || !freightCostEstablished || clearanceCostTotal <= 0)),
@@ -2509,7 +2509,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       state: allDealsConverted ? "done" : "todo",
       onClick: () => {
         if (allDealsConverted && convertedPiId) {
-          window.open(`/purchase-invoices/${convertedPiId}`, "_blank");
+          openInNewTab(`/purchase-invoices/${convertedPiId}`, "فاتورة الشراء");
         } else if (!clearance) {
           setActiveTab("clearance");
         } else if (clearanceCostTotal <= 0) {
@@ -2517,7 +2517,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         } else if (!freightCostEstablished) {
           setActiveTab("payments");
         } else if (shipment?.id) {
-          window.open(`/international-invoices?import_shipment=${shipment.id}`, "_blank");
+          openInNewTab(`/international-invoices?import_shipment=${shipment.id}`, "الفاتورة الدولية");
         }
       },
     },

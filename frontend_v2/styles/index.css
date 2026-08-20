@@ -297,6 +297,25 @@ tbody td {
   animation: spin 0.6s linear infinite;
 }
 
+/* ── وعي التبويبات: وميضة وصولٍ واحدة ──
+   التبويب المفتوح حديثاً يعلن عن نفسه لحظةً ثم يهدأ (نصف ثانية، مرّة واحدة —
+   `animation-iteration-count: 1`). ولمحة «لديك أيضاً» تستعمل الوميضة نفسها.
+   «تقليل الحركة» في النظام يُلغي الحركة **ويُبقي الشارة**: المعلومة ليست حركة،
+   وإخفاؤها مع الحركة يحرم مَن يحتاجها أكثر. */
+@keyframes ktra-flash-once {
+  0% {
+    background-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+    box-shadow: 0 0 0 0.35rem color-mix(in srgb, var(--color-primary) 20%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.ktra-flash-once { animation: ktra-flash-once 0.5s ease-out 1; }
+@media (prefers-reduced-motion: reduce) {
+  .ktra-flash-once { animation: none; }
+}
+
 /* ── Empty state ── */
 .empty-state {
   display: flex;

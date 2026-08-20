@@ -18,11 +18,15 @@ import { SessionSettingsProvider } from './contexts/SessionSettingsContext';
 import { PriceVisibilityProvider } from './contexts/PriceVisibilityContext';
 import { PermissionsProvider } from './contexts/PermissionsContext';
 import { applySkinOnBoot } from './styles/skin';
+import { captureTabHandoffOnBoot } from './utils/tabLink';
 
 import './styles/index.css';
 
 applySkinOnBoot();
 applyThemeOnBoot();
+// وعي التبويبات: يلتقط رمز المناولة من الرابط وينظّفه **قبل** إقلاع الموجّه،
+// فلا يرى `react-router` معاملاً عابراً ولا يتسرّب إلى رابطٍ يُنسخ أو يُحفَظ.
+captureTabHandoffOnBoot();
 
 // المتجر العام: خارج `AuthProvider`/`CompanyProvider` عمداً — زائرٌ بلا جلسة لا
 // ينتظر إقلاع مساحة عمل لا تخصّه، ولا يحمّل chunk لوحة التحكم كي يرى صنفاً.

@@ -6,6 +6,7 @@ import { formatDateValue, formatTimeValue } from "../../utils/formatDate";
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { useToast } from '../../contexts/ToastContext';
 import { RejectReasonModal } from '../modals/RejectReasonModal';
+import { openInNewTab } from "@/utils/openInNewTab";
 
 interface AllSubmissionsViewProps {
   task: Task;
@@ -431,7 +432,7 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            window.open(`/tasks/${task.id}/submissions/${data.latestSubmission!.id}`, '_blank');
+                            openInNewTab(`/tasks/${task.id}/submissions/${data.latestSubmission!.id}`, 'التسليم');
                           }}
                           className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] rounded-lg transition-colors"
                           title="فتح في نافذة جديدة"

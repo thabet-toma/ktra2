@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { resolveActiveTabKey } from "../../utils/tabSelection";
 
 export interface AseelTabItem {
   key: string;
@@ -17,29 +18,30 @@ export const AseelTabs: React.FC<AseelTabsProps> = ({
   activeTab,
   onTabChange,
 }) => {
-  const [localTab, setLocalTab] = useState(0);
-  const activeIdx =
+  // التتبّع بالمعرّف لا بالفهرس — تغيّر طول المصفوفة وقت التشغيل كان يقفز
+  // بالمستخدم إلى تبويب آخر (utils/tabSelection.ts).
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
+  const activeKey =
     activeTab != null
-      ? tabs.findIndex((t) => t.key === activeTab)
-      : localTab;
-  const effectiveIdx = activeIdx >= 0 ? activeIdx : 0;
-  const tab = tabs[effectiveIdx];
+      ? resolveActiveTabKey(tabs, activeTab)
+      : resolveActiveTabKey(tabs, pickedKey);
+  const tab = tabs.find((t) => t.key === activeKey);
 
   return (
     <div className="aseel-tabscol">
       <div className="aseel-tabs" role="tablist">
-        {tabs.map((t, i) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             type="button"
             role="tab"
-            aria-selected={i === effectiveIdx}
-            className={`aseel-tab${i === effectiveIdx ? " aseel-tab--active" : ""}`}
+            aria-selected={t.key === activeKey}
+            className={`aseel-tab${t.key === activeKey ? " aseel-tab--active" : ""}`}
             onClick={() => {
               if (activeTab != null) {
                 onTabChange?.(t.key);
               } else {
-                setLocalTab(i);
+                setPickedKey(t.key);
               }
             }}
           >

@@ -5,11 +5,12 @@
  * المسار: /product-group?ids=1,2,3&name=185/65/14
  */
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { inventoryApi } from '../../services/inventoryApi';
 import { AseelDocumentShell, AseelTab } from '../aseel';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
 import { openInNewTab } from '../../utils/openInNewTab';
+import { useAppBack } from '../../hooks/useAppBack';
 import { productProfilePath } from '../../utils/entityLinks';
 import { formatQuantity, formatMoney } from '../../utils/formatNumber';
 import { formatDateLocalized } from "../../utils/formatDate";
@@ -71,7 +72,8 @@ const PAGE = 50;
 
 export const GroupProfilePage: React.FC = () => {
   const location = useLocation();
-  const navigate = useNavigate();
+  // كالكرت المفرد: يُفتح في تبويب جديد، فوجهة «عودة» تُحسم لا تُخمَّن.
+  const back = useAppBack('/items', 'الأصناف');
 
   const ids = useMemo(() => {
     const raw = new URLSearchParams(location.search).get('ids') || '';
@@ -259,7 +261,7 @@ export const GroupProfilePage: React.FC = () => {
     <div className="min-h-[calc(100vh-5rem)]">
       <AseelDocumentShell
         title={title}
-        actions={[{ key: 'back', label: 'عودة', onClick: () => navigate(-1) }]}
+        actions={[{ key: 'back', label: back.label === 'رجوع' ? 'عودة' : back.label, onClick: back.go }]}
         tabs={tabs}
         status={
           error ? <span className="text-[var(--aseel-danger)]">تعذّر التحميل: {error}</span> :

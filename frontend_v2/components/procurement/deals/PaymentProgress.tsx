@@ -17,6 +17,7 @@ import {
 } from '@/utils/dealPaymentMatch';
 import { isAwaitingSupplierConfirmation } from '@/utils/dealPaymentFlow';
 import { formatDateValue } from "../../../utils/formatDate";
+import { openInNewTab } from "@/utils/openInNewTab";
 
 function parseSqlJournalId(p: DealPayment | undefined): number | null {
     if (p == null) return null;
@@ -239,8 +240,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
         if (onOpenAccountingJournal) {
             onOpenAccountingJournal(jid, dealRef);
         } else {
-            const path = `/accounting/journals/${jid}`;
-            window.open(path, '_blank', 'noopener,noreferrer');
+            openInNewTab(`/accounting/journals/${jid}`, 'قيد اليومية');
         }
     };
 

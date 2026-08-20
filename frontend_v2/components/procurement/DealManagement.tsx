@@ -55,6 +55,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 import { formatMoney } from "@/utils/formatNumber";
 import { formatDateValue } from "../../utils/formatDate";
+import { openInNewTab } from "@/utils/openInNewTab";
 const fmtAmt = (n: number) => formatMoney(n);
 
 const fmtDate = (s: string | undefined) => {
@@ -337,11 +338,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     /** فتح الصفقة — تُفتح على وضع العرض، والتحرير من زر «تحرير» داخلها. */
     const openDeal = (deal: Deal) => {
         // الأصل: يفتح في تاب جديد كي لا يفقد المستخدم سياق القائمة
-        window.open(
-            `${window.location.origin}/deals/${encodeURIComponent(deal.id)}`,
-            '_blank',
-            'noopener,noreferrer',
-        );
+        openInNewTab(`/deals/${encodeURIComponent(deal.id)}`, 'الصفقة');
     };
 
     const reloadDeals = async () => {
@@ -674,11 +671,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 onCreated={(shipmentId) => {
                     setIsShipmentModalOpen(false);
                     // افتح رحلة الاستيراد للشحنة الجديدة في تبويب جديد (يحفظ سياق القائمة)
-                    window.open(
-                        `${window.location.origin}/import-flow/${encodeURIComponent(String(shipmentId))}`,
-                        '_blank',
-                        'noopener,noreferrer',
-                    );
+                    openInNewTab(`/import-flow/${encodeURIComponent(String(shipmentId))}`, 'رحلة الاستيراد');
                 }}
                 // G4: مخرج «شحنة فارغة» — كان مدعوماً في المودال لكنه غير موصّل، فالحالة
                 // الفارغة كانت طريقاً مسدوداً (نص يذكر شحنة فارغة بلا زر). يفتح شاشة شحنة

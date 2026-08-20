@@ -15,6 +15,7 @@ import {
 import type { ShippingWorkflowStatus } from "@/types/deal";
 import { SHIPPING_WORKFLOW_LABELS } from "@/utils/shippingWorkflowLabels";
 import { useConfirm } from "@/contexts/ConfirmContext";
+import { openInNewTab } from "@/utils/openInNewTab";
 import { formatMoney } from "@/utils/formatNumber";
 import { formatDateValue } from "../../../utils/formatDate";
 
@@ -283,7 +284,7 @@ export const DealStageControl: React.FC<StageProps> = ({
           </div>
           <button
             type="button"
-            onClick={() => window.open(`/import-flow/${shipment.id}`, "_blank", "noopener,noreferrer")}
+            onClick={() => openInNewTab(`/import-flow/${shipment.id}`, "رحلة الاستيراد")}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium"
           >
             <ExternalLink className="w-4 h-4" />
