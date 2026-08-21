@@ -77,6 +77,7 @@ test('فتح تبويب جديد: الفاتح لا يتزحزح، والجدي�
   await expect(chip).toHaveCount(1, { timeout: 15000 });
   await expect(chip).toContainText('العملاء');
   expect(child.url()).not.toContain('_ktab');
+  expect(child.url()).not.toContain('#');
 
   // (4) «رجوع» في التبويب الجديد يذكّر بالتبويب الآخر — مرّةً واحدة.
   await child.getByRole('button', { name: /^رجوع/ }).click();

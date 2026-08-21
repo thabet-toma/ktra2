@@ -6,7 +6,7 @@ import {
   isInternalPath,
   withHandoffToken,
   readHandoffToken,
-  searchWithoutHandoff,
+  hashWithoutHandoff,
   isFreshHandoff,
   writeHandoff,
   takeHandoff,
@@ -35,21 +35,40 @@ test('الرمز يُلحق بالمسارات الداخلية وحدها', () 
   assert.equal(withHandoffToken('https://alibaba.com/order', 'tok'), 'https://alibaba.com/order');
 });
 
-test('الإلحاق يحترم وجود معاملات سابقة', () => {
-  assert.equal(withHandoffToken('/products/5', 'tok'), '/products/5?_ktab=tok');
-  assert.equal(withHandoffToken('/products/5?tab=serials', 'tok'), '/products/5?tab=serials&_ktab=tok');
+/**
+ * الرمز في المرساة لا في الاستعلام: مفتاح `Cache API` يشمل الاستعلام ويتجاهل
+ * المرساة، و`sw.ts` يخزّن كل تنقّل ناجح — فرمزٌ استعلاميّ فريد لكل فتحة كان
+ * يترك نسخةً دائمة من `index.html` في الكاش لكل تبويب يُفتح.
+ */
+test('الرمز يسكن المرساة، والاستعلام يبقى حرفياً كما هو', () => {
+  assert.equal(withHandoffToken('/products/5', 'tok'), '/products/5#_ktab=tok');
+  assert.equal(
+    withHandoffToken('/products/5?tab=serials', 'tok'),
+    '/products/5?tab=serials#_ktab=tok',
+  );
 });
 
-test('المرساة تبقى في الذيل بعد الإلحاق', () => {
-  assert.equal(withHandoffToken('/deals/9#lines', 'tok'), '/deals/9?_ktab=tok#lines');
+test('مرساةٌ قائمة تبقى قبل الرمز ثم تُستعاد كما كُتبت', () => {
+  const url = withHandoffToken('/deals/9#lines', 'tok');
+  assert.equal(url, '/deals/9#lines&_ktab=tok');
+  assert.equal(readHandoffToken('#lines&_ktab=tok'), 'tok');
+  assert.equal(hashWithoutHandoff('#lines&_ktab=tok'), '#lines');
 });
 
 test('قراءة الرمز ثم تنظيف الرابط', () => {
-  assert.equal(readHandoffToken('?tab=serials&_ktab=abc'), 'abc');
-  assert.equal(readHandoffToken('?tab=serials'), null);
+  assert.equal(readHandoffToken('#_ktab=abc'), 'abc');
+  assert.equal(readHandoffToken('#lines'), null);
   assert.equal(readHandoffToken(''), null);
-  assert.equal(searchWithoutHandoff('?tab=serials&_ktab=abc'), '?tab=serials');
-  assert.equal(searchWithoutHandoff('?_ktab=abc'), '');
+  // الاستعلام لم يعد يحمل الرمز — رابطٌ بالصيغة القديمة لا يُقرأ ولا يُكسر شيئاً.
+  assert.equal(readHandoffToken('?_ktab=abc'), null);
+  assert.equal(hashWithoutHandoff('#_ktab=abc'), '');
+  assert.equal(hashWithoutHandoff(''), '');
+});
+
+test('رمزٌ يحتاج ترميزاً يعود كما دخل', () => {
+  const token = 'a b/c#d&e';
+  const url = withHandoffToken('/products/5', token);
+  assert.equal(readHandoffToken(url.slice(url.indexOf('#'))), token);
 });
 
 test('المناولة تُستهلَك مرّة واحدة — التحديث لا يُعيد المؤشّر', () => {
@@ -98,8 +117,8 @@ test('تحضير المناولة لا يلمس رابط التبويب الفا
   writeHandoff(store, 'tok', { openerId: 'me', openerLabel: 'فواتير المبيعات', at: Date.now() });
 
   assert.equal(before, '/sales/invoices?page=2', 'رابط الفاتح كما هو');
-  assert.equal(target, '/products/5?_ktab=tok');
-  assert.equal(readHandoffToken(before.slice(before.indexOf('?'))), null, 'الفاتح بلا رمز مناولة');
+  assert.equal(target, '/products/5#_ktab=tok');
+  assert.equal(readHandoffToken(''), null, 'الفاتح بلا رمز مناولة');
 });
 
 test('الكنسة تُزيل سجلّات التبويبات التي لم تُفتح، وتُبقي الطازج ولا تمسّ غيره', () => {

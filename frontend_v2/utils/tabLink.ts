@@ -10,6 +10,15 @@
  *    في `index.tsx`)، يقرأ السجلّ، يحذفه، وينظّف الرابط — فلا يبقى في العنوان
  *    أثرٌ يُشارَك أو يُحفَظ. لا نعتمد على `sessionStorage` ولا `window.name`:
  *    كلاهما يسقط مع `rel="noopener"` الذي نفتح به.
+ *
+ *    والرمز في **المرساة (`#`) لا في الاستعلام (`?`)** — وهذا ليس ذوقاً:
+ *    مفتاح `Cache API` يشمل الاستعلام ويتجاهل المرساة، و`sw.ts` يخزّن كل تنقّل
+ *    ناجح (`networkFirst`). فرمزٌ في الاستعلام — وهو UUID جديد لكل فتحة — كان
+ *    يترك نسخةً دائمة من `index.html` في كاش المتصفّح **لكل تبويب يُفتح**، بلا
+ *    سقف حتى النشرة التالية. مُقاسٌ في المتصفّح: ثلاث فتحات ⇒ 3 مدخلات
+ *    بالاستعلام مقابل مدخل واحد بالمرساة. والمرساة لا تُرسَل للخادم أصلاً،
+ *    فلا تلوّث سجلّات الوصول ولا كاش أي وسيط. **لا يظهر هذا في التطوير**:
+ *    الـservice worker مُطفأ هناك (`devOptions: { enabled: false }`).
  * 2. **الحضور (presence):** كل تبويب يعلن نفسه على `BroadcastChannel` عند
  *    الإقلاع وعند تغيّر شاشته، ويودّع عند الإغلاق. بلا مؤقّتات ولا نبض دوري —
  *    مؤقّتٌ يعيد الرسم كل بضع ثوانٍ عطلٌ معروف في هذا المستودع.
@@ -21,7 +30,7 @@
 
 /* ────────────────────────── دوالّ صرفة (قابلة للاختبار) ───────────────────── */
 
-/** معامل الرابط العابر الذي يحمل رمز المناولة. يُزال فور قراءته. */
+/** مفتاح المرساة العابر الذي يحمل رمز المناولة. يُزال فور قراءته. */
 export const TAB_HANDOFF_PARAM = '_ktab';
 
 /** مفتاح السجلّ في `localStorage`. */
@@ -47,31 +56,38 @@ export function isInternalPath(url: string): boolean {
   return typeof url === 'string' && url.startsWith('/') && !url.startsWith('//');
 }
 
-/** يُلحق رمز المناولة بالمسار محافظاً على المرساة (`#…`) في ذيلها. */
+/**
+ * يُلحق رمز المناولة **بمرساة** الرابط، آخرَ مقطعٍ فيها دائماً، مع الحفاظ على أي
+ * مرساة قائمة قبله. الاستعلام يبقى كما هو حرفياً.
+ */
 export function withHandoffToken(url: string, token: string): string {
   if (!token || !isInternalPath(url)) return url;
   const hashAt = url.indexOf('#');
   const head = hashAt >= 0 ? url.slice(0, hashAt) : url;
-  const hash = hashAt >= 0 ? url.slice(hashAt) : '';
-  const sep = head.includes('?') ? '&' : '?';
-  return `${head}${sep}${TAB_HANDOFF_PARAM}=${encodeURIComponent(token)}${hash}`;
+  const existing = hashAt >= 0 ? url.slice(hashAt + 1) : '';
+  const marker = `${TAB_HANDOFF_PARAM}=${encodeURIComponent(token)}`;
+  return `${head}#${existing ? `${existing}&` : ''}${marker}`;
 }
 
-/** يقرأ الرمز من `location.search`. */
-export function readHandoffToken(search: string): string | null {
-  if (!search) return null;
-  const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-  const token = params.get(TAB_HANDOFF_PARAM);
-  return token ? token : null;
+/** يقرأ الرمز من `location.hash`. */
+export function readHandoffToken(hash: string): string | null {
+  if (!hash) return null;
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  const part = raw.split('&').find((p) => p.startsWith(`${TAB_HANDOFF_PARAM}=`));
+  if (!part) return null;
+  const token = decodeURIComponent(part.slice(TAB_HANDOFF_PARAM.length + 1));
+  return token || null;
 }
 
-/** نفس `search` بلا معامل المناولة — يعيد نصّاً فارغاً حين لا يبقى شيء. */
-export function searchWithoutHandoff(search: string): string {
-  if (!search) return '';
-  const params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-  params.delete(TAB_HANDOFF_PARAM);
-  const rest = params.toString();
-  return rest ? `?${rest}` : '';
+/**
+ * نفس المرساة بلا مقطع المناولة — تُعيد ما كتبه المستدعي الأصلي حرفياً (لا
+ * تطبيع `URLSearchParams`)، ونصّاً فارغاً حين لا يبقى شيء.
+ */
+export function hashWithoutHandoff(hash: string): string {
+  if (!hash) return '';
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  const rest = raw.split('&').filter((p) => !p.startsWith(`${TAB_HANDOFF_PARAM}=`));
+  return rest.length ? `#${rest.join('&')}` : '';
 }
 
 /** سجلٌّ صالح: شكلُه سليم ولم يتقادم. */
@@ -196,13 +212,13 @@ export function captureTabHandoffOnBoot(): void {
     if (typeof window === 'undefined') return;
     const store = browserStore();
     if (store) sweepStaleHandoffs(store as HandoffStore & Storage, Date.now());
-    const token = readHandoffToken(window.location.search);
+    const token = readHandoffToken(window.location.hash);
     if (!token) return;
     if (store) incoming = takeHandoff(store, token, Date.now());
     const clean =
       window.location.pathname +
-      searchWithoutHandoff(window.location.search) +
-      window.location.hash;
+      window.location.search +
+      hashWithoutHandoff(window.location.hash);
     window.history.replaceState(window.history.state, '', clean);
   } catch { /* الوعي كماليّ — لا يُسقط الإقلاع */ }
 }
