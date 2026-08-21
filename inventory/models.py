@@ -395,6 +395,13 @@ class ProductSerial(models.Model):
                 fields=['tenant', 'product', 'status'],
                 name='prodserial_tenant_prod_stat',
             ),
+            # T-SCAN: المسح يبحث بالرقم وحده (لا يعرف صنفه — هذا سؤاله أصلاً)،
+            # والفريد `(tenant, product, serial)` لا يخدمه لأن `product` في
+            # وسطه. بلا هذا الفهرس كل مسحة تمسح كل وحدات الشركة.
+            models.Index(
+                fields=['tenant', 'serial'],
+                name='prodserial_tenant_serial',
+            ),
         ]
 
     def __str__(self):

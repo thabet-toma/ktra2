@@ -20,7 +20,7 @@ from rest_framework.routers import DefaultRouter
 
 from core import (
     assistant_views, agent_db_view, dashboard_api, health, media_views,
-    permissions_api, platform_admin_api, reports_api, whatsapp_views,
+    permissions_api, platform_admin_api, reports_api, scan, whatsapp_views,
 )
 from core.activity_views import ActivityLogViewSet
 from core.platform_admin_api import DevelopmentNoteViewSet, PlatformRouter
@@ -67,6 +67,9 @@ urlpatterns = [
     path('api/agent/suppliers/', partners_agent_api.agent_suppliers),
     path('api/agent/customers/', partners_agent_api.agent_customers),
     path('api/agent/products/', inventory_agent_api.agent_products),
+    # T-SCAN: «ما الذي في يدي؟» — نقطة واحدة تحلّ الباركود والسيريال والـIMEI
+    # ورمز الصنف وجزء الاسم، بلا أن يختار المستخدم النوع.
+    path('api/scan/', scan.scan_lookup),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.
     path('api/reports/', reports_api.reports_catalog),

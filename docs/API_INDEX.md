@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **470**
+عدد النقاط: **471**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -441,6 +441,7 @@
 | `/api/sales/reports/reserved-stock/` | `SalesReportViewSet` | `sales/views.py` |
 | `/api/sales/settings/current/` | `SalesSettingsViewSet` | `sales/views.py` |
 | `/api/sales/settings/restore-defaults/` | `SalesSettingsViewSet` | `sales/views.py` |
+| `/api/scan/` | `scan_lookup` | `core/scan.py` |
 | `/api/store/<slug:slug>/` | `StoreProfileView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/` | `StoreCollectionListView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/<slug:collection_slug>/` | `StoreCollectionDetailView` | `store/views.py` |

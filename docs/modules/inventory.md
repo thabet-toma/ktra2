@@ -28,7 +28,7 @@
 | `StockMovement` | `movement_type` (IN/OUT/ADJUST_IN/ADJUST_OUT/RETURN_IN/RETURN_OUT), `quantity`, `unit_cost`, `total_cost`, `reference_type`, `reference_id`, `quantity_before/after`, `avg_cost_before/after` | `product` (PROTECT)، `warehouse` (PROTECT)، `branch→tenants.Branch`، `partner→partners.Partner`؛ خاصية `origin` (`:270`) |
 | `ProductCategory` | `name`, `parent` | `revenue_account`, `cogs_account`, `inventory_account` → `accounting.Account` |
 | `Warehouse` | `code`, `is_default`, `is_active` | `branch→tenants.Branch` (اختياري)؛ فريد `(tenant, code)` لغير الفارغ |
-| `ProductSerial` | `serial`, `status` (`in_stock`/`sold`) | `purchase_item→logistics.PurchaseInvoiceItem`، `sales_line→sales.SalesInvoiceLine`؛ فريد `(tenant, product, serial)` (`:362`) |
+| `ProductSerial` | `serial`, `status` (`in_stock`/`sold`) | `purchase_item→logistics.PurchaseInvoiceItem`، `sales_line→sales.SalesInvoiceLine`؛ فريد `(tenant, product, serial)`، وفهرس `(tenant, serial)` لبحث المسح الذي لا يعرف الصنف (`prodserial_tenant_serial`) |
 | `ProductPriceTier` | `tier_type` (sale/purchase), `tier_number`, `price`, `tax_inclusive` | فريد `(product, tier_type, tier_number)` |
 | `WarehouseTransfer` / `WarehouseTransferLine` | `transfer_number`, `is_posted`, `quantity` | `source_warehouse` / `dest_warehouse` (PROTECT) — بلا قيد محاسبي (`:384`) |
 | `Stocktake` / `StocktakeLine` | `is_posted`, `counted_quantity`, `system_quantity`, `variance` | `journal→accounting.JournalHeader` — قيد فرق الجرد |
@@ -127,6 +127,11 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 - **نموذج التكلفة قرارٌ في مكان واحد**: `apply_purchase_cost_model` (`services.py`) — إن كانت الشركة على WAC المتحرك فلا يُدهَس `avg_cost` الذي بناه `record_stock_movement`؛ وإلا يُضبط من متوسط المشتريات.
 - **الوحدة المُرقَّمة تُستهلَك بترحيل البيع لا بخروجها**: `consume_sales_serials` يتخطّى البند الذي استُهلكت وحداته فعلاً فإعادة الترحيل idempotent؛ والمختار صريحاً يجب أن يكون `in_stock` ولنفس الصنف وإلا رُفض (`serials.py` — `consume_sales_serials`).
 - **«إجباري» في البيع يعني الاختيار لا التخصيص**: التخصيص التلقائي FIFO حكرٌ على `optional`؛ تحت `required` يجب أن يحمل كل بند تسلسليٍّ أرقاماً بعدد كميته، وإلّا رُفض الترحيل **قبل أي كتابة** (`serials.py` — `assert_sales_serials_declared`، مُستدعى من `sales/services/flow.py` — `post_sales_invoice`)، و`consume_sales_serials` خط الدفاع الثاني. السبب: FIFO يقول «خرجت أقدم وحدة» لا «خرجت هذه الوحدة»، فمطالبةُ كفالةٍ لاحقة تُطابَق برقمٍ لم يره أحد على العلبة. مخرج المخزون القديم بلا أرقام هو `register_existing_serials` من كرت الصنف، والرسالة تسمّيه.
+- **`_serial_row` هو المصدر الواحد لرحلة الوحدة** (`serials.py`): بطاقة الصنف
+  وشاشة الوحدات وحلّال المسح (`core/scan.py`) يقرؤونه جميعاً، والمسح **يُثريه**
+  بالكفالة والصيانات وسعر الشراء ولا ينسخه — استعلامٌ ثانٍ هنا كان سيتباعد عنه
+  بعد أول حقلٍ يُضاف هناك. والإثراء يُحسب **مرّةً للرقم لا مرّةً لكل وحدة**: كل
+  الوحدات المطابقة تحمل الرقم نفسه (به طابقت)، فحسابُه داخل الحلقة كان N+1.
 - **الترقيم يصف مخزوناً قائماً ولا يخلقه**: `register_existing_serials` سقفه رصيد الصنف ولا يُنشئ حركة مخزون ولا قيداً (`serials.py:247-259`).
 - **التحويل بين المستودعات بلا قيد محاسبي** — صافي أثره على إجمالي الشركة صفر (`models.py:382-384`).
 

@@ -23,7 +23,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | App | المسؤولية | كود | اختبار | مسار الـAPI |
 |---|---|---:|---:|---|
 | `logistics` | الاستيراد والمشتريات: صفقة ← شحنة ← تخليص ← نقل ← فاتورة دولية + التكلفة المستوردة | 17,400 | 8,700 | `/api/logistics/` |
-| `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة، الداشبورد، المساعد الذكي | 13,700 | 6,700 | `/api/` (متفرّق) |
+| `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة، الداشبورد، المساعد الذكي | 14,000 | 7,100 | `/api/` (متفرّق) |
 | `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 11,900 | 5,400 | `/api/accounting/` |
 | `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 10,900 | 7,800 | `/api/sales/` |
 | `inventory` | الأصناف والمستودعات و`StockMovement` (المصدر الوحيد للرصيد ومتوسط التكلفة) والأرقام التسلسلية | 4,700 | 2,700 | `/api/inventory/` |
@@ -118,6 +118,7 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 | شيكات / بنوك / مطابقة | `modules/accounting.md` | `accounting/services.py` (`transfer_cheque`), `accounting/services.py` (`INCOMING_TRANSITIONS`) |
 | حركة مخزون أو تكلفة | `modules/inventory.md` | `inventory/services.py` (`record_stock_movement`) |
 | أرقام تسلسلية | `modules/inventory.md` | `inventory/serials.py` |
+| «ما هذا الرقم؟» — مسح باركود/سيريال/IMEI | `modules/core.md` + `modules/frontend.md` | `core/scan.py` (`resolve_scan`), `frontend_v2/components/shared/ScanLookupPanel.tsx` |
 | رحلة استيراد / مرحلة صفقة | `modules/logistics.md` | `logistics/domain/stages.py` (`advance_deal_stage`) |
 | التكلفة المستوردة (landed cost) | `modules/logistics.md` | `logistics/landed_cost.py` |
 | عميل/مورّد وربطه بالحسابات | `modules/partners.md` | `partners/views.py`, `partners/signals.py` |
