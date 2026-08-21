@@ -81,6 +81,7 @@ import {
   ClipboardList,
   ExternalLink,
   Wrench,
+  StickyNote,
 } from "lucide-react";
 import { eventBus } from "../../utils/eventBus";
 import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
@@ -175,6 +176,10 @@ export type DraftLine = {
   priceSourceLink?: string | null;
   /** T-SERIAL: الوحدات المختارة صراحةً لهذا البند — الفارغ يعني «أي وحدة» (FIFO خادمي). */
   serials?: string[];
+  /** ملاحظة الموظف على البند — لا تُطبع للعميل أبداً. */
+  internal_note?: string;
+  /** ملاحظة تُطبع للعميل تحت اسم الصنف في الفاتورة. */
+  customer_note?: string;
 };
 
 const newLineKey = () => `ln-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -187,6 +192,112 @@ const initialBlankLine = (): DraftLine => ({
   line_discount: "0",
   tax_rate: "",
 });
+
+/**
+ * T-NOTES: ملاحظتا البند في نافذة واحدة، مفصولتين بصرياً بقدر فصلهما في المخطط.
+ *
+ * الفصل هو الميزة نفسها: «العميل ساوم على السعر» و«الجهاز مفتوح العلبة» ملاحظتان
+ * لصاحب المحل، و«الكفالة سنة من تاريخ الفاتورة» ملاحظةٌ تُطبع للزبون. حقلٌ واحد
+ * يعني أن إحداهما ستُطبع خطأً — والخطأ في هذا الاتجاه لا يُستدرَك بعد التسليم.
+ */
+const LineNotesModal: React.FC<{
+  productName: string;
+  internalNote: string;
+  customerNote: string;
+  readOnly?: boolean;
+  onClose: () => void;
+  onSave: (next: { internalNote: string; customerNote: string }) => void;
+}> = ({ productName, internalNote, customerNote, readOnly = false, onClose, onSave }) => {
+  const [internal, setInternal] = useState(internalNote);
+  const [forCustomer, setForCustomer] = useState(customerNote);
+
+  return (
+    <div
+      dir="rtl"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="w-full max-w-lg rounded-2xl aseel-bg-field dark:aseel-bg-panel shadow-xl border aseel-border-soft">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b aseel-border-soft">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-[var(--color-primary)] text-white rounded-xl">
+              <StickyNote className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold aseel-text-ink dark:text-white">ملاحظات البند</h3>
+              <p className="text-xs aseel-text-soft">{productName}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 aseel-text-soft hover:aseel-bg-panel rounded-lg"
+            aria-label="إغلاق"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 space-y-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-bold aseel-text-ink dark:aseel-text-soft">
+              ملاحظة داخلية — للموظف
+            </span>
+            <textarea
+              rows={3}
+              maxLength={500}
+              disabled={readOnly}
+              value={internal}
+              onChange={(e) => setInternal(e.target.value)}
+              className="px-2 py-1.5 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm resize-y"
+              placeholder="لا تُطبع للعميل — سبب الخصم، حالة العلبة، من وافق على السعر…"
+            />
+            <span className="text-[11px] aseel-text-soft">
+              لا تظهر في نسخة العميل المطبوعة إطلاقاً.
+            </span>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-bold aseel-text-ink dark:aseel-text-soft">
+              ملاحظة للزبون — تُطبع في الفاتورة
+            </span>
+            <textarea
+              rows={3}
+              maxLength={500}
+              disabled={readOnly}
+              value={forCustomer}
+              onChange={(e) => setForCustomer(e.target.value)}
+              className="px-2 py-1.5 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm resize-y"
+              placeholder="تُطبع تحت اسم الصنف — مدّة الكفالة، شروط التركيب، ملحقات مرفقة…"
+            />
+            <span className="text-[11px] aseel-text-soft">
+              تظهر تحت اسم الصنف في الفاتورة المطبوعة.
+            </span>
+          </label>
+
+          <div className="flex items-center justify-end gap-3 pt-2 border-t aseel-border-soft">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 aseel-text-ink dark:aseel-text-soft aseel-bg-panel rounded-lg"
+            >
+              إلغاء
+            </button>
+            <button
+              onClick={() => onSave({
+                internalNote: internal.trim(),
+                customerNote: forCustomer.trim(),
+              })}
+              disabled={readOnly}
+              className="px-5 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] disabled:opacity-50 text-white rounded-lg font-medium"
+            >
+              حفظ الملاحظات
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 type Props = {
   products: ProductRow[];
@@ -416,6 +527,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const serialMode: SerialEntryMode = salesSettings?.serial_entry_mode ?? "off";
   /** بند مفتوح في نافذة اختيار الوحدات (بمفتاح السطر). */
   const [serialLineKey, setSerialLineKey] = useState<string | null>(null);
+  /** T-NOTES: البند المفتوحة ملاحظتاه. */
+  const [notesLineKey, setNotesLineKey] = useState<string | null>(null);
   /** الصنف يتتبّع وحداته؟ الخدمة مستثناة — بلا مخزون فبلا وحدات. */
   const lineTracksSerials = useCallback(
     (row: DraftLine) => {
@@ -889,6 +1002,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         // T-SERIAL: الاختيار نيّةٌ على البند تبقى بعد إلغاء الترحيل، فإعادة
         // الترحيل تستهلك الوحدات ذاتها لا غيرها.
         serials: Array.isArray(ln.serials) ? ln.serials.map(String) : [],
+        internal_note: ln.internal_note ?? "",
+        customer_note: ln.customer_note ?? "",
       }))
     );
     dirtyRef.current = false;
@@ -1052,6 +1167,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           // T-SERIAL: يُرسَل دائماً — القائمة الفارغة تمسح اختياراً سابقاً بدل
           // أن يبقى معلّقاً على البند بلا ظهور في الشاشة.
           serials: l.serials ?? [],
+          // الملاحظتان حقلان مستقلّان حتى في الحمولة: الداخلية لا تمرّ بأي
+          // مسارٍ يُطبع، والمطبوعة لا تحمل ما كُتب للموظف.
+          internal_note: l.internal_note ?? "",
+          customer_note: l.customer_note ?? "",
         })),
       // ── M2-T1: Aseel header fields ───────────────────────────────
       book_number: Number(bookNumber) || 0,
@@ -1973,6 +2092,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     { key: "unit_price", header: "سعر الوحدة", width: "100px", align: "center", type: "number" },
     { key: "line_discount", header: "خصم سطر", width: "84px", align: "center", type: "number" },
     { key: "tax", header: "الضريبة", width: "150px" },
+    // T-NOTES: ملاحظتا البند — أيقونة واحدة تفتح الاثنتين، فلا يتضخّم عرض الشبكة
+    // بعمودَي نصٍّ حرّ نادرَي الاستعمال.
+    { key: "notes", header: "ملاحظات", width: "76px", align: "center" as const, readOnly: true },
     { key: "line_total", header: "السعر الإجمالي", width: "110px", align: "center", readOnly: true },
     { key: "del", header: "", width: "36px", align: "center" },
   ];
@@ -2277,6 +2399,33 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     );
   };
 
+  /* T-NOTES: شارة الملاحظتين — الحرف يقول أيّهما مكتوبة قبل الفتح: «د» داخلية،
+     «ز» للزبون. الملاحظة الداخلية لا تظهر في الـtitle عند الطباعة لأنها لا تُطبع
+     أصلاً؛ لكنها تظهر هنا للبائع الذي كتبها. */
+  const renderNotesCell = (row: DraftLine) => {
+    const internal = (row.internal_note ?? "").trim();
+    const forCustomer = (row.customer_note ?? "").trim();
+    const marks = [internal ? "د" : "", forCustomer ? "ز" : ""].filter(Boolean);
+    return (
+      <button
+        type="button"
+        className="aseel-toolbtn"
+        style={{ width: "100%", fontWeight: 600 }}
+        onClick={() => setNotesLineKey(row.key)}
+        title={
+          marks.length
+            ? [
+                internal ? `داخلية: ${internal}` : "",
+                forCustomer ? `للزبون: ${forCustomer}` : "",
+              ].filter(Boolean).join("\n")
+            : "أضف ملاحظة داخلية أو ملاحظة تُطبع للزبون"
+        }
+      >
+        {marks.length ? marks.join("·") : <StickyNote className="h-3.5 w-3.5 mx-auto" />}
+      </button>
+    );
+  };
+
   const renderDeleteCell = (row: DraftLine) =>
     readOnly ? null : (
       <button
@@ -2297,6 +2446,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   };
   injectRender("product", renderProductCell);
   injectRender("serials", renderSerialCell);
+  injectRender("notes", renderNotesCell);
   injectRender("unit_price", renderUnitPriceCell);
   injectRender("tax", renderTaxCell);
   injectRender("del", renderDeleteCell);
@@ -3928,6 +4078,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             onSave={(picked) => {
               updateLine(row.key, { serials: picked });
               setSerialLineKey(null);
+            }}
+          />
+        );
+      })()}
+
+      {/* T-NOTES: ملاحظتا البند — حقلان مفصولان بصرياً كما هما مفصولان في المخطط. */}
+      {notesLineKey != null && (() => {
+        const row = lines.find((l) => l.key === notesLineKey);
+        if (!row) return null;
+        const pr = row.product !== "" ? productsById.get(Number(row.product)) : undefined;
+        return (
+          <LineNotesModal
+            productName={pr ? (pr.name_ar || pr.name_en || pr.sku) : "بند بلا صنف"}
+            internalNote={row.internal_note ?? ""}
+            customerNote={row.customer_note ?? ""}
+            readOnly={readOnly}
+            onClose={() => setNotesLineKey(null)}
+            onSave={(next) => {
+              updateLine(row.key, {
+                internal_note: next.internalNote,
+                customer_note: next.customerNote,
+              });
+              setNotesLineKey(null);
             }}
           />
         );

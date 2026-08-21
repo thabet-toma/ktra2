@@ -622,14 +622,23 @@ class ProductSerialFlowTest(APITestCase):
         assert 'لا يتتبّع' in res.json()['error']
 
     def test_registered_units_unblock_selling_legacy_stock_under_required(self):
-        """الاعتراض الأصلي: «إجباري» في البيع كان يُجمّد كل المخزون السابق للميزة."""
+        """الاعتراض الأصلي: «إجباري» في البيع كان يُجمّد كل المخزون السابق للميزة.
+
+        الترقيم يفتح الطريق، والاختيار يمشيه: تحت «إجباري» لا يُخصَّص شيء تلقائياً
+        (`assert_sales_serials_declared`) — فالوحدة المُسندة لزبون تُختار لا
+        تُخمَّن. المُسجَّل حديثاً يصير قابلاً للاختيار، وهذا هو فكّ التجميد.
+        """
         self._set_modes(sales=SERIAL_MODE_REQUIRED)
         self._stock_without_serials('2')
         blocked = self._post_sale(self._sales_invoice(qty='1')[0])
         assert blocked.status_code == 400, blocked.content
 
         assert self._register(['LEG-1', 'LEG-2']).status_code == 201
-        sale, _line = self._sales_invoice(qty='1')
+        # ولو بقي البند بلا اختيار بعد الترقيم لظلّ مرفوضاً — الترقيم وحده لا يبيع.
+        still_blocked = self._post_sale(self._sales_invoice(qty='1')[0])
+        assert still_blocked.status_code == 400, still_blocked.content
+
+        sale, _line = self._sales_invoice(qty='1', serials=['LEG-1'])
         assert self._post_sale(sale).status_code == 200
         assert [u.serial for u in self._units(status=ProductSerial.STATUS_SOLD)] == ['LEG-1']
 
@@ -753,5 +762,7 @@ class ProductSerialFlowTest(APITestCase):
         res = self._post_sale(self._sales_invoice(qty='1')[0])
         assert res.status_code == 400, res.content
         error = res.json()['error']
-        assert error.startswith('البند'), error
+        # جملةٌ عربية تسمّي البند الناقص — لا `ErrorList` ولا تمثيل بايثون.
+        assert 'لابتوب' in error, error
+        assert 'إجباري' in error, error
         assert '[' not in error and ']' not in error and "'" not in error

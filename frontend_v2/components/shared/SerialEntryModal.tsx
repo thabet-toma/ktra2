@@ -8,14 +8,20 @@
  *
  * `pick` (البيع): الوحدة موجودة أصلاً، فالمستخدم يختار **أيّها** يخرج — من قائمة
  * «في المخزن» لهذا الصنف، بالبحث أو بالمسح. و«تلقائي» خيار صريح لا فراغ: لا
- * يرسل أرقاماً ويترك الخادم يخصّص الأقدم (FIFO).
+ * يرسل أرقاماً ويترك الخادم يخصّص الأقدم (FIFO) — ويُقفَل تحت نمط «إجباري» لأن
+ * الخادم يرفضه هناك (`assert_sales_serials_declared`): خيارٌ معروضٌ يُرفض عند
+ * الحفظ أسوأ من خيارٍ غير معروض.
+ *
+ * المسح مصدرُه لوحةُ مفاتيح ماسحٍ يدوي (⏎ بعد القراءة) أو كاميرا الجهاز — وهذه
+ * لا تعمل إلا في سياق آمن (HTTPS/localhost)، والماسح نفسه يشرح ذلك عند تعذّرها.
  *
  * الإلزام كله خادمي؛ ما هنا إرشادٌ يمنع الخطأ قبل وقوعه لا حارسٌ يُعتمد عليه.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Hash, Loader2, Plus, Search, Trash2, X } from "lucide-react";
+import { Camera, Hash, Loader2, Plus, Search, Trash2, X } from "lucide-react";
 import { inventoryApi, type ProductSerialRow } from "../../services/inventoryApi";
 import { humanizeThrown } from "../../utils/drfError";
+import { BarcodeScannerModal } from "./BarcodeScannerModal";
 
 interface Props {
   mode: "capture" | "pick";
@@ -58,8 +64,12 @@ export const SerialEntryModal: React.FC<Props> = ({
   const [loading, setLoading] = useState(mode === "pick");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  /** «تلقائي» = لا أرقام على البند؛ الخادم يخصّص الأقدم عند الترحيل. */
-  const [auto, setAuto] = useState(() => mode === "pick" && value.filter(Boolean).length === 0);
+  /** «تلقائي» = لا أرقام على البند؛ الخادم يخصّص الأقدم عند الترحيل.
+   *  تحت «إجباري» لا وجود له: الخادم يرفض البند غير المكتمل الاختيار. */
+  const [auto, setAuto] = useState(
+    () => mode === "pick" && !required && value.filter(Boolean).length === 0,
+  );
+  const [camera, setCamera] = useState(false);
   const scanRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -264,32 +274,46 @@ export const SerialEntryModal: React.FC<Props> = ({
                 </div>
               </div>
 
-              <label className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1">
                 <span className="text-[11px] aseel-text-soft">أو امسح/اكتب رقماً واحداً ثم ⏎</span>
-                <input
-                  ref={scanRef}
-                  className="h-9 px-2 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm"
-                  dir="ltr"
-                  disabled={readOnly}
-                  value={scan}
-                  onChange={(e) => setScan(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter") return;
-                    e.preventDefault();
-                    addSerial(scan, serials);
-                    setScan("");
-                  }}
-                  placeholder="امسح الباركود أو اكتب الرقم ⏎"
-                />
-              </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={scanRef}
+                    className="h-9 flex-1 px-2 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm"
+                    dir="ltr"
+                    disabled={readOnly}
+                    value={scan}
+                    onChange={(e) => setScan(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      addSerial(scan, serials);
+                      setScan("");
+                    }}
+                    placeholder="امسح الباركود أو اكتب الرقم ⏎"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setCamera(true)}
+                    disabled={readOnly}
+                    className="h-9 flex items-center gap-1.5 px-3 border aseel-border-soft rounded-lg text-sm aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel disabled:opacity-50"
+                    title="مسح الباركود بكاميرا الجهاز"
+                  >
+                    <Camera className="w-4 h-4" />
+                    كاميرا
+                  </button>
+                </div>
+              </div>
             </>
           ) : (
             <>
-              <label className="flex items-start gap-2 rounded-lg border aseel-border-soft p-3 cursor-pointer">
+              <label
+                className={`flex items-start gap-2 rounded-lg border aseel-border-soft p-3 ${required ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+              >
                 <input
                   type="checkbox"
                   className="mt-0.5"
-                  disabled={readOnly}
+                  disabled={readOnly || required}
                   checked={auto}
                   onChange={(e) => {
                     setAuto(e.target.checked);
@@ -299,7 +323,9 @@ export const SerialEntryModal: React.FC<Props> = ({
                 <span className="text-sm">
                   <b className="aseel-text-ink dark:text-white">تلقائي — أي وحدة</b>
                   <span className="block text-[11px] aseel-text-soft">
-                    بلا اختيار: يخصّص الخادم أقدم الوحدات المتاحة عند الترحيل.
+                    {required
+                      ? "غير متاح بنمط «إجباري» — الوحدة التي تذهب للزبون تُختار لا تُخمَّن."
+                      : "بلا اختيار: يخصّص الخادم أقدم الوحدات المتاحة عند الترحيل."}
                   </span>
                 </span>
               </label>
@@ -330,6 +356,16 @@ export const SerialEntryModal: React.FC<Props> = ({
                   }}
                   placeholder="امسح الرقم لاختياره ⏎"
                 />
+                <button
+                  type="button"
+                  onClick={() => setCamera(true)}
+                  disabled={readOnly}
+                  className="h-9 flex items-center gap-1.5 px-3 border aseel-border-soft rounded-lg text-sm aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel disabled:opacity-50"
+                  title="مسح باركود الوحدة بكاميرا الجهاز"
+                >
+                  <Camera className="w-4 h-4" />
+                  كاميرا
+                </button>
               </div>
             </>
           )}
@@ -475,6 +511,22 @@ export const SerialEntryModal: React.FC<Props> = ({
           </div>
         </div>
       </div>
+
+      {camera && (
+        <BarcodeScannerModal
+          continuous
+          title={mode === "capture" ? "مسح أرقام الوحدات" : "مسح رقم الوحدة المباعة"}
+          hint={
+            mode === "capture"
+              ? "امسح ملصق كل وحدة — يبقى الماسح مفتوحاً حتى تُغلقه"
+              : "امسح ملصق الوحدة الخارجة — تُختار من المتاح في المخزن"
+          }
+          onDetect={(detected) =>
+            mode === "capture" ? addSerial(detected, serials) : scanPick(detected)
+          }
+          onClose={() => setCamera(false)}
+        />
+      )}
     </div>
   );
 };

@@ -630,6 +630,17 @@ class SalesInvoiceLine(models.Model):
         default=list, blank=True, db_column="Serials",
         help_text="أرقام تسلسلية مختارة للوحدات المبيعة في هذا البند (تُستهلَك عند الترحيل)",
     )
+    # ملاحظتان لا حقل واحد: خلطهما يعني أن ما كتبه البائع لنفسه («العميل ساوم»،
+    # «آخر قطعة في العلبة الممزّقة») يُطبع للعميل. الفصل هنا بنيوي لا اتفاقي —
+    # الطباعة تقرأ `customer_note` وحده، فلا يتسرّب الداخلي بخطأ عرض.
+    internal_note = models.CharField(
+        max_length=500, blank=True, default="", db_column="InternalNote",
+        help_text="ملاحظة داخلية للموظف — لا تُطبع للعميل",
+    )
+    customer_note = models.CharField(
+        max_length=500, blank=True, default="", db_column="CustomerNote",
+        help_text="ملاحظة تُطبع للعميل تحت اسم الصنف في الفاتورة",
+    )
 
     class Meta:
         db_table = "sales_module_invoice_lines"

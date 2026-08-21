@@ -23,6 +23,7 @@ from accounting.services import (
 )
 from inventory.models import Product, StockMovement
 from inventory.serials import (
+    assert_sales_serials_declared,
     consume_sales_serials,
     release_sales_serials,
     restore_returned_sales_serials,
@@ -708,6 +709,12 @@ def post_sales_invoice(
 
     if invoice.customer.tenant_id != invoice.tenant_id:
         raise ValidationError("العميل لا يتبع نفس الشركة (Tenant).")
+
+    # T-SERIAL: «إجباري» يُرفض هنا — قبل القيد والمخزون والإرسالية — لا عند
+    # الاستهلاك في آخر المعاملة. البيع وحده معنيّ: المرجع يُعيد وحدات فاتورته
+    # الأصلية بالترتيب ولا اختيار فيه.
+    if kind == SalesInvoice.INVOICE_KIND_SALE:
+        assert_sales_serials_declared(invoice, lines)
 
     recalculate_invoice_amounts(invoice, lines)
     SalesInvoiceLine.objects.bulk_update(

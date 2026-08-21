@@ -67,17 +67,38 @@ const friendlyCameraError = (cause: unknown): string => {
     : "تعذّر فتح الكاميرا.";
 };
 
+/** مهلة تبريد بين قراءتين في الوضع المتتالي — بدونها يُقرأ الملصق نفسه عشرات
+ *  المرات في الثانية الواحدة (الفكّ يعمل على كل إطار). */
+const CONTINUOUS_COOLDOWN_MS = 1200;
+
 export const BarcodeScannerModal: React.FC<{
   title?: string;
   hint?: string;
+  /** يبقى الماسح مفتوحاً بعد كل قراءة — لمسح عدّة وحدات في دفعة واحدة. */
+  continuous?: boolean;
   onDetect: (value: string) => void;
   onClose: () => void;
-}> = ({ title = "مسح الباركود بالكاميرا", hint, onDetect, onClose }) => {
+}> = ({ title = "مسح الباركود بالكاميرا", hint, continuous = false, onDetect, onClose }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [starting, setStarting] = useState(true);
+  /** آخر قيمة مقروءة — تأكيد بصري في الوضع المتتالي حيث لا يُغلق الماسح. */
+  const [lastHit, setLastHit] = useState<string | null>(null);
   // الالتقاط يحدث مرة واحدة — الفكّ المستمر قد يطلق النتيجة عدة مرات في إطار واحد.
   const doneRef = useRef(false);
+  const cooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (cooldownRef.current) clearTimeout(cooldownRef.current);
+  }, []);
+
+  /** المستدعي يمرّر دوالَّ سهميةً مضمّنةً غالباً، فتتغيّر مع كل رسم. لو دخلت
+   *  اعتماديات `handleHit` لأعادت أثرَ الكاميرا الإقلاع مع كل رسم — أي إغلاق
+   *  المجرى وفتحه من جديد بينما الموظف يصوّب على ملصق. المرجع يبقيها طازجةً
+   *  بلا أن تلمس دورة حياة المجرى. */
+  const onDetectRef = useRef(onDetect);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onDetectRef.current = onDetect; onCloseRef.current = onClose; });
 
   const handleHit = useCallback((raw: string) => {
     const value = (raw || "").trim();
@@ -85,9 +106,16 @@ export const BarcodeScannerModal: React.FC<{
     doneRef.current = true;
     beep();
     navigator.vibrate?.(80);
-    onDetect(value);
-    onClose();
-  }, [onDetect, onClose]);
+    onDetectRef.current(value);
+    if (!continuous) {
+      onCloseRef.current();
+      return;
+    }
+    // الوحدات المُرقَّمة تُمسح واحدةً تلو الأخرى من نفس الصندوق؛ إغلاق الماسح
+    // بعد كل ملصق يجعل مسح عشر وحدات عشر فتحاتٍ للكاميرا.
+    setLastHit(value);
+    cooldownRef.current = setTimeout(() => { doneRef.current = false; }, CONTINUOUS_COOLDOWN_MS);
+  }, [continuous]);
 
   useEffect(() => {
     let cancelled = false;
@@ -225,6 +253,11 @@ export const BarcodeScannerModal: React.FC<{
               )}
               {/* إطار تصويب يوجّه الموظف لموضع الباركود */}
               <div className="pointer-events-none absolute inset-x-8 top-1/2 h-20 -translate-y-1/2 rounded-lg border-2 border-emerald-400/90" />
+            </div>
+          )}
+          {continuous && lastHit && (
+            <div className="mt-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-center text-xs font-bold text-emerald-700 dark:text-emerald-300">
+              <span dir="ltr" className="font-mono">{lastHit}</span> — تمّت القراءة
             </div>
           )}
           <p className="mt-2 text-center text-[11px] text-[var(--color-text-muted)]">

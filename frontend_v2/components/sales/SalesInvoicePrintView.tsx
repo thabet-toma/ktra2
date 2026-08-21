@@ -175,6 +175,13 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                                         <td className="py-2 px-2 text-center border-l aseel-border-soft aseel-text-soft">{index + 1}</td>
                                         <td className="py-2 px-3 border-l aseel-border-soft">
                                             <p className="font-bold aseel-text-ink text-[12px]">{pName}</p>
+                                            {/* T-NOTES: `customer_note` وحدها تُطبع — الملاحظة الداخلية
+                                                لا تصل هذا المكوّن أصلاً بحكم اختيار الحقل. */}
+                                            {(item.customer_note ?? "").trim() && (
+                                                <p className="mt-0.5 text-[10px] aseel-text-soft whitespace-pre-line">
+                                                    {item.customer_note}
+                                                </p>
+                                            )}
                                         </td>
                                         <td className="py-2 px-2 text-center font-bold border-l aseel-border-soft text-sm">{item.quantity}</td>
                                         <td className="py-2 px-2 text-left font-mono border-l aseel-border-soft" dir="ltr">{formatMoney(Number(item.unit_price))} {curr}</td>

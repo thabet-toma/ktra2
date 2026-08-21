@@ -322,3 +322,58 @@ test('البيع: الصنف غير التسلسلي يبقى بلا زر وحد
 
   await expect(page.getByRole('columnheader', { name: 'الوحدات' })).toHaveCount(0);
 });
+
+test('البيع بنمط «إجباري»: «تلقائي» مُقفَل — لا خيار يرفضه الخادم', async ({ page }) => {
+  const state = freshState({ salesMode: 'required' });
+  await install(page, state);
+  await openSalesEditor(page);
+
+  await page.getByPlaceholder('اكتب اسم الصنف…').first().fill('لابتوب');
+  await page.getByText('لابتوب', { exact: true }).last().click();
+
+  // بلا اختيار: الشارة تقول 0/1 لا «تلقائي» — النقص مرئيّ قبل الحفظ.
+  const chip = page.getByRole('button', { name: /^0\/1$/ });
+  await expect(chip).toBeVisible();
+  await chip.click();
+
+  // الخادم يرفض البند غير المكتمل تحت «إجباري»
+  // (`inventory/serials.py::assert_sales_serials_declared`)، فعرضُ الخيار هنا
+  // وعدٌ يُخلَف عند الترحيل.
+  await expect(page.getByRole('checkbox', { name: /^تلقائي — أي وحدة/ })).toBeDisabled();
+  await expect(page.getByText(/غير متاح بنمط «إجباري»/)).toBeVisible();
+
+  // والاختيار الصريح يُكمل البند.
+  await page.getByRole('checkbox', { name: 'SN-0098' }).check();
+  await expect(page.getByText(/المختار: 1 من الكمية 1/)).toBeVisible();
+  await page.getByRole('button', { name: 'حفظ الأرقام' }).click();
+  await expect(page.getByRole('button', { name: /^1\/1$/ })).toBeVisible();
+});
+
+test('البيع: ملاحظتا البند حقلان مستقلّان يصلان الحمولة بلا اختلاط', async ({ page }) => {
+  const state = freshState();
+  await install(page, state);
+  await openSalesEditor(page);
+
+  await page.getByPlaceholder('اكتب اسم الصنف…').first().fill('ورق');
+  await page.getByText('ورق', { exact: true }).last().click();
+
+  // عمود الملاحظات لا يتبع نمط الأرقام التسلسلية — يظهر دائماً ولكل صنف.
+  await expect(page.getByRole('columnheader', { name: 'ملاحظات' })).toBeVisible();
+  // السطر الفارغ التالي يحمل الزرّ نفسه — المقصود سطر الصنف، وهو الأول.
+  await page.getByTitle('أضف ملاحظة داخلية أو ملاحظة تُطبع للزبون').first().click();
+
+  await page.getByPlaceholder(/لا تُطبع للعميل/).fill('العميل ساوم — وافق المدير');
+  await page.getByPlaceholder(/تُطبع تحت اسم الصنف/).fill('كفالة سنة من تاريخ الفاتورة');
+  await page.getByRole('button', { name: 'حفظ الملاحظات' }).click();
+
+  // الشارة تقول أيّهما مكتوبة قبل الفتح.
+  await expect(page.getByRole('button', { name: 'د·ز' })).toBeVisible();
+
+  await page.getByRole('button', { name: /^تخزين$/ }).first().click();
+  await expect.poll(() => state.saved.length).toBeGreaterThan(0);
+  const sent = state.saved[state.saved.length - 1] as {
+    lines: { internal_note: string; customer_note: string }[];
+  };
+  expect(sent.lines[0].internal_note).toBe('العميل ساوم — وافق المدير');
+  expect(sent.lines[0].customer_note).toBe('كفالة سنة من تاريخ الفاتورة');
+});

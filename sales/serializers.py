@@ -128,6 +128,8 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
             "extra_quantity",
             "line_tax_percent",
             "serials",
+            "internal_note",
+            "customer_note",
         ]
         read_only_fields = ["line_total_excl_tax", "line_tax_amount", "delivered_quantity"]
 

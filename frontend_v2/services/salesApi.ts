@@ -105,6 +105,10 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
     line_tax_percent?: string | null;
     /** T-SERIAL: الوحدات التي اختارها البائع لهذا البند (تبقى بعد إلغاء الترحيل). */
     serials?: string[] | null;
+    /** ملاحظة الموظف على البند — لا تُطبع للعميل. */
+    internal_note?: string | null;
+    /** ملاحظة تُطبع للعميل تحت اسم الصنف. */
+    customer_note?: string | null;
   }[];
   created_at?: string;
   // M2-T1: Aseel header fields

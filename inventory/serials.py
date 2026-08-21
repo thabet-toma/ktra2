@@ -504,6 +504,48 @@ def restock_returned_purchase_serials(return_invoice) -> int:
 # البيع: الترحيل يستهلك الوحدات · إلغاء الترحيل يعيدها للمخزن
 # ══════════════════════════════════════════════════════════════════════════
 
+def assert_sales_serials_declared(invoice, lines) -> None:
+    """«إجباري» يحرس ترحيل فاتورة البيع **قبل** أي كتابة.
+
+    مرآة `assert_purchase_serials_declared` على جانب البيع: الترحيل يكتب قيداً
+    وحركة مخزون وإرسالية قبل أن يصل الاستهلاك، فرفضٌ متأخّر داخل معاملة ذرّية
+    يُلغي كل ذلك بصمت ويعيد المستخدم لشاشة لا تقول له ما ينقص. هنا يُسمّى الناقص
+    بندَاً بندَاً ومعه المخرج: المخزون القديم بلا أرقام يُرقَّم من كرت الصنف.
+
+    بندٌ استُهلكت وحداته فعلاً (إعادة ترحيل بعد إلغاء) لا يُطالَب ثانيةً — نفس
+    قاعدة الذرّية في `consume_sales_serials`.
+    """
+    mode = sales_serial_mode(invoice.tenant_id)
+    if mode != SERIAL_MODE_REQUIRED:
+        return
+
+    incomplete: list[str] = []
+    for line in lines:
+        product = line.product
+        if not product_tracks_serials(product):
+            continue
+        label = _product_label(product)
+        needed = _whole_units(line.quantity, label=label)
+        if needed <= 0:
+            continue
+        if ProductSerial.objects.filter(
+            sales_line=line, status=ProductSerial.STATUS_SOLD,
+        ).exists():
+            continue
+        declared = normalize_serials(line.serials, label=label)
+        if len(declared) != needed:
+            incomplete.append(
+                f"«{label}» (المطلوب {needed} والمختار {len(declared)})"
+            )
+
+    if incomplete:
+        raise ValidationError(
+            'اختيار الأرقام التسلسلية إجباري قبل ترحيل فاتورة البيع — أكمل وحدات '
+            'البنود التالية من عمود «الوحدات»: ' + '؛ '.join(incomplete)
+            + '. ومخزونٌ قديم بلا أرقام يُرقَّم من تبويب «الأرقام التسلسلية» في كرت الصنف.'
+        )
+
+
 def consume_sales_serials(invoice, lines) -> int:
     """يوسم وحدات فاتورة بيع «مُباع» ويربطها ببنودها عند الترحيل.
 
@@ -511,8 +553,13 @@ def consume_sales_serials(invoice, lines) -> int:
     وفي المخزن ولنفس الصنف)، والباقي يُخصَّص تلقائياً **FIFO** من أقدم الوحدات
     المتاحة — كي لا يُلزَم من لا يهمّه اختيار الوحدة بعينها.
 
-    نقص المتاح (مخزون قديم سابق للتتبّع): `required` يرفض الترحيل، و`optional`
-    يخصّص ما وُجد ويترك الباقي بلا تتبّع. `off` لا يفعل شيئاً.
+    و«اختياري» وحده هو ما يقبل هذا التخصيص التلقائي: تحت `required` يُرفض البند
+    الناقص اختياره بدل أن يُملأ FIFO. سببه أن التخصيص التلقائي **تخمين**: يقول
+    «خرجت أقدم وحدة» لا «خرجت هذه الوحدة»، فمطالبة كفالةٍ لاحقة تُطابَق برقمٍ لم
+    يره أحد على العلبة. من يشغّل «إجباري» يطلب واقعةً مسجَّلة لا استنتاجاً.
+
+    نقص المتاح (مخزون قديم سابق للتتبّع): `optional` يخصّص ما وُجد ويترك الباقي
+    بلا تتبّع، و`required` يكون قد رُفض قبل ذلك. `off` لا يفعل شيئاً.
     """
     mode = sales_serial_mode(invoice.tenant_id)
     if mode == SERIAL_MODE_OFF:
@@ -540,6 +587,14 @@ def consume_sales_serials(invoice, lines) -> int:
                 f"البند «{label}»: عدد الأرقام التسلسلية المختارة ({len(declared)}) "
                 f"يتجاوز الكمية ({needed})."
             )
+        # خط الدفاع الثاني تحت «إجباري»: الحارس الأول
+        # (`assert_sales_serials_declared`) يقع قبل أي كتابة، وهذا يحمي كل مسار
+        # يستدعي الاستهلاك مباشرةً بلا مروره.
+        if mode == SERIAL_MODE_REQUIRED and len(declared) != needed:
+            raise ValidationError(
+                f"البند «{label}»: اختيار الأرقام التسلسلية إجباري — "
+                f"المطلوب {needed} والمختار {len(declared)}."
+            )
         chosen = list(
             ProductSerial.objects.filter(
                 tenant_id=invoice.tenant_id, product=product, serial__in=declared,
@@ -554,6 +609,8 @@ def consume_sales_serials(invoice, lines) -> int:
                 f"لهذا الصنف — {'، '.join(missing)}."
             )
 
+        # التخصيص التلقائي لـ«اختياري» وحده — تحت «إجباري» يكون الاختيار مكتملاً
+        # ومتحقَّقاً أعلاه، فلا نقص يُملأ ولا تخمين يُسجَّل.
         shortfall = needed - len(chosen)
         if shortfall > 0:
             auto = list(
@@ -567,11 +624,6 @@ def consume_sales_serials(invoice, lines) -> int:
             chosen.extend(auto)
 
         if len(chosen) < needed:
-            if mode == SERIAL_MODE_REQUIRED:
-                raise ValidationError(
-                    f"البند «{label}»: إدخال الأرقام التسلسلية إجباري — "
-                    f"المتوفر في المخزن {len(chosen)} وحدة والمطلوب {needed}."
-                )
             logger.info(
                 'sales serials partial: invoice=%s product=%s matched=%d needed=%d',
                 invoice.pk, product.pk, len(chosen), needed,
@@ -688,6 +740,18 @@ def _serial_row(unit) -> dict:
         'customer_name': (
             sales_invoice.customer.name
             if sales_invoice and sales_invoice.customer_id else None
+        ),
+        # مطالبة الكفالة تبدأ بمسح الرقم وتنتهي بـ«من اشتراه ومتى»: الاسم وحده
+        # يسمّي ولا يُثبت — المعرّف يفتح كرت الطرف، والهاتف يتحقّق على الطاولة،
+        # وتاريخ الفاتورة هو ما تُحسب منه مدّة الكفالة.
+        'customer': sales_invoice.customer_id if sales_invoice else None,
+        'customer_phone': (
+            (sales_invoice.customer.phone or '')
+            if sales_invoice and sales_invoice.customer_id else None
+        ),
+        'sold_at': (
+            sales_invoice.invoice_date.isoformat()
+            if sales_invoice and sales_invoice.invoice_date else None
         ),
         'created_at': unit.created_at.isoformat() if unit.created_at else None,
     }

@@ -13,7 +13,7 @@ from rest_framework.test import APITestCase
 
 from accounting.models import Account
 from accounting.services import create_fiscal_year
-from inventory.models import Product, ProductSerial, Warehouse
+from inventory.models import Product, ProductSerial, StockMovement, Warehouse
 from inventory.serials import SERIAL_MODE_OPTIONAL, SERIAL_MODE_REQUIRED
 from logistics.services import get_or_create_purchase_settings
 from partners.models import Partner
@@ -40,7 +40,7 @@ class SerialInvoiceJourneyTest(APITestCase):
             is_active=True)
         cls.customer = Partner.objects.create(
             tenant=cls.tenant, name='زبون الرحلة', partner_type='Customer',
-            linked_account=ar)
+            linked_account=ar, phone='0599123456')
         ss = get_or_create_sales_settings(cls.tenant)
         ss.default_ar_account = ar
         ss.default_cogs_account = Account.objects.create(
@@ -206,6 +206,77 @@ class SerialInvoiceJourneyTest(APITestCase):
 
         rows = {r['serial']: r['status'] for r in self._card_serials()}
         assert rows == {'SN-1': 'sold', 'SN-2': 'in_stock'}
+
+    # ── «إجباري» في البيع: الاختيار واقعةٌ لا تخمين ──────────────────────
+    def _receive(self, serials):
+        """شراء واستلام — يضع الوحدات «في المخزن» جاهزةً للبيع."""
+        created = self._create_purchase(serials, qty=len(serials))
+        assert created.status_code == 201, created.content
+        invoice_id = created.json()['id']
+        posted = self.client.post(
+            f'/api/logistics/purchase-invoices/{invoice_id}/post-to-accounting/',
+            {}, format='json', **self.headers)
+        assert posted.status_code == 201, posted.content
+        return invoice_id
+
+    def test_required_sale_without_a_chosen_serial_is_refused_at_posting(self):
+        """«إجباري» + بند بلا اختيار ⇒ الترحيل يفشل، ولا يترك أثراً نصفياً.
+
+        قبل هذا الحارس كان التخصيص التلقائي (FIFO) يملأ الفراغ فينجح الترحيل —
+        والواجهة تلوّن البند أحمر وتقول «الترحيل سيُرفض». الخادم هو الحَكَم، فصار
+        يقول ما تقوله الشاشة.
+        """
+        self._modes(purchase=SERIAL_MODE_OPTIONAL, sales=SERIAL_MODE_REQUIRED)
+        self._receive(['SN-A1', 'SN-A2'])
+
+        sale = self._create_sale([], qty='1')
+        assert sale.status_code == 201, sale.content
+        sale_id = sale.json()['id']
+
+        res = self.client.post(f'/api/sales/invoices/{sale_id}/post/', {},
+                               format='json', **self.headers)
+        assert res.status_code == 400, res.content
+        body = res.content.decode()
+        assert 'إجباري' in body
+        assert 'لابتوب' in body            # البند الناقص مُسمّى لا مُلمَّح إليه
+        assert 'المطلوب 1 والمختار 0' in body
+        assert 'كرت الصنف' in body         # المخرج مذكور لا متروك للتخمين
+
+        # لا أثر نصفي: الفاتورة مسوّدة، ولا وحدة استُهلكت، ولا حركة مخزون بيع.
+        reloaded = self.client.get(f'/api/sales/invoices/{sale_id}/', **self.headers)
+        assert reloaded.json()['status'] == 'draft'
+        assert reloaded.json()['journal'] is None
+        assert ProductSerial.objects.filter(
+            tenant=self.tenant, status=ProductSerial.STATUS_SOLD).count() == 0
+        assert not StockMovement.objects.filter(
+            reference_type='SALE', reference_id=sale_id).exists()
+
+    def test_required_sale_with_a_chosen_serial_binds_the_unit_to_the_customer(self):
+        """نفس الوضع مع رقمٍ صحيح: يمرّ، ويربط الوحدة بالزبون في بطاقة الجهاز.
+
+        «بطاقة الجهاز» هي ما يقرؤه تبويب الأرقام التسلسلية في كرت الصنف — وهو
+        نفسه ما تجيب به مطالبة الكفالة: من اشترى، بأي هاتف، وبأي تاريخ.
+        """
+        self._modes(purchase=SERIAL_MODE_OPTIONAL, sales=SERIAL_MODE_REQUIRED)
+        self._receive(['SN-B1', 'SN-B2'])
+
+        sale = self._create_sale(['SN-B2'], qty='1')
+        assert sale.status_code == 201, sale.content
+        sale_id = sale.json()['id']
+        posted = self.client.post(f'/api/sales/invoices/{sale_id}/post/', {},
+                                  format='json', **self.headers)
+        assert posted.status_code in (200, 201), posted.content
+
+        rows = {r['serial']: r for r in self._card_serials()}
+        sold = rows['SN-B2']
+        assert sold['status'] == 'sold'
+        assert sold['customer'] == self.customer.pk
+        assert sold['customer_name'] == 'زبون الرحلة'
+        assert sold['customer_phone'] == '0599123456'
+        assert sold['sold_at'] == '2026-06-15'
+        assert sold['sales_invoice'] == sale_id
+        # الوحدة الأخرى لم تُمسّ — الاختيار صريح لا FIFO.
+        assert rows['SN-B1']['status'] == 'in_stock'
 
     def test_off_mode_drops_serials_from_the_payload(self):
         """النمط الافتراضي: حتى لو أرسلت الواجهة أرقاماً، لا تُخزَّن ولا تُجسَّد."""
