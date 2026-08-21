@@ -100,6 +100,18 @@ class ReportSpec:
     #: الفهرس، فالتقرير الديناميكي يعلن في الفهرس أعمدة ملخّصه الثابتة فقط.
     columns_for: Callable[[int, dict], tuple[ReportColumn, ...]] | None = None
 
+    # ── التنقيب: الصفّ المجمَّع يُفتح على الحركات التي كوّنته ────────────
+    #: بانٍ ثانٍ يستقبل `(tenant_id, params)` بعد أن تُضاف إليها مفاتيح الصفّ
+    #: (`drill_keys`)، ويُعيد أسطر التفصيل. `row_link` يجيب سؤالاً آخر — «أين
+    #: مستند هذا السطر» — أما هذا فيجيب «من أين جاء هذا **الرقم**»: رقمٌ مجمَّع
+    #: لا يُفتح على مفرداته يُصدَّق أو يُرفض بلا فحص، وكلاهما سيّئ.
+    drill: Callable[[int, dict], list[dict]] | None = None
+    drill_columns: tuple[ReportColumn, ...] = ()
+    #: مفاتيح تُقرأ من الصفّ المنقور وتُمرَّر مع فلاتر التقرير إلى `drill`.
+    #: الصفّ يحملها في حمولته وإن لم تكن أعمدةً معروضة.
+    drill_keys: tuple[str, ...] = ()
+    drill_title: str = "تفصيل السطر"
+
 
 REPORTS: dict[str, ReportSpec] = {}
 
@@ -168,15 +180,25 @@ def _money_sum(field_name: str):
     )
 
 
-def compute_totals(spec: ReportSpec, rows: list[dict]) -> dict[str, str]:
-    """سطر الإجمالي من الأعمدة الموسومة `total=True` — لا حساب يدوي لكل تقرير."""
+def totals_for(columns, rows: list[dict]) -> dict[str, str]:
+    """إجمالي مجموعة أعمدة — يخدم أعمدة التقرير وأعمدة تفصيله بالقاعدة نفسها.
+
+    وحدةُ القاعدة هي ما يجعل «مجموع التفصيل = رقم الصفّ» مقارنةً صادقة: الرقمان
+    يُجمعان بالدالّة ذاتها وبالتقريب ذاته، فاختلافهما يعني اختلاف البيانات لا
+    اختلاف الحساب.
+    """
     totals: dict[str, str] = {}
-    for col in spec.columns:
+    for col in columns:
         if not col.total:
             continue
         acc = sum((Decimal(str(r.get(col.key) or 0)) for r in rows), ZERO)
         totals[col.key] = _money(acc) if col.kind == KIND_MONEY else _qty(acc)
     return totals
+
+
+def compute_totals(spec: ReportSpec, rows: list[dict]) -> dict[str, str]:
+    """سطر الإجمالي من الأعمدة الموسومة `total=True` — لا حساب يدوي لكل تقرير."""
+    return totals_for(spec.columns, rows)
 
 
 def report_catalog() -> list[dict]:
@@ -243,6 +265,17 @@ def run_report(key: str, tenant_id: int, params: dict) -> dict:
         "category": spec.category,
         "description": spec.description,
         "row_link": spec.row_link,
+        # وصف التنقيب يصل مع الحمولة لا مع الفهرس: الشاشة تعرف من الناتج وحده
+        # هل الصفوف قابلة للفتح وبأي أعمدة، فلا نداء ثانٍ ولا معرفةٌ مزدوجة.
+        "drill": None if spec.drill is None else {
+            "title": spec.drill_title,
+            "keys": list(spec.drill_keys),
+            "columns": [
+                {"key": c.key, "header": c.header, "kind": c.kind,
+                 "total": c.total, "width": c.width}
+                for c in spec.drill_columns
+            ],
+        },
         "columns": [
             {"key": c.key, "header": c.header, "kind": c.kind,
              "total": c.total, "width": c.width}
@@ -260,3 +293,44 @@ def run_report(key: str, tenant_id: int, params: dict) -> dict:
 #  المبيعات
 # ══════════════════════════════════════════════════════════════════════
 
+
+
+#: سقف أسطر التفصيل. التنقيب نافذةُ فحصٍ على صفٍّ واحد لا تقريرٌ ثانٍ — وصفٌّ
+#: مجمَّع من عشرات الآلاف من الحركات لا يُفحص بالتمرير على أي حال. المجموع
+#: يُحسب على الأسطر **كلّها** قبل القصّ، فالمقارنة برقم الصفّ تبقى صادقة.
+MAX_DRILL_ROWS = 500
+
+
+def run_drill(key: str, tenant_id: int, params: dict) -> dict:
+    """يفتح صفّاً مجمَّعاً على الأسطر التي كوّنته.
+
+    يُعيد `total` بنفس أعمدة المجموع، فتُقارَن بأرقام الصفّ في الشاشة مقارنةً
+    مباشرة: تطابقٌ يعني أن الرقم مشتقّ مما تحته لا محسوبٌ في مكانٍ آخر.
+    """
+    spec = REPORTS[key]
+    if spec.drill is None:
+        raise KeyError(f"التقرير «{key}» بلا تنقيب.")
+    params = params or {}
+    rows = spec.drill(tenant_id, params)
+    total_rows = len(rows)
+    totals = totals_for(spec.drill_columns, rows)
+    truncated = total_rows > MAX_DRILL_ROWS
+    if truncated:
+        rows = rows[:MAX_DRILL_ROWS]
+    logger.info(
+        "reports.drill key=%s tenant=%s rows=%s truncated=%s",
+        key, tenant_id, total_rows, truncated,
+    )
+    return {
+        "key": spec.key,
+        "title": spec.drill_title,
+        "columns": [
+            {"key": c.key, "header": c.header, "kind": c.kind,
+             "total": c.total, "width": c.width}
+            for c in spec.drill_columns
+        ],
+        "rows": rows,
+        "totals": totals,
+        "total_rows": total_rows,
+        "truncated": truncated,
+    }

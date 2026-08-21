@@ -51,12 +51,35 @@ export interface ReportCategoryDto {
 
 export type ReportRow = Record<string, unknown>;
 
+/**
+ * وصف التنقيب كما يعلنه الخادم مع الناتج: هل صفوف هذا التقرير تُفتح على
+ * مفرداتها، وبأي أعمدة، وأي مفاتيح يحملها الصفّ ليعيدها الطلب.
+ */
+export interface ReportDrillDto {
+  title: string;
+  keys: string[];
+  columns: ReportColumnDto[];
+}
+
+/** ناتج فتح صفّ — نفس شكل ناتج التقرير مقصوراً على ما يلزم لوحة التفصيل. */
+export interface ReportDrillResultDto {
+  key: string;
+  title: string;
+  columns: ReportColumnDto[];
+  rows: ReportRow[];
+  totals: Record<string, string>;
+  total_rows: number;
+  truncated: boolean;
+}
+
 export interface ReportResultDto {
   key: string;
   title: string;
   category: string;
   description: string;
   row_link?: string | null;
+  /** `null` لتقرير لا يُنقَّب — الشاشة تقرأ منه وحده، فلا معرفةٌ مزدوجة. */
+  drill?: ReportDrillDto | null;
   columns: ReportColumnDto[];
   rows: ReportRow[];
   totals: Record<string, string>;

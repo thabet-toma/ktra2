@@ -70,6 +70,9 @@ urlpatterns = [
     path('api/dashboard/', dashboard_api.trade_dashboard),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.
     path('api/reports/', reports_api.reports_catalog),
+    # التنقيب قبل التشغيل: `<str:key>` يبتلع «drill» لو جاء بعده،
+    # فيُطلب تقريرٌ اسمه drill بدل فتح تفصيل السطر.
+    path('api/reports/<str:key>/drill/', reports_api.report_drill),
     path('api/reports/<str:key>/', reports_api.report_run),
     path('api/platform/dashboard/', platform_admin_api.platform_dashboard),
     path('api/platform/super-admins/', platform_admin_api.platform_super_admins),

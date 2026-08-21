@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **469**
+عدد النقاط: **470**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -388,6 +388,7 @@
 | `/api/realestate/units/{pk}/` | `RentalUnitViewSet` | `realestate/views.py` |
 | `/api/reports/` | `reports_catalog` | `core/reports_api.py` |
 | `/api/reports/<str:key>/` | `report_run` | `core/reports_api.py` |
+| `/api/reports/<str:key>/drill/` | `report_drill` | `core/reports_api.py` |
 | `/api/sales/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/sales/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/sales/credit-debit-notes/` | `CreditDebitNoteViewSet` | `sales/views.py` |

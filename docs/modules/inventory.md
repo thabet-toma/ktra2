@@ -133,6 +133,7 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
 |---|---|
+| `core/tests/test_reports_stock_dimension.py` | تقرير «حركة المخزون حسب بُعد»: المحاور الخمسة، والتنقيب الذي يطابق مجموعُه رقمَ الصفّ |
 | `inventory/tests/test_product_serials.py` | مصفوفة الأنماط (بدون/اختياري/إجباري) على الجانبين، دورة بيع ⇄ إلغاء ترحيل، تخصيص FIFO |
 | `inventory/tests/test_serial_invoice_journey.py` | نفس الرحلة عبر HTTP بحمولة المحرِّرين (`items[].serials` / `lines[].serials`) |
 | `inventory/tests/test_inventory_documents.py` | التحويل (أثر صفري، حركتان موسومتان) والجرد (تسوية + قيد الفرق) |

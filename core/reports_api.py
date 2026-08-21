@@ -17,7 +17,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from core.access import require_perm, user_has_perm
-from core.reports import REPORTS, report_catalog, run_report
+from core.reports import REPORTS, report_catalog, run_drill, run_report
 from core.tenant_utils import get_tenant
 
 logger = logging.getLogger(__name__)
@@ -74,23 +74,35 @@ def reports_catalog(request):
     return Response({"categories": categories})
 
 
-@api_view(["GET"])
-def report_run(request, key: str):
+def _authorize(request, key: str):
+    """حارسٌ واحد للتشغيل وللتنقيب — `(spec, tenant, None)` أو `(None, None, رد)`.
+
+    التنقيب نافذةٌ على نفس بيانات التقرير، فلا يجوز أن يكون بابه أوسع من بابه:
+    نسخُ الحارس كان يعني أن أي تشديدٍ لاحق يُطبَّق على نقطةٍ وينسى الأخرى.
+    """
     spec = REPORTS.get(key)
     if spec is None:
-        return Response({"error": "تقرير غير معروف."}, status=404)
+        return None, None, Response({"error": "تقرير غير معروف."}, status=404)
     tenant = get_tenant(request)
     if not tenant:
-        return Response({"error": "لا يوجد شركة (tenant)."}, status=400)
+        return None, None, Response({"error": "لا يوجد شركة (tenant)."}, status=400)
     # الترخيص قبل الصلاحية — تقرير وحدةٍ غير مرخّصة «غير معروف» لا «ممنوع»،
     # فلا يكشف ردُّه وجودها (نفس ترتيب `after_sales/views.py::initial`).
     if spec.module:
         from core.modules import module_enabled
 
         if not module_enabled(tenant, spec.module):
-            return Response({"error": "تقرير غير معروف."}, status=404)
+            return None, None, Response({"error": "تقرير غير معروف."}, status=404)
     if spec.permission:
         require_perm(request, spec.permission, tenant=tenant)
+    return spec, tenant, None
+
+
+@api_view(["GET"])
+def report_run(request, key: str):
+    spec, tenant, denied = _authorize(request, key)
+    if denied is not None:
+        return denied
     params = request.query_params.dict()
     cache_key = None
     if REPORT_CACHE_SECONDS > 0:
@@ -115,4 +127,28 @@ def report_run(request, key: str):
     payload["generated_by"] = _user_display(getattr(request, "user", None))
     if cache_key is not None:
         cache.set(cache_key, payload, REPORT_CACHE_SECONDS)
+    return Response(payload)
+
+
+@api_view(["GET"])
+def report_drill(request, key: str):
+    """`GET /api/reports/<key>/drill/` — الأسطر التي كوّنت صفّاً مجمَّعاً.
+
+    نفس فلاتر التشغيل تُرسَل كما هي، ومعها مفاتيح الصفّ (`spec.drill_keys`).
+    وبلا كاش عمداً: التنقيب فعلُ تحقّقٍ من رقمٍ ظهر للتوّ، فتقديم نسخةٍ مخزَّنة
+    له يُفسد بالضبط السببَ الذي فُتح لأجله.
+    """
+    spec, tenant, denied = _authorize(request, key)
+    if denied is not None:
+        return denied
+    if spec.drill is None:
+        return Response({"error": f"التقرير «{spec.title}» لا يُنقَّب."}, status=400)
+    params = request.query_params.dict()
+    try:
+        payload = run_drill(key, tenant.TenantID, params)
+    except ValidationError as exc:
+        return Response({"error": _validation_message(exc)}, status=400)
+    except Exception:
+        logger.exception("reports.drill_failed key=%s tenant=%s", key, tenant.TenantID)
+        return Response({"error": "تعذّر فتح تفصيل السطر."}, status=500)
     return Response(payload)

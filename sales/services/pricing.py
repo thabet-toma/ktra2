@@ -95,6 +95,71 @@ def sales_cogs_map(
     }
 
 
+
+def allocate_invoice_discount(net, discount, subtotal):
+    """نصيب مبلغٍ من خصم الفاتورة — قاعدةٌ واحدة يستهلكها كل من يقول «الإيراد».
+
+    خصم الفاتورة يُعلَن على رأسها لا على بنودها، فنسبته إلى البند نسبةُ البند إلى
+    مجموع أسطرها. وهي **خطّية** في `net`، فيستوي أن تُطبَّق على سطرٍ أو على مجموع
+    أسطر نفس الصنف: `Σ(n − d·n/s) = Σn − d·Σn/s`. لولا ذلك لاختلف رقم الإيراد
+    بين تقريرٍ يجمع قبل الخصم وآخر يخصم قبل الجمع.
+
+    بلا خصمٍ أو بلا مجموع ⇒ الصافي كما هو (القسمة على صفر لا تُحرَس بشرطٍ
+    منسيّ في كل مستدعٍ).
+    """
+    net = Decimal(str(net or 0))
+    discount = Decimal(str(discount or 0))
+    subtotal = Decimal(str(subtotal or 0))
+    if not discount or not subtotal:
+        return net
+    return net - discount * net / subtotal
+
+
+def sales_revenue_map(
+    *,
+    tenant_id: int,
+    invoice_ids,
+) -> dict[tuple[int, int], dict]:
+    """مرآة `sales_cogs_map` على جانب الإيراد: `{(فاتورة، صنف): {net, qty, tax}}`.
+
+    التكلفة كان لها مصدر واحد منذ THA-60 والإيراد لم يكن له: كل مستهلكٍ يحسبه
+    من أسطر الفاتورة بنفسه ويوزّع خصمها بنفسه، فرقمان يفترقان عند أول تعديل في
+    قاعدة التوزيع. هنا يُحسب مرّةً — صافي الأسطر لنفس الصنف، ناقصاً نصيبه من خصم
+    الفاتورة عبر `allocate_invoice_discount`.
+
+    الصافي **بلا تقريب**: التقريب في نهاية العرض وحدها، فمجموعُ الأصناف يساوي
+    مجموع الفواتير قرشاً بقرش. محصورة بالشركة؛ `invoice_ids` فارغة ⇒ `{}` بلا
+    استعلام. استعلامان: رؤوس الفواتير (للخصم) وأسطرها مجمَّعةً.
+    """
+    ids = list(invoice_ids or [])
+    if not ids:
+        return {}
+    headers = {
+        r["id"]: (r["invoice_discount"], r["subtotal_excl_tax"])
+        for r in SalesInvoice.objects.filter(
+            tenant_id=tenant_id, id__in=ids,
+        ).values("id", "invoice_discount", "subtotal_excl_tax")
+    }
+    rows = (
+        SalesInvoiceLine.objects.filter(tenant_id=tenant_id, invoice_id__in=ids)
+        .values("invoice_id", "product_id")
+        .annotate(
+            net=Sum("line_total_excl_tax"),
+            qty=Sum("quantity"),
+            tax=Sum("line_tax_amount"),
+        )
+    )
+    out: dict[tuple[int, int], dict] = {}
+    for r in rows:
+        discount, subtotal = headers.get(r["invoice_id"], (None, None))
+        out[(r["invoice_id"], r["product_id"])] = {
+            "net": allocate_invoice_discount(r["net"], discount, subtotal),
+            "qty": Decimal(str(r["qty"] or "0")),
+            "tax": Decimal(str(r["tax"] or "0")),
+        }
+    return out
+
+
 def invoice_profits(
     *,
     tenant_id: int,

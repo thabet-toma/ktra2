@@ -28,6 +28,7 @@ import {
   resolveRowLink,
   type DatePresetKey,
   type ReportColumnDto,
+  type ReportDrillResultDto,
   type ReportFilterDto,
   type ReportResultDto,
   type ReportRow,
@@ -36,7 +37,7 @@ import { formatDateLocalized } from "../../utils/formatDate";
 import { printReport } from "../../utils/printReport";
 import type { AccountNodeLike } from "../../utils/accountTree";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
-import { AseelDocumentShell, AseelReportTable } from "../aseel";
+import { AseelDocumentShell, AseelReportTable, AseelSidePanel } from "../aseel";
 import type { AseelTab, AseelToolbarAction, ReportColumn } from "../aseel";
 
 type PartnerRow = { id: number; name: string; partner_type?: string };
@@ -75,6 +76,12 @@ export const ReportRunnerPage: React.FC = () => {
   const [ranOnce, setRanOnce] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  /** التنقيب: الصفّ المفتوح، وأسطره، وحالتهما. */
+  const [drillRow, setDrillRow] = useState<ReportRow | null>(null);
+  const [drillResult, setDrillResult] = useState<ReportDrillResultDto | null>(null);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [drillError, setDrillError] = useState<string | null>(null);
 
   const [partners, setPartners] = useState<PartnerRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -317,7 +324,9 @@ export const ReportRunnerPage: React.FC = () => {
           <button
             type="button"
             className="text-[var(--color-accent,#2563eb)] underline-offset-2 hover:underline"
-            onClick={() => navigate(path)}
+            // الصفّ نفسه قد يكون قابلاً للتنقيب: بلا إيقافٍ للانتشار يفتح النقر
+            // المستندَ ولوحةَ التفصيل معاً.
+            onClick={(e) => { e.stopPropagation(); navigate(path); }}
             title="فتح المستند"
           >
             {text}
@@ -327,6 +336,39 @@ export const ReportRunnerPage: React.FC = () => {
     })),
     [result, navigate],
   );
+
+  /**
+   * فتح صفّ على مفرداته.
+   *
+   * مفاتيح الصفّ تأتي من الخادم (`drill.keys`) لا من معرفةٍ مكتوبة هنا: الشاشة
+   * عامّة تخدم كل التقارير، فمعرفتُها بأي تقريرٍ بعينه دَينٌ يُسدَّد عند أول
+   * تقرير تالٍ يُنقَّب بمفاتيح أخرى.
+   */
+  const openDrill = useCallback((row: ReportRow) => {
+    const drill = result?.drill;
+    if (!drill || !reportKey) return;
+    const rowKeys: Record<string, string> = {};
+    for (const name of drill.keys) rowKeys[name] = String(row[name] ?? "");
+    setDrillRow(row);
+    setDrillResult(null);
+    setDrillError(null);
+    setDrillLoading(true);
+    void (async () => {
+      try {
+        setDrillResult(await reportsApi.drill(reportKey, values, rowKeys));
+      } catch (e: unknown) {
+        setDrillError(e instanceof Error ? e.message : "تعذّر فتح تفصيل السطر");
+      } finally {
+        setDrillLoading(false);
+      }
+    })();
+  }, [result, reportKey, values]);
+
+  const closeDrill = useCallback(() => {
+    setDrillRow(null);
+    setDrillResult(null);
+    setDrillError(null);
+  }, []);
 
   const totals = useMemo(() => {
     if (!result || Object.keys(result.totals || {}).length === 0) return undefined;
@@ -447,6 +489,108 @@ export const ReportRunnerPage: React.FC = () => {
   }, [result, filters, values, partners, products, warehouses, accounts,
       currentCompany, periodLabel, totals, toast]);
 
+  /**
+   * لوحة التفصيل — والمقارنة فيها هي المقصد لا زينة.
+   *
+   * «رقم لا يمكن تتبّعه إلى مصدره لا يُوثَق به»: عرضُ الحركات وحده يترك القارئ
+   * يجمعها بعينه ليطمئن. فتُعرَض المقارنة صريحةً عموداً بعمود — رقم الصفّ مقابل
+   * مجموع مفرداته — ويُقال إن اختلفا بدل أن يُخفى الاختلاف تحت جدولٍ طويل.
+   * والاختلاف مشروعٌ في حالة واحدة معلومة: قصُّ الأسطر عند سقفها.
+   */
+  const drillComparison = useMemo(() => {
+    if (!drillRow || !drillResult) return [];
+    return drillResult.columns
+      .filter((col) => col.total)
+      .map((col) => {
+        const rowText = formatReportCell(drillRow[col.key], col.kind);
+        const sumText = formatReportCell(drillResult.totals[col.key], col.kind);
+        return { key: col.key, header: col.header, rowText, sumText, matches: rowText === sumText };
+      })
+      .filter((entry) => drillRow[entry.key] !== undefined);
+  }, [drillRow, drillResult]);
+
+  const drillColumns: ReportColumn<ReportRow>[] = useMemo(
+    () => (drillResult?.columns ?? []).map((col) => ({
+      key: col.key,
+      header: col.header,
+      width: col.width || undefined,
+      numeric: isNumericKind(col.kind),
+      render: (row: ReportRow) => formatReportCell(row[col.key], col.kind),
+    })),
+    [drillResult],
+  );
+
+  const drillTotals = useMemo(() => {
+    if (!drillResult) return undefined;
+    const out: Record<string, string> = {};
+    for (const col of drillResult.columns) {
+      if (drillResult.totals[col.key] !== undefined) {
+        out[col.key] = formatReportCell(drillResult.totals[col.key], col.kind);
+      }
+    }
+    return Object.keys(out).length ? out : undefined;
+  }, [drillResult]);
+
+  const drillPanel = (
+    <AseelSidePanel
+      open={drillRow !== null}
+      onClose={closeDrill}
+      title={result?.drill?.title || "تفصيل السطر"}
+      width={Math.min(920, typeof window === "undefined" ? 920 : window.innerWidth - 40)}
+    >
+      <div style={{ padding: "12px", overflow: "auto" }}>
+        {/* هويّة السطر = أعمدته الوصفية كلّها — «مورد ألف — LAP — لابتوب»؛
+            تعميمٌ يصحّ لأي تقرير بدل انتقاء أعمدة بالفهرس. */}
+        {drillRow && result && (
+          <p className="mb-2 text-sm font-bold text-[var(--color-text)]">
+            {result.columns
+              .filter((col) => !isNumericKind(col.kind))
+              .map((col) => formatReportCell(drillRow[col.key], col.kind))
+              .filter((text) => text && text !== "—")
+              .join(" — ")}
+          </p>
+        )}
+        {drillError && <div className="aseel-banner aseel-banner--err">{drillError}</div>}
+        {drillComparison.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {drillComparison.map((entry) => (
+              <span
+                key={entry.key}
+                className={`rounded-lg border px-2.5 py-1 text-xs ${
+                  entry.matches
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                    : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300"
+                }`}
+                title={
+                  entry.matches
+                    ? "مجموع الحركات يساوي رقم السطر"
+                    : "مجموع الحركات يخالف رقم السطر"
+                }
+              >
+                {entry.header}: <b>{entry.rowText}</b>
+                {entry.matches ? " ✓" : ` ≠ ${entry.sumText}`}
+              </span>
+            ))}
+          </div>
+        )}
+        {drillResult?.truncated && (
+          <div className="aseel-banner aseel-banner--warn" style={{ marginBottom: "8px" }}>
+            السطر مكوَّن من {drillResult.total_rows} حركة، ظهر منها{" "}
+            {drillResult.rows.length}. المقارنة أعلاه محسوبة على الحركات كلّها.
+          </div>
+        )}
+        <AseelReportTable<ReportRow>
+          columns={drillColumns}
+          rows={drillResult?.rows ?? []}
+          totals={drillTotals}
+          loading={drillLoading}
+          getRowKey={(_row, idx) => idx}
+          emptyHint="لا حركات خلف هذا السطر"
+        />
+      </div>
+    </AseelSidePanel>
+  );
+
   const content = (
     <>
       {error && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{error}</div>}
@@ -469,7 +613,10 @@ export const ReportRunnerPage: React.FC = () => {
         onExport={exportCsv}
         loading={loading}
         getRowKey={(_row, idx) => idx}
+        onRowClick={result?.drill ? openDrill : undefined}
+        rowTitle="افتح السطر على الحركات التي كوّنته"
       />
+      {result?.drill && drillPanel}
     </>
   );
 

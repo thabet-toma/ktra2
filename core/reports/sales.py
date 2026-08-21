@@ -232,7 +232,7 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
     مخزون بحقّ. ثلاثة استعلامات إجمالاً: الفواتير، الأسطر، خريطة التكلفة.
     """
     from sales.models import SalesInvoiceLine
-    from sales.services import sales_cogs_map
+    from sales.services import allocate_invoice_discount, sales_cogs_map
 
     inv_rows = list(
         _posted_sales(tenant_id, params).values(
@@ -281,10 +281,10 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
         bucket = _bucket_of(prod, line.product_id)
         bucket_of_product[line.product_id] = bucket
         qty = Decimal(str(line.quantity or 0))
-        net = Decimal(str(line.line_total_excl_tax or 0))
+        # قاعدة توزيع خصم الفاتورة مشتركة مع `sales_revenue_map` (ومنها تقرير
+        # «حركة المخزون حسب بُعد») — نسختان منها كانتا ستفترقان عند أول تعديل.
         discount, subtotal = discounts.get(line.invoice_id, (ZERO, ZERO))
-        if discount and subtotal:
-            net -= discount * net / subtotal
+        net = allocate_invoice_discount(line.line_total_excl_tax, discount, subtotal)
         bucket["quantity"] += qty
         bucket["net_sales"] += net
         bucket["tax_amount"] += Decimal(str(line.line_tax_amount or 0))

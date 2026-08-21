@@ -166,6 +166,8 @@ register(spec: ReportSpec)                       # تسجيل تقرير جدي�
 run_report(key, tenant_id, params) -> dict       # أعمدة + صفوف + إجماليات
 report_catalog() -> list                         # الفهرس مجمَّعاً بالفئات
 ReportSpec.columns_for(tenant_id, params)        # أعمدة تُحسب عند التشغيل (عمود لكل يوم)
+ReportSpec.drill(tenant_id, params) + drill_keys # فتح صفّ مجمَّع على الأسطر التي كوّنته
+run_drill(key, tenant_id, params) -> dict        # أسطر التفصيل + مجموعها للمقارنة برقم الصفّ
 
 # core/payments.py — الدفع المشترك
 validate_payment(ctx) · post_payment(...) · document_payment_summary(total, paid)
@@ -178,6 +180,7 @@ validate_payment(ctx) · post_payment(...) · document_payment_summary(total, pa
 | المسار | الغرض |
 |---|---|
 | `/api/reports/` · `/api/reports/<key>/` | فهرس التقارير وتشغيلها |
+| `/api/reports/<key>/drill/` | الأسطر التي كوّنت صفّاً مجمَّعاً (للتقارير المُعلِنة `drill`) |
 | `/api/permissions/me/` | حمولة الإقلاع الواحدة: الدور · الصلاحيات · الوحدات المرخّصة · `ui_mode` — **كلّها للعرض فقط، لا تحمي endpoint** |
 | `/api/dashboard/` | تجميع الداشبورد |
 | `/api/platform/…` | لوحة السوبر أدمن |
@@ -207,6 +210,13 @@ validate_payment(ctx) · post_payment(...) · document_payment_summary(total, pa
    يَعِد بأعمدته — يُطلب بلا مستأجرٍ ولا فترة — فيُعلن أعمدة ملخّصه الثابتة
    وحدها. كل مستهلك (الشاشة العامة، CSV، Excel، الطباعة) يقرأ
    `ReportResultDto.columns`.
+6.1.1. **التنقيب يُبنى من مجموعة التقرير نفسها لا من مجموعة ثانية.** التقرير
+   المُعلِن `drill` يجب أن يشتقّ صفوفه المجمَّعة وأسطر تفصيلها من دالّة فلترةٍ
+   واحدة (`core/reports/inventory.py` — `_stock_dimension_queryset` نموذجاً)،
+   وإلا انحرف مجموعُ التفصيل عن رقم الصفّ عند أول فلتر يُنسى في أحدهما — وهو
+   بالضبط ما جاء التنقيب ليُثبت عدمَه. ونقطة التنقيب تمرّ بحارس التشغيل نفسه
+   (`core/reports_api.py` — `_authorize`) فلا يكون بابها أوسع من بابه، وبلا كاش:
+   التنقيب فعلُ تحقّقٍ من رقمٍ ظهر للتوّ.
 6.2. **مُدخل التقرير المرفوض 400 برسالته لا 500.** تقريرٌ يحرس فترته يرفع
    `ValidationError` فتعود رسالته كما كتبها (`core/reports_api.py`) — «تعذّر
    توليد التقرير» عن خطأٍ يصلحه المستخدم بنفسه رسالةُ عطلٍ كاذبة.
@@ -230,6 +240,7 @@ validate_payment(ctx) · post_payment(...) · document_payment_summary(total, pa
 | `core/tests/test_cache_resilience.py` | ألا يُسقط تعثّر الكاش الطلبَ |
 | `core/tests/test_global_throttle.py` | حدود المعدّل العامة |
 | `core/tests/test_reports.py` | صحة التقارير وثبات عدّ الاستعلامات |
+| `core/tests/test_reports_stock_dimension.py` | تقرير البُعد المتبدّل: مجموع التنقيب = رقم الصفّ على كل صفّ في كل محور |
 | `core/tests/test_dashboard_isolation.py` | عزل الداشبورد بين الشركات |
 | `core/tests/test_platform_admin.py` | حارس السوبر أدمن على **كل** مسار منصة + ثبات عدّ استعلامات اللوحة |
 | `core/tests/test_media_upload.py` | الرفع الموحّد وكتابة سجلّ البايتات معه |

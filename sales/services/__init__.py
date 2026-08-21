@@ -16,7 +16,9 @@ from .foundation import (
 )
 from .pricing import (
     SALES_STOCK_REFERENCE_TYPES,
+    allocate_invoice_discount,
     sales_cogs_map,
+    sales_revenue_map,
     invoice_profits,
     last_sale_price,
     customer_price_list,
@@ -116,6 +118,8 @@ __all__ = [
     "get_or_create_sales_settings",
     "dormant_customers",
     "SALES_STOCK_REFERENCE_TYPES",
+    "allocate_invoice_discount",
+    "sales_revenue_map",
     "sales_cogs_map",
     "invoice_profits",
     "last_sale_price",

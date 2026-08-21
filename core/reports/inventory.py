@@ -236,3 +236,418 @@ register(ReportSpec(
 #  المالية والنقدية
 # ══════════════════════════════════════════════════════════════════════
 
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  حركة المخزون حسب بُعد — تقرير واحد بأبعادٍ تُبدَّل، لا تقرير لكل بُعد
+# ══════════════════════════════════════════════════════════════════════
+#
+# لماذا بُعدٌ واحد قابل للتبديل بدل خمسة تقارير: السؤال واحد («ما الذي دخل
+# وخرج، وبكم») والمختلف هو **محور** الإجابة وحده. خمسة تقارير تعني خمس نسخ من
+# منطق الاتجاه والتكلفة تتباعد مع أول تعديل، وخمسة أسماء يبحث المستخدم بينها.
+#
+# ومحور الطرف يُقرأ من `StockMovement.partner` كما كتبه `record_stock_movement`:
+# استلامُ الشراء يكتب المورّد، وترحيلُ البيع يكتب الزبون. فـ«حسب المورد» ليس
+# فلترةً على نوع الحركة بل على **نوع الطرف** — وبذلك يظهر تحت المورّد وارده
+# ومرتجعُه إليه معاً، وتحت الزبون صادرُه ومرتجعُه منه. حركةٌ بلا طرف (تحويل
+# مستودعي، جرد، تسوية) لا مورّد لها ولا زبون فتغيب عن هذين المحورين وحدهما —
+# وهذا مكتوب في وصف التقرير لا مسكوتٌ عنه.
+
+_STOCK_INBOUND = ("IN", "ADJUST_IN", "RETURN_IN")
+_STOCK_OUTBOUND = ("OUT", "ADJUST_OUT", "RETURN_OUT")
+
+#: كل بُعد: ترويسة عموده · حقول التجميع · مفتاح الآلة · لافتة الصفّ · قصرُ
+#: مجموعةِ الحركات عليه إن لزم. الإضافة لاحقاً = مدخل واحد هنا.
+_STOCK_DIMENSIONS: dict[str, dict] = {
+    "supplier": {
+        "header": "المورد",
+        "fields": ("partner_id", "partner__name"),
+        "key_of": lambda r: str(r["partner_id"] or ""),
+        "label_of": lambda r: r["partner__name"] or "— بلا طرف —",
+        "restrict": {"partner__partner_type": "Supplier"},
+        "filter_of": lambda key: {"partner_id": int(key)} if key else {"partner__isnull": True},
+    },
+    "customer": {
+        "header": "الزبون",
+        "fields": ("partner_id", "partner__name"),
+        "key_of": lambda r: str(r["partner_id"] or ""),
+        "label_of": lambda r: r["partner__name"] or "— بلا طرف —",
+        "restrict": {"partner__partner_type": "Customer"},
+        "filter_of": lambda key: {"partner_id": int(key)} if key else {"partner__isnull": True},
+    },
+    "warehouse": {
+        "header": "المستودع",
+        "fields": ("warehouse_id", "warehouse__name"),
+        "key_of": lambda r: str(r["warehouse_id"] or ""),
+        "label_of": lambda r: r["warehouse__name"] or "— غير محدَّد —",
+        "restrict": None,
+        "filter_of": lambda key: {"warehouse_id": int(key)} if key else {"warehouse__isnull": True},
+    },
+    "brand": {
+        "header": "الماركة",
+        "fields": ("product__brand",),
+        "key_of": lambda r: r["product__brand"] or "",
+        "label_of": lambda r: r["product__brand"] or "— بلا ماركة —",
+        "restrict": None,
+        # الماركة نصٌّ على الصنف لا مفتاحٌ خارجي: الفارغ والـNULL كلاهما «بلا
+        # ماركة»، فيجب أن يلتقطهما التنقيب معاً وإلا فتح صفّاً على لا شيء.
+        "filter_of": lambda key: (
+            {"product__brand": key} if key else {"product__brand__in": ["", None]}
+        ),
+    },
+    "product": {
+        "header": "الصنف",
+        "fields": ("product_id", "product__sku", "product__name_ar", "product__name_en"),
+        "key_of": lambda r: str(r["product_id"] or ""),
+        "label_of": lambda r: (
+            r["product__name_ar"] or r["product__name_en"] or r["product__sku"] or "—"
+        ),
+        "restrict": None,
+        "filter_of": lambda key: {"product_id": int(key)},
+    },
+}
+
+_STOCK_DIM_DEFAULT = "supplier"
+
+
+def _stock_dimension(params: dict) -> tuple[str, dict]:
+    """البُعد المطلوب — وغير المعروف يعود للافتراضي بدل أن يرفع خطأً."""
+    raw = str(params.get("group_by") or "").strip() or _STOCK_DIM_DEFAULT
+    if raw not in _STOCK_DIMENSIONS:
+        raw = _STOCK_DIM_DEFAULT
+    return raw, _STOCK_DIMENSIONS[raw]
+
+
+def _stock_detailed(params: dict) -> bool:
+    """مفصَّلاً (صفٌّ لكل بُعد×صنف) أم ملخَّصاً (صفٌّ لكل قيمة بُعد)؟
+
+    المفصَّل هو الافتراضي لأنه ما يُسأل عنه فعلاً («أصناف هذا المورد وكمياتها»)؛
+    والملخَّص موجود لأن خمسين مورّداً × مئتَي صنف = عشرة آلاف سطر لا تُقرأ.
+    كلاهما يُنقَّب إلى الحركات نفسها.
+    """
+    return str(params.get("detail") or "lines").strip() != "summary"
+
+
+def _stock_dimension_queryset(tenant_id: int, params: dict):
+    """مجموعة الحركات بعد كل الفلاتر — مصدرٌ واحد للتجميع وللتنقيب.
+
+    وحدةُ المصدر هي ما يجعل «مجموع التنقيب = رقم الصفّ» صحيحاً **بالبناء** لا
+    بالمصادفة: لو بُني الرقمان من مجموعتين لانحرفا عند أول فلتر يُنسى في إحداهما.
+    """
+    from inventory.models import StockMovement
+
+    _key, dim = _stock_dimension(params)
+    qs = StockMovement.objects.filter(tenant_id=tenant_id)
+    qs = _apply_dates(qs, "movement_date", params)
+    if dim["restrict"]:
+        qs = qs.filter(**dim["restrict"])
+    product = _int_param(params, "product")
+    if product:
+        qs = qs.filter(product_id=product)
+    warehouse = _int_param(params, "warehouse")
+    if warehouse:
+        qs = qs.filter(warehouse_id=warehouse)
+    partner = _int_param(params, "partner")
+    if partner:
+        qs = qs.filter(partner_id=partner)
+    return qs
+
+
+def _stock_signed_sum(field_name: str, types: tuple[str, ...]):
+    """مجموع حقلٍ على اتجاهٍ واحد — الكمية مخزَّنة موجبةً والاتجاه في النوع."""
+    from django.db.models import Case, When
+
+    return Coalesce(
+        Sum(Case(
+            When(movement_type__in=types, then=F(field_name)),
+            default=Value(ZERO),
+            output_field=DecimalField(max_digits=20, decimal_places=4),
+        )),
+        Value(ZERO),
+        output_field=DecimalField(max_digits=20, decimal_places=4),
+    )
+
+
+def _sale_movement_shares(tenant_id: int, qs, extra_fields=()) -> list[dict]:
+    """نصيب كل حركة بيع من إيراد سطر فاتورتها — مصدرٌ واحد للتجميع وللتنقيب.
+
+    **لماذا الإيراد يُسنَد إلى الحركة لا إلى الصفّ**: لو حُسب الإيراد من أسطر
+    الفواتير مباشرةً لصار في الصفّ الواحد رقمان من عالمين — كميةٌ وتكلفةٌ مجموعتان
+    على الحركات، وإيرادٌ مجموعٌ على الأسطر — فينهار معيار «مجموع التنقيب = رقم
+    الصفّ» على عمودٍ واحد بلا أن ينبّه أحد. وبإسناده إلى الحركة يبقى كل رقم في
+    الصفّ مجموعاً على **نفس** الحركات، ويمتدّ المعيار إلى الإيراد والربح مجّاناً.
+
+    النصيب = صافي سطر (الفاتورة، الصنف) × كمية هذه الحركة ÷ **كل** كمية حركات
+    ذلك السطر. المقام غير مفلتر عمداً (`sales_cogs_map` يعطيه على كامل المستند):
+    لو قُسِم على الكميات داخل النطاق وحدها لتضخّم نصيبُ الحركة كلما ضاقت الفترة،
+    فتقرير شهرٍ يعطي إيراد سنة.
+
+    والتقريب على الحركة لا على مجموعها — فالذرّة نفسها في المسارين، ومجموعهما
+    متطابق بالبناء. ثمنُه أن مجموع أنصبة فاتورةٍ قد يخالف صافيها بقرش أو قرشين:
+    فرقُ تقريبٍ معلوم، ثمنُه أرخص من رقمين لا يتطابقان على الشاشة.
+
+    حركةُ بيعٍ بلا سطر مقابل (صنفٌ خرج ولا بند له) نصيبُها صفر و**ربحُها صفر لا
+    خسارة**: تكلفتها معلومة وإيرادها مجهول، وإعلانُها خسارةً اختراعُ رقم.
+    """
+    from sales.services import (
+        SALES_STOCK_REFERENCE_TYPES,
+        sales_cogs_map,
+        sales_revenue_map,
+    )
+
+    fields = ["id", "reference_id", "product_id", "quantity", "total_cost"]
+    for name in extra_fields:
+        if name not in fields:
+            fields.append(name)
+    rows = list(
+        qs.filter(
+            reference_type__in=SALES_STOCK_REFERENCE_TYPES,
+            movement_type__in=_STOCK_OUTBOUND,
+        ).values(*fields)
+    )
+    if not rows:
+        return []
+
+    invoice_ids = {r["reference_id"] for r in rows if r["reference_id"]}
+    moved = sales_cogs_map(tenant_id=tenant_id, invoice_ids=invoice_ids)
+    lines = sales_revenue_map(tenant_id=tenant_id, invoice_ids=invoice_ids)
+    for r in rows:
+        key = (r["reference_id"], r["product_id"])
+        line = lines.get(key)
+        total_qty = Decimal(str((moved.get(key) or {}).get("qty") or 0))
+        if line is None or total_qty <= 0:
+            r["revenue"] = ZERO
+            r["profit"] = ZERO
+            continue
+        share = (line["net"] * Decimal(str(r["quantity"] or 0)) / total_qty).quantize(DEC)
+        r["revenue"] = share
+        r["profit"] = share - Decimal(str(r["total_cost"] or 0))
+    return rows
+
+
+def _stock_by_dimension(tenant_id: int, params: dict) -> list[dict]:
+    """استعلام تجميعي **واحد** للكميات والتكلفة — لا استعلام لكل صفّ.
+
+    الاتجاه يُحسم داخل الاستعلام بـ`Case/When` على نوع الحركة، وأسماءُ الطرف
+    والصنف والمستودع تأتي بضمّها في نفس `values()` — فلا جولةُ جلبٍ ثانية ولا N+1.
+    والإيراد يلزمه مرورٌ ثانٍ (لا يسكن في جدول الحركات) بعدد استعلاماتٍ **ثابت**
+    لا يتبع عدد الصفوف — وهو الضمان الذي يهمّ.
+    """
+    from django.db.models import Count
+
+    _key, dim = _stock_dimension(params)
+    detailed = _stock_detailed(params)
+
+    group_fields = list(dim["fields"])
+    if detailed:
+        for extra in ("product_id", "product__sku", "product__name_ar", "product__name_en"):
+            if extra not in group_fields:
+                group_fields.append(extra)
+
+    rows = (
+        _stock_dimension_queryset(tenant_id, params)
+        .values(*group_fields)
+        .annotate(
+            qty_in=_stock_signed_sum("quantity", _STOCK_INBOUND),
+            qty_out=_stock_signed_sum("quantity", _STOCK_OUTBOUND),
+            cost_in=_stock_signed_sum("total_cost", _STOCK_INBOUND),
+            cost_out=_stock_signed_sum("total_cost", _STOCK_OUTBOUND),
+            moves=Count("id"),
+        )
+    )
+
+    # الإيراد والربح مجموعان على **نفس** حركات الصفّ، بمفتاح تجميعٍ واحد.
+    revenue_by_group: dict[tuple, Decimal] = {}
+    profit_by_group: dict[tuple, Decimal] = {}
+    for share in _sale_movement_shares(
+        tenant_id, _stock_dimension_queryset(tenant_id, params), group_fields,
+    ):
+        group_key = tuple(share.get(name) for name in group_fields)
+        revenue_by_group[group_key] = revenue_by_group.get(group_key, ZERO) + share["revenue"]
+        profit_by_group[group_key] = profit_by_group.get(group_key, ZERO) + share["profit"]
+
+    out: list[dict] = []
+    for r in rows:
+        qty_in = Decimal(str(r["qty_in"] or 0))
+        qty_out = Decimal(str(r["qty_out"] or 0))
+        group_key = tuple(r.get(name) for name in group_fields)
+        out.append({
+            "dim_label": dim["label_of"](r),
+            "sku": (r.get("product__sku") or "") if detailed else "",
+            "product_name": (
+                (r.get("product__name_ar") or r.get("product__name_en") or "")
+                if detailed else ""
+            ),
+            "qty_in": _qty(qty_in),
+            "qty_out": _qty(qty_out),
+            "qty_net": _qty(qty_in - qty_out),
+            "cost_in": _money(r["cost_in"]),
+            "cost_out": _money(r["cost_out"]),
+            "revenue": _money(revenue_by_group.get(group_key, ZERO)),
+            "profit": _money(profit_by_group.get(group_key, ZERO)),
+            "moves": r["moves"],
+            # مفاتيح آلة لا أعمدة عرض: يحملها الصفّ ليعيدها التنقيب كما هي.
+            "dim_key": dim["key_of"](r),
+            "row_product": str(r.get("product_id") or "") if detailed else "",
+        })
+
+    # مجمَّعاً بالبُعد ثم الأثقل حركةً أولاً — «أصناف هذا المورد» تُقرأ متجاورة.
+    out.sort(key=lambda row: (
+        row["dim_label"],
+        -abs(Decimal(row["qty_in"]) - Decimal(row["qty_out"])),
+        row["sku"],
+    ))
+    return out
+
+
+def _stock_by_dimension_columns(tenant_id: int, params: dict):
+    """العمود الأول يتبع البُعد المختار، وعمودا الصنف يظهران بالتفصيل وحده."""
+    dim_key, dim = _stock_dimension(params)
+    detailed = _stock_detailed(params)
+    columns = [ReportColumn("dim_label", dim["header"], width="200px")]
+    if detailed and dim_key != "product":
+        columns += [
+            ReportColumn("sku", "الرمز", width="110px"),
+            ReportColumn("product_name", "الصنف"),
+        ]
+    elif detailed:
+        # البُعد هو الصنف نفسه: يكفي رمزه — عمود الاسم يكرّر العمود الأول.
+        columns += [ReportColumn("sku", "الرمز", width="110px")]
+    columns += [
+        ReportColumn("qty_in", "الوارد", KIND_NUMBER, total=True, width="95px"),
+        ReportColumn("qty_out", "الصادر", KIND_NUMBER, total=True, width="95px"),
+        ReportColumn("qty_net", "الصافي", KIND_NUMBER, total=True, width="95px"),
+        ReportColumn("cost_in", "تكلفة الوارد", KIND_MONEY, total=True, width="120px"),
+        ReportColumn("cost_out", "تكلفة الصادر", KIND_MONEY, total=True, width="120px"),
+    ]
+    # الإيراد والربح يُسندان إلى حركة **البيع**، ومحور المورّد لا يحوي منها شيئاً
+    # (طرفُ حركة الشراء هو المورّد وطرفُ حركة البيع هو الزبون). فعمودٌ صفرٌ أبداً
+    # يُقرأ «لم نربح من بضاعة هذا المورّد» وهو غير ما يقوله. والسؤال نفسه — ربحُ
+    # بضاعةِ مورّدٍ بعينه — يلزمه تتبّعُ طبقات التكلفة (أي بيعةٍ استهلكت أي دفعة
+    # شراء)، وهو غير موجودٍ تحت المتوسط المرجّح إلا للوحدات المُرقَّمة.
+    if dim_key != "supplier":
+        columns += [
+            ReportColumn("revenue", "الإيراد", KIND_MONEY, total=True, width="120px"),
+            ReportColumn("profit", "الربح", KIND_MONEY, total=True, width="120px"),
+        ]
+    columns += [
+        ReportColumn("moves", "عدد الحركات", KIND_INT, total=True, width="100px"),
+    ]
+    return tuple(columns)
+
+
+_STOCK_DRILL_COLUMNS = (
+    ReportColumn("movement_date", "التاريخ", KIND_DATE, width="105px"),
+    ReportColumn("document", "المستند", width="160px"),
+    ReportColumn("sku", "الرمز", width="100px"),
+    ReportColumn("product_name", "الصنف"),
+    ReportColumn("warehouse", "المستودع", width="110px"),
+    ReportColumn("partner_name", "الطرف"),
+    ReportColumn("qty_in", "الوارد", KIND_NUMBER, total=True, width="90px"),
+    ReportColumn("qty_out", "الصادر", KIND_NUMBER, total=True, width="90px"),
+    ReportColumn("qty_net", "الصافي", KIND_NUMBER, total=True, width="90px"),
+    ReportColumn("cost_in", "تكلفة الوارد", KIND_MONEY, total=True, width="110px"),
+    ReportColumn("cost_out", "تكلفة الصادر", KIND_MONEY, total=True, width="110px"),
+    ReportColumn("revenue", "الإيراد", KIND_MONEY, total=True, width="110px"),
+    ReportColumn("profit", "الربح", KIND_MONEY, total=True, width="110px"),
+    ReportColumn("moves", "عدد الحركات", KIND_INT, total=True, width="95px"),
+)
+
+
+def _stock_by_dimension_drill(tenant_id: int, params: dict) -> list[dict]:
+    """حركات صفٍّ واحد — نفس المجموعة المفلترة، مقصورةً على مفتاحَي الصفّ.
+
+    أعمدتها هي أعمدة الصفّ نفسها (وارد/صادر/صافي/تكلفة/عدد) بقيمةٍ لكل حركة، كي
+    تكون المقارنة عموداً بعمود لا تفسيراً: مجموع العمود هنا = خانة الصفّ هناك.
+    """
+    _key, dim = _stock_dimension(params)
+    qs = _stock_dimension_queryset(tenant_id, params)
+
+    dim_key = str(params.get("dim_key") or "")
+    try:
+        qs = qs.filter(**dim["filter_of"](dim_key))
+    except (TypeError, ValueError):
+        # مفتاح غير صالح لا يفتح كل الحركات — صفّ لا نعرف مفتاحه لا تفصيل له.
+        return []
+    row_product = _int_param(params, "row_product")
+    if row_product:
+        qs = qs.filter(product_id=row_product)
+
+    # نفس الدالّة التي بنت عمودَي الإيراد والربح في الصفّ — لا حسابٌ ثانٍ هنا.
+    shares = {s["id"]: s for s in _sale_movement_shares(tenant_id, qs)}
+
+    rows = []
+    for m in qs.select_related("product", "warehouse", "partner").order_by("movement_date", "id"):
+        inbound = m.movement_type in _STOCK_INBOUND
+        qty = Decimal(str(m.quantity or 0))
+        cost = Decimal(str(m.total_cost or 0))
+        share = shares.get(m.id) or {}
+        rows.append({
+            "id": m.id,
+            "movement_date": m.movement_date,
+            "document": (
+                f"{m.get_reference_type_display()} #{m.reference_id}"
+                if m.reference_id else m.get_reference_type_display()
+            ),
+            "sku": m.product.sku if m.product_id else "",
+            "product_name": (
+                (m.product.name_ar or m.product.name_en or "") if m.product_id else ""
+            ),
+            "warehouse": m.warehouse.name if m.warehouse_id else "",
+            "partner_name": m.partner.name if m.partner_id else "",
+            "qty_in": _qty(qty if inbound else ZERO),
+            "qty_out": _qty(ZERO if inbound else qty),
+            "qty_net": _qty(qty if inbound else -qty),
+            "cost_in": _money(cost if inbound else ZERO),
+            "cost_out": _money(ZERO if inbound else cost),
+            "revenue": _money(share.get("revenue") or ZERO),
+            "profit": _money(share.get("profit") or ZERO),
+            "moves": 1,
+        })
+    return rows
+
+
+register(ReportSpec(
+    key="stock-by-dimension",
+    title="حركة المخزون حسب بُعد",
+    category="inventory",
+    description=(
+        "ما دخل وما خرج وبكم وبكم بِيع — بمحورٍ تختاره: المورد أو الزبون أو "
+        "المستودع أو الماركة أو الصنف. كل صفّ يُفتح على الحركات التي كوّنته "
+        "ومجموعها يطابقه في كل عمود. محورا المورد والزبون يقرآن طرف الحركة، "
+        "فالتحويل المستودعي والجرد (بلا طرف) يغيبان عنهما ويظهران في بقية "
+        "المحاور. والإيراد والربح مُسنَدان إلى حركة البيع نفسها بنصيبها من صافي "
+        "سطر فاتورتها، فلا يظهران على محور المورد — إسنادُ ربحِ بيعةٍ إلى مورّد "
+        "بضاعتها يلزمه تتبّع طبقات التكلفة."
+    ),
+    filters=DATE_FILTERS + (
+        ReportFilter(
+            "group_by", "جمِّع حسب", "select",
+            options=(
+                ("supplier", "المورد"),
+                ("customer", "الزبون"),
+                ("warehouse", "المستودع"),
+                ("brand", "الماركة"),
+                ("product", "الصنف"),
+            ),
+            default=_STOCK_DIM_DEFAULT,
+        ),
+        ReportFilter(
+            "detail", "التفصيل", "select",
+            options=(("lines", "مفصَّل — صفّ لكل صنف"), ("summary", "ملخَّص")),
+            default="lines",
+        ),
+        ReportFilter("partner", "الطرف", "partner"),
+        ReportFilter("product", "الصنف", "product"),
+        ReportFilter("warehouse", "المستودع", "warehouse"),
+    ),
+    # الفهرس يُطلب بلا معاملات فيرى أعمدة البُعد الافتراضي؛ التشغيل يستبدلها.
+    columns=_stock_by_dimension_columns(0, {}),
+    columns_for=_stock_by_dimension_columns,
+    permission="inventory.item.view",
+    build=_stock_by_dimension,
+    drill=_stock_by_dimension_drill,
+    drill_columns=_STOCK_DRILL_COLUMNS,
+    drill_keys=("dim_key", "row_product"),
+    drill_title="الحركات المكوِّنة للسطر",
+))

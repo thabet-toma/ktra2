@@ -28,9 +28,12 @@ from ._framework import (  # الأدوات ذات الشرطة السفلية �
     _sum,
     _money_sum,
     compute_totals,
+    totals_for,
     report_catalog,
     MAX_ROWS,
+    MAX_DRILL_ROWS,
     run_report,
+    run_drill,
 )
 
 # استيراد وحدات الدومين ينفّذ نداءات register() فيمتلئ REPORTS.
@@ -44,5 +47,5 @@ from . import procurement_logistics  # noqa: F401
 from . import hr  # noqa: F401
 from . import after_sales  # noqa: F401
 
-__all__ = ["REPORTS", "register", "report_catalog", "run_report",
+__all__ = ["REPORTS", "register", "report_catalog", "run_report", "run_drill",
            "ReportSpec", "ReportColumn", "ReportFilter", "compute_totals"]
