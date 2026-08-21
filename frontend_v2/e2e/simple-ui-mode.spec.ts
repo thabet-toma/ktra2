@@ -241,8 +241,11 @@ const withInvoiceScreen = async (page: import('@playwright/test').Page, uiMode: 
     }
     if (url.pathname.endsWith('/sales/settings/current/')) {
       // كل الافتراضيات محلولة ⇒ لا يفرض شيءٌ ظهورَه رغم القناع.
+      // وعميلٌ افتراضي **مقصود**: «رصيد العميل» صفٌّ لا وجود له بلا عميل
+      // مختار (انظر التعليق على ALWAYS_VISIBLE)، وشاشةٌ بلا عميل كانت تُفحَص
+      // بينما نصفُ ما تدّعي حراستَه غائبٌ لا مخفيّ.
       return json({
-        default_customer: null, default_currency: 1, default_payment_type: 'cash',
+        default_customer: 8, default_currency: 1, default_payment_type: 'cash',
         default_cash_account: 10, default_revenue_account_product: 40,
         stock_on_post_default: true, default_vat_rate: null,
         prices_include_tax: false, auto_post_invoices: false,
@@ -251,6 +254,14 @@ const withInvoiceScreen = async (page: import('@playwright/test').Page, uiMode: 
     }
     if (url.pathname.endsWith('/partners/lookup/')) {
       return json([{ id: 8, name: 'عميل الوضع السهل', partner_type: 'Customer' }]);
+    }
+    // مصدر «رصيد العميل» في لوحة المجاميع — بلا ردٍّ منه يبقى `creditHint`
+    // فارغاً فلا يُرسَم الصفّ أصلاً، في الوضعين معاً.
+    if (url.pathname.endsWith('/sales/invoices/credit-preview/')) {
+      return json({
+        credit_limit: null, open_balance: '250.00', proposed_total: '0.00',
+        projected_balance: '250.00', would_exceed: false,
+      });
     }
     if (url.pathname.endsWith('/sales/invoices/')) {
       return json({ count: 0, next: null, previous: null, results: [] });
@@ -282,7 +293,18 @@ const ADVANCED_ONLY = [
 ];
 
 /* THA-128: «أرصدة العميل» خرج من هذه القائمة — كان تبويباً يعيد رقمين تعرضهما
-   لوحة المجاميع أصلاً، فحُذف التبويب وبقي «رصيد العميل» في اللوحة حيث يُقرأ. */
+   لوحة المجاميع أصلاً، فحُذف التبويب وبقي «رصيد العميل» في اللوحة حيث يُقرأ.
+
+   وهنا كان الخلل: بديلُه ليس نظيرَه. «أرصدة العميل» كان **عنوان تبويب** يُرسَم
+   دائماً، أمّا «رصيد العميل» فصفٌّ في لوحة المجاميع مشروطٌ بـ`creditHint` —
+   ولا يُجلَب هذا إلّا بعد اختيار عميل. فبقي الاختبار أحمر منذ THA-128 لأن
+   الشاشة لا عميل فيها، لا لأن الصفّ مخفيّ: القناع لا يمسّه في الوضعين.
+   العلاج اختيارُ عميل في الشاشة المفحوصة (`default_customer` + ردّ
+   `credit-preview/`) لا حذفُ السطر — الحذف كان سيُطفئ حراسةَ وعدٍ قائم.
+
+   ملاحظة تمييز: THA-132 أزال من لوحة المجاميع سطرَي «رصيد العميل قبل احتساب
+   المتبقي…» و«…الحالي بعد احتسابه» لأنهما كانا رقماً كاذباً، وهما نصّان آخران
+   لا يطابقهما `exact: 'رصيد العميل'` أصلاً — فلا صلة لتلك الإزالة بهذا الفشل. */
 const ALWAYS_VISIBLE = ['العميل', 'نقدي', 'تاريخ', 'ملاحظات', 'رصيد العميل'];
 
 test('محرّر الفاتورة في الوضع المتقدّم يعرض كل ما كان يعرضه', async ({ page }) => {
