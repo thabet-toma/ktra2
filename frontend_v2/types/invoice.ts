@@ -59,7 +59,11 @@ export interface InvoiceInstallment {
 }
 
 export interface InvoiceItem {
+    /** مفتاح الصفّ في الشاشة — uuid للبند الجديد، لا يصلح معرّفاً للخادم. */
     id: string;
+    /** معرّف البند على الخادم إن كان محفوظاً — به يُطابَق البند عند التعديل
+     *  فتبقى كميته المستلَمة وسطر إرساليته. غيابه = بندٌ جديد. */
+    serverId?: number;
     itemId: string;
     name: string;
     categoryId: string;

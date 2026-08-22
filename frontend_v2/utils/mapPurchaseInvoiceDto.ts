@@ -15,6 +15,7 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     notes: dto.notes || undefined,
     items: (dto.items || []).map((item, idx) => ({
       id: String(item.id || idx),
+      serverId: Number(item.id) > 0 ? Number(item.id) : undefined,
       itemId: item.product ? String(item.product) : "",
       name: item.product_name || item.name,
       categoryId: "",

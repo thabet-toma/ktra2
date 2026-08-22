@@ -66,10 +66,10 @@ from inventory.models import Product
 
 logger = logging.getLogger("logistics.serializers")
 
-# مرآة POSTED_DOC_WARNING لحالة الاستلام: استبدال بنود فاتورة استُلمت بضاعتها
-# يمسح كمياتها المستلَمة وأسطر إرساليتها بينما تبقى حركات المخزون.
+# ذيلٌ يُلحَق برسائل حرّاس البند المستلَم: يسمّي المخرج بدل أن يترك المستخدم
+# أمام رفضٍ بلا طريق (`_guard_received_items`).
 RECEIVED_DOC_WARNING = (
-    "استُلمت بضاعة هذه الفاتورة. ألغِ إرسالية الاستلام أولاً ثم عدّل البنود."
+    "ألغِ إرسالية الاستلام أولاً إن كان التعديل مقصوداً."
 )
 
 
@@ -133,6 +133,10 @@ RECEIVED_DOC_WARNING = (
 from ._helpers import _deal_title_for_list_preview
 
 class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
+    # معرّف البند يُقرأ ويُكتب: التعديل يطابق البنود به بدل حذفها وإعادة
+    # إنشائها (`PurchaseInvoiceSerializer._sync_items`)، فتبقى الكمية المستلَمة
+    # وأسطر الإرسالية معلّقةً على البند نفسه. غيابه = بندٌ جديد.
+    id = serializers.IntegerField(required=False)
     product_name = serializers.SerializerMethodField()
     expense_account_code = serializers.CharField(source='expense_account.code', read_only=True)
     expense_account_name = serializers.CharField(source='expense_account.name', read_only=True)
@@ -151,7 +155,7 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
             'discount_percent', 'discount_amount',
             'expense_account', 'expense_account_code', 'expense_account_name',
         ]
-        read_only_fields = ['id', 'received_quantity']
+        read_only_fields = ['received_quantity']
 
     def validate_serials(self, value):
         from inventory.serials import normalize_serials
@@ -715,7 +719,11 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         fees_data = validated_data.pop('fees', [])
         invoice = PurchaseInvoice.objects.create(**validated_data)
         for item_data in items_data:
-            PurchaseInvoiceItem.objects.create(invoice=invoice, **item_data)
+            # معرّفٌ في حمولة إنشاء لا معنى له (بندٌ من فاتورة أخرى أو مفتاح
+            # مفروض) — يُسقَط بدل أن يُكتب pk بعينه.
+            PurchaseInvoiceItem.objects.create(
+                invoice=invoice, **{k: v for k, v in item_data.items() if k != 'id'},
+            )
         for fee_data in fees_data:
             fee_data = self._normalize_fee_amount(invoice, fee_data)
             fee_data = self._bind_import_expense_account(invoice, fee_data)
@@ -726,44 +734,114 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             logger.info('purchase invoice fees created invoice=%s count=%s', invoice.pk, len(fees_data))
         return invoice
 
-    def _reject_edit_of_received_items(self, instance):
-        """بنود فاتورة استُلمت بضاعتها لا تُستبدل — أُلغِ الإرسالية أولاً.
+    # الحقول التي يعتمد عليها سند الاستلام: غيّرها بعد الاستلام ⇒ الدفتر
+    # والمخزن يقولان شيئاً والفاتورة شيئاً آخر.
+    def _guard_received_items(self, instance, existing, items_data, kept_ids):
+        """بندٌ استُلمت بضاعته مُجمَّد فيما يعتمد عليه سند الاستلام.
 
-        استبدال البنود هنا حذفٌ وإعادة إنشاء: `received_quantity` يعود صفراً
-        (حقل للقراءة فقط فلا يصل في الحمولة)، وأسطر الإرسالية تسقط بالـCASCADE
-        (`GoodsReceiptLine.item`) — بينما حركات المخزون وقيدها تبقى. النتيجة
-        مخزنٌ يحمل البضاعة وفاتورةٌ تقول لم يُستلَم شيء، وإرسالية بلا أسطر لا
-        يقدر `void_goods_receipt` على عكسها.
-
-        الحارس هنا لا في الـview: هذا موضع الحذف، فيغطّي كل مستدعٍ للـserializer.
-        الفاتورة المرحّلة يمنعها حارسها في `perform_update`؛ وهذا يغطّي النافذة
-        المتبقية — فاتورة غير مرحّلة استُلمت بلا قيد (قيمة صفرية).
+        الحركة المخزنية سُجّلت بصنفه وسعره، والوحدات المُرقَّمة تجسّدت به —
+        فحذفه أو إنقاص كميته عن المستلَم أو تبديل صنفه/سعره/أرقامه يفصل
+        الفاتورة عن أثرها الفعلي. الباقي (الملاحظات، الوصف، بنود جديدة،
+        زيادة الكمية) يبقى مسموحاً: الاستلام الجزئي حالة مشروعة.
         """
-        received = [
-            it for it in instance.items.all()
-            if Decimal(str(it.received_quantity or 0)) > 0
-        ]
-        if not received:
-            return
-        logger.info(
-            'purchase invoice item edit rejected — already received invoice=%s items=%s',
-            instance.pk, len(received),
-        )
-        raise serializers.ValidationError({'detail': RECEIVED_DOC_WARNING})
+        errors = []
+        for item in existing.values():
+            received = Decimal(str(item.received_quantity or 0))
+            if received > 0 and item.id not in kept_ids:
+                errors.append(
+                    f'البند «{item.name}» استُلم منه {received.normalize()} — لا يُحذف.'
+                )
+        for item_id, data in items_data:
+            item = existing.get(item_id)
+            if item is None:
+                continue
+            received = Decimal(str(item.received_quantity or 0))
+            if received <= 0:
+                continue
+            label = f'«{item.name}»'
+            if 'quantity' in data and Decimal(str(data['quantity'] or 0)) < received:
+                errors.append(
+                    f'كمية البند {label} أقل من المستلَم ({received.normalize()}).'
+                )
+            if 'product' in data and getattr(data['product'], 'pk', None) != item.product_id:
+                errors.append(f'لا يُغيَّر صنف بندٍ استُلمت بضاعته {label}.')
+            if 'unit_price' in data and (
+                Decimal(str(data['unit_price'] or 0)) != Decimal(str(item.unit_price or 0))
+            ):
+                errors.append(
+                    f'لا يُغيَّر سعر بندٍ استُلمت بضاعته {label} — '
+                    'تكلفته دخلت المخزون والدفاتر.'
+                )
+            if 'serials' in data and (
+                [str(x) for x in (data['serials'] or [])]
+                != [str(x) for x in (item.serials or [])]
+            ):
+                errors.append(f'لا تُعدَّل أرقام بندٍ استُلمت وحداته {label}.')
+        if errors:
+            logger.info(
+                'purchase invoice item edit rejected — received lines invoice=%s errors=%s',
+                instance.pk, len(errors),
+            )
+            raise serializers.ValidationError(
+                {'detail': '؛ '.join(errors) + ' ' + RECEIVED_DOC_WARNING},
+            )
+
+    def _sync_items(self, instance, items_data):
+        """مطابقة البنود بالمعرّف — لا حذفٌ وإعادة إنشاء.
+
+        الحذف الشامل كان يُصفّر `received_quantity` (حقل للقراءة فقط فلا يعود
+        في الحمولة) ويُسقط أسطر الإرسالية بالـCASCADE (`GoodsReceiptLine.item`)
+        بينما تبقى حركات المخزون — فتصير الإرسالية بلا أسطر لا يقدر
+        `void_goods_receipt` على عكسها. المطابقة بالمعرّف تُبقي الاثنين.
+
+        بندٌ بمعرّف = تعديل في مكانه · بلا معرّف = جديد · غائبٌ عن الحمولة =
+        يُحذف. معرّفٌ من فاتورة أخرى يُرفض بدل أن يُنشئ بنداً صامتاً.
+        """
+        existing = {it.id: it for it in instance.items.all()}
+        normalized = []
+        kept_ids = set()
+        for raw in items_data:
+            data = dict(raw)
+            item_id = data.pop('id', None)
+            if item_id is not None:
+                item_id = int(item_id)
+                if item_id not in existing:
+                    raise serializers.ValidationError(
+                        {'detail': f'البند {item_id} لا ينتمي لهذه الفاتورة.'},
+                    )
+                # مرتان بالمعرّف نفسه = سطرٌ يبتلع الآخر بصمت لا سطران.
+                if item_id in kept_ids:
+                    raise serializers.ValidationError(
+                        {'detail': f'البند {item_id} مكرَّر في الحمولة.'},
+                    )
+                kept_ids.add(item_id)
+            normalized.append((item_id, data))
+
+        self._guard_received_items(instance, existing, normalized, kept_ids)
+
+        # المزامنة كلٌّ لا يتجزّأ: فشلٌ في المنتصف كان يترك فاتورةً نصف مُعدَّلة.
+        with transaction.atomic():
+            for item_id, data in normalized:
+                if item_id is None:
+                    PurchaseInvoiceItem.objects.create(invoice=instance, **data)
+                    continue
+                item = existing[item_id]
+                for attr, value in data.items():
+                    setattr(item, attr, value)
+                item.save()
+            for item_id, item in existing.items():
+                if item_id not in kept_ids:
+                    item.delete()
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
         fees_data = validated_data.pop('fees', None)
-        if items_data is not None:
-            self._reject_edit_of_received_items(instance)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
         if items_data is not None:
-            instance.items.all().delete()
-            for item_data in items_data:
-                PurchaseInvoiceItem.objects.create(invoice=instance, **item_data)
+            self._sync_items(instance, items_data)
 
         if fees_data is not None:
             instance.fees.all().delete()

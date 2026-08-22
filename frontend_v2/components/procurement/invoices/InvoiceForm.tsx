@@ -598,6 +598,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         items: (payload.items || [])
           .filter((item: any) => item.itemId && item.itemId !== "")
           .map((item: any) => ({
+            // معرّف الخادم يجعل الحفظ تعديلاً في مكانه: الكمية المستلَمة
+            // وأسطر الإرسالية معلّقة على البند، وحذفه وإعادة إنشاؤه يُسقطها.
+            ...(Number(item.serverId) > 0 ? { id: Number(item.serverId) } : {}),
             product: Number(item.itemId) || null,
             name: item.name,
             quantity: roundSqlMoney4(item.quantity ?? 0),
@@ -863,6 +866,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     let updatedItems = [...(formData.items || [])];
     if (index !== null && index < updatedItems.length) {
       newItem.id = updatedItems[index].id;
+      // الصفّ نفسه لا صفٌّ بديل: بلا نقل المعرّف يُحذف البند ويُعاد إنشاؤه
+      // عند الحفظ فتضيع كميته المستلَمة، ويرفض الخادمُ تبديلَ صنفٍ مستلَم
+      // برسالته الدقيقة بدل «لا يُحذف».
+      newItem.serverId = updatedItems[index].serverId;
       updatedItems[index] = newItem;
     } else {
       updatedItems.push(newItem);

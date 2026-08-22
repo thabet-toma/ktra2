@@ -216,33 +216,67 @@ class LocalInvoiceReceiveTest(APITestCase):
         assert all(w["tenant"] == self.tenant.TenantID for w in rows)
         assert len(rows) >= 1
 
-    def test_edit_items_blocked_after_receive(self):
-        """تعديل بنود فاتورة استُلمت بضاعتها مرفوض — البنود تُحذف وتُعاد بناءً.
+    # ── تعديل بنود فاتورة استُلمت بضاعتها ──────────────────────────────────
+    # الاستلام الصفري (كميات بلا أسعار) لا يُنشئ قيداً فتبقى الفاتورة مسودةً
+    # قابلةً للتعديل وهي ممتلئة بضاعةً — النافذة الوحيدة التي لا يغطّيها حارس
+    # «المستند المرحّل لا يُعدَّل».
 
-        الفاتورة الصفرية القيمة (كميات بلا أسعار) تُستلَم بلا قيد فتبقى غير
-        مرحّلة، فيمرّ تعديلها من حارس «المستند المرحّل». وحذف البنود يمسح
-        `received_quantity` ويُسقط أسطر الإرسالية بالـCASCADE بينما تبقى حركات
-        المخزون — دفترٌ يقول «استُلم» وفاتورةٌ تقول «لم يُستلَم شيء».
-        """
-        from logistics.models import GoodsReceiptLine
-
-        inv, item = self._make_invoice(qty="10", price="0")
+    def _received_invoice(self, qty="10", price="0"):
+        inv, item = self._make_invoice(qty=qty, price=price)
         res = self.client.post(
             f"/api/logistics/purchase-invoices/{inv.pk}/receive/",
-            {"lines": [{"item_id": item.pk, "quantity": 10, "warehouse_id": self.warehouse.pk}]},
+            {"lines": [{"item_id": item.pk, "quantity": qty, "warehouse_id": self.warehouse.pk}]},
             format="json", **self._auth())
         assert res.status_code == 200, res.content
         inv.refresh_from_db()
-        assert not inv.is_posted, "الاستلام الصفري لا يُرحّل الفاتورة — هذه هي النافذة"
-        assert inv.receipt_status == PurchaseInvoice.RECEIPT_FULL
+        item.refresh_from_db()
+        assert not inv.is_posted, "الاستلام الصفري لا يُرحّل — هذه هي النافذة"
+        assert item.received_quantity == Decimal(qty)
+        return inv, item
+
+    def _patch_items(self, inv, items):
+        return self.client.patch(
+            f"/api/logistics/purchase-invoices/{inv.pk}/",
+            {"items": items}, format="json", **self._auth())
+
+    def _line(self, item, **over):
+        row = {"id": item.pk, "product": item.product_id, "name": item.name,
+               "quantity": str(item.quantity), "unit_price": str(item.unit_price),
+               "total_price": str(item.total_price)}
+        row.update(over)
+        return row
+
+    def test_edit_by_id_preserves_received_quantity_and_receipt_line(self):
+        """التعديل بالمعرّف يُبقي الكمية المستلَمة وسطر الإرسالية على البند نفسه."""
+        from logistics.models import GoodsReceiptLine
+
+        inv, item = self._received_invoice()
         gr_line = GoodsReceiptLine.objects.get(item=item)
 
-        res = self.client.patch(
-            f"/api/logistics/purchase-invoices/{inv.pk}/",
-            {"items": [{"product": self.product.pk, "name": "صنف محلي",
-                        "quantity": "5", "unit_price": "0", "total_price": "0"}]},
-            format="json", **self._auth())
+        res = self._patch_items(inv, [self._line(item, name="اسم مصحَّح",
+                                                 notes="ملاحظة", quantity="12")])
+        assert res.status_code == 200, res.content
+
+        item.refresh_from_db()
+        assert item.name == "اسم مصحَّح"
+        assert item.quantity == Decimal("12.0000")
+        assert item.received_quantity == Decimal("10.0000"), "الكمية المستلَمة لا تُمسح"
+        assert inv.items.count() == 1
+        assert inv.items.first().pk == item.pk, "البند لم يُحذف ويُعاد إنشاؤه"
+        gr_line.refresh_from_db()
+        assert gr_line.item_id == item.pk, "سطر الإرسالية بقي معلّقاً على بنده"
+
+    def test_removing_received_line_rejected(self):
+        """حذف بندٍ استُلمت بضاعته مرفوض — الحركة المخزنية تبقى بلا فاتورة."""
+        from logistics.models import GoodsReceiptLine
+
+        inv, item = self._received_invoice()
+        gr_line = GoodsReceiptLine.objects.get(item=item)
+
+        res = self._patch_items(inv, [{"product": self.product.pk, "name": "بند بديل",
+                                       "quantity": "5", "unit_price": "0", "total_price": "0"}])
         assert res.status_code == 400, res.content
+        assert "لا يُحذف" in res.json()["detail"]
 
         item.refresh_from_db()
         assert item.received_quantity == Decimal("10.0000")
@@ -251,14 +285,71 @@ class LocalInvoiceReceiveTest(APITestCase):
         inv.refresh_from_db()
         assert inv.receipt_status == PurchaseInvoice.RECEIPT_FULL
 
-    def test_edit_items_allowed_before_receive(self):
-        """الفاتورة غير المستلَمة تبقى قابلة للتعديل — الحارس لا يوسّع الحظر."""
+    def test_quantity_below_received_rejected(self):
+        inv, item = self._received_invoice()
+        res = self._patch_items(inv, [self._line(item, quantity="4")])
+        assert res.status_code == 400, res.content
+        assert "أقل من المستلَم" in res.json()["detail"]
+        item.refresh_from_db()
+        assert item.quantity == Decimal("10.0000")
+
+    def test_price_and_product_change_on_received_line_rejected(self):
+        other = Product.objects.create(
+            tenant=self.tenant, sku="LOC-2", name_ar="صنف آخر",
+            quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
+        inv, item = self._received_invoice()
+
+        res = self._patch_items(inv, [self._line(item, unit_price="500", total_price="5000")])
+        assert res.status_code == 400, res.content
+        assert "سعر" in res.json()["detail"]
+
+        res = self._patch_items(inv, [self._line(item, product=other.pk)])
+        assert res.status_code == 400, res.content
+        assert "صنف" in res.json()["detail"]
+
+        item.refresh_from_db()
+        assert item.unit_price == Decimal("0.0000")
+        assert item.product_id == self.product.pk
+
+    def test_add_line_beside_received_line_allowed(self):
+        """الاستلام الجزئي حالة مشروعة: بندٌ جديد يُضاف بلا مساس بالمستلَم."""
+        inv, item = self._received_invoice()
+        res = self._patch_items(inv, [
+            self._line(item),
+            {"product": self.product.pk, "name": "بند إضافي",
+             "quantity": "3", "unit_price": "0", "total_price": "0"},
+        ])
+        assert res.status_code == 200, res.content
+        assert inv.items.count() == 2
+        item.refresh_from_db()
+        assert item.received_quantity == Decimal("10.0000")
+
+    def test_item_id_from_another_invoice_rejected(self):
+        """معرّف غريب يُرفض بدل أن يُنشئ بنداً صامتاً ويحذف بند الفاتورة."""
+        inv, item = self._make_invoice(qty="2", price="10")
+        other_inv, other_item = self._make_invoice(qty="2", price="10")
+        res = self._patch_items(inv, [self._line(other_item)])
+        assert res.status_code == 400, res.content
+        assert "لا ينتمي لهذه الفاتورة" in res.json()["detail"]
+        assert inv.items.count() == 1
+        assert inv.items.first().pk == item.pk
+
+    def test_unreceived_line_still_removable(self):
+        """دلالة الحذف محفوظة: بندٌ غائبٌ عن الحمولة يُحذف ما لم يُستلَم."""
         inv, item = self._make_invoice(qty="10", price="0")
-        res = self.client.patch(
-            f"/api/logistics/purchase-invoices/{inv.pk}/",
-            {"items": [{"product": self.product.pk, "name": "صنف محلي",
-                        "quantity": "5", "unit_price": "0", "total_price": "0"}]},
-            format="json", **self._auth())
+        extra = PurchaseInvoiceItem.objects.create(
+            invoice=inv, product=self.product, name="بند مؤقت",
+            quantity=Decimal("1"), unit_price=Decimal("0"), total_price=Decimal("0"))
+        res = self._patch_items(inv, [self._line(item)])
         assert res.status_code == 200, res.content
         assert inv.items.count() == 1
-        assert inv.items.first().quantity == Decimal("5.0000")
+        assert not PurchaseInvoiceItem.objects.filter(pk=extra.pk).exists()
+
+    def test_duplicate_item_id_rejected(self):
+        """المعرّف مرّتين = سطرٌ يبتلع الآخر بصمت — يُرفض بدل أن يُفقَد بند."""
+        inv, item = self._make_invoice(qty="4", price="10")
+        res = self._patch_items(inv, [self._line(item), self._line(item, quantity="9")])
+        assert res.status_code == 400, res.content
+        assert "مكرَّر" in res.json()["detail"]
+        item.refresh_from_db()
+        assert item.quantity == Decimal("4.0000")
