@@ -215,3 +215,50 @@ class LocalInvoiceReceiveTest(APITestCase):
         rows = data["results"] if isinstance(data, dict) else data
         assert all(w["tenant"] == self.tenant.TenantID for w in rows)
         assert len(rows) >= 1
+
+    def test_edit_items_blocked_after_receive(self):
+        """تعديل بنود فاتورة استُلمت بضاعتها مرفوض — البنود تُحذف وتُعاد بناءً.
+
+        الفاتورة الصفرية القيمة (كميات بلا أسعار) تُستلَم بلا قيد فتبقى غير
+        مرحّلة، فيمرّ تعديلها من حارس «المستند المرحّل». وحذف البنود يمسح
+        `received_quantity` ويُسقط أسطر الإرسالية بالـCASCADE بينما تبقى حركات
+        المخزون — دفترٌ يقول «استُلم» وفاتورةٌ تقول «لم يُستلَم شيء».
+        """
+        from logistics.models import GoodsReceiptLine
+
+        inv, item = self._make_invoice(qty="10", price="0")
+        res = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv.pk}/receive/",
+            {"lines": [{"item_id": item.pk, "quantity": 10, "warehouse_id": self.warehouse.pk}]},
+            format="json", **self._auth())
+        assert res.status_code == 200, res.content
+        inv.refresh_from_db()
+        assert not inv.is_posted, "الاستلام الصفري لا يُرحّل الفاتورة — هذه هي النافذة"
+        assert inv.receipt_status == PurchaseInvoice.RECEIPT_FULL
+        gr_line = GoodsReceiptLine.objects.get(item=item)
+
+        res = self.client.patch(
+            f"/api/logistics/purchase-invoices/{inv.pk}/",
+            {"items": [{"product": self.product.pk, "name": "صنف محلي",
+                        "quantity": "5", "unit_price": "0", "total_price": "0"}]},
+            format="json", **self._auth())
+        assert res.status_code == 400, res.content
+
+        item.refresh_from_db()
+        assert item.received_quantity == Decimal("10.0000")
+        assert inv.items.count() == 1
+        assert GoodsReceiptLine.objects.filter(pk=gr_line.pk).exists()
+        inv.refresh_from_db()
+        assert inv.receipt_status == PurchaseInvoice.RECEIPT_FULL
+
+    def test_edit_items_allowed_before_receive(self):
+        """الفاتورة غير المستلَمة تبقى قابلة للتعديل — الحارس لا يوسّع الحظر."""
+        inv, item = self._make_invoice(qty="10", price="0")
+        res = self.client.patch(
+            f"/api/logistics/purchase-invoices/{inv.pk}/",
+            {"items": [{"product": self.product.pk, "name": "صنف محلي",
+                        "quantity": "5", "unit_price": "0", "total_price": "0"}]},
+            format="json", **self._auth())
+        assert res.status_code == 200, res.content
+        assert inv.items.count() == 1
+        assert inv.items.first().quantity == Decimal("5.0000")

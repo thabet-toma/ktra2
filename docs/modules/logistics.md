@@ -132,6 +132,7 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 - **سعر شحن > 0 على صفقة بلا CBM/KG مرفوض** (وإلا حصّتها صفر صامتة): `domain/shipment_builder.py:43-59`، ونفس الحارس في `views.py:1582-1588`.
 - **لا فاتورة استيراد قبل**: إثبات تكلفة الشحن (`landed_cost.py`) + اكتمال دفع الصفقة بالدولار (`:1029`) + عدم تحويلها سابقاً (`:1018`).
 - **المستند المرحّل لا يُعدَّل ولا يُحذف**: `_shipment_is_posted` (views.py:2044)، `_clearance_is_posted` (views.py:2228)، وحارس `transit_journal` في `set_freight` (views.py:1558-1562).
+- **بنود فاتورة استُلمت بضاعتها لا تُستبدل**: `PurchaseInvoiceSerializer.update` يحذف البنود ويعيد إنشاءها، فيُصفِّر `received_quantity` (حقل للقراءة فقط) ويُسقط أسطر الإرسالية بالـCASCADE (`GoodsReceiptLine.item`) بينما تبقى حركات المخزون — لذا يرفض الحارس (`_reject_edit_of_received_items`) الحمولة التي تحمل `items` إن كان لأيّ بند كمية مستلَمة، والمخرج إلغاءُ الإرسالية (`DELETE goods-receipts/{id}` ⇐ `void_goods_receipt`). الفاتورة المرحّلة يمنعها حارسها في `perform_update`؛ وهذا يغطّي النافذة المتبقية — فاتورة صفرية القيمة استُلمت بلا قيد فبقيت غير مرحّلة (`services.py` — `gross > 0` وحده يُرحّل).
 - **الفاتورة المرحّلة مُجمَّدة على قيمها المحفوظة**؛ غير المرحّلة تُعاد حسابها حيّاً عند القراءة (`landed_cost.py`).
 - **العزل بالشركة إلزامي** (كل ViewSet يرث `BaseTenantViewSet`، `core/mixins.py`)، و**إلغاء الترحيل يحتاج** `import.doc.unpost` (views.py:760, 2104, 2176, 2275, 2296, 2593).
 
@@ -156,4 +157,5 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | `tests/test_clearance_import.py` (393) · `test_deal_total_and_freight_gate.py` (208) | استيراد الفواتير من التخليص · بوّابة «تكلفة الشحن مُثبتة» قبل الفوترة |
 | `tests/test_import_payment_separation.py` (556) | فصل الاستحقاق عن الدفع (تخليص + نقل محلي) |
 | `tests/test_shipment_freight_accrual.py` (307) · `test_receive_on_post_setting.py` (466) | استحقاق شحن الوكيل مستقلاً عن دفعاته · الاستلام عند الترحيل و GR/IR |
+| `tests/test_local_invoice_receive.py` | استلام الفاتورة المحلية للمخزن · حارس تعديل بنود فاتورة مستلَمة |
 | `tests/test_tenant_isolation.py` (75) | لا تسرّب صفقات بين الشركات؛ 400 بلا ترويسة الشركة |

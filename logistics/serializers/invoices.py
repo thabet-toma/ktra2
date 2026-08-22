@@ -66,6 +66,12 @@ from inventory.models import Product
 
 logger = logging.getLogger("logistics.serializers")
 
+# مرآة POSTED_DOC_WARNING لحالة الاستلام: استبدال بنود فاتورة استُلمت بضاعتها
+# يمسح كمياتها المستلَمة وأسطر إرساليتها بينما تبقى حركات المخزون.
+RECEIVED_DOC_WARNING = (
+    "استُلمت بضاعة هذه الفاتورة. ألغِ إرسالية الاستلام أولاً ثم عدّل البنود."
+)
+
 
 
 
@@ -720,9 +726,36 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             logger.info('purchase invoice fees created invoice=%s count=%s', invoice.pk, len(fees_data))
         return invoice
 
+    def _reject_edit_of_received_items(self, instance):
+        """بنود فاتورة استُلمت بضاعتها لا تُستبدل — أُلغِ الإرسالية أولاً.
+
+        استبدال البنود هنا حذفٌ وإعادة إنشاء: `received_quantity` يعود صفراً
+        (حقل للقراءة فقط فلا يصل في الحمولة)، وأسطر الإرسالية تسقط بالـCASCADE
+        (`GoodsReceiptLine.item`) — بينما حركات المخزون وقيدها تبقى. النتيجة
+        مخزنٌ يحمل البضاعة وفاتورةٌ تقول لم يُستلَم شيء، وإرسالية بلا أسطر لا
+        يقدر `void_goods_receipt` على عكسها.
+
+        الحارس هنا لا في الـview: هذا موضع الحذف، فيغطّي كل مستدعٍ للـserializer.
+        الفاتورة المرحّلة يمنعها حارسها في `perform_update`؛ وهذا يغطّي النافذة
+        المتبقية — فاتورة غير مرحّلة استُلمت بلا قيد (قيمة صفرية).
+        """
+        received = [
+            it for it in instance.items.all()
+            if Decimal(str(it.received_quantity or 0)) > 0
+        ]
+        if not received:
+            return
+        logger.info(
+            'purchase invoice item edit rejected — already received invoice=%s items=%s',
+            instance.pk, len(received),
+        )
+        raise serializers.ValidationError({'detail': RECEIVED_DOC_WARNING})
+
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
         fees_data = validated_data.pop('fees', None)
+        if items_data is not None:
+            self._reject_edit_of_received_items(instance)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
