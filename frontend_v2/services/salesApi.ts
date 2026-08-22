@@ -39,6 +39,10 @@ export type SalesInvoiceRow = {
   remaining_balance?: string;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payment_status_display?: string;
+  /** T-DUE: التأخّر بُعدٌ فوق حالة الدفع — لا قيمةٌ رابعة فيها. */
+  is_overdue?: boolean;
+  days_overdue?: number;
+  payment_terms_days?: number | null;
   customer_balance?: string;
   currency: number;
   stock_on_post?: boolean;
@@ -298,6 +302,16 @@ export async function getDeliveryLines(
    الفاتورة. يحرس ذلك `e2e/sales-invoice-context-tabs.spec.ts` بعدّ النداءات. */
 
 /** صفّ حركة مخزون سبّبتها هذه الفاتورة («رقم الحركة» في مرجع الأصيل). */
+/** T-PCTX: عقد تبويبات السياق لجانب البيع — يستهلكه `DocumentContextTabs`. */
+export const salesInvoiceContextApi = {
+  getStockMovements: (id: number) => getInvoiceStockMovements(id),
+  getPartnerLedger: (id: number) => getInvoiceCustomerLedger(id),
+  listAttachments: (id: number) => listInvoiceAttachments(id),
+  addAttachment: (id: number, url: string) => addInvoiceAttachment(id, url),
+  deleteAttachment: (id: number, attachmentId: number) =>
+    deleteInvoiceAttachment(id, attachmentId),
+};
+
 export type InvoiceStockMovementRow = {
   id: number;
   date: string | null;

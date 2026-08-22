@@ -171,6 +171,16 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
             )
         elif payment_status == "unpaid":
             qs = qs.filter(models.Q(grand_total__lte=0) | models.Q(amount_paid__lte=0))
+        elif payment_status == "overdue":
+            # T-DUE: «متأخرة» بُعدٌ فوق حالة الدفع لا قيمةٌ رابعة فيها — عليها
+            # متبقٍّ **و**استحقاقها مضى. نفس قاعدة جانب الشراء.
+            from django.utils import timezone
+            qs = qs.filter(
+                due_date__isnull=False,
+                due_date__lt=timezone.localdate(),
+                grand_total__gt=0,
+                amount_paid__lt=models.F("grand_total"),
+            )
         date_from = self.request.query_params.get("date_from")
         if date_from:
             qs = qs.filter(invoice_date__gte=date_from)
@@ -754,6 +764,29 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                 {k: (str(v) if isinstance(v, Decimal) else v) for k, v in row.items()}
                 for row in remaining_delivery_lines(invoice)
             ],
+        })
+
+    @action(detail=True, methods=["get"], url_path="returnable-lines")
+    def returnable_lines(self, request, pk=None):
+        """T-RETQTY: بنود الفاتورة الأصلية القابلة للإرجاع (المفوتر · المرتجع ·
+        المتبقّي) — تغذّي شاشة «مرجع البيع» بنفس الأرقام التي يقيس بها الحارس
+        الخادميّ، فلا يرى المستخدم رقماً ويُرفض بآخر. مرآة نقطة الشراء."""
+        from sales.services import returnable_lines_for_invoice
+
+        invoice = self.get_object()
+        return Response({
+            "original_invoice": invoice.pk,
+            "invoice_number": invoice.invoice_number,
+            "customer": invoice.customer_id,
+            "customer_name": invoice.customer.name if invoice.customer_id else None,
+            "lines": returnable_lines_for_invoice(
+                invoice,
+                exclude_invoice_id=(
+                    int(request.query_params["exclude_invoice"])
+                    if str(request.query_params.get("exclude_invoice") or "").isdigit()
+                    else None
+                ),
+            ),
         })
 
     @action(detail=True, methods=["get"], url_path="stock-movements")

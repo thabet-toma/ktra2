@@ -16,6 +16,11 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+# T-PCTX: أنواع حركات المخزون التي يسبّبها **مستند فاتورة الشراء نفسه**.
+# سند الاستلام المستقلّ (GR/IR) يحمل `GOODS_RECEIPT` بمعرّف السند لا الفاتورة،
+# فلا يدخل هنا — تبويب الفاتورة يقول ما فعلته هي.
+PURCHASE_STOCK_REFERENCE_TYPES = ("PURCHASE_INVOICE", "PURCHASE_RETURN")
+
 GR_IR_ACCOUNT_CODE = "2110"
 GR_IR_ACCOUNT_NAME = "بضاعة مُستلَمة لم تُفوتَر (GR/IR Clearing)"
 
@@ -367,6 +372,37 @@ def convert_local_quotation_to_invoice(quotation, *, user=None):
     return invoice, True
 
 
+def purchase_journal_settlement_debit(invoice) -> Decimal:
+    """ما سُوّي **داخل قيد فاتورة الشراء نفسه** — مجموع مدين ذمم المورد فيه.
+
+    قبل Feature 2 كانت الفاتورة النقدية تُرحَّل بقسمين: إثباتٌ يدائن الذمم ثم
+    «Section B» يدينها ويدائن الصندوق — تسويةٌ داخل القيد بلا سند صرف. تلك
+    القيود متوازنة وصحيحة، فحسابُها «مدفوعاً» حقٌّ لا افتراض؛ وحذفُ القاعدة كان
+    سيقلب فواتير تاريخية مسدَّدة إلى «غير مدفوعة».
+
+    اليوم لا يُنتج الترحيل هذا السطر إطلاقاً (يثبته `test_pi_subledger_routing`)،
+    فالقيمة صفرٌ لكل فاتورة جديدة وتبقى القاعدة واحدة للزمنين.
+
+    المرجع مستثنى: هو يدين الذمم **بحكم تعريفه** لا تسويةً. مرآة
+    `sales/services/flow.py` (`invoice_journal_settlement_credit`).
+    """
+    from django.db.models import Sum
+
+    from accounting.models import JournalLine
+
+    if getattr(invoice, "is_return", False):
+        return Decimal("0")
+    if not invoice.journal_id:
+        return Decimal("0")
+    ap_account_id = getattr(invoice.partner, "linked_account_id", None)
+    if not ap_account_id:
+        return Decimal("0")
+    total = JournalLine.objects.filter(
+        journal_id=invoice.journal_id, account_id=ap_account_id, debit__gt=0,
+    ).aggregate(total=Sum("debit"))["total"]
+    return Decimal(str(total or 0)).quantize(DEC)
+
+
 def purchase_invoice_payment_summary(invoice):
     """ملخص دفع فاتورة الشراء من السندات المرتبطة والمرحّلة فقط."""
     cached = getattr(invoice, "_payment_summary_cache", None)
@@ -405,10 +441,13 @@ def purchase_invoice_payment_summary(invoice):
         ),
         Decimal("0"),
     )
-    recorded_paid = linked_paid + legacy_paid
-    paid = recorded_paid if recorded_paid > 0 else Decimal(str(invoice.attached_cash_amount or 0))
-    if invoice.payment_type == "cash" and invoice.is_posted:
-        paid = max(paid, payable)
+    # T-APPAID: «المدفوع» يُحسب ولا يُفترض. القاعدة السابقة كانت تعطي كل فاتورة
+    # نقدية مرحّلة `paid = payable` بغضّ النظر عن وجود سند، وتسقط على
+    # `attached_cash_amount` وهو عمودٌ لا يُرحّل شيئاً — فتقول الشاشة «مدفوعة
+    # بالكامل» وذمم المورد دائنة. ما يُحتسب اليوم شيئان فقط، وكلاهما قيدٌ في
+    # الدفاتر: سنداتٌ مرحّلة، وتسويةٌ داخل قيد الفاتورة نفسه (فواتير ما قبل
+    # Feature 2). النسخة الـSQL أدناه تطبّق القاعدة نفسها حرفاً بحرف.
+    paid = linked_paid + legacy_paid + purchase_journal_settlement_debit(invoice)
     summary = {
         "fees_total": fees_total,
         "payable_total": payable,
@@ -418,6 +457,139 @@ def purchase_invoice_payment_summary(invoice):
     return summary
 
 
+def _auto_purchase_settlement_note(invoice) -> str:
+    """نصّ ملاحظات سند التسوية التلقائي — مصدر واحد يكتبه الترحيل ويقرأه التمييز."""
+    return f"صرف نقدي تلقائي — فاتورة شراء {invoice.invoice_number}"
+
+
+def is_auto_cash_purchase_settlement(payment, invoice) -> bool:
+    """هل هذا السند هو تسوية الفاتورة النقدية التلقائية (لا سند مستخدم)؟
+
+    العلامة الصريحة (`auto_settled_invoice`) هي المرجع. البيانات السابقة لها
+    تُطابَق بتوقيع صارم: نصّ الملاحظات الذي يولّده الكود + ارتباطٌ بهذه الفاتورة
+    وحدها بلا توزيع — فلا يُلتقط سند مستخدم بالخطأ. مرآة
+    `sales/services/flow.py` (`is_auto_cash_settlement`).
+    """
+    if payment.auto_settled_invoice_id == invoice.pk:
+        return True
+    if (payment.notes or "").strip() != _auto_purchase_settlement_note(invoice):
+        return False
+    if payment.purchase_invoice_id != invoice.pk:
+        return False
+    return not payment.allocations.all().exists()
+
+
+def guard_purchase_invoice_payments_before_unpost(
+    invoice, *, action_label: str = "إلغاء ترحيل"
+) -> None:
+    """T-APINT: يمنع إلغاء ترحيل فاتورة شراء عليها سندات صرف مرحّلة.
+
+    الجذر المُصلَح: إلغاء الترحيل كان يحذف قيود الفاتورة وحدها، فيبقى سند الصرف
+    مرحّلاً وقيده **يدين ذمم المورد بلا مقابل** — رصيدٌ وهميّ لصالح الشركة عند
+    مورّد لم يُدفع له شيء زائد. مرآةُ `guard_invoice_payments_before_unpost`
+    على جانب البيع، وحارسِ الاعتمادية في `unpost_document` لحركات المخزون.
+
+    السند التلقائي للشراء النقدي مستثنى — يُحرَّر بالحذف عبر
+    `release_auto_cash_purchase_settlement` قبل الحذف لا بمنعه.
+    """
+    from sales.models import SupplierPayment, SupplierPaymentAllocation
+
+    from accounting.services import guard_document_cheques_before_unpost
+
+    document_label = f"فاتورة الشراء {invoice.invoice_number}"
+    guard_document_cheques_before_unpost(
+        list(Cheque.objects.filter(
+            tenant_id=invoice.tenant_id, purchase_invoice=invoice)),
+        document_label=document_label,
+        action_label=action_label,
+    )
+
+    blockers: list[str] = []
+    for alloc in (
+        SupplierPaymentAllocation.objects
+        .filter(invoice=invoice, payment__is_posted=True)
+        .select_related("payment")
+    ):
+        blockers.append(
+            f"سند #{alloc.payment_id} ({Decimal(str(alloc.amount or 0)).quantize(DEC)})"
+        )
+    for payment in (
+        SupplierPayment.objects
+        .filter(purchase_invoice=invoice, is_posted=True)
+        .prefetch_related("allocations")
+    ):
+        if payment.allocations.all():
+            continue  # حُسِب أعلاه بمبالغ توزيعه — لا يُعدّ مرّتين
+        if is_auto_cash_purchase_settlement(payment, invoice):
+            continue  # يُحرَّر لا يَمنع
+        blockers.append(
+            f"سند #{payment.id} ({Decimal(str(payment.amount or 0)).quantize(DEC)})"
+        )
+    # الدفعات القديمة (PurchaseInvoicePayment) تحمل قيوداً مرحّلة أيضاً.
+    from logistics.models import PurchaseInvoicePayment
+    for legacy in PurchaseInvoicePayment.objects.filter(invoice=invoice, is_posted=True):
+        blockers.append(
+            f"دفعة #{legacy.id} ({Decimal(str(legacy.amount or 0)).quantize(DEC)})"
+        )
+
+    if not blockers:
+        return
+    logger.warning(
+        "unpost blocked for purchase invoice %s: %d posted payment(s)",
+        invoice.invoice_number, len(blockers),
+    )
+    raise ValidationError(
+        f"تعذّر {action_label} {document_label}: توجد سندات صرف مرحّلة عليها "
+        f"({'، '.join(blockers)}). ألغِ ترحيل هذه السندات (أو احذفها) أولاً ثم "
+        f"أعد المحاولة."
+    )
+
+
+def release_auto_cash_purchase_settlement(invoice, *, user=None) -> list[int]:
+    """يحرّر سند التسوية النقدية التلقائي قبل إلغاء ترحيل فاتورة شرائه.
+
+    هذا السند من إنتاج الترحيل نفسه (`_auto_settle_cash_purchase`) لا من إنشاء
+    المستخدم، فيُحذف مع قيوده ضمن نفس معاملة إلغاء الترحيل ويُعاد إنشاؤه عند
+    إعادة الترحيل — وإلا بقي معلّقاً (مدين ذمم بلا مقابل) وتضاعف عند كل إعادة
+    ترحيل. سندات المستخدم لا تُمَسّ: يحرسها
+    `guard_purchase_invoice_payments_before_unpost`.
+    """
+    from django.db.models import Q
+
+    from accounting.services import unpost_document
+    from sales.models import SupplierPayment
+
+    candidates = (
+        SupplierPayment.objects.filter(tenant_id=invoice.tenant_id)
+        .filter(
+            Q(auto_settled_invoice_id=invoice.pk)
+            | Q(purchase_invoice_id=invoice.pk)
+        )
+        .distinct()
+        .prefetch_related("allocations")
+    )
+    released: list[int] = []
+    for payment in candidates:
+        if not is_auto_cash_purchase_settlement(payment, invoice):
+            continue
+        if payment.is_posted:
+            unpost_document(
+                tenant_id=payment.tenant_id,
+                reference_id=payment.id,
+                journal_reference_types=["SUPPLIER_PAYMENT"],
+                user=user,
+                document_label=f"سند صرف تلقائي #{payment.id}",
+            )
+        payment_id = payment.id
+        payment.delete()  # صفوف التوزيع تُحذف تلقائياً (CASCADE)
+        released.append(payment_id)
+        logger.info(
+            "Released auto cash purchase settlement %s of invoice %s (unpost).",
+            payment_id, invoice.invoice_number,
+        )
+    return released
+
+
 def annotate_purchase_invoice_payment_summary(queryset):
     """نسخة SQL لملخص الدفع تُستخدم في القوائم والفلترة قبل pagination."""
     from django.db.models import (
@@ -425,6 +597,7 @@ def annotate_purchase_invoice_payment_summary(queryset):
         Subquery, Sum, Value, When,
     )
     from django.db.models.functions import Coalesce, Greatest
+    from accounting.models import JournalLine
     from logistics.models import PurchaseInvoiceFee, PurchaseInvoicePayment
     from sales.models import SupplierPayment, SupplierPaymentAllocation
 
@@ -457,6 +630,21 @@ def annotate_purchase_invoice_payment_summary(queryset):
         .values("total")[:1]
     )
     legacy_paid = total_subquery(PurchaseInvoicePayment, is_posted=True)
+    # T-APPAID: التسوية داخل قيد الفاتورة نفسه (فواتير ما قبل Feature 2) —
+    # نفس قاعدة `purchase_journal_settlement_debit` حرفاً بحرف: مدينُ حساب ذمم
+    # المورد المرتبط، داخل قيد الفاتورة وحده، والمرجع مستثنى. القاعدتان في
+    # موضعين ولا يجوز أن تفترقا — القائمة والتفصيل يقولان الرقم نفسه.
+    journal_settled = (
+        JournalLine.objects
+        .filter(
+            journal_id=OuterRef("journal_id"),
+            account_id=OuterRef("partner__linked_account_id"),
+            debit__gt=0,
+        )
+        .values("journal_id")
+        .annotate(total=Sum("debit"))
+        .values("total")[:1]
+    )
     zero = Value(Decimal("0.00"), output_field=money)
 
     queryset = queryset.annotate(
@@ -464,31 +652,27 @@ def annotate_purchase_invoice_payment_summary(queryset):
         list_linked_paid=Coalesce(Subquery(linked_paid, output_field=money), zero),
         list_allocated_paid=Coalesce(Subquery(allocated_paid, output_field=money), zero),
         list_legacy_paid=Coalesce(Subquery(legacy_paid, output_field=money), zero),
+        list_journal_settled=Case(
+            When(is_return=True, then=zero),
+            default=Coalesce(Subquery(journal_settled, output_field=money), zero),
+            output_field=money,
+        ),
     ).annotate(
         list_payable_total=ExpressionWrapper(
             F("grand_total") + F("list_fees_total"), output_field=money,
         ),
         list_recorded_paid=ExpressionWrapper(
-            F("list_linked_paid") + F("list_allocated_paid") + F("list_legacy_paid"),
-            output_field=money,
-        ),
-    ).annotate(
-        list_effective_paid=Case(
-            When(
-                payment_type="cash", is_posted=True,
-                then=F("list_payable_total"),
-            ),
-            When(list_recorded_paid__gt=0, then=F("list_recorded_paid")),
-            default=F("attached_cash_amount"),
+            F("list_linked_paid") + F("list_allocated_paid") + F("list_legacy_paid")
+            + F("list_journal_settled"),
             output_field=money,
         ),
     ).annotate(
         list_amount_paid=Case(
             When(
-                list_effective_paid__gt=F("list_payable_total"),
+                list_recorded_paid__gt=F("list_payable_total"),
                 then=F("list_payable_total"),
             ),
-            default=F("list_effective_paid"),
+            default=F("list_recorded_paid"),
             output_field=money,
         ),
     ).annotate(
@@ -572,98 +756,264 @@ def _resolve_ap_account(partner) -> Account:
     )
 
 
-def attach_pi_payment_voucher(
+def create_supplier_payment_cheques(payment, cheques) -> None:
+    """ينشئ شيكات سند الصرف بقاعدة واحدة — يستدعيها السيريالايزر والمنسّق معاً.
+
+    كانت الكتابة في السيريالايزر وحده، فأيّ مسارٍ ثانٍ يعني نسخةً ثانية من عقد
+    الشيك (الاتجاه والحالة الابتدائية وقصّ الحقول) تفترق عنها غداً.
+    """
+    from accounting.models import Cheque as _Cheque
+
+    for c in cheques or []:
+        _Cheque.objects.create(
+            tenant=payment.tenant,
+            supplier_payment=payment,
+            partner=payment.partner,
+            direction='Outgoing',
+            status='Draft',  # يصير «برسم الدفع» عند ترحيل السند
+            cheque_number=str(c['cheque_number']).strip(),
+            amount=Decimal(str(c['amount'])).quantize(DEC),
+            currency=payment.currency,
+            bank_name=(c.get('bank_name') or '')[:100],
+            account_number=(c.get('account_number') or '')[:50],
+            bank_branch=(c.get('bank_branch') or '')[:100],
+            due_date=c.get('due_date') or None,
+            issue_date=c.get('issue_date') or None,
+            payee_name=(c.get('payee_name') or '')[:150],
+            notes=c.get('notes') or '',
+        )
+
+
+def _validate_supplier_cheque_payloads(cheques, *, require_due_date=True) -> Decimal:
+    """يتحقّق من صفوف الشيكات ويعيد مجموعها — نفس شروط جانب البيع."""
+    total = Decimal('0')
+    for i, c in enumerate(cheques or []):
+        if not str(c.get('cheque_number', '')).strip():
+            raise ValidationError("الشيك #%d: رقم الشيك مطلوب." % (i + 1))
+        try:
+            amount = Decimal(str(c.get('amount', 0)))
+        except Exception:
+            raise ValidationError("الشيك #%d: مبلغ غير صالح." % (i + 1))
+        if amount <= 0:
+            raise ValidationError("الشيك #%d: المبلغ يجب أن يكون أكبر من صفر." % (i + 1))
+        if require_due_date and not c.get('due_date'):
+            raise ValidationError("الشيك #%d: تاريخ الاستحقاق مطلوب." % (i + 1))
+        total += amount
+    return total.quantize(DEC)
+
+
+def suggest_supplier_fifo_allocations(*, tenant_id: int, partner_id: int, amount):
+    """T-PSIMPL: اقتراح توزيع سند صرف على فواتير المورّد من الأقدم (FIFO).
+
+    مرآة `sales/services/numbering.py` (`suggest_fifo_allocations`) على جانب
+    المورّد. كانت موجودة للعميل وحده، فتوزيعُ سندٍ كبير على فواتير مورّدٍ يبقى
+    عملاً يدوياً وبحساباتٍ على ورقة.
+
+    الترتيب بالاستحقاق ثم بتاريخ الفاتورة: أقدمُ ما استحقّ يُسدَّد أولاً — وهو
+    المعنى الذي يريده المستخدم من «FIFO» هنا، لا أقدمُ ما صدر.
+
+    «المتبقّي» يأتي من `annotate_purchase_invoice_payment_summary` — القاعدة
+    نفسها التي تحكم القائمة والتقارير، فلا حسبةَ رابعة.
+    """
+    from logistics.models import PurchaseInvoice
+
+    remaining = Decimal(str(amount or 0)).quantize(DEC)
+    if remaining <= 0:
+        return []
+    rows = annotate_purchase_invoice_payment_summary(
+        PurchaseInvoice.objects.filter(
+            tenant_id=tenant_id, partner_id=partner_id,
+            is_posted=True, is_return=False,
+        )
+    ).order_by('due_date', 'invoice_date', 'id')
+
+    out: list[dict] = []
+    for inv in rows:
+        if remaining <= 0:
+            break
+        due = Decimal(str(inv.list_remaining_balance or 0)).quantize(DEC)
+        if due <= 0:
+            continue
+        take = min(due, remaining)
+        out.append({
+            'invoice': inv.id,
+            'invoice_number': inv.invoice_number,
+            'due_date': inv.due_date.isoformat() if inv.due_date else None,
+            'amount': str(take),
+        })
+        remaining -= take
+    return out
+
+
+def pay_purchase_invoice(
     invoice,
     *,
-    cash_amount: Decimal | str | float = 0,
-    cash_account_id: int | None = None,
-    cheques: list[dict] | None = None,
+    cash=None,
+    cash_account_id=None,
+    cheques=None,
+    from_on_account=None,
+    payment_date=None,
     user=None,
 ):
-    """يربط سند مالي (نقدي + شيكات) بفاتورة الشراء قبل الترحيل.
+    """T-APPAY: دفع فاتورة الشراء من نقطة واحدة — نقد + شيكات + سلف المورّد، ذرّياً.
 
-    Mirror of sales/services.py:attach_payment_voucher for PurchaseInvoice.
+    مرآة `sales/services/flow.py` (`collect_invoice_payment`). كان الدفع على جانب
+    الشراء خطوتين منفصلتين في الواجهة: «رحّل» ثم «افتح سند الصرف» — نداءان
+    مستقلّان، فانقطاعُ الثاني يترك فاتورةً مرحّلة بلا سند ومورّداً دائناً بلا سبب
+    ظاهر للمستخدم الذي ظنّ أنه دفع.
 
-    - Replace-semantics: each call replaces previously-attached Draft cheques.
-    - The journal is NOT posted here — post handler reads the attached data.
-    - Idempotent when called multiple times pre-post.
+    **صفر منطق ترحيل جديد** — تركيبُ خدمات قائمة:
 
-    cheques: list of dicts with keys:
-        cheque_number (str), amount (Decimal/str), bank_name (str, optional),
-        due_date (date/str, optional), issue_date (date/str, optional),
-        payee_name (str, optional), notes (str, optional).
+    1. النقد + الشيكات ⇒ **سند صرف واحد** (`post_supplier_payment`) بتوزيعٍ
+       مقصوص على المتبقّي؛ ما زاد يبقى «على الحساب» سلفةً للمورّد (T-ONACC).
+    2. كل صفّ `from_on_account` ⇒ `allocate_supplier_payment`: ربطٌ بلا قيد
+       جديد — ترحيلُ ذلك السند دَيَّن الذمم أصلاً.
+    3. الفاتورة النقدية مدفوعةٌ بالتعريف: نقدٌ **غير مذكور** يُكمَّل تلقائياً،
+       ونقصٌ بعد نقدٍ مذكور يَرفض العملية كلَّها.
+
+    الفاتورة يجب أن تكون **مرحّلة** قبل الاستدعاء — الترحيل يملكه
+    `PurchaseInvoiceViewSet.post_to_accounting`، والنقطة `pay/` تجمع الاثنين في
+    `transaction.atomic()` واحد فلا تُترك فاتورةٌ مرحّلة بسندٍ نصفِ مولود.
+
+    from_on_account: `[{"payment_id": <id>, "amount": <Decimal|str>}, ...]`
     """
-    if invoice.is_posted:
-        raise ValidationError("لا يمكن تعديل السند بعد ترحيل فاتورة الشراء.")
+    from sales.models import SupplierPayment, SupplierPaymentAllocation
+    from sales.services import allocate_supplier_payment, post_supplier_payment
 
-    cash_amount = Decimal(str(cash_amount or 0)).quantize(DEC)
+    cheque_rows = list(cheques or [])
+    on_account_rows = list(from_on_account or [])
+    # «غير مذكور» ليس «صفراً»: الأول يُكمَّل على الفاتورة النقدية، والثاني إعلانُ
+    # نيّةٍ بعدم دفع نقد فيُحاسَب عليه.
+    cash_given = cash is not None and str(cash).strip() != ""
+    try:
+        cash_amount = Decimal(str(cash or 0)).quantize(DEC)
+    except Exception:
+        raise ValidationError("مبلغ النقدي غير صالح.")
     if cash_amount < 0:
         raise ValidationError("مبلغ النقدي لا يمكن أن يكون سالباً.")
+    cheques_total = _validate_supplier_cheque_payloads(cheque_rows)
 
-    cheques = cheques or []
-    for i, c in enumerate(cheques):
-        if not str(c.get("cheque_number", "")).strip():
-            raise ValidationError(f"الشيك #{i+1}: رقم الشيك مطلوب.")
+    on_account_total = Decimal('0')
+    for i, row in enumerate(on_account_rows):
+        if not row.get('payment_id'):
+            raise ValidationError("الرصيد #%d: رقم سند الصرف مطلوب." % (i + 1))
         try:
-            amt = Decimal(str(c.get("amount", 0)))
+            amount = Decimal(str(row.get('amount', 0)))
         except Exception:
-            raise ValidationError(f"الشيك #{i+1}: مبلغ غير صالح.")
-        if amt <= 0:
-            raise ValidationError(f"الشيك #{i+1}: المبلغ يجب أن يكون أكبر من صفر.")
+            raise ValidationError("الرصيد #%d: مبلغ غير صالح." % (i + 1))
+        if amount <= 0:
+            raise ValidationError("الرصيد #%d: المبلغ يجب أن يكون أكبر من صفر." % (i + 1))
+        on_account_total += amount
 
-    cheques_total = sum(
-        (Decimal(str(c.get("amount", 0))) for c in cheques), Decimal("0")
-    ).quantize(DEC)
-
-    grand = Decimal(str(invoice.grand_total or 0)).quantize(DEC)
-    if (cash_amount + cheques_total) > grand:
+    if getattr(invoice, 'is_return', False):
         raise ValidationError(
-            f"مجموع السند ({cash_amount} نقدي + {cheques_total} شيكات) "
-            f"يتجاوز مبلغ الفاتورة {grand}."
+            "مرجع الشراء لا يُدفع — هو يخفّض ذمم المورد بحكم تعريفه."
         )
 
-    if cash_amount > 0 and not cash_account_id:
-        # T-DEFACC: الصندوق الافتراضي للشركة بدل رفض السند — نفس مصدر سندي
-        # القبض والصرف، فلا تختلف فاتورة الشراء عن بقية المعاملات.
-        from accounting.services import resolve_default_cash_account
-
-        default_cash = resolve_default_cash_account(invoice.tenant_id)
-        if default_cash is None:
-            raise ValidationError(
-                "لا بدّ من تحديد حساب الصندوق عند وجود مبلغ نقدي — أو عيّن صندوقاً "
-                "افتراضياً في إعدادات المبيعات."
-            )
-        cash_account_id = default_cash.pk
-        logger.info(
-            "purchase.invoice.cash_account_defaulted invoice=%s account=%s",
-            invoice.pk, cash_account_id,
-        )
-
+    payment = None
     with transaction.atomic():
-        invoice.attached_cash_amount = cash_amount
-        invoice.save(update_fields=["attached_cash_amount"])
-
-        # Replace previously-linked Draft cheques
-        Cheque.objects.filter(
-            purchase_invoice=invoice, status="Draft"
-        ).delete()
-        for c in cheques:
-            Cheque.objects.create(
-                tenant_id=invoice.tenant_id,
-                purchase_invoice=invoice,
-                partner=invoice.partner,
-                direction="Outgoing",
-                status="Draft",
-                cheque_number=str(c.get("cheque_number")).strip(),
-                bank_name=(c.get("bank_name") or "")[:100],
-                amount=Decimal(str(c.get("amount"))).quantize(DEC),
-                currency_id=invoice.currency_id,
-                due_date=c.get("due_date") or None,
-                issue_date=c.get("issue_date") or None,
-                payee_name=(c.get("payee_name") or "")[:150],
-                notes=c.get("notes") or "",
-                created_by=user if user and not getattr(user, "is_anonymous", False) else None,
+        if not invoice.is_posted:
+            raise ValidationError(
+                "الفاتورة %s غير مرحّلة — رحّلها أولاً أو اطلب الترحيل مع الدفع."
+                % invoice.invoice_number
             )
+        invoice.refresh_from_db()
+        summary = purchase_invoice_payment_summary(invoice)
+        remaining = Decimal(str(summary['remaining_balance'])).quantize(DEC)
+        amount = (cash_amount + cheques_total).quantize(DEC)
+        target = max((remaining - on_account_total).quantize(DEC), Decimal('0'))
+
+        is_cash_invoice = invoice.payment_type == 'cash'
+        if is_cash_invoice and not cash_given and amount < target:
+            cash_amount = (cash_amount + target - amount).quantize(DEC)
+            amount = (cash_amount + cheques_total).quantize(DEC)
+
+        if amount <= 0 and not on_account_rows:
+            raise ValidationError("لا مبلغ للدفع.")
+
+        if amount > 0:
+            resolved_cash_id = cash_account_id or invoice.cash_or_bank_account_id
+            if not resolved_cash_id:
+                from accounting.services import resolve_default_cash_account
+                default_cash = resolve_default_cash_account(invoice.tenant_id)
+                resolved_cash_id = default_cash.pk if default_cash else None
+            if not resolved_cash_id:
+                raise ValidationError(
+                    "دفع الفاتورة %s يحتاج حساب صندوق/بنك لتحرير سند الصرف. عيّن "
+                    "صندوقاً افتراضياً في الإعدادات أو حدّد حساب الصندوق على "
+                    "الفاتورة." % invoice.invoice_number
+                )
+            payment = SupplierPayment.objects.create(
+                tenant_id=invoice.tenant_id,
+                partner_id=invoice.partner_id,
+                purchase_invoice=invoice,
+                payment_date=payment_date or invoice.invoice_date or timezone.localdate(),
+                amount=amount,
+                currency_id=invoice.currency_id,
+                exchange_rate=invoice.exchange_rate or Decimal('1'),
+                cash_or_bank_account_id=resolved_cash_id,
+                notes="سند صرف من داخل الفاتورة",
+            )
+            create_supplier_payment_cheques(payment, cheque_rows)
+            allocated = min(amount, target)
+            if allocated > 0:
+                SupplierPaymentAllocation.objects.create(
+                    tenant_id=invoice.tenant_id,
+                    payment=payment,
+                    invoice=invoice,
+                    amount=allocated,
+                    amount_in_invoice_currency=allocated,
+                )
+            post_supplier_payment(payment, user=user)
+            from core.activity import log_activity
+            log_activity(
+                action='payment', entity_type='supplier_payment',
+                entity_id=payment.id, entity_label='#%s' % payment.id,
+                description='سند صرف من داخل الفاتورة',
+                partner_ids=[payment.partner_id], tenant=invoice.tenant, user=user,
+            )
+            log_activity(
+                action='post', entity_type='supplier_payment',
+                entity_id=payment.id, entity_label='#%s' % payment.id,
+                description='ترحيل سند صرف من داخل الفاتورة',
+                partner_ids=[payment.partner_id], tenant=invoice.tenant, user=user,
+            )
+
+        for row in on_account_rows:
+            source = SupplierPayment.objects.filter(
+                pk=row['payment_id'], tenant_id=invoice.tenant_id,
+            ).first()
+            if source is None:
+                raise ValidationError(
+                    "سند الصرف #%s غير موجود في هذه الشركة." % row['payment_id']
+                )
+            if source.partner_id != invoice.partner_id:
+                raise ValidationError(
+                    "سند الصرف #%s لا يخصّ مورّد الفاتورة." % source.pk
+                )
+            if not source.is_posted:
+                raise ValidationError(
+                    "سند الصرف #%s غير مرحّل — لا رصيد منه على الحساب." % source.pk
+                )
+            allocate_supplier_payment(
+                source, [{'invoice': invoice.pk, 'amount': row['amount']}], user=user,
+            )
+
+        invoice = type(invoice).objects.get(pk=invoice.pk)
+        left = Decimal(
+            str(purchase_invoice_payment_summary(invoice)['remaining_balance'])
+        ).quantize(DEC)
+        if is_cash_invoice and left > DEC:
+            raise ValidationError(
+                "الفاتورة نقدية — المدفوع لا يغطي الإجمالي؛ اجعلها فاتورة ذمم "
+                "(آجلة) أو أكمل المبلغ."
+            )
+    logger.info(
+        "Paid purchase invoice %s: payment=%s amount=%s on_account=%s left=%s",
+        invoice.invoice_number, getattr(payment, 'id', None), amount,
+        on_account_total, left,
+    )
+    return payment
 
 
 def _resolve_inventory_account(tenant) -> Account:

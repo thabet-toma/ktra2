@@ -205,6 +205,56 @@ def document_payment_summary(total, paid) -> dict[str, Any]:
     }
 
 
+def resolve_due_date(invoice_date, due_date, terms_days):
+    """تاريخ الاستحقاق: الصريح مقدَّمٌ على المشتقّ من مهلة السداد.
+
+    قاعدة واحدة للجانبين (بيعاً وشراءً) — والمهلة تُقرأ فقط حين لا تاريخ صريح،
+    فلا يُلغي حفظٌ لاحق تاريخاً كتبه المستخدم بيده.
+    """
+    import datetime
+
+    if due_date:
+        return due_date
+    if terms_days is None or not invoice_date:
+        return due_date
+    try:
+        days = int(terms_days)
+    except (TypeError, ValueError):
+        return due_date
+    if days < 0:
+        return due_date
+    if isinstance(invoice_date, str):
+        try:
+            invoice_date = datetime.date.fromisoformat(invoice_date[:10])
+        except ValueError:
+            return due_date
+    return invoice_date + datetime.timedelta(days=days)
+
+
+def document_overdue_state(due_date, remaining_balance, *, as_of=None) -> dict:
+    """هل تأخّر سداد هذا المستند، وبكم يوماً — مصدرٌ واحد للجانبين.
+
+    «متأخرة» ليست حالة دفعٍ رابعة بل بُعدٌ فوقها: مستندٌ عليه متبقٍّ **و**
+    استحقاقُه مضى. جعلُها قيمةً في `payment_status` كان سيكسر الفلاتر والشارات
+    القائمة (`paid`/`partially_paid`/`unpaid`) ويخفي «كم بقي» خلف «تأخّر».
+    بلا تاريخ استحقاق لا تأخّر — لا تخمين.
+    """
+    from django.utils import timezone
+
+    remaining = Decimal(str(remaining_balance or 0))
+    if not due_date or remaining <= Decimal("0.00"):
+        return {"is_overdue": False, "days_overdue": 0}
+    today = as_of or timezone.localdate()
+    if isinstance(due_date, str):
+        import datetime
+        try:
+            due_date = datetime.date.fromisoformat(due_date[:10])
+        except ValueError:
+            return {"is_overdue": False, "days_overdue": 0}
+    days = (today - due_date).days
+    return {"is_overdue": days > 0, "days_overdue": max(days, 0)}
+
+
 def document_partner_balance_summary(
     current_balance,
     remaining_balance,

@@ -266,17 +266,17 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
 async function openPanel(page: Page) {
   await installMocks(page);
   await page.goto("/sales/invoices/301");
-  const panel = page.getByTestId("invoice-collect-panel");
+  const panel = page.getByTestId("document-payment-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
   return panel;
 }
 
 test("تقسيم 60 نقداً و40 شيكاً يُنزل «المتبقي» إلى صفر حيّاً", async ({ page }) => {
   const panel = await openPanel(page);
-  await expect(page.getByTestId("collect-remaining")).toHaveText("100");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("100");
 
   await panel.getByLabel("المدفوع نقداً").fill("60");
-  await expect(page.getByTestId("collect-remaining")).toHaveText("40");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("40");
 
   await panel.getByRole("button", { name: "شيك", exact: true }).click();
   await panel.getByLabel("رقم الشيك 1").fill("12345");
@@ -284,9 +284,9 @@ test("تقسيم 60 نقداً و40 شيكاً يُنزل «المتبقي» إ�
   await panel.getByLabel("استحقاق الشيك 1").fill("2026-09-01");
   await panel.getByLabel("مبلغ الشيك 1").fill("40");
 
-  await expect(page.getByTestId("collect-cheques-total")).toHaveText("40");
-  await expect(page.getByTestId("collect-remaining")).toHaveText("0");
-  await expect(page.getByTestId("collect-overpay-note")).toHaveCount(0);
+  await expect(page.getByTestId("payment-cheques-total")).toHaveText("40");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("0");
+  await expect(page.getByTestId("payment-overpay-note")).toHaveCount(0);
   await page.screenshot({ path: `${SHOTS}/01-split-60-40-remaining-zero.png`, fullPage: true });
 });
 
@@ -300,13 +300,13 @@ test("زرّ التحصيل يُطلق نداء /collect/ واحداً بالح�
   await panel.getByLabel("استحقاق الشيك 1").fill("2026-09-01");
   await panel.getByLabel("مبلغ الشيك 1").fill("15");
   await panel.getByLabel("من رصيد العميل").fill("25");
-  await expect(page.getByTestId("collect-remaining")).toHaveText("0");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("0");
 
   const collectRequest = page.waitForRequest((request) =>
     request.method() === "POST"
     && new URL(request.url()).pathname.endsWith("/sales/invoices/301/collect/"),
   );
-  await page.getByTestId("collect-submit").click();
+  await page.getByTestId("payment-submit").click();
   const payload = (await collectRequest).postDataJSON();
   expect(payload).toEqual({
     cash: "60.00",
@@ -335,19 +335,19 @@ test("الوضع السهل: اللوحة تظهر على مسودة جديدة 
   await page.getByPlaceholder("اكتب اسم الصنف…").first().fill("لابتوب");
   await page.getByText("لابتوب", { exact: true }).last().click();
 
-  const panel = page.getByTestId("invoice-collect-panel");
+  const panel = page.getByTestId("document-payment-panel");
   await expect(panel).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId("collect-remaining")).toHaveText("100");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("100");
 
   await panel.getByLabel("المدفوع نقداً").fill("100");
-  await expect(page.getByTestId("collect-remaining")).toHaveText("0");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("0");
   await page.screenshot({ path: `${SHOTS}/04-simple-mode-draft-panel.png`, fullPage: true });
 
   const collectRequest = page.waitForRequest((request) =>
     request.method() === "POST"
     && new URL(request.url()).pathname.endsWith("/sales/invoices/302/collect/"),
   );
-  await page.getByTestId("collect-submit").click();
+  await page.getByTestId("payment-submit").click();
   const payload = (await collectRequest).postDataJSON();
   expect(payload).toMatchObject({
     cash: "100.00",
@@ -364,8 +364,8 @@ test("تجاوز المتبقّي يُظهر تنبيه «الفائض يُسج�
   const panel = await openPanel(page);
 
   await panel.getByLabel("المدفوع نقداً").fill("130");
-  await expect(page.getByTestId("collect-remaining")).toHaveText("0");
-  const note = page.getByTestId("collect-overpay-note");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("0");
+  const note = page.getByTestId("payment-overpay-note");
   await expect(note).toBeVisible();
   await expect(note).toHaveText("الفائض 30 يُسجَّل دفعة على الحساب.");
   await page.screenshot({ path: `${SHOTS}/03-overpayment-notice.png`, fullPage: true });

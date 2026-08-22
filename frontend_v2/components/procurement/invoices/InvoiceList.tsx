@@ -56,7 +56,7 @@ interface InvoiceListProps {
 export interface InvoiceListFilters {
   search: string;
   status: string;
-  paymentStatus: "all" | "paid" | "partially_paid" | "unpaid";
+  paymentStatus: "all" | "paid" | "partially_paid" | "unpaid" | "overdue";
   kind: "all" | "invoice" | "return";
   dateFrom: string;
   dateTo: string;
@@ -160,7 +160,12 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         if (filterKind === "return" && !inv.isReturn) return false;
         if (filterStatus === "posted" && !inv.isPosted) return false;
         if (filterStatus === "draft" && inv.isPosted) return false;
-        if (filterPaymentStatus !== "all" && inv.paymentStatus !== filterPaymentStatus) return false;
+        // T-DUE: «متأخرة» بُعدٌ فوق الحالة — تُرشَّح بعلمها لا بمساواة الحالة.
+        if (filterPaymentStatus === "overdue") {
+          if (!inv.isOverdue) return false;
+        } else if (filterPaymentStatus !== "all" && inv.paymentStatus !== filterPaymentStatus) {
+          return false;
+        }
         const d = inv.invoiceDate || (inv.createdAt ? inv.createdAt.slice(0, 10) : "");
         if (dateFrom && d && d < dateFrom) return false;
         if (dateTo && d && d > dateTo) return false;
@@ -311,6 +316,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         <PaymentStatusBadge
           status={r.paymentStatus}
           label={r.paymentStatusDisplay}
+          isOverdue={r.isOverdue}
+          daysOverdue={r.daysOverdue}
         />
       ),
     },
@@ -465,6 +472,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           <option value="unpaid">غير مدفوعة</option>
           <option value="partially_paid">مدفوعة جزئياً</option>
           <option value="paid">مدفوعة بالكامل</option>
+          {/* T-DUE: خيارٌ فوق الثلاثة لا رابعٌ بينها — «عليها متبقٍّ واستحقاقها مضى». */}
+          <option value="overdue">متأخرة</option>
         </select>
       </label>
       <label className="aseel-field">

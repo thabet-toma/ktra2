@@ -69,6 +69,10 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     remainingBalance: Number(dto.remaining_balance || 0),
     paymentStatus: dto.payment_status || "unpaid",
     paymentStatusDisplay: dto.payment_status_display || "غير مدفوعة",
+    isOverdue: Boolean(dto.is_overdue),
+    daysOverdue: Number(dto.days_overdue || 0),
+    dueDate: dto.due_date || null,
+    paymentTermsDays: dto.payment_terms_days ?? null,
     receiptStatus: dto.receipt_status || "not_received",
     receiptStatusDisplay: dto.receipt_status_display || undefined,
     receiptProgress: dto.receipt_progress

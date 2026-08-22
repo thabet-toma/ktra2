@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
@@ -11,6 +12,8 @@ from core.api_defaults import TenantScopedPrimaryKeyRelatedField
 from core.payments import (
     apply_default_cash_account,
     document_partner_balance_summary,
+    document_overdue_state,
+    resolve_due_date,
     document_payment_summary,
 )
 
@@ -143,6 +146,10 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
 
 class _SalesInvoicePaymentSummarySerializer(serializers.Serializer):
     remaining_balance = serializers.SerializerMethodField()
+    # T-DUE: «متأخرة» بُعدٌ فوق حالة الدفع لا قيمةٌ رابعة فيها — قاعدة واحدة
+    # مع جانب الشراء (`core.payments.document_overdue_state`).
+    is_overdue = serializers.SerializerMethodField()
+    days_overdue = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
     payment_status_display = serializers.SerializerMethodField()
     customer_balance = serializers.DecimalField(
@@ -161,6 +168,16 @@ class _SalesInvoicePaymentSummarySerializer(serializers.Serializer):
 
     def get_payment_status_display(self, obj):
         return self._payment_summary(obj)["payment_status_display"]
+
+    def get_is_overdue(self, obj) -> bool:
+        return document_overdue_state(
+            obj.due_date, self._payment_summary(obj)["remaining_balance"],
+        )["is_overdue"]
+
+    def get_days_overdue(self, obj) -> int:
+        return document_overdue_state(
+            obj.due_date, self._payment_summary(obj)["remaining_balance"],
+        )["days_overdue"]
 
 
 class _SalesInvoicePaymentDetailSerializer(serializers.Serializer):
@@ -201,6 +218,9 @@ class SalesInvoiceListSerializer(
             "customer_name",
             "invoice_date",
             "due_date",
+            "payment_terms_days",
+            "is_overdue",
+            "days_overdue",
             "invoice_type",
             "status",
             "grand_total",
@@ -356,6 +376,9 @@ class SalesInvoiceSerializer(
             "customer_name",
             "invoice_date",
             "due_date",
+            "payment_terms_days",
+            "is_overdue",
+            "days_overdue",
             "invoice_type",
             "currency",
             "exchange_rate",
@@ -431,6 +454,15 @@ class SalesInvoiceSerializer(
         ]
 
     def validate(self, attrs):
+        # T-DUE: الاستحقاق يُشتقّ من مهلة السداد حين لا يُكتب صراحةً — قاعدة
+        # واحدة مع جانب الشراء (`core.payments.resolve_due_date`).
+        invoice_date = attrs.get("invoice_date") or getattr(self.instance, "invoice_date", None)
+        terms = attrs.get(
+            "payment_terms_days", getattr(self.instance, "payment_terms_days", None))
+        due = attrs.get("due_date", getattr(self.instance, "due_date", None))
+        resolved = resolve_due_date(invoice_date, due, terms)
+        if resolved != due:
+            attrs["due_date"] = resolved
         # نمط «بدون» في إعدادات البيع: لا تُخزَّن أرقام تسلسلية على البنود إطلاقاً.
         from core.tenant_utils import get_tenant
         from inventory.serials import sales_serial_mode, strip_serials_when_off
@@ -441,7 +473,45 @@ class SalesInvoiceSerializer(
             strip_serials_when_off(
                 attrs["lines"], sales_serial_mode(tenant.TenantID),
             )
-        return self._enforce_return_party(attrs)
+        attrs = self._enforce_return_party(attrs)
+        self._enforce_return_quantities(attrs)
+        return attrs
+
+    def _enforce_return_quantities(self, attrs):
+        """T-RETQTY: مرجعٌ لا يتجاوز الكمية القابلة للإرجاع من فاتورته الأصلية.
+
+        الحارس هنا لا في الشاشة: مرجعُ فاتورةٍ بها 10 كان يقبل 100 فيُدائن ذمم
+        العميل بما لم يُبَع ويُدخل المخزنَ كميةً لم تخرج. القياس من
+        `returnable_lines_for_invoice` نفسها التي تغذّي منتقي البنود — رقمٌ واحد
+        يراه المستخدم ويحكم به الخادم. مرآة `create_purchase_return`.
+        """
+        from sales.services import guard_sales_return_quantities
+
+        def _current(field, default=None):
+            if field in attrs:
+                return attrs[field]
+            return getattr(self.instance, field, default) if self.instance else default
+
+        kind = _current("invoice_kind", SalesInvoice.INVOICE_KIND_SALE)
+        if kind not in (
+            SalesInvoice.INVOICE_KIND_SALE_RETURN,
+            SalesInvoice.INVOICE_KIND_PURCHASE_RETURN,
+        ):
+            return
+        original = _current("original_invoice")
+        if original is None:
+            return
+        lines = attrs.get("lines")
+        if lines is None:
+            return  # تعديلٌ لا يمسّ البنود — الكميات المحفوظة سبق أن مرّت بالحارس
+        try:
+            guard_sales_return_quantities(
+                original, lines,
+                exclude_invoice_id=self.instance.pk if self.instance else None,
+            )
+        except DjangoValidationError as exc:
+            message = exc.message if hasattr(exc, "message") else "؛ ".join(exc.messages)
+            raise serializers.ValidationError({"lines": message})
 
     def _enforce_return_party(self, attrs):
         """مرجعٌ مربوطٌ بأصلٍ يُقيَّد على مشتري الأصل — لا على طرفٍ آخر.

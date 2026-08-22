@@ -94,7 +94,11 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
             ).select_related("partner")
         )
         rows_src = (
-            (d.partner_id, d.partner.name if d.partner_id else "", d.invoice_date,
+            # T-DUE: تُعمَّر بالاستحقاق كنظيرتها المدينة — كان الجانب الدائن
+            # وحده يُعمَّر بتاريخ الفاتورة لأن `PurchaseInvoice` كانت بلا
+            # `due_date` أصلاً، فتظهر فاتورةٌ مهلتها 60 يوماً «متأخرة» بعد 31.
+            (d.partner_id, d.partner.name if d.partner_id else "",
+             d.due_date or d.invoice_date,
              Decimal(str(d.list_remaining_balance or 0)))
             for d in docs
         )

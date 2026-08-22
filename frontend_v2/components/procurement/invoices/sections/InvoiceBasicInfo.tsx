@@ -138,6 +138,45 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
           />
         </div>
 
+        {/* T-DUE: متى يُدفع للمورّد — كان الحقل على فاتورة البيع وحدها، فجانب
+            الشراء بلا «استحقاق» أصلاً: لا تقرير أعمارٍ صادق ولا شارة «متأخرة».
+            المهلة تشتقّ التاريخ، والتاريخ الصريح يسمو عليها (الخادم يحسمها). */}
+        <div className="md:col-span-3 space-y-1">
+          <label className="text-xs font-semibold aseel-text-soft dark:aseel-text-soft flex items-center gap-1">
+            <Calendar className="w-3 h-3 aseel-text-soft" />
+            الاستحقاق
+          </label>
+          <input
+            type="date"
+            data-testid="purchase-due-date"
+            value={data.dueDate ? String(data.dueDate).split("T")[0] : ""}
+            onChange={(e) => setData({ ...data, dueDate: e.target.value || null })}
+            disabled={readOnly}
+            title="تاريخ استحقاق الدفع — يُشتقّ من المهلة إن تُرك فارغاً"
+            className="w-full h-10 px-3 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel text-sm focus:ring-1 focus:ring-orange-500"
+          />
+        </div>
+
+        <div className="md:col-span-2 space-y-1">
+          <label className="text-xs font-semibold aseel-text-soft dark:aseel-text-soft flex items-center gap-1">
+            مهلة السداد (يوم)
+          </label>
+          <input
+            type="number"
+            min="0"
+            data-testid="purchase-payment-terms"
+            value={data.paymentTermsDays ?? ""}
+            onChange={(e) => setData({
+              ...data,
+              paymentTermsDays: e.target.value === "" ? null : Number(e.target.value),
+            })}
+            disabled={readOnly}
+            placeholder="30"
+            title="مثال: 30 = تُستحقّ بعد 30 يوماً من تاريخ الفاتورة"
+            className="w-full h-10 px-3 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel text-sm focus:ring-1 focus:ring-orange-500"
+          />
+        </div>
+
         {/* 3. الحالة */}
         <div className="md:col-span-3 space-y-1">
           <label className="text-xs font-semibold aseel-text-soft dark:aseel-text-soft flex items-center gap-1">

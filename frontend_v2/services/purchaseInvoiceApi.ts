@@ -146,6 +146,38 @@ async function asPage(res: Response): Promise<{
   };
 }
 
+/** T-PCTX: أشكال ردود تبويبات السياق — تفي بعقد `DocumentContextTabs`. */
+export type PurchaseContextStock = {
+  results: Array<Record<string, never>> | any[];
+  count: number;
+  total_cost: string;
+  is_posted: boolean;
+  receipt_status?: string;
+  receipt_status_display?: string;
+};
+
+export type PurchaseContextLedger = {
+  results: any[];
+  count: number;
+  closing_balance: string;
+  supplier_name?: string | null;
+  anchor: {
+    line_ids: number[];
+    balance_before: string;
+    balance_after: string;
+    effect: string;
+  } | null;
+  reason?: string;
+};
+
+export type PurchaseContextAttachment = {
+  id: number;
+  url: string;
+  file_type: string;
+  filename: string;
+  uploaded_at?: string | null;
+};
+
 export const purchaseInvoiceApi = {
   list: (params?: Record<string, string>) => {
     const q =
@@ -251,6 +283,102 @@ export const purchaseInvoiceApi = {
       headers: headers(),
     });
     await handle(res, "unpost");
+    return res.json();
+  },
+
+  /** T-PSIMPL: رقم الفاتورة التالي قبل الحفظ — مرآة نظيرتها في البيع. */
+  nextNumber: async (): Promise<string> => {
+    const res = await safeFetch(
+      `${API_BASE}/logistics/purchase-invoices/next-number/`, { headers: headers() },
+    );
+    await handle(res, "purchaseInvoiceNextNumber");
+    return (await res.json()).invoice_number as string;
+  },
+
+  /** T-PSIMPL: نسخُ الفاتورة إلى مسودّة جديدة — بلا ترحيلها ولا استلامها. */
+  duplicate: async (id: number): Promise<PurchaseInvoiceDto> => {
+    const res = await safeFetch(
+      `${API_BASE}/logistics/purchase-invoices/${id}/duplicate/`,
+      { method: "POST", headers: headers(), body: "{}" },
+    );
+    await handle(res, "duplicatePurchaseInvoice");
+    return res.json();
+  },
+
+  /** T-PCTX: أثر هذه الفاتورة على المخزون (تبويب «حركة المخزون»). */
+  getStockMovements: async (id: number): Promise<PurchaseContextStock> => {
+    const res = await safeFetch(
+      `${API_BASE}/logistics/purchase-invoices/${id}/stock-movements/`,
+      { headers: headers() },
+    );
+    await handle(res, "purchaseInvoiceStockMovements");
+    return res.json();
+  },
+
+  /** T-PCTX: كشف حساب المورّد مرسوّاً على هذه الفاتورة (الرصيد قبلها وبعدها). */
+  getSupplierLedger: async (id: number, limit = 20): Promise<PurchaseContextLedger> => {
+    const res = await safeFetch(
+      `${API_BASE}/logistics/purchase-invoices/${id}/supplier-ledger/?limit=${limit}`,
+      { headers: headers() },
+    );
+    await handle(res, "purchaseInvoiceSupplierLedger");
+    return res.json();
+  },
+
+  /** T-PCTX: مرفقات الفاتورة — تُحفظ فوراً فيبقى الإرفاق ممكناً بعد الترحيل. */
+  listAttachments: async (id: number): Promise<PurchaseContextAttachment[]> => {
+    const res = await safeFetch(
+      `${API_BASE}/logistics/purchase-invoices/${id}/attachments/`,
+      { headers: headers() },
+    );
+    await handle(res, "purchaseInvoiceAttachments");
+    return res.json();
+  },
+
+  addAttachment: async (id: number, url: string): Promise<PurchaseContextAttachment> => {
+    const res = await safeFetch(
+      `${API_BASE}/logistics/purchase-invoices/${id}/attachments/`,
+      { method: "POST", headers: headers(), body: JSON.stringify({ url }) },
+    );
+    await handle(res, "addPurchaseInvoiceAttachment");
+    return res.json();
+  },
+
+  deleteAttachment: async (id: number, attachmentId: number): Promise<void> => {
+    const res = await safeFetch(
+      `${API_BASE}/logistics/purchase-invoices/${id}/attachments/${attachmentId}/`,
+      { method: "DELETE", headers: headers() },
+    );
+    await handle(res, "deletePurchaseInvoiceAttachment");
+  },
+
+  /**
+   * T-APPAY: دفع الفاتورة من داخلها — نداء واحد يُرحّل (إن طُلب) ويُنشئ سند صرف
+   * واحداً مرحّلاً بنقده وشيكاته، ويطبّق سلف المورّد ربطاً بلا قيد جديد. مرآة
+   * `collectSalesInvoice`. الخادم ذرّي: لا فاتورةٌ مرحّلة بسندٍ نصفِ مولود.
+   */
+  pay: async (
+    id: number,
+    body: {
+      cash?: string;
+      cash_account_id?: number | null;
+      cheques?: Array<{
+        cheque_number: string;
+        amount: string;
+        bank_name?: string;
+        due_date?: string | null;
+      }>;
+      from_on_account?: Array<{ payment_id: number; amount: string }>;
+      post_invoice?: boolean;
+      payment_date?: string | null;
+    },
+  ): Promise<{ invoice: PurchaseInvoiceDto; payment_id: number | null }> => {
+    const res = await safeFetch(`${API_BASE}/logistics/purchase-invoices/${id}/pay/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "payPurchaseInvoice");
     return res.json();
   },
 
@@ -510,4 +638,14 @@ export const purchaseInvoiceApi = {
     await handle(res, "updatePurchaseSettings");
     return res.json();
   },
+};
+
+/** T-PCTX: عقد تبويبات السياق لجانب الشراء — مرآة `salesInvoiceContextApi`. */
+export const purchaseInvoiceContextApi = {
+  getStockMovements: (id: number) => purchaseInvoiceApi.getStockMovements(id),
+  getPartnerLedger: (id: number) => purchaseInvoiceApi.getSupplierLedger(id),
+  listAttachments: (id: number) => purchaseInvoiceApi.listAttachments(id),
+  addAttachment: (id: number, url: string) => purchaseInvoiceApi.addAttachment(id, url),
+  deleteAttachment: (id: number, attachmentId: number) =>
+    purchaseInvoiceApi.deleteAttachment(id, attachmentId),
 };

@@ -429,20 +429,20 @@ test("invoice and deal documents show posted pending remaining balances and paym
   /* T4: التحصيل صار داخل الشاشة لا في نافذة — الزر يُنزل إلى اللوحة، والنقد
      والرصيد على الحساب يخرجان في نداء `collect/` واحد بدل نداءين. */
   await page.getByRole("button", { name: "سند قبض", exact: true }).first().click();
-  const collectPanel = page.getByTestId("invoice-collect-panel");
+  const collectPanel = page.getByTestId("document-payment-panel");
   await expect(collectPanel).toBeVisible();
-  await expect(page.getByTestId("collect-remaining")).toHaveText("600");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("600");
 
   await collectPanel.getByLabel("المدفوع نقداً").fill("175");
-  await expect(page.getByTestId("collect-remaining")).toHaveText("425");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("425");
   await collectPanel.getByLabel("من رصيد العميل").fill("125");
-  await expect(page.getByTestId("collect-remaining")).toHaveText("300");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("300");
 
   const collectRequest = page.waitForRequest((request) =>
     request.method() === "POST"
     && new URL(request.url()).pathname.endsWith("/sales/invoices/145/collect/"),
   );
-  await page.getByTestId("collect-submit").click();
+  await page.getByTestId("payment-submit").click();
   expect((await collectRequest).postDataJSON()).toEqual({
     cash: "175.00",
     cash_account_id: 10,

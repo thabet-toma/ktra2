@@ -28,6 +28,7 @@ import {
   Banknote,
   PackageCheck,
   Truck,
+  Copy,
 } from "lucide-react";
 import { ProductCardModal } from "../../shared/ProductCardModal";
 import { SerialEntryModal } from "../../shared/SerialEntryModal";
@@ -36,7 +37,7 @@ import { AseelDatePicker } from "../../ui/AseelDatePicker";
 import {
   suppliersService,
 } from "@/services/firestoreService";
-import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
+import { purchaseInvoiceApi, purchaseInvoiceContextApi } from "@/services/purchaseInvoiceApi";
 import { accountingApi } from "@/services/accountingApi";
 import { AccountTreeField } from "@/components/accounting/AccountTreePicker";
 import type { AccountPurpose } from "@/utils/accountTree";
@@ -76,7 +77,11 @@ import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection
 import { PurchaseInvoiceAccountingPanel } from "./PurchaseInvoiceAccountingPanel";
 import { askReceiveOnPost, receiveOnPostApplies } from "./receiveOnPostPrompt";
 import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
-import { NewSupplierPaymentModal } from "../../sales/NewSupplierPaymentModal";
+import {
+  DocumentPaymentPanel,
+  deriveDocumentPayment,
+  type PaymentChequeRow,
+} from "@/components/shared/DocumentPaymentPanel";
 import { InvoicePrintView } from "./InvoicePrintView";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { EntityActivityLog } from "@/components/activity/EntityActivityLog";
@@ -103,6 +108,12 @@ import { FieldError } from "@/components/ui/FieldError";
 import { useConfirm } from "@/contexts/ConfirmContext";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { clientLogger } from "@/services/logger";
+import { accountMatchesPurpose } from "@/utils/accountTree";
+import {
+  InvoiceStockTab,
+  InvoicePartnerLedgerTab,
+  InvoiceAttachmentsTab,
+} from "@/components/shared/DocumentContextTabs";
 import { invoiceActionPermissions } from "@/utils/viewPermissions";
 import { getPurchaseInvoiceFeeEditorState } from "./purchaseInvoiceFeeEditorState";
 import { formatDateLocalized } from "../../../utils/formatDate";
@@ -197,8 +208,24 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // نافذة استلام البضاعة (تُنشئ إرسالية بالبنود المؤشَّرة).
   const [showReceive, setShowReceive] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
-  // T-ONEPAY: نافذة «سند صرف» (نقد + شيكات) المفتوحة من داخل فاتورة الشراء.
-  const [showSupplierVoucher, setShowSupplierVoucher] = useState(false);
+  /* ── T-APPAY: لوحة الدفع داخل المحرّر ───────────────────────────────────
+     كان الدفع نافذةً تُلزم بالترحيل أولاً ثم تفتح سند الصرف — نداءان منفصلان،
+     فانقطاعُ الثاني يترك فاتورةً مرحّلة بلا سند. اللوحة تنادي `pay/` مرّةً
+     واحدة، وهي نفس مكوّن لوحة التحصيل في فاتورة البيع (`DocumentPaymentPanel`)
+     بمفرداتِ جانب المورّد. */
+  const [payCash, setPayCash] = useState("");
+  const [payCashAccountId, setPayCashAccountId] = useState<number | null>(null);
+  const [payCheques, setPayCheques] = useState<PaymentChequeRow[]>([]);
+  const [payChequesOpen, setPayChequesOpen] = useState(false);
+  const [payFromBalance, setPayFromBalance] = useState("");
+  const [payAdvances, setPayAdvances] = useState<Array<{ id: number; unallocated: number }>>([]);
+  const [paying, setPaying] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
+  const [nextNumberPreview, setNextNumberPreview] = useState<string>("");
+  const payPanelRef = useRef<HTMLDivElement | null>(null);
+  const payCashInputRef = useRef<HTMLInputElement | null>(null);
+  /** يُزاد بعد كل دفعة ناجحة لإعادة جلب سلف المورّد غير الموزّعة. */
+  const [payAdvancesNonce, setPayAdvancesNonce] = useState(0);
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
   // task18 DEF-B1/B3: إنشاء صنف جديد inline من خلية اسم الصنف (النص المكتوب يُمرَّر مسبقاً)
   const [inlineCreate, setInlineCreate] = useState<{ rowIndex: number; name: string } | null>(null);
@@ -573,6 +600,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       const sqlBody: Record<string, unknown> = {
         invoice_name: payload.invoiceName || null,
         invoice_date: payload.invoiceDate || null,
+        // T-DUE: الاستحقاق والمهلة — الخادم يحسم أيّهما يفوز (`resolve_due_date`).
+        due_date: payload.dueDate || null,
+        payment_terms_days: payload.paymentTermsDays ?? null,
         partner: Number.isFinite(partnerId) && partnerId > 0 ? partnerId : undefined,
         deal: payload.dealId ? Number(payload.dealId) : null,
         subtotal: roundSqlMoney2(payload.subtotal ?? 0),
@@ -1613,7 +1643,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     />
   );
 
-  const attachmentsTab = (
+  /* T-PCTX: المرفقات صارت نقاطاً حيّة (`attachments/`) لا حقولاً تُحفظ مع
+     الفاتورة — المرحّلة لا تُعدَّل، فكان الإرفاق بعد الترحيل مستحيلاً عملياً وهو
+     أكثر وقت يُحتاج فيه إيصال المورّد؛ ولا حذفَ كان أصلاً. نفس مكوّن البيع.
+     المسودّة غير المحفوظة بلا معرّف ⇒ يبقى المحرّر القديم مدخلَها. */
+  const attachmentsTab = formData.id && Number(formData.id) > 0 ? (
+    <InvoiceAttachmentsTab
+      invoiceId={Number(formData.id)}
+      api={purchaseInvoiceContextApi}
+      readOnly={readOnly}
+    />
+  ) : (
     <div className="aseel-legacy-tab">
       <AttachmentsSection data={formData} setData={(val) => { setFormData(val); markDirty(); }} />
     </div>
@@ -1652,8 +1692,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           className="aseel-banner"
           style={{ marginBottom: "8px", display: "flex", gap: "18px", flexWrap: "wrap", fontSize: "13px" }}
         >
-          <span>رصيد المورد قبل احتساب متبقي الفاتورة (بالعملة الأساسية): <strong>{formatMoney(formData.partnerBalanceBeforeInvoice || 0)}</strong></span>
-          <span>الرصيد الحالي بعد احتسابه (بالعملة الأساسية): <strong>{formatMoney(formData.partnerBalanceAfterInvoice || 0)}</strong></span>
+          {/* T-PCTX: الرقمان القديمان («قبل/بعد») تقريبٌ يطرح المتبقّي من رصيد
+              **اليوم**، فالفاتورة المسدَّدة كانت تُظهر أثراً صفرياً وهي دائنةُ
+              ذمم بكامل إجماليها. يبقى المعروض هنا الرصيد الحالي — وهو رقمٌ
+              صحيح بذاته — و«قبل/بعد» الحقيقيان في تبويب «حساب المورّد». */}
+          <span>رصيد المورد الحالي (بالعملة الأساسية): <strong>{formatMoney(formData.partnerBalance ?? 0)}</strong></span>
+          <span className="text-[var(--color-text-muted)]">
+            أثر هذه الفاتورة على حسابه — والرصيد قبلها وبعدها — في تبويب «حساب المورّد».
+          </span>
         </div>
       )}
       <InvoiceBasicInfo
@@ -1989,34 +2035,233 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // T-ONEPAY (مرآة فاتورة البيع): مدخل واحد لدفع المورد — نقد و/أو شيكات في سند
   // صرف واحد. التوزيع يلزمه فاتورة مرحّلة، فنحفظ ونرحّل ضمن نفس النقرة بتأكيد.
   const supplierRemaining = Math.max(Number(formData.remainingBalance) || 0, 0);
-  const openSupplierVoucher = async () => {
-    if (!formData.supplierId) {
-      toast("اختر المورد أولاً.", "error");
+
+  /* T-APPAY: سلف المورّد المرحّلة غير الموزَّعة — «رصيدٌ لنا عنده» يصلح لتسديد
+     هذه الفاتورة ربطاً بلا قيد جديد (مرآة «من رصيد العميل» في البيع). */
+  useEffect(() => {
+    const supplierId = formData.supplierId;
+    if (!supplierId) { setPayAdvances([]); return; }
+    let cancelled = false;
+    purchaseInvoiceApi.listSupplierPayments(supplierId)
+      .then((rows) => {
+        if (cancelled) return;
+        setPayAdvances(
+          (rows || [])
+            .filter((r) => r.is_posted)
+            .map((r) => ({ id: r.id, unallocated: Number(r.unallocated_amount ?? 0) }))
+            .filter((r) => r.unallocated > 0.009),
+        );
+      })
+      .catch(() => { if (!cancelled) setPayAdvances([]); });
+    return () => { cancelled = true; };
+  }, [formData.supplierId, payAdvancesNonce]);
+
+  /** الصندوق الافتراضي للوحة — أوّل صندوق في الشجرة؛ والخادم يسقط على افتراضي
+      الشركة إن بقي فارغاً، فلا تُرفض الدفعة لفراغه. */
+  useEffect(() => {
+    if (payCashAccountId !== null) return;
+    const cashAcc = allAccounts.find((a) => accountMatchesPurpose(a, "cash"));
+    if (cashAcc) setPayCashAccountId(Number(cashAcc.id));
+  }, [payCashAccountId, allAccounts]);
+
+  const paymentInput = useMemo(() => ({
+    base: payableTotal,
+    paid: Number(formData.amountPaid) || 0,
+    isCashDocument: formData.paymentType === "cash",
+    cash: payCash,
+    cheques: payCheques,
+    fromBalance: payFromBalance,
+    onAccountVouchers: payAdvances,
+  }), [payableTotal, formData.amountPaid, formData.paymentType, payCash, payCheques,
+       payFromBalance, payAdvances]);
+  const payment = useMemo(() => deriveDocumentPayment(paymentInput), [paymentInput]);
+
+  /** اللوحة تظهر لمن يملك الدفع، على فاتورة شراء لها مورّد وما زال عليها متبقٍّ. */
+  const showPayPanel =
+    !formData.isReturn
+    && canPerm("purchase.payment.create")
+    && (isPosted || invoicePermissions.canSaveAndPost)
+    && Boolean(formData.supplierId)
+    && !(isPosted && supplierRemaining <= 0.009);
+
+  const resetPayInputs = () => {
+    setPayCash("");
+    setPayCheques([]);
+    setPayChequesOpen(false);
+    setPayFromBalance("");
+  };
+
+  /**
+   * نداء واحد إلى `pay/`: على المسودة تُحفظ الفاتورة أولاً ثم تُرحَّل ويُسجَّل
+   * سند الصرف داخل معاملة الخادم نفسها (`post_invoice`)، وعلى المرحّلة يُسجَّل
+   * السند فوراً. الكلّ أو لا شيء — لا فاتورةٌ مرحّلة بسندٍ نصفِ مولود.
+   */
+  const submitPayment = async () => {
+    if (!formData.supplierId) { toast("اختر المورد أولاً.", "error"); return; }
+    if (!payment.canSubmit) return;
+    if ((Number(payCash) || 0) > 0 && !payCashAccountId) {
+      toast("اختر حساب الصندوق أو البنك للمبلغ النقدي.", "error");
       return;
     }
-    if (isPosted && supplierRemaining <= 0) {
+    setPaying(true);
+    try {
+      let targetId = formData.id;
+      if (!targetId) {
+        const saved = await handleSave();
+        if (!saved) return;
+        targetId = saved;
+      }
+      const result = await purchaseInvoiceApi.pay(Number(targetId), {
+        cash: payCash || undefined,
+        cash_account_id: payCashAccountId,
+        cheques: payCheques.map((c) => ({
+          cheque_number: c.cheque_number,
+          amount: c.amount,
+          bank_name: c.bank_name || undefined,
+          due_date: c.due_date || null,
+        })),
+        from_on_account: payment.onAccountPlan.map((row) => ({
+          payment_id: row.payment_id,
+          amount: String(row.amount),
+        })),
+        post_invoice: !isPosted,
+      });
+      clientLogger.info("purchase_invoice.paid", {
+        invoiceId: targetId, paymentId: result.payment_id,
+      });
+      resetPayInputs();
+      setPayAdvancesNonce((n) => n + 1);
+      setAccMsg("تم تسجيل الدفعة وترحيل سند الصرف، وخُصِم من متبقي الفاتورة.");
+      await reloadInvoice(targetId);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), "error");
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const focusPayPanel = () => {
+    if (!formData.supplierId) { toast("اختر المورد أولاً.", "error"); return; }
+    if (isPosted && supplierRemaining <= 0.009) {
       toast("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.", "info");
       return;
     }
-    if (!isPosted) {
-      if (!formData.id) {
-        toast("احفظ الفاتورة أولاً ثم سجّل سند الصرف.", "error");
-        return;
+    payPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    payCashInputRef.current?.focus();
+  };
+
+  /* T-PCTX: تبويبات السياق تُعرض في **وضع العرض** أيضاً — وهو الوضع الذي تُفتح
+     به الفاتورة المرحّلة، أي بالضبط الحالة التي يُسأل فيها «ماذا فعلت هذه
+     الفاتورة بالمخزن وبحساب المورّد؟». كان `tabs={viewMode ? [] : [...]}`
+     يُسقط التبويبات كلَّها هناك، فيصير كلّ ما نضيفه إلى المحرّر غير قابل
+     للوصول على الفاتورة النهائية. */
+  const contextTabs = (formData.id && Number(formData.id) > 0) ? [
+    {
+      key: "stock_impact",
+      label: "حركة المخزون",
+      content: (
+        <InvoiceStockTab
+          invoiceId={Number(formData.id)}
+          api={purchaseInvoiceContextApi}
+          side="supplier"
+        />
+      ),
+    },
+    {
+      key: "supplier_ledger",
+      label: "حساب المورّد",
+      content: (
+        <InvoicePartnerLedgerTab
+          invoiceId={Number(formData.id)}
+          api={purchaseInvoiceContextApi}
+          side="supplier"
+        />
+      ),
+    },
+    {
+      key: "attachments",
+      label: "المرفقات",
+      content: (
+        <InvoiceAttachmentsTab
+          invoiceId={Number(formData.id)}
+          api={purchaseInvoiceContextApi}
+          readOnly={readOnly}
+        />
+      ),
+    },
+  ] : [];
+
+  const payPanel = !showPayPanel ? null : (
+    <DocumentPaymentPanel
+      side="supplier"
+      derived={payment}
+      input={paymentInput}
+      isPosted={isPosted}
+      busy={paying}
+      panelRef={payPanelRef}
+      cashInputRef={payCashInputRef}
+      chequesOpen={payChequesOpen}
+      onToggleCheques={() => setPayChequesOpen((v) => !v)}
+      onCashChange={setPayCash}
+      onFromBalanceChange={setPayFromBalance}
+      onAddCheque={() => {
+        setPayChequesOpen(true);
+        setPayCheques((rows) => [...rows, {
+          key: `chq-${rows.length}-${rows.length ? rows[rows.length - 1].key : "0"}`,
+          cheque_number: "", bank_name: "", due_date: "", amount: "",
+        }]);
+      }}
+      onPatchCheque={(key, patch) =>
+        setPayCheques((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)))
       }
-      if (!(await confirm({
-        title: "سند صرف",
-        message:
-          "لتسجيل دفعة (كاملة أو جزئية) تُرحَّل الفاتورة أولاً، ثم يُفتح سند الصرف بالمتبقي. متابعة؟",
-        confirmText: "ترحيل ثم متابعة",
-      }))) return;
-      await handlePost();
-      if (!Boolean(formData.isPosted)) {
-        // handlePost يعرض سبب الفشل في شريط الرسائل — لا نفتح السند على فاتورة غير مرحّلة.
-        const refreshed = await purchaseInvoiceApi.get(Number(formData.id)).catch(() => null);
-        if (!refreshed?.is_posted) return;
+      onRemoveCheque={(key) => setPayCheques((rows) => rows.filter((r) => r.key !== key))}
+      onFillCashShortfall={() =>
+        setPayCash(((Number(payCash) || 0) + payment.cashShortfall).toFixed(2))
       }
+      onSubmit={() => void submitPayment()}
+      cashAccountField={(
+        <AccountTreeField
+          className="aseel-input"
+          accounts={allAccounts}
+          value={payCashAccountId ?? ""}
+          purpose="cash"
+          disabled={paying}
+          allowClear={false}
+          onChange={(id) => setPayCashAccountId(id ?? null)}
+          placeholder="الصندوق / البنك"
+          title="حساب الصندوق أو البنك للدفع"
+        />
+      )}
+    />
+  );
+
+  /* T-PSIMPL: رقم المسودّة التالي — قراءةٌ واحدة عند فتح فاتورة جديدة. */
+  useEffect(() => {
+    if (formData.id) return;
+    let cancelled = false;
+    purchaseInvoiceApi.nextNumber()
+      .then((n) => { if (!cancelled) setNextNumberPreview(n); })
+      .catch(() => { if (!cancelled) setNextNumberPreview(""); });
+    return () => { cancelled = true; };
+  }, [formData.id]);
+
+  /** T-PSIMPL: ينسخ الفاتورة إلى مسودّة جديدة ويفتحها — بلا ترحيلٍ ولا استلام. */
+  const handleDuplicate = async () => {
+    if (!formData.id) return;
+    setDuplicating(true);
+    try {
+      const clone = await purchaseInvoiceApi.duplicate(Number(formData.id));
+      toast(`أُنشئت مسودّة جديدة برقم ${clone.invoice_number}.`, "success");
+      clientLogger.info("purchase_invoice.duplicated", {
+        sourceId: formData.id, cloneId: clone.id,
+      });
+      dirtyRef.current = false;
+      await reloadInvoice(clone.id);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), "error");
+    } finally {
+      setDuplicating(false);
     }
-    setShowSupplierVoucher(true);
   };
 
   const handleSaveAndPost = async () => {
@@ -2073,6 +2318,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     ...(canPerm("purchase.invoice.create")
       ? [{ key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true } as AseelToolbarAction]
       : []),
+    // T-PSIMPL: «نسخ» — مرآة نظيرتها في البيع. فواتير المورّد الواحد تتكرّر
+    // شهرياً، وكانت تُعاد كتابتها بندًا بندًا.
+    ...(canPerm("purchase.invoice.create") && formData.id ? [{
+      key: "duplicate",
+      label: duplicating ? "...نسخ" : "نسخ",
+      icon: duplicating ? <Loader2 className="animate-spin" /> : <Copy />,
+      onClick: duplicating ? undefined : () => void handleDuplicate(),
+      disabled: duplicating,
+    } as AseelToolbarAction] : []),
     ...(invoicePermissions.canPost ? [{
       key: "post",
       label: posting ? "...ترحيل" : "ترحيل",
@@ -2098,12 +2352,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       disabled: !isPosted || posting,
     } as AseelToolbarAction] : []),
     ...(canPerm("purchase.payment.create") && (isPosted || invoicePermissions.canSaveAndPost) ? [{
-      // T-ONEPAY: «سند صرف» كمرآة «سند قبض» في فاتورة البيع — نقد و/أو شيكات.
+      // T-APPAY: زرٌّ واحد باسمٍ واحد على الجانبين — «تسجيل دفعة» — يُنزِل
+      // المستخدم إلى اللوحة داخل المستند بدل نافذةٍ تُلزمه بالترحيل أوّلاً.
       key: "voucher",
-      label: isPosted && supplierRemaining <= 0 ? "مسدَّدة" : "سند صرف",
+      label: isPosted && supplierRemaining <= 0 ? "مسدَّدة" : "تسجيل دفعة",
       icon: <Banknote />,
-      onClick:
-        !(isPosted && supplierRemaining <= 0) ? () => void openSupplierVoucher() : undefined,
+      onClick: !(isPosted && supplierRemaining <= 0) ? () => focusPayPanel() : undefined,
       disabled: isPosted && supplierRemaining <= 0,
       separatorBefore: true,
     } as AseelToolbarAction] : []),
@@ -2381,7 +2635,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             <input
               className="aseel-input"
               readOnly
-              value={formData.id ? `#${formData.invoiceNumber || formData.id}` : "— جديدة —"}
+              // T-PSIMPL: المسودّة تعرض الرقم **التالي** بدل «— جديدة —» — كان
+              // المستخدم لا يعرف رقم مستنده حتى يحفظه. مُلمَّحٌ أنه مبدئي:
+              // الرقم النهائي يحسمه الخادم عند الحفظ (دفتر ترقيم مقفول).
+              value={
+                formData.id
+                  ? `#${formData.invoiceNumber || formData.id}`
+                  : nextNumberPreview
+                    ? `${nextNumberPreview} (مبدئي)`
+                    : "— جديدة —"
+              }
             />
           )}
           {fld(
@@ -2574,7 +2837,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       )}
       activeTab={activeTabKey}
       onTabChange={setActiveTabKey}
-      tabs={viewMode ? [] : [
+      tabs={viewMode ? [
+        // تبويبٌ أوّل خاملٌ عمداً: الغلاف يُفعّل الأوّل، فلو كان «حركة المخزون»
+        // لجَلَب لكل فتحة فاتورة — والكسل شرط لا تحسين. نفس ترتيب محرّر البيع.
+        { key: "notes", label: "الملاحظات", content: notesTab },
+        ...contextTabs,
+      ] : [
         { key: "basic", label: "بيانات الفاتورة", content: basicInfoTab },
         { key: "items", label: "البنود والمنتجات", content: itemsTab },
         { key: "fees", label: `حسابات الرسوم${feesTotal > 0 ? ` (${formatMoney(feesTotal)})` : ""}`, content: feesTab },
@@ -2610,6 +2878,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               />
             ),
           },
+          /* T-PCTX — تبويبات السياق. تُلحق **آخر** القائمة: الغلاف يتتبّع
+             التبويب بالفهرس، فإدراج تبويب في الوسط يقفز بالمستخدم. ولا شيء
+             منها يُجلَب حتى يُفتح تبويبه (الغلاف يركّب المحتوى النشط وحده).
+             ومصدرها `contextTabs` نفسه المستعمل في وضع العرض — قائمةٌ واحدة. */
+          ...contextTabs.filter((t) => t.key !== "attachments"),
           {
             key: "activity_log",
             label: "سجل النشاط",
@@ -2803,6 +3076,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             </div>
           ))}
         </div>
+        {/* T-APPAY: لوحة الدفع خارج حاوية الإدخال قصداً — الفاتورة المرحّلة
+            تُفتح في وضع العرض حيث تلك الحاوية مخفيّة، ودفعُها من هنا نفسه. */}
+        {payPanel}
     </AseelDocumentShell>
 
     {/* فهرس الموردين */}
@@ -2954,27 +3230,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             setShowReceive(false);
             toast("تم استلام البضاعة وإنشاء الإرسالية.", "success");
             void reloadInvoice();
-          }}
-        />
-      )}
-      {/* T-ONEPAY: سند صرف بنقد و/أو شيكات، مربوط بهذه الفاتورة. */}
-      {showSupplierVoucher && formData.id && formData.supplierId && (
-        <NewSupplierPaymentModal
-          initialPartner={{
-            id: Number(formData.supplierId),
-            name: selectedSupplier?.name || selectedSupplier?.tradeName || "",
-          }}
-          lockPartner
-          initialInvoice={{
-            id: Number(formData.id),
-            number: formData.invoiceName || String(formData.id),
-            remaining: supplierRemaining,
-          }}
-          onClose={() => setShowSupplierVoucher(false)}
-          onSaved={async (posted) => {
-            setShowSupplierVoucher(false);
-            setAccMsg(posted ? "تم تسجيل سند الصرف وترحيله، وخُصِم من متبقي الفاتورة." : "حُفظ سند الصرف كمسودة.");
-            await reloadInvoice();
           }}
         />
       )}

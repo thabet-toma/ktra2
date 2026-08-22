@@ -248,6 +248,120 @@ def guard_invoice_allocation_total(invoice: SalesInvoice, *, incoming: Decimal) 
         )
 
 
+# T-RETQTY: أنواع المرجع التي تُخصَم من الكمية القابلة للإرجاع — مصدر واحد
+# يقرأه القياس والحارس معاً.
+RETURN_INVOICE_KINDS = (
+    SalesInvoice.INVOICE_KIND_SALE_RETURN,
+    SalesInvoice.INVOICE_KIND_PURCHASE_RETURN,
+)
+
+
+def returnable_lines_for_invoice(
+    original_invoice: SalesInvoice, *, exclude_invoice_id: int | None = None
+) -> list[dict]:
+    """بنود فاتورة البيع الأصلية مع (المفوتر · المرتجع سابقاً · المتبقّي القابل
+    للإرجاع) لكل صنف — تغذّي منتقي بنود المرجع، ومصدرُ الحقيقة نفسه الذي يقيس به
+    الحارس. مرآة `logistics/services.py` (`returnable_lines_for_invoice`).
+
+    التجميع **بالصنف** لا بالسطر: صنفٌ تكرّر في سطرين من الفاتورة يُرجَع مجموعه،
+    وإلا فتحَ التكرارُ باباً لتجاوز الكمية بالتوزيع على السطور.
+
+    `exclude_invoice_id`: مرجعٌ يُعدَّل يستثني كمياته هو من «المرتجع سابقاً» —
+    وإلا منَع المرجعُ نفسَه من الحفظ مرّة ثانية.
+    """
+    if original_invoice is None:
+        return []
+
+    orig: dict[int, dict] = {}
+    for line in original_invoice.lines.all():
+        if not line.product_id:
+            continue
+        row = orig.setdefault(line.product_id, {
+            "product": line.product_id,
+            "name": str(line.product) if line.product_id else "",
+            "unit_price": Decimal(str(line.unit_price or 0)),
+            "invoiced_qty": Decimal("0"),
+        })
+        row["invoiced_qty"] += Decimal(str(line.quantity or 0))
+
+    prior = SalesInvoiceLine.objects.filter(
+        invoice__original_invoice=original_invoice,
+        invoice__invoice_kind__in=RETURN_INVOICE_KINDS,
+    )
+    if exclude_invoice_id:
+        prior = prior.exclude(invoice_id=exclude_invoice_id)
+    returned: dict[int, Decimal] = {}
+    for product_id, qty in prior.values_list("product_id", "quantity"):
+        if product_id:
+            returned[product_id] = (
+                returned.get(product_id, Decimal("0")) + Decimal(str(qty or 0))
+            )
+
+    rows = []
+    for product_id, row in orig.items():
+        returned_qty = returned.get(product_id, Decimal("0"))
+        remaining = row["invoiced_qty"] - returned_qty
+        rows.append({
+            "product": product_id,
+            "name": row["name"],
+            "unit_price": str(row["unit_price"]),
+            "invoiced_qty": str(row["invoiced_qty"]),
+            "returned_qty": str(returned_qty),
+            "remaining_qty": str(remaining if remaining > 0 else Decimal("0")),
+        })
+    return rows
+
+
+def guard_sales_return_quantities(
+    original_invoice: SalesInvoice,
+    lines: list[dict],
+    *,
+    exclude_invoice_id: int | None = None,
+) -> None:
+    """T-RETQTY: مرجع البيع لا يتجاوز الكمية القابلة للإرجاع.
+
+    الجذر: `_enforce_return_party` كان يحرس **الطرف** ولا يحرس **الكمية** — فمرجعُ
+    فاتورةٍ بها 10 يقبل 100: تُدائن ذمم العميل بما لم يُبَع وتدخل المخزنَ كميةٌ لم
+    تخرج منه قطّ. الحارس على جانب الشراء موجود منذ البداية
+    (`logistics/services.py` — `create_purchase_return`)، وهذا نظيره.
+
+    الحارس خادميّ لأن كل مسارٍ يكتب عبر الـAPI محكومٌ به — لا شاشةَ «مرجع البيع»
+    وحدها. والقياس بالصنف لا بالسطر، من `returnable_lines_for_invoice` نفسها.
+    """
+    if original_invoice is None or not lines:
+        return
+    allowed = {
+        int(row["product"]): Decimal(row["remaining_qty"])
+        for row in returnable_lines_for_invoice(
+            original_invoice, exclude_invoice_id=exclude_invoice_id,
+        )
+    }
+    wanted: dict[int, Decimal] = {}
+    for line in lines:
+        product = line.get("product")
+        product_id = getattr(product, "pk", product)
+        if not product_id:
+            continue
+        wanted[int(product_id)] = (
+            wanted.get(int(product_id), Decimal("0"))
+            + Decimal(str(line.get("quantity") or 0))
+        )
+    for product_id, qty in wanted.items():
+        remaining = allowed.get(product_id, Decimal("0"))
+        if qty > remaining:
+            product = Product.objects.filter(pk=product_id).first()
+            label = str(product) if product else f"#{product_id}"
+            logger.warning(
+                "sales return blocked: product %s wants %s, returnable %s "
+                "(original invoice %s)",
+                product_id, qty, remaining, original_invoice.invoice_number,
+            )
+            raise ValidationError(
+                f"الصنف «{label}»: الكمية المطلوب إرجاعها ({qty}) تتجاوز القابل "
+                f"للإرجاع ({remaining}) من فاتورة «{original_invoice.invoice_number}»."
+            )
+
+
 def invoice_journal_debits_ar(invoice: SalesInvoice) -> bool:
     """هل يحتوي قيد الفاتورة سطراً مديناً على حساب ذمم العميل؟
 

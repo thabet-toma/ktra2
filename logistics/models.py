@@ -1514,6 +1514,19 @@ class PurchaseInvoice(models.Model):
     invoice_number = models.CharField(max_length=50, db_column='InvoiceNumber')
     invoice_name = models.CharField(max_length=255, null=True, blank=True, db_column='InvoiceName')
     invoice_date = models.DateField(null=True, blank=True, db_column='InvoiceDate')
+    # T-DUE: تاريخ استحقاق الدفع للمورّد. كان الحقل موجوداً على فاتورة البيع
+    # وحدها، فكان جانب الشراء بلا «متى يُدفع» أصلاً: أعمارُ الذمم الدائنة تُعمَّر
+    # بتاريخ الفاتورة (لا بالاستحقاق كنظيرتها المدينة)، ولا تُعرف فاتورةٌ تأخّرت.
+    due_date = models.DateField(
+        null=True, blank=True, db_column='DueDate',
+        help_text='تاريخ استحقاق الدفع — يُشتقّ من مهلة السداد إن تُركت فارغة.',
+    )
+    # مهلة السداد بالأيام (Net 30…). صفرٌ = مستحقّة عند الاستلام. تُشتقّ منها
+    # `due_date` عند الحفظ، ويبقى التاريخ الصريح مقدَّماً عليها إن أُدخل.
+    payment_terms_days = models.PositiveIntegerField(
+        null=True, blank=True, db_column='PaymentTermsDays',
+        help_text='مهلة السداد بالأيام من تاريخ الفاتورة (0 = عند الاستلام).',
+    )
 
     # فصل الفاتورة الدولية (الاستيراد) عن المحلية. المحلية = فاتورة شراء عادية؛
     # الدولية = ضمن مسار الاستيراد (صفقة/شحنة/تخليص). الفصل يحكم الشاشة المعروضة

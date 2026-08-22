@@ -79,6 +79,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 | GET | `invoices/{id}/delivery-lines/` · `invoices/lookup/` · `invoices/next-number/` | (666) · (189) · (640) |
 | GET | `invoices/last-price/` · `invoices/resolve-price/` · `invoices/profits/` · `invoices/credit-preview/` | (577) · (594) · (623) · (551) |
 | POST | `invoices/{id}/collect/` | `collect` — التحصيل من داخل الفاتورة (نقد/شيكات/رصيد العميل)، صلاحية `sales.payment.create` (+`sales.invoice.post` مع `post_invoice`) |
+| GET | `invoices/{id}/returnable-lines/` | `SalesInvoiceViewSet.returnable_lines` — المفوتر · المرتجع سابقاً · المتبقّي القابل للإرجاع (يقبل `?exclude_invoice=`) |
 | GET | `invoices/{id}/stock-movements/` | `SalesInvoiceViewSet.stock_movements` → `inventory/services.py` (`document_stock_movements`) — أثر **هذه الفاتورة** على المخزون، ومعه **سبب الفراغ** (مسودّة؟ أم `stock_on_post=False` تنتظر التسليم؟) |
 | GET | `invoices/{id}/customer-ledger/` | `SalesInvoiceViewSet.customer_ledger` → `accounting/services.py` (`partner_account_statement`) بمرساة الفاتورة — الرصيد قبلها وبعدها وأثرها |
 | GET/POST · DELETE | `invoices/{id}/attachments/` · `attachments/{attachment_id}/` | `SalesInvoiceViewSet.attachments` · `delete_attachment` — تُحفظ **فوراً** لا مع الفاتورة، فيبقى الإرفاق ممكناً بعد الترحيل |
@@ -98,8 +99,19 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 
 ## قواعد لا يجوز كسرها
 - **لا تعديل ولا حذف لفاتورة غير مسودة**: `views.py` و`:306` يرفضان بـ`POSTED_DOC_WARNING` مع `can_unpost: True`؛ ونفس المنع في `serializers.py`. **والمرفقات استثناءٌ مقصود**: نقاطها الثلاث (`attachments`) تكتب في `core.SystemAttachment` لا في الفاتورة، فيبقى إرفاق الإيصال ممكناً بعد الترحيل — وهو أكثر وقت يُحتاج فيه. ربطُها بمسار PATCH كان يعني ألّا يُرفق شيء بفاتورة نهائية أبداً.
-- **«رصيد العميل قبل/بعد» لا يُشتقّ من «المتبقّي»**: `customer_balance_before_invoice`/`after` في `serializers.py` (`SalesInvoiceSerializer`) **تقريبٌ لا يطابق كشف الحساب** — يطرح المتبقّي من رصيد **اليوم**، فالفاتورة المدفوعة بالكامل تُظهر أثراً صفرياً وهي دائنةُ ذمم بكامل إجماليها (قيدها يدين الذمم كلَّها، والتحصيل قيدٌ منفصل). المصدر الصحيح هو `invoices/{id}/customer-ledger/` من `partner_account_statement` نفسه الذي يبني كشف الحساب — المطابقة **بالبناء** لا بالمصادفة. لا تعرض الحقلين القديمين على أنهما «قبل/بعد». **والمرآة في جانب المورّد لم تُصلَح** (`core/payments.py` — `document_partner_balance_summary` يخدم الطرفين): دينٌ معروف موثَّق، خارج نطاق THA-132.
+- **«رصيد العميل قبل/بعد» لا يُشتقّ من «المتبقّي»**: `customer_balance_before_invoice`/`after` في `serializers.py` (`SalesInvoiceSerializer`) **تقريبٌ لا يطابق كشف الحساب** — يطرح المتبقّي من رصيد **اليوم**، فالفاتورة المدفوعة بالكامل تُظهر أثراً صفرياً وهي دائنةُ ذمم بكامل إجماليها (قيدها يدين الذمم كلَّها، والتحصيل قيدٌ منفصل). المصدر الصحيح هو `invoices/{id}/customer-ledger/` من `partner_account_statement` نفسه الذي يبني كشف الحساب — المطابقة **بالبناء** لا بالمصادفة. لا تعرض الحقلين القديمين على أنهما «قبل/بعد». **والمرآة في جانب المورّد أُصلحت** (T-PCTX): `GET /api/logistics/purchase-invoices/{id}/supplier-ledger/` هي نظيرتها، و`document_partner_balance_summary` (`core/payments.py`) يبقى تقريباً موثَّقاً على الجانبين لعقد الـAPI وحده — لا يُعرض على أنه «قبل/بعد» في أيٍّ منهما.
 - **قيد الفاتورة لا يُسوّي شيئاً ولا يزيد «المدفوع»**: `post_sales_invoice` (`sales/services/flow.py`) يدين الذمم بكامل الإجمالي ويدائن الإيراد/الضريبة فقط — لا سطر صندوق ولا سطر «شيكات برسم التحصيل» داخله، ولا لمسَ لـ`amount_paid`. ما وصل مرفقاً مع الفاتورة (شيكات، ونقد البيع النقدي) يُحصَّل داخل نفس المعاملة بسند قبض حقيقي: `_settle_attached_cheques` ثم `_auto_settle_cash_sale`، وكلاهما يمرّ من `post_customer_payment`. وحين يأتي التحصيل مفصَّلاً من `collect_invoice_payment` تُكبَت التسويتان معاً (`suppress_auto_settlement=True`) فيحلّ محلّهما سندٌ واحد — وإلّا خطفت التلقائيةُ كاملَ المتبقّي فخرج سندان.
+- **تبويبات السياق مكوّنٌ واحد للجانبين**: انتقل
+  `components/sales/InvoiceContextTabs.tsx` إلى
+  `components/shared/DocumentContextTabs.tsx` وصار يخدم فاتورتَي البيع والشراء —
+  الفارق بينهما شيئان فقط: من أين تُجلب البيانات (`api`) وبأيّ مفردات تُسمّى
+  (`side`). ما عداهما مشترك، والكسلُ (لا جلبَ قبل فتح التبويب) شرطٌ فيهما معاً.
+- **لوحة الدفع مكوّنٌ واحد للجانبين**: `frontend_v2/components/shared/DocumentPaymentPanel.tsx`
+  — يخدم محرّر فاتورة البيع (`side="customer"`) ومحرّر فاتورة الشراء
+  (`side="supplier"`)، وكلّ ما يُعرض مشتقٌّ من `deriveDocumentPayment` وحدها.
+  نسختان من هذه الحسبة تعني «متبقّياً» يختلف بين شاشتين. الاختلاف بين الجانبين
+  مفرداتٌ فقط (رصيد العميل ÷ سلفة المورّد)، والزرّ اسمُه **«تسجيل دفعة»** على
+  الاثنين كما تفعل Odoo بـ*Register Payment*.
 - **التحصيل من داخل الفاتورة نقطة واحدة**: `collect_invoice_payment` (`sales/services/flow.py`) — تركيبُ خدمات قائمة بلا أي منطق ترحيل جديد: `post_sales_invoice` ← `post_customer_payment` (نقد + شيكات في سند واحد، توزيعٌ مقصوص على المتبقّي وما زاد «على الحساب») ← `allocate_customer_payment` لكل خصمٍ من رصيد العميل (ربطٌ بلا قيد جديد). كلّه في `transaction.atomic` واحد: لا فاتورةٌ مرحّلة بسندٍ نصف مولود. `attach_payment_voucher` لم يعد يقبل نقداً (كان يُسجَّل ولا يُرحَّل)، و`attach_voucher_and_post` والنقطة `payment-voucher` غلافان فوق المنسّق.
 - **الفاتورة النقدية لا تبقى ناقصة التحصيل**: نقدٌ غير مذكور يُكمَّل تلقائياً في نفس السند، ونقصٌ بعد نقدٍ **مذكور** يَرفض العمليةَ كلَّها («اجعلها فاتورة ذمم أو أكمل المبلغ») — `collect_invoice_payment`.
 - **`amount_paid` = مجموع توزيعات السندات المرحّلة**: كل زيادة عليه تأتي من `post_customer_payment` مقرونةً بصفّ `PaymentAllocation`، ويُثبته `posted_allocations_total` (`sales/services/flow.py`). الحقل مخزنٌ مُشتقّ عمداً — تقرأه التقارير وكشف الحساب والأعمار بجمع SQL — فثمنُه أن يُبرهَن لا أن يُفترض: `python manage.py audit_ar_integrity` (`sales/management/commands/audit_ar_integrity.py`) يمسح كل فاتورة مرحّلة عليها «مدفوع» أو توزيع، ويصنّف كل فرق إلى **قديم** (قيد الفاتورة نفسه يحمل التسوية — دائنُ ذمم داخله بدلالة `invoice_journal_settlement_credit`، أو نقديّةُ ما قبل الميزة 2 بقيدٍ بلا مدين ذمم: متوازنٌ وصحيح، يُبلَّغ ولا يُصلَح أبداً) أو **يتيم** (لا توزيع ولا تسوية داخل القيد — وحده ما يُعيده `--fix`/`--apply` إلى مجموع التوزيعات). الأمر عرضٌ فقط افتراضياً ولا يلمس قيداً إطلاقاً؛ والصنف القديم يحرسه الحارسان معاً (المتبقي على `amount_paid` + `guard_invoice_allocation_total`) فلا يُحصَّل مرّتين.
@@ -115,6 +127,22 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 - **رقم الفاتورة فريد داخل الشركة**: `UniqueConstraint(["tenant","invoice_number"])` (`models.py`).
 - **حقل العميل في محرّر الفاتورة يُكتب فيه ويُنشئ**: `AseelAutocomplete` لا حقلاً للقراءة، وسطرُ «إضافة «ما كُتب» كعميل جديد» يفتح `CustomerQuickAddModal` بالاسم معبّأً (الاسم وحده إلزامي؛ النوع محسوم `Customer`)، وفهرس الحسابات يبقى خلف زرّ «…» بسلوكه كما كان. وقبل الحفظ تسأل النافذةُ `partners/lookup/?search=` عن أطراف باسم قريب — **بأطول كلمة في الاسم** لا بالاسم كاملاً، لأن `name__icontains` يطابق احتواءً فيفوّت من يكتب اسماً أطول من المسجَّل، وهو الاتجاه الأخطر. **تحذيرٌ لا منع** (اسمان متطابقان لطرفين مختلفين واقعٌ)، والمطابق من غير نوع `Customer` يُعرض ولا يُختار — لا مكان له في قائمة عملاء الفاتورة. تفاصيل عودة المعرَّف إلى الحقل في `docs/modules/frontend.md` (القاعدة 13).
 - **مرجعٌ مربوطٌ بأصلٍ يُقيَّد على مشتري الأصل**: `SalesInvoiceSerializer` (`_enforce_return_party`) يرفض عميلاً يخالف `original_invoice.customer` (إنشاءً وتعديلاً)، ويشتقّ العميل من الأصل حين يُغفَل — **قبل** أن يتدخّل «العميل الافتراضي» في الإعدادات. سببه أن شاشة «مرجع البيع» كانت تُعبّئ العميل تلقائياً وتتركه قابلاً للتغيير بلا أي حارس خادمي: مرجع فاتورة زيدٍ على ذمم عمرو يمرّ ويُرحَّل، فيَنقص دينُ من لم يُرجِع شيئاً. الحارس على النوعين (`sale_return` و`purchase_return`)، ولا يمسّ مرجعاً بلا فاتورة أصلية. والشاشة صارت تعرض العميل مشتقّاً للقراءة فقط (`SalesReturnEditor.tsx`) — فسقطت معه قائمةُ عملاءٍ بـ500 صفّ من إقلاع الشاشة.
+- **الاستحقاق و«متأخرة» قاعدةٌ واحدة مع الشراء**: `payment_terms_days` أُضيف
+  إلى `SalesInvoice` (كان `due_date` وحده)، ويشتقّ التاريخَ عبر
+  `core/payments.py` (`resolve_due_date`). و«متأخرة» بُعدٌ فوق `payment_status`
+  لا قيمةٌ فيه (`document_overdue_state`): شارةٌ ثانية بجانب الحالة، وخيار فلترة
+  `?payment_status=overdue`. الحقلان `is_overdue`/`days_overdue` مُعرَّفان في
+  الـmixin المشترك بين سيريالايزر القائمة والتفصيل، فالرقم واحدٌ في الشاشتين.
+- **مرجعٌ لا يتجاوز الكمية القابلة للإرجاع**: `sales/services/flow.py`
+  (`guard_sales_return_quantities` فوق `returnable_lines_for_invoice`) يُستدعى من
+  `SalesInvoiceSerializer` (`_enforce_return_quantities`) إنشاءً وتعديلاً. كان
+  `_enforce_return_party` يحرس **الطرف** ولا يحرس **الكمية**: مرجعُ فاتورةٍ بها 10
+  يقبل 100، فتُدائن ذمم العميل بما لم يُبَع وتدخل المخزنَ كميةٌ لم تخرج. القياس
+  **بالصنف** لا بالسطر (صنفٌ تكرّر في سطرين يُرجَع مجموعه، وإلا فتح التكرارُ باباً
+  للتجاوز بالتوزيع)، ومرجعٌ يُعدَّل يستثني كمياته هو (`exclude_invoice_id`) وإلا
+  منَع نفسه. المرآة على جانب الشراء أقدم (`create_purchase_return`). ونقطة
+  `invoices/{id}/returnable-lines/` تعرض على الشاشة **نفس** الأرقام التي يقيس بها
+  الحارس، فلا يرى المستخدم رقماً ويُرفض بآخر.
 - **العميل والصنف يجب أن يتبعا نفس الـtenant** — يُفحص عند الترحيل (`services.py` للعميل، `:1597` للصنف).
 
 ## الاختبارات المهمة
@@ -130,4 +158,5 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 | `sales/tests/test_payment_cheques.py` · `test_voucher_atomicity.py` | الشيكات المرفقة وذرّية السند |
 | `sales/tests/test_invoice_journal_purity.py` | قيد الفاتورة نقيّ من التسوية، و«المدفوع» لا يزيد بلا توزيع |
 | `sales/tests/test_invoice_collect.py` | التحصيل من داخل الفاتورة: 60 نقداً + 40 شيكاً ⇒ سند واحد وذمم صفر، الفائض على الحساب، كبت التسوية التلقائية، والتراجع الكامل عند الفشل |
+| `sales/tests/test_sale_return_quantity_guard.py` | المرجع لا يتجاوز القابل للإرجاع (تراكمياً)، وصنفٌ خارج الفاتورة مرفوض، والتعديل لا يمنع نفسه |
 | `sales/tests/test_invoice_context_tabs.py` | تبويبات سياق الفاتورة: حركاتها المخزنية وحدها وسببُ فراغها، ومطابقة «قبل/بعد» لكشف الحساب سطراً بسطر (وأن أثر المدفوعة بالكامل = إجماليها لا صفر)، ونافذةٌ ترسو على فاتورة قديمة، والمرفق يُضاف لفاتورة مرحّلة ويُحذف بنطاق فاتورته |

@@ -85,6 +85,11 @@ export interface PurchaseInvoiceListDto {
   remaining_balance?: string;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payment_status_display?: string;
+  /** T-DUE: الاستحقاق والتأخّر — التأخّر بُعدٌ فوق حالة الدفع لا قيمةٌ فيها. */
+  due_date?: string | null;
+  payment_terms_days?: number | null;
+  is_overdue?: boolean;
+  days_overdue?: number;
   supplier_balance?: string;
   status: string;
   status_display: string;
@@ -150,6 +155,11 @@ export interface PurchaseInvoiceDto {
   remaining_balance?: string;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payment_status_display?: string;
+  /** T-DUE: الاستحقاق والتأخّر — التأخّر بُعدٌ فوق حالة الدفع لا قيمةٌ فيها. */
+  due_date?: string | null;
+  payment_terms_days?: number | null;
+  is_overdue?: boolean;
+  days_overdue?: number;
   supplier_balance_current?: string;
   supplier_balance_before_invoice?: string;
   supplier_balance_after_invoice?: string;

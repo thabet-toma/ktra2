@@ -85,7 +85,6 @@ from logistics.domain.shipment_builder import create_shipment_from_deals
 from logistics.domain.stages import derive_stage
 from logistics.services import (
     annotate_purchase_invoice_payment_summary,
-    attach_pi_payment_voucher,
     convert_local_quotation_to_invoice,
     convert_local_quotation_to_order,
     convert_purchase_order_to_invoice,

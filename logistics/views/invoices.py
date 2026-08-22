@@ -86,10 +86,11 @@ from logistics.domain.shipment_builder import create_shipment_from_deals
 from logistics.domain.stages import derive_stage
 from logistics.services import (
     annotate_purchase_invoice_payment_summary,
-    attach_pi_payment_voucher,
     convert_local_quotation_to_invoice,
     convert_local_quotation_to_order,
     convert_purchase_order_to_invoice,
+    guard_purchase_invoice_payments_before_unpost,
+    release_auto_cash_purchase_settlement,
 )
 from django.utils import timezone
 
@@ -201,6 +202,15 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         payment_status = params.get('payment_status')
         if self.action == 'list' and payment_status in ('paid', 'partially_paid', 'unpaid'):
             qs = qs.filter(list_payment_status=payment_status)
+        elif self.action == 'list' and payment_status == 'overdue':
+            # T-DUE: «متأخرة» ليست قيمةً في `payment_status` بل بُعدٌ فوقه —
+            # عليها متبقٍّ **و**استحقاقها مضى. بلا تاريخ استحقاق لا تأخّر.
+            from django.utils import timezone
+            qs = qs.filter(
+                due_date__isnull=False,
+                due_date__lt=timezone.localdate(),
+                list_remaining_balance__gt=0,
+            )
         posted = str(params.get('is_posted') or '').lower()
         if posted in ('true', '1', 'false', '0'):
             qs = qs.filter(is_posted=posted in ('true', '1'))
@@ -805,40 +815,338 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         return Response(result)
 
     @action(detail=True, methods=['post'], url_path='payment-voucher')
+    @requires_perm('purchase.payment.create')
     def payment_voucher(self, request, pk=None):
-        """P-H-1 — Attach the financial voucher (cash + cheques) to a purchase invoice.
+        """غلافٌ قديم فوق `pay/` — يُبقي شكل الطلب السابق (`cash_amount`) عاملاً.
 
-        Mirrors sales/views.py SalesInvoiceViewSet.payment_voucher.
+        **ما كان يفعله سابقاً**: يكتب `attached_cash_amount` على الفاتورة وينشئ
+        شيكات `Draft`، ولا يقرأ الترحيلُ أياً منهما — أي مالٌ يُسجَّل في الشاشة بلا
+        أثرٍ في الدفاتر، ثم يظهر «مدفوعاً» في الملخّص (حتى أُصلح ذلك في T-APPAID).
+        مستندٌ ماليّ الشكل عديمُ الأثر أسوأ من غيابه. الآن يمرّ من المنسّق نفسه
+        (`pay_purchase_invoice`) فيخرج سند صرف حقيقيّ مرحّل — تماماً كما صار
+        `payment-voucher` في البيع غلافاً فوق `collect`.
+        """
+        # `request.data` غير قابل للتعديل في DRF، فنُمرّر الحمولة المترجَمة عبر
+        # سمةٍ يقرأها `pay` — بلا نسخ أيّ منطق دفعٍ ثانٍ.
+        request._appay_payload = {
+            'cash': request.data.get('cash_amount', 0),
+            'cash_account_id': request.data.get('cash_account_id'),
+            'cheques': request.data.get('cheques') or [],
+            'post_invoice': True,
+        }
+        return self.pay(request, pk=pk)
+
+    @action(detail=False, methods=['get'], url_path='next-number')
+    def next_number(self, request):
+        """T-PSIMPL: رقم الفاتورة التالي قبل الحفظ — مرآة `invoices/next-number/`
+        في البيع. كان الترقيم داخلياً بلا نقطة، فالمحرّر يفتح بحقلٍ فارغ ولا
+        يعرف المستخدم رقم مستنده إلا بعد أن يحفظه."""
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response(
+                {'error': 'الشركة غير محددة.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'invoice_number': self._next_invoice_number(tenant)})
+
+    @action(detail=True, methods=['post'], url_path='duplicate')
+    @requires_perm('purchase.invoice.create')
+    def duplicate(self, request, pk=None):
+        """T-PSIMPL: نسخُ فاتورة شراء إلى مسودّة جديدة — مرآة نظيرتها في البيع.
+
+        يُنسَخ ما يصف **الشراء نفسه** (المورّد والعملة والبنود والرسوم)، ولا
+        يُنسَخ ما يخصّ نسخةً بعينها: الترحيل والقيد والاستلام والدفعات والمرفقات
+        وارتباطُ مسار الاستيراد. نسخُ أيٍّ من ذلك يعني مستنداً يدّعي أحداثاً لم
+        تقع.
+        """
+        source = self.get_object()
+        tenant = source.tenant
+        with transaction.atomic():
+            clone = PurchaseInvoice.objects.create(
+                tenant=tenant,
+                invoice_number=self._next_invoice_number(tenant),
+                invoice_name=source.invoice_name,
+                invoice_date=timezone.localdate(),
+                due_date=None,
+                payment_terms_days=source.payment_terms_days,
+                invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL,
+                partner=source.partner,
+                currency=source.currency,
+                exchange_rate=source.exchange_rate,
+                subtotal=source.subtotal,
+                discount_amount=source.discount_amount,
+                tax_rate=source.tax_rate,
+                tax_amount=source.tax_amount,
+                tax_type=source.tax_type,
+                shipping_cost=source.shipping_cost,
+                shipping_included=source.shipping_included,
+                grand_total=source.grand_total,
+                payment_type=source.payment_type,
+                cash_or_bank_account=source.cash_or_bank_account,
+                notes=source.notes,
+                status='draft',
+                created_by=request.user if request.user.is_authenticated else None,
+            )
+            for item in source.items.all():
+                PurchaseInvoiceItem.objects.create(
+                    invoice=clone,
+                    product=item.product,
+                    name=item.name,
+                    quantity=item.quantity,
+                    unit_price=item.unit_price,
+                    total_price=item.total_price,
+                    # الكمية المستلَمة والأرقام التسلسلية تخصّ الأصل وحده.
+                    received_quantity=0,
+                    serials=[],
+                    expense_account=item.expense_account,
+                )
+            for fee in source.fees.all():
+                PurchaseInvoiceFee.objects.create(
+                    tenant=tenant,
+                    invoice=clone,
+                    description=fee.description,
+                    amount=fee.amount,
+                    expense_account=fee.expense_account,
+                    calculation_type=fee.calculation_type,
+                    calculation_value=fee.calculation_value,
+                    percentage_basis=fee.percentage_basis,
+                    capitalize_to_inventory=fee.capitalize_to_inventory,
+                    is_taxable=fee.is_taxable,
+                )
+        log_activity(
+            action='create', entity_type='purchase_invoice', entity_id=clone.id,
+            entity_label=clone.invoice_number,
+            description=f'نسخ من فاتورة {source.invoice_number}',
+            partner_ids=[clone.partner_id], request=request,
+        )
+        ser = PurchaseInvoiceSerializer(clone, context={'request': request})
+        return Response(ser.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='stock-movements')
+    def stock_movements(self, request, pk=None):
+        """T-PCTX: أثر هذه الفاتورة على المخزون — مرآة تبويب المبيعات.
+
+        `get_object` هو حارس العزل، والخدمة تُنطَّق فوقه بـ`tenant_id`.
+        الحمولة تحمل **سبب الفراغ** لا الصفوف وحدها: مسودّةٌ لم تُرحَّل، أو
+        مرحّلةٌ لم تُستلَم بضاعتها بعد — حالتان صحيحتان تُقرآن كعطل إن عُرض لهما
+        جدولٌ فارغ بلا تفسير.
+        """
+        from inventory.services import document_stock_movements
+        from logistics.services import PURCHASE_STOCK_REFERENCE_TYPES
+
+        invoice = self.get_object()
+        data = document_stock_movements(
+            tenant_id=invoice.tenant_id,
+            reference_types=PURCHASE_STOCK_REFERENCE_TYPES,
+            reference_id=invoice.id,
+        )
+        data['is_posted'] = invoice.is_posted
+        data['receipt_status'] = invoice.receipt_status
+        data['receipt_status_display'] = invoice.get_receipt_status_display()
+        return Response(data)
+
+    @action(detail=True, methods=['get'], url_path='supplier-ledger')
+    def supplier_ledger(self, request, pk=None):
+        """T-PCTX: حركة حساب المورّد حول هذه الفاتورة — رصيد قبلها وبعدها.
+
+        **هذه هي الإجابة الصحيحة** عن «رصيد المورّد قبل/بعد»، لا الحقلان
+        `supplier_balance_before_invoice`/`after` في السيريالايزر: ذاك تقريبٌ
+        يطرح المتبقّي من رصيد **اليوم**، فالفاتورة المسدَّدة بالكامل تُظهر أثراً
+        صفرياً وهي دائنةُ ذمم بكامل إجماليها (قيدها يدائن الذمم كلَّها، والدفع
+        قيدٌ منفصل). المصدر هنا هو `partner_account_statement` نفسه الذي يبني
+        كشف الحساب — المطابقة **بالبناء** لا بالمصادفة. مرآة `customer-ledger`،
+        وبها يُغلق الدين الموثَّق في `docs/modules/sales.md`.
+        """
+        from accounting.services import partner_account_statement
+
+        invoice = self.get_object()
+        if not invoice.partner_id:
+            return Response({
+                'results': [], 'count': 0, 'anchor': None,
+                'closing_balance': '0', 'supplier_name': None,
+                'reason': 'no_supplier',
+            })
+        try:
+            limit = min(int(request.query_params.get('limit', 20)), 200)
+        except (TypeError, ValueError):
+            limit = 20
+        data = partner_account_statement(
+            tenant_id=invoice.tenant_id,
+            partner_id=invoice.partner_id,
+            is_supplier=True,
+            limit=limit,
+            anchor_reference_type=(
+                'PURCHASE_RETURN' if invoice.is_return else 'PURCHASE_INVOICE'
+            ),
+            anchor_reference_id=invoice.id,
+        )
+        data['supplier_name'] = invoice.partner.name if invoice.partner_id else None
+        return Response(data)
+
+    # ── T-PCTX: مرفقات فاتورة الشراء ────────────────────────────────────────
+    # تُحفظ **فوراً** لا مع حفظ الفاتورة: المرحّلة لا تُعدَّل (`perform_update`
+    # يرفض)، وكان الإرفاق معلّقاً بمسار PATCH وحده (`_sync_attachments`) ⇒ لا
+    # أحد يُرفق إيصال المورّد بعد الترحيل، وهو أكثر وقت يُحتاج فيه. ولا حذفَ
+    # كان أصلاً. مرآة نقاط فاتورة البيع.
+    ATTACHMENT_TABLE = 'purchase_invoices'
+
+    @staticmethod
+    def _attachment_row(att):
+        return {
+            'id': att.id,
+            'url': att.file_path,
+            'file_type': att.file_type or 'Image',
+            # الاسم غير مخزَّن في `SystemAttachment` — يُشتقّ من ذيل الرابط.
+            'filename': (att.file_path or '').rsplit('/', 1)[-1] or 'مرفق',
+            'uploaded_at': att.uploaded_at.isoformat() if att.uploaded_at else None,
+        }
+
+    @action(detail=True, methods=['get', 'post'], url_path='attachments')
+    def attachments(self, request, pk=None):
+        """مرفقات الفاتورة: قراءةً للجميع، وكتابةً بصلاحية التعديل.
+
+        الرفع نفسه يمرّ من `core/media_views.py` (نقطة الاختناق الوحيدة)؛ هذه
+        النقطة تربط الرابط الناتج بالفاتورة.
+        """
+        from core.models import SystemAttachment
+
+        invoice = self.get_object()
+        if request.method == 'POST':
+            require_perm(request, 'purchase.invoice.edit')
+            url = str(request.data.get('url') or '').strip()
+            if not url.startswith(('http://', 'https://')):
+                return Response(
+                    {'error': 'رابط المرفق غير صالح.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            file_type = 'PDF' if url.lower().endswith('.pdf') else 'Image'
+            att, _created = SystemAttachment.objects.get_or_create(
+                tenant_id=invoice.tenant_id,
+                related_table=self.ATTACHMENT_TABLE,
+                related_id=invoice.id,
+                file_path=url,
+                defaults={'file_type': file_type},
+            )
+            log_activity(
+                action='update', entity_type='purchase_invoice', entity_id=invoice.id,
+                entity_label=invoice.invoice_number, description='إرفاق ملف بالفاتورة',
+                partner_ids=[invoice.partner_id], request=request,
+            )
+            return Response(self._attachment_row(att), status=status.HTTP_201_CREATED)
+
+        rows = SystemAttachment.objects.filter(
+            tenant_id=invoice.tenant_id,
+            related_table=self.ATTACHMENT_TABLE,
+            related_id=invoice.id,
+        ).order_by('id')
+        return Response([self._attachment_row(a) for a in rows])
+
+    @action(
+        detail=True, methods=['delete'],
+        url_path=r'attachments/(?P<attachment_id>[0-9]+)',
+    )
+    def delete_attachment(self, request, pk=None, attachment_id=None):
+        """حذف مرفق واحد — مُنطاقٌ بالفاتورة وشركتها معاً.
+
+        الفلترة بالشركة **وبالفاتورة** لا بالمعرّف وحده: معرّفٌ من فاتورة أخرى
+        يعود «غير موجود» بدل أن يُحذف.
+        """
+        from core.models import SystemAttachment
+
+        invoice = self.get_object()
+        require_perm(request, 'purchase.invoice.edit')
+        deleted, _ = SystemAttachment.objects.filter(
+            id=attachment_id,
+            tenant_id=invoice.tenant_id,
+            related_table=self.ATTACHMENT_TABLE,
+            related_id=invoice.id,
+        ).delete()
+        if not deleted:
+            return Response(
+                {'error': 'المرفق غير موجود.'}, status=status.HTTP_404_NOT_FOUND,
+            )
+        log_activity(
+            action='update', entity_type='purchase_invoice', entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description='حذف مرفق من الفاتورة',
+            partner_ids=[invoice.partner_id], request=request,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['post'], url_path='pay')
+    @requires_perm('purchase.payment.create')
+    def pay(self, request, pk=None):
+        """T-APPAY — دفع فاتورة الشراء من داخلها: ترحيل + سند صرف واحد، ذرّياً.
+
+        مرآة `sales/views.py` (`SalesInvoiceViewSet.collect`). كانت الواجهة تنادي
+        نقطتين: «رحّل» ثم «سند صرف» — فانقطاعُ الثانية يترك فاتورةً مرحّلة بلا
+        سند ومورّداً دائناً، والمستخدم يظنّ أنه دفع. النقطتان هنا نداءٌ واحد داخل
+        `transaction.atomic()` واحد: إمّا الاثنان أو لا شيء.
 
         Body:
             {
-                "cash_amount": "100.00",
+                "cash": "60.00",
                 "cash_account_id": 12,
-                "cheques": [
-                    {"cheque_number": "12345", "amount": "50", "bank_name": "...",
-                     "due_date": "2026-06-01", "issue_date": "2026-05-20", "notes": ""}
-                ]
+                "cheques": [{"cheque_number": "1", "amount": "40",
+                             "due_date": "2026-07-01"}],
+                "from_on_account": [{"payment_id": 7, "amount": "20"}],
+                "post_invoice": true
             }
         """
+        from logistics.services import pay_purchase_invoice
+
         invoice = self.get_object()
+        # الغلاف القديم `payment-voucher` يترجم شكل طلبه إلى هذا الشكل.
+        payload = getattr(request, '_appay_payload', None) or request.data
+        post_invoice = bool(payload.get('post_invoice'))
+        if post_invoice and not invoice.is_posted:
+            require_perm(request, 'purchase.invoice.post')
         try:
-            attach_pi_payment_voucher(
-                invoice,
-                cash_amount=request.data.get('cash_amount', 0),
-                cash_account_id=request.data.get('cash_account_id'),
-                cheques=request.data.get('cheques') or [],
-                user=request.user,
+            with transaction.atomic():
+                if not invoice.is_posted:
+                    if not post_invoice:
+                        return Response(
+                            {'error': 'الفاتورة غير مرحّلة — رحّلها أولاً أو اطلب '
+                                      'الترحيل مع الدفع.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    # الترحيل يملكه `post_to_accounting` (منطقٌ عريض في الـview لا
+                    # في خدمة). ننادي المُعالِج نفسه بدل نسخه — واستخراجُه إلى
+                    # خدمة مستقلة تذكرةٌ قائمة بذاتها لا نوسّع بها هذا التغيير.
+                    # وسندُ التسوية التلقائي يُكبَت هنا: الدفع الصريح يحلّ محلّه،
+                    # وإلّا خطف كاملَ المتبقّي فخرج سندان.
+                    self._suppress_auto_settlement = True
+                    try:
+                        posted = self.post_to_accounting(request, pk=pk)
+                    finally:
+                        self._suppress_auto_settlement = False
+                    if posted.status_code not in (200, 201):
+                        raise DjangoValidationError(
+                            (posted.data or {}).get('error')
+                            or 'تعذّر ترحيل الفاتورة.'
+                        )
+                    invoice.refresh_from_db()
+                payment = pay_purchase_invoice(
+                    invoice,
+                    cash=payload.get('cash'),
+                    cash_account_id=payload.get('cash_account_id'),
+                    cheques=payload.get('cheques') or [],
+                    from_on_account=payload.get('from_on_account') or [],
+                    payment_date=payload.get('payment_date') or None,
+                    user=request.user,
+                )
+        except DjangoValidationError as e:
+            msg = e.message if hasattr(e, 'message') else '؛ '.join(e.messages)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except ValidationError as e:
+            return Response(
+                {'error': e.detail if hasattr(e, 'detail') else str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
         invoice.refresh_from_db()
-        log_activity(
-            action='payment', entity_type='purchase_invoice', entity_id=invoice.id,
-            entity_label=invoice.invoice_number, description='سند دفع', request=request,
-            partner_ids=[invoice.partner_id],
-        )
         ser = PurchaseInvoiceSerializer(invoice, context={'request': request})
-        return Response(ser.data)
+        return Response({
+            'invoice': ser.data,
+            'payment_id': getattr(payment, 'id', None),
+        }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='post-to-accounting')
     @requires_perm('purchase.invoice.post')
@@ -1396,6 +1704,14 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         from sales.services import post_supplier_payment
         if invoice.payment_type != PurchaseInvoice.PAYMENT_TYPE_CASH:
             return
+        if getattr(self, '_suppress_auto_settlement', False):
+            # T-APPAY: الدفع الصريح من نقطة `pay/` يحلّ محلّ التسوية التلقائية —
+            # وإلّا خطفت كاملَ المتبقّي قبل أن يوزّع تقسيمُ المستخدم فخرج سندان.
+            logger.info(
+                "Auto cash settlement suppressed for %s — explicit payment follows.",
+                invoice.invoice_number,
+            )
+            return
         amount = Decimal(str(settle_amount or 0)).quantize(Decimal('0.01'))
         if amount <= 0:
             return
@@ -1408,24 +1724,33 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             default_cash = resolve_default_cash_account(invoice.tenant_id)
             cash_account_id = default_cash.pk if default_cash else None
         if not cash_account_id:
+            # T-APPAID: التخطّي الصامت كان يترك فاتورةً «نقدية» بلا تسوية والمورد
+            # دائناً — ثم يقول الملخّص «مدفوعة بالكامل» لأنها نقدية. الرفض هنا
+            # يجعل الشرط ظاهراً للمستخدم بدل أن يتحول إلى رقمٍ كاذب في الشاشة.
             logger.warning(
-                "Cash purchase %s posted without a cash account — supplier left as "
-                "creditor (no auto-settlement). Set the invoice cash/bank account.",
-                invoice.invoice_number,
+                "Cash purchase %s cannot be posted: no cash/bank account on the "
+                "invoice and no company default.", invoice.invoice_number,
             )
-            return
+            raise DjangoValidationError(
+                "الفاتورة نقدية ولا صندوق محدَّد عليها ولا صندوق افتراضي للشركة — "
+                "اختر حساب الصندوق/البنك أو اجعلها فاتورة ذمم (آجلة)."
+            )
         user = getattr(request, 'user', None)
         user = user if (user is not None and user.is_authenticated) else None
+        from logistics.services import _auto_purchase_settlement_note
         payment = SupplierPayment.objects.create(
             tenant=invoice.tenant,
             partner=invoice.partner,
             purchase_invoice=invoice,
+            # T-APINT: العلامة الصريحة تُميّز سند الترحيل عن سند المستخدم، فيُحرَّر
+            # مع إلغاء الترحيل بدل أن يبقى مديناً للذمم بلا مقابل.
+            auto_settled_invoice=invoice,
             payment_date=invoice.invoice_date or timezone.localdate(),
             amount=amount,
             currency=invoice.currency,
             exchange_rate=invoice.exchange_rate or Decimal('1'),
             cash_or_bank_account_id=cash_account_id,
-            notes=f"صرف نقدي تلقائي — فاتورة شراء {invoice.invoice_number}",
+            notes=_auto_purchase_settlement_note(invoice),
         )
         post_supplier_payment(payment, user=user)
         log_activity(
@@ -1511,6 +1836,9 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 return Response({'error': 'المرجع غير مرحّل'}, status=status.HTTP_400_BAD_REQUEST)
             try:
                 with transaction.atomic():
+                    # T-APINT: سندٌ مرحّل على المستند يمنع حذف قيده — وإلا بقي
+                    # قيد السند يدين الذمم بلا مقابل.
+                    guard_purchase_invoice_payments_before_unpost(invoice)
                     # الكمية تعود للمخزن ⇒ وحداتها المُرقَّمة تعود معها، وإلا بقي
                     # الرصيد يقول شيئاً وكرت الصنف شيئاً آخر.
                     from inventory.serials import restock_returned_purchase_serials
@@ -1546,6 +1874,11 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             )
         try:
             with transaction.atomic():
+                # T-APINT: سندات الصرف المرحّلة تمنع التراجع (قيدها يدين ذمم
+                # المورد، وحذف قيد الفاتورة وحده يتركه بلا مقابل)؛ وسندُ الشراء
+                # النقدي التلقائي يُحرَّر بالحذف لأن الترحيل نفسه أنشأه.
+                guard_purchase_invoice_payments_before_unpost(invoice)
+                release_auto_cash_purchase_settlement(invoice, user=request.user)
                 # الوحدات المُرقَّمة تخرج مع مخزونها: حارس يمنع التراجع إن بِيعت
                 # إحداها (بجانب حارس اعتمادية المخزون داخل unpost_document، لا بدلاً
                 # منه — ذاك يرى الكميات وهذا يرى الوحدة بعينها).

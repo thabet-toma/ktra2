@@ -348,6 +348,12 @@ class SalesInvoice(models.Model):
     )
     invoice_date = models.DateField(db_column="InvoiceDate")
     due_date = models.DateField(null=True, blank=True, db_column="DueDate")
+    # T-DUE: مهلة السداد بالأيام (Net 30…) — يُشتقّ منها `due_date` حين تُترك
+    # فارغة، ويبقى التاريخ الصريح مقدَّماً عليها. مرآة فاتورة الشراء.
+    payment_terms_days = models.PositiveIntegerField(
+        null=True, blank=True, db_column="PaymentTermsDays",
+        help_text="مهلة السداد بالأيام من تاريخ الفاتورة (0 = فوراً).",
+    )
     invoice_kind = models.CharField(
         max_length=20, choices=INVOICE_KIND_CHOICES,
         default=INVOICE_KIND_SALE, db_column="InvoiceKind",
@@ -895,6 +901,17 @@ class SupplierPayment(models.Model):
         db_column="JournalID", related_name="supplier_payments",
     )
     is_posted = models.BooleanField(default=False, db_column="IsPosted")
+    # T-APINT: سند التسوية النقدية التلقائي (`_auto_settle_cash_purchase`) يملكه
+    # ترحيلُ الفاتورة نفسه — العلامة تُميّزه عن سندات المستخدم، فيُحرَّر تلقائياً مع
+    # إلغاء ترحيلها بدل أن يبقى معلّقاً (مدين ذمم بلا مقابل) أو يتكرّر عند إعادة
+    # الترحيل. مرآة `CustomerPayment.auto_settled_invoice`.
+    auto_settled_invoice = models.ForeignKey(
+        'logistics.PurchaseInvoice',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="AutoSettledPurchaseInvoiceID",
+        related_name="auto_settlements",
+    )
     notes = models.TextField(null=True, blank=True, db_column="Notes")
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
 

@@ -1,10 +1,15 @@
 /**
- * THA-132 — تبويبات سياق فاتورة المبيعات: أثر المخزون · حساب العميل · المرفقات.
+ * THA-132 / T-PCTX — تبويبات سياق المستند: أثر المخزون · حساب الطرف · المرفقات.
  *
  * المستند مركز سياق لا نموذج إدخال: من داخله يُرى ماذا فعل بالمخزون وبحساب
  * الطرف. مرجع «الأصيل» يضع «رقم الحركة المخزنية» على وجه الفاتورة ويجعله مدخلاً
  * «للاستعلام عن الحركات» (`docs/aseel_reference/invoices.txt`) — فتبويب المخزون
- * هنا هو ذلك المدخل: حركات **هذه الفاتورة**، لا تاريخ الصنف (ذاك في كرت الصنف).
+ * هنا هو ذلك المدخل: حركات **هذا المستند**، لا تاريخ الصنف (ذاك في كرت الصنف).
+ *
+ * **مكوّنٌ واحد للجانبين** (T-PCTX): كان في `components/sales/` ويخدم فاتورة
+ * البيع وحدها، وفاتورة الشراء بلا تبويباتٍ أصلاً. الاختلاف بين الجانبين شيئان
+ * لا ثالث لهما: من أين تُجلب البيانات (`api`) وبأيّ مفردات تُسمّى (`side`) —
+ * فصارا خاصّتين، وبقي كل ما عداهما مشتركاً.
  *
  * **الكسل شرطٌ لا تحسين**: كل مكوّن هنا يجلب داخل `useEffect` عند تركيبه،
  * و`AseelDocumentShell` لا يركّب إلا محتوى التبويب النشط — ففتح الفاتورة لا
@@ -13,24 +18,93 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Paperclip, Trash2, FileText } from "lucide-react";
-import { LedgerTable, DocRefCell, type LedgerColumn } from "../shared/LedgerTable";
+import { LedgerTable, DocRefCell, type LedgerColumn } from "./LedgerTable";
 import { FileDropZone } from "../ui/FileDropZone";
 import { cloudinaryService } from "../../services/cloudinaryService";
 import { useToast } from "../../contexts/ToastContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { clientLogger } from "../../services/logger";
-import {
-  getInvoiceStockMovements,
-  getInvoiceCustomerLedger,
-  listInvoiceAttachments,
-  addInvoiceAttachment,
-  deleteInvoiceAttachment,
-  type InvoiceStockMovementRow,
-  type InvoiceStockMovementsResponse,
-  type InvoiceLedgerRow,
-  type InvoiceLedgerResponse,
-  type InvoiceAttachmentRow,
-} from "../../services/salesApi";
+/** عقد البيانات الذي تحتاجه التبويبات — يفي به جانبا البيع والشراء معاً. */
+export type ContextStockRow = {
+  id: number;
+  date: string | null;
+  movement_type: string;
+  movement_type_label: string;
+  reference_type: string | null;
+  product_id: number;
+  product_name: string;
+  warehouse: string | null;
+  qty_in: string;
+  qty_out: string;
+  quantity_before: string;
+  running_balance: string;
+  unit_cost: string;
+  total_cost: string;
+};
+
+export type ContextStockResponse = {
+  results: ContextStockRow[];
+  count: number;
+  total_cost: string;
+  /** سبب الفراغ يصل مع الحمولة — جدولٌ فارغ بلا تفسير يُقرأ كعطل. */
+  is_posted: boolean;
+  /** جانب البيع: الخصم عند الترحيل أم عند التسليم. */
+  stock_on_post?: boolean;
+  delivery_status?: string;
+  delivery_status_display?: string;
+  /** جانب الشراء: هل وصلت البضاعة للمخزن بعد. */
+  receipt_status?: string;
+  receipt_status_display?: string;
+};
+
+export type ContextLedgerRow = {
+  id: number;
+  journal_id: number;
+  date: string | null;
+  reference_type: string | null;
+  reference_id: number | null;
+  description: string;
+  debit: string;
+  credit: string;
+  balance_before: string;
+  running_balance: string;
+  is_anchor?: boolean;
+};
+
+export type ContextLedgerResponse = {
+  results: ContextLedgerRow[];
+  count: number;
+  closing_balance: string;
+  customer_name?: string | null;
+  supplier_name?: string | null;
+  anchor: {
+    line_ids: number[];
+    balance_before: string;
+    balance_after: string;
+    effect: string;
+  } | null;
+  reason?: string;
+};
+
+export type ContextAttachmentRow = {
+  id: number;
+  url: string;
+  file_type: string;
+  filename: string;
+  uploaded_at?: string | null;
+};
+
+/** من أين تُجلب بيانات التبويبات — الفارق الأول بين الجانبين. */
+export type DocumentContextApi = {
+  getStockMovements: (id: number) => Promise<ContextStockResponse>;
+  getPartnerLedger: (id: number) => Promise<ContextLedgerResponse>;
+  listAttachments: (id: number) => Promise<ContextAttachmentRow[]>;
+  addAttachment: (id: number, url: string) => Promise<ContextAttachmentRow>;
+  deleteAttachment: (id: number, attachmentId: number) => Promise<void>;
+};
+
+/** بأيّ مفردات تُسمّى — الفارق الثاني والأخير. */
+export type DocumentContextSide = "customer" | "supplier";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
 
@@ -58,7 +132,7 @@ const Notice: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 
 /* ── 1) أثر الفاتورة على المخزون ───────────────────────────────────────────── */
 
-const stockColumns: LedgerColumn<InvoiceStockMovementRow>[] = [
+const stockColumns: LedgerColumn<ContextStockRow>[] = [
   { key: "id", header: "رقم الحركة", render: (r) => <span className="font-mono">{r.id}</span> },
   { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) || "—" },
   { key: "product_name", header: "الصنف", render: (r) => r.product_name },
@@ -86,8 +160,12 @@ const stockColumns: LedgerColumn<InvoiceStockMovementRow>[] = [
   },
 ];
 
-export const InvoiceStockTab: React.FC<{ invoiceId: number }> = ({ invoiceId }) => {
-  const [data, setData] = useState<InvoiceStockMovementsResponse | null>(null);
+export const InvoiceStockTab: React.FC<{
+  invoiceId: number;
+  api: DocumentContextApi;
+  side?: DocumentContextSide;
+}> = ({ invoiceId, api, side = "customer" }) => {
+  const [data, setData] = useState<ContextStockResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,13 +173,13 @@ export const InvoiceStockTab: React.FC<{ invoiceId: number }> = ({ invoiceId }) 
     let cancelled = false;
     setLoading(true);
     setError(null);
-    clientLogger.info("invoice.tab_open", { tab: "stock", invoiceId });
-    getInvoiceStockMovements(invoiceId)
+    clientLogger.info("invoice.tab_open", { tab: "stock", invoiceId, side });
+    api.getStockMovements(invoiceId)
       .then((d) => { if (!cancelled) setData(d); })
       .catch((e) => { if (!cancelled) setError(errText(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [invoiceId]);
+  }, [invoiceId, api, side]);
 
   useEffect(() => load(), [load]);
 
@@ -111,14 +189,18 @@ export const InvoiceStockTab: React.FC<{ invoiceId: number }> = ({ invoiceId }) 
   const notice = !data || data.count > 0 ? null
     : !data.is_posted
       ? "الفاتورة لم تُرحَّل بعد — لا حركة مخزون حتى ترحيلها."
-      : !data.stock_on_post
-        ? `الترحيل لا يخصم المخزون في هذه الفاتورة — تُخصم البضاعة عند التسليم (الحالة: ${data.delivery_status_display || "غير مسلَّمة"}).`
-        : "لا حركة مخزون — قد تكون كل البنود خدمات.";
+      : side === "supplier"
+        ? (data.receipt_status && data.receipt_status !== "received"
+            ? `لم تدخل البضاعة المخزن بعد — الحالة: ${data.receipt_status_display || "غير مستلمة"}. استلِمها لتظهر حركتها هنا.`
+            : "لا حركة مخزون — قد تكون كل البنود خدمات.")
+        : !data.stock_on_post
+          ? `الترحيل لا يخصم المخزون في هذه الفاتورة — تُخصم البضاعة عند التسليم (الحالة: ${data.delivery_status_display || "غير مسلَّمة"}).`
+          : "لا حركة مخزون — قد تكون كل البنود خدمات.";
 
   return (
     <div className="p-2">
       {notice && <Notice>{notice}</Notice>}
-      <LedgerTable<InvoiceStockMovementRow>
+      <LedgerTable<ContextStockRow>
         columns={stockColumns}
         rows={data?.results || []}
         loading={loading}
@@ -138,7 +220,7 @@ export const InvoiceStockTab: React.FC<{ invoiceId: number }> = ({ invoiceId }) 
 
 /* ── 2) حساب العميل: الرصيد قبل الفاتورة وبعدها ────────────────────────────── */
 
-const ledgerColumns: LedgerColumn<InvoiceLedgerRow>[] = [
+const ledgerColumns: LedgerColumn<ContextLedgerRow>[] = [
   { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) || "—" },
   {
     key: "reference", header: "المستند",
@@ -162,8 +244,13 @@ const ledgerColumns: LedgerColumn<InvoiceLedgerRow>[] = [
   },
 ];
 
-export const InvoiceCustomerLedgerTab: React.FC<{ invoiceId: number }> = ({ invoiceId }) => {
-  const [data, setData] = useState<InvoiceLedgerResponse | null>(null);
+export const InvoicePartnerLedgerTab: React.FC<{
+  invoiceId: number;
+  api: DocumentContextApi;
+  side?: DocumentContextSide;
+}> = ({ invoiceId, api, side = "customer" }) => {
+  const partyWord = side === "supplier" ? "المورّد" : "العميل";
+  const [data, setData] = useState<ContextLedgerResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -171,13 +258,13 @@ export const InvoiceCustomerLedgerTab: React.FC<{ invoiceId: number }> = ({ invo
     let cancelled = false;
     setLoading(true);
     setError(null);
-    clientLogger.info("invoice.tab_open", { tab: "customer_ledger", invoiceId });
-    getInvoiceCustomerLedger(invoiceId)
+    clientLogger.info("invoice.tab_open", { tab: "partner_ledger", invoiceId, side });
+    api.getPartnerLedger(invoiceId)
       .then((d) => { if (!cancelled) setData(d); })
       .catch((e) => { if (!cancelled) setError(errText(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [invoiceId]);
+  }, [invoiceId, api, side]);
 
   useEffect(() => load(), [load]);
 
@@ -206,16 +293,16 @@ export const InvoiceCustomerLedgerTab: React.FC<{ invoiceId: number }> = ({ invo
         </div>
       ) : !loading && (
         <Notice>
-          {data?.reason === "no_customer"
-            ? "لا عميل على هذه الفاتورة، فلا حركة حساب."
-            : "الفاتورة لم تُرحَّل بعد — لم تمسّ حساب العميل، والرصيد أدناه هو رصيده الحالي."}
+          {data?.reason === "no_customer" || data?.reason === "no_supplier"
+            ? `لا ${partyWord} على هذه الفاتورة، فلا حركة حساب.`
+            : `الفاتورة لم تُرحَّل بعد — لم تمسّ حساب ${partyWord}، والرصيد أدناه هو رصيده الحالي.`}
         </Notice>
       )}
-      <LedgerTable<InvoiceLedgerRow>
+      <LedgerTable<ContextLedgerRow>
         columns={ledgerColumns}
         rows={data?.results || []}
         loading={loading}
-        emptyText="لا توجد حركات على حساب هذا العميل."
+        emptyText={`لا توجد حركات على حساب هذا ${partyWord}.`}
         // سطر الفاتورة نفسها مميَّز داخل كشفها — وإلا ضاع بين جيرانه.
         rowClassName={(r) =>
           r.is_anchor ? "bg-amber-50 font-bold dark:bg-amber-900/20" : ""
@@ -224,7 +311,9 @@ export const InvoiceCustomerLedgerTab: React.FC<{ invoiceId: number }> = ({ invo
           data ? (
             <span>
               الرصيد الختامي للحساب <b dir="ltr">{formatMoney(data.closing_balance)}</b>
-              {data.customer_name ? ` — ${data.customer_name}` : ""}
+              {data.customer_name || data.supplier_name
+                ? ` — ${data.customer_name || data.supplier_name}`
+                : ""}
             </span>
           ) : undefined
         }
@@ -237,9 +326,10 @@ export const InvoiceCustomerLedgerTab: React.FC<{ invoiceId: number }> = ({ invo
 
 export const InvoiceAttachmentsTab: React.FC<{
   invoiceId: number;
+  api: DocumentContextApi;
   readOnly?: boolean;
-}> = ({ invoiceId, readOnly }) => {
-  const [rows, setRows] = useState<InvoiceAttachmentRow[]>([]);
+}> = ({ invoiceId, api, readOnly }) => {
+  const [rows, setRows] = useState<ContextAttachmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -251,12 +341,12 @@ export const InvoiceAttachmentsTab: React.FC<{
     setLoading(true);
     setError(null);
     clientLogger.info("invoice.tab_open", { tab: "attachments", invoiceId });
-    listInvoiceAttachments(invoiceId)
+    api.listAttachments(invoiceId)
       .then((d) => { if (!cancelled) setRows(Array.isArray(d) ? d : []); })
       .catch((e) => { if (!cancelled) setError(errText(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [invoiceId]);
+  }, [invoiceId, api]);
 
   useEffect(() => load(), [load]);
 
@@ -267,7 +357,7 @@ export const InvoiceAttachmentsTab: React.FC<{
     try {
       for (const file of files) {
         const url = await cloudinaryService.uploadFile(file);
-        const created = await addInvoiceAttachment(invoiceId, url);
+        const created = await api.addAttachment(invoiceId, url);
         setRows((prev) => [...prev, created]);
       }
       toast("تم إرفاق الملف.", "success");
@@ -276,17 +366,17 @@ export const InvoiceAttachmentsTab: React.FC<{
     } finally {
       setBusy(false);
     }
-  }, [invoiceId, toast]);
+  }, [invoiceId, api, toast]);
 
-  const remove = useCallback(async (row: InvoiceAttachmentRow) => {
+  const remove = useCallback(async (row: ContextAttachmentRow) => {
     if (!(await confirm({ message: `حذف المرفق «${row.filename}»؟` }))) return;
     try {
-      await deleteInvoiceAttachment(invoiceId, row.id);
+      await api.deleteAttachment(invoiceId, row.id);
       setRows((prev) => prev.filter((r) => r.id !== row.id));
     } catch (e) {
       toast(`تعذّر حذف المرفق: ${errText(e)}`, "error");
     }
-  }, [invoiceId, confirm, toast]);
+  }, [invoiceId, api, confirm, toast]);
 
   if (error) return <TabError message={`تعذّر تحميل المرفقات: ${error}`} onRetry={load} />;
 

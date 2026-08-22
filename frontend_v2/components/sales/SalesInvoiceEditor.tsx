@@ -17,20 +17,25 @@ import {
   type ReservedStockRow,
   type SalesInvoiceDetail,
   type SalesInvoiceRow,
+  salesInvoiceContextApi,
 } from "../../services/salesApi";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { usePriceVisibility } from "../../contexts/PriceVisibilityContext";
 import { useStaleConfirm } from "../offline/StaleDataConfirm";
+import {
+  DocumentPaymentPanel,
+  deriveDocumentPayment,
+} from "../shared/DocumentPaymentPanel";
 import { DocumentPaymentsTab } from "../shared/DocumentPaymentsTab";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { EntityActivityLog } from "../activity/EntityActivityLog";
 import {
   InvoiceStockTab,
-  InvoiceCustomerLedgerTab,
+  InvoicePartnerLedgerTab,
   InvoiceAttachmentsTab,
-} from "./InvoiceContextTabs";
+} from "../shared/DocumentContextTabs";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
 import { FieldHint } from "../ui/FieldHint";
@@ -2489,57 +2494,30 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   injectRender("tax", renderTaxCell);
   injectRender("del", renderDeleteCell);
 
-  /* ───────────── T4: حساب لوحة التحصيل ─────────────
-     كان التحصيل من داخل المحرّر يمرّ بنافذة تقبل النقد وحده وتَقصُر المبلغ على
-     المتبقّي. اللوحة تقبل الثلاثة معاً — نقد وشيكات وخصماً من رصيد العميل —
-     و«المتبقي» يُشتقّ منها لحظةً بلحظة قبل إرسال أيّ شيء. */
+  /* ───────────── T4/T-APPAY: حساب لوحة الدفع ─────────────
+     الاشتقاق كلّه في `deriveDocumentPayment` المشتركة مع محرّر الشراء — نسخةٌ
+     ثانية من هذه الحسبة تعني «متبقّياً» يختلف بين شاشتين. */
   const remainingDue = Math.max(savedGrandTotal - paidAmount, 0);
   /** أساس الاحتساب: المرحّلة من إجماليها المحفوظ، والمسودة من إجمالي الشاشة. */
   const collectBase = isPosted ? savedGrandTotal : totals.grandTotal;
-  const collectRemainingBefore = Math.max(collectBase - paidAmount, 0);
-  const collectChequesTotal = collectCheques.reduce(
-    (sum, row) => sum + (Number(row.amount) || 0), 0,
-  );
-  const onAccountAvailable = onAccountVouchers.reduce((sum, v) => sum + v.unallocated, 0);
+  const paymentInput = useMemo(() => ({
+    base: collectBase,
+    paid: paidAmount,
+    isCashDocument: invType === "cash",
+    cash: collectCash,
+    cheques: collectCheques,
+    fromBalance: collectFromBalance,
+    onAccountVouchers: onAccountVouchers.map((v) => ({ id: v.id, unallocated: v.unallocated })),
+  }), [collectBase, paidAmount, invType, collectCash, collectCheques,
+       collectFromBalance, onAccountVouchers]);
+  const payment = useMemo(() => deriveDocumentPayment(paymentInput), [paymentInput]);
+  const collectRemainingBefore = payment.remainingBefore;
+  const collectChequesTotal = payment.chequesTotal;
   const collectCashNum = Number(collectCash) || 0;
-  const collectFromBalanceNum = Number(collectFromBalance) || 0;
-  const collectPaidNow = collectCashNum + collectChequesTotal + collectFromBalanceNum;
-  /** المتبقي المشتقّ — يُعرض مقصوصاً عند الصفر، والفائض يُقال صراحةً تحته. */
-  const collectRemainingAfter = collectRemainingBefore - collectPaidNow;
-  const collectOverpay = Math.max(-collectRemainingAfter, 0);
-
-  /** توزيع «من رصيد العميل» على سنداته المتاحة — الأقدم أولاً كما يعيدها الخادم. */
-  const onAccountPlan = useMemo(() => {
-    let left = Number(collectFromBalance) || 0;
-    if (left <= 0.009) return [];
-    const rows: Array<{ payment_id: number; amount: number }> = [];
-    for (const voucher of onAccountVouchers) {
-      if (left <= 0.009) break;
-      const amount = Math.min(voucher.unallocated, left);
-      left -= amount;
-      if (amount > 0.009) rows.push({ payment_id: voucher.id, amount });
-    }
-    return rows;
-  }, [collectFromBalance, onAccountVouchers]);
-
-  /** أوّل خطأ في صفوف الشيكات — الاستحقاق إلزامي (الخادم يرفض بدونه). */
-  const collectChequeError = (() => {
-    for (let i = 0; i < collectCheques.length; i++) {
-      const row = collectCheques[i];
-      if (!row.cheque_number.trim()) return `الشيك #${i + 1}: رقم الشيك مطلوب.`;
-      if (!row.due_date) return `الشيك #${i + 1}: تاريخ الاستحقاق مطلوب.`;
-      if (!(Number(row.amount) > 0)) return `الشيك #${i + 1}: المبلغ يجب أن يكون أكبر من صفر.`;
-    }
-    return null;
-  })();
-
-  /* الفاتورة النقدية مدفوعةٌ بالتعريف عند الخادم: تحصيلٌ لا يغطّيها يُرفض ويرتدّ
-     كلُّ شيء. فنمنع الإرسال هنا ونقول للمستخدم مخرجيه — إكمال المبلغ، أو رفع
-     علامة «نقدي» فتصير آجلةً على الذمم. رفضٌ كان بالإمكان منعه شاشةٌ سيّئة لا حارس. */
-  const cashInvoiceShortfall =
-    invType === "cash" && collectPaidNow > 0.009 && collectRemainingAfter > 0.009
-      ? collectRemainingAfter
-      : 0;
+  const collectPaidNow = payment.paidNow;
+  const onAccountPlan = payment.onAccountPlan;
+  const collectChequeError = payment.chequeError;
+  const cashInvoiceShortfall = payment.cashShortfall;
 
   /** اللوحة تظهر لمن يملك التحصيل، على فاتورة بيع لها عميل وما زال عليها متبقٍّ. */
   const showCollectPanel =
@@ -2602,7 +2580,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       setLocalErr("اختر حساب الصندوق أو البنك للمبلغ النقدي.");
       return;
     }
-    if (collectFromBalanceNum > onAccountAvailable + 0.01) {
+    if ((Number(collectFromBalance) || 0) > payment.onAccountAvailable + 0.01) {
       setLocalErr("المطلوب من رصيد العميل يتجاوز رصيده المتاح على الحساب.");
       return;
     }
@@ -3268,245 +3246,42 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
      «المتبقي» مشتقّاً للقراءة فقط. تُعرض خارج منطقة الإدخال المخفيّة في وضع
      العرض، فالتحصيل على فاتورة مرحّلة يجري من نفس المكان تماماً. */
   const collectPanel = !showCollectPanel ? null : (
-    <div
-      ref={collectPanelRef}
-      data-testid="invoice-collect-panel"
-      className="flex flex-col gap-2 border border-[var(--aseel-border)] bg-[var(--aseel-panel)] p-2"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-bold text-[var(--color-text)]">
-          تحصيل الفاتورة {isPosted ? "(مرحّلة — يُسجَّل السند فوراً)" : "(تُحفظ وتُرحّل مع التحصيل)"}
-        </span>
-        <span className="text-[11px] text-[var(--color-text-muted)]">
-          المحصَّل سابقاً {fmt(paidAmount)} · المتبقي قبل هذا التحصيل {fmt(collectRemainingBefore)}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        {/* نقداً */}
-        <div className="flex flex-col gap-1">
-          <label className="flex flex-col gap-1">
-            <span className="text-[11px] font-bold text-[var(--color-text)]">المدفوع نقداً</span>
-            <input
-              ref={collectCashInputRef}
-              type="number"
-              step="0.01"
-              min="0"
-              className="aseel-input aseel-num"
-              disabled={collecting}
-              value={collectCash}
-              onChange={(e) => setCollectCash(e.target.value)}
-            />
-          </label>
-          <AccountTreeField
-            className="aseel-input"
-            accounts={accounts}
-            value={collectCashAccountId}
-            disabled={collecting}
-            allowClear={false}
-            isSelectable={(account) => cashboxAccounts.some((row) => row.id === account.id)}
-            onChange={(id) => setCollectCashAccountId(id ?? "")}
-            placeholder="الصندوق / البنك"
-            title="حساب الصندوق أو البنك للتحصيل"
-          />
-        </div>
-
-        {/* شيكات */}
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] font-bold text-[var(--color-text)]">المدفوع شيكات</span>
-          <div className="aseel-input aseel-num flex items-center" data-testid="collect-cheques-total">
-            {fmt(collectChequesTotal)}
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              className="aseel-toolbtn text-[11px]"
-              disabled={collecting}
-              onClick={addChequeRow}
-            >
-              <Plus className="h-3 w-3" /> شيك
-            </button>
-            {collectCheques.length > 0 && (
-              <button
-                type="button"
-                className="aseel-toolbtn text-[11px]"
-                onClick={() => setChequesOpen((v) => !v)}
-              >
-                {chequesOpen ? "إخفاء التفاصيل" : `تفاصيل الشيكات (${collectCheques.length})`}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* من رصيد العميل — يظهر فقط حين يوجد رصيد مرحّل غير موزَّع */}
-        <div className="flex flex-col gap-1">
-          {onAccountAvailable > 0.009 ? (
-            <>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold text-[var(--color-text)]">من رصيد العميل</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  max={onAccountAvailable}
-                  className="aseel-input aseel-num"
-                  disabled={collecting}
-                  value={collectFromBalance}
-                  onChange={(e) => setCollectFromBalance(e.target.value)}
-                />
-              </label>
-              <span className="text-[11px] text-[var(--color-text-muted)]">
-                المتاح على الحساب {fmt(onAccountAvailable)} — ربطُ سندٍ مرحّل بلا قيد جديد.
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="text-[11px] font-bold text-[var(--color-text)]">من رصيد العميل</span>
-              <span className="text-[11px] text-[var(--color-text-muted)]">
-                لا رصيد «على الحساب» لهذا العميل.
-              </span>
-            </>
-          )}
-        </div>
-
-        {/* المتبقي — مشتقّ حيّ، لا يُدخَل */}
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] font-bold text-[var(--color-text)]">المتبقي</span>
-          <div
-            className="aseel-input aseel-num flex items-center font-bold"
-            data-testid="collect-remaining"
-          >
-            {fmt(Math.max(collectRemainingAfter, 0))}
-          </div>
-          <span className="text-[11px] text-[var(--color-text-muted)]">
-            محسوب من الإجمالي ناقص المحصَّل — لا يُدخَل يدوياً.
-          </span>
-        </div>
-      </div>
-
-      {chequesOpen && collectCheques.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[520px] text-[11px]">
-            <thead className="bg-[var(--aseel-surface-2)]">
-              <tr>
-                <th className="p-1 text-right">رقم الشيك</th>
-                <th className="p-1 text-right">البنك</th>
-                <th className="p-1 text-right">الاستحقاق</th>
-                <th className="p-1 text-right">المبلغ</th>
-                <th className="w-8 p-1"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {collectCheques.map((row, i) => (
-                <tr key={row.key} className="border-t border-[var(--aseel-border)]">
-                  <td className="p-0.5">
-                    <input
-                      className="aseel-input text-[11px]"
-                      aria-label={`رقم الشيك ${i + 1}`}
-                      disabled={collecting}
-                      value={row.cheque_number}
-                      onChange={(e) => patchCheque(row.key, { cheque_number: e.target.value })}
-                    />
-                  </td>
-                  <td className="p-0.5">
-                    <input
-                      className="aseel-input text-[11px]"
-                      aria-label={`بنك الشيك ${i + 1}`}
-                      disabled={collecting}
-                      value={row.bank_name}
-                      onChange={(e) => patchCheque(row.key, { bank_name: e.target.value })}
-                    />
-                  </td>
-                  <td className="p-0.5">
-                    <input
-                      type="date"
-                      className="aseel-input text-[11px]"
-                      aria-label={`استحقاق الشيك ${i + 1}`}
-                      disabled={collecting}
-                      value={row.due_date}
-                      onChange={(e) => patchCheque(row.key, { due_date: e.target.value })}
-                    />
-                  </td>
-                  <td className="p-0.5">
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      className="aseel-input aseel-num text-[11px]"
-                      aria-label={`مبلغ الشيك ${i + 1}`}
-                      disabled={collecting}
-                      value={row.amount}
-                      onChange={(e) => patchCheque(row.key, { amount: e.target.value })}
-                    />
-                  </td>
-                  <td className="p-0.5 text-center">
-                    <button
-                      type="button"
-                      className="aseel-iconbtn aseel-iconbtn--danger"
-                      aria-label={`حذف الشيك ${i + 1}`}
-                      disabled={collecting}
-                      onClick={() =>
-                        setCollectCheques((rows) => rows.filter((r) => r.key !== row.key))
-                      }
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+    <DocumentPaymentPanel
+      side="customer"
+      derived={payment}
+      input={paymentInput}
+      isPosted={isPosted}
+      busy={collecting}
+      panelRef={collectPanelRef}
+      cashInputRef={collectCashInputRef}
+      chequesOpen={chequesOpen}
+      onToggleCheques={() => setChequesOpen((v) => !v)}
+      onCashChange={setCollectCash}
+      onFromBalanceChange={setCollectFromBalance}
+      onAddCheque={addChequeRow}
+      onPatchCheque={patchCheque}
+      onRemoveCheque={(key) =>
+        setCollectCheques((rows) => rows.filter((r) => r.key !== key))
+      }
+      onFillCashShortfall={() =>
+        setCollectCash((collectCashNum + cashInvoiceShortfall).toFixed(2))
+      }
+      onMakeCredit={() => setInvType("credit")}
+      onSubmit={() => void submitCollect()}
+      cashAccountField={(
+        <AccountTreeField
+          className="aseel-input"
+          accounts={accounts}
+          value={collectCashAccountId}
+          disabled={collecting}
+          allowClear={false}
+          isSelectable={(account) => cashboxAccounts.some((row) => row.id === account.id)}
+          onChange={(id) => setCollectCashAccountId(id ?? "")}
+          placeholder="الصندوق / البنك"
+          title="حساب الصندوق أو البنك للتحصيل"
+        />
       )}
-
-      {collectChequeError && (
-        <div className="aseel-note aseel-note--warn text-[11px]">{collectChequeError}</div>
-      )}
-
-      {/* الفائض سياسةٌ قائمة في الخادم (دفعة على الحساب) — اللوحة تقولها فقط. */}
-      {collectOverpay > 0.009 && (
-        <div className="aseel-note aseel-note--warn text-[11px]" data-testid="collect-overpay-note">
-          الفائض {fmt(collectOverpay)} يُسجَّل دفعة على الحساب.
-        </div>
-      )}
-
-      {cashInvoiceShortfall > 0 && (
-        <div className="aseel-note aseel-note--err text-[11px]" data-testid="collect-cash-guard">
-          الفاتورة نقدية — المدفوع لا يغطي الإجمالي. أكمل {fmt(cashInvoiceShortfall)} أو ارفع
-          علامة «نقدي» لتصير الفاتورة آجلةً على ذمم العميل.
-          <button
-            type="button"
-            className="aseel-toolbtn mr-2 text-[11px]"
-            onClick={() =>
-              setCollectCash((collectCashNum + cashInvoiceShortfall).toFixed(2))
-            }
-          >
-            أكمل المبلغ نقداً
-          </button>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          className="aseel-toolbtn"
-          data-testid="collect-submit"
-          disabled={collecting || collectPaidNow <= 0.009 || Boolean(collectChequeError) || cashInvoiceShortfall > 0}
-          onClick={() => void submitCollect()}
-        >
-          {collecting ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <Receipt className="h-3 w-3" />
-          )}
-          {collecting ? "...جارٍ التحصيل" : isPosted ? "تحصيل الآن" : "حفظ وترحيل وتحصيل"}
-        </button>
-        <span className="text-[11px] text-[var(--color-text-muted)]">
-          نداء واحد يُنتج سند قبض واحداً مرحّلاً — النقد والشيكات فيه، والخصم من رصيد
-          العميل ربطٌ بسنده القديم.
-        </span>
-      </div>
-    </div>
+    />
   );
 
   return (
@@ -3786,12 +3561,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           ...(showAdvancedTabs && draftId && Number(draftId) > 0 ? [{
             key: "stock_impact",
             label: "حركة المخزون",
-            content: <InvoiceStockTab invoiceId={Number(draftId)} />,
+            content: <InvoiceStockTab invoiceId={Number(draftId)} api={salesInvoiceContextApi} side="customer" />,
           }] : []),
           ...(showAdvancedTabs && draftId && Number(draftId) > 0 ? [{
             key: "customer_ledger",
             label: "حساب العميل",
-            content: <InvoiceCustomerLedgerTab invoiceId={Number(draftId)} />,
+            content: <InvoicePartnerLedgerTab invoiceId={Number(draftId)} api={salesInvoiceContextApi} side="customer" />,
           }] : []),
           /* المرفقات خارج `showAdvancedTabs` وحدها: إرفاق صورة إيصال فعلٌ
              أساسي لا متقدّم، ويحتاجه الوضع السهل قبل غيره. */
@@ -3801,6 +3576,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             content: (
               <InvoiceAttachmentsTab
                 invoiceId={Number(draftId)}
+                api={salesInvoiceContextApi}
                 readOnly={!invoicePermissions.canSave}
               />
             ),

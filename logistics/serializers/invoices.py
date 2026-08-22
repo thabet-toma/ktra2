@@ -13,6 +13,8 @@ from sales.serializers import CHEQUE_DUE_DATE_REQUIRED
 from core.payments import (
     apply_default_cash_account,
     document_partner_balance_summary,
+    document_overdue_state,
+    resolve_due_date,
     document_payment_summary,
 )
 from core.tenant_utils import get_tenant
@@ -255,10 +257,26 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'unpaid': 'غير مدفوعة',
         }.get(obj.list_payment_status, 'غير مدفوعة')
 
+    # T-DUE: التأخّر في القائمة يُحسب من `list_remaining_balance` المُعلَّم داخل
+    # استعلامٍ واحد — لا من ملخّصٍ لكل صفّ (جدولٌ مؤقّت لكل صفّ = قائمةٌ بطيئة).
+    is_overdue = serializers.SerializerMethodField()
+    days_overdue = serializers.SerializerMethodField()
+
+    def get_is_overdue(self, obj) -> bool:
+        return document_overdue_state(
+            obj.due_date, getattr(obj, 'list_remaining_balance', 0),
+        )['is_overdue']
+
+    def get_days_overdue(self, obj) -> int:
+        return document_overdue_state(
+            obj.due_date, getattr(obj, 'list_remaining_balance', 0),
+        )['days_overdue']
+
     class Meta:
         model = PurchaseInvoice
         fields = [
             'id', 'invoice_number', 'invoice_name', 'invoice_date',
+            'due_date', 'payment_terms_days', 'is_overdue', 'days_overdue',
             'invoice_type',
             'partner', 'partner_name',
             'deal', 'deal_ref', 'deal_title',
@@ -347,6 +365,9 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     # task16 C10: المبلغ المدفوع + المتبقي + حالة الدفع (مدفوعة/جزئياً/غير مدفوعة)
     amount_paid = serializers.SerializerMethodField()
     remaining_balance = serializers.SerializerMethodField()
+    # T-DUE: التأخّر بُعدٌ فوق حالة الدفع — مصدره `document_overdue_state`.
+    is_overdue = serializers.SerializerMethodField()
+    days_overdue = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
     payment_status_display = serializers.SerializerMethodField()
     fees_total = serializers.SerializerMethodField()
@@ -383,6 +404,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         model = PurchaseInvoice
         fields = [
             'id', 'invoice_number', 'invoice_name', 'invoice_date',
+            'due_date', 'payment_terms_days', 'is_overdue', 'days_overdue',
             'invoice_type',
             'partner', 'partner_name',
             'deal', 'deal_ref',
@@ -415,7 +437,12 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'quote_images', 'quote_pdfs',
             'created_at', 'updated_at', 'created_by',
         ]
-        read_only_fields = ['id', 'is_posted', 'is_return', 'original_invoice', 'journal', 'created_at', 'updated_at', 'receipt_status']
+        # T-APPAID: `attached_cash_amount` عمودٌ قديم لا يقرؤه الترحيل — صار
+        # للقراءة فقط (مرآة `SalesInvoice`). كتابتُه كانت تُسجّل مالاً في
+        # الشاشة بلا أثرٍ في الدفاتر.
+        read_only_fields = ['id', 'is_posted', 'is_return', 'original_invoice',
+                            'journal', 'created_at', 'updated_at', 'receipt_status',
+                            'attached_cash_amount']
 
     def get_is_local(self, obj):
         """فاتورة محلية = غير مستوردة (بلا صفقة/شحنة/تخليص) — قابلة للاستلام للمخزن."""
@@ -499,7 +526,27 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     def get_payment_status_display(self, obj):
         return purchase_invoice_payment_summary(obj)['payment_status_display']
 
+    def get_is_overdue(self, obj) -> bool:
+        """T-DUE: «متأخرة» بُعدٌ فوق حالة الدفع لا قيمةٌ رابعة فيها."""
+        return document_overdue_state(
+            obj.due_date, purchase_invoice_payment_summary(obj)['remaining_balance'],
+        )['is_overdue']
+
+    def get_days_overdue(self, obj) -> int:
+        return document_overdue_state(
+            obj.due_date, purchase_invoice_payment_summary(obj)['remaining_balance'],
+        )['days_overdue']
+
     def _balance_summary(self, obj):
+        # T-PCTX — **تقريبٌ لا يطابق كشف الحساب؛ لا تعرضه على أنه «قبل/بعد».**
+        # `document_partner_balance_summary` يطرح «المتبقّي» من رصيد **اليوم**،
+        # وكلا الأساسين خاطئ للفاتورة المرحّلة: قيدها يدائن الذمم بكامل الإجمالي
+        # (الدفع قيدٌ منفصل) فالمسدَّدةُ بالكامل تُظهر أثراً صفرياً وهي ليست
+        # كذلك؛ ومرساتُه اليومُ لا موضعُ الفاتورة زمنياً. الجواب الصحيح في
+        # `GET /api/logistics/purchase-invoices/{id}/supplier-ledger/` — من
+        # `partner_account_statement` نفسه الذي يبني كشف الحساب. الحقلان باقيان
+        # لعقد الـAPI وحده. (نفس قرار جانب البيع حرفياً — والمرآة التي كانت
+        # موثَّقةً كديْنٍ في `docs/modules/sales.md` أُغلقت بهذه النقطة.)
         summary = purchase_invoice_payment_summary(obj)
         return document_partner_balance_summary(
             getattr(obj, 'supplier_balance', 0),
@@ -567,6 +614,15 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             strip_serials_when_off(
                 attrs['items'], purchase_serial_mode(tenant.TenantID),
             )
+        # T-DUE: الاستحقاق يُشتقّ من مهلة السداد حين لا يُكتب صراحةً — والصريح
+        # مقدَّمٌ دائماً فلا يمحو حفظٌ لاحق تاريخاً كتبه المستخدم بيده.
+        invoice_date = attrs.get('invoice_date') or getattr(self.instance, 'invoice_date', None)
+        terms = attrs.get(
+            'payment_terms_days', getattr(self.instance, 'payment_terms_days', None))
+        due = attrs.get('due_date', getattr(self.instance, 'due_date', None))
+        resolved = resolve_due_date(invoice_date, due, terms)
+        if resolved != due:
+            attrs['due_date'] = resolved
         return attrs
 
     def get_cheques(self, obj):

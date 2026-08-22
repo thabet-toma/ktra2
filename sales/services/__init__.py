@@ -65,6 +65,8 @@ from .flow import (
     guard_invoice_allocation_total,
     invoice_journal_debits_ar,
     invoice_journal_settlement_credit,
+    returnable_lines_for_invoice,
+    guard_sales_return_quantities,
     is_auto_cash_settlement,
     guard_invoice_payments_before_unpost,
     release_auto_cash_settlement,

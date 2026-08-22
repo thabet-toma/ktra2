@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **473**
+عدد النقاط: **482**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -295,17 +295,24 @@
 | `/api/logistics/purchase-invoices/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/clearance-import-options/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/import-from-clearance/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
+| `/api/logistics/purchase-invoices/next-number/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/preview-clearance-import/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/price-list/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/recalculate-landed-cost/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/resolve-price/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/returns/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
+| `/api/logistics/purchase-invoices/{pk}/attachments/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
+| `/api/logistics/purchase-invoices/{pk}/attachments/{attachment_id}/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
+| `/api/logistics/purchase-invoices/{pk}/duplicate/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
+| `/api/logistics/purchase-invoices/{pk}/pay/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/payment-voucher/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/post-to-accounting/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/receivable-lines/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/receive/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/returnable-lines/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
+| `/api/logistics/purchase-invoices/{pk}/stock-movements/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
+| `/api/logistics/purchase-invoices/{pk}/supplier-ledger/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/trace/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/unpost/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-orders/` | `PurchaseOrderViewSet` | `logistics/views/procurement.py` |
@@ -331,6 +338,7 @@
 | `/api/logistics/shipments/{pk}/unpost-freight-accrual/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/unpost/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/supplier-payments/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
+| `/api/logistics/supplier-payments/suggest-fifo-allocations/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/allocate/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/post/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
@@ -420,6 +428,7 @@
 | `/api/sales/invoices/{pk}/duplicate/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/payment-voucher/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/post/` | `SalesInvoiceViewSet` | `sales/views.py` |
+| `/api/sales/invoices/{pk}/returnable-lines/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/stock-movements/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/unpost/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/orders/` | `SalesOrderViewSet` | `sales/views.py` |

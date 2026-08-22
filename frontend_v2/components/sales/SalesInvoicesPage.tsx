@@ -495,6 +495,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
         <PaymentStatusBadge
           status={r.payment_status}
           label={r.payment_status_display}
+          isOverdue={r.is_overdue}
+          daysOverdue={r.days_overdue}
         />
       ),
     },
@@ -645,6 +647,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           <option value="unpaid">غير مدفوعة</option>
           <option value="partially_paid">مدفوعة جزئياً</option>
           <option value="paid">مدفوعة بالكامل</option>
+          {/* T-DUE: خيارٌ فوق الثلاثة لا رابعٌ بينها — «عليها متبقٍّ واستحقاقها مضى». */}
+          <option value="overdue">متأخرة</option>
         </select>
       </label>
       <label className="aseel-field">

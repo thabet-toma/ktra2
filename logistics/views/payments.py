@@ -86,7 +86,6 @@ from logistics.domain.shipment_builder import create_shipment_from_deals
 from logistics.domain.stages import derive_stage
 from logistics.services import (
     annotate_purchase_invoice_payment_summary,
-    attach_pi_payment_voucher,
     convert_local_quotation_to_invoice,
     convert_local_quotation_to_order,
     convert_purchase_order_to_invoice,
@@ -193,6 +192,34 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
             partner_ids=[partner_id], request=request,
         )
         return response
+
+    @action(detail=False, methods=['get'], url_path='suggest-fifo-allocations')
+    def suggest_fifo_allocations(self, request):
+        """T-PSIMPL: اقتراح توزيع مبلغٍ على فواتير مورّد — مرآة نظيرتها في البيع.
+
+        اقتراحٌ لا تنفيذ: يعيد الصفوف ليعرضها المستخدم ويعدّلها قبل `allocate/`.
+        """
+        from logistics.services import suggest_supplier_fifo_allocations
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response(
+                {'error': 'الشركة غير محددة.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            partner_id = int(request.query_params.get('partner'))
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'المورد مطلوب.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            amount = Decimal(str(request.query_params.get('amount') or '0'))
+        except Exception:
+            return Response(
+                {'error': 'مبلغ غير صالح.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({
+            'allocations': suggest_supplier_fifo_allocations(
+                tenant_id=tenant.TenantID, partner_id=partner_id, amount=amount,
+            ),
+        })
 
     @action(detail=True, methods=['post'], url_path='allocate')
     def allocate(self, request, pk=None):

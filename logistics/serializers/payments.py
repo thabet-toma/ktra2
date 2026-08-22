@@ -250,26 +250,10 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        from accounting.models import Cheque
+        # T-APPAY: عقد الشيك في مكان واحد — يستدعيه هذا المسار ومنسّق الدفع معاً.
+        from logistics.services import create_supplier_payment_cheques
 
         cheques = validated_data.pop('cheques', [])
         payment = super().create(validated_data)
-        for c in cheques:
-            Cheque.objects.create(
-                tenant=payment.tenant,
-                supplier_payment=payment,
-                partner=payment.partner,
-                direction='Outgoing',
-                status='Draft',  # يصير «برسم الدفع» عند ترحيل السند
-                cheque_number=c['cheque_number'].strip(),
-                amount=c['amount'],
-                currency=payment.currency,
-                bank_name=c.get('bank_name') or '',
-                account_number=c.get('account_number') or '',
-                bank_branch=c.get('bank_branch') or '',
-                due_date=c.get('due_date') or None,
-                issue_date=c.get('issue_date') or None,
-                payee_name=c.get('payee_name') or '',
-                notes=c.get('notes') or '',
-            )
+        create_supplier_payment_cheques(payment, cheques)
         return payment

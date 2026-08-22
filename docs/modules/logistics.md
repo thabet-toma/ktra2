@@ -79,6 +79,13 @@ def void_goods_receipt(receipt, *, user=None):                          # عكس
 def create_purchase_return(tenant, *, original_invoice, partner, return_date, lines, notes='',
                            invoice_number=None, currency=None, exchange_rate=None, user=None):    # مرجع شراء كمسودة
 def post_purchase_return(invoice, *, user=None):                        # ترحيل المرجع: RETURN_OUT + قيد عكسي
+def suggest_supplier_fifo_allocations(*, tenant_id, partner_id, amount) -> list[dict]:  # اقتراح توزيع سند صرف من الأقدم استحقاقاً
+def pay_purchase_invoice(invoice, *, cash=None, cash_account_id=None, cheques=None,
+                        from_on_account=None, payment_date=None, user=None):        # منسّق الدفع: سند صرف واحد + سلف المورّد، ذرّياً
+def guard_purchase_invoice_payments_before_unpost(invoice, *, action_label='إلغاء ترحيل'):  # سندٌ مرحّل يمنع حذف قيد الفاتورة
+def release_auto_cash_purchase_settlement(invoice, *, user=None) -> list[int]:       # سند الشراء النقدي التلقائي يُحرَّر مع إلغاء الترحيل
+def purchase_journal_settlement_debit(invoice) -> Decimal:                           # ما سُوّي داخل قيد الفاتورة نفسه (ما قبل Feature 2)
+def create_supplier_payment_cheques(payment, cheques) -> None:                       # عقد شيك سند الصرف — نقطة كتابة واحدة
 def attach_pi_payment_voucher(invoice, *, cash_amount=0, cash_account_id=None,
                               cheques=None, user=None):                 # ربط سند (نقد + شيكات) قبل الترحيل
 
@@ -112,6 +119,11 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | POST | `clearances/{pk}/post-to-accounting/` · `pay_from_cashbox/` | views.py:2249 / 2338 |
 | POST | `purchase-invoices/preview-clearance-import/` · `import-from-clearance/` | views.py:3103 / 3179 |
 | GET | `purchase-invoices/{pk}/trace/` | `trace` (views.py:3245) |
+| GET | `purchase-invoices/{pk}/stock-movements/` · `supplier-ledger/` | تبويبا السياق — أثر الفاتورة على المخزن، وكشف حساب المورّد مرسوّاً عليها |
+| GET/POST · DELETE | `purchase-invoices/{pk}/attachments/` · `attachments/{id}/` | تُحفظ **فوراً** لا مع الفاتورة، فيبقى الإرفاق ممكناً بعد الترحيل |
+| GET · POST | `purchase-invoices/next-number/` · `purchase-invoices/{pk}/duplicate/` | الرقم التالي قبل الحفظ · نسخُ الفاتورة مسودّةً بلا ترحيلٍ ولا استلام |
+| GET | `supplier-payments/suggest-fifo-allocations/?partner=&amount=` | اقتراح توزيع سند صرف على فواتير المورّد (الأقدم استحقاقاً أولاً) |
+| POST | `purchase-invoices/{pk}/pay/` | `pay` — الدفع من داخل الفاتورة (نقد/شيكات/سلف المورّد)، صلاحية `purchase.payment.create` (+`purchase.invoice.post` مع `post_invoice`) |
 | POST | `purchase-invoices/{pk}/post-to-accounting/` · `receive/` · `unpost/` · `returns/` | views.py:3400 / 2991 / 4047 / 3027 |
 | GET | `import-journey/` · `reports/landed-cost/?shipment_id=` | views.py:4557 / 4588 |
 | GET/POST | `goods-receipts/` · `goods-receipts/outstanding/` · `purchase-settings/current/` | views.py:4783 / 4935 / 5038 |
@@ -140,6 +152,70 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 - **«الاستلام مع الترحيل» خيارُ الفاتورة الواحدة، والإعداد العام افتراضُه** — `views/invoices.py` (`post_to_accounting`) يقبل `receive_on_post` في جسم الطلب فيتقدّم على `PurchaseSettings.receive_on_post`. إغفاله يُبقي السلوك القديم حرفياً. الخيار لحظةُ ترحيلٍ لا حقلٌ محفوظ: ما بعده تقوله `receipt_status` والإرساليات.
 - **الطلبية تتحوّل كاملةً مرّةً واحدة** (`PurchaseOrder.invoice` علاقةُ واحد-لواحد) — والتجزئة على مستوى **الاستلام** لا التحويل: طلبيةٌ واحدة ← فاتورةٌ واحدة ← إرساليات متعددة. هذا ما تفعله Odoo (backorder على سند الاستلام) وZoho (عدّة Purchase Receives للطلبية). ولذلك تحمل `PurchaseOrderSerializer` تقدّم استلام فاتورتها (`invoice_receipt_progress`) فلا تنتهي الطلبية عند «محوّلة إلى فاتورة» طريقاً مسدوداً. **لا تُدخِل «كمية محوَّلة» على سطر الطلبية** — تخلق معنىً ثانياً لـ«الباقي» (للفوترة مقابل للاستلام) وتعيد الالتباس الذي أُزيل.
 - **«الباقي على البند» قاعدةٌ واحدة لا نسخ** — `services.py` (`purchase_item_receipt_quantities`): الكمية − المستلَم مقصوصاً عند الصفر وبدقّة العمود (أربع خانات). تستدعيها المواضع الستّة كلّها: تقرير البواقي (`views/goods_receipts.py` — `outstanding`)، وبنود الاستلام (`views/invoices.py` — `receivable_lines`)، وبند الإرسالية ومجموعها (`serializers/goods_receipts.py`)، وحارس `receive_purchase_invoice`، وقراءة الفاتورة (`serializers/invoices.py` — `remaining_quantity` على البند و`receipt_progress` على الرأس). **الواجهة تعرض ولا تطرح** — أيّ طرحٍ فيها نسخةٌ سابعة تفترق غداً.
+- **لا إلغاء ترحيل لفاتورة شراء عليها سند صرف مرحّل**: `services.py`
+  (`guard_purchase_invoice_payments_before_unpost`) يُستدعى من `views/invoices.py`
+  (`unpost`) في مسارَي الفاتورة والمرجع. كان الحذف يطال قيود الفاتورة وحدها
+  (`PURCHASE_INVOICE`/`GRN`/`RECEIPT`) ولا يرى السندات إطلاقاً، فيبقى قيد السند
+  **يدين ذمم المورد بلا مقابل** — رصيدٌ وهميّ لصالح الشركة عند مورّد لم يُدفع له
+  زائد. مرآة `guard_invoice_payments_before_unpost` على جانب البيع. الاستثناء
+  الوحيد سندُ التسوية النقدية التلقائي (الموسوم بـ`auto_settled_invoice`) —
+  يُحرَّر بالحذف أولاً عبر `release_auto_cash_purchase_settlement` لأن الترحيل
+  نفسه أنشأه، فلا يبقى معلّقاً ولا يتضاعف عند إعادة الترحيل.
+- **«المدفوع» يُحسب ولا يُفترض**: `purchase_invoice_payment_summary` (وتوأمها
+  الـSQL `annotate_purchase_invoice_payment_summary`) كانتا تعطيان كل فاتورة
+  **نقدية مرحّلة** `paid = payable` بغضّ النظر عن وجود سند، وتسقطان عند غيابه على
+  `attached_cash_amount` — عمودٌ تكتبه النقطة القديمة `payment-voucher` ولا يقرؤه
+  الترحيل. فكانت الشاشة تقول «مدفوعة بالكامل» وذمم المورد دائنة (يكفي إلغاء ترحيل
+  السند التلقائي ليظهر الكذب). ما يُحتسب اليوم شيئان، كلاهما قيدٌ فعليّ: سنداتٌ
+  مرحّلة، و**تسويةٌ داخل قيد الفاتورة نفسه** لفواتير ما قبل Feature 2
+  (`purchase_journal_settlement_debit` — مدينُ حساب ذمم المورد المرتبط داخل قيدها،
+  والمرجع مستثنى لأنه يدين الذمم بحكم تعريفه). **القاعدة في موضعين ولا يجوز أن
+  يفترقا** — القائمة والتفصيل يقولان الرقم نفسه، ويحرسه
+  `tests/test_purchase_paid_is_computed.py`. ومعها: الشراء النقدي بلا حساب صندوق
+  (ولا افتراضي للشركة) صار **يُرفض ترحيله** بدل التخطّي الصامت الذي كان يُنتج
+  فاتورةً «نقدية» بلا تسوية.
+- **الدفع من داخل الفاتورة نقطة واحدة**: `services.py` (`pay_purchase_invoice`) خلف
+  `purchase-invoices/{id}/pay/` — تركيبُ خدمات قائمة بلا أي منطق ترحيل جديد: سند
+  صرف واحد بنقده وشيكاته (`post_supplier_payment`) بتوزيعٍ مقصوص على المتبقّي وما
+  زاد يبقى سلفةً «على الحساب»، ثم `allocate_supplier_payment` لكل صفّ من سلف
+  المورّد (ربطٌ بلا قيد جديد). الترحيل يبقى مملوكاً لـ`post_to_accounting`،
+  والنقطة تجمع الاثنين في `transaction.atomic` واحد فلا تُترك فاتورةٌ مرحّلة
+  بسندٍ نصفِ مولود؛ وسندُ التسوية التلقائي يُكبَت حين يتولّاها الدفع الصريح
+  (`_suppress_auto_settlement`) وإلّا خطف كاملَ المتبقّي فخرج سندان. الفاتورة
+  النقدية مدفوعةٌ بالتعريف: نقدٌ غير مذكور يُكمَّل، ونقصٌ بعد نقدٍ مذكور يَرفض
+  العملية كلَّها. مرآة `collect_invoice_payment`.
+  > النقطة القديمة `payment-voucher` (`attach_pi_payment_voucher`) باقيةٌ بعقدها
+  > كما هو: تكتب `attached_cash_amount` وشيكات `Draft` **لا يقرؤها الترحيل** ⇒
+  > مستندٌ لا أثر مالياً له. لم تعد تُنتج «مدفوعاً» كاذباً بعد التغيير أعلاه،
+  > وحذفها/تحويلها غلافاً فوق `pay_purchase_invoice` تذكرةٌ قائمة بذاتها.
+- **الفاتورة مركز سياق لا نموذج إدخال**: ثلاث نقاط تجيب من داخلها —
+  `stock-movements/` (ما فعلته **هي** بالمخزن، ومعه سبب الفراغ: مسودّة؟ أم لم
+  تُستلَم؟) · `supplier-ledger/` (كشف حساب المورّد مرسوّاً عليها من
+  `partner_account_statement` نفسه) · `attachments/` GET/POST وDELETE. المرفقات
+  **تُحفظ فوراً** لا مع الفاتورة: `perform_update` يرفض المرحّلة، فكان
+  `_sync_attachments` المعلّق بمسار PATCH يعني ألّا يُرفق إيصال مورّد بعد الترحيل
+  أبداً — وهو أكثر وقت يُحتاج فيه — ولا حذفَ أصلاً. الواجهة تستهلكها بمكوّن
+  `DocumentContextTabs` المشترك مع البيع (`side="supplier"`).
+  > وبـ`supplier-ledger/` أُغلق الدين الموثَّق في `docs/modules/sales.md`:
+  > `supplier_balance_before_invoice`/`after` تقريبٌ يطرح المتبقّي من رصيد
+  > **اليوم** فتظهر المسدَّدةُ بأثرٍ صفريّ وهي دائنةُ ذمم بكامل إجماليها. الحقلان
+  > باقيان لعقد الـAPI، ولا يُعرضان على أنهما «قبل/بعد» — الشاشة تعرض الرصيد
+  > الحالي وتُحيل إلى التبويب.
+- **الاستحقاق حقلٌ ومهلةُ السداد تشتقّه**: `due_date` + `payment_terms_days` على
+  `PurchaseInvoice` (كانا على فاتورة البيع وحدها). القاعدة في
+  `core/payments.py` (`resolve_due_date`) — الصريح يسمو على المشتقّ فلا يمحو حفظٌ
+  لاحق تاريخاً كتبه المستخدم. وأعمار الذمم **الدائنة** صارت تُعمَّر بالاستحقاق
+  كنظيرتها المدينة (`core/reports/financial.py`)، بعد أن كانت تُعمَّر بتاريخ
+  الفاتورة فتضع فاتورةً مهلتها 60 يوماً في خانة «31–60» وهي لم تستحقّ بعد.
+- **«متأخرة» بُعدٌ فوق حالة الدفع لا قيمةٌ رابعة فيها**: `document_overdue_state`
+  (`core/payments.py`) — عليها متبقٍّ **و**استحقاقها مضى؛ وبلا تاريخ استحقاق لا
+  تخمين. تُعرض شارةً ثانيةً بجانب «مدفوعة جزئياً» لا بدلاً منها، ولها خيار فلترة
+  `?payment_status=overdue` على الجانبين. إدخالها في `payment_status` كان يكسر
+  الفلاتر والشارات القائمة على القيم الثلاث ويخفي «كم بقي» خلف «تأخّر».
+- **`attached_cash_amount` عمودٌ ميّت للقراءة فقط**: النقطة القديمة
+  `payment-voucher` كانت تكتبه وتُنشئ شيكات `Draft` **لا يقرأ الترحيلُ أياً
+  منهما** — مالٌ يُسجَّل في الشاشة بلا أثرٍ في الدفاتر. صارت النقطة غلافاً فوق
+  `pay/`، وحُذفت `attach_pi_payment_voucher`، وصار العمود `read_only`.
 - **العزل بالشركة إلزامي** (كل ViewSet يرث `BaseTenantViewSet`، `core/mixins.py`)، و**إلغاء الترحيل يحتاج** `import.doc.unpost` (views.py:760, 2104, 2176, 2275, 2296, 2593).
 
 ## إلغاء ترحيل الدفعات (وُحِّد في المرحلة 2 + معالجتها 2026-08-11)
@@ -166,4 +242,11 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | `tests/test_purchase_receipt_visibility.py` | الباقي على البند وملخّص رأس الفاتورة — وتكافؤ رقمهما مع تقرير `outstanding` (وكان بلا اختبار) |
 | `tests/test_receive_on_post_per_invoice.py` | خيار «الاستلام مع الترحيل» لكل فاتورة يتقدّم على الإعداد العام في الاتجاهين |
 | `tests/test_local_invoice_receive.py` | استلام الفاتورة المحلية للمخزن · مطابقة البنود بالمعرّف وحرّاس البند المستلَم |
+| `tests/test_purchase_invoice_context_tabs.py` | التبويبات الثلاث؛ ومطابقة «قبل/بعد» لكشف الحساب (وأن أثر المسدَّدة = إجماليها لا صفر) |
+| `tests/test_due_date_and_overdue.py` | الاستحقاق يُشتقّ من المهلة، و«متأخرة» بُعدٌ لا حالة، وأعمار الدائنة بالاستحقاق — على الجانبين |
+| `tests/test_purchase_parity_extras.py` | الرقم التالي · النسخ لا ينسخ تاريخ المستند · توزيع FIFO يبدأ بالأقدم استحقاقاً |
+| `tests/test_pi_cheque_voucher.py` | النقطة القديمة صارت تُنتج سند صرف مرحّلاً — لا `attached_cash_amount` بلا قيد |
+| `tests/test_purchase_unpost_payment_guard.py` | سندٌ مرحّل يمنع إلغاء الترحيل، والسند النقدي التلقائي يُحرَّر معه بلا ازدواج عند إعادته |
+| `tests/test_purchase_paid_is_computed.py` | «المدفوع» من السندات والقيد لا من نوع الفاتورة؛ والقائمة والتفصيل يتفقان |
+| `tests/test_purchase_invoice_pay.py` | الدفع من داخل الفاتورة: سندٌ واحد، الفائض سلفة، التراجع الكامل عند الفشل |
 | `tests/test_tenant_isolation.py` (75) | لا تسرّب صفقات بين الشركات؛ 400 بلا ترويسة الشركة |
