@@ -411,7 +411,12 @@ test("invoice and deal documents show posted pending remaining balances and paym
 
   await expect(page.getByText("تفاصيل سندات القبض (1)", { exact: true })).toBeVisible();
   await expect(page.getByText("سند قبض #77", { exact: true })).toBeVisible();
-  await expect(page.getByText("رصيد العميل الحالي بعد احتسابه (بالعملة الأساسية)", { exact: true })).toBeVisible();
+  /* THA-132 قلَب هذا التوقّع: سطرا «رصيد العميل قبل/بعد» أُزيلا من لوحة
+     المجاميع لأن رقمهما كان كاذباً (المتبقّي مطروحاً من رصيد **اليوم**، بينما
+     قيد الفاتورة يدين الذمم بكامل الإجمالي والتحصيل قيد منفصل). فالتوقّع صار
+     سالباً — لا يعودان — والوعدُ الصحيح (قبل/الأثر/بعد من مرساة كشف الحساب)
+     يحرسه `e2e/sales-invoice-context-tabs.spec.ts` على تبويب «حساب العميل». */
+  await expect(page.getByText(/رصيد العميل .* احتساب/)).toHaveCount(0);
   const printButton = page.getByRole("button", { name: "طباعة سند القبض #77" });
   await expect(printButton).toBeVisible();
   const [receiptPage] = await Promise.all([
