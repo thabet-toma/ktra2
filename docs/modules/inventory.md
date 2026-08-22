@@ -30,6 +30,7 @@
 | `Warehouse` | `code`, `is_default`, `is_active` | `branch→tenants.Branch` (اختياري)؛ فريد `(tenant, code)` لغير الفارغ |
 | `ProductSerial` | `serial`, `status` (`in_stock`/`sold`) | `purchase_item→logistics.PurchaseInvoiceItem`، `sales_line→sales.SalesInvoiceLine`؛ فريد `(tenant, product, serial)`، وفهرس `(tenant, serial)` لبحث المسح الذي لا يعرف الصنف (`prodserial_tenant_serial`) |
 | `ProductPriceTier` | `tier_type` (sale/purchase), `tier_number`, `price`, `tax_inclusive` | فريد `(product, tier_type, tier_number)` |
+| `SupplierProduct` | `supplier_sku`, `supplier_name` | `supplier→partners.Partner`، `product→Product`؛ فريد `(tenant, supplier, supplier_sku)` — **لا** على `(tenant, supplier, product)`: للمورّد أن يحمل أكثر من رقم للصنف الواحد، والممنوع عكسُه (رقمٌ واحد لصنفين يجعل المطابقة تخميناً). محايد مالياً بالكامل |
 | `WarehouseTransfer` / `WarehouseTransferLine` | `transfer_number`, `is_posted`, `quantity` | `source_warehouse` / `dest_warehouse` (PROTECT) — بلا قيد محاسبي (`:384`) |
 | `Stocktake` / `StocktakeLine` | `is_posted`, `counted_quantity`, `system_quantity`, `variance` | `journal→accounting.JournalHeader` — قيد فرق الجرد |
 
@@ -102,6 +103,7 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | POST | `products/generate_barcode/` · `products/generate_serials/` | (522) · (541) |
 | GET | `products/groups/` · `products/brands/` · `products/group-profile/` · `products/group-ledger/` · `products/group-invoices/` | (468) · (460) · (485) · (494) · (512) |
 | GET | `serials/` | `ProductSerialViewSet` (598) |
+| GET/POST/DELETE | `supplier-products/?product=&supplier=&sku=` | `SupplierProductViewSet` |
 | GET/POST | `stock-movements/` · GET `stock-movements/summary/` | `StockMovementViewSet` (689) · (792) |
 | GET | `warehouses/` · `warehouses/{id}/stock/` | `WarehouseViewSet` (615) · (662) |
 | POST | `warehouse-transfers/{id}/post/` · `warehouse-transfers/{id}/unpost/` | `WarehouseTransferViewSet` (844) · (856) |
@@ -132,6 +134,7 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
   بالكفالة والصيانات وسعر الشراء ولا ينسخه — استعلامٌ ثانٍ هنا كان سيتباعد عنه
   بعد أول حقلٍ يُضاف هناك. والإثراء يُحسب **مرّةً للرقم لا مرّةً لكل وحدة**: كل
   الوحدات المطابقة تحمل الرقم نفسه (به طابقت)، فحسابُه داخل الحلقة كان N+1.
+- **رقم الصنف عند المورّد جدولُ ربط لا حقل على الصنف** (`SupplierProduct`): الصنف الواحد يأتي من أكثر من مورّد ولكلٍّ ترقيمه — وهو ما استقرّ عليه Odoo (`product.supplierinfo.product_code`) وNetSuite (`itemvendor.vendorCode`). **ولا يُحشَر رقمٌ في `name_en`** (معناه اسم الصنف بالإنجليزية)؛ النقل من الحشوة القديمة عبر `migrate_supplier_sku_from_name_en` وهو معاينةٌ بلا `--commit`. البحث يشمل الرقم (`ProductViewSet.search_fields`)، ويصل منتقي بنود المستندات عبر `supplier_codes_text` في عقد `view=lookup` وحده — العقد الكامل لا يحمله. و**لقطةُ الرقم على المستند تبقى في `logistics.PurchaseInvoiceItem.catalog_number`**: البيانات الرئيسية تتغيّر والمستند المرحّل لا يتغيّر معها.
 - **الترقيم يصف مخزوناً قائماً ولا يخلقه**: `register_existing_serials` سقفه رصيد الصنف ولا يُنشئ حركة مخزون ولا قيداً (`serials.py:247-259`).
 - **التحويل بين المستودعات بلا قيد محاسبي** — صافي أثره على إجمالي الشركة صفر (`models.py:382-384`).
 
@@ -147,3 +150,4 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | `inventory/tests/test_account_overrides.py` | سلسلة الحسابات: تجاوز الصنف ← تجاوز الفئة ← الافتراضي |
 | `inventory/tests/test_brand_grouping.py` · `test_group_card_performance.py` | تجميع البراندات بـ`group_key`، وثبات عدد الاستعلامات (كان N+1) |
 | `inventory/tests/test_product_api.py` | توليد SKU خادمي، ترتيب/بحث/ترقيم صفحات، عزل الشركات |
+| `inventory/tests/test_supplier_products.py` | أرقام الموردين: الصنف من مورّدين، ورقمان لمورّد، ومنع الرقم الواحد لصنفين، والبحث بالرقم بلا تكرار صفّ |

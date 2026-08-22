@@ -17,7 +17,11 @@ from core.payments import (
 )
 from core.tenant_utils import get_tenant
 
-from logistics.services import purchase_invoice_payment_summary
+from logistics.services import (
+    purchase_invoice_payment_summary,
+    purchase_invoice_receipt_summary,
+    purchase_item_receipt_quantities,
+)
 from logistics.text_utils import has_arabic as _has_arabic
 from logistics.text_utils import (
     is_english_payment_or_legal_boilerplate as _english_payment_boilerplate,
@@ -130,12 +134,16 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     expense_account_code = serializers.CharField(source='expense_account.code', read_only=True)
     expense_account_name = serializers.CharField(source='expense_account.name', read_only=True)
+    # T-RECVIS: الباقي على البند. `received_quantity` كان مكشوفاً وحده فتُركت
+    # الطرحُ للواجهة — وطرحٌ في الواجهة نسخةٌ سادسة من القاعدة. الخادم يعطيه.
+    remaining_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseInvoiceItem
         fields = [
             'id', 'product', 'product_name', 'name',
-            'quantity', 'received_quantity', 'unit_price', 'total_price',
+            'quantity', 'received_quantity', 'remaining_quantity',
+            'unit_price', 'total_price',
             'notes', 'hs_code',
             'landed_unit_price_ils', 'landed_line_total_ils',
             'seq', 'catalog_number', 'name_snapshot', 'description_line', 'unit', 'warehouse',
@@ -145,7 +153,10 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
             'discount_percent', 'discount_amount',
             'expense_account', 'expense_account_code', 'expense_account_name',
         ]
-        read_only_fields = ['id', 'received_quantity']
+        read_only_fields = ['id', 'received_quantity', 'remaining_quantity']
+
+    def get_remaining_quantity(self, obj):
+        return str(purchase_item_receipt_quantities(obj)[2])
 
     def validate_serials(self, value):
         from inventory.serials import normalize_serials
@@ -311,6 +322,9 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
     is_local = serializers.SerializerMethodField()
+    # T-RECVIS: ملخّص الاستلام — مرآةُ ملخّص الدفع على بُعد المخزن. مصدره
+    # `purchase_invoice_receipt_summary` نفسها التي تغذّي تقرير البواقي.
+    receipt_progress = serializers.SerializerMethodField()
     # T-PLINEAGE: المستند الذي وُلدت منه الفاتورة (عرض سعر أو طلبية) — الفاتورة
     # كانت صامتة عن أصلها، فلا سبيل للرجوع إلى العرض الذي سعّرها.
     source_document = serializers.SerializerMethodField()
@@ -376,6 +390,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             # firestore_id: dropped in P-K-3 (migration 0042).
             'status', 'status_display', 'notes',
             'receipt_status', 'receipt_status_display', 'is_local',
+            'receipt_progress',
             'source_document',
             'amount_paid', 'remaining_balance', 'payment_status', 'payment_status_display',
             'supplier_balance_current', 'supplier_balance_before_invoice',
@@ -393,6 +408,21 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     def get_is_local(self, obj):
         """فاتورة محلية = غير مستوردة (بلا صفقة/شحنة/تخليص) — قابلة للاستلام للمخزن."""
         return not (obj.deal_id or obj.shipment_id or obj.clearance_id)
+
+    def get_receipt_progress(self, obj):
+        """«استُلم X من Y — باقي Z» بالأرقام، بلا فتح تقرير آخر.
+
+        الأعداد نصوصٌ كبقية الكميات في هذا العقد (Decimal لا يُسلسَل إلى JSON
+        بأمانة float)، والفاتورة المستوردة تُرجع أصفاراً — مخزونها من الشحنة.
+        """
+        s = purchase_invoice_receipt_summary(obj)
+        return {
+            'ordered': str(s['ordered']),
+            'received': str(s['received']),
+            'remaining': str(s['remaining']),
+            'lines_total': s['lines_total'],
+            'lines_remaining': s['lines_remaining'],
+        }
 
     def get_source_document(self, obj):
         """المستند الأب: طلبية شراء أو عرض سعر محوَّل مباشرةً — بالرقم والمعرّف.

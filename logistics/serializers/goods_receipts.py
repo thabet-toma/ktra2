@@ -17,7 +17,11 @@ from core.payments import (
 )
 from core.tenant_utils import get_tenant
 
-from logistics.services import purchase_invoice_payment_summary
+from logistics.services import (
+    purchase_invoice_payment_summary,
+    purchase_invoice_receipt_summary,
+    purchase_item_receipt_quantities,
+)
 from logistics.text_utils import has_arabic as _has_arabic
 from logistics.text_utils import (
     is_english_payment_or_legal_boilerplate as _english_payment_boilerplate,
@@ -157,9 +161,7 @@ class GoodsReceiptLineSerializer(serializers.ModelSerializer):
     def get_remaining_quantity(self, obj):
         if not obj.item_id:
             return '0'
-        ordered = Decimal(str(obj.item.quantity or 0))
-        received = Decimal(str(obj.item.received_quantity or 0))
-        return str(max(Decimal('0'), ordered - received))
+        return str(purchase_item_receipt_quantities(obj.item)[2])
 
 class GoodsReceiptListSerializer(serializers.ModelSerializer):
     invoice_number = serializers.CharField(
@@ -210,14 +212,7 @@ class GoodsReceiptListSerializer(serializers.ModelSerializer):
         """الباقي على الفاتورة المرتبطة بعد هذه الإرسالية (0 للسند المستقل)."""
         if obj.invoice_id is None:
             return '0'
-        total = Decimal('0')
-        for item in obj.invoice.items.all():
-            if not item.product_id:
-                continue
-            ordered = Decimal(str(item.quantity or 0))
-            received = Decimal(str(item.received_quantity or 0))
-            total += max(Decimal('0'), ordered - received)
-        return str(total)
+        return str(purchase_invoice_receipt_summary(obj.invoice)['remaining'])
 
 class GoodsReceiptSerializer(GoodsReceiptListSerializer):
     lines = GoodsReceiptLineSerializer(many=True, read_only=True)

@@ -22,6 +22,10 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
       specifications: "",
       imageUrls: [],
       quantity: Number(item.quantity),
+      // T-RECVIS: المستلَم والباقي يعبران المُطابِق — كان يُسقطهما فتبقى
+      // الأرقام في الحمولة ولا تصل الشاشة أبداً.
+      receivedQuantity: Number(item.received_quantity ?? 0),
+      remainingQuantity: Number(item.remaining_quantity ?? 0),
       unitPrice: Number(item.unit_price),
       totalPrice: Number(item.total_price),
       hsCodePrimary: item.hs_code || undefined,
@@ -66,6 +70,15 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     paymentStatusDisplay: dto.payment_status_display || "غير مدفوعة",
     receiptStatus: dto.receipt_status || "not_received",
     receiptStatusDisplay: dto.receipt_status_display || undefined,
+    receiptProgress: dto.receipt_progress
+      ? {
+          ordered: Number(dto.receipt_progress.ordered),
+          received: Number(dto.receipt_progress.received),
+          remaining: Number(dto.receipt_progress.remaining),
+          linesTotal: dto.receipt_progress.lines_total,
+          linesRemaining: dto.receipt_progress.lines_remaining,
+        }
+      : undefined,
     partnerBalance: Number(dto.supplier_balance_current || 0),
     partnerBalanceBeforeInvoice: Number(dto.supplier_balance_before_invoice || 0),
     partnerBalanceAfterInvoice: Number(dto.supplier_balance_after_invoice || 0),

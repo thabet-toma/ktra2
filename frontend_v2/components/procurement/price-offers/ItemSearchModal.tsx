@@ -23,6 +23,9 @@ export const productToItem = (p: any): Item => ({
     categoryId: p.category != null ? String(p.category) : "",
     categoryName: p.category_name || "",
     modelNumber: p.sku || undefined,
+    // T-SUPSKU: رقم المورّد يصل المنتقي فيصير البحث به ممكناً — وهو الرقم
+    // الذي تصل به فاتورة المورّد فعلاً (מק"ט).
+    supplierCodes: p.supplier_codes_text || "",
     specifications: "",
     imageUrls: [],
     barcode: p.barcode || "",
@@ -45,6 +48,9 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
         return items.filter(item =>
             item.name.toLowerCase().includes(lowerQuery) ||
             item.modelNumber?.toLowerCase().includes(lowerQuery) ||
+            // T-SUPSKU: البحث برقم المورّد — المستخدم يمسك فاتورة دانتير بيده
+            // ويكتب رقمها، لا رقمنا الذي لا يعرفه.
+            item.supplierCodes?.toLowerCase().includes(lowerQuery) ||
             item.categoryName.toLowerCase().includes(lowerQuery)
         );
     }, [items, searchQuery]);
@@ -176,6 +182,16 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
                                         {item.modelNumber && (
                                             <span className="text-xs aseel-bg-accent-bg dark:aseel-bg-panel/30 aseel-text-accent dark:aseel-text-soft px-2 py-1 rounded flex items-center gap-1">
                                                 <Hash className="w-3 h-3" /> {item.modelNumber}
+                                            </span>
+                                        )}
+                                        {/* T-SUPSKU: يُعرض رقم المورّد كي يرى المستخدم
+                                            **لماذا** طابق الصنفُ ما كتبه. */}
+                                        {item.supplierCodes && (
+                                            <span
+                                                className="text-xs aseel-bg-panel dark:aseel-bg-panel px-2 py-1 rounded aseel-text-soft"
+                                                title="رقم الصنف عند المورّد"
+                                            >
+                                                מק"ט {item.supplierCodes}
                                             </span>
                                         )}
                                     </div>

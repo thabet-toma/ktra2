@@ -339,6 +339,73 @@ class ProductPriceTier(models.Model):
         return f"{self.product} — {self.tier_type} #{self.tier_number}: {self.price}"
 
 
+class SupplierProduct(models.Model):
+    """رقم الصنف عند المورّد — جدول ربط (شركة × مورّد × رقم).
+
+    مطابقة فواتير المورّد تجري برقم كتالوجه (מק"ט)، وهو ليس رقمنا. حقلٌ واحد
+    على `Product` كان سيكذب أوّل مرّة يأتي فيها الصنف من مورّدَين — والإطارات
+    هي هذه الحالة بالضبط. ولذلك استقرّ Odoo (`product.supplierinfo.product_code`)
+    وNetSuite (`itemvendor.vendorCode`) على جدول ربطٍ لا حقل، كلٌّ منهما استقلالاً.
+
+    **بياناتٌ رئيسية لا مستند.** لقطةُ رقم المورّد على سطر الفاتورة تبقى في
+    `PurchaseInvoiceItem.catalog_number`: البيانات الرئيسية تتغيّر، والمستند
+    المرحّل يجب ألّا يتغيّر معها.
+
+    **الفرادة على (شركة، مورّد، رقم) لا على (شركة، مورّد، صنف)** عمداً: للمورّد
+    الواحد قد يكون أكثر من رقم للصنف نفسه (ترقيم قديم وجديد)، وهذا مقبول
+    ومفيد. الممنوع عكسُه — رقمٌ واحدٌ عند مورّدٍ واحد يشير إلى صنفين، فتصير
+    المطابقة تخميناً.
+
+    محايدٌ مالياً بالكامل: لا قيد ولا حركة مخزون ولا سعر.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='SupplierProductID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='supplier_products',
+    )
+    supplier = models.ForeignKey(
+        Partner, on_delete=models.CASCADE, db_column='SupplierID',
+        related_name='product_codes',
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, db_column='ProductID',
+        related_name='supplier_codes',
+    )
+    supplier_sku = models.CharField(
+        max_length=100, db_column='SupplierSKU',
+        help_text='رقم الصنف في كتالوج المورّد (مثال: 3068.82)',
+    )
+    supplier_name = models.CharField(
+        max_length=255, blank=True, default='', db_column='SupplierName',
+        help_text='اسم الصنف كما يسمّيه المورّد (اختياري — يساعد على المطابقة)',
+    )
+    notes = models.CharField(
+        max_length=255, blank=True, default='', db_column='Notes',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+
+    class Meta:
+        db_table = 'supplier_products'
+        managed = True
+        ordering = ['supplier_id', 'supplier_sku']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'supplier', 'supplier_sku'],
+                name='uniq_supplier_sku_per_supplier',
+            ),
+        ]
+        indexes = [
+            # المطابقة العكسية: «هذا الرقم — أيّ صنفٍ هو؟» عبر موردي الشركة.
+            models.Index(fields=['tenant', 'supplier_sku'], name='idx_tenant_supplier_sku'),
+            models.Index(fields=['tenant', 'product'], name='idx_tenant_supplier_prod'),
+        ]
+
+    def __str__(self):
+        return f'{self.supplier_sku} @ {self.supplier_id} -> {self.product_id}'
+
+
 class ProductSerial(models.Model):
     """وحدة واحدة مُرقَّمة من صنف يتتبّع أرقامه التسلسلية (`Product.is_serialized`).
 

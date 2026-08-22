@@ -68,6 +68,8 @@ def convert_local_quotation_to_invoice(quotation, *, user=None):        # عرض
 def convert_purchase_order_to_invoice(order, *, user=None):             # طلبية → فاتورة شراء مسودة
 def get_or_create_purchase_settings(tenant):                            # إعدادات الشراء للشركة بقيم افتراضية
 def purchase_invoice_payment_summary(invoice):                          # ملخص الدفع من السندات المرحّلة فقط
+def purchase_item_receipt_quantities(item):                             # (المطلوب، المستلَم، الباقي) لبند — القاعدة الوحيدة
+def purchase_invoice_receipt_summary(invoice, items=None):              # «استُلم X من Y — باقي Z» للفاتورة كلها
 def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement_date=None,
                              receipt_date=None, notes='', supplier_ref='',
                              existing_receipt=None):                    # استلام فاتورة محلية للمخزن + قيد الاستلام
@@ -133,6 +135,9 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 - **لا فاتورة استيراد قبل**: إثبات تكلفة الشحن (`landed_cost.py`) + اكتمال دفع الصفقة بالدولار (`:1029`) + عدم تحويلها سابقاً (`:1018`).
 - **المستند المرحّل لا يُعدَّل ولا يُحذف**: `_shipment_is_posted` (views.py:2044)، `_clearance_is_posted` (views.py:2228)، وحارس `transit_journal` في `set_freight` (views.py:1558-1562).
 - **الفاتورة المرحّلة مُجمَّدة على قيمها المحفوظة**؛ غير المرحّلة تُعاد حسابها حيّاً عند القراءة (`landed_cost.py`).
+- **«الاستلام مع الترحيل» خيارُ الفاتورة الواحدة، والإعداد العام افتراضُه** — `views/invoices.py` (`post_to_accounting`) يقبل `receive_on_post` في جسم الطلب فيتقدّم على `PurchaseSettings.receive_on_post`. إغفاله يُبقي السلوك القديم حرفياً. الخيار لحظةُ ترحيلٍ لا حقلٌ محفوظ: ما بعده تقوله `receipt_status` والإرساليات.
+- **الطلبية تتحوّل كاملةً مرّةً واحدة** (`PurchaseOrder.invoice` علاقةُ واحد-لواحد) — والتجزئة على مستوى **الاستلام** لا التحويل: طلبيةٌ واحدة ← فاتورةٌ واحدة ← إرساليات متعددة. هذا ما تفعله Odoo (backorder على سند الاستلام) وZoho (عدّة Purchase Receives للطلبية). ولذلك تحمل `PurchaseOrderSerializer` تقدّم استلام فاتورتها (`invoice_receipt_progress`) فلا تنتهي الطلبية عند «محوّلة إلى فاتورة» طريقاً مسدوداً. **لا تُدخِل «كمية محوَّلة» على سطر الطلبية** — تخلق معنىً ثانياً لـ«الباقي» (للفوترة مقابل للاستلام) وتعيد الالتباس الذي أُزيل.
+- **«الباقي على البند» قاعدةٌ واحدة لا نسخ** — `services.py` (`purchase_item_receipt_quantities`): الكمية − المستلَم مقصوصاً عند الصفر وبدقّة العمود (أربع خانات). تستدعيها المواضع الستّة كلّها: تقرير البواقي (`views/goods_receipts.py` — `outstanding`)، وبنود الاستلام (`views/invoices.py` — `receivable_lines`)، وبند الإرسالية ومجموعها (`serializers/goods_receipts.py`)، وحارس `receive_purchase_invoice`، وقراءة الفاتورة (`serializers/invoices.py` — `remaining_quantity` على البند و`receipt_progress` على الرأس). **الواجهة تعرض ولا تطرح** — أيّ طرحٍ فيها نسخةٌ سابعة تفترق غداً.
 - **العزل بالشركة إلزامي** (كل ViewSet يرث `BaseTenantViewSet`، `core/mixins.py`)، و**إلغاء الترحيل يحتاج** `import.doc.unpost` (views.py:760, 2104, 2176, 2275, 2296, 2593).
 
 ## إلغاء ترحيل الدفعات (وُحِّد في المرحلة 2 + معالجتها 2026-08-11)
@@ -156,4 +161,6 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | `tests/test_clearance_import.py` (393) · `test_deal_total_and_freight_gate.py` (208) | استيراد الفواتير من التخليص · بوّابة «تكلفة الشحن مُثبتة» قبل الفوترة |
 | `tests/test_import_payment_separation.py` (556) | فصل الاستحقاق عن الدفع (تخليص + نقل محلي) |
 | `tests/test_shipment_freight_accrual.py` (307) · `test_receive_on_post_setting.py` (466) | استحقاق شحن الوكيل مستقلاً عن دفعاته · الاستلام عند الترحيل و GR/IR |
+| `tests/test_purchase_receipt_visibility.py` | الباقي على البند وملخّص رأس الفاتورة — وتكافؤ رقمهما مع تقرير `outstanding` (وكان بلا اختبار) |
+| `tests/test_receive_on_post_per_invoice.py` | خيار «الاستلام مع الترحيل» لكل فاتورة يتقدّم على الإعداد العام في الاتجاهين |
 | `tests/test_tenant_isolation.py` (75) | لا تسرّب صفقات بين الشركات؛ 400 بلا ترويسة الشركة |

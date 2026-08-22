@@ -63,6 +63,15 @@ export interface PriceOffer {
     /** T-PLINEAGE: نوع المستند الناتج ومعرّفه — الرقم وحده لا يُفتح بنقرة. */
     linkedDocKind?: "invoice" | "order" | "deal";
     linkedDocId?: number;
+    /**
+     * T-RECVIS: تقدّم استلام المستند المرتبط، جاهزاً للعرض.
+     *
+     * نصٌّ مبنيٌّ من أرقام الخادم لا حسبةٌ في الواجهة — «الباقي» رقمٌ واحد في
+     * النظام كلّه (`purchase_invoice_receipt_summary`).
+     */
+    linkedDocReceiptText?: string;
+    /** هل بقي شيء لم يصل؟ لتلوين النصّ تنبيهاً. */
+    linkedDocHasRemaining?: boolean;
     /** T-IMPOFFER: مصدر التسعير — يُنقل إلى الصفقة عند التحويل. */
     alibabaLink?: string;
     /** T-IMPOFFER: رقم التواصل مع مندوب المورد لهذا العرض. */

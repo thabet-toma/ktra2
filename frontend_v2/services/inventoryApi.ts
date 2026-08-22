@@ -107,7 +107,55 @@ async function asList(res: Response): Promise<any[]> {
   return Array.isArray(data) ? data : (data.results ?? []);
 }
 
+/** T-SUPSKU: رقم الصنف في كتالوج المورّد (מק"ט) — بياناتٌ رئيسية محايدة مالياً. */
+export interface SupplierProductDto {
+  id: number;
+  supplier: number;
+  supplier_display_name?: string;
+  product: number;
+  product_sku?: string;
+  product_display_name?: string;
+  supplier_sku: string;
+  supplier_name?: string;
+  notes?: string;
+}
+
 export const inventoryApi = {
+  // ─── أرقام الأصناف عند الموردين (T-SUPSKU) ───
+
+  /** أرقام صنفٍ عند مورّديه — لكرت الصنف. */
+  listSupplierCodes: (productId: number): Promise<SupplierProductDto[]> =>
+    fetch(`${INV}/supplier-products/?product=${productId}`, { headers: headers() })
+      .then(asList),
+
+  /** «هذا الرقم — أيّ صنف؟» — مطابقة فاتورة المورّد عكسياً. */
+  lookupBySupplierCode: (
+    sku: string, supplierId?: number,
+  ): Promise<SupplierProductDto[]> => {
+    const q = new URLSearchParams({ sku });
+    if (supplierId) q.set("supplier", String(supplierId));
+    return fetch(`${INV}/supplier-products/?${q}`, { headers: headers() }).then(asList);
+  },
+
+  createSupplierCode: async (
+    body: Pick<SupplierProductDto, "supplier" | "product" | "supplier_sku">
+      & Partial<Pick<SupplierProductDto, "supplier_name" | "notes">>,
+  ): Promise<SupplierProductDto> => {
+    const res = await fetch(`${INV}/supplier-products/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    // الرسالة الخادمية تسمّي الصنف المالك للرقم — لا تُبتلع.
+    await handle(res, "createSupplierCode");
+    return res.json();
+  },
+
+  deleteSupplierCode: async (id: number): Promise<void> => {
+    const res = await fetch(`${INV}/supplier-products/${id}/`, {
+      method: "DELETE", headers: headers(),
+    });
+    if (!res.ok && res.status !== 204) await handle(res, "deleteSupplierCode");
+  },
+
   // ─── Products ───
 
   getProducts: (params?: Record<string, string | number>) => {

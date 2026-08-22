@@ -282,7 +282,9 @@ class PurchaseOrderViewSet(BaseTenantViewSet):
             .select_related(
                 'tenant', 'supplier', 'quotation', 'invoice', 'currency', 'created_by',
             )
-            .prefetch_related('lines__product')
+            # `invoice__items`: تقدّم استلام الفاتورة يُقرأ لكل طلبية (T-RECVIS)،
+            # وبلا الجلب المسبق يصير استعلاماً لكل صفّ في القائمة.
+            .prefetch_related('lines__product', 'invoice__items')
         )
         order_status = str(self.request.query_params.get('status') or '').strip()
         supplier = str(self.request.query_params.get('supplier') or '').strip()

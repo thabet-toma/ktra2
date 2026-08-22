@@ -66,6 +66,7 @@ import {
   type SupplierQuotationStatus,
 } from "../../services/procurementDocumentsApi";
 import { invalidatePickerProducts, listPickerProducts } from "../../services/inventoryApi";
+import { formatQuantity } from "../../utils/formatNumber";
 import { MIN_VISIBILITY_REFRESH_MS } from "../../services/sqlApiClient";
 
 // --- Helper: Sanitize Data ---
@@ -1343,6 +1344,9 @@ export const itemsService = {
       // ليعرف سطر الفاتورة أنه صنف يُتتبَّع بالوحدة.
       barcode: p.barcode || "",
       isSerialized: Boolean(p.is_serialized),
+      // T-SUPSKU: أرقام كتالوج الموردين — بها يبحث المستخدم في منتقي البنود،
+      // فهي الأرقام التي تصل بها فاتورة المورّد بيده.
+      supplierCodes: p.supplier_codes_text || "",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     } as Item;
@@ -2051,6 +2055,14 @@ const orderToUi = async (row: PurchaseOrderDto): Promise<PriceOffer> => ({
   linkedDocNumber: row.invoice_number || undefined,
   linkedDocKind: row.invoice ? "invoice" : undefined,
   linkedDocId: row.invoice ?? undefined,
+  // T-RECVIS: الطلبية لم تعد تنتهي عند «محوّلة إلى فاتورة» — تقول أين وصلت
+  // البضاعة. الأرقام من الخادم كما هي؛ هنا صياغةٌ فقط.
+  linkedDocReceiptText: row.invoice_receipt_progress
+    ? `استُلم ${formatQuantity(row.invoice_receipt_progress.received)} من `
+      + `${formatQuantity(row.invoice_receipt_progress.ordered)} — باقي `
+      + `${formatQuantity(row.invoice_receipt_progress.remaining)}`
+    : undefined,
+  linkedDocHasRemaining: Number(row.invoice_receipt_progress?.remaining || 0) > 0,
   internalNotes: row.notes || "",
   subtotal: Number(row.subtotal || 0),
   discountAmount: Number(row.discount_amount || 0),

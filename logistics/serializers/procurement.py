@@ -482,12 +482,38 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     invoice_number = serializers.CharField(
         source='invoice.invoice_number', read_only=True, default=None,
     )
+    # T-RECVIS: الطلبية كانت تنتهي عند «محوّلة إلى فاتورة» فتصير طريقاً مسدوداً —
+    # ورحلة البضاعة تكمل على الفاتورة (طلبيةٌ واحدة ← فاتورةٌ واحدة ← إرساليات
+    # متعددة). فتحمل الطلبية الآن تقدّم استلام فاتورتها، من **نفس** دالّة
+    # `purchase_invoice_receipt_summary` التي تغذّي الفاتورة وتقرير البواقي.
+    invoice_receipt_status_display = serializers.SerializerMethodField()
+    invoice_receipt_progress = serializers.SerializerMethodField()
+
+    def get_invoice_receipt_status_display(self, obj):
+        return obj.invoice.get_receipt_status_display() if obj.invoice_id else None
+
+    def get_invoice_receipt_progress(self, obj):
+        if not obj.invoice_id:
+            return None
+        from logistics.services import purchase_invoice_receipt_summary
+
+        s = purchase_invoice_receipt_summary(obj.invoice)
+        if not s['lines_total']:
+            return None
+        return {
+            'ordered': str(s['ordered']),
+            'received': str(s['received']),
+            'remaining': str(s['remaining']),
+            'lines_total': s['lines_total'],
+            'lines_remaining': s['lines_remaining'],
+        }
 
     class Meta:
         model = PurchaseOrder
         fields = [
             'id', 'order_number', 'supplier', 'supplier_name',
             'quotation', 'quotation_number', 'invoice', 'invoice_number',
+            'invoice_receipt_status_display', 'invoice_receipt_progress',
             'order_date', 'expected_delivery_date', 'status', 'status_display',
             'currency', 'currency_code', 'exchange_rate', 'subtotal',
             'discount_amount', 'tax_rate', 'tax_amount', 'grand_total',

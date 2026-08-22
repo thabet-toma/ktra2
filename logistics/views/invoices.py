@@ -403,13 +403,14 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         مصدر واحد يغذّي نافذة «استلام» ومنتقي بنود محرّر الإرسالية معاً، فلا
         تعرض الواجهة بنداً يرفضه الخادم.
         """
+        from logistics.services import purchase_item_receipt_quantities
+
         invoice = self.get_object()
         rows = []
         for it in invoice.items.select_related('product').all():
             if not it.product_id:
                 continue
-            ordered = Decimal(str(it.quantity or 0))
-            received = Decimal(str(it.received_quantity or 0))
+            ordered, received, remaining = purchase_item_receipt_quantities(it)
             rows.append({
                 'item_id': it.id,
                 'product': it.product_id,
@@ -418,7 +419,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 'unit_price': str(it.unit_price or 0),
                 'quantity': str(ordered),
                 'received_quantity': str(received),
-                'remaining_quantity': str(max(Decimal('0'), ordered - received)),
+                'remaining_quantity': str(remaining),
             })
         return Response({
             'invoice_number': invoice.invoice_number,
@@ -1055,6 +1056,18 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         # الوسيط) وتُستلَم البنود لاحقاً بكمياتها من نافذة الاستلام.
         from logistics.services import get_or_create_purchase_settings
         receive_on_post = get_or_create_purchase_settings(tenant).receive_on_post
+        # T-RECVOPT: خيار الفاتورة الواحدة يتقدّم على الإعداد العام.
+        #
+        # مورّدٌ واحد يوصّل على دفعات كان يُجبر المستخدم على إطفاء الإعداد
+        # **لكل الموردين**، فتُفقد الراحة في الحالة الغالبة (البضاعة تصل مع
+        # فاتورتها). الخيار لحظةُ ترحيلٍ لا حقلٌ محفوظ: ما بعد الترحيل تقوله
+        # `receipt_status` والإرساليات نفسها، فلا داعي لعمودٍ يكرّره.
+        override = request.data.get('receive_on_post')
+        if override is not None:
+            receive_on_post = (
+                override if isinstance(override, bool)
+                else str(override).strip().lower() in ('1', 'true', 'yes', 'on')
+            )
 
         # ─── 5) بناء أسطر القيد ─────────────────────────────────────────────────
         lines_payload: list[dict] = []
