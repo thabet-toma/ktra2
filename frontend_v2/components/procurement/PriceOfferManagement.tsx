@@ -26,7 +26,7 @@ import {
   getSupplierQuotation,
 } from "../../services/procurementDocumentsApi";
 import { quotationToDraftDeal } from "../../utils/quotationToDraftDeal";
-import { elideDocumentNumber } from "../../utils/documentNumberDisplay";
+import { documentSerialDisplay, elideDocumentNumber } from "../../utils/documentNumberDisplay";
 import { ConvertTargetDialog, type ConvertTarget } from "../sales/ConvertTargetDialog";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { useToast } from "../../contexts/ToastContext";
@@ -159,6 +159,20 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     setPendingDocId(null);
     void openEdit(target);
   }, [pendingDocId, loading, offers]);
+
+  // الرقم يُعرض تسلسلاً وحده (`IQ-0006` ← `6`) ليأخذ المربّعُ الصورةَ كاملةً.
+  // البادئة تعود **للقائمة كلّها** إن جعل الاختصارُ صفّين متطابقين — شاشة الشراء
+  // تخلط عرض سعر (`PQ`) وطلبية (`PO`) فقد يلتقي تسلسلاهما. القياس على `offers`
+  // لا على المفلتَر: البحث لا يقلب شكل الأرقام تحت يد المستخدم.
+  const serialsCollide = useMemo(() => {
+    const seen = new Set<string>();
+    for (const o of offers) {
+      const serial = documentSerialDisplay(o.offerNumber || o.id.slice(0, 8));
+      if (seen.has(serial)) return true;
+      seen.add(serial);
+    }
+    return false;
+  }, [offers]);
 
   const filtered = useMemo(() => {
     const s = search.toLowerCase();
@@ -336,7 +350,10 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
   const columns: DenseColumn<PriceOffer>[] = [
     // T-IMPOFFER: «وإذا غير ملائم يكون معلَّم على أنه مشطوب» — الشطب على رقم
     // المستند نفسه فيُقرأ القرار من مسح الصفوف بلا فتح أي عرض.
-    { key: "offerNumber", header: "رقم المستند", width: "150px",
+    // THA-116 (#31, مراجعة المالك): «الصورة تملأ مربّعها، والرقم ما ياكل منه» —
+    // المربّع صار 48px والخانة 104px، والرقم تسلسلاً وحده. الصورة هي ما يميّز
+    // العرض بصرياً في قائمة الاستيراد، والبادئة الثابتة كانت تأخذ ثلثَي الخانة.
+    { key: "offerNumber", header: "رقم المستند", width: "104px",
       render: (o) => {
         const firstImage = (o.attachments || []).find((file) =>
           (file.type || "").toLowerCase().startsWith("image/")
@@ -344,36 +361,36 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
         );
         const number = o.offerNumber || o.id.slice(0, 8);
         return (
-          <div className="flex items-center gap-2">
-            {/* المربّع نفسه هو الحاوية (`h-9 w-9 overflow-hidden`) والصورة تملأه
+          <div className="flex items-center gap-1.5">
+            {/* المربّع نفسه هو الحاوية (`h-12 w-12 overflow-hidden`) والصورة تملأه
                 بـ`h-full w-full object-cover`: صورة عمودية أو أعرض من مربّعها
                 تُقصّ ولا تُترك بهامش. الخلفية المحايدة للصور الشفافة — بلا
                 خلفية يظهر تناوب ألوان الصفوف من خلف الصورة. */}
             {firstImage ? (
               <button type="button"
-                className="block h-9 w-9 shrink-0 overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+                className="block h-12 w-12 shrink-0 overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]"
                 title={`عرض «${firstImage.name || "الصورة"}»`}
                 onClick={(e) => { e.stopPropagation(); setPreviewFile(firstImage); }}>
                 <img src={firstImage.url} alt="" className="h-full w-full object-cover" />
               </button>
             ) : (
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-dashed border-[var(--color-border)] aseel-text-soft"
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-dashed border-[var(--color-border)] aseel-text-soft"
                 title="لا توجد صورة توضيحية">
-                <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                <ImageIcon className="h-5 w-5" aria-hidden="true" />
               </span>
             )}
             {/* الرقم لا يزاحم الصورة: الصورة `shrink-0` والرقم `min-w-0 truncate`
-                فالفائض يُقصّ داخل الخلية بدل أن يوسّعها على حساب جارتها. القصّ
-                المرئي يقرّره `elideDocumentNumber` لا `text-overflow` وحده —
-                هذا يأكل الذيل، وذيل الرقم هو مميِّزه. وبلا `.aseel-cell-clip`:
-                قيده بالبكسل لا يتبع سحب حدّ العمود (THA-347)، و`min-w-0` داخل
-                صفّ مرن يتبعه. */}
+                فالفائض يُقصّ داخل الخلية بدل أن يوسّعها على حساب جارتها. والمعروض
+                تسلسلٌ وحده (`documentSerialDisplay`) إلا حين يتصادم تسلسلان في
+                القائمة — عندها يعود القصّ الأوسط الكامل. الكامل دائماً في `title`
+                وفي البحث. وبلا `.aseel-cell-clip`: قيده بالبكسل لا يتبع سحب حدّ
+                العمود (THA-347)، و`min-w-0` داخل صفّ مرن يتبعه. */}
             <b dir="auto" title={number}
               className="min-w-0 truncate tabular-nums"
               style={isOfferStruckThrough(o.backendStatus)
                 ? { textDecoration: "line-through", opacity: 0.6 }
                 : undefined}>
-              {elideDocumentNumber(number)}
+              {serialsCollide ? elideDocumentNumber(number) : documentSerialDisplay(number)}
             </b>
           </div>
         );

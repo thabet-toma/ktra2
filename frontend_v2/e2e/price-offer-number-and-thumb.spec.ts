@@ -3,13 +3,17 @@ import { test, expect, type Page } from '@playwright/test';
 /**
  * THA-116 (#31) — عمود «رقم المستند» في قائمة عروض وطلبيات الاستيراد.
  *
- * عنصران في صفّ واحد: مربّع صورة ثابت 36px ورقم المستند. العقد المثبَّت هنا:
+ * عنصران في صفّ واحد: مربّع صورة ثابت 48px ورقم المستند. العقد المثبَّت هنا:
  *   1. الصورة تملأ مربّعها (`object-fit: cover` على عنصر بحجم الحاوية كاملاً)،
  *      فالصورة العمودية تُقصّ ولا تُترك بهامش أبيض.
  *   2. رقم طويل لا يوسّع عمودَه ولا يزاحم الصورة ولا العمود المجاور: عرض
  *      الأعمدة لا يتغيّر بين قائمة فيها رقم طويل وقائمة بأرقام قصيرة فقط.
- *   3. القصّ من الوسط — البادئة تميّز النوع والذيل يميّز السجلّ — والكامل في
- *      التلميح.
+ *   3. المعروض تسلسلٌ وحده (`IQ-0006` ← `6`) والكامل في التلميح — إلا حين
+ *      يتصادم تسلسلان في القائمة، فتعود الأرقام كاملةً بالقصّ الأوسط.
+ *
+ * مراجعة المالك (٢٢‏/٨‏/٢٠٢٦) نسخت معيار «رقم من ١٢ محرفاً يظهر كاملاً»:
+ * «الرقم ملوش لزمة كثير ماكل الصور… يبين بس ٦ ويكبر الصور عحساب الرقم».
+ * فالمعيار المُستبدَل صار: التسلسل وحده، والمربّع 48px، والكامل في `title`.
  */
 
 /** صورة عمودية (نسبة 1:3) — `contain` يتركها بهامشين، `cover` يملأ المربّع. */
@@ -67,15 +71,24 @@ const SHORT_NUMBERS_ONLY = [
 ];
 
 /**
- * رقم من **١٢ محرفاً** — طول معيار نجاح المالك بالضبط، وهو حدّ
- * `elideDocumentNumber` الأعلى: يُعرض كاملاً بلا «…». الحدّ محروس هنا لأن
- * تجاوزه بمحرف واحد يقلب السلوك، ولأن `truncate` يقصّ من **الذيل** — فلو
- * ضاق العمود عن اثني عشر محرفاً لأكل CSS مميِّز الرقم، وهو عكس المطلوب.
+ * رقم من **١٢ محرفاً** — كان معيار المالك السابق («يظهر كاملاً»)، وصار الآن
+ * أشدَّ حالات الاختصار وضوحاً: أحدَ عشرَ محرفاً منه بادئةٌ أو أصفار، والمميِّز
+ * محرفٌ واحد. يبقى محروساً هنا لأن انقلاب السلوك عنده هو الفرق بين الشاشتين.
  */
 const TWELVE_CHAR_NUMBER = 'IQ-000000006';
 const WITH_TWELVE_CHAR = [
   quotation(1, TWELVE_CHAR_NUMBER, 'طلبية الرقم الطويل', true),
-  quotation(2, 'IQ-00006', 'طلبية الرقم القصير', true),
+  quotation(2, 'IQ-00007', 'طلبية الرقم القصير', true),
+  quotation(3, 'IQ-00008', 'طلبية بلا صورة', false),
+];
+
+/**
+ * تسلسلان متصادمان في قائمة واحدة (`IQ-0006` و`IQ-06` كلاهما «٦»). الاختصار
+ * هنا يجعل صفّين متطابقين، فالعقد أن تعود القائمة كلّها إلى الأرقام الكاملة.
+ */
+const WITH_COLLIDING_SERIALS = [
+  quotation(1, 'IQ-0006', 'طلبية الرقم الطويل', true),
+  quotation(2, 'IQ-06', 'طلبية الرقم القصير', true),
   quotation(3, 'IQ-00007', 'طلبية بلا صورة', false),
 ];
 
@@ -167,9 +180,9 @@ test('الصورة العمودية تملأ مربّعها بلا هامش', as
   });
 
   expect(fill.objectFit).toBe('cover');
-  // المربّع ثابت 36px ولم يُسحق بالرقم الطويل إلى جانبه.
-  expect(fill.holderWidth).toBe(36);
-  expect(fill.holderHeight).toBe(36);
+  // المربّع ثابت 48px ولم يُسحق بالرقم إلى جانبه.
+  expect(fill.holderWidth).toBe(48);
+  expect(fill.holderHeight).toBe(48);
   // لا هامش بين الصورة وحاويتها — الفرق حدّ المربّع فقط (1px من كل جهة).
   expect(fill.holderWidth - fill.width).toBeLessThanOrEqual(2);
   expect(fill.holderHeight - fill.height).toBeLessThanOrEqual(2);
@@ -188,8 +201,10 @@ test('الرقم الطويل يبقى سطراً واحداً بجانب الص
   // فيزاحمها بدل أن يقف إلى جانبها. سطر واحد مهما طال الرقم.
   expect(await numberLineHeight(page)).toBe(shortLine);
 
-  // والعمود يبقى داخل عرضه المعلن، وجارته لا تخسر شيئاً يُذكر.
-  expect(withLong.number).toBeLessThanOrEqual(150);
+  // والعمود يبقى داخل عرضه المعلن (104px بعد أن حلّ التسلسلُ محلّ الرقم
+  // الكامل — والقاع هنا عرضُ ترويسة العمود نفسها لا محتوى الخلية)، وجارته لا
+  // تخسر شيئاً يُذكر — بل تربح الستّة والأربعين بكسلاً المتروكة.
+  expect(withLong.number).toBeLessThanOrEqual(104);
   expect(baseline.summary - withLong.summary).toBeLessThanOrEqual(2);
 
   // ومحتوى الخلية لا يتجاوز الخلية — لا قطع لعنصر مجاور.
@@ -218,40 +233,57 @@ test('على الجوال أيضاً: سطر واحد ومربّع صورة كا
       const holder = (img.parentElement as HTMLElement).getBoundingClientRect();
       return { w: Math.round(holder.width), h: Math.round(holder.height) };
     });
-  expect(thumb).toEqual({ w: 36, h: 36 });
+  expect(thumb).toEqual({ w: 48, h: 48 });
 });
 
-test('معيار المالك: رقم من ١٢ محرفاً يظهر كاملاً بلا قصّ — مكتباً وجوالاً', async ({ page }) => {
+test('معيار المالك: التسلسل وحده يُعرض، بلا قصّ CSS — مكتباً وجوالاً', async ({ page }) => {
   /** يقارن عرض النصّ المرسوم بعرض الخانة: تساويهما يعني أن CSS لم يقصّ شيئاً. */
   const rendered = () => page.locator('tbody tr', { hasText: 'طلبية الرقم الطويل' })
     .first().locator('td').first().locator('b')
     .evaluate((b) => ({
       text: b.textContent,
+      title: b.getAttribute('title'),
       scrollWidth: b.scrollWidth,
       clientWidth: b.clientWidth,
     }));
 
   await openOffers(page, WITH_TWELVE_CHAR);
   const desktop = await rendered();
-  expect(desktop.text).toBe(TWELVE_CHAR_NUMBER);
+  expect(desktop.text).toBe('6');
+  // الكامل لم يُفقد — هو في التلميح وفي البحث.
+  expect(desktop.title).toBe(TWELVE_CHAR_NUMBER);
   expect(desktop.scrollWidth).toBe(desktop.clientWidth);
 
   await page.setViewportSize({ width: 390, height: 844 });
   const mobile = await rendered();
-  expect(mobile.text).toBe(TWELVE_CHAR_NUMBER);
+  expect(mobile.text).toBe('6');
+  expect(mobile.title).toBe(TWELVE_CHAR_NUMBER);
   expect(mobile.scrollWidth).toBe(mobile.clientWidth);
 });
 
-test('القصّ من الوسط والكامل في التلميح — والرقم الذي يتّسع يبقى كاملاً', async ({ page }) => {
+test('التسلسل وحده والكامل في التلميح', async ({ page }) => {
   await openOffers(page, WITH_LONG_NUMBER);
 
   const longNumber = page.locator('tbody tr', { hasText: 'طلبية الرقم الطويل' })
     .first().locator('td').first().locator('b');
   await expect(longNumber).toHaveAttribute('title', LONG_NUMBER);
-  // البادئة باقية (النوع) والذيل باق (المميِّز).
-  await expect(longNumber).toHaveText(/^IQ….*123456$/);
+  await expect(longNumber).toHaveText('123456');
 
   const shortNumber = page.locator('tbody tr', { hasText: 'طلبية الرقم القصير' })
     .first().locator('td').first().locator('b');
-  await expect(shortNumber).toHaveText('IQ-00006');
+  await expect(shortNumber).toHaveText('6');
+  await expect(shortNumber).toHaveAttribute('title', 'IQ-00006');
+});
+
+test('تصادم التسلسلات يعيد القائمة كلّها إلى الأرقام الكاملة', async ({ page }) => {
+  await openOffers(page, WITH_COLLIDING_SERIALS);
+
+  const numberOf = (orderName: string) => page.locator('tbody tr', { hasText: orderName })
+    .first().locator('td').first().locator('b');
+
+  // لولا الحارس لظهر الصفّان «٦» و«٦»: صفّان لا يفرّق بينهما شيء.
+  await expect(numberOf('طلبية الرقم الطويل')).toHaveText('IQ-0006');
+  await expect(numberOf('طلبية الرقم القصير')).toHaveText('IQ-06');
+  // والحارس على القائمة لا على الصفّ — الصفّ الثالث يتبعها ولو لم يتصادم.
+  await expect(numberOf('طلبية بلا صورة')).toHaveText('IQ-00007');
 });
