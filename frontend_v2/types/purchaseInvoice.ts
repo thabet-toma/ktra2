@@ -5,6 +5,8 @@ export interface PurchaseInvoiceItemDto {
   name: string;
   quantity: number;
   received_quantity?: number;
+  /** T-RECVIS: الباقي على البند (الكمية − المستلَم) — يحسبه الخادم لا الشاشة. */
+  remaining_quantity?: string;
   unit_price: number;
   total_price: number;
   notes?: string | null;
@@ -23,6 +25,20 @@ export type ReceiptStatus =
   | "not_received"
   | "partially_received"
   | "received";
+
+/**
+ * T-RECVIS: ملخّص استلام الفاتورة — «استُلم X من Y — باقي Z».
+ *
+ * الكميات نصوص (Decimal بدقّة أربع خانات لا يُسلسَل float بأمانة)، والعدّان
+ * أعدادٌ صحيحة. تعدّ الأصناف المخزنية وحدها — بند الخدمة لا يدخل مستودعاً.
+ */
+export interface ReceiptProgressDto {
+  ordered: string;
+  received: string;
+  remaining: string;
+  lines_total: number;
+  lines_remaining: number;
+}
 
 export interface PurchaseInvoiceFeeDto {
   id?: number;
@@ -126,6 +142,8 @@ export interface PurchaseInvoiceDto {
   status_display?: string;
   receipt_status?: ReceiptStatus;
   receipt_status_display?: string;
+  /** T-RECVIS: ملخّص الاستلام — على قراءة الفاتورة الكاملة فقط لا على القائمة. */
+  receipt_progress?: ReceiptProgressDto;
   is_local?: boolean;
   // task16 C10: حالة الدفع + المبلغ المدفوع + المتبقي (محسوبة في الخادم)
   amount_paid?: string;

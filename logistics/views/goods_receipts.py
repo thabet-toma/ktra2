@@ -1,6 +1,5 @@
 import datetime
 import logging
-from decimal import Decimal
 
 from rest_framework import viewsets, status
 from rest_framework.response import Response
@@ -85,6 +84,7 @@ from logistics.domain.shipment_builder import create_shipment_from_deals
 from logistics.domain.stages import derive_stage
 from logistics.services import (
     annotate_purchase_invoice_payment_summary,
+    purchase_item_receipt_quantities,
     attach_pi_payment_voucher,
     convert_local_quotation_to_invoice,
     convert_local_quotation_to_order,
@@ -271,9 +271,7 @@ class GoodsReceiptViewSet(BaseTenantViewSet):
             for it in inv.items.all():
                 if not it.product_id:
                     continue
-                ordered = Decimal(str(it.quantity or 0))
-                received = Decimal(str(it.received_quantity or 0))
-                remaining = ordered - received
+                ordered, received, remaining = purchase_item_receipt_quantities(it)
                 if remaining <= 0:
                     continue
                 rows.append({

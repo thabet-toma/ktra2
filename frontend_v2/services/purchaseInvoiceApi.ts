@@ -226,12 +226,20 @@ export const purchaseInvoiceApi = {
     }
   },
 
+  /**
+   * T-RECVOPT: `receiveOnPost` خيارُ هذه الفاتورة وحدها. إغفاله ⇒ يحكم الإعداد
+   * العام للشركة كما كان (فالنداءات القديمة تبقى على سلوكها حرفياً).
+   */
   postToAccounting: async (
-    id: number
+    id: number,
+    receiveOnPost?: boolean
   ): Promise<{ journal_id: number; message: string }> => {
     const res = await safeFetch(`${BASE}/${id}/post-to-accounting/`, {
       method: "POST",
       headers: headers(),
+      body: JSON.stringify(
+        receiveOnPost === undefined ? {} : { receive_on_post: receiveOnPost }
+      ),
     });
     await handle(res, "postToAccounting");
     return res.json();

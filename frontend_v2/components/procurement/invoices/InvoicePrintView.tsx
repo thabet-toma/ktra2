@@ -285,7 +285,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                 <span className="font-mono font-bold" dir="ltr">{formatCurrency(invoice.amountPaid || 0)}</span>
                             </div>
                             <div className="flex justify-between pt-1.5">
-                                <span className="aseel-text-soft">المتبقي:</span>
+                                <span className="aseel-text-soft">المتبقي للدفع:</span>
                                 <span className="font-mono font-bold" dir="ltr">{formatCurrency(invoice.remainingBalance || 0)}</span>
                             </div>
                             <div className="flex justify-between pt-1.5">

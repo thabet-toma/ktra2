@@ -23,6 +23,7 @@ import { ValuePicker } from "../inventory/ValuePicker";
 import { cloudinaryService } from "../../services/cloudinaryService";
 import { usePasteZone } from "../../utils/clipboardImage";
 import { useProductInsights } from "./ProductInsightTabs";
+import { SupplierCodesTab } from "./SupplierCodesTab";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { completeEan13, ean13Svg, isValidEan13, printBarcodeLabels } from "../../utils/barcode";
 
@@ -802,6 +803,11 @@ export const ItemFormAseel: React.FC<Props> = ({
           { key: "prices", label: "أسعار البيع والشراء", content: tabPrices },
           { key: "trading", label: "بيانات المتاجرة", content: tabTrading },
           { key: "other", label: "بيانات أخرى", content: tabOther },
+          // T-SUPSKU: رقم الصنف عند كل مورّد — كان يُحشَر في «الاسم بالإنجليزية».
+          // ثابتٌ في القائمة لا مشروط: تبويبٌ يظهر ويختفي وقت التشغيل يزحزح
+          // الفهرس فيقفز المستخدم (الغلاف يتتبّع النشط بالفهرس).
+          { key: "supplier_codes", label: "أرقام الموردين",
+            content: <SupplierCodesTab productId={currentId} /> },
           { key: "mfg", label: "معادلات التصنيع", content: tabManufacturing },
           // آخر القائمة: تفعيل التتبّع يُلحق تبويباً ولا يزحزح فهرس تبويب قائم
           // (الغلاف يتتبّع النشط بالفهرس) — فيبقى المستخدم حيث هو.

@@ -10,13 +10,14 @@ from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import (
-    ProductCategory, Product, UnitOfMeasure, StockMovement, Warehouse,
+    ProductCategory, Product, UnitOfMeasure, StockMovement, SupplierProduct, Warehouse,
     WarehouseTransfer, Stocktake,
 )
 from .serializers import (
     CategorySerializer, ProductSerializer, ProductLookupSerializer, UnitOfMeasureSerializer,
     StockMovementSerializer, WarehouseSerializer,
     WarehouseTransferSerializer, StocktakeSerializer,
+    SupplierProductSerializer,
 )
 from .services import (
     generate_next_sku, record_stock_movement,
@@ -87,7 +88,13 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     pagination_class = OptionalPageNumberPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['sku', 'barcode', 'name_ar', 'name_en', 'brand', 'category__name']
+    # `supplier_codes__supplier_sku`: البحث يجد الصنف برقم كتالوج مورّده
+    # (מק"ט) — وهو الرقم الذي تصل به فاتورة المورّد فعلاً. `SearchFilter`
+    # يضيف `.distinct()` تلقائياً لعبوره علاقةً متعدّدة، فلا يتكرّر الصفّ.
+    search_fields = [
+        'sku', 'barcode', 'name_ar', 'name_en', 'brand', 'category__name',
+        'supplier_codes__supplier_sku', 'supplier_codes__supplier_name',
+    ]
     ordering_fields = ['id', 'sku', 'name_ar', 'quantity_on_hand', 'avg_cost', 'sale_price',
                        'min_stock_level', 'created_at']
     ordering = ['-id']
@@ -181,7 +188,9 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         # aggregations على جدول الحركات الكبير عند طلب view=lookup. عقد القائمة
         # الكامل يبقى كما هو افتراضياً لجدول إدارة الأصناف.
         if params.get('view') == 'lookup':
-            return qs
+            # T-SUPSKU: أرقام الموردين تدخل حمولة المنتقي؛ الجلب المسبق يجعلها
+            # استعلاماً واحداً للصفحة كلّها لا واحداً لكل صنف.
+            return qs.prefetch_related('supplier_codes')
 
         # W8: تجميعات محسوبة من StockMovement (المصدر الوحيد) — منقّطة، لا N+1.
         # الوارد التراكمي (المشتريات) = مجموع حركات IN. متوسط المبيعات الشهري = صافي
@@ -627,6 +636,49 @@ class ProductSerialViewSet(viewsets.ViewSet):
             product_id=request.query_params.get('product') or None,
             limit=request.query_params.get('limit') or 100,
         ))
+
+
+class SupplierProductViewSet(viewsets.ModelViewSet):
+    """أرقام الأصناف عند الموردين — بياناتٌ رئيسية معزولة بالشركة.
+
+    محايدة مالياً تماماً: لا قيد ولا حركة مخزون. الغرض واحد — أن تُطابَق فاتورة
+    المورّد برقم كتالوجه لا برقمنا، وأن يجد البحثُ الصنفَ بذلك الرقم
+    (`ProductViewSet.search_fields`).
+
+    الترشيح: `?product=` لكرت الصنف، و`?supplier=` لكرت المورّد، و`?sku=`
+    للمطابقة العكسية «هذا الرقم — أيّ صنف؟».
+    """
+
+    queryset = SupplierProduct.objects.all()
+    serializer_class = SupplierProductSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return SupplierProduct.objects.none()
+        qs = (
+            super().get_queryset().filter(tenant=tenant)
+            .select_related('supplier', 'product')
+        )
+        params = self.request.query_params
+        product = str(params.get('product') or '').strip()
+        supplier = str(params.get('supplier') or '').strip()
+        sku = str(params.get('sku') or '').strip()
+        if product.isdigit():
+            qs = qs.filter(product_id=int(product))
+        if supplier.isdigit():
+            qs = qs.filter(supplier_id=int(supplier))
+        if sku:
+            qs = qs.filter(supplier_sku__iexact=sku)
+        return qs
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx['tenant'] = get_tenant(self.request)
+        return ctx
+
+    def perform_create(self, serializer):
+        serializer.save(tenant=get_tenant(self.request))
 
 
 class WarehouseViewSet(viewsets.ModelViewSet):

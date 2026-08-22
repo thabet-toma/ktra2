@@ -448,6 +448,17 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
                 <span className="text-[10px] aseel-text-soft">← {o.linkedDocNumber}</span>
               )
             )}
+            {/* T-RECVIS: أين وصلت بضاعة هذه الطلبية. الطلبية لا تُشقّ (طلبيةٌ
+                واحدة ← فاتورةٌ واحدة ← إرساليات متعددة)، فالجواب على فاتورتها. */}
+            {o.linkedDocReceiptText && (
+              <span
+                className={`text-[10px] ${o.linkedDocHasRemaining
+                  ? "text-[var(--aseel-warn)]" : "aseel-text-soft"}`}
+                title="الاستلام يكمل على الفاتورة — الطلبية تتحوّل كاملةً مرّةً واحدة"
+              >
+                {o.linkedDocReceiptText}
+              </span>
+            )}
             {/* التفصيل بجانب الحالة: «غير ملائم» بلا سبب — أو «بانتظار معلومات»
                 بلا ما يُنتظَر — لا يعلّم أحداً شيئاً عند مسح القائمة. */}
             {o.decisionReason && (

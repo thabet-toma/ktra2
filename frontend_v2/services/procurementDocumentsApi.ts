@@ -211,6 +211,15 @@ export interface PurchaseOrderDto {
   cancel_reason?: string;
   created_at?: string;
   updated_at?: string;
+  /** T-RECVIS: تقدّم استلام فاتورة هذه الطلبية — الرحلة تكمل هناك لا هنا. */
+  invoice_receipt_status_display?: string | null;
+  invoice_receipt_progress?: {
+    ordered: string;
+    received: string;
+    remaining: string;
+    lines_total: number;
+    lines_remaining: number;
+  } | null;
   lines: PurchaseOrderLineDto[];
 }
 

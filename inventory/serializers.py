@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
-    ProductCategory, Product, UnitOfMeasure, StockMovement, Warehouse,
-    WarehouseTransfer, WarehouseTransferLine, Stocktake, StocktakeLine,
+    ProductCategory, Product, UnitOfMeasure, StockMovement, SupplierProduct,
+    Warehouse, WarehouseTransfer, WarehouseTransferLine, Stocktake, StocktakeLine,
 )
 
 
@@ -63,7 +63,6 @@ class ProductSerializer(serializers.ModelSerializer):
 
     # task14 M2 (DEF-A2): رقم الصنف اختياري — يولَّد خادمياً عند الغياب
     sku = serializers.CharField(max_length=50, required=False, allow_blank=True)
-
     class Meta:
         model = Product
         fields = [
@@ -200,6 +199,17 @@ class ProductLookupSerializer(ProductSerializer):
     1490 صنفاً: 1,145 كيلوبايت / 1,249 مِلّي ثانية مقابل 609 / 331).
     """
 
+    # T-SUPSKU: أرقام كتالوج الموردين لهذا الصنف، مفصولةً بمسافات — هنا وحدها
+    # لا على العقد الكامل: منتقي المستندات يجلب الكتالوج دفعةً واحدة ويبحث
+    # موضعياً، فبحث الخادم لا يبلغه. تُقرأ من `supplier_codes` المجلوبة مسبقاً
+    # في `ProductViewSet.get_queryset`، وإلا صارت استعلاماً لكل صفّ من 1490.
+    # نصٌّ لا مصفوفةُ كائنات — المنتقي يطابق ولا يعرض.
+    supplier_codes_text = serializers.SerializerMethodField()
+
+    def get_supplier_codes_text(self, obj):
+        codes = [c.supplier_sku for c in obj.supplier_codes.all() if c.supplier_sku]
+        return ' '.join(codes)
+
     class Meta(ProductSerializer.Meta):
         fields = [
             'id', 'sku', 'barcode', 'name_ar', 'name_en', 'display_name',
@@ -214,6 +224,11 @@ class ProductLookupSerializer(ProductSerializer):
             'warranty_months', 'supplier_warranty_months',
             'is_for_sale_online',
             'online_price', 'online_description', 'attachments',
+            # T-SUPSKU: أرقام المورّدين نصّاً واحداً — منتقي بند الفاتورة يبحث
+            # موضعياً في الكتالوج المجلوب دفعةً واحدة، فبحث الخادم لا يبلغه.
+            # نصٌّ لا مصفوفةُ كائنات: الحمولة تُقاس على 1490 صنفاً، والمنتقي
+            # لا يحتاج إلا أن يطابق.
+            'supplier_codes_text',
         ]
 
 
@@ -354,3 +369,68 @@ class StocktakeSerializer(serializers.ModelSerializer):
             for ln in lines:
                 StocktakeLine.objects.create(stocktake=instance, **ln)
         return instance
+
+
+class SupplierProductSerializer(serializers.ModelSerializer):
+    """رقم الصنف عند المورّد — بياناتٌ رئيسية محايدة مالياً.
+
+    الفرادة تُحرَس في قاعدة البيانات (شركة، مورّد، رقم)، ويُترجَم خرقُها هنا
+    إلى رسالةٍ تسمّي الصنف الذي يحمل الرقم بالفعل — «قيد فريد مخروق» لا يعلّم
+    المستخدم شيئاً.
+    """
+
+    supplier_display_name = serializers.CharField(
+        source='supplier.name', read_only=True, default='',
+    )
+    product_sku = serializers.CharField(
+        source='product.sku', read_only=True, default='',
+    )
+    product_display_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SupplierProduct
+        fields = [
+            'id', 'supplier', 'supplier_display_name',
+            'product', 'product_sku', 'product_display_name',
+            'supplier_sku', 'supplier_name', 'notes',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_product_display_name(self, obj):
+        from inventory.services import product_display_name
+        return product_display_name(obj.product) if obj.product_id else ''
+
+    def validate_supplier_sku(self, value):
+        cleaned = str(value or '').strip()
+        if not cleaned:
+            raise serializers.ValidationError('رقم الصنف عند المورّد مطلوب.')
+        return cleaned
+
+    def validate(self, attrs):
+        tenant = self.context.get('tenant')
+        supplier = attrs.get('supplier', getattr(self.instance, 'supplier', None))
+        product = attrs.get('product', getattr(self.instance, 'product', None))
+        sku = attrs.get('supplier_sku', getattr(self.instance, 'supplier_sku', None))
+
+        if supplier is not None and supplier.partner_type != 'Supplier':
+            raise serializers.ValidationError(
+                {'supplier': 'الطرف المحدد ليس مورّداً.'})
+        if tenant is not None:
+            for field, obj in (('supplier', supplier), ('product', product)):
+                if obj is not None and obj.tenant_id != tenant.pk:
+                    raise serializers.ValidationError(
+                        {field: 'لا يتبع الشركة الحالية.'})
+
+        if supplier is not None and sku:
+            clash = SupplierProduct.objects.filter(
+                tenant=tenant, supplier=supplier, supplier_sku=sku,
+            ).exclude(pk=getattr(self.instance, 'pk', None)).first()
+            if clash is not None:
+                from inventory.services import product_display_name
+                raise serializers.ValidationError({'supplier_sku': (
+                    f'الرقم «{sku}» مرتبطٌ عند هذا المورّد بالصنف '
+                    f'«{product_display_name(clash.product)}» — رقمٌ واحد '
+                    f'لصنفين يجعل مطابقة فاتورة المورّد تخميناً.'
+                )})
+        return attrs

@@ -31,7 +31,6 @@ import {
 } from "../aseel";
 import { Plus, Save, X, RefreshCw, AlertTriangle, Search, Trash2 } from "lucide-react";
 
-type Partner = { id: number; name: string };
 type Product = {
   id: number;
   name?: string;
@@ -64,7 +63,6 @@ interface Props {
 export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
   const today = new Date().toISOString().slice(0, 10);
   const [originalInvoices, setOriginalInvoices] = useState<SalesInvoiceRow[]>([]);
-  const [partners, setPartners] = useState<Partner[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -86,17 +84,16 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
     setErr(null);
     const tenantId = resolveTenantId();
     try {
-      const [invs, parts, prods] = await Promise.allSettled([
+      // T-RETPARTY: سقطت قائمة العملاء (500 صفّاً) من الإقلاع — العميل مشتقٌّ
+      // من الفاتورة الأصلية، فلا قائمةَ يُختار منها.
+      const [invs, prods] = await Promise.allSettled([
         apiGetList<SalesInvoiceRow>("sales/invoices/lookup/?limit=500&status=posted", { tenantId }),
-        // T-PARTYPURE: مرجع البيع على عميل — الموردون لا مكان لهم في قائمته.
-        apiGetList<Partner>("partners/lookup/?limit=500&partner_type=Customer", { tenantId }),
         listPickerProducts<Product>(tenantId),
       ]);
       if (invs.status === "fulfilled") {
         // Only posted invoices are eligible for return
         setOriginalInvoices(invs.value.filter((i) => i.status === "posted"));
       }
-      if (parts.status === "fulfilled") setPartners(parts.value);
       if (prods.status === "fulfilled") setProducts(prods.value);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
@@ -107,12 +104,15 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   useEffect(() => { void load(); }, [load]);
 
+  /** الفاتورة الأصلية المختارة — مصدر العميل ومصدر عرضه معاً. */
+  const selectedOriginal = originalInvoices.find((i) => i.id === originalInvoiceId);
+
   // Auto-populate partner when original invoice is selected
   useEffect(() => {
-    if (originalInvoiceId !== "") {
-      const inv = originalInvoices.find((i) => i.id === originalInvoiceId);
-      if (inv) setPartnerId(inv.customer);
-    }
+    // T-RETPARTY: وإفراغُه مع إفراغ الأصل — عميلٌ عالقٌ من اختيارٍ ملغى كان
+    // يبقى في الحمولة بلا حقلٍ يعرضه.
+    setPartnerId(selectedOriginal ? selectedOriginal.customer : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [originalInvoiceId, originalInvoices]);
 
   const updateLine = (i: number, patch: Partial<ReturnLine>) => {
@@ -174,7 +174,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   const submit = async () => {
     if (!originalInvoiceId || !partnerId) {
-      setErr("اختر الفاتورة الأصلية والعميل.");
+      setErr("اختر الفاتورة الأصلية — العميل يتبعها.");
       return;
     }
     const payloadLines = lines
@@ -369,16 +369,21 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
                 ))}
               </select>
             </label>
+            {/* T-RETPARTY: العميل **مشتقٌّ** من الفاتورة الأصلية لا مُختار.
+                كان قائمةً حرّة تُعبَّأ تلقائياً ثم تُترَك مفتوحة، فيمكن ربط
+                مرجع فاتورة زيدٍ بذمم عمرو — نقصُ دينِ من لم يُرجِع شيئاً.
+                الحارس الحقيقي في الخادم (`SalesInvoiceSerializer.validate`)،
+                وهذا وجهه: لا يُعرض إلا الجواب الواحد الصحيح. */}
             <label className="aseel-field" style={{ minWidth: "180px" }}>
               <span className="aseel-field-label">العميل</span>
-              <select
+              <input
                 className="aseel-input"
-                value={partnerId}
-                onChange={(e) => setPartnerId(e.target.value ? Number(e.target.value) : "")}
-              >
-                <option value="">— اختر —</option>
-                {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+                readOnly
+                data-testid="return-customer"
+                title="يتبع الفاتورة الأصلية — لا يُختار"
+                value={selectedOriginal?.customer_name || (partnerId !== "" ? `#${partnerId}` : "")}
+                placeholder="— يتبع الفاتورة الأصلية —"
+              />
             </label>
           </>
         }

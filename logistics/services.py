@@ -20,6 +20,9 @@ GR_IR_ACCOUNT_CODE = "2110"
 GR_IR_ACCOUNT_NAME = "بضاعة مُستلَمة لم تُفوتَر (GR/IR Clearing)"
 
 DEC = Decimal("0.01")
+# دقّة الكميات = دقّة العمود نفسه (`decimal_places=4`). التقريب صريحٌ هنا كي لا
+# يخرج «الباقي» مرّةً «1550.0000» ومرّةً «0» فيختلف شكل الرقم بين حالتين.
+QTY = Decimal("0.0001")
 
 
 def materialize_quotation_draft_parties(quotation, *, user=None):
@@ -793,6 +796,54 @@ def open_goods_clearing(invoice):
     return acc, total, (open_amt if open_amt > 0 else Decimal('0'))
 
 
+def purchase_item_receipt_quantities(item):
+    """(المطلوب، المستلَم، الباقي) لبند فاتورة شراء — القاعدة الوحيدة في النظام.
+
+    الباقي = المطلوب − المستلَم، **مقصوصاً عند الصفر**: استلامٌ زائد (تصحيح يدوي
+    أو إرسالية أُعيد تطبيقها) لا يصنع باقياً سالباً يُطرَح من بندٍ آخر.
+
+    كانت هذه السطور الثلاثة منسوخةً في ستّة مواضع (تقرير البواقي، بنود الاستلام،
+    بند الإرسالية، مجموع الإرسالية، حارس `receive_purchase_invoice`، وأخيراً
+    الواجهة) — ونسخةٌ سادسة كانت ستجعل «الباقي» رقمين مختلفين على شاشتين.
+    """
+    ordered = Decimal(str(item.quantity or 0)).quantize(QTY)
+    received = Decimal(str(item.received_quantity or 0)).quantize(QTY)
+    remaining = ordered - received
+    return ordered, received, remaining if remaining > 0 else Decimal('0').quantize(QTY)
+
+
+def purchase_invoice_receipt_summary(invoice, items=None):
+    """ملخّص استلام الفاتورة: «استُلم X من Y — باقي Z» بمصدرٍ واحد.
+
+    مرآةُ `purchase_invoice_payment_summary` على بُعد المخزن بدل بُعد المال.
+    تُحتسب **بنود الأصناف المخزنية وحدها** — بند خدمة بلا صنف لا يدخل مستودعاً
+    فلا يصحّ أن يُبقي الفاتورة «ناقصة الاستلام» إلى الأبد (نفس استثناء
+    `GoodsReceiptViewSet.outstanding`).
+
+    `items` اختيارية لتفادي استعلام ثانٍ حين تكون البنود محمّلة سلفاً.
+    """
+    rows = invoice.items.all() if items is None else items
+    ordered_total = received_total = remaining_total = Decimal('0')
+    lines_total = lines_remaining = 0
+    for it in rows:
+        if not it.product_id:
+            continue
+        ordered, received, remaining = purchase_item_receipt_quantities(it)
+        ordered_total += ordered
+        received_total += received
+        remaining_total += remaining
+        lines_total += 1
+        if remaining > 0:
+            lines_remaining += 1
+    return {
+        'ordered': ordered_total,
+        'received': received_total,
+        'remaining': remaining_total,
+        'lines_total': lines_total,
+        'lines_remaining': lines_remaining,
+    }
+
+
 def next_goods_receipt_number(tenant_id, branch=None) -> str:
     """رقم إرسالية الشراء التالي — عبر دفاتر الترقيم المركزية (GRN-0001)."""
     from accounting.services import next_document_number
@@ -944,9 +995,7 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
             if qty <= 0:
                 continue
 
-            ordered = Decimal(str(item.quantity or 0))
-            already = Decimal(str(item.received_quantity or 0))
-            remaining = ordered - already
+            ordered, _already, remaining = purchase_item_receipt_quantities(item)
             if qty > remaining:
                 raise ValidationError(
                     f"البند «{item.name}»: الكمية المطلوب استلامها ({qty}) "

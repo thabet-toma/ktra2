@@ -441,6 +441,42 @@ class SalesInvoiceSerializer(
             strip_serials_when_off(
                 attrs["lines"], sales_serial_mode(tenant.TenantID),
             )
+        return self._enforce_return_party(attrs)
+
+    def _enforce_return_party(self, attrs):
+        """مرجعٌ مربوطٌ بأصلٍ يُقيَّد على مشتري الأصل — لا على طرفٍ آخر.
+
+        شاشة «مرجع البيع» تُعبّئ العميل من الفاتورة الأصلية ثم تتركه قابلاً
+        للتغيير، ولم يكن في الخادم ما يمنع الفارق: مرجع فاتورة زيدٍ يُقيَّد على
+        ذمم عمرو فيَنقص دينُ من لم يُرجِع شيئاً. الحارس هنا لا في الشاشة، فكل
+        مسارٍ يكتب عبر الـAPI محكومٌ به. والعميل **مشتقٌّ** حين يُغفَل: يأخذه من
+        الأصل لا من «العميل الافتراضي» في الإعدادات.
+        """
+        def _current(field, default=None):
+            if field in attrs:
+                return attrs[field]
+            return getattr(self.instance, field, default) if self.instance else default
+
+        kind = _current("invoice_kind", SalesInvoice.INVOICE_KIND_SALE)
+        if kind not in (
+            SalesInvoice.INVOICE_KIND_SALE_RETURN,
+            SalesInvoice.INVOICE_KIND_PURCHASE_RETURN,
+        ):
+            return attrs
+        original = _current("original_invoice")
+        if original is None or original.customer_id is None:
+            return attrs
+        customer = _current("customer")
+        if customer is None:
+            attrs["customer"] = original.customer
+            return attrs
+        if customer.pk != original.customer_id:
+            raise serializers.ValidationError({
+                "customer": (
+                    f"مرجع الفاتورة «{original.invoice_number}» يُقيَّد على "
+                    f"مشتريها «{original.customer.name}» — لا على طرفٍ آخر."
+                )
+            })
         return attrs
 
     def create(self, validated_data):

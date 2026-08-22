@@ -28,6 +28,12 @@ export interface AseelIndexPickerProps<T> {
   onClose: () => void;
   /** Custom button rendered next to the search box (e.g. Add Item) */
   actionButton?: React.ReactNode;
+  /** T-QUICKPARTY: عند عدم وجود نتيجة يصير سطر «لا نتائج» نفسه زرَّ إنشاء
+   *  يحمل ما كُتب في البحث. الإنشاء يجب أن يكون حيث انتهى البحث لا في زرٍّ
+   *  يبحث عنه المستخدم في مكان آخر. */
+  onCreate?: (query: string) => void;
+  /** نص سطر الإنشاء — الافتراضي «إضافة «النص»». */
+  createLabel?: (query: string) => string;
 }
 
 export function AseelIndexPicker<T>({
@@ -40,6 +46,8 @@ export function AseelIndexPicker<T>({
   onSelect,
   onClose,
   actionButton,
+  onCreate,
+  createLabel,
 }: AseelIndexPickerProps<T>) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
@@ -68,8 +76,12 @@ export function AseelIndexPicker<T>({
 
   if (!open) return null;
 
+  /** بحثٌ بلا نتيجة + نصٌّ مكتوب = الإنشاء هو الإجراء الوحيد المتبقّي. */
+  const canCreate = !!onCreate && filtered.length === 0 && q.trim().length > 0;
+
   const commit = (row: T | undefined) => {
     if (row) onSelect(row);
+    else if (canCreate) onCreate!(q.trim());
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -129,7 +141,17 @@ export function AseelIndexPicker<T>({
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length} style={{ textAlign: 'center', padding: '14px' }}>
-                    لا نتائج
+                    {canCreate ? (
+                      <button
+                        type="button"
+                        className="aseel-autocomplete-row aseel-autocomplete-row--create"
+                        onClick={() => onCreate!(q.trim())}
+                      >
+                        {createLabel ? createLabel(q.trim()) : `إضافة «${q.trim()}»`}
+                      </button>
+                    ) : (
+                      'لا نتائج'
+                    )}
                   </td>
                 </tr>
               ) : (

@@ -54,8 +54,10 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
     setLoading(true);
     setError(null);
     try {
-      // البنود تُجلب طازجة دائماً: تعديل الفاتورة يحذف بنودها ويعيد إنشاءها
-      // بمعرّفات جديدة، وقد استُلم بعضها منذ آخر عرض.
+      // البنود تُجلب طازجة دائماً: المعرّفات صارت ثابتة عبر التعديل (المطابقة
+      // بالمعرّف في `PurchaseInvoiceSerializer._sync_items`)، لكن الكميات
+      // المستلَمة قد تكون تغيّرت منذ آخر عرض — ونافذةٌ تعرض باقياً بائتاً
+      // تطلب من الخادم ما لا يقبله.
       const [whs, fresh] = await Promise.all([
         inventoryApi.getWarehouses({ active_only: "true" }) as Promise<
           WarehouseDto[]

@@ -74,6 +74,7 @@ import {
 import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
 import { PurchaseInvoiceAccountingPanel } from "./PurchaseInvoiceAccountingPanel";
+import { askReceiveOnPost, receiveOnPostApplies } from "./receiveOnPostPrompt";
 import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
 import { NewSupplierPaymentModal } from "../../sales/NewSupplierPaymentModal";
 import { InvoicePrintView } from "./InvoicePrintView";
@@ -218,10 +219,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   /* T-SERIAL: نمط إدخال الرقم التسلسلي في الشراء. `off` (الافتراضي، وحال تعذّر
      قراءة الإعدادات) ⇒ لا عمود ولا نافذة ولا حقل في الحمولة. */
   const [serialMode, setSerialMode] = useState<SerialEntryMode>("off");
+  /* T-RECVOPT: الإعداد العام هو **افتراضُ** مربّع «استلام مع الترحيل» لا حاكمه.
+     يبقى `true` حال تعذّر قراءة الإعدادات — وهو افتراضي الخادم نفسه. */
+  const [receiveOnPostDefault, setReceiveOnPostDefault] = useState(true);
   useEffect(() => {
     let cancelled = false;
     purchaseInvoiceApi.getSettings()
-      .then((s) => { if (!cancelled) setSerialMode(s.serial_entry_mode || "off"); })
+      .then((s) => {
+        if (cancelled) return;
+        setSerialMode(s.serial_entry_mode || "off");
+        setReceiveOnPostDefault(s.receive_on_post !== false);
+      })
       .catch(() => { /* بلا إعدادات: يبقى «معطّل» — الشاشة كما كانت */ });
     return () => { cancelled = true; };
   }, []);
@@ -712,11 +720,25 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
     const targetId = idOverride ?? formData.id;
     if (!targetId || posting) return false;
+    // T-RECVOPT: يُسأل حيث للجواب معنى فقط — فاتورة محلية لم تُستلَم كلّها.
+    let receiveChoice: boolean | undefined;
+    if (receiveOnPostApplies({
+      isLocal: !isInternationalInvoice && !formData.shipment && !formData.dealId
+        && !formData.clearanceId,
+      isReturn: Boolean(formData.isReturn),
+      receiptStatus: formData.receiptStatus,
+    })) {
+      const answer = await askReceiveOnPost(confirm, receiveOnPostDefault);
+      if (answer === null) return false;
+      receiveChoice = answer;
+    }
     setAccErr(null);
     setAccMsg(null);
     setPosting(true);
     try {
-      const res = await purchaseInvoiceApi.postToAccounting(Number(targetId));
+      const res = await purchaseInvoiceApi.postToAccounting(
+        Number(targetId), receiveChoice,
+      );
       setAccMsg(res.message || `تم الترحيل — قيد محاسبي #${res.journal_id}`);
       setViewMode(true);
       await reloadInvoice(targetId);
@@ -1172,6 +1194,43 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const isShipmentLinkedImport = Boolean(shipmentLinkId);
   const costLabels = getPurchaseInvoiceCostLabels(isShipmentLinkedImport);
 
+  /* T-RECVIS: «كم انطلب وكم وصل وكم باقي» داخل الفاتورة نفسها.
+
+     الأرقام كلّها من الخادم (`receipt_progress` للرأس و`remainingQuantity`
+     للبند) — الشاشة تعرض ولا تطرح، فلا يفترق «الباقي» هنا عن تقرير البواقي.
+     تظهر على الفاتورة المحلية المرحّلة وحدها: قبل الترحيل لا استلامَ أصلاً،
+     والمستوردة تدخل مخزنها من تخليص الشحنة لا من هذه الشاشة. */
+  const receiptProgress = formData.receiptProgress;
+  const showReceiptColumns =
+    // «المرحّلة فقط» هي القاعدة (لا أعمدةَ أصفارٍ على مسودّة)، لكنّ فاتورةً
+    // غير مرحّلة استُلم منها شيءٌ بالمسار القديم تعرضه أيضاً — إخفاء كميةٍ
+    // وصلت المخزنَ فعلاً كذبٌ لا اختصار.
+    (Boolean(formData.isPosted) || (receiptProgress?.received ?? 0) > 0)
+    && !formData.isReturn
+    && !isShipmentLinkedImport
+    && formData.invoiceType !== "international"
+    && !formData.dealId
+    && !formData.clearanceId
+    && Boolean(receiptProgress && receiptProgress.linesTotal > 0);
+  const receiptSummaryText = receiptProgress
+    ? `استُلم ${formatQuantity(receiptProgress.received)} من `
+      + `${formatQuantity(receiptProgress.ordered)} — باقي `
+      + `${formatQuantity(receiptProgress.remaining)}`
+    : "";
+  /** خليّة «باقي الاستلام»: الباقي > 0 تنبيهٌ لا رقمٌ صامت. */
+  const remainingCell = (row: InvoiceItem) => {
+    const remaining = Number(row.remainingQuantity) || 0;
+    return (
+      <span
+        className={remaining > 0
+          ? "font-semibold text-[var(--aseel-warn)]"
+          : "aseel-text-soft"}
+      >
+        {formatQuantity(remaining)}
+      </span>
+    );
+  };
+
   /* ───────────── تنبيه أثر السعر على متوسط تكلفة المنتج ───────────── */
   // عند إدخال سعر سيغيّر متوسط تكلفة المنتج (المرجّح بالكمية)، نعرض تنبيهاً فورياً
   // مع رابط لواجهة «تكلفة المنتجات» والمنتج محدد افتراضياً.
@@ -1298,6 +1357,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       )
     },
     { key: "quantity", header: "الكمية", width: "80px", align: "center", type: "number" },
+    // T-RECVIS: المستلَم والباقي — على الفاتورة المحلية المرحّلة وحدها.
+    ...(showReceiptColumns ? [
+      { key: "receivedQty", header: "مستلَم", width: "80px", align: "center" as const, readOnly: true },
+      {
+        key: "remainingQty", header: "باقي الاستلام", width: "100px",
+        align: "center" as const, readOnly: true, render: remainingCell,
+      },
+    ] : []),
     // T-SERIAL: عمود الأرقام على الأصناف التسلسلية وحدها، ويختفي بنمط «معطّل».
     ...(anySerializedItem ? [{
       key: "serials", header: "الأرقام التسلسلية", width: "120px", align: "center" as const, readOnly: true,
@@ -1316,6 +1383,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       case "name": return row.name || "";
       case "specifications": return row.specifications || "";
       case "quantity": return row.quantity || 0;
+      case "receivedQty": return formatQuantity(row.receivedQuantity || 0);
+      case "remainingQty": return formatQuantity(row.remainingQuantity || 0);
       case "unitPrice": return row.unitPrice || 0;
       case "totalPrice": return row.totalPrice || 0;
       case "finalUnitCost": return finalItemCosts[idx]?.finalUnit || 0;
@@ -2100,8 +2169,18 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       metrics={[
         { label: "إجمالي المستحق", value: invMoney(payableTotal), tone: "info" },
         { label: "المدفوع المرحّل", value: invMoney(Number(formData.amountPaid) || 0), tone: "ok" },
-        { label: "المتبقي", value: invMoney(Number(formData.remainingBalance) || 0), tone: "warn" },
+        // T-RECVIS: «المتبقي» صار يعني شيئين على شاشةٍ واحدة منذ ظهور باقي
+        // الاستلام — فالمالي يقول «للدفع» والكمّي يقول «الاستلام».
+        { label: "المتبقي للدفع", value: invMoney(Number(formData.remainingBalance) || 0), tone: "warn" },
         { label: "حالة الدفع", value: formData.paymentStatusDisplay || "غير مدفوعة" },
+        ...(showReceiptColumns ? [
+          {
+            label: `الاستلام — ${formData.receiptStatusDisplay || "غير مستلمة"}`,
+            value: receiptSummaryText,
+            tone: (receiptProgress && receiptProgress.remaining > 0
+              ? "warn" : "ok") as "warn" | "ok",
+          },
+        ] : []),
       ]}
       parties={[
         {
@@ -2136,6 +2215,21 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           ),
         },
         { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true, render: (r) => formatQuantity(r.quantity) },
+        // T-RECVIS: وضع العرض هو ما تفتح عليه الفاتورة افتراضياً — فالعمودان
+        // هنا لا في شبكة التحرير وحدها، وإلا بقي الباقي مخفيّاً عن القارئ.
+        ...(showReceiptColumns
+          ? [
+              {
+                key: "receivedQty", header: "مستلَم", width: "90px",
+                align: "center" as const, numeric: true,
+                render: (r: InvoiceItem) => formatQuantity(r.receivedQuantity || 0),
+              },
+              {
+                key: "remainingQty", header: "باقي الاستلام", width: "110px",
+                align: "center" as const, numeric: true, render: remainingCell,
+              },
+            ]
+          : []),
         { key: "price", header: "سعر الوحدة", width: "110px", align: "left", numeric: true, render: (r) => fmt(r.unitPrice) },
         { key: "total", header: "الإجمالي", width: "120px", align: "left", numeric: true, render: (r) => <b>{fmt(r.totalPrice)}</b> },
         ...(isInternationalInvoice
@@ -2177,10 +2271,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
               { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
               { label: "المدفوع المرحّل", value: fmt(Number(formData.amountPaid) || 0) },
-              { label: "المتبقي", value: fmt(Number(formData.remainingBalance) || 0), tone: "warn" },
+              { label: "المتبقي للدفع", value: fmt(Number(formData.remainingBalance) || 0), tone: "warn" },
               { label: "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
               { label: "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
               { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
+              ...(showReceiptColumns
+                ? [{ label: "باقي الاستلام", value: formatQuantity(receiptProgress!.remaining) }]
+                : []),
             ]
           : [
               { label: "مجموع البنود (قبل الخصم)", value: fmt(ilsMerchandiseBase - (formData.shippingIncluded ? 0 : formData.shippingCost || 0)) },
@@ -2192,10 +2289,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
               { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
               { label: "المدفوع المرحّل", value: fmt(Number(formData.amountPaid) || 0) },
-              { label: "المتبقي", value: fmt(Number(formData.remainingBalance) || 0), tone: "warn" },
+              { label: "المتبقي للدفع", value: fmt(Number(formData.remainingBalance) || 0), tone: "warn" },
               { label: "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
               { label: "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
               { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
+              ...(showReceiptColumns
+                ? [{ label: "باقي الاستلام", value: formatQuantity(receiptProgress!.remaining) }]
+                : []),
             ]
       }
       sections={[
@@ -2579,6 +2679,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <span>إجمالي الكمية</span>
               <span className="aseel-total-value">{formatQuantity(totalQty)}</span>
             </div>
+            {showReceiptColumns && (
+              <div className="aseel-total-row">
+                <span>باقي الاستلام</span>
+                <span className="aseel-total-value">{formatQuantity(receiptProgress!.remaining)}</span>
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -2614,6 +2720,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <span>إجمالي الكمية</span>
               <span className="aseel-total-value">{formatQuantity(totalQty)}</span>
             </div>
+            {showReceiptColumns && (
+              <div className="aseel-total-row">
+                <span>باقي الاستلام</span>
+                <span className="aseel-total-value">{formatQuantity(receiptProgress!.remaining)}</span>
+              </div>
+            )}
           </>
         )
       )}

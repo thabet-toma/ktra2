@@ -72,6 +72,10 @@ export interface InvoiceItem {
     imageUrls: string[];
     hsCodePrimary?: string;
     quantity: number;
+    /** T-RECVIS: ما وصل فعلاً للمخزن من هذا البند (من الخادم، لا يُحرَّر). */
+    receivedQuantity?: number;
+    /** T-RECVIS: الباقي = الكمية − المستلَم، محسوباً على الخادم لا هنا. */
+    remainingQuantity?: number;
     unitPrice: number;
     totalPrice: number;
     modelNumber?: string;
@@ -289,6 +293,14 @@ export interface Invoice {
     /** حالة استلام البضاعة للمخزن — مستقلة عن الحالة المالية. */
     receiptStatus?: 'not_received' | 'partially_received' | 'received';
     receiptStatusDisplay?: string;
+    /** T-RECVIS: «استُلم X من Y — باقي Z» — من الخادم على قراءة الفاتورة الكاملة. */
+    receiptProgress?: {
+        ordered: number;
+        received: number;
+        remaining: number;
+        linesTotal: number;
+        linesRemaining: number;
+    };
     partnerBalance?: number;
     partnerBalanceBeforeInvoice?: number;
     partnerBalanceAfterInvoice?: number;

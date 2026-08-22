@@ -480,7 +480,46 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const dirtyRef = useRef(false);
 
-  const customers = useMemo(() => partners.filter((p) => p.partner_type === "Customer"), [partners]);
+  /* T-QUICKPARTY: العميل المُنشأ من داخل الفاتورة يُستعمل فوراً — نفس علاج
+     `extraProducts`: القائمة تصل من الشاشة الأم بعد بثّ حدث `partners`، وحتى
+     يصل نعرضه محلياً. بلا هذا يبقى حقل العميل فارغاً بعد الإنشاء (والمعرَّف
+     مسنداً!) — وعلى شركةٍ بأكثر من 500 عميل يبقى فارغاً للأبد لأن
+     `partners/lookup/` مسقوفة عند 500. */
+  const [extraCustomers, setExtraCustomers] = useState<PartnerRow[]>([]);
+  const customers = useMemo(() => {
+    const own = partners.filter((p) => p.partner_type === "Customer");
+    if (extraCustomers.length === 0) return own;
+    const known = new Set(own.map((p) => p.id));
+    return [...own, ...extraCustomers.filter((p) => !known.has(p.id))];
+  }, [partners, extraCustomers]);
+
+  /** خيارات الإكمال التلقائي لحقل العميل — الرقم سطرٌ ثانوي كي يبقى قابلاً للبحث. */
+  const customerOptions = useMemo(
+    () => customers.map((c) => ({ id: c.id, label: c.name, sub: `#${c.id}` })),
+    [customers],
+  );
+
+  /** T-QUICKPARTY: الاسم المكتوب في حقل العميل يُحمل إلى نافذة الإضافة. */
+  const [quickAddName, setQuickAddName] = useState("");
+
+  /** حقل «بحث سريع/باركود»: محطة الإدخال التالية بعد حسم العميل، وهدف F6.
+   *  مؤجَّل دورةً كي لا تسحب إعادةُ الرسم بعد إغلاق القائمة التركيزَ منه. */
+  const focusBarcodeField = () => {
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLInputElement>('[data-aseel-field="barcode"]')
+        ?.focus();
+    }, 0);
+  };
+
+  /** مصدر واحد لأثر اختيار العميل — من الإكمال التلقائي أو الفهرس أو الإنشاء
+   *  السريع: يُثبَّت، تُعلَّم الفاتورة مُتّسخة، ويمضي التركيز إلى البند الأول. */
+  const pickCustomer = (id: number) => {
+    setCustomerId(id);
+    markDirty();
+    setCustomerPickerOpen(false);
+    focusBarcodeField();
+  };
 
   // T-SERVICELINE: الخدمة المُنشأة من داخل الفاتورة تُستعمل فوراً — قائمة الأصناف
   // تصل عبر الخصائص من الشاشة الأم، فننتظر تحديثها ونعرض المُضاف محلياً حتى يصل.
@@ -1947,10 +1986,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       },
       F6: () => {
         noteKey("F6 بحث");
-        const el = document.querySelector<HTMLInputElement>(
-          '[data-aseel-field="barcode"]'
-        );
-        el?.focus();
+        focusBarcodeField();
       },
       F12: () => {
         noteKey("F12 تخزين");
@@ -2015,7 +2051,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       CtrlPageDown: () => { noteKey("Ctrl+PgDn التالي"); nav.next(); },
       CtrlIns: () => { noteKey("Ctrl+Ins جديد"); resetForm(); },
     },
-    { enabled: !customerPickerOpen && productPickerLineKey === null }
+    // T-QUICKPARTY: نافذة إضافة العميل صارت تُفتح من الحقل مباشرةً (بلا فهرس
+    // مفتوح تحتها) — فبلا استثنائها كان Esc داخلها يُصفّر الفاتورة كلّها.
+    { enabled: !customerPickerOpen && !showAddCustomerModal && productPickerLineKey === null }
   );
 
   /* ───────────── شريحة الحالة + بيانات الرأس ───────────── */
@@ -3498,16 +3536,31 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 <div className="flex items-center gap-1">
                   <span className="font-bold text-[var(--color-text)] min-w-[35px] text-xs">العميل</span>
                   <FieldHint hint="invoice.customer" />
+                  {/* T-QUICKPARTY: الحقل صار يُكتب فيه لا يُنقر وحسب — الكتابة
+                      تُرشِّح العملاء، وآخر سطرٍ في القائمة «إضافة «ما كتبته»»
+                      يفتح نافذة الإنشاء بالاسم معبّأً. زرّ «…» يُبقي فهرس
+                      الحسابات الكامل (أعمدة + لوحة مفاتيح الأصيل) في متناول اليد. */}
                   <div className="flex-1 relative min-w-[120px]">
-                    <input 
-                      className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-emerald-500 outline-none cursor-pointer"
-                      readOnly 
-                      disabled={readOnly} 
-                      value={selectedCustomer ? `#${selectedCustomer.id} - ${selectedCustomer.name}` : ""} 
-                      placeholder="اختر عميلاً..." 
-                      onClick={() => !readOnly && setCustomerPickerOpen(true)}
+                    <AseelAutocomplete
+                      value={selectedCustomer ? `#${selectedCustomer.id} - ${selectedCustomer.name}` : ""}
+                      options={customerOptions}
+                      onPick={(id) => pickCustomer(Number(id))}
+                      onFreeText={(text) => { setQuickAddName(text); setShowAddCustomerModal(true); }}
+                      createLabel={(text) => `إضافة «${text}» كعميل جديد`}
+                      placeholder="اكتب اسم العميل…"
+                      disabled={readOnly}
                     />
                   </div>
+                  <button
+                    type="button"
+                    className="shrink-0 px-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-xs font-bold"
+                    title="فهرس الحسابات — العملاء"
+                    aria-label="فهرس الحسابات — العملاء"
+                    disabled={readOnly}
+                    onClick={() => !readOnly && setCustomerPickerOpen(true)}
+                  >
+                    …
+                  </button>
                   {selectedCustomer && (
                     <button
                       type="button"
@@ -3987,20 +4040,18 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         ]}
         getRowKey={(r) => r.id}
         searchValue={(r) => `${r.id} ${r.name}`}
+        onCreate={(typed) => { setQuickAddName(typed); setShowAddCustomerModal(true); }}
+        createLabel={(typed) => `إضافة «${typed}» كعميل جديد`}
         actionButton={
           <button
             type="button"
-            onClick={() => setShowAddCustomerModal(true)}
+            onClick={() => { setQuickAddName(""); setShowAddCustomerModal(true); }}
             className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
           >
             <Plus className="w-4 h-4" /> إضافة عميل
           </button>
         }
-        onSelect={(r) => {
-          setCustomerId(r.id);
-          markDirty();
-          setCustomerPickerOpen(false);
-        }}
+        onSelect={(r) => pickCustomer(r.id)}
         onClose={() => setCustomerPickerOpen(false)}
       />
 
@@ -4008,12 +4059,24 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         // task16: إصلاح — كان يفتح SupplierModal (يُنشئ مورداً!)؛ الآن يُنشئ عميلاً
         <CustomerQuickAddModal
           isOpen={showAddCustomerModal}
+          initialName={quickAddName}
           onClose={() => setShowAddCustomerModal(false)}
           onSaveSuccess={(newCustomer) => {
             setShowAddCustomerModal(false);
-            setCustomerId(newCustomer.id);
-            markDirty();
-            setCustomerPickerOpen(false);
+            // T-QUICKPARTY: أدخِله القائمة المحلية قبل إسناده — وإلا بقي الحقل
+            // فارغاً حتى تصل قائمة الشاشة الأم (وهي قد لا تصل أصلاً).
+            setExtraCustomers((prev) =>
+              prev.some((p) => p.id === newCustomer.id)
+                ? prev
+                : [...prev, {
+                    id: newCustomer.id,
+                    name: newCustomer.name,
+                    partner_type: newCustomer.partner_type || "Customer",
+                    credit_limit: newCustomer.credit_limit ?? null,
+                    linked_account: newCustomer.linked_account ?? null,
+                  }],
+            );
+            pickCustomer(newCustomer.id);
           }}
         />
       )}

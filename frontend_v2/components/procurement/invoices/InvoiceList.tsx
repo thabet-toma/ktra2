@@ -324,7 +324,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     },
     {
       key: "remainingBalance",
-      header: "المتبقي",
+      // T-RECVIS: «المتبقي» وحدها صارت ملتبسة بعد ظهور باقي الاستلام الكمّي.
+      header: "المتبقي للدفع",
       width: "100px",
       align: "left",
       numeric: true,

@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { accountingApi } from "@/services/accountingApi";
-import { formatMoney } from "@/utils/formatNumber";
+import { formatMoney, formatQuantity } from "@/utils/formatNumber";
 import type {
   PurchaseInvoiceDto,
   PurchaseInvoiceFeeDto,
@@ -32,6 +32,7 @@ import type {
   ReceiptStatus,
 } from "@/types/purchaseInvoice";
 import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
+import { askReceiveOnPost, receiveOnPostApplies } from "./receiveOnPostPrompt";
 import { SettleFromOnAccountModal } from "@/components/shared/SettleFromOnAccountModal";
 import { useConfirm } from "@/contexts/ConfirmContext";
 import { AccountTreeField } from "@/components/accounting/AccountTreePicker";
@@ -82,6 +83,16 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showReceive, setShowReceive] = useState(false);
+  /* T-RECVOPT: الإعداد العام افتراضُ مربّع «استلام مع الترحيل» لا حاكمه.
+     يبقى `true` حال تعذّر القراءة — وهو افتراضي الخادم نفسه. */
+  const [receiveOnPostDefault, setReceiveOnPostDefault] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    purchaseInvoiceApi.getSettings()
+      .then((s) => { if (!cancelled) setReceiveOnPostDefault(s.receive_on_post !== false); })
+      .catch(() => { /* بلا إعدادات: يبقى الافتراضي — الشاشة كما كانت */ });
+    return () => { cancelled = true; };
+  }, []);
   // T-ONACC: تسديد الفاتورة من رصيد المورد «على الحساب» (سندات صرف غير موزَّعة).
   const [showSettleModal, setShowSettleModal] = useState(false);
   // وصل دفع للمورد (Feature 2)
@@ -195,13 +206,28 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   // ─── ترحيل ──────────────────────────────────────────────────────────────
   const post = async () => {
     if (!invoice) return;
+    // T-RECVOPT: نفس سؤال شريط أدوات المحرّر ونفس شرطه — مصدرٌ واحد.
+    let receiveChoice: boolean | undefined;
+    if (receiveOnPostApplies({
+      isLocal: Boolean(invoice.is_local),
+      isReturn: Boolean(invoice.is_return),
+      receiptStatus: invoice.receipt_status,
+    })) {
+      const answer = await askReceiveOnPost(
+        confirmDialog, receiveOnPostDefault,
+      );
+      if (answer === null) return;
+      receiveChoice = answer;
+    }
     setPosting(true);
     setError(null);
     setSuccess(null);
     try {
       // حفظ تلقائي قبل الترحيل لضمان تزامن البيانات
       await saveAccountingFields();
-      const result = await purchaseInvoiceApi.postToAccounting(invoiceId);
+      const result = await purchaseInvoiceApi.postToAccounting(
+        invoiceId, receiveChoice,
+      );
       setSuccess(
         `✅ تم الترحيل بنجاح — رقم القيد: ${result.journal_id}`
       );
@@ -402,8 +428,8 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="المبلغ المدفوع المرحّل">
             المدفوع: {Number(invoice.amount_paid || 0).toLocaleString()} {invoice.currency_code || ""}
           </span>
-          <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="المبلغ المتبقي">
-            المتبقي: {Number(invoice.remaining_balance ?? invoice.grand_total ?? 0).toLocaleString()} {invoice.currency_code || ""}
+          <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="المبلغ المتبقي على الفاتورة (مالياً)">
+            المتبقي للدفع: {Number(invoice.remaining_balance ?? invoice.grand_total ?? 0).toLocaleString()} {invoice.currency_code || ""}
           </span>
           {invoice.payment_status && (
             <span
@@ -433,6 +459,23 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
             >
               {invoice.receipt_status_display ||
                 RECEIPT_BADGE[invoice.receipt_status]?.label}
+            </span>
+          )}
+          {/* T-RECVIS: الشارة تقول «مستلمة جزئياً» ولا تقول كم — والرقم بجانبها
+              من الخادم (`receipt_progress`) لا من طرحٍ في الشاشة. */}
+          {invoice.receipt_progress
+            && Number(invoice.receipt_progress.ordered) > 0
+            && invoice.receipt_status !== "not_received" && (
+            <span
+              className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink"
+              title="ما وصل المخزن من هذه الفاتورة، وما بقي على المورّد"
+            >
+              استُلم {formatQuantity(invoice.receipt_progress.received)} من{" "}
+              {formatQuantity(invoice.receipt_progress.ordered)} — باقي{" "}
+              <b className={Number(invoice.receipt_progress.remaining) > 0
+                ? "text-[var(--aseel-warn)]" : ""}>
+                {formatQuantity(invoice.receipt_progress.remaining)}
+              </b>
             </span>
           )}
           {invoice.is_local && invoice.receipt_status !== "received" && !readOnly && (

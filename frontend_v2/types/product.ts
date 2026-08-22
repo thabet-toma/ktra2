@@ -50,6 +50,13 @@ export interface Item {
     notes?: string;
     hsCodePrimary?: string;
     hsCodeAlternative?: string;
+    /**
+     * T-SUPSKU: أرقام كتالوج الموردين لهذا الصنف، مفصولةً بمسافات.
+     *
+     * نصٌّ واحد لا مصفوفة: المنتقي يطابق ولا يعرض كلَّ رقمٍ على حدة، والحمولة
+     * تُقاس على كتالوج كامل يُجلب دفعةً واحدة.
+     */
+    supplierCodes?: string;
     createdAt: string;
     updatedAt: string;
     isActive?: boolean;

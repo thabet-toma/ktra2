@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **471**
+عدد النقاط: **473**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -243,6 +243,8 @@
 | `/api/inventory/stocktakes/` | `StocktakeViewSet` | `inventory/views.py` |
 | `/api/inventory/stocktakes/{pk}/` | `StocktakeViewSet` | `inventory/views.py` |
 | `/api/inventory/stocktakes/{pk}/post/` | `StocktakeViewSet` | `inventory/views.py` |
+| `/api/inventory/supplier-products/` | `SupplierProductViewSet` | `inventory/views.py` |
+| `/api/inventory/supplier-products/{pk}/` | `SupplierProductViewSet` | `inventory/views.py` |
 | `/api/inventory/uom/` | `UnitOfMeasureViewSet` | `inventory/views.py` |
 | `/api/inventory/uom/{pk}/` | `UnitOfMeasureViewSet` | `inventory/views.py` |
 | `/api/inventory/warehouse-transfers/` | `WarehouseTransferViewSet` | `inventory/views.py` |
