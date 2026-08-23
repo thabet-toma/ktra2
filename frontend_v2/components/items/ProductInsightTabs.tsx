@@ -8,7 +8,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGetObject } from "../../services/restApi";
-import { inventoryApi, type ProductSerialRow } from "../../services/inventoryApi";
+import { inventoryApi, type ProductGroupSelector, type ProductSerialRow } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import type { AseelTab } from "../aseel";
 import { LedgerTable, DocRefCell, type LedgerColumn } from "../shared/LedgerTable";
@@ -598,16 +598,23 @@ const groupMemberColumns: LedgerColumn<GroupMember>[] = [
 ];
 
 /**
- * يجلب الكرت المجمّع لقائمة أصناف ويبني تبويباته. المفتاح نصّي (`ids.join`) كي
- * لا يُعيد مستدعٍ يبني المصفوفة في كل رسم إطلاقَ الطلبات بلا نهاية.
- * قائمةٌ فارغة (تصنيف بلا أصناف) ليست خطأ شبكة: لا نداء، ورسالةٌ تقول ذلك.
+ * يجلب الكرت المجمّع ويبني تبويباته. المحدِّد إمّا تصنيفٌ (`{ category }` —
+ * الخادم يشتقّ أصنافه وأحفاده فلا يسافر تعدادٌ في الطلب) وإمّا معرّفاتٌ صريحة.
+ * المفتاح نصّي كي لا يُعيد مستدعٍ يبني الكائن/المصفوفة في كل رسم إطلاقَ الطلبات
+ * بلا نهاية. مجموعةٌ فارغة (تصنيف بلا أصناف) ليست خطأ شبكة: لا نداء، ورسالةٌ
+ * تقول ذلك.
  */
-export const useGroupInsights = (ids: number[]) => {
-  const idsKey = ids.join(",");
-  const idList = useMemo(
-    () => idsKey.split(",").filter(Boolean).map(Number),
-    [idsKey],
-  );
+export const useGroupInsights = (selector: ProductGroupSelector | number[]) => {
+  const given: ProductGroupSelector = Array.isArray(selector) ? { ids: selector } : selector;
+  const selKey = `${given.category ?? ""}|${(given.ids ?? []).join(",")}`;
+  const sel = useMemo<ProductGroupSelector>(() => {
+    const [cat, idsRaw] = selKey.split("|");
+    return cat
+      ? { category: Number(cat) }
+      : { ids: idsRaw.split(",").filter(Boolean).map(Number) };
+  }, [selKey]);
+  // «فارغة» = لا تصنيف ولا معرّفات؛ التصنيف وحده كافٍ (الخادم يعدّ أعضاءه).
+  const isEmpty = !sel.category && !(sel.ids ?? []).length;
 
   const [profile, setProfile] = useState<GroupProfileData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -623,37 +630,37 @@ export const useGroupInsights = (ids: number[]) => {
 
   useEffect(() => {
     setLedOffset(0);
-    if (!idList.length) {
+    if (isEmpty) {
       setProfile(null);
       setError("لا توجد أصناف في هذه المجموعة بعد.");
       setLoading(false);
       return;
     }
     setLoading(true);
-    inventoryApi.getProductGroupProfile(idList)
+    inventoryApi.getProductGroupProfile(sel)
       .then((p) => { setProfile(p as GroupProfileData); setError(null); })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setLoading(false));
-  }, [idList]);
+  }, [sel, isEmpty]);
 
   useEffect(() => {
-    if (!idList.length) { setLedger({ rows: [], count: 0 }); return; }
+    if (isEmpty) { setLedger({ rows: [], count: 0 }); return; }
     setLedLoading(true);
-    inventoryApi.getProductGroupLedger(idList, PAGE, ledOffset)
+    inventoryApi.getProductGroupLedger(sel, PAGE, ledOffset)
       .then((d) => setLedger({ rows: d.results, count: d.count }))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setLedLoading(false));
-  }, [idList, ledOffset]);
+  }, [sel, isEmpty, ledOffset]);
 
   useEffect(() => {
-    if (!idList.length) { setInvoices([]); return; }
+    if (isEmpty) { setInvoices([]); return; }
     setInvLoading(true);
     setInvError(null);
-    inventoryApi.getProductGroupInvoices(idList)
+    inventoryApi.getProductGroupInvoices(sel)
       .then((d) => setInvoices(Array.isArray(d) ? d : []))
       .catch((err) => { setInvError(err instanceof Error ? err.message : String(err)); setInvoices([]); })
       .finally(() => setInvLoading(false));
-  }, [idList]);
+  }, [sel, isEmpty]);
 
   const tabs: AseelTab[] = [
     {

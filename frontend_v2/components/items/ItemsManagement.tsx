@@ -18,7 +18,7 @@ import type { Item } from "../../types";
 import { StalenessBadge } from "../offline";
 import db from "../../services/offline/db";
 import { openInNewTab } from "@/utils/openInNewTab";
-import { productProfilePath } from "../../utils/entityLinks";
+import { productGroupPath, productProfilePath } from "../../utils/entityLinks";
 import { clientLogger } from "../../services/logger";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -118,12 +118,17 @@ const ProductTreePane: React.FC<{
   );
 };
 
-/** بطاقة التصنيف: الكرت المجمّع لكل الأصناف تحته (وأحفاده). */
+/** بطاقة التصنيف: الكرت المجمّع لكل الأصناف تحته (وأحفاده).
+ *  مع `categoryId` يشتقّ الخادمُ الأعضاء بنفسه، فلا يسافر تعدادُ 1500 معرّف في
+ *  الطلب (كان يبلغ ~7.5KB في سطر الطلب فيردّه nginx بـ414). */
 const GroupTreePane: React.FC<{
   ids: number[];
   groupName: string;
-}> = ({ ids, groupName }) => {
-  const { profile, tabs } = useGroupInsights(ids);
+  categoryId?: number;
+}> = ({ ids, groupName, categoryId }) => {
+  const { profile, tabs } = useGroupInsights(
+    categoryId != null ? { category: categoryId } : { ids },
+  );
   const title = groupName || profile?.name || "كرت مجمّع";
   const count = profile?.member_count ?? ids.length;
   return (
@@ -136,8 +141,8 @@ const GroupTreePane: React.FC<{
         <button
           type="button"
           className="aseel-toolbtn"
-          disabled={!ids.length}
-          onClick={() => openInNewTab(`/product-group?ids=${ids.join(",")}&name=${encodeURIComponent(title)}`)}
+          disabled={!ids.length && categoryId == null}
+          onClick={() => openInNewTab(productGroupPath({ name: title, categoryId, ids }))}
           title="فتح الكرت المجمّع في تبويب مستقل"
         >
           <ExternalLink className="h-4 w-4" /> الكرت الكامل
@@ -150,7 +155,7 @@ const GroupTreePane: React.FC<{
 /** ما هو محدَّد في الشجرة: صنفٌ مفرد أو تصنيفٌ مجمّع. */
 type TreePreview =
   | { kind: "product"; id: number; name: string }
-  | { kind: "group"; ids: number[]; name: string };
+  | { kind: "group"; ids: number[]; name: string; categoryId?: number };
 
 export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products" | "categories" }> = ({ initialTab = "products" }) => {
   const navigate = useNavigate();
@@ -618,8 +623,11 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               categoryId: (p as unknown as { category?: number | string }).category ?? "",
             })) as unknown as Item[]}
             onShowCard={(it) => setPreview({ kind: "product", id: Number(it.id), name: it.name || "" })}
-            onShowGroup={(ids, name) =>
-              setPreview({ kind: "group", ids: ids.map(Number), name })}
+            onShowGroup={(ids, name, categoryId) =>
+              setPreview({
+                kind: "group", ids: ids.map(Number), name,
+                categoryId: categoryId == null ? undefined : Number(categoryId),
+              })}
             onPickItem={(it) => { setEditId(Number(it.id)); setView("form"); }}
             onItemCreated={() => reload()}
           />
@@ -634,9 +642,10 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               />
             ) : preview?.kind === "group" ? (
               <GroupTreePane
-                key={`g${preview.ids.join(",")}`}
+                key={`g${preview.categoryId ?? preview.ids.join(",")}`}
                 ids={preview.ids}
                 groupName={preview.name}
+                categoryId={preview.categoryId}
               />
             ) : (
               <div className="flex h-full items-center justify-center p-6 text-center text-[var(--aseel-ink-soft)]">
@@ -655,8 +664,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           loading={loading}
           emptyHint="لا توجد أصناف"
           onRowDoubleClick={(p) => { setEditId(p.id); setView("form"); }}
-          onShowGroup={(ids, name) =>
-            openInNewTab(`/product-group?ids=${ids.join(",")}&name=${encodeURIComponent(name)}`)}
+          onShowGroup={(ids, name, categoryId) =>
+            openInNewTab(productGroupPath({ name, categoryId, ids }))}
           sortKey={sortKey}
           sortDir={sortDir}
           onSort={(key, dir) => { setSortKey(key); setSortDir(dir); }}

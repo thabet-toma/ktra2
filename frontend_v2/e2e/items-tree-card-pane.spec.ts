@@ -194,7 +194,21 @@ test('طيّ الشجرة يسلّم عرضها للبطاقة — شريط لا
   await expect(page.locator('.aseel-tree-panel')).toBeVisible();
 });
 
-/** الصفحة الكاملة صارت غلافاً فوق نفس الخطّاف — فلتبقَ حيّة بتبويباتها. */
+/**
+ * الشكل الحاليّ للرابط: التصنيف وحده — الخادم يشتقّ أصنافه وأحفاده. تعدادُ
+ * المعرّفات لتصنيفٍ فيه ~1500 صنف كان يُنتج رابطاً ~7.5KB فيردّه nginx (414)
+ * قبل أن تُقلع الواجهة أصلاً.
+ */
+test('الكرت المجمّع بالتصنيف (/product-group?category=) يعرض التبويبات', async ({ page }) => {
+  await page.goto('/product-group?category=3&name=%D8%A5%D8%B7%D8%A7%D8%B1%D8%A7%D8%AA');
+  await page.waitForLoadState('networkidle');
+
+  await expect(page.getByText('كرت مجمّع: إطارات')).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'نظرة عامة (مجمّع)' })).toBeVisible();
+});
+
+/** الصفحة الكاملة صارت غلافاً فوق نفس الخطّاف — فلتبقَ حيّة بتبويباتها.
+ *  و`?ids=` يبقى مفهوماً: روابط قديمة محفوظة عند المستخدمين. */
 test('الكرت المجمّع الكامل (/product-group) يعرض التبويبات نفسها', async ({ page }) => {
   await page.goto('/product-group?ids=7,8&name=%D8%A5%D8%B7%D8%A7%D8%B1%D8%A7%D8%AA');
   await page.waitForLoadState('networkidle');

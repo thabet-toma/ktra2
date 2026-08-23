@@ -53,10 +53,25 @@ const WRITE_TIMEOUT_HINT =
 const READ_TIMEOUT_HINT =
   "انتهت مهلة انتظار الخادم (30 ثانية). تحقق من الاتصال، ثم أعد المحاولة.";
 
-/** طلب كتابة = أي method غير GET/HEAD. يحدّد أيّ رسالة يراها المستخدم عند الفشل. */
-function isWriteRequest(init?: RequestInit): boolean {
+/**
+ * خيارات `apiFetch` = خيارات `fetch` + `readOnly`: بعض القراءات تُرسَل بـPOST لأن
+ * محدِّدها لا يسع سطر الطلب (الكرت المجمّع يمرّر معرّفات ~1500 صنف — ~7.5KB ⇒
+ * nginx يردّ 414). المتصفح يتجاهل المفتاح الزائد، وهو هنا كي لا تُعامَل قراءةٌ
+ * معاملة الكتابة: فتُحرَم من إعادة المحاولة، ويُقال لصاحبها «لم يُحفَظ شيء».
+ */
+export interface ApiFetchInit extends RequestInit {
+  readOnly?: boolean;
+}
+
+/** قراءة = GET/HEAD، أو طلبٌ أعلن `readOnly` صراحةً. */
+function isReadRequest(init?: ApiFetchInit): boolean {
   const method = (init?.method || "GET").toUpperCase();
-  return method !== "GET" && method !== "HEAD";
+  return method === "GET" || method === "HEAD" || init?.readOnly === true;
+}
+
+/** طلب كتابة = ما ليس قراءة. يحدّد أيّ رسالة يراها المستخدم عند الفشل. */
+function isWriteRequest(init?: ApiFetchInit): boolean {
+  return !isReadRequest(init);
 }
 
 // سقف واضح لمسارات التطبيق العادية: يكفي لتذبذب الاستضافة المشتركة، ولا يترك
@@ -69,13 +84,12 @@ export const FETCH_TIMEOUT_MS = 30_000;
 const MAX_FETCH_ATTEMPTS = 3;
 const RETRY_DELAYS_MS = [400, 1200]; // تأخير قبل المحاولة الثانية ثم الثالثة
 
-function isSafeToRetry(init?: RequestInit): boolean {
-  const method = (init?.method || "GET").toUpperCase();
+function isSafeToRetry(init?: ApiFetchInit): boolean {
   // لا نعيد المحاولة إذا مرّر المتصل signal خاص به (قد يكون للإلغاء)
-  return (method === "GET" || method === "HEAD") && !init?.signal;
+  return isReadRequest(init) && !init?.signal;
 }
 
-export async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+export async function apiFetch(url: string, init?: ApiFetchInit): Promise<Response> {
   // كل عملية كتابة = المستخدم يعمل الآن؛ تُمدَّد مهلة الخمول ولو لم يلمس فأرة
   // ولا لوحة مفاتيح منذ فترة (إدخال بالباركود، لصق، اختصارات).
   if (isUserActivityRequest(init?.method)) {

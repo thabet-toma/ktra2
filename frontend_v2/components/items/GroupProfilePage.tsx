@@ -1,6 +1,9 @@
 /**
  * تجميع البراندات — الكرت المجمّع: بطاقة المقاس/الأساس (مثل عجل 185/65/14) تجمع
- * مؤشّرات وحركات وفواتير كل البراندات تحته. المسار: /product-group?ids=1,2,3&name=…
+ * مؤشّرات وحركات وفواتير كل البراندات تحته.
+ * المسار: `/product-group?category=3&name=…` — والخادم يشتقّ أصناف التصنيف
+ * وأحفاده. `?ids=1,2,3&name=…` يبقى مفهوماً: روابطُ قديمة، ومجموعةٌ لا تصنيف
+ * لها. (التعداد في الرابط كان يبلغ ~7.5KB لتصنيفٍ فيه ~1500 صنف ⇒ 414 من nginx.)
  *
  * الصفحة غلافٌ رقيق فوق `useGroupInsights` (في `ProductInsightTabs.tsx`) —
  * البيانات والتبويبات نفسها تعرضها شجرة الأصناف في بطاقتها الجانبية، فبقاؤها
@@ -18,16 +21,19 @@ export const GroupProfilePage: React.FC = () => {
   // كالكرت المفرد: يُفتح في تبويب جديد، فوجهة «عودة» تُحسم لا تُخمَّن.
   const back = useAppBack('/items', 'الأصناف');
 
-  const ids = useMemo(() => {
-    const raw = new URLSearchParams(location.search).get('ids') || '';
-    return raw.split(',').map((s) => s.trim()).filter((s) => /^\d+$/.test(s)).map(Number);
+  const selector = useMemo(() => {
+    const params = new URLSearchParams(location.search);
+    const category = (params.get('category') || '').trim();
+    if (/^\d+$/.test(category)) return { category: Number(category) };
+    const raw = params.get('ids') || '';
+    return { ids: raw.split(',').map((s) => s.trim()).filter((s) => /^\d+$/.test(s)).map(Number) };
   }, [location.search]);
   const nameParam = useMemo(
     () => new URLSearchParams(location.search).get('name') || '',
     [location.search],
   );
 
-  const { profile, loading, error, tabs } = useGroupInsights(ids);
+  const { profile, loading, error, tabs } = useGroupInsights(selector);
 
   const title = profile ? `كرت مجمّع: ${nameParam || profile.name}` : `كرت مجمّع: ${nameParam}`;
 

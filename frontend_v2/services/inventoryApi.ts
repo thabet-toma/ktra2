@@ -74,6 +74,18 @@ export interface ProductSerialRow {
   created_at: string | null;
 }
 
+/**
+ * محدِّد أعضاء الكرت المجمّع: تصنيفٌ يشتقّه الخادم (`category` — يشمل الأحفاد)
+ * أو تعدادٌ صريح (`ids` — مجموعات `group_key`، أو أسطر جردٍ بعينها).
+ */
+export type ProductGroupSelector = { ids?: number[]; category?: number };
+
+/** جسم طلب الكرت المجمّع — يقبل مصفوفة معرّفات كما يقبل المحدِّد الكامل. */
+const groupBody = (
+  sel: ProductGroupSelector | number[],
+  extra: Record<string, unknown> = {},
+): string => JSON.stringify(Array.isArray(sel) ? { ids: sel, ...extra } : { ...sel, ...extra });
+
 const headers = (): HeadersInit => {
   const token = localStorage.getItem("token");
   // task11 R2: الشركة النشطة + الفرع النشط مع كل طلب مخزون
@@ -380,21 +392,27 @@ export const inventoryApi = {
   },
 
   // ─── الكرت المجمّع: مجموع كل البراندات لنفس المقاس/الأساس ───
-  // تمرَّر معرّفات أعضاء المجموعة (تُحسب في الواجهة من group_key).
-  getProductGroupProfile: async (ids: number[]) => {
-    const res = await fetch(`${INV}/products/group-profile/?ids=${ids.join(",")}`, { headers: headers() });
+  // المحدِّد يسافر في **جسم** الطلب (POST) لا في عنوانه: التعداد `?ids=1,2,3…`
+  // لتصنيفٍ فيه ~1500 صنف يبلغ ~7.5KB في سطر الطلب فيردّه nginx بـ414/400
+  // (والتطوير يمرّ). `category` أوجز وأدقّ — الخادم يشتقّ الأصناف وأحفادها.
+  getProductGroupProfile: async (sel: ProductGroupSelector | number[]) => {
+    const res = await fetch(`${INV}/products/group-profile/`, {
+      method: "POST", headers: headers(), body: groupBody(sel), readOnly: true,
+    });
     await handle(res, "getProductGroupProfile");
     return res.json();
   },
-  getProductGroupLedger: async (ids: number[], limit = 50, offset = 0) => {
-    const res = await fetch(
-      `${INV}/products/group-ledger/?ids=${ids.join(",")}&limit=${limit}&offset=${offset}`,
-      { headers: headers() });
+  getProductGroupLedger: async (sel: ProductGroupSelector | number[], limit = 50, offset = 0) => {
+    const res = await fetch(`${INV}/products/group-ledger/`, {
+      method: "POST", headers: headers(), body: groupBody(sel, { limit, offset }), readOnly: true,
+    });
     await handle(res, "getProductGroupLedger");
     return res.json();
   },
-  getProductGroupInvoices: async (ids: number[]) => {
-    const res = await fetch(`${INV}/products/group-invoices/?ids=${ids.join(",")}`, { headers: headers() });
+  getProductGroupInvoices: async (sel: ProductGroupSelector | number[]) => {
+    const res = await fetch(`${INV}/products/group-invoices/`, {
+      method: "POST", headers: headers(), body: groupBody(sel), readOnly: true,
+    });
     await handle(res, "getProductGroupInvoices");
     return res.json();
   },

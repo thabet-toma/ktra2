@@ -5,6 +5,7 @@ import {
   entityPathForReference,
   isSafeInternalPath,
   platformNoteTarget,
+  productGroupPath,
   referenceTypeLabel,
   statementMovementTone,
   statementToneRowClass,
@@ -90,4 +91,29 @@ test("روابط التذكيرات تقبل المسار الداخلي وتر�
   assert.equal(isSafeInternalPath("https://example.com/phish"), false);
   assert.equal(isSafeInternalPath("//example.com/phish"), false);
   assert.equal(isSafeInternalPath("/\\example.com/phish"), false);
+});
+
+/**
+ * رابط الكرت المجمّع: التصنيف يسمو على تعداد المعرّفات. تصنيفٌ فيه ~1500 صنف
+ * كان يُنتج رابطاً ~7.5KB — فوق حدّ سطر الطلب في nginx (8KB) ⇒ 414 قبل أن
+ * تُقلع الواجهة. والتعداد يبقى للمجموعات التي لا تصنيف لها وللروابط القديمة.
+ */
+test("رابط الكرت المجمّع يفضّل التصنيف ولا يعدّ المعرّفات", () => {
+  const many = Array.from({ length: 1500 }, (_, i) => 100000 + i);
+  const byCategory = productGroupPath({ name: "أصناف عامة", categoryId: 3, ids: many });
+  assert.equal(byCategory, `/product-group?category=3&name=${encodeURIComponent("أصناف عامة")}`);
+  assert.ok(byCategory.length < 100);
+  // التعداد نفسه كان سيتجاوز حدّ سطر الطلب.
+  assert.ok(many.join(",").length > 8 * 1024);
+});
+
+test("بلا تصنيف يبقى التعداد — ومجموعةٌ فارغة لا تكسر الرابط", () => {
+  assert.equal(
+    productGroupPath({ name: "185/65/14", ids: [7, 8] }),
+    `/product-group?ids=7,8&name=${encodeURIComponent("185/65/14")}`,
+  );
+  assert.equal(
+    productGroupPath({ name: "بدون تصنيف", categoryId: null, ids: [] }),
+    `/product-group?ids=&name=${encodeURIComponent("بدون تصنيف")}`,
+  );
 });

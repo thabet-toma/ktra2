@@ -10,6 +10,7 @@ import { AseelDocumentShell, AseelAutocomplete, type AseelToolbarAction } from "
 import { ProductCardModal } from "../shared/ProductCardModal";
 import { formatQuantity } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
+import { productGroupPath } from "../../utils/entityLinks";
 import type { TreeCategory } from "../items/GroupedItemsTable";
 import { clientLogger } from "../../services/logger";
 import { Plus, Send, Trash2, RefreshCw, X, List, Save, Printer, Info, ChevronDown, ChevronLeft } from "lucide-react";
@@ -458,7 +459,7 @@ export const StocktakePage: React.FC = () => {
             </button>
             <button type="button" className="text-indigo-700 hover:underline"
               style={{ fontWeight: 700, background: "none", border: "none", padding: 0, cursor: "pointer" }}
-              onClick={() => (ids.length ? openInNewTab(`/product-group?ids=${ids.join(",")}&name=${encodeURIComponent(name)}`) : toggleGroup(key))}
+              onClick={() => (ids.length ? openInNewTab(productGroupPath({ name, categoryId: catId === UNCAT ? undefined : catId, ids })) : toggleGroup(key))}
               title="كرت مجمّع لكل ما تحت التصنيف">
               {name} <span style={{ color: "var(--aseel-ink-soft)", fontWeight: 400 }}>({ids.length})</span>
             </button>

@@ -175,6 +175,23 @@ export function productProfilePath(
   return `/products/${productId}?tab=${tab}`;
 }
 
+/**
+ * مسار الكرت المجمّع — مصدر واحد لكل من يفتحه (شجرة الأصناف، جدولها، الجرد).
+ * التصنيف يسمو على تعداد المعرّفات: رابطٌ فيه ~1500 معرّف يبلغ ~7.5KB في سطر
+ * الطلب فيردّه nginx بـ414 قبل أن تُقلع الواجهة أصلاً. `?ids=` يبقى مفهوماً —
+ * للروابط القديمة، ولمجموعةٍ لا تصنيفَ لها.
+ */
+export function productGroupPath(opts: {
+  name: string;
+  categoryId?: number | string | null;
+  ids?: Array<number | string>;
+}): string {
+  const name = encodeURIComponent(opts.name || "");
+  const cat = opts.categoryId == null ? "" : String(opts.categoryId);
+  if (cat) return `/product-group?category=${encodeURIComponent(cat)}&name=${name}`;
+  return `/product-group?ids=${(opts.ids || []).join(",")}&name=${name}`;
+}
+
 export function supplierPath(): string {
   return "/suppliers";
 }

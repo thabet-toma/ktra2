@@ -813,6 +813,44 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
     }
 
 
+def category_descendant_product_ids(*, tenant_id: int, category_id: int) -> list[int]:
+    """معرّفات أصناف تصنيفٍ **وكل أحفاده** — يشتقّها الخادم بدل أن تُعدَّد في الطلب.
+
+    الكرت المجمّع كان يحمل التعداد كاملاً في سطر الطلب (`?ids=1,2,3…`): تصنيفُ
+    جذرٍ فيه ~1500 صنف ⇒ ~7.5KB في سطر الطلب ⇒ nginx يردّ 414/400 قبل Django.
+    شجرةُ التصنيفات تُقرأ مسطّحةً باستعلام واحد ثم يُنزل الأحفاد في بايثون (لا
+    استعلام لكل عقدة)، فالعدد ثابتٌ مهما عمقت الشجرة: استعلامان.
+
+    تصنيفٌ من شركة أخرى (أو غير موجود) ⇒ قائمة فارغة — العزل مضاعف: عضويةُ
+    التصنيف في الشركة، وفلترةُ الأصناف بالشركة.
+    """
+    from .models import ProductCategory
+
+    pairs = list(
+        ProductCategory.objects.filter(tenant_id=tenant_id)
+        .values_list('id', 'parent_id')
+    )
+    if category_id not in {cid for cid, _ in pairs}:
+        return []
+    children: dict[int, list[int]] = {}
+    for cid, parent_id in pairs:
+        children.setdefault(parent_id, []).append(cid)
+    wanted: list[int] = []
+    seen: set[int] = set()
+    stack = [category_id]
+    while stack:
+        cid = stack.pop()
+        if cid in seen:
+            continue
+        seen.add(cid)
+        wanted.append(cid)
+        stack.extend(children.get(cid, ()))
+    return list(
+        Product.objects.filter(tenant_id=tenant_id, category_id__in=wanted)
+        .values_list('id', flat=True)
+    )
+
+
 def _group_products(tenant_id: int, product_ids: list[int]) -> list:
     """يحلّ ويصفّي قائمة معرّفات إلى منتجات الشركة فقط (عزل المستأجر)."""
     return list(

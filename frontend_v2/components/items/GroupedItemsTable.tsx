@@ -23,8 +23,10 @@ type Props = {
   sortDir?: "asc" | "desc";
   onSort?: (key: string, dir: "asc" | "desc") => void;
   onRowDoubleClick?: (p: SqlProduct) => void;
-  /** الكرت المجمّع لتصنيف: كل معرّفات المنتجات تحته (وكل أحفاده) + اسم التصنيف. */
-  onShowGroup: (ids: string[], name: string) => void;
+  /** الكرت المجمّع لتصنيف: كل معرّفات المنتجات تحته (وكل أحفاده) + اسم التصنيف.
+   *  `categoryId` يغني عن تعداد المعرّفات في الطلب (الخادم يشتقّها) — يغيب في
+   *  عقدة «بدون تصنيف» وحدها فتبقى معرّفاتها صريحة. */
+  onShowGroup: (ids: string[], name: string, categoryId?: number) => void;
 };
 
 const UNCAT = -1; // تصنيف افتراضي «بدون تصنيف» للمنتجات بلا تصنيف.
@@ -116,7 +118,7 @@ export const GroupedItemsTable: React.FC<Props> = ({
                   <FolderTree className="h-4 w-4" style={{ color: "var(--aseel-primary,#1857a4)", flexShrink: 0 }} />
                   <button type="button" className="hover:underline"
                     style={{ fontWeight: 700, color: "var(--aseel-primary,#1857a4)", background: "none", border: "none", padding: 0, cursor: "pointer" }}
-                    onClick={() => (ids.length ? onShowGroup(ids, name) : toggle(catId))}
+                    onClick={() => (ids.length ? onShowGroup(ids, name, catId === UNCAT ? undefined : catId) : toggle(catId))}
                     title="كرت مجمّع لكل ما تحت التصنيف">
                     {name} <span style={{ color: "var(--aseel-ink-soft)", fontWeight: 400 }}>({ids.length})</span>
                   </button>

@@ -12,6 +12,19 @@
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 
+def is_read_only_post(request, view) -> bool:
+    """POST قراءةٌ لا كتابة: نقطةٌ قرائية يسافر محدِّدها في **جسم** الطلب لأن سطر
+    الطلب لا يسعه — الكرت المجمّع يمرّر معرّفات تصنيفٍ فيه ~1500 صنف (~7.5KB في
+    سطر الطلب ⇒ nginx يردّ 414). الـview يعلنها في `read_only_post_actions`،
+    فتُفحص هنا كأنها GET: يسقط شرط «ليس مستعرضاً» وحده، ويبقى كل ما عداه
+    (المسارات المقيَّدة على المحاسب القانوني، والعضوية) كما هو.
+    """
+    return (
+        request.method == "POST"
+        and getattr(view, "action", None) in getattr(view, "read_only_post_actions", ())
+    )
+
+
 class TenantRolePermission(BasePermission):
     message = "صلاحيتك في هذه الشركة «مستعرض» — قراءة فقط."
 
@@ -30,7 +43,8 @@ class TenantRolePermission(BasePermission):
             request.method == "POST"
             and request.path.rstrip("/") == "/api/tenants/companies"
         )
-        if request.method in SAFE_METHODS and not restricted_route:
+        is_read = request.method in SAFE_METHODS or is_read_only_post(request, view)
+        if is_read and not restricted_route:
             return True
 
         from core.tenant_utils import get_tenant
@@ -46,7 +60,7 @@ class TenantRolePermission(BasePermission):
             if has_legal_membership and (
                 restricted_route
                 or (
-                    request.method not in SAFE_METHODS
+                    not is_read
                     and not request.path.startswith("/api/accountant/")
                     and not legal_office_bootstrap
                 )
@@ -73,12 +87,12 @@ class TenantRolePermission(BasePermission):
             return False
         if (
             role == "legal_accountant"
-            and request.method not in SAFE_METHODS
+            and not is_read
             and not request.path.startswith("/api/accountant/")
             and not legal_office_bootstrap
         ):
             self.message = "الكتابة التشغيلية متاحة للمحاسب من بوابة المراجعة فقط."
             return False
-        if request.method in SAFE_METHODS:
+        if is_read:
             return True
         return role != "viewer"

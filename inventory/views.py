@@ -98,6 +98,9 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     ordering_fields = ['id', 'sku', 'name_ar', 'quantity_on_hand', 'avg_cost', 'sale_price',
                        'min_stock_level', 'created_at']
     ordering = ['-id']
+    # كروت المجموعة قراءةٌ تُرسَل بـPOST (محدِّدها لا يسع سطر الطلب) — يفحصها
+    # TenantRolePermission كأنها GET، فيبقى «مستعرض» قادراً على فتحها.
+    read_only_post_actions = ('group_profile', 'group_ledger', 'group_invoices')
 
     activity_field_labels = {
         'name_ar': 'اسم المنتج',
@@ -464,16 +467,41 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             tenant_id=product.tenant_id, product_id=product.id))
 
     # ── تجميع البراندات: الكرت المجمّع (مجموع كل البراندات لنفس المقاس/الأساس) ──
-    # تمرّر الواجهة معرّفات أعضاء المجموعة عبر ?ids=1,2,3 (تحسبها من group_key)؛
-    # العزل بالشركة في الخدمة. النقر على عقدة الأب في الشجرة/الجرد يفتح هذه الكروت.
-    def _group_ids(self, request):
-        raw = request.query_params.get('ids', '')
-        ids = []
-        for part in raw.split(','):
-            part = part.strip()
-            if part.isdigit():
-                ids.append(int(part))
-        return ids
+    # النقر على عقدة التصنيف في الشجرة/الجرد يفتح هذه الكروت. أعضاء المجموعة
+    # يُحدَّدون بأحد شكلين:
+    #   • `category` — التصنيف وأحفاده، والخادم يشتقّ المعرّفات (الشكل المفضَّل)
+    #   • `ids` — تعدادٌ صريح (مجموعات group_key، وأسطر جردٍ بعينها)
+    # وكلاهما يُقرأ من **جسم** الطلب (POST). كان التعداد يسافر في سطر الطلب
+    # (`?ids=1,2,3…`): تصنيفُ جذرٍ فيه ~1500 صنف ⇒ عنوانٌ ~7.5KB ⇒ nginx يردّ
+    # 414/400 قبل أن يصل الطلب إلى Django (والتطوير يمرّ لأن runserver أسخى).
+    # GET مع `?ids=`/`?category=` يبقى مقروءاً لتوافق الروابط القديمة.
+    def _group_source(self, request):
+        return request.data if request.method == 'POST' else request.query_params
+
+    def _group_ids(self, request, tenant=None):
+        source = self._group_source(request)
+        raw = source.get('ids') or ''
+        parts = raw if isinstance(raw, (list, tuple)) else str(raw).split(',')
+        ids = [int(str(p).strip()) for p in parts if str(p).strip().isdigit()]
+        if ids:
+            return ids
+        category = str(source.get('category') or '').strip()
+        if category.isdigit() and tenant is not None:
+            from inventory.services import category_descendant_product_ids
+            return category_descendant_product_ids(
+                tenant_id=tenant.pk, category_id=int(category))
+        return []
+
+    def _group_int(self, request, key, default, *, minimum=None, maximum=None):
+        try:
+            value = int(self._group_source(request).get(key, default))
+        except (TypeError, ValueError):
+            return default
+        if minimum is not None:
+            value = max(value, minimum)
+        if maximum is not None:
+            value = min(value, maximum)
+        return value
 
     def _distinct_values(self, tenant, field):
         vals = (
@@ -508,41 +536,34 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             return Response([])
         return Response(self._distinct_values(tenant, 'name_ar'))
 
-    @action(detail=False, methods=['get'], url_path='group-profile')
+    @action(detail=False, methods=['get', 'post'], url_path='group-profile')
     def group_profile(self, request):
         from inventory.services import product_group_profile
         tenant = self._get_tenant()
         if not tenant:
             return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(product_group_profile(
-            tenant_id=tenant.pk, product_ids=self._group_ids(request)))
+            tenant_id=tenant.pk, product_ids=self._group_ids(request, tenant)))
 
-    @action(detail=False, methods=['get'], url_path='group-ledger')
+    @action(detail=False, methods=['get', 'post'], url_path='group-ledger')
     def group_ledger(self, request):
         from inventory.services import product_stock_ledger
         tenant = self._get_tenant()
         if not tenant:
             return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            limit = min(int(request.query_params.get('limit', 50)), 200)
-        except (TypeError, ValueError):
-            limit = 50
-        try:
-            offset = max(int(request.query_params.get('offset', 0)), 0)
-        except (TypeError, ValueError):
-            offset = 0
         return Response(product_stock_ledger(
-            tenant_id=tenant.pk, product_ids=self._group_ids(request),
-            limit=limit, offset=offset))
+            tenant_id=tenant.pk, product_ids=self._group_ids(request, tenant),
+            limit=self._group_int(request, 'limit', 50, minimum=1, maximum=200),
+            offset=self._group_int(request, 'offset', 0, minimum=0)))
 
-    @action(detail=False, methods=['get'], url_path='group-invoices')
+    @action(detail=False, methods=['get', 'post'], url_path='group-invoices')
     def group_invoices(self, request):
         from inventory.services import product_linked_invoices
         tenant = self._get_tenant()
         if not tenant:
             return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(product_linked_invoices(
-            tenant_id=tenant.pk, product_ids=self._group_ids(request)))
+            tenant_id=tenant.pk, product_ids=self._group_ids(request, tenant)))
 
     # ── الباركود والأرقام التسلسلية ────────────────────────────────────
     @action(detail=False, methods=['post'], url_path='generate_barcode')

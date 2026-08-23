@@ -41,8 +41,10 @@ interface Props {
   onPickItem: (item: Item) => void;
   /** DEF-007: فتح بطاقة المنتج (نقر مفرد). */
   onShowCard?: (item: Item) => void;
-  /** تجميع البراندات: فتح الكرت المجمّع لعقدة المقاس (مجموع كل البراندات). */
-  onShowGroup?: (memberIds: string[], name: string) => void;
+  /** تجميع البراندات: فتح الكرت المجمّع لعقدة المقاس (مجموع كل البراندات).
+   *  `categoryId` يُمرَّر كي يشتقّ الخادمُ الأعضاء بنفسه — تعدادُ معرّفات تصنيفٍ
+   *  كبير في الطلب كان يبلغ آلاف البايتات فيردّه nginx (414). */
+  onShowGroup?: (memberIds: string[], name: string, categoryId?: string) => void;
   onItemCreated?: (item: Item) => void;
   disabled?: boolean;
   manageMode?: boolean; // If true, hides product-specific UI and acts purely as a category manager.
@@ -266,7 +268,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
                   // كان مطويّاً (ولا تطويه بإعادة الكبس — الطيّ مهمّة السهم)،
                   // كما يفعل مستكشف الملفات. بلا ذلك تُعرض بطاقة تصنيفٍ لا
                   // يمكن رؤية أصنافه إلا بكبسةٍ ثانية على سهمٍ لم ينتبه له أحد.
-                  onShowGroup(descendantItemIds(c.id), c.name);
+                  onShowGroup(descendantItemIds(c.id), c.name, c.id);
                   if (!open) toggle(c.id);
                 }}
                 title={onShowGroup ? "كبسة ⇒ الكرت المجمّع لكل ما تحته + فتح الفرع — السهم للطيّ — كبسة يمين لخيارات" : "نقر للفتح/الطيّ — كبسة يمين لخيارات"}

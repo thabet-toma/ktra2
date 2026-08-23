@@ -56,6 +56,7 @@ def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
 def find_stock_dependents(*, tenant_id, reference_id, reference_types) -> list[dict]:  # من بنى على هذه البضاعة (371)
 def receive_shipment_stock(shipment, movement_date=None):  # استلام شحنة استيراد (431)
 def product_profile(*, tenant_id: int, product_id: int) -> dict:  # بطاقة الصنف (710)
+def category_descendant_product_ids(*, tenant_id: int, category_id: int) -> list[int]:  # أصناف تصنيفٍ وأحفاده — الخادم يشتقّها بدل تعدادها في الطلب
 def product_group_profile(*, tenant_id: int, product_ids: list[int]) -> dict:  # الكرت المجمّع (823)
 def product_stock_ledger(*, tenant_id, product_id=None, product_ids=None, limit=50, offset=0) -> dict:  # (887)
 def partner_stock_movements(*, tenant_id, partner_id, limit=50, offset=0) -> dict:  # حركات مخزون الشريك مجمَّعةً تحت المستند المسبِّب (تبويب «المال» في كرته)
@@ -101,7 +102,8 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | GET | `products/{id}/stock-movements/` · `products/{id}/invoices/` | (398) · (426) |
 | GET | `products/{id}/serials/` · POST `products/{id}/serials/register/` | (559) · (570) |
 | POST | `products/generate_barcode/` · `products/generate_serials/` | (522) · (541) |
-| GET | `products/groups/` · `products/brands/` · `products/group-profile/` · `products/group-ledger/` · `products/group-invoices/` | (468) · (460) · (485) · (494) · (512) |
+| GET | `products/groups/` · `products/brands/` | (468) · (460) |
+| GET/**POST** | `products/group-profile/` · `products/group-ledger/` · `products/group-invoices/` | الكرت المجمّع — المحدِّد في **جسم** الطلب |
 | GET | `serials/` | `ProductSerialViewSet` (598) |
 | GET/POST/DELETE | `supplier-products/?product=&supplier=&sku=` | `SupplierProductViewSet` |
 | GET/POST | `stock-movements/` · GET `stock-movements/summary/` | `StockMovementViewSet` (689) · (792) |
@@ -109,6 +111,26 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | POST | `warehouse-transfers/{id}/post/` · `warehouse-transfers/{id}/unpost/` | `WarehouseTransferViewSet` (844) · (856) |
 | POST | `stocktakes/{id}/post/` | `StocktakeViewSet` (881) |
 | GET | `categories/` · `uom/` | `CategoryViewSet` (38) · `UnitOfMeasureViewSet` (77) |
+
+### الكرت المجمّع: المحدِّد في الجسم لا في العنوان
+النقاط الثلاث تقبل `POST` بجسم JSON فيه أحد محدِّدَين:
+
+| المحدِّد | المعنى |
+|---|---|
+| `{"category": 3}` | التصنيف **وكل أحفاده** — الخادم يشتقّ الأصناف (`category_descendant_product_ids`) |
+| `{"ids": [1, 2, 3]}` | تعدادٌ صريح — مجموعات `group_key`، أو أسطر جردٍ بعينها |
+
+(و`group-ledger` يقبل `limit`/`offset` في الجسم نفسه.)
+
+**لماذا POST لقراءة؟** كان التعداد يسافر في سطر الطلب (`?ids=1,2,3…`): تصنيفُ
+جذرٍ فيه ~1500 صنف ⇒ عنوانٌ ~7.5KB، فوق `large_client_header_buffers 8k` في
+nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `GET` مع `?ids=`/`?category=`
+يبقى مفهوماً لتوافق الروابط القديمة (`/product-group?ids=…`).
+
+هذه الـPOST **قراءة لا كتابة**: الـview يعلنها في `read_only_post_actions`،
+فيفحصها `core/permissions.py` (`is_read_only_post`) كأنها `GET` — «مستعرض»
+يبقى يراها، والمسار يبقى مقيَّداً على المحاسب القانوني الخارجي كما كان — ولا
+يُبطل `store/cache.py` كاش الكتالوج عندها.
 
 ## الاعتماديات
 **يعتمد على:** (كل الاستيرادات عبر أبواب أخرى **كسولة داخل الدوال** — الملف يستورد على مستوى الوحدة من `tenants` و`partners` فقط، `models.py:2-3`)

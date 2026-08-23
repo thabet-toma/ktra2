@@ -69,9 +69,14 @@ class InvalidatesStoreCacheMixin:
         return get_tenant(request)
 
     def finalize_response(self, request, response, *args, **kwargs):
+        from core.permissions import is_read_only_post
+
         response = super().finalize_response(request, response, *args, **kwargs)
+        # قراءةٌ تُرسَل بـPOST (محدِّدها لا يسع سطر الطلب) ليست كتابة: لا تُبطل
+        # كاش الكتالوج — فتحُ كرتٍ مجمّع واحد كان سيبطله ثلاث مرات.
         if (
             request.method in self.WRITE_METHODS
+            and not is_read_only_post(request, self)
             and getattr(response, "status_code", 500) < 400
         ):
             tenant = self._invalidation_tenant(request)
