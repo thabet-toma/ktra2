@@ -28,6 +28,12 @@ interface FileDropZoneProps {
   hint?: string;
   /** سطر صغير تحت العبارة الرئيسية (الصيغ المدعومة، الحدّ الأقصى…). */
   subHint?: string;
+  /**
+   * اسم الحقل لقارئ الشاشة حين لا يكفي النصّ المرئي. المربّع المضغوط يقصّ
+   * عبارته لتتّسع للمساحة (`hint="إدراج صورة"`)، والاسمُ المتاح كان يتبعها
+   * فيضيع سياقُها — الوصف هنا لا يتبع الحيّز.
+   */
+  ariaLabel?: string;
   /** لصفوف متكرّرة: لا تستقبل لصقاً إلا بعد نقر/سحب داخلها. */
   interactionRequired?: boolean;
   /** معاينة روابط مرفوعة داخل المنطقة — تُترك فارغة إن كانت الشاشة تعرض معاينتها بنفسها. */
@@ -71,6 +77,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
   capture,
   maxSizeMB = 25,
   hint = DEFAULT_HINT,
+  ariaLabel,
   subHint,
   interactionRequired = false,
   previewUrls,
@@ -161,6 +168,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         <input
           id={inputId}
           type="file"
+          aria-label={ariaLabel}
           accept={ACCEPT_ATTR[accept]}
           multiple={multiple}
           capture={capture}

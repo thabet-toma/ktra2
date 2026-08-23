@@ -14,6 +14,11 @@ export interface PlatformCompanyRow {
   is_example: boolean;
   member_count: number;
   created_at: string;
+  /** آخر يوم كتابة مسموح — `null` اشتراك بلا انتهاء. الصيغة YYYY-MM-DD. */
+  subscription_ends_at: string | null;
+  /** أيام متبقّية بحساب الخادم: 0 = آخر يوم، سالب = منتهٍ، `null` = بلا انتهاء. */
+  subscription_days_left: number | null;
+  subscription_expired: boolean;
 }
 
 /** حدٌّ بلغ استهلاكه عتبة التحذير — يصل مرتَّباً بالأقرب إلى حدّه أولاً. */
@@ -126,6 +131,8 @@ export interface PlatformCompanyPatch {
   name?: string;
   plan?: string;
   status?: string;
+  /** YYYY-MM-DD لتثبيت الانتهاء، أو `null` لجعل الاشتراك بلا تاريخ. */
+  subscription_ends_at?: string | null;
   import_enabled?: boolean;
   is_example?: boolean;
 }

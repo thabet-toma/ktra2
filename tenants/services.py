@@ -4,6 +4,7 @@ from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 from tenants.models import Branch, Tenant, TenantSettings, TenantBook, UserCompanyMembership
 from accounting.models import Account, Currency
+from core.plans import trial_end_date
 
 logger = logging.getLogger(__name__)
 
@@ -212,10 +213,16 @@ def create_company(name: str, creator_user) -> Tenant:
 
     with transaction.atomic():
         # 1. Create Tenant
+        # T-TRIAL: الشركة الجديدة تبدأ **تجريبية** بأربعة عشر يوماً — كانت تُنشأ
+        # `Enterprise/Active`، أي بلا حدود وبلا تاريخ انتهاء مجاناً للأبد، فما
+        # كانت التجربة تبدأ لأحد إلا بتدخّل يدوي من السوبر أدمن. حدود التجربة
+        # حدود Pro (`core.plans.PLAN_DEFAULTS`)، والتمديد أو الترقية من لوحة
+        # المنصة: تعديل التاريخ أو تبديل الخطة — والحدود تتبع الخطة تلقائياً.
         tenant = Tenant.objects.create(
             CompanyName=name.strip(),
-            SubscriptionPlan="Enterprise",
-            Status="Active"
+            SubscriptionPlan="Trial",
+            Status="Trial",
+            subscription_ends_at=trial_end_date(),
         )
 
         # 2. Create TenantSettings

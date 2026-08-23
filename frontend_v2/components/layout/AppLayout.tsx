@@ -25,6 +25,8 @@ import { NotificationCenter } from '../notifications/NotificationCenter';
 import { WhatsNewButton } from './WhatsNewButton';
 import { CustomerNotesTab } from '../partners/CustomerNotesTab';
 import { useConfirm } from '../../contexts/ConfirmContext';
+import { useCompany } from '../../contexts/CompanyContext';
+import { formatNumber } from '../../utils/formatNumber';
 // استيراد مباشر لا عبر barrel الـimport-flow: البرميل يجرّ ImportDocumentScreen
 // كاملةً إلى حزمة القشرة ويُبطل تقسيم الحِزَم.
 import { ImportJourneyGuide } from '../import-flow/ImportJourneyGuide';
@@ -71,6 +73,40 @@ import {
   QUICK_SHORTCUTS_EVENT,
   type ShortcutIconName,
 } from '../../utils/quickShortcuts';
+
+/**
+ * T-TRIAL: شريط انتهاء الاشتراك — يظهر في آخر سبعة أيام وبعد الانتهاء، ويختفي
+ * تماماً لأي اشتراك بلا تاريخ. الأرقام والتاريخ يأتيان محسوبين من الخادم
+ * (`subscription_days_left` / `subscription_ends_at`) لأن الحارس الذي يمنع
+ * الكتابة يقرأ التاريخ بتوقيت الخادم؛ حسابُه هنا كان سيُظهر «يتبقّى يوم» لمن
+ * مُنع فعلاً. الظهور لا يُلغى بالإغلاق: حالةٌ قائمة لا إشعارٌ عابر.
+ */
+const SubscriptionExpiryBanner: React.FC = () => {
+  const { currentCompany } = useCompany();
+  const daysLeft = currentCompany?.subscription_days_left;
+  if (!currentCompany || daysLeft === null || daysLeft === undefined) return null;
+  const expired = daysLeft < 0;
+  if (!expired && daysLeft > 7) return null;
+  const endsAt = formatDateValue(currentCompany.subscription_ends_at ?? '');
+  const message = expired
+    ? `انتهى اشتراك «${currentCompany.CompanyName}» بتاريخ ${endsAt} — الحساب للقراءة والطباعة فقط، ولا يمكن حفظ أي مستند. تواصل مع إدارة المنصة للتجديد.`
+    : daysLeft === 0
+      ? `اليوم آخر يوم في اشتراك «${currentCompany.CompanyName}» (${endsAt}) — بعده يصير الحساب للقراءة فقط.`
+      : `يتبقّى ${formatNumber(daysLeft, { maxDecimals: 0 })} يوماً على انتهاء اشتراك «${currentCompany.CompanyName}» في ${endsAt}.`;
+  return (
+    <div
+      role="alert"
+      data-testid="subscription-expiry-banner"
+      className={`flex-shrink-0 border-b px-4 py-2 text-sm font-semibold ${
+        expired
+          ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-200'
+          : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/50 dark:text-amber-200'
+      }`}
+    >
+      {message}
+    </div>
+  );
+};
 
 interface AppLayoutProps {
   user: User;
@@ -336,6 +372,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                 يكون مطويّاً ومتاحاً لهذا المستخدم، ويبقى فارغاً بلا عرض للآخرين. */}
             <div id={IMPORT_GUIDE_SLOT_ID} className="aseel-toolgrp relative z-10 flex items-center py-1 ms-2" />
           </div>
+          <SubscriptionExpiryBanner />
           <main className="app-content overflow-auto flex-1">
             {children}
           </main>

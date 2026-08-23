@@ -18,6 +18,15 @@ export type Tenant = {
    * (`services/storeAdminApi.ts`)، ثم `refreshCompanies()` لتحديث هذه القيمة.
    */
   store_slug?: string | null;
+  /**
+   * T-TRIAL: آخر يوم كتابة مسموح (YYYY-MM-DD) — `null` أو غياب = اشتراك بلا
+   * انتهاء. الحقلان التاليان محسوبان في الخادم من نفس الدالّة التي يسأل عنها
+   * حارس الكتابة، فلا يعرض الشريط يوماً ويمنع الخادم في غيره.
+   */
+  subscription_ends_at?: string | null;
+  /** 0 = آخر يوم عمل · سالب = منتهٍ · `null` = بلا انتهاء. */
+  subscription_days_left?: number | null;
+  subscription_expired?: boolean;
 };
 
 export type CompanyMembership = {

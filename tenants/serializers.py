@@ -1,6 +1,8 @@
 """N0-T4 — Serializers for TenantSettings + TenantBook (Group Constants F11)."""
 from rest_framework import serializers
 
+from core.plans import subscription_expiry
+
 from .models import Branch, Tenant, TenantBook, TenantSettings, UserCompanyMembership
 
 
@@ -77,14 +79,28 @@ class TenantBookSerializer(serializers.ModelSerializer):
 
 
 class TenantSerializer(serializers.ModelSerializer):
+    # T-TRIAL: «كم بقي» و«هل انتهى» محسوبان في الخادم — الشريط داخل التطبيق
+    # يعرض ما يقرّره الحارس نفسه (`core.plans.subscription_expiry`)، فلا يقع
+    # يومُ فرقٍ بين ما يراه المستخدم وما يمنعه الخادم.
+    subscription_days_left = serializers.SerializerMethodField()
+    subscription_expired = serializers.SerializerMethodField()
+
     class Meta:
         model = Tenant
-        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled", "is_example", "store_slug"]
+        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled", "is_example", "store_slug", "subscription_ends_at", "subscription_days_left", "subscription_expired"]
         # ST-1: `store_slug` معروض للقراءة فقط عمداً. كتابته تمرّ من
         # `TenantViewSet.set_store_slug` وحدها لأنها تحمل تحقّق الشكل والكلمات
         # المحجوزة؛ لو كان قابلاً للكتابة هنا لصار PATCH عادي على الشركة باباً
         # خلفياً يضع أي قيمة (`api`, `ADMIN`, نصّاً فارغاً) بلا أي فحص.
-        read_only_fields = ["import_enabled", "is_example", "store_slug"]
+        # تاريخ الانتهاء قرار إداري للمنصة — كتابته من لوحة السوبر أدمن وحدها
+        # (`platform_company_detail`)؛ لو قُبل هنا لَمدّد كلُّ مديرٍ تجربتَه.
+        read_only_fields = ["import_enabled", "is_example", "store_slug", "subscription_ends_at"]
+
+    def get_subscription_days_left(self, obj):
+        return subscription_expiry(obj)["days_left"]
+
+    def get_subscription_expired(self, obj):
+        return subscription_expiry(obj)["expired"]
 
 
 class UserCompanyMembershipSerializer(serializers.ModelSerializer):

@@ -623,6 +623,7 @@ export const DevelopmentNotesPage: React.FC = () => {
                     busy={uploading}
                     variant="compact"
                     hint="إدراج صورة"
+                    ariaLabel="إدراج صورة توضيحية"
                     className="h-20 w-20"
                   />
                 </div>

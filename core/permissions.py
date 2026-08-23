@@ -9,7 +9,14 @@
 
 تُطبَّق افتراضياً عبر ApiAuthAndUser وعبر DEFAULT_PERMISSION_CLASSES.
 """
+import logging
+
+from django.core.exceptions import PermissionDenied
 from rest_framework.permissions import SAFE_METHODS, BasePermission
+
+from core.plans import subscription_expired
+
+logger = logging.getLogger(__name__)
 
 
 def is_read_only_post(request, view) -> bool:
@@ -23,6 +30,45 @@ def is_read_only_post(request, view) -> bool:
         request.method == "POST"
         and getattr(view, "action", None) in getattr(view, "read_only_post_actions", ())
     )
+
+
+def subscription_block_reason(tenant, user) -> str | None:
+    """T-TRIAL: سبب منع الكتابة إن انتهى اشتراك الشركة، وإلا `None`.
+
+    القاعدة في دالّة واحدة لأن لها **مستدعيَين**: الحارس العام أدناه، وبوابة
+    المحاسب التي تستبدل `permission_classes` بـ`[IsAuthenticated]` فلا يمرّ بها
+    الحارس العام أصلاً. نسخةٌ ثانية من الشرط هناك كانت ستفترق عن هذه بيومٍ أو
+    بشرطِ `>=` مقابل `>` عند أول تعديل.
+
+    السوبر أدمن مستثنى: هو من يجدّد الاشتراك المنتهي.
+    """
+    if user is None or not getattr(user, "is_authenticated", False):
+        return None
+    if getattr(user, "is_superuser", False):
+        return None
+    if tenant is None or not subscription_expired(tenant):
+        return None
+    return (
+        f"انتهى اشتراك الشركة بتاريخ {tenant.subscription_ends_at:%Y-%m-%d} — "
+        "الحساب للقراءة والطباعة فقط. تواصل مع إدارة المنصة لتجديد الاشتراك."
+    )
+
+
+def require_active_subscription(request, tenant) -> None:
+    """يمنع الكتابة على شركة انتهى اشتراكها — للمسارات خارج `TenantRolePermission`.
+
+    القراءات تمرّ (`SAFE_METHODS`)، فيبقى للزبون أن يرى ويطبع ويصدّر.
+    """
+    if request is not None and request.method in SAFE_METHODS:
+        return
+    reason = subscription_block_reason(tenant, getattr(request, "user", None))
+    if reason is None:
+        return
+    logger.info(
+        "subscription_expired_write_blocked tenant=%s user=%s path=%s",
+        getattr(tenant, "pk", None), getattr(request.user, "pk", None), request.path,
+    )
+    raise PermissionDenied(reason)
 
 
 class TenantRolePermission(BasePermission):
@@ -68,6 +114,20 @@ class TenantRolePermission(BasePermission):
                 self.message = "يلزم سياق شركة صالح للمحاسب القانوني الخارجي."
                 return False
             return True  # بلا سياق شركة — فحوصات أخرى تتكفل
+
+        # T-TRIAL: انتهى اشتراك الشركة ⇒ قراءة وطباعة وتصدير، بلا كتابة. يقع
+        # الفحص هنا لا في `get_tenant`: الإيقاف الإداري يمنع الدخول كلّه، أما
+        # انتهاء التجربة فيترك الزبون يرى بياناته ويصدّرها — منعُه منها يفقده
+        # سبب الترقية أصلاً. القراءات خرجت أعلاه قبل هذا السطر، والسوبر أدمن
+        # خرج قبلها، فما يصل هنا كتابةٌ من عضو في شركة انتهى وقتها.
+        expiry_reason = subscription_block_reason(tenant, user)
+        if expiry_reason is not None:
+            logger.info(
+                "subscription_expired_write_blocked tenant=%s user=%s path=%s ends_at=%s",
+                tenant.pk, user.pk, request.path, tenant.subscription_ends_at,
+            )
+            self.message = expiry_reason
+            return False
 
         cached_role = getattr(request, "_tenant_membership_role", None)
         if cached_role and cached_role[0] == tenant.pk:

@@ -52,6 +52,7 @@ class Currency(models.Model):
 
 class Tenant(models.Model):
     SUBSCRIPTION_PLANS = [
+        ('Trial', 'Trial'),
         ('Basic', 'Basic'),
         ('Pro', 'Pro'),
         ('Enterprise', 'Enterprise'),
@@ -67,6 +68,15 @@ class Tenant(models.Model):
     CompanyName = models.CharField(max_length=150)
     SubscriptionPlan = models.CharField(max_length=50, choices=SUBSCRIPTION_PLANS)
     Status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Trial')
+    # T-TRIAL: تاريخ انتهاء الاشتراك — **NULL = بلا انتهاء** (الخطط الدائمة)، فلا
+    # حقل `is_expired` منفصل يمكن أن يناقض التاريخ. التاريخ **شامل**: آخر يوم
+    # عملٍ هو اليوم المكتوب هنا، والقراءة-فقط تبدأ في اليوم التالي له.
+    # حقلٌ على الشركة لا على الخطة: نفس الآلية تخدم تجربةً بأربعة عشر يوماً
+    # واشتراكاً سنوياً مدفوعاً، فالانتهاء واحدٌ والخطة تحدّد الحدود لا العمر.
+    subscription_ends_at = models.DateField(
+        null=True, blank=True, db_column='SubscriptionEndsAt',
+        help_text='آخر يوم يُسمح فيه بالكتابة — فارغ يعني اشتراكاً بلا تاريخ انتهاء',
+    )
     CreatedAt = models.DateTimeField(auto_now_add=True)
     DomainName = models.CharField(max_length=100, unique=True, null=True, blank=True)
     # وحدة الاستيراد (الصفقات/الشحن/التخليص/الفاتورة الدولية) — يضبطها السوبر أدمن

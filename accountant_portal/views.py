@@ -78,6 +78,7 @@ from accountant_portal.services import (
 from core.access import permission_catalog, require_perm, user_has_perm, user_tenant_role
 from core.modules import guard_module_surface, module_enabled, require_module
 from core.models import ActivityLog, TenantModule
+from core.permissions import require_active_subscription
 from core.tenant_utils import get_tenant
 from tenants.models import Tenant
 
@@ -706,6 +707,11 @@ class TenantScopedView(PortalAPIView):
     def tenant_for(self, request, permission=None):
         tenant = get_tenant(request)
         require_module(request, "accountant_portal")
+        # T-TRIAL: هذه المسارات تستبدل `permission_classes` بـ`[IsAuthenticated]`
+        # فلا يمرّ بها `TenantRolePermission` — أي أن حارس انتهاء الاشتراك يغيب
+        # عنها ما لم يُستدعَ هنا. القراءة تمرّ؛ الكتابة على شركة انتهى اشتراكها
+        # لا تمرّ من بابٍ خلفي.
+        require_active_subscription(request, tenant)
         if permission:
             require_perm(request, permission, tenant=tenant)
         return tenant
@@ -1123,6 +1129,7 @@ class CompanyPortalSettingsView(PortalAPIView):
     def _tenant(self, request):
         tenant = get_tenant(request)
         require_module(request, "accountant_portal")
+        require_active_subscription(request, tenant)  # T-TRIAL — كما في TenantScopedView
         require_perm(request, "admin.settings.manage", tenant=tenant)
         return tenant
 

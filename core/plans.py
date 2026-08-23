@@ -13,6 +13,7 @@
 """
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Callable
 
 from django.core.cache import cache
@@ -250,7 +251,7 @@ LIMITS = {
 }
 
 
-# افتراضات الخطط الثلاث — `None` = بلا حدّ. تُعدَّل هنا للمنصة كلها، ويُعدّلها
+# افتراضات الخطط — `None` = بلا حدّ. تُعدَّل هنا للمنصة كلها، ويُعدّلها
 # السوبر أدمن لشركة بعينها من لوحة المنصة (TenantLimit) دون لمس هذا الجدول.
 PLAN_DEFAULTS = {
     "Basic": {
@@ -285,6 +286,20 @@ PLAN_DEFAULTS = {
     },
 }
 
+# T-TRIAL: التجربة تعرض المنتج بكامل قوّته — حدود Pro لأسبوعين. تجربةٌ مخنوقة
+# بحدود الأساسية تُخفي نصف النظام عمّن جاء يقرّر، وهو ما تتفق عليه منتجات
+# الاشتراك (Zoho/Odoo): القيد على **العمر** لا على المزايا. نسخةٌ لا إشارة،
+# فرفع حدود Pro لاحقاً قرارٌ منفصل عن رفع سقف التجربة.
+PLAN_DEFAULTS["Trial"] = dict(PLAN_DEFAULTS["Pro"])
+
+# طول التجربة الافتراضي حين يحوّل السوبر أدمن شركةً إلى الخطة التجريبية بلا
+# تاريخ — يمدّده يدوياً لأي شركة بتعديل التاريخ وحده.
+TRIAL_PERIOD_DAYS = 14
+
+# «قاربت على الانتهاء» = هذا العدد من الأيام أو أقل. نافذة التذكير الأخيرة قبل
+# أن يصير الحساب للقراءة فقط، ويقرأها الشريط داخل التطبيق ولوحة المنصة معاً.
+EXPIRY_WARNING_DAYS = 7
+
 
 def _tenant_id(tenant):
     """يقبل كائن الشركة أو معرّفها — بعض الحُرّاس لا يملك إلا المعرّف."""
@@ -309,6 +324,56 @@ def _plan_of(tenant):
 def plan_default(plan: str, key: str):
     """حدّ الخطة لهذا المفتاح — الخطة المجهولة تُعامَل كالأساسية لا كبلا حدّ."""
     return PLAN_DEFAULTS.get(plan, PLAN_DEFAULTS["Basic"]).get(key)
+
+
+def trial_end_date():
+    """تاريخ انتهاء تجربةٍ تبدأ اليوم — بتوقيت الخادم لا بتوقيت المتصفّح."""
+    return timezone.localdate() + timedelta(days=TRIAL_PERIOD_DAYS)
+
+
+def subscription_expiry(tenant) -> dict:
+    """حالة اشتراك الشركة زمنياً: {ends_at, days_left, expired, expiring_soon}.
+
+    مصدر الحقيقة الواحد للانتهاء — يقرأه حارس الكتابة، وكرت الشركة في لوحة
+    المنصة، والشريط داخل التطبيق؛ فلا تتكرّر قاعدة «متى انتهى» في ثلاثة أمكنة
+    تتباعد لاحقاً بيومٍ أو بشرطِ `>=` مقابل `>`.
+
+    التاريخ **شامل**: `days_left == 0` يعني «آخر يوم عمل اليوم» لا «انتهى»،
+    والانتهاء يبدأ في اليوم التالي (`days_left < 0`). `ends_at = None` (الخطط
+    الدائمة) يعطي `expired=False` و`days_left=None` — لا صفراً يُقرأ خطأً.
+
+    يقبل كائن الشركة أو معرّفها؛ الكائن لا يكلّف استعلاماً (الحقل محمول معه)،
+    والمعرّف وحده يكلّف استعلاماً واحداً بعمودٍ واحد.
+    """
+    ends_at = getattr(tenant, "subscription_ends_at", None)
+    if ends_at is None and not hasattr(tenant, "subscription_ends_at"):
+        from tenants.models import Tenant
+
+        tenant_id = _tenant_id(tenant)
+        row = (
+            Tenant.objects.filter(pk=tenant_id).only("subscription_ends_at").first()
+            if tenant_id is not None else None
+        )
+        ends_at = getattr(row, "subscription_ends_at", None)
+    if ends_at is None:
+        return {
+            "ends_at": None,
+            "days_left": None,
+            "expired": False,
+            "expiring_soon": False,
+        }
+    days_left = (ends_at - timezone.localdate()).days
+    return {
+        "ends_at": ends_at,
+        "days_left": days_left,
+        "expired": days_left < 0,
+        "expiring_soon": 0 <= days_left <= EXPIRY_WARNING_DAYS,
+    }
+
+
+def subscription_expired(tenant) -> bool:
+    """هل مضى تاريخ انتهاء اشتراك الشركة؟ — حارس الكتابة يسأل هذا وحده."""
+    return subscription_expiry(tenant)["expired"]
 
 
 def _cache_key(tenant_id):

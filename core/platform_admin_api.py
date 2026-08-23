@@ -1,11 +1,12 @@
 """واجهات إدارة المنصة — عالمية ومحروسة بالسوبر أدمن فقط."""
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Max, Q, Sum, Value, When
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from rest_framework import serializers, status, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import (
@@ -25,7 +26,8 @@ from core.models import (
 from core.modules import MODULES, invalidate_module_cache
 from core.plans import (
     LIMITS, bulk_overrides, bulk_usage, invalidate_limit_cache, limit_rows,
-    limit_value, near_limit_rows, plan_default,
+    limit_value, near_limit_rows, plan_default, subscription_expiry,
+    trial_end_date,
 )
 from tenants.models import Branch, Tenant, UserCompanyMembership
 
@@ -317,11 +319,17 @@ def platform_super_admin_detail(request, pk):
 
 
 def _company_payload(tenant, member_count=None):
+    # T-TRIAL: حالة الانتهاء محسوبة في الخادم لا في اللوحة — «كم بقي» قسمةُ
+    # تواريخ، وإجراؤها في المتصفّح يجعلها تتبع ساعة جهاز السوبر أدمن ومنطقته.
+    expiry = subscription_expiry(tenant)
     return {
         'id': tenant.TenantID,
         'name': tenant.CompanyName,
         'plan': tenant.SubscriptionPlan,
         'status': tenant.Status,
+        'subscription_ends_at': expiry['ends_at'],
+        'subscription_days_left': expiry['days_left'],
+        'subscription_expired': expiry['expired'],
         'import_enabled': tenant.import_enabled,
         'is_example': tenant.is_example,
         'member_count': (
@@ -945,6 +953,25 @@ def _apply_company_changes(tenant, data):
             raise serializers.ValidationError({'plan': 'خطة اشتراك غير معروفة.'})
         tenant.SubscriptionPlan = plan
         changed.append('SubscriptionPlan')
+        # T-TRIAL: تحويلٌ إلى الخطة التجريبية بلا تاريخ = تجربةٌ بلا نهاية، وهي
+        # الحالة التي وُجد هذا الحقل ليمنعها. يُملأ الافتراضي هنا لا في النموذج:
+        # الافتراضي على مستوى العمود كان سيمنح **كل** شركة قائمة تاريخ انتهاء.
+        # ولا يُلمس تاريخٌ موجود — تمديدُ تجربةٍ يمرّ بحقل التاريخ صراحةً.
+        if plan == 'Trial' and tenant.subscription_ends_at is None:
+            tenant.subscription_ends_at = trial_end_date()
+            changed.append('subscription_ends_at')
+    if 'subscription_ends_at' in data:
+        raw = data.get('subscription_ends_at')
+        if raw in (None, '', 'null'):
+            tenant.subscription_ends_at = None  # اشتراك بلا انتهاء
+        else:
+            parsed = parse_date(str(raw).strip())
+            if parsed is None:
+                raise serializers.ValidationError(
+                    {'subscription_ends_at': 'تاريخ غير صالح — الصيغة YYYY-MM-DD.'})
+            tenant.subscription_ends_at = parsed
+        if 'subscription_ends_at' not in changed:
+            changed.append('subscription_ends_at')
     if 'status' in data:
         state = str(data.get('status') or '').strip()
         if state not in {s for s, _ in Tenant.STATUS_CHOICES}:
@@ -964,7 +991,16 @@ def _apply_company_changes(tenant, data):
 _COMPANY_EVENT_FIELDS = {
     'SubscriptionPlan': ('PLAN_CHANGED', 'خطة الاشتراك', 'تم تغيير خطة اشتراك الشركة.'),
     'Status': ('STATUS_CHANGED', 'حالة الشركة', 'تم تغيير حالة الشركة.'),
+    'subscription_ends_at': (
+        'SUBSCRIPTION_END_CHANGED', 'تاريخ انتهاء الاشتراك',
+        'تم تغيير تاريخ انتهاء اشتراك الشركة.',
+    ),
 }
+
+
+def _json_safe(value):
+    """التاريخ نصّاً قبل أن يدخل `metadata` — JSONField لا يسلسل `date`."""
+    return value.isoformat() if isinstance(value, date) else value
 
 
 def _log_company_changes(request, tenant, changed, previous):
@@ -984,8 +1020,8 @@ def _log_company_changes(request, tenant, changed, previous):
             metadata={
                 'event_code': event_code,
                 'field': field,
-                'previous': previous[field],
-                'new': new_value,
+                'previous': _json_safe(previous[field]),
+                'new': _json_safe(new_value),
             },
             request=request,
             tenant=tenant,

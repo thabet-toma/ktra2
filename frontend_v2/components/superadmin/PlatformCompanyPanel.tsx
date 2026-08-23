@@ -16,6 +16,7 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { formatBytes } from "../../utils/formatBytes";
 import { formatDateValue } from "../../utils/formatDate";
+import { formatNumber } from "../../utils/formatNumber";
 // شكل الحركة الواحدة (شارة الإجراء · اسم النوع · صيغة الوقت) مصدره واحد مع سجل
 // المستند والصفحة العامة — لا صيغة ثالثة تخصّ لوحة المنصة.
 import { actionMeta, entityLabel, formatActivityTime } from "../activity/activityMeta";
@@ -32,6 +33,7 @@ export const COMPANY_STATUS_LABELS: Record<string, string> = {
 };
 
 export const COMPANY_PLAN_LABELS: Record<string, string> = {
+  Trial: "تجريبية",
   Basic: "أساسية",
   Pro: "احترافية",
   Enterprise: "مؤسسية",
@@ -52,6 +54,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<Required<Omit<PlatformCompanyPatch, "is_example">>>({
     name: "", plan: "Basic", status: "Trial", import_enabled: false,
+    subscription_ends_at: null,
   });
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -91,6 +94,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
       setForm({
         name: data.name, plan: data.plan, status: data.status,
         import_enabled: data.import_enabled,
+        subscription_ends_at: data.subscription_ends_at,
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذّر تحميل بيانات الشركة");
@@ -142,7 +146,28 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
   const dirty = !!detail && (
     form.name !== detail.name || form.plan !== detail.plan
     || form.status !== detail.status || form.import_enabled !== detail.import_enabled
+    || form.subscription_ends_at !== detail.subscription_ends_at
   );
+
+  // T-TRIAL: «كم بقي» يأتي محسوباً من الخادم (`subscription_days_left`) ولا
+  // يُحسب هنا: حسابُه في المتصفّح يجعله يتبع ساعة جهاز السوبر أدمن، فيقرأ يوماً
+  // والحارس يقرأ غيره. لذلك تاريخٌ عُدّل ولم يُحفظ لا رقم له — «يُطبَّق عند الحفظ».
+  const expiryHint = (() => {
+    if (!detail) return "";
+    if (!form.subscription_ends_at) {
+      return form.plan === "Trial"
+        ? "بلا تاريخ — يُضبط تلقائياً بعد ١٤ يوماً عند الحفظ"
+        : "بلا تاريخ انتهاء";
+    }
+    if (form.subscription_ends_at !== detail.subscription_ends_at) {
+      return "يُطبَّق عند الحفظ";
+    }
+    const left = detail.subscription_days_left;
+    if (left === null) return "";
+    if (left < 0) return `منتهٍ منذ ${formatNumber(-left, { maxDecimals: 0 })} يوماً — الشركة للقراءة فقط`;
+    if (left === 0) return "اليوم آخر يوم عمل";
+    return `يتبقّى ${formatNumber(left, { maxDecimals: 0 })} يوماً`;
+  })();
 
   const saveCompany = () =>
     run(async () => {
@@ -345,6 +370,19 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                         <option key={value} value={value}>{label}</option>
                       ))}
                     </select>
+                  </div>
+                  <div>
+                    <label htmlFor="platform-company-expiry" className="mb-1 block text-xs font-bold aseel-text-soft">تاريخ انتهاء الاشتراك</label>
+                    <input
+                      id="platform-company-expiry"
+                      type="date"
+                      className="aseel-input h-9 w-full"
+                      value={form.subscription_ends_at ?? ""}
+                      onChange={(event) => setForm((current) => ({
+                        ...current, subscription_ends_at: event.target.value || null,
+                      }))}
+                    />
+                    <p className="mt-1 text-[11px] aseel-text-soft">{expiryHint}</p>
                   </div>
                   <div className="flex items-end">
                     <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-[var(--color-text)]">

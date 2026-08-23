@@ -5,7 +5,7 @@
 ## الغرض
 app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: يُعرّف `Tenant` — وحدة العزل التي يحمل مفتاحَها كل model في كل app آخر —
 ومعها إعدادات الشركة، فروعها، دفاتر ترقيم مستنداتها، عضويات مستخدميها وأدوارهم، وتجاوزات الصلاحيات لكل دور ولكل عضو.
-كما يملك `create_company` الذي يُقلع شركة جديدة كاملة (إعدادات + 10 دفاتر لكل نوع مستند + شجرة حسابات + فرع رئيسي + مستودع + عضوية مدير).
+كما يملك `create_company` الذي يُقلع شركة جديدة كاملة (إعدادات + 10 دفاتر لكل نوع مستند + شجرة حسابات + فرع رئيسي + مستودع + عضوية مدير) — **على الخطة التجريبية بأربعة عشر يوماً** (`core/plans.py` — `trial_end_date`)، لا `Enterprise` بلا حدود ولا انتهاء.
 جدول `Currency` يعيش هنا أيضاً ويستورده `accounting` و`sales` و`logistics` منه.
 
 ## آلية عزل الشركات (القاعدة العابرة للنظام)
@@ -49,7 +49,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `Tenant` (:18) | `TenantID` (PK), `CompanyName`, `Status` (Active/Suspended/Trial), `SubscriptionPlan`, `import_enabled`, `is_example`, `DomainName` (unique) | مُشار إليه بـ`tenant` FK من كل model في كل app |
+| `Tenant` (:18) | `TenantID` (PK), `CompanyName`, `Status` (Active/Suspended/Trial), `SubscriptionPlan` (Trial/Basic/Pro/Enterprise), `subscription_ends_at` (NULL = بلا انتهاء), `import_enabled`, `is_example`, `DomainName` (unique) | مُشار إليه بـ`tenant` FK من كل model في كل app |
 | `Currency` (:4) | `CurrencyID`, `Code`, `Symbol`, `IsBaseCurrency` | **عام بلا tenant**؛ يستورده accounting/sales/logistics |
 | `TenantSettings` (:54) | `default_vat_rate` (16.00), `fiscal_period_*`, `dashboard_month_start_day`, `font_scale`/`font_family`, `idle_timeout_minutes` (5..1440), `licensed_dealer_no` | `tenant` **OneToOne**, `currency`, `default_freight_credit_account`→Account |
 | `Branch` (:141) | `name`, `code`, `is_main`, `is_active` | `tenant`, `unique_together (tenant, code)`؛ يشارك الشجرة والأصناف والشركاء ويعزل الفواتير/المخزون/القيود |
@@ -120,6 +120,8 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 - **ترقيم المستندات عبر `TenantBook.get_next_number` فقط** — قفل صف `select_for_update` داخل `transaction.atomic` (`models.py:244-273`)؛ لا تحسب `last_used_number + 1` يدوياً.
 - **الفرع يشارك الشجرة/الأصناف/الشركاء ويعزل الفواتير والمخزون والقيود** عبر بُعد `branch` (`models.py:141-149`, `services.py:374-380`) — لا تنسخ شجرة حسابات لفرع.
 - **`viewer` قراءة فقط** على مستوى المنصة (`core/permissions.py`)، و`legal_accountant` يكتب من `/api/accountant/` فقط (`core/permissions.py:74-81`).
+- **الشركة الجديدة تبدأ تجريبية**: `create_company` يضبط `SubscriptionPlan='Trial'` و`Status='Trial'` و`subscription_ends_at` بعد `TRIAL_PERIOD_DAYS` — الترقية أو التمديد من لوحة المنصة، والحدود تتبع الخطة تلقائياً.
+- **انتهاء الاشتراك يمنع الكتابة وحدها**: مضيُّ `subscription_ends_at` يجعل الشركة للقراءة والطباعة والتصدير، والكتابة ترد 403 (`core/permissions.py` — `TenantRolePermission`). التاريخ **شامل** (يوم الانتهاء يوم عمل)، والسؤال عنه يمرّ بـ`core/plans.py` (`subscription_expiry`) وحده — لا تعيد حساب «هل انتهى» في نقطة ثانية. تعديل التاريخ من لوحة المنصة فقط: `subscription_ends_at` للقراءة في `TenantSerializer` عمداً. ومسارٌ يستبدل `permission_classes` (بوابة المحاسب) لا يرث الحارس — يستدعي `require_active_subscription` صراحةً.
 - **`ui_mode` تفضيل عرض لا صلاحية**: لا يمنح وصولاً ولا يحجب مساراً ولا يُستشار في أي قرار خادمي. كتابته ذاتية على عضوية المستدعي وحدها (`tenants/views.py` — `set_ui_mode`)، ولم يُثقَب لأجله حارس `viewer`: رفضه 403 مقبول ومعالَج في الواجهة (`docs/modules/frontend.md`).
 
 ## الاختبارات المهمة
