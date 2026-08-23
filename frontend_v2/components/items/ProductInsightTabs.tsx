@@ -15,6 +15,8 @@ import { LedgerTable, DocRefCell, type LedgerColumn } from "../shared/LedgerTabl
 import SerialEntryModal from "../shared/SerialEntryModal";
 import { formatQuantity, formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
+import { openInNewTab } from "../../utils/openInNewTab";
+import { productProfilePath } from "../../utils/entityLinks";
 
 export interface ProductProfileData {
   id: number;
@@ -521,4 +523,212 @@ export const useProductInsights = (
     };
 
   return { profile, loading, error, reload: loadProfile, tabs, serialsTab };
+};
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * الكرت المجمّع: عقدة المقاس/التصنيف تجمع كل البراندات تحتها.
+ * كان كلّه محبوساً في صفحة `GroupProfilePage`، فلمّا احتاجته شجرة الأصناف
+ * لتعرضه في بطاقتها الجانبية كان الطريق إمّا نسخةً ثانية منه أو استخراجه —
+ * فاستُخرج هنا كما استُخرجت تبويبات الصنف المفرد، والصفحة صارت غلافاً فوقه.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+export interface GroupMember {
+  id: number;
+  sku: string;
+  brand: string;
+  name: string;
+  quantity_on_hand: string;
+  avg_cost: string;
+  inventory_valuation: string;
+  sold_qty: string;
+}
+
+export interface GroupProfileData {
+  name: string;
+  category: string | null;
+  member_count: number;
+  members: GroupMember[];
+  quantity_on_hand: string;
+  inventory_valuation: string;
+  purchased_qty: string;
+  purchased_value: string;
+  sold_qty: string;
+  sold_value: string;
+}
+
+/** حركة المخزون المجمّعة = صفّ حركة الصنف + البراند الذي جاءت منه. */
+export interface GroupLedgerRow extends LedgerRow {
+  product_name?: string;
+}
+
+/**
+ * أعمدة الحركة المجمّعة = أعمدة الصنف نفسها + «البراند» بعد التاريخ، والرصيد
+ * يُسمّى رصيد البراند لأنه جارٍ لكل براند على حدة لا للمجموعة.
+ * الحقن **بالمفتاح لا بالفهرس**: تغيّر ترتيب الأعمدة المشتركة لا يزحزح شيئاً.
+ */
+const groupLedgerColumns = (): LedgerColumn<GroupLedgerRow>[] => {
+  const out: LedgerColumn<GroupLedgerRow>[] = [];
+  for (const col of ledgerColumns({ withParty: true }) as LedgerColumn<GroupLedgerRow>[]) {
+    out.push(col.key === "running_balance" ? { ...col, header: "رصيد البراند" } : col);
+    if (col.key === "date") {
+      out.push({ key: "product_name", header: "البراند", render: (r) => r.product_name || "—" });
+    }
+  }
+  return out;
+};
+
+const groupMemberColumns: LedgerColumn<GroupMember>[] = [
+  {
+    key: "name",
+    header: "البراند",
+    render: (m) => (
+      <button
+        type="button"
+        className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+        onClick={() => openInNewTab(productProfilePath(m.id))}
+        title="فتح بطاقة هذا البراند"
+      >{m.name}</button>
+    ),
+  },
+  { key: "sku", header: "الكود", render: (m) => m.sku },
+  { key: "quantity_on_hand", header: "الكمية", align: "center", render: (m) => formatQuantity(m.quantity_on_hand, "—") },
+  { key: "avg_cost", header: "متوسط التكلفة", align: "center", render: (m) => formatMoney(m.avg_cost, "—") },
+  { key: "inventory_valuation", header: "التقييم", align: "center", render: (m) => formatMoney(m.inventory_valuation, "—") },
+  { key: "sold_qty", header: "المباع", align: "center", render: (m) => formatQuantity(m.sold_qty, "—") },
+];
+
+/**
+ * يجلب الكرت المجمّع لقائمة أصناف ويبني تبويباته. المفتاح نصّي (`ids.join`) كي
+ * لا يُعيد مستدعٍ يبني المصفوفة في كل رسم إطلاقَ الطلبات بلا نهاية.
+ * قائمةٌ فارغة (تصنيف بلا أصناف) ليست خطأ شبكة: لا نداء، ورسالةٌ تقول ذلك.
+ */
+export const useGroupInsights = (ids: number[]) => {
+  const idsKey = ids.join(",");
+  const idList = useMemo(
+    () => idsKey.split(",").filter(Boolean).map(Number),
+    [idsKey],
+  );
+
+  const [profile, setProfile] = useState<GroupProfileData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [ledger, setLedger] = useState<{ rows: GroupLedgerRow[]; count: number }>({ rows: [], count: 0 });
+  const [ledOffset, setLedOffset] = useState(0);
+  const [ledLoading, setLedLoading] = useState(false);
+
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [invLoading, setInvLoading] = useState(false);
+  const [invError, setInvError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLedOffset(0);
+    if (!idList.length) {
+      setProfile(null);
+      setError("لا توجد أصناف في هذه المجموعة بعد.");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    inventoryApi.getProductGroupProfile(idList)
+      .then((p) => { setProfile(p as GroupProfileData); setError(null); })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false));
+  }, [idList]);
+
+  useEffect(() => {
+    if (!idList.length) { setLedger({ rows: [], count: 0 }); return; }
+    setLedLoading(true);
+    inventoryApi.getProductGroupLedger(idList, PAGE, ledOffset)
+      .then((d) => setLedger({ rows: d.results, count: d.count }))
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLedLoading(false));
+  }, [idList, ledOffset]);
+
+  useEffect(() => {
+    if (!idList.length) { setInvoices([]); return; }
+    setInvLoading(true);
+    setInvError(null);
+    inventoryApi.getProductGroupInvoices(idList)
+      .then((d) => setInvoices(Array.isArray(d) ? d : []))
+      .catch((err) => { setInvError(err instanceof Error ? err.message : String(err)); setInvoices([]); })
+      .finally(() => setInvLoading(false));
+  }, [idList]);
+
+  const tabs: AseelTab[] = [
+    {
+      key: "kpis",
+      label: "نظرة عامة (مجمّع)",
+      content: (
+        <div className="p-3">
+          {profile ? (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <Kpi label="إجمالي المخزون (كل البراندات)" value={formatQuantity(profile.quantity_on_hand, "—")} />
+              <Kpi label="تقييم المخزون المجمّع" value={formatMoney(profile.inventory_valuation, "—")} />
+              <Kpi label="عدد البراندات" value={formatQuantity(profile.member_count, "—")} />
+              <Kpi label="التصنيف" value={profile.category || "—"} />
+              <Kpi label="إجمالي المشتراة (كمية)" value={formatQuantity(profile.purchased_qty, "—")} />
+              <Kpi label="إجمالي المشتراة (قيمة)" value={formatMoney(profile.purchased_value, "—")} />
+              <Kpi label="إجمالي المباعة (كمية)" value={formatQuantity(profile.sold_qty, "—")} />
+              <Kpi label="إجمالي المباعة (قيمة)" value={formatMoney(profile.sold_value, "—")} />
+            </div>
+          ) : (
+            // خطأٌ أو مجموعةٌ فارغة — لا «جاري التحميل…» أبديّ.
+            <div role={error ? "alert" : undefined} className="p-4 text-center text-[var(--aseel-ink-soft)]">
+              {loading ? "جاري التحميل…" : error || "لا توجد بيانات لهذه المجموعة."}
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: "members",
+      label: "البراندات",
+      content: (
+        <div className="p-2">
+          <LedgerTable<GroupMember>
+            columns={groupMemberColumns}
+            rows={profile?.members || []}
+            loading={loading}
+            emptyText="لا توجد براندات في هذه المجموعة."
+          />
+        </div>
+      ),
+    },
+    {
+      key: "invoices",
+      label: "الفواتير المرتبطة",
+      content: (
+        <div className="p-2">
+          <LedgerTable<InvoiceRow>
+            columns={invoiceColumns}
+            rows={invoices}
+            loading={invLoading}
+            error={invError}
+            emptyText="لا توجد فواتير لهذه المجموعة."
+          />
+        </div>
+      ),
+    },
+    {
+      key: "ledger",
+      label: "حركة المخزون (مجمّعة)",
+      content: (
+        <div className="p-2">
+          <LedgerTable<GroupLedgerRow>
+            columns={groupLedgerColumns()}
+            rows={ledger.rows}
+            loading={ledLoading}
+            count={ledger.count}
+            limit={PAGE}
+            offset={ledOffset}
+            onPage={setLedOffset}
+            emptyText="لا توجد حركات مخزون لهذه المجموعة."
+          />
+        </div>
+      ),
+    },
+  ];
+
+  return { profile, loading, error, tabs };
 };

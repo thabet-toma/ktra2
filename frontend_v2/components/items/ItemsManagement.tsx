@@ -8,8 +8,10 @@ import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
 import { type DenseColumn } from "../aseel/AseelDenseTable";
 import { GroupedItemsTable, type TreeCategory } from "./GroupedItemsTable";
-import { Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer, Copy } from "lucide-react";
+import { Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer, Copy, ExternalLink, FolderTree } from "lucide-react";
 import { ItemFormAseel } from "./ItemFormAseel";
+import { useProductInsights, useGroupInsights } from "./ProductInsightTabs";
+import { AseelTabs, type AseelTab } from "../aseel";
 import { CategoriesManagement } from "./CategoriesManagement";
 import { InvoiceCategoryTree } from "../procurement/invoices/InvoiceCategoryTree";
 import type { Item } from "../../types";
@@ -49,6 +51,107 @@ const exportItemStyle: React.CSSProperties = {
   background: "none", border: "none", cursor: "pointer", color: "var(--aseel-ink)",
 };
 
+/**
+ * البطاقة الجانبية للعرض الشجري — العرض الشجري كان يشغل شريط 240px ويترك بقية
+ * عرض الشاشة بياضاً، والنقر على منتج (أو تصنيف) يقذف المستخدم إلى تبويب جديد.
+ * صار الفراغ بطاقةَ ما هو محدَّد في الشجرة، على نمط شجرة الحسابات: شريط شجرة
+ * + بطاقة السجل المحدَّد.
+ *
+ * إطارٌ واحد للحالتين (صنف مفرد · تصنيف مجمّع): الرأس هوية وأزرار، وتحته
+ * تبويبات الكرت نفسها التي تعرضها الصفحة الكاملة — لا نسخة ثانية منها.
+ */
+const TreePaneFrame: React.FC<{
+  icon: React.ReactNode;
+  title: string;
+  badge?: React.ReactNode;
+  actions?: React.ReactNode;
+  tabs: AseelTab[];
+}> = ({ icon, title, badge, actions, tabs }) => (
+  <div className="flex h-full min-h-0 flex-col">
+    <div className="flex items-center gap-2 border-b border-[var(--aseel-border)] px-2 py-1.5">
+      {icon}
+      <b className="truncate text-[var(--aseel-ink)]" title={title}>{title}</b>
+      {badge}
+      <div className="flex-1" />
+      {actions}
+    </div>
+    <div className="min-h-0 flex-1 overflow-auto">
+      <AseelTabs tabs={tabs} />
+    </div>
+  </div>
+);
+
+/**
+ * بطاقة الصنف المفرد. التركيب بمفتاح `key` عند المستدعي: كل اختيار يُعيد
+ * التركيب، فنتائج طلبٍ سابق بطيء تسقط على مكوّن مفكوك بدل أن تكتب فوق
+ * بيانات الصنف الجديد.
+ */
+const ProductTreePane: React.FC<{
+  productId: number;
+  productName: string;
+  onEdit: () => void;
+}> = ({ productId, productName, onEdit }) => {
+  const { profile, tabs } = useProductInsights(productId);
+  const title = profile?.name || productName || `صنف #${productId}`;
+  return (
+    <TreePaneFrame
+      icon={<Package className="h-4 w-4 shrink-0 text-[var(--aseel-ink-soft)]" />}
+      title={title}
+      badge={profile?.sku ? <span className="aseel-status-item" dir="ltr">{profile.sku}</span> : null}
+      tabs={tabs}
+      actions={
+        <>
+          <button type="button" className="aseel-toolbtn" onClick={onEdit} title="تعديل هذا الصنف">
+            <Edit2 className="h-4 w-4" /> تعديل
+          </button>
+          <button
+            type="button"
+            className="aseel-toolbtn"
+            onClick={() => openInNewTab(productProfilePath(productId))}
+            title="فتح الكرت الكامل في تبويب مستقل"
+          >
+            <ExternalLink className="h-4 w-4" /> الكرت الكامل
+          </button>
+        </>
+      }
+    />
+  );
+};
+
+/** بطاقة التصنيف: الكرت المجمّع لكل الأصناف تحته (وأحفاده). */
+const GroupTreePane: React.FC<{
+  ids: number[];
+  groupName: string;
+}> = ({ ids, groupName }) => {
+  const { profile, tabs } = useGroupInsights(ids);
+  const title = groupName || profile?.name || "كرت مجمّع";
+  const count = profile?.member_count ?? ids.length;
+  return (
+    <TreePaneFrame
+      icon={<FolderTree className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />}
+      title={`كرت مجمّع: ${title}`}
+      badge={<span className="aseel-status-item">{count} صنف</span>}
+      tabs={tabs}
+      actions={
+        <button
+          type="button"
+          className="aseel-toolbtn"
+          disabled={!ids.length}
+          onClick={() => openInNewTab(`/product-group?ids=${ids.join(",")}&name=${encodeURIComponent(title)}`)}
+          title="فتح الكرت المجمّع في تبويب مستقل"
+        >
+          <ExternalLink className="h-4 w-4" /> الكرت الكامل
+        </button>
+      }
+    />
+  );
+};
+
+/** ما هو محدَّد في الشجرة: صنفٌ مفرد أو تصنيفٌ مجمّع. */
+type TreePreview =
+  | { kind: "product"; id: number; name: string }
+  | { kind: "group"; ids: number[]; name: string };
+
 export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products" | "categories" }> = ({ initialTab = "products" }) => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"products" | "categories">(initialTab);
@@ -68,6 +171,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [displayMode, setDisplayMode] = useState<"tree" | "table">("table");
   const [editId, setEditId] = useState<number | null>(null);
   const [duplicateId, setDuplicateId] = useState<number | null>(null);
+  // المعروض في بطاقة العرض الشجري (يمين: الشجرة · يسار: بطاقة ما اخترته).
+  const [preview, setPreview] = useState<TreePreview | null>(null);
   const [search, setSearch] = useState("");
   const [total, setTotal] = useState(0);
   // المرحلة 5 / P0-12: ترقيم خادمي فعلي للعرض الجدولي.
@@ -500,7 +605,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       {displayMode === "tree" ? (
         // T-N3: شجرة التصنيفات/الأصناف (نفس مكوّن شجرة المنتجات في الفواتير).
         // نقرة مفردة على صنف → بطاقته؛ نقرة مزدوجة/اختيار → تعديله.
-        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        <div className="flex min-h-0 flex-1 gap-2 overflow-hidden">
           <InvoiceCategoryTree
             items={products.map((p) => ({
               ...(p as unknown as Item),
@@ -512,12 +617,33 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               has_group: p.has_group,
               categoryId: (p as unknown as { category?: number | string }).category ?? "",
             })) as unknown as Item[]}
-            onShowCard={(it) => openInNewTab(productProfilePath(it.id))}
+            onShowCard={(it) => setPreview({ kind: "product", id: Number(it.id), name: it.name || "" })}
             onShowGroup={(ids, name) =>
-              openInNewTab(`/product-group?ids=${ids.join(",")}&name=${encodeURIComponent(name)}`)}
+              setPreview({ kind: "group", ids: ids.map(Number), name })}
             onPickItem={(it) => { setEditId(Number(it.id)); setView("form"); }}
             onItemCreated={() => reload()}
           />
+          {/* الفراغ الذي كان بجانب الشجرة: بطاقة ما هو محدَّد فيها. */}
+          <div className="min-w-0 flex-1 overflow-hidden rounded border border-[var(--aseel-border)] bg-[var(--aseel-panel)]">
+            {preview?.kind === "product" ? (
+              <ProductTreePane
+                key={`p${preview.id}`}
+                productId={preview.id}
+                productName={preview.name}
+                onEdit={() => { setEditId(preview.id); setDuplicateId(null); setView("form"); }}
+              />
+            ) : preview?.kind === "group" ? (
+              <GroupTreePane
+                key={`g${preview.ids.join(",")}`}
+                ids={preview.ids}
+                groupName={preview.name}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center p-6 text-center text-[var(--aseel-ink-soft)]">
+                اختر منتجاً من الشجرة لتظهر بطاقته هنا، أو تصنيفاً ليظهر كرته المجمّع — التسعير والمخزون والفواتير وحركة الصنف.
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         // تجميع البراندات: عقدة «مجموعة» قابلة للطيّ بالجدول + كرت مجمّع (DRY مع الشجرة).

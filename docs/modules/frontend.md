@@ -45,6 +45,25 @@
 `getUserMedia` لا خيارٌ لنا. يحرسها `e2e/scan-lookup.spec.ts` (بما فيه أن
 البطاقة كلّها تصل بنداءٍ **واحد**، وأن الزرّ مُعطَّل ومشروحٌ على غير HTTPS).
 
+**العرض الشجري للأصناف = شجرة + بطاقة**: `items/ItemsManagement.tsx` كان يرسم
+شجرة المنتجات (`procurement/invoices/InvoiceCategoryTree.tsx` — شريط 240px
+تفرضه `.aseel-tree-panel`) ويترك بقية عرض الشاشة بياضاً، والنقر على منتج أو
+تصنيف يفتح كرته في **تبويب جديد**. صارت المساحة بطاقةَ ما هو محدَّد في الشجرة:
+منتجٌ ⇒ `ProductTreePane` (فوق `useProductInsights`) · تصنيفٌ ⇒ `GroupTreePane`
+(فوق `useGroupInsights`) — والخطّافان في
+`frontend_v2/components/items/ProductInsightTabs.tsx` يخدمان البطاقة الجانبية
+والصفحتين الكاملتين (`ProductProfilePage` · `GroupProfilePage`) معاً، فلا نسخة
+ثانية من تبويبات الكرت. النمط من شجرة الحسابات
+(`frontend_v2/components/accounting/AccountingCoaPage.tsx`). الكرت الكامل
+والتحرير يبقيان زرّين في رأس البطاقة.
+
+**كبسةُ التصنيف تختار وتكشف**: حيث تُمرَّر `onShowGroup` (شاشة الأصناف وحدها)
+تعرض الكبسة الكرتَ المجمّع **وتفتح الفرع** إن كان مطويّاً — ولا تطويه بإعادة
+الكبس (الطيّ مهمّة السهم). وطيُّ اللوحة صار `.aseel-tree-rail` (32px بعنوان
+عمودي) بدل `.aseel-tree-panel w-10`: الأخيرة تخسر أمام `flex: 0 0 240px` في
+`styles/index.css` — القاعدة خارج طبقات Tailwind — فكان «الطيّ» يترك 240px
+بيضاء ولا يعيد للشاشة شيئاً. يحرس هذا كلَّه `e2e/items-tree-card-pane.spec.ts`.
+
 ## العقود مع الخادم
 
 | العقد | القاعدة |

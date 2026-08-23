@@ -260,8 +260,16 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
               <button
                 type="button"
                 className="truncate flex-1 text-start"
-                onClick={() => (onShowGroup ? onShowGroup(descendantItemIds(c.id), c.name) : toggle(c.id))}
-                title={onShowGroup ? "كبسة ⇒ الكرت المجمّع لكل ما تحته — السهم للفتح/الطيّ — كبسة يمين لخيارات" : "نقر للفتح/الطيّ — كبسة يمين لخيارات"}
+                onClick={() => {
+                  if (!onShowGroup) { toggle(c.id); return; }
+                  // كبسةٌ واحدة تختار وتكشف: تعرض الكرت المجمّع، وتفتح الفرع إن
+                  // كان مطويّاً (ولا تطويه بإعادة الكبس — الطيّ مهمّة السهم)،
+                  // كما يفعل مستكشف الملفات. بلا ذلك تُعرض بطاقة تصنيفٍ لا
+                  // يمكن رؤية أصنافه إلا بكبسةٍ ثانية على سهمٍ لم ينتبه له أحد.
+                  onShowGroup(descendantItemIds(c.id), c.name);
+                  if (!open) toggle(c.id);
+                }}
+                title={onShowGroup ? "كبسة ⇒ الكرت المجمّع لكل ما تحته + فتح الفرع — السهم للطيّ — كبسة يمين لخيارات" : "نقر للفتح/الطيّ — كبسة يمين لخيارات"}
               >
                 {c.name}
               </button>
@@ -302,9 +310,21 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
   const uncategorizedItems = (itemsByCat.get(UNCAT) || []).filter(itemMatches);
 
   if (panelCollapsed && !manageMode) {
+    // شريط مطويّ لا لوحة فارغة: `.aseel-tree-panel` تفرض `flex: 0 0 240px` من
+    // خارج طبقات Tailwind، فـ`w-10` كانت تخسر أمامها ويبقى الطيّ 240px بيضاء
+    // (قِيست: 240×320). `.aseel-tree-rail` هي شريط النظام نفسه — 32px بعنوان
+    // عمودي — فيعود عرضُ اللوحة إلى الشاشة فعلاً عند الطيّ.
     return (
-      <div className="aseel-tree-panel w-10 shrink-0 flex flex-col items-center py-2 cursor-pointer hover:bg-[var(--color-surface-2)]" onClick={() => setPanelCollapsed(false)} title="إظهار الشجرة">
-        <PanelRightOpen className="w-5 h-5 text-[var(--color-text-muted)]" />
+      <div
+        className="aseel-tree-rail"
+        role="button"
+        tabIndex={0}
+        onClick={() => setPanelCollapsed(false)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPanelCollapsed(false); } }}
+        title="إظهار شجرة المنتجات"
+      >
+        <PanelRightOpen className="w-4 h-4" />
+        <span className="aseel-tree-rail-label">شجرة المنتجات</span>
       </div>
     );
   }
