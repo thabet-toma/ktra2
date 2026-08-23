@@ -351,9 +351,9 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     // T-IMPOFFER: «وإذا غير ملائم يكون معلَّم على أنه مشطوب» — الشطب على رقم
     // المستند نفسه فيُقرأ القرار من مسح الصفوف بلا فتح أي عرض.
     // THA-116 (#31, مراجعة المالك): «الصورة تملأ مربّعها، والرقم ما ياكل منه» —
-    // المربّع صار 48px والخانة 104px، والرقم تسلسلاً وحده. الصورة هي ما يميّز
+    // المربّع صار 72px والخانة 128px، والرقم تسلسلاً وحده. الصورة هي ما يميّز
     // العرض بصرياً في قائمة الاستيراد، والبادئة الثابتة كانت تأخذ ثلثَي الخانة.
-    { key: "offerNumber", header: "رقم المستند", width: "104px",
+    { key: "offerNumber", header: "رقم المستند", width: "128px",
       render: (o) => {
         const firstImage = (o.attachments || []).find((file) =>
           (file.type || "").toLowerCase().startsWith("image/")
@@ -362,21 +362,22 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
         const number = o.offerNumber || o.id.slice(0, 8);
         return (
           <div className="flex items-center gap-1.5">
-            {/* المربّع نفسه هو الحاوية (`h-12 w-12 overflow-hidden`) والصورة تملأه
+            {/* المربّع نفسه هو الحاوية (`h-18 w-18` = 72px + `overflow-hidden`)
+                والصورة تملأه
                 بـ`h-full w-full object-cover`: صورة عمودية أو أعرض من مربّعها
                 تُقصّ ولا تُترك بهامش. الخلفية المحايدة للصور الشفافة — بلا
                 خلفية يظهر تناوب ألوان الصفوف من خلف الصورة. */}
             {firstImage ? (
               <button type="button"
-                className="block h-12 w-12 shrink-0 overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+                className="block h-18 w-18 shrink-0 overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface-2)]"
                 title={`عرض «${firstImage.name || "الصورة"}»`}
                 onClick={(e) => { e.stopPropagation(); setPreviewFile(firstImage); }}>
                 <img src={firstImage.url} alt="" className="h-full w-full object-cover" />
               </button>
             ) : (
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-dashed border-[var(--color-border)] aseel-text-soft"
+              <span className="flex h-18 w-18 shrink-0 items-center justify-center rounded border border-dashed border-[var(--color-border)] aseel-text-soft"
                 title="لا توجد صورة توضيحية">
-                <ImageIcon className="h-5 w-5" aria-hidden="true" />
+                <ImageIcon className="h-7 w-7" aria-hidden="true" />
               </span>
             )}
             {/* الرقم لا يزاحم الصورة: الصورة `shrink-0` والرقم `min-w-0 truncate`
