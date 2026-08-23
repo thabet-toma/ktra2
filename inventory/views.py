@@ -19,6 +19,7 @@ from .serializers import (
     WarehouseTransferSerializer, StocktakeSerializer,
     SupplierProductSerializer,
 )
+from .stock_status import filter_by_stock_status, stock_status_of
 from .services import (
     generate_next_sku, record_stock_movement,
     post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
@@ -96,7 +97,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         'supplier_codes__supplier_sku', 'supplier_codes__supplier_name',
     ]
     ordering_fields = ['id', 'sku', 'name_ar', 'quantity_on_hand', 'avg_cost', 'sale_price',
-                       'min_stock_level', 'created_at']
+                       'min_stock_level', 'max_stock_level', 'created_at']
     ordering = ['-id']
     # كروت المجموعة قراءةٌ تُرسَل بـPOST (محدِّدها لا يسع سطر الطلب) — يفحصها
     # TenantRolePermission كأنها GET، فيبقى «مستعرض» قادراً على فتحها.
@@ -115,6 +116,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         'volume_cbm': 'الحجم',
         'hs_code': 'رمز HS',
         'min_stock_level': 'حد المخزون الأدنى',
+        'max_stock_level': 'حد المخزون الأقصى',
         'allow_negative_stock': 'السماح بالمخزون السالب',
         'is_serialized': 'التتبع التسلسلي',
         'is_service': 'نوع الخدمة',
@@ -132,12 +134,25 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             return ProductLookupSerializer
         return ProductSerializer
 
+    def _reserved_map(self):
+        """خريطة المحجوز للشركة — تُحسب مرّةً لكل طلب.
+
+        يقرؤها الفلتر (`get_queryset`) والسيريالايزر معاً؛ بلا هذا الحفظ صارت
+        استعلامين لنفس السؤال في الطلب الواحد.
+        """
+        if not hasattr(self, '_reserved_map_cache'):
+            tenant = self._get_tenant()
+            if tenant:
+                from sales.services import reserved_quantity_map
+                self._reserved_map_cache = reserved_quantity_map(tenant.TenantID)
+            else:
+                self._reserved_map_cache = {}
+        return self._reserved_map_cache
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
-        tenant = self._get_tenant()
-        if tenant:
-            from sales.services import reserved_quantity_map
-            context['reserved_quantity_map'] = reserved_quantity_map(tenant.TenantID)
+        if self._get_tenant():
+            context['reserved_quantity_map'] = self._reserved_map()
         return context
 
     def get_queryset(self):
@@ -165,21 +180,12 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         created_to = params.get('created_to')
         if created_to:
             qs = qs.filter(created_at__date__lte=created_to)
-        # جدول الأصناف: فلتر حالة المخزون — مطابق لمنطق ProductSerializer.get_stock_status
-        # (نفذ: ≤0 · منخفض: >0 و حد أدنى>0 و ≤الحد الأدنى · متوفر: الباقي).
+        # T-REORDER: فلتر حالة المخزون — من `inventory/stock_status.py` وحدها.
+        # كان مكتوباً هنا نسخةً ثانية بجانب نسخة السيريالايزر، وتباعدتا.
         stock_status = params.get('stock_status')
-        if stock_status == 'out_of_stock':
-            qs = qs.filter(quantity_on_hand__lte=0)
-        elif stock_status == 'low_stock':
-            qs = qs.filter(
-                quantity_on_hand__gt=0,
-                min_stock_level__gt=0,
-                quantity_on_hand__lte=F('min_stock_level'),
-            )
-        elif stock_status == 'in_stock':
-            qs = qs.filter(quantity_on_hand__gt=0).exclude(
-                min_stock_level__gt=0,
-                quantity_on_hand__lte=F('min_stock_level'),
+        if stock_status:
+            qs = filter_by_stock_status(
+                qs, stock_status, reserved_map=self._reserved_map(),
             )
         # ST-3: شاشة «متجري» تعرض المنشور وحده، وتحتاج عدده قبل فتح المتجر أول
         # مرة. بلا هذا الفلتر كان عليها تحميل الكتالوج كاملاً وتصفيته في
@@ -564,6 +570,106 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(product_linked_invoices(
             tenant_id=tenant.pk, product_ids=self._group_ids(request, tenant)))
+
+    # ── تجديد المخزون ──────────────────────────────────────────────────
+    @action(detail=False, methods=['post'], url_path='apply-replenishment')
+    @requires_perm('inventory.item.manage')
+    def apply_replenishment(self, request):
+        """يثبّت الحدّين المقترَحين على أصنافٍ محدَّدة — `{"product_ids": [...]}`.
+
+        كتابةٌ حقيقية لا قراءة: **ليست** في `read_only_post_actions`، وتشترط
+        صلاحية إدارة الأصناف لا عرضها.
+
+        والمحدِّد في **جسم** الطلب لا في عنوانه: تعداد ألف صنفٍ في سطر الطلب
+        تجاوز في الإنتاج `large_client_header_buffers` فردّ nginx 414 بينما مرّ
+        التطوير — نفس درس كرت المجموعة.
+        """
+        from core.replenishment import apply_suggested_levels
+
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+        raw = request.data.get('product_ids') or []
+        if not isinstance(raw, list):
+            return Response(
+                {'error': 'product_ids يجب أن تكون قائمة معرّفات أصناف'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            ids = [int(pid) for pid in raw]
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'معرّف صنف غير صالح في القائمة'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not ids:
+            return Response(
+                {'error': 'لم تُحدَّد أصناف'}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        result = apply_suggested_levels(tenant.TenantID, ids, user=request.user)
+        return Response(result)
+
+    @action(detail=False, methods=['post'], url_path='bulk-set-group')
+    @requires_perm('inventory.item.manage')
+    def bulk_set_group(self, request):
+        """يضبط «النوع» و/أو البراند على أصنافٍ محدَّدة دفعةً واحدة.
+
+        لماذا نقطةٌ للجملة: `variant_group` هو مفتاح تجميع الموديلات (البدائل في
+        الفاتورة، وقرار «مؤجَّل» في تقرير التجديد)، وكان فارغاً على كل صنفٍ في كل
+        شركة لأنه بلا مدخل. ضبطُه صنفاً صنفاً على كتالوجٍ من ألفٍ ونصف يعني ألّا
+        يُضبط أبداً.
+
+        الحقل الغائب من الجسم **لا يُمَسّ**، والحقل الفارغ يُمحى — فيمكن تصحيح
+        نوعٍ خاطئ كما يمكن تعيينه. المحدِّد في الجسم لا في العنوان.
+        """
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+        raw = request.data.get('product_ids') or []
+        if not isinstance(raw, list) or not raw:
+            return Response(
+                {'error': 'لم تُحدَّد أصناف'}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            ids = [int(pid) for pid in raw]
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'معرّف صنف غير صالح في القائمة'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        fields = {}
+        if 'variant_group' in request.data:
+            fields['variant_group'] = (request.data.get('variant_group') or '').strip()[:120]
+        if 'brand' in request.data:
+            fields['brand'] = (request.data.get('brand') or '').strip()[:100]
+        if not fields:
+            return Response(
+                {'error': 'لا حقل للتعيين — مرّر variant_group أو brand'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        products = list(Product.objects.filter(tenant=tenant, pk__in=ids))
+        for product in products:
+            for name, value in fields.items():
+                setattr(product, name, value)
+        if products:
+            Product.objects.bulk_update(products, list(fields))
+            labels = '، '.join(
+                f'{self.activity_field_labels.get(k, k)} = «{v or "—"}»'
+                for k, v in fields.items()
+            )
+            log_activity(
+                action='update',
+                entity_type='product',
+                entity_label=f'{len(products)} صنفاً',
+                description=f'عيّن {labels} على {len(products)} صنفاً دفعةً واحدة',
+                metadata={'product_ids': [p.id for p in products][:200], **fields},
+                request=request,
+                tenant=tenant,
+                user=request.user,
+            )
+        return Response({'updated': len(products), 'fields': fields})
 
     # ── الباركود والأرقام التسلسلية ────────────────────────────────────
     @action(detail=False, methods=['post'], url_path='generate_barcode')
@@ -966,6 +1072,8 @@ class StockMovementViewSet(viewsets.ModelViewSet):
             tenant=tenant,
             quantity_on_hand__gt=0
         ).order_by('-quantity_on_hand')[:50]
+        from sales.services import reserved_quantity_map
+        reserved = reserved_quantity_map(tenant.TenantID, [p.id for p in products] or None)
         result = []
         for p in products:
             result.append({
@@ -976,10 +1084,8 @@ class StockMovementViewSet(viewsets.ModelViewSet):
                 'avg_cost': float(p.avg_cost),
                 'total_value': float(p.quantity_on_hand * p.avg_cost),
                 'min_stock_level': p.min_stock_level,
-                'stock_status': (
-                    'low_stock' if p.min_stock_level and p.quantity_on_hand <= p.min_stock_level
-                    else 'in_stock'
-                ),
+                # T-REORDER: نسخةٌ ثالثة من القاعدة كانت هنا — صارت نداءً واحداً.
+                'stock_status': stock_status_of(p, reserved_map=reserved),
             })
         total_value = sum(r['total_value'] for r in result)
         return Response({

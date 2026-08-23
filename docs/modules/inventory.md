@@ -17,6 +17,8 @@
 | `inventory/views.py` | ViewSets: المنتجات، الحركات، المستودعات، التحويلات، الجرد | 891 |
 | `inventory/serials.py` | كل منطق الأرقام التسلسلية للشراء والبيع (وحدة مستقلة عن services) | 765 |
 | `inventory/models.py` | 11 موديل: الصنف، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد | 465 |
+| `inventory/stock_status.py` | **مصدر الحقيقة الوحيد لحالة المخزون** (نفذ/منخفض/فائض/متوفّر): تعبير ORM ودالّة بايثون وفلتر — يستهلكها السيريالايزر والجدول والداشبورد والتقارير | 150 |
+
 | `inventory/serializers.py` | تمثيل الصنف والحركة والمستندات | 353 |
 | `inventory/urls.py` | 8 routers مركّبة على `/api/inventory/` (`core/urls.py`) | 21 |
 | `inventory/agent_api.py` | نقطة بوت الفواتير للأصناف (`/api/agent/products/`، مسجَّلة في `core/urls.py`). تسكن هنا لا في `core` لأن `.importlinter` يمنع `core` من استيراد `inventory.serializers`؛ ولا تستورد `sales`/`logistics` (عقد الاتجاه المعكوس) | 115 |
@@ -24,7 +26,7 @@
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `Product` | `sku`, `barcode`, `variant_group`, `brand`, `quantity_on_hand`, `avg_cost`, `sale_price`, `is_serialized`, `is_service`, `allow_negative_stock`, `warranty_months` | `category→ProductCategory`, `uom→UnitOfMeasure`، و6 FKs تجاوز حسابات على `accounting.Account` (`models.py:122-151`)؛ فريد `(tenant, sku)` (`:156`) |
+| `Product` | `sku`, `barcode`, `variant_group`, `brand`, `quantity_on_hand`, `avg_cost`, `sale_price`, `is_serialized`, `is_service`, `allow_negative_stock`, `warranty_months`, `min_stock_level`/`max_stock_level` (ثنائي إعادة الطلب: الأدنى **هو** نقطة الطلب، والأقصى هو المستوى الذي يُطلَب حتى بلوغه) | `category→ProductCategory`, `uom→UnitOfMeasure`، و6 FKs تجاوز حسابات على `accounting.Account` (`models.py:122-151`)؛ فريد `(tenant, sku)` (`:156`) |
 | `StockMovement` | `movement_type` (IN/OUT/ADJUST_IN/ADJUST_OUT/RETURN_IN/RETURN_OUT), `quantity`, `unit_cost`, `total_cost`, `reference_type`, `reference_id`, `quantity_before/after`, `avg_cost_before/after` | `product` (PROTECT)، `warehouse` (PROTECT)، `branch→tenants.Branch`، `partner→partners.Partner`؛ خاصية `origin` (`:270`) |
 | `ProductCategory` | `name`, `parent` | `revenue_account`, `cogs_account`, `inventory_account` → `accounting.Account` |
 | `Warehouse` | `code`, `is_default`, `is_active` | `branch→tenants.Branch` (اختياري)؛ فريد `(tenant, code)` لغير الفارغ |
@@ -101,6 +103,8 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | GET | `products/{id}/profile/` · `products/{id}/stock-ledger/` · `products/{id}/cost-breakdown/` | (405) · (411) · (433) |
 | GET | `products/{id}/stock-movements/` · `products/{id}/invoices/` | (398) · (426) |
 | GET | `products/{id}/serials/` · POST `products/{id}/serials/register/` | (559) · (570) |
+| **POST** | `products/bulk-set-group/` | تعيين «النوع» (`variant_group`) و/أو البراند على أصنافٍ محدَّدة دفعةً واحدة — `ProductViewSet` (`bulk_set_group`). الحقل الغائب من الجسم لا يُمَسّ، والفارغ يُمحى. يشترط `inventory.item.manage` |
+| **POST** | `products/apply-replenishment/` | تثبيت الحدّين المقترَحين على أصنافٍ محدَّدة — `ProductViewSet` (`apply_replenishment`). كتابةٌ حقيقية: تشترط `inventory.item.manage` وليست في `read_only_post_actions`، والمحدِّد في **جسم** الطلب |
 | POST | `products/generate_barcode/` · `products/generate_serials/` | (522) · (541) |
 | GET | `products/groups/` · `products/brands/` | (468) · (460) |
 | GET/**POST** | `products/group-profile/` · `products/group-ledger/` · `products/group-invoices/` | الكرت المجمّع — المحدِّد في **جسم** الطلب |
@@ -141,11 +145,53 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 
 **يعتمد عليه:** `sales` (`models.py:6-7`, `services.py:26-30`)، `logistics` (`models.py:4-5`, `services.py:996-998,1278-1281,1697-1698`, `views.py:3455-4123`)، `accounting` (`services.py`)، `core` (`dashboard_api.py`, `reports.py`, `pricing.py`, `plans.py`)، `after_sales` (`services.py:57,177`)، `bridge`.
 
+## حالة المخزون والتجديد (T-REORDER)
+
+**قاعدة الحالة تعيش في `inventory/stock_status.py` وحدها.** كانت مكتوبة ستّ مرّات
+(السيريالايزر · فلتر الجدول · الداشبورد · تقرير تحت حدّ الطلب · `StockLevelsPage` ·
+`ItemsManagement`) وتباعدت فعلاً: الداشبورد كان يشترط حدّاً أدنى **قبل** أن يعدّ
+صنفاً نافداً فيخفي أغلب النافد، والشاشة كانت تصبغ كلّ رصيدٍ صفر «منخفضاً» بينما
+الخادم يسمّيه «نفذ».
+
+| القرار | أين يعيش |
+|---|---|
+| الحالة تُقاس على **المتاح** (الرصيد − المحجوز) لا على الرصيد | `stock_status.py` (`available_of`, `available_expression`) |
+| «نفذ» **لا يشترط** حدّاً أدنى — المتاح ≤ 0 نفادٌ سواء ضُبط حدّ أم لا | `stock_status.py` (`stock_status_of`) |
+| الحدّ الفعّال = اليدوي إن ضُبط، وإلّا المقترَح المحسوب | `stock_status.py` (`effective_min`) |
+| الخدمة «متوفّرة» دائماً — بلا مخزونٍ يُقاس | `stock_status.py` (`stock_status_of`) |
+| المعادلات (الصرف اليومي · مخزون الأمان · الحدّان) | `core/replenishment.py` (`suggest_levels`) |
+| مهلة التوريد: وسيط (تاريخ أول وارد لفاتورة الطلبية − تاريخ الطلبية)، للصنف ثم للمورّد ثم للشركة ثم إعداد | `core/replenishment.py` (`_lead_time_samples`, `_lead_for`) |
+| قرار الطلب من الصنف **ونوعه** معاً: عاجل/مؤجَّل/راكد | `core/replenishment.py` (`_urgency_of`) |
+| الكتابة الوحيدة — بفعلٍ صريح من المستخدم | `core/replenishment.py` (`apply_suggested_levels`) |
+
+بارامترات الشركة الثلاثة (نافذة التحليل · المهلة الافتراضية · مدة المراجعة) على
+`logistics.PurchaseSettings` — التجديد قرارٌ شرائي، فإعداداته حيث تعيش إعدادات الشراء.
+
+**والمحرّك يسكن في `core/` لا هنا**: حسابه يحتاج `sales.services` (المحجوز) و
+`logistics.models` (مهلة التوريد)، و`.importlinter` يمنع `inventory` من استيرادهما
+(عقد «الاتجاه المعكوس»). ما بقي هنا هو `stock_status.py` وحده — قاعدةُ **حالة**
+المخزون لا تحتاج غير `inventory`.
+
+**«النوع» (`variant_group`) كان بلا مدخل**: الحقل والنقطة (`products/groups/`)
+موجودان منذ task31، ولا شاشةَ تكتبه — فبقي فارغاً على **كل** صنفٍ في كل شركة،
+وبفراغه يسقط `product_group_key` على اسم الصنف: كل صنفٍ نوعٌ بذاته، فلا بدائل في
+الفاتورة ولا قرار «مؤجَّل». صار له مدخلان: حقلٌ في كرت الصنف
+(`ItemFormAseel.tsx`)، وتعيينٌ جماعي للمحدَّد من «أرصدة المخزون»
+(`StockLevelsPage.tsx` ← `products/bulk-set-group/`).
+
 ## قواعد لا يجوز كسرها
 - **لا يُعدَّل `quantity_on_hand` أو `avg_cost` إلا عبر `record_stock_movement`** (أو `_recompute_product_stock` بعد حذف حركات). هي الدالة الوحيدة التي تقفل الصنف بـ`select_for_update` داخل `transaction.atomic` (`services.py:187-188`) وتحفظ لقطات before/after على الحركة.
 - **الكمية موجبة دائماً**: `record_stock_movement` يرفض `quantity <= 0` (`services.py`) — الاتجاه يأتي من `movement_type` لا من إشارة الكمية.
 - **معادلة WAC**: الوارد يعدّل المتوسط `new_avg = (old_qty*old_avg + qty*cost) / new_qty`؛ **الصادر لا يغيّر `avg_cost` إطلاقاً** ويأخذ تكلفته من المتوسط الحالي (`services.py:226-229`). و`_recompute_product_stock` يعيد تطبيق نفس المعادلة بالترتيب الزمني (`:287-296`).
 - **المخزون السالب**: يُرفض الصرف إن `qty_before < quantity` إلا إذا سمح `SalesSettings.allow_negative_stock_default` أو `Product.allow_negative_stock` (`services.py:206-224`) — أي أن قرار مخزون يعيش في `sales` لا هنا.
+- **لا تُكتب قاعدة «منخفض/نفذ» في أي مكان آخر** — استورد من `inventory/stock_status.py`.
+  ستّ نسخٍ متباعدة هي ما استدعى الوحدة، والسابعة ستتباعد كما تباعدت أخواتها.
+- **الاقتراح يُعرَض ولا يُكتب.** `min_stock_level` اليدوي يسبق المقترَح دائماً
+  (`effective_min`)، والكتابة لا تحدث إلا عبر `apply_suggested_levels` بفعلٍ صريح.
+  وصنفٌ بلا اقتراح (سجلّ أقصر من `MIN_HISTORY_DAYS` أو بلا مبيعات) **لا يُكتب عليه
+  صفر**: «لا أعرف بعد» ليست «لا تطلب أبداً».
+- **أرقام «النوع» مجاميعُ أرقام أفراده** لا حسابٌ ثانٍ عليها — كي يساوي مجموع
+  التنقيب رقمَ الصفّ (`docs/modules/core.md` — 6.1.1).
 - **`RETURN_IN` بلا تكلفة يأخذ المتوسط الحالي** كي لا ينحرف WAC (`services.py:195-196`).
 - **عكس الحركات محصور بالمستند**: `reverse_stock_movements` يفلتر بـ`(tenant, reference_id, reference_type ∈ types)` ثم يُعيد احتساب كل صنف متأثر (`services.py:311-324`) — فلا تُمَسّ حركات مستند آخر.
 - **نموذج التكلفة قرارٌ في مكان واحد**: `apply_purchase_cost_model` (`services.py`) — إن كانت الشركة على WAC المتحرك فلا يُدهَس `avg_cost` الذي بناه `record_stock_movement`؛ وإلا يُضبط من متوسط المشتريات.

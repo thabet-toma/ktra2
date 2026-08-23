@@ -69,7 +69,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'id', 'tenant', 'sku', 'barcode', 'name_ar', 'name_en',
             'variant_group', 'brand',
             'category', 'category_name', 'uom_id', 'uom_name',
-            'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level',
+            'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level', 'max_stock_level',
             'is_serialized', 'is_service',
             # THA-24: سياسة الكفالة على الصنف — تقرأها الكفالة عند ترحيل البيع،
             # ويحرّرها المستخدم من كرت الصنف. بلا إدراجها هنا يبتلع DRF قيمتها
@@ -182,13 +182,9 @@ class ProductSerializer(serializers.ModelSerializer):
             return []
 
     def get_stock_status(self, obj):
-        qty = float(obj.quantity_on_hand or 0)
-        min_lvl = obj.min_stock_level or 0
-        if qty <= 0:
-            return 'out_of_stock'
-        if min_lvl > 0 and qty <= min_lvl:
-            return 'low_stock'
-        return 'in_stock'
+        # T-REORDER: القاعدة تعيش في `inventory/stock_status.py` وحدها.
+        from .stock_status import stock_status_of
+        return stock_status_of(obj, reserved_map=self.context.get('reserved_quantity_map'))
 
 
 class ProductLookupSerializer(ProductSerializer):
@@ -217,6 +213,11 @@ class ProductLookupSerializer(ProductSerializer):
             # الأصناف؛ بدونها كان يطبع أقواساً فارغة: «❌ 205/65/16 () — رصيد 0».
             'brand',
             'category', 'category_name', 'hs_code', 'min_stock_level',
+            # T-REORDER: حقلان يجعلان بند الفاتورة يعرف حالة الصنف وبدائله:
+            # `stock_status` يصبغ الخيار (نفذ/منخفض)، و`group_key` يجمع موديلات
+            # النوع الواحد فيقترح المنتقي بديلاً بدل أن يقف عند «الرصيد 0».
+            # نصّان قصيران — والحمولة تُقاس على 1490 صنفاً، فأي حقل ثالث يُبرَّر.
+            'stock_status', 'group_key',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity',
             'avg_cost', 'sale_price', 'is_service', 'is_serialized',
             # THA-24: نافذة البطاقة اليدوية تملأ المدة من سياسة الصنف المختار،

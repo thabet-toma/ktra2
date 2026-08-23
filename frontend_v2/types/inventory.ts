@@ -21,6 +21,8 @@ export interface SqlProduct {
   volume_cbm?: string | null;
   hs_code?: string | null;
   min_stock_level?: number | null;
+  /** T-REORDER: المستوى الذي يُطلَب حتى بلوغه (نمط min/max). */
+  max_stock_level?: number | null;
   quantity_on_hand: number;
   reserved_quantity?: number | string;
   available_quantity?: number | string;
@@ -33,7 +35,8 @@ export interface SqlProduct {
   avg_monthly_sales?: string | null;
   /** T-SERIAL: الصنف يتتبّع وحداته برقم تسلسلي (يفعّله كرت الصنف). */
   is_serialized?: boolean;
-  stock_status: "in_stock" | "low_stock" | "out_of_stock";
+  /** T-REORDER: «overstock» = فوق الحدّ الأقصى. */
+  stock_status: "in_stock" | "low_stock" | "out_of_stock" | "overstock";
 }
 
 /**

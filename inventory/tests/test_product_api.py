@@ -176,6 +176,11 @@ class ProductApiTest(APITestCase):
         assert row["barcode"] == "6291001"
         assert Decimal(row["sale_price"]) == Decimal("12.50")
         assert row["is_service"] is False
+        # T-REORDER: شارة «نفذ/منخفض» في بند الفاتورة وشريط «بدائل من نفس النوع»
+        # يقرآن هذين الحقلين. مكوّنٌ يقرأ حقلاً لا يرسله العقد يعرض فراغاً بصمت،
+        # و`tsc` لا يكشفه (لا `@types/react` فلا فحص لخصائص JSX) — فالحارس هنا.
+        assert row["stock_status"] == "out_of_stock"   # بلا رصيد ⇒ نفذ ولو بلا حدّ أدنى
+        assert row["group_key"] == "صنف المنتقي"       # بلا مجموعة صريحة ⇒ الاسم
         # وما زال العقد أضيق من الكامل — لا تحليلات ولا حقول الكرت.
         assert "purchased_qty" not in row
         assert "avg_monthly_sales" not in row

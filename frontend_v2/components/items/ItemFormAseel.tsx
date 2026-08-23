@@ -77,6 +77,8 @@ const extractDatasheets = (p: Record<string, unknown>): DatasheetRef[] =>
 type FormState = {
   sku: string; catalog_no: string; name_ar: string; name_en: string;
   brand: string;
+  /** T-REORDER: «النوع» — موديلات النوع الواحد بدائلُ بعضها في البيع والطلب. */
+  variant_group: string;
   /** T-SERIAL: باركود الصنف (EAN-13) — فريد داخل الشركة، يحرسه الخادم. */
   barcode: string;
   /** T-SERIAL: تتبّع وحدات الصنف بأرقام تسلسلية. */
@@ -88,7 +90,7 @@ type FormState = {
   description: string; location: string;
   uom_primary: string; uom2: string; uom2_factor: string;
   uom3: string; uom3_factor: string;
-  min_stock_level: string; max_stock_level: string; reorder_level: string;
+  min_stock_level: string; max_stock_level: string;
   /** سعر البيع الافتراضي المحفوظ على الصنف (بجانب سعر التكلفة المحسوب). */
   sale_price: string;
   sale_tiers: PriceTier[];
@@ -105,12 +107,13 @@ type FormState = {
 const blankForm = (): FormState => ({
   sku: "", catalog_no: "", name_ar: "", name_en: "",
   brand: "",
+  variant_group: "",
   barcode: "", is_serialized: false,
   warranty_months: "", supplier_warranty_months: "",
   description: "", location: "",
   uom_primary: "عدد", uom2: "", uom2_factor: "1",
   uom3: "", uom3_factor: "1",
-  min_stock_level: "", max_stock_level: "", reorder_level: "",
+  min_stock_level: "", max_stock_level: "",
   sale_price: "",
   sale_tiers: Array.from({ length: 5 }, blankTier),
   purchase_tiers: Array.from({ length: 5 }, blankTier),
@@ -254,12 +257,12 @@ export const ItemFormAseel: React.FC<Props> = ({
       name_ar: String(p.name_ar ?? ""),
       name_en: isDuplicate ? "" : String(p.name_en ?? ""),
       brand: isDuplicate ? "" : String(p.brand ?? ""),
+      variant_group: String(p.variant_group ?? ""),
       description: String(p.description ?? ""),
       location: String(p.location ?? ""),
       uom_primary: String(p.uom_primary ?? "عدد"),
       min_stock_level: p.min_stock_level != null ? String(p.min_stock_level) : "",
       max_stock_level: p.max_stock_level != null ? String(p.max_stock_level) : "",
-      reorder_level: p.reorder_level != null ? String(p.reorder_level) : "",
       sale_price: p.sale_price != null ? String(p.sale_price) : "",
       category: p.category ? Number(p.category) : null,
       category_name: String(p.category_name ?? ""),
@@ -318,7 +321,11 @@ export const ItemFormAseel: React.FC<Props> = ({
         name_ar: form.name_ar || null,
         name_en: form.name_en || null,
         brand: form.brand.trim(),
+        variant_group: form.variant_group.trim(),
         min_stock_level: form.min_stock_level ? Number(form.min_stock_level) : null,
+        // T-REORDER: الحدّ الأقصى كان يُكتب في الشاشة ولا يُرسَل قطّ — حقلٌ ميّت
+        // يظنّ المستخدم أنه ضبطه. صار حقلاً حقيقياً على النموذج ويُرسَل هنا.
+        max_stock_level: form.max_stock_level ? Number(form.max_stock_level) : null,
         // سعر البيع: فارغ = لا سعر محفوظ (البطاقة ترجع لآخر سعر بيع فعلي).
         sale_price: form.sale_price.trim() ? Number(form.sale_price) : null,
         category: categoryId,
@@ -501,6 +508,15 @@ export const ItemFormAseel: React.FC<Props> = ({
         <ValuePicker value={form.brand} onChange={(b) => patch("brand", b)}
           fetchOptions={inventoryApi.getBrands}
           emptyLabel="— بدون براند —" addPlaceholder="مثال: روك بيلد" addTitle="إضافة براند جديد" />)}
+      {/* T-REORDER: «النوع» كان حقلاً خادمياً كاملاً (`variant_group`) بنقطته
+          الجاهزة (`products/groups/`) ولا مدخلَ له في أي شاشة — فبقي فارغاً على
+          كل صنفٍ في كل شركة، وبفراغه يسقط تجميعُ الموديلات على اسم الصنف: كل
+          صنفٍ نوعٌ بذاته، فلا بدائل في الفاتورة ولا قرار «مؤجَّل» في تقرير
+          التجديد. هذا هو مدخله. */}
+      {fld("النوع / المجموعة (موديلات النوع الواحد بدائلُ بعضها)",
+        <ValuePicker value={form.variant_group} onChange={(g) => patch("variant_group", g)}
+          fetchOptions={inventoryApi.getGroups}
+          emptyLabel="— بدون نوع —" addPlaceholder="مثال: ايفون 14 برو" addTitle="نوع جديد" />)}
       {fld("تفصيل / بيان الصنف", <input className="aseel-input" value={form.description}
         onChange={(e) => patch("description", e.target.value)} />, 2)}
       {fld("الموقع (الرف)", <input className="aseel-input" value={form.location}
@@ -578,12 +594,10 @@ export const ItemFormAseel: React.FC<Props> = ({
       {fld("مجموع الحركات الواردة", <input className="aseel-input" readOnly value="(تلقائي)" />)}
       {fld("مجموع الحركات الصادرة", <input className="aseel-input" readOnly value="(تلقائي)" />)}
       {fld("رصيد الصنف الحالي", <input className="aseel-input" readOnly value="(تلقائي)" />)}
-      {fld("الحد الأدنى", <input className="aseel-input" type="number" min="0" step="0.001"
+      {fld("الحد الأدنى", <input className="aseel-input" type="number" min="0" step="1"
         value={form.min_stock_level} onChange={(e) => patch("min_stock_level", e.target.value)} />)}
-      {fld("الحد الأقصى", <input className="aseel-input" type="number" min="0" step="0.001"
+      {fld("الحد الأقصى", <input className="aseel-input" type="number" min="0" step="1"
         value={form.max_stock_level} onChange={(e) => patch("max_stock_level", e.target.value)} />)}
-      {fld("حد إعادة الطلب", <input className="aseel-input" type="number" min="0" step="0.001"
-        value={form.reorder_level} onChange={(e) => patch("reorder_level", e.target.value)} />)}
       {fld("تاريخ آخر حركة", <input className="aseel-input" readOnly value="(تلقائي)" />)}
       <div style={{ gridColumn: "1/-1", fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>
         ملاحظة: جميع حركات المخازن ذات التاريخ قبل بداية الفترة المالية ترحل إلى رصيد أول المدة.

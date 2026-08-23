@@ -4,7 +4,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct, StockSummaryResponse } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { RefreshCw, Download, Printer } from "lucide-react";
+import { RefreshCw, Download, Printer, Tags } from "lucide-react";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { productProfilePath } from "../../utils/entityLinks";
 import { openInNewTab } from "../../utils/openInNewTab";
@@ -25,6 +25,12 @@ export const StockLevelsPage: React.FC = () => {
   const [filterCategory, setFilterCategory] = useState<string>("");
   // task16 E18: اختيار الأصناف للتصدير
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  // T-REORDER: تعيين «النوع» على المحدَّد — الحقل الذي بلا مدخلٍ جماعي يبقى فارغاً
+  // أبداً على كتالوجٍ من ألفٍ ونصف، وبفراغه يسقط تجميع الموديلات كلّه.
+  const [groupModal, setGroupModal] = useState(false);
+  const [groupValue, setGroupValue] = useState("");
+  const [brandValue, setBrandValue] = useState("");
+  const [groupBusy, setGroupBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -45,6 +51,31 @@ export const StockLevelsPage: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  const applyGroup = async () => {
+    const ids: number[] = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    const fields: { variant_group?: string; brand?: string } = {};
+    if (groupValue.trim()) fields.variant_group = groupValue.trim();
+    if (brandValue.trim()) fields.brand = brandValue.trim();
+    if (Object.keys(fields).length === 0) {
+      toast("اكتب نوعاً أو برانداً للتعيين.", "info");
+      return;
+    }
+    setGroupBusy(true);
+    try {
+      const res = await inventoryApi.bulkSetGroup(ids, fields);
+      toast(`عُيِّن على ${res.updated} صنفاً.`, "success");
+      setGroupModal(false);
+      setGroupValue("");
+      setBrandValue("");
+      await load();
+    } catch (e: unknown) {
+      toast(humanizeThrown(e, "تعذّر التعيين"), "error");
+    } finally {
+      setGroupBusy(false);
+    }
+  };
+
   const categories = Array.from(
     new Set(products.map((p) => p.category_name || "").filter(Boolean))
   ).sort();
@@ -59,17 +90,19 @@ export const StockLevelsPage: React.FC = () => {
       ) return false;
     }
     if (filterCategory && p.category_name !== filterCategory) return false;
-    const qty = Number(p.quantity_on_hand);
-    const min = Number(p.min_stock_level ?? 0);
-    if (filterStatus === "out") return qty <= 0;
-    if (filterStatus === "low") return qty > 0 && min > 0 && qty <= min;
-    if (filterStatus === "over") return min > 0 && qty > min * 3;
+    // T-REORDER: الحالة يحسمها الخادم (`inventory/stock_status.py`) — كانت
+    // تُحسب هنا بقاعدةٍ ثانية تصبغ كلّ رصيدٍ صفر «منخفضاً» بينما الخادم يسمّيه
+    // «نفذ»، فرقمان مختلفان لسؤالٍ واحد على شاشتين.
+    if (filterStatus === "out") return p.stock_status === "out_of_stock";
+    if (filterStatus === "low") return p.stock_status === "low_stock";
+    if (filterStatus === "over") return p.stock_status === "overstock";
     return true;
   });
 
   // task16 E18: تصدير رصيد المخزون إلى CSV — المختار، وإلا كل المعروض
   const STATUS_AR: Record<string, string> = {
-    out_of_stock: "نفذ", low_stock: "منخفض", in_stock: "متوفر",
+    // T-REORDER: «فائض» كانت ناقصة — الحالة الرابعة كانت تُصدَّر فارغة.
+    out_of_stock: "نفذ", low_stock: "منخفض", overstock: "فائض", in_stock: "متوفر",
   };
   const toggleOne = (id: number) =>
     setSelectedIds((prev) => {
@@ -144,12 +177,12 @@ export const StockLevelsPage: React.FC = () => {
       const qty = Number(p.quantity_on_hand);
       const avgCost = formatMoney(p.avg_cost);
       const minStock = p.min_stock_level ?? '—';
-      const isLow = qty <= (p.min_stock_level || 0);
+      const isLow = p.stock_status === 'out_of_stock' || p.stock_status === 'low_stock';
       
       html += `
         <tr>
           <td>${name} <br><span style="color:#6b7280; font-size:12px">${p.sku}</span></td>
-          <td class="num ${isLow ? 'danger' : ''}" style="direction: ltr">${qty}</td>
+          <td class="num ${isLow ? 'danger' : ''}" style="direction: ltr">${formatQuantity(qty)}</td>
           <td class="num" style="direction: ltr">${avgCost}</td>
           <td class="num" style="direction: ltr">${minStock}</td>
         </tr>
@@ -178,6 +211,10 @@ export const StockLevelsPage: React.FC = () => {
       return <span style={{ color: "var(--aseel-danger, #c00)" }}>نفذ</span>;
     if (p.stock_status === "low_stock")
       return <span style={{ color: "var(--aseel-warn, #b8800a)" }}>منخفض</span>;
+    // T-REORDER: «فائض» = فوق الحدّ الأقصى المضبوط على الصنف. كان الفلتر يخمّنه
+    // بـ«أكثر من ثلاثة أضعاف الأدنى» — قاعدةٌ لا مصدر لها.
+    if (p.stock_status === "overstock")
+      return <span style={{ color: "var(--aseel-warn, #b8800a)" }}>فائض</span>;
     return <span style={{ color: "var(--aseel-ok, #267346)" }}>متوفر</span>;
   };
 
@@ -214,7 +251,7 @@ export const StockLevelsPage: React.FC = () => {
     { key: "qty", header: "الرصيد", width: "90px", align: "center", numeric: true,
       render: (p) => {
         const qty = Number(p.quantity_on_hand);
-        const low = qty <= (p.min_stock_level || 0);
+        const low = p.stock_status === "out_of_stock" || p.stock_status === "low_stock";
         return <span style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
       }
     },
@@ -239,6 +276,14 @@ export const StockLevelsPage: React.FC = () => {
     },
     { key: "min", header: "الحد الأدنى", width: "90px", align: "center", numeric: true,
       render: (p) => <>{p.min_stock_level ?? "—"}</> },
+    { key: "max", header: "الحد الأقصى", width: "90px", align: "center", numeric: true,
+      render: (p) => <>{p.max_stock_level ?? "—"}</> },
+    // T-REORDER: «النوع» ظاهر كي يُرى فارغاً. حين يكون بلا قيمة يسقط التجميع على
+    // اسم الصنف ⇒ كل صنفٍ نوعٌ بذاته ⇒ لا بدائل ولا قرار «مؤجَّل».
+    { key: "grp", header: "النوع", width: "130px",
+      render: (p) => p.variant_group
+        ? <>{p.variant_group}</>
+        : <span className="aseel-text-soft" title="بلا نوع — لن تظهر له بدائل في الفاتورة">—</span> },
     { key: "status", header: "الحالة", width: "80px", align: "center", render: statusCell },
     { key: "avgcost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true,
       render: (p) => <>{fmt(Number(p.avg_cost))}</> },
@@ -310,6 +355,18 @@ export const StockLevelsPage: React.FC = () => {
           <Printer className="h-4 w-4" />
           طباعة / PDF{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
         </button>
+        <button
+          className="aseel-toolbtn"
+          onClick={() => setGroupModal(true)}
+          disabled={selectedIds.size === 0}
+          title={selectedIds.size > 0
+            ? `تعيين النوع/البراند لـ${selectedIds.size} صنف مختار`
+            : "اختر أصنافاً أولاً"}
+          style={{ display: "flex", alignItems: "center", gap: 4 }}
+        >
+          <Tags className="h-4 w-4" />
+          تعيين النوع{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+        </button>
         <button className="aseel-toolbtn" onClick={load} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
@@ -317,6 +374,43 @@ export const StockLevelsPage: React.FC = () => {
 
       {err && (
         <div className="aseel-banner aseel-banner--err">{err}</div>
+      )}
+
+      {groupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => !groupBusy && setGroupModal(false)}>
+          <div dir="rtl" className="w-full max-w-md rounded-xl border aseel-border-soft aseel-bg-field p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-1 text-sm font-bold aseel-text-ink">
+              تعيين النوع/البراند لـ{selectedIds.size} صنف
+            </h3>
+            <p className="mb-3 text-[11px] aseel-text-soft leading-relaxed">
+              «النوع» يجمع الموديلات المتبادلة: أصنافُ النوع الواحد تظهر بدائلَ لبعضها في
+              بند الفاتورة، ويقرأها تقرير التجديد فلا يطلب موديلاً قديماً وموديلٌ أحدث منه
+              على الرفّ. الحقل المتروك فارغاً هنا لا يُمَسّ على الأصناف.
+            </p>
+            <label className="mb-2 block text-xs aseel-text-soft">
+              النوع / المجموعة
+              <input className="aseel-input mt-1 w-full" value={groupValue} autoFocus
+                placeholder="مثال: ايفون 14 برو"
+                onChange={(e) => setGroupValue(e.target.value)} />
+            </label>
+            <label className="mb-3 block text-xs aseel-text-soft">
+              البراند (اختياري)
+              <input className="aseel-input mt-1 w-full" value={brandValue}
+                placeholder="مثال: سامسونج"
+                onChange={(e) => setBrandValue(e.target.value)} />
+            </label>
+            <div className="flex justify-start gap-2">
+              <button className="aseel-toolbtn" onClick={applyGroup} disabled={groupBusy}>
+                {groupBusy ? "جارٍ التعيين…" : "تعيين"}
+              </button>
+              <button className="aseel-toolbtn" onClick={() => setGroupModal(false)} disabled={groupBusy}>
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <AseelDenseTable<SqlProduct>

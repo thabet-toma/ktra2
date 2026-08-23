@@ -54,6 +54,7 @@ import {
 } from "../../utils/reservedStock";
 import { formatMoney, formatQuantity, formatNumber } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
+import { availableOf, needsAlternative, stockAlternatives, stockBadgeFor } from "../../utils/stockBadge";
 import { accountMatchesPurpose } from "../../utils/accountTree";
 import { entityPathForReference } from "../../utils/entityLinks";
 import { DeliverGoodsModal } from "./DeliverGoodsModal";
@@ -123,6 +124,12 @@ export type ProductRow = {
   is_service?: boolean;
   /** T-SERIAL: الصنف يتتبّع وحداته برقم تسلسلي — يُظهر عمود الأرقام على سطره. */
   is_serialized?: boolean;
+  /** T-REORDER: حالة المخزون كما يحسمها الخادم (`inventory/stock_status.py`). */
+  stock_status?: string | null;
+  /** T-REORDER: مفتاح «النوع» — موديلات النوع الواحد بدائلُ بعضها. */
+  group_key?: string | null;
+  /** المتاح بعد الحجز — يرسله عقد المنتقي بجانب الرصيد. */
+  available_quantity?: string | number | null;
 };
 
 export type PartnerRow = {
@@ -2231,6 +2238,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       return {
         id: p.id,
         label: formatProductPrimaryName(p),
+        // T-REORDER: «نفذ»/«منخفض» بجانب الاسم — القاعدة من الخادم لا من الشاشة.
+        badge: stockBadgeFor(p),
         // T-SERVICELINE: «المتاح: 0» على خدمة معلومة كاذبة — الخدمة بلا مخزون.
         // T-RESERVEVIS: والمحجوز يُذكر في الخيار نفسه — «المتاح» كان يعرض الرصيد.
         sub: p.is_service
@@ -2253,7 +2262,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const renderProductCell = (row: DraftLine, ri: number) => {
     const selectedId = row.product && Number(row.product) > 0 ? Number(row.product) : null;
+    // T-REORDER: صنفٌ نفد أو بلغ حدّه لا يُنهي البيع ما دام في نوعه موديلٌ آخر
+    // على الرفّ. الشريط يظهر تحت السطر عند الحاجة وحدها، والنقر يستبدل الصنف
+    // في السطر نفسه (فيعاد تسعيره من مصدره كأي اختيار).
+    const selectedProduct = selectedId != null ? productsById.get(selectedId) : undefined;
+    const alternatives = selectedProduct && needsAlternative(selectedProduct)
+      ? stockAlternatives(products, selectedProduct)
+      : [];
     return (
+    <div className="flex flex-col gap-0.5">
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
       <AseelAutocomplete
         value={(() => {
@@ -2315,6 +2332,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         onClick={() => setProductPickerLineKey(row.key)}
         title="فهرس الأصناف الكامل (+)"
       >…</button>
+    </div>
+    {selectedProduct && needsAlternative(selectedProduct) && !readOnly && (
+      <div className="flex flex-wrap items-center gap-1 text-[10px] leading-tight">
+        {alternatives.length === 0 ? (
+          <span className="text-[var(--aseel-ink-soft)]">لا بديل متوفّر من هذا النوع</span>
+        ) : (
+          <>
+            <span className="text-[var(--aseel-ink-soft)]">بدائل من نفس النوع:</span>
+            {alternatives.map((alt) => (
+              <button
+                key={alt.id}
+                type="button"
+                className="rounded border border-[var(--aseel-warn-bd)] bg-[var(--aseel-warn-bg)] px-1 py-px text-[var(--aseel-warn-fg)] hover:opacity-80"
+                title={`استبدال الصنف بـ«${formatProductPrimaryName(alt)}» — المتاح ${formatQuantity(availableOf(alt))}`}
+                onClick={() => { void onSelectProduct(row.key, alt.id); }}
+              >
+                {formatProductPrimaryName(alt)} · {formatQuantity(availableOf(alt))}
+              </button>
+            ))}
+          </>
+        )}
+      </div>
+    )}
     </div>
     );
   };

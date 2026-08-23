@@ -2081,6 +2081,22 @@ class PurchaseSettings(models.Model):
         db_column="SerialEntryMode",
         help_text="إدخال الأرقام التسلسلية في بنود فاتورة الشراء: بدون/اختياري/إجباري",
     )
+    # ── T-REORDER: بارامترات محرّك التجديد (`inventory/replenishment.py`) ──
+    # ثلاثة أرقام تحكم اقتراح الحدّ الأدنى، ولكل شركة عُرفها: تاجرُ إطاراتٍ
+    # يستورد من الصين مهلته شهران، وموزّعُ قطعٍ محلّي مهلته يومان — ورقمٌ واحد
+    # مطبوعٌ في الكود يكذب على أحدهما.
+    replenishment_window_days = models.PositiveSmallIntegerField(
+        default=90, db_column="ReplenishmentWindowDays",
+        help_text="نافذة تحليل المبيعات لحساب معدّل الصرف اليومي (بالأيام)",
+    )
+    default_lead_time_days = models.PositiveSmallIntegerField(
+        default=14, db_column="DefaultLeadTimeDays",
+        help_text="مهلة التوريد الافتراضية حين لا يكفي سجلّ الطلبيات لاشتقاقها (بالأيام)",
+    )
+    review_period_days = models.PositiveSmallIntegerField(
+        default=30, db_column="ReviewPeriodDays",
+        help_text="كل كم يوماً تراجع الطلب — تحدّد الحدّ الأقصى المقترَح فوق نقطة الطلب",
+    )
     updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
 
     class Meta:

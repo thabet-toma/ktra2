@@ -99,19 +99,52 @@ register(ReportSpec(
 ))
 
 
+def _reorder_rows(tenant_id: int, params: dict, *, level: str = "item") -> list[dict]:
+    """جسر واحد بين محرّك التجديد وتقارير المخزون — لا نسخةَ منطقٍ ثانية هنا."""
+    from core.replenishment import replenishment_rows
+
+    product = _int_param(params, "product")
+    return replenishment_rows(
+        tenant_id,
+        product_ids=[product] if product else None,
+        supplier_id=_int_param(params, "partner"),
+        urgency=(params.get("urgency") or None),
+        level=level,
+    )
+
+
+def _rate(value) -> str:
+    """معدّل صرفٍ يوميّ بمنزلتين — رقمٌ يُقرأ لا كسرٌ بعشرين خانة."""
+    return str(Decimal(str(value or 0)).quantize(Decimal("0.01")))
+
+
 def _low_stock(tenant_id: int, params: dict) -> list[dict]:
+    """ما نفد وما اقترب من النفاد معاً — بحالةٍ مكتوبة على كل سطر.
+
+    كان هذا التقرير يشترط `min_stock_level > 0` قبل أن يرى الصنف، والحدّ اليدوي
+    فارغٌ في معظم الكتالوج — فكان يصمت عن أغلب ما نفد فعلاً. صار يقرأ الحدّ
+    **الفعّال** (`inventory/stock_status.py`): اليدوي إن ضُبط، وإلّا المقترَح
+    المحسوب من المبيعات. و«نفذ» لا يشترط حدّاً أصلاً.
+    """
+    from inventory.stock_status import STATUS_LABELS, STATUS_LOW, STATUS_OUT_OF_STOCK
+
     rows = []
-    for p in _products(tenant_id, params).filter(min_stock_level__gt=0).order_by("sku"):
-        qty = Decimal(str(p.quantity_on_hand or 0))
-        minimum = Decimal(str(p.min_stock_level or 0))
-        if qty > minimum:
+    for r in _reorder_rows(tenant_id, params):
+        if r["status"] not in (STATUS_OUT_OF_STOCK, STATUS_LOW):
             continue
+        minimum = r["effective_min"]
         rows.append({
-            "sku": p.sku or "",
-            "name": p.name_ar or p.name_en or "",
-            "quantity": _qty(qty),
+            "product_id": r["product_id"],
+            "sku": r["sku"],
+            "name": r["name"],
+            "status": STATUS_LABELS[r["status"]],
+            "quantity": _qty(r["available"]),
             "min_stock_level": _qty(minimum),
-            "shortage": _qty(max(minimum - qty, ZERO)),
+            "min_source": "يدوي" if r["manual_min"] else ("محسوب" if minimum > ZERO else "—"),
+            "shortage": _qty(max(minimum - r["available"], ZERO)),
+            "group_available": _qty(r["group_available"]),
+            "newest_alternative": r["newest_alternative"],
+            "urgency": r["urgency_label"],
         })
     return rows
 
@@ -120,17 +153,171 @@ register(ReportSpec(
     key="low-stock",
     title="الأصناف تحت حدّ الطلب",
     category="inventory",
-    description="ما بلغ أو نزل عن الحدّ الأدنى المعرَّف على الصنف — قائمة إعادة الطلب.",
-    filters=(ReportFilter("product", "الصنف", "product"),),
+    description=(
+        "ما نفذ وما بلغ حدّه الأدنى معاً. الحدّ يُقرأ يدوياً إن ضُبط وإلّا يُحسب "
+        "من المبيعات، و«رصيد النوع» يقول إن كان لهذا الصنف بديلٌ متوفّر."
+    ),
+    filters=(
+        ReportFilter("product", "الصنف", "product"),
+        ReportFilter("partner", "المورّد", "supplier"),
+    ),
     columns=(
         ReportColumn("sku", "الرمز", width="120px"),
         ReportColumn("name", "الصنف"),
-        ReportColumn("quantity", "الرصيد", KIND_NUMBER, total=True, width="100px"),
-        ReportColumn("min_stock_level", "الحد الأدنى", KIND_NUMBER, width="110px"),
-        ReportColumn("shortage", "النقص", KIND_NUMBER, total=True, width="100px"),
+        ReportColumn("status", "الحالة", width="80px"),
+        ReportColumn("quantity", "المتاح", KIND_NUMBER, total=True, width="90px"),
+        ReportColumn("min_stock_level", "الحد الأدنى", KIND_NUMBER, width="100px"),
+        ReportColumn("min_source", "مصدر الحد", width="90px"),
+        ReportColumn("shortage", "النقص", KIND_NUMBER, total=True, width="90px"),
+        ReportColumn("group_available", "رصيد النوع", KIND_NUMBER, width="100px"),
+        ReportColumn("newest_alternative", "أحدث بديل متوفّر"),
+        ReportColumn("urgency", "القرار", width="80px"),
     ),
     permission="inventory.item.view",
+    row_link="/products/{product_id}",
     build=_low_stock,
+))
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  تجديد المخزون — «ماذا أطلب، وكم» بمستوى الصنف أو النوع
+# ══════════════════════════════════════════════════════════════════════
+#
+# لماذا تقريران لا واحد: «تحت حدّ الطلب» سؤال حالةٍ («ما الذي نفد؟») يقرؤه
+# البائع، وهذا سؤال قرارٍ («ماذا أطلب من المورّد وبأي كمية؟») يقرؤه المشتري.
+# نفس المحرّك يغذّيهما فلا ينحرف رقمٌ عن رقم، والاختلاف في الأعمدة والترتيب.
+
+_URGENCY_OPTIONS = (
+    ("", "الكل"),
+    ("urgent", "عاجل"),
+    ("deferred", "مؤجَّل"),
+    ("dead", "راكد"),
+)
+
+_LEVEL_OPTIONS = (("item", "صنف"), ("group", "نوع"))
+
+
+def _replenishment(tenant_id: int, params: dict) -> list[dict]:
+    from inventory.stock_status import STATUS_LABELS
+
+    level = "group" if (params.get("level") or "item") == "group" else "item"
+    rows = _reorder_rows(tenant_id, params, level=level)
+    if level == "group":
+        return [{
+            "group_key": r["group_key"],
+            "name": r["group_key"],
+            "products_count": r["products_count"],
+            "out_of_stock_count": r["out_of_stock_count"],
+            "available": _qty(r["available"]),
+            "on_order": _qty(r["on_order"]),
+            "adu": _rate(r["adu"]),
+            "lead_days": _qty(r["lead_days"]),
+            "suggested_min": _qty(r["suggested_min"]),
+            "suggested_max": _qty(r["suggested_max"]),
+            "order_qty": _qty(r["order_qty"]),
+            "newest_alternative": r["newest_alternative"],
+            "urgency": r["urgency_label"],
+        } for r in rows]
+    return [{
+        "product_id": r["product_id"],
+        "sku": r["sku"],
+        "name": r["name"],
+        "category": r["category"],
+        "status": STATUS_LABELS[r["status"]],
+        "urgency": r["urgency_label"],
+        "available": _qty(r["available"]),
+        "on_order": _qty(r["on_order"]),
+        "group_available": _qty(r["group_available"]),
+        "alternatives": r["alternatives"],
+        "newest_alternative": r["newest_alternative"],
+        "adu": _rate(r["adu"]),
+        "lead_days": _qty(r["lead_days"]),
+        "manual_min": _qty(r["manual_min"]) if r["manual_min"] else "",
+        "suggested_min": _qty(r["suggested_min"]),
+        "suggested_max": _qty(r["suggested_max"]),
+        "order_qty": _qty(r["order_qty"]),
+        "reason": r["reason"],
+        "group_key": r["group_key"],
+    } for r in rows]
+
+
+def _replenishment_drill(tenant_id: int, params: dict) -> list[dict]:
+    """صفّ النوع يُفتح على أصنافه — من **نفس** الدالّة التي بنت الصفّ."""
+    from inventory.stock_status import STATUS_LABELS
+
+    group_key = params.get("group_key")
+    # فلتر «القرار» يُسقَط هنا عمداً: صفّ النوع مصنَّفٌ بأشدّ قرارٍ في أفراده،
+    # فلو صُفّي التفصيل بالقرار نفسه لغابت الأصناف التي جعلت الصفّ ما هو عليه —
+    # والتنقيب جاء ليُظهر من أين جاء الرقم لا ليكرّر تصنيفه.
+    params = {k: v for k, v in params.items() if k != "urgency"}
+    rows = _reorder_rows(tenant_id, params, level="item")
+    return [{
+        "sku": r["sku"],
+        "name": r["name"],
+        "status": STATUS_LABELS[r["status"]],
+        "available": _qty(r["available"]),
+        "on_order": _qty(r["on_order"]),
+        "adu": _rate(r["adu"]),
+        "suggested_min": _qty(r["suggested_min"]),
+        "order_qty": _qty(r["order_qty"]),
+        "reason": r["reason"],
+    } for r in rows if r["group_key"] == group_key]
+
+
+register(ReportSpec(
+    key="stock-replenishment",
+    title="تجديد المخزون — ماذا أطلب",
+    category="inventory",
+    description=(
+        "الحدّ الأدنى محسوباً من المبيعات ومهلة التوريد، والكمية المقترح طلبها. "
+        "«عاجل» = لا بديل في النوع. «مؤجَّل» = موديل آخر من النوع نفسه يغطّي. "
+        "«راكد» = رصيدٌ بلا مبيعات. الصنف الحديث في المخزن يعود بلا اقتراح وبسببه."
+    ),
+    filters=(
+        ReportFilter("level", "المستوى", "select", options=_LEVEL_OPTIONS, default="item"),
+        ReportFilter("urgency", "القرار", "select", options=_URGENCY_OPTIONS),
+        ReportFilter("product", "الصنف", "product"),
+        ReportFilter("partner", "المورّد", "supplier"),
+    ),
+    columns=(
+        ReportColumn("sku", "الرمز", width="110px"),
+        ReportColumn("name", "الصنف"),
+        ReportColumn("urgency", "القرار", width="80px"),
+        ReportColumn("status", "الحالة", width="80px"),
+        ReportColumn("available", "المتاح", KIND_NUMBER, total=True, width="90px"),
+        ReportColumn("on_order", "قيد الطلب", KIND_NUMBER, total=True, width="90px"),
+        # «النوع» عمودٌ ظاهر عمداً: هو مفتاح قرار «مؤجَّل»، وحين يكون اسمَ الصنف
+        # نفسه يرى المستخدم فوراً أن أصنافه بلا مجموعةٍ معرَّفة — فيملأ
+        # `variant_group` أو `brand` بدل أن يتساءل لماذا «البدائل» صفرٌ دائماً.
+        ReportColumn("group_key", "النوع", width="140px"),
+        ReportColumn("group_available", "رصيد النوع", KIND_NUMBER, width="100px"),
+        ReportColumn("alternatives", "بدائل", KIND_INT, width="70px"),
+        ReportColumn("newest_alternative", "أحدث بديل متوفّر"),
+        ReportColumn("adu", "الصرف اليومي", KIND_NUMBER, width="110px"),
+        ReportColumn("lead_days", "المهلة (يوم)", KIND_NUMBER, width="100px"),
+        ReportColumn("manual_min", "الحد اليدوي", KIND_NUMBER, width="100px"),
+        ReportColumn("suggested_min", "الأدنى المقترَح", KIND_NUMBER, width="120px"),
+        ReportColumn("suggested_max", "الأقصى المقترَح", KIND_NUMBER, width="120px"),
+        ReportColumn("order_qty", "المقترح طلبه", KIND_NUMBER, total=True, width="110px"),
+        ReportColumn("reason", "ملاحظة"),
+    ),
+    permission="inventory.item.view",
+    row_link="/products/{product_id}",
+    drill=_replenishment_drill,
+    drill_keys=("group_key",),
+    drill_title="أصناف هذا النوع",
+    drill_columns=(
+        ReportColumn("sku", "الرمز", width="110px"),
+        ReportColumn("name", "الصنف"),
+        ReportColumn("status", "الحالة", width="80px"),
+        ReportColumn("available", "المتاح", KIND_NUMBER, total=True, width="90px"),
+        ReportColumn("on_order", "قيد الطلب", KIND_NUMBER, total=True, width="90px"),
+        ReportColumn("adu", "الصرف اليومي", KIND_NUMBER, width="110px"),
+        ReportColumn("suggested_min", "الأدنى المقترَح", KIND_NUMBER, width="120px"),
+        ReportColumn("order_qty", "المقترح طلبه", KIND_NUMBER, total=True, width="110px"),
+        ReportColumn("reason", "ملاحظة"),
+    ),
+    build=_replenishment,
 ))
 
 

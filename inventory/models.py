@@ -74,7 +74,13 @@ class Product(models.Model):
     weight_kg = models.DecimalField(max_digits=12, decimal_places=4, blank=True, null=True, db_column='Weight_KG')
     volume_cbm = models.DecimalField(max_digits=12, decimal_places=6, blank=True, null=True, db_column='Volume_CBM')
     hs_code = models.CharField(max_length=20, blank=True, null=True, db_column='HS_Code')
+    # T-REORDER: الحدّان هما ثنائي إعادة الطلب (نمط min/max): الأدنى **هو** نقطة
+    # الطلب — بلوغه يعني «اطلب»، والأقصى هو المستوى الذي يُطلَب حتى بلوغه. لا
+    # ثالثَ بينهما عمداً: «حدّ إعادة طلب» منفصلٌ عن الأدنى يخلق سؤال «أيّهما
+    # يحكم؟» بلا أن يضيف قراراً. فارغٌ = بلا حدّ يدوي، ويحلّ محلّه الحدّ المقترَح
+    # المحسوب من المبيعات (`inventory/replenishment.py`).
     min_stock_level = models.IntegerField(blank=True, null=True, db_column='MinStockLevel')
+    max_stock_level = models.IntegerField(blank=True, null=True, db_column='MaxStockLevel')
     allow_negative_stock = models.BooleanField(
         default=False,
         db_column='AllowNegativeStock',

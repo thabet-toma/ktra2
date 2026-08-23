@@ -31,6 +31,9 @@ export interface AseelAutocompleteOption {
   price?: string;
   /** task24: تسمية مصدر السعر (آخر بيع/شراء، عرض سعر، افتراضي…). */
   priceLabel?: string;
+  /** T-REORDER: شارة حالة قصيرة بجانب الاسم (نفذ/منخفض) — تُبنى من
+   *  `utils/stockBadge` كي لا تُكتب القاعدة في كل شاشة. */
+  badge?: { text: string; tone: 'danger' | 'warn'; title?: string };
 }
 
 export interface AseelAutocompleteProps {
@@ -196,6 +199,16 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
                 onMouseDown={(e) => { e.preventDefault(); commit(i); }}
               >
                 <span className="aseel-autocomplete-label">{opt.label}</span>
+                {opt.badge && (
+                  <span
+                    title={opt.badge.title}
+                    className={`shrink-0 rounded px-1 py-px text-[10px] font-semibold border ${
+                      opt.badge.tone === 'danger'
+                        ? 'bg-[var(--aseel-danger-bg)] border-[var(--aseel-danger-bd)] text-[var(--aseel-danger)]'
+                        : 'bg-[var(--aseel-warn-bg)] border-[var(--aseel-warn-bd)] text-[var(--aseel-warn-fg)]'
+                    }`}
+                  >{opt.badge.text}</span>
+                )}
                 {opt.sub && <span className="aseel-autocomplete-sub">{opt.sub}</span>}
                 {!showPrices ? null : opt.prices && opt.prices.length > 0 ? (
                   <div className="flex gap-2 items-center ml-auto">

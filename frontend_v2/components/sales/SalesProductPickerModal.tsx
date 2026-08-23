@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { Search, X, Package, Plus } from "lucide-react";
 import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
+import { availableOf, stockBadgeFor } from "../../utils/stockBadge";
+import { formatQuantity } from "../../utils/formatNumber";
 
 /** نفس حقول المنتج في فاتورة المبيعات — منفصل لتفادي تبعية دائرية */
 export type SalesProductPickerItem = {
@@ -11,6 +13,11 @@ export type SalesProductPickerItem = {
   name_en?: string | null;
   quantity_on_hand: string;
   online_price?: string | null;
+  /** T-REORDER: حالة المخزون كما يحسمها الخادم — لا تُعاد هنا. */
+  stock_status?: string | null;
+  /** المتاح بعد الحجز (عقد المنتقي يرسله بجانب الرصيد). */
+  available_quantity?: string | number | null;
+  is_service?: boolean | null;
 };
 
 type Props = {
@@ -168,8 +175,11 @@ export const SalesProductPickerModal: React.FC<Props> = ({
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {filtered.map((p, idx) => {
-                const qty = Number(p.quantity_on_hand);
-                const low = qty <= 0;
+                // T-REORDER: كانت هنا نسخةٌ رابعة من قاعدة «منخفض» (qty <= 0)،
+                // وكانت تعرض الرصيد تحت عنوان «متاح» — رقمان مختلفان لاسمٍ واحد.
+                // الحالة الآن من الخادم، والرقم هو المتاح فعلاً.
+                const qty = availableOf(p);
+                const badge = stockBadgeFor(p);
                 return (
                   <button
                     key={p.id}
@@ -194,15 +204,19 @@ export const SalesProductPickerModal: React.FC<Props> = ({
                       </div>
                     )}
                     <div className="flex justify-between items-center mt-2 pt-2 border-t aseel-border-soft dark:aseel-border-soft">
-                      <span
-                        className={`text-xs font-mono px-2 py-0.5 rounded ${
-                          low
-                            ? "aseel-bg-panel aseel-text-state dark:aseel-bg-panel/30 dark:aseel-text-soft"
-                            : "aseel-bg-panel aseel-text-ink dark:aseel-bg-panel/30 dark:aseel-text-soft"
-                        }`}
-                      >
-                        متاح: {qty.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+                      <span className="text-xs font-mono px-2 py-0.5 rounded aseel-bg-panel aseel-text-ink dark:aseel-bg-panel/30 dark:aseel-text-soft">
+                        متاح: {formatQuantity(qty)}
                       </span>
+                      {badge && (
+                        <span
+                          title={badge.title}
+                          className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${
+                            badge.tone === "danger"
+                              ? "bg-[var(--aseel-danger-bg)] border-[var(--aseel-danger-bd)] text-[var(--aseel-danger)]"
+                              : "bg-[var(--aseel-warn-bg)] border-[var(--aseel-warn-bd)] text-[var(--aseel-warn-fg)]"
+                          }`}
+                        >{badge.text}</span>
+                      )}
                     </div>
                   </button>
                 );

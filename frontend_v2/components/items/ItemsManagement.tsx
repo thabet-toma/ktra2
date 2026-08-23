@@ -28,7 +28,7 @@ import { tenantScopedOfflineKey } from "../../utils/offlineTenantScope";
 const fmt = (n: number | string) => formatMoney(n, "0");
 
 type View = "list" | "form";
-type StockStatus = "" | "out_of_stock" | "low_stock" | "in_stock";
+type StockStatus = "" | "out_of_stock" | "low_stock" | "overstock" | "in_stock";
 
 // مفتاح عمود الجدول → حقل الترتيب الخادمي (OrderingFilter).
 const ORDER_FIELD: Record<string, string> = {
@@ -38,11 +38,14 @@ const ORDER_FIELD: Record<string, string> = {
   avg_cost: "avg_cost",
   sale_price: "sale_price",
   min: "min_stock_level",
+  max: "max_stock_level",
 };
 
 const STATUS_LABEL: Record<Exclude<StockStatus, "">, string> = {
   out_of_stock: "نفذ",
   low_stock: "منخفض",
+  // T-REORDER: حالةٌ رابعة يحسمها الخادم — فوق الحدّ الأقصى المضبوط على الصنف.
+  overstock: "فائض",
   in_stock: "متوفر",
 };
 
@@ -462,10 +465,21 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       ) },
     { key: "min", header: "الحد الأدنى", width: "90px", align: "center", sortable: true,
       render: (p) => <>{p.min_stock_level ?? "—"}</> },
+    { key: "max", header: "الحد الأقصى", width: "90px", align: "center", sortable: true,
+      render: (p) => <>{p.max_stock_level ?? "—"}</> },
+    // T-REORDER: «النوع» يجمع الموديلات المتبادلة — وفراغه يعني ألّا بديل يُقترح
+    // في الفاتورة ولا قرار «مؤجَّل» في تقرير التجديد. يُعيَّن من كرت الصنف، أو
+    // للمحدَّد دفعةً واحدة من شاشة «أرصدة المخزون».
+    { key: "grp", header: "النوع", width: "120px",
+      render: (p) => p.variant_group
+        ? <>{p.variant_group}</>
+        : <span style={{ color: "var(--aseel-ink-soft)" }}
+            title="بلا نوع — لن تظهر له بدائل في الفاتورة">—</span> },
     { key: "status", header: "الحالة", width: "80px", align: "center",
       render: (p) => {
         if (p.stock_status === "out_of_stock") return <span style={{ color: "var(--aseel-danger,#c00)" }}>نفذ</span>;
         if (p.stock_status === "low_stock") return <span style={{ color: "var(--aseel-warn,#b8800a)" }}>منخفض</span>;
+        if (p.stock_status === "overstock") return <span style={{ color: "var(--aseel-warn,#b8800a)" }}>فائض</span>;
         return <span style={{ color: "var(--aseel-ok,#267346)" }}>متوفر</span>;
       }
     },
@@ -567,6 +581,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           <option value="">كل الحالات</option>
           <option value="out_of_stock">نفذ</option>
           <option value="low_stock">كمية منخفضة</option>
+          <option value="overstock">فائض</option>
           <option value="in_stock">متوفر</option>
         </select>
         {/* تصدير بخيارات: الكل / ما نفذ / المنخفضة */}

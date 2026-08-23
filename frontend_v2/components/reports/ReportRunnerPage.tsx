@@ -7,7 +7,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, Download, FileSpreadsheet, Printer, Search } from "lucide-react";
+import { ArrowRight, CheckCheck, Download, FileSpreadsheet, Printer, Search } from "lucide-react";
 
 import { reportsApi } from "../../services/reportsApi";
 import { accountingApi } from "../../services/accountingApi";
@@ -16,6 +16,8 @@ import { listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { useCompany } from "../../contexts/CompanyContext";
 import { useToast } from "../../contexts/ToastContext";
+import { useConfirm } from "../../contexts/ConfirmContext";
+import { extraReportActions } from "./reportActions";
 import {
   DATE_PRESETS,
   datePresetRange,
@@ -67,6 +69,7 @@ export const ReportRunnerPage: React.FC = () => {
   const navigate = useNavigate();
   const { currentCompany } = useCompany();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [result, setResult] = useState<ReportResultDto | null>(null);
   const [filters, setFilters] = useState<ReportFilterDto[]>([]);
@@ -623,6 +626,29 @@ export const ReportRunnerPage: React.FC = () => {
   const actions: AseelToolbarAction[] = [
     { key: "back", label: "كل التقارير", icon: <ArrowRight />, onClick: () => navigate("/reports") },
     { key: "run", label: "تشغيل", icon: <Search />, onClick: () => void run() },
+    // T-REORDER: أفعالٌ يعلنها التقرير نفسه (`reportActions`) — الشاشة تسأل ولا
+    // تعرف أيّ تقرير؛ تقريرٌ بلا أفعال يعود بمصفوفة فارغة فلا يتغيّر شيء.
+    ...extraReportActions({
+      reportKey,
+      rows: (result?.rows ?? []) as Record<string, unknown>[],
+      params: values,
+      confirm,
+      toast,
+      rerun: () => void run(),
+    }).map((a) => ({
+      key: a.key,
+      label: a.label,
+      icon: <CheckCheck />,
+      onClick: () => {
+        void (async () => {
+          try {
+            await a.onClick();
+          } catch (e) {
+            toast(e instanceof Error ? e.message : "تعذّر تنفيذ الإجراء", "error");
+          }
+        })();
+      },
+    })),
     { key: "export-xlsx", label: "تصدير Excel", icon: <FileSpreadsheet />, onClick: exportXlsx },
     { key: "export", label: "تصدير CSV", icon: <Download />, onClick: exportCsv },
     { key: "print", label: "طباعة / PDF", icon: <Printer />, onClick: print },

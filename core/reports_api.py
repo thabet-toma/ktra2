@@ -31,13 +31,40 @@ logger = logging.getLogger(__name__)
 REPORT_CACHE_SECONDS = int(os.environ.get("REPORT_CACHE_SECONDS", "60"))
 
 
+def _report_cache_version(tenant_id) -> int:
+    """ختم نسخة تقارير الشركة — يُبطِل كاشَها كلّه بزيادةٍ واحدة.
+
+    الكاش ملفّي (`core/cache_backends.py`، لا Redis) فلا حذف بنمط مفتاح: المفتاح
+    الوحيد الذي يمكن مسحه هو مفتاحٌ نعرف نصّه. فالنسخة تدخل في **كل** مفتاح
+    تقرير، وزيادتها تجعل المفاتيح القديمة غير قابلة للإصابة فتنتهي بمهلتها.
+    """
+    try:
+        return int(cache.get(f"reports:ver:{tenant_id}") or 1)
+    except Exception:
+        # الكاش مُسرِّع لا مصدر حقيقة — تعثّره لا يُسقط طلباً (قاعدة core.md 4).
+        return 1
+
+
+def invalidate_tenant_reports(tenant_id) -> None:
+    """يُبطِل تقارير شركةٍ فوراً بعد كتابةٍ تغيّر أرقامها.
+
+    بدونه كان المستخدم يضغط «تثبيت الحدود المقترَحة» ثم يُعاد تشغيل التقرير
+    فيعود **من الكاش** بأرقامه القديمة لستّين ثانية — فيبدو الزرّ معطّلاً
+    ويُضغط ثانيةً وثالثة. الفعل الذي يغيّر الأرقام يجب أن يُبطل نسختها.
+    """
+    try:
+        cache.set(f"reports:ver:{tenant_id}", _report_cache_version(tenant_id) + 1, None)
+    except Exception:
+        logger.warning("reports.cache_invalidate_failed tenant=%s", tenant_id, exc_info=True)
+
+
 def _report_cache_key(key, tenant_id, user_id, params):
     payload = json.dumps(
         {"k": key, "t": tenant_id, "u": user_id, "p": params},
         sort_keys=True, ensure_ascii=False,
     )
     digest = hashlib.md5(payload.encode("utf-8")).hexdigest()
-    return f"report:{tenant_id}:{key}:{digest}"
+    return f"report:{tenant_id}:{_report_cache_version(tenant_id)}:{key}:{digest}"
 
 
 def _validation_message(exc: ValidationError) -> str:

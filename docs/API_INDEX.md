@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **482**
+عدد النقاط: **484**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -218,7 +218,9 @@
 | `/api/inventory/categories/` | `CategoryViewSet` | `inventory/views.py` |
 | `/api/inventory/categories/{pk}/` | `CategoryViewSet` | `inventory/views.py` |
 | `/api/inventory/products/` | `ProductViewSet` | `inventory/views.py` |
+| `/api/inventory/products/apply-replenishment/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/brands/` | `ProductViewSet` | `inventory/views.py` |
+| `/api/inventory/products/bulk-set-group/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/generate_barcode/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/generate_serials/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/group-invoices/` | `ProductViewSet` | `inventory/views.py` |

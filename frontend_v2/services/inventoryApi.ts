@@ -216,6 +216,47 @@ export const inventoryApi = {
     return allRows;
   },
 
+  /**
+   * T-REORDER: تثبيت الحدّ الأدنى/الأقصى المقترَحين على أصنافٍ محدَّدة.
+   *
+   * المحدِّد في **جسم** الطلب لا في عنوانه: تعداد مئات المعرّفات في سطر الطلب
+   * ردّه nginx بـ414 في الإنتاج من قبل (كرت المجموعة). والخطأ الخادمي يُرفع
+   * كما كتبه (`handle`) لا يُبتلع — الشاشة تقول ما رفضه الخادم بلفظه.
+   */
+  applyReplenishment: async (productIds: number[]): Promise<{
+    applied: number;
+    skipped: { product_id: number; sku?: string; reason: string }[];
+    products: {
+      product_id: number; sku: string; name: string;
+      min_stock_level: number; max_stock_level: number;
+    }[];
+  }> => {
+    const res = await fetch(`${INV}/products/apply-replenishment/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ product_ids: productIds }),
+    });
+    await handle(res, "applyReplenishment");
+    return res.json();
+  },
+
+  /**
+   * T-REORDER: تعيين «النوع» و/أو البراند على أصنافٍ محدَّدة دفعةً واحدة.
+   * الحقل غير المُمرَّر لا يُمَسّ؛ والفارغ يُمحى (تصحيح نوعٍ خاطئ كتعيينه).
+   */
+  bulkSetGroup: async (
+    productIds: number[],
+    fields: { variant_group?: string; brand?: string },
+  ): Promise<{ updated: number; fields: Record<string, string> }> => {
+    const res = await fetch(`${INV}/products/bulk-set-group/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ product_ids: productIds, ...fields }),
+    });
+    await handle(res, "bulkSetGroup");
+    return res.json();
+  },
+
   // ─── Categories ───
 
   getCategories: () =>

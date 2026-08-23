@@ -159,14 +159,22 @@ def trade_dashboard(request):
             value=Sum(F("quantity_on_hand") * F("avg_cost"))
         )["value"]
     )
-    low_stock_qs = prod_qs.filter(
-        quantity_on_hand__gt=0,
-        min_stock_level__gt=0,
-        quantity_on_hand__lte=F("min_stock_level"),
+    # T-REORDER: العدّادان من `inventory.stock_status` وحدها. كان «نفذ» يفلتر
+    # `min_stock_level__gt=0` قبل العدّ — فصنفٌ نفد ولا حدّ أدنى له لا يُعدّ
+    # نافداً إطلاقاً، وهو معظم الكتالوج. رقمٌ كاذبٌ بالنقصان يقرأه المالك كل صباح.
+    from inventory.stock_status import (
+        STATUS_LOW, STATUS_OUT_OF_STOCK, filter_by_stock_status,
     )
+
+    reserved_map = {}
+    if tenant:
+        from sales.services import reserved_quantity_map
+
+        reserved_map = reserved_quantity_map(tenant.TenantID)
+    low_stock_qs = filter_by_stock_status(prod_qs, STATUS_LOW, reserved_map=reserved_map)
     low_stock = low_stock_qs.count()
-    out_of_stock = prod_qs.filter(
-        min_stock_level__gt=0, quantity_on_hand__lte=0
+    out_of_stock = filter_by_stock_status(
+        prod_qs, STATUS_OUT_OF_STOCK, reserved_map=reserved_map
     ).count()
     movements_qs = (
         StockMovement.objects.filter(tenant=tenant)

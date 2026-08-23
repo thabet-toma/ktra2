@@ -30,7 +30,7 @@ import type {
 import type { AppView } from "../../types/common";
 import type { DashboardData } from "../../types/dashboard";
 import { formatDateLocalized } from "../../utils/formatDate";
-import { formatMoney } from "../../utils/formatNumber";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { EmptyState, Spinner } from "../ui";
 
 interface TradeDashboardProps {
@@ -350,7 +350,7 @@ function InventoryPanel({ data, onNavigate }: { data: DashboardData["inventory"]
       ) : data.low_stock_items.length > 0 ? (
         <div className="mt-3 space-y-2 border-t border-[var(--color-border)] pt-3">
           {data.low_stock_items.slice(0, 3).map((item) => (
-            <div key={item.id} className="flex justify-between text-xs"><span className="truncate text-[var(--color-text-muted)]">{item.name_ar || item.sku}</span><span className="font-semibold text-rose-500">{Number(item.quantity_on_hand).toFixed(0)} متبقٍ</span></div>
+            <div key={item.id} className="flex justify-between text-xs"><span className="truncate text-[var(--color-text-muted)]">{item.name_ar || item.sku}</span><span className="font-semibold text-rose-500">{formatQuantity(item.quantity_on_hand)} متبقٍ</span></div>
           ))}
         </div>
       ) : <p className="mt-3 text-xs text-emerald-600 dark:text-emerald-400">مستويات المخزون ضمن الحدود المحددة.</p>}
