@@ -1223,7 +1223,12 @@ tbody td {
 :root[data-skin] .aseel-picker-body { flex: 1; overflow: auto; }
 /* T-WIN: لوحٌ على الطرف المقابل (AseelSidePanel) — كان يفرضه بنمطٍ inline. */
 :root[data-skin] .aseel-picker-mask--end { justify-content: flex-end; }
-:root[data-skin] .aseel-sidepanel { border-inline-end: none; border-inline-start: 1px solid var(--aseel-border); }
+:root[data-skin] .aseel-sidepanel {
+  border-inline-end: none;
+  border-inline-start: 1px solid var(--aseel-border);
+  width: var(--sidepanel-w, 380px);
+  max-width: 100vw;
+}
 :root[data-skin] .aseel-sidepanel__body { padding: 8px; }
 
 /* ───────── M1 — Sales-invoice screen extras (scoped to data-skin) ───────── */
@@ -1677,11 +1682,14 @@ tbody td {
   inset: 0;
   z-index: var(--z-window-mask);
   background: transparent;
+  /* غير الحاجبة تمرّر النقر لما خلفها — والنافذة نفسها تستعيده أدناه. */
+  pointer-events: none;
 }
-/* النافذة الحاجبة (modal) وحدها تُظلم ما خلفها؛ غير الحاجبة تترك العمل مرئياً. */
+/* النافذة الحاجبة (modal) وحدها تُظلم ما خلفها وتلتقط النقر خارجها للإغلاق. */
 :root[data-skin] .aseel-float-mask--dim {
   background: var(--overlay-mask);
   backdrop-filter: blur(1.5px);
+  pointer-events: auto;
 }
 
 :root[data-skin] .aseel-float-win {
@@ -1691,6 +1699,7 @@ tbody td {
   width: var(--win-w);
   height: var(--win-h);
   z-index: var(--z-window);
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1787,7 +1796,14 @@ tbody td {
 }
 :root[data-skin] .aseel-rail--right { right: 10px; }
 :root[data-skin] .aseel-rail--left { left: 10px; }
-:root[data-skin] .aseel-rail--busy { opacity: .9; transform: none; }
+/* أثناء السحب: يتبع المؤشر — الهندسة متغيّرا CSS من الحلقة، لا نمط مضمّن. */
+:root[data-skin] .aseel-rail--busy {
+  opacity: .9;
+  top: var(--rail-y);
+  left: var(--rail-x);
+  right: auto;
+  transform: translate(-50%, -20px);
+}
 :root[data-skin] .aseel-rail__grip {
   flex: 0 0 auto;
   display: flex;

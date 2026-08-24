@@ -307,8 +307,7 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
 
       {/* أدوات علوية: عنوان + ذاكرة + إغلاق */}
       <div
-        className={`relative flex justify-between items-center mb-3 ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
-        style={{ touchAction: "none" }}
+        className={`relative flex justify-between items-center mb-3 touch-none ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
         onPointerDown={startDrag}
         title="اسحب لتحريك الحاسبة"
       >

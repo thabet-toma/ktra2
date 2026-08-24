@@ -103,8 +103,7 @@ export const ActionBarRail: React.FC<Props> = ({ user, onNavigate }) => {
         {!narrow && (
           <button
             type="button"
-            className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary-emphasis)] rounded-lg cursor-grab active:cursor-grabbing"
-            style={{ touchAction: "none" }}
+            className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary-emphasis)] rounded-lg cursor-grab active:cursor-grabbing touch-none"
             onPointerDown={startDrag}
             title="اسحب لإرساء شريط الإجراءات على حافة الشاشة"
             aria-label="تغيير موضع شريط الإجراءات"
@@ -118,8 +117,9 @@ export const ActionBarRail: React.FC<Props> = ({ user, onNavigate }) => {
   }
 
   const dragging = dragPoint !== null;
+  /* الهندسة متغيّرا CSS كنافذة T-WIN — قاعدة `.aseel-rail--busy` تستهلكهما. */
   const floating: React.CSSProperties | undefined = dragPoint
-    ? { top: dragPoint.y, left: dragPoint.x, right: "auto", transform: "translate(-50%, -20px)" }
+    ? ({ "--rail-x": `${dragPoint.x}px`, "--rail-y": `${dragPoint.y}px` } as React.CSSProperties)
     : undefined;
 
   return createPortal(
@@ -134,7 +134,6 @@ export const ActionBarRail: React.FC<Props> = ({ user, onNavigate }) => {
         <button
           type="button"
           className="aseel-rail__grip"
-          style={{ touchAction: "none" }}
           onPointerDown={startDrag}
           title={`اسحب لتغيير الموضع — الآن: ${DOCK_LABEL[effective]}`}
           aria-label="تغيير موضع شريط الإجراءات"

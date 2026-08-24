@@ -125,7 +125,6 @@ export const AseelFloatWindow: React.FC<AseelFloatWindowProps> = ({
   return createPortal(
     <div
       className={`aseel-float-mask${modal ? " aseel-float-mask--dim" : ""}`}
-      style={modal ? undefined : { pointerEvents: "none" }}
       onMouseDown={(event) => {
         if (modal && event.target === event.currentTarget) onClose();
       }}
@@ -139,7 +138,7 @@ export const AseelFloatWindow: React.FC<AseelFloatWindowProps> = ({
         aria-labelledby={titleId}
         tabIndex={-1}
         className={`aseel-float-win${busy ? " aseel-float-win--busy" : ""}${extraClass ? ` ${extraClass}` : ""}`}
-        style={{ ...geometry, pointerEvents: "auto" }}
+        style={geometry}
         onKeyDown={onKeyDown}
       >
         <div className="aseel-float-win__bar" onPointerDown={startDrag}>

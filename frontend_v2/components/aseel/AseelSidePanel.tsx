@@ -42,7 +42,7 @@ export function AseelSidePanel({ open, onClose, title, width = 380, children }: 
     >
       <div
         className="aseel-picker aseel-sidepanel"
-        style={{ width, maxWidth: "100vw" }}
+        style={{ "--sidepanel-w": `${width}px` } as React.CSSProperties}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="aseel-picker-head">
