@@ -69,9 +69,13 @@ def public_url(share: DocumentShare) -> str:
 
     `request.build_absolute_uri` يبني من `Host`، وهي ترويسة يرسلها العميل.
     الرابط هنا يُلصق في واتساب ويعيش شهراً، فأساسه يُثبَّت في الإعدادات.
+
+    والوجهة كذلك (`DOCSHARE_PUBLIC_PATH`): القصير `/s` يلزمه سطر في nginx،
+    و`/api/share` يعمل بلا لمس الخادم — فالاختيار متغيّر بيئة لا نشرُ كود.
     """
     base = str(getattr(settings, "DOCSHARE_PUBLIC_BASE_URL", "")).rstrip("/")
-    return f"{base}/s/{share.token}"
+    path = str(getattr(settings, "DOCSHARE_PUBLIC_PATH", "/s")).rstrip("/")
+    return f"{base}{path}/{share.token}"
 
 
 def active_share(tenant, doc_type: str, doc_id: int):

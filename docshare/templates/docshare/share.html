@@ -178,7 +178,7 @@
         {% if decision_error %}<div class="alert">{{ decision_error }}</div>{% endif %}
         <h3>قرارك على هذا العرض</h3>
         <p class="muted" style="margin:0">اكتب اسمك ثم اختر. يُسجَّل القرار بتاريخه ولا يمكن تغييره بعد إرساله.</p>
-        <form method="post" action="/s/{{ share.token }}/decision/">
+        <form method="post" action="{{ decision_url }}">
           <input type="text" name="name" maxlength="120" required
                  placeholder="الاسم الكامل" autocomplete="name">
           <div class="acts">

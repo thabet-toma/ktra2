@@ -11,6 +11,7 @@
 import logging
 
 from django.http import HttpResponseRedirect
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -84,8 +85,25 @@ def _page_context(request, share, document, payload):
         # يُقرَّر على هذا الرابط من قبل. الشروط الثلاثة مستقلة ولكلٍّ رسالته.
         "can_decide": payload["can_decide"] and not expired_offer and not share.decision,
         "decision_error": "",
+        **_mount_urls(request, share.token),
     }
 
+
+def _mount_urls(request, token):
+    """عناوين هذه الصفحة **من نطاق المسار الذي خُدمت منه**، لا من ثابت `/s/`.
+
+    السطح مركَّب مرتين (`/s/` و`/api/share/`) لأن `/s/` يلزمه سطر `location`
+    في nginx بينما `/api/` ممرَّر أصلاً. لو ثبَّتنا `/s/` في نموذج القرار
+    وفي التحويل بعده، لانكسر القبول والرفض **بصمت** على التركيب الاحتياطي:
+    الطلب يسقط في `location /` فيردّ nginx صفحة الـSPA بحالة 200 — فيضغط
+    الزبون «موافق» ويرى واجهة التطبيق، ولا يُسجَّل شيء ولا يظهر خطأ.
+    `resolver_match.namespace` يقول أيّ تركيب استُعمل، فيُبنى الباقي عليه.
+    """
+    namespace = getattr(request.resolver_match, "namespace", "") or "docshare-s"
+    return {
+        "page_url": reverse(f"{namespace}:docshare-public", args=[token]),
+        "decision_url": reverse(f"{namespace}:docshare-decision", args=[token]),
+    }
 
 class DocSharePublicView(DocSharePublicBase):
     """`GET /s/<token>` و`GET /api/share/<token>/` — صفحة المستند."""
@@ -160,7 +178,10 @@ class DocShareDecisionView(DocSharePublicBase):
                 status_code=status.HTTP_409_CONFLICT,
             )
 
-        return _harden(HttpResponseRedirect(f"/s/{token}"), status_code=302)
+        return _harden(
+            HttpResponseRedirect(_mount_urls(request, token)["page_url"]),
+            status_code=302,
+        )
 
 
 class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):

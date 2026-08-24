@@ -318,6 +318,15 @@ DOCSHARE_PUBLIC_BASE_URL = os.environ.get(
     "DOCSHARE_PUBLIC_BASE_URL", "https://ktra-pro.tech",
 ).rstrip("/")
 
+# وجهة الرابط المنسوخ. السطح مركَّب مرتين في `core/urls.py`، والقصير `/s`
+# يلزمه سطر `location` في nginx لأن الخادم الأمامي يمرّر `/api/` وحده.
+# فإن لم يُضَف ذلك السطر، يكفي `DOCSHARE_PUBLIC_PATH=/api/share` لتعمل الميزة
+# كاملةً بلا تغيير كود: الصفحة تشتقّ نموذج القرار والتحويل من المسار الذي
+# خُدمت منه (`docshare/views.py` (`_mount_urls`))، فلا شيء يبقى مثبَّتاً على `/s`.
+DOCSHARE_PUBLIC_PATH = "/" + os.environ.get(
+    "DOCSHARE_PUBLIC_PATH", "/s",
+).strip("/")
+
 # المساعد الذكي (OpenClaw على سيرفر منفصل — ليس نفس خادم Django).
 # Django يتصل به عبر HTTP (صادر من هذا السيرفر)؛ على سيرفر OpenClaw يجب أن يكون المنفذ (مثل 18789)
 # مفتوحاً للوارد (Inbound) من الإنترنت إن أردت الوصول من خارج الشبكة الداخلية.
