@@ -12,6 +12,22 @@ const PASSWORD = process.env.OFFICE_PASSWORD || 'Walk!2026#office';
 const CLIENT_NAME = `مؤسسة المشي التجارية ${Date.now()}`;
 const SHOTS = 'e2e/office-walk-shots';
 
+/**
+ * هذا المشي يحتاج خادماً حيّاً وحساباً مزروعاً، فبدونهما كان يسقط **أحمر** في كل
+ * تشغيل محلي — وأحمرٌ دائمٌ يُدرّب على تجاهل الأحمر. صار يتخطّى نفسه معلناً
+ * سببه، فيبقى الأحمر معنىً لا ضجيجاً.
+ */
+test.beforeEach(async ({ request }) => {
+  let alive = false;
+  try {
+    const probe = await request.get('http://localhost:8000/api/', { timeout: 3_000 });
+    alive = probe.status() < 500;
+  } catch {
+    alive = false;
+  }
+  test.skip(!alive, 'يلزمه backend على 8000 وحساب محاسب مُتحقَّق (OFFICE_EMAIL/OFFICE_PASSWORD)');
+});
+
 test('المكتب يخدم زبوناً خارجياً من إضافته إلى ظهور موعده على اللوحة', async ({ page }) => {
   test.setTimeout(180_000);
 

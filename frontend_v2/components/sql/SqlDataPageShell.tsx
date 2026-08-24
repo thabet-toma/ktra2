@@ -1,5 +1,18 @@
 import React from "react";
+import { AseelDocumentShell } from "../aseel/AseelDocumentShell";
 
+/**
+ * إطار شاشات البيانات الخام (الصفقات · الشحنات · الأصناف · الأطراف).
+ *
+ * T-WIN M7: كان بطاقةً مرتجلة (`p-4` + `h1` + صندوق مدوّر) خارج الغلاف
+ * الموحّد — فالشاشات الأربع كانت الوحيدة بلا شريط عنوان ولا شريط أوامر ولا
+ * شريط حالة، ولا يصلها تلميع الجلد. صار الإطار `AseelDocumentShell`، فورثت
+ * الأربع كلها بتعديل ملفٍ واحد ولم يتغيّر سطرٌ في أيٍّ منها.
+ *
+ * `actions` تُمرَّر كما هي إلى الشريط العلوي (وليست `AseelToolbarAction[]`)
+ * لأنها في هذه الشاشات خليطُ أزرارٍ وحقولِ بحثٍ وقوائم — تمريرها كما هي يُبقي
+ * نصوصها ومعرّفاتها حرفاً بحرف كما كانت.
+ */
 export function SqlDataPageShell(props: {
   title: string;
   subtitle?: string;
@@ -7,23 +20,12 @@ export function SqlDataPageShell(props: {
   children: React.ReactNode;
 }) {
   return (
-    <div className="p-4 md:p-6">
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold aseel-text-ink">
-            {props.title}
-          </h1>
-          {props.subtitle ? (
-            <div className="text-sm aseel-text-soft mt-1">{props.subtitle}</div>
-          ) : null}
-        </div>
-        {props.actions ? <div className="shrink-0">{props.actions}</div> : null}
-      </div>
-
-      <div className="aseel-bg-field border aseel-border-soft rounded-xl shadow-sm overflow-hidden">
-        {props.children}
-      </div>
-    </div>
+    <AseelDocumentShell
+      title={props.title}
+      company={props.subtitle}
+      header={props.actions ? <div className="flex flex-wrap items-center gap-2">{props.actions}</div> : undefined}
+    >
+      {props.children}
+    </AseelDocumentShell>
   );
 }
-

@@ -19,7 +19,7 @@ import {
   BranchSwitcher,
 } from './BranchSwitcher';
 import { AseelCalculatorButton } from '../aseel';
-import { GlobalActionBar } from './GlobalActionBar';
+import { ActionBarRail } from './ActionBarRail';
 import { GlobalContextMenu } from './GlobalContextMenu';
 import { NotificationCenter } from '../notifications/NotificationCenter';
 import { WhatsNewButton } from './WhatsNewButton';
@@ -258,8 +258,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             <span className="hidden sm:inline">المساعد الذكي</span>
           </button>
           
-          {/* شريط الإجراءات السريعة */}
-          <GlobalActionBar user={user} onNavigate={onNavigate} />
+          {/* شريط الإجراءات السريعة — رفٌّ عائم قابل للإرساء (T-WIN) */}
+          <ActionBarRail user={user} onNavigate={onNavigate} />
         </div>
         <div className="flex items-center gap-3 ms-auto">
           {/* العناصر المنقولة من الشريط السفلي */}
@@ -386,7 +386,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       <GlobalContextMenu user={user} onNavigate={onNavigate} />
       {notesTarget && (
         <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-3"
+          className="ktra-overlay-mask z-[70] flex items-center justify-center p-3"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setNotesTarget(null);
           }}
@@ -395,7 +395,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             role="dialog"
             aria-modal="true"
             aria-labelledby="platform-notes-title"
-            className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xl"
+            className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--elev-5)]"
           >
             <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
               <div>

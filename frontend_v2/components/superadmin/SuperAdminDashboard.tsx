@@ -285,6 +285,9 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
         ))}
       </section>
 
+      {/* مؤشرات التشغيل قسمٌ مستقل: استجابةٌ بلا `kpis` (نسخة خادم أقدم أو ردٌّ
+          جزئي) كانت تُبيّض اللوحة كلها بدل أن تُسقط هذا القسم وحده. */}
+      {data.kpis && (
       <section aria-label="مؤشرات التشغيل" className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
         <InsightCard
           title={`بلا نشاط ${formatNumber(data.kpis.idle_companies.days)} يوماً`}
@@ -306,7 +309,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
 
         <InsightCard
           title="أعلى استهلاك للتخزين"
-          value={formatBytes(data.storage.ledger_total_bytes)}
+          value={formatBytes(data.storage?.ledger_total_bytes ?? 0)}
           caption="إجمالي سجلّ البايتات على المنصة — أعلى خمس شركات"
           icon={HardDrive}
           tone="text-indigo-600 bg-indigo-50 dark:bg-indigo-950/30"
@@ -340,6 +343,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
           />
         </InsightCard>
       </section>
+      )}
 
       <section aria-label="سوبر أدمن المنصة" className="mt-5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-3">
@@ -533,7 +537,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
             عليه — «غير منسوب» محجوزة في تقرير `backfill_tenant_assets` لكمّية
             أخرى (إجمالي Cloudinary ناقص السجلّ كلّه)، ولفظٌ واحد لا يعني رقمين.
             تُخفى عند الصفر: سطرٌ يقول «صفر» ضجيجٌ لا خبر. */}
-        {data.storage.unattributed_bytes > 0 && (
+        {(data.storage?.unattributed_bytes ?? 0) > 0 && (
           <div className="border-t border-[var(--color-border)] px-4 py-3">
             <p className="text-sm text-[var(--color-text)]">
               تخزين مرفوع لا يخصّ شركة بعينها:{" "}

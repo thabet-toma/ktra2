@@ -9,8 +9,8 @@
  * عرض واحد للصنف، والنسخة المختصرة هنا تُحيل للكرت الكامل للتحرير.
  */
 import React, { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
-import { X, ExternalLink, Check } from "lucide-react";
+import { ExternalLink, Check } from "lucide-react";
+import { AseelFloatWindow } from "../aseel/AseelFloatWindow";
 import { useNavigate } from "react-router-dom";
 import { apiGetObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -114,22 +114,44 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
   // أعمدة حركة المخزون المعروضة داخل البطاقة (مختصرة — بلا طرف/مستودع).
   const ledColumns = ledgerColumns();
 
-  return createPortal(
-    // البطاقة تُحقن في <body> عبر بورتال، خارج شجرة `.aseel-doc`.
-    // أنماط القناع عامة وتتبع الجلد المطبّق على جذر التطبيق، لذلك لا يحتاج
-    // المحتوى المنقول عبر البوابة إلى wrapper محلي يفرض جلداً بعينه.
-    <div>
-    <div
-      className="aseel-picker-mask"
-      data-aseel-modal="1"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+  /* T-WIN: البطاقة صارت نافذة عائمة تُسحب وتُحجَّم — كانت لوحاً ثابتاً بعرض
+     92vw. الهندسة تُحفظ لكل وضعٍ على حدة: الإضافة نافذة صغيرة والعرض أوسع. */
+  return (
+    <AseelFloatWindow
+      open
+      onClose={onClose}
+      name={addMode ? "product-card-add" : "product-card"}
+      title={title ? `بطاقة الصنف: ${title}` : "بطاقة الصنف"}
+      defaultWidth={addMode ? 560 : 860}
+      defaultHeight={addMode ? 460 : 620}
+      rootProps={{ "data-aseel-modal": "1", "aria-label": "بطاقة الصنف" } as React.HTMLAttributes<HTMLDivElement>}
+      footer={(
+        <>
+          <button
+            type="button"
+            className="aseel-toolbtn"
+            onClick={() => { onClose(); navigate(productProfilePath(productId)); }}
+            title="فتح كرت الصنف الكامل (عرض وتعديل)"
+          >
+            <ExternalLink className="w-4 h-4" /> الكرت الكامل
+          </button>
+          <div className="ms-auto flex items-center gap-2">
+            <button type="button" className="aseel-toolbtn" onClick={onClose}>إغلاق</button>
+            {onConfirm && (
+              <button
+                type="button"
+                onClick={() => { onConfirm(addMode ? confirmPayload() : undefined); onClose(); }}
+                title="إضافة الصنف إلى الفاتورة"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
+              >
+                <Check className="w-4 h-4" /> {confirmLabel}
+              </button>
+            )}
+          </div>
+        </>
+      )}
     >
-      <div className="aseel-picker" role="dialog" aria-modal="true" aria-label="بطاقة الصنف" style={{ maxWidth: addMode ? 560 : 760, width: "92vw" }}>
-        <div className="aseel-picker-head">
-          <span>{title ? `بطاقة الصنف: ${title}` : "بطاقة الصنف"}</span>
-          <button type="button" className="aseel-toolbtn" onClick={onClose} aria-label="إغلاق"><X /></button>
-        </div>
-        <div className="aseel-picker-body" style={{ padding: "10px", maxHeight: "72vh", overflowY: "auto" }}>
+      <div className="p-2.5">
           {loading ? (
             <div className="p-4 text-center text-[var(--aseel-ink-soft)]">جاري التحميل…</div>
           ) : error ? (
@@ -199,34 +221,8 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
               </label>
             </div>
           )}
-        </div>
-        <div className="aseel-picker-foot" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <button
-            type="button"
-            className="aseel-toolbtn"
-            onClick={() => { onClose(); navigate(productProfilePath(productId)); }}
-            title="فتح كرت الصنف الكامل (عرض وتعديل)"
-          >
-            <ExternalLink className="w-4 h-4" /> الكرت الكامل
-          </button>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button type="button" className="aseel-toolbtn" onClick={onClose}>إغلاق</button>
-            {onConfirm && (
-              <button
-                type="button"
-                onClick={() => { onConfirm(addMode ? confirmPayload() : undefined); onClose(); }}
-                title="إضافة الصنف إلى الفاتورة"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
-              >
-                <Check className="w-4 h-4" /> {confirmLabel}
-              </button>
-            )}
-          </div>
-        </div>
       </div>
-    </div>
-    </div>,
-    document.body,
+    </AseelFloatWindow>
   );
 };
 

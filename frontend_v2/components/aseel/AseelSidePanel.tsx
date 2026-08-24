@@ -14,6 +14,8 @@ export interface AseelSidePanelProps {
  * AseelSidePanel — right-sliding panel for browse/view (not decision modals).
  * Renders via portal to document.body.
  * Closes on ESC, click-outside mask, or X button.
+ * T-WIN: المظهر انتقل إلى كلاسات المنتقي المشتركة — كان أنماطاً inline
+ * بـ zIndex 9999 وألواناً ثابتة لا ترى الجلد ولا الوضع الداكن.
  */
 export function AseelSidePanel({ open, onClose, title, width = 380, children }: AseelSidePanelProps) {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -33,31 +35,23 @@ export function AseelSidePanel({ open, onClose, title, width = 380, children }: 
   if (!open) return null;
 
   return createPortal(
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 9999,
-      display: "flex", justifyContent: "flex-end",
-      background: "rgba(0,0,0,0.15)",
-      direction: "rtl",
-    }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{
-        width, height: "100%",
-        background: "var(--aseel-bg-panel, #fff)",
-        borderLeft: "1px solid var(--aseel-border, #ddd)",
-        display: "flex", flexDirection: "column",
-        transform: open ? "translateX(0)" : "translateX(100%)",
-        transition: "transform 0.2s ease",
-      }} onClick={(e) => e.stopPropagation()}>
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "8px 12px", borderBottom: "1px solid var(--aseel-border, #ddd)",
-          fontSize: "var(--aseel-fs, 13px)", fontWeight: 600,
-        }}>
+    <div
+      className="aseel-picker-mask aseel-picker-mask--end"
+      dir="rtl"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="aseel-picker aseel-sidepanel"
+        style={{ width, maxWidth: "100vw" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="aseel-picker-head">
           <span>{title}</span>
-          <button type="button" onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+          <button type="button" className="aseel-toolbtn" onClick={onClose} aria-label="إغلاق">
             <X size={16} />
           </button>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
+        <div className="aseel-picker-body aseel-sidepanel__body">
           {children}
         </div>
       </div>

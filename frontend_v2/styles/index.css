@@ -70,6 +70,31 @@
   /* ── Transitions ── */
   --transition-fast: 150ms ease;
   --transition-base: 200ms ease;
+
+  /* ── T-WIN: زوايا أكبر للأسطح العائمة (النوافذ، الشريط، البطاقات) ──
+     إضافة فقط — الرموز الثلاثة أعلاه تتغذّى منها أدوات Tailwind في
+     الجلدين، فتغييرها كان سيحرّك جلد الأصيل بكسلياً. */
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+
+  /* ── T-WIN: سلّم ارتفاع حقيقي — ظلٌّ محيطي واسع + ظلٌّ مفتاحي ضيّق،
+     وهو ما يفصل السطح العائم عن الصفحة في الواجهات الاحترافية. ── */
+  --elev-1: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.10);
+  --elev-2: 0 2px 4px rgb(15 23 42 / 0.06), 0 4px 8px -2px rgb(15 23 42 / 0.10);
+  --elev-3: 0 4px 8px rgb(15 23 42 / 0.06), 0 8px 20px -4px rgb(15 23 42 / 0.14);
+  --elev-4: 0 8px 16px rgb(15 23 42 / 0.08), 0 16px 32px -8px rgb(15 23 42 / 0.18);
+  --elev-5: 0 12px 24px rgb(15 23 42 / 0.10), 0 28px 56px -12px rgb(15 23 42 / 0.24);
+
+  /* ── T-WIN: قناع الأغطية الموحّد ومدّة حركة النوافذ ── */
+  --overlay-mask: rgb(15 23 42 / 0.42);
+  --motion-win: 160ms;
+
+  /* ── T-WIN: سلّم z للطبقات العائمة الجديدة ──
+     فوق لوح المنتقي (70) وتحت طبقة المنبثقات (10000+) عمداً: قائمةُ
+     إكمالٍ تُفتح داخل نافذة يجب أن تعلوها. القيم القديمة لم تُرقَّم. */
+  --z-float-rail: 60;
+  --z-window-mask: 80;
+  --z-window: 81;
 }
 
 /* Dark mode: apply dark token overrides when .dark class is on <html> */
@@ -82,6 +107,14 @@
   --color-muted: #1e293b;
   --color-text: #f8fafc;
   --color-text-muted: #94a3b8;
+
+  /* T-WIN: على خلفية داكنة الظلّ الشفاف يختفي — يُعمَّق ويُشدّ القناع. */
+  --elev-1: 0 1px 2px rgb(0 0 0 / 0.40), 0 1px 3px rgb(0 0 0 / 0.30);
+  --elev-2: 0 2px 4px rgb(0 0 0 / 0.40), 0 4px 8px -2px rgb(0 0 0 / 0.36);
+  --elev-3: 0 4px 8px rgb(0 0 0 / 0.44), 0 8px 20px -4px rgb(0 0 0 / 0.44);
+  --elev-4: 0 8px 16px rgb(0 0 0 / 0.48), 0 16px 32px -8px rgb(0 0 0 / 0.52);
+  --elev-5: 0 12px 24px rgb(0 0 0 / 0.52), 0 28px 56px -12px rgb(0 0 0 / 0.60);
+  --overlay-mask: rgb(0 0 0 / 0.62);
 }
 
 /* ── Base resets ── */
@@ -1188,6 +1221,10 @@ tbody td {
   color: var(--aseel-accent); font-weight: 700;
 }
 :root[data-skin] .aseel-picker-body { flex: 1; overflow: auto; }
+/* T-WIN: لوحٌ على الطرف المقابل (AseelSidePanel) — كان يفرضه بنمطٍ inline. */
+:root[data-skin] .aseel-picker-mask--end { justify-content: flex-end; }
+:root[data-skin] .aseel-sidepanel { border-inline-end: none; border-inline-start: 1px solid var(--aseel-border); }
+:root[data-skin] .aseel-sidepanel__body { padding: 8px; }
 
 /* ───────── M1 — Sales-invoice screen extras (scoped to data-skin) ───────── */
 
@@ -1620,6 +1657,165 @@ tbody td {
 :root[data-skin] .aseel-badge-neutral { background: var(--aseel-panel); color: var(--aseel-ink-soft); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
 
 /* ════════════════════════════════════════════════════════════════════
+   T-WIN — النافذة العائمة والشريط القابل للإرساء (قواعد هيكلية)
+   ────────────────────────────────────────────────────────────────────
+   الهندسة (left/top/width/height) تكتبها الواجهة كمتغيّرات CSS على
+   العنصر — لا أنماط مضمّنة للمظهر. المظهر كلّه من التوكنات، فينقلب مع
+   الجلد والوضع الداكن بلا سطرٍ إضافي.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* غطاء موحّد لكل الطبقات الحاجبة — يحلّ محل رمادياتٍ متفرّقة. */
+.ktra-overlay-mask {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-mask);
+  backdrop-filter: blur(1.5px);
+}
+
+:root[data-skin] .aseel-float-mask {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-window-mask);
+  background: transparent;
+}
+/* النافذة الحاجبة (modal) وحدها تُظلم ما خلفها؛ غير الحاجبة تترك العمل مرئياً. */
+:root[data-skin] .aseel-float-mask--dim {
+  background: var(--overlay-mask);
+  backdrop-filter: blur(1.5px);
+}
+
+:root[data-skin] .aseel-float-win {
+  position: fixed;
+  left: var(--win-x);
+  top: var(--win-y);
+  width: var(--win-w);
+  height: var(--win-h);
+  z-index: var(--z-window);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--aseel-panel);
+  color: var(--aseel-ink);
+  border: 1px solid var(--aseel-border);
+  border-radius: var(--aseel-radius);
+  box-shadow: var(--aseel-shadow-modal);
+}
+:root[data-skin] .aseel-float-win:focus { outline: none; }
+
+/* أثناء السحب/التحجيم: لا انتقالات (تُلاحق المؤشر) ولا تحديد نصّ. */
+:root[data-skin] .aseel-float-win--busy,
+:root[data-skin] .aseel-float-win--busy * {
+  transition: none !important;
+  user-select: none;
+}
+
+:root[data-skin] .aseel-float-win__bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--aseel-panel);
+  color: var(--aseel-ink);
+  border-bottom: 1px solid var(--aseel-border-soft);
+  cursor: grab;
+  touch-action: none;
+}
+:root[data-skin] .aseel-float-win--busy .aseel-float-win__bar { cursor: grabbing; }
+:root[data-skin] .aseel-float-win__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: var(--aseel-fs-sm, 12px);
+}
+:root[data-skin] .aseel-float-win__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: var(--aseel-bg);
+}
+:root[data-skin] .aseel-float-win__foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--aseel-border-soft);
+  background: var(--aseel-panel);
+}
+
+/* مقابض التحجيم: أشرطة خفية 6px على الحواف و12px على الزوايا. */
+:root[data-skin] .aseel-float-win__grip {
+  position: absolute;
+  touch-action: none;
+  background: transparent;
+}
+:root[data-skin] .aseel-float-win__grip--n { inset-block-start: 0; inset-inline: 6px; height: 6px; cursor: ns-resize; }
+:root[data-skin] .aseel-float-win__grip--s { inset-block-end: 0; inset-inline: 6px; height: 6px; cursor: ns-resize; }
+:root[data-skin] .aseel-float-win__grip--w { inset-inline-start: 0; inset-block: 6px; width: 6px; cursor: ew-resize; }
+:root[data-skin] .aseel-float-win__grip--e { inset-inline-end: 0; inset-block: 6px; width: 6px; cursor: ew-resize; }
+:root[data-skin] .aseel-float-win__grip--nw,
+:root[data-skin] .aseel-float-win__grip--ne,
+:root[data-skin] .aseel-float-win__grip--sw,
+:root[data-skin] .aseel-float-win__grip--se { width: 12px; height: 12px; }
+:root[data-skin] .aseel-float-win__grip--nw { top: 0; left: 0; cursor: nwse-resize; }
+:root[data-skin] .aseel-float-win__grip--ne { top: 0; right: 0; cursor: nesw-resize; }
+:root[data-skin] .aseel-float-win__grip--sw { bottom: 0; left: 0; cursor: nesw-resize; }
+:root[data-skin] .aseel-float-win__grip--se { bottom: 0; right: 0; cursor: nwse-resize; }
+
+/* ── الشريط العائم القابل للإرساء ── */
+:root[data-skin] .aseel-rail {
+  position: fixed;
+  z-index: var(--z-float-rail);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  background: var(--aseel-panel);
+  border: 1px solid var(--aseel-border);
+  border-radius: var(--aseel-radius);
+  box-shadow: var(--aseel-shadow-drop);
+}
+:root[data-skin] .aseel-rail--right,
+:root[data-skin] .aseel-rail--left {
+  flex-direction: column;
+  top: 50%;
+  transform: translateY(-50%);
+}
+:root[data-skin] .aseel-rail--right { right: 10px; }
+:root[data-skin] .aseel-rail--left { left: 10px; }
+:root[data-skin] .aseel-rail--busy { opacity: .9; transform: none; }
+:root[data-skin] .aseel-rail__grip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--aseel-ink-soft);
+  cursor: grab;
+  touch-action: none;
+  padding: 2px;
+}
+:root[data-skin] .aseel-rail--busy .aseel-rail__grip { cursor: grabbing; }
+
+/* منطقة إرساء تُضاء أثناء سحب الشريط فيرى المستخدم أين سيستقرّ. */
+:root[data-skin] .aseel-dockzone {
+  position: fixed;
+  z-index: var(--z-float-rail);
+  border: 2px dashed var(--aseel-accent);
+  background: var(--aseel-accent-soft, transparent);
+  border-radius: var(--aseel-radius);
+  opacity: .35;
+  pointer-events: none;
+}
+:root[data-skin] .aseel-dockzone--active { opacity: .85; }
+:root[data-skin] .aseel-dockzone--right { top: 20%; bottom: 20%; right: 6px; width: 56px; }
+:root[data-skin] .aseel-dockzone--left { top: 20%; bottom: 20%; left: 6px; width: 56px; }
+:root[data-skin] .aseel-dockzone--top { top: 6px; left: 25%; right: 25%; height: 44px; }
+
+/* ════════════════════════════════════════════════════════════════════
    M2 — كروم الجلد الحديث (دلتا هيكلية للجلد الحديث وحده)
    ────────────────────────────────────────────────────────────────────
    قواعد لا تُغيّر أسماء الكلاسات ولا تمسّ جلد الأصيل إطلاقاً. المحدد
@@ -1876,6 +2072,165 @@ tbody td {
 :root[data-skin="modern"] .aseel-badge-ok,
 :root[data-skin="modern"] .aseel-badge-neutral { border-radius: var(--radius-full); padding: 1px 8px; }
 
+/* ───────── T-WIN: النافذة العائمة والشريط في الجلد الحديث ─────────
+   الشكل الاحترافي: زاوية كبيرة، حدٌّ خافت، ارتفاعٌ حقيقي بظلّين، ودخولٌ
+   بتكبير طفيف. الأصيل لا يرى شيئاً من هذا — محدِّدُه ‎[data-skin="modern"]. */
+:root[data-skin="modern"] .aseel-float-win {
+  border-radius: var(--radius-xl);
+  border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
+  box-shadow: var(--elev-5);
+  background: var(--color-surface);
+}
+:root[data-skin="modern"] .aseel-float-win__bar {
+  padding: 8px 12px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+:root[data-skin="modern"] .aseel-float-win__title {
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+:root[data-skin="modern"] .aseel-float-win__body { background: var(--color-surface); }
+:root[data-skin="modern"] .aseel-float-win__foot {
+  padding: 8px 12px;
+  border-top-color: var(--color-border);
+  background: var(--color-surface);
+}
+
+/* دخول النافذة: تلاشٍ + تكبير طفيف من مركزها — 160ms لا يُشعر بالبطء. */
+@keyframes ktra-win-in {
+  from { opacity: 0; transform: scale(.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes ktra-mask-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+:root[data-skin="modern"] .aseel-float-win {
+  animation: ktra-win-in var(--motion-win) ease-out 1;
+  transform-origin: center;
+}
+:root[data-skin="modern"] .aseel-float-mask--dim {
+  animation: ktra-mask-in var(--motion-win) ease-out 1;
+}
+/* أثناء السحب لا حركة دخول تُعيد ضبط التحويل تحت المؤشر. */
+:root[data-skin="modern"] .aseel-float-win--busy { animation: none; }
+
+:root[data-skin="modern"] .aseel-rail {
+  border-radius: var(--radius-2xl);
+  border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
+  box-shadow: var(--elev-3);
+  background: var(--color-surface);
+  padding: 8px 5px;
+  gap: 5px;
+  transition: box-shadow var(--transition-fast), opacity var(--transition-fast);
+}
+:root[data-skin="modern"] .aseel-rail:hover { box-shadow: var(--elev-4); }
+:root[data-skin="modern"] .aseel-rail--busy { box-shadow: var(--elev-5); }
+:root[data-skin="modern"] .aseel-rail .aseel-toolbtn { border-radius: var(--radius-lg); }
+:root[data-skin="modern"] .aseel-dockzone {
+  border-radius: var(--radius-2xl);
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  transition: opacity var(--transition-fast);
+}
+
+/* ───────── T-WIN: تلميع عام يرثه كل ما يطفو ─────────
+   حلقة تركيز واحدة مرئية بالكيبورد لكل أزرار الأدوات، وسطوحٌ منبثقة
+   بارتفاعٍ حقيقي بدل الظلّ المسطّح — تنعكس على كل الشاشات بلا لمسها. */
+:root[data-skin="modern"] .aseel-toolbtn:focus-visible,
+:root[data-skin="modern"] .aseel-btn:focus-visible,
+:root[data-skin="modern"] .aseel-iconbtn:focus-visible,
+:root[data-skin="modern"] .aseel-tab:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+  border-radius: var(--radius-md);
+}
+:root[data-skin="modern"] .aseel-picker { box-shadow: var(--elev-5); }
+:root[data-skin="modern"] .aseel-picker-mask,
+:root[data-skin="modern"] .ktra-overlay-mask { background: var(--overlay-mask); }
+:root[data-skin="modern"] .aseel-autocomplete-pop,
+:root[data-skin="modern"] .aseel-ctxmenu {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-4);
+}
+:root[data-skin="modern"] .aseel-form-section { border-radius: var(--radius-lg); }
+
+/* ───────── T-WIN M5: تلميع الجلد الحديث مركزيّاً ─────────
+   كل ما هنا يمسّ الجلد الحديث وحده، ويصل الخمسين شاشة من غير أن تُلمس واحدة
+   منها — لأن الشاشات تستهلك الكلاسات الهيكلية نفسها. جلد الأصيل لا يرى شيئاً. */
+
+/* الأسطح المرتفعة: البطاقات واللوحات والشجرة — زاويةٌ أكبر وحدٌّ أخفت وظلٌّ
+   حقيقي بدل الحدّ الصلب الذي ورثناه من الطرفية المحاسبية. */
+:root[data-skin="modern"] .aseel-doc,
+:root[data-skin="modern"] .aseel-tree-panel {
+  border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+:root[data-skin="modern"] .aseel-form-section {
+  box-shadow: var(--elev-1);
+  border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+:root[data-skin="modern"] .aseel-totals {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1);
+}
+
+/* الأزرار: زاويةٌ موحّدة وردُّ فعلٍ محسوس عند الضغط (رفع خفيف ثم هبوط). */
+:root[data-skin="modern"] .aseel-btn,
+:root[data-skin="modern"] .aseel-btn-primary {
+  border-radius: var(--radius-lg);
+  transition: background var(--transition-fast), box-shadow var(--transition-fast),
+              transform var(--transition-fast);
+}
+:root[data-skin="modern"] .aseel-btn-primary { box-shadow: var(--elev-1); }
+:root[data-skin="modern"] .aseel-btn-primary:hover:not(:disabled) { box-shadow: var(--elev-2); }
+:root[data-skin="modern"] .aseel-btn:active:not(:disabled),
+:root[data-skin="modern"] .aseel-btn-primary:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: var(--elev-1);
+}
+
+/* التبويبات: الحدّ السفلي وحده يتحرّك — لا قفزة تخطيط. */
+:root[data-skin="modern"] .aseel-tab {
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+:root[data-skin="modern"] .aseel-tab:hover:not(.aseel-tab--active) {
+  background: var(--color-surface-2);
+}
+
+/* صفوف الجداول: تمييزٌ لطيف تحت المؤشر بدل قفزة لونية. */
+:root[data-skin="modern"] .aseel-grid tbody tr:hover td,
+:root[data-skin="modern"] .aseel-dense-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--color-primary) 5%, transparent);
+}
+
+/* شريط الحالة واللوح الجانبي: انفصالٌ بالظلّ لا بخطٍّ صلب. */
+:root[data-skin="modern"] .aseel-statusbar { box-shadow: var(--elev-1); }
+:root[data-skin="modern"] .aseel-picker { border-radius: var(--radius-xl) 0 0 var(--radius-xl); }
+:root[data-skin="modern"] .aseel-sidepanel { border-radius: var(--radius-xl) 0 0 var(--radius-xl); }
+
+/* حقول الإدخال: حلقة تركيز واحدة في كل الشاشات. */
+:root[data-skin="modern"] .aseel-input:focus-visible,
+:root[data-skin="modern"] .aseel-doc input:focus-visible,
+:root[data-skin="modern"] .aseel-doc select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
+  outline-offset: 0;
+}
+
+/* الحركة اختيار لا فرض — من أطفأها في نظامه لا يراها. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-skin="modern"] .aseel-float-win,
+  :root[data-skin="modern"] .aseel-float-mask--dim { animation: none; }
+  :root[data-skin="modern"] .aseel-rail,
+  :root[data-skin="modern"] .aseel-dockzone,
+  :root[data-skin="modern"] .aseel-btn,
+  :root[data-skin="modern"] .aseel-btn-primary,
+  :root[data-skin="modern"] .aseel-tab { transition: none; }
+  :root[data-skin="modern"] .aseel-btn:active:not(:disabled),
+  :root[data-skin="modern"] .aseel-btn-primary:active:not(:disabled) { transform: none; }
+}
+
 /* ── N9-T4: Mobile RTL — headband single col <640px, toolbar 2 rows ── */
 @media (max-width: 640px) {
   :root[data-skin] .aseel-headband {
@@ -1960,6 +2315,22 @@ tbody td {
     min-height: 38px;
     font-size: 16px;
   }
+
+  /* T-WIN: النافذة العائمة لوحٌ ملء الشاشة — لا سحب ولا تحجيم (عرف صناعي). */
+  :root[data-skin] .aseel-float-win {
+    left: 0 !important;
+    top: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    border-radius: 0;
+    border: none;
+  }
+  :root[data-skin] .aseel-float-win__bar { cursor: default; }
+  :root[data-skin] .aseel-float-win__grip { display: none; }
+
+  /* T-WIN: الشريط يعود إلى شريط العنوان — لا رفٌّ عائم يزاحم شاشةً ضيّقة. */
+  :root[data-skin] .aseel-rail,
+  :root[data-skin] .aseel-dockzone { display: none; }
 }
 
 /* ── N9-T5: Print CSS ───────────────────────────────────

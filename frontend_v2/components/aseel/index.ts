@@ -73,6 +73,10 @@ export type { AseelContextMenuAction, AseelContextMenuProps } from './AseelConte
 export { AseelSidePanel } from './AseelSidePanel';
 export type { AseelSidePanelProps } from './AseelSidePanel';
 
+// T-WIN — النافذة العائمة الموحّدة (سحب + تحجيم + حفظ الهندسة)
+export { AseelFloatWindow } from './AseelFloatWindow';
+export type { AseelFloatWindowProps } from './AseelFloatWindow';
+
 export { AseelCalculatorPopover } from './AseelCalculatorPopover';
 
 export { AseelTabs } from './AseelTabs';

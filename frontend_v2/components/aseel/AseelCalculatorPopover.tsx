@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { applyDrag, clampRectToViewport, readWindowGeometry, writeWindowGeometry } from "../../utils/windowGeometry";
 import { X, Delete, History as HistoryIcon, Trash2 } from "lucide-react";
 import { evaluateArithmeticExpression } from "../../utils/arithmetic";
 import { useToast } from "../../contexts/ToastContext";
@@ -68,6 +69,11 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
   // تموضع مثبَّت داخل الشاشة — يُصحَّح بعد القياس كي لا يُقطع أسفل/يمين الحاسبة
   // (يراعي الارتفاع الحقيقي مع/بلا لوحة الذاكرة). التصحيح في useLayoutEffect أدناه.
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: y, left: x });
+  /** T-WIN: قياس الحاسبة — تُقرأ في السحب لقصّها داخل الشاشة بالرياضيات المشتركة. */
+  const sizeRef = useRef({ w: 288, h: 320 });
+  const [dragging, setDragging] = useState(false);
+  /** المستخدم حرّكها بيده: يوقف التصحيح التلقائي فلا تقفز تحت أصابعه. */
+  const movedRef = useRef(false);
 
   // إيفكت الدخول/الخروج: enter (منكمش شفّاف) ← shown ← leave (يطير نحو الحقل).
   const [anim, setAnim] = useState<"enter" | "shown" | "leave">("enter");
@@ -90,11 +96,76 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
     if (!el) return;
     const h = el.offsetHeight;
     const w = el.offsetWidth;
+    sizeRef.current = { w, h };
+    /* T-WIN: بعد سحبٍ يدوي لا يُعاد التموضع على المرساة — الحاسبة تبقى حيث
+       وضعها المستخدم، ويُكتفى بقصّها داخل الشاشة إن تغيّر ارتفاعها. */
+    if (movedRef.current) {
+      setPos((current) => {
+        const clamped = clampRectToViewport(
+          { x: current.left, y: current.top, w, h },
+          { width: window.innerWidth, height: window.innerHeight },
+        );
+        return { top: clamped.y, left: clamped.x };
+      });
+      return;
+    }
+    /* الحاسبة المستقلّة (زر الشريط) بلا حقلٍ تُرسى عليه، فتعود حيث تُركت.
+       المنبثقة من حقلٍ تبقى عند حقلها — قربُ السياق أنفع من موضعٍ محفوظ. */
+    if (standalone) {
+      const saved = readWindowGeometry('calculator', {
+        width: window.innerWidth, height: window.innerHeight,
+      });
+      if (saved) {
+        setPos({ top: saved.y, left: saved.x });
+        return;
+      }
+    }
     setPos({
       top: Math.max(8, Math.min(y, window.innerHeight - h - 8)),
       left: Math.max(8, Math.min(x, window.innerWidth - w - 8)),
     });
-  }, [x, y, showHistory]);
+  }, [x, y, showHistory, standalone]);
+
+  /** T-WIN: سحب الحاسبة من رأسها — نفس رياضيات النافذة العائمة (مُختبَرة). */
+  const startDrag = (event: React.PointerEvent) => {
+    if (event.button !== 0 && event.pointerType === 'mouse') return;
+    event.preventDefault();
+    const startRect = {
+      x: pos.left, y: pos.top, w: sizeRef.current.w, h: sizeRef.current.h,
+    };
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const pointerId = event.pointerId;
+    movedRef.current = true;
+    setDragging(true);
+
+    const move = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      const next = applyDrag(startRect, e.clientX - startX, e.clientY - startY, {
+        width: window.innerWidth, height: window.innerHeight,
+      });
+      setPos({ top: next.y, left: next.x });
+    };
+    const finish = (e: PointerEvent) => {
+      if (e.pointerId !== pointerId) return;
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', finish);
+      document.removeEventListener('pointercancel', finish);
+      setDragging(false);
+      if (standalone) {
+        const el = containerRef.current;
+        writeWindowGeometry('calculator', {
+          x: el ? el.offsetLeft : startRect.x,
+          y: el ? el.offsetTop : startRect.y,
+          w: sizeRef.current.w,
+          h: sizeRef.current.h,
+        });
+      }
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', finish);
+    document.addEventListener('pointercancel', finish);
+  };
 
   const pushHistory = (expr: string, result: number) => {
     setHistory((prev) => {
@@ -205,8 +276,9 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
       : anim === "leave"
         ? `translate(${leaveDelta.current.tx}px, ${leaveDelta.current.ty}px) scale(.05)`
         : "scale(1)";
-  const transition =
-    anim === "leave"
+  const transition = dragging
+    ? "none"
+    : anim === "leave"
       ? `transform ${EXIT_MS}ms cubic-bezier(.5,0,.2,1), opacity ${EXIT_MS}ms cubic-bezier(.7,0,.9,1)`
       : `transform ${ENTER_MS}ms cubic-bezier(.2,.8,.25,1), opacity ${ENTER_MS}ms ease`;
 
@@ -234,12 +306,18 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
       <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
 
       {/* أدوات علوية: عنوان + ذاكرة + إغلاق */}
-      <div className="relative flex justify-between items-center mb-3">
+      <div
+        className={`relative flex justify-between items-center mb-3 ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
+        style={{ touchAction: "none" }}
+        onPointerDown={startDrag}
+        title="اسحب لتحريك الحاسبة"
+      >
         <span className="text-xs font-extrabold bg-gradient-to-l from-emerald-400 to-indigo-400 bg-clip-text text-transparent tracking-wider">حاسبة الأصيل</span>
         <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => setShowHistory((s) => !s)}
+            onPointerDown={(e) => e.stopPropagation()}
             title="ذاكرة العمليات السابقة"
             className={`p-1.5 rounded-full bg-black/25 hover:bg-black/40 ${showHistory ? "text-emerald-400" : "text-slate-200"}`}
           >
@@ -248,6 +326,7 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
           <button
             type="button"
             onClick={requestClose}
+            onPointerDown={(e) => e.stopPropagation()}
             title="إغلاق"
             className="p-1.5 rounded-full bg-black/25 text-slate-200 hover:bg-rose-500 hover:text-white"
           >

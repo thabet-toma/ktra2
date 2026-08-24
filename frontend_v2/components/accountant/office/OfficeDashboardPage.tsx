@@ -87,10 +87,13 @@ export const OfficeDashboardPage: React.FC<{
         />
       </div>
 
-      {deadlines && (
+      {/* الفحص على الشكل لا على الصدق: استجابةٌ **ناجحة** بشكلٍ غير متوقّع
+          (قائمة فارغة بدل كائن) تجعل `deadlines` صادقاً و`totals` معدوماً،
+          فتنهار اللوحة كلها بيضاء — وهو نقيض ما يقوله التعليق أعلاه. */}
+      {Array.isArray(deadlines?.items) && deadlines?.totals && (
         <DeadlinesStrip
           items={deadlines.items}
-          overdue={deadlines.totals.overdue}
+          overdue={deadlines.totals.overdue ?? 0}
           onOpen={openDeadline}
           onSeeAll={onGoToAgenda}
         />

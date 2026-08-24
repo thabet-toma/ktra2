@@ -212,13 +212,13 @@ export const Modal: React.FC<ModalProps> = ({ open, onClose, title, children, fo
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="ktra-overlay-mask z-50 flex items-center justify-center"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
     >
-      <div className={`bg-[var(--color-surface)] rounded-lg shadow-lg w-full ${modalSizes[size]} max-h-[90vh] flex flex-col`}>
+      <div className={`bg-[var(--color-surface)] rounded-xl shadow-[var(--elev-5)] w-full ${modalSizes[size]} max-h-[90vh] flex flex-col`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
           <h2 id="modal-title" className="text-[var(--font-size-sm)] font-semibold">{title}</h2>
           <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] text-lg leading-none">&times;</button>

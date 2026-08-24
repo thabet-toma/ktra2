@@ -254,6 +254,41 @@ async function installAuthenticatedApiMocks(page: Page) {
       return;
     }
 
+    /* بلا عضوية شركة يقف التطبيق على شاشة «لنُنشئ شركتك الأولى» فلا يُرسم
+       AppLayout أبداً: ينتظر كل هدفٍ 15ث على `main.app-content` ثم يُسجَّل
+       skipped، وتنتهي مهلة الاختبار (78 × 15ث) قبل بلوغ المقارنة. الشاشة دخلت
+       في 7923721 (2026-07-22) بعد تسجيل خط الأساس في 70f10c7 (2026-07-21)
+       بيوم واحد، فتعطّل الحارس بصمت شهراً كاملاً. */
+    if (url.pathname.includes("tenants/companies/my-companies/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([{
+          id: 1,
+          role: "manager",
+          is_default: true,
+          created_at: "2026-07-22T00:00:00Z",
+          can_access_import: true,
+          tenant: {
+            TenantID: 1,
+            CompanyName: "Parity Census Co",
+            SubscriptionPlan: "Enterprise",
+            Status: "Active",
+            CreatedAt: "2026-07-22T00:00:00Z",
+            import_enabled: true,
+          },
+        }]),
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith("/permissions/me/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ role: "manager", is_manager: true, permissions: [] }),
+      });
+      return;
+    }
+
     if (url.pathname.includes("/mapper/activityStatus/")) {
       await route.fulfill({
         contentType: "application/json",
@@ -281,6 +316,16 @@ async function waitForStableView(page: Page, target: ViewTarget) {
       .locator("main.app-content")
       .first()
       .waitFor({ state: "visible", timeout: 15_000 });
+  } else {
+    // هذه الشاشات بلا `main.app-content` فلم يكن لها شرطُ جهوزية إطلاقاً:
+    // حزمتها الكسولة تُترجم باردةً فتُلتقط الصفحةُ فارغةً، و«فارغ» حالةٌ
+    // مستقرّة تجتازها حلقةُ الاستقرار — فيُبلَّغ عن سقوط الشاشة كلها زوراً.
+    // انتظار أول زرّ يُنهي هذا التذبذب (وقع فعلاً على `aseel-sales`).
+    await page
+      .locator("#root button")
+      .first()
+      .waitFor({ state: "attached", timeout: 15_000 })
+      .catch(() => { /* شاشةٌ بلا أزرار: يتولّاها الالتقاط كما هي */ });
   }
 
   await page.addStyleTag({

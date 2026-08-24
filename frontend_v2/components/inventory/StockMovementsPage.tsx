@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { StockMovementDto, SqlProduct } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import { AseelDocumentShell, type AseelToolbarAction } from "../aseel/AseelDocumentShell";
 import { Plus, RefreshCw, X, Save, Loader2, Warehouse as WhIcon } from "lucide-react";
 import { invoicePathForReference, productProfilePath } from "../../utils/entityLinks";
 import { openInNewTab } from "@/utils/openInNewTab";
@@ -159,7 +160,7 @@ export const StockMovementsPage: React.FC = () => {
       render: (m) => {
         const label = m.movement_type_display || TYPES[m.movement_type] || m.movement_type;
         const isIn = m.movement_type.includes("IN") || m.movement_type === "IN";
-        return <span style={{ color: isIn ? "var(--aseel-ok, #267346)" : "var(--aseel-danger, #c00)" }}>{label}</span>;
+        return <span className={isIn ? "aseel-text-ok" : "aseel-text-danger"}>{label}</span>;
       }
     },
     { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true,
@@ -188,53 +189,69 @@ export const StockMovementsPage: React.FC = () => {
     { key: "origin", header: "المصدر", width: "90px", align: "center",
       render: (m) => {
         if (m.origin === "international")
-          return <span style={{ color: "#1d4ed8", fontWeight: 600 }}>دولي</span>;
+          return <span className="font-semibold text-[var(--color-primary)]">دولي</span>;
         if (m.origin === "local")
-          return <span style={{ color: "#166534", fontWeight: 600 }}>محلي</span>;
+          return <span className="font-semibold text-[var(--color-success)]">محلي</span>;
         return <>—</>;
       } },
     { key: "notes", header: "ملاحظات",
       render: (m) => <>{m.notes || "—"}</> },
   ];
 
-  return (
-    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }}>
-      {/* شريط الفلاتر */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
-          حركات المخازن
-        </strong>
-        <select className="aseel-input" style={{ width: 170 }}
-          value={filterProduct} onChange={(e) => setFilterProduct(e.target.value)}>
-          <option value="">كل الأصناف</option>
-          {products.map((p) => (
-            <option key={p.id} value={p.id}>{p.sku} — {p.name_ar || p.name_en || "—"}</option>
-          ))}
-        </select>
-        <select className="aseel-input" style={{ width: 130 }}
-          value={filterType} onChange={(e) => setFilterType(e.target.value)}>
-          <option value="">كل الأنواع</option>
-          {Object.entries(TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select className="aseel-input" style={{ width: 120 }}
-          value={filterOrigin} onChange={(e) => setFilterOrigin(e.target.value)} title="مصدر البضاعة">
-          <option value="">كل المصادر</option>
-          <option value="local">محلي (شراء)</option>
-          <option value="international">دولي (استيراد)</option>
-        </select>
-        <input className="aseel-input" style={{ width: 120 }} type="date"
-          value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} title="من تاريخ" />
-        <input className="aseel-input" style={{ width: 120 }} type="date"
-          value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} title="إلى تاريخ" />
-        <button className="aseel-toolbtn" onClick={load} title="تطبيق الفلاتر">
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-        </button>
-        <div style={{ flex: 1 }} />
-        <button className="aseel-toolbtn" onClick={() => { setShowForm(true); setErr(null); }} title="إضافة حركة (Ctrl+Ins)">
-          <Plus className="h-4 w-4" /> إضافة حركة
-        </button>
-      </div>
+  /* T-WIN M7: كانت الشاشة `div` بأنماط inline خارج الغلاف الموحّد. صارت
+     `AseelDocumentShell` كبقية الشاشات — النصوص كما هي، والإطار وحده تغيّر. */
+  const actions: AseelToolbarAction[] = [
+    {
+      key: "apply",
+      label: "تطبيق الفلاتر",
+      icon: <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />,
+      onClick: load,
+    },
+    {
+      key: "add",
+      label: "إضافة حركة",
+      icon: <Plus className="h-4 w-4" />,
+      onClick: () => { setShowForm(true); setErr(null); },
+      separatorBefore: true,
+    },
+  ];
 
+  return (
+    <AseelDocumentShell
+      title="حركات المخازن"
+      actions={actions}
+      status={(
+        <span className="aseel-status-item">
+          المعروض: <b>{movements.length}</b> من <b>{totalCount}</b>
+        </span>
+      )}
+      header={(
+        <div className="flex flex-wrap items-center gap-1.5">
+          <select className="aseel-input w-[170px]"
+            value={filterProduct} onChange={(e) => setFilterProduct(e.target.value)}>
+            <option value="">كل الأصناف</option>
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>{p.sku} — {p.name_ar || p.name_en || "—"}</option>
+            ))}
+          </select>
+          <select className="aseel-input w-[130px]"
+            value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+            <option value="">كل الأنواع</option>
+            {Object.entries(TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <select className="aseel-input w-[120px]"
+            value={filterOrigin} onChange={(e) => setFilterOrigin(e.target.value)} title="مصدر البضاعة">
+            <option value="">كل المصادر</option>
+            <option value="local">محلي (شراء)</option>
+            <option value="international">دولي (استيراد)</option>
+          </select>
+          <input className="aseel-input w-[120px]" type="date"
+            value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} title="من تاريخ" />
+          <input className="aseel-input w-[120px]" type="date"
+            value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} title="إلى تاريخ" />
+        </div>
+      )}
+    >
       {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
 
       <AseelDenseTable<StockMovementDto>
@@ -246,7 +263,7 @@ export const StockMovementsPage: React.FC = () => {
       />
 
       {hasNext && (
-        <div style={{ display: "flex", justifyContent: "center", padding: "8px" }}>
+        <div className="flex justify-center p-2">
           <button
             type="button"
             className="aseel-toolbtn"
@@ -263,14 +280,14 @@ export const StockMovementsPage: React.FC = () => {
       {/* نموذج إضافة حركة يدوية */}
       {showForm && (
         <div className="aseel-picker-mask" data-aseel-modal="1">
-          <div className="aseel-picker" role="dialog" aria-modal="true" aria-label="إضافة حركة مخزن"
-            style={{ width: "min(520px, 96vw)" }}>
+          <div className="aseel-picker w-[min(520px,96vw)]" role="dialog" aria-modal="true" aria-label="إضافة حركة مخزن"
+            >
             <div className="aseel-picker-head">
               <span>إضافة حركة مخزن يدوية</span>
               <button type="button" className="aseel-toolbtn" onClick={() => setShowForm(false)}><X /></button>
             </div>
-            <div className="aseel-picker-body" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: 10 }}>
-              <label className="aseel-field" style={{ gridColumn: "1/-1" }}>
+            <div className="aseel-picker-body grid grid-cols-2 gap-2 p-2.5">
+              <label className="aseel-field col-span-2">
                 <span className="aseel-field-label">الصنف</span>
                 <select className="aseel-input" value={form.product}
                   onChange={(e) => setForm((f) => ({ ...f, product: e.target.value }))}>
@@ -304,13 +321,13 @@ export const StockMovementsPage: React.FC = () => {
                   value={form.unit_cost}
                   onChange={(e) => setForm((f) => ({ ...f, unit_cost: e.target.value }))} />
               </label>
-              <label className="aseel-field" style={{ gridColumn: "1/-1" }}>
+              <label className="aseel-field col-span-2">
                 <span className="aseel-field-label">ملاحظات</span>
                 <input className="aseel-input" value={form.notes}
                   onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
               </label>
             </div>
-            <div className="aseel-picker-foot" style={{ gap: 8 }}>
+            <div className="aseel-picker-foot gap-2">
               <button type="button" className="aseel-toolbtn" onClick={() => setShowForm(false)}><X /> إلغاء</button>
               <button type="button" className="aseel-toolbtn" disabled={busy} onClick={handleCreate}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save />} حفظ
@@ -319,6 +336,6 @@ export const StockMovementsPage: React.FC = () => {
           </div>
         </div>
       )}
-    </div>
+    </AseelDocumentShell>
   );
 };

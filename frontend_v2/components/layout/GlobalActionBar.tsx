@@ -8,6 +8,7 @@ import {
   GripVertical
 } from "lucide-react";
 import { AppView, User } from "../../types";
+import type { DockSide } from "../../utils/windowGeometry";
 import { clientLogger } from "../../services/logger";
 import {
   buildQuickActionGroups,
@@ -22,9 +23,14 @@ const COLLAPSE_KEY = "ktra:quickActionsBarCollapsed";
 interface Props {
   user: User;
   onNavigate: (view: AppView, targetId?: string) => void;
+  /**
+   * T-WIN: جهة الشريط. `top` = داخل شريط العنوان أفقياً (السلوك التاريخي، وهو
+   * أيضاً حالة الجوال). `right`/`left` = رفٌّ عمودي عائم، والقائمة تُفتح جانباً.
+   */
+  dock?: DockSide;
 }
 
-export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
+export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate, dock = "top" }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
@@ -92,6 +98,14 @@ export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
     setOrderVersion((v) => v + 1);
   };
 
+  const vertical = dock !== "top";
+  /* القائمة تُفتح تحت الزر أفقياً، وإلى داخل الشاشة رأسياً. */
+  const menuPosition = dock === "top"
+    ? "top-full right-0 mt-2"
+    : dock === "right"
+      ? "top-0 right-full me-2"
+      : "top-0 left-full ms-2";
+
   if (collapsed) {
     return (
       <button
@@ -106,16 +120,23 @@ export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
   }
 
   return (
-    <div className="relative flex items-center gap-1.5" ref={menuRef}>
+    <div
+      className={`relative flex gap-1.5 ${vertical ? "flex-col items-stretch" : "items-center"}`}
+      ref={menuRef}
+    >
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-[var(--color-primary)] text-white hover:opacity-90 shadow-sm"
+        className={`flex items-center justify-center gap-1.5 rounded-lg text-sm font-medium transition-colors bg-[var(--color-primary)] text-white hover:opacity-90 shadow-sm ${vertical ? "p-2" : "px-3 py-1.5"}`}
         title="إجراءات سريعة"
       >
         <PlusCircle className="w-4 h-4" />
-        <span className="hidden sm:inline">إجراءات سريعة</span>
-        <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        {/* النصّ يبقى في الـDOM في الوضع العمودي أيضاً: هويّة الزر واحدة في
+            الوضعين، ولا يفقده إحصاء التكافؤ ولا قارئ الشاشة. */}
+        <span className={vertical ? "sr-only" : "hidden sm:inline"}>إجراءات سريعة</span>
+        {!vertical && (
+          <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        )}
       </button>
 
       {/* Quick single-click icons for Print & Refresh */}
@@ -125,7 +146,7 @@ export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
           clientLogger.info("app.print_requested");
           window.print();
         }}
-        className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-primary-emphasis)] hover:bg-[var(--color-surface-2)] rounded-lg transition-colors ml-1"
+        className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-primary-emphasis)] hover:bg-[var(--color-surface-2)] rounded-lg transition-colors ms-1"
         title="طباعة"
       >
         <Printer className="w-4 h-4" />
@@ -148,7 +169,7 @@ export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full right-0 mt-2 w-56 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-lg z-50 py-2">
+        <div className={`absolute ${menuPosition} w-56 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-[var(--elev-4)] z-50 py-2`}>
           {visibleGroups.map((group, gi) => (
             <React.Fragment key={gi}>
               {gi > 0 && <div className="h-px bg-[var(--color-border)] my-1.5 mx-3" />}

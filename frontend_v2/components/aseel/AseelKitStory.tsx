@@ -30,6 +30,7 @@ import {
   AseelDocumentView,
   AseelGrid,
   AseelIndexPicker,
+  AseelFloatWindow,
   AseelFormSection,
   AseelDenseTable,
   AseelReportTable,
@@ -76,6 +77,7 @@ export const AseelKitStory: React.FC = () => {
   const [skin, setSkin] = useState(() => getSkin());
   const [currentId, setCurrentId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [floatOpen, setFloatOpen] = useState(false);
   const [lastKey, setLastKey] = useState('—');
   const [account, setAccount] = useState('');
   const [lines, setLines] = useState<DemoLine[]>([
@@ -247,6 +249,34 @@ export const AseelKitStory: React.FC = () => {
         }}
         onClose={() => setPickerOpen(false)}
       />
+
+      {/* ─ T-WIN: النافذة العائمة — تُسحب من عنوانها وتُحجَّم من حوافها ─ */}
+      <div className="mt-8 p-4 border-t border-[var(--aseel-border)]">
+        <h3 className="text-lg font-bold mb-4 text-amber-700">T-WIN: النافذة العائمة</h3>
+        <button
+          type="button"
+          className="aseel-btn"
+          data-testid="story-open-float"
+          onClick={() => setFloatOpen(true)}
+        >
+          افتح نافذة عائمة
+        </button>
+        <AseelFloatWindow
+          open={floatOpen}
+          onClose={() => setFloatOpen(false)}
+          name="kit-demo"
+          title="نافذة تجريبية"
+          defaultWidth={520}
+          defaultHeight={360}
+          modal={false}
+          rootProps={{ 'data-testid': 'story-float-win' } as React.HTMLAttributes<HTMLDivElement>}
+        >
+          <div className="p-4 text-[var(--aseel-ink)]">
+            اسحبها من شريط العنوان، وحجّمها من أي حافة أو زاوية. موضعها وحجمها
+            يعودان كما تركتهما بعد إعادة تحميل الصفحة.
+          </div>
+        </AseelFloatWindow>
+      </div>
 
       {/* ─ N0 + N1: أمثلة الـ primitives الجديدة ──────────────────── */}
       <div className="mt-8 p-4 border-t border-[var(--aseel-border)]">

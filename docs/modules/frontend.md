@@ -14,7 +14,9 @@
 | `frontend_v2/App.tsx` | الجذر: التوجيه، 97 صفحة lazy، تركيب السياقات |
 | `frontend_v2/services/restApi.ts` | **الـbase client** — مهلة 30ث، إعادة محاولة GET، ترويسات الشركة/الفرع |
 | `frontend_v2/services/` | 52 ملفاً — خدمة لكل دومين (`salesApi`, `accountingApi`, `inventoryApi`, `dealsService`…) |
-| `frontend_v2/components/aseel/` | **غلاف المستندات المشترك**: `AseelDocumentShell`, `AseelDenseTable`, `AseelDocumentView`, `AseelAutocomplete` |
+| `frontend_v2/components/aseel/` | **غلاف المستندات المشترك**: `AseelDocumentShell`, `AseelDenseTable`, `AseelDocumentView`, `AseelAutocomplete`, `AseelFloatWindow` |
+| `frontend_v2/utils/windowGeometry.ts` · `frontend_v2/hooks/useDragResize.ts` | **هندسة النوافذ العائمة**: القصّ والسحب والتحجيم والحفظ (`ktra:win:<الاسم>`) + جهة إرساء الشريط |
+| `frontend_v2/components/layout/ActionBarRail.tsx` | **شريط الإجراءات القابل للإرساء** — يمين/يسار رفّاً عائماً، أو أفقياً في شريط العنوان |
 | `frontend_v2/contexts/` | 9 سياقات: `Auth`, `Company`, `Permissions`, `Appearance`, `SessionSettings`, `Theme`, `Toast`, `Confirm`, `PriceVisibility` |
 | `frontend_v2/utils/navAccess.ts` | اشتقاق القائمة: الصلاحية + قناع «الوضع السهل» — **نقطة التركيب الوحيدة** |
 | `frontend_v2/utils/uiMode.ts` | «الوضع السهل»: `SIMPLE_VIEWS` و`viewVisibleInSimpleMode` وcache بمفتاح الشركة |
@@ -343,6 +345,52 @@
 `utils/backTarget.test.ts` · `e2e/new-tab-indicator.spec.ts` (تبويبان حقيقيان) ·
 `e2e/back-button.spec.ts`.
 
+## T-WIN — النوافذ العائمة وشريط الإجراءات
+
+**النافذة العائمة للمحتوى الثانوي وحده.** المستند الرئيسي يبقى ملء الشاشة كما في
+Odoo/Zoho — لا MDI حرّ: هو يخالف نمط الويب ويهدم قرار «المُمرِّر الواحد»
+(`main.app-content`). العائم هو ما يُقارَن بالمستند أو يُستدعى أثناءه: بطاقة
+الصنف، معاينة الملف، الحاسبة.
+
+`components/aseel/AseelFloatWindow.tsx` — نافذةٌ واحدة تُسحب من شريط عنوانها
+وتُحجَّم من حوافها الأربع وزواياها الأربع. `portal` إلى `body`، و`role="dialog"`،
+وESC، وحبس Tab وإعادة التركيز لمن فتحها، وشريط سفلي مثبَّت (`footer`) لأزرار
+القرار فلا تنزلق مع المحتوى. تحت 768px تصير لوحاً ملء الشاشة بلا سحب ولا تحجيم
+والهندسة المحفوظة تُتجاهل.
+
+الحساب كلّه في `utils/windowGeometry.ts` نقيّاً بلا DOM (مُختبَر في
+`windowGeometry.test.ts`) والحلقة المؤشِّرة وحدها في `hooks/useDragResize.ts`:
+Pointer Events + `setPointerCapture` — حدثٌ واحد للفأرة واللمس والقلم، ولا يسقط
+السحب السريع كما يسقط في نمط `mousemove` على المستند.
+
+**الموضع بـ`left/top` بكسلاً خاماً فلا قلب إشارة في RTL** — بخلاف عرض الأعمدة في
+`columnWidths.ts` حيث الحافة نفسها تنعكس.
+
+**الهندسة تُحفظ في `ktra:win:<الاسم>`، وتُقصّ عند الاسترجاع** — شاشةٌ تغيّر
+مقاسها بين جلستين تُعيد نافذةً محفوظةً خارج المرأى بلا هذا القصّ.
+
+**شريط الإجراءات**: `layout/ActionBarRail.tsx` يلفّ `GlobalActionBar` بجهةِ
+إرساءٍ محفوظة في `ktra:actionBarDock` (`right` افتراضاً · `left` · `top`).
+`top` يعرض حرفياً الترميز الأفقي التاريخي في شريط العنوان — فهو مفتاح التراجع
+وهو المفروض على الجوال (بلا كتابة تخزين، فتفضيل الحاسوب يبقى). الرفّ يُحقن
+بـ`createPortal` لأن شريط العنوان سياق تراص (قاعدة 4.1).
+
+**سلّم z الجديد مضاف لا مُعاد ترقيمه**: `--z-float-rail: 60` · `--z-window-mask: 80`
+· `--z-window: 81` — فوق لوح المنتقي (70) وتحت طبقة المنبثقات (10000+) عمداً:
+قائمة إكمالٍ تُفتح داخل نافذة يجب أن تعلوها.
+
+البراهين: `utils/windowGeometry.test.ts` · `e2e/aseel-float-window.spec.ts` ·
+`e2e/action-bar-dock.spec.ts`.
+
+**الشاشات الشاذة عادت إلى الغلاف**: `frontend_v2/components/inventory/StockLevelsPage.tsx` و
+`frontend_v2/components/inventory/StockMovementsPage.tsx` كانتا `div` بأنماط inline (35 موضعاً) خارج
+`AseelDocumentShell`، وشاشات البيانات الخام الأربع كانت بطاقةً مرتجلة في
+`frontend_v2/components/sql/SqlDataPageShell.tsx`. الثلاثة صارت على الغلاف الموحّد بنصوصٍ لم تتغيّر
+حرفاً — والأربع ورثت ذلك بتعديل ملفِ إطارهنّ وحده.
+
+**دَينٌ معلوم**: 141 نمطاً مضمّناً باقياً في `frontend_v2/components/sql/` (‏`SqlDealsPage.tsx` وحدها 86) — مخالفةٌ لقاعدة «Tailwind فقط» سابقة لهذا العمل،
+تُنظَّف في مهمة مستقلّة لأن تحويلها الآلي بلا تحقّقٍ بصري يخاطر بكسرٍ صامت.
+
 ## قواعد لا يجوز كسرها
 
 1. **`tsc` لا يفحص خصائص JSX** — لا `@types/react` في المشروع. مكوّن يستقبل prop
@@ -369,6 +417,18 @@
    النشط يسقط إلى الأول لا إلى لوحة فارغة. وبها صار `initialTab` يُطبَّق **متى
    ظهر تبويبه** لا في أول رسمة وحدها، فالرابط العميق لم يعد يضيع على شاشةٍ تبني
    تبويباتها بعد الجلب. نفس عائلة «حقن أعمدة الشبكة بالمفتاح لا بالفهرس».
+5.1. **قِس السطح المتحرّك بمقاييس التخطيط لا بالصندوق المرئي.** النافذة العائمة
+   تدخل بـ`scale(.97)`، و`boundingBox()` يقرأ التحويل فيعطي عرضاً متذبذباً؛
+   `offsetWidth/offsetLeft` لا يراه. أوقع هذا اختبار السحب مرّتين قبل أن يُصحَّح.
+5.2. **حارس التكافؤ يلزمه عضويةُ شركة في مُحاكيه.** `feature-parity-census`
+   يُحاكي كل نداء API بـ`[]`؛ وحين دخلت شاشة «لنُنشئ شركتك الأولى» (7923721،
+   2026-07-22) بعد تسجيل خط الأساس (70f10c7، 2026-07-21) بيوم، صار التطبيق يقف
+   عليها فلا يُرسم `AppLayout` إطلاقاً: ينتظر كل هدفٍ 15ث ثم يُسجَّل skipped،
+   وتنتهي مهلة الاختبار (78 × 15ث) **قبل** بلوغ المقارنة. تعطّل الحارس شهراً
+   بصمت. المُحاكي الآن يردّ عضويةً واحدة على `/api/tenants/companies/my-companies/`
+   وصلاحياتِ مدير على `/api/permissions/me/`، فزمن الجولة 3.7د بدل تجاوز المهلة.
+   **القاعدة**: أي بوابةٍ جديدة أمام الغلاف (اشتراك، عضوية، تحقّق) تلزمها
+   إضافةٌ مقابلة في مُحاكي الإحصاء، وإلا عمي الحارس بلا أن يحمرّ.
 6. **نوافذ الكاش تُفرَغ بعد نجاح الكتابة لا قبلها**، ومع عدّاد أجيال كي لا يعيد
    طلبٌ طائر ملأها بقيمة قديمة (`inventoryApi.ts`, `tenantSettingsApi.ts`).
 7. **ما يخصّ المستخدم لا يُدرَج في قوائم الشركة** — مكانه «حسابي»

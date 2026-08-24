@@ -93,12 +93,14 @@ test('قيد جديد يبدأ بسطرين ويولّد البيان من ال�
 
   // اختيار حساب مدين من الفهرس + مبلغ.
   await accountCells.first().click();
-  await page.locator('.aseel-picker tbody tr', { hasText: '1101' }).first().dblclick();
+  // منتقي الحسابات صار شجرة (`.aseel-tree-row`) بعد task66 — لم يعد جدولاً،
+  // فمحدِّد `tbody tr` كان يبحث عن صفوفٍ لا وجود لها.
+  await page.locator('.aseel-picker .aseel-tree-row', { hasText: '1101' }).first().dblclick();
   await page.locator('input[data-side="debit"][data-line-idx="0"]').fill('500');
 
   // اختيار حساب دائن + مبلغ.
   await page.locator('.aseel-cell-picker').nth(1).click();
-  await page.locator('.aseel-picker tbody tr', { hasText: '4101' }).first().dblclick();
+  await page.locator('.aseel-picker .aseel-tree-row', { hasText: '4101' }).first().dblclick();
   await page.locator('input[data-side="credit"][data-line-idx="1"]').fill('500');
 
   // البيان تولّد بصيغة «من ح/ … إلى ح/ …» بلا كتابة يدوية.

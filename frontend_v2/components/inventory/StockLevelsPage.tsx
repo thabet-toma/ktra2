@@ -4,6 +4,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct, StockSummaryResponse } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import { AseelDocumentShell, type AseelToolbarAction } from "../aseel/AseelDocumentShell";
 import { RefreshCw, Download, Printer, Tags } from "lucide-react";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { productProfilePath } from "../../utils/entityLinks";
@@ -208,14 +209,14 @@ export const StockLevelsPage: React.FC = () => {
 
   const statusCell = (p: SqlProduct) => {
     if (p.stock_status === "out_of_stock")
-      return <span style={{ color: "var(--aseel-danger, #c00)" }}>نفذ</span>;
+      return <span className="aseel-text-danger">نفذ</span>;
     if (p.stock_status === "low_stock")
-      return <span style={{ color: "var(--aseel-warn, #b8800a)" }}>منخفض</span>;
+      return <span className="aseel-text-warn">منخفض</span>;
     // T-REORDER: «فائض» = فوق الحدّ الأقصى المضبوط على الصنف. كان الفلتر يخمّنه
     // بـ«أكثر من ثلاثة أضعاف الأدنى» — قاعدةٌ لا مصدر لها.
     if (p.stock_status === "overstock")
-      return <span style={{ color: "var(--aseel-warn, #b8800a)" }}>فائض</span>;
-    return <span style={{ color: "var(--aseel-ok, #267346)" }}>متوفر</span>;
+      return <span className="aseel-text-warn">فائض</span>;
+    return <span className="aseel-text-ok">متوفر</span>;
   };
 
   const columns: DenseColumn<SqlProduct>[] = [
@@ -261,7 +262,7 @@ export const StockLevelsPage: React.FC = () => {
         if (!reserved) return <span className="text-[var(--aseel-ink-soft)]">—</span>;
         return (
           <span title="محجوز بطلبيات زبائن مؤكَّدة سارية"
-            style={{ color: "var(--aseel-warn, #b06800)", fontWeight: 600 }}>
+            className="aseel-text-warn font-semibold">
             {formatQuantity(reserved)}
           </span>
         );
@@ -296,81 +297,90 @@ export const StockLevelsPage: React.FC = () => {
     (s, p) => s + Number(p.quantity_on_hand) * Number(p.avg_cost), 0
   );
 
+  /* T-WIN M7: كانت الشاشة `div` بأنماط inline خارج الغلاف الموحّد — بلا شريط
+     عنوان ولا شريط حالة ولا تلميع الجلد. صارت `AseelDocumentShell` كبقية
+     الخمسين شاشة: النصوص والأزرار كما هي حرفاً بحرف، والتغيير في الإطار. */
+  const actions: AseelToolbarAction[] = [
+    {
+      key: "print",
+      label: `طباعة / PDF${selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}`,
+      icon: <Printer className="h-4 w-4" />,
+      onClick: printPdf,
+      disabled: filtered.length === 0,
+    },
+    {
+      key: "group",
+      label: `تعيين النوع${selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}`,
+      icon: <Tags className="h-4 w-4" />,
+      onClick: () => setGroupModal(true),
+      disabled: selectedIds.size === 0,
+    },
+    {
+      key: "reload",
+      label: "تحديث",
+      icon: <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />,
+      onClick: load,
+      separatorBefore: true,
+    },
+  ];
+
   return (
-    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }}>
-      {/* شريط العنوان والفلاتر */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
-          أرصدة المخزون
-        </strong>
-        {summary && (
+    <AseelDocumentShell
+      title="أرصدة المخزون"
+      actions={actions}
+      status={(
+        <>
+          {summary && (
+            <span className="aseel-status-item">
+              إجمالي الأصناف: <b>{summary.total_products_in_stock ?? products.length}</b>
+            </span>
+          )}
+          {summary && (
+            <span className="aseel-status-item">
+              قيمة المخزون: <b>{fmt(Number(summary.total_inventory_value ?? 0))}</b>
+            </span>
+          )}
           <span className="aseel-status-item">
-            إجمالي الأصناف: <b>{summary.total_products_in_stock ?? products.length}</b>
+            إجمالي القيمة ({filtered.length} صنف): <b>{fmt(totalVal)}</b>
           </span>
-        )}
-        {summary && (
-          <span className="aseel-status-item">
-            قيمة المخزون: <b>{fmt(Number(summary.total_inventory_value ?? 0))}</b>
-          </span>
-        )}
-        <div style={{ flex: 1 }} />
-        <input
-          className="aseel-input"
-          style={{ width: 180 }}
-          placeholder="بحث SKU / الاسم…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <select
-          className="aseel-input"
-          style={{ width: 140 }}
-          value={filterCategory}
-          onChange={(e) => setFilterCategory(e.target.value)}
-        >
-          <option value="">كل التصنيفات</option>
-          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select
-          className="aseel-input"
-          style={{ width: 140 }}
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value as "" | "low" | "out" | "over")}
-        >
-          <option value="">كل الحالات</option>
-          <option value="low">منخفض</option>
-          <option value="out">نفذ</option>
-          <option value="over">فوق الحد الأقصى</option>
-        </select>
-        <label className="aseel-status-item" style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="تحديد/إلغاء كل المعروض">
-          <input type="checkbox" checked={allFilteredSelected} onChange={toggleAll} />
-          تحديد الكل
-        </label>
-        <button
-          className="aseel-toolbtn"
-          onClick={printPdf}
-          disabled={filtered.length === 0}
-          title={selectedIds.size > 0 ? `طباعة ${selectedIds.size} صنف مختار` : "طباعة كل المعروض"}
-          style={{ display: "flex", alignItems: "center", gap: 4 }}
-        >
-          <Printer className="h-4 w-4" />
-          طباعة / PDF{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
-        </button>
-        <button
-          className="aseel-toolbtn"
-          onClick={() => setGroupModal(true)}
-          disabled={selectedIds.size === 0}
-          title={selectedIds.size > 0
-            ? `تعيين النوع/البراند لـ${selectedIds.size} صنف مختار`
-            : "اختر أصنافاً أولاً"}
-          style={{ display: "flex", alignItems: "center", gap: 4 }}
-        >
-          <Tags className="h-4 w-4" />
-          تعيين النوع{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
-        </button>
-        <button className="aseel-toolbtn" onClick={load} title="تحديث">
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-        </button>
-      </div>
+        </>
+      )}
+      header={(
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            className="aseel-input w-[180px]"
+            placeholder="بحث SKU / الاسم…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select
+            className="aseel-input w-[140px]"
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+          >
+            <option value="">كل التصنيفات</option>
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select
+            className="aseel-input w-[140px]"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value as "" | "low" | "out" | "over")}
+          >
+            <option value="">كل الحالات</option>
+            <option value="low">منخفض</option>
+            <option value="out">نفذ</option>
+            <option value="over">فوق الحد الأقصى</option>
+          </select>
+          <label
+            className="aseel-status-item flex cursor-pointer items-center gap-1"
+            title="تحديد/إلغاء كل المعروض"
+          >
+            <input type="checkbox" checked={allFilteredSelected} onChange={toggleAll} />
+            تحديد الكل
+          </label>
+        </div>
+      )}
+    >
 
       {err && (
         <div className="aseel-banner aseel-banner--err">{err}</div>
@@ -420,12 +430,12 @@ export const StockLevelsPage: React.FC = () => {
         loading={loading}
         emptyHint="لا توجد أصناف"
         footer={
-          <span style={{ fontWeight: 700, color: "var(--aseel-ink)" }}>
+          <span className="font-bold aseel-text-ink">
             إجمالي القيمة ({filtered.length} صنف):{" "}
-            <span style={{ color: "var(--aseel-accent, #1857a4)" }}>{fmt(totalVal)}</span>
+            <span className="aseel-text-accent">{fmt(totalVal)}</span>
           </span>
         }
       />
-    </div>
+    </AseelDocumentShell>
   );
 };
