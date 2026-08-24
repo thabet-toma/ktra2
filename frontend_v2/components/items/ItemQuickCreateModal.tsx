@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Package, X, Save } from "lucide-react";
 import { inventoryApi } from "../../services/inventoryApi";
+import { blankSimpleFields, simplePayload, validateSimpleFields } from "../../utils/itemSimpleFields";
 
 export type ItemQuickCreateModalProps = {
   isOpen: boolean;
@@ -17,33 +18,39 @@ export type ItemQuickCreateModalProps = {
 export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOpen, onClose, onSaved, initialName, categoryId, initialIsService = false }) => {
   const [nameAr, setNameAr] = useState(initialName || "");
   const [nameEn, setNameEn] = useState("");
-  const [uom, setUom] = useState("عدد");
+  const [uomId, setUomId] = useState<number | null>(null);
+  const [uoms, setUoms] = useState<Array<{ id: number; name_ar: string; name_en: string; code: string }>>([]);
   const [salePrice, setSalePrice] = useState("");
   const [isService, setIsService] = useState(initialIsService);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // T-ITEMS M1: وحدة القياس صارت اختياراً من الجدول. كانت نصّاً حرّاً يُرسَل
+  // باسم `uom_primary` — وهو ليس في عقد الخادم، فيرميه DRF بصمت: يكتب
+  // المستخدم «كرتونة» ويحصل على «تم الحفظ» ولا وحدة على الصنف.
+  useEffect(() => {
+    if (!isOpen) return;
+    inventoryApi.getUoms().then(setUoms).catch(() => setUoms([]));
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSave = async () => {
-    if (!nameAr.trim()) {
-      setError("الاسم العربي مطلوب");
-      return;
-    }
+    const fields = {
+      ...blankSimpleFields(),
+      name_ar: nameAr, name_en: nameEn, uom_id: uomId,
+      sale_price: salePrice, is_service: isService,
+    };
+    const invalid = validateSimpleFields(fields);
+    if (invalid) { setError(invalid); return; }
     setSaving(true);
     setError(null);
     try {
-      // The backend generates SKU if we don't pass it, since Product model has logic or we made it optional.
-      // We pass the bare minimum.
-      const payload: Record<string, unknown> = {
-        name_ar: nameAr,
-        name_en: nameEn || null,
-        uom_primary: uom,
-        is_service: isService,
-        // سعر البيع الافتراضي — نفس حقل كرت الصنف (فارغ = يتبع آخر سعر بيع).
-        sale_price: salePrice.trim() ? Number(salePrice) : null,
-      };
-      if (categoryId != null && categoryId !== "") payload.category = categoryId;
+      // نفس تعريف «الوضع البسيط» الذي يستعمله الكرت الكامل — الحمولة تُبنى
+      // مرّةً واحدة في `utils/itemSimpleFields` فلا تتباعد الشاشتان.
+      const payload = simplePayload(fields);
+      // التصنيف يأتي من المستدعي (عقدة الشجرة) ويسبق قيمة النموذج الفارغة.
+      if (categoryId != null && categoryId !== "") payload.category = Number(categoryId);
       const created = await inventoryApi.createProduct(payload);
       onSaved(created);
     } catch (e: any) {
@@ -92,12 +99,16 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
 
           <div>
             <label className="block text-sm font-medium mb-1 text-[var(--color-text)]">وحدة القياس</label>
-            <input
-              type="text"
+            <select
               className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-emerald-500"
-              value={uom}
-              onChange={(e) => setUom(e.target.value)}
-            />
+              value={uomId ?? ""}
+              onChange={(e) => setUomId(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">— بدون وحدة —</option>
+              {uoms.map((u) => (
+                <option key={u.id} value={u.id}>{u.name_ar || u.name_en || u.code}</option>
+              ))}
+            </select>
           </div>
 
           <div>

@@ -11,33 +11,22 @@ import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
 import {
   AseelDocumentShell,
-  AseelGrid,
   useAseelKeymap,
   useRecordNavigation,
-  type AseelGridColumn,
   type AseelToolbarAction,
 } from "../aseel";
-import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Info, Upload, FileText } from "lucide-react";
+import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Upload, FileText } from "lucide-react";
 import { CategoryPicker } from "../inventory/CategoryPicker";
 import { ValuePicker } from "../inventory/ValuePicker";
+import { accountingApi } from "../../services/accountingApi";
+import { AccountTreeField } from "../accounting/AccountTreePicker";
+import type { AccountNodeLike } from "../../utils/accountTree";
 import { cloudinaryService } from "../../services/cloudinaryService";
 import { usePasteZone } from "../../utils/clipboardImage";
 import { useProductInsights } from "./ProductInsightTabs";
 import { SupplierCodesTab } from "./SupplierCodesTab";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { completeEan13, ean13Svg, isValidEan13, printBarcodeLabels } from "../../utils/barcode";
-
-const pendingN8 = (msg: string) => (
-  <div className="aseel-banner" style={{
-    background: "color-mix(in srgb, var(--aseel-warn, #b8800a) 12%, transparent)",
-    color: "var(--aseel-warn, #b8800a)",
-    border: "1px solid color-mix(in srgb, var(--aseel-warn, #b8800a) 30%, transparent)",
-    marginBottom: 6,
-  }}>
-    <Info className="h-4 w-4 shrink-0" />
-    <span>{msg}</span>
-  </div>
-);
 
 type Props = {
   productId: number | null;
@@ -54,11 +43,61 @@ type Props = {
   initialTab?: string;
 };
 
-type PriceTier = { price: string; currency: string; tax_inclusive: boolean };
-const blankTier = (): PriceTier => ({ price: "0", currency: "ILS", tax_inclusive: false });
+type CategoryNode = { id: number; name: string; parent: number | null };
 
-type ComponentLine = { key: string; component_sku: string; quantity: string };
-const newCmpKey = () => `cmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+/** شريحة سعر — العملة معرّفٌ من جدول العملات لا رمزٌ نصّي (الخادم يريد PK). */
+type PriceTier = { price: string; currency: number | null; tax_inclusive: boolean };
+const blankTier = (): PriceTier => ({ price: "", currency: null, tax_inclusive: false });
+
+const TIER_COUNT = 5;
+const numOrNull = (v: unknown): number | null =>
+  v == null || v === "" ? null : Number(v);
+
+type ServerTier = {
+  tier_type: string; tier_number: number;
+  price: string | number; currency: number; tax_inclusive?: boolean;
+};
+
+/** صفوف الخادم المسطّحة ← خمس شرائح مرتّبة بالرقم (الفجوات تبقى فارغة). */
+const tiersFromServer = (raw: unknown, type: "sale" | "purchase"): PriceTier[] => {
+  const rows = Array.isArray(raw) ? (raw as ServerTier[]) : [];
+  const out = Array.from({ length: TIER_COUNT }, blankTier);
+  for (const row of rows) {
+    if (row?.tier_type !== type) continue;
+    const index = Number(row.tier_number) - 1;
+    if (index < 0 || index >= TIER_COUNT) continue;
+    out[index] = {
+      price: row.price != null ? String(row.price) : "",
+      currency: numOrNull(row.currency),
+      tax_inclusive: Boolean(row.tax_inclusive),
+    };
+  }
+  return out;
+};
+
+/**
+ * الشرائح ← حمولة الخادم. الشريحة بلا سعرٍ موجب أو بلا عملة **تُحذف**: الخادم
+ * يعتبر الحمولة وصفاً للحالة النهائية، والصفّ الفارغ ليس سعراً بل غياب سعر.
+ */
+const tiersToPayload = (
+  sale: PriceTier[], purchase: PriceTier[],
+): Array<Record<string, unknown>> => {
+  const out: Array<Record<string, unknown>> = [];
+  const push = (tiers: PriceTier[], type: "sale" | "purchase") => {
+    tiers.forEach((tier, index) => {
+      const price = tier.price.trim();
+      if (!price || Number(price) <= 0 || tier.currency == null) return;
+      out.push({
+        tier_type: type, tier_number: index + 1,
+        price: Number(price), currency: tier.currency,
+        tax_inclusive: tier.tax_inclusive,
+      });
+    });
+  };
+  push(sale, "sale");
+  push(purchase, "purchase");
+  return out;
+};
 
 // الداتا شيت: المحفوظ له id (للحذف من SQL/Cloudinary)، والمرفوع حديثاً id=null.
 type DatasheetRef = { id: number | null; url: string };
@@ -75,7 +114,7 @@ const extractDatasheets = (p: Record<string, unknown>): DatasheetRef[] =>
     : [];
 
 type FormState = {
-  sku: string; catalog_no: string; name_ar: string; name_en: string;
+  sku: string; name_ar: string; name_en: string;
   brand: string;
   /** T-REORDER: «النوع» — موديلات النوع الواحد بدائلُ بعضها في البيع والطلب. */
   variant_group: string;
@@ -87,42 +126,43 @@ type FormState = {
   warranty_months: string;
   /** THA-24: كفالة المورد لنا بالأشهر — تُحسب من تاريخ فاتورة الشراء. */
   supplier_warranty_months: string;
-  description: string; location: string;
-  uom_primary: string; uom2: string; uom2_factor: string;
-  uom3: string; uom3_factor: string;
+  /** بيانٌ داخلي — منفصل عن وصف المتجر الذي يراه العالم. */
+  description: string;
+  /** موقع التخزين (رفّ/ممر) — إرشادي بلا أثر مخزني. */
+  storage_location: string;
+  /** وحدة القياس — معرّفٌ من جدول الوحدات لا نصّ حرّ: النصّ لم يكن يُحفظ أصلاً. */
+  uom_id: number | null;
+  uom2: number | null; uom2_factor: string;
+  uom3: number | null; uom3_factor: string;
   min_stock_level: string; max_stock_level: string;
   /** سعر البيع الافتراضي المحفوظ على الصنف (بجانب سعر التكلفة المحسوب). */
   sale_price: string;
   sale_tiers: PriceTier[];
   purchase_tiers: PriceTier[];
-  sale_account: string; sale_return_account: string;
-  purchase_account: string; purchase_return_account: string;
-  supplier_account: string; ending_inventory_account: string;
+  sale_account: number | null; sale_return_account: number | null;
+  purchase_account: number | null; purchase_return_account: number | null;
+  supplier_account: number | null; ending_inventory_account: number | null;
   category: number | null; category_name: string; item_type: string;
-  bonus_after_qty: string; bonus_every_qty: string;
-  components: ComponentLine[];
   datasheets: DatasheetRef[];
 };
 
 const blankForm = (): FormState => ({
-  sku: "", catalog_no: "", name_ar: "", name_en: "",
+  sku: "", name_ar: "", name_en: "",
   brand: "",
   variant_group: "",
   barcode: "", is_serialized: false,
   warranty_months: "", supplier_warranty_months: "",
-  description: "", location: "",
-  uom_primary: "عدد", uom2: "", uom2_factor: "1",
-  uom3: "", uom3_factor: "1",
+  description: "", storage_location: "",
+  uom_id: null, uom2: null, uom2_factor: "",
+  uom3: null, uom3_factor: "",
   min_stock_level: "", max_stock_level: "",
   sale_price: "",
   sale_tiers: Array.from({ length: 5 }, blankTier),
   purchase_tiers: Array.from({ length: 5 }, blankTier),
-  sale_account: "", sale_return_account: "",
-  purchase_account: "", purchase_return_account: "",
-  supplier_account: "", ending_inventory_account: "",
+  sale_account: null, sale_return_account: null,
+  purchase_account: null, purchase_return_account: null,
+  supplier_account: null, ending_inventory_account: null,
   category: null, category_name: "", item_type: "goods",
-  bonus_after_qty: "", bonus_every_qty: "1",
-  components: [],
   datasheets: [],
 });
 
@@ -147,15 +187,51 @@ export const ItemFormAseel: React.FC<Props> = ({
   const [currentId, setCurrentId] = useState<number | null>(productId);
   // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة/أرقام تسلسلية) — يتبع الصنف المعروض.
   const insights = useProductInsights(currentId, { isSerialized: form.is_serialized });
-  // W10: صنف موجود (تعديل) — اسمه يُحرَّر مباشرةً بحقل نصّي بدل منتقي «اختر/أضف»
-  // الذي كان يحبس الاسم في قائمة منسدلة (نقر «+» يمسح القيمة) فيبدو «غير قابل للتعديل».
-  const isExistingProduct = productId != null;
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [lastKey, setLastKey] = useState("—");
   const [dsUploading, setDsUploading] = useState(false);
   const datasheetRef = useRef<HTMLDivElement>(null);
+  // T-ITEMS M1: الكشف التدريجي — «بيانات عامة» تفتح على الحقول التي تلزم كل
+  // صنف، وما دونها خلف زرٍّ واحد. المستخدم المتقدّم يفتحه مرّةً ويبقى مفتوحاً
+  // ما دام الكرت مفتوحاً.
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [uoms, setUoms] = useState<Array<{ id: number; name_ar: string; name_en: string; code: string }>>([]);
+  const [categories, setCategories] = useState<CategoryNode[]>([]);
+
+  const [currencies, setCurrencies] = useState<Array<{ CurrencyID: number; CurrencyCode: string }>>([]);
+  const [accounts, setAccounts] = useState<AccountNodeLike[]>([]);
+
+  useEffect(() => {
+    inventoryApi.getUoms().then(setUoms).catch(() => setUoms([]));
+    // العملات لشرائح الأسعار، والحسابات لتجاوزات الترحيل — كلاهما صار يُحفظ.
+    accountingApi.getCurrencies().then(setCurrencies).catch(() => setCurrencies([]));
+    accountingApi.getAccounts().then(setAccounts).catch(() => setAccounts([]));
+  }, []);
+
+  // مسار التصنيف المختار — يُعرض قبل الحفظ («سيُحفظ تحت: أ ‹ ب») كي لا يبقى
+  // موضع الصنف في الشجرة مفاجأةً تُكتشف بعد الحفظ.
+  const loadCategories = useCallback(() => {
+    inventoryApi.getCategories().then(setCategories).catch(() => setCategories([]));
+  }, []);
+  useEffect(() => { loadCategories(); }, [loadCategories]);
+
+  const categoryPath = React.useMemo(() => {
+    if (form.category == null) return null;
+    const byId: Record<number, CategoryNode> = {};
+    for (const c of categories) byId[c.id] = c;
+    const names: string[] = [];
+    const seen = new Set<number>();
+    let node: CategoryNode | undefined = byId[form.category];
+    // الصعود محروسٌ بـ`seen`: بياناتٌ قديمة قد تحمل حلقةً سبقت حارس الخادم.
+    while (node && !seen.has(node.id)) {
+      seen.add(node.id);
+      names.unshift(node.name);
+      node = node.parent != null ? byId[node.parent] : undefined;
+    }
+    return names.length ? names.join(" ‹ ") : (form.category_name || null);
+  }, [form.category, form.category_name, categories]);
 
   const uploadDatasheetFile = async (file: File) => {
     setDsUploading(true); setErr(null); setMsg(null);
@@ -244,7 +320,6 @@ export const ItemFormAseel: React.FC<Props> = ({
     setForm((prev) => ({
       ...prev,
       sku: isDuplicate ? "" : String(p.sku ?? ""),
-      catalog_no: isDuplicate ? "" : String(p.catalog_no ?? ""),
       // الباركود يميّز صنفاً واحداً في الشركة — النسخة تبدأ بلا باركود لا بباركود أخيها.
       barcode: isDuplicate ? "" : String(p.barcode ?? ""),
       is_serialized: Boolean(p.is_serialized),
@@ -259,8 +334,12 @@ export const ItemFormAseel: React.FC<Props> = ({
       brand: isDuplicate ? "" : String(p.brand ?? ""),
       variant_group: String(p.variant_group ?? ""),
       description: String(p.description ?? ""),
-      location: String(p.location ?? ""),
-      uom_primary: String(p.uom_primary ?? "عدد"),
+      storage_location: String(p.storage_location ?? ""),
+      uom_id: p.uom_id != null ? Number(p.uom_id) : null,
+      uom2: p.uom2 != null ? Number(p.uom2) : null,
+      uom2_factor: p.uom2_factor != null ? String(p.uom2_factor) : "",
+      uom3: p.uom3 != null ? Number(p.uom3) : null,
+      uom3_factor: p.uom3_factor != null ? String(p.uom3_factor) : "",
       min_stock_level: p.min_stock_level != null ? String(p.min_stock_level) : "",
       max_stock_level: p.max_stock_level != null ? String(p.max_stock_level) : "",
       sale_price: p.sale_price != null ? String(p.sale_price) : "",
@@ -269,14 +348,15 @@ export const ItemFormAseel: React.FC<Props> = ({
       // is_service هو حقل الخادم الفعلي (يوجّه الترحيل لحساب مبيعات الخدمات)؛
       // «نوع الصنف» في الواجهة يُشتقّ منه لا من حقل item_type غير الموجود خادمياً.
       item_type: p.is_service ? "service" : "goods",
-      sale_tiers: (p.sale_tiers as PriceTier[] | undefined) ?? prev.sale_tiers,
-      purchase_tiers: (p.purchase_tiers as PriceTier[] | undefined) ?? prev.purchase_tiers,
-      sale_account: String(p.sale_account_override ?? ""),
-      sale_return_account: String(p.sale_return_account_override ?? ""),
-      purchase_account: String(p.purchase_account_override ?? ""),
-      purchase_return_account: String(p.purchase_return_account_override ?? ""),
-      supplier_account: String(p.supplier_account_override ?? ""),
-      ending_inventory_account: String(p.ending_inventory_account_override ?? ""),
+      // الشرائح تصل مسطّحةً من الخادم؛ توزَّع على الخمس بحسب رقمها.
+      sale_tiers: tiersFromServer(p.price_tiers, "sale"),
+      purchase_tiers: tiersFromServer(p.price_tiers, "purchase"),
+      sale_account: numOrNull(p.sale_account_override),
+      sale_return_account: numOrNull(p.sale_return_account_override),
+      purchase_account: numOrNull(p.purchase_account_override),
+      purchase_return_account: numOrNull(p.purchase_return_account_override),
+      supplier_account: numOrNull(p.supplier_account_override),
+      ending_inventory_account: numOrNull(p.ending_inventory_account_override),
       // الداتا شيت مرفقات المنتج (file_type='Datasheet') — لا تُنسَخ عند التكرار.
       datasheets: isDuplicate ? [] : extractDatasheets(p),
     }));
@@ -301,20 +381,12 @@ export const ItemFormAseel: React.FC<Props> = ({
     if (!form.name_ar.trim() && !form.name_en.trim()) { setErr("اسم الصنف مطلوب."); return; }
     setSaving(true); setErr(null); setMsg(null);
     try {
-      // التصنيف الفعلي للمنتج = تصنيف فرعي اسمه اسم المنتج: إن وُجد نستخدمه (فيُحفظ
-      // المنتج بجانب إخوته)، وإلا نُنشئه تحت التصنيف الأب المختار (شجرة بأي عمق).
-      const name = (form.name_ar || form.name_en || "").trim();
-      let categoryId: number | null = form.category;
-      try {
-        const cats = await inventoryApi.getCategories() as Array<{ id: number; name: string }>;
-        const existing = cats.find((c) => (c.name || "").trim() === name);
-        if (existing) {
-          categoryId = existing.id;
-        } else if (name) {
-          const createdCat = await inventoryApi.createCategory({ name, parent: form.category || null }) as { id: number };
-          categoryId = createdCat.id;
-        }
-      } catch { /* تعذّر — نستخدم التصنيف المختار كما هو */ }
+      // T-ITEMS M1: الصنف يُحفَظ تحت التصنيف المختار حرفياً.
+      // كان هنا إنشاءٌ صامت لتصنيفٍ باسم الصنف نفسه يُجعل المختارُ أباً له —
+      // بمطابقة نصّية على تصنيفات الشركة كلها وخطأٍ مبتلَع — فلا يعرف المستخدم
+      // أين حُفظ صنفه ولا لماذا امتلأت شجرته بتصنيفاتٍ لم يُنشئها. التجميع
+      // يقوم به «النوع» (`variant_group`) وهو حقلٌ ظاهر يُكتب بقصد.
+      const categoryId: number | null = form.category;
 
       // ProductSerializer.Meta.fields only — أي حقول إضافية سيَتجاهلها DRF بصمت.
       const payload: Record<string, unknown> = {
@@ -329,6 +401,23 @@ export const ItemFormAseel: React.FC<Props> = ({
         // سعر البيع: فارغ = لا سعر محفوظ (البطاقة ترجع لآخر سعر بيع فعلي).
         sale_price: form.sale_price.trim() ? Number(form.sale_price) : null,
         category: categoryId,
+        // M0: وحدة القياس صارت قابلة للكتابة على الخادم — كانت تُبتلع بصمت.
+        uom_id: form.uom_id,
+        // T-ITEMS M5: حقولٌ كانت تُعرض ولا تُحفظ — صارت حقيقية (بهجرة).
+        uom2: form.uom2,
+        uom2_factor: form.uom2_factor.trim() ? Number(form.uom2_factor) : null,
+        uom3: form.uom3,
+        uom3_factor: form.uom3_factor.trim() ? Number(form.uom3_factor) : null,
+        description: form.description.trim() || null,
+        storage_location: form.storage_location.trim() || null,
+        sale_account_override: form.sale_account,
+        sale_return_account_override: form.sale_return_account,
+        purchase_account_override: form.purchase_account,
+        purchase_return_account_override: form.purchase_return_account,
+        supplier_account_override: form.supplier_account,
+        ending_inventory_account_override: form.ending_inventory_account,
+        // الشرائح تصف الحالة النهائية: ما لم يُرسَل يُحذف خادمياً.
+        price_tiers: tiersToPayload(form.sale_tiers, form.purchase_tiers),
         // is_service: الحقل الفعلي الذي يقرأه الترحيل المحاسبي (مبيعات خدمات لا بضاعة).
         is_service: form.item_type === "service",
         // T-SERIAL: الباركود فارغ = null لا "" — كي لا يتصادم صنفان بلا باركود.
@@ -419,14 +508,47 @@ export const ItemFormAseel: React.FC<Props> = ({
   // ── صفحة 1: بيانات عامة ──
   const tabGeneral = (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, padding: "8px 4px" }}>
-      {fld("رقم الصنف (يولد تلقائياً إن ترك فارغاً)", <input className="aseel-input aseel-input--hl" value={form.sku}
-        onChange={(e) => patch("sku", e.target.value)} placeholder="تلقائي..." />)}
-      {fld("رقم الكتلوج", <input className="aseel-input" value={form.catalog_no}
-        onChange={(e) => patch("catalog_no", e.target.value)} />)}
+      {/* ── الوضع البسيط: ما يلزم كلَّ صنف ────────────────────────────────
+          الترتيب هو ترتيب الإدخال الفعلي: من يفتح الكرت يكتب الاسم فالتصنيف
+          فالوحدة فالسعر ثم يحفظ. الباقي خلف «متقدم» — كشفٌ تدريجي لا إخفاء:
+          الحقل موجود لمن يريده، وغائبٌ عمّن لا يريده. */}
+      {fld("اسم الصنف",
+        <input className="aseel-input aseel-input--hl" value={form.name_ar}
+          onChange={(e) => patch("name_ar", e.target.value)} placeholder="اسم الصنف" />, 2)}
+      {fld("اسم الصنف (إنجليزي)", <input className="aseel-input" value={form.name_en}
+        onChange={(e) => patch("name_en", e.target.value)} />)}
+      {fld("التصنيف",
+        <CategoryPicker value={form.category} onChange={(id, name) => {
+          patch("category", id);
+          patch("category_name", name ?? "");
+        }} />)}
+      {fld("وحدة القياس",
+        <select className="aseel-input" value={form.uom_id ?? ""}
+          onChange={(e) => patch("uom_id", e.target.value ? Number(e.target.value) : null)}>
+          <option value="">— بدون وحدة —</option>
+          {uoms.map((u) => (
+            <option key={u.id} value={u.id}>{u.name_ar || u.name_en || u.code}</option>
+          ))}
+        </select>)}
+      {fld("سعر البيع", <input className="aseel-input" type="number" min="0" step="0.01"
+        value={form.sale_price} placeholder="فارغ = بلا سعر محفوظ"
+        title="سعرٌ عام يدوي — يسبقه في الفاتورة آخر سعر بيع لهذا الزبون وعرضُ سعره"
+        onChange={(e) => patch("sale_price", e.target.value)} />)}
       {fld("نوع الصنف", <select className="aseel-input" value={form.item_type}
         onChange={(e) => patch("item_type", e.target.value)}>
         {ITEM_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
       </select>)}
+      {fld("رقم الصنف (يولد تلقائياً إن ترك فارغاً)", <input className="aseel-input" value={form.sku}
+        onChange={(e) => patch("sku", e.target.value)} placeholder="تلقائي..." />)}
+      {/* مِفصل الكشف التدريجي — صفٌّ كامل كي يُقرأ كفاصلٍ لا كحقل. */}
+      <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
+        <button type="button" className="aseel-addrow" style={{ margin: 0 }}
+          aria-expanded={showAdvanced}
+          onClick={() => setShowAdvanced((v) => !v)}>
+          {showAdvanced ? "▾ إخفاء المتقدم" : "▸ متقدم (باركود، براند، نوع، حدود مخزون، كفالات، ملفات)"}
+        </button>
+      </div>
+      {!showAdvanced ? null : <>
       {/* T-SERIAL: الباركود — توليد (من رقم مكتوب أو عشوائي) ومعاينة وطباعة ملصق. */}
       {fld("الباركود (EAN-13)",
         <div>
@@ -495,15 +617,6 @@ export const ItemFormAseel: React.FC<Props> = ({
           placeholder="فارغ = بلا كفالة مورد"
           title="تُحسب من تاريخ فاتورة الشراء — يراها موظف الكاونتر فلا تتحمّل الشركة كلفة يتحمّلها المورد"
           onChange={(e) => patch("supplier_warranty_months", e.target.value)} />)}
-      {fld(isExistingProduct ? "اسم المنتج" : "اسم المنتج (اختر موجوداً لبراند آخر، أو اكتب جديداً)",
-        isExistingProduct
-          ? <input className="aseel-input" value={form.name_ar}
-              onChange={(e) => patch("name_ar", e.target.value)} placeholder="اسم المنتج" />
-          : <ValuePicker value={form.name_ar} onChange={(v) => patch("name_ar", v)}
-              fetchOptions={inventoryApi.getProductNames}
-              emptyLabel="— اختر منتجاً —" addPlaceholder="مثال: 195/65/15" addTitle="منتج جديد" />, 2)}
-      {fld("اسم الصنف (إنجليزي)", <input className="aseel-input" value={form.name_en}
-        onChange={(e) => patch("name_en", e.target.value)} />)}
       {fld("البراند (يظهر بين قوسين)",
         <ValuePicker value={form.brand} onChange={(b) => patch("brand", b)}
           fetchOptions={inventoryApi.getBrands}
@@ -517,25 +630,6 @@ export const ItemFormAseel: React.FC<Props> = ({
         <ValuePicker value={form.variant_group} onChange={(g) => patch("variant_group", g)}
           fetchOptions={inventoryApi.getGroups}
           emptyLabel="— بدون نوع —" addPlaceholder="مثال: ايفون 14 برو" addTitle="نوع جديد" />)}
-      {fld("تفصيل / بيان الصنف", <input className="aseel-input" value={form.description}
-        onChange={(e) => patch("description", e.target.value)} />, 2)}
-      {fld("الموقع (الرف)", <input className="aseel-input" value={form.location}
-        onChange={(e) => patch("location", e.target.value)} />)}
-      {fld("تحت أي تصنيف (الأب — عند منتج جديد يُنشأ فرعي باسمه)",
-        <CategoryPicker value={form.category} onChange={(id, name) => {
-          patch("category", id);
-          if (name) patch("category_name", name);
-        }} />)}
-      {fld("الوحدة الرئيسية", <input className="aseel-input" value={form.uom_primary}
-        onChange={(e) => patch("uom_primary", e.target.value)} placeholder="عدد، كيلو، لتر…" />)}
-      {fld("وحدة 2", <input className="aseel-input" value={form.uom2}
-        onChange={(e) => patch("uom2", e.target.value)} />)}
-      {fld("معامل الوحدة 2", <input className="aseel-input" type="number" min="0" step="0.001"
-        value={form.uom2_factor} onChange={(e) => patch("uom2_factor", e.target.value)} />)}
-      {fld("وحدة 3", <input className="aseel-input" value={form.uom3}
-        onChange={(e) => patch("uom3", e.target.value)} />)}
-      {fld("معامل الوحدة 3", <input className="aseel-input" type="number" min="0" step="0.001"
-        value={form.uom3_factor} onChange={(e) => patch("uom3_factor", e.target.value)} />)}
       {fld("ملفات الداتا شيت (PDF أو صور)",
         <div ref={datasheetRef}>
           <label className="aseel-input" style={{
@@ -584,6 +678,14 @@ export const ItemFormAseel: React.FC<Props> = ({
             </ul>
           )}
         </div>, 3)}
+      </>}
+      {/* معاينة موضع الحفظ — تُقرأ قبل الضغط لا بعده. */}
+      <div style={{
+        gridColumn: "1 / -1", marginTop: 4, fontSize: "var(--aseel-fs-sm)",
+        color: "var(--aseel-ink-soft)",
+      }}>
+        سيُحفظ تحت: <b style={{ color: "var(--aseel-ink)" }}>{categoryPath || "بدون تصنيف"}</b>
+      </div>
     </div>
   );
 
@@ -609,7 +711,7 @@ export const ItemFormAseel: React.FC<Props> = ({
   // ── صفحة 3: أسعار البيع والشراء (5+5) ──
   const tierTable = (
     tiers: PriceTier[], label: string,
-    onUpdate: (i: number, k: keyof PriceTier, v: string | boolean) => void
+    onUpdate: (i: number, k: keyof PriceTier, v: string | number | boolean | null) => void
   ) => (
     <div style={{ marginBottom: 16 }}>
       <div style={{ fontWeight: 600, fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)", marginBottom: 4, paddingRight: 4 }}>
@@ -633,8 +735,13 @@ export const ItemFormAseel: React.FC<Props> = ({
                   value={t.price} onChange={(e) => onUpdate(i, "price", e.target.value)} />
               </td>
               <td>
-                <input className="aseel-input" value={t.currency}
-                  onChange={(e) => onUpdate(i, "currency", e.target.value)} placeholder="ILS" />
+                <select className="aseel-input" value={t.currency ?? ""}
+                  onChange={(e) => onUpdate(i, "currency", e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">—</option>
+                  {currencies.map((c) => (
+                    <option key={c.CurrencyID} value={c.CurrencyID}>{c.CurrencyCode}</option>
+                  ))}
+                </select>
               </td>
               <td style={{ textAlign: "center" }}>
                 <input type="checkbox" checked={t.tax_inclusive}
@@ -679,7 +786,10 @@ export const ItemFormAseel: React.FC<Props> = ({
           <input className="aseel-input" readOnly
             value={formatMoney(insights.profile?.last_purchase_price ?? "", "—")} />)}
       </div>
-      {pendingN8("فئات الأسعار الخمس تُعرَض ولكن لا تُحفَظ بعد — تَنتظر N8-T9 (ProductPriceTier migration).")}
+      <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)", marginBottom: 6 }}>
+        الشريحة الأولى للبيع تدخل تسعير الفواتير حين لا يكون للزبون عرضُ سعرٍ ولا شراءٌ
+        سابق. الصفّ بلا سعرٍ أو بلا عملة لا يُحفَظ.
+      </div>
       {tierTable(form.sale_tiers, "أسعار البيع (5 فئات)", (i, k, v) => {
         const next = [...form.sale_tiers];
         next[i] = { ...next[i], [k]: v };
@@ -694,25 +804,31 @@ export const ItemFormAseel: React.FC<Props> = ({
   );
 
   // ── صفحة 4: بيانات المتاجرة ──
+  // T-ITEMS M5: كانت حقولاً نصّية حرّة بلافتة «لا تُحفَظ». صارت منتقياتِ حسابٍ
+  // حقيقية تُحفَظ على الصنف — والخادم يرفض حساباً من شركة أخرى.
+  const accountField = (
+    label: string, key: keyof FormState, title: string,
+  ) => fld(label,
+    <AccountTreeField
+      accounts={accounts}
+      value={form[key] as number | null}
+      onChange={(id) => patch(key, id as FormState[typeof key])}
+      title={title}
+      placeholder="— الافتراضي من التصنيف —"
+    />);
+
   const tabTrading = (
     <div style={{ padding: "8px 4px" }}>
-      {pendingN8("حقول overrides الحسابات لا تُحفَظ بعد — تَنتظر N8-T10.")}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
-      {fld("حساب البيع", <input className="aseel-input" value={form.sale_account}
-        onChange={(e) => patch("sale_account", e.target.value)} placeholder="رقم الحساب (+ فهرس)" />)}
-      {fld("حساب مرجع البيع", <input className="aseel-input" value={form.sale_return_account}
-        onChange={(e) => patch("sale_return_account", e.target.value)} />)}
-      {fld("حساب الشراء", <input className="aseel-input" value={form.purchase_account}
-        onChange={(e) => patch("purchase_account", e.target.value)} />)}
-      {fld("حساب مرجع الشراء", <input className="aseel-input" value={form.purchase_return_account}
-        onChange={(e) => patch("purchase_return_account", e.target.value)} />)}
-      {fld("حساب المورد", <input className="aseel-input" value={form.supplier_account}
-        onChange={(e) => patch("supplier_account", e.target.value)} />)}
-      {fld("حساب بضاعة آخر المدة", <input className="aseel-input" value={form.ending_inventory_account}
-        onChange={(e) => patch("ending_inventory_account", e.target.value)} />)}
-      <div style={{ gridColumn: "1/-1", fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>
-        اترك الحقل فارغاً لاستخدام القيم الافتراضية من ثوابت المجموعة. استخدم + لفهرس الحسابات.
-      </div>
+        {accountField("حساب البيع", "sale_account", "يسبق حساب إيرادات التصنيف عند ترحيل بيع هذا الصنف")}
+        {accountField("حساب مرتجع البيع", "sale_return_account", "حساب مرتجع المبيعات لهذا الصنف")}
+        {accountField("حساب الشراء", "purchase_account", "حساب المشتريات لهذا الصنف")}
+        {accountField("حساب مرتجع الشراء", "purchase_return_account", "حساب مرتجع المشتريات لهذا الصنف")}
+        {accountField("حساب المورد", "supplier_account", "حساب المورد الافتراضي لهذا الصنف")}
+        {accountField("حساب بضاعة آخر المدة", "ending_inventory_account", "حساب المخزون لهذا الصنف")}
+        <div style={{ gridColumn: "1/-1", fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>
+          اترك الحقل فارغاً ليُستعمل حساب التصنيف الافتراضي.
+        </div>
       </div>
     </div>
   );
@@ -720,65 +836,48 @@ export const ItemFormAseel: React.FC<Props> = ({
   // ── صفحة 5: بيانات أخرى ──
   const tabOther = (
     <div style={{ padding: "8px 4px" }}>
-      {pendingN8("الكميات الإضافية لا تُحفَظ بعد — حقل backend غير متوفّر.")}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
-        {fld("إضافي بعد الكمية", <input className="aseel-input" type="number" min="0" step="1"
-          value={form.bonus_after_qty} onChange={(e) => patch("bonus_after_qty", e.target.value)} />)}
-        {fld("إضافي كل كمية", <input className="aseel-input" type="number" min="1" step="1"
-          value={form.bonus_every_qty} onChange={(e) => patch("bonus_every_qty", e.target.value)} />)}
+        {fld("بيان الصنف (داخلي)",
+          <input className="aseel-input" value={form.description}
+            title="وصفٌ داخلي — غير وصف المتجر الذي يراه الزبون"
+            onChange={(e) => patch("description", e.target.value)} />, 2)}
+        {fld("موقع التخزين (رفّ/ممر)",
+          <input className="aseel-input" value={form.storage_location}
+            placeholder="مثال: A-3"
+            title="إرشادي — لا رصيد عليه ولا حركة مخزون"
+            onChange={(e) => patch("storage_location", e.target.value)} />)}
+        {/* T-ITEMS M5: وحدتان إضافيتان بمعاملَي تحويلٍ إلى الوحدة الرئيسية. */}
+        {fld("الوحدة الثانية",
+          <select className="aseel-input" value={form.uom2 ?? ""}
+            onChange={(e) => patch("uom2", e.target.value ? Number(e.target.value) : null)}>
+            <option value="">— بدون —</option>
+            {uoms.map((u) => <option key={u.id} value={u.id}>{u.name_ar || u.name_en || u.code}</option>)}
+          </select>)}
+        {fld("معامل الوحدة الثانية",
+          <input className="aseel-input" type="number" min="0" step="0.001"
+            value={form.uom2_factor} placeholder="كم وحدةً رئيسية فيها؟"
+            onChange={(e) => patch("uom2_factor", e.target.value)} />)}
+        {fld("الوحدة الثالثة",
+          <select className="aseel-input" value={form.uom3 ?? ""}
+            onChange={(e) => patch("uom3", e.target.value ? Number(e.target.value) : null)}>
+            <option value="">— بدون —</option>
+            {uoms.map((u) => <option key={u.id} value={u.id}>{u.name_ar || u.name_en || u.code}</option>)}
+          </select>)}
+        {fld("معامل الوحدة الثالثة",
+          <input className="aseel-input" type="number" min="0" step="0.001"
+            value={form.uom3_factor} placeholder="كم وحدةً رئيسية فيها؟"
+            onChange={(e) => patch("uom3_factor", e.target.value)} />)}
         <div style={{ gridColumn: "1/-1", fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>
-          مثال: إضافي 1 بعد كل 10 وحدات مشتراة.
+          المعامل = كم وحدةً رئيسية داخل الوحدة الإضافية (كرتونة = 12 قطعة ⇒ 12).
         </div>
       </div>
     </div>
   );
 
-  // ── صفحة 6: معادلات التصنيع ──
-  const cmpColumns: AseelGridColumn<ComponentLine>[] = [
-    { key: "seq", header: "مسلسل", width: "55px", align: "center", readOnly: true },
-    { key: "component_sku", header: "رقم الصنف (المكوّن)", width: "200px" },
-    { key: "quantity", header: "الكمية", width: "100px", align: "center", type: "number" },
-    { key: "del", header: "", width: "36px", align: "center" },
-  ];
-
-  const cmpGetCell = (row: ComponentLine, key: string): string | number => {
-    const idx = form.components.findIndex((c) => c.key === row.key);
-    if (key === "seq") return idx + 1;
-    if (key === "component_sku") return row.component_sku;
-    if (key === "quantity") return row.quantity;
-    return "";
-  };
-
-  cmpColumns[3].render = (row: ComponentLine) => (
-    <button type="button" className="aseel-iconbtn aseel-iconbtn--danger"
-      onClick={() => patch("components", form.components.filter((c) => c.key !== row.key))}>
-      <Trash2 className="h-3 w-3" />
-    </button>
-  );
-
-  const tabManufacturing = (
-    <div style={{ padding: "8px 4px" }}>
-      <AseelGrid<ComponentLine>
-        columns={cmpColumns}
-        rows={form.components}
-        getCell={cmpGetCell}
-        getRowKey={(c) => c.key}
-        onChange={(rowIdx, key, val) => {
-          const next = [...form.components];
-          if (key === "component_sku") next[rowIdx] = { ...next[rowIdx], component_sku: val };
-          if (key === "quantity") next[rowIdx] = { ...next[rowIdx], quantity: val };
-          patch("components", next);
-        }}
-        onAddRow={() => patch("components", [...form.components, { key: newCmpKey(), component_sku: "", quantity: "1" }])}
-        emptyHint="لا توجد مكوّنات — أضف صنفاً داخلاً في التصنيع"
-      />
-      <button type="button" className="aseel-addrow" onClick={() =>
-        patch("components", [...form.components, { key: newCmpKey(), component_sku: "", quantity: "1" }])
-      }>
-        <Plus className="h-3 w-3" /> إضافة مكوّن
-      </button>
-    </div>
-  );
+  // T-ITEMS M5: تبويب «معادلات التصنيع» أُزيل. لم يكن يُحفظ إطلاقاً (لا نموذج
+  // ولا نقطة)، والتصنيع في المنتجات الاحترافية موديولٌ قائم بذاته (Odoo MRP:
+  // أوامر تصنيع ومراحل واستهلاك مخزون) لا حقلٌ في كرت الصنف — فبناؤه قرارٌ
+  // مستقل لا تفصيلٌ داخل هذه المهمة.
 
   return (
     <div dir="rtl">
@@ -791,15 +890,26 @@ export const ItemFormAseel: React.FC<Props> = ({
         actions={toolbarActions}
         header={
           <>
+            {/* T-ITEMS M1: شريط الهوية يُحرَّر في مكانه.
+                كان مرايا readOnly: فتحُ الكرت لتغيير الاسم يوجب النزول إلى
+                التبويب الرابع والبحث عنه بين الباركود والكفالات — وهو أوّل ما
+                يُفتح الكرت لأجله. الاسم رأسُ النموذج كما في Odoo. */}
             {fld("رقم الصنف", <input className="aseel-input" readOnly
               value={currentId ? `#${currentId}` : "— جديد —"} />)}
             {fld("SKU", <input className="aseel-input aseel-input--hl" value={form.sku}
               onChange={(e) => patch("sku", e.target.value)} />)}
-            {fld("الاسم", <input className="aseel-input" readOnly
-              value={form.name_ar || form.name_en || "—"} />)}
-            {fld("التصنيف", <input className="aseel-input" readOnly value={form.category_name || "—"} />)}
-            {fld("نوع الصنف", <input className="aseel-input" readOnly
-              value={ITEM_TYPES.find((t) => t.v === form.item_type)?.l ?? form.item_type} />)}
+            {fld("اسم الصنف", <input className="aseel-input aseel-input--hl" value={form.name_ar}
+              onChange={(e) => patch("name_ar", e.target.value)}
+              placeholder="اسم الصنف" autoFocus={productId == null} />, 2)}
+            {fld("التصنيف",
+              <CategoryPicker value={form.category} onChange={(id, name) => {
+                patch("category", id);
+                patch("category_name", name ?? "");
+              }} />)}
+            {fld("نوع الصنف", <select className="aseel-input" value={form.item_type}
+              onChange={(e) => patch("item_type", e.target.value)}>
+              {ITEM_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
+            </select>)}
             {/* الأرقام القيادية في شريط الرأس — تُرى قبل فتح أي تبويب. */}
             {fld("سعر البيع", <input className="aseel-input" readOnly
               value={formatMoney(insights.profile?.effective_sale_price ?? form.sale_price, "—")} />)}
@@ -822,7 +932,6 @@ export const ItemFormAseel: React.FC<Props> = ({
           // الفهرس فيقفز المستخدم (الغلاف يتتبّع النشط بالفهرس).
           { key: "supplier_codes", label: "أرقام الموردين",
             content: <SupplierCodesTab productId={currentId} /> },
-          { key: "mfg", label: "معادلات التصنيع", content: tabManufacturing },
           // آخر القائمة: تفعيل التتبّع يُلحق تبويباً ولا يزحزح فهرس تبويب قائم
           // (الغلاف يتتبّع النشط بالفهرس) — فيبقى المستخدم حيث هو.
           ...(insights.serialsTab ? [insights.serialsTab] : []),

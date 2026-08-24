@@ -824,6 +824,20 @@ def category_descendant_product_ids(*, tenant_id: int, category_id: int) -> list
     تصنيفٌ من شركة أخرى (أو غير موجود) ⇒ قائمة فارغة — العزل مضاعف: عضويةُ
     التصنيف في الشركة، وفلترةُ الأصناف بالشركة.
     """
+    wanted = category_descendant_ids(tenant_id=tenant_id, category_id=category_id)
+    return list(
+        Product.objects.filter(tenant_id=tenant_id, category_id__in=wanted)
+        .values_list('id', flat=True)
+    )
+
+
+def category_descendant_ids(*, tenant_id: int, category_id: int) -> list[int]:
+    """معرّفات تصنيفٍ **وكل أحفاده** (يشمل نفسه) — استعلام مسطّح واحد ثم نزول في بايثون.
+
+    تصنيفٌ من شركة أخرى (أو غير موجود) ⇒ قائمة فارغة. يقرؤها الكرت المجمّع
+    (`category_descendant_product_ids`) وفلتر `?category=` في قائمة الأصناف —
+    نسخة واحدة من قاعدة «التصنيف يعني شجرته» حيثما ظهر التصنيف كمحدِّد.
+    """
     from .models import ProductCategory
 
     pairs = list(
@@ -845,10 +859,7 @@ def category_descendant_product_ids(*, tenant_id: int, category_id: int) -> list
         seen.add(cid)
         wanted.append(cid)
         stack.extend(children.get(cid, ()))
-    return list(
-        Product.objects.filter(tenant_id=tenant_id, category_id__in=wanted)
-        .values_list('id', flat=True)
-    )
+    return wanted
 
 
 def _group_products(tenant_id: int, product_ids: list[int]) -> list:

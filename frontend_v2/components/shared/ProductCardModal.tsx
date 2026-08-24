@@ -9,7 +9,8 @@
  * عرض واحد للصنف، والنسخة المختصرة هنا تُحيل للكرت الكامل للتحرير.
  */
 import React, { useEffect, useState } from "react";
-import { ExternalLink, Check } from "lucide-react";
+import { ExternalLink, Check, Pencil } from "lucide-react";
+import { ItemQuickEditModal } from "../items/ItemQuickEditModal";
 import { AseelFloatWindow } from "../aseel/AseelFloatWindow";
 import { useNavigate } from "react-router-dom";
 import { apiGetObject } from "../../services/restApi";
@@ -71,6 +72,11 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
   /** يجمع قيم الإضافة لتمريرها لـ onConfirm. */
   const confirmPayload = () => ({ quantity: Number(qty) || 1, unitPrice: Number(price) || 0 });
 
+  // T-ITEMS M3: التحرير السريع فوق البطاقة — وبعد الحفظ تُعاد قراءة الملف كي
+  // تعرض البطاقة ما صار لا ما كان.
+  const [quickEdit, setQuickEdit] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -82,7 +88,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [productId]);
+  }, [productId, reloadKey]);
 
   // آخر حركات المخزون (حتى 8) — لملء مساحة البطاقة في وضع العرض فقط.
   useEffect(() => {
@@ -127,6 +133,16 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
       rootProps={{ "data-aseel-modal": "1", "aria-label": "بطاقة الصنف" } as React.HTMLAttributes<HTMLDivElement>}
       footer={(
         <>
+          {/* T-ITEMS M3: التعديل في مكانه أولاً — «الكرت الكامل» يغادر المستند
+              الجاري، وكان الطريق الوحيد لتغيير اسمٍ خاطئ يُرى من الفاتورة. */}
+          <button
+            type="button"
+            className="aseel-toolbtn"
+            onClick={() => setQuickEdit(true)}
+            title="تعديل اسم الصنف وبياناته الأساسية دون مغادرة الشاشة"
+          >
+            <Pencil className="w-4 h-4" /> تعديل سريع
+          </button>
           <button
             type="button"
             className="aseel-toolbtn"
@@ -222,6 +238,13 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
             </div>
           )}
       </div>
+      {quickEdit && (
+        <ItemQuickEditModal
+          productId={productId}
+          onClose={() => setQuickEdit(false)}
+          onSaved={() => setReloadKey((k) => k + 1)}
+        />
+      )}
     </AseelFloatWindow>
   );
 };

@@ -257,6 +257,11 @@ export const inventoryApi = {
     return res.json();
   },
 
+  // ─── Units of measure ───
+
+  /** وحدات القياس المفعّلة — قائمةٌ ثابتة تقريباً، يقرؤها كرت الصنف ونوافذه السريعة. */
+  getUoms: () => fetch(`${INV}/uom/`, { headers: headers() }).then(asList),
+
   // ─── Categories ───
 
   getCategories: () =>

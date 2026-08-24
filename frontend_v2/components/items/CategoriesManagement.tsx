@@ -3,6 +3,7 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { inventoryApi } from "../../services/inventoryApi";
 import { Plus, Edit2, Trash2, X, Check, RefreshCw } from "lucide-react";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import { eligibleParents, sortCategoryRows } from "../../utils/categoryTree";
 
 type Category = {
   id: number;
@@ -89,39 +90,16 @@ export const CategoriesManagement: React.FC = () => {
     }
   };
 
-  // خرائط الشجرة: الاسم بالمعرّف + العمق (لإزاحة الأبناء) + ترتيب DFS (الابن تحت أبيه).
-  const nameById = new Map(list.map((c) => [c.id, c.name]));
-  const childrenOf = new Map<number | null, Category[]>();
-  for (const c of list) {
-    const p = c.parent ?? null;
-    if (!childrenOf.has(p)) childrenOf.set(p, []);
-    childrenOf.get(p)!.push(c);
-  }
-  const depthOf = (c: Category): number => {
-    let d = 0, cur: number | null = c.parent ?? null, guard = 0;
-    while (cur != null && guard++ < 50) { d++; cur = nameById.has(cur) ? (list.find((x) => x.id === cur)?.parent ?? null) : null; }
-    return d;
-  };
-  // ترتيب الشجرة (أب ثم أبناؤه ثم أحفاده) عبر DFS من الجذور.
-  const orderedTree: Category[] = [];
-  const walk = (parent: number | null) => {
-    for (const c of (childrenOf.get(parent) || [])) { orderedTree.push(c); walk(c.id); }
-  };
-  walk(null);
-  // التصنيفات اليتيمة (أبٌ غير موجود) لا تظهر تحت أحد — ألحِقها كي لا تختفي.
-  for (const c of list) if (!orderedTree.includes(c)) orderedTree.push(c);
-
-  // كل أحفاد تصنيف (لمنع اختياره أباً لنفسه/أحد أبنائه — يكسر الشجرة).
-  const descendantsOf = (id: number): Set<number> => {
-    const out = new Set<number>();
-    const stack = [...(childrenOf.get(id) || [])];
-    while (stack.length) { const c = stack.pop()!; out.add(c.id); stack.push(...(childrenOf.get(c.id) || [])); }
-    return out;
-  };
-  const parentOptions = (selfId: number): Category[] => {
-    const banned = selfId ? descendantsOf(selfId) : new Set<number>();
-    return orderedTree.filter((c) => c.id !== selfId && !banned.has(c.id));
-  };
+  // T-ITEMS M2: الترتيب والعمق والأحفاد من `utils/categoryTree` — كانت هنا
+  // نسخةٌ ثالثة من الخوارزمية نفسها (والرابعة في جدول الأصناف المجمّع).
+  // اليتيم (أبٌ غير موجود) يعود جذراً في الوحدة، فلا يحتاج إلحاقاً بعديّاً.
+  const nameById = new Map(list.map((c) => [c.id, c.name] as const));
+  const rows = sortCategoryRows<Category>(list);
+  const orderedTree: Category[] = rows.map((r) => r.category);
+  const depthById = new Map(rows.map((r) => [r.category.id, r.depth] as const));
+  const depthOf = (c: Category): number => depthById.get(c.id) ?? 0;
+  const parentOptions = (selfId: number): Category[] =>
+    (selfId ? eligibleParents<Category>(list, selfId) : list).filter((c) => c.id !== selfId);
 
   const displayList = [...orderedTree];
   if (editId === 0) {

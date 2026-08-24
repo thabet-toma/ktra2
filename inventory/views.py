@@ -85,7 +85,7 @@ class UnitOfMeasureViewSet(viewsets.ReadOnlyModelViewSet):
 
 class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     # task14 M2 (DEF-A5): ترتيب افتراضي حتمي «الأحدث أولاً» + بحث/فرز/ترقيم خادمي
-    queryset = Product.objects.all().select_related('category')
+    queryset = Product.objects.all().select_related('category', 'uom')
     serializer_class = ProductSerializer
     pagination_class = OptionalPageNumberPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -124,6 +124,19 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         'online_price': 'سعر الإنترنت',
         'online_description': 'وصف الإنترنت',
         'sale_price': 'سعر البيع',
+        # T-ITEMS M5: حقولٌ صارت تُحفَظ فعلاً — فتُسجَّل تغييراتها كغيرها.
+        'uom2': 'الوحدة الثانية',
+        'uom2_factor': 'معامل الوحدة الثانية',
+        'uom3': 'الوحدة الثالثة',
+        'uom3_factor': 'معامل الوحدة الثالثة',
+        'description': 'بيان الصنف',
+        'storage_location': 'موقع التخزين',
+        'sale_account_override': 'حساب المبيعات',
+        'sale_return_account_override': 'حساب مرتجع المبيعات',
+        'purchase_account_override': 'حساب المشتريات',
+        'purchase_return_account_override': 'حساب مرتجع المشتريات',
+        'supplier_account_override': 'حساب المورد',
+        'ending_inventory_account_override': 'حساب بضاعة آخر المدة',
     }
 
     def _get_tenant(self):
@@ -173,7 +186,17 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
 
         category_id = params.get('category')
         if category_id:
-            qs = qs.filter(category_id=category_id)
+            # M0: التصنيف محدِّدٌ يعني شجرته — نفس قاعدة الكرت المجمّع، من نسخةٍ
+            # واحدة في `services`. كان exact-id هنا وشجرةً هناك، فتصنيفُ أبٍ
+            # يعرض «لا أصناف» بينما كرته المجمّع يعدّ المئات.
+            from .services import category_descendant_ids
+            try:
+                wanted = category_descendant_ids(
+                    tenant_id=tenant.pk, category_id=int(category_id)
+                )
+            except (TypeError, ValueError):
+                wanted = []
+            qs = qs.filter(category_id__in=wanted)
         created_from = params.get('created_from')
         if created_from:
             qs = qs.filter(created_at__date__gte=created_from)
@@ -200,6 +223,10 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             # T-SUPSKU: أرقام الموردين تدخل حمولة المنتقي؛ الجلب المسبق يجعلها
             # استعلاماً واحداً للصفحة كلّها لا واحداً لكل صنف.
             return qs.prefetch_related('supplier_codes')
+
+        # T-ITEMS M5: الشرائح جزءٌ من العقد الكامل — بلا جلبٍ مسبق صارت
+        # استعلاماً لكل صنف في القائمة.
+        qs = qs.prefetch_related('price_tiers')
 
         # W8: تجميعات محسوبة من StockMovement (المصدر الوحيد) — منقّطة، لا N+1.
         # الوارد التراكمي (المشتريات) = مجموع حركات IN. متوسط المبيعات الشهري = صافي
@@ -289,15 +316,17 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         if category and category.tenant_id != tenant.pk:
             raise serializers.ValidationError({'category': 'التصنيف غير موجود لهذه الشركة.'})
 
-    def _auto_create_group_category(self, serializer, tenant):
+    def _auto_create_group_category(self, serializer, tenant, instance=None):
+        # الـinstance يصل وسيطاً من update() — كان يُقرأ self.instance غير الموجود
+        # على الـViewSet فيسقط كل تعديلٍ يحمل variant_group+category معاً بـ500.
         variant_group = (serializer.validated_data.get('variant_group') or '').strip()
         base_category = serializer.validated_data.get('category')
-        
+
         if variant_group and base_category:
             # If editing and the incoming category is the old group category itself, use its parent as the base.
-            if getattr(self, 'action', '') in ['update', 'partial_update'] and self.instance:
-                old_category_id = getattr(self.instance, 'category_id', None)
-                old_variant_group = (getattr(self.instance, 'variant_group', '') or '').strip()
+            if instance is not None:
+                old_category_id = getattr(instance, 'category_id', None)
+                old_variant_group = (getattr(instance, 'variant_group', '') or '').strip()
                 if old_category_id == base_category.id and base_category.name == old_variant_group and base_category.parent:
                     base_category = base_category.parent
 
@@ -360,7 +389,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=kwargs.get('partial', False))
         serializer.is_valid(raise_exception=True)
         self._validate_category_tenant(serializer, tenant)
-        self._auto_create_group_category(serializer, tenant)
+        self._auto_create_group_category(serializer, tenant, instance=instance)
         tracked_labels = {
             field: label for field, label in self.activity_field_labels.items()
             if field in serializer.validated_data

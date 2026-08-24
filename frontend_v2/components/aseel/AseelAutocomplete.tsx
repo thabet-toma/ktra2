@@ -10,7 +10,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Info } from 'lucide-react';
+import { Plus, Info, Pencil } from 'lucide-react';
 import { usePriceVisibility } from '../../contexts/PriceVisibilityContext';
 
 export interface AseelPriceInfo {
@@ -43,6 +43,9 @@ export interface AseelAutocompleteProps {
   onPick: (id: string | number) => void;
   /** DEF-008: عند توفره تظهر أيقونة (i) لكل خيار → تفتح بطاقة الصنف دون اختياره. */
   onInfo?: (id: string | number) => void;
+  /** T-ITEMS M3: عند توفره يظهر قلمٌ بجانب (i) → تحريرٌ سريع دون مغادرة المستند.
+   *  المقعد هنا لا في كل محرّر: تمريرة واحدة تخدم كل شاشة تستعمل المنتقي. */
+  onEdit?: (id: string | number) => void;
   /** عند توفره: خيار «+ إضافة …» يثبت النص المكتوب كصنف حر/جديد */
   onFreeText?: (text: string) => void;
   /** نص خيار النص الحر — الافتراضي «إضافة … كصنف جديد». يُمرَّر له النص المكتوب
@@ -79,6 +82,7 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
   options,
   onPick,
   onInfo,
+  onEdit,
   onFreeText,
   createLabel,
   placeholder = 'اكتب للبحث…',
@@ -258,6 +262,17 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onInfo(opt.id); close(); }}
                 >
                   <Info className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {onEdit && (
+                <button
+                  type="button"
+                  className="aseel-autocomplete-info"
+                  title="تعديل سريع للصنف"
+                  aria-label="تعديل سريع للصنف"
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(opt.id); close(); }}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>

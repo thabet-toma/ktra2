@@ -457,3 +457,65 @@ class ProductApiTest(APITestCase):
         assert ActivityLog.objects.filter(
             tenant=self.t_a, entity_type="product", entity_id=created["id"], action="update",
         ).count() == before
+
+    # ── M0: تعديلٌ يحمل «النوع» و«التصنيف» معاً كان يسقط 500 ──
+    def test_patch_with_variant_group_and_category_succeeds(self):
+        """`_auto_create_group_category` كان يقرأ `self.instance` — وهي صفة
+        السيريالايزر لا الـViewSet — فكلّ تعديلٍ يمرّ بهذا الفرع يرفع
+        AttributeError. الكرت يرسل الحقلين معاً في كل حفظ، فالمسار حيّ لا نادر.
+        """
+        self._auth()
+        category = ProductCategory.objects.create(tenant=self.t_a, name="إطارات")
+        pid = self._post({"name_ar": "إطار", "category": category.id}).json()["id"]
+
+        res = self.client.patch(
+            f"{PRODUCTS_URL}{pid}/",
+            {"variant_group": "195/65/15", "category": category.id},
+            format="json", HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert res.status_code in (200, 202), res.content[:300]
+        product = Product.objects.get(pk=pid)
+        assert product.variant_group == "195/65/15"
+        # سلوك task31 يبقى: تصنيف المجموعة يُنشأ تحت التصنيف المختار.
+        assert product.category.name == "195/65/15"
+        assert product.category.parent_id == category.id
+
+    # ── M0: التصنيف محدِّدٌ يعني شجرته (كان exact-id هنا وشجرةً في الكرت المجمّع) ──
+    def test_category_filter_includes_descendants(self):
+        self._auth()
+        root = ProductCategory.objects.create(tenant=self.t_a, name="جذر")
+        child = ProductCategory.objects.create(tenant=self.t_a, name="ابن", parent=root)
+        grandchild = ProductCategory.objects.create(tenant=self.t_a, name="حفيد", parent=child)
+        Product.objects.create(tenant=self.t_a, sku="R-1", name_ar="صنف الجذر", category=root)
+        Product.objects.create(tenant=self.t_a, sku="C-1", name_ar="صنف الابن", category=child)
+        Product.objects.create(tenant=self.t_a, sku="G-1", name_ar="صنف الحفيد", category=grandchild)
+        Product.objects.create(tenant=self.t_a, sku="O-1", name_ar="صنف خارج الشجرة")
+
+        names = {row["name_ar"] for row in self._get(f"?category={root.id}").json()}
+        assert names == {"صنف الجذر", "صنف الابن", "صنف الحفيد"}
+
+        leaf_names = {row["name_ar"] for row in self._get(f"?category={child.id}").json()}
+        assert leaf_names == {"صنف الابن", "صنف الحفيد"}
+
+    def test_foreign_category_filter_returns_nothing(self):
+        self._auth()
+        foreign = ProductCategory.objects.create(tenant=self.t_b, name="تصنيف الشركة الأخرى")
+        Product.objects.create(tenant=self.t_a, sku="X-1", name_ar="صنفي")
+        assert self._get(f"?category={foreign.id}").json() == []
+
+    # ── M0: الكرت كان يعرض رقم الوحدة مكان اسمها ──
+    def test_uom_name_returns_the_name_not_the_id(self):
+        self._auth()
+        uom = UnitOfMeasure.objects.create(code="PCS", name_ar="قطعة", name_en="Piece")
+        created = self._post({"name_ar": "صنف بوحدة", "uom_id": uom.id}).json()
+        assert created["uom_id"] == uom.id
+        assert created["uom_name"] == "قطعة"
+
+    def test_uom_name_falls_back_to_legacy_text(self):
+        self._auth()
+        product = Product.objects.create(
+            tenant=self.t_a, sku="L-1", name_ar="صنف قديم", uom_legacy="كرتونة",
+        )
+        res = self.client.get(f"{PRODUCTS_URL}{product.id}/", HTTP_X_TENANT_ID=self._tenant_id)
+        assert res.status_code == 200, res.content[:300]
+        assert res.json()["uom_name"] == "كرتونة"

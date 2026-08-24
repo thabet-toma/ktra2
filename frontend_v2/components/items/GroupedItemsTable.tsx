@@ -9,6 +9,7 @@ import { ChevronDown, ChevronLeft, FolderTree } from "lucide-react";
 import type { DenseColumn } from "../aseel/AseelDenseTable";
 import type { SqlProduct } from "../../types/inventory";
 import { formatQuantity } from "../../utils/formatNumber";
+import { buildCategoryIndex, descendantIds as descendantCategoryIds } from "../../utils/categoryTree";
 
 export type TreeCategory = { id: number; name: string; parent: number | null };
 
@@ -48,34 +49,29 @@ export const GroupedItemsTable: React.FC<Props> = ({
     onSort(col.key, sortKey === col.key && sortDir === "asc" ? "desc" : "asc");
   };
 
-  // فهرسة التصنيفات (الأبناء حسب الأب) والمنتجات حسب التصنيف.
-  const catById = new Map<number, TreeCategory>();
-  for (const c of categories) catById.set(c.id, c);
-  const childrenOf = new Map<number | null, TreeCategory[]>();
-  for (const c of categories) {
-    const p = c.parent ?? null;
-    if (!childrenOf.has(p)) childrenOf.set(p, []);
-    childrenOf.get(p)!.push(c);
-  }
+  // T-ITEMS M2: فهرسة التصنيفات من `utils/categoryTree` — كانت نسخةً رابعة من
+  // الخوارزمية نفسها، ونزولُها إلى الأحفاد كان **تعاوداً بلا حارس**: حلقةٌ في
+  // البيانات تعني تعاوداً لا نهائياً وشاشةً بيضاء.
+  const { byId: catById, childrenOf } = buildCategoryIndex<TreeCategory>(categories);
   const productsOf = new Map<number, SqlProduct[]>();
   for (const p of rows) {
     // منتج بتصنيف غير موجود بالقائمة يُعامل كـ«بدون تصنيف».
-    const cid = p.category != null && catById.has(Number(p.category)) ? Number(p.category) : UNCAT;
+    const cid = p.category != null && catById.has(String(p.category)) ? Number(p.category) : UNCAT;
     if (!productsOf.has(cid)) productsOf.set(cid, []);
     productsOf.get(cid)!.push(p);
   }
 
-  // كل معرّفات المنتجات تحت تصنيف (recursive) + مجموع الكمية.
-  const descendantIds = (catId: number): string[] => {
-    const ids = (productsOf.get(catId) || []).map((p) => String(p.id));
-    for (const ch of childrenOf.get(catId) || []) ids.push(...descendantIds(ch.id));
-    return ids;
-  };
-  const descendantQty = (catId: number): number => {
-    let q = (productsOf.get(catId) || []).reduce((s, p) => s + Number(p.quantity_on_hand || 0), 0);
-    for (const ch of childrenOf.get(catId) || []) q += descendantQty(ch.id);
-    return q;
-  };
+  // كل معرّفات المنتجات تحت تصنيف (بكل الأعماق) + مجموع الكمية — من مجموعة
+  // الأحفاد المحسوبة مرّةً واحدة بلا تعاود.
+  const descendantIds = (catId: number): string[] =>
+    descendantCategoryIds(categories, catId)
+      .flatMap((id) => (productsOf.get(Number(id)) || []).map((p) => String(p.id)));
+  const descendantQty = (catId: number): number =>
+    descendantCategoryIds(categories, catId).reduce<number>(
+      (sum, id) => sum + (productsOf.get(Number(id)) || [])
+        .reduce((s, p) => s + Number(p.quantity_on_hand || 0), 0),
+      0,
+    );
 
   // سطر منتج (ورقة) — إزاحة الاسم حسب العمق.
   const renderRow = (p: SqlProduct, depth: number) => (
@@ -140,7 +136,7 @@ export const GroupedItemsTable: React.FC<Props> = ({
   const walk = (cat: TreeCategory, depth: number) => {
     body.push(renderCatNode(cat.id, cat.name, depth));
     if (!isExpanded(cat.id)) return;
-    for (const ch of childrenOf.get(cat.id) || []) walk(ch, depth + 1);
+    for (const ch of childrenOf.get(String(cat.id)) || []) walk(ch, depth + 1);
     for (const p of productsOf.get(cat.id) || []) body.push(renderRow(p, depth + 1));
   };
   for (const root of childrenOf.get(null) || []) walk(root, 0);

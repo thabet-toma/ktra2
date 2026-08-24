@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import (
-    ProductCategory, Product, UnitOfMeasure, StockMovement, SupplierProduct,
-    Warehouse, WarehouseTransfer, WarehouseTransferLine, Stocktake, StocktakeLine,
+    ProductCategory, Product, ProductPriceTier, UnitOfMeasure, StockMovement,
+    SupplierProduct, Warehouse, WarehouseTransfer, WarehouseTransferLine,
+    Stocktake, StocktakeLine,
 )
 
 
@@ -37,15 +38,82 @@ class CategorySerializer(serializers.ModelSerializer):
         children = list(obj.children.all())
         return CategorySerializer(children, many=True, context=self.context).data
 
+    def validate_name(self, value):
+        # تصنيفٌ بلا اسم يظهر في الشجرة سطراً فارغاً لا يُنقر ولا يُميَّز.
+        if not (value or '').strip():
+            raise serializers.ValidationError('اسم التصنيف مطلوب.')
+        return value.strip()
+
+    def validate(self, attrs):
+        if 'name' not in attrs and self.instance is None:
+            raise serializers.ValidationError({'name': 'اسم التصنيف مطلوب.'})
+        if 'parent' in attrs:
+            self._validate_parent(attrs.get('parent'))
+        return attrs
+
+    def _validate_parent(self, parent):
+        """الأب من الشركة نفسها، وليس العقدة نفسها، ولا أحد أحفادها.
+
+        بلا هذا الحرس كان `PATCH {"parent": <حفيد>}` مقبولاً، فتنشأ حلقة في
+        الشجرة: كلّ من يمشيها (المنتقي، الجدول، الكرت المجمّع) يدور بلا نهاية.
+        نجا قارئٌ واحد لأنه يحمل مجموعة `seen` — وتلك تُخفي الحلقة ولا تمنعها.
+        الصعود يقرأ الأزواج مسطّحةً مرّةً واحدة: استعلامٌ واحد مهما عمقت الشجرة.
+        """
+        if parent is None:
+            return
+        request = self.context.get('request')
+        if request is not None:
+            from core.tenant_utils import get_tenant
+            tenant = get_tenant(request)
+            if tenant is not None and parent.tenant_id != tenant.pk:
+                raise serializers.ValidationError(
+                    {'parent': 'التصنيف الأب غير موجود لهذه الشركة.'}
+                )
+        if self.instance is None:
+            return
+        if parent.pk == self.instance.pk:
+            raise serializers.ValidationError(
+                {'parent': 'لا يصلح التصنيف أباً لنفسه.'}
+            )
+        pairs = dict(
+            ProductCategory.objects.filter(tenant_id=parent.tenant_id)
+            .values_list('id', 'parent_id')
+        )
+        node_id = pairs.get(parent.pk)
+        seen = set()
+        while node_id and node_id not in seen:
+            if node_id == self.instance.pk:
+                raise serializers.ValidationError({
+                    'parent': 'لا يصلح تصنيفٌ فرعي أباً لأصله — تنشأ حلقة في الشجرة.'
+                })
+            seen.add(node_id)
+            node_id = pairs.get(node_id)
+
 class UnitOfMeasureSerializer(serializers.ModelSerializer):
     class Meta:
         model = UnitOfMeasure
         fields = ['id', 'code', 'name_ar', 'name_en']
         read_only_fields = ['id']
 
+class ProductPriceTierSerializer(serializers.ModelSerializer):
+    """T-ITEMS M5: شريحة سعرٍ واحدة (بيع/شراء × رقم).
+
+    خمسُ شرائح بيع وخمسُ شراء لكل صنف — الجدول موجود منذ N8-T9 وشاشةُ الكرت
+    تعرضه، لكن لا نقطةَ تكتبه: يملأ المستخدم الشرائح ويقرأ «تم الحفظ» وتضيع.
+    والشرائح ليست زينة: `core/pricing.py` (`resolve_sales_price`) يقرأ شريحة
+    البيع الأولى كمصدرٍ خامس للسعر، فبمجرّد أن تُحفَظ تدخل تسعير الفواتير.
+    """
+
+    class Meta:
+        model = ProductPriceTier
+        fields = ['id', 'tier_type', 'tier_number', 'price', 'currency', 'tax_inclusive']
+        read_only_fields = ['id']
+
+
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
-    uom_name = serializers.CharField(source='uom_id', read_only=True)
+    price_tiers = ProductPriceTierSerializer(many=True, required=False)
+    uom_name = serializers.SerializerMethodField()
     attachments = serializers.SerializerMethodField()
     reserved_quantity = serializers.SerializerMethodField()
     available_quantity = serializers.SerializerMethodField()
@@ -63,12 +131,30 @@ class ProductSerializer(serializers.ModelSerializer):
 
     # task14 M2 (DEF-A2): رقم الصنف اختياري — يولَّد خادمياً عند الغياب
     sku = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    # M0: وحدة القياس لم تكن تُحفظ من أيّ شاشة. إدراج `uom_id` في `fields` لا
+    # يكفي: DRF لا يرى فيه علاقةً (العلاقة اسمها `uom`) بل صفةَ نموذج، فيبنيه
+    # `ReadOnlyField` ويبتلع القيمة بصمت. التصريح هنا يُبقي اسم الحقل على السلك
+    # كما تعرفه الواجهة ويجعله قابلاً للكتابة.
+    uom_id = serializers.PrimaryKeyRelatedField(
+        source='uom', queryset=UnitOfMeasure.objects.all(),
+        required=False, allow_null=True,
+    )
     class Meta:
         model = Product
         fields = [
             'id', 'tenant', 'sku', 'barcode', 'name_ar', 'name_en',
             'variant_group', 'brand',
             'category', 'category_name', 'uom_id', 'uom_name',
+            # T-ITEMS M5: حقولٌ كانت تُعرض في الكرت ولا تُحفظ — صارت حقيقيةً
+            # (وحدتان إضافيتان بمعاملَيهما، الوصف الداخلي، موقع التخزين).
+            'uom2', 'uom2_factor', 'uom3', 'uom3_factor',
+            'description', 'storage_location',
+            # تجاوزات الحسابات على مستوى الصنف (نمط Odoo: حساب إيراد/مصروف
+            # على المنتج يسبق حساب تصنيفه).
+            'sale_account_override', 'sale_return_account_override',
+            'purchase_account_override', 'purchase_return_account_override',
+            'supplier_account_override', 'ending_inventory_account_override',
+            'price_tiers',
             'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level', 'max_stock_level',
             'is_serialized', 'is_service',
             # THA-24: سياسة الكفالة على الصنف — تقرأها الكفالة عند ترحيل البيع،
@@ -89,6 +175,16 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_group_key(self, obj):
         from .services import product_group_key
         return product_group_key(obj)
+
+    def get_uom_name(self, obj):
+        """اسم الوحدة لا معرّفها — كان `source='uom_id'` فيعرض الكرت رقماً.
+
+        مصدران: الوحدة المرتبطة (FK)، وإلا نصّ الوحدة القديم (`uom_legacy`)
+        الذي تحمله بيانات ما قبل جدول الوحدات.
+        """
+        if obj.uom_id and getattr(obj, 'uom', None):
+            return obj.uom.name_ar or obj.uom.name_en or obj.uom.code
+        return obj.uom_legacy or None
 
     def get_reserved_quantity(self, obj):
         reserved = self.context.get('reserved_quantity_map', {}).get(obj.id, 0)
@@ -121,6 +217,12 @@ class ProductSerializer(serializers.ModelSerializer):
         net = _D(str(sold)) - _D(str(returned))
         return str((net / _D('3')).quantize(_D('0.01')))
 
+    ACCOUNT_OVERRIDE_FIELDS = (
+        'sale_account_override', 'sale_return_account_override',
+        'purchase_account_override', 'purchase_return_account_override',
+        'supplier_account_override', 'ending_inventory_account_override',
+    )
+
     def validate(self, attrs):
         # task14 M2 (DEF-A2/A3): الاسم هو الحقل الإلزامي الوحيد — والخطأ يسمّي حقله الحقيقي
         name_ar = attrs.get('name_ar', getattr(self.instance, 'name_ar', None))
@@ -130,7 +232,79 @@ class ProductSerializer(serializers.ModelSerializer):
                 {'name_ar': 'اسم الصنف مطلوب — أدخل الاسم بالعربية أو بالإنجليزية.'}
             )
         self._validate_barcode_unique(attrs)
+        self._validate_account_overrides(attrs)
         return attrs
+
+    def _validate_account_overrides(self, attrs):
+        """كل حساب تجاوزٍ من شركة الصنف نفسها — الحسابات معزولةٌ بالشركة.
+
+        بلا هذا الفحص يُقبل معرّف حسابٍ من شركةٍ أخرى (الـFK لا يعرف الشركة)،
+        فيُرحَّل بيعُ الصنف على دفتر شركةٍ ليست صاحبته — تسريبٌ محاسبي صامت.
+        نفس منطق `ProductViewSet._validate_category_tenant`.
+        """
+        present = {f: attrs[f] for f in self.ACCOUNT_OVERRIDE_FIELDS
+                   if f in attrs and attrs[f] is not None}
+        if not present:
+            return
+        tenant_id = getattr(self.instance, 'tenant_id', None)
+        if tenant_id is None:
+            request = self.context.get('request')
+            if request is None:
+                return
+            from core.tenant_utils import get_tenant
+            tenant = get_tenant(request)
+            if tenant is None:
+                return
+            tenant_id = tenant.TenantID
+        for field, account in present.items():
+            if getattr(account, 'tenant_id', None) != tenant_id:
+                raise serializers.ValidationError(
+                    {field: 'الحساب غير موجود لهذه الشركة.'}
+                )
+
+    # ── الشرائح: كتابة متداخلة (upsert بالمفتاح، وحذف الغائب) ───────────────
+    def _save_price_tiers(self, product, tiers):
+        """الحمولة **تصف الحالة النهائية**: ما ورد يُنشأ أو يُحدَّث، وما غاب يُحذف.
+
+        المفتاح `(tier_type, tier_number)` هو نفسه قيد التفرّد في الجدول، فلا
+        تتكاثر الشريحة الواحدة عند إعادة الحفظ.
+        """
+        wanted = {}
+        for tier in tiers:
+            key = (tier['tier_type'], tier['tier_number'])
+            wanted[key] = tier
+        existing = {
+            (t.tier_type, t.tier_number): t
+            for t in product.price_tiers.all()
+        }
+        for key, tier in wanted.items():
+            row = existing.get(key)
+            if row is None:
+                ProductPriceTier.objects.create(product=product, **tier)
+                continue
+            row.price = tier['price']
+            row.currency = tier['currency']
+            row.tax_inclusive = tier.get('tax_inclusive', False)
+            row.save(update_fields=['price', 'currency', 'tax_inclusive'])
+        stale = [row.pk for key, row in existing.items() if key not in wanted]
+        if stale:
+            ProductPriceTier.objects.filter(pk__in=stale).delete()
+
+    def create(self, validated_data):
+        tiers = validated_data.pop('price_tiers', None)
+        product = super().create(validated_data)
+        if tiers is not None:
+            self._save_price_tiers(product, tiers)
+        return product
+
+    def update(self, instance, validated_data):
+        # غيابُ المفتاح = «لا تمسّ الشرائح» (تعديلٌ جزئي للاسم مثلاً)؛ قائمةٌ
+        # فارغة = «امسح الشرائح» — تمييزٌ لازم وإلا مسح كلُّ PATCH الشرائحَ.
+        tiers = validated_data.pop('price_tiers', None)
+        product = super().update(instance, validated_data)
+        if tiers is not None:
+            self._save_price_tiers(product, tiers)
+        return product
 
     def _validate_barcode_unique(self, attrs):
         """الباركود يجب أن يميّز صنفاً واحداً في الشركة — وإلا فقد معناه.

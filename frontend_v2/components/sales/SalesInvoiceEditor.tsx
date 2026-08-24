@@ -54,6 +54,7 @@ import {
 } from "../../utils/reservedStock";
 import { formatMoney, formatQuantity, formatNumber } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
+import { productProfilePath } from "../../utils/entityLinks";
 import { availableOf, needsAlternative, stockAlternatives, stockBadgeFor } from "../../utils/stockBadge";
 import { accountMatchesPurpose } from "../../utils/accountTree";
 import { entityPathForReference } from "../../utils/entityLinks";
@@ -91,6 +92,7 @@ import {
 } from "lucide-react";
 import { eventBus } from "../../utils/eventBus";
 import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
+import { ItemQuickEditModal } from "../items/ItemQuickEditModal";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
 import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
@@ -421,6 +423,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [productPickerLineKey, setProductPickerLineKey] = useState<string | null>(null);
   // DEF-007/008: بطاقة الصنف (مودال مشترك) — تُفتح من الشجرة/القائمة/سطر الفاتورة.
   const [cardProductId, setCardProductId] = useState<number | null>(null);
+  // T-ITEMS M3: الصنف الجاري تحريره سريعاً من داخل الفاتورة (بلا مغادرتها).
+  const [quickEditProductId, setQuickEditProductId] = useState<number | null>(null);
   // «موافق» (إضافة للفاتورة) يظهر فقط عند فتح البطاقة من الشجرة، لا من أيقونة (i).
   const [cardCanAdd, setCardCanAdd] = useState(false);
   // T-R2: السعر المقترح ومصدره — يُحسبان عند فتح البطاقة من الشجرة لعرضهما داخلها.
@@ -2287,6 +2291,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           }, 50);
         }}
         onInfo={(id) => { setCardCanAdd(false); setCardProductId(Number(id)); }}
+        onEdit={readOnly ? undefined : (id) => setQuickEditProductId(Number(id))}
       />
       {/* DEF-008: أيقونة (i) بجانب المنتج المختار على السطر → بطاقة الصنف */}
       {selectedId != null && (
@@ -2296,6 +2301,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           onClick={() => { setCardCanAdd(false); setCardProductId(selectedId); }}
           title="بطاقة الصنف"
         ><Info className="w-3.5 h-3.5" /></button>
+      )}
+      {/* T-ITEMS M3: قلمٌ بجانب (i) — تعديل الصنف دون مغادرة الفاتورة. */}
+      {selectedId != null && !readOnly && (
+        <button
+          type="button"
+          className="aseel-ellipsis"
+          onClick={() => setQuickEditProductId(selectedId)}
+          title="تعديل سريع للصنف"
+        ><Pencil className="w-3.5 h-3.5" /></button>
       )}
       {/* DEF-005: شارة مصدر السعر المقترح */}
       {row.priceSource === "last_invoice" && (
@@ -3894,6 +3908,25 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             );
             pickCustomer(newCustomer.id);
           }}
+        />
+      )}
+
+      {/* T-ITEMS M3: تعديل سريع للصنف من السطر — الفاتورة تبقى خلف النافذة
+          بحالتها كاملةً. الصفّ المحدَّث يحلّ محلّ نسخته في `extraProducts`،
+          والحدث يوقظ الشاشة الأم التي تحمل القائمة الرئيسية. */}
+      {quickEditProductId != null && (
+        <ItemQuickEditModal
+          productId={quickEditProductId}
+          onClose={() => setQuickEditProductId(null)}
+          onSaved={(updated) => {
+            const row = updated as unknown as ProductRow;
+            if (!row?.id) return;
+            setExtraProducts((prev) => {
+              const hit = prev.some((p) => Number(p.id) === Number(row.id));
+              return hit ? prev.map((p) => (Number(p.id) === Number(row.id) ? row : p)) : [...prev, row];
+            });
+          }}
+          onOpenFullCard={() => openInNewTab(productProfilePath(quickEditProductId))}
         />
       )}
 

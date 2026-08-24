@@ -60,6 +60,7 @@ import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber"
 import { inventoryApi } from "@/services/inventoryApi";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
+import { ItemQuickEditModal } from "../../items/ItemQuickEditModal";
 import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
 
 import {
@@ -199,6 +200,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [showSupplierPicker, setShowSupplierPicker] = useState(false);
   // DEF-007/008: بطاقة الصنف المشتركة (نقر مفرد على الشجرة / أيقونة (i)).
   const [cardProductId, setCardProductId] = useState<number | null>(null);
+  // T-ITEMS M3: الصنف الجاري تحريره سريعاً من داخل الفاتورة (بلا مغادرتها).
+  const [quickEditProductId, setQuickEditProductId] = useState<number | null>(null);
   // «موافق» (إضافة للفاتورة) يظهر فقط عند فتح البطاقة من الشجرة، لا من أيقونة (i).
   const [cardCanAdd, setCardCanAdd] = useState(false);
   // T-R2: السعر المقترح (آخر فاتورة شراء) ومصدره — لعرضهما داخل البطاقة.
@@ -1563,6 +1566,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           }
         }}
         onInfo={(id) => { const pid = Number(id); if (pid) { setCardCanAdd(false); setCardProductId(pid); } }}
+        onEdit={(id) => { const pid = Number(id); if (pid) setQuickEditProductId(pid); }}
         onFreeText={(t) => {
           // task18 DEF-B1/B3: «إضافة كصنف جديد» يفتح إنشاء صنف سريع مُعبّأً بالنص
           // ويُنشئه فعلياً (Product) بدل ترك سطر حر بلا itemId يُحذف عند الحفظ.
@@ -1577,6 +1581,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           onClick={() => { setCardCanAdd(false); setCardProductId(selectedId); }}
           title="بطاقة الصنف"
         ><Info className="w-3.5 h-3.5" /></button>
+      )}
+      {/* T-ITEMS M3: قلمٌ بجانب (i) — تعديل الصنف دون مغادرة الفاتورة. */}
+      {selectedId != null && (
+        <button
+          type="button"
+          className="aseel-ellipsis"
+          onClick={() => setQuickEditProductId(selectedId)}
+          title="تعديل سريع للصنف"
+        ><Pencil className="w-3.5 h-3.5" /></button>
       )}
     </div>
     );
@@ -3164,6 +3177,23 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     )}
 
     {/* DEF-007/008: بطاقة الصنف المشتركة — «موافق» يُدرج الصنف في فاتورة الشراء. */}
+    {/* T-ITEMS M3: التحرير السريع يحدّث النسخة المحلية عبر المُطابِق نفسه
+        (`productToItem`) الذي بُنيت به — وإلا بقي السطر يعرض الاسم القديم. */}
+    {quickEditProductId != null && (
+      <ItemQuickEditModal
+        productId={quickEditProductId}
+        onClose={() => setQuickEditProductId(null)}
+        onSaved={(updated) => {
+          const item = productToItem(updated as Record<string, unknown>);
+          setAllDbItems((prev) =>
+            prev.some((x) => String(x.id) === String(item.id))
+              ? prev.map((x) => (String(x.id) === String(item.id) ? item : x))
+              : [item, ...prev],
+          );
+        }}
+      />
+    )}
+
     {cardProductId != null && (() => {
       const it = allDbItems.find((x) => String(x.id) === String(cardProductId));
       return (

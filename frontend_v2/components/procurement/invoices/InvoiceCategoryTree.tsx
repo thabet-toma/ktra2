@@ -24,22 +24,27 @@ import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
 import { useToast } from "../../../contexts/ToastContext";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { productToItem } from "../price-offers/ItemSearchModal";
+import { buildCategoryIndex, descendantIds as descendantCategoryIds } from "../../../utils/categoryTree";
 
 /**
- * task18 DEF-B1/B3: شجرة منتجات احترافية مرساة بجانب الفاتورة (نمط الأصيل).
- * المصطلحات (DEF-002): «صنف/فئة» = العقدة الفرعية (branch) · «منتج» = العقدة
- * الورقية (leaf). المنتجات تُجمَّع تحت أصنافها.
- * - زر الماوس الأيمن على أي عقدة → قائمة: «إضافة صنف» (فرعي) · «إضافة منتج» · «تعديل».
- * - DEF-007: النقر المفرد على منتج يفتح بطاقته · النقر المزدوج يُدرجه في الفاتورة.
+ * task18 DEF-B1/B3: شجرة أصناف مرساة بجانب الفاتورة (نمط الأصيل).
+ *
+ * **المصطلحات (T-ITEMS M2)**: «تصنيف» = العقدة الفرعية (branch) · «صنف» =
+ * العقدة الورقية (leaf). كانت هذه الشاشة وحدها تعكسهما — تسمّي التصنيفَ «صنفاً»
+ * والصنفَ «منتجاً» — بينما بقية الموديول (قائمة الأصناف، الكرت، التقارير) على
+ * العكس. مصطلحان متناقضان في موديولٍ واحد يجعلان «أضف صنفاً» أمراً غامضاً.
+ * - زر الماوس الأيمن على أي عقدة → قائمة: «إضافة تصنيف فرعي» · «إضافة صنف» · «تعديل».
+ * - النقر المفرد على صنف يفتح بطاقته، ومنها يُدرَج في الفاتورة بزرّ «موافق»
+ *   (الإدراج بالنقر المزدوج أُلغي — كان التعليق يصفه بعد زواله).
  * + بحث فوري.
  */
 type Cat = { id: string; name: string; parent: number | null };
 
 interface Props {
   items: Item[];
-  /** DEF-007: إدراج المنتج في الفاتورة (نقر مزدوج). */
+  /** إدراج الصنف في الفاتورة (من زرّ «موافق» في بطاقته). */
   onPickItem: (item: Item) => void;
-  /** DEF-007: فتح بطاقة المنتج (نقر مفرد). */
+  /** فتح بطاقة الصنف (نقر مفرد). */
   onShowCard?: (item: Item) => void;
   /** تجميع البراندات: فتح الكرت المجمّع لعقدة المقاس (مجموع كل البراندات).
    *  `categoryId` يُمرَّر كي يشتقّ الخادمُ الأعضاء بنفسه — تعدادُ معرّفات تصنيفٍ
@@ -131,15 +136,10 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
     return m;
   }, [items]);
 
-  const childrenOf = useMemo(() => {
-    const m = new Map<string | null, Cat[]>();
-    for (const c of cats) {
-      const p = c.parent == null ? null : String(c.parent);
-      if (!m.has(p)) m.set(p, []);
-      m.get(p)!.push(c);
-    }
-    return m;
-  }, [cats]);
+  // T-ITEMS M2: الفهرسة من `utils/categoryTree` — كانت هذه النسخةَ الثانيةَ من
+  // الخوارزمية نفسها. الوحدة تطبّع المفاتيح نصّياً، فيلتقي معرّفُ العقدة النصّي
+  // هنا بمعرّف الأب الرقمي القادم من الخادم.
+  const childrenOf = useMemo(() => buildCategoryIndex<Cat>(cats).childrenOf, [cats]);
 
   const q = query.trim().toLowerCase();
   const itemMatches = (it: Item) => !q || (it.name || "").toLowerCase().includes(q);
@@ -170,12 +170,12 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
   };
 
   const deleteCat = async (id: string) => {
-    if (!(await confirmDialog({ title: "حذف الصنف", message: "هل أنت متأكد من حذف هذا الصنف؟" }))) return;
+    if (!(await confirmDialog({ title: "حذف التصنيف", message: "هل أنت متأكد من حذف هذا التصنيف؟" }))) return;
     try {
       await inventoryApi.deleteCategory(Number(id));
       await loadCats();
     } catch {
-      toast("لا يمكن حذف الصنف. قد يكون مرتبطاً بمنتجات أو أصناف فرعية.", "error");
+      toast("لا يمكن حذف التصنيف. قد يكون مرتبطاً بأصناف أو تصنيفات فرعية.", "error");
     }
   };
 
@@ -217,17 +217,17 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
     );
   };
 
-  const descendantHasMatch = (cat: Cat): boolean => {
-    if ((itemsByCat.get(cat.id) || []).some(itemMatches)) return true;
-    return (childrenOf.get(cat.id) || []).some(descendantHasMatch);
-  };
+  // النزول إلى الأحفاد يمرّ بالوحدة المشتركة: كان تعاوداً بلا حارس، فحلقةٌ في
+  // البيانات تعني تعاوداً لا نهائياً وشاشةً بيضاء.
+  const descendantCatIds = (catId: string): string[] =>
+    descendantCategoryIds(cats, catId).map(String);
+
+  const descendantHasMatch = (cat: Cat): boolean =>
+    descendantCatIds(cat.id).some((id) => (itemsByCat.get(id) || []).some(itemMatches));
 
   // كل معرّفات المنتجات تحت تصنيف (وكل أحفاده) — للكرت المجمّع الشامل.
-  const descendantItemIds = (catId: string): string[] => {
-    const ids = (itemsByCat.get(catId) || []).map((m) => String(m.id));
-    for (const ch of childrenOf.get(catId) || []) ids.push(...descendantItemIds(ch.id));
-    return ids;
-  };
+  const descendantItemIds = (catId: string): string[] =>
+    descendantCatIds(catId).flatMap((id) => (itemsByCat.get(id) || []).map((m) => String(m.id)));
 
   const renderNode = (c: Cat, depth: number): React.ReactNode => {
     if (q && !descendantHasMatch(c)) return null;
@@ -367,7 +367,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
               <FolderPlus className="w-4 h-4" />
             </button>
             {!manageMode && (
-              <button type="button" className="aseel-toolbtn" title="إضافة منتج (بدون صنف)" onClick={() => openAddItem(null)}>
+              <button type="button" className="aseel-toolbtn" title="إضافة صنف (بدون تصنيف)" onClick={() => openAddItem(null)}>
                 <Plus className="w-4 h-4" />
               </button>
             )}
@@ -414,11 +414,11 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
           onClick={(e) => e.stopPropagation()}
         >
           <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => { if (menu.catId) { setSubParent(menu.catId); setExpanded((e) => ({ ...e, [menu.catId!]: true })); setSubName(""); } else { const input = document.querySelector<HTMLInputElement>("input[placeholder='صنف رئيسي جديد...']"); input?.focus(); } setMenu(null); }}>
-            <FolderPlus className="w-3.5 h-3.5" /> {menu.catId ? "إضافة صنف فرعي" : "إضافة صنف رئيسي"}
+            <FolderPlus className="w-3.5 h-3.5" /> {menu.catId ? "إضافة تصنيف فرعي" : "إضافة تصنيف رئيسي"}
           </button>
           {!manageMode && (
             <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(menu.catId); setMenu(null); }}>
-              <PackagePlus className="w-3.5 h-3.5" /> إضافة منتج هنا
+              <PackagePlus className="w-3.5 h-3.5" /> إضافة صنف هنا
             </button>
           )}
           {menu.catId && (
@@ -427,12 +427,12 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
                 const c = cats.find((x) => x.id === menu.catId);
                 setEditId(menu.catId); setEditName(c?.name || ""); setMenu(null);
               }}>
-                <Pencil className="w-3.5 h-3.5" /> تعديل اسم الصنف
+                <Pencil className="w-3.5 h-3.5" /> تعديل اسم التصنيف
               </button>
               <button type="button" className="aseel-ctxmenu-item text-red-600 hover:bg-red-50" style={{...ctxItemStyle, color: "#dc2626"}} onClick={() => {
                 const id = menu.catId; setMenu(null); void deleteCat(id!);
               }}>
-                <Trash2 className="w-3.5 h-3.5" /> حذف الصنف
+                <Trash2 className="w-3.5 h-3.5" /> حذف التصنيف
               </button>
             </>
           )}

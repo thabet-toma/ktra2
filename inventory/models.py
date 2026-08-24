@@ -70,7 +70,36 @@ class Product(models.Model):
     brand = models.CharField(max_length=100, blank=True, default='', db_column='Brand')
     category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, null=True, blank=True, db_column='CategoryID', related_name='products')
     uom = models.ForeignKey(UnitOfMeasure, on_delete=models.SET_NULL, null=True, blank=True, db_column='UOMID', related_name='products')
-    uom_legacy = models.CharField(max_length=20, blank=True, null=True, db_column='UOM') 
+    uom_legacy = models.CharField(max_length=20, blank=True, null=True, db_column='UOM')
+    # T-ITEMS M5: وحدتان إضافيتان بمعامل تحويلٍ إلى الوحدة الرئيسية (كرتونة = 12
+    # قطعة). كانت الحقول الخمسة معروضةً في كرت الصنف ولا تُحفظ إطلاقاً — لا
+    # وجود لها في النموذج ولا في العقد؛ يكتبها المستخدم ويقرأ «تم الحفظ».
+    # الوحدات المتعدّدة قياسيّةٌ في Odoo وZoho والأصيل، فوُصلت بدل أن تُحذف.
+    uom2 = models.ForeignKey(
+        UnitOfMeasure, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='UOM2ID', related_name='products_as_uom2',
+    )
+    uom2_factor = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True, db_column='UOM2Factor',
+        help_text='كم وحدةً رئيسية في الوحدة الثانية (كرتونة = 12 قطعة ⇒ 12)',
+    )
+    uom3 = models.ForeignKey(
+        UnitOfMeasure, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='UOM3ID', related_name='products_as_uom3',
+    )
+    uom3_factor = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True, db_column='UOM3Factor',
+        help_text='كم وحدةً رئيسية في الوحدة الثالثة',
+    )
+    # T-ITEMS M5: وصفٌ داخلي للصنف — منفصلٌ عن `online_description` الذي يخصّ
+    # المتجر ويراه العالم. Odoo وZoho يفصلان بينهما للسبب نفسه.
+    description = models.TextField(blank=True, null=True, db_column='Description')
+    # T-ITEMS M5: موقع التخزين (الرفّ/الممر) — نصّ حرّ لا كيان: لا حركة مخزون
+    # عليه ولا رصيد، وهو ما تفعله دفترة وQuickBooks (bin) على كرت الصنف.
+    storage_location = models.CharField(
+        max_length=100, blank=True, null=True, db_column='StorageLocation',
+        help_text='موقع الصنف في المستودع (رفّ/ممر) — نصّ إرشادي بلا أثر مخزني',
+    )
     weight_kg = models.DecimalField(max_digits=12, decimal_places=4, blank=True, null=True, db_column='Weight_KG')
     volume_cbm = models.DecimalField(max_digits=12, decimal_places=6, blank=True, null=True, db_column='Volume_CBM')
     hs_code = models.CharField(max_length=20, blank=True, null=True, db_column='HS_Code')

@@ -434,17 +434,29 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       )
     },
     { key: "name_ar", header: "اسم الصنف", sortable: true, render: (p) => (
-      // FEAT-3: اسم الصنف يفتح بطاقة الصنف (الفواتير المرتبطة + دفتر الحركة).
-      <button
-        type="button"
-        className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
-        title="عرض بطاقة الصنف"
-        data-ctx-item-id={p.id}
-        data-ctx-item-name={p.display_name || p.name_ar || p.name_en || ""}
-        onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
-      >
-        {p.display_name || p.name_ar || p.name_en || "—"}
-      </button>
+      // T-ITEMS M4: نقرةُ الاسم كانت تفتح تبويباً جديداً بينما النقرة المزدوجة
+      // على الصفّ تفتح المحرّر في المكان — سلوكان متناقضان بلا فرقٍ بصري بينهما.
+      // الآن النقرة = النيّة الغالبة (تحرير هنا)، والمغادرة إلى تبويبٍ مستقل
+      // أيقونةٌ صريحة بجانبها.
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <button
+          type="button"
+          className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+          title="فتح كرت الصنف هنا"
+          data-ctx-item-id={p.id}
+          data-ctx-item-name={p.display_name || p.name_ar || p.name_en || ""}
+          onClick={(e) => { e.stopPropagation(); setEditId(p.id); setView("form"); }}
+        >
+          {p.display_name || p.name_ar || p.name_en || "—"}
+        </button>
+        <button
+          type="button"
+          className="aseel-iconbtn"
+          title="فتح في تبويب مستقل"
+          aria-label="فتح في تبويب مستقل"
+          onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
+        ><ExternalLink className="h-3 w-3" /></button>
+      </span>
     ) },
     { key: "avg_monthly", header: "متوسط البيع الشهري", width: "120px", align: "center", numeric: true,
       // صافي (OUT − RETURN_IN) خلال 90 يوماً ÷ 3.
