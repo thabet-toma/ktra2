@@ -6,6 +6,7 @@ import {
   Save,
   Loader2,
   Printer,
+  Share2,
   X,
 } from "lucide-react";
 import {
@@ -34,6 +35,7 @@ import {
   useRecordNavigation,
   useAseelKeymap,
 } from "../aseel";
+import { ShareDocumentModal } from "../shared/ShareDocumentModal";
 import { SalesProductPickerModal, type SalesProductPickerItem, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { SalesOrdersPage } from "./SalesOrdersPage";
 import {
@@ -69,6 +71,7 @@ export const SalesQuotationsPage: React.FC = () => {
   const [allowDelete, setAllowDelete] = useState(true);
   // العرض المطلوب تحويله — يفتح حوار «طلبية أم فاتورة؟» داخل الموقع (لا حوار متصفح).
   const [convertId, setConvertId] = useState<number | null>(null);
+  const [shareId, setShareId] = useState<number | null>(null);
   const [quotations, setQuotations] = useState<SalesQuotationRow[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -481,6 +484,22 @@ export const SalesQuotationsPage: React.FC = () => {
   );
   const taxTotal = Math.max(0, subtotal - (grossSubtotal - lineDiscountTotal));
   const selectedQuotation = quotations.find((quotation) => quotation.id === selectedId);
+
+  // DOC-SHARE: نافذة واحدة تخدم الفرعين (المحرّر والقائمة). عرضٌ ما زال
+  // مسودة: إنشاء الرابط هو إرساله فعلياً، والنافذة تُنبّه قبل الضغط.
+  const sharedQuotation = quotations.find((quotation) => quotation.id === shareId);
+  const shareModal = shareId != null ? (
+    <ShareDocumentModal
+      open
+      onClose={() => setShareId(null)}
+      docType="sales_quotation"
+      docId={shareId}
+      docLabel={`عرض سعر ${sharedQuotation?.quotation_number ?? ""}`.trim()}
+      partyName={sharedQuotation?.customer_name || undefined}
+      warnDraftWillBeSent={sharedQuotation?.status === "draft"}
+      onShared={() => void loadQuotations()}
+    />
+  ) : null;
   const toolbarActions: CommercialToolbarAction[] = [
     {
       key: "save",
@@ -498,6 +517,14 @@ export const SalesQuotationsPage: React.FC = () => {
       separatorBefore: true,
     },
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => window.print() },
+    // DOC-SHARE: الرابط يشير إلى صفٍّ محفوظ — عرضٌ لم يُحفظ بعد لا رابط له.
+    {
+      key: "share",
+      label: "مشاركة",
+      icon: <Share2 />,
+      disabled: selectedId == null,
+      onClick: () => setShareId(selectedId),
+    },
   ];
   const headerFields: CommercialHeaderField[] = [
     {
@@ -629,6 +656,7 @@ export const SalesQuotationsPage: React.FC = () => {
       render: (quotation) => (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <button onClick={() => void openQuotation(quotation.id)} className="aseel-text-accent hover:underline">تعديل</button>
+          <button onClick={() => setShareId(quotation.id)} className="text-blue-600 hover:underline">مشاركة</button>
           {quotation.status !== "converted" && quotation.status !== "cancelled" && (
             <>
               <button onClick={() => setConvertId(quotation.id)} className="text-green-600 hover:underline">تحويل</button>
@@ -708,7 +736,9 @@ export const SalesQuotationsPage: React.FC = () => {
           <span className="aseel-status-item">عدد الأصناف <b>{formLines.length}</b></span>
           <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
         </>}
-        overlay={productPickerLineIdx !== null ? (
+        overlay={<>
+          {shareModal}
+          {productPickerLineIdx !== null ? (
           <SalesProductPickerModal
             isOpen
             products={products}
@@ -725,7 +755,8 @@ export const SalesQuotationsPage: React.FC = () => {
             }}
             onClose={() => setProductPickerLineIdx(null)}
           />
-        ) : undefined}
+          ) : null}
+        </>}
       />
     );
   }
@@ -786,6 +817,7 @@ export const SalesQuotationsPage: React.FC = () => {
           onClose={() => setConvertId(null)}
         />
       )}
+      {shareModal}
     </>
   );
 };

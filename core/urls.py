@@ -119,4 +119,11 @@ urlpatterns = [
     # تأتي من الـslug في المسار لا من ترويسة. مجموعة في app واحدة عمداً كي
     # يُقرأ سطحُ المنصة العام كاملاً في ملف واحد: `store/views.py`.
     path('api/store/', include('store.urls')),
+    # DOC-SHARE: مشاركة المستندات برابط عام. السطح العام مسجَّل **مرتين**:
+    # `/s/<token>` هو الرابط المنسوخ (يلزمه سطر `location` في nginx)، و
+    # `/api/share/<token>/` يعمل فوراً بلا لمس السيرفر — فلا ميزة معطَّلة
+    # بانتظار إعداد. كل كود `AllowAny` خلفهما في `docshare/views.py` وحده.
+    path('s/', include(('docshare.urls_public', 'docshare'), namespace='docshare-s')),
+    path('api/share/', include(('docshare.urls_public', 'docshare'), namespace='docshare-api')),
+    path('api/document-shares/', include('docshare.urls')),
 ]

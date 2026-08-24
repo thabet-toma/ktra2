@@ -21,6 +21,7 @@ root_packages =
     bridge
     core
     device_registry
+    docshare
     hr
     inventory
     logistics
@@ -45,6 +46,7 @@ source_modules =
     bridge
     core
     device_registry
+    docshare
     hr
     inventory
     logistics
@@ -120,6 +122,7 @@ source_modules =
     bridge
     core
     device_registry
+    docshare
     hr
     inventory
     logistics

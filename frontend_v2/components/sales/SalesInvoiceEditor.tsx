@@ -24,6 +24,7 @@ import {
 } from "../../services/salesApi";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { ShareDocumentModal } from "../shared/ShareDocumentModal";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { usePriceVisibility } from "../../contexts/PriceVisibilityContext";
 import { useStaleConfirm } from "../offline/StaleDataConfirm";
@@ -83,6 +84,7 @@ import {
   Save,
   Search,
   Send,
+  Share2,
   Trash2,
   X,
   CreditCard,
@@ -500,6 +502,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   // نافذة تسليم البضاعة (تُنشئ إرسالية بالبنود المؤشَّرة).
   const [showDeliver, setShowDeliver] = useState(false);
   // T-SERVICELINE: نافذة «إضافة خدمة» — تُنشئ الخدمة وتضعها في سطر الفاتورة.
@@ -3041,6 +3044,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       separatorBefore: true,
     } as AseelToolbarAction]),
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => setShowPrintView(true) },
+    // DOC-SHARE: المشاركة تلزمها فاتورة محفوظة — الرابط يشير إلى صفٍّ في
+    // القاعدة، ومسوّدةٌ في الذاكرة لا صفَّ لها بعد.
+    {
+      key: "share",
+      label: "مشاركة",
+      icon: <Share2 />,
+      disabled: draftId == null,
+      onClick: () => setShowShareModal(true),
+    },
   ];
 
   const banner =
@@ -4237,6 +4249,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       {/* T4: نافذة «تسديد» انسحبت من جانب المبيعات — التحصيل كلّه في لوحة
           المحرّر (نقد + شيكات + رصيد العميل في نداء واحد). النافذة نفسها ما
           زالت تخدم جانب المشتريات كما هي. */}
+      {draftId != null && (
+        <ShareDocumentModal
+          open={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          docType="sales_invoice"
+          docId={draftId}
+          docLabel={`${isReturn ? "مرجع بيع" : "فاتورة"} ${invoiceNumber}`}
+          partyName={selectedCustomer?.name}
+        />
+      )}
       {showPrintView && (
         <SalesInvoicePrintView
           data={{

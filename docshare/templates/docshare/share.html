@@ -1,0 +1,200 @@
+{% extends "docshare/base.html" %}{% load docshare_fmt %}
+
+{% block page_title %}{{ doc.title }} {{ doc.number }} — {{ company.company_name_primary }}{% endblock %}
+
+{% block social %}
+{% comment %}
+وسوم المعاينة. الزاحف لا ينفّذ JavaScript، فهذه الأسطر هي كل ما يراه واتساب
+عند لصق الرابط. `og:image` يُحذف كاملاً إن لم يكن للشركة شعار — وسمٌ بقيمة
+فارغة يُنتج معاينةً مكسورة، وغيابه يُنتج معاينةً نصّية سليمة.
+{% endcomment %}
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="{{ company.company_name_primary }}">
+<meta property="og:title" content="{{ doc.title }} {{ doc.number }} — {{ company.company_name_primary }}">
+<meta property="og:description" content="الإجمالي {{ doc.totals.grand_total|money }} {{ doc.currency_symbol }} · بتاريخ {{ doc.date|gdate }}">
+<meta property="og:url" content="{{ public_url }}">
+{% if company.logo_url %}<meta property="og:image" content="{{ company.logo_url }}">{% endif %}
+<meta name="twitter:card" content="summary">
+{% endblock %}
+
+{% block extra_style %}
+  .head{display:flex; gap:20px; justify-content:space-between; align-items:flex-start;
+        border-bottom:2px solid var(--ink); padding-bottom:18px; margin-bottom:20px}
+  .head img{max-height:72px; max-width:190px; object-fit:contain}
+  .org-name{font-size:20px; font-weight:800; margin:0 0 2px}
+  .org-sub{font-size:13px; color:var(--muted); margin:0 0 8px}
+  .org-line{font-size:12px; color:var(--muted); margin:1px 0}
+  .doc-id{text-align:left}
+  .doc-kind{font-size:22px; font-weight:800; margin:0}
+  .doc-no{font-family:ui-monospace,Consolas,monospace; direction:ltr; font-size:15px;
+          font-weight:700; margin:4px 0}
+  .badge{display:inline-block; padding:3px 11px; border-radius:999px; font-size:12px;
+         font-weight:700; border:1px solid}
+  .b-ok{color:var(--ok); border-color:#bbf7d0; background:#f0fdf4}
+  .b-warn{color:var(--warn); border-color:#fde68a; background:#fffbeb}
+  .b-danger{color:var(--danger); border-color:#fecaca; background:#fef2f2}
+  .b-muted{color:var(--muted); border-color:var(--line); background:#f8fafc}
+  .cards{display:flex; gap:14px; flex-wrap:wrap; margin-bottom:20px}
+  .card{flex:1 1 240px; border:1px solid var(--line); border-radius:10px; padding:13px 15px}
+  .card h3{margin:0 0 7px; font-size:12px; color:var(--muted); font-weight:700;
+           letter-spacing:.02em}
+  .row{display:flex; justify-content:space-between; gap:12px; font-size:13px; padding:2px 0}
+  .row span:first-child{color:var(--muted)}
+  table{width:100%; border-collapse:collapse; margin:6px 0 18px; font-size:13px}
+  th,td{border:1px solid var(--line); padding:8px 10px; text-align:right}
+  thead th{background:#f8fafc; font-size:12px; color:var(--muted); font-weight:700}
+  td.num,th.num{text-align:center; font-variant-numeric:tabular-nums}
+  .item-note{display:block; font-size:11.5px; color:var(--muted); margin-top:3px}
+  .totals{margin-inline-start:auto; max-width:340px; border:1px solid var(--line);
+          border-radius:10px; padding:12px 15px}
+  .totals .row{padding:4px 0}
+  .totals .grand{border-top:2px solid var(--ink); margin-top:7px; padding-top:9px;
+                 font-size:16px; font-weight:800}
+  .totals .grand span:first-child{color:var(--ink)}
+  .notes{border:1px solid var(--line); border-radius:10px; padding:12px 15px;
+         margin-top:18px; font-size:13px; white-space:pre-wrap}
+  .decide{border:1px solid var(--line); border-radius:12px; padding:16px 18px;
+          margin-top:20px; background:#f8fafc}
+  .decide h3{margin:0 0 4px; font-size:15px}
+  .decide input[type=text]{width:100%; max-width:340px; padding:9px 11px; font:inherit;
+          border:1px solid #cbd5e1; border-radius:8px; margin:9px 0 12px; background:#fff}
+  .decide .acts{display:flex; gap:10px; flex-wrap:wrap}
+  .alert{border-radius:9px; padding:10px 13px; font-size:13px; margin-bottom:12px;
+         border:1px solid #fecaca; background:#fef2f2; color:var(--danger)}
+  .settled{border:1px solid #bbf7d0; background:#f0fdf4; color:var(--ok);
+           border-radius:10px; padding:12px 15px; margin-top:18px; font-size:13px}
+  .foot{margin-top:26px; padding-top:14px; border-top:1px solid var(--line);
+        font-size:11.5px; color:var(--muted); text-align:center}
+{% endblock %}
+
+{% block body %}
+<div class="bar no-print">
+  <button type="button" class="btn btn-primary" onclick="window.print()">
+    حفظ PDF / طباعة
+  </button>
+</div>
+
+<div class="sheet">
+  <div class="head">
+    <div>
+      {% if company.logo_url %}<img src="{{ company.logo_url }}" alt="{{ company.company_name_primary }}">{% endif %}
+      <p class="org-name">{{ company.company_name_primary }}</p>
+      {% if company.company_name_sub %}<p class="org-sub">{{ company.company_name_sub }}</p>{% endif %}
+      {% if company.address %}<p class="org-line">{{ company.address }}</p>{% endif %}
+      {% if company.phone %}<p class="org-line">هاتف: {{ company.phone }}{% if company.fax %} · فاكس: {{ company.fax }}{% endif %}</p>{% endif %}
+      {% if company.email %}<p class="org-line">{{ company.email }}</p>{% endif %}
+      {% if company.licensed_dealer_no %}<p class="org-line">مشتغل مرخّص: {{ company.licensed_dealer_no }}</p>{% endif %}
+    </div>
+    <div class="doc-id">
+      <p class="doc-kind">{{ doc.title }}</p>
+      <p class="doc-no">{{ doc.number }}</p>
+      {% if expired_offer %}
+        <span class="badge b-danger">منتهي الصلاحية</span>
+      {% elif doc.status == "posted" or doc.status == "accepted" %}
+        <span class="badge b-ok">{{ doc.status_label }}</span>
+      {% elif doc.status == "cancelled" or doc.status == "rejected" %}
+        <span class="badge b-danger">{{ doc.status_label }}</span>
+      {% elif doc.status == "draft" %}
+        <span class="badge b-warn">{{ doc.status_label }}</span>
+      {% else %}
+        <span class="badge b-muted">{{ doc.status_label }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <h3>{% if doc.kind == "quotation" %}مقدَّم إلى{% else %}فاتورة إلى{% endif %}</h3>
+      <div class="row"><span>الاسم</span><span><strong>{{ doc.customer_name }}</strong></span></div>
+      {% if doc.customer_address %}<div class="row"><span>العنوان</span><span>{{ doc.customer_address }}</span></div>{% endif %}
+      {% if doc.customer_phone %}<div class="row"><span>الهاتف</span><span>{{ doc.customer_phone }}</span></div>{% endif %}
+      {% if doc.customer_tax_number %}<div class="row"><span>الرقم الضريبي</span><span>{{ doc.customer_tax_number }}</span></div>{% endif %}
+    </div>
+    <div class="card">
+      <h3>بيانات المستند</h3>
+      <div class="row"><span>التاريخ</span><span>{{ doc.date|gdate }}</span></div>
+      {% if doc.due_date %}<div class="row"><span>تاريخ الاستحقاق</span><span>{{ doc.due_date|gdate }}</span></div>{% endif %}
+      {% if doc.valid_until %}<div class="row"><span>صالح حتى</span><span>{{ doc.valid_until|gdate }}</span></div>{% endif %}
+      <div class="row"><span>العملة</span><span>{{ doc.currency_code }}</span></div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="num" style="width:38px">#</th>
+        <th>الصنف</th>
+        <th class="num" style="width:64px">الوحدة</th>
+        <th class="num" style="width:80px">الكمية</th>
+        <th class="num" style="width:92px">السعر</th>
+        <th class="num" style="width:80px">الخصم</th>
+        <th class="num" style="width:66px">ض.%</th>
+        <th class="num" style="width:104px">الإجمالي</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in doc.lines %}
+      <tr>
+        <td class="num">{{ forloop.counter }}</td>
+        <td>
+          {{ line.name }}
+          {% if line.catalog_no %}<span class="item-note">رقم الصنف: {{ line.catalog_no }}</span>{% endif %}
+          {% if line.note %}<span class="item-note">{{ line.note }}</span>{% endif %}
+        </td>
+        <td class="num">{{ line.unit }}</td>
+        <td class="num">{{ line.quantity|qty }}</td>
+        <td class="num">{{ line.unit_price|qty }}</td>
+        <td class="num">{{ line.line_discount|money }}</td>
+        <td class="num">{{ line.tax_percent|percent }}</td>
+        <td class="num">{{ line.line_total|money }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="num muted">لا توجد بنود</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="row"><span>المجموع قبل الضريبة</span><span>{{ doc.totals.subtotal|money }}</span></div>
+    <div class="row"><span>الخصم</span><span>{{ doc.totals.discount|money }}</span></div>
+    <div class="row"><span>الضريبة</span><span>{{ doc.totals.tax|money }}</span></div>
+    <div class="row grand"><span>الإجمالي</span><span>{{ doc.totals.grand_total|money }} {{ doc.currency_symbol }}</span></div>
+    {% if doc.show_payment %}
+      <div class="row"><span>المدفوع</span><span>{{ doc.totals.paid|money }}</span></div>
+      <div class="row"><span><strong>المتبقي</strong></span><span><strong>{{ doc.totals.remaining|money }} {{ doc.currency_symbol }}</strong></span></div>
+    {% endif %}
+  </div>
+
+  {% if doc.notes %}<div class="notes"><strong>ملاحظات:</strong><br>{{ doc.notes }}</div>{% endif %}
+
+  {% if doc.kind == "quotation" %}
+    {% if share.decision %}
+      <div class="settled">
+        {% if share.decision == "accepted" %}تمت الموافقة على هذا العرض{% else %}تم رفض هذا العرض{% endif %}
+        بتوقيع <strong>{{ share.decided_name }}</strong> بتاريخ {{ share.decided_at|gdate }}.
+      </div>
+    {% elif can_decide %}
+      <div class="decide no-print">
+        {% if decision_error %}<div class="alert">{{ decision_error }}</div>{% endif %}
+        <h3>قرارك على هذا العرض</h3>
+        <p class="muted" style="margin:0">اكتب اسمك ثم اختر. يُسجَّل القرار بتاريخه ولا يمكن تغييره بعد إرساله.</p>
+        <form method="post" action="/s/{{ share.token }}/decision/">
+          <input type="text" name="name" maxlength="120" required
+                 placeholder="الاسم الكامل" autocomplete="name">
+          <div class="acts">
+            <button class="btn btn-ok" type="submit" name="decision" value="accepted">موافق على العرض</button>
+            <button class="btn btn-danger" type="submit" name="decision" value="rejected">رفض العرض</button>
+          </div>
+        </form>
+      </div>
+    {% elif expired_offer %}
+      <div class="notes no-print">انتهت صلاحية هذا العرض. تواصل مع {{ company.company_name_primary }} لتجديده.</div>
+    {% endif %}
+  {% endif %}
+
+  <div class="foot">
+    {{ company.company_name_primary }}{% if company.phone %} · {{ company.phone }}{% endif %}
+    <br>هذه نسخة إلكترونية من المستند، صالحة للعرض والطباعة.
+  </div>
+</div>
+{% endblock %}

@@ -23,7 +23,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | App | المسؤولية | كود | اختبار | مسار الـAPI |
 |---|---|---:|---:|---|
 | `logistics` | الاستيراد والمشتريات: صفقة ← شحنة ← تخليص ← نقل ← فاتورة دولية + التكلفة المستوردة | 18,800 | 10,600 | `/api/logistics/` |
-| `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة، الداشبورد، المساعد الذكي | 15,100 | 7,900 | `/api/` (متفرّق) |
+| `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة، الداشبورد، المساعد الذكي | 15,200 | 7,900 | `/api/` (متفرّق) |
 | `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 11,900 | 5,400 | `/api/accounting/` |
 | `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 11,300 | 8,200 | `/api/sales/` |
 | `inventory` | الأصناف والمستودعات و`StockMovement` (المصدر الوحيد للرصيد ومتوسط التكلفة) والأرقام التسلسلية وحالة المخزون وحدود التجديد | 5,600 | 3,400 | `/api/inventory/` |
@@ -33,6 +33,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | `tenants` | تعريف الشركة وعزلها: الأعضاء، الأدوار، الفروع، دفاتر الترقيم، إقلاع شركة جديدة | 2,100 | 1,400 | `/api/tenants/` |
 | `store` | المتجر العام: خمس نقاط قراءة **بلا مصادقة** مُقيَّدة بـ`Tenant.store_slug`، ولوحة إدارته المصادَق عليها (مظهر · صور · حملات · أصناف متجر) | 1,400 | 1,800 | `/api/store/` |
 | `partners` | بطاقة الطرف الموحّدة (عميل/مورّد/…) وحساباتها البنكية وربطها بشجرة الحسابات | 1,200 | 800 | `/api/partners/` |
+| `docshare` | مشاركة المستند برابط عام: صفحة **بلا مصادقة** يفتحها الزبون (‏HTML خادمي بوسوم Open Graph لمعاينة واتساب) + قبول/رفض عرض السعر منها | 1,100 | 600 | `/s/` · `/api/share/` · `/api/document-shares/` |
 | `import_file` | ملف الاستيراد: قائمة تحقّق مستندات ومهامّ لكل صفقة، ترسو على الصفقة أو على شحنتها — **وحدة مرخّصة، محايدة مالياً بالكامل** | 800 | 1,000 | `/api/import-file/` |
 | `realestate` | العمارات والوحدات وعدادات الكهرباء | 600 | 0 | `/api/realestate/` |
 | `device_registry` | سجل الأجهزة الحساسة — **وحدة مرخّصة، محايدة مالياً بالكامل** | 600 | 500 | `/api/devices/` |
@@ -130,6 +131,7 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 | تقارير | `modules/core.md` | `core/reports/` (`run_report`), `core/reports_api.py` |
 | عزل الشركة / حلّ الـtenant | `modules/core.md` + هذا الملف §1 | `core/tenant_utils.py` (`get_tenant`) |
 | صلاحيات / وحدات مرخّصة / كاش | `modules/core.md` | `core/access.py`, `core/modules.py` |
+| مشاركة مستند برابط عام / معاينة واتساب | `modules/docshare.md` | `docshare/services.py` (`create_share`), `docshare/documents.py` (`DOC_TYPES`) |
 | أي شاشة أو خدمة في الواجهة | `modules/frontend.md` | `frontend_v2/services/restApi.ts` |
 | «الوضع السهل» — قناع الواجهة المبسّطة | `modules/frontend.md` + `modules/tenants.md` | `frontend_v2/utils/uiMode.ts`, `core/access.py` (`user_ui_mode`) |
 | نافذة عائمة (سحب/تحجيم) أو موضع شريط الإجراءات | `modules/frontend.md` §T-WIN | `frontend_v2/utils/windowGeometry.ts`, `frontend_v2/components/aseel/AseelFloatWindow.tsx`, `frontend_v2/components/layout/ActionBarRail.tsx` |

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **485**
+عدد النقاط: **494**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -170,6 +170,9 @@
 | `/api/devices/records/{pk}/` | `SensitiveDeviceViewSet` | `device_registry/views.py` |
 | `/api/devices/records/{pk}/audit/` | `SensitiveDeviceViewSet` | `device_registry/views.py` |
 | `/api/devices/records/{pk}/restore/` | `SensitiveDeviceViewSet` | `device_registry/views.py` |
+| `/api/document-shares/` | `DocumentShareViewSet` | `docshare/views.py` |
+| `/api/document-shares/{pk}/` | `DocumentShareViewSet` | `docshare/views.py` |
+| `/api/document-shares/{pk}/revoke/` | `DocumentShareViewSet` | `docshare/views.py` |
 | `/api/health/` | `health_check` | `core/health.py` |
 | `/api/hr/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/hr/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
@@ -456,6 +459,9 @@
 | `/api/sales/settings/current/` | `SalesSettingsViewSet` | `sales/views.py` |
 | `/api/sales/settings/restore-defaults/` | `SalesSettingsViewSet` | `sales/views.py` |
 | `/api/scan/` | `scan_lookup` | `core/scan.py` |
+| `/api/share/<str:token>` | `DocSharePublicView` | `docshare/views.py` |
+| `/api/share/<str:token>/` | `DocSharePublicView` | `docshare/views.py` |
+| `/api/share/<str:token>/decision/` | `DocShareDecisionView` | `docshare/views.py` |
 | `/api/store/<slug:slug>/` | `StoreProfileView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/` | `StoreCollectionListView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/<slug:collection_slug>/` | `StoreCollectionDetailView` | `store/views.py` |
@@ -493,4 +499,7 @@
 | `/api/tenants/settings/` | `TenantSettingsViewSet` | `tenants/views.py` |
 | `/api/tenants/settings/current/` | `TenantSettingsViewSet` | `tenants/views.py` |
 | `/api/tenants/settings/{pk}/` | `TenantSettingsViewSet` | `tenants/views.py` |
+| `/s/<str:token>` | `DocSharePublicView` | `docshare/views.py` |
+| `/s/<str:token>/` | `DocSharePublicView` | `docshare/views.py` |
+| `/s/<str:token>/decision/` | `DocShareDecisionView` | `docshare/views.py` |
 <!-- AUTO:api_index:END -->

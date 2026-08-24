@@ -123,6 +123,7 @@ INSTALLED_APPS = [
     'after_sales.apps.AfterSalesConfig',
     'import_file.apps.ImportFileConfig',
     'store.apps.StoreConfig',
+    'docshare.apps.DocShareConfig',
 ]
 
 MIDDLEWARE = [
@@ -309,6 +310,13 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
 ]
 
 CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
+
+# DOC-SHARE: أساس الرابط العام للمستندات المُشارَكة (`docshare/services.py`
+# (`public_url`)). يُبنى من إعدادٍ صريح لا من ترويسة `Host` الواردة: الرابط
+# يُلصق في واتساب ويعيش شهراً، فلا يجوز أن يتحدّد بما يرسله العميل.
+DOCSHARE_PUBLIC_BASE_URL = os.environ.get(
+    "DOCSHARE_PUBLIC_BASE_URL", "https://ktra-pro.tech",
+).rstrip("/")
 
 # المساعد الذكي (OpenClaw على سيرفر منفصل — ليس نفس خادم Django).
 # Django يتصل به عبر HTTP (صادر من هذا السيرفر)؛ على سيرفر OpenClaw يجب أن يكون المنفذ (مثل 18789)
@@ -515,6 +523,10 @@ REST_FRAMEWORK = {
         # صفحة دخول، وهو ما قيس عليه `anon`. الحدّان يعملان معاً والأضيق نافذ:
         # هذا المقبض يضيّق على المتجر وحده بلا لمس بقية المنصة.
         "store_public": os.environ.get("THROTTLE_RATE_STORE", "120/min"),
+        # DOC-SHARE: صفحة المستند المُشارَك (`docshare/views.py`) — أضيق من
+        # المتجر لأن الرابط يُفتح مرة أو مرتين لا يُتصفَّح، وأوسع من `anon`
+        # لأن فتحةً واحدة تجلب الصفحة والشعار معاً وقد يُعاد التحميل للطباعة.
+        "doc_share_public": os.environ.get("THROTTLE_RATE_DOC_SHARE", "60/min"),
     },
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }

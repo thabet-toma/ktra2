@@ -54,6 +54,7 @@ PERMISSIONS: list[dict] = [
     {"key": "sales.customer.view", "label": "عرض العملاء", "group": GROUP_SALES},
     {"key": "sales.customer.manage", "label": "إدارة العملاء", "group": GROUP_SALES},
     {"key": "sales.settings.manage", "label": "إعدادات المبيعات", "group": GROUP_SALES},
+    {"key": "sales.document.share", "label": "مشاركة المستندات برابط عام", "group": GROUP_SALES},
     # المشتريات
     {"key": "purchase.invoice.view", "label": "عرض فواتير الشراء", "group": GROUP_PURCHASE},
     {"key": "purchase.invoice.create", "label": "إنشاء فاتورة شراء", "group": GROUP_PURCHASE},
@@ -168,6 +169,9 @@ _SALES_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | {
     "sales.payment.post",
     "sales.quotation.manage",
     "sales.customer.manage",
+    # إرسال الفاتورة أو العرض للزبون عملُ البائع نفسه — ولا مال فيه: الرابط
+    # يعرض ولا يكتب، وأقصى أثره نقلُ عرضٍ من «مسودة» إلى «أُرسل».
+    "sales.document.share",
     # الكفالة وأمر الصيانة عملُ واجهة الزبون — البيع يفتحه ويحرّكه، والمال فيه
     # (ترحيل القطع المغطاة والفوترة) للمحاسب وحده.
     "aftersales.warranty.manage",

@@ -1,0 +1,23 @@
+{% extends "docshare/base.html" %}
+
+{% comment %}
+صفحة «الرابط لا يعمل». تُعرض بـ404 أو 410، ولا تكشف شيئاً عن المستند —
+ولا تترك الزائر أمام شاشة خطأ عارية: تقول له بالضبط ما يفعله.
+{% endcomment %}
+
+{% block page_title %}{{ notice_title }}{% endblock %}
+
+{% block extra_style %}
+  .notice{text-align:center; padding:40px 20px}
+  .notice h1{font-size:22px; margin:0 0 10px}
+  .notice p{color:var(--muted); margin:0; font-size:14px}
+{% endblock %}
+
+{% block body %}
+<div class="sheet">
+  <div class="notice">
+    <h1>{{ notice_title }}</h1>
+    <p>{{ notice_message }}</p>
+  </div>
+</div>
+{% endblock %}
