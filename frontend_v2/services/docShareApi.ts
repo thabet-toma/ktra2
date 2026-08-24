@@ -6,6 +6,7 @@
  * جانغو. هذا الملف يخاطب سطح الإدارة وحده — الإنشاء والقراءة والإبطال.
  */
 import { apiGetList, apiPostObject } from "./restApi";
+import { resolveTenantId } from "../utils/tenantContext";
 
 export type ShareDocType = "sales_invoice" | "sales_quotation";
 export type ShareDecision = "" | "accepted" | "rejected";
@@ -38,6 +39,15 @@ export const SHARE_EXPIRY_OPTIONS = [
 
 export const DEFAULT_SHARE_EXPIRY_DAYS = 30;
 
+/**
+ * الشركة تُحلّ هنا لا عند المستدعي — نفس نمط `afterSalesApi.ts`.
+ *
+ * تركُها خياراً على كل نداء كان يعني أن كل نقطة التحام تتذكّر تمريرها،
+ * ونسيانُها لا يُكسِر البناء ولا الأنواع: يُحذف الرأس بصمت فيردّ الخادم
+ * «لم يتم تحديد الشركة» وقت التشغيل وحده. الوحدة تملك هذا الشأن.
+ */
+const tenantOpts = (tenantId?: number) => ({ tenantId: tenantId ?? resolveTenantId() });
+
 /** روابط مستند بعينه، الأحدث أولاً. */
 export function listDocumentShares(
   docType: ShareDocType,
@@ -45,7 +55,7 @@ export function listDocumentShares(
   tenantId?: number
 ): Promise<DocumentShare[]> {
   return apiGetList<DocumentShare>("document-shares/", {
-    tenantId,
+    ...tenantOpts(tenantId),
     query: { doc_type: docType, doc_id: docId },
   });
 }
@@ -65,7 +75,7 @@ export function createDocumentShare(
   return apiPostObject<DocumentShare>(
     "document-shares/",
     { doc_type: docType, doc_id: docId, days },
-    { tenantId }
+    tenantOpts(tenantId)
   );
 }
 
@@ -77,7 +87,7 @@ export function revokeDocumentShare(
   return apiPostObject<DocumentShare>(
     `document-shares/${shareId}/revoke/`,
     {},
-    { tenantId }
+    tenantOpts(tenantId)
   );
 }
 
