@@ -19,8 +19,6 @@ import {
   RefreshCw,
   PackageCheck,
   Undo2,
-  Banknote,
-  Receipt,
 } from "lucide-react";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { accountingApi } from "@/services/accountingApi";
@@ -33,7 +31,6 @@ import type {
 } from "@/types/purchaseInvoice";
 import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
 import { askReceiveOnPost, receiveOnPostApplies } from "./receiveOnPostPrompt";
-import { SettleFromOnAccountModal } from "@/components/shared/SettleFromOnAccountModal";
 import { useConfirm } from "@/contexts/ConfirmContext";
 import { AccountTreeField } from "@/components/accounting/AccountTreePicker";
 import type { AccountPurpose } from "@/utils/accountTree";
@@ -93,12 +90,6 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
       .catch(() => { /* بلا إعدادات: يبقى الافتراضي — الشاشة كما كانت */ });
     return () => { cancelled = true; };
   }, []);
-  // T-ONACC: تسديد الفاتورة من رصيد المورد «على الحساب» (سندات صرف غير موزَّعة).
-  const [showSettleModal, setShowSettleModal] = useState(false);
-  // وصل دفع للمورد (Feature 2)
-  const [payAmount, setPayAmount] = useState("");
-  const [payAccountId, setPayAccountId] = useState<number | null>(null);
-  const [paySaving, setPaySaving] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -261,43 +252,6 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
       setError(e instanceof Error ? e.message : "تعذر التراجع عن الترحيل");
     } finally {
       setPosting(false);
-    }
-  };
-
-  // ─── وصل دفع للمورد (Feature 2): سند صرف مستقل Dr ذمم المورد / Cr صندوق ───
-  const addSupplierPayment = async () => {
-    if (!invoice) return;
-    const amt = Number(payAmount);
-    if (!amt || amt <= 0) {
-      setError("أدخل مبلغ وصل الدفع.");
-      return;
-    }
-    if (!payAccountId) {
-      setError("اختر حساب الصندوق/البنك لوصل الدفع.");
-      return;
-    }
-    setPaySaving(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      await purchaseInvoiceApi.addSupplierPayment({
-        partner: invoice.partner,
-        purchase_invoice: invoiceId,
-        payment_date: new Date().toISOString().slice(0, 10),
-        amount: amt.toFixed(2),
-        currency: invoice.currency ?? null,
-        cash_or_bank_account: payAccountId,
-        notes: `وصل دفع فاتورة ${invoice.invoice_number || invoice.id}`,
-        // T-AUTOPOST: وصل الدفع من داخل الفاتورة يُرحَّل دائماً (لا مسودة) مهما كان إعداد الشركة.
-        auto_post: true,
-      });
-      setSuccess("✅ تم تسجيل وصل الدفع وترحيله (مدين ذمم المورد / دائن الصندوق).");
-      setPayAmount("");
-      await reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "تعذر تسجيل وصل الدفع");
-    } finally {
-      setPaySaving(false);
     }
   };
 
@@ -527,22 +481,24 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
             <label className="block text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-1.5">
               حالة الدفع
             </label>
-            {/* «مدفوعة» بدل قائمة آجل/نقدي — مربع اختيار: مؤشَّر = مدفوعة من
-                صندوق/بنك، فارغ = على ذمم المورد. القيم الخادمية كما هي. */}
-            <label className="flex items-center gap-2 h-11 aseel-text-ink dark:text-white cursor-pointer select-none">
-              <input
-                type="checkbox"
-                className="w-4 h-4 accent-emerald-600"
-                checked={paymentType === "cash"}
-                onChange={(e) => setPaymentType((e.target.checked ? "cash" : "credit") as PaymentType)}
-                disabled={disableEdit}
-              />
-              مدفوعة
-            </label>
+            {/* T-INTENT: المفتاح انتقل إلى رأس المحرّر (مرآة فاتورة البيع)، فلا
+                يبقى للقيمة الواحدة مدخلان يفترقان. الحالة هنا تبقى لأن حفظ هذا
+                التبويب يعيد إرسالها كما جاءت من الخادم. */}
+            <div className="flex h-11 items-center gap-2 aseel-text-ink dark:text-white">
+              <span
+                className={`inline-flex rounded px-2 py-0.5 text-xs font-semibold ${
+                  paymentType === "cash"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-slate-100 text-slate-700"
+                }`}
+              >
+                {paymentType === "cash" ? "نقدية" : "آجلة"}
+              </span>
+            </div>
             <p className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
               {paymentType === "credit"
-                ? "الدائن = حساب ذمم المورد المربوط."
-                : "الدائن = الصندوق/البنك المختار أدناه."}
+                ? "الدائن = حساب ذمم المورد المربوط. غيّرها من مفتاح «نقدي» في رأس الفاتورة."
+                : "الدائن = الصندوق/البنك المختار أدناه. غيّرها من مفتاح «نقدي» في رأس الفاتورة."}
             </p>
           </div>
           {paymentType === "cash" && (
@@ -831,91 +787,11 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           </div>
         )}
 
-        {/* وصل دفع للمورد (Feature 2): سند صرف مستقل يُفرّغ ذمم المورد للصندوق */}
-        {isPosted && (
-          <div className="pt-3 mt-1 border-t aseel-border-soft dark:aseel-border-soft space-y-2">
-            <div className="flex items-center gap-2">
-              <Receipt className="w-4 h-4 aseel-text-soft" />
-              <h4 className="font-medium aseel-text-ink">وصل دفع للمورد</h4>
-              {invoice.remaining_balance != null && (
-                <span className="text-sm aseel-text-soft">
-                  المتبقي: {invoice.remaining_balance}
-                </span>
-              )}
-            </div>
-            <p className="text-xs aseel-text-soft">
-              قيد مستقل: مدين «ذمم المورد» / دائن «الصندوق/البنك» — لا يولّده ترحيل الفاتورة.
-            </p>
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="aseel-text-soft">المبلغ</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  className="px-3 py-2 rounded-lg border aseel-border-soft aseel-bg-panel w-36"
-                  placeholder="0.00"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="aseel-text-soft">حساب الصندوق/البنك</span>
-                <AccountTreeField
-                  accounts={accounts}
-                  value={payAccountId}
-                  onChange={(id) => setPayAccountId(id)}
-                  purpose="cash"
-                  title="اختيار الصندوق / البنك"
-                  className="px-3 py-2 rounded-lg border aseel-border-soft aseel-bg-panel min-w-[12rem]"
-                />
-              </label>
-              <button
-                onClick={addSupplierPayment}
-                disabled={paySaving}
-                className="flex items-center gap-2 px-5 py-2 rounded-lg font-medium aseel-bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                title="تسجيل وصل دفع وترحيله"
-              >
-                {paySaving ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Banknote className="w-4 h-4" />
-                )}
-                تسجيل وصل الدفع
-              </button>
-              {/* T-ONACC: تسديد من رصيد المورد «على الحساب» (سندات صرف غير موزَّعة). */}
-              {Number(invoice.remaining_balance ?? 0) > 0.009 && (
-                <button
-                  onClick={() => setShowSettleModal(true)}
-                  className="flex items-center gap-2 px-5 py-2 rounded-lg font-medium border aseel-border-soft"
-                  title="تسديد الفاتورة من رصيدنا عند المورد"
-                >
-                  <Receipt className="w-4 h-4" />
-                  تسديد من الرصيد
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+        /* T-INTENT: مسارا الدفع القديمان هنا («وصل دفع للمورد» و«تسديد من
+           الرصيد») حُذفا. صار الدفع كلّه من لوحة الدفع الواحدة داخل المحرّر —
+           نقد وشيكات ورصيد المورّد في نداء واحد — تماماً كما تخلّى جانبُ البيع
+           عنهما. ثلاثة مداخل لعمل واحد تعني ثلاث قواعد تفترق. */
       </div>
-
-      {/* T-ONACC: تسديد فاتورة الشراء من رصيدنا عند المورد (سند صرف غير موزَّع). */}
-      {showSettleModal && invoice && (
-        <SettleFromOnAccountModal
-          kind="supplier"
-          partnerId={invoice.partner}
-          partnerLabel={invoice.partner_name || ""}
-          invoiceId={invoiceId}
-          invoiceLabel={`فاتورة ${invoice.invoice_number || invoiceId}`}
-          remaining={Number(invoice.remaining_balance ?? 0)}
-          onClose={() => setShowSettleModal(false)}
-          onSettled={async () => {
-            setShowSettleModal(false);
-            setSuccess("✅ تم تسديد الفاتورة من الرصيد على حساب المورد.");
-            await reload();
-          }}
-        />
-      )}
 
       {showReceive && (
         <ReceiveGoodsModal

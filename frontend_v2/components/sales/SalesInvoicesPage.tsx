@@ -41,6 +41,7 @@ import { openInNewTab } from "../../utils/openInNewTab";
 import { isOfflineRecordForTenant } from "../../utils/offlineTenantScope";
 import { clientLogger } from "../../services/logger";
 import { PaymentStatusBadge } from "../shared/PaymentStatusBadge";
+import { deriveInvoiceSettlement } from "../shared/DocumentPaymentPanel";
 import {
   AseelDocumentShell,
   AseelDenseTable,
@@ -491,14 +492,24 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       header: "حالة الدفع",
       width: "125px",
       align: "center",
-      render: (r) => (
-        <PaymentStatusBadge
-          status={r.payment_status}
-          label={r.payment_status_display}
-          isOverdue={r.is_overdue}
-          daysOverdue={r.days_overdue}
-        />
-      ),
+      render: (r) => {
+        const settlement = deriveInvoiceSettlement({
+          grandTotal: Number(r.grand_total || 0),
+          paid: Number(r.amount_paid || 0),
+          pendingIntent: Number(r.pending_payment_total || 0),
+          isPosted: r.status === "posted",
+        });
+        return (
+          <PaymentStatusBadge
+            status={r.payment_status}
+            label={r.payment_status_display}
+            isOverdue={r.is_overdue}
+            daysOverdue={r.days_overdue}
+            pendingIntent={settlement.pendingIntent}
+            intentCoversAll={settlement.intentCoversAll}
+          />
+        );
+      },
     },
     {
       key: "amount_paid",
@@ -515,15 +526,34 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       align: "left",
       numeric: true,
       render: (r) => {
-        const bal = Number(r.remaining_balance ?? (Number(r.grand_total || 0) - Number(r.amount_paid || 0)));
+        // T-INTENT: مسودةٌ سُجِّلت عليها دفعة تُظهر متبقّيها بعدها — وإلا بدت
+        // القائمة تكذّب الشاشة التي أدخل فيها المستخدم الدفعة. الوسم بجانبها
+        // يقول إنّها لم تدخل الدفاتر بعد.
+        const settlement = deriveInvoiceSettlement({
+          grandTotal: Number(r.grand_total || 0),
+          paid: Number(r.amount_paid || 0),
+          pendingIntent: Number(r.pending_payment_total || 0),
+          isPosted: r.status === "posted",
+        });
+        const bal = settlement.remainingAfterIntent;
         return (
-          <span
-            className="aseel-num font-mono text-xs font-semibold"
-            style={{
-              color: bal > 0 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ok, #2d7d46)",
-            }}
-          >
-            {fmtNum(bal)}
+          <span className="inline-flex items-center gap-1">
+            <span
+              className="aseel-num font-mono text-xs font-semibold"
+              style={{
+                color: bal > 0 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ok, #2d7d46)",
+              }}
+            >
+              {fmtNum(bal)}
+            </span>
+            {settlement.pendingIntent > 0.009 && (
+              <span
+                title={`دفعة ${fmtNum(settlement.pendingIntent)} مسجَّلة ولم تُرحَّل بعد`}
+                className="inline-flex rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold text-white"
+              >
+                غير مرحّلة
+              </span>
+            )}
           </span>
         );
       },

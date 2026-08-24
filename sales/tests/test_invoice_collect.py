@@ -284,27 +284,98 @@ class InvoiceCollectTest(APITestCase):
         inv.refresh_from_db()
         assert inv.status == SalesInvoice.STATUS_DRAFT
 
-    def test_attach_endpoint_no_longer_swallows_cash(self):
-        """الإرفاق بلا ترحيل يرفض النقد بدل تسجيله في عمود لا يُرحَّل."""
-        from sales.services import attach_payment_voucher
+    def test_attach_endpoint_stores_cash_as_unposted_intent(self):
+        """T-INTENT: النقد يُحفَظ على المسودة نيّةً — بلا أثر مالي حتى الترحيل.
+
+        كان مرفوضاً هنا لأنه كان يُبتلع في عمود لا يُرحَّل. صار له مصير معلوم
+        (`_settle_attached_cheques` يكنسه)، فالمعيار انقلب: يُقبل ويُحفَظ، وتبقى
+        الدفاتر ساكنة — لا قيد ولا سند ولا `amount_paid`.
+        """
         inv = self._draft("COLL-8")
         res = self.client.post(
             f"/api/sales/invoices/{inv.pk}/payment-voucher/",
             {"cash_amount": "60", "cash_account_id": self.cash.pk},
             format="json", **self.h,
         )
-        assert res.status_code == 400, res.content
+        assert res.status_code == 200, res.content
         inv.refresh_from_db()
-        assert inv.attached_cash_amount == Decimal("0.00")
-        assert inv.attached_cash_account_id is None
-        # وحتى نداء الخدمة مباشرةً — المنع في القاعدة لا في الواجهة
-        from django.core.exceptions import ValidationError
-        try:
-            attach_payment_voucher(inv, cash_amount=60, cash_account_id=self.cash.pk)
-        except ValidationError:
-            pass
-        else:
-            raise AssertionError("النقد على المسودة يجب أن يُرفض")
+        assert inv.attached_cash_amount == Decimal("60.00")
+        assert inv.attached_cash_account_id == self.cash.pk
+        # النيّة ليست دفعاً: الدفاتر لم تتحرّك.
+        assert inv.amount_paid == Decimal("0.00")
+        assert inv.journal_id is None
+        assert CustomerPayment.objects.filter(partner=self.partner).count() == 0
+        assert res.json()["pending_payment_total"] == "60.00"
+        # والنيّة لا تتجاوز إجمالي الفاتورة — الفائض شأن `/collect/` وحده.
+        over = self.client.post(
+            f"/api/sales/invoices/{inv.pk}/payment-voucher/",
+            {"cash_amount": "5000", "cash_account_id": self.cash.pk},
+            format="json", **self.h,
+        )
+        assert over.status_code == 400, over.content
+
+    def test_collect_with_post_folds_pending_cash_intent(self):
+        """نيّةٌ محفوظة + تحصيل-مع-ترحيل في نداء واحد: النيّة تُطوى في السند نفسه.
+
+        الكبت (`suppress_auto_settlement`) كان يمنع كنس الترحيل ولا يلتقطها
+        سندُ التحصيل — فتعلق أموالٌ سجّلها المستخدم على فاتورة مرحّلة بلا
+        مرحِّلٍ لها أبداً.
+        """
+        from sales.services import attach_payment_voucher
+        inv = self._draft("COLL-MIX")
+        attach_payment_voucher(inv, cash_amount=30, cash_account_id=self.cash.pk)
+
+        res = self._collect(inv, {
+            "cash": "70", "cash_account_id": self.cash.pk, "post_invoice": True,
+        })
+        assert res.status_code == 200, res.content
+        inv.refresh_from_db()
+        assert inv.amount_paid == Decimal("100.00")
+        payments = CustomerPayment.objects.filter(partner=self.partner)
+        assert payments.count() == 1, "سند واحد يجمع النيّة والدفع الصريح"
+        assert payments.first().amount == Decimal("100.00")
+
+    def test_deleting_draft_removes_intent_cheques(self):
+        """حذف المسودة يحذف شيكات نيّتها — الرابط SET_NULL كان يتركها يتيمة.
+
+        وقبل T-INTENT كان الحارس يمنع الحذف كلّه لمجرّد وجودها (حالة `Draft`
+        كانت تُعدّ «حركةً بعد الترحيل») — بابان خاطئان أُغلقا معاً.
+        """
+        from sales.services import attach_payment_voucher
+        inv = self._draft("COLL-DEL")
+        attach_payment_voucher(inv, cheques=[{"cheque_number": "CHQ-DEL", "amount": "20"}])
+        cheque_id = Cheque.objects.get(sales_invoice=inv).pk
+        res = self.client.delete(f"/api/sales/invoices/{inv.pk}/", **self.h)
+        assert res.status_code in (200, 204), res.content
+        assert not Cheque.objects.filter(pk=cheque_id).exists()
+
+    def test_cash_intent_materializes_once_on_post(self):
+        """النيّة تتجسّد سند قبض واحداً عند الترحيل، وتنجو من إلغائه بلا ازدواج."""
+        from sales.services import attach_payment_voucher, post_sales_invoice
+        inv = self._draft("COLL-9")
+        attach_payment_voucher(inv, cash_amount=60, cash_account_id=self.cash.pk)
+        post_sales_invoice(inv, user=self.user)
+        inv.refresh_from_db()
+
+        payments = CustomerPayment.objects.filter(auto_settled_invoice=inv)
+        assert payments.count() == 1, "النيّة يجب أن تُنتج سنداً واحداً لا أكثر"
+        assert payments.first().amount == Decimal("60.00")
+        assert inv.amount_paid == Decimal("60.00")
+        # النيّة سجلّ دائم: تبقى بعد الترحيل كي تُعاد الحالة عند إلغائه.
+        assert inv.attached_cash_amount == Decimal("60.00")
+
+        res = self.client.post(
+            f"/api/sales/invoices/{inv.pk}/unpost/", {}, format="json", **self.h,
+        )
+        assert res.status_code == 200, res.content
+        inv.refresh_from_db()
+        assert inv.amount_paid == Decimal("0.00")
+        assert inv.attached_cash_amount == Decimal("60.00")
+
+        post_sales_invoice(inv, user=self.user)
+        inv.refresh_from_db()
+        assert CustomerPayment.objects.filter(auto_settled_invoice=inv).count() == 1
+        assert inv.amount_paid == Decimal("60.00")
 
     def test_collect_on_a_posted_invoice(self):
         """الفاتورة المرحّلة تُحصَّل لاحقاً من نفس النقطة بلا إعادة ترحيل."""

@@ -100,13 +100,13 @@ export const TIPS: readonly Tip[] = [
     ],
     targetView: 'store-settings',
   },
-  // components/shared/SettleFromOnAccountModal.tsx ← PurchaseInvoiceAccountingPanel.tsx
+  // components/shared/DocumentPaymentPanel.tsx ← InvoiceForm.tsx
   {
     key: 'purchase.settle-on-account',
     view: 'purchase-invoices',
     title: 'سدّد للمورّد من دفعاته المقدّمة',
     lines: [
-      'إن كان للمورّد رصيدٌ على الحساب، سدّد منه فاتورة الشراء مباشرةً.',
+      'من لوحة الدفع داخل الفاتورة: «من رصيد المورّد (سلف)».',
       'الربط بلا قيدٍ جديد — الرصيد ينزل والفاتورة تُقفل.',
     ],
   },

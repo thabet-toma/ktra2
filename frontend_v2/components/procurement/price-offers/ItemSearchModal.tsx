@@ -10,6 +10,8 @@ interface ItemSearchModalProps {
     onSelectItem: (item: Item, lastPrice?: number) => void;
     items: Item[];
     supplierId?: string;
+    /** T-SEARCH: يفتح الفهرس على نفس ما كتبه المستخدم في المنتقي المدمج. */
+    initialSearch?: string;
     /** task18 DEF-B2: يُستدعى بعد إنشاء صنف جديد (Product) ليُضيفه الأب إلى قائمة
      *  الأصناف فوراً فيظهر في المنتقي/الإكمال التلقائي ويُعاد اختياره. */
     onItemCreated?: (item: Item) => void;
@@ -34,8 +36,8 @@ export const productToItem = (p: any): Item => ({
     updatedAt: new Date().toISOString(),
 });
 
-export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClose, onSelectItem, items = [], supplierId, onItemCreated }) => {
-    const [searchQuery, setSearchQuery] = useState('');
+export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClose, onSelectItem, items = [], supplierId, initialSearch = '', onItemCreated }) => {
+    const [searchQuery, setSearchQuery] = useState(initialSearch);
     const [itemPrices, setItemPrices] = useState<Record<string, number>>({});
     const [loadingPrices, setLoadingPrices] = useState(false);
     const [showAddItem, setShowAddItem] = useState(false);
@@ -54,6 +56,12 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
             item.categoryName.toLowerCase().includes(lowerQuery)
         );
     }, [items, searchQuery]);
+
+    /* T-SEARCH: كل فتحةٍ تبدأ من الاستعلام المنقول — النافذة تبقى مركَّبة بين
+       الفتحات، فالحالة الابتدائية وحدها لا تكفي لتحديثه. */
+    useEffect(() => {
+        if (isOpen) setSearchQuery(initialSearch);
+    }, [isOpen, initialSearch]);
 
     // Fetch last prices for filtered items from this supplier
     useEffect(() => {

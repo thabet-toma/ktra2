@@ -383,6 +383,33 @@ export const purchaseInvoiceApi = {
   },
 
   /**
+   * T-INTENT: يسجّل الدفعة على **مسودة** فاتورة الشراء بلا ترحيل ولا سند —
+   * نيّةٌ تتحوّل سند صرفٍ واحداً عند ترحيل الفاتورة. مرآة
+   * `attachSalesInvoiceIntent`. بدلالة الاستبدال: كل نداء يحلّ محلّ ما سبقه،
+   * ونداءٌ بـ`{cash_amount: "0", cheques: []}` يمسح النيّة كلّها.
+   */
+  attachIntent: async (
+    id: number,
+    body: {
+      cash_amount: string;
+      cash_account_id?: number | null;
+      cheques: Array<{
+        cheque_number: string;
+        amount: string;
+        due_date?: string | null;
+        bank_name?: string;
+      }>;
+    },
+  ): Promise<PurchaseInvoiceDto> => {
+    const res = await safeFetch(
+      `${API_BASE}/logistics/purchase-invoices/${id}/attach-payment/`,
+      { method: "POST", headers: headers(), body: JSON.stringify(body) },
+    );
+    await handle(res, "attachPurchaseIntent");
+    return res.json();
+  },
+
+  /**
    * وصل دفع للمورد (Feature 2): يُنشئ SupplierPayment ويرحّله (Dr ذمم المورد / Cr صندوق).
    * T-AUTOPOST: الترحيل صار في الخادم ضمن نفس الطلب — `auto_post` يسمو على إعداد
    * الشركة (`auto_post_payments`): true = حفظ وترحيل، false = حفظ كمسودة.

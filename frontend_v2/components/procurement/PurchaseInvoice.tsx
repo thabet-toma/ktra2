@@ -59,6 +59,7 @@ function sqlListToInvoice(row: PurchaseInvoiceListDto): Invoice {
     payableTotal: Number(row.payable_total || row.grand_total || 0),
     amountPaid: Number(row.amount_paid || 0),
     remainingBalance: Number(row.remaining_balance || 0),
+    pendingPaymentTotal: Number(row.pending_payment_total || 0),
     paymentStatus: row.payment_status || 'unpaid',
     paymentStatusDisplay: row.payment_status_display || 'غير مدفوعة',
     receiptStatus: row.receipt_status || 'not_received',

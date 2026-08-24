@@ -37,6 +37,8 @@ export type SalesInvoiceRow = {
   grand_total: string;
   amount_paid?: string;
   remaining_balance?: string;
+  /** T-INTENT: دفعة مرفقة بمسودة لم تُرحَّل بعد — تُعرَض ولا تدخل «المدفوع». */
+  pending_payment_total?: string;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payment_status_display?: string;
   /** T-DUE: التأخّر بُعدٌ فوق حالة الدفع — لا قيمةٌ رابعة فيها. */
@@ -237,6 +239,32 @@ export async function collectSalesInvoice(
   body: InvoiceCollectPayload,
 ): Promise<SalesInvoiceDetail & { payment_id: number | null }> {
   return apiPostObject(`${BASE}/invoices/${id}/collect/`, body, { tenantId: tid() });
+}
+
+/** نيّة دفع تُرفَق بالمسودة — نقد و/أو شيكات، بدلالة الاستبدال. */
+export type InvoiceIntentPayload = {
+  cash_amount: string;
+  cash_account_id?: number | null;
+  cheques: Array<{
+    cheque_number: string;
+    amount: string;
+    due_date?: string | null;
+    bank_name?: string;
+  }>;
+};
+
+/**
+ * T-INTENT: يسجّل الدفعة على **المسودة** بلا ترحيل ولا سند — نيّةٌ تتحوّل سند
+ * قبضٍ واحداً عند ترحيل الفاتورة. بدلالة الاستبدال: كل نداء يحلّ محلّ ما سبقه،
+ * ونداءٌ بـ`{cash_amount: "0", cheques: []}` يمسح النيّة كلّها.
+ *
+ * يقابله `collectSalesInvoice` حين يريد المستخدم الترحيل والتحصيل فوراً.
+ */
+export async function attachSalesInvoiceIntent(
+  id: number,
+  body: InvoiceIntentPayload,
+): Promise<SalesInvoiceDetail> {
+  return apiPostObject(`${BASE}/invoices/${id}/payment-voucher/`, body, { tenantId: tid() });
 }
 
 /** التراجع عن ترحيل الفاتورة: حذف قيودها وحركات مخزونها وإرجاعها مسودة (Feature 1). */

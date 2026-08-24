@@ -288,6 +288,23 @@ export interface Invoice {
     payableTotal?: number;
     amountPaid?: number;
     remainingBalance?: number;
+    /** T-INTENT: دفعة مرفقة بمسودة لم تُرحَّل بعد — تُعرَض ولا تدخل «المدفوع». */
+    pendingPaymentTotal?: number;
+    /** نقدية (تُدفع فوراً من صندوق/بنك) أو آجلة على ذمم المورّد. */
+    paymentType?: 'cash' | 'credit';
+    cashOrBankAccountId?: number | null;
+    /** نيّة الدفع النقدي المحفوظة على المسودة وحسابها. */
+    attachedCashAmount?: number;
+    attachedCashAccountId?: number | null;
+    /** شيكات الفاتورة كما يعيدها الخادم (المسودة منها نيّة دفع). */
+    cheques?: Array<{
+        id: number;
+        cheque_number: string;
+        bank_name?: string | null;
+        amount: string;
+        status: string;
+        due_date?: string | null;
+    }>;
     paymentStatus?: 'paid' | 'partially_paid' | 'unpaid';
     paymentStatusDisplay?: string;
     /** T-DUE: التأخّر بُعدٌ فوق حالة الدفع — لا قيمةٌ رابعة فيها. */

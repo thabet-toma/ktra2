@@ -1,4 +1,5 @@
 import React from "react";
+import { formatMoney } from "../../utils/formatNumber";
 
 export type InvoicePaymentStatus = "paid" | "partially_paid" | "unpaid";
 
@@ -22,19 +23,42 @@ const META: Record<InvoicePaymentStatus, { label: string; className: string }> =
  * بجانب الأولى لا بديلٌ عنها: «مدفوعة جزئياً» يبقى ظاهراً ويُقال معه «تأخّرت
  * 12 يوماً». دمجُها في `status` كان يخفي «كم بقي» خلف «تأخّر»، ويكسر الفلاتر
  * والشارات القائمة على القيم الثلاث.
+ *
+ * T-INTENT: و«غير مرحّلة» بُعدٌ ثالث بالمنطق نفسه — الدفعة المرفقة بمسودة ليست
+ * قيمةً رابعة في `status` (فما لم يُرحَّل ليس مدفوعاً في الدفاتر) بل شارةٌ
+ * كهرمانية بجانبها تقول إنّ على المستند دفعةً تنتظر الترحيل.
  */
 export const PaymentStatusBadge: React.FC<{
   status?: InvoicePaymentStatus;
   label?: string;
   isOverdue?: boolean;
   daysOverdue?: number;
-}> = ({ status = "unpaid", label, isOverdue, daysOverdue }) => {
+  /** الدفعة المرفقة غير المرحّلة (صفر/غياب ⇒ لا شارة). */
+  pendingIntent?: number;
+  /** الدفعة تغطّي إجمالي المستند ⇒ «مدفوعة — غير مرحّلة». */
+  intentCoversAll?: boolean;
+}> = ({
+  status = "unpaid", label, isOverdue, daysOverdue, pendingIntent, intentCoversAll,
+}) => {
   const meta = META[status];
+  const hasIntent = (pendingIntent ?? 0) > 0.009;
   return (
     <span className="inline-flex items-center gap-1 whitespace-nowrap">
       <span className={`inline-flex rounded px-2 py-0.5 text-xs font-semibold ${meta.className}`}>
         {label || meta.label}
       </span>
+      {hasIntent && (
+        <span
+          data-testid="pending-intent-badge"
+          title={
+            `دفعة مسجَّلة على المسودة (${formatMoney(pendingIntent ?? 0)}) لم تدخل `
+            + "الدفاتر بعد — تتحوّل إلى سند عند ترحيل المستند."
+          }
+          className="inline-flex rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white"
+        >
+          {intentCoversAll ? "مدفوعة — غير مرحّلة" : "دفعة غير مرحّلة"}
+        </span>
+      )}
       {isOverdue && (
         <span
           data-testid="overdue-badge"

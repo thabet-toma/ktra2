@@ -81,10 +81,13 @@ import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
 import {
   DocumentPaymentPanel,
   deriveDocumentPayment,
+  deriveInvoiceSettlement,
   type PaymentChequeRow,
 } from "@/components/shared/DocumentPaymentPanel";
 import { InvoicePrintView } from "./InvoicePrintView";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
+import { InvoicePaymentsSection } from "@/components/shared/InvoicePaymentsSection";
+import { entityPathForReference } from "@/utils/entityLinks";
 import { EntityActivityLog } from "@/components/activity/EntityActivityLog";
 import { PartnerNoteAlert } from "@/components/partners/PartnerNoteAlert";
 import {
@@ -211,6 +214,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // نافذة استلام البضاعة (تُنشئ إرسالية بالبنود المؤشَّرة).
   const [showReceive, setShowReceive] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
+  /** T-SEARCH: نصُّ البحث المنقول إلى الفهرس الكامل (من «+N أخرى» أو الباركود). */
+  const [pickerQuery, setPickerQuery] = useState("");
   /* ── T-APPAY: لوحة الدفع داخل المحرّر ───────────────────────────────────
      كان الدفع نافذةً تُلزم بالترحيل أولاً ثم تفتح سند الصرف — نداءان منفصلان،
      فانقطاعُ الثاني يترك فاتورةً مرحّلة بلا سند. اللوحة تنادي `pay/` مرّةً
@@ -617,6 +622,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         shipping_included: payload.shippingIncluded || false,
         grand_total: roundSqlMoney2(payload.grandTotal ?? 0),
         invoice_type: payload.invoiceType || (payload.clearanceId || payload.shipment ? 'international' : 'local'),
+        // نوع الدفع يُحفظ من الرأس — كان يُكتب من تبويب المحاسبة وحده، فلا
+        // يعرف المحرّر أنقديّةٌ فاتورته أم آجلة.
+        payment_type: payload.paymentType || 'credit',
+        cash_or_bank_account: payload.paymentType === 'cash'
+          ? (payload.cashOrBankAccountId ?? null) : null,
         fees: (payload.fees || []).map((fee: any) => ({
           description: String(fee.description || '').trim(),
           amount: roundSqlMoney2(fee.amount ?? 0),
@@ -844,11 +854,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const handleBarcodeEnter = async (raw: string) => {
     const t = raw.trim();
     if (!t) return;
+    const norm = t.toLowerCase();
     const hit = allDbItems.find(
-      (i) => (i.barcode || "").trim() === t || (i.modelNumber || "").trim() === t || String(i.id) === t,
+      (i) => (i.barcode || "").trim().toLowerCase() === norm
+        || (i.modelNumber || "").trim().toLowerCase() === norm
+        || String(i.id) === t,
     );
     if (!hit) {
-      toast(`لا صنف بالباركود/الرقم «${t}».`, "error");
+      // T-SEARCH: الرسالة وحدها طريقٌ مسدود — نفتح الفهرس على النصّ نفسه.
+      setPickerQuery(t);
+      setShowItemSearch(true);
+      toast(`لا تطابق تامّ لـ«${t}» — ابحث في الفهرس الكامل.`, "info");
       return;
     }
     const items = formData.items || [];
@@ -1533,6 +1549,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       return {
         id: it.id,
         label: it.name,
+        // T-RESERVEVIS: رصيد الصنف بجانب اسمه — كان جانب البيع وحده يعرضه،
+        // فيطلب المشتري ما عنده منه رفٌّ ممتلئ.
+        sub: `الرصيد: ${formatQuantity(Number(it.quantity || 0))}`,
+        // T-SEARCH: الباركود ورقم الموديل وأرقام كتالوج الموردين يُبحَث فيها
+        // ولا تُعرض — وهي ما يكتبه المشتري فعلاً وقت الطلب.
+        keywords: [it.barcode, it.modelNumber, it.supplierCodes]
+          .filter(Boolean).join(" ").toLowerCase(),
         price: pp ? formatMoney(Number(pp.price)) : undefined,
         // لا آخر/أقل شراء ولا متوسط تكلفة → نص «بدون سعر» بدل الفراغ.
         priceLabel: pp ? pp.label : "بدون سعر",
@@ -1544,6 +1567,18 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       };
     }),
     [allDbItems, purchasePriceMap],
+  );
+
+  /** T-SEARCH: المورّد يُبحَث باسمه وهاتفه ورقمه — مرآة منتقي العميل. */
+  const supplierOptions = useMemo(
+    () => suppliers.map((sup) => ({
+      id: sup.id,
+      label: sup.tradeName || sup.alias || `#${sup.id}`,
+      sub: `#${sup.id}${sup.city ? ` · ${sup.city}` : ""}`,
+      keywords: [sup.id, sup.phone, sup.mobile, sup.alias]
+        .filter(Boolean).join(" ").toLowerCase(),
+    })),
+    [suppliers],
   );
 
   const renderItemNameCell = (row: InvoiceItem, rowIndex: number) => {
@@ -1567,6 +1602,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         }}
         onInfo={(id) => { const pid = Number(id); if (pid) { setCardCanAdd(false); setCardProductId(pid); } }}
         onEdit={(id) => { const pid = Number(id); if (pid) setQuickEditProductId(pid); }}
+        onShowMore={(q) => {
+          setPickerQuery(q);
+          setActiveItemSearchIndex(rowIndex);
+          setShowItemSearch(true);
+        }}
         onFreeText={(t) => {
           // task18 DEF-B1/B3: «إضافة كصنف جديد» يفتح إنشاء صنف سريع مُعبّأً بالنص
           // ويُنشئه فعلياً (Product) بدل ترك سطر حر بلا itemId يُحذف عند الحفظ.
@@ -2047,6 +2087,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   // T-ONEPAY (مرآة فاتورة البيع): مدخل واحد لدفع المورد — نقد و/أو شيكات في سند
   // صرف واحد. التوزيع يلزمه فاتورة مرحّلة، فنحفظ ونرحّل ضمن نفس النقرة بتأكيد.
+  /* T-INTENT: تسوية المستند من المشتقّة المشتركة مع محرّر البيع — الرقم نفسه
+     في الشريط وعرض المستند والطباعة، ولا حسبةَ ثانية تفترق غداً. */
+  const settlement = useMemo(() => deriveInvoiceSettlement({
+    grandTotal: payableTotal,
+    paid: Number(formData.amountPaid) || 0,
+    pendingIntent: Number(formData.pendingPaymentTotal) || 0,
+    isPosted,
+  }), [payableTotal, formData.amountPaid, formData.pendingPaymentTotal, isPosted]);
   const supplierRemaining = Math.max(Number(formData.remainingBalance) || 0, 0);
 
   /* T-APPAY: سلف المورّد المرحّلة غير الموزَّعة — «رصيدٌ لنا عنده» يصلح لتسديد
@@ -2102,6 +2150,130 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setPayCheques([]);
     setPayChequesOpen(false);
     setPayFromBalance("");
+  };
+
+  /* ── T-INTENT: نيّة الدفع على المسودة — مرآة محرّر البيع حرفياً ────────── */
+
+  /** شيكات المسودة كما يعيدها الخادم — صفوف النيّة في جدول الدفعات. */
+  const intentCheques = useMemo(
+    () => (formData.cheques || []).filter((c) => c.status === "Draft"),
+    [formData.cheques],
+  );
+  const intentCash = Number(formData.attachedCashAmount) || 0;
+  const intentCashAccountId = formData.attachedCashAccountId ?? null;
+
+  const currentIntentCheques = () => intentCheques.map((c) => ({
+    cheque_number: c.cheque_number,
+    amount: Number(c.amount).toFixed(2),
+    due_date: c.due_date || null,
+    bank_name: c.bank_name || "",
+  }));
+
+  /**
+   * يكتب صورة النيّة **كاملةً** (بدلالة الاستبدال لا الفرق) — مصدرٌ واحد
+   * يخدم الحفظ والتعديل والحذف على السواء.
+   */
+  const writeIntent = async (
+    intent: {
+      cash: number;
+      cashAccountId: number | null;
+      cheques: ReturnType<typeof currentIntentCheques>;
+    },
+    successMsg: string,
+  ): Promise<boolean> => {
+    let targetId = formData.id;
+    if (!targetId) {
+      const saved = await handleSave();
+      if (!saved) return false;
+      targetId = saved;
+    }
+    setPaying(true);
+    try {
+      const dto = await purchaseInvoiceApi.attachIntent(Number(targetId), {
+        cash_amount: intent.cash.toFixed(2),
+        ...(intent.cash > 0 && intent.cashAccountId
+          ? { cash_account_id: intent.cashAccountId }
+          : {}),
+        cheques: intent.cheques,
+      });
+      setFormData(mapPurchaseInvoiceDtoToInvoice(dto));
+      resetPayInputs();
+      setAccMsg(successMsg);
+      if (onSave) onSave({ id: String(targetId) });
+      return true;
+    } catch (e) {
+      toast(humanizeThrown(e, "تعذّر حفظ الدفعة على المسودة"), "error");
+      return false;
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const saveIntentFromPanel = () => {
+    if (!formData.supplierId) { toast("اختر المورد أولاً.", "error"); return; }
+    if ((Number(payCash) || 0) > 0 && !payCashAccountId) {
+      toast("اختر حساب الصندوق أو البنك للمبلغ النقدي.", "error");
+      return;
+    }
+    if (payment.chequeError) { toast(payment.chequeError, "error"); return; }
+    // اللوحة تُضيف إلى النيّة القائمة لا تستبدلها.
+    void writeIntent(
+      {
+        cash: intentCash + (Number(payCash) || 0),
+        cashAccountId: payCashAccountId ?? intentCashAccountId,
+        cheques: [
+          ...currentIntentCheques(),
+          ...payCheques.map((row) => ({
+            cheque_number: row.cheque_number.trim(),
+            amount: (Number(row.amount) || 0).toFixed(2),
+            due_date: row.due_date || null,
+            bank_name: row.bank_name.trim(),
+          })),
+        ],
+      },
+      "حُفِظت الدفعة على المسودة — تتحوّل إلى سند صرف عند الترحيل.",
+    );
+  };
+
+  /** التعديل = سحب النيّة إلى اللوحة ومسحها من المستند فيعيد المستخدم بناءها. */
+  const editIntent = () => {
+    setPayCash(intentCash > 0 ? intentCash.toFixed(2) : "");
+    if (intentCashAccountId) setPayCashAccountId(intentCashAccountId);
+    setPayCheques(intentCheques.map((c, i) => ({
+      key: `intent-${c.id}-${i}`,
+      cheque_number: c.cheque_number,
+      bank_name: c.bank_name || "",
+      due_date: c.due_date || "",
+      amount: String(c.amount),
+    })));
+    setPayChequesOpen(intentCheques.length > 0);
+    void writeIntent({ cash: 0, cashAccountId: null, cheques: [] }, "عدّل الدفعة ثم احفظها.");
+    focusPayPanel();
+  };
+
+  const removeIntentCash = () => {
+    void writeIntent(
+      { cash: 0, cashAccountId: null, cheques: currentIntentCheques() },
+      "حُذِفت الدفعة النقدية من المسودة.",
+    );
+  };
+
+  const removeIntentCheque = (chequeId: number) => {
+    void writeIntent(
+      {
+        cash: intentCash,
+        cashAccountId: intentCashAccountId,
+        cheques: intentCheques
+          .filter((c) => c.id !== chequeId)
+          .map((c) => ({
+            cheque_number: c.cheque_number,
+            amount: Number(c.amount).toFixed(2),
+            due_date: c.due_date || null,
+            bank_name: c.bank_name || "",
+          })),
+      },
+      "حُذِف الشيك من المسودة.",
+    );
   };
 
   /**
@@ -2204,9 +2376,44 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     },
   ] : [];
 
+  /* T-INTENT: جدول دفعات الفاتورة — نفس مكوّن البيع بمفردات المورّد، ويظهر في
+     وضعَي التحرير والعرض كي يرى صاحبُ المسودة دفعتَه فور تسجيلها. */
+  const paymentsSection = formData.isReturn ? null : (
+    <InvoicePaymentsSection
+      side="supplier"
+      posted={(formData.paymentDetails || []).map((p) => ({
+        id: p.id,
+        payment_date: p.paymentDate,
+        allocated_amount: p.amount,
+        is_posted: p.isPosted,
+        journal: p.journalId ?? null,
+      }))}
+      intentCash={intentCash}
+      intentCashAccountLabel={
+        intentCashAccountId
+          ? allAccounts.find((a) => Number(a.id) === intentCashAccountId)?.name || undefined
+          : undefined
+      }
+      intentCheques={intentCheques}
+      settlement={settlement}
+      paid={Number(formData.amountPaid) || 0}
+      editable={!isPosted && canPerm("purchase.payment.create")}
+      busy={paying}
+      onAddPayment={focusPayPanel}
+      onEditIntent={editIntent}
+      onRemoveIntentCash={removeIntentCash}
+      onRemoveIntentCheque={removeIntentCheque}
+      onOpenVoucher={(paymentId) => {
+        const path = entityPathForReference("SUPPLIER_PAYMENT", paymentId);
+        if (path) openInNewTab(path);
+      }}
+    />
+  );
+
   const payPanel = !showPayPanel ? null : (
     <DocumentPaymentPanel
       side="supplier"
+      onSaveIntent={saveIntentFromPanel}
       derived={payment}
       input={paymentInput}
       isPosted={isPosted}
@@ -2231,6 +2438,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onFillCashShortfall={() =>
         setPayCash(((Number(payCash) || 0) + payment.cashShortfall).toFixed(2))
       }
+      // T-INTENT: المخرج الثاني من حارس الفاتورة النقدية — كان جانب البيع وحده
+      // يمرّره، فيقف مشترٍ لا يملك تغطية الفاتورة كاملةً أمام طريق مسدود لا
+      // مخرج منه إلا «أكمل المبلغ».
+      onMakeCredit={() => {
+        setFormData((prev) => ({ ...prev, paymentType: "credit" }));
+        dirtyRef.current = true;
+        toast("صارت الفاتورة آجلة على ذمم المورّد — احفظ ثم أكمل الدفع.", "info");
+      }}
       onSubmit={() => void submitPayment()}
       cashAccountField={(
         <AccountTreeField
@@ -2436,10 +2651,22 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       metrics={[
         { label: "إجمالي المستحق", value: invMoney(payableTotal), tone: "info" },
         { label: "المدفوع المرحّل", value: invMoney(Number(formData.amountPaid) || 0), tone: "ok" },
+        ...(settlement.pendingIntent > 0.009
+          ? [{
+            label: "دفعة غير مرحّلة",
+            value: invMoney(settlement.pendingIntent),
+            tone: "warn" as const,
+          }]
+          : []),
         // T-RECVIS: «المتبقي» صار يعني شيئين على شاشةٍ واحدة منذ ظهور باقي
         // الاستلام — فالمالي يقول «للدفع» والكمّي يقول «الاستلام».
-        { label: "المتبقي للدفع", value: invMoney(Number(formData.remainingBalance) || 0), tone: "warn" },
-        { label: "حالة الدفع", value: formData.paymentStatusDisplay || "غير مدفوعة" },
+        { label: "المتبقي للدفع", value: invMoney(settlement.remainingAfterIntent), tone: "warn" },
+        {
+          label: "حالة الدفع",
+          value: settlement.intentCoversAll
+            ? "مدفوعة — غير مرحّلة"
+            : (formData.paymentStatusDisplay || "غير مدفوعة"),
+        },
         ...(showReceiptColumns ? [
           {
             label: `الاستلام — ${formData.receiptStatusDisplay || "غير مستلمة"}`,
@@ -2538,7 +2765,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
               { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
               { label: "المدفوع المرحّل", value: fmt(Number(formData.amountPaid) || 0) },
-              { label: "المتبقي للدفع", value: fmt(Number(formData.remainingBalance) || 0), tone: "warn" },
+              ...(settlement.pendingIntent > 0.009
+                ? [{ label: "دفعة غير مرحّلة", value: fmt(settlement.pendingIntent) }]
+                : []),
+              { label: "المتبقي للدفع", value: fmt(settlement.remainingAfterIntent), tone: "warn" },
               { label: "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
               { label: "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
               { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
@@ -2556,7 +2786,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
               { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
               { label: "المدفوع المرحّل", value: fmt(Number(formData.amountPaid) || 0) },
-              { label: "المتبقي للدفع", value: fmt(Number(formData.remainingBalance) || 0), tone: "warn" },
+              ...(settlement.pendingIntent > 0.009
+                ? [{ label: "دفعة غير مرحّلة", value: fmt(settlement.pendingIntent) }]
+                : []),
+              { label: "المتبقي للدفع", value: fmt(settlement.remainingAfterIntent), tone: "warn" },
               { label: "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
               { label: "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
               { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
@@ -2734,10 +2967,25 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           )}
           {fld(
             "الاسم",
-            <input
-              className="aseel-input"
-              readOnly
+            /* T-SEARCH: كان صندوقاً للعرض فقط، فاختيارُ المورّد يمرّ بالفهرس
+               الكامل وحده — بينما جانب البيع يكتب اسم عميله ويجده. الآن يُكتب
+               ويُبحَث بالاسم والهاتف والرقم، ويُنشأ مورّد جديد من مكانه. */
+            <AseelAutocomplete
               value={headerSupplierName || ""}
+              options={supplierOptions}
+              disabled={effectiveReadOnly}
+              placeholder="اكتب اسم المورّد…"
+              onPick={(id) => {
+                const sup = suppliers.find((x) => String(x.id) === String(id));
+                if (!sup) return;
+                setFormData((prev) => ({
+                  ...prev, supplierId: sup.id, factoryName: sup.tradeName,
+                }));
+                markDirty();
+              }}
+              onShowMore={() => setShowSupplierPicker(true)}
+              onFreeText={() => setShowAddSupplierModal(true)}
+              createLabel={(t) => `إضافة «${t}» كمورّد جديد`}
             />
           )}
           {fld(
@@ -2844,6 +3092,35 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             />
             <span className="aseel-field-label" style={{ flex: "unset" }}>
               الأسعار تشمل ض.ق.م
+            </span>
+          </label>
+          {/* T-INTENT: نقدي/آجل في الرأس — مرآة مفتاح فاتورة البيع. كان مدفوناً
+              في تبويب المحاسبة وحده، فيدفع المشتري وهو لا يرى نوع فاتورته. */}
+          <label className="aseel-field aseel-field--inline">
+            <input
+              type="checkbox"
+              data-testid="purchase-payment-type"
+              disabled={effectiveReadOnly}
+              checked={formData.paymentType === "cash"}
+              onChange={(e) => {
+                setFormData((prev) => ({
+                  ...prev,
+                  paymentType: e.target.checked ? "cash" : "credit",
+                }));
+                markDirty();
+              }}
+            />
+            <span className="aseel-field-label" style={{ flex: "unset" }}>
+              نقدي
+            </span>
+            <span
+              className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                formData.paymentType === "cash"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-slate-100 text-slate-700"
+              }`}
+            >
+              {formData.paymentType === "cash" ? "تُدفع فوراً" : "على ذمم المورّد"}
             </span>
           </label>
         </>
@@ -3091,6 +3368,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </div>
         {/* T-APPAY: لوحة الدفع خارج حاوية الإدخال قصداً — الفاتورة المرحّلة
             تُفتح في وضع العرض حيث تلك الحاوية مخفيّة، ودفعُها من هنا نفسه. */}
+        {paymentsSection}
         {payPanel}
     </AseelDocumentShell>
 
@@ -3139,7 +3417,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     {showItemSearch && (
       <ItemSearchModal
         isOpen={showItemSearch}
-        onClose={() => setShowItemSearch(false)}
+        initialSearch={pickerQuery}
+        onClose={() => { setShowItemSearch(false); setPickerQuery(""); }}
         onSelectItem={handleItemSelect}
         items={allDbItems}
         supplierId={formData.supplierId}

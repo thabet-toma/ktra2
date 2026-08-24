@@ -497,14 +497,13 @@ class SalesInvoice(models.Model):
         help_text="نسبة الخصم على مستوى الفاتورة (0-100)",
     )
 
-    # M2-T3: Attached payment voucher (cash side; cheques attach via Cheque.sales_invoice FK).
-    # When the operator records cash/cheques alongside the invoice, these fields
-    # capture the cash portion. The integrated journal posts cash + cheques as
-    # additional Dr lines, reducing the AR remainder.
+    # T-INTENT: نيّة الدفع النقدي على المسودة (الشيكات تُرفَق بـCheque.sales_invoice).
+    # ليست تحصيلاً: لا قيد ولا `amount_paid` ولا أثر على رصيد العميل حتى الترحيل،
+    # وعنده يكنسها `_settle_attached_cheques` مع الشيكات في **سند قبض واحد**.
     attached_cash_amount = models.DecimalField(
         max_digits=18, decimal_places=2, default=0,
         db_column="AttachedCashAmount",
-        help_text="مبلغ نقدي مرفق مع الفاتورة (يُحسم من ذمم العميل ويُرحَّل ضمن نفس قيد الفاتورة)",
+        help_text="نيّة دفع نقدي مرفقة بالمسودة — تتجسّد سند قبض عند ترحيل الفاتورة",
     )
     attached_cash_account = models.ForeignKey(
         Account,
@@ -512,7 +511,7 @@ class SalesInvoice(models.Model):
         null=True, blank=True,
         db_column="AttachedCashAccountID",
         related_name="sales_invoices_attached_cash",
-        help_text="حساب الصندوق/البنك الذي استلم المبلغ النقدي المرفق",
+        help_text="حساب الصندوق/البنك الذي سيستلم المبلغ النقدي المرفق",
     )
 
     # M2-T4: per-invoice OVERRIDE of source discount (نسبة/مبلغ خصم المصدر).

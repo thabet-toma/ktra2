@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models.functions import Coalesce
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError as DRFValidationError
@@ -144,6 +145,30 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
             from accounting.services import annotate_partner_posted_balance
             qs = annotate_partner_posted_balance(
                 qs, "customer_id", supplier=False, alias="customer_balance",
+            )
+        else:
+            # T-INTENT: مجموع الشيكات المرفقة يُحقن مرّةً للصفحة كلّها، فتقرأه
+            # `invoice_pending_payment_total` بلا استعلامٍ لكل صفّ.
+            from accounting.models import Cheque
+
+            # Coalesce لا لتجميل الصفر: بدونه يعود التعليق `None` للفاتورة بلا
+            # شيكات فيسقط المُسلسِل إلى الاستعلام الاحتياطي لكل صفّ — أي عكس
+            # الغاية تماماً.
+            qs = qs.annotate(
+                pending_cheques_total=Coalesce(
+                    models.Subquery(
+                        Cheque.objects.filter(
+                            sales_invoice_id=models.OuterRef("pk"), status="Draft",
+                            customer_payment__isnull=True,
+                        )
+                        .values("sales_invoice_id")
+                        .annotate(total=models.Sum("amount"))
+                        .values("total")[:1],
+                        output_field=models.DecimalField(max_digits=18, decimal_places=2),
+                    ),
+                    models.Value(Decimal("0.00")),
+                    output_field=models.DecimalField(max_digits=18, decimal_places=2),
+                ),
             )
         # task11 M4: الفرع النشط يرى فواتيره فقط (الرئيسي يشمل القديمة بلا فرع)
         branch = get_branch(self.request, tenant)
@@ -333,6 +358,15 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                 {"error": "؛ ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST
             )
         inv_id, inv_no, customer_id = instance.id, instance.invoice_number, instance.customer_id
+        # T-INTENT: شيكات النيّة تموت مع مستندها. الرابط `SET_NULL`، فبدون هذا
+        # يترك حذفُ المسودة شيكاتٍ مسودةً يتيمة لا يراها أحد ولا يكنسها شيء —
+        # وكان الحارس القديم يمنع الحذف كلّه (برسالة إلغاء ترحيلٍ لا معنى لها
+        # هنا) لمجرّد وجودها.
+        from accounting.models import Cheque
+
+        Cheque.objects.filter(
+            sales_invoice=instance, status="Draft", customer_payment__isnull=True,
+        ).delete()
         response = super().destroy(request, *args, **kwargs)
         log_activity(
             action="delete", entity_type="sales_invoice", entity_id=inv_id,
@@ -578,7 +612,7 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="payment-voucher")
     @requires_perm("sales.payment.create")
     def payment_voucher(self, request, pk=None):
-        """M2-T3 — Attach the financial voucher (cheques) to the invoice.
+        """T-INTENT — يربط نيّة الدفع (نقد + شيكات) بمسودة الفاتورة.
 
         Body:
             {
@@ -589,17 +623,13 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                      "due_date": "2026-06-01", "issue_date": "2026-05-20", "notes": ""}
                 ]
             }
-        Replaces previously-attached DRAFT cheques. Posting still happens via
-        the `/post` endpoint, which produces ONE integrated journal (M2-T3).
+        بدلالة الاستبدال: كل نداء يحلّ محلّ ما سبقه، و`{cash_amount: 0,
+        cheques: []}` يمسح النيّة. لا قيد ولا سند ولا `amount_paid` هنا —
+        الترحيل يكنس النيّة في **سند قبض واحد** (`_settle_attached_cheques`).
 
-        P-H-5: pass `"post": true` in the body to atomically attach + post in
-        a single `transaction.atomic()` so a post failure rolls the cheques
-        back too. Default `post: false` preserves the prior two-step flow.
-
-        T2: شكل النقطة محفوظ لأي مستهلك خارجي، لكنها صارت غلافاً فوق منسّق
-        التحصيل — فالنقد يصير سند قبض حقيقياً بدل عمود لا يُرحَّل — واكتسبت فحص
-        الصلاحية الذي كانت وحدها بين أخواتها بلا فحص. المفضَّل للجديد:
-        `invoices/{id}/collect/`.
+        P-H-5: مرّر `"post": true` فيُربط ويُرحَّل ذرّياً في
+        `transaction.atomic()` واحد عبر منسّق التحصيل (`attach_voucher_and_post`).
+        للتحصيل الفوري المفصَّل (رصيد العميل، تاريخ دفع): `invoices/{id}/collect/`.
         """
         invoice = self.get_object()
         want_post = bool(request.data.get("post"))

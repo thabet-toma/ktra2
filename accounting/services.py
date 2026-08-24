@@ -1680,6 +1680,11 @@ DOCUMENT_POSTED_MOVEMENT = {'Incoming': 'receive', 'Outgoing': 'issue'}
 #: بعد الترحيل (تحصيل، ارتداد، تظهير…) وله قيده الخاص.
 DOCUMENT_REVERSIBLE_STATUSES = ('Received', 'Under_Collection')
 
+# T-INTENT: «مسودة» ليست حركةً بعد الترحيل بل حالُ ما قبل الدفاتر — لا قيد لها
+# ولا شيء فيها يُعكَس. الحارس أدناه كان يعدّها مانعاً، فورقةٌ عادت مسودةً
+# (أو لم تُرحَّل أصلاً) تمنع إلغاء ترحيل مستندها بلا سبب.
+DOCUMENT_UNPOST_SAFE_STATUSES = ('Draft',) + DOCUMENT_REVERSIBLE_STATUSES
+
 
 def record_document_cheque_posting(cheques, *, journal=None, user=None):
     """ترحيل السند يحرّك شيكاته المسودة — الحالة **وصفّ حركة** مربوط بقيده.
@@ -1747,8 +1752,9 @@ def guard_document_cheques_before_unpost(
     حساب الشيكات يصير سالباً، والعميل يعود مديناً رغم أن النقد في البنك.
 
     مانعان مستقلان:
-      1. **الحالة** — أي حالة خارج `Received`/`Under_Collection` تعني حدثاً
-         مالياً مستقلاً وقع بعد الترحيل.
+      1. **الحالة** — أي حالة خارج `Draft`/`Received`/`Under_Collection` تعني
+         حدثاً مالياً مستقلاً وقع بعد الترحيل. «مسودة» حالُ ما قبل الدفاتر فلا
+         تمنع شيئاً.
       2. **قيد حركة مرحَّل** — الورقة قد تبقى `Under_Collection` ولها قيد
          `CHEQUE_DEPOSIT` مستقل (1107 ÷ 1109): حذف قيد السند وحده يترك 1109
          سالباً. حركات المستند نفسه (`receive`/`issue`/`revert`) مستثناة.
@@ -1758,7 +1764,7 @@ def guard_document_cheques_before_unpost(
     """
     from .models import ChequeMovement
 
-    rows = [c for c in cheques if c.status not in DOCUMENT_REVERSIBLE_STATUSES]
+    rows = [c for c in cheques if c.status not in DOCUMENT_UNPOST_SAFE_STATUSES]
     blocked = {c.pk: c for c in rows}
     reversible_ids = [c.pk for c in cheques if c.pk not in blocked]
     if reversible_ids:

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  attachSalesInvoiceIntent,
   createSalesInvoice,
   collectSalesInvoice,
   duplicateSalesInvoice,
@@ -13,7 +14,9 @@ import {
   patchSalesInvoice,
   postSalesInvoice,
   unpostSalesInvoice,
+  type AttachedCheque,
   type CreditPreviewResponse,
+  type InvoiceIntentPayload,
   type ReservedStockRow,
   type SalesInvoiceDetail,
   type SalesInvoiceRow,
@@ -27,7 +30,9 @@ import { useStaleConfirm } from "../offline/StaleDataConfirm";
 import {
   DocumentPaymentPanel,
   deriveDocumentPayment,
+  deriveInvoiceSettlement,
 } from "../shared/DocumentPaymentPanel";
+import { InvoicePaymentsSection } from "../shared/InvoicePaymentsSection";
 import { DocumentPaymentsTab } from "../shared/DocumentPaymentsTab";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { EntityActivityLog } from "../activity/EntityActivityLog";
@@ -96,7 +101,7 @@ import { ItemQuickEditModal } from "../items/ItemQuickEditModal";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
 import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
-import { formatDateLocalized, formatDateTimeValue } from "../../utils/formatDate";
+import { formatDateTimeValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { FieldError } from "../ui/FieldError";
 import {
@@ -138,6 +143,8 @@ export type PartnerRow = {
   id: number;
   name: string;
   partner_type: string;
+  /** يصل من `partners/lookup/` — يُبحَث فيه ولا يُعرض في السطر. */
+  phone?: string | null;
   credit_limit?: string | null;
   /** M5: customer's linked GL account — enables ledger drill-down. */
   linked_account?: number | null;
@@ -434,6 +441,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [postedJournalId, setPostedJournalId] = useState<number | null>(null);
   // task18: المدفوع/الإجمالي المحفوظان — لحساب المتبقي عند تسجيل سند قبض على فاتورة مرحّلة.
   const [paidAmount, setPaidAmount] = useState(0);
+  // T-INTENT: الدفعة المرفقة بالمسودة — مسجَّلة ولم تدخل الدفاتر بعد.
+  const [pendingIntent, setPendingIntent] = useState(0);
+  const [intentCash, setIntentCash] = useState(0);
+  const [intentCashAccountId, setIntentCashAccountId] = useState<number | null>(null);
+  const [attachedCheques, setAttachedCheques] = useState<AttachedCheque[]>([]);
   const [savedGrandTotal, setSavedGrandTotal] = useState(0);
   const [paymentStatusDisplay, setPaymentStatusDisplay] = useState("غير مدفوعة");
   // حالة تسليم البضاعة (تظهر للفاتورة التي لا تخصم المخزون عند الترحيل).
@@ -511,12 +523,22 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   /** خيارات الإكمال التلقائي لحقل العميل — الرقم سطرٌ ثانوي كي يبقى قابلاً للبحث. */
   const customerOptions = useMemo(
-    () => customers.map((c) => ({ id: c.id, label: c.name, sub: `#${c.id}` })),
+    // T-SEARCH: الهاتف والرقم يُبحَث فيهما — كان الاسم وحده، والبائع يعرف
+    // زبونه برقمه غالباً. الهاتف يصل من `partners/lookup/` أصلاً.
+    () => customers.map((c) => ({
+      id: c.id,
+      label: c.name,
+      sub: `#${c.id}`,
+      keywords: [String(c.id), c.phone || ""].filter(Boolean).join(" ").toLowerCase(),
+    })),
     [customers],
   );
 
   /** T-QUICKPARTY: الاسم المكتوب في حقل العميل يُحمل إلى نافذة الإضافة. */
   const [quickAddName, setQuickAddName] = useState("");
+
+  /** T-SEARCH: نصُّ البحث المنقول إلى الفهرس الكامل (من «+N أخرى» أو الباركود). */
+  const [pickerQuery, setPickerQuery] = useState("");
 
   /** حقل «بحث سريع/باركود»: محطة الإدخال التالية بعد حسم العميل، وهدف F6.
    *  مؤجَّل دورةً كي لا تسحب إعادةُ الرسم بعد إغلاق القائمة التركيزَ منه. */
@@ -1010,6 +1032,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setInvoiceStatus(d.status || "draft");
     setPostedJournalId(d.journal ?? null);
     setPaidAmount(Number((d as { amount_paid?: number | string }).amount_paid ?? 0));
+    setPendingIntent(
+      Number((d as { pending_payment_total?: number | string }).pending_payment_total ?? 0),
+    );
+    setIntentCash(Number(d.attached_cash_amount ?? 0));
+    setIntentCashAccountId(d.attached_cash_account ?? null);
+    setAttachedCheques(d.cheques || []);
     setSavedGrandTotal(Number((d as { grand_total?: number | string }).grand_total ?? 0));
     setPaymentStatusDisplay(d.payment_status_display || "غير مدفوعة");
     setDeliveryStatusDisplay(d.delivery_status_display || "غير مسلَّمة");
@@ -1524,9 +1552,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     try {
       if (dirtyRef.current) await patchSalesInvoice(targetId, buildPayload());
       const posted = await postSalesInvoice(targetId);
-      setInvoiceStatus(posted.status || "posted");
-      setPostedJournalId(posted.journal ?? null);
-      // T-CASH2: تسوية البيع النقدي تتمّ خادمياً ذرّياً مع الترحيل (سند قبض مستقل).
+      // T-CASH2: تسوية البيع النقدي تتمّ خادمياً ذرّياً مع الترحيل (سند قبض مستقل)،
+      // فالردّ يحمل المحصَّل وحالة الدفع الجديدين — نطبّقه كاملاً لا حالةً وقيداً فقط،
+      // وإلا بقيت الشاشة تقول «غير مدفوعة» حتى إعادة التحميل.
+      applyDetail(posted);
       setMsg(
         posted.journal
           ? `تم الترحيل — القيد #${posted.journal}`
@@ -1558,8 +1587,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setPosting(true);
     try {
       const inv = await unpostSalesInvoice(draftId);
-      setInvoiceStatus(inv.status || "draft");
-      setPostedJournalId(inv.journal ?? null);
+      // الخادم يصفّر المحصَّل عند إلغاء الترحيل — نطبّق الردّ كاملاً كي لا يبقى
+      // «المحصَّل» القديم معروضاً على فاتورةٍ عادت مسودة.
+      applyDetail(inv);
       setMsg("تم التراجع عن الترحيل وحذف القيود. الفاتورة الآن مسودة.");
       onInvoiceSaved();
     } catch (e) {
@@ -1575,6 +1605,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setInvoiceStatus("draft");
     setPostedJournalId(null);
     setPaidAmount(0);
+    setPendingIntent(0);
+    setIntentCash(0);
+    setIntentCashAccountId(null);
+    setAttachedCheques([]);
     setSavedGrandTotal(0);
     setPaymentStatusDisplay("غير مدفوعة");
     setDeliveryStatusDisplay("غير مسلَّمة");
@@ -1931,10 +1965,23 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId]);
 
+  /**
+   * T-SEARCH: المسح يُدخل السطر، والفشل **يقول لماذا**.
+   *
+   * كان الفشل صمتاً تاماً: المطابقة تامّةٌ على الباركود/الـSKU/المعرّف وحدها،
+   * فباركودٌ فيه فراغٌ زائد أو اسمٌ مكتوب باليد لا يفعل شيئاً ولا يعتذر —
+   * والمستخدم يظنّ الشاشة معطّلة. الآن: تطابقٌ تامّ ⇒ سطر، وإلا فبحثٌ في
+   * الفهرس الكامل بالنصّ نفسه مع رسالة تسمّي ما جرى.
+   */
   const handleBarcodeEnter = (raw: string) => {
     const t = raw.trim();
     if (!t) return;
-    const byBar = products.find((p) => (p.barcode || "").trim() === t || p.sku === t || String(p.id) === t);
+    const norm = t.toLowerCase();
+    const byBar = products.find(
+      (p) => (p.barcode || "").trim().toLowerCase() === norm
+        || (p.sku || "").trim().toLowerCase() === norm
+        || String(p.id) === t,
+    );
     if (byBar) {
       const emptyIdx = lines.findIndex((l) => l.product === "");
       let key = "";
@@ -1947,7 +1994,18 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       }
       onSelectProduct(key, byBar.id);
       setProductFilter("");
+      return;
     }
+    // لا تطابق تامّ: افتح الفهرس مُصفّىً بالنصّ بدل أن يبتلعه الصمت.
+    const emptyIdx = lines.findIndex((l) => l.product === "");
+    const targetKey = emptyIdx >= 0 ? lines[emptyIdx].key : (() => {
+      const newLine = makeEmptyLine();
+      setLines((prev) => [...prev, newLine]);
+      return newLine.key;
+    })();
+    setPickerQuery(t);
+    setProductPickerLineKey(targetKey);
+    setMsg(`لا صنف بالباركود/الرقم «${t}» — ابحث في الفهرس الكامل.`);
   };
 
   // G1: عرض موحّد بلا أصفار عشرية زائدة (مع فاصل آلاف للمبالغ).
@@ -2259,6 +2317,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         price,
         priceLabel,
         prices,
+        // T-SEARCH: رقم الصنف وباركوده يُبحَث فيهما ولا يُعرضان — كانا يصلان
+        // الشاشة في البيانات ولا يجدهما البحث المدمج أبداً، فيضطرّ البائع لفتح
+        // الفهرس الكامل لكل مسحة باركود.
+        keywords: [p.sku, p.barcode].filter(Boolean).join(" ").toLowerCase(),
       };
     }),
     [products, customerPriceMap, reservationIndex],
@@ -2292,6 +2354,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }}
         onInfo={(id) => { setCardCanAdd(false); setCardProductId(Number(id)); }}
         onEdit={readOnly ? undefined : (id) => setQuickEditProductId(Number(id))}
+        onShowMore={(q) => { setPickerQuery(q); setProductPickerLineKey(row.key); }}
       />
       {/* DEF-008: أيقونة (i) بجانب المنتج المختار على السطر → بطاقة الصنف */}
       {selectedId != null && (
@@ -2551,9 +2614,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   /* ───────────── T4/T-APPAY: حساب لوحة الدفع ─────────────
      الاشتقاق كلّه في `deriveDocumentPayment` المشتركة مع محرّر الشراء — نسخةٌ
      ثانية من هذه الحسبة تعني «متبقّياً» يختلف بين شاشتين. */
-  const remainingDue = Math.max(savedGrandTotal - paidAmount, 0);
   /** أساس الاحتساب: المرحّلة من إجماليها المحفوظ، والمسودة من إجمالي الشاشة. */
   const collectBase = isPosted ? savedGrandTotal : totals.grandTotal;
+  /* T-INTENT: تسوية المستند نفسه من مشتقّةٍ واحدة يقرأها الشريط وعرضُ المستند
+     والطباعة — بدل أربع حسبات كانت تفترق بصمت. */
+  const settlement = useMemo(() => deriveInvoiceSettlement({
+    grandTotal: collectBase,
+    paid: paidAmount,
+    pendingIntent,
+    isPosted,
+  }), [collectBase, paidAmount, pendingIntent, isPosted]);
+  const remainingDue = settlement.remaining;
   const paymentInput = useMemo(() => ({
     base: collectBase,
     paid: paidAmount,
@@ -2610,6 +2681,130 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setCollectCheques([]);
     setChequesOpen(false);
     setCollectFromBalance("");
+  };
+
+  /**
+   * T-INTENT: يكتب نيّة الدفع على المسودة — بدلالة الاستبدال، فالنداء يحمل
+   * **الصورة الكاملة** للنيّة لا الفرق. مصدرٌ واحد يخدم الحفظ والتعديل والحذف.
+   */
+  const writeIntent = async (
+    intent: {
+      cash: number;
+      cashAccountId: number | null;
+      cheques: InvoiceIntentPayload["cheques"];
+    },
+    successMsg: string,
+  ): Promise<boolean> => {
+    let targetId = draftId;
+    if (!targetId) {
+      const saved = await handleSaveDraft();
+      if (!saved) return false;
+      targetId = saved.id;
+    }
+    setCollecting(true);
+    try {
+      const detail = await attachSalesInvoiceIntent(targetId, {
+        cash_amount: intent.cash.toFixed(2),
+        ...(intent.cash > 0 && intent.cashAccountId
+          ? { cash_account_id: intent.cashAccountId }
+          : {}),
+        cheques: intent.cheques,
+      });
+      applyDetail(detail);
+      resetCollectInputs();
+      setMsg(successMsg);
+      onInvoiceSaved();
+      return true;
+    } catch (e) {
+      setLocalErr(humanizeThrown(e, "تعذّر حفظ الدفعة على المسودة"));
+      return false;
+    } finally {
+      setCollecting(false);
+    }
+  };
+
+  /** الشيكات المرفقة بالمسودة كما يعيدها الخادم — صفوف النيّة في الجدول. */
+  const intentCheques = useMemo(
+    () => (attachedCheques || []).filter((c) => c.status === "Draft"),
+    [attachedCheques],
+  );
+
+  /** صورة النيّة الحالية بصيغة الإرسال — أساسُ كل تعديل عليها. */
+  const currentIntentCheques = (): InvoiceIntentPayload["cheques"] => intentCheques.map((c) => ({
+    cheque_number: c.cheque_number,
+    amount: Number(c.amount).toFixed(2),
+    due_date: c.due_date || null,
+    bank_name: c.bank_name || "",
+  }));
+
+  const saveIntentFromPanel = () => {
+    if (customerId === "") { setLocalErr("اختر العميل أولاً."); return; }
+    if (collectCashNum > 0 && collectCashAccountId === "") {
+      setLocalErr("اختر حساب الصندوق أو البنك للمبلغ النقدي.");
+      return;
+    }
+    if (collectChequeError) { setLocalErr(collectChequeError); return; }
+    setLocalErr(null);
+    setMsg(null);
+    // اللوحة تضيف إلى النيّة القائمة لا تستبدلها — وإلا محا إدخالُ شيكٍ ثانٍ الأول.
+    void writeIntent(
+      {
+        cash: intentCash + collectCashNum,
+        cashAccountId:
+          collectCashAccountId !== "" ? Number(collectCashAccountId) : intentCashAccountId,
+        cheques: [
+          ...currentIntentCheques(),
+          ...collectCheques.map((row) => ({
+            cheque_number: row.cheque_number.trim(),
+            amount: (Number(row.amount) || 0).toFixed(2),
+            due_date: row.due_date || null,
+            bank_name: row.bank_name.trim(),
+          })),
+        ],
+      },
+      "حُفِظت الدفعة على المسودة — تتحوّل إلى سند قبض عند الترحيل.",
+    );
+  };
+
+  /** التعديل = سحب النيّة إلى اللوحة ومسحها من المستند، فيعيد المستخدم بناءها. */
+  const editIntent = () => {
+    setCollectCash(intentCash > 0 ? intentCash.toFixed(2) : "");
+    if (intentCashAccountId) setCollectCashAccountId(intentCashAccountId);
+    setCollectCheques(intentCheques.map((c) => ({
+      key: newLineKey(),
+      cheque_number: c.cheque_number,
+      bank_name: c.bank_name || "",
+      due_date: c.due_date || "",
+      amount: String(c.amount),
+    })));
+    setChequesOpen(intentCheques.length > 0);
+    void writeIntent({ cash: 0, cashAccountId: null, cheques: [] }, "عدّل الدفعة ثم احفظها.");
+    focusCollectPanel();
+  };
+
+  const removeIntentCash = () => {
+    void writeIntent(
+      { cash: 0, cashAccountId: null, cheques: currentIntentCheques() },
+      "حُذِفت الدفعة النقدية من المسودة.",
+    );
+  };
+
+  const removeIntentCheque = (chequeId: number) => {
+    void writeIntent(
+      {
+        cash: intentCash,
+        cashAccountId: intentCashAccountId,
+        cheques: intentCheques
+          .filter((c) => c.id !== chequeId)
+          .map((c) => ({
+            cheque_number: c.cheque_number,
+            amount: Number(c.amount).toFixed(2),
+            due_date: c.due_date || null,
+            bank_name: c.bank_name || "",
+          })),
+      },
+      "حُذِف الشيك من المسودة.",
+    );
   };
 
   /**
@@ -3096,8 +3291,20 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         ...(!isReturn
           ? [
             { label: "المدفوع المرحّل", value: money(paidAmount), tone: "ok" as const },
-            { label: "المتبقي", value: money(Math.max(savedGrandTotal - paidAmount, 0)), tone: "warn" as const },
-            { label: "حالة الدفع", value: paymentStatusDisplay },
+            ...(settlement.pendingIntent > 0.009
+              ? [{
+                label: "دفعة غير مرحّلة",
+                value: money(settlement.pendingIntent),
+                tone: "warn" as const,
+              }]
+              : []),
+            { label: "المتبقي", value: money(settlement.remainingAfterIntent), tone: "warn" as const },
+            {
+              label: "حالة الدفع",
+              value: settlement.intentCoversAll
+                ? "مدفوعة — غير مرحّلة"
+                : paymentStatusDisplay,
+            },
             // التسليم بُعد مستقل — يُعرض فقط حين لا يُخصم المخزون مع الترحيل.
             ...(isPosted && !stockOnPost
               ? [{ label: "حالة التسليم", value: deliveryStatusDisplay }]
@@ -3235,7 +3442,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         ...(!isReturn
           ? [
             { label: "المدفوع المرحّل", value: money(paidAmount) },
-            { label: "المتبقي", value: money(Math.max(savedGrandTotal - paidAmount, 0)), tone: "warn" as const },
+            ...(settlement.pendingIntent > 0.009
+              ? [{ label: "دفعة غير مرحّلة", value: money(settlement.pendingIntent) }]
+              : []),
+            { label: "المتبقي", value: money(settlement.remainingAfterIntent), tone: "warn" as const },
           ]
           : []),
         /* THA-132: أُزيل هنا سطرا «رصيد العميل قبل/بعد». كانا يُشتقّان من
@@ -3245,51 +3455,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
            الصحيح — من كشف الحساب نفسه — في تبويب «حساب العميل». */
       ]}
       sections={[
-        ...(isReturn ? [] : [{
-          key: "payments",
-          title: `تفاصيل سندات القبض (${paymentDetails?.length || 0})`,
-          content: paymentDetails?.length ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--color-border)] text-[var(--color-text-muted)]">
-                    <th className="p-2 text-right">السند</th>
-                    <th className="p-2 text-right">التاريخ</th>
-                    <th className="p-2 text-right">المبلغ المخصص</th>
-                    <th className="p-2 text-right">الحالة</th>
-                    <th className="p-2 text-right">قيد اليومية</th>
-                    <th className="p-2 text-center">طباعة</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paymentDetails.map((payment) => (
-                    <tr key={payment.id} className="border-b border-[var(--color-border)]">
-                      <td className="p-2">سند قبض #{payment.id}</td>
-                      <td className="p-2">{formatDateLocalized(payment.payment_date)}</td>
-                      <td className="p-2">{money(Number(payment.allocated_amount))}</td>
-                      <td className="p-2">{payment.is_posted ? "مرحّل" : "غير مرحّل"}</td>
-                      <td className="p-2">{payment.journal ? `#${payment.journal}` : "—"}</td>
-                      <td className="p-2 text-center">
-                        <button
-                          type="button"
-                          className="aseel-toolbtn"
-                          aria-label={`طباعة سند القبض #${payment.id}`}
-                          title={`طباعة سند القبض #${payment.id}`}
-                          onClick={() => {
-                            const path = entityPathForReference("CUSTOMER_PAYMENT", payment.id);
-                            if (path) openInNewTab(path);
-                          }}
-                        >
-                          <Printer className="h-3 w-3" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : "لا توجد سندات قبض مخصصة لهذه الفاتورة.",
-        }]),
+        /* T-INTENT: جدول السندات انتقل إلى `InvoicePaymentsSection` المشترك
+           ويُعرض في وضعَي التحرير والعرض معاً — كان هنا وحده، أي أنّ من يحرّر
+           فاتورته لا يرى دفعاتها إطلاقاً. وزرُّ «طباعة السند» كان يفتح قائمة
+           السندات لا السند. */
         ...(notes ? [{ key: "notes", title: isReturn ? "سبب المرجوع / ملاحظات" : "ملاحظات", content: notes }] : []),
       ]}
     />
@@ -3299,9 +3468,38 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
      صفٌّ واحد: «المدفوع نقداً» · «المدفوع شيكات» · «من رصيد العميل» ·
      «المتبقي» مشتقّاً للقراءة فقط. تُعرض خارج منطقة الإدخال المخفيّة في وضع
      العرض، فالتحصيل على فاتورة مرحّلة يجري من نفس المكان تماماً. */
+  /* T-INTENT: جدول دفعات الفاتورة — يظهر في وضعَي التحرير والعرض على كل فاتورة
+     (لا على المرحّلة وحدها)، فمن سجّل دفعةً على مسودته يراها فوراً. */
+  const paymentsSection = isReturn ? null : (
+    <InvoicePaymentsSection
+      side="customer"
+      posted={paymentDetails || []}
+      intentCash={intentCash}
+      intentCashAccountLabel={
+        intentCashAccountId
+          ? accountsById.get(intentCashAccountId)?.name || undefined
+          : undefined
+      }
+      intentCheques={intentCheques}
+      settlement={settlement}
+      paid={paidAmount}
+      editable={!isPosted && canPerm("sales.payment.create")}
+      busy={collecting}
+      onAddPayment={focusCollectPanel}
+      onEditIntent={editIntent}
+      onRemoveIntentCash={removeIntentCash}
+      onRemoveIntentCheque={removeIntentCheque}
+      onOpenVoucher={(paymentId) => {
+        const path = entityPathForReference("CUSTOMER_PAYMENT", paymentId);
+        if (path) openInNewTab(path);
+      }}
+    />
+  );
+
   const collectPanel = !showCollectPanel ? null : (
     <DocumentPaymentPanel
       side="customer"
+      onSaveIntent={saveIntentFromPanel}
       derived={payment}
       input={paymentInput}
       isPosted={isPosted}
@@ -3754,10 +3952,21 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               <span className="aseel-total-value">{fmt(paidAmount)}</span>
             </div>
 
+            {/* T-INTENT: الدفعة المسجَّلة على المسودة تُعرَض موسومةً بأنها لم
+                تدخل الدفاتر — لا تُخلط بالمحصَّل ولا تُخفى عن صاحبها. */}
+            {settlement.pendingIntent > 0.009 && (
+              <div className="aseel-total-row">
+                <span>دفعة غير مرحّلة</span>
+                <span className="aseel-total-value text-amber-600">
+                  {fmt(settlement.pendingIntent)}
+                </span>
+              </div>
+            )}
+
             <div className="aseel-total-row">
               <span>المتبقي على الحساب</span>
               <span className="aseel-total-value">
-                {fmt(isPosted ? remainingDue : totals.grandTotal - paidAmount)}
+                {fmt(settlement.remainingAfterIntent)}
               </span>
             </div>
           </>
@@ -3850,6 +4059,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           </div>
         {/* T4: لوحة التحصيل خارج حاوية الإدخال قصداً — الفاتورة المرحّلة تُفتح في
             وضع العرض حيث تلك الحاوية مخفيّة، وتحصيلها من هنا نفسه. */}
+        {paymentsSection}
         {collectPanel}
       </AseelDocumentShell>
 
@@ -3953,6 +4163,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       <SalesProductPickerModal
         isOpen={productPickerLineKey !== null}
         products={products}
+        // T-SEARCH: يفتح على نفس ما كتبه المستخدم — «+N أخرى» أو فشل الباركود
+        // ينقلان الاستعلام بدل أن يبدأ من صفحة بيضاء.
+        initialSearch={pickerQuery}
         onSelect={(productId) => {
           if (productPickerLineKey) onSelectProduct(productPickerLineKey, productId);
           setProductPickerLineKey(null);
@@ -4041,7 +4254,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             notes,
             currencyCode: currencyId !== "" ? currencies.find((c) => c.CurrencyID === currencyId)?.Code : undefined,
             amountPaid: paidAmount,
-            remainingBalance: Math.max(savedGrandTotal - paidAmount, 0),
+            // الطباعة مستندٌ يُسلَّم للعميل: المتبقّي فيه حقيقةُ الدفاتر
+            // (المرحّل وحده) لا ما ينتظر الترحيل.
+            remainingBalance: settlement.remaining,
             paymentStatusDisplay,
             customerBalanceBeforeInvoice,
             customerBalanceAfterInvoice,

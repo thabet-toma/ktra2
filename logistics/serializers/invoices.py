@@ -241,6 +241,11 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     remaining_balance = serializers.DecimalField(
         source='list_remaining_balance', max_digits=18, decimal_places=2, read_only=True,
     )
+    # T-INTENT: دفعةٌ مرفقة بمسودة لم تُرحَّل بعد — تُعرَض ولا تدخل «المدفوع».
+    pending_payment_total = serializers.DecimalField(
+        source='list_pending_payment_total', max_digits=18, decimal_places=2,
+        read_only=True,
+    )
     payment_status = serializers.CharField(source='list_payment_status', read_only=True)
     payment_status_display = serializers.SerializerMethodField()
     supplier_balance = serializers.DecimalField(
@@ -285,7 +290,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'subtotal', 'discount_amount', 'tax_rate', 'tax_amount',
             'grand_total', 'status', 'status_display',
             'fees_total', 'payable_total',
-            'amount_paid', 'remaining_balance',
+            'amount_paid', 'remaining_balance', 'pending_payment_total',
             'payment_status', 'payment_status_display', 'supplier_balance',
             'receipt_status', 'receipt_status_display',
             'is_posted', 'is_return', 'original_invoice', 'journal_id_display',
@@ -365,6 +370,8 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     # task16 C10: المبلغ المدفوع + المتبقي + حالة الدفع (مدفوعة/جزئياً/غير مدفوعة)
     amount_paid = serializers.SerializerMethodField()
     remaining_balance = serializers.SerializerMethodField()
+    # T-INTENT: دفعةٌ مرفقة بمسودة لم تُرحَّل بعد — تُعرَض ولا تدخل «المدفوع».
+    pending_payment_total = serializers.SerializerMethodField()
     # T-DUE: التأخّر بُعدٌ فوق حالة الدفع — مصدره `document_overdue_state`.
     is_overdue = serializers.SerializerMethodField()
     days_overdue = serializers.SerializerMethodField()
@@ -417,7 +424,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'grand_total',
             'payment_type',
             'cash_or_bank_account', 'cash_or_bank_account_name', 'cash_or_bank_account_code',
-            'attached_cash_amount',
+            'attached_cash_amount', 'attached_cash_account',
             # local_payments_json / conversion_metadata_json: dropped in P-D-8.
             # `to_representation` still emits the keys in the JSON payload from
             # the landed-cost live payload, but they are no longer model fields.
@@ -426,7 +433,8 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'receipt_status', 'receipt_status_display', 'is_local',
             'receipt_progress',
             'source_document',
-            'amount_paid', 'remaining_balance', 'payment_status', 'payment_status_display',
+            'amount_paid', 'remaining_balance', 'pending_payment_total',
+            'payment_status', 'payment_status_display',
             'supplier_balance_current', 'supplier_balance_before_invoice',
             'supplier_balance_after_invoice', 'payment_details',
             'fees_total', 'payable_total',
@@ -437,12 +445,12 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'quote_images', 'quote_pdfs',
             'created_at', 'updated_at', 'created_by',
         ]
-        # T-APPAID: `attached_cash_amount` عمودٌ قديم لا يقرؤه الترحيل — صار
-        # للقراءة فقط (مرآة `SalesInvoice`). كتابتُه كانت تُسجّل مالاً في
-        # الشاشة بلا أثرٍ في الدفاتر.
+        # T-INTENT: حقلا النيّة النقدية للقراءة فقط هنا — تُكتب من نقطة
+        # `attach-payment/` وحدها كي تبقى دلالة الاستبدال في مكان واحد
+        # (مرآة `SalesInvoice`).
         read_only_fields = ['id', 'is_posted', 'is_return', 'original_invoice',
                             'journal', 'created_at', 'updated_at', 'receipt_status',
-                            'attached_cash_amount']
+                            'attached_cash_amount', 'attached_cash_account']
 
     def get_is_local(self, obj):
         """فاتورة محلية = غير مستوردة (بلا صفقة/شحنة/تخليص) — قابلة للاستلام للمخزن."""
@@ -519,6 +527,9 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
 
     def get_remaining_balance(self, obj):
         return str(purchase_invoice_payment_summary(obj)['remaining_balance'])
+
+    def get_pending_payment_total(self, obj):
+        return str(purchase_invoice_payment_summary(obj)['pending_payment_total'])
 
     def get_payment_status(self, obj):
         return purchase_invoice_payment_summary(obj)['payment_status']

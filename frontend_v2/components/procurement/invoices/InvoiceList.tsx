@@ -11,6 +11,7 @@ import { openInNewTab } from "@/utils/openInNewTab";
 import { clientLogger } from "../../../services/logger";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { PaymentStatusBadge } from "../../shared/PaymentStatusBadge";
+import { deriveInvoiceSettlement } from "../../shared/DocumentPaymentPanel";
 import {
   Plus,
   RefreshCw,
@@ -28,6 +29,14 @@ import {
   type DenseColumn,
   type AseelToolbarAction,
 } from "../../aseel";
+
+/** T-INTENT: تسوية صفّ القائمة من المشتقّة المشتركة — نفس رقم المحرّر. */
+const rowSettlement = (r: Invoice) => deriveInvoiceSettlement({
+  grandTotal: Number(r.payableTotal ?? r.grandTotal ?? 0),
+  paid: Number(r.amountPaid || 0),
+  pendingIntent: Number(r.pendingPaymentTotal || 0),
+  isPosted: Boolean(r.isPosted),
+});
 
 interface InvoiceListProps {
   invoices: Invoice[];
@@ -312,14 +321,19 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       header: "حالة الدفع",
       width: "125px",
       align: "center",
-      render: (r) => (
-        <PaymentStatusBadge
-          status={r.paymentStatus}
-          label={r.paymentStatusDisplay}
-          isOverdue={r.isOverdue}
-          daysOverdue={r.daysOverdue}
-        />
-      ),
+      render: (r) => {
+        const settlement = rowSettlement(r);
+        return (
+          <PaymentStatusBadge
+            status={r.paymentStatus}
+            label={r.paymentStatusDisplay}
+            isOverdue={r.isOverdue}
+            daysOverdue={r.daysOverdue}
+            pendingIntent={settlement.pendingIntent}
+            intentCoversAll={settlement.intentCoversAll}
+          />
+        );
+      },
     },
     {
       key: "amountPaid",
@@ -336,7 +350,26 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       width: "100px",
       align: "left",
       numeric: true,
-      render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmtNum(r.remainingBalance)}</span>,
+      // T-INTENT: مسودةٌ سُجِّلت عليها دفعة تُظهر متبقّيها بعدها، موسوماً بأنه
+      // لم يدخل الدفاتر — وإلا كذّبت القائمةُ الشاشةَ التي أُدخلت فيها الدفعة.
+      render: (r) => {
+        const settlement = rowSettlement(r);
+        return (
+          <span className="inline-flex items-center gap-1">
+            <span className="aseel-num font-mono text-xs font-semibold">
+              {fmtNum(settlement.remainingAfterIntent)}
+            </span>
+            {settlement.pendingIntent > 0.009 && (
+              <span
+                title={`دفعة ${fmtNum(settlement.pendingIntent)} مسجَّلة ولم تُرحَّل بعد`}
+                className="inline-flex rounded bg-amber-500 px-1 py-0.5 text-[9px] font-bold text-white"
+              >
+                غير مرحّلة
+              </span>
+            )}
+          </span>
+        );
+      },
     },
     {
       key: "partnerBalance",
@@ -506,6 +539,12 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   const totalSum = filteredRows.reduce((s, r) => s + grandOf(r), 0);
   const postedCount = filteredRows.filter((r) => r.isPosted).length;
   const draftCount = filteredRows.length - postedCount;
+  /* T-INTENT: مجاميع المدفوع والمتبقّي في الشريط — كان جانب البيع وحده يجمعها،
+     فيغلق المشتري الشاشة وهو لا يعرف كم عليه للموردين في هذه الصفحة. */
+  const paidSum = filteredRows.reduce((s, r) => s + (Number(r.amountPaid) || 0), 0);
+  const balanceSum = filteredRows.reduce(
+    (s, r) => s + rowSettlement(r).remainingAfterIntent, 0,
+  );
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
@@ -520,6 +559,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             <span className="aseel-status-item">الإجمالي <b className="aseel-num">{fmtNum(totalSum)}</b></span>
             <span className="aseel-status-item" style={{ color: "var(--aseel-ok, #2d7d46)" }}>مرحَّلة <b>{postedCount}</b></span>
             <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b06800)" }}>مسودة <b>{draftCount}</b></span>
+            <span className="aseel-status-item">المدفوع <b className="aseel-num">{fmtNum(paidSum)}</b></span>
+            <span className="aseel-status-item">المتبقي للدفع <b className="aseel-num">{fmtNum(balanceSum)}</b></span>
           </>
         }
       >

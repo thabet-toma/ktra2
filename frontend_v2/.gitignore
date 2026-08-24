@@ -32,5 +32,6 @@ dist-ssr
 # لقطات تحقّق يدويّة — تُولَّد محلياً من specs مُتتبَّعة، لا مصدر.
 /e2e/cheque-lifecycle-shots/
 /e2e/collect-panel-shots/
+/e2e/payment-intent-shots/
 /e2e/pay-panel-shots/
 /e2e/receipt-remaining-shots/

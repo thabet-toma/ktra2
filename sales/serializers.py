@@ -33,6 +33,7 @@ from .models import (
 )
 from .services import (
     guard_loss_invoice,
+    invoice_pending_payment_total,
     next_credit_debit_note_number,
     next_invoice_number,
     recalculate_invoice_amounts,
@@ -152,6 +153,10 @@ class _SalesInvoicePaymentSummarySerializer(serializers.Serializer):
     days_overdue = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
     payment_status_display = serializers.SerializerMethodField()
+    # T-INTENT: دفعةٌ مرفقة بمسودة لم تُرحَّل بعد. لا تدخل `amount_paid` ولا
+    # `payment_status` — فما لم يُرحَّل ليس مدفوعاً في الدفاتر — لكن الفاتورة
+    # تعرضها كي لا تكذب شاشةٌ أدخل فيها المستخدم دفعةً فلم يرَ لها أثراً.
+    pending_payment_total = serializers.SerializerMethodField()
     customer_balance = serializers.DecimalField(
         max_digits=18, decimal_places=2, read_only=True,
     )
@@ -159,6 +164,9 @@ class _SalesInvoicePaymentSummarySerializer(serializers.Serializer):
     @staticmethod
     def _payment_summary(obj):
         return document_payment_summary(obj.grand_total, obj.amount_paid)
+
+    def get_pending_payment_total(self, obj) -> str:
+        return str(invoice_pending_payment_total(obj))
 
     def get_remaining_balance(self, obj):
         return str(self._payment_summary(obj)["remaining_balance"])
@@ -226,6 +234,7 @@ class SalesInvoiceListSerializer(
             "grand_total",
             "amount_paid",
             "remaining_balance",
+            "pending_payment_total",
             "payment_status",
             "payment_status_display",
             "customer_balance",
@@ -389,6 +398,7 @@ class SalesInvoiceSerializer(
             "grand_total",
             "amount_paid",
             "remaining_balance",
+            "pending_payment_total",
             "payment_status",
             "payment_status_display",
             "customer_balance",
@@ -432,6 +442,7 @@ class SalesInvoiceSerializer(
             "grand_total",
             "amount_paid",
             "remaining_balance",
+            "pending_payment_total",
             "payment_status",
             "payment_status_display",
             "customer_balance",

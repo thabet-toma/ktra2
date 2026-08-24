@@ -98,11 +98,12 @@ def attach_payment_voucher(
     - Nothing is posted here. T1: at post time the cheques are swept into a
       real posted `CustomerPayment` (`_settle_attached_cheques`) — they are NOT
       settled inside the invoice's own journal any more.
-    - T2: `cash_amount > 0` **مرفوض هنا**. كان يُكتب في `attached_cash_amount`
-      ولا يُرحَّل شيئاً إطلاقاً — مالٌ يدخل الصندوق ولا أثر له في الدفاتر. لا
-      وعاء للنقد على مسودة، فالنقد يمرّ من `collect_invoice_payment` الذي يُنشئ
-      سند قبض حقيقياً. العمودان يبقيان (قراءة قديمة) ويُصفَّران هنا فلا يبقى
-      رقمٌ قديم يخدع فحصَ «المرفق لا يتجاوز الإجمالي» عند الترحيل.
+    - T-INTENT: النقد يُحفَظ على المسودة **نيّةَ دفع** لا تحصيلاً. كان مرفوضاً
+      هنا لأنه كان يُكتب في العمود ولا يُرحَّل شيئاً — مالٌ يدخل الصندوق بلا أثر
+      في الدفاتر. الآن للنيّة مصير معلوم: `_settle_attached_cheques` يكنسها عند
+      ترحيل الفاتورة في **سند قبض واحد** مع الشيكات المرفقة، تماماً كما تُكنَس
+      الشيكات. فحتى الترحيل لا قيدَ ولا سند ولا `amount_paid` ولا أثر على رصيد
+      العميل — والواجهة تسمّيها «غير مرحّلة» صراحةً.
     - Idempotency: posting goes through `post_journal()` which deduplicates by
       (reference_type, reference_id). Calling this function multiple times
       pre-post just updates the attachment state.
@@ -124,12 +125,6 @@ def attach_payment_voucher(
     cash_amount = Decimal(str(cash_amount or 0)).quantize(DEC)
     if cash_amount < 0:
         raise ValidationError("مبلغ النقدي لا يمكن أن يكون سالباً.")
-    if cash_amount > 0:
-        raise ValidationError(
-            "المبلغ النقدي لا يُحفَظ على المسودة — كان يُسجَّل ولا يُرحَّل. "
-            "حصّل الفاتورة بـ«التحصيل» (`invoices/{id}/collect/`) أو أرسل "
-            "`post: true` مع السند، فيُنشأ سند قبض حقيقي."
-        )
 
     cheques = cheques or []
     cheques_total = _validate_cheque_payloads(cheques)
@@ -138,15 +133,26 @@ def attach_payment_voucher(
     if invoice.pk:
         recalculate_invoice_amounts(invoice)
     grand = Decimal(str(invoice.grand_total or 0)).quantize(DEC)
-    if cheques_total > grand:
+    intent_total = (cash_amount + cheques_total).quantize(DEC)
+    if intent_total > grand:
+        # النيّة وعدٌ على هذه الفاتورة وحدها؛ الفائض دفعةً مقدَّمة على الحساب
+        # يبقى من اختصاص `collect_invoice_payment` حيث يُرحَّل فعلاً.
         raise ValidationError(
-            f"مجموع شيكات السند ({cheques_total}) يتجاوز مبلغ الفاتورة {grand}."
+            f"مجموع الدفعة المرفقة ({intent_total}) يتجاوز مبلغ الفاتورة {grand}."
         )
+    cash_account_id = cash_account_id or None
+    if cash_amount > 0 and cash_account_id:
+        from accounting.models import Account
+
+        if not Account.objects.filter(
+            pk=cash_account_id, tenant_id=invoice.tenant_id
+        ).exists():
+            raise ValidationError("حساب الصندوق/البنك غير موجود في هذه الشركة.")
 
     with transaction.atomic():
-        # 1) T2: لا نقد على المسودة — والعمودان القديمان يُصفَّران مع كل إرفاق.
-        invoice.attached_cash_amount = Decimal("0.00")
-        invoice.attached_cash_account_id = None
+        # 1) T-INTENT: نيّة النقد تُحفَظ على المسودة ويكنسها الترحيل إلى سند واحد.
+        invoice.attached_cash_amount = cash_amount
+        invoice.attached_cash_account_id = cash_account_id if cash_amount > 0 else None
         invoice.save(update_fields=[
             "attached_cash_amount", "attached_cash_account",
         ])
@@ -231,6 +237,32 @@ def posted_allocations_total(invoice_id: int) -> Decimal:
     for amount, in_inv_currency in rows:
         total += Decimal(str(in_inv_currency if in_inv_currency is not None else amount))
     return total.quantize(DEC)
+
+
+def invoice_pending_payment_total(invoice: SalesInvoice) -> Decimal:
+    """T-INTENT: الدفعة المرفقة بمسودة — نقدٌ منويّ + شيكات مسودة، بلا ترحيل.
+
+    قاعدةٌ واحدة يقرأها التفصيل والقائمة معاً. لا تدخل `amount_paid` ولا تغيّر
+    `payment_status` — فما لم يُرحَّل ليس مدفوعاً في الدفاتر — لكنها تُعرَض على
+    الفاتورة نفسها كي لا تكذب شاشةٌ أدخل فيها المستخدم دفعةً ثم لم يرَ لها أثراً.
+
+    تقرأ `pending_cheques_total` المحقونة بالتعليق إن وُجدت، فلا استعلامٌ لكل صفّ
+    في القائمة.
+    """
+    if invoice.status != SalesInvoice.STATUS_DRAFT:
+        return Decimal("0.00")
+    cheques_total = getattr(invoice, "pending_cheques_total", None)
+    if cheques_total is None:
+        from accounting.models import Cheque
+
+        cheques_total = Cheque.objects.filter(
+            sales_invoice_id=invoice.pk, status="Draft",
+            customer_payment__isnull=True,
+        ).aggregate(total=Sum("amount"))["total"]
+    return (
+        Decimal(str(invoice.attached_cash_amount or 0))
+        + Decimal(str(cheques_total or 0))
+    ).quantize(DEC)
 
 
 def guard_invoice_allocation_total(invoice: SalesInvoice, *, incoming: Decimal) -> None:
@@ -470,7 +502,14 @@ def release_auto_cash_settlement(invoice: SalesInvoice, *, user=None) -> list[in
     المستخدم، فيُحذف مع قيوده ضمن نفس معاملة إلغاء الترحيل ويُعاد إنشاؤه عند
     إعادة الترحيل — وإلا بقي معلّقاً وتضاعف عند كل إعادة ترحيل. سندات المستخدم
     لا تُمَسّ: يحرسها `guard_invoice_payments_before_unpost`.
+
+    T-INTENT: شيكات السند تعود **مسودةً** قبل حذفه. كان الوصف يَعِد بذلك ولا
+    يفعله: الشيك يبقى «برسم التحصيل» بلا سندٍ يحمله (الرابط `SET_NULL`)، فلا
+    يكنسه الترحيل التالي ولا يظهر نيّةً على المسودة — تسويةٌ تضيع بصمت بين
+    إلغاء ترحيلٍ وإعادته.
     """
+    from accounting.services import record_document_cheque_unposting
+
     candidates = (
         CustomerPayment.objects.filter(tenant_id=invoice.tenant_id)
         .filter(
@@ -492,6 +531,7 @@ def release_auto_cash_settlement(invoice: SalesInvoice, *, user=None) -> list[in
                 user=user,
                 document_label=f"سند قبض تلقائي #{payment.id}",
             )
+        record_document_cheque_unposting(list(payment.cheques.all()), user=user)
         payment_id = payment.id
         payment.delete()  # صفوف التوزيع تُحذف تلقائياً (CASCADE)
         released.append(payment_id)
@@ -683,7 +723,8 @@ def _resolve_settlement_cash_account_id(invoice: SalesInvoice) -> int | None:
 
 
 def _settle_attached_cheques(invoice: SalesInvoice, *, user=None) -> None:
-    """T1: الشيكات المرفقة بالفاتورة تُحصَّل بسند قبض مملوك لها، لا داخل قيدها.
+    """T1: الدفعة المرفقة بالفاتورة (شيكات ± نقد) تُحصَّل بسند قبض مملوك لها،
+    لا داخل قيدها.
 
     قبل هذا كانت تُرحَّل سطرين في قيد الفاتورة نفسه (مدين شيكات برسم التحصيل /
     دائن ذمم) وتزيد `amount_paid` بلا صفّ `PaymentAllocation` واحد — فيقول
@@ -698,6 +739,10 @@ def _settle_attached_cheques(invoice: SalesInvoice, *, user=None) -> None:
     السند من إنتاج الترحيل لا من إنشاء المستخدم (`auto_settled_invoice`) ⇒
     يُحرَّر مع إلغاء ترحيل الفاتورة (`release_auto_cash_settlement`) وتعود
     شيكاته مسودةً، فلا يبقى دائن ذمم بلا مقابل ولا يتكرّر عند إعادة الترحيل.
+
+    T-INTENT: `attached_cash_amount` **لا يُمسح** عند الترحيل — هو سجلّ النيّة
+    الدائم، والتجسّد هو السند نفسه. فإلغاء الترحيل يحرّر السند ويعيد الشيكات
+    مسودةً وتبقى النيّة كما أدخلها المستخدم، فتُعاد الحالة بلا سطر كود إضافي.
     """
     from accounting.models import Cheque
 
@@ -714,7 +759,9 @@ def _settle_attached_cheques(invoice: SalesInvoice, *, user=None) -> None:
     cheques_total = sum(
         (Decimal(str(c.amount or 0)) for c in cheques), Decimal("0")
     ).quantize(DEC)
-    if cheques_total <= 0:
+    # T-INTENT: نيّة النقد المحفوظة على المسودة تُكنَس هنا مع الشيكات في سند واحد.
+    cash_intent = Decimal(str(invoice.attached_cash_amount or 0)).quantize(DEC)
+    if cheques_total + cash_intent <= 0:
         return
     if not invoice_journal_debits_ar(invoice):
         logger.warning(
@@ -729,16 +776,19 @@ def _settle_attached_cheques(invoice: SalesInvoice, *, user=None) -> None:
     ).quantize(DEC)
     if remaining <= 0:
         return
-    # البيع النقدي مدفوع فوراً ⇒ يُكمل السندُ نفسه ما لم تغطّه الشيكات نقداً.
-    amount = cheques_total
-    if invoice.invoice_type == SalesInvoice.INVOICE_CASH and remaining > cheques_total:
+    # نيّة النقد تُقصّ على ما بقي فعلاً بعد الشيكات: نيّةٌ بائتة نجت من إلغاء
+    # ترحيلٍ ثم حُصّلت الفاتورة يدوياً لا يجوز أن تُدفع مرّة ثانية عند إعادته.
+    cash_part = min(cash_intent, max((remaining - cheques_total).quantize(DEC), Decimal("0")))
+    amount = (cheques_total + cash_part).quantize(DEC)
+    # البيع النقدي مدفوع فوراً ⇒ يُكمل السندُ نفسه ما لم يغطّه المرفق نقداً.
+    if invoice.invoice_type == SalesInvoice.INVOICE_CASH and remaining > amount:
         amount = remaining
     cash_account_id = _resolve_settlement_cash_account_id(invoice)
     if not cash_account_id:
-        # الصندوق حقل إلزامي على السند. التخطّي هنا يعني إسقاط شيكات مقبوضة
+        # الصندوق حقل إلزامي على السند. التخطّي هنا يعني إسقاط دفعة مقبوضة
         # بصمت، فالترحيل كلّه يرتدّ ويبقى المستند مسودة مع رسالة تُسمّي الإعداد.
         raise ValidationError(
-            f"الفاتورة {invoice.invoice_number} عليها شيكات مرفقة لكن لا يوجد "
+            f"الفاتورة {invoice.invoice_number} عليها دفعة مرفقة لكن لا يوجد "
             "حساب صندوق/بنك لتحرير سند القبض. عيّن `default_cash_account` في "
             "إعدادات المبيعات أو حدّد حساب الصندوق على الفاتورة."
         )
@@ -767,18 +817,18 @@ def _settle_attached_cheques(invoice: SalesInvoice, *, user=None) -> None:
 
     log_activity(
         action="payment", entity_type="customer_payment", entity_id=payment.id,
-        entity_label=f"#{payment.id}", description="سند قبض شيكات مرفقة",
+        entity_label=f"#{payment.id}", description="سند قبض دفعة مرفقة",
         partner_ids=[payment.partner_id], tenant=invoice.tenant, user=user,
     )
     log_activity(
         action="post", entity_type="customer_payment", entity_id=payment.id,
-        entity_label=f"#{payment.id}", description="ترحيل سند قبض شيكات مرفقة",
+        entity_label=f"#{payment.id}", description="ترحيل سند قبض دفعة مرفقة",
         partner_ids=[payment.partner_id], tenant=invoice.tenant, user=user,
     )
     logger.info(
-        "Settled attached cheques of invoice %s via customer payment %s "
-        "(cheques %s of %s).",
-        invoice.invoice_number, payment.id, cheques_total, amount,
+        "Settled attached payment of invoice %s via customer payment %s "
+        "(cheques %s + cash %s of %s).",
+        invoice.invoice_number, payment.id, cheques_total, cash_part, amount,
     )
 
 
@@ -1266,6 +1316,16 @@ def collect_invoice_payment(
         swept_total = sum(
             (Decimal(str(c.amount or 0)) for c in swept), Decimal("0")
         ).quantize(DEC)
+        # T-INTENT: نيّة النقد المحفوظة على المسودة تُكنس هنا أيضاً — كما تُكنس
+        # الشيكات فوقها تماماً. بدون هذا الطيّ يكبت `has_spec` كنسَ الترحيل ثم
+        # لا يلتقطها هذا السند: مالٌ سجّله المستخدم يعلق «نيّةً» على فاتورة صارت
+        # مرحّلة، ولا شيء يرحّله بعدها أبداً.
+        swept_cash = (
+            Decimal(str(invoice.attached_cash_amount or 0)).quantize(DEC)
+            if posted_now else Decimal("0")
+        )
+        if swept_cash > 0:
+            cash_amount = (cash_amount + swept_cash).quantize(DEC)
 
         cheques_total = (new_cheques_total + swept_total).quantize(DEC)
         amount = (cash_amount + cheques_total).quantize(DEC)

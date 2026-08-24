@@ -41,7 +41,7 @@ from accounting.models import Account, TaxRate
 from inventory.models import StockMovement
 from partners.models import Partner
 from tenants.models import Tenant, Currency
-from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
+from accounting.models import Cheque, JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting import api as accounting_api
 from accounting.cashbox import resolve_default_cash_box_account
 from accounting.services import (
@@ -86,11 +86,13 @@ from logistics.domain.shipment_builder import create_shipment_from_deals
 from logistics.domain.stages import derive_stage
 from logistics.services import (
     annotate_purchase_invoice_payment_summary,
+    attach_purchase_payment_voucher,
     convert_local_quotation_to_invoice,
     convert_local_quotation_to_order,
     convert_purchase_order_to_invoice,
     guard_purchase_invoice_payments_before_unpost,
     release_auto_cash_purchase_settlement,
+    settle_attached_purchase_intent,
 )
 from django.utils import timezone
 
@@ -836,6 +838,39 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         }
         return self.pay(request, pk=pk)
 
+    @action(detail=True, methods=['post'], url_path='attach-payment')
+    @requires_perm('purchase.payment.create')
+    def attach_payment(self, request, pk=None):
+        """T-INTENT: يربط نيّة دفع بمسودة فاتورة الشراء — بلا ترحيل ولا سند.
+
+        Body: `{"cash_amount": "100", "cash_account_id": 12, "cheques": [...]}`
+        بدلالة الاستبدال: كل نداء يحلّ محلّ ما سبق، و`{0, []}` يمسح النيّة.
+
+        تتجسّد النيّة سندَ صرفٍ واحداً عند ترحيل الفاتورة. مرآة
+        `sales/invoices/{id}/payment-voucher/` على جانب الشراء.
+        """
+        invoice = self.get_object()
+        try:
+            attach_purchase_payment_voucher(
+                invoice,
+                cash_amount=request.data.get('cash_amount', 0),
+                cash_account_id=request.data.get('cash_account_id'),
+                cheques=request.data.get('cheques') or [],
+                user=request.user,
+            )
+        except (ValidationError, DjangoValidationError) as e:
+            msg = e.message if hasattr(e, 'message') else '؛ '.join(e.messages)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        invoice.refresh_from_db()
+        log_activity(
+            action='payment', entity_type='purchase_invoice', entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description='دفعة مرفقة بالمسودة',
+            partner_ids=[invoice.partner_id], request=request,
+        )
+        return Response(
+            PurchaseInvoiceSerializer(invoice, context={'request': request}).data
+        )
+
     @action(detail=False, methods=['get'], url_path='next-number')
     def next_number(self, request):
         """T-PSIMPL: رقم الفاتورة التالي قبل الحفظ — مرآة `invoices/next-number/`
@@ -1531,6 +1566,19 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                         request=request,
                     )
 
+                # T-INTENT: نيّة الدفع المرفقة بالمسودة (نقد + شيكات) تتجسّد
+                # سندَ صرف واحداً — قبل التسوية التلقائية كي تكمّل هذه ما بقي.
+                # الكنس **لا يخضع** لعلم الكبت: ذاك للتسوية التلقائية التي يحلّ
+                # الدفعُ الصريح محلّها، أمّا النيّة فمالٌ سجّله المستخدم فعلاً —
+                # كبتُها معها كان يتركها عالقةً على فاتورةٍ مرحّلة بلا مرحِّل،
+                # وسقفُ `min(intent, remaining)` يمنع أي ازدواج مع سند `pay/`
+                # الذي يحسب متبقّيه بعد هذا الكنس.
+                _poster = getattr(request, 'user', None)
+                settle_attached_purchase_intent(
+                    invoice,
+                    user=_poster if (_poster is not None and _poster.is_authenticated) else None,
+                )
+
                 # T-CASH2 (شراء): الشراء النقدي = مدفوع فوراً ⇒ سوِّه بسند صرف
                 # مستقل داخل نفس المعاملة (ذرّياً مع الترحيل) فلا يبقى المورد دائناً.
                 self._auto_settle_cash_purchase(
@@ -1712,7 +1760,15 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 invoice.invoice_number,
             )
             return
-        amount = Decimal(str(settle_amount or 0)).quantize(Decimal('0.01'))
+        # T-INTENT: النيّة المرفقة سُوّيت قبل سطور بسندها، فهذه تكمّل ما بقي
+        # فقط. بدون القصّ يخرج سندان مجموعهما يتجاوز الفاتورة — مرآة الحارس
+        # الذي يقف في `_auto_settle_cash_sale` على جانب البيع.
+        from logistics.services import purchase_invoice_payment_summary
+        invoice._payment_summary_cache = None
+        remaining = purchase_invoice_payment_summary(invoice)['remaining_balance']
+        amount = min(
+            Decimal(str(settle_amount or 0)).quantize(Decimal('0.01')), remaining,
+        )
         if amount <= 0:
             return
         cash_account_id = invoice.cash_or_bank_account_id
@@ -1814,6 +1870,11 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         inv_id, inv_no, is_ret, partner_id = (
             instance.id, instance.invoice_number, instance.is_return, instance.partner_id,
         )
+        # T-INTENT: شيكات النيّة تموت مع مستندها — الرابط `SET_NULL` فبدون هذا
+        # يترك حذفُ المسودة شيكاتٍ مسودةً يتيمة (مرآة حذف فاتورة البيع).
+        Cheque.objects.filter(
+            purchase_invoice=instance, status='Draft', supplier_payment__isnull=True,
+        ).delete()
         response = super().destroy(request, *args, **kwargs)
         log_activity(
             action='delete', entity_type='purchase_invoice', entity_id=inv_id,
@@ -1877,8 +1938,11 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 # T-APINT: سندات الصرف المرحّلة تمنع التراجع (قيدها يدين ذمم
                 # المورد، وحذف قيد الفاتورة وحده يتركه بلا مقابل)؛ وسندُ الشراء
                 # النقدي التلقائي يُحرَّر بالحذف لأن الترحيل نفسه أنشأه.
-                guard_purchase_invoice_payments_before_unpost(invoice)
+                # التحرير **قبل** الحارس — مرآة ترتيب البيع. السند التلقائي صار
+                # يحمل توزيعاً (T-INTENT) فيراه الحارس مانعاً لو سبقه، فتمنع
+                # الفاتورةُ إلغاءَ ترحيل نفسها بسندٍ هي التي أنشأته.
                 release_auto_cash_purchase_settlement(invoice, user=request.user)
+                guard_purchase_invoice_payments_before_unpost(invoice)
                 # الوحدات المُرقَّمة تخرج مع مخزونها: حارس يمنع التراجع إن بِيعت
                 # إحداها (بجانب حارس اعتمادية المخزون داخل unpost_document، لا بدلاً
                 # منه — ذاك يرى الكميات وهذا يرى الوحدة بعينها).

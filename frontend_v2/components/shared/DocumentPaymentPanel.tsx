@@ -13,7 +13,7 @@
  * «تسجيل دفعة» — كما تفعل Odoo بزرّ *Register Payment* على المستندين سواء.
  */
 import React from "react";
-import { Loader2, Plus, Receipt, Trash2 } from "lucide-react";
+import { Loader2, Plus, Receipt, Save, Trash2 } from "lucide-react";
 import { formatMoney } from "../../utils/formatNumber";
 
 export type PaymentChequeRow = {
@@ -52,6 +52,8 @@ export type DocumentPaymentDerived = {
   chequeError: string | null;
   cashShortfall: number;
   onAccountPlan: Array<{ payment_id: number; amount: number }>;
+  /** الدفعة تشمل خصماً من رصيد الطرف — ربطٌ بسندٍ مرحّل، فلا يصحّ على مسودة. */
+  usesOnAccount: boolean;
   canSubmit: boolean;
 };
 
@@ -112,7 +114,53 @@ export function deriveDocumentPayment(input: DocumentPaymentInput): DocumentPaym
     chequeError,
     cashShortfall,
     onAccountPlan,
+    usesOnAccount: onAccountPlan.length > 0,
     canSubmit: paidNow > 0.009 && !chequeError && cashShortfall <= 0,
+  };
+}
+
+/** حالة تسوية المستند نفسه — لا حالة النموذج الذي يُملأ الآن. */
+export type InvoiceSettlement = {
+  /** المتبقّي في الدفاتر: ما لم يُرحَّل ليس مدفوعاً. */
+  remaining: number;
+  /** المتبقّي بعد احتساب الدفعة المرفقة غير المرحّلة — للعرض على المسودة. */
+  remainingAfterIntent: number;
+  /** المسودة عليها دفعة تغطّي إجماليها — تُوسَم «مدفوعة — غير مرحّلة». */
+  intentCoversAll: boolean;
+  /** الدفعة المرفقة غير المرحّلة (صفر على المرحّل). */
+  pendingIntent: number;
+};
+
+/**
+ * T-INTENT: مشتقّة «المتبقّي» الوحيدة لشاشتَي الفاتورة.
+ *
+ * كانت الحسبة مكتوبة أربع مرّات في محرّر البيع وحده (شريط الإجماليات، اللوحة،
+ * عرض المستند، الطباعة) بفروقٍ صامتة — إحداها بلا `Math.max` فكانت تُظهر متبقّياً
+ * **سالباً** على مسودة. الرقم الآن من موضع واحد.
+ *
+ * الفصل مقصود: `remaining` حقيقةُ الدفاتر (المرحّل وحده)، و`remainingAfterIntent`
+ * ما يراه صاحب المسودة بعد أن سجّل دفعته — موسوماً «غير مرحّل» كي لا يُقرأ
+ * أحدهما مكان الآخر.
+ */
+export function deriveInvoiceSettlement(input: {
+  grandTotal: number;
+  paid: number;
+  pendingIntent: number;
+  isPosted: boolean;
+}): InvoiceSettlement {
+  const remaining = Math.max(input.grandTotal - input.paid, 0);
+  // النيّة شأن المسودة وحدها؛ المرحّلة تجسّدت نيّتها سنداً فدخلت `paid`.
+  const pendingIntent = input.isPosted ? 0 : Math.max(input.pendingIntent, 0);
+  const remainingAfterIntent = Math.max(remaining - pendingIntent, 0);
+  return {
+    remaining,
+    remainingAfterIntent,
+    pendingIntent,
+    intentCoversAll:
+      !input.isPosted
+      && pendingIntent > 0.009
+      && remainingAfterIntent <= 0.009
+      && input.grandTotal > 0.009,
   };
 }
 
@@ -154,13 +202,16 @@ export type DocumentPaymentPanelProps = {
   onRemoveCheque: (key: string) => void;
   onFillCashShortfall: () => void;
   onMakeCredit?: () => void;
+  /** T-INTENT: حفظ الدفعة على المسودة بلا ترحيل (يُعرض على المسودة وحدها). */
+  onSaveIntent?: () => void;
   onSubmit: () => void;
 };
 
 export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
   side, derived, input, isPosted, busy, cashAccountField, panelRef, cashInputRef,
   chequesOpen, onToggleCheques, onCashChange, onFromBalanceChange, onAddCheque,
-  onPatchCheque, onRemoveCheque, onFillCashShortfall, onMakeCredit, onSubmit,
+  onPatchCheque, onRemoveCheque, onFillCashShortfall, onMakeCredit, onSaveIntent,
+  onSubmit,
 }) => {
   const w = WORDS[side];
   const fmt = (n: number) => formatMoney(n);
@@ -372,6 +423,26 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
       )}
 
       <div className="flex flex-wrap items-center gap-2">
+        {/* T-INTENT: على المسودة يختار المستخدم بين تسجيل الدفعة عليها (بلا
+            أثرٍ في الدفاتر) وبين الترحيل والتحصيل فوراً. الفصل مقصود: إجبارُ
+            الترحيل ليسجّل دفعةً كان يعني أن مسودةً مدفوعة لا يمكن أن توجد. */}
+        {!isPosted && onSaveIntent && (
+          <button
+            type="button"
+            className="aseel-toolbtn"
+            data-testid="payment-save-intent"
+            disabled={busy || !derived.canSubmit || derived.usesOnAccount}
+            title={
+              derived.usesOnAccount
+                ? "الخصم من رصيد الطرف ربطٌ بسندٍ مرحّل — يلزمه ترحيل المستند."
+                : "تُسجَّل الدفعة على المسودة وتتحوّل إلى سند عند الترحيل."
+            }
+            onClick={onSaveIntent}
+          >
+            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+            حفظ الدفعة على المسودة
+          </button>
+        )}
         <button
           type="button"
           className="aseel-toolbtn"

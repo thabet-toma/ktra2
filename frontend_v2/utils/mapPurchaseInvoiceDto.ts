@@ -67,6 +67,14 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     payableTotal: Number(dto.payable_total || dto.grand_total || 0),
     amountPaid: Number(dto.amount_paid || 0),
     remainingBalance: Number(dto.remaining_balance || 0),
+    pendingPaymentTotal: Number(dto.pending_payment_total || 0),
+    // كان مفقوداً من المُطابِق كلّه، فقرأت الشاشةُ `undefined` دائماً وبقي
+    // حارسُ الفاتورة النقدية في لوحة الدفع ميتاً لا يعمل أبداً.
+    paymentType: dto.payment_type === "cash" ? "cash" : "credit",
+    cashOrBankAccountId: dto.cash_or_bank_account ?? null,
+    attachedCashAmount: Number(dto.attached_cash_amount || 0),
+    attachedCashAccountId: dto.attached_cash_account ?? null,
+    cheques: dto.cheques || [],
     paymentStatus: dto.payment_status || "unpaid",
     paymentStatusDisplay: dto.payment_status_display || "غير مدفوعة",
     isOverdue: Boolean(dto.is_overdue),

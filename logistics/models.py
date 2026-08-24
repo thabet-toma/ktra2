@@ -1677,11 +1677,20 @@ class PurchaseInvoice(models.Model):
         help_text='حساب الصندوق/البنك — مطلوب عند payment_type=cash',
     )
 
-    # P-H-1: attached payment voucher fields (mirror of SalesInvoice)
+    # T-INTENT: نيّة الدفع النقدي على المسودة — مرآة `SalesInvoice` حرفياً.
+    # لا قيد ولا سند صرف ولا أثر على رصيد المورد حتى الترحيل، وعنده يكنسها
+    # `_settle_attached_purchase_intent` مع الشيكات المرفقة في **سند صرف واحد**.
     attached_cash_amount = models.DecimalField(
         max_digits=18, decimal_places=2, default=0,
         db_column='AttachedCashAmount',
-        help_text='مبلغ نقدي مرفق عبر السند المالي (P-H-1)',
+        help_text='نيّة دفع نقدي مرفقة بالمسودة — تتجسّد سند صرف عند ترحيل الفاتورة',
+    )
+    attached_cash_account = models.ForeignKey(
+        Account, on_delete=models.PROTECT,
+        null=True, blank=True,
+        db_column='AttachedCashAccountID',
+        related_name='purchase_invoices_attached_cash',
+        help_text='حساب الصندوق/البنك الذي سيدفع المبلغ النقدي المرفق',
     )
 
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')

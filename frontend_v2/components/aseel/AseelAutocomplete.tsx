@@ -10,8 +10,9 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Info, Pencil } from 'lucide-react';
+import { Plus, Info, Pencil, Search } from 'lucide-react';
 import { usePriceVisibility } from '../../contexts/PriceVisibilityContext';
+import { firstMatchRange, rankOptions } from '../../utils/autocompleteRank';
 
 export interface AseelPriceInfo {
   label: string;
@@ -34,6 +35,9 @@ export interface AseelAutocompleteOption {
   /** T-REORDER: شارة حالة قصيرة بجانب الاسم (نفذ/منخفض) — تُبنى من
    *  `utils/stockBadge` كي لا تُكتب القاعدة في كل شاشة. */
   badge?: { text: string; tone: 'danger' | 'warn'; title?: string };
+  /** T-SEARCH: نصٌّ إضافي يُبحَث فيه ولا يُعرض — SKU والباركود والهاتف.
+   *  يُمرَّر بحروف صغيرة مسبقاً، فالمطابقة تجري لكل ضغطة مفتاح. */
+  keywords?: string;
 }
 
 export interface AseelAutocompleteProps {
@@ -54,27 +58,34 @@ export interface AseelAutocompleteProps {
   placeholder?: string;
   disabled?: boolean;
   maxResults?: number;
+  /** T-SEARCH: عند تجاوز المطابقات السقف يظهر صفّ «+N أخرى» يستدعيها
+   *  بالاستعلام الحالي — عادةً لفتح الفهرس الكامل مُصفّىً مسبقاً. */
+  onShowMore?: (query: string) => void;
 }
 
 const MAX_DEFAULT = 8;
 
-/** ترتيب أقرب تطابق: يبدأ بالنص < يحتويه في الاسم < يحتويه في السطر الثانوي */
+/**
+ * غلافٌ رقيق فوق `utils/autocompleteRank` — القاعدة هناك كي تُختبر وحدها،
+ * وهنا يبقى الرسم وحده.
+ */
 function rank(options: AseelAutocompleteOption[], q: string, max: number) {
-  const needle = q.trim().toLowerCase();
-  if (!needle) return options.slice(0, max);
-  const scored: { opt: AseelAutocompleteOption; score: number }[] = [];
-  for (const opt of options) {
-    const label = (opt.label || '').toLowerCase();
-    const sub = (opt.sub || '').toLowerCase();
-    let score: number;
-    if (label.startsWith(needle)) score = 0;
-    else if (label.includes(needle)) score = 1;
-    else if (sub.includes(needle)) score = 2;
-    else continue;
-    scored.push({ opt, score });
-  }
-  scored.sort((a, b) => a.score - b.score || a.opt.label.length - b.opt.label.length);
-  return scored.slice(0, max).map((s) => s.opt);
+  return rankOptions(options, q, max);
+}
+
+/** يظلّل أول تطابق في النصّ — بلا HTML خام. */
+function highlight(text: string, q: string): React.ReactNode {
+  const at = firstMatchRange(text, q);
+  if (!at) return text;
+  return (
+    <>
+      {text.slice(0, at.start)}
+      <mark className="rounded bg-amber-200 px-0.5 text-inherit">
+        {text.slice(at.start, at.end)}
+      </mark>
+      {text.slice(at.end)}
+    </>
+  );
 }
 
 export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
@@ -88,6 +99,7 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
   placeholder = 'اكتب للبحث…',
   disabled,
   maxResults = MAX_DEFAULT,
+  onShowMore,
 }) => {
   const { visible: showPrices } = usePriceVisibility(); // خصوصية: إخفاء الأسعار أمام الزبون
   const [query, setQuery] = useState<string | null>(null); // null = غير مفتوح، يعرض value
@@ -97,12 +109,17 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
   const popRef = useRef<HTMLDivElement>(null);
 
   const open = query !== null;
-  const matches = useMemo(
-    () => (open ? rank(options, query ?? '', maxResults) : []),
+  const ranked = useMemo(
+    () => (open
+      ? rank(options, query ?? '', maxResults)
+      : { matches: [] as AseelAutocompleteOption[], total: 0 }),
     [open, options, query, maxResults],
   );
+  const matches = ranked.matches;
+  const hiddenCount = Math.max(ranked.total - matches.length, 0);
+  const canShowMore = !!onShowMore && hiddenCount > 0;
   const canCreate = !!onFreeText && (query ?? '').trim().length > 0;
-  const rowCount = matches.length + (canCreate ? 1 : 0);
+  const rowCount = matches.length + (canShowMore ? 1 : 0) + (canCreate ? 1 : 0);
 
   const reposition = () => {
     const r = inputRef.current?.getBoundingClientRect();
@@ -125,6 +142,9 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
   const commit = (idx: number) => {
     if (idx < matches.length) {
       onPick(matches[idx].id);
+    } else if (canShowMore && idx === matches.length) {
+      // لا نُغلق بالنتيجة: الفهرس الكامل يفتح على الاستعلام نفسه.
+      onShowMore!((query ?? '').trim());
     } else if (canCreate) {
       onFreeText!((query ?? '').trim());
     }
@@ -202,7 +222,9 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
                 className="aseel-autocomplete-main"
                 onMouseDown={(e) => { e.preventDefault(); commit(i); }}
               >
-                <span className="aseel-autocomplete-label">{opt.label}</span>
+                <span className="aseel-autocomplete-label">
+                  {highlight(opt.label, query ?? '')}
+                </span>
                 {opt.badge && (
                   <span
                     title={opt.badge.title}
@@ -213,7 +235,11 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
                     }`}
                   >{opt.badge.text}</span>
                 )}
-                {opt.sub && <span className="aseel-autocomplete-sub">{opt.sub}</span>}
+                {opt.sub && (
+                  <span className="aseel-autocomplete-sub">
+                    {highlight(opt.sub, query ?? '')}
+                  </span>
+                )}
                 {!showPrices ? null : opt.prices && opt.prices.length > 0 ? (
                   <div className="flex gap-2 items-center ml-auto">
                     {opt.prices.map((p, idx) => {
@@ -280,14 +306,31 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
           {matches.length === 0 && !canCreate && (
             <div className="aseel-autocomplete-empty">لا تطابق</div>
           )}
-          {canCreate && (
+          {canShowMore && (
             <button
               type="button"
               role="option"
+              data-testid="autocomplete-show-more"
               aria-selected={sel === matches.length}
               className={`aseel-autocomplete-row aseel-autocomplete-row--create${sel === matches.length ? ' aseel-autocomplete-row--sel' : ''}`}
               onMouseEnter={() => setSel(matches.length)}
               onMouseDown={(e) => { e.preventDefault(); commit(matches.length); }}
+            >
+              <Search className="h-3 w-3" />
+              <span>{`عرض ${hiddenCount} نتيجة أخرى في الفهرس الكامل…`}</span>
+            </button>
+          )}
+          {canCreate && (
+            <button
+              type="button"
+              role="option"
+              aria-selected={sel === matches.length + (canShowMore ? 1 : 0)}
+              className={`aseel-autocomplete-row aseel-autocomplete-row--create${sel === matches.length + (canShowMore ? 1 : 0) ? ' aseel-autocomplete-row--sel' : ''}`}
+              onMouseEnter={() => setSel(matches.length + (canShowMore ? 1 : 0))}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                commit(matches.length + (canShowMore ? 1 : 0));
+              }}
             >
               <Plus className="h-3 w-3" />
               <span>

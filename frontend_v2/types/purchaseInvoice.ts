@@ -83,6 +83,8 @@ export interface PurchaseInvoiceListDto {
   payable_total?: string;
   amount_paid?: string;
   remaining_balance?: string;
+  /** T-INTENT: دفعة مرفقة بمسودة لم تُرحَّل بعد — تُعرَض ولا تدخل «المدفوع». */
+  pending_payment_total?: string;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payment_status_display?: string;
   /** T-DUE: الاستحقاق والتأخّر — التأخّر بُعدٌ فوق حالة الدفع لا قيمةٌ فيها. */
@@ -101,6 +103,16 @@ export interface PurchaseInvoiceListDto {
   items_count: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface PurchaseInvoiceChequeDto {
+  id: number;
+  cheque_number: string;
+  bank_name?: string | null;
+  amount: string;
+  status: string;
+  direction: string;
+  due_date?: string | null;
 }
 
 export interface PurchaseInvoiceDto {
@@ -153,6 +165,13 @@ export interface PurchaseInvoiceDto {
   // task16 C10: حالة الدفع + المبلغ المدفوع + المتبقي (محسوبة في الخادم)
   amount_paid?: string;
   remaining_balance?: string;
+  /** T-INTENT: دفعة مرفقة بمسودة لم تُرحَّل بعد — تُعرَض ولا تدخل «المدفوع». */
+  pending_payment_total?: string;
+  /** شيكات الفاتورة — المسودة منها نيّةُ دفعٍ لم تدخل الدفاتر. */
+  cheques?: PurchaseInvoiceChequeDto[];
+  /** T-INTENT: نيّة الدفع النقدي المحفوظة على المسودة وحسابها (قراءة فقط). */
+  readonly attached_cash_amount?: string;
+  readonly attached_cash_account?: number | null;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payment_status_display?: string;
   /** T-DUE: الاستحقاق والتأخّر — التأخّر بُعدٌ فوق حالة الدفع لا قيمةٌ فيها. */
