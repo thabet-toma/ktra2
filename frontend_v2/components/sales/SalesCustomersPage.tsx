@@ -54,12 +54,14 @@ const PRICE_TIERS = [
 
 import { formatMoney } from "@/utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
+import { useKeepOnce, useSimpleUi } from "../../hooks/useSimpleUi";
 const fmtMoney = (s: string | null | undefined) =>
   s != null && s !== "" ? formatMoney(s, "—") : "—";
 
 export const SalesCustomersPage: React.FC = () => {
   const confirm = useConfirm();
   const [rows, setRows] = useState<PartnerApi[]>([]);
+  const { show: showAdv, columns: maskColumns } = useSimpleUi();
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -141,7 +143,7 @@ export const SalesCustomersPage: React.FC = () => {
     }
   };
 
-  const columns: DenseColumn<PartnerApi>[] = [
+  const allColumns: DenseColumn<PartnerApi>[] = [
     {
       key: "name",
       header: "الاسم",
@@ -224,6 +226,17 @@ export const SalesCustomersPage: React.FC = () => {
     },
   ];
 
+  /* T-SIMPL2: الرقم الضريبي وفئة السعر يُطويان في الوضع السهل، وحدُّ الائتمان
+     يعود متى ضُبط على أحد العملاء فعلاً — سقفُ دَينٍ مفروضٌ لا يُخفى. */
+  /* القائمة مرقَّمة، و`rows` صفحةٌ واحدة — الحقيقة تُثبَّت بعد رؤيتها فلا يختفي
+     عمودُ حدِّ ائتمانٍ رآه المستخدم في الصفحة السابقة. */
+  const anyCreditLimit = useKeepOnce(rows.some((r) => Number(r.credit_limit || 0) > 0));
+  const columns = maskColumns(
+    allColumns,
+    "sales-customers",
+    anyCreditLimit ? ["credit_limit"] : [],
+  );
+
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
       <label className="ktra-field" style={{ flex: 1, minWidth: "200px" }}>
@@ -236,15 +249,19 @@ export const SalesCustomersPage: React.FC = () => {
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />
       </label>
-      <label className="ktra-field" style={{ minWidth: "120px" }}>
-        <span className="ktra-field-label">فئة السعر</span>
-        <select className="ktra-input" value={filterTier} onChange={(e) => { setFilterTier(e.target.value); setPage(1); }}>
-          <option value="">الكل</option>
-          {PRICE_TIERS.filter((t) => t.v).map((t) => (
-            <option key={t.v} value={t.v}>{t.l}</option>
-          ))}
-        </select>
-      </label>
+      {/* T-SIMPL2: فلتر فئة السعر يتبع عمودها في الطيّ — ويعود متى كان مفعّلاً
+          فعلاً، فلا تبقى قائمةٌ مُرشَّحة بفلترٍ لا يراه صاحبها. */}
+      {showAdv("list.type-filter", Boolean(filterTier)) && (
+        <label className="ktra-field" style={{ minWidth: "120px" }}>
+          <span className="ktra-field-label">فئة السعر</span>
+          <select className="ktra-input" value={filterTier} onChange={(e) => { setFilterTier(e.target.value); setPage(1); }}>
+            <option value="">الكل</option>
+            {PRICE_TIERS.filter((t) => t.v).map((t) => (
+              <option key={t.v} value={t.v}>{t.l}</option>
+            ))}
+          </select>
+        </label>
+      )}
     </div>
   );
 

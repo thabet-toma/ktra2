@@ -285,11 +285,18 @@ const withInvoiceScreen = async (page: import('@playwright/test').Page, uiMode: 
 /* THA-131: «استحقاق» خرج من هذه القائمة لأنه لم يعد حقلاً متقدّماً — صار يتبع
    نوع الدفع في الوضعين معاً (آجلة ⇒ يظهر، نقدية ⇒ يحلّ الصندوق مكانه). يحرسه
    اختبارُ المعيار أدناه لا قناعُ الوضع السهل. */
+/* T-SIMPL2: الضريبة وخصم السطر انضمّا إلى المطويّ — طلبُ المالك حرفياً
+   («بالمبسّطة ما بلزمش ضريبة»). وهي مطويّةٌ هنا لأن الشاشة المفحوصة بلا ضريبة
+   محسوبة (`default_vat_rate: null`)؛ ولو حُسبت لعادت رغم الوضع — تلك قاعدة
+   السقوط للظهور، ويسمّرها `utils/uiMode.test.ts`. */
 const ADVANCED_ONLY = [
   'عملة',
   'شامل الضريبة',
   'الحسابات / مركز التكلفة',
   'بيانات أخرى',
+  'خصم سطر',
+  'المجموع قبل الضريبة',
+  'الضريبة المضافة',
 ];
 
 /* THA-128: «أرصدة العميل» خرج من هذه القائمة — كان تبويباً يعيد رقمين تعرضهما
@@ -335,6 +342,32 @@ test('الوضع السهل يطوي متقدّم المحرّر ويُبقي ج
 const hintKeys = async (page: import('@playwright/test').Page, scope: string) =>
   page.locator(`${scope} [data-field-hint]`)
     .evaluateAll((els) => els.map((el) => el.getAttribute('data-field-hint')).sort());
+
+/**
+ * T-SIMPL2 — «استحقاق» أدقُّ حالةٍ في القناع: THA-131 ربطه بنوع الدفع لا بالوضع،
+ * فلا يكفي فتحُ الشاشة — يجب **قلبُ الفاتورة إلى آجلة** ثم النظر. الوضع
+ * المتقدّم يُظهره كما كان (لا انحدار)، والسهل يطويه كما طلب المالك.
+ */
+const makeCredit = async (page: import('@playwright/test').Page) => {
+  await page.getByRole('checkbox', { name: 'نقدي' }).uncheck();
+  await expect(page.getByTestId('invoice-payment-type-badge')).toHaveText('آجل');
+};
+
+test('الفاتورة الآجلة في الوضع المتقدّم تُظهر «استحقاق» كما كانت', async ({ page }) => {
+  await withInvoiceScreen(page, 'advanced');
+  await makeCredit(page);
+  await expect(page.getByText('استحقاق', { exact: true })).toBeVisible();
+});
+
+test('الوضع السهل يطوي «استحقاق» حتى على الفاتورة الآجلة', async ({ page }) => {
+  await withInvoiceScreen(page, 'simple');
+  await makeCredit(page);
+  await expect(page.getByText('استحقاق', { exact: true })).toHaveCount(0);
+  // ولا شيء آخر انكسر: جوهر الفاتورة كما هو بعد قلبها آجلة.
+  for (const label of ALWAYS_VISIBLE) {
+    await expect(page.getByText(label, { exact: true }).first()).toBeVisible();
+  }
+});
 
 test('«؟» تشرح بنود القائمة في الوضع السهل، وتغيب تماماً عن المتقدّم', async ({ page }) => {
   await asManager(page);

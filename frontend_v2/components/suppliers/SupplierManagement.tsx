@@ -9,6 +9,7 @@ import { RefreshCw, Search, Plus, Pencil } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PartnerEditorModal, type SupplierScope } from "../partners/PartnerEditorModal";
 import { partnerKindFromType } from "../../utils/partnerActions";
+import { useSimpleUi } from "../../hooks/useSimpleUi";
 
 /** T-PARTYTYPE: تسمية نوع الطرف كما تظهر في العمود والفلتر. */
 const PARTY_TYPE_LABELS: Record<string, string> = {
@@ -43,6 +44,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
 }) => {
   const navigate = useNavigate();
   const [partners, setPartners] = useState<Partner[]>([]);
+  const { columns: maskColumns } = useSimpleUi();
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -111,7 +113,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
     ...Object.entries(PARTY_TYPE_LABELS).map(([value, label]) => ({ value, label })),
   ];
 
-  const columns: DenseColumn<Partner>[] = [
+  const allColumns: DenseColumn<Partner>[] = [
     { key: "id", header: "#", width: "55px", align: "center", render: (p) => <>{p.id}</> },
     // T-PARTYTYPE: النوع ظاهر في الصف — بلا عمود لا يفرّق أحد بين مورد وناقل.
     { key: "type", header: "النوع", width: "100px", align: "center",
@@ -181,6 +183,15 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
         </button>
       ) },
   ];
+
+  /* T-SIMPL2: النطاق (محلي/دولي) ورقم الحساب المحاسبي يُطويان في الوضع السهل،
+     وحدُّ الائتمان يعود متى ضُبط على أحد الموردين فعلاً — سقفٌ مفروضٌ لا يُخفى. */
+  const anyCreditLimit = partners.some((p) => Number(p.credit_limit || 0) > 0);
+  const columns = maskColumns(
+    allColumns,
+    "supplier-management",
+    anyCreditLimit ? ["limit"] : [],
+  );
 
   return (
     <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }}>

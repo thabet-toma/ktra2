@@ -200,7 +200,13 @@ const VIEW_TARGETS: readonly ViewTarget[] = [
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const BASELINE_PATH = join(E2E_DIR, "parity-baseline.json");
 const SHOTS_DIR = join(E2E_DIR, "parity-shots", "baseline");
-const COMPARE_MODE = process.env.PARITY_MODE === "compare";
+/* **الافتراض حراسةٌ لا تسجيل.** كان الشرط معكوساً: بلا `PARITY_MODE` يكتب هذا
+   الاختبار خطَّ الأساس فوق نفسه ويمرّ أخضر — أي أن أي `npx playwright test`
+   كامل (وهو ما يشغّله المطوّر والـCI) **يمحو الحارس ويباركُ ما وجده**، بما فيه
+   شاشةٌ فشل تحميلها في تلك الجولة. حارسٌ افتراضُه أن يوافق ليس حارساً.
+   الآن: التسجيل نيّةٌ تُعلَن (`PARITY_MODE=record`)، وكلُّ ما عداه مقارنة —
+   و`PARITY_MODE=compare` تبقى مقبولة كما كانت في الوثائق والأوامر القائمة. */
+const RECORD_MODE = process.env.PARITY_MODE === "record";
 const CAPTURE_SHOTS = process.env.PARITY_SHOTS === "1";
 
 async function installAuthenticatedApiMocks(page: Page) {
@@ -450,7 +456,7 @@ test("authenticated AppView feature-parity census", async ({ page }) => {
   }
 
   const deterministic = sortedBaseline(current);
-  if (!COMPARE_MODE) {
+  if (RECORD_MODE) {
     await writeFile(BASELINE_PATH, `${JSON.stringify(deterministic, null, 2)}\n`, "utf8");
     return;
   }

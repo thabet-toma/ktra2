@@ -9,6 +9,7 @@ import { RefreshCw, Download, Printer, Tags } from "lucide-react";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { productProfilePath } from "../../utils/entityLinks";
 import { openInNewTab } from "../../utils/openInNewTab";
+import { useSimpleUi } from "../../hooks/useSimpleUi";
 
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة (6.00 ⇒ 6، 6.50 ⇒ 6.5) عبر المُنسّق الموحّد.
 const fmt = (n: number | string) => formatMoney(n, "0");
@@ -16,6 +17,7 @@ const fmt = (n: number | string) => formatMoney(n, "0");
 export const StockLevelsPage: React.FC = () => {
   const [products, setProducts] = useState<SqlProduct[]>([]);
   const toast = useToast();
+  const { show: showAdv, columns: maskColumns } = useSimpleUi();
   const [summary, setSummary] = useState<StockSummaryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -219,7 +221,7 @@ export const StockLevelsPage: React.FC = () => {
     return <span className="ktra-text-ok">متوفر</span>;
   };
 
-  const columns: DenseColumn<SqlProduct>[] = [
+  const allColumns: DenseColumn<SqlProduct>[] = [
     {
       key: "sel",
       header: "✓",
@@ -292,6 +294,15 @@ export const StockLevelsPage: React.FC = () => {
       render: (p) => <>{fmt(Number(p.quantity_on_hand) * Number(p.avg_cost))}</> },
   ];
 
+  /* T-SIMPL2: أعمدة الحجز والحدّ الأقصى و«النوع» تُطوى في الوضع السهل — و«محجوز»
+     و«المتاح» يعودان لحظة يوجد حجزٌ فعلاً: رصيدٌ لا يُباع منه لا يُخفى عن بائعه. */
+  const anyReserved = filtered.some((p) => Number(p.reserved_quantity || 0) > 0);
+  const columns = maskColumns(
+    allColumns,
+    "stock-levels",
+    anyReserved ? ["reserved", "available"] : [],
+  );
+
   // footer: مجاميع
   const totalVal = filtered.reduce(
     (s, p) => s + Number(p.quantity_on_hand) * Number(p.avg_cost), 0
@@ -308,13 +319,15 @@ export const StockLevelsPage: React.FC = () => {
       onClick: printPdf,
       disabled: filtered.length === 0,
     },
-    {
+    /* T-SIMPL2: التعيين الجماعي لـ«النوع/البراند» إعدادُ كتالوج لا عملٌ يومي —
+       يُطوى في الوضع السهل مع عمود «النوع» الذي يخدمه. */
+    ...(showAdv("stock.bulk-group") ? [{
       key: "group",
       label: `تعيين النوع${selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}`,
       icon: <Tags className="h-4 w-4" />,
       onClick: () => setGroupModal(true),
       disabled: selectedIds.size === 0,
-    },
+    }] : []),
     {
       key: "reload",
       label: "تحديث",

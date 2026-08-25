@@ -8,6 +8,11 @@ import {
   uiModeCacheKey,
   viewVisibleInSimpleMode,
   writeUiModeCache,
+  SIMPLE_MASK,
+  SIMPLE_HIDDEN_COLUMNS,
+  showAdvanced,
+  visibleColumns,
+  type MaskKey,
   type UiMode,
 } from './uiMode.ts';
 
@@ -103,5 +108,89 @@ test('متصفح يمنع التخزين لا يكسر شيئاً — قراءة
     assert.doesNotThrow(() => writeUiModeCache(1, 'simple' as UiMode));
   } finally {
     g.localStorage = previous;
+  }
+});
+
+
+/* ── T-SIMPL2 — قناع العناصر داخل الشاشات ───────────────────────────────── */
+
+const MASK_KEYS = Object.keys(SIMPLE_MASK) as MaskKey[];
+
+test('الوضع المتقدّم يعرض كل عنصرٍ مسجَّل — القناع لا يمسّه بشيء', () => {
+  for (const key of MASK_KEYS) {
+    assert.equal(showAdvanced(key, 'advanced'), true);
+    // ولا حتى حين تقول الشاشة إن العنصر بلا قيمة.
+    assert.equal(showAdvanced(key, 'advanced', false), true);
+  }
+});
+
+test('الوضع السهل يطوي كل عنصرٍ مسجَّل ما لم يحمل قيمة', () => {
+  for (const key of MASK_KEYS) {
+    assert.equal(showAdvanced(key, 'simple'), false);
+  }
+});
+
+test('قاعدة السقوط للظهور: ما حمل قيمةً فعلية يظهر رغم الوضع السهل', () => {
+  // ضريبةٌ محسوبة أو استحقاقٌ مُدخَل — رقمٌ يغيّر مالاً لا يُخفى عن صاحبه.
+  assert.equal(showAdvanced('doc.tax', 'simple', true), true);
+  assert.equal(showAdvanced('doc.due-date', 'simple', true), true);
+  assert.equal(showAdvanced('doc.line-discount', 'simple', true), true);
+});
+
+test('مفتاحٌ خارج السِّجل يُعرض — الفشل نحو الظهور لا نحو الإخفاء الصامت', () => {
+  assert.equal(showAdvanced('doc.not-a-real-key' as MaskKey, 'simple'), true);
+});
+
+test('كل مفتاحٍ في السِّجل يحمل سببَ طيّه مكتوباً — لا إخفاءَ بلا تعليل', () => {
+  assert.ok(MASK_KEYS.length > 0);
+  for (const key of MASK_KEYS) {
+    assert.equal(typeof SIMPLE_MASK[key], 'string');
+    assert.ok(SIMPLE_MASK[key].length > 10, `المفتاح ${key} بلا سبب مكتوب`);
+  }
+});
+
+const COLS = [
+  { key: 'name' }, { key: 'reserved' }, { key: 'available' },
+  { key: 'max' }, { key: 'grp' }, { key: 'status' },
+];
+
+test('الوضع المتقدّم يُبقي الأعمدة كما هي بترتيبها حرفياً', () => {
+  assert.deepEqual(
+    visibleColumns(COLS, 'stock-levels', 'advanced').map((c) => c.key),
+    COLS.map((c) => c.key),
+  );
+});
+
+test('الوضع السهل يقلّم أعمدة الشاشة المسجَّلة ولا يمسّ ترتيب الباقي', () => {
+  assert.deepEqual(
+    visibleColumns(COLS, 'stock-levels', 'simple').map((c) => c.key),
+    ['name', 'status'],
+  );
+});
+
+test('`keep` يعيد العمود رغم الوضع — حجزٌ قائمٌ لا يُخفى عن بائعه', () => {
+  assert.deepEqual(
+    visibleColumns(COLS, 'stock-levels', 'simple', ['reserved', 'available']).map((c) => c.key),
+    ['name', 'reserved', 'available', 'status'],
+  );
+});
+
+test('شاشةٌ بلا سِجلّ أعمدة تبقى كاملة — لا إخفاء بالمصادفة', () => {
+  assert.deepEqual(
+    visibleColumns(COLS, 'screen-with-no-mask', 'simple').map((c) => c.key),
+    COLS.map((c) => c.key),
+  );
+});
+
+test('التقليم لا يُعدّل المصفوفة الأصلية — الشاشة تبني أعمدتها مرّةً', () => {
+  const before = COLS.map((c) => c.key);
+  visibleColumns(COLS, 'stock-levels', 'simple');
+  assert.deepEqual(COLS.map((c) => c.key), before);
+});
+
+test('كل شاشةٍ في سِجلّ الأعمدة هي شاشةٌ يراها الوضع السهل أصلاً', () => {
+  // قناعُ أعمدةٍ لشاشةٍ لا تظهر في الوضع السهل شيفرةٌ ميتة تُوهم بأنها تعمل.
+  for (const screen of Object.keys(SIMPLE_HIDDEN_COLUMNS)) {
+    assert.equal(viewVisibleInSimpleMode(screen), true, `الشاشة ${screen} خارج SIMPLE_VIEWS`);
   }
 });

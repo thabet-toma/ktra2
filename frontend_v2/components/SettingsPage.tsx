@@ -15,6 +15,8 @@ import { useAppearance, FONT_SCALE_OPTIONS, FONT_FAMILY_OPTIONS } from '../conte
 import { useSessionSettings, IDLE_MIN_MINUTES, IDLE_MAX_MINUTES } from '../contexts/SessionSettingsContext';
 import { getSkin, setSkin, UiSkin } from '../styles/skin';
 import { useToast } from '../contexts/ToastContext';
+import { useSimpleUi } from '../hooks/useSimpleUi';
+import { humanizeThrown } from '../utils/drfError';
 
 interface SettingsPageProps {
     user: User;
@@ -22,6 +24,7 @@ interface SettingsPageProps {
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const toast = useToast();
+    const { show: showAdv } = useSimpleUi();
     const [profileForm, setProfileForm] = useState({
         name: user.name,
         phone: user.phone || '',
@@ -373,7 +376,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                 </div>
             </div>
 
-            {/* P5-T1-b: إدارة التخزين المحلي */}
+            {/* P5-T1-b: إدارة التخزين المحلي.
+                T-SIMPL2: زرٌّ تقنيّ للتشخيص — يُطوى في الوضع السهل. */}
+            {showAdv('settings.local-cache') && (
             <div className="ktra-form-section" style={{ marginTop: 20 }}>
                 <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>إدارة التخزين المحلي</h3>
                 <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
@@ -382,16 +387,30 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                 <button
                     type="button"
                     className="ktra-toolbtn"
+                    /* عطلان كانا هنا (وُجدا أثناء عملٍ آخر، خارج نطاقه):
+                       (1) رسالةُ **نجاحٍ** بنبرة `error` — حمراء تقول «تم»، فيظنّ
+                           المستخدم أن المسح أخفق وقد نجح.
+                       (2) `cleanOldCache` تفتح IndexedDB وقد ترمي (وضع خاص،
+                           حصّةٌ ممتلئة، قاعدة مقفولة) بلا `catch` — فالوعد يسقط
+                           في الفراغ والزرّ يبدو بلا أثر. لا فشل صامت. */
                     onClick={async () => {
-                        const { cleanOldCache } = await import('../services/offline/cacheCleaner');
-                        const n = await cleanOldCache(7);
-                        toast(`تم حذف ${n} سجل قديم`, 'error');
+                        try {
+                            const { cleanOldCache } = await import('../services/offline/cacheCleaner');
+                            const n = await cleanOldCache(7);
+                            toast(
+                                n > 0 ? `تم حذف ${n} سجل قديم` : 'لا سجلات أقدم من 7 أيام — لا شيء ليُحذف',
+                                n > 0 ? 'success' : 'info',
+                            );
+                        } catch (e) {
+                            toast(humanizeThrown(e, 'تعذّر مسح الـcache القديم'), 'error');
+                        }
                     }}
                     style={{ padding: '5px 16px', fontWeight: 700 }}
                 >
                     امسح cache قديم (أقدم من 7 أيام)
                 </button>
             </div>
+            )}
         </div>
     );
 };

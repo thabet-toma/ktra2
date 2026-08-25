@@ -82,6 +82,7 @@ const DELIVERY_BADGE: Record<DeliveryStatus, { label: string; color: string }> =
 
 import { formatMoney } from "@/utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
+import { useSimpleUi } from "../../hooks/useSimpleUi";
 const fmtNum = (s: string | number | undefined | null) => formatMoney(s, "—");
 
 type SalesInvoicesPageProps = {
@@ -353,7 +354,11 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     }
   };
 
-  const columns: DenseColumn<ExtRow>[] = [
+  /* T-SIMPL2: قناع أعمدة القائمة من السِّجل الواحد (`utils/uiMode.ts`) — لا
+     قائمةَ إخفاءٍ ثانية تسكن هذا الملف وتفترق عنه. */
+  const { show: showAdv, columns: maskColumns } = useSimpleUi();
+
+  const allColumns: DenseColumn<ExtRow>[] = [
     {
       key: "invoice_number",
       header: "رقم",
@@ -637,6 +642,9 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     },
   ];
 
+  /* الأعمدة بعد القناع. القائمة كاملةٌ في الوضع المتقدّم حرفياً كما كانت. */
+  const columns = maskColumns(allColumns, "sales-invoices");
+
   const filterBar = (
     <div className="ktra-print-hidden" style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
       <label className="ktra-field" style={{ flex: 1, minWidth: "200px" }}>
@@ -649,12 +657,16 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />
       </label>
-      <label className="ktra-field" style={{ minWidth: "100px" }}>
-        <span className="ktra-field-label">النوع</span>
-        <select className="ktra-input" value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }}>
-          {TYPE_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
-        </select>
-      </label>
+      {/* T-SIMPL2: فلتر النوع يُطوى في السهل — ويعود متى كان مفعّلاً فعلاً،
+          فلا تبقى قائمةٌ مُرشَّحة بفلترٍ لا يراه صاحبها ولا يستطيع رفعه. */}
+      {showAdv("list.type-filter", Boolean(filterType)) && (
+        <label className="ktra-field" style={{ minWidth: "100px" }}>
+          <span className="ktra-field-label">النوع</span>
+          <select className="ktra-input" value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }}>
+            {TYPE_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+          </select>
+        </label>
+      )}
       <label className="ktra-field" style={{ minWidth: "100px" }}>
         <span className="ktra-field-label">الحالة</span>
         <select className="ktra-input" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}>

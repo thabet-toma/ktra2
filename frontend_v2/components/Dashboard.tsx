@@ -9,6 +9,7 @@ import { TasksDistributionChart } from './dashboard/TasksDistributionChart';
 import { useTenantSettings } from '../hooks/useTenantSettings';
 import { useCompany } from '../contexts/CompanyContext';
 import { formatDateValue } from "../utils/formatDate";
+import { useSimpleUi } from '../hooks/useSimpleUi';
 
 interface DashboardProps {
     tasks: Task[];
@@ -21,6 +22,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ tasks, users, onNavigate, 
     // M2: هوية الشركة النشطة — لا أسماء ثابتة
     const { identity } = useTenantSettings();
     const { currentCompany } = useCompany();
+    /* T-SIMPL2: الرئيسية مقاييسها مقاييسُ إدارةِ مهامٍ لا مقاييسُ متجر — عدّاد
+       المستخدمين ورسمُ توزيع المهام يُطويان في الوضع السهل، ويبقى ما يخدم
+       التاجر: تحيّته وأرقام مهامّه واختصاراته وبطاقة شركته وآخر النشاطات. */
+    const { show: showAdv } = useSimpleUi();
     const companyName =
         identity?.company_name_primary || currentCompany?.CompanyName || 'الشركة النشطة';
     const companySub = identity?.company_name_sub || 'نظام إدارة عمليات الاستيراد والمشتريات المتكامل';
@@ -42,14 +47,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ tasks, users, onNavigate, 
                 <span className="ktra-status-item">نشطة: <b style={{ color: 'var(--ktra-accent, #1857a4)' }}>{pendingTasks}</b></span>
                 <span className="ktra-status-item">مكتملة: <b style={{ color: 'var(--ktra-ok, #267346)' }}>{completedTasks}</b></span>
                 <span className="ktra-status-item">الإنجاز: <b>{completionRate}%</b></span>
-                <span className="ktra-status-item">المستخدمون: <b>{totalUsers}</b></span>
+                {showAdv('home.task-analytics') && (
+                    <span className="ktra-status-item">المستخدمون: <b>{totalUsers}</b></span>
+                )}
             </div>
 
             {/* المحتوى الرئيسي */}
             <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0 }}>
                 {/* العمود الأيمن: الرسوم البيانية + الشركة */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minWidth: 0 }}>
-                    <TasksDistributionChart tasks={tasks} />
+                    {showAdv('home.task-analytics') && <TasksDistributionChart tasks={tasks} />}
 
                     <div style={{ background: 'var(--ktra-accent, #1857a4)', borderRadius: 8, padding: '12px 16px', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

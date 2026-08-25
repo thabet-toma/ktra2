@@ -111,6 +111,7 @@ import { humanizeThrown } from "@/utils/drfError";
 import { FieldError } from "@/components/ui/FieldError";
 import { useConfirm } from "@/contexts/ConfirmContext";
 import { usePermissions } from "@/contexts/PermissionsContext";
+import { useSimpleUi } from "@/hooks/useSimpleUi";
 import { clientLogger } from "@/services/logger";
 import { accountMatchesPurpose } from "@/utils/accountTree";
 import {
@@ -1234,6 +1235,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       <FieldError message={error} />
     </label>
   );
+
+  /* T-SIMPL2 — قناع العناصر المتقدّمة، بنفس السِّجل ونفس المفاتيح المستعملة في
+     محرّر البيع (`utils/uiMode.ts`): «الضريبة» واحدةٌ على الجانبين، فلا يفترق
+     الوضع السهل بين فاتورةٍ وأخرى. ومعه قاعدة السقوط للظهور: ما حمل رقماً
+     فعلياً يظهر رغم الوضع. */
+  const { show: showAdv } = useSimpleUi();
+  const invoiceHasTax = Number(formData.taxRate || 0) > 0 || Number(formData.taxAmount || 0) > 0.0001;
 
   const selectedSupplier = formData.supplierId
     ? suppliers.find((s) => s.id === formData.supplierId)
@@ -2902,7 +2910,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               onChange={(val) => handleUpdateFinancial("invoiceDate", val)}
             />
           )}
-          {fld(
+          {showAdv("doc.due-date", Boolean(formData.dealInfo?.dueDate)) && fld(
             "تاريخ الاستحقاق",
             <KitDatePicker
               className="ktra-input"
@@ -2988,7 +2996,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               createLabel={(t) => `إضافة «${t}» كمورّد جديد`}
             />
           )}
-          {fld(
+          {showAdv("doc.currency", (formData.currency || "ILS") !== "ILS") && fld(
             "العملة",
             <select
               className="ktra-input"
@@ -3000,7 +3008,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <option value="ILS">ILS — شيكل</option>
             </select>
           )}
-          {formData.currency === "ILS" && fld(
+          {formData.currency === "ILS" && showAdv("doc.tax", invoiceHasTax) && fld(
             "نسبة الضريبة %",
             <input
               className="ktra-input"
@@ -3015,7 +3023,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               onChange={(e) => handleUpdateFinancial("taxRate", Number(e.target.value))}
             />
           )}
-          {fld(
+          {showAdv("doc.licensed-dealer", Boolean(formData.dealInfo?.licensedDealerNo)) && fld(
             "مشتغل مرخص",
             <input
               className="ktra-input"
@@ -3127,23 +3135,38 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       )}
       activeTab={activeTabKey}
       onTabChange={setActiveTabKey}
+      /* T-SIMPL2: التبويبات المتقدّمة (الرسوم/الأقساط/الصفقة/السجلّات/القيد)
+         تُطوى في الوضع السهل ويبقى جوهر الفاتورة: بياناتها وبنودها وملاحظاتها
+         ومرفقاتها. الغلاف يتتبّع التبويب **بالمفتاح** لا بالفهرس، فطيُّ تبويبٍ
+         لا يقفز بالمستخدم. و«حسابات الرسوم» تعود متى حملت مبلغاً فعلاً. */
       tabs={viewMode ? [
         // تبويبٌ أوّل خاملٌ عمداً: الغلاف يُفعّل الأوّل، فلو كان «حركة المخزون»
         // لجَلَب لكل فتحة فاتورة — والكسل شرط لا تحسين. نفس ترتيب محرّر البيع.
         { key: "notes", label: "الملاحظات", content: notesTab },
-        ...contextTabs,
+        ...(showAdv("doc.advanced-tabs") ? contextTabs : contextTabs.filter((t) => t.key === "attachments")),
       ] : [
         { key: "basic", label: "بيانات الفاتورة", content: basicInfoTab },
         { key: "items", label: "البنود والمنتجات", content: itemsTab },
-        { key: "fees", label: `حسابات الرسوم${feesTotal > 0 ? ` (${formatMoney(feesTotal)})` : ""}`, content: feesTab },
-        { key: "installments", label: "أقساط الدفع", content: installmentsTab },
-        { key: "dealinfo", label: "معلومات الصفقة", content: dealInfoTab },
+        ...(showAdv("doc.advanced-tabs", feesTotal > 0)
+          ? [{ key: "fees", label: `حسابات الرسوم${feesTotal > 0 ? ` (${formatMoney(feesTotal)})` : ""}`, content: feesTab }]
+          : []),
+        ...(showAdv("doc.advanced-tabs")
+          ? [
+              { key: "installments", label: "أقساط الدفع", content: installmentsTab },
+              { key: "dealinfo", label: "معلومات الصفقة", content: dealInfoTab },
+            ]
+          : []),
         { key: "notes", label: "الملاحظات", content: notesTab },
         { key: "attachments", label: "المرفقات", content: attachmentsTab },
-        { key: "activity", label: "سجل النشاطات", content: activityTab },
-        { key: "other", label: "بيانات أخرى", content: otherTab },
+        ...(showAdv("doc.advanced-tabs")
+          ? [
+              { key: "activity", label: "سجل النشاطات", content: activityTab },
+              { key: "other", label: "بيانات أخرى", content: otherTab },
+            ]
+          : []),
         // M2: المحاسبة والقيد + الحركات المالية inline داخل المحرر (توحيداً مع المبيعات).
-        ...(formData.id && Number(formData.id) > 0 ? [
+        // T-SIMPL2: وكلّها متقدّمة — تُطوى في الوضع السهل وتبقى المرفقات أعلاه.
+        ...(showAdv("doc.advanced-tabs") && formData.id && Number(formData.id) > 0 ? [
           {
             key: "accounting",
             label: "المحاسبة والقيد",
@@ -3220,14 +3243,20 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 <span className="ktra-total-value">{fmt(formData.discountAmount || 0)}</span>
               </div>
             )}
-            <div className="ktra-total-row">
-              <span>المجموع قبل الضريبة</span>
-              <span className="ktra-total-value">{fmt((formData.subtotal || 0) + transferCommissionsIls)}</span>
-            </div>
-            <div className="ktra-total-row">
-              <span>الضريبة المضافة</span>
-              <span className="ktra-total-value">{fmt(formData.taxAmount || 0)}</span>
-            </div>
+            {/* T-SIMPL2: سطرا الضريبة يُطويان في الوضع السهل — ويعودان متى
+                احتُسبت ضريبةٌ فعلاً، فلا يختفي فرقٌ في المبلغ عن دافعه. */}
+            {showAdv("doc.tax", invoiceHasTax) && (
+              <>
+                <div className="ktra-total-row">
+                  <span>المجموع قبل الضريبة</span>
+                  <span className="ktra-total-value">{fmt((formData.subtotal || 0) + transferCommissionsIls)}</span>
+                </div>
+                <div className="ktra-total-row">
+                  <span>الضريبة المضافة</span>
+                  <span className="ktra-total-value">{fmt(formData.taxAmount || 0)}</span>
+                </div>
+              </>
+            )}
             {(formData.fees || []).map((fee, index) => (
               <div className="ktra-total-row" key={fee.id || index}>
                 <span>{fee.description || "رسم إضافي"}</span>
@@ -3261,14 +3290,18 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 <span className="ktra-total-value">{fmt(formData.discountAmount || 0)}</span>
               </div>
             )}
-            <div className="ktra-total-row">
-              <span>المجموع قبل الضريبة</span>
-              <span className="ktra-total-value">{fmt(formData.subtotal || 0)}</span>
-            </div>
-            <div className="ktra-total-row">
-              <span>الضريبة المضافة</span>
-              <span className="ktra-total-value">{fmt(formData.taxAmount || 0)}</span>
-            </div>
+            {showAdv("doc.tax", invoiceHasTax) && (
+              <>
+                <div className="ktra-total-row">
+                  <span>المجموع قبل الضريبة</span>
+                  <span className="ktra-total-value">{fmt(formData.subtotal || 0)}</span>
+                </div>
+                <div className="ktra-total-row">
+                  <span>الضريبة المضافة</span>
+                  <span className="ktra-total-value">{fmt(formData.taxAmount || 0)}</span>
+                </div>
+              </>
+            )}
             {(formData.fees || []).map((fee, index) => (
               <div className="ktra-total-row" key={fee.id || index}>
                 <span>{fee.description || "رسم إضافي"}</span>

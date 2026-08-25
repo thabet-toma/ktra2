@@ -45,6 +45,7 @@ import {
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { KitDatePicker } from "../ui/KitDatePicker";
 import { FieldHint } from "../ui/FieldHint";
+import { useSimpleUi } from "../../hooks/useSimpleUi";
 
 import { ProductCardModal } from "../shared/ProductCardModal";
 import { SerialEntryModal } from "../shared/SerialEntryModal";
@@ -1206,6 +1207,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
      وقاعدة السقوط للأمان فوق قائمة الإخفاء كلها: **حقلٌ مطلوبٌ لم يُحَلّ افتراضيُه
      يظهر رغم الوضع** — لا فشل صامت، ولا حالة بلا مخرج. */
   const simpleMode = uiMode === "simple";
+  /* T-SIMPL2: قرار «هل يُعرض هذا العنصر المتقدّم؟» من سِجلّ واحد
+     (`utils/uiMode.ts`) لا من شرطٍ مكتوبٍ بيدٍ هنا — ومعه قاعدة السقوط للظهور. */
+  const { show: showAdv } = useSimpleUi();
   /** افتراضٌ مطلوبٌ لم يُحَلّ ⇒ `validateClient` سيرفض الحفظ، فلا يُخفى تفسيرُه. */
   const unresolvedRequiredDefault =
     (invType === "cash" && cashAccountId === "") || revenueAccountId === "";
@@ -1218,8 +1222,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
      آجلٌ بحت، والصندوق مفهومٌ نقديٌّ بحت. فتبديل «نقدي» يبدّل الحقلين فوراً في
      الوضعين. القيمة المخفيّة تبقى كما هي (قانون قناع THA-110 أعلاه)، فلا حمولة
      تتغيّر بمجرّد الإخفاء. */
-  /** الفاتورة النقدية مدفوعةٌ عند الترحيل فلا استحقاق لها — الحقل للآجلة. */
-  const showDueDateField = invType !== "cash";
+  /** الفاتورة النقدية مدفوعةٌ عند الترحيل فلا استحقاق لها — الحقل للآجلة.
+   *  T-SIMPL2: والوضع السهل يطويه فوق ذلك — **ما لم يحمل تاريخاً فعلاً**، فموعدُ
+   *  استحقاقٍ مُدخَل التزامٌ قائم لا يُخفى عن صاحبه. */
+  const showDueDateField =
+    invType !== "cash" && showAdv("doc.due-date", Boolean(dueDate));
   /** الصندوق وجهةُ نقد الفاتورة النقدية — والوضع السهل يُخفيه: افتراضُه محلولٌ
    *  دائماً (الإعدادات ثم أول صندوق في الشجرة)، وحين لا يُحلّ فلأنه لا صندوق في
    *  الشجرة أصلاً — وحقلُ اختيارٍ بلا خيارات لا يُخرج من ذلك، بل تحذيرُ
@@ -1229,6 +1236,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const showAdvancedTabs = !simpleMode;
   /** «بيانات أخرى» يحمل تحذيرات الإعداد: يبقى ظاهراً ما دام تحذيرٌ حيّاً. */
   const showOtherTab = !simpleMode || unresolvedRequiredDefault;
+  /* T-SIMPL2 — حقائق «قاعدة السقوط للظهور» لعناصر المال: رقمٌ غير صفريّ يُبقي
+     عنصرَه ظاهراً مهما كان الوضع. الإخفاء يقلّم الصفر لا يُخفي فرقاً في مبلغ. */
+  const anyLineDiscount = lines.some((l) => Number(l.line_discount) > 0);
+  const anyLineTax = Number(totals.taxAmount) > 0.0001;
 
   const buildPayload = useCallback(() => {
     const body: Record<string, unknown> = {
@@ -2205,8 +2216,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       key: "serials", header: "الوحدات", width: "92px", align: "center" as const, readOnly: true,
     }] : []),
     { key: "unit_price", header: "سعر الوحدة", width: "100px", align: "center", type: "number" },
-    { key: "line_discount", header: "خصم سطر", width: "84px", align: "center", type: "number" },
-    { key: "tax", header: "الضريبة", width: "150px" },
+    /* T-SIMPL2: عمودا «خصم سطر» و«الضريبة» يُطويان في الوضع السهل — ويعودان
+       لحظة يحمل أحدهما رقماً فعلياً، فلا يُخفى عن البائع سببُ فرقٍ في الإجمالي. */
+    ...(showAdv("doc.line-discount", anyLineDiscount)
+      ? [{ key: "line_discount", header: "خصم سطر", width: "84px", align: "center" as const, type: "number" as const }]
+      : []),
+    ...(showAdv("doc.tax", anyLineTax)
+      ? [{ key: "tax", header: "الضريبة", width: "150px" }]
+      : []),
     // T-NOTES: ملاحظتا البند — أيقونة واحدة تفتح الاثنتين، فلا يتضخّم عرض الشبكة
     // بعمودَي نصٍّ حرّ نادرَي الاستعمال.
     { key: "notes", header: "ملاحظات", width: "76px", align: "center" as const, readOnly: true },
@@ -3867,20 +3884,24 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 }}
               />
             </div>
-            <div className="ktra-total-row">
-              <span>المجموع قبل الضريبة</span>
-              <span className="ktra-total-value">{fmt(totals.subtotalExclTax)}</span>
-            </div>
+            {showAdv("doc.tax", anyLineTax) && (
+              <div className="ktra-total-row">
+                <span>المجموع قبل الضريبة</span>
+                <span className="ktra-total-value">{fmt(totals.subtotalExclTax)}</span>
+              </div>
+            )}
             {Number(discountPercent) > 0 && (
               <div className="ktra-total-row">
                 <span>خصم مكتسب %</span>
                 <span className="ktra-total-value">{discountPercent}%</span>
               </div>
             )}
-            <div className="ktra-total-row">
-              <span>الضريبة المضافة</span>
-              <span className="ktra-total-value">{fmt(totals.taxAmount)}</span>
-            </div>
+            {showAdv("doc.tax", anyLineTax) && (
+              <div className="ktra-total-row">
+                <span>الضريبة المضافة</span>
+                <span className="ktra-total-value">{fmt(totals.taxAmount)}</span>
+              </div>
+            )}
             {profitVisible && journalPreview.revenue > 0 && journalPreview.cogs > 0 && (
               <div className="ktra-total-row">
                 <span>الربح الإجمالي</span>
@@ -3988,25 +4009,33 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             <span className="ktra-status-item">
               المستخدم <b>{currentUserName || "—"}</b>
             </span>
-            <span className="ktra-status-item">
-              رقم القيد <b>{postedJournalId ?? "—"}</b>
-            </span>
+            {/* T-SIMPL2: أثرُ التشخيص (القيد/الحركة/آخر مفتاح) يُطوى في السهل —
+                ويعود رقمُ القيد متى وُجد قيدٌ فعلاً: إثباتُ ترحيلٍ لا زينة. */}
+            {showAdv("doc.audit-strip", postedJournalId != null) && (
+              <span className="ktra-status-item">
+                رقم القيد <b>{postedJournalId ?? "—"}</b>
+              </span>
+            )}
             {/* THA-132: «رقم الحركة» المخزنية بجانب رقم القيد — سلوك الأصيل
                 نفسه (`invoices.txt`: «رقم الحركة المخزنية المسلسل… يمكن
                 استخدام هذا الحقل للاستعلام عن الحركات»). يُملأ من تبويب حركة
                 المخزون حين يُفتح، فلا يكلّف فتحَ الفاتورة نداءً. */}
-            <span className="ktra-status-item">
-              رقم الحركة <b>{stockMovementNo ?? "—"}</b>
-            </span>
+            {showAdv("doc.audit-strip") && (
+              <span className="ktra-status-item">
+                رقم الحركة <b>{stockMovementNo ?? "—"}</b>
+              </span>
+            )}
             <span className="ktra-status-item">
               الحالة <b>{isPosted ? "مرحّلة" : draftId ? "مسودة" : "جديدة"}</b>
             </span>
             <span className="ktra-status-item">
               السجل <b>{nav.position}/{nav.total}</b>
             </span>
-            <span className="ktra-status-item">
-              آخر مفتاح <b>{lastKey}</b>
-            </span>
+            {showAdv("doc.audit-strip") && (
+              <span className="ktra-status-item">
+                آخر مفتاح <b>{lastKey}</b>
+              </span>
+            )}
             <span className="ktra-status-item">
               {readOnly ? "للقراءة فقط" : "قابل للتعديل ✓"}
             </span>
@@ -4065,7 +4094,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             {revenueAccounts.length === 0 && (
               <div className="ktra-note ktra-note--err">لا توجد حسابات إيراد. شغّل seed_professional_coa.</div>
             )}
-            {salesTaxRates.length === 0 && (
+            {/* T-SIMPL2: تحذير الضريبة يتبع الضريبة — من طوى عمودها لا يُنبَّه
+                إلى إعدادٍ ناقصٍ لها. ويعود لحظة تُحتسب ضريبةٌ فعلاً. */}
+            {salesTaxRates.length === 0 && showAdv("doc.tax", anyLineTax) && (
               <div className="ktra-note ktra-note--warn">لا توجد نسبة ضريبة مبيعات مسجلة في الإعدادات.</div>
             )}
           </div>

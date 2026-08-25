@@ -23,6 +23,7 @@ import { clientLogger } from "../../services/logger";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { tenantScopedOfflineKey } from "../../utils/offlineTenantScope";
+import { useKeepOnce, useSimpleUi } from "../../hooks/useSimpleUi";
 
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
 const fmt = (n: number | string) => formatMoney(n, "0");
@@ -169,6 +170,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   }, [initialTab]);
 
   const [products, setProducts] = useState<SqlProduct[]>([]);
+  const { columns: maskColumns } = useSimpleUi();
   // شجرة التصنيفات (أي عمق) لعرض الجدول الشجري + الكرت المجمّع لكل تصنيف.
   const [treeCategories, setTreeCategories] = useState<TreeCategory[]>([]);
   const [loading, setLoading] = useState(false);
@@ -399,7 +401,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     }
   }, []);
 
-  const columns: DenseColumn<SqlProduct>[] = [
+  const allColumns: DenseColumn<SqlProduct>[] = [
     // W8: الأعمدة القيادية بالترتيب المطلوب — الكمية المشتراة (الوارد التراكمي)،
     // ثم الكمية المتبقية، ثم عمود الاسم (المثبَّت)، ثم متوسط المبيعات الشهري.
     { key: "purchased", header: "الكمية المشتراة", width: "100px", align: "center", numeric: true,
@@ -510,6 +512,18 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       )
     },
   ];
+
+  /* T-SIMPL2: أعمدة التحليل (المشتراة · متوسط البيع الشهري) وإعداد الكتالوج
+     (الحدّ الأقصى · النوع) تُطوى في الوضع السهل. و«محجوز/المتاح» يعودان لحظة
+     يوجد حجزٌ فعلاً — رصيدٌ لا يُباع منه لا يُخفى عن بائعه. */
+  /* القائمة مرقَّمة، و`products` صفحةٌ واحدة: بلا تثبيت تظهر الأعمدة في صفحة
+     وتختفي في التي تليها — جدولٌ يتراقص تحت يد المستخدم. */
+  const anyReserved = useKeepOnce(products.some((p) => Number(p.reserved_quantity || 0) > 0));
+  const columns = maskColumns(
+    allColumns,
+    "items-management",
+    anyReserved ? ["reserved", "available"] : [],
+  );
 
   if (view === "form") {
     return (
