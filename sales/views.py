@@ -1313,7 +1313,10 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
         # of malformed inputs. Wrapped in atomic so the row is rolled back
         # if validate_payment rejects it.
         from django.db import transaction
-        from core.payments import PaymentContext, should_auto_post_payment, validate_payment
+        from core.payments import (
+            PaymentContext, describe_auto_post_failure, should_auto_post_payment,
+            validate_payment,
+        )
         from rest_framework.exceptions import ValidationError as DRFValidationError
         with transaction.atomic():
             payment = serializer.save(tenant=tenant)
@@ -1343,8 +1346,11 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
                 )
             except Exception as e:  # noqa: BLE001
                 # الفشل لا يُضيع السند — يبقى مسودة وتُعاد الرسالة مع الاستجابة.
-                logger.warning("Auto-post customer payment %s failed: %s", payment.id, e)
-                payment._auto_post_error = str(e)
+                # CHQ-4: `exception` لا `warning` — بلا traceback لا يُشخَّص عمودٌ
+                # مفقود من اللوغ، وهو أشيع أسباب هذا الفشل على خادمٍ لم يُهاجَر.
+                logger.exception("Auto-post customer payment %s failed", payment.id)
+                payment._auto_post_error = describe_auto_post_failure(
+                    e, document_label="سند القبض")
 
     def perform_update(self, serializer):
         payment = serializer.save()

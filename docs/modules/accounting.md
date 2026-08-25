@@ -158,7 +158,9 @@ def year_end_close(*, tenant_id: int, fiscal_year: int, retained_earnings_accoun
 def next_document_number(tenant_id: int, document_type: str, book_number: int = 0, branch_id: int | None = None) -> int:  # ترقيم المستندات عبر TenantBook مع select_for_update
 def get_exchange_rate(tenant_id: int, from_currency_id: int, to_currency_id: int, effective_date=None) -> Decimal:  # أحدث سعر ≤ التاريخ، أو مقلوب الاتجاه المعاكس
 def convert_amount(amount: Decimal, from_currency_id: int, to_currency_id: int, tenant_id: int, effective_date=None, explicit_rate: Decimal | None = None) -> tuple[Decimal, Decimal]:  # (المبلغ المحوَّل، السعر)
-def transfer_cheque(cheque_id, movement_type, *, user=None, notes='', account_id=None, movement_date=None, bank_account_id=None):  # تحويل حالة شيك + قيده
+def transfer_cheque(cheque_id, movement_type, *, user=None, notes='', account_id=None, movement_date=None, bank_account_id=None, endorsed_to_id=None):  # تحويل حالة شيك + قيده؛ يرفض حركةً على سندٍ غير مرحّل، ومسودةً داخل مستند، وتاريخاً مستقبلياً أو أسبق من آخر حركة مرحّلة، وإيداعاً بلا بنك متى كان للشركة بنوك نشطة
+def deposit_cheques_batch(tenant_id, cheque_ids, *, bank_account_id=None, user=None, movement_date=None, notes='') -> dict:  # إيداع حزمة شيكات ذرّياً (الكلّ أو لا شيء) + بيانات قسيمة الإيداع
+def cheque_source_document(cheque) -> dict | None:  # المستند الذي دخل الشيك الدفاتر ضمنه: نوعه ورقمه وهل رُحِّل
 def post_cheque_movement_journal(cheque, movement_type, *, when, user=None, account_id=None, branch_id=None):  # قيد حركة شيك واحدة، idempotent
 def cheque_wallet(tenant_id: int, *, today=None) -> dict:  # محفظة الشيكات المفتوحة حسب الحالة والاستحقاق
 def create_bank_account(*, tenant, bank, name, currency, branch=None, account_number=None, iban=None, is_default=False, notes=None, user=None):  # حساب بنكي + حسابه في الشجرة تحت «1102»
@@ -183,8 +185,10 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | GET | `journals/users/` | `JournalViewSet.journal_users` — خيارات فلتر «المستخدم» من قيود الشركة وحدها |
 | POST | `journals/{id}/post/` | `JournalViewSet.post_entry` — يتطلب `accounting.journal.post` |
 | POST | `journals/{id}/reverse/` | `JournalViewSet.reverse_entry` — يتطلب `accounting.journal.unpost` |
-| GET/POST | `cheques/` | `ChequeViewSet` |
+| GET/POST | `cheques/` | `ChequeViewSet` — فلاتر خادمية: `search` (رقم الشيك/الاسم عليه/البنك/حساب الساحب/الطرف)، `status`، `direction`، `partner`، `due_from`/`due_to`، `deposit_bank_account`، و`ordering` بقائمة بيضاء؛ الترقيم اختياري بـ`?page=` |
+| DELETE | `cheques/{id}/` | `ChequeViewSet.destroy` — يرفض شيكاً له حركة مرحّلة، أو تجاوزت حالته اليد، أو مستنده مرحّل |
 | POST | `cheques/{id}/transfer/` | `ChequeViewSet` (يستدعي `transfer_cheque`) |
+| POST | `cheques/deposit-batch/` | `ChequeViewSet.deposit_batch` — إيداع حزمة ذرّياً؛ الرفض يعود 400 بـ`rejected` (سببٌ لكل ورقة) ولا يُودَع شيء |
 | GET | `cheques/{id}/movements/` · `cheques/wallet/` | `ChequeViewSet` |
 | GET | `general-ledger/` · `trial-balance/` · `vat-report/` | `GeneralLedgerView` · `TrialBalanceView` · `VatReportView` |
 | GET | `bank-accounts/{id}/statement/` | `BankAccountViewSet` |
@@ -221,7 +225,10 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 - **`JournalLine.account` بـ`PROTECT`** — لا يُحذف حساب له حركة، و`debit`/`credit` بقيدَي `CheckConstraint` غير سالبين (`accounting/models.py` (`JournalLine`)).
 - **كل قراءة مُنطاقة بالشركة**: `tenant is None ⇒ .none()` في `accounting/views.py` (`JournalViewSet`) و`accounting/views.py` (`AccountViewSet`).
 - **وكل مرساة تُكتب مُنطاقة بها أيضاً**: `get_queryset` يحمي القراءة وحدها، فحقول الـpk الكاتبة تُعلَن `TenantScopedPrimaryKeyRelatedField` (`core/api_defaults.py`) — أب الحساب (`accounting/serializers.py` (`AccountSerializer`)) وشريك السطر ومركز كلفته (`JournalLineSerializer`). معرّف شركة أخرى يعود «غير موجود»، فلا شجرةَ تُعلَّق تحت شركة غيرها ولا كشفَ لوجود المعرّف.
-- **الشيك لا يتحرك خارج جدول اتجاهه** — `accounting/services.py` (`INCOMING_TRANSITIONS`) و`accounting/services.py` (`OUTGOING_TRANSITIONS`) هما المصدر الواحد، و`accounting/services.py` (`transfer_cheque`) ترفض الانتقال غير المسموح، وترفض أي حركة على شيكٍ سندُه غير مرحّل، وتكتب `ChequeMovement` مربوطةً بقيدها.
+- **الشيك لا يتحرك خارج جدول اتجاهه** — `accounting/services.py` (`INCOMING_TRANSITIONS`) و`accounting/services.py` (`OUTGOING_TRANSITIONS`) هما المصدر الواحد، و`accounting/services.py` (`transfer_cheque`) ترفض الانتقال غير المسموح، وترفض أي حركة على شيكٍ سندُه غير مرحّل، وتكتب `ChequeMovement` مربوطةً بقيدها. والورقة المظهَّرة لها مخرج واحد هو `bounce` (قيدٌ بين ذمّتين: العميل الساحب يعود مديناً والمستفيد تعود ذمّته، بلا مساس بحسابَي الشيكات).
+- **ما يعلنه الخادم للشاشة هو ما يقبله** — `accounting/services.py` (`allowed_movement_options`) تعيد قائمة فارغة لورقةٍ سندُها غير مرحّل بدل عرض حركاتٍ يرفضها الحارس حتماً، و`needs_document_post` و`source_document` في `accounting/serializers.py` (`ChequeSerializer`) يقولان أيّ سند يُرحَّل.
+- **بنك الإيداع يُسجَّل على الورقة لا في القيد** — قيد الإيداع يبقى 1107 ÷ 1109 بحسابٍ واحد للشيكات برسم التحصيل؛ و`deposit_bank_account` هو المصدر الوحيد لمعرفة أين الورقة، فيُلزَم متى كانت للشركة حسابات بنكية نشطة (`accounting/services.py` (`CHEQUE_MOVEMENTS_NEEDING_BANK_ACCOUNT`)).
+- **`endorsed_to` و`deposit_bank_account` قراءةٌ فقط في الـAPI** — يكتبهما `transfer_cheque` مع قيد الحركة وحده؛ وما يقرأه قيد السند (المبلغ، الاتجاه، الطرف، العملة) مقفولٌ ما دام المستند مرحّلاً (`accounting/serializers.py` (`ChequeSerializer`)).
 - **لا تُقفل مطابقة بنكية بفرق ≥ 0.01** (`accounting/services.py` (`close_bank_reconciliation`))، وكل `JournalLine` تُطابَق مرة واحدة (`accounting/models.py` (`BankReconciliationLine`)).
 - **الفترة المُقفَلة لا تتغيّر إلا عبر `reopen/` بسبب مسجَّل** — `FiscalPeriodViewSet.perform_update`/`perform_destroy` (`accounting/views.py`) يرفضان أي تعديل أو حذف عليها، ويمنعان حذف فترة في مداها قيد مرحّل (تاريخٌ بلا فترة تغطّيه يشلّ الترحيل وإلغاءه معاً)، وكل تعديل أو حذف ناجح يُكتب في سجل التدقيق.
 - **`create_audit_log` يجب أن يبقى معزولاً** — سطر تدقيق فاشل لا يجوز أن يُرجِع معاملة المستدعي (سبب اختبار `test_audit_log_isolation`).
@@ -239,6 +246,9 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | `accounting/tests/test_cheque_lifecycle.py` | إنفاذ جدولَي الانتقالات لكل اتجاه عبر `transfer_cheque` |
 | `accounting/tests/test_cheque_cycle_v2.py` | قيد الإيداع (1107 ÷ 1109)، التظهير، إعادة الإيداع، إلغاء الصادر، وصراحة ريزولفرَي حسابَي الشيكات |
 | `accounting/tests/test_cheque_accounts_autocreate.py` · `test_cheque_create_api.py` · `test_cheques_column_alignment.py` | إنشاء حسابي الشيكات تلقائياً، وعقد إنشاء الشيك داخل سند |
+| `accounting/tests/test_cheque_guards.py` | حارس حذف الشيك، وقفل الكتابة الخام بعد الترحيل، ومخرج ارتداد الورقة المظهَّرة، ومنع صرف مسودة داخل مستند، وحراسة تاريخ الحركة |
+| `accounting/tests/test_cheque_deposit_batch.py` · `test_cheque_deposit_bank.py` | ذرّية الإيداع الجماعي وقسيمته، وإلزام بنك الإيداع مع بقاء القيد 1107 ÷ 1109 |
+| `accounting/tests/test_cheque_source_document.py` · `test_cheque_list_filters.py` · `test_cheque_voucher_autopost.py` | المستند المصدر وصمت الحركات قبل ترحيله، والفلاتر والبحث والترقيم بعزل الشركة، وترحيل سندٍ فيه شيك على شركة تنقصها حسابات الشيكات |
 | `accounting/tests/test_journal_tenant_scoping.py` | رفض شريك/مركز تكلفة من شركة أخرى في `validate_journal_entry` |
 | `accounting/tests/test_accounting_permissions.py` | إنفاذ مفاتيح `accounting.*` على القيد والشجرة والفترات |
 | `accounting/tests/test_partner_statement.py` | مطابقة الرصيد الجاري في كشف الحساب مع `partner_posted_balance` |

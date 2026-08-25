@@ -11,6 +11,8 @@ import type {
   BankDto,
   BankReconciliationSummaryDto,
   BankStatementDto,
+  ChequeDepositBatchResult,
+  ChequeDto,
   OpeningBalanceDto,
   OpeningBalanceLinesInput,
 } from "../types/accounting";
@@ -38,8 +40,10 @@ const headers = (): HeadersInit => {
 async function handle(res: Response, ctx: string): Promise<void> {
   if (res.ok) return;
   let msg = `${ctx}: ${res.status}`;
+  let body: unknown = null;
   try {
     const j = await res.json();
+    body = j;
     // T-CHQ3: أخطاء الحقول ({"tenant":["مطلوب"]}) كانت تسقط هنا فيرى المستخدم
     // «createCheque: 400» بلا سبب — تمرّ الآن على الطبقة الموحّدة.
     msg = humanizeDrfError(j) || msg;
@@ -47,7 +51,13 @@ async function handle(res: Response, ctx: string): Promise<void> {
     const t = await res.text();
     if (t) msg = t.slice(0, 400);
   }
-  throw new Error(msg);
+  // CHQ-4: جسم الاستجابة يبقى مُلحقاً بالخطأ — نفس عقد `restApi`. رفضُ دفعة
+  // الإيداع مثلاً يحمل `rejected` مربوطاً بأرقام الشيكات، وسطرُ نصٍّ وحده
+  // يُضيّعه فتعود الشاشة إلى رسالة عامة لا تقول أي ورقة أبطلت الدفعة.
+  const err = new Error(msg) as Error & { status?: number; data?: unknown };
+  err.status = res.status;
+  err.data = body;
+  throw err;
 }
 
 async function asList(res: Response): Promise<any[]> {
@@ -378,6 +388,36 @@ export const accountingApi = {
     await handle(res, "deleteBankReconciliation");
   },
 
+  /**
+   * CHQ-4: قائمة الشيكات مفلترةً في الخادم ومُرقَّمة. كانت تُسحب كاملةً ثم
+   * تُفلتر في المتصفح — جدولٌ ينمو بلا حدّ يُبثّ في كل فتح للشاشة. بلا
+   * `page` تعود مصفوفة خام (الترقيم opt-in) فلا ينكسر مستهلك قائم.
+   */
+  getChequesPage: async (params: {
+    search?: string;
+    status?: string;
+    direction?: string;
+    partner?: string;
+    due_from?: string;
+    due_to?: string;
+    ordering?: string;
+    page?: number;
+    page_size?: number;
+  } = {}): Promise<{ results: ChequeDto[]; count: number }> => {
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== "") {
+        qs.set(key, String(value));
+      }
+    }
+    const res = await fetch(`${ACC}/cheques/?${qs.toString()}`, { headers: headers() });
+    await handle(res, "getCheques");
+    const data = await res.json();
+    return Array.isArray(data)
+      ? { results: data as ChequeDto[], count: data.length }
+      : { results: (data.results ?? []) as ChequeDto[], count: data.count ?? 0 };
+  },
+
   getCheques: () =>
     fetch(`${ACC}/cheques/`, { headers: headers() }).then(asList),
 
@@ -399,6 +439,26 @@ export const accountingApi = {
       body: JSON.stringify(body),
     });
     await handle(res, "createCheque");
+    return res.json();
+  },
+
+  /**
+   * CHQ-4: إيداع حزمة شيكات دفعةً واحدة — ذرّي في الخادم (الكلّ أو لا شيء).
+   * الرفض يعود 400 بجسمٍ فيه `rejected: [{cheque_id, cheque_number, reason}]`
+   * فتُسمّي الشاشة الأوراق المخالفة بدل رسالة عامة.
+   */
+  depositChequesBatch: async (body: {
+    cheque_ids: number[];
+    bank_account?: number | null;
+    movement_date?: string;
+    notes?: string;
+  }): Promise<ChequeDepositBatchResult> => {
+    const res = await fetch(`${ACC}/cheques/deposit-batch/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "depositChequesBatch");
     return res.json();
   },
 

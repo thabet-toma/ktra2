@@ -411,20 +411,57 @@ class ChequeSerializer(serializers.ModelSerializer):
     # نسختها من الجدول والتسميات، فتفترق النسختان بلا أن يشعر أحد.
     status_label = serializers.SerializerMethodField(read_only=True)
     allowed_movements = serializers.SerializerMethodField(read_only=True)
+    # CHQ-4: المستند الذي دخل الشيك الدفاتر ضمنه، وهل ينتظر ترحيله. بدونهما
+    # كانت ورقة السند المسودة طريقاً مسدوداً في الشاشة: حركاتٌ مرفوضة حتماً
+    # ولا سبيل لمعرفة أي سند يُرحَّل ولا للوصول إليه.
+    source_document = serializers.SerializerMethodField(read_only=True)
+    needs_document_post = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Cheque
         fields = '__all__'
         # T-CHQ3: الشركة من الترويسة والمستخدم من التوكن — وبقاؤهما مطلوبَين
         # (FK بلا blank=True) كان يردّ كل إنشاء شيك من الشاشة بـ400.
-        read_only_fields = ['tenant', 'created_by', 'created_at']
+        # CHQ-4: `endorsed_to` و`deposit_bank_account` قراءةٌ فقط — يكتبهما
+        # `transfer_cheque` وحده مع قيد الحركة. كانا مفتوحَين لـPATCH خام،
+        # فيتغيّر مستفيد التظهير بعد أن رُحِّل قيدٌ يدين ذممه ⇒ الصفّ يقول
+        # طرفاً واليومية تقول آخر، بلا أي تعارض ظاهر يكشف ذلك.
+        read_only_fields = [
+            'tenant', 'created_by', 'created_at',
+            'endorsed_to', 'deposit_bank_account',
+        ]
+
+    #: الحقائق المالية للورقة — يقرؤها قيدُ سندها. تغييرها بعد الترحيل يجعل
+    #: القيد يصف ورقةً غير التي في الجدول.
+    _LOCKED_AFTER_POSTING = ('amount', 'direction', 'partner', 'currency')
 
     def validate(self, attrs):
         """T-CHQ3: البنك المسحوب عليه أهمّ ما في الورقة — مسجَّلاً أو نصاً.
 
         على التعديل لا يُطبَّق الشرط إلا إذا مسّ الطلب حقول البنك، كي لا يمنع
         تحرير شيكات قديمة سُجِّلت بلا بنك.
+
+        CHQ-4: ويُقفل هنا ما يقرؤه قيد السند (المبلغ، الاتجاه، الطرف، العملة)
+        متى صار السند مرحّلاً — تغييره كان يجعل اليومية تصف ورقةً غير التي في
+        الجدول، بلا أي تعارض ظاهر. التصحيح يمرّ بإلغاء ترحيل السند.
         """
+        if self.instance is not None:
+            from .services import cheque_document_is_posted
+
+            if cheque_document_is_posted(self.instance) is True:
+                changed = [
+                    field for field in self._LOCKED_AFTER_POSTING
+                    if field in attrs
+                    and attrs[field] != getattr(self.instance, field, None)
+                ]
+                if changed:
+                    raise serializers.ValidationError({
+                        changed[0]: (
+                            'الشيك داخل مستند مرحّل — لا يُعدَّل مبلغه ولا طرفه '
+                            'ولا عملته ولا اتجاهه. ألغِ ترحيل المستند، عدّل، '
+                            'ثم أعد الترحيل.'
+                        ),
+                    })
         if self.instance is not None and not (
                 'bank' in attrs or 'bank_name' in attrs):
             return attrs
@@ -453,7 +490,21 @@ class ChequeSerializer(serializers.ModelSerializer):
 
     def get_allowed_movements(self, obj):
         from .services import allowed_movement_options
-        return allowed_movement_options(obj)
+        # CHQ-4: إلزام بنك الإيداع مشروطٌ بامتلاك الشركة بنوكاً نشطة — حقيقةٌ
+        # واحدة للطلب كله يحقنها الـViewSet، لا استعلامٌ لكل صفّ في القائمة.
+        return allowed_movement_options(
+            obj,
+            has_active_bank_accounts=self.context.get('has_active_bank_accounts'),
+        )
+
+    def get_source_document(self, obj):
+        from .services import cheque_source_document
+        return cheque_source_document(obj)
+
+    def get_needs_document_post(self, obj):
+        from .services import cheque_document_is_posted
+        # `False` وحدها تعني «مرتبط ولم يُرحَّل»؛ `None` ورقةٌ يتيمة لا تنتظر شيئاً.
+        return cheque_document_is_posted(obj) is False
 
 
 class ChequeMovementSerializer(serializers.ModelSerializer):

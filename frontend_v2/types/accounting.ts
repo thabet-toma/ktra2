@@ -66,6 +66,59 @@ export interface ChequeMovementOption {
   requires_endorsee: boolean;
 }
 
+/**
+ * CHQ-4: المستند الذي دخل الشيك الدفاتر ضمنه — الشيك ليس مستنداً مستقلاً.
+ * `is_posted === false` هو سبب صمت `allowed_movements`، ومنه يُبنى زر
+ * «ترحيل السند» في الشاشة. `null` يعني ورقة يتيمة (legacy) لا سند لها.
+ */
+export interface ChequeSourceDocument {
+  type: "customer_payment" | "sales_invoice" | "supplier_payment" | "purchase_invoice";
+  label: string;
+  id: number;
+  number: string;
+  is_posted: boolean;
+}
+
+/**
+ * CHQ-4: ورقةٌ رُفضت من الدفعة وسببها. الدفعة ذرّية، فوجود صفٍّ واحد هنا يعني
+ * أن **لا شيء** أُودع — والقائمة تسمّي ما يجب استثناؤه من التحديد.
+ */
+export interface ChequeBatchRejection {
+  cheque_id: number | null;
+  cheque_number: string | null;
+  reason: string;
+}
+
+/** CHQ-4: قسيمة الإيداع — ما يُسلَّم مع الأوراق إلى صرّاف البنك. */
+export interface ChequeDepositSlip {
+  slip_date: string;
+  batch_ref: string;
+  notes: string;
+  bank_account: {
+    id: number;
+    bank_name: string;
+    name: string;
+    account_number: string;
+  } | null;
+  currency_code: string;
+  total: string;
+  cheques: {
+    id: number;
+    cheque_number: string;
+    drawer_bank: string;
+    payee_name: string;
+    partner_name: string;
+    due_date: string;
+    amount: string;
+  }[];
+}
+
+export interface ChequeDepositBatchResult {
+  deposited_count: number;
+  batch_ref: string;
+  slip: ChequeDepositSlip;
+}
+
 export interface ChequeDto {
   id: number;
   cheque_number: string;
@@ -88,6 +141,10 @@ export interface ChequeDto {
   status_label?: string;
   /** CHQ-3: ما يمكن فعله بالورقة الآن — مصدره آلة الحالات في الخادم. */
   allowed_movements?: ChequeMovementOption[];
+  /** CHQ-4: السند/الفاتورة التي تحمل الشيك — رقمها وهل رُحِّلت. */
+  source_document?: ChequeSourceDocument | null;
+  /** CHQ-4: الورقة تنتظر ترحيل سندها — لا حركة لها حتى يُرحَّل. */
+  needs_document_post?: boolean;
   direction: string;
   partner?: number | null;
   /** CHQ-1: الطرف الذي ظُهِّر له الشيك. */

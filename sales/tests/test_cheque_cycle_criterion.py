@@ -44,6 +44,14 @@ WHEN = dt.date(2026, 7, 5)
 OPENING = Decimal("1000.00")
 CHEQUE_AMOUNT = Decimal("200.00")
 
+# CHQ-4: تواريخ الحركات كانت ثابتة (2026-07-10 و2026-09-02) — والثانية صارت
+# مستقبلاً بمرور الوقت، فيردّها حارس «لا حركة بتاريخ لم يأتِ بعد». اختبارٌ نتيجته
+# تتغيّر بتقويم الجهاز عطلٌ في ذاته، فالتواريخ تُشتقّ من اليوم: ماضيةٌ دائماً
+# ومرتّبةٌ دائماً (الإيداع قبل ما يليه). الأسئلة المحاسبية للاختبار لم تتغيّر.
+_TODAY = dt.date.today()
+DEPOSIT_DATE = _TODAY - dt.timedelta(days=45)
+SETTLE_DATE = _TODAY - dt.timedelta(days=1)
+
 
 class _Books:
     """شركة بشجرة معيارية مصغّرة — ما تحتاجه دورة الشيك ولا شيء غيره."""
@@ -177,7 +185,7 @@ def test_incoming_receive_deposit_bounce_three_journals_ar_restored():
     assert receive.journal_id == payment.journal_id
 
     # 2) الإيداع — قيد مستقل: 1107 ÷ 1109، بلا أثر على العميل.
-    transfer_cheque(cheque.pk, "deposit", movement_date=dt.date(2026, 7, 10))
+    transfer_cheque(cheque.pk, "deposit", movement_date=DEPOSIT_DATE)
     cheque.refresh_from_db()
     assert cheque.status == "Under_Collection"
     assert books.customer_balance() == (OPENING - CHEQUE_AMOUNT)
@@ -185,7 +193,7 @@ def test_incoming_receive_deposit_bounce_three_journals_ar_restored():
     assert books.account_balance(books.uc) == CHEQUE_AMOUNT
 
     # 3) الارتداد — الذمّة تعود على العميل والورقة تخرج من 1107.
-    transfer_cheque(cheque.pk, "bounce", movement_date=dt.date(2026, 9, 2))
+    transfer_cheque(cheque.pk, "bounce", movement_date=SETTLE_DATE)
     cheque.refresh_from_db()
     assert cheque.status == "Bounced"
 
@@ -211,8 +219,8 @@ def test_unposting_a_voucher_whose_cheque_was_collected_is_rejected():
     books.open_customer_balance()
     payment, cheque = books.incoming_voucher(number="CHQ-COLLECTED")
     payment = post_customer_payment(payment)
-    transfer_cheque(cheque.pk, "deposit", movement_date=dt.date(2026, 7, 10))
-    transfer_cheque(cheque.pk, "collect", movement_date=dt.date(2026, 9, 2))
+    transfer_cheque(cheque.pk, "deposit", movement_date=DEPOSIT_DATE)
+    transfer_cheque(cheque.pk, "collect", movement_date=SETTLE_DATE)
     cheque.refresh_from_db()
     assert cheque.status == "Collected"
 
@@ -232,7 +240,7 @@ def test_unposting_a_voucher_whose_cheque_was_only_deposited_is_rejected():
     books.open_customer_balance()
     payment, cheque = books.incoming_voucher(number="CHQ-DEPOSITED")
     payment = post_customer_payment(payment)
-    transfer_cheque(cheque.pk, "deposit", movement_date=dt.date(2026, 7, 10))
+    transfer_cheque(cheque.pk, "deposit", movement_date=DEPOSIT_DATE)
     cheque.refresh_from_db()
     assert cheque.status == "Under_Collection"
 
@@ -283,7 +291,7 @@ def test_unposting_a_supplier_voucher_whose_cheque_was_cashed_is_rejected():
     books = _Books(48106)
     payment, cheque = books.outgoing_voucher(number="OUT-CASHED")
     payment = post_supplier_payment(payment)
-    transfer_cheque(cheque.pk, "collect", movement_date=dt.date(2026, 9, 2))
+    transfer_cheque(cheque.pk, "collect", movement_date=SETTLE_DATE)
     cheque.refresh_from_db()
     assert cheque.status == "Collected"
 

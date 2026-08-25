@@ -236,12 +236,25 @@ class ChequeAccountResolversTest(TestCase):
         assert in_hand.code == "1109", f"المحفظة حُلّت إلى {in_hand.code}"
         assert uc.pk != in_hand.pk
 
-    def test_tenant_with_only_the_in_hand_account_raises_instead_of_picking_it(self):
+    def test_tenant_with_only_the_in_hand_account_creates_1107_instead_of_picking_it(self):
+        """شركة بلا 1107 يُنشأ لها الحساب — ولا يُلتقط 1109 أبداً.
+
+        CHQ-4: كان هذا الاختبار يثبّت `ValidationError`. أُبدِل المعيار بعد
+        إثبات أن الرمي خطأ: مسار ترحيل السند يُنشئ 1107 تلقائياً
+        (`sales/services/calc.py` (`resolve_cheques_under_collection_account`))
+        بينما مسار حركة الشيك كان يرمي — فشركةٌ بلا 1107 تُرحّل سندها بنجاح ثم
+        تصطدم بجدار عند أول إيداع، بلا أي طريق من الشاشة. الخطر الذي حرسه
+        الاختبار الأصلي (التقاط «شيكات في المحفظة» بمطابقة الاسم) يبقى محروساً
+        هنا، وبصرامة أشدّ: الحساب المُعاد كوده 1107 وهو غير حساب المحفظة.
+        """
         from accounting.services import _resolve_cheque_under_collection_account
         Account.objects.filter(tenant=self.tenant, code="1107").delete()
+        in_hand = Account.objects.get(tenant=self.tenant, code="1109")
         assert Account.objects.filter(
             tenant=self.tenant, name__icontains="شيكات", account_type="Asset",
         ).exists(), "الشجرة يجب أن تبقى فيها «شيكات في المحفظة» ليكون الفخّ حقيقياً"
 
-        with self.assertRaises(ValidationError):
-            _resolve_cheque_under_collection_account(self.tenant.TenantID)
+        acc = _resolve_cheque_under_collection_account(self.tenant.TenantID)
+
+        assert acc.code == "1107", f"برسم التحصيل حُلّ إلى {acc.code}"
+        assert acc.pk != in_hand.pk, "التُقط حساب المحفظة بدل إنشاء 1107"

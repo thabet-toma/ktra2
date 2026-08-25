@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **494**
+عدد النقاط: **495**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -89,6 +89,7 @@
 | `/api/accounting/cash-box-accounts/{pk}/fx-lots/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
 | `/api/accounting/cash-box-accounts/{pk}/transfer-from-ils/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
 | `/api/accounting/cheques/` | `ChequeViewSet` | `accounting/views.py` |
+| `/api/accounting/cheques/deposit-batch/` | `ChequeViewSet` | `accounting/views.py` |
 | `/api/accounting/cheques/wallet/` | `ChequeViewSet` | `accounting/views.py` |
 | `/api/accounting/cheques/{pk}/` | `ChequeViewSet` | `accounting/views.py` |
 | `/api/accounting/cheques/{pk}/movements/` | `ChequeViewSet` | `accounting/views.py` |

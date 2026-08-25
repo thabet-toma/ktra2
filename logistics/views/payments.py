@@ -134,7 +134,7 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
         )
         # T-AUTOPOST: سند الصرف يُرحَّل فور الحفظ (لا مسودة) ما لم يُطلب خلاف ذلك —
         # نفس مصدر القرار المشترك مع سند القبض (core.payments).
-        from core.payments import should_auto_post_payment
+        from core.payments import describe_auto_post_failure, should_auto_post_payment
         if should_auto_post_payment(tenant, self.request.data):
             try:
                 from sales.services import post_supplier_payment
@@ -146,8 +146,10 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
                 )
             except Exception as e:  # noqa: BLE001
                 # الفشل لا يُضيع السند — يبقى مسودة وتُعاد الرسالة مع الاستجابة.
-                logger.warning("Auto-post supplier payment %s failed: %s", payment.id, e)
-                payment._auto_post_error = str(e)
+                # CHQ-4: مرآة سند القبض — traceback في اللوغ ورسالة مفهومة للمستخدم.
+                logger.exception("Auto-post supplier payment %s failed", payment.id)
+                payment._auto_post_error = describe_auto_post_failure(
+                    e, document_label="سند الصرف")
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)

@@ -1,6 +1,7 @@
 import calendar
 import datetime
 import logging
+import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -1029,7 +1030,11 @@ INCOMING_TRANSITIONS = {
     'Bounced':          {'redeposit', 'return_to_customer', 'settle'},
     'Returned':         set(),
     'Settled':          set(),
-    'Endorsed':         set(),
+    # CHQ-4: الورقة المظهَّرة ترتدّ في الواقع — البنك يرفضها بيد المورد، فيعود
+    # الدين علينا للمورد ويعود على العميل الساحب. كانت `Endorsed` نهائيةً بلا
+    # مخرج، فحدثٌ يقع فعلاً لا سبيل لتسجيله: تظلّ ذمّة المورد منخفضة بورقةٍ لم
+    # تُصرف، ويظلّ العميل بريئاً من دينٍ لم يُسدَّد.
+    'Endorsed':         {'bounce'},
     'Cancelled':        set(),
 }
 
@@ -1151,6 +1156,25 @@ _MOVEMENT_LABELS_BY_DIRECTION = {
 #: تكتشفه من رسالة خطأ. تُشتق من القيد نفسه؛ أي تغيير هناك يُصحَّح هنا.
 CHEQUE_MOVEMENTS_NEEDING_CASH_ACCOUNT = frozenset({'collect', 'withdraw', 'settle'})
 
+#: CHQ-4: الإيداع يقصد بنكاً بعينه ولو لم يقصد حساباً آخر في القيد. قيده يبقى
+#: 1107 ÷ 1109 (حسابٌ واحد للشيكات برسم التحصيل بقرار المالك — نهج Odoo بلا
+#: تضخيم الشجرة)، لكن **أي بنك** أُودعت فيه الورقة حقيقةٌ تشغيلية: بدونها لا
+#: يُعرف أين يُطالَب بالشيك، ولا يُقترح بنك التحصيل لاحقاً، ولا تُطبع قسيمة
+#: إيداع. فالبنك وصفيٌّ على الشيك لا في القيد — ومطلوبٌ متى كان للشركة بنوك.
+CHEQUE_MOVEMENTS_NEEDING_BANK_ACCOUNT = frozenset({'deposit'})
+
+
+def tenant_has_active_bank_accounts(tenant_id: int) -> bool:
+    """هل للشركة حساب بنكي نشط؟ — شرط إلزام البنك عند الإيداع.
+
+    شركةٌ لم تسجّل بنوكها بعد تودع «ورقياً» كما كانت؛ إلزامها بحقلٍ لا خيارات
+    فيه يوقف عملها. تُحسب مرة واحدة للطلب وتُحقن في السيريالايزر (لا استعلام
+    لكل صفّ في القائمة).
+    """
+    from .models import BankAccount
+    return BankAccount.objects.filter(
+        tenant_id=tenant_id, is_active=True).exists()
+
 #: ترتيب عرض الحركات — ترتيب دورة حياة الورقة، لا الأبجدية.
 _MOVEMENT_ORDER = tuple(STATUS_MAP)
 
@@ -1170,14 +1194,29 @@ def movement_label(direction: str, movement_type: str) -> str:
             or movement_type)
 
 
-def allowed_movement_options(cheque) -> list:
-    """الحركات المتاحة الآن جاهزةً للعرض: الرمز، تسميته، وما يلزمها من مدخلات."""
+def allowed_movement_options(cheque, *, has_active_bank_accounts=None) -> list:
+    """الحركات المتاحة الآن جاهزةً للعرض: الرمز، تسميته، وما يلزمها من مدخلات.
+
+    CHQ-4: ورقةٌ سندُها غير مرحّل لا حركة لها إطلاقاً — `transfer_cheque` يرفضها
+    كلها (حارس «رحّل السند أولاً»). كانت تُعرض ثلاث حركات محكومٌ عليها بالـ400،
+    فيقف المستخدم أمام قائمة كاذبة بلا مخرج. الجدولان والحارس ينطقان هنا بلسان
+    واحد، و`needs_document_post` في السيريالايزر هو الذي يشرح الصمت.
+    """
+    if cheque_document_is_posted(cheque) is False:
+        return []
     moves = allowed_movements(cheque)
     ordered = [m for m in _MOVEMENT_ORDER if m in moves]
+    if has_active_bank_accounts is None and (
+            CHEQUE_MOVEMENTS_NEEDING_BANK_ACCOUNT & set(ordered)):
+        has_active_bank_accounts = tenant_has_active_bank_accounts(cheque.tenant_id)
     return [{
         'value': move,
         'label': movement_label(cheque.direction, move),
-        'requires_bank_account': move in CHEQUE_MOVEMENTS_NEEDING_CASH_ACCOUNT,
+        'requires_bank_account': (
+            move in CHEQUE_MOVEMENTS_NEEDING_CASH_ACCOUNT
+            or (move in CHEQUE_MOVEMENTS_NEEDING_BANK_ACCOUNT
+                and bool(has_active_bank_accounts))
+        ),
         'requires_endorsee': move == 'endorse',
     } for move in ordered]
 
@@ -1255,6 +1294,17 @@ def _resolve_cheque_under_collection_account(tenant_id: int):
               .exclude(name__icontains="in hand")
               .order_by("code").first()
     )
+    if acc is None:
+        # CHQ-4: تباينٌ كان يوقف المستخدم في منتصف الدورة — مسار ترحيل السند
+        # يُنشئ 1107 تلقائياً (`sales/services/calc.py`)، ومسار حركة الشيك كان
+        # يرمي. فشركةٌ بلا 1107 تُرحّل سندها بنجاح ثم يفشل أول إيداع بلا مخرج
+        # من الشاشة. المسارَان الآن ينشئان الحساب نفسه من الشجرة المعيارية.
+        from tenants.models import Tenant
+        from tenants.services import ensure_operational_account
+
+        tenant = Tenant.objects.filter(pk=tenant_id).first()
+        acc = ensure_operational_account(
+            tenant, CHEQUES_UNDER_COLLECTION_CODE) if tenant else None
     if acc is None:
         raise ValidationError(
             "لا يوجد حساب «شيكات برسم التحصيل» (1107) في شجرة هذه الشركة. "
@@ -1400,6 +1450,47 @@ def cheque_document_is_posted(cheque):
     return None
 
 
+#: المستند الذي دخل الشيك الدفاتر ضمنه، مرتَّباً بأولوية الدقّة لكل اتجاه:
+#: السند أدقّ من الفاتورة (الشيك يُسجَّل داخله)، فيتصدّر حين يوجد الاثنان.
+_CHEQUE_SOURCE_DOCUMENTS = {
+    'Incoming': (
+        ('customer_payment', 'سند قبض'),
+        ('sales_invoice', 'فاتورة مبيعات'),
+    ),
+    'Outgoing': (
+        ('supplier_payment', 'سند صرف'),
+        ('purchase_invoice', 'فاتورة شراء'),
+    ),
+}
+
+
+def cheque_source_document(cheque) -> dict | None:
+    """CHQ-4: المستند المصدر للشيك — نوعه ومعرّفه ورقمه وهل رُحِّل.
+
+    شاشة الشيكات كانت طريقاً مسدوداً: ورقةٌ سندُها مسودة تُعرض لها حركات يرفضها
+    `transfer_cheque` حتماً، ولا شيء في الصفّ يقول أين السند ولا كيف يُرحَّل.
+    هذا الحقل هو الخيط الذي يجعل الخروج ممكناً — والشاشة تبني عليه زر «ترحيل
+    السند» ورابط المستند. يعيد None لورقةٍ يتيمة (legacy) فيبقى مسارها كما هو.
+    """
+    for field, label in _CHEQUE_SOURCE_DOCUMENTS.get(cheque.direction, ()):
+        if getattr(cheque, f"{field}_id", None) is None:
+            continue
+        doc = getattr(cheque, field)
+        number = (
+            getattr(doc, 'invoice_number', None)
+            or getattr(doc, 'payment_number', None)
+            or f"#{doc.pk}"
+        )
+        return {
+            'type': field,
+            'label': label,
+            'id': doc.pk,
+            'number': number,
+            'is_posted': bool(cheque_document_is_posted(cheque)),
+        }
+    return None
+
+
 def _cheque_movement_gl(cheque, movement_type, account_id=None):
     """طرفا قيد حركة الشيك ووصفه — مصدر واحد لـ`transfer_cheque` وللترحيل الرجعي.
 
@@ -1460,6 +1551,20 @@ def _cheque_movement_gl(cheque, movement_type, account_id=None):
         cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
         dr, cr = cash, asset
         desc = f"تحصيل شيك {cheque.cheque_number}"
+    elif movement_type == 'bounce' and cheque.status == 'Endorsed':
+        # CHQ-4: ارتداد ورقةٍ ظُهِّرت لمورد. الورقة لم تكن في 1107 ولا في 1109
+        # (خرجت من المحفظة يوم التظهير)، فالقيد بين ذمّتين: دَينُ المورد يعود
+        # كما كان (عكس قيد التظهير) والعميل الساحب يعود مديناً. الحالة المصدر
+        # هي المميِّز — `_cheque_movement_gl` يُستدعى قبل تغييرها عمداً.
+        ar, customer = _resolve_cheque_ar_account(cheque)
+        ap, endorsee = _resolve_cheque_endorsee_account(cheque)
+        dr, cr = ar, ap
+        desc = (
+            f"ارتداد شيك مظهَّر {cheque.cheque_number} — "
+            f"الدين يعود على {customer.name} وعلى ذمّة {endorsee.name}"
+        )
+        dr_partner_id = customer.pk
+        cr_partner_id = endorsee.pk
     elif movement_type == 'bounce':
         uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
         ar, partner = _resolve_cheque_ar_account(cheque)
@@ -1574,6 +1679,58 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             "المرتبطة به — رحّل المستند أولاً ثم أعد المحاولة."
         )
 
+    # CHQ-4: ورقةٌ مسودة **مربوطة بمستند** لا تُصرَف مباشرةً. حالة `Draft` تعني
+    # أن الورقة لم تدخل الدفاتر بعد (لا 1109 مدين ولا 2111 دائن)، فقيدُ الصرف
+    # يدائن/يدين حساباً لم يُقيَّد قط ⇒ رصيده سالب. تقع الحالة فعلاً حين يُرحَّل
+    # المستند ولا يُكنَس شيكه إلى سند (مرتجع الشراء مثلاً — `logistics/services.py`
+    # يتخطّى الكنس صراحةً)، فيبقى `Draft` والمستند مرحّل فيمرّ حارس السند أعلاه.
+    # الورقة اليتيمة (legacy، بلا مستند) تكمل مسارها القديم حرفياً.
+    if (cheque.status == 'Draft'
+            and movement_type in _CHEQUE_GL_MOVEMENTS
+            and cheque_is_linked_to_document(cheque)):
+        raise ValidationError(
+            f"الشيك {cheque.cheque_number} ما زال مسودةً داخل مستنده — لم يدخل "
+            "الدفاتر بعد. رحّل المستند (أو أعِد ترحيله) فتُسجَّل الورقة، ثم "
+            "حرّكها."
+        )
+
+    # CHQ-4: تاريخ الحركة كان يُمرَّر إلى `post_journal` كما وصل، بلا حارس إلا
+    # الفترة المالية. فتحصيلٌ بتاريخ الغد يدخل الدفاتر، وتحصيلٌ بتاريخٍ أسبق من
+    # إيداعه يجعل مسار الورقة يقرأ عكس ما حدث.
+    if movement_date:
+        today = timezone.localdate()
+        as_date = movement_date
+        if isinstance(as_date, str):
+            as_date = _dt.date.fromisoformat(as_date)
+        if as_date > today:
+            raise ValidationError(
+                "تاريخ الحركة في المستقبل — الشيكات تُسجَّل بما حدث لا بما سيحدث."
+            )
+        last_dated = (
+            ChequeMovement.objects
+            .filter(cheque=cheque, journal__isnull=False)
+            .select_related('journal')
+            .order_by('-id').first()
+        )
+        previous = last_dated.journal.transaction_date if last_dated else None
+        if previous and as_date < previous:
+            raise ValidationError(
+                f"تاريخ الحركة ({as_date}) أسبق من آخر حركة مرحّلة على الشيك "
+                f"({previous}) — مسار الورقة لا يعود إلى الوراء."
+            )
+
+    # CHQ-4: «أودعتُه في أي بنك؟» سؤالٌ لا جواب له في الدفاتر (القيد 1107 ÷ 1109
+    # بحسابٍ واحد)، فلو لم يُسأل هنا لضاع إلى الأبد: لا مطالبة بالورقة، ولا
+    # اقتراح لبنك التحصيل، ولا قسيمة إيداع. يُلزَم فقط حين للشركة بنوك مسجَّلة —
+    # وإلا فالإلزام حقلٌ بلا خيارات يوقف العمل.
+    if (movement_type in CHEQUE_MOVEMENTS_NEEDING_BANK_ACCOUNT
+            and not bank_account_id
+            and tenant_has_active_bank_accounts(cheque.tenant_id)):
+        raise ValidationError(
+            "حدّد الحساب البنكي الذي أُودع فيه الشيك — بدونه لا يُعرف أين "
+            "الورقة ولا يمكن مطابقة كشف البنك."
+        )
+
     # CHQ-1: التظهير يحتاج مستفيداً؛ يُقبل من الطلب أو من قيمة سابقة على الشيك.
     endorsee_changed = False
     if movement_type == 'endorse' and endorsed_to_id:
@@ -1660,6 +1817,154 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             ),
         )
     return cheque
+
+
+#: CHQ-4: سقف الدفعة الواحدة. الإيداع اليومي في أي شركة عشراتٌ لا مئات، وقسيمة
+#: بأكثر من هذا لا تُقرأ ولا تُطبع في ورقة — والسقف يمنع طلباً يقفل الجدول.
+CHEQUE_DEPOSIT_BATCH_LIMIT = 200
+
+
+class ChequeBatchRejected(Exception):
+    """CHQ-4: رفضُ دفعة إيداع مع سببٍ **لكل ورقة**.
+
+    `ValidationError` كان سيسطّح قائمة المخالفين إلى نصوص (Django يلفّ كل قيمة
+    في القاموس ويحوّلها) فيضيع ربط السبب برقم شيكه — وهو بالضبط ما يحتاجه
+    المستخدم ليعرف أي ورقة يستثنيها من التحديد.
+    """
+
+    def __init__(self, rejected: list, detail: str):
+        super().__init__(detail)
+        self.rejected = rejected
+        self.detail = detail
+
+
+def deposit_cheques_batch(
+    tenant_id: int, cheque_ids, *, bank_account_id=None, user=None,
+    movement_date=None, notes: str = '',
+) -> dict:
+    """CHQ-4: إيداع عدّة شيكات في البنك دفعةً واحدة — وقسيمةٌ تُسلَّم مع الأوراق.
+
+    إيداع الصباح في أي شركة حزمةُ شيكات لا ورقة: عشرون نافذة وعشرون نداءً كان
+    عملاً يدوياً بلا مقابل، وأسوأ منه أن فشل الورقة السابعة يترك ستّاً مودَعة
+    وستّاً لا — حالةٌ لا يملك المستخدم تصحيحها. فهنا **الكلّ أو لا شيء**:
+    التحقّق كاملاً قبل أي كتابة، ثم `transfer_cheque` لكل ورقة داخل معاملة
+    واحدة — فترث الدفعةُ الحُرّاسَ والقيود وidempotency بلا مسار قيدٍ ثانٍ.
+
+    العملة واحدة عمداً: القسيمة ورقةٌ تُقدَّم للبنك بمجموعٍ واحد، ومجموعُ
+    عملتين رقمٌ لا معنى له. عملتان ⇒ قسيمتان.
+    """
+    from .models import BankAccount, Cheque
+
+    ids = list(dict.fromkeys(int(i) for i in (cheque_ids or [])))
+    if not ids:
+        raise ValidationError("لم تُحدَّد أي شيكات للإيداع.")
+    if len(ids) > CHEQUE_DEPOSIT_BATCH_LIMIT:
+        raise ValidationError(
+            f"الحد الأقصى {CHEQUE_DEPOSIT_BATCH_LIMIT} شيكاً في الدفعة الواحدة — "
+            f"حُدِّد {len(ids)}. قسّمها إلى دفعات."
+        )
+
+    cheques = list(
+        Cheque.objects.filter(tenant_id=tenant_id, pk__in=ids)
+        .select_related('partner', 'currency', 'customer_payment', 'sales_invoice',
+                        'supplier_payment', 'purchase_invoice', 'bank')
+    )
+    found = {c.pk for c in cheques}
+    rejected = [
+        {'cheque_id': i, 'cheque_number': None,
+         'reason': 'الشيك غير موجود أو لا يتبع هذه الشركة.'}
+        for i in ids if i not in found
+    ]
+
+    for cheque in cheques:
+        reason = None
+        if cheque.direction != 'Incoming':
+            reason = 'الإيداع للشيكات الواردة فقط.'
+        elif cheque.status != 'Received':
+            reason = (
+                f"لا يمكن الإيداع من حالة «{status_label(cheque.direction, cheque.status)}»."
+            )
+        elif cheque_document_is_posted(cheque) is False:
+            reason = 'سند الشيك غير مرحّل — رحّله أولاً.'
+        if reason:
+            rejected.append({
+                'cheque_id': cheque.pk,
+                'cheque_number': cheque.cheque_number,
+                'reason': reason,
+            })
+
+    currencies = {c.currency_id for c in cheques}
+    if len(currencies) > 1:
+        rejected.append({
+            'cheque_id': None, 'cheque_number': None,
+            'reason': 'القسيمة الواحدة بعملة واحدة — أودع كل عملة في دفعة.',
+        })
+
+    bank_account = None
+    if bank_account_id:
+        bank_account = (
+            BankAccount.objects
+            .filter(pk=bank_account_id, tenant_id=tenant_id, is_active=True)
+            .select_related('bank', 'currency').first()
+        )
+        if bank_account is None:
+            rejected.append({
+                'cheque_id': None, 'cheque_number': None,
+                'reason': 'الحساب البنكي المحدد غير موجود أو لا يتبع هذه الشركة.',
+            })
+    elif tenant_has_active_bank_accounts(tenant_id):
+        rejected.append({
+            'cheque_id': None, 'cheque_number': None,
+            'reason': 'حدّد الحساب البنكي المُودَع فيه.',
+        })
+
+    if rejected:
+        # الذرّية تُقال قبل أن تُنفَّذ: لا كتابة إطلاقاً، والرسالة تعدّ المخالفين
+        # بأرقام شيكاتهم كي يعرف المستخدم ما يستثنيه بدل أن يخمّن.
+        raise ChequeBatchRejected(
+            rejected, 'تعذّر إيداع الدفعة — لم تُودَع أي ورقة.')
+
+    batch_ref = uuid.uuid4().hex[:8]
+    batch_note = f"{notes} [batch:{batch_ref}]".strip()
+    deposited = []
+    with transaction.atomic():
+        for cheque in cheques:
+            deposited.append(transfer_cheque(
+                cheque.pk, 'deposit', user=user, notes=batch_note[:500],
+                movement_date=movement_date,
+                bank_account_id=bank_account.pk if bank_account else None,
+            ))
+
+    total = sum(
+        (Decimal(str(c.amount or 0)) for c in deposited), Decimal('0'),
+    ).quantize(Decimal('0.01'))
+    first = deposited[0]
+    return {
+        'deposited_count': len(deposited),
+        'batch_ref': batch_ref,
+        'slip': {
+            'slip_date': str(movement_date or timezone.localdate()),
+            'batch_ref': batch_ref,
+            'notes': notes,
+            'bank_account': ({
+                'id': bank_account.pk,
+                'bank_name': bank_account.bank.name if bank_account.bank_id else '',
+                'name': bank_account.name,
+                'account_number': bank_account.account_number or '',
+            } if bank_account else None),
+            'currency_code': getattr(first.currency, 'Code', '') if first.currency_id else '',
+            'total': str(total),
+            'cheques': [{
+                'id': c.pk,
+                'cheque_number': c.cheque_number,
+                'drawer_bank': (c.bank.name if c.bank_id else None) or c.bank_name or '',
+                'payee_name': c.payee_name or '',
+                'partner_name': c.partner.name if c.partner_id else '',
+                'due_date': str(c.due_date) if c.due_date else '',
+                'amount': str(c.amount),
+            } for c in deposited],
+        },
+    }
 
 
 # ── CHQ-2: الشيك داخل سنده — الترحيل، إلغاؤه، وحارسه ────────────────────────

@@ -163,6 +163,33 @@ def should_auto_post_payment(tenant, request_data: Any = None) -> bool:
     return bool(ss and ss.auto_post_payments)
 
 
+def describe_auto_post_failure(exc: BaseException, *, document_label: str) -> str:
+    """CHQ-4: رسالة فشل الترحيل التلقائي كما يقرؤها صاحب المستند لا كما ترميها القاعدة.
+
+    الترحيل التلقائي يُبتلع عمداً كي لا يضيع السند (يبقى مسودة وتُعاد الرسالة مع
+    الاستجابة). لكن حين يكون السبب **مخطَّطاً متأخّراً عن الكود** — عمودٌ أضافته
+    هجرة لم تُطبَّق على قاعدة الإنتاج — كان ما يصل المستخدم نصّ MySQL خاماً
+    (`(1054, "Unknown column 'JournalID' in 'field list'")`) فلا يعرف أن العطل
+    ليس في سنده أصلاً، ويُعيد المحاولة إلى ما لا نهاية. هنا نسمّي السبب ونسمّي
+    الدواء. أي سبب آخر يُعاد نصّه كما هو — التشخيص لا يبتلع الرسائل الصحيحة.
+    """
+    from django.db import DatabaseError
+
+    text = str(exc)
+    is_schema_gap = isinstance(exc, DatabaseError) and (
+        "Unknown column" in text or "no such column" in text
+        or "does not exist" in text
+    )
+    if is_schema_gap:
+        return (
+            f"قاعدة البيانات متأخّرة عن الكود — تعذّر ترحيل {document_label}. "
+            "شغّل هجرات قاعدة البيانات على الخادم "
+            "(python manage.py migrate) ثم أعد المحاولة. "
+            f"التفصيل التقني: {text}"
+        )
+    return text
+
+
 def get_payment_summary(ctx: PaymentContext) -> dict[str, Any]:
     """ملخص موحّد للواجهة — نفس الحقول لكل نوع دفعة."""
     return {

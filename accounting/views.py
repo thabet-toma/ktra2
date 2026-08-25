@@ -198,14 +198,81 @@ class ChequeViewSet(viewsets.ModelViewSet):
     queryset = Cheque.objects.all()
     serializer_class = ChequeSerializer
 
+    #: CHQ-4: ترتيبات مسموحة بالاسم — تمريرُ `ordering` خاماً إلى `order_by`
+    #: يفتح الجدول على حقول لم تُقصد (وعلى تسريب بنية عبر رسائل الخطأ).
+    CHEQUE_ORDERING = {
+        "due_date": ("due_date", "-id"),
+        "-due_date": ("-due_date", "-id"),
+        "amount": ("amount", "-id"),
+        "-amount": ("-amount", "-id"),
+        "cheque_number": ("cheque_number", "-id"),
+        "-cheque_number": ("-cheque_number", "-id"),
+        "id": ("id",),
+        "-id": ("-id",),
+    }
+
     def get_queryset(self):
+        """CHQ-4: الفلترة والبحث في الخادم — الشاشة كانت تسحب الجدول كاملاً.
+
+        قائمة الشيكات تنمو بلا حدّ، وكانت تُبثّ كلها في كل فتح للشاشة ثم تُفلتر
+        في المتصفح — ولا بحث برقم الشيك أصلاً، وهو المفتاح الطبيعي للبحث في أي
+        نظام شيكات. الترقيم يبقى opt-in (`?page=`) كما هو عقد المستودع، فلا
+        ينكسر أي مستهلك يتوقع مصفوفة خام.
+        """
         tenant = get_tenant(self.request)
-        if tenant:
-            # P2-12 (SCALABILITY_AUDIT): بلا ترتيب صريح يتركه MySQL لخطة التنفيذ،
-            # فصفٌّ واحد قد يظهر في صفحتين أو لا يظهر إطلاقاً عند الترقيم. `-id`
-            # يكسر التعادل حتماً (مفتاح أساسي).
-            return Cheque.objects.filter(tenant=tenant).order_by("-due_date", "-id")
-        return Cheque.objects.none()
+        if not tenant:
+            return Cheque.objects.none()
+        params = self.request.query_params
+        qs = (
+            Cheque.objects.filter(tenant=tenant)
+            # CHQ-4: `source_document` و`needs_document_post` يقرآن المستندات
+            # الأربعة لكل صفّ — بلا هذه الوصلات استعلامٌ لكل شيك في القائمة.
+            .select_related(
+                "customer_payment", "sales_invoice",
+                "supplier_payment", "purchase_invoice",
+                "bank", "bank_branch_ref", "deposit_bank_account",
+                "deposit_bank_account__bank", "partner", "currency",
+            )
+        )
+        search = (params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                Q(cheque_number__icontains=search)
+                | Q(payee_name__icontains=search)
+                | Q(bank_name__icontains=search)
+                | Q(bank__name__icontains=search)
+                | Q(account_number__icontains=search)
+                | Q(partner__name__icontains=search)
+            )
+        for param, field in (
+            ("status", "status"), ("direction", "direction"),
+            ("partner", "partner_id"),
+            ("deposit_bank_account", "deposit_bank_account_id"),
+            ("due_from", "due_date__gte"), ("due_to", "due_date__lte"),
+        ):
+            value = (params.get(param) or "").strip()
+            if value:
+                qs = qs.filter(**{field: value})
+        # P2-12 (SCALABILITY_AUDIT): بلا ترتيب صريح يتركه MySQL لخطة التنفيذ،
+        # فصفٌّ واحد قد يظهر في صفحتين أو لا يظهر إطلاقاً عند الترقيم. `-id`
+        # يكسر التعادل حتماً (مفتاح أساسي).
+        ordering = self.CHEQUE_ORDERING.get(
+            (params.get("ordering") or "").strip(), ("-due_date", "-id"))
+        return qs.order_by(*ordering)
+
+    def get_serializer_context(self):
+        """CHQ-4: «هل للشركة بنوك نشطة؟» تُحسب مرة للطلب لا مرة لكل شيك.
+
+        الجواب يحسم `requires_bank_account` لحركة الإيداع في كل صفّ، فحسابه
+        داخل السيريالايزر كان سيعيد الاستعلام بعدد الشيكات.
+        """
+        context = super().get_serializer_context()
+        tenant = get_tenant(self.request)
+        if tenant is not None:
+            from .services import tenant_has_active_bank_accounts
+            context['has_active_bank_accounts'] = tenant_has_active_bank_accounts(
+                tenant.TenantID)
+        return context
 
     def perform_create(self, serializer):
         """T-CHQ3: الورقة تدخل الدفاتر ضمن سندها لا وحدها.
@@ -256,6 +323,39 @@ class ChequeViewSet(viewsets.ModelViewSet):
             )
         return super().update(request, *args, **kwargs)
 
+    def destroy(self, request, *args, **kwargs):
+        """CHQ-4: الورقة التي دخلت الدفاتر لا تُحذف — تُعكَس بحركة.
+
+        الثغرة المُغلقة: الحذف كان بلا أي حارس بينما تغييرُ الحالة بـPATCH ممنوع
+        منذ task11 — بابٌ أُغلق أمام التعديل وتُرك مفتوحاً أمام الإفناء. شيك
+        `Collected` يُحذف وقيود تحصيله تبقى في اليومية بلا ورقة تفسّرها: حساب
+        الشيكات مدين أو دائن بمبلغ لا مصدر له، ولا شيء يكشفه لأن القيد متوازن.
+        """
+        cheque = self.get_object()
+        from .models import ChequeMovement
+        from .services import DOCUMENT_UNPOST_SAFE_STATUSES, cheque_document_is_posted
+
+        if ChequeMovement.objects.filter(
+                cheque=cheque, journal__isnull=False).exists():
+            return Response(
+                {"detail": "للشيك حركات مرحّلة في اليومية — لا يمكن حذفه. "
+                           "اعكس حركته الأخيرة أو ألغِ ترحيل سنده أولاً."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if cheque.status not in DOCUMENT_UNPOST_SAFE_STATUSES:
+            return Response(
+                {"detail": f"لا يمكن حذف شيك بحالة «{cheque.get_status_display()}» — "
+                           "تجاوز الورقة مرحلة اليد يعني حدثاً مالياً مستقلاً."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if cheque_document_is_posted(cheque) is True:
+            return Response(
+                {"detail": "سند/فاتورة الشيك مرحّلة — ألغِ ترحيلها ثم احذف الشيك "
+                           "من داخلها، كي لا يبقى قيدها يذكر ورقة لا وجود لها."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=True, methods=["post"], url_path="transfer")
     def transfer(self, request, pk=None):
         """تحويل حالة الشيك مع القيد المحاسبي (collect/bounce/settle/...)."""
@@ -279,7 +379,8 @@ class ChequeViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as e:
             raise ValidationError(
                 {"detail": e.messages if hasattr(e, "messages") else str(e)})
-        return Response(ChequeSerializer(cheque).data)
+        return Response(
+            ChequeSerializer(cheque, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["get"], url_path="movements")
     def movements(self, request, pk=None):
@@ -292,6 +393,40 @@ class ChequeViewSet(viewsets.ModelViewSet):
                 .select_related("created_by", "journal", "cheque")
                 .order_by("id"))
         return Response(ChequeMovementSerializer(rows, many=True).data)
+
+    @action(detail=False, methods=["post"], url_path="deposit-batch")
+    def deposit_batch(self, request):
+        """CHQ-4: إيداع حزمة شيكات في البنك دفعةً واحدة، وقسيمةٌ تُطبع معها.
+
+        ذرّية: الرفض يُقال كاملاً قبل أي كتابة، فلا تبقى نصف دفعة مودَعة.
+        """
+        from .services import ChequeBatchRejected, deposit_cheques_batch
+        tenant = get_tenant(request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        try:
+            result = deposit_cheques_batch(
+                tenant.TenantID,
+                request.data.get("cheque_ids") or [],
+                bank_account_id=request.data.get("bank_account") or None,
+                user=request.user,
+                movement_date=request.data.get("movement_date") or None,
+                notes=(request.data.get("notes") or "")[:400],
+            )
+        except (TypeError, ValueError):
+            raise ValidationError({"detail": "قائمة الشيكات غير صالحة."})
+        except ChequeBatchRejected as e:
+            # استجابة مباشرة لا `ValidationError`: DRF يمرّر كل قيمة على
+            # `force_str` فتصير المعرّفات نصوصاً و`None` تصير "None" — والشاشة
+            # تطابق هذه المعرّفات بأرقام صفوفها لتلوّن المرفوض.
+            return Response(
+                {"detail": e.detail, "rejected": e.rejected},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except DjangoValidationError as e:
+            raise ValidationError(
+                {"detail": e.messages if hasattr(e, "messages") else str(e)})
+        return Response(result, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["get"], url_path="wallet")
     def wallet(self, request):
