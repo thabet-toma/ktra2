@@ -14,15 +14,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Banknote, Plus, Trash2, RefreshCw, ChevronRight, ChevronLeft, Loader2,
-  Users, Clock, CalendarX, FileText, CheckCircle2, RotateCcw, Wallet, X,
+  Users, Clock, CalendarX, FileText, CheckCircle2, RotateCcw, Wallet, X, Printer,
 } from "lucide-react";
 import { formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
 import { monthKeyLabel, monthKeyOf, monthKeyRange, shiftMonthKey } from "../../utils/monthKey";
 import {
-  formatHours, formatLateMinutes, validateAdjustmentDraft, validateEmployeeDraft,
-  validateWorkLogDraft,
+  buildDailySheet, buildPayslipPrint, formatHours, formatLateMinutes,
+  validateAdjustmentDraft, validateEmployeeDraft, validateWorkLogDraft,
+  type DailySheetRow, type PayslipPrintLine,
 } from "../../utils/payroll";
+import { printReport } from "../../utils/printReport";
 import {
   listEmployees, createEmployee, updateEmployee, deleteEmployee,
   listWorkLogs, createWorkLog, deleteWorkLog,
@@ -35,6 +37,7 @@ import {
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
+import { useCompany } from "../../contexts/CompanyContext";
 
 type Tab = "employees" | "daily" | "payslips";
 
@@ -64,6 +67,7 @@ export const PayrollPage: React.FC = () => {
   const toast = useToast();
   const confirm = useConfirm();
   const { can } = usePermissions();
+  const { currentCompany } = useCompany();
   const canManage = can("hr.payroll.manage");
   const canPost = can("hr.payroll.post");
 
@@ -382,6 +386,83 @@ export const PayrollPage: React.FC = () => {
     setPaymentDraft({ date: paymentDraft.date, amount: "", notes: "" });
   };
 
+  /* — الورقتان اللتان تُسلَّمان بيد الموظف — */
+
+  const printBlocked = useCallback(
+    () => toast("المتصفح منع نافذة الطباعة — اسمح بالنوافذ المنبثقة لهذا الموقع.", "error"),
+    [toast],
+  );
+
+  /**
+   * قسيمة راتب كشفٍ واحد. أرقامها لقطاتُ الكشف كما هي — ولا «متبقٍّ» مشتقٌّ
+   * هنا (انظر `utils/payroll`): دفعةٌ غير مربوطة بالكشف تجعل الطرح كذباً على
+   * ورقةٍ موقّعة، فيُطبع المصروف ورصيدُ الدفاتر كما يقولهما الخادم.
+   */
+  const printPayslip = useCallback((row: Payslip) => {
+    if (!selected) return;
+    const doc = buildPayslipPrint(row, selected);
+    const opened = printReport<PayslipPrintLine>({
+      title: doc.title,
+      subtitle: [currentCompany?.CompanyName, doc.period].filter(Boolean).join(" · "),
+      columns: [
+        { header: "البند", value: (line) => line.label },
+        { header: "استحقاق", value: (line) => line.earn, numeric: true },
+        { header: "خصم", value: (line) => line.deduct, numeric: true },
+      ],
+      rows: doc.lines,
+      meta: doc.meta,
+      totals: ["الصافي المستحق", doc.net, ""],
+      footer: "توقيع المستلم: ............................"
+        + "        توقيع المسؤول: ............................",
+    });
+    if (!opened) printBlocked();
+  }, [selected, currentCompany, printBlocked]);
+
+  /** كشف دوام الشهر المعروض للموظف المختار — صفٌّ لكل يوم. */
+  const printDailySheet = useCallback(() => {
+    if (!selected) return;
+    const hourly = selected.pay_type === "hourly";
+    const sheet = buildDailySheet(month, workLogs, adjustments);
+    const opened = printReport<DailySheetRow>({
+      title: `${hourly ? "كشف ساعات الدوام" : "كشف الدوام"} — ${selected.name}`,
+      subtitle: [currentCompany?.CompanyName, monthKeyLabel(month)]
+        .filter(Boolean).join(" · "),
+      columns: [
+        { header: "التاريخ", value: (row) => formatDateLocalized(row.date) },
+        { header: "اليوم", value: (row) => row.weekday },
+        // عمود الساعات للجزئي وحده: الدائم لا ساعات يومية له في النموذج،
+        // وعمودٌ فارغٌ في كل صفّ يوحي بتسجيلٍ ناقص لا بغيابه أصلاً.
+        ...(hourly
+          ? [{ header: "الساعات", value: (row: DailySheetRow) => row.hours, numeric: true }]
+          : []),
+        { header: hourly ? "غياب/تأخير" : "الحالة", value: (row) => row.mark },
+        { header: "ملاحظة", value: (row) => row.note },
+      ],
+      rows: sheet.rows,
+      meta: [
+        { label: "رقم الموظف", value: selected.code || "—" },
+        { label: "نوع الأجر", value: selected.pay_type_label },
+        ...(selected.job_title
+          ? [{ label: "المسمّى الوظيفي", value: selected.job_title }] : []),
+        ...(hourly
+          ? [{ label: "أجر الساعة", value: formatMoney(selected.hourly_rate) }]
+          : []),
+      ],
+      totals: hourly
+        ? ["الإجمالي", `${sheet.workedDays} يوم عمل`, sheet.totalHours,
+           `غياب ${sheet.absenceDays} يوم`, ""]
+        : ["الإجمالي", "",
+           `غياب ${sheet.absenceDays} يوم · تأخير ${formatLateMinutes(sheet.lateMinutes)}`,
+           ""],
+      footer: (hourly
+        ? "اليوم الفارغ لا ساعات مسجّلة عليه."
+        : "الأيام الفارغة لا سجلّ عليها — الراتب الشهري كاملٌ ما لم يُسجَّل غياب أو تأخير.")
+        + "        توقيع الموظف: ....................."
+        + "        توقيع المسؤول: .....................",
+    });
+    if (!opened) printBlocked();
+  }, [selected, month, workLogs, adjustments, currentCompany, printBlocked]);
+
   /* — العرض — */
 
   const totalOwed = employees.reduce((sum, e) => sum + (Number(e.balance) || 0), 0);
@@ -685,6 +766,14 @@ export const PayrollPage: React.FC = () => {
               className="p-2 rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]" title="الشهر التالي">
               <ChevronLeft className="w-4 h-4" />
             </button>
+            {selected && (
+              <button onClick={printDailySheet}
+                className="ms-auto flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm font-bold text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+                title="ورقة تُسلَّم للموظف — صفٌّ لكل يوم من الشهر">
+                <Printer className="w-4 h-4" />
+                {selected.pay_type === "hourly" ? "طباعة كشف الساعات" : "طباعة كشف الدوام"}
+              </button>
+            )}
           </div>
 
           {!selected && (
@@ -984,6 +1073,15 @@ export const PayrollPage: React.FC = () => {
                       </td>
                       <td className={cellClass}>
                         <div className="flex gap-1">
+                          {/* المسودّة تُطبع أيضاً — وحالتها مكتوبة على الورقة
+                              فلا تُقرأ قسيمةً معتمدة. */}
+                          <button
+                            onClick={() => printPayslip(row)}
+                            className="flex items-center gap-1 rounded-md border border-[var(--color-border)] px-2 py-1 text-xs"
+                            title="طباعة قسيمة الراتب لتسليمها للموظف"
+                          >
+                            <Printer className="w-3.5 h-3.5" /> طباعة القسيمة
+                          </button>
                           {row.status === "draft" && canPost && (
                             <button
                               onClick={() => void runOnSlip(
