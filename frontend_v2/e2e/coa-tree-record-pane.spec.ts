@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 
 /** حقل البطاقة من نصّ تسميته — «نوع الحساب» لا يبتلع «نوع الحساب الختامي». */
 const field = (page: Page, label: string) =>
-  page.locator(`.aseel-field:has(label:text-is("${label}"))`).locator('input, select');
+  page.locator(`.ktra-field:has(label:text-is("${label}"))`).locator('input, select');
 
 /**
  * شجرة الحسابات على نمط الأصيل: شريط شجرة مضغوط على اليمين + بطاقة الحساب

@@ -404,9 +404,9 @@ export function DataGrid<T>({
 export { Field } from './Field';
 // SAVE-1: خطأ الخادم بجانب حقله بدل سحقه في لافتة واحدة.
 export { FieldError } from './FieldError';
-// M5-T4: unified Aseel-skinned states. `EmptyState`/`Spinner` already exist in
-// this barrel from D1-03 — to avoid name clashes, the Aseel variants are
-// exposed via a namespace import: `import { AseelStates } from '@/components/ui'`.
+// M5-T4: unified Kit-skinned states. `EmptyState`/`Spinner` already exist in
+// this barrel from D1-03 — to avoid name clashes, the Kit variants are
+// exposed via a namespace import: `import { KitStates } from '@/components/ui'`.
 // For new screens that want the cream theme, use these. Existing screens keep
 // the legacy variants — no breakage.
-export * as AseelStates from './EmptyState';
+export * as KitStates from './EmptyState';

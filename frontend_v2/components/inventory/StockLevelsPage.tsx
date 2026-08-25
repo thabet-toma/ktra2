@@ -3,8 +3,8 @@ import { humanizeThrown } from "../../utils/drfError";
 import { useToast } from "../../contexts/ToastContext";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct, StockSummaryResponse } from "../../types/inventory";
-import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { AseelDocumentShell, type AseelToolbarAction } from "../aseel/AseelDocumentShell";
+import { KitDenseTable, type DenseColumn } from "../kit/KitDenseTable";
+import { KitDocumentShell, type KitToolbarAction } from "../kit/KitDocumentShell";
 import { RefreshCw, Download, Printer, Tags } from "lucide-react";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { productProfilePath } from "../../utils/entityLinks";
@@ -209,14 +209,14 @@ export const StockLevelsPage: React.FC = () => {
 
   const statusCell = (p: SqlProduct) => {
     if (p.stock_status === "out_of_stock")
-      return <span className="aseel-text-danger">نفذ</span>;
+      return <span className="ktra-text-danger">نفذ</span>;
     if (p.stock_status === "low_stock")
-      return <span className="aseel-text-warn">منخفض</span>;
+      return <span className="ktra-text-warn">منخفض</span>;
     // T-REORDER: «فائض» = فوق الحدّ الأقصى المضبوط على الصنف. كان الفلتر يخمّنه
     // بـ«أكثر من ثلاثة أضعاف الأدنى» — قاعدةٌ لا مصدر لها.
     if (p.stock_status === "overstock")
-      return <span className="aseel-text-warn">فائض</span>;
-    return <span className="aseel-text-ok">متوفر</span>;
+      return <span className="ktra-text-warn">فائض</span>;
+    return <span className="ktra-text-ok">متوفر</span>;
   };
 
   const columns: DenseColumn<SqlProduct>[] = [
@@ -253,16 +253,16 @@ export const StockLevelsPage: React.FC = () => {
       render: (p) => {
         const qty = Number(p.quantity_on_hand);
         const low = p.stock_status === "out_of_stock" || p.stock_status === "low_stock";
-        return <span style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
+        return <span style={low ? { color: "var(--ktra-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
       }
     },
     { key: "reserved", header: "محجوز", width: "80px", align: "center", numeric: true,
       render: (p) => {
         const reserved = Number(p.reserved_quantity || 0);
-        if (!reserved) return <span className="text-[var(--aseel-ink-soft)]">—</span>;
+        if (!reserved) return <span className="text-[var(--ktra-ink-soft)]">—</span>;
         return (
           <span title="محجوز بطلبيات زبائن مؤكَّدة سارية"
-            className="aseel-text-warn font-semibold">
+            className="ktra-text-warn font-semibold">
             {formatQuantity(reserved)}
           </span>
         );
@@ -284,7 +284,7 @@ export const StockLevelsPage: React.FC = () => {
     { key: "grp", header: "النوع", width: "130px",
       render: (p) => p.variant_group
         ? <>{p.variant_group}</>
-        : <span className="aseel-text-soft" title="بلا نوع — لن تظهر له بدائل في الفاتورة">—</span> },
+        : <span className="ktra-text-soft" title="بلا نوع — لن تظهر له بدائل في الفاتورة">—</span> },
     { key: "status", header: "الحالة", width: "80px", align: "center", render: statusCell },
     { key: "avgcost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true,
       render: (p) => <>{fmt(Number(p.avg_cost))}</> },
@@ -298,9 +298,9 @@ export const StockLevelsPage: React.FC = () => {
   );
 
   /* T-WIN M7: كانت الشاشة `div` بأنماط inline خارج الغلاف الموحّد — بلا شريط
-     عنوان ولا شريط حالة ولا تلميع الجلد. صارت `AseelDocumentShell` كبقية
+     عنوان ولا شريط حالة ولا تلميع الجلد. صارت `KitDocumentShell` كبقية
      الخمسين شاشة: النصوص والأزرار كما هي حرفاً بحرف، والتغيير في الإطار. */
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     {
       key: "print",
       label: `طباعة / PDF${selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}`,
@@ -325,22 +325,22 @@ export const StockLevelsPage: React.FC = () => {
   ];
 
   return (
-    <AseelDocumentShell
+    <KitDocumentShell
       title="أرصدة المخزون"
       actions={actions}
       status={(
         <>
           {summary && (
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               إجمالي الأصناف: <b>{summary.total_products_in_stock ?? products.length}</b>
             </span>
           )}
           {summary && (
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               قيمة المخزون: <b>{fmt(Number(summary.total_inventory_value ?? 0))}</b>
             </span>
           )}
-          <span className="aseel-status-item">
+          <span className="ktra-status-item">
             إجمالي القيمة ({filtered.length} صنف): <b>{fmt(totalVal)}</b>
           </span>
         </>
@@ -348,13 +348,13 @@ export const StockLevelsPage: React.FC = () => {
       header={(
         <div className="flex flex-wrap items-center gap-2">
           <input
-            className="aseel-input w-[180px]"
+            className="ktra-input w-[180px]"
             placeholder="بحث SKU / الاسم…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <select
-            className="aseel-input w-[140px]"
+            className="ktra-input w-[140px]"
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value)}
           >
@@ -362,7 +362,7 @@ export const StockLevelsPage: React.FC = () => {
             {categories.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <select
-            className="aseel-input w-[140px]"
+            className="ktra-input w-[140px]"
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as "" | "low" | "out" | "over")}
           >
@@ -372,7 +372,7 @@ export const StockLevelsPage: React.FC = () => {
             <option value="over">فوق الحد الأقصى</option>
           </select>
           <label
-            className="aseel-status-item flex cursor-pointer items-center gap-1"
+            className="ktra-status-item flex cursor-pointer items-center gap-1"
             title="تحديد/إلغاء كل المعروض"
           >
             <input type="checkbox" checked={allFilteredSelected} onChange={toggleAll} />
@@ -383,39 +383,39 @@ export const StockLevelsPage: React.FC = () => {
     >
 
       {err && (
-        <div className="aseel-banner aseel-banner--err">{err}</div>
+        <div className="ktra-banner ktra-banner--err">{err}</div>
       )}
 
       {groupModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           onClick={() => !groupBusy && setGroupModal(false)}>
-          <div dir="rtl" className="w-full max-w-md rounded-xl border aseel-border-soft aseel-bg-field p-4 shadow-xl"
+          <div dir="rtl" className="w-full max-w-md rounded-xl border ktra-border-soft ktra-bg-field p-4 shadow-xl"
             onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-1 text-sm font-bold aseel-text-ink">
+            <h3 className="mb-1 text-sm font-bold ktra-text-ink">
               تعيين النوع/البراند لـ{selectedIds.size} صنف
             </h3>
-            <p className="mb-3 text-[11px] aseel-text-soft leading-relaxed">
+            <p className="mb-3 text-[11px] ktra-text-soft leading-relaxed">
               «النوع» يجمع الموديلات المتبادلة: أصنافُ النوع الواحد تظهر بدائلَ لبعضها في
               بند الفاتورة، ويقرأها تقرير التجديد فلا يطلب موديلاً قديماً وموديلٌ أحدث منه
               على الرفّ. الحقل المتروك فارغاً هنا لا يُمَسّ على الأصناف.
             </p>
-            <label className="mb-2 block text-xs aseel-text-soft">
+            <label className="mb-2 block text-xs ktra-text-soft">
               النوع / المجموعة
-              <input className="aseel-input mt-1 w-full" value={groupValue} autoFocus
+              <input className="ktra-input mt-1 w-full" value={groupValue} autoFocus
                 placeholder="مثال: ايفون 14 برو"
                 onChange={(e) => setGroupValue(e.target.value)} />
             </label>
-            <label className="mb-3 block text-xs aseel-text-soft">
+            <label className="mb-3 block text-xs ktra-text-soft">
               البراند (اختياري)
-              <input className="aseel-input mt-1 w-full" value={brandValue}
+              <input className="ktra-input mt-1 w-full" value={brandValue}
                 placeholder="مثال: سامسونج"
                 onChange={(e) => setBrandValue(e.target.value)} />
             </label>
             <div className="flex justify-start gap-2">
-              <button className="aseel-toolbtn" onClick={applyGroup} disabled={groupBusy}>
+              <button className="ktra-toolbtn" onClick={applyGroup} disabled={groupBusy}>
                 {groupBusy ? "جارٍ التعيين…" : "تعيين"}
               </button>
-              <button className="aseel-toolbtn" onClick={() => setGroupModal(false)} disabled={groupBusy}>
+              <button className="ktra-toolbtn" onClick={() => setGroupModal(false)} disabled={groupBusy}>
                 إلغاء
               </button>
             </div>
@@ -423,19 +423,19 @@ export const StockLevelsPage: React.FC = () => {
         </div>
       )}
 
-      <AseelDenseTable<SqlProduct>
+      <KitDenseTable<SqlProduct>
         columns={columns}
         rows={filtered}
         getRowKey={(p) => p.id}
         loading={loading}
         emptyHint="لا توجد أصناف"
         footer={
-          <span className="font-bold aseel-text-ink">
+          <span className="font-bold ktra-text-ink">
             إجمالي القيمة ({filtered.length} صنف):{" "}
-            <span className="aseel-text-accent">{fmt(totalVal)}</span>
+            <span className="ktra-text-accent">{fmt(totalVal)}</span>
           </span>
         }
       />
-    </AseelDocumentShell>
+    </KitDocumentShell>
   );
 };

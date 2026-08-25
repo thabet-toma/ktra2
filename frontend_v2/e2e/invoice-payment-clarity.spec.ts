@@ -365,11 +365,11 @@ test("credit and debit note choices explain their customer impact", async ({ pag
 test("sales and purchase lists show payment state remaining and partner balance", async ({ page }) => {
   await installMocks(page);
   await page.goto("/sales/invoices");
-  await expect(page.locator(".aseel-grid")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".ktra-grid")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("حالة الدفع", { exact: true }).first()).toBeVisible();
-  await expect(page.locator(".aseel-grid").getByText("مدفوعة جزئياً", { exact: true })).toBeVisible();
+  await expect(page.locator(".ktra-grid").getByText("مدفوعة جزئياً", { exact: true })).toBeVisible();
   await expect(page.getByText("رصيد العميل", { exact: true })).toBeVisible();
-  await expect(page.locator(".aseel-grid").getByText("600", { exact: true })).toBeVisible();
+  await expect(page.locator(".ktra-grid").getByText("600", { exact: true })).toBeVisible();
   const salesFilterRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname.endsWith("/sales/invoices/")
@@ -379,10 +379,10 @@ test("sales and purchase lists show payment state remaining and partner balance"
   await salesFilterRequest;
 
   await page.goto("/purchase-invoices");
-  await expect(page.locator(".aseel-grid")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".ktra-grid")).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("المورد الظاهر", { exact: true })).toBeVisible();
   await expect(page.getByText("حالة الدفع", { exact: true }).first()).toBeVisible();
-  await expect(page.locator(".aseel-grid").getByText("مدفوعة جزئياً", { exact: true })).toBeVisible();
+  await expect(page.locator(".ktra-grid").getByText("مدفوعة جزئياً", { exact: true })).toBeVisible();
   await expect(page.getByText("رصيد المورد", { exact: true })).toBeVisible();
   const purchaseFilterRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());

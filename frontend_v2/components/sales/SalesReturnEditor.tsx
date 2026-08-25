@@ -20,15 +20,15 @@ import { listPickerProducts } from "../../services/inventoryApi";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
-  AseelDocumentShell,
-  AseelDenseTable,
-  AseelGrid,
-  useAseelKeymap,
-  type AseelGridColumn,
-  type AseelToolbarAction,
-  type AseelTab,
+  KitDocumentShell,
+  KitDenseTable,
+  KitGrid,
+  useKitKeymap,
+  type KitGridColumn,
+  type KitToolbarAction,
+  type KitTab,
   type DenseColumn,
-} from "../aseel";
+} from "../kit";
 import { Plus, Save, X, RefreshCw, AlertTriangle, Search, Trash2 } from "lucide-react";
 
 type Product = {
@@ -219,13 +219,13 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
     }
   };
 
-  useAseelKeymap({
+  useKitKeymap({
     Escape: onBack || (() => undefined),
     F12: () => void submit(),
     F5: () => void load(),
   });
 
-  const gridColumns: AseelGridColumn<ReturnLine>[] = [
+  const gridColumns: KitGridColumn<ReturnLine>[] = [
     { key: "seq", header: "#", width: "40px", align: "center", readOnly: true },
     { key: "product", header: "الصنف", width: "30%" },
     { key: "quantity", header: "الكمية", width: "100px", align: "center", type: "number" },
@@ -248,7 +248,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
     const prod = products.find((p) => String(p.id) === row.product_id);
     return (
       <select
-        className="aseel-input"
+        className="ktra-input"
         value={row.product_id}
         onChange={(e) => {
           const p = products.find((x) => String(x.id) === e.target.value);
@@ -269,7 +269,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   const renderDelCell = (row: ReturnLine) =>
     lines.length > 1 ? (
-      <button type="button" className="aseel-iconbtn aseel-iconbtn--danger" onClick={() => removeLine(row._idx)} title="حذف">
+      <button type="button" className="ktra-iconbtn ktra-iconbtn--danger" onClick={() => removeLine(row._idx)} title="حذف">
         <Trash2 className="w-3 h-3" />
       </button>
     ) : null;
@@ -282,7 +282,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
     else if (key === "unit_price") updateLine(rowIndex, { unit_price: value });
   };
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     {
       key: "save",
       label: saving ? "..." : "حفظ المرجع كمسودة (F12)",
@@ -304,19 +304,19 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
       onClick: () => void load(),
       separatorBefore: true,
     },
-    ...(onBack ? [{ key: "back", label: "خروج", icon: <X />, onClick: onBack, danger: true } as AseelToolbarAction] : []),
+    ...(onBack ? [{ key: "back", label: "خروج", icon: <X />, onClick: onBack, danger: true } as KitToolbarAction] : []),
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     {
       key: "main",
       label: "بيانات المرجع",
       content: (
         <div style={{ padding: "8px" }}>
-          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}><AlertTriangle className="w-3 h-3 inline" /> {err}</div>}
-          {msg && <div className="aseel-banner" style={{ marginBottom: "8px", color: "var(--aseel-ok, #2d7d46)" }}>{msg}</div>}
+          {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}><AlertTriangle className="w-3 h-3 inline" /> {err}</div>}
+          {msg && <div className="ktra-banner" style={{ marginBottom: "8px", color: "var(--ktra-ok, #2d7d46)" }}>{msg}</div>}
 
-          <AseelGrid<ReturnLine>
+          <KitGrid<ReturnLine>
             columns={gridColumns}
             rows={lines}
             getCell={getCell}
@@ -326,15 +326,15 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
             emptyHint="ابدأ إدخال بنود المرجوع"
           />
 
-          <div className="aseel-total-row aseel-total-row--grand" style={{ marginTop: "8px", padding: "8px 12px" }}>
+          <div className="ktra-total-row ktra-total-row--grand" style={{ marginTop: "8px", padding: "8px 12px" }}>
             <span>إجمالي المرجوع</span>
-            <span className="aseel-num font-bold">{formatMoney(totalAmount)}</span>
+            <span className="ktra-num font-bold">{formatMoney(totalAmount)}</span>
           </div>
 
           <div style={{ marginTop: "12px" }}>
-            <label className="aseel-field">
-              <span className="aseel-field-label">سبب المرجوع</span>
-              <textarea className="aseel-input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="عيب جودة / طلب العميل / ..." />
+            <label className="ktra-field">
+              <span className="ktra-field-label">سبب المرجوع</span>
+              <textarea className="ktra-input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="عيب جودة / طلب العميل / ..." />
             </label>
           </div>
         </div>
@@ -344,20 +344,20 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="مرجع البيع (Sale Return)"
         state={originalInvoiceId ? `للفاتورة #${originalInvoiceId}` : "مرجع جديد"}
         actions={actions}
         header={
           <>
-            <label className="aseel-field">
-              <span className="aseel-field-label">تاريخ المرجوع</span>
-              <input type="date" className="aseel-input" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
+            <label className="ktra-field">
+              <span className="ktra-field-label">تاريخ المرجوع</span>
+              <input type="date" className="ktra-input" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
             </label>
-            <label className="aseel-field" style={{ minWidth: "180px" }}>
-              <span className="aseel-field-label">الفاتورة الأصلية *</span>
+            <label className="ktra-field" style={{ minWidth: "180px" }}>
+              <span className="ktra-field-label">الفاتورة الأصلية *</span>
               <select
-                className="aseel-input"
+                className="ktra-input"
                 value={originalInvoiceId}
                 onChange={(e) => setOriginalInvoiceId(e.target.value ? Number(e.target.value) : "")}
               >
@@ -374,10 +374,10 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
                 مرجع فاتورة زيدٍ بذمم عمرو — نقصُ دينِ من لم يُرجِع شيئاً.
                 الحارس الحقيقي في الخادم (`SalesInvoiceSerializer.validate`)،
                 وهذا وجهه: لا يُعرض إلا الجواب الواحد الصحيح. */}
-            <label className="aseel-field" style={{ minWidth: "180px" }}>
-              <span className="aseel-field-label">العميل</span>
+            <label className="ktra-field" style={{ minWidth: "180px" }}>
+              <span className="ktra-field-label">العميل</span>
               <input
-                className="aseel-input"
+                className="ktra-input"
                 readOnly
                 data-testid="return-customer"
                 title="يتبع الفاتورة الأصلية — لا يُختار"
@@ -390,8 +390,8 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
         tabs={tabs}
         status={
           <>
-            <span className="aseel-status-item">عدد البنود <b>{lines.filter((l) => l.product_id).length}</b></span>
-            <span className="aseel-status-item">الإجمالي <b className="aseel-num">{formatMoney(totalAmount)}</b></span>
+            <span className="ktra-status-item">عدد البنود <b>{lines.filter((l) => l.product_id).length}</b></span>
+            <span className="ktra-status-item">الإجمالي <b className="ktra-num">{formatMoney(totalAmount)}</b></span>
           </>
         }
       />

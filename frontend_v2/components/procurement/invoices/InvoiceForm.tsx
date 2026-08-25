@@ -33,7 +33,7 @@ import {
 import { ProductCardModal } from "../../shared/ProductCardModal";
 import { SerialEntryModal } from "../../shared/SerialEntryModal";
 import type { SerialEntryMode } from "@/types/inventory";
-import { AseelDatePicker } from "../../ui/AseelDatePicker";
+import { KitDatePicker } from "../../ui/KitDatePicker";
 import {
   suppliersService,
 } from "@/services/firestoreService";
@@ -91,17 +91,17 @@ import { entityPathForReference } from "@/utils/entityLinks";
 import { EntityActivityLog } from "@/components/activity/EntityActivityLog";
 import { PartnerNoteAlert } from "@/components/partners/PartnerNoteAlert";
 import {
-  AseelDocumentShell,
-  AseelDocumentView,
-  AseelViewTable,
-  AseelGrid,
-  AseelIndexPicker,
-  AseelAutocomplete,
+  KitDocumentShell,
+  KitDocumentView,
+  KitViewTable,
+  KitGrid,
+  KitIndexPicker,
+  KitAutocomplete,
   useRecordNavigation,
-  useAseelKeymap,
-  type AseelGridColumn,
-  type AseelToolbarAction,
-} from "../../aseel";
+  useKitKeymap,
+  type KitGridColumn,
+  type KitToolbarAction,
+} from "../../kit";
 import {
   formatInvoiceImportLogisticsLine,
   getPurchaseInvoiceCostLabels,
@@ -305,7 +305,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     initialInvoice?.dealInfo?.activityLog || []
   );
 
-  // M4-T1: Aseel Navigation for invoices
+  // M4-T1: Kit Navigation for invoices
   const [invoicesList, setInvoicesList] = useState<any[]>([]);
   const invoicesListRequestedRef = useRef(false);
 
@@ -372,13 +372,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     nav?.goNew?.();
   };
 
-  // M4-T1: Aseel keyboard shortcuts — real handlers.
-  useAseelKeymap({
+  // M4-T1: Kit keyboard shortcuts — real handlers.
+  useKitKeymap({
     F2: () => setShowPrintView(true),
     F6: () => {
       // كان المحدِّد يشير إلى حقل غير موجود في هذه الشاشة — صار على صندوق
       // الباركود نفسه المستعمل في المبيعات.
-      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="barcode"]');
+      const el = document.querySelector<HTMLInputElement>('[data-ktra-field="barcode"]');
       el?.focus();
     },
     F12: () => handleSave(),
@@ -388,7 +388,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     },
     plus: () => {
       const ae = document.activeElement;
-      if (ae?.getAttribute?.('data-aseel-key') === '1') {
+      if (ae?.getAttribute?.('data-ktra-key') === '1') {
         setShowSupplierPicker(true);
       }
     },
@@ -1228,8 +1228,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const fe = (name: string): string | undefined => saveError?.fieldErrors[name];
 
   const fld = (label: string, node: React.ReactNode, error?: string) => (
-    <label className="aseel-field">
-      <span className="aseel-field-label">{label}</span>
+    <label className="ktra-field">
+      <span className="ktra-field-label">{label}</span>
       {node}
       <FieldError message={error} />
     </label>
@@ -1272,8 +1272,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     return (
       <span
         className={remaining > 0
-          ? "font-semibold text-[var(--aseel-warn)]"
-          : "aseel-text-soft"}
+          ? "font-semibold text-[var(--ktra-warn)]"
+          : "ktra-text-soft"}
       >
         {formatQuantity(remaining)}
       </span>
@@ -1317,7 +1317,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
   };
 
-  /* ───────────── أعمدة جدول البنود (AseelGrid) ───────────── */
+  /* ───────────── أعمدة جدول البنود (KitGrid) ───────────── */
   const finalCostFeesTotal = (formData.fees || []).reduce(
     (sum, fee) => sum + (Number(fee.amount) || 0), 0,
   );
@@ -1368,7 +1368,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     [formData.items, itemTracksSerials],
   );
 
-  const itemColumns: AseelGridColumn<InvoiceItem>[] = [
+  const itemColumns: KitGridColumn<InvoiceItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     { key: "itemId", header: "رقم الصنف", width: "100px" },
     { key: "name", header: "اسم الصنف", width: "25%" },
@@ -1378,8 +1378,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       width: "1%",
       render: (r, ri) => (
         <input
-          id={`aseel-grid-input-${ri}-specifications`}
-          data-aseel-key="1"
+          id={`ktra-grid-input-${ri}-specifications`}
+          data-ktra-key="1"
           size={Math.max(4, (r.specifications || "").length)}
           style={{
             minWidth: "45px",
@@ -1395,8 +1395,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           value={r.specifications == null ? "" : String(r.specifications)}
           onChange={(e) => handleUpdateItem(ri, "specifications", e.target.value)}
           onFocus={(e) => {
-            e.currentTarget.style.borderColor = "var(--aseel-accent)";
-            e.currentTarget.style.background = "var(--aseel-field-focus)";
+            e.currentTarget.style.borderColor = "var(--ktra-accent)";
+            e.currentTarget.style.background = "var(--ktra-field-focus)";
           }}
           onBlur={(e) => {
             e.currentTarget.style.borderColor = "transparent";
@@ -1504,9 +1504,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const renderItemIdCell = (row: InvoiceItem, rowIndex: number) => (
     <button
       type="button"
-      className="aseel-cell-picker"
+      className="ktra-cell-picker"
       disabled={effectiveReadOnly}
-      data-aseel-key="1"
+      data-ktra-key="1"
       onClick={() => {
         setActiveItemSearchIndex(rowIndex);
         setShowItemSearch(true);
@@ -1585,7 +1585,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     const selectedId = row.itemId ? Number(row.itemId) : null;
     return (
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-      <AseelAutocomplete
+      <KitAutocomplete
         value={row.name || ""}
         options={itemOptions}
         disabled={effectiveReadOnly}
@@ -1596,7 +1596,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             const lastPrice = await resolveSuggestedPrice(it.id);
             applyItemAt(rowIndex, it, lastPrice);
             setTimeout(() => {
-              document.getElementById(`aseel-grid-input-${rowIndex}-quantity`)?.focus();
+              document.getElementById(`ktra-grid-input-${rowIndex}-quantity`)?.focus();
             }, 50);
           }
         }}
@@ -1617,7 +1617,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       {selectedId != null && (
         <button
           type="button"
-          className="aseel-ellipsis"
+          className="ktra-ellipsis"
           onClick={() => { setCardCanAdd(false); setCardProductId(selectedId); }}
           title="بطاقة الصنف"
         ><Info className="w-3.5 h-3.5" /></button>
@@ -1626,7 +1626,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       {selectedId != null && (
         <button
           type="button"
-          className="aseel-ellipsis"
+          className="ktra-ellipsis"
           onClick={() => setQuickEditProductId(selectedId)}
           title="تعديل سريع للصنف"
         ><Pencil className="w-3.5 h-3.5" /></button>
@@ -1638,17 +1638,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   /* T-SERIAL: زر أرقام البند — العدد مقابل الكمية، وأحمر حين ينقص في النمط
      الإجباري. المنع نفسه عند الاستلام/الترحيل على الخادم. */
   const renderSerialsCell = (row: InvoiceItem, rowIndex: number) => {
-    if (!itemTracksSerials(row)) return <span className="aseel-text-soft">—</span>;
+    if (!itemTracksSerials(row)) return <span className="ktra-text-soft">—</span>;
     const entered = row.serials?.length ?? 0;
     const qty = Math.max(0, Math.trunc(Number(row.quantity) || 0));
     const incomplete = serialMode === "required" && entered !== qty;
     return (
       <button
         type="button"
-        className="aseel-toolbtn"
+        className="ktra-toolbtn"
         style={{
           width: "100%", fontWeight: 600,
-          ...(incomplete ? { color: "var(--aseel-danger, #c00)" } : {}),
+          ...(incomplete ? { color: "var(--ktra-danger, #c00)" } : {}),
         }}
         onClick={() => setSerialRowIndex(rowIndex)}
         title={entered > 0 ? `الأرقام: ${row.serials!.join("، ")}` : "لم تُدخَل أرقام بعد"}
@@ -1662,7 +1662,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     effectiveReadOnly ? null : (
       <button
         type="button"
-        className="aseel-iconbtn aseel-iconbtn--danger"
+        className="ktra-iconbtn ktra-iconbtn--danger"
         onClick={() => removeRow(row.id)}
         title="حذف السطر"
       >
@@ -1687,7 +1687,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   /* ───────────── تبويبات ───────────── */
   const notesTab = (
     <textarea
-      className="aseel-input"
+      className="ktra-input"
       rows={3}
       style={{ width: "100%" }}
       disabled={effectiveReadOnly}
@@ -1707,17 +1707,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       readOnly={readOnly}
     />
   ) : (
-    <div className="aseel-legacy-tab">
+    <div className="ktra-legacy-tab">
       <AttachmentsSection data={formData} setData={(val) => { setFormData(val); markDirty(); }} />
     </div>
   );
 
   const basicInfoTab = (
-    <div className="aseel-legacy-tab">
+    <div className="ktra-legacy-tab">
       {/* W7a: هوية مستند المرجع — شارة + رابط الفاتورة الأصلية + لغة معكوسة. */}
       {formData.isReturn && (
         <div
-          className="aseel-banner"
+          className="ktra-banner"
           style={{ marginBottom: "8px", display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", background: "var(--color-danger-bg, #fef2f2)", color: "var(--color-danger, #b91c1c)", fontWeight: 600 }}
         >
           <span style={{ padding: "2px 10px", borderRadius: "999px", background: "var(--color-danger, #b91c1c)", color: "#fff", fontSize: "12px" }}>
@@ -1742,7 +1742,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       <PartnerNoteAlert partnerId={formData.supplierId || null} className="mb-2" />
       {formData.supplierId && (
         <div
-          className="aseel-banner"
+          className="ktra-banner"
           style={{ marginBottom: "8px", display: "flex", gap: "18px", flexWrap: "wrap", fontSize: "13px" }}
         >
           {/* T-PCTX: الرقمان القديمان («قبل/بعد») تقريبٌ يطرح المتبقّي من رصيد
@@ -1799,7 +1799,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   const itemsTab = (
-    <div className="aseel-legacy-tab">
+    <div className="ktra-legacy-tab">
       {formData.currency === "ILS" ? (
         <>
           {(formData.conversionMetadata || formData.importLogistics) && (
@@ -1951,7 +1951,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     window.setTimeout(() => document.querySelector<HTMLInputElement>(`[data-fee-amount='${id}']`)?.focus(), 0);
   };
   const feesTab = (
-    <div className="aseel-legacy-tab">
+    <div className="ktra-legacy-tab">
       <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 sm:grid-cols-3">
         <div><span className="block text-xs text-[var(--color-text-muted)]">إجمالي الفاتورة الأساسي</span><b>{formatMoney(formData.grandTotal || 0)} ₪</b></div>
         <div><span className="block text-xs text-[var(--color-text-muted)]">ضرائب ورسوم إضافية</span><b className="text-amber-700">{formatMoney(feesTotal)} ₪</b></div>
@@ -1964,13 +1964,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </div>
         {feeEditorState.canAdd && (
           <div className="flex flex-wrap justify-end gap-2">
-            <button type="button" className="aseel-toolbtn" onClick={focusTaxRate}>
+            <button type="button" className="ktra-toolbtn" onClick={focusTaxRate}>
               <Pencil size={14} /> {feeEditorState.requiresEdit ? "تحرير وضبط ض.ق.م" : "ضبط ض.ق.م الأساسية"}
             </button>
-            <button type="button" className="aseel-toolbtn" onClick={() => appendFeeLine("tax")}>
+            <button type="button" className="ktra-toolbtn" onClick={() => appendFeeLine("tax")}>
               <Plus size={14} /> {feeEditorState.requiresEdit ? "تحرير وإضافة ضريبة" : "إضافة ضريبة مستقلة"}
             </button>
-            <button type="button" className="aseel-toolbtn" onClick={() => appendFeeLine("fee")}>
+            <button type="button" className="ktra-toolbtn" onClick={() => appendFeeLine("fee")}>
               <Plus size={14} /> {feeEditorState.requiresEdit ? "تحرير وإضافة رسم" : "إضافة رسم"}
             </button>
           </div>
@@ -1985,7 +1985,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </div>
       )}
       <div className="overflow-x-auto">
-        <table className="aseel-input w-full text-xs">
+        <table className="ktra-input w-full text-xs">
           <thead><tr>
             <th className="p-1 text-start">البيان</th>
             <th className="p-1 text-start">الحساب</th>
@@ -1996,11 +1996,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           <tbody>
             {(formData.fees || []).map((fee, index) => (
               <tr key={fee.id || index}>
-                <td className="p-1"><input className="aseel-input w-full" disabled={effectiveReadOnly} value={fee.description} placeholder="مثال: رسوم فحص أو ضريبة إضافية" onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, description: e.target.value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
+                <td className="p-1"><input className="ktra-input w-full" disabled={effectiveReadOnly} value={fee.description} placeholder="مثال: رسوم فحص أو ضريبة إضافية" onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, description: e.target.value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1"><AccountTreeField accounts={allAccounts} value={fee.expenseAccountId || ""} disabled={effectiveReadOnly} purpose={FEE_PURPOSE} title="اختيار حساب الرسم" onChange={(id, account) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, expenseAccountId: id, expenseAccountCode: account?.code, expenseAccountName: account?.name ?? undefined }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
-                <td className="p-1"><input className="aseel-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly || fee.calculationType === "percentage"} value={fee.calculationType === "percentage" ? fee.amount : (fee.calculationValue ?? fee.amount)} onChange={(e) => { const value = Number(e.target.value) || 0; const fees = [...(formData.fees || [])]; fees[index] = { ...fee, amount: value, calculationValue: value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
+                <td className="p-1"><input className="ktra-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly || fee.calculationType === "percentage"} value={fee.calculationType === "percentage" ? fee.amount : (fee.calculationValue ?? fee.amount)} onChange={(e) => { const value = Number(e.target.value) || 0; const fees = [...(formData.fees || [])]; fees[index] = { ...fee, amount: value, calculationValue: value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} checked={fee.capitalizeToInventory} onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, capitalizeToInventory: e.target.checked }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
-                <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="aseel-toolbtn" onClick={() => { setFormData((prev) => ({ ...prev, fees: (prev.fees || []).filter((_, i) => i !== index) })); markDirty(); }}><Trash2 size={14} /></button>}</td>
+                <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="ktra-toolbtn" onClick={() => { setFormData((prev) => ({ ...prev, fees: (prev.fees || []).filter((_, i) => i !== index) })); markDirty(); }}><Trash2 size={14} /></button>}</td>
               </tr>
             ))}
             {(formData.fees || []).length === 0 && <tr><td colSpan={5} className="p-6 text-center text-[var(--color-text-muted)]">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
@@ -2009,7 +2009,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       </div>
       {!viewMode && !effectiveReadOnly && (
         <div className="mt-3 flex justify-end">
-          <button type="button" className="aseel-toolbtn" disabled={saving} onClick={() => void handleSave()}>
+          <button type="button" className="ktra-toolbtn" disabled={saving} onClick={() => void handleSave()}>
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             حفظ الفاتورة والرسوم
           </button>
@@ -2019,7 +2019,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
 
   const installmentsTab = (
-    <div className="aseel-legacy-tab">
+    <div className="ktra-legacy-tab">
       <InstallmentsSection
         installments={installments}
         installmentPlanEnabled={installmentPlanEnabled}
@@ -2043,7 +2043,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
 
   const dealInfoTab = (
-    <div className="aseel-legacy-tab">
+    <div className="ktra-legacy-tab">
       <DealInfoSection
         dealInfo={dealInfo}
         formData={formData}
@@ -2053,29 +2053,29 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
 
   const activityTab = (
-    <div className="aseel-legacy-tab">
+    <div className="ktra-legacy-tab">
       {dealActivities.length > 0 ? (
         <DealActivityLog activities={dealActivities} />
       ) : (
-        <p className="aseel-hint">لا يوجد سجل نشاطات للصفقة المرتبطة.</p>
+        <p className="ktra-hint">لا يوجد سجل نشاطات للصفقة المرتبطة.</p>
       )}
     </div>
   );
 
   const otherTab = (
-    <div className="aseel-other">
-      <label className="aseel-field aseel-field--inline">
+    <div className="ktra-other">
+      <label className="ktra-field ktra-field--inline">
         <input
           type="checkbox"
           disabled={effectiveReadOnly}
           checked={formData.shippingIncluded || false}
           onChange={(e) => { handleUpdateFinancial("shippingIncluded", e.target.checked); markDirty(); }}
         />
-        <span className="aseel-field-label" style={{ flex: "unset" }}>
+        <span className="ktra-field-label" style={{ flex: "unset" }}>
           الأسعار تشمل الشحن
         </span>
       </label>
-      <p className="aseel-hint">
+      <p className="ktra-hint">
         عملة الفاتورة: {formData.currency === "ILS" ? "شيكل (₪)" : "دولار ($)"}
         {formData.dealId ? ` — مرتبطة بالصفقة ${formData.dealNumber || formData.dealId}` : ""}
       </p>
@@ -2449,7 +2449,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onSubmit={() => void submitPayment()}
       cashAccountField={(
         <AccountTreeField
-          className="aseel-input"
+          className="ktra-input"
           accounts={allAccounts}
           value={payCashAccountId ?? ""}
           purpose="cash"
@@ -2516,8 +2516,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     && !formData.clearanceId
     && formData.receiptStatus !== "received";
 
-  const toolbarActions: AseelToolbarAction[] = [
-    ...(invoicePermissions.canSave ? [{ key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => { handleSave(); dirtyRef.current = false; } : undefined, disabled: saving || isPosted } as AseelToolbarAction] : []),
+  const toolbarActions: KitToolbarAction[] = [
+    ...(invoicePermissions.canSave ? [{ key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => { handleSave(); dirtyRef.current = false; } : undefined, disabled: saving || isPosted } as KitToolbarAction] : []),
     ...(invoicePermissions.canSaveAndPost ? [{
       key: "save-and-post",
       label: saving || posting ? "...حفظ وترحيل" : "حفظ وترحيل",
@@ -2527,7 +2527,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         : undefined,
       disabled: saving || posting || isPosted || Boolean(formData.isHistorical),
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     ...(viewMode && !formData.isHistorical && invoicePermissions.canSave ? [{
       key: "edit",
       label: "تحرير",
@@ -2542,9 +2542,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         setViewMode(false);
       },
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     ...(canPerm("purchase.invoice.create")
-      ? [{ key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true } as AseelToolbarAction]
+      ? [{ key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true } as KitToolbarAction]
       : []),
     // T-PSIMPL: «نسخ» — مرآة نظيرتها في البيع. فواتير المورّد الواحد تتكرّر
     // شهرياً، وكانت تُعاد كتابتها بندًا بندًا.
@@ -2554,7 +2554,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       icon: duplicating ? <Loader2 className="animate-spin" /> : <Copy />,
       onClick: duplicating ? undefined : () => void handleDuplicate(),
       disabled: duplicating,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     ...(invoicePermissions.canPost ? [{
       key: "post",
       label: posting ? "...ترحيل" : "ترحيل",
@@ -2562,7 +2562,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onClick: canPostDocument && !posting ? () => void handlePost() : undefined,
       disabled: !canPostDocument || posting,
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     ...(!readOnly && formData.shipment && formData.id && formData.currency === "ILS" ? [{
       key: "recalculate",
       label: recalcBusy ? "..." : "إعادة حساب التكلفة",
@@ -2570,7 +2570,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onClick: formData.isPosted ? undefined : () => void handleRecalculateLanded(),
       disabled: recalcBusy || formData.isPosted,
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     // T-PERM: «تراجع عن الترحيل» يظهر فقط لمن يملك الصلاحية (الخادم يفرضها أيضاً).
     ...(canPerm("purchase.invoice.unpost") ? [{
       key: "unpost",
@@ -2578,7 +2578,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       icon: posting ? <Loader2 className="animate-spin" /> : <Undo2 />,
       onClick: isPosted && !posting ? () => void handleUnpost() : undefined,
       disabled: !isPosted || posting,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     ...(canPerm("purchase.payment.create") && (isPosted || invoicePermissions.canSaveAndPost) ? [{
       // T-APPAY: زرٌّ واحد باسمٍ واحد على الجانبين — «تسجيل دفعة» — يُنزِل
       // المستخدم إلى اللوحة داخل المستند بدل نافذةٍ تُلزمه بالترحيل أوّلاً.
@@ -2588,7 +2588,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onClick: !(isPosted && supplierRemaining <= 0) ? () => focusPayPanel() : undefined,
       disabled: isPosted && supplierRemaining <= 0,
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     // الاستلام: نافذة سريعة تُنشئ إرسالية بالبنود المؤشَّرة، أو المحرّر الكامل
     // في شاشة الإرساليات بالفاتورة نفسها مربوطةً مسبقاً.
     ...(canReceiveGoods ? [{
@@ -2597,19 +2597,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       icon: <PackageCheck />,
       onClick: () => setShowReceive(true),
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     ...(canReceiveGoods ? [{
       key: "new-receipt",
       label: "إرسالية جديدة",
       icon: <Truck />,
       onClick: () => openInNewTab(`/purchase-receipts/new?invoice=${formData.id}`),
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => setShowPrintView(true), separatorBefore: true },
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: guardedCancel, danger: true, separatorBefore: true },
   ];
 
   const saveErrorBanner = saveError ? (
-    <div className="aseel-banner aseel-banner--err" role="alert" data-testid="save-error">
+    <div className="ktra-banner ktra-banner--err" role="alert" data-testid="save-error">
       <AlertCircle className="h-4 w-4 shrink-0" />
       {/* `message` يحمل أسطر الحقول مُسمّاة أصلاً (عبر `humanizeDrfError`)، وما
           له حقل مرئي يُعرض بجانبه كذلك عبر `fld`. تكرارها هنا بلا تسمية كان
@@ -2619,7 +2619,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   ) : null;
 
   const accBanner = (accErr || accMsg) ? (
-    <div className={`aseel-banner ${accErr ? "aseel-banner--err" : "aseel-banner--ok"}`}>
+    <div className={`ktra-banner ${accErr ? "ktra-banner--err" : "ktra-banner--ok"}`}>
       {accErr ? <AlertCircle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
       <span>{accErr || accMsg}</span>
     </div>
@@ -2633,7 +2633,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const invFees = (formData.fees || []).filter((f) => Number(f.amount) > 0);
 
   const invoiceDocumentView = (
-    <AseelDocumentView<InvoiceItem>
+    <KitDocumentView<InvoiceItem>
       title={
         formData.isReturn
           ? "مرجع شراء (إرجاع للمورد)"
@@ -2803,7 +2803,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           key: "payments",
           title: `تفاصيل دفعات المورد (${formData.paymentDetails?.length || 0})`,
           content: formData.paymentDetails?.length ? (
-            <AseelViewTable<NonNullable<Invoice["paymentDetails"]>[number]>
+            <KitViewTable<NonNullable<Invoice["paymentDetails"]>[number]>
               columns={[
                 { key: "voucher", header: "السند", render: (p) => `${p.source === "supplier_payment" ? "سند صرف" : "دفعة فاتورة"} #${p.id}` },
                 { key: "date", header: "التاريخ", width: "110px", render: (p) => formatDateLocalized(p.paymentDate) },
@@ -2824,7 +2824,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 key: "fees",
                 title: `الرسوم (${invFees.length})`,
                 content: (
-                  <AseelViewTable<(typeof invFees)[number]>
+                  <KitViewTable<(typeof invFees)[number]>
                     columns={[
                       { key: "desc", header: "البيان", render: (f) => f.description || "—" },
                       { key: "acc", header: "الحساب", width: "160px", render: (f) => f.expenseAccountName || "—" },
@@ -2858,7 +2858,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       id="purchase-invoice-print"
       dir="rtl"
     >
-    <AseelDocumentShell
+    <KitDocumentShell
       gridFitContent={viewMode}
       title={formData.isReturn
         ? "مرجع شراء (إرجاع للمورد)"
@@ -2879,7 +2879,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           {fld(
             "رقم الفاتورة",
             <input
-              className="aseel-input"
+              className="ktra-input"
               readOnly
               // T-PSIMPL: المسودّة تعرض الرقم **التالي** بدل «— جديدة —» — كان
               // المستخدم لا يعرف رقم مستنده حتى يحفظه. مُلمَّحٌ أنه مبدئي:
@@ -2895,8 +2895,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           )}
           {fld(
             "التاريخ",
-            <AseelDatePicker
-              className="aseel-input"
+            <KitDatePicker
+              className="ktra-input"
               disabled={effectiveReadOnly}
               value={formData.invoiceDate || ""}
               onChange={(val) => handleUpdateFinancial("invoiceDate", val)}
@@ -2904,8 +2904,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           )}
           {fld(
             "تاريخ الاستحقاق",
-            <AseelDatePicker
-              className="aseel-input"
+            <KitDatePicker
+              className="ktra-input"
               disabled={effectiveReadOnly}
               value={formData.dealInfo?.dueDate || ""}
               onChange={(val) => handleDealInfoUpdate("dueDate", val)}
@@ -2914,7 +2914,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           {fld(
             "رقم المستند",
             <input
-              className="aseel-input"
+              className="ktra-input"
               disabled={effectiveReadOnly}
               value={formData.supplierInvoiceNumber || ""}
               onChange={(e) => handleUpdateFinancial("supplierInvoiceNumber", e.target.value)}
@@ -2927,8 +2927,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           {fld(
             "بحث سريع / باركود (F6)",
             <input
-              className="aseel-input"
-              data-aseel-field="barcode"
+              className="ktra-input"
+              data-ktra-field="barcode"
               disabled={effectiveReadOnly}
               value={barcodeQuery}
               onChange={(e) => setBarcodeQuery(e.target.value)}
@@ -2942,11 +2942,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           )}
           {fld(
             "المورد",
-            <div className="aseel-pickfield">
+            <div className="ktra-pickfield">
               <input
-                className="aseel-input aseel-input--hl"
-                data-aseel-field="supplier"
-                data-aseel-key="1"
+                className="ktra-input ktra-input--hl"
+                data-ktra-field="supplier"
+                data-ktra-key="1"
                 readOnly
                 disabled={effectiveReadOnly}
                 value={selectedSupplier ? `#${selectedSupplier.id}` : ""}
@@ -2955,7 +2955,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               />
               <button
                 type="button"
-                className="aseel-ellipsis"
+                className="ktra-ellipsis"
                 disabled={effectiveReadOnly}
                 onClick={() => setShowSupplierPicker(true)}
                 title="فهرس الموردين (+)"
@@ -2970,7 +2970,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             /* T-SEARCH: كان صندوقاً للعرض فقط، فاختيارُ المورّد يمرّ بالفهرس
                الكامل وحده — بينما جانب البيع يكتب اسم عميله ويجده. الآن يُكتب
                ويُبحَث بالاسم والهاتف والرقم، ويُنشأ مورّد جديد من مكانه. */
-            <AseelAutocomplete
+            <KitAutocomplete
               value={headerSupplierName || ""}
               options={supplierOptions}
               disabled={effectiveReadOnly}
@@ -2991,7 +2991,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           {fld(
             "العملة",
             <select
-              className="aseel-input"
+              className="ktra-input"
               disabled={effectiveReadOnly}
               value={formData.currency || "ILS"}
               onChange={(e) => handleUpdateFinancial("currency", e.target.value)}
@@ -3003,8 +3003,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           {formData.currency === "ILS" && fld(
             "نسبة الضريبة %",
             <input
-              className="aseel-input"
-              data-aseel-key="1"
+              className="ktra-input"
+              data-ktra-key="1"
               data-purchase-tax-rate="true"
               type="number"
               min={0}
@@ -3018,7 +3018,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           {fld(
             "مشتغل مرخص",
             <input
-              className="aseel-input"
+              className="ktra-input"
               disabled={effectiveReadOnly}
               value={formData.dealInfo?.licensedDealerNo || ""}
               onChange={(e) => handleDealInfoUpdate("licensedDealerNo", e.target.value)}
@@ -3028,7 +3028,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           {formData.dealNumber && fld(
             "رقم الصفقة",
             <input
-              className="aseel-input"
+              className="ktra-input"
               readOnly
               value={formData.dealNumber}
             />
@@ -3052,7 +3052,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 <b dir="ltr">{formData.sourceDocument.number}</b>
               </button>
               {formData.sourceDocument.originNumber && (
-                <span className="text-[10px] text-[var(--aseel-ink-soft)]">
+                <span className="text-[10px] text-[var(--ktra-ink-soft)]">
                   الطلبية نفسها من عرض السعر {formData.sourceDocument.originNumber}
                 </span>
               )}
@@ -3078,25 +3078,25 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           {formData.importLogistics && fld(
             "رقم التخليص",
             <input
-              className="aseel-input"
+              className="ktra-input"
               readOnly
               value={String(formData.importLogistics.clearanceId || "")}
             />
           )}
-          <label className="aseel-field aseel-field--inline">
+          <label className="ktra-field ktra-field--inline">
             <input
               type="checkbox"
               disabled={effectiveReadOnly}
               checked={formData.shippingIncluded || false}
               onChange={(e) => handleUpdateFinancial("shippingIncluded", e.target.checked)}
             />
-            <span className="aseel-field-label" style={{ flex: "unset" }}>
+            <span className="ktra-field-label" style={{ flex: "unset" }}>
               الأسعار تشمل ض.ق.م
             </span>
           </label>
           {/* T-INTENT: نقدي/آجل في الرأس — مرآة مفتاح فاتورة البيع. كان مدفوناً
               في تبويب المحاسبة وحده، فيدفع المشتري وهو لا يرى نوع فاتورته. */}
-          <label className="aseel-field aseel-field--inline">
+          <label className="ktra-field ktra-field--inline">
             <input
               type="checkbox"
               data-testid="purchase-payment-type"
@@ -3110,7 +3110,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 markDirty();
               }}
             />
-            <span className="aseel-field-label" style={{ flex: "unset" }}>
+            <span className="ktra-field-label" style={{ flex: "unset" }}>
               نقدي
             </span>
             <span
@@ -3148,7 +3148,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             key: "accounting",
             label: "المحاسبة والقيد",
             content: (
-              <div className="aseel-legacy-tab">
+              <div className="ktra-legacy-tab">
                 <PurchaseInvoiceAccountingPanel
                   invoiceId={Number(formData.id)}
                   readOnly={readOnly}
@@ -3183,110 +3183,110 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       totals={viewMode ? undefined : (
         formData.conversionMetadata?.line_meta ? (
           <>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>{costLabels.merchandiseBase}</span>
-              <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.subtotal_merch_ils ?? formData.conversionMetadata.deal_total_ils ?? 0)}</span>
+              <span className="ktra-total-value">{fmt(formData.conversionMetadata.line_meta.subtotal_merch_ils ?? formData.conversionMetadata.deal_total_ils ?? 0)}</span>
             </div>
             {/* الشحن داخل المنشأ مخصوم من البضاعة أعلاه؛ عند تضمينه بالأسعار لا يُعرض كسطر مستقل */}
             {!formData.shippingIncluded && (
-              <div className="aseel-total-row">
+              <div className="ktra-total-row">
                 <span>الشحن داخل المنشأ</span>
-                <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.internal_shipping_ils || 0)}</span>
+                <span className="ktra-total-value">{fmt(formData.conversionMetadata.line_meta.internal_shipping_ils || 0)}</span>
               </div>
             )}
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>تكلفة الشحن الدولي</span>
-              <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.deal_ship_allocated_ils || 0)}</span>
+              <span className="ktra-total-value">{fmt(formData.conversionMetadata.line_meta.deal_ship_allocated_ils || 0)}</span>
             </div>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>تكلفة التخليص</span>
-              <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.deal_clearance_allocated_ils || 0)}</span>
+              <span className="ktra-total-value">{fmt(formData.conversionMetadata.line_meta.deal_clearance_allocated_ils || 0)}</span>
             </div>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>تكلفة النقل</span>
-              <span className="aseel-total-value">{fmt(formData.conversionMetadata.deal_local_shipping_from_clearance_ils || 0)}</span>
+              <span className="ktra-total-value">{fmt(formData.conversionMetadata.deal_local_shipping_from_clearance_ils || 0)}</span>
             </div>
             {/* عمولات تحويل دفعات الصفقة — كانت محسوبة في تكلفة المنتج وأساس ض.ق.م بلا سطر ظاهر هنا */}
             {transferCommissionsIls > 0 && (
-              <div className="aseel-total-row">
+              <div className="ktra-total-row">
                 <span>عمولات تحويل الدفعات</span>
-                <span className="aseel-total-value">{fmt(transferCommissionsIls)}</span>
+                <span className="ktra-total-value">{fmt(transferCommissionsIls)}</span>
               </div>
             )}
             <div className="border-t border-gray-400 my-1 w-full" style={{ borderStyle: "dashed", borderColor: "rgba(0,0,0,0.15)" }} />
             {(formData.discountAmount || 0) > 0 && (
-              <div className="aseel-total-row">
+              <div className="ktra-total-row">
                 <span>الخصم</span>
-                <span className="aseel-total-value">{fmt(formData.discountAmount || 0)}</span>
+                <span className="ktra-total-value">{fmt(formData.discountAmount || 0)}</span>
               </div>
             )}
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>المجموع قبل الضريبة</span>
-              <span className="aseel-total-value">{fmt((formData.subtotal || 0) + transferCommissionsIls)}</span>
+              <span className="ktra-total-value">{fmt((formData.subtotal || 0) + transferCommissionsIls)}</span>
             </div>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>الضريبة المضافة</span>
-              <span className="aseel-total-value">{fmt(formData.taxAmount || 0)}</span>
+              <span className="ktra-total-value">{fmt(formData.taxAmount || 0)}</span>
             </div>
             {(formData.fees || []).map((fee, index) => (
-              <div className="aseel-total-row" key={fee.id || index}>
+              <div className="ktra-total-row" key={fee.id || index}>
                 <span>{fee.description || "رسم إضافي"}</span>
-                <span className="aseel-total-value">{fmt(fee.amount || 0)}</span>
+                <span className="ktra-total-value">{fmt(fee.amount || 0)}</span>
               </div>
             ))}
-            <div className="aseel-total-row aseel-total-row--grand">
+            <div className="ktra-total-row ktra-total-row--grand">
               <span>إجمالي المستحق بعد الضريبة والرسوم</span>
-              <span className="aseel-total-value">{fmt(payableTotal)}</span>
+              <span className="ktra-total-value">{fmt(payableTotal)}</span>
             </div>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>إجمالي الكمية</span>
-              <span className="aseel-total-value">{formatQuantity(totalQty)}</span>
+              <span className="ktra-total-value">{formatQuantity(totalQty)}</span>
             </div>
             {showReceiptColumns && (
-              <div className="aseel-total-row">
+              <div className="ktra-total-row">
                 <span>باقي الاستلام</span>
-                <span className="aseel-total-value">{formatQuantity(receiptProgress!.remaining)}</span>
+                <span className="ktra-total-value">{formatQuantity(receiptProgress!.remaining)}</span>
               </div>
             )}
           </>
         ) : (
           <>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>مجموع البنود (قبل الخصم)</span>
-              <span className="aseel-total-value">{fmt(ilsMerchandiseBase - (formData.shippingIncluded ? 0 : formData.shippingCost || 0))}</span>
+              <span className="ktra-total-value">{fmt(ilsMerchandiseBase - (formData.shippingIncluded ? 0 : formData.shippingCost || 0))}</span>
             </div>
             {(formData.discountAmount || 0) > 0 && (
-              <div className="aseel-total-row">
+              <div className="ktra-total-row">
                 <span>الخصم</span>
-                <span className="aseel-total-value">{fmt(formData.discountAmount || 0)}</span>
+                <span className="ktra-total-value">{fmt(formData.discountAmount || 0)}</span>
               </div>
             )}
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>المجموع قبل الضريبة</span>
-              <span className="aseel-total-value">{fmt(formData.subtotal || 0)}</span>
+              <span className="ktra-total-value">{fmt(formData.subtotal || 0)}</span>
             </div>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>الضريبة المضافة</span>
-              <span className="aseel-total-value">{fmt(formData.taxAmount || 0)}</span>
+              <span className="ktra-total-value">{fmt(formData.taxAmount || 0)}</span>
             </div>
             {(formData.fees || []).map((fee, index) => (
-              <div className="aseel-total-row" key={fee.id || index}>
+              <div className="ktra-total-row" key={fee.id || index}>
                 <span>{fee.description || "رسم إضافي"}</span>
-                <span className="aseel-total-value">{fmt(fee.amount || 0)}</span>
+                <span className="ktra-total-value">{fmt(fee.amount || 0)}</span>
               </div>
             ))}
-            <div className="aseel-total-row aseel-total-row--grand">
+            <div className="ktra-total-row ktra-total-row--grand">
               <span>إجمالي المستحق بعد الضريبة والرسوم</span>
-              <span className="aseel-total-value">{fmt(payableTotal)}</span>
+              <span className="ktra-total-value">{fmt(payableTotal)}</span>
             </div>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>إجمالي الكمية</span>
-              <span className="aseel-total-value">{formatQuantity(totalQty)}</span>
+              <span className="ktra-total-value">{formatQuantity(totalQty)}</span>
             </div>
             {showReceiptColumns && (
-              <div className="aseel-total-row">
+              <div className="ktra-total-row">
                 <span>باقي الاستلام</span>
-                <span className="aseel-total-value">{formatQuantity(receiptProgress!.remaining)}</span>
+                <span className="ktra-total-value">{formatQuantity(receiptProgress!.remaining)}</span>
               </div>
             )}
           </>
@@ -3294,14 +3294,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       )}
       status={
         <>
-          <span className="aseel-status-item">المستخدم <b>{currentUser?.name || "—"}</b></span>
-          <span className="aseel-status-item">رقم القيد <b>{formData.glPurchaseReceiptJournalId ?? "—"}</b></span>
+          <span className="ktra-status-item">المستخدم <b>{currentUser?.name || "—"}</b></span>
+          <span className="ktra-status-item">رقم القيد <b>{formData.glPurchaseReceiptJournalId ?? "—"}</b></span>
           {formData.importLogistics && (
-            <span className="aseel-status-item">رقم الحركة <b>{formData.importLogistics.shipmentNumber || "—"}</b></span>
+            <span className="ktra-status-item">رقم الحركة <b>{formData.importLogistics.shipmentNumber || "—"}</b></span>
           )}
-          <span className="aseel-status-item">الحالة <b>{formData.isPosted ? "مرحّلة" : formData.isHistorical ? "مؤرشفة" : formData.id ? "مسودة" : "جديدة"}</b></span>
-          <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
-          <span className="aseel-status-item">{effectiveReadOnly ? "للقراءة فقط" : "قابل للتعديل ✓"}</span>
+          <span className="ktra-status-item">الحالة <b>{formData.isPosted ? "مرحّلة" : formData.isHistorical ? "مؤرشفة" : formData.id ? "مسودة" : "جديدة"}</b></span>
+          <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+          <span className="ktra-status-item">{effectiveReadOnly ? "للقراءة فقط" : "قابل للتعديل ✓"}</span>
         </>
       }
     >
@@ -3324,7 +3324,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               </span>
             </div>
           )}
-          <AseelGrid<InvoiceItem>
+          <KitGrid<InvoiceItem>
             columns={itemColumns}
             rows={formData.items || []}
             getCell={itemGetCell}
@@ -3334,7 +3334,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             emptyHint="لا توجد بنود — أضف صنفاً من الشجرة أو اكتب اسمه"
           />
           {!readOnly && !formData.isHistorical && (
-            <button type="button" className="aseel-addrow" onClick={addRow}>
+            <button type="button" className="ktra-addrow" onClick={addRow}>
               <Plus className="h-3 w-3" /> إضافة سطر
             </button>
           )}
@@ -3345,19 +3345,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               style={{
                 display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
                 margin: "4px 0", padding: "6px 10px", borderRadius: 4,
-                background: "var(--aseel-warn-bg, #fff7e6)",
-                border: "1px solid var(--aseel-warn, #e0a800)",
-                color: "var(--aseel-ink)", fontSize: "var(--aseel-fs-sm)",
+                background: "var(--ktra-warn-bg, #fff7e6)",
+                border: "1px solid var(--ktra-warn, #e0a800)",
+                color: "var(--ktra-ink)", fontSize: "var(--ktra-fs-sm)",
               }}
             >
-              <AlertCircle style={{ width: 14, height: 14, color: "var(--aseel-warn, #e0a800)" }} />
+              <AlertCircle style={{ width: 14, height: 14, color: "var(--ktra-warn, #e0a800)" }} />
               <span>
                 هذا السعر سيغيّر متوسط تكلفة «<b>{w.name}</b>» من <b>{formatMoney(w.from)}</b> إلى{" "}
                 <b>{formatMoney(w.to)}</b>.
               </span>
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 style={{ fontWeight: 600 }}
                 onClick={() => openInNewTab(`/product-cost?product=${w.productId}`)}
               >
@@ -3370,10 +3370,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             تُفتح في وضع العرض حيث تلك الحاوية مخفيّة، ودفعُها من هنا نفسه. */}
         {paymentsSection}
         {payPanel}
-    </AseelDocumentShell>
+    </KitDocumentShell>
 
     {/* فهرس الموردين */}
-    <AseelIndexPicker<Supplier>
+    <KitIndexPicker<Supplier>
       open={showSupplierPicker}
       title="فهرس الموردين"
       rows={suppliers}
@@ -3449,7 +3449,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     {previewImage && (
       <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
         <img src={previewImage} alt="Preview" className="max-w-full max-h-full rounded-lg" />
-        <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 text-white p-2 aseel-bg-panel rounded-full">
+        <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 text-white p-2 ktra-bg-panel rounded-full">
           <ArrowRight className="w-6 h-6 rotate-180" />
         </button>
       </div>

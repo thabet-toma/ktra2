@@ -8,7 +8,7 @@ import {
   type ReportResultDto,
   type ReportRow,
 } from "../../utils/reportFormat";
-import { AseelReportTable, type ReportColumn } from "../aseel";
+import { KitReportTable, type ReportColumn } from "../kit";
 
 /**
  * CHQ-4 — تبويب «الاستحقاق والسيولة».
@@ -69,22 +69,22 @@ export const ChequeMaturityPanel: React.FC<{ refreshKey?: number }> = ({ refresh
 
   const filterBar = (
     <div className="flex flex-wrap items-end gap-2">
-      <div className="aseel-field">
-        <label className="aseel-field-label">اعتباراً من</label>
+      <div className="ktra-field">
+        <label className="ktra-field-label">اعتباراً من</label>
         <input
           type="date"
-          className="aseel-input"
+          className="ktra-input"
           value={asOf}
           onChange={(e) => setAsOf(e.target.value)}
           title="اليوم الذي يُقاس منه التأخير والأسابيع"
         />
       </div>
-      <button type="button" className="aseel-toolbtn" onClick={() => void load()}>
+      <button type="button" className="ktra-toolbtn" onClick={() => void load()}>
         <RefreshCw className="h-3 w-3" /> تحديث
       </button>
       <button
         type="button"
-        className="aseel-toolbtn"
+        className="ktra-toolbtn"
         onClick={() => navigate("/reports/cheques-maturity")}
         title="فتح التقرير كاملاً — للطباعة والتصدير"
       >
@@ -93,18 +93,18 @@ export const ChequeMaturityPanel: React.FC<{ refreshKey?: number }> = ({ refresh
     </div>
   );
 
-  if (err) return <div className="aseel-banner aseel-banner--err m-3">{err}</div>;
+  if (err) return <div className="ktra-banner ktra-banner--err m-3">{err}</div>;
   // أول تحميل: الأعمدة نفسها لم تصل بعد، وجدولٌ بلا أعمدة لا يعرض شيئاً.
   if (!result) {
-    return <div className="p-4 text-sm text-[var(--aseel-ink-soft)]">جاري تحميل جدول الاستحقاق…</div>;
+    return <div className="p-4 text-sm text-[var(--ktra-ink-soft)]">جاري تحميل جدول الاستحقاق…</div>;
   }
 
   return (
     <div className="p-3">
       {result.description && (
-        <p className="mb-2 text-xs text-[var(--aseel-ink-soft)]">{result.description}</p>
+        <p className="mb-2 text-xs text-[var(--ktra-ink-soft)]">{result.description}</p>
       )}
-      <AseelReportTable<ReportRow>
+      <KitReportTable<ReportRow>
         filterBar={filterBar}
         columns={columns}
         rows={result.rows}

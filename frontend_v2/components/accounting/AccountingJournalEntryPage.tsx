@@ -27,13 +27,13 @@ import {
   Search,
 } from "lucide-react";
 import {
-  AseelDocumentShell,
-  AseelGrid,
+  KitDocumentShell,
+  KitGrid,
   useRecordNavigation,
-  useAseelKeymap,
-  useAseelFieldShortcuts,
-  type AseelGridColumn,
-} from "../aseel";
+  useKitKeymap,
+  useKitFieldShortcuts,
+  type KitGridColumn,
+} from "../kit";
 import { AccountTreePicker } from "./AccountTreePicker";
 import OfflineGuard from "../offline/OfflineGuard";
 import { entityPathForReference } from "../../utils/entityLinks";
@@ -158,7 +158,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   /** كتب المستخدم البيان الإجمالي بيده — فيتوقّف التوليد التلقائي. */
   const [headerDescTouched, setHeaderDescTouched] = useState(false);
 
-  // N3-T1: Aseel Navigation + account picker state
+  // N3-T1: Kit Navigation + account picker state
   const [journalsList, setJournalsList] = useState<any[]>([]);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
   // which line index is waiting for account pick
@@ -252,12 +252,12 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     },
   });
 
-  // N3-T1: Aseel keyboard shortcuts.
-  useAseelKeymap({
+  // N3-T1: Kit keyboard shortcuts.
+  useKitKeymap({
     F2: () => window.print(),
     F5: () => load(),
     F6: () => {
-      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      const el = document.querySelector<HTMLInputElement>('[data-ktra-field="search"]');
       el?.focus();
     },
     F12: () => saveAndPost(),
@@ -274,7 +274,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   }, { enabled: !showAccountPicker });
 
   // N3-T1: Field shortcuts — Space=auto-balance, *=balance-lookup, +=account-picker
-  useAseelFieldShortcuts({
+  useKitFieldShortcuts({
     'remaining-fill': () => {
       // autofill the remaining diff on the focused debit/credit cell
       const ae = document.activeElement as HTMLInputElement | null;
@@ -533,8 +533,8 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     );
   }
 
-  /* ── N3-T1: AseelGrid columns for journal lines ── */
-  const journalGridColumns: AseelGridColumn<LineState & { _idx: number }>[] = [
+  /* ── N3-T1: KitGrid columns for journal lines ── */
+  const journalGridColumns: KitGridColumn<LineState & { _idx: number }>[] = [
     { key: 'seq',         header: '#',          width: '40px',  align: 'center', readOnly: true },
     { key: 'account',     header: 'الحساب',      width: '22%' },
     { key: 'description', header: 'البيان',      width: '20%' },
@@ -563,7 +563,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     if (posted) return <span className="text-xs">{costCenters.find((c) => String(c.id) === row.costCenterId)?.name || '—'}</span>;
     return (
       <select
-        className="aseel-input"
+        className="ktra-input"
         value={row.costCenterId}
         onChange={(e) => updateLine(row._idx, { costCenterId: e.target.value })}
       >
@@ -587,9 +587,9 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
         <button
           type="button"
-          className="aseel-cell-picker"
+          className="ktra-cell-picker"
           disabled={posted}
-          data-aseel-key="1"
+          data-ktra-key="1"
           title="+ فتح شجرة الحسابات  |  * عرض الرصيد"
           onKeyDown={(e) => {
             if (e.key === '+') { e.preventDefault(); setPickerTargetLine(row._idx); setShowAccountPicker(true); }
@@ -602,8 +602,8 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         {balanceTooltip?.lineIdx === row._idx && (
           <span style={{
             position: 'absolute', top: '100%', right: 0, zIndex: 50,
-            background: 'var(--aseel-bg, #fffbf5)',
-            border: '1px solid var(--aseel-border, #c8b99a)',
+            background: 'var(--ktra-bg, #fffbf5)',
+            border: '1px solid var(--ktra-border, #c8b99a)',
             borderRadius: '4px', padding: '3px 8px',
             fontSize: '11px', whiteSpace: 'nowrap', fontWeight: 600,
             boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
@@ -618,16 +618,16 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   const renderDebitCell = (row: GridLine) => {
     const isDebit = parseFloat(row.debit) > 0;
     if (posted) return (
-      <span className={`block text-center text-xs font-mono font-semibold ${isDebit ? 'aseel-text-accent' : 'aseel-text-soft'}`}>
+      <span className={`block text-center text-xs font-mono font-semibold ${isDebit ? 'ktra-text-accent' : 'ktra-text-soft'}`}>
         {isDebit ? fmtAmount(row.debit) : ''}
       </span>
     );
     return (
       <input
         type="number" step="0.01" min="0" placeholder="0.00"
-        className="aseel-input aseel-num"
-        data-aseel-field="remaining-amount"
-        data-aseel-key="1"
+        className="ktra-input ktra-num"
+        data-ktra-field="remaining-amount"
+        data-ktra-key="1"
         data-line-idx={String(row._idx)}
         data-side="debit"
         value={row.debit}
@@ -641,16 +641,16 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   const renderCreditCell = (row: GridLine) => {
     const isCredit = parseFloat(row.credit) > 0;
     if (posted) return (
-      <span className={`block text-center text-xs font-mono font-semibold ${isCredit ? 'aseel-text-ink' : 'aseel-text-soft'}`}>
+      <span className={`block text-center text-xs font-mono font-semibold ${isCredit ? 'ktra-text-ink' : 'ktra-text-soft'}`}>
         {isCredit ? fmtAmount(row.credit) : ''}
       </span>
     );
     return (
       <input
         type="number" step="0.01" min="0" placeholder="0.00"
-        className="aseel-input aseel-num"
-        data-aseel-field="remaining-amount"
-        data-aseel-key="1"
+        className="ktra-input ktra-num"
+        data-ktra-field="remaining-amount"
+        data-ktra-key="1"
         data-line-idx={String(row._idx)}
         data-side="credit"
         value={row.credit}
@@ -665,7 +665,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     if (posted) return <span className="text-xs">{partners.find((p) => String(p.id) === row.partnerId)?.name || '—'}</span>;
     return (
       <select
-        className="aseel-input"
+        className="ktra-input"
         value={row.partnerId}
         onChange={(e) => updateLine(row._idx, { partnerId: e.target.value })}
       >
@@ -677,7 +677,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
 
   const renderDelCell = (row: GridLine) =>
     (!posted && lines.length > 1) ? (
-      <button type="button" className="aseel-iconbtn aseel-iconbtn--danger" onClick={() => removeLine(row._idx)} title="حذف السطر">
+      <button type="button" className="ktra-iconbtn ktra-iconbtn--danger" onClick={() => removeLine(row._idx)} title="حذف السطر">
         <Trash2 className="h-3 w-3" />
       </button>
     ) : null;
@@ -728,7 +728,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     <div
       style={{ minHeight: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
     >
-    <AseelDocumentShell
+    <KitDocumentShell
       title="قيود المحاسبة"
       state={journalId ? `قيد #${journalId}` : 'قيد جديد'}
       nav={nav}
@@ -765,15 +765,15 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       header={
         <>
           {/* رقم القيد */}
-          <label className="aseel-field">
-            <span className="aseel-field-label">رقم القيد</span>
-            <input className="aseel-input" readOnly value={journalId ? `#${journalId}` : '— جديد —'} />
+          <label className="ktra-field">
+            <span className="ktra-field-label">رقم القيد</span>
+            <input className="ktra-input" readOnly value={journalId ? `#${journalId}` : '— جديد —'} />
           </label>
           {/* التاريخ */}
-          <label className="aseel-field">
-            <span className="aseel-field-label">التاريخ</span>
+          <label className="ktra-field">
+            <span className="ktra-field-label">التاريخ</span>
             <input
-              className="aseel-input"
+              className="ktra-input"
               type="date"
               disabled={posted}
               value={header.transaction_date}
@@ -781,10 +781,10 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
             />
           </label>
           {/* العملة */}
-          <label className="aseel-field">
-            <span className="aseel-field-label">العملة</span>
+          <label className="ktra-field">
+            <span className="ktra-field-label">العملة</span>
             <select
-              className="aseel-input"
+              className="ktra-input"
               disabled={posted}
               value={header.currency}
               onChange={(e) => {
@@ -806,10 +806,10 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
             </select>
           </label>
           {/* سعر العملة */}
-          <label className="aseel-field">
-            <span className="aseel-field-label">سعر العملة</span>
+          <label className="ktra-field">
+            <span className="ktra-field-label">سعر العملة</span>
             <input
-              className="aseel-input"
+              className="ktra-input"
               type="number"
               step="0.000001"
               min="0"
@@ -819,10 +819,10 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
             />
           </label>
           {/* نوع المرجع — يحدده النظام من مصدر القيد ولا يُدخَل يدوياً */}
-          <label className="aseel-field">
-            <span className="aseel-field-label">نوع المرجع</span>
+          <label className="ktra-field">
+            <span className="ktra-field-label">نوع المرجع</span>
             <input
-              className="aseel-input"
+              className="ktra-input"
               readOnly
               value={header.reference_type
                 ? refTypeLabel(header.reference_type, header.description, header.source_label)
@@ -831,10 +831,10 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
           </label>
           {/* A3: وسم «قيد تسوية» — يدويٌّ فقط، ويجعل القيد قابلاً للتصفية في الدفتر */}
           {isManualEntry && (
-            <label className="aseel-field">
-              <span className="aseel-field-label">قيد تسوية</span>
+            <label className="ktra-field">
+              <span className="ktra-field-label">قيد تسوية</span>
               <div
-                className="aseel-input"
+                className="ktra-input"
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', minHeight: '28px' }}
               >
                 <input
@@ -853,13 +853,13 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
             </label>
           )}
           {/* البيان الإجمالي — يتولد من الحسابات ما لم يُكتب يدوياً */}
-          <label className="aseel-field" style={{ gridColumn: 'span 2' }}>
-            <span className="aseel-field-label">
+          <label className="ktra-field" style={{ gridColumn: 'span 2' }}>
+            <span className="ktra-field-label">
               البيان الإجمالي {headerDescTouched ? '(يدوي)' : '(تلقائي)'}
             </span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <input
-                className="aseel-input"
+                className="ktra-input"
                 style={{ flex: 1 }}
                 disabled={posted}
                 placeholder="يتولد تلقائياً: من ح/ … إلى ح/ …"
@@ -873,7 +873,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
               {!posted && headerDescTouched && (
                 <button
                   type="button"
-                  className="aseel-iconbtn"
+                  className="ktra-iconbtn"
                   title="إرجاع البيان إلى التوليد التلقائي حسب الحسابات"
                   onClick={() => {
                     setHeaderDescTouched(false);
@@ -889,47 +889,47 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       }
       status={
         <>
-          <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
-          <span className="aseel-status-item">الحالة <b>{posted ? 'مرحَّل' : 'مسودة'}</b></span>
-          {journalId && <span className="aseel-status-item">رقم القيد <b>{journalId}</b></span>}
-          <span className="aseel-status-item">
-            مدين <b className="aseel-num">{formatMoney(totalDebit)}</b>
+          <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+          <span className="ktra-status-item">الحالة <b>{posted ? 'مرحَّل' : 'مسودة'}</b></span>
+          {journalId && <span className="ktra-status-item">رقم القيد <b>{journalId}</b></span>}
+          <span className="ktra-status-item">
+            مدين <b className="ktra-num">{formatMoney(totalDebit)}</b>
           </span>
-          <span className="aseel-status-item">
-            دائن <b className="aseel-num">{formatMoney(totalCredit)}</b>
+          <span className="ktra-status-item">
+            دائن <b className="ktra-num">{formatMoney(totalCredit)}</b>
           </span>
           {!balanced && totalDebit > 0 && (
-            <span className="aseel-status-item" style={{ color: 'var(--aseel-err, #c0392b)' }}>
+            <span className="ktra-status-item" style={{ color: 'var(--ktra-err, #c0392b)' }}>
               فرق <b>{formatMoney(Math.abs(diff))}</b>
             </span>
           )}
           {balanced && totalDebit > 0 && (
-            <span className="aseel-status-item" style={{ color: 'var(--aseel-ok, #27ae60)' }}>
+            <span className="ktra-status-item" style={{ color: 'var(--ktra-ok, #27ae60)' }}>
               متوازن ✓
             </span>
           )}
         </>
       }
     >
-    <div style={{ height: '100%', overflow: 'auto', padding: '8px 12px', background: 'var(--aseel-bg, #fffbf5)' }}>
+    <div style={{ height: '100%', overflow: 'auto', padding: '8px 12px', background: 'var(--ktra-bg, #fffbf5)' }}>
 
       {/* ── ارتباط بصفقة/شحنة (تنقّل) ── */}
       {activeDealRef && (
-        <div className="aseel-banner" style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 12px' }}>
+        <div className="ktra-banner" style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 12px' }}>
           <Handshake className="w-4 h-4" />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ fontSize: '11px', color: 'var(--aseel-ink-soft)' }}>
+            <span style={{ fontSize: '11px', color: 'var(--ktra-ink-soft)' }}>
               {isShipmentLink ? 'مرتبط بشحنة:' : 'مرتبط بصفقة:'}
             </span>
             <span style={{ fontWeight: 600, marginInlineStart: '6px' }}>{activeDealRef.displayName}</span>
           </div>
           {isShipmentLink && activeDealRef.dealId && onNavigateToShipment && /^\d+$/.test(String(activeDealRef.dealId).trim()) && (
-            <button type="button" className="aseel-toolbtn" onClick={() => onNavigateToShipment(String(activeDealRef.dealId).trim())}>
+            <button type="button" className="ktra-toolbtn" onClick={() => onNavigateToShipment(String(activeDealRef.dealId).trim())}>
               <ExternalLink className="w-3 h-3" /> فتح الشحنة
             </button>
           )}
           {!isShipmentLink && (activeDealRef.dealId || activeDealRef.dealNumber) && onNavigateToDeal && (
-            <button type="button" className="aseel-toolbtn" onClick={() => onNavigateToDeal(activeDealRef.dealId || activeDealRef.dealNumber)}>
+            <button type="button" className="ktra-toolbtn" onClick={() => onNavigateToDeal(activeDealRef.dealId || activeDealRef.dealNumber)}>
               <ExternalLink className="w-3 h-3" /> فتح الصفقة
             </button>
           )}
@@ -938,15 +938,15 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
 
       {/* ── خطأ ── */}
       {err && (
-        <div className="aseel-banner aseel-banner--err" style={{ marginBottom: '8px' }}>
+        <div className="ktra-banner ktra-banner--err" style={{ marginBottom: '8px' }}>
           <AlertTriangle className="w-4 h-4" style={{ marginInlineEnd: '6px' }} />
           {err}
         </div>
       )}
 
       {/* ── مصدر القيد: يعرضه النظام ولا يُدخَل يدوياً ── */}
-      <div className="aseel-input" style={{ display: 'flex', alignItems: 'center', minHeight: '28px', marginBottom: '8px', background: 'var(--aseel-surface-2, #f4ede0)' }}>
-        <Info className="w-3 h-3" style={{ marginInlineEnd: '6px', color: 'var(--aseel-ink-soft)' }} />
+      <div className="ktra-input" style={{ display: 'flex', alignItems: 'center', minHeight: '28px', marginBottom: '8px', background: 'var(--ktra-surface-2, #f4ede0)' }}>
+        <Info className="w-3 h-3" style={{ marginInlineEnd: '6px', color: 'var(--ktra-ink-soft)' }} />
         <span style={{ fontSize: '12px' }}>
           {!isManualEntry
             ? `مصدر القيد: ${refTypeLabel(header.reference_type, header.description, header.source_label)}${header.reference_id ? ' · #' + header.reference_id : ''}`
@@ -958,7 +958,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         {sourceDocumentPath && (
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             style={{ marginInlineStart: 'auto' }}
             title="فتح المستند المصدر"
             onClick={() => navigate(sourceDocumentPath)}
@@ -968,8 +968,8 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         )}
       </div>
 
-      {/* ── AseelGrid لبنود القيد ── */}
-      <AseelGrid<GridLine>
+      {/* ── KitGrid لبنود القيد ── */}
+      <KitGrid<GridLine>
         columns={journalGridColumns}
         rows={gridLines}
         getCell={gridGetCell}
@@ -981,23 +981,23 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       />
 
       {/* ── إجمالي/فرق row ── */}
-      <div className="aseel-total-row aseel-total-row--grand" style={{ marginTop: '6px', display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: '12px', padding: '8px 12px' }}>
-        <span style={{ fontSize: '12px', color: 'var(--aseel-ink-soft)' }}>
+      <div className="ktra-total-row ktra-total-row--grand" style={{ marginTop: '6px', display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: '12px', padding: '8px 12px' }}>
+        <span style={{ fontSize: '12px', color: 'var(--ktra-ink-soft)' }}>
           {lines.filter((l) => l.accountId && (parseFloat(l.debit) > 0 || parseFloat(l.credit) > 0)).length} سطر نشط
         </span>
         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <span style={{ fontSize: '10px', color: 'var(--aseel-ink-soft)' }}>مدين</span>
-          <span className="aseel-num" style={{ fontWeight: 700, color: 'var(--color-primary, #3b5bdb)' }}>{fmtAmount(totalDebit)}</span>
+          <span style={{ fontSize: '10px', color: 'var(--ktra-ink-soft)' }}>مدين</span>
+          <span className="ktra-num" style={{ fontWeight: 700, color: 'var(--color-primary, #3b5bdb)' }}>{fmtAmount(totalDebit)}</span>
         </span>
         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <span style={{ fontSize: '10px', color: 'var(--aseel-ink-soft)' }}>دائن</span>
-          <span className="aseel-num" style={{ fontWeight: 700, color: 'var(--color-danger, #e03131)' }}>{fmtAmount(totalCredit)}</span>
+          <span style={{ fontSize: '10px', color: 'var(--ktra-ink-soft)' }}>دائن</span>
+          <span className="ktra-num" style={{ fontWeight: 700, color: 'var(--color-danger, #e03131)' }}>{fmtAmount(totalCredit)}</span>
         </span>
         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <span style={{ fontSize: '10px', color: 'var(--aseel-ink-soft)' }}>{balanced ? 'متوازن' : 'فرق'}</span>
-          <span className="aseel-num" style={{
+          <span style={{ fontSize: '10px', color: 'var(--ktra-ink-soft)' }}>{balanced ? 'متوازن' : 'فرق'}</span>
+          <span className="ktra-num" style={{
             fontWeight: 700,
-            color: balanced && totalDebit > 0 ? 'var(--aseel-ok, #2d7d46)' : 'var(--aseel-err, #c0392b)',
+            color: balanced && totalDebit > 0 ? 'var(--ktra-ok, #2d7d46)' : 'var(--ktra-err, #c0392b)',
           }}>
             {balanced && totalDebit > 0 ? '✓' : fmtAmount(Math.abs(diff))}
           </span>
@@ -1009,14 +1009,14 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         <div style={{ display: 'flex', gap: '8px', marginTop: '10px', justifyContent: 'flex-end' }}>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             onClick={() => setLines((prev) => [...prev, emptyLine()])}
           >
             <Plus className="w-3 h-3" /> سطر جديد
           </button>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             disabled={saving}
             onClick={saveOnly}
           >
@@ -1029,12 +1029,12 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
           >
             <button
               type="button"
-              className="aseel-toolbtn"
+              className="ktra-toolbtn"
               disabled={saving || !balanced || totalDebit <= 0}
               onClick={saveAndPost}
               title={!balanced ? 'يجب توازن القيد أولاً (F12)' : 'F12 = حفظ وترحيل'}
               style={{
-                background: balanced && totalDebit > 0 ? 'var(--aseel-ok, #2d7d46)' : undefined,
+                background: balanced && totalDebit > 0 ? 'var(--ktra-ok, #2d7d46)' : undefined,
                 color: balanced && totalDebit > 0 ? '#fff' : undefined,
               }}
             >
@@ -1046,7 +1046,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       )}
 
       {posted && (
-        <div className="aseel-banner" style={{ marginTop: '10px', background: 'var(--aseel-ok-bg, #e3f6e9)', color: 'var(--aseel-ok, #2d7d46)' }}>
+        <div className="ktra-banner" style={{ marginTop: '10px', background: 'var(--ktra-ok-bg, #e3f6e9)', color: 'var(--ktra-ok, #2d7d46)' }}>
           <CheckCircle className="w-3 h-3" style={{ marginInlineEnd: '6px' }} />
           هذا القيد مرحَّل — لا يمكن تعديله.
         </div>
@@ -1073,7 +1073,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       }}
       onClose={() => { setShowAccountPicker(false); setPickerTargetLine(null); }}
     />
-    </AseelDocumentShell>
+    </KitDocumentShell>
     </div>
   );
 };

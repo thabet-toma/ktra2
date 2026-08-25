@@ -220,7 +220,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
     <div
       ref={panelRef}
       data-testid="document-payment-panel"
-      className="flex flex-col gap-2 border border-[var(--aseel-border)] bg-[var(--aseel-panel)] p-2"
+      className="flex flex-col gap-2 border border-[var(--ktra-border)] bg-[var(--ktra-panel)] p-2"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-bold text-[var(--color-text)]">
@@ -241,7 +241,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
               type="number"
               step="0.01"
               min="0"
-              className="aseel-input aseel-num"
+              className="ktra-input ktra-num"
               data-testid="payment-cash"
               disabled={busy}
               value={input.cash}
@@ -254,20 +254,20 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
         {/* شيكات */}
         <div className="flex flex-col gap-1">
           <span className="text-[11px] font-bold text-[var(--color-text)]">المدفوع شيكات</span>
-          <div className="aseel-input aseel-num flex items-center" data-testid="payment-cheques-total">
+          <div className="ktra-input ktra-num flex items-center" data-testid="payment-cheques-total">
             {fmt(derived.chequesTotal)}
           </div>
           <div className="flex items-center gap-1">
             <button
               type="button"
-              className="aseel-toolbtn text-[11px]"
+              className="ktra-toolbtn text-[11px]"
               disabled={busy}
               onClick={onAddCheque}
             >
               <Plus className="h-3 w-3" /> شيك
             </button>
             {input.cheques.length > 0 && (
-              <button type="button" className="aseel-toolbtn text-[11px]" onClick={onToggleCheques}>
+              <button type="button" className="ktra-toolbtn text-[11px]" onClick={onToggleCheques}>
                 {chequesOpen ? "إخفاء التفاصيل" : `تفاصيل الشيكات (${input.cheques.length})`}
               </button>
             )}
@@ -285,7 +285,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
                   step="0.01"
                   min="0"
                   max={derived.onAccountAvailable}
-                  className="aseel-input aseel-num"
+                  className="ktra-input ktra-num"
                   data-testid="payment-from-balance"
                   disabled={busy}
                   value={input.fromBalance}
@@ -308,7 +308,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
         <div className="flex flex-col gap-1">
           <span className="text-[11px] font-bold text-[var(--color-text)]">المتبقي</span>
           <div
-            className="aseel-input aseel-num flex items-center font-bold"
+            className="ktra-input ktra-num flex items-center font-bold"
             data-testid="payment-remaining"
           >
             {fmt(Math.max(derived.remainingAfter, 0))}
@@ -322,7 +322,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
       {chequesOpen && input.cheques.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[520px] text-[11px]">
-            <thead className="bg-[var(--aseel-surface-2)]">
+            <thead className="bg-[var(--ktra-surface-2)]">
               <tr>
                 <th className="p-1 text-right">رقم الشيك</th>
                 <th className="p-1 text-right">البنك</th>
@@ -333,10 +333,10 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
             </thead>
             <tbody>
               {input.cheques.map((row, i) => (
-                <tr key={row.key} className="border-t border-[var(--aseel-border)]">
+                <tr key={row.key} className="border-t border-[var(--ktra-border)]">
                   <td className="p-0.5">
                     <input
-                      className="aseel-input text-[11px]"
+                      className="ktra-input text-[11px]"
                       aria-label={`رقم الشيك ${i + 1}`}
                       disabled={busy}
                       value={row.cheque_number}
@@ -345,7 +345,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
                   </td>
                   <td className="p-0.5">
                     <input
-                      className="aseel-input text-[11px]"
+                      className="ktra-input text-[11px]"
                       aria-label={`بنك الشيك ${i + 1}`}
                       disabled={busy}
                       value={row.bank_name}
@@ -355,7 +355,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
                   <td className="p-0.5">
                     <input
                       type="date"
-                      className="aseel-input text-[11px]"
+                      className="ktra-input text-[11px]"
                       aria-label={`استحقاق الشيك ${i + 1}`}
                       disabled={busy}
                       value={row.due_date}
@@ -367,7 +367,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
                       type="number"
                       step="0.01"
                       min="0"
-                      className="aseel-input aseel-num text-[11px]"
+                      className="ktra-input ktra-num text-[11px]"
                       aria-label={`مبلغ الشيك ${i + 1}`}
                       disabled={busy}
                       value={row.amount}
@@ -377,7 +377,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
                   <td className="p-0.5 text-center">
                     <button
                       type="button"
-                      className="aseel-iconbtn aseel-iconbtn--danger"
+                      className="ktra-iconbtn ktra-iconbtn--danger"
                       aria-label={`حذف الشيك ${i + 1}`}
                       disabled={busy}
                       onClick={() => onRemoveCheque(row.key)}
@@ -393,29 +393,29 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
       )}
 
       {derived.chequeError && (
-        <div className="aseel-note aseel-note--warn text-[11px]">{derived.chequeError}</div>
+        <div className="ktra-note ktra-note--warn text-[11px]">{derived.chequeError}</div>
       )}
 
       {/* الفائض سياسةٌ قائمة في الخادم (دفعة على الحساب) — اللوحة تقولها فقط. */}
       {derived.overpay > 0.009 && (
-        <div className="aseel-note aseel-note--warn text-[11px]" data-testid="payment-overpay-note">
+        <div className="ktra-note ktra-note--warn text-[11px]" data-testid="payment-overpay-note">
           الفائض {fmt(derived.overpay)} يُسجَّل دفعة على الحساب.
         </div>
       )}
 
       {derived.cashShortfall > 0 && (
-        <div className="aseel-note aseel-note--err text-[11px]" data-testid="payment-cash-guard">
+        <div className="ktra-note ktra-note--err text-[11px]" data-testid="payment-cash-guard">
           الفاتورة نقدية — المسدَّد لا يغطي الإجمالي. أكمل {fmt(derived.cashShortfall)}
           {onMakeCredit ? " أو اجعلها آجلةً على ذمم الطرف." : "."}
           <button
             type="button"
-            className="aseel-toolbtn mr-2 text-[11px]"
+            className="ktra-toolbtn mr-2 text-[11px]"
             onClick={onFillCashShortfall}
           >
             أكمل المبلغ نقداً
           </button>
           {onMakeCredit && (
-            <button type="button" className="aseel-toolbtn mr-2 text-[11px]" onClick={onMakeCredit}>
+            <button type="button" className="ktra-toolbtn mr-2 text-[11px]" onClick={onMakeCredit}>
               اجعلها آجلة
             </button>
           )}
@@ -429,7 +429,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
         {!isPosted && onSaveIntent && (
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             data-testid="payment-save-intent"
             disabled={busy || !derived.canSubmit || derived.usesOnAccount}
             title={
@@ -445,7 +445,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
         )}
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           data-testid="payment-submit"
           disabled={busy || !derived.canSubmit}
           onClick={onSubmit}

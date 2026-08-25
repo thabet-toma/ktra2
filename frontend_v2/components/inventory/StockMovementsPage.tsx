@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { StockMovementDto, SqlProduct } from "../../types/inventory";
-import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { AseelDocumentShell, type AseelToolbarAction } from "../aseel/AseelDocumentShell";
+import { KitDenseTable, type DenseColumn } from "../kit/KitDenseTable";
+import { KitDocumentShell, type KitToolbarAction } from "../kit/KitDocumentShell";
 import { Plus, RefreshCw, X, Save, Loader2, Warehouse as WhIcon } from "lucide-react";
 import { invoicePathForReference, productProfilePath } from "../../utils/entityLinks";
 import { openInNewTab } from "@/utils/openInNewTab";
@@ -160,7 +160,7 @@ export const StockMovementsPage: React.FC = () => {
       render: (m) => {
         const label = m.movement_type_display || TYPES[m.movement_type] || m.movement_type;
         const isIn = m.movement_type.includes("IN") || m.movement_type === "IN";
-        return <span className={isIn ? "aseel-text-ok" : "aseel-text-danger"}>{label}</span>;
+        return <span className={isIn ? "ktra-text-ok" : "ktra-text-danger"}>{label}</span>;
       }
     },
     { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true,
@@ -199,8 +199,8 @@ export const StockMovementsPage: React.FC = () => {
   ];
 
   /* T-WIN M7: كانت الشاشة `div` بأنماط inline خارج الغلاف الموحّد. صارت
-     `AseelDocumentShell` كبقية الشاشات — النصوص كما هي، والإطار وحده تغيّر. */
-  const actions: AseelToolbarAction[] = [
+     `KitDocumentShell` كبقية الشاشات — النصوص كما هي، والإطار وحده تغيّر. */
+  const actions: KitToolbarAction[] = [
     {
       key: "apply",
       label: "تطبيق الفلاتر",
@@ -217,44 +217,44 @@ export const StockMovementsPage: React.FC = () => {
   ];
 
   return (
-    <AseelDocumentShell
+    <KitDocumentShell
       title="حركات المخازن"
       actions={actions}
       status={(
-        <span className="aseel-status-item">
+        <span className="ktra-status-item">
           المعروض: <b>{movements.length}</b> من <b>{totalCount}</b>
         </span>
       )}
       header={(
         <div className="flex flex-wrap items-center gap-1.5">
-          <select className="aseel-input w-[170px]"
+          <select className="ktra-input w-[170px]"
             value={filterProduct} onChange={(e) => setFilterProduct(e.target.value)}>
             <option value="">كل الأصناف</option>
             {products.map((p) => (
               <option key={p.id} value={p.id}>{p.sku} — {p.name_ar || p.name_en || "—"}</option>
             ))}
           </select>
-          <select className="aseel-input w-[130px]"
+          <select className="ktra-input w-[130px]"
             value={filterType} onChange={(e) => setFilterType(e.target.value)}>
             <option value="">كل الأنواع</option>
             {Object.entries(TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
           </select>
-          <select className="aseel-input w-[120px]"
+          <select className="ktra-input w-[120px]"
             value={filterOrigin} onChange={(e) => setFilterOrigin(e.target.value)} title="مصدر البضاعة">
             <option value="">كل المصادر</option>
             <option value="local">محلي (شراء)</option>
             <option value="international">دولي (استيراد)</option>
           </select>
-          <input className="aseel-input w-[120px]" type="date"
+          <input className="ktra-input w-[120px]" type="date"
             value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} title="من تاريخ" />
-          <input className="aseel-input w-[120px]" type="date"
+          <input className="ktra-input w-[120px]" type="date"
             value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} title="إلى تاريخ" />
         </div>
       )}
     >
-      {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
+      {err && <div className="ktra-banner ktra-banner--err">{err}</div>}
 
-      <AseelDenseTable<StockMovementDto>
+      <KitDenseTable<StockMovementDto>
         columns={columns}
         rows={movements}
         getRowKey={(m) => m.id}
@@ -266,7 +266,7 @@ export const StockMovementsPage: React.FC = () => {
         <div className="flex justify-center p-2">
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             disabled={loadingMore}
             onClick={() => void loadMore()}
           >
@@ -279,17 +279,17 @@ export const StockMovementsPage: React.FC = () => {
 
       {/* نموذج إضافة حركة يدوية */}
       {showForm && (
-        <div className="aseel-picker-mask" data-aseel-modal="1">
-          <div className="aseel-picker w-[min(520px,96vw)]" role="dialog" aria-modal="true" aria-label="إضافة حركة مخزن"
+        <div className="ktra-picker-mask" data-ktra-modal="1">
+          <div className="ktra-picker w-[min(520px,96vw)]" role="dialog" aria-modal="true" aria-label="إضافة حركة مخزن"
             >
-            <div className="aseel-picker-head">
+            <div className="ktra-picker-head">
               <span>إضافة حركة مخزن يدوية</span>
-              <button type="button" className="aseel-toolbtn" onClick={() => setShowForm(false)}><X /></button>
+              <button type="button" className="ktra-toolbtn" onClick={() => setShowForm(false)}><X /></button>
             </div>
-            <div className="aseel-picker-body grid grid-cols-2 gap-2 p-2.5">
-              <label className="aseel-field col-span-2">
-                <span className="aseel-field-label">الصنف</span>
-                <select className="aseel-input" value={form.product}
+            <div className="ktra-picker-body grid grid-cols-2 gap-2 p-2.5">
+              <label className="ktra-field col-span-2">
+                <span className="ktra-field-label">الصنف</span>
+                <select className="ktra-input" value={form.product}
                   onChange={(e) => setForm((f) => ({ ...f, product: e.target.value }))}>
                   <option value="">— اختر صنفاً —</option>
                   {products.map((p) => (
@@ -297,45 +297,45 @@ export const StockMovementsPage: React.FC = () => {
                   ))}
                 </select>
               </label>
-              <label className="aseel-field">
-                <span className="aseel-field-label">نوع الحركة</span>
-                <select className="aseel-input" value={form.movement_type}
+              <label className="ktra-field">
+                <span className="ktra-field-label">نوع الحركة</span>
+                <select className="ktra-input" value={form.movement_type}
                   onChange={(e) => setForm((f) => ({ ...f, movement_type: e.target.value }))}>
                   {Object.entries(TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </label>
-              <label className="aseel-field">
-                <span className="aseel-field-label">التاريخ</span>
-                <input className="aseel-input" type="date" value={form.movement_date}
+              <label className="ktra-field">
+                <span className="ktra-field-label">التاريخ</span>
+                <input className="ktra-input" type="date" value={form.movement_date}
                   onChange={(e) => setForm((f) => ({ ...f, movement_date: e.target.value }))} />
               </label>
-              <label className="aseel-field">
-                <span className="aseel-field-label">الكمية</span>
-                <input className="aseel-input" type="number" min="0" step="0.001"
+              <label className="ktra-field">
+                <span className="ktra-field-label">الكمية</span>
+                <input className="ktra-input" type="number" min="0" step="0.001"
                   value={form.quantity}
                   onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))} />
               </label>
-              <label className="aseel-field">
-                <span className="aseel-field-label">سعر الوحدة</span>
-                <input className="aseel-input" type="number" min="0" step="0.01"
+              <label className="ktra-field">
+                <span className="ktra-field-label">سعر الوحدة</span>
+                <input className="ktra-input" type="number" min="0" step="0.01"
                   value={form.unit_cost}
                   onChange={(e) => setForm((f) => ({ ...f, unit_cost: e.target.value }))} />
               </label>
-              <label className="aseel-field col-span-2">
-                <span className="aseel-field-label">ملاحظات</span>
-                <input className="aseel-input" value={form.notes}
+              <label className="ktra-field col-span-2">
+                <span className="ktra-field-label">ملاحظات</span>
+                <input className="ktra-input" value={form.notes}
                   onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
               </label>
             </div>
-            <div className="aseel-picker-foot gap-2">
-              <button type="button" className="aseel-toolbtn" onClick={() => setShowForm(false)}><X /> إلغاء</button>
-              <button type="button" className="aseel-toolbtn" disabled={busy} onClick={handleCreate}>
+            <div className="ktra-picker-foot gap-2">
+              <button type="button" className="ktra-toolbtn" onClick={() => setShowForm(false)}><X /> إلغاء</button>
+              <button type="button" className="ktra-toolbtn" disabled={busy} onClick={handleCreate}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save />} حفظ
               </button>
             </div>
           </div>
         </div>
       )}
-    </AseelDocumentShell>
+    </KitDocumentShell>
   );
 };

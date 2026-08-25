@@ -19,9 +19,13 @@ import { PriceVisibilityProvider } from './contexts/PriceVisibilityContext';
 import { PermissionsProvider } from './contexts/PermissionsContext';
 import { applySkinOnBoot } from './styles/skin';
 import { captureTabHandoffOnBoot } from './utils/tabLink';
+import { migrateLegacyStorageKeys } from './utils/legacyStorageKeys';
 
 import './styles/index.css';
 
+// M7-T4: مفاتيح `aseel_*` القديمة تُنقل إلى `ktra_*` **قبل** أن يقرأ أي جدول
+// عرضَ أعمدته — وإلا بدا للمستخدم أن ضبطه اختفى.
+migrateLegacyStorageKeys(window.localStorage);
 applySkinOnBoot();
 applyThemeOnBoot();
 // وعي التبويبات: يلتقط رمز المناولة من الرابط وينظّفه **قبل** إقلاع الموجّه،

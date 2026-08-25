@@ -69,7 +69,7 @@ const asManager = async (page: import('@playwright/test').Page) => {
 
 /** الشريط الجانبي لسطح المكتب — الجوّال يُصيَّر أيضاً في نفس الصفحة. */
 const desktopSidebar = (page: import('@playwright/test').Page) =>
-  page.locator('aside.aseel-sidebar.hidden');
+  page.locator('aside.ktra-sidebar.hidden');
 
 /** ترتيب مجموعات التنقّل كما تظهر فعلاً في الشريط. */
 const groupOrder = async (page: import('@playwright/test').Page) =>

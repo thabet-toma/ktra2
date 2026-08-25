@@ -88,36 +88,36 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
     const colCount = 4 + (showLanded ? 2 : 0) + (showAllocColumns ? 2 : 0);
 
     return (
-        <div className="overflow-hidden rounded-2xl border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel shadow-sm">
+        <div className="overflow-hidden rounded-2xl border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel shadow-sm">
             <div className="overflow-x-auto">
                 <table
                     className="w-full text-right border-collapse"
                     style={{ minWidth: Math.max(640, colCount * 100) }}
                 >
                     <thead>
-                        <tr className="aseel-bg-panel/50 dark:aseel-bg-panel/20 border-b aseel-border-soft dark:aseel-border-soft/50">
-                            <th className="px-3 py-2 text-xs font-bold aseel-text-ink dark:aseel-text-soft">
+                        <tr className="ktra-bg-panel/50 dark:ktra-bg-panel/20 border-b ktra-border-soft dark:ktra-border-soft/50">
+                            <th className="px-3 py-2 text-xs font-bold ktra-text-ink dark:ktra-text-soft">
                                 المنتج
                             </th>
-                            <th className="px-2 py-2 text-xs font-bold aseel-text-ink dark:aseel-text-soft text-center">
+                            <th className="px-2 py-2 text-xs font-bold ktra-text-ink dark:ktra-text-soft text-center">
                                 كمية
                             </th>
-                            <th className="px-2 py-2 text-xs font-bold aseel-text-ink dark:aseel-text-soft">
+                            <th className="px-2 py-2 text-xs font-bold ktra-text-ink dark:ktra-text-soft">
                                 {isShipmentLinkedImport ? "تكلفة الاستيراد/وحدة ₪" : "وحدة أساس ₪"}
                             </th>
                             {showLanded && (
-                                <th className="px-2 py-2 text-xs font-bold aseel-text-ink dark:aseel-text-soft aseel-bg-panel/80 dark:aseel-bg-panel/20">
+                                <th className="px-2 py-2 text-xs font-bold ktra-text-ink dark:ktra-text-soft ktra-bg-panel/80 dark:ktra-bg-panel/20">
                                     <span className="inline-flex items-center gap-1">
                                         <Anchor className="w-3.5 h-3.5" />
                                         {isShipmentLinkedImport ? "قبل ض.ق.م/وحدة ₪" : "وحدة نهائية ₪"}
                                     </span>
                                 </th>
                             )}
-                            <th className="px-2 py-2 text-xs font-bold aseel-text-ink dark:aseel-text-soft">
+                            <th className="px-2 py-2 text-xs font-bold ktra-text-ink dark:ktra-text-soft">
                                 {isShipmentLinkedImport ? "إجمالي تكلفة الاستيراد ₪" : "إجمالي أساس ₪"}
                             </th>
                             {showLanded && (
-                                <th className="px-2 py-2 text-xs font-bold aseel-text-ink dark:aseel-text-soft aseel-bg-panel/80 dark:aseel-bg-panel/20">
+                                <th className="px-2 py-2 text-xs font-bold ktra-text-ink dark:ktra-text-soft ktra-bg-panel/80 dark:ktra-bg-panel/20">
                                     {isShipmentLinkedImport ? "الإجمالي قبل ض.ق.م ₪" : "إجمالي نهائي ₪"}
                                 </th>
                             )}
@@ -147,11 +147,11 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                             return (
                                 <tr
                                     key={item.id || idx}
-                                    className="hover:aseel-bg-panel dark:hover:aseel-bg-panel/50 transition-colors group"
+                                    className="hover:ktra-bg-panel dark:hover:ktra-bg-panel/50 transition-colors group"
                                 >
                                     <td className="px-3 py-2">
                                         <div className="flex items-start gap-2">
-                                            <div className="w-10 h-10 rounded-md aseel-bg-panel dark:aseel-bg-panel flex-shrink-0 overflow-hidden border aseel-border-soft dark:aseel-border-soft">
+                                            <div className="w-10 h-10 rounded-md ktra-bg-panel dark:ktra-bg-panel flex-shrink-0 overflow-hidden border ktra-border-soft dark:ktra-border-soft">
                                                 {item.imageUrls?.[0] ? (
                                                     <img
                                                         src={item.imageUrls[0]}
@@ -159,16 +159,16 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                                         className="w-full h-full object-cover"
                                                     />
                                                 ) : (
-                                                    <div className="w-full h-full flex items-center justify-center aseel-text-soft">
+                                                    <div className="w-full h-full flex items-center justify-center ktra-text-soft">
                                                         <Package className="w-4 h-4" />
                                                     </div>
                                                 )}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="text-xs font-bold aseel-text-ink dark:text-white truncate">
+                                                <div className="text-xs font-bold ktra-text-ink dark:text-white truncate">
                                                     {item.name}
                                                 </div>
-                                                <div className="text-[10px] aseel-text-soft flex items-center gap-0.5 mt-0.5">
+                                                <div className="text-[10px] ktra-text-soft flex items-center gap-0.5 mt-0.5">
                                                     <Tag className="w-2.5 h-2.5" />
                                                     {item.categoryName}
                                                     {item.modelNumber && ` · ${item.modelNumber}`}
@@ -177,26 +177,26 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                         </div>
                                     </td>
                                     <td className="px-2 py-2 text-center">
-                                        <span className="text-xs font-bold aseel-text-ink dark:aseel-text-soft">
+                                        <span className="text-xs font-bold ktra-text-ink dark:ktra-text-soft">
                                             {item.quantity}
                                         </span>
                                     </td>
                                     <td className="px-2 py-2">
-                                        <div className="text-xs font-bold aseel-text-ink dark:text-white tabular-nums">
+                                        <div className="text-xs font-bold ktra-text-ink dark:text-white tabular-nums">
                                             ₪
                                             {formatMoney(item.unitPrice)}
                                         </div>
-                                        <div className="text-[9px] aseel-text-soft tabular-nums">
+                                        <div className="text-[9px] ktra-text-soft tabular-nums">
                                             ${formatMoney(usdUnitPrice)}
                                         </div>
                                     </td>
                                     {showLanded && (
-                                        <td className="px-2 py-2 aseel-bg-panel/40 dark:aseel-bg-panel/10">
+                                        <td className="px-2 py-2 ktra-bg-panel/40 dark:ktra-bg-panel/10">
                                             {alloc &&
                                             (item.landedLineTotalIls != null ||
                                                 item.landedUnitPriceIls != null ||
                                                 (Number(item.totalPrice) || 0) > 0) ? (
-                                                <span className="text-xs font-bold aseel-text-ink dark:aseel-text-soft tabular-nums">
+                                                <span className="text-xs font-bold ktra-text-ink dark:ktra-text-soft tabular-nums">
                                                     ₪
                                                     {formatMoney(
                                                         alloc.preTaxWithTransfer /
@@ -204,31 +204,31 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                                     )}
                                                 </span>
                                             ) : (
-                                                <span className="aseel-text-soft text-xs">—</span>
+                                                <span className="ktra-text-soft text-xs">—</span>
                                             )}
                                         </td>
                                     )}
                                     <td className="px-2 py-2">
-                                        <div className="text-xs font-bold aseel-text-ink dark:aseel-text-soft tabular-nums">
+                                        <div className="text-xs font-bold ktra-text-ink dark:ktra-text-soft tabular-nums">
                                             ₪
                                             {formatMoney(item.totalPrice)}
                                         </div>
-                                        <div className="text-[9px] aseel-text-soft tabular-nums">
+                                        <div className="text-[9px] ktra-text-soft tabular-nums">
                                             ${formatMoney(usdTotalPrice)}
                                         </div>
                                     </td>
                                     {showLanded && (
-                                        <td className="px-2 py-2 aseel-bg-panel/40 dark:aseel-bg-panel/10">
+                                        <td className="px-2 py-2 ktra-bg-panel/40 dark:ktra-bg-panel/10">
                                             {alloc && (item.landedLineTotalIls != null || (Number(item.totalPrice) || 0) > 0) ? (
                                                 <div className="space-y-0.5">
-                                                    <span className="text-xs font-bold aseel-text-ink dark:aseel-text-soft tabular-nums">
+                                                    <span className="text-xs font-bold ktra-text-ink dark:ktra-text-soft tabular-nums">
                                                         ₪
                                                         {alloc.preTaxWithTransfer.toLocaleString(undefined, {
                                                             minimumFractionDigits: 2,
                                                         })}
                                                     </span>
                                                     {alloc.transferAlloc > 0.005 ? (
-                                                        <span className="block text-[9px] aseel-text-ink/90 dark:aseel-text-soft/80 tabular-nums">
+                                                        <span className="block text-[9px] ktra-text-ink/90 dark:ktra-text-soft/80 tabular-nums">
                                                             منها عمولات تحويل ₪
                                                             {alloc.transferAlloc.toLocaleString(undefined, {
                                                                 minimumFractionDigits: 2,
@@ -237,7 +237,7 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                                     ) : null}
                                                 </div>
                                             ) : (
-                                                <span className="aseel-text-soft text-xs">—</span>
+                                                <span className="ktra-text-soft text-xs">—</span>
                                             )}
                                         </td>
                                     )}
@@ -262,19 +262,19 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                     </tbody>
                     {items.length > 0 ? (
                         <tfoot>
-                            <tr className="aseel-bg-panel/40 dark:aseel-bg-panel/40 border-t aseel-border-soft dark:aseel-border-soft">
+                            <tr className="ktra-bg-panel/40 dark:ktra-bg-panel/40 border-t ktra-border-soft dark:ktra-border-soft">
                                 <td
                                     colSpan={3}
-                                    className="px-3 py-2 text-[10px] font-bold aseel-text-ink dark:aseel-text-soft"
+                                    className="px-3 py-2 text-[10px] font-bold ktra-text-ink dark:ktra-text-soft"
                                 >
                                     المجاميع
                                 </td>
                                 {showLanded ? <td className="px-2 py-2" /> : null}
-                                <td className="px-2 py-2 text-xs font-black aseel-text-ink dark:aseel-text-soft tabular-nums">
+                                <td className="px-2 py-2 text-xs font-black ktra-text-ink dark:ktra-text-soft tabular-nums">
                                     {fmtIls(sumMerchIls)}
                                 </td>
                                 {showLanded ? (
-                                    <td className="px-2 py-2 text-xs font-black aseel-text-ink dark:aseel-text-soft aseel-bg-panel/60 dark:aseel-bg-panel/50 tabular-nums">
+                                    <td className="px-2 py-2 text-xs font-black ktra-text-ink dark:ktra-text-soft ktra-bg-panel/60 dark:ktra-bg-panel/50 tabular-nums">
                                         {fmtIls(sumLandedWithTransferIls)}
                                     </td>
                                 ) : null}
@@ -300,8 +300,8 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
 
             {items.length === 0 && (
                 <div className="p-8 text-center">
-                    <Layers className="w-10 h-10 aseel-text-soft dark:aseel-text-ink mx-auto mb-2" />
-                    <p className="aseel-text-soft text-xs">لا توجد بنود</p>
+                    <Layers className="w-10 h-10 ktra-text-soft dark:ktra-text-ink mx-auto mb-2" />
+                    <p className="ktra-text-soft text-xs">لا توجد بنود</p>
                 </div>
             )}
         </div>

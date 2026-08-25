@@ -1,5 +1,5 @@
 /**
- * N6-T3 — LocalShippingPage (L10) — AseelDenseTable للشحن المحلي
+ * N6-T3 — LocalShippingPage (L10) — KitDenseTable للشحن المحلي
  * المرجع: task5.md:797 + الإرساليات.txt:91-109
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,8 +22,8 @@ import {
   type LocalShipmentRow,
   type LocalShipmentStatus,
 } from "@/services/localShippingApi";
-import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { useAseelIndexKeymap } from "../aseel/useAseelIndexKeymap";
+import { KitDenseTable, type DenseColumn } from "../kit/KitDenseTable";
+import { useKitIndexKeymap } from "../kit/useKitIndexKeymap";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { apiGetList } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
@@ -37,10 +37,10 @@ const STATUS_LABEL: Record<LocalShipmentStatus, string> = {
 };
 
 const STATUS_COLORS: Record<LocalShipmentStatus, string> = {
-  pending:    "var(--aseel-warn, #b8800a)",
-  in_transit: "var(--aseel-accent, #1857a4)",
-  delivered:  "var(--aseel-ok, #267346)",
-  cancelled:  "var(--aseel-danger, #c00)",
+  pending:    "var(--ktra-warn, #b8800a)",
+  in_transit: "var(--ktra-accent, #1857a4)",
+  delivered:  "var(--ktra-ok, #267346)",
+  cancelled:  "var(--ktra-danger, #c00)",
 };
 
 import { formatMoney } from "../../utils/formatNumber";
@@ -181,7 +181,7 @@ export const LocalShippingPage: React.FC = () => {
         <div>
           <div>{r.carrier_name || `#${r.carrier}`}</div>
           {r.driver_name && (
-            <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>
+            <div style={{ fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-ink-soft)" }}>
               {r.driver_name}{r.vehicle_number ? ` • ${r.vehicle_number}` : ""}
             </div>
           )}
@@ -193,7 +193,7 @@ export const LocalShippingPage: React.FC = () => {
       header: "التخليص",
       width: "120px",
       render: (r) => (
-        <span style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>
+        <span style={{ fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-ink-soft)" }}>
           {r.clearance_number ? `بيان ${r.clearance_number}` : r.shipment_number_source || "—"}
         </span>
       ),
@@ -202,7 +202,7 @@ export const LocalShippingPage: React.FC = () => {
       key: "route",
       header: "من ← إلى",
       render: (r) => (
-        <span style={{ fontSize: "var(--aseel-fs-sm)" }}>
+        <span style={{ fontSize: "var(--ktra-fs-sm)" }}>
           {r.origin || "—"} ← {r.destination || "—"}
         </span>
       ),
@@ -237,11 +237,11 @@ export const LocalShippingPage: React.FC = () => {
       render: (r) => (
         <div>
           {r.is_posted
-            ? <span style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ok, #267346)" }}>مرحّلة #{r.journal}</span>
-            : <span style={{ color: "var(--aseel-ink-soft)" }}>—</span>
+            ? <span style={{ fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-ok, #267346)" }}>مرحّلة #{r.journal}</span>
+            : <span style={{ color: "var(--ktra-ink-soft)" }}>—</span>
           }
           {r.purchase_invoice && (
-            <div style={{ fontSize: "10px", color: "var(--aseel-accent, #1857a4)", marginTop: 2 }}>
+            <div style={{ fontSize: "10px", color: "var(--ktra-accent, #1857a4)", marginTop: 2 }}>
               فاتورة {r.purchase_invoice_number || `#${r.purchase_invoice}`}
             </div>
           )}
@@ -258,7 +258,7 @@ export const LocalShippingPage: React.FC = () => {
           {!r.is_posted && !r.purchase_invoice && r.shipment != null && (
             <>
               <button
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 style={{ padding: "2px 4px" }}
                 onClick={() => openInNewTab(`/import-flow/${r.shipment}?tab=local`)}
                 title="التعديل — يفتح رحلة الاستيراد (تبويب النقل المحلي)"
@@ -266,8 +266,8 @@ export const LocalShippingPage: React.FC = () => {
                 <Pencil style={{ width: 13, height: 13 }} />
               </button>
               <button
-                className="aseel-toolbtn"
-                style={{ padding: "2px 4px", color: "var(--aseel-ok, #267346)" }}
+                className="ktra-toolbtn"
+                style={{ padding: "2px 4px", color: "var(--ktra-ok, #267346)" }}
                 onClick={() => void handlePost(r.id)}
                 title="ترحيل"
               >
@@ -277,8 +277,8 @@ export const LocalShippingPage: React.FC = () => {
           )}
           {r.is_posted && (
             <button
-              className="aseel-toolbtn"
-              style={{ padding: "2px 4px", color: "var(--aseel-warn, #b8800a)" }}
+              className="ktra-toolbtn"
+              style={{ padding: "2px 4px", color: "var(--ktra-warn, #b8800a)" }}
               onClick={() => void handleUnpost(r.id)}
               title="إلغاء الترحيل"
             >
@@ -287,7 +287,7 @@ export const LocalShippingPage: React.FC = () => {
           )}
           {!r.is_posted && !r.purchase_invoice && r.shipment != null && (
             <button
-              className="aseel-toolbtn"
+              className="ktra-toolbtn"
               style={{ padding: "2px 4px" }}
               onClick={() => openInNewTab(`/import-flow/${r.shipment}?tab=local`)}
               title="نقل التكلفة إلى فاتورة المشتريات — من رحلة الاستيراد"
@@ -297,8 +297,8 @@ export const LocalShippingPage: React.FC = () => {
           )}
           {!r.is_posted && (
             <button
-              className="aseel-toolbtn"
-              style={{ padding: "2px 4px", color: "var(--aseel-danger, #c00)" }}
+              className="ktra-toolbtn"
+              style={{ padding: "2px 4px", color: "var(--ktra-danger, #c00)" }}
               onClick={() => void handleDelete(r)}
               title="حذف"
             >
@@ -310,7 +310,7 @@ export const LocalShippingPage: React.FC = () => {
     },
   ];
 
-  useAseelIndexKeymap(
+  useKitIndexKeymap(
     {
       CtrlIns: () => void openShipmentPicker(),
       F6: () => searchInputRef.current?.focus(),
@@ -322,26 +322,26 @@ export const LocalShippingPage: React.FC = () => {
   return (
     <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 6, padding: "8px 12px" }}>
       {/* شريط العنوان */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingBottom: 4, borderBottom: "1px solid var(--aseel-border)" }}>
-        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingBottom: 4, borderBottom: "1px solid var(--ktra-border)" }}>
+        <strong style={{ fontSize: "var(--ktra-fs-title, 14px)", color: "var(--ktra-ink)" }}>
           الشحن المحلي
         </strong>
         {(Object.keys(STATUS_LABEL) as LocalShipmentStatus[]).map((s) => (
-          <span key={s} className="aseel-status-item">
+          <span key={s} className="ktra-status-item">
             {STATUS_LABEL[s]}: <b>{totalsByStatus[s].count}</b>
           </span>
         ))}
         <div style={{ flex: 1 }} />
         <input
           ref={searchInputRef}
-          className="aseel-input"
+          className="ktra-input"
           style={{ width: 190 }}
           placeholder="بحث في الشحنات… (F6)"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <select
-          className="aseel-input"
+          className="ktra-input"
           style={{ width: 140 }}
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as LocalShipmentStatus | "all")}
@@ -352,14 +352,14 @@ export const LocalShippingPage: React.FC = () => {
           ))}
         </select>
         <button
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           onClick={() => void load()}
           title="تحديث"
         >
           <RefreshCw style={{ width: 14, height: 14 }} className={loading ? "animate-spin" : ""} />
         </button>
         <button
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           onClick={() => void openShipmentPicker()}
           title="اختر شحنة الاستيراد ثم يُفتح تبويب «النقل المحلي» في رحلتها (Ctrl+Ins)"
         >
@@ -368,25 +368,25 @@ export const LocalShippingPage: React.FC = () => {
       </div>
 
       {/* موضع التسجيل الموحّد: رحلة الاستيراد — هذه القائمة للمتابعة والترحيل */}
-      <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", margin: 0 }}>
+      <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm, 12px)", margin: 0 }}>
         النقل المحلي يُسجَّل ويُعدَّل داخل «رحلة الاستيراد» لشحنته (تبويب النقل المحلي) —
         نقرة مزدوجة على أي سجل تفتحها. هذه القائمة للمتابعة والترحيل والحذف.
       </p>
 
       {/* رسائل النجاح/الخطأ */}
       {err && (
-        <div style={{ padding: "6px 10px", background: "var(--aseel-danger-bg, #fef2f2)", color: "var(--aseel-danger, #c00)", borderRadius: 4, fontSize: "var(--aseel-fs-sm)" }}>
+        <div style={{ padding: "6px 10px", background: "var(--ktra-danger-bg, #fef2f2)", color: "var(--ktra-danger, #c00)", borderRadius: 4, fontSize: "var(--ktra-fs-sm)" }}>
           {err}
         </div>
       )}
       {msg && (
-        <div style={{ padding: "6px 10px", background: "var(--aseel-ok-bg, #f0fdf4)", color: "var(--aseel-ok, #267346)", borderRadius: 4, fontSize: "var(--aseel-fs-sm)" }}>
+        <div style={{ padding: "6px 10px", background: "var(--ktra-ok-bg, #f0fdf4)", color: "var(--ktra-ok, #267346)", borderRadius: 4, fontSize: "var(--ktra-fs-sm)" }}>
           {msg}
         </div>
       )}
 
       {/* جدول الشحنات المحلية */}
-      <AseelDenseTable<LocalShipmentRow>
+      <KitDenseTable<LocalShipmentRow>
         columns={columns}
         rows={filteredRows}
         getRowKey={(r) => r.id}
@@ -398,7 +398,7 @@ export const LocalShippingPage: React.FC = () => {
         }}
         footer={
           filteredRows.length > 0 ? (
-            <span style={{ fontFamily: "monospace", fontSize: "var(--aseel-fs-sm)" }}>
+            <span style={{ fontFamily: "monospace", fontSize: "var(--ktra-fs-sm)" }}>
               الإجمالي: <b>{fmt(filteredRows.reduce((s, r) => s + Number(r.amount || 0), 0))}</b>
             </span>
           ) : undefined
@@ -407,23 +407,23 @@ export const LocalShippingPage: React.FC = () => {
 
       {shipmentPickerOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)" }} onClick={() => setShipmentPickerOpen(false)}>
-          <div style={{ background: "var(--aseel-bg, #fff)", borderRadius: 8, padding: 16, maxWidth: 520, width: "90%", maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: "var(--ktra-bg, #fff)", borderRadius: 8, padding: 16, maxWidth: 520, width: "90%", maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
             <h4 style={{ fontWeight: 600, marginBottom: 4 }}>اختر شحنة الاستيراد</h4>
-            <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm)", marginBottom: 8 }}>
+            <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm)", marginBottom: 8 }}>
               يُفتح تبويب «النقل المحلي» في رحلة استيراد الشحنة المختارة لإضافة السجل هناك.
             </p>
             {shipmentOptions.length === 0 && (
-              <p className="aseel-text-soft" style={{ padding: 8 }}>جاري تحميل الشحنات…</p>
+              <p className="ktra-text-soft" style={{ padding: 8 }}>جاري تحميل الشحنات…</p>
             )}
             {shipmentOptions.map((s) => (
-              <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--aseel-border, #eee)", cursor: "pointer" }}
+              <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--ktra-border, #eee)", cursor: "pointer" }}
                 onClick={() => { setShipmentPickerOpen(false); openInNewTab(`/import-flow/${s.id}?tab=local`); }}>
                 <span>{buildShipmentOptionLabel(s)}</span>
-                <span className="aseel-toolbtn">فتح الرحلة</span>
+                <span className="ktra-toolbtn">فتح الرحلة</span>
               </div>
             ))}
             <div style={{ marginTop: 8, textAlign: "center" }}>
-              <button type="button" className="aseel-toolbtn" onClick={() => setShipmentPickerOpen(false)}>إلغاء</button>
+              <button type="button" className="ktra-toolbtn" onClick={() => setShipmentPickerOpen(false)}>إلغاء</button>
             </div>
           </div>
         </div>

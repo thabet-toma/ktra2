@@ -445,23 +445,23 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
     return (
         <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
             <div
-                className="aseel-bg-field dark:aseel-bg-panel sm:rounded-3xl w-full max-w-5xl min-h-0 flex flex-col shadow-2xl overflow-hidden border-0 sm:border aseel-border-soft dark:aseel-border-soft my-0 sm:my-auto
+                className="ktra-bg-field dark:ktra-bg-panel sm:rounded-3xl w-full max-w-5xl min-h-0 flex flex-col shadow-2xl overflow-hidden border-0 sm:border ktra-border-soft dark:ktra-border-soft my-0 sm:my-auto
                 h-[100dvh] max-h-[100dvh] sm:h-[min(92vh,900px)] sm:max-h-[min(92vh,900px)]"
             >
-                <div className="px-4 sm:px-8 py-4 sm:py-5 bg-gradient-to-r from-[var(--color-primary)] aseel-bg-panel text-white flex justify-between items-start gap-3 shrink-0">
+                <div className="px-4 sm:px-8 py-4 sm:py-5 bg-gradient-to-r from-[var(--color-primary)] ktra-bg-panel text-white flex justify-between items-start gap-3 shrink-0">
                     <div className="min-w-0">
                         <h2 className="text-lg sm:text-2xl font-bold flex items-center gap-2 sm:gap-3">
                             <ScrollText className="w-6 h-6 sm:w-7 sm:h-7 shrink-0" />
                             <span className="leading-tight">استيراد فواتير من تخليص جمركي</span>
                         </h2>
-                        <p className="aseel-text-soft text-xs sm:text-sm mt-1 leading-snug max-w-[52ch]">
+                        <p className="ktra-text-soft text-xs sm:text-sm mt-1 leading-snug max-w-[52ch]">
                             التخليص مرتبط بشحنة واحدة؛ اختر الصفقات داخل تلك الشحنة لإنشاء فاتورة لكل صفقة
                             (شحنة ← عدة صفقات)
                         </p>
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 hover:aseel-bg-field/20 rounded-xl transition-colors"
+                        className="p-2 hover:ktra-bg-field/20 rounded-xl transition-colors"
                         type="button"
                     >
                         <X className="w-6 h-6" />
@@ -469,26 +469,26 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                 </div>
 
                 <div className="flex flex-1 min-h-0 overflow-hidden">
-                    <div className="w-[min(100%,320px)] sm:w-[34%] max-w-sm shrink-0 border-s aseel-border-soft dark:aseel-border-soft flex flex-col aseel-bg-panel/50 dark:aseel-bg-panel/50 min-h-0">
+                    <div className="w-[min(100%,320px)] sm:w-[34%] max-w-sm shrink-0 border-s ktra-border-soft dark:ktra-border-soft flex flex-col ktra-bg-panel/50 dark:ktra-bg-panel/50 min-h-0">
                         <div className="p-4 space-y-3 shrink-0">
                             <div className="relative">
-                                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 aseel-text-soft" />
+                                <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 ktra-text-soft" />
                                 <input
                                     type="text"
                                     placeholder="بحث: اسم الشحنة، رقم الشحنة، بيان، صفقات..."
-                                    className="w-full pr-10 pl-4 py-2.5 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl text-sm focus:ring-2 focus:ring-[var(--color-primary)] transition-all outline-none"
+                                    className="w-full pr-10 pl-4 py-2.5 ktra-bg-field dark:ktra-bg-panel border ktra-border-soft dark:ktra-border-soft rounded-xl text-sm focus:ring-2 focus:ring-[var(--color-primary)] transition-all outline-none"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                 />
                             </div>
                             {listError && (
-                                <p className="text-xs aseel-text-state dark:aseel-text-soft">{listError}</p>
+                                <p className="text-xs ktra-text-state dark:ktra-text-soft">{listError}</p>
                             )}
                         </div>
 
                         <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
                             {listLoading ? (
-                                <div className="flex justify-center py-12 aseel-text-soft">
+                                <div className="flex justify-center py-12 ktra-text-soft">
                                     <Loader2 className="w-8 h-8 animate-spin" />
                                 </div>
                             ) : (
@@ -500,7 +500,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                         className={`w-full text-right p-4 rounded-2xl border transition-all duration-200 group ${
                                             selectedClearance?.id === c.id
                                                 ? "bg-[var(--color-primary)] border-[var(--color-border)] text-white shadow-lg shadow-indigo-200 dark:shadow-none"
-                                                : "aseel-bg-field dark:aseel-bg-panel aseel-border-soft dark:aseel-border-soft hover:border-[var(--color-border)] dark:hover:border-[var(--color-border)] hover:shadow-md"
+                                                : "ktra-bg-field dark:ktra-bg-panel ktra-border-soft dark:ktra-border-soft hover:border-[var(--color-border)] dark:hover:border-[var(--color-border)] hover:shadow-md"
                                         }`}
                                     >
                                         <div className="flex justify-between items-start mb-2">
@@ -511,8 +511,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                             <span
                                                 className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold ${
                                                     selectedClearance?.id === c.id
-                                                        ? "aseel-bg-field/20 text-white"
-                                                        : "aseel-bg-panel dark:aseel-bg-panel aseel-text-soft dark:aseel-text-soft"
+                                                        ? "ktra-bg-field/20 text-white"
+                                                        : "ktra-bg-panel dark:ktra-bg-panel ktra-text-soft dark:ktra-text-soft"
                                                 }`}
                                             >
                                                 {c.status}
@@ -522,7 +522,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                             className={`mt-1 flex items-start gap-2 text-sm font-bold leading-snug ${
                                                 selectedClearance?.id === c.id
                                                     ? "text-white"
-                                                    : "aseel-text-ink dark:text-white"
+                                                    : "ktra-text-ink dark:text-white"
                                             }`}
                                         >
                                             <Truck className="w-4 h-4 shrink-0 mt-0.5 opacity-80" />
@@ -535,7 +535,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                 className={`mt-2 text-xs leading-relaxed line-clamp-3 text-right ${
                                                     selectedClearance?.id === c.id
                                                         ? "text-[var(--color-primary)]"
-                                                        : "aseel-text-soft dark:aseel-text-soft"
+                                                        : "ktra-text-soft dark:ktra-text-soft"
                                                 }`}
                                                 title={c.deals_preview || undefined}
                                             >
@@ -552,7 +552,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                             className={`mt-2 text-xs ${
                                                 selectedClearance?.id === c.id
                                                     ? "text-[var(--color-primary)]"
-                                                    : "aseel-text-soft dark:aseel-text-soft"
+                                                    : "ktra-text-soft dark:ktra-text-soft"
                                             }`}
                                         >
                                             المخلص: {c.broker_name || "—"}
@@ -563,19 +563,19 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                         </div>
                     </div>
 
-                    <div className="flex-1 flex flex-col min-h-0 min-w-0 aseel-bg-field dark:aseel-bg-panel">
+                    <div className="flex-1 flex flex-col min-h-0 min-w-0 ktra-bg-field dark:ktra-bg-panel">
                         {selectedClearance ? (
                             shipmentLoading ? (
                                 <div className="flex-1 flex flex-col items-center justify-center p-20 gap-4">
                                     <Loader2 className="w-10 h-10 text-[var(--color-primary)] animate-spin" />
-                                    <p className="aseel-text-soft">جاري تحميل بيانات الشحنة...</p>
-                                    <p className="text-sm font-semibold aseel-text-ink dark:aseel-text-soft text-center max-w-md">
+                                    <p className="ktra-text-soft">جاري تحميل بيانات الشحنة...</p>
+                                    <p className="text-sm font-semibold ktra-text-ink dark:ktra-text-soft text-center max-w-md">
                                         {formatClearanceShipmentLine(selectedClearance)}
                                     </p>
                                 </div>
                             ) : shipmentError || !resolvedShipment ? (
                                 <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
-                                    <p className="aseel-text-state dark:aseel-text-soft">
+                                    <p className="ktra-text-state dark:ktra-text-soft">
                                         {shipmentError || "لا توجد بيانات شحنة"}
                                     </p>
                                 </div>
@@ -583,29 +583,29 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                 <div className="flex flex-col flex-1 min-h-0 min-w-0">
                                     {/* منطقة تمرير واحدة: تفاصيل الشحنة + المعاينة + الصفقات — حتى لا تُضغط قائمة الصفقات */}
                                     <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-                                    <div className="p-4 sm:p-8 border-b aseel-border-soft dark:aseel-border-soft bg-[var(--color-surface-2)]/30 dark:bg-[var(--color-surface-2)]/10">
-                                        <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-2 text-xs aseel-text-ink dark:aseel-text-soft">
-                                            <span className="inline-flex items-center gap-1 rounded-full aseel-bg-field/90 dark:aseel-bg-panel/90 px-3 py-1 font-bold border border-[var(--color-border)] dark:border-[var(--color-border)]">
+                                    <div className="p-4 sm:p-8 border-b ktra-border-soft dark:ktra-border-soft bg-[var(--color-surface-2)]/30 dark:bg-[var(--color-surface-2)]/10">
+                                        <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-2 text-xs ktra-text-ink dark:ktra-text-soft">
+                                            <span className="inline-flex items-center gap-1 rounded-full ktra-bg-field/90 dark:ktra-bg-panel/90 px-3 py-1 font-bold border border-[var(--color-border)] dark:border-[var(--color-border)]">
                                                 <span className="text-[var(--color-primary)] dark:text-[var(--color-primary)]">١</span>
                                                 التخليص
                                             </span>
-                                            <span className="aseel-text-soft px-0.5" aria-hidden>
+                                            <span className="ktra-text-soft px-0.5" aria-hidden>
                                                 ·
                                             </span>
                                             <span
                                                 className={`inline-flex items-center gap-1 rounded-full px-3 py-1 font-bold border ${
                                                     selectedDeals.length > 0
-                                                        ? "aseel-bg-field/90 dark:aseel-bg-panel/90 border-[var(--color-border)] dark:border-[var(--color-border)]"
-                                                        : "aseel-bg-panel dark:aseel-bg-panel/90 aseel-border-soft dark:aseel-border-soft aseel-text-ink dark:aseel-text-soft"
+                                                        ? "ktra-bg-field/90 dark:ktra-bg-panel/90 border-[var(--color-border)] dark:border-[var(--color-border)]"
+                                                        : "ktra-bg-panel dark:ktra-bg-panel/90 ktra-border-soft dark:ktra-border-soft ktra-text-ink dark:ktra-text-soft"
                                                 }`}
                                             >
                                                 <span className="text-[var(--color-primary)] dark:text-[var(--color-primary)]">٢</span>
                                                 اختر صفقة أو أكثر
                                             </span>
-                                            <span className="aseel-text-soft px-0.5" aria-hidden>
+                                            <span className="ktra-text-soft px-0.5" aria-hidden>
                                                 ·
                                             </span>
-                                            <span className="inline-flex items-center gap-1 rounded-full aseel-bg-field/90 dark:aseel-bg-panel/90 px-3 py-1 font-bold border aseel-border-soft dark:aseel-border-soft">
+                                            <span className="inline-flex items-center gap-1 rounded-full ktra-bg-field/90 dark:ktra-bg-panel/90 px-3 py-1 font-bold border ktra-border-soft dark:ktra-border-soft">
                                                 <span className="text-[var(--color-primary)] dark:text-[var(--color-primary)]">٣</span>
                                                 «استيراد الفواتير» في الأسفل
                                             </span>
@@ -615,10 +615,10 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                 <p className="text-[10px] font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] uppercase tracking-wider">
                                                     اسم الشحنة (عربي / تعريفي)
                                                 </p>
-                                                <h3 className="text-xl font-bold aseel-text-ink dark:text-white truncate">
+                                                <h3 className="text-xl font-bold ktra-text-ink dark:text-white truncate">
                                                     {shipmentTitleAndNumber(resolvedShipment).title}
                                                 </h3>
-                                                <p className="aseel-text-soft dark:aseel-text-soft text-sm">
+                                                <p className="ktra-text-soft dark:ktra-text-soft text-sm">
                                                     {shipmentTitleAndNumber(resolvedShipment).numberLine}
                                                     {resolvedShipment.shippingAgentName ? (
                                                         <>
@@ -627,8 +627,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                         </>
                                                     ) : null}
                                                 </p>
-                                                <p className="aseel-text-soft text-sm mt-2">
-                                                    <span className="font-semibold aseel-text-ink dark:aseel-text-soft">
+                                                <p className="ktra-text-soft text-sm mt-2">
+                                                    <span className="font-semibold ktra-text-ink dark:ktra-text-soft">
                                                         التخليص الجمركي:
                                                     </span>{" "}
                                                     {selectedClearance.declaration_number?.trim() ||
@@ -643,26 +643,26 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                         </div>
                                     </div>
 
-                                    <div className="px-4 sm:px-8 py-4 border-b aseel-border-soft dark:aseel-border-soft aseel-bg-panel/80 dark:aseel-bg-panel/30 space-y-3">
-                                        <label className="flex items-center gap-2 text-sm font-semibold aseel-text-ink dark:aseel-text-soft cursor-pointer">
+                                    <div className="px-4 sm:px-8 py-4 border-b ktra-border-soft dark:ktra-border-soft ktra-bg-panel/80 dark:ktra-bg-panel/30 space-y-3">
+                                        <label className="flex items-center gap-2 text-sm font-semibold ktra-text-ink dark:ktra-text-soft cursor-pointer">
                                             <input
                                                 type="checkbox"
-                                                className="rounded aseel-border-soft text-[var(--color-primary)] focus:ring-[var(--color-primary)]"
+                                                className="rounded ktra-border-soft text-[var(--color-primary)] focus:ring-[var(--color-primary)]"
                                                 checked={useCostLines}
                                                 onChange={(e) => setUseCostLines(e.target.checked)}
                                             />
                                             استخدام بنود التخليص (تقدير) بدل مجموع الدفعات الفعلية
                                         </label>
                                         {previewLoading ? (
-                                            <p className="text-xs aseel-text-soft flex items-center gap-2">
+                                            <p className="text-xs ktra-text-soft flex items-center gap-2">
                                                 <Loader2 className="w-4 h-4 animate-spin" />
                                                 جاري حساب المعاينة…
                                             </p>
                                         ) : preview ? (
                                             <div className="space-y-3 text-sm">
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 aseel-text-ink dark:aseel-text-soft">
-                                                    <div className="rounded-xl border aseel-border-soft dark:aseel-border-soft aseel-bg-field/80 dark:aseel-bg-panel/60 px-3 py-2.5">
-                                                        <div className="text-[11px] font-bold aseel-text-soft dark:aseel-text-soft mb-1">
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 ktra-text-ink dark:ktra-text-soft">
+                                                    <div className="rounded-xl border ktra-border-soft dark:ktra-border-soft ktra-bg-field/80 dark:ktra-bg-panel/60 px-3 py-2.5">
+                                                        <div className="text-[11px] font-bold ktra-text-soft dark:ktra-text-soft mb-1">
                                                             إجمالي بنود التخليص
                                                         </div>
                                                         <div className="font-mono font-bold text-base tabular-nums">
@@ -670,8 +670,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                             ₪
                                                         </div>
                                                     </div>
-                                                    <div className="rounded-xl border aseel-border-soft dark:aseel-border-soft aseel-bg-field/80 dark:aseel-bg-panel/60 px-3 py-2.5">
-                                                        <div className="text-[11px] font-bold aseel-text-soft dark:aseel-text-soft mb-1">
+                                                    <div className="rounded-xl border ktra-border-soft dark:ktra-border-soft ktra-bg-field/80 dark:ktra-bg-panel/60 px-3 py-2.5">
+                                                        <div className="text-[11px] font-bold ktra-text-soft dark:ktra-text-soft mb-1">
                                                             مجموع دفعات التخليص
                                                         </div>
                                                         <div className="font-mono font-bold text-base tabular-nums">
@@ -681,8 +681,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                             ₪
                                                         </div>
                                                     </div>
-                                                    <div className="rounded-xl border aseel-border-soft dark:aseel-border-soft aseel-bg-field/80 dark:aseel-bg-panel/60 px-3 py-2.5">
-                                                        <div className="text-[11px] font-bold aseel-text-soft dark:aseel-text-soft mb-1">
+                                                    <div className="rounded-xl border ktra-border-soft dark:ktra-border-soft ktra-bg-field/80 dark:ktra-bg-panel/60 px-3 py-2.5">
+                                                        <div className="text-[11px] font-bold ktra-text-soft dark:ktra-text-soft mb-1">
                                                             تكلفة شحن الشحنة
                                                         </div>
                                                         <div className="font-mono font-bold text-base tabular-nums">
@@ -705,13 +705,13 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                     </div>
                                                 </div>
                                                 {preview.cost_lines_vs_payments_mismatch ? (
-                                                    <div className="aseel-text-ink dark:aseel-text-soft text-xs aseel-bg-panel dark:aseel-bg-panel/40 rounded-lg px-3 py-2 border aseel-border-soft dark:aseel-border-soft">
+                                                    <div className="ktra-text-ink dark:ktra-text-soft text-xs ktra-bg-panel dark:ktra-bg-panel/40 rounded-lg px-3 py-2 border ktra-border-soft dark:ktra-border-soft">
                                                         مجموع بنود التخليص لا يطابق مجموع الدفعات — راجع الأرقام أو مصدر التكلفة.
                                                     </div>
                                                 ) : null}
                                                 {hasUsdFreightPreview ? (
-                                                    <div className="rounded-xl border aseel-border-soft dark:aseel-border-soft aseel-bg-field/80 dark:aseel-bg-panel/60 px-3 py-2.5 text-xs aseel-text-ink dark:aseel-text-soft space-y-1">
-                                                        <div className="font-bold aseel-text-soft dark:aseel-text-soft">
+                                                    <div className="rounded-xl border ktra-border-soft dark:ktra-border-soft ktra-bg-field/80 dark:ktra-bg-panel/60 px-3 py-2.5 text-xs ktra-text-ink dark:ktra-text-soft space-y-1">
+                                                        <div className="font-bold ktra-text-soft dark:ktra-text-soft">
                                                             شحن الشحنة (مرجع الدولار من إجمالي تكلفة الشحن)
                                                         </div>
                                                         <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono tabular-nums">
@@ -743,7 +743,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                                 })}
                                                             </span>
                                                         </div>
-                                                        <p className="text-[11px] leading-relaxed aseel-text-soft dark:aseel-text-soft pt-1 border-t aseel-border-soft dark:aseel-border-soft">
+                                                        <p className="text-[11px] leading-relaxed ktra-text-soft dark:ktra-text-soft pt-1 border-t ktra-border-soft dark:ktra-border-soft">
                                                             تكلفة الشحن بالشيكل في المعاينة = (ما دُفع فعلياً ومُؤكَّد
                                                             بالشيكل) + (غير المدفوع بالدولار × سعر «صرف المتبقي
                                                             (الشحن)»). الاستيراد يتطلّب إكمال دفع الشحن بالدولار حتى
@@ -752,7 +752,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                     </div>
                                                 ) : null}
                                                 {freightImportBlocked ? (
-                                                    <div className="aseel-text-state dark:aseel-text-soft text-xs aseel-bg-panel dark:aseel-bg-panel/40 rounded-lg px-3 py-2.5 border aseel-border-soft dark:aseel-border-soft">
+                                                    <div className="ktra-text-state dark:ktra-text-soft text-xs ktra-bg-panel dark:ktra-bg-panel/40 rounded-lg px-3 py-2.5 border ktra-border-soft dark:ktra-border-soft">
                                                         <strong>لا يمكن استيراد الفواتير:</strong> ما زال هناك{" "}
                                                         <span className="font-mono font-bold">
                                                             $
@@ -781,9 +781,9 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                     </div>
                                                 ) : null}
                                                 {Array.isArray(preview.deals) && preview.deals.length > 0 ? (
-                                                    <div className="overflow-x-auto rounded-lg border aseel-border-soft dark:aseel-border-soft">
+                                                    <div className="overflow-x-auto rounded-lg border ktra-border-soft dark:ktra-border-soft">
                                                         <table className="min-w-full text-xs text-right">
-                                                            <thead className="aseel-bg-panel dark:aseel-bg-panel">
+                                                            <thead className="ktra-bg-panel dark:ktra-bg-panel">
                                                                 <tr>
                                                                     <th className="px-3 py-2">صفقة</th>
                                                                     <th className="px-3 py-2">حصة قيمة</th>
@@ -797,7 +797,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                                     (row) => (
                                                                         <tr
                                                                             key={String(row.deal_id)}
-                                                                            className="border-t aseel-border-soft dark:aseel-border-soft"
+                                                                            className="border-t ktra-border-soft dark:ktra-border-soft"
                                                                         >
                                                                             <td className="px-3 py-2 font-mono">
                                                                                 {String(row.ref_number ?? row.deal_id)}
@@ -834,25 +834,25 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                 ) : null}
                                             </div>
                                         ) : selectedDeals.length > 0 ? (
-                                            <p className="text-xs aseel-text-soft">تعذّر تحميل المعاينة</p>
+                                            <p className="text-xs ktra-text-soft">تعذّر تحميل المعاينة</p>
                                         ) : null}
                                     </div>
 
                                     <div className="p-4 sm:p-8 space-y-4 pb-8">
-                                        <h4 className="text-sm font-bold aseel-text-soft uppercase tracking-widest flex items-center gap-2">
+                                        <h4 className="text-sm font-bold ktra-text-soft uppercase tracking-widest flex items-center gap-2">
                                             <Package className="w-4 h-4" />
                                             الصفقات على شحنة «{shipmentTitleAndNumber(resolvedShipment).title}»
                                         </h4>
-                                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border aseel-border-soft px-3 py-2">
-                                            <span className="text-xs aseel-text-soft">
-                                                المتبقية للتحويل: <b className="aseel-text-ink">{remainingDealIds.length}</b>
-                                                {" · "}المحوّلة: <b className="aseel-text-ink">{visibleDeals.length - remainingDealIds.length}</b>
+                                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border ktra-border-soft px-3 py-2">
+                                            <span className="text-xs ktra-text-soft">
+                                                المتبقية للتحويل: <b className="ktra-text-ink">{remainingDealIds.length}</b>
+                                                {" · "}المحوّلة: <b className="ktra-text-ink">{visibleDeals.length - remainingDealIds.length}</b>
                                             </span>
                                             {remainingDealIds.length > 0 ? (
                                                 <button
                                                     type="button"
                                                     onClick={() => setSelectedDeals([...remainingDealIds])}
-                                                    className="rounded-lg border aseel-border-soft px-3 py-1.5 text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]"
+                                                    className="rounded-lg border ktra-border-soft px-3 py-1.5 text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]"
                                                 >
                                                     اختيار كل المتبقي
                                                 </button>
@@ -868,7 +868,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                 تم تحويل جميع صفقات هذه الشحنة. يمكنك فتح كل فاتورة من بطاقتها أدناه.
                                             </p>
                                         ) : selectedDeals.length === 0 ? (
-                                            <p className="text-sm aseel-text-soft dark:aseel-text-soft">
+                                            <p className="text-sm ktra-text-soft dark:ktra-text-soft">
                                                 اختر صفقة من القائمة أدناه، ثم «استيراد الفواتير».
                                             </p>
                                         ) : null}
@@ -922,11 +922,11 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                             handleToggleDeal(sd.dealId);
                                                     }}
                                                     className={`p-4 sm:p-5 rounded-2xl border-2 transition-all duration-300 flex justify-between items-start gap-3 sm:gap-4 group ${
-                                                        isConverted ? "cursor-default opacity-75 aseel-border-soft bg-[var(--color-surface-2)]" : "cursor-pointer"
+                                                        isConverted ? "cursor-default opacity-75 ktra-border-soft bg-[var(--color-surface-2)]" : "cursor-pointer"
                                                     } ${
                                                         isSelected
                                                             ? "border-[var(--color-border)] bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/20 shadow-lg shadow-indigo-100/50 dark:shadow-none"
-                                                            : "aseel-border-soft dark:aseel-border-soft hover:aseel-border-soft dark:hover:aseel-border-soft"
+                                                            : "ktra-border-soft dark:ktra-border-soft hover:ktra-border-soft dark:hover:ktra-border-soft"
                                                     }`}
                                                 >
                                                     <input
@@ -936,7 +936,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                             /* selection toggled by clicking the card */
                                                         }}
                                                         tabIndex={-1}
-                                                        className="mt-1.5 h-5 w-5 shrink-0 rounded aseel-border-soft text-[var(--color-primary)] focus:ring-[var(--color-primary)] pointer-events-none"
+                                                        className="mt-1.5 h-5 w-5 shrink-0 rounded ktra-border-soft text-[var(--color-primary)] focus:ring-[var(--color-primary)] pointer-events-none"
                                                         aria-hidden
                                                         disabled={isConverted}
                                                     />
@@ -945,7 +945,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                             className={`w-12 h-12 shrink-0 rounded-xl flex items-center justify-center transition-colors ${
                                                                 isSelected
                                                                     ? "bg-[var(--color-primary)] text-white shadow-md"
-                                                                    : "aseel-bg-panel dark:aseel-bg-panel aseel-text-soft group-hover:aseel-bg-grid-head"
+                                                                    : "ktra-bg-panel dark:ktra-bg-panel ktra-text-soft group-hover:ktra-bg-grid-head"
                                                             }`}
                                                         >
                                                             {isSelected ? (
@@ -956,36 +956,36 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                         </div>
                                                         <div className="min-w-0 space-y-1.5">
                                                             <div>
-                                                                <span className="text-[10px] font-bold aseel-text-soft uppercase tracking-wide block mb-0.5">
+                                                                <span className="text-[10px] font-bold ktra-text-soft uppercase tracking-wide block mb-0.5">
                                                                     عنوان الصفقة (من بيانات الشحنة + الصفقة)
                                                                 </span>
                                                                 <div
-                                                                    className="font-bold text-base sm:text-lg aseel-text-ink dark:text-white leading-snug break-words"
+                                                                    className="font-bold text-base sm:text-lg ktra-text-ink dark:text-white leading-snug break-words"
                                                                     title={displayTitle}
                                                                 >
                                                                     {displayTitle}
                                                                 </div>
                                                                 {!hasSqlDescription &&
                                                                 displayTitle === sd.dealNumber ? (
-                                                                    <div className="text-[11px] aseel-text-soft dark:aseel-text-soft mt-1">
+                                                                    <div className="text-[11px] ktra-text-soft dark:ktra-text-soft mt-1">
                                                                         لم يُعثر على وصف عربي في بيانات الصفقة.
                                                                     </div>
                                                                 ) : !hasSqlDescription &&
                                                                   displayTitle !== sd.dealNumber ? (
-                                                                    <div className="text-[10px] aseel-text-soft mt-1">
+                                                                    <div className="text-[10px] ktra-text-soft mt-1">
                                                                         العنوان مُستخرج من أول سطر عربي في الملاحظات
                                                                     </div>
                                                                 ) : null}
-                                                                <div className="text-xs aseel-text-soft mt-1 font-mono">
+                                                                <div className="text-xs ktra-text-soft mt-1 font-mono">
                                                                     رقم الصفقة: {sd.dealNumber}
                                                                 </div>
                                                                 {showTermsBlock ? (
-                                                                    <div className="mt-2 pt-2 border-t aseel-border-soft dark:aseel-border-soft">
-                                                                        <span className="text-[10px] font-bold aseel-text-soft uppercase tracking-wide block mb-0.5">
+                                                                    <div className="mt-2 pt-2 border-t ktra-border-soft dark:ktra-border-soft">
+                                                                        <span className="text-[10px] font-bold ktra-text-soft uppercase tracking-wide block mb-0.5">
                                                                             شروط وملاحظات (نص طويل)
                                                                         </span>
                                                                         <p
-                                                                            className="text-xs aseel-text-soft dark:aseel-text-soft leading-relaxed line-clamp-4 break-words"
+                                                                            className="text-xs ktra-text-soft dark:ktra-text-soft leading-relaxed line-clamp-4 break-words"
                                                                             title={notesLong}
                                                                         >
                                                                             {termsPreview}
@@ -994,14 +994,14 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                                 ) : null}
                                                             </div>
                                                             <div>
-                                                                <span className="text-[10px] font-bold aseel-text-soft uppercase tracking-wide block mb-0.5">
+                                                                <span className="text-[10px] font-bold ktra-text-soft uppercase tracking-wide block mb-0.5">
                                                                     المورد — الاسم المستعار / المحلي
                                                                 </span>
                                                                 <div className="text-sm font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)] break-words">
                                                                     {localSupplier}
                                                                 </div>
                                                                 {formalSupplier ? (
-                                                                    <div className="text-xs aseel-text-soft mt-0.5 break-words">
+                                                                    <div className="text-xs ktra-text-soft mt-0.5 break-words">
                                                                         الاسم الإنجليزي / المصنع: {formalSupplier}
                                                                     </div>
                                                                 ) : null}
@@ -1015,7 +1015,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                                 event.stopPropagation();
                                                                 if (importState?.invoiceId) openInNewTab(`/purchase-invoices/${importState.invoiceId}`);
                                                             }}
-                                                            className="inline-flex shrink-0 items-center gap-1 rounded-lg border aseel-border-soft px-2.5 py-1.5 text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]"
+                                                            className="inline-flex shrink-0 items-center gap-1 rounded-lg border ktra-border-soft px-2.5 py-1.5 text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]"
                                                         >
                                                             <ExternalLink className="h-3.5 w-3.5" />
                                                             محوّلة — {importState?.invoiceNumber || `فاتورة #${importState?.invoiceId}`}
@@ -1023,10 +1023,10 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                     ) : null}
                                                     <div className="text-left flex items-center gap-10">
                                                         <div className="text-right">
-                                                            <div className="text-[10px] aseel-text-soft uppercase font-bold tracking-wider mb-1">
+                                                            <div className="text-[10px] ktra-text-soft uppercase font-bold tracking-wider mb-1">
                                                                 المبلغ الإجمالي
                                                             </div>
-                                                            <div className="font-mono text-lg font-bold aseel-text-ink dark:aseel-text-soft">
+                                                            <div className="font-mono text-lg font-bold ktra-text-ink dark:ktra-text-soft">
                                                                 ${sd.totalAmount?.toLocaleString()}
                                                             </div>
                                                         </div>
@@ -1034,7 +1034,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                             className={`p-2 rounded-lg transition-colors ${
                                                                 isSelected
                                                                     ? "bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/40 text-[var(--color-primary)]"
-                                                                    : "aseel-text-soft"
+                                                                    : "ktra-text-soft"
                                                             }`}
                                                         >
                                                             <ChevronRight
@@ -1050,22 +1050,22 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                     </div>
                                     </div>
 
-                                    <div className="z-20 p-4 sm:p-6 border-t aseel-border-soft dark:aseel-border-soft flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 shrink-0 aseel-bg-field dark:aseel-bg-panel shadow-[0_-6px_24px_-6px_rgba(0,0,0,0.1)] dark:shadow-[0_-6px_24px_-6px_rgba(0,0,0,0.45)]">
-                                        <div className="flex flex-wrap items-center gap-4 text-sm aseel-text-soft dark:aseel-text-soft">
+                                    <div className="z-20 p-4 sm:p-6 border-t ktra-border-soft dark:ktra-border-soft flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 shrink-0 ktra-bg-field dark:ktra-bg-panel shadow-[0_-6px_24px_-6px_rgba(0,0,0,0.1)] dark:shadow-[0_-6px_24px_-6px_rgba(0,0,0,0.45)]">
+                                        <div className="flex flex-wrap items-center gap-4 text-sm ktra-text-soft dark:ktra-text-soft">
                                             <div className="flex flex-col">
-                                                <span className="text-[10px] aseel-text-soft uppercase font-bold tracking-widest">
+                                                <span className="text-[10px] ktra-text-soft uppercase font-bold tracking-widest">
                                                     صفقات مختارة
                                                 </span>
-                                                <span className="text-2xl font-black aseel-text-ink dark:text-white tabular-nums">
+                                                <span className="text-2xl font-black ktra-text-ink dark:text-white tabular-nums">
                                                     {selectedDeals.length}
                                                 </span>
                                             </div>
                                             {selectedDeals.length === 0 ? (
-                                                <span className="max-w-md aseel-text-soft dark:aseel-text-soft text-xs sm:text-sm">
+                                                <span className="max-w-md ktra-text-soft dark:ktra-text-soft text-xs sm:text-sm">
                                                     اختر صفقة واحدة على الأقل.
                                                 </span>
                                             ) : (
-                                                <span className="text-xs sm:text-sm aseel-text-soft dark:aseel-text-soft">
+                                                <span className="text-xs sm:text-sm ktra-text-soft dark:ktra-text-soft">
                                                     سيتم إنشاء فاتورة شراء (شيكل) لكل صفقة مختارة.
                                                 </span>
                                             )}
@@ -1075,8 +1075,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                 <p
                                                     className={`text-xs text-right leading-snug max-w-[min(100%,28rem)] ${
                                                         importFooterHint.tone === "danger"
-                                                            ? "aseel-text-state dark:aseel-text-soft font-semibold"
-                                                            : "aseel-text-soft dark:aseel-text-soft"
+                                                            ? "ktra-text-state dark:ktra-text-soft font-semibold"
+                                                            : "ktra-text-soft dark:ktra-text-soft"
                                                     }`}
                                                 >
                                                     {importFooterHint.text}
@@ -1086,7 +1086,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                             type="button"
                                             onClick={() => void handleImportClick()}
                                                 disabled={importButtonDisabled}
-                                                className="w-full sm:w-auto min-h-[52px] px-8 sm:px-10 py-3.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] disabled:aseel-bg-grid-head disabled:aseel-text-soft dark:disabled:aseel-bg-panel dark:disabled:aseel-text-soft text-white rounded-2xl font-bold shadow-lg shadow-indigo-200/80 dark:shadow-none transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
+                                                className="w-full sm:w-auto min-h-[52px] px-8 sm:px-10 py-3.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] disabled:ktra-bg-grid-head disabled:ktra-text-soft dark:disabled:ktra-bg-panel dark:disabled:ktra-text-soft text-white rounded-2xl font-bold shadow-lg shadow-indigo-200/80 dark:shadow-none transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
                                         >
                                             {importBusy ? (
                                                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -1105,10 +1105,10 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                     <ScrollText className="w-10 h-10 text-[var(--color-primary)]" />
                                 </div>
                                 <div>
-                                    <h3 className="text-xl font-bold aseel-text-ink dark:text-white">
+                                    <h3 className="text-xl font-bold ktra-text-ink dark:text-white">
                                         لم يتم اختيار تخليص جمركي
                                     </h3>
-                                    <p className="aseel-text-soft max-w-xs mx-auto mt-2">
+                                    <p className="ktra-text-soft max-w-xs mx-auto mt-2">
                                         اختر تخليصاً من القائمة لعرض صفقات الشحنة المرتبطة وإنشاء فواتير
                                         متعددة
                                     </p>

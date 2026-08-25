@@ -2,6 +2,15 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+/* الحكم (نقصان/زيادة) حسابٌ صرف ⇒ يسكن في utils ويُختبر في أجزاء الثانية
+   (`utils/parityCensus.test.ts`)، ويبقى هنا الجمعُ الذي يلزمه متصفّح وحده. */
+import {
+  compareBaselines,
+  sortedBaseline,
+  toCategory,
+  type ParityBaseline,
+  type ViewCensus,
+} from "../utils/parityCensus";
 
 test.use({
   serviceWorkers: "block",
@@ -65,8 +74,8 @@ type AppView =
   | "stocktake"
   | "product-cost"
   | "property-rental"
-  | "aseel-kit"
-  | "aseel-sales"
+  | "ui-kit"
+  | "sales-classic"
   | "sales-quotations"
   | "credit-debit-notes"
   | "sql-clearances"
@@ -158,8 +167,8 @@ const VIEW_TARGETS: readonly ViewTarget[] = [
   { view: "stocktake", path: "/stocktake" },
   { view: "product-cost", path: "/product-cost" },
   { view: "property-rental", path: "/property-rental" },
-  { view: "aseel-kit", path: "/aseel-kit" },
-  { view: "aseel-sales", path: "/aseel-sales" },
+  { view: "ui-kit", path: "/ui-kit" },
+  { view: "sales-classic", path: "/sales-classic" },
   { view: "sales-quotations", path: "/sales/quotations" },
   { view: "credit-debit-notes", path: "/sales/credit-debit-notes" },
   {
@@ -188,35 +197,11 @@ const VIEW_TARGETS: readonly ViewTarget[] = [
   { view: "contact", path: "/contact" },
 ] as const;
 
-type CensusCategory = {
-  count: number;
-  values: string[];
-};
-
-type ViewCensus = {
-  path: string;
-  buttons: CensusCategory;
-  fields: CensusCategory;
-  tabs: CensusCategory;
-  tableHeaders: CensusCategory;
-  toolbarItems: CensusCategory;
-};
-
-type ParityBaseline = {
-  schemaVersion: 1;
-  viewport: { width: 1440; height: 900 };
-  views: Record<string, ViewCensus>;
-  skipped: Record<string, string>;
-};
-
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const BASELINE_PATH = join(E2E_DIR, "parity-baseline.json");
 const SHOTS_DIR = join(E2E_DIR, "parity-shots", "baseline");
 const COMPARE_MODE = process.env.PARITY_MODE === "compare";
 const CAPTURE_SHOTS = process.env.PARITY_SHOTS === "1";
-
-const normalise = (value: string | null | undefined): string =>
-  (value ?? "").replace(/\s+/g, " ").trim();
 
 async function installAuthenticatedApiMocks(page: Page) {
   await page.addInitScript(() => {
@@ -310,7 +295,7 @@ async function waitForStableView(page: Page, target: ViewTarget) {
   // بالصدفة لأن <html> كان يحمل data-skin="aseel" (الجلد الافتراضي القديم)؛
   // بعد أن صار الافتراضي modern توقّف عن المطابقة فانتهى الانتظار بمهلة
   // وسقطت الشاشتان في skipped. الاستثناء الصريح أدق ولا يعتمد على الجلد.
-  const RENDERS_OUTSIDE_LAYOUT = new Set(["store", "aseel-kit", "aseel-sales"]);
+  const RENDERS_OUTSIDE_LAYOUT = new Set(["store", "ui-kit", "sales-classic"]);
   if (!RENDERS_OUTSIDE_LAYOUT.has(target.view)) {
     await page
       .locator("main.app-content")
@@ -320,7 +305,7 @@ async function waitForStableView(page: Page, target: ViewTarget) {
     // هذه الشاشات بلا `main.app-content` فلم يكن لها شرطُ جهوزية إطلاقاً:
     // حزمتها الكسولة تُترجم باردةً فتُلتقط الصفحةُ فارغةً، و«فارغ» حالةٌ
     // مستقرّة تجتازها حلقةُ الاستقرار — فيُبلَّغ عن سقوط الشاشة كلها زوراً.
-    // انتظار أول زرّ يُنهي هذا التذبذب (وقع فعلاً على `aseel-sales`).
+    // انتظار أول زرّ يُنهي هذا التذبذب (وقع فعلاً على `sales-classic`).
     await page
       .locator("#root button")
       .first()
@@ -342,7 +327,7 @@ async function waitForStableView(page: Page, target: ViewTarget) {
 
   // App.tsx uses this exact wrapper while a lazy page chunk is loading. Do not
   // use networkidle here: several real screens intentionally poll in the background.
-  if (target.view !== "store" && target.view !== "aseel-kit" && target.view !== "aseel-sales") {
+  if (target.view !== "store" && target.view !== "ui-kit" && target.view !== "sales-classic") {
     await page
       .locator("main.app-content .flex.justify-center.py-16 .animate-spin")
       .waitFor({ state: "hidden", timeout: 10_000 })
@@ -355,8 +340,8 @@ async function waitForStableView(page: Page, target: ViewTarget) {
         "button",
         "input, select, textarea",
         '[role="tab"]',
-        'th, .aseel-dense-table [role="columnheader"]',
-        ".aseel-toolbtn",
+        'th, .ktra-dense-table [role="columnheader"]',
+        ".ktra-toolbtn",
       ];
       return JSON.stringify(
         selectors.map((selector) =>
@@ -388,8 +373,14 @@ async function waitForStableView(page: Page, target: ViewTarget) {
 
 async function collectCensus(page: Page, path: string): Promise<ViewCensus> {
   const raw = await page.evaluate(() => {
-    const text = (element: Element) =>
-      (element.textContent ?? "").replace(/\s+/g, " ").trim();
+    /* الزخرفة خارج النصّ: مثلّث الفرز داخل `<th>` كان يدخل في عنوان العمود،
+       فيتغيّر العنوان بتغيّر عمود الفرز ويُبلَّغ عن «عمود مفقود» وهو حاضر —
+       وقع فعلاً على شاشة الشيكات. المصدر يعلّم زخرفته بـ`aria-hidden`. */
+    const text = (element: Element) => {
+      const clone = element.cloneNode(true) as Element;
+      clone.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
+      return (clone.textContent ?? "").replace(/\s+/g, " ").trim();
+    };
     const values = (selector: string, map: (element: Element) => string) =>
       Array.from(document.querySelectorAll(selector)).map(map);
 
@@ -404,81 +395,18 @@ async function collectCensus(page: Page, path: string): Promise<ViewCensus> {
         ].join("|");
       }),
       tabs: values('[role="tab"]', text),
-      tableHeaders: values('th, .aseel-dense-table [role="columnheader"]', text),
-      toolbarItems: values(".aseel-toolbtn", text),
+      tableHeaders: values('th, .ktra-dense-table [role="columnheader"]', text),
+      toolbarItems: values(".ktra-toolbtn", text),
     };
   });
 
-  const category = (values: string[]): CensusCategory => {
-    const sorted = values.map(normalise).sort((a, b) => a.localeCompare(b, "ar"));
-    return { count: sorted.length, values: sorted };
-  };
-
   return {
     path,
-    buttons: category(raw.buttons),
-    fields: category(raw.fields),
-    tabs: category(raw.tabs),
-    tableHeaders: category(raw.tableHeaders),
-    toolbarItems: category(raw.toolbarItems),
-  };
-}
-
-function missingValues(baseline: string[], current: string[]): string[] {
-  const available = new Map<string, number>();
-  for (const value of current) available.set(value, (available.get(value) ?? 0) + 1);
-
-  const missing: string[] = [];
-  for (const value of baseline) {
-    const count = available.get(value) ?? 0;
-    if (count > 0) available.set(value, count - 1);
-    else missing.push(value);
-  }
-  return missing;
-}
-
-function compareBaselines(baseline: ParityBaseline, current: ParityBaseline): string[] {
-  const failures: string[] = [];
-  const categories = ["buttons", "fields", "tabs", "tableHeaders", "toolbarItems"] as const;
-
-  for (const [view, expectedView] of Object.entries(baseline.views)) {
-    const actualView = current.views[view];
-    if (!actualView) {
-      failures.push(`${view}: entire view census is missing`);
-      continue;
-    }
-
-    for (const category of categories) {
-      const missing = missingValues(expectedView[category].values, actualView[category].values);
-      if (missing.length > 0) {
-        failures.push(
-          `${view}.${category}: missing ${missing.map((value) => JSON.stringify(value)).join(", ")}`,
-        );
-      }
-
-      const added = missingValues(actualView[category].values, expectedView[category].values);
-      if (added.length > 0) {
-        console.warn(
-          `[parity] ${view}.${category}: new ${added.map((value) => JSON.stringify(value)).join(", ")}`,
-        );
-      }
-    }
-  }
-
-  for (const view of Object.keys(current.views)) {
-    if (!baseline.views[view]) console.warn(`[parity] ${view}: new view census`);
-  }
-
-  return failures;
-}
-
-function sortedBaseline(baseline: ParityBaseline): ParityBaseline {
-  return {
-    ...baseline,
-    views: Object.fromEntries(Object.entries(baseline.views).sort(([a], [b]) => a.localeCompare(b))),
-    skipped: Object.fromEntries(
-      Object.entries(baseline.skipped).sort(([a], [b]) => a.localeCompare(b)),
-    ),
+    buttons: toCategory(raw.buttons),
+    fields: toCategory(raw.fields),
+    tabs: toCategory(raw.tabs),
+    tableHeaders: toCategory(raw.tableHeaders),
+    toolbarItems: toCategory(raw.toolbarItems),
   };
 }
 
@@ -528,6 +456,7 @@ test("authenticated AppView feature-parity census", async ({ page }) => {
   }
 
   const baseline = JSON.parse(await readFile(BASELINE_PATH, "utf8")) as ParityBaseline;
-  const failures = compareBaselines(baseline, deterministic);
+  const { failures, additions } = compareBaselines(baseline, deterministic);
+  for (const addition of additions) console.warn(`[parity] ${addition}`);
   expect(failures, failures.join("\n")).toEqual([]);
 });

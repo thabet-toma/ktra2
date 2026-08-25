@@ -6,7 +6,7 @@ import { formatMoney, formatQuantity } from '../../utils/formatNumber';
 import { formatDateLocalized, todayIso } from '../../utils/formatDate';
 import { isReservationActive } from '../../utils/documentBadges';
 import { resolveTenantId } from '../../utils/tenantContext';
-import { AseelDocumentShell, AseelTab } from '../aseel';
+import { KitDocumentShell, KitTab } from '../kit';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
 import { PaymentStatusBadge, type InvoicePaymentStatus } from '../shared/PaymentStatusBadge';
 import { CustomerPriceListTab } from './CustomerPriceListTab';
@@ -423,7 +423,7 @@ export const PartnerProfilePage: React.FC = () => {
           />
           {/* السند يعلن الفاتورة التي وُزّع عليها — الربط ظاهر ولو تفرّقت الصفحة. */}
           {!r.document_number && r.link_label && (
-            <span className="text-[10px] text-[var(--aseel-ink-soft)]">
+            <span className="text-[10px] text-[var(--ktra-ink-soft)]">
               ↔ مقابل {r.link_label}
             </span>
           )}
@@ -431,9 +431,9 @@ export const PartnerProfilePage: React.FC = () => {
       ),
     },
     { key: 'description', header: 'البيان', render: (r) => clarifyStatementDescription(r.reference_type, r.description) || '—' },
-    { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="aseel-num">{r?.debit ?? ''}</span> },
-    { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="aseel-num">{r?.credit ?? ''}</span> },
-    { key: 'running_balance', header: 'الرصيد', align: 'right', render: (r) => <b className="aseel-num">{r?.running_balance ?? ''}</b> },
+    { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="ktra-num">{r?.debit ?? ''}</span> },
+    { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="ktra-num">{r?.credit ?? ''}</span> },
+    { key: 'running_balance', header: 'الرصيد', align: 'right', render: (r) => <b className="ktra-num">{r?.running_balance ?? ''}</b> },
     {
       key: 'details',
       header: 'تفاصيل',
@@ -442,7 +442,7 @@ export const PartnerProfilePage: React.FC = () => {
         <button
           type="button"
           onClick={() => setDetailRow(r)}
-          className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+          className="text-[var(--ktra-accent,#2563eb)] underline hover:opacity-80"
         >
           تفاصيل
         </button>
@@ -465,19 +465,19 @@ export const PartnerProfilePage: React.FC = () => {
         />
       ),
     },
-    { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="aseel-num">{r?.debit ?? ''}</span> },
-    { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="aseel-num">{r?.credit ?? ''}</span> },
+    { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="ktra-num">{r?.debit ?? ''}</span> },
+    { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="ktra-num">{r?.credit ?? ''}</span> },
     {
       key: 'balance_before',
       header: 'الرصيد قبل',
       align: 'right',
-      render: (r) => <span className="aseel-num">{formatMoney(r?.balance_before ?? '')}</span>,
+      render: (r) => <span className="ktra-num">{formatMoney(r?.balance_before ?? '')}</span>,
     },
     {
       key: 'balance_after',
       header: 'الرصيد بعد',
       align: 'right',
-      render: (r) => <b className="aseel-num">{formatMoney(r?.running_balance ?? '')}</b>,
+      render: (r) => <b className="ktra-num">{formatMoney(r?.running_balance ?? '')}</b>,
     },
   ];
 
@@ -499,20 +499,20 @@ export const PartnerProfilePage: React.FC = () => {
       key: 'grand_total',
       header: 'الإجمالي',
       align: 'center',
-      render: (r) => <span className="aseel-num">{formatMoney(r.grand_total)}</span>,
+      render: (r) => <span className="ktra-num">{formatMoney(r.grand_total)}</span>,
     },
     {
       key: 'amount_paid',
       header: 'المدفوع',
       align: 'center',
-      render: (r) => <span className="aseel-num">{formatMoney(r.amount_paid ?? 0)}</span>,
+      render: (r) => <span className="ktra-num">{formatMoney(r.amount_paid ?? 0)}</span>,
     },
     {
       key: 'remaining_balance',
       header: 'المتبقي',
       align: 'center',
       render: (r) => (
-        <b className="aseel-num">{formatMoney(r.remaining_balance ?? 0)}</b>
+        <b className="ktra-num">{formatMoney(r.remaining_balance ?? 0)}</b>
       ),
     },
     {
@@ -532,13 +532,13 @@ export const PartnerProfilePage: React.FC = () => {
   ];
 
   const Kpi: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
-    <div className="p-3 border border-[var(--aseel-border)] rounded">
-      <div className="text-xs text-[var(--aseel-ink-soft)]">{label}</div>
-      <div className="text-lg font-bold text-[var(--aseel-ink)]">{value}</div>
+    <div className="p-3 border border-[var(--ktra-border)] rounded">
+      <div className="text-xs text-[var(--ktra-ink-soft)]">{label}</div>
+      <div className="text-lg font-bold text-[var(--ktra-ink)]">{value}</div>
     </div>
   );
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     {
       key: 'details',
       label: 'التفاصيل',
@@ -549,7 +549,7 @@ export const PartnerProfilePage: React.FC = () => {
               <div className="col-span-2 flex justify-end">
                 <button
                   type="button"
-                  className="aseel-toolbtn"
+                  className="ktra-toolbtn"
                   onClick={() => {
                     setActiveTabKey('edit');
                     clientLogger.info('partner.edit_card_open', { partner_id: id });
@@ -558,31 +558,31 @@ export const PartnerProfilePage: React.FC = () => {
                   <Pencil className="h-3.5 w-3.5" /> تعديل البطاقة
                 </button>
               </div>
-              <div><span className="text-[var(--aseel-ink-soft)]">الاسم:</span> <b>{partner.name}</b></div>
-              <div><span className="text-[var(--aseel-ink-soft)]">الاسم القانوني:</span> <b>{partner.legal_name || '—'}</b></div>
-              <div><span className="text-[var(--aseel-ink-soft)]">النوع:</span> <b>{isSupplier ? 'مورد' : partner.partner_type === 'Customer' ? 'عميل' : partner.partner_type}</b></div>
-              <div><span className="text-[var(--aseel-ink-soft)]">الهاتف:</span> <b>{partner.phone || '—'}</b></div>
-              <div><span className="text-[var(--aseel-ink-soft)]">البريد الإلكتروني:</span> <b>{partner.email || '—'}</b></div>
-              <div><span className="text-[var(--aseel-ink-soft)]">الرقم الضريبي:</span> <b>{partner.tax_number || '—'}</b></div>
-              <div><span className="text-[var(--aseel-ink-soft)]">حد الائتمان:</span> <b>{partner.credit_limit || '—'}</b></div>
-              <div className="col-span-2"><span className="text-[var(--aseel-ink-soft)]">العنوان:</span> <b>{[partner.street_address, partner.city, partner.state_or_province, partner.country].filter(Boolean).join(', ') || '—'}</b></div>
-              <div className="col-span-2 mt-2 border-t border-[var(--aseel-border)] pt-3">
+              <div><span className="text-[var(--ktra-ink-soft)]">الاسم:</span> <b>{partner.name}</b></div>
+              <div><span className="text-[var(--ktra-ink-soft)]">الاسم القانوني:</span> <b>{partner.legal_name || '—'}</b></div>
+              <div><span className="text-[var(--ktra-ink-soft)]">النوع:</span> <b>{isSupplier ? 'مورد' : partner.partner_type === 'Customer' ? 'عميل' : partner.partner_type}</b></div>
+              <div><span className="text-[var(--ktra-ink-soft)]">الهاتف:</span> <b>{partner.phone || '—'}</b></div>
+              <div><span className="text-[var(--ktra-ink-soft)]">البريد الإلكتروني:</span> <b>{partner.email || '—'}</b></div>
+              <div><span className="text-[var(--ktra-ink-soft)]">الرقم الضريبي:</span> <b>{partner.tax_number || '—'}</b></div>
+              <div><span className="text-[var(--ktra-ink-soft)]">حد الائتمان:</span> <b>{partner.credit_limit || '—'}</b></div>
+              <div className="col-span-2"><span className="text-[var(--ktra-ink-soft)]">العنوان:</span> <b>{[partner.street_address, partner.city, partner.state_or_province, partner.country].filter(Boolean).join(', ') || '—'}</b></div>
+              <div className="col-span-2 mt-2 border-t border-[var(--ktra-border)] pt-3">
                 <div className="mb-2 font-bold">الحسابات البنكية</div>
                 {partner.bank_accounts?.length ? (
                   <div className="grid gap-2 md:grid-cols-2">
                     {partner.bank_accounts.map((account) => (
-                      <div key={account.id} className="rounded border border-[var(--aseel-border)] bg-[var(--aseel-panel)] p-2">
+                      <div key={account.id} className="rounded border border-[var(--ktra-border)] bg-[var(--ktra-panel)] p-2">
                         <div className="flex items-center justify-between">
                           <b>{account.bank_name}</b>
                           {account.is_default && <span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] text-blue-700">افتراضي</span>}
                         </div>
                         <div className="mt-1 font-mono" dir="ltr">{account.account_number}</div>
-                        <div className="text-xs text-[var(--aseel-ink-soft)]">{account.branch_name || '—'}{account.iban ? ` · IBAN ${account.iban}` : ''}</div>
+                        <div className="text-xs text-[var(--ktra-ink-soft)]">{account.branch_name || '—'}{account.iban ? ` · IBAN ${account.iban}` : ''}</div>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <span className="text-[var(--aseel-ink-soft)]">لا توجد حسابات بنكية محفوظة.</span>
+                  <span className="text-[var(--ktra-ink-soft)]">لا توجد حسابات بنكية محفوظة.</span>
                 )}
               </div>
             </>
@@ -603,7 +603,7 @@ export const PartnerProfilePage: React.FC = () => {
               <Kpi label="آخر معاملة" value={profile.last_transaction_date || '—'} />
             </>
           ) : (
-            <span className="text-[var(--aseel-ink-soft)]">جاري التحميل…</span>
+            <span className="text-[var(--ktra-ink-soft)]">جاري التحميل…</span>
           )}
         </div>
       ),
@@ -627,7 +627,7 @@ export const PartnerProfilePage: React.FC = () => {
               />
             </div>
           ),
-        } as AseelTab]
+        } as KitTab]
       : []),
     {
       key: 'statement',
@@ -636,17 +636,17 @@ export const PartnerProfilePage: React.FC = () => {
         <div className="p-2">
           <div className="mb-3 flex flex-wrap items-center justify-end gap-3">
             {/* مفتاح الألوان: ما يزيد الذمة أحمر وما يسدّدها أخضر. */}
-            <div className="me-auto flex items-center gap-3 text-xs text-[var(--aseel-ink-soft)]">
+            <div className="me-auto flex items-center gap-3 text-xs text-[var(--ktra-ink-soft)]">
               <span className="flex items-center gap-1">
-                <span className="inline-block h-3 w-3 rounded-sm border border-[var(--aseel-border)] bg-red-50 dark:bg-red-900/20" />
+                <span className="inline-block h-3 w-3 rounded-sm border border-[var(--ktra-border)] bg-red-50 dark:bg-red-900/20" />
                 {isSupplier ? 'فاتورة شراء' : 'فاتورة بيع'}
               </span>
               <span className="flex items-center gap-1">
-                <span className="inline-block h-3 w-3 rounded-sm border border-[var(--aseel-border)] bg-emerald-50 dark:bg-emerald-900/20" />
+                <span className="inline-block h-3 w-3 rounded-sm border border-[var(--ktra-border)] bg-emerald-50 dark:bg-emerald-900/20" />
                 {isSupplier ? 'سند صرف' : 'سند قبض'}
               </span>
             </div>
-            <label className="flex items-center gap-1.5 text-sm text-[var(--aseel-ink-soft)]">
+            <label className="flex items-center gap-1.5 text-sm text-[var(--ktra-ink-soft)]">
               <input
                 type="checkbox"
                 checked={stmtGrouped}
@@ -659,7 +659,7 @@ export const PartnerProfilePage: React.FC = () => {
               />
               ربط الفاتورة بسندها
             </label>
-            <label htmlFor="partner-statement-ordering" className="text-sm text-[var(--aseel-ink-soft)]">
+            <label htmlFor="partner-statement-ordering" className="text-sm text-[var(--ktra-ink-soft)]">
               ترتيب الحركات:
             </label>
             <select
@@ -671,14 +671,14 @@ export const PartnerProfilePage: React.FC = () => {
                 setStmtOffset(0);
                 clientLogger.info("partner.statement_order_changed", { ordering });
               }}
-              className="rounded-lg border border-[var(--aseel-border)] bg-[var(--aseel-panel)] px-3 py-2 text-sm text-[var(--aseel-ink)]"
+              className="rounded-lg border border-[var(--ktra-border)] bg-[var(--ktra-panel)] px-3 py-2 text-sm text-[var(--ktra-ink)]"
             >
               <option value="newest">الأحدث أولاً</option>
               <option value="oldest">الأقدم أولاً</option>
             </select>
           </div>
           {stmtGrouped && (
-            <div className="mb-2 text-[11px] text-[var(--aseel-ink-soft)]">
+            <div className="mb-2 text-[11px] text-[var(--ktra-ink-soft)]">
               الحركات المترابطة مجمَّعة داخل إطار واحد؛ عمود «الرصيد» يبقى الرصيد الجاري
               زمنياً لكل حركة. الربط ضمن الصفحة المعروضة.
             </div>
@@ -696,15 +696,15 @@ export const PartnerProfilePage: React.FC = () => {
             emptyText="لا توجد حركات على حساب هذا الشريك."
             summaryRow={
               (stmt?.rows && stmt.rows.length > 0) ? (
-                <tr className="bg-[#e6e4d5] font-bold border-t-2 border-[var(--aseel-border)]">
+                <tr className="bg-[#e6e4d5] font-bold border-t-2 border-[var(--ktra-border)]">
                   <td colSpan={3} className="px-2 py-2 text-right">الإجمالي (هذه الصفحة):</td>
-                  <td className="px-2 py-2 text-right aseel-num">
+                  <td className="px-2 py-2 text-right ktra-num">
                     {formatMoney(stmt.rows.reduce((sum, r) => {
                       const val = parseFloat(String(r?.debit || "0").replace(/,/g, ''));
                       return sum + (isNaN(val) ? 0 : val);
                     }, 0))}
                   </td>
-                  <td className="px-2 py-2 text-right aseel-num">
+                  <td className="px-2 py-2 text-right ktra-num">
                     {formatMoney(stmt.rows.reduce((sum, r) => {
                       const val = parseFloat(String(r?.credit || "0").replace(/,/g, ''));
                       return sum + (isNaN(val) ? 0 : val);
@@ -724,7 +724,7 @@ export const PartnerProfilePage: React.FC = () => {
       label: 'المال',
       content: (
         <div className="p-2">
-          <div className="mb-2 text-[11px] text-[var(--aseel-ink-soft)]">
+          <div className="mb-2 text-[11px] text-[var(--ktra-ink-soft)]">
             حركات التسوية وحدها (بلا الفاتورة نفسها)، وكلٌّ منها برصيد الحساب قبلها
             وبعدها. الرصيدان محسوبان على الحساب كلّه لا على المعروض، فيطابقان كشف
             الحساب في اللحظات نفسها.
@@ -741,13 +741,13 @@ export const PartnerProfilePage: React.FC = () => {
             emptyText="لا توجد حركات مالية على حساب هذا الشريك بعد."
           />
 
-          <h3 className="mt-5 mb-2 text-sm font-bold text-[var(--aseel-ink)]">
+          <h3 className="mt-5 mb-2 text-sm font-bold text-[var(--ktra-ink)]">
             حركات المخزون المرتبطة
           </h3>
           {stockLoading ? (
-            <div className="py-4 text-sm text-[var(--aseel-ink-soft)]">جارٍ التحميل…</div>
+            <div className="py-4 text-sm text-[var(--ktra-ink-soft)]">جارٍ التحميل…</div>
           ) : stockGroups.length === 0 ? (
-            <div className="py-4 text-sm text-[var(--aseel-ink-soft)]">
+            <div className="py-4 text-sm text-[var(--ktra-ink-soft)]">
               لا توجد حركات مخزون مرتبطة بمستندات هذا الشريك.
             </div>
           ) : (
@@ -755,7 +755,7 @@ export const PartnerProfilePage: React.FC = () => {
               {stockGroups.map((g) => (
                 <div
                   key={`${g.reference_type}:${g.reference_id}`}
-                  className="rounded-lg border border-[var(--aseel-border)] p-2"
+                  className="rounded-lg border border-[var(--ktra-border)] p-2"
                 >
                   <div className="mb-1 text-xs font-bold">
                     <DocRefCell
@@ -768,7 +768,7 @@ export const PartnerProfilePage: React.FC = () => {
                   </div>
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="text-[var(--aseel-ink-soft)]">
+                      <tr className="text-[var(--ktra-ink-soft)]">
                         <th className="px-2 py-1 text-right">التاريخ</th>
                         <th className="px-2 py-1 text-right">الصنف</th>
                         <th className="px-2 py-1 text-right">الحركة</th>
@@ -785,9 +785,9 @@ export const PartnerProfilePage: React.FC = () => {
                           <td className="px-2 py-1">{m.product_name}</td>
                           <td className="px-2 py-1">{m.movement_type_label}</td>
                           <td className="px-2 py-1">{m.warehouse || '—'}</td>
-                          <td className="px-2 py-1 aseel-num">{formatQuantity(m.qty_in)}</td>
-                          <td className="px-2 py-1 aseel-num">{formatQuantity(m.qty_out)}</td>
-                          <td className="px-2 py-1 aseel-num font-bold">{formatQuantity(m.running_balance)}</td>
+                          <td className="px-2 py-1 ktra-num">{formatQuantity(m.qty_in)}</td>
+                          <td className="px-2 py-1 ktra-num">{formatQuantity(m.qty_out)}</td>
+                          <td className="px-2 py-1 ktra-num font-bold">{formatQuantity(m.running_balance)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -822,12 +822,12 @@ export const PartnerProfilePage: React.FC = () => {
           content: (
             <div className="p-3 space-y-4">
               <div>
-                <div className="mb-1 font-bold text-[var(--aseel-ink)]">عروض الأسعار</div>
+                <div className="mb-1 font-bold text-[var(--ktra-ink)]">عروض الأسعار</div>
                 {partnerQuotes.length === 0 ? (
-                  <div className="text-xs text-[var(--aseel-ink-soft)]">لا عروض لهذا الزبون.</div>
+                  <div className="text-xs text-[var(--ktra-ink-soft)]">لا عروض لهذا الزبون.</div>
                 ) : (
                   <table className="w-full text-xs">
-                    <thead className="text-[var(--aseel-ink-soft)]">
+                    <thead className="text-[var(--ktra-ink-soft)]">
                       <tr>
                         <th className="p-1 text-right">الرقم</th>
                         <th className="p-1 text-right">التاريخ</th>
@@ -838,7 +838,7 @@ export const PartnerProfilePage: React.FC = () => {
                     </thead>
                     <tbody>
                       {partnerQuotes.map((q) => (
-                        <tr key={q.id} className="border-t border-[var(--aseel-border)]">
+                        <tr key={q.id} className="border-t border-[var(--ktra-border)]">
                           <td className="p-1">{q.quotation_number}</td>
                           <td className="p-1">{formatDateLocalized(q.quotation_date)}</td>
                           <td className="p-1">{formatDateLocalized(q.valid_until) || '—'}</td>
@@ -852,12 +852,12 @@ export const PartnerProfilePage: React.FC = () => {
               </div>
 
               <div>
-                <div className="mb-1 font-bold text-[var(--aseel-ink)]">الطلبيات</div>
+                <div className="mb-1 font-bold text-[var(--ktra-ink)]">الطلبيات</div>
                 {partnerOrders.length === 0 ? (
-                  <div className="text-xs text-[var(--aseel-ink-soft)]">لا طلبيات لهذا الزبون.</div>
+                  <div className="text-xs text-[var(--ktra-ink-soft)]">لا طلبيات لهذا الزبون.</div>
                 ) : (
                   <table className="w-full text-xs">
-                    <thead className="text-[var(--aseel-ink-soft)]">
+                    <thead className="text-[var(--ktra-ink-soft)]">
                       <tr>
                         <th className="p-1 text-right">الرقم</th>
                         <th className="p-1 text-right">التاريخ</th>
@@ -869,18 +869,18 @@ export const PartnerProfilePage: React.FC = () => {
                     </thead>
                     <tbody>
                       {partnerOrders.map((o) => (
-                        <tr key={o.id} className="border-t border-[var(--aseel-border)]">
+                        <tr key={o.id} className="border-t border-[var(--ktra-border)]">
                           <td className="p-1">{o.order_number}</td>
                           <td className="p-1">{formatDateLocalized(o.order_date)}</td>
                           {/* T-RESERVE: التاريخ وحده كان يُقرأ «محجوز» على طلبية
                               ملغاة/محوَّلة أو انتهت مدّتها — الآن الحالة صريحة. */}
                           <td className="p-1">
                             {isReservationActive(o.status, o.reserved_until, todayIso()) ? (
-                              <span style={{ color: 'var(--aseel-warn, #b06800)', fontWeight: 600 }}>
+                              <span className="font-semibold text-[var(--ktra-warn)]">
                                 محجوز حتى {formatDateLocalized(o.reserved_until)}
                               </span>
                             ) : (
-                              <span className="text-[var(--aseel-ink-soft)]">
+                              <span className="text-[var(--ktra-ink-soft)]">
                                 {o.reserved_until
                                   ? `انتهى الحجز (${formatDateLocalized(o.reserved_until)})`
                                   : 'بلا حجز'}
@@ -898,7 +898,7 @@ export const PartnerProfilePage: React.FC = () => {
               </div>
             </div>
           ),
-        } as AseelTab]
+        } as KitTab]
       : []),
     ...(id
       ? [{
@@ -914,7 +914,7 @@ export const PartnerProfilePage: React.FC = () => {
               />
             </div>
           ),
-        } as AseelTab]
+        } as KitTab]
       : []),
     // DEF-004: عرض السعر — مبيعات فقط (للعملاء، لا للموردين).
     ...(!isSupplier && id
@@ -922,7 +922,7 @@ export const PartnerProfilePage: React.FC = () => {
           key: 'price_list',
           label: 'عرض السعر',
           content: <CustomerPriceListTab customerId={id} />,
-        } as AseelTab]
+        } as KitTab]
       : []),
     // ملاحظات الطرف (CRM) — لكل الأطراف: العاجلة منها تُنبّه عند أي معاملة له.
     ...(id
@@ -930,14 +930,14 @@ export const PartnerProfilePage: React.FC = () => {
           key: 'customer_notes',
           label: isSupplier ? 'ملاحظات المورد' : 'ملاحظات الزبون',
           content: <CustomerNotesTab customerId={id} focusNoteId={focusNoteId} />,
-        } as AseelTab]
+        } as KitTab]
       : []),
   ];
 
   return (
     <div className="min-h-[calc(100vh-5rem)]">
       <PartnerNoteAlert partnerId={id} className="mb-2" />
-      <AseelDocumentShell
+      <KitDocumentShell
         title={partner ? `كشف حساب: ${partner.name}` : 'جاري التحميل...'}
         actions={[
           { key: 'back', label: back.label === 'رجوع' ? 'عودة' : back.label, onClick: back.go },
@@ -1017,13 +1017,13 @@ export const PartnerProfilePage: React.FC = () => {
         activeTab={activeTabKey}
         onTabChange={setActiveTabKey}
         status={
-          error || allocError ? <span className="text-[var(--aseel-danger)]">{error || allocError}</span> :
+          error || allocError ? <span className="text-[var(--ktra-danger)]">{error || allocError}</span> :
           loading ? <span>جاري التحميل...</span> :
-          <span className="aseel-status-item">{isSupplier ? 'مورد' : 'عميل'}{profile ? ` · الرصيد ${profile.balance} ${profile.balance_side}` : ''}</span>
+          <span className="ktra-status-item">{isSupplier ? 'مورد' : 'عميل'}{profile ? ` · الرصيد ${profile.balance} ${profile.balance_side}` : ''}</span>
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
       <StatementDetailsModal movement={detailRow} onClose={() => setDetailRow(null)} />
       {showReceiptModal && receiptPartner && (
         <NewPaymentModal
@@ -1046,49 +1046,46 @@ export const PartnerProfilePage: React.FC = () => {
       {/* T-ONACC: اختيار السند حين يوجد أكثر من رصيد «على الحساب» لهذا العميل. */}
       {showAllocPicker && (
         <div
-          className="fixed inset-0 z-[60] bg-black/40"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
           onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAllocPicker(false); }}
         >
+          {/* بلا `data-skin` محليّ: محدِّد التوكنات الكلاسيكية في `index.css`
+              بلا `:root` فوسمُ النافذة كان يُطابقه، فتلبس اللوحة الكلاسيكية
+              (حدّ زيتوني وسطح أبيض) داخل الجلد الحديث — وبلا مقابلٍ داكن.
+              متغيّرات `--ktra-*` معرَّفة على `<html>` في الجلدين، فالنافذة
+              الآن تتبع جلد التطبيق وسمته. */}
           <div
             dir="rtl"
-            data-skin="aseel"
-            style={{
-              background: 'var(--aseel-surface, #fff)',
-              border: '1px solid var(--aseel-border, #c8b99a)',
-              borderRadius: 'var(--aseel-radius, 6px)',
-              width: '100%', maxWidth: '520px', maxHeight: '80vh', overflow: 'auto', padding: '16px',
-            }}
+            className="max-h-[80vh] w-full max-w-[520px] overflow-auto rounded-[var(--ktra-radius)] border border-[var(--ktra-border)] bg-[var(--ktra-surface)] p-4"
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid var(--aseel-border)', paddingBottom: '8px' }}>
-              <h3 style={{ fontWeight: 600, fontSize: '14px' }}>اختر السند المراد توزيعه</h3>
-              <button type="button" className="aseel-toolbtn" onClick={() => setShowAllocPicker(false)}>✕</button>
+            <div className="mb-3 flex items-center justify-between border-b border-[var(--ktra-border)] pb-2">
+              <h3 className="text-[14px] font-semibold">اختر السند المراد توزيعه</h3>
+              <button type="button" className="ktra-toolbtn" onClick={() => setShowAllocPicker(false)}>✕</button>
             </div>
-            <table style={{ width: '100%', fontSize: '12px' }}>
-              <thead style={{ background: 'var(--aseel-surface-2, #f4ede0)' }}>
+            <table className="ktra-compact-grid w-full text-[12px]">
+              <thead className="bg-[var(--ktra-surface-2)]">
                 <tr>
-                  <th style={{ padding: '4px', textAlign: 'right' }}>السند</th>
-                  <th style={{ padding: '4px', textAlign: 'right' }}>التاريخ</th>
-                  <th style={{ padding: '4px', textAlign: 'right' }}>المبلغ</th>
-                  <th style={{ padding: '4px', textAlign: 'right' }}>على الحساب</th>
-                  <th style={{ width: '70px' }}></th>
+                  <th>السند</th>
+                  <th>التاريخ</th>
+                  <th>المبلغ</th>
+                  <th>على الحساب</th>
+                  <th className="w-[70px]"></th>
                 </tr>
               </thead>
               <tbody>
                 {onAccountPayments.map((p) => (
-                  <tr key={p.id} style={{ borderTop: '1px solid var(--aseel-border)' }}>
-                    <td style={{ padding: '4px' }}>#{p.id}</td>
-                    <td style={{ padding: '4px' }}>{formatDateLocalized(p.payment_date)}</td>
-                    <td style={{ padding: '4px' }} className="aseel-num">{formatMoney(p.amount)}</td>
-                    <td style={{ padding: '4px', color: 'var(--aseel-warn, #b06800)' }} className="aseel-num">
+                  <tr key={p.id} className="border-t border-[var(--ktra-border)]">
+                    <td>#{p.id}</td>
+                    <td>{formatDateLocalized(p.payment_date)}</td>
+                    <td className="ktra-num">{formatMoney(p.amount)}</td>
+                    <td className="ktra-num text-[var(--ktra-warn)]">
                       {formatMoney(p.unallocated_amount ?? 0)}
                     </td>
-                    <td style={{ padding: '4px', textAlign: 'center' }}>
+                    <td className="text-center">
                       <button
                         type="button"
-                        className="aseel-toolbtn"
-                        style={{ fontSize: '11px' }}
+                        className="ktra-toolbtn text-[11px]"
                         onClick={() => { setAllocTarget(p); setShowAllocPicker(false); }}
                       >
                         توزيع

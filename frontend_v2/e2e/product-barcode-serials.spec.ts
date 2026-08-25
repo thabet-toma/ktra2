@@ -196,7 +196,7 @@ const install = async (page: Page, state: ServerState) => {
 };
 
 const barcodeField = (page: Page) =>
-  page.locator('.aseel-field:has(span:text-is("الباركود (EAN-13)")) input').first();
+  page.locator('.ktra-field:has(span:text-is("الباركود (EAN-13)")) input').first();
 
 const generalTab = async (page: Page) => {
   await page.getByRole('tab', { name: 'بيانات عامة' }).click();
@@ -291,7 +291,7 @@ test('تبويب الأرقام التسلسلية يظهر بالتفعيل و�
   await expect(page.getByRole('tab', { name: 'الأرقام التسلسلية' })).toHaveCount(0);
 
   await generalTab(page);
-  await page.locator('.aseel-field:has(span:text-is("تتبّع بالرقم التسلسلي")) input[type=checkbox]').check();
+  await page.locator('.ktra-field:has(span:text-is("تتبّع بالرقم التسلسلي")) input[type=checkbox]').check();
 
   const tab = page.getByRole('tab', { name: 'الأرقام التسلسلية' });
   await expect(tab).toBeVisible();
@@ -324,7 +324,7 @@ test('«تسجيل أرقام لمخزون قائم» يرقّم الوحدات 
   await page.goto('/products/42');
   await page.waitForLoadState('networkidle');
   await generalTab(page);
-  await page.locator('.aseel-field:has(span:text-is("تتبّع بالرقم التسلسلي")) input[type=checkbox]').check();
+  await page.locator('.ktra-field:has(span:text-is("تتبّع بالرقم التسلسلي")) input[type=checkbox]').check();
   await page.getByRole('tab', { name: 'الأرقام التسلسلية' }).click();
 
   // الرصيد 12 ومنه وحدة واحدة مُرقَّمة «في المخزن» ⇒ 11 بلا ترقيم.
@@ -361,7 +361,7 @@ test('رفض الخادم لتسجيل فوق الرصيد يصل للمستخد
   await page.goto('/products/42');
   await page.waitForLoadState('networkidle');
   await generalTab(page);
-  await page.locator('.aseel-field:has(span:text-is("تتبّع بالرقم التسلسلي")) input[type=checkbox]').check();
+  await page.locator('.ktra-field:has(span:text-is("تتبّع بالرقم التسلسلي")) input[type=checkbox]').check();
   await page.getByRole('tab', { name: 'الأرقام التسلسلية' }).click();
   await page.getByRole('button', { name: 'تسجيل أرقام لمخزون قائم' }).click();
 

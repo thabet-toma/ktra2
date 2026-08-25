@@ -36,7 +36,7 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
             key: 'customsClearanceFees',
             label: 'رسوم المخلص الجمركي',
             icon: <Building className="w-4 h-4" />,
-            color: 'aseel-bg-accent-bg dark:aseel-bg-panel/20 aseel-border-accent dark:aseel-border-soft/30 aseel-text-accent dark:aseel-text-soft',
+            color: 'ktra-bg-accent-bg dark:ktra-bg-panel/20 ktra-border-accent dark:ktra-border-soft/30 ktra-text-accent dark:ktra-text-soft',
             description: 'رسوم الوكيل الجمركي المسؤول عن تخليص البضاعة'
         },
         {
@@ -50,14 +50,14 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
             key: 'portFees',
             label: 'رسوم الميناء',
             icon: <Anchor className="w-4 h-4" />,
-            color: 'aseel-bg-panel dark:aseel-bg-panel/20 aseel-border-soft dark:aseel-border-soft/30 aseel-text-ink dark:aseel-text-soft',
+            color: 'ktra-bg-panel dark:ktra-bg-panel/20 ktra-border-soft dark:ktra-border-soft/30 ktra-text-ink dark:ktra-text-soft',
             description: 'رسوم التفريغ والشحن والخدمات المينائية'
         },
         {
             key: 'internalShippingFees',
             label: 'رسوم الشحن الداخلي',
             icon: <Truck className="w-4 h-4" />,
-            color: 'bg-green-50 dark:bg-green-900/20 aseel-border-soft dark:border-green-800/30 text-green-700 dark:text-green-300',
+            color: 'bg-green-50 dark:bg-green-900/20 ktra-border-soft dark:border-green-800/30 text-green-700 dark:text-green-300',
             description: 'نقل البضاعة داخل البلد'
         }
     ];
@@ -201,40 +201,40 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
     return (
         <div className="space-y-6">
             {/* العنوان والوصف */}
-            <div className="border-b aseel-border-soft dark:aseel-border-soft pb-4">
+            <div className="border-b ktra-border-soft dark:ktra-border-soft pb-4">
                 <div className="flex items-center gap-3 mb-2">
-                    <CreditCard className="w-6 h-6 aseel-text-soft" />
-                    <h3 className="text-xl font-bold aseel-text-ink dark:text-white">
+                    <CreditCard className="w-6 h-6 ktra-text-soft" />
+                    <h3 className="text-xl font-bold ktra-text-ink dark:text-white">
                         المدفوعات المحلية
                     </h3>
                     {includedInPrice && (
-                        <span className="px-2 py-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full border aseel-border-soft dark:border-green-800">
+                        <span className="px-2 py-1 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full border ktra-border-soft dark:border-green-800">
                             مشمولة في سعر المورد
                         </span>
                     )}
                 </div>
-                <p className="text-sm aseel-text-soft dark:aseel-text-soft">
+                <p className="text-sm ktra-text-soft dark:ktra-text-soft">
                     هذه الرسوم تضاف بعد وصول البضاعة إلى بلد الوجهة
                 </p>
             </div>
 
             {/* بطاقة الحالة الرئيسية */}
             <div className={`p-4 rounded-xl border ${includedInPrice
-                ? 'bg-green-50 dark:bg-green-900/10 aseel-border-soft dark:border-green-800/30'
-                : 'aseel-bg-accent-bg dark:aseel-bg-panel/10 aseel-border-accent dark:aseel-border-soft/30'
+                ? 'bg-green-50 dark:bg-green-900/10 ktra-border-soft dark:border-green-800/30'
+                : 'ktra-bg-accent-bg dark:ktra-bg-panel/10 ktra-border-accent dark:ktra-border-soft/30'
                 }`}>
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         {includedInPrice ? (
                             <Lock className="w-5 h-5 text-green-600 dark:text-green-400" />
                         ) : (
-                            <Unlock className="w-5 h-5 aseel-text-accent dark:aseel-text-soft" />
+                            <Unlock className="w-5 h-5 ktra-text-accent dark:ktra-text-soft" />
                         )}
                         <div>
-                            <h4 className="font-medium aseel-text-ink dark:text-white">
+                            <h4 className="font-medium ktra-text-ink dark:text-white">
                                 {includedInPrice ? 'الرسوم مشمولة في سعر المورد' : 'الرسوم غير مشمولة في السعر'}
                             </h4>
-                            <p className="text-sm aseel-text-soft dark:aseel-text-soft">
+                            <p className="text-sm ktra-text-soft dark:ktra-text-soft">
                                 {includedInPrice
                                     ? 'المورد يتحمل كافة الرسوم المحلية. لا حاجة لإدخال قيم.'
                                     : 'يجب إدخال قيم الرسوم المحلية يدوياً.'
@@ -249,7 +249,7 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
                             onChange={(e) => handleIncludedToggle(e.target.checked)}
                             className="sr-only peer"
                         />
-                        <div className="w-12 h-6 aseel-bg-grid-head peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:aseel-bg-panel peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:aseel-bg-field after:aseel-border-soft after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:aseel-border-soft peer-checked:bg-green-600"></div>
+                        <div className="w-12 h-6 ktra-bg-grid-head peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:ktra-bg-panel peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:ktra-bg-field after:ktra-border-soft after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:ktra-border-soft peer-checked:bg-green-600"></div>
                     </label>
                 </div>
             </div>
@@ -258,7 +258,7 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
             {!includedInPrice && (
                 <>
                     <div className="mt-6">
-                        <h4 className="text-lg font-medium aseel-text-ink dark:text-white mb-3">
+                        <h4 className="text-lg font-medium ktra-text-ink dark:text-white mb-3">
                             اختر طريقة حساب الرسوم
                         </h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -266,16 +266,16 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
                                 type="button"
                                 onClick={() => handleMethodChange('detailed')}
                                 className={`p-4 rounded-xl border transition-all duration-200 flex flex-col items-center gap-3 ${calculationMethod === 'detailed'
-                                    ? 'aseel-bg-accent-bg dark:aseel-bg-panel/20 aseel-border-soft dark:aseel-border-soft shadow-sm'
-                                    : 'aseel-bg-panel dark:aseel-bg-panel/50 aseel-border-soft dark:aseel-border-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel'
+                                    ? 'ktra-bg-accent-bg dark:ktra-bg-panel/20 ktra-border-soft dark:ktra-border-soft shadow-sm'
+                                    : 'ktra-bg-panel dark:ktra-bg-panel/50 ktra-border-soft dark:ktra-border-soft hover:ktra-bg-panel dark:hover:ktra-bg-panel'
                                     }`}
                             >
-                                <Calculator className={`w-8 h-8 ${calculationMethod === 'detailed' ? 'aseel-text-accent' : 'aseel-text-soft'}`} />
+                                <Calculator className={`w-8 h-8 ${calculationMethod === 'detailed' ? 'ktra-text-accent' : 'ktra-text-soft'}`} />
                                 <div className="text-center">
-                                    <div className="font-medium aseel-text-ink dark:text-white">
+                                    <div className="font-medium ktra-text-ink dark:text-white">
                                         تفصيلي
                                     </div>
-                                    <div className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
+                                    <div className="text-xs ktra-text-soft dark:ktra-text-soft mt-1">
                                         أدخل كل رسومة على حدة
                                     </div>
                                 </div>
@@ -285,16 +285,16 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
                                 type="button"
                                 onClick={() => handleMethodChange('lump_sum')}
                                 className={`p-4 rounded-xl border transition-all duration-200 flex flex-col items-center gap-3 ${calculationMethod === 'lump_sum'
-                                    ? 'aseel-bg-accent-bg dark:aseel-bg-panel/20 aseel-border-soft dark:aseel-border-soft shadow-sm'
-                                    : 'aseel-bg-panel dark:aseel-bg-panel/50 aseel-border-soft dark:aseel-border-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel'
+                                    ? 'ktra-bg-accent-bg dark:ktra-bg-panel/20 ktra-border-soft dark:ktra-border-soft shadow-sm'
+                                    : 'ktra-bg-panel dark:ktra-bg-panel/50 ktra-border-soft dark:ktra-border-soft hover:ktra-bg-panel dark:hover:ktra-bg-panel'
                                     }`}
                             >
-                                <DollarSign className={`w-8 h-8 ${calculationMethod === 'lump_sum' ? 'aseel-text-accent' : 'aseel-text-soft'}`} />
+                                <DollarSign className={`w-8 h-8 ${calculationMethod === 'lump_sum' ? 'ktra-text-accent' : 'ktra-text-soft'}`} />
                                 <div className="text-center">
-                                    <div className="font-medium aseel-text-ink dark:text-white">
+                                    <div className="font-medium ktra-text-ink dark:text-white">
                                         مبلغ شامل
                                     </div>
-                                    <div className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
+                                    <div className="text-xs ktra-text-soft dark:ktra-text-soft mt-1">
                                         أدخل مبلغاً إجمالياً للجميع
                                     </div>
                                 </div>
@@ -305,7 +305,7 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
                     {/* الحقول التفصيلية */}
                     {calculationMethod === 'detailed' && !includedInPrice && (
                         <div className="mt-6">
-                            <h4 className="text-lg font-medium aseel-text-ink dark:text-white mb-4">
+                            <h4 className="text-lg font-medium ktra-text-ink dark:text-white mb-4">
                                 أدخل قيم الرسوم التفصيلية
                             </h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -322,12 +322,12 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
                                         >
                                             <div className="flex items-center gap-3 mb-2">
                                                 {payment.icon}
-                                                <span className="font-medium aseel-text-ink dark:text-white">
+                                                <span className="font-medium ktra-text-ink dark:text-white">
                                                     {payment.label}
                                                 </span>
                                             </div>
 
-                                            <p className="text-xs aseel-text-soft dark:aseel-text-soft mb-3">
+                                            <p className="text-xs ktra-text-soft dark:ktra-text-soft mb-3">
                                                 {payment.description}
                                             </p>
 
@@ -342,11 +342,11 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
                                                         )
                                                     }
                                                     placeholder="0.00"
-                                                    className="w-full pl-10 pr-3 py-2 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft focus:ring-2 focus:ring-blue-500 focus:aseel-border-soft"
+                                                    className="w-full pl-10 pr-3 py-2 border ktra-border-soft dark:ktra-border-soft rounded-lg ktra-bg-field dark:ktra-bg-panel ktra-text-ink dark:ktra-text-soft focus:ring-2 focus:ring-blue-500 focus:ktra-border-soft"
                                                     step="0.01"
                                                     min="0"
                                                 />
-                                                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 aseel-text-soft">
+                                                <span className="absolute left-3 top-1/2 transform -translate-y-1/2 ktra-text-soft">
                                                     $
                                                 </span>
                                             </div>
@@ -360,11 +360,11 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
                     {/* المبلغ الشامل */}
                     {calculationMethod === 'lump_sum' && !includedInPrice && (
                         <div className="mt-6">
-                            <div className="p-4 rounded-xl border aseel-bg-accent-bg dark:aseel-bg-panel/10 aseel-border-accent dark:aseel-border-soft/30">
-                                <h4 className="text-lg font-medium aseel-text-ink dark:text-white mb-3">
+                            <div className="p-4 rounded-xl border ktra-bg-accent-bg dark:ktra-bg-panel/10 ktra-border-accent dark:ktra-border-soft/30">
+                                <h4 className="text-lg font-medium ktra-text-ink dark:text-white mb-3">
                                     المبلغ الشامل للرسوم المحلية
                                 </h4>
-                                <p className="text-sm aseel-text-soft dark:aseel-text-soft mb-4">
+                                <p className="text-sm ktra-text-soft dark:ktra-text-soft mb-4">
                                     أدخل المبلغ الإجمالي لجميع الرسوم المحلية معاً
                                 </p>
                                 <div className="relative">
@@ -373,15 +373,15 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
                                         value={localPayments.lumpSumAmount || ''}
                                         onChange={(e) => handleChange('lumpSumAmount', parseFloat(e.target.value) || 0)}
                                         placeholder="0.00"
-                                        className="w-full pl-12 pr-4 py-3 border-2 aseel-border-soft dark:aseel-border-soft rounded-xl aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft text-lg font-medium focus:ring-2 focus:ring-blue-500 focus:aseel-border-soft"
+                                        className="w-full pl-12 pr-4 py-3 border-2 ktra-border-soft dark:ktra-border-soft rounded-xl ktra-bg-field dark:ktra-bg-panel ktra-text-ink dark:ktra-text-soft text-lg font-medium focus:ring-2 focus:ring-blue-500 focus:ktra-border-soft"
                                         step="0.01"
                                         min="0"
                                     />
                                     <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
-                                        <DollarSign className="w-6 h-6 aseel-text-accent" />
+                                        <DollarSign className="w-6 h-6 ktra-text-accent" />
                                     </div>
                                 </div>
-                                <div className="mt-3 text-sm aseel-text-soft dark:aseel-text-soft">
+                                <div className="mt-3 text-sm ktra-text-soft dark:ktra-text-soft">
                                     يشمل: المخلص الجمركي، الجمارك، الميناء، الشحن الداخلي
                                 </div>
                             </div>
@@ -393,29 +393,29 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
             {/* ملخص الإجمالي */}
             {(totalLocalPayments > 0 || includedInPrice) && (
                 <div className="mt-6">
-                    <div className="p-4 rounded-xl border bg-gradient-to-r aseel-bg-panel to-green-50 dark:aseel-bg-panel/10 dark:to-green-900/10 aseel-border-accent dark:aseel-border-soft/30">
+                    <div className="p-4 rounded-xl border bg-gradient-to-r ktra-bg-panel to-green-50 dark:ktra-bg-panel/10 dark:to-green-900/10 ktra-border-accent dark:ktra-border-soft/30">
                         <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-3">
-                                <CreditCard className="w-5 h-5 aseel-text-accent" />
-                                <h4 className="font-bold aseel-text-ink dark:text-white">
+                                <CreditCard className="w-5 h-5 ktra-text-accent" />
+                                <h4 className="font-bold ktra-text-ink dark:text-white">
                                     ملخص المدفوعات المحلية
                                 </h4>
                             </div>
-                            <div className="text-lg font-bold aseel-text-ink dark:text-white">
+                            <div className="text-lg font-bold ktra-text-ink dark:text-white">
                                 {includedInPrice ? 'مشمولة في السعر' : `$${formatMoney(totalLocalPayments)}`}
                             </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
-                            <div className="text-sm aseel-text-soft dark:aseel-text-soft">
+                            <div className="text-sm ktra-text-soft dark:ktra-text-soft">
                                 طريقة الحساب: <span className="font-medium">
                                     {calculationMethod === 'detailed' ? 'تفصيلي' :
                                         calculationMethod === 'lump_sum' ? 'مبلغ شامل' :
                                             'لم يتم تحديدها'}
                                 </span>
                             </div>
-                            <div className="text-sm aseel-text-soft dark:aseel-text-soft">
-                                حالة الدفع: <span className={`font-medium ${includedInPrice ? 'text-green-600' : 'aseel-text-accent'}`}>
+                            <div className="text-sm ktra-text-soft dark:ktra-text-soft">
+                                حالة الدفع: <span className={`font-medium ${includedInPrice ? 'text-green-600' : 'ktra-text-accent'}`}>
                                     {includedInPrice ? 'مورد يدفع' : 'يتم حسابها'}
                                 </span>
                             </div>
@@ -423,8 +423,8 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
 
                         {/* تفاصيل الرسوم إذا كانت تفصيلية */}
                         {calculationMethod === 'detailed' && !includedInPrice && totalLocalPayments > 0 && (
-                            <div className="mt-3 pt-3 border-t aseel-border-soft dark:aseel-border-soft">
-                                <div className="text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-2">
+                            <div className="mt-3 pt-3 border-t ktra-border-soft dark:ktra-border-soft">
+                                <div className="text-sm font-medium ktra-text-ink dark:ktra-text-soft mb-2">
                                     تفاصيل الرسوم:
                                 </div>
                                 <div className="grid grid-cols-2 gap-2">
@@ -434,7 +434,7 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
 
                                         return (
                                             <div key={payment.key} className="flex justify-between items-center text-sm">
-                                                <span className="aseel-text-soft dark:aseel-text-soft">{payment.label}:</span>
+                                                <span className="ktra-text-soft dark:ktra-text-soft">{payment.label}:</span>
                                                 <span className="font-medium">${formatMoney(value)}</span>
                                             </div>
                                         );
@@ -447,8 +447,8 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
             )}
 
             {/* رسالة توضيحية */}
-            <div className="mt-4 p-3 aseel-bg-panel dark:aseel-bg-panel/30 rounded-lg border aseel-border-soft dark:aseel-border-soft">
-                <div className="text-sm aseel-text-soft dark:aseel-text-soft">
+            <div className="mt-4 p-3 ktra-bg-panel dark:ktra-bg-panel/30 rounded-lg border ktra-border-soft dark:ktra-border-soft">
+                <div className="text-sm ktra-text-soft dark:ktra-text-soft">
                     <div className="font-medium mb-1">💡 ملاحظة مهمة:</div>
                     <ul className="list-disc list-inside space-y-1">
                         <li>اختر <span className="font-medium">"مشمولة في السعر"</span> إذا كان المورد يتحمل كافة الرسوم المحلية</li>

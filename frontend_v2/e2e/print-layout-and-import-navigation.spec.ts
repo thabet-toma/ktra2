@@ -86,13 +86,13 @@ test("print media keeps the invoice content and removes the app chrome", async (
   await expect(page.getByText("فواتير المبيعات", { exact: true }).last()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("العمل يتم عبر قاعدة SQL", { exact: true })).toHaveCount(0);
 
-  const titlebars = page.locator(".aseel-titlebar");
+  const titlebars = page.locator(".ktra-titlebar");
   await expect(titlebars).toHaveCount(2);
   await expect(titlebars.first()).toBeVisible();
   await expect(titlebars.last()).toBeVisible();
   await expect(page.locator("aside").last()).toBeVisible();
-  const screenOnlyCells = page.locator(".aseel-grid .aseel-print-hidden");
-  const screenOnlyFilters = page.locator(".aseel-headband .aseel-print-hidden");
+  const screenOnlyCells = page.locator(".ktra-grid .ktra-print-hidden");
+  const screenOnlyFilters = page.locator(".ktra-headband .ktra-print-hidden");
   await expect(screenOnlyCells.first()).toBeVisible();
   await expect(screenOnlyFilters).toBeVisible();
 
@@ -104,7 +104,7 @@ test("print media keeps the invoice content and removes the app chrome", async (
   await expect(screenOnlyCells.first()).toBeHidden();
   await expect(screenOnlyFilters).toBeHidden();
   await expect(page.locator("main.app-content")).toHaveCSS("overflow-y", "visible");
-  await expect(page.locator(".aseel-grid")).toBeVisible();
+  await expect(page.locator(".ktra-grid")).toBeVisible();
 });
 
 test("invoice filters use the localized date control instead of the browser date placeholder", async ({ page }) => {

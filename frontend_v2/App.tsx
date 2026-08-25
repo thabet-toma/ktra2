@@ -90,8 +90,8 @@ const DealManagement = lazyPage(() => import("./components/procurement/DealManag
 const ItemsManagement = lazyPage(() => import("./components/items/ItemsManagement").then((m) => ({ default: m.ItemsManagement })));
 const SupplierManagement = lazyPage(() => import("./components/suppliers/SupplierManagement").then((m) => ({ default: m.SupplierManagement })));
 const ShipmentManagement = lazyPage(() => import("./components/procurement/shipments/ShipmentManagement").then((m) => ({ default: m.ShipmentManagement })));
-const AseelKitStory = lazyPage(() => import("./components/aseel/AseelKitStory").then((m) => ({ default: m.AseelKitStory })));
-const SalesInvoiceAseelStory = lazyPage(() => import("./components/sales/SalesInvoiceAseelStory").then((m) => ({ default: m.SalesInvoiceAseelStory })));
+const KitStory = lazyPage(() => import("./components/kit/KitStory").then((m) => ({ default: m.KitStory })));
+const SalesInvoiceKitStory = lazyPage(() => import("./components/sales/SalesInvoiceKitStory").then((m) => ({ default: m.SalesInvoiceKitStory })));
 const SalesDocumentsPage = lazyPage(() => import("./components/sales/SalesQuotationsPage").then((m) => ({ default: m.SalesDocumentsPage })));
 const CreditDebitNotesPage = lazyPage(() => import("./components/sales/CreditDebitNotesPage").then((m) => ({ default: m.CreditDebitNotesPage })));
 const SalesReturnEditor = lazyPage(() => import("./components/sales/SalesReturnEditor").then((m) => ({ default: m.SalesReturnEditor })));
@@ -287,8 +287,8 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   // `/store/` كي لا يزاحم مسارات المتجر العام في `index.tsx`.
   "store-settings": "/store-settings",
   "group-constants": "/group-constants",
-  "aseel-kit": "/aseel-kit",
-  "aseel-sales": "/aseel-sales",
+  "ui-kit": "/ui-kit",
+  "sales-classic": "/sales-classic",
 };
 
 const PATH_TO_VIEW: Record<string, AppView> = Object.fromEntries(
@@ -572,11 +572,14 @@ const App: React.FC = () => {
     });
   }, [currentUser, tasks, activeTask]);
 
-  // مسارات معاينة الأصيل (dev/QA) — تُكتشف قبل حارس المصادقة لأن لها bypass خاص
+  /* شاشتا معاينة للمطوّر/الفحص (dev/QA) — تُكتشف قبل حارس المصادقة لأن لها
+     bypass خاص. M7-T4: `aseel-kit`/`aseel-sales` صارتا `ui-kit`/`sales-classic`،
+     و**المساران القديمان يبقيان مقبولين**: إعادة تسمية داخلية لا يجوز أن تكسر
+     رابطاً محفوظاً في مفضّلة أحدهم. */
   useEffect(() => {
     const p = (location.pathname || "/").replace(/\/$/, "") || "/";
-    if (p === "/aseel-kit") setAppView("aseel-kit");
-    else if (p === "/aseel-sales") setAppView("aseel-sales");
+    if (p === "/ui-kit" || p === "/aseel-kit") setAppView("ui-kit");
+    else if (p === "/sales-classic" || p === "/aseel-sales") setAppView("sales-classic");
   }, [location.pathname]);
 
   // مسارات الصفقات + ?view= القديم؛ لا نفرض شاشة الدور عند كل زيارة لـ /
@@ -2071,11 +2074,11 @@ const App: React.FC = () => {
       case "smart-assistant":
         return <SmartAssistantPage />;
 
-      case "aseel-kit":
-        return <AseelKitStory />;
+      case "ui-kit":
+        return <KitStory />;
 
-      case "aseel-sales":
-        return <SalesInvoiceAseelStory />;
+      case "sales-classic":
+        return <SalesInvoiceKitStory />;
 
       case "sales-orders":
         if (canView(appView)) return <SalesDocumentsPage initialTab="orders" />;
@@ -2111,11 +2114,11 @@ const App: React.FC = () => {
   };
 
   // Dev kit — no auth required
-  if (appView === "aseel-kit") {
-    return <AseelKitStory />;
+  if (appView === "ui-kit") {
+    return <KitStory />;
   }
-  if (appView === "aseel-sales") {
-    return <SalesInvoiceAseelStory />;
+  if (appView === "sales-classic") {
+    return <SalesInvoiceKitStory />;
   }
 
   // 2. Auth Checks

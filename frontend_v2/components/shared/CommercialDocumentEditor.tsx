@@ -1,13 +1,13 @@
 import React from "react";
 import { Plus } from "lucide-react";
 import {
-  AseelDocumentShell,
-  AseelGrid,
-  type AseelGridColumn,
-  type AseelTab,
-  type AseelToolbarAction,
+  KitDocumentShell,
+  KitGrid,
+  type KitGridColumn,
+  type KitTab,
+  type KitToolbarAction,
   type RecordNavigation,
-} from "../aseel";
+} from "../kit";
 
 export type CommercialHeaderField = {
   key: string;
@@ -20,16 +20,16 @@ type Props<TLine> = {
   title: string;
   state?: string;
   nav?: RecordNavigation;
-  actions: AseelToolbarAction[];
+  actions: KitToolbarAction[];
   headerFields: CommercialHeaderField[];
   lines: TLine[];
-  lineColumns: AseelGridColumn<TLine>[];
+  lineColumns: KitGridColumn<TLine>[];
   getLineCell: (line: TLine, key: string) => string | number | null | undefined;
   getLineKey: (line: TLine, index: number) => string | number;
   onLineChange?: (index: number, key: string, value: string) => void;
   onAddLine?: () => void;
   addLineLabel?: string;
-  tabs?: AseelTab[];
+  tabs?: KitTab[];
   totals?: React.ReactNode;
   status?: React.ReactNode;
   banner?: React.ReactNode;
@@ -61,7 +61,7 @@ export function CommercialDocumentEditor<TLine>({
 }: Props<TLine>) {
   return (
     <div dir="rtl" className="min-h-0">
-      <AseelDocumentShell
+      <KitDocumentShell
         title={title}
         state={state}
         nav={nav}
@@ -71,9 +71,9 @@ export function CommercialDocumentEditor<TLine>({
             {headerFields.map((field) => (
               <label
                 key={field.key}
-                className={`aseel-field${field.className ? ` ${field.className}` : ""}`}
+                className={`ktra-field${field.className ? ` ${field.className}` : ""}`}
               >
-                <span className="aseel-field-label">{field.label}</span>
+                <span className="ktra-field-label">{field.label}</span>
                 {field.control}
               </label>
             ))}
@@ -84,7 +84,7 @@ export function CommercialDocumentEditor<TLine>({
         status={status}
       >
         {banner}
-        <AseelGrid<TLine>
+        <KitGrid<TLine>
           columns={lineColumns}
           rows={lines}
           getCell={getLineCell}
@@ -94,17 +94,17 @@ export function CommercialDocumentEditor<TLine>({
           emptyHint={emptyHint}
         />
         {!readOnly && onAddLine && (
-          <button type="button" className="aseel-addrow" onClick={onAddLine}>
+          <button type="button" className="ktra-addrow" onClick={onAddLine}>
             <Plus className="h-3 w-3" /> {addLineLabel}
           </button>
         )}
-      </AseelDocumentShell>
+      </KitDocumentShell>
       {overlay}
     </div>
   );
 }
 
 export type {
-  AseelGridColumn as CommercialLineColumn,
-  AseelToolbarAction as CommercialToolbarAction,
+  KitGridColumn as CommercialLineColumn,
+  KitToolbarAction as CommercialToolbarAction,
 };

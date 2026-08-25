@@ -16,13 +16,13 @@ import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
-  AseelDocumentShell,
-  AseelGrid,
-  useAseelKeymap,
-  type AseelGridColumn,
-  type AseelToolbarAction,
-  type AseelTab,
-} from "../aseel";
+  KitDocumentShell,
+  KitGrid,
+  useKitKeymap,
+  type KitGridColumn,
+  type KitToolbarAction,
+  type KitTab,
+} from "../kit";
 import { Plus, Save, X, RefreshCw, AlertTriangle, Trash2 } from "lucide-react";
 
 type Product = {
@@ -269,13 +269,13 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
     }
   };
 
-  useAseelKeymap({
+  useKitKeymap({
     Escape: onBack || (() => undefined),
     F12: () => void submit(),
     F5: () => void load(),
   });
 
-  const gridColumns: AseelGridColumn<ReturnLine>[] = [
+  const gridColumns: KitGridColumn<ReturnLine>[] = [
     { key: "seq", header: "#", width: "40px", align: "center", readOnly: true },
     { key: "product", header: "الصنف", width: "30%" },
     { key: "quantity", header: "الكمية", width: "100px", align: "center", type: "number" },
@@ -296,7 +296,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   gridColumns[1].render = (row) => (
     <select
-      className="aseel-input"
+      className="ktra-input"
       value={row.product_id}
       onChange={(e) => {
         const p = products.find((x) => String(x.id) === e.target.value);
@@ -314,7 +314,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   gridColumns[5].render = (row) =>
     lines.length > 1 ? (
-      <button type="button" className="aseel-iconbtn aseel-iconbtn--danger" onClick={() => removeLine(row._idx)}>
+      <button type="button" className="ktra-iconbtn ktra-iconbtn--danger" onClick={() => removeLine(row._idx)}>
         <Trash2 className="w-3 h-3" />
       </button>
     ) : null;
@@ -324,7 +324,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
     else if (key === "unit_price") updateLine(rowIndex, { unit_price: value });
   };
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     {
       key: "save",
       label: saving ? "..." : "حفظ المرجع كمسودة (F12)",
@@ -349,19 +349,19 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
       onClick: () => void load(),
       separatorBefore: true,
     },
-    ...(onBack ? [{ key: "back", label: "خروج", icon: <X />, onClick: onBack, danger: true } as AseelToolbarAction] : []),
+    ...(onBack ? [{ key: "back", label: "خروج", icon: <X />, onClick: onBack, danger: true } as KitToolbarAction] : []),
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     {
       key: "main",
       label: "بيانات المرجع",
       content: (
         <div style={{ padding: "8px" }}>
-          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}><AlertTriangle className="w-3 h-3 inline" /> {err}</div>}
-          {msg && <div className="aseel-banner" style={{ marginBottom: "8px", color: "var(--aseel-ok, #2d7d46)" }}>{msg}</div>}
+          {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}><AlertTriangle className="w-3 h-3 inline" /> {err}</div>}
+          {msg && <div className="ktra-banner" style={{ marginBottom: "8px", color: "var(--ktra-ok, #2d7d46)" }}>{msg}</div>}
 
-          <AseelGrid<ReturnLine>
+          <KitGrid<ReturnLine>
             columns={gridColumns}
             rows={lines}
             getCell={getCell}
@@ -371,15 +371,15 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
             emptyHint="ابدأ إدخال البنود المرتجعة للمورد"
           />
 
-          <div className="aseel-total-row aseel-total-row--grand" style={{ marginTop: "8px", padding: "8px 12px" }}>
+          <div className="ktra-total-row ktra-total-row--grand" style={{ marginTop: "8px", padding: "8px 12px" }}>
             <span>إجمالي المرجوع للمورد</span>
-            <span className="aseel-num font-bold">{formatMoney(totalAmount)}</span>
+            <span className="ktra-num font-bold">{formatMoney(totalAmount)}</span>
           </div>
 
           <div style={{ marginTop: "12px" }}>
-            <label className="aseel-field">
-              <span className="aseel-field-label">سبب الإرجاع للمورد</span>
-              <textarea className="aseel-input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="عيب جودة / كميات زائدة / ..." />
+            <label className="ktra-field">
+              <span className="ktra-field-label">سبب الإرجاع للمورد</span>
+              <textarea className="ktra-input" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="عيب جودة / كميات زائدة / ..." />
             </label>
           </div>
         </div>
@@ -389,20 +389,20 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="مرجع الشراء (Purchase Return)"
         state={originalInvoiceId ? `للفاتورة #${originalInvoiceId}` : "مرجع جديد"}
         actions={actions}
         header={
           <>
-            <label className="aseel-field">
-              <span className="aseel-field-label">تاريخ المرجوع</span>
-              <input type="date" className="aseel-input" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
+            <label className="ktra-field">
+              <span className="ktra-field-label">تاريخ المرجوع</span>
+              <input type="date" className="ktra-input" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} />
             </label>
-            <label className="aseel-field" style={{ minWidth: "200px" }}>
-              <span className="aseel-field-label">فاتورة الشراء الأصلية *</span>
+            <label className="ktra-field" style={{ minWidth: "200px" }}>
+              <span className="ktra-field-label">فاتورة الشراء الأصلية *</span>
               <select
-                className="aseel-input"
+                className="ktra-input"
                 value={originalInvoiceId}
                 onChange={(e) => setOriginalInvoiceId(e.target.value ? Number(e.target.value) : "")}
               >
@@ -414,10 +414,10 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
                 ))}
               </select>
             </label>
-            <label className="aseel-field" style={{ minWidth: "180px" }}>
-              <span className="aseel-field-label">المورد (موروث من الفاتورة)</span>
+            <label className="ktra-field" style={{ minWidth: "180px" }}>
+              <span className="ktra-field-label">المورد (موروث من الفاتورة)</span>
               <input
-                className="aseel-input"
+                className="ktra-input"
                 value={supplierName || "— اختر الفاتورة الأصلية —"}
                 readOnly
                 title="المورد يُورَّث من الفاتورة الأصلية ولا يُعدَّل — قيد العكس يجب أن يصيب نفس حساب ذمم المورد."
@@ -428,8 +428,8 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
         tabs={tabs}
         status={
           <>
-            <span className="aseel-status-item">عدد البنود <b>{lines.filter((l) => l.product_id).length}</b></span>
-            <span className="aseel-status-item">الإجمالي <b className="aseel-num">{formatMoney(totalAmount)}</b></span>
+            <span className="ktra-status-item">عدد البنود <b>{lines.filter((l) => l.product_id).length}</b></span>
+            <span className="ktra-status-item">الإجمالي <b className="ktra-num">{formatMoney(totalAmount)}</b></span>
           </>
         }
       />
@@ -447,7 +447,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
           >
             <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)]">
               <h3 className="text-sm font-bold text-[var(--color-text)]">اختيار بنود الإرجاع</h3>
-              <button type="button" className="aseel-iconbtn" onClick={() => setPickerOpen(false)} title="إغلاق">
+              <button type="button" className="ktra-iconbtn" onClick={() => setPickerOpen(false)} title="إغلاق">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -492,7 +492,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
                           <td className="p-2 text-center">
                             <input
                               type="number"
-                              className="aseel-input"
+                              className="ktra-input"
                               style={{ width: "80px", textAlign: "center" }}
                               min={0}
                               max={remaining}
@@ -512,8 +512,8 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
               )}
             </div>
             <div className="flex justify-end gap-2 px-4 py-3 border-t border-[var(--color-border)]">
-              <button type="button" className="aseel-btn" onClick={() => setPickerOpen(false)}>إلغاء</button>
-              <button type="button" className="aseel-btn aseel-btn-primary" onClick={confirmPicker}>
+              <button type="button" className="ktra-btn" onClick={() => setPickerOpen(false)}>إلغاء</button>
+              <button type="button" className="ktra-btn ktra-btn-primary" onClick={confirmPicker}>
                 إضافة البنود المختارة
               </button>
             </div>

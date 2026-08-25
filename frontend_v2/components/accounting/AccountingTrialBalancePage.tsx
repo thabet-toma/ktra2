@@ -3,10 +3,10 @@ import { accountingApi } from "../../services/accountingApi";
 import { formatMoney } from "../../utils/formatNumber";
 import type { TrialBalanceResponse, TrialBalanceRow } from "../../types/accounting";
 import {
-  AseelDocumentShell,
-  AseelReportTable,
-} from "../aseel";
-import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
+  KitDocumentShell,
+  KitReportTable,
+} from "../kit";
+import type { KitToolbarAction, KitTab, ReportColumn } from "../kit";
 import { Search, CheckCircle2, AlertTriangle } from "lucide-react";
 
 export interface AccountingTrialBalancePageProps {
@@ -139,24 +139,24 @@ export const AccountingTrialBalancePage: React.FC<AccountingTrialBalancePageProp
 
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      <div className="aseel-field">
-        <label className="aseel-field-label">من</label>
-        <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">من</label>
+        <input type="date" className="ktra-input" value={start} onChange={(e) => setStart(e.target.value)} />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">إلى</label>
-        <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">إلى</label>
+        <input type="date" className="ktra-input" value={end} onChange={(e) => setEnd(e.target.value)} />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">نوع</label>
-        <select className="aseel-input" style={{ minWidth: "120px" }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+      <div className="ktra-field">
+        <label className="ktra-field-label">نوع</label>
+        <select className="ktra-input" style={{ minWidth: "120px" }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
           <option value="">الكل</option>
           {types.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
       </div>
-      <div className="aseel-field" style={{ flex: "1", minWidth: "180px" }}>
-        <label className="aseel-field-label">بحث</label>
-        <input type="text" className="aseel-input" placeholder="كود أو اسم..."
+      <div className="ktra-field" style={{ flex: "1", minWidth: "180px" }}>
+        <label className="ktra-field-label">بحث</label>
+        <input type="text" className="ktra-input" placeholder="كود أو اسم..."
           value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
       <label className="flex items-center gap-2 text-sm" style={{ paddingTop: "18px" }}>
@@ -167,7 +167,7 @@ export const AccountingTrialBalancePage: React.FC<AccountingTrialBalancePageProp
         <input type="checkbox" checked={showZero} onChange={(e) => setShowZero(e.target.checked)} />
         عرض بدون حركة
       </label>
-      <button type="button" className="aseel-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
+      <button type="button" className="ktra-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
         <Search className="w-4 h-4" />تحديث
       </button>
     </div>
@@ -175,8 +175,8 @@ export const AccountingTrialBalancePage: React.FC<AccountingTrialBalancePageProp
 
   const reportContent = (
     <>
-      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-      <AseelReportTable<TrialBalanceRow>
+      {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      <KitReportTable<TrialBalanceRow>
         filterBar={filterBar}
         columns={columns}
         rows={rows}
@@ -192,24 +192,24 @@ export const AccountingTrialBalancePage: React.FC<AccountingTrialBalancePageProp
     </>
   );
 
-  const shellActions: AseelToolbarAction[] = [
+  const shellActions: KitToolbarAction[] = [
     { key: "run", label: "تحديث", icon: <Search className="w-4 h-4" />, onClick: fetchData },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "balance", label: "ميزان المراجعة", content: reportContent },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="ميزان المراجعة"
         actions={shellActions}
         header={<></>}
         tabs={tabs}
         status={
           totals ? (
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               {totals.balanced ? (
                 <CheckCircle2 className="w-3 h-3" style={{ color: "var(--color-success,#16a34a)" }} />
               ) : (
@@ -221,7 +221,7 @@ export const AccountingTrialBalancePage: React.FC<AccountingTrialBalancePageProp
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

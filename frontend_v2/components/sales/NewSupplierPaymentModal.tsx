@@ -241,24 +241,24 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
       {/* ملاحظة عاجلة مستحقة على هذا المورد — تظهر قبل إتمام السند. */}
       <PartnerNoteAlert partnerId={supplierId === "" ? null : supplierId} className="mb-2" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-        <label className="aseel-field" style={{ gridColumn: "span 2" }}>
-          <span className="aseel-field-label">المورد *</span>
+        <label className="ktra-field" style={{ gridColumn: "span 2" }}>
+          <span className="ktra-field-label">المورد *</span>
           {lockPartner && initialPartner ? (
-            <input className="aseel-input" value={initialPartner.name} readOnly style={{ background: "var(--aseel-surface-2)" }} />
+            <input className="ktra-input" value={initialPartner.name} readOnly style={{ background: "var(--ktra-surface-2)" }} />
           ) : (
-            <select className="aseel-input" value={supplierId} onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : "")}>
+            <select className="ktra-input" value={supplierId} onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : "")}>
               <option value="">— اختر —</option>
               {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           )}
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">التاريخ</span>
-          <input type="date" className="aseel-input" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+        <label className="ktra-field">
+          <span className="ktra-field-label">التاريخ</span>
+          <input type="date" className="ktra-input" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
         </label>
 
-        <label className="aseel-field">
-          <span className="aseel-field-label">الصندوق / البنك *</span>
+        <label className="ktra-field">
+          <span className="ktra-field-label">الصندوق / البنك *</span>
           <AccountTreeField
             accounts={accounts}
             value={cashAccountId}
@@ -267,16 +267,16 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
             title="اختيار الصندوق / البنك"
           />
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">العملة</span>
-          <select className="aseel-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value ? Number(e.target.value) : "")}>
+        <label className="ktra-field">
+          <span className="ktra-field-label">العملة</span>
+          <select className="ktra-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value ? Number(e.target.value) : "")}>
             <option value="">—</option>
             {currencies.map((c) => <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>)}
           </select>
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">سعر الصرف</span>
-          <input type="number" step="0.000001" className="aseel-input aseel-num" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+        <label className="ktra-field">
+          <span className="ktra-field-label">سعر الصرف</span>
+          <input type="number" step="0.000001" className="ktra-input ktra-num" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
         </label>
       </div>
 
@@ -300,14 +300,14 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
         newLineDefaults={chequeDefaults}
       />
 
-      <label className="aseel-field" style={{ marginTop: "12px", display: "block" }}>
-        <span className="aseel-field-label">ملاحظات</span>
-        <textarea className="aseel-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+      <label className="ktra-field" style={{ marginTop: "12px", display: "block" }}>
+        <span className="ktra-field-label">ملاحظات</span>
+        <textarea className="ktra-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
 
       {/* T-CHQ3/و: سطر القيد كما سيُرحَّل — الشيك الصادر التزام على «شيكات برسم
           الدفع» لا نقدٌ خرج من الصندوق. */}
-      <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--aseel-ink-soft)" }}>
+      <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--ktra-ink-soft)" }}>
         القيد: {buildVoucherEntryPreview({
           cashAmount: cashNum,
           chequesAmount: totalCheques,

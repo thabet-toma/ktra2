@@ -80,7 +80,7 @@ import {
 import { humanizeDrfError } from "../../utils/drfError";
 import { formatNumber } from "../../utils/formatNumber";
 import { storeHomeUrl } from "../../utils/storeLinks";
-import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
+import { KitDocumentShell, type KitToolbarAction } from "../kit";
 
 const cloudinaryService = new CloudinaryService();
 
@@ -712,7 +712,7 @@ export const StoreSettingsPage: React.FC = () => {
   };
 
   return (
-    <AseelDocumentShell
+    <KitDocumentShell
       title="إدارة وتخصيص المتجر الإلكتروني"
       subtitle="تحكم كامل في المنتجات المعروضة، صور المتجر المخصصة، الحملات الإعلانية، والمظهر والتصميم"
     >
@@ -2262,7 +2262,7 @@ export const StoreSettingsPage: React.FC = () => {
           </div>
         )}
       </div>
-    </AseelDocumentShell>
+    </KitDocumentShell>
   );
 };
 

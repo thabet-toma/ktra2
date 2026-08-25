@@ -1,6 +1,6 @@
 /**
- * N4-T2 — SalesCustomersPage (L8) Aseel inside-out
- * AseelDocumentShell + AseelDenseTable + شريط فلاتر + modal CRUD
+ * N4-T2 — SalesCustomersPage (L8) Kit inside-out
+ * KitDocumentShell + KitDenseTable + شريط فلاتر + modal CRUD
  * Ref: task5.md:677-680
  *
  * حقول Partner الجديدة (N8-T8 backend): default_cost_center،
@@ -12,13 +12,13 @@ import { apiDelete, apiGetPagedList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { Plus, Pencil, Trash2, RefreshCw } from "lucide-react";
 import {
-  AseelDocumentShell,
-  AseelDenseTable,
-  useAseelIndexKeymap,
+  KitDocumentShell,
+  KitDenseTable,
+  useKitIndexKeymap,
   type DenseColumn,
-  type AseelToolbarAction,
-  type AseelTab,
-} from "../aseel";
+  type KitToolbarAction,
+  type KitTab,
+} from "../kit";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { PartnerEditorModal } from "../partners/PartnerEditorModal";
@@ -112,14 +112,14 @@ export const SalesCustomersPage: React.FC = () => {
     openInNewTab(`/partners/${p.id}?tab=edit`);
   };
 
-  useAseelIndexKeymap({
+  useKitIndexKeymap({
     F2: () => {
       if (selectedKey != null) {
         const r = rows.find((x) => x.id === selectedKey);
         if (r) openEdit(r);
       }
     },
-    F6: () => document.querySelector<HTMLInputElement>('[data-aseel-field="search"]')?.focus(),
+    F6: () => document.querySelector<HTMLInputElement>('[data-ktra-field="search"]')?.focus(),
     CtrlIns: openNew,
     Enter: () => {
       if (selectedKey != null) {
@@ -160,7 +160,7 @@ export const SalesCustomersPage: React.FC = () => {
           >
             {r.name}
           </button>
-          {r.legal_name && <span className="text-[10px]" style={{ color: "var(--aseel-ink-soft)" }}>{r.legal_name}</span>}
+          {r.legal_name && <span className="text-[10px]" style={{ color: "var(--ktra-ink-soft)" }}>{r.legal_name}</span>}
         </div>
       ),
     },
@@ -174,7 +174,7 @@ export const SalesCustomersPage: React.FC = () => {
       width: "80px",
       align: "center",
       render: (r) => (
-        <span className="text-xs" style={{ color: "var(--aseel-ink-soft)" }}>
+        <span className="text-xs" style={{ color: "var(--ktra-ink-soft)" }}>
           {PRICE_TIERS.find((t) => t.v === String(r.assigned_price_tier ?? ""))?.l || "—"}
         </span>
       ),
@@ -185,7 +185,7 @@ export const SalesCustomersPage: React.FC = () => {
       width: "110px",
       align: "left",
       numeric: true,
-      render: (r) => <span className="aseel-num font-mono text-xs">{fmtMoney(r.credit_limit)}</span>,
+      render: (r) => <span className="ktra-num font-mono text-xs">{fmtMoney(r.credit_limit)}</span>,
     },
     {
       key: "end_date",
@@ -203,7 +203,7 @@ export const SalesCustomersPage: React.FC = () => {
         <div style={{ display: "flex", gap: "4px", justifyContent: "center" }}>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             style={{ fontSize: "10px", padding: "2px 6px" }}
             onClick={(e) => { e.stopPropagation(); openEdit(r); }}
             title="تعديل (F2)"
@@ -212,7 +212,7 @@ export const SalesCustomersPage: React.FC = () => {
           </button>
           <button
             type="button"
-            className="aseel-toolbtn aseel-toolbtn--danger"
+            className="ktra-toolbtn ktra-toolbtn--danger"
             style={{ fontSize: "10px", padding: "2px 6px" }}
             onClick={(e) => { e.stopPropagation(); handleDelete(r); }}
             title="حذف"
@@ -226,19 +226,19 @@ export const SalesCustomersPage: React.FC = () => {
 
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
-      <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
-        <span className="aseel-field-label">بحث (اسم/هاتف/بريد/ضريبي)</span>
+      <label className="ktra-field" style={{ flex: 1, minWidth: "200px" }}>
+        <span className="ktra-field-label">بحث (اسم/هاتف/بريد/ضريبي)</span>
         <input
-          className="aseel-input"
-          data-aseel-field="search"
+          className="ktra-input"
+          data-ktra-field="search"
           placeholder="بحث... (F6)"
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />
       </label>
-      <label className="aseel-field" style={{ minWidth: "120px" }}>
-        <span className="aseel-field-label">فئة السعر</span>
-        <select className="aseel-input" value={filterTier} onChange={(e) => { setFilterTier(e.target.value); setPage(1); }}>
+      <label className="ktra-field" style={{ minWidth: "120px" }}>
+        <span className="ktra-field-label">فئة السعر</span>
+        <select className="ktra-input" value={filterTier} onChange={(e) => { setFilterTier(e.target.value); setPage(1); }}>
           <option value="">الكل</option>
           {PRICE_TIERS.filter((t) => t.v).map((t) => (
             <option key={t.v} value={t.v}>{t.l}</option>
@@ -248,7 +248,7 @@ export const SalesCustomersPage: React.FC = () => {
     </div>
   );
 
-  const toolbarActions: AseelToolbarAction[] = [
+  const toolbarActions: KitToolbarAction[] = [
     { key: "new", label: "عميل جديد (Ctrl+Ins)", icon: <Plus />, onClick: openNew },
     {
       key: "refresh",
@@ -259,15 +259,15 @@ export const SalesCustomersPage: React.FC = () => {
     },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     {
       key: "list",
       label: "العملاء",
       content: (
         <div style={{ padding: "8px" }}>
-          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-          {msg && <div className="aseel-banner" style={{ marginBottom: "8px", color: "var(--aseel-ok, #2d7d46)" }}>{msg}</div>}
-          <AseelDenseTable<PartnerApi>
+          {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+          {msg && <div className="ktra-banner" style={{ marginBottom: "8px", color: "var(--ktra-ok, #2d7d46)" }}>{msg}</div>}
+          <KitDenseTable<PartnerApi>
             columns={columns}
             rows={filtered}
             getRowKey={(r) => r.id}
@@ -286,14 +286,14 @@ export const SalesCustomersPage: React.FC = () => {
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="عملاء المبيعات"
         state={loading ? "جاري التحميل…" : `${filtered.length} في الصفحة من ${total}`}
         actions={toolbarActions}
         header={filterBar}
         tabs={tabs}
         status={
-          <span className="aseel-status-item">
+          <span className="ktra-status-item">
             عميل <b>{total}</b>
           </span>
         }

@@ -1,5 +1,5 @@
 /**
- * N5-T7 — PriceOfferForm (F5) — Aseel-style مع 4 أنواع
+ * N5-T7 — PriceOfferForm (F5) — Kit-style مع 4 أنواع
  * المرجع: العروض والطلبيات.txt:4-9
  * القالب: SalesInvoiceEditor.tsx
  */
@@ -8,11 +8,11 @@ import { PriceOffer, PriceOfferItem, PriceOfferStatus, PriceOfferType, Supplier,
 import type { PriceOfferAttachment, PriceOfferNote } from "../../../types/offer";
 import type { PriceOfferScope } from "../../../services/firestoreService";
 import {
-  AseelAutocomplete,
-  useAseelKeymap,
-  type AseelGridColumn,
-  type AseelToolbarAction,
-} from "../../aseel";
+  KitAutocomplete,
+  useKitKeymap,
+  type KitGridColumn,
+  type KitToolbarAction,
+} from "../../kit";
 import {
   Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Search, Info,
   FileText, Link2, Plus,
@@ -353,13 +353,13 @@ export const PriceOfferForm: React.FC<Props> = ({
   const removeAttachment = (index: number) =>
     setAttachments((prev) => prev.filter((_, i) => i !== index));
 
-  useAseelKeymap({
+  useKitKeymap({
     F12: () => { setLastKey("F12 حفظ"); if (!saving && !isReadOnly) void handleSave(); },
     Escape: () => { setLastKey("Esc إلغاء"); onCancel(); },
     CtrlIns: () => { setLastKey("Ctrl+Ins سطر"); addLine(); },
   }, { enabled: true });
 
-  const toolbarActions: AseelToolbarAction[] = [
+  const toolbarActions: KitToolbarAction[] = [
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)",
       icon: saving ? <Loader2 className="animate-spin" /> : <Save />,
       onClick: !isReadOnly && !saving ? () => void handleSave() : undefined,
@@ -369,7 +369,7 @@ export const PriceOfferForm: React.FC<Props> = ({
   ];
 
   // ── أعمدة جدول البنود ──
-  const gridColumns: AseelGridColumn<LineItem>[] = [
+  const gridColumns: KitGridColumn<LineItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     { key: "name", header: "بيان الصنف", width: "35%" },
     { key: "specifications", header: "مواصفات", width: "20%" },
@@ -406,7 +406,7 @@ export const PriceOfferForm: React.FC<Props> = ({
 
   gridColumns[gridColumns.length - 1].render = (row: LineItem) =>
     isReadOnly ? null : (
-      <button type="button" className="aseel-iconbtn aseel-iconbtn--danger" onClick={() => removeLine(row.key)}>
+      <button type="button" className="ktra-iconbtn ktra-iconbtn--danger" onClick={() => removeLine(row.key)}>
         <Trash2 className="h-3 w-3" />
       </button>
     );
@@ -415,7 +415,7 @@ export const PriceOfferForm: React.FC<Props> = ({
    *
    * كانت الخلية زرّاً يفتح `ItemSearchModal` العريض: مسار مختلف عن كل شاشة أخرى
    * (فاتورة الشراء، الصفقة، فاتورة البيع) التي تكتب اسم الصنف داخل الخلية.
-   * الآن نفس المكوّن المشترك `AseelAutocomplete`: كتابة ← قائمة مرشَّحة ←
+   * الآن نفس المكوّن المشترك `KitAutocomplete`: كتابة ← قائمة مرشَّحة ←
    * «إضافة كصنف جديد» للنص الحر، مع (i) لبطاقة الصنف. المنتقي العريض باقٍ خلف
    * أيقونة البحث لمن يريد الفهرس الكامل.
    *
@@ -425,7 +425,7 @@ export const PriceOfferForm: React.FC<Props> = ({
    */
   gridColumns[1].render = (row: LineItem) => (
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-      <AseelAutocomplete
+      <KitAutocomplete
         value={row.name || ""}
         options={itemOptions}
         disabled={isReadOnly}
@@ -445,7 +445,7 @@ export const PriceOfferForm: React.FC<Props> = ({
       {row.itemId && (
         <button
           type="button"
-          className="aseel-ellipsis"
+          className="ktra-ellipsis"
           onClick={() => setCardProductId(Number(row.itemId))}
           title="بطاقة الصنف"
         ><Info className="h-3.5 w-3.5" /></button>
@@ -453,7 +453,7 @@ export const PriceOfferForm: React.FC<Props> = ({
       {!isReadOnly && (
         <button
           type="button"
-          className="aseel-ellipsis"
+          className="ktra-ellipsis"
           onClick={() => setItemPickerLineKey(row.key)}
           title="فهرس الأصناف الكامل"
         ><Search className="h-3.5 w-3.5" /></button>
@@ -462,7 +462,7 @@ export const PriceOfferForm: React.FC<Props> = ({
   );
 
   const banner = (err || msg) ? (
-    <div className={`aseel-banner ${err ? "aseel-banner--err" : "aseel-banner--ok"}`}>
+    <div className={`ktra-banner ${err ? "ktra-banner--err" : "ktra-banner--ok"}`}>
       {err ? <AlertCircle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
       <span>{err || msg}</span>
     </div>
@@ -483,24 +483,24 @@ export const PriceOfferForm: React.FC<Props> = ({
 
   const notesTab = (
     <div className="space-y-3 px-1 py-2">
-      <label className="aseel-field">
-        <span className="aseel-field-label">ملاحظة عامة على العرض</span>
-        <textarea className="aseel-input w-full" rows={6}
+      <label className="ktra-field">
+        <span className="ktra-field-label">ملاحظة عامة على العرض</span>
+        <textarea className="ktra-input w-full" rows={6}
           disabled={isReadOnly} value={internalNotes}
           onChange={(e) => setInternalNotes(e.target.value)}
           placeholder="ملاحظات داخلية…" />
       </label>
 
       <div className="space-y-2">
-        <span className="aseel-field-label">
+        <span className="ktra-field-label">
           دفتر الملاحظات {notesLog.length > 0 && `(${notesLog.length})`}
         </span>
         {!isReadOnly && (
           <div className="flex items-start gap-2">
-            <textarea className="aseel-input w-full" rows={3}
+            <textarea className="ktra-input w-full" rows={3}
               value={newNote} onChange={(e) => setNewNote(e.target.value)}
               placeholder="أضف ملاحظة جديدة… (تُحفظ بتاريخها)" />
-            <button type="button" className="aseel-btn shrink-0"
+            <button type="button" className="ktra-btn shrink-0"
               disabled={!newNote.trim()} onClick={addNote}
               title="إضافة ملاحظة مؤرَّخة">
               <Plus className="h-4 w-4" /> إضافة
@@ -508,21 +508,21 @@ export const PriceOfferForm: React.FC<Props> = ({
           </div>
         )}
         {notesLog.length === 0 ? (
-          <p className="aseel-hint">لا ملاحظات بعد — أضف ملاحظة لتبقى مؤرَّخة في سجل العرض.</p>
+          <p className="ktra-hint">لا ملاحظات بعد — أضف ملاحظة لتبقى مؤرَّخة في سجل العرض.</p>
         ) : (
           <ul className="space-y-1.5">
             {notesLog.map((note, index) => (
               <li key={`${note.at || "new"}-${index}`}
                 className="flex items-start justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1.5">
                 <div className="min-w-0 flex-1">
-                  <div className="whitespace-pre-wrap break-words text-xs aseel-text-ink">{note.text}</div>
-                  <div className="mt-0.5 text-[10px] aseel-text-soft">
+                  <div className="whitespace-pre-wrap break-words text-xs ktra-text-ink">{note.text}</div>
+                  <div className="mt-0.5 text-[10px] ktra-text-soft">
                     {note.at ? formatDateValue(note.at) : "ستُؤرَّخ عند الحفظ"}
                     {note.by ? ` · ${note.by}` : ""}
                   </div>
                 </div>
                 {!isReadOnly && (
-                  <button type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+                  <button type="button" className="ktra-iconbtn ktra-iconbtn--danger"
                     onClick={() => setNotesLog((current) => current.filter((_, i) => i !== index))}
                     title="حذف الملاحظة">
                     <Trash2 className="h-3 w-3" />
@@ -538,33 +538,33 @@ export const PriceOfferForm: React.FC<Props> = ({
 
   const shippingTab = (
     <div className="grid grid-cols-1 gap-2 px-1 py-2 md:grid-cols-3">
-      <label className="aseel-field">
-        <span className="aseel-field-label">طريقة الشحن</span>
-        <input className="aseel-input" disabled={isReadOnly}
+      <label className="ktra-field">
+        <span className="ktra-field-label">طريقة الشحن</span>
+        <input className="ktra-input" disabled={isReadOnly}
           value={shippingMethod} onChange={(e) => setShippingMethod(e.target.value)} />
       </label>
-      <label className="aseel-field">
-        <span className="aseel-field-label">طريقة الدفع</span>
-        <input className="aseel-input" disabled={isReadOnly}
+      <label className="ktra-field">
+        <span className="ktra-field-label">طريقة الدفع</span>
+        <input className="ktra-input" disabled={isReadOnly}
           value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} />
       </label>
-      <label className="aseel-field">
-        <span className="aseel-field-label">مدة التسليم (يوم)</span>
-        <input className="aseel-input" type="number" min="0" disabled={isReadOnly}
+      <label className="ktra-field">
+        <span className="ktra-field-label">مدة التسليم (يوم)</span>
+        <input className="ktra-input" type="number" min="0" disabled={isReadOnly}
           value={deliveryDays} onChange={(e) => setDeliveryDays(e.target.value)} />
       </label>
       {/* T-IMPOFFER: مبلغ الشحن المقدَّر — كان غائباً عن الشاشة كلياً. */}
-      <label className="aseel-field">
-        <span className="aseel-field-label">مبلغ الشحن المقدَّر</span>
-        <input className="aseel-input" type="number" min="0" step="0.01"
+      <label className="ktra-field">
+        <span className="ktra-field-label">مبلغ الشحن المقدَّر</span>
+        <input className="ktra-input" type="number" min="0" step="0.01"
           disabled={isReadOnly || shippingIncluded}
           value={shippingCost} onChange={(e) => setShippingCost(e.target.value)} />
       </label>
-      <label className="aseel-field aseel-field--inline">
+      <label className="ktra-field ktra-field--inline">
         <input type="checkbox" disabled={isReadOnly}
           checked={shippingIncluded}
           onChange={(e) => setShippingIncluded(e.target.checked)} />
-        <span className="aseel-field-label" style={{ flex: "unset" }}>
+        <span className="ktra-field-label" style={{ flex: "unset" }}>
           الأسعار تشمل الشحن
         </span>
       </label>
@@ -574,20 +574,20 @@ export const PriceOfferForm: React.FC<Props> = ({
   /** T-IMPOFFER: مصدر العرض — رابط علي بابا ورقم التواصل مع مندوب المورد. */
   const sourceTab = (
     <div className="grid grid-cols-1 gap-2 px-1 py-2 md:grid-cols-2">
-      <label className="aseel-field">
-        <span className="aseel-field-label">رابط علي بابا / المصدر</span>
-        <input className="aseel-input" dir="ltr" disabled={isReadOnly}
+      <label className="ktra-field">
+        <span className="ktra-field-label">رابط علي بابا / المصدر</span>
+        <input className="ktra-input" dir="ltr" disabled={isReadOnly}
           value={alibabaLink} onChange={(e) => setAlibabaLink(e.target.value)}
           placeholder="https://www.alibaba.com/product-detail/…" />
       </label>
-      <label className="aseel-field">
-        <span className="aseel-field-label">رقم التواصل مع المورد</span>
-        <input className="aseel-input" dir="ltr" disabled={isReadOnly}
+      <label className="ktra-field">
+        <span className="ktra-field-label">رقم التواصل مع المورد</span>
+        <input className="ktra-input" dir="ltr" disabled={isReadOnly}
           value={supplierContact} onChange={(e) => setSupplierContact(e.target.value)}
           placeholder="+86 138 0000 0000" />
       </label>
       {alibabaLink.trim() && (
-        <a className="aseel-hint flex items-center gap-1 hover:underline md:col-span-2"
+        <a className="ktra-hint flex items-center gap-1 hover:underline md:col-span-2"
           href={alibabaLink.trim()} target="_blank" rel="noopener noreferrer">
           <Link2 className="h-3.5 w-3.5" />
           <span>افتح صفحة المنتج عند المورد</span>
@@ -614,7 +614,7 @@ export const PriceOfferForm: React.FC<Props> = ({
         />
       )}
       {attachments.length === 0 ? (
-        <p className="aseel-hint text-center">لا توجد ملفات مرفوعة لهذا العرض</p>
+        <p className="ktra-hint text-center">لا توجد ملفات مرفوعة لهذا العرض</p>
       ) : (
         <ul className="space-y-1">
           {attachments.map((file, index) => (
@@ -627,13 +627,13 @@ export const PriceOfferForm: React.FC<Props> = ({
                 <FileText className="h-4 w-4 shrink-0 text-red-500" />
                 <span className="truncate">{file.name || file.url}</span>
                 {file.size ? (
-                  <span className="shrink-0 text-[10px] aseel-text-soft">
+                  <span className="shrink-0 text-[10px] ktra-text-soft">
                     {formatNumber(file.size / 1024, { maxDecimals: 1 })} KB
                   </span>
                 ) : null}
               </button>
               {!isReadOnly && (
-                <button type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+                <button type="button" className="ktra-iconbtn ktra-iconbtn--danger"
                   onClick={() => removeAttachment(index)} title="إزالة الملف">
                   <Trash2 className="h-3 w-3" />
                 </button>
@@ -653,7 +653,7 @@ export const PriceOfferForm: React.FC<Props> = ({
   const needsDetail = STATUS_NEEDS_DETAIL.includes(status);
   const decisionTab = (
     <div className="space-y-2 px-1 py-2">
-      <p className="aseel-hint">
+      <p className="ktra-hint">
         {status === "rejected"
           ? "هذا العرض غير ملائم — سيظهر مشطوباً في القائمة."
           : status === "approved_for_shipping"
@@ -664,11 +664,11 @@ export const PriceOfferForm: React.FC<Props> = ({
                 ? "العرض قيد المناقشة مع المورد — لم يُتَّخذ قرار بعد."
                 : "لم تُحدَّد حالة العرض بعد."}
       </p>
-      <label className="aseel-field">
-        <span className="aseel-field-label">
+      <label className="ktra-field">
+        <span className="ktra-field-label">
           {STATUS_DETAIL_LABEL[status] || "تفصيل الحالة"} {needsDetail ? "*" : ""}
         </span>
-        <textarea className="aseel-input w-full" rows={4}
+        <textarea className="ktra-input w-full" rows={4}
           disabled={isReadOnly || !needsDetail}
           value={decisionReason} onChange={(e) => setDecisionReason(e.target.value)}
           placeholder={STATUS_DETAIL_PLACEHOLDER[status]
@@ -683,40 +683,40 @@ export const PriceOfferForm: React.FC<Props> = ({
     {
       key: "number",
       label: "رقم العرض",
-      control: <input className="aseel-input aseel-input--hl" disabled={isReadOnly}
+      control: <input className="ktra-input ktra-input--hl" disabled={isReadOnly}
         value={offerNumber} onChange={(e) => setOfferNumber(e.target.value)} placeholder="تلقائي" />,
     },
     {
       key: "orderName",
       label: "اسم الطلبية",
-      control: <input className="aseel-input" disabled={isReadOnly}
+      control: <input className="ktra-input" disabled={isReadOnly}
         value={orderName} onChange={(e) => setOrderName(e.target.value)}
         maxLength={200} placeholder="مثال: طلبية أثاث مكتبي" />,
     },
     {
       key: "orderDescription",
       label: "وصف الطلبية",
-      control: <textarea className="aseel-input min-h-16 resize-y" disabled={isReadOnly}
+      control: <textarea className="ktra-input min-h-16 resize-y" disabled={isReadOnly}
         value={orderDescription} onChange={(e) => setOrderDescription(e.target.value)}
         placeholder="وصف مختصر يوضح محتوى الطلبية والغرض منها" />,
     },
     {
       key: "date",
       label: "التاريخ",
-      control: <input className="aseel-input" type="date" disabled={isReadOnly}
+      control: <input className="ktra-input" type="date" disabled={isReadOnly}
         value={offerDate} onChange={(e) => setOfferDate(e.target.value)} />,
     },
     {
       key: "validUntil",
       label: "صالح حتى",
-      control: <input className="aseel-input" type="date" disabled={isReadOnly}
+      control: <input className="ktra-input" type="date" disabled={isReadOnly}
         value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />,
     },
     {
       key: "type",
       label: "نوع العرض",
       control: (
-        <select className="aseel-input" disabled={isReadOnly}
+        <select className="ktra-input" disabled={isReadOnly}
           value={offerType} onChange={(e) => setOfferType(e.target.value as PriceOfferType)}>
           {OFFER_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
         </select>
@@ -731,7 +731,7 @@ export const PriceOfferForm: React.FC<Props> = ({
        * المشابه، والاسم الجديد يبقى **مبدئياً** حتى التحويل.
        */
       control: (
-        <AseelAutocomplete
+        <KitAutocomplete
           value={selectedSupplier?.tradeName || supplierDraftName}
           options={supplierOptions}
           disabled={isReadOnly}
@@ -756,7 +756,7 @@ export const PriceOfferForm: React.FC<Props> = ({
       label: "الاسم",
       control: (
         <input
-          className="aseel-input"
+          className="ktra-input"
           readOnly
           value={
             selectedSupplier?.tradeName
@@ -769,7 +769,7 @@ export const PriceOfferForm: React.FC<Props> = ({
       key: "currency",
       label: "العملة",
       control: (
-        <select className="aseel-input" disabled={isReadOnly}
+        <select className="ktra-input" disabled={isReadOnly}
           value={currency} onChange={(e) => setCurrency(e.target.value)}>
           <option value="USD">USD</option>
           <option value="EUR">EUR</option>
@@ -780,7 +780,7 @@ export const PriceOfferForm: React.FC<Props> = ({
     {
       key: "exchangeRate",
       label: "سعر العملة",
-      control: <input className="aseel-input" type="number" min="0" step="0.001"
+      control: <input className="ktra-input" type="number" min="0" step="0.001"
         disabled={isReadOnly} value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />,
     },
     {
@@ -788,7 +788,7 @@ export const PriceOfferForm: React.FC<Props> = ({
       // T-OFFERSTATE: «الحالة» لا «القرار» — الانتظار والمناقشة حالتان قبل القرار.
       label: "الحالة",
       control: (
-        <select className="aseel-input" disabled={isReadOnly}
+        <select className="ktra-input" disabled={isReadOnly}
           value={status} onChange={(e) => setStatus(e.target.value as PriceOfferStatus)}>
           {Object.entries(statusLabels).map(([key, label]) => (
             <option key={key} value={key}>{label}</option>
@@ -825,46 +825,46 @@ export const PriceOfferForm: React.FC<Props> = ({
       ]}
       totals={
         <>
-          <div className="aseel-total-row">
+          <div className="ktra-total-row">
             <span>مجموع البنود</span>
-            <span className="aseel-total-value">{fmt(subtotal)}</span>
+            <span className="ktra-total-value">{fmt(subtotal)}</span>
           </div>
-          <div className="aseel-total-row">
+          <div className="ktra-total-row">
             <span>الخصم</span>
-            <input className="aseel-input aseel-total-input" type="number" step="0.01" min="0"
+            <input className="ktra-input ktra-total-input" type="number" step="0.01" min="0"
               disabled={isReadOnly} value={discountAmount}
               onChange={(e) => setDiscountAmount(e.target.value)} />
           </div>
-          <div className="aseel-total-row">
+          <div className="ktra-total-row">
             <span>بعد الخصم</span>
-            <span className="aseel-total-value">{fmt(afterDiscount)}</span>
+            <span className="ktra-total-value">{fmt(afterDiscount)}</span>
           </div>
-          <div className="aseel-total-row">
+          <div className="ktra-total-row">
             <span>نسبة الضريبة %</span>
-            <input className="aseel-input aseel-total-input" type="number" step="0.01" min="0"
+            <input className="ktra-input ktra-total-input" type="number" step="0.01" min="0"
           disabled={isReadOnly || scope === "import"} value={scope === "import" ? "0" : taxRate}
               onChange={(e) => setTaxRate(e.target.value)} />
           </div>
-          <div className="aseel-total-row">
+          <div className="ktra-total-row">
             <span>الضريبة</span>
-            <span className="aseel-total-value">{fmt(tax)}</span>
+            <span className="ktra-total-value">{fmt(tax)}</span>
           </div>
           {/* T-IMPOFFER: الشحن ظاهر في الإجماليات لا مخفياً في تبويب. */}
-          <div className="aseel-total-row">
+          <div className="ktra-total-row">
             <span>{shippingIncluded ? "الشحن (مشمول بالأسعار)" : "الشحن المقدَّر"}</span>
-            <span className="aseel-total-value">{fmt(shipping)}</span>
+            <span className="ktra-total-value">{fmt(shipping)}</span>
           </div>
-          <div className="aseel-total-row aseel-total-row--grand">
+          <div className="ktra-total-row ktra-total-row--grand">
             <span>إجمالي العرض</span>
-            <span className="aseel-total-value">{fmt(grandTotal)} {currency}</span>
+            <span className="ktra-total-value">{fmt(grandTotal)} {currency}</span>
           </div>
         </>
       }
       status={
         <>
-          <span className="aseel-status-item">عدد الأصناف <b>{lines.length}</b></span>
-          <span className="aseel-status-item">آخر مفتاح <b>{lastKey}</b></span>
-          {isReadOnly && <span className="aseel-status-item">للقراءة فقط</span>}
+          <span className="ktra-status-item">عدد الأصناف <b>{lines.length}</b></span>
+          <span className="ktra-status-item">آخر مفتاح <b>{lastKey}</b></span>
+          {isReadOnly && <span className="ktra-status-item">للقراءة فقط</span>}
         </>
       }
       overlay={<>

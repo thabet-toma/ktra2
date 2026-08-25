@@ -117,7 +117,7 @@ export const ActionBarRail: React.FC<Props> = ({ user, onNavigate }) => {
   }
 
   const dragging = dragPoint !== null;
-  /* الهندسة متغيّرا CSS كنافذة T-WIN — قاعدة `.aseel-rail--busy` تستهلكهما. */
+  /* الهندسة متغيّرا CSS كنافذة T-WIN — قاعدة `.ktra-rail--busy` تستهلكهما. */
   const floating: React.CSSProperties | undefined = dragPoint
     ? ({ "--rail-x": `${dragPoint.x}px`, "--rail-y": `${dragPoint.y}px` } as React.CSSProperties)
     : undefined;
@@ -126,14 +126,14 @@ export const ActionBarRail: React.FC<Props> = ({ user, onNavigate }) => {
     <>
       <div
         ref={railRef}
-        className={`aseel-rail aseel-rail--${effective}${dragging ? " aseel-rail--busy" : ""}`}
+        className={`ktra-rail ktra-rail--${effective}${dragging ? " ktra-rail--busy" : ""}`}
         style={floating}
         data-action-bar-dock={effective}
         data-testid="action-bar-rail"
       >
         <button
           type="button"
-          className="aseel-rail__grip"
+          className="ktra-rail__grip"
           onPointerDown={startDrag}
           title={`اسحب لتغيير الموضع — الآن: ${DOCK_LABEL[effective]}`}
           aria-label="تغيير موضع شريط الإجراءات"
@@ -154,7 +154,7 @@ const DockZones: React.FC<{ target: DockSide | null }> = ({ target }) => (
     {DOCK_SIDES.map((side) => (
       <div
         key={side}
-        className={`aseel-dockzone aseel-dockzone--${side}${target === side ? " aseel-dockzone--active" : ""}`}
+        className={`ktra-dockzone ktra-dockzone--${side}${target === side ? " ktra-dockzone--active" : ""}`}
         data-dockzone={side}
       />
     ))}

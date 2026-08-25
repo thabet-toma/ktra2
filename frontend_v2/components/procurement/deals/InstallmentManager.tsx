@@ -278,8 +278,8 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
         <div
             className={`rounded-2xl border shadow-sm overflow-hidden ${
                 isShipmentFinance
-                    ? 'bg-gradient-to-br aseel-bg-panel via-white to-[var(--color-primary)]/40 dark:aseel-bg-panel dark:via-gray-900 dark:to-[var(--color-primary)]/30 border-[var(--color-border)]/60 dark:border-[var(--color-border)]/50'
-                    : 'aseel-bg-field dark:aseel-bg-panel aseel-border-soft dark:aseel-border-soft'
+                    ? 'bg-gradient-to-br ktra-bg-panel via-white to-[var(--color-primary)]/40 dark:ktra-bg-panel dark:via-gray-900 dark:to-[var(--color-primary)]/30 border-[var(--color-border)]/60 dark:border-[var(--color-border)]/50'
+                    : 'ktra-bg-field dark:ktra-bg-panel ktra-border-soft dark:ktra-border-soft'
             }`}
         >
             {isShipmentFinance && (
@@ -292,21 +292,21 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
             )}
             <div className="p-4">
             {/* --- Header (Compact) --- */}
-            <div className="flex items-center justify-between mb-4 pb-3 border-b aseel-border-soft dark:aseel-border-soft">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b ktra-border-soft dark:ktra-border-soft">
                 <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${isLocked ? 'aseel-bg-panel aseel-text-soft' : isShipmentFinance ? 'bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/40 dark:text-[var(--color-primary)]' : 'aseel-bg-accent-bg aseel-text-accent'} dark:bg-opacity-10`}>
+                    <div className={`p-2 rounded-lg ${isLocked ? 'ktra-bg-panel ktra-text-soft' : isShipmentFinance ? 'bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/40 dark:text-[var(--color-primary)]' : 'ktra-bg-accent-bg ktra-text-accent'} dark:bg-opacity-10`}>
                         {isLocked ? <Lock className="w-5 h-5" /> : isShipmentFinance ? <Sparkles className="w-5 h-5" /> : <Calculator className="w-5 h-5" />}
                     </div>
                     <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-bold aseel-text-ink dark:aseel-text-soft text-base">
+                            <h3 className="font-bold ktra-text-ink dark:ktra-text-soft text-base">
                                 {isShipmentFinance ? 'خطة دفع وكيل الشحن' : 'جدول الدفعات'}
                             </h3>
                             <span
                                 className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
                                     planActive
-                                        ? 'aseel-bg-panel aseel-text-ink dark:aseel-bg-panel/40 dark:aseel-text-soft'
-                                        : 'aseel-bg-panel aseel-text-soft dark:aseel-bg-panel/50'
+                                        ? 'ktra-bg-panel ktra-text-ink dark:ktra-bg-panel/40 dark:ktra-text-soft'
+                                        : 'ktra-bg-panel ktra-text-soft dark:ktra-bg-panel/50'
                                 }`}
                             >
                                 {isShipmentFinance
@@ -320,27 +320,27 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
                                       : 'معطل'}
                             </span>
                         </div>
-                        <p className="text-xs aseel-text-soft dark:aseel-text-soft flex items-center gap-1 mt-0.5">
+                        <p className="text-xs ktra-text-soft dark:ktra-text-soft flex items-center gap-1 mt-0.5">
                             <span>المبلغ المرجعي:</span>
-                            <span className="font-bold aseel-text-ink dark:aseel-text-soft">${grandTotal.toLocaleString()}</span>
-                            {isLocked && <span className="aseel-text-soft font-medium px-1">• مقفل</span>}
+                            <span className="font-bold ktra-text-ink dark:ktra-text-soft">${grandTotal.toLocaleString()}</span>
+                            {isLocked && <span className="ktra-text-soft font-medium px-1">• مقفل</span>}
                         </p>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-3">
                     {!isLocked && planActive && (
-                        <div className="flex aseel-bg-panel dark:aseel-bg-panel rounded-lg p-0.5">
+                        <div className="flex ktra-bg-panel dark:ktra-bg-panel rounded-lg p-0.5">
                             {[1, 2, 3, 4].map(num => (
                                 <button
                                     key={num}
                                     onClick={() => generateInstallments(num)}
-                                    className={`w-7 h-7 text-xs font-bold rounded-md transition-all ${numInstallments === num ? 'aseel-bg-field dark:aseel-bg-panel aseel-text-accent shadow-sm' : 'aseel-text-soft hover:aseel-text-ink'}`}
+                                    className={`w-7 h-7 text-xs font-bold rounded-md transition-all ${numInstallments === num ? 'ktra-bg-field dark:ktra-bg-panel ktra-text-accent shadow-sm' : 'ktra-text-soft hover:ktra-text-ink'}`}
                                 >
                                     {num}
                                 </button>
                             ))}
-                            <button onClick={addNewInstallment} className="w-7 h-7 flex items-center justify-center rounded-md hover:aseel-bg-field dark:hover:aseel-bg-panel text-green-600">
+                            <button onClick={addNewInstallment} className="w-7 h-7 flex items-center justify-center rounded-md hover:ktra-bg-field dark:hover:ktra-bg-panel text-green-600">
                                 <Plus className="w-3 h-3" />
                             </button>
                         </div>
@@ -352,9 +352,9 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
                             title={installmentPlanEnabled ? 'إيقاف جدول الدفعات' : 'تفعيل جدول الدفعات'}
                             onClick={() => !isLocked && onTogglePlan(!installmentPlanEnabled)}
                             disabled={isLocked && installmentPlanEnabled}
-                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${installmentPlanEnabled ? (isLocked ? 'aseel-bg-panel' : 'aseel-bg-accent') : 'aseel-bg-grid-head'}`}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${installmentPlanEnabled ? (isLocked ? 'ktra-bg-panel' : 'ktra-bg-accent') : 'ktra-bg-grid-head'}`}
                         >
-                            <span className={`inline-block h-3 w-3 transform rounded-full aseel-bg-field transition-transform ${installmentPlanEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
+                            <span className={`inline-block h-3 w-3 transform rounded-full ktra-bg-field transition-transform ${installmentPlanEnabled ? 'translate-x-5' : 'translate-x-1'}`} />
                         </button>
                     )}
                 </div>
@@ -362,11 +362,11 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
 
             {/* --- Body --- */}
             {!planActive ? (
-                <div className="text-center py-8 px-4 aseel-text-soft text-sm rounded-xl aseel-bg-panel/80 dark:aseel-bg-panel/50 border border-dashed aseel-border-soft dark:aseel-border-soft">
+                <div className="text-center py-8 px-4 ktra-text-soft text-sm rounded-xl ktra-bg-panel/80 dark:ktra-bg-panel/50 border border-dashed ktra-border-soft dark:ktra-border-soft">
                     {isShipmentFinance ? (
                         <>
-                            <p className="font-medium aseel-text-ink dark:aseel-text-soft mb-1">لا يوجد إجمالي شحنة بعد</p>
-                            <p className="text-xs aseel-text-soft dark:aseel-text-soft max-w-md mx-auto">
+                            <p className="font-medium ktra-text-ink dark:ktra-text-soft mb-1">لا يوجد إجمالي شحنة بعد</p>
+                            <p className="text-xs ktra-text-soft dark:ktra-text-soft max-w-md mx-auto">
                                 عيّن تكلفة الشحن (إجمالي أو بالوحدة) ثم يظهر جدول الدفعات تلقائياً.
                             </p>
                         </>
@@ -377,7 +377,7 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
             ) : (
                 <div className="space-y-2">
                     {/* Table Header */}
-                    <div className="grid grid-cols-12 gap-2 text-[11px] font-bold aseel-text-soft dark:aseel-text-soft px-2">
+                    <div className="grid grid-cols-12 gap-2 text-[11px] font-bold ktra-text-soft dark:ktra-text-soft px-2">
                         <div className="col-span-1 text-center">#</div>
                         <div className="col-span-3">النسبة %</div>
                         <div className="col-span-4">المبلغ ($)</div>
@@ -401,16 +401,16 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
                             <div key={inst.id}
                                 className={`group grid grid-cols-12 gap-2 items-center p-1.5 rounded-lg border transition-all
                                 ${isPaid
-                                        ? 'bg-green-50/50 aseel-border-soft dark:bg-green-900/10 dark:border-green-800/50'
+                                        ? 'bg-green-50/50 ktra-border-soft dark:bg-green-900/10 dark:border-green-800/50'
                                         : hasSwift
-                                            ? 'aseel-bg-accent-bg/50 aseel-border-accent dark:aseel-bg-panel/10 dark:aseel-border-soft/50'
-                                            : 'aseel-bg-field aseel-border-soft hover:aseel-border-soft dark:aseel-bg-panel dark:aseel-border-soft'
+                                            ? 'ktra-bg-accent-bg/50 ktra-border-accent dark:ktra-bg-panel/10 dark:ktra-border-soft/50'
+                                            : 'ktra-bg-field ktra-border-soft hover:ktra-border-soft dark:ktra-bg-panel dark:ktra-border-soft'
                                     }`}
                             >
                                 {/* # */}
                                 <div className="col-span-1 flex justify-center">
                                     <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold 
-                                        ${isPaid ? 'bg-green-100 text-green-700' : hasSwift ? 'aseel-bg-accent-bg aseel-text-accent' : 'aseel-bg-panel aseel-text-soft dark:aseel-bg-panel dark:aseel-text-soft'}`}>
+                                        ${isPaid ? 'bg-green-100 text-green-700' : hasSwift ? 'ktra-bg-accent-bg ktra-text-accent' : 'ktra-bg-panel ktra-text-soft dark:ktra-bg-panel dark:ktra-text-soft'}`}>
                                         {inst.installmentNumber}
                                     </div>
                                 </div>
@@ -427,10 +427,10 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
                                             className={`w-full pl-6 pr-1 py-1 text-xs font-semibold text-center rounded border focus:ring-1 transition-colors ${
                                                 isLastAuto
                                                     ? 'border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)]/50 text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/30 dark:border-[var(--color-border)] dark:text-[var(--color-primary)]'
-                                                    : 'aseel-border-soft focus:aseel-border-soft focus:ring-blue-500 aseel-bg-field dark:aseel-bg-panel dark:aseel-border-soft dark:text-white'
-                                            } disabled:aseel-bg-panel disabled:aseel-text-soft`}
+                                                    : 'ktra-border-soft focus:ktra-border-soft focus:ring-blue-500 ktra-bg-field dark:ktra-bg-panel dark:ktra-border-soft dark:text-white'
+                                            } disabled:ktra-bg-panel disabled:ktra-text-soft`}
                                         />
-                                        <Percent className="w-3 h-3 aseel-text-soft absolute left-1.5 pointer-events-none" />
+                                        <Percent className="w-3 h-3 ktra-text-soft absolute left-1.5 pointer-events-none" />
                                     </div>
                                 </div>
 
@@ -444,12 +444,12 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
                                             disabled={rowLockedInputs}
                                             title={isLastAuto ? 'يُحسب تلقائياً كباقي الإجمالي' : undefined}
                                             className={`w-full pl-5 pr-1 py-1 text-xs font-bold text-center rounded border focus:ring-1 transition-colors
-                                                ${isPaid ? 'text-green-700 aseel-border-soft aseel-bg-field dark:aseel-bg-panel dark:text-green-400 dark:border-green-900'
+                                                ${isPaid ? 'text-green-700 ktra-border-soft ktra-bg-field dark:ktra-bg-panel dark:text-green-400 dark:border-green-900'
                                                     : isLastAuto
                                                       ? 'border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)]/50 text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/30 dark:border-[var(--color-border)] dark:text-[var(--color-primary)]'
-                                                    : 'aseel-text-ink aseel-border-soft focus:aseel-border-soft focus:ring-blue-500 aseel-bg-field dark:aseel-bg-panel dark:aseel-border-soft dark:text-white disabled:aseel-bg-panel disabled:aseel-text-soft'}`}
+                                                    : 'ktra-text-ink ktra-border-soft focus:ktra-border-soft focus:ring-blue-500 ktra-bg-field dark:ktra-bg-panel dark:ktra-border-soft dark:text-white disabled:ktra-bg-panel disabled:ktra-text-soft'}`}
                                         />
-                                        <DollarSign className={`w-3 h-3 absolute left-1.5 pointer-events-none ${isPaid ? 'text-green-500' : 'aseel-text-soft'}`} />
+                                        <DollarSign className={`w-3 h-3 absolute left-1.5 pointer-events-none ${isPaid ? 'text-green-500' : 'ktra-text-soft'}`} />
                                     </div>
                                 </div>
 
@@ -459,18 +459,18 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
                                         {isPaid ? (
                                             <span className="text-green-600 font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> تم الدفع</span>
                                         ) : hasSwift ? (
-                                            <span className="aseel-text-accent font-medium">سليب مرفق</span>
+                                            <span className="ktra-text-accent font-medium">سليب مرفق</span>
                                         ) : (
-                                            <span className="aseel-text-soft dark:aseel-text-soft">بانتظار الدفع</span>
+                                            <span className="ktra-text-soft dark:ktra-text-soft">بانتظار الدفع</span>
                                         )}
-                                        {payment?.usdToIls && <span className="aseel-text-soft text-[9px]">1$ = {payment.usdToIls}₪</span>}
+                                        {payment?.usdToIls && <span className="ktra-text-soft text-[9px]">1$ = {payment.usdToIls}₪</span>}
                                     </div>
                                 </div>
 
                                 {/* Delete Action */}
                                 <div className="col-span-1 flex justify-center">
                                     {!isLocked && effectiveInstallments.length > 1 && (
-                                        <button onClick={() => deleteInstallment(index)} className="aseel-text-soft hover:aseel-text-soft transition-colors">
+                                        <button onClick={() => deleteInstallment(index)} className="ktra-text-soft hover:ktra-text-soft transition-colors">
                                             <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                     )}
@@ -480,7 +480,7 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
                     })}
 
                     {/* Footer Summary */}
-                    <div className={`mt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-3 py-2 rounded-lg text-xs border ${isValid ? 'bg-green-50/50 border-green-100 text-green-700 dark:bg-green-900/10 dark:border-green-900 dark:text-green-400' : 'aseel-bg-panel aseel-border-soft aseel-text-state dark:aseel-bg-panel/10 dark:aseel-border-soft dark:aseel-text-soft'}`}>
+                    <div className={`mt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-3 py-2 rounded-lg text-xs border ${isValid ? 'bg-green-50/50 border-green-100 text-green-700 dark:bg-green-900/10 dark:border-green-900 dark:text-green-400' : 'ktra-bg-panel ktra-border-soft ktra-text-state dark:ktra-bg-panel/10 dark:ktra-border-soft dark:ktra-text-soft'}`}>
                         <div className="flex items-center gap-2">
                             {isValid ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
                             <div>

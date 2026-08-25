@@ -54,14 +54,14 @@ export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
       defaultOpen={defaultOpen}
       badge={rows.length ? String(rows.length) : undefined}
       badgeColor="gray"
-      className="aseel-border-soft dark:aseel-border-soft"
+      className="ktra-border-soft dark:ktra-border-soft"
     >
       {loading ? (
-        <div className="text-center py-6 aseel-text-soft">جارٍ التحميل…</div>
+        <div className="text-center py-6 ktra-text-soft">جارٍ التحميل…</div>
       ) : error ? (
         <div className="text-center py-6 text-red-600">{error}</div>
       ) : rows.length === 0 ? (
-        <div className="text-center py-8 aseel-text-soft">
+        <div className="text-center py-8 ktra-text-soft">
           <History className="w-10 h-10 mx-auto mb-3 opacity-50" />
           <p>لا توجد نشاطات مسجلة لهذا المستند بعد</p>
         </div>
@@ -73,19 +73,19 @@ export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
             const folded = count > 1;
             const isOpen = Boolean(expanded[r.id]);
             return (
-              <li key={r.id} className="flex items-start gap-3 border-b aseel-border-soft last:border-b-0 pb-3 last:pb-0">
+              <li key={r.id} className="flex items-start gap-3 border-b ktra-border-soft last:border-b-0 pb-3 last:pb-0">
                 <div className="mt-0.5">{meta.icon}</div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${meta.badge}`}>{r.action_label || meta.label}</span>
                     {folded && (
-                      <span className="text-xs px-1.5 py-0.5 rounded-full aseel-bg-panel aseel-text-soft font-bold">
+                      <span className="text-xs px-1.5 py-0.5 rounded-full ktra-bg-panel ktra-text-soft font-bold">
                         ×{formatNumber(count)}
                       </span>
                     )}
-                    <span className="font-medium aseel-text-ink dark:text-white">{r.user_name}</span>
+                    <span className="font-medium ktra-text-ink dark:text-white">{r.user_name}</span>
                     {partnerId && (
-                      <span className="text-xs aseel-text-soft">
+                      <span className="text-xs ktra-text-soft">
                         <DocRefCell
                           referenceType={r.entity_type}
                           referenceId={r.entity_id}
@@ -99,7 +99,7 @@ export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
                     <>
                       <button
                         type="button"
-                        className="mt-0.5 flex items-center gap-1 text-sm aseel-text-soft hover:underline"
+                        className="mt-0.5 flex items-center gap-1 text-sm ktra-text-soft hover:underline"
                         aria-expanded={isOpen}
                         onClick={() => setExpanded((prev) => ({ ...prev, [r.id]: !prev[r.id] }))}
                       >
@@ -109,9 +109,9 @@ export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
                         </span>
                       </button>
                       {isOpen && (
-                        <ul className="mt-1 space-y-0.5 border-s ps-2 aseel-border-soft">
+                        <ul className="mt-1 space-y-0.5 border-s ps-2 ktra-border-soft">
                           {(r.group_rows || []).map((g) => (
-                            <li key={g.id} className="text-xs aseel-text-soft">
+                            <li key={g.id} className="text-xs ktra-text-soft">
                               {formatActivityTime(g.timestamp)}
                             </li>
                           ))}
@@ -122,11 +122,11 @@ export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
                     <div className="mt-1"><ActivityChanges changes={r.metadata.changes} /></div>
                   ) : (
                     r.description && (
-                      <p className="text-sm aseel-text-soft mt-0.5">{r.description}</p>
+                      <p className="text-sm ktra-text-soft mt-0.5">{r.description}</p>
                     )
                   )}
                 </div>
-                <div className="text-xs aseel-text-soft whitespace-nowrap">
+                <div className="text-xs ktra-text-soft whitespace-nowrap">
                   {formatActivityTime(r.timestamp)}
                 </div>
               </li>

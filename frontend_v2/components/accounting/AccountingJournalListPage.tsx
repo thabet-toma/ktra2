@@ -1,6 +1,6 @@
 /**
  * N3-T2 — AccountingJournalListPage (L15) inside-out
- * AseelDenseTable + شريط فلاتر + useAseelIndexKeymap
+ * KitDenseTable + شريط فلاتر + useKitIndexKeymap
  * Ref: المحاسبة.txt:48-69
  */
 import React, { useEffect, useState, useCallback, useRef } from "react";
@@ -9,13 +9,13 @@ import { accountingApi } from "../../services/accountingApi";
 import { Plus, RefreshCw, Printer } from "lucide-react";
 import { invoicePathForReference } from "../../utils/entityLinks";
 import {
-  AseelDenseTable,
-  AseelDocumentShell,
-  useAseelIndexKeymap,
+  KitDenseTable,
+  KitDocumentShell,
+  useKitIndexKeymap,
   type DenseColumn,
-  type AseelToolbarAction,
-} from "../aseel";
-import type { AseelTab } from "../aseel";
+  type KitToolbarAction,
+} from "../kit";
+import type { KitTab } from "../kit";
 
 export interface JournalListItem {
   id: number;
@@ -190,10 +190,10 @@ export const AccountingJournalListPage: React.FC<Props> = ({
     if (row) onOpen(row.id, row.deal_ref_number, row.reference_summary);
   }, [selectedKey, rows, onOpen]);
 
-  useAseelIndexKeymap({
+  useKitIndexKeymap({
     F2: openSelected,
     F6: () => {
-      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      const el = document.querySelector<HTMLInputElement>('[data-ktra-field="search"]');
       el?.focus();
     },
     CtrlIns: onNew,
@@ -206,7 +206,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       header: "رقم القيد",
       width: "80px",
       align: "center",
-      render: (r) => <span className="aseel-num font-mono text-xs">{r.id}</span>,
+      render: (r) => <span className="ktra-num font-mono text-xs">{r.id}</span>,
     },
     {
       key: "transaction_date",
@@ -220,7 +220,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       header: "الساعة",
       width: "70px",
       align: "center",
-      render: (r) => <span className="text-xs aseel-num font-mono">{fmtTime(r.created_at)}</span>,
+      render: (r) => <span className="text-xs ktra-num font-mono">{fmtTime(r.created_at)}</span>,
     },
     {
       key: "amount",
@@ -228,7 +228,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       width: "120px",
       align: "left",
       numeric: true,
-      render: (r) => <span className="text-xs aseel-num font-mono font-semibold">{fmtAmount(journalAmount(r))}</span>,
+      render: (r) => <span className="text-xs ktra-num font-mono font-semibold">{fmtAmount(journalAmount(r))}</span>,
       exportValue: (r) => journalAmount(r),
     },
     {
@@ -252,7 +252,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       header: "المستخدم",
       width: "110px",
       render: (r) => (
-        <span className="text-xs text-[var(--aseel-ink-soft)]">{r.created_by_name || "—"}</span>
+        <span className="text-xs text-[var(--ktra-ink-soft)]">{r.created_by_name || "—"}</span>
       ),
     },
     {
@@ -264,7 +264,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
         const href = invoicePathForReference(r.reference_type, r.reference_id);
         const label = `${refLabel(r.reference_type)}${r.reference_id ? ` #${r.reference_id}` : ""}`;
         if (!href) {
-          return <span className="text-xs text-[var(--aseel-ink-soft)]">{label}</span>;
+          return <span className="text-xs text-[var(--ktra-ink-soft)]">{label}</span>;
         }
         return (
           <button
@@ -291,7 +291,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
           style={{
             fontSize: "11px",
             fontWeight: 600,
-            color: r.is_posted ? "var(--aseel-ok, #2d7d46)" : "var(--aseel-warn, #b06800)",
+            color: r.is_posted ? "var(--ktra-ok, #2d7d46)" : "var(--ktra-warn, #b06800)",
           }}
         >
           {r.is_posted ? "مرحَّل" : "مسودة"}
@@ -306,7 +306,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       render: (r) => (
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           style={{ fontSize: "11px", padding: "2px 8px" }}
           onClick={() => onOpen(r.id, r.deal_ref_number, r.reference_summary)}
         >
@@ -316,7 +316,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
     },
   ];
 
-  const toolbarActions: AseelToolbarAction[] = [
+  const toolbarActions: KitToolbarAction[] = [
     { key: "new", label: "قيد جديد", icon: <Plus />, onClick: onNew },
     {
       key: "refresh",
@@ -335,39 +335,39 @@ export const AccountingJournalListPage: React.FC<Props> = ({
 
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
-      <label className="aseel-field" style={{ flex: "1", minWidth: "160px" }}>
-        <span className="aseel-field-label">بحث</span>
+      <label className="ktra-field" style={{ flex: "1", minWidth: "160px" }}>
+        <span className="ktra-field-label">بحث</span>
         <input
-          className="aseel-input"
-          data-aseel-field="search"
+          className="ktra-input"
+          data-ktra-field="search"
           placeholder="رقم القيد / البيان / مرجع"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void load()}
         />
       </label>
-      <label className="aseel-field">
-        <span className="aseel-field-label">من تاريخ</span>
+      <label className="ktra-field">
+        <span className="ktra-field-label">من تاريخ</span>
         <input
-          className="aseel-input"
+          className="ktra-input"
           type="date"
           value={dateFrom}
           onChange={(e) => setDateFrom(e.target.value)}
         />
       </label>
-      <label className="aseel-field">
-        <span className="aseel-field-label">إلى تاريخ</span>
+      <label className="ktra-field">
+        <span className="ktra-field-label">إلى تاريخ</span>
         <input
-          className="aseel-input"
+          className="ktra-input"
           type="date"
           value={dateTo}
           onChange={(e) => setDateTo(e.target.value)}
         />
       </label>
-      <label className="aseel-field">
-        <span className="aseel-field-label">نوع المرجع</span>
+      <label className="ktra-field">
+        <span className="ktra-field-label">نوع المرجع</span>
         <select
-          className="aseel-input"
+          className="ktra-input"
           value={refType}
           onChange={(e) => setRefType(e.target.value)}
         >
@@ -378,10 +378,10 @@ export const AccountingJournalListPage: React.FC<Props> = ({
         </select>
       </label>
       {/* A3: الحساب — «أرِني قيود هذا الحساب وحده» */}
-      <label className="aseel-field" style={{ minWidth: "180px" }}>
-        <span className="aseel-field-label">الحساب</span>
+      <label className="ktra-field" style={{ minWidth: "180px" }}>
+        <span className="ktra-field-label">الحساب</span>
         <select
-          className="aseel-input"
+          className="ktra-input"
           value={accountId}
           onChange={(e) => setAccountId(e.target.value)}
         >
@@ -394,10 +394,10 @@ export const AccountingJournalListPage: React.FC<Props> = ({
         </select>
       </label>
       {/* A3: المستخدم — مَن أنشأ القيد (القيود الأقدم من هذا العمود بلا مستخدم) */}
-      <label className="aseel-field">
-        <span className="aseel-field-label">المستخدم</span>
+      <label className="ktra-field">
+        <span className="ktra-field-label">المستخدم</span>
         <select
-          className="aseel-input"
+          className="ktra-input"
           value={userId}
           onChange={(e) => setUserId(e.target.value)}
         >
@@ -410,22 +410,22 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       {/* A3: شارة قيود التسوية — سؤال يتكرر كل إقفال، فلا يُدفن في قائمة الأنواع */}
       <button
         type="button"
-        className="aseel-toolbtn"
+        className="ktra-toolbtn"
         aria-pressed={refType === "ADJUSTMENT"}
         title="عرض قيود التسوية وحدها"
         onClick={() => setRefType((t) => (t === "ADJUSTMENT" ? "" : "ADJUSTMENT"))}
         style={{
           alignSelf: "flex-end",
           fontWeight: refType === "ADJUSTMENT" ? 700 : undefined,
-          borderColor: refType === "ADJUSTMENT" ? "var(--aseel-ok, #2d7d46)" : undefined,
-          color: refType === "ADJUSTMENT" ? "var(--aseel-ok, #2d7d46)" : undefined,
+          borderColor: refType === "ADJUSTMENT" ? "var(--ktra-ok, #2d7d46)" : undefined,
+          color: refType === "ADJUSTMENT" ? "var(--ktra-ok, #2d7d46)" : undefined,
         }}
       >
         قيود التسوية {refType === "ADJUSTMENT" ? "✓" : ""}
       </button>
       <button
         type="button"
-        className="aseel-toolbtn"
+        className="ktra-toolbtn"
         onClick={() => void load()}
         style={{ alignSelf: "flex-end" }}
       >
@@ -435,7 +435,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
     </div>
   );
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     {
       key: "list",
       label: "دفتر اليومية",
@@ -443,12 +443,12 @@ export const AccountingJournalListPage: React.FC<Props> = ({
         <div style={{ padding: "8px" }}>
           {filterBar}
           {err && (
-            <div className="aseel-banner aseel-banner--err" style={{ marginTop: "8px" }}>
+            <div className="ktra-banner ktra-banner--err" style={{ marginTop: "8px" }}>
               {err}
             </div>
           )}
           <div style={{ marginTop: "8px" }}>
-            <AseelDenseTable<JournalListItem>
+            <KitDenseTable<JournalListItem>
               columns={columns}
               rows={rows}
               getRowKey={(r) => r.id}
@@ -466,7 +466,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
             <div style={{ display: "flex", justifyContent: "center", padding: "8px" }}>
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 disabled={loadingMore}
                 onClick={() => void loadMore()}
               >
@@ -483,7 +483,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="دفتر اليومية"
         state={loading ? "جاري التحميل…" : `${totalCount || rows.length} قيد`}
         actions={toolbarActions}
@@ -491,13 +491,13 @@ export const AccountingJournalListPage: React.FC<Props> = ({
         tabs={tabs}
         status={
           <>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               الإجمالي <b>{totalCount || rows.length}</b>
             </span>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               مرحَّل <b>{rows.filter((r) => r.is_posted).length}</b>
             </span>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               مسودات <b>{rows.filter((r) => !r.is_posted).length}</b>
             </span>
           </>

@@ -1,11 +1,11 @@
 /**
- * N7-T4 — EmployeePointsManagement (H4) — AseelDenseTable لإدارة نقاط الموظفين
+ * N7-T4 — EmployeePointsManagement (H4) — KitDenseTable لإدارة نقاط الموظفين
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, DailyPoints, ActivityStatus } from '../types';
 import { pointsHistoryService, activityService } from '../services/firestoreService';
 import { autoDisableScheduler } from '../services/autoDisableScheduler';
-import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
+import { KitDenseTable, type DenseColumn } from './kit/KitDenseTable';
 import { formatDateValue, formatWeekdayName } from '../utils/formatDate';
 import { useToast } from '../contexts/ToastContext';
 import { humanizeThrown } from '../utils/drfError';
@@ -134,50 +134,50 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
     // columns for userPoints table (user mode)
     const userPointsCols: DenseColumn<DailyPoints>[] = [
         { key: 'date', header: 'التاريخ', width: '180px', render: (d) => <span>{formatDate(d.date)}</span> },
-        { key: 'activityPoints', header: 'نقاط النشاط', width: '100px', align: 'center', render: (d) => <b style={{ color: 'var(--aseel-ok, #267346)' }}>{d.activityPoints}</b> },
+        { key: 'activityPoints', header: 'نقاط النشاط', width: '100px', align: 'center', render: (d) => <b style={{ color: 'var(--ktra-ok, #267346)' }}>{d.activityPoints}</b> },
         { key: 'checkinClicks', header: 'ضغطات النشاط', width: '100px', align: 'center', render: (d) => <>{d.checkinClicks}</> },
-        { key: 'taskPoints', header: 'نقاط المهام', width: '100px', align: 'center', render: (d) => <b style={{ color: 'var(--aseel-accent, #1857a4)' }}>{d.taskPoints}</b> },
+        { key: 'taskPoints', header: 'نقاط المهام', width: '100px', align: 'center', render: (d) => <b style={{ color: 'var(--ktra-accent, #1857a4)' }}>{d.taskPoints}</b> },
         { key: 'completedTasks', header: 'مهام مكتملة', width: '100px', align: 'center', render: (d) => <>{d.completedTasks}</> },
-        { key: 'totalPoints', header: 'الإجمالي', width: '100px', align: 'center', numeric: true, render: (d) => <b style={{ color: 'var(--aseel-accent, #1857a4)', fontSize: 'var(--aseel-fs-base)' }}>{d.totalPoints}</b> },
+        { key: 'totalPoints', header: 'الإجمالي', width: '100px', align: 'center', numeric: true, render: (d) => <b style={{ color: 'var(--ktra-accent, #1857a4)', fontSize: 'var(--ktra-fs-base)' }}>{d.totalPoints}</b> },
     ];
 
     // columns for daily users table (daily mode)
     const dailyUsersCols: DenseColumn<DailyUserPoints>[] = [
         { key: 'userName', header: 'الموظف', width: '140px', render: (d) => <b>{d.userName}</b> },
-        { key: 'activityPoints', header: 'نقاط النشاط', width: '100px', align: 'center', render: (d) => <b style={{ color: 'var(--aseel-ok, #267346)' }}>{d.dailyPoints?.activityPoints || 0}</b> },
+        { key: 'activityPoints', header: 'نقاط النشاط', width: '100px', align: 'center', render: (d) => <b style={{ color: 'var(--ktra-ok, #267346)' }}>{d.dailyPoints?.activityPoints || 0}</b> },
         { key: 'checkinClicks', header: 'ضغطات النشاط', width: '100px', align: 'center', render: (d) => <>{d.dailyPoints?.checkinClicks || 0}</> },
-        { key: 'taskPoints', header: 'نقاط المهام', width: '100px', align: 'center', render: (d) => <b style={{ color: 'var(--aseel-accent, #1857a4)' }}>{d.dailyPoints?.taskPoints || 0}</b> },
+        { key: 'taskPoints', header: 'نقاط المهام', width: '100px', align: 'center', render: (d) => <b style={{ color: 'var(--ktra-accent, #1857a4)' }}>{d.dailyPoints?.taskPoints || 0}</b> },
         { key: 'completedTasks', header: 'مهام مكتملة', width: '100px', align: 'center', render: (d) => <>{d.dailyPoints?.completedTasks || 0}</> },
-        { key: 'totalPoints', header: 'الإجمالي', width: '100px', align: 'center', numeric: true, render: (d) => <b style={{ color: 'var(--aseel-accent, #1857a4)' }}>{d.dailyPoints?.totalPoints || 0}</b> },
+        { key: 'totalPoints', header: 'الإجمالي', width: '100px', align: 'center', numeric: true, render: (d) => <b style={{ color: 'var(--ktra-accent, #1857a4)' }}>{d.dailyPoints?.totalPoints || 0}</b> },
     ];
 
     return (
         <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px', height: '100%' }}>
             {/* العنوان */}
-            <div style={{ paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
-                <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>إدارة نقاط الموظفين</strong>
+            <div style={{ paddingBottom: 4, borderBottom: '1px solid var(--ktra-border)' }}>
+                <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>إدارة نقاط الموظفين</strong>
             </div>
 
             {/* إعدادات النشاط العامة */}
-            <div style={{ border: '1px solid var(--aseel-border)', borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>
+            <div style={{ border: '1px solid var(--ktra-border)', borderRadius: 6, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>
                     تعطيل زر النشاط:
-                    <b style={{ marginRight: 4, color: globalDailyDisableSettings.isEnabled ? 'var(--aseel-danger, #c00)' : 'var(--aseel-ok, #267346)' }}>
+                    <b style={{ marginRight: 4, color: globalDailyDisableSettings.isEnabled ? 'var(--ktra-danger, #c00)' : 'var(--ktra-ok, #267346)' }}>
                         {globalDailyDisableSettings.isEnabled ? `من ${globalDailyDisableSettings.startTime} إلى ${globalDailyDisableSettings.endTime}` : 'معطل'}
                     </b>
                 </span>
-                <span style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>
+                <span style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>
                     المجدول:
-                    <b style={{ marginRight: 4, color: autoDisableScheduler.getStatus().isRunning ? 'var(--aseel-ok, #267346)' : 'var(--aseel-danger, #c00)' }}>
+                    <b style={{ marginRight: 4, color: autoDisableScheduler.getStatus().isRunning ? 'var(--ktra-ok, #267346)' : 'var(--ktra-danger, #c00)' }}>
                         {autoDisableScheduler.getStatus().isRunning ? '🟢 نشط' : '🔴 متوقف'}
                     </b>
                 </span>
                 <div style={{ flex: 1 }} />
-                <button className="aseel-toolbtn" onClick={() => setShowGlobalSettingsModal(true)}>تعديل الإعدادات</button>
-                <button className="aseel-toolbtn" onClick={() => autoDisableScheduler.manualCheck().then(() => toast('تم التحقق يدوياً', 'error'))}>تحقق الآن</button>
+                <button className="ktra-toolbtn" onClick={() => setShowGlobalSettingsModal(true)}>تعديل الإعدادات</button>
+                <button className="ktra-toolbtn" onClick={() => autoDisableScheduler.manualCheck().then(() => toast('تم التحقق يدوياً', 'error'))}>تحقق الآن</button>
                 <button
-                    className="aseel-toolbtn"
-                    style={{ color: autoDisableScheduler.getStatus().isRunning ? 'var(--aseel-danger, #c00)' : 'var(--aseel-ok, #267346)' }}
+                    className="ktra-toolbtn"
+                    style={{ color: autoDisableScheduler.getStatus().isRunning ? 'var(--ktra-danger, #c00)' : 'var(--ktra-ok, #267346)' }}
                     onClick={() => autoDisableScheduler.getStatus().isRunning ? autoDisableScheduler.stop() : autoDisableScheduler.start()}
                 >
                     {autoDisableScheduler.getStatus().isRunning ? 'إيقاف المجدول' : 'تشغيل المجدول'}
@@ -186,24 +186,24 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
 
             {/* وضع العرض + التاريخ */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <button className="aseel-toolbtn" style={{ fontWeight: viewMode === 'user' ? 700 : undefined, background: viewMode === 'user' ? 'var(--aseel-accent, #1857a4)' : undefined, color: viewMode === 'user' ? '#fff' : undefined }} onClick={() => setViewMode('user')}>
+                <button className="ktra-toolbtn" style={{ fontWeight: viewMode === 'user' ? 700 : undefined, background: viewMode === 'user' ? 'var(--ktra-accent, #1857a4)' : undefined, color: viewMode === 'user' ? '#fff' : undefined }} onClick={() => setViewMode('user')}>
                     موظف محدد
                 </button>
-                <button className="aseel-toolbtn" style={{ fontWeight: viewMode === 'daily' ? 700 : undefined, background: viewMode === 'daily' ? 'var(--aseel-accent, #1857a4)' : undefined, color: viewMode === 'daily' ? '#fff' : undefined }} onClick={() => setViewMode('daily')}>
+                <button className="ktra-toolbtn" style={{ fontWeight: viewMode === 'daily' ? 700 : undefined, background: viewMode === 'daily' ? 'var(--ktra-accent, #1857a4)' : undefined, color: viewMode === 'daily' ? '#fff' : undefined }} onClick={() => setViewMode('daily')}>
                     جميع الموظفين ليوم محدد
                 </button>
                 <div style={{ flex: 1 }} />
-                <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>التاريخ:</label>
-                <input type="date" className="aseel-input" style={{ width: 140 }} value={selectedDate} onChange={e => setSelectedDate(e.target.value)} />
+                <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>التاريخ:</label>
+                <input type="date" className="ktra-input" style={{ width: 140 }} value={selectedDate} onChange={e => setSelectedDate(e.target.value)} />
             </div>
 
             {viewMode === 'user' ? (
                 <>
                     {/* اختيار الموظف */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>الموظف:</label>
+                        <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>الموظف:</label>
                         <select
-                            className="aseel-input"
+                            className="ktra-input"
                             style={{ width: 260 }}
                             value={selectedUser?.id || ''}
                             onChange={e => setSelectedUser(users.find(u => u.id === e.target.value) || null)}
@@ -215,14 +215,14 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
                         </select>
                         {selectedUser && (
                             <>
-                                <span className="aseel-status-item">النشاط: <b style={{ color: userActivity?.isCurrentlyActive ? 'var(--aseel-ok, #267346)' : 'var(--aseel-danger, #c00)' }}>{userActivity?.isCurrentlyActive ? 'نشط' : 'غير نشط'}</b></span>
-                                <span className="aseel-status-item">زر التأكيد: <b style={{ color: userActivity?.checkInButtonEnabled !== false ? 'var(--aseel-ok, #267346)' : 'var(--aseel-danger, #c00)' }}>{userActivity?.checkInButtonEnabled !== false ? 'مفعل' : 'معطل'}</b></span>
-                                <span className="aseel-status-item">إجمالي النقاط (30 يوم): <b>{getTotalStats(selectedUser.id).totalPoints}</b></span>
+                                <span className="ktra-status-item">النشاط: <b style={{ color: userActivity?.isCurrentlyActive ? 'var(--ktra-ok, #267346)' : 'var(--ktra-danger, #c00)' }}>{userActivity?.isCurrentlyActive ? 'نشط' : 'غير نشط'}</b></span>
+                                <span className="ktra-status-item">زر التأكيد: <b style={{ color: userActivity?.checkInButtonEnabled !== false ? 'var(--ktra-ok, #267346)' : 'var(--ktra-danger, #c00)' }}>{userActivity?.checkInButtonEnabled !== false ? 'مفعل' : 'معطل'}</b></span>
+                                <span className="ktra-status-item">إجمالي النقاط (30 يوم): <b>{getTotalStats(selectedUser.id).totalPoints}</b></span>
                                 <div style={{ flex: 1 }} />
-                                <button className="aseel-toolbtn" onClick={() => setShowAdjustModal(true)}>تعديل النقاط</button>
+                                <button className="ktra-toolbtn" onClick={() => setShowAdjustModal(true)}>تعديل النقاط</button>
                                 <button
-                                    className="aseel-toolbtn"
-                                    style={{ color: userActivity?.checkInButtonEnabled !== false ? 'var(--aseel-warn, #b8800a)' : 'var(--aseel-ok, #267346)' }}
+                                    className="ktra-toolbtn"
+                                    style={{ color: userActivity?.checkInButtonEnabled !== false ? 'var(--ktra-warn, #b8800a)' : 'var(--ktra-ok, #267346)' }}
                                     onClick={() => handleToggleCheckInButton(userActivity?.checkInButtonEnabled === false)}
                                 >
                                     {userActivity?.checkInButtonEnabled !== false ? 'تعطيل زر التأكيد' : 'تفعيل زر التأكيد'}
@@ -232,7 +232,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
                     </div>
 
                     {selectedUser && (
-                        <AseelDenseTable<DailyPoints>
+                        <KitDenseTable<DailyPoints>
                             columns={userPointsCols}
                             rows={userPoints}
                             getRowKey={d => d.date}
@@ -240,7 +240,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
                             emptyHint="لا توجد بيانات للنقاط"
                             footer={
                                 userPoints.length > 0 ? (
-                                    <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
+                                    <span style={{ fontFamily: 'monospace', fontSize: 'var(--ktra-fs-sm)' }}>
                                         الإجمالي: <b>{userPoints.reduce((s, d) => s + d.totalPoints, 0)}</b> نقطة
                                     </span>
                                 ) : undefined
@@ -252,18 +252,18 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
                 <>
                     {/* فرز عرض اليوم */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>الترتيب:</span>
-                        <select className="aseel-input" style={{ width: 160 }} value={sortBy} onChange={e => setSortBy(e.target.value as 'points' | 'name')}>
+                        <span style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>الترتيب:</span>
+                        <select className="ktra-input" style={{ width: 160 }} value={sortBy} onChange={e => setSortBy(e.target.value as 'points' | 'name')}>
                             <option value="points">حسب النقاط</option>
                             <option value="name">حسب الاسم</option>
                         </select>
-                        <select className="aseel-input" style={{ width: 100 }} value={sortOrder} onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')}>
+                        <select className="ktra-input" style={{ width: 100 }} value={sortOrder} onChange={e => setSortOrder(e.target.value as 'asc' | 'desc')}>
                             <option value="desc">تنازلي</option>
                             <option value="asc">تصاعدي</option>
                         </select>
                     </div>
 
-                    <AseelDenseTable<DailyUserPoints>
+                    <KitDenseTable<DailyUserPoints>
                         columns={dailyUsersCols}
                         rows={sortedDailyUsers}
                         getRowKey={d => d.userId}
@@ -271,7 +271,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
                         emptyHint="لا توجد بيانات لهذا اليوم"
                         footer={
                             sortedDailyUsers.length > 0 ? (
-                                <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
+                                <span style={{ fontFamily: 'monospace', fontSize: 'var(--ktra-fs-sm)' }}>
                                     إجمالي النقاط: <b>{sortedDailyUsers.reduce((s, d) => s + (d.dailyPoints?.totalPoints || 0), 0)}</b>
                                 </span>
                             ) : undefined
@@ -283,25 +283,25 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
             {/* مودال تعديل النقاط */}
             {showAdjustModal && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }}>
-                    <div dir="rtl" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, padding: 20, width: '100%', maxWidth: 400 }}>
-                        <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>تعديل النقاط لـ {selectedUser?.name}</strong>
+                    <div dir="rtl" style={{ background: 'var(--ktra-surface, #fff)', borderRadius: 8, padding: 20, width: '100%', maxWidth: 400 }}>
+                        <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>تعديل النقاط لـ {selectedUser?.name}</strong>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
                             <div>
-                                <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>التاريخ</label>
-                                <input type="date" className="aseel-input" style={{ width: '100%', marginTop: 4 }} value={selectedDate} onChange={e => setSelectedDate(e.target.value)} />
+                                <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>التاريخ</label>
+                                <input type="date" className="ktra-input" style={{ width: '100%', marginTop: 4 }} value={selectedDate} onChange={e => setSelectedDate(e.target.value)} />
                             </div>
                             <div>
-                                <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>نقاط النشاط</label>
-                                <input type="number" className="aseel-input" style={{ width: '100%', marginTop: 4 }} value={manualPoints.activityPoints} onChange={e => setManualPoints(p => ({ ...p, activityPoints: parseInt(e.target.value) || 0 }))} />
+                                <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>نقاط النشاط</label>
+                                <input type="number" className="ktra-input" style={{ width: '100%', marginTop: 4 }} value={manualPoints.activityPoints} onChange={e => setManualPoints(p => ({ ...p, activityPoints: parseInt(e.target.value) || 0 }))} />
                             </div>
                             <div>
-                                <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>نقاط المهام</label>
-                                <input type="number" className="aseel-input" style={{ width: '100%', marginTop: 4 }} value={manualPoints.taskPoints} onChange={e => setManualPoints(p => ({ ...p, taskPoints: parseInt(e.target.value) || 0 }))} />
+                                <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>نقاط المهام</label>
+                                <input type="number" className="ktra-input" style={{ width: '100%', marginTop: 4 }} value={manualPoints.taskPoints} onChange={e => setManualPoints(p => ({ ...p, taskPoints: parseInt(e.target.value) || 0 }))} />
                             </div>
                         </div>
                         <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
-                            <button className="aseel-toolbtn" onClick={() => setShowAdjustModal(false)}>إلغاء</button>
-                            <button className="aseel-toolbtn" style={{ color: 'var(--aseel-accent, #1857a4)', fontWeight: 700 }} onClick={handleAdjustPoints}>حفظ التعديلات</button>
+                            <button className="ktra-toolbtn" onClick={() => setShowAdjustModal(false)}>إلغاء</button>
+                            <button className="ktra-toolbtn" style={{ color: 'var(--ktra-accent, #1857a4)', fontWeight: 700 }} onClick={handleAdjustPoints}>حفظ التعديلات</button>
                         </div>
                     </div>
                 </div>
@@ -310,28 +310,28 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
             {/* مودال الإعدادات العامة */}
             {showGlobalSettingsModal && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }}>
-                    <div dir="rtl" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, padding: 20, width: '100%', maxWidth: 400 }}>
-                        <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>إعداد التعطيل اليومي العام</strong>
-                        <p style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)', marginTop: 8 }}>سيُطبَّق على زر النشاط لجميع الموظفين يومياً.</p>
+                    <div dir="rtl" style={{ background: 'var(--ktra-surface, #fff)', borderRadius: 8, padding: 20, width: '100%', maxWidth: 400 }}>
+                        <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>إعداد التعطيل اليومي العام</strong>
+                        <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginTop: 8 }}>سيُطبَّق على زر النشاط لجميع الموظفين يومياً.</p>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>
                                 <input type="checkbox" checked={globalDailyDisableSettings.isEnabled} onChange={e => setGlobalDailyDisableSettings(p => ({ ...p, isEnabled: e.target.checked }))} />
                                 تفعيل التعطيل اليومي التلقائي
                             </label>
                             <div style={{ display: 'flex', gap: 10 }}>
                                 <div style={{ flex: 1 }}>
-                                    <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>وقت البدء</label>
-                                    <input type="time" className="aseel-input" style={{ width: '100%', marginTop: 4 }} value={globalDailyDisableSettings.startTime} disabled={!globalDailyDisableSettings.isEnabled} onChange={e => setGlobalDailyDisableSettings(p => ({ ...p, startTime: e.target.value }))} />
+                                    <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>وقت البدء</label>
+                                    <input type="time" className="ktra-input" style={{ width: '100%', marginTop: 4 }} value={globalDailyDisableSettings.startTime} disabled={!globalDailyDisableSettings.isEnabled} onChange={e => setGlobalDailyDisableSettings(p => ({ ...p, startTime: e.target.value }))} />
                                 </div>
                                 <div style={{ flex: 1 }}>
-                                    <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>وقت الانتهاء</label>
-                                    <input type="time" className="aseel-input" style={{ width: '100%', marginTop: 4 }} value={globalDailyDisableSettings.endTime} disabled={!globalDailyDisableSettings.isEnabled} onChange={e => setGlobalDailyDisableSettings(p => ({ ...p, endTime: e.target.value }))} />
+                                    <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>وقت الانتهاء</label>
+                                    <input type="time" className="ktra-input" style={{ width: '100%', marginTop: 4 }} value={globalDailyDisableSettings.endTime} disabled={!globalDailyDisableSettings.isEnabled} onChange={e => setGlobalDailyDisableSettings(p => ({ ...p, endTime: e.target.value }))} />
                                 </div>
                             </div>
                         </div>
                         <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
-                            <button className="aseel-toolbtn" onClick={() => setShowGlobalSettingsModal(false)}>إلغاء</button>
-                            <button className="aseel-toolbtn" style={{ color: 'var(--aseel-accent, #1857a4)', fontWeight: 700 }} onClick={handleSaveGlobalDailyDisableSettings}>حفظ الإعدادات</button>
+                            <button className="ktra-toolbtn" onClick={() => setShowGlobalSettingsModal(false)}>إلغاء</button>
+                            <button className="ktra-toolbtn" style={{ color: 'var(--ktra-accent, #1857a4)', fontWeight: 700 }} onClick={handleSaveGlobalDailyDisableSettings}>حفظ الإعدادات</button>
                         </div>
                     </div>
                 </div>

@@ -113,7 +113,7 @@ const asManager = async (page: import('@playwright/test').Page) => {
 };
 
 const desktopSidebar = (page: import('@playwright/test').Page) =>
-  page.locator('aside.aseel-sidebar.hidden');
+  page.locator('aside.ktra-sidebar.hidden');
 
 /** أبناء `nav` المباشرون — بنود القائمة المتقدمة المفردة (لا مجموعة لها). */
 const flatItems = async (page: import('@playwright/test').Page) =>
@@ -346,7 +346,7 @@ test('«؟» تشرح بنود القائمة في الوضع السهل، وت�
 
   // 2) الوضع السهل: لكل بندٍ من الثمانية «؟» خاصته.
   await modeToggle(page, 'الواجهة السهلة').click();
-  expect(await hintKeys(page, 'aside.aseel-sidebar.hidden')).toEqual([
+  expect(await hintKeys(page, 'aside.ktra-sidebar.hidden')).toEqual([
     'nav.dashboard',
     'nav.items-management',
     'nav.purchase-invoices',

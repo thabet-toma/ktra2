@@ -1465,8 +1465,8 @@
         "values": []
       }
     },
-    "aseel-kit": {
-      "path": "/aseel-kit",
+    "ui-kit": {
+      "path": "/ui-kit",
       "buttons": {
         "count": 24,
         "values": [
@@ -1583,8 +1583,8 @@
         ]
       }
     },
-    "aseel-sales": {
-      "path": "/aseel-sales",
+    "sales-classic": {
+      "path": "/sales-classic",
       "buttons": {
         "count": 16,
         "values": [

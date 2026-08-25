@@ -42,7 +42,7 @@ interface InsightEntry {
 /** قائمة الشركات المعنيّة داخل كرت مؤشّر — مقصوصة بسقفٍ ثابت ومصرَّحٌ بالباقي. */
 const InsightList: React.FC<{ rows: InsightEntry[]; empty: string }> = ({ rows, empty }) => {
   if (rows.length === 0) {
-    return <p className="mt-2 text-xs aseel-text-soft">{empty}</p>;
+    return <p className="mt-2 text-xs ktra-text-soft">{empty}</p>;
   }
   const shown = rows.slice(0, MAX_LISTED_COMPANIES);
   const rest = rows.length - shown.length;
@@ -51,11 +51,11 @@ const InsightList: React.FC<{ rows: InsightEntry[]; empty: string }> = ({ rows, 
       {shown.map((row) => (
         <li key={row.id} className="flex items-center justify-between gap-2 text-xs" title={row.title}>
           <span className="truncate text-[var(--color-text)]">{row.name}</span>
-          <span className="shrink-0 aseel-text-soft">{row.hint}</span>
+          <span className="shrink-0 ktra-text-soft">{row.hint}</span>
         </li>
       ))}
       {rest > 0 && (
-        <li className="text-xs aseel-text-soft">+{formatNumber(rest)} شركة أخرى</li>
+        <li className="text-xs ktra-text-soft">+{formatNumber(rest)} شركة أخرى</li>
       )}
     </ul>
   );
@@ -75,11 +75,11 @@ const InsightCard: React.FC<{
         <Icon className="h-5 w-5" aria-hidden="true" />
       </span>
       <div className="min-w-0">
-        <p className="text-xs aseel-text-soft">{title}</p>
+        <p className="text-xs ktra-text-soft">{title}</p>
         <p className="text-2xl font-bold text-[var(--color-text)]">{value}</p>
       </div>
     </div>
-    <p className="mt-2 text-[11px] aseel-text-soft">{caption}</p>
+    <p className="mt-2 text-[11px] ktra-text-soft">{caption}</p>
     {children}
   </article>
 );
@@ -233,13 +233,13 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
   };
 
   if (loading && !data) {
-    return <div className="p-8 text-center aseel-text-soft" role="status">جارٍ تحميل لوحة المنصة…</div>;
+    return <div className="p-8 text-center ktra-text-soft" role="status">جارٍ تحميل لوحة المنصة…</div>;
   }
   if (error && !data) {
     return (
       <div className="p-8 text-center" role="alert">
         <p className="text-red-600">{error}</p>
-        <button type="button" onClick={load} className="aseel-btn aseel-btn-primary mt-3">إعادة المحاولة</button>
+        <button type="button" onClick={load} className="ktra-btn ktra-btn-primary mt-3">إعادة المحاولة</button>
       </div>
     );
   }
@@ -261,14 +261,14 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
           </span>
           <div>
             <h1 className="text-xl font-bold text-[var(--color-text)]">لوحة تحكم السوبر أدمن</h1>
-            <p className="text-sm aseel-text-soft">نظرة تشغيلية على المنصة والشركات، منفصلة عن لوحة الشركة</p>
+            <p className="text-sm ktra-text-soft">نظرة تشغيلية على المنصة والشركات، منفصلة عن لوحة الشركة</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => onNavigate("development-notes")} className="aseel-btn aseel-btn-primary">
+          <button type="button" onClick={() => onNavigate("development-notes")} className="ktra-btn ktra-btn-primary">
             <ClipboardList className="h-4 w-4" aria-hidden="true" /> ملاحظات التطوير
           </button>
-          <button type="button" onClick={load} className="aseel-iconbtn" title="تحديث" aria-label="تحديث لوحة المنصة">
+          <button type="button" onClick={load} className="ktra-iconbtn" title="تحديث" aria-label="تحديث لوحة المنصة">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </button>
         </div>
@@ -280,7 +280,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
         {cards.map(({ label, value, icon: Icon, tone }) => (
           <article key={label} className="flex items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             <span className={`flex h-10 w-10 items-center justify-center rounded-md ${tone}`}><Icon className="h-5 w-5" /></span>
-            <div><p className="text-xs aseel-text-soft">{label}</p><p className="text-2xl font-bold text-[var(--color-text)]">{value}</p></div>
+            <div><p className="text-xs ktra-text-soft">{label}</p><p className="text-2xl font-bold text-[var(--color-text)]">{value}</p></div>
           </article>
         ))}
       </section>
@@ -349,38 +349,38 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-3">
           <div>
             <h2 className="font-bold text-[var(--color-text)]">سوبر أدمن المنصة</h2>
-            <p className="text-xs aseel-text-soft">ترقية مستخدم مسجَّل باسمه أو بريده — بلا إنشاء حساب ولا كلمة سر</p>
+            <p className="text-xs ktra-text-soft">ترقية مستخدم مسجَّل باسمه أو بريده — بلا إنشاء حساب ولا كلمة سر</p>
           </div>
           <div className="flex items-center gap-2">
             <label htmlFor="super-admin-identifier" className="sr-only">اسم المستخدم أو البريد</label>
             <input
               id="super-admin-identifier"
-              className="aseel-input h-9 w-56"
+              className="ktra-input h-9 w-56"
               placeholder="اسم المستخدم أو البريد"
               value={identifier}
               onChange={(event) => setIdentifier(event.target.value)}
               onKeyDown={(event) => { if (event.key === "Enter") void grant(); }}
             />
-            <button type="button" onClick={() => void grant()} disabled={granting || !identifier.trim()} className="aseel-btn aseel-btn-primary">
+            <button type="button" onClick={() => void grant()} disabled={granting || !identifier.trim()} className="ktra-btn ktra-btn-primary">
               <UserPlus className="h-4 w-4" aria-hidden="true" /> ترقية
             </button>
           </div>
         </div>
         <ul className="divide-y divide-[var(--color-border)]">
           {admins.length === 0 ? (
-            <li className="px-4 py-6 text-center aseel-text-soft">لا سوبر أدمن مسجَّل بعد</li>
+            <li className="px-4 py-6 text-center ktra-text-soft">لا سوبر أدمن مسجَّل بعد</li>
           ) : admins.map((admin) => (
             <li key={admin.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
               <div>
                 <p className="font-semibold text-[var(--color-text)]">{admin.full_name}</p>
-                <p className="text-xs aseel-text-soft">{admin.username}{admin.email ? ` · ${admin.email}` : ""}</p>
+                <p className="text-xs ktra-text-soft">{admin.username}{admin.email ? ` · ${admin.email}` : ""}</p>
               </div>
               {admin.removable ? (
-                <button type="button" onClick={() => void revoke(admin)} className="aseel-iconbtn text-red-600" title="سحب الصلاحية" aria-label={`سحب صلاحية ${admin.full_name}`}>
+                <button type="button" onClick={() => void revoke(admin)} className="ktra-iconbtn text-red-600" title="سحب الصلاحية" aria-label={`سحب صلاحية ${admin.full_name}`}>
                   <Trash2 className="h-4 w-4" />
                 </button>
               ) : (
-                <span className="text-xs aseel-text-soft">مثبَّت في إعدادات المنصة</span>
+                <span className="text-xs ktra-text-soft">مثبَّت في إعدادات المنصة</span>
               )}
             </li>
           ))}
@@ -391,7 +391,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div>
             <h2 className="font-bold text-[var(--color-text)]">واجهة شركة المحاسبة القانونية</h2>
-            <p className="text-xs aseel-text-soft">
+            <p className="text-xs ktra-text-soft">
               تفتح لحسابك ملفاً مهنياً موثَّقاً ومكتب محاسبة مرخَّصاً، فتدخل الواجهة كما يراها المحاسب
               وترسل منها طلب ارتباط لأي شركة مسجَّلة عندنا لتراجع بياناتها.
             </p>
@@ -400,7 +400,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
             type="button"
             onClick={() => void openAccountantView()}
             disabled={openingWorkspace}
-            className="aseel-btn aseel-btn-primary"
+            className="ktra-btn ktra-btn-primary"
           >
             {openingWorkspace ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
             افتح واجهة المحاسب القانوني
@@ -411,34 +411,34 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
       <section aria-label="ملفات المحاسبين بانتظار التحقق" className="mt-5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="border-b border-[var(--color-border)] px-4 py-3">
           <h2 className="font-bold text-[var(--color-text)]">توثيق المحاسبين القانونيين ({pendingAccountants.length})</h2>
-          <p className="text-xs aseel-text-soft">
+          <p className="text-xs ktra-text-soft">
             التوثيق يدوي (ق6): تحقّق من الرخصة والرقم الضريبي وعنوان العمل قبل القبول. «منع» يوقف ارتباطه بأي شركة (م116.2).
           </p>
         </div>
         <ul className="divide-y divide-[var(--color-border)]">
           {pendingAccountants.length === 0 ? (
-            <li className="px-4 py-6 text-center aseel-text-soft">لا ملفات بانتظار التحقق</li>
+            <li className="px-4 py-6 text-center ktra-text-soft">لا ملفات بانتظار التحقق</li>
           ) : pendingAccountants.map((profile) => (
             <li key={profile.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-[16rem]">
                 <p className="font-semibold text-[var(--color-text)]">{profile.full_name}</p>
-                <p className="text-xs aseel-text-soft">
+                <p className="text-xs ktra-text-soft">
                   {profile.email} · ضريبي {profile.tax_registration_number}
                   {profile.license_number ? ` · رخصة ${profile.license_number}` : ""}
                 </p>
-                <p className="text-[11px] aseel-text-soft">{profile.business_address}</p>
+                <p className="text-[11px] ktra-text-soft">{profile.business_address}</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <input
-                  className="aseel-input h-9 w-56"
+                  className="ktra-input h-9 w-56"
                   placeholder="سبب الرفض/المنع"
                   aria-label={`سبب قرار ${profile.full_name}`}
                   value={rejectReason[profile.id] || ""}
                   onChange={(event) => setRejectReason((current) => ({ ...current, [profile.id]: event.target.value }))}
                 />
-                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "approve")} className="aseel-btn aseel-btn-primary">توثيق</button>
-                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "reject")} className="aseel-btn">رفض</button>
-                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "bar")} className="aseel-btn text-red-600">منع</button>
+                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "approve")} className="ktra-btn ktra-btn-primary">توثيق</button>
+                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "reject")} className="ktra-btn">رفض</button>
+                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "bar")} className="ktra-btn text-red-600">منع</button>
               </div>
             </li>
           ))}
@@ -447,13 +447,13 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
 
       <section className="mt-5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-3">
-          <div><h2 className="font-bold text-[var(--color-text)]">الشركات</h2><p className="text-xs aseel-text-soft">{data.memberships} عضوية عبر المنصة · «تحكم» يفتح إعدادات الشركة وأعضاءها</p></div>
+          <div><h2 className="font-bold text-[var(--color-text)]">الشركات</h2><p className="text-xs ktra-text-soft">{data.memberships} عضوية عبر المنصة · «تحكم» يفتح إعدادات الشركة وأعضاءها</p></div>
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label htmlFor="platform-example-company" className="mb-1 block text-xs font-bold text-[var(--color-text)]">تعيين الشركة المثال</label>
               <select
                 id="platform-example-company"
-                className="aseel-input h-9 min-w-56"
+                className="ktra-input h-9 min-w-56"
                 value={data.company_rows.find((company) => company.is_example)?.id ?? ""}
                 disabled={assigningExample}
                 onChange={(event) => void assignExampleCompany(event.target.value)}
@@ -464,12 +464,12 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
                 ))}
               </select>
             </div>
-            <span className="pb-2 text-xs aseel-text-soft">تجريبية: {data.companies.trial} · مستخدمون: {data.users.total}</span>
+            <span className="pb-2 text-xs ktra-text-soft">تجريبية: {data.companies.trial} · مستخدمون: {data.users.total}</span>
           </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1200px] text-sm">
-            <thead className="bg-[var(--color-surface-2)] aseel-text-soft"><tr>
+            <thead className="bg-[var(--color-surface-2)] ktra-text-soft"><tr>
               <th className="px-3 py-2 text-right">الشركة</th><th className="px-3 py-2 text-right">الخطة</th>
               <th className="px-3 py-2 text-right">الحالة</th><th className="px-3 py-2 text-center">الأعضاء</th>
               <th className="px-3 py-2 text-center">الفروع</th>
@@ -483,7 +483,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
             </tr></thead>
             <tbody>
               {data.company_rows.length === 0 ? (
-                <tr><td colSpan={11} className="px-3 py-10 text-center aseel-text-soft">لا توجد شركات بعد</td></tr>
+                <tr><td colSpan={11} className="px-3 py-10 text-center ktra-text-soft">لا توجد شركات بعد</td></tr>
               ) : data.company_rows.map((company) => (
                 <tr key={company.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-2)]">
                   <td className="px-3 py-2">
@@ -521,7 +521,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
                     <button
                       type="button"
                       onClick={() => setManagedCompanyId(company.id)}
-                      className="aseel-btn"
+                      className="ktra-btn"
                       title={`تحكم بـ${company.name}`}
                       aria-label={`تحكم بـ${company.name}`}
                     >
@@ -543,7 +543,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
               تخزين مرفوع لا يخصّ شركة بعينها:{" "}
               <span className="font-bold">{formatBytes(data.storage.unattributed_bytes)}</span>
             </p>
-            <p className="mt-1 text-xs aseel-text-soft">
+            <p className="mt-1 text-xs ktra-text-soft">
               رفوعات على مستوى المنصة (صور ملاحظات التطوير ومستندات مكتب المحاسبة) وملفات
               وصلت بلا شركة. نسبة الأرشيف القديم لأصحابه تأتي من قاعدة البيانات
               عبر الاسترجاع الأثري (source='backfill').

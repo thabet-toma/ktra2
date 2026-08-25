@@ -34,7 +34,7 @@ import { formatDateLocalized, todayIso } from "../../../utils/formatDate";
 import { printReport } from "../../../utils/printReport";
 import { useToast } from "../../../contexts/ToastContext";
 import { useConfirm } from "../../../contexts/ConfirmContext";
-import { AseelAutocomplete, AseelDateInput } from "../../aseel";
+import { KitAutocomplete, KitDateInput } from "../../kit";
 import {
   CommercialDocumentEditor,
   type CommercialLineColumn,
@@ -403,7 +403,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       header: "الصنف",
       width: isStandalone ? "30%" : "28%",
       render: (line, idx) => (
-        <AseelAutocomplete
+        <KitAutocomplete
           value={line.product_name}
           options={options}
           onPick={(id) => pickRowItem(idx, Number(id))}
@@ -434,7 +434,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       width: "18%",
       render: (line, idx) => (
         <select
-          className="aseel-input"
+          className="ktra-input"
           value={line.warehouse_id === "" ? "" : String(line.warehouse_id)}
           onChange={(e) =>
             updateLine(idx, {
@@ -458,7 +458,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       render: (_line, idx) => (
         <button
           type="button"
-          className="aseel-toolbtn aseel-toolbtn--danger"
+          className="ktra-toolbtn ktra-toolbtn--danger"
           title="حذف السطر"
           onClick={() => setFormLines((ls) => ls.filter((_, i) => i !== idx))}
         >
@@ -617,7 +617,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       render: (r) => (
         <button
           type="button"
-          className="font-mono text-xs text-[var(--aseel-accent)] hover:underline"
+          className="font-mono text-xs text-[var(--ktra-accent)] hover:underline"
           onClick={(e) => {
             e.stopPropagation();
             void openView(r.id);
@@ -639,7 +639,7 @@ export const GoodsReceiptsPage: React.FC = () => {
             fontWeight: 700,
             padding: "1px 6px",
             borderRadius: "4px",
-            color: r.is_standalone ? "#b04a00" : "var(--aseel-accent, #2563eb)",
+            color: r.is_standalone ? "#b04a00" : "var(--ktra-accent, #2563eb)",
             background: r.is_standalone ? "rgba(176,74,0,0.12)" : "rgba(37,99,235,0.10)",
           }}
         >
@@ -664,7 +664,7 @@ export const GoodsReceiptsPage: React.FC = () => {
         r.invoice ? (
           <button
             type="button"
-            className="font-mono text-xs text-[var(--aseel-accent)] hover:underline"
+            className="font-mono text-xs text-[var(--ktra-accent)] hover:underline"
             title="فتح الفاتورة في تبويب جديد"
             onClick={(e) => {
               e.stopPropagation();
@@ -674,7 +674,7 @@ export const GoodsReceiptsPage: React.FC = () => {
             {r.invoice_number}
           </button>
         ) : (
-          <span className="text-xs aseel-text-soft">— بلا فاتورة —</span>
+          <span className="text-xs ktra-text-soft">— بلا فاتورة —</span>
         ),
     },
     { key: "partner_name", header: "المورد" },
@@ -691,7 +691,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       align: "left",
       numeric: true,
       render: (r) => (
-        <span className="aseel-num font-mono text-xs">{formatQuantity(r.total_quantity)}</span>
+        <span className="ktra-num font-mono text-xs">{formatQuantity(r.total_quantity)}</span>
       ),
     },
     {
@@ -704,9 +704,9 @@ export const GoodsReceiptsPage: React.FC = () => {
         const remaining = Number(r.total_remaining) || 0;
         return (
           <span
-            className="aseel-num font-mono text-xs font-semibold"
+            className="ktra-num font-mono text-xs font-semibold"
             style={{
-              color: remaining > 0 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ok, #2d7d46)",
+              color: remaining > 0 ? "var(--ktra-warn, #b06800)" : "var(--ktra-ok, #2d7d46)",
             }}
             title="الباقي غير المستلم من الفاتورة المرتبطة"
           >
@@ -724,7 +724,7 @@ export const GoodsReceiptsPage: React.FC = () => {
         <div style={{ display: "flex", gap: "3px", justifyContent: "center" }}>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             style={{ fontSize: "10px", padding: "2px 6px" }}
             title="عرض وطباعة"
             onClick={(e) => {
@@ -738,7 +738,7 @@ export const GoodsReceiptsPage: React.FC = () => {
             <>
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 style={{ fontSize: "10px", padding: "2px 6px" }}
                 title="تعديل"
                 onClick={async (e) => {
@@ -754,7 +754,7 @@ export const GoodsReceiptsPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                className="aseel-toolbtn aseel-toolbtn--danger"
+                className="ktra-toolbtn ktra-toolbtn--danger"
                 style={{ fontSize: "10px", padding: "2px 6px" }}
                 title="إلغاء الإرسالية"
                 onClick={(e) => {
@@ -775,13 +775,13 @@ export const GoodsReceiptsPage: React.FC = () => {
     return (
       <div dir="rtl" style={{ padding: "12px" }}>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h2 className="font-bold text-[var(--aseel-ink)]">
+          <h2 className="font-bold text-[var(--ktra-ink)]">
             {viewDoc.doc_label} {viewDoc.receipt_number}
           </h2>
           <div className="flex gap-2">
             <button
               type="button"
-              className="aseel-toolbtn"
+              className="ktra-toolbtn"
               onClick={() => printDoc(viewDoc)}
               title="طباعة / حفظ PDF"
             >
@@ -791,26 +791,26 @@ export const GoodsReceiptsPage: React.FC = () => {
               <>
                 <button
                   type="button"
-                  className="aseel-toolbtn"
+                  className="ktra-toolbtn"
                   onClick={() => void openEdit(viewDoc)}
                 >
                   <Pencil className="h-4 w-4" /> تعديل
                 </button>
                 <button
                   type="button"
-                  className="aseel-toolbtn aseel-toolbtn--danger"
+                  className="ktra-toolbtn ktra-toolbtn--danger"
                   onClick={() => void removeDoc(viewDoc)}
                 >
                   <Trash2 className="h-4 w-4" /> إلغاء
                 </button>
               </>
             )}
-            <button type="button" className="aseel-toolbtn" onClick={closeForm}>
+            <button type="button" className="ktra-toolbtn" onClick={closeForm}>
               <X className="h-4 w-4" /> إغلاق
             </button>
           </div>
         </div>
-        <div className="flex flex-wrap gap-4 text-sm mb-3 text-[var(--aseel-ink-soft)]">
+        <div className="flex flex-wrap gap-4 text-sm mb-3 text-[var(--ktra-ink-soft)]">
           <span>التاريخ: {formatDateLocalized(viewDoc.receipt_date)}</span>
           <span>الفاتورة المرتبطة: {viewDoc.invoice_number || "— بلا فاتورة —"}</span>
           <span>المورد: {viewDoc.partner_name || "—"}</span>
@@ -818,7 +818,7 @@ export const GoodsReceiptsPage: React.FC = () => {
           <span>{viewDoc.auto_created ? "أُنشئت مع الترحيل" : "مستند يدوي"}</span>
           {viewDoc.notes && <span>ملاحظات: {viewDoc.notes}</span>}
         </div>
-        <table className="aseel-grid">
+        <table className="ktra-grid">
           <thead>
             <tr>
               <th>الصنف</th>
@@ -833,16 +833,16 @@ export const GoodsReceiptsPage: React.FC = () => {
             {viewDoc.lines.map((l) => (
               <tr key={l.id}>
                 <td>{l.product_name || l.item_name}</td>
-                <td className="aseel-num">{formatQuantity(l.ordered_quantity)}</td>
-                <td className="aseel-num">{formatQuantity(l.quantity)}</td>
-                <td className="aseel-num">{formatQuantity(l.received_total)}</td>
+                <td className="ktra-num">{formatQuantity(l.ordered_quantity)}</td>
+                <td className="ktra-num">{formatQuantity(l.quantity)}</td>
+                <td className="ktra-num">{formatQuantity(l.received_total)}</td>
                 <td
-                  className="aseel-num"
+                  className="ktra-num"
                   style={{
                     color:
                       Number(l.remaining_quantity) > 0
-                        ? "var(--aseel-warn, #b06800)"
-                        : "var(--aseel-ok, #2d7d46)",
+                        ? "var(--ktra-warn, #b06800)"
+                        : "var(--ktra-ok, #2d7d46)",
                     fontWeight: 600,
                   }}
                 >
@@ -907,7 +907,7 @@ export const GoodsReceiptsPage: React.FC = () => {
               control: (
                 <div className="flex gap-1">
                   <input
-                    className="aseel-input flex-1"
+                    className="ktra-input flex-1"
                     readOnly
                     value={formInvoiceLabel || "— بلا فاتورة (سند مستقل) —"}
                     placeholder="اختر فاتورة…"
@@ -915,7 +915,7 @@ export const GoodsReceiptsPage: React.FC = () => {
                   />
                   <button
                     type="button"
-                    className="aseel-toolbtn"
+                    className="ktra-toolbtn"
                     title="اختيار من قائمة فواتير الشراء"
                     onClick={() => setPickerOpen(true)}
                   >
@@ -924,7 +924,7 @@ export const GoodsReceiptsPage: React.FC = () => {
                   {!isStandalone && (
                     <button
                       type="button"
-                      className="aseel-toolbtn"
+                      className="ktra-toolbtn"
                       title="إزالة الربط (سند مستقل)"
                       onClick={() => void pickInvoice("")}
                     >
@@ -939,7 +939,7 @@ export const GoodsReceiptsPage: React.FC = () => {
               label: isStandalone ? "المورد (إلزامي)" : "المورد",
               control: (
                 <select
-                  className="aseel-input"
+                  className="ktra-input"
                   disabled={!isStandalone}
                   value={formPartner === "" ? "" : String(formPartner)}
                   onChange={(e) =>
@@ -962,7 +962,7 @@ export const GoodsReceiptsPage: React.FC = () => {
               label: "رقم/مرجع المورد",
               control: (
                 <input
-                  className="aseel-input"
+                  className="ktra-input"
                   value={formSupplierRef}
                   onChange={(e) => setFormSupplierRef(e.target.value)}
                   placeholder="بوليصة، إشعار تسليم…"
@@ -972,14 +972,14 @@ export const GoodsReceiptsPage: React.FC = () => {
             {
               key: "date",
               label: "التاريخ",
-              control: <AseelDateInput value={formDate} onChange={setFormDate} />,
+              control: <KitDateInput value={formDate} onChange={setFormDate} />,
             },
             {
               key: "notes",
               label: "ملاحظات",
               control: (
                 <input
-                  className="aseel-input"
+                  className="ktra-input"
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
                   placeholder="اسم المستلم / رقم المركبة…"
@@ -1006,20 +1006,20 @@ export const GoodsReceiptsPage: React.FC = () => {
           }
           banner={
             err ? (
-              <div className="aseel-banner aseel-banner--err" role="alert">
+              <div className="ktra-banner ktra-banner--err" role="alert">
                 {err}
               </div>
             ) : undefined
           }
           status={
             <>
-              <span className="aseel-status-item">
+              <span className="ktra-status-item">
                 البنود <b>{formLines.length}</b>
               </span>
               {isStandalone && (
-                <span className="aseel-status-item">
+                <span className="ktra-status-item">
                   القيمة{" "}
-                  <b className="aseel-num">
+                  <b className="ktra-num">
                     {formatMoney(
                       formLines.reduce(
                         (s, l) => s + Number(l.quantity || 0) * Number(l.unit_price || 0),

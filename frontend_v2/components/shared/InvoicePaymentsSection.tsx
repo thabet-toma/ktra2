@@ -93,7 +93,7 @@ export const InvoicePaymentsSection: React.FC<InvoicePaymentsSectionProps> = ({
         <button
           type="button"
           data-testid="payments-section-add"
-          className="aseel-toolbtn inline-flex items-center gap-1"
+          className="ktra-toolbtn inline-flex items-center gap-1"
           onClick={onAddPayment}
           disabled={busy}
         >
@@ -148,7 +148,7 @@ export const InvoicePaymentsSection: React.FC<InvoicePaymentsSectionProps> = ({
                   <td className={`${CELL} text-center`}>
                     <button
                       type="button"
-                      className="aseel-toolbtn"
+                      className="ktra-toolbtn"
                       aria-label={`فتح ${words.voucher} #${row.id}`}
                       title={`فتح ${words.voucher} #${row.id} للعرض والطباعة`}
                       onClick={() => onOpenVoucher(row.id)}
@@ -178,14 +178,14 @@ export const InvoicePaymentsSection: React.FC<InvoicePaymentsSectionProps> = ({
                     {editable && (
                       <span className="inline-flex gap-1">
                         <button
-                          type="button" className="aseel-toolbtn"
+                          type="button" className="ktra-toolbtn"
                           aria-label="تعديل الدفعة النقدية" title="تعديل الدفعة النقدية"
                           onClick={onEditIntent} disabled={busy}
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
                         <button
-                          type="button" className="aseel-toolbtn"
+                          type="button" className="ktra-toolbtn"
                           aria-label="حذف الدفعة النقدية" title="حذف الدفعة النقدية"
                           onClick={onRemoveIntentCash} disabled={busy}
                         >
@@ -223,7 +223,7 @@ export const InvoicePaymentsSection: React.FC<InvoicePaymentsSectionProps> = ({
                     {editable && (
                       <span className="inline-flex gap-1">
                         <button
-                          type="button" className="aseel-toolbtn"
+                          type="button" className="ktra-toolbtn"
                           aria-label={`تعديل الشيك ${cheque.cheque_number}`}
                           title={`تعديل الشيك ${cheque.cheque_number}`}
                           onClick={onEditIntent} disabled={busy}
@@ -231,7 +231,7 @@ export const InvoicePaymentsSection: React.FC<InvoicePaymentsSectionProps> = ({
                           <Pencil className="h-3 w-3" />
                         </button>
                         <button
-                          type="button" className="aseel-toolbtn"
+                          type="button" className="ktra-toolbtn"
                           aria-label={`حذف الشيك ${cheque.cheque_number}`}
                           title={`حذف الشيك ${cheque.cheque_number}`}
                           onClick={() => onRemoveIntentCheque(cheque.id)} disabled={busy}

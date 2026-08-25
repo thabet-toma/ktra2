@@ -88,8 +88,8 @@ export const CompanySwitcher: React.FC = () => {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold rounded-lg bg-[var(--aseel-panel)] border border-[var(--aseel-border-soft)] hover:bg-[var(--aseel-panel-hover)] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--aseel-accent)]"
-        style={{ color: "var(--aseel-ink)" }}
+        className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold rounded-lg bg-[var(--ktra-panel)] border border-[var(--ktra-border-soft)] hover:bg-[var(--ktra-panel-hover)] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--ktra-accent)]"
+        style={{ color: "var(--ktra-ink)" }}
       >
         {identity?.logo_url ? (
           <img src={identity.logo_url} alt="Logo" className="w-5 h-5 rounded object-cover bg-[var(--color-surface)]" />
@@ -101,8 +101,8 @@ export const CompanySwitcher: React.FC = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-1.5 w-64 rounded-xl shadow-xl bg-[var(--aseel-bg)] border border-[var(--aseel-border)] z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
-          <div className="px-4 py-2.5 bg-[var(--aseel-panel)] border-b border-[var(--aseel-border-soft)]">
+        <div className="absolute right-0 mt-1.5 w-64 rounded-xl shadow-xl bg-[var(--ktra-bg)] border border-[var(--ktra-border)] z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="px-4 py-2.5 bg-[var(--ktra-panel)] border-b border-[var(--ktra-border-soft)]">
             <span className="text-[11px] font-bold tracking-wider uppercase opacity-60">الشركات والمجموعات</span>
           </div>
 
@@ -112,7 +112,7 @@ export const CompanySwitcher: React.FC = () => {
               return (
                 <div
                   key={membership.id}
-                  className={`w-full flex items-center gap-1 pl-1.5 pr-4 transition-colors duration-150 hover:bg-[var(--aseel-panel-hover)] ${isActive ? "bg-[var(--aseel-panel-hover)] font-bold" : ""}`}
+                  className={`w-full flex items-center gap-1 pl-1.5 pr-4 transition-colors duration-150 hover:bg-[var(--ktra-panel-hover)] ${isActive ? "bg-[var(--ktra-panel-hover)] font-bold" : ""}`}
                 >
                   <button
                     type="button"
@@ -120,7 +120,7 @@ export const CompanySwitcher: React.FC = () => {
                     className="flex flex-1 items-center justify-between py-2.5 text-sm text-right"
                   >
                     <div className="flex flex-col">
-                      <span style={{ color: isActive ? "var(--aseel-accent)" : "var(--aseel-ink)" }}>
+                      <span style={{ color: isActive ? "var(--ktra-accent)" : "var(--ktra-ink)" }}>
                         {companyLabel(membership.tenant)}
                       </span>
                       <span className="text-[11px] opacity-60">
@@ -128,14 +128,14 @@ export const CompanySwitcher: React.FC = () => {
                         {membership.is_default && " · افتراضية"}
                       </span>
                     </div>
-                    {isActive && <Check className="w-4 h-4 text-[var(--aseel-accent)]" />}
+                    {isActive && <Check className="w-4 h-4 text-[var(--ktra-accent)]" />}
                   </button>
                   {/* T-IMPOFFER: تثبيت الشركة التي تُفتح عند الدخول. */}
                   <button
                     type="button"
                     disabled={membership.is_default || pinning != null}
                     onClick={() => void handlePinDefault(membership.tenant.TenantID)}
-                    className="p-1.5 rounded-lg hover:bg-[var(--aseel-panel)] disabled:cursor-default transition-colors"
+                    className="p-1.5 rounded-lg hover:bg-[var(--ktra-panel)] disabled:cursor-default transition-colors"
                     title={membership.is_default ? "الشركة الافتراضية عند الدخول" : "اجعلها الشركة الافتراضية عند الدخول"}
                     aria-label="الشركة الافتراضية"
                   >
@@ -145,8 +145,8 @@ export const CompanySwitcher: React.FC = () => {
                       <Star
                         className="w-3.5 h-3.5"
                         style={{
-                          color: membership.is_default ? "var(--aseel-accent)" : "var(--aseel-ink-soft)",
-                          fill: membership.is_default ? "var(--aseel-accent)" : "none",
+                          color: membership.is_default ? "var(--ktra-accent)" : "var(--ktra-ink-soft)",
+                          fill: membership.is_default ? "var(--ktra-accent)" : "none",
                         }}
                       />
                     )}
@@ -161,7 +161,7 @@ export const CompanySwitcher: React.FC = () => {
             )}
           </div>
 
-          <div className="border-t border-[var(--aseel-border-soft)] p-1.5 bg-[var(--aseel-panel)] space-y-1.5">
+          <div className="border-t border-[var(--ktra-border-soft)] p-1.5 bg-[var(--ktra-panel)] space-y-1.5">
             {currentCompany && canManageCurrentCompany && (
               <button
                 type="button"
@@ -169,8 +169,8 @@ export const CompanySwitcher: React.FC = () => {
                   setShowManageModal(true);
                   setIsOpen(false);
                 }}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold rounded-lg border border-[var(--aseel-border)] hover:bg-[var(--aseel-panel-hover)] transition-colors duration-150 focus:outline-none"
-                style={{ color: "var(--aseel-ink)" }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold rounded-lg border border-[var(--ktra-border)] hover:bg-[var(--ktra-panel-hover)] transition-colors duration-150 focus:outline-none"
+                style={{ color: "var(--ktra-ink)" }}
               >
                 <Settings2 className="w-3.5 h-3.5" />
                 <span>إدارة الشركة (الاسم والأعضاء)</span>
@@ -182,7 +182,7 @@ export const CompanySwitcher: React.FC = () => {
                 setShowModal(true);
                 setIsOpen(false);
               }}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-white rounded-lg bg-[var(--aseel-accent)] hover:bg-[var(--aseel-accent-dark,var(--aseel-accent))] transition-colors duration-150 focus:outline-none"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-white rounded-lg bg-[var(--ktra-accent)] hover:bg-[var(--ktra-accent-dark,var(--ktra-accent))] transition-colors duration-150 focus:outline-none"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>إنشاء شركة جديدة</span>
@@ -206,11 +206,11 @@ export const CompanySwitcher: React.FC = () => {
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
           <div
-            className="w-full max-w-md rounded-2xl bg-[var(--aseel-bg)] border border-[var(--aseel-border)] shadow-2xl p-6 overflow-hidden transform transition-all animate-in zoom-in-95 duration-200"
+            className="w-full max-w-md rounded-2xl bg-[var(--ktra-bg)] border border-[var(--ktra-border)] shadow-2xl p-6 overflow-hidden transform transition-all animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-bold" style={{ color: "var(--aseel-ink)" }}>إنشاء شركة / مجموعة جديدة</h3>
+              <h3 className="text-lg font-bold" style={{ color: "var(--ktra-ink)" }}>إنشاء شركة / مجموعة جديدة</h3>
               <button
                 type="button"
                 onClick={() => {
@@ -218,7 +218,7 @@ export const CompanySwitcher: React.FC = () => {
                   setError(null);
                   setNewCompanyName("");
                 }}
-                className="p-1 rounded-lg hover:bg-[var(--aseel-panel-hover)] transition-colors opacity-70 hover:opacity-100"
+                className="p-1 rounded-lg hover:bg-[var(--ktra-panel-hover)] transition-colors opacity-70 hover:opacity-100"
               >
                 <Plus className="w-5 h-5 rotate-45" />
               </button>
@@ -240,7 +240,7 @@ export const CompanySwitcher: React.FC = () => {
                   placeholder="مثال: شركة القدس للتجارة"
                   value={newCompanyName}
                   onChange={(e) => setNewCompanyName(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--aseel-border)] bg-[var(--aseel-panel)] focus:outline-none focus:ring-2 focus:ring-[var(--aseel-accent)] focus:border-transparent transition-all duration-200"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ktra-border)] bg-[var(--ktra-panel)] focus:outline-none focus:ring-2 focus:ring-[var(--ktra-accent)] focus:border-transparent transition-all duration-200"
                   disabled={submitting}
                 />
               </div>
@@ -253,14 +253,14 @@ export const CompanySwitcher: React.FC = () => {
                     setError(null);
                     setNewCompanyName("");
                   }}
-                  className="px-4 py-2 text-sm font-semibold rounded-lg hover:bg-[var(--aseel-panel-hover)] transition-colors duration-150"
+                  className="px-4 py-2 text-sm font-semibold rounded-lg hover:bg-[var(--ktra-panel-hover)] transition-colors duration-150"
                   disabled={submitting}
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
-                  className="flex items-center gap-2 px-5 py-2 text-sm font-bold text-white rounded-lg bg-[var(--aseel-accent)] hover:bg-[var(--aseel-accent-dark,var(--aseel-accent))] transition-colors duration-150"
+                  className="flex items-center gap-2 px-5 py-2 text-sm font-bold text-white rounded-lg bg-[var(--ktra-accent)] hover:bg-[var(--ktra-accent-dark,var(--ktra-accent))] transition-colors duration-150"
                   disabled={submitting}
                 >
                   {submitting ? (

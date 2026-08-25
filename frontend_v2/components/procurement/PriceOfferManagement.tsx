@@ -1,5 +1,5 @@
 /**
- * N5-T6 — PriceOfferManagement (L3) — AseelDenseTable لعروض الأسعار
+ * N5-T6 — PriceOfferManagement (L3) — KitDenseTable لعروض الأسعار
  * المرجع: العروض والطلبيات.txt:4-9
  */
 import React, { useState, useEffect, useMemo } from "react";
@@ -11,7 +11,7 @@ import {
   priceOffersService,
   type PriceOfferScope,
 } from "../../services/firestoreService";
-import type { DenseColumn } from "../aseel/AseelDenseTable";
+import type { DenseColumn } from "../kit/KitDenseTable";
 import { PriceOfferForm } from "./price-offers/PriceOfferForm";
 import { CommercialDocumentsList } from "../shared/CommercialDocumentsList";
 import { FilePreviewModal } from "../shared/FilePreviewModal";
@@ -55,11 +55,11 @@ const IMPORT_STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  initial: "var(--aseel-ink-soft)",
-  pending_info: "var(--aseel-warn, #b8800a)",
-  under_discussion: "var(--aseel-accent, #1857a4)",
-  approved_for_shipping: "var(--aseel-ok, #267346)",
-  rejected: "var(--aseel-danger, #c00)",
+  initial: "var(--ktra-ink-soft)",
+  pending_info: "var(--ktra-warn, #b8800a)",
+  under_discussion: "var(--ktra-accent, #1857a4)",
+  approved_for_shipping: "var(--ktra-ok, #267346)",
+  rejected: "var(--ktra-danger, #c00)",
 };
 
 const fmtDate = (d: string | undefined) => {
@@ -375,7 +375,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
                 <img src={firstImage.url} alt="" className="h-full w-full object-cover" />
               </button>
             ) : (
-              <span className="flex h-18 w-18 shrink-0 items-center justify-center rounded border border-dashed border-[var(--color-border)] aseel-text-soft"
+              <span className="flex h-18 w-18 shrink-0 items-center justify-center rounded border border-dashed border-[var(--color-border)] ktra-text-soft"
                 title="لا توجد صورة توضيحية">
                 <ImageIcon className="h-7 w-7" aria-hidden="true" />
               </span>
@@ -384,7 +384,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
                 فالفائض يُقصّ داخل الخلية بدل أن يوسّعها على حساب جارتها. والمعروض
                 تسلسلٌ وحده (`documentSerialDisplay`) إلا حين يتصادم تسلسلان في
                 القائمة — عندها يعود القصّ الأوسط الكامل. الكامل دائماً في `title`
-                وفي البحث. وبلا `.aseel-cell-clip`: قيده بالبكسل لا يتبع سحب حدّ
+                وفي البحث. وبلا `.ktra-cell-clip`: قيده بالبكسل لا يتبع سحب حدّ
                 العمود (THA-347)، و`min-w-0` داخل صفّ مرن يتبعه. */}
             <b dir="auto" title={number}
               className="min-w-0 truncate tabular-nums"
@@ -403,7 +403,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
             {o.orderName || "—"}
           </div>
           {o.orderDescription && (
-            <div className="mt-0.5 line-clamp-2 text-[10px] aseel-text-soft" title={o.orderDescription}>
+            <div className="mt-0.5 line-clamp-2 text-[10px] ktra-text-soft" title={o.orderDescription}>
               {o.orderDescription}
             </div>
           )}
@@ -425,11 +425,11 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     { key: "files", header: "الملف", width: "60px", align: "center",
       render: (o) => {
         const files = o.attachments || [];
-        if (files.length === 0) return <span className="aseel-text-soft">—</span>;
+        if (files.length === 0) return <span className="ktra-text-soft">—</span>;
         return (
           <button
             type="button"
-            className="aseel-text-accent inline-flex items-center gap-0.5"
+            className="ktra-text-accent inline-flex items-center gap-0.5"
             title={`عرض «${files[0].name || "الملف"}»`}
             onClick={(e) => { e.stopPropagation(); setPreviewFile(files[0]); }}
           >
@@ -456,14 +456,14 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
               linkedDocPath(o) ? (
                 <button
                   type="button"
-                  className="aseel-text-accent text-[10px] text-right hover:underline"
+                  className="ktra-text-accent text-[10px] text-right hover:underline"
                   title={`فتح ${o.linkedDocNumber}`}
                   onClick={(e) => { e.stopPropagation(); openInNewTab(linkedDocPath(o)!); }}
                 >
                   ← {o.linkedDocNumber}
                 </button>
               ) : (
-                <span className="text-[10px] aseel-text-soft">← {o.linkedDocNumber}</span>
+                <span className="text-[10px] ktra-text-soft">← {o.linkedDocNumber}</span>
               )
             )}
             {/* T-RECVIS: أين وصلت بضاعة هذه الطلبية. الطلبية لا تُشقّ (طلبيةٌ
@@ -471,7 +471,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
             {o.linkedDocReceiptText && (
               <span
                 className={`text-[10px] ${o.linkedDocHasRemaining
-                  ? "text-[var(--aseel-warn)]" : "aseel-text-soft"}`}
+                  ? "text-[var(--ktra-warn)]" : "ktra-text-soft"}`}
                 title="الاستلام يكمل على الفاتورة — الطلبية تتحوّل كاملةً مرّةً واحدة"
               >
                 {o.linkedDocReceiptText}
@@ -480,7 +480,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
             {/* التفصيل بجانب الحالة: «غير ملائم» بلا سبب — أو «بانتظار معلومات»
                 بلا ما يُنتظَر — لا يعلّم أحداً شيئاً عند مسح القائمة. */}
             {o.decisionReason && (
-              <span className="text-[10px] aseel-text-soft" title={o.decisionReason}>
+              <span className="text-[10px] ktra-text-soft" title={o.decisionReason}>
                 {o.backendStatus === "pending_info" ? "بانتظار: " : "السبب: "}
                 {o.decisionReason}
               </span>
@@ -492,7 +492,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     { key: "actions", header: "إجراءات", width: "250px", align: "center",
       render: (o) => (
         <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
-          <button className="aseel-text-accent hover:underline"
+          <button className="ktra-text-accent hover:underline"
             onClick={(e) => { e.stopPropagation(); void openEdit(o); }}>
             {o.backendStatus === "converted" ? "عرض" : "تعديل"}
           </button>
@@ -519,7 +519,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
             && scope === "import"
             && o.backendStatus !== "accepted"
             && o.backendStatus !== "converted" && (
-            <span className="aseel-text-soft text-[10px]" title="حوّل العرض بعد اعتباره ملائماً">
+            <span className="ktra-text-soft text-[10px]" title="حوّل العرض بعد اعتباره ملائماً">
               {isOfferStruckThrough(o.backendStatus)
                 ? "غير ملائم — لا يُحوَّل"
                 : "يلزمه قرار «ملائم» للتحويل"}

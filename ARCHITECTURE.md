@@ -134,7 +134,7 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 | مشاركة مستند برابط عام / معاينة واتساب | `modules/docshare.md` | `docshare/services.py` (`create_share`), `docshare/documents.py` (`DOC_TYPES`) |
 | أي شاشة أو خدمة في الواجهة | `modules/frontend.md` | `frontend_v2/services/restApi.ts` |
 | «الوضع السهل» — قناع الواجهة المبسّطة | `modules/frontend.md` + `modules/tenants.md` | `frontend_v2/utils/uiMode.ts`, `core/access.py` (`user_ui_mode`) |
-| نافذة عائمة (سحب/تحجيم) أو موضع شريط الإجراءات | `modules/frontend.md` §T-WIN | `frontend_v2/utils/windowGeometry.ts`, `frontend_v2/components/aseel/AseelFloatWindow.tsx`, `frontend_v2/components/layout/ActionBarRail.tsx` |
+| نافذة عائمة (سحب/تحجيم) أو موضع شريط الإجراءات | `modules/frontend.md` §T-WIN | `frontend_v2/utils/windowGeometry.ts`, `frontend_v2/components/kit/KitFloatWindow.tsx`, `frontend_v2/components/layout/ActionBarRail.tsx` |
 | **أين نقطة الـAPI؟** | — | `docs/API_INDEX.md` (مولَّد — كل النقاط ← الـView ← الملف) |
 
 ## الاختبارات

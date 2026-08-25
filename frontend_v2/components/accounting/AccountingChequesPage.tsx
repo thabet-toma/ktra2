@@ -22,10 +22,10 @@ import { ChequeMaturityPanel } from "./ChequeMaturityPanel";
 import { NewPaymentModal } from "../sales/SalesCustomerPaymentsPage";
 import { NewSupplierPaymentModal } from "../sales/NewSupplierPaymentModal";
 import {
-  AseelDocumentShell,
-  AseelDenseTable,
-} from "../aseel";
-import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
+  KitDocumentShell,
+  KitDenseTable,
+} from "../kit";
+import type { KitToolbarAction, KitTab, DenseColumn } from "../kit";
 import { Plus, X, ArrowRightLeft, Loader2, Upload, Banknote, Printer } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
 import { formatDateLocalized, formatDateTimeValue } from "../../utils/formatDate";
@@ -523,7 +523,7 @@ export const AccountingChequesPage: React.FC = () => {
           return (
             <button
               type="button"
-              className="aseel-toolbtn"
+              className="ktra-toolbtn"
               data-testid="cheque-post-document"
               disabled={busy}
               title={`ترحيل ${doc.label} ${doc.number}`}
@@ -537,14 +537,14 @@ export const AccountingChequesPage: React.FC = () => {
         // حالة نهائية: لا حركة ممكنة — زرٌّ يفتح نافذةً فارغة كان وعداً كاذباً.
         if ((r.allowed_movements ?? []).length === 0) {
           return (
-            <span className="text-[0.75rem] text-[var(--aseel-ink-soft)]"
+            <span className="text-[0.75rem] text-[var(--ktra-ink-soft)]"
               title="لا حركات متاحة من هذه الحالة">نهائي</span>
           );
         }
         return (
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             title="تحويل الشيك"
             onClick={(e) => {
               e.stopPropagation();
@@ -576,7 +576,7 @@ export const AccountingChequesPage: React.FC = () => {
   // T-CHQ3: الشيك ليس مستنداً مستقلاً — يدخل الدفاتر ضمن سنده كما في الأنظمة
   // المهنية. فزرّا الإدخال يفتحان سند القبض/الصرف نفسه المستعمل في بطاقة
   // الطرف وفي الفاتورة: بلا توزيع = دفعة على الحساب، وبتوزيع = تسوية فاتورة.
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     {
       key: "new-in", label: "شيك وارد (سند قبض)",
       icon: <Plus className="w-4 h-4" />, onClick: () => setVoucher("Incoming"),
@@ -628,41 +628,41 @@ export const AccountingChequesPage: React.FC = () => {
     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
       {/* CHQ-4: البحث برقم الشيك — المفتاح الأول في أي نظام شيكات، ولم يكن
           موجوداً. يبحث أيضاً في الاسم على الورقة والبنك وحساب الساحب والطرف. */}
-      <div className="aseel-field" style={{ minWidth: "200px" }}>
-        <label className="aseel-field-label">بحث</label>
+      <div className="ktra-field" style={{ minWidth: "200px" }}>
+        <label className="ktra-field-label">بحث</label>
         <input
           type="search"
-          className="aseel-input"
+          className="ktra-input"
           data-testid="cheque-search"
           placeholder="رقم الشيك، البنك، الاسم…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">الاتجاه</label>
-        <select className="aseel-input" value={filterDirection} onChange={(e) => setFilterDirection(e.target.value)}>
+      <div className="ktra-field">
+        <label className="ktra-field-label">الاتجاه</label>
+        <select className="ktra-input" value={filterDirection} onChange={(e) => setFilterDirection(e.target.value)}>
           {DIRECTIONS.map((d) => <option key={d.v} value={d.v}>{d.l}</option>)}
         </select>
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">الحالة</label>
-        <select className="aseel-input" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+      <div className="ktra-field">
+        <label className="ktra-field-label">الحالة</label>
+        <select className="ktra-input" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
           <option value="">الكل</option>
           {statusOptions.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
         </select>
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">استحقاق من</label>
-        <input type="date" className="aseel-input" value={filterDueFrom} onChange={(e) => setFilterDueFrom(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">استحقاق من</label>
+        <input type="date" className="ktra-input" value={filterDueFrom} onChange={(e) => setFilterDueFrom(e.target.value)} />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">استحقاق إلى</label>
-        <input type="date" className="aseel-input" value={filterDueTo} onChange={(e) => setFilterDueTo(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">استحقاق إلى</label>
+        <input type="date" className="ktra-input" value={filterDueTo} onChange={(e) => setFilterDueTo(e.target.value)} />
       </div>
-      <div className="aseel-field" style={{ minWidth: "160px" }}>
-        <label className="aseel-field-label">الشريك</label>
-        <select className="aseel-input" value={filterPartner} onChange={(e) => setFilterPartner(e.target.value)}>
+      <div className="ktra-field" style={{ minWidth: "160px" }}>
+        <label className="ktra-field-label">الشريك</label>
+        <select className="ktra-input" value={filterPartner} onChange={(e) => setFilterPartner(e.target.value)}>
           <option value="">الكل</option>
           {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
@@ -676,7 +676,7 @@ export const AccountingChequesPage: React.FC = () => {
       {(depositableRows.length > 0 || selectedIds.size > 0) && (
         <div
           data-testid="cheque-batch-bar"
-          className="mb-2 flex flex-wrap items-center gap-3 rounded border border-[var(--aseel-border)] bg-[var(--aseel-surface)] px-3 py-2"
+          className="mb-2 flex flex-wrap items-center gap-3 rounded border border-[var(--ktra-border)] bg-[var(--ktra-surface)] px-3 py-2"
         >
           <label className="flex items-center gap-1.5 text-[0.8rem]">
             <input
@@ -706,7 +706,7 @@ export const AccountingChequesPage: React.FC = () => {
               </span>
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 data-testid="cheque-deposit-open"
                 onClick={() => {
                   setDepositRejected([]);
@@ -720,7 +720,7 @@ export const AccountingChequesPage: React.FC = () => {
               </button>
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 onClick={() => setSelectedIds(new Set())}
               >
                 إلغاء التحديد
@@ -729,7 +729,7 @@ export const AccountingChequesPage: React.FC = () => {
           )}
         </div>
       )}
-      <AseelDenseTable<ChequeDto>
+      <KitDenseTable<ChequeDto>
         columns={columns}
         rows={filteredRows}
         getRowKey={(r) => r.id}
@@ -755,7 +755,7 @@ export const AccountingChequesPage: React.FC = () => {
     </>
   );
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "list", label: "قائمة الشيكات", content: tableContent },
     {
       key: "wallet",
@@ -788,10 +788,10 @@ export const AccountingChequesPage: React.FC = () => {
           نافذة التحويل حين تكون مفتوحة لأن النافذة تغطّي الصفحة، وعلى الصفحة
           نفسها حين يكون الفشل في التحميل أو الحذف. */}
       {err && !transferCheque && (
-        <div className="aseel-banner aseel-banner--err" data-testid="cheque-page-error"
+        <div className="ktra-banner ktra-banner--err" data-testid="cheque-page-error"
           style={{ marginBottom: "8px" }}>{err}</div>
       )}
-      <AseelDocumentShell
+      <KitDocumentShell
         title="الشيكات"
         actions={actions}
         header={filterBar}
@@ -799,7 +799,7 @@ export const AccountingChequesPage: React.FC = () => {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         status={
-          <span className="aseel-status-item">
+          <span className="ktra-status-item">
             {totalCount} شيك
             {totalCount > PAGE_SIZE
               && ` — صفحة ${page} من ${Math.ceil(totalCount / PAGE_SIZE)}`}
@@ -807,7 +807,7 @@ export const AccountingChequesPage: React.FC = () => {
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
 
       {/* T-CHQ3: إدخال الشيك عبر سنده — نفس النافذة المستعملة في بطاقة الطرف
           وفي الفاتورة، فلا يوجد مسار ثانٍ للشيك ولا قيد موازٍ. */}
@@ -830,13 +830,13 @@ export const AccountingChequesPage: React.FC = () => {
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
           data-testid="cheque-deposit-dialog">
           <div style={{
-            background: "var(--aseel-surface)", borderRadius: "var(--aseel-radius)",
+            background: "var(--ktra-surface)", borderRadius: "var(--ktra-radius)",
             boxShadow: "0 8px 32px #0004", maxWidth: "460px", width: "100%",
-            padding: "24px", border: "1px solid var(--aseel-border)",
+            padding: "24px", border: "1px solid var(--ktra-border)",
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <h3 style={{ fontWeight: "bold" }}>إيداع {selectedIds.size} شيكاً في البنك</h3>
-              <button type="button" className="aseel-toolbtn" onClick={() => setDepositOpen(false)}>
+              <button type="button" className="ktra-toolbtn" onClick={() => setDepositOpen(false)}>
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -844,9 +844,9 @@ export const AccountingChequesPage: React.FC = () => {
               <div style={{ fontSize: "0.85rem" }}>
                 الإجمالي: <strong>{formatMoney(selectedTotal)}</strong>
               </div>
-              <div className="aseel-field">
-                <label className="aseel-field-label">البنك المُودَع فيه</label>
-                <select className="aseel-input" data-testid="cheque-deposit-bank"
+              <div className="ktra-field">
+                <label className="ktra-field-label">البنك المُودَع فيه</label>
+                <select className="ktra-input" data-testid="cheque-deposit-bank"
                   value={depositBank} onChange={(e) => setDepositBank(e.target.value)}>
                   <option value="">— اختر البنك —</option>
                   {bankAccounts.map((a) => (
@@ -856,19 +856,19 @@ export const AccountingChequesPage: React.FC = () => {
                   ))}
                 </select>
               </div>
-              <div className="aseel-field">
-                <label className="aseel-field-label">تاريخ الإيداع</label>
-                <input type="date" className="aseel-input" value={depositDate}
+              <div className="ktra-field">
+                <label className="ktra-field-label">تاريخ الإيداع</label>
+                <input type="date" className="ktra-input" value={depositDate}
                   onChange={(e) => setDepositDate(e.target.value)} />
               </div>
-              <div className="aseel-field">
-                <label className="aseel-field-label">ملاحظات القسيمة</label>
-                <textarea className="aseel-input" rows={2} value={depositNotes}
+              <div className="ktra-field">
+                <label className="ktra-field-label">ملاحظات القسيمة</label>
+                <textarea className="ktra-input" rows={2} value={depositNotes}
                   onChange={(e) => setDepositNotes(e.target.value)} />
               </div>
               {/* الدفعة ذرّية: هذه القائمة تعني أن **لا شيء** أُودع بعد. */}
               {depositRejected.length > 0 && (
-                <div className="aseel-banner aseel-banner--err" data-testid="cheque-deposit-rejected">
+                <div className="ktra-banner ktra-banner--err" data-testid="cheque-deposit-rejected">
                   <div style={{ fontWeight: 700, marginBottom: "4px" }}>
                     لم تُودَع أي ورقة — استثنِ الآتي من التحديد:
                   </div>
@@ -882,18 +882,18 @@ export const AccountingChequesPage: React.FC = () => {
                 </div>
               )}
               {err && depositRejected.length === 0 && (
-                <div className="aseel-banner aseel-banner--err">{err}</div>
+                <div className="ktra-banner ktra-banner--err">{err}</div>
               )}
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
-              <button type="button" className="aseel-toolbtn" onClick={() => setDepositOpen(false)}>إلغاء</button>
+              <button type="button" className="ktra-toolbtn" onClick={() => setDepositOpen(false)}>إلغاء</button>
               <OfflineGuard
                 action="إيداع الشيكات"
                 warningMessage="الإيداع يُرحَّل له قيدٌ لكل ورقة على الخادم — يتطلب اتصالاً"
               >
                 <button
                   type="button"
-                  className="aseel-toolbtn"
+                  className="ktra-toolbtn"
                   data-testid="cheque-deposit-submit"
                   // البنك مطلوب متى وُجدت بنوك مسجَّلة — نفس شرط الخادم.
                   disabled={busy || selectedIds.size === 0 || (bankAccounts.length > 0 && !depositBank)}
@@ -913,18 +913,18 @@ export const AccountingChequesPage: React.FC = () => {
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50"
           data-testid="cheque-transfer-dialog">
           <div style={{
-            background: "var(--aseel-surface)", borderRadius: "var(--aseel-radius)",
+            background: "var(--ktra-surface)", borderRadius: "var(--ktra-radius)",
             boxShadow: "0 8px 32px #0004", maxWidth: "420px", width: "100%",
-            padding: "24px", border: "1px solid var(--aseel-border)",
+            padding: "24px", border: "1px solid var(--ktra-border)",
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
               <h3 style={{ fontWeight: "bold" }}>تحويل الشيك #{transferCheque.cheque_number}</h3>
-              <button type="button" className="aseel-toolbtn" onClick={() => setTransferCheque(null)}>
+              <button type="button" className="ktra-toolbtn" onClick={() => setTransferCheque(null)}>
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div style={{ display: "grid", gap: "10px" }}>
-              <div style={{ fontSize: "0.85rem", color: "var(--aseel-ink-soft)" }}>
+              <div style={{ fontSize: "0.85rem", color: "var(--ktra-ink-soft)" }}>
                 {transferCheque.direction === "Incoming" ? "شيك وارد" : "شيك صادر"} ·
                 الحالة الحالية: <strong>{transferCheque.status_label || transferCheque.status}</strong>
               </div>
@@ -939,9 +939,9 @@ export const AccountingChequesPage: React.FC = () => {
                 <span>الطرف: <strong>{getPartnerName(transferCheque.partner)}</strong></span>
                 <span>الاستحقاق: <strong>{formatDateLocalized(transferCheque.due_date) || "—"}</strong></span>
               </div>
-              <div className="aseel-field">
-                <label className="aseel-field-label">الحركة</label>
-                <select className="aseel-input" data-testid="cheque-move-select"
+              <div className="ktra-field">
+                <label className="ktra-field-label">الحركة</label>
+                <select className="ktra-input" data-testid="cheque-move-select"
                   value={newMovement} onChange={(e) => setNewMovement(e.target.value)}>
                   <option value="">— اختر الحركة —</option>
                   {moves.map((m) => (
@@ -949,19 +949,19 @@ export const AccountingChequesPage: React.FC = () => {
                   ))}
                 </select>
                 {moves.length === 0 && (
-                  <span style={{ fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
+                  <span style={{ fontSize: "0.75rem", color: "var(--ktra-ink-soft)" }}>
                     حالة نهائية — لا حركات متاحة من «{transferCheque.status_label || transferCheque.status}»
                   </span>
                 )}
               </div>
               {selectedMove?.requires_bank_account && (
-                <div className="aseel-field">
-                  <label className="aseel-field-label">
+                <div className="ktra-field">
+                  <label className="ktra-field-label">
                     {newMovement === "deposit"
                       ? "البنك المُودَع فيه"
                       : "حساب الإيداع/التحصيل البنكي"}
                   </label>
-                  <select className="aseel-input" data-testid="cheque-bank-select"
+                  <select className="ktra-input" data-testid="cheque-bank-select"
                     value={transferBankAccount}
                     onChange={(e) => setTransferBankAccount(e.target.value)}>
                     {/* CHQ-4: الإيداع لا صندوق افتراضي له — الورقة تُودَع في بنك
@@ -978,7 +978,7 @@ export const AccountingChequesPage: React.FC = () => {
                   {/* CHQ-4: التحصيل يقترح البنك الذي أُودعت فيه الورقة — هو
                       المصدر الطبيعي للنقد، وكتابته من الذاكرة كل مرة خطأ ينتظر. */}
                   {transferCheque.deposit_bank_account_name && newMovement !== "deposit" && (
-                    <span style={{ fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--ktra-ink-soft)" }}>
                       أُودِع في: {transferCheque.deposit_bank_account_name}
                     </span>
                   )}
@@ -987,9 +987,9 @@ export const AccountingChequesPage: React.FC = () => {
               {/* CHQ-4: التظهير يسدّد مورداً بالورقة بدل النقد — بلا مستفيدٍ لا
                   يكون للحركة قيد ذمم، فالحقل شرطٌ لا اختيار. */}
               {selectedMove?.requires_endorsee && (
-                <div className="aseel-field">
-                  <label className="aseel-field-label">المورد المستفيد من التظهير</label>
-                  <select className="aseel-input" data-testid="cheque-endorsee-select"
+                <div className="ktra-field">
+                  <label className="ktra-field-label">المورد المستفيد من التظهير</label>
+                  <select className="ktra-input" data-testid="cheque-endorsee-select"
                     value={transferEndorsee}
                     onChange={(e) => setTransferEndorsee(e.target.value)}>
                     <option value="">— اختر المورد —</option>
@@ -998,32 +998,32 @@ export const AccountingChequesPage: React.FC = () => {
                     ))}
                   </select>
                   {!transferEndorsee && (
-                    <span style={{ fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--ktra-ink-soft)" }}>
                       تنخفض ذمة هذا المورد بقيمة الشيك عند التظهير.
                     </span>
                   )}
                 </div>
               )}
-              <div className="aseel-field">
-                <label className="aseel-field-label">تاريخ التحويل</label>
-                <input type="date" className="aseel-input" value={transferDate}
+              <div className="ktra-field">
+                <label className="ktra-field-label">تاريخ التحويل</label>
+                <input type="date" className="ktra-input" value={transferDate}
                   onChange={(e) => setTransferDate(e.target.value)} />
               </div>
-              <div className="aseel-field">
-                <label className="aseel-field-label">ملاحظات</label>
-                <textarea className="aseel-input" rows={2} value={transferNotes}
+              <div className="ktra-field">
+                <label className="ktra-field-label">ملاحظات</label>
+                <textarea className="ktra-input" rows={2} value={transferNotes}
                   onChange={(e) => setTransferNotes(e.target.value)} />
               </div>
               {/* T-CHQ2 · CHQ-4: مسار الشيك — كل خطوة بتاريخها ومنفّذها **وقيدها**.
                   رقم القيد رابطٌ إلى شاشة القيد ولا مبلغ بجانبه عمداً: سند قبض
                   موزَّع على فاتورتين يشقّ مبلغ الشيك على قيدين (THA-489)، فرقمٌ
                   هنا كان سيزعم أنه «قيد مبلغ هذا الشيك». القيد يتكلّم عن نفسه. */}
-              <div style={{ borderTop: "1px solid var(--aseel-border)", paddingTop: "8px" }}>
-                <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--aseel-ink-soft)", marginBottom: "4px" }}>
+              <div style={{ borderTop: "1px solid var(--ktra-border)", paddingTop: "8px" }}>
+                <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--ktra-ink-soft)", marginBottom: "4px" }}>
                   مسار الشيك
                 </div>
                 {movements.length === 0 ? (
-                  <span style={{ fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
+                  <span style={{ fontSize: "0.75rem", color: "var(--ktra-ink-soft)" }}>
                     لا حركات سابقة.
                   </span>
                 ) : (
@@ -1036,7 +1036,7 @@ export const AccountingChequesPage: React.FC = () => {
                           {m.notes ? ` — ${m.notes}` : ""}
                           {m.created_by_name ? ` (${m.created_by_name})` : ""}
                         </span>
-                        <span style={{ color: "var(--aseel-ink-soft)", whiteSpace: "nowrap", display: "flex", gap: "8px" }}>
+                        <span style={{ color: "var(--ktra-ink-soft)", whiteSpace: "nowrap", display: "flex", gap: "8px" }}>
                           {m.journal ? (
                             <button
                               type="button"
@@ -1059,18 +1059,18 @@ export const AccountingChequesPage: React.FC = () => {
               </div>
             </div>
             {err && (
-              <div className="aseel-banner aseel-banner--err" data-testid="cheque-transfer-error"
+              <div className="ktra-banner ktra-banner--err" data-testid="cheque-transfer-error"
                 style={{ marginTop: "12px" }}>{err}</div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
-              <button type="button" className="aseel-toolbtn" onClick={() => setTransferCheque(null)}>إلغاء</button>
+              <button type="button" className="ktra-toolbtn" onClick={() => setTransferCheque(null)}>إلغاء</button>
               <OfflineGuard
                 action="تحويل حالة الشيك"
                 warningMessage="تَحويل حالة الشيك يتطلب اتصالاً — state machine يَنفَّذ على الـserver"
               >
                 <button
                   type="button"
-                  className="aseel-toolbtn"
+                  className="ktra-toolbtn"
                   data-testid="cheque-transfer-submit"
                   // CHQ-4: `requires_bank_account` كان يُعلَن ولا يُفرَض — الضغط
                   // بلا بنك يسقط على الصندوق الافتراضي في الخادم بصمت، فيقع قيد

@@ -66,9 +66,9 @@ const blankLine = (): LineState => ({
 });
 
 const STATUS_TONE: Record<string, string> = {
-  draft: "aseel-bg-panel aseel-text-ink",
+  draft: "ktra-bg-panel ktra-text-ink",
   confirmed: "bg-green-100 text-green-700",
-  converted: "aseel-bg-panel aseel-text-ink",
+  converted: "ktra-bg-panel ktra-text-ink",
   cancelled: "bg-amber-100 text-amber-700",
 };
 
@@ -303,31 +303,31 @@ export const SalesOrdersPage: React.FC = () => {
     {
       key: "number",
       label: "رقم الطلبية",
-      control: <input className="aseel-input aseel-input--hl" readOnly
+      control: <input className="ktra-input ktra-input--hl" readOnly
         value={selectedOrder?.order_number || (selectedId ? `#${selectedId}` : "تلقائي")} />,
     },
     {
       key: "date",
       label: "تاريخ الطلبية",
-      control: <input type="date" className="aseel-input" value={formDate}
+      control: <input type="date" className="ktra-input" value={formDate}
         onChange={(event) => setFormDate(event.target.value)} />,
     },
     {
       key: "delivery",
       label: "تاريخ التسليم",
-      control: <input type="date" className="aseel-input" value={formDelivery}
+      control: <input type="date" className="ktra-input" value={formDelivery}
         onChange={(event) => setFormDelivery(event.target.value)} />,
     },
     {
       key: "type",
       label: "نوع المستند",
-      control: <input className="aseel-input" readOnly value="طلبية زبون" />,
+      control: <input className="ktra-input" readOnly value="طلبية زبون" />,
     },
     {
       key: "customer",
       label: "الزبون / الحساب",
       control: (
-        <select className="aseel-input" value={formCustomer}
+        <select className="ktra-input" value={formCustomer}
           onChange={(event) => setFormCustomer(event.target.value)}>
           <option value="">— اختر الزبون —</option>
           {partners.map((partner) => (
@@ -339,24 +339,24 @@ export const SalesOrdersPage: React.FC = () => {
     {
       key: "customerName",
       label: "الاسم",
-      control: <input className="aseel-input" readOnly
+      control: <input className="ktra-input" readOnly
         value={partners.find((partner) => String(partner.id) === formCustomer)?.name || ""} />,
     },
     {
       key: "reserve",
       label: "الحجز الافتراضي",
-      control: <input className="aseel-input" readOnly
+      control: <input className="ktra-input" readOnly
         value={reserveDays ? `${reserveDays} أيام` : "بلا حجز"} />,
     },
     {
       key: "deposit",
       label: "العربون",
-      control: <input className="aseel-input" readOnly value={formatMoney(selectedOrder?.deposit_amount || 0)} />,
+      control: <input className="ktra-input" readOnly value={formatMoney(selectedOrder?.deposit_amount || 0)} />,
     },
     {
       key: "status",
       label: "الحالة",
-      control: <input className="aseel-input" readOnly
+      control: <input className="ktra-input" readOnly
         value={selectedOrder?.status_display || selectedOrder?.status || "مسودة"} />,
     },
   ];
@@ -389,10 +389,10 @@ export const SalesOrdersPage: React.FC = () => {
       render: (line, index) => (
         <button type="button" className="flex w-full items-center justify-between gap-2 px-1 text-right"
           onClick={() => setPickerIdx(index)}>
-          <span className={line.product_name ? "aseel-text-ink" : "aseel-text-soft"}>
+          <span className={line.product_name ? "ktra-text-ink" : "ktra-text-soft"}>
             {line.product_name || "اختر صنفاً…"}
           </span>
-          <span className="aseel-text-accent">…</span>
+          <span className="ktra-text-accent">…</span>
         </button>
       ),
     },
@@ -405,7 +405,7 @@ export const SalesOrdersPage: React.FC = () => {
       width: "36px",
       align: "center",
       render: (_line, index) => (
-        <button type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+        <button type="button" className="ktra-iconbtn ktra-iconbtn--danger"
           onClick={() => setFormLines((lines) => lines.length > 1 ? lines.filter((_, rowIndex) => rowIndex !== index) : lines)}
           title="حذف السطر">
           <Trash2 className="h-3 w-3" />
@@ -425,11 +425,11 @@ export const SalesOrdersPage: React.FC = () => {
       render: (order) => (
         isReservationActive(order.status, order.reserved_until, todayIso()) ? (
           <span title="محجوز بطلبية مؤكَّدة سارية"
-            style={{ color: "var(--aseel-warn, #b06800)", fontWeight: 600 }}>
+            style={{ color: "var(--ktra-warn, #b06800)", fontWeight: 600 }}>
             محجوز حتى {formatDateLocalized(order.reserved_until)}
           </span>
         ) : (
-          <span className="text-[var(--aseel-ink-soft)]">
+          <span className="text-[var(--ktra-ink-soft)]">
             {order.reserved_until
               ? `انتهى الحجز (${formatDateLocalized(order.reserved_until)})`
               : "بلا حجز"}
@@ -456,7 +456,7 @@ export const SalesOrdersPage: React.FC = () => {
           {order.invoice && (
             <button
               type="button"
-              className="aseel-text-accent mt-0.5 text-right text-[10px] hover:underline"
+              className="ktra-text-accent mt-0.5 text-right text-[10px] hover:underline"
               title={`فتح الفاتورة ${order.invoice_number || `#${order.invoice}`}`}
               onClick={(event) => {
                 event.stopPropagation();
@@ -475,7 +475,7 @@ export const SalesOrdersPage: React.FC = () => {
       width: "260px",
       render: (order) => (
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <button onClick={() => void openOrder(order.id)} className="aseel-text-accent hover:underline">تعديل</button>
+          <button onClick={() => void openOrder(order.id)} className="ktra-text-accent hover:underline">تعديل</button>
           {order.status === "draft" && (
             <button onClick={() => void act(() => confirmSalesOrder(order.id), "تم تأكيد الطلبية وحجز الكمية")}
               className="text-green-600 hover:underline">تأكيد وحجز</button>
@@ -491,7 +491,7 @@ export const SalesOrdersPage: React.FC = () => {
             </>
           )}
           {allowDelete && (
-            <button onClick={() => void doDelete(order)} className="aseel-text-state hover:underline">حذف</button>
+            <button onClick={() => void doDelete(order)} className="ktra-text-state hover:underline">حذف</button>
           )}
         </div>
       ),
@@ -522,23 +522,23 @@ export const SalesOrdersPage: React.FC = () => {
             rowIndex === index ? { ...line, [key]: value } : line));
         }}
         onAddLine={() => setFormLines((lines) => [...lines, blankLine()])}
-        banner={err ? <div className="aseel-banner aseel-banner--err">{err}</div> : undefined}
+        banner={err ? <div className="ktra-banner ktra-banner--err">{err}</div> : undefined}
         tabs={[{
           key: "notes",
           label: "الملاحظات",
           content: <div className="px-1 py-2">
-            <textarea className="aseel-input w-full" rows={4} value={formNotes}
+            <textarea className="ktra-input w-full" rows={4} value={formNotes}
               onChange={(event) => setFormNotes(event.target.value)} placeholder="ملاحظات الطلبية…" />
           </div>,
         }]}
         totals={<>
-          <div className="aseel-total-row"><span>مجموع البنود</span><span className="aseel-total-value">{formatMoney(formTotal)}</span></div>
-          <div className="aseel-total-row"><span>العربون</span><span className="aseel-total-value">{formatMoney(selectedOrder?.deposit_amount || 0)}</span></div>
-          <div className="aseel-total-row aseel-total-row--grand"><span>إجمالي الطلبية</span><span className="aseel-total-value">{formatMoney(formTotal)}</span></div>
+          <div className="ktra-total-row"><span>مجموع البنود</span><span className="ktra-total-value">{formatMoney(formTotal)}</span></div>
+          <div className="ktra-total-row"><span>العربون</span><span className="ktra-total-value">{formatMoney(selectedOrder?.deposit_amount || 0)}</span></div>
+          <div className="ktra-total-row ktra-total-row--grand"><span>إجمالي الطلبية</span><span className="ktra-total-value">{formatMoney(formTotal)}</span></div>
         </>}
         status={<>
-          <span className="aseel-status-item">عدد الأصناف <b>{formLines.length}</b></span>
-          <span className="aseel-status-item">
+          <span className="ktra-status-item">عدد الأصناف <b>{formLines.length}</b></span>
+          <span className="ktra-status-item">
             {reserveDays ? `الحجز ${reserveDays} أيام بعد التأكيد` : "الحجز معطّل"}
           </span>
         </>}

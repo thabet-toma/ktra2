@@ -5,11 +5,11 @@ import { accountingApi } from "../../services/accountingApi";
 import { formatMoney } from "../../utils/formatNumber";
 import type { VatReportResponse, VatReportLine } from "../../types/accounting";
 import {
-  AseelDocumentShell,
-  AseelDenseTable,
-  AseelReportTable,
-} from "../aseel";
-import type { AseelToolbarAction, AseelTab, DenseColumn, ReportColumn } from "../aseel";
+  KitDocumentShell,
+  KitDenseTable,
+  KitReportTable,
+} from "../kit";
+import type { KitToolbarAction, KitTab, DenseColumn, ReportColumn } from "../kit";
 import { Plus, Search, FileText } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
 import { formatDateLocalized } from "../../utils/formatDate";
@@ -93,10 +93,10 @@ export const VatStatementsPage: React.FC = () => {
 
   const statementsContent = (
     <>
-      <div style={{ marginBottom: "8px", fontSize: "0.85rem", color: "var(--aseel-ink-soft)" }}>
+      <div style={{ marginBottom: "8px", fontSize: "0.85rem", color: "var(--ktra-ink-soft)" }}>
         ملاحظة: قائمة الكشوف ستكون متاحة بعد تنفيذ N8-T13 في الخادم.
       </div>
-      <AseelDenseTable<VatStatement>
+      <KitDenseTable<VatStatement>
         columns={stmtColumns}
         rows={statements}
         getRowKey={(r) => r.id}
@@ -108,20 +108,20 @@ export const VatStatementsPage: React.FC = () => {
   const newStatementContent = (
     <div style={{ padding: "8px 0" }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end", marginBottom: "16px" }}>
-        <div className="aseel-field">
-          <label className="aseel-field-label">من تاريخ</label>
-          <input type="date" className="aseel-input" value={previewFrom} onChange={(e) => setPreviewFrom(e.target.value)} />
+        <div className="ktra-field">
+          <label className="ktra-field-label">من تاريخ</label>
+          <input type="date" className="ktra-input" value={previewFrom} onChange={(e) => setPreviewFrom(e.target.value)} />
         </div>
-        <div className="aseel-field">
-          <label className="aseel-field-label">إلى تاريخ</label>
-          <input type="date" className="aseel-input" value={previewTo} onChange={(e) => setPreviewTo(e.target.value)} />
+        <div className="ktra-field">
+          <label className="ktra-field-label">إلى تاريخ</label>
+          <input type="date" className="ktra-input" value={previewTo} onChange={(e) => setPreviewTo(e.target.value)} />
         </div>
-        <button type="button" className="aseel-toolbtn" onClick={fetchPreview} style={{ marginTop: "18px" }}>
+        <button type="button" className="ktra-toolbtn" onClick={fetchPreview} style={{ marginTop: "18px" }}>
           <Search className="w-4 h-4" />معاينة
         </button>
       </div>
 
-      {previewErr && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{previewErr}</div>}
+      {previewErr && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{previewErr}</div>}
 
       {previewData && (
         <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
@@ -140,7 +140,7 @@ export const VatStatementsPage: React.FC = () => {
         </div>
       )}
 
-      <AseelReportTable<VatLine>
+      <KitReportTable<VatLine>
         columns={previewColumns}
         rows={allLines}
         loading={previewLoading}
@@ -157,7 +157,7 @@ export const VatStatementsPage: React.FC = () => {
           >
             <button
               type="button"
-              className="aseel-toolbtn"
+              className="ktra-toolbtn"
               onClick={() => {
                 toast("إنشاء الكشف غير متاح بعد — ينتظر تنفيذ N8-T13 في الخادم.", "info");
               }}
@@ -170,7 +170,7 @@ export const VatStatementsPage: React.FC = () => {
     </div>
   );
 
-  const shellActions: AseelToolbarAction[] = [
+  const shellActions: KitToolbarAction[] = [
     {
       key: "new",
       label: "كشف جديد",
@@ -180,26 +180,26 @@ export const VatStatementsPage: React.FC = () => {
     { key: "refresh", label: "تحديث" },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "statements", label: "الكشوف المحفوظة", content: statementsContent },
     ...(showNewForm ? [{ key: "new", label: "كشف جديد", content: newStatementContent }] : []),
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="كشوف الضريبة المضافة"
         actions={shellActions}
         header={<></>}
         tabs={tabs}
         status={
-          <span className="aseel-status-item">
+          <span className="ktra-status-item">
             {statements.length} كشف محفوظ
           </span>
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

@@ -26,7 +26,7 @@ export const StatisticsPanel: React.FC<{ offers: PriceOffer[]; suppliers: Suppli
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <div className="bg-gradient-to-r aseel-bg-panel aseel-bg-panel rounded-xl p-5 text-white">
+            <div className="bg-gradient-to-r ktra-bg-panel ktra-bg-panel rounded-xl p-5 text-white">
                 <div className="flex items-center justify-between">
                     <div>
                         <p className="text-sm opacity-90">إجمالي العروض</p>
@@ -56,7 +56,7 @@ export const StatisticsPanel: React.FC<{ offers: PriceOffer[]; suppliers: Suppli
                 </div>
             </div>
 
-            <div className="bg-gradient-to-r aseel-bg-panel aseel-bg-panel rounded-xl p-5 text-white">
+            <div className="bg-gradient-to-r ktra-bg-panel ktra-bg-panel rounded-xl p-5 text-white">
                 <div className="flex items-center justify-between">
                     <div>
                         <p className="text-sm opacity-90">متوسط قيمة العرض</p>

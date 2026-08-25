@@ -30,37 +30,37 @@ const Side: React.FC<{
   onPick?: (status: string) => void;
 }> = ({ title, hint, side, tone, direction, statusLabel, onPick }) => (
   <div
-    className="rounded-lg border border-[var(--aseel-border)] p-3"
-    style={{ background: "var(--aseel-panel)" }}
+    className="rounded-lg border border-[var(--ktra-border)] p-3"
+    style={{ background: "var(--ktra-panel)" }}
   >
     <div className="mb-2 flex items-baseline justify-between gap-2">
       <div>
         <div className="font-bold">{title}</div>
-        <div className="text-xs text-[var(--aseel-ink-soft)]">{hint}</div>
+        <div className="text-xs text-[var(--ktra-ink-soft)]">{hint}</div>
       </div>
       <div className="text-left">
         <div className="text-lg font-bold" style={{ color: tone }}>
           {formatMoney(side.open_total)}
         </div>
-        <div className="text-xs text-[var(--aseel-ink-soft)]">{side.open_count} ورقة</div>
+        <div className="text-xs text-[var(--ktra-ink-soft)]">{side.open_count} ورقة</div>
       </div>
     </div>
 
     <div className="mb-2 grid gap-1">
       {side.buckets.length === 0 ? (
-        <span className="text-xs text-[var(--aseel-ink-soft)]">لا أوراق مفتوحة.</span>
+        <span className="text-xs text-[var(--ktra-ink-soft)]">لا أوراق مفتوحة.</span>
       ) : (
         side.buckets.map((bucket) => (
           <button
             key={bucket.status}
             type="button"
-            className="flex items-center justify-between rounded px-2 py-1 text-sm hover:bg-[var(--aseel-tab-bg)]"
+            className="flex items-center justify-between rounded px-2 py-1 text-sm hover:bg-[var(--ktra-tab-bg)]"
             onClick={() => onPick?.(bucket.status)}
             title="عرض هذه الحالة في القائمة"
           >
             <span>
               {statusLabel(direction, bucket.status)}
-              <span className="text-xs text-[var(--aseel-ink-soft)]"> ({bucket.count})</span>
+              <span className="text-xs text-[var(--ktra-ink-soft)]"> ({bucket.count})</span>
             </span>
             <span className="font-mono">{formatMoney(bucket.amount)}</span>
           </button>
@@ -68,8 +68,8 @@ const Side: React.FC<{
       )}
     </div>
 
-    <div className="border-t border-[var(--aseel-border)] pt-2">
-      <div className="mb-1 text-xs font-bold text-[var(--aseel-ink-soft)]">حسب الاستحقاق</div>
+    <div className="border-t border-[var(--ktra-border)] pt-2">
+      <div className="mb-1 text-xs font-bold text-[var(--ktra-ink-soft)]">حسب الاستحقاق</div>
       <div className="grid gap-1">
         {side.due_buckets
           .filter((bucket) => bucket.count > 0)
@@ -77,17 +77,17 @@ const Side: React.FC<{
             <div key={bucket.key} className="flex items-center justify-between text-sm">
               <span
                 style={bucket.key === "overdue"
-                  ? { color: "var(--aseel-danger, #dc2626)", fontWeight: 600 }
+                  ? { color: "var(--ktra-danger, #dc2626)", fontWeight: 600 }
                   : undefined}
               >
                 {bucket.label}
-                <span className="text-xs text-[var(--aseel-ink-soft)]"> ({bucket.count})</span>
+                <span className="text-xs text-[var(--ktra-ink-soft)]"> ({bucket.count})</span>
               </span>
               <span className="font-mono">{formatMoney(bucket.amount)}</span>
             </div>
           ))}
         {side.due_buckets.every((bucket) => bucket.count === 0) && (
-          <span className="text-xs text-[var(--aseel-ink-soft)]">—</span>
+          <span className="text-xs text-[var(--ktra-ink-soft)]">—</span>
         )}
       </div>
     </div>
@@ -121,9 +121,9 @@ export const ChequeWalletPanel: React.FC<{
   }, [load, refreshKey]);
 
   if (loading) {
-    return <div className="p-4 text-sm text-[var(--aseel-ink-soft)]">جاري تحميل المحفظة…</div>;
+    return <div className="p-4 text-sm text-[var(--ktra-ink-soft)]">جاري تحميل المحفظة…</div>;
   }
-  if (err) return <div className="aseel-banner aseel-banner--err m-3">{err}</div>;
+  if (err) return <div className="ktra-banner ktra-banner--err m-3">{err}</div>;
   if (!wallet) return null;
 
   const net = Number(wallet.net_open);
@@ -131,10 +131,10 @@ export const ChequeWalletPanel: React.FC<{
   return (
     <div className="p-3">
       <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="text-sm text-[var(--aseel-ink-soft)]">
+        <div className="text-sm text-[var(--ktra-ink-soft)]">
           حتى {formatDateLocalized(wallet.as_of)}
         </div>
-        <button type="button" className="aseel-toolbtn" onClick={() => void load()}>
+        <button type="button" className="ktra-toolbtn" onClick={() => void load()}>
           <RefreshCw className="h-3 w-3" /> تحديث
         </button>
       </div>
@@ -144,7 +144,7 @@ export const ChequeWalletPanel: React.FC<{
           title="شيكات واردة في اليد"
           hint="أوراق العملاء التي لم تُحصَّل بعد"
           side={wallet.incoming}
-          tone="var(--aseel-ok, #16a34a)"
+          tone="var(--ktra-ok, #16a34a)"
           direction="Incoming"
           statusLabel={statusLabel}
           onPick={(status) => onPickStatus?.("Incoming", status)}
@@ -153,7 +153,7 @@ export const ChequeWalletPanel: React.FC<{
           title="شيكات صادرة قائمة"
           hint="التزامات لم تُصرف من حسابنا بعد"
           side={wallet.outgoing}
-          tone="var(--aseel-danger, #dc2626)"
+          tone="var(--ktra-danger, #dc2626)"
           direction="Outgoing"
           statusLabel={statusLabel}
           onPick={(status) => onPickStatus?.("Outgoing", status)}
@@ -161,13 +161,13 @@ export const ChequeWalletPanel: React.FC<{
       </div>
 
       <div
-        className="mt-3 flex items-center justify-between rounded-lg border border-[var(--aseel-border)] p-3"
-        style={{ background: "var(--aseel-panel)" }}
+        className="mt-3 flex items-center justify-between rounded-lg border border-[var(--ktra-border)] p-3"
+        style={{ background: "var(--ktra-panel)" }}
       >
         <span className="font-bold">صافي المحفظة (وارد − صادر)</span>
         <span
           className="text-lg font-bold font-mono"
-          style={{ color: net < 0 ? "var(--aseel-danger, #dc2626)" : "var(--aseel-ok, #16a34a)" }}
+          style={{ color: net < 0 ? "var(--ktra-danger, #dc2626)" : "var(--ktra-ok, #16a34a)" }}
         >
           {formatMoney(wallet.net_open)}
         </span>

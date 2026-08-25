@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { AseelSidePanel } from '../aseel/AseelSidePanel';
+import { KitSidePanel } from '../kit/KitSidePanel';
 import db, { type MutationEntry } from '../../services/offline/db';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { resolveTenantId } from '../../utils/tenantContext';
@@ -104,7 +104,7 @@ export default function PendingMutationsPanel() {
         </button>
       )}
 
-      <AseelSidePanel open={open} onClose={() => setOpen(false)} title="العمليات المعلقة" width={420}>
+      <KitSidePanel open={open} onClose={() => setOpen(false)} title="العمليات المعلقة" width={420}>
         {mutations.length === 0 ? (
           <div className="text-center text-[var(--color-text-muted)] py-12 text-sm">لا توجد عمليات معلقة</div>
         ) : (
@@ -143,7 +143,7 @@ export default function PendingMutationsPanel() {
             ))}
           </div>
         )}
-      </AseelSidePanel>
+      </KitSidePanel>
     </>
   );
 }

@@ -9,7 +9,7 @@ import { Loader2, Save, Info } from "lucide-react";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
-import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
+import { KitDocumentShell, type KitToolbarAction } from "../kit";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import {
   SERIAL_ENTRY_MODE_HINT,
@@ -102,7 +102,7 @@ const PurchaseSettingsPage: React.FC = () => {
     allowStandalone, allowEditReceipt, serialMode,
   ]);
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     {
       key: "save",
       label: saving ? "جارٍ الحفظ…" : "حفظ",
@@ -114,21 +114,21 @@ const PurchaseSettingsPage: React.FC = () => {
 
   return (
     <div className="min-h-[calc(100vh-5rem)]">
-      <AseelDocumentShell title="إعدادات الشراء" actions={actions}>
+      <KitDocumentShell title="إعدادات الشراء" actions={actions}>
         {banner && (
           <div
             role="status"
-            className={`aseel-banner ${banner.ok ? "aseel-banner--ok" : "aseel-banner--err"}`}
+            className={`ktra-banner ${banner.ok ? "ktra-banner--ok" : "ktra-banner--err"}`}
             style={{ margin: "8px" }}
           >
             {banner.msg}
           </div>
         )}
         <div className="p-4 max-w-2xl">
-          <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">
+          <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">
             استراتيجية تسعير بنود الشراء
           </h3>
-          <p className="text-sm text-[var(--aseel-ink-soft)] mb-3 flex items-start gap-1">
+          <p className="text-sm text-[var(--ktra-ink-soft)] mb-3 flex items-start gap-1">
             <Info className="h-4 w-4 mt-0.5 shrink-0" />
             <span>
               عند اختيار صنف في بند فاتورة شراء، يُقترح سعر الوحدة تلقائياً حسب
@@ -138,7 +138,7 @@ const PurchaseSettingsPage: React.FC = () => {
           </p>
 
           {loading ? (
-            <div className="flex items-center gap-2 text-[var(--aseel-ink-soft)]">
+            <div className="flex items-center gap-2 text-[var(--ktra-ink-soft)]">
               <Loader2 className="h-4 w-4 animate-spin" /> جاري التحميل…
             </div>
           ) : (
@@ -148,8 +148,8 @@ const PurchaseSettingsPage: React.FC = () => {
                   key={s.value}
                   className={`flex items-start gap-2 p-3 border rounded cursor-pointer ${
                     strategy === s.value
-                      ? "border-[var(--aseel-accent)] bg-[var(--aseel-accent-soft,#f3f4f6)]"
-                      : "border-[var(--aseel-border)]"
+                      ? "border-[var(--ktra-accent)] bg-[var(--ktra-accent-soft,#f3f4f6)]"
+                      : "border-[var(--ktra-border)]"
                   }`}
                 >
                   <input
@@ -161,8 +161,8 @@ const PurchaseSettingsPage: React.FC = () => {
                     className="mt-1"
                   />
                   <span>
-                    <b className="text-[var(--aseel-ink)]">{s.label}</b>
-                    <span className="block text-sm text-[var(--aseel-ink-soft)]">
+                    <b className="text-[var(--ktra-ink)]">{s.label}</b>
+                    <span className="block text-sm text-[var(--ktra-ink-soft)]">
                       {s.hint}
                     </span>
                   </span>
@@ -172,9 +172,9 @@ const PurchaseSettingsPage: React.FC = () => {
           )}
 
           {/* استلام البضاعة مع الترحيل — مرآة «خصم المخزون عند الترحيل» في المبيعات. */}
-          <div className="mt-6 pt-4 border-t border-[var(--aseel-border)]">
-            <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">استلام البضاعة مع الترحيل</h3>
-            <p className="text-sm text-[var(--aseel-ink-soft)] mb-2 flex items-start gap-1">
+          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+            <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">استلام البضاعة مع الترحيل</h3>
+            <p className="text-sm text-[var(--ktra-ink-soft)] mb-2 flex items-start gap-1">
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
               <span>
                 مفعّلاً: ترحيل فاتورة الشراء يُدخل كل بنودها للمستودع الافتراضي فوراً.
@@ -182,7 +182,7 @@ const PurchaseSettingsPage: React.FC = () => {
                 البضاعة» داخل الفاتورة — يفتح كل البنود بالكامل ويمكن تعديل ما استُلم.
               </span>
             </p>
-            <label className="flex items-center gap-2 cursor-pointer select-none text-[var(--aseel-ink)]">
+            <label className="flex items-center gap-2 cursor-pointer select-none text-[var(--ktra-ink)]">
               <input
                 type="checkbox"
                 disabled={loading}
@@ -194,9 +194,9 @@ const PurchaseSettingsPage: React.FC = () => {
           </div>
 
           {/* مستند الاستلام: التسمية حرّة لكل شركة، والسند المستقل والتعديل اختياريان. */}
-          <div className="mt-6 pt-4 border-t border-[var(--aseel-border)]">
-            <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">مستند الاستلام</h3>
-            <p className="text-sm text-[var(--aseel-ink-soft)] mb-3 flex items-start gap-1">
+          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+            <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">مستند الاستلام</h3>
+            <p className="text-sm text-[var(--ktra-ink-soft)] mb-3 flex items-start gap-1">
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
               <span>
                 سمِّ المستند كما تسميه شركتك — الاسم يظهر في الشاشات والطباعة. المستند
@@ -205,11 +205,11 @@ const PurchaseSettingsPage: React.FC = () => {
             </p>
             <div className="grid sm:grid-cols-2 gap-3 max-w-2xl">
               <label className="block">
-                <span className="block text-sm text-[var(--aseel-ink-soft)] mb-1">
+                <span className="block text-sm text-[var(--ktra-ink-soft)] mb-1">
                   اسم المستند المرتبط بفاتورة
                 </span>
                 <input
-                  className="aseel-input w-full"
+                  className="ktra-input w-full"
                   disabled={loading}
                   value={receiptLabel}
                   onChange={(e) => setReceiptLabel(e.target.value)}
@@ -217,11 +217,11 @@ const PurchaseSettingsPage: React.FC = () => {
                 />
               </label>
               <label className="block">
-                <span className="block text-sm text-[var(--aseel-ink-soft)] mb-1">
+                <span className="block text-sm text-[var(--ktra-ink-soft)] mb-1">
                   اسم المستند بلا فاتورة
                 </span>
                 <input
-                  className="aseel-input w-full"
+                  className="ktra-input w-full"
                   disabled={loading || !allowStandalone}
                   value={standaloneLabel}
                   onChange={(e) => setStandaloneLabel(e.target.value)}
@@ -229,7 +229,7 @@ const PurchaseSettingsPage: React.FC = () => {
                 />
               </label>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer select-none text-[var(--aseel-ink)] mt-3">
+            <label className="flex items-center gap-2 cursor-pointer select-none text-[var(--ktra-ink)] mt-3">
               <input
                 type="checkbox"
                 disabled={loading}
@@ -238,7 +238,7 @@ const PurchaseSettingsPage: React.FC = () => {
               />
               <span>السماح بمستند استلام بلا فاتورة مرتبطة</span>
             </label>
-            <label className="flex items-center gap-2 cursor-pointer select-none text-[var(--aseel-ink)] mt-2">
+            <label className="flex items-center gap-2 cursor-pointer select-none text-[var(--ktra-ink)] mt-2">
               <input
                 type="checkbox"
                 disabled={loading}
@@ -250,16 +250,16 @@ const PurchaseSettingsPage: React.FC = () => {
           </div>
 
           {/* T-SERIAL: نمط الأرقام التسلسلية في بنود الشراء — يخصّ الأصناف المتتبَّعة وحدها. */}
-          <div className="mt-6 pt-4 border-t border-[var(--aseel-border)]">
-            <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">
+          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+            <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">
               إدخال الأرقام التسلسلية في فاتورة الشراء
             </h3>
-            <p className="text-sm text-[var(--aseel-ink-soft)] mb-2 flex items-start gap-1">
+            <p className="text-sm text-[var(--ktra-ink-soft)] mb-2 flex items-start gap-1">
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
               <span>{SERIAL_ENTRY_MODE_HINT}</span>
             </p>
             <select
-              className="aseel-input w-full max-w-md"
+              className="ktra-input w-full max-w-md"
               disabled={loading}
               value={serialMode}
               onChange={(e) => setSerialMode(e.target.value as SerialEntryMode)}
@@ -271,9 +271,9 @@ const PurchaseSettingsPage: React.FC = () => {
           </div>
 
           {/* T-A4: الصندوق الافتراضي لفواتير الشراء النقدية (مرآة إعدادات المبيعات). */}
-          <div className="mt-6 pt-4 border-t border-[var(--aseel-border)]">
-            <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">حساب الصندوق الافتراضي (للنقدي)</h3>
-            <p className="text-sm text-[var(--aseel-ink-soft)] mb-2 flex items-start gap-1">
+          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+            <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">حساب الصندوق الافتراضي (للنقدي)</h3>
+            <p className="text-sm text-[var(--ktra-ink-soft)] mb-2 flex items-start gap-1">
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
               <span>يُستخدم تلقائياً للدفعات النقدية في فواتير الشراء بدل اختيار صندوق لكل فاتورة.</span>
             </p>
@@ -291,7 +291,7 @@ const PurchaseSettingsPage: React.FC = () => {
             </div>
           </div>
         </div>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

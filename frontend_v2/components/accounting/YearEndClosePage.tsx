@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import { formatMoney } from "../../utils/formatNumber";
-import { AseelDocumentShell } from "../aseel";
+import { KitDocumentShell } from "../kit";
 import { AlertCircle, CheckCircle, Loader2 } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
 
@@ -44,7 +44,7 @@ export const YearEndClosePage: React.FC = () => {
   for (let y = 2020; y <= currentYear + 1; y++) yearOptions.push(y);
 
   return (
-    <AseelDocumentShell title="الإغلاق السنوي">
+    <KitDocumentShell title="الإغلاق السنوي">
       <div style={{ maxWidth: 500, margin: "0 auto", padding: 24 }}>
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: "block", marginBottom: 4, fontWeight: 600 }}>السنة المالية</label>
@@ -110,6 +110,6 @@ export const YearEndClosePage: React.FC = () => {
           </div>
         )}
       </div>
-    </AseelDocumentShell>
+    </KitDocumentShell>
   );
 };

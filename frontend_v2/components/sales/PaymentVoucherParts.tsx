@@ -65,51 +65,44 @@ export const PaymentVoucherModal: React.FC<{
   hideActions = false, onClose, onSubmit, children,
 }) => (
   <div
-    className="fixed inset-0 z-[60] bg-black/40"
-    style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+    className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
     onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
   >
+    {/* بلا `data-skin` محليّ — انظر التعليل نفسه في `PartnerProfilePage.tsx`:
+        الوسم كان يفرض اللوحة الكلاسيكية على النافذة داخل الجلد الحديث. */}
     <div
       dir="rtl"
-      data-skin="aseel"
-      style={{
-        background: "var(--aseel-surface, #fff)",
-        border: "1px solid var(--aseel-border, #c8b99a)",
-        borderRadius: "var(--aseel-radius, 6px)",
-        width: "100%", maxWidth: "780px", maxHeight: "90vh", overflow: "auto", padding: "16px",
-      }}
+      className="max-h-[90vh] w-full max-w-[780px] overflow-auto rounded-[var(--ktra-radius)] border border-[var(--ktra-border)] bg-[var(--ktra-surface)] p-4"
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", borderBottom: "1px solid var(--aseel-border)", paddingBottom: "8px" }}>
-        <h3 style={{ fontWeight: 600, fontSize: "14px" }}>{title}</h3>
-        <button type="button" className="aseel-toolbtn" onClick={onClose} aria-label="إغلاق نافذة السند">
+      <div className="mb-3 flex items-center justify-between border-b border-[var(--ktra-border)] pb-2">
+        <h3 className="text-[14px] font-semibold">{title}</h3>
+        <button type="button" className="ktra-toolbtn" onClick={onClose} aria-label="إغلاق نافذة السند">
           <X className="w-3 h-3" />
         </button>
       </div>
 
-      {error && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{error}</div>}
+      {error && <div className="ktra-banner ktra-banner--err mb-2">{error}</div>}
 
       {children}
 
-      {!hideActions && <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
-        <button type="button" className="aseel-toolbtn" onClick={onClose}>إلغاء</button>
+      {!hideActions && <div className="mt-4 flex justify-end gap-2">
+        <button type="button" className="ktra-toolbtn" onClick={onClose}>إلغاء</button>
         {secondaryLabel && onSecondary && (
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn disabled:opacity-50"
             disabled={submitting || (secondaryDisabled ?? disabled)}
             onClick={onSecondary}
-            style={{ opacity: submitting || (secondaryDisabled ?? disabled) ? 0.5 : 1 }}
           >
             {secondaryLabel}
           </button>
         )}
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn bg-[var(--ktra-ok)] text-white disabled:opacity-50"
           disabled={submitting || disabled}
           onClick={onSubmit}
-          style={{ background: "var(--aseel-ok, #2d7d46)", color: "#fff", opacity: submitting || disabled ? 0.5 : 1 }}
         >
           <Save className="w-3 h-3" /> {submitting ? "..." : submitLabel}
         </button>
@@ -137,44 +130,44 @@ export const PaymentFinanceFields: React.FC<{
 }) => {
   const net = Math.max(0, total - (Number(withholdingAmt) || 0));
   return (
-    <div style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "4px", padding: "8px", marginTop: "12px" }}>
-      <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--aseel-warn, #b06800)", marginBottom: "6px" }}>حقول الدفع</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-        <label className="aseel-field">
-          <span className="aseel-field-label">نقدا</span>
+    <div className="mt-3 rounded border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)] p-2">
+      <div className="mb-1.5 text-[11px] font-semibold text-[var(--ktra-warn)]">حقول الدفع</div>
+      <div className="grid grid-cols-3 gap-2">
+        <label className="ktra-field">
+          <span className="ktra-field-label">نقدا</span>
           <input
             type="number" step="0.01"
-            data-aseel-field="remaining-amount"
-            className="aseel-input aseel-num"
+            data-ktra-field="remaining-amount"
+            className="ktra-input ktra-num"
             value={cashAmount}
             onChange={(e) => onCashAmount(e.target.value)}
           />
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">مجموع الشيكات (auto)</span>
-          <input type="text" readOnly className="aseel-input aseel-num" value={fmt(totalCheques)} style={{ background: "var(--aseel-surface-2)" }} />
+        <label className="ktra-field">
+          <span className="ktra-field-label">مجموع الشيكات (auto)</span>
+          <input type="text" readOnly className="ktra-input ktra-num bg-[var(--ktra-surface-2)]" value={fmt(totalCheques)} />
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">المجموع</span>
-          <input type="text" readOnly className="aseel-input aseel-num" value={fmt(total)} style={{ background: "var(--aseel-surface-2)", fontWeight: 700 }} />
+        <label className="ktra-field">
+          <span className="ktra-field-label">المجموع</span>
+          <input type="text" readOnly className="ktra-input ktra-num bg-[var(--ktra-surface-2)] font-bold" value={fmt(total)} />
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">نسبة خصم المصدر %</span>
-          <input type="number" step="0.01" className="aseel-input aseel-num" value={withholdingPct} onChange={(e) => onWithholdingPct(e.target.value)} />
+        <label className="ktra-field">
+          <span className="ktra-field-label">نسبة خصم المصدر %</span>
+          <input type="number" step="0.01" className="ktra-input ktra-num" value={withholdingPct} onChange={(e) => onWithholdingPct(e.target.value)} />
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">مبلغ خصم المصدر</span>
+        <label className="ktra-field">
+          <span className="ktra-field-label">مبلغ خصم المصدر</span>
           <input
-            type="number" step="0.01" className="aseel-input aseel-num" value={withholdingAmt}
+            type="number" step="0.01" className="ktra-input ktra-num" value={withholdingAmt}
             onChange={(e) => {
               onWithholdingAmt(e.target.value);
               if (total > 0) onWithholdingPct(formatNumber(((Number(e.target.value) || 0) / total) * 100, { maxDecimals: 2 }));
             }}
           />
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">{netLabel}</span>
-          <input type="text" readOnly className="aseel-input aseel-num" value={fmt(net)} style={{ background: "var(--aseel-ok-bg, #e3f6e9)", color: "var(--aseel-ok, #2d7d46)", fontWeight: 700 }} />
+        <label className="ktra-field">
+          <span className="ktra-field-label">{netLabel}</span>
+          <input type="text" readOnly className="ktra-input ktra-num bg-[var(--ktra-ok-bg)] font-bold text-[var(--ktra-ok)]" value={fmt(net)} />
         </label>
       </div>
     </div>
@@ -235,24 +228,24 @@ export const ChequeGrid: React.FC<{
   };
 
   return (
-    <div style={{ marginTop: "12px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-        <span style={{ fontWeight: 600, fontSize: "12px" }}>شيكات السند</span>
-        <div style={{ display: "flex", gap: "6px" }}>
+    <div className="mt-3">
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-[12px] font-semibold">شيكات السند</span>
+        <div className="flex gap-1.5">
           <button
-            type="button" className="aseel-toolbtn" style={{ fontSize: "11px" }}
+            type="button" className="ktra-toolbtn text-[11px]"
             onClick={fillSimilar}
             title="تعبئة شيكات بنفس البنك/المبلغ لشهور متتالية"
           >
             تعبئة متشابهة
           </button>
-          <button type="button" className="aseel-toolbtn" style={{ fontSize: "11px" }} onClick={() => onChange([...cheques, newChequeLine(newLineDefaults)])}>
+          <button type="button" className="ktra-toolbtn text-[11px]" onClick={() => onChange([...cheques, newChequeLine(newLineDefaults)])}>
             <Plus className="w-3 h-3" /> شيك
           </button>
         </div>
       </div>
       {cheques.length === 0 ? (
-        <div style={{ textAlign: "center", fontSize: "11px", padding: "12px", color: "var(--aseel-ink-soft)", border: "1px dashed var(--aseel-border)", borderRadius: "4px" }}>
+        <div className="rounded border border-dashed border-[var(--ktra-border)] p-3 text-center text-[11px] text-[var(--ktra-ink-soft)]">
           لا شيكات — اضغط «شيك» للإضافة
         </div>
       ) : (
@@ -260,46 +253,39 @@ export const ChequeGrid: React.FC<{
         // الجدول فوق عرض النافذة فانحشر عمود الحذف خارج الشاشة — «عملت اثنين
         // بالغلط وبدي أحذف واحد وفش زر». الجدول يمرّر أفقياً داخل حاويته، وعمود
         // الحذف ملتصق بالحافة فيبقى ظاهراً مهما ضاقت الشاشة.
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", minWidth: "760px", fontSize: "11px" }}>
-          <thead style={{ background: "var(--aseel-surface-2, #f4ede0)" }}>
+        <div className="overflow-x-auto">
+          <table className="ktra-compact-grid ktra-compact-grid--tight w-full min-w-[760px] text-[11px]">
+          <thead className="bg-[var(--ktra-surface-2)]">
             <tr>
-              <th style={{ padding: "4px" }}>#</th>
-              <th style={{ padding: "4px" }}>رقم</th>
-              <th style={{ padding: "4px" }}>حساب الساحب</th>
-              <th style={{ padding: "4px" }}>{nameHeader}</th>
-              <th style={{ padding: "4px" }}>الاستحقاق</th>
-              <th style={{ padding: "4px" }}>المبلغ</th>
-              <th style={{ padding: "4px" }}>البنك المسحوب عليه</th>
-              <th style={{ padding: "4px" }}>الفرع</th>
-              <th style={{
-                width: "34px", position: "sticky", left: 0,
-                background: "var(--aseel-surface-2, #f4ede0)",
-              }}></th>
+              <th>#</th>
+              <th>رقم</th>
+              <th>حساب الساحب</th>
+              <th>{nameHeader}</th>
+              <th>الاستحقاق</th>
+              <th>المبلغ</th>
+              <th>البنك المسحوب عليه</th>
+              <th>الفرع</th>
+              <th className="sticky left-0 w-[34px] bg-[var(--ktra-surface-2)]"></th>
             </tr>
           </thead>
           <tbody>
             {cheques.map((c, i) => (
-              <tr key={i} style={{ borderTop: "1px solid var(--aseel-border)" }}>
-                <td style={{ padding: "2px", textAlign: "center" }}>{i + 1}</td>
-                <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.cheque_number} onChange={(e) => patch(i, { cheque_number: e.target.value })} /></td>
-                <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.account_number} onChange={(e) => patch(i, { account_number: e.target.value })} /></td>
-                <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.payee_name} onChange={(e) => patch(i, { payee_name: e.target.value })} /></td>
-                <td style={{ padding: "2px" }}><input type="date" className="aseel-input" style={{ fontSize: "11px" }} value={c.due_date} onChange={(e) => patch(i, { due_date: e.target.value })} /></td>
-                <td style={{ padding: "2px" }}><input type="number" step="0.01" className="aseel-input aseel-num" style={{ fontSize: "11px" }} value={c.amount} onChange={(e) => patch(i, { amount: e.target.value })} /></td>
-                <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.bank_name} onChange={(e) => patch(i, { bank_name: e.target.value })} /></td>
-                <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.branch} onChange={(e) => patch(i, { branch: e.target.value })} /></td>
-                <td style={{
-                  padding: "2px", textAlign: "center",
-                  position: "sticky", left: 0,
-                  background: "var(--aseel-surface, #fff)",
-                }}>
+              <tr key={i} className="border-t border-[var(--ktra-border)]">
+                <td className="text-center">{i + 1}</td>
+                <td><input className="ktra-input text-[11px]" value={c.cheque_number} onChange={(e) => patch(i, { cheque_number: e.target.value })} /></td>
+                <td><input className="ktra-input text-[11px]" value={c.account_number} onChange={(e) => patch(i, { account_number: e.target.value })} /></td>
+                <td><input className="ktra-input text-[11px]" value={c.payee_name} onChange={(e) => patch(i, { payee_name: e.target.value })} /></td>
+                <td><input type="date" className="ktra-input text-[11px]" value={c.due_date} onChange={(e) => patch(i, { due_date: e.target.value })} /></td>
+                <td><input type="number" step="0.01" className="ktra-input ktra-num text-[11px]" value={c.amount} onChange={(e) => patch(i, { amount: e.target.value })} /></td>
+                <td><input className="ktra-input text-[11px]" value={c.bank_name} onChange={(e) => patch(i, { bank_name: e.target.value })} /></td>
+                <td><input className="ktra-input text-[11px]" value={c.branch} onChange={(e) => patch(i, { branch: e.target.value })} /></td>
+                <td className="sticky left-0 bg-[var(--ktra-surface)] text-center">
                   <button
                     type="button"
                     title={`حذف الشيك #${i + 1}`}
                     aria-label={`حذف الشيك #${i + 1}`}
                     onClick={() => onChange(cheques.filter((_, j) => j !== i))}
-                    style={{ color: "var(--aseel-err, #c0392b)", padding: "4px" }}
+                    className="p-1 text-[var(--ktra-err)]"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>

@@ -305,11 +305,11 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
             <h2 className="font-bold text-[var(--color-text)]">
               تحكم المنصة بالشركة{detail ? `: ${detail.name}` : ""}
             </h2>
-            <p className="text-xs aseel-text-soft">
+            <p className="text-xs ktra-text-soft">
               صلاحيات سوبر أدمن — تسري على هذه الشركة دون الحاجة لعضوية فيها
             </p>
             {detail && (
-              <p className="mt-1 text-[11px] aseel-text-soft">
+              <p className="mt-1 text-[11px] ktra-text-soft">
                 التخزين المستهلَك:{" "}
                 <span className="font-bold text-[var(--color-text)]">{formatBytes(detail.storage_bytes)}</span>
                 {" · "}آخر نشاط:{" "}
@@ -317,7 +317,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
               </p>
             )}
           </div>
-          <button type="button" onClick={onClose} className="aseel-iconbtn" aria-label="إغلاق">
+          <button type="button" onClick={onClose} className="ktra-iconbtn" aria-label="إغلاق">
             <X className="h-4 w-4" />
           </button>
         </header>
@@ -328,7 +328,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
           )}
 
           {loading && !detail ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-sm aseel-text-soft" role="status">
+            <div className="flex items-center justify-center gap-2 py-10 text-sm ktra-text-soft" role="status">
               <Loader2 className="h-4 w-4 animate-spin" /> جارٍ تحميل بيانات الشركة…
             </div>
           ) : !detail ? null : (
@@ -337,19 +337,19 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                 <h3 className="mb-3 text-sm font-bold text-[var(--color-text)]">إعدادات الشركة</h3>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="sm:col-span-3">
-                    <label htmlFor="platform-company-name" className="mb-1 block text-xs font-bold aseel-text-soft">اسم الشركة</label>
+                    <label htmlFor="platform-company-name" className="mb-1 block text-xs font-bold ktra-text-soft">اسم الشركة</label>
                     <input
                       id="platform-company-name"
-                      className="aseel-input h-9 w-full"
+                      className="ktra-input h-9 w-full"
                       value={form.name}
                       onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
                     />
                   </div>
                   <div>
-                    <label htmlFor="platform-company-plan" className="mb-1 block text-xs font-bold aseel-text-soft">خطة الاشتراك</label>
+                    <label htmlFor="platform-company-plan" className="mb-1 block text-xs font-bold ktra-text-soft">خطة الاشتراك</label>
                     <select
                       id="platform-company-plan"
-                      className="aseel-input h-9 w-full"
+                      className="ktra-input h-9 w-full"
                       value={form.plan}
                       onChange={(event) => setForm((current) => ({ ...current, plan: event.target.value }))}
                     >
@@ -359,10 +359,10 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="platform-company-status" className="mb-1 block text-xs font-bold aseel-text-soft">حالة الشركة</label>
+                    <label htmlFor="platform-company-status" className="mb-1 block text-xs font-bold ktra-text-soft">حالة الشركة</label>
                     <select
                       id="platform-company-status"
-                      className="aseel-input h-9 w-full"
+                      className="ktra-input h-9 w-full"
                       value={form.status}
                       onChange={(event) => setForm((current) => ({ ...current, status: event.target.value }))}
                     >
@@ -372,17 +372,17 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="platform-company-expiry" className="mb-1 block text-xs font-bold aseel-text-soft">تاريخ انتهاء الاشتراك</label>
+                    <label htmlFor="platform-company-expiry" className="mb-1 block text-xs font-bold ktra-text-soft">تاريخ انتهاء الاشتراك</label>
                     <input
                       id="platform-company-expiry"
                       type="date"
-                      className="aseel-input h-9 w-full"
+                      className="ktra-input h-9 w-full"
                       value={form.subscription_ends_at ?? ""}
                       onChange={(event) => setForm((current) => ({
                         ...current, subscription_ends_at: event.target.value || null,
                       }))}
                     />
-                    <p className="mt-1 text-[11px] aseel-text-soft">{expiryHint}</p>
+                    <p className="mt-1 text-[11px] ktra-text-soft">{expiryHint}</p>
                   </div>
                   <div className="flex items-end">
                     <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-[var(--color-text)]">
@@ -396,14 +396,14 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[11px] aseel-text-soft">
+                  <p className="text-[11px] ktra-text-soft">
                     الشركة الموقوفة يُمنع أعضاؤها من الوصول إلى بياناتها حتى إعادة التفعيل. تعطيل وحدة الاستيراد يخفي قائمة الاستيراد وقسم «تكاليف الاستيراد» عن كل أعضائها.
                   </p>
                   <button
                     type="button"
                     onClick={() => void saveCompany()}
                     disabled={saving || !dirty}
-                    className="aseel-btn aseel-btn-primary"
+                    className="ktra-btn ktra-btn-primary"
                   >
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} حفظ
                   </button>
@@ -414,7 +414,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                 <h3 className="mb-3 text-sm font-bold text-[var(--color-text)]">الوحدات المرخَّصة</h3>
                 <div className="space-y-2">
                   {modules.length === 0 ? (
-                    <p className="text-xs aseel-text-soft">لا وحدات إضافية — وحدة الاستيراد تُضبط من «إعدادات الشركة» أعلاه.</p>
+                    <p className="text-xs ktra-text-soft">لا وحدات إضافية — وحدة الاستيراد تُضبط من «إعدادات الشركة» أعلاه.</p>
                   ) : modules.map((module) => (
                     <div
                       key={module.module_key}
@@ -422,7 +422,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                     >
                       <div className="min-w-[14rem]">
                         <p className="text-sm font-bold text-[var(--color-text)]">{module.label}</p>
-                        <p className="text-[11px] aseel-text-soft">
+                        <p className="text-[11px] ktra-text-soft">
                           {module.plans.length ? `الخطط: ${module.plans.join("، ")}` : "بلا خطة محددة"}
                           {module.plan_note ? ` · ${module.plan_note}` : ""}
                         </p>
@@ -447,7 +447,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                     </div>
                   ))}
                 </div>
-                <p className="mt-2 text-[11px] aseel-text-soft">
+                <p className="mt-2 text-[11px] ktra-text-soft">
                   الشركة غير المرخَّصة لا ترى مسارات الوحدة ولا صلاحياتها ولا تُحمَّل شاشاتها في متصفحها.
                   واجهة المكتب نفسها تُفتح من لوحة المنصة بزرّ «افتح واجهة المحاسب القانوني».
                 </p>
@@ -459,7 +459,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                 </h3>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[640px] text-sm">
-                    <thead className="bg-[var(--color-surface-2)] aseel-text-soft">
+                    <thead className="bg-[var(--color-surface-2)] ktra-text-soft">
                       <tr>
                         <th className="px-3 py-2 text-right">البند</th>
                         <th className="px-3 py-2 text-center w-28">افتراضي الخطة</th>
@@ -475,12 +475,12 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                           <tr key={row.key} className="border-t border-[var(--color-border)]">
                             <td className="px-3 py-2">
                               <div className="font-semibold text-[var(--color-text)]">{row.label}</div>
-                              <div className="text-[11px] aseel-text-soft">
+                              <div className="text-[11px] ktra-text-soft">
                                 {row.unit} · {row.period_label}
                                 {row.has_override ? " · مخصّص لهذه الشركة" : ""}
                               </div>
                             </td>
-                            <td className="px-3 py-2 text-center aseel-text-soft">
+                            <td className="px-3 py-2 text-center ktra-text-soft">
                               {row.plan_default === null ? "بلا حدّ" : row.plan_default}
                             </td>
                             <td className={`px-3 py-2 text-center ${over ? "font-bold text-amber-600" : ""}`}>
@@ -488,7 +488,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                             </td>
                             <td className="px-3 py-2">
                               <input
-                                className="aseel-input h-8 w-full text-center"
+                                className="ktra-input h-8 w-full text-center"
                                 type="number"
                                 min={0}
                                 inputMode="numeric"
@@ -507,7 +507,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                                   type="button"
                                   onClick={() => void saveLimit(row)}
                                   disabled={limitBusy === row.key}
-                                  className="aseel-iconbtn text-emerald-600"
+                                  className="ktra-iconbtn text-emerald-600"
                                   title={`حفظ حدّ ${row.label}`}
                                   aria-label={`حفظ حدّ ${row.label}`}
                                 >
@@ -519,7 +519,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                                   type="button"
                                   onClick={() => void resetLimit(row)}
                                   disabled={limitBusy === row.key || !row.has_override}
-                                  className="aseel-iconbtn"
+                                  className="ktra-iconbtn"
                                   title={`استعادة افتراضي الخطة لـ${row.label}`}
                                   aria-label={`استعادة افتراضي الخطة لـ${row.label}`}
                                 >
@@ -533,7 +533,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                     </tbody>
                   </table>
                 </div>
-                <p className="mt-2 text-[11px] aseel-text-soft">
+                <p className="mt-2 text-[11px] ktra-text-soft">
                   الحقل الفارغ = بلا حدّ لهذه الشركة. تغيير الخطة يغيّر الافتراضيات، والقيمة المخصّصة هنا تبقى فوقها حتى تُستعاد.
                   عند بلوغ الحدّ يُرفض الإنشاء برسالة واضحة للمستخدم؛ إضافة عضو من هذه اللوحة لا يحدّها الحدّ.
                 </p>
@@ -544,10 +544,10 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                   <h3 className="text-sm font-bold text-[var(--color-text)]">الأعضاء ({detail.members.length})</h3>
                   <div className="flex flex-wrap items-end gap-2">
                     <div>
-                      <label htmlFor="platform-member-identifier" className="mb-1 block text-[11px] font-bold aseel-text-soft">اسم المستخدم أو البريد</label>
+                      <label htmlFor="platform-member-identifier" className="mb-1 block text-[11px] font-bold ktra-text-soft">اسم المستخدم أو البريد</label>
                       <input
                         id="platform-member-identifier"
-                        className="aseel-input h-9 w-56"
+                        className="ktra-input h-9 w-56"
                         value={identifier}
                         onChange={(event) => setIdentifier(event.target.value)}
                         placeholder="حساب مسجَّل في المنصة"
@@ -556,10 +556,10 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                       />
                     </div>
                     <div>
-                      <label htmlFor="platform-member-role" className="mb-1 block text-[11px] font-bold aseel-text-soft">الدور</label>
+                      <label htmlFor="platform-member-role" className="mb-1 block text-[11px] font-bold ktra-text-soft">الدور</label>
                       <select
                         id="platform-member-role"
-                        className="aseel-input h-9"
+                        className="ktra-input h-9"
                         value={newRole}
                         onChange={(event) => setNewRole(event.target.value)}
                       >
@@ -572,7 +572,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                       type="button"
                       onClick={() => void addMember()}
                       disabled={adding || !identifier.trim()}
-                      className="aseel-btn aseel-btn-primary"
+                      className="ktra-btn ktra-btn-primary"
                     >
                       {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />} إضافة
                     </button>
@@ -581,7 +581,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
 
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[720px] text-sm">
-                    <thead className="bg-[var(--color-surface-2)] aseel-text-soft">
+                    <thead className="bg-[var(--color-surface-2)] ktra-text-soft">
                       <tr>
                         <th className="px-3 py-2 text-right">المستخدم</th>
                         <th className="px-3 py-2 text-right w-44">الدور</th>
@@ -592,16 +592,16 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                     </thead>
                     <tbody>
                       {detail.members.length === 0 ? (
-                        <tr><td colSpan={5} className="px-3 py-8 text-center aseel-text-soft">لا أعضاء في هذه الشركة</td></tr>
+                        <tr><td colSpan={5} className="px-3 py-8 text-center ktra-text-soft">لا أعضاء في هذه الشركة</td></tr>
                       ) : detail.members.map((member) => (
                         <tr key={member.membership_id} className="border-t border-[var(--color-border)]">
                           <td className="px-3 py-2">
                             <div className="font-semibold text-[var(--color-text)]">{member.full_name || member.username}</div>
-                            <div className="text-[11px] aseel-text-soft">{member.email || member.username}</div>
+                            <div className="text-[11px] ktra-text-soft">{member.email || member.username}</div>
                           </td>
                           <td className="px-3 py-2">
                             <select
-                              className="aseel-input h-8 w-full"
+                              className="ktra-input h-8 w-full"
                               value={member.role}
                               disabled={busyId === member.membership_id}
                               onChange={(event) => void patchMember(member, { role: event.target.value })}
@@ -614,7 +614,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                           </td>
                           <td className="px-3 py-2 text-center">
                             {member.role === "manager" ? (
-                              <span className="text-[11px] aseel-text-soft" title="المدير يملك صلاحية الاستيراد ضمناً">ضمناً</span>
+                              <span className="text-[11px] ktra-text-soft" title="المدير يملك صلاحية الاستيراد ضمناً">ضمناً</span>
                             ) : (
                               <input
                                 type="checkbox"
@@ -637,7 +637,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                                 type="button"
                                 onClick={() => void toggleAccount(member)}
                                 disabled={busyId === member.membership_id}
-                                className={`aseel-iconbtn ${member.is_active ? "text-amber-600" : "text-emerald-600"}`}
+                                className={`ktra-iconbtn ${member.is_active ? "text-amber-600" : "text-emerald-600"}`}
                                 title={member.is_active ? `إيقاف حساب ${member.username}` : `تفعيل حساب ${member.username}`}
                                 aria-label={member.is_active ? `إيقاف حساب ${member.username}` : `تفعيل حساب ${member.username}`}
                               >
@@ -647,7 +647,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                                 type="button"
                                 onClick={() => void removeMember(member)}
                                 disabled={busyId === member.membership_id}
-                                className="aseel-iconbtn text-red-600"
+                                className="ktra-iconbtn text-red-600"
                                 title={`إخراج ${member.username} من الشركة`}
                                 aria-label={`إخراج ${member.username} من الشركة`}
                               >
@@ -660,7 +660,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                     </tbody>
                   </table>
                 </div>
-                <p className="mt-2 text-[11px] aseel-text-soft">
+                <p className="mt-2 text-[11px] ktra-text-soft">
                   «إيقاف الحساب» يمنع الدخول إلى المنصة كلها، و«الإخراج» يزيل العضوية من هذه الشركة فقط. لا يمكن إخراج أو تخفيض آخر مدير قبل تعيين بديل.
                 </p>
               </section>
@@ -670,7 +670,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                   الفروع ({detail.branches.length})
                 </h3>
                 {detail.branches.length === 0 ? (
-                  <p className="text-xs aseel-text-soft">لا فروع</p>
+                  <p className="text-xs ktra-text-soft">لا فروع</p>
                 ) : (
                   <ul className="flex flex-wrap gap-2">
                     {detail.branches.map((branch) => (
@@ -679,12 +679,12 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                         className="rounded border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)]"
                       >
                         <span className="font-semibold">{branch.name}</span>
-                        {branch.code && <span className="text-[11px] aseel-text-soft"> · {branch.code}</span>}
+                        {branch.code && <span className="text-[11px] ktra-text-soft"> · {branch.code}</span>}
                       </li>
                     ))}
                   </ul>
                 )}
-                <p className="mt-2 text-[11px] aseel-text-soft">
+                <p className="mt-2 text-[11px] ktra-text-soft">
                   الفروع تُنشأ وتُعدَّل من داخل الشركة نفسها — تُقرأ هنا فقط، وعددها يحدّه بند «الفروع» في «حدود الاستخدام» أعلاه.
                 </p>
               </section>
@@ -697,7 +697,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                   className="flex w-full items-center justify-between gap-2 text-right"
                 >
                   <h3 className="text-sm font-bold text-[var(--color-text)]">آخر الحركات</h3>
-                  <span className="flex items-center gap-1 text-[11px] aseel-text-soft">
+                  <span className="flex items-center gap-1 text-[11px] ktra-text-soft">
                     {feedOpen ? "إخفاء" : "عرض آخر 100 حركة"}
                     {feedOpen
                       ? <ChevronDown className="h-4 w-4" />
@@ -708,7 +708,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                 {feedOpen && (
                   <div className="mt-3">
                     {feedLoading ? (
-                      <div className="flex items-center justify-center gap-2 py-6 text-sm aseel-text-soft" role="status">
+                      <div className="flex items-center justify-center gap-2 py-6 text-sm ktra-text-soft" role="status">
                         <Loader2 className="h-4 w-4 animate-spin" /> جارٍ تحميل آخر الحركات…
                       </div>
                     ) : feedError ? (
@@ -717,18 +717,18 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                         role="alert"
                       >
                         <span>{feedError}</span>
-                        <button type="button" onClick={() => void loadFeed()} className="aseel-btn">
+                        <button type="button" onClick={() => void loadFeed()} className="ktra-btn">
                           <RotateCcw className="h-4 w-4" /> إعادة المحاولة
                         </button>
                       </div>
                     ) : !feed || feed.length === 0 ? (
-                      <p className="py-6 text-center text-sm aseel-text-soft">
+                      <p className="py-6 text-center text-sm ktra-text-soft">
                         لا حركات مسجَّلة لهذه الشركة — أحداث فتح المستندات لا تُحتسب.
                       </p>
                     ) : (
                       <div className="overflow-x-auto">
                         <table className="w-full min-w-[640px] text-sm">
-                          <thead className="bg-[var(--color-surface-2)] aseel-text-soft">
+                          <thead className="bg-[var(--color-surface-2)] ktra-text-soft">
                             <tr>
                               <th className="px-3 py-2 text-right w-40">التاريخ</th>
                               <th className="px-3 py-2 text-right w-40">المستخدم</th>
@@ -741,7 +741,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                               const meta = actionMeta(row.action);
                               return (
                                 <tr key={`${row.timestamp}-${index}`} className="border-t border-[var(--color-border)]">
-                                  <td className="px-3 py-2 whitespace-nowrap aseel-text-soft">
+                                  <td className="px-3 py-2 whitespace-nowrap ktra-text-soft">
                                     {formatActivityTime(row.timestamp)}
                                   </td>
                                   <td className="px-3 py-2">{row.user_name}</td>
@@ -756,7 +756,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                                       {row.entity_label ? ` ${row.entity_label}` : ""}
                                     </div>
                                     {row.description && (
-                                      <div className="text-[11px] aseel-text-soft">{row.description}</div>
+                                      <div className="text-[11px] ktra-text-soft">{row.description}</div>
                                     )}
                                   </td>
                                 </tr>
@@ -769,7 +769,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                   </div>
                 )}
 
-                <p className="mt-2 text-[11px] aseel-text-soft">
+                <p className="mt-2 text-[11px] ktra-text-soft">
                   آخر مئة حركة على الشركة — تشمل ما فعله سوبر أدمن بها (الخطة، الحالة، الحدود، الوحدات). السجل الكامل مكانه صفحة «سجل النشاط» داخل الشركة.
                 </p>
               </section>

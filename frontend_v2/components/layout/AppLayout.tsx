@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sidebar } from '../Sidebar';
 import { User, AppView } from '../../types';
-import { Breadcrumb } from './Breadcrumb';
 import {
   DensitySwitch,
 } from './DensitySwitch';
@@ -18,8 +17,9 @@ import {
 import {
   BranchSwitcher,
 } from './BranchSwitcher';
-import { AseelCalculatorButton } from '../aseel';
+import { KitCalculatorButton } from '../kit';
 import { ActionBarRail } from './ActionBarRail';
+import { QuickAccessBar } from './QuickAccessBar';
 import { GlobalContextMenu } from './GlobalContextMenu';
 import { NotificationCenter } from '../notifications/NotificationCenter';
 import { WhatsNewButton } from './WhatsNewButton';
@@ -30,7 +30,6 @@ import { formatNumber } from '../../utils/formatNumber';
 // استيراد مباشر لا عبر barrel الـimport-flow: البرميل يجرّ ImportDocumentScreen
 // كاملةً إلى حزمة القشرة ويُبطل تقسيم الحِزَم.
 import { ImportJourneyGuide } from '../import-flow/ImportJourneyGuide';
-import { IMPORT_GUIDE_SLOT_ID } from '../../utils/importGuidePref';
 import { platformNoteTarget, type PlatformNoteTarget } from '../../utils/entityLinks';
 import { openInNewTab, TAB_OPENED_EVENT, type TabOpenedDetail } from '../../utils/openInNewTab';
 import { setCurrentTabLabel } from '../../utils/tabLink';
@@ -43,36 +42,10 @@ import {
   LogOut,
   Copy,
   SlidersHorizontal,
-  Home,
-  ReceiptText,
-  ShoppingCart,
-  FileText,
-  ClipboardList,
-  Boxes,
-  Building2,
-  Users,
-  ArrowLeftRight,
-  BookOpen,
-  WalletCards,
-  BarChart3,
-  Zap,
-  Handshake,
-  Ship,
-  History,
-  Truck,
-  Package,
   NotebookPen,
-  type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatDateValue } from "../../utils/formatDate";
-import {
-  getQuickShortcuts,
-  iconForShortcut,
-  labelForShortcut,
-  QUICK_SHORTCUTS_EVENT,
-  type ShortcutIconName,
-} from '../../utils/quickShortcuts';
 
 /**
  * T-TRIAL: شريط انتهاء الاشتراك — يظهر في آخر سبعة أيام وبعد الانتهاء، ويختفي
@@ -120,54 +93,6 @@ interface AppLayoutProps {
   listPath?: string;
 }
 
-const SHORTCUT_ICONS: Record<ShortcutIconName, LucideIcon> = {
-  home: Home,
-  "sales-invoice": ReceiptText,
-  "purchase-invoice": ShoppingCart,
-  quotation: FileText,
-  "supplier-offer": ClipboardList,
-  items: Boxes,
-  suppliers: Building2,
-  customers: Users,
-  "stock-movements": ArrowLeftRight,
-  journal: BookOpen,
-  cashboxes: WalletCards,
-  reports: BarChart3,
-  "import-offers": ClipboardList,
-  "international-invoices": FileText,
-  deals: Handshake,
-  shipments: Ship,
-  "old-invoices": History,
-  "local-shipping": Truck,
-  clearance: FileText,
-  "import-flow": Package,
-  zap: Zap,
-};
-
-const SHORTCUT_ICON_COLORS: Record<ShortcutIconName, string> = {
-  home: "text-blue-600 dark:text-blue-400",
-  "sales-invoice": "text-emerald-600 dark:text-emerald-400",
-  "purchase-invoice": "text-amber-600 dark:text-amber-400",
-  quotation: "text-violet-600 dark:text-violet-400",
-  "supplier-offer": "text-rose-600 dark:text-rose-400",
-  items: "text-cyan-600 dark:text-cyan-400",
-  suppliers: "text-orange-600 dark:text-orange-400",
-  customers: "text-indigo-600 dark:text-indigo-400",
-  "stock-movements": "text-teal-600 dark:text-teal-400",
-  journal: "text-fuchsia-600 dark:text-fuchsia-400",
-  cashboxes: "text-green-600 dark:text-green-400",
-  reports: "text-sky-600 dark:text-sky-400",
-  "import-offers": "text-lime-600 dark:text-lime-400",
-  "international-invoices": "text-purple-600 dark:text-purple-400",
-  deals: "text-pink-600 dark:text-pink-400",
-  shipments: "text-blue-500 dark:text-blue-300",
-  "old-invoices": "text-stone-600 dark:text-stone-400",
-  "local-shipping": "text-amber-500 dark:text-amber-300",
-  clearance: "text-red-600 dark:text-red-400",
-  "import-flow": "text-emerald-500 dark:text-emerald-300",
-  zap: "text-slate-600 dark:text-slate-300",
-};
-
 export const AppLayout: React.FC<AppLayoutProps> = ({
   user,
   activeView,
@@ -191,18 +116,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       heading || document.title || 'الصفحة الحالية',
     ));
   };
-  // task16 D14: اختصارات الوصول السريع (قابلة للتهيئة من الإعدادات)
-  const [shortcuts, setShortcuts] = useState<AppView[]>(() => getQuickShortcuts());
-  useEffect(() => {
-    const refresh = () => setShortcuts(getQuickShortcuts());
-    window.addEventListener(QUICK_SHORTCUTS_EVENT, refresh);
-    window.addEventListener('storage', refresh);
-    return () => {
-      window.removeEventListener(QUICK_SHORTCUTS_EVENT, refresh);
-      window.removeEventListener('storage', refresh);
-    };
-  }, []);
-
   // وعي التبويبات: هذا التبويب يعلن اسم شاشته للتبويبات الأخرى، فيقدر تبويبٌ
   // فُتح منه أن يقول «فُتح من: فواتير المبيعات» بلا جدول مسارات ثانٍ.
   useEffect(() => {
@@ -238,8 +151,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
     <div className="app-shell flex flex-col h-screen overflow-hidden bg-[var(--color-surface)]" data-density={density}>
       {/* task13 M6: حُذف chip العنوان (كان يكرر تسمية الشريط الجانبي والـ breadcrumb)
            ونُقلت «السنة المالية» إلى شريط الحالة السفلي بجانب المستخدم/الدور. */}
-      <div className="aseel-titlebar aseel-app-chrome flex-shrink-0">
-        <div className="aseel-company flex items-center gap-3">
+      <div className="ktra-titlebar ktra-app-chrome flex-shrink-0">
+        <div className="ktra-company flex items-center gap-3">
           <CompanySwitcher />
           <BranchSwitcher />
           
@@ -302,7 +215,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             </button>
           )}
           {/* task16 E15: حاسبة بأيقونة — تفتح عند الطلب فقط */}
-          <AseelCalculatorButton />
+          <KitCalculatorButton />
           <DensitySwitch value={density} onChange={setDensity} />
           <PriceVisibilityToggle />
           <ThemeToggle />
@@ -337,41 +250,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         <Sidebar user={user} activeView={activeView} setView={onNavigate} />
 
         <div className="app-main flex flex-col flex-1 min-w-0">
-          {/* شريط التنقل السريع */}
-          <div className="aseel-toolbar relative flex-shrink-0 overflow-hidden">
-            <div
-              className="pointer-events-none absolute inset-0 bg-gradient-to-l from-sky-100/90 via-blue-50/90 to-cyan-100/80 dark:from-slate-900 dark:via-blue-950/80 dark:to-cyan-950/70"
-              aria-hidden="true"
-            />
-            <div className="aseel-toolgrp relative z-10">
-              <Breadcrumb activeView={activeView} listPath={listPath} />
-            </div>
-            {/* task16 D14: اختصارات الوصول السريع القابلة للتهيئة */}
-            {shortcuts.filter(v => v !== 'dashboard' && v !== activeView).length > 0 && (
-              <div className="aseel-toolgrp relative z-10 flex items-center gap-1.5 py-1 ms-4" title="اختصارات سريعة (تُهيّأ من الإعدادات)">
-                {shortcuts.filter(v => v !== 'dashboard' && v !== activeView).map((v) => {
-                  const iconName = iconForShortcut(v);
-                  const ShortcutIcon = SHORTCUT_ICONS[iconName];
-                  return (
-                    <button
-                      key={v}
-                      type="button"
-                      onClick={() => onNavigate(v)}
-                      className="group flex min-w-[4.75rem] flex-col items-center justify-center gap-1 rounded-lg border border-blue-100/80 bg-white/75 px-2.5 py-1.5 text-[11px] font-semibold text-[var(--color-text)] shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-300 hover:bg-white hover:shadow-md dark:border-blue-900/60 dark:bg-slate-900/55 dark:hover:border-blue-700 dark:hover:bg-slate-900"
-                    >
-                      <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/80 bg-white/90 shadow-inner transition-transform group-hover:scale-105 dark:border-slate-700 dark:bg-slate-800/90">
-                        <ShortcutIcon className={`h-5 w-5 ${SHORTCUT_ICON_COLORS[iconName]}`} />
-                      </span>
-                      <span className="whitespace-nowrap">{labelForShortcut(v)}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {/* مرسى زرّ «مرشد الرحلة» — يملؤه ImportJourneyGuide بـportal حين
-                يكون مطويّاً ومتاحاً لهذا المستخدم، ويبقى فارغاً بلا عرض للآخرين. */}
-            <div id={IMPORT_GUIDE_SLOT_ID} className="aseel-toolgrp relative z-10 flex items-center py-1 ms-2" />
-          </div>
+          {/* شريط الوصول السريع — رجوع + المسار + الاختصارات + مرسى المرشد،
+              يُطوى بضغطة (أو Ctrl+F1) ويُحفظ الاختيار لصاحبه. */}
+          <QuickAccessBar
+            activeView={activeView}
+            onNavigate={onNavigate}
+            listPath={listPath}
+            userId={user.id}
+          />
           <SubscriptionExpiryBanner />
           <main className="app-content overflow-auto flex-1">
             {children}
@@ -405,7 +291,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               <button
                 type="button"
                 autoFocus
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 onClick={() => setNotesTarget(null)}
                 aria-label="إغلاق ملاحظات الصفحة"
               >

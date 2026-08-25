@@ -43,7 +43,7 @@ import {
   InvoiceAttachmentsTab,
 } from "../shared/DocumentContextTabs";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
-import { AseelDatePicker } from "../ui/AseelDatePicker";
+import { KitDatePicker } from "../ui/KitDatePicker";
 import { FieldHint } from "../ui/FieldHint";
 
 import { ProductCardModal } from "../shared/ProductCardModal";
@@ -107,16 +107,16 @@ import { formatDateTimeValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { FieldError } from "../ui/FieldError";
 import {
-  AseelDocumentShell,
-  AseelDocumentView,
-  AseelGrid,
-  AseelIndexPicker,
-  AseelAutocomplete,
-  useAseelKeymap,
+  KitDocumentShell,
+  KitDocumentView,
+  KitGrid,
+  KitIndexPicker,
+  KitAutocomplete,
+  useKitKeymap,
   useRecordNavigation,
-  type AseelGridColumn,
-  type AseelToolbarAction,
-} from "../aseel";
+  type KitGridColumn,
+  type KitToolbarAction,
+} from "../kit";
 
 export type ProductRow = {
   id: number;
@@ -241,20 +241,20 @@ const LineNotesModal: React.FC<{
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-lg rounded-2xl aseel-bg-field dark:aseel-bg-panel shadow-xl border aseel-border-soft">
-        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b aseel-border-soft">
+      <div className="w-full max-w-lg rounded-2xl ktra-bg-field dark:ktra-bg-panel shadow-xl border ktra-border-soft">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b ktra-border-soft">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-[var(--color-primary)] text-white rounded-xl">
               <StickyNote className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold aseel-text-ink dark:text-white">ملاحظات البند</h3>
-              <p className="text-xs aseel-text-soft">{productName}</p>
+              <h3 className="text-base font-bold ktra-text-ink dark:text-white">ملاحظات البند</h3>
+              <p className="text-xs ktra-text-soft">{productName}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 aseel-text-soft hover:aseel-bg-panel rounded-lg"
+            className="p-2 ktra-text-soft hover:ktra-bg-panel rounded-lg"
             aria-label="إغلاق"
           >
             <X className="w-5 h-5" />
@@ -263,7 +263,7 @@ const LineNotesModal: React.FC<{
 
         <div className="p-4 sm:p-6 space-y-4">
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-bold aseel-text-ink dark:aseel-text-soft">
+            <span className="text-xs font-bold ktra-text-ink dark:ktra-text-soft">
               ملاحظة داخلية — للموظف
             </span>
             <textarea
@@ -272,16 +272,16 @@ const LineNotesModal: React.FC<{
               disabled={readOnly}
               value={internal}
               onChange={(e) => setInternal(e.target.value)}
-              className="px-2 py-1.5 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm resize-y"
+              className="px-2 py-1.5 border ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-sm resize-y"
               placeholder="لا تُطبع للعميل — سبب الخصم، حالة العلبة، من وافق على السعر…"
             />
-            <span className="text-[11px] aseel-text-soft">
+            <span className="text-[11px] ktra-text-soft">
               لا تظهر في نسخة العميل المطبوعة إطلاقاً.
             </span>
           </label>
 
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-bold aseel-text-ink dark:aseel-text-soft">
+            <span className="text-xs font-bold ktra-text-ink dark:ktra-text-soft">
               ملاحظة للزبون — تُطبع في الفاتورة
             </span>
             <textarea
@@ -290,18 +290,18 @@ const LineNotesModal: React.FC<{
               disabled={readOnly}
               value={forCustomer}
               onChange={(e) => setForCustomer(e.target.value)}
-              className="px-2 py-1.5 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm resize-y"
+              className="px-2 py-1.5 border ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-sm resize-y"
               placeholder="تُطبع تحت اسم الصنف — مدّة الكفالة، شروط التركيب، ملحقات مرفقة…"
             />
-            <span className="text-[11px] aseel-text-soft">
+            <span className="text-[11px] ktra-text-soft">
               تظهر تحت اسم الصنف في الفاتورة المطبوعة.
             </span>
           </label>
 
-          <div className="flex items-center justify-end gap-3 pt-2 border-t aseel-border-soft">
+          <div className="flex items-center justify-end gap-3 pt-2 border-t ktra-border-soft">
             <button
               onClick={onClose}
-              className="px-4 py-2 aseel-text-ink dark:aseel-text-soft aseel-bg-panel rounded-lg"
+              className="px-4 py-2 ktra-text-ink dark:ktra-text-soft ktra-bg-panel rounded-lg"
             >
               إلغاء
             </button>
@@ -413,7 +413,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [revenueAccountId, setRevenueAccountId] = useState<number | "">("");
   const [stockOnPost, setStockOnPost] = useState(true);
   const [notes, setNotes] = useState("");
-  // ── M2-T1: Aseel header fields ─────────────────────────────────────────
+  // ── M2-T1: Kit header fields ─────────────────────────────────────────
   const [bookNumber, setBookNumber] = useState<string>("0");
   const [secondDate, setSecondDate] = useState<string>("");
   const [licensedDealerNo, setLicensedDealerNo] = useState<string>("");
@@ -548,7 +548,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const focusBarcodeField = () => {
     window.setTimeout(() => {
       document
-        .querySelector<HTMLInputElement>('[data-aseel-field="barcode"]')
+        .querySelector<HTMLInputElement>('[data-ktra-field="barcode"]')
         ?.focus();
     }, 0);
   };
@@ -1258,7 +1258,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           internal_note: l.internal_note ?? "",
           customer_note: l.customer_note ?? "",
         })),
-      // ── M2-T1: Aseel header fields ───────────────────────────────
+      // ── M2-T1: Kit header fields ───────────────────────────────
       book_number: Number(bookNumber) || 0,
       second_date: secondDate || null,
       licensed_dealer_no: licensedDealerNo || "",
@@ -2047,7 +2047,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   /* ───────────── اختصارات الأصيل (M1-T3) ───────────── */
   const noteKey = (k: string) => setLastKey(k);
 
-  useAseelKeymap(
+  useKitKeymap(
     {
       F2: () => {
         noteKey("F2 طباعة");
@@ -2084,7 +2084,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       plus: () => {
         // فهرس الحساب/الصنف حسب الحقل المركَّز عليه
         const active = document.activeElement as HTMLElement | null;
-        const field = active?.getAttribute?.("data-aseel-field");
+        const field = active?.getAttribute?.("data-ktra-field");
         if (field === "customer") {
           noteKey("+ فهرس الحسابات");
           setCustomerPickerOpen(true);
@@ -2099,7 +2099,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       star: () => {
         // الحساب التالي داخل حقل العميل
         const active = document.activeElement as HTMLElement | null;
-        if (active?.getAttribute?.("data-aseel-field") === "customer") {
+        if (active?.getAttribute?.("data-ktra-field") === "customer") {
           noteKey("* الحساب التالي");
           const idx = customers.findIndex((c) => c.id === Number(customerId));
           const nextC = customers[idx + 1] ?? customers[0];
@@ -2111,7 +2111,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       },
       minus: () => {
         const active = document.activeElement as HTMLElement | null;
-        if (active?.getAttribute?.("data-aseel-field") === "customer") {
+        if (active?.getAttribute?.("data-ktra-field") === "customer") {
           noteKey("- الحساب السابق");
           const idx = customers.findIndex((c) => c.id === Number(customerId));
           const prevC = customers[idx - 1] ?? customers[customers.length - 1];
@@ -2156,11 +2156,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   // W4: إجمالي الكميات (مجموع كميات البنود) بجانب الإجماليات المالية.
   const totalQty = lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
 
-  /* ───────────── أعمدة جدول البنود (AseelGrid) ─────────────
+  /* ───────────── أعمدة جدول البنود (KitGrid) ─────────────
      T-RESERVEVIS: «المتاح» وحده كان يعرض الرصيد الكامل فيبدو الصنف المحجوز حراً.
      صار الرصيد صريحاً، ويظهر معه عمودا «محجوز/المتاح للبيع» فقط حين يوجد حجز
      يزاحم هذه الفاتورة — لا أعمدة فارغة على فاتورة بلا حجز. */
-  const gridColumns: AseelGridColumn<DraftLine>[] = [
+  const gridColumns: KitGridColumn<DraftLine>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     { key: "product", header: "بيان الصنف", width: "30%" },
     { key: "avail", header: "الرصيد", width: "70px", align: "center", readOnly: true },
@@ -2174,7 +2174,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           const holders = [...entry.holders, ...entry.ownHolders];
           return (
             <span
-              style={{ color: "var(--aseel-warn, #b06800)", fontWeight: 600 }}
+              style={{ color: "var(--ktra-warn, #b06800)", fontWeight: 600 }}
               title={`محجوز بطلبيات: ${holders.map((h) => `${h.orderNumber} (${h.customerName})`).join("، ")}`}
             >{fmt(reserved)}</span>
           );
@@ -2191,7 +2191,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           return (
             <span
               style={available < 0
-                ? { color: "var(--aseel-danger, #c00)", fontWeight: 700 }
+                ? { color: "var(--ktra-danger, #c00)", fontWeight: 700 }
                 : undefined}
               title="الرصيد بعد حجوزات الزبائن الآخرين"
             >{fmt(available)}</span>
@@ -2341,7 +2341,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     return (
     <div className="flex flex-col gap-0.5">
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-      <AseelAutocomplete
+      <KitAutocomplete
         value={(() => {
           const pr = row.product ? productsById.get(Number(row.product)) : undefined;
           return pr ? formatProductPrimaryName(pr) : "";
@@ -2352,7 +2352,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         onPick={(id) => {
           void onSelectProduct(row.key, Number(id));
           setTimeout(() => {
-            document.getElementById(`aseel-grid-input-${ri}-quantity`)?.focus();
+            document.getElementById(`ktra-grid-input-${ri}-quantity`)?.focus();
           }, 50);
         }}
         onInfo={(id) => { setCardCanAdd(false); setCardProductId(Number(id)); }}
@@ -2363,7 +2363,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       {selectedId != null && (
         <button
           type="button"
-          className="aseel-ellipsis"
+          className="ktra-ellipsis"
           onClick={() => { setCardCanAdd(false); setCardProductId(selectedId); }}
           title="بطاقة الصنف"
         ><Info className="w-3.5 h-3.5" /></button>
@@ -2372,17 +2372,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       {selectedId != null && !readOnly && (
         <button
           type="button"
-          className="aseel-ellipsis"
+          className="ktra-ellipsis"
           onClick={() => setQuickEditProductId(selectedId)}
           title="تعديل سريع للصنف"
         ><Pencil className="w-3.5 h-3.5" /></button>
       )}
       {/* DEF-005: شارة مصدر السعر المقترح */}
       {row.priceSource === "last_invoice" && (
-        <span className="aseel-price-badge aseel-price-badge--last" title="السعر من آخر فاتورة لهذا العميل">من آخر فاتورة</span>
+        <span className="ktra-price-badge ktra-price-badge--last" title="السعر من آخر فاتورة لهذا العميل">من آخر فاتورة</span>
       )}
       {row.priceSource === "default" && (
-        <span className="aseel-price-badge aseel-price-badge--general"
+        <span className="ktra-price-badge ktra-price-badge--general"
           title="سعر عام من كرت الصنف — لا عرض لهذا الزبون ولا شراء سابق">سعر عام</span>
       )}
       {(row.priceSource === "quote" || row.priceSource === "sales_quote") && (() => {
@@ -2393,7 +2393,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         return link ? (
           <button
             type="button"
-            className="aseel-price-badge aseel-price-badge--quote"
+            className="ktra-price-badge ktra-price-badge--quote"
             style={{ cursor: "pointer", textDecoration: "underline" }}
             title={title}
             onClick={() => {
@@ -2402,12 +2402,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             }}
           >من عرض السعر</button>
         ) : (
-          <span className="aseel-price-badge aseel-price-badge--quote" title="السعر من عرض السعر">من عرض السعر</span>
+          <span className="ktra-price-badge ktra-price-badge--quote" title="السعر من عرض السعر">من عرض السعر</span>
         );
       })()}
       <button
         type="button"
-        className="aseel-ellipsis"
+        className="ktra-ellipsis"
         disabled={readOnly}
         onClick={() => setProductPickerLineKey(row.key)}
         title="فهرس الأصناف الكامل (+)"
@@ -2416,15 +2416,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     {selectedProduct && needsAlternative(selectedProduct) && !readOnly && (
       <div className="flex flex-wrap items-center gap-1 text-[10px] leading-tight">
         {alternatives.length === 0 ? (
-          <span className="text-[var(--aseel-ink-soft)]">لا بديل متوفّر من هذا النوع</span>
+          <span className="text-[var(--ktra-ink-soft)]">لا بديل متوفّر من هذا النوع</span>
         ) : (
           <>
-            <span className="text-[var(--aseel-ink-soft)]">بدائل من نفس النوع:</span>
+            <span className="text-[var(--ktra-ink-soft)]">بدائل من نفس النوع:</span>
             {alternatives.map((alt) => (
               <button
                 key={alt.id}
                 type="button"
-                className="rounded border border-[var(--aseel-warn-bd)] bg-[var(--aseel-warn-bg)] px-1 py-px text-[var(--aseel-warn-fg)] hover:opacity-80"
+                className="rounded border border-[var(--ktra-warn-bd)] bg-[var(--ktra-warn-bg)] px-1 py-px text-[var(--ktra-warn-fg)] hover:opacity-80"
                 title={`استبدال الصنف بـ«${formatProductPrimaryName(alt)}» — المتاح ${formatQuantity(availableOf(alt))}`}
                 onClick={() => { void onSelectProduct(row.key, alt.id); }}
               >
@@ -2448,7 +2448,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "2px", alignItems: "center" }}>
         <input
-          className={`aseel-input ${belowCost ? "border-red-500 focus:ring-red-500" : ""}`}
+          className={`ktra-input ${belowCost ? "border-red-500 focus:ring-red-500" : ""}`}
           type="text"
           inputMode="decimal"
           value={row.unit_price}
@@ -2471,10 +2471,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const renderTaxCell = (row: DraftLine) => {
     const isEdit = taxEditKey === row.key;
     return (
-      <div className="aseel-cell-tax">
+      <div className="ktra-cell-tax">
         {isEdit ? (
           <input
-            className="aseel-input"
+            className="ktra-input"
             type="number"
             min={0}
             max={100}
@@ -2495,7 +2495,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           />
         ) : (
           <select
-            className="aseel-input"
+            className="ktra-input"
             disabled={readOnly}
             value={row.tax_rate === null || row.tax_rate === "" ? "" : row.tax_rate}
             onChange={(e) =>
@@ -2515,7 +2515,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         {!readOnly && (
           <button
             type="button"
-            className="aseel-iconbtn"
+            className="ktra-iconbtn"
             title="تعديل النسبة يدوياً %"
             onClick={() => {
               if (taxEditKey === row.key) {
@@ -2540,17 +2540,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   /* T-SERIAL: شارة الوحدات على السطر — «تلقائي» حين لا اختيار، والعدد حين يوجد.
      النقص في النمط الإجباري يظهر أحمرَ هنا، والمنع نفسه يقع على الخادم. */
   const renderSerialCell = (row: DraftLine) => {
-    if (!lineTracksSerials(row)) return <span className="aseel-text-soft">—</span>;
+    if (!lineTracksSerials(row)) return <span className="ktra-text-soft">—</span>;
     const chosen = row.serials?.length ?? 0;
     const qty = Math.max(0, Math.trunc(Number(row.quantity) || 0));
     const incomplete = serialMode === "required" && chosen !== qty;
     return (
       <button
         type="button"
-        className="aseel-toolbtn"
+        className="ktra-toolbtn"
         style={{
           width: "100%", fontWeight: 600,
-          ...(incomplete ? { color: "var(--aseel-danger, #c00)" } : {}),
+          ...(incomplete ? { color: "var(--ktra-danger, #c00)" } : {}),
         }}
         onClick={() => setSerialLineKey(row.key)}
         title={chosen > 0
@@ -2572,7 +2572,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     return (
       <button
         type="button"
-        className="aseel-toolbtn"
+        className="ktra-toolbtn"
         style={{ width: "100%", fontWeight: 600 }}
         onClick={() => setNotesLineKey(row.key)}
         title={
@@ -2593,7 +2593,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     readOnly ? null : (
       <button
         type="button"
-        className="aseel-iconbtn aseel-iconbtn--danger"
+        className="ktra-iconbtn ktra-iconbtn--danger"
         onClick={() => removeRow(row.key)}
         title="حذف السطر"
       >
@@ -2603,7 +2603,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   // حقن الأعمدة المخصّصة (تستخدم render) — بالمفتاح لا بالترتيب: أعمدة الحجز
   // تظهر وتختفي بحسب وجود حجز، فالفهرس الثابت كان سيحقن العمود الخطأ.
-  const injectRender = (key: string, render: AseelGridColumn<DraftLine>["render"]) => {
+  const injectRender = (key: string, render: KitGridColumn<DraftLine>["render"]) => {
     const column = gridColumns.find((c) => c.key === key);
     if (column) column.render = render;
   };
@@ -2924,13 +2924,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     && !stockOnPost
     && deliveryStatus !== "delivered";
 
-  const toolbarActions: AseelToolbarAction[] = [
+  const toolbarActions: KitToolbarAction[] = [
     // task16: زر صريح للعودة لقائمة الفواتير (إلى جانب ✕ إغلاق في الإطار)
     ...(onClose
-      ? [{ key: "back", label: "الفواتير", icon: <ArrowRight />, onClick: onClose } as AseelToolbarAction]
+      ? [{ key: "back", label: "الفواتير", icon: <ArrowRight />, onClick: onClose } as KitToolbarAction]
       : []),
     ...(canPerm("sales.invoice.create")
-      ? [{ key: "new", label: "إضافة", icon: <Plus />, onClick: guardedReset } as AseelToolbarAction]
+      ? [{ key: "new", label: "إضافة", icon: <Plus />, onClick: guardedReset } as KitToolbarAction]
       : []),
     ...(viewMode && !isPosted && invoicePermissions.canSave ? [{
       key: "edit",
@@ -2938,14 +2938,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       icon: <Pencil />,
       onClick: () => setViewMode(false),
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     ...(invoicePermissions.canSave ? [{
       key: "save",
       label: saving ? "...تخزين" : "تخزين",
       icon: saving ? <Loader2 className="animate-spin" /> : <Save />,
       onClick: !readOnly && !saving ? () => void handleSaveDraft() : undefined,
       disabled: readOnly || saving,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     ...(invoicePermissions.canSaveAndPost ? [{
       key: "save-and-post",
       label: saving || posting ? "...حفظ وترحيل" : "حفظ وترحيل",
@@ -2967,7 +2967,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         saving ||
         posting,
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     ...(invoicePermissions.canPost ? [{
       key: "post",
       // P3-1-b: posting requires a server-side document number + journal
@@ -2991,7 +2991,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         journalPreview.errors.length > 0 ||
       posting,
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     // T-PERM: «تراجع عن الترحيل» يظهر فقط لمن يملك الصلاحية (الخادم يفرضها أيضاً).
     ...(canPerm("sales.invoice.unpost") ? [{
       key: "unpost",
@@ -2999,7 +2999,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       icon: posting ? <Loader2 className="animate-spin" /> : <Undo2 />,
       onClick: isPosted && !posting ? () => void handleUnpost() : undefined,
       disabled: !isPosted || posting,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     {
       key: "cancel",
       label: "إلغاء",
@@ -3018,7 +3018,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       onClick: !(isPosted && remainingDue <= 0.009) ? focusCollectPanel : undefined,
       disabled: isPosted && remainingDue <= 0.009,
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     // التسليم: نافذة سريعة تُنشئ إرسالية بالبنود المؤشَّرة، أو المحرّر الكامل
     // في شاشة الإرساليات بالفاتورة نفسها مربوطةً مسبقاً (مرآة فاتورة الشراء).
     ...(!isReturn && canDeliverGoods ? [{
@@ -3027,13 +3027,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       icon: <Truck />,
       onClick: () => setShowDeliver(true),
       separatorBefore: true,
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     ...(!isReturn && canDeliverGoods ? [{
       key: "new-delivery-note",
       label: "إرسالية جديدة",
       icon: <ClipboardList />,
       onClick: () => openInNewTab(`/sales/delivery-notes/new?invoice=${draftId}`),
-    } as AseelToolbarAction] : []),
+    } as KitToolbarAction] : []),
     // T-SERVICELINE: «بدي أضيف خدمة» — إنشاؤها من داخل الفاتورة ثم وضعها في
     // السطر مباشرةً، بدل الخروج إلى شاشة الأصناف والعودة.
     ...(readOnly ? [] : [{
@@ -3042,7 +3042,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       icon: <Wrench />,
       onClick: () => setShowServiceModal(true),
       separatorBefore: true,
-    } as AseelToolbarAction]),
+    } as KitToolbarAction]),
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => setShowPrintView(true) },
     // DOC-SHARE: المشاركة تلزمها فاتورة محفوظة — الرابط يشير إلى صفٍّ في
     // القاعدة، ومسوّدةٌ في الذاكرة لا صفَّ لها بعد.
@@ -3057,7 +3057,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const banner =
     localErr || msg ? (
-      <div className={`aseel-banner ${localErr ? "aseel-banner--err" : "aseel-banner--ok"}`}>
+      <div className={`ktra-banner ${localErr ? "ktra-banner--err" : "ktra-banner--ok"}`}>
         {localErr ? (
           <AlertCircle className="h-4 w-4 shrink-0" />
         ) : (
@@ -3077,7 +3077,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const stockWarningBanner =
     overSellWarnings.length > 0 ? (
       <div
-        className="aseel-banner"
+        className="ktra-banner"
         role="status"
         style={{
           backgroundColor: "#fef9c3",
@@ -3102,7 +3102,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const reservedWarningBanner =
     reservedWarnings.length > 0 ? (
       <div
-        className="aseel-banner"
+        className="ktra-banner"
         role="alert"
         data-testid="reserved-stock-warning"
         style={{ backgroundColor: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" }}
@@ -3123,7 +3123,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   // M4: recover an autosaved-but-unsaved draft (only offered for a fresh invoice).
   const restoreBanner = recoverableDraft ? (
-    <div className="aseel-banner aseel-banner--ok" role="status">
+    <div className="ktra-banner ktra-banner--ok" role="status">
       <AlertCircle className="h-4 w-4 shrink-0" />
       <span>
         توجد مسودة غير محفوظة محليّاً (
@@ -3163,19 +3163,19 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   ) : null;
 
   const fld = (label: string, node: React.ReactNode) => (
-    <label className="aseel-field">
-      <span className="aseel-field-label">{label}</span>
+    <label className="ktra-field">
+      <span className="ktra-field-label">{label}</span>
       {node}
     </label>
   );
 
   /* ───────────── تبويب: معاينة القيد (M1-T4) ───────────── */
   const journalTab = (
-    <div className="aseel-journal">
+    <div className="ktra-journal">
       {journalPreview.errors.length > 0 && (
-        <div className="aseel-journal-errs">
+        <div className="ktra-journal-errs">
           {journalPreview.errors.map((e, i) => (
-            <div key={i} className="aseel-journal-err">
+            <div key={i} className="ktra-journal-err">
               <AlertCircle className="h-3 w-3 shrink-0" />
               <span>{e}</span>
             </div>
@@ -3183,9 +3183,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         </div>
       )}
       {journalPreview.lines.length === 0 ? (
-        <p className="aseel-journal-empty">أدخل الأسطر والحسابات لعرض القيد المحاسبي.</p>
+        <p className="ktra-journal-empty">أدخل الأسطر والحسابات لعرض القيد المحاسبي.</p>
       ) : (
-        <table className="aseel-grid" data-variant="journal">
+        <table className="ktra-grid" data-variant="journal">
           <thead>
             <tr>
               <th>الحساب</th>
@@ -3198,20 +3198,20 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             {journalPreview.lines.map((l, i) => (
               <tr key={i}>
                 <td>{l.accountLabel}</td>
-                <td className="aseel-num">{l.debit > 0 ? fmt(l.debit) : "—"}</td>
-                <td className="aseel-num">{l.credit > 0 ? fmt(l.credit) : "—"}</td>
+                <td className="ktra-num">{l.debit > 0 ? fmt(l.debit) : "—"}</td>
+                <td className="ktra-num">{l.credit > 0 ? fmt(l.credit) : "—"}</td>
                 <td>{l.description || "—"}</td>
               </tr>
             ))}
-            <tr className="aseel-row--total">
+            <tr className="ktra-row--total">
               <td>الإجمالي</td>
-              <td className="aseel-num">{fmt(journalPreview.totalDebit)}</td>
-              <td className="aseel-num">{fmt(journalPreview.totalCredit)}</td>
+              <td className="ktra-num">{fmt(journalPreview.totalDebit)}</td>
+              <td className="ktra-num">{fmt(journalPreview.totalCredit)}</td>
               <td>
                 {journalPreview.balanced ? (
-                  <span className="aseel-ok-text">متوازن ✓</span>
+                  <span className="ktra-ok-text">متوازن ✓</span>
                 ) : (
-                  <span className="aseel-err-text">غير متوازن</span>
+                  <span className="ktra-err-text">غير متوازن</span>
                 )}
               </td>
             </tr>
@@ -3223,26 +3223,26 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   /* ───────────── تبويب: بيانات أخرى (تنبيهات الإعداد) ───────────── */
   const otherTab = (
-    <div className="aseel-other">
+    <div className="ktra-other">
       {revenueAccounts.length === 0 && (
-        <div className="aseel-note aseel-note--err">
+        <div className="ktra-note ktra-note--err">
           لا توجد حسابات إيراد (Revenue) في شجرة الحسابات. شغّل
           <code> python manage.py seed_professional_coa </code>
           لإنشاء شجرة الحسابات الاحترافية (يشمل حساب مبيعات 4101).
         </div>
       )}
       {invType === "cash" && cashboxAccounts.length === 0 && (
-        <div className="aseel-note aseel-note--warn">
+        <div className="ktra-note ktra-note--warn">
           لا توجد حسابات صناديق/بنوك (Asset بكود 1101/1102/1103 أو باسم يحتوي صندوق/بنك).
         </div>
       )}
       {salesTaxRates.length === 0 && (
-        <div className="aseel-note aseel-note--warn">
+        <div className="ktra-note ktra-note--warn">
           لا توجد نسب ضريبة مبيعات (direction=sales/both). يُنشأ تلقائياً سجل 16% بعد
           الترحيلات أو أضف من الإدارة.
         </div>
       )}
-      <label className="aseel-field aseel-field--inline">
+      <label className="ktra-field ktra-field--inline">
         <input
           type="checkbox"
           disabled={readOnly}
@@ -3252,11 +3252,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             markDirty();
           }}
         />
-        <span className="aseel-field-label" style={{ flex: "unset" }}>
+        <span className="ktra-field-label" style={{ flex: "unset" }}>
           خصم المخزون عند الترحيل (إن أُلغيَ يُخصم لاحقاً عند تسليم البنود)
         </span>
       </label>
-      <p className="aseel-hint">
+      <p className="ktra-hint">
         تُسجَّل القيود المحاسبية (عملاء/صندوق، مبيعات، ضريبة، تكلفة) عند «ترحيل» فقط، وليس
         عند «تخزين» المسودة.{stockOnPost ? "" : " (الخصم مؤجّل للتسليم.)"}
       </p>
@@ -3283,7 +3283,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     : `/sales/quotations?open=${source.id}`);
 
   const documentView = (
-    <AseelDocumentView<DraftLine>
+    <KitDocumentView<DraftLine>
       title={isReturn ? "مرجع بيع" : "فاتورة مبيعات"}
       subtitle={isReturn ? "SALES RETURN / CREDIT NOTE" : "SALES INVOICE"}
       documentNumber={invoiceNumber || (draftId ? `#${draftId}` : "مسودة")}
@@ -3354,7 +3354,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             value: (
               <button
                 type="button"
-                className="aseel-text-accent inline-flex items-center gap-1 hover:underline"
+                className="ktra-text-accent inline-flex items-center gap-1 hover:underline"
                 title={`فتح الفاتورة الأصلية ${originalInvoiceNumber || `#${originalInvoiceId}`}`}
                 onClick={() => openInNewTab(`/sales/invoices/${originalInvoiceId}`)}
               >
@@ -3375,7 +3375,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               <button
                 type="button"
                 data-testid="open-invoice-source"
-                className="aseel-text-accent inline-flex items-center gap-1 hover:underline"
+                className="ktra-text-accent inline-flex items-center gap-1 hover:underline"
                 title={`فتح المستند المصدر ${sourceDocument.number}`}
                 onClick={() => openInNewTab(sourceDocumentPath(sourceDocument))}
               >
@@ -3534,7 +3534,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       onSubmit={() => void submitCollect()}
       cashAccountField={(
         <AccountTreeField
-          className="aseel-input"
+          className="ktra-input"
           accounts={accounts}
           value={collectCashAccountId}
           disabled={collecting}
@@ -3554,7 +3554,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       dir="rtl"
       style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}
     >
-      <AseelDocumentShell
+      <KitDocumentShell
         gridFitContent={viewMode}
         title={isReturn ? "مرجع بيع" : "فاتورة مبيعات"}
         state={docState}
@@ -3580,7 +3580,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                       يفتح نافذة الإنشاء بالاسم معبّأً. زرّ «…» يُبقي فهرس
                       الحسابات الكامل (أعمدة + لوحة مفاتيح الأصيل) في متناول اليد. */}
                   <div className="flex-1 relative min-w-[120px]">
-                    <AseelAutocomplete
+                    <KitAutocomplete
                       value={selectedCustomer ? `#${selectedCustomer.id} - ${selectedCustomer.name}` : ""}
                       options={customerOptions}
                       onPick={(id) => pickCustomer(Number(id))}
@@ -3698,7 +3698,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                    </div>
                    <input
                     className="w-full bg-emerald-50/50 dark:bg-emerald-900/10 border border-emerald-300 dark:border-emerald-800/60 rounded px-2 py-0.5 pr-6 text-xs font-bold focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none placeholder:text-gray-400 placeholder:font-normal"
-                    data-aseel-field="barcode"
+                    data-ktra-field="barcode"
                     disabled={readOnly}
                     value={productFilter}
                     onChange={(e) => setProductFilter(e.target.value)}
@@ -3788,7 +3788,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             label: "ملاحظات",
             content: (
               <textarea
-                className="aseel-input"
+                className="ktra-input"
                 style={{ width: "100%", minHeight: "90px" }}
                 placeholder="ملاحظات الفاتورة…"
                 disabled={readOnly}
@@ -3848,14 +3848,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         ]}
         totals={viewMode ? undefined : (
           <>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>مجموع البنود (قبل الخصم)</span>
-              <span className="aseel-total-value">{fmt(grandSubtotalBeforeDiscount)}</span>
+              <span className="ktra-total-value">{fmt(grandSubtotalBeforeDiscount)}</span>
             </div>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>خصم الفاتورة</span>
               <input
-                className="aseel-input aseel-total-input"
+                className="ktra-input ktra-total-input"
                 type="number"
                 step="0.01"
                 min="0"
@@ -3867,28 +3867,28 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 }}
               />
             </div>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>المجموع قبل الضريبة</span>
-              <span className="aseel-total-value">{fmt(totals.subtotalExclTax)}</span>
+              <span className="ktra-total-value">{fmt(totals.subtotalExclTax)}</span>
             </div>
             {Number(discountPercent) > 0 && (
-              <div className="aseel-total-row">
+              <div className="ktra-total-row">
                 <span>خصم مكتسب %</span>
-                <span className="aseel-total-value">{discountPercent}%</span>
+                <span className="ktra-total-value">{discountPercent}%</span>
               </div>
             )}
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>الضريبة المضافة</span>
-              <span className="aseel-total-value">{fmt(totals.taxAmount)}</span>
+              <span className="ktra-total-value">{fmt(totals.taxAmount)}</span>
             </div>
             {profitVisible && journalPreview.revenue > 0 && journalPreview.cogs > 0 && (
-              <div className="aseel-total-row">
+              <div className="ktra-total-row">
                 <span>الربح الإجمالي</span>
                 <span
-                  className="aseel-total-value"
+                  className="ktra-total-value"
                   style={{
                     color:
-                      journalPreview.grossProfit >= 0 ? "var(--aseel-status-credit)" : "var(--aseel-status-debit)",
+                      journalPreview.grossProfit >= 0 ? "var(--ktra-status-credit)" : "var(--ktra-status-debit)",
                   }}
                 >
                   {fmt(journalPreview.grossProfit)} (
@@ -3903,16 +3903,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 const isCreditor = bal < -0.005;
                 const statusLabel = isDebtor ? "مدين" : isCreditor ? "دائن" : "متوازن";
                 const color = isDebtor
-                  ? "var(--aseel-status-debit)"
+                  ? "var(--ktra-status-debit)"
                   : isCreditor
-                  ? "var(--aseel-status-credit)"
-                  : "var(--aseel-ink-soft)";
+                  ? "var(--ktra-status-credit)"
+                  : "var(--ktra-ink-soft)";
                 const ledgerAcct = selectedCustomer?.linked_account ?? null;
                 const canDrill = Boolean(onOpenGeneralLedger && ledgerAcct);
                 return (
-                  <div className="aseel-total-row">
+                  <div className="ktra-total-row">
                     <span>رصيد العميل</span>
-                    <span className="aseel-total-value" style={{ color }}>
+                    <span className="ktra-total-value" style={{ color }}>
                       {canDrill ? (
                         <button
                           type="button"
@@ -3934,50 +3934,50 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               })()}
             {invType === "credit" && creditHint && (
               <div
-                className={`aseel-total-row ${
-                  creditHint.would_exceed ? "aseel-total-row--warn" : ""
+                className={`ktra-total-row ${
+                  creditHint.would_exceed ? "ktra-total-row--warn" : ""
                 }`}
               >
                 <span>
                   الرصيد بعد الفاتورة
                   {creditHint.would_exceed && (
-                    <span className="aseel-err-text ms-1">⚠ يتجاوز حد الائتمان</span>
+                    <span className="ktra-err-text ms-1">⚠ يتجاوز حد الائتمان</span>
                   )}
                 </span>
-                <span className="aseel-total-value">
+                <span className="ktra-total-value">
                   {fmt(Number(creditHint.projected_balance))}
                 </span>
               </div>
             )}
-            <div className="aseel-total-row aseel-total-row--grand">
+            <div className="ktra-total-row ktra-total-row--grand">
               <span>مبلغ الفاتورة الإجمالي <FieldHint hint="invoice.total" /></span>
-              <span className="aseel-total-value">{fmt(totals.grandTotal)}</span>
+              <span className="ktra-total-value">{fmt(totals.grandTotal)}</span>
             </div>
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>إجمالي الكمية</span>
-              <span className="aseel-total-value">{formatQuantity(totalQty)}</span>
+              <span className="ktra-total-value">{formatQuantity(totalQty)}</span>
             </div>
 
             {/* T-ONEPAY: المحصَّل = سندات قبض مرحّلة فقط (لا خانات إدخال هنا). */}
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>المحصَّل</span>
-              <span className="aseel-total-value">{fmt(paidAmount)}</span>
+              <span className="ktra-total-value">{fmt(paidAmount)}</span>
             </div>
 
             {/* T-INTENT: الدفعة المسجَّلة على المسودة تُعرَض موسومةً بأنها لم
                 تدخل الدفاتر — لا تُخلط بالمحصَّل ولا تُخفى عن صاحبها. */}
             {settlement.pendingIntent > 0.009 && (
-              <div className="aseel-total-row">
+              <div className="ktra-total-row">
                 <span>دفعة غير مرحّلة</span>
-                <span className="aseel-total-value text-amber-600">
+                <span className="ktra-total-value text-amber-600">
                   {fmt(settlement.pendingIntent)}
                 </span>
               </div>
             )}
 
-            <div className="aseel-total-row">
+            <div className="ktra-total-row">
               <span>المتبقي على الحساب</span>
-              <span className="aseel-total-value">
+              <span className="ktra-total-value">
                 {fmt(settlement.remainingAfterIntent)}
               </span>
             </div>
@@ -3985,29 +3985,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         )}
         status={
           <>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               المستخدم <b>{currentUserName || "—"}</b>
             </span>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               رقم القيد <b>{postedJournalId ?? "—"}</b>
             </span>
             {/* THA-132: «رقم الحركة» المخزنية بجانب رقم القيد — سلوك الأصيل
                 نفسه (`invoices.txt`: «رقم الحركة المخزنية المسلسل… يمكن
                 استخدام هذا الحقل للاستعلام عن الحركات»). يُملأ من تبويب حركة
                 المخزون حين يُفتح، فلا يكلّف فتحَ الفاتورة نداءً. */}
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               رقم الحركة <b>{stockMovementNo ?? "—"}</b>
             </span>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               الحالة <b>{isPosted ? "مرحّلة" : draftId ? "مسودة" : "جديدة"}</b>
             </span>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               السجل <b>{nav.position}/{nav.total}</b>
             </span>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               آخر مفتاح <b>{lastKey}</b>
             </span>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               {readOnly ? "للقراءة فقط" : "قابل للتعديل ✓"}
             </span>
           </>
@@ -4021,7 +4021,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         {viewMode && documentView}
         {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}
         <div style={{ flex: 1, minWidth: 0, display: viewMode ? "none" : "flex", flexDirection: "column", gap: "8px" }}>
-            <AseelGrid<DraftLine>
+            <KitGrid<DraftLine>
               columns={gridColumns}
               rows={lines}
               getCell={gridGetCell}
@@ -4035,7 +4035,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               // الزرّ يبقى ممتداً كما كان (`flex-1`)، و«؟» بجانبه تشرح الجدول
               // كلّه — فهذا مدخل البنود لا زرٌّ ثانوي.
               <div className="flex items-center gap-1">
-                <button type="button" className="aseel-addrow flex-1" onClick={addRow}>
+                <button type="button" className="ktra-addrow flex-1" onClick={addRow}>
                   <Plus className="h-3 w-3" /> إضافة سطر
                 </button>
                 <FieldHint hint="invoice.lines" />
@@ -4044,12 +4044,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
             {/* INLINE FOOTER: الملاحظات. خلاصة التحصيل وخاناته انتقلت إلى لوحة
                 التحصيل أسفلَه — لتظهر في وضع العرض أيضاً (فاتورة مرحّلة). */}
-            <div style={{ display: "flex", gap: "16px", background: "var(--aseel-panel)", padding: "8px", border: "1px solid var(--aseel-border)" }}>
+            <div style={{ display: "flex", gap: "16px", background: "var(--ktra-panel)", padding: "8px", border: "1px solid var(--ktra-border)" }}>
               <div style={{ flex: 1 }}>
-                <label className="aseel-field">
-                  <span className="aseel-field-label">الملاحظات <FieldHint hint="invoice.notes" /></span>
+                <label className="ktra-field">
+                  <span className="ktra-field-label">الملاحظات <FieldHint hint="invoice.notes" /></span>
                   <textarea
-                    className="aseel-input"
+                    className="ktra-input"
                     rows={2}
                     disabled={readOnly}
                     value={notes}
@@ -4063,20 +4063,20 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             </div>
             {/* Warnings */}
             {revenueAccounts.length === 0 && (
-              <div className="aseel-note aseel-note--err">لا توجد حسابات إيراد. شغّل seed_professional_coa.</div>
+              <div className="ktra-note ktra-note--err">لا توجد حسابات إيراد. شغّل seed_professional_coa.</div>
             )}
             {salesTaxRates.length === 0 && (
-              <div className="aseel-note aseel-note--warn">لا توجد نسبة ضريبة مبيعات مسجلة في الإعدادات.</div>
+              <div className="ktra-note ktra-note--warn">لا توجد نسبة ضريبة مبيعات مسجلة في الإعدادات.</div>
             )}
           </div>
         {/* T4: لوحة التحصيل خارج حاوية الإدخال قصداً — الفاتورة المرحّلة تُفتح في
             وضع العرض حيث تلك الحاوية مخفيّة، وتحصيلها من هنا نفسه. */}
         {paymentsSection}
         {collectPanel}
-      </AseelDocumentShell>
+      </KitDocumentShell>
 
       {/* فهرس الحسابات (العميل) */}
-      <AseelIndexPicker<PartnerRow>
+      <KitIndexPicker<PartnerRow>
         open={customerPickerOpen}
         title="فهرس الحسابات — العملاء"
         rows={customers}

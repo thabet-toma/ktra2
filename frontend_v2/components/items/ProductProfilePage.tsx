@@ -2,13 +2,13 @@
  * FEAT-3 — ProductProfilePage: مسار كرت الصنف (`/products/:id`).
  *
  * كان صفحةً منفصلة عن نموذج التحرير، فصار للصنف كرتان: واحد يُعرض وآخر يُعدَّل.
- * الآن هذه الصفحة غلاف رقيق فوق الكرت الموحّد `ItemFormAseel` — نفس الشاشة التي
+ * الآن هذه الصفحة غلاف رقيق فوق الكرت الموحّد `ItemForm` — نفس الشاشة التي
  * تفتحها شاشة الأصناف للتعديل والإضافة، بتبويباتها القرائية (نظرة عامة/الفواتير/
  * حركة المخزون) وتحريرها في مكان واحد.
  */
 import React, { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ItemFormAseel } from './ItemFormAseel';
+import { ItemForm } from './ItemForm';
 import { openInNewTab } from '../../utils/openInNewTab';
 import { useAppBack } from '../../hooks/useAppBack';
 
@@ -39,12 +39,12 @@ export const ProductProfilePage: React.FC = () => {
   );
 
   if (!Number.isFinite(id)) {
-    return <div className="p-4 text-[var(--aseel-danger,#c00)]">معرّف صنف غير صالح.</div>;
+    return <div className="p-4 text-[var(--ktra-danger,#c00)]">معرّف صنف غير صالح.</div>;
   }
 
   return (
     <div className="min-h-[calc(100vh-5rem)]">
-      <ItemFormAseel
+      <ItemForm
         productId={id}
         products={[]}
         initialTab={initialTab}

@@ -9,7 +9,7 @@ import { resolveTenantId } from '../utils/tenantContext';
  * شركة: يُحفَظ per-company فيثبت عبر الأجهزة ولا يرجع للافتراضي عند إعادة فتح
  * الموقع، ومعزول لكل شركة لا للمنصة كلها. يُبقى cache محلي مفتاحه رقم الشركة
  * للتطبيق الفوري قبل رد الخادم. يُطبَّق بضبط متغيّرات CSS على <html> فيسري على
- * الواجهة العامة (rem مرتكز على html) وسكِن «الأصيل» (--aseel-*) معاً.
+ * الواجهة العامة (rem مرتكز على html) وسكِن «الأصيل» (--ktra-*) معاً.
  * يُضبط من صفحة الإعدادات (قسم «الخط»).
  */
 const SCALE_KEY = 'ktra_font_scale';
@@ -91,14 +91,14 @@ const applyAppearance = (scale: FontScale, family: FontFamilyId): void => {
   const stack = FONT_STACK[family] ?? FONT_STACK.default;
   // نوع الخط: للواجهة العامة وسكِن الأصيل.
   root.style.setProperty('--font-family-base', stack);
-  root.style.setProperty('--aseel-font', stack);
+  root.style.setProperty('--ktra-font', stack);
   // الحجم: مرتكز rem العام (html أصله 16px) يُكبّر كل الأحجام النسبية.
   root.style.fontSize = `${16 * factor}px`;
   // متغيّرات الأصيل بالبكسل (لا تتبع rem) تُكبَّر يدوياً بنفس النسبة.
-  root.style.setProperty('--aseel-fs', `${12 * factor}px`);
-  root.style.setProperty('--aseel-fs-sm', `${11 * factor}px`);
-  root.style.setProperty('--aseel-fs-base', `${13 * factor}px`);
-  root.style.setProperty('--aseel-fs-title', `${14 * factor}px`);
+  root.style.setProperty('--ktra-fs', `${12 * factor}px`);
+  root.style.setProperty('--ktra-fs-sm', `${11 * factor}px`);
+  root.style.setProperty('--ktra-fs-base', `${13 * factor}px`);
+  root.style.setProperty('--ktra-fs-title', `${14 * factor}px`);
 };
 
 export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

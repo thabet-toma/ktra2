@@ -1,5 +1,5 @@
 /**
- * N6-T1 — DealManagement (L1) — AseelDenseTable لإدارة الصفقات
+ * N6-T1 — DealManagement (L1) — KitDenseTable لإدارة الصفقات
  * المرجع: task5.md:795 + الإرساليات.txt:1-34
  */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -17,12 +17,12 @@ import { quotationToDraftDeal } from '../../utils/quotationToDraftDeal';
 import { CreateShipmentFromDealsModal } from '../import-flow/CreateShipmentFromDealsModal';
 import { FirstDealWizard } from './deals/FirstDealWizard';
 import { Sparkles } from 'lucide-react';
-import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
-import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
+import { KitDenseTable, type DenseColumn } from '../kit/KitDenseTable';
+import { useKitIndexKeymap } from '../kit/useKitIndexKeymap';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { useToast } from '../../contexts/ToastContext';
 import { getShippingWorkflowLabel } from '../../utils/shippingWorkflowLabels';
-import { AseelErrorState } from '../aseel';
+import { KitErrorState } from '../kit';
 
 interface DealManagementProps {
     currentUser: User;
@@ -47,10 +47,10 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-    initial:   'var(--aseel-ink-soft)',
-    shipped:   'var(--aseel-accent, #1857a4)',
-    completed: 'var(--aseel-ok, #267346)',
-    cancelled: 'var(--aseel-danger, #c00)',
+    initial:   'var(--ktra-ink-soft)',
+    shipped:   'var(--ktra-accent, #1857a4)',
+    completed: 'var(--ktra-ok, #267346)',
+    cancelled: 'var(--ktra-danger, #c00)',
 };
 
 import { formatMoney } from "@/utils/formatNumber";
@@ -67,14 +67,14 @@ const fmtDate = (s: string | undefined) => {
  * خلية نصّ حرّ (اسم المورد، وصف الصفقة): سطر واحد مقصوص بـ«…» والنصّ الكامل في
  * التلميح. بلا قيدٍ صريح كان وصفٌ طويل واحد يبتلع عرض «الحالة» و«المرحلة»
  * ويكسر الصفّ على سطرين — والقيد يقع هنا لا على `<td>` لأن الجدول تلقائي العرض
- * (`.aseel-cell-clip` في `styles/index.css` يشرح السبب).
+ * (`.ktra-cell-clip` في `styles/index.css` يشرح السبب).
  */
 const ClippedCell: React.FC<{ text: string; maxWidth: number; muted?: boolean }> = ({
     text, maxWidth, muted,
 }) => (
     <span
-        className="aseel-cell-clip"
-        style={{ maxWidth, color: muted ? 'var(--aseel-ink-soft)' : undefined }}
+        className="ktra-cell-clip"
+        style={{ maxWidth, color: muted ? 'var(--ktra-ink-soft)' : undefined }}
         title={text}
     >
         {text}
@@ -427,7 +427,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                             }}
                             title="فتح الفاتورة الناتجة عن الصفقة"
                             style={{
-                                color: 'var(--aseel-accent, #2563eb)',
+                                color: 'var(--ktra-accent, #2563eb)',
                                 textDecoration: 'underline',
                                 fontWeight: 500,
                                 fontSize: '0.72rem',
@@ -448,7 +448,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
             header: 'المرحلة',
             width: '150px',
             render: (d) => (
-                <span style={{ color: 'var(--aseel-ink-soft)' }} title="مرحلة الشحن والتصنيع (مصدر الحقيقة التشغيلي)">
+                <span style={{ color: 'var(--ktra-ink-soft)' }} title="مرحلة الشحن والتصنيع (مصدر الحقيقة التشغيلي)">
                     {d.status === 'cancelled' || !d.shippingWorkflowStatus ? '—' : getShippingWorkflowLabel(d.shippingWorkflowStatus)}
                 </span>
             ),
@@ -471,7 +471,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
             render: (d) => {
                 const rem = d.remainingAmount || 0;
                 return (
-                    <span style={{ fontFamily: 'monospace', color: rem > 0 ? 'var(--aseel-warn, #b8800a)' : 'var(--aseel-ok, #267346)' }}>
+                    <span style={{ fontFamily: 'monospace', color: rem > 0 ? 'var(--ktra-warn, #b8800a)' : 'var(--ktra-ok, #267346)' }}>
                         ${fmtAmt(rem)}
                     </span>
                 );
@@ -492,7 +492,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
             render: (d) => (
                 <span style={{ display: 'inline-flex', gap: 2 }}>
                     <button
-                        className="aseel-toolbtn"
+                        className="ktra-toolbtn"
                         style={{ padding: '2px 4px' }}
                         onClick={(e) => { e.stopPropagation(); setDealToPrint(d); }}
                         title="طباعة"
@@ -500,8 +500,8 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                         <Printer style={{ width: 13, height: 13 }} />
                     </button>
                     <button
-                        className="aseel-toolbtn"
-                        style={{ padding: '2px 4px', color: 'var(--aseel-danger, #c00)' }}
+                        className="ktra-toolbtn"
+                        style={{ padding: '2px 4px', color: 'var(--ktra-danger, #c00)' }}
                         onClick={(e) => { e.stopPropagation(); void handleDelete(d.id); }}
                         title="حذف"
                     >
@@ -513,7 +513,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     ];
 
     // N0-T7 — keymap على قائمة الصفقات (list mode فقط)
-    useAseelIndexKeymap(
+    useKitIndexKeymap(
         {
             CtrlIns: handleCreateNew,
             F6: () => searchInputRef.current?.focus(),
@@ -524,7 +524,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
 
     if (loading) return <LoadingSpinner />;
     if (loadError && deals.length === 0) {
-        return <AseelErrorState message={loadError} onRetry={() => {
+        return <KitErrorState message={loadError} onRetry={() => {
             setLoading(true);
             setReloadKey((key) => key + 1);
         }} />;
@@ -571,19 +571,19 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     return (
         <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
             {/* شريط العنوان والأدوات */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
-                <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--ktra-border)' }}>
+                <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>
                     إدارة الصفقات
                 </strong>
-                <span className="aseel-status-item">الإجمالي: <b>{stats.total}</b></span>
-                <span className="aseel-status-item">نشطة: <b>{stats.active}</b></span>
-                <span className="aseel-status-item">مكتمل: <b>{stats.completed}</b></span>
-                <span className="aseel-status-item">القيمة: <b>${(stats.totalValue / 1000).toFixed(1)}K</b></span>
+                <span className="ktra-status-item">الإجمالي: <b>{stats.total}</b></span>
+                <span className="ktra-status-item">نشطة: <b>{stats.active}</b></span>
+                <span className="ktra-status-item">مكتمل: <b>{stats.completed}</b></span>
+                <span className="ktra-status-item">القيمة: <b>${(stats.totalValue / 1000).toFixed(1)}K</b></span>
                 <div style={{ flex: 1 }} />
                 {/* بحث (F6 = focus) */}
                 <input
                     ref={searchInputRef}
-                    className="aseel-input aseel-print-hidden"
+                    className="ktra-input ktra-print-hidden"
                     style={{ width: 200 }}
                     placeholder="بحث برقم الصفقة، المورد، المنتج… (F6)"
                     value={search}
@@ -591,7 +591,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 />
                 {/* فلتر الحالة */}
                 <select
-                    className="aseel-input aseel-print-hidden"
+                    className="ktra-input ktra-print-hidden"
                     style={{ width: 150 }}
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
@@ -602,14 +602,14 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                     ))}
                 </select>
                 <button
-                    className="aseel-toolbtn aseel-print-hidden"
+                    className="ktra-toolbtn ktra-print-hidden"
                     onClick={() => { setSearch(''); setStatusFilter('all'); void reloadDeals(); }}
                     title="تحديث القائمة وإعادة تعيين الفلاتر"
                 >
                     <RefreshCw style={{ width: 14, height: 14 }} />
                 </button>
                 <button
-                    className="aseel-toolbtn aseel-print-hidden"
+                    className="ktra-toolbtn ktra-print-hidden"
                     onClick={() => setIsOfferModalOpen(true)}
                     title="إنشاء من عرض سعر"
                 >
@@ -618,21 +618,21 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                     من عرض
                 </button>
                 <button
-                    className="aseel-toolbtn aseel-print-hidden"
+                    className="ktra-toolbtn ktra-print-hidden"
                     onClick={() => setIsShipmentModalOpen(true)}
                     title="إنشاء شحنة من صفقات جاهزة للشحن (اختيار متعدد)"
                 >
                     <Ship style={{ width: 14, height: 14 }} /> شحنة من الصفقات
                 </button>
                 <button
-                    className="aseel-toolbtn aseel-print-hidden"
+                    className="ktra-toolbtn ktra-print-hidden"
                     onClick={() => setShowWizard(true)}
                     title="معالِج موجّه لإنشاء أول صفقة (3 خطوات مبسّطة)"
                 >
                     <Sparkles style={{ width: 14, height: 14 }} /> معالِج الصفقة
                 </button>
                 <button
-                    className="aseel-toolbtn aseel-print-hidden"
+                    className="ktra-toolbtn ktra-print-hidden"
                     onClick={handleCreateNew}
                     title="صفقة جديدة (Ctrl+Ins)"
                 >
@@ -641,7 +641,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
             </div>
 
             {/* جدول الصفقات */}
-            <AseelDenseTable<Deal>
+            <KitDenseTable<Deal>
                 columns={columns}
                 rows={filteredDeals}
                 getRowKey={(d) => d.id}
@@ -650,7 +650,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 onRowDoubleClick={(d) => openDeal(d)}
                 footer={
                     filteredDeals.length > 0 ? (
-                        <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: 'var(--ktra-fs-sm)' }}>
                             إجمالي: <b>${fmtAmt(filteredDeals.reduce((s, d) => s + (d.totalAmount || 0), 0))}</b>
                             {' • '}
                             متبقي: <b>${fmtAmt(filteredDeals.reduce((s, d) => s + (d.remainingAmount || 0), 0))}</b>
@@ -659,7 +659,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 }
             />
             {hasNextPage && (
-                <button className="aseel-toolbtn aseel-print-hidden" onClick={() => void loadMoreDeals()}>
+                <button className="ktra-toolbtn ktra-print-hidden" onClick={() => void loadMoreDeals()}>
                     تحميل المزيد ({deals.length} من {totalCount})
                 </button>
             )}

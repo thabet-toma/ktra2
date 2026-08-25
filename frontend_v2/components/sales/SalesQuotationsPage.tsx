@@ -33,8 +33,8 @@ import { formatQuantity } from "../../utils/formatNumber";
 import type { SqlProduct } from "../../types/inventory";
 import {
   useRecordNavigation,
-  useAseelKeymap,
-} from "../aseel";
+  useKitKeymap,
+} from "../kit";
 import { ShareDocumentModal } from "../shared/ShareDocumentModal";
 import { SalesProductPickerModal, type SalesProductPickerItem, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { SalesOrdersPage } from "./SalesOrdersPage";
@@ -137,7 +137,7 @@ export const SalesQuotationsPage: React.FC = () => {
     [customerPriceMap]
   );
 
-  // Aseel Navigation
+  // Kit Navigation
   const [showPartnerPicker, setShowPartnerPicker] = useState(false);
 
   // تحميل عرض سعر وفتح نموذجه (يعرض البنود) — مصدر واحد يخدم «تعديل» ورقم العرض
@@ -218,12 +218,12 @@ export const SalesQuotationsPage: React.FC = () => {
     } catch { /* تجاهل — تبقى الرسالة «جارٍ التحميل» ثم تُعاد المحاولة عند الطيّ/الفتح */ }
   }, [expandedLines, products]);
 
-  // M4-T5: Aseel keyboard shortcuts — real handlers.
-  useAseelKeymap({
+  // M4-T5: Kit keyboard shortcuts — real handlers.
+  useKitKeymap({
     F2: () => window.print(),
     F5: () => loadQuotations(),
     F6: () => {
-      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      const el = document.querySelector<HTMLInputElement>('[data-ktra-field="search"]');
       el?.focus();
     },
     F12: () => handleSave(),
@@ -233,7 +233,7 @@ export const SalesQuotationsPage: React.FC = () => {
       setSelectedId(null);
     },
     plus: () => {
-      if (document.activeElement?.getAttribute('data-aseel-key') === '1') {
+      if (document.activeElement?.getAttribute('data-ktra-key') === '1') {
         setShowPartnerPicker(true);
       }
     },
@@ -465,15 +465,15 @@ export const SalesQuotationsPage: React.FC = () => {
 
   const statusColor = (s: string) => {
     const map: Record<string, string> = {
-      draft: "aseel-bg-panel aseel-text-ink",
-      sent: "aseel-bg-accent-bg aseel-text-accent",
+      draft: "ktra-bg-panel ktra-text-ink",
+      sent: "ktra-bg-accent-bg ktra-text-accent",
       accepted: "bg-green-100 text-green-700",
-      rejected: "aseel-bg-panel aseel-text-state",
-      converted: "aseel-bg-panel aseel-text-ink",
+      rejected: "ktra-bg-panel ktra-text-state",
+      converted: "ktra-bg-panel ktra-text-ink",
       cancelled: "bg-amber-100 text-amber-700",
-      expired: "aseel-bg-panel aseel-text-soft",
+      expired: "ktra-bg-panel ktra-text-soft",
     };
-    return map[s] || "aseel-bg-panel aseel-text-ink";
+    return map[s] || "ktra-bg-panel ktra-text-ink";
   };
 
   const subtotal = formLines.reduce((s, l) => s + (Number(l.total) || 0), 0);
@@ -530,32 +530,32 @@ export const SalesQuotationsPage: React.FC = () => {
     {
       key: "number",
       label: "رقم العرض",
-      control: <input className="aseel-input aseel-input--hl" readOnly
+      control: <input className="ktra-input ktra-input--hl" readOnly
         value={selectedQuotation?.quotation_number || (selectedId ? `#${selectedId}` : "تلقائي")} />,
     },
     {
       key: "date",
       label: "التاريخ",
-      control: <input className="aseel-input" type="date" value={formDate}
+      control: <input className="ktra-input" type="date" value={formDate}
         onChange={(event) => setFormDate(event.target.value)} />,
     },
     {
       key: "validUntil",
       label: "صالح حتى",
-      control: <input className="aseel-input" type="date" value={formValidUntil}
+      control: <input className="ktra-input" type="date" value={formValidUntil}
         onChange={(event) => setFormValidUntil(event.target.value)} />,
     },
     {
       key: "type",
       label: "نوع المستند",
-      control: <input className="aseel-input" readOnly value="عرض سعر صادر للزبون" />,
+      control: <input className="ktra-input" readOnly value="عرض سعر صادر للزبون" />,
     },
     {
       key: "customer",
       label: "الزبون / الحساب",
       control: (
-        <select className="aseel-input" value={formCustomer}
-          onChange={(event) => setFormCustomer(event.target.value)} data-aseel-key="1">
+        <select className="ktra-input" value={formCustomer}
+          onChange={(event) => setFormCustomer(event.target.value)} data-ktra-key="1">
           <option value="">— اختر الزبون —</option>
           {partners.map((partner) => (
             <option key={partner.id} value={partner.id}>{partner.name}</option>
@@ -566,25 +566,25 @@ export const SalesQuotationsPage: React.FC = () => {
     {
       key: "customerName",
       label: "الاسم",
-      control: <input className="aseel-input" readOnly
+      control: <input className="ktra-input" readOnly
         value={partners.find((partner) => String(partner.id) === formCustomer)?.name || ""} />,
     },
     {
       key: "address",
       label: "عنوان الزبون",
-      control: <input className="aseel-input" value={formCustomerAddress}
+      control: <input className="ktra-input" value={formCustomerAddress}
         onChange={(event) => setFormCustomerAddress(event.target.value)} />,
     },
     {
       key: "taxNumber",
       label: "الرقم الضريبي",
-      control: <input className="aseel-input font-mono" value={formCustomerTaxNumber}
+      control: <input className="ktra-input font-mono" value={formCustomerTaxNumber}
         onChange={(event) => setFormCustomerTaxNumber(event.target.value)} />,
     },
     {
       key: "status",
       label: "الحالة",
-      control: <input className="aseel-input" readOnly
+      control: <input className="ktra-input" readOnly
         value={selectedQuotation ? statusLabel(selectedQuotation.status) : "مسودة"} />,
     },
   ];
@@ -597,10 +597,10 @@ export const SalesQuotationsPage: React.FC = () => {
       render: (line, index) => (
         <button type="button" className="flex w-full items-center justify-between gap-2 px-1 text-right"
           onClick={() => setProductPickerLineIdx(index)}>
-          <span className={line.product_name ? "aseel-text-ink" : "aseel-text-soft"}>
+          <span className={line.product_name ? "ktra-text-ink" : "ktra-text-soft"}>
             {line.product_name || "اختر صنفاً…"}
           </span>
-          <span className="aseel-text-accent">…</span>
+          <span className="ktra-text-accent">…</span>
         </button>
       ),
     },
@@ -615,7 +615,7 @@ export const SalesQuotationsPage: React.FC = () => {
       width: "36px",
       align: "center",
       render: (_line, index) => (
-        <button type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+        <button type="button" className="ktra-iconbtn ktra-iconbtn--danger"
           onClick={() => handleRemoveLine(index)} title="حذف السطر">
           <Trash2 className="h-3 w-3" />
         </button>
@@ -628,7 +628,7 @@ export const SalesQuotationsPage: React.FC = () => {
       header: "رقم العرض",
       width: "130px",
       render: (quotation) => (
-        <button type="button" className="aseel-text-accent hover:underline"
+        <button type="button" className="ktra-text-accent hover:underline"
           onClick={() => void toggleExpand(quotation.id)}>
           {expandedId === quotation.id ? "▾ " : "▸ "}{quotation.quotation_number}
         </button>
@@ -655,7 +655,7 @@ export const SalesQuotationsPage: React.FC = () => {
       width: "210px",
       render: (quotation) => (
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <button onClick={() => void openQuotation(quotation.id)} className="aseel-text-accent hover:underline">تعديل</button>
+          <button onClick={() => void openQuotation(quotation.id)} className="ktra-text-accent hover:underline">تعديل</button>
           <button onClick={() => setShareId(quotation.id)} className="text-blue-600 hover:underline">مشاركة</button>
           {quotation.status !== "converted" && quotation.status !== "cancelled" && (
             <>
@@ -664,7 +664,7 @@ export const SalesQuotationsPage: React.FC = () => {
             </>
           )}
           {allowDelete && (
-            <button onClick={() => void handleDelete(quotation.id)} className="aseel-text-state hover:underline">حذف</button>
+            <button onClick={() => void handleDelete(quotation.id)} className="ktra-text-state hover:underline">حذف</button>
           )}
         </div>
       ),
@@ -694,13 +694,13 @@ export const SalesQuotationsPage: React.FC = () => {
         getLineKey={(line, index) => line.id ?? `new-${index}`}
         onLineChange={(index, key, value) => handleLineChange(index, key, value)}
         onAddLine={handleAddLine}
-        banner={err ? <div className="aseel-banner aseel-banner--err">{err}</div> : undefined}
+        banner={err ? <div className="ktra-banner ktra-banner--err">{err}</div> : undefined}
         tabs={[
           {
             key: "notes",
             label: "الملاحظات",
             content: <div className="px-1 py-2">
-              <textarea className="aseel-input w-full" rows={4} value={formNotes}
+              <textarea className="ktra-input w-full" rows={4} value={formNotes}
                 onChange={(event) => setFormNotes(event.target.value)} placeholder="ملاحظات العرض…" />
             </div>,
           },
@@ -719,22 +719,22 @@ export const SalesQuotationsPage: React.FC = () => {
                 الأسعار تشمل ض.ق.م
               </label>
               {formValidUntil && new Date(formValidUntil) < new Date() && (
-                <span className="text-xs font-semibold aseel-text-state">منتهي الصلاحية</span>
+                <span className="text-xs font-semibold ktra-text-state">منتهي الصلاحية</span>
               )}
             </div>,
           },
         ]}
         totals={
           <>
-            <div className="aseel-total-row"><span>مجموع البنود</span><span className="aseel-total-value">{grossSubtotal.toLocaleString()}</span></div>
-            <div className="aseel-total-row"><span>الخصم</span><span className="aseel-total-value">{lineDiscountTotal.toLocaleString()}</span></div>
-            <div className="aseel-total-row"><span>الضريبة</span><span className="aseel-total-value">{taxTotal.toLocaleString()}</span></div>
-            <div className="aseel-total-row aseel-total-row--grand"><span>إجمالي العرض</span><span className="aseel-total-value">{subtotal.toLocaleString()}</span></div>
+            <div className="ktra-total-row"><span>مجموع البنود</span><span className="ktra-total-value">{grossSubtotal.toLocaleString()}</span></div>
+            <div className="ktra-total-row"><span>الخصم</span><span className="ktra-total-value">{lineDiscountTotal.toLocaleString()}</span></div>
+            <div className="ktra-total-row"><span>الضريبة</span><span className="ktra-total-value">{taxTotal.toLocaleString()}</span></div>
+            <div className="ktra-total-row ktra-total-row--grand"><span>إجمالي العرض</span><span className="ktra-total-value">{subtotal.toLocaleString()}</span></div>
           </>
         }
         status={<>
-          <span className="aseel-status-item">عدد الأصناف <b>{formLines.length}</b></span>
-          <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+          <span className="ktra-status-item">عدد الأصناف <b>{formLines.length}</b></span>
+          <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
         </>}
         overlay={<>
           {shareModal}
@@ -762,13 +762,13 @@ export const SalesQuotationsPage: React.FC = () => {
   }
 
   const detailPanel = expandedId != null ? (
-    <div className="border-t aseel-border-soft p-3">
+    <div className="border-t ktra-border-soft p-3">
       {!expandedLines[expandedId] ? (
-        <div className="text-xs aseel-text-soft">جارٍ تحميل البنود…</div>
+        <div className="text-xs ktra-text-soft">جارٍ تحميل البنود…</div>
       ) : expandedLines[expandedId].length === 0 ? (
-        <div className="text-xs aseel-text-soft">لا بنود في هذا العرض.</div>
+        <div className="text-xs ktra-text-soft">لا بنود في هذا العرض.</div>
       ) : (
-        <table className="aseel-grid text-xs" data-variant="list">
+        <table className="ktra-grid text-xs" data-variant="list">
           <thead><tr><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
           <tbody>
             {expandedLines[expandedId].map((line, index) => (

@@ -85,8 +85,8 @@ export const BranchSwitcher: React.FC = () => {
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-[var(--aseel-panel)] border border-[var(--aseel-border-soft)] hover:bg-[var(--aseel-panel-hover)] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--aseel-accent)]"
-        style={{ color: "var(--aseel-ink)" }}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg bg-[var(--ktra-panel)] border border-[var(--ktra-border-soft)] hover:bg-[var(--ktra-panel-hover)] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--ktra-accent)]"
+        style={{ color: "var(--ktra-ink)" }}
         title="الفرع النشط"
       >
         <GitBranch className="w-3.5 h-3.5 opacity-70" />
@@ -95,8 +95,8 @@ export const BranchSwitcher: React.FC = () => {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-1.5 w-56 rounded-xl shadow-xl bg-[var(--aseel-bg)] border border-[var(--aseel-border)] z-50 overflow-hidden">
-          <div className="px-4 py-2 bg-[var(--aseel-panel)] border-b border-[var(--aseel-border-soft)]">
+        <div className="absolute right-0 mt-1.5 w-56 rounded-xl shadow-xl bg-[var(--ktra-bg)] border border-[var(--ktra-border)] z-50 overflow-hidden">
+          <div className="px-4 py-2 bg-[var(--ktra-panel)] border-b border-[var(--ktra-border-soft)]">
             <span className="text-[11px] font-bold tracking-wider uppercase opacity-60">فروع الشركة</span>
           </div>
 
@@ -104,12 +104,12 @@ export const BranchSwitcher: React.FC = () => {
             <button
               type="button"
               onClick={() => selectBranch(null)}
-              className={`w-full flex items-center justify-between px-4 py-2 text-xs text-right hover:bg-[var(--aseel-panel-hover)] ${activeBranchId == null ? "font-bold" : ""}`}
+              className={`w-full flex items-center justify-between px-4 py-2 text-xs text-right hover:bg-[var(--ktra-panel-hover)] ${activeBranchId == null ? "font-bold" : ""}`}
             >
-              <span style={{ color: activeBranchId == null ? "var(--aseel-accent)" : "var(--aseel-ink)" }}>
+              <span style={{ color: activeBranchId == null ? "var(--ktra-accent)" : "var(--ktra-ink)" }}>
                 كل الفروع (مستوى الشركة)
               </span>
-              {activeBranchId == null && <Check className="w-3.5 h-3.5 text-[var(--aseel-accent)]" />}
+              {activeBranchId == null && <Check className="w-3.5 h-3.5 text-[var(--ktra-accent)]" />}
             </button>
             {branches.map((b) => {
               const isActive = b.id === activeBranchId;
@@ -118,27 +118,27 @@ export const BranchSwitcher: React.FC = () => {
                   key={b.id}
                   type="button"
                   onClick={() => selectBranch(b.id)}
-                  className={`w-full flex items-center justify-between px-4 py-2 text-xs text-right hover:bg-[var(--aseel-panel-hover)] ${isActive ? "font-bold" : ""}`}
+                  className={`w-full flex items-center justify-between px-4 py-2 text-xs text-right hover:bg-[var(--ktra-panel-hover)] ${isActive ? "font-bold" : ""}`}
                 >
-                  <span style={{ color: isActive ? "var(--aseel-accent)" : "var(--aseel-ink)" }}>
+                  <span style={{ color: isActive ? "var(--ktra-accent)" : "var(--ktra-ink)" }}>
                     {b.name}
                     <span className="opacity-50 mr-1">[{b.code}]</span>
                     {b.is_main && <span className="opacity-50 mr-1">— رئيسي</span>}
                   </span>
-                  {isActive && <Check className="w-3.5 h-3.5 text-[var(--aseel-accent)]" />}
+                  {isActive && <Check className="w-3.5 h-3.5 text-[var(--ktra-accent)]" />}
                 </button>
               );
             })}
           </div>
 
-          <div className="border-t border-[var(--aseel-border-soft)] p-1.5 bg-[var(--aseel-panel)]">
+          <div className="border-t border-[var(--ktra-border-soft)] p-1.5 bg-[var(--ktra-panel)]">
             <button
               type="button"
               onClick={() => {
                 setShowModal(true);
                 setIsOpen(false);
               }}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white rounded-lg bg-[var(--aseel-accent)] hover:opacity-90 transition-opacity"
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-white rounded-lg bg-[var(--ktra-accent)] hover:opacity-90 transition-opacity"
             >
               <Plus className="w-3 h-3" />
               <span>إضافة فرع</span>
@@ -150,21 +150,21 @@ export const BranchSwitcher: React.FC = () => {
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
           <div
-            className="w-full max-w-sm rounded-2xl bg-[var(--aseel-bg)] border border-[var(--aseel-border)] shadow-2xl p-5"
+            className="w-full max-w-sm rounded-2xl bg-[var(--ktra-bg)] border border-[var(--ktra-border)] shadow-2xl p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-base font-bold" style={{ color: "var(--aseel-ink)" }}>إضافة فرع جديد</h3>
+              <h3 className="text-base font-bold" style={{ color: "var(--ktra-ink)" }}>إضافة فرع جديد</h3>
               <button
                 type="button"
                 onClick={() => { setShowModal(false); setError(null); }}
-                className="p-1 rounded-lg hover:bg-[var(--aseel-panel-hover)] opacity-70 hover:opacity-100"
+                className="p-1 rounded-lg hover:bg-[var(--ktra-panel-hover)] opacity-70 hover:opacity-100"
               >
                 <Plus className="w-4 h-4 rotate-45" />
               </button>
             </div>
 
-            <p className="text-[11px] mb-4 opacity-70" style={{ color: "var(--aseel-ink)" }}>
+            <p className="text-[11px] mb-4 opacity-70" style={{ color: "var(--ktra-ink)" }}>
               الفرع يشارك الشركة شجرة الحسابات والأصناف والعملاء، وله فواتير
               ومخزون وتقارير مالية مستقلة.
             </p>
@@ -184,7 +184,7 @@ export const BranchSwitcher: React.FC = () => {
                   placeholder="مثال: فرع نابلس"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--aseel-border)] bg-[var(--aseel-panel)] focus:outline-none focus:ring-2 focus:ring-[var(--aseel-accent)]"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ktra-border)] bg-[var(--ktra-panel)] focus:outline-none focus:ring-2 focus:ring-[var(--ktra-accent)]"
                   disabled={submitting}
                 />
               </div>
@@ -198,7 +198,7 @@ export const BranchSwitcher: React.FC = () => {
                   placeholder="مثال: NAB"
                   value={newCode}
                   onChange={(e) => setNewCode(e.target.value.toUpperCase())}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--aseel-border)] bg-[var(--aseel-panel)] focus:outline-none focus:ring-2 focus:ring-[var(--aseel-accent)] font-mono"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ktra-border)] bg-[var(--ktra-panel)] focus:outline-none focus:ring-2 focus:ring-[var(--ktra-accent)] font-mono"
                   disabled={submitting}
                 />
               </div>
@@ -206,14 +206,14 @@ export const BranchSwitcher: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => { setShowModal(false); setError(null); }}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-lg hover:bg-[var(--aseel-panel-hover)]"
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg hover:bg-[var(--ktra-panel-hover)]"
                   disabled={submitting}
                 >
                   إلغاء
                 </button>
                 <button
                   type="submit"
-                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg bg-[var(--aseel-accent)] hover:opacity-90"
+                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white rounded-lg bg-[var(--ktra-accent)] hover:opacity-90"
                   disabled={submitting}
                 >
                   {submitting ? (

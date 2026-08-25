@@ -10,7 +10,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { inventoryApi, type ProductCostBreakdown, type ProductCostInvoiceRow } from "../../services/inventoryApi";
-import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import { KitDenseTable, type DenseColumn } from "../kit/KitDenseTable";
 import { DocRefCell } from "../shared/LedgerTable";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { BarChart3, RefreshCw, Search, Info } from "lucide-react";
@@ -111,19 +111,19 @@ export const ProductCostPage: React.FC = () => {
       width: "170px",
       align: "center",
       numeric: true,
-      render: (r) => <b style={{ color: "var(--aseel-accent, #1857a4)" }}>{formatMoney(r.unit_cost)}</b>,
+      render: (r) => <b style={{ color: "var(--ktra-accent, #1857a4)" }}>{formatMoney(r.unit_cost)}</b>,
     },
   ];
 
   const footer =
     data && data.invoice_count > 0 ? (
-      <span style={{ fontWeight: 700, color: "var(--aseel-ink)", display: "flex", gap: 18, flexWrap: "wrap" }}>
+      <span style={{ fontWeight: 700, color: "var(--ktra-ink)", display: "flex", gap: 18, flexWrap: "wrap" }}>
         <span>
           إجمالي الكمية المشتراة: <b>{formatQuantity(data.total_purchased_qty)}</b>
         </span>
         <span>
           تكلفة المنتج (متوسط مرجّح بالكمية):{" "}
-          <span style={{ color: "var(--aseel-accent, #1857a4)" }}>{formatMoney(data.average_cost)}</span>
+          <span style={{ color: "var(--ktra-accent, #1857a4)" }}>{formatMoney(data.average_cost)}</span>
         </span>
       </span>
     ) : undefined;
@@ -135,12 +135,12 @@ export const ProductCostPage: React.FC = () => {
     >
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <BarChart3 style={{ width: 16, height: 16, color: "var(--aseel-accent, #1857a4)" }} />
-        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
+        <BarChart3 style={{ width: 16, height: 16, color: "var(--ktra-accent, #1857a4)" }} />
+        <strong style={{ fontSize: "var(--ktra-fs-title, 14px)", color: "var(--ktra-ink)" }}>
           تكلفة المنتجات
         </strong>
         {data && (
-          <span className="aseel-status-item">
+          <span className="ktra-status-item">
             {data.sku} — {data.name} · <b>{data.invoice_count}</b> فاتورة · متوسط مرجّح{" "}
             <b>{formatMoney(data.average_cost)}</b>
           </span>
@@ -148,7 +148,7 @@ export const ProductCostPage: React.FC = () => {
         <div style={{ flex: 1 }} />
         {selectedId != null && (
           <button
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             onClick={() => loadBreakdown(selectedId)}
             disabled={loading}
             title="تحديث"
@@ -164,17 +164,17 @@ export const ProductCostPage: React.FC = () => {
       <div
         style={{
           padding: "8px 10px",
-          background: "var(--aseel-row-alt, #f5f5f5)",
+          background: "var(--ktra-row-alt, #f5f5f5)",
           borderRadius: 4,
-          border: "1px solid var(--aseel-border, #d0d0d0)",
+          border: "1px solid var(--ktra-border, #d0d0d0)",
         }}
       >
-        <div className="aseel-field" style={{ position: "relative" }}>
-          <label className="aseel-field-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <div className="ktra-field" style={{ position: "relative" }}>
+          <label className="ktra-field-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <Search style={{ width: 12, height: 12 }} /> اختر المنتج
           </label>
           <input
-            className="aseel-input"
+            className="ktra-input"
             placeholder="SKU / اسم المنتج…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -187,8 +187,8 @@ export const ProductCostPage: React.FC = () => {
                 insetInlineStart: 0,
                 insetInlineEnd: 0,
                 zIndex: 20,
-                background: "var(--aseel-bg, #fff)",
-                border: "1px solid var(--aseel-border, #d0d0d0)",
+                background: "var(--ktra-bg, #fff)",
+                border: "1px solid var(--ktra-border, #d0d0d0)",
                 borderRadius: 4,
                 maxHeight: 280,
                 overflowY: "auto",
@@ -210,10 +210,10 @@ export const ProductCostPage: React.FC = () => {
                     border: "none",
                     background: "transparent",
                     cursor: "pointer",
-                    fontSize: "var(--aseel-fs-sm)",
-                    color: "var(--aseel-ink)",
+                    fontSize: "var(--ktra-fs-sm)",
+                    color: "var(--ktra-ink)",
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--aseel-row-alt, #f0f0f0)")}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--ktra-row-alt, #f0f0f0)")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   <b>{p.sku}</b> — {p.name_ar || p.name_en || "—"}
@@ -224,15 +224,15 @@ export const ProductCostPage: React.FC = () => {
         </div>
       </div>
 
-      {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
+      {err && <div className="ktra-banner ktra-banner--err">{err}</div>}
 
       <div
         style={{
           display: "flex",
           gap: 6,
           alignItems: "center",
-          fontSize: "var(--aseel-fs-sm)",
-          color: "var(--aseel-ink-soft)",
+          fontSize: "var(--ktra-fs-sm)",
+          color: "var(--ktra-ink-soft)",
           padding: "2px 4px",
         }}
       >
@@ -252,7 +252,7 @@ export const ProductCostPage: React.FC = () => {
             justifyContent: "center",
             flexDirection: "column",
             gap: 12,
-            color: "var(--aseel-ink-soft)",
+            color: "var(--ktra-ink-soft)",
           }}
         >
           <BarChart3 style={{ width: 40, height: 40, opacity: 0.3 }} />
@@ -261,7 +261,7 @@ export const ProductCostPage: React.FC = () => {
       )}
 
       {selectedId != null && (
-        <AseelDenseTable<ProductCostInvoiceRow>
+        <KitDenseTable<ProductCostInvoiceRow>
           columns={columns}
           rows={data?.invoices ?? []}
           getRowKey={(r) => r.invoice_id}

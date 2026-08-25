@@ -12,7 +12,7 @@
 import React, { useEffect, useState } from "react";
 import { Loader2, Save, AlertCircle } from "lucide-react";
 import { inventoryApi } from "../../services/inventoryApi";
-import { AseelFloatWindow } from "../aseel/AseelFloatWindow";
+import { KitFloatWindow } from "../kit/KitFloatWindow";
 import { CategoryPicker } from "../inventory/CategoryPicker";
 import { eventBus } from "../../utils/eventBus";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -103,7 +103,7 @@ export const ItemQuickEditModal: React.FC<Props> = ({
   const input = "w-full px-2 py-1.5 border rounded border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] text-sm";
 
   return (
-    <AseelFloatWindow
+    <KitFloatWindow
       open
       onClose={onClose}
       name="item-quick-edit"
@@ -182,7 +182,7 @@ export const ItemQuickEditModal: React.FC<Props> = ({
           </div>
         )}
       </div>
-    </AseelFloatWindow>
+    </KitFloatWindow>
   );
 };
 

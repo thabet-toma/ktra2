@@ -93,23 +93,23 @@ export const VoucherAllocationModal: React.FC<Props> = ({
       onSubmit={() => void submit()}
     >
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-        <label className="aseel-field">
-          <span className="aseel-field-label">مبلغ السند</span>
-          <input readOnly className="aseel-input aseel-num" value={formatMoney(voucher.amount)}
-            style={{ background: "var(--aseel-surface-2)" }} />
+        <label className="ktra-field">
+          <span className="ktra-field-label">مبلغ السند</span>
+          <input readOnly className="ktra-input ktra-num" value={formatMoney(voucher.amount)}
+            style={{ background: "var(--ktra-surface-2)" }} />
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">المتاح للتوزيع</span>
-          <input readOnly className="aseel-input aseel-num" value={formatMoney(available)}
-            style={{ background: "var(--aseel-surface-2)", fontWeight: 700 }} />
+        <label className="ktra-field">
+          <span className="ktra-field-label">المتاح للتوزيع</span>
+          <input readOnly className="ktra-input ktra-num" value={formatMoney(available)}
+            style={{ background: "var(--ktra-surface-2)", fontWeight: 700 }} />
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">يبقى على الحساب</span>
+        <label className="ktra-field">
+          <span className="ktra-field-label">يبقى على الحساب</span>
           <input
-            readOnly className="aseel-input aseel-num" value={formatMoney(remainingAfter)}
+            readOnly className="ktra-input ktra-num" value={formatMoney(remainingAfter)}
             style={{
-              background: "var(--aseel-ok-bg, #e3f6e9)",
-              color: remainingAfter < -0.01 ? "var(--aseel-err, #c0392b)" : "var(--aseel-ok, #2d7d46)",
+              background: "var(--ktra-ok-bg, #e3f6e9)",
+              color: remainingAfter < -0.01 ? "var(--ktra-err, #c0392b)" : "var(--ktra-ok, #2d7d46)",
               fontWeight: 700,
             }}
           />
@@ -118,7 +118,7 @@ export const VoucherAllocationModal: React.FC<Props> = ({
 
       <div style={{ display: "flex", gap: "6px", marginTop: "12px" }}>
         <select
-          className="aseel-input"
+          className="ktra-input"
           style={{ flex: 1, fontSize: "11px" }}
           value={pickId}
           onChange={(e) => setPickId(e.target.value ? Number(e.target.value) : "")}
@@ -130,20 +130,20 @@ export const VoucherAllocationModal: React.FC<Props> = ({
             </option>
           ))}
         </select>
-        <button type="button" className="aseel-toolbtn" style={{ fontSize: "11px" }} onClick={addRow} disabled={!pickId}>
+        <button type="button" className="ktra-toolbtn" style={{ fontSize: "11px" }} onClick={addRow} disabled={!pickId}>
           <Plus className="w-3 h-3" /> أضف
         </button>
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ textAlign: "center", fontSize: "11px", padding: "12px", marginTop: "8px", color: "var(--aseel-ink-soft)", border: "1px dashed var(--aseel-border)", borderRadius: "4px" }}>
+        <div style={{ textAlign: "center", fontSize: "11px", padding: "12px", marginTop: "8px", color: "var(--ktra-ink-soft)", border: "1px dashed var(--ktra-border)", borderRadius: "4px" }}>
           {docs.length === 0
             ? `لا فواتير مفتوحة لهذا ${isCustomer ? "العميل" : "المورد"}`
             : "أضف فاتورة لتوزيع المبلغ عليها"}
         </div>
       ) : (
         <table style={{ width: "100%", fontSize: "11px", marginTop: "8px" }}>
-          <thead style={{ background: "var(--aseel-surface-2, #f4ede0)" }}>
+          <thead style={{ background: "var(--ktra-surface-2, #f4ede0)" }}>
             <tr>
               <th style={{ padding: "4px", textAlign: "right" }}>الفاتورة</th>
               <th style={{ padding: "4px", textAlign: "right" }}>المبلغ</th>
@@ -152,17 +152,17 @@ export const VoucherAllocationModal: React.FC<Props> = ({
           </thead>
           <tbody>
             {rows.map((r, idx) => (
-              <tr key={r.invoice} style={{ borderTop: "1px solid var(--aseel-border)" }}>
+              <tr key={r.invoice} style={{ borderTop: "1px solid var(--ktra-border)" }}>
                 <td style={{ padding: "2px" }}>{r.label}</td>
                 <td style={{ padding: "2px" }}>
                   <input
-                    type="number" step="0.01" className="aseel-input aseel-num" style={{ fontSize: "11px" }}
+                    type="number" step="0.01" className="ktra-input ktra-num" style={{ fontSize: "11px" }}
                     value={r.amount}
                     onChange={(e) => setRows((rs) => rs.map((x, i) => (i === idx ? { ...x, amount: e.target.value } : x)))}
                   />
                 </td>
                 <td style={{ padding: "2px", textAlign: "center" }}>
-                  <button type="button" onClick={() => setRows((rs) => rs.filter((_, i) => i !== idx))} style={{ color: "var(--aseel-err, #c0392b)" }}>
+                  <button type="button" onClick={() => setRows((rs) => rs.filter((_, i) => i !== idx))} style={{ color: "var(--ktra-err, #c0392b)" }}>
                     <Trash2 className="w-3 h-3" />
                   </button>
                 </td>
@@ -172,7 +172,7 @@ export const VoucherAllocationModal: React.FC<Props> = ({
         </table>
       )}
 
-      <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--aseel-ink-soft)" }}>
+      <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--ktra-ink-soft)" }}>
         {voucher.is_posted
           ? `السند مرحَّل — التوزيع ربط بالفواتير فقط ولا يُنشئ قيداً جديداً (${isCustomer ? "ذمم العميل خُفِّضت" : "ذمم المورد دُينت"} وقت الترحيل).`
           : "السند غير مرحَّل — التوزيع يُحفظ الآن ويُطبَّق محاسبياً عند الترحيل."}

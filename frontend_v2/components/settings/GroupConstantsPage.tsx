@@ -1,7 +1,7 @@
 /**
  * N0-T4 — GroupConstantsPage (ثوابت المجموعة F11)
  *
- * صفحة Aseel-style بـ AseelDocumentShell. 4 tabs:
+ * صفحة Kit-style بـ KitDocumentShell. 4 tabs:
  *   1. بيانات عامة     — TenantSettings (company info, fiscal period)
  *   2. أرقام الدفاتر   — TenantBook (15 doc types × 10 books)
  *   3. حسابات افتراضية — SalesSettings.default_*_account
@@ -11,12 +11,12 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  AseelDocumentShell,
-  AseelFormSection,
-  AseelGrid,
-  type AseelGridColumn,
-  type AseelToolbarAction,
-} from "../aseel";
+  KitDocumentShell,
+  KitFormSection,
+  KitGrid,
+  type KitGridColumn,
+  type KitToolbarAction,
+} from "../kit";
 import {
   apiGetList,
   apiGetObject,
@@ -91,8 +91,8 @@ const DOC_TYPE_LABELS: Record<string, string> = {
 /** ── Helper: labelled field ──────────────────────────────────────────── */
 
 const fld = (label: string, node: React.ReactNode) => (
-  <label className="aseel-field">
-    <span className="aseel-field-label">{label}</span>
+  <label className="ktra-field">
+    <span className="ktra-field-label">{label}</span>
     {node}
   </label>
 );
@@ -273,45 +273,45 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
 
   /** ── Tab 1: بيانات عامة ───────────────────────────────────────────── */
   const generalTab = (
-    <AseelFormSection title="بيانات الشركة" cols={3}>
+    <KitFormSection title="بيانات الشركة" cols={3}>
       {fld("الاسم الرئيسي", (
-        <input className="aseel-input" value={settings?.company_name_primary || ""}
+        <input className="ktra-input" value={settings?.company_name_primary || ""}
           onChange={(e) => upd("company_name_primary", e.target.value)} />
       ))}
       {fld("الاسم الفرعي", (
-        <input className="aseel-input" value={settings?.company_name_sub || ""}
+        <input className="ktra-input" value={settings?.company_name_sub || ""}
           onChange={(e) => upd("company_name_sub", e.target.value)} />
       ))}
       {fld("العنوان", (
-        <input className="aseel-input" value={settings?.address || ""}
+        <input className="ktra-input" value={settings?.address || ""}
           onChange={(e) => upd("address", e.target.value)} />
       ))}
       {fld("ص.ب", (
-        <input className="aseel-input" value={settings?.po_box || ""}
+        <input className="ktra-input" value={settings?.po_box || ""}
           onChange={(e) => upd("po_box", e.target.value)} />
       ))}
       {fld("الهاتف", (
-        <input className="aseel-input" value={settings?.phone || ""}
+        <input className="ktra-input" value={settings?.phone || ""}
           onChange={(e) => upd("phone", e.target.value)} />
       ))}
       {fld("الفاكس", (
-        <input className="aseel-input" value={settings?.fax || ""}
+        <input className="ktra-input" value={settings?.fax || ""}
           onChange={(e) => upd("fax", e.target.value)} />
       ))}
       {fld("البريد الإلكتروني", (
-        <input className="aseel-input" type="email" value={settings?.email || ""}
+        <input className="ktra-input" type="email" value={settings?.email || ""}
           onChange={(e) => upd("email", e.target.value)} />
       ))}
       {fld("شعار الشركة", (
         <span style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
           {settings?.logo_url && (
             <img src={settings.logo_url} alt="شعار الشركة"
-              style={{ width: 22, height: 22, borderRadius: 4, objectFit: "cover", border: "1px solid var(--aseel-border)" }} />
+              style={{ width: 22, height: 22, borderRadius: 4, objectFit: "cover", border: "1px solid var(--ktra-border)" }} />
           )}
-          <input className="aseel-input" placeholder="رابط الشعار أو ارفع صورة"
+          <input className="ktra-input" placeholder="رابط الشعار أو ارفع صورة"
             value={settings?.logo_url || ""}
             onChange={(e) => upd("logo_url", e.target.value)} />
-          <label className="aseel-toolbtn" style={{ cursor: uploadingLogo ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+          <label className="ktra-toolbtn" style={{ cursor: uploadingLogo ? "wait" : "pointer", whiteSpace: "nowrap" }}>
             <Upload style={{ width: 13, height: 13 }} />
             <span>{uploadingLogo ? "جارٍ الرفع…" : "رفع"}</span>
             <input type="file" accept="image/*" style={{ display: "none" }} disabled={uploadingLogo}
@@ -322,19 +322,19 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
                 e.target.value = "";
               }} />
           </label>
-          <span className="aseel-hint">أو الصق الصورة (Ctrl+V)</span>
+          <span className="ktra-hint">أو الصق الصورة (Ctrl+V)</span>
         </span>
       ))}
       {fld("رقم المشتغل المرخص", (
-        <input className="aseel-input" value={settings?.licensed_dealer_no || ""}
+        <input className="ktra-input" value={settings?.licensed_dealer_no || ""}
           onChange={(e) => upd("licensed_dealer_no", e.target.value)} />
       ))}
       {fld("رقم ملف ضريبة الدخل", (
-        <input className="aseel-input" value={settings?.income_tax_file_no || ""}
+        <input className="ktra-input" value={settings?.income_tax_file_no || ""}
           onChange={(e) => upd("income_tax_file_no", e.target.value)} />
       ))}
       {fld("العملة", (
-        <select className="aseel-input" value={settings?.currency || ""}
+        <select className="ktra-input" value={settings?.currency || ""}
           onChange={(e) => upd("currency", e.target.value ? Number(e.target.value) : null)}>
           <option value="">— اختر —</option>
           {currencies.map((c) => (
@@ -343,44 +343,44 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
         </select>
       ))}
       {fld("تسمية الفترة المالية", (
-        <input className="aseel-input" value={settings?.fiscal_period_label || ""}
+        <input className="ktra-input" value={settings?.fiscal_period_label || ""}
           onChange={(e) => upd("fiscal_period_label", e.target.value)} />
       ))}
       {fld("بداية الفترة المالية", (
-        <input className="aseel-input" type="date" value={settings?.fiscal_period_start || ""}
+        <input className="ktra-input" type="date" value={settings?.fiscal_period_start || ""}
           onChange={(e) => upd("fiscal_period_start", e.target.value)} />
       ))}
       {fld("نهاية الفترة المالية", (
-        <input className="aseel-input" type="date" value={settings?.fiscal_period_end || ""}
+        <input className="ktra-input" type="date" value={settings?.fiscal_period_end || ""}
           onChange={(e) => upd("fiscal_period_end", e.target.value)} />
       ))}
       {fld("يوم بداية شهر ملخص الأعمال (1–31)", (
-        <input className="aseel-input" type="number" min={1} max={31}
+        <input className="ktra-input" type="number" min={1} max={31}
           title="مثال: 20 — تُحسب الدورة كل شهر من آخر يوم 20 حتى اليوم"
           value={settings?.dashboard_month_start_day ?? 1}
           onChange={(e) => upd("dashboard_month_start_day", Number(e.target.value))} />
       ))}
       {fld("إجراء الباركود", (
-        <select className="aseel-input" value={settings?.barcode_action || "index"}
+        <select className="ktra-input" value={settings?.barcode_action || "index"}
           onChange={(e) => upd("barcode_action", e.target.value)}>
           <option value="index">فتح فهرس الأصناف</option>
           <option value="cashier">فتح فاتورة كاشير</option>
         </select>
       ))}
       {fld("رسالة إشعار الأوفلاين", (
-        <input className="aseel-input" value={offlineMessage}
+        <input className="ktra-input" value={offlineMessage}
           onChange={(e) => setOfflineMessage(e.target.value)} placeholder="رسالة مخصصة تظهر عند انقطاع الاتصال..." />
       ))}
-      <label className="aseel-field aseel-field--inline" style={{ gridColumn: "1 / -1" }}>
+      <label className="ktra-field ktra-field--inline" style={{ gridColumn: "1 / -1" }}>
         <input type="checkbox" checked={settings?.mixture_auto_fill_enabled || false}
           onChange={(e) => upd("mixture_auto_fill_enabled", e.target.checked)} />
-        <span className="aseel-field-label" style={{ flex: "unset" }}>تعبئة تلقائية لرقم الخلطة/تاريخ الانتهاء</span>
+        <span className="ktra-field-label" style={{ flex: "unset" }}>تعبئة تلقائية لرقم الخلطة/تاريخ الانتهاء</span>
       </label>
-    </AseelFormSection>
+    </KitFormSection>
   );
 
   /** ── Tab 2: أرقام الدفاتر ─────────────────────────────────────────── */
-  const bookColumns: AseelGridColumn<TenantBookRow>[] = [
+  const bookColumns: KitGridColumn<TenantBookRow>[] = [
     {
       key: "document_type",
       header: "نوع المستند",
@@ -394,7 +394,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
       header: "اسم الدفتر",
       render: (r) => (
         <input
-          className="aseel-input"
+          className="ktra-input"
           value={r.name || ""}
           onChange={(e) => updBook(r.id, "name", e.target.value)}
         />
@@ -407,7 +407,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
       align: "center",
       render: (r) => (
         <input
-          className="aseel-input"
+          className="ktra-input"
           type="number"
           value={r.last_used_number || 0}
           onChange={(e) => updBook(r.id, "last_used_number", Number(e.target.value) || 0)}
@@ -432,11 +432,11 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
   const booksTab = (
     <div>
       {books.length === 0 && (
-        <div className="aseel-banner aseel-banner--warn" style={{ marginBottom: 8 }}>
+        <div className="ktra-banner ktra-banner--warn" style={{ marginBottom: 8 }}>
           <span>لا توجد دفاتر مهيَّأة بعد. اضغط «تهيئة الدفاتر» لإنشاء 10 دفاتر لكل نوع مستند.</span>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             onClick={seedBooks}
             disabled={seeding}
             style={{ marginInlineStart: 12 }}
@@ -447,7 +447,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
         </div>
       )}
       {books.length > 0 && (
-        <AseelGrid<TenantBookRow>
+        <KitGrid<TenantBookRow>
           columns={bookColumns}
           rows={books}
           getRowKey={(r) => r.id}
@@ -460,7 +460,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
   /** ── Tab 3: حسابات افتراضية ───────────────────────────────────────── */
   // THA-111: غرض الحقل يقود ما تعرضه الشجرة وما يُختار منه — لا شرط محلي هنا.
   const accountsTab = (
-    <AseelFormSection title="الحسابات المحاسبية الافتراضية" cols={2}>
+    <KitFormSection title="الحسابات المحاسبية الافتراضية" cols={2}>
       {fld("حساب الإيراد (منتج)", (
         <AccountTreeField accounts={accounts} value={salesSettings?.default_revenue_account_product || ""}
           onChange={(id) => updSales("default_revenue_account_product", id)} purpose="revenue" allowParents title="حساب الإيراد (منتج)" />
@@ -491,39 +491,39 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
           onChange={(id) => upd("default_freight_credit_account", id)} purpose="liability" allowParents
           title="حساب أجرة الشحن (دائن)" />
       ))}
-    </AseelFormSection>
+    </KitFormSection>
   );
 
   /** ── Tab 4: ضرائب ─────────────────────────────────────────────────── */
   const taxesTab = (
-    <AseelFormSection title="إعدادات الضرائب" cols={2}>
+    <KitFormSection title="إعدادات الضرائب" cols={2}>
       {fld("نسبة ض.ق.م الافتراضية (%)", (
-        <input className="aseel-input" type="number" step="0.01"
+        <input className="ktra-input" type="number" step="0.01"
           value={settings?.default_vat_rate ?? "16"}
           onChange={(e) => upd("default_vat_rate", e.target.value)} />
       ))}
       {fld("نسبة خصم المصدر الافتراضية (%)", (
-        <input className="aseel-input" type="number" step="0.01"
+        <input className="ktra-input" type="number" step="0.01"
           value={settings?.default_source_discount_rate ?? "0"}
           onChange={(e) => upd("default_source_discount_rate", e.target.value)} />
       ))}
-      <label className="aseel-field aseel-field--inline" style={{ gridColumn: "1 / -1" }}>
+      <label className="ktra-field ktra-field--inline" style={{ gridColumn: "1 / -1" }}>
         <input type="checkbox" checked={salesSettings?.prices_include_tax || false}
           onChange={(e) => updSales("prices_include_tax", e.target.checked)} />
-        <span className="aseel-field-label" style={{ flex: "unset" }}>
+        <span className="ktra-field-label" style={{ flex: "unset" }}>
           الأسعار المُدخَلة تَشمل قيمة الضريبة المضافة (افتراضياً)
         </span>
       </label>
-      <p className="aseel-hint" style={{ gridColumn: "1 / -1" }}>
+      <p className="ktra-hint" style={{ gridColumn: "1 / -1" }}>
         تُستخدَم نسبة ض.ق.م الافتراضية عند إضافة فاتورة جديدة. يَجوز
         تجاوزها لكل فاتورة عبر حقل «الأسعار تشمل ض.ق.م» داخل الفاتورة.
       </p>
-    </AseelFormSection>
+    </KitFormSection>
   );
 
   /** ── Toolbar + banner ─────────────────────────────────────────────── */
 
-  const toolbarActions: AseelToolbarAction[] = [
+  const toolbarActions: KitToolbarAction[] = [
     {
       key: "save",
       label: saving ? "...حفظ" : "حفظ",
@@ -546,12 +546,12 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
           onClick: onClose,
           danger: true,
           separatorBefore: true,
-        } as AseelToolbarAction]
+        } as KitToolbarAction]
       : []),
   ];
 
   const banner = (localErr || msg) ? (
-    <div className={`aseel-banner ${localErr ? "aseel-banner--err" : "aseel-banner--ok"}`}>
+    <div className={`ktra-banner ${localErr ? "ktra-banner--err" : "ktra-banner--ok"}`}>
       <span>{localErr || msg}</span>
     </div>
   ) : null;
@@ -561,7 +561,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
       dir="rtl"
       style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}
     >
-      <AseelDocumentShell
+      <KitDocumentShell
         title="ثوابت المجموعة"
         state="F11"
         actions={toolbarActions}
@@ -574,17 +574,17 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
         ]}
         status={
           <>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               المستخدم <b>{currentUserName || "—"}</b>
             </span>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               {books.length} دفتر · {accounts.length} حساب · {currencies.length} عملة
             </span>
           </>
         }
       >
         {banner}
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

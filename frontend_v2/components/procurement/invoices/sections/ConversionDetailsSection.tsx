@@ -149,7 +149,7 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
         <button
             type="button"
             onClick={() => openInNewTab(`/import-flow/${encodeURIComponent(shipmentId)}`)}
-            className="inline-flex items-center gap-1 rounded-lg border aseel-border-soft px-2.5 py-1.5 text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]"
+            className="inline-flex items-center gap-1 rounded-lg border ktra-border-soft px-2.5 py-1.5 text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]"
         >
             <ExternalLink className="h-3.5 w-3.5" />
             فتح رحلة الشحنة
@@ -158,7 +158,7 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
 
     if (!metadata) {
         return (
-            <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl border border-[var(--color-border)] dark:border-[var(--color-border)]/30 overflow-hidden shadow-sm p-4">
+            <div className="ktra-bg-field dark:ktra-bg-panel rounded-2xl border border-[var(--color-border)] dark:border-[var(--color-border)]/30 overflow-hidden shadow-sm p-4">
                 <div className="flex items-start gap-3 text-sm text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                     <Ship className="w-5 h-5 shrink-0 text-[var(--color-primary)]" />
                     <div>
@@ -266,15 +266,15 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
                 <div className="space-y-1">
                     {localClr > 0 ? (
                         <div>
-                            <div className="text-sm font-black aseel-text-accent dark:aseel-text-soft">
+                            <div className="text-sm font-black ktra-text-accent dark:ktra-text-soft">
                                 {fmtIlsZero(localClr)}
                             </div>
                             {localFromInvoiceImplied ? (
-                                <span className="text-[9px] aseel-text-soft dark:aseel-text-soft block">
+                                <span className="text-[9px] ktra-text-soft dark:ktra-text-soft block">
                                     مُستنتج من إجمالي شحن الفاتورة — يُفضَّل «إعادة حساب التكلفة» لمزامنة البيانات
                                 </span>
                             ) : (
-                                <span className="text-[9px] aseel-text-soft dark:aseel-text-soft block">
+                                <span className="text-[9px] ktra-text-soft dark:ktra-text-soft block">
                                     {localTransportSource === "local_shipment"
                                         ? "من سجل النقل المحلي — موزّع حسب الحجم/الوزن"
                                         : "من بنود التخليص (نقل / شحن محلي أو دفعة الناقل)"}
@@ -284,16 +284,16 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
                     ) : null}
                     {ils > 0 ? (
                         <div>
-                            <div className="text-sm font-black aseel-text-accent dark:aseel-text-soft">
+                            <div className="text-sm font-black ktra-text-accent dark:ktra-text-soft">
                                 {fmtIlsZero(ils)}
                             </div>
-                            <span className="text-[10px] aseel-text-soft dark:aseel-text-soft">
+                            <span className="text-[10px] ktra-text-soft dark:ktra-text-soft">
                                 تقدير من الصفقة — مضمّن بسعر البضاعة
                             </span>
                         </div>
                     ) : null}
                     {totalLocal === 0 ? (
-                        <span className="text-xs aseel-text-soft dark:aseel-text-soft">
+                        <span className="text-xs ktra-text-soft dark:ktra-text-soft">
                             {clearanceLinked
                                 ? "لا مبلغ نقل من التخليص في البيانات المحفوظة — «إعادة حساب التكلفة»."
                                 : "—"}
@@ -305,15 +305,15 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
         if (totalLocal > 0) {
             return (
                 <div className="space-y-0.5">
-                    <span className="text-sm font-black aseel-text-accent dark:aseel-text-soft">
+                    <span className="text-sm font-black ktra-text-accent dark:ktra-text-soft">
                         {fmtIlsZero(totalLocal)}
                     </span>
                     {localClr > 0 && ils > 0 ? (
-                        <span className="text-[9px] aseel-text-soft dark:aseel-text-soft block">
+                        <span className="text-[9px] ktra-text-soft dark:ktra-text-soft block">
                             من الصفقة {fmtIlsZero(ils)} + من التخليص {fmtIlsZero(localClr)}
                         </span>
                     ) : localClr > 0 ? (
-                        <span className="text-[9px] aseel-text-soft dark:aseel-text-soft block">
+                        <span className="text-[9px] ktra-text-soft dark:ktra-text-soft block">
                             {localFromInvoiceImplied
                                 ? "من التخليص (مُستنتج من شحن الفاتورة — يُفضَّل إعادة الحساب)"
                                 : localTransportSource === "local_shipment"
@@ -326,13 +326,13 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
         }
         if (internalShippingUsd > 0) {
             return (
-                <span className="text-xs aseel-text-soft dark:aseel-text-soft">
+                <span className="text-xs ktra-text-soft dark:ktra-text-soft">
                     {fmtIlsZero(ils)} — تقدير الشحن المحلي من الصفقة
                 </span>
             );
         }
         return (
-            <span className="text-xs aseel-text-soft dark:aseel-text-soft">
+            <span className="text-xs ktra-text-soft dark:ktra-text-soft">
                 {clearanceLinked
                     ? "لا مبلغ نقل من التخليص في البيانات المحفوظة — «إعادة حساب التكلفة»."
                     : "—"}
@@ -350,53 +350,53 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
 
     const sharePctLabel = (pct: number, suffix: string) =>
         pct > 0 ? (
-            <span className="block text-[9px] font-semibold aseel-text-soft dark:aseel-text-soft mt-0.5 tabular-nums">
+            <span className="block text-[9px] font-semibold ktra-text-soft dark:ktra-text-soft mt-0.5 tabular-nums">
                 {formatNumber(pct, { maxDecimals: 2 })}% {suffix}
             </span>
         ) : (
-            <span className="block text-[9px] aseel-text-soft dark:aseel-text-soft mt-0.5">—</span>
+            <span className="block text-[9px] ktra-text-soft dark:ktra-text-soft mt-0.5">—</span>
         );
 
     const internalPctLabel = () => {
         if (internalPctOfDeal != null && internalPctOfDeal > 0) {
             return (
-                <span className="block text-[9px] font-semibold aseel-text-soft dark:aseel-text-soft mt-0.5 tabular-nums">
+                <span className="block text-[9px] font-semibold ktra-text-soft dark:ktra-text-soft mt-0.5 tabular-nums">
                     {formatNumber(internalPctOfDeal, { maxDecimals: 2 })}% من إجمالي الصفقة ($)
                 </span>
             );
         }
         if ((internalShippingIls ?? 0) > 0) {
             return (
-                <span className="block text-[9px] aseel-text-soft dark:aseel-text-soft mt-0.5">
+                <span className="block text-[9px] ktra-text-soft dark:ktra-text-soft mt-0.5">
                     تقدير بالشيكل (بدون نسبة $)
                 </span>
             );
         }
-        return <span className="block text-[9px] aseel-text-soft dark:aseel-text-soft mt-0.5">—</span>;
+        return <span className="block text-[9px] ktra-text-soft dark:ktra-text-soft mt-0.5">—</span>;
     };
 
     if (hasIlsLogisticsBreakdown) {
         return (
-            <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl border aseel-border-soft dark:aseel-border-soft shadow-sm p-3 space-y-3">
+            <div className="ktra-bg-field dark:ktra-bg-panel rounded-xl border ktra-border-soft dark:ktra-border-soft shadow-sm p-3 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h4 className="flex items-center gap-2 text-sm font-bold aseel-text-ink dark:aseel-text-soft">
-                        <Calculator className="w-4 h-4 aseel-text-soft shrink-0" />
+                    <h4 className="flex items-center gap-2 text-sm font-bold ktra-text-ink dark:ktra-text-soft">
+                        <Calculator className="w-4 h-4 ktra-text-soft shrink-0" />
                         توزيع التكلفة (شيكل) — أساس أعمدة التكلفة النهائية
                     </h4>
                     {shipmentLink}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
-                    <div className="p-3 aseel-bg-panel dark:aseel-bg-panel/80 border aseel-border-soft dark:aseel-border-soft rounded-lg">
-                        <span className="text-[10px] aseel-text-soft dark:aseel-text-soft block mb-1">
+                    <div className="p-3 ktra-bg-panel dark:ktra-bg-panel/80 border ktra-border-soft dark:ktra-border-soft rounded-lg">
+                        <span className="text-[10px] ktra-text-soft dark:ktra-text-soft block mb-1">
                             بضاعة (أساس الجدول)
                         </span>
-                        <div className="text-sm font-black aseel-text-ink dark:text-white">
+                        <div className="text-sm font-black ktra-text-ink dark:text-white">
                             {fmtIls(subtotalMerchIls)}
                         </div>
                     </div>
-                    <div className="p-3 aseel-bg-panel dark:aseel-bg-panel/80 border aseel-border-soft dark:aseel-border-soft rounded-lg">
-                        <span className="text-[10px] aseel-text-soft dark:aseel-text-soft block mb-1">
+                    <div className="p-3 ktra-bg-panel dark:ktra-bg-panel/80 border ktra-border-soft dark:ktra-border-soft rounded-lg">
+                        <span className="text-[10px] ktra-text-soft dark:ktra-text-soft block mb-1">
                             حصة شحن دولي للصفقة
                         </span>
                         {sharePctLabel(
@@ -409,45 +409,45 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
                             {fmtIls(dealShipmentAllocatedIls)}
                         </div>
                     </div>
-                    <div className="p-3 aseel-bg-panel dark:aseel-bg-panel/80 border aseel-border-soft dark:aseel-border-soft rounded-lg">
-                        <span className="text-[10px] aseel-text-soft dark:aseel-text-soft block mb-1">
+                    <div className="p-3 ktra-bg-panel dark:ktra-bg-panel/80 border ktra-border-soft dark:ktra-border-soft rounded-lg">
+                        <span className="text-[10px] ktra-text-soft dark:ktra-text-soft block mb-1">
                             نقل من التخليص (حصة الصفقة)
                         </span>
                         {internalPctLabel()}
                         <div className="mt-0.5">{internalShippingMoney()}</div>
                     </div>
-                    <div className="p-3 aseel-bg-panel dark:aseel-bg-panel/80 border aseel-border-soft dark:aseel-border-soft rounded-lg">
-                        <span className="text-[10px] aseel-text-soft dark:aseel-text-soft block mb-1">
+                    <div className="p-3 ktra-bg-panel dark:ktra-bg-panel/80 border ktra-border-soft dark:ktra-border-soft rounded-lg">
+                        <span className="text-[10px] ktra-text-soft dark:ktra-text-soft block mb-1">
                             حصة تخليص للصفقة
                         </span>
                         {sharePctLabel(
                             clearanceValueSharePct,
                             "من إجمالي الصفقات (بنود+ضريبة…) / مجموع صفقات الشحنة — مطابق لقائمة الصفقات"
                         )}
-                        <div className="text-sm font-black aseel-text-ink dark:aseel-text-soft mt-0.5">
+                        <div className="text-sm font-black ktra-text-ink dark:ktra-text-soft mt-0.5">
                             {fmtIls(dealClearanceAllocatedIls)}
                         </div>
                     </div>
-                    <div className="p-3 aseel-bg-panel/80 dark:aseel-bg-panel/20 border aseel-border-soft/80 dark:aseel-border-soft/50 rounded-lg">
-                        <span className="text-[10px] aseel-text-ink/90 dark:aseel-text-soft/90 block mb-1">
+                    <div className="p-3 ktra-bg-panel/80 dark:ktra-bg-panel/20 border ktra-border-soft/80 dark:ktra-border-soft/50 rounded-lg">
+                        <span className="text-[10px] ktra-text-ink/90 dark:ktra-text-soft/90 block mb-1">
                             عمولات تحويل (إجمالي للصفقة)
                         </span>
-                        <span className="block text-[9px] aseel-text-ink/85 dark:aseel-text-soft/85 mb-0.5 leading-snug">
+                        <span className="block text-[9px] ktra-text-ink/85 dark:ktra-text-soft/85 mb-0.5 leading-snug">
                             دفعات الصفقة + حصة من عمولات دفعات شحن الشحنة (بنفس نسبة الشحن الدولي)
                         </span>
-                        <div className="text-sm font-black aseel-text-ink dark:aseel-text-soft mt-0.5">
+                        <div className="text-sm font-black ktra-text-ink dark:ktra-text-soft mt-0.5">
                             {fmtIlsZero(dealTransferCommissionsIls)}
                         </div>
                         {(dealTransferCommissionsFromDealPaymentsIls ?? 0) > 0.005 ||
                         (dealTransferCommissionsFromShipmentShareIls ?? 0) > 0.005 ? (
-                            <div className="mt-1.5 space-y-0.5 text-[9px] aseel-text-ink/80 dark:aseel-text-soft/80 tabular-nums">
+                            <div className="mt-1.5 space-y-0.5 text-[9px] ktra-text-ink/80 dark:ktra-text-soft/80 tabular-nums">
                                 {(dealTransferCommissionsFromDealPaymentsIls ?? 0) > 0.005 ? (
                                     <div>
                                         من دفعات الصفقة: {fmtIlsZero(dealTransferCommissionsFromDealPaymentsIls)}
                                     </div>
                                 ) : null}
                                 {(shipmentTransferCommissionsTotalIls ?? 0) > 0.005 ? (
-                                    <div className="aseel-text-ink/75 dark:aseel-text-soft/75">
+                                    <div className="ktra-text-ink/75 dark:ktra-text-soft/75">
                                         إجمالي شحن الشحنة: {fmtIlsZero(shipmentTransferCommissionsTotalIls)} → حصة
                                         الصفقة: {fmtIlsZero(dealTransferCommissionsFromShipmentShareIls)}
                                     </div>
@@ -462,8 +462,8 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
                 </div>
 
                 {totalFreightIlsForInvoice > 0 ? (
-                    <div className="text-[11px] aseel-text-soft dark:aseel-text-soft rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-panel/80 dark:aseel-bg-panel/40 px-3 py-2">
-                        <span className="font-bold aseel-text-ink dark:aseel-text-soft">
+                    <div className="text-[11px] ktra-text-soft dark:ktra-text-soft rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-panel/80 dark:ktra-bg-panel/40 px-3 py-2">
+                        <span className="font-bold ktra-text-ink dark:ktra-text-soft">
                             إجمالي شحن الفاتورة (تقريباً):
                         </span>{" "}
                         <span className="font-mono font-bold">
@@ -481,7 +481,7 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
 
     if (importLogistics) {
         return (
-            <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl border border-[var(--color-border)] dark:border-[var(--color-border)]/30 shadow-sm p-3">
+            <div className="ktra-bg-field dark:ktra-bg-panel rounded-xl border border-[var(--color-border)] dark:border-[var(--color-border)]/30 shadow-sm p-3">
                 <div className="flex items-start gap-2 text-xs text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                     <Ship className="w-4 h-4 shrink-0 text-[var(--color-primary)] mt-0.5" />
                     <p className="leading-relaxed">{formatInvoiceImportLogisticsLine(importLogistics)}</p>

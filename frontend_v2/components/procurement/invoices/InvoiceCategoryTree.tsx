@@ -197,7 +197,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
       key={it.id}
       type="button"
       disabled={disabled}
-      className="aseel-tree-leaf"
+      className="ktra-tree-leaf"
       onClick={() => handleLeafClick(it)}
       title={`${displayNameOf(it)} — انقر لعرض بطاقة الصنف`}
     >
@@ -237,15 +237,15 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
 
     return (
       <div key={c.id} style={{ marginInlineStart: `${depth * 10}px` }}>
-        <div className="aseel-tree-cat" onContextMenu={(e) => openMenu(e, c.id)}>
-          <button type="button" className="aseel-tree-twisty" onClick={() => toggle(c.id)} title={open ? "طيّ" : "فتح"}>
+        <div className="ktra-tree-cat" onContextMenu={(e) => openMenu(e, c.id)}>
+          <button type="button" className="ktra-tree-twisty" onClick={() => toggle(c.id)} title={open ? "طيّ" : "فتح"}>
             {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
           </button>
           <FolderTree className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
           {isEditing ? (
             <span className="flex items-center gap-1 flex-1 min-w-0">
               <input
-                className="aseel-input flex-1"
+                className="ktra-input flex-1"
                 autoFocus
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
@@ -254,8 +254,8 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
                   if (e.key === "Escape") setEditId(null);
                 }}
               />
-              <button type="button" className="aseel-tree-act" title="حفظ" onClick={() => { void renameCat(); }}><Check className="w-3.5 h-3.5" /></button>
-              <button type="button" className="aseel-tree-act" title="إلغاء" onClick={() => setEditId(null)}><X className="w-3.5 h-3.5" /></button>
+              <button type="button" className="ktra-tree-act" title="حفظ" onClick={() => { void renameCat(); }}><Check className="w-3.5 h-3.5" /></button>
+              <button type="button" className="ktra-tree-act" title="إلغاء" onClick={() => setEditId(null)}><X className="w-3.5 h-3.5" /></button>
             </span>
           ) : (
             <>
@@ -275,7 +275,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
               >
                 {c.name}
               </button>
-              <span className="aseel-tree-count">{descendantItemIds(c.id).length || ""}</span>
+              <span className="ktra-tree-count">{descendantItemIds(c.id).length || ""}</span>
             </>
           )}
         </div>
@@ -283,7 +283,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
         {subParent === c.id && !disabled && (
           <div className="flex items-center gap-1 my-1" style={{ marginInlineStart: "16px" }}>
             <input
-              className="aseel-input flex-1"
+              className="ktra-input flex-1"
               autoFocus
               placeholder="اسم الصنف الفرعي"
               value={subName}
@@ -293,8 +293,8 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
                 if (e.key === "Escape") setSubParent(null);
               }}
             />
-            <button type="button" className="aseel-tree-act" title="حفظ" onClick={() => { void createCat(subName, c.id); setSubParent(null); }}><Check className="w-3.5 h-3.5" /></button>
-            <button type="button" className="aseel-tree-act" title="إلغاء" onClick={() => setSubParent(null)}><X className="w-3.5 h-3.5" /></button>
+            <button type="button" className="ktra-tree-act" title="حفظ" onClick={() => { void createCat(subName, c.id); setSubParent(null); }}><Check className="w-3.5 h-3.5" /></button>
+            <button type="button" className="ktra-tree-act" title="إلغاء" onClick={() => setSubParent(null)}><X className="w-3.5 h-3.5" /></button>
           </div>
         )}
 
@@ -312,13 +312,13 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
   const uncategorizedItems = (itemsByCat.get(UNCAT) || []).filter(itemMatches);
 
   if (panelCollapsed && !manageMode) {
-    // شريط مطويّ لا لوحة فارغة: `.aseel-tree-panel` تفرض `flex: 0 0 240px` من
+    // شريط مطويّ لا لوحة فارغة: `.ktra-tree-panel` تفرض `flex: 0 0 240px` من
     // خارج طبقات Tailwind، فـ`w-10` كانت تخسر أمامها ويبقى الطيّ 240px بيضاء
-    // (قِيست: 240×320). `.aseel-tree-rail` هي شريط النظام نفسه — 32px بعنوان
+    // (قِيست: 240×320). `.ktra-tree-rail` هي شريط النظام نفسه — 32px بعنوان
     // عمودي — فيعود عرضُ اللوحة إلى الشاشة فعلاً عند الطيّ.
     return (
       <div
-        className="aseel-tree-rail"
+        className="ktra-tree-rail"
         role="button"
         tabIndex={0}
         onClick={() => setPanelCollapsed(false)}
@@ -326,18 +326,18 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
         title="إظهار شجرة المنتجات"
       >
         <PanelRightOpen className="w-4 h-4" />
-        <span className="aseel-tree-rail-label">شجرة المنتجات</span>
+        <span className="ktra-tree-rail-label">شجرة المنتجات</span>
       </div>
     );
   }
 
   return (
-    <div className={`aseel-tree-panel shrink-0 flex-1 flex flex-col ${manageMode ? "w-full border-none" : "w-[280px]"}`}>
-      <div className="aseel-tree-toolbar">
+    <div className={`ktra-tree-panel shrink-0 flex-1 flex flex-col ${manageMode ? "w-full border-none" : "w-[280px]"}`}>
+      <div className="ktra-tree-toolbar">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold" style={{ color: "var(--aseel-ink)" }}>{manageMode ? "شجرة التصنيفات" : "شجرة المنتجات"}</span>
+          <span className="text-xs font-semibold" style={{ color: "var(--ktra-ink)" }}>{manageMode ? "شجرة التصنيفات" : "شجرة المنتجات"}</span>
           {!manageMode && (
-            <button type="button" className="aseel-toolbtn" title="طيّ اللوحة" onClick={() => setPanelCollapsed(true)}>
+            <button type="button" className="ktra-toolbtn" title="طيّ اللوحة" onClick={() => setPanelCollapsed(true)}>
               <PanelRightClose className="w-4 h-4" />
             </button>
           )}
@@ -345,7 +345,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
         <div className="relative">
           <input
             type="text"
-            className="aseel-input w-full"
+            className="ktra-input w-full"
             style={{ paddingInlineStart: "26px" }}
             placeholder={manageMode ? "بحث عن تصنيف..." : "بحث عن منتج..."}
             value={query}
@@ -357,17 +357,17 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
           <div className="flex gap-1 mt-1.5">
             <input
               type="text"
-              className="aseel-input flex-1"
+              className="ktra-input flex-1"
               placeholder="صنف رئيسي جديد..."
               value={newRootName}
               onChange={(e) => setNewRootName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { void createCat(newRootName, null); setNewRootName(""); } }}
             />
-            <button type="button" className="aseel-toolbtn" title="إضافة صنف رئيسي" onClick={() => { void createCat(newRootName, null); setNewRootName(""); }}>
+            <button type="button" className="ktra-toolbtn" title="إضافة صنف رئيسي" onClick={() => { void createCat(newRootName, null); setNewRootName(""); }}>
               <FolderPlus className="w-4 h-4" />
             </button>
             {!manageMode && (
-              <button type="button" className="aseel-toolbtn" title="إضافة صنف (بدون تصنيف)" onClick={() => openAddItem(null)}>
+              <button type="button" className="ktra-toolbtn" title="إضافة صنف (بدون تصنيف)" onClick={() => openAddItem(null)}>
                 <Plus className="w-4 h-4" />
               </button>
             )}
@@ -376,7 +376,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
       </div>
 
       {/* كبسة يمين على الفراغ → إضافة صنف رئيسي/منتج بدون صنف */}
-      <div className="aseel-tree-body" onContextMenu={(e) => openMenu(e, null)}>
+      <div className="ktra-tree-body" onContextMenu={(e) => openMenu(e, null)}>
         {loadingCats ? (
           <div className="p-3 text-center text-sm text-[var(--color-text-muted)] flex items-center justify-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin" /> جاري التحميل...
@@ -386,10 +386,10 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
             {rootCats.map((c) => renderNode(c, 0))}
             {!manageMode && uncategorizedItems.length > 0 && (
               <div className="mt-1">
-                <div className="aseel-tree-cat">
+                <div className="ktra-tree-cat">
                   <FolderTree className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
                   <span className="truncate flex-1">بدون صنف</span>
-                  <span className="aseel-tree-count">{uncategorizedItems.length}</span>
+                  <span className="ktra-tree-count">{uncategorizedItems.length}</span>
                 </div>
                 <div className="mt-0.5">{renderItems(UNCAT)}</div>
               </div>
@@ -413,23 +413,23 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => { if (menu.catId) { setSubParent(menu.catId); setExpanded((e) => ({ ...e, [menu.catId!]: true })); setSubName(""); } else { const input = document.querySelector<HTMLInputElement>("input[placeholder='صنف رئيسي جديد...']"); input?.focus(); } setMenu(null); }}>
+          <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { if (menu.catId) { setSubParent(menu.catId); setExpanded((e) => ({ ...e, [menu.catId!]: true })); setSubName(""); } else { const input = document.querySelector<HTMLInputElement>("input[placeholder='صنف رئيسي جديد...']"); input?.focus(); } setMenu(null); }}>
             <FolderPlus className="w-3.5 h-3.5" /> {menu.catId ? "إضافة تصنيف فرعي" : "إضافة تصنيف رئيسي"}
           </button>
           {!manageMode && (
-            <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(menu.catId); setMenu(null); }}>
+            <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(menu.catId); setMenu(null); }}>
               <PackagePlus className="w-3.5 h-3.5" /> إضافة صنف هنا
             </button>
           )}
           {menu.catId && (
             <>
-              <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => {
+              <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => {
                 const c = cats.find((x) => x.id === menu.catId);
                 setEditId(menu.catId); setEditName(c?.name || ""); setMenu(null);
               }}>
                 <Pencil className="w-3.5 h-3.5" /> تعديل اسم التصنيف
               </button>
-              <button type="button" className="aseel-ctxmenu-item text-red-600 hover:bg-red-50" style={{...ctxItemStyle, color: "#dc2626"}} onClick={() => {
+              <button type="button" className="ktra-ctxmenu-item text-red-600 hover:bg-red-50" style={{...ctxItemStyle, color: "#dc2626"}} onClick={() => {
                 const id = menu.catId; setMenu(null); void deleteCat(id!);
               }}>
                 <Trash2 className="w-3.5 h-3.5" /> حذف التصنيف

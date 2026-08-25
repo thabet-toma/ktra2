@@ -3,10 +3,10 @@ import { accountingApi } from "../../services/accountingApi";
 import { formatMoney } from "../../utils/formatNumber";
 import type { TrialBalanceRow, CurrencyDto } from "../../types/accounting";
 import {
-  AseelDocumentShell,
-  AseelReportTable,
-} from "../aseel";
-import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
+  KitDocumentShell,
+  KitReportTable,
+} from "../kit";
+import type { KitToolbarAction, KitTab, ReportColumn } from "../kit";
 import { Search } from "lucide-react";
 
 interface BalanceSheetRow {
@@ -96,20 +96,20 @@ export const BalanceSheetPage: React.FC = () => {
 
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      <div className="aseel-field">
-        <label className="aseel-field-label">التاريخ (كما في)</label>
-        <input type="date" className="aseel-input" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">التاريخ (كما في)</label>
+        <input type="date" className="ktra-input" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
       </div>
-      <div className="aseel-field" style={{ minWidth: "140px" }}>
-        <label className="aseel-field-label">العملة</label>
-        <select className="aseel-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value)}>
+      <div className="ktra-field" style={{ minWidth: "140px" }}>
+        <label className="ktra-field-label">العملة</label>
+        <select className="ktra-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value)}>
           <option value="">الأساسية</option>
           {currencies.map((c) => (
             <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>
           ))}
         </select>
       </div>
-      <button type="button" className="aseel-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
+      <button type="button" className="ktra-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
         <Search className="w-4 h-4" />عرض
       </button>
     </div>
@@ -117,18 +117,18 @@ export const BalanceSheetPage: React.FC = () => {
 
   const reportContent = (
     <>
-      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
       {!isBalanced && rows.length > 0 && (
-        <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>
+        <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>
           تحذير: الأصول ({fmt(totalAssets)}) ≠ الخصوم وحقوق الملكية ({fmt(totalLiabilities)})
         </div>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
         <div>
-          <div style={{ fontWeight: "bold", padding: "8px 0", borderBottom: "2px solid var(--aseel-border)", marginBottom: "8px" }}>
+          <div style={{ fontWeight: "bold", padding: "8px 0", borderBottom: "2px solid var(--ktra-border)", marginBottom: "8px" }}>
             الأصول
           </div>
-          <AseelReportTable<BalanceSheetRow>
+          <KitReportTable<BalanceSheetRow>
             filterBar={filterBar}
             columns={assetColumns}
             rows={assets}
@@ -138,16 +138,16 @@ export const BalanceSheetPage: React.FC = () => {
             emptyHint="لا بيانات"
             getRowKey={(r, idx) => `asset-${r.code || idx}`}
           />
-          <div className="aseel-total-row aseel-total-row--grand" style={{ marginTop: "4px" }}>
+          <div className="ktra-total-row ktra-total-row--grand" style={{ marginTop: "4px" }}>
             <span>إجمالي الأصول</span>
-            <span className="aseel-total-value">{fmt(totalAssets)}</span>
+            <span className="ktra-total-value">{fmt(totalAssets)}</span>
           </div>
         </div>
         <div>
-          <div style={{ fontWeight: "bold", padding: "8px 0", borderBottom: "2px solid var(--aseel-border)", marginBottom: "8px" }}>
+          <div style={{ fontWeight: "bold", padding: "8px 0", borderBottom: "2px solid var(--ktra-border)", marginBottom: "8px" }}>
             الخصوم وحقوق الملكية
           </div>
-          <AseelReportTable<BalanceSheetRow>
+          <KitReportTable<BalanceSheetRow>
             columns={liabilityColumns}
             rows={liabilities}
             totals={liabilities.length > 0 ? { amount: fmt(totalLiabilities) } : undefined}
@@ -156,40 +156,40 @@ export const BalanceSheetPage: React.FC = () => {
             emptyHint="لا بيانات"
             getRowKey={(r, idx) => `liab-${r.code || idx}`}
           />
-          <div className="aseel-total-row aseel-total-row--grand" style={{ marginTop: "4px" }}>
+          <div className="ktra-total-row ktra-total-row--grand" style={{ marginTop: "4px" }}>
             <span>إجمالي الخصوم وحقوق الملكية</span>
-            <span className="aseel-total-value">{fmt(totalLiabilities)}</span>
+            <span className="ktra-total-value">{fmt(totalLiabilities)}</span>
           </div>
         </div>
       </div>
     </>
   );
 
-  const shellActions: AseelToolbarAction[] = [
+  const shellActions: KitToolbarAction[] = [
     { key: "run", label: "عرض", icon: <Search className="w-4 h-4" />, onClick: fetchData },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "bs", label: "الميزانية العمومية", content: reportContent },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="الميزانية العمومية"
         actions={shellActions}
         header={filterBar}
         tabs={tabs}
         status={
           rows.length > 0 ? (
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               {isBalanced ? "متوازنة ✓" : "غير متوازنة ✗"} | كما في {asOf}
             </span>
           ) : undefined
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

@@ -7,33 +7,33 @@ export const StatusBadge: React.FC<{ status: PriceOfferStatus }> = ({ status }) 
         initial: {
             label: "أولية",
             icon: Clock,
-            bg: "aseel-bg-panel dark:aseel-bg-panel",
-            text: "aseel-text-ink dark:aseel-text-soft",
-            border: "aseel-border-soft dark:aseel-border-soft",
-            iconColor: "aseel-text-soft dark:aseel-text-soft"
+            bg: "ktra-bg-panel dark:ktra-bg-panel",
+            text: "ktra-text-ink dark:ktra-text-soft",
+            border: "ktra-border-soft dark:ktra-border-soft",
+            iconColor: "ktra-text-soft dark:ktra-text-soft"
         },
         pending_info: {
             label: "بانتظار المعلومات",
             icon: AlertCircle,
-            bg: "aseel-bg-panel dark:aseel-bg-panel/30",
-            text: "aseel-text-ink dark:aseel-text-soft",
-            border: "aseel-border-soft dark:aseel-border-soft",
-            iconColor: "aseel-text-soft dark:aseel-text-soft"
+            bg: "ktra-bg-panel dark:ktra-bg-panel/30",
+            text: "ktra-text-ink dark:ktra-text-soft",
+            border: "ktra-border-soft dark:ktra-border-soft",
+            iconColor: "ktra-text-soft dark:ktra-text-soft"
         },
         under_discussion: {
             label: "تحت المناقشة",
             icon: MessageSquare,
-            bg: "aseel-bg-accent-bg dark:aseel-bg-panel/30",
-            text: "aseel-text-ink dark:aseel-text-soft",
-            border: "aseel-border-accent dark:aseel-border-soft",
-            iconColor: "aseel-text-soft dark:aseel-text-soft"
+            bg: "ktra-bg-accent-bg dark:ktra-bg-panel/30",
+            text: "ktra-text-ink dark:ktra-text-soft",
+            border: "ktra-border-accent dark:ktra-border-soft",
+            iconColor: "ktra-text-soft dark:ktra-text-soft"
         },
         approved_for_shipping: {
             label: "معتمدة للشراء ",
             icon: CheckSquare,
             bg: "bg-green-100 dark:bg-green-900/30",
             text: "text-green-800 dark:text-green-300",
-            border: "aseel-border-soft dark:border-green-800",
+            border: "ktra-border-soft dark:border-green-800",
             iconColor: "text-green-500 dark:text-green-400"
         }
     };

@@ -2,11 +2,11 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { accountingApi } from "../../services/accountingApi";
 import type { AccountingAccount } from "../../types/accounting";
 import {
-  AseelDocumentShell,
-  useAseelKeymap,
+  KitDocumentShell,
+  useKitKeymap,
   useRecordNavigation,
-} from "../aseel";
-import type { AseelToolbarAction } from "../aseel";
+} from "../kit";
+import type { KitToolbarAction } from "../kit";
 import {
   accountNature,
   accountPath,
@@ -352,12 +352,12 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
   }, [confirm, load, selected, toast]);
 
   const focusSearch = useCallback(() => {
-    document.querySelector<HTMLInputElement>('[data-aseel-field="search"]')?.focus();
+    document.querySelector<HTMLInputElement>('[data-ktra-field="search"]')?.focus();
   }, []);
 
   // مفاتيح الأصيل كما في نافذة شجرة الحسابات: جديد F2 · تعديل F3 · حذف F4 ·
   // حفظ F5 · بحث F6 · خروج Esc.
-  useAseelKeymap({
+  useKitKeymap({
     F2: () => startCreate(selected),
     F3: startEdit,
     F4: () => void remove(),
@@ -428,50 +428,50 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
   };
 
   const tree = (
-    <aside className="aseel-tree-panel aseel-tree-panel--coa" aria-label="شجرة الحسابات">
-      <div className="aseel-tree-head">
+    <aside className="ktra-tree-panel ktra-tree-panel--coa" aria-label="شجرة الحسابات">
+      <div className="ktra-tree-head">
         <FolderTree className="w-4 h-4" />
         <span style={{ fontWeight: 700 }}>شجرة الحسابات</span>
-        <span className="aseel-tree-count">{accounts.length}</span>
+        <span className="ktra-tree-count">{accounts.length}</span>
       </div>
-      <div className="aseel-tree-search">
+      <div className="ktra-tree-search">
         <Search className="w-3.5 h-3.5" />
         <input
-          className="aseel-input"
-          data-aseel-field="search"
+          className="ktra-input"
+          data-ktra-field="search"
           placeholder="بحث بالكود أو الاسم… (F6)"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
         {searchTerm && (
-          <button type="button" className="aseel-tree-act" title="مسح البحث"
+          <button type="button" className="ktra-tree-act" title="مسح البحث"
             onClick={() => setSearchTerm("")}>
             <X className="w-3.5 h-3.5" />
           </button>
         )}
       </div>
-      <div className="aseel-tree-actions">
-        <button type="button" className="aseel-toolbtn" onClick={expandAll}>توسيع الكل</button>
-        <button type="button" className="aseel-toolbtn" onClick={collapseAll}>طيّ الكل</button>
-        <label className="flex items-center gap-1" style={{ fontSize: "var(--aseel-fs-sm)" }}>
+      <div className="ktra-tree-actions">
+        <button type="button" className="ktra-toolbtn" onClick={expandAll}>توسيع الكل</button>
+        <button type="button" className="ktra-toolbtn" onClick={collapseAll}>طيّ الكل</button>
+        <label className="flex items-center gap-1" style={{ fontSize: "var(--ktra-fs-sm)" }}>
           <input type="checkbox" checked={activeOnly}
             onChange={(e) => setActiveOnly(e.target.checked)} />
           النشطة فقط
         </label>
       </div>
       <div
-        className="aseel-tree-body"
+        className="ktra-tree-body"
         role="tree"
         tabIndex={0}
         ref={treeBodyRef}
         onKeyDown={onTreeKeyDown}
       >
         {loading ? (
-          <div style={{ padding: "16px", textAlign: "center", color: "var(--aseel-ink-soft)" }}>
+          <div style={{ padding: "16px", textAlign: "center", color: "var(--ktra-ink-soft)" }}>
             جاري التحميل…
           </div>
         ) : rows.length === 0 ? (
-          <div style={{ padding: "16px", textAlign: "center", color: "var(--aseel-ink-soft)" }}>
+          <div style={{ padding: "16px", textAlign: "center", color: "var(--ktra-ink-soft)" }}>
             {accounts.length === 0 ? "لا توجد حسابات. أضف حساباً رئيسياً." : "لا نتائج"}
           </div>
         ) : (
@@ -489,11 +489,11 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
                 aria-level={row.depth + 1}
                 aria-expanded={row.hasChildren ? row.expanded : undefined}
                 aria-selected={isSel}
-                className={row.hasChildren ? "aseel-tree-node" : "aseel-tree-leaf"}
+                className={row.hasChildren ? "ktra-tree-node" : "ktra-tree-leaf"}
                 style={{
                   paddingInlineStart: `${4 + row.depth * 14}px`,
                   fontWeight: row.hasChildren ? 600 : 400,
-                  background: isSel ? "var(--aseel-row-sel)" : undefined,
+                  background: isSel ? "var(--ktra-row-sel)" : undefined,
                   opacity: a.is_active ? 1 : 0.55,
                 }}
                 onClick={() => void selectAccount(a.id)}
@@ -506,7 +506,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
                 {row.hasChildren ? (
                   <button
                     type="button"
-                    className="aseel-tree-twisty"
+                    className="ktra-tree-twisty"
                     aria-label={row.expanded ? "طيّ" : "فتح"}
                     onClick={(e) => { e.stopPropagation(); toggle(a.id); }}
                   >
@@ -520,7 +520,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
                     title="حساب رئيسي"
                     style={{
                       flexShrink: 0, width: "15px", textAlign: "center", fontWeight: 700,
-                      color: "var(--aseel-accent)",
+                      color: "var(--ktra-accent)",
                     }}
                   >
                     {letter}
@@ -555,36 +555,36 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
 
   const pane = (
     <div style={{ padding: "10px 12px", maxWidth: "620px" }}>
-      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
 
       {!selected && !editing ? (
-        <div style={{ padding: "40px 8px", color: "var(--aseel-ink-soft)", textAlign: "center" }}>
+        <div style={{ padding: "40px 8px", color: "var(--ktra-ink-soft)", textAlign: "center" }}>
           اختر حساباً من الشجرة لعرض بطاقته، أو «حساب رئيسي» لإضافة جذر جديد.
         </div>
       ) : (
         <>
-          <div className="aseel-field">
-            <label className="aseel-field-label" style={{ minWidth: "110px" }}>رقم الحساب</label>
+          <div className="ktra-field">
+            <label className="ktra-field-label" style={{ minWidth: "110px" }}>رقم الحساب</label>
             <input
-              className="aseel-input font-mono"
+              className="ktra-input font-mono"
               value={editing ? form.code : selected?.code || ""}
               readOnly={readOnly}
               onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
             />
           </div>
-          <div className="aseel-field" style={{ marginTop: "6px" }}>
-            <label className="aseel-field-label" style={{ minWidth: "110px" }}>وصف الحساب</label>
+          <div className="ktra-field" style={{ marginTop: "6px" }}>
+            <label className="ktra-field-label" style={{ minWidth: "110px" }}>وصف الحساب</label>
             <input
-              className="aseel-input"
+              className="ktra-input"
               value={editing ? form.name : selected?.name || ""}
               readOnly={readOnly}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
             />
           </div>
-          <div className="aseel-field" style={{ marginTop: "6px" }}>
-            <label className="aseel-field-label" style={{ minWidth: "110px" }}>نوع الحساب</label>
+          <div className="ktra-field" style={{ marginTop: "6px" }}>
+            <label className="ktra-field-label" style={{ minWidth: "110px" }}>نوع الحساب</label>
             <select
-              className="aseel-input"
+              className="ktra-input"
               value={editing ? form.account_type : selected?.account_type || ""}
               disabled={readOnly}
               onChange={(e) => setForm((f) => ({ ...f, account_type: e.target.value }))}
@@ -595,10 +595,10 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
             </select>
           </div>
           {/* THA-111: الغرض الذي يظهر فيه الحساب داخل منتقيات الحسابات. */}
-          <div className="aseel-field" style={{ marginTop: "6px" }}>
-            <label className="aseel-field-label" style={{ minWidth: "110px" }}>التصنيف الوظيفي</label>
+          <div className="ktra-field" style={{ marginTop: "6px" }}>
+            <label className="ktra-field-label" style={{ minWidth: "110px" }}>التصنيف الوظيفي</label>
             <select
-              className="aseel-input"
+              className="ktra-input"
               value={editing ? form.sub_type : selected?.sub_type || ""}
               disabled={readOnly}
               onChange={(e) => setForm((f) => ({ ...f, sub_type: e.target.value }))}
@@ -608,16 +608,16 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
               ))}
             </select>
           </div>
-          <p className="mt-1 text-[11px] text-[var(--aseel-ink-soft)]">
+          <p className="mt-1 text-[11px] text-[var(--ktra-ink-soft)]">
             يحدّد في أي الحقول يُعرض هذا الحساب — حقل الصندوق يعرض الصناديق والبنوك
             وحدها، وهكذا. «—» يعني حساباً عادياً يكفيه نوعه.
           </p>
 
           {/* حقول مشتقّة — تُعرض ولا تُدخَل (الأصيل يشتقّها من نوع الحساب). */}
-          <div className="aseel-field" style={{ marginTop: "6px" }}>
-            <label className="aseel-field-label" style={{ minWidth: "110px" }}>نوع الحساب الختامي</label>
+          <div className="ktra-field" style={{ marginTop: "6px" }}>
+            <label className="ktra-field-label" style={{ minWidth: "110px" }}>نوع الحساب الختامي</label>
             <input
-              className="aseel-input aseel-input--hl"
+              className="ktra-input ktra-input--hl"
               readOnly
               value={
                 (editing ? formStatement : statementKey)
@@ -626,10 +626,10 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
               }
             />
           </div>
-          <div className="aseel-field" style={{ marginTop: "6px" }}>
-            <label className="aseel-field-label" style={{ minWidth: "110px" }}>طبيعة الحساب</label>
+          <div className="ktra-field" style={{ marginTop: "6px" }}>
+            <label className="ktra-field-label" style={{ minWidth: "110px" }}>طبيعة الحساب</label>
             <input
-              className="aseel-input aseel-input--hl"
+              className="ktra-input ktra-input--hl"
               readOnly
               value={
                 (editing ? formNature : natureKey)
@@ -638,11 +638,11 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
               }
             />
           </div>
-          <div className="aseel-field" style={{ marginTop: "6px" }}>
-            <label className="aseel-field-label" style={{ minWidth: "110px" }}>يتبع حساب</label>
-            <input className="aseel-input" readOnly value={parentPath || "— حساب رئيسي —"} />
+          <div className="ktra-field" style={{ marginTop: "6px" }}>
+            <label className="ktra-field-label" style={{ minWidth: "110px" }}>يتبع حساب</label>
+            <input className="ktra-input" readOnly value={parentPath || "— حساب رئيسي —"} />
           </div>
-          <label className="flex items-center gap-2" style={{ marginTop: "8px", fontSize: "var(--aseel-fs)" }}>
+          <label className="flex items-center gap-2" style={{ marginTop: "8px", fontSize: "var(--ktra-fs)" }}>
             <input
               type="checkbox"
               checked={editing ? form.is_active : !!selected?.is_active}
@@ -654,7 +654,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
 
           {selected?.linked_partner && !editing && (
             <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-              <span style={{ color: "var(--aseel-ink-soft)", fontSize: "var(--aseel-fs-sm)" }}>
+              <span style={{ color: "var(--ktra-ink-soft)", fontSize: "var(--ktra-fs-sm)" }}>
                 مرتبط بالطرف:
               </span>
               <span style={{ fontWeight: 600 }}>
@@ -662,7 +662,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
               </span>
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 onClick={() => onOpenSupplier?.(selected.linked_partner!.id)}
               >
                 <ExternalLink className="w-3.5 h-3.5" />بطاقة الطرف
@@ -674,14 +674,14 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
             <div style={{ marginTop: "12px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 onClick={() => onOpenGeneralLedger?.(selected.id)}
               >
                 <BookOpen className="w-4 h-4" />الرصيد الحالي (الأستاذ العام)
               </button>
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 onClick={(e) => openRowMenu(selected, e.currentTarget)}
               >
                 <MoreHorizontal className="w-4 h-4" />خيارات
@@ -693,7 +693,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
     </div>
   );
 
-  const shellActions: AseelToolbarAction[] = [
+  const shellActions: KitToolbarAction[] = [
     {
       key: "new-child",
       label: selected && !editing ? "جديد F2 (فرعي)" : "جديد F2",
@@ -743,7 +743,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="شجرة الحسابات"
         state={mode === "create" ? "حساب جديد" : mode === "edit" ? "تعديل" : undefined}
         nav={nav}
@@ -751,16 +751,16 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
         aside={tree}
         status={
           <>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               <FolderTree className="w-3 h-3" />
               الحساب {nav.position} من {nav.total} · {accounts.length} حساب
             </span>
-            {selectedPath && <span className="aseel-status-item">{selectedPath}</span>}
+            {selectedPath && <span className="ktra-status-item">{selectedPath}</span>}
           </>
         }
       >
         {pane}
-      </AseelDocumentShell>
+      </KitDocumentShell>
 
       {rowMenu && (
         <div

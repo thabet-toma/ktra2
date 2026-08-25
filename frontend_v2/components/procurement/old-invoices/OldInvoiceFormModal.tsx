@@ -378,24 +378,24 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
 
     return (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
-            <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl shadow-2xl w-full max-w-6xl my-8 flex flex-col relative">
+            <div className="ktra-bg-field dark:ktra-bg-panel rounded-2xl shadow-2xl w-full max-w-6xl my-8 flex flex-col relative">
                 {/* Header */}
-                <div className="sticky top-0 aseel-bg-field dark:aseel-bg-panel p-6 border-b aseel-border-soft dark:aseel-border-soft flex justify-between items-center z-20 rounded-t-2xl">
+                <div className="sticky top-0 ktra-bg-field dark:ktra-bg-panel p-6 border-b ktra-border-soft dark:ktra-border-soft flex justify-between items-center z-20 rounded-t-2xl">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 aseel-bg-accent-bg dark:aseel-bg-panel/30 rounded-lg">
-                            <FileText className="w-6 h-6 aseel-text-accent dark:aseel-text-soft" />
+                        <div className="p-2 ktra-bg-accent-bg dark:ktra-bg-panel/30 rounded-lg">
+                            <FileText className="w-6 h-6 ktra-text-accent dark:ktra-text-soft" />
                         </div>
                         <div>
-                            <h2 className="text-2xl font-bold aseel-text-ink dark:text-white">
+                            <h2 className="text-2xl font-bold ktra-text-ink dark:text-white">
                                 {initialData ? 'تعديل فاتورة مؤرشفة' : 'إضافة فاتورة قديمة للأرشيف'}
                             </h2>
-                            <p className="text-sm aseel-text-soft dark:aseel-text-soft">
+                            <p className="text-sm ktra-text-soft dark:ktra-text-soft">
                                 {initialData ? `رقم الفاتورة: ${initialData.invoiceNumber}` : 'إدخال بيانات فاتورة سابقة لغرض الأرشفة ومتابعة الأسعار'}
                             </p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg">
-                        <X className="w-6 h-6 aseel-text-soft" />
+                    <button onClick={onClose} className="p-2 hover:ktra-bg-panel dark:hover:ktra-bg-panel rounded-lg">
+                        <X className="w-6 h-6 ktra-text-soft" />
                     </button>
                 </div>
 
@@ -407,18 +407,18 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                         <div className="space-y-6">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-2">
+                                    <label className="block text-sm font-semibold ktra-text-ink dark:ktra-text-soft mb-2">
                                         تاريخ الفاتورة *
                                     </label>
                                     <input
                                         type="date"
                                         value={invoiceDate}
                                         onChange={(e) => setInvoiceDate(e.target.value)}
-                                        className="w-full px-4 py-3 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-4 py-3 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel ktra-text-ink dark:text-white focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-2">
+                                    <label className="block text-sm font-semibold ktra-text-ink dark:ktra-text-soft mb-2">
                                         رقم الفاتورة *
                                     </label>
                                     <input
@@ -426,22 +426,22 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                         value={invoiceNumber}
                                         onChange={(e) => setInvoiceNumber(e.target.value)}
                                         placeholder="مثال: 00123"
-                                        className="w-full px-4 py-3 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-4 py-3 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel ktra-text-ink dark:text-white focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-2">
+                                <label className="block text-sm font-semibold ktra-text-ink dark:ktra-text-soft mb-2">
                                     رابط الفاتورة (اختياري)
                                 </label>
                                 <div className="relative">
-                                    <ExternalLink className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 aseel-text-soft" />
+                                    <ExternalLink className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 ktra-text-soft" />
                                     <input
                                         type="url"
                                         value={invoiceLink}
                                         onChange={(e) => setInvoiceLink(e.target.value)}
                                         placeholder="https://example.com/invoice/123"
-                                        className="w-full pr-10 pl-4 py-3 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white focus:ring-2 focus:ring-blue-500 text-left"
+                                        className="w-full pr-10 pl-4 py-3 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel ktra-text-ink dark:text-white focus:ring-2 focus:ring-blue-500 text-left"
                                         dir="ltr"
                                     />
                                 </div>
@@ -450,9 +450,9 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
 
                         {/* ✅ قسم اختيار المورد بالتنسيق الجديد */}
                         <div className="space-y-1.5">
-                            <label className="block text-xs font-semibold aseel-text-ink dark:aseel-text-soft flex items-center gap-1.5">
-                                <Building className="w-3.5 h-3.5 aseel-text-accent" />
-                                المورد / المصنع <span className="aseel-text-soft">*</span>
+                            <label className="block text-xs font-semibold ktra-text-ink dark:ktra-text-soft flex items-center gap-1.5">
+                                <Building className="w-3.5 h-3.5 ktra-text-accent" />
+                                المورد / المصنع <span className="ktra-text-soft">*</span>
                             </label>
                             <SupplierSearch
                                 suppliers={suppliers}
@@ -522,22 +522,22 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                         <div className="lg:col-span-2 space-y-6">
                             {/* Notes */}
                             <div>
-                                <label className="block text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-2">
+                                <label className="block text-sm font-semibold ktra-text-ink dark:ktra-text-soft mb-2">
                                     ملاحظات
                                 </label>
                                 <textarea
                                     rows={3}
                                     value={notes}
                                     onChange={(e) => setNotes(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel focus:ring-2 focus:ring-blue-500"
+                                    className="w-full px-4 py-3 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel focus:ring-2 focus:ring-blue-500"
                                     placeholder="ملاحظات إضافية..."
                                 />
                             </div>
 
                             {/* Attachments */}
-                            <div className="aseel-bg-panel dark:aseel-bg-panel/30 p-6 rounded-xl border aseel-border-soft dark:aseel-border-soft">
-                                <h4 className="font-bold aseel-text-ink dark:text-white mb-4 flex items-center gap-2">
-                                    <Paperclip className="w-5 h-5 aseel-text-soft" /> المرفقات
+                            <div className="ktra-bg-panel dark:ktra-bg-panel/30 p-6 rounded-xl border ktra-border-soft dark:ktra-border-soft">
+                                <h4 className="font-bold ktra-text-ink dark:text-white mb-4 flex items-center gap-2">
+                                    <Paperclip className="w-5 h-5 ktra-text-soft" /> المرفقات
                                 </h4>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -565,26 +565,26 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                 {/* File List */}
                                 <div className="space-y-3">
                                     {imageUrls.map((url, i) => (
-                                        <div key={i} className="flex items-center justify-between p-2 aseel-bg-field dark:aseel-bg-panel rounded border aseel-border-soft dark:aseel-border-soft">
+                                        <div key={i} className="flex items-center justify-between p-2 ktra-bg-field dark:ktra-bg-panel rounded border ktra-border-soft dark:ktra-border-soft">
                                             <div className="flex items-center gap-3">
                                                 <img src={url} alt="Attachment" className="w-10 h-10 rounded object-cover" />
                                                 <span className="text-sm truncate max-w-[150px]">Image {i + 1}</span>
                                             </div>
-                                            <button onClick={() => setImageUrls(prev => prev.filter((_, idx) => idx !== i))} className="aseel-text-soft hover:aseel-bg-panel p-1 rounded">
+                                            <button onClick={() => setImageUrls(prev => prev.filter((_, idx) => idx !== i))} className="ktra-text-soft hover:ktra-bg-panel p-1 rounded">
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>
                                     ))}
                                     {pdfFiles.map((file, i) => (
-                                        <div key={i} className="flex items-center justify-between p-2 aseel-bg-field dark:aseel-bg-panel rounded border aseel-border-soft dark:aseel-border-soft">
+                                        <div key={i} className="flex items-center justify-between p-2 ktra-bg-field dark:ktra-bg-panel rounded border ktra-border-soft dark:ktra-border-soft">
                                             <div className="flex items-center gap-3">
-                                                <FileText className="w-8 h-8 aseel-text-soft" />
+                                                <FileText className="w-8 h-8 ktra-text-soft" />
                                                 <div className="text-sm">
                                                     <div className="font-medium truncate max-w-[150px]">{file.name}</div>
-                                                    <div className="text-xs aseel-text-soft">{(file.size / 1024).toFixed(1)} KB</div>
+                                                    <div className="text-xs ktra-text-soft">{(file.size / 1024).toFixed(1)} KB</div>
                                                 </div>
                                             </div>
-                                            <button onClick={() => setPdfFiles(prev => prev.filter((_, idx) => idx !== i))} className="aseel-text-soft hover:aseel-bg-panel p-1 rounded">
+                                            <button onClick={() => setPdfFiles(prev => prev.filter((_, idx) => idx !== i))} className="ktra-text-soft hover:ktra-bg-panel p-1 rounded">
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>
@@ -594,27 +594,27 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                         </div>
 
                         {/* Totals Box */}
-                        <div className="bg-gradient-to-b aseel-bg-panel to-white dark:aseel-bg-panel dark:aseel-bg-panel p-6 rounded-xl border aseel-border-soft dark:aseel-border-soft shadow-lg h-fit">
-                            <h3 className="text-xl font-bold aseel-text-ink dark:text-white mb-6 flex items-center gap-2">
-                                <Calculator className="w-6 h-6 aseel-text-accent" /> ملخص الفاتورة
+                        <div className="bg-gradient-to-b ktra-bg-panel to-white dark:ktra-bg-panel dark:ktra-bg-panel p-6 rounded-xl border ktra-border-soft dark:ktra-border-soft shadow-lg h-fit">
+                            <h3 className="text-xl font-bold ktra-text-ink dark:text-white mb-6 flex items-center gap-2">
+                                <Calculator className="w-6 h-6 ktra-text-accent" /> ملخص الفاتورة
                             </h3>
 
                             <div className="space-y-4">
-                                <div className="flex justify-between py-2 border-b dark:aseel-border-soft">
-                                    <span className="aseel-text-soft dark:aseel-text-soft">المجموع الفرعي</span>
+                                <div className="flex justify-between py-2 border-b dark:ktra-border-soft">
+                                    <span className="ktra-text-soft dark:ktra-text-soft">المجموع الفرعي</span>
                                     <span className="font-bold">{subtotal.toLocaleString()} $</span>
                                 </div>
-                                <div className="flex justify-between items-center py-2 border-b dark:aseel-border-soft">
-                                    <label className="text-sm aseel-text-soft dark:aseel-text-soft">خصم ($)</label>
+                                <div className="flex justify-between items-center py-2 border-b dark:ktra-border-soft">
+                                    <label className="text-sm ktra-text-soft dark:ktra-text-soft">خصم ($)</label>
                                     <input
                                         type="number"
                                         value={discount}
                                         onChange={e => setDiscount(parseFloat(e.target.value) || 0)}
-                                        className="w-24 px-2 py-1 text-right border rounded aseel-bg-field dark:aseel-bg-panel"
+                                        className="w-24 px-2 py-1 text-right border rounded ktra-bg-field dark:ktra-bg-panel"
                                     />
                                 </div>
-                                <div className="flex justify-between items-center py-2 border-b dark:aseel-border-soft">
-                                    <label className="text-sm aseel-text-soft dark:aseel-text-soft">الضريبة ({taxType === 'amount' ? '$' : '%'})</label>
+                                <div className="flex justify-between items-center py-2 border-b dark:ktra-border-soft">
+                                    <label className="text-sm ktra-text-soft dark:ktra-text-soft">الضريبة ({taxType === 'amount' ? '$' : '%'})</label>
                                     <div className="flex items-center gap-2">
                                         <input
                                             type="number"
@@ -624,9 +624,9 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                                 if (taxType === 'amount') setTaxAmountState(val);
                                                 else setTaxRate(val);
                                             }}
-                                            className="w-16 px-2 py-1 text-right border rounded aseel-bg-field dark:aseel-bg-panel"
+                                            className="w-16 px-2 py-1 text-right border rounded ktra-bg-field dark:ktra-bg-panel"
                                         />
-                                        <span className="text-xs aseel-text-soft">
+                                        <span className="text-xs ktra-text-soft">
                                             {taxType === 'percentage' ? `(${taxAmount.toLocaleString()} $)` : `(${taxRate} %)`}
                                         </span>
                                     </div>
@@ -634,14 +634,14 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                             </div>
                             <div className="pt-4 flex justify-between items-center text-xl font-bold">
                                 <span>الإجمالي</span>
-                                <span className="aseel-text-accent dark:aseel-text-soft">{grandTotal.toLocaleString()} $</span>
+                                <span className="ktra-text-accent dark:ktra-text-soft">{grandTotal.toLocaleString()} $</span>
                             </div>
                         </div>
 
                         <button
                             onClick={handleSubmit}
                             disabled={isSaving}
-                            className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r aseel-bg-panel to-[var(--color-primary)] text-white rounded-xl hover:shadow-lg disabled:opacity-50 transition-all font-bold"
+                            className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r ktra-bg-panel to-[var(--color-primary)] text-white rounded-xl hover:shadow-lg disabled:opacity-50 transition-all font-bold"
                         >
                             {isSaving ? <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" /> : <Save className="w-5 h-5" />}
                             {initialData ? 'حفظ التعديلات' : 'أرشفة الفاتورة'}

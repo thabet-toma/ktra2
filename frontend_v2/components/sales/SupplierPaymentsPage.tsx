@@ -17,13 +17,13 @@ import { humanizeThrown } from "../../utils/drfError";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { accountingApi } from "../../services/accountingApi";
 import {
-  AseelDocumentShell,
-  AseelDenseTable,
-  useAseelKeymap,
+  KitDocumentShell,
+  KitDenseTable,
+  useKitKeymap,
   type DenseColumn,
-  type AseelToolbarAction,
-  type AseelTab,
-} from "../aseel";
+  type KitToolbarAction,
+  type KitTab,
+} from "../kit";
 import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split, Undo2, Loader2 } from "lucide-react";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
@@ -108,7 +108,7 @@ export const SupplierPaymentsPage: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
-  useAseelKeymap({
+  useKitKeymap({
     F2: () => window.print(),
     F5: () => void load(),
     Escape: () => {
@@ -206,7 +206,7 @@ export const SupplierPaymentsPage: React.FC = () => {
     { key: "id", header: "#", width: "60px", align: "center", render: (r) => <span className="font-mono text-xs">#{r.id}</span> },
     { key: "payment_date", header: "التاريخ", width: "110px", align: "center", render: (r) => <span className="text-xs">{formatDateLocalized(r.payment_date)}</span> },
     { key: "supplier", header: "المورد", render: (r) => <span className="text-xs" data-ctx-partner-id={r.partner ?? undefined} data-ctx-partner-name={r.partner_name || partnerName(r.partner)} data-ctx-partner-kind="supplier">{r.partner_name || partnerName(r.partner)}</span> },
-    { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmt(r.amount)}</span> },
+    { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => <span className="ktra-num font-mono text-xs font-semibold">{fmt(r.amount)}</span> },
     {
       // T-ONACC: المتبقّي غير الموزَّع = رصيد لنا عند المورد.
       key: "unallocated", header: "على الحساب", width: "110px", align: "left", numeric: true,
@@ -214,8 +214,8 @@ export const SupplierPaymentsPage: React.FC = () => {
         const u = unallocatedOf(r);
         return (
           <span
-            className="aseel-num font-mono text-xs"
-            style={{ color: u > 0.009 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ink-soft)" }}
+            className="ktra-num font-mono text-xs"
+            style={{ color: u > 0.009 ? "var(--ktra-warn, #b06800)" : "var(--ktra-ink-soft)" }}
           >
             {fmt(u)}
           </span>
@@ -229,7 +229,7 @@ export const SupplierPaymentsPage: React.FC = () => {
         <span className="text-[11px]">
           {r.allocations && r.allocations.length > 0
             ? r.allocations.map((a) => `${a.invoice_number || "#" + a.invoice} = ${fmt(a.amount)}`).join(" · ")
-            : <span style={{ color: "var(--aseel-ink-soft)" }}>بدون توزيع</span>}
+            : <span style={{ color: "var(--ktra-ink-soft)" }}>بدون توزيع</span>}
         </span>
       ),
     },
@@ -240,7 +240,7 @@ export const SupplierPaymentsPage: React.FC = () => {
           style={{
             fontSize: "11px",
             fontWeight: 600,
-            color: r.is_posted ? "var(--aseel-ok, #2d7d46)" : "var(--aseel-warn, #b06800)",
+            color: r.is_posted ? "var(--ktra-ok, #2d7d46)" : "var(--ktra-warn, #b06800)",
           }}
         >
           {r.is_posted ? `مرحَّل ${r.journal ? "#" + r.journal : ""}` : "مسودة"}
@@ -254,18 +254,18 @@ export const SupplierPaymentsPage: React.FC = () => {
       render: (r) => (
         <div style={{ display: "flex", gap: "2px", justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
           {!r.is_posted && (
-            <button type="button" className="aseel-toolbtn" title="ترحيل" disabled={busyId != null} onClick={() => void handlePost(r.id)}>
+            <button type="button" className="ktra-toolbtn" title="ترحيل" disabled={busyId != null} onClick={() => void handlePost(r.id)}>
               {busyId === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
             </button>
           )}
           {r.is_posted && canPerm("purchase.payment.unpost") && (
-            <button type="button" className="aseel-toolbtn" title="تراجع عن الترحيل" disabled={busyId != null} onClick={() => void handleUnpost(r)}>
+            <button type="button" className="ktra-toolbtn" title="تراجع عن الترحيل" disabled={busyId != null} onClick={() => void handleUnpost(r)}>
               {busyId === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Undo2 className="w-3 h-3" />}
             </button>
           )}
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             title="توزيع على فواتير الشراء"
             disabled={unallocatedOf(r) <= 0.009}
             onClick={() => void openAllocation(r)}
@@ -280,7 +280,7 @@ export const SupplierPaymentsPage: React.FC = () => {
   const totalPending = payments.filter((p) => !p.is_posted).reduce((s, p) => s + Number(p.amount), 0);
   const totalPosted = payments.filter((p) => p.is_posted).reduce((s, p) => s + Number(p.amount), 0);
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "new", label: "سند صرف جديد (Ctrl+Ins)", icon: <Plus />, onClick: () => setShowForm(true) },
     {
       key: "refresh",
@@ -305,22 +305,22 @@ export const SupplierPaymentsPage: React.FC = () => {
     },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     {
       key: "list",
       label: "سندات الصرف",
       content: (
         <div style={{ padding: "8px" }}>
-          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-          {msg && <div className="aseel-banner" style={{ marginBottom: "8px", color: "var(--aseel-ok, #2d7d46)" }}>{msg}</div>}
+          {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+          {msg && <div className="ktra-banner" style={{ marginBottom: "8px", color: "var(--ktra-ok, #2d7d46)" }}>{msg}</div>}
 
-          <div className="aseel-banner" style={{ marginBottom: "8px", background: "var(--aseel-surface-2, #f4ede0)", fontSize: "11px", padding: "8px 12px" }}>
-            <AlertTriangle className="w-3 h-3 inline" style={{ marginInlineEnd: "4px", color: "var(--aseel-warn, #b06800)" }} />
+          <div className="ktra-banner" style={{ marginBottom: "8px", background: "var(--ktra-surface-2, #f4ede0)", fontSize: "11px", padding: "8px 12px" }}>
+            <AlertTriangle className="w-3 h-3 inline" style={{ marginInlineEnd: "4px", color: "var(--ktra-warn, #b06800)" }} />
             يُسجَّل المبلغ الإجمالي المصروف ويُرحَّل (Dr ذمم المورد / Cr الصندوق).
             تفصيل الشيكات وخصم المصدر لا يُحفظان بعد (نموذج مبسّط) — قيد التطوير.
           </div>
 
-          <AseelDenseTable<SupplierPaymentRow>
+          <KitDenseTable<SupplierPaymentRow>
             columns={columns}
             rows={filtered}
             getRowKey={(r) => r.id}
@@ -334,16 +334,16 @@ export const SupplierPaymentsPage: React.FC = () => {
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="سندات الصرف للموردين"
         state={`${filtered.length} سند`}
         actions={actions}
         header={
-          <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
-            <span className="aseel-field-label">بحث (مورد / رقم)</span>
+          <label className="ktra-field" style={{ flex: 1, minWidth: "200px" }}>
+            <span className="ktra-field-label">بحث (مورد / رقم)</span>
             <input
-              className="aseel-input"
-              data-aseel-field="search"
+              className="ktra-input"
+              data-ktra-field="search"
               placeholder="بحث... (F6)"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -353,10 +353,10 @@ export const SupplierPaymentsPage: React.FC = () => {
         tabs={tabs}
         status={
           <>
-            <span className="aseel-status-item"><Banknote className="w-3 h-3 inline" /> {filtered.length} سند</span>
-            <span className="aseel-status-item">مرحَّل <b className="aseel-num">{fmt(totalPosted)}</b></span>
-            <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b06800)" }}>
-              مسودة <b className="aseel-num">{fmt(totalPending)}</b>
+            <span className="ktra-status-item"><Banknote className="w-3 h-3 inline" /> {filtered.length} سند</span>
+            <span className="ktra-status-item">مرحَّل <b className="ktra-num">{fmt(totalPosted)}</b></span>
+            <span className="ktra-status-item" style={{ color: "var(--ktra-warn, #b06800)" }}>
+              مسودة <b className="ktra-num">{fmt(totalPending)}</b>
             </span>
           </>
         }

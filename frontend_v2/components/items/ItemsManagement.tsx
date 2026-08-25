@@ -1,17 +1,17 @@
 /**
- * N5-T3 — ItemsManagement (L4) — AseelDenseTable للأصناف
+ * N5-T3 — ItemsManagement (L4) — KitDenseTable للأصناف
  * يستخدم SQL products من inventoryApi (لا Firestore).
  */
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
-import { type DenseColumn } from "../aseel/AseelDenseTable";
+import { type DenseColumn } from "../kit/KitDenseTable";
 import { GroupedItemsTable, type TreeCategory } from "./GroupedItemsTable";
 import { Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer, Copy, ExternalLink, FolderTree } from "lucide-react";
-import { ItemFormAseel } from "./ItemFormAseel";
+import { ItemForm } from "./ItemForm";
 import { useProductInsights, useGroupInsights } from "./ProductInsightTabs";
-import { AseelTabs, type AseelTab } from "../aseel";
+import { KitTabs, type KitTab } from "../kit";
 import { CategoriesManagement } from "./CategoriesManagement";
 import { InvoiceCategoryTree } from "../procurement/invoices/InvoiceCategoryTree";
 import type { Item } from "../../types";
@@ -51,7 +51,7 @@ const STATUS_LABEL: Record<Exclude<StockStatus, "">, string> = {
 
 const exportItemStyle: React.CSSProperties = {
   display: "block", width: "100%", textAlign: "start", padding: "8px 12px",
-  background: "none", border: "none", cursor: "pointer", color: "var(--aseel-ink)",
+  background: "none", border: "none", cursor: "pointer", color: "var(--ktra-ink)",
 };
 
 /**
@@ -68,18 +68,18 @@ const TreePaneFrame: React.FC<{
   title: string;
   badge?: React.ReactNode;
   actions?: React.ReactNode;
-  tabs: AseelTab[];
+  tabs: KitTab[];
 }> = ({ icon, title, badge, actions, tabs }) => (
   <div className="flex h-full min-h-0 flex-col">
-    <div className="flex items-center gap-2 border-b border-[var(--aseel-border)] px-2 py-1.5">
+    <div className="flex items-center gap-2 border-b border-[var(--ktra-border)] px-2 py-1.5">
       {icon}
-      <b className="truncate text-[var(--aseel-ink)]" title={title}>{title}</b>
+      <b className="truncate text-[var(--ktra-ink)]" title={title}>{title}</b>
       {badge}
       <div className="flex-1" />
       {actions}
     </div>
     <div className="min-h-0 flex-1 overflow-auto">
-      <AseelTabs tabs={tabs} />
+      <KitTabs tabs={tabs} />
     </div>
   </div>
 );
@@ -98,18 +98,18 @@ const ProductTreePane: React.FC<{
   const title = profile?.name || productName || `صنف #${productId}`;
   return (
     <TreePaneFrame
-      icon={<Package className="h-4 w-4 shrink-0 text-[var(--aseel-ink-soft)]" />}
+      icon={<Package className="h-4 w-4 shrink-0 text-[var(--ktra-ink-soft)]" />}
       title={title}
-      badge={profile?.sku ? <span className="aseel-status-item" dir="ltr">{profile.sku}</span> : null}
+      badge={profile?.sku ? <span className="ktra-status-item" dir="ltr">{profile.sku}</span> : null}
       tabs={tabs}
       actions={
         <>
-          <button type="button" className="aseel-toolbtn" onClick={onEdit} title="تعديل هذا الصنف">
+          <button type="button" className="ktra-toolbtn" onClick={onEdit} title="تعديل هذا الصنف">
             <Edit2 className="h-4 w-4" /> تعديل
           </button>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             onClick={() => openInNewTab(productProfilePath(productId))}
             title="فتح الكرت الكامل في تبويب مستقل"
           >
@@ -138,12 +138,12 @@ const GroupTreePane: React.FC<{
     <TreePaneFrame
       icon={<FolderTree className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />}
       title={`كرت مجمّع: ${title}`}
-      badge={<span className="aseel-status-item">{count} صنف</span>}
+      badge={<span className="ktra-status-item">{count} صنف</span>}
       tabs={tabs}
       actions={
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           disabled={!ids.length && categoryId == null}
           onClick={() => openInNewTab(productGroupPath({ name: title, categoryId, ids }))}
           title="فتح الكرت المجمّع في تبويب مستقل"
@@ -409,7 +409,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       render: (p) => {
         const qty = Number(p.quantity_on_hand);
         const low = qty <= 0;
-        return <span title="المخزون الحالي" style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
+        return <span title="المخزون الحالي" style={low ? { color: "var(--ktra-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
       }
     },
     // T-RESERVE: المحجوز لطلبيات الزبائن المؤكَّدة السارية — البيع من «المتاح» لا
@@ -417,10 +417,10 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     { key: "reserved", header: "محجوز", width: "80px", align: "center", numeric: true,
       render: (p) => {
         const reserved = Number(p.reserved_quantity || 0);
-        if (!reserved) return <span className="text-[var(--aseel-ink-soft)]">—</span>;
+        if (!reserved) return <span className="text-[var(--ktra-ink-soft)]">—</span>;
         return (
           <span title="محجوز بطلبيات زبائن مؤكَّدة سارية"
-            style={{ color: "var(--aseel-warn, #b06800)", fontWeight: 600 }}>
+            style={{ color: "var(--ktra-warn, #b06800)", fontWeight: 600 }}>
             {formatQuantity(reserved)}
           </span>
         );
@@ -441,7 +441,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
         <button
           type="button"
-          className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+          className="text-[var(--ktra-accent,#2563eb)] underline hover:opacity-80"
           title="فتح كرت الصنف هنا"
           data-ctx-item-id={p.id}
           data-ctx-item-name={p.display_name || p.name_ar || p.name_en || ""}
@@ -451,7 +451,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         </button>
         <button
           type="button"
-          className="aseel-iconbtn"
+          className="ktra-iconbtn"
           title="فتح في تبويب مستقل"
           aria-label="فتح في تبويب مستقل"
           onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
@@ -485,24 +485,24 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     { key: "grp", header: "النوع", width: "120px",
       render: (p) => p.variant_group
         ? <>{p.variant_group}</>
-        : <span style={{ color: "var(--aseel-ink-soft)" }}
+        : <span style={{ color: "var(--ktra-ink-soft)" }}
             title="بلا نوع — لن تظهر له بدائل في الفاتورة">—</span> },
     { key: "status", header: "الحالة", width: "80px", align: "center",
       render: (p) => {
-        if (p.stock_status === "out_of_stock") return <span style={{ color: "var(--aseel-danger,#c00)" }}>نفذ</span>;
-        if (p.stock_status === "low_stock") return <span style={{ color: "var(--aseel-warn,#b8800a)" }}>منخفض</span>;
-        if (p.stock_status === "overstock") return <span style={{ color: "var(--aseel-warn,#b8800a)" }}>فائض</span>;
-        return <span style={{ color: "var(--aseel-ok,#267346)" }}>متوفر</span>;
+        if (p.stock_status === "out_of_stock") return <span style={{ color: "var(--ktra-danger,#c00)" }}>نفذ</span>;
+        if (p.stock_status === "low_stock") return <span style={{ color: "var(--ktra-warn,#b8800a)" }}>منخفض</span>;
+        if (p.stock_status === "overstock") return <span style={{ color: "var(--ktra-warn,#b8800a)" }}>فائض</span>;
+        return <span style={{ color: "var(--ktra-ok,#267346)" }}>متوفر</span>;
       }
     },
     { key: "edit", header: "", width: "70px", align: "center",
       render: (p) => (
         <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
-          <button className="aseel-iconbtn" title="تعديل"
+          <button className="ktra-iconbtn" title="تعديل"
             onClick={(e) => { e.stopPropagation(); setEditId(p.id); setDuplicateId(null); setView("form"); }}>
             <Edit2 className="h-3.5 w-3.5" />
           </button>
-          <button className="aseel-iconbtn text-indigo-600 hover:bg-indigo-50" title="إضافة براند آخر (تكرار)"
+          <button className="ktra-iconbtn text-indigo-600 hover:bg-indigo-50" title="إضافة براند آخر (تكرار)"
             onClick={(e) => { e.stopPropagation(); setDuplicateId(p.id); setEditId(null); setView("form"); }}>
             <Copy className="h-3.5 w-3.5" />
           </button>
@@ -513,7 +513,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
 
   if (view === "form") {
     return (
-      <ItemFormAseel
+      <ItemForm
         productId={editId}
         duplicateId={duplicateId}
         products={products}
@@ -526,13 +526,13 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   return (
     <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", padding: "8px 12px" }}>
       {/* Tabs Header */}
-      <div style={{ display: "flex", gap: "16px", borderBottom: "1px solid var(--aseel-border)", marginBottom: "8px" }}>
+      <div style={{ display: "flex", gap: "16px", borderBottom: "1px solid var(--ktra-border)", marginBottom: "8px" }}>
         <button
           onClick={() => setActiveTab("products")}
           style={{
             padding: "8px 16px",
-            borderBottom: activeTab === "products" ? "2px solid var(--aseel-primary)" : "2px solid transparent",
-            color: activeTab === "products" ? "var(--aseel-primary)" : "var(--aseel-ink)",
+            borderBottom: activeTab === "products" ? "2px solid var(--ktra-primary)" : "2px solid transparent",
+            color: activeTab === "products" ? "var(--ktra-primary)" : "var(--ktra-ink)",
             fontWeight: activeTab === "products" ? "bold" : "normal",
             background: "none",
             borderTop: "none", borderLeft: "none", borderRight: "none",
@@ -545,8 +545,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           onClick={() => setActiveTab("categories")}
           style={{
             padding: "8px 16px",
-            borderBottom: activeTab === "categories" ? "2px solid var(--aseel-primary)" : "2px solid transparent",
-            color: activeTab === "categories" ? "var(--aseel-primary)" : "var(--aseel-ink)",
+            borderBottom: activeTab === "categories" ? "2px solid var(--ktra-primary)" : "2px solid transparent",
+            color: activeTab === "categories" ? "var(--ktra-primary)" : "var(--ktra-ink)",
             fontWeight: activeTab === "categories" ? "bold" : "normal",
             background: "none",
             borderTop: "none", borderLeft: "none", borderRight: "none",
@@ -564,11 +564,11 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       ) : (
         <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
+            <strong style={{ fontSize: "var(--ktra-fs-title, 14px)", color: "var(--ktra-ink)" }}>
               إدارة الأصناف
             </strong>
             {/* P0-12: الإجمالي من الخادم (count) لا من طول الصفحة المعروضة. */}
-            <span className="aseel-status-item">الإجمالي: <b>{total}</b></span>
+            <span className="ktra-status-item">الإجمالي: <b>{total}</b></span>
         {/* Phase 2 wiring — freshness/cache indicator */}
         <StalenessBadge updatedAt={lastSync} />
         {fromCache && (
@@ -582,11 +582,11 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           </span>
         )}
         <div style={{ flex: 1 }} />
-        <input className="aseel-input" style={{ width: 200 }}
+        <input className="ktra-input" style={{ width: 200 }}
           placeholder="بحث SKU / الاسم…"
           value={search} onChange={(e) => { setSearch(e.target.value); }} />
         {/* فلتر حالة المخزون: الكل / نفذ / منخفض / متوفر (خادمي) */}
-        <select className="aseel-input" style={{ width: 130 }}
+        <select className="ktra-input" style={{ width: 130 }}
           value={statusFilter}
           onChange={(e) => { setStatusFilter(e.target.value as StockStatus); }}
           title="فلترة حسب حالة المخزون">
@@ -598,7 +598,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         </select>
         {/* تصدير بخيارات: الكل / ما نفذ / المنخفضة */}
         <div style={{ position: "relative" }}>
-          <button className="aseel-toolbtn" disabled={exporting}
+          <button className="ktra-toolbtn" disabled={exporting}
             onClick={() => setExportMenuOpen((o) => !o)} title="تصدير PDF للطباعة">
             <Printer className="h-4 w-4" /> {exporting ? "جارٍ التحضير…" : "تصدير PDF"}
           </button>
@@ -606,33 +606,33 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             <div role="menu"
               style={{
                 position: "absolute", insetInlineStart: 0, top: "calc(100% + 4px)", zIndex: 10,
-                background: "var(--aseel-surface, #fff)", border: "1px solid var(--aseel-border)",
+                background: "var(--ktra-surface, #fff)", border: "1px solid var(--ktra-border)",
                 borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.12)", minWidth: 170,
               }}>
-              <button className="aseel-menu-item" style={exportItemStyle} onClick={() => exportProducts("")}>تصدير الكل</button>
-              <button className="aseel-menu-item" style={exportItemStyle} onClick={() => exportProducts("out_of_stock")}>الأصناف التي نفذت</button>
-              <button className="aseel-menu-item" style={exportItemStyle} onClick={() => exportProducts("low_stock")}>الكمية المنخفضة</button>
+              <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("")}>تصدير الكل</button>
+              <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("out_of_stock")}>الأصناف التي نفذت</button>
+              <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("low_stock")}>الكمية المنخفضة</button>
             </div>
           )}
         </div>
         {/* T-N3: مبدّل عرض الشجرة/الجدول */}
         <button
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           onClick={() => setDisplayMode(displayMode === "tree" ? "table" : "tree")}
           title={displayMode === "tree" ? "عرض كجدول" : "عرض كشجرة تصنيفات"}
         >
           {displayMode === "tree" ? <Table2 className="h-4 w-4" /> : <ListTree className="h-4 w-4" />}
           {displayMode === "tree" ? " جدول" : " شجرة"}
         </button>
-        <button className="aseel-toolbtn" onClick={() => reload()} title="تحديث">
+        <button className="ktra-toolbtn" onClick={() => reload()} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
-        <button className="aseel-toolbtn" onClick={() => { setEditId(null); setDuplicateId(null); setView("form"); }} title="إضافة صنف (Ctrl+Ins)">
+        <button className="ktra-toolbtn" onClick={() => { setEditId(null); setDuplicateId(null); setView("form"); }} title="إضافة صنف (Ctrl+Ins)">
           <Plus className="h-4 w-4" /> إضافة
         </button>
       </div>
 
-      {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
+      {err && <div className="ktra-banner ktra-banner--err">{err}</div>}
 
       {displayMode === "tree" ? (
         // T-N3: شجرة التصنيفات/الأصناف (نفس مكوّن شجرة المنتجات في الفواتير).
@@ -659,7 +659,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             onItemCreated={() => reload()}
           />
           {/* الفراغ الذي كان بجانب الشجرة: بطاقة ما هو محدَّد فيها. */}
-          <div className="min-w-0 flex-1 overflow-hidden rounded border border-[var(--aseel-border)] bg-[var(--aseel-panel)]">
+          <div className="min-w-0 flex-1 overflow-hidden rounded border border-[var(--ktra-border)] bg-[var(--ktra-panel)]">
             {preview?.kind === "product" ? (
               <ProductTreePane
                 key={`p${preview.id}`}
@@ -675,7 +675,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
                 categoryId={preview.categoryId}
               />
             ) : (
-              <div className="flex h-full items-center justify-center p-6 text-center text-[var(--aseel-ink-soft)]">
+              <div className="flex h-full items-center justify-center p-6 text-center text-[var(--ktra-ink-soft)]">
                 اختر منتجاً من الشجرة لتظهر بطاقته هنا، أو تصنيفاً ليظهر كرته المجمّع — التسعير والمخزون والفواتير وحركة الصنف.
               </div>
             )}
@@ -709,17 +709,17 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           }}
         >
           <button
-            className="aseel-btn"
+            className="ktra-btn"
             disabled={page <= 1 || loading}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
           >
             السابق
           </button>
-          <span className="aseel-status-item">
+          <span className="ktra-status-item">
             صفحة <b>{page}</b> من <b>{Math.max(1, Math.ceil(total / pageSize))}</b>
           </span>
           <button
-            className="aseel-btn"
+            className="ktra-btn"
             disabled={!hasNext || loading}
             onClick={() => setPage((p) => p + 1)}
           >

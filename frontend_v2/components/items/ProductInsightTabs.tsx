@@ -1,16 +1,16 @@
 /**
  * كرت الصنف الموحّد — الجزء القرائي (نظرة عامة + الفواتير المرتبطة + حركة المخزون).
  *
- * كان هذا المحتوى حبيس `ProductProfilePage` بينما التحرير حبيس `ItemFormAseel`،
+ * كان هذا المحتوى حبيس `ProductProfilePage` بينما التحرير حبيس `ItemForm`،
  * فصار للصنف كرتان: واحد يُرى وآخر يُعدَّل. استُخرج هنا ليركّبه نموذج الكرت نفسه
- * (`ItemFormAseel`) كتبويبات، وتستهلك بطاقةُ المودال المختصرة نفسَ النظرة العامة —
+ * (`ItemForm`) كتبويبات، وتستهلك بطاقةُ المودال المختصرة نفسَ النظرة العامة —
  * مصدر واحد لكل عرض للصنف. يقرأ `inventory/products/{id}/profile|stock-ledger|invoices`.
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGetObject } from "../../services/restApi";
 import { inventoryApi, type ProductGroupSelector, type ProductSerialRow } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
-import type { AseelTab } from "../aseel";
+import type { KitTab } from "../kit";
 import { LedgerTable, DocRefCell, type LedgerColumn } from "../shared/LedgerTable";
 import SerialEntryModal from "../shared/SerialEntryModal";
 import { formatQuantity, formatMoney } from "../../utils/formatNumber";
@@ -88,13 +88,13 @@ export const Kpi: React.FC<{
   label: string; value: React.ReactNode; hint?: string; tone?: "ok" | "warn" | "danger";
 }> = ({ label, value, hint, tone }) => {
   const color =
-    tone === "danger" ? "var(--aseel-danger,#c00)"
-    : tone === "warn" ? "var(--aseel-warn,#b8800a)"
-    : tone === "ok" ? "var(--aseel-ok,#267346)"
-    : "var(--aseel-ink)";
+    tone === "danger" ? "var(--ktra-danger,#c00)"
+    : tone === "warn" ? "var(--ktra-warn,#b8800a)"
+    : tone === "ok" ? "var(--ktra-ok,#267346)"
+    : "var(--ktra-ink)";
   return (
-    <div className="p-2 border border-[var(--aseel-border)] rounded" title={hint}>
-      <div className="text-xs text-[var(--aseel-ink-soft)]">{label}</div>
+    <div className="p-2 border border-[var(--ktra-border)] rounded" title={hint}>
+      <div className="text-xs text-[var(--ktra-ink-soft)]">{label}</div>
       <div className="text-base font-bold" style={{ color }}>{value}</div>
     </div>
   );
@@ -102,7 +102,7 @@ export const Kpi: React.FC<{
 
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <section className="mb-3">
-    <div className="text-xs font-bold text-[var(--aseel-ink-soft)] mb-1.5 pr-0.5">{title}</div>
+    <div className="text-xs font-bold text-[var(--ktra-ink-soft)] mb-1.5 pr-0.5">{title}</div>
     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">{children}</div>
   </section>
 );
@@ -123,7 +123,7 @@ const SALE_SOURCE_LABEL: Record<"product" | "last_invoice", string> = {
 export const ProductOverview: React.FC<{ profile: ProductProfileData | null; loading?: boolean }> = ({ profile, loading }) => {
   if (!profile) {
     return (
-      <div className="p-4 text-center text-[var(--aseel-ink-soft)]">
+      <div className="p-4 text-center text-[var(--ktra-ink-soft)]">
         {loading ? "جاري التحميل…" : "لا توجد بيانات لهذا الصنف بعد."}
       </div>
     );
@@ -250,7 +250,7 @@ const serialColumns: LedgerColumn<ProductSerialRow>[] = [
     header: "الحالة",
     align: "center",
     render: (r) => (
-      <span style={{ color: r.status === "sold" ? "var(--aseel-ink-soft)" : "var(--aseel-ok,#267346)" }}>
+      <span style={{ color: r.status === "sold" ? "var(--ktra-ink-soft)" : "var(--ktra-ok,#267346)" }}>
         {r.status_display}
       </span>
     ),
@@ -284,7 +284,7 @@ const serialColumns: LedgerColumn<ProductSerialRow>[] = [
 
 /**
  * يجلب بيانات الكرت القرائية لصنف محفوظ (`productId=null` عند صنف جديد → بلا نداءات)
- * ويبني تبويباته جاهزة للتركيب في `AseelDocumentShell`.
+ * ويبني تبويباته جاهزة للتركيب في `KitDocumentShell`.
  *
  * `isSerialized` يأتي من الكرت لا من نقطة `profile` (لا تحمله): تبويب الأرقام
  * التسلسلية لا يُبنى أصلاً لصنف غير متتبَّع، فلا نداء ولا تبويب فارغ.
@@ -406,21 +406,21 @@ export const useProductInsights = (
 
   const emptyHint = "احفظ الصنف أولاً لتظهر بياناته هنا.";
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     {
       key: "overview",
       label: "نظرة عامة",
       content: productId == null
-        ? <div className="p-4 text-[var(--aseel-ink-soft)]">{emptyHint}</div>
+        ? <div className="p-4 text-[var(--ktra-ink-soft)]">{emptyHint}</div>
         : error
-          ? <div role="alert" className="p-3 text-sm text-[var(--aseel-danger,#c00)]">تعذّر تحميل النظرة العامة: {error}</div>
+          ? <div role="alert" className="p-3 text-sm text-[var(--ktra-danger,#c00)]">تعذّر تحميل النظرة العامة: {error}</div>
           : <ProductOverview profile={profile} loading={loading} />,
     },
     {
       key: "invoices",
       label: "الفواتير المرتبطة",
       content: productId == null
-        ? <div className="p-4 text-[var(--aseel-ink-soft)]">{emptyHint}</div>
+        ? <div className="p-4 text-[var(--ktra-ink-soft)]">{emptyHint}</div>
         : (
           <div className="p-2">
             <LedgerTable<InvoiceRow>
@@ -437,7 +437,7 @@ export const useProductInsights = (
       key: "ledger",
       label: "حركة المخزون",
       content: productId == null
-        ? <div className="p-4 text-[var(--aseel-ink-soft)]">{emptyHint}</div>
+        ? <div className="p-4 text-[var(--ktra-ink-soft)]">{emptyHint}</div>
         : (
           <div className="p-2">
             <LedgerTable<LedgerRow>
@@ -458,26 +458,26 @@ export const useProductInsights = (
 
   /**
    * T-SERIAL: تبويب الوحدات — منفصل عن `tabs` عمداً كي يركّبه الكرت **آخر** القائمة.
-   * `AseelDocumentShell` يتتبّع التبويب النشط بالفهرس لا بالمفتاح، فإدراج تبويب في
+   * `KitDocumentShell` يتتبّع التبويب النشط بالفهرس لا بالمفتاح، فإدراج تبويب في
    * وسط القائمة وقت التفعيل كان يقفز بالمستخدم من «بيانات عامة» إلى التبويب الجديد.
    * تبويبٌ يُلحق في النهاية لا يزحزح فهرس أحد. (بلا تتبّع: لا تبويب أصلاً.)
    */
-  const serialsTab: AseelTab | null = !isSerialized ? null : {
+  const serialsTab: KitTab | null = !isSerialized ? null : {
       key: "serials",
       label: "الأرقام التسلسلية",
       content: productId == null
-        ? <div className="p-4 text-[var(--aseel-ink-soft)]">{emptyHint}</div>
+        ? <div className="p-4 text-[var(--ktra-ink-soft)]">{emptyHint}</div>
         : (
           <div className="p-2">
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               <input
-                className="aseel-input"
+                className="ktra-input"
                 style={{ maxWidth: 280 }}
                 value={serQuery}
                 onChange={(e) => setSerQuery(e.target.value)}
                 placeholder="بحث برقم الوحدة أو الفاتورة أو الطرف…"
               />
-              <span className="text-xs text-[var(--aseel-ink-soft)]">
+              <span className="text-xs text-[var(--ktra-ink-soft)]">
                 {formatQuantity(inStockUnits)} في المخزن
                 {" · "}
                 {formatQuantity(serials.filter((r) => r.status === "sold").length)} مُباعة
@@ -487,7 +487,7 @@ export const useProductInsights = (
               {untrackedQty > 0 && (
                 <button
                   type="button"
-                  className="aseel-addrow"
+                  className="ktra-addrow"
                   style={{ margin: 0 }}
                   title="أعطِ أرقاماً لوحدات موجودة في المخزن قبل تفعيل التتبّع"
                   onClick={() => setRegisterOpen(true)}
@@ -584,7 +584,7 @@ const groupMemberColumns: LedgerColumn<GroupMember>[] = [
     render: (m) => (
       <button
         type="button"
-        className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+        className="text-[var(--ktra-accent,#2563eb)] underline hover:opacity-80"
         onClick={() => openInNewTab(productProfilePath(m.id))}
         title="فتح بطاقة هذا البراند"
       >{m.name}</button>
@@ -662,7 +662,7 @@ export const useGroupInsights = (selector: ProductGroupSelector | number[]) => {
       .finally(() => setInvLoading(false));
   }, [sel, isEmpty]);
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     {
       key: "kpis",
       label: "نظرة عامة (مجمّع)",
@@ -681,7 +681,7 @@ export const useGroupInsights = (selector: ProductGroupSelector | number[]) => {
             </div>
           ) : (
             // خطأٌ أو مجموعةٌ فارغة — لا «جاري التحميل…» أبديّ.
-            <div role={error ? "alert" : undefined} className="p-4 text-center text-[var(--aseel-ink-soft)]">
+            <div role={error ? "alert" : undefined} className="p-4 text-center text-[var(--ktra-ink-soft)]">
               {loading ? "جاري التحميل…" : error || "لا توجد بيانات لهذه المجموعة."}
             </div>
           )}

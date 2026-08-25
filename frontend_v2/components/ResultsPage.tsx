@@ -1,12 +1,12 @@
 /**
- * N7-T6 — ResultsPage (H8) — AseelDenseTable لنتائج تحليل AI
+ * N7-T6 — ResultsPage (H8) — KitDenseTable لنتائج تحليل AI
  */
 import React, { useState, useMemo, useRef } from 'react';
 import { Product } from '../types';
 import { ProductPreviewModal } from './modals/ProductPreviewModal';
 import { Eye, RefreshCw } from 'lucide-react';
-import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
-import { useAseelIndexKeymap } from './aseel/useAseelIndexKeymap';
+import { KitDenseTable, type DenseColumn } from './kit/KitDenseTable';
+import { useKitIndexKeymap } from './kit/useKitIndexKeymap';
 
 interface ResultsPageProps {
     products: Product[];
@@ -32,7 +32,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ products, onBack, isTa
             });
     }, [products, searchTerm, price, sortBy]);
 
-    useAseelIndexKeymap(
+    useKitIndexKeymap(
         { F6: () => searchInputRef.current?.focus(), Escape: () => { setSearchTerm(''); setPrice(maxPrice); setSortBy('similarity'); } },
         { enabled: !previewUrl },
     );
@@ -45,7 +45,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ products, onBack, isTa
             align: 'center',
             sortable: true,
             render: (p) => (
-                <span style={{ fontFamily: 'monospace', fontWeight: 700, color: p.similarity >= 0.8 ? 'var(--aseel-ok, #267346)' : p.similarity >= 0.5 ? 'var(--aseel-warn, #b8800a)' : 'var(--aseel-ink-soft)' }}>
+                <span style={{ fontFamily: 'monospace', fontWeight: 700, color: p.similarity >= 0.8 ? 'var(--ktra-ok, #267346)' : p.similarity >= 0.5 ? 'var(--ktra-warn, #b8800a)' : 'var(--ktra-ink-soft)' }}>
                     {Math.round((p.similarity || 0) * 100)}%
                 </span>
             ),
@@ -55,8 +55,8 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ products, onBack, isTa
             header: 'المنتج',
             render: (p) => (
                 <span>
-                    <b style={{ color: 'var(--aseel-ink)' }}>{p.name}</b>
-                    {p.description && <span style={{ marginRight: 6, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)' }}>{p.description.slice(0, 60)}{p.description.length > 60 ? '…' : ''}</span>}
+                    <b style={{ color: 'var(--ktra-ink)' }}>{p.name}</b>
+                    {p.description && <span style={{ marginRight: 6, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)' }}>{p.description.slice(0, 60)}{p.description.length > 60 ? '…' : ''}</span>}
                 </span>
             ),
         },
@@ -76,7 +76,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ products, onBack, isTa
             align: 'center',
             render: (p) => (
                 p.url ? (
-                    <button className="aseel-toolbtn" style={{ padding: '2px 4px' }} onClick={(e) => { e.stopPropagation(); setPreviewUrl(p.url!); }} title="معاينة">
+                    <button className="ktra-toolbtn" style={{ padding: '2px 4px' }} onClick={(e) => { e.stopPropagation(); setPreviewUrl(p.url!); }} title="معاينة">
                         <Eye style={{ width: 13, height: 13 }} />
                     </button>
                 ) : null
@@ -88,25 +88,25 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ products, onBack, isTa
         <>
             <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
                 {/* شريط العنوان */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
-                    <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>نتائج تحليل AI</strong>
-                    <span className="aseel-status-item">المطابق: <b>{filteredProducts.length}</b> / {products.length}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--ktra-border)' }}>
+                    <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>نتائج تحليل AI</strong>
+                    <span className="ktra-status-item">المطابق: <b>{filteredProducts.length}</b> / {products.length}</span>
                     <div style={{ flex: 1 }} />
                     <input
                         ref={searchInputRef}
-                        className="aseel-input"
+                        className="ktra-input"
                         style={{ width: 180 }}
                         placeholder="تصفية النتائج… (F6)"
                         value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
                     />
-                    <select className="aseel-input" style={{ width: 150 }} value={sortBy} onChange={e => setSortBy(e.target.value)}>
+                    <select className="ktra-input" style={{ width: 150 }} value={sortBy} onChange={e => setSortBy(e.target.value)}>
                         <option value="similarity">الأفضل مطابقة (AI)</option>
                         <option value="price_asc">السعر: من الأقل</option>
                         <option value="price_desc">السعر: من الأعلى</option>
                     </select>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)', whiteSpace: 'nowrap' }}>الحد الأقصى: ${price}</label>
+                        <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)', whiteSpace: 'nowrap' }}>الحد الأقصى: ${price}</label>
                         <input
                             type="range"
                             min={0}
@@ -116,15 +116,15 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ products, onBack, isTa
                             style={{ width: 100 }}
                         />
                     </div>
-                    <button className="aseel-toolbtn" onClick={() => { setSearchTerm(''); setPrice(maxPrice); setSortBy('similarity'); }} title="إعادة تعيين">
+                    <button className="ktra-toolbtn" onClick={() => { setSearchTerm(''); setPrice(maxPrice); setSortBy('similarity'); }} title="إعادة تعيين">
                         <RefreshCw style={{ width: 14, height: 14 }} />
                     </button>
-                    <button className="aseel-toolbtn" style={{ color: 'var(--aseel-accent, #1857a4)', fontWeight: 600 }} onClick={onBack}>
+                    <button className="ktra-toolbtn" style={{ color: 'var(--ktra-accent, #1857a4)', fontWeight: 600 }} onClick={onBack}>
                         {isTaskActive ? 'بحث جديد' : 'إنهاء'}
                     </button>
                 </div>
 
-                <AseelDenseTable<Product>
+                <KitDenseTable<Product>
                     columns={columns}
                     rows={filteredProducts}
                     getRowKey={(p) => `${p.name}-${p.price}-${p.similarity}`}

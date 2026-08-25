@@ -192,7 +192,7 @@ async function openNewInvoiceAndFill(page: Page) {
   await product.fill("لابتوب");
   await page.getByText("لابتوب").last().click();
 
-  const qty = page.locator("#aseel-grid-input-0-quantity");
+  const qty = page.locator("#ktra-grid-input-0-quantity");
   await expect(qty).toBeVisible({ timeout: 10_000 });
   await qty.fill("2");
 
@@ -210,7 +210,7 @@ test("رفض 400 بأخطاء حقول: السبب ظاهر، المحرّر م�
   // 1) السبب معروض ومعرَّب: التسمية العربية للحقل (`customer` → «العميل») مع
   //    ترجمة رسالة DRF الإنجليزية. لو عُرض الردّ خاماً لظهر
   //    «customer: This field is required.» ولسقط هذا التوكيد.
-  const banner = page.locator(".aseel-banner--err");
+  const banner = page.locator(".ktra-banner--err");
   await expect(banner.first()).toBeVisible({ timeout: 15_000 });
   await expect(banner.first()).toContainText("العميل: هذا الحقل مطلوب");
   await expect(banner.first()).not.toContainText("This field is required");
@@ -230,7 +230,7 @@ test("فشل شبكة كامل: «لم يصل الطلب … بياناتك ما
 
   await page.getByRole("button", { name: /حفظ/ }).first().click();
 
-  const banner = page.locator(".aseel-banner--err");
+  const banner = page.locator(".ktra-banner--err");
   await expect(banner.first()).toBeVisible({ timeout: 20_000 });
   await expect(banner.first()).toContainText("لم يصل الطلب إلى الخادم");
   await expect(banner.first()).toContainText("بياناتك ما زالت أمامك");
@@ -245,7 +245,7 @@ test("رفض 400 عام: نصّ detail يظهر كما أرسله الخادم",
 
   await page.getByRole("button", { name: /حفظ/ }).first().click();
 
-  const banner = page.locator(".aseel-banner--err");
+  const banner = page.locator(".ktra-banner--err");
   await expect(banner.first()).toBeVisible({ timeout: 15_000 });
   await expect(banner.first()).toContainText("الفترة المالية مقفلة");
 
@@ -403,10 +403,10 @@ test("فاتورة شراء بمرفق: الرفض يُبقي النموذج و�
 
   // مورد حقيقي — بدونه يوقف تحقّق العميل النداءَ قبل خروجه فلا نختبر رفض
   // الخادم أصلاً. الاختيار من الفهرس يكون بنقرة مزدوجة على السطر.
-  await expect(page.locator('[data-aseel-field="supplier"]')).toBeVisible({ timeout: 20_000 });
-  await page.locator('[data-aseel-field="supplier"]').click();
+  await expect(page.locator('[data-ktra-field="supplier"]')).toBeVisible({ timeout: 20_000 });
+  await page.locator('[data-ktra-field="supplier"]').click();
   await page.getByRole("row").filter({ hasText: "مورد الاختبار" }).first().dblclick();
-  await expect(page.locator('[data-aseel-field="supplier"]')).toHaveValue("#8");
+  await expect(page.locator('[data-ktra-field="supplier"]')).toHaveValue("#8");
 
   // المرفقات في تبويبها الخاص — حقل الملف لا يُرندَر قبل فتحه. وفي القسم
   // منطقتا رفع: الأولى لملفات PDF والثانية للصور، فنقصد الثانية.
@@ -442,13 +442,13 @@ test("فاتورة شراء بمرفق: الرفض يُبقي النموذج و�
   //    حقل المورد في تبويب «بيانات الفاتورة».
   await page.getByText("بيانات الفاتورة", { exact: true }).first().click();
   const supplierField = page
-    .locator("label.aseel-field")
+    .locator("label.ktra-field")
     .filter({ hasText: "المورد" })
     .first();
   await expect(supplierField.getByRole("alert")).toHaveText("هذا الحقل مطلوب.");
 
   // 3) النموذج لم يُغلق — ما زلنا في المحرّر لا في القائمة.
-  await expect(page.locator('[data-aseel-field="supplier"]')).toBeVisible();
+  await expect(page.locator('[data-ktra-field="supplier"]')).toBeVisible();
 
   // 4) المرفق ما زال مرفقاً — بند معيار النجاح. (نعود إلى تبويبه: التبويبات
   //    تُرندَر عند فتحها، فالصورة لا توجد في DOM تبويب «بيانات الفاتورة».)

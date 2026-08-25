@@ -1,13 +1,13 @@
 /**
- * N7-T2 — TaskManagement (H2) — AseelDenseTable لإدارة المهام
+ * N7-T2 — TaskManagement (H2) — KitDenseTable لإدارة المهام
  */
 import React, { useState, useMemo, useRef } from 'react';
 import { Task, User, TaskPriority } from '../types';
 import { CreateTaskModal } from './CreateTaskModal';
 import { List, Eye, CheckCircle, XCircle, Clock, FileText, RefreshCw, Plus } from 'lucide-react';
 import { AllSubmissionsView } from './tasks/AllSubmissionsView';
-import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
-import { useAseelIndexKeymap } from './aseel/useAseelIndexKeymap';
+import { KitDenseTable, type DenseColumn } from './kit/KitDenseTable';
+import { useKitIndexKeymap } from './kit/useKitIndexKeymap';
 import { formatDateLocalized } from "../utils/formatDate";
 import { useToast } from '../contexts/ToastContext';
 
@@ -26,10 +26,10 @@ interface TaskManagementProps {
 
 const PRIORITY_LABELS: Record<string, string> = { low: 'منخفضة', medium: 'متوسطة', high: 'عالية', urgent: 'عاجلة' };
 const PRIORITY_COLORS: Record<string, string> = {
-    low:    'var(--aseel-ok, #267346)',
-    medium: 'var(--aseel-warn, #b8800a)',
-    high:   'var(--aseel-warn, #b8800a)',
-    urgent: 'var(--aseel-danger, #c00)',
+    low:    'var(--ktra-ok, #267346)',
+    medium: 'var(--ktra-warn, #b8800a)',
+    high:   'var(--ktra-warn, #b8800a)',
+    urgent: 'var(--ktra-danger, #c00)',
 };
 const STATUS_LABELS: Record<string, string> = {
     not_started: 'لم تبدأ',
@@ -92,7 +92,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
         urgent: allTasks.filter(t => t.priority === 'urgent').length,
     }), [allTasks]);
 
-    useAseelIndexKeymap(
+    useKitIndexKeymap(
         { CtrlIns: () => setIsCreateModalOpen(true), Escape: () => { setStatusFilter('All'); setEmployeeFilter('All'); setPriorityFilter('All'); } },
         { enabled: viewMode === 'list' && !isCreateModalOpen },
     );
@@ -101,8 +101,8 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
         return (
             <div dir="rtl" style={{ padding: '8px 12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                    <button className="aseel-toolbtn" onClick={() => { setViewMode('list'); setSelectedTaskForSubmissions(null); }}>← رجوع</button>
-                    <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>
+                    <button className="ktra-toolbtn" onClick={() => { setViewMode('list'); setSelectedTaskForSubmissions(null); }}>← رجوع</button>
+                    <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>
                         تسليمات: {selectedTaskForSubmissions.title}
                     </strong>
                 </div>
@@ -127,9 +127,9 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
                 const isOverdue = new Date(t.dueDate) < new Date();
                 return (
                     <span>
-                        <b style={{ color: 'var(--aseel-ink)' }}>{t.title}</b>
-                        {isOverdue && <span style={{ marginRight: 4, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-danger, #c00)' }}>متأخرة</span>}
-                        {rate > 0 && <span style={{ marginRight: 4, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)' }}>{rate}%</span>}
+                        <b style={{ color: 'var(--ktra-ink)' }}>{t.title}</b>
+                        {isOverdue && <span style={{ marginRight: 4, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-danger, #c00)' }}>متأخرة</span>}
+                        {rate > 0 && <span style={{ marginRight: 4, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)' }}>{rate}%</span>}
                     </span>
                 );
             },
@@ -144,11 +144,11 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
                 const inProgress = Object.values(t.userStatuses || {}).filter((s: any) => s.status === 'in_progress' || s.status === 'submitted').length;
                 const rejected = Object.values(t.userStatuses || {}).filter((s: any) => s.status === 'rejected').length;
                 return (
-                    <span style={{ fontSize: 'var(--aseel-fs-sm)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-                        <span style={{ color: 'var(--aseel-ink-soft)' }}>{assigned.length} موظف</span>
-                        {completed > 0 && <span style={{ color: 'var(--aseel-ok, #267346)' }}><CheckCircle style={{ width: 11, height: 11, display: 'inline' }} />{completed}</span>}
-                        {inProgress > 0 && <span style={{ color: 'var(--aseel-accent, #1857a4)' }}><Clock style={{ width: 11, height: 11, display: 'inline' }} />{inProgress}</span>}
-                        {rejected > 0 && <span style={{ color: 'var(--aseel-danger, #c00)' }}><XCircle style={{ width: 11, height: 11, display: 'inline' }} />{rejected}</span>}
+                    <span style={{ fontSize: 'var(--ktra-fs-sm)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <span style={{ color: 'var(--ktra-ink-soft)' }}>{assigned.length} موظف</span>
+                        {completed > 0 && <span style={{ color: 'var(--ktra-ok, #267346)' }}><CheckCircle style={{ width: 11, height: 11, display: 'inline' }} />{completed}</span>}
+                        {inProgress > 0 && <span style={{ color: 'var(--ktra-accent, #1857a4)' }}><Clock style={{ width: 11, height: 11, display: 'inline' }} />{inProgress}</span>}
+                        {rejected > 0 && <span style={{ color: 'var(--ktra-danger, #c00)' }}><XCircle style={{ width: 11, height: 11, display: 'inline' }} />{rejected}</span>}
                     </span>
                 );
             },
@@ -159,7 +159,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
             width: '80px',
             align: 'center',
             render: (t) => (
-                <span style={{ color: PRIORITY_COLORS[t.priority] || 'inherit', fontWeight: 500, fontSize: 'var(--aseel-fs-sm)' }}>
+                <span style={{ color: PRIORITY_COLORS[t.priority] || 'inherit', fontWeight: 500, fontSize: 'var(--ktra-fs-sm)' }}>
                     {PRIORITY_LABELS[t.priority] || t.priority}
                 </span>
             ),
@@ -170,7 +170,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
             width: '100px',
             render: (t) => {
                 const isOverdue = new Date(t.dueDate) < new Date();
-                return <span style={{ color: isOverdue ? 'var(--aseel-danger, #c00)' : 'inherit' }}>{formatDateLocalized(t.dueDate)}</span>;
+                return <span style={{ color: isOverdue ? 'var(--ktra-danger, #c00)' : 'inherit' }}>{formatDateLocalized(t.dueDate)}</span>;
             },
         },
         {
@@ -181,7 +181,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
             render: (t) => (
                 <span style={{ display: 'inline-flex', gap: 2 }}>
                     <button
-                        className="aseel-toolbtn"
+                        className="ktra-toolbtn"
                         style={{ padding: '2px 4px' }}
                         onClick={(e) => { e.stopPropagation(); onSelectTask(t); }}
                         title="عرض التفاصيل"
@@ -190,7 +190,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
                     </button>
                     {onUpdateSubmissionStatus && (
                         <button
-                            className="aseel-toolbtn"
+                            className="ktra-toolbtn"
                             style={{ padding: '2px 4px' }}
                             onClick={(e) => { e.stopPropagation(); setSelectedTaskForSubmissions(t); setViewMode('submissions'); }}
                             title="التسليمات"
@@ -206,32 +206,32 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
     return (
         <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
             {/* شريط العنوان */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
-                <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>إدارة المهام</strong>
-                <span className="aseel-status-item">الإجمالي: <b>{stats.total}</b></span>
-                <span className="aseel-status-item">نشطة: <b style={{ color: 'var(--aseel-accent, #1857a4)' }}>{stats.active}</b></span>
-                <span className="aseel-status-item">مكتملة: <b style={{ color: 'var(--aseel-ok, #267346)' }}>{stats.completed}</b></span>
-                {stats.urgent > 0 && <span className="aseel-status-item">عاجلة: <b style={{ color: 'var(--aseel-danger, #c00)' }}>{stats.urgent}</b></span>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--ktra-border)' }}>
+                <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>إدارة المهام</strong>
+                <span className="ktra-status-item">الإجمالي: <b>{stats.total}</b></span>
+                <span className="ktra-status-item">نشطة: <b style={{ color: 'var(--ktra-accent, #1857a4)' }}>{stats.active}</b></span>
+                <span className="ktra-status-item">مكتملة: <b style={{ color: 'var(--ktra-ok, #267346)' }}>{stats.completed}</b></span>
+                {stats.urgent > 0 && <span className="ktra-status-item">عاجلة: <b style={{ color: 'var(--ktra-danger, #c00)' }}>{stats.urgent}</b></span>}
                 <div style={{ flex: 1 }} />
-                <select className="aseel-input" style={{ width: 130 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                <select className="ktra-input" style={{ width: 130 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                     <option value="All">جميع الحالات</option>
                     {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k === 'not_started' ? 'Not Started' : k === 'in_progress' ? 'In Progress' : k === 'submitted' ? 'Submitted' : k === 'completed' ? 'Completed' : 'Rejected'}>{v}</option>)}
                 </select>
-                <select className="aseel-input" style={{ width: 130 }} value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)}>
+                <select className="ktra-input" style={{ width: 130 }} value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)}>
                     <option value="All">كل الموظفين</option>
                     {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                 </select>
-                <select className="aseel-input" style={{ width: 110 }} value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)}>
+                <select className="ktra-input" style={{ width: 110 }} value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)}>
                     <option value="All">جميع الأولويات</option>
                     {Object.entries(PRIORITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
-                <button className="aseel-toolbtn" onClick={() => { setStatusFilter('All'); setEmployeeFilter('All'); setPriorityFilter('All'); }} title="إعادة تعيين"><RefreshCw style={{ width: 14, height: 14 }} /></button>
-                <button className="aseel-toolbtn" onClick={() => setIsCreateModalOpen(true)} title="مهمة جديدة (Ctrl+Ins)">
+                <button className="ktra-toolbtn" onClick={() => { setStatusFilter('All'); setEmployeeFilter('All'); setPriorityFilter('All'); }} title="إعادة تعيين"><RefreshCw style={{ width: 14, height: 14 }} /></button>
+                <button className="ktra-toolbtn" onClick={() => setIsCreateModalOpen(true)} title="مهمة جديدة (Ctrl+Ins)">
                     <Plus style={{ width: 14, height: 14 }} /> مهمة جديدة
                 </button>
             </div>
 
-            <AseelDenseTable<Task>
+            <KitDenseTable<Task>
                 columns={columns}
                 rows={filteredTasks}
                 getRowKey={t => t.id}
@@ -239,7 +239,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
                 emptyHint="لا توجد مهام — اضغط «مهمة جديدة»"
                 footer={
                     filteredTasks.length > 0 ? (
-                        <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: 'var(--ktra-fs-sm)' }}>
                             المُعيَّنون: <b>{filteredTasks.reduce((s, t) => s + (Array.isArray(t.assignedTo) ? t.assignedTo.length : 1), 0)}</b>
                         </span>
                     ) : undefined

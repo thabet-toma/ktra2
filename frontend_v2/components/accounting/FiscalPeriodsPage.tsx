@@ -3,10 +3,10 @@ import { accountingApi } from "../../services/accountingApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import type { FiscalPeriodDto } from "../../types/accounting";
 import {
-  AseelDocumentShell,
-  AseelDenseTable,
-} from "../aseel";
-import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
+  KitDocumentShell,
+  KitDenseTable,
+} from "../kit";
+import type { KitToolbarAction, KitTab, DenseColumn } from "../kit";
 import { Plus, Lock, Unlock } from "lucide-react";
 
 type Granularity = "monthly" | "yearly";
@@ -131,7 +131,7 @@ export const FiscalPeriodsPage: React.FC = () => {
       render: (p) => (
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           disabled={busy}
           onClick={(e) => {
             e.stopPropagation();
@@ -149,27 +149,27 @@ export const FiscalPeriodsPage: React.FC = () => {
     },
   ];
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "new", label: "إضافة سنة", icon: <Plus className="w-4 h-4" />, onClick: () => setShowAddForm(!showAddForm) },
     { key: "refresh", label: "تحديث", onClick: load },
   ];
 
   const addYearBand = showAddForm ? (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "12px" }}>
-      <div className="aseel-field">
-        <label className="aseel-field-label">السنة المالية</label>
+      <div className="ktra-field">
+        <label className="ktra-field-label">السنة المالية</label>
         <input
           type="number"
           min={2000}
           max={2100}
-          className="aseel-input aseel-num"
+          className="ktra-input ktra-num"
           style={{ width: "100px" }}
           value={newYear}
           onChange={(e) => setNewYear(e.target.value)}
         />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">تقسيم السنة</label>
+      <div className="ktra-field">
+        <label className="ktra-field-label">تقسيم السنة</label>
         <div style={{ display: "flex", gap: "12px", alignItems: "center", height: "30px" }}>
           {([["monthly", "12 شهراً"], ["yearly", "سنة واحدة"]] as [Granularity, string][]).map(
             ([value, label]) => (
@@ -187,12 +187,12 @@ export const FiscalPeriodsPage: React.FC = () => {
           )}
         </div>
       </div>
-      <button type="button" className="aseel-toolbtn" disabled={busy} onClick={createYear}
+      <button type="button" className="ktra-toolbtn" disabled={busy} onClick={createYear}
         style={{ marginTop: "18px" }}>
         <Plus className="w-4 h-4" />
         {granularity === "monthly" ? `إنشاء أشهر ${newYear}` : `إنشاء FY ${newYear}`}
       </button>
-      <span style={{ marginTop: "22px", fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
+      <span style={{ marginTop: "22px", fontSize: "0.75rem", color: "var(--ktra-ink-soft)" }}>
         {granularity === "monthly"
           ? `${newYear}-01 … ${newYear}-12 — يُقفَل كل شهر على حدة`
           : "يناير 1 — ديسمبر 31 — فترة واحدة تُقفَل كاملة"}
@@ -202,13 +202,13 @@ export const FiscalPeriodsPage: React.FC = () => {
 
   const reopenBand = reopenTarget ? (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "12px" }}>
-      <div className="aseel-field" style={{ flex: "1 1 320px" }}>
-        <label className="aseel-field-label">
+      <div className="ktra-field" style={{ flex: "1 1 320px" }}>
+        <label className="ktra-field-label">
           سبب إعادة فتح «{reopenTarget.name}» — يُحفظ في سجل التدقيق
         </label>
         <input
           type="text"
-          className="aseel-input"
+          className="ktra-input"
           autoFocus
           placeholder="مثال: تصحيح فاتورة مورّد وردت متأخرة"
           value={reopenReason}
@@ -216,12 +216,12 @@ export const FiscalPeriodsPage: React.FC = () => {
           onKeyDown={(e) => { if (e.key === "Enter") submitReopen(); }}
         />
       </div>
-      <button type="button" className="aseel-toolbtn" disabled={busy || !reopenReason.trim()}
+      <button type="button" className="ktra-toolbtn" disabled={busy || !reopenReason.trim()}
         onClick={submitReopen} style={{ marginTop: "18px" }}>
         <Unlock className="w-4 h-4" />
         إعادة الفتح
       </button>
-      <button type="button" className="aseel-toolbtn" disabled={busy}
+      <button type="button" className="ktra-toolbtn" disabled={busy}
         onClick={() => { setReopenTarget(null); setReopenReason(""); }}
         style={{ marginTop: "18px" }}>
         إلغاء
@@ -231,8 +231,8 @@ export const FiscalPeriodsPage: React.FC = () => {
 
   const tableContent = (
     <>
-      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-      <AseelDenseTable<FiscalPeriodDto>
+      {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      <KitDenseTable<FiscalPeriodDto>
         columns={columns}
         rows={periods}
         getRowKey={(p) => p.id}
@@ -242,23 +242,23 @@ export const FiscalPeriodsPage: React.FC = () => {
     </>
   );
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "periods", label: "الفترات المالية", content: tableContent },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="الفترات المالية"
         actions={actions}
         header={<>{addYearBand}{reopenBand}</>}
         tabs={tabs}
         status={
-          <span className="aseel-status-item">{periods.length} فترة</span>
+          <span className="ktra-status-item">{periods.length} فترة</span>
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

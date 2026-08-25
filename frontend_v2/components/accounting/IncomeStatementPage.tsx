@@ -3,10 +3,10 @@ import { accountingApi } from "../../services/accountingApi";
 import { formatMoney } from "../../utils/formatNumber";
 import type { TrialBalanceRow } from "../../types/accounting";
 import {
-  AseelDocumentShell,
-  AseelReportTable,
-} from "../aseel";
-import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
+  KitDocumentShell,
+  KitReportTable,
+} from "../kit";
+import type { KitToolbarAction, KitTab, ReportColumn } from "../kit";
 import { Search } from "lucide-react";
 
 interface IncomeRow {
@@ -122,15 +122,15 @@ export const IncomeStatementPage: React.FC = () => {
 
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      <div className="aseel-field">
-        <label className="aseel-field-label">من</label>
-        <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">من</label>
+        <input type="date" className="ktra-input" value={start} onChange={(e) => setStart(e.target.value)} />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">إلى</label>
-        <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">إلى</label>
+        <input type="date" className="ktra-input" value={end} onChange={(e) => setEnd(e.target.value)} />
       </div>
-      <button type="button" className="aseel-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
+      <button type="button" className="ktra-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
         <Search className="w-4 h-4" />عرض
       </button>
     </div>
@@ -138,8 +138,8 @@ export const IncomeStatementPage: React.FC = () => {
 
   const reportContent = (
     <>
-      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-      <AseelReportTable<IncomeRow>
+      {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      <KitReportTable<IncomeRow>
         filterBar={filterBar}
         columns={columns}
         rows={rows}
@@ -177,24 +177,24 @@ export const IncomeStatementPage: React.FC = () => {
     </>
   );
 
-  const shellActions: AseelToolbarAction[] = [
+  const shellActions: KitToolbarAction[] = [
     { key: "run", label: "عرض", icon: <Search className="w-4 h-4" />, onClick: fetchData },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "is", label: "كشف الإيرادات والمصروفات", content: reportContent },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="كشف الإيرادات والمصروفات"
         actions={shellActions}
         header={<></>}
         tabs={tabs}
         status={
           rows.length > 0 ? (
-            <span className="aseel-status-item"
+            <span className="ktra-status-item"
               style={{ color: netProfit >= 0 ? "var(--color-success,#16a34a)" : "var(--color-danger,#dc2626)" }}>
               {netProfit >= 0 ? "ربح" : "خسارة"}: {fmt(Math.abs(netProfit))}
             </span>
@@ -202,7 +202,7 @@ export const IncomeStatementPage: React.FC = () => {
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

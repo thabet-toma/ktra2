@@ -165,15 +165,15 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" dir="rtl">
-      <div className="w-full max-w-2xl rounded-2xl bg-[var(--aseel-bg,white)] border border-[var(--aseel-border,#ddd)] shadow-2xl p-6 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-2xl rounded-2xl bg-[var(--ktra-bg,white)] border border-[var(--ktra-border,#ddd)] shadow-2xl p-6 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2">
-            <h3 className="text-lg font-bold" style={{ color: "var(--aseel-ink)" }}>إدارة الشركة:</h3>
+            <h3 className="text-lg font-bold" style={{ color: "var(--ktra-ink)" }}>إدارة الشركة:</h3>
             <select
               value={activeTenantId}
               onChange={(e) => setActiveTenantId(Number(e.target.value))}
-              className="px-3 py-1.5 text-sm font-bold rounded-lg border border-[var(--aseel-border,#ddd)] bg-[var(--aseel-panel,#fafafa)] focus:outline-none focus:ring-2 focus:ring-[var(--aseel-accent)]"
-              style={{ color: "var(--aseel-ink)" }}
+              className="px-3 py-1.5 text-sm font-bold rounded-lg border border-[var(--ktra-border,#ddd)] bg-[var(--ktra-panel,#fafafa)] focus:outline-none focus:ring-2 focus:ring-[var(--ktra-accent)]"
+              style={{ color: "var(--ktra-ink)" }}
             >
               {memberships.filter(m => m.role === "manager").map(m => (
                 <option key={m.tenant.TenantID} value={m.tenant.TenantID}>
@@ -182,7 +182,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
               ))}
             </select>
           </div>
-          <button type="button" onClick={onClose} className="p-1 rounded-lg hover:bg-[var(--aseel-panel-hover,#f3f3f3)] opacity-70 hover:opacity-100" aria-label="إغلاق">
+          <button type="button" onClick={onClose} className="p-1 rounded-lg hover:bg-[var(--ktra-panel-hover,#f3f3f3)] opacity-70 hover:opacity-100" aria-label="إغلاق">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -200,14 +200,14 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={!isManager || savingName}
-              className="flex-1 px-3 py-2 text-sm rounded-lg border border-[var(--aseel-border,#ddd)] bg-[var(--aseel-panel,#fafafa)] focus:outline-none focus:ring-2 focus:ring-[var(--aseel-accent,#1857a4)]"
+              className="flex-1 px-3 py-2 text-sm rounded-lg border border-[var(--ktra-border,#ddd)] bg-[var(--ktra-panel,#fafafa)] focus:outline-none focus:ring-2 focus:ring-[var(--ktra-accent,#1857a4)]"
             />
             {isManager && (
               <button
                 type="button"
                 onClick={() => void handleRename()}
                 disabled={savingName || !name.trim() || name.trim() === tenant.CompanyName}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white rounded-lg bg-[var(--aseel-accent,#1857a4)] disabled:opacity-50"
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white rounded-lg bg-[var(--ktra-accent,#1857a4)] disabled:opacity-50"
               >
                 {savingName ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 حفظ
@@ -219,7 +219,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
 
         {/* الأعضاء */}
         <div>
-          <h4 className="text-sm font-bold mb-2" style={{ color: "var(--aseel-ink)" }}>الأعضاء والأدوار ({members.length})</h4>
+          <h4 className="text-sm font-bold mb-2" style={{ color: "var(--ktra-ink)" }}>الأعضاء والأدوار ({members.length})</h4>
 
           {isManager && (
             <div className="flex flex-wrap gap-2 mb-3 items-end">
@@ -230,7 +230,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
                   type="text"
                   value={newMember}
                   onChange={(e) => setNewMember(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--aseel-border,#ddd)] bg-[var(--aseel-panel,#fafafa)]"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ktra-border,#ddd)] bg-[var(--ktra-panel,#fafafa)]"
                   disabled={addBusy}
                   placeholder="أدخل البريد أو اسم المستخدم بدقة"
                   autoComplete="off"
@@ -247,7 +247,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
                   id="add-member-role"
                   value={newRole}
                   onChange={(e) => setNewRole(e.target.value)}
-                  className="px-3 py-2 text-sm rounded-lg border border-[var(--aseel-border,#ddd)] bg-[var(--aseel-panel,#fafafa)]"
+                  className="px-3 py-2 text-sm rounded-lg border border-[var(--ktra-border,#ddd)] bg-[var(--ktra-panel,#fafafa)]"
                   disabled={addBusy}
                 >
                   {Object.entries(ROLE_LABELS).map(([k, v]) => (
@@ -259,7 +259,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
                 type="button"
                 onClick={() => void handleAdd()}
                 disabled={addBusy || !newMember.trim()}
-                className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white rounded-lg bg-[var(--aseel-accent,#1857a4)] disabled:opacity-50"
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white rounded-lg bg-[var(--ktra-accent,#1857a4)] disabled:opacity-50"
               >
                 {addBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
                 إضافة عضو
@@ -272,9 +272,9 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
               <Loader2 className="w-4 h-4 animate-spin" /> جاري تحميل الأعضاء…
             </div>
           ) : (
-            <table className="w-full text-sm border border-[var(--aseel-border,#ddd)] rounded-lg overflow-hidden">
+            <table className="w-full text-sm border border-[var(--ktra-border,#ddd)] rounded-lg overflow-hidden">
               <thead>
-                <tr className="bg-[var(--aseel-panel,#f5f5f5)] text-right">
+                <tr className="bg-[var(--ktra-panel,#f5f5f5)] text-right">
                   <th className="px-3 py-2 font-bold">المستخدم</th>
                   <th className="px-3 py-2 font-bold">البريد</th>
                   <th className="px-3 py-2 font-bold w-44">الدور</th>
@@ -284,7 +284,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
               </thead>
               <tbody>
                 {members.map((m) => (
-                  <tr key={m.membership_id} className="border-t border-[var(--aseel-border-soft,#eee)]">
+                  <tr key={m.membership_id} className="border-t border-[var(--ktra-border-soft,#eee)]">
                     <td className="px-3 py-2">
                       <div className="font-semibold">{m.full_name || m.username}</div>
                       {m.full_name && <div className="text-[11px] opacity-60">{m.username}</div>}
@@ -296,7 +296,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
                           value={m.role}
                           onChange={(e) => void handleRoleChange(m, e.target.value)}
                           disabled={busyId === m.membership_id}
-                          className="w-full px-2 py-1.5 text-sm rounded-lg border border-[var(--aseel-border,#ddd)] bg-[var(--aseel-panel,#fafafa)]"
+                          className="w-full px-2 py-1.5 text-sm rounded-lg border border-[var(--ktra-border,#ddd)] bg-[var(--ktra-panel,#fafafa)]"
                           aria-label={`دور ${m.username}`}
                         >
                           {Object.entries(ROLE_LABELS).map(([k, v]) => (

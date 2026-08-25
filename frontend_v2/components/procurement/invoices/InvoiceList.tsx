@@ -1,6 +1,6 @@
 /**
  * InvoiceList — قائمة فواتير الشراء على نمط «الأصيل» (مطابقة لقائمة المبيعات).
- * AseelDocumentShell + AseelDenseTable + شريط فلاتر + شريط أدوات موحّد.
+ * KitDocumentShell + KitDenseTable + شريط فلاتر + شريط أدوات موحّد.
  * أعمدة: رقم / التاريخ / المورد / الحالة / الإجمالي / إجراءات
  * (استُبدل التصميم البطاقي السابق بالكامل بطلب المالك — توحيد UI مع المبيعات.)
  */
@@ -23,12 +23,12 @@ import {
   Truck,
 } from "lucide-react";
 import {
-  AseelDocumentShell,
-  AseelDenseTable,
-  AseelDateInput,
+  KitDocumentShell,
+  KitDenseTable,
+  KitDateInput,
   type DenseColumn,
-  type AseelToolbarAction,
-} from "../../aseel";
+  type KitToolbarAction,
+} from "../../kit";
 
 /** T-INTENT: تسوية صفّ القائمة من المشتقّة المشتركة — نفس رقم المحرّر. */
 const rowSettlement = (r: Invoice) => deriveInvoiceSettlement({
@@ -82,9 +82,9 @@ const RECEIPT_BADGE: Record<
   NonNullable<Invoice["receiptStatus"]>,
   { label: string; color: string }
 > = {
-  not_received: { label: "غير مستلمة", color: "var(--aseel-warn, #b06800)" },
-  partially_received: { label: "مستلمة جزئياً", color: "var(--aseel-accent, #2563eb)" },
-  received: { label: "مستلمة", color: "var(--aseel-ok, #2d7d46)" },
+  not_received: { label: "غير مستلمة", color: "var(--ktra-warn, #b06800)" },
+  partially_received: { label: "مستلمة جزئياً", color: "var(--ktra-accent, #2563eb)" },
+  received: { label: "مستلمة", color: "var(--ktra-ok, #2d7d46)" },
 };
 
 import { formatMoney } from "@/utils/formatNumber";
@@ -220,7 +220,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             fontWeight: 700,
             padding: "1px 6px",
             borderRadius: "4px",
-            color: r.isReturn ? "#b04a00" : "var(--aseel-accent, #2563eb)",
+            color: r.isReturn ? "#b04a00" : "var(--ktra-accent, #2563eb)",
             background: r.isReturn ? "rgba(176,74,0,0.12)" : "rgba(37,99,235,0.10)",
           }}
         >
@@ -243,7 +243,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         r.supplierId ? (
           <button
             type="button"
-            className="text-xs text-[var(--aseel-accent)] underline hover:no-underline cursor-pointer bg-transparent border-0 p-0 font-inherit text-right"
+            className="text-xs text-[var(--ktra-accent)] underline hover:no-underline cursor-pointer bg-transparent border-0 p-0 font-inherit text-right"
             title="فتح كشف حساب المورد في تبويب جديد"
             data-ctx-partner-id={r.supplierId}
             data-ctx-partner-name={supplierName(r)}
@@ -265,13 +265,13 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         r.dealId ? (
           <button
             type="button"
-            className="text-xs text-[var(--aseel-accent)] underline hover:no-underline cursor-pointer bg-transparent border-0 p-0 font-inherit text-right"
+            className="text-xs text-[var(--ktra-accent)] underline hover:no-underline cursor-pointer bg-transparent border-0 p-0 font-inherit text-right"
             title="فتح الصفقة في تبويب جديد"
             onClick={(e) => { e.stopPropagation(); openInNewTab(`/deals/${r.dealId}`); }}
           >
             {r.dealTitle || r.dealNumber || `#${r.dealId}`}
           </button>
-        ) : <span className="text-xs aseel-text-soft">—</span>
+        ) : <span className="text-xs ktra-text-soft">—</span>
       ),
     },
     {
@@ -284,7 +284,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           style={{
             fontSize: "11px",
             fontWeight: 600,
-            color: r.isPosted ? "var(--aseel-ok, #2d7d46)" : "var(--aseel-warn, #b06800)",
+            color: r.isPosted ? "var(--ktra-ok, #2d7d46)" : "var(--ktra-warn, #b06800)",
           }}
         >
           {r.isPosted ? "مرحَّلة" : "مسودة"}
@@ -314,7 +314,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       width: "120px",
       align: "left",
       numeric: true,
-      render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmtNum(grandOf(r))}</span>,
+      render: (r) => <span className="ktra-num font-mono text-xs font-semibold">{fmtNum(grandOf(r))}</span>,
     },
     {
       key: "paymentStatus",
@@ -341,7 +341,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       width: "100px",
       align: "left",
       numeric: true,
-      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.amountPaid)}</span>,
+      render: (r) => <span className="ktra-num font-mono text-xs">{fmtNum(r.amountPaid)}</span>,
     },
     {
       key: "remainingBalance",
@@ -356,7 +356,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         const settlement = rowSettlement(r);
         return (
           <span className="inline-flex items-center gap-1">
-            <span className="aseel-num font-mono text-xs font-semibold">
+            <span className="ktra-num font-mono text-xs font-semibold">
               {fmtNum(settlement.remainingAfterIntent)}
             </span>
             {settlement.pendingIntent > 0.009 && (
@@ -377,7 +377,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       width: "110px",
       align: "left",
       numeric: true,
-      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.partnerBalance)}</span>,
+      render: (r) => <span className="ktra-num font-mono text-xs">{fmtNum(r.partnerBalance)}</span>,
     },
     {
       key: "actions",
@@ -388,7 +388,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         <div style={{ display: "flex", gap: "3px", flexWrap: "wrap", justifyContent: "center" }}>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             style={{ fontSize: "10px", padding: "2px 6px" }}
             onClick={(e) => { e.stopPropagation(); onView(r); }}
             title="عرض"
@@ -397,7 +397,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           </button>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             style={{ fontSize: "10px", padding: "2px 6px" }}
             onClick={(e) => { e.stopPropagation(); onPrint(r); }}
             title="طباعة"
@@ -409,7 +409,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             && r.receiptStatus !== "received" && (
             <button
               type="button"
-              className="aseel-toolbtn"
+              className="ktra-toolbtn"
               style={{ fontSize: "10px", padding: "2px 6px" }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -422,7 +422,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           )}
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             style={{ fontSize: "10px", padding: "2px 6px" }}
             onClick={async (e) => {
               e.stopPropagation();
@@ -437,7 +437,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           {!r.isPosted && (
             <button
               type="button"
-              className="aseel-toolbtn aseel-toolbtn--danger"
+              className="ktra-toolbtn ktra-toolbtn--danger"
               style={{ fontSize: "10px", padding: "2px 6px" }}
               onClick={async (e) => {
                 e.stopPropagation();
@@ -456,21 +456,21 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   ];
 
   const filterBar = (
-    <div className="aseel-print-hidden" style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
-      <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
-        <span className="aseel-field-label">بحث (رقم / مورد)</span>
+    <div className="ktra-print-hidden" style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
+      <label className="ktra-field" style={{ flex: 1, minWidth: "200px" }}>
+        <span className="ktra-field-label">بحث (رقم / مورد)</span>
         <input
-          className="aseel-input"
-          data-aseel-field="search"
+          className="ktra-input"
+          data-ktra-field="search"
           placeholder="بحث... (F6)"
           value={search}
           onChange={(e) => { setSearch(e.target.value); publishFilters({ search: e.target.value }); }}
         />
       </label>
-      <label className="aseel-field" style={{ minWidth: "110px" }}>
-        <span className="aseel-field-label">النوع</span>
+      <label className="ktra-field" style={{ minWidth: "110px" }}>
+        <span className="ktra-field-label">النوع</span>
         <select
-          className="aseel-input"
+          className="ktra-input"
           value={filterKind}
           onChange={(e) => {
             const value = e.target.value as "all" | "invoice" | "return";
@@ -483,16 +483,16 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           <option value="return">مراجيع الشراء</option>
         </select>
       </label>
-      <label className="aseel-field" style={{ minWidth: "100px" }}>
-        <span className="aseel-field-label">الحالة</span>
-        <select className="aseel-input" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); publishFilters({ status: e.target.value }); }}>
+      <label className="ktra-field" style={{ minWidth: "100px" }}>
+        <span className="ktra-field-label">الحالة</span>
+        <select className="ktra-input" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); publishFilters({ status: e.target.value }); }}>
           {STATUS_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
       </label>
-      <label className="aseel-field" style={{ minWidth: "125px" }}>
-        <span className="aseel-field-label">حالة الدفع</span>
+      <label className="ktra-field" style={{ minWidth: "125px" }}>
+        <span className="ktra-field-label">حالة الدفع</span>
         <select
-          className="aseel-input"
+          className="ktra-input"
           value={filterPaymentStatus}
           onChange={(e) => {
             const value = e.target.value as InvoiceListFilters["paymentStatus"];
@@ -509,18 +509,18 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           <option value="overdue">متأخرة</option>
         </select>
       </label>
-      <label className="aseel-field">
-        <span className="aseel-field-label">من تاريخ</span>
-        <AseelDateInput value={dateFrom} onChange={(value) => { clientLogger.info("purchase_invoice.date_filter_changed", { boundary: "from", hasValue: Boolean(value) }); setDateFrom(value); publishFilters({ dateFrom: value }); }} />
+      <label className="ktra-field">
+        <span className="ktra-field-label">من تاريخ</span>
+        <KitDateInput value={dateFrom} onChange={(value) => { clientLogger.info("purchase_invoice.date_filter_changed", { boundary: "from", hasValue: Boolean(value) }); setDateFrom(value); publishFilters({ dateFrom: value }); }} />
       </label>
-      <label className="aseel-field">
-        <span className="aseel-field-label">إلى تاريخ</span>
-        <AseelDateInput value={dateTo} onChange={(value) => { clientLogger.info("purchase_invoice.date_filter_changed", { boundary: "to", hasValue: Boolean(value) }); setDateTo(value); publishFilters({ dateTo: value }); }} />
+      <label className="ktra-field">
+        <span className="ktra-field-label">إلى تاريخ</span>
+        <KitDateInput value={dateTo} onChange={(value) => { clientLogger.info("purchase_invoice.date_filter_changed", { boundary: "to", hasValue: Boolean(value) }); setDateTo(value); publishFilters({ dateTo: value }); }} />
       </label>
     </div>
   );
 
-  const toolbarActions: AseelToolbarAction[] = [
+  const toolbarActions: KitToolbarAction[] = [
     {
       key: "new",
       label: "فاتورة جديدة",
@@ -528,10 +528,10 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       onClick: onCreateNew ?? (() => openInNewTab("/purchase-invoices/new")),
     },
     ...(onImport
-      ? [{ key: "import", label: "استيراد من تخليص جمركي", icon: <ScrollText />, onClick: onImport, separatorBefore: true } as AseelToolbarAction]
+      ? [{ key: "import", label: "استيراد من تخليص جمركي", icon: <ScrollText />, onClick: onImport, separatorBefore: true } as KitToolbarAction]
       : []),
     ...(onRefresh
-      ? [{ key: "refresh", label: "تحديث", icon: <RefreshCw />, onClick: onRefresh, separatorBefore: true } as AseelToolbarAction]
+      ? [{ key: "refresh", label: "تحديث", icon: <RefreshCw />, onClick: onRefresh, separatorBefore: true } as KitToolbarAction]
       : []),
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => window.print() },
   ];
@@ -548,24 +548,24 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
+      <KitDocumentShell
         title={isInternational ? "الفواتير الدولية" : "فواتير الشراء"}
         state={`${filteredRows.length} في الصفحة من ${total}`}
         actions={toolbarActions}
         header={filterBar}
         status={
           <>
-            <span className="aseel-status-item">العدد <b>{filteredRows.length}</b></span>
-            <span className="aseel-status-item">الإجمالي <b className="aseel-num">{fmtNum(totalSum)}</b></span>
-            <span className="aseel-status-item" style={{ color: "var(--aseel-ok, #2d7d46)" }}>مرحَّلة <b>{postedCount}</b></span>
-            <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b06800)" }}>مسودة <b>{draftCount}</b></span>
-            <span className="aseel-status-item">المدفوع <b className="aseel-num">{fmtNum(paidSum)}</b></span>
-            <span className="aseel-status-item">المتبقي للدفع <b className="aseel-num">{fmtNum(balanceSum)}</b></span>
+            <span className="ktra-status-item">العدد <b>{filteredRows.length}</b></span>
+            <span className="ktra-status-item">الإجمالي <b className="ktra-num">{fmtNum(totalSum)}</b></span>
+            <span className="ktra-status-item" style={{ color: "var(--ktra-ok, #2d7d46)" }}>مرحَّلة <b>{postedCount}</b></span>
+            <span className="ktra-status-item" style={{ color: "var(--ktra-warn, #b06800)" }}>مسودة <b>{draftCount}</b></span>
+            <span className="ktra-status-item">المدفوع <b className="ktra-num">{fmtNum(paidSum)}</b></span>
+            <span className="ktra-status-item">المتبقي للدفع <b className="ktra-num">{fmtNum(balanceSum)}</b></span>
           </>
         }
       >
         <div style={{ padding: "8px" }}>
-          <AseelDenseTable<Invoice>
+          <KitDenseTable<Invoice>
             columns={columns}
             rows={filteredRows}
             getRowKey={(r) => String(r.id)}
@@ -578,7 +578,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             pagination={onPageChange ? { page, pageSize, total, onChange: onPageChange } : undefined}
           />
         </div>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

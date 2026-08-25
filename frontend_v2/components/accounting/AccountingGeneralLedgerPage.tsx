@@ -3,10 +3,10 @@ import { accountingApi } from "../../services/accountingApi";
 import { formatMoney, formatBalanceWithSide, formatNumber } from "../../utils/formatNumber";
 import type { AccountingAccount, GeneralLedgerResponse, CurrencyDto } from "../../types/accounting";
 import {
-  AseelDocumentShell,
-  AseelReportTable,
-} from "../aseel";
-import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
+  KitDocumentShell,
+  KitReportTable,
+} from "../kit";
+import type { KitToolbarAction, KitTab, ReportColumn } from "../kit";
 import { Search } from "lucide-react";
 import { formatDateLocalized } from "../../utils/formatDate";
 import { AccountTreeField } from "./AccountTreePicker";
@@ -146,8 +146,8 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
 
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      <div className="aseel-field" style={{ flex: "1", minWidth: "200px" }}>
-        <label className="aseel-field-label">الحساب</label>
+      <div className="ktra-field" style={{ flex: "1", minWidth: "200px" }}>
+        <label className="ktra-field-label">الحساب</label>
         {/* THA-111: فلتر عرض لا هدف ترحيل — يُسمح فيه باختيار حساب أب. */}
         <AccountTreeField
           accounts={accounts}
@@ -158,17 +158,17 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
           title="اختيار الحساب من الشجرة"
         />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">من</label>
-        <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">من</label>
+        <input type="date" className="ktra-input" value={start} onChange={(e) => setStart(e.target.value)} />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">إلى</label>
-        <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">إلى</label>
+        <input type="date" className="ktra-input" value={end} onChange={(e) => setEnd(e.target.value)} />
       </div>
-      <div className="aseel-field" style={{ minWidth: "120px" }}>
-        <label className="aseel-field-label">العملة</label>
-        <select className="aseel-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value)}>
+      <div className="ktra-field" style={{ minWidth: "120px" }}>
+        <label className="ktra-field-label">العملة</label>
+        <select className="ktra-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value)}>
           <option value="">كل العملات</option>
           {currencies.map((c) => (
             <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>
@@ -179,7 +179,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
         <input type="checkbox" checked={unposted} onChange={(e) => setUnposted(e.target.checked)} />
         غير المرحّل
       </label>
-      <button type="button" className="aseel-toolbtn" onClick={run} style={{ marginTop: "18px" }}>
+      <button type="button" className="ktra-toolbtn" onClick={run} style={{ marginTop: "18px" }}>
         <Search className="w-4 h-4" />عرض
       </button>
     </div>
@@ -187,22 +187,22 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
 
   const reportContent = (
     <>
-      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
       {data?.truncated && (
-        <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>
+        <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>
           الكشف مقصوص: عُرض {formatNumber(data.max_rows ?? 0)} سطراً من أصل{" "}
           {formatNumber(data.total_count ?? 0)} — الرصيد الختامي أدناه يخصّ المعروض فقط.
           ضيّق مدى التاريخ لعرض الكشف كاملاً.
         </div>
       )}
       {data && (
-        <div style={{ padding: "8px 0", fontSize: "0.85rem", color: "var(--aseel-ink-soft)" }}>
+        <div style={{ padding: "8px 0", fontSize: "0.85rem", color: "var(--ktra-ink-soft)" }}>
           <strong>{data.account_code} — {data.account_name}</strong>
           &nbsp;|&nbsp; رصيد افتتاحي: <strong>{fmtBalance(Number(data.opening_balance))}</strong>
           &nbsp;|&nbsp; رصيد ختامي: <strong>{fmtBalance(Number(data.closing_balance))}</strong>
         </div>
       )}
-      <AseelReportTable<LedgerRow>
+      <KitReportTable<LedgerRow>
         filterBar={filterBar}
         columns={columns}
         rows={ledgerRows}
@@ -222,29 +222,29 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
     </>
   );
 
-  const shellActions: AseelToolbarAction[] = [
+  const shellActions: KitToolbarAction[] = [
     { key: "run", label: "عرض", icon: <Search className="w-4 h-4" />, onClick: run },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "ledger", label: "حركة الحساب", content: reportContent },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="الأستاذ العام"
         actions={shellActions}
         header={<></>}
         tabs={tabs}
         status={
           data ? (
-            <span className="aseel-status-item">{ledgerRows.length} حركة</span>
+            <span className="ktra-status-item">{ledgerRows.length} حركة</span>
           ) : undefined
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

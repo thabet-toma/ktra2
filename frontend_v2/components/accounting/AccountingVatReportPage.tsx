@@ -3,10 +3,10 @@ import { accountingApi } from "../../services/accountingApi";
 import { formatMoney } from "../../utils/formatNumber";
 import type { VatReportResponse, VatReportLine } from "../../types/accounting";
 import {
-  AseelDocumentShell,
-  AseelReportTable,
-} from "../aseel";
-import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
+  KitDocumentShell,
+  KitReportTable,
+} from "../kit";
+import type { KitToolbarAction, KitTab, ReportColumn } from "../kit";
 import { Search } from "lucide-react";
 import { formatDateLocalized } from "../../utils/formatDate";
 
@@ -87,23 +87,23 @@ export const AccountingVatReportPage: React.FC = () => {
 
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      <div className="aseel-field">
-        <label className="aseel-field-label">من</label>
-        <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">من</label>
+        <input type="date" className="ktra-input" value={start} onChange={(e) => setStart(e.target.value)} />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">إلى</label>
-        <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">إلى</label>
+        <input type="date" className="ktra-input" value={end} onChange={(e) => setEnd(e.target.value)} />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">نوع الضريبة</label>
-        <select className="aseel-input" value={vatType} onChange={(e) => setVatType(e.target.value as "all" | "input" | "output")}>
+      <div className="ktra-field">
+        <label className="ktra-field-label">نوع الضريبة</label>
+        <select className="ktra-input" value={vatType} onChange={(e) => setVatType(e.target.value as "all" | "input" | "output")}>
           <option value="all">الكل</option>
           <option value="output">مخرجات</option>
           <option value="input">مدخلات</option>
         </select>
       </div>
-      <button type="button" className="aseel-toolbtn" onClick={fetchReport} style={{ marginTop: "18px" }}>
+      <button type="button" className="ktra-toolbtn" onClick={fetchReport} style={{ marginTop: "18px" }}>
         <Search className="w-4 h-4" />تحديث
       </button>
     </div>
@@ -130,9 +130,9 @@ export const AccountingVatReportPage: React.FC = () => {
 
   const reportContent = (
     <>
-      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
       {summaryBand}
-      <AseelReportTable<VatReportLine & { vat_type: string }>
+      <KitReportTable<VatReportLine & { vat_type: string }>
         filterBar={filterBar}
         columns={columns}
         rows={lines}
@@ -146,31 +146,31 @@ export const AccountingVatReportPage: React.FC = () => {
     </>
   );
 
-  const shellActions: AseelToolbarAction[] = [
+  const shellActions: KitToolbarAction[] = [
     { key: "run", label: "تحديث", icon: <Search className="w-4 h-4" />, onClick: fetchReport },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "vat", label: "تقرير الضريبة", content: reportContent },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="تقرير ضريبة القيمة المضافة"
         actions={shellActions}
         header={<></>}
         tabs={tabs}
         status={
           data ? (
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               {lines.length} حركة | صافي: {fmt(net)}
             </span>
           ) : undefined
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

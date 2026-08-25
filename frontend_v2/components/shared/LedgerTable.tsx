@@ -52,7 +52,7 @@ export const DocRefCell: React.FC<{
     <button
       type="button"
       onClick={() => navigate(path)}
-      className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+      className="text-[var(--ktra-accent,#2563eb)] underline hover:opacity-80"
     >
       {text}
     </button>
@@ -95,7 +95,7 @@ export function LedgerTable<Row = Record<string, unknown>>({
   const renderRow = (row: Row, key: React.Key) => (
     <tr
       key={key}
-      className={`border-b border-[var(--aseel-border)] hover:bg-black/5 ${
+      className={`border-b border-[var(--ktra-border)] hover:bg-black/5 ${
         rowClassName ? rowClassName(row) : ""
       }`}
     >
@@ -108,7 +108,7 @@ export function LedgerTable<Row = Record<string, unknown>>({
   );
 
   return (
-    <div className="aseel-dense-table overflow-x-auto" dir="rtl">
+    <div className="ktra-dense-table overflow-x-auto" dir="rtl">
       <table className="w-full text-sm">
         <thead>
           <tr>
@@ -116,7 +116,7 @@ export function LedgerTable<Row = Record<string, unknown>>({
               <th
                 key={c.key}
                 style={{ textAlign: c.align ?? "right" }}
-                className="px-2 py-1 border-b border-[var(--aseel-border)] bg-[var(--aseel-head,#f2f0e4)] font-bold"
+                className="px-2 py-1 border-b border-[var(--ktra-border)] bg-[var(--ktra-head,#f2f0e4)] font-bold"
               >
                 {c.header}
               </th>
@@ -127,19 +127,19 @@ export function LedgerTable<Row = Record<string, unknown>>({
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={columns.length} className="p-4 text-center text-[var(--aseel-ink-soft)]">
+                <td colSpan={columns.length} className="p-4 text-center text-[var(--ktra-ink-soft)]">
                   جاري التحميل…
                 </td>
               </tr>
             ) : error ? (
               <tr>
-                <td colSpan={columns.length} className="p-4 text-center text-[var(--aseel-danger)]">
+                <td colSpan={columns.length} className="p-4 text-center text-[var(--ktra-danger)]">
                   {error}
                 </td>
               </tr>
             ) : (
               <tr>
-                <td colSpan={columns.length} className="p-4 text-center text-[var(--aseel-ink-soft)]">
+                <td colSpan={columns.length} className="p-4 text-center text-[var(--ktra-ink-soft)]">
                   {emptyText}
                 </td>
               </tr>
@@ -152,7 +152,7 @@ export function LedgerTable<Row = Record<string, unknown>>({
               key={group.key}
               className={
                 group.rows.length > 1
-                  ? "border-2 border-[var(--aseel-accent,#2563eb)]"
+                  ? "border-2 border-[var(--ktra-accent,#2563eb)]"
                   : undefined
               }
             >
@@ -169,7 +169,7 @@ export function LedgerTable<Row = Record<string, unknown>>({
 
       {canPaginate && (count ?? 0) > (limit ?? 0) && (
         <div className="flex items-center justify-between p-2 text-sm">
-          <span className="text-[var(--aseel-ink-soft)]">
+          <span className="text-[var(--ktra-ink-soft)]">
             {offset + 1}–{Math.min(offset + (limit ?? 0), count ?? 0)} من {count}
           </span>
           <div className="flex gap-2">

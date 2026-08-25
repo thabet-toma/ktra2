@@ -150,24 +150,24 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl aseel-bg-field dark:aseel-bg-panel shadow-xl border aseel-border-soft">
-        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b aseel-border-soft sticky top-0 aseel-bg-field dark:aseel-bg-panel">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl ktra-bg-field dark:ktra-bg-panel shadow-xl border ktra-border-soft">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b ktra-border-soft sticky top-0 ktra-bg-field dark:ktra-bg-panel">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-[var(--color-primary)] text-white rounded-xl">
               <PackageCheck className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base sm:text-lg font-bold aseel-text-ink dark:text-white">
+              <h3 className="text-base sm:text-lg font-bold ktra-text-ink dark:text-white">
                 استلام البضاعة للمخزن
               </h3>
-              <p className="text-xs aseel-text-soft">
+              <p className="text-xs ktra-text-soft">
                 فاتورة {number}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 aseel-text-soft hover:aseel-bg-panel rounded-lg"
+            className="p-2 ktra-text-soft hover:ktra-bg-panel rounded-lg"
             aria-label="إغلاق"
           >
             <X className="w-5 h-5" />
@@ -176,29 +176,29 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
 
         <div className="p-4 sm:p-6 space-y-4">
           {error && (
-            <div className="p-3 rounded-lg aseel-bg-panel aseel-text-state text-sm border aseel-border-soft">
+            <div className="p-3 rounded-lg ktra-bg-panel ktra-text-state text-sm border ktra-border-soft">
               {error}
             </div>
           )}
           {noWarehouses && (
-            <div className="p-3 rounded-lg aseel-bg-panel aseel-text-ink text-sm border aseel-border-soft">
+            <div className="p-3 rounded-lg ktra-bg-panel ktra-text-ink text-sm border ktra-border-soft">
               لا توجد مستودعات نشطة. أنشئ مستودعاً من صفحة إدارة المستودعات أولاً.
             </div>
           )}
 
           {loading ? (
-            <div className="flex items-center gap-2 justify-center py-10 aseel-text-soft">
+            <div className="flex items-center gap-2 justify-center py-10 ktra-text-soft">
               <Loader2 className="w-5 h-5 animate-spin" />
               <span>جارٍ التحميل…</span>
             </div>
           ) : rows.length === 0 ? (
-            <div className="py-10 text-center aseel-text-soft text-sm">
+            <div className="py-10 text-center ktra-text-soft text-sm">
               لا توجد بنود ذات صنف مخزون قابلة للاستلام في هذه الفاتورة.
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-lg border aseel-border-soft">
+            <div className="overflow-x-auto rounded-lg border ktra-border-soft">
               <table className="w-full text-sm min-w-[480px]">
-                <thead className="aseel-bg-panel aseel-text-soft text-xs">
+                <thead className="ktra-bg-panel ktra-text-soft text-xs">
                   <tr>
                     <th className="px-2 py-2 text-center font-medium w-10">
                       <input
@@ -223,7 +223,7 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
                     return (
                       <tr
                         key={r.item_id}
-                        className="border-t aseel-border-soft"
+                        className="border-t ktra-border-soft"
                       >
                         <td className="px-2 py-2 text-center">
                           <input
@@ -236,10 +236,10 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
                             aria-label={`استلام ${r.name}`}
                           />
                         </td>
-                        <td className="px-3 py-2 aseel-text-ink dark:aseel-text-soft">
+                        <td className="px-3 py-2 ktra-text-ink dark:ktra-text-soft">
                           {r.name}
                           {done && (
-                            <span className="block text-[11px] aseel-text-soft">
+                            <span className="block text-[11px] ktra-text-soft">
                               مستلَم بالكامل
                             </span>
                           )}
@@ -268,7 +268,7 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
                               );
                               updateRow(idx, { qty: v });
                             }}
-                            className="w-20 h-9 px-2 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-right disabled:opacity-50"
+                            className="w-20 h-9 px-2 border ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-right disabled:opacity-50"
                           />
                         </td>
                         <td className="px-3 py-2">
@@ -282,7 +282,7 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
                                   : null,
                               })
                             }
-                            className="w-full h-9 px-2 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel disabled:opacity-50"
+                            className="w-full h-9 px-2 border ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel disabled:opacity-50"
                           >
                             {warehouses.map((w) => (
                               <option key={w.id} value={w.id}>
@@ -299,10 +299,10 @@ export const ReceiveGoodsModal: React.FC<Props> = ({
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-3 pt-2 border-t aseel-border-soft">
+          <div className="flex items-center justify-end gap-3 pt-2 border-t ktra-border-soft">
             <button
               onClick={onClose}
-              className="px-4 py-2 aseel-text-ink dark:aseel-text-soft aseel-bg-panel rounded-lg"
+              className="px-4 py-2 ktra-text-ink dark:ktra-text-soft ktra-bg-panel rounded-lg"
             >
               إلغاء
             </button>

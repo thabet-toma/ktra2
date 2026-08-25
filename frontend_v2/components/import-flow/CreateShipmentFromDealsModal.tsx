@@ -124,53 +124,53 @@ export const CreateShipmentFromDealsModal: React.FC<Props> = ({ isOpen, onClose,
       onClick={onClose}
     >
       <div
-        style={{ background: "var(--aseel-bg, #fff)", color: "var(--aseel-ink)", borderRadius: 10, width: "min(880px, 100%)", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 10px 40px rgba(0,0,0,0.3)" }}
+        style={{ background: "var(--ktra-bg, #fff)", color: "var(--ktra-ink)", borderRadius: 10, width: "min(880px, 100%)", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 10px 40px rgba(0,0,0,0.3)" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderBottom: "1px solid var(--aseel-border)" }}>
-          <Ship style={{ width: 18, height: 18, color: "var(--aseel-accent, #1857a4)" }} />
-          <strong style={{ fontSize: "var(--aseel-fs-title, 14px)" }}>إنشاء شحنة من الصفقات الجاهزة</strong>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderBottom: "1px solid var(--ktra-border)" }}>
+          <Ship style={{ width: 18, height: 18, color: "var(--ktra-accent, #1857a4)" }} />
+          <strong style={{ fontSize: "var(--ktra-fs-title, 14px)" }}>إنشاء شحنة من الصفقات الجاهزة</strong>
           <div style={{ flex: 1 }} />
-          <button className="aseel-toolbtn" onClick={onClose} title="إغلاق"><X style={{ width: 16, height: 16 }} /></button>
+          <button className="ktra-toolbtn" onClick={onClose} title="إغلاق"><X style={{ width: 16, height: 16 }} /></button>
         </div>
 
         {/* Body */}
         <div style={{ padding: "12px 16px", overflowY: "auto", flex: 1 }}>
           {error && (
-            <div style={{ background: "var(--aseel-danger-bg, #fdecec)", color: "var(--aseel-danger, #c00)", padding: "6px 10px", borderRadius: 6, marginBottom: 10, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+            <div style={{ background: "var(--ktra-danger-bg, #fdecec)", color: "var(--ktra-danger, #c00)", padding: "6px 10px", borderRadius: 6, marginBottom: 10, fontSize: "var(--ktra-fs-sm, 12px)" }}>
               {error}
             </div>
           )}
 
           {loading ? (
-            <p style={{ color: "var(--aseel-ink-soft)" }}>جارٍ تحميل الصفقات الجاهزة…</p>
+            <p style={{ color: "var(--ktra-ink-soft)" }}>جارٍ تحميل الصفقات الجاهزة…</p>
           ) : rows.length === 0 ? (
             // G4: بدل رسالة سلبية تُشير لـ«شحنة فارغة» دون زر (طريق مسدود) —
             // حالة فارغة موجِّهة بإجراء واضح للأمام.
-            <div style={{ textAlign: "center", padding: "18px 8px", color: "var(--aseel-ink-soft)" }}>
+            <div style={{ textAlign: "center", padding: "18px 8px", color: "var(--ktra-ink-soft)" }}>
               <PackageCheck style={{ width: 28, height: 28, opacity: 0.5, marginInline: "auto" }} />
-              <p style={{ margin: "10px 0 4px", fontWeight: 600, color: "var(--aseel-ink)" }}>
+              <p style={{ margin: "10px 0 4px", fontWeight: 600, color: "var(--ktra-ink)" }}>
                 لا صفقات جاهزة للشحن بعد
               </p>
-              <p style={{ margin: "0 auto", maxWidth: 460, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+              <p style={{ margin: "0 auto", maxWidth: 460, fontSize: "var(--ktra-fs-sm, 12px)" }}>
                 جهّز صفقة أولاً: افتحها ثم اضغط «ابدأ الشحن الدولي» في تبويب «المراحل والشحن»
                 (تصل المرحلة إلى «تم الشحن للوكيل»). أو ابدأ شحنة فارغة الآن واضمم الصفقات لاحقاً.
               </p>
               {onCreateEmpty && (
                 <button
-                  className="aseel-toolbtn"
+                  className="ktra-toolbtn"
                   onClick={onCreateEmpty}
-                  style={{ marginTop: 12, background: "var(--aseel-accent, #1857a4)", color: "#fff" }}
+                  style={{ marginTop: 12, background: "var(--ktra-accent, #1857a4)", color: "#fff" }}
                 >
                   <Ship style={{ width: 14, height: 14 }} /> بدء شحنة فارغة
                 </button>
               )}
             </div>
           ) : (
-            <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)", borderCollapse: "collapse" }}>
+            <table className="ktra-input" style={{ width: "100%", fontSize: "var(--ktra-fs-sm, 12px)", borderCollapse: "collapse" }}>
               <thead>
-                <tr style={{ textAlign: "right", color: "var(--aseel-ink-soft)" }}>
+                <tr style={{ textAlign: "right", color: "var(--ktra-ink-soft)" }}>
                   <th style={{ width: 32 }}>
                     <input type="checkbox" checked={selected.size === rows.length && rows.length > 0} onChange={toggleAll} title="تحديد الكل" />
                   </th>
@@ -188,17 +188,17 @@ export const CreateShipmentFromDealsModal: React.FC<Props> = ({ isOpen, onClose,
                     <tr
                       key={r.id}
                       onClick={() => toggle(r.id)}
-                      style={{ cursor: "pointer", background: on ? "var(--aseel-accent-bg, #eaf1fb)" : undefined, borderTop: "1px solid var(--aseel-border)" }}
+                      style={{ cursor: "pointer", background: on ? "var(--ktra-accent-bg, #eaf1fb)" : undefined, borderTop: "1px solid var(--ktra-border)" }}
                     >
                       <td><input type="checkbox" checked={on} onChange={() => toggle(r.id)} onClick={(e) => e.stopPropagation()} /></td>
                       <td>
                         <b style={{ fontFamily: "monospace" }}>{r.ref_number}</b>
                         {r.stage === "ready_to_ship" && (
-                          <span title="جاهزة للشحن" style={{ marginRight: 4, color: "var(--aseel-ok, #267346)" }}>
+                          <span title="جاهزة للشحن" style={{ marginRight: 4, color: "var(--ktra-ok, #267346)" }}>
                             <PackageCheck style={{ width: 12, height: 12, display: "inline" }} />
                           </span>
                         )}
-                        <div style={{ color: "var(--aseel-ink-soft)" }}>{r.short_name || r.description || ""}</div>
+                        <div style={{ color: "var(--ktra-ink-soft)" }}>{r.short_name || r.description || ""}</div>
                       </td>
                       <td>{r.partner_name || "—"}</td>
                       <td style={{ textAlign: "left", fontFamily: "monospace" }}>{formatMoney(num(r.total_cbm))}</td>
@@ -213,38 +213,38 @@ export const CreateShipmentFromDealsModal: React.FC<Props> = ({ isOpen, onClose,
         </div>
 
         {/* Freight controls + live totals */}
-        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--aseel-border)", background: "var(--aseel-surface, #f7f8fa)" }}>
+        <div style={{ padding: "10px 16px", borderTop: "1px solid var(--ktra-border)", background: "var(--ktra-surface, #f7f8fa)" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--ktra-fs-sm, 12px)" }}>
               اسم الشحنة (اختياري)
-              <input className="aseel-input" style={{ width: 180 }} value={shipmentName} onChange={(e) => setShipmentName(e.target.value)} placeholder="مثال: شحنة الصين يوليو" />
+              <input className="ktra-input" style={{ width: 180 }} value={shipmentName} onChange={(e) => setShipmentName(e.target.value)} placeholder="مثال: شحنة الصين يوليو" />
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--ktra-fs-sm, 12px)" }}>
               وحدة التسعير
-              <div style={{ display: "inline-flex", border: "1px solid var(--aseel-border)", borderRadius: 6, overflow: "hidden" }}>
+              <div style={{ display: "inline-flex", border: "1px solid var(--ktra-border)", borderRadius: 6, overflow: "hidden" }}>
                 {(["cbm", "kg"] as ChargeableUnit[]).map((u) => (
                   <button
                     key={u}
                     type="button"
                     onClick={() => setUnit(u)}
-                    className="aseel-toolbtn"
-                    style={{ borderRadius: 0, background: unit === u ? "var(--aseel-accent, #1857a4)" : "transparent", color: unit === u ? "#fff" : "var(--aseel-ink)", padding: "4px 14px" }}
+                    className="ktra-toolbtn"
+                    style={{ borderRadius: 0, background: unit === u ? "var(--ktra-accent, #1857a4)" : "transparent", color: unit === u ? "#fff" : "var(--ktra-ink)", padding: "4px 14px" }}
                   >
                     {u.toUpperCase()}
                   </button>
                 ))}
               </div>
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--ktra-fs-sm, 12px)" }}>
               سعر الشحن لكل {unitLabel}
-              <input className="aseel-input" style={{ width: 120 }} type="number" step="0.0001" min="0" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="0.00" />
+              <input className="ktra-input" style={{ width: 120 }} type="number" step="0.0001" min="0" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="0.00" />
             </label>
             <div style={{ flex: 1 }} />
-            <div style={{ fontSize: "var(--aseel-fs-sm, 12px)", lineHeight: 1.7, textAlign: "left" }}>
+            <div style={{ fontSize: "var(--ktra-fs-sm, 12px)", lineHeight: 1.7, textAlign: "left" }}>
               <div>محدَّد: <b>{totals.count}</b> صفقة · <b>{formatMoney(totals.cbm)}</b> CBM · <b>{formatMoney(totals.kg)}</b> KG</div>
               <div>
                 إجمالي الشحن = {formatMoney(num(rate))} × {formatMoney(totals.units)} {unitLabel} ={" "}
-                <b style={{ color: "var(--aseel-accent, #1857a4)" }}>${formatMoney(totals.freight)}</b>
+                <b style={{ color: "var(--ktra-accent, #1857a4)" }}>${formatMoney(totals.freight)}</b>
               </div>
             </div>
           </div>
@@ -252,7 +252,7 @@ export const CreateShipmentFromDealsModal: React.FC<Props> = ({ isOpen, onClose,
           <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, marginTop: 10 }}>
             {onCreateEmpty && (
               <button
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 onClick={onCreateEmpty}
                 disabled={saving}
                 style={{ marginInlineEnd: "auto" }}
@@ -261,12 +261,12 @@ export const CreateShipmentFromDealsModal: React.FC<Props> = ({ isOpen, onClose,
                 إنشاء شحنة فارغة (بدون صفقات)
               </button>
             )}
-            <button className="aseel-toolbtn" onClick={onClose} disabled={saving}>إلغاء</button>
+            <button className="ktra-toolbtn" onClick={onClose} disabled={saving}>إلغاء</button>
             <button
-              className="aseel-toolbtn"
+              className="ktra-toolbtn"
               onClick={() => void handleCreate()}
               disabled={saving || selected.size === 0}
-              style={{ background: "var(--aseel-accent, #1857a4)", color: "#fff" }}
+              style={{ background: "var(--ktra-accent, #1857a4)", color: "#fff" }}
               title="إنشاء الشحنة وفتح رحلة الاستيراد"
             >
               <Ship style={{ width: 14, height: 14 }} /> {saving ? "جارٍ الإنشاء…" : "إنشاء الشحنة"}

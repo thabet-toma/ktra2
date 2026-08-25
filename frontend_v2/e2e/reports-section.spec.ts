@@ -114,7 +114,7 @@ test('فهرس التقارير يفتح التقرير بمفتاحه لا بم
   // العقد: صفوف التقرير تُعرض، وسطر الإجمالي معها — لا لافتة خطأ.
   await expect(page.getByText('SI-0007')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('SI-0008')).toBeVisible();
-  await expect(page.locator('.aseel-banner--err')).toHaveCount(0);
+  await expect(page.locator('.ktra-banner--err')).toHaveCount(0);
 
   expect(calls.filter((c) => c === '/api/reports//')).toHaveLength(0);
   expect(calls.filter((c) => c === '/api/reports/sales-invoices/').length).toBeGreaterThan(0);
@@ -125,7 +125,7 @@ test('فتح التقرير مباشرةً من الرابط يقرأ المفت
 
   await page.goto('/reports/sales-invoices');
   await expect(page.getByText('SI-0007')).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.aseel-banner--err')).toHaveCount(0);
+  await expect(page.locator('.ktra-banner--err')).toHaveCount(0);
   expect(calls.filter((c) => c === '/api/reports//')).toHaveLength(0);
 });
 

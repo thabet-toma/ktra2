@@ -127,7 +127,7 @@ test('اسمٌ غير موجود: «إضافة» تُنشئ العميل وتر�
     expect.objectContaining({ name: 'مؤسسة النور للتجارة', partner_type: 'Customer' }),
   ]);
   // والتركيز في محطة الإدخال التالية.
-  await expect(page.locator('[data-aseel-field="barcode"]')).toBeFocused();
+  await expect(page.locator('[data-ktra-field="barcode"]')).toBeFocused();
 });
 
 test('اسمٌ قريب من طرف قائم: تحذيرٌ قبل الحفظ و«اختره» يربط القائم بلا إنشاء', async ({ page }) => {
@@ -165,7 +165,7 @@ test('فهرس الحسابات: بحثٌ بلا نتيجة يصير سطرَ إ
   await openNewInvoice(page);
 
   await page.getByRole('button', { name: 'فهرس الحسابات — العملاء' }).click();
-  await expect(page.locator('.aseel-picker')).toBeVisible();
+  await expect(page.locator('.ktra-picker')).toBeVisible();
   await page.getByPlaceholder(/بحث…/).fill('شركة الأمل');
 
   const createRow = page.getByRole('button', { name: 'إضافة «شركة الأمل» كعميل جديد' });

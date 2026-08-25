@@ -56,7 +56,7 @@ async function createDeal(page: Page, supplier: string, description: string, pro
     await page.goto(existingUrl);
     await expect(page).toHaveURL(/\/deals\/\d+$/, { timeout: 30_000 });
     const id = Number(page.url().match(/\/deals\/(\d+)$/)?.[1]);
-    const ref = (await page.locator(".aseel-status-item").filter({ hasText: "رقم الصفقة" }).locator("b").innerText()).trim();
+    const ref = (await page.locator(".ktra-status-item").filter({ hasText: "رقم الصفقة" }).locator("b").innerText()).trim();
     return { id, ref, description, amount };
   }
   await dealSearch.fill("");
@@ -78,7 +78,7 @@ async function createDeal(page: Page, supplier: string, description: string, pro
   await expect(page).toHaveURL(/\/deals\/\d+$/, { timeout: 30_000 });
   const id = Number(page.url().match(/\/deals\/(\d+)$/)?.[1]);
   await expect(page.getByText(/رقم الصفقة/).first()).toBeVisible({ timeout: 20_000 });
-  const ref = (await page.locator(".aseel-status-item").filter({ hasText: "رقم الصفقة" }).locator("b").innerText()).trim();
+  const ref = (await page.locator(".ktra-status-item").filter({ hasText: "رقم الصفقة" }).locator("b").innerText()).trim();
   return { id, ref, description, amount };
 }
 

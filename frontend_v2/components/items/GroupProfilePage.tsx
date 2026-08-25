@@ -11,7 +11,7 @@
  */
 import React, { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { AseelDocumentShell } from '../aseel';
+import { KitDocumentShell } from '../kit';
 import { useAppBack } from '../../hooks/useAppBack';
 import { formatQuantity, formatMoney } from '../../utils/formatNumber';
 import { useGroupInsights } from './ProductInsightTabs';
@@ -39,22 +39,22 @@ export const GroupProfilePage: React.FC = () => {
 
   return (
     <div className="min-h-[calc(100vh-5rem)]">
-      <AseelDocumentShell
+      <KitDocumentShell
         title={title}
         actions={[{ key: 'back', label: back.label === 'رجوع' ? 'عودة' : back.label, onClick: back.go }]}
         tabs={tabs}
         status={
-          error ? <span className="text-[var(--aseel-danger)]">تعذّر التحميل: {error}</span> :
+          error ? <span className="text-[var(--ktra-danger)]">تعذّر التحميل: {error}</span> :
           loading ? <span>جاري التحميل...</span> :
-          <span className="aseel-status-item">{profile ? `إجمالي المخزون ${formatQuantity(profile.quantity_on_hand, '—')} · تقييم ${formatMoney(profile.inventory_valuation, '—')}` : ''}</span>
+          <span className="ktra-status-item">{profile ? `إجمالي المخزون ${formatQuantity(profile.quantity_on_hand, '—')} · تقييم ${formatMoney(profile.inventory_valuation, '—')}` : ''}</span>
         }
       >
         {error && (
-          <div role="alert" className="m-2 p-3 rounded border border-[var(--aseel-danger,#c00)] text-[var(--aseel-danger,#c00)] text-sm">
+          <div role="alert" className="m-2 p-3 rounded border border-[var(--ktra-danger,#c00)] text-[var(--ktra-danger,#c00)] text-sm">
             تعذّر تحميل الكرت المجمّع: {error}
           </div>
         )}
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

@@ -18,7 +18,7 @@ import { InvoicePrintView } from './invoices/InvoicePrintView';
 import { openInNewTab } from '@/utils/openInNewTab';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
-import { AseelErrorState } from '../aseel';
+import { KitErrorState } from '../kit';
 
 interface PurchaseInvoiceProps {
   currentUser?: User;
@@ -514,7 +514,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
   if (viewMode === 'list' && listError) {
     return (
       <div className="min-h-[500px] bg-[var(--color-surface-2)]">
-        <AseelErrorState
+        <KitErrorState
           message={listError}
           onRetry={() => void loadInvoices({ blocking: true })}
         />

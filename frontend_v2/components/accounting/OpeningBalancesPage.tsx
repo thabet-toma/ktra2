@@ -20,8 +20,8 @@ import { useToast } from "../../contexts/ToastContext";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
-import { AseelDocumentShell, AseelAutocomplete, AseelDateInput } from "../aseel";
-import type { AseelTab, AseelToolbarAction } from "../aseel";
+import { KitDocumentShell, KitAutocomplete, KitDateInput } from "../kit";
+import type { KitTab, KitToolbarAction } from "../kit";
 import { AccountTreeField } from "./AccountTreePicker";
 import type { AccountingAccount, OpeningBalanceDto } from "../../types/accounting";
 
@@ -315,7 +315,7 @@ export const OpeningBalancesPage: React.FC = () => {
   // ── التبويبات ────────────────────────────────────────────────────────────
   const accountsTab = (
     <div className="p-2">
-      <table className="aseel-grid" data-variant="list">
+      <table className="ktra-grid" data-variant="list">
         <thead>
           <tr>
             <th>الحساب</th>
@@ -328,7 +328,7 @@ export const OpeningBalancesPage: React.FC = () => {
         <tbody>
           {accountRows.length === 0 && (
             <tr>
-              <td colSpan={5} className="p-4 text-center text-[var(--aseel-ink-soft)]">
+              <td colSpan={5} className="p-4 text-center text-[var(--ktra-ink-soft)]">
                 لا أرصدة حسابات — أضف سطراً. (الذمم من تبويب «الأطراف»، والمخزون من تبويب «المخزون»)
               </td>
             </tr>
@@ -349,7 +349,7 @@ export const OpeningBalancesPage: React.FC = () => {
               </td>
               <td>
                 <input
-                  type="number" step="any" min="0" className="aseel-input aseel-num"
+                  type="number" step="any" min="0" className="ktra-input ktra-num"
                   value={row.debit} disabled={posted}
                   onChange={(e) =>
                     setAccountRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, debit: e.target.value, credit: "" } : r)))
@@ -358,7 +358,7 @@ export const OpeningBalancesPage: React.FC = () => {
               </td>
               <td>
                 <input
-                  type="number" step="any" min="0" className="aseel-input aseel-num"
+                  type="number" step="any" min="0" className="ktra-input ktra-num"
                   value={row.credit} disabled={posted}
                   onChange={(e) =>
                     setAccountRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, credit: e.target.value, debit: "" } : r)))
@@ -367,7 +367,7 @@ export const OpeningBalancesPage: React.FC = () => {
               </td>
               <td>
                 <input
-                  className="aseel-input" value={row.notes} disabled={posted}
+                  className="ktra-input" value={row.notes} disabled={posted}
                   onChange={(e) =>
                     setAccountRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, notes: e.target.value } : r)))
                   }
@@ -376,7 +376,7 @@ export const OpeningBalancesPage: React.FC = () => {
               <td className="text-center">
                 {!posted && (
                   <button
-                    type="button" className="aseel-iconbtn" title="حذف السطر"
+                    type="button" className="ktra-iconbtn" title="حذف السطر"
                     onClick={() => setAccountRows((rs) => rs.filter((_, idx) => idx !== i))}
                   >
                     <Trash2 className="h-3 w-3" />
@@ -389,15 +389,15 @@ export const OpeningBalancesPage: React.FC = () => {
         <tfoot>
           <tr>
             <td className="font-bold">المجموع</td>
-            <td className="aseel-num font-bold">{formatMoney(totals.debit)}</td>
-            <td className="aseel-num font-bold">{formatMoney(totals.credit)}</td>
+            <td className="ktra-num font-bold">{formatMoney(totals.debit)}</td>
+            <td className="ktra-num font-bold">{formatMoney(totals.credit)}</td>
             <td colSpan={2}></td>
           </tr>
         </tfoot>
       </table>
       {!posted && (
         <button
-          type="button" className="aseel-toolbtn mt-2"
+          type="button" className="ktra-toolbtn mt-2"
           onClick={() => setAccountRows((rs) => [...rs, { key: nextKey(), account: "", debit: "", credit: "", notes: "" }])}
         >
           <Plus className="h-4 w-4" /> سطر حساب
@@ -414,12 +414,12 @@ export const OpeningBalancesPage: React.FC = () => {
 
   const partnersTab = (
     <div className="p-2">
-      <div className="mb-2 text-xs text-[var(--aseel-ink-soft)]">
+      <div className="mb-2 text-xs text-[var(--ktra-ink-soft)]">
         رصيد الطرف يُرحَّل بقيد مستقلّ على حساب «{offsetCode}» نفسه — موجبٌ يعني أن العميل مدين لنا
         (أو أننا مدينون للمورّد)، وسالبٌ يعني دفعةً مقدَّمة. تعديل رصيدٍ مُرحَّل لا يصل الدفاتر إلا
         بإلغاء ترحيله أولاً.
       </div>
-      <table className="aseel-grid" data-variant="list">
+      <table className="ktra-grid" data-variant="list">
         <thead>
           <tr>
             <th>الطرف</th>
@@ -433,7 +433,7 @@ export const OpeningBalancesPage: React.FC = () => {
         <tbody>
           {partnerRows.length === 0 && (
             <tr>
-              <td colSpan={6} className="p-4 text-center text-[var(--aseel-ink-soft)]">
+              <td colSpan={6} className="p-4 text-center text-[var(--ktra-ink-soft)]">
                 لا أرصدة أطراف افتتاحية بعد
               </td>
             </tr>
@@ -449,12 +449,12 @@ export const OpeningBalancesPage: React.FC = () => {
                 <td className="text-center">{p.partner_type === "Customer" ? "عميل" : "مورّد"}</td>
                 <td>
                   <input
-                    type="number" step="any" className="aseel-input aseel-num"
+                    type="number" step="any" className="ktra-input ktra-num"
                     value={value} disabled={p.is_posted}
                     onChange={(e) => setPartnerDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
                   />
                 </td>
-                <td className="aseel-num">
+                <td className="ktra-num">
                   {p.posted_amount != null ? formatMoney(p.posted_amount) : "—"}
                 </td>
                 <td className="text-center">{formatDateLocalized(p.opening_balance_date)}</td>
@@ -464,7 +464,7 @@ export const OpeningBalancesPage: React.FC = () => {
                       <>
                         <span className="badge badge-success">مرحّل{p.journal ? ` #${p.journal}` : ""}</span>
                         <button
-                          type="button" className="aseel-toolbtn" disabled={busy}
+                          type="button" className="ktra-toolbtn" disabled={busy}
                           onClick={() => void reversePartner(p.id, p.name)}
                         >
                           <RotateCcw className="h-3 w-3" /> إلغاء الترحيل
@@ -474,7 +474,7 @@ export const OpeningBalancesPage: React.FC = () => {
                       <>
                         <span className="badge badge-warning">غير مرحّل</span>
                         <button
-                          type="button" className="aseel-toolbtn" disabled={busy}
+                          type="button" className="ktra-toolbtn" disabled={busy}
                           onClick={() => void savePartner(p.id, value)}
                         >
                           <Save className="h-3 w-3" /> حفظ وترحيل
@@ -495,24 +495,24 @@ export const OpeningBalancesPage: React.FC = () => {
       </table>
 
       <div className="mt-3 flex flex-wrap items-end gap-2">
-        <label className="aseel-field min-w-[280px] flex-1">
-          <span className="aseel-field-label">إضافة رصيد افتتاحي لطرف</span>
-          <AseelAutocomplete
+        <label className="ktra-field min-w-[280px] flex-1">
+          <span className="ktra-field-label">إضافة رصيد افتتاحي لطرف</span>
+          <KitAutocomplete
             value={newPartner === "" ? "" : (partners.find((p) => p.id === newPartner)?.name ?? "")}
             options={partnerOptions}
             onPick={(id) => setNewPartner(Number(id))}
             placeholder="اكتب اسم العميل أو المورّد…"
           />
         </label>
-        <label className="aseel-field w-[160px]">
-          <span className="aseel-field-label">المبلغ</span>
+        <label className="ktra-field w-[160px]">
+          <span className="ktra-field-label">المبلغ</span>
           <input
-            type="number" step="any" className="aseel-input aseel-num"
+            type="number" step="any" className="ktra-input ktra-num"
             value={newPartnerAmount} onChange={(e) => setNewPartnerAmount(e.target.value)}
           />
         </label>
         <button
-          type="button" className="aseel-toolbtn"
+          type="button" className="ktra-toolbtn"
           disabled={busy || newPartner === "" || num(newPartnerAmount) === 0}
           onClick={() => void savePartner(Number(newPartner), newPartnerAmount)}
         >
@@ -536,12 +536,12 @@ export const OpeningBalancesPage: React.FC = () => {
   const serialsPanel = !posted || serialItems.length === 0 ? null : (
     <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs dark:border-amber-700 dark:bg-amber-950/40">
       <div className="mb-2 font-bold">أصناف تتتبّع أرقاماً تسلسلية في بضاعة أول المدة</div>
-      <div className="mb-2 text-[var(--aseel-ink-soft)]">
+      <div className="mb-2 text-[var(--ktra-ink-soft)]">
         القيد الافتتاحي أدخل الكميات للمخزن ولا يُنشئ أرقاماً تسلسلية — تُنشأ من استلام الشراء.
         إن كان إدخال الرقم التسلسلي إجبارياً في البيع فلن تُباع هذه الوحدات قبل ترقيمها،
         ورقّمها من كرت الصنف. الافتتاح صحيح بلا أرقام؛ البيع وحده هو ما يحتاجها.
       </div>
-      <table className="aseel-grid" data-variant="list">
+      <table className="ktra-grid" data-variant="list">
         <thead>
           <tr>
             <th>الصنف</th>
@@ -556,8 +556,8 @@ export const OpeningBalancesPage: React.FC = () => {
             return (
               <tr key={item.product}>
                 <td>{item.product_name}{item.product_sku ? ` — ${item.product_sku}` : ""}</td>
-                <td className="aseel-num">{formatQuantity(item.serials_registered, "0")}</td>
-                <td className="aseel-num">{formatQuantity(item.quantity, "0")}</td>
+                <td className="ktra-num">{formatQuantity(item.serials_registered, "0")}</td>
+                <td className="ktra-num">{formatQuantity(item.quantity, "0")}</td>
                 <td>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={complete ? "badge badge-success" : "badge badge-warning"}>
@@ -566,7 +566,7 @@ export const OpeningBalancesPage: React.FC = () => {
                         : `ناقص ${formatQuantity(item.quantity - item.serials_registered, "0")}`}
                     </span>
                     <button
-                      type="button" className="aseel-toolbtn"
+                      type="button" className="ktra-toolbtn"
                       title="يفتح كرت الصنف على تبويب الأرقام التسلسلية"
                       onClick={() => navigate(`/products/${item.product}?tab=serials`)}
                     >
@@ -584,12 +584,12 @@ export const OpeningBalancesPage: React.FC = () => {
 
   const stockTab = (
     <div className="p-2">
-      <div className="mb-2 text-xs text-[var(--aseel-ink-soft)]">
+      <div className="mb-2 text-xs text-[var(--ktra-ink-soft)]">
         بضاعة أول المدة: كمية وتكلفة وحدة لكل صنف/مستودع. تدخل المخزون بتاريخ القيد الافتتاحي
         فيتكوّن متوسط التكلفة صحيحاً قبل أول شراء، وقيمتها تُرحَّل مدينةً على حساب المخزون في
         الأستاذ — فيتطابق الرقمان بالضرورة.
       </div>
-      <table className="aseel-grid" data-variant="list">
+      <table className="ktra-grid" data-variant="list">
         <thead>
           <tr>
             <th>الصنف</th>
@@ -603,7 +603,7 @@ export const OpeningBalancesPage: React.FC = () => {
         <tbody>
           {stockRows.length === 0 && (
             <tr>
-              <td colSpan={6} className="p-4 text-center text-[var(--aseel-ink-soft)]">
+              <td colSpan={6} className="p-4 text-center text-[var(--ktra-ink-soft)]">
                 لا بضاعة أول مدة — أضف سطراً
               </td>
             </tr>
@@ -616,7 +616,7 @@ export const OpeningBalancesPage: React.FC = () => {
                   {row.product !== "" ? (
                     <span>{product ? productLabel(product) : `صنف #${row.product}`}</span>
                   ) : (
-                    <AseelAutocomplete
+                    <KitAutocomplete
                       value=""
                       options={products.map((p) => ({ id: p.id, label: productLabel(p) }))}
                       onPick={(id) =>
@@ -628,7 +628,7 @@ export const OpeningBalancesPage: React.FC = () => {
                 </td>
                 <td>
                   <select
-                    className="aseel-input" value={row.warehouse} disabled={posted}
+                    className="ktra-input" value={row.warehouse} disabled={posted}
                     onChange={(e) =>
                       setStockRows((rs) => rs.map((r, idx) => (
                         idx === i ? { ...r, warehouse: e.target.value ? Number(e.target.value) : "" } : r
@@ -641,7 +641,7 @@ export const OpeningBalancesPage: React.FC = () => {
                 </td>
                 <td>
                   <input
-                    type="number" step="any" min="0" className="aseel-input aseel-num"
+                    type="number" step="any" min="0" className="ktra-input ktra-num"
                     value={row.quantity} disabled={posted}
                     onChange={(e) =>
                       setStockRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, quantity: e.target.value } : r)))
@@ -650,18 +650,18 @@ export const OpeningBalancesPage: React.FC = () => {
                 </td>
                 <td>
                   <input
-                    type="number" step="any" min="0" className="aseel-input aseel-num"
+                    type="number" step="any" min="0" className="ktra-input ktra-num"
                     value={row.unit_cost} disabled={posted}
                     onChange={(e) =>
                       setStockRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, unit_cost: e.target.value } : r)))
                     }
                   />
                 </td>
-                <td className="aseel-num">{formatMoney(num(row.quantity) * num(row.unit_cost))}</td>
+                <td className="ktra-num">{formatMoney(num(row.quantity) * num(row.unit_cost))}</td>
                 <td className="text-center">
                   {!posted && (
                     <button
-                      type="button" className="aseel-iconbtn" title="حذف السطر"
+                      type="button" className="ktra-iconbtn" title="حذف السطر"
                       onClick={() => setStockRows((rs) => rs.filter((_, idx) => idx !== i))}
                     >
                       <Trash2 className="h-3 w-3" />
@@ -675,18 +675,18 @@ export const OpeningBalancesPage: React.FC = () => {
         <tfoot>
           <tr>
             <td colSpan={2} className="font-bold">قيمة بضاعة أول المدة</td>
-            <td className="aseel-num">
+            <td className="ktra-num">
               {formatQuantity(stockRows.reduce((s, r) => s + num(r.quantity), 0), "0")}
             </td>
             <td></td>
-            <td className="aseel-num font-bold">{formatMoney(totals.stock)}</td>
+            <td className="ktra-num font-bold">{formatMoney(totals.stock)}</td>
             <td></td>
           </tr>
         </tfoot>
       </table>
       {!posted && (
         <button
-          type="button" className="aseel-toolbtn mt-2"
+          type="button" className="ktra-toolbtn mt-2"
           onClick={() => setStockRows((rs) => [...rs, {
             key: nextKey(), product: "", warehouse: warehouses.length === 1 ? warehouses[0].id : "",
             quantity: "", unit_cost: "",
@@ -699,13 +699,13 @@ export const OpeningBalancesPage: React.FC = () => {
     </div>
   );
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "accounts", label: `حسابات (${accountRows.length})`, content: accountsTab },
     { key: "partners", label: `أطراف (${partnerRows.length})`, content: partnersTab },
     { key: "stock", label: `مخزون (${stockRows.length})`, content: stockTab },
   ];
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "save", label: "حفظ المسودة", icon: <Save />, disabled: busy || posted, onClick: () => void onSave() },
     posted
       ? { key: "unpost", label: "إلغاء الترحيل", icon: <RotateCcw />, danger: true, disabled: busy, onClick: () => void onUnpost() }
@@ -715,25 +715,25 @@ export const OpeningBalancesPage: React.FC = () => {
 
   const header = (
     <div className="flex flex-wrap items-end gap-4">
-      <label className="aseel-field w-[170px]">
-        <span className="aseel-field-label">تاريخ بدء التشغيل</span>
-        <AseelDateInput
-          className="aseel-input"
+      <label className="ktra-field w-[170px]">
+        <span className="ktra-field-label">تاريخ بدء التشغيل</span>
+        <KitDateInput
+          className="ktra-input"
           value={startDate}
           disabled={posted}
           onChange={setStartDate}
         />
       </label>
-      <div className="aseel-field">
-        <span className="aseel-field-label">تاريخ القيد الافتتاحي</span>
+      <div className="ktra-field">
+        <span className="ktra-field-label">تاريخ القيد الافتتاحي</span>
         <div className="flex h-[30px] items-center gap-1 text-sm font-bold">
           <CalendarDays className="h-4 w-4" />
           {entryDate ? formatDateLocalized(entryDate) : "—"}
-          <span className="text-xs font-normal text-[var(--aseel-ink-soft)]">(اليوم السابق للبدء)</span>
+          <span className="text-xs font-normal text-[var(--ktra-ink-soft)]">(اليوم السابق للبدء)</span>
         </div>
       </div>
-      <div className="aseel-field">
-        <span className="aseel-field-label">الحالة</span>
+      <div className="ktra-field">
+        <span className="ktra-field-label">الحالة</span>
         <div className="flex h-[30px] items-center">
           {posted ? (
             <span className="badge badge-success">
@@ -744,11 +744,11 @@ export const OpeningBalancesPage: React.FC = () => {
           )}
         </div>
       </div>
-      <div className="aseel-field">
-        <span className="aseel-field-label">صافي حقوق الملكية الافتتاحية</span>
+      <div className="ktra-field">
+        <span className="ktra-field-label">صافي حقوق الملكية الافتتاحية</span>
         <div className="flex h-[30px] items-center gap-2">
-          <strong className="aseel-num text-base">{formatMoney(totals.plug)}</strong>
-          <span className="text-xs text-[var(--aseel-ink-soft)]">
+          <strong className="ktra-num text-base">{formatMoney(totals.plug)}</strong>
+          <span className="text-xs text-[var(--ktra-ink-soft)]">
             على حساب «{offsetCode}» — {totals.plug >= 0 ? "دائن" : "مدين"}
           </span>
         </div>
@@ -757,11 +757,11 @@ export const OpeningBalancesPage: React.FC = () => {
   );
 
   const banner = err ? (
-    <div className="aseel-banner aseel-banner--err mb-2">
+    <div className="ktra-banner ktra-banner--err mb-2">
       <div>{err}</div>
       {isFiscalPeriodError(err) && (
         <button
-          type="button" className="aseel-toolbtn mt-1"
+          type="button" className="ktra-toolbtn mt-1"
           onClick={() => navigate("/accounting/fiscal-periods")}
         >
           <CalendarDays className="h-4 w-4" /> افتح الفترات المالية
@@ -771,7 +771,7 @@ export const OpeningBalancesPage: React.FC = () => {
   ) : null;
 
   return (
-    <AseelDocumentShell
+    <KitDocumentShell
       title="الأرصدة الافتتاحية"
       state={posted ? `مرحّل${data?.journal ? ` #${data.journal}` : ""}` : "مسودة"}
       actions={actions}
@@ -779,14 +779,14 @@ export const OpeningBalancesPage: React.FC = () => {
       tabs={tabs}
       status={
         <>
-          <span className="aseel-status-item">مدين {formatMoney(totals.debit)}</span>
-          <span className="aseel-status-item">دائن {formatMoney(totals.credit)}</span>
-          <span className="aseel-status-item">بضاعة أول المدة {formatMoney(totals.stock)}</span>
+          <span className="ktra-status-item">مدين {formatMoney(totals.debit)}</span>
+          <span className="ktra-status-item">دائن {formatMoney(totals.credit)}</span>
+          <span className="ktra-status-item">بضاعة أول المدة {formatMoney(totals.stock)}</span>
         </>
       }
     >
       <></>
-    </AseelDocumentShell>
+    </KitDocumentShell>
   );
 };
 

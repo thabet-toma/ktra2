@@ -16,12 +16,12 @@
 //   // دالة لتحديد لون الحالة
 //   const getStatusColor = (status: PriceOffer['status']) => {
 //     switch (status) {
-//       case 'initial': return 'aseel-bg-panel aseel-text-ink aseel-border-soft';
-//       case 'pending_info': return 'aseel-bg-panel aseel-text-ink aseel-border-soft';
-//       case 'under_discussion': return 'aseel-bg-accent-bg aseel-text-accent aseel-border-accent';
-//       case 'approved_for_shipping': return 'bg-green-50 text-green-700 aseel-border-soft';
-//       case 'rejected': return 'aseel-bg-panel aseel-text-state aseel-border-soft';
-//       default: return 'aseel-bg-panel aseel-text-ink aseel-border-soft';
+//       case 'initial': return 'ktra-bg-panel ktra-text-ink ktra-border-soft';
+//       case 'pending_info': return 'ktra-bg-panel ktra-text-ink ktra-border-soft';
+//       case 'under_discussion': return 'ktra-bg-accent-bg ktra-text-accent ktra-border-accent';
+//       case 'approved_for_shipping': return 'bg-green-50 text-green-700 ktra-border-soft';
+//       case 'rejected': return 'ktra-bg-panel ktra-text-state ktra-border-soft';
+//       default: return 'ktra-bg-panel ktra-text-ink ktra-border-soft';
 //     }
 //   };
 
@@ -56,22 +56,22 @@
 //       {offers.map(offer => (
 //         <div 
 //           key={offer.id} 
-//           className="group aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-sm hover:shadow-md border aseel-border-soft dark:aseel-border-soft overflow-hidden transition-all duration-300"
+//           className="group ktra-bg-field dark:ktra-bg-panel rounded-xl shadow-sm hover:shadow-md border ktra-border-soft dark:ktra-border-soft overflow-hidden transition-all duration-300"
 //         >
 //           {/* Header */}
-//           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 border-b aseel-border-soft dark:aseel-border-soft aseel-bg-panel/50 dark:aseel-bg-panel/50 gap-3">
+//           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 border-b ktra-border-soft dark:ktra-border-soft ktra-bg-panel/50 dark:ktra-bg-panel/50 gap-3">
 //             <div className="flex items-center gap-3">
-//               <div className="aseel-bg-field dark:aseel-bg-panel p-2 rounded-lg border aseel-border-soft dark:aseel-border-soft shadow-sm">
-//                 <span className="font-mono font-bold text-lg aseel-text-accent dark:aseel-text-soft">
+//               <div className="ktra-bg-field dark:ktra-bg-panel p-2 rounded-lg border ktra-border-soft dark:ktra-border-soft shadow-sm">
+//                 <span className="font-mono font-bold text-lg ktra-text-accent dark:ktra-text-soft">
 //                   {offer.offerNumber}
 //                 </span>
 //               </div>
 //               <div className="flex flex-col">
-//                 <h3 className="font-bold aseel-text-ink dark:text-white flex items-center gap-2">
-//                   <Building className="w-4 h-4 aseel-text-soft" />
+//                 <h3 className="font-bold ktra-text-ink dark:text-white flex items-center gap-2">
+//                   <Building className="w-4 h-4 ktra-text-soft" />
 //                   {offer.factoryName || 'مورد غير محدد'}
 //                 </h3>
-//                 <span className="text-xs aseel-text-soft flex items-center gap-1">
+//                 <span className="text-xs ktra-text-soft flex items-center gap-1">
 //                   <Calendar className="w-3 h-3" />
 //                   {new Date(offer.createdAt).toLocaleDateString('ar-EG')}
 //                 </span>
@@ -90,23 +90,23 @@
               
 //               {/* Items Summary */}
 //               <div className="flex-1">
-//                 <div className="text-sm font-medium aseel-text-soft mb-2 flex items-center gap-1">
+//                 <div className="text-sm font-medium ktra-text-soft mb-2 flex items-center gap-1">
 //                   <Package className="w-4 h-4" />
 //                   أبرز المنتجات ({offer.items?.length || 0})
 //                 </div>
 //                 <div className="flex flex-wrap gap-2 mb-3">
 //                   {offer.items && offer.items.length > 0 ? (
 //                     offer.items.slice(0, 3).map((item, idx) => (
-//                       <span key={idx} className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium aseel-bg-panel dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft border aseel-border-soft dark:aseel-border-soft">
+//                       <span key={idx} className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium ktra-bg-panel dark:ktra-bg-panel ktra-text-ink dark:ktra-text-soft border ktra-border-soft dark:ktra-border-soft">
 //                         {item.name}
-//                         <span className="mr-1 aseel-text-soft">×{item.quantity}</span>
+//                         <span className="mr-1 ktra-text-soft">×{item.quantity}</span>
 //                       </span>
 //                     ))
 //                   ) : (
-//                     <span className="text-sm aseel-text-soft italic">لا توجد منتجات</span>
+//                     <span className="text-sm ktra-text-soft italic">لا توجد منتجات</span>
 //                   )}
 //                   {(offer.items?.length || 0) > 3 && (
-//                     <span className="text-xs aseel-text-soft self-center">
+//                     <span className="text-xs ktra-text-soft self-center">
 //                       +{offer.items.length - 3} المزيد...
 //                     </span>
 //                   )}
@@ -114,12 +114,12 @@
 
 //                 {/* Internal Notes Preview */}
 //                 {offer.internalNotes && (
-//                   <div className="mt-3 pt-3 border-t aseel-border-soft dark:aseel-border-soft">
-//                     <div className="text-sm font-medium aseel-text-soft mb-1 flex items-center gap-1">
+//                   <div className="mt-3 pt-3 border-t ktra-border-soft dark:ktra-border-soft">
+//                     <div className="text-sm font-medium ktra-text-soft mb-1 flex items-center gap-1">
 //                       <MessageSquare className="w-4 h-4" />
 //                       ملاحظات داخلية
 //                     </div>
-//                     <p className="text-sm aseel-text-soft dark:aseel-text-soft line-clamp-2">
+//                     <p className="text-sm ktra-text-soft dark:ktra-text-soft line-clamp-2">
 //                       {truncateText(offer.internalNotes, 120)}
 //                     </p>
 //                   </div>
@@ -130,13 +130,13 @@
 //               <div className="flex-1 lg:max-w-sm">
 //                 <div className="grid grid-cols-2 gap-4">
 //                   <div className="flex flex-col">
-//                     <span className="text-xs aseel-text-soft dark:aseel-text-soft mb-1">المجموع الفرعي</span>
-//                     <span className="font-semibold aseel-text-ink dark:aseel-text-soft">
+//                     <span className="text-xs ktra-text-soft dark:ktra-text-soft mb-1">المجموع الفرعي</span>
+//                     <span className="font-semibold ktra-text-ink dark:ktra-text-soft">
 //                       ${offer.subtotal?.toLocaleString()}
 //                     </span>
 //                   </div>
 //                   <div className="flex flex-col">
-//                     <span className="text-xs aseel-text-soft dark:aseel-text-soft mb-1">الإجمالي النهائي</span>
+//                     <span className="text-xs ktra-text-soft dark:ktra-text-soft mb-1">الإجمالي النهائي</span>
 //                     <span className="font-bold text-xl text-green-600 dark:text-green-400 flex items-center gap-1">
 //                       <DollarSign className="w-5 h-5" />
 //                       {offer.grandTotal?.toLocaleString()}
@@ -144,8 +144,8 @@
 //                   </div>
 //                   {offer.shipmentNotes && (
 //                     <div className="col-span-2 mt-2">
-//                       <span className="text-xs aseel-text-soft dark:aseel-text-soft mb-1">ملاحظات الشحن</span>
-//                       <p className="text-xs aseel-text-soft dark:aseel-text-soft truncate">
+//                       <span className="text-xs ktra-text-soft dark:ktra-text-soft mb-1">ملاحظات الشحن</span>
+//                       <p className="text-xs ktra-text-soft dark:ktra-text-soft truncate">
 //                         {truncateText(offer.shipmentNotes || '', 60)}
 //                       </p>
 //                     </div>
@@ -155,10 +155,10 @@
 //             </div>
 
 //             {/* Footer Action */}
-//             <div className="mt-5 pt-4 border-t aseel-border-soft dark:aseel-border-soft flex justify-end">
+//             <div className="mt-5 pt-4 border-t ktra-border-soft dark:ktra-border-soft flex justify-end">
 //               <button
 //                 onClick={() => onEdit(offer)}
-//                 className="inline-flex items-center gap-2 px-5 py-2 aseel-bg-accent hover:aseel-bg-accent text-white rounded-lg transition-colors shadow-sm text-sm font-medium"
+//                 className="inline-flex items-center gap-2 px-5 py-2 ktra-bg-accent hover:ktra-bg-accent text-white rounded-lg transition-colors shadow-sm text-sm font-medium"
 //               >
 //                 <Edit className="w-4 h-4" />
 //                 تعديل / عرض التفاصيل
@@ -170,12 +170,12 @@
 //       ))}
 
 //       {offers.length === 0 && (
-//         <div className="text-center py-16 aseel-bg-field dark:aseel-bg-panel rounded-xl border border-dashed aseel-border-soft dark:aseel-border-soft">
-//           <div className="w-20 h-20 aseel-bg-panel dark:aseel-bg-panel rounded-full flex items-center justify-center mx-auto mb-4">
-//             <FileText className="w-10 h-10 aseel-text-soft" />
+//         <div className="text-center py-16 ktra-bg-field dark:ktra-bg-panel rounded-xl border border-dashed ktra-border-soft dark:ktra-border-soft">
+//           <div className="w-20 h-20 ktra-bg-panel dark:ktra-bg-panel rounded-full flex items-center justify-center mx-auto mb-4">
+//             <FileText className="w-10 h-10 ktra-text-soft" />
 //           </div>
-//           <h3 className="text-lg font-bold aseel-text-ink dark:text-white mb-1">لا توجد عروض أسعار</h3>
-//           <p className="aseel-text-soft dark:aseel-text-soft">ابدأ بإنشاء عرض سعر جديد الآن</p>
+//           <h3 className="text-lg font-bold ktra-text-ink dark:text-white mb-1">لا توجد عروض أسعار</h3>
+//           <p className="ktra-text-soft dark:ktra-text-soft">ابدأ بإنشاء عرض سعر جديد الآن</p>
 //         </div>
 //       )}
 //     </div>

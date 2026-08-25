@@ -1,6 +1,6 @@
 /**
- * N4-T1 — SalesInvoicesPage (L7) Aseel inside-out
- * AseelDocumentShell + AseelDenseTable + شريط فلاتر + useAseelIndexKeymap
+ * N4-T1 — SalesInvoicesPage (L7) Kit inside-out
+ * KitDocumentShell + KitDenseTable + شريط فلاتر + useKitIndexKeymap
  * Ref: task5.md:673-676 + الفواتير.txt
  *
  * أعمدة (per spec): رقم / تاريخ / العميل / النوع / الحالة /
@@ -43,13 +43,13 @@ import { clientLogger } from "../../services/logger";
 import { PaymentStatusBadge } from "../shared/PaymentStatusBadge";
 import { deriveInvoiceSettlement } from "../shared/DocumentPaymentPanel";
 import {
-  AseelDocumentShell,
-  AseelDenseTable,
-  AseelDateInput,
-  useAseelIndexKeymap,
+  KitDocumentShell,
+  KitDenseTable,
+  KitDateInput,
+  useKitIndexKeymap,
   type DenseColumn,
-  type AseelToolbarAction,
-} from "../aseel";
+  type KitToolbarAction,
+} from "../kit";
 
 type CurrOpt = { CurrencyID: number; Code: string };
 type AccountOpt = {
@@ -75,9 +75,9 @@ const TYPE_OPTIONS = [
 
 /** شارات حالة التسليم — نفس ألوان الحالات في باقي الشاشات. */
 const DELIVERY_BADGE: Record<DeliveryStatus, { label: string; color: string }> = {
-  not_delivered: { label: "غير مسلَّمة", color: "var(--aseel-warn, #b06800)" },
-  partially_delivered: { label: "مسلَّمة جزئياً", color: "var(--aseel-accent, #2563eb)" },
-  delivered: { label: "مسلَّمة", color: "var(--aseel-ok, #2d7d46)" },
+  not_delivered: { label: "غير مسلَّمة", color: "var(--ktra-warn, #b06800)" },
+  partially_delivered: { label: "مسلَّمة جزئياً", color: "var(--ktra-accent, #2563eb)" },
+  delivered: { label: "مسلَّمة", color: "var(--ktra-ok, #2d7d46)" },
 };
 
 import { formatMoney } from "@/utils/formatNumber";
@@ -301,7 +301,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     }
   }, [location.pathname]);
 
-  useAseelIndexKeymap({
+  useKitIndexKeymap({
     F2: () => {
       if (selectedKey != null) {
         const row = rows.find((r) => r.id === selectedKey);
@@ -309,7 +309,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       }
     },
     F6: () => {
-      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      const el = document.querySelector<HTMLInputElement>('[data-ktra-field="search"]');
       el?.focus();
     },
     CtrlIns: openNew,
@@ -423,7 +423,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             style={{
               fontSize: "11px",
               fontWeight: 700,
-              color: "var(--aseel-err, #c0392b)",
+              color: "var(--ktra-err, #c0392b)",
               border: "1px solid currentColor",
               borderRadius: "4px",
               padding: "0 4px",
@@ -448,10 +448,10 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             fontWeight: 600,
             color:
               r.status === "posted"
-                ? "var(--aseel-ok, #2d7d46)"
+                ? "var(--ktra-ok, #2d7d46)"
                 : r.status === "draft"
-                ? "var(--aseel-warn, #b06800)"
-                : "var(--aseel-ink-soft, #777)",
+                ? "var(--ktra-warn, #b06800)"
+                : "var(--ktra-ink-soft, #777)",
           }}
         >
           {r.status === "posted" ? "مرحَّلة" : r.status === "draft" ? "مسودة" : r.status}
@@ -485,7 +485,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       width: "110px",
       align: "left",
       numeric: true,
-      render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmtNum(r.grand_total)}</span>,
+      render: (r) => <span className="ktra-num font-mono text-xs font-semibold">{fmtNum(r.grand_total)}</span>,
     },
     {
       key: "payment_status",
@@ -517,7 +517,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       width: "100px",
       align: "left",
       numeric: true,
-      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.amount_paid)}</span>,
+      render: (r) => <span className="ktra-num font-mono text-xs">{fmtNum(r.amount_paid)}</span>,
     },
     {
       key: "balance",
@@ -539,9 +539,9 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
         return (
           <span className="inline-flex items-center gap-1">
             <span
-              className="aseel-num font-mono text-xs font-semibold"
+              className="ktra-num font-mono text-xs font-semibold"
               style={{
-                color: bal > 0 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ok, #2d7d46)",
+                color: bal > 0 ? "var(--ktra-warn, #b06800)" : "var(--ktra-ok, #2d7d46)",
               }}
             >
               {fmtNum(bal)}
@@ -564,7 +564,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       width: "110px",
       align: "left",
       numeric: true,
-      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.customer_balance)}</span>,
+      render: (r) => <span className="ktra-num font-mono text-xs">{fmtNum(r.customer_balance)}</span>,
     },
     {
       key: "vat_statement",
@@ -572,7 +572,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       width: "80px",
       align: "center",
       render: (r) => (
-        <span className="text-xs" style={{ color: "var(--aseel-ink-soft)" }}>
+        <span className="text-xs" style={{ color: "var(--ktra-ink-soft)" }}>
           {r.vat_statement_no || "—"}
         </span>
       ),
@@ -588,7 +588,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             <>
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 style={{ fontSize: "10px", padding: "2px 6px" }}
                 onClick={(e) => { e.stopPropagation(); handlePostRow(r.id); }}
                 title="ترحيل"
@@ -597,7 +597,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               </button>
               <button
                 type="button"
-                className="aseel-toolbtn aseel-toolbtn--danger"
+                className="ktra-toolbtn ktra-toolbtn--danger"
                 style={{ fontSize: "10px", padding: "2px 6px" }}
                 onClick={(e) => { e.stopPropagation(); handleDeleteDraft(r.id); }}
                 title="حذف"
@@ -610,7 +610,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             <>
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 style={{ fontSize: "10px", padding: "2px 6px" }}
                 onClick={(e) => { e.stopPropagation(); setDeliverFor(r); }}
                 title="تسليم سريع (اختيار البنود)"
@@ -620,7 +620,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               {/* المحرّر الكامل في شاشة الإرساليات بهذه الفاتورة مربوطةً مسبقاً. */}
               <button
                 type="button"
-                className="aseel-toolbtn"
+                className="ktra-toolbtn"
                 style={{ fontSize: "10px", padding: "2px 6px" }}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -638,33 +638,33 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   ];
 
   const filterBar = (
-    <div className="aseel-print-hidden" style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
-      <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
-        <span className="aseel-field-label">بحث (رقم / عميل)</span>
+    <div className="ktra-print-hidden" style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
+      <label className="ktra-field" style={{ flex: 1, minWidth: "200px" }}>
+        <span className="ktra-field-label">بحث (رقم / عميل)</span>
         <input
-          className="aseel-input"
-          data-aseel-field="search"
+          className="ktra-input"
+          data-ktra-field="search"
           placeholder="بحث... (F6)"
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />
       </label>
-      <label className="aseel-field" style={{ minWidth: "100px" }}>
-        <span className="aseel-field-label">النوع</span>
-        <select className="aseel-input" value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }}>
+      <label className="ktra-field" style={{ minWidth: "100px" }}>
+        <span className="ktra-field-label">النوع</span>
+        <select className="ktra-input" value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }}>
           {TYPE_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
       </label>
-      <label className="aseel-field" style={{ minWidth: "100px" }}>
-        <span className="aseel-field-label">الحالة</span>
-        <select className="aseel-input" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}>
+      <label className="ktra-field" style={{ minWidth: "100px" }}>
+        <span className="ktra-field-label">الحالة</span>
+        <select className="ktra-input" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}>
           {STATUS_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
       </label>
-      <label className="aseel-field" style={{ minWidth: "125px" }}>
-        <span className="aseel-field-label">حالة الدفع</span>
+      <label className="ktra-field" style={{ minWidth: "125px" }}>
+        <span className="ktra-field-label">حالة الدفع</span>
         <select
-          className="aseel-input"
+          className="ktra-input"
           value={filterPaymentStatus}
           onChange={(e) => {
             const value = e.target.value;
@@ -681,18 +681,18 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           <option value="overdue">متأخرة</option>
         </select>
       </label>
-      <label className="aseel-field">
-        <span className="aseel-field-label">من تاريخ</span>
-        <AseelDateInput value={filterFrom} onChange={(value) => { clientLogger.info("sales_invoice.date_filter_changed", { boundary: "from", hasValue: Boolean(value) }); setFilterFrom(value); setPage(1); }} />
+      <label className="ktra-field">
+        <span className="ktra-field-label">من تاريخ</span>
+        <KitDateInput value={filterFrom} onChange={(value) => { clientLogger.info("sales_invoice.date_filter_changed", { boundary: "from", hasValue: Boolean(value) }); setFilterFrom(value); setPage(1); }} />
       </label>
-      <label className="aseel-field">
-        <span className="aseel-field-label">إلى تاريخ</span>
-        <AseelDateInput value={filterTo} onChange={(value) => { clientLogger.info("sales_invoice.date_filter_changed", { boundary: "to", hasValue: Boolean(value) }); setFilterTo(value); setPage(1); }} />
+      <label className="ktra-field">
+        <span className="ktra-field-label">إلى تاريخ</span>
+        <KitDateInput value={filterTo} onChange={(value) => { clientLogger.info("sales_invoice.date_filter_changed", { boundary: "to", hasValue: Boolean(value) }); setFilterTo(value); setPage(1); }} />
       </label>
     </div>
   );
 
-  const toolbarActions: AseelToolbarAction[] = [
+  const toolbarActions: KitToolbarAction[] = [
     { key: "new", label: "فاتورة جديدة (Ctrl+Ins)", icon: <Plus />, onClick: openNew },
     {
       key: "refresh",
@@ -714,29 +714,29 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)", display: "flex", flexDirection: "column" }}>
       {!editorOpen ? (
-        <AseelDocumentShell
+        <KitDocumentShell
           title="فواتير المبيعات"
           state={loading ? "جاري التحميل…" : `${filteredRows.length} في الصفحة من ${totalRows}`}
           actions={toolbarActions}
           header={filterBar}
           status={
             <>
-              <span className="aseel-status-item">العدد <b>{filteredRows.length}</b></span>
-              <span className="aseel-status-item">الإجمالي <b className="aseel-num">{fmtNum(totalSum)}</b></span>
-              <span className="aseel-status-item">المدفوع <b className="aseel-num">{fmtNum(paidSum)}</b></span>
+              <span className="ktra-status-item">العدد <b>{filteredRows.length}</b></span>
+              <span className="ktra-status-item">الإجمالي <b className="ktra-num">{fmtNum(totalSum)}</b></span>
+              <span className="ktra-status-item">المدفوع <b className="ktra-num">{fmtNum(paidSum)}</b></span>
               <span
-                className="aseel-status-item"
+                className="ktra-status-item"
                 style={{ color: balanceSum > 0 ? "#fbbf24" : "#34d399" }}
               >
-                المتبقي <b className="aseel-num" style={{ backgroundColor: balanceSum > 0 ? "rgba(251,191,36,0.15)" : "rgba(52,211,153,0.15)" }}>{fmtNum(balanceSum)}</b>
+                المتبقي <b className="ktra-num" style={{ backgroundColor: balanceSum > 0 ? "rgba(251,191,36,0.15)" : "rgba(52,211,153,0.15)" }}>{fmtNum(balanceSum)}</b>
               </span>
             </>
           }
         >
           <div style={{ padding: "8px" }}>
-            {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-            {msg && <div className="aseel-banner" style={{ marginBottom: "8px", color: "var(--aseel-ok, #2d7d46)" }}>{msg}</div>}
-            <AseelDenseTable<ExtRow>
+            {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+            {msg && <div className="ktra-banner" style={{ marginBottom: "8px", color: "var(--ktra-ok, #2d7d46)" }}>{msg}</div>}
+            <KitDenseTable<ExtRow>
               columns={columns}
               rows={filteredRows}
               getRowKey={(r) => r.id}
@@ -750,21 +750,21 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               pagination={{ page, pageSize, total: totalRows, onChange: setPage }}
             />
           </div>
-        </AseelDocumentShell>
+        </KitDocumentShell>
       ) : (
         <div
           style={{
-            background: "var(--aseel-bg, #fffbf5)",
+            background: "var(--ktra-bg, #fffbf5)",
             flex: 1,
             position: "relative",
             display: "flex",
             flexDirection: "column",
           }}
         >
-          <div style={{ padding: "8px", borderBottom: "1px solid var(--aseel-border)", display: "flex", justifyContent: "flex-end" }}>
+          <div style={{ padding: "8px", borderBottom: "1px solid var(--ktra-border)", display: "flex", justifyContent: "flex-end" }}>
             <button
               type="button"
-              className="aseel-toolbtn aseel-toolbtn--danger"
+              className="ktra-toolbtn ktra-toolbtn--danger"
               onClick={closeEditor}
             >
               ✕ إغلاق

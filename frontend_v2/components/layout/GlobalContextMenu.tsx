@@ -28,7 +28,7 @@ import { partnerActionGroups, type PartnerActionIcon } from "../../utils/partner
 import { AppView, User } from "../../types";
 import { clientLogger } from "../../services/logger";
 import { buildQuickActionGroups, visibleQuickActionGroups, QuickAction } from "./quickActions";
-import { AseelCalculatorPopover } from "../aseel/AseelCalculatorPopover";
+import { KitCalculatorPopover } from "../kit/KitCalculatorPopover";
 import {
   PartnerContext,
   ItemContext,
@@ -150,7 +150,7 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
     // الحاسبة قد تبقى مفتوحة بعد إغلاق المنيو.
     return calc
       ? createPortal(
-          <AseelCalculatorPopover
+          <KitCalculatorPopover
             initialValue={calc.seed}
             x={calc.x}
             y={calc.y}
@@ -458,7 +458,7 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
         </div>
       )}
       {calc && (
-        <AseelCalculatorPopover
+        <KitCalculatorPopover
           initialValue={calc.seed}
           x={calc.x}
           y={calc.y}

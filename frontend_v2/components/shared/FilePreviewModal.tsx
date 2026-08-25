@@ -10,7 +10,7 @@
  */
 import React from "react";
 import { Download, ExternalLink, FileText } from "lucide-react";
-import { AseelFloatWindow } from "../aseel/AseelFloatWindow";
+import { KitFloatWindow } from "../kit/KitFloatWindow";
 
 export interface PreviewableFile {
   name?: string;
@@ -37,7 +37,7 @@ export const FilePreviewModal: React.FC<{
   /* T-WIN: المعاينة صارت نافذة عائمة تُسحب وتُحجَّم — كانت مستطيلاً ثابتاً
      في المنتصف، فمقارنة الملف بالمستند خلفه كانت متعذّرة. */
   return (
-    <AseelFloatWindow
+    <KitFloatWindow
       open
       onClose={onClose}
       name="file-preview"
@@ -52,7 +52,7 @@ export const FilePreviewModal: React.FC<{
       barExtras={(
         <>
           <a
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             href={file.url}
             target="_blank"
             rel="noopener noreferrer"
@@ -60,7 +60,7 @@ export const FilePreviewModal: React.FC<{
           >
             <ExternalLink className="h-4 w-4" />
           </a>
-          <a className="aseel-toolbtn" href={file.url} download title="تنزيل">
+          <a className="ktra-toolbtn" href={file.url} download title="تنزيل">
             <Download className="h-4 w-4" />
           </a>
         </>
@@ -86,6 +86,6 @@ export const FilePreviewModal: React.FC<{
           </div>
         )}
       </div>
-    </AseelFloatWindow>
+    </KitFloatWindow>
   );
 };

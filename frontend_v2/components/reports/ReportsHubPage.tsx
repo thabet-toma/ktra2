@@ -12,8 +12,8 @@ import { BarChart3, ExternalLink, RefreshCw, Search } from "lucide-react";
 
 import { reportsApi } from "../../services/reportsApi";
 import type { ReportCategoryDto, ReportSummaryDto } from "../../utils/reportFormat";
-import { AseelDocumentShell } from "../aseel";
-import type { AseelTab, AseelToolbarAction } from "../aseel";
+import { KitDocumentShell } from "../kit";
+import type { KitTab, KitToolbarAction } from "../kit";
 
 /**
  * تقارير لها شاشاتها المخصّصة أصلاً — تُفهرَس هنا ولا تُعاد كتابتها.
@@ -164,12 +164,12 @@ export const ReportsHubPage: React.FC = () => {
 
   const content = (
     <div className="flex flex-col gap-4">
-      {error && <div className="aseel-banner aseel-banner--err">{error}</div>}
-      <div className="aseel-field" style={{ maxWidth: "320px" }}>
-        <label className="aseel-field-label">بحث في التقارير</label>
+      {error && <div className="ktra-banner ktra-banner--err">{error}</div>}
+      <div className="ktra-field" style={{ maxWidth: "320px" }}>
+        <label className="ktra-field-label">بحث في التقارير</label>
         <input
           type="text"
-          className="aseel-input"
+          className="ktra-input"
           placeholder="اسم التقرير أو وصفه…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -211,30 +211,30 @@ export const ReportsHubPage: React.FC = () => {
     </div>
   );
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "refresh", label: "تحديث", icon: <RefreshCw />, onClick: () => void load() },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "catalog", label: "كل التقارير", content },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="التقارير"
         actions={actions}
         header={<></>}
         tabs={tabs}
         status={
-          <span className="aseel-status-item">
+          <span className="ktra-status-item">
             <BarChart3 className="w-3 h-3" />
             {totalCount} تقرير
           </span>
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

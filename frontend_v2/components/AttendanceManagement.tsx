@@ -1,5 +1,5 @@
 /**
- * N7-T3 — AttendanceManagement (H3) — AseelDenseTable لإدارة الحضور
+ * N7-T3 — AttendanceManagement (H3) — KitDenseTable لإدارة الحضور
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { User, AttendanceSession, AttendanceRecord } from '../types';
@@ -7,8 +7,8 @@ import { attendanceService } from '../services/attendanceService';
 import { format, parseISO } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { RefreshCw } from 'lucide-react';
-import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
-import { useAseelIndexKeymap } from './aseel/useAseelIndexKeymap';
+import { KitDenseTable, type DenseColumn } from './kit/KitDenseTable';
+import { useKitIndexKeymap } from './kit/useKitIndexKeymap';
 import { formatTimeValue } from '../utils/formatDate';
 import { useToast } from '../contexts/ToastContext';
 import { humanizeThrown } from '../utils/drfError';
@@ -87,7 +87,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
 
     const presentCount = employees.filter(e => !!getEmployeeAttendance(e.id)).length;
 
-    useAseelIndexKeymap(
+    useKitIndexKeymap(
         { F5: () => loadAttendanceRecords(), F6: () => searchInputRef.current?.focus(), Escape: () => { setSearchTerm(''); setAttendanceFilter('all'); } },
         { enabled: !loading },
     );
@@ -97,13 +97,13 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
             key: 'name',
             header: 'الموظف',
             width: '150px',
-            render: (emp) => <b style={{ color: 'var(--aseel-ink)' }}>{emp.name}</b>,
+            render: (emp) => <b style={{ color: 'var(--ktra-ink)' }}>{emp.name}</b>,
         },
         {
             key: 'email',
             header: 'البريد الإلكتروني',
             width: '180px',
-            render: (emp) => <span style={{ color: 'var(--aseel-ink-soft)', fontSize: 'var(--aseel-fs-sm)' }}>{emp.email}</span>,
+            render: (emp) => <span style={{ color: 'var(--ktra-ink-soft)', fontSize: 'var(--ktra-fs-sm)' }}>{emp.email}</span>,
         },
         {
             key: 'status',
@@ -113,7 +113,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
             render: (emp) => {
                 const hasAttended = !!getEmployeeAttendance(emp.id);
                 return (
-                    <span style={{ fontWeight: 600, color: hasAttended ? 'var(--aseel-ok, #267346)' : 'var(--aseel-danger, #c00)', fontSize: 'var(--aseel-fs-sm)' }}>
+                    <span style={{ fontWeight: 600, color: hasAttended ? 'var(--ktra-ok, #267346)' : 'var(--ktra-danger, #c00)', fontSize: 'var(--ktra-fs-sm)' }}>
                         {hasAttended ? 'حاضر' : 'غائب'}
                     </span>
                 );
@@ -125,7 +125,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
             width: '100px',
             render: (emp) => {
                 const rec = getEmployeeAttendance(emp.id);
-                return <span style={{ color: 'var(--aseel-ink-soft)', fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{rec ? formatTimeValue(rec.attendedAt) : '—'}</span>;
+                return <span style={{ color: 'var(--ktra-ink-soft)', fontFamily: 'monospace', fontSize: 'var(--ktra-fs-sm)' }}>{rec ? formatTimeValue(rec.attendedAt) : '—'}</span>;
             },
         },
         {
@@ -135,7 +135,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
             align: 'center',
             render: (emp) => {
                 const hasAttended = !!getEmployeeAttendance(emp.id);
-                return <span style={{ fontWeight: 700, color: hasAttended ? 'var(--aseel-ok, #267346)' : 'var(--aseel-ink-soft)' }}>{hasAttended ? '+10' : '0'}</span>;
+                return <span style={{ fontWeight: 700, color: hasAttended ? 'var(--ktra-ok, #267346)' : 'var(--ktra-ink-soft)' }}>{hasAttended ? '+10' : '0'}</span>;
             },
         },
         {
@@ -147,8 +147,8 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
                 const hasAttended = !!getEmployeeAttendance(emp.id);
                 return (
                     <button
-                        className="aseel-toolbtn"
-                        style={{ padding: '2px 6px', fontSize: 'var(--aseel-fs-sm)', color: hasAttended ? 'var(--aseel-danger, #c00)' : 'var(--aseel-ok, #267346)' }}
+                        className="ktra-toolbtn"
+                        style={{ padding: '2px 6px', fontSize: 'var(--ktra-fs-sm)', color: hasAttended ? 'var(--ktra-danger, #c00)' : 'var(--ktra-ok, #267346)' }}
                         onClick={() => handleManualAttendance(emp.id, !hasAttended)}
                         disabled={loading}
                     >
@@ -162,24 +162,24 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
     return (
         <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
             {/* جلسة الحضور */}
-            <div style={{ border: '1px solid var(--aseel-border)', borderRadius: 6, padding: '10px 14px', background: activeSession ? 'var(--aseel-surface-accent, #f0f5ff)' : undefined }}>
+            <div style={{ border: '1px solid var(--ktra-border)', borderRadius: 6, padding: '10px 14px', background: activeSession ? 'var(--ktra-surface-accent, #f0f5ff)' : undefined }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                    <strong style={{ fontSize: 'var(--aseel-fs-base, 13px)', color: 'var(--aseel-ink)' }}>جلسة الحضور</strong>
-                    <span style={{ color: 'var(--aseel-ink-soft)', fontSize: 'var(--aseel-fs-sm)' }}>
+                    <strong style={{ fontSize: 'var(--ktra-fs-base, 13px)', color: 'var(--ktra-ink)' }}>جلسة الحضور</strong>
+                    <span style={{ color: 'var(--ktra-ink-soft)', fontSize: 'var(--ktra-fs-sm)' }}>
                         {activeSession ? `نشطة — متبقي ${formatTime(timeLeft)}` : 'لا توجد جلسة نشطة'}
                     </span>
                     {activeSession && (
-                        <span style={{ color: 'var(--aseel-ink-soft)', fontSize: 'var(--aseel-fs-sm)' }}>
+                        <span style={{ color: 'var(--ktra-ink-soft)', fontSize: 'var(--ktra-fs-sm)' }}>
                             بدأت: {formatTimeValue(activeSession.startTime)}
                         </span>
                     )}
                     <div style={{ flex: 1 }} />
                     {!activeSession ? (
-                        <button className="aseel-toolbtn" style={{ padding: '4px 10px', color: 'var(--aseel-ok, #267346)' }} onClick={handleStartSession} disabled={loading}>
+                        <button className="ktra-toolbtn" style={{ padding: '4px 10px', color: 'var(--ktra-ok, #267346)' }} onClick={handleStartSession} disabled={loading}>
                             بدء جلسة جديدة
                         </button>
                     ) : (
-                        <button className="aseel-toolbtn" style={{ padding: '4px 10px', color: 'var(--aseel-danger, #c00)' }} onClick={handleEndSession} disabled={loading}>
+                        <button className="ktra-toolbtn" style={{ padding: '4px 10px', color: 'var(--ktra-danger, #c00)' }} onClick={handleEndSession} disabled={loading}>
                             إنهاء الجلسة
                         </button>
                     )}
@@ -187,39 +187,39 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
             </div>
 
             {/* شريط الفلاتر */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
-                <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--ktra-border)' }}>
+                <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>
                     تقرير يوم {formatArabicDate(selectedDate)}
                 </strong>
-                <span className="aseel-status-item">الحضور: <b style={{ color: 'var(--aseel-ok, #267346)' }}>{presentCount}</b> / {employees.length}</span>
-                <span className="aseel-status-item">الغياب: <b style={{ color: 'var(--aseel-danger, #c00)' }}>{employees.length - presentCount}</b></span>
+                <span className="ktra-status-item">الحضور: <b style={{ color: 'var(--ktra-ok, #267346)' }}>{presentCount}</b> / {employees.length}</span>
+                <span className="ktra-status-item">الغياب: <b style={{ color: 'var(--ktra-danger, #c00)' }}>{employees.length - presentCount}</b></span>
                 <div style={{ flex: 1 }} />
                 <input
                     type="date"
-                    className="aseel-input"
+                    className="ktra-input"
                     style={{ width: 140 }}
                     value={selectedDate}
                     onChange={e => setSelectedDate(e.target.value)}
                 />
-                <select className="aseel-input" style={{ width: 100 }} value={attendanceFilter} onChange={e => setAttendanceFilter(e.target.value as 'all' | 'present' | 'absent')}>
+                <select className="ktra-input" style={{ width: 100 }} value={attendanceFilter} onChange={e => setAttendanceFilter(e.target.value as 'all' | 'present' | 'absent')}>
                     <option value="all">الكل</option>
                     <option value="present">حاضر</option>
                     <option value="absent">غائب</option>
                 </select>
                 <input
                     ref={searchInputRef}
-                    className="aseel-input"
+                    className="ktra-input"
                     style={{ width: 150 }}
                     placeholder="بحث بالاسم… (F6)"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
                 />
-                <button className="aseel-toolbtn" onClick={() => { setSearchTerm(''); setAttendanceFilter('all'); }} title="إعادة تعيين">
+                <button className="ktra-toolbtn" onClick={() => { setSearchTerm(''); setAttendanceFilter('all'); }} title="إعادة تعيين">
                     <RefreshCw style={{ width: 14, height: 14 }} />
                 </button>
             </div>
 
-            <AseelDenseTable<User>
+            <KitDenseTable<User>
                 columns={columns}
                 rows={filteredEmployees}
                 getRowKey={emp => emp.id}

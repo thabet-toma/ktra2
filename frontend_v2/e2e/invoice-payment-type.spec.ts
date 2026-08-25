@@ -94,7 +94,7 @@ test('قائمة الزبائن تُحاذي بداية السطر — يمين 
   // T-QUICKPARTY: الحقل نفسه صار إكمالاً تلقائياً يُكتب فيه، وفهرس الحسابات
   // الكامل انتقل إلى زرّ «…» بجانبه. المُختبَر هنا محاذاة الفهرس كما كان.
   await page.getByRole('button', { name: 'فهرس الحسابات — العملاء' }).click();
-  const picker = page.locator('.aseel-picker');
+  const picker = page.locator('.ktra-picker');
   await expect(picker).toBeVisible();
   await expect(page.getByText('فهرس الحسابات — العملاء', { exact: true })).toBeVisible();
 

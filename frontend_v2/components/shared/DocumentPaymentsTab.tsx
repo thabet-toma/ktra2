@@ -79,7 +79,7 @@ export const DocumentPaymentsTab: React.FC<Props> = ({ referenceType, referenceI
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-8 aseel-text-soft">
+      <div className="flex items-center justify-center p-8 ktra-text-soft">
         <Loader2 className="w-5 h-5 animate-spin ml-2" />
         جارٍ جلب الحركات المالية...
       </div>
@@ -96,7 +96,7 @@ export const DocumentPaymentsTab: React.FC<Props> = ({ referenceType, referenceI
 
   if (journals.length === 0) {
     return (
-      <div className="p-8 text-center aseel-text-soft">
+      <div className="p-8 text-center ktra-text-soft">
         لا توجد حركات مالية مسجلة لهذا المستند حتى الآن.
       </div>
     );
@@ -105,16 +105,16 @@ export const DocumentPaymentsTab: React.FC<Props> = ({ referenceType, referenceI
   return (
     <div className="p-4 space-y-4" dir="rtl">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-lg aseel-text-ink">الحركات المالية المرتبطة</h3>
-        <button onClick={load} className="p-2 hover:aseel-bg-panel rounded-full text-[var(--color-text-muted)] transition-colors" title="تحديث">
+        <h3 className="font-semibold text-lg ktra-text-ink">الحركات المالية المرتبطة</h3>
+        <button onClick={load} className="p-2 hover:ktra-bg-panel rounded-full text-[var(--color-text-muted)] transition-colors" title="تحديث">
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
       
-      <div className="overflow-x-auto rounded-lg border aseel-border-soft dark:aseel-border-soft">
+      <div className="overflow-x-auto rounded-lg border ktra-border-soft dark:ktra-border-soft">
         <table className="w-full text-sm text-right">
-          <thead className="aseel-bg-panel dark:aseel-bg-panel text-xs text-[var(--color-text-muted)]">
-            <tr className="border-b aseel-border-soft dark:aseel-border-soft">
+          <thead className="ktra-bg-panel dark:ktra-bg-panel text-xs text-[var(--color-text-muted)]">
+            <tr className="border-b ktra-border-soft dark:ktra-border-soft">
               <th className="px-4 py-3 font-medium">رقم القيد</th>
               <th className="px-4 py-3 font-medium">التاريخ</th>
               <th className="px-4 py-3 font-medium">النوع</th>

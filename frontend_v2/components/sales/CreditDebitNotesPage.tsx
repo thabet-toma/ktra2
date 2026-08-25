@@ -15,18 +15,18 @@ import {
   Printer,
   FileDown,
 } from "lucide-react";
-import { AseelSpinner } from "../aseel/AseelStates";
+import { KitSpinner } from "../kit/KitStates";
 import { apiGetList, apiPostObject, apiPatchObject } from "../../services/restApi";
 import { formatMoney } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { accountingApi } from "../../services/accountingApi";
 import { clientLogger } from "../../services/logger";
 import {
-  AseelDocumentShell,
+  KitDocumentShell,
   useRecordNavigation,
-  useAseelKeymap,
-  AseelTabs,
-} from "../aseel";
+  useKitKeymap,
+  KitTabs,
+} from "../kit";
 import { RefreshCw } from "lucide-react";
 import { formatDateLocalized } from "../../utils/formatDate";
 
@@ -110,12 +110,12 @@ export const CreditDebitNotesPage: React.FC = () => {
     },
   });
 
-  // M4-T4: Aseel keyboard shortcuts — real handlers.
-  useAseelKeymap({
+  // M4-T4: Kit keyboard shortcuts — real handlers.
+  useKitKeymap({
     F2: () => window.print(),
     F5: () => loadAll(),
     F6: () => {
-      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      const el = document.querySelector<HTMLInputElement>('[data-ktra-field="search"]');
       el?.focus();
     },
     F12: () => handleSave(),
@@ -215,18 +215,18 @@ export const CreditDebitNotesPage: React.FC = () => {
 
   const statusColor = (s: string) => {
     const map: Record<string, string> = {
-      draft: "aseel-bg-panel aseel-text-ink",
+      draft: "ktra-bg-panel ktra-text-ink",
       posted: "bg-green-100 text-green-700",
-      cancelled: "aseel-bg-panel aseel-text-state",
+      cancelled: "ktra-bg-panel ktra-text-state",
     };
-    return map[s] || "aseel-bg-panel aseel-text-ink";
+    return map[s] || "ktra-bg-panel ktra-text-ink";
   };
 
   return (
     <div
       style={{ minHeight: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
     >
-    <AseelDocumentShell
+    <KitDocumentShell
       title="الإشعارات المدينة/الدائنة"
       state={selectedId ? `إشعار #${selectedId}` : 'إشعارات'}
       nav={nav}
@@ -254,8 +254,8 @@ export const CreditDebitNotesPage: React.FC = () => {
       header={<></>}
       status={
         <>
-          <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
-          <span className="aseel-status-item">{notes.length} إشعار</span>
+          <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+          <span className="ktra-status-item">{notes.length} إشعار</span>
         </>
       }
     >
@@ -264,20 +264,20 @@ export const CreditDebitNotesPage: React.FC = () => {
         <h2 className="text-xl font-bold">الإشعارات المدينة/الدائنة</h2>
         <button
           onClick={() => { resetForm(); setShowForm(true); }}
-          className="flex items-center gap-2 px-4 py-2 aseel-btn-primary"
+          className="flex items-center gap-2 px-4 py-2 ktra-btn-primary"
         >
           <Plus className="w-4 h-4" /> إشعار جديد
         </button>
       </div>
 
-      {err && <div className="p-3 aseel-bg-panel aseel-text-state rounded-lg">{err}</div>}
+      {err && <div className="p-3 ktra-bg-panel ktra-text-state rounded-lg">{err}</div>}
 
       {loading ? (
-        <AseelSpinner />
+        <KitSpinner />
       ) : (
-        <div className="aseel-bg-field rounded-lg shadow overflow-x-auto">
+        <div className="ktra-bg-field rounded-lg shadow overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="aseel-bg-panel">
+            <thead className="ktra-bg-panel">
               <tr>
                 <th className="text-right p-3">رقم الإشعار</th>
                 <th className="text-right p-3">النوع</th>
@@ -290,12 +290,12 @@ export const CreditDebitNotesPage: React.FC = () => {
             </thead>
             <tbody>
               {notes.length === 0 ? (
-                <tr><td colSpan={7} className="p-6 text-center aseel-text-soft">لا توجد إشعارات</td></tr>
+                <tr><td colSpan={7} className="p-6 text-center ktra-text-soft">لا توجد إشعارات</td></tr>
               ) : notes.map((n) => (
-                <tr key={n.id} className="border-t hover:aseel-bg-panel">
+                <tr key={n.id} className="border-t hover:ktra-bg-panel">
                   <td className="p-3 font-mono">{n.note_number}</td>
                   <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded text-xs ${n.note_type === "credit" ? "bg-green-100 text-green-700" : "aseel-bg-panel aseel-text-state"}`}>
+                    <span className={`px-2 py-0.5 rounded text-xs ${n.note_type === "credit" ? "bg-green-100 text-green-700" : "ktra-bg-panel ktra-text-state"}`}>
                       {n.note_type === "credit" ? "دائن — ينقص على العميل" : "مدين — يزيد على العميل"}
                     </span>
                   </td>
@@ -310,11 +310,11 @@ export const CreditDebitNotesPage: React.FC = () => {
                   <td className="p-3 flex gap-2">
                     {n.status === "draft" && (
                       <>
-                        <button onClick={() => { setSelectedId(n.id); }} className="aseel-text-accent hover:underline text-xs">تعديل</button>
+                        <button onClick={() => { setSelectedId(n.id); }} className="ktra-text-accent hover:underline text-xs">تعديل</button>
                         <button onClick={() => handlePost(n.id)} className="text-green-600 hover:underline text-xs">ترحيل</button>
                       </>
                     )}
-                    {n.journal && <span className="aseel-text-soft text-xs">قيد #{n.journal}</span>}
+                    {n.journal && <span className="ktra-text-soft text-xs">قيد #{n.journal}</span>}
                   </td>
                 </tr>
               ))}
@@ -325,14 +325,14 @@ export const CreditDebitNotesPage: React.FC = () => {
 
       {showForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="aseel-bg-field rounded-xl shadow-lg w-full max-w-lg p-6">
+          <div className="ktra-bg-field rounded-xl shadow-lg w-full max-w-lg p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold">{selectedId ? "تعديل الإشعار" : "إشعار جديد"}</h3>
-              <button onClick={() => setShowForm(false)} className="p-1 hover:aseel-bg-panel rounded"><FileDown className="w-5 h-5" /></button>
+              <button onClick={() => setShowForm(false)} className="p-1 hover:ktra-bg-panel rounded"><FileDown className="w-5 h-5" /></button>
             </div>
 
-            {/* N4-T5 tabs using AseelTabs */}
-            <AseelTabs
+            {/* N4-T5 tabs using KitTabs */}
+            <KitTabs
               activeTab={activeTab}
               onTabChange={(key) => setActiveTab(key as "main" | "notes" | "accounts")}
               tabs={[
@@ -352,7 +352,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                             setFormType(value);
                           }}
                           className="w-full border rounded p-1.5 text-sm"
-                          data-aseel-key="1"
+                          data-ktra-key="1"
                         >
                           <option value="credit">إشعار دائن — ينقص المطلوب</option>
                           <option value="debit">إشعار مدين — يزيد المطلوب</option>
@@ -369,7 +369,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                       </div>
                       <div className="col-span-2">
                         <label className="block text-xs font-medium mb-1">العميل</label>
-                        <select value={formCustomer} onChange={(e) => setFormCustomer(e.target.value)} className="w-full border rounded p-1.5 text-sm" data-aseel-key="1">
+                        <select value={formCustomer} onChange={(e) => setFormCustomer(e.target.value)} className="w-full border rounded p-1.5 text-sm" data-ktra-key="1">
                           <option value="">-- اختر (+) --</option>
                           {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
@@ -384,7 +384,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                       </div>
 
                       {/* المبلغ + ضريبة */}
-                      <div className="col-span-2 aseel-bg-panel border aseel-border-soft rounded p-2 mt-2">
+                      <div className="col-span-2 ktra-bg-panel border ktra-border-soft rounded p-2 mt-2">
                         <label className="flex items-center gap-2 text-xs mb-2">
                           <input type="checkbox" checked={formIncludesTax} onChange={(e) => setFormIncludesTax(e.target.checked)} />
                           المبلغ يشمل قيمة الضريبة المضافة
@@ -394,7 +394,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                             <label className="block text-[11px] mb-0.5">المبلغ (Space=رصيد)</label>
                             <input
                               type="number" step="0.01"
-                              data-aseel-field="remaining-amount"
+                              data-ktra-field="remaining-amount"
                               value={formAmount}
                               onChange={(e) => setFormAmount(e.target.value)}
                               className="w-full border rounded p-1 text-sm font-mono"
@@ -406,15 +406,15 @@ export const CreditDebitNotesPage: React.FC = () => {
                           </div>
                           <div>
                             <label className="block text-[11px] mb-0.5">المبلغ بدون ضريبة</label>
-                            <input type="text" readOnly value={formatMoney(amountExcl)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
+                            <input type="text" readOnly value={formatMoney(amountExcl)} className="w-full border rounded p-1 text-sm font-mono ktra-bg-panel" />
                           </div>
                           <div>
                             <label className="block text-[11px] mb-0.5">مبلغ الضريبة</label>
-                            <input type="text" readOnly value={formatMoney(taxAmount)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
+                            <input type="text" readOnly value={formatMoney(taxAmount)} className="w-full border rounded p-1 text-sm font-mono ktra-bg-panel" />
                           </div>
                           <div className="col-span-2">
                             <label className="block text-[11px] mb-0.5">مبلغ الإشعار الإجمالي</label>
-                            <input type="text" readOnly value={formatMoney(totalAmount)} className="w-full border rounded p-1 text-sm font-mono font-bold aseel-bg-panel" />
+                            <input type="text" readOnly value={formatMoney(totalAmount)} className="w-full border rounded p-1 text-sm font-mono font-bold ktra-bg-panel" />
                           </div>
                         </div>
                       </div>
@@ -435,7 +435,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                   key: "accounts",
                   label: "الحسابات",
                   content: (
-                    <div className="text-xs aseel-text-soft p-3 aseel-bg-panel rounded">
+                    <div className="text-xs ktra-text-soft p-3 ktra-bg-panel rounded">
                       معاينة القيد المحاسبي: {formType === "credit" ? "Dr إيراد مرتجعات / Cr ذمم" : "Dr ذمم / Cr إيراد إضافي"} —
                       المبلغ: {formatMoney(totalAmount)} (ضمنه ض.ق.م {formatMoney(taxAmount)}).
                     </div>
@@ -445,8 +445,8 @@ export const CreditDebitNotesPage: React.FC = () => {
             />
 
             <div className="flex justify-end gap-3 mt-4">
-              <button onClick={() => setShowForm(false)} className="px-4 py-2 aseel-bg-panel rounded-lg hover:aseel-bg-grid-head">إلغاء</button>
-              <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-4 py-2 aseel-btn-primary disabled:opacity-50">
+              <button onClick={() => setShowForm(false)} className="px-4 py-2 ktra-bg-panel rounded-lg hover:ktra-bg-grid-head">إلغاء</button>
+              <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-4 py-2 ktra-btn-primary disabled:opacity-50">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 {saving ? "جاري الحفظ..." : "حفظ"}
               </button>
@@ -455,7 +455,7 @@ export const CreditDebitNotesPage: React.FC = () => {
         </div>
       )}
     </div>
-    </AseelDocumentShell>
+    </KitDocumentShell>
     </div>
   );
 };

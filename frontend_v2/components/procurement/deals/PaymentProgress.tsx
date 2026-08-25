@@ -276,19 +276,19 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
         return (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 z-50">
                 {/* استخدمنا max-w-5xl لعرض أكبر واستغلال العرض بدلاً من الطول */}
-                <div className="aseel-bg-field dark:bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden border aseel-border-soft dark:aseel-border-soft flex flex-col max-h-[95vh]">
+                <div className="ktra-bg-field dark:bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden border ktra-border-soft dark:ktra-border-soft flex flex-col max-h-[95vh]">
 
                     {/* Header: Compact & Includes Exchange Rate */}
-                    <div className="px-5 py-3 border-b aseel-border-soft dark:aseel-border-soft flex items-center justify-between aseel-bg-panel dark:bg-[var(--color-surface-2)]">
+                    <div className="px-5 py-3 border-b ktra-border-soft dark:ktra-border-soft flex items-center justify-between ktra-bg-panel dark:bg-[var(--color-surface-2)]">
                         <div className="flex items-center gap-4">
-                            <div className="p-2 aseel-bg-accent-bg dark:aseel-bg-panel/30 rounded-lg aseel-text-accent dark:aseel-text-soft">
+                            <div className="p-2 ktra-bg-accent-bg dark:ktra-bg-panel/30 rounded-lg ktra-text-accent dark:ktra-text-soft">
                                 <FileText className="w-5 h-5" />
                             </div>
                             <div>
-                                <h3 className="font-bold aseel-text-ink dark:text-white text-lg leading-tight">
+                                <h3 className="font-bold ktra-text-ink dark:text-white text-lg leading-tight">
                                     تفاصيل الدفعة {selectedInstallment.installmentNumber}
                                 </h3>
-                                <div className="text-xs aseel-text-soft flex gap-2">
+                                <div className="text-xs ktra-text-soft flex gap-2">
                                     <span>بواسطة: {currentUser.name}</span>
                                     {payment?.paymentConfirmationDate && (
                                         <span className="text-green-600 dark:text-green-400 flex items-center gap-1">
@@ -301,9 +301,9 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
 
                         {/* Exchange Rate moved to Header */}
                         {payment && (
-                            <div className="flex items-center gap-4 aseel-bg-field dark:bg-black/20 px-3 py-1.5 rounded-lg border aseel-border-soft dark:aseel-border-soft">
-                                <span className="text-xs aseel-text-soft dark:aseel-text-soft">سعر التحويل:</span>
-                                <span className="font-mono font-bold aseel-text-accent dark:aseel-text-soft text-sm dir-ltr">
+                            <div className="flex items-center gap-4 ktra-bg-field dark:bg-black/20 px-3 py-1.5 rounded-lg border ktra-border-soft dark:ktra-border-soft">
+                                <span className="text-xs ktra-text-soft dark:ktra-text-soft">سعر التحويل:</span>
+                                <span className="font-mono font-bold ktra-text-accent dark:ktra-text-soft text-sm dir-ltr">
                                     1 USD = {payment.usdToIls || '-'} ILS
                                 </span>
                             </div>
@@ -314,7 +314,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 <button
                                     type="button"
                                     onClick={() => openJournalForPayment(payment)}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border aseel-border-soft aseel-bg-field aseel-text-ink dark:aseel-border-soft dark:aseel-bg-panel dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel transition-colors"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border ktra-border-soft ktra-bg-field ktra-text-ink dark:ktra-border-soft dark:ktra-bg-panel dark:ktra-text-soft hover:ktra-bg-panel dark:hover:ktra-bg-panel transition-colors"
                                 >
                                     <BookOpen className="w-4 h-4" />
                                     فتح القيد
@@ -323,7 +323,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                             <button
                                 type="button"
                                 onClick={() => { setShowDetailsModal(false); setSelectedInstallment(null); }}
-                                className="p-1.5 hover:aseel-bg-panel hover:aseel-text-soft dark:hover:aseel-bg-panel/20 rounded-lg aseel-text-soft transition-colors"
+                                className="p-1.5 hover:ktra-bg-panel hover:ktra-text-soft dark:hover:ktra-bg-panel/20 rounded-lg ktra-text-soft transition-colors"
                             >
                                 <X className="w-5 h-5" />
                             </button>
@@ -331,7 +331,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                     </div>
 
                     {/* Content: Grid Layout to reduce height */}
-                    <div className="p-4 overflow-y-auto custom-scrollbar aseel-bg-field dark:bg-[var(--color-surface)]">
+                    <div className="p-4 overflow-y-auto custom-scrollbar ktra-bg-field dark:bg-[var(--color-surface)]">
                         {payment ? (
                             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-full">
 
@@ -339,23 +339,23 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 <div className="lg:col-span-4 flex flex-col gap-3">
 
                                     {/* Financial Card */}
-                                    <div className="bg-gradient-to-br aseel-bg-panel to-white dark:from-[var(--color-surface-2)] dark:to-[var(--color-surface-2)] rounded-xl border aseel-border-soft dark:aseel-border-soft p-4 shadow-sm">
-                                        <h4 className="aseel-text-ink dark:aseel-text-soft font-bold text-sm mb-3 flex items-center gap-2">
-                                            <Wallet className="w-4 h-4 aseel-text-soft" />
+                                    <div className="bg-gradient-to-br ktra-bg-panel to-white dark:from-[var(--color-surface-2)] dark:to-[var(--color-surface-2)] rounded-xl border ktra-border-soft dark:ktra-border-soft p-4 shadow-sm">
+                                        <h4 className="ktra-text-ink dark:ktra-text-soft font-bold text-sm mb-3 flex items-center gap-2">
+                                            <Wallet className="w-4 h-4 ktra-text-soft" />
                                             البيانات المالية
                                         </h4>
                                         <div className="space-y-2">
-                                            <div className="flex justify-between items-center p-2 aseel-bg-field dark:bg-black/20 rounded-lg border aseel-border-soft dark:aseel-border-soft">
-                                                <span className="text-xs aseel-text-soft dark:aseel-text-soft">مبلغ الدفعة</span>
-                                                <span className="font-bold aseel-text-ink dark:text-white">${payment.amount?.toLocaleString()}</span>
+                                            <div className="flex justify-between items-center p-2 ktra-bg-field dark:bg-black/20 rounded-lg border ktra-border-soft dark:ktra-border-soft">
+                                                <span className="text-xs ktra-text-soft dark:ktra-text-soft">مبلغ الدفعة</span>
+                                                <span className="font-bold ktra-text-ink dark:text-white">${payment.amount?.toLocaleString()}</span>
                                             </div>
-                                            <div className="flex justify-between items-center p-2 aseel-bg-field dark:bg-black/20 rounded-lg border aseel-border-soft dark:aseel-border-soft">
-                                                <span className="text-xs aseel-text-soft dark:aseel-text-soft">تكلفة الحوالة</span>
-                                                <span className="font-bold aseel-text-ink dark:aseel-text-soft">${payment.transferCost?.toLocaleString() || '0'}</span>
+                                            <div className="flex justify-between items-center p-2 ktra-bg-field dark:bg-black/20 rounded-lg border ktra-border-soft dark:ktra-border-soft">
+                                                <span className="text-xs ktra-text-soft dark:ktra-text-soft">تكلفة الحوالة</span>
+                                                <span className="font-bold ktra-text-ink dark:ktra-text-soft">${payment.transferCost?.toLocaleString() || '0'}</span>
                                             </div>
-                                            <div className="flex justify-between items-center p-2 aseel-bg-panel dark:aseel-bg-panel/20 rounded-lg border aseel-border-soft dark:aseel-border-soft">
-                                                <span className="text-xs aseel-text-ink dark:aseel-text-soft font-bold">الإجمالي الكلي</span>
-                                                <span className="font-bold aseel-text-ink dark:aseel-text-soft text-lg">
+                                            <div className="flex justify-between items-center p-2 ktra-bg-panel dark:ktra-bg-panel/20 rounded-lg border ktra-border-soft dark:ktra-border-soft">
+                                                <span className="text-xs ktra-text-ink dark:ktra-text-soft font-bold">الإجمالي الكلي</span>
+                                                <span className="font-bold ktra-text-ink dark:ktra-text-soft text-lg">
                                                     ${((payment.amount || 0) + (payment.transferCost || 0)).toLocaleString()}
                                                 </span>
                                             </div>
@@ -363,26 +363,26 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                     </div>
 
                                     {/* Dates Card */}
-                                    <div className="aseel-bg-field dark:bg-[var(--color-surface-2)] rounded-xl border aseel-border-soft dark:aseel-border-soft p-4 shadow-sm flex-1">
-                                        <h4 className="aseel-text-ink dark:aseel-text-soft font-bold text-sm mb-3 flex items-center gap-2">
-                                            <Calendar className="w-4 h-4 aseel-text-soft" />
+                                    <div className="ktra-bg-field dark:bg-[var(--color-surface-2)] rounded-xl border ktra-border-soft dark:ktra-border-soft p-4 shadow-sm flex-1">
+                                        <h4 className="ktra-text-ink dark:ktra-text-soft font-bold text-sm mb-3 flex items-center gap-2">
+                                            <Calendar className="w-4 h-4 ktra-text-soft" />
                                             التواريخ
                                         </h4>
                                         <div className="space-y-3 text-sm">
-                                            <div className="flex justify-between border-b aseel-border-soft dark:aseel-border-soft pb-2 last:border-0 last:pb-0">
-                                                <span className="aseel-text-soft dark:aseel-text-soft text-xs">تاريخ التحويل</span>
-                                                <span className="font-mono font-medium aseel-text-ink dark:aseel-text-soft">{formatDate(payment.paymentDate)}</span>
+                                            <div className="flex justify-between border-b ktra-border-soft dark:ktra-border-soft pb-2 last:border-0 last:pb-0">
+                                                <span className="ktra-text-soft dark:ktra-text-soft text-xs">تاريخ التحويل</span>
+                                                <span className="font-mono font-medium ktra-text-ink dark:ktra-text-soft">{formatDate(payment.paymentDate)}</span>
                                             </div>
-                                            <div className="flex justify-between border-b aseel-border-soft dark:aseel-border-soft pb-2 last:border-0 last:pb-0">
-                                                <span className="aseel-text-soft dark:aseel-text-soft text-xs">تاريخ التأكيد</span>
-                                                <span className="font-mono font-medium aseel-text-ink dark:aseel-text-soft">{formatDate(payment.paymentConfirmationDate)}</span>
+                                            <div className="flex justify-between border-b ktra-border-soft dark:ktra-border-soft pb-2 last:border-0 last:pb-0">
+                                                <span className="ktra-text-soft dark:ktra-text-soft text-xs">تاريخ التأكيد</span>
+                                                <span className="font-mono font-medium ktra-text-ink dark:ktra-text-soft">{formatDate(payment.paymentConfirmationDate)}</span>
                                             </div>
                                         </div>
 
                                         {/* Compact Notes */}
-                                        <div className="mt-4 pt-3 border-t aseel-border-soft dark:aseel-border-soft">
-                                            <span className="text-xs aseel-text-soft block mb-1">الملاحظات:</span>
-                                            <p className="text-xs aseel-text-soft dark:aseel-text-soft line-clamp-3 leading-relaxed">
+                                        <div className="mt-4 pt-3 border-t ktra-border-soft dark:ktra-border-soft">
+                                            <span className="text-xs ktra-text-soft block mb-1">الملاحظات:</span>
+                                            <p className="text-xs ktra-text-soft dark:ktra-text-soft line-clamp-3 leading-relaxed">
                                                 {payment.notes || payment.supplierNotes || "لا توجد ملاحظات."}
                                             </p>
                                         </div>
@@ -391,19 +391,19 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
 
                                 {/* Left Column: Documents (70% width) */}
                                 <div className="lg:col-span-8 flex flex-col h-full">
-                                    <h4 className="aseel-text-ink dark:aseel-text-soft font-bold text-sm mb-3 flex items-center gap-2">
+                                    <h4 className="ktra-text-ink dark:ktra-text-soft font-bold text-sm mb-3 flex items-center gap-2">
                                         <ImageIcon className="w-4 h-4 text-[var(--color-primary)]" />
                                         المستندات المرفقة
                                     </h4>
 
                                     <div className="grid grid-cols-2 gap-3 h-full min-h-[250px]">
                                         {/* Claim Image */}
-                                        <div className="relative group border aseel-border-soft dark:aseel-border-soft rounded-xl overflow-hidden aseel-bg-panel dark:bg-black/20 flex flex-col">
+                                        <div className="relative group border ktra-border-soft dark:ktra-border-soft rounded-xl overflow-hidden ktra-bg-panel dark:bg-black/20 flex flex-col">
                                             <div className="absolute top-2 right-2 left-2 z-10 flex justify-between items-start opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <span className="aseel-bg-grid-head/90 aseel-text-ink text-[10px] px-2 py-0.5 rounded backdrop-blur-sm font-bold shadow-sm dark:aseel-bg-panel/90 dark:aseel-text-soft">المطالبة (Claim)</span>
+                                                <span className="ktra-bg-grid-head/90 ktra-text-ink text-[10px] px-2 py-0.5 rounded backdrop-blur-sm font-bold shadow-sm dark:ktra-bg-panel/90 dark:ktra-text-soft">المطالبة (Claim)</span>
                                                 <div className="flex gap-1">
-                                                    <button onClick={() => downloadImage(payment.alibabaClaimImage || '', 'claim.jpg')} className="p-1.5 aseel-bg-field/90 aseel-text-ink rounded hover:aseel-text-accent shadow-sm"><Download className="w-3 h-3" /></button>
-                                                    <button onClick={() => openImageInPopup(payment.alibabaClaimImage || '')} className="p-1.5 aseel-bg-field/90 aseel-text-ink rounded hover:aseel-text-accent shadow-sm"><Eye className="w-3 h-3" /></button>
+                                                    <button onClick={() => downloadImage(payment.alibabaClaimImage || '', 'claim.jpg')} className="p-1.5 ktra-bg-field/90 ktra-text-ink rounded hover:ktra-text-accent shadow-sm"><Download className="w-3 h-3" /></button>
+                                                    <button onClick={() => openImageInPopup(payment.alibabaClaimImage || '')} className="p-1.5 ktra-bg-field/90 ktra-text-ink rounded hover:ktra-text-accent shadow-sm"><Eye className="w-3 h-3" /></button>
                                                 </div>
                                             </div>
                                             {payment.alibabaClaimImage ? (
@@ -415,7 +415,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                                     />
                                                 </div>
                                             ) : (
-                                                <div className="flex-1 flex flex-col items-center justify-center aseel-text-soft">
+                                                <div className="flex-1 flex flex-col items-center justify-center ktra-text-soft">
                                                     <ImageIcon className="w-8 h-8 mb-2 opacity-20" />
                                                     <span className="text-xs">لا توجد صورة</span>
                                                 </div>
@@ -423,12 +423,12 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                         </div>
 
                                         {/* Swift Image */}
-                                        <div className="relative group border aseel-border-soft dark:aseel-border-soft rounded-xl overflow-hidden aseel-bg-panel dark:bg-black/20 flex flex-col">
+                                        <div className="relative group border ktra-border-soft dark:ktra-border-soft rounded-xl overflow-hidden ktra-bg-panel dark:bg-black/20 flex flex-col">
                                             <div className="absolute top-2 right-2 left-2 z-10 flex justify-between items-start opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <span className="aseel-bg-accent-bg/90 aseel-text-accent text-[10px] px-2 py-0.5 rounded backdrop-blur-sm font-bold shadow-sm">السليب (Swift)</span>
+                                                <span className="ktra-bg-accent-bg/90 ktra-text-accent text-[10px] px-2 py-0.5 rounded backdrop-blur-sm font-bold shadow-sm">السليب (Swift)</span>
                                                 <div className="flex gap-1">
-                                                    <button onClick={() => downloadImage(payment.bankSwiftImage || '', 'swift.jpg')} className="p-1.5 aseel-bg-field/90 aseel-text-ink rounded hover:aseel-text-accent shadow-sm"><Download className="w-3 h-3" /></button>
-                                                    <button onClick={() => openImageInPopup(payment.bankSwiftImage || '')} className="p-1.5 aseel-bg-field/90 aseel-text-ink rounded hover:aseel-text-accent shadow-sm"><Eye className="w-3 h-3" /></button>
+                                                    <button onClick={() => downloadImage(payment.bankSwiftImage || '', 'swift.jpg')} className="p-1.5 ktra-bg-field/90 ktra-text-ink rounded hover:ktra-text-accent shadow-sm"><Download className="w-3 h-3" /></button>
+                                                    <button onClick={() => openImageInPopup(payment.bankSwiftImage || '')} className="p-1.5 ktra-bg-field/90 ktra-text-ink rounded hover:ktra-text-accent shadow-sm"><Eye className="w-3 h-3" /></button>
                                                 </div>
                                             </div>
                                             {payment.bankSwiftImage ? (
@@ -440,7 +440,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                                     />
                                                 </div>
                                             ) : (
-                                                <div className="flex-1 flex flex-col items-center justify-center aseel-text-soft">
+                                                <div className="flex-1 flex flex-col items-center justify-center ktra-text-soft">
                                                     <ImageIcon className="w-8 h-8 mb-2 opacity-20" />
                                                     <span className="text-xs">لا توجد صورة</span>
                                                 </div>
@@ -450,7 +450,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 </div>
                             </div>
                         ) : (
-                            <div className="flex flex-col items-center justify-center h-48 aseel-text-soft">
+                            <div className="flex flex-col items-center justify-center h-48 ktra-text-soft">
                                 <AlertCircle className="w-10 h-10 mb-2 opacity-50" />
                                 <p className="text-sm">لا توجد بيانات</p>
                             </div>
@@ -462,32 +462,32 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
     };
 
     return (
-        <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl border aseel-border-soft dark:aseel-border-soft p-5 shadow-sm" key={refreshKey}>
+        <div className="ktra-bg-field dark:ktra-bg-panel rounded-2xl border ktra-border-soft dark:ktra-border-soft p-5 shadow-sm" key={refreshKey}>
             {/* Header Area */}
-            <div className="mb-6 border-b aseel-border-soft dark:aseel-border-soft pb-5">
+            <div className="mb-6 border-b ktra-border-soft dark:ktra-border-soft pb-5">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
-                        <div className="p-3 aseel-bg-accent rounded-xl text-white shadow-lg shadow-blue-500/20">
+                        <div className="p-3 ktra-bg-accent rounded-xl text-white shadow-lg shadow-blue-500/20">
                             <Banknote className="w-6 h-6" />
                         </div>
                         <div>
                             <div className="flex items-center gap-2">
-                                <h3 className="font-bold aseel-text-ink dark:text-white text-lg">
+                                <h3 className="font-bold ktra-text-ink dark:text-white text-lg">
                                     {variant === 'shipment' ? 'دفعات الشحنة' : 'دفعات الصفقة'}
                                 </h3>
                                 <button
                                     onClick={handleRefresh}
-                                    className="p-1.5 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-full aseel-text-soft transition-colors"
+                                    className="p-1.5 hover:ktra-bg-panel dark:hover:ktra-bg-panel rounded-full ktra-text-soft transition-colors"
                                 >
                                     <RefreshCw className="w-3.5 h-3.5" />
                                 </button>
                             </div>
-                            <div className="flex items-center gap-2 text-sm aseel-text-soft dark:aseel-text-soft">
+                            <div className="flex items-center gap-2 text-sm ktra-text-soft dark:ktra-text-soft">
                                 <span>المدفوع:</span>
-                                <span className="aseel-text-accent dark:aseel-text-soft font-bold">${totalPaid.toLocaleString()}</span>
-                                <span className="aseel-text-soft">|</span>
+                                <span className="ktra-text-accent dark:ktra-text-soft font-bold">${totalPaid.toLocaleString()}</span>
+                                <span className="ktra-text-soft">|</span>
                                 <span>{supplierAdvance > 0 ? "دفعة مقدمة على هذه الصفقة:" : "المتبقي:"}</span>
-                                <span className="aseel-text-soft font-bold">
+                                <span className="ktra-text-soft font-bold">
                                     ${supplierAdvance > 0 ? supplierAdvance.toLocaleString() : amountOutstanding.toLocaleString()}
                                 </span>
                             </div>
@@ -496,13 +496,13 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
 
                     <div className="flex items-center gap-3">
                         <div className="text-right">
-                            <span className="text-xs aseel-text-soft dark:aseel-text-soft block">نسبة الإنجاز</span>
-                            <span className="text-lg font-bold aseel-text-ink dark:text-white">{formatNumber(progressPercentage, { maxDecimals: 1 })}%</span>
+                            <span className="text-xs ktra-text-soft dark:ktra-text-soft block">نسبة الإنجاز</span>
+                            <span className="text-lg font-bold ktra-text-ink dark:text-white">{formatNumber(progressPercentage, { maxDecimals: 1 })}%</span>
                         </div>
                         <div className="w-16 h-16 relative flex items-center justify-center">
                             <svg className="w-full h-full transform -rotate-90">
-                                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" className="aseel-text-soft dark:aseel-text-ink" />
-                                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" strokeDasharray={175.9} strokeDashoffset={175.9 - (progressRingPercent / 100) * 175.9} className="aseel-text-soft transition-all duration-1000 ease-out" />
+                                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" className="ktra-text-soft dark:ktra-text-ink" />
+                                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" strokeDasharray={175.9} strokeDashoffset={175.9 - (progressRingPercent / 100) * 175.9} className="ktra-text-soft transition-all duration-1000 ease-out" />
                             </svg>
                         </div>
                     </div>
@@ -534,12 +534,12 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                             className={`
                                 group relative p-4 rounded-xl border transition-all duration-200 
                                 ${isFullyFinished
-                                    ? 'bg-green-50/40 dark:bg-green-900/10 aseel-border-soft dark:border-green-800/30'
+                                    ? 'bg-green-50/40 dark:bg-green-900/10 ktra-border-soft dark:border-green-800/30'
                                     : hasPaidProgress
-                                        ? 'aseel-bg-accent-bg/40 dark:aseel-bg-panel/10 aseel-border-accent dark:aseel-border-soft/30'
+                                        ? 'ktra-bg-accent-bg/40 dark:ktra-bg-panel/10 ktra-border-accent dark:ktra-border-soft/30'
                                         : unlocked
-                                            ? 'aseel-bg-field dark:aseel-bg-panel aseel-border-soft dark:aseel-border-soft hover:aseel-border-soft'
-                                            : 'aseel-bg-panel dark:aseel-bg-panel aseel-border-soft dark:aseel-border-soft opacity-60'
+                                            ? 'ktra-bg-field dark:ktra-bg-panel ktra-border-soft dark:ktra-border-soft hover:ktra-border-soft'
+                                            : 'ktra-bg-panel dark:ktra-bg-panel ktra-border-soft dark:ktra-border-soft opacity-60'
                                 }
                             `}
                         >
@@ -547,10 +547,10 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 <div className="flex items-center gap-4">
                                     <div className={`
                                         w-10 h-10 rounded-full flex items-center justify-center border shadow-sm
-                                        ${isFullyFinished ? 'bg-green-100 aseel-border-soft text-green-600 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400' :
-                                            hasPaidProgress ? 'aseel-bg-accent-bg aseel-border-accent aseel-text-accent dark:aseel-bg-panel/30 dark:aseel-border-soft dark:aseel-text-soft' :
-                                                unlocked ? 'aseel-bg-field aseel-border-soft aseel-text-soft dark:aseel-bg-panel dark:aseel-border-soft' :
-                                                    'aseel-bg-panel aseel-border-soft aseel-text-soft dark:aseel-bg-panel dark:aseel-border-soft'}
+                                        ${isFullyFinished ? 'bg-green-100 ktra-border-soft text-green-600 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400' :
+                                            hasPaidProgress ? 'ktra-bg-accent-bg ktra-border-accent ktra-text-accent dark:ktra-bg-panel/30 dark:ktra-border-soft dark:ktra-text-soft' :
+                                                unlocked ? 'ktra-bg-field ktra-border-soft ktra-text-soft dark:ktra-bg-panel dark:ktra-border-soft' :
+                                                    'ktra-bg-panel ktra-border-soft ktra-text-soft dark:ktra-bg-panel dark:ktra-border-soft'}
                                     `}>
                                         {isFullyFinished ? <CheckCircle2 className="w-5 h-5" /> :
                                             hasPaidProgress ? <DollarSign className="w-5 h-5" /> :
@@ -560,17 +560,17 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
 
                                     <div>
                                         <div className="flex items-center gap-2">
-                                            <h4 className="font-bold aseel-text-ink dark:text-white text-base">
+                                            <h4 className="font-bold ktra-text-ink dark:text-white text-base">
                                                 الدفعة {installment.installmentNumber}
                                             </h4>
-                                            <span className="text-xs aseel-text-soft dark:aseel-text-soft font-normal aseel-bg-panel dark:aseel-bg-panel px-2 py-0.5 rounded-full">
+                                            <span className="text-xs ktra-text-soft dark:ktra-text-soft font-normal ktra-bg-panel dark:ktra-bg-panel px-2 py-0.5 rounded-full">
                                                 {installment.percentage}%
                                             </span>
                                         </div>
                                         <div className="flex items-center gap-3 mt-1 text-sm">
-                                            <span className="font-bold aseel-text-ink dark:aseel-text-soft">${installment.amount.toLocaleString()}</span>
-                                            <span className="aseel-text-soft dark:aseel-text-soft">|</span>
-                                            <span className={`text-xs ${isFullyFinished ? 'text-green-600' : hasPaidProgress ? 'aseel-text-accent' : 'aseel-text-soft'}`}>
+                                            <span className="font-bold ktra-text-ink dark:ktra-text-soft">${installment.amount.toLocaleString()}</span>
+                                            <span className="ktra-text-soft dark:ktra-text-soft">|</span>
+                                            <span className={`text-xs ${isFullyFinished ? 'text-green-600' : hasPaidProgress ? 'ktra-text-accent' : 'ktra-text-soft'}`}>
                                                 {getInstallmentStatusText(installment)}
                                             </span>
                                         </div>
@@ -583,7 +583,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                             type="button"
                                             title="فتح القيد في المحاسبة"
                                             onClick={() => openJournalForPayment(payment)}
-                                            className="p-2 aseel-text-soft hover:text-[var(--color-primary-hover)] hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/20 rounded-lg transition-colors"
+                                            className="p-2 ktra-text-soft hover:text-[var(--color-primary-hover)] hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/20 rounded-lg transition-colors"
                                         >
                                             <BookOpen className="w-5 h-5" />
                                         </button>
@@ -602,7 +602,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                                 type: `دفعة_${installment.installmentNumber}`,
                                                 paymentId: String(payment.id),
                                             })}
-                                            className="shrink-0 rounded-md border aseel-border-soft aseel-bg-field px-2 py-1.5 text-xs font-semibold aseel-text-ink hover:aseel-bg-panel dark:aseel-border-soft dark:aseel-bg-panel dark:aseel-text-soft dark:hover:aseel-bg-panel"
+                                            className="shrink-0 rounded-md border ktra-border-soft ktra-bg-field px-2 py-1.5 text-xs font-semibold ktra-text-ink hover:ktra-bg-panel dark:ktra-border-soft dark:ktra-bg-panel dark:ktra-text-soft dark:hover:ktra-bg-panel"
                                         >
                                             ربط قيد
                                         </button>
@@ -612,7 +612,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                             type="button"
                                             title="تفاصيل الدفعة والمستندات"
                                             onClick={() => { setSelectedInstallment(installment); setShowDetailsModal(true); }}
-                                            className="p-2 aseel-text-soft hover:aseel-text-accent hover:aseel-bg-accent-bg dark:hover:aseel-bg-panel/20 rounded-lg transition-colors"
+                                            className="p-2 ktra-text-soft hover:ktra-text-accent hover:ktra-bg-accent-bg dark:hover:ktra-bg-panel/20 rounded-lg transition-colors"
                                         >
                                             <Eye className="w-5 h-5" />
                                         </button>
@@ -642,7 +642,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                                 );
                                                 setRefreshKey((k) => k + 1);
                                             }}
-                                            className="p-2 aseel-text-soft hover:aseel-text-state hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded-lg transition-colors"
+                                            className="p-2 ktra-text-soft hover:ktra-text-state hover:ktra-bg-panel dark:hover:ktra-bg-panel/30 rounded-lg transition-colors"
                                         >
                                             <Trash2 className="w-5 h-5" />
                                         </button>
@@ -656,10 +656,10 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                             ${isFullyFinished
                                                 ? 'bg-transparent text-green-600 cursor-default'
                                                 : awaitingSupplier
-                                                    ? 'aseel-bg-accent text-white hover:aseel-bg-accent shadow-sm shadow-blue-500/30'
+                                                    ? 'ktra-bg-accent text-white hover:ktra-bg-accent shadow-sm shadow-blue-500/30'
                                                     : unlocked
-                                                        ? 'aseel-bg-panel text-white hover:aseel-bg-panel dark:aseel-bg-field dark:text-black dark:hover:aseel-bg-grid-head'
-                                                        : 'aseel-bg-panel aseel-text-soft cursor-not-allowed dark:aseel-bg-panel dark:aseel-text-soft'}
+                                                        ? 'ktra-bg-panel text-white hover:ktra-bg-panel dark:ktra-bg-field dark:text-black dark:hover:ktra-bg-grid-head'
+                                                        : 'ktra-bg-panel ktra-text-soft cursor-not-allowed dark:ktra-bg-panel dark:ktra-text-soft'}
                                         `}
                                     >
                                         {isFullyFinished ? 'تمت بنجاح' : awaitingSupplier ? 'تأكيد المورد' : 'إجراء الدفع'}
@@ -678,15 +678,15 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                 const confirmOnlyModal = isAwaitingSupplierConfirmation(modalPayment);
                 return (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                    <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border aseel-border-soft dark:aseel-border-soft">
+                    <div className="ktra-bg-field dark:ktra-bg-panel rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border ktra-border-soft dark:ktra-border-soft">
                         <div className="p-6">
                             <div className="flex justify-between items-center mb-6">
-                                <h3 className="font-bold text-xl aseel-text-ink dark:text-white">
+                                <h3 className="font-bold text-xl ktra-text-ink dark:text-white">
                                     {confirmOnlyModal
                                         ? `تأكيد المورد — الدفعة ${selectedInstallment.installmentNumber}`
                                         : `تسجيل الدفعة ${selectedInstallment.installmentNumber}`}
                                 </h3>
-                                <button onClick={() => setShowPaymentModal(false)} className="p-2 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-full aseel-text-soft">✕</button>
+                                <button onClick={() => setShowPaymentModal(false)} className="p-2 hover:ktra-bg-panel dark:hover:ktra-bg-panel rounded-full ktra-text-soft">✕</button>
                             </div>
                             <PaymentRegistration
                                 title={`الدفعة ${selectedInstallment.installmentNumber}`}

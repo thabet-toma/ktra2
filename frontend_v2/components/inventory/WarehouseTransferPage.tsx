@@ -6,7 +6,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
-import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
+import { KitDocumentShell, type KitToolbarAction } from "../kit";
 import { Plus, Save, Send, Trash2, RefreshCw, X } from "lucide-react";
 import { formatDateLocalized } from "../../utils/formatDate";
 
@@ -107,7 +107,7 @@ export const WarehouseTransferPage: React.FC = () => {
     }
   };
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "new", label: showForm ? "إخفاء النموذج" : "تحويل جديد", icon: <Plus />, onClick: () => setShowForm((s) => !s) },
     { key: "refresh", label: "تحديث", icon: <RefreshCw className={loading ? "animate-spin" : ""} />, onClick: () => void load(), separatorBefore: true },
     { key: "back", label: "عودة", icon: <X />, onClick: () => navigate(-1), danger: true, separatorBefore: true },
@@ -115,64 +115,64 @@ export const WarehouseTransferPage: React.FC = () => {
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell title="تحويل بين المستودعات" state={`${rows.length} مستند`} actions={actions}>
+      <KitDocumentShell title="تحويل بين المستودعات" state={`${rows.length} مستند`} actions={actions}>
         <div style={{ padding: 8 }}>
-          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: 8 }}>{err}</div>}
-          {msg && <div className="aseel-banner" style={{ marginBottom: 8, color: "var(--aseel-ok,#2d7d46)" }}>{msg}</div>}
+          {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: 8 }}>{err}</div>}
+          {msg && <div className="ktra-banner" style={{ marginBottom: 8, color: "var(--ktra-ok,#2d7d46)" }}>{msg}</div>}
 
           {showForm && (
-            <div className="aseel-bg-panel" style={{ border: "1px solid var(--aseel-border)", borderRadius: 6, padding: 10, marginBottom: 12 }}>
+            <div className="ktra-bg-panel" style={{ border: "1px solid var(--ktra-border)", borderRadius: 6, padding: 10, marginBottom: 12 }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                <label className="aseel-field"><span className="aseel-field-label">التاريخ</span>
-                  <input type="date" className="aseel-input" value={date} onChange={(e) => setDate(e.target.value)} /></label>
-                <label className="aseel-field"><span className="aseel-field-label">من مستودع</span>
-                  <select className="aseel-input" value={source} onChange={(e) => setSource(e.target.value ? Number(e.target.value) : "")}>
+                <label className="ktra-field"><span className="ktra-field-label">التاريخ</span>
+                  <input type="date" className="ktra-input" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+                <label className="ktra-field"><span className="ktra-field-label">من مستودع</span>
+                  <select className="ktra-input" value={source} onChange={(e) => setSource(e.target.value ? Number(e.target.value) : "")}>
                     <option value="">—</option>
                     {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select></label>
-                <label className="aseel-field"><span className="aseel-field-label">إلى مستودع</span>
-                  <select className="aseel-input" value={dest} onChange={(e) => setDest(e.target.value ? Number(e.target.value) : "")}>
+                <label className="ktra-field"><span className="ktra-field-label">إلى مستودع</span>
+                  <select className="ktra-input" value={dest} onChange={(e) => setDest(e.target.value ? Number(e.target.value) : "")}>
                     <option value="">—</option>
                     {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select></label>
-                <label className="aseel-field" style={{ flex: 1, minWidth: 160 }}><span className="aseel-field-label">ملاحظات</span>
-                  <input className="aseel-input" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+                <label className="ktra-field" style={{ flex: 1, minWidth: 160 }}><span className="ktra-field-label">ملاحظات</span>
+                  <input className="ktra-input" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
               </div>
 
-              <table className="aseel-grid" data-variant="list" style={{ marginBottom: 8 }}>
+              <table className="ktra-grid" data-variant="list" style={{ marginBottom: 8 }}>
                 <thead><tr><th>الصنف</th><th style={{ width: 120 }}>الكمية</th><th style={{ width: 40 }}></th></tr></thead>
                 <tbody>
                   {lines.map((l, i) => (
                     <tr key={i}>
                       <td>
-                        <select className="aseel-input" style={{ width: "100%" }} value={l.product}
+                        <select className="ktra-input" style={{ width: "100%" }} value={l.product}
                           onChange={(e) => updateLine(i, { product: e.target.value ? Number(e.target.value) : "" })}>
                           <option value="">— اختر صنفاً —</option>
                           {products.map((p) => <option key={p.id} value={p.id}>{prodLabel(p)}</option>)}
                         </select>
                       </td>
-                      <td><input type="number" min="0" step="any" className="aseel-input" style={{ width: "100%" }}
+                      <td><input type="number" min="0" step="any" className="ktra-input" style={{ width: "100%" }}
                         value={l.quantity} onChange={(e) => updateLine(i, { quantity: e.target.value })} /></td>
                       <td style={{ textAlign: "center" }}>
-                        <button className="aseel-iconbtn" onClick={() => removeLine(i)} title="حذف"><Trash2 className="h-3 w-3" /></button>
+                        <button className="ktra-iconbtn" onClick={() => removeLine(i)} title="حذف"><Trash2 className="h-3 w-3" /></button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="aseel-toolbtn" onClick={addLine}><Plus className="h-4 w-4" /> سطر</button>
-                <button className="aseel-toolbtn" onClick={saveAndPost} disabled={saving} style={{ marginInlineStart: "auto" }}>
+                <button className="ktra-toolbtn" onClick={addLine}><Plus className="h-4 w-4" /> سطر</button>
+                <button className="ktra-toolbtn" onClick={saveAndPost} disabled={saving} style={{ marginInlineStart: "auto" }}>
                   {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} حفظ وترحيل
                 </button>
               </div>
             </div>
           )}
 
-          <table className="aseel-grid" data-variant="list">
+          <table className="ktra-grid" data-variant="list">
             <thead><tr><th style={{ width: 60 }}>#</th><th style={{ width: 110 }}>الرقم</th><th style={{ width: 110 }}>التاريخ</th><th>من</th><th>إلى</th><th style={{ width: 110 }}>الحالة</th></tr></thead>
             <tbody>
-              {rows.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", padding: 16, color: "var(--aseel-ink-soft)" }}>لا تحويلات</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", padding: 16, color: "var(--ktra-ink-soft)" }}>لا تحويلات</td></tr>}
               {rows.map((r) => (
                 <tr key={r.id}>
                   <td>#{r.id}</td>
@@ -181,15 +181,15 @@ export const WarehouseTransferPage: React.FC = () => {
                   <td>{r.source_warehouse_name}</td>
                   <td>{r.dest_warehouse_name}</td>
                   <td>
-                    {r.is_posted ? <span style={{ color: "var(--aseel-ok,#2d7d46)", fontWeight: 600 }}>مُرحَّل</span>
-                      : <button className="aseel-toolbtn" onClick={() => postExisting(r.id)}><Send className="h-3 w-3" /> ترحيل</button>}
+                    {r.is_posted ? <span style={{ color: "var(--ktra-ok,#2d7d46)", fontWeight: 600 }}>مُرحَّل</span>
+                      : <button className="ktra-toolbtn" onClick={() => postExisting(r.id)}><Send className="h-3 w-3" /> ترحيل</button>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

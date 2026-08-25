@@ -10,8 +10,8 @@ import type {
   BankReconciliationDto,
   BankReconciliationSummaryDto,
 } from "../../types/accounting";
-import { AseelDocumentShell, AseelDenseTable } from "../aseel";
-import type { AseelToolbarAction, DenseColumn } from "../aseel";
+import { KitDocumentShell, KitDenseTable } from "../kit";
+import type { KitToolbarAction, DenseColumn } from "../kit";
 import { CheckCircle, Lock, Plus, RefreshCw, Unlock } from "lucide-react";
 
 /** مبلغ مع رمز عملة الحساب — الوسيط الثاني في `formatMoney` بديلٌ عند الفشل لا عملة. */
@@ -167,15 +167,15 @@ export const BankReconciliationPage: React.FC = () => {
     { key: "balance", header: "الرصيد", numeric: true, render: (r) => formatMoney(r.balance, "") },
   ];
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "refresh", label: "تحديث", icon: <RefreshCw />, onClick: () => void loadReconciliations(accountId) },
   ];
 
   const headerBand = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      <div className="aseel-field" style={{ minWidth: "220px" }}>
-        <label className="aseel-field-label">الحساب البنكي</label>
-        <select className="aseel-input" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+      <div className="ktra-field" style={{ minWidth: "220px" }}>
+        <label className="ktra-field-label">الحساب البنكي</label>
+        <select className="ktra-input" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
           <option value="">— اختر —</option>
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
@@ -184,31 +184,31 @@ export const BankReconciliationPage: React.FC = () => {
           ))}
         </select>
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">تاريخ الكشف</label>
-        <input type="date" className="aseel-input" value={stmtDate}
+      <div className="ktra-field">
+        <label className="ktra-field-label">تاريخ الكشف</label>
+        <input type="date" className="ktra-input" value={stmtDate}
           onChange={(e) => setStmtDate(e.target.value)} />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">رصيد الكشف</label>
-        <input type="number" step="0.01" className="aseel-input aseel-num" style={{ width: "140px" }}
+      <div className="ktra-field">
+        <label className="ktra-field-label">رصيد الكشف</label>
+        <input type="number" step="0.01" className="ktra-input ktra-num" style={{ width: "140px" }}
           value={stmtBalance} placeholder="0.00" onChange={(e) => setStmtBalance(e.target.value)} />
       </div>
-      <button type="button" className="aseel-toolbtn" disabled={busy || !accountId}
+      <button type="button" className="ktra-toolbtn" disabled={busy || !accountId}
         onClick={() => void startReconciliation()}>
         <Plus className="w-4 h-4" /> مطابقة جديدة
       </button>
       <div style={{ flex: 1 }} />
       {current && !isClosed && (
-        <button type="button" className="aseel-toolbtn" disabled={busy || !balanced}
+        <button type="button" className="ktra-toolbtn" disabled={busy || !balanced}
           title={balanced ? "إقفال المطابقة" : "لا يمكن الإقفال قبل تصفير الفرق"}
           onClick={() => void closeCurrent()}
-          style={{ background: balanced ? "var(--aseel-ok, #2d7d46)" : undefined, color: balanced ? "#fff" : undefined }}>
+          style={{ background: balanced ? "var(--ktra-ok, #2d7d46)" : undefined, color: balanced ? "#fff" : undefined }}>
           <Lock className="w-4 h-4" /> إقفال المطابقة
         </button>
       )}
       {current && isClosed && (
-        <button type="button" className="aseel-toolbtn" disabled={busy}
+        <button type="button" className="ktra-toolbtn" disabled={busy}
           onClick={() => void reopenCurrent()}>
           <Unlock className="w-4 h-4" /> إعادة فتح
         </button>
@@ -218,7 +218,7 @@ export const BankReconciliationPage: React.FC = () => {
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="المطابقة البنكية"
         state={current ? `مطابقة #${current.id} — ${isClosed ? "مُقفلة" : "مفتوحة"}` : "لا مطابقة مفتوحة"}
         actions={actions}
@@ -226,37 +226,37 @@ export const BankReconciliationPage: React.FC = () => {
         status={
           current ? (
             <>
-              <span className="aseel-status-item">
-                رصيد الدفاتر <b className="aseel-num">{money(current.book_balance, currencyCode)}</b>
+              <span className="ktra-status-item">
+                رصيد الدفاتر <b className="ktra-num">{money(current.book_balance, currencyCode)}</b>
               </span>
-              <span className="aseel-status-item">
-                المؤشَّر <b className="aseel-num">{money(current.cleared_balance, currencyCode)}</b>
+              <span className="ktra-status-item">
+                المؤشَّر <b className="ktra-num">{money(current.cleared_balance, currencyCode)}</b>
               </span>
-              <span className="aseel-status-item">
-                رصيد الكشف <b className="aseel-num">{money(current.statement_balance, currencyCode)}</b>
+              <span className="ktra-status-item">
+                رصيد الكشف <b className="ktra-num">{money(current.statement_balance, currencyCode)}</b>
               </span>
-              <span className="aseel-status-item"
-                style={{ color: balanced ? "var(--aseel-ok, #27ae60)" : "var(--aseel-err, #c0392b)" }}>
-                {balanced ? "مطابق ✓" : <>الفرق <b className="aseel-num">{money(difference, currencyCode)}</b></>}
+              <span className="ktra-status-item"
+                style={{ color: balanced ? "var(--ktra-ok, #27ae60)" : "var(--ktra-err, #c0392b)" }}>
+                {balanced ? "مطابق ✓" : <>الفرق <b className="ktra-num">{money(difference, currencyCode)}</b></>}
               </span>
-              <span className="aseel-status-item">غير مؤشَّر <b>{current.uncleared_count}</b></span>
+              <span className="ktra-status-item">غير مؤشَّر <b>{current.uncleared_count}</b></span>
             </>
           ) : (
-            <span className="aseel-status-item">اختر حساباً وابدأ مطابقة</span>
+            <span className="ktra-status-item">اختر حساباً وابدأ مطابقة</span>
           )
         }
       >
         <div style={{ padding: "8px 12px" }}>
-          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+          {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
 
           {isClosed && (
-            <div className="aseel-banner" style={{ marginBottom: "8px", background: "var(--aseel-ok-bg, #e3f6e9)", color: "var(--aseel-ok, #2d7d46)" }}>
+            <div className="ktra-banner" style={{ marginBottom: "8px", background: "var(--ktra-ok-bg, #e3f6e9)", color: "var(--ktra-ok, #2d7d46)" }}>
               <CheckCircle className="w-3 h-3" style={{ marginInlineEnd: "6px" }} />
               هذه المطابقة مُقفلة — أعِد فتحها لتعديل أسطرها.
             </div>
           )}
 
-          <AseelDenseTable<BankReconciliationSummaryDto["rows"][number]>
+          <KitDenseTable<BankReconciliationSummaryDto["rows"][number]>
             columns={rowColumns}
             rows={current?.rows || []}
             getRowKey={(r) => r.journal_line_id}
@@ -266,10 +266,10 @@ export const BankReconciliationPage: React.FC = () => {
 
           {list.length > 1 && (
             <div style={{ marginTop: "12px" }}>
-              <div className="aseel-field-label" style={{ marginBottom: "4px" }}>مطابقات سابقة</div>
+              <div className="ktra-field-label" style={{ marginBottom: "4px" }}>مطابقات سابقة</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                 {list.map((r) => (
-                  <button key={r.id} type="button" className="aseel-toolbtn" disabled={busy}
+                  <button key={r.id} type="button" className="ktra-toolbtn" disabled={busy}
                     onClick={() => void openReconciliation(r)}
                     style={{ fontWeight: current?.id === r.id ? 700 : 400 }}>
                     {formatDateValue(r.statement_date)} · {r.status === "Closed" ? "مُقفلة" : "مفتوحة"}
@@ -279,7 +279,7 @@ export const BankReconciliationPage: React.FC = () => {
             </div>
           )}
         </div>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

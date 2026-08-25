@@ -39,8 +39,8 @@ import { formatDateLocalized } from "../../utils/formatDate";
 import { printReport } from "../../utils/printReport";
 import type { AccountNodeLike } from "../../utils/accountTree";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
-import { AseelDocumentShell, AseelReportTable, AseelSidePanel } from "../aseel";
-import type { AseelTab, AseelToolbarAction, ReportColumn } from "../aseel";
+import { KitDocumentShell, KitReportTable, KitSidePanel } from "../kit";
+import type { KitTab, KitToolbarAction, ReportColumn } from "../kit";
 
 type PartnerRow = { id: number; name: string; partner_type?: string };
 type ProductRow = { id: number; sku?: string; name_ar?: string; name_en?: string; name?: string };
@@ -182,13 +182,13 @@ export const ReportRunnerPage: React.FC = () => {
     const value = values[filter.key] ?? "";
     if (filter.kind === "date") {
       return (
-        <input type="date" className="aseel-input" value={value}
+        <input type="date" className="ktra-input" value={value}
           onChange={(e) => setValue(filter.key, e.target.value)} />
       );
     }
     if (PARTNER_KINDS.has(filter.kind)) {
       return (
-        <select className="aseel-input" style={{ minWidth: "170px" }} value={value}
+        <select className="ktra-input" style={{ minWidth: "170px" }} value={value}
           onChange={(e) => setValue(filter.key, e.target.value)}>
           <option value="">الكل</option>
           {partnersFor(filter.kind).map((p) => (
@@ -199,7 +199,7 @@ export const ReportRunnerPage: React.FC = () => {
     }
     if (filter.kind === "product") {
       return (
-        <select className="aseel-input" style={{ minWidth: "200px" }} value={value}
+        <select className="ktra-input" style={{ minWidth: "200px" }} value={value}
           onChange={(e) => setValue(filter.key, e.target.value)}>
           <option value="">الكل</option>
           {products.map((p) => (
@@ -212,7 +212,7 @@ export const ReportRunnerPage: React.FC = () => {
     }
     if (filter.kind === "warehouse") {
       return (
-        <select className="aseel-input" style={{ minWidth: "150px" }} value={value}
+        <select className="ktra-input" style={{ minWidth: "150px" }} value={value}
           onChange={(e) => setValue(filter.key, e.target.value)}>
           <option value="">الكل</option>
           {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
@@ -239,7 +239,7 @@ export const ReportRunnerPage: React.FC = () => {
     }
     if (filter.kind === "select") {
       return (
-        <select className="aseel-input" style={{ minWidth: "150px" }} value={value}
+        <select className="ktra-input" style={{ minWidth: "150px" }} value={value}
           onChange={(e) => setValue(filter.key, e.target.value)}>
           {(filter.options ?? []).map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
@@ -248,7 +248,7 @@ export const ReportRunnerPage: React.FC = () => {
       );
     }
     return (
-      <input type="text" className="aseel-input" value={value}
+      <input type="text" className="ktra-input" value={value}
         onChange={(e) => setValue(filter.key, e.target.value)} />
     );
   };
@@ -298,12 +298,12 @@ export const ReportRunnerPage: React.FC = () => {
       )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
         {filters.map((filter) => (
-          <div className="aseel-field" key={filter.key}>
-            <label className="aseel-field-label">{filter.label}</label>
+          <div className="ktra-field" key={filter.key}>
+            <label className="ktra-field-label">{filter.label}</label>
             {renderFilter(filter)}
           </div>
         ))}
-        <button type="button" className="aseel-toolbtn" style={{ marginTop: "18px" }}
+        <button type="button" className="ktra-toolbtn" style={{ marginTop: "18px" }}
           onClick={() => void run()}>
           <Search className="w-4 h-4" /> تشغيل
         </button>
@@ -535,7 +535,7 @@ export const ReportRunnerPage: React.FC = () => {
   }, [drillResult]);
 
   const drillPanel = (
-    <AseelSidePanel
+    <KitSidePanel
       open={drillRow !== null}
       onClose={closeDrill}
       title={result?.drill?.title || "تفصيل السطر"}
@@ -553,7 +553,7 @@ export const ReportRunnerPage: React.FC = () => {
               .join(" — ")}
           </p>
         )}
-        {drillError && <div className="aseel-banner aseel-banner--err">{drillError}</div>}
+        {drillError && <div className="ktra-banner ktra-banner--err">{drillError}</div>}
         {drillComparison.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
             {drillComparison.map((entry) => (
@@ -577,12 +577,12 @@ export const ReportRunnerPage: React.FC = () => {
           </div>
         )}
         {drillResult?.truncated && (
-          <div className="aseel-banner aseel-banner--warn" style={{ marginBottom: "8px" }}>
+          <div className="ktra-banner ktra-banner--warn" style={{ marginBottom: "8px" }}>
             السطر مكوَّن من {drillResult.total_rows} حركة، ظهر منها{" "}
             {drillResult.rows.length}. المقارنة أعلاه محسوبة على الحركات كلّها.
           </div>
         )}
-        <AseelReportTable<ReportRow>
+        <KitReportTable<ReportRow>
           columns={drillColumns}
           rows={drillResult?.rows ?? []}
           totals={drillTotals}
@@ -591,14 +591,14 @@ export const ReportRunnerPage: React.FC = () => {
           emptyHint="لا حركات خلف هذا السطر"
         />
       </div>
-    </AseelSidePanel>
+    </KitSidePanel>
   );
 
   const content = (
     <>
-      {error && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{error}</div>}
+      {error && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{error}</div>}
       {result?.truncated && (
-        <div className="aseel-banner aseel-banner--warn" style={{ marginBottom: "8px" }}>
+        <div className="ktra-banner ktra-banner--warn" style={{ marginBottom: "8px" }}>
           التقرير أكبر من أن يُعرض كاملاً: ظهر أول {result.rows.length} سطر من{" "}
           {result.total_rows}. الإجماليات أدناه محسوبة على الصفوف كلها — ضيّق الفترة
           لتصفّح الباقي.
@@ -607,7 +607,7 @@ export const ReportRunnerPage: React.FC = () => {
       {result?.description && (
         <p className="mb-2 text-xs text-[var(--color-text-muted)]">{result.description}</p>
       )}
-      <AseelReportTable<ReportRow>
+      <KitReportTable<ReportRow>
         filterBar={filterBar}
         columns={columns}
         rows={result?.rows ?? []}
@@ -623,7 +623,7 @@ export const ReportRunnerPage: React.FC = () => {
     </>
   );
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "back", label: "كل التقارير", icon: <ArrowRight />, onClick: () => navigate("/reports") },
     { key: "run", label: "تشغيل", icon: <Search />, onClick: () => void run() },
     // T-REORDER: أفعالٌ يعلنها التقرير نفسه (`reportActions`) — الشاشة تسأل ولا
@@ -654,32 +654,32 @@ export const ReportRunnerPage: React.FC = () => {
     { key: "print", label: "طباعة / PDF", icon: <Printer />, onClick: print },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "result", label: result?.title || "التقرير", content },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title={result?.title || "تقرير"}
         actions={actions}
         header={<></>}
         tabs={tabs}
         status={
           <>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               {result
                 ? (result.truncated
                     ? `${result.rows.length} من ${result.total_rows} سطر`
                     : `${result.rows.length} سطر`)
                 : "…"}
             </span>
-            <span className="aseel-status-item">{periodLabel}</span>
+            <span className="ktra-status-item">{periodLabel}</span>
           </>
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

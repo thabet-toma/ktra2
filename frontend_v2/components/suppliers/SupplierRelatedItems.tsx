@@ -13,22 +13,22 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
   const [selectedItem, setSelectedItem] = useState<{ item: InvoiceItem, lastPurchaseDate: string, totalQuantity: number, totalSpent: number } | null>(null);
 
   return (
-    <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-sm p-6 space-y-6">
+    <div className="ktra-bg-field dark:ktra-bg-panel rounded-xl shadow-sm p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-4 border-b aseel-border-soft dark:aseel-border-soft pb-4">
-        <button onClick={onBack} className="p-2 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-full transition-colors">
-          <ArrowRight className="w-6 h-6 aseel-text-soft" />
+      <div className="flex items-center gap-4 border-b ktra-border-soft dark:ktra-border-soft pb-4">
+        <button onClick={onBack} className="p-2 hover:ktra-bg-panel dark:hover:ktra-bg-panel rounded-full transition-colors">
+          <ArrowRight className="w-6 h-6 ktra-text-soft" />
         </button>
         <div>
-          <h2 className="text-xl font-bold aseel-text-ink dark:text-white">الأصناف الموردة</h2>
-          <p className="text-sm aseel-text-soft dark:aseel-text-soft">للمورد: {supplier.tradeName}</p>
+          <h2 className="text-xl font-bold ktra-text-ink dark:text-white">الأصناف الموردة</h2>
+          <p className="text-sm ktra-text-soft dark:ktra-text-soft">للمورد: {supplier.tradeName}</p>
         </div>
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto border aseel-border-soft dark:aseel-border-soft rounded-lg">
+      <div className="overflow-x-auto border ktra-border-soft dark:ktra-border-soft rounded-lg">
         <table className="w-full text-right text-sm">
-          <thead className="aseel-bg-panel dark:aseel-bg-panel/50 aseel-text-ink dark:aseel-text-soft border-b aseel-border-soft dark:aseel-border-soft">
+          <thead className="ktra-bg-panel dark:ktra-bg-panel/50 ktra-text-ink dark:ktra-text-soft border-b ktra-border-soft dark:ktra-border-soft">
             <tr>
               <th className="px-6 py-4 w-16">#</th>
               <th className="px-6 py-4">الصورة</th>
@@ -44,21 +44,21 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
               <tr 
                 key={index} 
                 onClick={() => setSelectedItem(row)}
-                className="hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 cursor-pointer transition-colors"
+                className="hover:ktra-bg-panel dark:hover:ktra-bg-panel/30 cursor-pointer transition-colors"
               >
-                <td className="px-6 py-4 aseel-text-soft">{index + 1}</td>
+                <td className="px-6 py-4 ktra-text-soft">{index + 1}</td>
                 <td className="px-6 py-4">
                    {row.item.imageUrls?.[0] ? (
-                     <img src={row.item.imageUrls[0]} alt="" className="w-10 h-10 rounded border aseel-border-soft object-cover" />
+                     <img src={row.item.imageUrls[0]} alt="" className="w-10 h-10 rounded border ktra-border-soft object-cover" />
                    ) : (
-                     <div className="w-10 h-10 rounded aseel-bg-panel flex items-center justify-center aseel-text-soft"><ImageIcon className="w-5 h-5" /></div>
+                     <div className="w-10 h-10 rounded ktra-bg-panel flex items-center justify-center ktra-text-soft"><ImageIcon className="w-5 h-5" /></div>
                    )}
                 </td>
-                <td className="px-6 py-4 font-medium aseel-text-ink dark:text-white">
+                <td className="px-6 py-4 font-medium ktra-text-ink dark:text-white">
                   {row.item.name}
                 </td>
-                <td className="px-6 py-4 aseel-text-soft">
-                  <span className="aseel-bg-panel dark:aseel-bg-panel px-2 py-1 rounded text-xs">
+                <td className="px-6 py-4 ktra-text-soft">
+                  <span className="ktra-bg-panel dark:ktra-bg-panel px-2 py-1 rounded text-xs">
                     {row.item.categoryName || '-'}
                   </span>
                 </td>
@@ -68,7 +68,7 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
                 <td className="px-6 py-4 font-bold text-green-600">
                    {row.totalSpent.toLocaleString()} $
                 </td>
-                <td className="px-6 py-4 aseel-text-soft dir-ltr text-right">
+                <td className="px-6 py-4 ktra-text-soft dir-ltr text-right">
                    {formatDateValue(row.lastPurchaseDate)}
                 </td>
               </tr>
@@ -76,7 +76,7 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
           </tbody>
         </table>
         {data.length === 0 && (
-          <div className="text-center py-12 aseel-text-soft">
+          <div className="text-center py-12 ktra-text-soft">
             <Package className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>لا توجد أصناف مرتبطة بهذا المورد</p>
           </div>
@@ -86,12 +86,12 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
       {/* Item Details Modal */}
       {selectedItem && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4" onClick={() => setSelectedItem(null)}>
-          <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="p-4 border-b aseel-border-soft dark:aseel-border-soft flex justify-between items-center aseel-bg-panel dark:aseel-bg-panel/50">
-              <h3 className="font-bold text-lg aseel-text-ink dark:text-white truncate">
+          <div className="ktra-bg-field dark:ktra-bg-panel rounded-xl shadow-xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b ktra-border-soft dark:ktra-border-soft flex justify-between items-center ktra-bg-panel dark:ktra-bg-panel/50">
+              <h3 className="font-bold text-lg ktra-text-ink dark:text-white truncate">
                 {selectedItem.item.name}
               </h3>
-              <button onClick={() => setSelectedItem(null)}><X className="w-5 h-5 aseel-text-soft" /></button>
+              <button onClick={() => setSelectedItem(null)}><X className="w-5 h-5 ktra-text-soft" /></button>
             </div>
             
             <div className="p-6 space-y-4">
@@ -99,7 +99,7 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
                     {selectedItem.item.imageUrls?.[0] ? (
                         <img src={selectedItem.item.imageUrls[0]} alt="" className="w-32 h-32 rounded-lg object-cover border" />
                     ) : (
-                        <div className="w-32 h-32 rounded-lg aseel-bg-panel flex items-center justify-center"><ImageIcon className="w-12 h-12 aseel-text-soft" /></div>
+                        <div className="w-32 h-32 rounded-lg ktra-bg-panel flex items-center justify-center"><ImageIcon className="w-12 h-12 ktra-text-soft" /></div>
                     )}
                 </div>
 
@@ -112,8 +112,8 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
                 
                 {selectedItem.item.specifications && (
                     <div className="mt-2">
-                        <span className="text-xs aseel-text-soft block mb-1">المواصفات</span>
-                        <p className="text-sm aseel-bg-panel dark:aseel-bg-panel p-2 rounded">{selectedItem.item.specifications}</p>
+                        <span className="text-xs ktra-text-soft block mb-1">المواصفات</span>
+                        <p className="text-sm ktra-bg-panel dark:ktra-bg-panel p-2 rounded">{selectedItem.item.specifications}</p>
                     </div>
                 )}
             </div>
@@ -126,10 +126,10 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
 
 const DetailItem = ({ icon, label, value }: any) => (
   <div>
-    <span className="text-xs aseel-text-soft flex items-center gap-1 mb-1">
+    <span className="text-xs ktra-text-soft flex items-center gap-1 mb-1">
       {React.cloneElement(icon, { className: "w-3 h-3" })} {label}
     </span>
-    <span className="text-sm font-medium aseel-text-ink dark:text-white">
+    <span className="text-sm font-medium ktra-text-ink dark:text-white">
       {value}
     </span>
   </div>

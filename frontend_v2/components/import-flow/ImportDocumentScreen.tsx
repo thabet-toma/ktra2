@@ -9,7 +9,7 @@ import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRo
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
 import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox } from "@/services/localShippingApi";
-import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab, AseelDateInput } from "@/components/aseel";
+import { KitDocumentShell, useRecordNavigation, KitToolbarAction, KitTab, KitDateInput } from "@/components/kit";
 import { effectiveDealTitleForDisplay } from "@/utils/dealTitleDisplay";
 import { getShippingWorkflowLabel } from "@/utils/shippingWorkflowLabels";
 import { CompactTimeline } from "./CompactTimeline";
@@ -41,13 +41,13 @@ const CLEARANCE_LINE_TYPE_LABELS: Record<string, string> = {
 // G6: تحقّق حقلي — عند تمرير `error` يُحاط الحقل بإطار أحمر وتظهر الرسالة أسفله.
 const fld = (label: string, node: React.ReactNode, error?: string | null) => (
   <label
-    className="aseel-field"
-    style={error ? { outline: "1.5px solid var(--aseel-danger, #c0392b)", outlineOffset: 2, borderRadius: 4 } : undefined}
+    className="ktra-field"
+    style={error ? { outline: "1.5px solid var(--ktra-danger, #c0392b)", outlineOffset: 2, borderRadius: 4 } : undefined}
   >
-    <span className="aseel-field-label">{label}</span>
+    <span className="ktra-field-label">{label}</span>
     {node}
     {error ? (
-      <span role="alert" style={{ color: "var(--aseel-danger, #c0392b)", fontSize: "11px", marginTop: 2 }}>{error}</span>
+      <span role="alert" style={{ color: "var(--ktra-danger, #c0392b)", fontSize: "11px", marginTop: 2 }}>{error}</span>
     ) : null}
   </label>
 );
@@ -210,7 +210,7 @@ const ShipmentDealAllocationRow = React.memo(function ShipmentDealAllocationRow(
       <td style={{ padding: "2px 4px" }}>{dealTitle || dealName || "—"}</td>
       <td style={{ padding: "2px 4px", textAlign: "center" }}>
         <input
-          className="aseel-input"
+          className="ktra-input"
           type="number"
           step="0.001"
           min="0"
@@ -223,12 +223,12 @@ const ShipmentDealAllocationRow = React.memo(function ShipmentDealAllocationRow(
           }}
           data-testid={`shipment-deal-cbm-${dealId}`}
           title="حجم الصفقة (CBM) — عبّئه من هنا مباشرة"
-          style={{ width: 62, textAlign: "center", fontWeight: freightUnit === "cbm" ? 700 : 400, ...(freightUnit === "cbm" && missing ? { borderColor: "var(--aseel-danger, #c0392b)", color: "var(--aseel-danger, #c0392b)" } : {}) }}
+          style={{ width: 62, textAlign: "center", fontWeight: freightUnit === "cbm" ? 700 : 400, ...(freightUnit === "cbm" && missing ? { borderColor: "var(--ktra-danger, #c0392b)", color: "var(--ktra-danger, #c0392b)" } : {}) }}
         />
       </td>
       <td style={{ padding: "2px 4px", textAlign: "center" }}>
         <input
-          className="aseel-input"
+          className="ktra-input"
           type="number"
           step="0.001"
           min="0"
@@ -241,13 +241,13 @@ const ShipmentDealAllocationRow = React.memo(function ShipmentDealAllocationRow(
           }}
           data-testid={`shipment-deal-kg-${dealId}`}
           title="وزن الصفقة (KG) — عبّئه من هنا مباشرة"
-          style={{ width: 62, textAlign: "center", fontWeight: freightUnit === "kg" ? 700 : 400, ...(freightUnit === "kg" && missing ? { borderColor: "var(--aseel-danger, #c0392b)", color: "var(--aseel-danger, #c0392b)" } : {}) }}
+          style={{ width: 62, textAlign: "center", fontWeight: freightUnit === "kg" ? 700 : 400, ...(freightUnit === "kg" && missing ? { borderColor: "var(--ktra-danger, #c0392b)", color: "var(--ktra-danger, #c0392b)" } : {}) }}
         />
       </td>
       <td style={{ padding: "2px 4px", textAlign: "center" }}>
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           onClick={() => openInNewTab(`/deals/${dealId}`)}
           disabled={rowDisabled}
           title="فتح الصفقة وتعديل منتجاتها وقيمها"
@@ -257,7 +257,7 @@ const ShipmentDealAllocationRow = React.memo(function ShipmentDealAllocationRow(
       </td>
       <td style={{ padding: "2px 4px", textAlign: "center" }}>
         <input
-          className="aseel-input"
+          className="ktra-input"
           type="number"
           step="0.01"
           value={allocationDraft}
@@ -274,10 +274,10 @@ const ShipmentDealAllocationRow = React.memo(function ShipmentDealAllocationRow(
       <td style={{ padding: "2px 4px", textAlign: "center" }}>
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           onClick={() => onUnlink(dealId)}
           disabled={rowDisabled}
-          style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }}
+          style={{ color: "var(--ktra-danger, #c0392b)", padding: "0 4px" }}
           title="فك ربط الصفقة من الشحنة"
         >
           ✕
@@ -1345,7 +1345,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   // ── Early returns AFTER all hooks ──
   if (loading) {
-    return <div className="p-8 text-center aseel-text-soft">جاري تحميل الشحنة…</div>;
+    return <div className="p-8 text-center ktra-text-soft">جاري تحميل الشحنة…</div>;
   }
   if (error && !shipmentForm) {
     return (
@@ -1363,7 +1363,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   }
   if (!shipmentId) {
     return (
-      <div className="p-8 text-center aseel-text-soft">
+      <div className="p-8 text-center ktra-text-soft">
         <p>لم يتم اختيار شحنة.</p>
         <p style={{ marginTop: 8 }}>افتح صفحة «الشحنات» واختر سجلاً لفتحه هنا.</p>
       </div>
@@ -1371,7 +1371,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   }
   const s = shipment || shipmentForm;
   if (!s || !shipmentForm) {
-    return <div className="p-8 text-center aseel-text-soft">لم يتم العثور على الشحنة</div>;
+    return <div className="p-8 text-center ktra-text-soft">لم يتم العثور على الشحنة</div>;
   }
 
   // ── Render ──
@@ -1451,30 +1451,30 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const totals = (
     <>
-      <div className="aseel-total-row"><span>تكلفة الشحن</span><span className="aseel-total-value">{fmt(s.total_shipping_cost_usd)}</span></div>
-      <div className="aseel-total-row"><span>المجموع بدون ضريبة</span><span className="aseel-total-value">{fmt(s.subtotal)}</span></div>
-      <div className="aseel-total-row"><span>مجموع الضريبة</span><span className="aseel-total-value">{fmt(s.vat_total)}</span></div>
-      <div className="aseel-total-row aseel-total-row--grand"><span>الإجمالي</span><span className="aseel-total-value">{fmt(s.grand_total)}</span></div>
-      <div className="aseel-total-row"><span>المدفوع</span><span className="aseel-total-value">{shipmentPaid != null ? fmt(shipmentPaid) : "—"}</span></div>
-      <div className="aseel-total-row"><span>المتبقي</span><span className="aseel-total-value">{fmt(s.remaining_amount)}</span></div>
-      <hr style={{ margin: "4px 0", border: "none", borderTop: "1px solid var(--aseel-border, #ddd)" }} />
-      <div className="aseel-total-row"><span>{clearance ? `تكلفة التخليص #${clearance.id}` : "تكلفة التخليص"}</span><span className="aseel-total-value">{clearance ? fmt(clearanceCostTotal) : "—"}</span></div>
-      {clearance && <div className="aseel-total-row"><span>مدفوع تخليص</span><span className="aseel-total-value">{fmt(paidClearance)}</span></div>}
-      {clearance && <div className="aseel-total-row"><span>متبقي تخليص</span><span className="aseel-total-value">{fmt(clearanceRemaining)}</span></div>}
-      {clearance && <div className="aseel-total-row"><span>مدفوع شحن</span><span className="aseel-total-value">{fmt(paidShipping)}</span></div>}
+      <div className="ktra-total-row"><span>تكلفة الشحن</span><span className="ktra-total-value">{fmt(s.total_shipping_cost_usd)}</span></div>
+      <div className="ktra-total-row"><span>المجموع بدون ضريبة</span><span className="ktra-total-value">{fmt(s.subtotal)}</span></div>
+      <div className="ktra-total-row"><span>مجموع الضريبة</span><span className="ktra-total-value">{fmt(s.vat_total)}</span></div>
+      <div className="ktra-total-row ktra-total-row--grand"><span>الإجمالي</span><span className="ktra-total-value">{fmt(s.grand_total)}</span></div>
+      <div className="ktra-total-row"><span>المدفوع</span><span className="ktra-total-value">{shipmentPaid != null ? fmt(shipmentPaid) : "—"}</span></div>
+      <div className="ktra-total-row"><span>المتبقي</span><span className="ktra-total-value">{fmt(s.remaining_amount)}</span></div>
+      <hr style={{ margin: "4px 0", border: "none", borderTop: "1px solid var(--ktra-border, #ddd)" }} />
+      <div className="ktra-total-row"><span>{clearance ? `تكلفة التخليص #${clearance.id}` : "تكلفة التخليص"}</span><span className="ktra-total-value">{clearance ? fmt(clearanceCostTotal) : "—"}</span></div>
+      {clearance && <div className="ktra-total-row"><span>مدفوع تخليص</span><span className="ktra-total-value">{fmt(paidClearance)}</span></div>}
+      {clearance && <div className="ktra-total-row"><span>متبقي تخليص</span><span className="ktra-total-value">{fmt(clearanceRemaining)}</span></div>}
+      {clearance && <div className="ktra-total-row"><span>مدفوع شحن</span><span className="ktra-total-value">{fmt(paidShipping)}</span></div>}
       {localShipments.map((ls) => (
-        <div className="aseel-total-row" key={ls.id}><span>نقل محلي #{ls.shipment_number} · متبقي</span><span className="aseel-total-value">{fmt(ls.remaining_balance ?? ls.amount)}</span></div>
+        <div className="ktra-total-row" key={ls.id}><span>نقل محلي #{ls.shipment_number} · متبقي</span><span className="ktra-total-value">{fmt(ls.remaining_balance ?? ls.amount)}</span></div>
       ))}
     </>
   );
 
   const statusBar = (
     <>
-      <span className="aseel-status-item">الحالة <b>{s.shipping_workflow_status || "—"}</b></span>
-      {s.transit_journal && <span className="aseel-status-item">رقم القيد <b>#{s.transit_journal}</b></span>}
-      <span className="aseel-status-item">رقم الشحنة <b>{s.shipment_number || "—"}</b></span>
-      {isShipmentDirty && <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b45309)" }}>● غير محفوظ</span>}
-      <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+      <span className="ktra-status-item">الحالة <b>{s.shipping_workflow_status || "—"}</b></span>
+      {s.transit_journal && <span className="ktra-status-item">رقم القيد <b>#{s.transit_journal}</b></span>}
+      <span className="ktra-status-item">رقم الشحنة <b>{s.shipment_number || "—"}</b></span>
+      {isShipmentDirty && <span className="ktra-status-item" style={{ color: "var(--ktra-warn, #b45309)" }}>● غير محفوظ</span>}
+      <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
     </>
   );
 
@@ -1482,15 +1482,15 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const headerBand = (
     <div className="grid w-full grid-cols-1 gap-x-2 gap-y-1 py-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-      {fld("رقم الشحنة", <input className="aseel-input" readOnly value={shipmentForm.shipment_number || (shipmentForm.id ? `#${shipmentForm.id}` : "— جديدة —")} />)}
-      {fld("تاريخ", <AseelDateInput value={shipmentForm.shipment_date ? String(shipmentForm.shipment_date).slice(0, 10) : ""} onChange={(v) => setSF({ shipment_date: v })} />, fieldErrors.shipment_date)}
+      {fld("رقم الشحنة", <input className="ktra-input" readOnly value={shipmentForm.shipment_number || (shipmentForm.id ? `#${shipmentForm.id}` : "— جديدة —")} />)}
+      {fld("تاريخ", <KitDateInput value={shipmentForm.shipment_date ? String(shipmentForm.shipment_date).slice(0, 10) : ""} onChange={(v) => setSF({ shipment_date: v })} />, fieldErrors.shipment_date)}
       {showAdvancedShipment && <>
-        {fld("الساعة", <input className="aseel-input" type="time" value={shipmentForm.transaction_time ? String(shipmentForm.transaction_time).slice(0, 5) : ""} onChange={sfText("transaction_time")} />)}
-        {fld("تاريخ ثاني", <AseelDateInput value={shipmentForm.second_date ? String(shipmentForm.second_date).slice(0, 10) : ""} onChange={(v) => setSF({ second_date: v })} />)}
+        {fld("الساعة", <input className="ktra-input" type="time" value={shipmentForm.transaction_time ? String(shipmentForm.transaction_time).slice(0, 5) : ""} onChange={sfText("transaction_time")} />)}
+        {fld("تاريخ ثاني", <KitDateInput value={shipmentForm.second_date ? String(shipmentForm.second_date).slice(0, 10) : ""} onChange={(v) => setSF({ second_date: v })} />)}
       </>}
       {fld("وكيل الشحن", <span style={{ display: "flex", gap: 2 }}>
         <select
-          className="aseel-input"
+          className="ktra-input"
           value={shipmentForm.shipping_agent ?? ""}
           onChange={(e) => {
             const v = e.target.value ? Number(e.target.value) : null;
@@ -1509,33 +1509,33 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               </option>
             )}
         </select>
-        <button type="button" className="aseel-ellipsis" title="إضافة وكيل شحن جديد" onClick={() => { setQuickAddType("FreightForwarder"); setQuickAddName(""); }}>+</button>
+        <button type="button" className="ktra-ellipsis" title="إضافة وكيل شحن جديد" onClick={() => { setQuickAddType("FreightForwarder"); setQuickAddName(""); }}>+</button>
       </span>, fieldErrors.shipping_agent)}
       {showAdvancedShipment && <>
-        {fld("اسم الوكيل", <input className="aseel-input" readOnly value={shipmentForm.agent_name || "—"} />)}
-        {fld("نوع الشحنة", <select className="aseel-input" value={shipmentForm.shipment_type || "invoice"} onChange={sfText("shipment_type")}>
+        {fld("اسم الوكيل", <input className="ktra-input" readOnly value={shipmentForm.agent_name || "—"} />)}
+        {fld("نوع الشحنة", <select className="ktra-input" value={shipmentForm.shipment_type || "invoice"} onChange={sfText("shipment_type")}>
           <option value="invoice">فاتورة (تتحول لفاتورة شراء)</option>
           <option value="transport">نقل فقط</option>
         </select>)}
       </>}
-      {fld("نوع الشحن", <select className="aseel-input" value={shipmentForm.shipping_type || ""} onChange={sfText("shipping_type")}>
+      {fld("نوع الشحن", <select className="ktra-input" value={shipmentForm.shipping_type || ""} onChange={sfText("shipping_type")}>
         <option value="">—</option>
         <option value="sea">بحري</option>
         <option value="air">جوي</option>
         <option value="land">بري</option>
       </select>, fieldErrors.shipping_type)}
-      {fld("رقم البوليصة", <input className="aseel-input" value={shipmentForm.bill_of_lading || ""} onChange={sfText("bill_of_lading")} />, fieldErrors.bill_of_lading)}
-      {fld("رقم الحاوية", <input className="aseel-input" value={shipmentForm.container_number || ""} onChange={sfText("container_number")} />, fieldErrors.container_number)}
-      {fld("المغادرة", <AseelDateInput value={shipmentForm.departure_date ? String(shipmentForm.departure_date).slice(0, 10) : ""} onChange={(v) => setSF({ departure_date: v })} />, fieldErrors.departure_date)}
-      {fld("الوصول", <AseelDateInput value={shipmentForm.arrival_date ? String(shipmentForm.arrival_date).slice(0, 10) : ""} onChange={(v) => setSF({ arrival_date: v })} />, fieldErrors.arrival_date)}
+      {fld("رقم البوليصة", <input className="ktra-input" value={shipmentForm.bill_of_lading || ""} onChange={sfText("bill_of_lading")} />, fieldErrors.bill_of_lading)}
+      {fld("رقم الحاوية", <input className="ktra-input" value={shipmentForm.container_number || ""} onChange={sfText("container_number")} />, fieldErrors.container_number)}
+      {fld("المغادرة", <KitDateInput value={shipmentForm.departure_date ? String(shipmentForm.departure_date).slice(0, 10) : ""} onChange={(v) => setSF({ departure_date: v })} />, fieldErrors.departure_date)}
+      {fld("الوصول", <KitDateInput value={shipmentForm.arrival_date ? String(shipmentForm.arrival_date).slice(0, 10) : ""} onChange={(v) => setSF({ arrival_date: v })} />, fieldErrors.arrival_date)}
       {showAdvancedShipment && <>
-        {fld("السفينة / الرحلة", <input className="aseel-input" value={shipmentForm.ship_name || shipmentForm.flight_number || ""} onChange={(e) => setSF({ ship_name: e.target.value, flight_number: e.target.value })} />)}
-        {fld("رقم الحركة", <input className="aseel-input" value={shipmentForm.agent_shipment_number || ""} onChange={sfText("agent_shipment_number")} />)}
-        {fld("رقم الفاتورة", <input className="aseel-input" readOnly value={shipmentForm.invoice_number || "—"} />)}
-        {fld("الحجم / الوزن", <input className="aseel-input" readOnly value={`${fmt(shipmentForm.total_volume)} / ${fmt(shipmentForm.total_weight_kg)}`} />)}
+        {fld("السفينة / الرحلة", <input className="ktra-input" value={shipmentForm.ship_name || shipmentForm.flight_number || ""} onChange={(e) => setSF({ ship_name: e.target.value, flight_number: e.target.value })} />)}
+        {fld("رقم الحركة", <input className="ktra-input" value={shipmentForm.agent_shipment_number || ""} onChange={sfText("agent_shipment_number")} />)}
+        {fld("رقم الفاتورة", <input className="ktra-input" readOnly value={shipmentForm.invoice_number || "—"} />)}
+        {fld("الحجم / الوزن", <input className="ktra-input" readOnly value={`${fmt(shipmentForm.total_volume)} / ${fmt(shipmentForm.total_weight_kg)}`} />)}
         {fld("المخلِّص", <span style={{ display: "flex", gap: 2 }}>
         <select
-          className="aseel-input"
+          className="ktra-input"
           value={clearanceForm?.customs_broker ?? ""}
           onChange={(e) => {
             const val = e.target.value;
@@ -1561,16 +1561,16 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               </option>
             )}
         </select>
-        <button type="button" className="aseel-ellipsis" title="إضافة مخلِّص جمركي جديد" disabled={!clearanceForm} onClick={() => { setQuickAddType("CustomsBroker"); setQuickAddName(""); }}>+</button>
+        <button type="button" className="ktra-ellipsis" title="إضافة مخلِّص جمركي جديد" disabled={!clearanceForm} onClick={() => { setQuickAddType("CustomsBroker"); setQuickAddName(""); }}>+</button>
         </span>)}
-        {fld("رقم البيان", <input className="aseel-input" readOnly value={clearance?.declaration_number || "—"} />)}
-        {fld("تاريخ التخليص", <input className="aseel-input" type="date" readOnly value={clearance?.clearance_date ? String(clearance.clearance_date).slice(0, 10) : ""} />)}
-        {fld("فاتورة المقاصة", <input className="aseel-input" readOnly value={clearance?.settlement_invoice_number || "—"} />)}
-        {fld("كشف الضريبة", <input className="aseel-input" readOnly value={clearance?.vat_statement != null ? String(clearance.vat_statement) : "—"} />)}
-        {fld("محرَّر", <input className="aseel-input" readOnly value={shipmentForm.editable ? "نعم" : "لا"} />)}
+        {fld("رقم البيان", <input className="ktra-input" readOnly value={clearance?.declaration_number || "—"} />)}
+        {fld("تاريخ التخليص", <input className="ktra-input" type="date" readOnly value={clearance?.clearance_date ? String(clearance.clearance_date).slice(0, 10) : ""} />)}
+        {fld("فاتورة المقاصة", <input className="ktra-input" readOnly value={clearance?.settlement_invoice_number || "—"} />)}
+        {fld("كشف الضريبة", <input className="ktra-input" readOnly value={clearance?.vat_statement != null ? String(clearance.vat_statement) : "—"} />)}
+        {fld("محرَّر", <input className="ktra-input" readOnly value={shipmentForm.editable ? "نعم" : "لا"} />)}
       </>}
       <div className="col-span-full flex justify-end">
-        <button type="button" className="aseel-toolbtn" onClick={() => setShowAdvancedShipment((value) => !value)}>
+        <button type="button" className="ktra-toolbtn" onClick={() => setShowAdvancedShipment((value) => !value)}>
           {showAdvancedShipment ? "إخفاء تفاصيل الشحنة" : "إظهار تفاصيل الشحنة المتقدمة"}
         </button>
       </div>
@@ -1580,37 +1580,37 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const dealsContent = (
     <div style={{ padding: "4px 8px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>صفقات هذه الشحنة ({shipmentDeals.length})</h4>
+        <h4 style={{ fontSize: "var(--ktra-fs-sm, 12px)", fontWeight: 600 }}>صفقات هذه الشحنة ({shipmentDeals.length})</h4>
         <span style={{ display: "inline-flex", gap: 4 }}>
-          <button type="button" className="aseel-toolbtn" onClick={() => void handleRedistributeAllocations()} disabled={!shipment || saving || shipmentDeals.length === 0} title="توزيع تكلفة الشحن الدولي على الصفقات حسب الحجم/الوزن">⟳ إعادة توزيع الحصص</button>
-          <button type="button" className="aseel-toolbtn" onClick={() => void openLinkPicker()} disabled={!shipment || saving}>+ ضمّ صفقة</button>
+          <button type="button" className="ktra-toolbtn" onClick={() => void handleRedistributeAllocations()} disabled={!shipment || saving || shipmentDeals.length === 0} title="توزيع تكلفة الشحن الدولي على الصفقات حسب الحجم/الوزن">⟳ إعادة توزيع الحصص</button>
+          <button type="button" className="ktra-toolbtn" onClick={() => void openLinkPicker()} disabled={!shipment || saving}>+ ضمّ صفقة</button>
         </span>
       </div>
-      <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", margin: "0 0 4px" }}>
+      <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm, 12px)", margin: "0 0 4px" }}>
         كل صف = صفقة شراء مضمومة لهذه الشحنة. «حصة الشحن» = نصيب الصفقة من تكلفة الشحن
         الدولي (يتوزع حسب الوحدة المختارة تلقائياً — عدّله يدوياً أو اضغط «إعادة توزيع الحصص»).
       </p>
       {/* M2: أساس تسعير الشحن — CBM أو KG (اختيار يدوي)؛ التبديل يعيد الحساب كاملاً بلا بقايا */}
       {shipment && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "4px 6px", marginBottom: 4, background: "var(--aseel-bg-strip, #f5f5f5)", borderRadius: 6, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "4px 6px", marginBottom: 4, background: "var(--ktra-bg-strip, #f5f5f5)", borderRadius: 6, fontSize: "var(--ktra-fs-sm, 12px)" }}>
           <b>أساس الشحن:</b>
-          <span style={{ display: "inline-flex", border: "1px solid var(--aseel-border)", borderRadius: 6, overflow: "hidden" }}>
+          <span style={{ display: "inline-flex", border: "1px solid var(--ktra-border)", borderRadius: 6, overflow: "hidden" }}>
             {(["cbm", "kg"] as const).map((u) => (
-              <button key={u} type="button" className="aseel-toolbtn"
+              <button key={u} type="button" className="ktra-toolbtn"
                 onClick={() => { setFreightUnit(u); void handleSetFreight(u, freightRate); }}
                 disabled={saving}
-                style={{ borderRadius: 0, padding: "2px 12px", background: freightUnit === u ? "var(--aseel-accent, #1857a4)" : "transparent", color: freightUnit === u ? "#fff" : "var(--aseel-ink)" }}>
+                style={{ borderRadius: 0, padding: "2px 12px", background: freightUnit === u ? "var(--ktra-accent, #1857a4)" : "transparent", color: freightUnit === u ? "#fff" : "var(--ktra-ink)" }}>
                 {u.toUpperCase()}
               </button>
             ))}
           </span>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             سعر/{freightUnit.toUpperCase()}:
-            <input className="aseel-input" type="number" step="0.0001" min="0" style={{ width: 90 }}
+            <input className="ktra-input" type="number" step="0.0001" min="0" style={{ width: 90 }}
               value={freightRate} onChange={(e) => setFreightRate(e.target.value)}
               onBlur={() => void handleSetFreight(freightUnit, freightRate)} disabled={saving} />
           </label>
-          <span className="aseel-text-soft">
+          <span className="ktra-text-soft">
             الإجمالي = السعر × مجموع {freightUnit.toUpperCase()} ={" "}
             <b>{fmt(shipmentForm?.total_shipping_cost_usd)}</b> USD
           </span>
@@ -1618,7 +1618,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       )}
       {/* تحذير واضح: صفقات بلا حجم/وزن → الشحن ما بيتوزّع حتى تُعبّأ */}
       {shipment && missingMeasureRefs.length > 0 && (
-        <div style={{ padding: "6px 10px", marginBottom: 4, borderRadius: 6, fontSize: "var(--aseel-fs-sm, 12px)", background: "var(--aseel-warn-bg, #fdf3e3)", color: "var(--aseel-warn, #8a5a00)", border: "1px solid var(--aseel-warn, #d9a441)" }}>
+        <div style={{ padding: "6px 10px", marginBottom: 4, borderRadius: 6, fontSize: "var(--ktra-fs-sm, 12px)", background: "var(--ktra-warn-bg, #fdf3e3)", color: "var(--ktra-warn, #8a5a00)", border: "1px solid var(--ktra-warn, #d9a441)" }}>
           ⚠ صفقات بلا {freightUnit === "kg" ? "وزن (KG)" : "حجم (CBM)"}: <b>{missingMeasureRefs.join("، ")}</b>.
           {" "}عبّئ القيمة مباشرة في عمود {freightUnit === "kg" ? "KG" : "CBM"} بالجدول أدناه — يُحفظ في الصفقة
           ويُعاد توزيع الشحن تلقائياً بمجرّد اكتمال كل الصفقات.
@@ -1628,7 +1628,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)" }}>
           <div style={{ background: "#fff", borderRadius: 8, padding: 16, maxWidth: 500, width: "90%", maxHeight: "70vh", overflowY: "auto" }}>
             <h4 style={{ fontWeight: 600, marginBottom: 8 }}>اختر صفقة للربط</h4>
-            {availableDeals.length === 0 && <p className="aseel-text-soft">لا توجد صفقات متاحة</p>}
+            {availableDeals.length === 0 && <p className="ktra-text-soft">لا توجد صفقات متاحة</p>}
             {availableDeals.map((d) => {
               const title = effectiveDealTitleForDisplay({
                 description: d.description,
@@ -1645,30 +1645,30 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                   onClick={() => void handleLinkDeal(d.id)}>
                   <span style={{ minWidth: 0 }}>
                     <span style={{ display: "block", fontWeight: 600 }}>{title}</span>
-                    <span className="aseel-text-soft" style={{ fontSize: 11, fontFamily: "monospace" }}>
+                    <span className="ktra-text-soft" style={{ fontSize: 11, fontFamily: "monospace" }}>
                       {d.ref_number || d.deal_number || `#${d.id}`}
                       {d.partner_name ? ` · ${d.partner_name}` : ""}
                     </span>
                     {ready ? (
-                      <span style={{ marginInlineStart: 6, fontSize: 10, fontWeight: 700, color: "var(--aseel-ok, #267346)", border: "1px solid var(--aseel-ok, #267346)", borderRadius: 8, padding: "0 6px" }}>
+                      <span style={{ marginInlineStart: 6, fontSize: 10, fontWeight: 700, color: "var(--ktra-ok, #267346)", border: "1px solid var(--ktra-ok, #267346)", borderRadius: 8, padding: "0 6px" }}>
                         جاهزة للشحن
                       </span>
                     ) : stageLabel ? (
-                      <span className="aseel-text-soft" style={{ marginInlineStart: 6, fontSize: 10 }}>{stageLabel}</span>
+                      <span className="ktra-text-soft" style={{ marginInlineStart: 6, fontSize: 10 }}>{stageLabel}</span>
                     ) : null}
                   </span>
-                  <span className="aseel-toolbtn" style={{ flexShrink: 0 }}>ربط</span>
+                  <span className="ktra-toolbtn" style={{ flexShrink: 0 }}>ربط</span>
                 </div>
               );
             })}
             <div style={{ marginTop: 8, textAlign: "center" }}>
-              <button type="button" className="aseel-toolbtn" onClick={() => setLinkPickerOpen(false)}>إلغاء</button>
+              <button type="button" className="ktra-toolbtn" onClick={() => setLinkPickerOpen(false)}>إلغاء</button>
             </div>
           </div>
         </div>
       )}
-      <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)" }}>
-        <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
+      <table className="ktra-input" style={{ width: "100%", fontSize: "var(--ktra-fs-sm, 12px)" }}>
+        <thead><tr style={{ background: "var(--ktra-bg-strip, #f5f5f5)", fontWeight: 600 }}>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>رقم الصفقة</th>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>الاسم</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 70 }}>CBM</th>
@@ -1702,7 +1702,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </tbody>
       </table>
       {shipmentDeals.length > 0 && (
-        <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", padding: "4px 0" }}>
+        <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm, 12px)", padding: "4px 0" }}>
           مجموع الحصص: <b>{fmt(shipmentDeals.reduce((sum, d) => sum + Number(d.allocated_shipping_cost ?? 0), 0))}</b> USD
           {shipmentForm.total_shipping_cost_usd != null && (
             <> · إجمالي الشحن: <b>{fmt(shipmentForm.total_shipping_cost_usd)}</b></>
@@ -1723,17 +1723,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {!clearanceForm.journal ? (
-          <button type="button" className="aseel-toolbtn" onClick={() => void handlePostClearance()} disabled={saving || clearanceCostTotal <= 0}>
+          <button type="button" className="ktra-toolbtn" onClick={() => void handlePostClearance()} disabled={saving || clearanceCostTotal <= 0}>
             إثبات استحقاق التخليص
           </button>
         ) : (
           <>
             <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">الاستحقاق مرحّل · قيد #{clearanceForm.journal}</span>
-            <button type="button" className="aseel-toolbtn" onClick={() => void handleUnpostClearanceAccrual()} disabled={saving}>تراجع عن الاستحقاق</button>
+            <button type="button" className="ktra-toolbtn" onClick={() => void handleUnpostClearanceAccrual()} disabled={saving}>تراجع عن الاستحقاق</button>
           </>
         )}
         <button
-          type="button" className="aseel-toolbtn" onClick={openClearancePayment}
+          type="button" className="ktra-toolbtn" onClick={openClearancePayment}
           disabled={saving || !clearanceForm.customs_broker}
           title="دفع للمخلّص من الصندوق بقيد مستقل — يجوز تجاوز المتبقي (يصير دفعة مقدمة)"
         >
@@ -1745,12 +1745,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             : "الاستحقاق يُثبَّت تلقائياً عند ترحيل الشحنة إلى فاتورة — أو أثبِته الآن يدوياً."}
         </span>
       </div>
-      <div className="aseel-headband" style={{ marginBottom: 4 }}>
-        {fld("رقم البيان", <input className="aseel-input" value={clearanceForm.declaration_number || ""} onChange={cfText("declaration_number")} />)}
-        {fld("تاريخ التخليص", <input className="aseel-input" type="date" value={clearanceForm.clearance_date ? String(clearanceForm.clearance_date).slice(0, 10) : ""} onChange={cfText("clearance_date")} />)}
+      <div className="ktra-headband" style={{ marginBottom: 4 }}>
+        {fld("رقم البيان", <input className="ktra-input" value={clearanceForm.declaration_number || ""} onChange={cfText("declaration_number")} />)}
+        {fld("تاريخ التخليص", <input className="ktra-input" type="date" value={clearanceForm.clearance_date ? String(clearanceForm.clearance_date).slice(0, 10) : ""} onChange={cfText("clearance_date")} />)}
         {fld("المخلِّص", <span style={{ display: "flex", gap: 2 }}>
           <select
-            className="aseel-input"
+            className="ktra-input"
             value={clearanceForm.customs_broker ?? ""}
             onChange={(e) => {
               const val = e.target.value;
@@ -1772,32 +1772,32 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 </option>
               )}
           </select>
-          <button type="button" className="aseel-ellipsis" title="إضافة مخلِّص جمركي جديد" onClick={() => { setQuickAddType("CustomsBroker"); setQuickAddName(""); }}>+</button>
+          <button type="button" className="ktra-ellipsis" title="إضافة مخلِّص جمركي جديد" onClick={() => { setQuickAddType("CustomsBroker"); setQuickAddName(""); }}>+</button>
         </span>)}
         {showAdvancedClearance && <>
-          {fld("الوقت", <input className="aseel-input" type="time" value={clearanceForm.transaction_time ? String(clearanceForm.transaction_time).slice(0, 5) : ""} onChange={cfText("transaction_time")} />)}
-          {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={clearanceForm.second_date ? String(clearanceForm.second_date).slice(0, 10) : ""} onChange={cfText("second_date")} />)}
-          {fld("مشتغل مرخص", <input className="aseel-input" value={clearanceForm.licensed_dealer_no || ""} onChange={cfText("licensed_dealer_no")} />)}
-          {fld("رقم فاتورة المقاصة", <input className="aseel-input" value={clearanceForm.settlement_invoice_number || ""} onChange={cfText("settlement_invoice_number")} />)}
-          {fld("العملة", <input className="aseel-input" value={clearanceForm.currency != null ? String(clearanceForm.currency) : ""} onChange={(e) => setCF({ currency: e.target.value ? Number(e.target.value) : null })} />)}
-          {fld("سعر العملة", <input className="aseel-input" type="number" step="0.000001" value={clearanceForm.exchange_rate != null ? String(clearanceForm.exchange_rate) : ""} onChange={(e) => setCF({ exchange_rate: e.target.value ? Number(e.target.value) : null })} />)}
-          {fld("مجموع بدون ضريبة", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.subtotal_no_vat != null ? String(clearanceForm.subtotal_no_vat) : ""} onChange={(e) => setCF({ subtotal_no_vat: e.target.value ? Number(e.target.value) : null })} />)}
-          {fld("مجموع الضريبة", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.vat_total != null ? String(clearanceForm.vat_total) : ""} onChange={(e) => setCF({ vat_total: e.target.value ? Number(e.target.value) : null })} />)}
-          {fld("الإجمالي", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.grand_total != null ? String(clearanceForm.grand_total) : ""} onChange={(e) => setCF({ grand_total: e.target.value ? Number(e.target.value) : null })} />)}
+          {fld("الوقت", <input className="ktra-input" type="time" value={clearanceForm.transaction_time ? String(clearanceForm.transaction_time).slice(0, 5) : ""} onChange={cfText("transaction_time")} />)}
+          {fld("تاريخ ثاني", <input className="ktra-input" type="date" value={clearanceForm.second_date ? String(clearanceForm.second_date).slice(0, 10) : ""} onChange={cfText("second_date")} />)}
+          {fld("مشتغل مرخص", <input className="ktra-input" value={clearanceForm.licensed_dealer_no || ""} onChange={cfText("licensed_dealer_no")} />)}
+          {fld("رقم فاتورة المقاصة", <input className="ktra-input" value={clearanceForm.settlement_invoice_number || ""} onChange={cfText("settlement_invoice_number")} />)}
+          {fld("العملة", <input className="ktra-input" value={clearanceForm.currency != null ? String(clearanceForm.currency) : ""} onChange={(e) => setCF({ currency: e.target.value ? Number(e.target.value) : null })} />)}
+          {fld("سعر العملة", <input className="ktra-input" type="number" step="0.000001" value={clearanceForm.exchange_rate != null ? String(clearanceForm.exchange_rate) : ""} onChange={(e) => setCF({ exchange_rate: e.target.value ? Number(e.target.value) : null })} />)}
+          {fld("مجموع بدون ضريبة", <input className="ktra-input" type="number" step="0.01" value={clearanceForm.subtotal_no_vat != null ? String(clearanceForm.subtotal_no_vat) : ""} onChange={(e) => setCF({ subtotal_no_vat: e.target.value ? Number(e.target.value) : null })} />)}
+          {fld("مجموع الضريبة", <input className="ktra-input" type="number" step="0.01" value={clearanceForm.vat_total != null ? String(clearanceForm.vat_total) : ""} onChange={(e) => setCF({ vat_total: e.target.value ? Number(e.target.value) : null })} />)}
+          {fld("الإجمالي", <input className="ktra-input" type="number" step="0.01" value={clearanceForm.grand_total != null ? String(clearanceForm.grand_total) : ""} onChange={(e) => setCF({ grand_total: e.target.value ? Number(e.target.value) : null })} />)}
         </>}
       </div>
       <div className="mb-2 flex justify-end">
-        <button type="button" className="aseel-toolbtn" onClick={() => setShowAdvancedClearance((value) => !value)}>
+        <button type="button" className="ktra-toolbtn" onClick={() => setShowAdvancedClearance((value) => !value)}>
           {showAdvancedClearance ? "إخفاء تفاصيل البيان" : "إظهار تفاصيل البيان المتقدمة"}
         </button>
       </div>
       {/* تسجيل سريع: إجمالي واحد بدون بنود مفصّلة — يُخزَّن كبند وحيد كي يدخل في
           توزيع التكلفة (حقل «الإجمالي» أعلاه للعرض ولا يُوزَّع على الفواتير) */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "0 0 8px", padding: "6px 8px", border: "1px dashed var(--aseel-border, #bbb)", borderRadius: 6, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "0 0 8px", padding: "6px 8px", border: "1px dashed var(--ktra-border, #bbb)", borderRadius: 6, fontSize: "var(--ktra-fs-sm, 12px)" }}>
         <b>تسجيل سريع:</b>
         <span>عندك إجمالي واحد بدون تفاصيل؟</span>
         <input
-          className="aseel-input"
+          className="ktra-input"
           type="number"
           step="0.01"
           placeholder="تكلفة التخليص الإجمالية ₪"
@@ -1807,13 +1807,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         />
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           onClick={() => void applyQuickClearanceTotal()}
           disabled={saving || !quickClearanceTotal || Number(quickClearanceTotal) <= 0}
         >
           اعتماد وحفظ
         </button>
-        <span className="aseel-text-soft">
+        <span className="ktra-text-soft">
           يُسجَّل كبند واحد «تكلفة التخليص (إجمالي)» — أو فصّل بالبنود أدناه.
         </span>
       </div>
@@ -1825,13 +1825,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             ? `${clearanceForm.lines.length} بند تفصيلي · المجموع ${fmt(clearanceCostTotal)} ₪`
             : "لا توجد بنود تفصيلية — استخدم الإجمالي السريع أو أضف بنوداً"}
         </span>
-        <button type="button" className="aseel-toolbtn" onClick={() => setShowClearanceBreakdown((value) => !value)}>
+        <button type="button" className="ktra-toolbtn" onClick={() => setShowClearanceBreakdown((value) => !value)}>
           {showClearanceBreakdown ? "إخفاء تفصيل الرسوم" : "تفصيل الرسوم والبنود"}
         </button>
       </div>
       {showClearanceBreakdown && <>
-      <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)", tableLayout: "fixed" }}>
-        <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
+      <table className="ktra-input" style={{ width: "100%", fontSize: "var(--ktra-fs-sm, 12px)", tableLayout: "fixed" }}>
+        <thead><tr style={{ background: "var(--ktra-bg-strip, #f5f5f5)", fontWeight: 600 }}>
           <th style={{ padding: "2px 4px", textAlign: "start", width: 130 }}>النوع</th>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>البيان</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 120 }}>المبلغ (₪)</th>
@@ -1842,7 +1842,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             <tr key={l.id ?? i}>
               <td style={{ padding: "2px 4px" }}>
                 <select
-                  className="aseel-input"
+                  className="ktra-input"
                   value={l.line_type}
                   onChange={(e) => {
                     const nextType = e.target.value;
@@ -1864,11 +1864,11 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 </select>
               </td>
               <td style={{ padding: "2px 4px" }}>
-                <input className="aseel-input" value={l.description} onChange={(e) => updateClearanceLine(i, { description: e.target.value })} style={{ width: "100%" }} />
+                <input className="ktra-input" value={l.description} onChange={(e) => updateClearanceLine(i, { description: e.target.value })} style={{ width: "100%" }} />
               </td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>
                 <input
-                  className="aseel-input"
+                  className="ktra-input"
                   type="number"
                   step="0.01"
                   value={String((Number(l.debit) || 0) - (Number(l.credit) || 0))}
@@ -1877,7 +1877,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 />
               </td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>
-                <button type="button" className="aseel-toolbtn" onClick={() => deleteClearanceLine(i)} style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }}>✕</button>
+                <button type="button" className="ktra-toolbtn" onClick={() => deleteClearanceLine(i)} style={{ color: "var(--ktra-danger, #c0392b)", padding: "0 4px" }}>✕</button>
               </td>
             </tr>
           ))}
@@ -1886,7 +1886,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           )}
         </tbody>
       </table>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "4px 0", fontSize: "var(--aseel-fs-sm, 12px)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "4px 0", fontSize: "var(--ktra-fs-sm, 12px)" }}>
         <span>
           مجموع البنود:{" "}
           <b style={{ fontFamily: "monospace" }}>
@@ -1895,7 +1895,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </span>
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           style={{ fontSize: "11px" }}
           onClick={() => setCF({
             grand_total: (clearanceForm.lines || []).reduce(
@@ -1906,12 +1906,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         >
           اعتماده كـ«الإجمالي»
         </button>
-        <span className="aseel-text-soft">
+        <span className="ktra-text-soft">
           هذه البنود هي «تكلفة التخليص» التي تتوزع على فواتير الصفقات عند الاستيراد.
         </span>
       </div>
       {(clearanceForm.lines || []).some((l) => isLocalShippingClearanceLabel(l.description)) && (
-        <p style={{ fontSize: "var(--aseel-fs-sm, 12px)", padding: "4px 6px", margin: "4px 0", borderRadius: 4, background: "var(--aseel-warn-bg, #fdf3e0)", color: "var(--aseel-warn, #b45309)", border: "1px solid var(--aseel-warn, #b45309)" }}>
+        <p style={{ fontSize: "var(--ktra-fs-sm, 12px)", padding: "4px 6px", margin: "4px 0", borderRadius: 4, background: "var(--ktra-warn-bg, #fdf3e0)", color: "var(--ktra-warn, #b45309)", border: "1px solid var(--ktra-warn, #b45309)" }}>
           يوجد بند «شحن محلي» ضمن بنود التخليص — هذا مسار قديم. المكان الموحّد لتسجيل النقل
           المحلي هو تبويب «النقل المحلي» (ناقل + مبلغ + ترحيل أو نقل للفاتورة). عند وجود نقل
           محلي مرحّل ومُرسمَل للمخزون تُستبعد هذه البنود تلقائياً من تكلفة الاستيراد لمنع الازدواج.
@@ -1919,25 +1919,25 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       )}
       </>}
       <div style={{ display: "flex", gap: 8, padding: "4px 0" }}>
-        {showClearanceBreakdown && <button type="button" className="aseel-toolbtn" onClick={addClearanceLine}>+ إضافة بند</button>}
-        <button type="button" className="aseel-toolbtn" onClick={() => void handleSaveClearance()} disabled={saving}>تخزين التخليص</button>
+        {showClearanceBreakdown && <button type="button" className="ktra-toolbtn" onClick={addClearanceLine}>+ إضافة بند</button>}
+        <button type="button" className="ktra-toolbtn" onClick={() => void handleSaveClearance()} disabled={saving}>تخزين التخليص</button>
       </div>
     </div>
   ) : (
     <div style={{ padding: "8px", textAlign: "center" }}>
-      <p className="aseel-text-soft" style={{ marginBottom: 8 }}>لا يوجد سجل تخليص لهذه الشحنة</p>
-      <button type="button" className="aseel-toolbtn" onClick={() => void handleCreateClearance()} disabled={saving || !shipment}>إنشاء سجل تخليص</button>
+      <p className="ktra-text-soft" style={{ marginBottom: 8 }}>لا يوجد سجل تخليص لهذه الشحنة</p>
+      <button type="button" className="ktra-toolbtn" onClick={() => void handleCreateClearance()} disabled={saving || !shipment}>إنشاء سجل تخليص</button>
     </div>
   );
 
   const localContent = (
     <div style={{ padding: "4px 8px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>الشحنات المحلية ({localShipments.length})</h4>
-        <button type="button" className="aseel-toolbtn" onClick={handleNewLocal} disabled={!shipment || saving}><Plus size={14} /> إضافة نقل محلي</button>
+        <h4 style={{ fontSize: "var(--ktra-fs-sm, 12px)", fontWeight: 600 }}>الشحنات المحلية ({localShipments.length})</h4>
+        <button type="button" className="ktra-toolbtn" onClick={handleNewLocal} disabled={!shipment || saving}><Plus size={14} /> إضافة نقل محلي</button>
       </div>
-      <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)" }}>
-        <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
+      <table className="ktra-input" style={{ width: "100%", fontSize: "var(--ktra-fs-sm, 12px)" }}>
+        <thead><tr style={{ background: "var(--ktra-bg-strip, #f5f5f5)", fontWeight: 600 }}>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>رقم</th>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>الناقل</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>المبلغ</th>
@@ -1960,11 +1960,11 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               <td style={{ padding: "2px 4px", textAlign: "center" }}>
                 <span style={{ display: "inline-flex", gap: 4 }}>
                   {!ls.is_posted && (
-                    <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px", backgroundColor: "var(--aseel-primary)", color: "white", padding: "2px 6px" }} title="مدين تكلفة نقل محلي / دائن ذمم الناقل.">إثبات الاستحقاق</button>
+                    <button type="button" className="ktra-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px", backgroundColor: "var(--ktra-primary)", color: "white", padding: "2px 6px" }} title="مدين تكلفة نقل محلي / دائن ذمم الناقل.">إثبات الاستحقاق</button>
                   )}
-                  <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); openLocalPayment(ls); }} disabled={saving} style={{ fontSize: "11px" }} title="دفع للناقل من الصندوق بقيد مستقل — يجوز تجاوز المتبقي (يصير دفعة مقدمة)">تسجيل دفعة</button>
+                  <button type="button" className="ktra-toolbtn" onClick={(e) => { e.stopPropagation(); openLocalPayment(ls); }} disabled={saving} style={{ fontSize: "11px" }} title="دفع للناقل من الصندوق بقيد مستقل — يجوز تجاوز المتبقي (يصير دفعة مقدمة)">تسجيل دفعة</button>
                   {ls.is_posted && (
-                    <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handleUnpostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="يحذف قيد المصروف ويعيد السجل مسودة">تراجع عن الترحيل</button>
+                    <button type="button" className="ktra-toolbtn" onClick={(e) => { e.stopPropagation(); void handleUnpostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="يحذف قيد المصروف ويعيد السجل مسودة">تراجع عن الترحيل</button>
                   )}
                 </span>
               </td>
@@ -1976,7 +1976,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </tbody>
       </table>
       {localShipments.some((l) => !l.is_posted) && (
-        <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", padding: "4px 0" }}>
+        <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm, 12px)", padding: "4px 0" }}>
           الاستحقاق («ارسالية») يُثبَّت تلقائياً عند ترحيل الشحنة إلى فاتورة فيصير الناقل دائناً — أو أثبِته الآن يدوياً. «تسجيل دفعة» يخصم من ذممه بقيد منفصل.
         </p>
       )}
@@ -1984,26 +1984,26 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         <div className="my-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
           <h5 className="mb-2 text-sm font-semibold">تسجيل دفعة للناقل · نقل #{payingLocalId}</h5>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
-            {fld("المبلغ", <input className="aseel-input" type="number" step="0.01" value={localPayAmount} onChange={(e) => setLocalPayAmount(e.target.value)} />)}
-            {fld("الصندوق", <select className="aseel-input" value={payCashBoxId} onChange={(e) => setPayCashBoxId(e.target.value)}><option value="">— اختر —</option>{cashBoxes.map((box) => <option key={box.external_id} value={box.external_id}>{box.name} ({box.currency_code})</option>)}</select>)}
-            {fld("التاريخ", <input className="aseel-input" type="date" value={localPayDate} onChange={(e) => setLocalPayDate(e.target.value)} />)}
-            {fld("ملاحظات", <input className="aseel-input" value={localPayNotes} onChange={(e) => setLocalPayNotes(e.target.value)} />)}
+            {fld("المبلغ", <input className="ktra-input" type="number" step="0.01" value={localPayAmount} onChange={(e) => setLocalPayAmount(e.target.value)} />)}
+            {fld("الصندوق", <select className="ktra-input" value={payCashBoxId} onChange={(e) => setPayCashBoxId(e.target.value)}><option value="">— اختر —</option>{cashBoxes.map((box) => <option key={box.external_id} value={box.external_id}>{box.name} ({box.currency_code})</option>)}</select>)}
+            {fld("التاريخ", <input className="ktra-input" type="date" value={localPayDate} onChange={(e) => setLocalPayDate(e.target.value)} />)}
+            {fld("ملاحظات", <input className="ktra-input" value={localPayNotes} onChange={(e) => setLocalPayNotes(e.target.value)} />)}
           </div>
           <div className="mt-2 flex gap-2">
-            <button type="button" className="aseel-toolbtn" onClick={() => void handlePayLocal()} disabled={saving || !payCashBoxId || Number(localPayAmount) <= 0}>تأكيد الدفعة</button>
-            <button type="button" className="aseel-toolbtn" onClick={() => setPayingLocalId(null)}>إلغاء</button>
+            <button type="button" className="ktra-toolbtn" onClick={() => void handlePayLocal()} disabled={saving || !payCashBoxId || Number(localPayAmount) <= 0}>تأكيد الدفعة</button>
+            <button type="button" className="ktra-toolbtn" onClick={() => setPayingLocalId(null)}>إلغاء</button>
           </div>
         </div>
       )}
       {localForm && (
-        <div style={{ marginTop: 8, border: "1px solid var(--aseel-border, #ddd)", padding: 8, borderRadius: 4 }}>
-          <h5 style={{ fontWeight: 600, marginBottom: 4, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+        <div style={{ marginTop: 8, border: "1px solid var(--ktra-border, #ddd)", padding: 8, borderRadius: 4 }}>
+          <h5 style={{ fontWeight: 600, marginBottom: 4, fontSize: "var(--ktra-fs-sm, 12px)" }}>
             {editingLocalId && editingLocalId > 0 ? `تعديل النقل المحلي #${editingLocalId}` : "إضافة نقل محلي جديد"}
           </h5>
           <div className="mb-1 grid grid-cols-1 gap-x-2 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
             {fld("الناقل", carriers.length > 0 ? (
               <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                <select className="aseel-input" value={localForm.carrier ? String(localForm.carrier) : ""} onChange={(e) => setLF({ carrier: Number(e.target.value) || 0 })}>
+                <select className="ktra-input" value={localForm.carrier ? String(localForm.carrier) : ""} onChange={(e) => setLF({ carrier: Number(e.target.value) || 0 })}>
                   <option value="">— اختر الناقل المحلي —</option>
                   {carriers.filter((c) => c.partner_type === "LocalTransporter").map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
@@ -2017,38 +2017,38 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                       </option>
                     )}
                 </select>
-                <button type="button" className="aseel-ellipsis" title="إضافة ناقل محلي جديد" onClick={() => { setQuickAddType("LocalTransporter"); setQuickAddName(""); }}>+</button>
+                <button type="button" className="ktra-ellipsis" title="إضافة ناقل محلي جديد" onClick={() => { setQuickAddType("LocalTransporter"); setQuickAddName(""); }}>+</button>
               </span>
             ) : (
-              <input className="aseel-input" type="number" placeholder="رقم الناقل (لم تُحمَّل قائمة الشركاء)" value={localForm.carrier ?? ""} onChange={(e) => setLF({ carrier: Number(e.target.value) })} />
+              <input className="ktra-input" type="number" placeholder="رقم الناقل (لم تُحمَّل قائمة الشركاء)" value={localForm.carrier ?? ""} onChange={(e) => setLF({ carrier: Number(e.target.value) })} />
             ))}
-            {fld("إلى", <input className="aseel-input" value={localForm.destination || ""} onChange={(e) => setLF({ destination: e.target.value })} />)}
-            {fld("تاريخ التسليم", <input className="aseel-input" type="date" value={localForm.delivery_date ? String(localForm.delivery_date).slice(0, 10) : ""} onChange={(e) => setLF({ delivery_date: e.target.value })} />)}
-            {fld("المبلغ", <input className="aseel-input" type="number" step="0.01" value={localForm.amount ? String(localForm.amount) : "0"} onChange={(e) => setLF({ amount: e.target.value })} />)}
+            {fld("إلى", <input className="ktra-input" value={localForm.destination || ""} onChange={(e) => setLF({ destination: e.target.value })} />)}
+            {fld("تاريخ التسليم", <input className="ktra-input" type="date" value={localForm.delivery_date ? String(localForm.delivery_date).slice(0, 10) : ""} onChange={(e) => setLF({ delivery_date: e.target.value })} />)}
+            {fld("المبلغ", <input className="ktra-input" type="number" step="0.01" value={localForm.amount ? String(localForm.amount) : "0"} onChange={(e) => setLF({ amount: e.target.value })} />)}
             {showAdvancedLocal && <>
-              {fld("السائق", <input className="aseel-input" value={localForm.driver_name || ""} onChange={(e) => setLF({ driver_name: e.target.value })} />)}
-              {fld("المركبة", <input className="aseel-input" value={localForm.vehicle_number || ""} onChange={(e) => setLF({ vehicle_number: e.target.value })} />)}
-              {fld("من", <input className="aseel-input" value={localForm.origin || ""} onChange={(e) => setLF({ origin: e.target.value })} />)}
-              {fld("تاريخ التحميل", <input className="aseel-input" type="date" value={localForm.pickup_date ? String(localForm.pickup_date).slice(0, 10) : ""} onChange={(e) => setLF({ pickup_date: e.target.value })} />)}
-              {fld("الحالة", <select className="aseel-input" value={localForm.status || "pending"} onChange={(e) => setLF({ status: e.target.value as LocalShipmentRow["status"] })}>
+              {fld("السائق", <input className="ktra-input" value={localForm.driver_name || ""} onChange={(e) => setLF({ driver_name: e.target.value })} />)}
+              {fld("المركبة", <input className="ktra-input" value={localForm.vehicle_number || ""} onChange={(e) => setLF({ vehicle_number: e.target.value })} />)}
+              {fld("من", <input className="ktra-input" value={localForm.origin || ""} onChange={(e) => setLF({ origin: e.target.value })} />)}
+              {fld("تاريخ التحميل", <input className="ktra-input" type="date" value={localForm.pickup_date ? String(localForm.pickup_date).slice(0, 10) : ""} onChange={(e) => setLF({ pickup_date: e.target.value })} />)}
+              {fld("الحالة", <select className="ktra-input" value={localForm.status || "pending"} onChange={(e) => setLF({ status: e.target.value as LocalShipmentRow["status"] })}>
                 <option value="pending">قيد الانتظار</option>
                 <option value="in_transit">قيد النقل</option>
                 <option value="delivered">تم التسليم</option>
                 <option value="cancelled">ملغي</option>
               </select>)}
-              {fld("ملاحظات", <input className="aseel-input" value={localForm.notes || ""} onChange={(e) => setLF({ notes: e.target.value })} />)}
+              {fld("ملاحظات", <input className="ktra-input" value={localForm.notes || ""} onChange={(e) => setLF({ notes: e.target.value })} />)}
             </>}
           </div>
-          <button type="button" className="aseel-toolbtn" onClick={() => setShowAdvancedLocal((value) => !value)}>
+          <button type="button" className="ktra-toolbtn" onClick={() => setShowAdvancedLocal((value) => !value)}>
             {showAdvancedLocal ? "إخفاء تفاصيل النقل" : "إضافة تفاصيل السائق والمركبة"}
           </button>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button type="button" className="aseel-toolbtn" onClick={() => void handleSaveLocal()} disabled={saving}>
+            <button type="button" className="ktra-toolbtn" onClick={() => void handleSaveLocal()} disabled={saving}>
               {editingLocalId && editingLocalId > 0 ? "تحديث" : "إضافة"}
             </button>
-            <button type="button" className="aseel-toolbtn" onClick={handleCancelLocal}>إلغاء</button>
+            <button type="button" className="ktra-toolbtn" onClick={handleCancelLocal}>إلغاء</button>
             {editingLocalId && editingLocalId > 0 && (
-              <button type="button" className="aseel-toolbtn" onClick={() => void handleDeleteLocal(editingLocalId)} disabled={saving} style={{ color: "var(--aseel-danger, #c0392b)" }}>حذف</button>
+              <button type="button" className="ktra-toolbtn" onClick={() => void handleDeleteLocal(editingLocalId)} disabled={saving} style={{ color: "var(--ktra-danger, #c0392b)" }}>حذف</button>
             )}
           </div>
         </div>
@@ -2117,19 +2117,19 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       <ImportPartyDuesPanel busy={saving} parties={importPartyDues} />
 
       {/* ── ٠) استحقاق شحن الوكيل — منفصل عن الدفع، وهو ما يثبّت التكلفة ── */}
-      <div style={{ marginBottom: 10, border: "1px solid var(--aseel-border, #ddd)", borderRadius: 4, padding: 8 }}>
+      <div style={{ marginBottom: 10, border: "1px solid var(--ktra-border, #ddd)", borderRadius: 4, padding: 8 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>
+          <h4 style={{ fontSize: "var(--ktra-fs-sm, 12px)", fontWeight: 600 }}>
             استحقاق شحن الوكيل — يجعله دائناً (مستقل عن الدفع)
           </h4>
           {freightAccrued && (
-            <span style={{ color: "var(--aseel-ok, #267346)", fontWeight: 700, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+            <span style={{ color: "var(--ktra-ok, #267346)", fontWeight: 700, fontSize: "var(--ktra-fs-sm, 12px)" }}>
               ✓ مُستحق بسعر {fmt(Number(s.freight_exchange_rate) || 0)} ₪/$
             </span>
           )}
         </div>
         {freightTotalUsd <= 0 ? (
-          <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)" }}>
+          <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm, 12px)" }}>
             تكلفة الشحن صفر — لا استحقاق ولا دفعة، والاستيراد متاح مباشرة.
           </p>
         ) : (
@@ -2137,13 +2137,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
               {fld("سعر الصرف (₪/$)", (
                 <input
-                  className="aseel-input" type="number" step="0.001"
+                  className="ktra-input" type="number" step="0.001"
                   value={freightAccrualRate}
                   disabled={freightAccrued}
                   onChange={(e) => setFreightAccrualRate(e.target.value)}
                 />
               ))}
-              <span style={{ fontSize: "var(--aseel-fs-sm, 12px)" }}>
+              <span style={{ fontSize: "var(--ktra-fs-sm, 12px)" }}>
                 الاستحقاق:{" "}
                 <b style={{ fontFamily: "monospace" }}>
                   {fmt(freightTotalUsd * (Number(freightAccrualRate) || 0))} ₪
@@ -2151,12 +2151,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 (${fmt(freightTotalUsd)})
               </span>
               {freightAccrued ? (
-                <button type="button" className="aseel-toolbtn" disabled={saving} onClick={() => void handleUnpostFreightAccrual()}>
+                <button type="button" className="ktra-toolbtn" disabled={saving} onClick={() => void handleUnpostFreightAccrual()}>
                   تراجع عن الاستحقاق
                 </button>
               ) : (
                 <button
-                  type="button" className="aseel-toolbtn"
+                  type="button" className="ktra-toolbtn"
                   disabled={saving || !(Number(freightAccrualRate) > 0)}
                   onClick={() => void handlePostFreightAccrual()}
                 >
@@ -2164,7 +2164,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 </button>
               )}
             </div>
-            <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", marginTop: 4 }}>
+            <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm, 12px)", marginTop: 4 }}>
               مدين «مصاريف الشحن الدولي» / دائن «ذمم الوكيل». هذا السعر هو الذي يحكم تكلفة الشحن
               بالشيكل في تكلفة الاستيراد — بلا حاجة لأي دفعة. ادفع للوكيل لاحقاً متى شئت.
             </p>
@@ -2174,12 +2174,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
       {/* ── ١) دفعات وكيل الشحن الدولي (USD) — سداد الذمّة، لا شرط للاستيراد ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>
+        <h4 style={{ fontSize: "var(--ktra-fs-sm, 12px)", fontWeight: 600 }}>
           دفعات وكيل الشحن — الشحن الدولي بالدولار ({agentPayments.length})
         </h4>
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           onClick={() => {
             const opening = !showAgentPayForm;
             setShowAgentPayForm(opening);
@@ -2193,7 +2193,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           <Plus size={14} /> دفعة شحن دولي
         </button>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, fontSize: "var(--ktra-fs-sm, 12px)" }}>
         <span>
           مدفوع ومؤكّد: <b style={{ fontFamily: "monospace" }}>${fmt(freightPaidUsd)}</b>
           {" من "}
@@ -2202,45 +2202,45 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         {freightTotalUsd > 0 && (
           freightAgentAdvanceUsd > 0 ? (
             // الدفع الزائد واقعة صحيحة: الوكيل يصبح مديناً لنا بالفائض.
-            <span style={{ color: "var(--aseel-ok, #267346)", fontWeight: 700 }}>
+            <span style={{ color: "var(--ktra-ok, #267346)", fontWeight: 700 }}>
               ✓ مسدَّد بالكامل · دفعة مقدمة لدى الوكيل ${fmt(freightAgentAdvanceUsd)} (رصيد لصالحنا)
             </span>
           ) : freightFullyPaid ? (
-            <span style={{ color: "var(--aseel-ok, #267346)", fontWeight: 700 }}>✓ مسدَّد بالكامل</span>
+            <span style={{ color: "var(--ktra-ok, #267346)", fontWeight: 700 }}>✓ مسدَّد بالكامل</span>
           ) : (
-            <span className="aseel-text-soft">
+            <span className="ktra-text-soft">
               متبقٍ للوكيل ${fmt(freightTotalUsd - freightPaidUsd)} — الدفع اختياري ولا يعطّل الاستيراد
             </span>
           )
         )}
         {freightTotalUsd <= 0 && (
-          <span className="aseel-text-soft">حدّد «تكلفة الشحن» في بيانات الشحنة أولاً</span>
+          <span className="ktra-text-soft">حدّد «تكلفة الشحن» في بيانات الشحنة أولاً</span>
         )}
       </div>
       {showAgentPayForm && (
-        <div style={{ marginBottom: 8, border: "1px solid var(--aseel-border, #ddd)", padding: 8, borderRadius: 4 }}>
+        <div style={{ marginBottom: 8, border: "1px solid var(--ktra-border, #ddd)", padding: 8, borderRadius: 4 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "2px 8px", marginBottom: 4 }}>
-            {fld("المبلغ (USD)", <input className="aseel-input" type="number" step="0.01" value={agentPayAmount} onChange={(e) => setAgentPayAmount(e.target.value)} />)}
-            {fld("سعر الصرف (₪/$)", <input className="aseel-input" type="number" step="0.001" value={agentPayRate} onChange={(e) => setAgentPayRate(e.target.value)} />)}
-            {fld("تاريخ التحويل", <input className="aseel-input" type="date" value={agentPayDate} onChange={(e) => setAgentPayDate(e.target.value)} />)}
-            {fld("ملاحظات", <input className="aseel-input" value={agentPayNotes} onChange={(e) => setAgentPayNotes(e.target.value)} />)}
-            <label className="aseel-field" style={{ justifyContent: "end" }}>
-              <span className="aseel-field-label">مؤكّدة (دُفعت فعلاً)</span>
+            {fld("المبلغ (USD)", <input className="ktra-input" type="number" step="0.01" value={agentPayAmount} onChange={(e) => setAgentPayAmount(e.target.value)} />)}
+            {fld("سعر الصرف (₪/$)", <input className="ktra-input" type="number" step="0.001" value={agentPayRate} onChange={(e) => setAgentPayRate(e.target.value)} />)}
+            {fld("تاريخ التحويل", <input className="ktra-input" type="date" value={agentPayDate} onChange={(e) => setAgentPayDate(e.target.value)} />)}
+            {fld("ملاحظات", <input className="ktra-input" value={agentPayNotes} onChange={(e) => setAgentPayNotes(e.target.value)} />)}
+            <label className="ktra-field" style={{ justifyContent: "end" }}>
+              <span className="ktra-field-label">مؤكّدة (دُفعت فعلاً)</span>
               <input type="checkbox" checked={agentPayConfirmed} onChange={(e) => setAgentPayConfirmed(e.target.checked)} style={{ width: 16, height: 16 }} />
             </label>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" className="aseel-toolbtn" onClick={() => void handleAddAgentPayment()} disabled={saving || !agentPayAmount || Number(agentPayAmount) <= 0}>تسجيل دفعة الشحن</button>
-            <button type="button" className="aseel-toolbtn" onClick={() => setShowAgentPayForm(false)}>إلغاء</button>
+            <button type="button" className="ktra-toolbtn" onClick={() => void handleAddAgentPayment()} disabled={saving || !agentPayAmount || Number(agentPayAmount) <= 0}>تسجيل دفعة الشحن</button>
+            <button type="button" className="ktra-toolbtn" onClick={() => setShowAgentPayForm(false)}>إلغاء</button>
           </div>
-          <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", marginTop: 4 }}>
+          <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm, 12px)", marginTop: 4 }}>
             الدفع للوكيل مستقل عن الاستحقاق ولا يشترطه الاستيراد. يجوز الدفع بأكثر من تكلفة الشحن — الفائض دفعة مقدمة تُسوّى على شحنة لاحقة.
           </p>
         </div>
       )}
       {agentPayments.length > 0 && (
-        <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)", marginBottom: 10 }}>
-          <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
+        <table className="ktra-input" style={{ width: "100%", fontSize: "var(--ktra-fs-sm, 12px)", marginBottom: 10 }}>
+          <thead><tr style={{ background: "var(--ktra-bg-strip, #f5f5f5)", fontWeight: 600 }}>
             <th style={{ padding: "2px 4px", textAlign: "start", width: 40 }}>#</th>
             <th style={{ padding: "2px 4px", textAlign: "start" }}>التاريخ</th>
             <th style={{ padding: "2px 4px", textAlign: "center", width: 90 }}>المبلغ $</th>
@@ -2257,8 +2257,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 <td style={{ padding: "2px 4px", textAlign: "center", fontFamily: "monospace" }}>{fmt(p.usd_to_ils)}</td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>
                   {isAgentPaymentSettled(p)
-                    ? <span style={{ color: "var(--aseel-ok, #267346)", fontWeight: 600 }}>مؤكّدة</span>
-                    : <span style={{ color: "var(--aseel-warn, #b45309)" }}>معلّقة</span>}
+                    ? <span style={{ color: "var(--ktra-ok, #267346)", fontWeight: 600 }}>مؤكّدة</span>
+                    : <span style={{ color: "var(--ktra-warn, #b45309)" }}>معلّقة</span>}
                 </td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.journal ? `#${p.journal}` : p.is_posted ? "✓" : "—"}</td>
               </tr>
@@ -2268,23 +2268,23 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       )}
 
       {localShipments.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border aseel-border-soft bg-[var(--color-surface-2)] px-3 py-2 text-xs">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border ktra-border-soft bg-[var(--color-surface-2)] px-3 py-2 text-xs">
           <div className="flex flex-wrap gap-4">
             <span>استحقاق النقل المحلي: <b>{fmt(localShipments.reduce((sum, row) => sum + Number(row.amount || 0), 0))} ₪</b></span>
             <span>المدفوع للناقل: <b className="text-emerald-700">{fmt(localShipments.reduce((sum, row) => sum + Number(row.amount_paid || 0), 0))} ₪</b></span>
             <span>المتبقي للناقل: <b className="text-amber-700">{fmt(localShipments.reduce((sum, row) => sum + Number(row.remaining_balance ?? row.amount ?? 0), 0))} ₪</b></span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="aseel-text-soft">التكلفة تدخل حصص الفواتير، أمّا الدفع للناقل فيبقى مستقلاً.</span>
-            <button type="button" className="aseel-toolbtn" onClick={() => setActiveTab("local")}>إدارة دفعات النقل</button>
+            <span className="ktra-text-soft">التكلفة تدخل حصص الفواتير، أمّا الدفع للناقل فيبقى مستقلاً.</span>
+            <button type="button" className="ktra-toolbtn" onClick={() => setActiveTab("local")}>إدارة دفعات النقل</button>
           </div>
         </div>
       )}
 
       {/* ── ٢) دفعات التخليص (من الصندوق) ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, borderTop: "1px solid var(--aseel-border, #ddd)", paddingTop: 8 }}>
-        <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>دفعات المخلّص ({clearancePayments.length})</h4>
-        {clearance && <button type="button" className="aseel-toolbtn" onClick={openClearancePayment} disabled={saving}><Plus size={14} /> تسجيل دفعة للمخلّص</button>}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, borderTop: "1px solid var(--ktra-border, #ddd)", paddingTop: 8 }}>
+        <h4 style={{ fontSize: "var(--ktra-fs-sm, 12px)", fontWeight: 600 }}>دفعات المخلّص ({clearancePayments.length})</h4>
+        {clearance && <button type="button" className="ktra-toolbtn" onClick={openClearancePayment} disabled={saving}><Plus size={14} /> تسجيل دفعة للمخلّص</button>}
       </div>
       {clearance && (
         <div className="mb-2 flex flex-wrap gap-4 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-xs">
@@ -2301,39 +2301,39 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </div>
       )}
       {showPaymentForm && (
-        <div style={{ marginBottom: 8, border: "1px solid var(--aseel-border, #ddd)", padding: 8, borderRadius: 4 }}>
+        <div style={{ marginBottom: 8, border: "1px solid var(--ktra-border, #ddd)", padding: 8, borderRadius: 4 }}>
           <div className="mb-1 grid grid-cols-1 gap-x-2 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
             {/* بلا max: الدفع الزائد مسموح ويصبح دفعة مقدمة — المخلّص يصير مديناً
                 لنا بالفائض (قرار المالك). كان الحقل والزر يمنعانه رغم قبول الخادم. */}
-            {fld(`المبلغ (المتبقي ${fmt(clearanceRemaining)} ₪)`, <input className="aseel-input" type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />)}
-            {fld("الصندوق", <select className="aseel-input" value={payCashBoxId} onChange={(e) => setPayCashBoxId(e.target.value)}>
+            {fld(`المبلغ (المتبقي ${fmt(clearanceRemaining)} ₪)`, <input className="ktra-input" type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />)}
+            {fld("الصندوق", <select className="ktra-input" value={payCashBoxId} onChange={(e) => setPayCashBoxId(e.target.value)}>
               <option value="">— اختر —</option>
               {cashBoxes.map((cb) => (
                 <option key={cb.external_id} value={cb.external_id}>{cb.name} ({cb.currency_code})</option>
               ))}
             </select>)}
-            {fld("التاريخ", <input className="aseel-input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />)}
-            {fld("ملاحظات", <input className="aseel-input" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} />)}
+            {fld("التاريخ", <input className="ktra-input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />)}
+            {fld("ملاحظات", <input className="ktra-input" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} />)}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <OfflineGuard
               action="تسجيل دفعة تخليص"
               warningMessage="تسجيل الدفعة يتطلب اتصالاً — يُولَّد قيد محاسبي على الـserver"
             >
-              <button type="button" className="aseel-toolbtn" onClick={() => void handleAddPayment()} disabled={saving || !payAmount || Number(payAmount) <= 0 || !payCashBoxId}>تأكيد دفعة المخلّص</button>
+              <button type="button" className="ktra-toolbtn" onClick={() => void handleAddPayment()} disabled={saving || !payAmount || Number(payAmount) <= 0 || !payCashBoxId}>تأكيد دفعة المخلّص</button>
             </OfflineGuard>
-            <button type="button" className="aseel-toolbtn" onClick={() => setShowPaymentForm(false)}>إلغاء</button>
+            <button type="button" className="ktra-toolbtn" onClick={() => setShowPaymentForm(false)}>إلغاء</button>
           </div>
           {cashBoxes.length === 0 && (
-            <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", marginTop: 4, color: "var(--aseel-warn, #b45309)" }}>
+            <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm, 12px)", marginTop: 4, color: "var(--ktra-warn, #b45309)" }}>
               لا يوجد صندوق مَربوط بحساب محاسبي — افتح «المحاسبة → ربط صناديق Firestore» قبل تسجيل دفعة.
             </p>
           )}
         </div>
       )}
       {clearancePayments.length > 0 ? (
-        <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)" }}>
-          <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
+        <table className="ktra-input" style={{ width: "100%", fontSize: "var(--ktra-fs-sm, 12px)" }}>
+          <thead><tr style={{ background: "var(--ktra-bg-strip, #f5f5f5)", fontWeight: 600 }}>
             <th style={{ padding: "2px 4px", textAlign: "start" }}>التاريخ</th>
             <th style={{ padding: "2px 4px", textAlign: "start" }}>الغرض</th>
             <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>المبلغ</th>
@@ -2352,25 +2352,25 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             ))}
           </tbody>
         </table>
-      ) : <p className="aseel-text-soft" style={{ padding: 8 }}>لا توجد دفعات</p>}
+      ) : <p className="ktra-text-soft" style={{ padding: 8 }}>لا توجد دفعات</p>}
     </div>
   );
 
   const accountsContent = (
-    <div style={{ padding: "4px 8px", fontSize: "var(--aseel-fs-sm, 12px)" }}>
-      <div className="aseel-total-row"><span>قيد التحويل (الشحنة):</span><span><b>{s.transit_journal ? `#${s.transit_journal}` : "—"}</b></span></div>
-      <div className="aseel-total-row"><span>قيد استحقاق التخليص:</span><span><b>{clearance?.journal ? `#${clearance.journal}` : "—"}</b></span></div>
-      <div className="aseel-total-row"><span>كشف الضريبة:</span><span><b>{clearance?.vat_statement ?? "—"}</b></span></div>
+    <div style={{ padding: "4px 8px", fontSize: "var(--ktra-fs-sm, 12px)" }}>
+      <div className="ktra-total-row"><span>قيد التحويل (الشحنة):</span><span><b>{s.transit_journal ? `#${s.transit_journal}` : "—"}</b></span></div>
+      <div className="ktra-total-row"><span>قيد استحقاق التخليص:</span><span><b>{clearance?.journal ? `#${clearance.journal}` : "—"}</b></span></div>
+      <div className="ktra-total-row"><span>كشف الضريبة:</span><span><b>{clearance?.vat_statement ?? "—"}</b></span></div>
       {/* إجراءات التراجع عن الترحيل — نفس نمط فاتورة الشراء (task17) */}
-      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--aseel-border, #ddd)" }}>
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--ktra-border, #ddd)" }}>
         <h5 style={{ fontWeight: 600, marginBottom: 4 }}>تراجع عن الترحيل</h5>
-        <p className="aseel-text-soft" style={{ marginBottom: 6 }}>
+        <p className="ktra-text-soft" style={{ marginBottom: 6 }}>
           يحذف القيود ويعيد المستند مسودة (لا قيود عكسية). حارس الاعتمادية يمنع التراجع
           إن كانت مبيعات لاحقة استهلكت المخزون.
         </p>
         <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
           <button
-            type="button" className="aseel-toolbtn"
+            type="button" className="ktra-toolbtn"
             onClick={() => void handleUnpostShipment()}
             disabled={!shipment || saving}
             title="يحذف قيد الشحنة (LOGISTICS_SHIPMENT) ويعكس حركات استلام المخزون"
@@ -2378,7 +2378,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             تراجع عن ترحيل الشحنة
           </button>
           <button
-            type="button" className="aseel-toolbtn"
+            type="button" className="ktra-toolbtn"
             onClick={() => void handleUnpostClearance()}
             disabled={!clearance || saving || !clearancePayments.some((p) => p.is_posted)}
             title={clearancePayments.some((p) => p.is_posted)
@@ -2415,14 +2415,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const notesContent = (
     <textarea
-      className="aseel-input"
+      className="ktra-input"
       value={shipmentForm.notes || ""}
       onChange={(e) => setSF({ notes: e.target.value })}
       style={{ width: "100%", height: "100%", minHeight: 80, resize: "none", border: "none", padding: 8 }}
     />
   );
 
-  const tabsConfig: AseelTab[] = [
+  const tabsConfig: KitTab[] = [
     { key: "deals", label: "الصفقات والشحن", content: dealsContent },
     { key: "clearance", label: "التخليص", content: clearanceContent },
     { key: "local", label: "النقل المحلي", content: localContent },
@@ -2431,7 +2431,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     { key: "notes", label: "ملاحظات", content: notesContent },
   ];
 
-  const toolbarActions: AseelToolbarAction[] = [
+  const toolbarActions: KitToolbarAction[] = [
     { key: "save", label: "تخزين (F12)", icon: <Save />, onClick: () => void handleSaveShipment(), disabled: !isShipmentDirty || saving },
     {
       key: "to-invoice", label: allDealsConverted ? `فتح الفاتورة #${convertedPiId}` : remainingDealsCount < shipmentDeals.length ? `إنشاء الفواتير المتبقية (${remainingDealsCount})` : "إنشاء الفاتورة الدولية", icon: <FileText />,
@@ -2544,7 +2544,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </div>
         <button
           type="button"
-          className="aseel-toolbtn shrink-0 bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-800"
+          className="ktra-toolbtn shrink-0 bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-800"
           onClick={() => executeGuidanceAction(guidance.action)}
           disabled={saving}
         >
@@ -2603,11 +2603,11 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   return (
     <>
       {error && (
-        <div style={{ background: "var(--aseel-err-bg, #fde8e8)", color: "var(--aseel-err, #c0392b)", padding: "4px 12px", borderBottom: "1px solid var(--aseel-err, #c0392b)", fontSize: "var(--aseel-fs-sm, 12px)" }}>
+        <div style={{ background: "var(--ktra-err-bg, #fde8e8)", color: "var(--ktra-err, #c0392b)", padding: "4px 12px", borderBottom: "1px solid var(--ktra-err, #c0392b)", fontSize: "var(--ktra-fs-sm, 12px)" }}>
           {error}
         </div>
       )}
-      <AseelDocumentShell
+      <KitDocumentShell
         title={`رحلة الاستيراد — ${s.shipment_name || (s.shipment_number ? `شحنة ${s.shipment_number}` : "شحنة جديدة")}`}
         state={s.shipment_number ? `شحنة #${s.shipment_number}` : "شحنة جديدة"}
         nav={nav}
@@ -2623,19 +2623,19 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         {guidancePanel}
         {journeyStrip}
         {routeTimeline}
-      </AseelDocumentShell>
+      </KitDocumentShell>
       {quickAddType && (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.5)", padding: 16 }}
           onMouseDown={(e) => { if (e.target === e.currentTarget) setQuickAddType(null); }}
           dir="rtl"
         >
-          <div style={{ background: "var(--aseel-panel, #fff)", borderRadius: 8, padding: 16, minWidth: 320, boxShadow: "0 8px 30px rgba(0,0,0,0.25)" }}>
+          <div style={{ background: "var(--ktra-panel, #fff)", borderRadius: 8, padding: 16, minWidth: 320, boxShadow: "0 8px 30px rgba(0,0,0,0.25)" }}>
             <h3 style={{ fontWeight: 700, marginBottom: 8 }}>
               {quickAddType === "FreightForwarder" ? "إضافة وكيل شحن جديد" : quickAddType === "LocalTransporter" ? "إضافة ناقل محلي جديد" : "إضافة مخلِّص جمركي جديد"}
             </h3>
             <input
-              className="aseel-input"
+              className="ktra-input"
               autoFocus
               placeholder="الاسم"
               value={quickAddName}
@@ -2644,8 +2644,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               style={{ width: "100%", marginBottom: 10 }}
             />
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-start" }}>
-              <button type="button" className="aseel-toolbtn" disabled={saving || !quickAddName.trim()} onClick={() => void handleQuickAddPartner()}>حفظ واختيار</button>
-              <button type="button" className="aseel-toolbtn" onClick={() => setQuickAddType(null)}>إلغاء</button>
+              <button type="button" className="ktra-toolbtn" disabled={saving || !quickAddName.trim()} onClick={() => void handleQuickAddPartner()}>حفظ واختيار</button>
+              <button type="button" className="ktra-toolbtn" onClick={() => setQuickAddType(null)}>إلغاء</button>
             </div>
           </div>
         </div>

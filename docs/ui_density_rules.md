@@ -28,8 +28,8 @@
 ## 2. Header Band
 
 - CSS grid: `grid-template-columns: repeat(6, 1fr)` (6 أعمدة على 1080px+)
-- كل حقل = `<label className="aseel-field"><span className="aseel-field-label">الاسم</span><input className="aseel-input" .../></label>`
-- ارتفاع الحقل = 22px (حجم `aseel-input`)
+- كل حقل = `<label className="ktra-field"><span className="ktra-field-label">الاسم</span><input className="ktra-input" .../></label>`
+- ارتفاع الحقل = 22px (حجم `ktra-input`)
 - مسافة بين الحقول: `gap: 2px 8px`
 - عدد الحقول: 24 (4 صفوف × 6 أعمدة)
 
@@ -39,7 +39,7 @@
 
 | القديم (ممنوع) | الجديد (إلزامي) |
 |----------------|-----------------|
-| `CollapsibleSection` مع padding كبير | `AseelDocumentShell` tabs أفقية |
+| `CollapsibleSection` مع padding كبير | `KitDocumentShell` tabs أفقية |
 | `space-y-6`, `space-y-4` بين الأقسام | tabs مع content واحد مرئي |
 | أقسام عمودية مع `mb-*` | tab أفقي لا يزيد ارتفاعه عن 36px |
 | `p-6`, `p-8` حول المحتوى | `padding: 4px 8px` في tab content |
@@ -51,7 +51,7 @@
 - استبدال `ShipmentStatusVisualizer` (100px) بـ `CompactTimeline` (32px)
 - سطر واحد: `●مكتمل → ◐حالي → ○قادم`
 - CSS: `height: 32px, display: flex, gap: 4px, direction: ltr`
-- خلفية: `var(--aseel-bg-strip, #f5f5f5)`
+- خلفية: `var(--ktra-bg-strip, #f5f5f5)`
 
 ---
 
@@ -59,7 +59,7 @@
 
 - على ≥1280px: side panel على اليمين (ثابت، ~280px عرض)
 - على <1280px: أسفل المحتوى (row أفقي)
-- كل total: `<div className="aseel-total-row"><span>label</span><span className="aseel-total-value">value</span></div>`
+- كل total: `<div className="ktra-total-row"><span>label</span><span className="ktra-total-value">value</span></div>`
 
 ---
 
@@ -84,6 +84,6 @@
 
 ## 8. الاستثناءات
 
-- شاشات الـlist (`AseelDenseTable`) لا تحتاج density treatment — هي أصلاً كثيفة.
+- شاشات الـlist (`KitDenseTable`) لا تحتاج density treatment — هي أصلاً كثيفة.
 - شاشات التقارير (PDF-preview) مستثناة.
 - الـmodals التي تعرض صورة أو مستند بحجم كامل (مثل Viewer) مستثناة — لكن side-panel مفضّل.

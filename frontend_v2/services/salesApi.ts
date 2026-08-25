@@ -102,7 +102,7 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
     tax_rate: number | null;
     line_total_excl_tax: string;
     line_tax_amount: string;
-    /** M2-T2: Aseel line columns */
+    /** M2-T2: Kit line columns */
     unit?: string;
     warehouse?: string;
     catalog_no?: string;
@@ -117,7 +117,7 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
     customer_note?: string | null;
   }[];
   created_at?: string;
-  // M2-T1: Aseel header fields
+  // M2-T1: Kit header fields
   book_number?: number;
   second_date?: string | null;
   licensed_dealer_no?: string;

@@ -19,7 +19,7 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "invoice-profits": "inventory.cost.view",
   "reserved-stock": "sales.quotation.manage",
   "sales-settings": "sales.settings.manage",
-  "aseel-sales": "sales.invoice.view",
+  "sales-classic": "sales.invoice.view",
   // العملاء
   "sales-customers": "sales.customer.view",
   "sales-customer-payments": "sales.payment.create",

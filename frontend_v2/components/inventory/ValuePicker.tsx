@@ -39,7 +39,7 @@ export const ValuePicker: React.FC<Props> = ({
     return (
       <div style={{ display: "flex", gap: 4, width: "100%" }}>
         <input
-          className={className || "aseel-input"}
+          className={className || "ktra-input"}
           style={{ flex: 1 }}
           autoFocus
           value={value}
@@ -50,10 +50,10 @@ export const ValuePicker: React.FC<Props> = ({
             if (e.key === "Escape") setAdding(false);
           }}
         />
-        <button type="button" className="aseel-toolbtn" title="تم" onClick={() => setAdding(false)}>
+        <button type="button" className="ktra-toolbtn" title="تم" onClick={() => setAdding(false)}>
           <Check className="h-4 w-4" />
         </button>
-        <button type="button" className="aseel-toolbtn" title="إلغاء" onClick={() => { onChange(""); setAdding(false); }}>
+        <button type="button" className="ktra-toolbtn" title="إلغاء" onClick={() => { onChange(""); setAdding(false); }}>
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -63,7 +63,7 @@ export const ValuePicker: React.FC<Props> = ({
   return (
     <div style={{ display: "flex", gap: 4, width: "100%" }}>
       <select
-        className={className || "aseel-input"}
+        className={className || "ktra-input"}
         style={{ flex: 1 }}
         value={value}
         disabled={disabled}
@@ -76,7 +76,7 @@ export const ValuePicker: React.FC<Props> = ({
       </select>
       <button
         type="button"
-        className="aseel-toolbtn"
+        className="ktra-toolbtn"
         disabled={disabled}
         title={addTitle}
         onClick={() => { onChange(""); setAdding(true); }}

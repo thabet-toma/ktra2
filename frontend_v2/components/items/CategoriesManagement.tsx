@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { inventoryApi } from "../../services/inventoryApi";
 import { Plus, Edit2, Trash2, X, Check, RefreshCw } from "lucide-react";
-import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import { KitDenseTable, type DenseColumn } from "../kit/KitDenseTable";
 import { eligibleParents, sortCategoryRows } from "../../utils/categoryTree";
 
 type Category = {
@@ -109,7 +109,7 @@ export const CategoriesManagement: React.FC = () => {
   // محرّر الأب المشترك (للجديد والتعديل) — هذا ما كان ناقصاً فتعذّر إنشاء أب/ابن/حفيد.
   const parentSelect = (selfId: number) => (
     <select
-      className="aseel-input w-full"
+      className="ktra-input w-full"
       value={editParent ?? ""}
       onChange={(e) => setEditParent(e.target.value ? Number(e.target.value) : null)}
     >
@@ -134,7 +134,7 @@ export const CategoriesManagement: React.FC = () => {
         if (editId === c.id) {
           return (
             <input
-              className="aseel-input w-full"
+              className="ktra-input w-full"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
               onKeyDown={(e) => {
@@ -149,7 +149,7 @@ export const CategoriesManagement: React.FC = () => {
         // إزاحة بصرية حسب العمق لإظهار الشجرة (أب ⇠ ابن ⇠ حفيد).
         return (
           <span style={{ paddingInlineStart: `${depthOf(c) * 18}px` }}>
-            {depthOf(c) > 0 && <span style={{ color: "var(--aseel-ink-soft)" }}>└ </span>}
+            {depthOf(c) > 0 && <span style={{ color: "var(--ktra-ink-soft)" }}>└ </span>}
             {c.name}
           </span>
         );
@@ -175,15 +175,15 @@ export const CategoriesManagement: React.FC = () => {
         if (editId === c.id) {
           return (
             <div className="flex gap-1 justify-center">
-              <button onClick={handleSave} disabled={loading} className="aseel-iconbtn text-green-600"><Check className="h-4 w-4" /></button>
-              <button onClick={() => setEditId(null)} disabled={loading} className="aseel-iconbtn text-[var(--color-text-muted)]"><X className="h-4 w-4" /></button>
+              <button onClick={handleSave} disabled={loading} className="ktra-iconbtn text-green-600"><Check className="h-4 w-4" /></button>
+              <button onClick={() => setEditId(null)} disabled={loading} className="ktra-iconbtn text-[var(--color-text-muted)]"><X className="h-4 w-4" /></button>
             </div>
           );
         }
         return (
           <div className="flex gap-1 justify-center">
-            <button onClick={(e) => { e.stopPropagation(); startEdit(c); }} disabled={loading || editId !== null} className="aseel-iconbtn text-blue-600"><Edit2 className="h-4 w-4" /></button>
-            <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }} disabled={loading || editId !== null} className="aseel-iconbtn text-red-600"><Trash2 className="h-4 w-4" /></button>
+            <button onClick={(e) => { e.stopPropagation(); startEdit(c); }} disabled={loading || editId !== null} className="ktra-iconbtn text-blue-600"><Edit2 className="h-4 w-4" /></button>
+            <button onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }} disabled={loading || editId !== null} className="ktra-iconbtn text-red-600"><Trash2 className="h-4 w-4" /></button>
           </div>
         );
       }
@@ -193,24 +193,24 @@ export const CategoriesManagement: React.FC = () => {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
+        <strong style={{ fontSize: "var(--ktra-fs-title, 14px)", color: "var(--ktra-ink)" }}>
           إدارة التصنيفات
         </strong>
-        <span className="aseel-status-item">الإجمالي: <b>{list.length}</b></span>
+        <span className="ktra-status-item">الإجمالي: <b>{list.length}</b></span>
         
         <div style={{ flex: 1 }} />
         
-        <button className="aseel-toolbtn" onClick={load} title="تحديث">
+        <button className="ktra-toolbtn" onClick={load} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
-        <button className="aseel-toolbtn" onClick={startNew} disabled={editId !== null} title="إضافة تصنيف">
+        <button className="ktra-toolbtn" onClick={startNew} disabled={editId !== null} title="إضافة تصنيف">
           <Plus className="h-4 w-4" /> إضافة
         </button>
       </div>
 
-      {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
+      {err && <div className="ktra-banner ktra-banner--err">{err}</div>}
 
-      <AseelDenseTable<Category>
+      <KitDenseTable<Category>
         columns={columns}
         rows={displayList}
         getRowKey={(c) => c.id}

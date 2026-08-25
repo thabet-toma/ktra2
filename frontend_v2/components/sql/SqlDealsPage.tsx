@@ -1,13 +1,13 @@
 /**
- * N7-T8 — SqlDealsPage — AseelDenseTable للصفقات (SQL)
+ * N7-T8 — SqlDealsPage — KitDenseTable للصفقات (SQL)
  */
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { apiGetList, apiGetPagedList, apiGetObject, apiPostObject } from '../../services/restApi';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { SqlDataPageShell } from './SqlDataPageShell';
 import { Eye, RefreshCw, Plus } from 'lucide-react';
-import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
-import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
+import { KitDenseTable, type DenseColumn } from '../kit/KitDenseTable';
+import { useKitIndexKeymap } from '../kit/useKitIndexKeymap';
 
 type DealRow = {
     id: number;
@@ -46,10 +46,10 @@ const paymentStatusLabel = (s?: string) => {
 
 const statusColor = (s?: string) => {
     const v = (s || '').toLowerCase();
-    if (v.includes('open')) return 'var(--aseel-warn, #b8800a)';
-    if (v.includes('close') || v.includes('complete')) return 'var(--aseel-ok, #267346)';
-    if (v.includes('cancel')) return 'var(--aseel-danger, #c00)';
-    if (v.includes('ship')) return 'var(--aseel-accent, #1857a4)';
+    if (v.includes('open')) return 'var(--ktra-warn, #b8800a)';
+    if (v.includes('close') || v.includes('complete')) return 'var(--ktra-ok, #267346)';
+    if (v.includes('cancel')) return 'var(--ktra-danger, #c00)';
+    if (v.includes('ship')) return 'var(--ktra-accent, #1857a4)';
     return 'inherit';
 };
 
@@ -134,7 +134,7 @@ export function SqlDealsPage() {
         finally { setSavingCreate(false); }
     };
 
-    useAseelIndexKeymap(
+    useKitIndexKeymap(
         { CtrlIns: () => setCreateOpen(true), F6: () => searchInputRef.current?.focus(), Escape: () => { setQ(''); setStatusFilter('all'); } },
         { enabled: !detailsOpen && !createOpen },
     );
@@ -150,15 +150,15 @@ export function SqlDealsPage() {
         },
         {
             key: 'status', header: 'الحالة', width: '100px',
-            render: r => <span style={{ color: statusColor(r.status), fontWeight: 500, fontSize: 'var(--aseel-fs-sm)' }}>{statusLabel(r.status)}</span>,
+            render: r => <span style={{ color: statusColor(r.status), fontWeight: 500, fontSize: 'var(--ktra-fs-sm)' }}>{statusLabel(r.status)}</span>,
         },
         {
             key: 'payment_status', header: 'الدفع', width: '120px',
-            render: r => <span style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)' }}>{paymentStatusLabel(r.payment_status)}</span>,
+            render: r => <span style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)' }}>{paymentStatusLabel(r.payment_status)}</span>,
         },
         {
             key: 'order_date', header: 'التاريخ', width: '90px',
-            render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{fmtDate(r.order_date)}</span>,
+            render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--ktra-fs-sm)' }}>{fmtDate(r.order_date)}</span>,
         },
         {
             key: 'total_amount', header: 'الإجمالي', width: '110px', align: 'right', numeric: true,
@@ -167,7 +167,7 @@ export function SqlDealsPage() {
         {
             key: 'actions', header: '', width: '60px', align: 'center',
             render: r => (
-                <button className="aseel-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); void openDeal(r); }} title="إدارة كاملة">
+                <button className="ktra-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); void openDeal(r); }} title="إدارة كاملة">
                     <Eye style={{ width: 13, height: 13 }} />
                 </button>
             ),
@@ -181,26 +181,26 @@ export function SqlDealsPage() {
                 subtitle="اضغط على أي صفقة لرؤية التفاصيل الكاملة."
                 actions={
                     <div style={{ display: 'flex', gap: 6 }}>
-                        <button className="aseel-toolbtn" style={{ padding: '4px 10px', color: 'var(--aseel-accent, #1857a4)', fontWeight: 700 }} onClick={() => setCreateOpen(true)} title="صفقة جديدة (Ctrl+Ins)">
+                        <button className="ktra-toolbtn" style={{ padding: '4px 10px', color: 'var(--ktra-accent, #1857a4)', fontWeight: 700 }} onClick={() => setCreateOpen(true)} title="صفقة جديدة (Ctrl+Ins)">
                             <Plus style={{ width: 14, height: 14, display: 'inline', marginLeft: 4 }} />صفقة جديدة
                         </button>
-                        <input ref={searchInputRef} value={q} onChange={e => setQ(e.target.value)} placeholder="بحث برقم/مورد/حالة… (F6)" className="aseel-input" style={{ width: 220 }} />
-                        <select className="aseel-input" style={{ width: 130 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                        <input ref={searchInputRef} value={q} onChange={e => setQ(e.target.value)} placeholder="بحث برقم/مورد/حالة… (F6)" className="ktra-input" style={{ width: 220 }} />
+                        <select className="ktra-input" style={{ width: 130 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                             <option value="all">كل الحالات</option>
                             {statuses.map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
-                        <button className="aseel-toolbtn" onClick={() => { setQ(''); setStatusFilter('all'); }} title="إعادة تعيين"><RefreshCw style={{ width: 14, height: 14 }} /></button>
+                        <button className="ktra-toolbtn" onClick={() => { setQ(''); setStatusFilter('all'); }} title="إعادة تعيين"><RefreshCw style={{ width: 14, height: 14 }} /></button>
                     </div>
                 }
             >
-                {err && <div style={{ padding: '6px 12px', fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-danger, #c00)', borderBottom: '1px solid var(--aseel-border)' }}>{err}</div>}
+                {err && <div style={{ padding: '6px 12px', fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-danger, #c00)', borderBottom: '1px solid var(--ktra-border)' }}>{err}</div>}
                 <div style={{ padding: '4px 12px 4px', display: 'flex', gap: 8 }}>
-                    <span className="aseel-status-item">الإجمالي: <b>{stats.total}</b></span>
-                    <span className="aseel-status-item">نشطة: <b style={{ color: 'var(--aseel-warn, #b8800a)' }}>{stats.active}</b></span>
-                    <span className="aseel-status-item">القيمة الكلية: <b style={{ fontFamily: 'monospace' }}>{stats.totalAmount.toLocaleString()}</b></span>
-                    {filtered.length !== rows.length && <span className="aseel-status-item">المفلتر: <b>{filtered.length}</b></span>}
+                    <span className="ktra-status-item">الإجمالي: <b>{stats.total}</b></span>
+                    <span className="ktra-status-item">نشطة: <b style={{ color: 'var(--ktra-warn, #b8800a)' }}>{stats.active}</b></span>
+                    <span className="ktra-status-item">القيمة الكلية: <b style={{ fontFamily: 'monospace' }}>{stats.totalAmount.toLocaleString()}</b></span>
+                    {filtered.length !== rows.length && <span className="ktra-status-item">المفلتر: <b>{filtered.length}</b></span>}
                 </div>
-                <AseelDenseTable<DealRow>
+                <KitDenseTable<DealRow>
                     columns={columns}
                     rows={filtered}
                     getRowKey={r => r.id}
@@ -209,7 +209,7 @@ export function SqlDealsPage() {
                     onRowDoubleClick={r => void openDeal(r)}
                     footer={
                         filtered.length > 0 ? (
-                            <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
+                            <span style={{ fontFamily: 'monospace', fontSize: 'var(--ktra-fs-sm)' }}>
                                 إجمالي: <b>{fmtMoney(filtered.reduce((s, r) => s + Number(r.total_amount || 0), 0))}</b>
                             </span>
                         ) : undefined
@@ -323,28 +323,28 @@ export function SqlDealsPage() {
             {/* مودال إضافة صفقة */}
             {createOpen && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }} onClick={() => setCreateOpen(false)}>
-                    <div dir="rtl" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-                        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--aseel-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>إضافة صفقة جديدة</strong>
-                            <button className="aseel-toolbtn" onClick={() => setCreateOpen(false)}>إغلاق</button>
+                    <div dir="rtl" style={{ background: 'var(--ktra-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+                        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--ktra-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>إضافة صفقة جديدة</strong>
+                            <button className="ktra-toolbtn" onClick={() => setCreateOpen(false)}>إغلاق</button>
                         </div>
                         <div style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                             {[['رقم الصفقة', 'text', 'ref_number', 'D-0104'], ['التاريخ', 'date', 'order_date', '']].map(([label, type, key, placeholder]) => (
                                 <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                    <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>{label}</label>
-                                    <input type={type} className="aseel-input" placeholder={placeholder} value={(createForm as any)[key]} onChange={e => setCreateForm(p => ({ ...p, [key]: e.target.value }))} />
+                                    <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>{label}</label>
+                                    <input type={type} className="ktra-input" placeholder={placeholder} value={(createForm as any)[key]} onChange={e => setCreateForm(p => ({ ...p, [key]: e.target.value }))} />
                                 </div>
                             ))}
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>المورد</label>
-                                <select className="aseel-input" value={createForm.partner} onChange={e => setCreateForm(p => ({ ...p, partner: e.target.value }))}>
+                                <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>المورد</label>
+                                <select className="ktra-input" value={createForm.partner} onChange={e => setCreateForm(p => ({ ...p, partner: e.target.value }))}>
                                     <option value="">اختر المورد</option>
                                     {partners.map(p => <option key={p.id} value={p.id}>{p.name || `#${p.id}`}</option>)}
                                 </select>
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>الحالة</label>
-                                <select className="aseel-input" value={createForm.status} onChange={e => setCreateForm(p => ({ ...p, status: e.target.value }))}>
+                                <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>الحالة</label>
+                                <select className="ktra-input" value={createForm.status} onChange={e => setCreateForm(p => ({ ...p, status: e.target.value }))}>
                                     <option value="Open">Open</option>
                                     <option value="Shipped">Shipped</option>
                                     <option value="Closed">Closed</option>
@@ -352,13 +352,13 @@ export function SqlDealsPage() {
                                 </select>
                             </div>
                             <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>الوصف</label>
-                                <textarea className="aseel-input" rows={3} style={{ resize: 'vertical' }} placeholder="وصف مختصر للصفقة" value={createForm.description} onChange={e => setCreateForm(p => ({ ...p, description: e.target.value }))} />
+                                <label style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>الوصف</label>
+                                <textarea className="ktra-input" rows={3} style={{ resize: 'vertical' }} placeholder="وصف مختصر للصفقة" value={createForm.description} onChange={e => setCreateForm(p => ({ ...p, description: e.target.value }))} />
                             </div>
                         </div>
-                        <div style={{ padding: '10px 14px', borderTop: '1px solid var(--aseel-border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                            <button className="aseel-toolbtn" onClick={() => setCreateOpen(false)}>إلغاء</button>
-                            <button className="aseel-toolbtn" style={{ color: 'var(--aseel-accent, #1857a4)', fontWeight: 700 }} onClick={handleCreateDeal} disabled={savingCreate}>
+                        <div style={{ padding: '10px 14px', borderTop: '1px solid var(--ktra-border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                            <button className="ktra-toolbtn" onClick={() => setCreateOpen(false)}>إلغاء</button>
+                            <button className="ktra-toolbtn" style={{ color: 'var(--ktra-accent, #1857a4)', fontWeight: 700 }} onClick={handleCreateDeal} disabled={savingCreate}>
                                 {savingCreate ? 'جارٍ الحفظ...' : 'حفظ الصفقة'}
                             </button>
                         </div>

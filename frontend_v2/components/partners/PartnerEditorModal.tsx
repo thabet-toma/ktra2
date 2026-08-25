@@ -6,7 +6,7 @@ import {
 import { clientLogger } from "../../services/logger";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { eventBus } from "../../utils/eventBus";
-import { AseelDateInput } from "../aseel/AseelDateInput";
+import { KitDateInput } from "../kit/KitDateInput";
 import type { PartnerBankAccount } from "../../utils/partnerChequeDefaults";
 
 export type PartnerType =
@@ -281,10 +281,10 @@ export const PartnerEditorModal: React.FC<{
     key: keyof typeof form,
     type = "text",
   ) => (
-    <label className="aseel-field">
-      <span className="aseel-field-label">{label}</span>
+    <label className="ktra-field">
+      <span className="ktra-field-label">{label}</span>
       <input
-        className="aseel-input"
+        className="ktra-input"
         type={type}
         value={value}
         onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))}
@@ -307,11 +307,11 @@ export const PartnerEditorModal: React.FC<{
               <p className="text-xs text-[var(--color-text-muted)]">بيانات موحّدة تُستخدم في الفواتير والسندات والشيكات</p>
             </div>
           </div>
-          {!embedded && <button type="button" className="aseel-toolbtn" onClick={onClose}><X className="h-4 w-4" /></button>}
+          {!embedded && <button type="button" className="ktra-toolbtn" onClick={onClose}><X className="h-4 w-4" /></button>}
         </div>
 
         <div className="space-y-5 p-4">
-          {error && <div className="aseel-banner aseel-banner--err">{error}</div>}
+          {error && <div className="ktra-banner ktra-banner--err">{error}</div>}
           {loading ? (
             <div className="p-8 text-center text-sm text-[var(--color-text-muted)]">جاري تحميل البطاقة…</div>
           ) : (
@@ -320,10 +320,10 @@ export const PartnerEditorModal: React.FC<{
                 <h3 className="mb-3 text-sm font-bold">البيانات الأساسية</h3>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
                   {!fixedType && (
-                    <label className="aseel-field">
-                      <span className="aseel-field-label">نوع الطرف *</span>
+                    <label className="ktra-field">
+                      <span className="ktra-field-label">نوع الطرف *</span>
                       <select
-                        className="aseel-input"
+                        className="ktra-input"
                         value={form.partner_type}
                         onChange={(e) => setForm((current) => ({
                           ...current, partner_type: e.target.value as PartnerType,
@@ -334,10 +334,10 @@ export const PartnerEditorModal: React.FC<{
                     </label>
                   )}
                   {(fixedType || form.partner_type) === "Supplier" && (
-                    <label className="aseel-field">
-                      <span className="aseel-field-label">نطاق المورد</span>
+                    <label className="ktra-field">
+                      <span className="ktra-field-label">نطاق المورد</span>
                       <select
-                        className="aseel-input"
+                        className="ktra-input"
                         value={form.supplier_scope}
                         onChange={(e) => setForm((current) => ({
                           ...current, supplier_scope: e.target.value as SupplierScope,
@@ -355,10 +355,10 @@ export const PartnerEditorModal: React.FC<{
                   {field("الهاتف", form.phone, "phone", "tel")}
                   {field("البريد الإلكتروني", form.email, "email", "email")}
                   {field("حد الائتمان", form.credit_limit, "credit_limit", "number")}
-                  <label className="aseel-field">
-                    <span className="aseel-field-label">العملة الافتراضية</span>
+                  <label className="ktra-field">
+                    <span className="ktra-field-label">العملة الافتراضية</span>
                     <select
-                      className="aseel-input"
+                      className="ktra-input"
                       value={form.currency}
                       onChange={(e) => setForm((current) => ({
                         ...current,
@@ -371,10 +371,10 @@ export const PartnerEditorModal: React.FC<{
                       ))}
                     </select>
                   </label>
-                  <label className="aseel-field">
-                    <span className="aseel-field-label">مركز التكلفة الافتراضي</span>
+                  <label className="ktra-field">
+                    <span className="ktra-field-label">مركز التكلفة الافتراضي</span>
                     <select
-                      className="aseel-input"
+                      className="ktra-input"
                       value={form.default_cost_center}
                       onChange={(e) => setForm((current) => ({
                         ...current,
@@ -385,20 +385,20 @@ export const PartnerEditorModal: React.FC<{
                       {costCenters.map((center) => <option key={center.id} value={center.id}>{center.name}</option>)}
                     </select>
                   </label>
-                  <label className="aseel-field">
-                    <span className="aseel-field-label">نهاية التعامل</span>
-                    <AseelDateInput
-                      className="aseel-input"
+                  <label className="ktra-field">
+                    <span className="ktra-field-label">نهاية التعامل</span>
+                    <KitDateInput
+                      className="ktra-input"
                       value={form.end_of_dealing_date}
                       onChange={(value) => setForm((current) => ({
                         ...current, end_of_dealing_date: value,
                       }))}
                     />
                   </label>
-                  <label className="aseel-field">
-                    <span className="aseel-field-label">فئة السعر</span>
+                  <label className="ktra-field">
+                    <span className="ktra-field-label">فئة السعر</span>
                     <select
-                      className="aseel-input"
+                      className="ktra-input"
                       value={form.assigned_price_tier}
                       onChange={(e) => setForm((current) => ({
                         ...current,
@@ -436,7 +436,7 @@ export const PartnerEditorModal: React.FC<{
                   </div>
                   <button
                     type="button"
-                    className="aseel-toolbtn"
+                    className="ktra-toolbtn"
                     onClick={() => setBanks((rows) => [
                       ...rows,
                       blankBank(form.currency || currencies[0]?.CurrencyID || "", rows.length === 0),
@@ -454,33 +454,33 @@ export const PartnerEditorModal: React.FC<{
                     {banks.map((bank, index) => (
                       <div key={bank.id || `new-${index}`} className="rounded-lg bg-[var(--color-surface-2)] p-3">
                         <div className="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-4">
-                          <label className="aseel-field">
-                            <span className="aseel-field-label">اسم البنك *</span>
-                            <input className="aseel-input" value={bank.bank_name} onChange={(e) => patchBank(index, { bank_name: e.target.value })} />
+                          <label className="ktra-field">
+                            <span className="ktra-field-label">اسم البنك *</span>
+                            <input className="ktra-input" value={bank.bank_name} onChange={(e) => patchBank(index, { bank_name: e.target.value })} />
                           </label>
-                          <label className="aseel-field">
-                            <span className="aseel-field-label">رقم الحساب *</span>
-                            <input className="aseel-input font-mono" dir="ltr" value={bank.account_number} onChange={(e) => patchBank(index, { account_number: e.target.value })} />
+                          <label className="ktra-field">
+                            <span className="ktra-field-label">رقم الحساب *</span>
+                            <input className="ktra-input font-mono" dir="ltr" value={bank.account_number} onChange={(e) => patchBank(index, { account_number: e.target.value })} />
                           </label>
-                          <label className="aseel-field">
-                            <span className="aseel-field-label">الفرع</span>
-                            <input className="aseel-input" value={bank.branch_name || ""} onChange={(e) => patchBank(index, { branch_name: e.target.value })} />
+                          <label className="ktra-field">
+                            <span className="ktra-field-label">الفرع</span>
+                            <input className="ktra-input" value={bank.branch_name || ""} onChange={(e) => patchBank(index, { branch_name: e.target.value })} />
                           </label>
-                          <label className="aseel-field">
-                            <span className="aseel-field-label">اسم صاحب الحساب</span>
-                            <input className="aseel-input" value={bank.beneficiary_name || ""} onChange={(e) => patchBank(index, { beneficiary_name: e.target.value })} />
+                          <label className="ktra-field">
+                            <span className="ktra-field-label">اسم صاحب الحساب</span>
+                            <input className="ktra-input" value={bank.beneficiary_name || ""} onChange={(e) => patchBank(index, { beneficiary_name: e.target.value })} />
                           </label>
-                          <label className="aseel-field">
-                            <span className="aseel-field-label">IBAN</span>
-                            <input className="aseel-input font-mono" dir="ltr" value={bank.iban || ""} onChange={(e) => patchBank(index, { iban: e.target.value })} />
+                          <label className="ktra-field">
+                            <span className="ktra-field-label">IBAN</span>
+                            <input className="ktra-input font-mono" dir="ltr" value={bank.iban || ""} onChange={(e) => patchBank(index, { iban: e.target.value })} />
                           </label>
-                          <label className="aseel-field">
-                            <span className="aseel-field-label">SWIFT</span>
-                            <input className="aseel-input font-mono" dir="ltr" value={bank.swift_code || ""} onChange={(e) => patchBank(index, { swift_code: e.target.value })} />
+                          <label className="ktra-field">
+                            <span className="ktra-field-label">SWIFT</span>
+                            <input className="ktra-input font-mono" dir="ltr" value={bank.swift_code || ""} onChange={(e) => patchBank(index, { swift_code: e.target.value })} />
                           </label>
-                          <label className="aseel-field">
-                            <span className="aseel-field-label">العملة *</span>
-                            <select className="aseel-input" value={bank.currency || ""} onChange={(e) => patchBank(index, { currency: e.target.value ? Number(e.target.value) : null })}>
+                          <label className="ktra-field">
+                            <span className="ktra-field-label">العملة *</span>
+                            <select className="ktra-input" value={bank.currency || ""} onChange={(e) => patchBank(index, { currency: e.target.value ? Number(e.target.value) : null })}>
                               <option value="">—</option>
                               {currencies.map((currency) => <option key={currency.CurrencyID} value={currency.CurrencyID}>{currency.Code}</option>)}
                             </select>
@@ -509,8 +509,8 @@ export const PartnerEditorModal: React.FC<{
         </div>
 
         <div className={`${embedded ? "" : "sticky bottom-0 "}flex justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-4`}>
-          <button type="button" className="aseel-toolbtn" onClick={onClose}>{embedded ? "العودة للتفاصيل" : "إلغاء"}</button>
-          <button type="button" className="aseel-toolbtn bg-blue-600 text-white" disabled={loading || saving} onClick={() => void save()}>
+          <button type="button" className="ktra-toolbtn" onClick={onClose}>{embedded ? "العودة للتفاصيل" : "إلغاء"}</button>
+          <button type="button" className="ktra-toolbtn bg-blue-600 text-white" disabled={loading || saving} onClick={() => void save()}>
             <Save className="h-4 w-4" /> {saving ? "جاري الحفظ…" : "حفظ البطاقة"}
           </button>
         </div>

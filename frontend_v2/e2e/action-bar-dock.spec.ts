@@ -119,7 +119,7 @@ test('السحب إلى الأعلى يُعيد الشريط أفقياً إلى
   await expect(dockOf(page)).toHaveAttribute('data-action-bar-dock', 'top');
   await expect(page.getByTestId('action-bar-rail')).toHaveCount(0);
   /* في وضع الأعلى الشريط داخل شريط العنوان لا معلّقاً على الجسم. */
-  await expect(page.locator('.aseel-app-chrome [data-action-bar-dock="top"]')).toBeVisible();
+  await expect(page.locator('.ktra-app-chrome [data-action-bar-dock="top"]')).toBeVisible();
 });
 
 test('على الجوال يُفرض شريط العنوان ولا يظهر رفٌّ عائم', async ({ page }) => {

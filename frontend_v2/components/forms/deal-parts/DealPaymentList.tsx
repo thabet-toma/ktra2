@@ -78,7 +78,7 @@ function statusBadge(p: DealPayment): { label: string; cls: string } {
 
 const cellCls = "px-3 py-2 whitespace-nowrap";
 const iconBtnCls =
-  "inline-flex items-center gap-1 rounded border aseel-border-soft aseel-bg-field px-2 py-1 text-xs font-medium aseel-text-ink hover:aseel-bg-panel dark:aseel-bg-panel dark:hover:aseel-bg-grid-head";
+  "inline-flex items-center gap-1 rounded border ktra-border-soft ktra-bg-field px-2 py-1 text-xs font-medium ktra-text-ink hover:ktra-bg-panel dark:ktra-bg-panel dark:hover:ktra-bg-grid-head";
 
 /**
  * سجل مدفوعات الصفقة — جدول كثيف بنمط جداول الفواتير (بدل البطاقات القديمة
@@ -198,7 +198,7 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
       <h4 className="font-bold text-[var(--color-text)] flex items-center gap-2">
         <Receipt className="w-4 h-4" />
         سجل المدفوعات
-        <span className="text-xs font-normal aseel-text-soft">
+        <span className="text-xs font-normal ktra-text-soft">
           ({payments.length} دفعة)
         </span>
       </h4>
@@ -227,10 +227,10 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
         </div>
       )}
 
-      <div className="rounded-lg border aseel-border-soft dark:aseel-border-soft overflow-x-auto">
+      <div className="rounded-lg border ktra-border-soft dark:ktra-border-soft overflow-x-auto">
         <table className="w-full text-sm text-right">
-          <thead className="aseel-bg-panel dark:aseel-bg-panel text-xs aseel-text-soft">
-            <tr className="border-b aseel-border-soft dark:aseel-border-soft">
+          <thead className="ktra-bg-panel dark:ktra-bg-panel text-xs ktra-text-soft">
+            <tr className="border-b ktra-border-soft dark:ktra-border-soft">
               <th className={`${cellCls} font-medium w-16`}>القسط</th>
               <th className={`${cellCls} font-medium`}>النوع</th>
               <th className={`${cellCls} font-medium w-24`}>التاريخ</th>
@@ -404,14 +404,14 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
             })}
           </tbody>
           <tfoot>
-            <tr className="aseel-bg-panel dark:aseel-bg-panel font-bold border-t aseel-border-soft dark:aseel-border-soft">
+            <tr className="ktra-bg-panel dark:ktra-bg-panel font-bold border-t ktra-border-soft dark:ktra-border-soft">
               <td className={cellCls} colSpan={3}>
                 المجموع
               </td>
               <td className={`${cellCls} font-mono`}>${formatMoney(totalSum)}</td>
               <td className={cellCls} colSpan={2}>
                 {dealCap > 0 && (
-                  <span className="text-xs font-normal aseel-text-soft">
+                  <span className="text-xs font-normal ktra-text-soft">
                     المتبقي:{" "}
                     <span className="font-mono font-bold">
                       ${formatMoney(Math.max(0, dealCap - totalSum))}

@@ -17,11 +17,11 @@ import { apiGetList } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
 import { buildShipmentOptionLabel, ShipmentLabelInput } from "@/utils/shipmentLabel";
 import {
-  AseelDocumentShell,
+  KitDocumentShell,
   useRecordNavigation,
-  useAseelKeymap,
-  AseelDenseTable,
-} from "../../aseel";
+  useKitKeymap,
+  KitDenseTable,
+} from "../../kit";
 
 type ShipmentPick = ShipmentLabelInput;
 type BrokerPick = { id: number; name: string; partner_type?: string };
@@ -88,15 +88,15 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
     },
   });
 
-  useAseelKeymap({
+  useKitKeymap({
     F5: () => reload(),
-    F6: () => { const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]'); el?.focus(); },
+    F6: () => { const el = document.querySelector<HTMLInputElement>('[data-ktra-field="search"]'); el?.focus(); },
     Escape: () => { setShipmentPickerOpen(false); setSelected(null); },
     CtrlIns: () => setShipmentPickerOpen(true),
   });
 
   if (currentUser.role !== "manager" && currentUser.role !== "procurement") {
-    return <div className="p-8 text-center aseel-text-soft dark:aseel-text-soft">لا تملك صلاحية عرض التخليص الجمركي.</div>;
+    return <div className="p-8 text-center ktra-text-soft dark:ktra-text-soft">لا تملك صلاحية عرض التخليص الجمركي.</div>;
   }
 
   const sumLines = (lines: { amount?: number }[]) => lines.reduce((s, r) => s + (Number(r.amount) || 0), 0);
@@ -117,21 +117,21 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
 
   return (
     <div id="clearance-print" dir="rtl">
-      <AseelDocumentShell
+      <KitDocumentShell
         title="فاتورة البيان الجمركي"
         state={selected ? `بيان #${selected.declaration_number || selected.id}` : "قائمة"}
         nav={nav}
         actions={toolbarActions}
         header={
           selected ? (
-            <div style={{ display: "flex", gap: 24, padding: "8px 0", fontSize: "var(--aseel-fs-sm)" }}>
+            <div style={{ display: "flex", gap: 24, padding: "8px 0", fontSize: "var(--ktra-fs-sm)" }}>
               <span><b>الشحنة:</b> {clearanceShipmentTitle(selected)}</span>
               <span><b>المخلّص:</b> {selected.broker_name || "—"}</span>
               <span><b>الحالة:</b> {selected.status}</span>
               <span><b>الإجمالي:</b> {sumLines(selected.cost_lines || []).toLocaleString()}</span>
             </div>
           ) : (
-            <p className="aseel-text-soft text-sm" style={{ padding: 8 }}>
+            <p className="ktra-text-soft text-sm" style={{ padding: 8 }}>
               التخليص يُنشأ ويُحرَّر من داخل «رحلة الاستيراد» لشحنته — نقرة تختار السجل،
               ونقرة مزدوجة (أو زر «رحلة الاستيراد») تفتح التحرير هناك.
             </p>
@@ -139,18 +139,18 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
         }
         status={
           <>
-            <span className="aseel-status-item">المستخدم <b>{currentUser?.name || "—"}</b></span>
-            <span className="aseel-status-item">{clearances.length} بيان</span>
+            <span className="ktra-status-item">المستخدم <b>{currentUser?.name || "—"}</b></span>
+            <span className="ktra-status-item">{clearances.length} بيان</span>
           </>
         }
       >
         {err && (
-          <div className="p-4 rounded-xl aseel-bg-panel aseel-text-state text-sm border aseel-border-soft" style={{ marginBottom: 8 }}>
+          <div className="p-4 rounded-xl ktra-bg-panel ktra-text-state text-sm border ktra-border-soft" style={{ marginBottom: 8 }}>
             {err}
           </div>
         )}
 
-        <AseelDenseTable<ClearanceRow>
+        <KitDenseTable<ClearanceRow>
           columns={listColumns}
           rows={clearances}
           getRowKey={(r) => r.id}
@@ -162,31 +162,31 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
 
         {shipmentPickerOpen && (
           <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)" }} onClick={() => setShipmentPickerOpen(false)}>
-            <div style={{ background: "var(--aseel-bg, #fff)", borderRadius: 8, padding: 16, maxWidth: 520, width: "90%", maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ background: "var(--ktra-bg, #fff)", borderRadius: 8, padding: 16, maxWidth: 520, width: "90%", maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
               <h4 style={{ fontWeight: 600, marginBottom: 4 }}>اختر الشحنة لإنشاء تخليصها</h4>
-              <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm)", marginBottom: 8 }}>
+              <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm)", marginBottom: 8 }}>
                 لكل شحنة تخليص واحد — تُعرض الشحنات التي بلا تخليص بعد، ويُفتح تبويب
                 «التخليص» في رحلة الاستيراد مباشرة.
               </p>
               {shipmentsWithoutClearance.length === 0 && (
-                <p className="aseel-text-soft" style={{ padding: 8 }}>
+                <p className="ktra-text-soft" style={{ padding: 8 }}>
                   كل الشحنات لديها تخليص بالفعل — أنشئ شحنة جديدة من صفحة «الشحنات» أولاً.
                 </p>
               )}
               {shipmentsWithoutClearance.map((s) => (
-                <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--aseel-border, #eee)", cursor: "pointer" }}
+                <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--ktra-border, #eee)", cursor: "pointer" }}
                   onClick={() => { setShipmentPickerOpen(false); navigate(`/import-flow/${s.id}?tab=clearance`); }}>
                   <span>{buildShipmentOptionLabel(s)}</span>
-                  <span className="aseel-toolbtn">فتح الرحلة</span>
+                  <span className="ktra-toolbtn">فتح الرحلة</span>
                 </div>
               ))}
               <div style={{ marginTop: 8, textAlign: "center" }}>
-                <button type="button" className="aseel-toolbtn" onClick={() => setShipmentPickerOpen(false)}>إلغاء</button>
+                <button type="button" className="ktra-toolbtn" onClick={() => setShipmentPickerOpen(false)}>إلغاء</button>
               </div>
             </div>
           </div>
         )}
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

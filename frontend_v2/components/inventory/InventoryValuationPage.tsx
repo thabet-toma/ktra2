@@ -21,7 +21,7 @@ interface ValuationServerRow {
   avg_out_cost: string | null;
   moves_qty_delta: string | null;
 }
-import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import { KitDenseTable, type DenseColumn } from "../kit/KitDenseTable";
 import { RefreshCw, BarChart2, Info } from "lucide-react";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { productProfilePath } from "../../utils/entityLinks";
@@ -198,15 +198,15 @@ export const InventoryValuationPage: React.FC = () => {
       align: "center",
       numeric: true,
       render: (r) => (
-        <b style={{ color: "var(--aseel-accent, #1857a4)" }}>{fmt(r.totalValue)}</b>
+        <b style={{ color: "var(--ktra-accent, #1857a4)" }}>{fmt(r.totalValue)}</b>
       ),
     },
   ];
 
   const footer = hasRun ? (
-    <span style={{ fontWeight: 700, color: "var(--aseel-ink)" }}>
+    <span style={{ fontWeight: 700, color: "var(--ktra-ink)" }}>
       إجمالي قيمة البضاعة ({rows.length} صنف):{" "}
-      <span style={{ color: "var(--aseel-accent, #1857a4)" }}>{fmt(grandTotal)}</span>
+      <span style={{ color: "var(--ktra-accent, #1857a4)" }}>{fmt(grandTotal)}</span>
     </span>
   ) : undefined;
 
@@ -217,18 +217,18 @@ export const InventoryValuationPage: React.FC = () => {
     >
       {/* Header bar */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <BarChart2 style={{ width: 16, height: 16, color: "var(--aseel-accent, #1857a4)" }} />
-        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
+        <BarChart2 style={{ width: 16, height: 16, color: "var(--ktra-accent, #1857a4)" }} />
+        <strong style={{ fontSize: "var(--ktra-fs-title, 14px)", color: "var(--ktra-ink)" }}>
           قيمة البضاعة الموجودة
         </strong>
         {hasRun && (
-          <span className="aseel-status-item">
+          <span className="ktra-status-item">
             <b>{rows.length}</b> صنف — إجمالي: <b>{fmt(grandTotal)}</b>
           </span>
         )}
         <div style={{ flex: 1 }} />
         <button
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           onClick={run}
           disabled={loading}
           title="احتساب قيمة البضاعة"
@@ -246,16 +246,16 @@ export const InventoryValuationPage: React.FC = () => {
           gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
           gap: 8,
           padding: "8px 10px",
-          background: "var(--aseel-row-alt, #f5f5f5)",
+          background: "var(--ktra-row-alt, #f5f5f5)",
           borderRadius: 4,
-          border: "1px solid var(--aseel-border, #d0d0d0)",
+          border: "1px solid var(--ktra-border, #d0d0d0)",
         }}
       >
         {/* Valuation method */}
-        <div className="aseel-field">
-          <label className="aseel-field-label">طريقة الاحتساب</label>
+        <div className="ktra-field">
+          <label className="ktra-field-label">طريقة الاحتساب</label>
           <select
-            className="aseel-input"
+            className="ktra-input"
             value={method}
             onChange={(e) => setMethod(e.target.value as ValuationMethod)}
           >
@@ -266,10 +266,10 @@ export const InventoryValuationPage: React.FC = () => {
         </div>
 
         {/* Bonus quantities */}
-        <div className="aseel-field">
-          <label className="aseel-field-label">الكميات الإضافية</label>
+        <div className="ktra-field">
+          <label className="ktra-field-label">الكميات الإضافية</label>
           <select
-            className="aseel-input"
+            className="ktra-input"
             value={bonusCalc}
             onChange={(e) => setBonusCalc(e.target.value as BonusCalc)}
           >
@@ -280,21 +280,21 @@ export const InventoryValuationPage: React.FC = () => {
         </div>
 
         {/* As-of date */}
-        <div className="aseel-field">
-          <label className="aseel-field-label">التاريخ حتى</label>
+        <div className="ktra-field">
+          <label className="ktra-field-label">التاريخ حتى</label>
           <input
             type="date"
-            className="aseel-input"
+            className="ktra-input"
             value={asOfDate}
             onChange={(e) => setAsOfDate(e.target.value)}
           />
         </div>
 
         {/* Category filter */}
-        <div className="aseel-field">
-          <label className="aseel-field-label">التصنيف</label>
+        <div className="ktra-field">
+          <label className="ktra-field-label">التصنيف</label>
           <select
-            className="aseel-input"
+            className="ktra-input"
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value)}
           >
@@ -306,10 +306,10 @@ export const InventoryValuationPage: React.FC = () => {
         </div>
 
         {/* Search */}
-        <div className="aseel-field" style={{ gridColumn: "span 2" }}>
-          <label className="aseel-field-label">بحث</label>
+        <div className="ktra-field" style={{ gridColumn: "span 2" }}>
+          <label className="ktra-field-label">بحث</label>
           <input
-            className="aseel-input"
+            className="ktra-input"
             placeholder="SKU / اسم الصنف…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -317,15 +317,15 @@ export const InventoryValuationPage: React.FC = () => {
         </div>
       </div>
 
-      {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
+      {err && <div className="ktra-banner ktra-banner--err">{err}</div>}
 
       <div
         style={{
           display: "flex",
           gap: 6,
           alignItems: "center",
-          fontSize: "var(--aseel-fs-sm)",
-          color: "var(--aseel-ink-soft)",
+          fontSize: "var(--ktra-fs-sm)",
+          color: "var(--ktra-ink-soft)",
           padding: "2px 4px",
         }}
       >
@@ -344,7 +344,7 @@ export const InventoryValuationPage: React.FC = () => {
             justifyContent: "center",
             flexDirection: "column",
             gap: 12,
-            color: "var(--aseel-ink-soft)",
+            color: "var(--ktra-ink-soft)",
           }}
         >
           <BarChart2 style={{ width: 40, height: 40, opacity: 0.3 }} />
@@ -353,7 +353,7 @@ export const InventoryValuationPage: React.FC = () => {
       )}
 
       {(hasRun || loading) && (
-        <AseelDenseTable<ValuationRow>
+        <KitDenseTable<ValuationRow>
           columns={columns}
           rows={rows}
           getRowKey={(r) => r.id}

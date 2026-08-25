@@ -1,14 +1,14 @@
 import React from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import {
-  AseelDenseTable,
-  AseelDocumentShell,
-  type AseelDenseTableProps,
-  type AseelToolbarAction,
+  KitDenseTable,
+  KitDocumentShell,
+  type KitDenseTableProps,
+  type KitToolbarAction,
   type DenseColumn,
   type DensePagination,
   type RecordNavigation,
-} from "../aseel";
+} from "../kit";
 
 export type CommercialListOption = {
   value: string;
@@ -39,10 +39,10 @@ type Props<T extends Record<string, any>> = {
   onRowDoubleClick?: (row: T) => void;
   pagination?: DensePagination;
   detailPanel?: React.ReactNode;
-  extraActions?: AseelToolbarAction[];
+  extraActions?: KitToolbarAction[];
   tableProps?: Partial<
     Pick<
-      AseelDenseTableProps<T>,
+      KitDenseTableProps<T>,
       "selectable" | "selectedKey" | "onSelect" | "exportable" | "exportFilename"
     >
   >;
@@ -75,7 +75,7 @@ export function CommercialDocumentsList<T extends Record<string, any>>({
   extraActions = [],
   tableProps,
 }: Props<T>) {
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "new", label: newLabel, icon: <Plus />, onClick: onNew },
     {
       key: "reload",
@@ -90,7 +90,7 @@ export function CommercialDocumentsList<T extends Record<string, any>>({
 
   return (
     <div dir="rtl" className="min-h-0">
-      <AseelDocumentShell
+      <KitDocumentShell
         title={title}
         state={state}
         nav={nav}
@@ -98,11 +98,11 @@ export function CommercialDocumentsList<T extends Record<string, any>>({
         header={hasFilters ? (
           <>
             {onSearchChange && (
-              <label className="aseel-field">
-                <span className="aseel-field-label">بحث</span>
+              <label className="ktra-field">
+                <span className="ktra-field-label">بحث</span>
                 <input
-                  className="aseel-input"
-                  data-aseel-field="search"
+                  className="ktra-input"
+                  data-ktra-field="search"
                   placeholder={searchPlaceholder}
                   value={searchValue ?? ""}
                   onChange={(event) => onSearchChange(event.target.value)}
@@ -110,10 +110,10 @@ export function CommercialDocumentsList<T extends Record<string, any>>({
               </label>
             )}
             {statusOptions?.length && onStatusChange && (
-              <label className="aseel-field">
-                <span className="aseel-field-label">الحالة</span>
+              <label className="ktra-field">
+                <span className="ktra-field-label">الحالة</span>
                 <select
-                  className="aseel-input"
+                  className="ktra-input"
                   value={statusValue ?? ""}
                   onChange={(event) => onStatusChange(event.target.value)}
                 >
@@ -127,14 +127,14 @@ export function CommercialDocumentsList<T extends Record<string, any>>({
             )}
           </>
         ) : undefined}
-        status={countLabel ? <span className="aseel-status-item">{countLabel}</span> : undefined}
+        status={countLabel ? <span className="ktra-status-item">{countLabel}</span> : undefined}
       >
         {error && (
-          <div className="aseel-banner aseel-banner--err" role="alert">
+          <div className="ktra-banner ktra-banner--err" role="alert">
             {error}
           </div>
         )}
-        <AseelDenseTable<T>
+        <KitDenseTable<T>
           columns={columns}
           rows={rows}
           getRowKey={getRowKey}
@@ -146,7 +146,7 @@ export function CommercialDocumentsList<T extends Record<string, any>>({
           {...tableProps}
         />
         {detailPanel}
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 }

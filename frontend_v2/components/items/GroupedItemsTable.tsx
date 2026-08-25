@@ -2,11 +2,11 @@
  * جدول أصناف شجري بأي عمق (نمط المواقع الاحترافية): يعرض **شجرة التصنيفات** كما بناها
  * المستخدم (أب/ابن/حفيد... بلا حدّ)، والمنتجات أوراق تحت تصنيفاتها. كبسة على أي تصنيف
  * ⇒ الكرت المجمّع لكل ما تحته (بكل الأعماق)؛ كبسة على منتج ⇒ كرته (عبر عمود الاسم).
- * يعيد استخدام نفس أعمدة AseelDenseTable وتنسيقها (DRY). الافتراضي **مفتوح**.
+ * يعيد استخدام نفس أعمدة KitDenseTable وتنسيقها (DRY). الافتراضي **مفتوح**.
  */
 import React, { useState } from "react";
 import { ChevronDown, ChevronLeft, FolderTree } from "lucide-react";
-import type { DenseColumn } from "../aseel/AseelDenseTable";
+import type { DenseColumn } from "../kit/KitDenseTable";
 import type { SqlProduct } from "../../types/inventory";
 import { formatQuantity } from "../../utils/formatNumber";
 import { buildCategoryIndex, descendantIds as descendantCategoryIds } from "../../utils/categoryTree";
@@ -83,7 +83,7 @@ export const GroupedItemsTable: React.FC<Props> = ({
             textAlign: getAlign(col) as React.CSSProperties["textAlign"],
             ...(ci === 1 ? { paddingInlineStart: depth * 22 } : {}),
           }}
-          className={col.numeric ? "aseel-num" : ""}
+          className={col.numeric ? "ktra-num" : ""}
         >
           {col.render ? col.render(p, 0) : String((p as unknown as Record<string, unknown>)[col.key] ?? "")}
         </td>
@@ -96,12 +96,12 @@ export const GroupedItemsTable: React.FC<Props> = ({
     const open = isExpanded(catId);
     const ids = descendantIds(catId);
     return (
-      <tr key={`c-${catId}`} style={{ background: depth === 0 ? "var(--aseel-bg-soft,#e7ecf1)" : "var(--aseel-bg-soft,#f1f3f5)" }}>
+      <tr key={`c-${catId}`} style={{ background: depth === 0 ? "var(--ktra-bg-soft,#e7ecf1)" : "var(--ktra-bg-soft,#f1f3f5)" }}>
         {columns.map((col, ci) => {
           if (ci === 0) {
             return (
               <td key={col.key} style={{ textAlign: "center" }}>
-                <button type="button" className="aseel-iconbtn" title={open ? "طيّ" : "فتح"} onClick={() => toggle(catId)}>
+                <button type="button" className="ktra-iconbtn" title={open ? "طيّ" : "فتح"} onClick={() => toggle(catId)}>
                   {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
                 </button>
               </td>
@@ -111,12 +111,12 @@ export const GroupedItemsTable: React.FC<Props> = ({
             return (
               <td key={col.key}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, paddingInlineStart: depth * 22 }}>
-                  <FolderTree className="h-4 w-4" style={{ color: "var(--aseel-primary,#1857a4)", flexShrink: 0 }} />
+                  <FolderTree className="h-4 w-4" style={{ color: "var(--ktra-primary,#1857a4)", flexShrink: 0 }} />
                   <button type="button" className="hover:underline"
-                    style={{ fontWeight: 700, color: "var(--aseel-primary,#1857a4)", background: "none", border: "none", padding: 0, cursor: "pointer" }}
+                    style={{ fontWeight: 700, color: "var(--ktra-primary,#1857a4)", background: "none", border: "none", padding: 0, cursor: "pointer" }}
                     onClick={() => (ids.length ? onShowGroup(ids, name, catId === UNCAT ? undefined : catId) : toggle(catId))}
                     title="كرت مجمّع لكل ما تحت التصنيف">
-                    {name} <span style={{ color: "var(--aseel-ink-soft)", fontWeight: 400 }}>({ids.length})</span>
+                    {name} <span style={{ color: "var(--ktra-ink-soft)", fontWeight: 400 }}>({ids.length})</span>
                   </button>
                 </div>
               </td>
@@ -147,20 +147,21 @@ export const GroupedItemsTable: React.FC<Props> = ({
   }
 
   return (
-    <div className="aseel-dense-table">
-      <table className="aseel-grid" data-variant="list">
+    <div className="ktra-dense-table">
+      <table className="ktra-grid" data-variant="list">
         <thead>
           <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
                 style={{ width: col.width, textAlign: getAlign(col) as React.CSSProperties["textAlign"] }}
-                className={col.sortable && onSort ? "aseel-sortable" : ""}
+                className={col.sortable && onSort ? "ktra-sortable" : ""}
                 onClick={() => handleSort(col)}
               >
                 {col.header}
+                {/* المثلّث زخرفة — انظر التعليل في `KitDenseTable.tsx`. */}
                 {sortKey === col.key && (
-                  <span className="aseel-sort-indicator">{sortDir === "asc" ? "▲" : "▼"}</span>
+                  <span className="ktra-sort-indicator" aria-hidden="true">{sortDir === "asc" ? "▲" : "▼"}</span>
                 )}
               </th>
             ))}
@@ -168,10 +169,10 @@ export const GroupedItemsTable: React.FC<Props> = ({
         </thead>
         <tbody>
           {loading && rows.length === 0 && (
-            <tr className="aseel-row--empty"><td colSpan={columns.length} style={{ textAlign: "center", padding: 16 }}>جاري التحميل…</td></tr>
+            <tr className="ktra-row--empty"><td colSpan={columns.length} style={{ textAlign: "center", padding: 16 }}>جاري التحميل…</td></tr>
           )}
           {!loading && rows.length === 0 && (
-            <tr className="aseel-row--empty"><td colSpan={columns.length} style={{ textAlign: "center", padding: 16, color: "var(--aseel-ink-soft)" }}>{emptyHint}</td></tr>
+            <tr className="ktra-row--empty"><td colSpan={columns.length} style={{ textAlign: "center", padding: 16, color: "var(--ktra-ink-soft)" }}>{emptyHint}</td></tr>
           )}
           {body}
         </tbody>

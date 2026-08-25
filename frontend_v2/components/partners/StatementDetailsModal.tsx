@@ -46,8 +46,8 @@ function kindOf(t?: string | null): Kind {
   return "other";
 }
 
-const th = "px-2 py-1 text-right font-bold border-b border-[var(--aseel-border)] bg-[var(--aseel-head,#f2f0e4)]";
-const td = "px-2 py-1 text-right border-b border-[var(--aseel-border)]";
+const th = "px-2 py-1 text-right font-bold border-b border-[var(--ktra-border)] bg-[var(--ktra-head,#f2f0e4)]";
+const td = "px-2 py-1 text-right border-b border-[var(--ktra-border)]";
 
 export const StatementDetailsModal: React.FC<{
   movement: StatementMovement | null;
@@ -108,21 +108,21 @@ export const StatementDetailsModal: React.FC<{
         </div>
 
         <div className="p-4 space-y-3 text-sm">
-          <div className="flex flex-wrap gap-x-6 gap-y-1 text-[var(--aseel-ink-soft)]">
-            <span>التاريخ: <b className="text-[var(--aseel-ink)]">{formatDateLocalized(movement.date) || "—"}</b></span>
-            <span>مدين: <b className="text-[var(--aseel-ink)] aseel-num">{movement.debit}</b></span>
-            <span>دائن: <b className="text-[var(--aseel-ink)] aseel-num">{movement.credit}</b></span>
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-[var(--ktra-ink-soft)]">
+            <span>التاريخ: <b className="text-[var(--ktra-ink)]">{formatDateLocalized(movement.date) || "—"}</b></span>
+            <span>مدين: <b className="text-[var(--ktra-ink)] ktra-num">{movement.debit}</b></span>
+            <span>دائن: <b className="text-[var(--ktra-ink)] ktra-num">{movement.credit}</b></span>
           </div>
           {movement.description && (
-            <div className="text-[var(--aseel-ink-soft)]">البيان: <span className="text-[var(--aseel-ink)]">{movement.description}</span></div>
+            <div className="text-[var(--ktra-ink-soft)]">البيان: <span className="text-[var(--ktra-ink)]">{movement.description}</span></div>
           )}
 
           {loading && (
-            <div className="flex items-center gap-2 text-[var(--aseel-ink-soft)] py-4">
+            <div className="flex items-center gap-2 text-[var(--ktra-ink-soft)] py-4">
               <Loader2 className="w-4 h-4 animate-spin" /> جاري تحميل التفاصيل…
             </div>
           )}
-          {error && <div className="text-[var(--aseel-danger)] py-2">{error}</div>}
+          {error && <div className="text-[var(--ktra-danger)] py-2">{error}</div>}
 
           {/* فاتورة مبيعات — البنود المُباعة */}
           {!loading && sales && (
@@ -139,9 +139,9 @@ export const StatementDetailsModal: React.FC<{
                 {sales.lines.map((l) => (
                   <tr key={l.id}>
                     <td className={td}>{l.product_name || `#${l.product}`}</td>
-                    <td className={`${td} aseel-num`}>{l.quantity}</td>
-                    <td className={`${td} aseel-num`}>{formatMoney(l.unit_price)}</td>
-                    <td className={`${td} aseel-num`}>{formatMoney(l.line_total_excl_tax)}</td>
+                    <td className={`${td} ktra-num`}>{l.quantity}</td>
+                    <td className={`${td} ktra-num`}>{formatMoney(l.unit_price)}</td>
+                    <td className={`${td} ktra-num`}>{formatMoney(l.line_total_excl_tax)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -163,9 +163,9 @@ export const StatementDetailsModal: React.FC<{
                 {(purchase.items || []).map((it, i) => (
                   <tr key={it.id ?? i}>
                     <td className={td}>{it.product_name || it.name || `#${it.product ?? ""}`}</td>
-                    <td className={`${td} aseel-num`}>{it.quantity}</td>
-                    <td className={`${td} aseel-num`}>{formatMoney(it.unit_price)}</td>
-                    <td className={`${td} aseel-num`}>{formatMoney(it.total_price)}</td>
+                    <td className={`${td} ktra-num`}>{it.quantity}</td>
+                    <td className={`${td} ktra-num`}>{formatMoney(it.unit_price)}</td>
+                    <td className={`${td} ktra-num`}>{formatMoney(it.total_price)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -176,11 +176,11 @@ export const StatementDetailsModal: React.FC<{
           {!loading && payment && (
             <div className="space-y-3">
               <div className="flex flex-wrap gap-x-6 gap-y-1">
-                <span className="text-[var(--aseel-ink-soft)]">المبلغ المقبوض: <b className="text-[var(--aseel-ink)] aseel-num">{formatMoney(payment.amount)}</b></span>
-                <span className="text-[var(--aseel-ink-soft)]">تاريخ القبض: <b className="text-[var(--aseel-ink)]">{formatDateLocalized(payment.payment_date) || "—"}</b></span>
+                <span className="text-[var(--ktra-ink-soft)]">المبلغ المقبوض: <b className="text-[var(--ktra-ink)] ktra-num">{formatMoney(payment.amount)}</b></span>
+                <span className="text-[var(--ktra-ink-soft)]">تاريخ القبض: <b className="text-[var(--ktra-ink)]">{formatDateLocalized(payment.payment_date) || "—"}</b></span>
               </div>
               {payment.notes && (
-                <div className="text-[var(--aseel-ink-soft)]">ملاحظات: <span className="text-[var(--aseel-ink)]">{payment.notes}</span></div>
+                <div className="text-[var(--ktra-ink-soft)]">ملاحظات: <span className="text-[var(--ktra-ink)]">{payment.notes}</span></div>
               )}
               {payment.allocations && payment.allocations.length > 0 ? (
                 <table className="w-full border-collapse">
@@ -194,20 +194,20 @@ export const StatementDetailsModal: React.FC<{
                     {payment.allocations.map((a, i) => (
                       <tr key={a.id ?? i}>
                         <td className={td}>فاتورة #{a.invoice}</td>
-                        <td className={`${td} aseel-num`}>{formatMoney(a.amount)}</td>
+                        <td className={`${td} ktra-num`}>{formatMoney(a.amount)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               ) : (
-                <div className="text-[var(--aseel-ink-soft)]">دفعة على الحساب (بلا تخصيص لفاتورة محددة).</div>
+                <div className="text-[var(--ktra-ink-soft)]">دفعة على الحساب (بلا تخصيص لفاتورة محددة).</div>
               )}
             </div>
           )}
 
           {/* أنواع أخرى — ملخّص + رابط المستند إن وُجد */}
           {!loading && kind === "other" && !error && (
-            <div className="text-[var(--aseel-ink-soft)] py-2">
+            <div className="text-[var(--ktra-ink-soft)] py-2">
               لا تتوفر بنود تفصيلية لهذا النوع من الحركات. يظهر الملخّص أعلاه.
             </div>
           )}
@@ -217,7 +217,7 @@ export const StatementDetailsModal: React.FC<{
               <button
                 type="button"
                 onClick={() => navigate(path)}
-                className="inline-flex items-center gap-1.5 text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+                className="inline-flex items-center gap-1.5 text-[var(--ktra-accent,#2563eb)] underline hover:opacity-80"
               >
                 <ExternalLink className="w-4 h-4" /> فتح المستند الكامل
               </button>

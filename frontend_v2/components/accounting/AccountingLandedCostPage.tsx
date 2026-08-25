@@ -2,10 +2,10 @@ import React, { useState, useEffect, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import type { LandedCostReport, LandedCostShipment } from "../../types/accounting";
 import {
-  AseelDocumentShell,
-  AseelReportTable,
-} from "../aseel";
-import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
+  KitDocumentShell,
+  KitReportTable,
+} from "../kit";
+import type { KitToolbarAction, KitTab, ReportColumn } from "../kit";
 import { Search, ChevronRight, ChevronDown, Package, AlertCircle } from "lucide-react";
 import { Spinner } from "../ui";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
@@ -70,7 +70,7 @@ export const AccountingLandedCostPage: React.FC = () => {
 
   const shipments = data?.shipments || [];
 
-  // For AseelReportTable we need flat rows
+  // For KitReportTable we need flat rows
   const columns: ReportColumn<LandedCostShipment>[] = [
     {
       key: "expand", header: "",
@@ -106,29 +106,29 @@ export const AccountingLandedCostPage: React.FC = () => {
 
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      <div className="aseel-field">
-        <label className="aseel-field-label">وصول من</label>
-        <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">وصول من</label>
+        <input type="date" className="ktra-input" value={start} onChange={(e) => setStart(e.target.value)} />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">وصول إلى</label>
-        <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">وصول إلى</label>
+        <input type="date" className="ktra-input" value={end} onChange={(e) => setEnd(e.target.value)} />
       </div>
-      <button type="button" className="aseel-toolbtn" onClick={fetchReport} style={{ marginTop: "18px" }}>
+      <button type="button" className="ktra-toolbtn" onClick={fetchReport} style={{ marginTop: "18px" }}>
         <Search className="w-4 h-4" />تحديث
       </button>
     </div>
   );
 
-  // Custom table because we need expand rows — we'll render a custom section after AseelReportTable
+  // Custom table because we need expand rows — we'll render a custom section after KitReportTable
   const reportContent = (
     <>
       {err && (
-        <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px", display: "flex", gap: "8px", alignItems: "center" }}>
+        <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px", display: "flex", gap: "8px", alignItems: "center" }}>
           <AlertCircle className="w-4 h-4" />{err}
         </div>
       )}
-      <AseelReportTable<LandedCostShipment>
+      <KitReportTable<LandedCostShipment>
         filterBar={filterBar}
         columns={columns}
         rows={shipments}
@@ -140,7 +140,7 @@ export const AccountingLandedCostPage: React.FC = () => {
       />
       {/* Expand detail panel */}
       {expanded != null && (
-        <div style={{ marginTop: "8px", border: "1px solid var(--aseel-border)", borderRadius: "var(--aseel-radius)", padding: "12px" }}>
+        <div style={{ marginTop: "8px", border: "1px solid var(--ktra-border)", borderRadius: "var(--ktra-radius)", padding: "12px" }}>
           {detail ? (
             <ShipmentDetail sh={detail} fmt={fmt} />
           ) : (
@@ -151,29 +151,29 @@ export const AccountingLandedCostPage: React.FC = () => {
     </>
   );
 
-  const shellActions: AseelToolbarAction[] = [
+  const shellActions: KitToolbarAction[] = [
     { key: "run", label: "تحديث", icon: <Search className="w-4 h-4" />, onClick: fetchReport },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "landed", label: "التكلفة المستوردة", content: reportContent },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="تقرير التكلفة المستوردة"
         actions={shellActions}
         header={<></>}
         tabs={tabs}
         status={
           data ? (
-            <span className="aseel-status-item">{shipments.length} شحنة</span>
+            <span className="ktra-status-item">{shipments.length} شحنة</span>
           ) : undefined
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };
@@ -185,11 +185,11 @@ const ShipmentDetail: React.FC<{
   <div className="space-y-4">
     {sh.deals.map((d) => (
       <div key={d.deal_id}
-        style={{ background: "var(--aseel-surface)", border: "1px solid var(--aseel-border)", borderRadius: "var(--aseel-radius)", padding: "12px" }}>
+        style={{ background: "var(--ktra-surface)", border: "1px solid var(--ktra-border)", borderRadius: "var(--ktra-radius)", padding: "12px" }}>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
           <Package className="w-4 h-4" style={{ color: "var(--color-primary,#3b82f6)" }} />
           <span style={{ fontWeight: "600" }}>صفقة {d.ref_number || `#${d.deal_id}`}</span>
-          <span style={{ fontSize: "0.8rem", color: "var(--aseel-ink-soft)" }}>{d.partner_name} — {d.currency}</span>
+          <span style={{ fontSize: "0.8rem", color: "var(--ktra-ink-soft)" }}>{d.partner_name} — {d.currency}</span>
           <span style={{ fontSize: "0.8rem", marginInlineStart: "auto" }}>
             بضاعة: {fmt(d.merchandise_total)} | شحن مُخصَّص: {fmt(d.allocated_shipping_cost_usd)} USD
           </span>
@@ -211,7 +211,7 @@ const ShipmentDetail: React.FC<{
             {d.purchase_invoice.items.length > 0 && (
               <table style={{ width: "100%", fontSize: "0.8rem", borderCollapse: "collapse" }}>
                 <thead>
-                  <tr style={{ background: "var(--aseel-surface-2,#f8f9fa)" }}>
+                  <tr style={{ background: "var(--ktra-surface-2,#f8f9fa)" }}>
                     <th style={{ padding: "4px 8px", textAlign: "right" }}>الصنف</th>
                     <th style={{ padding: "4px 8px", textAlign: "right" }}>الكمية</th>
                     <th style={{ padding: "4px 8px", textAlign: "right" }}>سعر الصفقة</th>
@@ -221,7 +221,7 @@ const ShipmentDetail: React.FC<{
                 </thead>
                 <tbody>
                   {d.purchase_invoice.items.map((it) => (
-                    <tr key={it.id} style={{ borderTop: "1px solid var(--aseel-border)" }}>
+                    <tr key={it.id} style={{ borderTop: "1px solid var(--ktra-border)" }}>
                       <td style={{ padding: "4px 8px" }}>{it.name}</td>
                       <td style={{ padding: "4px 8px", textAlign: "right" }}>{formatQuantity(it.quantity)}</td>
                       <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(it.unit_price)}</td>
@@ -246,32 +246,32 @@ const ShipmentDetail: React.FC<{
     ))}
 
     {sh.clearance && (
-      <div style={{ background: "var(--aseel-surface)", border: "1px solid var(--aseel-border)", borderRadius: "var(--aseel-radius)", padding: "12px" }}>
+      <div style={{ background: "var(--ktra-surface)", border: "1px solid var(--ktra-border)", borderRadius: "var(--ktra-radius)", padding: "12px" }}>
         <div style={{ fontWeight: "600", marginBottom: "8px" }}>
           التخليص الجمركي #{sh.clearance.id}
           {sh.clearance.declaration_number && ` — بيان ${sh.clearance.declaration_number}`}
         </div>
-        <div style={{ fontSize: "0.8rem", color: "var(--aseel-ink-soft)", marginBottom: "8px" }}>
+        <div style={{ fontSize: "0.8rem", color: "var(--ktra-ink-soft)", marginBottom: "8px" }}>
           {sh.clearance.broker_name} · {sh.clearance.status} · دفعات مرحّلة: {fmt(sh.clearance.posted_payments_total)}
         </div>
         {sh.clearance.cost_lines.length > 0 && (
           <table style={{ width: "100%", fontSize: "0.8rem", borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ background: "var(--aseel-surface-2,#f8f9fa)" }}>
+              <tr style={{ background: "var(--ktra-surface-2,#f8f9fa)" }}>
                 <th style={{ padding: "4px 8px", textAlign: "right" }}>البند</th>
                 <th style={{ padding: "4px 8px", textAlign: "right" }}>المبلغ</th>
               </tr>
             </thead>
             <tbody>
               {sh.clearance.cost_lines.map((ln, i) => (
-                <tr key={i} style={{ borderTop: "1px solid var(--aseel-border)" }}>
+                <tr key={i} style={{ borderTop: "1px solid var(--ktra-border)" }}>
                   <td style={{ padding: "4px 8px" }}>{ln.label}</td>
                   <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(ln.amount)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
-              <tr style={{ fontWeight: "600", borderTop: "1px solid var(--aseel-border)" }}>
+              <tr style={{ fontWeight: "600", borderTop: "1px solid var(--ktra-border)" }}>
                 <td style={{ padding: "4px 8px" }}>الإجمالي</td>
                 <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(sh.clearance.cost_lines_total)}</td>
               </tr>

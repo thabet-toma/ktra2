@@ -23,7 +23,7 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { humanizeDrfError } from "../../utils/drfError";
 import { memberOverrideForCheckbox } from "../../utils/viewPermissions";
-import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
+import { KitDocumentShell, type KitToolbarAction } from "../kit";
 
 type Draft = Record<string, Record<string, boolean>>;
 
@@ -196,7 +196,7 @@ export const PermissionsPage: React.FC = () => {
     }
   };
 
-  const toolbarActions: AseelToolbarAction[] = [
+  const toolbarActions: KitToolbarAction[] = [
     {
       key: "save",
       label: saving ? "..." : `حفظ${changes.length ? ` (${changes.length})` : ""}`,
@@ -226,10 +226,10 @@ export const PermissionsPage: React.FC = () => {
   const inner = (
     <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-4" dir="rtl">
       <div
-        className="aseel-banner"
-        style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "var(--aseel-surface-2, #f4ede0)" }}
+        className="ktra-banner"
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "var(--ktra-surface-2, #f4ede0)" }}
       >
-        <ShieldCheck className="w-4 h-4" style={{ color: "var(--aseel-ink-soft)" }} />
+        <ShieldCheck className="w-4 h-4" style={{ color: "var(--ktra-ink-soft)" }} />
         <span style={{ fontSize: 12 }}>
           حدّد ما يملكه كل دور. عمود «مدير» مقفل (مالك الشركة يملك كل شيء).
           الإنفاذ على الخادم — إخفاء الزر وحده لا يكفي.
@@ -249,7 +249,7 @@ export const PermissionsPage: React.FC = () => {
       )}
 
       {/* تبويبان: القاعدة العامة (الدور) ثم الاستثناء الفردي (الموظف). */}
-      <div className="flex gap-2 border-b aseel-border-soft">
+      <div className="flex gap-2 border-b ktra-border-soft">
         {([["role", "حسب الدور"], ["member", "حسب الموظف"]] as const).map(([k, label]) => (
           <button
             key={k}
@@ -268,7 +268,7 @@ export const PermissionsPage: React.FC = () => {
               <button
                 key={m.membership_id}
                 onClick={() => setActiveMember(m.membership_id)}
-                className={`px-3 py-1.5 rounded-md border text-sm ${activeMember === m.membership_id ? "border-[var(--color-primary)] text-[var(--color-primary)] font-bold" : "aseel-border-soft"}`}
+                className={`px-3 py-1.5 rounded-md border text-sm ${activeMember === m.membership_id ? "border-[var(--color-primary)] text-[var(--color-primary)] font-bold" : "ktra-border-soft"}`}
               >
                 {m.name}
                 <span className="text-[10px] mr-2 opacity-70">
@@ -298,10 +298,10 @@ export const PermissionsPage: React.FC = () => {
             return (
               <div className="space-y-3">
                 {/* الدور أولاً (القاعدة العامة) ثم الاستثناءات الفردية تحته. */}
-                <div className="flex items-center gap-2 rounded-lg border aseel-border-soft p-3">
+                <div className="flex items-center gap-2 rounded-lg border ktra-border-soft p-3">
                   <span className="text-sm font-semibold">دور {m.name}:</span>
                   <select
-                    className="rounded-md border aseel-border-soft aseel-bg-field px-2 py-1 text-sm"
+                    className="rounded-md border ktra-border-soft ktra-bg-field px-2 py-1 text-sm"
                     value={m.role}
                     disabled={saving}
                     onChange={(e) => void handleRoleChange(m, e.target.value)}
@@ -328,10 +328,10 @@ export const PermissionsPage: React.FC = () => {
                   يُحفظ تخصيصاً له وحده (مُعلَّم بإطار)، وما وافقه يعود للدور.
                 </p>
                 {groups.map(([group, perms]) => (
-                  <div key={group} className="rounded-lg border aseel-border-soft overflow-x-auto">
+                  <div key={group} className="rounded-lg border ktra-border-soft overflow-x-auto">
                     <table className="w-full text-sm" style={{ minWidth: 480 }}>
                       <thead>
-                        <tr className="aseel-bg-panel">
+                        <tr className="ktra-bg-panel">
                           <th className="p-2 text-right font-semibold">{group}</th>
                           <th className="p-2 text-center font-semibold w-40">الحالة</th>
                         </tr>
@@ -341,7 +341,7 @@ export const PermissionsPage: React.FC = () => {
                           const ovr = m.overrides[p.key];
                           const effective = m.effective.includes(p.key);
                           return (
-                            <tr key={p.key} className="border-t aseel-border-soft">
+                            <tr key={p.key} className="border-t ktra-border-soft">
                               <td className="p-2 text-right">{p.label}</td>
                               <td className="p-2 text-center">
                                 <input
@@ -369,10 +369,10 @@ export const PermissionsPage: React.FC = () => {
       )}
 
       {tab === "role" && data && groups.map(([group, perms]) => (
-        <div key={group} className="rounded-lg border aseel-border-soft overflow-x-auto">
+        <div key={group} className="rounded-lg border ktra-border-soft overflow-x-auto">
           <table className="w-full text-sm" style={{ minWidth: 640 }}>
             <thead>
-              <tr className="aseel-bg-panel">
+              <tr className="ktra-bg-panel">
                 <th className="p-2 text-right font-semibold">{group}</th>
                 {data.roles.map((r) => (
                   <th key={r.key} className="p-2 text-center font-semibold whitespace-nowrap">
@@ -383,7 +383,7 @@ export const PermissionsPage: React.FC = () => {
             </thead>
             <tbody>
               {perms.map((p) => (
-                <tr key={p.key} className="border-t aseel-border-soft">
+                <tr key={p.key} className="border-t ktra-border-soft">
                   <td className="p-2 text-right">{p.label}</td>
                   {data.roles.map((r) => {
                     const on = !!draft[r.key]?.[p.key];
@@ -413,14 +413,14 @@ export const PermissionsPage: React.FC = () => {
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="الصلاحيات والأدوار"
         state="مصفوفة (دور × صلاحية) لهذه الشركة"
         actions={toolbarActions}
         header={<></>}
       >
         {inner}
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

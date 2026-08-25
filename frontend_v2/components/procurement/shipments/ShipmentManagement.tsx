@@ -1,5 +1,5 @@
 /**
- * N6-T2 — ShipmentManagement (L2) — AseelDenseTable لإدارة الشحنات
+ * N6-T2 — ShipmentManagement (L2) — KitDenseTable لإدارة الشحنات
  * المرجع: task5.md:796 + الإرساليات.txt:6-155
  */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -9,13 +9,13 @@ import { shipmentsService } from '../../../services/shipmentsService';
 import { Plus, Eye, Edit, Trash2, RefreshCw } from 'lucide-react';
 import { LoadingSpinner } from '../../LoadingSpinner';
 import { ShipmentDetailView } from './ShipmentDetailView';
-import { AseelDenseTable, type DenseColumn } from '../../aseel/AseelDenseTable';
+import { KitDenseTable, type DenseColumn } from '../../kit/KitDenseTable';
 import { CreateShipmentFromDealsModal } from '../../import-flow/CreateShipmentFromDealsModal';
-import { useAseelIndexKeymap } from '../../aseel/useAseelIndexKeymap';
+import { useKitIndexKeymap } from '../../kit/useKitIndexKeymap';
 import { openInNewTab } from '@/utils/openInNewTab';
 import { useConfirm } from '../../../contexts/ConfirmContext';
 import { useToast } from '../../../contexts/ToastContext';
-import { AseelErrorState } from '../../aseel';
+import { KitErrorState } from '../../kit';
 import { formatDateValue } from "../../../utils/formatDate";
 
 interface ShipmentManagementProps {
@@ -37,13 +37,13 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-    draft:           'var(--aseel-ink-soft)',
-    payment_pending: 'var(--aseel-warn, #b8800a)',
-    partially_paid:  'var(--aseel-warn, #b8800a)',
-    paid:            'var(--aseel-ok, #267346)',
-    shipped:         'var(--aseel-accent, #1857a4)',
-    delivered:       'var(--aseel-ok, #267346)',
-    cancelled:       'var(--aseel-danger, #c00)',
+    draft:           'var(--ktra-ink-soft)',
+    payment_pending: 'var(--ktra-warn, #b8800a)',
+    partially_paid:  'var(--ktra-warn, #b8800a)',
+    paid:            'var(--ktra-ok, #267346)',
+    shipped:         'var(--ktra-accent, #1857a4)',
+    delivered:       'var(--ktra-ok, #267346)',
+    cancelled:       'var(--ktra-danger, #c00)',
 };
 
 const fmtAmt = (n: number | undefined) =>
@@ -175,7 +175,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                     <span style={{ marginLeft: 4 }}>{s.shippingInfo?.shippingType === 'air' ? '✈' : '🚢'}</span>
                     <b style={{ fontFamily: 'monospace' }}>{s.shipmentNumber}</b>
                     {(s.dealsCount ?? s.deals?.length ?? 0) > 0 && (
-                        <span style={{ marginRight: 4, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)' }}>
+                        <span style={{ marginRight: 4, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)' }}>
                             ({s.dealsCount ?? s.deals?.length ?? 0} صفقة)
                         </span>
                     )}
@@ -250,7 +250,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
             render: (s) => (
                 <span style={{ display: 'inline-flex', gap: 2 }}>
                     <button
-                        className="aseel-toolbtn"
+                        className="ktra-toolbtn"
                         style={{ padding: '2px 4px' }}
                         onClick={(e) => { e.stopPropagation(); void openShipmentDetails(s); }}
                         title="عرض التفاصيل"
@@ -258,7 +258,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                         <Eye style={{ width: 13, height: 13 }} />
                     </button>
                     <button
-                        className="aseel-toolbtn"
+                        className="ktra-toolbtn"
                         style={{ padding: '2px 4px' }}
                         onClick={(e) => { e.stopPropagation(); handleEdit(s); }}
                         title="تعديل (رحلة الاستيراد)"
@@ -266,8 +266,8 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                         <Edit style={{ width: 13, height: 13 }} />
                     </button>
                     <button
-                        className="aseel-toolbtn"
-                        style={{ padding: '2px 4px', color: 'var(--aseel-danger, #c00)' }}
+                        className="ktra-toolbtn"
+                        style={{ padding: '2px 4px', color: 'var(--ktra-danger, #c00)' }}
                         onClick={(e) => { e.stopPropagation(); void handleDelete(String(s.id)); }}
                         title="حذف"
                     >
@@ -279,7 +279,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     ];
 
     // N0-T7 — keymap على قائمة الشحنات
-    useAseelIndexKeymap({
+    useKitIndexKeymap({
         CtrlIns: handleCreateNew,
         F6: () => searchInputRef.current?.focus(),
         Escape: () => { setSearch(''); setTypeFilter('all'); setStatusFilter('all'); },
@@ -289,7 +289,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
 
     if (loading) return <LoadingSpinner />;
     if (loadError && shipments.length === 0) {
-        return <AseelErrorState message={loadError} onRetry={() => {
+        return <KitErrorState message={loadError} onRetry={() => {
             setLoading(true);
             setReloadKey((key) => key + 1);
         }} />;
@@ -298,25 +298,25 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     return (
         <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
             {/* شريط العنوان */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
-                <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--ktra-border)' }}>
+                <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>
                     إدارة الشحنات
                 </strong>
-                <span className="aseel-status-item">الإجمالي: <b>{stats.total}</b></span>
-                <span className="aseel-status-item">في الشحن: <b>{stats.inTransit}</b></span>
-                <span className="aseel-status-item">تم التسليم: <b>{stats.delivered}</b></span>
-                <span className="aseel-status-item">إجمالي التكلفة: <b>${fmtAmt(stats.totalCost)}</b></span>
+                <span className="ktra-status-item">الإجمالي: <b>{stats.total}</b></span>
+                <span className="ktra-status-item">في الشحن: <b>{stats.inTransit}</b></span>
+                <span className="ktra-status-item">تم التسليم: <b>{stats.delivered}</b></span>
+                <span className="ktra-status-item">إجمالي التكلفة: <b>${fmtAmt(stats.totalCost)}</b></span>
                 <div style={{ flex: 1 }} />
                 <input
                     ref={searchInputRef}
-                    className="aseel-input"
+                    className="ktra-input"
                     style={{ width: 190 }}
                     placeholder="بحث بالاسم، رقم الشحنة، الوكيل… (F6)"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
                 <select
-                    className="aseel-input"
+                    className="ktra-input"
                     style={{ width: 120 }}
                     value={typeFilter}
                     onChange={(e) => setTypeFilter(e.target.value as 'all' | 'sea' | 'air')}
@@ -326,7 +326,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                     <option value="air">✈️ جوي</option>
                 </select>
                 <select
-                    className="aseel-input"
+                    className="ktra-input"
                     style={{ width: 150 }}
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
@@ -337,14 +337,14 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                     ))}
                 </select>
                 <button
-                    className="aseel-toolbtn"
+                    className="ktra-toolbtn"
                     onClick={() => { setSearch(''); setTypeFilter('all'); setStatusFilter('all'); }}
                     title="إعادة تعيين الفلاتر"
                 >
                     <RefreshCw style={{ width: 14, height: 14 }} />
                 </button>
                 <button
-                    className="aseel-toolbtn"
+                    className="ktra-toolbtn"
                     onClick={handleCreateNew}
                     title="تفتح «رحلة الاستيراد» لشحنة جديدة: بيانات ← صفقات ← دفع شحن ← تخليص ← فواتير (Ctrl+Ins)"
                 >
@@ -353,13 +353,13 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
             </div>
 
             {/* عقد موحّد مع صفحات التخليص والنقل المحلي: التحرير داخل رحلة الاستيراد */}
-            <p style={{ fontSize: 'var(--aseel-fs-sm, 12px)', color: 'var(--aseel-ink-soft)', margin: 0 }}>
+            <p style={{ fontSize: 'var(--ktra-fs-sm, 12px)', color: 'var(--ktra-ink-soft)', margin: 0 }}>
                 نقرة مزدوجة تفتح <b>ملخص الشحنة</b> · زر التعديل ✎ يفتح <b>«رحلة الاستيراد»</b>
                 (الصفقات، دفع الشحن، التخليص، النقل المحلي، الفواتير).
             </p>
 
             {/* جدول الشحنات */}
-            <AseelDenseTable<Shipment>
+            <KitDenseTable<Shipment>
                 columns={columns}
                 rows={filteredShipments}
                 getRowKey={(s) => s.id}
@@ -369,14 +369,14 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                 onRowDoubleClick={(s) => { void openShipmentDetails(s); }}
                 footer={
                     filteredShipments.length > 0 ? (
-                        <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: 'var(--ktra-fs-sm)' }}>
                             إجمالي التكلفة: <b>${fmtAmt(filteredShipments.reduce((s, r) => s + (r.totalShippingCostUsd || 0), 0))}</b>
                         </span>
                     ) : undefined
                 }
             />
             {hasNextPage && (
-                <button className="aseel-toolbtn" onClick={() => void loadMoreShipments()}>
+                <button className="ktra-toolbtn" onClick={() => void loadMoreShipments()}>
                     تحميل المزيد ({shipments.length} من {totalCount})
                 </button>
             )}

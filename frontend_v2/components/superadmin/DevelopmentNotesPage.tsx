@@ -17,9 +17,9 @@ import {
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { useConfirm } from "../../contexts/ConfirmContext";
-import { AseelDateInput } from "../aseel/AseelDateInput";
-import { AseelDenseTable } from "../aseel";
-import type { DenseColumn } from "../aseel";
+import { KitDateInput } from "../kit/KitDateInput";
+import { KitDenseTable } from "../kit";
+import type { DenseColumn } from "../kit";
 import { FileDropZone } from "../ui/FileDropZone";
 
 /** ملاحظة جديدة: التاريخ يُملأ بتاريخ اليوم تلقائياً — يُعدَّل إن أراد المستخدم. */
@@ -424,12 +424,12 @@ export const DevelopmentNotesPage: React.FC = () => {
       render: (note) => (
         <div className="flex items-center justify-center gap-1">
           <button
-            type="button" className="aseel-iconbtn" disabled={busy}
+            type="button" className="ktra-iconbtn" disabled={busy}
             aria-label={`تعديل ${note.title}`} title="تعديل"
             onClick={(event) => { event.stopPropagation(); openEdit(note); }}
           ><Pencil className="h-4 w-4" /></button>
           <button
-            type="button" className="aseel-iconbtn aseel-iconbtn--danger" disabled={busy}
+            type="button" className="ktra-iconbtn ktra-iconbtn--danger" disabled={busy}
             aria-label={`حذف ${note.title}`} title="حذف"
             onClick={(event) => { event.stopPropagation(); void remove(note); }}
           ><Trash2 className="h-4 w-4" /></button>
@@ -445,21 +445,21 @@ export const DevelopmentNotesPage: React.FC = () => {
       <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-[var(--color-text)]">ملاحظات التطوير</h1>
-          <p className="text-sm aseel-text-soft">
+          <p className="text-sm ktra-text-soft">
             الأهمّ أولاً ثم الأقدم داخل الأولوية الواحدة، والمكتملة في قسمٍ مستقلّ.
             الإضافة والتعديل من نافذة واحدة، وتغيير الحالة من الجدول يُحفظ فوراً.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-[var(--color-surface-2)] px-3 py-1 text-xs aseel-text-soft">
+          <span className="rounded-full bg-[var(--color-surface-2)] px-3 py-1 text-xs ktra-text-soft">
             {formatNumber(notes.length)} ملاحظة · {formatNumber(openNotes.length)} مفتوحة
             · {formatNumber(doneNotes.length)} مكتملة
           </span>
-          <button type="button" onClick={openNew} className="aseel-btn aseel-btn-primary">
+          <button type="button" onClick={openNew} className="ktra-btn ktra-btn-primary">
             <Plus className="h-4 w-4" /> إضافة ملاحظة
           </button>
           <button
-            type="button" onClick={load} className="aseel-iconbtn"
+            type="button" onClick={load} className="ktra-iconbtn"
             aria-label="تحديث ملاحظات التطوير" title="تحديث"
           ><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /></button>
         </div>
@@ -479,7 +479,7 @@ export const DevelopmentNotesPage: React.FC = () => {
           <span className="h-px flex-1 bg-[var(--color-border)]" />
         </div>
         <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-          <AseelDenseTable<DevelopmentNote>
+          <KitDenseTable<DevelopmentNote>
             columns={buildColumns("open")}
             rows={openNotes}
             getRowKey={(note) => note.id}
@@ -508,7 +508,7 @@ export const DevelopmentNotesPage: React.FC = () => {
         </button>
         {doneOpen && (
           <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-            <AseelDenseTable<DevelopmentNote>
+            <KitDenseTable<DevelopmentNote>
               columns={buildColumns("done")}
               rows={doneNotes}
               getRowKey={(note) => note.id}
@@ -520,7 +520,7 @@ export const DevelopmentNotesPage: React.FC = () => {
         )}
       </section>
 
-      <p className="mt-2 text-xs aseel-text-soft">
+      <p className="mt-2 text-xs ktra-text-soft">
         نقرتان على الصف تفتحان الملاحظة للتعديل والردّ عليها.
       </p>
 
@@ -536,7 +536,7 @@ export const DevelopmentNotesPage: React.FC = () => {
                 {editor.mode === "edit" ? "تعديل ملاحظة تطوير" : "ملاحظة تطوير جديدة"}
               </h2>
               <button
-                type="button" className="aseel-iconbtn" aria-label="إغلاق النافذة" title="إغلاق"
+                type="button" className="ktra-iconbtn" aria-label="إغلاق النافذة" title="إغلاق"
                 onClick={() => setEditor(null)}
               ><X className="h-4 w-4" /></button>
             </div>
@@ -591,7 +591,7 @@ export const DevelopmentNotesPage: React.FC = () => {
                 </div>
                 <div>
                   <span className={fieldLabel}>الموعد</span>
-                  <AseelDateInput
+                  <KitDateInput
                     aria-label="موعد الملاحظة" className={fieldInput}
                     value={form.due_date || ""}
                     onChange={(value) => setForm({ ...form, due_date: value || null })}
@@ -640,7 +640,7 @@ export const DevelopmentNotesPage: React.FC = () => {
                   </span>
                   <div className="space-y-2">
                     {editor.note.comments.length === 0 && (
-                      <p className="text-xs aseel-text-soft">
+                      <p className="text-xs ktra-text-soft">
                         لا ردود بعد — اكتب أول ردّ على هذه الملاحظة.
                       </p>
                     )}
@@ -669,7 +669,7 @@ export const DevelopmentNotesPage: React.FC = () => {
                               </span>
                             </span>
                             <button
-                              type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+                              type="button" className="ktra-iconbtn ktra-iconbtn--danger"
                               disabled={commentBusy}
                               aria-label={`حذف ردّ ${comment.created_by_name}`} title="حذف الردّ"
                               onClick={() => void removeComment(editor.note, comment)}
@@ -705,7 +705,7 @@ export const DevelopmentNotesPage: React.FC = () => {
                       }}
                     />
                     <button
-                      type="button" className="aseel-btn aseel-btn-primary whitespace-nowrap"
+                      type="button" className="ktra-btn ktra-btn-primary whitespace-nowrap"
                       disabled={commentBusy}
                       onClick={() => void sendComment(editor.note)}
                     >
@@ -713,12 +713,12 @@ export const DevelopmentNotesPage: React.FC = () => {
                       {commentBusy ? "جارٍ الإرسال…" : "إرسال"}
                     </button>
                   </div>
-                  <p className="mt-1 text-[11px] aseel-text-soft">
+                  <p className="mt-1 text-[11px] ktra-text-soft">
                     الردّ يُحفظ فور إرساله — مستقلّاً عن زر حفظ الملاحظة.
                   </p>
                 </div>
               ) : (
-                <p className="border-t border-[var(--color-border)] pt-4 text-xs aseel-text-soft">
+                <p className="border-t border-[var(--color-border)] pt-4 text-xs ktra-text-soft">
                   الردود تُفتح بعد حفظ الملاحظة.
                 </p>
               )}
@@ -727,14 +727,14 @@ export const DevelopmentNotesPage: React.FC = () => {
             <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-4">
               {editor.mode === "edit" ? (
                 <button
-                  type="button" className="aseel-btn text-red-600" disabled={busy}
+                  type="button" className="ktra-btn text-red-600" disabled={busy}
                   onClick={() => void remove(editor.note)}
                 ><Trash2 className="h-4 w-4" /> حذف</button>
               ) : <span />}
               <div className="flex items-center gap-2">
-                <button type="button" className="aseel-btn" onClick={() => setEditor(null)}>إلغاء</button>
+                <button type="button" className="ktra-btn" onClick={() => setEditor(null)}>إلغاء</button>
                 <button
-                  type="button" className="aseel-btn aseel-btn-primary" disabled={busy}
+                  type="button" className="ktra-btn ktra-btn-primary" disabled={busy}
                   onClick={() => void submit()}
                 >
                   <Save className="h-4 w-4" />
@@ -757,17 +757,17 @@ export const DevelopmentNotesPage: React.FC = () => {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-sm aseel-text-soft">
+              <span className="text-sm ktra-text-soft">
                 صورة {preview + 1} من {form.images.length}
               </span>
               <div className="flex items-center gap-2">
                 <button
-                  type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+                  type="button" className="ktra-iconbtn ktra-iconbtn--danger"
                   title="حذف الصورة" aria-label="حذف الصورة"
                   onClick={() => dropImage(preview)}
                 ><Trash2 className="h-4 w-4" /></button>
                 <button
-                  type="button" className="aseel-iconbtn" title="إغلاق"
+                  type="button" className="ktra-iconbtn" title="إغلاق"
                   aria-label="إغلاق المعاينة" onClick={() => setPreview(null)}
                 ><X className="h-4 w-4" /></button>
               </div>
@@ -782,7 +782,7 @@ export const DevelopmentNotesPage: React.FC = () => {
               value={previewImage.caption}
               onChange={(event) => patchImage(preview, { caption: event.target.value })}
             />
-            <p className="text-xs aseel-text-soft">
+            <p className="text-xs ktra-text-soft">
               الصور والتعليقات تُحفظ مع الملاحظة عند الضغط على زر الحفظ.
             </p>
           </div>

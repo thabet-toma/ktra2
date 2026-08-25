@@ -107,7 +107,7 @@ test('الفراغ بجانب شجرة الأصناف يصير بطاقة الص
   const hint = page.getByText('اختر منتجاً من الشجرة لتظهر بطاقته هنا');
   await expect(hint).toBeVisible();
 
-  const tree = page.locator('.aseel-tree-panel');
+  const tree = page.locator('.ktra-tree-panel');
   await expect(tree).toBeVisible();
 
   // فتح التصنيف ثم النقر على المنتج.
@@ -134,7 +134,7 @@ test('اختيار منتج آخر يبدّل البطاقة في مكانها',
   await page.waitForLoadState('networkidle');
   await page.getByTitle('عرض كشجرة تصنيفات').click();
 
-  const tree = page.locator('.aseel-tree-panel');
+  const tree = page.locator('.ktra-tree-panel');
   await tree.getByTitle('فتح').first().click();
   await tree.getByRole('button', { name: /إطار 205\/55 — ميشلان/ }).click();
   await expect(page.getByText('SKU-7').first()).toBeVisible();
@@ -151,7 +151,7 @@ test('النقر على تصنيف يعرض كرته المجمّع في الب�
   await page.waitForLoadState('networkidle');
   await page.getByTitle('عرض كشجرة تصنيفات').click();
 
-  const tree = page.locator('.aseel-tree-panel');
+  const tree = page.locator('.ktra-tree-panel');
   await tree.getByRole('button', { name: 'إطارات' }).click();
 
   expect(page.context().pages()).toHaveLength(1);
@@ -176,22 +176,22 @@ test('طيّ الشجرة يسلّم عرضها للبطاقة — شريط لا
   await page.goto('/items');
   await page.waitForLoadState('networkidle');
   await page.getByTitle('عرض كشجرة تصنيفات').click();
-  await page.locator('.aseel-tree-panel').getByRole('button', { name: 'إطارات' }).click();
+  await page.locator('.ktra-tree-panel').getByRole('button', { name: 'إطارات' }).click();
 
   const paneBefore = (await page.getByRole('tablist').boundingBox())!;
   await page.getByTitle('طيّ اللوحة').click();
 
-  const rail = page.locator('.aseel-tree-rail');
+  const rail = page.locator('.ktra-tree-rail');
   const railBox = (await rail.boundingBox())!;
   expect(railBox.width).toBeLessThan(60);
-  await expect(page.locator('.aseel-tree-panel')).toHaveCount(0);
+  await expect(page.locator('.ktra-tree-panel')).toHaveCount(0);
 
   const paneAfter = (await page.getByRole('tablist').boundingBox())!;
   expect(paneAfter.width).toBeGreaterThan(paneBefore.width);
 
   // ولا طريق مسدود: الشريط يعيد الشجرة.
   await rail.click();
-  await expect(page.locator('.aseel-tree-panel')).toBeVisible();
+  await expect(page.locator('.ktra-tree-panel')).toBeVisible();
 });
 
 /**

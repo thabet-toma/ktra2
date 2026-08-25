@@ -71,13 +71,13 @@ const openNewDeal = async (page: Page) => {
 const discountInput = (page: Page) => page.getByTestId('deal-discount-input');
 const freightInput = (page: Page) => page.getByTestId('deal-china-freight-input');
 const grandTotal = (page: Page) =>
-  page.locator('.aseel-total-row--grand .aseel-total-value');
+  page.locator('.ktra-total-row--grand .ktra-total-value');
 
 /** يضيف بنداً واحداً بكمية وسعر معلومين ⇒ مجموع بنود = 1000. */
 const addLineWorth1000 = async (page: Page) => {
   await page.getByRole('button', { name: 'إضافة سطر' }).click();
-  await page.locator('#aseel-grid-input-0-quantity').fill('10');
-  await page.locator('#aseel-grid-input-0-unitPrice').fill('100');
+  await page.locator('#ktra-grid-input-0-quantity').fill('10');
+  await page.locator('#ktra-grid-input-0-unitPrice').fill('100');
   await expect(grandTotal(page)).toHaveText('1,000');
 };
 

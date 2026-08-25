@@ -643,7 +643,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   return (
     <>
       {/* Mobile Top Bar */}
-      <header className="aseel-app-chrome md:hidden fixed top-0 left-0 right-0 h-14 bg-[var(--color-surface)] border-b border-[var(--color-border)] flex items-center justify-between px-4 z-40">
+      <header className="ktra-app-chrome md:hidden fixed top-0 left-0 right-0 h-14 bg-[var(--color-surface)] border-b border-[var(--color-border)] flex items-center justify-between px-4 z-40">
         <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] rounded-full transition-colors">
           <Menu className="h-6 w-6" />
         </button>
@@ -660,12 +660,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
       )}
 
       {/* Mobile Sidebar */}
-      <aside className={`aseel-sidebar fixed top-0 right-0 bottom-0 w-72 z-50 transform transition-transform duration-300 md:hidden ${isMobileMenuOpen ? "translate-x-0" : "translate-x-full"}`}>
+      <aside className={`ktra-sidebar fixed top-0 right-0 bottom-0 w-72 z-50 transform transition-transform duration-300 md:hidden ${isMobileMenuOpen ? "translate-x-0" : "translate-x-full"}`}>
         {SidebarContent(true)}
       </aside>
 
       {/* Desktop Sidebar Wrapper */}
-      <aside className={`aseel-sidebar hidden md:flex flex-col sticky top-0 h-screen transition-all duration-300 z-30 ${isCollapsed ? "w-20" : "w-64"}`}>
+      <aside className={`ktra-sidebar hidden md:flex flex-col sticky top-0 h-screen transition-all duration-300 z-30 ${isCollapsed ? "w-20" : "w-64"}`}>
 
         {/* المبدل (Toggle Button) - الموضع الجديد المحسن */}
         <button
@@ -683,7 +683,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
         {SidebarContent(false)}
       </aside>
 
-      <div className="aseel-sidebar-spacer h-14 md:hidden" />
+      <div className="ktra-sidebar-spacer h-14 md:hidden" />
     </>
   );
 };

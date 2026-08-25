@@ -8,7 +8,7 @@ import {
     FileText, Edit
 } from 'lucide-react';
 import { LoadingSpinner } from '../LoadingSpinner';
-import { AseelSidePanel } from '../aseel/AseelSidePanel';
+import { KitSidePanel } from '../kit/KitSidePanel';
 import { EntityActivityLog } from '../activity/EntityActivityLog';
 import { formatDateValue } from "../../utils/formatDate";
 
@@ -86,7 +86,7 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
     const typeInfo = getTypeInfo(supplier?.type);
 
     return (
-        <AseelSidePanel open={isOpen} onClose={onClose} title={supplier?.tradeName || 'المورد'} width={520}>
+        <KitSidePanel open={isOpen} onClose={onClose} title={supplier?.tradeName || 'المورد'} width={520}>
             <div className="flex flex-col h-full">
 
                 {/* Header Section */}
@@ -212,6 +212,6 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
                     ) : null}
                 </div>
             </div>
-        </AseelSidePanel>
+        </KitSidePanel>
     );
 };

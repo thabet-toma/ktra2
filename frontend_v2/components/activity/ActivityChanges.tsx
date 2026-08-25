@@ -5,8 +5,8 @@ import type { ActivityChange, ActivityFieldChange } from "@/types/activity";
 /** «من ← إلى» بشكل موحّد: القديم مشطوب باهت، والجديد بارز. */
 const ValuePair: React.FC<{ change: ActivityFieldChange }> = ({ change }) => (
   <span className="inline-flex items-center gap-1 whitespace-nowrap">
-    <span className="aseel-text-soft line-through">{change.old || "—"}</span>
-    <span className="aseel-text-soft">←</span>
+    <span className="ktra-text-soft line-through">{change.old || "—"}</span>
+    <span className="ktra-text-soft">←</span>
     <span className="font-semibold text-[var(--color-text)]">{change.new || "—"}</span>
   </span>
 );
@@ -34,7 +34,7 @@ export const ActivityChanges: React.FC<{ changes: ActivityChange[] }> = ({ chang
               </span>{" "}
               <span className="font-semibold text-[var(--color-text)]">{label}</span>
               {values.length > 0 && (
-                <span className="aseel-text-soft">
+                <span className="ktra-text-soft">
                   {" "}({values.map((v) => `${v.label} ${v.value}`).join(" · ")})
                 </span>
               )}
@@ -51,7 +51,7 @@ export const ActivityChanges: React.FC<{ changes: ActivityChange[] }> = ({ chang
               <span className="font-semibold text-[var(--color-text)]">{label}</span>
               {fields.map((field) => (
                 <span key={field.field} className="inline-flex items-center gap-1">
-                  <span className="aseel-text-soft">{field.label}:</span>
+                  <span className="ktra-text-soft">{field.label}:</span>
                   <ValuePair change={field} />
                 </span>
               ))}
@@ -62,9 +62,9 @@ export const ActivityChanges: React.FC<{ changes: ActivityChange[] }> = ({ chang
       const field = change as ActivityFieldChange;
       return (
         <li key={index} className={rowCls}>
-          <PencilLine className="w-3.5 h-3.5 mt-0.5 shrink-0 aseel-text-soft" />
+          <PencilLine className="w-3.5 h-3.5 mt-0.5 shrink-0 ktra-text-soft" />
           <span className="inline-flex items-center gap-1 flex-wrap">
-            <span className="aseel-text-soft">{field.label}:</span>
+            <span className="ktra-text-soft">{field.label}:</span>
             <ValuePair change={field} />
           </span>
         </li>

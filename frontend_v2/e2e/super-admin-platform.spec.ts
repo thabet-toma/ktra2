@@ -423,7 +423,7 @@ test("قسما الملاحظات: الأهمّ أولاً، ختم الإنجا
   await page.getByRole("button", { name: /تم تنفيذها/ }).click();
   await expect(notesTable(page, /تم تنفيذها/)).toBeVisible();
 
-  // الصفحة RTL: النص العربي يبدأ من اليمين — `AseelDenseTable` كان يفرض `left`
+  // الصفحة RTL: النص العربي يبدأ من اليمين — `KitDenseTable` كان يفرض `left`
   await expect(noteRows(page).nth(0).locator("td").nth(1)).toHaveCSS("text-align", "right");
 
   // الوصف الطويل مقصوص في الجدول، وكاملاً في نافذة التعديل

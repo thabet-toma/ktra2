@@ -203,20 +203,20 @@ export const SerialEntryModal: React.FC<Props> = ({
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl aseel-bg-field dark:aseel-bg-panel shadow-xl border aseel-border-soft">
-        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b aseel-border-soft sticky top-0 aseel-bg-field dark:aseel-bg-panel">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl ktra-bg-field dark:ktra-bg-panel shadow-xl border ktra-border-soft">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b ktra-border-soft sticky top-0 ktra-bg-field dark:ktra-bg-panel">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-[var(--color-primary)] text-white rounded-xl">
               <Hash className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base sm:text-lg font-bold aseel-text-ink dark:text-white">{title}</h3>
-              <p className="text-xs aseel-text-soft">{productName}</p>
+              <h3 className="text-base sm:text-lg font-bold ktra-text-ink dark:text-white">{title}</h3>
+              <p className="text-xs ktra-text-soft">{productName}</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 aseel-text-soft hover:aseel-bg-panel rounded-lg"
+            className="p-2 ktra-text-soft hover:ktra-bg-panel rounded-lg"
             aria-label="إغلاق"
           >
             <X className="w-5 h-5" />
@@ -225,22 +225,22 @@ export const SerialEntryModal: React.FC<Props> = ({
 
         <div className="p-4 sm:p-6 space-y-4">
           {error && (
-            <div className="p-3 rounded-lg aseel-bg-panel aseel-text-state text-sm border aseel-border-soft">
+            <div className="p-3 rounded-lg ktra-bg-panel ktra-text-state text-sm border ktra-border-soft">
               {error}
             </div>
           )}
 
           {mode === "capture" ? (
             <>
-              <div className="rounded-lg border aseel-border-soft p-3 space-y-2">
-                <div className="text-xs font-bold aseel-text-ink dark:aseel-text-soft">
+              <div className="rounded-lg border ktra-border-soft p-3 space-y-2">
+                <div className="text-xs font-bold ktra-text-ink dark:ktra-text-soft">
                   توليد سلسلة — ابدأ برقم والعدد يزيد الكود تلقائياً
                 </div>
                 <div className="flex flex-wrap items-end gap-2">
                   <label className="flex flex-col gap-1 flex-1 min-w-[160px]">
-                    <span className="text-[11px] aseel-text-soft">رقم البداية</span>
+                    <span className="text-[11px] ktra-text-soft">رقم البداية</span>
                     <input
-                      className="h-9 px-2 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm"
+                      className="h-9 px-2 border ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-sm"
                       dir="ltr"
                       disabled={readOnly || generating}
                       value={start}
@@ -252,11 +252,11 @@ export const SerialEntryModal: React.FC<Props> = ({
                     />
                   </label>
                   <label className="flex flex-col gap-1 w-24">
-                    <span className="text-[11px] aseel-text-soft">عدد الوحدات</span>
+                    <span className="text-[11px] ktra-text-soft">عدد الوحدات</span>
                     <input
                       type="number"
                       min={1}
-                      className="h-9 px-2 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm text-center"
+                      className="h-9 px-2 border ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-sm text-center"
                       disabled={readOnly || generating}
                       value={count}
                       onChange={(e) => setCount(e.target.value)}
@@ -275,11 +275,11 @@ export const SerialEntryModal: React.FC<Props> = ({
               </div>
 
               <div className="flex flex-col gap-1">
-                <span className="text-[11px] aseel-text-soft">أو امسح/اكتب رقماً واحداً ثم ⏎</span>
+                <span className="text-[11px] ktra-text-soft">أو امسح/اكتب رقماً واحداً ثم ⏎</span>
                 <div className="flex items-center gap-2">
                   <input
                     ref={scanRef}
-                    className="h-9 flex-1 px-2 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm"
+                    className="h-9 flex-1 px-2 border ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-sm"
                     dir="ltr"
                     disabled={readOnly}
                     value={scan}
@@ -296,7 +296,7 @@ export const SerialEntryModal: React.FC<Props> = ({
                     type="button"
                     onClick={() => setCamera(true)}
                     disabled={readOnly}
-                    className="h-9 flex items-center gap-1.5 px-3 border aseel-border-soft rounded-lg text-sm aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel disabled:opacity-50"
+                    className="h-9 flex items-center gap-1.5 px-3 border ktra-border-soft rounded-lg text-sm ktra-text-ink dark:ktra-text-soft hover:ktra-bg-panel disabled:opacity-50"
                     title="مسح الباركود بكاميرا الجهاز"
                   >
                     <Camera className="w-4 h-4" />
@@ -308,7 +308,7 @@ export const SerialEntryModal: React.FC<Props> = ({
           ) : (
             <>
               <label
-                className={`flex items-start gap-2 rounded-lg border aseel-border-soft p-3 ${required ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
+                className={`flex items-start gap-2 rounded-lg border ktra-border-soft p-3 ${required ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}`}
               >
                 <input
                   type="checkbox"
@@ -321,8 +321,8 @@ export const SerialEntryModal: React.FC<Props> = ({
                   }}
                 />
                 <span className="text-sm">
-                  <b className="aseel-text-ink dark:text-white">تلقائي — أي وحدة</b>
-                  <span className="block text-[11px] aseel-text-soft">
+                  <b className="ktra-text-ink dark:text-white">تلقائي — أي وحدة</b>
+                  <span className="block text-[11px] ktra-text-soft">
                     {required
                       ? "غير متاح بنمط «إجباري» — الوحدة التي تذهب للزبون تُختار لا تُخمَّن."
                       : "بلا اختيار: يخصّص الخادم أقدم الوحدات المتاحة عند الترحيل."}
@@ -333,10 +333,10 @@ export const SerialEntryModal: React.FC<Props> = ({
               <div className="flex flex-wrap gap-2">
                 <div className="relative flex-1 min-w-[160px]">
                   <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
-                    <Search className="w-3.5 h-3.5 aseel-text-soft" />
+                    <Search className="w-3.5 h-3.5 ktra-text-soft" />
                   </div>
                   <input
-                    className="w-full h-9 pr-7 px-2 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm"
+                    className="w-full h-9 pr-7 px-2 border ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-sm"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="ابحث عن رقم…"
@@ -344,7 +344,7 @@ export const SerialEntryModal: React.FC<Props> = ({
                 </div>
                 <input
                   ref={scanRef}
-                  className="h-9 px-2 border aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-sm flex-1 min-w-[160px]"
+                  className="h-9 px-2 border ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-sm flex-1 min-w-[160px]"
                   dir="ltr"
                   disabled={readOnly}
                   value={scan}
@@ -360,7 +360,7 @@ export const SerialEntryModal: React.FC<Props> = ({
                   type="button"
                   onClick={() => setCamera(true)}
                   disabled={readOnly}
-                  className="h-9 flex items-center gap-1.5 px-3 border aseel-border-soft rounded-lg text-sm aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel disabled:opacity-50"
+                  className="h-9 flex items-center gap-1.5 px-3 border ktra-border-soft rounded-lg text-sm ktra-text-ink dark:ktra-text-soft hover:ktra-bg-panel disabled:opacity-50"
                   title="مسح باركود الوحدة بكاميرا الجهاز"
                 >
                   <Camera className="w-4 h-4" />
@@ -372,14 +372,14 @@ export const SerialEntryModal: React.FC<Props> = ({
 
           {/* القائمة — المُدخَل (شراء) أو المتاح للاختيار (بيع) */}
           {mode === "capture" ? (
-            <div className="rounded-lg border aseel-border-soft overflow-hidden">
+            <div className="rounded-lg border ktra-border-soft overflow-hidden">
               {serials.length === 0 ? (
-                <div className="py-8 text-center aseel-text-soft text-sm">
+                <div className="py-8 text-center ktra-text-soft text-sm">
                   لا أرقام بعد — ولّد سلسلة أو امسح رقماً.
                 </div>
               ) : (
                 <table className="w-full text-sm">
-                  <thead className="aseel-bg-panel aseel-text-soft text-xs">
+                  <thead className="ktra-bg-panel ktra-text-soft text-xs">
                     <tr>
                       <th className="px-2 py-2 w-10 text-center font-medium">#</th>
                       <th className="px-3 py-2 text-right font-medium">الرقم التسلسلي</th>
@@ -388,10 +388,10 @@ export const SerialEntryModal: React.FC<Props> = ({
                   </thead>
                   <tbody>
                     {serials.map((s, i) => (
-                      <tr key={`${s}-${i}`} className="border-t aseel-border-soft">
-                        <td className="px-2 py-1.5 text-center aseel-text-soft">{i + 1}</td>
+                      <tr key={`${s}-${i}`} className="border-t ktra-border-soft">
+                        <td className="px-2 py-1.5 text-center ktra-text-soft">{i + 1}</td>
                         <td
-                          className={`px-3 py-1.5 font-mono ${duplicates.has(s) ? "text-red-600 font-bold" : "aseel-text-ink dark:aseel-text-soft"}`}
+                          className={`px-3 py-1.5 font-mono ${duplicates.has(s) ? "text-red-600 font-bold" : "ktra-text-ink dark:ktra-text-soft"}`}
                           dir="ltr"
                         >
                           {s}
@@ -418,19 +418,19 @@ export const SerialEntryModal: React.FC<Props> = ({
               )}
             </div>
           ) : (
-            <div className="rounded-lg border aseel-border-soft overflow-hidden max-h-64 overflow-y-auto">
+            <div className="rounded-lg border ktra-border-soft overflow-hidden max-h-64 overflow-y-auto">
               {loading ? (
-                <div className="flex items-center gap-2 justify-center py-8 aseel-text-soft">
+                <div className="flex items-center gap-2 justify-center py-8 ktra-text-soft">
                   <Loader2 className="w-5 h-5 animate-spin" />
                   <span>جارٍ التحميل…</span>
                 </div>
               ) : filteredPool.length === 0 && chosenOutsidePool.length === 0 ? (
-                <div className="py-8 text-center aseel-text-soft text-sm">
+                <div className="py-8 text-center ktra-text-soft text-sm">
                   لا وحدات مُرقَّمة في مخزن هذا الصنف — «تلقائي» يترك البند بلا تتبّع.
                 </div>
               ) : (
                 <table className="w-full text-sm">
-                  <thead className="aseel-bg-panel aseel-text-soft text-xs sticky top-0">
+                  <thead className="ktra-bg-panel ktra-text-soft text-xs sticky top-0">
                     <tr>
                       <th className="px-2 py-2 w-10" />
                       <th className="px-3 py-2 text-right font-medium">الرقم التسلسلي</th>
@@ -439,7 +439,7 @@ export const SerialEntryModal: React.FC<Props> = ({
                   </thead>
                   <tbody>
                     {chosenOutsidePool.map((s) => (
-                      <tr key={`kept-${s}`} className="border-t aseel-border-soft">
+                      <tr key={`kept-${s}`} className="border-t ktra-border-soft">
                         <td className="px-2 py-1.5 text-center">
                           <input
                             type="checkbox"
@@ -450,11 +450,11 @@ export const SerialEntryModal: React.FC<Props> = ({
                           />
                         </td>
                         <td className="px-3 py-1.5 font-mono" dir="ltr">{s}</td>
-                        <td className="px-3 py-1.5 aseel-text-soft text-xs">مختار على هذا البند</td>
+                        <td className="px-3 py-1.5 ktra-text-soft text-xs">مختار على هذا البند</td>
                       </tr>
                     ))}
                     {filteredPool.map((row) => (
-                      <tr key={row.id} className="border-t aseel-border-soft">
+                      <tr key={row.id} className="border-t ktra-border-soft">
                         <td className="px-2 py-1.5 text-center">
                           <input
                             type="checkbox"
@@ -465,7 +465,7 @@ export const SerialEntryModal: React.FC<Props> = ({
                           />
                         </td>
                         <td className="px-3 py-1.5 font-mono" dir="ltr">{row.serial}</td>
-                        <td className="px-3 py-1.5 aseel-text-soft text-xs">
+                        <td className="px-3 py-1.5 ktra-text-soft text-xs">
                           {row.purchase_invoice_number
                             ? `فاتورة ${row.purchase_invoice_number}${row.supplier_name ? ` — ${row.supplier_name}` : ""}`
                             : "—"}
@@ -478,25 +478,25 @@ export const SerialEntryModal: React.FC<Props> = ({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t aseel-border-soft">
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t ktra-border-soft">
             <div className="text-xs">
               {mode === "capture" ? (
-                <span className={incomplete ? "text-red-600 font-bold" : "aseel-text-ink dark:aseel-text-soft"}>
+                <span className={incomplete ? "text-red-600 font-bold" : "ktra-text-ink dark:ktra-text-soft"}>
                   {serials.length > 0
                     ? <>عدد الأرقام: <b>{serials.length}</b> — كمية البند ستصبح <b>{serials.length}</b></>
                     : <>لا أرقام — الكمية تبقى <b>{wholeQty}</b>{required ? " والترحيل سيُرفض" : ""}</>}
                 </span>
               ) : (
-                <span className={incomplete ? "text-red-600 font-bold" : "aseel-text-ink dark:aseel-text-soft"}>
+                <span className={incomplete ? "text-red-600 font-bold" : "ktra-text-ink dark:ktra-text-soft"}>
                   المختار: <b>{chosenCount}</b> من الكمية <b>{wholeQty}</b>
-                  {auto && <span className="aseel-text-soft"> — تخصيص تلقائي</span>}
+                  {auto && <span className="ktra-text-soft"> — تخصيص تلقائي</span>}
                 </span>
               )}
             </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={onClose}
-                className="px-4 py-2 aseel-text-ink dark:aseel-text-soft aseel-bg-panel rounded-lg"
+                className="px-4 py-2 ktra-text-ink dark:ktra-text-soft ktra-bg-panel rounded-lg"
               >
                 إلغاء
               </button>

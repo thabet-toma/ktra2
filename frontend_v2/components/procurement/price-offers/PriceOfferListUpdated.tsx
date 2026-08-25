@@ -136,11 +136,11 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
     };
 
     const statusOptions = [
-        { value: 'initial' as PriceOfferStatus, label: 'أولية', icon: Clock, color: 'aseel-text-soft' },
-        { value: 'pending_info' as PriceOfferStatus, label: 'بانتظار المعلومات', icon: AlertCircle, color: 'aseel-text-soft' },
-        { value: 'under_discussion' as PriceOfferStatus, label: 'تحت المناقشة', icon: MessageSquare, color: 'aseel-text-soft' },
+        { value: 'initial' as PriceOfferStatus, label: 'أولية', icon: Clock, color: 'ktra-text-soft' },
+        { value: 'pending_info' as PriceOfferStatus, label: 'بانتظار المعلومات', icon: AlertCircle, color: 'ktra-text-soft' },
+        { value: 'under_discussion' as PriceOfferStatus, label: 'تحت المناقشة', icon: MessageSquare, color: 'ktra-text-soft' },
         { value: 'approved_for_shipping' as PriceOfferStatus, label: 'معتمد للشراء', icon: CheckCircle, color: 'text-green-500' },
-        { value: 'rejected' as PriceOfferStatus, label: 'مرفوضة', icon: X, color: 'aseel-text-soft' }
+        { value: 'rejected' as PriceOfferStatus, label: 'مرفوضة', icon: X, color: 'ktra-text-soft' }
     ];
 
     // دالة مساعدة للحصول على اسم العرض (الاسم المستعار أو الأصلي)
@@ -161,51 +161,51 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
         <div className="space-y-6">
             {/* Search Bar */}
             {/* Search Bar */}
-            <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl border aseel-border-soft dark:aseel-border-soft p-4">
+            <div className="ktra-bg-field dark:ktra-bg-panel rounded-xl border ktra-border-soft dark:ktra-border-soft p-4">
                 <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-                    <div className="text-sm aseel-text-soft">
+                    <div className="text-sm ktra-text-soft">
                         {/* Static Shipping Terms now used */}
                     </div>
                 </div>
             </div>
 
             {/* Table View */}
-            <div ref={tableRef} className="aseel-bg-field dark:aseel-bg-panel rounded-xl border aseel-border-soft dark:aseel-border-soft shadow-sm overflow-visible">
+            <div ref={tableRef} className="ktra-bg-field dark:ktra-bg-panel rounded-xl border ktra-border-soft dark:ktra-border-soft shadow-sm overflow-visible">
                 <div className="overflow-x-auto overflow-y-visible min-h-[400px]">
                     <table className="w-full text-right">
-                        <thead className="aseel-bg-panel dark:aseel-bg-panel">
+                        <thead className="ktra-bg-panel dark:ktra-bg-panel">
                             <tr>
-                                <th className="py-3 px-4 text-sm font-semibold aseel-text-ink dark:aseel-text-soft border-b aseel-border-soft dark:aseel-border-soft">
+                                <th className="py-3 px-4 text-sm font-semibold ktra-text-ink dark:ktra-text-soft border-b ktra-border-soft dark:ktra-border-soft">
                                     <div className="flex items-center gap-2">
                                         <FileText className="w-4 h-4" />
                                         اسم الفاتورة
                                     </div>
                                 </th>
-                                <th className="py-3 px-4 text-sm font-semibold aseel-text-ink dark:aseel-text-soft border-b aseel-border-soft dark:aseel-border-soft">
+                                <th className="py-3 px-4 text-sm font-semibold ktra-text-ink dark:ktra-text-soft border-b ktra-border-soft dark:ktra-border-soft">
                                     <div className="flex items-center gap-2">
                                         <Package className="w-4 h-4" />
                                         المورد
                                     </div>
                                 </th>
-                                <th className="py-3 px-4 text-sm font-semibold aseel-text-ink dark:aseel-text-soft border-b aseel-border-soft dark:aseel-border-soft">
+                                <th className="py-3 px-4 text-sm font-semibold ktra-text-ink dark:ktra-text-soft border-b ktra-border-soft dark:ktra-border-soft">
                                     <div className="flex items-center gap-2">
                                         <Calendar className="w-4 h-4" />
                                         التاريخ
                                     </div>
                                 </th>
-                                <th className="py-3 px-4 text-sm font-semibold aseel-text-ink dark:aseel-text-soft border-b aseel-border-soft dark:aseel-border-soft">
+                                <th className="py-3 px-4 text-sm font-semibold ktra-text-ink dark:ktra-text-soft border-b ktra-border-soft dark:ktra-border-soft">
                                     <div className="flex items-center gap-2">
                                         <Package className="w-4 h-4 text-[var(--color-primary)]" />
                                         المنتجات الرئيسية
                                     </div>
                                 </th>
-                                <th className="py-3 px-4 text-sm font-semibold aseel-text-ink dark:aseel-text-soft border-b aseel-border-soft dark:aseel-border-soft">
+                                <th className="py-3 px-4 text-sm font-semibold ktra-text-ink dark:ktra-text-soft border-b ktra-border-soft dark:ktra-border-soft">
                                     <div className="flex items-center gap-2">
                                         <Tag className="w-4 h-4" />
                                         الحالة والملاحظات
                                     </div>
                                 </th>
-                                <th className="py-3 px-4 text-sm font-semibold aseel-text-ink dark:aseel-text-soft border-b aseel-border-soft dark:aseel-border-soft">
+                                <th className="py-3 px-4 text-sm font-semibold ktra-text-ink dark:ktra-text-soft border-b ktra-border-soft dark:ktra-border-soft">
                                     <div className="flex items-center gap-2">
                                         <DollarSign className="w-4 h-4" />
                                         الإجمالي
@@ -221,17 +221,17 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                     <tr
                                         key={offer.id}
                                         onClick={(e) => handleRowClick(offer, e)}
-                                        className={`hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 transition-colors cursor-pointer ${offer.status === 'under_discussion'
-                                            ? 'aseel-bg-accent-bg/50 dark:aseel-bg-panel/10 border-l-4 border-l-blue-500'
+                                        className={`hover:ktra-bg-panel dark:hover:ktra-bg-panel/30 transition-colors cursor-pointer ${offer.status === 'under_discussion'
+                                            ? 'ktra-bg-accent-bg/50 dark:ktra-bg-panel/10 border-l-4 border-l-blue-500'
                                             : ''
                                             }`}
                                     >
                                         <td className="py-3 px-4">
                                             <div className="flex flex-col">
-                                                <span className="font-mono font-bold aseel-text-ink dark:text-white">
+                                                <span className="font-mono font-bold ktra-text-ink dark:text-white">
                                                     {offer.offerNumber}
                                                 </span>
-                                                <span className="text-xs aseel-text-soft dark:aseel-text-soft">
+                                                <span className="text-xs ktra-text-soft dark:ktra-text-soft">
                                                     {offer.id?.slice(-8)}
                                                 </span>
                                             </div>
@@ -240,15 +240,15 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                         {/* عمود المورد المحدث */}
                                         <td className="py-3 px-4">
                                             <div className="flex items-center gap-2">
-                                                <div className="w-8 h-8 aseel-bg-accent-bg dark:aseel-bg-panel/30 rounded-lg flex items-center justify-center">
-                                                    <Package className="w-4 h-4 aseel-text-accent dark:aseel-text-soft" />
+                                                <div className="w-8 h-8 ktra-bg-accent-bg dark:ktra-bg-panel/30 rounded-lg flex items-center justify-center">
+                                                    <Package className="w-4 h-4 ktra-text-accent dark:ktra-text-soft" />
                                                 </div>
                                                 <div className="flex flex-col">
-                                                    <span className="font-medium aseel-text-ink dark:text-white truncate max-w-[150px]">
+                                                    <span className="font-medium ktra-text-ink dark:text-white truncate max-w-[150px]">
                                                         {/* هنا التغيير: عرض الاسم المستعار أو الأصلي */}
                                                         {getSupplierDisplayName(offer.supplierId, offer.factoryName)}
                                                     </span>
-                                                    <span className="text-xs aseel-text-soft dark:aseel-text-soft">
+                                                    <span className="text-xs ktra-text-soft dark:ktra-text-soft">
                                                         {getSupplierContact(offer.supplierId)}
                                                     </span>
                                                 </div>
@@ -257,8 +257,8 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
 
                                         <td className="py-3 px-4">
                                             <div className="flex flex-col">
-                                                <span className="aseel-text-ink dark:text-white">{formattedDate}</span>
-                                                <span className="text-xs aseel-text-soft dark:aseel-text-soft">
+                                                <span className="ktra-text-ink dark:text-white">{formattedDate}</span>
+                                                <span className="text-xs ktra-text-soft dark:ktra-text-soft">
                                                     {formatTimeValue(offer.createdAt)}
                                                 </span>
                                             </div>
@@ -270,14 +270,14 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                                     const topProducts = getTopProductsByQuantity(offer);
                                                     if (topProducts.length === 0) {
                                                         return (
-                                                            <div className="text-xs aseel-text-soft dark:aseel-text-soft">لا توجد منتجات</div>
+                                                            <div className="text-xs ktra-text-soft dark:ktra-text-soft">لا توجد منتجات</div>
                                                         );
                                                     }
                                                     return (
                                                         <div className="flex flex-col gap-1.5">
                                                             {topProducts.map((item, idx) => (
-                                                                <div key={idx} className="flex items-center gap-2 aseel-bg-panel dark:aseel-bg-panel/50 p-1 rounded-md border aseel-border-soft dark:aseel-border-soft/50">
-                                                                    <div className="w-7 h-7 shrink-0 rounded overflow-hidden aseel-bg-grid-head dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft">
+                                                                <div key={idx} className="flex items-center gap-2 ktra-bg-panel dark:ktra-bg-panel/50 p-1 rounded-md border ktra-border-soft dark:ktra-border-soft/50">
+                                                                    <div className="w-7 h-7 shrink-0 rounded overflow-hidden ktra-bg-grid-head dark:ktra-bg-panel border ktra-border-soft dark:ktra-border-soft">
                                                                         {item.imageUrls && item.imageUrls.length > 0 ? (
                                                                             <img
                                                                                 src={item.imageUrls[0]}
@@ -285,21 +285,21 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                                                                 className="w-full h-full object-cover"
                                                                             />
                                                                         ) : (
-                                                                            <div className="w-full h-full flex items-center justify-center aseel-text-soft">
+                                                                            <div className="w-full h-full flex items-center justify-center ktra-text-soft">
                                                                                 <Package className="w-3 h-3" />
                                                                             </div>
                                                                         )}
                                                                     </div>
                                                                     <div className="flex flex-col min-w-0">
                                                                         <div className="flex items-center gap-2">
-                                                                            <span className="text-xs font-medium aseel-text-ink dark:aseel-text-soft truncate max-w-[120px]" title={item.name}>
+                                                                            <span className="text-xs font-medium ktra-text-ink dark:ktra-text-soft truncate max-w-[120px]" title={item.name}>
                                                                                 {item.name}
                                                                             </span>
-                                                                            <span className="text-[10px] aseel-bg-accent-bg dark:aseel-bg-panel/30 aseel-text-accent dark:aseel-text-soft px-1 rounded border aseel-border-soft dark:aseel-border-soft shrink-0">
+                                                                            <span className="text-[10px] ktra-bg-accent-bg dark:ktra-bg-panel/30 ktra-text-accent dark:ktra-text-soft px-1 rounded border ktra-border-soft dark:ktra-border-soft shrink-0">
                                                                                 x{item.quantity}
                                                                             </span>
                                                                         </div>
-                                                                        <span className="text-[10px] aseel-text-soft dark:aseel-text-soft font-mono">
+                                                                        <span className="text-[10px] ktra-text-soft dark:ktra-text-soft font-mono">
                                                                             HS: {(() => {
                                                                                 const dbItem = allDbItems?.find(d => d.id === item.itemId || d.id === item.id);
                                                                                 return item.hsCodePrimary || dbItem?.hsCodePrimary || "—";
@@ -309,7 +309,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                                                 </div>
                                                             ))}
                                                             {(offer.items?.length || 0) > 3 && (
-                                                                <span className="text-[10px] aseel-text-soft pr-1">
+                                                                <span className="text-[10px] ktra-text-soft pr-1">
                                                                     +{(offer.items?.length || 0) - 3} المزيد
                                                                 </span>
                                                             )}
@@ -324,7 +324,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                             <div className="relative">
                                                 <button
                                                     onClick={() => toggleStatusDropdown(offer.id)}
-                                                    className="flex items-center gap-2 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg p-1 transition-colors"
+                                                    className="flex items-center gap-2 hover:ktra-bg-panel dark:hover:ktra-bg-panel rounded-lg p-1 transition-colors"
                                                 >
                                                     <StatusBadge status={offer.status} />
                                                     <ChevronDown className={`w-3 h-3 transition-transform ${statusDropdown === offer.id ? 'rotate-180' : ''
@@ -332,25 +332,25 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                                 </button>
 
                                                 {statusDropdown === offer.id && (
-                                                    <div className="absolute top-full right-0 mt-2 z-50 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl shadow-xl min-w-[220px] overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+                                                    <div className="absolute top-full right-0 mt-2 z-50 ktra-bg-field dark:ktra-bg-panel border ktra-border-soft dark:ktra-border-soft rounded-xl shadow-xl min-w-[220px] overflow-hidden animate-in fade-in zoom-in-95 duration-100">
                                                         <div className="p-1">
                                                             {statusOptions.map((option) => (
                                                                 <button
                                                                     key={option.value}
                                                                     onClick={() => handleStatusChange(offer.id, option.value)}
                                                                     className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-colors ${offer.status === option.value
-                                                                        ? 'aseel-bg-accent-bg dark:aseel-bg-panel/20 aseel-text-accent dark:aseel-text-soft'
-                                                                        : 'aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel'
+                                                                        ? 'ktra-bg-accent-bg dark:ktra-bg-panel/20 ktra-text-accent dark:ktra-text-soft'
+                                                                        : 'ktra-text-ink dark:ktra-text-soft hover:ktra-bg-panel dark:hover:ktra-bg-panel'
                                                                         }`}
                                                                 >
-                                                                    <div className={`p-1.5 rounded-md ${offer.status === option.value ? 'aseel-bg-accent-bg dark:aseel-bg-panel/40' : 'aseel-bg-panel dark:aseel-bg-panel'}`}>
+                                                                    <div className={`p-1.5 rounded-md ${offer.status === option.value ? 'ktra-bg-accent-bg dark:ktra-bg-panel/40' : 'ktra-bg-panel dark:ktra-bg-panel'}`}>
                                                                         <option.icon className={`w-4 h-4 ${option.color}`} />
                                                                     </div>
                                                                     <span className="font-medium flex-1 text-right">
                                                                         {option.label}
                                                                     </span>
                                                                     {offer.status === option.value && (
-                                                                        <CheckCircle className="w-4 h-4 aseel-text-accent dark:aseel-text-soft" />
+                                                                        <CheckCircle className="w-4 h-4 ktra-text-accent dark:ktra-text-soft" />
                                                                     )}
                                                                 </button>
                                                             ))}
@@ -361,18 +361,18 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                                 {/* عرض الملاحظات الداخلية بدلاً من statusNotes */}
                                                 {offer.internalNotes && (
                                                     <div className="mt-3 relative group">
-                                                        <div className="absolute -right-1 top-0 bottom-0 w-1 aseel-bg-panel dark:aseel-bg-panel rounded-full"></div>
+                                                        <div className="absolute -right-1 top-0 bottom-0 w-1 ktra-bg-panel dark:ktra-bg-panel rounded-full"></div>
                                                         <div className="pr-3">
-                                                            <p className="text-xs aseel-text-soft dark:aseel-text-soft line-clamp-2">
+                                                            <p className="text-xs ktra-text-soft dark:ktra-text-soft line-clamp-2">
                                                                 {truncateText(offer.internalNotes, 100)}
                                                             </p>
                                                             {offer.internalNotes.length > 100 && (
-                                                                <div className="absolute z-10 invisible group-hover:visible bottom-full right-3 mb-2 aseel-bg-panel dark:aseel-bg-panel text-white text-sm rounded-lg p-3 max-w-xs shadow-xl">
+                                                                <div className="absolute z-10 invisible group-hover:visible bottom-full right-3 mb-2 ktra-bg-panel dark:ktra-bg-panel text-white text-sm rounded-lg p-3 max-w-xs shadow-xl">
                                                                     <div className="font-medium mb-1 flex items-center gap-2">
                                                                         <MessageSquare className="w-4 h-4" />
                                                                         ملاحظات داخلية
                                                                     </div>
-                                                                    <p className="aseel-text-soft whitespace-pre-line">
+                                                                    <p className="ktra-text-soft whitespace-pre-line">
                                                                         {offer.internalNotes}
                                                                     </p>
                                                                 </div>
@@ -389,7 +389,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                                     <DollarSign className="w-4 h-4" />
                                                     {offer.grandTotal.toLocaleString()} $
                                                 </div>
-                                                <div className="text-xs aseel-text-soft dark:aseel-text-soft">
+                                                <div className="text-xs ktra-text-soft dark:ktra-text-soft">
                                                     ضريبة: {formatMoney(offer.taxAmount ?? 0)} $
                                                 </div>
                                             </div>
@@ -402,11 +402,11 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
 
                     {filteredOffers.length === 0 && (
                         <div className="text-center py-16">
-                            <FileText className="w-20 h-20 aseel-text-soft dark:aseel-text-soft mx-auto mb-4" />
-                            <h3 className="text-lg font-medium aseel-text-soft dark:aseel-text-soft mb-2">
+                            <FileText className="w-20 h-20 ktra-text-soft dark:ktra-text-soft mx-auto mb-4" />
+                            <h3 className="text-lg font-medium ktra-text-soft dark:ktra-text-soft mb-2">
                                 {searchQuery ? 'لم يتم العثور على عروض' : 'لا توجد عروض'}
                             </h3>
-                            <p className="aseel-text-soft dark:aseel-text-soft mb-6">
+                            <p className="ktra-text-soft dark:ktra-text-soft mb-6">
                                 {searchQuery
                                     ? 'لا توجد عروض تطابق بحثك'
                                     : activeFilter === 'all'
@@ -416,7 +416,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                             {(activeFilter !== 'all' || searchQuery) && (
                                 <button
                                     onClick={onClearFilter}
-                                    className="px-4 py-2 aseel-bg-grid-head dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft rounded-lg inline-flex items-center gap-2 mr-2"
+                                    className="px-4 py-2 ktra-bg-grid-head dark:ktra-bg-panel ktra-text-ink dark:ktra-text-soft rounded-lg inline-flex items-center gap-2 mr-2"
                                 >
                                     <X className="w-4 h-4" />
                                     مسح الفلترة
@@ -424,7 +424,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                             )}
                             <button
                                 onClick={onCreateNew}
-                                className="px-4 py-2 aseel-bg-accent hover:aseel-bg-accent dark:aseel-bg-accent-bg dark:hover:aseel-bg-accent text-white rounded-lg inline-flex items-center gap-2"
+                                className="px-4 py-2 ktra-bg-accent hover:ktra-bg-accent dark:ktra-bg-accent-bg dark:hover:ktra-bg-accent text-white rounded-lg inline-flex items-center gap-2"
                             >
                                 <Plus className="w-4 h-4" />
                                 إنشاء أول عرض
@@ -434,20 +434,20 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                 </div>
 
                 {filteredOffers.length > 0 && (
-                    <div className="px-4 py-3 border-t aseel-border-soft dark:aseel-border-soft aseel-bg-panel dark:aseel-bg-panel/50">
+                    <div className="px-4 py-3 border-t ktra-border-soft dark:ktra-border-soft ktra-bg-panel dark:ktra-bg-panel/50">
                         <div className="flex items-center justify-between">
-                            <div className="text-sm aseel-text-soft dark:aseel-text-soft">
+                            <div className="text-sm ktra-text-soft dark:ktra-text-soft">
                                 عرض <span className="font-medium">{filteredOffers.length}</span> من <span className="font-medium">{offers.length}</span> عرض
                             </div>
                             <div className="flex gap-1">
-                                <button className="px-3 py-1 rounded-lg aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel disabled:opacity-50 disabled:cursor-not-allowed">
+                                <button className="px-3 py-1 rounded-lg ktra-bg-field dark:ktra-bg-panel border ktra-border-soft dark:ktra-border-soft ktra-text-ink dark:ktra-text-soft hover:ktra-bg-panel dark:hover:ktra-bg-panel disabled:opacity-50 disabled:cursor-not-allowed">
                                     السابق
                                 </button>
-                                <button className="px-3 py-1 rounded-lg aseel-bg-accent text-white">1</button>
-                                <button className="px-3 py-1 rounded-lg aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel">
+                                <button className="px-3 py-1 rounded-lg ktra-bg-accent text-white">1</button>
+                                <button className="px-3 py-1 rounded-lg ktra-bg-field dark:ktra-bg-panel border ktra-border-soft dark:ktra-border-soft ktra-text-ink dark:ktra-text-soft hover:ktra-bg-panel dark:hover:ktra-bg-panel">
                                     2
                                 </button>
-                                <button className="px-3 py-1 rounded-lg aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel">
+                                <button className="px-3 py-1 rounded-lg ktra-bg-field dark:ktra-bg-panel border ktra-border-soft dark:ktra-border-soft ktra-text-ink dark:ktra-text-soft hover:ktra-bg-panel dark:hover:ktra-bg-panel">
                                     التالي
                                 </button>
                             </div>
@@ -458,7 +458,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
 
             {menuPosition && selectedOffer && (
                 <div
-                    className="fixed aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl shadow-xl min-w-[160px] overflow-hidden z-50"
+                    className="fixed ktra-bg-field dark:ktra-bg-panel border ktra-border-soft dark:ktra-border-soft rounded-xl shadow-xl min-w-[160px] overflow-hidden z-50"
                     style={{
                         top: `${menuPosition.top}px`,
                         left: `${menuPosition.left}px`
@@ -472,9 +472,9 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                 setMenuPosition(null);
                                 setSelectedOffer(null);
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg transition-colors text-right"
+                            className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium ktra-text-ink dark:ktra-text-soft hover:ktra-bg-panel dark:hover:ktra-bg-panel rounded-lg transition-colors text-right"
                         >
-                            <Eye className="w-4 h-4 aseel-text-soft" />
+                            <Eye className="w-4 h-4 ktra-text-soft" />
                             عرض
                         </button>
                         <button
@@ -483,7 +483,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                 setMenuPosition(null);
                                 setSelectedOffer(null);
                             }}
-                            className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg transition-colors text-right"
+                            className="w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium ktra-text-ink dark:ktra-text-soft hover:ktra-bg-panel dark:hover:ktra-bg-panel rounded-lg transition-colors text-right"
                         >
                             <Edit2 className="w-4 h-4 text-green-500" />
                             تعديل

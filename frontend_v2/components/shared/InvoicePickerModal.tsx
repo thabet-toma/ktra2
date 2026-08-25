@@ -63,26 +63,26 @@ export const InvoicePickerModal: React.FC<Props> = ({
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-3xl max-h-[88vh] flex flex-col rounded-2xl aseel-bg-field dark:aseel-bg-panel shadow-xl border aseel-border-soft">
-        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b aseel-border-soft">
-          <h3 className="text-base sm:text-lg font-bold aseel-text-ink dark:text-white">
+      <div className="w-full max-w-3xl max-h-[88vh] flex flex-col rounded-2xl ktra-bg-field dark:ktra-bg-panel shadow-xl border ktra-border-soft">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b ktra-border-soft">
+          <h3 className="text-base sm:text-lg font-bold ktra-text-ink dark:text-white">
             {title}
           </h3>
           <button
             onClick={onClose}
-            className="p-2 aseel-text-soft hover:aseel-bg-panel rounded-lg"
+            className="p-2 ktra-text-soft hover:ktra-bg-panel rounded-lg"
             aria-label="إغلاق"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="px-4 sm:px-6 py-3 border-b aseel-border-soft">
+        <div className="px-4 sm:px-6 py-3 border-b ktra-border-soft">
           <label className="relative block">
-            <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 right-3 aseel-text-soft" />
+            <Search className="w-4 h-4 absolute top-1/2 -translate-y-1/2 right-3 ktra-text-soft" />
             <input
               autoFocus
-              className="aseel-input w-full ps-3 pe-9"
+              className="ktra-input w-full ps-3 pe-9"
               placeholder="بحث برقم الفاتورة أو الاسم…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -92,20 +92,20 @@ export const InvoicePickerModal: React.FC<Props> = ({
 
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-3">
           {error && (
-            <div className="aseel-banner aseel-banner--err" role="alert">
+            <div className="ktra-banner ktra-banner--err" role="alert">
               {error}
             </div>
           )}
           {loading ? (
-            <div className="flex items-center gap-2 justify-center py-10 aseel-text-soft">
+            <div className="flex items-center gap-2 justify-center py-10 ktra-text-soft">
               <Loader2 className="w-5 h-5 animate-spin" />
               <span>جارٍ التحميل…</span>
             </div>
           ) : filtered.length === 0 ? (
-            <div className="py-10 text-center aseel-text-soft text-sm">{emptyHint}</div>
+            <div className="py-10 text-center ktra-text-soft text-sm">{emptyHint}</div>
           ) : (
             <table className="w-full text-sm">
-              <thead className="aseel-bg-panel aseel-text-soft text-xs">
+              <thead className="ktra-bg-panel ktra-text-soft text-xs">
                 <tr>
                   <th className="px-3 py-2 text-right font-medium">رقم الفاتورة</th>
                   <th className="px-3 py-2 text-center font-medium">التاريخ</th>
@@ -120,16 +120,16 @@ export const InvoicePickerModal: React.FC<Props> = ({
                     key={r.id}
                     className={
                       r.disabled
-                        ? "border-t aseel-border-soft opacity-60 cursor-not-allowed"
-                        : "border-t aseel-border-soft cursor-pointer hover:aseel-bg-panel"
+                        ? "border-t ktra-border-soft opacity-60 cursor-not-allowed"
+                        : "border-t ktra-border-soft cursor-pointer hover:ktra-bg-panel"
                     }
                     onClick={() => !r.disabled && onPick(r)}
                     onDoubleClick={() => !r.disabled && onPick(r)}
                   >
-                    <td className="px-3 py-2 font-mono text-xs aseel-text-ink dark:aseel-text-soft">
+                    <td className="px-3 py-2 font-mono text-xs ktra-text-ink dark:ktra-text-soft">
                       {r.number}
                       {r.hint && (
-                        <span className="block text-[11px] aseel-text-soft">{r.hint}</span>
+                        <span className="block text-[11px] ktra-text-soft">{r.hint}</span>
                       )}
                     </td>
                     <td className="px-3 py-2 text-center text-xs">
@@ -139,7 +139,7 @@ export const InvoicePickerModal: React.FC<Props> = ({
                     <td className="px-3 py-2 text-left font-mono text-xs">
                       {formatMoney(r.total, "—")}
                     </td>
-                    <td className="px-3 py-2 text-center text-[11px] aseel-text-soft">
+                    <td className="px-3 py-2 text-center text-[11px] ktra-text-soft">
                       {r.statusLabel || "—"}
                     </td>
                   </tr>

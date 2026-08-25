@@ -1,5 +1,5 @@
 /**
- * N4-T3 — SalesSettingsPage (L9): Aseel shell wrap + إشارة لـ GroupConstantsPage
+ * N4-T3 — SalesSettingsPage (L9): Kit shell wrap + إشارة لـ GroupConstantsPage
  * Ref: task5.md:681-683
  *
  * تَبقى الحسابات الافتراضية المتعلّقة بالمبيعات. الحقول العامة (طوابع رسوم...)
@@ -17,7 +17,7 @@ import {
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
-import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
+import { KitDocumentShell, type KitToolbarAction } from "../kit";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import {
   SERIAL_ENTRY_MODE_HINT,
@@ -48,13 +48,13 @@ const Section: React.FC<{
   description?: string;
   children: React.ReactNode;
 }> = ({ title, description, children }) => (
-  <div className="rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel p-5 space-y-3">
+  <div className="rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel p-5 space-y-3">
     <div>
-      <h3 className="text-base font-semibold aseel-text-ink dark:aseel-text-soft">
+      <h3 className="text-base font-semibold ktra-text-ink dark:ktra-text-soft">
         {title}
       </h3>
       {description && (
-        <p className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
+        <p className="text-xs ktra-text-soft dark:ktra-text-soft mt-1">
           {description}
         </p>
       )}
@@ -68,7 +68,7 @@ const FieldLabel: React.FC<{ label: string; children: React.ReactNode }> = ({
   children,
 }) => (
   <label className="block">
-    <span className="text-xs font-medium aseel-text-soft dark:aseel-text-soft">
+    <span className="text-xs font-medium ktra-text-soft dark:ktra-text-soft">
       {label}
     </span>
     <div className="mt-1">{children}</div>
@@ -76,7 +76,7 @@ const FieldLabel: React.FC<{ label: string; children: React.ReactNode }> = ({
 );
 
 const input =
-  "w-full rounded-md border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel px-2.5 py-1.5 text-sm aseel-text-ink dark:aseel-text-soft focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50";
+  "w-full rounded-md border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel px-2.5 py-1.5 text-sm ktra-text-ink dark:ktra-text-soft focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50";
 
 export const SalesSettingsPage: React.FC = () => {
   const [settings, setSettings] = useState<SalesSettings | null>(null);
@@ -219,7 +219,7 @@ export const SalesSettingsPage: React.FC = () => {
 
   if (loading && !settings) {
     return (
-      <div className="flex items-center justify-center p-10 aseel-text-soft">
+      <div className="flex items-center justify-center p-10 ktra-text-soft">
         <Loader2 className="w-6 h-6 animate-spin me-2" /> تحميل الإعدادات...
       </div>
     );
@@ -227,13 +227,13 @@ export const SalesSettingsPage: React.FC = () => {
 
   if (!settings) {
     return (
-      <div className="p-6 aseel-text-state dark:aseel-text-soft">
+      <div className="p-6 ktra-text-state dark:ktra-text-soft">
         تعذّر تحميل الإعدادات. {err}
       </div>
     );
   }
 
-  const toolbarActions: AseelToolbarAction[] = [
+  const toolbarActions: KitToolbarAction[] = [
     {
       key: "save",
       label: saving ? "..." : "حفظ الإعدادات",
@@ -245,8 +245,8 @@ export const SalesSettingsPage: React.FC = () => {
 
   const innerContent = (
     <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-5" dir="rtl">
-      <div className="aseel-banner" style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", background: "var(--aseel-surface-2, #f4ede0)" }}>
-        <Info className="w-4 h-4" style={{ color: "var(--aseel-ink-soft)" }} />
+      <div className="ktra-banner" style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", background: "var(--ktra-surface-2, #f4ede0)" }}>
+        <Info className="w-4 h-4" style={{ color: "var(--ktra-ink-soft)" }} />
         <span style={{ fontSize: "12px" }}>
           الحقول العامة (طوابع رسوم، عملة أساسية، إلخ.) انتقلت إلى صفحة «ثوابت المجموعة».
           تَبقى هنا الحسابات الافتراضية الخاصة بفواتير المبيعات فقط.
@@ -255,13 +255,13 @@ export const SalesSettingsPage: React.FC = () => {
 
       {msg && (
         // task16 D12: تأكيد «حُفظ بنجاح» واضح (بنر نجاح أخضر + علامة)
-        <div className="aseel-banner aseel-banner--ok" role="status" aria-live="polite">
+        <div className="ktra-banner ktra-banner--ok" role="status" aria-live="polite">
           <Info className="h-4 w-4 shrink-0" />
           <span>{msg}</span>
         </div>
       )}
       {err && (
-        <div className="rounded aseel-bg-panel aseel-text-state dark:aseel-bg-panel/30 dark:aseel-text-soft text-sm px-3 py-2">
+        <div className="rounded ktra-bg-panel ktra-text-state dark:ktra-bg-panel/30 dark:ktra-text-soft text-sm px-3 py-2">
           {err}
         </div>
       )}
@@ -289,7 +289,7 @@ export const SalesSettingsPage: React.FC = () => {
             ))}
           </select>
           {settings.default_customer_name && (
-            <div className="text-[11px] aseel-text-soft mt-1">
+            <div className="text-[11px] ktra-text-soft mt-1">
               الحالي: {settings.default_customer_name}
             </div>
           )}
@@ -316,7 +316,7 @@ export const SalesSettingsPage: React.FC = () => {
             ))}
           </select>
           {settings.default_currency_code && (
-            <div className="text-[11px] aseel-text-soft mt-1">
+            <div className="text-[11px] ktra-text-soft mt-1">
               الحالي: {settings.default_currency_code}
             </div>
           )}
@@ -375,7 +375,7 @@ export const SalesSettingsPage: React.FC = () => {
             title="اختيار حساب إيراد البضائع"
           />
           {settings.default_revenue_account_product_name && (
-            <div className="text-[11px] aseel-text-soft mt-1">
+            <div className="text-[11px] ktra-text-soft mt-1">
               الحالي: {settings.default_revenue_account_product_name}
             </div>
           )}
@@ -391,7 +391,7 @@ export const SalesSettingsPage: React.FC = () => {
             title="اختيار حساب إيراد الخدمات"
           />
           {settings.default_revenue_account_service_name && (
-            <div className="text-[11px] aseel-text-soft mt-1">
+            <div className="text-[11px] ktra-text-soft mt-1">
               الحالي: {settings.default_revenue_account_service_name}
             </div>
           )}
@@ -621,7 +621,7 @@ export const SalesSettingsPage: React.FC = () => {
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
-          <div className="text-[11px] aseel-text-soft mt-1">{SERIAL_ENTRY_MODE_HINT}</div>
+          <div className="text-[11px] ktra-text-soft mt-1">{SERIAL_ENTRY_MODE_HINT}</div>
         </FieldLabel>
       </Section>
 
@@ -677,7 +677,7 @@ export const SalesSettingsPage: React.FC = () => {
         description="الحسابات التي يُرحَّل إليها كل نوع فاتورة. تُعدَّل من حقول الحسابات أعلاه."
       >
         <div className="md:col-span-2 overflow-x-auto">
-          <table className="w-full text-sm aseel-grid" data-variant="list">
+          <table className="w-full text-sm ktra-grid" data-variant="list">
             <thead>
               <tr>
                 <th className="text-right p-2">نوع الفاتورة / الحركة</th>
@@ -689,12 +689,12 @@ export const SalesSettingsPage: React.FC = () => {
               <tr>
                 <td className="p-2">بيع نقدي</td>
                 <td className="p-2">{acctName(settings.default_cash_account)}</td>
-                <td className="p-2">{acctName(settings.default_revenue_account_product)} <span className="aseel-text-soft">+ ض.ق.م مخرجات</span></td>
+                <td className="p-2">{acctName(settings.default_revenue_account_product)} <span className="ktra-text-soft">+ ض.ق.م مخرجات</span></td>
               </tr>
               <tr>
                 <td className="p-2">بيع آجل (ذمم)</td>
-                <td className="p-2">ذمم العميل <span className="aseel-text-soft">(حساب العميل المرتبط، أو الافتراضي: {acctName(settings.default_ar_account)})</span></td>
-                <td className="p-2">{acctName(settings.default_revenue_account_product)} <span className="aseel-text-soft">+ ض.ق.م مخرجات</span></td>
+                <td className="p-2">ذمم العميل <span className="ktra-text-soft">(حساب العميل المرتبط، أو الافتراضي: {acctName(settings.default_ar_account)})</span></td>
+                <td className="p-2">{acctName(settings.default_revenue_account_product)} <span className="ktra-text-soft">+ ض.ق.م مخرجات</span></td>
               </tr>
               <tr>
                 <td className="p-2">بيع خدمات</td>
@@ -712,7 +712,7 @@ export const SalesSettingsPage: React.FC = () => {
             type="button"
             onClick={handleRestoreDefaults}
             disabled={saving}
-            className="mt-3 text-sm px-3 py-1.5 rounded-lg border aseel-border-soft hover:aseel-bg-panel disabled:opacity-40"
+            className="mt-3 text-sm px-3 py-1.5 rounded-lg border ktra-border-soft hover:ktra-bg-panel disabled:opacity-40"
           >
             استعادة خريطة القيد الافتراضية
           </button>
@@ -748,14 +748,14 @@ export const SalesSettingsPage: React.FC = () => {
   // tab سفلي بارتفاع أقصى 220px تاركاً فراغاً أبيض ضخماً وسط الشاشة.
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="إعدادات فواتير المبيعات"
         state="حسابات افتراضية + ضرائب + شحن"
         actions={toolbarActions}
         header={<></>}
       >
         {innerContent}
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

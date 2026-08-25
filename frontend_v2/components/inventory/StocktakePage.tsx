@@ -6,7 +6,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
-import { AseelDocumentShell, AseelAutocomplete, type AseelToolbarAction } from "../aseel";
+import { KitDocumentShell, KitAutocomplete, type KitToolbarAction } from "../kit";
 import { ProductCardModal } from "../shared/ProductCardModal";
 import { formatQuantity } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
@@ -360,7 +360,7 @@ export const StocktakePage: React.FC = () => {
   const renderLineRow = (l: Line, i: number, depth: number) => {
     const p = prodById(l.product);
     const d = lineVariance(l);
-    const diffColor = d === null || d === 0 ? "var(--aseel-ink-soft)" : d > 0 ? "#15803d" : "#b91c1c";
+    const diffColor = d === null || d === 0 ? "var(--ktra-ink-soft)" : d > 0 ? "#15803d" : "#b91c1c";
     return (
       <tr key={i}>
         <td style={{ textAlign: "center" }}>
@@ -378,17 +378,17 @@ export const StocktakePage: React.FC = () => {
                 title={p ? `بطاقة الصنف: ${p.sku} — ${p.name_ar || p.name_en || ""}` : "بطاقة الصنف"}>
                 {lineName(l)}
               </button>
-              <button className="aseel-iconbtn" onClick={() => setCardProductId(Number(l.product))} title="بطاقة الصنف"><Info className="h-3 w-3" /></button>
+              <button className="ktra-iconbtn" onClick={() => setCardProductId(Number(l.product))} title="بطاقة الصنف"><Info className="h-3 w-3" /></button>
             </div>
           ) : (
-            <AseelAutocomplete value="" options={productOptions}
+            <KitAutocomplete value="" options={productOptions}
               onPick={(id) => updateLine(i, { product: Number(id) })}
               onInfo={(id) => setCardProductId(Number(id))}
               placeholder="اكتب المقاس أو الاسم أو الكود للبحث…" />
           )}
         </td>
-        <td style={{ textAlign: "center", color: "var(--aseel-ink-soft)" }}>{lineSys(l)}</td>
-        <td><input type="number" min="0" step="any" className="aseel-input" style={{ width: "100%" }}
+        <td style={{ textAlign: "center", color: "var(--ktra-ink-soft)" }}>{lineSys(l)}</td>
+        <td><input type="number" min="0" step="any" className="ktra-input" style={{ width: "100%" }}
           data-qty-for={l.product} value={l.counted_quantity} placeholder="عدّ…" disabled={editingPosted}
           onChange={(e) => updateLine(i, { counted_quantity: e.target.value })}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); document.querySelector<HTMLInputElement>("#stocktake-locate input")?.focus(); } }} /></td>
@@ -396,7 +396,7 @@ export const StocktakePage: React.FC = () => {
           {d === null ? "—" : d > 0 ? `+${trimNum(d)}` : trimNum(d)}
         </td>
         <td style={{ textAlign: "center" }}>
-          {!editingPosted && (<button className="aseel-iconbtn" onClick={() => removeLine(i)} title="حذف"><Trash2 className="h-3 w-3" /></button>)}
+          {!editingPosted && (<button className="ktra-iconbtn" onClick={() => removeLine(i)} title="حذف"><Trash2 className="h-3 w-3" /></button>)}
         </td>
       </tr>
     );
@@ -443,9 +443,9 @@ export const StocktakePage: React.FC = () => {
     }
     const ids = members.map((idx) => lines[idx].product).filter((x) => x !== "") as number[];
     const allSel = members.length > 0 && members.every((idx) => lines[idx].selected);
-    const vColor = !anyCnt || varSum === 0 ? "var(--aseel-ink-soft)" : varSum > 0 ? "#15803d" : "#b91c1c";
+    const vColor = !anyCnt || varSum === 0 ? "var(--ktra-ink-soft)" : varSum > 0 ? "#15803d" : "#b91c1c";
     return (
-      <tr key={`cat-${catId}`} style={{ background: depth === 0 ? "var(--aseel-bg-soft,#e7ecf1)" : "var(--aseel-bg-soft,#f1f3f5)" }}>
+      <tr key={`cat-${catId}`} style={{ background: depth === 0 ? "var(--ktra-bg-soft,#e7ecf1)" : "var(--ktra-bg-soft,#f1f3f5)" }}>
         <td style={{ textAlign: "center" }}>
           <input type="checkbox" checked={allSel} onChange={(e) => {
             const c = e.target.checked;
@@ -454,26 +454,26 @@ export const StocktakePage: React.FC = () => {
         </td>
         <td>
           <div style={{ display: "flex", alignItems: "center", gap: 6, paddingInlineStart: depth * 22 }}>
-            <button type="button" className="aseel-iconbtn" onClick={() => toggleGroup(key)} title={collapsed ? "فتح" : "طيّ"}>
+            <button type="button" className="ktra-iconbtn" onClick={() => toggleGroup(key)} title={collapsed ? "فتح" : "طيّ"}>
               {collapsed ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             </button>
             <button type="button" className="text-indigo-700 hover:underline"
               style={{ fontWeight: 700, background: "none", border: "none", padding: 0, cursor: "pointer" }}
               onClick={() => (ids.length ? openInNewTab(productGroupPath({ name, categoryId: catId === UNCAT ? undefined : catId, ids })) : toggleGroup(key))}
               title="كرت مجمّع لكل ما تحت التصنيف">
-              {name} <span style={{ color: "var(--aseel-ink-soft)", fontWeight: 400 }}>({ids.length})</span>
+              {name} <span style={{ color: "var(--ktra-ink-soft)", fontWeight: 400 }}>({ids.length})</span>
             </button>
           </div>
         </td>
         <td style={{ textAlign: "center", fontWeight: 700 }}>{trimNum(sys)}</td>
-        <td style={{ textAlign: "center", color: "var(--aseel-ink-soft)" }}>{anyCnt ? trimNum(cnt) : "—"}</td>
+        <td style={{ textAlign: "center", color: "var(--ktra-ink-soft)" }}>{anyCnt ? trimNum(cnt) : "—"}</td>
         <td style={{ textAlign: "center", fontWeight: 700, color: vColor }}>{!anyCnt ? "—" : varSum > 0 ? `+${trimNum(varSum)}` : trimNum(varSum)}</td>
         <td></td>
       </tr>
     );
   };
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "new", label: showForm ? "إخفاء النموذج" : "جرد جديد", icon: <Plus />, onClick: () => { if (showForm) setShowForm(false); else { resetForm(); setShowForm(true); } } },
     { key: "refresh", label: "تحديث", icon: <RefreshCw className={loading ? "animate-spin" : ""} />, onClick: () => void load(), separatorBefore: true },
     { key: "back", label: "عودة", icon: <X />, onClick: () => navigate(-1), danger: true, separatorBefore: true },
@@ -481,37 +481,37 @@ export const StocktakePage: React.FC = () => {
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell title="الجرد (جرد المخزون)" state={`${rows.length} مستند`} actions={actions}>
+      <KitDocumentShell title="الجرد (جرد المخزون)" state={`${rows.length} مستند`} actions={actions}>
         <div style={{ padding: 8 }}>
-          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: 8 }}>{err}</div>}
-          {msg && <div className="aseel-banner" style={{ marginBottom: 8, color: "var(--aseel-ok,#2d7d46)" }}>{msg}</div>}
+          {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: 8 }}>{err}</div>}
+          {msg && <div className="ktra-banner" style={{ marginBottom: 8, color: "var(--ktra-ok,#2d7d46)" }}>{msg}</div>}
 
           {showForm && (
-            <div className="aseel-bg-panel" style={{ border: "1px solid var(--aseel-border)", borderRadius: 6, padding: 10, marginBottom: 12 }}>
+            <div className="ktra-bg-panel" style={{ border: "1px solid var(--ktra-border)", borderRadius: 6, padding: 10, marginBottom: 12 }}>
               {editingId != null && (
-                <div className="aseel-banner" style={{ marginBottom: 8, color: editingPosted ? "#b45309" : "var(--aseel-ink)" }}>
+                <div className="ktra-banner" style={{ marginBottom: 8, color: editingPosted ? "#b45309" : "var(--ktra-ink)" }}>
                   {editingPosted
                     ? `عرض جرد مُرحَّل #${editingId} — للقراءة فقط (لا يمكن تعديله)`
                     : `تعديل مسودة جرد #${editingId} — راجع ثم احفظ أو رحّل`}
                 </div>
               )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-                <label className="aseel-field"><span className="aseel-field-label">التاريخ</span>
-                  <input type="date" className="aseel-input" value={date} disabled={editingPosted} onChange={(e) => setDate(e.target.value)} /></label>
-                <label className="aseel-field"><span className="aseel-field-label">المستودع</span>
-                  <select className="aseel-input" value={warehouse} disabled={editingPosted} onChange={(e) => setWarehouse(e.target.value ? Number(e.target.value) : "")}>
+                <label className="ktra-field"><span className="ktra-field-label">التاريخ</span>
+                  <input type="date" className="ktra-input" value={date} disabled={editingPosted} onChange={(e) => setDate(e.target.value)} /></label>
+                <label className="ktra-field"><span className="ktra-field-label">المستودع</span>
+                  <select className="ktra-input" value={warehouse} disabled={editingPosted} onChange={(e) => setWarehouse(e.target.value ? Number(e.target.value) : "")}>
                     <option value="">— كل المخزون —</option>
                     {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select></label>
-                <label className="aseel-field" style={{ flex: 1, minWidth: 160 }}><span className="aseel-field-label">ملاحظات</span>
-                  <input className="aseel-input" value={notes} disabled={editingPosted} onChange={(e) => setNotes(e.target.value)} /></label>
+                <label className="ktra-field" style={{ flex: 1, minWidth: 160 }}><span className="ktra-field-label">ملاحظات</span>
+                  <input className="ktra-input" value={notes} disabled={editingPosted} onChange={(e) => setNotes(e.target.value)} /></label>
               </div>
 
               {/* قفز لصنف: اكتب الكود/الاسم → اختر أو Enter ⇒ تنزل القائمة على الصنف والمؤشّر بخانة الكمية */}
               {!editingPosted && (
               <div id="stocktake-locate" style={{ marginBottom: 8, maxWidth: 480 }}>
-                <span className="aseel-field-label">🔎 قفز لصنف (اكتب الكود ثم Enter — للعدّ بأي ترتيب)</span>
-                <AseelAutocomplete
+                <span className="ktra-field-label">🔎 قفز لصنف (اكتب الكود ثم Enter — للعدّ بأي ترتيب)</span>
+                <KitAutocomplete
                   value=""
                   options={locateOptions}
                   onPick={(id) => locateProduct(Number(id))}
@@ -523,12 +523,12 @@ export const StocktakePage: React.FC = () => {
 
               {/* ملخص المراجعة + فلتر العرض (الكل/المعدود/غير المعدود/الفروقات) للعرض والطباعة */}
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 6, fontSize: 13 }}>
-                <span style={{ color: "var(--aseel-ink-soft)" }}>
+                <span style={{ color: "var(--ktra-ink-soft)" }}>
                   معدود: <b>{countedCount}</b> · فروقات: <b style={{ color: varianceCount ? "#b45309" : undefined }}>{varianceCount}</b> · غير معدود: <b>{uncountedCount}</b>
                 </span>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginInlineStart: "auto" }} title="تصفية الأصناف المعروضة (لا تؤثر على التحديد اليدوي)">
-                  <span className="aseel-field-label">تصفية</span>
-                  <select className="aseel-input" style={{ width: "auto" }} value={filterMode}
+                  <span className="ktra-field-label">تصفية</span>
+                  <select className="ktra-input" style={{ width: "auto" }} value={filterMode}
                     onChange={(e) => {
                       const mode = e.target.value as FilterMode;
                       setFilterMode(mode);
@@ -537,10 +537,10 @@ export const StocktakePage: React.FC = () => {
                     {FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </label>
-                <button className="aseel-toolbtn" onClick={printSheet} title="طباعة ورقة نتيجة الجرد (تحترم الفلتر)"><Printer className="h-4 w-4" /> طباعة</button>
+                <button className="ktra-toolbtn" onClick={printSheet} title="طباعة ورقة نتيجة الجرد (تحترم الفلتر)"><Printer className="h-4 w-4" /> طباعة</button>
               </div>
 
-              <table className="aseel-grid" data-variant="list" style={{ marginBottom: 8 }}>
+              <table className="ktra-grid" data-variant="list" style={{ marginBottom: 8 }}>
                 <thead><tr>
                   <th style={{ width: 36, textAlign: "center" }}>
                     <input type="checkbox" onChange={(e) => {
@@ -586,16 +586,16 @@ export const StocktakePage: React.FC = () => {
               </table>
               {editingPosted ? (
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="aseel-toolbtn" onClick={resetForm} style={{ marginInlineStart: "auto" }}><X className="h-4 w-4" /> إغلاق</button>
+                  <button className="ktra-toolbtn" onClick={resetForm} style={{ marginInlineStart: "auto" }}><X className="h-4 w-4" /> إغلاق</button>
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 8 }}>
-                  <button className="aseel-toolbtn" onClick={addLine}><Plus className="h-4 w-4" /> سطر</button>
-                  <button className="aseel-toolbtn" onClick={loadAllProducts} title="إدراج كافة الأصناف المسجلة"><List className="h-4 w-4" /> إدراج كل الأصناف</button>
-                  <button className="aseel-toolbtn" onClick={() => void save(false)} disabled={saving} style={{ marginInlineStart: "auto" }} title="حفظ كمسودة بدون ترحيل — تُرحَّل لاحقاً من القائمة">
+                  <button className="ktra-toolbtn" onClick={addLine}><Plus className="h-4 w-4" /> سطر</button>
+                  <button className="ktra-toolbtn" onClick={loadAllProducts} title="إدراج كافة الأصناف المسجلة"><List className="h-4 w-4" /> إدراج كل الأصناف</button>
+                  <button className="ktra-toolbtn" onClick={() => void save(false)} disabled={saving} style={{ marginInlineStart: "auto" }} title="حفظ كمسودة بدون ترحيل — تُرحَّل لاحقاً من القائمة">
                     {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} حفظ
                   </button>
-                  <button className="aseel-toolbtn" onClick={() => void save(true)} disabled={saving} title="حفظ وترحيل فوراً (تسوية المخزون + قيد الفرق)">
+                  <button className="ktra-toolbtn" onClick={() => void save(true)} disabled={saving} title="حفظ وترحيل فوراً (تسوية المخزون + قيد الفرق)">
                     {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} حفظ وترحيل
                   </button>
                 </div>
@@ -603,10 +603,10 @@ export const StocktakePage: React.FC = () => {
             </div>
           )}
 
-          <table className="aseel-grid" data-variant="list">
+          <table className="ktra-grid" data-variant="list">
             <thead><tr><th style={{ width: 60 }}>#</th><th style={{ width: 110 }}>الرقم</th><th style={{ width: 110 }}>التاريخ</th><th>المستودع</th><th style={{ width: 200 }}>الحالة</th></tr></thead>
             <tbody>
-              {rows.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", padding: 16, color: "var(--aseel-ink-soft)" }}>لا عمليات جرد</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", padding: 16, color: "var(--ktra-ink-soft)" }}>لا عمليات جرد</td></tr>}
               {rows.map((r) => (
                 // النقر على السطر يفتح المستند: المسودة للتعديل والمُرحَّل للعرض.
                 <tr key={r.id} onClick={() => void openStocktake(r.id)} style={{ cursor: "pointer" }} title="انقر لفتح المستند">
@@ -616,12 +616,12 @@ export const StocktakePage: React.FC = () => {
                   <td>{r.warehouse_name || "كل المخزون"}</td>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <button className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void openStocktake(r.id); }}>
+                      <button className="ktra-toolbtn" onClick={(e) => { e.stopPropagation(); void openStocktake(r.id); }}>
                         {r.is_posted ? "عرض" : "فتح"}
                       </button>
                       {r.is_posted
-                        ? <span style={{ color: "var(--aseel-ok,#2d7d46)", fontWeight: 600 }}>مُرحَّل {r.journal ? `#${r.journal}` : ""}</span>
-                        : <button className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void postExisting(r.id); }}><Send className="h-3 w-3" /> ترحيل</button>}
+                        ? <span style={{ color: "var(--ktra-ok,#2d7d46)", fontWeight: 600 }}>مُرحَّل {r.journal ? `#${r.journal}` : ""}</span>
+                        : <button className="ktra-toolbtn" onClick={(e) => { e.stopPropagation(); void postExisting(r.id); }}><Send className="h-3 w-3" /> ترحيل</button>}
                     </div>
                   </td>
                 </tr>
@@ -629,7 +629,7 @@ export const StocktakePage: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </AseelDocumentShell>
+      </KitDocumentShell>
       {cardProductId != null && (
         <ProductCardModal productId={cardProductId} onClose={() => setCardProductId(null)} />
       )}

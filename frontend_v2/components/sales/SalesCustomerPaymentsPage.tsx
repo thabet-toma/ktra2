@@ -2,7 +2,7 @@
  * SalesCustomerPaymentsPage — «سند قبض» (دفعات العملاء).
  *
  * التصميم موحَّد مع {@link SupplierPaymentsPage} (قرار المالك 2026-07-25): نفس
- * الهيكل — AseelDocumentShell + شريط أدوات + AseelDenseTable + شريط حالة —
+ * الهيكل — KitDocumentShell + شريط أدوات + KitDenseTable + شريط حالة —
  * والنافذة تُبنى من نفس قطع {@link PaymentVoucherParts} المشتركة مع سند الصرف.
  *
  * T-ONACC: التوزيع على الفواتير **اختياري**. سند بلا توزيع (أو بتوزيع جزئي)
@@ -44,14 +44,14 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import {
-  AseelDocumentShell,
-  AseelDenseTable,
+  KitDocumentShell,
+  KitDenseTable,
   useRecordNavigation,
-  useAseelKeymap,
+  useKitKeymap,
   type DenseColumn,
-  type AseelToolbarAction,
-  type AseelTab,
-} from "../aseel";
+  type KitToolbarAction,
+  type KitTab,
+} from "../kit";
 import {
   ChequeGrid,
   PaymentFinanceFields,
@@ -122,7 +122,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     }
   }, []);
 
-  // M4-T3: Aseel Navigation for customer payments
+  // M4-T3: Kit Navigation for customer payments
   const [selectedPayment, setSelectedPayment] = useState<CustomerPaymentRow | null>(null);
 
   const nav = useRecordNavigation<CustomerPaymentRow>({
@@ -183,12 +183,12 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     loadAll();
   }, [loadAll]);
 
-  // M4-T3: Aseel keyboard shortcuts — real handlers.
-  useAseelKeymap({
+  // M4-T3: Kit keyboard shortcuts — real handlers.
+  useKitKeymap({
     F2: () => window.print(),
     F5: () => loadAll(),
     F6: () => {
-      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      const el = document.querySelector<HTMLInputElement>('[data-ktra-field="search"]');
       el?.focus();
     },
     Escape: () => {
@@ -313,15 +313,15 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
         </span>
       ),
     },
-    { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmt(r.amount)}</span> },
+    { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => <span className="ktra-num font-mono text-xs font-semibold">{fmt(r.amount)}</span> },
     {
       key: "unallocated", header: "على الحساب", width: "110px", align: "left", numeric: true,
       render: (r) => {
         const u = unallocatedOf(r);
         return (
           <span
-            className="aseel-num font-mono text-xs"
-            style={{ color: u > 0.009 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ink-soft)" }}
+            className="ktra-num font-mono text-xs"
+            style={{ color: u > 0.009 ? "var(--ktra-warn, #b06800)" : "var(--ktra-ink-soft)" }}
           >
             {fmt(u)}
           </span>
@@ -335,7 +335,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
         <span className="text-[11px]">
           {r.allocations && r.allocations.length > 0
             ? r.allocations.map((a) => `#${a.invoice} = ${fmt(a.amount)}`).join(" · ")
-            : <span style={{ color: "var(--aseel-ink-soft)" }}>بدون توزيع</span>}
+            : <span style={{ color: "var(--ktra-ink-soft)" }}>بدون توزيع</span>}
         </span>
       ),
     },
@@ -346,7 +346,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
           style={{
             fontSize: "11px",
             fontWeight: 600,
-            color: r.is_posted ? "var(--aseel-ok, #2d7d46)" : "var(--aseel-warn, #b06800)",
+            color: r.is_posted ? "var(--ktra-ok, #2d7d46)" : "var(--ktra-warn, #b06800)",
           }}
         >
           {r.is_posted ? `مرحَّل ${r.journal ? "#" + r.journal : ""}` : "مسودة"}
@@ -358,18 +358,18 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       render: (r) => (
         <div style={{ display: "flex", gap: "2px", justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
           {!r.is_posted && (
-            <button type="button" className="aseel-toolbtn" title="ترحيل" onClick={() => void handlePost(r)}>
+            <button type="button" className="ktra-toolbtn" title="ترحيل" onClick={() => void handlePost(r)}>
               <Check className="w-3 h-3" />
             </button>
           )}
           {r.is_posted && canPerm("sales.payment.unpost") && (
-            <button type="button" className="aseel-toolbtn" title="تراجع عن الترحيل" onClick={() => void handleUnpost(r)}>
+            <button type="button" className="ktra-toolbtn" title="تراجع عن الترحيل" onClick={() => void handleUnpost(r)}>
               <Undo2 className="w-3 h-3" />
             </button>
           )}
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             title="توزيع على الفواتير"
             disabled={unallocatedOf(r) <= 0.009}
             onClick={() => setAllocatingPayment(r)}
@@ -378,7 +378,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
           </button>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             title="حذف"
             disabled={r.is_posted}
             onClick={() => void handleDelete(r)}
@@ -390,7 +390,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     },
   ];
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "new", label: "سند قبض جديد (Ctrl+Ins)", icon: <Plus />, onClick: () => { setSelectedPayment(null); setShowForm(true); } },
     { key: "refresh", label: "تحديث", icon: <RefreshCw className={loading ? "animate-spin" : ""} />, onClick: () => void loadAll(), separatorBefore: true },
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => window.print() },
@@ -412,15 +412,15 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     {
       key: "list",
       label: "سندات القبض",
       content: (
         <div style={{ padding: "8px" }}>
-          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+          {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
 
-          <AseelDenseTable<CustomerPaymentRow>
+          <KitDenseTable<CustomerPaymentRow>
             columns={columns}
             rows={filtered}
             getRowKey={(r) => r.id}
@@ -437,17 +437,17 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
 
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="سندات القبض من العملاء"
         state={selectedPayment ? `سند #${selectedPayment.id}` : `${filtered.length} سند`}
         nav={nav}
         actions={actions}
         header={
-          <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
-            <span className="aseel-field-label">بحث (عميل / رقم / ملاحظة)</span>
+          <label className="ktra-field" style={{ flex: 1, minWidth: "200px" }}>
+            <span className="ktra-field-label">بحث (عميل / رقم / ملاحظة)</span>
             <input
-              className="aseel-input"
-              data-aseel-field="search"
+              className="ktra-input"
+              data-ktra-field="search"
               placeholder="بحث... (F6)"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -457,18 +457,18 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
         tabs={tabs}
         status={
           <>
-            <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
-            <span className="aseel-status-item"><Banknote className="w-3 h-3 inline" /> {filtered.length} سند</span>
-            <span className="aseel-status-item">مرحَّل <b className="aseel-num">{fmt(totalPosted)}</b></span>
-            <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b06800)" }}>
-              مسودة <b className="aseel-num">{fmt(totalPending)}</b>
+            <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+            <span className="ktra-status-item"><Banknote className="w-3 h-3 inline" /> {filtered.length} سند</span>
+            <span className="ktra-status-item">مرحَّل <b className="ktra-num">{fmt(totalPosted)}</b></span>
+            <span className="ktra-status-item" style={{ color: "var(--ktra-warn, #b06800)" }}>
+              مسودة <b className="ktra-num">{fmt(totalPending)}</b>
             </span>
-            <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b06800)" }}>
-              على الحساب <b className="aseel-num">{fmt(totalUnallocated)}</b>
+            <span className="ktra-status-item" style={{ color: "var(--ktra-warn, #b06800)" }}>
+              على الحساب <b className="ktra-num">{fmt(totalUnallocated)}</b>
             </span>
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               فواتير مفتوحة {aging.length} · متبقٍ{" "}
-              <b className="aseel-num">{fmt(aging.reduce((s, a) => s + Number(a.remaining), 0))}</b>
+              <b className="ktra-num">{fmt(aging.reduce((s, a) => s + Number(a.remaining), 0))}</b>
             </span>
           </>
         }
@@ -850,13 +850,13 @@ export const NewPaymentModal: React.FC<{
       {/* ملاحظة عاجلة مستحقة على هذا العميل — تظهر قبل إتمام السند. */}
       <PartnerNoteAlert partnerId={partnerId === "" ? null : partnerId} className="mb-2" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-        <label className="aseel-field" style={{ gridColumn: "span 2" }}>
-          <span className="aseel-field-label">العميل *</span>
+        <label className="ktra-field" style={{ gridColumn: "span 2" }}>
+          <span className="ktra-field-label">العميل *</span>
           {lockPartner && initialPartner ? (
-            <input className="aseel-input" value={initialPartner.name} readOnly style={{ background: "var(--aseel-surface-2)" }} />
+            <input className="ktra-input" value={initialPartner.name} readOnly style={{ background: "var(--ktra-surface-2)" }} />
           ) : (
             <select
-              className="aseel-input"
+              className="ktra-input"
               value={partnerId}
               onChange={(e) => {
                 setPartnerId(e.target.value ? Number(e.target.value) : "");
@@ -868,13 +868,13 @@ export const NewPaymentModal: React.FC<{
             </select>
           )}
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">التاريخ</span>
-          <input type="date" className="aseel-input" value={date} onChange={(e) => setDate(e.target.value)} />
+        <label className="ktra-field">
+          <span className="ktra-field-label">التاريخ</span>
+          <input type="date" className="ktra-input" value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
 
-        <label className="aseel-field">
-          <span className="aseel-field-label">الصندوق / البنك *</span>
+        <label className="ktra-field">
+          <span className="ktra-field-label">الصندوق / البنك *</span>
           <AccountTreeField
             accounts={accounts}
             value={cashAccountId}
@@ -883,17 +883,17 @@ export const NewPaymentModal: React.FC<{
             title="اختيار الصندوق / البنك"
           />
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">العملة *</span>
-          <select className="aseel-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value ? Number(e.target.value) : "")}>
+        <label className="ktra-field">
+          <span className="ktra-field-label">العملة *</span>
+          <select className="ktra-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value ? Number(e.target.value) : "")}>
             {currencies.map((c) => (
               <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}{c.Name ? ` — ${c.Name}` : ""}</option>
             ))}
           </select>
         </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">سعر الصرف</span>
-          <input type="number" step="0.000001" className="aseel-input aseel-num" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+        <label className="ktra-field">
+          <span className="ktra-field-label">سعر الصرف</span>
+          <input type="number" step="0.000001" className="ktra-input ktra-num" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
         </label>
       </div>
 
@@ -915,7 +915,7 @@ export const NewPaymentModal: React.FC<{
           <span style={{ fontWeight: 600, fontSize: "12px" }}>توزيع على الفواتير (اختياري)</span>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             style={{ fontSize: "11px" }}
             onClick={() => void suggestFifo()}
             disabled={!partnerId || amtNum <= 0}
@@ -927,7 +927,7 @@ export const NewPaymentModal: React.FC<{
         {partnerId && partnerAging.length > 0 && (
           <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
             <select
-              className="aseel-input"
+              className="ktra-input"
               style={{ flex: 1, fontSize: "11px" }}
               value={pickInvoiceId}
               onChange={(e) => setPickInvoiceId(e.target.value ? Number(e.target.value) : "")}
@@ -939,19 +939,19 @@ export const NewPaymentModal: React.FC<{
                 </option>
               ))}
             </select>
-            <button type="button" className="aseel-toolbtn" style={{ fontSize: "11px" }} onClick={addInvoiceAllocation} disabled={!pickInvoiceId}>
+            <button type="button" className="ktra-toolbtn" style={{ fontSize: "11px" }} onClick={addInvoiceAllocation} disabled={!pickInvoiceId}>
               أضف الفاتورة
             </button>
           </div>
         )}
 
         {allocations.length === 0 ? (
-          <div style={{ textAlign: "center", fontSize: "11px", padding: "12px", color: "var(--aseel-ink-soft)", border: "1px dashed var(--aseel-border)", borderRadius: "4px" }}>
+          <div style={{ textAlign: "center", fontSize: "11px", padding: "12px", color: "var(--ktra-ink-soft)", border: "1px dashed var(--ktra-border)", borderRadius: "4px" }}>
             بلا توزيع — كامل المبلغ يُسجَّل على حساب العميل ويمكن توزيعه لاحقاً
           </div>
         ) : (
           <table style={{ width: "100%", fontSize: "11px" }}>
-            <thead style={{ background: "var(--aseel-surface-2, #f4ede0)" }}>
+            <thead style={{ background: "var(--ktra-surface-2, #f4ede0)" }}>
               <tr>
                 <th style={{ padding: "4px", textAlign: "right" }}>الفاتورة</th>
                 <th style={{ padding: "4px", textAlign: "right" }}>المبلغ</th>
@@ -960,23 +960,23 @@ export const NewPaymentModal: React.FC<{
             </thead>
             <tbody>
               {allocations.map((a, idx) => (
-                <tr key={idx} style={{ borderTop: "1px solid var(--aseel-border)" }}>
+                <tr key={idx} style={{ borderTop: "1px solid var(--ktra-border)" }}>
                   <td style={{ padding: "2px" }}>{a.invoice_number || `#${a.invoice}`}</td>
                   <td style={{ padding: "2px" }}>
-                    <input type="number" step="0.01" className="aseel-input aseel-num" style={{ fontSize: "11px" }} value={a.amount} onChange={(e) => updateAlloc(idx, e.target.value)} />
+                    <input type="number" step="0.01" className="ktra-input ktra-num" style={{ fontSize: "11px" }} value={a.amount} onChange={(e) => updateAlloc(idx, e.target.value)} />
                   </td>
                   <td style={{ padding: "2px", textAlign: "center" }}>
-                    <button type="button" onClick={() => removeAlloc(idx)} style={{ color: "var(--aseel-err, #c0392b)" }}>
+                    <button type="button" onClick={() => removeAlloc(idx)} style={{ color: "var(--ktra-err, #c0392b)" }}>
                       <Trash2 className="w-3 h-3" />
                     </button>
                   </td>
                 </tr>
               ))}
             </tbody>
-            <tfoot style={{ background: "var(--aseel-surface-2, #f4ede0)", fontWeight: 600 }}>
+            <tfoot style={{ background: "var(--ktra-surface-2, #f4ede0)", fontWeight: 600 }}>
               <tr>
                 <td style={{ padding: "4px" }}>المُوزَّع من {fmt(amtNum)}</td>
-                <td style={{ padding: "4px" }} className="aseel-num">{fmt(totalAlloc)}</td>
+                <td style={{ padding: "4px" }} className="ktra-num">{fmt(totalAlloc)}</td>
                 <td></td>
               </tr>
             </tfoot>
@@ -984,7 +984,7 @@ export const NewPaymentModal: React.FC<{
         )}
 
         {amtNum > 0 && (
-          <div style={{ fontSize: "11px", marginTop: "6px", color: onAccount < -0.01 ? "var(--aseel-err, #c0392b)" : "var(--aseel-warn, #b06800)" }}>
+          <div style={{ fontSize: "11px", marginTop: "6px", color: onAccount < -0.01 ? "var(--ktra-err, #c0392b)" : "var(--ktra-warn, #b06800)" }}>
             {onAccount < -0.01
               ? `التوزيع يتجاوز مبلغ السند بـ ${fmt(Math.abs(onAccount))}`
               : `يُسجَّل على حساب العميل: ${fmt(onAccount)}`}
@@ -999,15 +999,15 @@ export const NewPaymentModal: React.FC<{
         newLineDefaults={chequeDefaults}
       />
 
-      <label className="aseel-field" style={{ marginTop: "12px", display: "block" }}>
-        <span className="aseel-field-label">ملاحظات</span>
-        <textarea className="aseel-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+      <label className="ktra-field" style={{ marginTop: "12px", display: "block" }}>
+        <span className="ktra-field-label">ملاحظات</span>
+        <textarea className="ktra-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
 
       {/* T-CHQ3/و: كان السطر يقول «Dr الصندوق» دائماً ولو كان السند كلّه شيكات —
           وهو كذبٌ على المستخدم: الشيك لا يدخل الصندوق حتى يُحصَّل. الخادم يقسم
           الجانب المدين أصلاً؛ هذا السطر يعرض القسمة نفسها. */}
-      <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--aseel-ink-soft)" }}>
+      <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--ktra-ink-soft)" }}>
         القيد: {buildVoucherEntryPreview({
           cashAmount: Number(cashAmount) || 0,
           chequesAmount: totalCheques,

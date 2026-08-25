@@ -19,8 +19,8 @@ export function CompactTimeline({ steps }: CompactTimelineProps) {
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 4, height: 32,
-      padding: "0 8px", background: "var(--aseel-bg-strip, #f5f5f5)",
-      borderRadius: "var(--aseel-radius, 4px)", fontSize: "var(--aseel-fs-sm, 12px)",
+      padding: "0 8px", background: "var(--ktra-bg-strip, #f5f5f5)",
+      borderRadius: "var(--ktra-radius, 4px)", fontSize: "var(--ktra-fs-sm, 12px)",
       overflowX: "auto", whiteSpace: "nowrap", direction: "ltr",
     }}>
       {steps.map((s, i) => (

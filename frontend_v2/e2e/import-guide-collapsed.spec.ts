@@ -182,7 +182,7 @@ test("وصف الصفقة الطويل في القائمة سطر واحد لا 
   });
   await page.goto("/deals");
 
-  const cell = page.locator(`td .aseel-cell-clip[title="${LONG_TITLE}"]`);
+  const cell = page.locator(`td .ktra-cell-clip[title="${LONG_TITLE}"]`);
   await expect(cell).toBeVisible({ timeout: 15_000 });
   const clipped = await cell.evaluate((el) => ({
     overflowing: el.scrollWidth > el.clientWidth,

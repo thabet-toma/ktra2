@@ -231,7 +231,7 @@ test('على الجوال أيضاً: سطر واحد ومربّع صورة كا
   await page.setViewportSize({ width: 390, height: 844 });
   await openOffers(page, WITH_LONG_NUMBER);
 
-  // الجدول يمرّر أفقياً داخل `.aseel-gridwrap` — الخلية نفسها لا تنكسر.
+  // الجدول يمرّر أفقياً داخل `.ktra-gridwrap` — الخلية نفسها لا تنكسر.
   // سطر الجوال أقصر من سطر سطح المكتب، فالمقياس هو صفّ الرقم القصير نفسه.
   expect(await numberLineHeight(page))
     .toBe(await numberLineHeight(page, 'طلبية الرقم القصير'));

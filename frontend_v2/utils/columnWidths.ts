@@ -2,7 +2,7 @@
  * عرض أعمدة الجداول على طريقة Excel — مصدر واحد لكل جدول قابل لتغيير العرض:
  * السحب من حافة العنوان، والعرض التلقائي من أطول نص، والحفظ في المتصفح كي
  * يعود العرض كما تركه المستخدم بعد الخروج من الشاشة.
- * يستهلكه `AseelDenseTable` و`DevelopmentNotesPage`.
+ * يستهلكه `KitDenseTable` و`DevelopmentNotesPage`.
  */
 
 export type SizeMap = Record<string, number>;
@@ -35,10 +35,10 @@ const browserStorage = (): StorageLike | null => {
 
 /** مفتاح الحفظ = نطاق الجدول + أعمدته، فلا يخلط جدولان عرضيهما. */
 export const columnWidthsKey = (scope: string, columnKeys: string[]): string =>
-  `aseel_table_widths_${scope}_${columnKeys.join(',')}`;
+  `ktra_table_widths_${scope}_${columnKeys.join(',')}`;
 
 /** مفتاح ارتفاعات الصفوف — مفاتيحه معرّفات الصفوف لا الأعمدة. */
-export const rowHeightsKey = (scope: string): string => `aseel_table_row_heights_${scope}`;
+export const rowHeightsKey = (scope: string): string => `ktra_table_row_heights_${scope}`;
 
 export const readSizes = (key: string, storage?: StorageLike | null): SizeMap => {
   const store = storage ?? browserStorage();

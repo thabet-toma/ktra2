@@ -1,15 +1,15 @@
 import { test, expect } from '@playwright/test';
 
-test('Title group appears on the right side of the titlebar in AseelDocumentShell', async ({ page }) => {
-  await page.goto('/aseel-kit');
+test('Title group appears on the right side of the titlebar in KitDocumentShell', async ({ page }) => {
+  await page.goto('/ui-kit');
   
   // Wait for the title bar
-  const titlebar = page.locator('.aseel-titlebar');
+  const titlebar = page.locator('.ktra-titlebar');
   await expect(titlebar).toBeVisible({ timeout: 15000 });
 
   // Get the bounding boxes of the title group and the company
-  const titleGrp = titlebar.locator('.aseel-title-grp');
-  const company = titlebar.locator('.aseel-company');
+  const titleGrp = titlebar.locator('.ktra-title-grp');
+  const company = titlebar.locator('.ktra-company');
 
   const titleBox = await titleGrp.boundingBox();
   const companyBox = await company.boundingBox();

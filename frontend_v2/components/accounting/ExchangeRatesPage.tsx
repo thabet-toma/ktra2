@@ -5,10 +5,10 @@ import { humanizeThrown } from "../../utils/drfError";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import type { ExchangeRateDto, CurrencyDto } from "../../types/accounting";
 import {
-  AseelDocumentShell,
-  AseelDenseTable,
-} from "../aseel";
-import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
+  KitDocumentShell,
+  KitDenseTable,
+} from "../kit";
+import type { KitToolbarAction, KitTab, DenseColumn } from "../kit";
 import { Plus, Trash2 } from "lucide-react";
 
 export const ExchangeRatesPage: React.FC = () => {
@@ -132,7 +132,7 @@ export const ExchangeRatesPage: React.FC = () => {
       render: (r) => (
         <button
           type="button"
-          className="aseel-toolbtn aseel-toolbtn--danger"
+          className="ktra-toolbtn ktra-toolbtn--danger"
           disabled={busy}
           onClick={(e) => { e.stopPropagation(); deleteRate(r.id); }}
         >
@@ -142,48 +142,48 @@ export const ExchangeRatesPage: React.FC = () => {
     },
   ];
 
-  const actions: AseelToolbarAction[] = [
+  const actions: KitToolbarAction[] = [
     { key: "refresh", label: "تحديث", onClick: load },
   ];
 
   const headerBand = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      <div className="aseel-field">
-        <label className="aseel-field-label">من عملة</label>
-        <select className="aseel-input" value={fromCur} onChange={(e) => setFromCur(e.target.value)}>
+      <div className="ktra-field">
+        <label className="ktra-field-label">من عملة</label>
+        <select className="ktra-input" value={fromCur} onChange={(e) => setFromCur(e.target.value)}>
           <option value="">—</option>
           {currencies.map((c) => (
             <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}{c.Name ? ` — ${c.Name}` : ""}</option>
           ))}
         </select>
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">إلى عملة</label>
-        <select className="aseel-input" value={toCur} onChange={(e) => setToCur(e.target.value)}>
+      <div className="ktra-field">
+        <label className="ktra-field-label">إلى عملة</label>
+        <select className="ktra-input" value={toCur} onChange={(e) => setToCur(e.target.value)}>
           <option value="">—</option>
           {currencies.map((c) => (
             <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}{c.Name ? ` — ${c.Name}` : ""}</option>
           ))}
         </select>
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">سعر الصرف</label>
-        <input type="number" step="0.000001" className="aseel-input aseel-num"
+      <div className="ktra-field">
+        <label className="ktra-field-label">سعر الصرف</label>
+        <input type="number" step="0.000001" className="ktra-input ktra-num"
           style={{ width: "120px" }} placeholder="3.650000"
           value={rate} onChange={(e) => setRate(e.target.value)} />
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">تاريخ السريان</label>
-        <input type="date" className="aseel-input" value={effDate} onChange={(e) => setEffDate(e.target.value)} />
+      <div className="ktra-field">
+        <label className="ktra-field-label">تاريخ السريان</label>
+        <input type="date" className="ktra-input" value={effDate} onChange={(e) => setEffDate(e.target.value)} />
       </div>
-      <button type="button" className="aseel-toolbtn" disabled={busy || !fromCur || !toCur || !rate}
+      <button type="button" className="ktra-toolbtn" disabled={busy || !fromCur || !toCur || !rate}
         onClick={addRate} style={{ marginTop: "18px" }}>
         <Plus className="w-4 h-4" />إضافة
       </button>
       <div style={{ flex: "1" }} />
-      <div className="aseel-field" style={{ minWidth: "160px" }}>
-        <label className="aseel-field-label">تصفية حسب عملة</label>
-        <select className="aseel-input" value={filterCurrency} onChange={(e) => setFilterCurrency(e.target.value)}>
+      <div className="ktra-field" style={{ minWidth: "160px" }}>
+        <label className="ktra-field-label">تصفية حسب عملة</label>
+        <select className="ktra-input" value={filterCurrency} onChange={(e) => setFilterCurrency(e.target.value)}>
           <option value="">الكل</option>
           {currencies.map((c) => (
             <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>
@@ -195,8 +195,8 @@ export const ExchangeRatesPage: React.FC = () => {
 
   const tableContent = (
     <>
-      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-      <AseelDenseTable<ExchangeRateDto>
+      {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      <KitDenseTable<ExchangeRateDto>
         columns={columns}
         rows={filteredRates}
         getRowKey={(r) => r.id}
@@ -206,23 +206,23 @@ export const ExchangeRatesPage: React.FC = () => {
     </>
   );
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "rates", label: "أسعار الصرف", content: tableContent },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="أسعار الصرف"
         actions={actions}
         header={headerBand}
         tabs={tabs}
         status={
-          <span className="aseel-status-item">{filteredRates.length} سعر</span>
+          <span className="ktra-status-item">{filteredRates.length} سعر</span>
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

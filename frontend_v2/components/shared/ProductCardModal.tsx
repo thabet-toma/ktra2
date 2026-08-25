@@ -11,7 +11,7 @@
 import React, { useEffect, useState } from "react";
 import { ExternalLink, Check, Pencil } from "lucide-react";
 import { ItemQuickEditModal } from "../items/ItemQuickEditModal";
-import { AseelFloatWindow } from "../aseel/AseelFloatWindow";
+import { KitFloatWindow } from "../kit/KitFloatWindow";
 import { useNavigate } from "react-router-dom";
 import { apiGetObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -123,21 +123,21 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
   /* T-WIN: البطاقة صارت نافذة عائمة تُسحب وتُحجَّم — كانت لوحاً ثابتاً بعرض
      92vw. الهندسة تُحفظ لكل وضعٍ على حدة: الإضافة نافذة صغيرة والعرض أوسع. */
   return (
-    <AseelFloatWindow
+    <KitFloatWindow
       open
       onClose={onClose}
       name={addMode ? "product-card-add" : "product-card"}
       title={title ? `بطاقة الصنف: ${title}` : "بطاقة الصنف"}
       defaultWidth={addMode ? 560 : 860}
       defaultHeight={addMode ? 460 : 620}
-      rootProps={{ "data-aseel-modal": "1", "aria-label": "بطاقة الصنف" } as React.HTMLAttributes<HTMLDivElement>}
+      rootProps={{ "data-ktra-modal": "1", "aria-label": "بطاقة الصنف" } as React.HTMLAttributes<HTMLDivElement>}
       footer={(
         <>
           {/* T-ITEMS M3: التعديل في مكانه أولاً — «الكرت الكامل» يغادر المستند
               الجاري، وكان الطريق الوحيد لتغيير اسمٍ خاطئ يُرى من الفاتورة. */}
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             onClick={() => setQuickEdit(true)}
             title="تعديل اسم الصنف وبياناته الأساسية دون مغادرة الشاشة"
           >
@@ -145,14 +145,14 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
           </button>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             onClick={() => { onClose(); navigate(productProfilePath(productId)); }}
             title="فتح كرت الصنف الكامل (عرض وتعديل)"
           >
             <ExternalLink className="w-4 h-4" /> الكرت الكامل
           </button>
           <div className="ms-auto flex items-center gap-2">
-            <button type="button" className="aseel-toolbtn" onClick={onClose}>إغلاق</button>
+            <button type="button" className="ktra-toolbtn" onClick={onClose}>إغلاق</button>
             {onConfirm && (
               <button
                 type="button"
@@ -169,9 +169,9 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
     >
       <div className="p-2.5">
           {loading ? (
-            <div className="p-4 text-center text-[var(--aseel-ink-soft)]">جاري التحميل…</div>
+            <div className="p-4 text-center text-[var(--ktra-ink-soft)]">جاري التحميل…</div>
           ) : error ? (
-            <div role="alert" className="p-3 text-sm text-[var(--aseel-ink-soft)]">
+            <div role="alert" className="p-3 text-sm text-[var(--ktra-ink-soft)]">
               تعذّر تحميل تفاصيل البطاقة. يمكنك المتابعة وإضافة الصنف للفاتورة.
             </div>
           ) : profile ? (
@@ -180,12 +180,12 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
 
           {/* حركة المخزون داخل البطاقة — تملأ المساحة في وضع العرض (لا الإضافة). */}
           {!addMode && (
-            <div className="mt-3 pt-3 border-t border-[var(--aseel-border)]">
+            <div className="mt-3 pt-3 border-t border-[var(--ktra-border)]">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-sm font-bold text-[var(--aseel-ink)]">حركة المخزون (آخر الحركات)</span>
+                <span className="text-sm font-bold text-[var(--ktra-ink)]">حركة المخزون (آخر الحركات)</span>
                 <button
                   type="button"
-                  className="text-xs text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+                  className="text-xs text-[var(--ktra-accent,#2563eb)] underline hover:opacity-80"
                   onClick={() => { onClose(); navigate(productProfilePath(productId)); }}
                   title="عرض كامل حركة المخزون"
                 >
@@ -204,24 +204,24 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
 
           {/* T-R2: حقل الكمية والسعر مع شارة المصدر — يظهر فقط في وضع الإضافة. */}
           {addMode && onConfirm && (
-            <div className="mt-3 pt-3 border-t border-[var(--aseel-border)] grid grid-cols-2 gap-3">
-              <label className="flex flex-col gap-1 text-xs text-[var(--aseel-ink-soft)]">
+            <div className="mt-3 pt-3 border-t border-[var(--ktra-border)] grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-xs text-[var(--ktra-ink-soft)]">
                 الكمية المراد إضافتها
                 <input
                   type="number"
                   min="0"
                   step="any"
-                  className="aseel-input"
+                  className="ktra-input"
                   value={qty}
                   autoFocus
                   onChange={(e) => setQty(e.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-xs text-[var(--aseel-ink-soft)]">
+              <label className="flex flex-col gap-1 text-xs text-[var(--ktra-ink-soft)]">
                 <span className="flex items-center justify-between gap-2">
                   السعر
                   {priceSource && (
-                    <span className="aseel-price-badge" title="مصدر السعر المقترح">
+                    <span className="ktra-price-badge" title="مصدر السعر المقترح">
                       {PRICE_SOURCE_LABEL[priceSource]}
                     </span>
                   )}
@@ -230,7 +230,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
                   type="number"
                   min="0"
                   step="any"
-                  className="aseel-input"
+                  className="ktra-input"
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
                 />
@@ -245,7 +245,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
           onSaved={() => setReloadKey((k) => k + 1)}
         />
       )}
-    </AseelFloatWindow>
+    </KitFloatWindow>
   );
 };
 

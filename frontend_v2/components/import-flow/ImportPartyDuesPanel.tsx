@@ -101,12 +101,12 @@ export function ImportPartyDuesPanel({
               {p.note && <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">{p.note}</p>}
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {!p.accrued && p.onAccrue && (
-                  <button type="button" className="aseel-toolbtn" style={{ fontSize: 11 }} disabled={busy} onClick={p.onAccrue}>
+                  <button type="button" className="ktra-toolbtn" style={{ fontSize: 11 }} disabled={busy} onClick={p.onAccrue}>
                     {p.accrueLabel || "أثبت الاستحقاق"}
                   </button>
                 )}
                 {p.onPay && (
-                  <button type="button" className="aseel-toolbtn" style={{ fontSize: 11 }} disabled={busy} onClick={p.onPay}>
+                  <button type="button" className="ktra-toolbtn" style={{ fontSize: 11 }} disabled={busy} onClick={p.onPay}>
                     {p.payLabel || (remaining > 0.02 ? `ادفع ${p.symbol}${fmt(remaining)}` : "تسجيل دفعة")}
                   </button>
                 )}

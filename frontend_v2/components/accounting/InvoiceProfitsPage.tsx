@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { getInvoiceProfits, type InvoiceProfitRow, type InvoiceProfitsResponse } from "../../services/salesApi";
 import { formatMoney } from "../../utils/formatNumber";
-import { AseelDocumentShell, AseelReportTable } from "../aseel";
-import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
+import { KitDocumentShell, KitReportTable } from "../kit";
+import type { KitToolbarAction, KitTab, ReportColumn } from "../kit";
 import { Search } from "lucide-react";
 import { formatDateLocalized } from "../../utils/formatDate";
 
@@ -116,26 +116,26 @@ export const InvoiceProfitsPage: React.FC = () => {
   const filterBar = (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-        <button type="button" className="aseel-btn" onClick={() => setQuickDate('today')}>اليوم</button>
-        <button type="button" className="aseel-btn" onClick={() => setQuickDate('week')}>أول الأسبوع</button>
-        <button type="button" className="aseel-btn" onClick={() => setQuickDate('month')}>أول الشهر</button>
-        <button type="button" className="aseel-btn" onClick={() => setQuickDate('year')}>أول السنة</button>
+        <button type="button" className="ktra-btn" onClick={() => setQuickDate('today')}>اليوم</button>
+        <button type="button" className="ktra-btn" onClick={() => setQuickDate('week')}>أول الأسبوع</button>
+        <button type="button" className="ktra-btn" onClick={() => setQuickDate('month')}>أول الشهر</button>
+        <button type="button" className="ktra-btn" onClick={() => setQuickDate('year')}>أول السنة</button>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-        <div className="aseel-field">
-          <label className="aseel-field-label">من</label>
-          <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+        <div className="ktra-field">
+          <label className="ktra-field-label">من</label>
+          <input type="date" className="ktra-input" value={start} onChange={(e) => setStart(e.target.value)} />
         </div>
-        <div className="aseel-field">
-          <label className="aseel-field-label">إلى</label>
-          <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+        <div className="ktra-field">
+          <label className="ktra-field-label">إلى</label>
+          <input type="date" className="ktra-input" value={end} onChange={(e) => setEnd(e.target.value)} />
         </div>
-        <div className="aseel-field" style={{ flex: "1", minWidth: "180px" }}>
-          <label className="aseel-field-label">العميل/الرقم</label>
-          <input type="text" className="aseel-input" placeholder="اسم العميل أو رقم الفاتورة..."
+        <div className="ktra-field" style={{ flex: "1", minWidth: "180px" }}>
+          <label className="ktra-field-label">العميل/الرقم</label>
+          <input type="text" className="ktra-input" placeholder="اسم العميل أو رقم الفاتورة..."
             value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <button type="button" className="aseel-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
+        <button type="button" className="ktra-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
           <Search className="w-4 h-4" />تحديث
         </button>
       </div>
@@ -144,8 +144,8 @@ export const InvoiceProfitsPage: React.FC = () => {
 
   const reportContent = (
     <>
-      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-      <AseelReportTable<InvoiceProfitRow>
+      {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      <KitReportTable<InvoiceProfitRow>
         filterBar={filterBar}
         columns={columns}
         rows={rows}
@@ -158,31 +158,31 @@ export const InvoiceProfitsPage: React.FC = () => {
     </>
   );
 
-  const shellActions: AseelToolbarAction[] = [
+  const shellActions: KitToolbarAction[] = [
     { key: "run", label: "تحديث", icon: <Search className="w-4 h-4" />, onClick: fetchData },
   ];
 
-  const tabs: AseelTab[] = [
+  const tabs: KitTab[] = [
     { key: "profits", label: "أرباح الفواتير", content: reportContent },
   ];
 
   return (
     <div>
-      <AseelDocumentShell
+      <KitDocumentShell
         title="أرباح الفواتير"
         actions={shellActions}
         header={<></>}
         tabs={tabs}
         status={
           data ? (
-            <span className="aseel-status-item">
+            <span className="ktra-status-item">
               عدد الفواتير: {rows.length} · إجمالي الربح: {fmt(shown.profit)}
             </span>
           ) : undefined
         }
       >
         <></>
-      </AseelDocumentShell>
+      </KitDocumentShell>
     </div>
   );
 };

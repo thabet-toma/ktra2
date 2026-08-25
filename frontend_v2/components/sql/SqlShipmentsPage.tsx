@@ -1,5 +1,5 @@
 /**
- * N7-T8 — SqlShipmentsPage — AseelDenseTable للشحنات (SQL)
+ * N7-T8 — SqlShipmentsPage — KitDenseTable للشحنات (SQL)
  */
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { apiGetList, apiGetObject } from '../../services/restApi';
@@ -7,8 +7,8 @@ import { resolveTenantId } from '../../utils/tenantContext';
 import { SqlDataPageShell } from './SqlDataPageShell';
 import { Eye, RefreshCw } from 'lucide-react';
 import { buildShipmentOptionLabel, ShipmentLabelInput } from '@/utils/shipmentLabel';
-import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
-import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
+import { KitDenseTable, type DenseColumn } from '../kit/KitDenseTable';
+import { useKitIndexKeymap } from '../kit/useKitIndexKeymap';
 import { formatDateLocalized } from "../../utils/formatDate";
 
 type ShipmentRow = ShipmentLabelInput & {
@@ -53,7 +53,7 @@ export function SqlShipmentsPage() {
         finally { setLoadingDetail(false); }
     };
 
-    useAseelIndexKeymap(
+    useKitIndexKeymap(
         { F6: () => searchInputRef.current?.focus(), Escape: () => setQ('') },
         { enabled: !detailsOpen },
     );
@@ -69,14 +69,14 @@ export function SqlShipmentsPage() {
         { key: 'agent', header: 'وكيل الشحن', width: '140px', render: r => <>{r.shipping_agent?.name || '—'}</> },
         {
             key: 'status', header: 'الحالة', width: '100px',
-            render: r => <span style={{ fontSize: 'var(--aseel-fs-sm)', fontWeight: 500 }}>{r.status || '—'}</span>,
+            render: r => <span style={{ fontSize: 'var(--ktra-fs-sm)', fontWeight: 500 }}>{r.status || '—'}</span>,
         },
-        { key: 'departure_date', header: 'المغادرة', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{formatDateLocalized(r.departure_date) || '—'}</span> },
-        { key: 'arrival_date', header: 'الوصول', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{formatDateLocalized(r.arrival_date) || '—'}</span> },
+        { key: 'departure_date', header: 'المغادرة', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--ktra-fs-sm)' }}>{formatDateLocalized(r.departure_date) || '—'}</span> },
+        { key: 'arrival_date', header: 'الوصول', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--ktra-fs-sm)' }}>{formatDateLocalized(r.arrival_date) || '—'}</span> },
         {
             key: 'actions', header: '', width: '60px', align: 'center',
             render: r => (
-                <button className="aseel-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); void openShipment(r); }} title="عرض التفاصيل">
+                <button className="ktra-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); void openShipment(r); }} title="عرض التفاصيل">
                     <Eye style={{ width: 13, height: 13 }} />
                 </button>
             ),
@@ -95,20 +95,20 @@ export function SqlShipmentsPage() {
                             value={q}
                             onChange={e => setQ(e.target.value)}
                             placeholder="بحث برقم/وكيل/حالة… (F6)"
-                            className="aseel-input"
+                            className="ktra-input"
                             style={{ width: 220 }}
                         />
-                        <button className="aseel-toolbtn" onClick={() => setQ('')} title="مسح"><RefreshCw style={{ width: 14, height: 14 }} /></button>
+                        <button className="ktra-toolbtn" onClick={() => setQ('')} title="مسح"><RefreshCw style={{ width: 14, height: 14 }} /></button>
                     </div>
                 }
             >
-                {err && <div style={{ padding: '6px 12px', fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-danger, #c00)', borderBottom: '1px solid var(--aseel-border)' }}>{err}</div>}
+                {err && <div style={{ padding: '6px 12px', fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-danger, #c00)', borderBottom: '1px solid var(--ktra-border)' }}>{err}</div>}
                 <div style={{ padding: '4px 0' }}>
                     <div style={{ padding: '4px 12px', display: 'flex', gap: 8 }}>
-                        <span className="aseel-status-item">الإجمالي: <b>{rows.length}</b></span>
-                        {filtered.length !== rows.length && <span className="aseel-status-item">المفلتر: <b>{filtered.length}</b></span>}
+                        <span className="ktra-status-item">الإجمالي: <b>{rows.length}</b></span>
+                        {filtered.length !== rows.length && <span className="ktra-status-item">المفلتر: <b>{filtered.length}</b></span>}
                     </div>
-                    <AseelDenseTable<ShipmentRow>
+                    <KitDenseTable<ShipmentRow>
                         columns={columns}
                         rows={filtered}
                         getRowKey={r => r.id}
@@ -121,20 +121,20 @@ export function SqlShipmentsPage() {
 
             {detailsOpen && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }} onClick={() => setDetailsOpen(false)}>
-                    <div dir="rtl" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 640, maxHeight: '90vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-                        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--aseel-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>تفاصيل الشحنة</strong>
-                            <button className="aseel-toolbtn" onClick={() => setDetailsOpen(false)}>إغلاق</button>
+                    <div dir="rtl" style={{ background: 'var(--ktra-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 640, maxHeight: '90vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--ktra-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>تفاصيل الشحنة</strong>
+                            <button className="ktra-toolbtn" onClick={() => setDetailsOpen(false)}>إغلاق</button>
                         </div>
-                        <div style={{ padding: 14, fontSize: 'var(--aseel-fs-sm)' }}>
+                        <div style={{ padding: 14, fontSize: 'var(--ktra-fs-sm)' }}>
                             {loadingDetail ? (
-                                <div style={{ color: 'var(--aseel-ink-soft)' }}>جار تحميل التفاصيل...</div>
+                                <div style={{ color: 'var(--ktra-ink-soft)' }}>جار تحميل التفاصيل...</div>
                             ) : !selected ? (
-                                <div style={{ color: 'var(--aseel-ink-soft)' }}>تعذر تحميل التفاصيل.</div>
+                                <div style={{ color: 'var(--ktra-ink-soft)' }}>تعذر تحميل التفاصيل.</div>
                             ) : (
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                                     {[['رقم الشحنة', selected.shipment_number || '—'], ['الحالة', selected.status || '—'], ['وكيل الشحن', selected.shipping_agent?.name || '—'], ['Departure', selected.departure_date || '—'], ['Arrival', selected.arrival_date || '—'], ['B/L', selected.bill_of_lading || '—'], ['Container', selected.container_number || '—']].map(([k, v]) => (
-                                        <div key={k as string}><span style={{ color: 'var(--aseel-ink-soft)' }}>{k}:</span> <b>{v as string}</b></div>
+                                        <div key={k as string}><span style={{ color: 'var(--ktra-ink-soft)' }}>{k}:</span> <b>{v as string}</b></div>
                                     ))}
                                 </div>
                             )}

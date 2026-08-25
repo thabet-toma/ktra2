@@ -23,23 +23,23 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ activities }) => {
 
   const getActivityColor = (type: string) => {
     switch (type) {
-      case 'status_change': return 'aseel-bg-accent-bg aseel-text-ink dark:aseel-bg-panel/30 dark:aseel-text-soft';
+      case 'status_change': return 'ktra-bg-accent-bg ktra-text-ink dark:ktra-bg-panel/30 dark:ktra-text-soft';
       case 'payment': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
       case 'item_update': return 'bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/30 dark:text-[var(--color-primary)]';
-      case 'note': return 'aseel-bg-panel aseel-text-ink dark:aseel-bg-panel/30 dark:aseel-text-soft';
-      default: return 'aseel-bg-panel aseel-text-ink dark:aseel-bg-panel/30 dark:aseel-text-soft';
+      case 'note': return 'ktra-bg-panel ktra-text-ink dark:ktra-bg-panel/30 dark:ktra-text-soft';
+      default: return 'ktra-bg-panel ktra-text-ink dark:ktra-bg-panel/30 dark:ktra-text-soft';
     }
   };
 
   return (
-    <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow border aseel-border-soft dark:aseel-border-soft p-6">
+    <div className="ktra-bg-field dark:ktra-bg-panel rounded-xl shadow border ktra-border-soft dark:ktra-border-soft p-6">
       <div className="flex items-center gap-3 mb-6">
-        <div className="p-2 aseel-bg-panel dark:aseel-bg-panel rounded-lg">
-          <History className="w-6 h-6 aseel-text-soft dark:aseel-text-soft" />
+        <div className="p-2 ktra-bg-panel dark:ktra-bg-panel rounded-lg">
+          <History className="w-6 h-6 ktra-text-soft dark:ktra-text-soft" />
         </div>
         <div>
-          <h3 className="text-lg font-bold aseel-text-ink dark:text-white">سجل النشاطات</h3>
-          <p className="text-sm aseel-text-soft dark:aseel-text-soft">
+          <h3 className="text-lg font-bold ktra-text-ink dark:text-white">سجل النشاطات</h3>
+          <p className="text-sm ktra-text-soft dark:ktra-text-soft">
             جميع التغييرات والإجراءات على الصفقة
           </p>
         </div>
@@ -47,13 +47,13 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ activities }) => {
 
       <div className="space-y-4 max-h-96 overflow-y-auto">
         {activities.length === 0 ? (
-          <div className="text-center py-8 aseel-text-soft dark:aseel-text-soft">
+          <div className="text-center py-8 ktra-text-soft dark:ktra-text-soft">
             <History className="w-12 h-12 mx-auto mb-4 opacity-50" />
             <p>لا توجد نشاطات مسجلة بعد</p>
           </div>
         ) : (
           activities.map((activity) => (
-            <div key={activity.id} className="border-l-4 aseel-border-soft pl-4 py-3">
+            <div key={activity.id} className="border-l-4 ktra-border-soft pl-4 py-3">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3">
                   <div className={`p-2 rounded-lg ${getActivityColor(activity.type)}`}>
@@ -61,21 +61,21 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ activities }) => {
                   </div>
                   <div>
                     <div className="flex items-center gap-2 mb-1">
-                      <User className="w-4 h-4 aseel-text-soft" />
-                      <span className="font-medium aseel-text-ink dark:text-white">
+                      <User className="w-4 h-4 ktra-text-soft" />
+                      <span className="font-medium ktra-text-ink dark:text-white">
                         {activity.userName}
                       </span>
                       <span className={`text-xs px-2 py-1 rounded-full ${getActivityColor(activity.type)}`}>
                         {activity.action}
                       </span>
                     </div>
-                    <p className="aseel-text-ink dark:aseel-text-soft mb-1">
+                    <p className="ktra-text-ink dark:ktra-text-soft mb-1">
                       {activity.details}
                     </p>
                     {activity.metadata && (
-                      <div className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
+                      <div className="text-xs ktra-text-soft dark:ktra-text-soft mt-1">
                         {Object.entries(activity.metadata).map(([key, value]) => (
-                          <span key={key} className="inline-block aseel-bg-panel dark:aseel-bg-panel px-2 py-1 rounded mr-2 mb-1">
+                          <span key={key} className="inline-block ktra-bg-panel dark:ktra-bg-panel px-2 py-1 rounded mr-2 mb-1">
                             {key}: {String(value)}
                           </span>
                         ))}
@@ -83,7 +83,7 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ activities }) => {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm aseel-text-soft dark:aseel-text-soft">
+                <div className="flex items-center gap-2 text-sm ktra-text-soft dark:ktra-text-soft">
                   <Clock className="w-4 h-4" />
                   {formatDateTimeValue(activity.timestamp)}
                 </div>

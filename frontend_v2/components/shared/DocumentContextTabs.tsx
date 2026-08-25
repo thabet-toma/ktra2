@@ -12,7 +12,7 @@
  * فصارا خاصّتين، وبقي كل ما عداهما مشتركاً.
  *
  * **الكسل شرطٌ لا تحسين**: كل مكوّن هنا يجلب داخل `useEffect` عند تركيبه،
- * و`AseelDocumentShell` لا يركّب إلا محتوى التبويب النشط — ففتح الفاتورة لا
+ * و`KitDocumentShell` لا يركّب إلا محتوى التبويب النشط — ففتح الفاتورة لا
  * يُصدر أياً من هذه النداءات. يحرسه `e2e/sales-invoice-context-tabs.spec.ts`
  * بعدّ النداءات لا بالثقة.
  */
@@ -116,8 +116,8 @@ const TabError: React.FC<{ message: string; onRetry: () => void }> = ({
   onRetry,
 }) => (
   <div role="alert" className="p-4 text-center">
-    <p className="text-sm text-[var(--aseel-danger,#c00)]">{message}</p>
-    <button type="button" className="aseel-addrow mt-2" onClick={onRetry}>
+    <p className="text-sm text-[var(--ktra-danger,#c00)]">{message}</p>
+    <button type="button" className="ktra-addrow mt-2" onClick={onRetry}>
       إعادة المحاولة
     </button>
   </div>
@@ -125,7 +125,7 @@ const TabError: React.FC<{ message: string; onRetry: () => void }> = ({
 
 /** لافتة تشرح **سبب** الفراغ — جدولٌ فارغ بلا تفسير يُقرأ كعطل. */
 const Notice: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="mb-2 rounded border border-[var(--aseel-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs text-[var(--aseel-ink-soft)]">
+  <div className="mb-2 rounded border border-[var(--ktra-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs text-[var(--ktra-ink-soft)]">
     {children}
   </div>
 );
@@ -278,16 +278,16 @@ export const InvoicePartnerLedgerTab: React.FC<{
         // «ماذا فعلت هذه الفاتورة بالحساب؟» — من كشف الحساب نفسه، لا من حسابٍ
         // موازٍ في الواجهة. الأثر هو كامل قيد الذمم لا «المتبقّي» منه.
         <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <div className="rounded border border-[var(--aseel-border)] p-2">
-            <div className="text-xs text-[var(--aseel-ink-soft)]">الرصيد قبل الفاتورة</div>
+          <div className="rounded border border-[var(--ktra-border)] p-2">
+            <div className="text-xs text-[var(--ktra-ink-soft)]">الرصيد قبل الفاتورة</div>
             <div className="text-base font-bold" dir="ltr">{formatMoney(anchor.balance_before)}</div>
           </div>
-          <div className="rounded border border-[var(--aseel-border)] p-2">
-            <div className="text-xs text-[var(--aseel-ink-soft)]">أثر الفاتورة</div>
+          <div className="rounded border border-[var(--ktra-border)] p-2">
+            <div className="text-xs text-[var(--ktra-ink-soft)]">أثر الفاتورة</div>
             <div className="text-base font-bold" dir="ltr">{formatMoney(anchor.effect)}</div>
           </div>
-          <div className="rounded border border-[var(--aseel-border)] p-2">
-            <div className="text-xs text-[var(--aseel-ink-soft)]">الرصيد بعدها</div>
+          <div className="rounded border border-[var(--ktra-border)] p-2">
+            <div className="text-xs text-[var(--ktra-ink-soft)]">الرصيد بعدها</div>
             <div className="text-base font-bold" dir="ltr">{formatMoney(anchor.balance_after)}</div>
           </div>
         </div>
@@ -394,9 +394,9 @@ export const InvoiceAttachmentsTab: React.FC<{
         />
       )}
       {loading ? (
-        <div className="p-4 text-center text-[var(--aseel-ink-soft)]">جارٍ التحميل…</div>
+        <div className="p-4 text-center text-[var(--ktra-ink-soft)]">جارٍ التحميل…</div>
       ) : rows.length === 0 ? (
-        <div className="p-4 text-center text-[var(--aseel-ink-soft)]">
+        <div className="p-4 text-center text-[var(--ktra-ink-soft)]">
           لا مرفقات على هذه الفاتورة بعد.
         </div>
       ) : (
@@ -404,7 +404,7 @@ export const InvoiceAttachmentsTab: React.FC<{
           {rows.map((row) => (
             <div
               key={row.id}
-              className="group relative overflow-hidden rounded-lg border border-[var(--aseel-border)] bg-[var(--color-surface-2)]"
+              className="group relative overflow-hidden rounded-lg border border-[var(--ktra-border)] bg-[var(--color-surface-2)]"
             >
               <a
                 href={row.url}
@@ -419,7 +419,7 @@ export const InvoiceAttachmentsTab: React.FC<{
                   <img src={row.url} alt={row.filename} className="h-full w-full object-cover" />
                 )}
               </a>
-              <div className="truncate px-1 py-0.5 text-[10px] text-[var(--aseel-ink-soft)]">
+              <div className="truncate px-1 py-0.5 text-[10px] text-[var(--ktra-ink-soft)]">
                 {row.filename}
               </div>
               {!readOnly && (

@@ -72,14 +72,14 @@ export const PriceOfferFilters: React.FC<PriceOfferFiltersProps> = ({
     const hasActiveFilters = searchTerm || selectedSupplierId || selectedItemIds.length > 0 || selectedStatus !== 'all' || dateRange.start || dateRange.end;
 
     return (
-        <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-sm border aseel-border-soft dark:aseel-border-soft p-4">
+        <div className="ktra-bg-field dark:ktra-bg-panel rounded-xl shadow-sm border ktra-border-soft dark:ktra-border-soft p-4">
 
             {/* Header Compact */}
             <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2 aseel-text-ink dark:aseel-text-soft">
-                    <Filter className="w-4 h-4 aseel-text-accent" />
+                <div className="flex items-center gap-2 ktra-text-ink dark:ktra-text-soft">
+                    <Filter className="w-4 h-4 ktra-text-accent" />
                     <span className="text-sm font-bold">فلترة البيانات</span>
-                    <span className="text-xs aseel-bg-panel dark:aseel-bg-panel aseel-text-soft dark:aseel-text-soft px-2 py-0.5 rounded-full">
+                    <span className="text-xs ktra-bg-panel dark:ktra-bg-panel ktra-text-soft dark:ktra-text-soft px-2 py-0.5 rounded-full">
                         {filteredCount}
                     </span>
                 </div>
@@ -92,7 +92,7 @@ export const PriceOfferFilters: React.FC<PriceOfferFiltersProps> = ({
                             onStatusChange('all');
                             onDateRangeChange({ start: '', end: '' });
                         }}
-                        className="text-xs aseel-text-soft hover:aseel-text-state flex items-center gap-1 transition-colors"
+                        className="text-xs ktra-text-soft hover:ktra-text-state flex items-center gap-1 transition-colors"
                     >
                         <X className="w-3 h-3" />
                         مسح الكل
@@ -110,23 +110,23 @@ export const PriceOfferFilters: React.FC<PriceOfferFiltersProps> = ({
 
                 {/* 1. Search Input (Takes 2 cols on Large screens for better visibility) */}
                 <div className="md:col-span-2 relative">
-                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 aseel-text-soft w-4 h-4" />
+                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 ktra-text-soft w-4 h-4" />
                     <input
                         type="text"
                         value={searchTerm}
                         onChange={(e) => onSearchChange(e.target.value)}
                         placeholder="بحث شامل (رقم العرض، اسم المورد...)"
-                        className="w-full pr-9 pl-3 py-2 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-panel dark:aseel-bg-panel text-sm focus:ring-1 focus:ring-blue-500 focus:aseel-border-soft transition-all"
+                        className="w-full pr-9 pl-3 py-2 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-panel dark:ktra-bg-panel text-sm focus:ring-1 focus:ring-blue-500 focus:ktra-border-soft transition-all"
                     />
                 </div>
 
                 {/* 2. Supplier Select */}
                 <div className="relative">
-                    <Building className="absolute right-3 top-1/2 -translate-y-1/2 aseel-text-soft w-4 h-4 pointer-events-none" />
+                    <Building className="absolute right-3 top-1/2 -translate-y-1/2 ktra-text-soft w-4 h-4 pointer-events-none" />
                     <select
                         value={selectedSupplierId}
                         onChange={(e) => onSupplierChange(e.target.value)}
-                        className="w-full pr-9 pl-8 py-2 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel text-sm focus:ring-1 focus:ring-blue-500 focus:aseel-border-soft appearance-none truncate"
+                        className="w-full pr-9 pl-8 py-2 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel text-sm focus:ring-1 focus:ring-blue-500 focus:ktra-border-soft appearance-none truncate"
                     >
                         <option value="">كل الموردين</option>
                         {suppliers.map(sup => (
@@ -135,16 +135,16 @@ export const PriceOfferFilters: React.FC<PriceOfferFiltersProps> = ({
                             </option>
                         ))}
                     </select>
-                    <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 aseel-text-soft w-3 h-3 pointer-events-none" />
+                    <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 ktra-text-soft w-3 h-3 pointer-events-none" />
                 </div>
 
                 {/* 3. Status Select */}
                 <div className="relative">
-                    <Tag className="absolute right-3 top-1/2 -translate-y-1/2 aseel-text-soft w-4 h-4 pointer-events-none" />
+                    <Tag className="absolute right-3 top-1/2 -translate-y-1/2 ktra-text-soft w-4 h-4 pointer-events-none" />
                     <select
                         value={selectedStatus}
                         onChange={(e) => onStatusChange(e.target.value as PriceOfferStatus | 'all')}
-                        className="w-full pr-9 pl-8 py-2 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel text-sm focus:ring-1 focus:ring-blue-500 focus:aseel-border-soft appearance-none"
+                        className="w-full pr-9 pl-8 py-2 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel text-sm focus:ring-1 focus:ring-blue-500 focus:ktra-border-soft appearance-none"
                     >
                         {statusOptions.map(option => (
                             <option key={option.value} value={option.value}>
@@ -152,7 +152,7 @@ export const PriceOfferFilters: React.FC<PriceOfferFiltersProps> = ({
                             </option>
                         ))}
                     </select>
-                    <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 aseel-text-soft w-3 h-3 pointer-events-none" />
+                    <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 ktra-text-soft w-3 h-3 pointer-events-none" />
                 </div>
 
                 {/* 4. Products Multi-select Dropdown */}
@@ -163,45 +163,45 @@ export const PriceOfferFilters: React.FC<PriceOfferFiltersProps> = ({
                             setItemSearch('');
                         }}
                         className={`w-full px-3 py-2 rounded-lg border text-sm flex items-center justify-between transition-all ${showItemsDropdown || selectedItemIds.length > 0
-                            ? 'aseel-border-soft aseel-bg-accent-bg dark:aseel-bg-panel/20'
-                            : 'aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel'
+                            ? 'ktra-border-soft ktra-bg-accent-bg dark:ktra-bg-panel/20'
+                            : 'ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel'
                             }`}
                     >
                         <div className="flex items-center gap-2 truncate">
-                            <Package className="w-4 h-4 aseel-text-soft shrink-0" />
-                            <span className="truncate aseel-text-ink dark:aseel-text-soft">
+                            <Package className="w-4 h-4 ktra-text-soft shrink-0" />
+                            <span className="truncate ktra-text-ink dark:ktra-text-soft">
                                 {selectedItemIds.length === 0
                                     ? 'المنتجات'
                                     : `${selectedItemIds.length} منتج`}
                             </span>
                         </div>
-                        <ChevronDown className={`w-3 h-3 aseel-text-soft transition-transform ${showItemsDropdown ? 'rotate-180' : ''}`} />
+                        <ChevronDown className={`w-3 h-3 ktra-text-soft transition-transform ${showItemsDropdown ? 'rotate-180' : ''}`} />
                     </button>
 
                     {showItemsDropdown && (
-                        <div className="absolute top-full left-0 right-0 mt-1 z-50 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-lg shadow-lg max-h-60 flex flex-col w-full min-w-[200px]">
-                            <div className="p-2 border-b dark:aseel-border-soft">
+                        <div className="absolute top-full left-0 right-0 mt-1 z-50 ktra-bg-field dark:ktra-bg-panel border ktra-border-soft dark:ktra-border-soft rounded-lg shadow-lg max-h-60 flex flex-col w-full min-w-[200px]">
+                            <div className="p-2 border-b dark:ktra-border-soft">
                                 <input
                                     type="text"
                                     placeholder="بحث..."
                                     value={itemSearch}
                                     onChange={(e) => setItemSearch(e.target.value)}
-                                    className="w-full px-2 py-1 text-xs border rounded dark:aseel-bg-panel dark:aseel-border-soft"
+                                    className="w-full px-2 py-1 text-xs border rounded dark:ktra-bg-panel dark:ktra-border-soft"
                                     onClick={(e) => e.stopPropagation()}
                                     autoFocus
                                 />
                             </div>
                             <div className="flex-1 overflow-y-auto p-1">
                                 {filteredItems.length === 0 ? (
-                                    <div className="p-2 text-xs text-center aseel-text-soft">لا يوجد</div>
+                                    <div className="p-2 text-xs text-center ktra-text-soft">لا يوجد</div>
                                 ) : (
                                     filteredItems.map(item => (
-                                        <label key={item.id} className="flex items-center gap-2 px-2 py-1.5 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded cursor-pointer">
+                                        <label key={item.id} className="flex items-center gap-2 px-2 py-1.5 hover:ktra-bg-panel dark:hover:ktra-bg-panel rounded cursor-pointer">
                                             <input
                                                 type="checkbox"
                                                 checked={selectedItemIds.includes(item.id)}
                                                 onChange={() => handleItemToggle(item.id)}
-                                                className="rounded aseel-text-accent w-3.5 h-3.5"
+                                                className="rounded ktra-text-accent w-3.5 h-3.5"
                                             />
                                             <span className="text-xs truncate">{item.name}</span>
                                         </label>
@@ -222,7 +222,7 @@ export const PriceOfferFilters: React.FC<PriceOfferFiltersProps> = ({
                             type="date"
                             value={dateRange.start}
                             onChange={(e) => onDateRangeChange({ ...dateRange, start: e.target.value })}
-                            className="w-full px-2 py-2 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel text-xs focus:ring-1 focus:ring-blue-500"
+                            className="w-full px-2 py-2 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel text-xs focus:ring-1 focus:ring-blue-500"
                         />
                     </div>
                     <div className="relative flex">
@@ -231,7 +231,7 @@ export const PriceOfferFilters: React.FC<PriceOfferFiltersProps> = ({
                             type="date"
                             value={dateRange.end}
                             onChange={(e) => onDateRangeChange({ ...dateRange, end: e.target.value })}
-                            className="w-full px-2 py-2 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel text-xs focus:ring-1 focus:ring-blue-500"
+                            className="w-full px-2 py-2 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel text-xs focus:ring-1 focus:ring-blue-500"
                         />
                     </div>
                 </div>
@@ -240,14 +240,14 @@ export const PriceOfferFilters: React.FC<PriceOfferFiltersProps> = ({
 
             {/* Selected Items Tags (Minimalist) */}
             {selectedItemIds.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-3 pt-2 border-t aseel-border-soft dark:aseel-border-soft">
+                <div className="flex flex-wrap gap-1.5 mt-3 pt-2 border-t ktra-border-soft dark:ktra-border-soft">
                     {selectedItemIds.map(itemId => {
                         const item = items.find(i => i.id === itemId);
                         if (!item) return null;
                         return (
-                            <span key={itemId} className="inline-flex items-center gap-1 aseel-bg-accent-bg dark:aseel-bg-panel/30 aseel-text-accent dark:aseel-text-soft px-2 py-0.5 rounded text-[10px] border aseel-border-soft dark:aseel-border-soft">
+                            <span key={itemId} className="inline-flex items-center gap-1 ktra-bg-accent-bg dark:ktra-bg-panel/30 ktra-text-accent dark:ktra-text-soft px-2 py-0.5 rounded text-[10px] border ktra-border-soft dark:ktra-border-soft">
                                 {item.name}
-                                <button onClick={() => handleItemToggle(itemId)} className="hover:aseel-text-soft">
+                                <button onClick={() => handleItemToggle(itemId)} className="hover:ktra-text-soft">
                                     <X className="w-3 h-3" />
                                 </button>
                             </span>

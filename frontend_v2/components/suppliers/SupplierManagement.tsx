@@ -1,10 +1,10 @@
 /**
- * N5-T5 — SupplierManagement (L5) — AseelDenseTable للموردين
+ * N5-T5 — SupplierManagement (L5) — KitDenseTable للموردين
  * يستخدم partners API (partner_type=Supplier) من accountingApi.
  */
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
-import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import { KitDenseTable, type DenseColumn } from "../kit/KitDenseTable";
 import { RefreshCw, Search, Plus, Pencil } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PartnerEditorModal, type SupplierScope } from "../partners/PartnerEditorModal";
@@ -121,7 +121,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
           fontWeight: 700,
           padding: "1px 6px",
           borderRadius: "4px",
-          color: p.partner_type === "Supplier" ? "#267346" : "var(--aseel-accent, #2563eb)",
+          color: p.partner_type === "Supplier" ? "#267346" : "var(--ktra-accent, #2563eb)",
           background: p.partner_type === "Supplier"
             ? "rgba(38,115,70,0.10)"
             : "rgba(37,99,235,0.10)",
@@ -148,7 +148,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
     { key: "scope", header: "النطاق", width: "95px", align: "center",
       render: (p) => {
         const scope = p.supplier_scope || "";
-        if (!scope) return <span className="text-[10px] aseel-text-soft">غير مصنَّف</span>;
+        if (!scope) return <span className="text-[10px] ktra-text-soft">غير مصنَّف</span>;
         const isIntl = scope === "international";
         return (
           <span style={{
@@ -156,7 +156,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
             fontWeight: 700,
             padding: "1px 6px",
             borderRadius: "4px",
-            color: isIntl ? "var(--aseel-accent, #2563eb)" : "#267346",
+            color: isIntl ? "var(--ktra-accent, #2563eb)" : "#267346",
             background: isIntl ? "rgba(37,99,235,0.10)" : "rgba(38,115,70,0.10)",
           }}>
             {isIntl ? "دولي" : "محلي"}
@@ -173,7 +173,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
       render: (p) => (
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           title="تعديل بيانات المورد"
           onClick={(e) => { e.stopPropagation(); openEdit(p); }}
         >
@@ -185,12 +185,12 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
   return (
     <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
+        <strong style={{ fontSize: "var(--ktra-fs-title, 14px)", color: "var(--ktra-ink)" }}>
           إدارة الموردين
         </strong>
-        <span className="aseel-status-item">الإجمالي: <b>{partners.length}</b></span>
+        <span className="ktra-status-item">الإجمالي: <b>{partners.length}</b></span>
         <select
-          className="aseel-input"
+          className="ktra-input"
           style={{ width: 130 }}
           value={typeTab}
           onChange={(e) => setTypeTab(e.target.value)}
@@ -205,10 +205,10 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
             <button
               key={tab.value || "unset"}
               type="button"
-              className="aseel-toolbtn"
+              className="ktra-toolbtn"
               onClick={() => setScopeTab(tab.value)}
               style={scopeTab === tab.value
-                ? { background: "var(--aseel-panel-hover)", fontWeight: 700 }
+                ? { background: "var(--ktra-panel-hover)", fontWeight: 700 }
                 : undefined}
             >
               {tab.label}
@@ -217,22 +217,22 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ position: "relative" }}>
-          <Search style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "var(--aseel-ink-soft)" }} />
-          <input className="aseel-input" style={{ width: 200, paddingRight: 24 }}
+          <Search style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "var(--ktra-ink-soft)" }} />
+          <input className="ktra-input" style={{ width: 200, paddingRight: 24 }}
             placeholder="بحث بالاسم / الهاتف…"
             value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <button className="aseel-toolbtn" onClick={load} title="تحديث">
+        <button className="ktra-toolbtn" onClick={load} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
-        <button className="aseel-toolbtn" onClick={() => setShowAddModal(true)} title="إضافة مورد">
+        <button className="ktra-toolbtn" onClick={() => setShowAddModal(true)} title="إضافة مورد">
           <Plus className="h-4 w-4" /> إضافة
         </button>
       </div>
 
-      {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
+      {err && <div className="ktra-banner ktra-banner--err">{err}</div>}
 
-      <AseelDenseTable<Partner>
+      <KitDenseTable<Partner>
         columns={columns}
         rows={filtered}
         getRowKey={(p) => p.id}

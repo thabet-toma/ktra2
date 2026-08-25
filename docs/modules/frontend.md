@@ -14,9 +14,10 @@
 | `frontend_v2/App.tsx` | الجذر: التوجيه، 97 صفحة lazy، تركيب السياقات |
 | `frontend_v2/services/restApi.ts` | **الـbase client** — مهلة 30ث، إعادة محاولة GET، ترويسات الشركة/الفرع |
 | `frontend_v2/services/` | 52 ملفاً — خدمة لكل دومين (`salesApi`, `accountingApi`, `inventoryApi`, `dealsService`…) |
-| `frontend_v2/components/aseel/` | **غلاف المستندات المشترك**: `AseelDocumentShell`, `AseelDenseTable`, `AseelDocumentView`, `AseelAutocomplete`, `AseelFloatWindow` |
+| `frontend_v2/components/kit/` | **عُدّة الواجهة المشتركة**: `KitDocumentShell`, `KitDenseTable`, `KitDocumentView`, `KitAutocomplete`, `KitFloatWindow` |
 | `frontend_v2/utils/windowGeometry.ts` · `frontend_v2/hooks/useDragResize.ts` | **هندسة النوافذ العائمة**: القصّ والسحب والتحجيم والحفظ (`ktra:win:<الاسم>`) + جهة إرساء الشريط |
 | `frontend_v2/components/layout/ActionBarRail.tsx` | **شريط الإجراءات القابل للإرساء** — يمين/يسار رفّاً عائماً، أو أفقياً في شريط العنوان |
+| `frontend_v2/components/layout/QuickAccessBar.tsx` · `frontend_v2/utils/quickBarPref.ts` | **شريط الوصول السريع** (رجوع + المسار + الاختصارات + مرسى المرشد) — يُطوى بضغطة أو `Ctrl+F1`، والتفضيل لكل مستخدم |
 | `frontend_v2/contexts/` | 9 سياقات: `Auth`, `Company`, `Permissions`, `Appearance`, `SessionSettings`, `Theme`, `Toast`, `Confirm`, `PriceVisibility` |
 | `frontend_v2/utils/navAccess.ts` | اشتقاق القائمة: الصلاحية + قناع «الوضع السهل» — **نقطة التركيب الوحيدة** |
 | `frontend_v2/utils/uiMode.ts` | «الوضع السهل»: `SIMPLE_VIEWS` و`viewVisibleInSimpleMode` وcache بمفتاح الشركة |
@@ -35,7 +36,7 @@
 39 مجلداً فرعياً تحت `components/`، أهمّها بحسب الدومين: `sales/` · `accounting/` ·
 `inventory/` · `logistics/` · `import-flow/` · `partners/` · `procurement/` ·
 `finance/` · `hr/` · `reports/` · `settings/` · `superadmin/`.
-والمشترك: `aseel/` (غلاف المستندات) · `common/` · `shared/` · `ui/` · `layout/`.
+والمشترك: `kit/` (عُدّة الواجهة) · `common/` · `shared/` · `ui/` · `layout/`.
 
 **T-SCAN — التعرّف على رقم**: زرّ البحث في الترويسة (`layout/GlobalSearch.tsx`)
 كان روابط سريعة بلا حقل بحثٍ واحد؛ صار يفتح `shared/ScanLookupPanel.tsx` — حقلٌ
@@ -49,7 +50,7 @@
 
 **العرض الشجري للأصناف = شجرة + بطاقة**: `items/ItemsManagement.tsx` كان يرسم
 شجرة المنتجات (`procurement/invoices/InvoiceCategoryTree.tsx` — شريط 240px
-تفرضه `.aseel-tree-panel`) ويترك بقية عرض الشاشة بياضاً، والنقر على منتج أو
+تفرضه `.ktra-tree-panel`) ويترك بقية عرض الشاشة بياضاً، والنقر على منتج أو
 تصنيف يفتح كرته في **تبويب جديد**. صارت المساحة بطاقةَ ما هو محدَّد في الشجرة:
 منتجٌ ⇒ `ProductTreePane` (فوق `useProductInsights`) · تصنيفٌ ⇒ `GroupTreePane`
 (فوق `useGroupInsights`) — والخطّافان في
@@ -61,8 +62,8 @@
 
 **كبسةُ التصنيف تختار وتكشف**: حيث تُمرَّر `onShowGroup` (شاشة الأصناف وحدها)
 تعرض الكبسة الكرتَ المجمّع **وتفتح الفرع** إن كان مطويّاً — ولا تطويه بإعادة
-الكبس (الطيّ مهمّة السهم). وطيُّ اللوحة صار `.aseel-tree-rail` (32px بعنوان
-عمودي) بدل `.aseel-tree-panel w-10`: الأخيرة تخسر أمام `flex: 0 0 240px` في
+الكبس (الطيّ مهمّة السهم). وطيُّ اللوحة صار `.ktra-tree-rail` (32px بعنوان
+عمودي) بدل `.ktra-tree-panel w-10`: الأخيرة تخسر أمام `flex: 0 0 240px` في
 `styles/index.css` — القاعدة خارج طبقات Tailwind — فكان «الطيّ» يترك 240px
 بيضاء ولا يعيد للشاشة شيئاً. يحرس هذا كلَّه `e2e/items-tree-card-pane.spec.ts`.
 
@@ -177,7 +178,7 @@
 - **الفاتورة النقدية**: تحصيلٌ لا يغطّي إجماليها يرفضه الخادمُ ويرتدّ كلُّ شيء،
   فاللوحة تمنع الإرسال أصلاً وتعرض مخرجَين — «أكمل المبلغ نقداً» أو رفع علامة
   «مدفوعة» لتصير على الذمم. رفضٌ كان بالإمكان منعه شاشةٌ سيّئة لا حارس.
-- **اللوحة خارج حاوية الإدخال** في شجرة `AseelDocumentShell`: الفاتورة المرحّلة
+- **اللوحة خارج حاوية الإدخال** في شجرة `KitDocumentShell`: الفاتورة المرحّلة
   تُفتح في وضع العرض حيث تلك الحاوية مخفيّة، والتحصيل عليها من المكان نفسه. وهي
   تظهر في الوضعين السهل والمتقدّم (القناع عرضٌ لا منع).
 - **الدفع مسارٌ واحد على الجانبين (T-INTENT)**: `SettleFromOnAccountModal`
@@ -201,7 +202,7 @@
 
 ## البحث المدمج — قاعدة واحدة تُختبر وحدها
 
-`utils/autocompleteRank.ts` (`rankOptions`) قاعدةُ ترتيب نتائج `AseelAutocomplete`
+`utils/autocompleteRank.ts` (`rankOptions`) قاعدةُ ترتيب نتائج `KitAutocomplete`
 كلِّها. مقعدها في `utils/` لا في المكوّن لأن ملف JSX لا يمرّ من `node --test`.
 
 - **`keywords`** حقلٌ اختياري على كل خيار: نصٌّ يُبحَث فيه ولا يُعرض — SKU
@@ -260,7 +261,7 @@
 
 ## المستند مركز سياق — تبويبات فاتورة المبيعات
 
-`SalesInvoiceEditor.tsx` يمرّر إلى شريط تبويبات `AseelDocumentShell` سبعةَ
+`SalesInvoiceEditor.tsx` يمرّر إلى شريط تبويبات `KitDocumentShell` سبعةَ
 تبويبات، ثلاثةٌ منها سياقية في `components/sales/InvoiceContextTabs.tsx`:
 **حركة المخزون** · **حساب العميل** · **المرفقات**. ومعها القائمُ سلفاً: سجل
 النشاط (`EntityActivityLog`) والحركات المالية المرتبطة (`DocumentPaymentsTab`).
@@ -280,9 +281,10 @@
   `partner_account_statement` نفسها. **لا تحسب الأثر في الواجهة**، وحقلا
   `customer_balance_*_invoice` في حمولة الفاتورة تقريبٌ لا يطابق كشف الحساب
   (أُزيلا من عرض المستند لهذا السبب — التفصيل في `docs/modules/sales.md`).
-- **شريط الحالة يحمل «رقم الحركة»** بجانب رقم القيد — سلوك الأصيل
-  (`docs/aseel_reference/invoices.txt`: «رقم الحركة المخزنية المسلسل… يمكن
-  استخدام هذا الحقل للاستعلام عن الحركات»). يصل ضمن حمولة الفاتورة
+- **شريط الحالة يحمل «رقم الحركة»** بجانب رقم القيد — سلوكٌ موروث من الشاشة
+  الكلاسيكية (سببه مؤرشَف في `docs/aseel_reference/invoices.txt`: «رقم الحركة
+  المخزنية المسلسل… يمكن استخدام هذا الحقل للاستعلام عن الحركات»؛ أرشيفٌ لا
+  مرجع تصميم). يصل ضمن حمولة الفاتورة
   (`stock_movement_no`) فلا يكلّف نداءً.
 
 ## «هل تعلم» — تلميحات سياقية
@@ -383,7 +385,7 @@ Odoo/Zoho — لا MDI حرّ: هو يخالف نمط الويب ويهدم قر
 (`main.app-content`). العائم هو ما يُقارَن بالمستند أو يُستدعى أثناءه: بطاقة
 الصنف، معاينة الملف، الحاسبة.
 
-`components/aseel/AseelFloatWindow.tsx` — نافذةٌ واحدة تُسحب من شريط عنوانها
+`components/kit/KitFloatWindow.tsx` — نافذةٌ واحدة تُسحب من شريط عنوانها
 وتُحجَّم من حوافها الأربع وزواياها الأربع. `portal` إلى `body`، و`role="dialog"`،
 وESC، وحبس Tab وإعادة التركيز لمن فتحها، وشريط سفلي مثبَّت (`footer`) لأزرار
 القرار فلا تنزلق مع المحتوى. تحت 768px تصير لوحاً ملء الشاشة بلا سحب ولا تحجيم
@@ -410,12 +412,32 @@ Pointer Events + `setPointerCapture` — حدثٌ واحد للفأرة والل
 · `--z-window: 81` — فوق لوح المنتقي (70) وتحت طبقة المنبثقات (10000+) عمداً:
 قائمة إكمالٍ تُفتح داخل نافذة يجب أن تعلوها.
 
-البراهين: `utils/windowGeometry.test.ts` · `e2e/aseel-float-window.spec.ts` ·
+البراهين: `utils/windowGeometry.test.ts` · `e2e/kit-float-window.spec.ts` ·
 `e2e/action-bar-dock.spec.ts`.
+
+**شريط الوصول السريع يُطوى — وشريطُ الإجراءات لا يُخلط به**: `layout/QuickAccessBar.tsx`
+هو الشريط الأفقي أعلى المحتوى (رجوع + مسار الشاشة + بطاقات الاختصارات + مرسى
+«مرشد الرحلة»)، وهو شريط **وصول** لا **إجراء** — `ActionBarRail` أعلاه شيء آخر.
+يُطوى بزرّه أو بـ`Ctrl+F1` (وتر طيّ شريط أوامر Office)، والتفضيل يُحفظ **لكل
+مستخدم** في `ktra.quickBar.open:<id>` (`utils/quickBarPref.ts`) — جهاز المحلّ
+مشترك، وطيّ صاحبه لا يسلب موظّفه زرّ «رجوع». ثلاث قواعد لا تُكسر:
+
+1. **الطيّ ارتفاعٌ صفر لا حذفٌ من الشجرة** (`grid-template-rows: 0fr`):
+   `ImportJourneyGuide` يمسك عقدة `#import-guide-slot` مرّةً بـ`getElementById`
+   ويصبّ فيها `createPortal` — حذفُ العقدة يترك البوابة تصبّ في عقدةٍ منفصلة
+   عن الصفحة، فيختفي زرّ «مرشد الرحلة» ولا يعود بالبسط.
+2. **`inert` مع `aria-hidden` عند الطيّ** — بلاه يبقى المخفيّ في مسار `Tab`.
+3. **اللسان يبقى مرئياً دائماً مطويّاً** — لا إخفاء تلقائي ولا حالة بلا مخرج.
+
+ومعها حارسٌ في `components/kit/useKitKeymap.ts`: المفاتيح الوظيفية هناك
+**مجرّدة**، فأيّ وترٍ مع `Ctrl`/`Meta` لا يُفهم مفتاحاً مفرداً (كان `Ctrl+F1`
+يفتح بحث المستند معه، و`Ctrl+F5` يُطلق إجراء `F5` مع إعادة تحميل المتصفّح).
+
+البراهين: `utils/quickBarPref.test.ts` · `e2e/quick-bar-collapse.spec.ts`.
 
 **الشاشات الشاذة عادت إلى الغلاف**: `frontend_v2/components/inventory/StockLevelsPage.tsx` و
 `frontend_v2/components/inventory/StockMovementsPage.tsx` كانتا `div` بأنماط inline (35 موضعاً) خارج
-`AseelDocumentShell`، وشاشات البيانات الخام الأربع كانت بطاقةً مرتجلة في
+`KitDocumentShell`، وشاشات البيانات الخام الأربع كانت بطاقةً مرتجلة في
 `frontend_v2/components/sql/SqlDataPageShell.tsx`. الثلاثة صارت على الغلاف الموحّد بنصوصٍ لم تتغيّر
 حرفاً — والأربع ورثت ذلك بتعديل ملفِ إطارهنّ وحده.
 
@@ -440,8 +462,8 @@ Pointer Events + `setPointerCapture` — حدثٌ واحد للفأرة والل
 4.1. **لوحةٌ تُولَد من الترويسة تحتاج `createPortal`** — الترويسة عنصرٌ
    `sticky` بـ`z-index`، أي **سياق تكديس**، فطبقةٌ `fixed` بداخلها تبقى محبوسةً
    فيه مهما رُفع رقمها. `ScanLookupPanel` يُحقن في `document.body`.
-5. **لا تتبُّعَ لاختيارٍ بالفهرس — بالمعرّف دائماً.** كان `AseelDocumentShell`
-   و`AseelTabs` يحفظان التبويب النشط رقماً، فإدراج تبويب في الوسط وقت التشغيل
+5. **لا تتبُّعَ لاختيارٍ بالفهرس — بالمعرّف دائماً.** كان `KitDocumentShell`
+   و`KitTabs` يحفظان التبويب النشط رقماً، فإدراج تبويب في الوسط وقت التشغيل
    يزيح كل ما بعده ويقفز بالمستخدم إلى شاشة أخرى. القاعدة كلّها الآن في
    `frontend_v2/utils/tabSelection.ts` (`resolveActiveTabKey`): اختيار المستخدم
    أقوى، ثم الطلب الخارجي (`initialTab` / `?tab=`)، ثم أول تبويب — وحذفُ التبويب
@@ -467,7 +489,7 @@ Pointer Events + `setPointerCapture` — حدثٌ واحد للفأرة والل
    المستخدم أسفل `Sidebar.tsx`). بندٌ شخصي بين شاشات الشركة يوحي بأنه بيان
    شركة، والحدّ بين المال الشخصي ومال الشركة حدٌّ محاسبي قبل أن يكون حدَّ تنقّل.
 8. **النصّ الطويل داخل خلية قائمة يُقصّ، والقصّ يختلف باختلاف ما يُقصّ.** النصّ
-   الحرّ (اسم مورد، وصف طلبية) يقع عليه `.aseel-cell-clip` — سطر واحد و«…» في
+   الحرّ (اسم مورد، وصف طلبية) يقع عليه `.ktra-cell-clip` — سطر واحد و«…» في
    الذيل والكامل في `title`. أما **رقم المستند** فما يميّزه تسلسلُه لا بادئتُه:
    في قائمةٍ كلُّ صفوفها `IQ-00xx` تكون البادئة والأصفار ثلثَي الخانة بلا معلومة.
    فالمعروض تسلسلٌ وحده عبر `utils/documentNumberDisplay.ts`
@@ -499,15 +521,15 @@ Pointer Events + `setPointerCapture` — حدثٌ واحد للفأرة والل
    خاصّ بشاشة: `usePasteZone` أو غلافها. مستمعٌ ثانٍ خارج السجلّ يعني لصقةً برابحين.
 
 13. **الإنشاء حيث انتهى البحث — والمعرَّف يعود إلى الحقل الذي ناداه.** حقلُ طرفٍ
-   أو صنفٍ داخل مستند يُكتب فيه (`AseelAutocomplete`)، وآخرُ سطرٍ في قائمته
+   أو صنفٍ داخل مستند يُكتب فيه (`KitAutocomplete`)، وآخرُ سطرٍ في قائمته
    «إضافة «ما كُتب»» يفتح نافذة الإنشاء **بالاسم معبّأً**؛ ونفسه في
-   `AseelIndexPicker` عبر `onCreate` حين لا يُرجع البحث شيئاً. وبعد الحفظ لا
+   `KitIndexPicker` عبر `onCreate` حين لا يُرجع البحث شيئاً. وبعد الحفظ لا
    يكفي `setXId(created.id)`: القوائم تصل من الشاشة الأمّ بعد بثّ `eventBus`،
    فيبقى الحقل **فارغاً ومعرَّفه مسنَد** حتى تصل — وعلى شركةٍ فوق سقف
    `lookup` (500) لا تصل أبداً. الصفُّ المُنشأ يُدرَج في حالةٍ محلية تُدمَج مع
    الخاصية (`extraCustomers` / `extraProducts` في `SalesInvoiceEditor.tsx`).
    **ونافذةٌ تُفتح من الحقل مباشرةً يجب أن تُعطَّل معها لوحةُ مفاتيح المستند**
-   (`useAseelKeymap({ enabled })`) وإلّا صفّر `Esc` داخلها المستندَ كلَّه.
+   (`useKitKeymap({ enabled })`) وإلّا صفّر `Esc` داخلها المستندَ كلَّه.
 
 ## التحقق
 

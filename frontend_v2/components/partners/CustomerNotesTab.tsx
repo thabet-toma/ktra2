@@ -153,22 +153,22 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
   return (
     <div className="p-4" dir="rtl">
       {/* نموذج إضافة ملاحظة/تذكير */}
-      <div className="border border-[var(--aseel-border)] rounded-lg p-3 mb-4 bg-[var(--color-surface,#fff)]">
-        <div className="flex items-center gap-2 mb-2 text-sm font-bold text-[var(--aseel-ink)]">
-          <Plus className="w-4 h-4 text-[var(--aseel-accent,#2563eb)]" />
+      <div className="border border-[var(--ktra-border)] rounded-lg p-3 mb-4 bg-[var(--color-surface,#fff)]">
+        <div className="flex items-center gap-2 mb-2 text-sm font-bold text-[var(--ktra-ink)]">
+          <Plus className="w-4 h-4 text-[var(--ktra-accent,#2563eb)]" />
           ملاحظة / تذكير جديد
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <input
-            className="aseel-input md:col-span-2"
+            className="ktra-input md:col-span-2"
             placeholder="العنوان (مثال: متابعة دفعة مستحقة)"
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
           />
-          <label className="flex items-center gap-1.5 text-xs text-[var(--aseel-ink-soft)]">
+          <label className="flex items-center gap-1.5 text-xs text-[var(--ktra-ink-soft)]">
             الأولوية
             <select
-              className="aseel-input flex-1"
+              className="ktra-input flex-1"
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: e.target.value as CustomerNotePriority })}
               title="«عاجل» مع يوم تذكير ⇒ تنبيه لكل مستخدم عند أي معاملة لهذا الطرف"
@@ -178,18 +178,18 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
               <option value="urgent">عاجل</option>
             </select>
           </label>
-          <label className="flex items-center gap-1.5 text-xs text-[var(--aseel-ink-soft)]">
+          <label className="flex items-center gap-1.5 text-xs text-[var(--ktra-ink-soft)]">
             <Bell className="w-3.5 h-3.5" />
             <input
               type="date"
-              className="aseel-input flex-1"
+              className="ktra-input flex-1"
               value={form.remind_on}
               onChange={(e) => setForm({ ...form, remind_on: e.target.value })}
               title="يوم التذكير (اختياري) — يظهر في إشعارات الموقع"
             />
           </label>
           <textarea
-            className="aseel-input md:col-span-3"
+            className="ktra-input md:col-span-3"
             rows={2}
             placeholder="تفاصيل الملاحظة (اختياري)"
             value={form.body}
@@ -202,7 +202,7 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
             type="button"
             onClick={handleAdd}
             disabled={saving}
-            className="aseel-toolbtn flex items-center gap-1.5"
+            className="ktra-toolbtn flex items-center gap-1.5"
             style={{ padding: '5px 16px', fontWeight: 700 }}
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
@@ -213,13 +213,13 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
 
       {/* القائمة (خط زمني) */}
       {loading ? (
-        <div className="flex items-center gap-2 text-[var(--aseel-ink-soft)] p-4">
+        <div className="flex items-center gap-2 text-[var(--ktra-ink-soft)] p-4">
           <Loader2 className="w-4 h-4 animate-spin" /> جاري التحميل…
         </div>
       ) : error ? (
-        <div className="text-[var(--aseel-danger,#c00)] p-4">{error}</div>
+        <div className="text-[var(--ktra-danger,#c00)] p-4">{error}</div>
       ) : notes.length === 0 ? (
-        <div className="text-center text-[var(--aseel-ink-soft)] p-10">
+        <div className="text-center text-[var(--ktra-ink-soft)] p-10">
           لا توجد ملاحظات بعد {customerId ? 'لهذا الطرف' : 'لهذا الهدف'}. ابدأ بإضافة ملاحظة أو تذكير أعلاه.
         </div>
       ) : (
@@ -234,8 +234,8 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
                 ref={isFocus ? focusRef : undefined}
                 className={`border rounded-lg p-3 transition-shadow ${
                   isFocus
-                    ? 'border-[var(--aseel-accent,#2563eb)] ring-2 ring-[var(--aseel-accent,#2563eb)]/40 shadow'
-                    : 'border-[var(--aseel-border)]'
+                    ? 'border-[var(--ktra-accent,#2563eb)] ring-2 ring-[var(--ktra-accent,#2563eb)]/40 shadow'
+                    : 'border-[var(--ktra-border)]'
                 } ${n.is_done ? 'opacity-70' : ''}`}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -254,14 +254,14 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge.cls}`}>
                         {badge.label}
                       </span>
-                      <h4 className={`text-sm font-bold text-[var(--aseel-ink)] ${n.is_done ? 'line-through' : ''}`}>
+                      <h4 className={`text-sm font-bold text-[var(--ktra-ink)] ${n.is_done ? 'line-through' : ''}`}>
                         {n.title}
                       </h4>
                     </div>
                     {n.body && (
-                      <p className="text-xs text-[var(--aseel-ink-soft)] mt-1 whitespace-pre-wrap">{n.body}</p>
+                      <p className="text-xs text-[var(--ktra-ink-soft)] mt-1 whitespace-pre-wrap">{n.body}</p>
                     )}
-                    <div className="flex items-center gap-3 mt-1.5 text-[10px] text-[var(--aseel-ink-soft)]">
+                    <div className="flex items-center gap-3 mt-1.5 text-[10px] text-[var(--ktra-ink-soft)]">
                       {n.remind_on && (
                         <span className="flex items-center gap-1"><Bell className="w-3 h-3" />{formatDateLocalized(n.remind_on)}</span>
                       )}

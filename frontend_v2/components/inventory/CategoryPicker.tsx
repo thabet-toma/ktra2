@@ -69,7 +69,7 @@ export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, di
     <div style={{ width: "100%" }}>
       <div style={{ display: "flex", gap: "4px", width: "100%" }}>
         <select
-          className={className || "aseel-input"}
+          className={className || "ktra-input"}
           value={value ?? ""}
           onChange={(e) => {
             const val = e.target.value;
@@ -95,7 +95,7 @@ export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, di
         </select>
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           onClick={() => { setAdding((v) => !v); setAddErr(null); }}
           disabled={disabled}
           title={value ? "تصنيف فرعي تحت المختار" : "تصنيف جذري جديد"}
@@ -104,7 +104,7 @@ export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, di
         </button>
         <button
           type="button"
-          className="aseel-toolbtn"
+          className="ktra-toolbtn"
           onClick={() => setShowManage(true)}
           disabled={disabled}
           title="إدارة التصنيفات (شجرة)"
@@ -115,7 +115,7 @@ export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, di
 
       {/* المسار الكامل للمختار — «أين يقع هذا التصنيف» يُقرأ بلا فتح الشجرة. */}
       {value != null && (
-        <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)", marginTop: 2 }}>
+        <div style={{ fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-ink-soft)", marginTop: 2 }}>
           {categoryPathLabel(categories, value)}
         </div>
       )}
@@ -123,7 +123,7 @@ export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, di
       {adding && (
         <div style={{ display: "flex", gap: 4, marginTop: 4, alignItems: "center" }}>
           <input
-            className="aseel-input"
+            className="ktra-input"
             style={{ flex: 1 }}
             autoFocus
             value={newName}
@@ -134,16 +134,16 @@ export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, di
               if (e.key === "Escape") { e.preventDefault(); setAdding(false); setNewName(""); }
             }}
           />
-          <button type="button" className="aseel-toolbtn" disabled={addBusy}
+          <button type="button" className="ktra-toolbtn" disabled={addBusy}
             onClick={() => void handleAdd()}>إضافة</button>
-          <button type="button" className="aseel-toolbtn"
+          <button type="button" className="ktra-toolbtn"
             onClick={() => { setAdding(false); setNewName(""); setAddErr(null); }}>
             <X className="h-4 w-4" />
           </button>
         </div>
       )}
       {addErr && (
-        <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-danger, #c0392b)", marginTop: 2 }}>
+        <div style={{ fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-danger, #c0392b)", marginTop: 2 }}>
           {addErr}
         </div>
       )}
@@ -165,7 +165,7 @@ const CategoryManageModal: React.FC<{ onClose: () => void }> = ({ onClose }) => 
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" dir="rtl">
       <div className="bg-[var(--color-surface)] rounded shadow-xl w-full max-w-md flex flex-col" style={{ maxHeight: "80vh", height: "600px" }}>
         <div className="flex items-center justify-between p-3 border-b bg-[var(--color-surface-2)]">
-          <h3 className="font-bold text-[var(--aseel-ink)]">إدارة التصنيفات (شجرة)</h3>
+          <h3 className="font-bold text-[var(--ktra-ink)]">إدارة التصنيفات (شجرة)</h3>
           <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]"><X className="h-5 w-5" /></button>
         </div>
         <div className="p-0 overflow-hidden flex-1 flex flex-col">

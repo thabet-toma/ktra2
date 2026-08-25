@@ -198,29 +198,29 @@ export function AccountTreePicker({
 
   return (
     <div
-      className="aseel-picker-mask"
-      data-aseel-modal="1"
+      className="ktra-picker-mask"
+      data-ktra-modal="1"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
-        className="aseel-picker"
+        className="ktra-picker"
         role="dialog"
         aria-modal="true"
         aria-label={title}
         onKeyDown={onKeyDown}
       >
-        <div className="aseel-picker-head">
+        <div className="ktra-picker-head">
           <span>{title}</span>
-          <button type="button" className="aseel-toolbtn" onClick={onClose} aria-label="إغلاق">
+          <button type="button" className="ktra-toolbtn" onClick={onClose} aria-label="إغلاق">
             <X />
           </button>
         </div>
         <div style={{ padding: '6px 10px' }}>
           <input
             ref={searchRef}
-            className="aseel-input"
+            className="ktra-input"
             placeholder="بحث بالكود أو الاسم… (↑↓ تنقّل · ← فتح · → طيّ · Enter اختيار · Esc خروج)"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -249,7 +249,7 @@ export function AccountTreePicker({
             )}
           </div>
         )}
-        <div className="aseel-picker-body" role="tree">
+        <div className="ktra-picker-body" role="tree">
           {rows.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '14px' }}>لا نتائج</div>
           ) : (
@@ -262,7 +262,7 @@ export function AccountTreePicker({
                   aria-level={row.depth + 1}
                   aria-expanded={row.hasChildren ? row.expanded : undefined}
                   aria-selected={row.account.id === value}
-                  className={`aseel-tree-row${i === cursor ? ' aseel-row--sel' : ''}`}
+                  className={`ktra-tree-row${i === cursor ? ' ktra-row--sel' : ''}`}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -273,7 +273,7 @@ export function AccountTreePicker({
                     opacity: canSelect ? 1 : 0.75,
                     fontWeight: row.hasChildren ? 600 : 400,
                     background:
-                      row.account.id === value ? 'var(--aseel-sel-bg, #dbeafe)' : undefined,
+                      row.account.id === value ? 'var(--ktra-sel-bg, #dbeafe)' : undefined,
                   }}
                   onMouseDown={() => setCursor(i)}
                   onClick={() => {
@@ -284,7 +284,7 @@ export function AccountTreePicker({
                   {row.hasChildren ? (
                     <button
                       type="button"
-                      className="aseel-toolbtn"
+                      className="ktra-toolbtn"
                       aria-label={row.expanded ? 'طيّ' : 'فتح'}
                       style={{ padding: 0, width: '16px', height: '16px' }}
                       onClick={(e) => {
@@ -304,7 +304,7 @@ export function AccountTreePicker({
                   {canSelect && (
                     <button
                       type="button"
-                      className="aseel-toolbtn"
+                      className="ktra-toolbtn"
                       onClick={(e) => {
                         e.stopPropagation();
                         commit(row.account);
@@ -318,7 +318,7 @@ export function AccountTreePicker({
             })
           )}
         </div>
-        <div className="aseel-picker-foot">{rows.length} حساب ظاهر</div>
+        <div className="ktra-picker-foot">{rows.length} حساب ظاهر</div>
       </div>
     </div>
   );
@@ -367,7 +367,7 @@ export function AccountTreeField({
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
         <button
           type="button"
-          className={className ?? 'aseel-input'}
+          className={className ?? 'ktra-input'}
           disabled={disabled}
           onClick={() => setOpen(true)}
           style={{ flex: 1, textAlign: 'start', overflow: 'hidden', whiteSpace: 'nowrap' }}
@@ -378,7 +378,7 @@ export function AccountTreeField({
         {allowClear && selected && !disabled && (
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             aria-label="مسح الحساب"
             onClick={() => onChange(null, null)}
           >

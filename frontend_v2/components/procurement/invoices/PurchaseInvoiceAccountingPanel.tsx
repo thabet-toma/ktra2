@@ -40,9 +40,9 @@ import type { AccountPurpose } from "@/utils/accountTree";
 const FEE_PURPOSE: readonly AccountPurpose[] = ["expense", "asset"];
 
 const RECEIPT_BADGE: Record<ReceiptStatus, { label: string; cls: string }> = {
-  not_received: { label: "غير مستلمة", cls: "aseel-text-state" },
-  partially_received: { label: "مستلمة جزئياً", cls: "aseel-text-ink" },
-  received: { label: "مستلمة", cls: "aseel-text-soft" },
+  not_received: { label: "غير مستلمة", cls: "ktra-text-state" },
+  partially_received: { label: "مستلمة جزئياً", cls: "ktra-text-ink" },
+  received: { label: "مستلمة", cls: "ktra-text-soft" },
 };
 
 interface AccountDto {
@@ -343,7 +343,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 justify-center py-12 aseel-text-soft">
+      <div className="flex items-center gap-2 justify-center py-12 ktra-text-soft">
         <Loader2 className="w-5 h-5 animate-spin" />
         <span>جارٍ تحميل البيانات المحاسبية…</span>
       </div>
@@ -357,42 +357,42 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   return (
     <div
       dir="rtl"
-      className="mt-6 rounded-2xl border-2 border-[var(--color-border)] dark:border-[var(--color-border)] aseel-bg-field dark:aseel-bg-panel shadow-sm overflow-hidden"
+      className="mt-6 rounded-2xl border-2 border-[var(--color-border)] dark:border-[var(--color-border)] ktra-bg-field dark:ktra-bg-panel shadow-sm overflow-hidden"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] dark:border-[var(--color-border)]/60 bg-gradient-to-l from-[var(--color-primary)] to-white dark:from-[var(--color-primary)]/30 dark:aseel-bg-panel">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] dark:border-[var(--color-border)]/60 bg-gradient-to-l from-[var(--color-primary)] to-white dark:from-[var(--color-primary)]/30 dark:ktra-bg-panel">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-[var(--color-primary)] text-white rounded-xl">
             <Calculator className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-lg font-bold aseel-text-ink dark:text-white">
+            <h3 className="text-lg font-bold ktra-text-ink dark:text-white">
               المحاسبة والترحيل
             </h3>
-            <p className="text-xs aseel-text-soft dark:aseel-text-soft">
+            <p className="text-xs ktra-text-soft dark:ktra-text-soft">
               الرسوم + نوع الدفع + معاينة القيد
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 justify-end">
           {/* task16 C10: الإجمالي + المتبقي + حالة الدفع */}
-          <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="إجمالي الفاتورة">
+          <span className="px-3 py-1.5 rounded-full text-sm font-medium border ktra-border-soft ktra-bg-panel ktra-text-ink" title="إجمالي الفاتورة">
             الإجمالي: {Number(invoice.grand_total || 0).toLocaleString()} {invoice.currency_code || ""}
           </span>
-          <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="المبلغ المدفوع المرحّل">
+          <span className="px-3 py-1.5 rounded-full text-sm font-medium border ktra-border-soft ktra-bg-panel ktra-text-ink" title="المبلغ المدفوع المرحّل">
             المدفوع: {Number(invoice.amount_paid || 0).toLocaleString()} {invoice.currency_code || ""}
           </span>
-          <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="المبلغ المتبقي على الفاتورة (مالياً)">
+          <span className="px-3 py-1.5 rounded-full text-sm font-medium border ktra-border-soft ktra-bg-panel ktra-text-ink" title="المبلغ المتبقي على الفاتورة (مالياً)">
             المتبقي للدفع: {Number(invoice.remaining_balance ?? invoice.grand_total ?? 0).toLocaleString()} {invoice.currency_code || ""}
           </span>
           {invoice.payment_status && (
             <span
-              className={`px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft ${
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border ktra-border-soft ${
                 invoice.payment_status === "paid"
                   ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
                   : invoice.payment_status === "partially_paid"
                     ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
-                    : "aseel-bg-panel aseel-text-state"
+                    : "ktra-bg-panel ktra-text-state"
               }`}
               title="حالة الدفع"
             >
@@ -406,7 +406,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           )}
           {invoice.receipt_status && (
             <span
-              className={`px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel ${
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border ktra-border-soft ktra-bg-panel ${
                 RECEIPT_BADGE[invoice.receipt_status]?.cls || ""
               }`}
               title="حالة استلام البضاعة للمخزن"
@@ -421,13 +421,13 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
             && Number(invoice.receipt_progress.ordered) > 0
             && invoice.receipt_status !== "not_received" && (
             <span
-              className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink"
+              className="px-3 py-1.5 rounded-full text-sm font-medium border ktra-border-soft ktra-bg-panel ktra-text-ink"
               title="ما وصل المخزن من هذه الفاتورة، وما بقي على المورّد"
             >
               استُلم {formatQuantity(invoice.receipt_progress.received)} من{" "}
               {formatQuantity(invoice.receipt_progress.ordered)} — باقي{" "}
               <b className={Number(invoice.receipt_progress.remaining) > 0
-                ? "text-[var(--aseel-warn)]" : ""}>
+                ? "text-[var(--ktra-warn)]" : ""}>
                 {formatQuantity(invoice.receipt_progress.remaining)}
               </b>
             </span>
@@ -444,18 +444,18 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           )}
           <button
             onClick={reload}
-            className="p-2 aseel-text-soft dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg"
+            className="p-2 ktra-text-soft dark:ktra-text-soft hover:ktra-bg-panel dark:hover:ktra-bg-panel rounded-lg"
             title="تحديث"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
           {isPosted ? (
-            <span className="flex items-center gap-1.5 px-3 py-1.5 aseel-bg-panel dark:aseel-bg-panel/40 aseel-text-ink dark:aseel-text-soft rounded-full text-sm font-medium border aseel-border-soft dark:aseel-border-soft">
+            <span className="flex items-center gap-1.5 px-3 py-1.5 ktra-bg-panel dark:ktra-bg-panel/40 ktra-text-ink dark:ktra-text-soft rounded-full text-sm font-medium border ktra-border-soft dark:ktra-border-soft">
               <CheckCircle2 className="w-4 h-4" />
               مرحّلة (قيد #{invoice.journal_id_display})
             </span>
           ) : (
-            <span className="flex items-center gap-1.5 px-3 py-1.5 aseel-bg-panel dark:aseel-bg-panel/40 aseel-text-ink dark:aseel-text-soft rounded-full text-sm font-medium border aseel-border-soft dark:aseel-border-soft">
+            <span className="flex items-center gap-1.5 px-3 py-1.5 ktra-bg-panel dark:ktra-bg-panel/40 ktra-text-ink dark:ktra-text-soft rounded-full text-sm font-medium border ktra-border-soft dark:ktra-border-soft">
               <AlertTriangle className="w-4 h-4" />
               غير مرحّلة
             </span>
@@ -465,12 +465,12 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
 
       <div className="p-6 space-y-6">
         {error && (
-          <div className="p-3 rounded-lg aseel-bg-panel dark:aseel-bg-panel/30 aseel-text-state dark:aseel-text-soft text-sm border aseel-border-soft dark:aseel-border-soft">
+          <div className="p-3 rounded-lg ktra-bg-panel dark:ktra-bg-panel/30 ktra-text-state dark:ktra-text-soft text-sm border ktra-border-soft dark:ktra-border-soft">
             {error}
           </div>
         )}
         {success && (
-          <div className="p-3 rounded-lg aseel-bg-panel dark:aseel-bg-panel/30 aseel-text-ink dark:aseel-text-soft text-sm border aseel-border-soft dark:aseel-border-soft">
+          <div className="p-3 rounded-lg ktra-bg-panel dark:ktra-bg-panel/30 ktra-text-ink dark:ktra-text-soft text-sm border ktra-border-soft dark:ktra-border-soft">
             {success}
           </div>
         )}
@@ -478,13 +478,13 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         {/* نوع الدفع */}
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-1.5">
+            <label className="block text-sm font-medium ktra-text-ink dark:ktra-text-soft mb-1.5">
               حالة الدفع
             </label>
             {/* T-INTENT: المفتاح انتقل إلى رأس المحرّر (مرآة فاتورة البيع)، فلا
                 يبقى للقيمة الواحدة مدخلان يفترقان. الحالة هنا تبقى لأن حفظ هذا
                 التبويب يعيد إرسالها كما جاءت من الخادم. */}
-            <div className="flex h-11 items-center gap-2 aseel-text-ink dark:text-white">
+            <div className="flex h-11 items-center gap-2 ktra-text-ink dark:text-white">
               <span
                 className={`inline-flex rounded px-2 py-0.5 text-xs font-semibold ${
                   paymentType === "cash"
@@ -495,7 +495,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                 {paymentType === "cash" ? "نقدية" : "آجلة"}
               </span>
             </div>
-            <p className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
+            <p className="text-xs ktra-text-soft dark:ktra-text-soft mt-1">
               {paymentType === "credit"
                 ? "الدائن = حساب ذمم المورد المربوط. غيّرها من مفتاح «نقدي» في رأس الفاتورة."
                 : "الدائن = الصندوق/البنك المختار أدناه. غيّرها من مفتاح «نقدي» في رأس الفاتورة."}
@@ -503,7 +503,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           </div>
           {paymentType === "cash" && (
             <div>
-              <label className="block text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-1.5">
+              <label className="block text-sm font-medium ktra-text-ink dark:ktra-text-soft mb-1.5">
                 حساب الصندوق / البنك *
               </label>
               <AccountTreeField
@@ -513,7 +513,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                 purpose="cash"
                 disabled={disableEdit}
                 title="اختيار الصندوق / البنك"
-                className="w-full h-11 px-3 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white disabled:opacity-60"
+                className="w-full h-11 px-3 border ktra-border-soft dark:ktra-border-soft rounded-lg ktra-bg-field dark:ktra-bg-panel ktra-text-ink dark:text-white disabled:opacity-60"
               />
             </div>
           )}
@@ -522,13 +522,13 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         {/* جدول الأصناف - توجيه حسابات الأسطر */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h4 className="text-sm font-semibold aseel-text-ink dark:aseel-text-soft">
+            <h4 className="text-sm font-semibold ktra-text-ink dark:ktra-text-soft">
               توجيه حسابات بنود الفاتورة
             </h4>
           </div>
-          <div className="overflow-x-auto rounded-lg border aseel-border-soft dark:aseel-border-soft">
+          <div className="overflow-x-auto rounded-lg border ktra-border-soft dark:ktra-border-soft">
             <table className="w-full text-sm">
-              <thead className="aseel-bg-panel dark:aseel-bg-panel aseel-text-soft dark:aseel-text-soft text-xs">
+              <thead className="ktra-bg-panel dark:ktra-bg-panel ktra-text-soft dark:ktra-text-soft text-xs">
                 <tr>
                   <th className="px-3 py-2 text-right font-medium">الصنف</th>
                   <th className="px-3 py-2 text-right font-medium">المبلغ</th>
@@ -538,13 +538,13 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
               <tbody>
                 {items.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-3 py-6 text-center aseel-text-soft">
+                    <td colSpan={3} className="px-3 py-6 text-center ktra-text-soft">
                       لا توجد أصناف
                     </td>
                   </tr>
                 )}
                 {items.map((item, idx) => (
-                  <tr key={item.id ?? `it-${idx}`} className="border-t aseel-border-soft dark:aseel-border-soft">
+                  <tr key={item.id ?? `it-${idx}`} className="border-t ktra-border-soft dark:ktra-border-soft">
                     <td className="px-3 py-2">{item.name}</td>
                     <td className="px-3 py-2">{formatMoney(item.total_price)}</td>
                     <td className="px-3 py-2">
@@ -556,7 +556,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                         disabled={disableEdit}
                         placeholder="— حساب المخزون الافتراضي —"
                         title="اختيار حساب البند"
-                        className="w-full h-9 px-2 border aseel-border-soft dark:aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-xs"
+                        className="w-full h-9 px-2 border ktra-border-soft dark:ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-xs"
                       />
                     </td>
                   </tr>
@@ -569,7 +569,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         {/* جدول الرسوم */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <h4 className="text-sm font-semibold aseel-text-ink dark:aseel-text-soft">
+            <h4 className="text-sm font-semibold ktra-text-ink dark:ktra-text-soft">
               الرسوم الإضافية (شحن، تخليص، جمارك، …)
             </h4>
             {!disableEdit && (
@@ -582,9 +582,9 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
               </button>
             )}
           </div>
-          <div className="overflow-x-auto rounded-lg border aseel-border-soft dark:aseel-border-soft">
+          <div className="overflow-x-auto rounded-lg border ktra-border-soft dark:ktra-border-soft">
             <table className="w-full text-sm">
-              <thead className="aseel-bg-panel dark:aseel-bg-panel aseel-text-soft dark:aseel-text-soft text-xs">
+              <thead className="ktra-bg-panel dark:ktra-bg-panel ktra-text-soft dark:ktra-text-soft text-xs">
                 <tr>
                   <th className="px-3 py-2 text-right font-medium">الوصف</th>
                   <th className="px-3 py-2 text-right font-medium">الحساب المحاسبي</th>
@@ -598,7 +598,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                   <tr>
                     <td
                       colSpan={5}
-                      className="px-3 py-6 text-center aseel-text-soft"
+                      className="px-3 py-6 text-center ktra-text-soft"
                     >
                       لا توجد رسوم — اضغط "إضافة رسم" لإضافة رسم شحن/تخليص/…
                     </td>
@@ -607,7 +607,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                 {fees.map((fee, idx) => (
                   <tr
                     key={fee.id ?? `new-${idx}`}
-                    className="border-t aseel-border-soft dark:aseel-border-soft"
+                    className="border-t ktra-border-soft dark:ktra-border-soft"
                   >
                     <td className="px-3 py-2">
                       <input
@@ -618,7 +618,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                         }
                         disabled={disableEdit}
                         placeholder="مثلاً: رسوم تخليص"
-                        className="w-full h-9 px-2 border aseel-border-soft dark:aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel"
+                        className="w-full h-9 px-2 border ktra-border-soft dark:ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel"
                       />
                     </td>
                     <td className="px-3 py-2">
@@ -629,7 +629,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                         purpose={FEE_PURPOSE}
                         disabled={disableEdit}
                         title="اختيار حساب الرسم"
-                        className="w-full h-9 px-2 border aseel-border-soft dark:aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-xs"
+                        className="w-full h-9 px-2 border ktra-border-soft dark:ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-xs"
                       />
                     </td>
                     <td className="px-3 py-2 w-32">
@@ -645,7 +645,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                           })
                         }
                         disabled={disableEdit || fee.calculation_type === "percentage"}
-                        className="w-full h-9 px-2 border aseel-border-soft dark:aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-right"
+                        className="w-full h-9 px-2 border ktra-border-soft dark:ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-right"
                       />
                     </td>
                     <td className="px-3 py-2 text-center">
@@ -665,7 +665,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                       {!disableEdit && (
                         <button
                           onClick={() => removeFee(idx)}
-                          className="p-1.5 aseel-text-state hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded"
+                          className="p-1.5 ktra-text-state hover:ktra-bg-panel dark:hover:ktra-bg-panel/30 rounded"
                           title="حذف"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -681,22 +681,22 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
 
         {/* معاينة القيد */}
         {preview && (
-          <div className="rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-panel dark:aseel-bg-panel/50 overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-2 aseel-bg-panel dark:aseel-bg-panel text-xs font-semibold aseel-text-ink dark:aseel-text-soft">
+          <div className="rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-panel dark:ktra-bg-panel/50 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2 ktra-bg-panel dark:ktra-bg-panel text-xs font-semibold ktra-text-ink dark:ktra-text-soft">
               <span>معاينة القيد المحاسبي</span>
               <span
                 className={
                   preview.isBalanced
-                    ? "aseel-text-soft dark:aseel-text-soft"
-                    : "aseel-text-state dark:aseel-text-soft"
+                    ? "ktra-text-soft dark:ktra-text-soft"
+                    : "ktra-text-state dark:ktra-text-soft"
                 }
               >
                 {preview.isBalanced ? "✓ متوازن" : "✗ غير متوازن"}
               </span>
             </div>
             <table className="w-full text-sm">
-              <thead className="aseel-text-soft dark:aseel-text-soft text-xs">
-                <tr className="border-b aseel-border-soft dark:aseel-border-soft">
+              <thead className="ktra-text-soft dark:ktra-text-soft text-xs">
+                <tr className="border-b ktra-border-soft dark:ktra-border-soft">
                   <th className="px-4 py-2 text-right font-medium">الحساب</th>
                   <th className="px-4 py-2 text-right font-medium w-32">مدين</th>
                   <th className="px-4 py-2 text-right font-medium w-32">دائن</th>
@@ -705,10 +705,10 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
               <tbody className="divide-y divide-[var(--color-border)]">
                 {preview.lines.map((l, i) => (
                   <tr key={i}>
-                    <td className="px-4 py-2 aseel-text-ink dark:aseel-text-soft">
+                    <td className="px-4 py-2 ktra-text-ink dark:ktra-text-soft">
                       {l.account}
                       {l.note && (
-                        <span className="text-xs aseel-text-soft block">
+                        <span className="text-xs ktra-text-soft block">
                           {l.note}
                         </span>
                       )}
@@ -721,7 +721,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                     </td>
                   </tr>
                 ))}
-                <tr className="aseel-bg-panel dark:aseel-bg-panel font-bold">
+                <tr className="ktra-bg-panel dark:ktra-bg-panel font-bold">
                   <td className="px-4 py-2 text-right">المجموع</td>
                   <td className="px-4 py-2 text-right font-mono">
                     {formatMoney(preview.totalDebit)}
@@ -737,18 +737,18 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
 
         {/* أزرار الإجراءات */}
         {!isPosted && !readOnly && (
-          <div className="flex items-center justify-end gap-3 pt-2 border-t aseel-border-soft dark:aseel-border-soft">
+          <div className="flex items-center justify-end gap-3 pt-2 border-t ktra-border-soft dark:ktra-border-soft">
             <button
               onClick={saveAccountingFields}
               disabled={saving}
-              className="px-4 py-2 aseel-text-ink dark:aseel-text-soft aseel-bg-panel dark:aseel-bg-panel hover:aseel-bg-grid-head dark:hover:aseel-bg-panel rounded-lg disabled:opacity-50"
+              className="px-4 py-2 ktra-text-ink dark:ktra-text-soft ktra-bg-panel dark:ktra-bg-panel hover:ktra-bg-grid-head dark:hover:ktra-bg-panel rounded-lg disabled:opacity-50"
             >
               {saving ? "جارٍ الحفظ…" : "حفظ الإعدادات"}
             </button>
             <button
               onClick={post}
               disabled={posting || !preview?.isBalanced}
-              className="flex items-center gap-2 px-5 py-2 aseel-bg-panel hover:aseel-bg-panel disabled:aseel-bg-panel disabled:cursor-not-allowed text-white rounded-lg font-medium"
+              className="flex items-center gap-2 px-5 py-2 ktra-bg-panel hover:ktra-bg-panel disabled:ktra-bg-panel disabled:cursor-not-allowed text-white rounded-lg font-medium"
               title={
                 !preview?.isBalanced
                   ? "القيد غير متوازن — لا يمكن الترحيل"
@@ -767,14 +767,14 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
 
         {/* مستند مرحَّل: تحذير + تراجع عن الترحيل */}
         {isPosted && !readOnly && (
-          <div className="flex items-center justify-between gap-3 pt-2 border-t aseel-border-soft dark:aseel-border-soft">
-            <p className="text-sm aseel-text-soft">
+          <div className="flex items-center justify-between gap-3 pt-2 border-t ktra-border-soft dark:ktra-border-soft">
+            <p className="text-sm ktra-text-soft">
               هذا المستند مرحَّل. يجب التراجع عن الترحيل قبل تعديله أو حذفه.
             </p>
             <button
               onClick={unpost}
               disabled={posting}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg font-medium border aseel-border-soft aseel-text-ink hover:aseel-bg-grid-head disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-5 py-2 rounded-lg font-medium border ktra-border-soft ktra-text-ink hover:ktra-bg-grid-head disabled:opacity-50 disabled:cursor-not-allowed"
               title="حذف قيود الفاتورة وإرجاعها مسودة"
             >
               {posting ? (

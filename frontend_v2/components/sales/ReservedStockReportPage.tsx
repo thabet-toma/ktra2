@@ -12,8 +12,8 @@ import { openInNewTab } from "../../utils/openInNewTab";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { clientLogger } from "../../services/logger";
-import { AseelDocumentShell, AseelReportTable } from "../aseel";
-import type { AseelToolbarAction, ReportColumn } from "../aseel";
+import { KitDocumentShell, KitReportTable } from "../kit";
+import type { KitToolbarAction, ReportColumn } from "../kit";
 
 /**
  * T-RESERVEGUARD: «تقرير المحجوزات» — ما هو محجوز الآن ولمن وحتى متى.
@@ -165,7 +165,7 @@ export const ReservedStockReportPage: React.FC = () => {
       // المتاح السالب = حجوزات تتجاوز الرصيد — يجب أن يُرى لا أن يُبتلع.
       render: (r) => (
         <span style={Number(r.available_quantity) < 0
-          ? { color: "var(--aseel-danger, #c00)", fontWeight: 700 }
+          ? { color: "var(--ktra-danger, #c00)", fontWeight: 700 }
           : undefined}>
           {formatNumber(r.available_quantity)}
         </span>
@@ -181,7 +181,7 @@ export const ReservedStockReportPage: React.FC = () => {
       render: (r) => (
         r.days_left == null ? "—"
           : <span style={r.days_left <= 2
-            ? { color: "var(--aseel-warn, #b06800)", fontWeight: 600 }
+            ? { color: "var(--ktra-warn, #b06800)", fontWeight: 600 }
             : undefined}>
             {formatNumber(r.days_left)} يوم
           </span>
@@ -193,7 +193,7 @@ export const ReservedStockReportPage: React.FC = () => {
         <div className="flex items-center justify-center gap-2 text-xs">
           <button
             type="button"
-            className="aseel-text-accent inline-flex items-center gap-1 hover:underline"
+            className="ktra-text-accent inline-flex items-center gap-1 hover:underline"
             title={`فتح الطلبية ${r.order_number} للتعديل`}
             onClick={() => openOrder(r)}
           ><Pencil className="h-3 w-3" />تعديل</button>
@@ -212,20 +212,20 @@ export const ReservedStockReportPage: React.FC = () => {
 
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      <div className="aseel-field" style={{ flex: "1", minWidth: "180px" }}>
-        <label className="aseel-field-label">الزبون / الصنف / رقم الطلبية</label>
+      <div className="ktra-field" style={{ flex: "1", minWidth: "180px" }}>
+        <label className="ktra-field-label">الزبون / الصنف / رقم الطلبية</label>
         <input
           type="text"
-          className="aseel-input"
+          className="ktra-input"
           placeholder="بحث…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
-      <div className="aseel-field" style={{ minWidth: "170px" }}>
-        <label className="aseel-field-label">الزبون</label>
+      <div className="ktra-field" style={{ minWidth: "170px" }}>
+        <label className="ktra-field-label">الزبون</label>
         <select
-          className="aseel-input"
+          className="ktra-input"
           value={customerId}
           onChange={(e) => setCustomerId(e.target.value ? Number(e.target.value) : "")}
         >
@@ -233,28 +233,28 @@ export const ReservedStockReportPage: React.FC = () => {
           {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </div>
-      <div className="aseel-field" style={{ minWidth: "140px" }}>
-        <label className="aseel-field-label">الحجز حتى — من</label>
-        <input type="date" className="aseel-input" value={dateFrom}
+      <div className="ktra-field" style={{ minWidth: "140px" }}>
+        <label className="ktra-field-label">الحجز حتى — من</label>
+        <input type="date" className="ktra-input" value={dateFrom}
           onChange={(e) => setDateFrom(e.target.value)} />
       </div>
-      <div className="aseel-field" style={{ minWidth: "140px" }}>
-        <label className="aseel-field-label">الحجز حتى — إلى</label>
-        <input type="date" className="aseel-input" value={dateTo}
+      <div className="ktra-field" style={{ minWidth: "140px" }}>
+        <label className="ktra-field-label">الحجز حتى — إلى</label>
+        <input type="date" className="ktra-input" value={dateTo}
           onChange={(e) => setDateTo(e.target.value)} />
       </div>
       {/* نوافذ جاهزة: «ما ينتهي هذا الأسبوع» سؤال يومي لا يستحق كتابة تاريخين. */}
       <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-        <button type="button" className="aseel-btn"
+        <button type="button" className="ktra-btn"
           onClick={() => { setDateFrom(todayIso()); setDateTo(addDays(2)); }}
           title="الحجوزات التي تنتهي خلال يومين">ينتهي خلال يومين</button>
-        <button type="button" className="aseel-btn"
+        <button type="button" className="ktra-btn"
           onClick={() => { setDateFrom(todayIso()); setDateTo(addDays(7)); }}
           title="الحجوزات التي تنتهي خلال أسبوع">هذا الأسبوع</button>
-        <button type="button" className="aseel-toolbtn" onClick={resetFilters} title="مسح الفلاتر">
+        <button type="button" className="ktra-toolbtn" onClick={resetFilters} title="مسح الفلاتر">
           <RotateCcw className="w-4 h-4" />مسح
         </button>
-        <button type="button" className="aseel-toolbtn" onClick={() => void fetchData()}>
+        <button type="button" className="ktra-toolbtn" onClick={() => void fetchData()}>
           <Search className="w-4 h-4" />تحديث
         </button>
       </div>
@@ -270,8 +270,8 @@ export const ReservedStockReportPage: React.FC = () => {
       <div
         className="text-lg font-bold"
         style={{
-          color: tone === "danger" ? "var(--aseel-danger, #c00)"
-            : tone === "warn" ? "var(--aseel-warn, #b06800)" : undefined,
+          color: tone === "danger" ? "var(--ktra-danger, #c00)"
+            : tone === "warn" ? "var(--ktra-warn, #b06800)" : undefined,
         }}
       >{value}</div>
     </div>
@@ -290,13 +290,13 @@ export const ReservedStockReportPage: React.FC = () => {
     </div>
   );
 
-  const shellActions: AseelToolbarAction[] = [
+  const shellActions: KitToolbarAction[] = [
     { key: "run", label: "تحديث", icon: <Search className="w-4 h-4" />, onClick: () => void fetchData() },
     { key: "reset", label: "مسح الفلاتر", icon: <RotateCcw className="w-4 h-4" />, onClick: resetFilters },
   ];
 
   return (
-    <AseelDocumentShell
+    <KitDocumentShell
       title="تقرير المحجوزات"
       state={
         dateFrom || dateTo
@@ -306,14 +306,14 @@ export const ReservedStockReportPage: React.FC = () => {
       actions={shellActions}
       header={kpiBand}
       status={
-        <span className="aseel-status-item">
+        <span className="ktra-status-item">
           عدد الحجوزات: {shown.length} · إجمالي القيمة: {formatMoney(totals.line_total)}
           {" · "}إلغاء الحجز = إلغاء الطلبية بكل بنودها
         </span>
       }
     >
-      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-      <AseelReportTable<ReservedStockRow>
+      {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      <KitReportTable<ReservedStockRow>
         filterBar={filterBar}
         columns={columns}
         rows={shown}
@@ -326,7 +326,7 @@ export const ReservedStockReportPage: React.FC = () => {
         emptyHint="لا حجوزات سارية في هذا النطاق — الطلبيات المؤكَّدة وحدها تحجز، والحجز المنتهي يُفرَج عنه تلقائياً."
         getRowKey={(r) => `${r.order_id}-${r.product_id}`}
       />
-    </AseelDocumentShell>
+    </KitDocumentShell>
   );
 };
 

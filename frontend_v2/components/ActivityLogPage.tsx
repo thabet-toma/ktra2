@@ -106,24 +106,24 @@ export const ActivityLogPage: React.FC = () => {
             </div>
             <div>
               <h2 className="text-lg font-bold text-[var(--color-text)]">{drillUser.name}</h2>
-              <p className="text-xs aseel-text-soft">رحلة المستخدم — تشمل الفتح والعرض</p>
+              <p className="text-xs ktra-text-soft">رحلة المستخدم — تشمل الفتح والعرض</p>
             </div>
           </div>
           <label className="flex items-center gap-2 text-sm">
-            <span className="aseel-text-soft">اليوم:</span>
+            <span className="ktra-text-soft">اليوم:</span>
             <input type="date" value={drillDate} onChange={(e) => setDrillDate(e.target.value)} className={selectCls} />
           </label>
         </div>
 
         {drillLoading ? (
-          <div className="text-center py-10 aseel-text-soft">جارٍ التحميل…</div>
+          <div className="text-center py-10 ktra-text-soft">جارٍ التحميل…</div>
         ) : drillRows.length === 0 ? (
-          <div className="text-center py-12 aseel-text-soft">
+          <div className="text-center py-12 ktra-text-soft">
             <History className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>لا يوجد نشاط في هذا اليوم</p>
           </div>
         ) : (
-          <ol className="relative border-r-2 aseel-border-soft pr-4 space-y-4">
+          <ol className="relative border-r-2 ktra-border-soft pr-4 space-y-4">
             {drillRows.map((r) => {
               const meta = actionMeta(r.action);
               return (
@@ -131,14 +131,14 @@ export const ActivityLogPage: React.FC = () => {
                   <span className="absolute -right-[1.35rem] top-1 w-3 h-3 rounded-full bg-[var(--color-surface)] border-2 border-[var(--color-primary)]" />
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${meta.badge}`}>{r.action_label || meta.label}</span>
-                    <span className="text-sm aseel-text-soft">{entityLabel(r.entity_type)}</span>
+                    <span className="text-sm ktra-text-soft">{entityLabel(r.entity_type)}</span>
                     {r.entity_label && <span className="text-sm font-medium text-[var(--color-text)]">{r.entity_label}</span>}
-                    <span className="text-xs aseel-text-soft mr-auto">{formatActivityTime(r.timestamp)}</span>
+                    <span className="text-xs ktra-text-soft mr-auto">{formatActivityTime(r.timestamp)}</span>
                   </div>
                   {r.metadata?.changes?.length ? (
                     <div className="mt-1"><ActivityChanges changes={r.metadata.changes} /></div>
                   ) : (
-                    r.description && <p className="text-sm aseel-text-soft mt-0.5">{r.description}</p>
+                    r.description && <p className="text-sm ktra-text-soft mt-0.5">{r.description}</p>
                   )}
                 </li>
               );
@@ -157,14 +157,14 @@ export const ActivityLogPage: React.FC = () => {
         </div>
         <div>
           <h1 className="text-xl font-bold text-[var(--color-text)]">سجل النشاط</h1>
-          <p className="text-sm aseel-text-soft">كل ما فعله المستخدمون — اضغط على مستخدم لرؤية رحلته التفصيلية</p>
+          <p className="text-sm ktra-text-soft">كل ما فعله المستخدمون — اضغط على مستخدم لرؤية رحلته التفصيلية</p>
         </div>
       </div>
 
       {/* شريط الفلاتر */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <label className="flex items-center gap-1.5 text-sm">
-          <span className="aseel-text-soft">التاريخ:</span>
+          <span className="ktra-text-soft">التاريخ:</span>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={selectCls} />
         </label>
         <select value={userId} onChange={(e) => setUserId(e.target.value)} className={selectCls}>
@@ -178,7 +178,7 @@ export const ActivityLogPage: React.FC = () => {
           {entityOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <div className="relative">
-          <Search className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 aseel-text-soft" />
+          <Search className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2 ktra-text-soft" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -187,14 +187,14 @@ export const ActivityLogPage: React.FC = () => {
           />
         </div>
         <button onClick={loadFeed} className="p-1.5 rounded-md hover:bg-[var(--color-surface-2)]" title="تحديث">
-          <RefreshCw className={`w-4 h-4 aseel-text-soft ${loading ? "animate-spin" : ""}`} />
+          <RefreshCw className={`w-4 h-4 ktra-text-soft ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
 
       {error ? (
         <div className="text-center py-12 text-red-600">{error}</div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border aseel-border-soft">
+        <div className="overflow-x-auto rounded-lg border ktra-border-soft">
           <table className="w-full text-sm">
             <thead className="bg-[var(--color-surface-2)] text-[var(--color-text-muted)]">
               <tr>
@@ -208,17 +208,17 @@ export const ActivityLogPage: React.FC = () => {
             </thead>
             <tbody>
               {loading && rows.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-10 aseel-text-soft">جارٍ التحميل…</td></tr>
+                <tr><td colSpan={6} className="text-center py-10 ktra-text-soft">جارٍ التحميل…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-12 aseel-text-soft">
+                <tr><td colSpan={6} className="text-center py-12 ktra-text-soft">
                   <History className="w-10 h-10 mx-auto mb-2 opacity-50" />لا يوجد نشاط بهذه الفلاتر
                 </td></tr>
               ) : (
                 rows.map((r) => {
                   const meta = actionMeta(r.action);
                   return (
-                    <tr key={r.id} className="border-t aseel-border-soft hover:bg-[var(--color-surface-2)]/50">
-                      <td className="px-3 py-2 whitespace-nowrap aseel-text-soft">{formatActivityTime(r.timestamp)}</td>
+                    <tr key={r.id} className="border-t ktra-border-soft hover:bg-[var(--color-surface-2)]/50">
+                      <td className="px-3 py-2 whitespace-nowrap ktra-text-soft">{formatActivityTime(r.timestamp)}</td>
                       <td className="px-3 py-2">
                         {r.user ? (
                           <button
@@ -227,7 +227,7 @@ export const ActivityLogPage: React.FC = () => {
                           >
                             <UserIcon className="w-3.5 h-3.5" />{r.user_name}
                           </button>
-                        ) : <span className="aseel-text-soft">{r.user_name}</span>}
+                        ) : <span className="ktra-text-soft">{r.user_name}</span>}
                       </td>
                       <td className="px-3 py-2">
                         <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${meta.badge}`}>
@@ -235,17 +235,17 @@ export const ActivityLogPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">
-                        <span className="aseel-text-soft">{entityLabel(r.entity_type)}</span>
+                        <span className="ktra-text-soft">{entityLabel(r.entity_type)}</span>
                         {r.entity_label && <span className="font-medium text-[var(--color-text)]"> {r.entity_label}</span>}
                       </td>
-                      <td className="px-3 py-2 aseel-text-soft max-w-lg">
+                      <td className="px-3 py-2 ktra-text-soft max-w-lg">
                         {r.metadata?.changes?.length ? (
                           <ActivityChanges changes={r.metadata.changes} />
                         ) : (
                           r.description
                         )}
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap aseel-text-soft text-xs">{r.ip_address || "—"}</td>
+                      <td className="px-3 py-2 whitespace-nowrap ktra-text-soft text-xs">{r.ip_address || "—"}</td>
                     </tr>
                   );
                 })

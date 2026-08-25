@@ -60,7 +60,7 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
       <div className="flex items-center gap-2 mb-2">
         <div className="relative flex-1 max-w-xs">
           <input
-            className="aseel-input w-full"
+            className="ktra-input w-full"
             style={{ paddingInlineStart: 26 }}
             placeholder="بحث عن منتج…"
             value={query}
@@ -77,18 +77,18 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} حفظ
         </button>
-        {savedMsg && <span role="status" className="text-xs" style={{ color: 'var(--aseel-ok,#2e7d32)' }}>{savedMsg}</span>}
+        {savedMsg && <span role="status" className="text-xs" style={{ color: 'var(--ktra-ok,#2e7d32)' }}>{savedMsg}</span>}
       </div>
 
-      {error && <div role="alert" className="m-1 p-2 text-sm text-[var(--aseel-danger,#c00)]">{error}</div>}
+      {error && <div role="alert" className="m-1 p-2 text-sm text-[var(--ktra-danger,#c00)]">{error}</div>}
 
       {loading ? (
-        <div className="p-4 text-center text-[var(--aseel-ink-soft)] flex items-center justify-center gap-2">
+        <div className="p-4 text-center text-[var(--ktra-ink-soft)] flex items-center justify-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin" /> جاري التحميل…
         </div>
       ) : (
         <div style={{ maxHeight: '60vh', overflow: 'auto' }}>
-          <table className="aseel-grid" data-variant="items">
+          <table className="ktra-grid" data-variant="items">
             <thead>
               <tr>
                 <th>المنتج</th>
@@ -98,14 +98,14 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={3} style={{ textAlign: 'center', padding: 14, color: 'var(--aseel-ink-soft)' }}>لا منتجات</td></tr>
+                <tr><td colSpan={3} style={{ textAlign: 'center', padding: 14, color: 'var(--ktra-ink-soft)' }}>لا منتجات</td></tr>
               ) : filtered.map((r) => (
                 <tr key={r.product_id}>
                   <td>{r.name}</td>
-                  <td className="aseel-num">
+                  <td className="ktra-num">
                     {r.editable ? (
                       <input
-                        className="aseel-input"
+                        className="ktra-input"
                         type="number"
                         min={0}
                         step={0.01}
@@ -119,10 +119,10 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
                   </td>
                   <td>
                     <span
-                      className={`aseel-price-badge ${
-                        r.source === 'last_invoice' ? 'aseel-price-badge--last'
-                        : r.source === 'default' ? 'aseel-price-badge--general'
-                        : 'aseel-price-badge--quote'}`}
+                      className={`ktra-price-badge ${
+                        r.source === 'last_invoice' ? 'ktra-price-badge--last'
+                        : r.source === 'default' ? 'ktra-price-badge--general'
+                        : 'ktra-price-badge--quote'}`}
                       title={
                         r.invoice_number ? `فاتورة ${r.invoice_number}`
                         : r.source === 'default'

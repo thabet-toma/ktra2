@@ -232,7 +232,7 @@ test("الحالة تُقرأ بتسمية اتجاهها — الرمز واح�
     .toContainText("مسلَّم — بانتظار الصرف");
   await expect(page.getByText("برسم التحصيل")).toHaveCount(0);
   // وفلتر الحالة يعرض التسميات نفسها، لا جدولاً ثانياً.
-  const statusFilter = page.locator(".aseel-field", { hasText: "الحالة" }).first().locator("select");
+  const statusFilter = page.locator(".ktra-field", { hasText: "الحالة" }).first().locator("select");
   await expect(statusFilter.locator("option")).toContainText([
     "الكل", "مستلَم — في المحفظة", "مسلَّم — بانتظار الصرف", "مرتدّ",
   ]);

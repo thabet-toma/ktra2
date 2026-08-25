@@ -294,6 +294,17 @@ tbody td {
   vertical-align: middle;
 }
 
+/* ── جدول مضغوط داخل النوافذ (شبكة شيكات السند، منتقي السندات) ──
+   لماذا صنفٌ ولا أنماط inline: القاعدتان `thead th` و`tbody td` أعلاه **خارج
+   الطبقات**، وأيّ قاعدة خارج الطبقات تغلب كل أصناف Tailwind مهما بلغت دقّتها
+   (‏`@import "tailwindcss"` يضع الأدوات في `@layer utilities`). فتحويل حشوة
+   الخلية إلى `p-0.5` يتركها تحت `0.375rem 0.75rem` وترتفع الصفوف فجأةً.
+   الصنف هنا خارج الطبقات أيضاً ويغلب بالدقّة (0,1,1 مقابل 0,0,2). */
+.ktra-compact-grid th,
+.ktra-compact-grid td { padding: 4px; }
+/* شبكة الشيكات أضيق: خلاياها حقول إدخال لا نصّ. */
+.ktra-compact-grid--tight td { padding: 2px; }
+
 /* ── Status badges ── */
 .badge {
   display: inline-flex;
@@ -405,123 +416,123 @@ tbody td {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   Aseel skin system — shared structure with per-skin tokens.
-   data-skin is applied once on <html>; structural .aseel-* rules below
+   Kit skin system — shared structure with per-skin tokens.
+   data-skin is applied once on <html>; structural .ktra-* rules below
    are shared by both skins while each skin owns its token values.
    Faithful to the «الأصيل» screenshots: cream workspace, pale-blue
    title chip, red doc-state, pale-yellow thin-bordered fields,
    sharp 2px corners, Tahoma, high density.
    ════════════════════════════════════════════════════════════════════ */
 /* M1-T1: 60 توكناً — كل قيمة بصرية في القواعد الهيكلية تُقرأ من هنا.
-   لا قيمة صلبة (hex/rgba/ظل) باقية في قواعد .aseel-* عدا كتلة @media print
+   لا قيمة صلبة (hex/rgba/ظل) باقية في قواعد .ktra-* عدا كتلة @media print
    (سوداء على أبيض عمداً في الجلدين). قيم هذه الكتلة = ما كان مكتوباً حرفياً
    في القواعد قبل الاستخراج ⇒ صفر تغيير بصري لجلد الأصيل. */
-[data-skin="aseel"] {
-  --aseel-font: 'Tahoma', 'Segoe UI', 'IBM Plex Sans Arabic', system-ui, sans-serif;
-  --aseel-fs: 12px;
-  --aseel-fs-sm: 11px;
-  --aseel-bg: #e9e6d6;
-  --aseel-panel: #f2f0e4;
-  --aseel-field: #fcfcec;
-  --aseel-field-hl: #dce9f5;
-  --aseel-field-focus: #ffffff;
-  --aseel-border: #9e9c7e;
-  --aseel-border-soft: #c4c2a6;
-  --aseel-line: #cdcbb2;
-  --aseel-ink: #2b2b1c;
-  --aseel-ink-soft: #353426;
-  --aseel-accent: #2f5f8f;
-  --aseel-accent-bg: #bcd3e8;
-  --aseel-accent-bd: #7fa8c9;
-  --aseel-state: #c0392b;
-  --aseel-grid-head: #d7d4be;
-  --aseel-row-alt: #f7f6ec;
-  --aseel-row-sel: #cbd9e8;
-  --aseel-radius: 2px;
-  --aseel-status-credit: #2e7d32;
-  --aseel-status-debit: #c62828;
-  --aseel-status-paid: #2e7d32;
-  --aseel-status-due: #ef6c00;
+[data-skin="classic"] {
+  --ktra-font: 'Tahoma', 'Segoe UI', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --ktra-fs: 12px;
+  --ktra-fs-sm: 11px;
+  --ktra-bg: #e9e6d6;
+  --ktra-panel: #f2f0e4;
+  --ktra-field: #fcfcec;
+  --ktra-field-hl: #dce9f5;
+  --ktra-field-focus: #ffffff;
+  --ktra-border: #9e9c7e;
+  --ktra-border-soft: #c4c2a6;
+  --ktra-line: #cdcbb2;
+  --ktra-ink: #2b2b1c;
+  --ktra-ink-soft: #353426;
+  --ktra-accent: #2f5f8f;
+  --ktra-accent-bg: #bcd3e8;
+  --ktra-accent-bd: #7fa8c9;
+  --ktra-state: #c0392b;
+  --ktra-grid-head: #d7d4be;
+  --ktra-row-alt: #f7f6ec;
+  --ktra-row-sel: #cbd9e8;
+  --ktra-radius: 2px;
+  --ktra-status-credit: #2e7d32;
+  --ktra-status-debit: #c62828;
+  --ktra-status-paid: #2e7d32;
+  --ktra-status-due: #ef6c00;
 
   /* ── تفاعل (hover/active) ── */
-  --aseel-hover: #dceaf6;
-  --aseel-hover-soft: #eef4fa;
-  --aseel-active: #c7ddef;
-  --aseel-accent-hover: #1e4a75;
-  --aseel-on-accent: #ffffff;
-  --aseel-info-hover-bg: #e3ecf6;
-  --aseel-info-hover-bd: #9bb4d0;
-  --aseel-danger-bg: #f6dcdc;
-  --aseel-danger-bd: #c98686;
-  --aseel-danger-soft: #f1d6d1;
+  --ktra-hover: #dceaf6;
+  --ktra-hover-soft: #eef4fa;
+  --ktra-active: #c7ddef;
+  --ktra-accent-hover: #1e4a75;
+  --ktra-on-accent: #ffffff;
+  --ktra-info-hover-bg: #e3ecf6;
+  --ktra-info-hover-bd: #9bb4d0;
+  --ktra-danger-bg: #f6dcdc;
+  --ktra-danger-bd: #c98686;
+  --ktra-danger-soft: #f1d6d1;
 
   /* ── أسطح ── */
-  --aseel-grid-bg: #ffffff;
-  --aseel-tab-bg: #dbd8c4;
-  --aseel-pop-line: #e6e4d2;
-  --aseel-ink-faint: #6b6952;
-  --aseel-code-bg: rgba(0, 0, 0, .07);
+  --ktra-grid-bg: #ffffff;
+  --ktra-tab-bg: #dbd8c4;
+  --ktra-pop-line: #e6e4d2;
+  --ktra-ink-faint: #6b6952;
+  --ktra-code-bg: rgba(0, 0, 0, .07);
 
   /* ── ظلال وأقنعة ── */
-  --aseel-shadow-pop: 0 6px 20px rgba(0, 0, 0, .18);
-  --aseel-shadow-drop: 0 4px 14px rgba(43, 43, 28, .25);
-  --aseel-shadow-panel: -4px 0 16px rgba(0, 0, 0, .15);
-  --aseel-shadow-modal: 0 8px 24px rgba(0, 0, 0, .25);
-  --aseel-mask: rgba(0, 0, 0, .2);
-  --aseel-mask-strong: rgba(0, 0, 0, .45);
+  --ktra-shadow-pop: 0 6px 20px rgba(0, 0, 0, .18);
+  --ktra-shadow-drop: 0 4px 14px rgba(43, 43, 28, .25);
+  --ktra-shadow-panel: -4px 0 16px rgba(0, 0, 0, .15);
+  --ktra-shadow-modal: 0 8px 24px rgba(0, 0, 0, .25);
+  --ktra-mask: rgba(0, 0, 0, .2);
+  --ktra-mask-strong: rgba(0, 0, 0, .45);
 
   /* ── دلالات (نجاح/خطأ/تحذير/أسعار) ── */
-  --aseel-ok-bg: #dceadb;
-  --aseel-ok-bd: #5f8f5f;
-  --aseel-ok-fg: #2c4f2c;
-  --aseel-ok-text: #2c6f2c;
-  --aseel-err-bg: #f7dcd7;
-  --aseel-err-fg: #7a241a;
-  --aseel-warn-bg: #f3eccf;
-  --aseel-warn-bd: #b9982f;
-  --aseel-warn-fg: #6b551a;
-  --aseel-badge-state-bg: #fce4e4;
-  --aseel-badge-ok-bg: #e4f0e4;
-  --aseel-badge-ok-fg: #2e7d32;
-  --aseel-price-fg: #15803d;
-  --aseel-price-src-fg: #166534;
-  --aseel-price-src-bg: #dcfce7;
-  --aseel-price-none-fg: #a3a193;
-  --aseel-badge-last-bg: #dbeafe;
-  --aseel-badge-last-fg: #1e40af;
-  --aseel-badge-quote-bg: #fef3c7;
-  --aseel-badge-quote-fg: #92400e;
+  --ktra-ok-bg: #dceadb;
+  --ktra-ok-bd: #5f8f5f;
+  --ktra-ok-fg: #2c4f2c;
+  --ktra-ok-text: #2c6f2c;
+  --ktra-err-bg: #f7dcd7;
+  --ktra-err-fg: #7a241a;
+  --ktra-warn-bg: #f3eccf;
+  --ktra-warn-bd: #b9982f;
+  --ktra-warn-fg: #6b551a;
+  --ktra-badge-state-bg: #fce4e4;
+  --ktra-badge-ok-bg: #e4f0e4;
+  --ktra-badge-ok-fg: #2e7d32;
+  --ktra-price-fg: #15803d;
+  --ktra-price-src-fg: #166534;
+  --ktra-price-src-bg: #dcfce7;
+  --ktra-price-none-fg: #a3a193;
+  --ktra-badge-last-bg: #dbeafe;
+  --ktra-badge-last-fg: #1e40af;
+  --ktra-badge-quote-bg: #fef3c7;
+  --ktra-badge-quote-fg: #92400e;
 
   /* ── شريط الحالة ── */
-  --aseel-statusbar-bg: #1f2937;
-  --aseel-statusbar-fg: #e5e7eb;
-  --aseel-statusbar-strong-fg: #ffffff;
-  --aseel-statusbar-chip-bg: rgba(255, 255, 255, .1);
-  --aseel-statusbar-shadow: 0 -2px 10px rgba(0, 0, 0, .05);
+  --ktra-statusbar-bg: #1f2937;
+  --ktra-statusbar-fg: #e5e7eb;
+  --ktra-statusbar-strong-fg: #ffffff;
+  --ktra-statusbar-chip-bg: rgba(255, 255, 255, .1);
+  --ktra-statusbar-shadow: 0 -2px 10px rgba(0, 0, 0, .05);
 
   /* ── M5: توكنات كانت «معلّقة» ──────────────────────────────────────
-     ~280 موضعاً في components/ تكتب var(--aseel-X, #literal) لتوكنات لم
+     ~280 موضعاً في components/ تكتب var(--ktra-X, #literal) لتوكنات لم
      تُعرَّف قط في أي جلد ⇒ كانت تسقط دائماً على القيمة الاحتياطية الصلبة،
      فلا تستجيب للجلد ولا للوضع الداكن. القيم هنا = القيمة الاحتياطية
      السائدة في الكود حفاظاً على مظهر الأصيل.
-     (كان `--aseel-ok` وحده يُكتب بأربعة أخضر مختلفة — وُحّدت.) */
-  --aseel-ok: #267346;
-  --aseel-danger: #cc0000;
-  --aseel-err: #c0392b;
-  --aseel-warn: #b8800a;
-  --aseel-primary: #1857a4;
-  --aseel-accent-dark: #1e4a75;
-  --aseel-accent-soft: #f3f4f6;
-  --aseel-surface: #ffffff;
-  --aseel-surface-2: #f4ede0;
-  --aseel-surface-alt: rgba(0, 0, 0, .04);
-  --aseel-surface-accent: #f0f5ff;
-  --aseel-bg-soft: #f1f3f5;
-  --aseel-bg-strip: #f5f5f5;
-  --aseel-bg-panel: var(--aseel-panel);
-  --aseel-panel-hover: #f3f3f3;
-  --aseel-head: #f2f0e4;
-  --aseel-table-head: var(--aseel-grid-head);
+     (كان `--ktra-ok` وحده يُكتب بأربعة أخضر مختلفة — وُحّدت.) */
+  --ktra-ok: #267346;
+  --ktra-danger: #cc0000;
+  --ktra-err: #c0392b;
+  --ktra-warn: #b8800a;
+  --ktra-primary: #1857a4;
+  --ktra-accent-dark: #1e4a75;
+  --ktra-accent-soft: #f3f4f6;
+  --ktra-surface: #ffffff;
+  --ktra-surface-2: #f4ede0;
+  --ktra-surface-alt: rgba(0, 0, 0, .04);
+  --ktra-surface-accent: #f0f5ff;
+  --ktra-bg-soft: #f1f3f5;
+  --ktra-bg-strip: #f5f5f5;
+  --ktra-bg-panel: var(--ktra-panel);
+  --ktra-panel-hover: #f3f3f3;
+  --ktra-head: #f2f0e4;
+  --ktra-table-head: var(--ktra-grid-head);
 }
 
 /* ── M1-T2: الجلد الحديث ──────────────────────────────────────────────
@@ -534,221 +545,221 @@ tbody td {
    لا يمسّ هذا القسم أي خاصية layout — ألوان وخطوط وحواف وظلال فقط. */
 [data-skin="modern"] {
   /* الطباعة ليست شأن الجلد: contexts/AppearanceContext.tsx يكتب
-     --aseel-font/--aseel-fs/--aseel-fs-sm أنماطاً inline على <html> مضروبة
+     --ktra-font/--ktra-fs/--ktra-fs-sm أنماطاً inline على <html> مضروبة
      في مقياس خط الشركة (ميزة task34)، والـ inline يتفوق على أي قاعدة هنا.
      فالقيم التالية احتياطي ما قبل تركيب المزوّد فقط، ومطابقة لما يكتبه عند
      المقياس 1 كي لا يومض الحجم. تكبير الخط يتم من إعدادات المظهر لا من هنا. */
-  --aseel-font: var(--font-family-base);
-  --aseel-fs: 12px;
-  --aseel-fs-sm: 11px;
-  --aseel-bg: var(--color-surface-2);
-  --aseel-panel: var(--color-surface);
-  --aseel-field: var(--color-surface);
-  --aseel-field-hl: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
-  --aseel-field-focus: var(--color-surface);
-  --aseel-border: var(--color-border);
-  --aseel-border-soft: var(--color-border);
-  --aseel-line: var(--color-border);
-  --aseel-ink: var(--color-text);
-  --aseel-ink-soft: var(--color-text-muted);
-  --aseel-accent: var(--color-primary);
-  --aseel-accent-bg: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
-  --aseel-accent-bd: color-mix(in srgb, var(--color-primary) 35%, var(--color-surface));
-  --aseel-state: var(--color-danger);
-  --aseel-grid-head: var(--color-surface-3);
-  --aseel-row-alt: var(--color-surface-2);
-  --aseel-row-sel: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
-  --aseel-radius: var(--radius-md);
-  --aseel-status-credit: var(--color-success);
-  --aseel-status-debit: var(--color-danger);
-  --aseel-status-paid: var(--color-success);
-  --aseel-status-due: var(--color-warning);
+  --ktra-font: var(--font-family-base);
+  --ktra-fs: 12px;
+  --ktra-fs-sm: 11px;
+  --ktra-bg: var(--color-surface-2);
+  --ktra-panel: var(--color-surface);
+  --ktra-field: var(--color-surface);
+  --ktra-field-hl: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  --ktra-field-focus: var(--color-surface);
+  --ktra-border: var(--color-border);
+  --ktra-border-soft: var(--color-border);
+  --ktra-line: var(--color-border);
+  --ktra-ink: var(--color-text);
+  --ktra-ink-soft: var(--color-text-muted);
+  --ktra-accent: var(--color-primary);
+  --ktra-accent-bg: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+  --ktra-accent-bd: color-mix(in srgb, var(--color-primary) 35%, var(--color-surface));
+  --ktra-state: var(--color-danger);
+  --ktra-grid-head: var(--color-surface-3);
+  --ktra-row-alt: var(--color-surface-2);
+  --ktra-row-sel: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+  --ktra-radius: var(--radius-md);
+  --ktra-status-credit: var(--color-success);
+  --ktra-status-debit: var(--color-danger);
+  --ktra-status-paid: var(--color-success);
+  --ktra-status-due: var(--color-warning);
 
-  --aseel-hover: var(--color-surface-3);
-  --aseel-hover-soft: var(--color-surface-2);
-  --aseel-active: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
-  --aseel-accent-hover: var(--color-primary-hover);
-  --aseel-on-accent: var(--color-primary-foreground);
-  --aseel-info-hover-bg: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
-  --aseel-info-hover-bd: color-mix(in srgb, var(--color-primary) 30%, var(--color-surface));
-  --aseel-danger-bg: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
-  --aseel-danger-bd: color-mix(in srgb, var(--color-danger) 35%, var(--color-surface));
-  --aseel-danger-soft: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
+  --ktra-hover: var(--color-surface-3);
+  --ktra-hover-soft: var(--color-surface-2);
+  --ktra-active: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+  --ktra-accent-hover: var(--color-primary-hover);
+  --ktra-on-accent: var(--color-primary-foreground);
+  --ktra-info-hover-bg: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+  --ktra-info-hover-bd: color-mix(in srgb, var(--color-primary) 30%, var(--color-surface));
+  --ktra-danger-bg: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
+  --ktra-danger-bd: color-mix(in srgb, var(--color-danger) 35%, var(--color-surface));
+  --ktra-danger-soft: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
 
-  --aseel-grid-bg: var(--color-surface);
-  --aseel-tab-bg: var(--color-surface-2);
-  --aseel-pop-line: var(--color-border);
-  --aseel-ink-faint: var(--color-text-muted);
-  --aseel-code-bg: var(--color-surface-3);
+  --ktra-grid-bg: var(--color-surface);
+  --ktra-tab-bg: var(--color-surface-2);
+  --ktra-pop-line: var(--color-border);
+  --ktra-ink-faint: var(--color-text-muted);
+  --ktra-code-bg: var(--color-surface-3);
 
-  --aseel-shadow-pop: var(--shadow-lg);
-  --aseel-shadow-drop: var(--shadow-lg);
-  --aseel-shadow-panel: var(--shadow-lg);
-  --aseel-shadow-modal: var(--shadow-lg);
-  --aseel-mask: rgb(0 0 0 / 0.35);
-  --aseel-mask-strong: rgb(0 0 0 / 0.5);
+  --ktra-shadow-pop: var(--shadow-lg);
+  --ktra-shadow-drop: var(--shadow-lg);
+  --ktra-shadow-panel: var(--shadow-lg);
+  --ktra-shadow-modal: var(--shadow-lg);
+  --ktra-mask: rgb(0 0 0 / 0.35);
+  --ktra-mask-strong: rgb(0 0 0 / 0.5);
 
-  --aseel-ok-bg: #dcfce7;
-  --aseel-ok-bd: color-mix(in srgb, var(--color-success) 35%, var(--color-surface));
-  --aseel-ok-fg: #166534;
-  --aseel-ok-text: var(--color-success);
-  --aseel-err-bg: #fee2e2;
-  --aseel-err-fg: #991b1b;
-  --aseel-warn-bg: #fef3c7;
-  --aseel-warn-bd: color-mix(in srgb, var(--color-warning) 35%, var(--color-surface));
-  --aseel-warn-fg: #92400e;
-  --aseel-badge-state-bg: #fee2e2;
-  --aseel-badge-ok-bg: #dcfce7;
-  --aseel-badge-ok-fg: #166534;
-  --aseel-price-fg: #15803d;
-  --aseel-price-src-fg: #166534;
-  --aseel-price-src-bg: #dcfce7;
-  --aseel-price-none-fg: var(--color-text-muted);
-  --aseel-badge-last-bg: #dbeafe;
-  --aseel-badge-last-fg: #1e40af;
-  --aseel-badge-quote-bg: #fef3c7;
-  --aseel-badge-quote-fg: #92400e;
+  --ktra-ok-bg: #dcfce7;
+  --ktra-ok-bd: color-mix(in srgb, var(--color-success) 35%, var(--color-surface));
+  --ktra-ok-fg: #166534;
+  --ktra-ok-text: var(--color-success);
+  --ktra-err-bg: #fee2e2;
+  --ktra-err-fg: #991b1b;
+  --ktra-warn-bg: #fef3c7;
+  --ktra-warn-bd: color-mix(in srgb, var(--color-warning) 35%, var(--color-surface));
+  --ktra-warn-fg: #92400e;
+  --ktra-badge-state-bg: #fee2e2;
+  --ktra-badge-ok-bg: #dcfce7;
+  --ktra-badge-ok-fg: #166534;
+  --ktra-price-fg: #15803d;
+  --ktra-price-src-fg: #166534;
+  --ktra-price-src-bg: #dcfce7;
+  --ktra-price-none-fg: var(--color-text-muted);
+  --ktra-badge-last-bg: #dbeafe;
+  --ktra-badge-last-fg: #1e40af;
+  --ktra-badge-quote-bg: #fef3c7;
+  --ktra-badge-quote-fg: #92400e;
 
-  --aseel-statusbar-bg: var(--color-surface);
-  --aseel-statusbar-fg: var(--color-text-muted);
-  --aseel-statusbar-strong-fg: var(--color-text);
-  --aseel-statusbar-chip-bg: var(--color-surface-3);
-  --aseel-statusbar-shadow: none;
+  --ktra-statusbar-bg: var(--color-surface);
+  --ktra-statusbar-fg: var(--color-text-muted);
+  --ktra-statusbar-strong-fg: var(--color-text);
+  --ktra-statusbar-chip-bg: var(--color-surface-3);
+  --ktra-statusbar-shadow: none;
 
   /* M5: التوكنات المعلّقة — نسخة الجلد الحديث (مشتقة، تنقلب مع .dark) */
-  --aseel-ok: var(--color-success);
-  --aseel-danger: var(--color-danger);
-  --aseel-err: var(--color-danger);
-  --aseel-warn: var(--color-warning);
-  --aseel-primary: var(--color-primary);
-  --aseel-accent-dark: var(--color-primary-hover);
-  --aseel-accent-soft: var(--color-surface-3);
-  --aseel-surface: var(--color-surface);
-  --aseel-surface-2: var(--color-surface-2);
-  --aseel-surface-alt: var(--color-surface-2);
-  --aseel-surface-accent: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
-  --aseel-bg-soft: var(--color-surface-2);
-  --aseel-bg-strip: var(--color-surface-2);
-  --aseel-bg-panel: var(--aseel-panel);
-  --aseel-panel-hover: var(--color-surface-3);
-  --aseel-head: var(--color-surface-3);
-  --aseel-table-head: var(--aseel-grid-head);
+  --ktra-ok: var(--color-success);
+  --ktra-danger: var(--color-danger);
+  --ktra-err: var(--color-danger);
+  --ktra-warn: var(--color-warning);
+  --ktra-primary: var(--color-primary);
+  --ktra-accent-dark: var(--color-primary-hover);
+  --ktra-accent-soft: var(--color-surface-3);
+  --ktra-surface: var(--color-surface);
+  --ktra-surface-2: var(--color-surface-2);
+  --ktra-surface-alt: var(--color-surface-2);
+  --ktra-surface-accent: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  --ktra-bg-soft: var(--color-surface-2);
+  --ktra-bg-strip: var(--color-surface-2);
+  --ktra-bg-panel: var(--ktra-panel);
+  --ktra-panel-hover: var(--color-surface-3);
+  --ktra-head: var(--color-surface-3);
+  --ktra-table-head: var(--ktra-grid-head);
 }
 
 /* الجلد الحديث في الوضع الداكن: بقية التوكنات تنقلب وحدها لأنها var(--color-*)
    والكلاس .dark يعيد تعريفها؛ هنا فقط الشارات الدلالية ذات القيم الصريحة
    (نفس درجات .dark .badge-* أعلى الملف حفاظاً على لغة لونية واحدة). */
 .dark[data-skin="modern"] {
-  --aseel-ok-bg: #14532d;
-  --aseel-ok-fg: #bbf7d0;
-  --aseel-err-bg: #7f1d1d;
-  --aseel-err-fg: #fecaca;
-  --aseel-warn-bg: #78350f;
-  --aseel-warn-fg: #fde68a;
-  --aseel-badge-state-bg: #7f1d1d;
-  --aseel-badge-ok-bg: #14532d;
-  --aseel-badge-ok-fg: #bbf7d0;
-  --aseel-price-fg: #86efac;
-  --aseel-price-src-fg: #bbf7d0;
-  --aseel-price-src-bg: #14532d;
-  --aseel-badge-last-bg: #1e3a8a;
-  --aseel-badge-last-fg: #bfdbfe;
-  --aseel-badge-quote-bg: #78350f;
-  --aseel-badge-quote-fg: #fde68a;
+  --ktra-ok-bg: #14532d;
+  --ktra-ok-fg: #bbf7d0;
+  --ktra-err-bg: #7f1d1d;
+  --ktra-err-fg: #fecaca;
+  --ktra-warn-bg: #78350f;
+  --ktra-warn-fg: #fde68a;
+  --ktra-badge-state-bg: #7f1d1d;
+  --ktra-badge-ok-bg: #14532d;
+  --ktra-badge-ok-fg: #bbf7d0;
+  --ktra-price-fg: #86efac;
+  --ktra-price-src-fg: #bbf7d0;
+  --ktra-price-src-bg: #14532d;
+  --ktra-badge-last-bg: #1e3a8a;
+  --ktra-badge-last-fg: #bfdbfe;
+  --ktra-badge-quote-bg: #78350f;
+  --ktra-badge-quote-fg: #fde68a;
 
   /* M5: درجات النجاح/الخطأ/التحذير الافتراضية داكنة جداً على خلفية داكنة
      (تباين <3) — تُرفع هنا. تُقرأ من ~280 موضعاً عبر التوكنات المعلّقة سابقاً. */
-  --aseel-ok: #4ade80;
-  --aseel-danger: #f87171;
-  --aseel-err: #f87171;
-  --aseel-warn: #fbbf24;
-  --aseel-status-credit: #4ade80;
-  --aseel-status-debit: #f87171;
-  --aseel-status-paid: #4ade80;
-  --aseel-status-due: #fbbf24;
-  --aseel-price-fg: #4ade80;
+  --ktra-ok: #4ade80;
+  --ktra-danger: #f87171;
+  --ktra-err: #f87171;
+  --ktra-warn: #fbbf24;
+  --ktra-status-credit: #4ade80;
+  --ktra-status-debit: #f87171;
+  --ktra-status-paid: #4ade80;
+  --ktra-status-due: #fbbf24;
+  --ktra-price-fg: #4ade80;
 }
 
 /* task13 M3: المستند تدفقٌ طبيعي يكبر بمحتواه — سكرولر الصفحة الوحيد هو
    main.app-content. (كان height:100% + مناطق overflow داخلية ⇒ 4 سكرولات
    متداخلة: headband / gridwrap / bottom / totals — عيب #1 عند المالك.) */
-:root[data-skin] .aseel-doc {
+:root[data-skin] .ktra-doc {
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  background: var(--aseel-bg);
-  color: var(--aseel-ink);
-  font-family: var(--aseel-font);
-  font-size: var(--aseel-fs);
+  background: var(--ktra-bg);
+  color: var(--ktra-ink);
+  font-family: var(--ktra-font);
+  font-size: var(--ktra-fs);
   direction: rtl;
 }
 
 /* ── Title bar ── */
-:root[data-skin] .aseel-titlebar {
+:root[data-skin] .ktra-titlebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
   padding: 2px 6px;
-  background: var(--aseel-panel);
-  border-bottom: 1px solid var(--aseel-border-soft);
+  background: var(--ktra-panel);
+  border-bottom: 1px solid var(--ktra-border-soft);
 }
-:root[data-skin] .aseel-title-grp { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-:root[data-skin] .aseel-title-chip {
-  background: var(--aseel-accent-bg);
-  border: 1px solid var(--aseel-accent-bd);
-  border-radius: var(--aseel-radius);
-  color: var(--aseel-accent);
+:root[data-skin] .ktra-title-grp { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+:root[data-skin] .ktra-title-chip {
+  background: var(--ktra-accent-bg);
+  border: 1px solid var(--ktra-accent-bd);
+  border-radius: var(--ktra-radius);
+  color: var(--ktra-accent);
   font-weight: 700;
   font-size: 13px;
   padding: 3px 14px;
 }
-:root[data-skin] .aseel-title-state { color: var(--aseel-state); font-weight: 700; font-size: var(--aseel-fs); }
-:root[data-skin] .aseel-company { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); text-align: end; }
+:root[data-skin] .ktra-title-state { color: var(--ktra-state); font-weight: 700; font-size: var(--ktra-fs); }
+:root[data-skin] .ktra-company { color: var(--ktra-ink-soft); font-size: var(--ktra-fs-sm); text-align: end; }
 
 /* ── Command toolbar ── */
 /* task13 M3: شريط الأوامر يلتصق بأعلى سكرولر الصفحة — أزرار الحفظ/الطباعة
    تبقى في المتناول أثناء تمرير النموذج الطويل (نمط دفترة). */
-:root[data-skin] .aseel-doc .aseel-toolbar {
+:root[data-skin] .ktra-doc .ktra-toolbar {
   position: sticky;
   top: 0;
   z-index: 30;
 }
-:root[data-skin] .aseel-toolbar {
+:root[data-skin] .ktra-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
   gap: 1px;
   padding: 1px 6px;
-  background: var(--aseel-panel);
-  border-bottom: 1px solid var(--aseel-border-soft);
+  background: var(--ktra-panel);
+  border-bottom: 1px solid var(--ktra-border-soft);
 }
-:root[data-skin] .aseel-toolgrp { display: flex; align-items: stretch; gap: 1px; }
-:root[data-skin] .aseel-toolsep { width: 1px; background: var(--aseel-border-soft); margin: 2px 4px; }
-:root[data-skin] .aseel-toolbtn {
+:root[data-skin] .ktra-toolgrp { display: flex; align-items: stretch; gap: 1px; }
+:root[data-skin] .ktra-toolsep { width: 1px; background: var(--ktra-border-soft); margin: 2px 4px; }
+:root[data-skin] .ktra-toolbtn {
   display: inline-flex;
   align-items: center;
   gap: 3px;
   padding: 2px 6px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--aseel-radius);
-  color: var(--aseel-ink);
+  border-radius: var(--ktra-radius);
+  color: var(--ktra-ink);
   font-family: inherit;
-  font-size: var(--aseel-fs-sm);
+  font-size: var(--ktra-fs-sm);
   white-space: nowrap;
   cursor: pointer;
   transition: background .1s, border-color .1s;
 }
-:root[data-skin] .aseel-toolbtn:hover:not(:disabled) { background: var(--aseel-hover); border-color: var(--aseel-accent-bd); }
-:root[data-skin] .aseel-toolbtn:active:not(:disabled) { background: var(--aseel-active); }
-:root[data-skin] .aseel-toolbtn:disabled { opacity: .4; cursor: default; }
-:root[data-skin] .aseel-toolbtn--danger:hover:not(:disabled) { background: var(--aseel-danger-bg); border-color: var(--aseel-danger-bd); color: var(--aseel-state); }
-:root[data-skin] .aseel-toolbtn svg { width: 15px; height: 15px; }
+:root[data-skin] .ktra-toolbtn:hover:not(:disabled) { background: var(--ktra-hover); border-color: var(--ktra-accent-bd); }
+:root[data-skin] .ktra-toolbtn:active:not(:disabled) { background: var(--ktra-active); }
+:root[data-skin] .ktra-toolbtn:disabled { opacity: .4; cursor: default; }
+:root[data-skin] .ktra-toolbtn--danger:hover:not(:disabled) { background: var(--ktra-danger-bg); border-color: var(--ktra-danger-bd); color: var(--ktra-state); }
+:root[data-skin] .ktra-toolbtn svg { width: 15px; height: 15px; }
 
 /* task18 DEF-A2: شريط الإجراءات العام السفلي — حد علوي بدل السفلي + لفّ آمن */
-:root[data-skin] .aseel-actionbar {
-  border-top: 1px solid var(--aseel-border-soft);
+:root[data-skin] .ktra-actionbar {
+  border-top: 1px solid var(--ktra-border-soft);
   border-bottom: none;
   padding: 2px 6px;
   row-gap: 2px;
@@ -757,14 +768,14 @@ tbody td {
 /* task18 DEF-B1/B3 + DEF-001: شجرة المنتجات المرساة بجانب الفاتورة.
    DEF-001: ترتفع لتحاذي رأس جدول البنود وتستعمل ارتفاع الشاشة المتاح حتى تظهر
    أول ~8 صفوف دون تمرير على دقّة 1366×768 (يبقى الـ body قابلاً للتمرير عند الطول). */
-:root[data-skin] .aseel-tree-panel {
+:root[data-skin] .ktra-tree-panel {
   flex: 0 0 240px;
   max-width: 240px;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--aseel-border-soft);
-  border-radius: var(--aseel-radius);
-  background: var(--aseel-panel);
+  border: 1px solid var(--ktra-border-soft);
+  border-radius: var(--ktra-radius);
+  background: var(--ktra-panel);
   align-self: flex-start;
   position: sticky;
   top: 8px;
@@ -773,96 +784,96 @@ tbody td {
 }
 /* شجرة الحسابات: الشجرة هي موضوع الشاشة لا مساعداً جانبياً — فتأخذ عرضاً
    وارتفاعاً أوسع من شريط منتقي المنتجات. */
-:root[data-skin] .aseel-tree-panel--coa {
+:root[data-skin] .ktra-tree-panel--coa {
   flex: 0 0 320px;
   max-width: 320px;
   max-height: calc(100vh - 120px);
   min-height: 420px;
 }
-:root[data-skin] .aseel-tree-head,
-:root[data-skin] .aseel-tree-search,
-:root[data-skin] .aseel-tree-actions {
+:root[data-skin] .ktra-tree-head,
+:root[data-skin] .ktra-tree-search,
+:root[data-skin] .ktra-tree-actions {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 4px 6px;
-  border-bottom: 1px solid var(--aseel-border-soft);
+  border-bottom: 1px solid var(--ktra-border-soft);
 }
-:root[data-skin] .aseel-tree-search .aseel-input { height: 22px; }
-:root[data-skin] .aseel-tree-actions { flex-wrap: wrap; }
-:root[data-skin] .aseel-tree-body { overflow: auto; flex: 1; padding: 4px 2px; }
-:root[data-skin] .aseel-tree-node,
-:root[data-skin] .aseel-tree-leaf {
+:root[data-skin] .ktra-tree-search .ktra-input { height: 22px; }
+:root[data-skin] .ktra-tree-actions { flex-wrap: wrap; }
+:root[data-skin] .ktra-tree-body { overflow: auto; flex: 1; padding: 4px 2px; }
+:root[data-skin] .ktra-tree-node,
+:root[data-skin] .ktra-tree-leaf {
   display: flex;
   align-items: center;
   gap: 4px;
   width: 100%;
   text-align: start;
   padding: 2px 4px;
-  font-size: var(--aseel-fs-sm);
-  color: var(--aseel-ink);
+  font-size: var(--ktra-fs-sm);
+  color: var(--ktra-ink);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--aseel-radius);
+  border-radius: var(--ktra-radius);
   cursor: pointer;
 }
-:root[data-skin] .aseel-tree-node:hover,
-:root[data-skin] .aseel-tree-leaf:hover:not(:disabled) { background: var(--aseel-hover); }
-:root[data-skin] .aseel-tree-leaf:disabled { opacity: .5; cursor: default; }
-:root[data-skin] .aseel-tree-count { margin-inline-start: auto; font-size: 10px; color: var(--aseel-ink-soft); }
+:root[data-skin] .ktra-tree-node:hover,
+:root[data-skin] .ktra-tree-leaf:hover:not(:disabled) { background: var(--ktra-hover); }
+:root[data-skin] .ktra-tree-leaf:disabled { opacity: .5; cursor: default; }
+:root[data-skin] .ktra-tree-count { margin-inline-start: auto; font-size: 10px; color: var(--ktra-ink-soft); }
 
 /* task18: شجرة احترافية — عقد قابلة للطيّ + أزرار إجراءات لكل فئة */
-:root[data-skin] .aseel-tree-toolbar {
+:root[data-skin] .ktra-tree-toolbar {
   padding: 6px;
-  border-bottom: 1px solid var(--aseel-border-soft);
+  border-bottom: 1px solid var(--ktra-border-soft);
 }
-:root[data-skin] .aseel-tree-cat {
+:root[data-skin] .ktra-tree-cat {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 2px 4px;
-  border-radius: var(--aseel-radius);
-  font-size: var(--aseel-fs-sm);
+  border-radius: var(--ktra-radius);
+  font-size: var(--ktra-fs-sm);
   font-weight: 600;
-  color: var(--aseel-ink);
+  color: var(--ktra-ink);
 }
-:root[data-skin] .aseel-tree-cat:hover { background: var(--aseel-hover-soft); }
-:root[data-skin] .aseel-tree-twisty {
+:root[data-skin] .ktra-tree-cat:hover { background: var(--ktra-hover-soft); }
+:root[data-skin] .ktra-tree-twisty {
   display: inline-flex; align-items: center; justify-content: center;
   width: 16px; height: 16px; padding: 0; background: transparent; border: 0;
-  color: var(--aseel-ink); cursor: pointer; flex-shrink: 0;
+  color: var(--ktra-ink); cursor: pointer; flex-shrink: 0;
 }
-:root[data-skin] .aseel-tree-actions-inline {
+:root[data-skin] .ktra-tree-actions-inline {
   display: inline-flex; gap: 1px; margin-inline-start: 2px;
   opacity: 0; transition: opacity .1s;
 }
-:root[data-skin] .aseel-tree-cat:hover .aseel-tree-actions-inline,
-:root[data-skin] .group:hover .aseel-tree-actions-inline { opacity: 1; }
-:root[data-skin] .aseel-tree-act {
+:root[data-skin] .ktra-tree-cat:hover .ktra-tree-actions-inline,
+:root[data-skin] .group:hover .ktra-tree-actions-inline { opacity: 1; }
+:root[data-skin] .ktra-tree-act {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 20px; height: 20px; padding: 0; border-radius: var(--aseel-radius);
-  background: transparent; border: 1px solid transparent; color: var(--aseel-ink);
+  width: 20px; height: 20px; padding: 0; border-radius: var(--ktra-radius);
+  background: transparent; border: 1px solid transparent; color: var(--ktra-ink);
   cursor: pointer;
 }
-:root[data-skin] .aseel-tree-act:hover { background: var(--aseel-hover); border-color: var(--aseel-accent-bd); }
+:root[data-skin] .ktra-tree-act:hover { background: var(--ktra-hover); border-color: var(--ktra-accent-bd); }
 
 /* task18: قائمة زر الماوس الأيمن للشجرة */
-:root[data-skin] .aseel-ctxmenu {
+:root[data-skin] .ktra-ctxmenu {
   min-width: 160px;
-  background: var(--aseel-field);
-  border: 1px solid var(--aseel-border);
-  border-radius: var(--aseel-radius);
-  box-shadow: var(--aseel-shadow-pop);
+  background: var(--ktra-field);
+  border: 1px solid var(--ktra-border);
+  border-radius: var(--ktra-radius);
+  box-shadow: var(--ktra-shadow-pop);
   padding: 3px;
 }
-:root[data-skin] .aseel-ctxmenu-item {
+:root[data-skin] .ktra-ctxmenu-item {
   display: flex; align-items: center; gap: 6px; width: 100%;
   padding: 5px 8px; border: 0; background: transparent; cursor: pointer;
-  font-size: var(--aseel-fs-sm); color: var(--aseel-ink); text-align: start;
-  border-radius: var(--aseel-radius);
+  font-size: var(--ktra-fs-sm); color: var(--ktra-ink); text-align: start;
+  border-radius: var(--ktra-radius);
 }
-:root[data-skin] .aseel-ctxmenu-item:hover { background: var(--aseel-hover); }
-:root[data-skin] .aseel-tree-rail {
+:root[data-skin] .ktra-ctxmenu-item:hover { background: var(--ktra-hover); }
+:root[data-skin] .ktra-tree-rail {
   flex: 0 0 32px;
   align-self: stretch;
   min-height: 180px;
@@ -871,15 +882,15 @@ tbody td {
   align-items: center;
   gap: 8px;
   padding: 8px 0;
-  border: 1px solid var(--aseel-border-soft);
-  border-radius: var(--aseel-radius);
-  background: var(--aseel-panel);
-  color: var(--aseel-ink);
+  border: 1px solid var(--ktra-border-soft);
+  border-radius: var(--ktra-radius);
+  background: var(--ktra-panel);
+  color: var(--ktra-ink);
   cursor: pointer;
   transition: background .1s;
 }
-:root[data-skin] .aseel-tree-rail:hover { background: var(--aseel-hover); }
-:root[data-skin] .aseel-tree-rail-label {
+:root[data-skin] .ktra-tree-rail:hover { background: var(--ktra-hover); }
+:root[data-skin] .ktra-tree-rail-label {
   writing-mode: vertical-rl;
   text-orientation: mixed;
   font-size: 12px;
@@ -887,15 +898,15 @@ tbody td {
   white-space: nowrap;
 }
 @media print {
-  :root[data-skin] .aseel-tree-panel,
-  :root[data-skin] .aseel-tree-rail { display: none !important; }
+  :root[data-skin] .ktra-tree-panel,
+  :root[data-skin] .ktra-tree-rail { display: none !important; }
 }
 
 /* ── Header field band ── */
-:root[data-skin] .aseel-headband {
+:root[data-skin] .ktra-headband {
   padding: 3px 8px;
-  background: var(--aseel-panel);
-  border-bottom: 1px solid var(--aseel-border-soft);
+  background: var(--ktra-panel);
+  border-bottom: 1px solid var(--ktra-border-soft);
   /* T-L1/T-L5: رأس أفقي مدمج — حقول fld تتدفّق جنباً إلى جنب وتلتفّ على عدة
      صفوف بدل التراص العمودي الذي كان يبتلع نصف الصفحة (فاتورة الشراء، صورة 11).
      عناصر بعرض كامل (w-full، كبطاقتي رأس المبيعات) تبقى صفّاً مستقلاً. */
@@ -904,105 +915,105 @@ tbody td {
   align-items: center;
   gap: 3px 14px;
 }
-:root[data-skin] .aseel-headband > .aseel-field {
+:root[data-skin] .ktra-headband > .ktra-field {
   flex: 1 1 220px;
   min-width: 190px;
   max-width: 340px;
 }
-:root[data-skin] .aseel-headband > .aseel-field > :not(.aseel-field-label) {
+:root[data-skin] .ktra-headband > .ktra-field > :not(.ktra-field-label) {
   flex: 1 1 auto;
   min-width: 0;
 }
-:root[data-skin] .aseel-field { display: flex; align-items: center; gap: 4px; }
-:root[data-skin] .aseel-field-label {
+:root[data-skin] .ktra-field { display: flex; align-items: center; gap: 4px; }
+:root[data-skin] .ktra-field-label {
   flex: 0 0 80px;
   text-align: start;
-  color: var(--aseel-ink);
-  font-size: var(--aseel-fs-sm);
+  color: var(--ktra-ink);
+  font-size: var(--ktra-fs-sm);
   line-height: 1.2;
 }
-:root[data-skin] .aseel-input,
-:root[data-skin] .aseel-doc input:not([type="checkbox"]):not([type="radio"]),
-:root[data-skin] .aseel-doc select {
+:root[data-skin] .ktra-input,
+:root[data-skin] .ktra-doc input:not([type="checkbox"]):not([type="radio"]),
+:root[data-skin] .ktra-doc select {
   flex: 1;
   min-width: 0;
   height: 20px;
   padding: 0 4px;
-  background: var(--aseel-field);
-  border: 1px solid var(--aseel-border);
-  border-radius: var(--aseel-radius);
-  color: var(--aseel-ink);
+  background: var(--ktra-field);
+  border: 1px solid var(--ktra-border);
+  border-radius: var(--ktra-radius);
+  color: var(--ktra-ink);
   font-family: inherit;
-  font-size: var(--aseel-fs);
+  font-size: var(--ktra-fs);
   box-shadow: none;
 }
-:root[data-skin] .aseel-doc input:focus,
-:root[data-skin] .aseel-doc select:focus {
+:root[data-skin] .ktra-doc input:focus,
+:root[data-skin] .ktra-doc select:focus {
   outline: none;
-  border-color: var(--aseel-accent);
-  background: var(--aseel-field-focus);
-  box-shadow: 0 0 0 1px var(--aseel-accent);
+  border-color: var(--ktra-accent);
+  background: var(--ktra-field-focus);
+  box-shadow: 0 0 0 1px var(--ktra-accent);
 }
-:root[data-skin] .aseel-input--hl { background: var(--aseel-field-hl); }
+:root[data-skin] .ktra-input--hl { background: var(--ktra-field-hl); }
 
 /* ── Grid area ── */
 /* task13 M3: ينمو بمحتواه (flex-basis:auto) ويملأ الفراغ عند قصره؛
    overflow-x فقط للجداول العريضة — لا سكرول عمودي داخلي. */
-:root[data-skin] .aseel-gridwrap {
+:root[data-skin] .ktra-gridwrap {
   flex: 1 0 auto;
   min-height: 120px;
   overflow-x: auto;
-  background: var(--aseel-grid-bg);
-  border-top: 1px solid var(--aseel-border);
-  border-bottom: 1px solid var(--aseel-border);
+  background: var(--ktra-grid-bg);
+  border-top: 1px solid var(--ktra-border);
+  border-bottom: 1px solid var(--ktra-border);
 }
 /* وضع العرض (مستند مُنسَّق للقراءة فقط): لا يوجد جدول إدخال يُفترض أن يملأ
    الفراغ، فالنمو الإجباري يترك فراغاً أبيض ضخماً أسفل مستند قصير (بند واحد
    مثلاً). يأخذ ارتفاع محتواه فقط. */
-:root[data-skin] .aseel-gridwrap--fit {
+:root[data-skin] .ktra-gridwrap--fit {
   flex: 0 0 auto;
   min-height: 0;
 }
 /* DEF: الشجرة كشريط جانبي يمتدّ من رأس المستند (يحاذي بطاقة العميل) لأقصى أعلى. */
-:root[data-skin] .aseel-doc-mainrow {
+:root[data-skin] .ktra-doc-mainrow {
   display: flex;
   gap: 8px;
   align-items: flex-start;
   flex: 1 0 auto;
   min-height: 0;
 }
-:root[data-skin] .aseel-doc-maincol {
+:root[data-skin] .ktra-doc-maincol {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
 }
-:root[data-skin] .aseel-grid { width: 100%; border-collapse: collapse; font-size: var(--aseel-fs); }
-:root[data-skin] .aseel-grid thead th {
+:root[data-skin] .ktra-grid { width: 100%; border-collapse: collapse; font-size: var(--ktra-fs); }
+:root[data-skin] .ktra-grid thead th {
   position: sticky;
   top: 0;
-  background: var(--aseel-grid-head);
-  color: var(--aseel-ink);
+  background: var(--ktra-grid-head);
+  color: var(--ktra-ink);
   font-weight: 700;
-  font-size: var(--aseel-fs-sm);
+  font-size: var(--ktra-fs-sm);
   text-transform: none;
   letter-spacing: 0;
   text-align: center;
   padding: 3px 6px;
-  border: 1px solid var(--aseel-border);
+  border: 1px solid var(--ktra-border);
   white-space: nowrap;
 }
-:root[data-skin] .aseel-grid tbody td {
+:root[data-skin] .ktra-grid tbody td {
   padding: 0 4px;
-  border: 1px solid var(--aseel-line);
+  border: 1px solid var(--ktra-line);
   height: 20px;
-  background: var(--aseel-grid-bg);
+  background: var(--ktra-grid-bg);
 }
-:root[data-skin] .aseel-grid tbody tr:nth-child(even) td { background: var(--aseel-row-alt); }
-:root[data-skin] .aseel-grid tbody tr.aseel-row--sel td { background: var(--aseel-row-sel); }
-:root[data-skin] .aseel-grid tbody tr:hover td { background: var(--aseel-hover-soft); }
-:root[data-skin] .aseel-grid input,
-:root[data-skin] .aseel-grid select {
+:root[data-skin] .ktra-grid tbody tr:nth-child(even) td { background: var(--ktra-row-alt); }
+:root[data-skin] .ktra-grid tbody tr.ktra-row--sel td { background: var(--ktra-row-sel); }
+:root[data-skin] .ktra-grid tbody tr:hover td { background: var(--ktra-hover-soft); }
+:root[data-skin] .ktra-grid input,
+:root[data-skin] .ktra-grid select {
   width: 100%;
   height: 20px;
   border: 1px solid transparent;
@@ -1010,22 +1021,22 @@ tbody td {
   padding: 0 3px;
   font: inherit;
 }
-:root[data-skin] .aseel-grid input:focus,
-:root[data-skin] .aseel-grid select:focus {
-  border-color: var(--aseel-accent);
-  background: var(--aseel-field-focus);
+:root[data-skin] .ktra-grid input:focus,
+:root[data-skin] .ktra-grid select:focus {
+  border-color: var(--ktra-accent);
+  background: var(--ktra-field-focus);
   box-shadow: none;
 }
-/* Numeric cells: right-aligned (Aseel convention) + tabular-nums for column alignment.
+/* Numeric cells: right-aligned (Kit convention) + tabular-nums for column alignment.
    Inline style="text-align:right" on the <td> still wins, keeping per-cell overrides intact. */
-:root[data-skin] .aseel-num { text-align: right; font-variant-numeric: tabular-nums; }
+:root[data-skin] .ktra-num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* نصّ حرّ طويل داخل خلية قائمة: سطر واحد + «…» + التلميح الكامل على `title`.
    القيد يقع على عنصر داخل الخلية لا على `<td>` نفسه: الجدول `table-layout: auto`
    فـ`max-width` على الخلية مجرّد اقتراح يتجاوزه المتصفح متى طال المحتوى — فكان
    وصفٌ طويل واحد يسرق عرض بقية الأعمدة ويكسر الصف على سطرين. العرض الأقصى
    يمرَّر بـ`style={{ maxWidth }}` من العمود لأنه يختلف باختلاف الجدول. */
-:root[data-skin] .aseel-cell-clip {
+:root[data-skin] .ktra-cell-clip {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1034,77 +1045,77 @@ tbody td {
 
 /* ── Bottom tabs + totals dock ── */
 /* task13 M3: بلا max-height ولا سكرول داخلي — محتوى التبويبات يكبر بطبيعته */
-:root[data-skin] .aseel-bottom { display: flex; align-items: stretch; gap: 6px; background: var(--aseel-panel); border-top: 1px solid var(--aseel-border-soft); padding: 2px 6px 3px; flex-shrink: 0; }
-:root[data-skin] .aseel-tabscol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+:root[data-skin] .ktra-bottom { display: flex; align-items: stretch; gap: 6px; background: var(--ktra-panel); border-top: 1px solid var(--ktra-border-soft); padding: 2px 6px 3px; flex-shrink: 0; }
+:root[data-skin] .ktra-tabscol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* Tabs row: scrolls horizontally when there are too many tabs to fit, so
    "البيانات الأساسية / الشروط والشحن / الدفعات" never get clipped off-screen. */
-:root[data-skin] .aseel-tabs {
+:root[data-skin] .ktra-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
   overflow-x: auto;
   scrollbar-width: thin;
 }
-:root[data-skin] .aseel-tabs::-webkit-scrollbar { height: 4px; }
-:root[data-skin] .aseel-tabs::-webkit-scrollbar-thumb { background: var(--aseel-border); border-radius: 2px; }
+:root[data-skin] .ktra-tabs::-webkit-scrollbar { height: 4px; }
+:root[data-skin] .ktra-tabs::-webkit-scrollbar-thumb { background: var(--ktra-border); border-radius: 2px; }
 /* task13 M4: كانت التبويبات «مخفية» — خلفية #e4e1d0 على لوحة #f2f0e4 بخط 11px
    (تباين شبه معدوم، عيب #2/#3 عند المالك). الآن: حدود واضحة، خط أكبر،
    والنشط مميز بشريط علوي بلون الـ accent. */
-:root[data-skin] .aseel-tab {
+:root[data-skin] .ktra-tab {
   padding: 5px 14px;
-  background: var(--aseel-tab-bg);
-  border: 1px solid var(--aseel-border);
+  background: var(--ktra-tab-bg);
+  border: 1px solid var(--ktra-border);
   border-bottom: none;
-  border-radius: var(--aseel-radius) var(--aseel-radius) 0 0;
-  color: var(--aseel-ink);
-  font-size: var(--aseel-fs);
+  border-radius: var(--ktra-radius) var(--ktra-radius) 0 0;
+  color: var(--ktra-ink);
+  font-size: var(--ktra-fs);
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
 }
-:root[data-skin] .aseel-tab:hover:not(.aseel-tab--active) { background: var(--aseel-hover); border-color: var(--aseel-accent-bd); }
-:root[data-skin] .aseel-tab--active {
-  background: var(--aseel-field);
-  color: var(--aseel-accent);
+:root[data-skin] .ktra-tab:hover:not(.ktra-tab--active) { background: var(--ktra-hover); border-color: var(--ktra-accent-bd); }
+:root[data-skin] .ktra-tab--active {
+  background: var(--ktra-field);
+  color: var(--ktra-accent);
   font-weight: 700;
-  border-color: var(--aseel-accent-bd);
-  box-shadow: inset 0 2px 0 var(--aseel-accent);
+  border-color: var(--ktra-accent-bd);
+  box-shadow: inset 0 2px 0 var(--ktra-accent);
 }
-:root[data-skin] .aseel-tabpanel {
-  border: 1px solid var(--aseel-border-soft);
-  background: var(--aseel-field);
+:root[data-skin] .ktra-tabpanel {
+  border: 1px solid var(--ktra-border-soft);
+  background: var(--ktra-field);
   padding: 4px 6px;
   min-height: 48px;
 }
-:root[data-skin] .aseel-totals {
+:root[data-skin] .ktra-totals {
   flex: 0 0 240px;
   align-self: flex-start;
-  background: var(--aseel-panel);
-  border: 1px solid var(--aseel-border-soft);
-  border-radius: var(--aseel-radius);
+  background: var(--ktra-panel);
+  border: 1px solid var(--ktra-border-soft);
+  border-radius: var(--ktra-radius);
   padding: 3px 6px;
 }
-:root[data-skin] .aseel-total-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0; font-size: var(--aseel-fs-sm); line-height: 1.4; }
-:root[data-skin] .aseel-total-row--grand { border-top: 1px solid var(--aseel-border); margin-top: 2px; padding-top: 2px; font-weight: 700; font-size: var(--aseel-fs); }
-:root[data-skin] .aseel-total-value { min-width: 90px; text-align: left; background: var(--aseel-field); border: 1px solid var(--aseel-border); border-radius: var(--aseel-radius); padding: 0 4px; font-variant-numeric: tabular-nums; }
+:root[data-skin] .ktra-total-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0; font-size: var(--ktra-fs-sm); line-height: 1.4; }
+:root[data-skin] .ktra-total-row--grand { border-top: 1px solid var(--ktra-border); margin-top: 2px; padding-top: 2px; font-weight: 700; font-size: var(--ktra-fs); }
+:root[data-skin] .ktra-total-value { min-width: 90px; text-align: left; background: var(--ktra-field); border: 1px solid var(--ktra-border); border-radius: var(--ktra-radius); padding: 0 4px; font-variant-numeric: tabular-nums; }
 
 /* ── task13 M5: القائمة المنسدلة لمنتقي الأصناف المدمج ──
    M0-T3: data-skin صار على <html> فالبوابة (portal) ترث التوكنات — لم تعد
    الألوان بحاجة للتضمين الصلب كما كانت. */
-:root[data-skin] .aseel-autocomplete-pop {
+:root[data-skin] .ktra-autocomplete-pop {
   z-index: 10000;
   max-height: 260px;
   overflow-y: auto;
-  background: var(--aseel-field);
-  border: 1px solid var(--aseel-border);
-  border-radius: var(--aseel-radius);
-  box-shadow: var(--aseel-shadow-drop);
-  font-family: var(--aseel-font);
-  font-size: var(--aseel-fs);
-  color: var(--aseel-ink);
+  background: var(--ktra-field);
+  border: 1px solid var(--ktra-border);
+  border-radius: var(--ktra-radius);
+  box-shadow: var(--ktra-shadow-drop);
+  font-family: var(--ktra-font);
+  font-size: var(--ktra-fs);
+  color: var(--ktra-ink);
 }
-:root[data-skin] .aseel-autocomplete-row {
+:root[data-skin] .ktra-autocomplete-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1113,82 +1124,82 @@ tbody td {
   padding: 4px 8px;
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--aseel-pop-line);
+  border-bottom: 1px solid var(--ktra-pop-line);
   text-align: start;
   cursor: pointer;
   font: inherit;
   color: inherit;
 }
-:root[data-skin] .aseel-autocomplete-row--sel { background: var(--aseel-row-sel); }
-:root[data-skin] .aseel-autocomplete-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
-:root[data-skin] .aseel-autocomplete-sub { color: var(--aseel-ink-faint); font-size: 10px; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 25%; }
-:root[data-skin] .aseel-autocomplete-empty { padding: 8px; color: var(--aseel-ink-faint); text-align: center; }
+:root[data-skin] .ktra-autocomplete-row--sel { background: var(--ktra-row-sel); }
+:root[data-skin] .ktra-autocomplete-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+:root[data-skin] .ktra-autocomplete-sub { color: var(--ktra-ink-faint); font-size: 10px; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 25%; }
+:root[data-skin] .ktra-autocomplete-empty { padding: 8px; color: var(--ktra-ink-faint); text-align: center; }
 /* task24: السعر المقترح + مصدره داخل خيار المنتقي (يظهر بلا نقر) */
-:root[data-skin] .aseel-autocomplete-price {
+:root[data-skin] .ktra-autocomplete-price {
   flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 4px;
-  font-weight: 700; color: var(--aseel-price-fg); font-size: 12px; white-space: nowrap;
+  font-weight: 700; color: var(--ktra-price-fg); font-size: 12px; white-space: nowrap;
   margin-inline-start: auto;
 }
-:root[data-skin] .aseel-autocomplete-price-src {
-  font-style: normal; font-weight: 600; font-size: 9px; color: var(--aseel-price-src-fg);
-  background: var(--aseel-price-src-bg); border-radius: 6px; padding: 1px 4px;
+:root[data-skin] .ktra-autocomplete-price-src {
+  font-style: normal; font-weight: 600; font-size: 9px; color: var(--ktra-price-src-fg);
+  background: var(--ktra-price-src-bg); border-radius: 6px; padding: 1px 4px;
 }
 /* لا سعر مُعرّف (لا آخر بيع/شراء ولا عرض) — نص رمادي بدل الفراغ */
-:root[data-skin] .aseel-autocomplete-price--none { color: var(--aseel-price-none-fg); font-weight: 500; font-size: 9px; opacity: 0.8; }
-:root[data-skin] .aseel-autocomplete-row--create { color: var(--aseel-accent); font-weight: 700; justify-content: flex-start; border-bottom: none; }
+:root[data-skin] .ktra-autocomplete-price--none { color: var(--ktra-price-none-fg); font-weight: 500; font-size: 9px; opacity: 0.8; }
+:root[data-skin] .ktra-autocomplete-row--create { color: var(--ktra-accent); font-weight: 700; justify-content: flex-start; border-bottom: none; }
 /* DEF-008: زرّ المحتوى الأساسي داخل صف القائمة + أيقونة (i) لفتح بطاقة الصنف */
-:root[data-skin] .aseel-autocomplete-main {
+:root[data-skin] .ktra-autocomplete-main {
   display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0;
   background: transparent; border: none; padding: 0; text-align: start;
   cursor: pointer; font: inherit; color: inherit;
 }
-:root[data-skin] .aseel-autocomplete-info {
+:root[data-skin] .ktra-autocomplete-info {
   display: inline-flex; align-items: center; justify-content: center;
   flex: 0 0 auto; width: 22px; height: 22px; padding: 0;
   background: transparent; border: 1px solid transparent; border-radius: 3px;
-  color: var(--aseel-accent); cursor: pointer;
+  color: var(--ktra-accent); cursor: pointer;
 }
-:root[data-skin] .aseel-autocomplete-info:hover { background: var(--aseel-info-hover-bg); border-color: var(--aseel-info-hover-bd); }
+:root[data-skin] .ktra-autocomplete-info:hover { background: var(--ktra-info-hover-bg); border-color: var(--ktra-info-hover-bd); }
 
 /* DEF-005: شارة مصدر السعر المقترح على سطر الفاتورة */
-:root[data-skin] .aseel-price-badge {
+:root[data-skin] .ktra-price-badge {
   flex: 0 0 auto; font-size: 10px; line-height: 1; white-space: nowrap;
   padding: 2px 5px; border-radius: 8px; font-weight: 700;
 }
-:root[data-skin] .aseel-price-badge--last { background: var(--aseel-badge-last-bg); color: var(--aseel-badge-last-fg); }
-:root[data-skin] .aseel-price-badge--quote { background: var(--aseel-badge-quote-bg); color: var(--aseel-badge-quote-fg); }
+:root[data-skin] .ktra-price-badge--last { background: var(--ktra-badge-last-bg); color: var(--ktra-badge-last-fg); }
+:root[data-skin] .ktra-price-badge--quote { background: var(--ktra-badge-quote-bg); color: var(--ktra-badge-quote-fg); }
 /* «سعر عام» من كرت الصنف — أضعف المصادر: يظهر حين لا عرض للزبون ولا شراء سابق. */
-:root[data-skin] .aseel-price-badge--general {
-  background: color-mix(in srgb, var(--aseel-ink-soft) 18%, transparent);
-  color: var(--aseel-ink-soft);
+:root[data-skin] .ktra-price-badge--general {
+  background: color-mix(in srgb, var(--ktra-ink-soft) 18%, transparent);
+  color: var(--ktra-ink-soft);
 }
 
 /* ── Status bar ── */
-:root[data-skin] .aseel-statusbar {
+:root[data-skin] .ktra-statusbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 20px;
   padding: 8px 16px;
-  background: var(--aseel-statusbar-bg);
-  border-top: 2px solid var(--aseel-accent);
-  color: var(--aseel-statusbar-fg);
+  background: var(--ktra-statusbar-bg);
+  border-top: 2px solid var(--ktra-accent);
+  color: var(--ktra-statusbar-fg);
   font-size: 14px;
   font-weight: 600;
   flex-shrink: 0;
-  box-shadow: var(--aseel-statusbar-shadow);
+  box-shadow: var(--ktra-statusbar-shadow);
 }
-:root[data-skin] .aseel-status-item {
+:root[data-skin] .ktra-status-item {
   display: inline-flex; 
   align-items: center; 
   gap: 6px; 
 }
-:root[data-skin] .aseel-status-item b {
-  color: var(--aseel-statusbar-strong-fg);
+:root[data-skin] .ktra-status-item b {
+  color: var(--ktra-statusbar-strong-fg);
   font-weight: 800;
   font-size: 15px;
-  background: var(--aseel-statusbar-chip-bg);
+  background: var(--ktra-statusbar-chip-bg);
   padding: 2px 8px;
   border-radius: 4px;
 }
@@ -1198,57 +1209,57 @@ tbody td {
    فـ`flex-end` كان يرميها إلى يسار الشاشة بعيداً عن الحقل الذي فتحها ومسار
    العين. `flex-start` = يمين في RTL، ويسار تلقائياً لو صار في الموقع اتجاه
    LTR يوماً — ولذلك الحدّ صار منطقياً (`inline-end`) لا `left` ثابتاً. */
-:root[data-skin] .aseel-picker-mask {
+:root[data-skin] .ktra-picker-mask {
   position: fixed; inset: 0; z-index: 70;
-  background: var(--aseel-mask);
+  background: var(--ktra-mask);
   display: flex; align-items: stretch; justify-content: flex-start;
 }
-:root[data-skin] .aseel-picker {
+:root[data-skin] .ktra-picker {
   width: 380px;
   max-height: 100vh;
   display: flex; flex-direction: column;
-  background: var(--aseel-panel);
-  border-inline-end: 1px solid var(--aseel-border);
-  box-shadow: var(--aseel-shadow-panel);
-  font-family: var(--aseel-font);
+  background: var(--ktra-panel);
+  border-inline-end: 1px solid var(--ktra-border);
+  box-shadow: var(--ktra-shadow-panel);
+  font-family: var(--ktra-font);
   direction: rtl;
 }
-:root[data-skin] .aseel-picker-head {
+:root[data-skin] .ktra-picker-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 5px 10px;
-  background: var(--aseel-accent-bg);
-  border-bottom: 1px solid var(--aseel-accent-bd);
-  color: var(--aseel-accent); font-weight: 700;
+  background: var(--ktra-accent-bg);
+  border-bottom: 1px solid var(--ktra-accent-bd);
+  color: var(--ktra-accent); font-weight: 700;
 }
-:root[data-skin] .aseel-picker-body { flex: 1; overflow: auto; }
-/* T-WIN: لوحٌ على الطرف المقابل (AseelSidePanel) — كان يفرضه بنمطٍ inline. */
-:root[data-skin] .aseel-picker-mask--end { justify-content: flex-end; }
-:root[data-skin] .aseel-sidepanel {
+:root[data-skin] .ktra-picker-body { flex: 1; overflow: auto; }
+/* T-WIN: لوحٌ على الطرف المقابل (KitSidePanel) — كان يفرضه بنمطٍ inline. */
+:root[data-skin] .ktra-picker-mask--end { justify-content: flex-end; }
+:root[data-skin] .ktra-sidepanel {
   border-inline-end: none;
-  border-inline-start: 1px solid var(--aseel-border);
+  border-inline-start: 1px solid var(--ktra-border);
   width: var(--sidepanel-w, 380px);
   max-width: 100vw;
 }
-:root[data-skin] .aseel-sidepanel__body { padding: 8px; }
+:root[data-skin] .ktra-sidepanel__body { padding: 8px; }
 
 /* ───────── M1 — Sales-invoice screen extras (scoped to data-skin) ───────── */
 
 /* message banner above the grid */
-:root[data-skin] .aseel-banner {
+:root[data-skin] .ktra-banner {
   display: flex;
   align-items: center;
   gap: 6px;
   margin: 5px 6px 0;
   padding: 4px 8px;
-  border: 1px solid var(--aseel-border);
-  border-radius: var(--aseel-radius);
-  font-size: var(--aseel-fs-sm);
+  border: 1px solid var(--ktra-border);
+  border-radius: var(--ktra-radius);
+  font-size: var(--ktra-fs-sm);
 }
-:root[data-skin] .aseel-banner--err { background: var(--aseel-err-bg); border-color: var(--aseel-state); color: var(--aseel-err-fg); }
-:root[data-skin] .aseel-banner--ok { background: var(--aseel-ok-bg); border-color: var(--aseel-ok-bd); color: var(--aseel-ok-fg); }
+:root[data-skin] .ktra-banner--err { background: var(--ktra-err-bg); border-color: var(--ktra-state); color: var(--ktra-err-fg); }
+:root[data-skin] .ktra-banner--ok { background: var(--ktra-ok-bg); border-color: var(--ktra-ok-bd); color: var(--ktra-ok-fg); }
 
 /* in-cell product picker button */
-:root[data-skin] .aseel-cell-picker {
+:root[data-skin] .ktra-cell-picker {
   width: 100%;
   height: 20px;
   border: 1px solid transparent;
@@ -1256,410 +1267,411 @@ tbody td {
   font: inherit;
   text-align: right;
   cursor: pointer;
-  color: var(--aseel-accent);
+  color: var(--ktra-accent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-:root[data-skin] .aseel-cell-picker:hover:not(:disabled) { background: var(--aseel-field-hl); }
-:root[data-skin] .aseel-cell-picker:disabled { color: var(--aseel-ink-soft); cursor: default; }
+:root[data-skin] .ktra-cell-picker:hover:not(:disabled) { background: var(--ktra-field-hl); }
+:root[data-skin] .ktra-cell-picker:disabled { color: var(--ktra-ink-soft); cursor: default; }
 
 /* in-cell tax editor (select + manual % button) */
-:root[data-skin] .aseel-cell-tax { display: flex; align-items: center; gap: 2px; }
-:root[data-skin] .aseel-cell-tax > :first-child { flex: 1; min-width: 0; }
+:root[data-skin] .ktra-cell-tax { display: flex; align-items: center; gap: 2px; }
+:root[data-skin] .ktra-cell-tax > :first-child { flex: 1; min-width: 0; }
 
 /* small icon buttons (tax-edit / delete) */
-:root[data-skin] .aseel-iconbtn {
+:root[data-skin] .ktra-iconbtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 20px;
   height: 20px;
-  border: 1px solid var(--aseel-border-soft);
-  background: var(--aseel-panel);
-  border-radius: var(--aseel-radius);
-  color: var(--aseel-accent);
+  border: 1px solid var(--ktra-border-soft);
+  background: var(--ktra-panel);
+  border-radius: var(--ktra-radius);
+  color: var(--ktra-accent);
   cursor: pointer;
   flex: none;
 }
-:root[data-skin] .aseel-iconbtn:hover { background: var(--aseel-accent-bg); }
-:root[data-skin] .aseel-iconbtn--danger { color: var(--aseel-state); }
-:root[data-skin] .aseel-iconbtn--danger:hover { background: var(--aseel-danger-soft); }
+:root[data-skin] .ktra-iconbtn:hover { background: var(--ktra-accent-bg); }
+:root[data-skin] .ktra-iconbtn--danger { color: var(--ktra-state); }
+:root[data-skin] .ktra-iconbtn--danger:hover { background: var(--ktra-danger-soft); }
 
 /* "add row" affordance under the grid */
-:root[data-skin] .aseel-addrow {
+:root[data-skin] .ktra-addrow {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   margin: 4px 6px;
   padding: 2px 10px;
-  border: 1px dashed var(--aseel-accent-bd);
-  background: var(--aseel-panel);
-  color: var(--aseel-accent);
-  border-radius: var(--aseel-radius);
-  font-size: var(--aseel-fs-sm);
+  border: 1px dashed var(--ktra-accent-bd);
+  background: var(--ktra-panel);
+  color: var(--ktra-accent);
+  border-radius: var(--ktra-radius);
+  font-size: var(--ktra-fs-sm);
   cursor: pointer;
 }
-:root[data-skin] .aseel-addrow:hover { background: var(--aseel-accent-bg); }
+:root[data-skin] .ktra-addrow:hover { background: var(--ktra-accent-bg); }
 
 /* account/customer pick field with «…» affordance */
-:root[data-skin] .aseel-pickfield { display: flex; align-items: stretch; gap: 2px; flex: 1; }
-:root[data-skin] .aseel-pickfield .aseel-input { flex: 1; cursor: pointer; }
-:root[data-skin] .aseel-ellipsis {
+:root[data-skin] .ktra-pickfield { display: flex; align-items: stretch; gap: 2px; flex: 1; }
+:root[data-skin] .ktra-pickfield .ktra-input { flex: 1; cursor: pointer; }
+:root[data-skin] .ktra-ellipsis {
   flex: none;
   width: 22px;
-  border: 1px solid var(--aseel-border);
-  background: var(--aseel-panel);
-  border-radius: var(--aseel-radius);
-  color: var(--aseel-accent);
+  border: 1px solid var(--ktra-border);
+  background: var(--ktra-panel);
+  border-radius: var(--ktra-radius);
+  color: var(--ktra-accent);
   cursor: pointer;
   font-weight: 700;
   line-height: 1;
 }
-:root[data-skin] .aseel-ellipsis:hover:not(:disabled) { background: var(--aseel-accent-bg); }
-:root[data-skin] .aseel-ellipsis:disabled { color: var(--aseel-ink-soft); cursor: default; }
+:root[data-skin] .ktra-ellipsis:hover:not(:disabled) { background: var(--ktra-accent-bg); }
+:root[data-skin] .ktra-ellipsis:disabled { color: var(--ktra-ink-soft); cursor: default; }
 
 /* journal-preview tab (M1-T4) */
-:root[data-skin] .aseel-journal { display: flex; flex-direction: column; gap: 5px; }
-:root[data-skin] .aseel-journal-empty { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); margin: 4px 0; }
-:root[data-skin] .aseel-journal-errs { display: flex; flex-direction: column; gap: 2px; }
-:root[data-skin] .aseel-journal-err {
+:root[data-skin] .ktra-journal { display: flex; flex-direction: column; gap: 5px; }
+:root[data-skin] .ktra-journal-empty { color: var(--ktra-ink-soft); font-size: var(--ktra-fs-sm); margin: 4px 0; }
+:root[data-skin] .ktra-journal-errs { display: flex; flex-direction: column; gap: 2px; }
+:root[data-skin] .ktra-journal-err {
   display: flex;
   align-items: flex-start;
   gap: 4px;
-  font-size: var(--aseel-fs-sm);
-  color: var(--aseel-err-fg);
+  font-size: var(--ktra-fs-sm);
+  color: var(--ktra-err-fg);
 }
-:root[data-skin] .aseel-grid tbody tr.aseel-row--total td {
-  background: var(--aseel-grid-head);
+:root[data-skin] .ktra-grid tbody tr.ktra-row--total td {
+  background: var(--ktra-grid-head);
   font-weight: 700;
-  border-top: 2px solid var(--aseel-border);
+  border-top: 2px solid var(--ktra-border);
 }
-:root[data-skin] .aseel-ok-text { color: var(--aseel-ok-text); font-weight: 700; }
-:root[data-skin] .aseel-err-text { color: var(--aseel-state); font-weight: 700; }
+:root[data-skin] .ktra-ok-text { color: var(--ktra-ok-text); font-weight: 700; }
+:root[data-skin] .ktra-err-text { color: var(--ktra-state); font-weight: 700; }
 
 /* "other data" tab — config notes */
-:root[data-skin] .aseel-other { display: flex; flex-direction: column; gap: 6px; }
-/* Wrapper for legacy section components embedded inside Aseel tabs (DealForm/ShipmentForm/etc.).
-   Keeps modern card chrome subdued so the surrounding Aseel cream surface stays primary,
+:root[data-skin] .ktra-other { display: flex; flex-direction: column; gap: 6px; }
+/* Wrapper for legacy section components embedded inside Kit tabs (DealForm/ShipmentForm/etc.).
+   Keeps modern card chrome subdued so the surrounding Kit cream surface stays primary,
    without touching the section's own internal layout. */
-:root[data-skin] .aseel-legacy-tab { padding: 4px; display: flex; flex-direction: column; gap: 10px; }
-:root[data-skin] .aseel-legacy-tab .shadow,
-:root[data-skin] .aseel-legacy-tab .shadow-sm,
-:root[data-skin] .aseel-legacy-tab .shadow-md,
-:root[data-skin] .aseel-legacy-tab .shadow-lg { box-shadow: none !important; }
-:root[data-skin] .aseel-note {
+:root[data-skin] .ktra-legacy-tab { padding: 4px; display: flex; flex-direction: column; gap: 10px; }
+:root[data-skin] .ktra-legacy-tab .shadow,
+:root[data-skin] .ktra-legacy-tab .shadow-sm,
+:root[data-skin] .ktra-legacy-tab .shadow-md,
+:root[data-skin] .ktra-legacy-tab .shadow-lg { box-shadow: none !important; }
+:root[data-skin] .ktra-note {
   padding: 4px 8px;
-  border: 1px solid var(--aseel-border);
-  border-radius: var(--aseel-radius);
-  font-size: var(--aseel-fs-sm);
+  border: 1px solid var(--ktra-border);
+  border-radius: var(--ktra-radius);
+  font-size: var(--ktra-fs-sm);
 }
-:root[data-skin] .aseel-note code {
-  background: var(--aseel-code-bg);
+:root[data-skin] .ktra-note code {
+  background: var(--ktra-code-bg);
   padding: 0 3px;
-  border-radius: var(--aseel-radius);
+  border-radius: var(--ktra-radius);
   font-family: ui-monospace, monospace;
 }
-:root[data-skin] .aseel-note--err { background: var(--aseel-err-bg); border-color: var(--aseel-state); color: var(--aseel-err-fg); }
-:root[data-skin] .aseel-note--warn { background: var(--aseel-warn-bg); border-color: var(--aseel-warn-bd); color: var(--aseel-warn-fg); }
-:root[data-skin] .aseel-hint { font-size: var(--aseel-fs-sm); color: var(--aseel-ink-soft); margin: 2px 0 0; }
-:root[data-skin] .aseel-field--inline { flex-direction: row; align-items: center; gap: 6px; }
+:root[data-skin] .ktra-note--err { background: var(--ktra-err-bg); border-color: var(--ktra-state); color: var(--ktra-err-fg); }
+:root[data-skin] .ktra-note--warn { background: var(--ktra-warn-bg); border-color: var(--ktra-warn-bd); color: var(--ktra-warn-fg); }
+:root[data-skin] .ktra-hint { font-size: var(--ktra-fs-sm); color: var(--ktra-ink-soft); margin: 2px 0 0; }
+:root[data-skin] .ktra-field--inline { flex-direction: row; align-items: center; gap: 6px; }
 
 /* discount input inside the totals dock */
-:root[data-skin] .aseel-total-input {
+:root[data-skin] .ktra-total-input {
   min-width: 110px;
   width: 110px;
   height: 18px;
   text-align: left;
   font-variant-numeric: tabular-nums;
 }
-:root[data-skin] .aseel-total-row--warn .aseel-total-value { background: var(--aseel-warn-bg); border-color: var(--aseel-warn-bd); }
+:root[data-skin] .ktra-total-row--warn .ktra-total-value { background: var(--ktra-warn-bg); border-color: var(--ktra-warn-bd); }
 
 /* ───────── N0/N1 primitives — Form section + Dense table + Report table ───── */
 
-/* AseelFormSection: bordered subsection with title + responsive grid */
-:root[data-skin] .aseel-form-section {
-  border: 1px solid var(--aseel-border-soft);
-  border-radius: var(--aseel-radius);
+/* KitFormSection: bordered subsection with title + responsive grid */
+:root[data-skin] .ktra-form-section {
+  border: 1px solid var(--ktra-border-soft);
+  border-radius: var(--ktra-radius);
   padding: 8px 10px;
   margin-bottom: 6px;
-  background: var(--aseel-panel);
+  background: var(--ktra-panel);
 }
-:root[data-skin] .aseel-form-section-title {
-  color: var(--aseel-ink-soft);
-  font-size: var(--aseel-fs-sm);
+:root[data-skin] .ktra-form-section-title {
+  color: var(--ktra-ink-soft);
+  font-size: var(--ktra-fs-sm);
   font-weight: 700;
   margin-bottom: 6px;
-  border-bottom: 1px dashed var(--aseel-border-soft);
+  border-bottom: 1px dashed var(--ktra-border-soft);
   padding-bottom: 4px;
 }
-:root[data-skin] .aseel-form-section-body {
+:root[data-skin] .ktra-form-section-body {
   display: grid;
   gap: 4px 10px;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
-:root[data-skin] .aseel-form-section.aseel-grid-2 .aseel-form-section-body {
+:root[data-skin] .ktra-form-section.ktra-grid-2 .ktra-form-section-body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-:root[data-skin] .aseel-form-section.aseel-grid-3 .aseel-form-section-body {
+:root[data-skin] .ktra-form-section.ktra-grid-3 .ktra-form-section-body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-:root[data-skin] .aseel-form-section.aseel-grid-4 .aseel-form-section-body {
+:root[data-skin] .ktra-form-section.ktra-grid-4 .ktra-form-section-body {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 @media (max-width: 640px) {
-  :root[data-skin] .aseel-form-section.aseel-grid-2 .aseel-form-section-body,
-  :root[data-skin] .aseel-form-section.aseel-grid-3 .aseel-form-section-body,
-  :root[data-skin] .aseel-form-section.aseel-grid-4 .aseel-form-section-body {
+  :root[data-skin] .ktra-form-section.ktra-grid-2 .ktra-form-section-body,
+  :root[data-skin] .ktra-form-section.ktra-grid-3 .ktra-form-section-body,
+  :root[data-skin] .ktra-form-section.ktra-grid-4 .ktra-form-section-body {
     grid-template-columns: 1fr;
   }
 }
 
-/* AseelDenseTable: list/index table wrapper */
-:root[data-skin] .aseel-dense-table {
+/* KitDenseTable: list/index table wrapper */
+:root[data-skin] .ktra-dense-table {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-:root[data-skin] .aseel-dense-table .aseel-sortable {
+:root[data-skin] .ktra-dense-table .ktra-sortable {
   cursor: pointer;
   user-select: none;
 }
-:root[data-skin] .aseel-dense-table .aseel-sortable:hover { background: var(--aseel-accent-bg); }
-:root[data-skin] .aseel-sort-indicator { font-size: 9px; margin-inline-start: 4px; color: var(--aseel-accent); }
+:root[data-skin] .ktra-dense-table .ktra-sortable:hover { background: var(--ktra-accent-bg); }
+:root[data-skin] .ktra-sort-indicator { font-size: 9px; margin-inline-start: 4px; color: var(--ktra-accent); }
 
-:root[data-skin] .aseel-grid tbody tr.aseel-row--selected td { background: var(--aseel-row-sel) !important; }
-:root[data-skin] .aseel-grid tbody tr.aseel-row--hover td { background: var(--aseel-hover-soft); }
+:root[data-skin] .ktra-grid tbody tr.ktra-row--selected td { background: var(--ktra-row-sel) !important; }
+:root[data-skin] .ktra-grid tbody tr.ktra-row--hover td { background: var(--ktra-hover-soft); }
 
-:root[data-skin] .aseel-pagination {
+:root[data-skin] .ktra-pagination {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 12px;
   padding: 4px 8px;
-  background: var(--aseel-panel);
-  border: 1px solid var(--aseel-border-soft);
-  border-radius: var(--aseel-radius);
-  font-size: var(--aseel-fs-sm);
+  background: var(--ktra-panel);
+  border: 1px solid var(--ktra-border-soft);
+  border-radius: var(--ktra-radius);
+  font-size: var(--ktra-fs-sm);
 }
-:root[data-skin] .aseel-pagination button {
+:root[data-skin] .ktra-pagination button {
   padding: 2px 10px;
-  border: 1px solid var(--aseel-border);
-  background: var(--aseel-field);
-  border-radius: var(--aseel-radius);
+  border: 1px solid var(--ktra-border);
+  background: var(--ktra-field);
+  border-radius: var(--ktra-radius);
   cursor: pointer;
 }
-:root[data-skin] .aseel-pagination button:disabled { opacity: 0.4; cursor: default; }
-:root[data-skin] .aseel-pagination button:hover:not(:disabled) { background: var(--aseel-accent-bg); }
+:root[data-skin] .ktra-pagination button:disabled { opacity: 0.4; cursor: default; }
+:root[data-skin] .ktra-pagination button:hover:not(:disabled) { background: var(--ktra-accent-bg); }
 
-/* AseelReportTable */
-:root[data-skin] .aseel-report-table {
+/* KitReportTable */
+:root[data-skin] .ktra-report-table {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-:root[data-skin] .aseel-report-toolbar {
+:root[data-skin] .ktra-report-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  background: var(--aseel-panel);
-  border: 1px solid var(--aseel-border-soft);
-  border-radius: var(--aseel-radius);
+  background: var(--ktra-panel);
+  border: 1px solid var(--ktra-border-soft);
+  border-radius: var(--ktra-radius);
 }
-:root[data-skin] .aseel-btn {
+:root[data-skin] .ktra-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 3px 12px;
-  border: 1px solid var(--aseel-border);
-  background: var(--aseel-field);
-  color: var(--aseel-ink);
-  border-radius: var(--aseel-radius);
-  font-size: var(--aseel-fs-sm);
+  border: 1px solid var(--ktra-border);
+  background: var(--ktra-field);
+  color: var(--ktra-ink);
+  border-radius: var(--ktra-radius);
+  font-size: var(--ktra-fs-sm);
   cursor: pointer;
 }
-:root[data-skin] .aseel-btn:hover:not(:disabled) { background: var(--aseel-accent-bg); }
-:root[data-skin] .aseel-btn:disabled { opacity: 0.5; cursor: default; }
+:root[data-skin] .ktra-btn:hover:not(:disabled) { background: var(--ktra-accent-bg); }
+:root[data-skin] .ktra-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* Banner warn variant (used by GroupConstantsPage seed-prompt) */
-:root[data-skin] .aseel-banner--warn {
-  background: var(--aseel-warn-bg);
-  border-color: var(--aseel-warn-bd);
-  color: var(--aseel-warn-fg);
+:root[data-skin] .ktra-banner--warn {
+  background: var(--ktra-warn-bg);
+  border-color: var(--ktra-warn-bd);
+  color: var(--ktra-warn-fg);
 }
-:root[data-skin] .aseel-picker-foot { padding: 5px 10px; border-top: 1px solid var(--aseel-border-soft); color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); }
+:root[data-skin] .ktra-picker-foot { padding: 5px 10px; border-top: 1px solid var(--ktra-border-soft); color: var(--ktra-ink-soft); font-size: var(--ktra-fs-sm); }
 
-/* N1-T5 AseelDateInput — year calendar modal */
-:root[data-skin] .aseel-date-cal__backdrop {
-  position: fixed; inset: 0; background: var(--aseel-mask-strong);
+/* N1-T5 KitDateInput — year calendar modal */
+:root[data-skin] .ktra-date-cal__backdrop {
+  position: fixed; inset: 0; background: var(--ktra-mask-strong);
   z-index: 9999; display: flex; align-items: center; justify-content: center;
   padding: 16px;
 }
-:root[data-skin] .aseel-date-cal {
-  background: var(--aseel-panel);
-  border: 1px solid var(--aseel-border);
-  border-radius: var(--aseel-radius);
-  box-shadow: var(--aseel-shadow-modal);
+:root[data-skin] .ktra-date-cal {
+  background: var(--ktra-panel);
+  border: 1px solid var(--ktra-border);
+  border-radius: var(--ktra-radius);
+  box-shadow: var(--ktra-shadow-modal);
   width: min(960px, 95vw); max-height: 90vh; overflow: auto;
   padding: 12px;
 }
-:root[data-skin] .aseel-date-cal__header {
+:root[data-skin] .ktra-date-cal__header {
   display: flex; align-items: center; gap: 6px;
-  padding-bottom: 8px; border-bottom: 1px solid var(--aseel-border-soft);
+  padding-bottom: 8px; border-bottom: 1px solid var(--ktra-border-soft);
   margin-bottom: 8px;
 }
-:root[data-skin] .aseel-date-cal__year {
+:root[data-skin] .ktra-date-cal__year {
   width: 90px; text-align: center; font-weight: bold;
 }
-:root[data-skin] .aseel-date-cal__grid {
+:root[data-skin] .ktra-date-cal__grid {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
 }
 @media (max-width: 720px) {
-  :root[data-skin] .aseel-date-cal__grid { grid-template-columns: repeat(2, 1fr); }
+  :root[data-skin] .ktra-date-cal__grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 480px) {
-  :root[data-skin] .aseel-date-cal__grid { grid-template-columns: 1fr; }
+  :root[data-skin] .ktra-date-cal__grid { grid-template-columns: 1fr; }
 }
-:root[data-skin] .aseel-date-cal__month {
-  border: 1px solid var(--aseel-border-soft);
-  border-radius: var(--aseel-radius);
+:root[data-skin] .ktra-date-cal__month {
+  border: 1px solid var(--ktra-border-soft);
+  border-radius: var(--ktra-radius);
   padding: 6px;
-  background: var(--aseel-field);
+  background: var(--ktra-field);
 }
-:root[data-skin] .aseel-date-cal__month-title {
-  font-weight: bold; font-size: var(--aseel-fs-sm);
+:root[data-skin] .ktra-date-cal__month-title {
+  font-weight: bold; font-size: var(--ktra-fs-sm);
   text-align: center; padding-bottom: 4px;
-  color: var(--aseel-accent);
+  color: var(--ktra-accent);
 }
-:root[data-skin] .aseel-date-cal__weekdays {
+:root[data-skin] .ktra-date-cal__weekdays {
   display: grid; grid-template-columns: repeat(7, 1fr);
-  font-size: 10px; color: var(--aseel-ink-soft);
+  font-size: 10px; color: var(--ktra-ink-soft);
   text-align: center; padding-bottom: 2px;
 }
-:root[data-skin] .aseel-date-cal__days {
+:root[data-skin] .ktra-date-cal__days {
   display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px;
 }
-:root[data-skin] .aseel-date-cal__day {
+:root[data-skin] .ktra-date-cal__day {
   font-size: 11px; padding: 3px 0;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--aseel-ink);
-  cursor: pointer; border-radius: var(--aseel-radius);
+  color: var(--ktra-ink);
+  cursor: pointer; border-radius: var(--ktra-radius);
   font-variant-numeric: tabular-nums;
 }
-:root[data-skin] .aseel-date-cal__day:hover { background: var(--aseel-accent-bg); }
-:root[data-skin] .aseel-date-cal__day--today { border-color: var(--aseel-accent); font-weight: bold; }
-:root[data-skin] .aseel-date-cal__day--sel { background: var(--aseel-accent); color: var(--aseel-on-accent); }
+:root[data-skin] .ktra-date-cal__day:hover { background: var(--ktra-accent-bg); }
+:root[data-skin] .ktra-date-cal__day--today { border-color: var(--ktra-accent); font-weight: bold; }
+:root[data-skin] .ktra-date-cal__day--sel { background: var(--ktra-accent); color: var(--ktra-on-accent); }
 
-/* ── N9-T3: Dark Aseel ─────────────────────────────────────────────────
+/* ── N9-T3: Dark Kit ─────────────────────────────────────────────────
    M6: كان محددها `[data-skin="aseel"][data-theme="dark"]` وهو لا يُطابَق
+   (والقيمة `aseel` صارت `classic` في M7-T3 — الجلد باقٍ والاسم تغيّر).
    أبداً — لا شيء في التطبيق يضبط data-theme (المبدّل يضيف كلاس .dark على
    <html>). فبقيت الكتلة خاملة منذ كتابتها وجلد الأصيل بلا وضع داكن. الآن
    رُبطت بـ .dark فصار الوضع الداكن يعمل على الجلدين، لا الحديث وحده. */
-.dark[data-skin="aseel"] {
-  --aseel-bg: #2b2b1c;
-  --aseel-panel: #363626;
-  --aseel-field: #404030;
-  --aseel-field-hl: #3a4a5a;
-  --aseel-field-focus: #4a4a3a;
-  --aseel-border: #6a6a4e;
-  --aseel-border-soft: #5a5a42;
-  --aseel-line: #4a4a34;
-  --aseel-ink: #e8e4d0;
-  --aseel-ink-soft: #a8a490;
-  --aseel-accent: #6a9fc8;
-  --aseel-accent-bg: #2a4a6a;
-  --aseel-accent-bd: #4a7aaa;
-  --aseel-state: #e06050;
-  --aseel-grid-head: #3a3a2a;
-  --aseel-row-alt: #323226;
-  --aseel-row-sel: #2a4a5a;
-  --aseel-status-credit: #81c784;
-  --aseel-status-debit: #e57373;
-  --aseel-status-paid: #81c784;
-  --aseel-status-due: #ffb74d;
+.dark[data-skin="classic"] {
+  --ktra-bg: #2b2b1c;
+  --ktra-panel: #363626;
+  --ktra-field: #404030;
+  --ktra-field-hl: #3a4a5a;
+  --ktra-field-focus: #4a4a3a;
+  --ktra-border: #6a6a4e;
+  --ktra-border-soft: #5a5a42;
+  --ktra-line: #4a4a34;
+  --ktra-ink: #e8e4d0;
+  --ktra-ink-soft: #a8a490;
+  --ktra-accent: #6a9fc8;
+  --ktra-accent-bg: #2a4a6a;
+  --ktra-accent-bd: #4a7aaa;
+  --ktra-state: #e06050;
+  --ktra-grid-head: #3a3a2a;
+  --ktra-row-alt: #323226;
+  --ktra-row-sel: #2a4a5a;
+  --ktra-status-credit: #81c784;
+  --ktra-status-debit: #e57373;
+  --ktra-status-paid: #81c784;
+  --ktra-status-due: #ffb74d;
 
   /* M6: نظائر داكنة للتوكنات التي عُرّفت في M5 (الأسطح والدلالات والظلال)
      — بدونها كان الجلد الكلاسيكي الداكن يعرض جزراً فاتحة في ~280 موضعاً. */
-  --aseel-grid-bg: #2f2f20;
-  --aseel-tab-bg: #43432f;
-  --aseel-pop-line: #4a4a34;
-  --aseel-ink-faint: #a8a490;
-  --aseel-hover: #3a4a5a;
-  --aseel-hover-soft: #343a42;
-  --aseel-active: #44586c;
-  --aseel-accent-hover: #8ab8dd;
-  --aseel-code-bg: rgba(255, 255, 255, .08);
-  --aseel-info-hover-bg: #3a4a5a;
-  --aseel-info-hover-bd: #4a7aaa;
-  --aseel-danger-bg: #5a2a24;
-  --aseel-danger-bd: #8a4a40;
-  --aseel-danger-soft: #4a251f;
-  --aseel-ok: #81c784;
-  --aseel-danger: #e57373;
-  --aseel-err: #e57373;
-  --aseel-warn: #ffb74d;
-  --aseel-primary: #6a9fc8;
-  --aseel-accent-dark: #8ab8dd;
-  --aseel-accent-soft: #3a3a2a;
-  --aseel-surface: #363626;
-  --aseel-surface-2: #3f3f2c;
-  --aseel-surface-alt: rgba(255, 255, 255, .06);
-  --aseel-surface-accent: #2a4a6a;
-  --aseel-bg-soft: #3a3a2a;
-  --aseel-bg-strip: #3a3a2a;
-  --aseel-panel-hover: #43432f;
-  --aseel-head: #3a3a2a;
-  --aseel-ok-bg: #234a2c;
-  --aseel-ok-fg: #bbf7d0;
-  --aseel-ok-text: #81c784;
-  --aseel-err-bg: #5a2a24;
-  --aseel-err-fg: #fecaca;
-  --aseel-warn-bg: #4d3a14;
-  --aseel-warn-bd: #b9982f;
-  --aseel-warn-fg: #fde68a;
-  --aseel-badge-state-bg: #5a2a24;
-  --aseel-badge-ok-bg: #234a2c;
-  --aseel-badge-ok-fg: #bbf7d0;
-  --aseel-price-fg: #81c784;
-  --aseel-price-src-fg: #bbf7d0;
-  --aseel-price-src-bg: #234a2c;
-  --aseel-price-none-fg: #8a8778;
-  --aseel-badge-last-bg: #1e3a8a;
-  --aseel-badge-last-fg: #bfdbfe;
-  --aseel-badge-quote-bg: #4d3a14;
-  --aseel-badge-quote-fg: #fde68a;
+  --ktra-grid-bg: #2f2f20;
+  --ktra-tab-bg: #43432f;
+  --ktra-pop-line: #4a4a34;
+  --ktra-ink-faint: #a8a490;
+  --ktra-hover: #3a4a5a;
+  --ktra-hover-soft: #343a42;
+  --ktra-active: #44586c;
+  --ktra-accent-hover: #8ab8dd;
+  --ktra-code-bg: rgba(255, 255, 255, .08);
+  --ktra-info-hover-bg: #3a4a5a;
+  --ktra-info-hover-bd: #4a7aaa;
+  --ktra-danger-bg: #5a2a24;
+  --ktra-danger-bd: #8a4a40;
+  --ktra-danger-soft: #4a251f;
+  --ktra-ok: #81c784;
+  --ktra-danger: #e57373;
+  --ktra-err: #e57373;
+  --ktra-warn: #ffb74d;
+  --ktra-primary: #6a9fc8;
+  --ktra-accent-dark: #8ab8dd;
+  --ktra-accent-soft: #3a3a2a;
+  --ktra-surface: #363626;
+  --ktra-surface-2: #3f3f2c;
+  --ktra-surface-alt: rgba(255, 255, 255, .06);
+  --ktra-surface-accent: #2a4a6a;
+  --ktra-bg-soft: #3a3a2a;
+  --ktra-bg-strip: #3a3a2a;
+  --ktra-panel-hover: #43432f;
+  --ktra-head: #3a3a2a;
+  --ktra-ok-bg: #234a2c;
+  --ktra-ok-fg: #bbf7d0;
+  --ktra-ok-text: #81c784;
+  --ktra-err-bg: #5a2a24;
+  --ktra-err-fg: #fecaca;
+  --ktra-warn-bg: #4d3a14;
+  --ktra-warn-bd: #b9982f;
+  --ktra-warn-fg: #fde68a;
+  --ktra-badge-state-bg: #5a2a24;
+  --ktra-badge-ok-bg: #234a2c;
+  --ktra-badge-ok-fg: #bbf7d0;
+  --ktra-price-fg: #81c784;
+  --ktra-price-src-fg: #bbf7d0;
+  --ktra-price-src-bg: #234a2c;
+  --ktra-price-none-fg: #8a8778;
+  --ktra-badge-last-bg: #1e3a8a;
+  --ktra-badge-last-fg: #bfdbfe;
+  --ktra-badge-quote-bg: #4d3a14;
+  --ktra-badge-quote-fg: #fde68a;
 }
 
 /* حُذف placeholder «[data-skin="modern"][data-theme="dark"]» في M1-T2:
    المحدد لا يُطابَق أبداً (data-theme غير مضبوط)، والوضع الداكن للجلد الحديث
    يعمل عبر .dark[data-skin="modern"] أعلى الملف. */
 
-/* ── N9-T1: Aseel utility tokens (replace Tailwind named colors in screens) ── */
-:root[data-skin] .aseel-bg-panel { background: var(--aseel-panel); }
-:root[data-skin] .aseel-bg-field { background: var(--aseel-field); }
-:root[data-skin] .aseel-bg-accent { background: var(--aseel-accent); }
-:root[data-skin] .aseel-bg-accent-bg { background: var(--aseel-accent-bg); }
-:root[data-skin] .aseel-bg-grid-head { background: var(--aseel-grid-head); }
-:root[data-skin] .aseel-bg-row-alt { background: var(--aseel-row-alt); }
-:root[data-skin] .aseel-text-ink { color: var(--aseel-ink); }
-:root[data-skin] .aseel-text-soft { color: var(--aseel-ink-soft); }
-:root[data-skin] .aseel-text-accent { color: var(--aseel-accent); }
-:root[data-skin] .aseel-text-state { color: var(--aseel-state); }
-:root[data-skin] .aseel-text-credit { color: var(--aseel-status-credit); }
-:root[data-skin] .aseel-text-debit { color: var(--aseel-status-debit); }
-:root[data-skin] .aseel-text-paid { color: var(--aseel-status-paid); }
-:root[data-skin] .aseel-text-due { color: var(--aseel-status-due); }
-:root[data-skin] .aseel-border-soft { border-color: var(--aseel-border-soft); }
-:root[data-skin] .aseel-border-line { border-color: var(--aseel-line); }
-:root[data-skin] .aseel-border-accent { border-color: var(--aseel-accent-bd); }
-:root[data-skin] .aseel-btn-primary { background: var(--aseel-accent); color: var(--aseel-on-accent); border: 1px solid var(--aseel-accent-bd); border-radius: var(--aseel-radius); }
-:root[data-skin] .aseel-btn-primary:hover { background: var(--aseel-accent-hover); }
-:root[data-skin] .aseel-badge-state { background: var(--aseel-badge-state-bg); color: var(--aseel-state); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
-:root[data-skin] .aseel-badge-ok { background: var(--aseel-badge-ok-bg); color: var(--aseel-badge-ok-fg); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
-:root[data-skin] .aseel-badge-neutral { background: var(--aseel-panel); color: var(--aseel-ink-soft); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
+/* ── N9-T1: Kit utility tokens (replace Tailwind named colors in screens) ── */
+:root[data-skin] .ktra-bg-panel { background: var(--ktra-panel); }
+:root[data-skin] .ktra-bg-field { background: var(--ktra-field); }
+:root[data-skin] .ktra-bg-accent { background: var(--ktra-accent); }
+:root[data-skin] .ktra-bg-accent-bg { background: var(--ktra-accent-bg); }
+:root[data-skin] .ktra-bg-grid-head { background: var(--ktra-grid-head); }
+:root[data-skin] .ktra-bg-row-alt { background: var(--ktra-row-alt); }
+:root[data-skin] .ktra-text-ink { color: var(--ktra-ink); }
+:root[data-skin] .ktra-text-soft { color: var(--ktra-ink-soft); }
+:root[data-skin] .ktra-text-accent { color: var(--ktra-accent); }
+:root[data-skin] .ktra-text-state { color: var(--ktra-state); }
+:root[data-skin] .ktra-text-credit { color: var(--ktra-status-credit); }
+:root[data-skin] .ktra-text-debit { color: var(--ktra-status-debit); }
+:root[data-skin] .ktra-text-paid { color: var(--ktra-status-paid); }
+:root[data-skin] .ktra-text-due { color: var(--ktra-status-due); }
+:root[data-skin] .ktra-border-soft { border-color: var(--ktra-border-soft); }
+:root[data-skin] .ktra-border-line { border-color: var(--ktra-line); }
+:root[data-skin] .ktra-border-accent { border-color: var(--ktra-accent-bd); }
+:root[data-skin] .ktra-btn-primary { background: var(--ktra-accent); color: var(--ktra-on-accent); border: 1px solid var(--ktra-accent-bd); border-radius: var(--ktra-radius); }
+:root[data-skin] .ktra-btn-primary:hover { background: var(--ktra-accent-hover); }
+:root[data-skin] .ktra-badge-state { background: var(--ktra-badge-state-bg); color: var(--ktra-state); padding: 1px 6px; border-radius: var(--ktra-radius); font-size: 10px; }
+:root[data-skin] .ktra-badge-ok { background: var(--ktra-badge-ok-bg); color: var(--ktra-badge-ok-fg); padding: 1px 6px; border-radius: var(--ktra-radius); font-size: 10px; }
+:root[data-skin] .ktra-badge-neutral { background: var(--ktra-panel); color: var(--ktra-ink-soft); padding: 1px 6px; border-radius: var(--ktra-radius); font-size: 10px; }
 
 /* ════════════════════════════════════════════════════════════════════
    T-WIN — النافذة العائمة والشريط القابل للإرساء (قواعد هيكلية)
@@ -1677,7 +1689,7 @@ tbody td {
   backdrop-filter: blur(1.5px);
 }
 
-:root[data-skin] .aseel-float-mask {
+:root[data-skin] .ktra-float-mask {
   position: fixed;
   inset: 0;
   z-index: var(--z-window-mask);
@@ -1686,13 +1698,13 @@ tbody td {
   pointer-events: none;
 }
 /* النافذة الحاجبة (modal) وحدها تُظلم ما خلفها وتلتقط النقر خارجها للإغلاق. */
-:root[data-skin] .aseel-float-mask--dim {
+:root[data-skin] .ktra-float-mask--dim {
   background: var(--overlay-mask);
   backdrop-filter: blur(1.5px);
   pointer-events: auto;
 }
 
-:root[data-skin] .aseel-float-win {
+:root[data-skin] .ktra-float-win {
   position: fixed;
   left: var(--win-x);
   top: var(--win-y);
@@ -1703,133 +1715,133 @@ tbody td {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--aseel-panel);
-  color: var(--aseel-ink);
-  border: 1px solid var(--aseel-border);
-  border-radius: var(--aseel-radius);
-  box-shadow: var(--aseel-shadow-modal);
+  background: var(--ktra-panel);
+  color: var(--ktra-ink);
+  border: 1px solid var(--ktra-border);
+  border-radius: var(--ktra-radius);
+  box-shadow: var(--ktra-shadow-modal);
 }
-:root[data-skin] .aseel-float-win:focus { outline: none; }
+:root[data-skin] .ktra-float-win:focus { outline: none; }
 
 /* أثناء السحب/التحجيم: لا انتقالات (تُلاحق المؤشر) ولا تحديد نصّ. */
-:root[data-skin] .aseel-float-win--busy,
-:root[data-skin] .aseel-float-win--busy * {
+:root[data-skin] .ktra-float-win--busy,
+:root[data-skin] .ktra-float-win--busy * {
   transition: none !important;
   user-select: none;
 }
 
-:root[data-skin] .aseel-float-win__bar {
+:root[data-skin] .ktra-float-win__bar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background: var(--aseel-panel);
-  color: var(--aseel-ink);
-  border-bottom: 1px solid var(--aseel-border-soft);
+  background: var(--ktra-panel);
+  color: var(--ktra-ink);
+  border-bottom: 1px solid var(--ktra-border-soft);
   cursor: grab;
   touch-action: none;
 }
-:root[data-skin] .aseel-float-win--busy .aseel-float-win__bar { cursor: grabbing; }
-:root[data-skin] .aseel-float-win__title {
+:root[data-skin] .ktra-float-win--busy .ktra-float-win__bar { cursor: grabbing; }
+:root[data-skin] .ktra-float-win__title {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
-  font-size: var(--aseel-fs-sm, 12px);
+  font-size: var(--ktra-fs-sm, 12px);
 }
-:root[data-skin] .aseel-float-win__body {
+:root[data-skin] .ktra-float-win__body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  background: var(--aseel-bg);
+  background: var(--ktra-bg);
 }
-:root[data-skin] .aseel-float-win__foot {
+:root[data-skin] .ktra-float-win__foot {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-top: 1px solid var(--aseel-border-soft);
-  background: var(--aseel-panel);
+  border-top: 1px solid var(--ktra-border-soft);
+  background: var(--ktra-panel);
 }
 
 /* مقابض التحجيم: أشرطة خفية 6px على الحواف و12px على الزوايا. */
-:root[data-skin] .aseel-float-win__grip {
+:root[data-skin] .ktra-float-win__grip {
   position: absolute;
   touch-action: none;
   background: transparent;
 }
-:root[data-skin] .aseel-float-win__grip--n { inset-block-start: 0; inset-inline: 6px; height: 6px; cursor: ns-resize; }
-:root[data-skin] .aseel-float-win__grip--s { inset-block-end: 0; inset-inline: 6px; height: 6px; cursor: ns-resize; }
-:root[data-skin] .aseel-float-win__grip--w { inset-inline-start: 0; inset-block: 6px; width: 6px; cursor: ew-resize; }
-:root[data-skin] .aseel-float-win__grip--e { inset-inline-end: 0; inset-block: 6px; width: 6px; cursor: ew-resize; }
-:root[data-skin] .aseel-float-win__grip--nw,
-:root[data-skin] .aseel-float-win__grip--ne,
-:root[data-skin] .aseel-float-win__grip--sw,
-:root[data-skin] .aseel-float-win__grip--se { width: 12px; height: 12px; }
-:root[data-skin] .aseel-float-win__grip--nw { top: 0; left: 0; cursor: nwse-resize; }
-:root[data-skin] .aseel-float-win__grip--ne { top: 0; right: 0; cursor: nesw-resize; }
-:root[data-skin] .aseel-float-win__grip--sw { bottom: 0; left: 0; cursor: nesw-resize; }
-:root[data-skin] .aseel-float-win__grip--se { bottom: 0; right: 0; cursor: nwse-resize; }
+:root[data-skin] .ktra-float-win__grip--n { inset-block-start: 0; inset-inline: 6px; height: 6px; cursor: ns-resize; }
+:root[data-skin] .ktra-float-win__grip--s { inset-block-end: 0; inset-inline: 6px; height: 6px; cursor: ns-resize; }
+:root[data-skin] .ktra-float-win__grip--w { inset-inline-start: 0; inset-block: 6px; width: 6px; cursor: ew-resize; }
+:root[data-skin] .ktra-float-win__grip--e { inset-inline-end: 0; inset-block: 6px; width: 6px; cursor: ew-resize; }
+:root[data-skin] .ktra-float-win__grip--nw,
+:root[data-skin] .ktra-float-win__grip--ne,
+:root[data-skin] .ktra-float-win__grip--sw,
+:root[data-skin] .ktra-float-win__grip--se { width: 12px; height: 12px; }
+:root[data-skin] .ktra-float-win__grip--nw { top: 0; left: 0; cursor: nwse-resize; }
+:root[data-skin] .ktra-float-win__grip--ne { top: 0; right: 0; cursor: nesw-resize; }
+:root[data-skin] .ktra-float-win__grip--sw { bottom: 0; left: 0; cursor: nesw-resize; }
+:root[data-skin] .ktra-float-win__grip--se { bottom: 0; right: 0; cursor: nwse-resize; }
 
 /* ── الشريط العائم القابل للإرساء ── */
-:root[data-skin] .aseel-rail {
+:root[data-skin] .ktra-rail {
   position: fixed;
   z-index: var(--z-float-rail);
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 6px 4px;
-  background: var(--aseel-panel);
-  border: 1px solid var(--aseel-border);
-  border-radius: var(--aseel-radius);
-  box-shadow: var(--aseel-shadow-drop);
+  background: var(--ktra-panel);
+  border: 1px solid var(--ktra-border);
+  border-radius: var(--ktra-radius);
+  box-shadow: var(--ktra-shadow-drop);
 }
-:root[data-skin] .aseel-rail--right,
-:root[data-skin] .aseel-rail--left {
+:root[data-skin] .ktra-rail--right,
+:root[data-skin] .ktra-rail--left {
   flex-direction: column;
   top: 50%;
   transform: translateY(-50%);
 }
-:root[data-skin] .aseel-rail--right { right: 10px; }
-:root[data-skin] .aseel-rail--left { left: 10px; }
+:root[data-skin] .ktra-rail--right { right: 10px; }
+:root[data-skin] .ktra-rail--left { left: 10px; }
 /* أثناء السحب: يتبع المؤشر — الهندسة متغيّرا CSS من الحلقة، لا نمط مضمّن. */
-:root[data-skin] .aseel-rail--busy {
+:root[data-skin] .ktra-rail--busy {
   opacity: .9;
   top: var(--rail-y);
   left: var(--rail-x);
   right: auto;
   transform: translate(-50%, -20px);
 }
-:root[data-skin] .aseel-rail__grip {
+:root[data-skin] .ktra-rail__grip {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--aseel-ink-soft);
+  color: var(--ktra-ink-soft);
   cursor: grab;
   touch-action: none;
   padding: 2px;
 }
-:root[data-skin] .aseel-rail--busy .aseel-rail__grip { cursor: grabbing; }
+:root[data-skin] .ktra-rail--busy .ktra-rail__grip { cursor: grabbing; }
 
 /* منطقة إرساء تُضاء أثناء سحب الشريط فيرى المستخدم أين سيستقرّ. */
-:root[data-skin] .aseel-dockzone {
+:root[data-skin] .ktra-dockzone {
   position: fixed;
   z-index: var(--z-float-rail);
-  border: 2px dashed var(--aseel-accent);
-  background: var(--aseel-accent-soft, transparent);
-  border-radius: var(--aseel-radius);
+  border: 2px dashed var(--ktra-accent);
+  background: var(--ktra-accent-soft, transparent);
+  border-radius: var(--ktra-radius);
   opacity: .35;
   pointer-events: none;
 }
-:root[data-skin] .aseel-dockzone--active { opacity: .85; }
-:root[data-skin] .aseel-dockzone--right { top: 20%; bottom: 20%; right: 6px; width: 56px; }
-:root[data-skin] .aseel-dockzone--left { top: 20%; bottom: 20%; left: 6px; width: 56px; }
-:root[data-skin] .aseel-dockzone--top { top: 6px; left: 25%; right: 25%; height: 44px; }
+:root[data-skin] .ktra-dockzone--active { opacity: .85; }
+:root[data-skin] .ktra-dockzone--right { top: 20%; bottom: 20%; right: 6px; width: 56px; }
+:root[data-skin] .ktra-dockzone--left { top: 20%; bottom: 20%; left: 6px; width: 56px; }
+:root[data-skin] .ktra-dockzone--top { top: 6px; left: 25%; right: 25%; height: 44px; }
 
 /* ════════════════════════════════════════════════════════════════════
    M2 — كروم الجلد الحديث (دلتا هيكلية للجلد الحديث وحده)
@@ -1844,13 +1856,13 @@ tbody td {
    ════════════════════════════════════════════════════════════════════ */
 
 /* ───────── M2-T1: شريط العنوان + شريط الأوامر ───────── */
-:root[data-skin="modern"] .aseel-titlebar {
+:root[data-skin="modern"] .ktra-titlebar {
   padding: 4px 10px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
 }
 /* العنوان لم يعد chip محفوراً بل عنوان صفحة */
-:root[data-skin="modern"] .aseel-title-chip {
+:root[data-skin="modern"] .ktra-title-chip {
   background: transparent;
   border: 1px solid transparent;
   color: var(--color-text);
@@ -1859,7 +1871,7 @@ tbody td {
   padding: 2px 0;
 }
 /* حالة المستند: شارة بدل نص أحمر عارٍ */
-:root[data-skin="modern"] .aseel-title-state {
+:root[data-skin="modern"] .ktra-title-state {
   display: inline-block;
   padding: 1px 8px;
   border-radius: var(--radius-full);
@@ -1868,19 +1880,19 @@ tbody td {
   font-size: var(--font-size-xs);
   font-weight: 600;
 }
-:root[data-skin="modern"] .aseel-toolbar {
+:root[data-skin="modern"] .ktra-toolbar {
   padding: 3px 8px;
   gap: 2px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
 }
-:root[data-skin="modern"] .aseel-toolgrp { gap: 2px; }
-:root[data-skin="modern"] .aseel-toolsep {
+:root[data-skin="modern"] .ktra-toolgrp { gap: 2px; }
+:root[data-skin="modern"] .ktra-toolsep {
   background: var(--color-border);
   margin: 4px 6px;
 }
 /* أزرار ghost: بلا حفر ولا حدود، وضوحها من الـ hover */
-:root[data-skin="modern"] .aseel-toolbtn {
+:root[data-skin="modern"] .ktra-toolbtn {
   gap: 5px;
   padding: 4px 8px;
   border-color: transparent;
@@ -1889,107 +1901,107 @@ tbody td {
   font-weight: 500;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
-:root[data-skin="modern"] .aseel-toolbtn:hover:not(:disabled) {
+:root[data-skin="modern"] .ktra-toolbtn:hover:not(:disabled) {
   background: var(--color-surface-3);
   border-color: transparent;
   color: var(--color-primary);
 }
-:root[data-skin="modern"] .aseel-toolbtn:active:not(:disabled) {
+:root[data-skin="modern"] .ktra-toolbtn:active:not(:disabled) {
   background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
 }
-:root[data-skin="modern"] .aseel-toolbtn:disabled { opacity: .45; }
-:root[data-skin="modern"] .aseel-toolbtn--danger { color: var(--color-danger); }
-:root[data-skin="modern"] .aseel-toolbtn--danger:hover:not(:disabled) {
+:root[data-skin="modern"] .ktra-toolbtn:disabled { opacity: .45; }
+:root[data-skin="modern"] .ktra-toolbtn--danger { color: var(--color-danger); }
+:root[data-skin="modern"] .ktra-toolbtn--danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
   border-color: transparent;
   color: var(--color-danger);
 }
-:root[data-skin="modern"] .aseel-toolbtn svg { width: 16px; height: 16px; }
-:root[data-skin="modern"] .aseel-actionbar { border-top-color: var(--color-border); }
+:root[data-skin="modern"] .ktra-toolbtn svg { width: 16px; height: 16px; }
+:root[data-skin="modern"] .ktra-actionbar { border-top-color: var(--color-border); }
 
 /* ───────── M2-T2: حزام الحقول + النماذج + الشبكات + المجاميع ───────── */
-:root[data-skin="modern"] .aseel-headband {
+:root[data-skin="modern"] .ktra-headband {
   padding: 8px 10px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
 }
-:root[data-skin="modern"] .aseel-field-label {
+:root[data-skin="modern"] .ktra-field-label {
   color: var(--color-text-muted);
   font-weight: 500;
 }
-:root[data-skin="modern"] .aseel-input,
-:root[data-skin="modern"] .aseel-doc input:not([type="checkbox"]):not([type="radio"]),
-:root[data-skin="modern"] .aseel-doc select {
+:root[data-skin="modern"] .ktra-input,
+:root[data-skin="modern"] .ktra-doc input:not([type="checkbox"]):not([type="radio"]),
+:root[data-skin="modern"] .ktra-doc select {
   background: var(--color-surface);
   border-color: var(--color-border);
   border-radius: var(--radius-md);
 }
-:root[data-skin="modern"] .aseel-doc input:focus,
-:root[data-skin="modern"] .aseel-doc select:focus {
+:root[data-skin="modern"] .ktra-doc input:focus,
+:root[data-skin="modern"] .ktra-doc select:focus {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 /* شبكة البنود: رأس أوضح، خطوط أنعم — بلا أي تغيير في الارتفاعات */
-:root[data-skin="modern"] .aseel-grid thead th {
+:root[data-skin="modern"] .ktra-grid thead th {
   background: var(--color-surface-3);
   color: var(--color-text);
   font-weight: 600;
   border-color: var(--color-border);
 }
-:root[data-skin="modern"] .aseel-grid tbody td { border-color: var(--color-border); }
-:root[data-skin="modern"] .aseel-grid input:focus,
-:root[data-skin="modern"] .aseel-grid select:focus {
+:root[data-skin="modern"] .ktra-grid tbody td { border-color: var(--color-border); }
+:root[data-skin="modern"] .ktra-grid input:focus,
+:root[data-skin="modern"] .ktra-grid select:focus {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 16%, transparent);
 }
-:root[data-skin="modern"] .aseel-grid tbody tr.aseel-row--total td {
+:root[data-skin="modern"] .ktra-grid tbody tr.ktra-row--total td {
   background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
   border-top-color: var(--color-border);
 }
-:root[data-skin="modern"] .aseel-gridwrap {
+:root[data-skin="modern"] .ktra-gridwrap {
   border-top-color: var(--color-border);
   border-bottom-color: var(--color-border);
 }
 /* أقسام النموذج: بطاقة بيضاء بعنوان بحد سفلي خفيف */
-:root[data-skin="modern"] .aseel-form-section {
+:root[data-skin="modern"] .ktra-form-section {
   background: var(--color-surface);
   border-color: var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
 }
-:root[data-skin="modern"] .aseel-form-section-title {
+:root[data-skin="modern"] .ktra-form-section-title {
   color: var(--color-text);
   font-weight: 600;
   border-bottom: 1px solid var(--color-border);
 }
 /* رصيف المجاميع */
-:root[data-skin="modern"] .aseel-totals {
+:root[data-skin="modern"] .ktra-totals {
   background: var(--color-surface);
   border-color: var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
   padding: 6px 8px;
 }
-:root[data-skin="modern"] .aseel-total-row--grand {
+:root[data-skin="modern"] .ktra-total-row--grand {
   border-top-color: var(--color-border);
   color: var(--color-text);
 }
-:root[data-skin="modern"] .aseel-total-value {
+:root[data-skin="modern"] .ktra-total-value {
   background: var(--color-surface-2);
   border-color: var(--color-border);
   border-radius: var(--radius-sm);
 }
-:root[data-skin="modern"] .aseel-pagination {
+:root[data-skin="modern"] .ktra-pagination {
   background: var(--color-surface);
   border-color: var(--color-border);
   border-radius: var(--radius-md);
 }
-:root[data-skin="modern"] .aseel-pagination button,
-:root[data-skin="modern"] .aseel-btn {
+:root[data-skin="modern"] .ktra-pagination button,
+:root[data-skin="modern"] .ktra-btn {
   border-color: var(--color-border);
   border-radius: var(--radius-md);
 }
-:root[data-skin="modern"] .aseel-report-toolbar {
+:root[data-skin="modern"] .ktra-report-toolbar {
   background: var(--color-surface);
   border-color: var(--color-border);
   border-radius: var(--radius-md);
@@ -1997,11 +2009,11 @@ tbody td {
 
 /* ───────── M2-T3: التبويبات + الشجرة + المنبثقات + شريط الحالة ───────── */
 /* تبويبات underline بدل المستطيلات المحفورة */
-:root[data-skin="modern"] .aseel-tabs {
+:root[data-skin="modern"] .ktra-tabs {
   gap: 4px;
   border-bottom: 1px solid var(--color-border);
 }
-:root[data-skin="modern"] .aseel-tab {
+:root[data-skin="modern"] .ktra-tab {
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
@@ -2010,104 +2022,104 @@ tbody td {
   font-weight: 500;
   margin-bottom: -1px;
 }
-:root[data-skin="modern"] .aseel-tab:hover:not(.aseel-tab--active) {
+:root[data-skin="modern"] .ktra-tab:hover:not(.ktra-tab--active) {
   background: transparent;
   border-bottom-color: var(--color-border);
   color: var(--color-text);
 }
-:root[data-skin="modern"] .aseel-tab--active {
+:root[data-skin="modern"] .ktra-tab--active {
   background: transparent;
   border-bottom-color: var(--color-primary);
   color: var(--color-primary);
   font-weight: 600;
   box-shadow: none;
 }
-:root[data-skin="modern"] .aseel-tabpanel {
+:root[data-skin="modern"] .ktra-tabpanel {
   background: transparent;
   border: none;
   padding: 8px 4px;
 }
-:root[data-skin="modern"] .aseel-bottom { border-top-color: var(--color-border); }
+:root[data-skin="modern"] .ktra-bottom { border-top-color: var(--color-border); }
 /* الشجرة الجانبية */
-:root[data-skin="modern"] .aseel-tree-panel {
+:root[data-skin="modern"] .ktra-tree-panel {
   background: var(--color-surface);
   border-color: var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
 }
-:root[data-skin="modern"] .aseel-tree-head,
-:root[data-skin="modern"] .aseel-tree-search,
-:root[data-skin="modern"] .aseel-tree-actions,
-:root[data-skin="modern"] .aseel-tree-toolbar { border-bottom-color: var(--color-border); }
-:root[data-skin="modern"] .aseel-tree-node:hover,
-:root[data-skin="modern"] .aseel-tree-leaf:hover:not(:disabled),
-:root[data-skin="modern"] .aseel-tree-cat:hover { background: var(--color-surface-3); }
-:root[data-skin="modern"] .aseel-tree-rail {
+:root[data-skin="modern"] .ktra-tree-head,
+:root[data-skin="modern"] .ktra-tree-search,
+:root[data-skin="modern"] .ktra-tree-actions,
+:root[data-skin="modern"] .ktra-tree-toolbar { border-bottom-color: var(--color-border); }
+:root[data-skin="modern"] .ktra-tree-node:hover,
+:root[data-skin="modern"] .ktra-tree-leaf:hover:not(:disabled),
+:root[data-skin="modern"] .ktra-tree-cat:hover { background: var(--color-surface-3); }
+:root[data-skin="modern"] .ktra-tree-rail {
   background: var(--color-surface);
   border-color: var(--color-border);
   border-radius: var(--radius-lg);
 }
-:root[data-skin="modern"] .aseel-tree-rail:hover { background: var(--color-surface-3); }
+:root[data-skin="modern"] .ktra-tree-rail:hover { background: var(--color-surface-3); }
 /* منبثقات: زوايا أنعم وظل أوضح */
-:root[data-skin="modern"] .aseel-autocomplete-pop,
-:root[data-skin="modern"] .aseel-ctxmenu,
-:root[data-skin="modern"] .aseel-date-cal {
+:root[data-skin="modern"] .ktra-autocomplete-pop,
+:root[data-skin="modern"] .ktra-ctxmenu,
+:root[data-skin="modern"] .ktra-date-cal {
   border-color: var(--color-border);
   border-radius: var(--radius-lg);
 }
-:root[data-skin="modern"] .aseel-autocomplete-row--sel,
-:root[data-skin="modern"] .aseel-ctxmenu-item:hover { background: var(--color-surface-3); }
-:root[data-skin="modern"] .aseel-picker {
+:root[data-skin="modern"] .ktra-autocomplete-row--sel,
+:root[data-skin="modern"] .ktra-ctxmenu-item:hover { background: var(--color-surface-3); }
+:root[data-skin="modern"] .ktra-picker {
   background: var(--color-surface);
   border-left-color: var(--color-border);
 }
-:root[data-skin="modern"] .aseel-picker-head {
+:root[data-skin="modern"] .ktra-picker-head {
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text);
 }
-:root[data-skin="modern"] .aseel-picker-foot { border-top-color: var(--color-border); }
+:root[data-skin="modern"] .ktra-picker-foot { border-top-color: var(--color-border); }
 /* شريط الحالة: سطر رفيع بدل اللوح الداكن */
-:root[data-skin="modern"] .aseel-statusbar {
+:root[data-skin="modern"] .ktra-statusbar {
   padding: 5px 12px;
   gap: 16px;
   border-top: 1px solid var(--color-border);
   font-size: var(--font-size-sm);
   font-weight: 500;
 }
-:root[data-skin="modern"] .aseel-status-item b {
+:root[data-skin="modern"] .ktra-status-item b {
   padding: 1px 7px;
   border-radius: var(--radius-sm);
   font-weight: 700;
   font-size: var(--font-size-sm);
 }
 /* بانرات وشارات: حواف حديثة (الألوان أصلاً من توكنات M1) */
-:root[data-skin="modern"] .aseel-banner,
-:root[data-skin="modern"] .aseel-note { border-radius: var(--radius-md); }
-:root[data-skin="modern"] .aseel-badge-state,
-:root[data-skin="modern"] .aseel-badge-ok,
-:root[data-skin="modern"] .aseel-badge-neutral { border-radius: var(--radius-full); padding: 1px 8px; }
+:root[data-skin="modern"] .ktra-banner,
+:root[data-skin="modern"] .ktra-note { border-radius: var(--radius-md); }
+:root[data-skin="modern"] .ktra-badge-state,
+:root[data-skin="modern"] .ktra-badge-ok,
+:root[data-skin="modern"] .ktra-badge-neutral { border-radius: var(--radius-full); padding: 1px 8px; }
 
 /* ───────── T-WIN: النافذة العائمة والشريط في الجلد الحديث ─────────
    الشكل الاحترافي: زاوية كبيرة، حدٌّ خافت، ارتفاعٌ حقيقي بظلّين، ودخولٌ
    بتكبير طفيف. الأصيل لا يرى شيئاً من هذا — محدِّدُه ‎[data-skin="modern"]. */
-:root[data-skin="modern"] .aseel-float-win {
+:root[data-skin="modern"] .ktra-float-win {
   border-radius: var(--radius-xl);
   border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
   box-shadow: var(--elev-5);
   background: var(--color-surface);
 }
-:root[data-skin="modern"] .aseel-float-win__bar {
+:root[data-skin="modern"] .ktra-float-win__bar {
   padding: 8px 12px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
 }
-:root[data-skin="modern"] .aseel-float-win__title {
+:root[data-skin="modern"] .ktra-float-win__title {
   font-size: var(--font-size-sm);
   color: var(--color-text);
 }
-:root[data-skin="modern"] .aseel-float-win__body { background: var(--color-surface); }
-:root[data-skin="modern"] .aseel-float-win__foot {
+:root[data-skin="modern"] .ktra-float-win__body { background: var(--color-surface); }
+:root[data-skin="modern"] .ktra-float-win__foot {
   padding: 8px 12px;
   border-top-color: var(--color-border);
   background: var(--color-surface);
@@ -2122,17 +2134,17 @@ tbody td {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-:root[data-skin="modern"] .aseel-float-win {
+:root[data-skin="modern"] .ktra-float-win {
   animation: ktra-win-in var(--motion-win) ease-out 1;
   transform-origin: center;
 }
-:root[data-skin="modern"] .aseel-float-mask--dim {
+:root[data-skin="modern"] .ktra-float-mask--dim {
   animation: ktra-mask-in var(--motion-win) ease-out 1;
 }
 /* أثناء السحب لا حركة دخول تُعيد ضبط التحويل تحت المؤشر. */
-:root[data-skin="modern"] .aseel-float-win--busy { animation: none; }
+:root[data-skin="modern"] .ktra-float-win--busy { animation: none; }
 
-:root[data-skin="modern"] .aseel-rail {
+:root[data-skin="modern"] .ktra-rail {
   border-radius: var(--radius-2xl);
   border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
   box-shadow: var(--elev-3);
@@ -2141,10 +2153,10 @@ tbody td {
   gap: 5px;
   transition: box-shadow var(--transition-fast), opacity var(--transition-fast);
 }
-:root[data-skin="modern"] .aseel-rail:hover { box-shadow: var(--elev-4); }
-:root[data-skin="modern"] .aseel-rail--busy { box-shadow: var(--elev-5); }
-:root[data-skin="modern"] .aseel-rail .aseel-toolbtn { border-radius: var(--radius-lg); }
-:root[data-skin="modern"] .aseel-dockzone {
+:root[data-skin="modern"] .ktra-rail:hover { box-shadow: var(--elev-4); }
+:root[data-skin="modern"] .ktra-rail--busy { box-shadow: var(--elev-5); }
+:root[data-skin="modern"] .ktra-rail .ktra-toolbtn { border-radius: var(--radius-lg); }
+:root[data-skin="modern"] .ktra-dockzone {
   border-radius: var(--radius-2xl);
   border-color: var(--color-primary);
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
@@ -2154,23 +2166,23 @@ tbody td {
 /* ───────── T-WIN: تلميع عام يرثه كل ما يطفو ─────────
    حلقة تركيز واحدة مرئية بالكيبورد لكل أزرار الأدوات، وسطوحٌ منبثقة
    بارتفاعٍ حقيقي بدل الظلّ المسطّح — تنعكس على كل الشاشات بلا لمسها. */
-:root[data-skin="modern"] .aseel-toolbtn:focus-visible,
-:root[data-skin="modern"] .aseel-btn:focus-visible,
-:root[data-skin="modern"] .aseel-iconbtn:focus-visible,
-:root[data-skin="modern"] .aseel-tab:focus-visible {
+:root[data-skin="modern"] .ktra-toolbtn:focus-visible,
+:root[data-skin="modern"] .ktra-btn:focus-visible,
+:root[data-skin="modern"] .ktra-iconbtn:focus-visible,
+:root[data-skin="modern"] .ktra-tab:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 1px;
   border-radius: var(--radius-md);
 }
-:root[data-skin="modern"] .aseel-picker { box-shadow: var(--elev-5); }
-:root[data-skin="modern"] .aseel-picker-mask,
+:root[data-skin="modern"] .ktra-picker { box-shadow: var(--elev-5); }
+:root[data-skin="modern"] .ktra-picker-mask,
 :root[data-skin="modern"] .ktra-overlay-mask { background: var(--overlay-mask); }
-:root[data-skin="modern"] .aseel-autocomplete-pop,
-:root[data-skin="modern"] .aseel-ctxmenu {
+:root[data-skin="modern"] .ktra-autocomplete-pop,
+:root[data-skin="modern"] .ktra-ctxmenu {
   border-radius: var(--radius-lg);
   box-shadow: var(--elev-4);
 }
-:root[data-skin="modern"] .aseel-form-section { border-radius: var(--radius-lg); }
+:root[data-skin="modern"] .ktra-form-section { border-radius: var(--radius-lg); }
 
 /* ───────── T-WIN M5: تلميع الجلد الحديث مركزيّاً ─────────
    كل ما هنا يمسّ الجلد الحديث وحده، ويصل الخمسين شاشة من غير أن تُلمس واحدة
@@ -2178,99 +2190,99 @@ tbody td {
 
 /* الأسطح المرتفعة: البطاقات واللوحات والشجرة — زاويةٌ أكبر وحدٌّ أخفت وظلٌّ
    حقيقي بدل الحدّ الصلب الذي ورثناه من الطرفية المحاسبية. */
-:root[data-skin="modern"] .aseel-doc,
-:root[data-skin="modern"] .aseel-tree-panel {
+:root[data-skin="modern"] .ktra-doc,
+:root[data-skin="modern"] .ktra-tree-panel {
   border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
 }
-:root[data-skin="modern"] .aseel-form-section {
+:root[data-skin="modern"] .ktra-form-section {
   box-shadow: var(--elev-1);
   border-color: color-mix(in srgb, var(--color-border) 70%, transparent);
 }
-:root[data-skin="modern"] .aseel-totals {
+:root[data-skin="modern"] .ktra-totals {
   border-radius: var(--radius-lg);
   box-shadow: var(--elev-1);
 }
 
 /* الأزرار: زاويةٌ موحّدة وردُّ فعلٍ محسوس عند الضغط (رفع خفيف ثم هبوط). */
-:root[data-skin="modern"] .aseel-btn,
-:root[data-skin="modern"] .aseel-btn-primary {
+:root[data-skin="modern"] .ktra-btn,
+:root[data-skin="modern"] .ktra-btn-primary {
   border-radius: var(--radius-lg);
   transition: background var(--transition-fast), box-shadow var(--transition-fast),
               transform var(--transition-fast);
 }
-:root[data-skin="modern"] .aseel-btn-primary { box-shadow: var(--elev-1); }
-:root[data-skin="modern"] .aseel-btn-primary:hover:not(:disabled) { box-shadow: var(--elev-2); }
-:root[data-skin="modern"] .aseel-btn:active:not(:disabled),
-:root[data-skin="modern"] .aseel-btn-primary:active:not(:disabled) {
+:root[data-skin="modern"] .ktra-btn-primary { box-shadow: var(--elev-1); }
+:root[data-skin="modern"] .ktra-btn-primary:hover:not(:disabled) { box-shadow: var(--elev-2); }
+:root[data-skin="modern"] .ktra-btn:active:not(:disabled),
+:root[data-skin="modern"] .ktra-btn-primary:active:not(:disabled) {
   transform: translateY(1px);
   box-shadow: var(--elev-1);
 }
 
 /* التبويبات: الحدّ السفلي وحده يتحرّك — لا قفزة تخطيط. */
-:root[data-skin="modern"] .aseel-tab {
+:root[data-skin="modern"] .ktra-tab {
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
-:root[data-skin="modern"] .aseel-tab:hover:not(.aseel-tab--active) {
+:root[data-skin="modern"] .ktra-tab:hover:not(.ktra-tab--active) {
   background: var(--color-surface-2);
 }
 
 /* صفوف الجداول: تمييزٌ لطيف تحت المؤشر بدل قفزة لونية. */
-:root[data-skin="modern"] .aseel-grid tbody tr:hover td,
-:root[data-skin="modern"] .aseel-dense-table tbody tr:hover td {
+:root[data-skin="modern"] .ktra-grid tbody tr:hover td,
+:root[data-skin="modern"] .ktra-dense-table tbody tr:hover td {
   background: color-mix(in srgb, var(--color-primary) 5%, transparent);
 }
 
 /* شريط الحالة واللوح الجانبي: انفصالٌ بالظلّ لا بخطٍّ صلب. */
-:root[data-skin="modern"] .aseel-statusbar { box-shadow: var(--elev-1); }
-:root[data-skin="modern"] .aseel-picker { border-radius: var(--radius-xl) 0 0 var(--radius-xl); }
-:root[data-skin="modern"] .aseel-sidepanel { border-radius: var(--radius-xl) 0 0 var(--radius-xl); }
+:root[data-skin="modern"] .ktra-statusbar { box-shadow: var(--elev-1); }
+:root[data-skin="modern"] .ktra-picker { border-radius: var(--radius-xl) 0 0 var(--radius-xl); }
+:root[data-skin="modern"] .ktra-sidepanel { border-radius: var(--radius-xl) 0 0 var(--radius-xl); }
 
 /* حقول الإدخال: حلقة تركيز واحدة في كل الشاشات. */
-:root[data-skin="modern"] .aseel-input:focus-visible,
-:root[data-skin="modern"] .aseel-doc input:focus-visible,
-:root[data-skin="modern"] .aseel-doc select:focus-visible {
+:root[data-skin="modern"] .ktra-input:focus-visible,
+:root[data-skin="modern"] .ktra-doc input:focus-visible,
+:root[data-skin="modern"] .ktra-doc select:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--color-primary) 55%, transparent);
   outline-offset: 0;
 }
 
 /* الحركة اختيار لا فرض — من أطفأها في نظامه لا يراها. */
 @media (prefers-reduced-motion: reduce) {
-  :root[data-skin="modern"] .aseel-float-win,
-  :root[data-skin="modern"] .aseel-float-mask--dim { animation: none; }
-  :root[data-skin="modern"] .aseel-rail,
-  :root[data-skin="modern"] .aseel-dockzone,
-  :root[data-skin="modern"] .aseel-btn,
-  :root[data-skin="modern"] .aseel-btn-primary,
-  :root[data-skin="modern"] .aseel-tab { transition: none; }
-  :root[data-skin="modern"] .aseel-btn:active:not(:disabled),
-  :root[data-skin="modern"] .aseel-btn-primary:active:not(:disabled) { transform: none; }
+  :root[data-skin="modern"] .ktra-float-win,
+  :root[data-skin="modern"] .ktra-float-mask--dim { animation: none; }
+  :root[data-skin="modern"] .ktra-rail,
+  :root[data-skin="modern"] .ktra-dockzone,
+  :root[data-skin="modern"] .ktra-btn,
+  :root[data-skin="modern"] .ktra-btn-primary,
+  :root[data-skin="modern"] .ktra-tab { transition: none; }
+  :root[data-skin="modern"] .ktra-btn:active:not(:disabled),
+  :root[data-skin="modern"] .ktra-btn-primary:active:not(:disabled) { transform: none; }
 }
 
 /* ── N9-T4: Mobile RTL — headband single col <640px, toolbar 2 rows ── */
 @media (max-width: 640px) {
-  :root[data-skin] .aseel-headband {
+  :root[data-skin] .ktra-headband {
     flex-direction: column !important;
     align-items: stretch !important;
     gap: 2px !important;
     padding: 4px !important;
   }
-  :root[data-skin] .aseel-headband > .aseel-field {
+  :root[data-skin] .ktra-headband > .ktra-field {
     flex: 1 1 auto !important;
     max-width: none !important;
   }
-  :root[data-skin] .aseel-toolbar {
+  :root[data-skin] .ktra-toolbar {
     flex-wrap: wrap !important;
     gap: 2px !important;
   }
-  :root[data-skin] .aseel-toolbar .aseel-toolbar-group {
+  :root[data-skin] .ktra-toolbar .ktra-toolbar-group {
     flex: 1 1 45% !important;
     min-width: 0 !important;
   }
-  :root[data-skin] .aseel-grid {
+  :root[data-skin] .ktra-grid {
     font-size: 10px !important;
   }
-  :root[data-skin] .aseel-doc {
+  :root[data-skin] .ktra-doc {
     padding: 2px !important;
   }
 }
@@ -2282,58 +2294,58 @@ tbody td {
    ════════════════════════════════════════════════════════════════ */
 @media (max-width: 767px) {
   /* الشريط العلوي يلتف ويترك مساحة للهيدر العائم لزر القائمة (h-14) */
-  :root[data-skin] .aseel-titlebar {
+  :root[data-skin] .ktra-titlebar {
     flex-wrap: wrap;
     row-gap: 4px;
     padding: 6px 8px;
     padding-top: 60px;
   }
-  :root[data-skin] .aseel-company {
+  :root[data-skin] .ktra-company {
     flex-wrap: wrap;
     gap: 6px;
     width: 100%;
   }
   /* أدوات اليمين (بحث/كثافة/سمة) تأخذ سطراً كاملاً وتتمدد */
-  :root[data-skin] .aseel-titlebar > .ms-auto {
+  :root[data-skin] .ktra-titlebar > .ms-auto {
     width: 100%;
     justify-content: flex-start;
     flex-wrap: wrap;
   }
 
   /* شريط الحالة السفلي مخفي على الجوال (زخرفي) لتوفير مساحة الشاشة */
-  :root[data-skin] .aseel-statusbar { display: none; }
+  :root[data-skin] .ktra-statusbar { display: none; }
 
   /* الجداول الكثيفة: تمرير أفقي بدل ضغط الأعمدة */
-  :root[data-skin] .aseel-gridwrap,
-  :root[data-skin] .aseel-grid-wrap,
-  :root[data-skin] .aseel-doc .aseel-bottom,
-  :root[data-skin] .aseel-dense-table {
+  :root[data-skin] .ktra-gridwrap,
+  :root[data-skin] .ktra-grid-wrap,
+  :root[data-skin] .ktra-doc .ktra-bottom,
+  :root[data-skin] .ktra-dense-table {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  :root[data-skin] .aseel-grid { min-width: max-content; }
+  :root[data-skin] .ktra-grid { min-width: max-content; }
 
   /* أشرطة الأدوات تلتف وتكبر مساحة اللمس */
-  :root[data-skin] .aseel-toolbar { flex-wrap: wrap; gap: 3px; padding: 3px 6px; }
-  :root[data-skin] .aseel-toolbtn { min-height: 34px; }
+  :root[data-skin] .ktra-toolbar { flex-wrap: wrap; gap: 3px; padding: 3px 6px; }
+  :root[data-skin] .ktra-toolbtn { min-height: 34px; }
 
   /* المنتقيات الجانبية تصبح بملء العرض على الجوال */
-  :root[data-skin] .aseel-picker {
+  :root[data-skin] .ktra-picker {
     width: 100vw !important;
     max-width: 100vw;
   }
-  :root[data-skin] .aseel-picker-mask { justify-content: stretch; }
+  :root[data-skin] .ktra-picker-mask { justify-content: stretch; }
 
   /* حقول الإدخال أطول للمس + خط 16px يمنع التكبير التلقائي في iOS */
-  :root[data-skin] .aseel-input,
-  :root[data-skin] .aseel-doc input:not([type="checkbox"]):not([type="radio"]),
-  :root[data-skin] .aseel-doc select {
+  :root[data-skin] .ktra-input,
+  :root[data-skin] .ktra-doc input:not([type="checkbox"]):not([type="radio"]),
+  :root[data-skin] .ktra-doc select {
     min-height: 38px;
     font-size: 16px;
   }
 
   /* T-WIN: النافذة العائمة لوحٌ ملء الشاشة — لا سحب ولا تحجيم (عرف صناعي). */
-  :root[data-skin] .aseel-float-win {
+  :root[data-skin] .ktra-float-win {
     left: 0 !important;
     top: 0 !important;
     width: 100vw !important;
@@ -2341,30 +2353,30 @@ tbody td {
     border-radius: 0;
     border: none;
   }
-  :root[data-skin] .aseel-float-win__bar { cursor: default; }
-  :root[data-skin] .aseel-float-win__grip { display: none; }
+  :root[data-skin] .ktra-float-win__bar { cursor: default; }
+  :root[data-skin] .ktra-float-win__grip { display: none; }
 
   /* T-WIN: الشريط يعود إلى شريط العنوان — لا رفٌّ عائم يزاحم شاشةً ضيّقة. */
-  :root[data-skin] .aseel-rail,
-  :root[data-skin] .aseel-dockzone { display: none; }
+  :root[data-skin] .ktra-rail,
+  :root[data-skin] .ktra-dockzone { display: none; }
 }
 
 /* ── N9-T5: Print CSS ───────────────────────────────────
    القيم هنا صلبة عمداً (أسود على أبيض) ولا تُشتق من توكنات الجلد: الورق
    واحد في الجلدين، وربطه بالمظهر يطبع خلفيات داكنة. لا تحوّلها لمتغيرات. */
 @media print {
-  :root[data-skin] .aseel-app-chrome,
-  :root[data-skin] .aseel-sidebar,
-  :root[data-skin] .aseel-sidebar-spacer,
-  :root[data-skin] .aseel-toolbar,
-  :root[data-skin] .aseel-actionbar,
-  :root[data-skin] .aseel-statusbar-global,
-  :root[data-skin] .aseel-doc-statusbar,
-  /* M5: الكلاس الفعلي الذي يرسمه AseelDocumentShell كان غائباً عن القائمة
+  :root[data-skin] .ktra-app-chrome,
+  :root[data-skin] .ktra-sidebar,
+  :root[data-skin] .ktra-sidebar-spacer,
+  :root[data-skin] .ktra-toolbar,
+  :root[data-skin] .ktra-actionbar,
+  :root[data-skin] .ktra-statusbar-global,
+  :root[data-skin] .ktra-doc-statusbar,
+  /* M5: الكلاس الفعلي الذي يرسمه KitDocumentShell كان غائباً عن القائمة
      (الموجودان أعلاه اسمان لا يستعملهما الشل) ⇒ شريط الحالة كان يُطبع. */
-  :root[data-skin] .aseel-statusbar,
-  :root[data-skin] .aseel-pagination,
-  :root[data-skin] .aseel-print-hidden {
+  :root[data-skin] .ktra-statusbar,
+  :root[data-skin] .ktra-pagination,
+  :root[data-skin] .ktra-print-hidden {
     display: none !important;
   }
   :root[data-skin] .app-shell,
@@ -2376,24 +2388,24 @@ tbody td {
     min-height: 0 !important;
     overflow: visible !important;
   }
-  :root[data-skin] .aseel-grid {
+  :root[data-skin] .ktra-grid {
     width: 100% !important;
     font-size: 9pt !important;
     border-collapse: collapse !important;
   }
-  :root[data-skin] .aseel-grid th,
-  :root[data-skin] .aseel-grid td {
+  :root[data-skin] .ktra-grid th,
+  :root[data-skin] .ktra-grid td {
     border: 1px solid #000 !important;
     padding: 3px 4px !important;
   }
-  :root[data-skin] .aseel-doc {
+  :root[data-skin] .ktra-doc {
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
     background: #fff !important;
     color: #000 !important;
   }
-  :root[data-skin] .aseel-doc-titlebar h2:after {
+  :root[data-skin] .ktra-doc-titlebar h2:after {
     content: " — مطبوع";
     font-size: 10pt;
     color: #666;

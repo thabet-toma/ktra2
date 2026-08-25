@@ -24,7 +24,7 @@ const memoryStorage = (seed: Record<string, string> = {}) => {
 test('مفتاح الحفظ يجمع نطاق الجدول وأعمدته', () => {
   assert.equal(
     columnWidthsKey('/super-admin/development-notes', ['title', 'status']),
-    'aseel_table_widths_/super-admin/development-notes_title,status',
+    'ktra_table_widths_/super-admin/development-notes_title,status',
   );
 });
 

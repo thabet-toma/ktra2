@@ -195,11 +195,11 @@ const openPurchaseEditor = async (page: Page) => {
 
 /** المورد شرط الحفظ في محرر الشراء — يُختار من الفهرس كما يفعل المستخدم. */
 const pickSupplier = async (page: Page) => {
-  await page.locator('[data-aseel-field="supplier"]').click();
+  await page.locator('[data-ktra-field="supplier"]').click();
   const search = page.getByPlaceholder(/بحث… \(Enter اختيار/);
   await search.fill('مورد اللابتوبات');
   await search.press('Enter');
-  await expect(page.locator('[data-aseel-field="supplier"]')).toHaveValue('#8');
+  await expect(page.locator('[data-ktra-field="supplier"]')).toHaveValue('#8');
 };
 
 test('الشراء بنمط «معطّل»: لا عمود أرقام ولا أثر على الشبكة', async ({ page }) => {
@@ -255,7 +255,7 @@ test('الشراء: صندوق الباركود يُدخل الصنف على ا�
   await install(page, state);
   await openPurchaseEditor(page);
 
-  const box = page.locator('[data-aseel-field="barcode"]');
+  const box = page.locator('[data-ktra-field="barcode"]');
   await expect(box).toBeVisible();
   await box.fill('2000000000015');
   await box.press('Enter');

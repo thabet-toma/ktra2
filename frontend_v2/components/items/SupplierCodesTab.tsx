@@ -112,7 +112,7 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
 
   if (!productId) {
     return (
-      <div className="p-4 text-sm aseel-text-soft">
+      <div className="p-4 text-sm ktra-text-soft">
         احفظ الصنف أوّلاً، ثم اربط أرقام مورّديه به.
       </div>
     );
@@ -120,7 +120,7 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
 
   return (
     <div className="space-y-3 p-2">
-      <p className="text-xs aseel-text-soft">
+      <p className="text-xs ktra-text-soft">
         رقم هذا الصنف في كتالوج كل مورّد — به تُطابَق فاتورته، وبه يجده البحث
         ومنتقي بنود الفاتورة. للصنف الواحد رقمٌ عند كل مورّد، وللمورّد الواحد
         أكثر من رقم إن بدّل ترقيمه.
@@ -135,9 +135,9 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
       {!readOnly && (
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1">
-            <span className="text-xs aseel-text-soft">المورّد</span>
+            <span className="text-xs ktra-text-soft">المورّد</span>
             <select
-              className="aseel-input"
+              className="ktra-input"
               value={supplierId}
               onChange={(e) => setSupplierId(e.target.value)}
               data-testid="supplier-code-partner"
@@ -149,9 +149,9 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs aseel-text-soft">رقمه للصنف (מק"ט)</span>
+            <span className="text-xs ktra-text-soft">رقمه للصنف (מק"ט)</span>
             <input
-              className="aseel-input"
+              className="ktra-input"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="3068.82"
@@ -159,16 +159,16 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs aseel-text-soft">اسمه عنده (اختياري)</span>
+            <span className="text-xs ktra-text-soft">اسمه عنده (اختياري)</span>
             <input
-              className="aseel-input"
+              className="ktra-input"
               value={supplierItemName}
               onChange={(e) => setSupplierItemName(e.target.value)}
             />
           </label>
           <button
             type="button"
-            className="aseel-toolbtn"
+            className="ktra-toolbtn"
             disabled={saving}
             onClick={() => void add()}
             data-testid="supplier-code-add"
@@ -191,11 +191,11 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={4} className="p-3 text-center aseel-text-soft">…تحميل</td></tr>
+              <tr><td colSpan={4} className="p-3 text-center ktra-text-soft">…تحميل</td></tr>
             )}
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={4} className="p-3 text-center aseel-text-soft">
+                <td colSpan={4} className="p-3 text-center ktra-text-soft">
                   لا أرقام بعد — أضف رقم المورّد لتُطابَق فاتورته به.
                 </td>
               </tr>
@@ -204,12 +204,12 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
               <tr key={row.id}>
                 <td className="p-1">{row.supplier_display_name}</td>
                 <td className="p-1 font-mono">{row.supplier_sku}</td>
-                <td className="p-1 aseel-text-soft">{row.supplier_name || "—"}</td>
+                <td className="p-1 ktra-text-soft">{row.supplier_name || "—"}</td>
                 {!readOnly && (
                   <td className="p-1">
                     <button
                       type="button"
-                      className="aseel-iconbtn aseel-iconbtn--danger"
+                      className="ktra-iconbtn ktra-iconbtn--danger"
                       disabled={saving}
                       onClick={() => void remove(row)}
                       title="حذف"
