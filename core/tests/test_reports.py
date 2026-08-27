@@ -49,7 +49,7 @@ class ReportEngineTest(APITestCase):
         cls.supplier = Partner.objects.create(
             tenant=cls.tenant, name="مورد التقارير", partner_type="Supplier")
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="RPT-1", name_ar="صنف التقارير",
+            tenant=cls.tenant, sku="RPT-1", name_ar="منتج التقارير",
             brand="ماركة", quantity_on_hand=Decimal("10"), avg_cost=Decimal("4"),
             min_stock_level=20,
         )
@@ -167,7 +167,7 @@ class ReportEngineTest(APITestCase):
         self.assertEqual(Decimal(row["uncosted_qty"]), Decimal("5"))
 
     def test_sales_by_product_reads_cost_from_the_stock_movement(self):
-        """وبوجود الحركة تُقرأ تكلفتها هي — لا متوسط الصنف اليوم (4)."""
+        """وبوجود الحركة تُقرأ تكلفتها هي — لا متوسط المنتج اليوم (4)."""
         StockMovement.objects.create(
             tenant=self.tenant, product=self.product, movement_type="OUT",
             quantity=Decimal("5"), unit_cost=Decimal("6"), total_cost=Decimal("30"),
@@ -203,6 +203,8 @@ class ReportEngineTest(APITestCase):
     #: يُشغَّل كلٌّ منها بنطاقه بدل تعطيل الحارس عنه.
     NARROW_PERIOD_REPORTS = {
         "timesheet-daily": {"from": "2026-08-01", "to": "2026-08-31"},
+        # T-HR: شبكة الحضور عمودٌ لكل يوم كذلك — نفس سقف الأعمدة ونفس السبب.
+        "hr-attendance-grid": {"from": "2026-08-01", "to": "2026-08-31"},
     }
 
     def test_every_report_runs_without_error(self):

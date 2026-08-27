@@ -23,15 +23,15 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | App | المسؤولية | كود | اختبار | مسار الـAPI |
 |---|---|---:|---:|---|
 | `logistics` | الاستيراد والمشتريات: صفقة ← شحنة ← تخليص ← نقل ← فاتورة دولية + التكلفة المستوردة | 18,800 | 10,600 | `/api/logistics/` |
-| `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة، الداشبورد، المساعد الذكي | 15,200 | 7,900 | `/api/` (متفرّق) |
+| `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة، الداشبورد، المساعد الذكي | 15,700 | 7,900 | `/api/` (متفرّق) |
 | `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 12,400 | 6,400 | `/api/accounting/` |
 | `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 11,300 | 8,200 | `/api/sales/` |
-| `inventory` | الأصناف والمستودعات و`StockMovement` (المصدر الوحيد للرصيد ومتوسط التكلفة) والأرقام التسلسلية وحالة المخزون وحدود التجديد | 5,600 | 3,400 | `/api/inventory/` |
+| `hr` | الموظفون والرواتب والحضور الجغرافي والورديات والعقود والطلبات والسلف والخدمة الذاتية | 7,100 | 3,900 | `/api/hr/` |
+| `inventory` | المنتجات والمستودعات و`StockMovement` (المصدر الوحيد للرصيد ومتوسط التكلفة) والأرقام التسلسلية وحالة المخزون وحدود التجديد | 5,600 | 3,400 | `/api/inventory/` |
 | `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية — وفوقها **طبقة مكتب** بنطاق `accountant=` لا `tenant=`: زبائن المكتب (ولو لم يكونوا شركات على المنصة) وبرامجه ومواعيده ومستنداته | 4,600 | 3,800 | `/api/accountant/` |
-| `hr` | الموظفون والرواتب والحضور والمهام | 2,200 | 1,200 | `/api/hr/` |
 | `after_sales` | بطاقات الكفالة وأوامر الصيانة — **وحدة مرخّصة** | 2,200 | 1,600 | `/api/after-sales/` |
 | `tenants` | تعريف الشركة وعزلها: الأعضاء، الأدوار، الفروع، دفاتر الترقيم، إقلاع شركة جديدة | 2,100 | 1,400 | `/api/tenants/` |
-| `store` | المتجر العام: خمس نقاط قراءة **بلا مصادقة** مُقيَّدة بـ`Tenant.store_slug`، ولوحة إدارته المصادَق عليها (مظهر · صور · حملات · أصناف متجر) | 1,400 | 1,800 | `/api/store/` |
+| `store` | المتجر العام: خمس نقاط قراءة **بلا مصادقة** مُقيَّدة بـ`Tenant.store_slug`، ولوحة إدارته المصادَق عليها (مظهر · صور · حملات · منتجات متجر) | 1,400 | 1,800 | `/api/store/` |
 | `partners` | بطاقة الطرف الموحّدة (عميل/مورّد/…) وحساباتها البنكية وربطها بشجرة الحسابات | 1,200 | 800 | `/api/partners/` |
 | `docshare` | مشاركة المستند برابط عام: صفحة **بلا مصادقة** يفتحها الزبون (‏HTML خادمي بوسوم Open Graph لمعاينة واتساب) + قبول/رفض عرض السعر منها | 1,100 | 700 | `/s/` · `/api/share/` · `/api/document-shares/` |
 | `import_file` | ملف الاستيراد: قائمة تحقّق مستندات ومهامّ لكل صفقة، ترسو على الصفقة أو على شحنتها — **وحدة مرخّصة، محايدة مالياً بالكامل** | 800 | 1,000 | `/api/import-file/` |
@@ -101,17 +101,19 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 المخالفات التاريخية (كتابة قيود مباشرة متجاوزةً `post_journal`) **عولجت في المرحلة 2** — كل الكتابة الخارجية الآن عبر `accounting/api.py`، ويحرسها عقد `no-direct-accounting-models` في `.importlinter`.
 
 ### 4. المخزون
-`quantity_on_hand` و `avg_cost` لا يتغيّران إلا عبر `inventory.services.record_stock_movement` (`inventory/services.py`) — الدالة الوحيدة التي تقفل الصنف بـ`select_for_update` وتحفظ لقطات before/after.
+`quantity_on_hand` و `avg_cost` لا يتغيّران إلا عبر `inventory.services.record_stock_movement` (`inventory/services.py`) — الدالة الوحيدة التي تقفل المنتج بـ`select_for_update` وتحفظ لقطات before/after.
 الصادر لا يغيّر `avg_cost` إطلاقاً؛ الوارد وحده يطبّق معادلة المتوسط المرجّح.
 
 ### 5. ترقيم المستندات
 عبر `tenants.TenantBook.get_next_number` وحده (`tenants/models.py`, `select_for_update` داخل `atomic`) — أو غلافه `accounting.services.next_document_number`.
 
 ### 6. الوحدات المرخّصة
-`core/modules.py` يحكم أي وحدة مفعّلة لأي شركة حسب الخطة. الوحدات المرخّصة (`import`, `accountant_portal`, `after_sales`, `sensitive_devices`) **ترد 404 لشركة غير مرخّصة** — لا 403.
+`core/modules.py` يحكم أي وحدة مفعّلة لأي شركة حسب الخطة. الوحدات المرخّصة (`import`, `import_file`, `accountant_portal`, `after_sales`, `sensitive_devices`, `hr_suite`) **ترد 404 لشركة غير مرخّصة** — لا 403.
+
+**و`hr_suite` وحدها بابان في تطبيق واحد**: الحضور والورديات والعقود والطلبات والخدمة الذاتية مرخّصة، وسطحُ الرواتب القديم (`employees`، `payslips`، `work-logs`…) **مفتوحٌ بلا ترخيص ولا يصير مرخّصاً** — حجبُه كان سيُطفئ رواتب شركاتٍ تشتغل عليه. كل ViewSet جديد يرث `hr/suite.py` (`HrSuiteViewSetBase`) ويُسجَّل على `suite_router`، وحارسٌ في `hr/tests/test_hr_suite_org.py` يمشي على الراوتر نفسه فيسقط إن أفلت واحدٌ من الوراثة.
 
 ### 7. الترقيم (pagination)
-صنفان في `core/pagination.py`:
+منتجان في `core/pagination.py`:
 - `EnforcedPageNumberPagination` — **إلزامي**، يُرقّم دائماً ولو لم يمرَّر `?page=`. مفروض على نقاط «الفئة أ» (حركات المخزون، القيود، فواتير البيع والشراء، الصفقات، المدفوعات) بعد P0-5، وعلى قائمة المتجر العام (`store/views.py`) لأنها كتالوج ينمو بلا حدّ خلف نقطة **مجهولة**.
 - `OptionalPageNumberPagination` — **opt-in** (الافتراضي العام): بلا `?page=` يُرجع كل الصفوف. يبقى مقصوداً للقوائم المنسدلة والـautocomplete.
 
@@ -128,7 +130,9 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 | رحلة استيراد / مرحلة صفقة | `modules/logistics.md` | `logistics/domain/stages.py` (`advance_deal_stage`) |
 | التكلفة المستوردة (landed cost) | `modules/logistics.md` | `logistics/landed_cost.py` |
 | عميل/مورّد وربطه بالحسابات | `modules/partners.md` | `partners/views.py`, `partners/signals.py` |
-| رواتب | `modules/hr.md` | `hr/payroll.py` |
+| رواتب ومسير وسلف | `modules/hr.md` | `hr/payroll.py` (`compute_payslip`), `hr/contracts.py` (`effective_terms`) |
+| حضور وانصراف وورديات | `modules/hr.md` | `hr/attendance.py` (`recompute_attendance_day`, `evaluate_punch`) |
+| إجازات وطلبات واعتمادها | `modules/hr.md` | `hr/leave.py` (`leave_balance`), `hr/requests.py` (`approve`) |
 | شركة جديدة / أعضاء / أدوار | `modules/tenants.md` | `tenants/services.py` (`create_company`) |
 | صلاحيات | `modules/tenants.md` | `core/access.py` |
 | محاسب خارجي / ارتباطات | `modules/accountant_portal.md` | `accountant_portal/services.py` |

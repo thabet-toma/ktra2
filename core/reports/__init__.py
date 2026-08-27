@@ -45,6 +45,9 @@ from . import treasury  # noqa: F401
 from . import ledger_import  # noqa: F401
 from . import procurement_logistics  # noqa: F401
 from . import hr  # noqa: F401
+# T-HR: تقارير وحدة الموارد البشرية المرخّصة — منفصلةٌ لأنها كلّها خلف
+# `module="hr_suite"` بينما تقارير `hr` القديمة مفتوحة لكل شركة.
+from . import hr_attendance  # noqa: F401
 from . import after_sales  # noqa: F401
 
 __all__ = ["REPORTS", "register", "report_catalog", "run_report", "run_drill",

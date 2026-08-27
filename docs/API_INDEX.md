@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **495**
+عدد النقاط: **551**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -177,8 +177,19 @@
 | `/api/health/` | `health_check` | `core/health.py` |
 | `/api/hr/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/hr/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
+| `/api/hr/advances/` | `AdvanceViewSet` | `hr/requests_api.py` |
+| `/api/hr/advances/{pk}/` | `AdvanceViewSet` | `hr/requests_api.py` |
+| `/api/hr/advances/{pk}/cancel/` | `AdvanceViewSet` | `hr/requests_api.py` |
+| `/api/hr/advances/{pk}/disburse/` | `AdvanceViewSet` | `hr/requests_api.py` |
+| `/api/hr/approval-rules/` | `ApprovalRuleViewSet` | `hr/requests_api.py` |
+| `/api/hr/approval-rules/{pk}/` | `ApprovalRuleViewSet` | `hr/requests_api.py` |
 | `/api/hr/attendance-adjustments/` | `AttendanceAdjustmentViewSet` | `hr/payroll_api.py` |
 | `/api/hr/attendance-adjustments/{pk}/` | `AttendanceAdjustmentViewSet` | `hr/payroll_api.py` |
+| `/api/hr/attendance-days/` | `AttendanceDayViewSet` | `hr/attendance_api.py` |
+| `/api/hr/attendance-days/import/` | `AttendanceDayViewSet` | `hr/attendance_api.py` |
+| `/api/hr/attendance-days/recompute/` | `AttendanceDayViewSet` | `hr/attendance_api.py` |
+| `/api/hr/attendance-days/{pk}/` | `AttendanceDayViewSet` | `hr/attendance_api.py` |
+| `/api/hr/attendance-days/{pk}/override/` | `AttendanceDayViewSet` | `hr/attendance_api.py` |
 | `/api/hr/attendance/` | `AttendanceRecordViewSet` | `hr/views.py` |
 | `/api/hr/attendance/{pk}/` | `AttendanceRecordViewSet` | `hr/views.py` |
 | `/api/hr/auth/change-password/` | `change_password_view` | `hr/auth_api.py` |
@@ -186,11 +197,44 @@
 | `/api/hr/auth/logout/` | `logout_view` | `hr/auth_api.py` |
 | `/api/hr/auth/resend-verification/` | `resend_view` | `hr/auth_api.py` |
 | `/api/hr/auth/signup/` | `signup_view` | `hr/auth_api.py` |
+| `/api/hr/check-events/` | `CheckEventViewSet` | `hr/attendance_api.py` |
+| `/api/hr/check-events/{pk}/` | `CheckEventViewSet` | `hr/attendance_api.py` |
+| `/api/hr/check-events/{pk}/void/` | `CheckEventViewSet` | `hr/attendance_api.py` |
+| `/api/hr/contracts/` | `ContractViewSet` | `hr/contracts_api.py` |
+| `/api/hr/contracts/alerts/` | `ContractViewSet` | `hr/contracts_api.py` |
+| `/api/hr/contracts/{pk}/` | `ContractViewSet` | `hr/contracts_api.py` |
+| `/api/hr/contracts/{pk}/activate/` | `ContractViewSet` | `hr/contracts_api.py` |
+| `/api/hr/contracts/{pk}/terminate/` | `ContractViewSet` | `hr/contracts_api.py` |
+| `/api/hr/departments/` | `DepartmentViewSet` | `hr/org_api.py` |
+| `/api/hr/departments/{pk}/` | `DepartmentViewSet` | `hr/org_api.py` |
 | `/api/hr/employees/` | `EmployeeViewSet` | `hr/payroll_api.py` |
 | `/api/hr/employees/{pk}/` | `EmployeeViewSet` | `hr/payroll_api.py` |
+| `/api/hr/employees/{pk}/ess-access/` | `EmployeeViewSet` | `hr/payroll_api.py` |
 | `/api/hr/employees/{pk}/statement/` | `EmployeeViewSet` | `hr/payroll_api.py` |
+| `/api/hr/ess/check-in/` | `ess_punch` | `hr/ess_api.py` |
+| `/api/hr/ess/check-out/` | `ess_punch` | `hr/ess_api.py` |
+| `/api/hr/ess/me/` | `ess_me` | `hr/ess_api.py` |
+| `/api/hr/ess/my-day/` | `ess_my_day` | `hr/ess_api.py` |
+| `/api/hr/ess/my-month/` | `ess_my_month` | `hr/ess_api.py` |
+| `/api/hr/ess/my-payslips/` | `ess_my_payslips` | `hr/ess_api.py` |
+| `/api/hr/ess/my-schedule/` | `ess_my_schedule` | `hr/ess_api.py` |
+| `/api/hr/holidays/` | `HolidayViewSet` | `hr/requests_api.py` |
+| `/api/hr/holidays/{pk}/` | `HolidayViewSet` | `hr/requests_api.py` |
+| `/api/hr/job-titles/` | `JobTitleViewSet` | `hr/org_api.py` |
+| `/api/hr/job-titles/{pk}/` | `JobTitleViewSet` | `hr/org_api.py` |
+| `/api/hr/leave-adjustments/` | `LeaveBalanceAdjustmentViewSet` | `hr/requests_api.py` |
+| `/api/hr/leave-adjustments/balances/` | `LeaveBalanceAdjustmentViewSet` | `hr/requests_api.py` |
+| `/api/hr/leave-adjustments/{pk}/` | `LeaveBalanceAdjustmentViewSet` | `hr/requests_api.py` |
+| `/api/hr/leave-types/` | `LeaveTypeViewSet` | `hr/requests_api.py` |
+| `/api/hr/leave-types/{pk}/` | `LeaveTypeViewSet` | `hr/requests_api.py` |
 | `/api/hr/payroll-payments/` | `PayrollPaymentViewSet` | `hr/payroll_api.py` |
 | `/api/hr/payroll-payments/{pk}/` | `PayrollPaymentViewSet` | `hr/payroll_api.py` |
+| `/api/hr/payroll-runs/` | `PayrollRunViewSet` | `hr/contracts_api.py` |
+| `/api/hr/payroll-runs/{pk}/` | `PayrollRunViewSet` | `hr/contracts_api.py` |
+| `/api/hr/payroll-runs/{pk}/compute/` | `PayrollRunViewSet` | `hr/contracts_api.py` |
+| `/api/hr/payroll-runs/{pk}/payslips/` | `PayrollRunViewSet` | `hr/contracts_api.py` |
+| `/api/hr/payroll-runs/{pk}/post/` | `PayrollRunViewSet` | `hr/contracts_api.py` |
+| `/api/hr/payroll-runs/{pk}/unpost/` | `PayrollRunViewSet` | `hr/contracts_api.py` |
 | `/api/hr/payslips/` | `PayslipViewSet` | `hr/payroll_api.py` |
 | `/api/hr/payslips/preview/` | `PayslipViewSet` | `hr/payroll_api.py` |
 | `/api/hr/payslips/{pk}/` | `PayslipViewSet` | `hr/payroll_api.py` |
@@ -205,11 +249,23 @@
 | `/api/hr/personal-expenses/{pk}/` | `PersonalExpenseViewSet` | `hr/views.py` |
 | `/api/hr/points/` | `PointsHistoryViewSet` | `hr/views.py` |
 | `/api/hr/points/{pk}/` | `PointsHistoryViewSet` | `hr/views.py` |
+| `/api/hr/requests/` | `EmployeeRequestViewSet` | `hr/requests_api.py` |
+| `/api/hr/requests/{pk}/` | `EmployeeRequestViewSet` | `hr/requests_api.py` |
+| `/api/hr/requests/{pk}/approve/` | `EmployeeRequestViewSet` | `hr/requests_api.py` |
+| `/api/hr/requests/{pk}/cancel/` | `EmployeeRequestViewSet` | `hr/requests_api.py` |
+| `/api/hr/requests/{pk}/reject/` | `EmployeeRequestViewSet` | `hr/requests_api.py` |
+| `/api/hr/requests/{pk}/submit/` | `EmployeeRequestViewSet` | `hr/requests_api.py` |
+| `/api/hr/shift-assignments/` | `ShiftAssignmentViewSet` | `hr/attendance_api.py` |
+| `/api/hr/shift-assignments/{pk}/` | `ShiftAssignmentViewSet` | `hr/attendance_api.py` |
+| `/api/hr/shifts/` | `ShiftViewSet` | `hr/attendance_api.py` |
+| `/api/hr/shifts/{pk}/` | `ShiftViewSet` | `hr/attendance_api.py` |
 | `/api/hr/tasks/` | `TaskViewSet` | `hr/views.py` |
 | `/api/hr/tasks/{pk}/` | `TaskViewSet` | `hr/views.py` |
 | `/api/hr/tasks/{pk}/add_submission/` | `TaskViewSet` | `hr/views.py` |
 | `/api/hr/users/` | `list_users` | `hr/user_api.py` |
 | `/api/hr/users/<str:pk>/` | `user_detail` | `hr/user_api.py` |
+| `/api/hr/work-locations/` | `WorkLocationViewSet` | `hr/attendance_api.py` |
+| `/api/hr/work-locations/{pk}/` | `WorkLocationViewSet` | `hr/attendance_api.py` |
 | `/api/hr/work-logs/` | `WorkLogViewSet` | `hr/payroll_api.py` |
 | `/api/hr/work-logs/{pk}/` | `WorkLogViewSet` | `hr/payroll_api.py` |
 | `/api/import-file/deals/{pk}/file/` | `DealImportFileViewSet` | `import_file/views.py` |

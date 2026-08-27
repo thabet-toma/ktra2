@@ -17,7 +17,7 @@ import {
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck,
   Gauge, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
-  PlayCircle,
+  PlayCircle, Network, Fingerprint, CalendarCheck, Inbox, FileSignature,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { enterOfficeShell } from "../utils/officeShell";
@@ -94,6 +94,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "attendance" as AppView, label: "الحضور والغياب", icon: <AttendanceIcon className="h-5 w-5" /> },
     // الرواتب — بندها في شجرة الحسابات وتحته حساب كل موظف.
     { view: "payroll" as AppView, label: "الرواتب", icon: <Banknote className="h-5 w-5" /> },
+    // T-HR: بنود وحدة `hr_suite` المرخّصة — تُحقن هنا لا في مجموعة مستقلة، لأن
+    // مكانها الطبيعي مع بقية شؤون الموظفين. الشرط بالوحدة لا بالصلاحية:
+    // `withPerms` يقرأ الصلاحية وحدها من الخريطة ولا يعرف الترخيص.
+    ...(moduleAllowsView("hr-org", modules)
+      ? [
+        { view: "hr-check-in" as AppView, label: "تسجيل حضوري", icon: <Fingerprint className="h-5 w-5" /> },
+        { view: "hr-attendance" as AppView, label: "سجل الحضور والانصراف", icon: <CalendarCheck className="h-5 w-5" /> },
+        { view: "hr-requests" as AppView, label: "الطلبات والسلف", icon: <Inbox className="h-5 w-5" /> },
+        { view: "hr-contracts" as AppView, label: "العقود ومسير الرواتب", icon: <FileSignature className="h-5 w-5" /> },
+        { view: "hr-org" as AppView, label: "الهيكل التنظيمي", icon: <Network className="h-5 w-5" /> },
+      ]
+      : []),
     { view: "employee-notes" as AppView, label: "ملاحظات الموظفين", icon: <NoteIcon className="h-5 w-5" /> },
     { view: "points-management" as AppView, label: "إدارة النقاط", icon: <PointsIcon className="h-5 w-5" /> },
     { view: "points-history" as AppView, label: "سجل نقاطي", icon: <PointsIcon className="h-5 w-5" />, roles: ['employee', 'procurement', 'manager'] },
@@ -143,10 +155,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "import-flow", label: "رحلة الاستيراد", icon: <Package className="h-4 w-4" /> },
   ];
 
-  // 6) المخزون — الأصناف (شجرة، T-N3) + أرصدة + حركات. (إعدادات المخزون غير مبنية — مُدرجة بخارطة الطريق.)
+  // 6) المخزون — المنتجات (شجرة، T-N3) + أرصدة + حركات. (إعدادات المخزون غير مبنية — مُدرجة بخارطة الطريق.)
   const inventoryLinks: NavLink[] = [
+    { view: "items-management", label: "المنتجات", icon: <Boxes className="h-4 w-4" /> },
     { view: "stock-levels", label: "أرصدة المخزون", icon: <BarChart3 className="h-4 w-4" /> },
-    { view: "items-management", label: "الأصناف", icon: <Boxes className="h-4 w-4" /> },
     { view: "stock-movements", label: "حركات المخزون", icon: <ArrowLeftRight className="h-4 w-4" /> },
     { view: "product-cost", label: "تكلفة المنتجات", icon: <BarChart3 className="h-4 w-4" /> },
     { view: "warehouses", label: "المستودعات", icon: <Warehouse className="h-4 w-4" /> },
@@ -167,7 +179,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     // T-REPORTS: «كل التقارير» هو فهرس القسم — يقود لكل تقارير المنصة. البقية
     // اختصارات للأكثر استعمالاً كي لا يمرّ المستخدم بالفهرس في كل مرة.
     { view: "reports", label: "كل التقارير", icon: <ReportsIcon className="h-4 w-4" />, path: "/reports", newTab: true },
-    { view: "stock-movements", label: "تقرير حركة صنف", icon: <ArrowLeftRight className="h-4 w-4" />, path: "/stock-movements", newTab: true },
+    { view: "stock-movements", label: "تقرير حركة منتج", icon: <ArrowLeftRight className="h-4 w-4" />, path: "/stock-movements", newTab: true },
     { view: "accounting-trial-balance", label: "ميزان المراجعة", icon: <Scale className="h-4 w-4" />, path: "/accounting/trial-balance", newTab: true },
     { view: "accounting-income-statement", label: "قائمة الدخل", icon: <TrendingUp className="h-4 w-4" />, path: "/accounting/income-statement", newTab: true },
     { view: "accounting-balance-sheet", label: "الميزانية العمومية", icon: <BarChart3 className="h-4 w-4" />, path: "/accounting/balance-sheet", newTab: true },
@@ -196,7 +208,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     "sales-invoices": { label: "فواتير المبيعات", icon: <FileText className="h-5 w-5 flex-shrink-0" /> },
     "purchase-invoices": { label: "فواتير الشراء", icon: <NoteIcon className="h-5 w-5 flex-shrink-0" /> },
     "stock-levels": { label: "أرصدة المخزون", icon: <BarChart3 className="h-5 w-5 flex-shrink-0" /> },
-    "items-management": { label: "الأصناف", icon: <Boxes className="h-5 w-5 flex-shrink-0" /> },
+    "items-management": { label: "المنتجات", icon: <Boxes className="h-5 w-5 flex-shrink-0" /> },
     "supplier-management": { label: "الموردين", icon: <UsersIcon className="h-5 w-5 flex-shrink-0" /> },
     "sales-customers": { label: "العملاء", icon: <Users className="h-5 w-5 flex-shrink-0" /> },
     "settings": { label: "الإعدادات", icon: <SettingsIcon className="h-5 w-5 flex-shrink-0" /> },
@@ -491,7 +503,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             <button
               onClick={() => { setView("store-settings"); if (isMobile) setIsMobileMenuOpen(false); }}
               className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("store-settings") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
-              title="متجري — الواجهة العامة لأصنافك"
+              title="متجري — الواجهة العامة لمنتجاتك"
             >
               <Store className="h-5 w-5 flex-shrink-0" />
               {showText && <span className="mr-3 text-right flex-1">متجري</span>}

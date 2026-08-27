@@ -104,6 +104,11 @@ class EmployeeViewSet(PayrollViewSetBase):
 
     def perform_create(self, serializer):
         tenant = self._tenant()
+        # حدّ الخطة يُفحص قبل الإنشاء لا بعده — إنشاءٌ ثم رفضٌ يترك حساباً
+        # في الشجرة بلا صاحب.
+        from core.plans import enforce_limits
+
+        enforce_limits(tenant, 'hr.employees')
         with transaction.atomic():
             code = (serializer.validated_data.get('code') or '').strip()
             employee = serializer.save(
@@ -127,6 +132,61 @@ class EmployeeViewSet(PayrollViewSetBase):
         employee_id = instance.pk
         instance.delete()
         logger.info('payroll.employee_deleted employee=%s', employee_id)
+
+    @action(detail=True, methods=['post'], url_path='ess-access')
+    def ess_access(self, request, pk=None):
+        """يفتح للموظف حساب خدمة ذاتية — أو يربطه بحسابٍ قائم، أو يفصله.
+
+        الفعل إداريّ لا مالي، وسطحُه هنا لأن مدخله كرت الموظف. وهو **خلف
+        ترخيص الوحدة** رغم سُكناه في ViewSet قديمٍ مفتوح: بلا `hr_suite` لا
+        وجود لخدمةٍ ذاتية أصلاً، فمنحُ صلاحيتها عبثٌ يُربك مصفوفة الأدوار.
+
+        وكلمة المرور **لا تُولَّد ولا تُرسَل هنا**: الحساب يُنشأ بلا كلمة قابلة
+        للاستعمال، والموظف يضبطها بمسار «نسيت كلمة المرور» المعتاد — كلمةُ مرور
+        تعبر استجابةَ API تُكتب في سجلٍّ ما، وتبقى فيه.
+        """
+        from django.contrib.auth.models import User
+
+        from core.modules import require_module
+        from tenants.models import UserCompanyMembership
+
+        from .suite import MODULE_KEY
+
+        tenant = require_module(request, MODULE_KEY)
+        require_perm(request, 'admin.members.manage', tenant=tenant)
+        employee = self.get_object()
+
+        if request.data.get('detach'):
+            employee.user = None
+            employee.save(update_fields=['user'])
+            return Response(EmployeeSerializer(employee, context=self.get_serializer_context()).data)
+
+        username = str(request.data.get('username') or '').strip()
+        if not username:
+            raise ValidationError({'username': 'اسم المستخدم مطلوب.'})
+
+        with transaction.atomic():
+            user = User.objects.filter(username__iexact=username).first()
+            created = False
+            if user is None:
+                user = User.objects.create(username=username, first_name=employee.name[:150])
+                user.set_unusable_password()
+                user.save()
+                created = True
+            taken = Employee.objects.filter(tenant=tenant, user=user).exclude(pk=employee.pk)
+            if taken.exists():
+                raise ValidationError(
+                    {'username': 'هذا المستخدم مرتبط بموظف آخر في هذه الشركة.'})
+            UserCompanyMembership.objects.get_or_create(
+                user=user, tenant=tenant, defaults={'role': 'ess'})
+            employee.user = user
+            employee.save(update_fields=['user'])
+
+        logger.info('hr.ess_access employee=%s user=%s created=%s',
+                    employee.pk, user.pk, created)
+        payload = EmployeeSerializer(employee, context=self.get_serializer_context()).data
+        payload['ess_user_created'] = created
+        return Response(payload)
 
     @action(detail=True, methods=['get'])
     def statement(self, request, pk=None):

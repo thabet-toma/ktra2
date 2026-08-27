@@ -54,6 +54,8 @@ class TenantSettingsSerializer(serializers.ModelSerializer):
             "font_family",
             # الجلسة (per-company)
             "idle_timeout_minutes",
+            # الموارد البشرية (per-company)
+            "hr_absence_requires_shift",
         ]
 
 

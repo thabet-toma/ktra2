@@ -210,6 +210,9 @@ def report_catalog() -> list[dict]:
             "title": spec.title,
             "description": spec.description,
             "permission": spec.permission,
+            # وحدة التقرير إن كان تقرير وحدةٍ مرخّصة — يصفّي بها `reports_catalog`
+            # (الفهرس هنا لا يعرف الشركة، فالتصفية عند من يعرفها).
+            "module": spec.module,
             "screen_path": spec.screen_path,
             "row_link": spec.row_link,
             "filters": [

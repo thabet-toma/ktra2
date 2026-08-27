@@ -170,6 +170,12 @@ const WarrantyCardsScreen = lazyPage(() => import("./components/aftersales/Warra
 const ServiceOrdersScreen = lazyPage(() => import("./components/aftersales/ServiceOrdersScreen"));
 // THA-114: شرح مستندات الاستيراد — وحدة «ملف الاستيراد» المرخّصة، بنفس الحارس.
 const ImportFileGuideScreen = lazyPage(() => import("./components/import-file/ImportFileGuideScreen").then((m) => ({ default: m.ImportFileGuideScreen })));
+// T-HR: الهيكل التنظيمي — وحدة «الموارد البشرية» المرخّصة، بنفس الحارس.
+const OrgStructurePage = lazyPage(() => import("./components/hr/OrgStructurePage").then((m) => ({ default: m.OrgStructurePage })));
+const HrAttendancePage = lazyPage(() => import("./components/hr/AttendancePage").then((m) => ({ default: m.AttendancePage })));
+const HrCheckInPage = lazyPage(() => import("./components/hr/CheckInPage").then((m) => ({ default: m.CheckInPage })));
+const HrRequestsPage = lazyPage(() => import("./components/hr/RequestsPage").then((m) => ({ default: m.RequestsPage })));
+const HrContractsPage = lazyPage(() => import("./components/hr/ContractsPage").then((m) => ({ default: m.ContractsPage })));
 
 type SourcingView = "search" | "loading" | "results";
 type AuthView = "landing" | "login" | "signup" | "accountant-signup";
@@ -217,6 +223,11 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "sensitive-devices": "/sensitive-devices",
   "after-sales": "/after-sales",
   "service-orders": "/after-sales/service-orders",
+  "hr-org": "/hr/org",
+  "hr-attendance": "/hr/attendance",
+  "hr-check-in": "/hr/check-in",
+  "hr-requests": "/hr/requests",
+  "hr-contracts": "/hr/contracts",
   "sales-invoices": "/sales/invoices",
   "sales-quotations": "/sales/quotations",
   "sales-orders": "/sales/orders",
@@ -315,7 +326,7 @@ const App: React.FC = () => {
   const { currentUser, loading: authLoading, logout, updateUser } = useAuth();
   const { currentCompany, canAccessImport } = useCompany();
   // T-PERM: صلاحيات الشركة النشطة — تُخفي ما لا يملكه المستخدم (الخادم يفرض).
-  const { can: canPerm, isManager } = usePermissions();
+  const { can: canPerm, isManager, modules: licensedModules } = usePermissions();
   const canManagePermissions = canPerm("admin.permissions.manage");
   // T-PERM: حارس الدخول المباشر بالرابط — نفس خريطة الشريط الجانبي، فلا يظهر
   // رابطٌ يقود إلى لوحة التحكم. الشاشة بلا صلاحية في الخريطة مفتوحة للجميع.
@@ -1479,6 +1490,54 @@ const App: React.FC = () => {
           </ModuleLicenseGuard>
         );
 
+      case "hr-org":
+        // نفس ترتيب البوابتين — الترخيص أولاً ثم الصلاحية (`hr/suite.py::initial`).
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة الموارد البشرية غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <OrgStructurePage />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض الهيكل التنظيمي (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "hr-attendance":
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة الموارد البشرية غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <HrAttendancePage />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض سجل الحضور (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "hr-check-in":
+        // شاشة الموظف بنفسه — صلاحيتها `ess.self` التي يملكها كل من يعمل في
+        // الشركة، والخادم يحلّ الموظف من الجلسة فلا يرى أحدٌ غير بياناته.
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة الموارد البشرية غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <HrCheckInPage />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية الخدمة الذاتية (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "hr-requests":
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة الموارد البشرية غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <HrRequestsPage />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية الطلبات (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "hr-contracts":
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة الموارد البشرية غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <HrContractsPage />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض العقود (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
       case "import-file-guide":
         // THA-114: نفس ترتيب البوابتين — الترخيص أولاً ثم الصلاحية، ومفاتيح
         // صلاحيات الوحدة محذوفة أصلاً من كتالوج الشركة غير المرخّصة.
@@ -1588,6 +1647,15 @@ const App: React.FC = () => {
         return <SettingsPage user={currentUser!} />;
 
       case "attendance":
+        // T-HR: شركةٌ مرخّصة لـ`hr_suite` ترى الحضور الحقيقي (بصمةٌ على الموظف
+        // تصل الرواتب). الشاشتان القديمتان تعملان على جلسات مرآة Firestore عبر
+        // `services/attendanceService.ts` ولا تمسّان `/api/hr/` أصلاً — تبقيان
+        // للشركات غير المرخّصة كي لا يفقد أحدٌ ما كان يستعمله، ولا تُحذفان هنا.
+        if (moduleAllowsView("hr-attendance", licensedModules)) {
+          return canView("hr-attendance")
+            ? <HrAttendancePage />
+            : <HrCheckInPage />;
+        }
         if (currentUser!.role === "manager") {
           return <AttendanceManagement users={users} currentUser={currentUser!} />;
         }

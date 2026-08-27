@@ -69,8 +69,8 @@ PERMISSIONS: list[dict] = [
     {"key": "purchase.supplier.manage", "label": "إدارة الموردين", "group": GROUP_PURCHASE},
     {"key": "purchase.settings.manage", "label": "إعدادات المشتريات", "group": GROUP_PURCHASE},
     # المخزون
-    {"key": "inventory.item.view", "label": "عرض الأصناف والمخزون", "group": GROUP_INVENTORY},
-    {"key": "inventory.item.manage", "label": "إدارة الأصناف والفئات", "group": GROUP_INVENTORY},
+    {"key": "inventory.item.view", "label": "عرض المنتجات والمخزون", "group": GROUP_INVENTORY},
+    {"key": "inventory.item.manage", "label": "إدارة المنتجات والفئات", "group": GROUP_INVENTORY},
     {"key": "inventory.cost.view", "label": "عرض التكاليف وهوامش الربح", "group": GROUP_INVENTORY},
     {"key": "inventory.doc.post", "label": "ترحيل مستندات المخزون (تحويل/جرد/تسوية)", "group": GROUP_INVENTORY},
     {"key": "inventory.doc.unpost", "label": "التراجع عن ترحيل مستندات المخزون", "group": GROUP_INVENTORY},
@@ -96,6 +96,16 @@ PERMISSIONS: list[dict] = [
     {"key": "hr.payroll.view", "label": "عرض الرواتب وكشوفها", "group": GROUP_HR},
     {"key": "hr.payroll.manage", "label": "إدارة الموظفين والساعات وكشوف الرواتب", "group": GROUP_HR},
     {"key": "hr.payroll.post", "label": "ترحيل كشوف الرواتب وصرفها", "group": GROUP_HR},
+    # وحدة الموارد البشرية الموسّعة — لا تظهر إلا للشركات المرخّصة لـ`hr_suite`.
+    {"key": "hr.org.manage", "label": "الهيكل التنظيمي — الأقسام والمسميات", "group": GROUP_HR, "module": "hr_suite"},
+    {"key": "hr.shifts.manage", "label": "الورديات وجداول المناوبات", "group": GROUP_HR, "module": "hr_suite"},
+    {"key": "hr.attendance.manage", "label": "تعديل سجلات الحضور والانصراف", "group": GROUP_HR, "module": "hr_suite"},
+    {"key": "hr.leave.manage", "label": "أنواع الإجازات والعطلات الرسمية", "group": GROUP_HR, "module": "hr_suite"},
+    {"key": "hr.requests.view", "label": "عرض طلبات الموظفين وسلفهم", "group": GROUP_HR, "module": "hr_suite"},
+    {"key": "hr.requests.approve", "label": "الموافقة على طلبات الموظفين", "group": GROUP_HR, "module": "hr_suite"},
+    {"key": "hr.contracts.view", "label": "عرض عقود الموظفين", "group": GROUP_HR, "module": "hr_suite"},
+    {"key": "hr.contracts.manage", "label": "إنشاء العقود وتفعيلها وإنهاؤها", "group": GROUP_HR, "module": "hr_suite"},
+    {"key": "ess.self", "label": "الخدمة الذاتية — تسجيل حضوري وطلباتي", "group": GROUP_HR, "module": "hr_suite"},
     # الإدارة
     {"key": "admin.members.manage", "label": "إدارة أعضاء الشركة وأدوارهم", "group": GROUP_ADMIN},
     {"key": "admin.permissions.manage", "label": "إدارة الصلاحيات", "group": GROUP_ADMIN},
@@ -160,7 +170,12 @@ _AFTERSALES_READ = {
     "aftersales.order.view",
 }
 
-_SALES_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | {
+# الخدمة الذاتية: تسجيل حضوري وطلباتي وقسائم راتبي. كل من يعمل في الشركة يملكها
+# — بمن فيهم المحاسب والبائع. ليست قراءةً على أحد: المفتاح يفتح بيانات صاحبه
+# وحده (الخادم يحلّ الموظف من `request.user`).
+_EMPLOYEE_SELF = {"ess.self"}
+
+_SALES_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | _EMPLOYEE_SELF | {
     "hr.attendance.view",
     "sales.invoice.create",
     "sales.invoice.edit",
@@ -179,7 +194,7 @@ _SALES_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | {
     "aftersales.order.edit",
 }
 
-_PROCUREMENT_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | {
+_PROCUREMENT_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | _EMPLOYEE_SELF | {
     "hr.attendance.view",
     "purchase.invoice.create",
     "purchase.invoice.edit",
@@ -198,7 +213,7 @@ _PROCUREMENT_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | {
     "importfile.file.manage",
 }
 
-_ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | {
+_ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | _EMPLOYEE_SELF | {
     "hr.attendance.view",
     "sales.invoice.post",
     "sales.invoice.unpost",
@@ -231,6 +246,10 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | {
     "aftersales.warranty.manage",
     "aftersales.order.post",
     "aftersales.order.unpost",
+    # العقد مصدر أرقام الراتب والطلب المعتمد يصير خصماً في القسيمة — يقرأهما
+    # المحاسب ليعرف من أين جاء الرقم، ولا يعتمد ولا يحرّر.
+    "hr.contracts.view",
+    "hr.requests.view",
 }
 
 _LEGAL_ACCOUNTANT = {
@@ -247,7 +266,7 @@ _LEGAL_ACCOUNTANT = {
 }
 
 # موظف عام (الدور الافتراضي للعضو الجديد): إدخال بيانات بلا ترحيل ولا حذف.
-_STAFF = _VIEW_ONLY | _AFTERSALES_READ | {
+_STAFF = _VIEW_ONLY | _AFTERSALES_READ | _EMPLOYEE_SELF | {
     "hr.attendance.view",
     "sales.invoice.create",
     "sales.invoice.edit",
@@ -260,6 +279,19 @@ _STAFF = _VIEW_ONLY | _AFTERSALES_READ | {
     "aftersales.order.create",
 }
 
+# «موظف خدمة ذاتية» — أضيق دور في النظام: يسجّل حضوره ويقدّم طلباته ويرى قسائم
+# راتبه، ولا يرى فاتورةً ولا صنفاً ولا زميلاً. دورُ من يُعطى حساباً ليبصم فقط،
+# ولذلك لا يبني على `_VIEW_ONLY`: منحُه قراءةَ المبيعات لأجل زرّ حضورٍ إفراطٌ.
+#
+# **ومفتاحه `ess` لا `employee`**: القيمة الأخيرة محجوزةٌ في هذا المستودع منذ
+# ما قبل الأدوار — هي دور التطبيق القديم القادم من `core.user_roles` ووثائق
+# `bridge`، ومعناها هناك «موظف عام». استعمالُها هنا كان يصطدم بها من طرفين:
+# `user_tenant_role` يترجم عضوية `employee` إلى `staff` (فيُرقّي كلَّ موظف
+# خدمة ذاتية إلى صلاحيات الموظف العام)، وسقوطُها في `ROLE_DEFAULTS` كان يهبط
+# بمستخدمٍ قديمٍ بلا عضوية من `staff` إلى `ess.self` وحدها. اسمٌ ثالث يُغلق
+# البابين بلا لمس أيٍّ من المسارين القديمين.
+_ESS_EMPLOYEE = set(_EMPLOYEE_SELF)
+
 ROLE_DEFAULTS: dict[str, object] = {
     "manager": "*",
     "accountant": _ACCOUNTANT,
@@ -267,6 +299,7 @@ ROLE_DEFAULTS: dict[str, object] = {
     "sales": _SALES_EMPLOYEE,
     "procurement": _PROCUREMENT_EMPLOYEE,
     "staff": _STAFF,
+    "ess": _ESS_EMPLOYEE,
     "viewer": _VIEW_ONLY,
 }
 
@@ -278,10 +311,15 @@ ROLE_LABELS = (
     ("sales", "موظف مبيعات"),
     ("procurement", "موظف مشتريات"),
     ("staff", "موظف"),
+    ("ess", "موظف خدمة ذاتية"),
     ("viewer", "مستعرض"),
 )
 ROLE_ORDER = tuple(r for r, _ in ROLE_LABELS)
-ROLE_MODULES = {"legal_accountant": "accountant_portal"}
+ROLE_MODULES = {
+    "legal_accountant": "accountant_portal",
+    # دور الخدمة الذاتية بلا معنى بلا وحدة الموارد البشرية — يختفي معها.
+    "ess": "hr_suite",
+}
 
 
 def permission_catalog(tenant=None) -> tuple[dict, ...]:

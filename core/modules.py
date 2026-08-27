@@ -16,6 +16,11 @@ MODULES = {
         "plans": ("Pro", "Enterprise"),
         "legacy_flag": None,
     },
+    "hr_suite": {
+        "label": "الموارد البشرية — الحضور والورديات والعقود والطلبات",
+        "plans": ("Pro", "Enterprise"),
+        "legacy_flag": None,
+    },
     "import": {
         "label": "الاستيراد والشحن والتخليص",
         "plans": ("Enterprise",),

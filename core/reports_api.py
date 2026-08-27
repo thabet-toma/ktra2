@@ -89,12 +89,21 @@ def reports_catalog(request):
     tenant = get_tenant(request)
     if not tenant:
         return Response({"categories": []})
+    from core.modules import module_enabled
+
     user = getattr(request, "user", None)
     categories = []
     for category in report_catalog():
         allowed = [
             report for report in category["reports"]
-            if not report["permission"] or user_has_perm(user, tenant, report["permission"])
+            # الترخيص أولاً ثم الصلاحية — نفس ترتيب `_authorize` أدناه ونفس
+            # ترتيب كل بوابة وحدة في المشروع. وبلا هذا السطر كان تقريرُ وحدةٍ
+            # غير مرخّصة **يظهر في الفهرس** ثم يردّ 404 عند فتحه: فهرسٌ يَعِد
+            # بما لا يُنجزه، ويُثبت للشركة وجودَ وحدةٍ لم تشترِها. (التقارير
+            # القائمة كانت محميّةً بالصدفة — لأن مفاتيح صلاحياتها هي نفسها
+            # مقيّدة بالوحدة، وهو ما لا يصحّ الاتّكال عليه.)
+            if (not report.get("module") or module_enabled(tenant, report["module"]))
+            and (not report["permission"] or user_has_perm(user, tenant, report["permission"]))
         ]
         if allowed:
             categories.append({**category, "reports": allowed})

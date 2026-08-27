@@ -536,6 +536,11 @@ REST_FRAMEWORK = {
         # المتجر لأن الرابط يُفتح مرة أو مرتين لا يُتصفَّح، وأوسع من `anon`
         # لأن فتحةً واحدة تجلب الصفحة والشعار معاً وقد يُعاد التحميل للطباعة.
         "doc_share_public": os.environ.get("THROTTLE_RATE_DOC_SHARE", "60/min"),
+        # T-HR: الخدمة الذاتية (`hr/ess_api.py`). القراءة أوسع لأن شاشة الموظف
+        # تجلب يومه وشهره وجدوله معاً، والبصمة أضيق بكثير: الضغطة المتكرّرة على
+        # زرّ التسجيل تُنتج صفوفاً في سجلٍّ لا يُحذف منه شيء.
+        "ess": os.environ.get("THROTTLE_RATE_ESS", "120/min"),
+        "ess_punch": os.environ.get("THROTTLE_RATE_ESS_PUNCH", "10/min"),
     },
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }
@@ -618,7 +623,7 @@ LOGGING = {
     "handlers": {
         # G11 (بروتوكول 4): تسجيل غير حاجب ومتوافق مع Python 3.10+.
         # لا نستخدم مفتاح dictConfig المسمّى "handlers" داخل QueueHandler لأنه
-        # غير مدعوم قبل Python 3.12؛ الصنف المخصص يدير QueueListener بنفسه.
+        # غير مدعوم قبل Python 3.12؛ المنتج المخصص يدير QueueListener بنفسه.
         "queue": {
             "class": "core.logging_handlers.NonBlockingConsoleHandler",
             "formatter": "verbose",

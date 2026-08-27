@@ -132,6 +132,23 @@ def _bulk_warehouses(tenant_ids, since):
     return _grouped_count(Warehouse.objects.all(), tenant_ids)
 
 
+def _count_hr_employees(tenant_id, since):
+    """الموظفون **النشطون** وحدهم — الموظف المعطَّل سجلٌّ تاريخي لا مقعدٌ مشغول.
+
+    نظيرُ `company.members` وليس بديلَه: العضو حسابُ دخولٍ للنظام، والموظف
+    ملفُّ رواتبٍ وحضور. أكثرُ الموظفين هنا بلا حساب دخول أصلاً.
+    """
+    from hr.models import Employee
+
+    return Employee.objects.filter(tenant_id=tenant_id, is_active=True).count()
+
+
+def _bulk_hr_employees(tenant_ids, since):
+    from hr.models import Employee
+
+    return _grouped_count(Employee.objects.filter(is_active=True), tenant_ids)
+
+
 def _count_members(tenant_id, since):
     from tenants.models import UserCompanyMembership
 
@@ -216,6 +233,14 @@ LIMITS = {
             bulk=_bulk_warehouses,
         ),
         LimitSpec(
+            key="hr.employees",
+            label="الموظفون على كشف الرواتب",
+            unit="موظف",
+            period=PERIOD_TOTAL,
+            count=_count_hr_employees,
+            bulk=_bulk_hr_employees,
+        ),
+        LimitSpec(
             key="company.members",
             label="أعضاء الشركة",
             unit="عضو",
@@ -233,8 +258,8 @@ LIMITS = {
         ),
         LimitSpec(
             key="inventory.products",
-            label="الأصناف",
-            unit="صنف",
+            label="المنتجات",
+            unit="منتج",
             period=PERIOD_TOTAL,
             count=_count_products,
             bulk=_bulk_products,
@@ -259,6 +284,7 @@ PLAN_DEFAULTS = {
         "purchase.invoices": 100,
         "documents.invoices": 250,
         "inventory.warehouses": 1,
+        "hr.employees": 10,
         "company.members": 3,
         "company.branches": 1,
         "inventory.products": 500,
@@ -269,6 +295,7 @@ PLAN_DEFAULTS = {
         "purchase.invoices": 750,
         "documents.invoices": 2000,
         "inventory.warehouses": 5,
+        "hr.employees": 50,
         "company.members": 10,
         "company.branches": 3,
         "inventory.products": 5000,
@@ -279,6 +306,7 @@ PLAN_DEFAULTS = {
         "purchase.invoices": None,
         "documents.invoices": None,
         "inventory.warehouses": None,
+        "hr.employees": None,
         "company.members": None,
         "company.branches": None,
         "inventory.products": None,

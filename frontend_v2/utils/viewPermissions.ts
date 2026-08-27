@@ -102,6 +102,15 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   // THA-24 م4: أوامر الصيانة — نفس الوحدة، ومفتاح صلاحيتها مستقل: من يرى
   // الكفالات لا يرى بالضرورة ملفات الصيانة (مفاتيح الخادم السبعة منفصلة).
   "service-orders": "aftersales.order.view",
+  // T-HR: الهيكل التنظيمي — وحدة «الموارد البشرية» المرخّصة. القراءة لمن يرى
+  // شاشة الحضور، والتحرير خلف `hr.org.manage` داخل الشاشة نفسها.
+  "hr-org": "hr.attendance.view",
+  "hr-attendance": "hr.attendance.view",
+  // شاشة الموظف بنفسه — أوسع مفاتيح الوحدة لأن كل من يعمل يبصم.
+  "hr-check-in": "ess.self",
+  // الطلبات: يراها كل موظف (طلباته هو) — الفلترة خادمية.
+  "hr-requests": "ess.self",
+  "hr-contracts": "hr.contracts.view",
   // «الرئيسية» تختار بين اللوحة التجارية والشخصية — لا تُدرَج هنا كي لا تُحجب
   // الشاشة كلياً؛ الاختيار يتم بدور manager الفعلي في App.tsx.
 };
@@ -128,6 +137,13 @@ export const VIEW_MODULES: Record<string, string> = {
   // وبلا العَلَم لا يُطلب chunk الشاشة. لوحة الملف داخل الصفقة محروسة بالعَلَم
   // نفسه في `DealForm.tsx` — تبويب لا يُبنى أصلاً بلا ترخيص.
   "import-file-guide": "import_file",
+  // T-HR: الموارد البشرية — نفس العقد: 404 خادمياً (`hr/suite.py`)، وبلا العَلَم
+  // لا يُطلب chunk الشاشة أصلاً.
+  "hr-org": "hr_suite",
+  "hr-attendance": "hr_suite",
+  "hr-check-in": "hr_suite",
+  "hr-requests": "hr_suite",
+  "hr-contracts": "hr_suite",
 };
 
 /** صلاحية الشاشة إن وُجدت، وإلا undefined (شاشة مفتوحة). */

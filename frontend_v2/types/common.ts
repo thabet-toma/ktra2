@@ -105,6 +105,11 @@ export type AppView =
     | "sensitive-devices"
     | "after-sales"
     | "service-orders"
+    | "hr-org"
+    | "hr-attendance"
+    | "hr-check-in"
+    | "hr-requests"
+    | "hr-contracts"
     | "about-us"
     | "contact";
 

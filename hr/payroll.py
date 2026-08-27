@@ -112,6 +112,16 @@ def ensure_employee_account(employee: Employee):
     """
     tenant = employee.tenant
     label = (employee.name or "").strip() or f"موظف #{employee.pk}"
+    if not employee.account_id and employee.pk:
+        # النسخة في الذاكرة قد تكون قديمة: عمليةٌ سابقة في نفس الطلب (صرفُ
+        # سلفة، أو دورةُ مسيرٍ على الموظف نفسه) أنشأت الحساب وحفظته، وهذا
+        # الكائن ما زال يحمل `None`. القرار على قيمةٍ قديمة كان يُنشئ **حساباً
+        # ثانياً للموظف الواحد** فينشقّ رصيده بين حسابين بلا أن يشتكي شيء.
+        stored = Employee.objects.filter(pk=employee.pk).values_list(
+            "account_id", flat=True).first()
+        if stored:
+            employee.account_id = stored
+
     if employee.account_id:
         account = employee.account
         if account.name != label[:100]:
@@ -178,18 +188,87 @@ def employee_balance(employee: Employee) -> Decimal:
 #  الاحتساب — مصدر واحد للأرقام: المعاينة والحفظ يستدعيانه معاً
 # ─────────────────────────────────────────────────────────
 
+def attendance_totals(employee: Employee, period_start, period_end) -> dict:
+    """مجاميع الحضور المشتقّ في الفترة — أو أصفارٌ إن لم تكن الوحدة تعمل.
+
+    **مصدرٌ ثانٍ يُجمَع لا يحلّ محلّ الأول**: `AttendanceAdjustment` اليدوية
+    تبقى كما هي (تصحيحاتٌ ومدخلاتٌ إدارية)، و`AttendanceDay` يضيف إليها ما
+    اشتقّه محرّك البصمات. توليدُ صفوف adjustments من الحضور كان البديل، وكان
+    يعني حذفاً وإعادةَ توليد عند كل إعادة حساب — ولا يعبّر عن الإضافي أصلاً
+    (لا نوعَ له في ذلك النموذج).
+
+    الاستيراد كسولٌ عمداً: قبل بناء وحدة الحضور لم يكن `AttendanceDay` موجوداً،
+    والدالّة تعمل بلا وحدةٍ كما تعمل معها.
+    """
+    zero = {"absence_days": Decimal("0"), "late_minutes": 0, "overtime_minutes": 0}
+    try:
+        from .models import AttendanceDay
+    except ImportError:  # pragma: no cover — قبل وجود الوحدة
+        return zero
+
+    rows = AttendanceDay.objects.filter(
+        employee=employee, date__gte=period_start, date__lte=period_end)
+    totals = dict(zero)
+    for row in rows.values("absence_days", "late_minutes", "overtime_minutes"):
+        totals["absence_days"] += row["absence_days"] or Decimal("0")
+        totals["late_minutes"] += row["late_minutes"] or 0
+        totals["overtime_minutes"] += row["overtime_minutes"] or 0
+    return totals
+
+
+def advance_installment(employee: Employee) -> tuple:
+    """قسط السلف المستحقّ هذا الشهر، والسلف التي يخصّها.
+
+    السلفة **المصروفة** وحدها تُخصم: سلفةٌ اعتُمدت ولم يُصرَف مالُها ليست
+    دَيناً بعد، وخصمُ قسطها يأخذ من الموظف مقابل ما لم يقبضه.
+
+    والقسط لا يتجاوز المتبقّي — آخرُ قسطٍ يُغلق الرصيد مهما كان أصغر من قيمته.
+    """
+    from .models import Advance
+
+    total = Decimal("0")
+    picked = []
+    for advance in Advance.objects.filter(
+            employee=employee, status=Advance.STATUS_OPEN).order_by("date", "id"):
+        if not advance.is_disbursed:
+            continue
+        due = min(
+            money(advance.monthly_installment or 0),
+            money(advance.remaining or 0),
+        )
+        if due <= 0:
+            continue
+        total += due
+        picked.append((advance, due))
+    return money(total), picked
+
+
 def compute_payslip(employee: Employee, period_start, period_end, *,
                     allowances=0, other_deductions=0) -> dict:
-    """أرقام كشف الفترة، مشتقّةً من نوع الموظف وسجلاته — بلا حفظ.
+    """أرقام كشف الفترة، مشتقّةً من شروط الموظف وسجلاته — بلا حفظ.
 
     الجزئي: الاستحقاق = مجموع ساعاته المسجّلة × أجر الساعة. لا خصم غياب —
     الغياب عنده هو ببساطة ساعةٌ لم تُسجَّل.
 
     الدائم: الاستحقاق = الراتب الشهري، ويُخصم منه الغياب بمعدّل اليوم
-    والتأخير بمعدّل الدقيقة، ولا يُحتسب إلا ما وُسم قابلاً للخصم.
+    والتأخير بمعدّل الدقيقة.
+
+    ومصادر الأرقام ثلاثة تُجمَع ولا يُلغي بعضُها بعضاً:
+    1. **الشروط السارية** (`hr/contracts.py`) — العقد النشط إن وُجد، وإلا
+       بطاقة الموظف. وبنودُ العقد الثابتة تصبّ في البدلات والخصومات.
+    2. **الحضور المشتقّ** (`AttendanceDay`) — غيابٌ وتأخيرٌ وإضافيّ.
+    3. **المدخلات اليدوية** (`AttendanceAdjustment` و`WorkLog`) كما كانت.
+
+    والقسط: `net` ما يدخل الدفاتر، و`net_payable` ما يقبضه الموظف.
     """
     if period_end < period_start:
         raise ValidationError({"period_end": "نهاية الفترة قبل بدايتها."})
+
+    from .contracts import daily_rate, effective_terms, minute_rate, overtime_multiplier
+
+    terms = effective_terms(employee, period_end)
+    day_rate = daily_rate(employee, terms)
+    min_rate = minute_rate(employee, terms)
 
     hours = Decimal("0")
     absence_days = Decimal("0")
@@ -197,15 +276,21 @@ def compute_payslip(employee: Employee, period_start, period_end, *,
     absence_deduction = Decimal("0")
     late_deduction = Decimal("0")
 
-    if employee.pay_type == Employee.PAY_HOURLY:
-        rate = employee.hourly_rate or Decimal("0")
+    derived = attendance_totals(employee, period_start, period_end)
+    overtime_minutes = derived["overtime_minutes"]
+
+    if terms.pay_type == Employee.PAY_HOURLY:
+        rate = terms.hourly_rate or Decimal("0")
         hours = sum(
             (log.hours or Decimal("0")) for log in WorkLog.objects.filter(
                 employee=employee, date__gte=period_start, date__lte=period_end)
         ) or Decimal("0")
         gross = money(Decimal(hours) * rate)
+        # لا خصم غياب للجزئي — لكن تأخيره وغيابه يُسجَّلان للعِلم كما في التقارير.
+        absence_days = derived["absence_days"]
+        late_minutes = derived["late_minutes"]
     else:
-        rate = employee.monthly_salary or Decimal("0")
+        rate = terms.monthly_salary or Decimal("0")
         gross = money(rate)
         adjustments = AttendanceAdjustment.objects.filter(
             employee=employee, date__gte=period_start, date__lte=period_end)
@@ -213,30 +298,53 @@ def compute_payslip(employee: Employee, period_start, period_end, *,
             if adj.kind == AttendanceAdjustment.KIND_ABSENCE:
                 absence_days += adj.days or Decimal("0")
                 if adj.is_deductible:
-                    absence_deduction += (adj.days or Decimal("0")) * employee.daily_rate
+                    absence_deduction += (adj.days or Decimal("0")) * day_rate
             else:
                 late_minutes += adj.minutes or 0
                 if adj.is_deductible:
-                    late_deduction += Decimal(adj.minutes or 0) * employee.minute_rate
+                    late_deduction += Decimal(adj.minutes or 0) * min_rate
+        # ثم الحضور المشتقّ فوقها — والغياب المشتقّ مخصومٌ دائماً: العذر
+        # (إجازةً كان أو عطلة) لا يصل إلى هنا أصلاً لأن `AttendanceDay`
+        # يُصفّر `absence_days` لتلك الحالات.
+        absence_days += derived["absence_days"]
+        absence_deduction += derived["absence_days"] * day_rate
+        late_minutes += derived["late_minutes"]
+        late_deduction += Decimal(derived["late_minutes"]) * min_rate
 
-    allowances = money(allowances)
-    other_deductions = money(other_deductions)
+    overtime_pay = money(
+        Decimal(overtime_minutes) * min_rate * overtime_multiplier(employee, period_end, terms))
+
+    # بنود العقد الثابتة تُضاف إلى ما أدخله المستخدم يدوياً في الكشف.
+    allowances = money(Decimal(allowances or 0) + terms.earnings_total)
+    other_deductions = money(Decimal(other_deductions or 0) + terms.deductions_total)
     absence_deduction = money(absence_deduction)
     late_deduction = money(late_deduction)
-    net = money(gross + allowances - absence_deduction - late_deduction - other_deductions)
+    net = money(
+        gross + overtime_pay + allowances
+        - absence_deduction - late_deduction - other_deductions)
+
+    installment, _advances = advance_installment(employee)
+    # القسط لا يبتلع الراتب كلّه: ما يُخصم لا يتجاوز الصافي، والباقي يُرحَّل
+    # للشهر التالي — موظفٌ يقبض صفراً هذا الشهر بسبب سلفةٍ مشكلةٌ إنسانية
+    # قبل أن تكون محاسبية.
+    installment = min(installment, max(net, Decimal("0")))
 
     return {
-        "pay_type": employee.pay_type,
+        "pay_type": terms.pay_type,
         "rate": money(rate),
         "worked_hours": money(hours),
         "absence_days": money(absence_days),
         "late_minutes": late_minutes,
+        "overtime_minutes": overtime_minutes,
+        "overtime_pay": overtime_pay,
         "gross": gross,
         "allowances": allowances,
         "absence_deduction": absence_deduction,
         "late_deduction": late_deduction,
         "other_deductions": other_deductions,
         "net": net,
+        "advance_deduction": installment,
+        "net_payable": money(net - installment),
     }
 
 
@@ -294,10 +402,61 @@ def post_payslip(payslip: Payslip, *, user=None) -> Payslip:
         payslip.posted_at = timezone.now()
         payslip.posted_by = user if getattr(user, "is_authenticated", False) else None
         payslip.save(update_fields=["status", "posted_at", "posted_by", "updated_at"])
+        _consume_advances(payslip)
 
     logger.info("payroll.payslip_posted tenant=%s payslip=%s net=%s",
                 tenant.pk, payslip.pk, net)
     return payslip
+
+
+def _consume_advances(payslip: Payslip) -> None:
+    """ينقص متبقّي السلف بقدر ما خُصم في هذا الكشف — **بلا قيدٍ ثانٍ**.
+
+    القسط تصافٍ داخل حساب الموظف: صرفُ السلفة كان مديناً على حسابه، وقيدُ
+    الكشف يُدائنه بكامل `net` (لا بـ`net_payable`)، فيبقى فرقُ القسط رصيداً
+    مديناً يتناقص شهراً بعد شهر. أي قيدٍ إضافي هنا يعدّ السداد مرّتين.
+
+    والربط عند **الترحيل** لا عند الاحتساب: مسودّةٌ تُحسب عشر مرّات، وربطُ
+    الخصم بالاحتساب كان ينقص الرصيد عشراً.
+    """
+    from .models import Advance, PayslipAdvance
+
+    due = money(payslip.advance_deduction or 0)
+    if due <= 0:
+        return
+    remaining = due
+    for advance in Advance.objects.select_for_update().filter(
+            employee=payslip.employee, status=Advance.STATUS_OPEN).order_by("date", "id"):
+        if remaining <= 0:
+            break
+        if not advance.is_disbursed:
+            continue
+        take = min(money(advance.remaining or 0), remaining)
+        if take <= 0:
+            continue
+        advance.remaining = money(Decimal(advance.remaining) - take)
+        if advance.remaining <= 0:
+            advance.status = Advance.STATUS_SETTLED
+        advance.save(update_fields=["remaining", "status", "updated_at"])
+        PayslipAdvance.objects.create(payslip=payslip, advance=advance, amount=take)
+        remaining -= take
+
+
+def _release_advances(payslip: Payslip) -> None:
+    """يعيد ما خُصم من السلف عند إلغاء ترحيل الكشف — عكسٌ تامّ لا تقريبيّ.
+
+    نقرأ ما خُصم فعلاً من `PayslipAdvance` لا نعيد حسابه: قواعد الأقساط قد
+    تكون تغيّرت بين الترحيل وإلغائه، وإعادةُ الحساب كانت تُرجِع رقماً آخر.
+    """
+    from .models import PayslipAdvance
+
+    for link in PayslipAdvance.objects.select_related("advance").filter(payslip=payslip):
+        advance = link.advance
+        advance.remaining = money(Decimal(advance.remaining) + Decimal(link.amount))
+        if advance.remaining > 0 and advance.status == advance.STATUS_SETTLED:
+            advance.status = advance.STATUS_OPEN
+        advance.save(update_fields=["remaining", "status", "updated_at"])
+        link.delete()
 
 
 def unpost_payslip(payslip: Payslip, *, user=None) -> dict:
@@ -319,6 +478,9 @@ def unpost_payslip(payslip: Payslip, *, user=None) -> dict:
     payslip.posted_at = None
     payslip.posted_by = None
     payslip.save(update_fields=["status", "posted_at", "posted_by", "updated_at"])
+    # ما خُصم من السلف يعود بالضبط — وإلا بقي جزءٌ من دَينٍ مسدَّداً على الورق
+    # وغيرَ مسدَّد في الحساب.
+    _release_advances(payslip)
     logger.info("payroll.payslip_unposted tenant=%s payslip=%s", payslip.tenant_id, payslip.pk)
     return result
 

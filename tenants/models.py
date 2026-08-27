@@ -160,7 +160,7 @@ class TenantSettings(models.Model):
     mixture_auto_fill_enabled = models.BooleanField(default=False, db_column='MixtureAutoFillEnabled')
     barcode_action = models.CharField(
         max_length=20, default='index', db_column='BarcodeAction',
-        help_text="'index' = يفتح فهرس الأصناف, 'cashier' = يفتح فاتورة كاشير",
+        help_text="'index' = يفتح فهرس المنتجات, 'cashier' = يفتح فاتورة كاشير",
     )
 
     # تفضيل المظهر (حجم/نوع الخط) — يُحفَظ خادمياً لكل شركة فيثبت عبر الأجهزة
@@ -183,6 +183,14 @@ class TenantSettings(models.Model):
         help_text="مهلة إنهاء الجلسة عند الخمول بالدقائق (5..1440)",
     )
 
+    # T-HR: هل يُعلَن غياب الموظف في يومٍ لا وردية مُسنَدة له فيه؟
+    # الافتراضي **لا**: شركةٌ فعّلت الحضور ولم تبنِ جداولها بعد كانت ستستيقظ
+    # على موظفيها كلّهم «غائبين» بأثرٍ مالي في مسير الرواتب.
+    hr_absence_requires_shift = models.BooleanField(
+        default=True, db_column='HrAbsenceRequiresShift',
+        help_text='لا يُحتسب غياب إلا في يومٍ للموظف فيه وردية مُسنَدة',
+    )
+
     class Meta:
         db_table = 'tenant_settings'
         managed = True
@@ -196,7 +204,7 @@ class TenantSettings(models.Model):
 class Branch(models.Model):
     """فرع تابع لشركة أم.
 
-    التعريف القاطع: الفرع يشارك الشركةَ الأمَّ شجرةَ الحسابات والأصناف
+    التعريف القاطع: الفرع يشارك الشركةَ الأمَّ شجرةَ الحسابات والمنتجات
     والشركاء، لكن فواتيره ومخزونه وتقاريره المالية مستقلة (بُعد branch
     على SalesInvoice / StockMovement / JournalHeader).
     """
@@ -340,6 +348,10 @@ class UserCompanyMembership(models.Model):
         ('sales', 'موظف مبيعات (Sales)'),
         ('procurement', 'موظف مشتريات (Procurement)'),
         ('staff', 'موظف (Staff)'),
+        # T-HR: صاحب حسابٍ للخدمة الذاتية وحدها — يبصم ويطلب ويرى قسيمته.
+        # `ess` لا `employee`: الأخيرة محجوزة لدور التطبيق القديم (انظر
+        # `core/access.py` عند `_ESS_EMPLOYEE` و`user_tenant_role`).
+        ('ess', 'موظف خدمة ذاتية (ESS)'),
         ('viewer', 'مستعرض (Viewer)'),
     ]
 
