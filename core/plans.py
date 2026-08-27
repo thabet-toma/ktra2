@@ -20,6 +20,8 @@ from django.core.cache import cache
 from django.db.models import Count
 from django.utils import timezone
 
+from core.date_ranges import local_day_start
+
 logger = logging.getLogger(__name__)
 
 PERIOD_MONTH = "month"
@@ -78,7 +80,7 @@ def _count_sales_invoices(tenant_id, since):
     from sales.models import SalesInvoice
 
     return SalesInvoice.objects.filter(
-        tenant_id=tenant_id, created_at__date__gte=since,
+        tenant_id=tenant_id, created_at__gte=local_day_start(since),
     ).count()
 
 
@@ -86,7 +88,7 @@ def _bulk_sales_invoices(tenant_ids, since):
     from sales.models import SalesInvoice
 
     return _grouped_count(
-        SalesInvoice.objects.filter(created_at__date__gte=since), tenant_ids,
+        SalesInvoice.objects.filter(created_at__gte=local_day_start(since)), tenant_ids,
     )
 
 
@@ -94,7 +96,7 @@ def _count_purchase_invoices(tenant_id, since):
     from logistics.models import PurchaseInvoice
 
     return PurchaseInvoice.objects.filter(
-        tenant_id=tenant_id, created_at__date__gte=since,
+        tenant_id=tenant_id, created_at__gte=local_day_start(since),
     ).count()
 
 
@@ -102,7 +104,7 @@ def _bulk_purchase_invoices(tenant_ids, since):
     from logistics.models import PurchaseInvoice
 
     return _grouped_count(
-        PurchaseInvoice.objects.filter(created_at__date__gte=since), tenant_ids,
+        PurchaseInvoice.objects.filter(created_at__gte=local_day_start(since)), tenant_ids,
     )
 
 

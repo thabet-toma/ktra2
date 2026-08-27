@@ -14,6 +14,7 @@ from accounting.services import attach_partner_posted_balance, unpost_document
 from core.access import require_perm, requires_perm, user_has_perm
 from core.activity import (
     build_activity_changes,
+    build_document_snapshot_changes,
     build_line_changes,
     describe_activity_changes,
     log_activity,
@@ -292,9 +293,21 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
             except Exception as e:  # noqa: BLE001
                 # Store error on invoice for later inspection
                 invoice._auto_post_error = str(e)
+        # الإنشاء يُسجَّل بمحتواه كاملاً لا بجملةٍ مجرّدة: كل بندٍ أُضيف بكميته
+        # وسعره، وحقول الترويسة المملوءة. بلا هذا يبقى «إنشاء فاتورة» سطراً لا
+        # يُساءَل عليه — والمقارنة اللاحقة بالتعديلات تفقد نقطة الأصل.
+        changes = build_document_snapshot_changes(
+            header=snapshot_fields(invoice, INVOICE_ACTIVITY_FIELD_LABELS),
+            lines=_invoice_line_snapshot(invoice),
+            labels=INVOICE_ACTIVITY_FIELD_LABELS,
+            line_labels=INVOICE_ACTIVITY_LINE_LABELS,
+        )
+        details = describe_activity_changes(changes)
         log_activity(
             action="create", entity_type="sales_invoice", entity_id=invoice.id,
-            entity_label=invoice.invoice_number, description="إنشاء فاتورة مبيعات",
+            entity_label=invoice.invoice_number,
+            description=f"إنشاء فاتورة مبيعات — {details}" if details else "إنشاء فاتورة مبيعات",
+            metadata={"changes": changes} if changes else None,
             partner_ids=[invoice.customer_id],
             request=self.request,
         )
@@ -358,6 +371,14 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                 {"error": "؛ ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST
             )
         inv_id, inv_no, customer_id = instance.id, instance.invoice_number, instance.customer_id
+        # لقطة ما ستحمله الفاتورة إلى العدم — بعد `destroy` لا يبقى ما يُقرأ منه.
+        deleted_changes = build_document_snapshot_changes(
+            header=snapshot_fields(instance, INVOICE_ACTIVITY_FIELD_LABELS),
+            lines=_invoice_line_snapshot(instance),
+            labels=INVOICE_ACTIVITY_FIELD_LABELS,
+            line_labels=INVOICE_ACTIVITY_LINE_LABELS,
+            removed=True,
+        )
         # T-INTENT: شيكات النيّة تموت مع مستندها. الرابط `SET_NULL`، فبدون هذا
         # يترك حذفُ المسودة شيكاتٍ مسودةً يتيمة لا يراها أحد ولا يكنسها شيء —
         # وكان الحارس القديم يمنع الحذف كلّه (برسالة إلغاء ترحيلٍ لا معنى لها
@@ -368,10 +389,16 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
             sales_invoice=instance, status="Draft", customer_payment__isnull=True,
         ).delete()
         response = super().destroy(request, *args, **kwargs)
+        deleted_details = describe_activity_changes(deleted_changes)
         log_activity(
             action="delete", entity_type="sales_invoice", entity_id=inv_id,
-            entity_label=inv_no, description="حذف فاتورة مبيعات", request=request,
-            partner_ids=[customer_id],
+            entity_label=inv_no,
+            description=(
+                f"حذف فاتورة مبيعات — {deleted_details}" if deleted_details
+                else "حذف فاتورة مبيعات"
+            ),
+            metadata={"changes": deleted_changes} if deleted_changes else None,
+            request=request, partner_ids=[customer_id],
         )
         return response
 

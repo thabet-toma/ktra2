@@ -28,7 +28,8 @@
 | `core/api_defaults.py` | إعدادات المصادقة الموحّدة + `PagePartnerBalanceMixin` |
 | `core/cache_backends.py` | خلفية كاش لا تُسقط الطلب عند تعثّر نظام الملفات |
 | `core/dashboard_api.py` | تجميع الداشبورد خادمياً (كاش مفتاحه الشركة) |
-| `core/activity.py` · `core/activity_views.py` | سجلّ النشاط |
+| `core/activity.py` · `core/activity_views.py` | سجلّ النشاط — الكتابة والقراءة. الإنشاء والحذف والتعديل تُسجَّل **بمحتواها** (بندٌ أُضيف/حُذف بكميته وسعره، وقيمةٌ تغيّرت من/إلى) عبر `build_document_snapshot_changes` و`build_line_changes` |
+| `core/date_ranges.py` | **المدى الزمني المحلّي** — البديل الوحيد لـ`__date` على أعمدة `DateTimeField`. انظر «قواعد عابرة للنظام §8» في `ARCHITECTURE.md` |
 | `core/assistant_*.py` · `core/ollama_assistant.py` | المساعد الذكي وأدواته |
 | `core/platform_admin_api.py` | لوحة السوبر أدمن (شركات/أعضاء/إيقاف) |
 | `core/media_views.py` | **نقطة الرفع الوحيدة** إلى Cloudinary + سجلّ بايتاتها |

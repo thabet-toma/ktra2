@@ -10,6 +10,8 @@ export interface ActivityQuery {
   entity_type?: string;
   entity_id?: number | string;
   partner_id?: number | string;
+  /** مدى جاهز — يتقدّم على date/date_from/date_to حين يُمرَّر. */
+  range?: string;
   date?: string;        // YYYY-MM-DD (يوم واحد)
   date_from?: string;
   date_to?: string;
@@ -26,6 +28,7 @@ export async function getActivityLog(params: ActivityQuery = {}): Promise<Activi
     entity_type: params.entity_type,
     entity_id: params.entity_id,
     partner_id: params.partner_id,
+    range: params.range,
     date: params.date,
     date_from: params.date_from,
     date_to: params.date_to,

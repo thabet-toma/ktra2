@@ -29,6 +29,8 @@ from tenants.models import Tenant
 from core.access import requires_perm
 from core.pagination import EnforcedPageNumberPagination
 from core.activity import build_activity_changes, log_activity, log_view
+from core.date_ranges import filter_local_date_range
+from django.utils.dateparse import parse_date
 from core.tenant_utils import get_tenant
 from store.cache import InvalidatesStoreCacheMixin
 # صيانة الأداء 2026-07: الكلاس انتقل إلى core/pagination.py ليصبح الافتراضي
@@ -197,12 +199,13 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             except (TypeError, ValueError):
                 wanted = []
             qs = qs.filter(category_id__in=wanted)
-        created_from = params.get('created_from')
-        if created_from:
-            qs = qs.filter(created_at__date__gte=created_from)
-        created_to = params.get('created_to')
-        if created_to:
-            qs = qs.filter(created_at__date__lte=created_to)
+        # مدى محلّي بلا `__date`: CONVERT_TZ يُعيد NULL على خادمٍ بلا جداول
+        # مناطق زمنية، فيبتلع الفلتر كل الصفوف بصمت (core/date_ranges.py).
+        qs = filter_local_date_range(
+            qs, 'created_at',
+            date_from=parse_date(params.get('created_from') or ''),
+            date_to=parse_date(params.get('created_to') or ''),
+        )
         # T-REORDER: فلتر حالة المخزون — من `inventory/stock_status.py` وحدها.
         # كان مكتوباً هنا نسخةً ثانية بجانب نسخة السيريالايزر، وتباعدتا.
         stock_status = params.get('stock_status')

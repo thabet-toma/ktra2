@@ -115,3 +115,43 @@ class SalesInvoiceActivityDetailTest(APITestCase):
         activity = self._activity()
         assert activity.description == "تعديل فاتورة مبيعات"
         assert activity.metadata == {}
+
+    def test_creating_an_invoice_records_every_line_it_was_born_with(self):
+        """«إنشاء فاتورة» وحدها لا تُساءَل — الصف يجب أن يحمل ما دخل الفاتورة."""
+        res = self.client.post(
+            "/api/sales/invoices/",
+            {
+                "customer": self.customer.id, "invoice_date": "2026-08-05",
+                "invoice_type": SalesInvoice.INVOICE_CREDIT,
+                "currency": self.currency.CurrencyID,
+                "lines": [
+                    {"product": self.tire.id, "quantity": "4", "unit_price": "110"},
+                    {"product": self.oil.id, "quantity": "2", "unit_price": "45"},
+                ],
+            },
+            format="json", HTTP_X_TENANT_ID=str(self.tenant.TenantID),
+        )
+        assert res.status_code == 201, res.content[:600]
+        activity = ActivityLog.objects.filter(
+            tenant=self.tenant, entity_type="sales_invoice", action="create",
+        ).latest("id")
+        assert "أضاف منتج «إطار 205» (الكمية 4 · السعر 110)" in activity.description
+        assert "أضاف منتج «زيت محرك» (الكمية 2 · السعر 45)" in activity.description
+        kinds = [c["kind"] for c in activity.metadata["changes"]]
+        assert kinds.count("line_added") == 2
+        # حقول الترويسة المملوءة تُعرض كقيمةٍ واحدة لا كـ«من ← إلى».
+        assert {c["kind"] for c in activity.metadata["changes"]} <= {"field_set", "line_added"}
+
+    def test_deleting_an_invoice_records_what_went_with_it(self):
+        res = self.client.delete(
+            f"/api/sales/invoices/{self.invoice.id}/",
+            HTTP_X_TENANT_ID=str(self.tenant.TenantID),
+        )
+        assert res.status_code == 204, res.content[:400]
+        activity = ActivityLog.objects.filter(
+            tenant=self.tenant, entity_type="sales_invoice",
+            entity_id=self.invoice.id, action="delete",
+        ).latest("id")
+        assert "حذف منتج «إطار 205» (الكمية 2 · السعر 100)" in activity.description
+        assert "حذف منتج «زيت محرك» (الكمية 1 · السعر 50)" in activity.description
+        assert [c["kind"] for c in activity.metadata["changes"]].count("line_removed") == 2

@@ -146,7 +146,20 @@ def _date_range(params: dict) -> tuple[datetime.date | None, datetime.date | Non
 
 
 def _apply_dates(qs, field_name: str, params: dict):
+    """مدى «من/إلى» على حقل تاريخ — أو على `DateTimeField` بلاحقة `__date`.
+
+    اللاحقة `__date` تُترجَم في MySQL إلى `DATE(CONVERT_TZ(...))`، و`CONVERT_TZ`
+    تُعيد `NULL` على خادمٍ بلا جداول مناطق زمنية فيُفرَّغ التقرير بصمت. فحين
+    تُطلب، نحوّلها هنا إلى مدىً زمنيّ محلّي صريح — مصدرٌ واحد يحمي كل تقرير
+    حاضرٍ ومستقبلي (`core/date_ranges.py`).
+    """
     start, end = _date_range(params)
+    if field_name.endswith("__date"):
+        from core.date_ranges import filter_local_date_range
+
+        return filter_local_date_range(
+            qs, field_name[: -len("__date")], date_from=start, date_to=end,
+        )
     if start:
         qs = qs.filter(**{f"{field_name}__gte": start})
     if end:

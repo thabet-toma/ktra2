@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { History, Search, ArrowRight, User as UserIcon, RefreshCw } from "lucide-react";
+import { DocRefCell } from "@/components/shared/LedgerTable";
 import { getActivityLog, getActivityUsers } from "@/services/activityService";
-import type { ActivityLogEntry, ActivityUserOption } from "@/types/activity";
+import type { ActivityLogEntry, ActivityRange, ActivityUserOption } from "@/types/activity";
+import { formatNumber } from "@/utils/formatNumber";
+import { formatDateValue } from "@/utils/formatDate";
 import { actionMeta, entityLabel, formatActivityTime, ENTITY_LABELS } from "./activity/activityMeta";
 import { ActivityChanges } from "./activity/ActivityChanges";
 
@@ -25,11 +28,63 @@ const ACTION_OPTIONS: { value: string; label: string }[] = [
   { value: "logout", label: "تسجيل خروج" },
 ];
 
+/** المدى الزمني — الأسماء تُرسل كما هي إلى `?range=` عدا «مخصص». */
+const RANGE_OPTIONS: { value: ActivityRange; label: string }[] = [
+  { value: "today", label: "اليوم" },
+  { value: "yesterday", label: "أمس" },
+  { value: "week", label: "هذا الأسبوع" },
+  { value: "month", label: "هذا الشهر" },
+  { value: "quarter", label: "هذا الربع" },
+  { value: "year", label: "هذه السنة" },
+  { value: "all", label: "الكل" },
+  { value: "custom", label: "مخصص" },
+];
+
 const selectCls =
   "px-2.5 py-1.5 text-sm rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)]";
 
+const chipCls = (active: boolean) =>
+  `px-3 py-1 text-sm rounded-full border transition-colors ${
+    active
+      ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)] font-semibold"
+      : "ktra-border-soft ktra-text-soft hover:bg-[var(--color-surface-2)]"
+  }`;
+
+/** استعلام المدى: «مخصص» يرسل الحدّين، وما عداه يرسل الاسم الجاهز. */
+function rangeQuery(range: ActivityRange, from: string, to: string) {
+  if (range !== "custom") return { range };
+  return { date_from: from || undefined, date_to: to || undefined };
+}
+
+/**
+ * صفوف مجمَّعة بيومها، بترتيب ورودها (تنازلي زمنياً من الخادم).
+ *
+ * التجميع ضرورة لا زينة: المدى صار يمتدّ أسبوعاً أو سنة، وجدارُ صفوفٍ بلا فاصلٍ
+ * يوميّ يُخفي متى وقع ماذا — وهو أوّل ما يُسأل عنه سجلّ التدقيق.
+ */
+function groupByDay(rows: ActivityLogEntry[]): { day: string; rows: ActivityLogEntry[] }[] {
+  const groups: { day: string; rows: ActivityLogEntry[] }[] = [];
+  for (const row of rows) {
+    const day = (row.timestamp || "").slice(0, 10);
+    const last = groups[groups.length - 1];
+    if (last && last.day === day) last.rows.push(row);
+    else groups.push({ day, rows: [row] });
+  }
+  return groups;
+}
+
+/** تفصيل الصف: القائمة المبنيّة إن وُجدت، وإلا الوصف النصّي. */
+const RowDetails: React.FC<{ row: ActivityLogEntry }> = ({ row }) =>
+  row.metadata?.changes?.length ? (
+    <ActivityChanges changes={row.metadata.changes} />
+  ) : (
+    <span className="ktra-text-soft">{row.description}</span>
+  );
+
 export const ActivityLogPage: React.FC = () => {
-  const [date, setDate] = useState<string>(todayLocal());
+  const [range, setRange] = useState<ActivityRange>("today");
+  const [dateFrom, setDateFrom] = useState<string>(todayLocal());
+  const [dateTo, setDateTo] = useState<string>(todayLocal());
   const [userId, setUserId] = useState<string>("");
   const [action, setAction] = useState<string>("");
   const [entityType, setEntityType] = useState<string>("");
@@ -41,7 +96,7 @@ export const ActivityLogPage: React.FC = () => {
 
   // Drill-down: نشاط مستخدم واحد بالتفصيل (يشمل العرض/الفتح).
   const [drillUser, setDrillUser] = useState<ActivityUserOption | null>(null);
-  const [drillDate, setDrillDate] = useState<string>(todayLocal());
+  const [drillRange, setDrillRange] = useState<ActivityRange>("today");
   const [drillRows, setDrillRows] = useState<ActivityLogEntry[]>([]);
   const [drillLoading, setDrillLoading] = useState(false);
 
@@ -53,7 +108,7 @@ export const ActivityLogPage: React.FC = () => {
     setLoading(true);
     setError(null);
     getActivityLog({
-      date,
+      ...rangeQuery(range, dateFrom, dateTo),
       user: userId || undefined,
       action: action || undefined,
       entity_type: entityType || undefined,
@@ -62,7 +117,7 @@ export const ActivityLogPage: React.FC = () => {
       .then(setRows)
       .catch((e: any) => setError(e?.message === "403" ? "هذه الصفحة متاحة للمدير فقط." : "تعذّر تحميل السجل."))
       .finally(() => setLoading(false));
-  }, [date, userId, action, entityType, search]);
+  }, [range, dateFrom, dateTo, userId, action, entityType, search]);
 
   useEffect(() => {
     const t = setTimeout(loadFeed, 250); // debounce للبحث
@@ -71,23 +126,36 @@ export const ActivityLogPage: React.FC = () => {
 
   const openDrill = useCallback((u: ActivityUserOption) => {
     setDrillUser(u);
-    setDrillDate(todayLocal());
+    setDrillRange("today");
   }, []);
 
   useEffect(() => {
     if (!drillUser) return;
     let cancelled = false;
     setDrillLoading(true);
-    getActivityLog({ user: drillUser.id, date: drillDate, include_views: true })
+    getActivityLog({ user: drillUser.id, range: drillRange, include_views: true })
       .then((d) => { if (!cancelled) setDrillRows(d); })
       .catch(() => { if (!cancelled) setDrillRows([]); })
       .finally(() => { if (!cancelled) setDrillLoading(false); });
     return () => { cancelled = true; };
-  }, [drillUser, drillDate]);
+  }, [drillUser, drillRange]);
 
   const entityOptions = useMemo(
     () => [{ value: "", label: "كل المستندات" }, ...Object.entries(ENTITY_LABELS).map(([v, l]) => ({ value: v, label: l }))],
     [],
+  );
+
+  const dayGroups = useMemo(() => groupByDay(rows), [rows]);
+
+  /* شريط المدى — مشترك بين الجدول العام ورحلة المستخدم. */
+  const RangeChips: React.FC<{ value: ActivityRange; onChange: (r: ActivityRange) => void }> = ({ value, onChange }) => (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {RANGE_OPTIONS.map((o) => (
+        <button key={o.value} type="button" onClick={() => onChange(o.value)} className={chipCls(value === o.value)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
   );
 
   if (drillUser) {
@@ -99,7 +167,7 @@ export const ActivityLogPage: React.FC = () => {
         >
           <ArrowRight className="w-4 h-4" /> رجوع لسجل الكل
         </button>
-        <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
           <div className="flex items-center gap-2">
             <div className="w-10 h-10 rounded-full bg-[var(--color-primary)] flex items-center justify-center text-white font-bold">
               {drillUser.name?.charAt(0)}
@@ -109,10 +177,13 @@ export const ActivityLogPage: React.FC = () => {
               <p className="text-xs ktra-text-soft">رحلة المستخدم — تشمل الفتح والعرض</p>
             </div>
           </div>
-          <label className="flex items-center gap-2 text-sm">
-            <span className="ktra-text-soft">اليوم:</span>
-            <input type="date" value={drillDate} onChange={(e) => setDrillDate(e.target.value)} className={selectCls} />
-          </label>
+          <span className="text-xs ktra-text-soft">{formatNumber(drillRows.length)} حدثاً</span>
+        </div>
+        <div className="mb-4">
+          <RangeChips
+            value={drillRange === "custom" ? "today" : drillRange}
+            onChange={(r) => setDrillRange(r === "custom" ? "today" : r)}
+          />
         </div>
 
         {drillLoading ? (
@@ -120,30 +191,37 @@ export const ActivityLogPage: React.FC = () => {
         ) : drillRows.length === 0 ? (
           <div className="text-center py-12 ktra-text-soft">
             <History className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>لا يوجد نشاط في هذا اليوم</p>
+            <p>لا يوجد نشاط في هذا المدى</p>
           </div>
         ) : (
-          <ol className="relative border-r-2 ktra-border-soft pr-4 space-y-4">
-            {drillRows.map((r) => {
-              const meta = actionMeta(r.action);
-              return (
-                <li key={r.id} className="relative">
-                  <span className="absolute -right-[1.35rem] top-1 w-3 h-3 rounded-full bg-[var(--color-surface)] border-2 border-[var(--color-primary)]" />
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${meta.badge}`}>{r.action_label || meta.label}</span>
-                    <span className="text-sm ktra-text-soft">{entityLabel(r.entity_type)}</span>
-                    {r.entity_label && <span className="text-sm font-medium text-[var(--color-text)]">{r.entity_label}</span>}
-                    <span className="text-xs ktra-text-soft mr-auto">{formatActivityTime(r.timestamp)}</span>
-                  </div>
-                  {r.metadata?.changes?.length ? (
-                    <div className="mt-1"><ActivityChanges changes={r.metadata.changes} /></div>
-                  ) : (
-                    r.description && <p className="text-sm ktra-text-soft mt-0.5">{r.description}</p>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
+          groupByDay(drillRows).map((group) => (
+            <section key={group.day} className="mb-5">
+              <h3 className="text-xs font-bold ktra-text-soft mb-2">
+                {formatDateValue(group.day) || group.day} — {formatNumber(group.rows.length)} حدثاً
+              </h3>
+              <ol className="relative border-r-2 ktra-border-soft pr-4 space-y-4">
+                {group.rows.map((r) => {
+                  const meta = actionMeta(r.action);
+                  return (
+                    <li key={r.id} className="relative">
+                      <span className="absolute -right-[1.35rem] top-1 w-3 h-3 rounded-full bg-[var(--color-surface)] border-2 border-[var(--color-primary)]" />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${meta.badge}`}>{r.action_label || meta.label}</span>
+                        <span className="text-sm ktra-text-soft">{entityLabel(r.entity_type)}</span>
+                        {r.entity_label && (
+                          <span className="text-sm font-medium text-[var(--color-text)]">
+                            <DocRefCell referenceType={r.entity_type} referenceId={r.entity_id} label={r.entity_label} />
+                          </span>
+                        )}
+                        <span className="text-xs ktra-text-soft mr-auto">{formatActivityTime(r.timestamp)}</span>
+                      </div>
+                      <div className="mt-0.5 text-sm"><RowDetails row={r} /></div>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          ))
         )}
       </div>
     );
@@ -161,12 +239,21 @@ export const ActivityLogPage: React.FC = () => {
         </div>
       </div>
 
+      {/* المدى الزمني */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <RangeChips value={range} onChange={setRange} />
+        {range === "custom" && (
+          <div className="flex items-center gap-1.5 text-sm">
+            <span className="ktra-text-soft">من:</span>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={selectCls} />
+            <span className="ktra-text-soft">إلى:</span>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={selectCls} />
+          </div>
+        )}
+      </div>
+
       {/* شريط الفلاتر */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <label className="flex items-center gap-1.5 text-sm">
-          <span className="ktra-text-soft">التاريخ:</span>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={selectCls} />
-        </label>
         <select value={userId} onChange={(e) => setUserId(e.target.value)} className={selectCls}>
           <option value="">كل المستخدمين</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
@@ -189,6 +276,9 @@ export const ActivityLogPage: React.FC = () => {
         <button onClick={loadFeed} className="p-1.5 rounded-md hover:bg-[var(--color-surface-2)]" title="تحديث">
           <RefreshCw className={`w-4 h-4 ktra-text-soft ${loading ? "animate-spin" : ""}`} />
         </button>
+        <span className="text-xs ktra-text-soft mr-auto">
+          {formatNumber(rows.length)} حدثاً في {formatNumber(dayGroups.length)} يوم
+        </span>
       </div>
 
       {error ? (
@@ -214,41 +304,49 @@ export const ActivityLogPage: React.FC = () => {
                   <History className="w-10 h-10 mx-auto mb-2 opacity-50" />لا يوجد نشاط بهذه الفلاتر
                 </td></tr>
               ) : (
-                rows.map((r) => {
-                  const meta = actionMeta(r.action);
-                  return (
-                    <tr key={r.id} className="border-t ktra-border-soft hover:bg-[var(--color-surface-2)]/50">
-                      <td className="px-3 py-2 whitespace-nowrap ktra-text-soft">{formatActivityTime(r.timestamp)}</td>
-                      <td className="px-3 py-2">
-                        {r.user ? (
-                          <button
-                            onClick={() => openDrill({ id: r.user!, name: r.user_name })}
-                            className="flex items-center gap-1.5 text-[var(--color-primary)] hover:underline font-medium"
-                          >
-                            <UserIcon className="w-3.5 h-3.5" />{r.user_name}
-                          </button>
-                        ) : <span className="ktra-text-soft">{r.user_name}</span>}
+                dayGroups.map((group) => (
+                  <React.Fragment key={group.day}>
+                    <tr className="bg-[var(--color-surface-2)]">
+                      <td colSpan={6} className="px-3 py-1.5 text-xs font-bold ktra-text-soft">
+                        {formatDateValue(group.day) || group.day} — {formatNumber(group.rows.length)} حدثاً
                       </td>
-                      <td className="px-3 py-2">
-                        <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${meta.badge}`}>
-                          {r.action_label || meta.label}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        <span className="ktra-text-soft">{entityLabel(r.entity_type)}</span>
-                        {r.entity_label && <span className="font-medium text-[var(--color-text)]"> {r.entity_label}</span>}
-                      </td>
-                      <td className="px-3 py-2 ktra-text-soft max-w-lg">
-                        {r.metadata?.changes?.length ? (
-                          <ActivityChanges changes={r.metadata.changes} />
-                        ) : (
-                          r.description
-                        )}
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap ktra-text-soft text-xs">{r.ip_address || "—"}</td>
                     </tr>
-                  );
-                })
+                    {group.rows.map((r) => {
+                      const meta = actionMeta(r.action);
+                      return (
+                        <tr key={r.id} className="border-t ktra-border-soft hover:bg-[var(--color-surface-2)]/50 align-top">
+                          <td className="px-3 py-2 whitespace-nowrap ktra-text-soft">{formatActivityTime(r.timestamp)}</td>
+                          <td className="px-3 py-2">
+                            {r.user ? (
+                              <button
+                                onClick={() => openDrill({ id: r.user!, name: r.user_name })}
+                                className="flex items-center gap-1.5 text-[var(--color-primary)] hover:underline font-medium"
+                              >
+                                <UserIcon className="w-3.5 h-3.5" />{r.user_name}
+                              </button>
+                            ) : <span className="ktra-text-soft">{r.user_name}</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${meta.badge}`}>
+                              {r.action_label || meta.label}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className="ktra-text-soft">{entityLabel(r.entity_type)}</span>
+                            {r.entity_label && (
+                              <span className="font-medium text-[var(--color-text)]">
+                                {" "}
+                                <DocRefCell referenceType={r.entity_type} referenceId={r.entity_id} label={r.entity_label} />
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 max-w-lg"><RowDetails row={r} /></td>
+                          <td className="px-3 py-2 whitespace-nowrap ktra-text-soft text-xs">{r.ip_address || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                ))
               )}
             </tbody>
           </table>

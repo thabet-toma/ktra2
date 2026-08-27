@@ -6,11 +6,24 @@ export interface ActivityFieldChange {
   new: string;
 }
 
-/** تفصيل حركة واحدة: حقل تغيّر، أو بند أُضيف/حُذف/تغيّرت قيمه. */
+/** قيمة حقل عند الإنشاء أو الحذف — لا قيمة سابقة ولا لاحقة، قيمة واحدة. */
+export interface ActivityFieldSet {
+  kind: "field_set";
+  field: string;
+  label: string;
+  new: string;
+}
+
+/** تفصيل حركة واحدة: حقل تغيّر أو ثُبّت، أو بند أُضيف/حُذف/تغيّرت قيمه. */
 export type ActivityChange =
   | ({ kind?: "field" } & ActivityFieldChange)
+  | ActivityFieldSet
   | { kind: "line_added" | "line_removed"; label: string; values: { label: string; value: string }[] }
   | { kind: "line_changed"; label: string; changes: ActivityFieldChange[] };
+
+/** أسماء المدى الزمني الجاهزة كما يقبلها `/api/activity/?range=`. */
+export type ActivityRange =
+  | "today" | "yesterday" | "week" | "month" | "quarter" | "year" | "all" | "custom";
 
 /** سجل النشاط الموحّد — صف واحد من /api/activity/ */
 export interface ActivityLogEntry {

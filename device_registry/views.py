@@ -21,6 +21,7 @@ from rest_framework.response import Response
 
 from core.access import require_perm
 from core.activity import _client_ip, build_activity_changes, log_activity
+from core.date_ranges import filter_local_date_range
 from core.api_defaults import ApiAuthAndUser
 from core.modules import require_module
 from device_registry.models import DeviceAuditLog, SensitiveDevice, imei_is_valid
@@ -168,10 +169,10 @@ class SensitiveDeviceViewSet(viewsets.ModelViewSet):
 
         date_from = parse_date(params.get("date_from") or "")
         date_to = parse_date(params.get("date_to") or "")
-        if date_from:
-            queryset = queryset.filter(created_at__date__gte=date_from)
-        if date_to:
-            queryset = queryset.filter(created_at__date__lte=date_to)
+        # مدى محلّي بلا `__date` — انظر core/date_ranges.py.
+        queryset = filter_local_date_range(
+            queryset, "created_at", date_from=date_from, date_to=date_to,
+        )
         return queryset
 
     def get_queryset(self):

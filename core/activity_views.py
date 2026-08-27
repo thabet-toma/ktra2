@@ -2,8 +2,10 @@
 
 - سجل مستند واحد: ?entity_type=sales_invoice&entity_id=12 → متاح لأي مستخدم مصرّح.
 - الصفحة العامة (بلا entity_id): نشاط كل المستخدمين → للمدير/السوبر أدمن فقط.
-- فلاتر: user, action, entity_type, date (افتراضي اليوم), date_from/date_to,
-  search, include_views (افتراضي false — يستبعد أحداث العرض من الجدول العام).
+- فلاتر: user, action, entity_type, search, include_views (افتراضي false —
+  يستبعد أحداث العرض من الجدول العام).
+- المدى الزمني: `range` جاهز (today/yesterday/week/month/quarter/year/all)، أو
+  `date` ليومٍ واحد، أو `date_from`/`date_to`. الافتراضي للصفحة العامة «اليوم».
 """
 from django.contrib.auth.models import User
 from django.db.models import Q
@@ -15,6 +17,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
+from core.date_ranges import RANGE_PRESETS, filter_local_date_range, resolve_preset
 from core.models import ActivityLog
 from core.tenant_utils import get_tenant
 from core.user_roles import user_is_admin
@@ -202,20 +205,13 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         if not include_views and not is_document_scoped:
             qs = qs.filter(is_view=False)
 
-        # التاريخ: افتراضي اليوم للصفحة العامة (لا يُطبّق على سجل مستند واحد).
-        date_from = parse_date(p.get("date_from") or "")
-        date_to = parse_date(p.get("date_to") or "")
-        single_date = parse_date(p.get("date") or "")
-        if single_date:
-            qs = qs.filter(timestamp__date=single_date)
-        else:
-            if date_from:
-                qs = qs.filter(timestamp__date__gte=date_from)
-            if date_to:
-                qs = qs.filter(timestamp__date__lte=date_to)
-            if not is_scoped and not date_from and not date_to:
-                from django.utils import timezone
-                qs = qs.filter(timestamp__date=timezone.localdate())
+        # المدى الزمني: `range` جاهز، أو `date` ليومٍ واحد، أو `date_from/to`.
+        # لا `timestamp__date` هنا: CONVERT_TZ تُعيد NULL على خادمٍ بلا جداول
+        # مناطق زمنية فتُفرَّغ الصفحة بصمت — راجع core/date_ranges.py.
+        date_from, date_to = self._resolve_dates(p, is_scoped)
+        qs = filter_local_date_range(
+            qs, "timestamp", date_from=date_from, date_to=date_to,
+        )
 
         search = (p.get("search") or "").strip()
         if search:
@@ -228,6 +224,34 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
             )
 
         return qs.order_by("-timestamp", "-id")
+
+    @staticmethod
+    def _resolve_dates(params, is_scoped: bool):
+        """المدى الزمني المطلوب كيومين شاملين — أو (None, None) لبلا حدّ.
+
+        الأولوية: `range` الجاهز ← `date` ليومٍ واحد ← `date_from/date_to`. وحين
+        لا يُطلب شيء تبقى الصفحة العامة على «اليوم» (سجل مستندٍ أو جهةٍ بلا حدّ
+        زمني افتراضاً، فتاريخه كلّه هو المقصود).
+        """
+        preset = (params.get("range") or "").strip().lower()
+        if preset:
+            if preset not in RANGE_PRESETS:
+                raise ValidationError(
+                    {"range": f"مدى غير معروف: {preset}. المتاح: {', '.join(RANGE_PRESETS)}."},
+                )
+            return resolve_preset(preset)
+
+        single_date = parse_date(params.get("date") or "")
+        if single_date:
+            return single_date, single_date
+
+        date_from = parse_date(params.get("date_from") or "")
+        date_to = parse_date(params.get("date_to") or "")
+        if date_from or date_to:
+            return date_from, date_to
+        if is_scoped:
+            return None, None
+        return resolve_preset("today")
 
     def _is_document_scoped(self) -> bool:
         """سجل مستند واحد = نوع الكيان ومعرّفه معاً؛ وهو وحده ما يُطوى."""

@@ -5,11 +5,12 @@ import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct, StockSummaryResponse } from "../../types/inventory";
 import { KitDenseTable, type DenseColumn } from "../kit/KitDenseTable";
 import { KitDocumentShell, type KitToolbarAction } from "../kit/KitDocumentShell";
-import { RefreshCw, Download, Printer, Tags } from "lucide-react";
+import { RefreshCw, Download, Printer, Tags, Pencil, ExternalLink } from "lucide-react";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { productProfilePath } from "../../utils/entityLinks";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { useSimpleUi } from "../../hooks/useSimpleUi";
+import { ItemQuickEditModal } from "../items/ItemQuickEditModal";
 
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة (6.00 ⇒ 6، 6.50 ⇒ 6.5) عبر المُنسّق الموحّد.
 const fmt = (n: number | string) => formatMoney(n, "0");
@@ -34,6 +35,9 @@ export const StockLevelsPage: React.FC = () => {
   const [groupValue, setGroupValue] = useState("");
   const [brandValue, setBrandValue] = useState("");
   const [groupBusy, setGroupBusy] = useState(false);
+  // T-PRODUCT: التحرير السريع من هذه الشاشة أيضاً — الاسم كان زرّاً أزرق مسطَّراً
+  // يقول «رابط» ولا طريقَ منه لتعديل المنتج، كما كان في شاشة المنتجات قبلها.
+  const [quickEditProductId, setQuickEditProductId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -237,16 +241,30 @@ export const StockLevelsPage: React.FC = () => {
       ),
     },
     { key: "sku", header: "SKU", width: "110px" },
+    /* T-PRODUCT: الاسم نصٌّ لا رابط — كان أزرقَ مسطَّراً يعد بالانتقال ولا يعطي
+       طريقاً للتعديل. الوجهتان صارتا أيقونتين صريحتين بجانبه (قلم: تحرير سريع
+       في مكانه · سهم: حركة المخزون في تبويب مستقل)، وهو نفس ترتيب شاشة
+       المنتجات — لا اصطلاح ثانٍ يتعلّمه المستخدم. */
     { key: "name", header: "المنتج", render: (p) => (
-        // اسم المنتج قابل للنقر — يفتح حركة مخزون المنتج.
-        <button
-          type="button"
-          className="text-blue-700 hover:underline text-right"
-          onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
-          title="فتح حركة مخزون المنتج"
-        >
-          {p.name_ar || p.name_en || "—"}
-        </button>
+        <span className="group flex min-w-0 items-center gap-1">
+          <span className="min-w-0 flex-1 truncate text-start" title={p.name_ar || p.name_en || undefined}>
+            {p.name_ar || p.name_en || "—"}
+          </span>
+          <button
+            type="button"
+            className="ktra-iconbtn opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
+            title="تعديل سريع للمنتج"
+            aria-label="تعديل سريع للمنتج"
+            onClick={(e) => { e.stopPropagation(); setQuickEditProductId(p.id); }}
+          ><Pencil className="h-3 w-3" /></button>
+          <button
+            type="button"
+            className="ktra-iconbtn opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
+            title="فتح حركة مخزون المنتج في تبويب مستقل"
+            aria-label="فتح حركة مخزون المنتج في تبويب مستقل"
+            onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
+          ><ExternalLink className="h-3 w-3" /></button>
+        </span>
       ) },
     { key: "cat", header: "التصنيف", width: "130px", render: (p) => <>{p.category_name || "—"}</> },
     // T-RESERVE: «المتاح» كان يعرض الرصيد نفسه — تسمية مضلِّلة بعد وجود الحجز.
@@ -397,6 +415,25 @@ export const StockLevelsPage: React.FC = () => {
 
       {err && (
         <div className="ktra-banner ktra-banner--err">{err}</div>
+      )}
+
+      {/* T-PRODUCT: نفس نافذة «التعديل السريع» التي يفتحها المستند وبطاقة المنتج
+          — لا مسار حفظٍ ثانٍ. وترقيعُ حقول الاسم وحدها بعد الردّ: صفّ هذه
+          الشاشة يحمل الرصيد والمحجوز والقيمة، وهي محسوبةٌ لا يعيدها ردّ التعديل. */}
+      {quickEditProductId != null && (
+        <ItemQuickEditModal
+          productId={quickEditProductId}
+          onClose={() => setQuickEditProductId(null)}
+          onSaved={(updated) => {
+            const id = Number(updated.id ?? quickEditProductId);
+            setProducts((rows) => rows.map((r) => (r.id === id ? {
+              ...r,
+              name_ar: (updated.name_ar ?? r.name_ar ?? null) as string | null,
+              name_en: (updated.name_en ?? r.name_en ?? null) as string | null,
+            } : r)));
+          }}
+          onOpenFullCard={() => openInNewTab(productProfilePath(quickEditProductId))}
+        />
       )}
 
       {groupModal && (

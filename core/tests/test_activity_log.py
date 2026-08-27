@@ -17,6 +17,7 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from core.activity import (
+    build_document_snapshot_changes,
     build_line_changes,
     describe_activity_changes,
     log_activity,
@@ -163,6 +164,36 @@ class DocumentChangeDetailTest(APITestCase):
         changes = build_line_changes(before=[], after=after, labels=labels)
         assert describe_activity_changes(changes) == "أضاف منتج «زيت» (الكمية 1 · السعر 50)"
 
+    def test_creation_snapshot_lists_every_line_and_filled_header_field(self):
+        """الإنشاء يُسجَّل بمحتواه — لا «إنشاء فاتورة» مجرّدة بلا مساءلة."""
+        changes = build_document_snapshot_changes(
+            header={"customer": "أحمد", "notes": "", "invoice_discount": Decimal("0")},
+            lines=self._snapshot(self._lines(
+                (3, "إطار 205", "2", "100"), (7, "زيت محرك", "1", "50"))),
+            labels={"customer": "العميل", "notes": "الملاحظات",
+                    "invoice_discount": "خصم الفاتورة"},
+            line_labels=self.LINE_LABELS,
+        )
+        assert [c["kind"] for c in changes] == ["field_set", "line_added", "line_added"]
+        # الفارغ والصفر يُسقطان: حقلٌ لم يُملأ ليس معلومة.
+        assert changes[0] == {
+            "kind": "field_set", "field": "customer", "label": "العميل", "new": "أحمد"}
+        assert describe_activity_changes(changes) == (
+            "العميل: أحمد؛ أضاف منتج «إطار 205» (الكمية 2 · السعر 100)؛ "
+            "أضاف منتج «زيت محرك» (الكمية 1 · السعر 50)"
+        )
+
+    def test_deletion_snapshot_records_what_the_document_carried_away(self):
+        changes = build_document_snapshot_changes(
+            header={"customer": "أحمد"},
+            lines=self._snapshot(self._lines((3, "إطار 205", "2", "100"))),
+            labels={"customer": "العميل"},
+            line_labels=self.LINE_LABELS,
+            removed=True,
+        )
+        assert [c["kind"] for c in changes] == ["field_set", "line_removed"]
+        assert "حذف منتج «إطار 205» (الكمية 2 · السعر 100)" in describe_activity_changes(changes)
+
     def test_snapshot_fields_prefers_display_label(self):
         row = SimpleNamespace(
             invoice_type="cash", get_invoice_type_display=lambda: "نقدي", notes="ملاحظة")
@@ -235,6 +266,46 @@ class ActivityApiTest(APITestCase):
         rows = res.json().get("results", res.json())
         ids = {r["entity_id"] for r in rows}
         assert 100 in ids and 99 not in ids
+
+    def _seed_aged(self, entity_id, days_ago):
+        """صف بعمرٍ محدَّد — الكتابة ثم إزاحة الطابع الزمني (auto_now_add)."""
+        row = ActivityLog.objects.create(
+            tenant=self.tenant, user=self.manager, action="create",
+            entity_type="sales_invoice", entity_id=entity_id, entity_label=f"E{entity_id}")
+        ActivityLog.objects.filter(pk=row.pk).update(
+            timestamp=timezone.now() - timezone.timedelta(days=days_ago))
+        return row
+
+    def _entity_ids(self, url):
+        res = self.client.get(url, **self._h(self.manager))
+        assert res.status_code == 200, res.content
+        rows = res.json().get("results", res.json())
+        return {r["entity_id"] for r in rows}
+
+    def test_range_presets_widen_the_window_beyond_today(self):
+        """«اليوم» وحده كان يخفي كل ما سبقه — والمدى الجاهز هو مخرج المستخدم."""
+        self._seed_aged(101, days_ago=0)
+        self._seed_aged(102, days_ago=1)
+        self._seed_aged(103, days_ago=200)
+
+        assert self._entity_ids("/api/activity/?range=today") == {101}
+        assert self._entity_ids("/api/activity/?range=yesterday") == {102}
+        assert {101, 102} <= self._entity_ids("/api/activity/?range=month")
+        assert {101, 102, 103} <= self._entity_ids("/api/activity/?range=all")
+
+    def test_unknown_range_is_rejected_not_silently_ignored(self):
+        res = self.client.get("/api/activity/?range=lastweekish", **self._h(self.manager))
+        assert res.status_code == 400, res.content
+        assert "range" in res.json()
+
+    def test_explicit_date_bounds_are_inclusive_on_both_ends(self):
+        self._seed_aged(201, days_ago=3)
+        self._seed_aged(202, days_ago=1)
+        today = timezone.localdate()
+        start = (today - timezone.timedelta(days=3)).isoformat()
+        end = (today - timezone.timedelta(days=1)).isoformat()
+        assert {201, 202} <= self._entity_ids(
+            f"/api/activity/?date_from={start}&date_to={end}")
 
     def test_partner_feed_includes_current_and_historical_related_documents(self):
         currency = Currency.objects.filter(Code="ILS").first()

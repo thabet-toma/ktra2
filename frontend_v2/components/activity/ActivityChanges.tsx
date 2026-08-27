@@ -1,6 +1,6 @@
 import React from "react";
-import { Plus, Minus, PencilLine } from "lucide-react";
-import type { ActivityChange, ActivityFieldChange } from "@/types/activity";
+import { Plus, Minus, PencilLine, Dot } from "lucide-react";
+import type { ActivityChange, ActivityFieldChange, ActivityFieldSet } from "@/types/activity";
 
 /** «من ← إلى» بشكل موحّد: القديم مشطوب باهت، والجديد بارز. */
 const ValuePair: React.FC<{ change: ActivityFieldChange }> = ({ change }) => (
@@ -38,6 +38,19 @@ export const ActivityChanges: React.FC<{ changes: ActivityChange[] }> = ({ chang
                   {" "}({values.map((v) => `${v.label} ${v.value}`).join(" · ")})
                 </span>
               )}
+            </span>
+          </li>
+        );
+      }
+      if (kind === "field_set") {
+        // إنشاء/حذف: قيمة واحدة. «— ← أحمد» هنا تُقرأ خطأً على أنها تعديل.
+        const { label, new: value } = change as ActivityFieldSet;
+        return (
+          <li key={index} className={rowCls}>
+            <Dot className="w-3.5 h-3.5 mt-0.5 shrink-0 ktra-text-soft" />
+            <span className="inline-flex items-center gap-1 flex-wrap">
+              <span className="ktra-text-soft">{label}:</span>
+              <span className="font-semibold text-[var(--color-text)]">{value || "—"}</span>
             </span>
           </li>
         );

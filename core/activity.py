@@ -100,6 +100,39 @@ def build_line_changes(*, before: list[dict], after: list[dict], labels: dict) -
     return changes
 
 
+def build_header_snapshot_changes(header: dict, labels: dict) -> list[dict]:
+    """حقول ترويسة مستندٍ أُنشئ أو حُذف — قيمةٌ واحدة لا «من ← إلى».
+
+    الإنشاء والحذف ليسا فرقاً بين حالتين: لا قيمة قديمة في الأول ولا جديدة في
+    الثاني. فالنوع `field_set` يعرض القيمة وحدها بدل «— ← أحمد» التي تُقرأ خطأً
+    على أنها تعديل. الفارغ يُسقط: حقلٌ لم يُملأ ليس معلومة.
+    """
+    changes = []
+    for field, label in labels.items():
+        value = _activity_value(header.get(field))
+        if value in ("", "0"):
+            continue
+        changes.append({"kind": "field_set", "field": field, "label": label, "new": value})
+    return changes
+
+
+def build_document_snapshot_changes(
+    *, header: dict, lines: list[dict], labels: dict, line_labels: dict, removed: bool = False,
+) -> list[dict]:
+    """لقطة مستند كامل كقائمة فروقات — للإنشاء (كلّه جديد) أو للحذف (كلّه زال).
+
+    البنود تمرّ بـ`build_line_changes` نفسها بلقطةٍ فارغة على الطرف المقابل، فلا
+    تُكتب قواعد المقارنة مرتين ولا تتباعد نسختاها لاحقاً.
+    """
+    empty: list[dict] = []
+    line_changes = (
+        build_line_changes(before=lines, after=empty, labels=line_labels)
+        if removed
+        else build_line_changes(before=empty, after=lines, labels=line_labels)
+    )
+    return build_header_snapshot_changes(header, labels) + line_changes
+
+
 def _values_suffix(change: dict) -> str:
     values = change.get("values") or []
     if not values:
@@ -112,7 +145,9 @@ def describe_activity_changes(changes: list[dict]) -> str:
     parts = []
     for change in changes:
         kind = change.get("kind", "field")
-        if kind == "line_added":
+        if kind == "field_set":
+            parts.append(f'{change["label"]}: {change["new"]}')
+        elif kind == "line_added":
             parts.append(f'أضاف منتج «{change["label"]}»{_values_suffix(change)}')
         elif kind == "line_removed":
             parts.append(f'حذف منتج «{change["label"]}»{_values_suffix(change)}')

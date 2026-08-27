@@ -59,6 +59,7 @@ from logistics.accruals import (
 )
 from core.activity import (
     build_activity_changes,
+    build_document_snapshot_changes,
     build_line_changes,
     describe_activity_changes,
     log_activity,
@@ -323,10 +324,20 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 raise PermissionDenied("صلاحية الفاتورة الدولية (الاستيراد) غير متاحة لحسابك.")
         invoice = serializer.save(tenant=tenant, invoice_number=inv_num, invoice_type=invoice_type)
         self._sync_attachments(invoice)
+        # الإنشاء يُسجَّل بمحتواه كاملاً — مرآة فاتورة البيع (sales/views.py).
+        changes = build_document_snapshot_changes(
+            header=snapshot_fields(invoice, PURCHASE_ACTIVITY_FIELD_LABELS),
+            lines=_purchase_item_snapshot(invoice),
+            labels=PURCHASE_ACTIVITY_FIELD_LABELS,
+            line_labels=PURCHASE_ACTIVITY_ITEM_LABELS,
+        )
+        details = describe_activity_changes(changes)
+        base = 'إنشاء ' + ('مرجع شراء' if invoice.is_return else 'فاتورة شراء')
         log_activity(
             action='create', entity_type='purchase_invoice', entity_id=invoice.id,
             entity_label=invoice.invoice_number,
-            description='إنشاء ' + ('مرجع شراء' if invoice.is_return else 'فاتورة شراء'),
+            description=f'{base} — {details}' if details else base,
+            metadata={'changes': changes} if changes else None,
             partner_ids=[invoice.partner_id],
             request=self.request,
         )
@@ -1870,16 +1881,29 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         inv_id, inv_no, is_ret, partner_id = (
             instance.id, instance.invoice_number, instance.is_return, instance.partner_id,
         )
+        # لقطة ما ستحمله الفاتورة إلى العدم — بعد `destroy` لا يبقى ما يُقرأ منه.
+        deleted_changes = build_document_snapshot_changes(
+            header=snapshot_fields(instance, PURCHASE_ACTIVITY_FIELD_LABELS),
+            lines=_purchase_item_snapshot(instance),
+            labels=PURCHASE_ACTIVITY_FIELD_LABELS,
+            line_labels=PURCHASE_ACTIVITY_ITEM_LABELS,
+            removed=True,
+        )
         # T-INTENT: شيكات النيّة تموت مع مستندها — الرابط `SET_NULL` فبدون هذا
         # يترك حذفُ المسودة شيكاتٍ مسودةً يتيمة (مرآة حذف فاتورة البيع).
         Cheque.objects.filter(
             purchase_invoice=instance, status='Draft', supplier_payment__isnull=True,
         ).delete()
         response = super().destroy(request, *args, **kwargs)
+        deleted_details = describe_activity_changes(deleted_changes)
+        deleted_base = 'حذف ' + ('مرجع شراء' if is_ret else 'فاتورة شراء')
         log_activity(
             action='delete', entity_type='purchase_invoice', entity_id=inv_id,
             entity_label=inv_no,
-            description='حذف ' + ('مرجع شراء' if is_ret else 'فاتورة شراء'),
+            description=(
+                f'{deleted_base} — {deleted_details}' if deleted_details else deleted_base
+            ),
+            metadata={'changes': deleted_changes} if deleted_changes else None,
             partner_ids=[partner_id],
             request=request,
         )
