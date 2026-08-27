@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, ShieldCheck,
 } from "lucide-react";
+import { ShareRowButton } from "../shared/ShareRowButton";
 import {
   listWarrantyCards,
   type WarrantyCardRow,
@@ -268,6 +269,7 @@ export const WarrantyCardsScreen: React.FC = () => {
                 <th>الحالة</th>
                 <th className="hidden lg:table-cell">المصدر</th>
                 <th className="hidden lg:table-cell">كفالة المورد</th>
+                <th>مشاركة</th>
               </tr>
             </thead>
             <tbody>
@@ -316,6 +318,19 @@ export const WarrantyCardsScreen: React.FC = () => {
                         {formatDateValue(row.supplier_warranty_end_date)}
                       </span>
                     ) : "—"}
+                  </td>
+                  {/* DOC-SHARE: البطاقة تُسلَّم للزبون — و`supplier` و
+                      `supplier_warranty_end_date` لا يخرجان إليه (العمود
+                      المجاور داخليّ، والصفحة العامة لا تحمله). */}
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <ShareRowButton
+                      docType="warranty_card"
+                      docId={row.id}
+                      docLabel={`بطاقة كفالة #${row.id}`}
+                      partyName={row.customer_name || undefined}
+                      className="text-blue-600 hover:underline text-xs"
+                      label=""
+                    />
                   </td>
                 </tr>
               ))}

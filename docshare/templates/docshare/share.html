@@ -11,7 +11,12 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{{ company.company_name_primary }}">
 <meta property="og:title" content="{{ doc.title }} {{ doc.number }} — {{ company.company_name_primary }}">
-<meta property="og:description" content="الإجمالي {{ doc.totals.grand_total|money }} {{ doc.currency_symbol }} · بتاريخ {{ doc.date|gdate }}">
+{% comment %}
+وصفُ المعاينة يذكر الإجمالي **متى وُجد** فقط: سندُ التسليم بلا أسعار أصلاً،
+و«الإجمالي 0» في معاينة واتساب يقول للمستلم إن البضاعة مجّانية — نفس حجّة
+حذف عمودَي السعر من جدوله.
+{% endcomment %}
+<meta property="og:description" content="{% if doc.grand_total %}الإجمالي {{ doc.grand_total|money }} {{ doc.currency_symbol }} · {% endif %}{{ doc.party_name }} · بتاريخ {{ doc.date|gdate }}">
 <meta property="og:url" content="{{ public_url }}">
 {% if company.logo_url %}<meta property="og:image" content="{{ company.logo_url }}">{% endif %}
 <meta name="twitter:card" content="summary">
@@ -56,8 +61,10 @@
   .decide{border:1px solid var(--line); border-radius:12px; padding:16px 18px;
           margin-top:20px; background:#f8fafc}
   .decide h3{margin:0 0 4px; font-size:15px}
-  .decide input[type=text]{width:100%; max-width:340px; padding:9px 11px; font:inherit;
-          border:1px solid #cbd5e1; border-radius:8px; margin:9px 0 12px; background:#fff}
+  .decide input[type=text],.decide textarea{width:100%; max-width:340px; padding:9px 11px;
+          font:inherit; border:1px solid #cbd5e1; border-radius:8px; margin:9px 0 0;
+          background:#fff; display:block}
+  .decide textarea{max-width:440px; margin-bottom:12px; resize:vertical}
   .decide .acts{display:flex; gap:10px; flex-wrap:wrap}
   .alert{border-radius:9px; padding:10px 13px; font-size:13px; margin-bottom:12px;
          border:1px solid #fecaca; background:#fef2f2; color:var(--danger)}
@@ -88,37 +95,46 @@
     <div class="doc-id">
       <p class="doc-kind">{{ doc.title }}</p>
       <p class="doc-no">{{ doc.number }}</p>
+      {% comment %}
+      النبرة تأتي محسوبةً من `documents.py` لا مفرّعةً هنا: النماذج لا تتفق على
+      مفردات الحالة (`posted` هنا و`Open` هناك و`delivered` في ثالث)، والنوع
+      وحده يعرف ماذا تعني حالته.
+      {% endcomment %}
       {% if expired_offer %}
         <span class="badge b-danger">منتهي الصلاحية</span>
-      {% elif doc.status == "posted" or doc.status == "accepted" %}
-        <span class="badge b-ok">{{ doc.status_label }}</span>
-      {% elif doc.status == "cancelled" or doc.status == "rejected" %}
-        <span class="badge b-danger">{{ doc.status_label }}</span>
-      {% elif doc.status == "draft" %}
-        <span class="badge b-warn">{{ doc.status_label }}</span>
       {% else %}
-        <span class="badge b-muted">{{ doc.status_label }}</span>
+        <span class="badge b-{{ doc.status_tone }}">{{ doc.status_label }}</span>
       {% endif %}
     </div>
   </div>
 
   <div class="cards">
     <div class="card">
-      <h3>{% if doc.kind == "quotation" %}مقدَّم إلى{% else %}فاتورة إلى{% endif %}</h3>
-      <div class="row"><span>الاسم</span><span><strong>{{ doc.customer_name }}</strong></span></div>
-      {% if doc.customer_address %}<div class="row"><span>العنوان</span><span>{{ doc.customer_address }}</span></div>{% endif %}
-      {% if doc.customer_phone %}<div class="row"><span>الهاتف</span><span>{{ doc.customer_phone }}</span></div>{% endif %}
-      {% if doc.customer_tax_number %}<div class="row"><span>الرقم الضريبي</span><span>{{ doc.customer_tax_number }}</span></div>{% endif %}
+      <h3>{{ doc.party_title }}</h3>
+      <div class="row"><span>الاسم</span><span><strong>{{ doc.party_name }}</strong></span></div>
+      {% if doc.party_address %}<div class="row"><span>العنوان</span><span>{{ doc.party_address }}</span></div>{% endif %}
+      {% if doc.party_phone %}<div class="row"><span>الهاتف</span><span>{{ doc.party_phone }}</span></div>{% endif %}
+      {% if doc.party_tax_number %}<div class="row"><span>الرقم الضريبي</span><span>{{ doc.party_tax_number }}</span></div>{% endif %}
     </div>
     <div class="card">
       <h3>بيانات المستند</h3>
-      <div class="row"><span>التاريخ</span><span>{{ doc.date|gdate }}</span></div>
-      {% if doc.due_date %}<div class="row"><span>تاريخ الاستحقاق</span><span>{{ doc.due_date|gdate }}</span></div>{% endif %}
-      {% if doc.valid_until %}<div class="row"><span>صالح حتى</span><span>{{ doc.valid_until|gdate }}</span></div>{% endif %}
-      <div class="row"><span>العملة</span><span>{{ doc.currency_code }}</span></div>
+      {% comment %}
+      صفوفٌ لا حقولٌ مثبَّتة: الصفقة تعرض Incoterms وطريقة الشحن، وبطاقة
+      الكفالة تعرض الجهاز والسيريال، والسند لا يعرض أياً منها. الصفّ الفارغ
+      يُحذف في `documents.meta()` فلا يصل إلى هنا أصلاً.
+      {% endcomment %}
+      {% for row in doc.meta_rows %}
+      <div class="row"><span>{{ row.label }}</span><span>
+        {% if row.kind == "date" %}{{ row.value|gdate }}
+        {% elif row.kind == "money" %}{{ row.value|money }}
+        {% elif row.kind == "qty" %}{{ row.value|qty }}
+        {% else %}{{ row.value }}{% endif %}
+      </span></div>
+      {% endfor %}
     </div>
   </div>
 
+  {% if doc.show_lines %}
   <table>
     <thead>
       <tr>
@@ -126,10 +142,17 @@
         <th>الصنف</th>
         <th class="num" style="width:64px">الوحدة</th>
         <th class="num" style="width:80px">الكمية</th>
+        {% comment %}
+        أعمدة المال تُحذف كاملةً على المستندات التي لا مال فيها (سند التسليم)
+        — لا تُملأ أصفاراً: عمودُ «السعر» تحته صفرٌ يقول للمستلم إن البضاعة
+        مجّانية، وهو أسوأ من غياب العمود.
+        {% endcomment %}
+        {% if doc.show_line_prices %}
         <th class="num" style="width:92px">السعر</th>
         <th class="num" style="width:80px">الخصم</th>
         <th class="num" style="width:66px">ض.%</th>
         <th class="num" style="width:104px">الإجمالي</th>
+        {% endif %}
       </tr>
     </thead>
     <tbody>
@@ -143,52 +166,83 @@
         </td>
         <td class="num">{{ line.unit }}</td>
         <td class="num">{{ line.quantity|qty }}</td>
+        {% if doc.show_line_prices %}
         <td class="num">{{ line.unit_price|qty }}</td>
         <td class="num">{{ line.line_discount|money }}</td>
         <td class="num">{{ line.tax_percent|percent }}</td>
         <td class="num">{{ line.line_total|money }}</td>
+        {% endif %}
       </tr>
       {% empty %}
-      <tr><td colspan="8" class="num muted">لا توجد بنود</td></tr>
+      <tr><td colspan="{% if doc.show_line_prices %}8{% else %}4{% endif %}" class="num muted">لا توجد بنود</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  {% endif %}
 
+  {% comment %}
+  الإجماليات صفوفٌ يبنيها النوع بترتيبها: عرضُ السعر لا يبني «المدفوع/المتبقي»
+  أصلاً بدل أن يبنيَهما ثم يُخفيَهما بعَلَم — والرقم غير المبنيّ لا يتسرّب.
+  {% endcomment %}
+  {% if doc.totals_rows %}
   <div class="totals">
-    <div class="row"><span>المجموع قبل الضريبة</span><span>{{ doc.totals.subtotal|money }}</span></div>
-    <div class="row"><span>الخصم</span><span>{{ doc.totals.discount|money }}</span></div>
-    <div class="row"><span>الضريبة</span><span>{{ doc.totals.tax|money }}</span></div>
-    <div class="row grand"><span>الإجمالي</span><span>{{ doc.totals.grand_total|money }} {{ doc.currency_symbol }}</span></div>
-    {% if doc.show_payment %}
-      <div class="row"><span>المدفوع</span><span>{{ doc.totals.paid|money }}</span></div>
-      <div class="row"><span><strong>المتبقي</strong></span><span><strong>{{ doc.totals.remaining|money }} {{ doc.currency_symbol }}</strong></span></div>
-    {% endif %}
+    {% for row in doc.totals_rows %}
+      {% if row.strong %}
+      <div class="row grand"><span>{{ row.label }}</span><span>{{ row.value|money }} {{ doc.currency_symbol }}</span></div>
+      {% else %}
+      <div class="row"><span>{{ row.label }}</span><span>{{ row.value|money }}</span></div>
+      {% endif %}
+    {% endfor %}
   </div>
+  {% endif %}
 
   {% if doc.notes %}<div class="notes"><strong>ملاحظات:</strong><br>{{ doc.notes }}</div>{% endif %}
 
-  {% if doc.kind == "quotation" %}
+  {% comment %}
+  كتلة القرار كانت مشروطةً بـ`doc.kind == "quotation"` حرفياً هنا، وباسم عرض
+  السعر حرفياً في `services.record_decision` — موضعان متباعدان لحقيقةٍ واحدة.
+  الآن الشرط وجودُ `doc.decision`، ونصوصُه من مواصفة النوع في `documents.py`.
+  {% endcomment %}
+  {% comment %}
+  سببُ رفض القرار يُعرَض **خارج** صندوق القرار وقبله. كان بداخله، فكان يظهر في
+  الحالة الوحيدة التي لا يحتاجه فيها أحد (البابُ مفتوح) ويختفي في كل الحالات
+  التي وقع فيها الرفض فعلاً: مستندٌ تحرّكت حالته، أو طلبيةٌ بلا بنود، أو نوعٌ
+  لا يقبل قراراً — يضغط الزائر «موافق» فيتلقّى الصفحة نفسها **بلا كلمة تشرح**،
+  فيضغط ثانيةً وثالثة. الرسالة الآن تُعرض متى وُجدت مهما كان الصندوق.
+  {% endcomment %}
+  {% if decision_error %}
+    <div class="alert no-print" style="margin-top:18px">{{ decision_error }}</div>
+  {% endif %}
+
+  {% if doc.decision %}
     {% if share.decision %}
       <div class="settled">
-        {% if share.decision == "accepted" %}تمت الموافقة على هذا العرض{% else %}تم رفض هذا العرض{% endif %}
+        {% if share.decision == "accepted" %}{{ doc.decision.settled_accepted }}{% else %}{{ doc.decision.settled_rejected }}{% endif %}
         بتوقيع <strong>{{ share.decided_name }}</strong> بتاريخ {{ share.decided_at|gdate }}.
+        {% if share.decided_note %}<br>الملاحظة: {{ share.decided_note }}{% endif %}
       </div>
     {% elif can_decide %}
       <div class="decide no-print">
-        {% if decision_error %}<div class="alert">{{ decision_error }}</div>{% endif %}
-        <h3>قرارك على هذا العرض</h3>
-        <p class="muted" style="margin:0">اكتب اسمك ثم اختر. يُسجَّل القرار بتاريخه ولا يمكن تغييره بعد إرساله.</p>
+        <h3>{{ doc.decision.title }}</h3>
+        <p class="muted" style="margin:0">{{ doc.decision.hint }}</p>
         <form method="post" action="{{ decision_url }}">
           <input type="text" name="name" maxlength="120" required
                  placeholder="الاسم الكامل" autocomplete="name">
+          {% comment %}
+          السبب **اختياريّ**: Odoo يجعله إلزامياً على المورّد، لكن ضغطةً تُمنَع
+          على جوّالٍ بطيء أسوأ من سببٍ ناقص — والقرار نفسه هو المعلومة التي لا
+          يجوز أن تضيع. ويُعرَض للمالك في نافذة المشاركة فيعرف «لماذا».
+          {% endcomment %}
+          <textarea name="note" rows="2" maxlength="500"
+                    placeholder="ملاحظة أو سبب (اختياري)"></textarea>
           <div class="acts">
-            <button class="btn btn-ok" type="submit" name="decision" value="accepted">موافق على العرض</button>
-            <button class="btn btn-danger" type="submit" name="decision" value="rejected">رفض العرض</button>
+            <button class="btn btn-ok" type="submit" name="decision" value="accepted">{{ doc.decision.accept_label }}</button>
+            <button class="btn btn-danger" type="submit" name="decision" value="rejected">{{ doc.decision.reject_label }}</button>
           </div>
         </form>
       </div>
     {% elif expired_offer %}
-      <div class="notes no-print">انتهت صلاحية هذا العرض. تواصل مع {{ company.company_name_primary }} لتجديده.</div>
+      <div class="notes no-print">{{ doc.decision.expired_note }} تواصل مع {{ company.company_name_primary }}.</div>
     {% endif %}
   {% endif %}
 

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, Wrench,
 } from "lucide-react";
+import { ShareRowButton } from "../shared/ShareRowButton";
 import {
   listServiceOrders,
   type ServiceOrderListFilters,
@@ -229,6 +230,7 @@ export const ServiceOrdersScreen: React.FC<Props> = ({ onOpenInvoice }) => {
                 <th className="hidden md:table-cell">الشكوى</th>
                 <th>الحالة</th>
                 <th className="hidden lg:table-cell">المال</th>
+                <th>مشاركة</th>
               </tr>
             </thead>
             <tbody>
@@ -268,6 +270,18 @@ export const ServiceOrdersScreen: React.FC<Props> = ({ onOpenInvoice }) => {
                     {!row.covered_posted_at && !row.sales_invoice && (
                       <span className="text-[var(--color-text-muted)]">—</span>
                     )}
+                  </td>
+                  {/* DOC-SHARE: إيصالُ استلام الجهاز بيد الزبون. التقدير لا
+                      يظهر إلا بعد اعتماده، والفنّيُّ ومطالبةُ المورّد لا تخرج. */}
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <ShareRowButton
+                      docType="service_order"
+                      docId={row.id}
+                      docLabel={`أمر صيانة ${row.order_number || `#${row.id}`}`}
+                      partyName={row.customer_name || undefined}
+                      className="text-blue-600 hover:underline text-xs"
+                      label=""
+                    />
                   </td>
                 </tr>
               ))}

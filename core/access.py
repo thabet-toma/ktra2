@@ -68,6 +68,10 @@ PERMISSIONS: list[dict] = [
     {"key": "purchase.supplier.view", "label": "عرض الموردين", "group": GROUP_PURCHASE},
     {"key": "purchase.supplier.manage", "label": "إدارة الموردين", "group": GROUP_PURCHASE},
     {"key": "purchase.settings.manage", "label": "إعدادات المشتريات", "group": GROUP_PURCHASE},
+    # مرآة `sales.document.share` على جانب الشراء. مفتاحان لا واحد لأن الجمهور
+    # مختلف: من يشارك فاتورة بيعٍ يرسلها إلى زبون، ومن يشارك أمرَ شراءٍ أو صفقةً
+    # يرسلها إلى مورّد — وموظف المبيعات لا شأن له بالثانية ولا العكس.
+    {"key": "purchase.document.share", "label": "مشاركة مستندات الشراء برابط عام", "group": GROUP_PURCHASE},
     # المخزون
     {"key": "inventory.item.view", "label": "عرض المنتجات والمخزون", "group": GROUP_INVENTORY},
     {"key": "inventory.item.manage", "label": "إدارة المنتجات والفئات", "group": GROUP_INVENTORY},
@@ -202,6 +206,9 @@ _PROCUREMENT_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | _EMPLOYEE_SELF | {
     "purchase.payment.create",
     "purchase.payment.post",
     "purchase.supplier.manage",
+    # إرسال أمر الشراء أو الصفقة إلى المصنع عملُ المشتريات نفسه — بنفس حجّة
+    # `sales.document.share` عند البائع: الرابط يعرض ولا يكتب.
+    "purchase.document.share",
     "inventory.item.manage",
     "inventory.cost.view",
     "inventory.doc.post",

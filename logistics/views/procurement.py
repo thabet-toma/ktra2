@@ -88,6 +88,7 @@ from logistics.services import (
     convert_local_quotation_to_invoice,
     convert_local_quotation_to_order,
     convert_purchase_order_to_invoice,
+    confirm_purchase_order,
 )
 
 logger = logging.getLogger("logistics.views")
@@ -330,21 +331,14 @@ class PurchaseOrderViewSet(BaseTenantViewSet):
 
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
-        with transaction.atomic():
-            order = PurchaseOrder.objects.select_for_update().get(
-                pk=self.get_object().pk,
-                tenant=get_tenant(request),
+        # القاعدة في `logistics/services.py` (`confirm_purchase_order`) لا هنا:
+        # المورّد صار يقدر أن يقبل الطلبية من رابط المشاركة العام، ونسخُ الشروط
+        # في موضعين يعني قاعدتين تنحرفان عند أول تعديل.
+        order = confirm_purchase_order(
+            PurchaseOrder.objects.get(
+                pk=self.get_object().pk, tenant=get_tenant(request),
             )
-            if order.status == PurchaseOrder.STATUS_CONFIRMED:
-                return Response(PurchaseOrderSerializer(
-                    order, context={'request': request},
-                ).data)
-            if order.status != PurchaseOrder.STATUS_DRAFT:
-                raise ValidationError('يمكن تأكيد الطلبية المسودة فقط.')
-            if not order.lines.exists():
-                raise ValidationError('لا يمكن تأكيد طلبية بلا منتجات.')
-            order.status = PurchaseOrder.STATUS_CONFIRMED
-            order.save(update_fields=['status', 'updated_at'])
+        )
         return Response(PurchaseOrderSerializer(
             order, context={'request': request},
         ).data)

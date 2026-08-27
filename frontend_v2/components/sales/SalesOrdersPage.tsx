@@ -8,6 +8,7 @@
  * لا قيد محاسبي للطلبية نفسها — العربون وحده حدث مالي.
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ShareRowButton } from "../shared/ShareRowButton";
 import {
   Trash2, Save, Loader2, X, CheckCircle, Banknote, FileText, ExternalLink,
 } from "lucide-react";
@@ -476,6 +477,14 @@ export const SalesOrdersPage: React.FC = () => {
       render: (order) => (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <button onClick={() => void openOrder(order.id)} className="ktra-text-accent hover:underline">تعديل</button>
+          {/* DOC-SHARE: الطلبية تُرسَل للزبون ليؤكّدها — والعربون المدفوع
+              يظهر عليها مع «المتبقي عند التسليم». */}
+          <ShareRowButton
+            docType="sales_order"
+            docId={order.id}
+            docLabel={`طلبية ${order.order_number}`}
+            partyName={order.customer_name || undefined}
+          />
           {order.status === "draft" && (
             <button onClick={() => void act(() => confirmSalesOrder(order.id), "تم تأكيد الطلبية وحجز الكمية")}
               className="text-green-600 hover:underline">تأكيد وحجز</button>

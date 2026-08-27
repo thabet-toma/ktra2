@@ -208,18 +208,27 @@ export const ShareDocumentModal: React.FC<ShareDocumentModalProps> = ({
                   </span>
                 </div>
                 {share.decision ? (
-                  <div className="flex justify-between py-0.5">
-                    <span className="text-slate-500">قرار الزبون</span>
-                    <span
-                      className={
-                        share.decision === "accepted"
-                          ? "font-semibold text-emerald-700"
-                          : "font-semibold text-red-700"
-                      }
-                    >
-                      {share.decision === "accepted" ? "موافق" : "مرفوض"} — {share.decided_name}
-                    </span>
-                  </div>
+                  <>
+                    <div className="flex justify-between py-0.5">
+                      {/* «الزبون» صارت «المستلم»: نصفُ الأنواع طرفُها مورّد. */}
+                      <span className="text-slate-500">قرار المستلم</span>
+                      <span
+                        className={
+                          share.decision === "accepted"
+                            ? "font-semibold text-emerald-700"
+                            : "font-semibold text-red-700"
+                        }
+                      >
+                        {share.decision === "accepted" ? "موافق" : "مرفوض"} — {share.decided_name}
+                      </span>
+                    </div>
+                    {/* السبب هو ما يمنع مكالمةً ليعرف الموظف «لماذا رفضوا». */}
+                    {share.decided_note ? (
+                      <div className="py-0.5 text-slate-600">
+                        السبب: {share.decided_note}
+                      </div>
+                    ) : null}
+                  </>
                 ) : null}
               </div>
 

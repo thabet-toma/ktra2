@@ -49,6 +49,7 @@ import {
   CheckCircle,
   Activity,
   Pencil,
+  Share2,
 } from "lucide-react";
 import { BasicInfoSection } from "@/components/forms/shared/BasicInfoSection";
 import { DealStageControl } from "@/components/forms/deal-parts/DealStageControl";
@@ -59,6 +60,7 @@ import { ImagePreviewModal } from "../price-offers/ImagePreviewModal";
 import { TermsAndShippingSection } from "@/components/forms/shared/TermsAndShippingSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
+import { ShareDocumentModal } from "@/components/shared/ShareDocumentModal";
 import { EntityActivityLog } from "@/components/activity/EntityActivityLog";
 import { dealsService } from "../../../services/dealsService";
 import { ActivityLog } from "./ActivityLog";
@@ -285,6 +287,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   const [showItemSearch, setShowItemSearch] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showPrintView, setShowPrintView] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   /** الصفقة تُفتح على العرض المستندي، والتحرير من زر «تحرير» في شريط الأدوات.
       كانت تفتح على نموذج التحرير مباشرة بلا وضع عرض إطلاقاً. */
   const [viewMode, setViewMode] = useState<boolean>(!!deal?.id);
@@ -1266,6 +1269,16 @@ export const DealForm: React.FC<DealFormProps> = ({
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: <Save />, onClick: !saving ? () => void handleFinalSave() : undefined, disabled: saving },
     ...(viewMode ? [{ key: "edit", label: "تحرير", icon: <Pencil />, onClick: () => setViewMode(false), separatorBefore: true } as KitToolbarAction] : []),
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => setShowPrintView(true), separatorBefore: true },
+    // DOC-SHARE: المشاركة تلزمها صفقة محفوظة — الرابط يشير إلى صفٍّ في القاعدة،
+    // ومسوّدةٌ في الذاكرة لا صفَّ لها بعد. الزرّ يبقى ظاهراً معطَّلاً لا مخفياً:
+    // زرٌّ يظهر ويختفي يجعل المستخدم يبحث عمّا رآه مرة.
+    {
+      key: "share",
+      label: "مشاركة",
+      icon: <Share2 />,
+      disabled: !formData.id,
+      onClick: () => setShowShareModal(true),
+    },
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: onCancel, danger: true, separatorBefore: true },
   ];
 
@@ -1410,6 +1423,17 @@ export const DealForm: React.FC<DealFormProps> = ({
         <div className="fixed inset-0 z-[100] ktra-bg-field overflow-y-auto">
           <DealPrintView deal={formData as Deal} currentUser={currentUser} supplier={selectedSupplier} onClose={() => setShowPrintView(false)} onEdit={() => setShowPrintView(false)} />
         </div>
+      )}
+
+      {formData.id != null && (
+        <ShareDocumentModal
+          open={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          docType="logistics_deal"
+          docId={Number(formData.id)}
+          docLabel={`صفقة ${formData.dealNumber || `#${formData.id}`}`}
+          partyName={selectedSupplier?.tradeName}
+        />
       )}
     </div>
   );

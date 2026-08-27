@@ -27,12 +27,47 @@ from django.utils import timezone
 from tenants.models import Tenant
 
 #: أنواع المستندات المشمولة. التوسيع = سطر هنا وسطر في `documents.DOC_TYPES`.
+#:
+#: **ولماذا قائمتان لا واحدة:** `documents` يستورد `sales.models` و`logistics.models`،
+#: فاستيراده من هذا الملف يجرّ نماذج نصف المنصّة أثناء إقلاع تسجيل التطبيقات.
+#: الثمن انحرافٌ ممكن بين القائمتين — يحرسه `tests/test_registry.py`
+#: (`test_choices_match_registry`) بمساواة المجموعتين، لا بالثقة.
 DOC_SALES_INVOICE = "sales_invoice"
 DOC_SALES_QUOTATION = "sales_quotation"
+DOC_PURCHASE_INVOICE = "purchase_invoice"
+DOC_PURCHASE_ORDER = "purchase_order"
+DOC_LOGISTICS_DEAL = "logistics_deal"
+DOC_SUPPLIER_QUOTATION = "supplier_quotation"
+DOC_LOCAL_PURCHASE_INVOICE = "local_purchase_invoice"
+DOC_SALES_ORDER = "sales_order"
+DOC_DELIVERY_ORDER = "delivery_order"
+DOC_CUSTOMER_PAYMENT = "customer_payment"
+DOC_SUPPLIER_PAYMENT = "supplier_payment"
+DOC_CREDIT_DEBIT_NOTE = "credit_debit_note"
+DOC_WARRANTY_CARD = "warranty_card"
+DOC_SERVICE_ORDER = "service_order"
 DOC_TYPE_CHOICES = [
     (DOC_SALES_INVOICE, "فاتورة بيع"),
     (DOC_SALES_QUOTATION, "عرض سعر"),
+    (DOC_PURCHASE_INVOICE, "فاتورة شراء"),
+    (DOC_PURCHASE_ORDER, "أمر شراء"),
+    (DOC_LOGISTICS_DEAL, "صفقة استيراد"),
+    (DOC_SUPPLIER_QUOTATION, "عرض سعر مورّد"),
+    (DOC_LOCAL_PURCHASE_INVOICE, "فاتورة شراء محلّية"),
+    (DOC_SALES_ORDER, "طلبية زبون"),
+    (DOC_DELIVERY_ORDER, "سند تسليم"),
+    (DOC_CUSTOMER_PAYMENT, "سند قبض"),
+    (DOC_SUPPLIER_PAYMENT, "سند صرف"),
+    (DOC_CREDIT_DEBIT_NOTE, "إشعار دائن/مدين"),
+    (DOC_WARRANTY_CARD, "بطاقة كفالة"),
+    (DOC_SERVICE_ORDER, "أمر صيانة"),
 ]
+
+#: سقف طول المفتاح. العمود كان **٢٠** حين كان النوعان مبيعاتٍ فقط، وأقصر اسم
+#: لفاتورة الشراء الدولية (`purchase_invoice` وأخواتها في `logistics`) يتجاوزه.
+#: وهذا بالضبط صنف العطل الصامت: MySQL يُلغي القيد بلا استثناء، وSQLite في
+#: الاختبارات **لا يكشفه أبداً** فتمرّ المجموعة خضراء على قاعدةٍ لا تكتب.
+DOC_TYPE_MAX_LENGTH = 40
 
 DECISION_ACCEPTED = "accepted"
 DECISION_REJECTED = "rejected"
@@ -59,7 +94,8 @@ class DocumentShare(models.Model):
         related_name="document_shares",
     )
     doc_type = models.CharField(
-        max_length=20, choices=DOC_TYPE_CHOICES, db_column="DocType",
+        max_length=DOC_TYPE_MAX_LENGTH, choices=DOC_TYPE_CHOICES,
+        db_column="DocType",
     )
     doc_id = models.PositiveIntegerField(db_column="DocID")
     #: `secrets.token_urlsafe(32)` = 43 محرفاً. العمود 64 ليتّسع لتغيير الطول لاحقاً.
@@ -89,6 +125,14 @@ class DocumentShare(models.Model):
     )
     decided_name = models.CharField(
         max_length=120, blank=True, default="", db_column="DecidedName",
+    )
+    #: سببُ الرفض كما كتبه المستلم — اختياريّ، ويُعرَض للمالك في نافذة المشاركة.
+    #: **ورفضٌ بلا سبب رسالةٌ ناقصة**: «رفض المصنع» بلا «لماذا» تُلزم الموظف
+    #: بمكالمةٍ ليعرف ما كان يسع الحقل أن يقوله. Odoo يجعله إلزامياً على
+    #: المورّد؛ وهو هنا اختياريّ لأن ضغطةً تُمنَع على جوّالٍ بطيء أسوأ من سببٍ
+    #: ناقص — والقرار نفسه هو المعلومة التي لا يجوز أن تضيع.
+    decided_note = models.CharField(
+        max_length=500, blank=True, default="", db_column="DecidedNote",
     )
 
     created_by = models.ForeignKey(

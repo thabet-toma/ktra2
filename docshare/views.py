@@ -15,14 +15,16 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny
 from rest_framework.renderers import TemplateHTMLRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.access import require_perm
+from core.access import require_perm, user_has_perm
 from core.api_defaults import ApiAuthAndUser
 from core.mixins import TenantQuerySetMixin
+from core.modules import module_enabled, require_module
 from core.tenant_utils import get_tenant
 from docshare import services
 from docshare.documents import DOC_TYPES, company_card
@@ -75,15 +77,19 @@ def _page_context(request, share, document, payload):
     company = company_card(share.tenant)
     today = timezone.localdate()
     expired_offer = bool(payload["valid_until"] and payload["valid_until"] < today)
+    decision = payload["decision"]
     return {
         "doc": payload,
         "company": company,
         "share": share,
         "public_url": services.public_url(share),
         "expired_offer": expired_offer,
-        # القرار متاح متى كانت حالة العرض تسمح، **ولم** تنقضِ صلاحيته، **ولم**
-        # يُقرَّر على هذا الرابط من قبل. الشروط الثلاثة مستقلة ولكلٍّ رسالته.
-        "can_decide": payload["can_decide"] and not expired_offer and not share.decision,
+        # القرار متاح متى كان النوع يقبله، **وكانت** حالة المستند تسمح، **ولم**
+        # تنقضِ صلاحيته، **ولم** يُقرَّر على هذا الرابط من قبل. الشروط الأربعة
+        # مستقلة ولكلٍّ رسالته.
+        "can_decide": bool(
+            decision and decision["open"] and not expired_offer and not share.decision
+        ),
         "decision_error": "",
         **_mount_urls(request, share.token),
     }
@@ -145,8 +151,9 @@ class DocShareDecisionView(DocSharePublicBase):
     def post(self, request, token):
         decision = (request.data.get("decision") or "").strip()
         name = (request.data.get("name") or "").strip()
+        note = (request.data.get("note") or "").strip()
         try:
-            services.record_decision(token, decision, name, request)
+            services.record_decision(token, decision, name, request, note=note)
         except services.ShareGone:
             return _notice(
                 request,
@@ -196,6 +203,23 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = DocumentShareSerializer
     queryset = DocumentShare.objects.all().order_by("-created_at", "-id")
 
+    def _allowed_doc_types(self, request) -> set:
+        """الأنواع التي يملك هذا المستخدم مشاركتها — من `DOC_TYPES` لا من ثابت.
+
+        الصلاحية كانت `sales.document.share` **مثبَّتةً حرفياً** في كل طريقة
+        هنا، بينما `DOC_TYPES[…]["permission"]` معلَنةٌ ومهملة. مع أول نوع شراء
+        كان ذلك يعني: موظف المبيعات يشارك فواتير المورّدين، وموظف المشتريات
+        لا يقدر أن يشارك مستنده هو.
+        """
+        tenant = get_tenant(request, raise_on_missing=False)
+        if tenant is None:
+            return set()
+        return {
+            doc_type for doc_type, spec in DOC_TYPES.items()
+            if user_has_perm(request.user, tenant, spec["permission"])
+            and (not spec.get("module") or module_enabled(tenant, spec["module"]))
+        }
+
     def get_queryset(self):
         queryset = super().get_queryset()
         doc_type = self.request.query_params.get("doc_type")
@@ -204,18 +228,30 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(doc_type=doc_type)
         if doc_id and str(doc_id).isdigit():
             queryset = queryset.filter(doc_id=int(doc_id))
+        if self.action == "list":
+            # يرى روابط ما يملك مشاركته وحده — لا كلَّ روابط الشركة. القائمةُ
+            # مفلترةٌ لا محجوبة: من يملك المبيعات وحدها يرى روابط المبيعات.
+            queryset = queryset.filter(
+                doc_type__in=self._allowed_doc_types(self.request)
+            )
         return queryset
 
     def list(self, request, *args, **kwargs):
-        require_perm(request, "sales.document.share")
+        allowed = self._allowed_doc_types(request)
+        if not allowed:
+            raise PermissionDenied("لا تملك صلاحية مشاركة المستندات.")
+        doc_type = request.query_params.get("doc_type")
+        if doc_type and doc_type not in allowed:
+            raise PermissionDenied("لا تملك صلاحية مشاركة هذا النوع من المستندات.")
         return super().list(request, *args, **kwargs)
 
     def retrieve(self, request, *args, **kwargs):
-        require_perm(request, "sales.document.share")
+        share = self.get_object()
+        spec = DOC_TYPES.get(share.doc_type)
+        require_perm(request, spec["permission"] if spec else "sales.document.share")
         return super().retrieve(request, *args, **kwargs)
 
     def create(self, request, *args, **kwargs):
-        require_perm(request, "sales.document.share")
         tenant = get_tenant(request, raise_on_missing=True)
         doc_type = (request.data.get("doc_type") or "").strip()
         doc_id = request.data.get("doc_id")
@@ -224,6 +260,17 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
                 {"detail": "نوع المستند أو معرّفه غير صالح."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        spec = DOC_TYPES[doc_type]
+        # الترخيص **قبل** الصلاحية، و`require_module` يردّ **404 لا 403**
+        # (`core/modules.py`) — قرارٌ قائم في المستودع: الوحدة غير المرخّصة
+        # تختفي كمسارٍ غير موجود بدل أن تُعلن عن نفسها بـ«ممنوع». وترتيبُهما
+        # هو ما يجعل ذلك صادقاً: لو سبقت الصلاحيةُ الترخيصَ لردّ السطح 403
+        # على شركةٍ لا تملك الوحدة أصلاً — وهو إقرارٌ بوجودها.
+        if spec.get("module"):
+            require_module(request, spec["module"])
+        # والصلاحية **بعد** التحقّق من صحّة النوع: نوعٌ مجهول خطأُ طلبٍ (400)
+        # لا حرمانُ صلاحية، وقلبُ الترتيب يجعل الخطأ المطبعي يبدو منعاً.
+        require_perm(request, spec["permission"])
         try:
             days = int(request.data.get("days") or services.DEFAULT_EXPIRY_DAYS)
         except (TypeError, ValueError):
@@ -244,7 +291,8 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=["post"])
     def revoke(self, request, pk=None):
-        require_perm(request, "sales.document.share")
         share = self.get_object()
+        spec = DOC_TYPES.get(share.doc_type)
+        require_perm(request, spec["permission"] if spec else "sales.document.share")
         services.revoke_share(share, user=request.user, request=request)
         return Response(self.get_serializer(share).data)

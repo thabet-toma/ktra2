@@ -3,7 +3,7 @@
 > مبني على قراءة الكود مباشرةً بتاريخ 2026-08-24 (DOC-SHARE). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
 ## الغرض
-تحويل مستندٍ داخلي إلى صفحة يفتحها الزبون على أي جهاز بلا حساب وبلا تطبيق: يراها، ويحمّلها PDF، ويطبعها — **ولعرض السعر: يقبله أو يرفضه فتنتقل حالته في النظام**.
+تحويل مستندٍ داخلي إلى صفحة يفتحها **الطرف الآخر** — زبوناً كان أو مورّداً — على أي جهاز بلا حساب وبلا تطبيق: يراها، ويحمّلها PDF، ويطبعها — **ولعرض السعر: يقبله أو يرفضه فتنتقل حالته في النظام**.
 قبل هذه الوحدة كانت المشاركة تحدث خارج المنصة (لقطة شاشة على واتساب)، ولم يكن في المستودع مكتبة PDF واحدة ولا قالب Django واحد.
 
 **لماذا app مستقلة ولم تُضَف إلى `sales`:** الحجّة أمنية لا تنظيمية، وهي نفس حجّة `store` حرفياً — كل كود `AllowAny` يعيش في مجلد يقرؤه مراجع الأمن كاملاً في جلسة، ويبقى `sales/views.py` مئة بالمئة خلف المصادقة.
@@ -15,13 +15,63 @@
 `docshare/models.py` (`DocumentShare`) — جدول `document_shares`. «حيّ» تعريفه في مكان واحد: `DocumentShare.is_live` = لا مُبطَل (`revoked_at`) ولا منتهٍ (`expires_at`).
 
 **المستند مربوط بـ`(doc_type, doc_id)` نصّاً وعدداً، لا بمفتاح أجنبي ولا بـ`GenericForeignKey`.**
-المستندان اليوم في `sales`، والتوسّع لاحقاً إلى `LogisticsDeal` و`CustomerPayment` في apps أخرى: مفتاحٌ أجنبيّ اختياريّ لكل نوع يعني عموداً وهجرةً مع كل توسيع، بينما النصّ + العدد يجعلان التوسيع **سطراً في `docshare/documents.py` (`DOC_TYPES`) ودالّتين، بلا هجرة**.
+الأنواع اليوم **أربعة عشر** في `sales` و`logistics` و`after_sales`: مفتاحٌ أجنبيّ اختياريّ لكل نوع كان يعني عموداً جديداً مع كل توسيع، بينما النصّ + العدد يجعلان التوسيع **سطراً في `docshare/documents/` (`DOC_TYPES`) ودالّتين**.
+
+**وتصحيحٌ لوعدٍ كان هنا: التوسيع ليس «بلا هجرة».** العمود كان `varchar(20)` يوم كان النوعان مبيعاتٍ فقط، و`local_purchase_invoice` اثنان وعشرون محرفاً. مفتاحٌ أطول من العمود **لا يرمي على MySQL بل يُلغي القيد بصمت**، وSQLite في مجموعة الاختبارات لا يكشفه أبداً — فتمرّ خضراءَ على ميزةٍ لا تحفظ شيئاً (نفس عطل `ActivityLog.action`). العمود الآن أربعون، والسقف يحرسه `docshare/tests/test_registry.py` (`test_doc_type_keys_fit_the_column`) بقياس أطول مفتاح في السجلّ مقابل `max_length` الفعلي. فالقاعدة الصحيحة: **التوسيع بلا هجرة ما دام المفتاح يسع العمود، والاختبار هو من يقول ذلك لا الذاكرة.**
 
 **التوكن مخزَّن خاماً** — بخلاف دعوة المحاسب (`accountant_portal/models.py` (`AccountantEngagement`) تُهشِّر `invitation_token_hash`).
 الفارق وظيفي: تلك تُستهلَك مرة واحدة، وهذه تُفتح مراراً و**يجب** أن يقدر المالك على إعادة نسخ الرابط من نافذة المشاركة بعد أسبوع — وذلك مستحيل مع تهشيرٍ أحادي. وهو اختيار Odoo نفسه (`access_token` خام على السجل).
 المقابل معلوم ومقبول: تسريب نسخة القاعدة يسرّب الروابط الحيّة؛ يخفّفه الانتهاء الإلزامي (**لا خيار «بلا انتهاء»**) والإبطال الفوري و`secrets.token_urlsafe(32)` (‏256 بت).
 
 **لا قيد فرادة على `(tenant, doc_type, doc_id)`:** الروابط المُبطَلة تبقى صفوفاً، لأن «من شارك هذا المستند ومتى؟» سؤالٌ يُسأل بعد الإبطال لا قبله. الفرادة على التوكن وحده.
+
+## الأنواع الأربعة عشر — والجمهور هو ما يحكم ما يخرج
+`docshare/documents/` **حزمة لا ملف** (نمط `logistics/views/` و`core/reports/`): العقد في `_contract.py` بلا استيراد نموذجٍ واحد، والأنواع في وحدةٍ لكل جمهور. الفائدة ليست الحجم بل أن **حدود الجمهور صارت حدود ملف**: من يراجع «ماذا يرى المورّد؟» يقرأ `purchase_docs.py` كاملاً في جلسة.
+
+| `doc_type` | النموذج | الطرف | الجمهور | ملاحظة |
+|---|---|---|---|---|
+| `sales_invoice` | `sales.SalesInvoice` (بيع/مرجع بيع) | `customer` | زبون | — |
+| `sales_quotation` | `sales.SalesQuotation` | `customer` | زبون | **يقبل قراراً**؛ ومشاركةُ مسودّته تُرسلها |
+| `sales_order` | `sales.SalesOrder` | `customer` | زبون | **يقبل قراراً** — التأكيد يحجز الكمية |
+| `delivery_order` | `sales.DeliveryOrder` | `partner` | زبون | **كمياتٌ بلا أسعار** — `show_line_prices=False` |
+| `customer_payment` | `sales.CustomerPayment` | `partner` | زبون | **المرحَّل وحده**؛ بلا جدول بنود |
+| `credit_debit_note` | `sales.CreditDebitNote` | `customer` | زبون | بلا جدول بنود؛ السبب هو المتن |
+| `purchase_invoice` | `logistics.PurchaseInvoice` | `partner` | مورّد | يخدم مرجعَ الشراء أيضاً (`is_return`) |
+| `purchase_order` | `logistics.PurchaseOrder` | `supplier` | مورّد | **يقبل قراراً**؛ وبلا شاشة — انظر أسفل |
+| `logistics_deal` | `logistics.LogisticsDeal` | `partner` | مورّد | أغنى نموذجٍ بالحقول الحسّاسة |
+| `supplier_quotation` | `logistics.SupplierQuotation` | `supplier` أو `supplier_draft_name` | مورّد | الطرف قد يكون **اسماً** بلا صفّ |
+| `supplier_payment` | `sales.SupplierPayment` | `partner` | مورّد | **المرحَّل وحده**؛ مرآةُ سند القبض |
+| `local_purchase_invoice` | `sales.SalesInvoice` (شراء/مرجع شراء) | `customer` (وهو المورّد) | مورّد | بلا شاشة — انظر أسفل |
+| `warranty_card` | `after_sales.WarrantyCard` | `partner` أو `customer_name` | زبون | **وحدة مرخّصة** |
+| `service_order` | `after_sales.ServiceOrder` | `partner` أو `customer_name` | زبون | **وحدة مرخّصة**؛ التقدير بعد اعتماده |
+
+**ثلاث قواعد عرضٍ تعمّمت من هذه الأنواع، وكلٌّ منها منعٌ مقصود:**
+- **`show_lines=False`** للسندات والإشعارات والكفالة: جدولٌ بعناوين «الصنف/الوحدة/الكمية/ض.%» فوق إيصال قبضٍ ضجيجٌ يُربك من يقرؤه. وتوزيعاتُ السند تنزل **صفوفَ بيانات** (فاتورةً فاتورةً بمبلغها)، و«على الحساب» **يُشتقّ طرحاً** لا يُقرأ من عمودٍ ثانٍ قد يخالفه.
+- **`show_line_prices=False`** لسند التسليم: أعمدةُ السعر **تُحذف** لا تُملأ أصفاراً — عمودُ «السعر» تحته صفرٌ يقول للمستلم إن البضاعة مجّانية، وهو أسوأ من غياب العمود. ولنفس السبب لا يذكر وسمُ `og:description` الإجماليَ إلا متى وُجد.
+- **السند غير المرحَّل لا يُشارَك أصلاً** (‏`_posted_only` في `voucher_docs.py`): ورقةُ إيصالٍ بيد الزبون على دفعةٍ لم تدخل الدفاتر تُنازَع لاحقاً، ولا سبيل لسحبها من هاتفه.
+
+**والوحدة المرخّصة تُفحَص قبل الصلاحية** (`docshare/views.py` و`services.resolve_share`): شركةٌ لا تشترك بـ`after_sales` تتلقّى **404** لا 403 — قرارٌ قائم في `core/modules.py` (`require_module`): الوحدة غير المرخّصة تختفي كمسارٍ غير موجود بدل أن تُعلن عن نفسها. وترتيبُ الفحصين هو ما يجعل ذلك صادقاً: لو سبقت الصلاحيةُ الترخيصَ لردّ السطح 403 على مديرٍ يملك `"*"` — وهو إقرارٌ بوجود الوحدة. **ورابطٌ حيّ لوحدةٍ أُطفئت بعد إنشائه يردّ 410**: كان حيّاً يوماً فيفهم الزائر، وإبقاؤه عاملاً كان يعني أن وحدةً غير مشترَك بها تخدم صفحاتٍ للعالم.
+
+**ما لا يخرج إلى المورّد** — لأنه سرُّنا لا سرُّه: `fees_percentage` و`shipping_cost_estimate` و`remaining_amount` على الصفقة (نسبةُ ربحنا وتقديرُنا وخطّةُ سيولتنا) · `alibaba_link` و`price_offer_id` و`original_offer_number` (من أين جئنا به، وبكم عرضه علينا غيرُه) · `import_*_remaining_rate` و`attached_cash_*` و`cash_or_bank_account` و`journal` (توزيعُ التكلفة المستوردة ودفاترُنا) · `landed_*` على البنود · `received_quantity` و`warehouse` و`serials` (ما جرى للبضاعة عندنا بعد وصولها). يحرسها `docshare/tests/test_purchase_leakage.py` بزرع القيم والبحث عنها **بكل صور تنسيقها** في الصفحة المُصيَّرة — البحث عن `7777.77` وحده يمرّ كاذباً لأن مرشّح `money` يطبعها «7,777.77».
+
+## القرار: من يقبل، وماذا يتحرّك
+**القرار خاصية النوع** (`DOC_TYPES[…]["decision"]`) لا فرعٌ في مكانين. كان اسم عرض السعر مثبَّتاً حرفياً في القالب **وفي** `services.record_decision` — موضعان متباعدان لحقيقةٍ واحدة، وأولُ نوعٍ ثانٍ يقبل قراراً كان سينسى أحدَهما.
+
+| النوع | مَن يقرّر | القبول يفعل | الرفض يفعل |
+|---|---|---|---|
+| `sales_quotation` | الزبون | `sent` ← `accepted` | `sent` ← `rejected` |
+| `sales_order` | الزبون | `confirm_sales_order` — تأكيدٌ **وحجزُ كمية** | **لا شيء في المستند** |
+| `purchase_order` | المورّد | `confirm_purchase_order` — تأكيد | **لا شيء في المستند** |
+
+**والقاعدة تعيش في خدمة واحدة يستدعيها الطرفان.** شروطُ تأكيد أمر الشراء كانت محبوسةً **داخل `PurchaseOrderViewSet.confirm`**، و`.importlinter` يمنع `docshare` من استيراد `logistics.views` — فكان البديل نسخَها (قاعدتان تنحرفان عند أول تعديل). استُخرجت إلى `logistics/services.py` (`confirm_purchase_order`)، ويحرس ذلك `docshare/tests/test_order_decisions.py` (`test_confirm_rule_lives_in_one_place_for_both_callers`) بقراءة مصدر الـview.
+
+**وحالةُ «مؤكدة» واحدةٌ مهما كان المُقِرّ:** أن نضغط نحن «تأكيد» بعد مكالمةٍ مع المصنع، أو أن يضغط المصنع «موافق» على الرابط — كلاهما يقول إن الطلبية مُتَّفقٌ عليها. **ومَن أقرّ ومتى** يُسجَّل في `DocumentShare` (الاسم والتوقيت وIP والسبب) وفي `ActivityLog`، لا في عمود الحالة.
+
+**ولماذا الرفضُ لا يُلغي — خلافاً لـOdoo:** `cancelled` في هذا المستودع **طريقٌ بلا رجعة** — لا مسار «إلغاء الإلغاء» في شاشةٍ ولا في خدمة، والطلبية الملغاة لا تُحوَّل إلى فاتورة، **وإلغاء طلبية البيع يُفرِج عن الكمية المحجوزة** (أثرٌ في المخزون). فجعلُ ضغطةٍ من رابطٍ بلا تحقّق هويّة تغلق ذلك الباب مخاطرةٌ لا يقابلها مكسب. بوابةُ Odoo خلف حساب مورّدٍ معروف؛ وهذا رابطٌ يحمله من يحمله. الرفض يُسجَّل باسمه وسببه وتوقيته، **والإلغاء قرارُ صاحب المستند** في شاشته وهو يرى السبب.
+
+**والسبب حقلٌ حقيقيّ** (`DocumentShare.decided_note`): «رفض المصنع» بلا «لماذا» تُلزم الموظف بمكالمةٍ ليعرف ما كان يسع الحقل أن يقوله. اختياريّ لا إلزاميّ (Odoo يُلزمه): ضغطةٌ تُمنَع على جوّالٍ بطيء أسوأ من سببٍ ناقص — والقرار نفسه هو المعلومة التي لا يجوز أن تضيع. يظهر في الصفحة بعد القرار، وفي نافذة المشاركة للمالك، وفي وصف `ActivityLog`.
+
+**وقواعدُ العمل ترفض أحياناً، والزائر يقرأ لماذا:** تأكيدُ طلبيةٍ بكميةٍ لا تكفي يرمي `ValidationError` من `confirm_sales_order` — تلفّه `record_decision` إلى `DecisionRefused` فتُعاد الصفحة كاملةً بالسبب العربي وحالة 409. **وسببُ الرفض يُعرَض خارج صندوق القرار وقبله**: كان بداخله فكان يظهر في الحالة الوحيدة التي لا يحتاجه فيها أحد (البابُ مفتوح) ويختفي في كل حالةٍ وقع فيها الرفض فعلاً — فيضغط الزائر ثانيةً وثالثة بلا كلمةٍ تشرح.
 
 ## النقاط
 
@@ -52,12 +102,12 @@
 ## الحمولة العامة — قائمة بيضاء إيجابية بثلاث طبقات
 نفس معمار `store`: استعلام `.only()` ⇐ بانٍ صريح حقلاً حقلاً ⇐ اختبار يقارن **مجموعة** المفاتيح.
 
-1. **الاستعلام** — `docshare/documents.py` (`load_sales_invoice`, `load_sales_quotation`): `.only()` بأعمدة محصورة. التكلفة و`amount_paid` و`exchange_rate` وحسابا الإيراد والصندوق **لا تُحمَّل من القاعدة أصلاً** (محروسٌ بـ`get_deferred_fields`).
-2. **البانِي** — `docshare/documents.py` (`build_sales_invoice`, `build_sales_quotation`): بانٍ صريح لا `serializers.Serializer`، لأن هذا السطح يُصيَّر HTML لا JSON فلا مدخلات تُتحقَّق ولا تمثيل يُتفاوض عليه. الضمانة نفسها: مفتاحٌ لا يُكتب لا يخرج.
+1. **الاستعلام** — `docshare/documents/sales_docs.py` (`load_sales_invoice`) و`docshare/documents/purchase_docs.py` (`load_purchase_invoice`, `load_logistics_deal`): `.only()` بأعمدة محصورة. التكلفة و`amount_paid` و`exchange_rate` وحسابا الإيراد والصندوق **لا تُحمَّل من القاعدة أصلاً** (محروسٌ بـ`get_deferred_fields`).
+2. **البانِي** — `docshare/documents/_contract.py` (`payload`): **مُنشئٌ واحد لكل الأنواع**، لا قاموسٌ يجمّعه كل بانٍ بنفسه. الفرق ليس أناقة: حين كان كل نوع يبني قاموسه، كان مفتاحٌ زائد في نوعٍ واحد يمرّ ما دام اختبارُ ذلك النوع لم يُحدَّث. الآن **مجموعة المفاتيح خاصيةُ المُنشئ** (`PAYLOAD_FIELDS`)، فتسري على كل نوع جديد يوم كتابته. وبانٍ صريح لا `serializers.Serializer` لأن هذا السطح يُصيَّر HTML لا JSON.
 3. **الاختبار** — `docshare/tests/test_public_leakage.py`: `assert set(keys) == WHITELIST` لا غياباً فردياً، ثم بحثٌ حرفي في الصفحة المُصيَّرة عن التكلفة المزروعة وعن الملاحظة الداخلية.
 
 **فخّان أُغلقا صراحةً:**
-- **`SalesInvoice` يخدم أربعة أنواع** — بيع، مرجع بيع، **شراء**، مرجع شراء. مشاركة سجلّ شراء تسرّب اسم المورّد وسعر التكلفة إلى زبون. الحصر إيجابي في `docshare/documents.py` (`SHAREABLE_INVOICE_KINDS`)، ومحروس باختبار.
+- **`SalesInvoice` يخدم أربعة أنواع** — بيع، مرجع بيع، **شراء**، مرجع شراء. مشاركة سجلّ شراءٍ **كفاتورة بيع** تسرّب اسم المورّد وسعر التكلفة إلى زبون. الحصر إيجابي في `docshare/documents/sales_docs.py` (`SHAREABLE_INVOICE_KINDS`) ومحروس باختبار — **ولم يُرفَع مع توسيع السطح إلى الشراء، بل قُرِن بمرآته**: `purchase_docs.py` (`LOCAL_PURCHASE_KINDS`) يحصر الاتجاه الآخر إيجابياً كذلك، فلا يمرّ نوعٌ من بابٍ ليس بابه.
 - **`SalesInvoiceLine` فيه ملاحظتان لا واحدة** — `internal_note` للموظف و`customer_note` للزبون، والفصل بنيوي في `sales/models.py`. السطح العام يقرأ `customer_note` وحده.
 
 **«المدفوع» يُشتقّ لا يُقرأ:** `SalesInvoice.amount_paid` ليس مصدر حقيقة في هذا المستودع — يُستعمل `sales.services` (`posted_allocations_total`)، وإلا عرض الرابط رقماً يخالف شاشة الموظف.
@@ -88,13 +138,41 @@
 `docshare/services.py` (`record_view`, `is_crawler`) — جلبُ الزاحف **لا يُحتسب مشاهدة**.
 واتساب يجلب الرابط أثناء الكتابة **قبل الإرسال**، فاحتسابه يجعل المالك يرى «شوهدت الفاتورة» قبل أن يضغط هو زرّ الإرسال. المشاهدة تُكتب بـ`F()` لا بقراءةٍ ثم كتابة، ولا ترمي أبداً — العرض أهمّ من العدّاد.
 
-## الصلاحية
-`sales.document.share` («مشاركة المستندات برابط عام»، مجموعة المبيعات) في `core/access.py`. يأخذها **موظف المبيعات** افتراضياً (إرسال الفاتورة للزبون عملُه، ولا مال في الرابط: يعرض ولا يكتب، وأقصى أثره نقلُ عرضٍ من «مسودة» إلى «أُرسل»)، و`manager` بـ`"*"`، و`viewer` لا.
+## الجمهور والصلاحية — مفتاحان لا واحد
+**الجمهور خاصيةٌ في `DOC_TYPES` (`audience`) لا تعليقٌ عليها**، لأن «تسريب» ليست صفة حقلٍ في ذاته بل علاقةً بينه وبين من يفتح الرابط: سعرُ الشراء سرٌّ أمام الزبون وحقيقةٌ يعرفها المورّد أصلاً (هو من كتبها لنا)، ونسبةُ ربحنا سرٌّ أمام الاثنين.
+
+| المفتاح | الأنواع | من يأخذه افتراضياً |
+|---|---|---|
+| `sales.document.share` | `sales_invoice` · `sales_quotation` · `sales_order` · `delivery_order` · `customer_payment` · `credit_debit_note` · `warranty_card` · `service_order` | موظف المبيعات · `manager` بـ`"*"` |
+| `purchase.document.share` | `purchase_invoice` · `purchase_order` · `logistics_deal` · `supplier_quotation` · `local_purchase_invoice` · `supplier_payment` | موظف المشتريات · `manager` بـ`"*"` |
+
+`viewer` لا يأخذ أياً منهما. ولا مال في الرابط على الجانبين: يعرض ولا يكتب، وأقصى أثره نقلُ عرضٍ من «مسودة» إلى «أُرسل».
+
+**والصلاحية تُقرأ من النوع، ولم تكن.** كانت `DOC_TYPES[…]["permission"]` معلَنةً في السجلّ و**مهملةً** في `docshare/views.py`: الصلاحية المبيعاتية مثبَّتةً حرفياً في `list`/`retrieve`/`create`/`revoke`. لم يكن ذلك نزيفاً يوم كُتب (النوعان مبيعات)، لكنه كان يعني أن أول نوع شراء يجعل **موظف المبيعات يشارك فواتير المورّدين** وموظف المشتريات لا يقدر أن يشارك مستنده. الآن تُقرأ من السجلّ، والقائمة **مفلترةٌ** بما يملكه المستخدم لا محجوبةً كلَّها. يحرسه `docshare/tests/test_admin_api.py` (`test_permission_is_taken_from_the_type_not_hardcoded`) — وقد أُثبت أنه يُخفق على الكود القديم قبل أن يُعتمد.
 
 ## الواجهة
 - `frontend_v2/services/docShareApi.ts` — عميل سطح الإدارة وحده. **الشركة تُحلّ داخل الوحدة** (`resolveTenantId`) على نمط `afterSalesApi.ts`، لا عند كل مستدعٍ: تركُها خياراً كان يعني رأس `X-Tenant-Id` مفقوداً بلا كسرِ بناءٍ ولا نوع — فيردّ الإنشاء «لم يتم تحديد الشركة»، و**الأسوأ** أن القائمة تُرجع `.none()` بصمت فتقول النافذة «لا رابط» ولو كان هناك رابط حيّ، فتُنشَأ روابط مكرّرة.
 - `frontend_v2/components/shared/ShareDocumentModal.tsx` — نافذة واحدة تخدم كل الأنواع (النوع خاصية لا فرع): نسخ الرابط · إرسال واتساب · مدّة الصلاحية · الإبطال · «شوهد» · قرار الزبون.
-- نقطتا الالتحام: `SalesInvoiceEditor.tsx` و`SalesQuotationsPage.tsx` — في مصفوفة `toolbarActions` بجوار «طباعة»، وزرّ «مشاركة» في صفوف قائمة العروض. الزرّ معطَّل قبل الحفظ: الرابط يشير إلى صفٍّ في القاعدة، ومسوّدةٌ في الذاكرة لا صفَّ لها.
+- نقاط الالتحام — كلها في مصفوفة `toolbarActions` بجوار «طباعة»، والزرّ **معطَّل قبل الحفظ** (الرابط يشير إلى صفٍّ في القاعدة، ومسوّدةٌ في الذاكرة لا صفَّ لها) ويبقى **ظاهراً** لا مخفياً: زرٌّ يظهر ويختفي يجعل المستخدم يبحث عمّا رآه مرة.
+
+| الشاشة | النوع |
+|---|---|
+| `frontend_v2/components/sales/SalesInvoiceEditor.tsx` | `sales_invoice` |
+| `frontend_v2/components/sales/SalesQuotationsPage.tsx` (صفوف القائمة) | `sales_quotation` |
+| `frontend_v2/components/procurement/invoices/InvoiceForm.tsx` | `purchase_invoice` (وهو نفسه مرجعُ الشراء حين `is_return`) |
+| `frontend_v2/components/procurement/deals/DealForm.tsx` | `logistics_deal` |
+| `frontend_v2/components/procurement/price-offers/PriceOfferForm.tsx` | `supplier_quotation` |
+| `frontend_v2/components/sales/SalesOrdersPage.tsx` | `sales_order` |
+| `frontend_v2/components/sales/DeliveryNotesPage.tsx` | `delivery_order` |
+| `frontend_v2/components/sales/SalesCustomerPaymentsPage.tsx` | `customer_payment` (المرحَّل وحده) |
+| `frontend_v2/components/sales/SupplierPaymentsPage.tsx` | `supplier_payment` (المرحَّل وحده) |
+| `frontend_v2/components/sales/CreditDebitNotesPage.tsx` | `credit_debit_note` |
+| `frontend_v2/components/aftersales/WarrantyCardsScreen.tsx` | `warranty_card` |
+| `frontend_v2/components/aftersales/ServiceOrdersScreen.tsx` | `service_order` |
+
+- `frontend_v2/components/shared/ShareRowButton.tsx` — زرُّ الصفّ في شاشات القوائم، يحمل حالته ونافذته معه. شاشاتُ القوائم لا محرّرَ لها بشريط أدوات، وتكرارُ ثلاثيّة «حالة + نافذة + زرّ» في ثمان شاشات كان يعني ثماني نسخٍ تنحرف. **والنافذة تُركَّب عند الفتح فقط**، فقائمةٌ بمئة صفّ لا تُطلق مئة نداء `listDocumentShares`.
+
+**نوعان بلا شاشة — مقصودٌ وموثَّق:** `purchase_order` مدعومٌ خادمياً بالكامل ولا زرّ له لأن **لا شاشة لأمر الشراء أصلاً في `frontend_v2`** (النقطة `/api/logistics/purchase-orders/` حيّة و`procurementDocumentsApi.ts` يخاطبها، ولا مكوّن يستدعيه). و`local_purchase_invoice` (`SalesInvoice` بنوع شراء) لا مُنشئ له في الواجهة اليوم — جانب الشراء يمرّ عبر `logistics.PurchaseInvoice`. النوعان يعملان عبر الـAPI، وينتظران شاشتيهما.
 
 ## خطوة نشر يملكها المالك
 لتشغيل الرابط القصير `https://ktra-pro.tech/s/<token>` يُضاف إلى `/etc/nginx/sites-available/ktra-pro.tech`:

@@ -41,6 +41,7 @@ import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { accountingApi } from "../../services/accountingApi";
 import { apiGetObject } from "../../services/restApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { ShareRowButton } from "../shared/ShareRowButton";
 import { useToast } from "../../contexts/ToastContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import {
@@ -366,6 +367,18 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
             <button type="button" className="ktra-toolbtn" title="تراجع عن الترحيل" onClick={() => void handleUnpost(r)}>
               <Undo2 className="w-3 h-3" />
             </button>
+          )}
+          {/* DOC-SHARE: إيصالُ الزبون — أكثر ما يُطلب على واتساب بعد الدفع.
+              والمرحَّل وحده: ورقةٌ على دفعةٍ لم تدخل الدفاتر تُنازَع ولا تُسحَب. */}
+          {r.is_posted && (
+            <ShareRowButton
+              docType="customer_payment"
+              docId={r.id}
+              docLabel={`سند قبض #${r.id}`}
+              partyName={r.partner_name || undefined}
+              className="ktra-toolbtn"
+              label=""
+            />
           )}
           <button
             type="button"

@@ -10,6 +10,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { ShareRowButton } from "../shared/ShareRowButton";
 import { FileSearch, Loader2, Pencil, Printer, Save, Trash2, X } from "lucide-react";
 import {
   createDeliveryNote,
@@ -707,6 +708,18 @@ export const DeliveryNotesPage: React.FC = () => {
           >
             <FileSearch className="w-3 h-3" />
           </button>
+          {/* DOC-SHARE: ورقةُ التسليم تسبق البضاعة إلى الزبون — كمياتٌ بلا
+              أسعار (انظر `docshare/documents/voucher_docs.py`). */}
+          <span onClick={(e) => e.stopPropagation()}>
+            <ShareRowButton
+              docType="delivery_order"
+              docId={r.id}
+              docLabel={`سند تسليم ${r.delivery_number || `#${r.id}`}`}
+              partyName={r.customer_name || undefined}
+              className="ktra-toolbtn"
+              label=""
+            />
+          </span>
           {allowEdit && (
             <>
               <button

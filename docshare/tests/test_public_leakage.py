@@ -11,57 +11,67 @@
    فلو تسلّلت التكلفة داخل نصٍّ أو سمة HTML لأمسكتها.
 3. **الأعمدة المؤجّلة** — إثبات أن التكلفة **لم تُحمَّل من القاعدة أصلاً**،
    فلا تسريب ممكن حتى بخطأ عرضٍ لاحق.
+
+**والطبقة الأولى تدور على `DOC_TYPES` لا على نوعين مُسمَّيين.** حين كان الاختبار
+يذكر `sales_invoice` و`sales_quotation` بالاسم، كان نوعٌ ثالث يُضاف بلا اختبارٍ
+يمرّ خضراءَ صامتاً. الآن `SAMPLE_FIXTURES` تُقاس مجموعتُها بمجموعة السجلّ:
+**نوعٌ بلا عيّنة يُسقِط المجموعة يوم تسجيله**، لا يوم تذكُّر أحدهم.
 """
 import pytest
 
 from docshare import services
 from docshare.documents import (
     COMPANY_FIELDS,
-    build_sales_invoice,
-    build_sales_quotation,
+    DECISION_DISPLAY_KEYS,
+    DOC_TYPES,
+    PAYLOAD_FIELDS,
     company_card,
     load_sales_invoice,
 )
 from docshare.models import DOC_SALES_INVOICE, DOC_SALES_QUOTATION
-from docshare.tests.conftest import CUSTOMER_NOTE, SECRET_COST, SECRET_INTERNAL_NOTE
+from docshare.tests.conftest import (
+    CUSTOMER_NOTE,
+    SAMPLE_FIXTURES,
+    SECRET_COST,
+    SECRET_INTERNAL_NOTE,
+)
 
 pytestmark = pytest.mark.django_db
-
-#: العقد العام للمستند — كل مفتاح هنا قرارٌ واعٍ بنشره للعالم.
-DOC_WHITELIST = {
-    "kind", "title", "number", "date", "due_date", "valid_until",
-    "status", "status_label", "notes", "lines", "totals",
-    "show_payment", "can_decide",
-    "customer_name", "customer_address", "customer_phone", "customer_tax_number",
-    "currency_code", "currency_symbol",
-}
 
 LINE_WHITELIST = {
     "name", "name_en", "catalog_no", "note", "unit",
     "quantity", "unit_price", "line_discount", "tax_percent", "line_total",
 }
 
-TOTALS_WHITELIST = {
-    "subtotal", "discount", "tax", "grand_total", "paid", "remaining",
-}
+META_ROW_KEYS = {"label", "value", "kind"}
+TOTAL_ROW_KEYS = {"label", "value", "strong"}
+DECISION_KEYS = set(DECISION_DISPLAY_KEYS) | {"open"}
 
 
-def test_invoice_payload_keys_match_whitelist_exactly(invoice):
-    payload = build_sales_invoice(load_sales_invoice(invoice.tenant_id, invoice.pk))
-    assert set(payload) == DOC_WHITELIST
-    assert set(payload["totals"]) == TOTALS_WHITELIST
-    assert set(payload["lines"][0]) == LINE_WHITELIST
-
-
-def test_quotation_payload_keys_match_whitelist_exactly(quotation):
-    from docshare.documents import load_sales_quotation
-
-    payload = build_sales_quotation(
-        load_sales_quotation(quotation.tenant_id, quotation.pk)
+def test_every_registered_doc_type_has_a_sample():
+    """نوعٌ يُسجَّل بلا عيّنة = نوعٌ يخرج إلى العالم بلا اختبار تسريب واحد."""
+    assert set(DOC_TYPES) == set(SAMPLE_FIXTURES), (
+        "أضف عيّنة في conftest.SAMPLE_FIXTURES لكل نوع مسجَّل في DOC_TYPES"
     )
-    assert set(payload) == DOC_WHITELIST
-    assert set(payload["totals"]) == TOTALS_WHITELIST
-    assert set(payload["lines"][0]) == LINE_WHITELIST
+
+
+def test_every_type_payload_matches_the_whitelist_exactly(samples):
+    """القائمة البيضاء تسري على **كل** نوع مسجَّل، بالدوران لا بالتعداد."""
+    for doc_type, document in samples.items():
+        spec = DOC_TYPES[doc_type]
+        loaded = spec["loader"](document.tenant_id, document.pk)
+        assert loaded is not None, f"عيّنة {doc_type} لا يحمّلها loader النوع"
+        payload = spec["builder"](loaded)
+
+        assert set(payload) == set(PAYLOAD_FIELDS), doc_type
+        for line in payload["lines"]:
+            assert set(line) == LINE_WHITELIST, doc_type
+        for row in payload["meta_rows"]:
+            assert set(row) == META_ROW_KEYS, doc_type
+        for row in payload["totals_rows"]:
+            assert set(row) == TOTAL_ROW_KEYS, doc_type
+        if payload["decision"] is not None:
+            assert set(payload["decision"]) == DECISION_KEYS, doc_type
 
 
 def test_company_card_keys_match_whitelist_exactly(env):
@@ -91,8 +101,12 @@ def test_cost_columns_are_not_even_loaded_from_the_database(invoice):
         )
 
 
-def test_purchase_invoice_is_not_shareable(env, invoice):
-    """`SalesInvoice` يخدم الشراء أيضاً — ومشاركته تسرّب المورّد إلى الزبون."""
+def test_purchase_invoice_is_not_shareable_as_a_sales_invoice(env, invoice):
+    """`SalesInvoice` يخدم الشراء أيضاً — ومشاركته **كفاتورة بيع** تسرّب المورّد.
+
+    الحارس لم يُرفَع مع توسيع السطح إلى الشراء: جانبُ الشراء نوعُه الخاص
+    بجمهوره الخاص، وهذا الطريق يبقى مسدوداً.
+    """
     from sales.models import SalesInvoice
 
     invoice.invoice_kind = SalesInvoice.INVOICE_KIND_PURCHASE
@@ -116,7 +130,7 @@ def test_share_of_another_tenants_document_is_refused(env, invoice, base_currenc
 
 
 def test_quotation_page_shows_no_payment_figures(client, env, quotation):
-    """«المدفوع/المتبقي» على عرض سعر كذبة — ولا يُعرض أصلاً."""
+    """«المدفوع/المتبقي» على عرض سعر كذبة — ولا يُبنى صفُّه أصلاً."""
     share = services.create_share(env["tenant"], DOC_SALES_QUOTATION, quotation.pk)
     html = client.get(f"/s/{share.token}").content.decode("utf-8")
     assert "المتبقي" not in html

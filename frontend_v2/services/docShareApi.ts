@@ -8,7 +8,31 @@
 import { apiGetList, apiPostObject } from "./restApi";
 import { resolveTenantId } from "../utils/tenantContext";
 
-export type ShareDocType = "sales_invoice" | "sales_quotation";
+/**
+ * أنواع المستندات القابلة للمشاركة — **مرآة `docshare/documents/DOC_TYPES`**.
+ *
+ * جانبان بجمهورين: أنواع البيع يفتحها الزبون وتلزمها `sales.document.share`،
+ * وأنواع الشراء يفتحها المورّد وتلزمها `purchase.document.share`. الخادم هو
+ * من يفرض ذلك — وهذا النوع يمنع الخطأ المطبعي قبل أن يصل إليه.
+ */
+export type ShareDocType =
+  // جانب البيع — جمهوره الزبون، ويلزمه `sales.document.share`
+  | "sales_invoice"
+  | "sales_quotation"
+  | "sales_order"
+  | "delivery_order"
+  | "customer_payment"
+  | "credit_debit_note"
+  // ما بعد البيع — جمهوره الزبون، ووحدته مرخّصة
+  | "warranty_card"
+  | "service_order"
+  // جانب الشراء — جمهوره المورّد، ويلزمه `purchase.document.share`
+  | "purchase_invoice"
+  | "purchase_order"
+  | "logistics_deal"
+  | "supplier_quotation"
+  | "local_purchase_invoice"
+  | "supplier_payment";
 export type ShareDecision = "" | "accepted" | "rejected";
 
 export interface DocumentShare {
@@ -26,6 +50,7 @@ export interface DocumentShare {
   decision: ShareDecision;
   decided_at: string | null;
   decided_name: string;
+  decided_note: string;
   created_at: string;
   created_by_name: string;
 }

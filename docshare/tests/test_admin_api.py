@@ -66,6 +66,55 @@ def test_sales_employee_can_create_a_share(env, quotation):
     assert response.status_code == 201, response.data
 
 
+def test_permission_is_taken_from_the_type_not_hardcoded(env, invoice, monkeypatch):
+    """صلاحية النوع تُقرأ من `DOC_TYPES`، لا `sales.document.share` مثبَّتةً.
+
+    كانت صلاحية المبيعات مثبَّتةً حرفياً في كل طريقة على هذا السطح بينما
+    `DOC_TYPES[…]["permission"]` معلَنةٌ ومهملة. الأثر لحظةَ أول نوع شراء:
+    **موظف المبيعات يشارك فواتير المورّدين** وموظف المشتريات لا يقدر.
+
+    الاختبار يحقن نوعاً وهمياً بصلاحية غير مبيعاتية بدل انتظار نوعٍ حقيقي:
+    ما يُقاس هنا هو التوصيل نفسه، وهو واحدٌ لكل الأنواع.
+    """
+    from docshare import documents
+
+    fake = dict(documents.DOC_TYPES[DOC_SALES_INVOICE])
+    fake["permission"] = "purchase.invoice.create"
+    monkeypatch.setitem(documents.DOC_TYPES, "fake_purchase_doc", fake)
+
+    seller = _member(env["tenant"], "share-seller-perm", "sales")
+    api = _client(seller, env["tenant"])
+
+    # موظف المبيعات يملك `sales.document.share` ولا يملك `purchase.invoice.create`.
+    refused = api.post(
+        SHARES_URL, {"doc_type": "fake_purchase_doc", "doc_id": invoice.pk},
+        format="json",
+    )
+    assert refused.status_code == 403, refused.data
+
+    # ونفس المستند تحت نوعه المبيعاتي يمرّ — فالرفض صلاحيةُ نوعٍ لا عطلٌ عام.
+    allowed = api.post(
+        SHARES_URL, {"doc_type": DOC_SALES_INVOICE, "doc_id": invoice.pk},
+        format="json",
+    )
+    assert allowed.status_code == 201, allowed.data
+
+
+def test_listing_hides_types_the_user_cannot_share(env, invoice, monkeypatch):
+    """القائمة مفلترةٌ بصلاحية النوع لا محجوبةً كلّها ولا مكشوفةً كلّها."""
+    from docshare import documents
+
+    fake = dict(documents.DOC_TYPES[DOC_SALES_INVOICE])
+    fake["permission"] = "purchase.invoice.create"
+    monkeypatch.setitem(documents.DOC_TYPES, "fake_purchase_doc", fake)
+    services.create_share(env["tenant"], DOC_SALES_INVOICE, invoice.pk)
+    services.create_share(env["tenant"], "fake_purchase_doc", invoice.pk)
+
+    seller = _member(env["tenant"], "share-seller-list", "sales")
+    rows = _rows(_client(seller, env["tenant"]).get(SHARES_URL))
+    assert {row["doc_type"] for row in rows} == {DOC_SALES_INVOICE}
+
+
 def test_unknown_document_is_404_not_403(env):
     """404 لا 403: 403 يُثبت لمن يخمّن المعرّفات أن المستند موجود."""
     api = _client(env["owner"], env["tenant"])
@@ -78,10 +127,42 @@ def test_unknown_document_is_404_not_403(env):
 def test_bad_doc_type_is_400(env, invoice):
     api = _client(env["owner"], env["tenant"])
     response = api.post(
-        SHARES_URL, {"doc_type": "purchase_invoice", "doc_id": invoice.pk},
+        SHARES_URL, {"doc_type": "no_such_document_type", "doc_id": invoice.pk},
         format="json",
     )
     assert response.status_code == 400
+
+
+def test_sales_employee_cannot_share_a_purchase_document(env, deal):
+    """جانبان جمهورُهما مختلف ⇒ مفتاحان مختلفان.
+
+    البائع يملك `sales.document.share` ولا يملك `purchase.document.share`،
+    فإرسالُ صفقةٍ إلى المصنع ليس عملَه.
+    """
+    seller = _member(env["tenant"], "seller-vs-purchase", "sales")
+    response = _client(seller, env["tenant"]).post(
+        SHARES_URL, {"doc_type": "logistics_deal", "doc_id": deal.pk}, format="json",
+    )
+    assert response.status_code == 403
+
+
+def test_procurement_employee_can_share_a_purchase_document(env, deal):
+    """وموظف المشتريات يملكه افتراضياً — إرسال الصفقة إلى المصنع عملُه."""
+    buyer = _member(env["tenant"], "buyer-shares-deal", "procurement")
+    response = _client(buyer, env["tenant"]).post(
+        SHARES_URL, {"doc_type": "logistics_deal", "doc_id": deal.pk}, format="json",
+    )
+    assert response.status_code == 201, response.data
+
+
+def test_procurement_employee_cannot_share_a_sales_invoice(env, invoice):
+    """والمنعُ متبادل — ولولا ذلك لكان المفتاحان مفتاحاً واحداً بلا معنى."""
+    buyer = _member(env["tenant"], "buyer-vs-sales", "procurement")
+    response = _client(buyer, env["tenant"]).post(
+        SHARES_URL, {"doc_type": DOC_SALES_INVOICE, "doc_id": invoice.pk},
+        format="json",
+    )
+    assert response.status_code == 403
 
 
 def test_listing_is_scoped_to_the_company(env, invoice):

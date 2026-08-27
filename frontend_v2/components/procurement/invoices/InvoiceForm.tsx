@@ -16,6 +16,7 @@ import {
   Pencil,
   Plus,
   Printer,
+  Share2,
   RefreshCw,
   Trash2,
   X,
@@ -87,6 +88,7 @@ import {
 import { InvoicePrintView } from "./InvoicePrintView";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { InvoicePaymentsSection } from "@/components/shared/InvoicePaymentsSection";
+import { ShareDocumentModal } from "@/components/shared/ShareDocumentModal";
 import { entityPathForReference } from "@/utils/entityLinks";
 import { EntityActivityLog } from "@/components/activity/EntityActivityLog";
 import { PartnerNoteAlert } from "@/components/partners/PartnerNoteAlert";
@@ -212,6 +214,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [cardSuggestedPrice, setCardSuggestedPrice] = useState<number | null>(null);
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   // نافذة استلام البضاعة (تُنشئ إرسالية بالبنود المؤشَّرة).
   const [showReceive, setShowReceive] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
@@ -2650,6 +2653,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onClick: () => openInNewTab(`/purchase-receipts/new?invoice=${formData.id}`),
     } as KitToolbarAction] : []),
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => setShowPrintView(true), separatorBefore: true },
+    // DOC-SHARE: المشاركة تلزمها فاتورة محفوظة — الرابط يشير إلى صفٍّ في القاعدة.
+    // وجمهور هذه الصفحة **المورّد**، فصلاحيتها `purchase.document.share` لا
+    // صلاحية المبيعات: الخادم يفرضها، وهذا الزرّ يقود إليها لا يقرّرها.
+    {
+      key: "share",
+      label: "مشاركة",
+      icon: <Share2 />,
+      disabled: !formData.id,
+      onClick: () => setShowShareModal(true),
+    },
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: guardedCancel, danger: true, separatorBefore: true },
   ];
 
@@ -3589,6 +3602,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           currentUser={currentUser}
           supplier={selectedSupplier}
           onClose={() => setShowPrintView(false)}
+        />
+      )}
+      {formData.id != null && (
+        <ShareDocumentModal
+          open={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          docType="purchase_invoice"
+          docId={Number(formData.id)}
+          docLabel={`فاتورة شراء ${formData.invoiceNumber || `#${formData.id}`}`}
+          partyName={selectedSupplier?.tradeName}
         />
       )}
       {/* استلام سريع: يُنشئ إرسالية بالبنود المؤشَّرة (كلها افتراضياً). */}

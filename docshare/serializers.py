@@ -23,7 +23,7 @@ class DocumentShareSerializer(serializers.ModelSerializer):
             "id", "doc_type", "doc_id", "token", "public_url",
             "expires_at", "revoked_at", "is_live",
             "view_count", "first_viewed_at", "last_viewed_at",
-            "decision", "decided_at", "decided_name",
+            "decision", "decided_at", "decided_name", "decided_note",
             "created_at", "created_by_name",
         )
         read_only_fields = fields

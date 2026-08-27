@@ -27,6 +27,7 @@ import {
 import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split, Undo2, Loader2 } from "lucide-react";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { ShareRowButton } from "../shared/ShareRowButton";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { VoucherAllocationModal } from "../shared/VoucherAllocationModal";
 import { NewSupplierPaymentModal } from "./NewSupplierPaymentModal";
@@ -262,6 +263,17 @@ export const SupplierPaymentsPage: React.FC = () => {
             <button type="button" className="ktra-toolbtn" title="تراجع عن الترحيل" disabled={busyId != null} onClick={() => void handleUnpost(r)}>
               {busyId === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Undo2 className="w-3 h-3" />}
             </button>
+          )}
+          {/* DOC-SHARE: مرآةُ سند القبض — إيصالُ المورّد بما دفعناه له. */}
+          {r.is_posted && (
+            <ShareRowButton
+              docType="supplier_payment"
+              docId={r.id}
+              docLabel={`سند صرف #${r.id}`}
+              partyName={r.partner_name || undefined}
+              className="ktra-toolbtn"
+              label=""
+            />
           )}
           <button
             type="button"

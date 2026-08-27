@@ -16,6 +16,7 @@ import {
   FileDown,
 } from "lucide-react";
 import { KitSpinner } from "../kit/KitStates";
+import { ShareRowButton } from "../shared/ShareRowButton";
 import { apiGetList, apiPostObject, apiPatchObject } from "../../services/restApi";
 import { formatMoney } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -314,6 +315,13 @@ export const CreditDebitNotesPage: React.FC = () => {
                         <button onClick={() => handlePost(n.id)} className="text-green-600 hover:underline text-xs">ترحيل</button>
                       </>
                     )}
+                    <ShareRowButton
+                      docType="credit_debit_note"
+                      docId={n.id}
+                      docLabel={`إشعار ${n.note_number}`}
+                      partyName={n.customer_name || undefined}
+                      className="text-blue-600 hover:underline text-xs"
+                    />
                     {n.journal && <span className="ktra-text-soft text-xs">قيد #{n.journal}</span>}
                   </td>
                 </tr>

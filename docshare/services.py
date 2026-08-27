@@ -9,19 +9,19 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
 from core.activity import log_activity
+from core.modules import module_enabled
 from docshare.documents import DOC_TYPES
 from docshare.models import (
     DECISION_ACCEPTED,
     DECISION_REJECTED,
-    DOC_SALES_QUOTATION,
     DocumentShare,
 )
-from sales.models import SalesQuotation
 
 logger = logging.getLogger(__name__)
 
@@ -123,9 +123,12 @@ def create_share(tenant, doc_type: str, doc_id: int, *, days: int = DEFAULT_EXPI
         created_by=user if (user and user.is_authenticated) else None,
     )
 
-    if doc_type == DOC_SALES_QUOTATION and document.status == SalesQuotation.STATUS_DRAFT:
-        document.status = SalesQuotation.STATUS_SENT
-        document.save(update_fields=["status", "updated_at"])
+    # خطافُ «ما معنى أن يُشارَك هذا النوع؟» — يعرفه النوع لا هذه الدالّة.
+    # كان اسمُ عرض السعر مثبَّتاً هنا حرفياً، فكان كلُّ نوعٍ جديد يقبل قراراً
+    # سيضيف فرعاً ثانياً في خدمةٍ لا شأن لها بآلات حالات المبيعات.
+    on_share = DOC_TYPES[doc_type].get("on_share")
+    if on_share is not None:
+        on_share(document)
 
     log_activity(
         action="create",
@@ -179,6 +182,12 @@ def resolve_share(token: str) -> tuple[DocumentShare, object, dict]:
     if spec is None:
         raise ShareNotFound(share.doc_type)
 
+    # وحدةٌ مرخّصة أُطفئت بعد إنشاء الرابط ⇒ **410 لا 404**: الرابط كان حيّاً
+    # يوماً، والصفحة تقول للزائر أن يطلب بديلاً بدل أن تصمت. وإبقاؤه عاملاً
+    # كان يعني أن وحدةً غير مشترَك بها تخدم صفحاتٍ للعالم.
+    if spec.get("module") and not module_enabled(share.tenant, spec["module"]):
+        raise ShareGone(f"{share.doc_type}: module off")
+
     document = spec["loader"](share.tenant_id, share.doc_id)
     if document is None:
         # المستند حُذف بعد المشاركة، أو تغيّر نوعه إلى ما لا يُشارَك.
@@ -203,17 +212,23 @@ def record_view(share: DocumentShare, request) -> None:
 
 
 @transaction.atomic
-def record_decision(token: str, decision: str, name: str, request) -> DocumentShare:
-    """يسجّل قبول الزبون أو رفضه لعرض السعر، ويحرّك حالة العرض معه.
+def record_decision(token: str, decision: str, name: str, request,
+                    note: str = "") -> DocumentShare:
+    """يسجّل قبول المستلم أو رفضه، ويحرّك حالة المستند معه.
 
     القفل على صفّ المشاركة داخل معاملة: ضغطتان متتاليتان على «موافق» من
     جوالٍ بطيء طلبان متزامنان، والثاني يجب أن يرتدّ لا أن يُعيد الكتابة.
+
+    **وأيُّ نوعٍ يقبل قراراً سؤالٌ يجيب عنه `DOC_TYPES` لا هذه الدالّة.** كان
+    اسم عرض السعر مثبَّتاً هنا حرفياً وفي القالب معاً — موضعان متباعدان لحقيقةٍ
+    واحدة، وأولُ نوعٍ ثانٍ يقبل قراراً كان سينسى أحدَهما.
     """
     if decision not in (DECISION_ACCEPTED, DECISION_REJECTED):
         raise DecisionRefused("قرار غير معروف.")
     name = (name or "").strip()[:120]
     if not name:
         raise DecisionRefused("الاسم مطلوب لتسجيل القرار.")
+    note = (note or "").strip()[:500]
 
     share = (
         DocumentShare.objects
@@ -226,46 +241,57 @@ def record_decision(token: str, decision: str, name: str, request) -> DocumentSh
         raise ShareNotFound(token)
     if not share.is_live:
         raise ShareGone(token)
-    if share.doc_type != DOC_SALES_QUOTATION:
+    spec = DOC_TYPES.get(share.doc_type)
+    if spec is None:
+        raise ShareNotFound(share.doc_type)
+    decision_spec = spec.get("decision")
+    if decision_spec is None:
         raise DecisionRefused("هذا المستند لا يقبل قراراً.")
     if share.decision:
-        raise DecisionRefused("تم تسجيل قرارك على هذا العرض مسبقاً.")
+        raise DecisionRefused("تم تسجيل قرارك على هذا المستند مسبقاً.")
 
-    quotation = DOC_TYPES[share.doc_type]["loader"](share.tenant_id, share.doc_id)
-    if quotation is None:
+    document = spec["loader"](share.tenant_id, share.doc_id)
+    if document is None:
         raise ShareNotFound(f"{share.doc_type}#{share.doc_id}")
-    if quotation.status != SalesQuotation.STATUS_SENT:
-        raise DecisionRefused(
-            f"لم يعد هذا العرض قابلاً للقرار (حالته: {quotation.get_status_display()})."
-        )
+    if not decision_spec["is_open"](document):
+        raise DecisionRefused(decision_spec["closed_reason"](document))
 
-    quotation.status = (
-        SalesQuotation.STATUS_ACCEPTED if decision == DECISION_ACCEPTED
-        else SalesQuotation.STATUS_REJECTED
-    )
-    quotation.save(update_fields=["status", "updated_at"])
+    # **قواعدُ العمل ترفض أحياناً، والزائر يجب أن يقرأ لماذا.** تأكيدُ طلبيةٍ
+    # بكميةٍ لا تكفي يرمي `ValidationError` من `confirm_sales_order` — بلا هذا
+    # اللفّ يصعد الاستثناء إلى 500 بصفحةٍ بيضاء، فيضغط الزبون ثانيةً وثالثة ولا
+    # يعرف أن السبب نفادُ المخزون. الرسالة عربيةٌ أصلاً في الخدمة، فتُمرَّر كما هي.
+    try:
+        decision_spec["apply"](document, decision == DECISION_ACCEPTED)
+    except ValidationError as exc:
+        raise DecisionRefused(" ".join(exc.messages) or "تعذّر تنفيذ القرار.") from exc
 
     share.decision = decision
     share.decided_at = timezone.now()
     share.decided_ip = _client_ip(request)
     share.decided_name = name
-    share.save(update_fields=["decision", "decided_at", "decided_ip", "decided_name"])
+    share.decided_note = note
+    share.save(update_fields=[
+        "decision", "decided_at", "decided_ip", "decided_name", "decided_note",
+    ])
 
     # `action` محصور بـ`choices` النموذج وطوله ≤20 — التفصيل يسكن في `metadata`،
     # ووضعه في `action` يُسقط القيد بصمت على MySQL بينما SQLite لا يكشفه.
     log_activity(
         action="update",
-        entity_type="sales_quotation",
-        entity_id=quotation.pk,
-        entity_label=quotation.quotation_number,
+        entity_type=decision_spec["entity_type"],
+        entity_id=document.pk,
+        entity_label=decision_spec["entity_label"](document),
         description=(
-            f"قرار الزبون من الرابط العام: "
+            f"قرار المستلم من الرابط العام: "
             f"{'موافقة' if decision == DECISION_ACCEPTED else 'رفض'} — بتوقيع {name}"
+            + (f" — السبب: {note}" if note else "")
         ),
         metadata={
             "source": "public_share",
+            "doc_type": share.doc_type,
             "decision": decision,
             "decided_by_name": name,
+            "note": note,
             "ip": share.decided_ip,
             "share_id": share.pk,
         },

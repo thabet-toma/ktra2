@@ -276,6 +276,38 @@ def _draft_purchase_invoice_from_document(
 
 
 @transaction.atomic
+def confirm_purchase_order(order):
+    """تأكيد طلبية الشراء — القاعدة الوحيدة، أينما جاء التأكيد.
+
+    كانت هذه الشروط تعيش **داخل `PurchaseOrderViewSet.confirm`** وحدها. ولمّا
+    صار المورّد يقدر أن يقبل الطلبية من رابط المشاركة العام، كان أمام `docshare`
+    طريقان: أن ينسخها (فتصير قاعدتان تنحرفان عند أول تعديل)، أو أن يستورد
+    `logistics.views` — و`.importlinter` يمنعه بعقد `no-cross-app-internals`.
+    فاستُخرجت إلى خدمة يستدعيها الطرفان.
+
+    وحالةُ «مؤكدة» واحدةٌ مهما كان المُقِرّ: أن نضغط نحن «تأكيد» بعد مكالمةٍ مع
+    المصنع، أو أن يضغط المصنع «موافق» على الرابط — كلاهما يقول إن الطلبية
+    مُتَّفقٌ عليها. **ومَن أقرّ ومتى** يُسجَّل في `DocumentShare` (الاسم والتوقيت
+    وIP) وفي `ActivityLog`، لا في عمود الحالة.
+    """
+    from logistics.models import PurchaseOrder
+
+    locked = PurchaseOrder.objects.select_for_update().get(pk=order.pk)
+    if locked.status == PurchaseOrder.STATUS_CONFIRMED:
+        return locked
+    if locked.status != PurchaseOrder.STATUS_DRAFT:
+        raise ValidationError('يمكن تأكيد الطلبية المسودة فقط.')
+    if not locked.lines.exists():
+        raise ValidationError('لا يمكن تأكيد طلبية بلا منتجات.')
+    locked.status = PurchaseOrder.STATUS_CONFIRMED
+    locked.save(update_fields=['status', 'updated_at'])
+    logger.info(
+        'purchase_order.confirm order=%s tenant=%s', locked.id, locked.tenant_id,
+    )
+    return locked
+
+
+@transaction.atomic
 def convert_purchase_order_to_invoice(order, *, user=None):
     """أنشئ فاتورة شراء محلية مسودة؛ لا قيد ولا حركة مخزون قبل الترحيل/الاستلام."""
     from logistics.models import PurchaseOrder
