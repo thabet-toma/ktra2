@@ -40,7 +40,7 @@ def tire_size_key(name: str) -> str | None:
 
 
 def product_group_key(product) -> str:
-    """مفتاح تجميع المنتج (اسم الصنف الفرعي/عقدة الأب). الأولوية:
+    """مفتاح تجميع المنتج (اسم المنتج الفرعي/عقدة الأب). الأولوية:
     1) `variant_group` الصريح الذي يدخله المستخدم (مثل 185/65/14) — يُنشئ مجلّداً
        يتجمّع تحته حتى لو منتج واحد.
     2) مقاس الإطار المُستخرَج من الاسم (توافق مع البيانات القائمة للعجال).
@@ -60,7 +60,7 @@ def product_group_key(product) -> str:
 
 
 def product_has_explicit_group(product) -> bool:
-    """هل عُيِّن للمنتج صنف فرعي صريح — فيظهر مجلّده حتى لو منتجاً واحداً."""
+    """هل عُيِّن للمنتج منتج فرعي صريح — فيظهر مجلّده حتى لو منتجاً واحداً."""
     return bool((getattr(product, 'variant_group', '') or '').strip())
 
 
@@ -77,7 +77,7 @@ OUTBOUND_TYPES = {'OUT', 'ADJUST_OUT', 'RETURN_OUT'}
 
 
 def warehouse_stock_summary(*, tenant_id: int, warehouse_id: int) -> dict:
-    """رصيد مستودع وقيمته بالتكلفة المتوسطة الحالية للصنف."""
+    """رصيد مستودع وقيمته بالتكلفة المتوسطة الحالية للمنتج."""
     from django.db.models import Sum
 
     movement_totals = (
@@ -134,7 +134,7 @@ def warehouse_stock_summary(*, tenant_id: int, warehouse_id: int) -> dict:
     }
 
 
-# task14 M2 (DEF-A2/A4): توليد رقم صنف خادمي قصير — أرقام صرفة تسلسلية لكل شركة
+# task14 M2 (DEF-A2/A4): توليد رقم منتج خادمي قصير — أرقام صرفة تسلسلية لكل شركة
 SKU_PAD = 6
 
 
@@ -214,7 +214,7 @@ def record_stock_movement(
                 allow_negative = global_allow or bool(getattr(prod, "allow_negative_stock", False))
                 if not allow_negative:
                     raise ValidationError(
-                        f"لا يمكن صرف {quantity} من الصنف «{prod.sku}» — "
+                        f"لا يمكن صرف {quantity} من المنتج «{prod.sku}» — "
                         f"الرصيد المتاح: {qty_before}. "
                         f"تأكد من استلام البضاعة أولاً أو قم بتسوية المخزون."
                     )
@@ -267,7 +267,7 @@ def record_stock_movement(
 
 
 def _recompute_product_stock(product: Product) -> None:
-    """أعد احتساب الرصيد ومتوسط التكلفة لصنف بإعادة تشغيل كل حركاته المتبقية.
+    """أعد احتساب الرصيد ومتوسط التكلفة لمنتج بإعادة تشغيل كل حركاته المتبقية.
 
     تُستدعى بعد حذف حركات مستند ما (إلغاء الترحيل/الحذف) لتعيد ضبط
     quantity_on_hand و avg_cost بدقة بغضّ النظر عن ترتيب الحركات — بدلاً من
@@ -301,7 +301,7 @@ def _recompute_product_stock(product: Product) -> None:
 
 
 def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
-    """احذف حركات المخزون التي ولّدها مستند معيّن وأعد احتساب أرصدة أصنافه.
+    """احذف حركات المخزون التي ولّدها مستند معيّن وأعد احتساب أرصدة منتجاته.
 
     تُستخدم في «إلغاء الترحيل»/الحذف لإرجاع المخزون لما كان عليه قبل المستند.
     النطاق محصور تماماً بـ (tenant, reference_id, reference_type ∈ reference_types)
@@ -374,9 +374,9 @@ def find_stock_dependents(*, tenant_id, reference_id, reference_types) -> list[d
     """ابحث عن المستندات اللاحقة المعتمِدة على المخزون/التكلفة الذي وفّره مستند.
 
     عند التراجع عن ترحيل مستند **مُورِّد للمخزون** (شراء/استلام/تسوية إضافة)، فإن
-    أي حركة **صرف/بيع لاحقة** على نفس الأصناف تكون قد استهلكت رصيده وبُنيت تكلفتها
+    أي حركة **صرف/بيع لاحقة** على نفس المنتجات تكون قد استهلكت رصيده وبُنيت تكلفتها
     (COGS) على متوسط التكلفة المتضمِّن هذا المستند. حذف المستند يُيتّم تلك الحركات
-    وقيودها (تكلفة المبيعات…). تُرجع قائمة المستندات المعتمِدة (نوع/رقم/أصناف)
+    وقيودها (تكلفة المبيعات…). تُرجع قائمة المستندات المعتمِدة (نوع/رقم/منتجات)
     لمنع الحذف. قائمة فارغة ⇒ لا اعتمادية (يجوز التراجع).
 
     مستند **مستهلِك** (بيع/صرف) لا تابعين له — التراجع عنه يحرّر مخزوناً فقط.
@@ -578,7 +578,7 @@ def warn_landed_cost_mismatch(purchase_invoice):
 
 
 def _resolve_line_account(product, account_type='revenue', *, tenant_id=None):
-    """P-H-7: يحلّ الحساب المحاسبي لصنف/بند المخزون بسلسلة أولويات.
+    """P-H-7: يحلّ الحساب المحاسبي لمنتج/بند المخزون بسلسلة أولويات.
 
     1. Product-level override (حسب account_type)
     2. Category-level account
@@ -665,8 +665,8 @@ def _resolve_line_account(product, account_type='revenue', *, tenant_id=None):
             return acc
 
     raise ValidationError(
-        f"لم يُعثر على حساب {account_type} للصنف «{product.sku or product.name}». "
-        "حدد حساباً للصنف أو للتصنيف أو في إعدادات المبيعات."
+        f"لم يُعثر على حساب {account_type} للمنتج «{product.sku or product.name}». "
+        "حدد حساباً للمنتج أو للتصنيف أو في إعدادات المبيعات."
     )
 
 
@@ -674,7 +674,7 @@ def _resolve_line_account(product, account_type='revenue', *, tenant_id=None):
 # FEAT-3 — Product profile (KPIs + linked invoices + stock ledger)
 # ──────────────────────────────────────────────────────────────────────────
 def _purchased_totals_by_product(tenant_id: int, product_ids: list[int]) -> dict:
-    """مجاميع المشتريات المرحّلة لكل صنف — استعلام واحد لأي عدد أصناف.
+    """مجاميع المشتريات المرحّلة لكل منتج — استعلام واحد لأي عدد منتجات.
 
     مصدر واحد لشرط الاحتساب (فاتورة شراء مرحّلة) يخدم البطاقة المفردة والمجمّعة.
     """
@@ -693,7 +693,7 @@ def _purchased_totals_by_product(tenant_id: int, product_ids: list[int]) -> dict
 
 
 def _sold_totals_by_product(tenant_id: int, product_ids: list[int]) -> dict:
-    """مجاميع المبيعات المرحّلة (فواتير بيع فقط) لكل صنف — استعلام واحد."""
+    """مجاميع المبيعات المرحّلة (فواتير بيع فقط) لكل منتج — استعلام واحد."""
     from django.db.models import Sum
 
     from sales.models import SalesInvoice, SalesInvoiceLine
@@ -724,7 +724,7 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
     on_hand = Decimal(str(p.quantity_on_hand or 0))
     avg_cost = Decimal(str(p.avg_cost or 0))
 
-    # W8: معدّلات البيع من StockMovement (المصدر الوحيد، مطابق لجدول الأصناف):
+    # W8: معدّلات البيع من StockMovement (المصدر الوحيد، مطابق لجدول المنتجات):
     # أسبوعي = صافي (OUT − RETURN_IN) خلال 28 يوماً ÷ 4؛ شهري = 90 يوماً ÷ 3.
     import datetime as _dt
     from .models import StockMovement
@@ -739,13 +739,13 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
         net = Decimal(str(out_q)) - Decimal(str(ret_q))
         return (net / Decimal(divisor)).quantize(Decimal('0.01'))
 
-    # T-RESERVE: المحجوز بطلبيات الزبائن المؤكَّدة السارية — نفس مصدر جدول الأصناف
+    # T-RESERVE: المحجوز بطلبيات الزبائن المؤكَّدة السارية — نفس مصدر جدول المنتجات
     # (`ProductSerializer`) فلا رقمان لحقيقة واحدة، والمتاح = الرصيد − المحجوز.
     from sales.services import reserved_quantity_map
     reserved = Decimal(str(
         reserved_quantity_map(tenant_id, [product_id]).get(product_id, 0)))
 
-    # كرت الصنف الاحترافي: سعر البيع (المحفوظ أو آخر سعر فعلي) مقابل التكلفة،
+    # كرت المنتج الاحترافي: سعر البيع (المحفوظ أو آخر سعر فعلي) مقابل التكلفة،
     # فالربح والهامش يُشتقّان خادمياً — لا تحسبهما الواجهة فيختلف رقمان لحقيقة واحدة.
     from sales.services import last_sale_price as _last_sale_price
     from core.pricing import PriceStrategy, resolve_purchase_price
@@ -814,15 +814,15 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
 
 
 def category_descendant_product_ids(*, tenant_id: int, category_id: int) -> list[int]:
-    """معرّفات أصناف تصنيفٍ **وكل أحفاده** — يشتقّها الخادم بدل أن تُعدَّد في الطلب.
+    """معرّفات منتجات تصنيفٍ **وكل أحفاده** — يشتقّها الخادم بدل أن تُعدَّد في الطلب.
 
     الكرت المجمّع كان يحمل التعداد كاملاً في سطر الطلب (`?ids=1,2,3…`): تصنيفُ
-    جذرٍ فيه ~1500 صنف ⇒ ~7.5KB في سطر الطلب ⇒ nginx يردّ 414/400 قبل Django.
+    جذرٍ فيه ~1500 منتج ⇒ ~7.5KB في سطر الطلب ⇒ nginx يردّ 414/400 قبل Django.
     شجرةُ التصنيفات تُقرأ مسطّحةً باستعلام واحد ثم يُنزل الأحفاد في بايثون (لا
     استعلام لكل عقدة)، فالعدد ثابتٌ مهما عمقت الشجرة: استعلامان.
 
     تصنيفٌ من شركة أخرى (أو غير موجود) ⇒ قائمة فارغة — العزل مضاعف: عضويةُ
-    التصنيف في الشركة، وفلترةُ الأصناف بالشركة.
+    التصنيف في الشركة، وفلترةُ المنتجات بالشركة.
     """
     wanted = category_descendant_ids(tenant_id=tenant_id, category_id=category_id)
     return list(
@@ -835,7 +835,7 @@ def category_descendant_ids(*, tenant_id: int, category_id: int) -> list[int]:
     """معرّفات تصنيفٍ **وكل أحفاده** (يشمل نفسه) — استعلام مسطّح واحد ثم نزول في بايثون.
 
     تصنيفٌ من شركة أخرى (أو غير موجود) ⇒ قائمة فارغة. يقرؤها الكرت المجمّع
-    (`category_descendant_product_ids`) وفلتر `?category=` في قائمة الأصناف —
+    (`category_descendant_product_ids`) وفلتر `?category=` في قائمة المنتجات —
     نسخة واحدة من قاعدة «التصنيف يعني شجرته» حيثما ظهر التصنيف كمحدِّد.
     """
     from .models import ProductCategory
@@ -875,8 +875,8 @@ def product_group_profile(*, tenant_id: int, product_ids: list[int]) -> dict:
     """الكرت المجمّع: يجمع مؤشّرات كل البراندات (المنتجات) التي تشترك بنفس المقاس/
     الأساس في بطاقة واحدة — المخزون والمشتريات والمبيعات الإجمالية + تفصيل كل براند.
 
-    كان يستدعي `product_profile` لكل عضو: 7 استعلامات × عدد الأصناف (منها 4 لمعدّلات
-    بيع لا تظهر هنا أصلاً) — 1490 صنفاً في «أصناف عامة» ⇒ ~10 آلاف استعلام وتجاوز
+    كان يستدعي `product_profile` لكل عضو: 7 استعلامات × عدد المنتجات (منها 4 لمعدّلات
+    بيع لا تظهر هنا أصلاً) — 1490 منتجاً في «منتجات عامة» ⇒ ~10 آلاف استعلام وتجاوز
     مهلة الـ30 ثانية. الآن مجاميع مجمَّعة باستعلامين مشتركين مع البطاقة المفردة،
     والرصيد/التكلفة من حقول المنتج نفسه (بلا استعلام إضافي)."""
     members = _group_products(tenant_id, product_ids)
@@ -946,7 +946,7 @@ def product_stock_ledger(
     to current stock (A4) without a parallel computation. Paginated.
 
     تمرير `product_ids` يجمع دفتر الحركة لعدة براندات (الكرت المجمّع) ويضيف اسم
-    المنتج لكل سطر؛ الرصيد الجاري يبقى رصيد كل صنف على حدة (لقطته بعد حركته).
+    المنتج لكل سطر؛ الرصيد الجاري يبقى رصيد كل منتج على حدة (لقطته بعد حركته).
     """
     if product_ids:
         base = StockMovement.objects.filter(tenant_id=tenant_id, product_id__in=product_ids)
@@ -984,7 +984,7 @@ def partner_stock_movements(
 
     الربط بالمستند قائمٌ أصلاً في `StockMovement` (`reference_type`/`reference_id`)
     ولا يُنشأ هنا شيء — الناقص كان العرض بجانب مال الشريك. والرصيد الجاري يبقى
-    `quantity_after` المخزَّن (A4: لا حساب موازٍ يخالف رصيد الصنف).
+    `quantity_after` المخزَّن (A4: لا حساب موازٍ يخالف رصيد المنتج).
 
     التجميع بعد الترقيم لا قبله: الصفحة هي ما يُعرض، وعليها تُبنى المجموعات.
     """
@@ -1029,7 +1029,7 @@ def document_stock_movements(
 ) -> dict:
     """THA-132: أثر مستندٍ واحد على المخزون — الحركات التي سبّبها **هو**.
 
-    ليست تاريخَ الصنف (ذاك `product_stock_ledger` في كرت الصنف) ولا حركاتِ
+    ليست تاريخَ المنتج (ذاك `product_stock_ledger` في كرت المنتج) ولا حركاتِ
     الطرف (`partner_stock_movements` في كرته)، بل المحور الثالث: المستند.
     مرجع «الأصيل» يضع «رقم الحركة المخزنية» على وجه الفاتورة ويجعله مدخلاً
     «للاستعلام عن الحركات» (`docs/aseel_reference/invoices.txt`) — وهذه الدالة
@@ -1039,7 +1039,7 @@ def document_stock_movements(
     `StockMovement` أصلاً، والناقص كان القراءة من جهة المستند.
 
     `quantity_before`/`quantity_after` لقطتان مخزَّنتان لحظة الحركة (A4)، فرصيد
-    الصنف قبل هذه الفاتورة وبعدها يُقرأ ولا يُحسب — لا مصدر حقيقة موازٍ.
+    المنتج قبل هذه الفاتورة وبعدها يُقرأ ولا يُحسب — لا مصدر حقيقة موازٍ.
 
     بلا ترقيم عمداً: بنود مستندٍ واحد محدودة بطبعها (سقفها بنود الفاتورة)،
     والترقيم هنا تعقيدٌ بلا مقابل.
@@ -1095,7 +1095,7 @@ def product_linked_invoices(
 
     الحذف المكرر يتم في SQL لا في بايثون: القراءة القديمة كانت تسحب **كل سطر**
     في كل فاتورة تخصّ أي عضو (عشرات الآلاف من الأسطر مع join على الفاتورة والطرف)
-    ثم تتجاهل المكرر — 11 ثانية على مجموعة من 1490 صنفاً. الآن: معرّفات الفواتير
+    ثم تتجاهل المكرر — 11 ثانية على مجموعة من 1490 منتجاً. الآن: معرّفات الفواتير
     المميّزة أولاً ثم الفواتير نفسها فقط."""
     from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
     from sales.models import SalesInvoice, SalesInvoiceLine
@@ -1143,7 +1143,7 @@ def product_linked_invoices(
 
 
 def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
-    """واجهة «تكلفة المنتجات»: تكلفة كل فاتورة شراء لهذا الصنف على حدة، ومتوسط سعر
+    """واجهة «تكلفة المنتجات»: تكلفة كل فاتورة شراء لهذا المنتج على حدة، ومتوسط سعر
     الوحدة لكل فاتورة (إجمالي الفاتورة ÷ كميتها)، ثم تكلفة المنتج = **متوسط أسعار
     وحدات الفواتير مرجّحاً بكمية كل فاتورة** — أي Σ(سعر وحدة الفاتورة × كميتها) ÷
     Σ(كميات الشراء). المقام هو إجمالي الكمية المشتراة (لا الكمية الحالية المتبقية)،
@@ -1151,7 +1151,7 @@ def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
 
     تكلفة بند الفاتورة تُؤخذ بأفضلية landed cost (السعر النازل الحقيقي للمستورد):
       landed_line_total_ils ← landed_unit_price_ils × qty ← total_price.
-    البنود متعددة لنفس الصنف داخل فاتورة واحدة تُجمَّع في صفّ فاتورة واحد.
+    البنود متعددة لنفس المنتج داخل فاتورة واحدة تُجمَّع في صفّ فاتورة واحد.
     """
     from logistics.models import PurchaseInvoiceItem
 
@@ -1227,7 +1227,7 @@ def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
 
 
 def set_avg_cost_from_purchases(product) -> Decimal:
-    """يضبط `avg_cost` للصنف من فواتير الشراء المرحّلة بنموذج «تكلفة المنتجات»
+    """يضبط `avg_cost` للمنتج من فواتير الشراء المرحّلة بنموذج «تكلفة المنتجات»
     (متوسط مرجّح بالكمية). يُستدعى بعد استلام/ترحيل فاتورة شراء محلية كي يصبح
     avg_cost مصدر الحقيقة للنموذج الجديد بدل WAC المتحرك المنحرف — فيقرأ ترحيل
     COGS عند البيع القيمة الصحيحة تلقائياً. لا فواتير ⇒ يُترك avg_cost كما هو."""
@@ -1264,7 +1264,7 @@ def apply_purchase_cost_model(product) -> None:
 
 
 def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = False, user=None) -> dict:
-    """يصحّح تكلفة البضاعة المباعة وقائمة الدخل لصنف وفق نموذج «تكلفة المنتجات»
+    """يصحّح تكلفة البضاعة المباعة وقائمة الدخل لمنتج وفق نموذج «تكلفة المنتجات»
     (متوسط مرجّح بالكمية، periodic — يتحقق: COGS + مخزون آخر المدة = إجمالي المشتريات).
 
     يعيد تقييم حركات البيع (movement_type=OUT, reference_type=SALE) بالمتوسط الجديد
@@ -1431,7 +1431,7 @@ def unpost_warehouse_transfer(transfer, user=None):
 
 
 def post_stocktake(stocktake, user=None):
-    """T-I2: يرحّل جرداً — يسوّي رصيد كل صنف ليطابق الكمية المعدودة عبر حركات
+    """T-I2: يرحّل جرداً — يسوّي رصيد كل منتج ليطابق الكمية المعدودة عبر حركات
     ADJUST_IN/ADJUST_OUT، ويُنشئ قيد فرق الجرد (المخزون مقابل تكلفة البضاعة المباعة).
       فائض (عُدّ > النظام): مدين المخزون / دائن ت.ب.م.
       عجز  (عُدّ < النظام): مدين ت.ب.م / دائن المخزون.

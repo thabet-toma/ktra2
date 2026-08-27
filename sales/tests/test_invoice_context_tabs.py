@@ -37,7 +37,7 @@ def env():
     customer = Partner.objects.create(
         tenant=tenant, name="عميل السياق", partner_type="Customer", linked_account=ar)
     product = Product.objects.create(
-        tenant=tenant, sku="CTX-1", name_ar="صنف السياق",
+        tenant=tenant, sku="CTX-1", name_ar="منتج السياق",
         quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
     record_stock_movement(
         product=product, movement_type="IN", quantity=Decimal("100"),
@@ -77,7 +77,7 @@ def _invoice(tenant, cur, customer, product, *, number, qty="10", price="100",
 # ── تبويب أثر المخزون ───────────────────────────────────────────────────────
 
 def test_stock_tab_lists_only_this_invoices_movements(env):
-    """حركات هذه الفاتورة وحدها — لا حركات فاتورة أخرى لنفس الصنف."""
+    """حركات هذه الفاتورة وحدها — لا حركات فاتورة أخرى لنفس المنتج."""
     tenant, owner, cur, customer, product = env
     mine = _invoice(tenant, cur, customer, product, number="CTX-A", qty="10")
     other = _invoice(tenant, cur, customer, product, number="CTX-B", qty="7")

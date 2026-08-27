@@ -9,7 +9,7 @@ export type ItemQuickCreateModalProps = {
   onSaved: (newProduct: any) => void;
   /** task18 DEF-B1/B3: تعبئة الاسم العربي مسبقاً (مثلاً النص المكتوب في الإكمال التلقائي). */
   initialName?: string;
-  /** task18: إنشاء الصنف تحت فئة محددة (من الشجرة) — يُرسَل كـ category. */
+  /** task18: إنشاء المنتج تحت فئة محددة (من الشجرة) — يُرسَل كـ category. */
   categoryId?: string | number | null;
   /** T-SERVICELINE: فتح النافذة على «بند خدمة» (مدخل «إضافة خدمة» من الفاتورة). */
   initialIsService?: boolean;
@@ -27,7 +27,7 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
 
   // T-ITEMS M1: وحدة القياس صارت اختياراً من الجدول. كانت نصّاً حرّاً يُرسَل
   // باسم `uom_primary` — وهو ليس في عقد الخادم، فيرميه DRF بصمت: يكتب
-  // المستخدم «كرتونة» ويحصل على «تم الحفظ» ولا وحدة على الصنف.
+  // المستخدم «كرتونة» ويحصل على «تم الحفظ» ولا وحدة على المنتج.
   useEffect(() => {
     if (!isOpen) return;
     inventoryApi.getUoms().then(setUoms).catch(() => setUoms([]));
@@ -66,7 +66,7 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
         <div className="px-5 py-4 border-b border-[var(--color-border)] flex justify-between items-center bg-[var(--color-surface-2)]">
           <h3 className="font-bold flex items-center gap-2 text-[var(--color-text)]">
             <Package className="w-5 h-5 text-emerald-600" />
-            إضافة صنف سريع
+            إضافة منتج سريع
           </h3>
           <button onClick={onClose} className="p-1 hover:bg-[var(--color-surface-3)] rounded-full">
             <X className="w-5 h-5 text-[var(--color-text-muted)]" />

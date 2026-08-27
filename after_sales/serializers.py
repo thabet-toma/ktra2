@@ -81,7 +81,7 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
         product = attrs.get("product", getattr(instance, "product", None))
         if not (serial.strip() or device.strip() or product):
             raise serializers.ValidationError(
-                {"serial": "حدّد الرقم التسلسلي أو اسم الجهاز أو الصنف — البطاقة بلا هوية لا تُفحص."}
+                {"serial": "حدّد الرقم التسلسلي أو اسم الجهاز أو المنتج — البطاقة بلا هوية لا تُفحص."}
             )
 
         start = attrs.get("start_date", getattr(instance, "start_date", None))
@@ -290,7 +290,7 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
         )
         if not (serial.strip() or product or description.strip()):
             raise serializers.ValidationError(
-                {"serial": "حدّد الجهاز برقمه التسلسلي أو صنفه أو وصفه."}
+                {"serial": "حدّد الجهاز برقمه التسلسلي أو منتجه أو وصفه."}
             )
 
         estimated = attrs.get(

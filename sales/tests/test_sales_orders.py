@@ -58,7 +58,7 @@ class SalesOrderFlowTest(APITestCase):
             tenant=cls.tenant, name="زبون الطلبيات", partner_type="Customer",
             linked_account=cls.ar)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="ORD-1", name_ar="صنف", quantity_on_hand=Decimal("20"),
+            tenant=cls.tenant, sku="ORD-1", name_ar="منتج", quantity_on_hand=Decimal("20"),
             is_service=True)
         FiscalPeriod.objects.create(
             tenant=cls.tenant, name="2026", start_date="2026-01-01",
@@ -216,7 +216,7 @@ class SalesOrderApiTest(APITestCase):
         cls.customer = Partner.objects.create(
             tenant=cls.tenant, name="زبون", partner_type="Customer", linked_account=cls.ar)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="ORD-API", name_ar="صنف",
+            tenant=cls.tenant, sku="ORD-API", name_ar="منتج",
             quantity_on_hand=Decimal("20"), is_service=False)
 
     def setUp(self):
@@ -307,7 +307,7 @@ class SalesOrderApiTest(APITestCase):
         other_customer = Partner.objects.create(
             tenant=other_tenant, name="زبون شركة أخرى", partner_type="Customer")
         other_product = Product.objects.create(
-            tenant=other_tenant, sku="ORD-OTHER", name_ar="صنف شركة أخرى", is_service=True)
+            tenant=other_tenant, sku="ORD-OTHER", name_ar="منتج شركة أخرى", is_service=True)
 
         wrong_customer = self.client.post(
             "/api/sales/orders/",

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronDown,
@@ -27,14 +27,14 @@ import { productToItem } from "../price-offers/ItemSearchModal";
 import { buildCategoryIndex, descendantIds as descendantCategoryIds } from "../../../utils/categoryTree";
 
 /**
- * task18 DEF-B1/B3: شجرة أصناف مرساة بجانب الفاتورة (نمط الأصيل).
+ * task18 DEF-B1/B3: شجرة منتجات مرساة بجانب الفاتورة (نمط الأصيل).
  *
- * **المصطلحات (T-ITEMS M2)**: «تصنيف» = العقدة الفرعية (branch) · «صنف» =
+ * **المصطلحات (T-PRODUCT)**: «تصنيف» = العقدة الفرعية (branch) · «منتج» =
  * العقدة الورقية (leaf). كانت هذه الشاشة وحدها تعكسهما — تسمّي التصنيفَ «صنفاً»
- * والصنفَ «منتجاً» — بينما بقية الموديول (قائمة الأصناف، الكرت، التقارير) على
- * العكس. مصطلحان متناقضان في موديولٍ واحد يجعلان «أضف صنفاً» أمراً غامضاً.
- * - زر الماوس الأيمن على أي عقدة → قائمة: «إضافة تصنيف فرعي» · «إضافة صنف» · «تعديل».
- * - النقر المفرد على صنف يفتح بطاقته، ومنها يُدرَج في الفاتورة بزرّ «موافق»
+ * بينما بقية الموديول تسمّي المنتجَ بذلك. صارت على المصطلح الواحد: كلُّ ما
+ * يُنشئ عقدةً هنا «تصنيف»، وكلُّ ما يُنشئ سجلّاً قابلاً للبيع «منتج».
+ * - زر الماوس الأيمن على أي عقدة → قائمة: «إضافة تصنيف فرعي» · «إضافة منتج» · «تعديل».
+ * - النقر المفرد على منتج يفتح بطاقته، ومنها يُدرَج في الفاتورة بزرّ «موافق»
  *   (الإدراج بالنقر المزدوج أُلغي — كان التعليق يصفه بعد زواله).
  * + بحث فوري.
  */
@@ -42,9 +42,9 @@ type Cat = { id: string; name: string; parent: number | null };
 
 interface Props {
   items: Item[];
-  /** إدراج الصنف في الفاتورة (من زرّ «موافق» في بطاقته). */
+  /** إدراج المنتج في الفاتورة (من زرّ «موافق» في بطاقته). */
   onPickItem: (item: Item) => void;
-  /** فتح بطاقة الصنف (نقر مفرد). */
+  /** فتح بطاقة المنتج (نقر مفرد). */
   onShowCard?: (item: Item) => void;
   /** تجميع البراندات: فتح الكرت المجمّع لعقدة المقاس (مجموع كل البراندات).
    *  `categoryId` يُمرَّر كي يشتقّ الخادمُ الأعضاء بنفسه — تعدادُ معرّفات تصنيفٍ
@@ -67,8 +67,8 @@ const ctxItemStyle: React.CSSProperties = {
 };
 
 export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShowCard, onShowGroup, onItemCreated, disabled, manageMode }) => {
-  // نقرة مفردة على الصنف → تفتح بطاقة الصنف (وفيها «موافق» للإضافة). لا إدراج
-  // بالنقر المزدوج. (الإدراج المباشر يبقى فقط عند إنشاء صنف جديد من الشجرة.)
+  // نقرة مفردة على المنتج → تفتح بطاقة المنتج (وفيها «موافق» للإضافة). لا إدراج
+  // بالنقر المزدوج. (الإدراج المباشر يبقى فقط عند إنشاء منتج جديد من الشجرة.)
   const handleLeafClick = (it: Item) => {
     if (disabled) return;
     onShowCard?.(it);
@@ -80,6 +80,10 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingCats, setLoadingCats] = useState(false);
   const [newRootName, setNewRootName] = useState("");
+  /* T-PRODUCT: كان تركيز هذا الحقل يمرّ بـ`querySelector` مبنيٍّ على **نصّه
+     العربي الحرفي** — فأيّ إعادة صياغةٍ للنصّ تُميت «إضافة تصنيف رئيسي» بصمت
+     (`?.focus()` على `null` لا يرمي). مرجعٌ مباشر يقتل الاقتران نهائياً. */
+  const rootNameInputRef = useRef<HTMLInputElement | null>(null);
   const [subParent, setSubParent] = useState<string | null>(null);
   const [subName, setSubName] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
@@ -97,7 +101,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
       const data = await inventoryApi.getCategories();
       const mapped = (Array.isArray(data) ? data : []).map((c: any) => ({
         id: String(c.id),
-        name: c.name || `صنف ${c.id}`,
+        name: c.name || `منتج ${c.id}`,
         parent: c.parent ?? null,
       }));
       setCats(mapped);
@@ -175,7 +179,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
       await inventoryApi.deleteCategory(Number(id));
       await loadCats();
     } catch {
-      toast("لا يمكن حذف التصنيف. قد يكون مرتبطاً بأصناف أو تصنيفات فرعية.", "error");
+      toast("لا يمكن حذف التصنيف. قد يكون مرتبطاً بمنتجات أو تصنيفات فرعية.", "error");
     }
   };
 
@@ -191,7 +195,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
     setMenu({ x: e.clientX, y: e.clientY, catId });
   };
 
-  // ورقة منتج مفردة (نقرة → بطاقة الصنف). اسم العرض يحمل البراند.
+  // ورقة منتج مفردة (نقرة → بطاقة المنتج). اسم العرض يحمل البراند.
   const leafButton = (it: Item) => (
     <button
       key={it.id}
@@ -199,14 +203,14 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
       disabled={disabled}
       className="ktra-tree-leaf"
       onClick={() => handleLeafClick(it)}
-      title={`${displayNameOf(it)} — انقر لعرض بطاقة الصنف`}
+      title={`${displayNameOf(it)} — انقر لعرض بطاقة المنتج`}
     >
       <Package className="w-3 h-3 shrink-0" />
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayNameOf(it)}</span>
     </button>
   );
 
-  // عرض المنتجات كأوراق تحت الصنف مباشرة
+  // عرض المنتجات كأوراق تحت المنتج مباشرة
   const renderItems = (catId: string) => {
     const list = (itemsByCat.get(catId) || []).filter(itemMatches);
     if (!list.length) return null;
@@ -267,7 +271,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
                   // كبسةٌ واحدة تختار وتكشف: تعرض الكرت المجمّع، وتفتح الفرع إن
                   // كان مطويّاً (ولا تطويه بإعادة الكبس — الطيّ مهمّة السهم)،
                   // كما يفعل مستكشف الملفات. بلا ذلك تُعرض بطاقة تصنيفٍ لا
-                  // يمكن رؤية أصنافه إلا بكبسةٍ ثانية على سهمٍ لم ينتبه له أحد.
+                  // يمكن رؤية منتجاته إلا بكبسةٍ ثانية على سهمٍ لم ينتبه له أحد.
                   onShowGroup(descendantItemIds(c.id), c.name, c.id);
                   if (!open) toggle(c.id);
                 }}
@@ -285,7 +289,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
             <input
               className="ktra-input flex-1"
               autoFocus
-              placeholder="اسم الصنف الفرعي"
+              placeholder="اسم التصنيف الفرعي"
               value={subName}
               onChange={(e) => setSubName(e.target.value)}
               onKeyDown={(e) => {
@@ -358,16 +362,17 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
             <input
               type="text"
               className="ktra-input flex-1"
-              placeholder="صنف رئيسي جديد..."
+              ref={rootNameInputRef}
+              placeholder="تصنيف رئيسي جديد..."
               value={newRootName}
               onChange={(e) => setNewRootName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { void createCat(newRootName, null); setNewRootName(""); } }}
             />
-            <button type="button" className="ktra-toolbtn" title="إضافة صنف رئيسي" onClick={() => { void createCat(newRootName, null); setNewRootName(""); }}>
+            <button type="button" className="ktra-toolbtn" title="إضافة تصنيف رئيسي" onClick={() => { void createCat(newRootName, null); setNewRootName(""); }}>
               <FolderPlus className="w-4 h-4" />
             </button>
             {!manageMode && (
-              <button type="button" className="ktra-toolbtn" title="إضافة صنف (بدون تصنيف)" onClick={() => openAddItem(null)}>
+              <button type="button" className="ktra-toolbtn" title="إضافة منتج (بدون تصنيف)" onClick={() => openAddItem(null)}>
                 <Plus className="w-4 h-4" />
               </button>
             )}
@@ -375,7 +380,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
         )}
       </div>
 
-      {/* كبسة يمين على الفراغ → إضافة صنف رئيسي/منتج بدون صنف */}
+      {/* كبسة يمين على الفراغ → إضافة منتج رئيسي/منتج بدون منتج */}
       <div className="ktra-tree-body" onContextMenu={(e) => openMenu(e, null)}>
         {loadingCats ? (
           <div className="p-3 text-center text-sm text-[var(--color-text-muted)] flex items-center justify-center gap-2">
@@ -388,14 +393,14 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
               <div className="mt-1">
                 <div className="ktra-tree-cat">
                   <FolderTree className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
-                  <span className="truncate flex-1">بدون صنف</span>
+                  <span className="truncate flex-1">بدون تصنيف</span>
                   <span className="ktra-tree-count">{uncategorizedItems.length}</span>
                 </div>
                 <div className="mt-0.5">{renderItems(UNCAT)}</div>
               </div>
             )}
             {!rootCats.length && !uncategorizedItems.length && !query && (
-              <div className="p-3 text-center text-sm text-[var(--color-text-muted)]">لا أصناف/منتجات — كبسة يمين أو الأزرار بالأعلى لإضافة.</div>
+              <div className="p-3 text-center text-sm text-[var(--color-text-muted)]">لا تصنيفات ولا منتجات — كبسة يمين أو الأزرار بالأعلى لإضافة.</div>
             )}
           </>
         )}
@@ -413,12 +418,12 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { if (menu.catId) { setSubParent(menu.catId); setExpanded((e) => ({ ...e, [menu.catId!]: true })); setSubName(""); } else { const input = document.querySelector<HTMLInputElement>("input[placeholder='صنف رئيسي جديد...']"); input?.focus(); } setMenu(null); }}>
+          <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { if (menu.catId) { setSubParent(menu.catId); setExpanded((e) => ({ ...e, [menu.catId!]: true })); setSubName(""); } else { rootNameInputRef.current?.focus(); } setMenu(null); }}>
             <FolderPlus className="w-3.5 h-3.5" /> {menu.catId ? "إضافة تصنيف فرعي" : "إضافة تصنيف رئيسي"}
           </button>
           {!manageMode && (
             <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(menu.catId); setMenu(null); }}>
-              <PackagePlus className="w-3.5 h-3.5" /> إضافة صنف هنا
+              <PackagePlus className="w-3.5 h-3.5" /> إضافة منتج هنا
             </button>
           )}
           {menu.catId && (

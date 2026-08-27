@@ -31,14 +31,14 @@ QTY = Decimal("0.0001")
 
 
 def materialize_quotation_draft_parties(quotation, *, user=None):
-    """T-DRAFTPARTY: يحوّل المورد/الأصناف **المبدئية** في عرض السعر إلى سجلات حقيقية.
+    """T-DRAFTPARTY: يحوّل المورد/المنتجات **المبدئية** في عرض السعر إلى سجلات حقيقية.
 
-    عرض السعر يُكتب أثناء الاستكشاف: المورد قد يكون اسماً سمعه المشتري، والصنف
-    نصاً في رسالة. لا شيء من ذلك يدخل دفتر الشركاء أو فهرس الأصناف حتى **لحظة
+    عرض السعر يُكتب أثناء الاستكشاف: المورد قد يكون اسماً سمعه المشتري، والمنتج
+    نصاً في رسالة. لا شيء من ذلك يدخل دفتر الشركاء أو فهرس المنتجات حتى **لحظة
     التحويل** إلى صفقة/طلبية/فاتورة — عندها فقط صار القرار حقيقياً.
 
     المطابقة بالاسم أولاً: الاسم الموجود مسبقاً يُعاد استعماله، فلا يتضاعف مورد
-    أو صنف لأن العرض كُتب يدوياً. مصدر واحد يستدعيه طُرق التحويل الثلاثة.
+    أو منتج لأن العرض كُتب يدوياً. مصدر واحد يستدعيه طُرق التحويل الثلاثة.
     """
     from django.db import IntegrityError
 
@@ -78,7 +78,7 @@ def materialize_quotation_draft_parties(quotation, *, user=None):
         )
 
     # استعلام طازج لا ذاكرة prefetch: المستدعون يجلبون `lines__product` قبل النداء،
-    # فالقراءة من الذاكرة تعطي أصنافاً قديمة بعد الإنشاء.
+    # فالقراءة من الذاكرة تعطي منتجات قديمة بعد الإنشاء.
     for line in quotation.lines.select_related('product').all():
         if line.product_id:
             continue
@@ -92,7 +92,7 @@ def materialize_quotation_draft_parties(quotation, *, user=None):
         ).first()
         if product is None:
             # تفرّد SKU يضمنه قيد unique(tenant, sku) — نعيد المحاولة عند السباق
-            # كما في مسار إنشاء الصنف العادي.
+            # كما في مسار إنشاء المنتج العادي.
             for _ in range(5):
                 try:
                     with transaction.atomic():
@@ -105,7 +105,7 @@ def materialize_quotation_draft_parties(quotation, *, user=None):
                 except IntegrityError:
                     product = None
             if product is None:
-                raise ValidationError('تعذّر توليد رقم صنف — أعد المحاولة.')
+                raise ValidationError('تعذّر توليد رقم منتج — أعد المحاولة.')
             created_products.append(product)
         line.product = product
         line.save(update_fields=['product'])
@@ -150,13 +150,13 @@ def convert_local_quotation_to_order(quotation, *, user=None):
     if quotation.status != SupplierQuotation.STATUS_ACCEPTED:
         raise ValidationError('يجب اعتماد عرض الشراء قبل تحويله إلى طلبية.')
 
-    # T-DRAFTPARTY: المورد/الأصناف المبدئية تصير سجلات حقيقية هنا لا قبل ذلك.
+    # T-DRAFTPARTY: المورد/المنتجات المبدئية تصير سجلات حقيقية هنا لا قبل ذلك.
     materialize_quotation_draft_parties(quotation, user=user)
 
-    # طازج بعد تجسيد المبدئيّ: ذاكرة prefetch السابقة تحمل أصنافاً فارغة.
+    # طازج بعد تجسيد المبدئيّ: ذاكرة prefetch السابقة تحمل منتجات فارغة.
     lines = list(quotation.lines.select_related('product').all())
     if not lines:
-        raise ValidationError('لا يمكن تحويل عرض سعر بلا أصناف.')
+        raise ValidationError('لا يمكن تحويل عرض سعر بلا منتجات.')
     number = next_document_number(quotation.tenant_id, 'purchase_order')
     order = PurchaseOrder.objects.create(
         tenant=quotation.tenant,
@@ -345,13 +345,13 @@ def convert_local_quotation_to_invoice(quotation, *, user=None):
             f'{existing_order.order_number} — حوّل الطلبية إلى فاتورة.'
         )
 
-    # T-DRAFTPARTY: المورد/الأصناف المبدئية تصير سجلات حقيقية هنا لا قبل ذلك.
+    # T-DRAFTPARTY: المورد/المنتجات المبدئية تصير سجلات حقيقية هنا لا قبل ذلك.
     materialize_quotation_draft_parties(quotation, user=user)
 
-    # طازج بعد تجسيد المبدئيّ: ذاكرة prefetch السابقة تحمل أصنافاً فارغة.
+    # طازج بعد تجسيد المبدئيّ: ذاكرة prefetch السابقة تحمل منتجات فارغة.
     lines = list(quotation.lines.select_related('product').all())
     if not lines:
-        raise ValidationError('لا يمكن تحويل عرض سعر بلا أصناف.')
+        raise ValidationError('لا يمكن تحويل عرض سعر بلا منتجات.')
 
     invoice = _draft_purchase_invoice_from_document(
         quotation,
@@ -1398,7 +1398,7 @@ def purchase_invoice_receipt_summary(invoice, items=None):
     """ملخّص استلام الفاتورة: «استُلم X من Y — باقي Z» بمصدرٍ واحد.
 
     مرآةُ `purchase_invoice_payment_summary` على بُعد المخزن بدل بُعد المال.
-    تُحتسب **بنود الأصناف المخزنية وحدها** — بند خدمة بلا صنف لا يدخل مستودعاً
+    تُحتسب **بنود المنتجات المخزنية وحدها** — بند خدمة بلا منتج لا يدخل مستودعاً
     فلا يصحّ أن يُبقي الفاتورة «ناقصة الاستلام» إلى الأبد (نفس استثناء
     `GoodsReceiptViewSet.outstanding`).
 
@@ -1506,7 +1506,7 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
     يستلم البضاعة عبر تخليص الشحنة، لا من هنا.
 
     lines: قائمة [{'item_id': int, 'quantity': Decimal, 'warehouse_id': int}].
-    لكل بند ذي صنف مخزون: تُنشأ حركة IN (متوسط مرجح) موسومة بالفرع والمستودع،
+    لكل بند ذي منتج مخزون: تُنشأ حركة IN (متوسط مرجح) موسومة بالفرع والمستودع،
     ويُحدَّث received_quantity. ثم يُرحَّل قيد استلام للقيمة المستلمة في هذا النداء:
 
     - فاتورة **مرحّلة** (الاستلام مؤجَّل عن الترحيل): مدين المخزون / دائن وسيط
@@ -1567,7 +1567,7 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
                 raise ValidationError(f"البند {item_id} لا ينتمي لهذه الفاتورة.")
             if not item.product_id:
                 raise ValidationError(
-                    f"البند «{item.name}» بلا صنف مخزون مربوط — لا يمكن استلامه."
+                    f"البند «{item.name}» بلا منتج مخزون مربوط — لا يمكن استلامه."
                 )
 
             try:
@@ -1806,7 +1806,7 @@ def create_standalone_goods_receipt(
     from inventory.models import Product
 
     if not lines:
-        raise ValidationError('حدّد الأصناف والكميات المستلمة.')
+        raise ValidationError('حدّد المنتجات والكميات المستلمة.')
     if partner is None:
         raise ValidationError('حدّد المورد لسند الاستلام المستقل.')
 
@@ -1824,11 +1824,11 @@ def create_standalone_goods_receipt(
     for raw in lines:
         product = products.get(int(raw.get('product_id') or 0))
         if product is None:
-            raise ValidationError(f"الصنف {raw.get('product_id')} غير موجود في هذه الشركة.")
+            raise ValidationError(f"المنتج {raw.get('product_id')} غير موجود في هذه الشركة.")
         try:
             qty = Decimal(str(raw.get('quantity', 0)))
         except Exception:
-            raise ValidationError(f"كمية غير صالحة للصنف «{product}».")
+            raise ValidationError(f"كمية غير صالحة للمنتج «{product}».")
         if qty <= 0:
             continue
         try:
@@ -1839,7 +1839,7 @@ def create_standalone_goods_receipt(
             pk=raw.get('warehouse_id'), tenant_id=tenant_id,
         ).first()
         if not wh:
-            raise ValidationError(f"المستودع المحدد للصنف «{product}» غير موجود.")
+            raise ValidationError(f"المستودع المحدد للمنتج «{product}» غير موجود.")
         planned.append({
             'product': product, 'qty': qty, 'warehouse': wh, 'unit_cost': unit_cost,
         })
@@ -2012,8 +2012,8 @@ def void_goods_receipt(receipt, *, user=None):
 
 def returnable_lines_for_invoice(original_invoice):
     """W6: بنود الفاتورة الأصلية مع (المفوتر · المرتجع سابقاً · المتبقّي القابل للإرجاع)
-    لكل صنف — يغذّي منتقي بنود المرجع في الواجهة. مصدر حقيقة واحد مع حارس الإنشاء.
-    يُجمّع بالصنف (لو تكرّر الصنف في أسطر الفاتورة)."""
+    لكل منتج — يغذّي منتقي بنود المرجع في الواجهة. مصدر حقيقة واحد مع حارس الإنشاء.
+    يُجمّع بالمنتج (لو تكرّر المنتج في أسطر الفاتورة)."""
     from decimal import Decimal as _D
     from .models import PurchaseInvoiceItem
 
@@ -2081,7 +2081,7 @@ def create_purchase_return(
     if partner.tenant_id != tenant.TenantID:
         raise ValidationError("المورد لا يتبع نفس الشركة.")
 
-    # نسبة الضريبة لكل صنف من الفاتورة الأصلية (لعكسها بدقة عند الترحيل).
+    # نسبة الضريبة لكل منتج من الفاتورة الأصلية (لعكسها بدقة عند الترحيل).
     vat_by_product: dict[int, _D] = {}
     if original_invoice is not None:
         for it in original_invoice.items.all():
@@ -2112,7 +2112,7 @@ def create_purchase_return(
     base_factor = _D(str(exchange_rate if exchange_rate is not None else 1))
 
     with transaction.atomic():
-        # W6: منع تجاوز الكمية المرتجعة الكمية الأصلية المفوترة (لكل صنف). المتبقّي
+        # W6: منع تجاوز الكمية المرتجعة الكمية الأصلية المفوترة (لكل منتج). المتبقّي
         # القابل للإرجاع = المفوتر − (مجموع كل المراجيع السابقة لنفس الفاتورة الأصلية).
         if original_invoice is not None:
             orig_qty: dict[int, _D] = {}
@@ -2136,7 +2136,7 @@ def create_purchase_return(
                              or f"#{pid}") if prod else f"#{pid}"
                     remaining = allowed if allowed > 0 else _D('0')
                     raise ValidationError(
-                        f"الكمية المرتجعة للصنف «{pname}» ({l['quantity']}) تتجاوز المتبقّي "
+                        f"الكمية المرتجعة للمنتج «{pname}» ({l['quantity']}) تتجاوز المتبقّي "
                         f"القابل للإرجاع ({remaining}) من أصل {orig_qty.get(pid, _D('0'))} مفوترة."
                     )
 
@@ -2185,7 +2185,7 @@ def create_purchase_return(
         for l in clean_lines:
             prod = products.get(l['product'])
             if prod is None:
-                raise ValidationError(f"الصنف {l['product']} غير موجود أو لا يتبع الشركة.")
+                raise ValidationError(f"المنتج {l['product']} غير موجود أو لا يتبع الشركة.")
             qty = l['quantity']
             line_net = (qty * l['unit_price'] * base_factor).quantize(DEC)
             vat_pct = vat_by_product.get(prod.id, _D('0'))
@@ -2243,7 +2243,7 @@ def post_purchase_return(invoice, *, user=None):
             raise ValidationError("المرجع بلا بنود.")
 
         # البضاعة تعود للمورد ⇒ وحداتها المُرقَّمة تخرج من المخزن معها، وإلا بقي
-        # كرت الصنف يقول «في المخزن» عن وحدة غادرت. يسبق أي كتابة: وحدة مُباعة
+        # كرت المنتج يقول «في المخزن» عن وحدة غادرت. يسبق أي كتابة: وحدة مُباعة
         # منها تمنع الترحيل.
         release_returned_purchase_serials(invoice)
 

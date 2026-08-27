@@ -76,7 +76,7 @@ test("activity feed renders the change detail of an invoice edit", async ({ page
           entity_label: "SI-6-293",
           description:
             "تعديل فاتورة مبيعات — «إطار 205»: السعر من 100 إلى 120؛ "
-            + "حذف صنف «زيت محرك»؛ أضاف صنف «فلتر هواء» (الكمية 3 · السعر 70)",
+            + "حذف منتج «زيت محرك»؛ أضاف منتج «فلتر هواء» (الكمية 3 · السعر 70)",
           metadata: {
             changes: [
               {

@@ -128,8 +128,8 @@ class DocumentChangeDetailTest(APITestCase):
         kinds = [c["kind"] for c in changes]
         assert kinds == ["line_removed", "line_added"]
         text = describe_activity_changes(changes)
-        assert "حذف صنف «إطار 205»" in text
-        assert "أضاف صنف «زيت محرك» (الكمية 1 · السعر 50)" in text
+        assert "حذف منتج «إطار 205»" in text
+        assert "أضاف منتج «زيت محرك» (الكمية 1 · السعر 50)" in text
 
     def test_repeated_product_keeps_two_distinct_lines(self):
         before = self._snapshot(self._lines(
@@ -161,7 +161,7 @@ class DocumentChangeDetailTest(APITestCase):
             discount=Decimal("0.00"), label="زيت")
         after = snapshot_document_lines([line], label=lambda l: l.label, fields=labels)
         changes = build_line_changes(before=[], after=after, labels=labels)
-        assert describe_activity_changes(changes) == "أضاف صنف «زيت» (الكمية 1 · السعر 50)"
+        assert describe_activity_changes(changes) == "أضاف منتج «زيت» (الكمية 1 · السعر 50)"
 
     def test_snapshot_fields_prefers_display_label(self):
         row = SimpleNamespace(

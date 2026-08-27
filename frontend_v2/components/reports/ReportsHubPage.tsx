@@ -57,14 +57,14 @@ const SCREEN_REPORTS: Record<string, { title: string; description: string; path:
   inventory: [
     {
       title: "تكلفة المنتجات",
-      description: "تفصيل تكلفة الصنف ومصادرها.",
+      description: "تفصيل تكلفة المنتج ومصادرها.",
       path: "/product-cost",
     },
   ],
   import: [
     {
       title: "تكلفة الوصول (Landed Cost)",
-      description: "توزيع مصاريف الاستيراد على أصناف الشحنة.",
+      description: "توزيع مصاريف الاستيراد على منتجات الشحنة.",
       path: "/accounting/landed-cost",
     },
   ],

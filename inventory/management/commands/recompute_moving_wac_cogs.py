@@ -2,8 +2,8 @@
 """إعادة احتساب تكلفة المبيعات التاريخية بالمتوسط المرجّح المتحرك (moving WAC)
 «لحظة البيع» لشركة الجرابعه — بدل التكلفة المسجّلة وقت الاستيراد (لقطة AverageCost).
 
-المنهج: يُعاد تشغيل دفتر حركة كل صنف **زمنياً** (حسب movement_date ثم id):
-  - تكلفة افتتاحية لكل صنف = AverageCost من الملف (أفضل تقدير لتكلفة ما قبل البيانات).
+المنهج: يُعاد تشغيل دفتر حركة كل منتج **زمنياً** (حسب movement_date ثم id):
+  - تكلفة افتتاحية لكل منتج = AverageCost من الملف (أفضل تقدير لتكلفة ما قبل البيانات).
   - كل حركة IN ترفع المتوسط (WAC)؛ إن كان الرصيد ≤ 0 يُضبط المتوسط = تكلفة الوارد
     (حارس ضد انحراف المخزون السالب — مشكلة name-mismatch/negative stock).
   - كل حركة بيع (OUT/SALE): التكلفة = الكمية × المتوسط **لحظتها** (لا يتغيّر المتوسط).
@@ -63,7 +63,7 @@ class Command(BaseCommand):
         tid = tenant.TenantID
         apply = opt['apply']
 
-        # ── تكلفة افتتاحية لكل صنف من الملف (norm_name → AverageCost) ──
+        # ── تكلفة افتتاحية لكل منتج من الملف (norm_name → AverageCost) ──
         opening = {}
         pf = csv_dir / 'Products.csv'
         if pf.exists():
@@ -183,5 +183,5 @@ class Command(BaseCommand):
                     lines_data=lines, idempotent=False,
                 )
             self.stdout.write(self.style.SUCCESS(
-                f'\n[تم التنفيذ] حركات محدّثة={len(changed_moves)} · أصناف={len(product_final_avg)} · '
+                f'\n[تم التنفيذ] حركات محدّثة={len(changed_moves)} · منتجات={len(product_final_avg)} · '
                 f'قيد التسوية={journal.id if journal else "لا يوجد"}'))

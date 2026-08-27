@@ -182,7 +182,7 @@ export const DeliverGoodsModal: React.FC<Props> = ({
             </div>
           ) : rows.length === 0 ? (
             <div className="py-10 text-center ktra-text-soft text-sm">
-              لا توجد بنود ذات صنف مخزون قابلة للتسليم في هذه الفاتورة.
+              لا توجد بنود مرتبطة بمنتج مخزني قابلة للتسليم في هذه الفاتورة.
             </div>
           ) : (
             <div className="overflow-x-auto rounded-lg border ktra-border-soft">
@@ -198,7 +198,7 @@ export const DeliverGoodsModal: React.FC<Props> = ({
                         aria-label="تحديد الكل"
                       />
                     </th>
-                    <th className="px-3 py-2 text-right font-medium">الصنف</th>
+                    <th className="px-3 py-2 text-right font-medium">المنتج</th>
                     <th className="px-2 py-2 text-center font-medium">المفوتر</th>
                     <th className="px-2 py-2 text-center font-medium">المسلَّم</th>
                     <th className="px-2 py-2 text-center font-medium">المتبقي</th>

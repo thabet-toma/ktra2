@@ -10,7 +10,7 @@ interface SignupPageProps {
 }
 
 const BENEFITS = [
-  { icon: Boxes, title: "مخزون ومبيعات مترابطة", description: "تابع الأصناف والفواتير والحركات من مساحة عمل واحدة." },
+  { icon: Boxes, title: "مخزون ومبيعات مترابطة", description: "تابع المنتجات والفواتير والحركات من مساحة عمل واحدة." },
   { icon: BarChart3, title: "أرقام واضحة لحظياً", description: "لوحات وتقارير تساعدك على اتخاذ القرار بثقة." },
   { icon: ShieldCheck, title: "بيانات كل شركة معزولة", description: "ابدأ بشركتك الأولى وأضف فرقك وفروعك لاحقاً." },
 ];

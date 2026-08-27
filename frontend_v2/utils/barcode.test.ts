@@ -217,7 +217,7 @@ test("صفحة الملصقات تكرّر الملصق بعدد النسخ وت
   assert.equal((barcodeLabelsHtml([{ barcode: "4006381333931", name: "x" }], 9999).match(/class="label"/g) || []).length, 200);
 });
 
-test("اسم الصنف يُهرَّب فلا يكسر صفحة الطباعة", () => {
+test("اسم المنتج يُهرَّب فلا يكسر صفحة الطباعة", () => {
   const html = barcodeLabelsHtml([{ barcode: "4006381333931", name: '<script>x</script>&' }], 1);
   assert.equal(html.includes("<script>x</script>"), false);
   assert.match(html, /&lt;script&gt;/);

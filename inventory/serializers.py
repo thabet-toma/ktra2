@@ -98,7 +98,7 @@ class UnitOfMeasureSerializer(serializers.ModelSerializer):
 class ProductPriceTierSerializer(serializers.ModelSerializer):
     """T-ITEMS M5: شريحة سعرٍ واحدة (بيع/شراء × رقم).
 
-    خمسُ شرائح بيع وخمسُ شراء لكل صنف — الجدول موجود منذ N8-T9 وشاشةُ الكرت
+    خمسُ شرائح بيع وخمسُ شراء لكل منتج — الجدول موجود منذ N8-T9 وشاشةُ الكرت
     تعرضه، لكن لا نقطةَ تكتبه: يملأ المستخدم الشرائح ويقرأ «تم الحفظ» وتضيع.
     والشرائح ليست زينة: `core/pricing.py` (`resolve_sales_price`) يقرأ شريحة
     البيع الأولى كمصدرٍ خامس للسعر، فبمجرّد أن تُحفَظ تدخل تسعير الفواتير.
@@ -119,7 +119,7 @@ class ProductSerializer(serializers.ModelSerializer):
     available_quantity = serializers.SerializerMethodField()
 
     stock_status = serializers.SerializerMethodField()
-    # تجميع البراندات: مفتاح الصنف الفرعي (للشجرة/الجرد/الجدول) + اسم العرض (الاسم+
+    # تجميع البراندات: مفتاح المنتج الفرعي (للشجرة/الجرد/الجدول) + اسم العرض (الاسم+
     # البراند بين قوسين) + هل المجموعة صريحة (فيظهر المجلّد حتى لمنتج واحد).
     group_key = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
@@ -129,7 +129,7 @@ class ProductSerializer(serializers.ModelSerializer):
     purchased_qty = serializers.SerializerMethodField()
     avg_monthly_sales = serializers.SerializerMethodField()
 
-    # task14 M2 (DEF-A2): رقم الصنف اختياري — يولَّد خادمياً عند الغياب
+    # task14 M2 (DEF-A2): رقم المنتج اختياري — يولَّد خادمياً عند الغياب
     sku = serializers.CharField(max_length=50, required=False, allow_blank=True)
     # M0: وحدة القياس لم تكن تُحفظ من أيّ شاشة. إدراج `uom_id` في `fields` لا
     # يكفي: DRF لا يرى فيه علاقةً (العلاقة اسمها `uom`) بل صفةَ نموذج، فيبنيه
@@ -149,7 +149,7 @@ class ProductSerializer(serializers.ModelSerializer):
             # (وحدتان إضافيتان بمعاملَيهما، الوصف الداخلي، موقع التخزين).
             'uom2', 'uom2_factor', 'uom3', 'uom3_factor',
             'description', 'storage_location',
-            # تجاوزات الحسابات على مستوى الصنف (نمط Odoo: حساب إيراد/مصروف
+            # تجاوزات الحسابات على مستوى المنتج (نمط Odoo: حساب إيراد/مصروف
             # على المنتج يسبق حساب تصنيفه).
             'sale_account_override', 'sale_return_account_override',
             'purchase_account_override', 'purchase_return_account_override',
@@ -157,13 +157,13 @@ class ProductSerializer(serializers.ModelSerializer):
             'price_tiers',
             'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level', 'max_stock_level',
             'is_serialized', 'is_service',
-            # THA-24: سياسة الكفالة على الصنف — تقرأها الكفالة عند ترحيل البيع،
-            # ويحرّرها المستخدم من كرت الصنف. بلا إدراجها هنا يبتلع DRF قيمتها
+            # THA-24: سياسة الكفالة على المنتج — تقرأها الكفالة عند ترحيل البيع،
+            # ويحرّرها المستخدم من كرت المنتج. بلا إدراجها هنا يبتلع DRF قيمتها
             # في الكتابة بصمت فيبدو الحقل محفوظاً وهو ليس كذلك.
             'warranty_months', 'supplier_warranty_months',
             'is_for_sale_online', 'online_price', 'online_description',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity', 'avg_cost',
-            # كرت الصنف: سعر البيع الافتراضي — قابل للتحرير بجانب التكلفة المحسوبة.
+            # كرت المنتج: سعر البيع الافتراضي — قابل للتحرير بجانب التكلفة المحسوبة.
             'sale_price',
             'purchased_qty', 'avg_monthly_sales',
             'stock_status', 'group_key', 'display_name', 'has_group',
@@ -229,17 +229,17 @@ class ProductSerializer(serializers.ModelSerializer):
         name_en = attrs.get('name_en', getattr(self.instance, 'name_en', None))
         if not ((name_ar or '').strip() or (name_en or '').strip()):
             raise serializers.ValidationError(
-                {'name_ar': 'اسم الصنف مطلوب — أدخل الاسم بالعربية أو بالإنجليزية.'}
+                {'name_ar': 'اسم المنتج مطلوب — أدخل الاسم بالعربية أو بالإنجليزية.'}
             )
         self._validate_barcode_unique(attrs)
         self._validate_account_overrides(attrs)
         return attrs
 
     def _validate_account_overrides(self, attrs):
-        """كل حساب تجاوزٍ من شركة الصنف نفسها — الحسابات معزولةٌ بالشركة.
+        """كل حساب تجاوزٍ من شركة المنتج نفسها — الحسابات معزولةٌ بالشركة.
 
         بلا هذا الفحص يُقبل معرّف حسابٍ من شركةٍ أخرى (الـFK لا يعرف الشركة)،
-        فيُرحَّل بيعُ الصنف على دفتر شركةٍ ليست صاحبته — تسريبٌ محاسبي صامت.
+        فيُرحَّل بيعُ المنتج على دفتر شركةٍ ليست صاحبته — تسريبٌ محاسبي صامت.
         نفس منطق `ProductViewSet._validate_category_tenant`.
         """
         present = {f: attrs[f] for f in self.ACCOUNT_OVERRIDE_FIELDS
@@ -307,10 +307,10 @@ class ProductSerializer(serializers.ModelSerializer):
         return product
 
     def _validate_barcode_unique(self, attrs):
-        """الباركود يجب أن يميّز صنفاً واحداً في الشركة — وإلا فقد معناه.
+        """الباركود يجب أن يميّز منتجاً واحداً في الشركة — وإلا فقد معناه.
 
         العمود ليس فريداً في المخطّط ولن يُجعَل كذلك: بياناتٌ قديمة تحمل تكراراً،
-        وقيدٌ فريد يمنع حفظ أي صنف منها. الحرس هنا على **ما يُكتَب**: تكرارٌ قائم
+        وقيدٌ فريد يمنع حفظ أي منتج منها. الحرس هنا على **ما يُكتَب**: تكرارٌ قائم
         يبقى كما هو حتى يُحرَّر صاحبه.
         """
         if 'barcode' not in attrs:
@@ -335,7 +335,7 @@ class ProductSerializer(serializers.ModelSerializer):
         if other is not None:
             raise serializers.ValidationError({
                 'barcode': (
-                    f'الباركود «{barcode}» مستخدم للصنف '
+                    f'الباركود «{barcode}» مستخدم للمنتج '
                     f'«{other.name_ar or other.name_en or other.sku}».'
                 )
             })
@@ -364,12 +364,12 @@ class ProductSerializer(serializers.ModelSerializer):
 class ProductLookupSerializer(ProductSerializer):
     """Small, explicit contract for invoice/deal product pickers.
 
-    يجب أن يغطّي **كل** ما تقرؤه شاشات الفواتير من الصنف، وإلا رجعت تلك الشاشات
-    إلى العقد الكامل فتجلب لكل صنف تحليلاتٍ وحقولَ كرتٍ لا تعرضها (قياس على
-    1490 صنفاً: 1,145 كيلوبايت / 1,249 مِلّي ثانية مقابل 609 / 331).
+    يجب أن يغطّي **كل** ما تقرؤه شاشات الفواتير من المنتج، وإلا رجعت تلك الشاشات
+    إلى العقد الكامل فتجلب لكل منتج تحليلاتٍ وحقولَ كرتٍ لا تعرضها (قياس على
+    1490 منتجاً: 1,145 كيلوبايت / 1,249 مِلّي ثانية مقابل 609 / 331).
     """
 
-    # T-SUPSKU: أرقام كتالوج الموردين لهذا الصنف، مفصولةً بمسافات — هنا وحدها
+    # T-SUPSKU: أرقام كتالوج الموردين لهذا المنتج، مفصولةً بمسافات — هنا وحدها
     # لا على العقد الكامل: منتقي المستندات يجلب الكتالوج دفعةً واحدة ويبحث
     # موضعياً، فبحث الخادم لا يبلغه. تُقرأ من `supplier_codes` المجلوبة مسبقاً
     # في `ProductViewSet.get_queryset`، وإلا صارت استعلاماً لكل صفّ من 1490.
@@ -384,24 +384,24 @@ class ProductLookupSerializer(ProductSerializer):
         fields = [
             'id', 'sku', 'barcode', 'name_ar', 'name_en', 'display_name',
             # وكيل الفواتير يطبع الماركة في كل سطر تشخيص وفي أسباب استبعاد
-            # الأصناف؛ بدونها كان يطبع أقواساً فارغة: «❌ 205/65/16 () — رصيد 0».
+            # المنتجات؛ بدونها كان يطبع أقواساً فارغة: «❌ 205/65/16 () — رصيد 0».
             'brand',
             'category', 'category_name', 'hs_code', 'min_stock_level',
-            # T-REORDER: حقلان يجعلان بند الفاتورة يعرف حالة الصنف وبدائله:
+            # T-REORDER: حقلان يجعلان بند الفاتورة يعرف حالة المنتج وبدائله:
             # `stock_status` يصبغ الخيار (نفذ/منخفض)، و`group_key` يجمع موديلات
             # النوع الواحد فيقترح المنتقي بديلاً بدل أن يقف عند «الرصيد 0».
-            # نصّان قصيران — والحمولة تُقاس على 1490 صنفاً، فأي حقل ثالث يُبرَّر.
+            # نصّان قصيران — والحمولة تُقاس على 1490 منتجاً، فأي حقل ثالث يُبرَّر.
             'stock_status', 'group_key',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity',
             'avg_cost', 'sale_price', 'is_service', 'is_serialized',
-            # THA-24: نافذة البطاقة اليدوية تملأ المدة من سياسة الصنف المختار،
+            # THA-24: نافذة البطاقة اليدوية تملأ المدة من سياسة المنتج المختار،
             # فلا يعيد المستخدم كتابة ما تعرفه المنظومة.
             'warranty_months', 'supplier_warranty_months',
             'is_for_sale_online',
             'online_price', 'online_description', 'attachments',
             # T-SUPSKU: أرقام المورّدين نصّاً واحداً — منتقي بند الفاتورة يبحث
             # موضعياً في الكتالوج المجلوب دفعةً واحدة، فبحث الخادم لا يبلغه.
-            # نصٌّ لا مصفوفةُ كائنات: الحمولة تُقاس على 1490 صنفاً، والمنتقي
+            # نصٌّ لا مصفوفةُ كائنات: الحمولة تُقاس على 1490 منتجاً، والمنتقي
             # لا يحتاج إلا أن يطابق.
             'supplier_codes_text',
         ]
@@ -547,10 +547,10 @@ class StocktakeSerializer(serializers.ModelSerializer):
 
 
 class SupplierProductSerializer(serializers.ModelSerializer):
-    """رقم الصنف عند المورّد — بياناتٌ رئيسية محايدة مالياً.
+    """رقم المنتج عند المورّد — بياناتٌ رئيسية محايدة مالياً.
 
     الفرادة تُحرَس في قاعدة البيانات (شركة، مورّد، رقم)، ويُترجَم خرقُها هنا
-    إلى رسالةٍ تسمّي الصنف الذي يحمل الرقم بالفعل — «قيد فريد مخروق» لا يعلّم
+    إلى رسالةٍ تسمّي المنتج الذي يحمل الرقم بالفعل — «قيد فريد مخروق» لا يعلّم
     المستخدم شيئاً.
     """
 
@@ -579,7 +579,7 @@ class SupplierProductSerializer(serializers.ModelSerializer):
     def validate_supplier_sku(self, value):
         cleaned = str(value or '').strip()
         if not cleaned:
-            raise serializers.ValidationError('رقم الصنف عند المورّد مطلوب.')
+            raise serializers.ValidationError('رقم المنتج عند المورّد مطلوب.')
         return cleaned
 
     def validate(self, attrs):
@@ -604,8 +604,8 @@ class SupplierProductSerializer(serializers.ModelSerializer):
             if clash is not None:
                 from inventory.services import product_display_name
                 raise serializers.ValidationError({'supplier_sku': (
-                    f'الرقم «{sku}» مرتبطٌ عند هذا المورّد بالصنف '
+                    f'الرقم «{sku}» مرتبطٌ عند هذا المورّد بالمنتج '
                     f'«{product_display_name(clash.product)}» — رقمٌ واحد '
-                    f'لصنفين يجعل مطابقة فاتورة المورّد تخميناً.'
+                    f'لمنتجين يجعل مطابقة فاتورة المورّد تخميناً.'
                 )})
         return attrs

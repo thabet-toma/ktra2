@@ -1,4 +1,4 @@
-"""نقطة الوكيل الخاصة بالأصناف — `/api/agent/products/`.
+"""نقطة الوكيل الخاصة بالمنتجات — `/api/agent/products/`.
 
 **لماذا هنا لا في `core/`:** تستعمل `inventory.serializers`، و`.importlinter` يمنع
 `core` من استيراد داخليات app آخر. فتسكن النقطة في الـapp المالكة لبياناتها
@@ -38,9 +38,9 @@ def agent_products(request):
     GET  /api/agent/products/?tenant_id=1&search=...
     POST /api/agent/products/
     Headers: X-Agent-Key: <AGENT_DB_API_KEY>
-    Body: {"tenant_id": 1, "name_ar": "صنف جديد", "sku": "اختياري"}
+    Body: {"tenant_id": 1, "name_ar": "منتج جديد", "sku": "اختياري"}
 
-    رقم الصنف (sku) يُولَّد خادمياً عند غيابه (نفس منطق شاشة الأصناف) —
+    رقم المنتج (sku) يُولَّد خادمياً عند غيابه (نفس منطق شاشة المنتجات) —
     لا مسار تعديل أو حذف على واجهة الوكيل.
     """
     unauthorized = _check_agent_key(request)
@@ -88,7 +88,7 @@ def agent_products(request):
     if explicit_sku:
         if Product.objects.filter(tenant=tenant, sku=explicit_sku).exists():
             return Response(
-                {"error": "رقم الصنف مستخدم مسبقاً لهذه الشركة."},
+                {"error": "رقم المنتج مستخدم مسبقاً لهذه الشركة."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         product = serializer.save(tenant=tenant, sku=explicit_sku)
@@ -104,13 +104,13 @@ def agent_products(request):
                 continue
         if product is None:
             return Response(
-                {"error": "تعذّر توليد رقم صنف — أعد المحاولة."},
+                {"error": "تعذّر توليد رقم منتج — أعد المحاولة."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
     log_activity(
         action="create", entity_type="product", entity_id=product.id,
-        entity_label=str(product), description="إضافة صنف عبر واجهة الوكيل",
+        entity_label=str(product), description="إضافة منتج عبر واجهة الوكيل",
         tenant=tenant, request=request,
     )
     return Response(ProductSerializer(product).data, status=status.HTTP_201_CREATED)

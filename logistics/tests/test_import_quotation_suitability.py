@@ -34,7 +34,7 @@ class ImportQuotationSuitabilityTest(APITestCase):
             supplier_scope=Partner.SUPPLIER_SCOPE_INTERNATIONAL,
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku='IQ-ITEM-1', name_ar='صنف عرض استيراد',
+            tenant=cls.tenant, sku='IQ-ITEM-1', name_ar='منتج عرض استيراد',
         )
 
     def setUp(self):

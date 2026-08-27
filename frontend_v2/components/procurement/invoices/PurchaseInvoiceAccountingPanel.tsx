@@ -519,7 +519,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           )}
         </div>
 
-        {/* جدول الأصناف - توجيه حسابات الأسطر */}
+        {/* جدول المنتجات - توجيه حسابات الأسطر */}
         <div>
           <div className="flex items-center justify-between mb-2">
             <h4 className="text-sm font-semibold ktra-text-ink dark:ktra-text-soft">
@@ -530,7 +530,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
             <table className="w-full text-sm">
               <thead className="ktra-bg-panel dark:ktra-bg-panel ktra-text-soft dark:ktra-text-soft text-xs">
                 <tr>
-                  <th className="px-3 py-2 text-right font-medium">الصنف</th>
+                  <th className="px-3 py-2 text-right font-medium">المنتج</th>
                   <th className="px-3 py-2 text-right font-medium">المبلغ</th>
                   <th className="px-3 py-2 text-right font-medium">حساب المصروف (تجاوز)</th>
                 </tr>
@@ -539,7 +539,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                 {items.length === 0 && (
                   <tr>
                     <td colSpan={3} className="px-3 py-6 text-center ktra-text-soft">
-                      لا توجد أصناف
+                      لا توجد منتجات
                     </td>
                   </tr>
                 )}

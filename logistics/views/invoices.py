@@ -342,7 +342,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
 
     @action(detail=False, methods=['get'], url_path='resolve-price')
     def resolve_price(self, request):
-        """FEAT-1: سعر الوحدة المقترح لصنف حسب استراتيجية إعدادات الشراء.
+        """FEAT-1: سعر الوحدة المقترح لمنتج حسب استراتيجية إعدادات الشراء.
 
         يفوّض إلى core.pricing (المصدر المشترك مع المبيعات). الاستراتيجية تؤخذ من
         إعدادات الشراء افتراضياً ويمكن تجاوزها بـ ?strategy=.
@@ -377,7 +377,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
     @action(detail=False, methods=['get'], url_path='price-list')
     def price_list(self, request):
         """task24: سعر الشراء المقترح لكل المنتجات دفعة واحدة — يُعرض داخل خيارات
-        منتقي الأصناف في الفاتورة بلا نقر. يفوّض لـ core.pricing (المصدر المشترك).
+        منتقي المنتجات في الفاتورة بلا نقر. يفوّض لـ core.pricing (المصدر المشترك).
         الاستراتيجية من إعدادات الشراء افتراضياً ويمكن تجاوزها بـ ?strategy=.
         و‍`?supplier=` يحصر «آخر شراء» بمورد الفاتورة (يبقى «أقل شراء» عاماً).
         """
@@ -1639,7 +1639,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 "لا يوجد مستودع نشط لاستلام البضاعة. أنشئ مستودعاً (أو اجعله الافتراضي) أولاً."
             )
 
-        # البنود القابلة للتخزين = ذات صنف، بلا حساب مصروف صريح، وكمية موجبة.
+        # البنود القابلة للتخزين = ذات منتج، بلا حساب مصروف صريح، وكمية موجبة.
         # التوزيع نفسه يخدم الاستلام المؤجَّل (goods_clearing_unit_costs) — مصدر واحد.
         from logistics.services import goods_clearing_unit_costs
         goods_lines = [
@@ -1901,7 +1901,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                     # قيد السند يدين الذمم بلا مقابل.
                     guard_purchase_invoice_payments_before_unpost(invoice)
                     # الكمية تعود للمخزن ⇒ وحداتها المُرقَّمة تعود معها، وإلا بقي
-                    # الرصيد يقول شيئاً وكرت الصنف شيئاً آخر.
+                    # الرصيد يقول شيئاً وكرت المنتج شيئاً آخر.
                     from inventory.serials import restock_returned_purchase_serials
                     restock_returned_purchase_serials(invoice)
                     result = unpost_document(

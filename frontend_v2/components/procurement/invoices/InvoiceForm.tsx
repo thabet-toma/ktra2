@@ -182,10 +182,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   
   const [allDbItems, setAllDbItems] = useState<Item[]>(initialDbItems);
-  // الأصناف تصل من الأب بشكل غير متزامن (subscribeToItems). useState يلتقط الـ prop
+  // المنتجات تصل من الأب بشكل غير متزامن (subscribeToItems). useState يلتقط الـ prop
   // عند التركيب فقط، فإن فُتحت الفاتورة قبل اكتمال التحميل بقيت القائمة فارغة («لا
   // يوجد تطابق») حتى إعادة فتحها. هذا التأثير يعتمد آخر قائمة وصلت مع الحفاظ على أي
-  // صنف أُنشئ inline، ويتفادى إعادة الرندر إن لم يتغيّر المحتوى فعلاً.
+  // منتج أُنشئ inline، ويتفادى إعادة الرندر إن لم يتغيّر المحتوى فعلاً.
   useEffect(() => {
     setAllDbItems((prev) => {
       const incoming = initialDbItems || [];
@@ -202,9 +202,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     });
   }, [initialDbItems]);
   const [showSupplierPicker, setShowSupplierPicker] = useState(false);
-  // DEF-007/008: بطاقة الصنف المشتركة (نقر مفرد على الشجرة / أيقونة (i)).
+  // DEF-007/008: بطاقة المنتج المشتركة (نقر مفرد على الشجرة / أيقونة (i)).
   const [cardProductId, setCardProductId] = useState<number | null>(null);
-  // T-ITEMS M3: الصنف الجاري تحريره سريعاً من داخل الفاتورة (بلا مغادرتها).
+  // T-ITEMS M3: المنتج الجاري تحريره سريعاً من داخل الفاتورة (بلا مغادرتها).
   const [quickEditProductId, setQuickEditProductId] = useState<number | null>(null);
   // «موافق» (إضافة للفاتورة) يظهر فقط عند فتح البطاقة من الشجرة، لا من أيقونة (i).
   const [cardCanAdd, setCardCanAdd] = useState(false);
@@ -236,7 +236,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   /** يُزاد بعد كل دفعة ناجحة لإعادة جلب سلف المورّد غير الموزّعة. */
   const [payAdvancesNonce, setPayAdvancesNonce] = useState(0);
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
-  // task18 DEF-B1/B3: إنشاء صنف جديد inline من خلية اسم الصنف (النص المكتوب يُمرَّر مسبقاً)
+  // task18 DEF-B1/B3: إنشاء منتج جديد inline من خلية اسم المنتج (النص المكتوب يُمرَّر مسبقاً)
   const [inlineCreate, setInlineCreate] = useState<{ rowIndex: number; name: string } | null>(null);
   // T-DEFACC: الشجرة تحتاج القائمة كاملة (الآباء منها) — و`feeAccounts` تبقى
   // المجموعة القابلة للاختيار التي يستعملها الاختيار التلقائي للرسوم.
@@ -556,7 +556,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       return;
     }
     if (!formData.items || formData.items.length === 0) {
-      toast("الرجاء إضافة صنف واحد على الأقل", "error");
+      toast("الرجاء إضافة منتج واحد على الأقل", "error");
       return;
     }
     const invalidFee = (formData.fees || []).find(
@@ -827,7 +827,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   /* task13 M5: منطق تعبئة السطر مشترك بين المنتقي المدمج والفهرس الكامل */
   // FEAT-1: السعر المقترح لبند الشراء عبر PriceResolver المشترك في الخادم
-  // (آخر/أقل سعر شراء حسب إعدادات الشراء، ثم تكلفة الصنف، ثم فارغ). يحل محل
+  // (آخر/أقل سعر شراء حسب إعدادات الشراء، ثم تكلفة المنتج، ثم فارغ). يحل محل
   // مسار supplier_prices القديم (مصدر حقيقة موازٍ) — الآن من الفواتير المرحَّلة.
   const resolveSuggestedPrice = async (productId: string | number): Promise<number> => {
     const pid = Number(productId);
@@ -849,7 +849,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   /* بحث سريع/باركود — نفس سلوك `handleBarcodeEnter` في محرر المبيعات: الماسح
-     يكتب الرقم ويضغط ⏎ فيهبط الصنف على أول سطر فارغ، وإلا على سطر جديد.
+     يكتب الرقم ويضغط ⏎ فيهبط المنتج على أول سطر فارغ، وإلا على سطر جديد.
      كانت الشاشتان غير متكافئتين: البيع يمسح والشراء لا. */
   const [barcodeQuery, setBarcodeQuery] = useState("");
   const handleBarcodeEnter = async (raw: string) => {
@@ -876,7 +876,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   const applyItemAt = async (index: number | null, item: Item, lastPrice?: number, qtyOverride?: number) => {
-    // task18 DEF-C3: إن كان الصنف موجوداً في سطر آخر — نبّه المستخدم ودعه يختار:
+    // task18 DEF-C3: إن كان المنتج موجوداً في سطر آخر — نبّه المستخدم ودعه يختار:
     // موافق = دمج الكمية في السطر القائم · إلغاء = إضافته كسطر مستقل (سعر مختلف).
     const current = formData.items || [];
     const dupIndex = current.findIndex(
@@ -884,7 +884,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     );
     if (dupIndex >= 0) {
       const merge = await confirm({
-        message: `الصنف «${item.name}» مضاف مسبقاً في الفاتورة. اختر الإجراء:`,
+        message: `المنتج «${item.name}» مضاف مسبقاً في الفاتورة. اختر الإجراء:`,
         confirmText: "دمج الكمية",
         cancelText: "سطر جديد مستقل",
         danger: false,
@@ -906,19 +906,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         recalculateTotals({ items: updated });
         return;
       }
-      // إلغاء الدمج → نتابع بالمسار العادي فيُملأ السطر الجاري كصنف مستقل
+      // إلغاء الدمج → نتابع بالمسار العادي فيُملأ السطر الجاري كمنتج مستقل
       // (سطر مكرّر بسعره الخاص — وهو المطلوب).
     }
-    // FEAT-1 edit-protection: السعر اليدوي يُحفظ فقط عند **إعادة اختيار نفس الصنف**
-    // على السطر. اختيار صنف *مختلف* يُعاد تسعيره دائماً بسعر الصنف الجديد — وإلا
-    // يرث الصنف الجديد سعر الصنف القديم.
+    // FEAT-1 edit-protection: السعر اليدوي يُحفظ فقط عند **إعادة اختيار نفس المنتج**
+    // على السطر. اختيار منتج *مختلف* يُعاد تسعيره دائماً بسعر المنتج الجديد — وإلا
+    // يرث المنتج الجديد سعر المنتج القديم.
     const currentRow =
       index !== null && index < (formData.items || []).length
         ? (formData.items || [])[index]
         : undefined;
     const existingPrice = Number(currentRow?.unitPrice) || 0;
     const sameProduct = currentRow != null && String(currentRow.itemId) === String(item.id);
-    // T-R2: الكمية المُدخلة من بطاقة الصنف (إن وُجدت) وإلا 1.
+    // T-R2: الكمية المُدخلة من بطاقة المنتج (إن وُجدت) وإلا 1.
     const qty = qtyOverride && qtyOverride > 0 ? qtyOverride : 1;
     const resolvedPrice = sameProduct && existingPrice > 0 ? existingPrice : (lastPrice || 0);
     const newItem: InvoiceItem = {
@@ -939,7 +939,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     if (index !== null && index < updatedItems.length) {
       newItem.id = updatedItems[index].id;
       // الصفّ نفسه لا صفٌّ بديل: بلا نقل المعرّف يُحذف البند ويُعاد إنشاؤه
-      // عند الحفظ فتضيع كميته المستلَمة، ويرفض الخادمُ تبديلَ صنفٍ مستلَم
+      // عند الحفظ فتضيع كميته المستلَمة، ويرفض الخادمُ تبديلَ منتجٍ مستلَم
       // برسالته الدقيقة بدل «لا يُحذف».
       newItem.serverId = updatedItems[index].serverId;
       updatedItems[index] = newItem;
@@ -947,7 +947,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       updatedItems.push(newItem);
     }
 
-    // ملاحظة: لا نُضيف سطراً فارغاً تلقائياً عند اختيار صنف (طلب المالك) — يُضاف
+    // ملاحظة: لا نُضيف سطراً فارغاً تلقائياً عند اختيار منتج (طلب المالك) — يُضاف
     // السطر يدوياً بزر «أضف صف» أو من الشجرة. كان السلوك السابق يفتح سطراً بنفسه.
     recalculateTotals({ items: updatedItems });
     markDirty();
@@ -1357,7 +1357,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     finalCostFeesTotal,
   ]);
 
-  /* T-SERIAL: من يتتبّع وحداته؟ الجواب من كتالوج الأصناف (`view=lookup`)، فالبند
+  /* T-SERIAL: من يتتبّع وحداته؟ الجواب من كتالوج المنتجات (`view=lookup`)، فالبند
      نفسه لا يحمل العَلَم. الخدمة مستثناة — بلا مخزون فبلا وحدات. */
   const dbItemsById = useMemo(() => {
     const m = new Map<string, Item>();
@@ -1378,8 +1378,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   const itemColumns: KitGridColumn<InvoiceItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
-    { key: "itemId", header: "رقم الصنف", width: "100px" },
-    { key: "name", header: "اسم الصنف", width: "25%" },
+    { key: "itemId", header: "رقم المنتج", width: "100px" },
+    { key: "name", header: "اسم المنتج", width: "25%" },
     { 
       key: "specifications", 
       header: "بيان", 
@@ -1422,7 +1422,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         align: "center" as const, readOnly: true, render: remainingCell,
       },
     ] : []),
-    // T-SERIAL: عمود الأرقام على الأصناف التسلسلية وحدها، ويختفي بنمط «معطّل».
+    // T-SERIAL: عمود الأرقام على المنتجات التسلسلية وحدها، ويختفي بنمط «معطّل».
     ...(anySerializedItem ? [{
       key: "serials", header: "الأرقام التسلسلية", width: "120px", align: "center" as const, readOnly: true,
     }] : []),
@@ -1519,7 +1519,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         setActiveItemSearchIndex(rowIndex);
         setShowItemSearch(true);
       }}
-      title="فهرس الأصناف الكامل (+)"
+      title="فهرس المنتجات الكامل (+)"
     >
       {row.itemId ? `#${row.itemId}` : "…"}
     </button>
@@ -1550,14 +1550,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     return () => { cancelled = true; };
   }, [formData.supplierId]);
 
-  /* task13 M5: منتقي مدمج في خلية اسم الصنف (يحل محل المودال كمسار أساسي) */
+  /* task13 M5: منتقي مدمج في خلية اسم المنتج (يحل محل المودال كمسار أساسي) */
   const itemOptions = useMemo(
     () => allDbItems.map((it) => {
       const pp = purchasePriceMap.get(Number(it.id));
       return {
         id: it.id,
         label: it.name,
-        // T-RESERVEVIS: رصيد الصنف بجانب اسمه — كان جانب البيع وحده يعرضه،
+        // T-RESERVEVIS: رصيد المنتج بجانب اسمه — كان جانب البيع وحده يعرضه،
         // فيطلب المشتري ما عنده منه رفٌّ ممتلئ.
         sub: `الرصيد: ${formatQuantity(Number(it.quantity || 0))}`,
         // T-SEARCH: الباركود ورقم الموديل وأرقام كتالوج الموردين يُبحَث فيها
@@ -1589,6 +1589,42 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     [suppliers],
   );
 
+  /**
+   * T-PRODUCT M4 — المعالِج الواحد لكل تعديلٍ على منتج من داخل هذه الفاتورة:
+   * القلم (`ItemQuickEditModal`) والبطاقة (`ProductCardModal`) يمرّان به معاً.
+   *
+   * نصفان لا نصف واحد: الكتالوج المحلي **والسطور**. سطر فاتورة الشراء يلتقط
+   * الاسم نسخةً عند الاختيار (`applyItemAt`) ويعرض `row.name` لا الكتالوج —
+   * فترقيع الكتالوج وحده (وهو ما كان يحدث) يترك السطر على اسمه القديم **إلى
+   * الأبد**: لا مشترِك حدثٍ هنا يُنقذه كما في فاتورة البيع.
+   *
+   * و`markDirty` فقط إن تغيّر صفٌّ فعلاً — وإلا رفع فتحُ النافذة وإغلاقها على
+   * فاتورةٍ نظيفة إنذارَ «تغييرات غير محفوظة» بلا تغييرٍ واحد.
+   */
+  const applyProductUpdate = (updated: Record<string, unknown>) => {
+    const item = productToItem(updated);
+    setAllDbItems((prev) =>
+      prev.some((x) => String(x.id) === String(item.id))
+        ? prev.map((x) => (String(x.id) === String(item.id) ? item : x))
+        : [item, ...prev],
+    );
+    // القرار يُتخذ على الحالة الحاضرة لا داخل مُحدِّث `setFormData`: المُحدِّث
+    // يعمل في طور الرسم لا فور استدعائه، فراية تُرفع بداخله تُقرأ هنا وهي بعدُ
+    // على قيمتها القديمة.
+    const rows = formData.items || [];
+    const needsRename = rows.some(
+      (r) => String(r.itemId) === String(item.id) && r.name !== item.name,
+    );
+    if (!needsRename) return;
+    setFormData((prev) => ({
+      ...prev,
+      items: (prev.items || []).map((r) => (
+        String(r.itemId) === String(item.id) ? { ...r, name: item.name } : r
+      )),
+    }));
+    markDirty();
+  };
+
   const renderItemNameCell = (row: InvoiceItem, rowIndex: number) => {
     const selectedId = row.itemId ? Number(row.itemId) : null;
     return (
@@ -1597,7 +1633,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         value={row.name || ""}
         options={itemOptions}
         disabled={effectiveReadOnly}
-        placeholder="اكتب اسم الصنف…"
+        placeholder="اكتب اسم المنتج…"
         onPick={async (id) => {
           const it = allDbItems.find((x) => String(x.id) === String(id));
           if (it) {
@@ -1609,34 +1645,35 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           }
         }}
         onInfo={(id) => { const pid = Number(id); if (pid) { setCardCanAdd(false); setCardProductId(pid); } }}
-        onEdit={(id) => { const pid = Number(id); if (pid) setQuickEditProductId(pid); }}
+        onEdit={effectiveReadOnly ? undefined : (id) => { const pid = Number(id); if (pid) setQuickEditProductId(pid); }}
         onShowMore={(q) => {
           setPickerQuery(q);
           setActiveItemSearchIndex(rowIndex);
           setShowItemSearch(true);
         }}
         onFreeText={(t) => {
-          // task18 DEF-B1/B3: «إضافة كصنف جديد» يفتح إنشاء صنف سريع مُعبّأً بالنص
+          // task18 DEF-B1/B3: «إضافة كمنتج جديد» يفتح إنشاء منتج سريع مُعبّأً بالنص
           // ويُنشئه فعلياً (Product) بدل ترك سطر حر بلا itemId يُحذف عند الحفظ.
           setInlineCreate({ rowIndex, name: t.trim() });
         }}
       />
-      {/* DEF-008: أيقونة (i) بجانب المنتج المختار → بطاقة الصنف */}
+      {/* DEF-008: أيقونة (i) بجانب المنتج المختار → بطاقة المنتج */}
       {selectedId != null && (
         <button
           type="button"
           className="ktra-ellipsis"
           onClick={() => { setCardCanAdd(false); setCardProductId(selectedId); }}
-          title="بطاقة الصنف"
+          title="بطاقة المنتج"
         ><Info className="w-3.5 h-3.5" /></button>
       )}
-      {/* T-ITEMS M3: قلمٌ بجانب (i) — تعديل الصنف دون مغادرة الفاتورة. */}
-      {selectedId != null && (
+      {/* T-ITEMS M3: قلمٌ بجانب (i) — تعديل المنتج دون مغادرة الفاتورة.
+          الفاتورة المرحّلة للقراءة فقط، فلا قلم عليها — كما في محرّر فاتورة البيع. */}
+      {selectedId != null && !effectiveReadOnly && (
         <button
           type="button"
           className="ktra-ellipsis"
           onClick={() => setQuickEditProductId(selectedId)}
-          title="تعديل سريع للصنف"
+          title="تعديل سريع للمنتج"
         ><Pencil className="w-3.5 h-3.5" /></button>
       )}
     </div>
@@ -1777,7 +1814,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const feesTotal = (formData.fees || []).reduce(
     (sum, fee) => sum + (Number(fee.amount) || 0), 0,
   );
-  // عمولات تحويل دفعات الصفقة — داخلة في تكلفة الصنف وأساس ض.ق.م، فتُعرض كسطر في الملخص.
+  // عمولات تحويل دفعات الصفقة — داخلة في تكلفة المنتج وأساس ض.ق.م، فتُعرض كسطر في الملخص.
   const transferCommissionsIls = transferCommissionsIlsForVat(
     formData.conversionMetadata as Record<string, unknown> | null,
   );
@@ -2706,7 +2743,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       columns={[
         {
           key: "name",
-          header: "الصنف",
+          header: "المنتج",
           render: (r) => (
             <div>
               <span className="font-semibold">{r.name || "—"}</span>
@@ -2931,7 +2968,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             ,
             fe("supplier_invoice_number")
           )}
-          {/* تكافؤ مع محرر المبيعات: الماسح يُدخل الصنف مباشرةً بلا فتح المنتقي. */}
+          {/* تكافؤ مع محرر المبيعات: الماسح يُدخل المنتج مباشرةً بلا فتح المنتقي. */}
           {fld(
             "بحث سريع / باركود (F6)",
             <input
@@ -3364,7 +3401,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             getRowKey={(r) => r.id}
             onChange={effectiveReadOnly ? undefined : itemOnChange}
             onAddRow={effectiveReadOnly ? undefined : addRow}
-            emptyHint="لا توجد بنود — أضف صنفاً من الشجرة أو اكتب اسمه"
+            emptyHint="لا توجد بنود — أضف منتجاً من الشجرة أو اكتب اسمه"
           />
           {!readOnly && !formData.isHistorical && (
             <button type="button" className="ktra-addrow" onClick={addRow}>
@@ -3488,21 +3525,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       </div>
     )}
 
-    {/* DEF-007/008: بطاقة الصنف المشتركة — «موافق» يُدرج الصنف في فاتورة الشراء. */}
-    {/* T-ITEMS M3: التحرير السريع يحدّث النسخة المحلية عبر المُطابِق نفسه
-        (`productToItem`) الذي بُنيت به — وإلا بقي السطر يعرض الاسم القديم. */}
+    {/* DEF-007/008: بطاقة المنتج المشتركة — «موافق» يُدرج المنتج في فاتورة الشراء. */}
     {quickEditProductId != null && (
       <ItemQuickEditModal
         productId={quickEditProductId}
         onClose={() => setQuickEditProductId(null)}
-        onSaved={(updated) => {
-          const item = productToItem(updated as Record<string, unknown>);
-          setAllDbItems((prev) =>
-            prev.some((x) => String(x.id) === String(item.id))
-              ? prev.map((x) => (String(x.id) === String(item.id) ? item : x))
-              : [item, ...prev],
-          );
-        }}
+        onSaved={applyProductUpdate}
       />
     )}
 
@@ -3519,6 +3547,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             const price = opts?.unitPrice ?? cardSuggestedPrice ?? 0;
             applyItemAt(null, it, price, opts?.quantity);
           }}
+          onProductSaved={applyProductUpdate}
           onClose={() => setCardProductId(null)}
         />
       );

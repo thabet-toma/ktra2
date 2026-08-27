@@ -26,7 +26,7 @@ export type SupplierQuotationStatus =
 
 export interface SupplierQuotationLineDto {
   id?: number;
-  /** T-DRAFTPARTY: null = صنف مكتوب يدوياً داخل العرض، اسمه في name_snapshot. */
+  /** T-DRAFTPARTY: null = منتج مكتوب يدوياً داخل العرض، اسمه في name_snapshot. */
   product: number | null;
   product_name?: string;
   seq?: number;

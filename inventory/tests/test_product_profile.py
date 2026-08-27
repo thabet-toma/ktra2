@@ -30,12 +30,12 @@ pytestmark = pytest.mark.django_db
 def env():
     owner = User.objects.create_user(username="pp", password="x")
     ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
-    tenant = create_company("شركة بطاقة الصنف", owner)
+    tenant = create_company("شركة بطاقة المنتج", owner)
     from accounting.services import create_fiscal_year
     create_fiscal_year(tenant, 2026)
     sup = Partner.objects.create(tenant=tenant, name="مورد", partner_type="Supplier")
     product = Product.objects.create(
-        tenant=tenant, sku="PP-1", name_ar="صنف", quantity_on_hand=0, avg_cost=Decimal("0"))
+        tenant=tenant, sku="PP-1", name_ar="منتج", quantity_on_hand=0, avg_cost=Decimal("0"))
     return tenant, ils, sup, product
 
 
@@ -72,7 +72,7 @@ def test_profile_kpis(env):
         tenant=tenant, invoice_number="P-1", partner=sup, currency=ils,
         invoice_date="2026-06-01", is_posted=True)
     PurchaseInvoiceItem.objects.create(
-        invoice=inv, product=product, name="صنف",
+        invoice=inv, product=product, name="منتج",
         quantity=Decimal("10"), unit_price=Decimal("5"), total_price=Decimal("50"))
 
     prof = product_profile(tenant_id=tenant.TenantID, product_id=product.id)
@@ -89,7 +89,7 @@ def test_linked_invoices_have_clickable_refs(env):
         tenant=tenant, invoice_number="P-1", partner=sup, currency=ils,
         invoice_date="2026-06-01", is_posted=True)
     PurchaseInvoiceItem.objects.create(
-        invoice=inv, product=product, name="صنف",
+        invoice=inv, product=product, name="منتج",
         quantity=Decimal("1"), unit_price=Decimal("5"), total_price=Decimal("5"))
 
     links = product_linked_invoices(tenant_id=tenant.TenantID, product_id=product.id)
@@ -108,14 +108,14 @@ def test_cost_breakdown_weighted_avg_ignores_sold_qty(env):
         tenant=tenant, invoice_number="P-1", partner=sup, currency=ils,
         invoice_date="2026-06-01", is_posted=True)
     PurchaseInvoiceItem.objects.create(
-        invoice=inv1, product=product, name="صنف",
+        invoice=inv1, product=product, name="منتج",
         quantity=Decimal("10"), unit_price=Decimal("100"), total_price=Decimal("1000"))
     # فاتورة 2: 30 وحدة بإجمالي 2800 → سعر وحدة 93.3333
     inv2 = PurchaseInvoice.objects.create(
         tenant=tenant, invoice_number="P-2", partner=sup, currency=ils,
         invoice_date="2026-06-05", is_posted=True)
     PurchaseInvoiceItem.objects.create(
-        invoice=inv2, product=product, name="صنف",
+        invoice=inv2, product=product, name="منتج",
         quantity=Decimal("30"), unit_price=Decimal("93.3333"), total_price=Decimal("2800"))
 
     res = product_cost_breakdown(tenant_id=tenant.TenantID, product_id=product.id)
@@ -135,7 +135,7 @@ def test_cost_breakdown_landed_cost_priority(env):
         tenant=tenant, invoice_number="P-L", partner=sup, currency=ils,
         invoice_date="2026-06-01", is_posted=True)
     PurchaseInvoiceItem.objects.create(
-        invoice=inv, product=product, name="صنف",
+        invoice=inv, product=product, name="منتج",
         quantity=Decimal("10"), unit_price=Decimal("100"), total_price=Decimal("1000"),
         landed_unit_price_ils=Decimal("120"))
 
@@ -153,7 +153,7 @@ def test_set_avg_cost_from_purchases(env):
         tenant=tenant, invoice_number="P-1", partner=sup, currency=ils,
         invoice_date="2026-06-01", is_posted=True)
     PurchaseInvoiceItem.objects.create(
-        invoice=inv, product=product, name="صنف",
+        invoice=inv, product=product, name="منتج",
         quantity=Decimal("40"), unit_price=Decimal("95"), total_price=Decimal("3800"))
     avg = set_avg_cost_from_purchases(product)
     assert avg == Decimal("95.0000")
@@ -178,7 +178,7 @@ def test_reconcile_cogs_fixes_sell_before_buy(env):
         tenant=tenant, invoice_number="P-1", partner=sup, currency=ils,
         invoice_date="2026-06-05", is_posted=True)
     PurchaseInvoiceItem.objects.create(
-        invoice=inv, product=product, name="صنف",
+        invoice=inv, product=product, name="منتج",
         quantity=Decimal("40"), unit_price=Decimal("95"), total_price=Decimal("3800"))
 
     preview = reconcile_product_cogs(tenant_id=tenant.TenantID, product_id=product.id, apply=False)
@@ -229,7 +229,7 @@ class ProductProfileEndpointTest(APITestCase):
         cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
         cls.tenant = create_company("شركة بطاقة", cls.user)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="PPE-1", name_ar="صنف", quantity_on_hand=0, avg_cost=Decimal("0"))
+            tenant=cls.tenant, sku="PPE-1", name_ar="منتج", quantity_on_hand=0, avg_cost=Decimal("0"))
         record_stock_movement(
             product=cls.product, movement_type="IN", quantity=Decimal("4"),
             unit_cost=Decimal("2"), movement_date="2026-06-01", tenant=cls.tenant)
@@ -255,14 +255,14 @@ class ProductProfileEndpointTest(APITestCase):
 
 
 def test_profile_exposes_sale_price_and_margin(env):
-    """كرت الصنف: «سعر البيع» حقل محفوظ بجانب «سعر التكلفة»، والربح والهامش
+    """كرت المنتج: «سعر البيع» حقل محفوظ بجانب «سعر التكلفة»، والربح والهامش
     مشتقّان منهما — لا تُحسب في الواجهة فيختلف رقمان لحقيقة واحدة."""
     tenant, _ils, sup, product = env
     inv = PurchaseInvoice.objects.create(
         tenant=tenant, invoice_number="P-SP", partner=sup, currency=_ils,
         invoice_date="2026-06-01", is_posted=True)
     PurchaseInvoiceItem.objects.create(
-        invoice=inv, product=product, name="صنف",
+        invoice=inv, product=product, name="منتج",
         quantity=Decimal("10"), unit_price=Decimal("100"), total_price=Decimal("1000"))
     set_avg_cost_from_purchases(product)
     product.sale_price = Decimal("150")
@@ -303,10 +303,10 @@ def test_profile_sale_price_falls_back_to_last_invoice(env):
 
 
 def test_product_profile_exposes_active_reservation(env):
-    """T-RESERVE: كرت الصنف يُظهر المحجوز والمتاح — الحجز لا يُرى إلا إن عُرض.
+    """T-RESERVE: كرت المنتج يُظهر المحجوز والمتاح — الحجز لا يُرى إلا إن عُرض.
 
     الحجز مشتقّ من طلبيات مؤكَّدة سارية (`sales.reserved_quantity_map`) — نفس
-    مصدر جدول الأصناف، فلا رقمان لحقيقة واحدة.
+    مصدر جدول المنتجات، فلا رقمان لحقيقة واحدة.
     """
     from datetime import date, timedelta
 

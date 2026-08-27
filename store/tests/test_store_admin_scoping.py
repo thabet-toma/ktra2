@@ -30,17 +30,17 @@ class StoreAdminScopingTest(TestCase):
         cls.other.save()
 
         cls.p_pub = Product.objects.create(
-            tenant=cls.tenant, sku="A-01", name_ar="صنف منشور",
+            tenant=cls.tenant, sku="A-01", name_ar="منتج منشور",
             is_for_sale_online=True, online_price=Decimal("100.00"),
             quantity_on_hand=Decimal("5"), uom=cls.uom,
         )
         cls.p_hidden = Product.objects.create(
-            tenant=cls.tenant, sku="A-02", name_ar="صنف غير منشور",
+            tenant=cls.tenant, sku="A-02", name_ar="منتج غير منشور",
             is_for_sale_online=False, online_price=Decimal("999.00"),
             quantity_on_hand=Decimal("5"), uom=cls.uom,
         )
         cls.p_foreign = Product.objects.create(
-            tenant=cls.other, sku="B-01", name_ar="صنف شركة أخرى",
+            tenant=cls.other, sku="B-01", name_ar="منتج شركة أخرى",
             is_for_sale_online=True, online_price=Decimal("777.00"),
             quantity_on_hand=Decimal("5"), uom=cls.uom,
         )
@@ -74,7 +74,7 @@ class StoreAdminScopingTest(TestCase):
         self.assertEqual(featured["availability"], "available")
 
     def test_unpublished_featured_product_is_not_exposed(self):
-        """صنف غير منشور لا يتسرّب للزائر لمجرّد تعيينه منتجاً مميّزاً."""
+        """منتج غير منشور لا يتسرّب للزائر لمجرّد تعيينه منتجاً مميّزاً."""
         StoreCollection.objects.create(
             tenant=self.tenant, title="عروض", slug="offers",
             featured_product=self.p_hidden,
@@ -84,7 +84,7 @@ class StoreAdminScopingTest(TestCase):
         self.assertIsNone(res.json()["collection"]["featured_product"])
 
     def test_foreign_featured_product_is_not_exposed(self):
-        """صنف شركة أخرى لا يظهر على متجرنا العام."""
+        """منتج شركة أخرى لا يظهر على متجرنا العام."""
         StoreCollection.objects.create(
             tenant=self.tenant, title="حملة", slug="camp",
             featured_product=self.p_foreign,
@@ -143,7 +143,7 @@ class StoreAdminScopingTest(TestCase):
         """التصنيف مرجع كتابةٍ كغيره — لا يُقبل تصنيف شركة أخرى."""
         res = self.auth.post(
             "/api/store/admin/products/",
-            {"name_ar": "صنف جديد", "category": self.foreign_category.id},
+            {"name_ar": "منتج جديد", "category": self.foreign_category.id},
             format="json",
         )
         self.assertEqual(res.status_code, 400)
@@ -160,12 +160,12 @@ class StoreAdminScopingTest(TestCase):
         self.assertEqual(res.status_code, 400)
         self.assertFalse(StoreProductImage.objects.filter(product=self.p_foreign).exists())
 
-    # ── حذف صنف له حركة ────────────────────────────────────────────────
+    # ── حذف منتج له حركة ────────────────────────────────────────────────
 
     def test_delete_product_with_history_reports_conflict(self):
-        """صنف متجرٍ بِيع فعلاً لا يُحذف — والواجهة تُخبر بذلك بدل ادّعاء الحذف."""
+        """منتج متجرٍ بِيع فعلاً لا يُحذف — والواجهة تُخبر بذلك بدل ادّعاء الحذف."""
         sold = Product.objects.create(
-            tenant=self.tenant, sku="ST-SOLD1", name_ar="صنف متجر مبيع",
+            tenant=self.tenant, sku="ST-SOLD1", name_ar="منتج متجر مبيع",
             is_store_only=True, is_for_sale_online=True, uom=self.uom,
         )
         record_stock_movement(
@@ -179,9 +179,9 @@ class StoreAdminScopingTest(TestCase):
         self.assertFalse(sold.is_for_sale_online)
 
     def test_inventory_product_is_not_deletable_from_the_store_panel(self):
-        """صلاحية المتجر تسويقية — لا تهدم صنفاً مخزنياً ولو لم يتحرّك بعد."""
+        """صلاحية المتجر تسويقية — لا تهدم منتجاً مخزنياً ولو لم يتحرّك بعد."""
         stock_item = Product.objects.create(
-            tenant=self.tenant, sku="A-09", name_ar="صنف مخزني بكر",
+            tenant=self.tenant, sku="A-09", name_ar="منتج مخزني بكر",
             is_store_only=False, uom=self.uom,
         )
         res = self.auth.delete(f"/api/store/admin/products/{stock_item.id}/")
@@ -189,9 +189,9 @@ class StoreAdminScopingTest(TestCase):
         self.assertTrue(Product.objects.filter(pk=stock_item.pk).exists())
 
     def test_store_only_product_without_history_is_deletable(self):
-        """صنف المتجر الخالص يُحذف فعلاً — الحارس يضيّق ولا يقفل."""
+        """منتج المتجر الخالص يُحذف فعلاً — الحارس يضيّق ولا يقفل."""
         store_item = Product.objects.create(
-            tenant=self.tenant, sku="ST-AAA111", name_ar="صنف متجر",
+            tenant=self.tenant, sku="ST-AAA111", name_ar="منتج متجر",
             is_store_only=True, is_for_sale_online=True, uom=self.uom,
         )
         res = self.auth.delete(f"/api/store/admin/products/{store_item.id}/")

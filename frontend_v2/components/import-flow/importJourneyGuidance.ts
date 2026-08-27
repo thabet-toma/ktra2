@@ -125,7 +125,7 @@ export interface ImportStageDef {
 
 export const IMPORT_JOURNEY_STAGES: readonly ImportStageDef[] = [
   { key: "offer", order: 1, label: "عرض سعر الاستيراد", purpose: "اطلب سعراً من المورد الدولي وقرّر ملاءمته قبل الالتزام.", fallbackRoute: "/import-offers" },
-  { key: "deal", order: 2, label: "الصفقة", purpose: "العرض المقبول يصير صفقة بأصنافها وقيمتها — وهي المستند الذي يتتبّع كل ما بعده.", fallbackRoute: "/deals" },
+  { key: "deal", order: 2, label: "الصفقة", purpose: "العرض المقبول يصير صفقة بمنتجاتها وقيمتها — وهي المستند الذي يتتبّع كل ما بعده.", fallbackRoute: "/deals" },
   { key: "deal_payments", order: 3, label: "دفعات الصفقة", purpose: "ادفع للمورد على دفعات (عربون ثم رصيد) — كل دفعة مستقلة عن مرحلة الشحن.", fallbackRoute: "/deals" },
   { key: "shipment", order: 4, label: "الشحنة الدولية", purpose: "اضمم الصفقات الجاهزة إلى شحنة واحدة عند الوكيل.", fallbackRoute: "/import-flow" },
   { key: "freight", order: 5, label: "الشحن الدولي", purpose: "أثبت استحقاق الشحن على الوكيل بسعر صرفه — والدفع له خطوة مستقلة متى شئت.", fallbackRoute: "/import-flow" },

@@ -41,12 +41,12 @@ def _days_in_month(year: int, month: int) -> int:
 class WarrantyCard(models.Model):
     """بطاقة كفالة — نسخة الكفالة الفعلية لوحدة واحدة عند الزبون.
 
-    السياسة تعيش على الصنف (`Product.warranty_months`)؛ هذه هي النسخة المصروفة
+    السياسة تعيش على المنتج (`Product.warranty_months`)؛ هذه هي النسخة المصروفة
     منها: تُنشأ آلياً عند ترحيل فاتورة البيع لكل وحدة متسلسلة استُهلكت
     (`source=auto_sale`)، أو يدوياً لما لا وحدة متسلسلة له (`source=manual`).
 
     `end_date` **مخزَّن وقابل للتعديل** — التمديد مجاملةً قرارُ تاجر لا حساب،
-    وتخزينه يجعله واقعة مؤرَّخة لا نتيجة ضربٍ تتبدّل بتبدّل سياسة الصنف.
+    وتخزينه يجعله واقعة مؤرَّخة لا نتيجة ضربٍ تتبدّل بتبدّل سياسة المنتج.
     """
 
     SOURCE_AUTO_SALE = "auto_sale"
@@ -352,9 +352,9 @@ class ServiceOrderEvent(models.Model):
 
 
 class AfterSalesSettings(models.Model):
-    """إعدادات الوحدة لكل شركة — مثبِّت الحسابات والأصناف الافتراضية.
+    """إعدادات الوحدة لكل شركة — مثبِّت الحسابات والمنتجات الافتراضية.
 
-    الحساب والصنف يُنشآن من الكود ويُثبَّتان هنا (نمط حسابات الشيكات) بدل ردّ
+    الحساب والمنتج يُنشآن من الكود ويُثبَّتان هنا (نمط حسابات الشيكات) بدل ردّ
     استفسارٍ على المستخدم عند أول ترحيل: من لا يعرف رقم الحساب لن يعرفه لأننا
     سألناه.
     """
@@ -370,7 +370,7 @@ class AfterSalesSettings(models.Model):
     default_labour_product = models.ForeignKey(
         "inventory.Product", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="after_sales_labour_settings",
-        help_text="صنف خدمة «أجرة صيانة» الافتراضي في الفاتورة المولَّدة",
+        help_text="منتج خدمة «أجرة صيانة» الافتراضي في الفاتورة المولَّدة",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -4,7 +4,7 @@
  * مرآة «إرساليات الشراء». المستند نوعان يحكمهما وجود «الفاتورة المرتبطة»:
  *  - مرتبط بفاتورة ⇒ اسمه من الإعدادات (افتراضياً «إرسالية بيع»)، وبنوده من
  *    بنود تلك الفاتورة حصراً بكمياتها المتبقية.
- *  - بلا فاتورة ⇒ «سند تسليم» (بضاعة خرجت قبل فوترتها): يُحدَّد العميل وأصنافه،
+ *  - بلا فاتورة ⇒ «سند تسليم» (بضاعة خرجت قبل فوترتها): يُحدَّد العميل ومنتجاته،
  *    ويُرحَّل مقابل حساب «بضاعة مسلَّمة لم تُفوتَر».
  * التسميتان وإتاحة السند المستقل والتعديل — كلها من إعدادات المبيعات.
  */
@@ -157,7 +157,7 @@ export const DeliveryNotesPage: React.FC = () => {
   }, []);
 
   /**
-   * مراجع المحرّر: فواتير البيع المرحّلة + عملاء + أصناف + مستودعات.
+   * مراجع المحرّر: فواتير البيع المرحّلة + عملاء + منتجات + مستودعات.
    *
    * تُعرض **كل** الفواتير المرحّلة (رقم/تاريخ/عميل/إجمالي) كما في منتقي فواتير
    * الشراء؛ وما لا يقبل إرسالية يُعرَض غير قابل للاختيار بسببه لا مخفياً —
@@ -396,14 +396,14 @@ export const DeliveryNotesPage: React.FC = () => {
   const lineColumns: CommercialLineColumn<LineState>[] = [
     {
       key: "product_name",
-      header: "الصنف",
+      header: "المنتج",
       width: isStandalone ? "56%" : "30%",
       render: (line, idx) => (
         <KitAutocomplete
           value={line.product_name}
           options={options}
           onPick={(id) => pickRowItem(idx, Number(id))}
-          placeholder={isStandalone ? "ابحث عن صنف…" : "اختر من بنود الفاتورة…"}
+          placeholder={isStandalone ? "ابحث عن منتج…" : "اختر من بنود الفاتورة…"}
         />
       ),
     },
@@ -540,7 +540,7 @@ export const DeliveryNotesPage: React.FC = () => {
         ...(doc.notes ? [{ label: "ملاحظات", value: doc.notes }] : []),
       ],
       columns: [
-        { header: "الصنف", value: (l: DeliveryNoteDto["lines"][number]) => l.product_name },
+        { header: "المنتج", value: (l: DeliveryNoteDto["lines"][number]) => l.product_name },
         { header: "المفوتر", value: (l) => formatQuantity(l.ordered_quantity), numeric: true },
         { header: "المسلَّم في هذا المستند", value: (l) => formatQuantity(l.quantity), numeric: true },
         { header: "الباقي", value: (l) => formatQuantity(l.remaining_quantity), numeric: true },
@@ -563,7 +563,7 @@ export const DeliveryNotesPage: React.FC = () => {
           { header: "الفاتورة", value: (r) => r.invoice_number },
           { header: "التاريخ", value: (r) => formatDateLocalized(r.invoice_date) || "—" },
           { header: "العميل", value: (r) => r.partner_name },
-          { header: "الصنف", value: (r) => r.product_name },
+          { header: "المنتج", value: (r) => r.product_name },
           { header: "المفوتر", value: (r) => formatQuantity(r.quantity), numeric: true },
           { header: "المسلَّم", value: (r) => formatQuantity(r.delivered_quantity), numeric: true },
           { header: "الباقي", value: (r) => formatQuantity(r.remaining_quantity), numeric: true },
@@ -794,7 +794,7 @@ export const DeliveryNotesPage: React.FC = () => {
         <table className="ktra-grid">
           <thead>
             <tr>
-              <th>الصنف</th>
+              <th>المنتج</th>
               <th>المفوتر</th>
               <th>المسلَّم في هذا المستند</th>
               <th>المسلَّم تراكمياً</th>
@@ -968,10 +968,10 @@ export const DeliveryNotesPage: React.FC = () => {
             if (key === "quantity") updateLine(idx, { quantity: value });
           }}
           onAddLine={addLine}
-          addLineLabel={isStandalone ? "إضافة صنف" : "إضافة بند من الفاتورة"}
+          addLineLabel={isStandalone ? "إضافة منتج" : "إضافة بند من الفاتورة"}
           emptyHint={
             isStandalone
-              ? "لا توجد بنود — اضغط «إضافة صنف»"
+              ? "لا توجد بنود — اضغط «إضافة منتج»"
               : "لا توجد بنود — اضغط «إضافة بند من الفاتورة»"
           }
           banner={

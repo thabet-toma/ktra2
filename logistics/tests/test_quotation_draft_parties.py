@@ -1,11 +1,11 @@
-"""T-DRAFTPARTY: مورد وأصناف **مبدئية** داخل عرض السعر.
+"""T-DRAFTPARTY: مورد ومنتجات **مبدئية** داخل عرض السعر.
 
-القاعدة: العرض يقبل اسم مورد لم يُسجَّل واسم صنف غير موجود، ولا يُنشئ منهما شيئاً
-في دفتر الشركاء ولا في فهرس الأصناف.
+القاعدة: العرض يقبل اسم مورد لم يُسجَّل واسم منتج غير موجود، ولا يُنشئ منهما شيئاً
+في دفتر الشركاء ولا في فهرس المنتجات.
 
 المسار المحلي (طلبية/فاتورة) ما يزال يُجسّدهما لحظة التحويل بمطابقة الاسم أولاً.
 مسار **الصفقة** لم يعد كذلك منذ T113-1: العرض يُفتح محرّراً غير محفوظ، ويُحلّ
-المورد والصنف صراحةً قبل «حفظ» — فلا سجل ضمنيّ ولا سجل قبل الحفظ أصلاً.
+المورد والمنتج صراحةً قبل «حفظ» — فلا سجل ضمنيّ ولا سجل قبل الحفظ أصلاً.
 """
 from decimal import Decimal
 
@@ -33,7 +33,7 @@ class QuotationDraftPartiesTest(APITestCase):
             tenant=cls.tenant, name='مورد مسجَّل', partner_type='Supplier',
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku='DRAFT-1', name_ar='صنف مسجَّل',
+            tenant=cls.tenant, sku='DRAFT-1', name_ar='منتج مسجَّل',
         )
 
     def setUp(self):
@@ -55,7 +55,7 @@ class QuotationDraftPartiesTest(APITestCase):
             'is_shipping_included': False,
             'lines': [{
                 'seq': 1,
-                'name_snapshot': 'صنف مكتوب يدوياً',
+                'name_snapshot': 'منتج مكتوب يدوياً',
                 'quantity': '2.000',
                 'unit_price': '10.0000',
             }],
@@ -78,13 +78,13 @@ class QuotationDraftPartiesTest(APITestCase):
         self.assertIsNone(response.data['supplier'])
         self.assertEqual(response.data['supplier_name'], 'مصنع لم نتعامل معه بعد')
         self.assertTrue(response.data['is_draft_supplier'])
-        # الشرط الجوهري: لا شريك جديد ولا صنف جديد قبل التحويل.
+        # الشرط الجوهري: لا شريك جديد ولا منتج جديد قبل التحويل.
         self.assertEqual(Partner.objects.filter(tenant=self.tenant).count(), 1)
         self.assertEqual(Product.objects.filter(tenant=self.tenant).count(), 1)
         quotation = SupplierQuotation.objects.get(pk=response.data['id'])
         line = quotation.lines.get()
         self.assertIsNone(line.product_id)
-        self.assertEqual(line.name_snapshot, 'صنف مكتوب يدوياً')
+        self.assertEqual(line.name_snapshot, 'منتج مكتوب يدوياً')
         self.assertEqual(Decimal(response.data['grand_total']), Decimal('20.00'))
 
     def test_quotation_without_any_party_is_rejected(self):
@@ -125,7 +125,7 @@ class QuotationDraftPartiesTest(APITestCase):
             'items': [{
                 'product': self.product.id, 'seq': 1,
                 'quantity': '2.000', 'unit_price': '10.0000',
-                'name_snapshot': 'صنف مكتوب يدوياً',
+                'name_snapshot': 'منتج مكتوب يدوياً',
             }],
         }
         payload.update(overrides)
@@ -134,8 +134,8 @@ class QuotationDraftPartiesTest(APITestCase):
     def test_deal_creation_never_creates_a_partner_or_a_product(self):
         """T113-1 عكس القاعدة القديمة: مسار الصفقة لم يعد يُجسّد شيئاً ضمنياً.
 
-        المورد والصنف يُحلّان **صراحةً في المحرّر** قبل «حفظ»؛ الخادم لا يخترع
-        شريكاً ولا صنفاً من اسمٍ مكتوب — فلا يتضاعف دفتر الشركاء بلا قرار.
+        المورد والمنتج يُحلّان **صراحةً في المحرّر** قبل «حفظ»؛ الخادم لا يخترع
+        شريكاً ولا منتجاً من اسمٍ مكتوب — فلا يتضاعف دفتر الشركاء بلا قرار.
         """
         created = self.create_quotation()
         quotation_id = created.data['id']
@@ -165,7 +165,7 @@ class QuotationDraftPartiesTest(APITestCase):
         self.assertIsNone(quotation.supplier_id)
         self.assertEqual(quotation.supplier_draft_name, 'مصنع لم نتعامل معه بعد')
         self.assertIsNone(quotation.lines.get().product_id)
-        self.assertEqual(quotation.lines.get().name_snapshot, 'صنف مكتوب يدوياً')
+        self.assertEqual(quotation.lines.get().name_snapshot, 'منتج مكتوب يدوياً')
         self.assertEqual(quotation.status, SupplierQuotation.STATUS_CONVERTED)
 
     def test_local_order_conversion_materializes_too(self):

@@ -1,4 +1,4 @@
-"""أعد احتساب متوسط تكلفة كل صنف بطريقة «تكلفة المنتجات»: متوسط أسعار وحدات فواتير
+"""أعد احتساب متوسط تكلفة كل منتج بطريقة «تكلفة المنتجات»: متوسط أسعار وحدات فواتير
 الشراء مرجّحاً بكمية كل فاتورة (Σ تكلفة الفواتير ÷ Σ كميات الشراء) — المقام إجمالي
 المشترى لا الكمية الحالية، فلا ينحرف المتوسط بسبب البيع قبل وصول الشراء.
 
@@ -16,7 +16,7 @@ from inventory.services import product_cost_breakdown
 
 
 class Command(BaseCommand):
-    help = "إعادة احتساب avg_cost لكل صنف من فواتير الشراء (متوسط مرجّح بالكمية)."
+    help = "إعادة احتساب avg_cost لكل منتج من فواتير الشراء (متوسط مرجّح بالكمية)."
 
     def add_arguments(self, parser):
         parser.add_argument('--apply', action='store_true', help='طبّق التغيير فعلياً.')
@@ -47,6 +47,6 @@ class Command(BaseCommand):
                 p.save(update_fields=['avg_cost'])
 
         verb = 'حُدِّث' if apply else 'سيُحدَّث'
-        self.stdout.write(self.style.SUCCESS(f"\n{verb}: {changed} صنف."))
+        self.stdout.write(self.style.SUCCESS(f"\n{verb}: {changed} منتج."))
         if not apply and changed:
             self.stdout.write("أعد التشغيل بـ --apply لتطبيق التغيير.")

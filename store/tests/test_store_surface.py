@@ -1,4 +1,4 @@
-"""تصليب السطح العام: إبطال كاش النشر، ترقيم الحملات، وانتقاء الأصناف بمعرّفاتها."""
+"""تصليب السطح العام: إبطال كاش النشر، ترقيم الحملات، وانتقاء المنتجات بمعرّفاتها."""
 from decimal import Decimal
 
 from django.contrib.auth.models import User
@@ -34,7 +34,7 @@ class StorePublicSurfaceTest(TestCase):
 
         cls.published = [
             Product.objects.create(
-                tenant=cls.tenant, sku=f"S-{i:02d}", name_ar=f"صنف {i}",
+                tenant=cls.tenant, sku=f"S-{i:02d}", name_ar=f"منتج {i}",
                 is_for_sale_online=True, online_price=Decimal("10.00"),
                 quantity_on_hand=Decimal("5"), uom=cls.uom,
             )
@@ -52,11 +52,11 @@ class StorePublicSurfaceTest(TestCase):
 
     @REAL_CACHE
     def test_publishing_a_product_shows_it_immediately(self):
-        """نشر صنف يظهر فوراً — الكاش لا يحجبه دقيقةً كاملة."""
+        """نشر منتج يظهر فوراً — الكاش لا يحجبه دقيقةً كاملة."""
         before = self.public.get("/api/store/surface/products/").json()["count"]
 
         hidden = Product.objects.create(
-            tenant=self.tenant, sku="S-NEW", name_ar="صنف جديد",
+            tenant=self.tenant, sku="S-NEW", name_ar="منتج جديد",
             is_for_sale_online=False, online_price=Decimal("20.00"),
             quantity_on_hand=Decimal("3"), uom=self.uom,
         )
@@ -72,7 +72,7 @@ class StorePublicSurfaceTest(TestCase):
 
     @REAL_CACHE
     def test_unpublishing_a_product_hides_it_immediately(self):
-        """سحب صنف من المتجر يُخفيه فوراً — لا يبقى مطلوباً دقيقةً بعد سحبه."""
+        """سحب منتج من المتجر يُخفيه فوراً — لا يبقى مطلوباً دقيقةً بعد سحبه."""
         target = self.published[0]
         self.public.get("/api/store/surface/products/")  # يملأ الكاش
 
@@ -93,7 +93,7 @@ class StorePublicSurfaceTest(TestCase):
         other.store_slug = "surface2"
         other.save()
         Product.objects.create(
-            tenant=other, sku="O-01", name_ar="صنف الأخرى",
+            tenant=other, sku="O-01", name_ar="منتج الأخرى",
             is_for_sale_online=True, online_price=Decimal("30.00"),
             quantity_on_hand=Decimal("1"), uom=self.uom,
         )
@@ -144,7 +144,7 @@ class StorePublicSurfaceTest(TestCase):
         other_user = User.objects.create_user(username="surf3", password="pw123456")
         other = create_company("ثالثة", other_user)
         foreign = Product.objects.create(
-            tenant=other, sku="F-01", name_ar="صنف أجنبي",
+            tenant=other, sku="F-01", name_ar="منتج أجنبي",
             is_for_sale_online=True, online_price=Decimal("50.00"),
             quantity_on_hand=Decimal("1"), uom=self.uom,
         )

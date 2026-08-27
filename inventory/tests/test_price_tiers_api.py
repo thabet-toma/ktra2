@@ -1,6 +1,6 @@
 """T-ITEMS M5 — الحقول التي كانت تُعرض ولا تُحفظ.
 
-شرائح الأسعار وتجاوزات الحسابات والوحدات الإضافية كانت في كرت الصنف حقولاً
+شرائح الأسعار وتجاوزات الحسابات والوحدات الإضافية كانت في كرت المنتج حقولاً
 يملؤها المستخدم ويقرأ «تم الحفظ» ثم لا يجد شيئاً: لا نقطة تكتبها. الشرائح
 خصوصاً ليست زينة — `core/pricing.py` يقرأ شريحة البيع الأولى كمصدرٍ للسعر.
 """
@@ -45,7 +45,7 @@ class ProductRealFieldsTest(APITestCase):
     # ── شرائح الأسعار ──
     def test_price_tiers_round_trip(self):
         res = self._post({
-            "name_ar": "صنف بشرائح",
+            "name_ar": "منتج بشرائح",
             "price_tiers": [
                 {"tier_type": "sale", "tier_number": 1, "price": "100",
                  "currency": self.currency.pk, "tax_inclusive": False},
@@ -64,7 +64,7 @@ class ProductRealFieldsTest(APITestCase):
 
     def test_resaving_updates_in_place_and_does_not_duplicate(self):
         pid = self._post({
-            "name_ar": "صنف",
+            "name_ar": "منتج",
             "price_tiers": [{"tier_type": "sale", "tier_number": 1, "price": "100",
                              "currency": self.currency.pk}],
         }).json()["id"]
@@ -80,7 +80,7 @@ class ProductRealFieldsTest(APITestCase):
 
     def test_omitting_tiers_keeps_them_but_empty_list_clears(self):
         pid = self._post({
-            "name_ar": "صنف",
+            "name_ar": "منتج",
             "price_tiers": [{"tier_type": "sale", "tier_number": 1, "price": "100",
                              "currency": self.currency.pk}],
         }).json()["id"]
@@ -98,7 +98,7 @@ class ProductRealFieldsTest(APITestCase):
         from core.pricing import resolve_sales_price
 
         pid = self._post({
-            "name_ar": "صنف مسعَّر بالشريحة",
+            "name_ar": "منتج مسعَّر بالشريحة",
             "price_tiers": [{"tier_type": "sale", "tier_number": 1, "price": "77",
                              "currency": self.currency.pk}],
         }).json()["id"]
@@ -112,7 +112,7 @@ class ProductRealFieldsTest(APITestCase):
     def test_account_overrides_round_trip(self):
         account = Account.objects.filter(tenant=self.t_a).first()
         assert account is not None, "الشركة الجديدة تأتي بشجرة حسابات"
-        pid = self._post({"name_ar": "صنف بحساب"}).json()["id"]
+        pid = self._post({"name_ar": "منتج بحساب"}).json()["id"]
 
         res = self._patch(pid, {"sale_account_override": account.pk})
         assert res.status_code in (200, 202), res.content[:400]
@@ -121,7 +121,7 @@ class ProductRealFieldsTest(APITestCase):
     def test_foreign_account_override_rejected(self):
         foreign = Account.objects.filter(tenant=self.t_b).first()
         assert foreign is not None
-        pid = self._post({"name_ar": "صنف"}).json()["id"]
+        pid = self._post({"name_ar": "منتج"}).json()["id"]
 
         res = self._patch(pid, {"sale_account_override": foreign.pk})
         assert res.status_code == 400, res.content[:400]
@@ -131,7 +131,7 @@ class ProductRealFieldsTest(APITestCase):
     # ── الوحدات الإضافية والوصف والموقع ──
     def test_extra_units_description_and_location_are_saved(self):
         box = UnitOfMeasure.objects.create(code="BOX", name_ar="كرتونة", name_en="Box")
-        pid = self._post({"name_ar": "صنف"}).json()["id"]
+        pid = self._post({"name_ar": "منتج"}).json()["id"]
 
         res = self._patch(pid, {
             "uom2": box.pk, "uom2_factor": "12",
@@ -145,18 +145,18 @@ class ProductRealFieldsTest(APITestCase):
         assert product.storage_location == "رفّ A-3"
 
     def test_item_card_full_payload_loses_nothing(self):
-        """حارس الصنف الذي كان يكذب: حمولة الكرت كاملةً تعود كما أُرسلت.
+        """حارس المنتج الذي كان يكذب: حمولة الكرت كاملةً تعود كما أُرسلت.
 
         العطل الأصلي لم يكن في حقلٍ بعينه بل في **صمت** DRF: أي مفتاح خارج
         `Meta.fields` يُرمى بلا خطأ، فتقول الشاشة «تم الحفظ» ولا شيء حُفظ. هذا
-        الاختبار يرسل ما يرسله كرت الصنف فعلاً ويقارن الوارد بالصادر حقلاً حقلاً.
+        الاختبار يرسل ما يرسله كرت المنتج فعلاً ويقارن الوارد بالصادر حقلاً حقلاً.
         """
         box = UnitOfMeasure.objects.create(code="BX2", name_ar="صندوق", name_en="Box")
         piece = UnitOfMeasure.objects.create(code="PC2", name_ar="حبة", name_en="Piece")
         account = Account.objects.filter(tenant=self.t_a).first()
 
         payload = {
-            "name_ar": "صنف الكرت الكامل", "name_en": "Full card item",
+            "name_ar": "منتج الكرت الكامل", "name_en": "Full card item",
             "brand": "روك بيلد", "variant_group": "195/65/15",
             "min_stock_level": 5, "max_stock_level": 50,
             "sale_price": 199.5,
@@ -175,7 +175,7 @@ class ProductRealFieldsTest(APITestCase):
         assert created.status_code == 201, created.content[:400]
         body = self._get(created.json()["id"]).json()
 
-        assert body["name_ar"] == "صنف الكرت الكامل"
+        assert body["name_ar"] == "منتج الكرت الكامل"
         assert body["brand"] == "روك بيلد"
         assert body["uom_id"] == piece.pk
         assert body["uom_name"] == "حبة"
@@ -186,13 +186,13 @@ class ProductRealFieldsTest(APITestCase):
         assert body["sale_account_override"] == account.pk
         assert body["warranty_months"] == 12
         assert len(body["price_tiers"]) == 1
-        # «النوع» يُنشئ تصنيفَ مجموعةٍ خادمياً (task31) — والصنف يبقى داخله.
+        # «النوع» يُنشئ تصنيفَ مجموعةٍ خادمياً (task31) — والمنتج يبقى داخله.
         assert body["variant_group"] == "195/65/15"
 
     def test_internal_description_is_separate_from_store_description(self):
         """وصف المتجر يراه العالم؛ البيان الداخلي لا — فلا يدوس أحدهما الآخر."""
         pid = self._post({
-            "name_ar": "صنف",
+            "name_ar": "منتج",
             "description": "ملاحظة داخلية",
             "online_description": "نصّ التسويق",
         }).json()["id"]

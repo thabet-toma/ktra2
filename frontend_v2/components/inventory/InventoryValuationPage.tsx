@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
 
-/** P0-5: صف التقييم الخادمي — تجميعات لكل صنف بدل كل حركات المخزون. */
+/** P0-5: صف التقييم الخادمي — تجميعات لكل منتج بدل كل حركات المخزون. */
 interface ValuationServerRow {
   id: number;
   sku: string;
@@ -60,7 +60,7 @@ const METHOD_LABELS: Record<ValuationMethod, string> = {
 const BONUS_LABELS: Record<BonusCalc, string> = {
   none: "بدون احتساب",
   from_movements: "من الحركات",
-  from_card: "من كارت الصنف",
+  from_card: "من كارت المنتج",
 };
 
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
@@ -109,7 +109,7 @@ export const InventoryValuationPage: React.FC = () => {
     setLoading(true);
     setErr(null);
     try {
-      // P0-5: نداء تجميعي واحد (~صف/صنف) بدل جلب كل الأصناف + كل الحركات.
+      // P0-5: نداء تجميعي واحد (~صف/منتج) بدل جلب كل المنتجات + كل الحركات.
       const res = await inventoryApi.getStockValuation(
         asOfDate ? { as_of: asOfDate } : undefined,
       );
@@ -162,14 +162,14 @@ export const InventoryValuationPage: React.FC = () => {
   const grandTotal = useMemo(() => rows.reduce((s, r) => s + r.totalValue, 0), [rows]);
 
   const columns: DenseColumn<ValuationRow>[] = [
-    { key: "sku", header: "رقم الصنف", width: "110px", render: (r) => <b>{r.sku}</b> },
-    { key: "name", header: "اسم الصنف", render: (r) => (
-        // اسم الصنف قابل للنقر — يفتح حركة مخزون الصنف.
+    { key: "sku", header: "رقم المنتج", width: "110px", render: (r) => <b>{r.sku}</b> },
+    { key: "name", header: "اسم المنتج", render: (r) => (
+        // اسم المنتج قابل للنقر — يفتح حركة مخزون المنتج.
         <button
           type="button"
           className="text-blue-700 hover:underline text-right"
           onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(r.id)); }}
-          title="فتح حركة مخزون الصنف"
+          title="فتح حركة مخزون المنتج"
         >
           {r.name}
         </button>
@@ -205,7 +205,7 @@ export const InventoryValuationPage: React.FC = () => {
 
   const footer = hasRun ? (
     <span style={{ fontWeight: 700, color: "var(--ktra-ink)" }}>
-      إجمالي قيمة البضاعة ({rows.length} صنف):{" "}
+      إجمالي قيمة البضاعة ({rows.length} منتج):{" "}
       <span style={{ color: "var(--ktra-accent, #1857a4)" }}>{fmt(grandTotal)}</span>
     </span>
   ) : undefined;
@@ -223,7 +223,7 @@ export const InventoryValuationPage: React.FC = () => {
         </strong>
         {hasRun && (
           <span className="ktra-status-item">
-            <b>{rows.length}</b> صنف — إجمالي: <b>{fmt(grandTotal)}</b>
+            <b>{rows.length}</b> منتج — إجمالي: <b>{fmt(grandTotal)}</b>
           </span>
         )}
         <div style={{ flex: 1 }} />
@@ -310,7 +310,7 @@ export const InventoryValuationPage: React.FC = () => {
           <label className="ktra-field-label">بحث</label>
           <input
             className="ktra-input"
-            placeholder="SKU / اسم الصنف…"
+            placeholder="SKU / اسم المنتج…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />

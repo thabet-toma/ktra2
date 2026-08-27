@@ -363,7 +363,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
       {fld("إجراء الباركود", (
         <select className="ktra-input" value={settings?.barcode_action || "index"}
           onChange={(e) => upd("barcode_action", e.target.value)}>
-          <option value="index">فتح فهرس الأصناف</option>
+          <option value="index">فتح فهرس المنتجات</option>
           <option value="cashier">فتح فاتورة كاشير</option>
         </select>
       ))}
@@ -461,9 +461,9 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
   // THA-111: غرض الحقل يقود ما تعرضه الشجرة وما يُختار منه — لا شرط محلي هنا.
   const accountsTab = (
     <KitFormSection title="الحسابات المحاسبية الافتراضية" cols={2}>
-      {fld("حساب الإيراد (منتج)", (
+      {fld("حساب إيراد البضائع", (
         <AccountTreeField accounts={accounts} value={salesSettings?.default_revenue_account_product || ""}
-          onChange={(id) => updSales("default_revenue_account_product", id)} purpose="revenue" allowParents title="حساب الإيراد (منتج)" />
+          onChange={(id) => updSales("default_revenue_account_product", id)} purpose="revenue" allowParents title="حساب إيراد البضائع" />
       ))}
       {fld("حساب الإيراد (خدمة)", (
         <AccountTreeField accounts={accounts} value={salesSettings?.default_revenue_account_service || ""}

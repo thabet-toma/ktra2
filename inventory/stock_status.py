@@ -1,10 +1,10 @@
-"""T-REORDER: مصدر الحقيقة الوحيد لحالة مخزون الصنف.
+"""T-REORDER: مصدر الحقيقة الوحيد لحالة مخزون المنتج.
 
 لماذا وحدةٌ لقاعدةٍ من سطرين: كانت القاعدة مكتوبة **ستّ مرّات** — في
-`inventory/serializers.py` (بطاقة الصنف)، وفي `inventory/views.py` (فلتر الجدول)،
+`inventory/serializers.py` (بطاقة المنتج)، وفي `inventory/views.py` (فلتر الجدول)،
 وفي `core/dashboard_api.py` (عدّادات الصفحة الأولى)، وفي `core/reports/inventory.py`
 (تقرير تحت حدّ الطلب)، وفي شاشتَي `StockLevelsPage` و`ItemsManagement`. وتباعدت
-فعلاً لا احتمالاً: الداشبورد كان يشترط وجود حدٍّ أدنى **قبل** أن يعدّ صنفاً نافداً
+فعلاً لا احتمالاً: الداشبورد كان يشترط وجود حدٍّ أدنى **قبل** أن يعدّ منتجاً نافداً
 فيخفي أغلب النافد، والشاشة كانت تصبغ كلّ رصيدٍ صفر بلون «منخفض» بينما الخادم
 يسمّيه «نفذ». رقمان مختلفان لسؤالٍ واحد على شاشتين.
 
@@ -12,7 +12,7 @@
 
 1. **الحالة تُقاس على «المتاح» لا على «الرصيد».** المتاح = الرصيد − المحجوز،
    والمحجوز من `sales.services.reserved_quantity_map` — نفس مصدر حارس البيع.
-   صنفٌ رصيده عشرة وكلّه محجوزٌ لزبون ليس متوفّراً لزبونٍ آخر.
+   منتجٌ رصيده عشرة وكلّه محجوزٌ لزبون ليس متوفّراً لزبونٍ آخر.
 2. **«نفذ» لا يشترط حدّاً أدنى.** المتاح ≤ 0 نفادٌ سواء ضُبط له حدّ أم لا — وهذا
    هو العيب الذي كان يُخفي أغلب الكتالوج عن عدّاد الداشبورد.
 3. **الحدّ الفعّال يقبل بديلاً محسوباً.** إن لم يضبط المستخدم `min_stock_level`
@@ -57,7 +57,7 @@ def _dec(value) -> Decimal:
 
 
 def reserved_of(product, reserved_map=None) -> Decimal:
-    """المحجوز لهذا الصنف من خريطة الحجز (فارغةٌ = لا حجز)."""
+    """المحجوز لهذا المنتج من خريطة الحجز (فارغةٌ = لا حجز)."""
     if not reserved_map:
         return ZERO
     return _dec(reserved_map.get(getattr(product, "id", None) or getattr(product, "pk", None)))
@@ -88,7 +88,7 @@ def effective_max(product, suggested_max=None) -> Decimal:
 
 
 def stock_status_of(product, *, reserved_map=None, suggested_min=None, suggested_max=None) -> str:
-    """حالة الصنف الواحد — نفس ترتيب القرار الذي يطبّقه `filter_by_stock_status`."""
+    """حالة المنتج الواحد — نفس ترتيب القرار الذي يطبّقه `filter_by_stock_status`."""
     if getattr(product, "is_service", False):
         return STATUS_IN_STOCK
     available = available_of(product, reserved_map)
@@ -106,8 +106,8 @@ def stock_status_of(product, *, reserved_map=None, suggested_min=None, suggested
 def available_expression(reserved_map=None):
     """تعبير ORM للمتاح — يطابق `available_of` صفّاً بصفّ.
 
-    الحجز مشتقٌّ من الطلبيات لا عمودٌ على الصنف، فلا سبيل لطرحه في SQL إلا
-    بحقنه. حُقن كـ`CASE` على معرّفات الأصناف المحجوزة وحدها (وهي قلّة: بنود
+    الحجز مشتقٌّ من الطلبيات لا عمودٌ على المنتج، فلا سبيل لطرحه في SQL إلا
+    بحقنه. حُقن كـ`CASE` على معرّفات المنتجات المحجوزة وحدها (وهي قلّة: بنود
     طلبيات مؤكَّدة لم ينتهِ حجزها) بدل استعلامٍ مترابط لكل صفّ — ذاك النمط قاس
     في هذا المستودع من قبل: رصيد الطرف في القوائم كلّف 17 ثانية.
     """
@@ -142,7 +142,7 @@ def _over_q():
 
 def _not_low_q():
     # نفيٌ مكتوبٌ صراحةً لا بـ`~Q`: العمود يقبل NULL، و`NOT (NULL > 0)` تعود
-    # NULL في MySQL — أي «كاذب» — فيسقط من «متوفّر» كلُّ صنفٍ بلا حدّ أدنى،
+    # NULL في MySQL — أي «كاذب» — فيسقط من «متوفّر» كلُّ منتجٍ بلا حدّ أدنى،
     # وهو معظم الكتالوج. الصمتُ هنا أسوأ من الخطأ.
     return Q(min_stock_level__isnull=True) | Q(min_stock_level__lte=0) | Q(
         available_qty__gt=F("min_stock_level"))

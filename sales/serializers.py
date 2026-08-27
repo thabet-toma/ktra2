@@ -67,7 +67,7 @@ def _validate_stock_lines(tenant, lines_data, stock_on_post: bool, *, is_return:
     """يمنع بيع كمية أكبر من الرصيد عند تفعيل خصم المخزون عند الترحيل.
 
     للمراجيع (`is_return`) البضاعة تدخل للمخزون (مرجع بيع) — لا فحص توفّر، بل
-    يُكتفى بالتحقق من الكمية الموجبة ووجود الصنف (يتم أدناه في create/update).
+    يُكتفى بالتحقق من الكمية الموجبة ووجود المنتج (يتم أدناه في create/update).
     """
     if not stock_on_post or not lines_data or is_return:
         return
@@ -85,15 +85,15 @@ def _validate_stock_lines(tenant, lines_data, stock_on_post: bool, *, is_return:
                 {"lines": "الكمية يجب أن تكون أكبر من صفر لكل سطر."}
             )
         if not pid:
-            raise serializers.ValidationError({"lines": "يجب اختيار صنف لكل سطر."})
+            raise serializers.ValidationError({"lines": "يجب اختيار منتج لكل سطر."})
         prod = _as_product(pid)
         if prod is None:
-            raise serializers.ValidationError({"lines": f"صنف غير موجود: {pid}"})
+            raise serializers.ValidationError({"lines": f"منتج غير موجود: {pid}"})
         if prod.tenant_id != tenant.TenantID:
             raise serializers.ValidationError(
-                {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
+                {"lines": f"المنتج {prod.sku} لا يتبع نفس الشركة."}
             )
-        # M2-14 + M3: المخزون السالب مسموح إن سمح الإعداد العام أو الصنف (الخدمة هي المرجع الوحيد)
+        # M2-14 + M3: المخزون السالب مسموح إن سمح الإعداد العام أو المنتج (الخدمة هي المرجع الوحيد)
         if global_allow or getattr(prod, "allow_negative_stock", False):
             continue
         if qty > prod.quantity_on_hand + Decimal("0.0001"):
@@ -601,11 +601,11 @@ class SalesInvoiceSerializer(
             prod = _as_product(row.get("product"))
             if prod is None:
                 raise serializers.ValidationError(
-                    {"lines": f"صنف غير موجود: {row.get('product')}"}
+                    {"lines": f"منتج غير موجود: {row.get('product')}"}
                 )
             if prod.tenant_id != tenant.TenantID:
                 raise serializers.ValidationError(
-                    {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
+                    {"lines": f"المنتج {prod.sku} لا يتبع نفس الشركة."}
                 )
         _is_return = validated_data.get("invoice_kind") in (
             SalesInvoice.INVOICE_KIND_SALE_RETURN,
@@ -686,11 +686,11 @@ class SalesInvoiceSerializer(
                     prod = _as_product(raw.get("product"))
                     if prod is None:
                         raise serializers.ValidationError(
-                            {"lines": f"صنف غير موجود: {raw.get('product')}"}
+                            {"lines": f"منتج غير موجود: {raw.get('product')}"}
                         )
                     if prod.tenant_id != tenant.TenantID:
                         raise serializers.ValidationError(
-                            {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
+                            {"lines": f"المنتج {prod.sku} لا يتبع نفس الشركة."}
                         )
                 stock_flag = validated_data.get("stock_on_post", instance.stock_on_post)
                 _upd_is_return = instance.invoice_kind in (
@@ -1243,7 +1243,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
                 product = line.get("product")
                 if product and product.tenant_id != tenant.TenantID:
                     raise serializers.ValidationError({
-                        "lines": f"الصنف في السطر {index} لا يتبع الشركة الحالية."
+                        "lines": f"المنتج في السطر {index} لا يتبع الشركة الحالية."
                     })
                 quantity = Decimal(str(line.get("quantity", 0) or 0))
                 unit_price = Decimal(str(line.get("unit_price", 0) or 0))
@@ -1436,7 +1436,7 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
                 product = line.get("product")
                 if product and product.tenant_id != tenant.TenantID:
                     raise serializers.ValidationError({
-                        "lines": f"الصنف في السطر {index} لا يتبع الشركة الحالية."
+                        "lines": f"المنتج في السطر {index} لا يتبع الشركة الحالية."
                     })
                 tax_rate = line.get("tax_rate")
                 if tax_rate and tax_rate.tenant_id != tenant.TenantID:

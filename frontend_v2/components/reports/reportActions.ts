@@ -7,7 +7,7 @@
  * فلا يتغيّر شيء في شكله ولا في سلوكه.
  *
  * وحده تقرير التجديد يحتاجها اليوم: قراءته تنتهي بقرار — «ثبّت هذه الحدود» —
- * وإرسال المستخدم إلى كرت كل صنفٍ ليكتب رقمين بيده يُبطل التقرير عملياً.
+ * وإرسال المستخدم إلى كرت كل منتجٍ ليكتب رقمين بيده يُبطل التقرير عملياً.
  */
 import { inventoryApi } from "../../services/inventoryApi";
 
@@ -28,7 +28,7 @@ export interface ReportActionContext {
   rerun: () => void | Promise<void>;
 }
 
-/** الأصناف التي لها اقتراحٌ فعلي — ما لا اقتراح له لا يُرسَل أصلاً. */
+/** المنتجات التي لها اقتراحٌ فعلي — ما لا اقتراح له لا يُرسَل أصلاً. */
 function applicableProductIds(rows: Record<string, unknown>[]): number[] {
   const ids: number[] = [];
   for (const row of rows) {
@@ -44,7 +44,7 @@ function applicableProductIds(rows: Record<string, unknown>[]): number[] {
 
 export function extraReportActions(ctx: ReportActionContext): ReportActionSpec[] {
   if (ctx.reportKey !== "stock-replenishment") return [];
-  // على مستوى «النوع» لا صفَّ لصنفٍ بعينه، فلا شيء يُكتب عليه.
+  // على مستوى «النوع» لا صفَّ لمنتجٍ بعينه، فلا شيء يُكتب عليه.
   if ((ctx.params.level || "item") !== "item") return [];
 
   return [{
@@ -53,14 +53,14 @@ export function extraReportActions(ctx: ReportActionContext): ReportActionSpec[]
     onClick: async () => {
       const ids = applicableProductIds(ctx.rows);
       if (ids.length === 0) {
-        ctx.toast("لا صنف في هذه النتيجة له اقتراحٌ يُثبَّت.", "info");
+        ctx.toast("لا منتج في هذه النتيجة له اقتراحٌ يُثبَّت.", "info");
         return;
       }
       const ok = await ctx.confirm({
         title: "تثبيت الحدود المقترَحة",
         message:
-          `سيُكتب الحدّ الأدنى والأقصى المقترَحان على ${ids.length} صنفاً، ` +
-          "ويحلّان محلّ أي حدٍّ يدويّ عليها. الأصناف بلا اقتراح لن تُمَسّ.",
+          `سيُكتب الحدّ الأدنى والأقصى المقترَحان على ${ids.length} منتجاً، ` +
+          "ويحلّان محلّ أي حدٍّ يدويّ عليها. المنتجات بلا اقتراح لن تُمَسّ.",
         confirmText: "تثبيت",
       });
       if (!ok) return;
@@ -68,8 +68,8 @@ export function extraReportActions(ctx: ReportActionContext): ReportActionSpec[]
       const skipped = res.skipped?.length ?? 0;
       ctx.toast(
         skipped > 0
-          ? `ثُبِّت الحدّ على ${res.applied} صنفاً، وتُرك ${skipped} بلا اقتراح.`
-          : `ثُبِّت الحدّ على ${res.applied} صنفاً.`,
+          ? `ثُبِّت الحدّ على ${res.applied} منتجاً، وتُرك ${skipped} بلا اقتراح.`
+          : `ثُبِّت الحدّ على ${res.applied} منتجاً.`,
         "success",
       );
       await ctx.rerun();

@@ -56,7 +56,7 @@ export function CommercialDocumentEditor<TLine>({
   status,
   banner,
   readOnly = false,
-  emptyHint = "لا توجد بنود — أضف صنفاً",
+  emptyHint = "لا توجد بنود — أضف منتجاً",
   overlay,
 }: Props<TLine>) {
   return (

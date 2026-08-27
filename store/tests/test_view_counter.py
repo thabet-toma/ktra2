@@ -21,7 +21,7 @@ class StoreViewCounterTest(TestCase):
             CompanyName="متجر العدّاد", SubscriptionPlan="Pro", Status="Active",
             store_slug="counter")
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="C-1", name_ar="صنف مشاهَد",
+            tenant=cls.tenant, sku="C-1", name_ar="منتج مشاهَد",
             is_for_sale_online=True, online_price=Decimal("9.00"),
             quantity_on_hand=Decimal("4"), avg_cost=Decimal("2"))
 

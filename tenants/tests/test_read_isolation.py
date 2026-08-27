@@ -27,7 +27,7 @@ class ReadIsolationTest(APITestCase):
         cls.partner_a = Partner.objects.create(tenant=cls.t_a, name="مورد قديم", partner_type="Supplier")
         Partner.objects.create(tenant=cls.t_a, name="زبون قديم", partner_type="Customer")
         cls.cat_a = ProductCategory.objects.create(tenant=cls.t_a, name="فئة قديمة")
-        cls.prod_a = Product.objects.create(tenant=cls.t_a, sku="OLD-1", name_ar="صنف قديم")
+        cls.prod_a = Product.objects.create(tenant=cls.t_a, sku="OLD-1", name_ar="منتج قديم")
         StockMovement.objects.create(
             tenant=cls.t_a, product=cls.prod_a, movement_type="IN",
             quantity=5, movement_date="2026-06-01",

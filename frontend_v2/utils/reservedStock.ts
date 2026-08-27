@@ -35,7 +35,7 @@ const num = (value: string | number | null | undefined): number => {
 };
 
 /**
- * يجمع صفوف الحجز لكل صنف. `excludeCustomerId` = زبون الفاتورة الحالية:
+ * يجمع صفوف الحجز لكل منتج. `excludeCustomerId` = زبون الفاتورة الحالية:
  * حجوزاته تُحسب في `ownReserved` ولا تدخل `reserved`.
  */
 export function buildReservationIndex(
@@ -87,7 +87,7 @@ export type ReservedSaleLine = {
   quantity: string | number;
   onHand: string | number;
   name: string;
-  /** الخدمة والصنف الذي يسمح بالسالب معفيان — كما في حارس الخادم. */
+  /** الخدمة والمنتج الذي يسمح بالسالب معفيان — كما في حارس الخادم. */
   exempt?: boolean;
 };
 
@@ -100,8 +100,8 @@ export type ReservedSaleWarning = {
 };
 
 /**
- * تنبيه لكل صنف تتجاوز كميتُه المتاحَ بعد الحجز. الكميات تُجمَّع لكل صنف —
- * سطران من نفس الصنف يزاحمان الحجز مجتمعَين لا كلٌّ على حدة (نفس تجميع الحارس).
+ * تنبيه لكل منتج تتجاوز كميتُه المتاحَ بعد الحجز. الكميات تُجمَّع لكل منتج —
+ * سطران من نفس المنتج يزاحمان الحجز مجتمعَين لا كلٌّ على حدة (نفس تجميع الحارس).
  */
 export function reservedSaleWarnings(
   lines: ReservedSaleLine[],

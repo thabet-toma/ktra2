@@ -2,7 +2,7 @@
  * N5-T4 — ItemForm (F6) — inside-out نمط Kit مع 6 صفحات
  * المرجع: المخازن.txt:11-25، القالب: SalesInvoiceEditor.tsx
  *
- * كرت الصنف الموحّد: صار هذا المكوّن هو الكرت الوحيد — الإضافة والتعديل والعرض.
+ * كرت المنتج الموحّد: صار هذا المكوّن هو الكرت الوحيد — الإضافة والتعديل والعرض.
  * تبويبات «نظرة عامة» و«الفواتير المرتبطة» و«حركة المخزون» تأتي من
  * `useProductInsights` (كانت حبيسة صفحة `ProductProfilePage` المنفصلة).
  */
@@ -116,11 +116,11 @@ const extractDatasheets = (p: Record<string, unknown>): DatasheetRef[] =>
 type FormState = {
   sku: string; name_ar: string; name_en: string;
   brand: string;
-  /** T-REORDER: «النوع» — موديلات النوع الواحد بدائلُ بعضها في البيع والطلب. */
+  /** T-REORDER: «الصنف» — موديلات الصنف الواحد بدائلُ بعضها في البيع والطلب. */
   variant_group: string;
-  /** T-SERIAL: باركود الصنف (EAN-13) — فريد داخل الشركة، يحرسه الخادم. */
+  /** T-SERIAL: باركود المنتج (EAN-13) — فريد داخل الشركة، يحرسه الخادم. */
   barcode: string;
-  /** T-SERIAL: تتبّع وحدات الصنف بأرقام تسلسلية. */
+  /** T-SERIAL: تتبّع وحدات المنتج بأرقام تسلسلية. */
   is_serialized: boolean;
   /** THA-24: سياسة كفالة الزبون بالأشهر — فارغ = بلا كفالة، فلا بطاقة تلقائية. */
   warranty_months: string;
@@ -135,7 +135,7 @@ type FormState = {
   uom2: number | null; uom2_factor: string;
   uom3: number | null; uom3_factor: string;
   min_stock_level: string; max_stock_level: string;
-  /** سعر البيع الافتراضي المحفوظ على الصنف (بجانب سعر التكلفة المحسوب). */
+  /** سعر البيع الافتراضي المحفوظ على المنتج (بجانب سعر التكلفة المحسوب). */
   sale_price: string;
   sale_tiers: PriceTier[];
   purchase_tiers: PriceTier[];
@@ -185,7 +185,7 @@ export const ItemForm: React.FC<Props> = ({
 }) => {
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
-  // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة/أرقام تسلسلية) — يتبع الصنف المعروض.
+  // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة/أرقام تسلسلية) — يتبع المنتج المعروض.
   const insights = useProductInsights(currentId, { isSerialized: form.is_serialized });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -194,7 +194,7 @@ export const ItemForm: React.FC<Props> = ({
   const [dsUploading, setDsUploading] = useState(false);
   const datasheetRef = useRef<HTMLDivElement>(null);
   // T-ITEMS M1: الكشف التدريجي — «بيانات عامة» تفتح على الحقول التي تلزم كل
-  // صنف، وما دونها خلف زرٍّ واحد. المستخدم المتقدّم يفتحه مرّةً ويبقى مفتوحاً
+  // منتج، وما دونها خلف زرٍّ واحد. المستخدم المتقدّم يفتحه مرّةً ويبقى مفتوحاً
   // ما دام الكرت مفتوحاً.
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [uoms, setUoms] = useState<Array<{ id: number; name_ar: string; name_en: string; code: string }>>([]);
@@ -211,7 +211,7 @@ export const ItemForm: React.FC<Props> = ({
   }, []);
 
   // مسار التصنيف المختار — يُعرض قبل الحفظ («سيُحفظ تحت: أ ‹ ب») كي لا يبقى
-  // موضع الصنف في الشجرة مفاجأةً تُكتشف بعد الحفظ.
+  // موضع المنتج في الشجرة مفاجأةً تُكتشف بعد الحفظ.
   const loadCategories = useCallback(() => {
     inventoryApi.getCategories().then(setCategories).catch(() => setCategories([]));
   }, []);
@@ -287,7 +287,7 @@ export const ItemForm: React.FC<Props> = ({
     if (!out) { setErr("اكتب رقماً أولاً، أو استخدم «توليد تلقائي»."); return; }
     setErr(null);
     patch("barcode", out.code);
-    setMsg(`${out.note} احفظ (F12) لتثبيته على الصنف.`);
+    setMsg(`${out.note} احفظ (F12) لتثبيته على المنتج.`);
   };
 
   /** رقم عشوائي غير مستخدم — خادمي عمداً: التفرّد يُفحص على قاعدة البيانات لا على الشاشة. */
@@ -296,7 +296,7 @@ export const ItemForm: React.FC<Props> = ({
     try {
       const barcode = await inventoryApi.generateBarcode();
       patch("barcode", barcode);
-      setMsg("وُلِّد باركود غير مستخدم — احفظ (F12) لتثبيته على الصنف.");
+      setMsg("وُلِّد باركود غير مستخدم — احفظ (F12) لتثبيته على المنتج.");
     } catch (ex: unknown) {
       setErr(ex instanceof Error ? ex.message : "تعذّر توليد الباركود");
     } finally {
@@ -320,10 +320,10 @@ export const ItemForm: React.FC<Props> = ({
     setForm((prev) => ({
       ...prev,
       sku: isDuplicate ? "" : String(p.sku ?? ""),
-      // الباركود يميّز صنفاً واحداً في الشركة — النسخة تبدأ بلا باركود لا بباركود أخيها.
+      // الباركود يميّز منتجاً واحداً في الشركة — النسخة تبدأ بلا باركود لا بباركود أخيها.
       barcode: isDuplicate ? "" : String(p.barcode ?? ""),
       is_serialized: Boolean(p.is_serialized),
-      // الكفالة سياسة الصنف لا حالة نسخةٍ منه — تُنسَخ مع النسخة لبراند آخر.
+      // الكفالة سياسة المنتج لا حالة نسخةٍ منه — تُنسَخ مع النسخة لبراند آخر.
       warranty_months: p.warranty_months != null ? String(p.warranty_months) : "",
       supplier_warranty_months:
         p.supplier_warranty_months != null ? String(p.supplier_warranty_months) : "",
@@ -346,7 +346,7 @@ export const ItemForm: React.FC<Props> = ({
       category: p.category ? Number(p.category) : null,
       category_name: String(p.category_name ?? ""),
       // is_service هو حقل الخادم الفعلي (يوجّه الترحيل لحساب مبيعات الخدمات)؛
-      // «نوع الصنف» في الواجهة يُشتقّ منه لا من حقل item_type غير الموجود خادمياً.
+      // «طبيعة المنتج» في الواجهة يُشتقّ منه لا من حقل item_type غير الموجود خادمياً.
       item_type: p.is_service ? "service" : "goods",
       // الشرائح تصل مسطّحةً من الخادم؛ توزَّع على الخمس بحسب رقمها.
       sale_tiers: tiersFromServer(p.price_tiers, "sale"),
@@ -361,7 +361,7 @@ export const ItemForm: React.FC<Props> = ({
       datasheets: isDuplicate ? [] : extractDatasheets(p),
     }));
     setCurrentId(isDuplicate ? null : Number(p.id));
-    setErr(null); setMsg(isDuplicate ? "أنت الآن تقوم بإضافة صنف جديد كنسخة من صنف آخر. قم بتغيير البراند أو الاسم." : null);
+    setErr(null); setMsg(isDuplicate ? "أنت الآن تقوم بإضافة منتج جديد كنسخة من منتج آخر. قم بتغيير البراند أو الاسم." : null);
   }, []);
 
   useEffect(() => {
@@ -378,14 +378,14 @@ export const ItemForm: React.FC<Props> = ({
   }, [productId, duplicateId, applyProduct]);
 
   const handleSave = async () => {
-    if (!form.name_ar.trim() && !form.name_en.trim()) { setErr("اسم الصنف مطلوب."); return; }
+    if (!form.name_ar.trim() && !form.name_en.trim()) { setErr("اسم المنتج مطلوب."); return; }
     setSaving(true); setErr(null); setMsg(null);
     try {
-      // T-ITEMS M1: الصنف يُحفَظ تحت التصنيف المختار حرفياً.
-      // كان هنا إنشاءٌ صامت لتصنيفٍ باسم الصنف نفسه يُجعل المختارُ أباً له —
+      // T-ITEMS M1: المنتج يُحفَظ تحت التصنيف المختار حرفياً.
+      // كان هنا إنشاءٌ صامت لتصنيفٍ باسم المنتج نفسه يُجعل المختارُ أباً له —
       // بمطابقة نصّية على تصنيفات الشركة كلها وخطأٍ مبتلَع — فلا يعرف المستخدم
-      // أين حُفظ صنفه ولا لماذا امتلأت شجرته بتصنيفاتٍ لم يُنشئها. التجميع
-      // يقوم به «النوع» (`variant_group`) وهو حقلٌ ظاهر يُكتب بقصد.
+      // أين حُفظ منتجه ولا لماذا امتلأت شجرته بتصنيفاتٍ لم يُنشئها. التجميع
+      // يقوم به «الصنف» (`variant_group`) وهو حقلٌ ظاهر يُكتب بقصد.
       const categoryId: number | null = form.category;
 
       // ProductSerializer.Meta.fields only — أي حقول إضافية سيَتجاهلها DRF بصمت.
@@ -420,7 +420,7 @@ export const ItemForm: React.FC<Props> = ({
         price_tiers: tiersToPayload(form.sale_tiers, form.purchase_tiers),
         // is_service: الحقل الفعلي الذي يقرأه الترحيل المحاسبي (مبيعات خدمات لا بضاعة).
         is_service: form.item_type === "service",
-        // T-SERIAL: الباركود فارغ = null لا "" — كي لا يتصادم صنفان بلا باركود.
+        // T-SERIAL: الباركود فارغ = null لا "" — كي لا يتصادم منتجان بلا باركود.
         barcode: form.barcode.trim() || null,
         is_serialized: form.is_serialized,
         // THA-24: فارغ = null لا 0 — «بلا كفالة» و«كفالة صفر شهر» شيء واحد،
@@ -441,7 +441,7 @@ export const ItemForm: React.FC<Props> = ({
         const created = await inventoryApi.createProduct(payload) as Record<string, unknown>;
         savedId = Number(created.id);
         setCurrentId(savedId);
-        setMsg(`تم إنشاء الصنف ${created.sku}.`);
+        setMsg(`تم إنشاء المنتج ${created.sku}.`);
       }
       // زامن معرّفات الداتا شيت بعد الحفظ: الرفوعات الجديدة صارت صفوفاً محفوظة لها id
       // (فيعمل زر الحذف من الخادم دون إعادة تحميل الصفحة). التزامن ليس حرجاً إن فشل.
@@ -488,11 +488,11 @@ export const ItemForm: React.FC<Props> = ({
     { key: "cancel", label: cancelLabel, icon: <X />, onClick: onCancel, danger: true },
   ];
 
-  // صنف جديد يفتح على حقول الإدخال؛ الصنف المحفوظ يفتح على نظرته العامة.
+  // منتج جديد يفتح على حقول الإدخال؛ المنتج المحفوظ يفتح على نظرته العامة.
   const openingTab = initialTab ?? (productId == null ? "general" : "overview");
   /**
    * THA-411: الكرت يتتبّع تبويبه النشط **بالمفتاح** لا بفهرس الغلاف.
-   * تبويب «الأرقام التسلسلية» يُلحق بعد وصول بيانات الصنف (`is_serialized`)، وفهرس
+   * تبويب «الأرقام التسلسلية» يُلحق بعد وصول بيانات المنتج (`is_serialized`)، وفهرس
    * الغلاف يُثبَّت عند أول رسم — فرابطٌ يقصده (`/products/{id}?tab=serials`) كان
    * يهبط على أول تبويب. المفتاح يصمد حتى لو تأخّر تبويبه، والنقر يبقى كما هو.
    */
@@ -508,14 +508,14 @@ export const ItemForm: React.FC<Props> = ({
   // ── صفحة 1: بيانات عامة ──
   const tabGeneral = (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, padding: "8px 4px" }}>
-      {/* ── الوضع البسيط: ما يلزم كلَّ صنف ────────────────────────────────
+      {/* ── الوضع البسيط: ما يلزم كلَّ منتج ────────────────────────────────
           الترتيب هو ترتيب الإدخال الفعلي: من يفتح الكرت يكتب الاسم فالتصنيف
           فالوحدة فالسعر ثم يحفظ. الباقي خلف «متقدم» — كشفٌ تدريجي لا إخفاء:
           الحقل موجود لمن يريده، وغائبٌ عمّن لا يريده. */}
-      {fld("اسم الصنف",
+      {fld("اسم المنتج",
         <input className="ktra-input ktra-input--hl" value={form.name_ar}
-          onChange={(e) => patch("name_ar", e.target.value)} placeholder="اسم الصنف" />, 2)}
-      {fld("اسم الصنف (إنجليزي)", <input className="ktra-input" value={form.name_en}
+          onChange={(e) => patch("name_ar", e.target.value)} placeholder="اسم المنتج" />, 2)}
+      {fld("اسم المنتج (إنجليزي)", <input className="ktra-input" value={form.name_en}
         onChange={(e) => patch("name_en", e.target.value)} />)}
       {fld("التصنيف",
         <CategoryPicker value={form.category} onChange={(id, name) => {
@@ -534,18 +534,18 @@ export const ItemForm: React.FC<Props> = ({
         value={form.sale_price} placeholder="فارغ = بلا سعر محفوظ"
         title="سعرٌ عام يدوي — يسبقه في الفاتورة آخر سعر بيع لهذا الزبون وعرضُ سعره"
         onChange={(e) => patch("sale_price", e.target.value)} />)}
-      {fld("نوع الصنف", <select className="ktra-input" value={form.item_type}
+      {fld("طبيعة المنتج", <select className="ktra-input" value={form.item_type}
         onChange={(e) => patch("item_type", e.target.value)}>
         {ITEM_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
       </select>)}
-      {fld("رقم الصنف (يولد تلقائياً إن ترك فارغاً)", <input className="ktra-input" value={form.sku}
+      {fld("رقم المنتج (يولد تلقائياً إن ترك فارغاً)", <input className="ktra-input" value={form.sku}
         onChange={(e) => patch("sku", e.target.value)} placeholder="تلقائي..." />)}
       {/* مِفصل الكشف التدريجي — صفٌّ كامل كي يُقرأ كفاصلٍ لا كحقل. */}
       <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
         <button type="button" className="ktra-addrow" style={{ margin: 0 }}
           aria-expanded={showAdvanced}
           onClick={() => setShowAdvanced((v) => !v)}>
-          {showAdvanced ? "▾ إخفاء المتقدم" : "▸ متقدم (باركود، براند، نوع، حدود مخزون، كفالات، ملفات)"}
+          {showAdvanced ? "▾ إخفاء المتقدم" : "▸ متقدم (باركود، براند، صنف، حدود مخزون، كفالات، ملفات)"}
         </button>
       </div>
       {!showAdvanced ? null : <>
@@ -587,8 +587,8 @@ export const ItemForm: React.FC<Props> = ({
             </div>
           )}
         </div>, 2)}
-      {/* T-SERIAL: التتبّع بالرقم التسلسلي — بجانب «نوع الصنف» (is_service) لأنهما
-          معاً يحدّدان ما إذا كان للصنف وحدات مادّية تُتتبَّع أصلاً. */}
+      {/* T-SERIAL: التتبّع بالرقم التسلسلي — بجانب «طبيعة المنتج» (is_service) لأنهما
+          معاً يحدّدان ما إذا كان للمنتج وحدات مادّية تُتتبَّع أصلاً. */}
       {/* غلاف span لا label: `fld` يلفّ الحقل بـ<label> أصلاً، و<label> داخل
           <label> يوصّل النقرة مرّتين فيعود المربّع كما كان — أي زرّ لا يعمل. */}
       {fld("تتبّع بالرقم التسلسلي",
@@ -609,7 +609,7 @@ export const ItemForm: React.FC<Props> = ({
         <input className="ktra-input" type="number" min="0" max="600" step="1"
           value={form.warranty_months}
           placeholder="فارغ = بلا كفالة"
-          title="تُنشأ بطاقة كفالة تلقائياً لكل وحدة مُرقَّمة تُباع من هذا الصنف، بدايتها تاريخ فاتورة البيع"
+          title="تُنشأ بطاقة كفالة تلقائياً لكل وحدة مُرقَّمة تُباع من هذا المنتج، بدايتها تاريخ فاتورة البيع"
           onChange={(e) => patch("warranty_months", e.target.value)} />)}
       {fld("كفالة المورد لنا (أشهر)",
         <input className="ktra-input" type="number" min="0" max="600" step="1"
@@ -621,15 +621,15 @@ export const ItemForm: React.FC<Props> = ({
         <ValuePicker value={form.brand} onChange={(b) => patch("brand", b)}
           fetchOptions={inventoryApi.getBrands}
           emptyLabel="— بدون براند —" addPlaceholder="مثال: روك بيلد" addTitle="إضافة براند جديد" />)}
-      {/* T-REORDER: «النوع» كان حقلاً خادمياً كاملاً (`variant_group`) بنقطته
+      {/* T-REORDER: «الصنف» كان حقلاً خادمياً كاملاً (`variant_group`) بنقطته
           الجاهزة (`products/groups/`) ولا مدخلَ له في أي شاشة — فبقي فارغاً على
-          كل صنفٍ في كل شركة، وبفراغه يسقط تجميعُ الموديلات على اسم الصنف: كل
-          صنفٍ نوعٌ بذاته، فلا بدائل في الفاتورة ولا قرار «مؤجَّل» في تقرير
+          كل منتجٍ في كل شركة، وبفراغه يسقط تجميعُ الموديلات على اسم المنتج: كل
+          منتجٍ صنفٌ بذاته، فلا بدائل في الفاتورة ولا قرار «مؤجَّل» في تقرير
           التجديد. هذا هو مدخله. */}
-      {fld("النوع / المجموعة (موديلات النوع الواحد بدائلُ بعضها)",
+      {fld("الصنف / المجموعة (موديلات الصنف الواحد بدائلُ بعضها)",
         <ValuePicker value={form.variant_group} onChange={(g) => patch("variant_group", g)}
           fetchOptions={inventoryApi.getGroups}
-          emptyLabel="— بدون نوع —" addPlaceholder="مثال: ايفون 14 برو" addTitle="نوع جديد" />)}
+          emptyLabel="— بدون صنف —" addPlaceholder="مثال: ايفون 14 برو" addTitle="صنف جديد" />)}
       {fld("ملفات الداتا شيت (PDF أو صور)",
         <div ref={datasheetRef}>
           <label className="ktra-input" style={{
@@ -695,7 +695,7 @@ export const ItemForm: React.FC<Props> = ({
       {fld("رصيد أول المدة", <input className="ktra-input" readOnly value="(محسوب — غير قابل للتعديل)" />)}
       {fld("مجموع الحركات الواردة", <input className="ktra-input" readOnly value="(تلقائي)" />)}
       {fld("مجموع الحركات الصادرة", <input className="ktra-input" readOnly value="(تلقائي)" />)}
-      {fld("رصيد الصنف الحالي", <input className="ktra-input" readOnly value="(تلقائي)" />)}
+      {fld("رصيد المنتج الحالي", <input className="ktra-input" readOnly value="(تلقائي)" />)}
       {fld("الحد الأدنى", <input className="ktra-input" type="number" min="0" step="1"
         value={form.min_stock_level} onChange={(e) => patch("min_stock_level", e.target.value)} />)}
       {fld("الحد الأقصى", <input className="ktra-input" type="number" min="0" step="1"
@@ -769,7 +769,7 @@ export const ItemForm: React.FC<Props> = ({
         {fld("سعر البيع العام (يدوي)",
           <input className="ktra-input ktra-input--hl" type="number" min="0" step="0.01"
             value={form.sale_price} onChange={(e) => patch("sale_price", e.target.value)}
-            title="يُقترح في مستند البيع فقط للزبون الذي لا عرض سعر له ولا شراء سابق لهذا الصنف"
+            title="يُقترح في مستند البيع فقط للزبون الذي لا عرض سعر له ولا شراء سابق لهذا المنتج"
             placeholder="للزبون بلا عرض ولا شراء سابق" />)}
         {fld("سعر التكلفة (متوسط — محسوب)",
           <input className="ktra-input" readOnly value={formatMoney(insights.profile?.avg_cost ?? "", "—")} />)}
@@ -805,7 +805,7 @@ export const ItemForm: React.FC<Props> = ({
 
   // ── صفحة 4: بيانات المتاجرة ──
   // T-ITEMS M5: كانت حقولاً نصّية حرّة بلافتة «لا تُحفَظ». صارت منتقياتِ حسابٍ
-  // حقيقية تُحفَظ على الصنف — والخادم يرفض حساباً من شركة أخرى.
+  // حقيقية تُحفَظ على المنتج — والخادم يرفض حساباً من شركة أخرى.
   const accountField = (
     label: string, key: keyof FormState, title: string,
   ) => fld(label,
@@ -820,12 +820,12 @@ export const ItemForm: React.FC<Props> = ({
   const tabTrading = (
     <div style={{ padding: "8px 4px" }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
-        {accountField("حساب البيع", "sale_account", "يسبق حساب إيرادات التصنيف عند ترحيل بيع هذا الصنف")}
-        {accountField("حساب مرتجع البيع", "sale_return_account", "حساب مرتجع المبيعات لهذا الصنف")}
-        {accountField("حساب الشراء", "purchase_account", "حساب المشتريات لهذا الصنف")}
-        {accountField("حساب مرتجع الشراء", "purchase_return_account", "حساب مرتجع المشتريات لهذا الصنف")}
-        {accountField("حساب المورد", "supplier_account", "حساب المورد الافتراضي لهذا الصنف")}
-        {accountField("حساب بضاعة آخر المدة", "ending_inventory_account", "حساب المخزون لهذا الصنف")}
+        {accountField("حساب البيع", "sale_account", "يسبق حساب إيرادات التصنيف عند ترحيل بيع هذا المنتج")}
+        {accountField("حساب مرتجع البيع", "sale_return_account", "حساب مرتجع المبيعات لهذا المنتج")}
+        {accountField("حساب الشراء", "purchase_account", "حساب المشتريات لهذا المنتج")}
+        {accountField("حساب مرتجع الشراء", "purchase_return_account", "حساب مرتجع المشتريات لهذا المنتج")}
+        {accountField("حساب المورد", "supplier_account", "حساب المورد الافتراضي لهذا المنتج")}
+        {accountField("حساب بضاعة آخر المدة", "ending_inventory_account", "حساب المخزون لهذا المنتج")}
         <div style={{ gridColumn: "1/-1", fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-ink-soft)" }}>
           اترك الحقل فارغاً ليُستعمل حساب التصنيف الافتراضي.
         </div>
@@ -837,7 +837,7 @@ export const ItemForm: React.FC<Props> = ({
   const tabOther = (
     <div style={{ padding: "8px 4px" }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
-        {fld("بيان الصنف (داخلي)",
+        {fld("وصف المنتج (داخلي)",
           <input className="ktra-input" value={form.description}
             title="وصفٌ داخلي — غير وصف المتجر الذي يراه الزبون"
             onChange={(e) => patch("description", e.target.value)} />, 2)}
@@ -876,14 +876,14 @@ export const ItemForm: React.FC<Props> = ({
 
   // T-ITEMS M5: تبويب «معادلات التصنيع» أُزيل. لم يكن يُحفظ إطلاقاً (لا نموذج
   // ولا نقطة)، والتصنيع في المنتجات الاحترافية موديولٌ قائم بذاته (Odoo MRP:
-  // أوامر تصنيع ومراحل واستهلاك مخزون) لا حقلٌ في كرت الصنف — فبناؤه قرارٌ
+  // أوامر تصنيع ومراحل واستهلاك مخزون) لا حقلٌ في كرت المنتج — فبناؤه قرارٌ
   // مستقل لا تفصيلٌ داخل هذه المهمة.
 
   return (
     <div dir="rtl">
       <KitDocumentShell
-        title="كرت الصنف"
-        state={currentId ? `صنف #${currentId}` : "صنف جديد"}
+        title="كرت المنتج"
+        state={currentId ? `منتج #${currentId}` : "منتج جديد"}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         nav={nav}
@@ -894,19 +894,19 @@ export const ItemForm: React.FC<Props> = ({
                 كان مرايا readOnly: فتحُ الكرت لتغيير الاسم يوجب النزول إلى
                 التبويب الرابع والبحث عنه بين الباركود والكفالات — وهو أوّل ما
                 يُفتح الكرت لأجله. الاسم رأسُ النموذج كما في Odoo. */}
-            {fld("رقم الصنف", <input className="ktra-input" readOnly
+            {fld("رقم المنتج", <input className="ktra-input" readOnly
               value={currentId ? `#${currentId}` : "— جديد —"} />)}
             {fld("SKU", <input className="ktra-input ktra-input--hl" value={form.sku}
               onChange={(e) => patch("sku", e.target.value)} />)}
-            {fld("اسم الصنف", <input className="ktra-input ktra-input--hl" value={form.name_ar}
+            {fld("اسم المنتج", <input className="ktra-input ktra-input--hl" value={form.name_ar}
               onChange={(e) => patch("name_ar", e.target.value)}
-              placeholder="اسم الصنف" autoFocus={productId == null} />, 2)}
+              placeholder="اسم المنتج" autoFocus={productId == null} />, 2)}
             {fld("التصنيف",
               <CategoryPicker value={form.category} onChange={(id, name) => {
                 patch("category", id);
                 patch("category_name", name ?? "");
               }} />)}
-            {fld("نوع الصنف", <select className="ktra-input" value={form.item_type}
+            {fld("طبيعة المنتج", <select className="ktra-input" value={form.item_type}
               onChange={(e) => patch("item_type", e.target.value)}>
               {ITEM_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
             </select>)}
@@ -920,14 +920,14 @@ export const ItemForm: React.FC<Props> = ({
           </>
         }
         tabs={[
-          // النظرة العامة أولاً: فتح الكرت يعرض حالة الصنف كاملة قبل أي تحرير.
+          // النظرة العامة أولاً: فتح الكرت يعرض حالة المنتج كاملة قبل أي تحرير.
           ...insights.tabs,
           { key: "general", label: "بيانات عامة", content: tabGeneral },
           { key: "balances", label: "الأرصدة والحركات", content: tabBalances },
           { key: "prices", label: "أسعار البيع والشراء", content: tabPrices },
           { key: "trading", label: "بيانات المتاجرة", content: tabTrading },
           { key: "other", label: "بيانات أخرى", content: tabOther },
-          // T-SUPSKU: رقم الصنف عند كل مورّد — كان يُحشَر في «الاسم بالإنجليزية».
+          // T-SUPSKU: رقم المنتج عند كل مورّد — كان يُحشَر في «الاسم بالإنجليزية».
           // ثابتٌ في القائمة لا مشروط: تبويبٌ يظهر ويختفي وقت التشغيل يزحزح
           // الفهرس فيقفز المستخدم (الغلاف يتتبّع النشط بالفهرس).
           { key: "supplier_codes", label: "أرقام الموردين",
@@ -948,7 +948,7 @@ export const ItemForm: React.FC<Props> = ({
         }
         status={
           <>
-            <span className="ktra-status-item">رقم الصنف <b>{currentId ?? "—"}</b></span>
+            <span className="ktra-status-item">رقم المنتج <b>{currentId ?? "—"}</b></span>
             <span className="ktra-status-item">الرصيد <b>{formatQuantity(insights.profile?.quantity_on_hand ?? "", "—")}</b></span>
             <span className="ktra-status-item">المتاح <b>{formatQuantity(insights.profile?.available_quantity ?? "", "—")}</b></span>
             <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>

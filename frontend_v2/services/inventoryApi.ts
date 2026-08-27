@@ -119,7 +119,7 @@ async function asList(res: Response): Promise<any[]> {
   return Array.isArray(data) ? data : (data.results ?? []);
 }
 
-/** T-SUPSKU: رقم الصنف في كتالوج المورّد (מק"ט) — بياناتٌ رئيسية محايدة مالياً. */
+/** T-SUPSKU: رقم المنتج في كتالوج المورّد (מק"ט) — بياناتٌ رئيسية محايدة مالياً. */
 export interface SupplierProductDto {
   id: number;
   supplier: number;
@@ -133,14 +133,14 @@ export interface SupplierProductDto {
 }
 
 export const inventoryApi = {
-  // ─── أرقام الأصناف عند الموردين (T-SUPSKU) ───
+  // ─── أرقام المنتجات عند الموردين (T-SUPSKU) ───
 
-  /** أرقام صنفٍ عند مورّديه — لكرت الصنف. */
+  /** أرقام منتجٍ عند مورّديه — لكرت المنتج. */
   listSupplierCodes: (productId: number): Promise<SupplierProductDto[]> =>
     fetch(`${INV}/supplier-products/?product=${productId}`, { headers: headers() })
       .then(asList),
 
-  /** «هذا الرقم — أيّ صنف؟» — مطابقة فاتورة المورّد عكسياً. */
+  /** «هذا الرقم — أيّ منتج؟» — مطابقة فاتورة المورّد عكسياً. */
   lookupBySupplierCode: (
     sku: string, supplierId?: number,
   ): Promise<SupplierProductDto[]> => {
@@ -156,7 +156,7 @@ export const inventoryApi = {
     const res = await fetch(`${INV}/supplier-products/`, {
       method: "POST", headers: headers(), body: JSON.stringify(body),
     });
-    // الرسالة الخادمية تسمّي الصنف المالك للرقم — لا تُبتلع.
+    // الرسالة الخادمية تسمّي المنتج المالك للرقم — لا تُبتلع.
     await handle(res, "createSupplierCode");
     return res.json();
   },
@@ -182,7 +182,7 @@ export const inventoryApi = {
   },
 
   /**
-   * صفحة واحدة من الأصناف (المرحلة 5 / P0-12).
+   * صفحة واحدة من المنتجات (المرحلة 5 / P0-12).
    * الخادم يدعم search/stock_status/ordering أصلاً (ProductViewSet)، فالبحث
    * والفرز خادميّان ولا حاجة لسحب الجدول كله لتصفيته في المتصفح.
    */
@@ -194,7 +194,7 @@ export const inventoryApi = {
   },
 
   /**
-   * كل الأصناف عبر حلقة صفحات. **لا تستخدمها لعرض قائمة** — بقيت لعمليات
+   * كل المنتجات عبر حلقة صفحات. **لا تستخدمها لعرض قائمة** — بقيت لعمليات
    * تحتاج المجموعة كاملةً بطبيعتها (التصدير للطباعة، والعرض الشجري الذي
    * يجمّع حسب التصنيف). العرض الجدولي يستخدم getProductsPaged.
    */
@@ -217,7 +217,7 @@ export const inventoryApi = {
   },
 
   /**
-   * T-REORDER: تثبيت الحدّ الأدنى/الأقصى المقترَحين على أصنافٍ محدَّدة.
+   * T-REORDER: تثبيت الحدّ الأدنى/الأقصى المقترَحين على منتجاتٍ محدَّدة.
    *
    * المحدِّد في **جسم** الطلب لا في عنوانه: تعداد مئات المعرّفات في سطر الطلب
    * ردّه nginx بـ414 في الإنتاج من قبل (كرت المجموعة). والخطأ الخادمي يُرفع
@@ -241,7 +241,7 @@ export const inventoryApi = {
   },
 
   /**
-   * T-REORDER: تعيين «النوع» و/أو البراند على أصنافٍ محدَّدة دفعةً واحدة.
+   * T-REORDER: تعيين «النوع» و/أو البراند على منتجاتٍ محدَّدة دفعةً واحدة.
    * الحقل غير المُمرَّر لا يُمَسّ؛ والفارغ يُمحى (تصحيح نوعٍ خاطئ كتعيينه).
    */
   bulkSetGroup: async (
@@ -259,7 +259,7 @@ export const inventoryApi = {
 
   // ─── Units of measure ───
 
-  /** وحدات القياس المفعّلة — قائمةٌ ثابتة تقريباً، يقرؤها كرت الصنف ونوافذه السريعة. */
+  /** وحدات القياس المفعّلة — قائمةٌ ثابتة تقريباً، يقرؤها كرت المنتج ونوافذه السريعة. */
   getUoms: () => fetch(`${INV}/uom/`, { headers: headers() }).then(asList),
 
   // ─── Categories ───
@@ -355,7 +355,7 @@ export const inventoryApi = {
   // ─── الباركود والأرقام التسلسلية (T-SERIAL) ───
   /**
    * باركود EAN-13 داخلي غير مستخدم لهذه الشركة. التوليد خادمي عمداً: فحص
-   * «غير مستخدم» يجب أن يقع على مصدر البيانات، لا على الأصناف المحمَّلة في الشاشة.
+   * «غير مستخدم» يجب أن يقع على مصدر البيانات، لا على المنتجات المحمَّلة في الشاشة.
    */
   generateBarcode: async (): Promise<string> => {
     const res = await fetch(`${INV}/products/generate_barcode/`, {
@@ -386,7 +386,7 @@ export const inventoryApi = {
 
   /**
    * ترقيم مخزون قائم: وحدات «في المخزن» بلا فاتورة شراء — مخرج الشركة التي
-   * تُشغّل «إجباري» في البيع وكل مخزونها سابقٌ للميزة. السقف خادمي (رصيد الصنف).
+   * تُشغّل «إجباري» في البيع وكل مخزونها سابقٌ للميزة. السقف خادمي (رصيد المنتج).
    */
   registerProductSerials: async (
     productId: number,
@@ -402,7 +402,7 @@ export const inventoryApi = {
     return Array.isArray(data.serials) ? data.serials : [];
   },
 
-  /** وحدات صنف واحد المُرقَّمة — `status` يفلتر «في المخزن»/«مُباع». */
+  /** وحدات منتج واحد المُرقَّمة — `status` يفلتر «في المخزن»/«مُباع». */
   getProductSerials: async (
     productId: number,
     status?: "in_stock" | "sold",
@@ -439,8 +439,8 @@ export const inventoryApi = {
 
   // ─── الكرت المجمّع: مجموع كل البراندات لنفس المقاس/الأساس ───
   // المحدِّد يسافر في **جسم** الطلب (POST) لا في عنوانه: التعداد `?ids=1,2,3…`
-  // لتصنيفٍ فيه ~1500 صنف يبلغ ~7.5KB في سطر الطلب فيردّه nginx بـ414/400
-  // (والتطوير يمرّ). `category` أوجز وأدقّ — الخادم يشتقّ الأصناف وأحفادها.
+  // لتصنيفٍ فيه ~1500 منتج يبلغ ~7.5KB في سطر الطلب فيردّه nginx بـ414/400
+  // (والتطوير يمرّ). `category` أوجز وأدقّ — الخادم يشتقّ المنتجات وأحفادها.
   getProductGroupProfile: async (sel: ProductGroupSelector | number[]) => {
     const res = await fetch(`${INV}/products/group-profile/`, {
       method: "POST", headers: headers(), body: groupBody(sel), readOnly: true,
@@ -500,7 +500,7 @@ export const inventoryApi = {
     return res.json();
   },
 
-  /** P0-5: تقييم المخزون التجميعي — صف واحد لكل صنف بدل كل الحركات. */
+  /** P0-5: تقييم المخزون التجميعي — صف واحد لكل منتج بدل كل الحركات. */
   getStockValuation: async (params?: Record<string, string>) => {
     const q = params && Object.keys(params).length
       ? `?${new URLSearchParams(params)}`
@@ -619,7 +619,7 @@ const PICKER_PRODUCTS_TTL_MS = 60_000;
 const pickerProductsCache = new Map<string, { at: number; rows: unknown[] }>();
 const pickerProductsInFlight = new Map<string, Promise<unknown[]>>();
 // عدّاد أجيال: الإفراغ وحده لا يكفي — طلبٌ طائر لحظة الإفراغ كان يهبط بعده
-// فيعيد ملء النافذة بصفوف ما قبل التعديل، فيغيب الصنف الجديد 60 ثانية كاملة.
+// فيعيد ملء النافذة بصفوف ما قبل التعديل، فيغيب المنتج الجديد 60 ثانية كاملة.
 // الجيل يُلتقط عند إطلاق الطلب، ولا يكتب في النافذة من هبط بجيلٍ أقدم.
 let pickerProductsGeneration = 0;
 
@@ -630,7 +630,7 @@ const pickerCacheKey = (tenantId?: number) =>
   tenantId === undefined ? "auto" : String(tenantId);
 
 /**
- * تُفرَغ النافذة عند أي تعديل على الأصناف كي لا يختفي صنفٌ أُنشئ للتوّ من
+ * تُفرَغ النافذة عند أي تعديل على المنتجات كي لا يختفي منتجٌ أُنشئ للتوّ من
  * منتقي الفاتورة التي أُنشئ من داخلها.
  */
 export const invalidatePickerProducts = (): void => {
@@ -642,11 +642,11 @@ export const invalidatePickerProducts = (): void => {
 };
 
 /**
- * أصناف منتقي المستندات — العقد الضيّق (`?view=lookup`) لا كرت الصنف الكامل.
+ * منتجات منتقي المستندات — العقد الضيّق (`?view=lookup`) لا كرت المنتج الكامل.
  *
- * العقد الكامل يحمل لكل صنف تحليلاتٍ وحقولَ كرتٍ لا تعرضها شاشة الفاتورة
+ * العقد الكامل يحمل لكل منتج تحليلاتٍ وحقولَ كرتٍ لا تعرضها شاشة الفاتورة
  * (`purchased_qty`, `avg_monthly_sales`, `stock_status`, `group_key`, …):
- * قياس على 1490 صنفاً أعطى 1,145 كيلوبايت / 1,249 مِلّي ثانية عند **كل** فتح
+ * قياس على 1490 منتجاً أعطى 1,145 كيلوبايت / 1,249 مِلّي ثانية عند **كل** فتح
  * للشاشة، مقابل 609 / 331 لعقد المنتقي. مصدر واحد لكل شاشات المستندات كي لا
  * ترتدّ إحداها للعقد الكامل بصمت.
  */

@@ -186,7 +186,7 @@ class InvoiceSaveAndPostPermissionTest(APITestCase):
         cls.customer = Partner.objects.create(
             tenant=cls.tenant, name="عميل حفظ وترحيل", partner_type="Customer")
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="SAP-1", name_ar="صنف", quantity_on_hand=10, avg_cost=1)
+            tenant=cls.tenant, sku="SAP-1", name_ar="منتج", quantity_on_hand=10, avg_cost=1)
         settings = get_or_create_sales_settings(cls.tenant)
         settings.auto_post_invoices = True
         settings.save(update_fields=["auto_post_invoices"])

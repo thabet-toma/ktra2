@@ -117,7 +117,7 @@ class StoreCollectionDetailSerializer(serializers.Serializer):
     def get_featured_product(self, obj):
         """المنتج المميّز — يحلّه العرضُ عبر `published_products` ويضعه في السياق.
 
-        قراءته من `obj.featured_product` مباشرةً تنشر صنفاً غير منشور أو صنف
+        قراءته من `obj.featured_product` مباشرةً تنشر منتجاً غير منشور أو منتج
         شركة أخرى، وتُسقط `price` و`availability` لغياب حقول الاستعلام.
         """
         featured = self.context.get("featured_product")
@@ -205,10 +205,10 @@ class StoreCollectionAdminSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
 
-#: ما تملك لوحة المتجر تعديله على صنفٍ **مخزني**. `store.manage` صلاحية
-#: تسويقية: تنشر الصنف وتسحبه وتصف واجهته، ولا تُعيد تعريفه. `sale_price`
+#: ما تملك لوحة المتجر تعديله على منتجٍ **مخزني**. `store.manage` صلاحية
+#: تسويقية: تنشر المنتج وتسحبه وتصف واجهته، ولا تُعيد تعريفه. `sale_price`
 #: و`sku` و`name_ar` تقرؤها الفوترة والتقارير، وتغييرها من هنا يجعل مسؤول
-#: تسويق يصيب سعر البيع المعتمَد بلا أن يدري. صنف المتجر الخالص
+#: تسويق يصيب سعر البيع المعتمَد بلا أن يدري. منتج المتجر الخالص
 #: (`is_store_only`) ملكُ اللوحة كاملاً فلا يخضع لهذا الحصر.
 STORE_EDITABLE_ON_INVENTORY = frozenset({
     "is_for_sale_online", "allow_preorder", "online_price", "online_description",
@@ -273,15 +273,15 @@ class StoreProductAdminSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, attrs):
-        """الصنف المخزني: حقول المتجر وحدها. والرمز المُدخل: فريد داخل الشركة."""
+        """المنتج المخزني: حقول المتجر وحدها. والرمز المُدخل: فريد داخل الشركة."""
         instance = self.instance
         if instance is not None and not instance.is_store_only:
             refused = sorted(set(attrs) - STORE_EDITABLE_ON_INVENTORY)
             if refused:
                 raise serializers.ValidationError({
                     field: (
-                        "هذا صنف مخزني — لا يُعدَّل هذا الحقل من لوحة المتجر. "
-                        "عدّله من شاشة الأصناف بصلاحيتها."
+                        "هذا منتج مخزني — لا يُعدَّل هذا الحقل من لوحة المتجر. "
+                        "عدّله من شاشة المنتجات بصلاحيتها."
                     )
                     for field in refused
                 })
@@ -302,7 +302,7 @@ class StoreProductAdminSerializer(serializers.ModelSerializer):
                 # القيد `unique(tenant, sku)` كان يفجّر IntegrityError أي 500 في
                 # وجه المستخدم — وهو خطأ إدخالٍ لا انهيار خادم.
                 raise serializers.ValidationError(
-                    {"sku": "رقم الصنف مستخدم مسبقاً لهذه الشركة."}
+                    {"sku": "رقم المنتج مستخدم مسبقاً لهذه الشركة."}
                 )
         return attrs
 
@@ -322,7 +322,7 @@ class StoreProductAdminSerializer(serializers.ModelSerializer):
             if not Product.objects.filter(tenant=tenant, sku=candidate).exists():
                 return candidate
         raise serializers.ValidationError(
-            {"sku": "تعذّر توليد رقم صنف — أدخله يدوياً."}
+            {"sku": "تعذّر توليد رقم منتج — أدخله يدوياً."}
         )
 
     def create(self, validated_data):
@@ -334,7 +334,7 @@ class StoreProductAdminSerializer(serializers.ModelSerializer):
 
         validated_data.setdefault("is_store_only", True)
         validated_data.setdefault("is_for_sale_online", True)
-        # `allow_preorder` لا يُفرض: «طلب مسبق» وعدٌ تجاري بتوفير الصنف عند
+        # `allow_preorder` لا يُفرض: «طلب مسبق» وعدٌ تجاري بتوفير المنتج عند
         # الطلب — قرارُ صاحب المتجر لا افتراضُ الكود. يسود افتراضي النموذج.
 
         product = super().create(validated_data)

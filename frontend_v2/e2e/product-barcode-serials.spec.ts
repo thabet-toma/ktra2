@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Route } from '@playwright/test';
 
 /**
- * T-SERIAL/م2 — كرت الصنف: توليد الباركود وطباعته وتتبّع الأرقام التسلسلية،
+ * T-SERIAL/م2 — كرت المنتج: توليد الباركود وطباعته وتتبّع الأرقام التسلسلية،
  * وإعدادا الشراء والبيع لنمط إدخال الرقم.
  *
  * الشاشات داخلية، فتلزمها نقاط الدخول الوهمية الثلاث (المستخدم/الشركات/الصلاحيات).
@@ -138,7 +138,7 @@ const install = async (page: Page, state: ServerState) => {
       });
     }
 
-    // ── كرت الصنف ──
+    // ── كرت المنتج ──
     if (path.endsWith('/inventory/products/generate_barcode/') && method === 'POST') {
       return json({ barcode: '2000000000008' });
     }
@@ -203,10 +203,10 @@ const generalTab = async (page: Page) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════
-// كرت الصنف — الباركود
+// كرت المنتج — الباركود
 // ══════════════════════════════════════════════════════════════════════════
 
-test('«توليد تلقائي» يجلب باركوداً من الخادم ويرسمه، والحفظ يثبّته على الصنف', async ({ page }) => {
+test('«توليد تلقائي» يجلب باركوداً من الخادم ويرسمه، والحفظ يثبّته على المنتج', async ({ page }) => {
   const state = freshState();
   await install(page, state);
   await page.goto('/products/42');
@@ -265,7 +265,7 @@ test('باركود مكرّر: رسالة الخادم تصل للمستخدم �
     await route.fulfill({
       status: 400,
       contentType: 'application/json',
-      body: JSON.stringify({ barcode: ['الباركود «4006381333931» مستخدم للصنف «بطارية 70 أمبير».'] }),
+      body: JSON.stringify({ barcode: ['الباركود «4006381333931» مستخدم للمنتج «بطارية 70 أمبير».'] }),
     });
   });
   await page.goto('/products/42');
@@ -274,11 +274,11 @@ test('باركود مكرّر: رسالة الخادم تصل للمستخدم �
 
   await barcodeField(page).fill('4006381333931');
   await page.getByRole('button', { name: /تخزين/ }).click();
-  await expect(page.getByText(/مستخدم للصنف «بطارية 70 أمبير»/)).toBeVisible();
+  await expect(page.getByText(/مستخدم للمنتج «بطارية 70 أمبير»/)).toBeVisible();
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// كرت الصنف — تبويب الأرقام التسلسلية
+// كرت المنتج — تبويب الأرقام التسلسلية
 // ══════════════════════════════════════════════════════════════════════════
 
 test('تبويب الأرقام التسلسلية يظهر بالتفعيل وحده، ويسرد الوحدات ومستنداتها ويبحث فيها', async ({ page }) => {
@@ -287,7 +287,7 @@ test('تبويب الأرقام التسلسلية يظهر بالتفعيل و�
   await page.goto('/products/42');
   await page.waitForLoadState('networkidle');
 
-  // صنف غير متتبَّع: لا تبويب أصلاً (لا تبويب فارغ يوحي بعطل).
+  // منتج غير متتبَّع: لا تبويب أصلاً (لا تبويب فارغ يوحي بعطل).
   await expect(page.getByRole('tab', { name: 'الأرقام التسلسلية' })).toHaveCount(0);
 
   await generalTab(page);
@@ -312,7 +312,7 @@ test('تبويب الأرقام التسلسلية يظهر بالتفعيل و�
   await expect(page.getByText('SN-0099')).toBeVisible();
   await expect(page.getByText('SN-0098')).toHaveCount(0);
 
-  // التفعيل يُحفَظ على الصنف.
+  // التفعيل يُحفَظ على المنتج.
   await page.getByRole('button', { name: /تخزين/ }).click();
   await expect.poll(() => state.productPatches.length).toBeGreaterThan(0);
   expect(state.productPatches[state.productPatches.length - 1].is_serialized).toBe(true);
@@ -354,7 +354,7 @@ test('رفض الخادم لتسجيل فوق الرصيد يصل للمستخد
       status: 400,
       contentType: 'application/json',
       body: JSON.stringify({
-        error: 'الصنف «إطار 195/65/15»: رصيد المخزن 12 وحدة ومنها 12 مُرقَّمة — لا مكان لتسجيل رقم إضافي.',
+        error: 'المنتج «إطار 195/65/15»: رصيد المخزن 12 وحدة ومنها 12 مُرقَّمة — لا مكان لتسجيل رقم إضافي.',
       }),
     });
   });

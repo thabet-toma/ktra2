@@ -23,7 +23,7 @@ from tenants.services import create_company
 
 
 class SerialInvoiceJourneyTest(APITestCase):
-    """صنف تسلسلي → شراء بأرقام → استلام → بيع وحدة بعينها → تراجع."""
+    """منتج تسلسلي → شراء بأرقام → استلام → بيع وحدة بعينها → تراجع."""
 
     @classmethod
     def setUpTestData(cls):
@@ -112,7 +112,7 @@ class SerialInvoiceJourneyTest(APITestCase):
         return res
 
     def _card_serials(self, status=None):
-        """تبويب «الأرقام التسلسلية» في كرت الصنف — نفس نقطة النهاية التي يقرؤها."""
+        """تبويب «الأرقام التسلسلية» في كرت المنتج — نفس نقطة النهاية التي يقرؤها."""
         query = f'?status={status}' if status else ''
         res = self.client.get(
             f'/api/inventory/products/{self.product.pk}/serials/{query}', **self.headers)
@@ -161,7 +161,7 @@ class SerialInvoiceJourneyTest(APITestCase):
             f'/api/sales/invoices/{sale_id}/post/', {}, format='json', **self.headers)
         assert sale_posted.status_code in (200, 201), sale_posted.content
 
-        # 5) كرت الصنف: الوحدة المختارة «مُباعة» ومعها مستنداها وطرفاهما.
+        # 5) كرت المنتج: الوحدة المختارة «مُباعة» ومعها مستنداها وطرفاهما.
         rows = {r['serial']: r for r in self._card_serials()}
         sold = rows['SN-0099']
         assert sold['status'] == 'sold'
@@ -240,7 +240,7 @@ class SerialInvoiceJourneyTest(APITestCase):
         assert 'إجباري' in body
         assert 'لابتوب' in body            # البند الناقص مُسمّى لا مُلمَّح إليه
         assert 'المطلوب 1 والمختار 0' in body
-        assert 'كرت الصنف' in body         # المخرج مذكور لا متروك للتخمين
+        assert 'كرت المنتج' in body         # المخرج مذكور لا متروك للتخمين
 
         # لا أثر نصفي: الفاتورة مسوّدة، ولا وحدة استُهلكت، ولا حركة مخزون بيع.
         reloaded = self.client.get(f'/api/sales/invoices/{sale_id}/', **self.headers)
@@ -254,7 +254,7 @@ class SerialInvoiceJourneyTest(APITestCase):
     def test_required_sale_with_a_chosen_serial_binds_the_unit_to_the_customer(self):
         """نفس الوضع مع رقمٍ صحيح: يمرّ، ويربط الوحدة بالزبون في بطاقة الجهاز.
 
-        «بطاقة الجهاز» هي ما يقرؤه تبويب الأرقام التسلسلية في كرت الصنف — وهو
+        «بطاقة الجهاز» هي ما يقرؤه تبويب الأرقام التسلسلية في كرت المنتج — وهو
         نفسه ما تجيب به مطالبة الكفالة: من اشترى، بأي هاتف، وبأي تاريخ.
         """
         self._modes(purchase=SERIAL_MODE_OPTIONAL, sales=SERIAL_MODE_REQUIRED)
@@ -290,7 +290,7 @@ class SerialInvoiceJourneyTest(APITestCase):
         assert ProductSerial.objects.filter(tenant=self.tenant).count() == 0
 
     def test_lookup_contract_exposes_is_serialized_for_the_editors(self):
-        """المحرِّران يعرفان الصنف التسلسلي من عقد المنتقي — لا نداء إضافي لكل سطر."""
+        """المحرِّران يعرفان المنتج التسلسلي من عقد المنتقي — لا نداء إضافي لكل سطر."""
         res = self.client.get('/api/inventory/products/?view=lookup', **self.headers)
         assert res.status_code == 200, res.content
         rows = res.json()

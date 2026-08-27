@@ -49,7 +49,7 @@ def env():
     rev = Account.objects.create(
         tenant=tenant, code="4101-P", name="إيراد", account_type="Revenue", is_active=True)
     product = Product.objects.create(
-        tenant=tenant, sku="P-1", name_ar="صنف", quantity_on_hand=Decimal("0"),
+        tenant=tenant, sku="P-1", name_ar="منتج", quantity_on_hand=Decimal("0"),
         avg_cost=Decimal("0"))
     return tenant, owner, ar, rev, product
 

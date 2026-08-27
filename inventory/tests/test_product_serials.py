@@ -251,7 +251,7 @@ class ProductSerialFlowTest(APITestCase):
         assert {u.purchase_item_id for u in units} == {item.pk}
 
     def test_required_mode_ignores_lines_of_untracked_products(self):
-        """الإلزام يخصّ الأصناف التسلسلية وحدها — لا يعطّل بقية الفواتير."""
+        """الإلزام يخصّ المنتجات التسلسلية وحدها — لا يعطّل بقية الفواتير."""
         self._set_modes(purchase=SERIAL_MODE_REQUIRED)
         inv, _item = self._purchase_invoice(qty='5', product=self.plain)
         assert self._post_purchase(inv).status_code == 201

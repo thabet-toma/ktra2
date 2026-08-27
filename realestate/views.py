@@ -18,7 +18,7 @@ from .serializers import (
 
 
 class TenantScopedViewSet(viewsets.ModelViewSet):
-    """P1-7 (المرحلة 5): الصنف كان يوفّر ‎_tenant()‎ فقط ويترك الفلترة للوارث
+    """P1-7 (المرحلة 5): المنتج كان يوفّر ‎_tenant()‎ فقط ويترك الفلترة للوارث
     بنمط ‎filter(tenant=None)‎ الهش عند غياب الشركة (يُرجِع صفوف tenant IS NULL
     اليتيمة بدل لا شيء). كل ‎get_queryset‎ وارث يبدأ الآن بحارس ‎.none()‎."""
 

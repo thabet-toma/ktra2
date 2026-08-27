@@ -222,7 +222,7 @@ class AfterSalesReportsTest(APITestCase):
         from inventory.services import record_stock_movement
 
         product = Product.objects.create(
-            tenant=self.tenant, sku="RP-SALE", name_ar="صنف مبيع",
+            tenant=self.tenant, sku="RP-SALE", name_ar="منتج مبيع",
             quantity_on_hand=Decimal("10"), avg_cost=Decimal("7"),
         )
         record_stock_movement(

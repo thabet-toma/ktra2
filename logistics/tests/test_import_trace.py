@@ -31,7 +31,7 @@ class ImportTraceTest(TestCase):
         UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant, role='manager')
         cls.partner = Partner.objects.create(tenant=cls.tenant, name='مصنع', partner_type='Supplier')
         cls.carrier = Partner.objects.create(tenant=cls.tenant, name='ناقل', partner_type='Supplier')
-        cls.product = Product.objects.create(tenant=cls.tenant, sku='M5-1', name_ar='صنف')
+        cls.product = Product.objects.create(tenant=cls.tenant, sku='M5-1', name_ar='منتج')
 
     def setUp(self):
         self.client = APIClient()
@@ -67,7 +67,7 @@ class ImportTraceTest(TestCase):
             grand_total=Decimal('7000'),
             import_shipment_remaining_rate=Decimal('3.6'), import_use_cost_lines=True)
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name='صنف',
+            invoice=inv, product=self.product, name='منتج',
             quantity=Decimal('10'), unit_price=Decimal('500'),
             total_price=Decimal('5000'),
             landed_unit_price_ils=Decimal('700'), landed_line_total_ils=Decimal('7000'))

@@ -1,6 +1,6 @@
 /**
  * M0-T6 — KitIndexPicker
- * Unified popup index (حسابات / أصناف / عملات) opened from a field via `+`
+ * Unified popup index (حسابات / منتجات / عملات) opened from a field via `+`
  * or the «…» affordance. Search + keyboard stepping (`*` next, `-` prev),
  * Enter selects, Esc closes — exactly the Kit index behaviour.
  * Generic & presentational: parent supplies columns + rows + handlers.

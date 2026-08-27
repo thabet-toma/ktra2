@@ -75,7 +75,7 @@ class PurchaseDueDateTest(APITestCase):
             tenant=cls.tenant, name="عميل الاستحقاق", partner_type="Customer",
             linked_account=cls.ar)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="DUE-1", name_ar="صنف",
+            tenant=cls.tenant, sku="DUE-1", name_ar="منتج",
             quantity_on_hand=Decimal("100"), avg_cost=Decimal("10"))
 
     def _auth(self):
@@ -92,7 +92,7 @@ class PurchaseDueDateTest(APITestCase):
                 "currency": "ILS",
                 "exchange_rate": "1",
                 "items": [{
-                    "product": self.product.id, "name": "صنف",
+                    "product": self.product.id, "name": "منتج",
                     "quantity": "1", "unit_price": "100", "total_price": "100",
                 }],
             },
@@ -123,7 +123,7 @@ class PurchaseDueDateTest(APITestCase):
             due_date=timezone.localdate() - datetime.timedelta(days=10),
             exchange_rate=Decimal("1"), grand_total=Decimal("100.00"))
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف",
+            invoice=inv, product=self.product, name="منتج",
             quantity=Decimal("1"), unit_price=Decimal("100"),
             total_price=Decimal("100"))
         self.client.post(
@@ -172,7 +172,7 @@ class PurchaseDueDateTest(APITestCase):
             due_date=timezone.localdate() + datetime.timedelta(days=20),
             exchange_rate=Decimal("1"), grand_total=Decimal("100.00"))
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف",
+            invoice=inv, product=self.product, name="منتج",
             quantity=Decimal("1"), unit_price=Decimal("100"), total_price=Decimal("100"))
         self.client.post(
             f"/api/logistics/purchase-invoices/{inv.pk}/post-to-accounting/",

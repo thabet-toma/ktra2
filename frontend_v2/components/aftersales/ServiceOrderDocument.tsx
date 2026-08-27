@@ -226,7 +226,7 @@ export const ServiceOrderDocument: React.FC<Props> = ({
 
   const addPart = () => {
     const productId = Number(newPart.product);
-    if (!productId) { setErr("اختر الصنف أولاً"); return; }
+    if (!productId) { setErr("اختر المنتج أولاً"); return; }
     void run(
       async () => {
         await addServiceOrderPart(order.id, {
@@ -529,7 +529,7 @@ export const ServiceOrderDocument: React.FC<Props> = ({
           {editable && (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-5">
               <div className="sm:col-span-2">
-                <label className={labelClass} htmlFor="part-product">الصنف</label>
+                <label className={labelClass} htmlFor="part-product">المنتج</label>
                 <select
                   id="part-product"
                   className={inputClass}
@@ -602,7 +602,7 @@ export const ServiceOrderDocument: React.FC<Props> = ({
             <table>
               <thead>
                 <tr>
-                  <th>الصنف</th>
+                  <th>المنتج</th>
                   <th>الكمية</th>
                   <th>المسار</th>
                   <th>السعر</th>

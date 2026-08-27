@@ -300,7 +300,7 @@ class ReadinessChecksTest(TaxPeriodBaseTest):
         from sales.models import SalesInvoiceLine
         from inventory.models import Product
 
-        product = Product.objects.create(tenant=self.tenant, name_ar="صنف", sku="SKU-1")
+        product = Product.objects.create(tenant=self.tenant, name_ar="منتج", sku="SKU-1")
         SalesInvoiceLine.objects.create(
             tenant=self.tenant,
             invoice=invoice,
@@ -320,7 +320,7 @@ class ReadinessChecksTest(TaxPeriodBaseTest):
         from sales.models import SalesInvoiceLine
 
         invoice = self._invoice("SI-MIS", date(2026, 6, 11))
-        product = Product.objects.create(tenant=self.tenant, name_ar="صنف مطابقة", sku="SKU-MIS")
+        product = Product.objects.create(tenant=self.tenant, name_ar="منتج مطابقة", sku="SKU-MIS")
         SalesInvoiceLine.objects.create(
             tenant=self.tenant,
             invoice=invoice,
@@ -341,7 +341,7 @@ class ReadinessChecksTest(TaxPeriodBaseTest):
         from sales.models import SalesInvoiceLine
 
         invoice = self._invoice("SI-OK", date(2026, 6, 12))
-        product = Product.objects.create(tenant=self.tenant, name_ar="صنف مطابق", sku="SKU-OK")
+        product = Product.objects.create(tenant=self.tenant, name_ar="منتج مطابق", sku="SKU-OK")
         SalesInvoiceLine.objects.create(
             tenant=self.tenant,
             invoice=invoice,

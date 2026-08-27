@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """بذر بيانات بحجم واقعي لاختبار الحمل (المرحلة 6 من docs/REFACTOR_PROMPTS.md).
 
-يولّد 3-5 شركات، كلٌّ بشجرة حساباتها وفترتها المالية ومستودعها وأصنافها
+يولّد 3-5 شركات، كلٌّ بشجرة حساباتها وفترتها المالية ومستودعها ومنتجاتها
 وعملائها وآلاف فواتير البيع **المرحّلة** (قيود + حركات مخزون حقيقية) — لأن
 اختبار حمل على قاعدة فارغة كذبة: الفهارس لا تُختبر، والتقارير ترجع صفراً،
 وخطط الاستعلام تختلف كلياً عن الإنتاج.
@@ -63,7 +63,7 @@ CITIES = ["نابلس", "رام الله", "الخليل", "جنين", "طولك
 
 class Command(BaseCommand):
     help = (
-        "يبذر بيانات حمل واقعية (3-5 شركات × آلاف الفواتير/القيود/الأصناف) "
+        "يبذر بيانات حمل واقعية (3-5 شركات × آلاف الفواتير/القيود/المنتجات) "
         "— على قاعدة اختبار معزولة فقط."
     )
 
@@ -79,7 +79,7 @@ class Command(BaseCommand):
                  "ومرّر نفسها لـlocust عبر KTRA_LOADTEST_PASSWORD.",
         )
         parser.add_argument("--tenants", type=int, default=4, help="عدد الشركات (3-5)")
-        parser.add_argument("--products", type=int, default=800, help="أصناف لكل شركة")
+        parser.add_argument("--products", type=int, default=800, help="منتجات لكل شركة")
         parser.add_argument("--customers", type=int, default=200, help="عملاء لكل شركة")
         parser.add_argument("--suppliers", type=int, default=40, help="موردون لكل شركة")
         parser.add_argument("--invoices", type=int, default=1500, help="فواتير بيع لكل شركة")
@@ -281,7 +281,7 @@ class Command(BaseCommand):
             defaults={"role": "manager", "is_default": True},
         )
 
-        # 8) الأطراف والأصناف
+        # 8) الأطراف والمنتجات
         categories = self._ensure_categories(tenant)
         customers = self._ensure_partners(tenant, "Customer", opt["customers"])
         self._ensure_partners(tenant, "Supplier", opt["suppliers"])
@@ -403,7 +403,7 @@ class Command(BaseCommand):
                         tenant=tenant,
                         sku=f"LT-{tenant.TenantID}-{idx:06d}",
                         barcode=f"62{tenant.TenantID:02d}{idx:08d}",
-                        name_ar=f"صنف {idx:05d} {size}",
+                        name_ar=f"منتج {idx:05d} {size}",
                         name_en=f"Item {idx:05d}",
                         variant_group=size,
                         brand=random.choice(BRANDS),
@@ -418,7 +418,7 @@ class Command(BaseCommand):
                 )
             Product.objects.bulk_create(new_rows, batch_size=500)
             existing = list(Product.objects.filter(tenant=tenant).order_by("id"))
-            self.stdout.write(f"    أصناف: +{missing} (الإجمالي {len(existing)})")
+            self.stdout.write(f"    منتجات: +{missing} (الإجمالي {len(existing)})")
 
         # رصيد افتتاحي عبر خدمة المخزون (يبني avg_cost وحركة حقيقية)
         opening_date = start_date

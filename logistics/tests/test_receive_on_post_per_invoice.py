@@ -40,7 +40,7 @@ class ReceiveOnPostPerInvoiceTest(APITestCase):
         self.headers = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
         self.product = Product.objects.create(
             tenant=self.tenant, sku=f"OPT-{Product.objects.count() + 1}",
-            name_ar="صنف", quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
+            name_ar="منتج", quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
 
     def _set_company_default(self, value):
         ps = get_or_create_purchase_settings(self.tenant)
@@ -55,7 +55,7 @@ class ReceiveOnPostPerInvoiceTest(APITestCase):
             partner=self.partner, currency=self.ils, invoice_date="2026-06-11",
             exchange_rate=Decimal("1"), grand_total=grand)
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف",
+            invoice=inv, product=self.product, name="منتج",
             quantity=Decimal(qty), unit_price=Decimal(price), total_price=grand)
         return inv
 

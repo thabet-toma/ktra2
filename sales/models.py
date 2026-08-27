@@ -154,7 +154,7 @@ class SalesSettings(models.Model):
     allow_negative_stock_default = models.BooleanField(
         default=True,
         db_column="AllowNegativeStockDefault",
-        help_text="السماح ببيع المخزون بالسالب افتراضياً (يمكن تجاوزه على مستوى الصنف)",
+        help_text="السماح ببيع المخزون بالسالب افتراضياً (يمكن تجاوزه على مستوى المنتج)",
     )
     # طريقة احتساب تكلفة المخزون (متوسط التكلفة):
     #   False (افتراضي) = النموذج الدوري «تكلفة المنتجات»: avg_cost = متوسط كل
@@ -209,7 +209,7 @@ class SalesSettings(models.Model):
         db_column="ShowJournalPreview",
         help_text="إظهار معاينة القيد المحاسبي قبل الترحيل",
     )
-    # T-S2: تنبيه عند تكرار الصنف على سطر جديد (يقود سلوك T-R3 في محرّر الفاتورة).
+    # T-S2: تنبيه عند تكرار المنتج على سطر جديد (يقود سلوك T-R3 في محرّر الفاتورة).
     warn_on_duplicate_item = models.BooleanField(
         default=True,
         db_column="WarnOnDuplicateItem",
@@ -273,7 +273,7 @@ class SalesSettings(models.Model):
     )
 
     # الأرقام التسلسلية في بنود البيع: مُطفأ افتراضياً فلا أثر على شركة لم تطلبه.
-    # «إجباري» يمنع ترحيل فاتورة صنف تسلسلي لا تُغطّي وحداتُه المتاحة كميتها.
+    # «إجباري» يمنع ترحيل فاتورة منتج تسلسلي لا تُغطّي وحداتُه المتاحة كميتها.
     serial_entry_mode = models.CharField(
         max_length=20,
         choices=SERIAL_MODE_CHOICES,
@@ -644,7 +644,7 @@ class SalesInvoiceLine(models.Model):
     )
     customer_note = models.CharField(
         max_length=500, blank=True, default="", db_column="CustomerNote",
-        help_text="ملاحظة تُطبع للعميل تحت اسم الصنف في الفاتورة",
+        help_text="ملاحظة تُطبع للعميل تحت اسم المنتج في الفاتورة",
     )
 
     class Meta:

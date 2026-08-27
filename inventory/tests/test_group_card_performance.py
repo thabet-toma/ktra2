@@ -1,7 +1,7 @@
-"""الكرت المجمّع: عدد الاستعلامات ثابت مهما كبر عدد الأصناف (كان N+1).
+"""الكرت المجمّع: عدد الاستعلامات ثابت مهما كبر عدد المنتجات (كان N+1).
 
-«أصناف عامة» في شركة الجرابعه = 1490 صنفاً ⇒ الكرت المجمّع كان يطلق ~10 آلاف
-استعلام (7 لكل صنف) فتنتهي مهلة الخادم (30 ثانية) وتظهر الشاشة خربانة.
+«منتجات عامة» في شركة الجرابعه = 1490 منتجاً ⇒ الكرت المجمّع كان يطلق ~10 آلاف
+استعلام (7 لكل منتج) فتنتهي مهلة الخادم (30 ثانية) وتظهر الشاشة خربانة.
 """
 from decimal import Decimal
 
@@ -24,7 +24,7 @@ class GroupCardQueryBudgetTest(TestCase):
         create_fiscal_year(cls.tenant, 2026)
         cls.products = [
             Product.objects.create(
-                tenant=cls.tenant, sku=f"SKU-{i}", name_ar=f"صنف {i}",
+                tenant=cls.tenant, sku=f"SKU-{i}", name_ar=f"منتج {i}",
                 quantity_on_hand=Decimal("10"), avg_cost=Decimal("5"),
             )
             for i in range(25)
@@ -42,7 +42,7 @@ class GroupCardQueryBudgetTest(TestCase):
         res = product_group_profile(tenant_id=self.tenant.pk, product_ids=ids)
         self.assertEqual(res["member_count"], 25)
         self.assertEqual(Decimal(res["quantity_on_hand"]), Decimal("250"))
-        # 25 صنفاً × (10 × 5)
+        # 25 منتجاً × (10 × 5)
         self.assertEqual(Decimal(res["inventory_valuation"]), Decimal("1250.00"))
         self.assertEqual(res["members"][0]["avg_cost"], "5.0000")
 

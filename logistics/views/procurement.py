@@ -342,7 +342,7 @@ class PurchaseOrderViewSet(BaseTenantViewSet):
             if order.status != PurchaseOrder.STATUS_DRAFT:
                 raise ValidationError('يمكن تأكيد الطلبية المسودة فقط.')
             if not order.lines.exists():
-                raise ValidationError('لا يمكن تأكيد طلبية بلا أصناف.')
+                raise ValidationError('لا يمكن تأكيد طلبية بلا منتجات.')
             order.status = PurchaseOrder.STATUS_CONFIRMED
             order.save(update_fields=['status', 'updated_at'])
         return Response(PurchaseOrderSerializer(

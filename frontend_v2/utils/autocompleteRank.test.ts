@@ -8,13 +8,13 @@ const CATALOG = [
   { label: 'زيت محرك 5w30', sub: 'الرصيد: 12', keywords: 'oil-5w30 1234567890123' },
 ];
 
-test('يجد الصنف برقمه (SKU) وهو غير معروض في القائمة', () => {
+test('يجد المنتج برقمه (SKU) وهو غير معروض في القائمة', () => {
   const { matches } = rankOptions(CATALOG, 'mch-17', 8);
   assert.equal(matches.length, 1);
   assert.equal(matches[0].label, 'اطار ميشلان 17');
 });
 
-test('يجد الصنف بجزء من الباركود', () => {
+test('يجد المنتج بجزء من الباركود', () => {
   const { matches } = rankOptions(CATALOG, '1500220', 8);
   assert.equal(matches.length, 1);
   assert.equal(matches[0].label, 'اطار برجستون 16');

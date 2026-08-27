@@ -261,8 +261,8 @@ export const SalesQuotationsPage: React.FC = () => {
 
   const loadMasterData = useCallback(async () => {
     try {
-      // task16 E17: منتقي الصنف في عرض السعر كان يحمّل شجرة الحسابات
-      // (getAccounts) بدل الأصناف — يُصحَّح إلى أصناف المخزون (inventory/products).
+      // task16 E17: منتقي المنتج في عرض السعر كان يحمّل شجرة الحسابات
+      // (getAccounts) بدل المنتجات — يُصحَّح إلى منتجات المخزون (inventory/products).
       const tenantId = resolveTenantId();
       const [parts, prods] = await Promise.all([
         // T-PARTYPURE: عرض سعر بيع = زبائن فقط.
@@ -367,7 +367,7 @@ export const SalesQuotationsPage: React.FC = () => {
     // البنود بلا منتج تُستبعد؛ يجب وجود بند واحد صالح على الأقل.
     const validLines = formLines.filter((l) => l.product_id);
     if (validLines.length === 0) {
-      setErr("أضف صنفاً واحداً على الأقل للعرض.");
+      setErr("أضف منتجاً واحداً على الأقل للعرض.");
       return;
     }
     setSaving(true);
@@ -592,13 +592,13 @@ export const SalesQuotationsPage: React.FC = () => {
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     {
       key: "name",
-      header: "بيان الصنف",
+      header: "وصف المنتج",
       width: "35%",
       render: (line, index) => (
         <button type="button" className="flex w-full items-center justify-between gap-2 px-1 text-right"
           onClick={() => setProductPickerLineIdx(index)}>
           <span className={line.product_name ? "ktra-text-ink" : "ktra-text-soft"}>
-            {line.product_name || "اختر صنفاً…"}
+            {line.product_name || "اختر منتجاً…"}
           </span>
           <span className="ktra-text-accent">…</span>
         </button>
@@ -733,7 +733,7 @@ export const SalesQuotationsPage: React.FC = () => {
           </>
         }
         status={<>
-          <span className="ktra-status-item">عدد الأصناف <b>{formLines.length}</b></span>
+          <span className="ktra-status-item">عدد المنتجات <b>{formLines.length}</b></span>
           <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
         </>}
         overlay={<>
@@ -769,7 +769,7 @@ export const SalesQuotationsPage: React.FC = () => {
         <div className="text-xs ktra-text-soft">لا بنود في هذا العرض.</div>
       ) : (
         <table className="ktra-grid text-xs" data-variant="list">
-          <thead><tr><th>الصنف</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
+          <thead><tr><th>المنتج</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
           <tbody>
             {expandedLines[expandedId].map((line, index) => (
               <tr key={index}>

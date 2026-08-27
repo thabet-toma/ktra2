@@ -1,12 +1,12 @@
 /**
- * T-SUPSKU — أرقام الصنف عند مورّديه، داخل كرت الصنف.
+ * T-SUPSKU — أرقام المنتج عند مورّديه، داخل كرت المنتج.
  *
  * مطابقة فاتورة المورّد تجري برقم كتالوجه (מק"ט) لا برقمنا. كان الرقم يُحشَر
  * في «الاسم بالإنجليزية» لغياب مكانٍ له — وهذا مكانه.
  *
- * جدول ربط لا حقل على الصنف: نفس الإطار يأتي من أكثر من مورّد، ولكلٍّ ترقيمه.
- * الرقم الواحد عند المورّد الواحد لا يشير إلى صنفين — يحرسه الخادم ويردّ
- * برسالةٍ تسمّي الصنف المالك.
+ * جدول ربط لا حقل على المنتج: نفس الإطار يأتي من أكثر من مورّد، ولكلٍّ ترقيمه.
+ * الرقم الواحد عند المورّد الواحد لا يشير إلى منتجين — يحرسه الخادم ويردّ
+ * برسالةٍ تسمّي المنتج المالك.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
@@ -20,7 +20,7 @@ interface SupplierOption {
 }
 
 interface Props {
-  /** معرّف الصنف. غيابه = صنف لم يُحفظ بعد، فلا رقم يُربط به. */
+  /** معرّف المنتج. غيابه = منتج لم يُحفظ بعد، فلا رقم يُربط به. */
   productId: number | null;
   readOnly?: boolean;
 }
@@ -68,7 +68,7 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
 
   const add = async () => {
     if (!productId || !supplierId || !code.trim()) {
-      setError("اختر المورّد واكتب رقمه للصنف.");
+      setError("اختر المورّد واكتب رقمه للمنتج.");
       return;
     }
     setSaving(true);
@@ -84,7 +84,7 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
       setSupplierItemName("");
       await load();
     } catch (e) {
-      // رسالة الخادم تسمّي الصنف الذي يحمل الرقم — تُعرض كما هي.
+      // رسالة الخادم تسمّي المنتج الذي يحمل الرقم — تُعرض كما هي.
       setError(e instanceof Error ? e.message : "تعذّر الحفظ");
     } finally {
       setSaving(false);
@@ -95,7 +95,7 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
     if (!(await confirm({
       title: "حذف رقم المورّد",
       message: `سيُحذف الرقم «${row.supplier_sku}» عند «${row.supplier_display_name}». `
-        + "الصنف نفسه لا يتأثّر، لكن فواتير هذا المورّد لن تُطابَق بهذا الرقم بعدها.",
+        + "المنتج نفسه لا يتأثّر، لكن فواتير هذا المورّد لن تُطابَق بهذا الرقم بعدها.",
       confirmText: "حذف",
     }))) return;
     setSaving(true);
@@ -113,7 +113,7 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
   if (!productId) {
     return (
       <div className="p-4 text-sm ktra-text-soft">
-        احفظ الصنف أوّلاً، ثم اربط أرقام مورّديه به.
+        احفظ المنتج أوّلاً، ثم اربط أرقام مورّديه به.
       </div>
     );
   }
@@ -121,8 +121,8 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
   return (
     <div className="space-y-3 p-2">
       <p className="text-xs ktra-text-soft">
-        رقم هذا الصنف في كتالوج كل مورّد — به تُطابَق فاتورته، وبه يجده البحث
-        ومنتقي بنود الفاتورة. للصنف الواحد رقمٌ عند كل مورّد، وللمورّد الواحد
+        رقم هذا المنتج في كتالوج كل مورّد — به تُطابَق فاتورته، وبه يجده البحث
+        ومنتقي بنود الفاتورة. للمنتج الواحد رقمٌ عند كل مورّد، وللمورّد الواحد
         أكثر من رقم إن بدّل ترقيمه.
       </p>
 
@@ -149,7 +149,7 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs ktra-text-soft">رقمه للصنف (מק"ט)</span>
+            <span className="text-xs ktra-text-soft">رقمه للمنتج (מק"ט)</span>
             <input
               className="ktra-input"
               value={code}
@@ -184,7 +184,7 @@ export const SupplierCodesTab: React.FC<Props> = ({ productId, readOnly }) => {
           <thead>
             <tr>
               <th className="p-1 text-start">المورّد</th>
-              <th className="p-1 text-start">رقمه للصنف</th>
+              <th className="p-1 text-start">رقمه للمنتج</th>
               <th className="p-1 text-start">اسمه عنده</th>
               {!readOnly && <th className="w-10 p-1" />}
             </tr>

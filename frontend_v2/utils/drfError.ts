@@ -9,7 +9,7 @@
 
 /** خريطة أسماء حقول DRF التقنية → تسميات عربية بشرية. */
 const FIELD_LABELS: Record<string, string> = {
-  product: "الصنف",
+  product: "المنتج",
   partner: "الطرف",
   customer: "العميل",
   supplier: "المورد",
@@ -30,7 +30,7 @@ const FIELD_LABELS: Record<string, string> = {
   name_ar: "الاسم العربي",
   name_en: "الاسم الإنجليزي",
   name: "الاسم",
-  sku: "رقم الصنف",
+  sku: "رقم المنتج",
   account: "الحساب",
   shipment: "الشحنة",
   deal: "الصفقة",

@@ -1,5 +1,5 @@
 /**
- * جدول أصناف شجري بأي عمق (نمط المواقع الاحترافية): يعرض **شجرة التصنيفات** كما بناها
+ * جدول منتجات شجري بأي عمق (نمط المواقع الاحترافية): يعرض **شجرة التصنيفات** كما بناها
  * المستخدم (أب/ابن/حفيد... بلا حدّ)، والمنتجات أوراق تحت تصنيفاتها. كبسة على أي تصنيف
  * ⇒ الكرت المجمّع لكل ما تحته (بكل الأعماق)؛ كبسة على منتج ⇒ كرته (عبر عمود الاسم).
  * يعيد استخدام نفس أعمدة KitDenseTable وتنسيقها (DRY). الافتراضي **مفتوح**.
@@ -33,10 +33,10 @@ type Props = {
 const UNCAT = -1; // تصنيف افتراضي «بدون تصنيف» للمنتجات بلا تصنيف.
 
 export const GroupedItemsTable: React.FC<Props> = ({
-  columns, rows, categories, getRowKey, loading, emptyHint = "لا توجد أصناف",
+  columns, rows, categories, getRowKey, loading, emptyHint = "لا توجد منتجات",
   sortKey, sortDir, onSort, onRowDoubleClick, onShowGroup,
 }) => {
-  // مفتوحة افتراضياً: البدء بالطيّ كان يُخفي كل الأصناف تحت اسم التصنيف فتبدو
+  // مفتوحة افتراضياً: البدء بالطيّ كان يُخفي كل المنتجات تحت اسم التصنيف فتبدو
   // الشاشة فارغة. `collapsed` تحمل ما طواه المستخدم فقط (الجديد يبقى مفتوحاً).
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const isExpanded = (id: number) => !collapsed.has(id);

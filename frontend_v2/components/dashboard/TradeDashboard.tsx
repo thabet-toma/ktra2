@@ -177,7 +177,7 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
           icon={Boxes}
           label="قيمة المخزون"
           value={baseMoney(data.inventory.inventory_value)}
-          note={`${data.inventory.in_stock} صنف · بالعملة الأساسية`}
+          note={`${data.inventory.in_stock} منتج · بالعملة الأساسية`}
           tone="violet"
           onClick={() => onNavigate("stock-levels")}
         />
@@ -222,7 +222,7 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
 
 function GettingStarted({ onNavigate }: { onNavigate: (view: AppView) => void }) {
   const steps = [
-    { icon: PackagePlus, title: "أضف الأصناف", description: "عرّف المنتجات والأرصدة الافتتاحية", view: "items-management" as AppView },
+    { icon: PackagePlus, title: "أضف المنتجات", description: "عرّف المنتجات والأرصدة الافتتاحية", view: "items-management" as AppView },
     { icon: FileInput, title: "سجّل أول شراء", description: "أدخل فاتورة المورد وتكلفة البضاعة", view: "purchase-invoices" as AppView },
     { icon: FileOutput, title: "أنشئ أول مبيعة", description: "أصدر فاتورة وتابع الإيراد والتحصيل", view: "sales-invoices" as AppView },
   ];
@@ -341,12 +341,12 @@ function InventoryPanel({ data, onNavigate }: { data: DashboardData["inventory"]
         <button type="button" onClick={() => onNavigate("stock-levels")} className="text-xs font-semibold text-[var(--color-primary)]">التفاصيل</button>
       </div>
       <div className="grid grid-cols-3 gap-2">
-        <MiniStat label="الأصناف" value={data.total_products} />
+        <MiniStat label="المنتجات" value={data.total_products} />
         <MiniStat label="منخفض" value={data.low_stock} warning={data.low_stock > 0} />
         <MiniStat label="نافد" value={data.out_of_stock} warning={data.out_of_stock > 0} />
       </div>
       {data.total_products === 0 ? (
-        <button type="button" onClick={() => onNavigate("items-management")} className="mt-3 w-full rounded-[var(--radius-lg)] border border-dashed border-[var(--color-primary)]/40 bg-[var(--color-primary)]/5 px-3 py-3 text-xs font-semibold text-[var(--color-primary)]">إضافة أول صنف للمخزون</button>
+        <button type="button" onClick={() => onNavigate("items-management")} className="mt-3 w-full rounded-[var(--radius-lg)] border border-dashed border-[var(--color-primary)]/40 bg-[var(--color-primary)]/5 px-3 py-3 text-xs font-semibold text-[var(--color-primary)]">إضافة أول منتج للمخزون</button>
       ) : data.low_stock_items.length > 0 ? (
         <div className="mt-3 space-y-2 border-t border-[var(--color-border)] pt-3">
           {data.low_stock_items.slice(0, 3).map((item) => (

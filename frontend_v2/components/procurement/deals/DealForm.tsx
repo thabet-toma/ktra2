@@ -207,7 +207,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   const [loading, setLoading] = useState(false);
   const [dealsList, setDealsList] = useState<Deal[]>([]);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
-  // G1: «إضافة كصنف جديد» يفتح إنشاء صنف سريع يُنشئ Product فعلياً ويربط
+  // G1: «إضافة كمنتج جديد» يفتح إنشاء منتج سريع يُنشئ Product فعلياً ويربط
   // product_id في السطر — بدل ترك سطر حر بلا itemId يُرفض بـ {"product":[...]}.
   const [inlineCreate, setInlineCreate] = useState<{ rowId: string; name: string } | null>(null);
 
@@ -684,10 +684,10 @@ export const DealForm: React.FC<DealFormProps> = ({
   const validateForm = (): boolean => {
     if (!formData.supplierId) { toast("يرجى اختيار المورد أولاً", "error"); return false; }
     if (nonEmptyItems().length === 0) { toast("يرجى إضافة منتجات على الأقل", "error"); return false; }
-    // G1: امنع الحفظ إن وُجد بند بلا صنف مربوط (itemId رقمي) — يكافئ رفض الخادم
+    // G1: امنع الحفظ إن وُجد بند بلا منتج مربوط (itemId رقمي) — يكافئ رفض الخادم
     // {"product":["هذا الحقل مطلوب."]} برسالة عربية واضحة بدل JSON خام.
     const unlinked = nonEmptyItems().filter((i) => !(i.itemId && /^\d+$/.test(String(i.itemId))));
-    if (unlinked.length > 0) { toast("يوجد بند بلا صنف مربوط — اختر صنفاً من القائمة أو «إضافة كصنف جديد»", "error"); return false; }
+    if (unlinked.length > 0) { toast("يوجد بند بلا منتج مربوط — اختر منتجاً من القائمة أو «إضافة كمنتج جديد»", "error"); return false; }
     return true;
   };
 
@@ -762,8 +762,8 @@ export const DealForm: React.FC<DealFormProps> = ({
   /* ───────────── أعمدة جدول البنود ───────────── */
   const itemColumns: KitGridColumn<DealItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
-    { key: "itemId", header: "رقم الصنف", width: "100px" },
-    { key: "name", header: "اسم الصنف", width: "25%" },
+    { key: "itemId", header: "رقم المنتج", width: "100px" },
+    { key: "name", header: "اسم المنتج", width: "25%" },
     { key: "specifications", header: "بيان", width: "20%" },
     { key: "quantity", header: "الكمية", width: "80px", align: "center", type: "number" },
     { key: "unitPrice", header: "سعر الوحدة", width: "100px", align: "center", type: "number" },
@@ -802,7 +802,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   const removeRow = (key: string) => { recalculateTotals(items.filter((i) => i.id !== key)); };
 
   const renderItemIdCell = (row: DealItem) => (
-    <button type="button" className="ktra-cell-picker" disabled={isDealLocked} data-ktra-key="1" onClick={() => setShowItemSearch(true)} title="فهرس الأصناف الكامل (+)">
+    <button type="button" className="ktra-cell-picker" disabled={isDealLocked} data-ktra-key="1" onClick={() => setShowItemSearch(true)} title="فهرس المنتجات الكامل (+)">
       {row.itemId ? `#${row.itemId}` : "…"}
     </button>
   );
@@ -812,9 +812,9 @@ export const DealForm: React.FC<DealFormProps> = ({
       <button type="button" className="ktra-iconbtn ktra-iconbtn--danger" onClick={() => removeRow(row.id)} title="حذف السطر"><Trash2 className="h-3 w-3" /></button>
     );
 
-  /* task13 M5: منتقي مدمج في خلية اسم الصنف — الكتابة تفلتر فورياً وتعبئ
+  /* task13 M5: منتقي مدمج في خلية اسم المنتج — الكتابة تفلتر فورياً وتعبئ
      السطر نفسه (المودال القديم كان يضيف سطراً جديداً دائماً ويأكل الشاشة).
-     زر «#» في عمود رقم الصنف يبقى فاتحاً الفهرس الكامل كمسار ثانوي. */
+     زر «#» في عمود رقم المنتج يبقى فاتحاً الفهرس الكامل كمسار ثانوي. */
   const itemOptions = useMemo(
     () => allDbItems.map((it) => {
       const pp = purchasePriceMap.get(Number(it.id));
@@ -856,7 +856,7 @@ export const DealForm: React.FC<DealFormProps> = ({
       value={row.name || ""}
       options={itemOptions}
       disabled={isDealLocked}
-      placeholder="اكتب اسم الصنف…"
+      placeholder="اكتب اسم المنتج…"
       onPick={(id) => {
         const it = allDbItems.find((x) => String(x.id) === String(id));
         if (it) fillRowWithItem(row.id, it);
@@ -1100,7 +1100,7 @@ export const DealForm: React.FC<DealFormProps> = ({
       columns={[
         {
           key: "name",
-          header: "الصنف",
+          header: "المنتج",
           render: (r) => (
             <div>
               <span className="font-semibold">{r.name || "—"}</span>
@@ -1118,7 +1118,7 @@ export const DealForm: React.FC<DealFormProps> = ({
       ]}
       rows={filledDealItems}
       rowKey={(r) => r.id}
-      emptyRowsHint="لا توجد أصناف في الصفقة"
+      emptyRowsHint="لا توجد منتجات في الصفقة"
       /* ملخّص كامل داخل المستند (يُرفع لأعلى بدل دوك سفلي عالق) — طلب المالك. */
       totals={[
         { label: "مجموع البنود", value: dealMoney(calculateSubtotal()) },
@@ -1371,7 +1371,7 @@ export const DealForm: React.FC<DealFormProps> = ({
           getRowKey={(r) => r.id}
           onChange={isDealLocked ? undefined : itemOnChange}
           onAddRow={isDealLocked ? undefined : addRow}
-          emptyHint="لا توجد بنود — أضف صنفاً (+ فهرس الأصناف)"
+          emptyHint="لا توجد بنود — أضف منتجاً (+ فهرس المنتجات)"
         />
         )}
         {!viewMode && !isDealLocked && (

@@ -63,7 +63,7 @@ test("readPartnerContext يتحمّل غياب الاسم", () => {
   assert.deepEqual(ctx, { id: "9", name: "", kind: "supplier" });
 });
 
-test("readItemContext يقرأ سياق صنف صالح ويرفض الناقص", () => {
+test("readItemContext يقرأ سياق منتج صالح ويرفض الناقص", () => {
   const attrs: Record<string, string> = {
     "data-ctx-item-id": "500",
     "data-ctx-item-name": "إطار",

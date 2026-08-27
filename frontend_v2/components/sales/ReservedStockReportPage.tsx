@@ -153,7 +153,7 @@ export const ReservedStockReportPage: React.FC = () => {
     { key: "order_date", header: "تاريخ الطلبية", width: "110px",
       render: (r) => formatDateLocalized(r.order_date) || "—" },
     { key: "customer_name", header: "الزبون", render: (r) => r.customer_name },
-    { key: "product_name", header: "الصنف", render: (r) => r.product_name },
+    { key: "product_name", header: "المنتج", render: (r) => r.product_name },
     { key: "product_sku", header: "الرمز", width: "100px", render: (r) => r.product_sku || "—" },
     { key: "quantity", header: "المحجوز", numeric: true, render: (r) => formatNumber(r.quantity) },
     {
@@ -213,7 +213,7 @@ export const ReservedStockReportPage: React.FC = () => {
   const filterBar = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
       <div className="ktra-field" style={{ flex: "1", minWidth: "180px" }}>
-        <label className="ktra-field-label">الزبون / الصنف / رقم الطلبية</label>
+        <label className="ktra-field-label">الزبون / المنتج / رقم الطلبية</label>
         <input
           type="text"
           className="ktra-input"
@@ -282,11 +282,11 @@ export const ReservedStockReportPage: React.FC = () => {
       {kpiCard("عدد الحجوزات", formatNumber(shown.length))}
       {kpiCard("الطلبيات", formatNumber(kpis.orders))}
       {kpiCard("الزبائن", formatNumber(kpis.customers))}
-      {kpiCard("الأصناف", formatNumber(kpis.products))}
+      {kpiCard("المنتجات", formatNumber(kpis.products))}
       {kpiCard("الكمية المحجوزة", formatNumber(totals.quantity))}
       {kpiCard("قيمة المحجوز", formatMoney(totals.line_total))}
       {kpiCard("ينتهي خلال يومين", formatNumber(kpis.endingSoon), kpis.endingSoon > 0 ? "warn" : undefined)}
-      {kpiCard("أصناف بمتاح سالب", formatNumber(kpis.negative), kpis.negative > 0 ? "danger" : undefined)}
+      {kpiCard("منتجات بمتاح سالب", formatNumber(kpis.negative), kpis.negative > 0 ? "danger" : undefined)}
     </div>
   );
 

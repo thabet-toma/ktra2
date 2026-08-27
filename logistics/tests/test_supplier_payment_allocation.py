@@ -39,7 +39,7 @@ class SupplierPaymentAllocationTest(APITestCase):
             tenant=cls.tenant, name="مورد التوزيع", partner_type="Supplier",
             linked_account=cls.ap)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="SPA-1", name_ar="صنف",
+            tenant=cls.tenant, sku="SPA-1", name_ar="منتج",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
 
     def _auth(self):
@@ -53,7 +53,7 @@ class SupplierPaymentAllocationTest(APITestCase):
             grand_total=Decimal(str(total)),
             payment_type=PurchaseInvoice.PAYMENT_TYPE_CREDIT)
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف",
+            invoice=inv, product=self.product, name="منتج",
             quantity=Decimal("1"), unit_price=Decimal(str(total)),
             total_price=Decimal(str(total)))
         res = self.client.post(

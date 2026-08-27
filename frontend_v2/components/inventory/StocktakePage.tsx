@@ -1,6 +1,6 @@
 /**
  * T-I2 — مستند جرد فعلي (جرد).
- * إنشاء + ترحيل: يسوّي رصيد كل صنف ليطابق العدّ (ADJUST_IN/OUT) ويُنشئ قيد فرق
+ * إنشاء + ترحيل: يسوّي رصيد كل منتج ليطابق العدّ (ADJUST_IN/OUT) ويُنشئ قيد فرق
  * الجرد (المخزون ↔ ت.ب.م). يعتمد على /api/inventory/stocktakes/.
  */
 import React, { useEffect, useState, useCallback, useMemo } from "react";
@@ -51,11 +51,11 @@ const trimQty = (v: unknown) =>
   v === null || v === undefined || v === "" ? "—" : formatQuantity(v, "—");
 
 /**
- * يستخرج مقاس الإطار (عرض/نسبة/قطر مثل 255/65/15 أو 31/10.5/15) من اسم الصنف
+ * يستخرج مقاس الإطار (عرض/نسبة/قطر مثل 255/65/15 أو 31/10.5/15) من اسم المنتج
  * لتجميع المقاسات المتطابقة بجانب بعضها — دون الحاجة لكود مخصّص. النمط مشدَّد على
  * أبعاد إطار معقولة (عرض 2-3 خانات، نسبة 1-2، قطر خانتان) كي لا تُلتقط أرقام أو
- * تواريخ عادية بالخطأ. يُرجع null لأي اسم لا يحوي مقاساً (الأصناف العادية) ⇒ تُرتَّب
- * هذه بترتيب الكود الطبيعي، فلا يتأثر أصحاب الأصناف غير العجال.
+ * تواريخ عادية بالخطأ. يُرجع null لأي اسم لا يحوي مقاساً (المنتجات العادية) ⇒ تُرتَّب
+ * هذه بترتيب الكود الطبيعي، فلا يتأثر أصحاب المنتجات غير العجال.
  */
 const tireSizeKey = (name: string): { d: number; w: number; a: number } | null => {
   // حدّان (?<!\d) و (?!\d) يجعلان المقاس «رمزاً مستقلاً» فلا يُلتقط جزء من رقم أطول
@@ -83,7 +83,7 @@ export const StocktakePage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   // فلتر المراجعة: الكل / المعدود / غير المعدود / الفروقات فقط — للعرض والطباعة.
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
-  // بطاقة الصنف (مودال مشترك) — تُفتح بالنقر على زر المعلومات بجانب الصنف.
+  // بطاقة المنتج (مودال مشترك) — تُفتح بالنقر على زر المعلومات بجانب المنتج.
   const [cardProductId, setCardProductId] = useState<number | null>(null);
   // تجميع الجرد شجرياً حسب التصنيفات (بأي عمق). المطويّة الافتراض: الكل مفتوح.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -121,7 +121,7 @@ export const StocktakePage: React.FC = () => {
   const prodById = (id: number | "") => products.find((p) => p.id === Number(id));
 
   // فرق السطر = المعدودة − رصيد النظام. يُرجع null إذا لم تُعَدّ بعد (خانة فارغة)
-  // كي لا يُحسب الفراغ صفراً (السطر غير المعدود لا يُرحَّل ولا يُصفِّر الصنف).
+  // كي لا يُحسب الفراغ صفراً (السطر غير المعدود لا يُرحَّل ولا يُصفِّر المنتج).
   const lineDiff = (l: Line): number | null => {
     if (String(l.counted_quantity).trim() === "") return null;
     const cnt = Number(l.counted_quantity);
@@ -138,7 +138,7 @@ export const StocktakePage: React.FC = () => {
     editingPosted ? (l.variance != null ? Number(l.variance) : null) : lineDiff(l);
 
   // هل يطابق السطر الفلتر الحالي — مصدر حقيقة واحد للعرض والطباعة (DRY).
-  // الأسطر الفارغة (بلا صنف) لا تطابق أي فلتر مقيّد؛ في وضع «الكل» تبقى ظاهرة للإضافة.
+  // الأسطر الفارغة (بلا منتج) لا تطابق أي فلتر مقيّد؛ في وضع «الكل» تبقى ظاهرة للإضافة.
   const matchesFilter = (l: Line): boolean => {
     if (l.product === "") return false;
     const counted = String(l.counted_quantity).trim() !== "";
@@ -157,7 +157,7 @@ export const StocktakePage: React.FC = () => {
     return p.display_name || p.name_ar || p.name_en || p.sku;
   };
 
-  // ملخص المراجعة: كم صنفاً عُدّ، كم منها فرقه ≠ 0، وكم أُدرج بلا عدّ بعد.
+  // ملخص المراجعة: كم منتجاً عُدّ، كم منها فرقه ≠ 0، وكم أُدرج بلا عدّ بعد.
   const { countedCount, varianceCount, uncountedCount } = useMemo(() => {
     let counted = 0, variance = 0, uncounted = 0;
     for (const l of lines) {
@@ -171,8 +171,8 @@ export const StocktakePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lines, products, editingPosted]);
 
-  // ترتيب الأصناف بحيث تتجاور المقاسات المتطابقة (مثل 255/65/15 بمختلف الشركات)؛
-  // الأصناف بلا مقاس تُرتَّب أخيراً أبجدياً. مشتق من الاسم — بلا كود مخصّص.
+  // ترتيب المنتجات بحيث تتجاور المقاسات المتطابقة (مثل 255/65/15 بمختلف الشركات)؛
+  // المنتجات بلا مقاس تُرتَّب أخيراً أبجدياً. مشتق من الاسم — بلا كود مخصّص.
   const sortedProducts = useMemo(() => {
     const nameOf = (p: Prod) => p.name_ar || p.name_en || p.sku;
     // ترتيب الكود الطبيعي (000073 < 000087) — هو الترتيب الافتراضي لمن لا مقاس لهم.
@@ -184,7 +184,7 @@ export const StocktakePage: React.FC = () => {
       if (kx && ky) {
         return (kx.d - ky.d) || (kx.w - ky.w) || (kx.a - ky.a) || byCode(x, y);
       }
-      // ذو المقاس يسبق عديم المقاس؛ والباقي (الأصناف العادية) بترتيب الكود.
+      // ذو المقاس يسبق عديم المقاس؛ والباقي (المنتجات العادية) بترتيب الكود.
       if (kx) return -1;
       if (ky) return 1;
       return byCode(x, y);
@@ -195,21 +195,21 @@ export const StocktakePage: React.FC = () => {
   const productOptions = useMemo(
     () => sortedProducts.map((p) => ({
       id: p.id,
-      label: p.display_name || p.name_ar || p.name_en || p.sku || `صنف #${p.id}`,
+      label: p.display_name || p.name_ar || p.name_en || p.sku || `منتج #${p.id}`,
     })),
     [sortedProducts],
   );
-  // خيارات «القفز لصنف»: الكود أولاً في التسمية كي تطابق الكتابة فوراً (startsWith)
-  // فيكفي كتابة الكود + Enter للقفز للصنف المطابق.
+  // خيارات «القفز لمنتج»: الكود أولاً في التسمية كي تطابق الكتابة فوراً (startsWith)
+  // فيكفي كتابة الكود + Enter للقفز للمنتج المطابق.
   const locateOptions = useMemo(
     () => sortedProducts.map((p) => ({
       id: p.id,
-      label: p.display_name || p.name_ar || p.name_en || p.sku || `صنف #${p.id}`,
+      label: p.display_name || p.name_ar || p.name_en || p.sku || `منتج #${p.id}`,
     })),
     [sortedProducts],
   );
 
-  // يُنزل القائمة على سطر الصنف ويضع المؤشّر في خانة الكمية (للعدّ من ورقة بترتيب مختلف).
+  // يُنزل القائمة على سطر المنتج ويضع المؤشّر في خانة الكمية (للعدّ من ورقة بترتيب مختلف).
   const locateProduct = (id: number) => {
     const el = document.querySelector<HTMLInputElement>(`[data-qty-for="${id}"]`);
     if (el) {
@@ -228,7 +228,7 @@ export const StocktakePage: React.FC = () => {
     if (sortedProducts.length === 0) return;
     // الإدراج بالترتيب المُجمَّع بالمقاس ليسهل العدّ (المتطابقات متجاورة).
     // الكمية المعدودة تبدأ فارغة عمداً — يعبّئها المستخدم بالعدّ الفعلي (لا تُملأ
-    // برصيد النظام كي لا يُرحَّل صنف بلا عدّ فعلي).
+    // برصيد النظام كي لا يُرحَّل منتج بلا عدّ فعلي).
     const newLines = sortedProducts.map((p) => ({
       product: p.id,
       counted_quantity: "",
@@ -271,10 +271,10 @@ export const StocktakePage: React.FC = () => {
   // حفظ الجرد: post=false ⇒ مسودة فقط (تُرحَّل لاحقاً من القائمة)، post=true ⇒ حفظ وترحيل.
   const save = async (post: boolean) => {
     setErr(null); setMsg(null);
-    // يُرحَّل فقط ما عُدّ فعلاً: سطر بصنف + خانة معدودة غير فارغة. الأصناف المُدرَجة
+    // يُرحَّل فقط ما عُدّ فعلاً: سطر بمنتج + خانة معدودة غير فارغة. المنتجات المُدرَجة
     // بلا عدّ تُترك كما هي في النظام (لا تُصفَّر) — السلوك الاحترافي للجرد الجزئي.
     const filled = lines.filter((l) => l.product !== "" && String(l.counted_quantity).trim() !== "");
-    if (!filled.length) { setErr("أدخل الكمية المعدودة لصنف واحد على الأقل"); return; }
+    if (!filled.length) { setErr("أدخل الكمية المعدودة لمنتج واحد على الأقل"); return; }
     setSaving(true);
     try {
       const payload = {
@@ -320,7 +320,7 @@ export const StocktakePage: React.FC = () => {
       if (explicitSelection) return l.selected;
       return matchesFilter(l);
     });
-    if (!rows.length) { setErr("لا أصناف للطباعة (راجع الفلتر أو حدد أصنافاً)"); return; }
+    if (!rows.length) { setErr("لا منتجات للطباعة (راجع الفلتر أو حدد منتجات)"); return; }
     const whName = warehouses.find((w) => w.id === Number(warehouse))?.name || "كل المخزون";
     const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
     const body = rows.map((l) => {
@@ -345,8 +345,8 @@ export const StocktakePage: React.FC = () => {
       + `</style></head><body>`
       + `<h1>نتيجة الجرد${FILTER_PRINT_SUFFIX[filterMode]}</h1>`
       + `<div class="meta">التاريخ: ${esc(date)} · المستودع: ${esc(whName)}`
-      + `${notes ? ` · ملاحظات: ${esc(notes)}` : ""} · عدد الأصناف: ${rows.length}</div>`
-      + `<table><thead><tr><th>الكود</th><th>الصنف</th><th>رصيد النظام</th><th>المعدودة</th><th>الفرق</th></tr></thead>`
+      + `${notes ? ` · ملاحظات: ${esc(notes)}` : ""} · عدد المنتجات: ${rows.length}</div>`
+      + `<table><thead><tr><th>الكود</th><th>المنتج</th><th>رصيد النظام</th><th>المعدودة</th><th>الفرق</th></tr></thead>`
       + `<tbody>${body}</tbody></table>`
       + `<script>window.onload=function(){window.print()}</script></body></html>`;
     const win = window.open("", "_blank", "width=900,height=700");
@@ -375,10 +375,10 @@ export const StocktakePage: React.FC = () => {
               <button type="button" className="text-blue-700 hover:underline text-right"
                 style={{ fontWeight: 600, background: "none", border: "none", padding: 0, cursor: "pointer" }}
                 onClick={() => setCardProductId(Number(l.product))}
-                title={p ? `بطاقة الصنف: ${p.sku} — ${p.name_ar || p.name_en || ""}` : "بطاقة الصنف"}>
+                title={p ? `بطاقة المنتج: ${p.sku} — ${p.name_ar || p.name_en || ""}` : "بطاقة المنتج"}>
                 {lineName(l)}
               </button>
-              <button className="ktra-iconbtn" onClick={() => setCardProductId(Number(l.product))} title="بطاقة الصنف"><Info className="h-3 w-3" /></button>
+              <button className="ktra-iconbtn" onClick={() => setCardProductId(Number(l.product))} title="بطاقة المنتج"><Info className="h-3 w-3" /></button>
             </div>
           ) : (
             <KitAutocomplete value="" options={productOptions}
@@ -411,7 +411,7 @@ export const StocktakePage: React.FC = () => {
     _childrenOfCat.get(p)!.push(c);
   }
   const UNCAT = -1;
-  // أسطر الجرد (ذات الصنف) مفهرسة حسب تصنيف الصنف.
+  // أسطر الجرد (ذات المنتج) مفهرسة حسب تصنيف المنتج.
   const _lineIdxByCat = new Map<number, number[]>();
   lines.forEach((l, i) => {
     if (l.product === "") return;
@@ -507,15 +507,15 @@ export const StocktakePage: React.FC = () => {
                   <input className="ktra-input" value={notes} disabled={editingPosted} onChange={(e) => setNotes(e.target.value)} /></label>
               </div>
 
-              {/* قفز لصنف: اكتب الكود/الاسم → اختر أو Enter ⇒ تنزل القائمة على الصنف والمؤشّر بخانة الكمية */}
+              {/* قفز لمنتج: اكتب الكود/الاسم → اختر أو Enter ⇒ تنزل القائمة على المنتج والمؤشّر بخانة الكمية */}
               {!editingPosted && (
               <div id="stocktake-locate" style={{ marginBottom: 8, maxWidth: 480 }}>
-                <span className="ktra-field-label">🔎 قفز لصنف (اكتب الكود ثم Enter — للعدّ بأي ترتيب)</span>
+                <span className="ktra-field-label">🔎 قفز لمنتج (اكتب الكود ثم Enter — للعدّ بأي ترتيب)</span>
                 <KitAutocomplete
                   value=""
                   options={locateOptions}
                   onPick={(id) => locateProduct(Number(id))}
-                  placeholder="اكتب رقم/اسم الصنف… ثم Enter للقفز إليه"
+                  placeholder="اكتب رقم/اسم المنتج… ثم Enter للقفز إليه"
                   maxResults={12}
                 />
               </div>
@@ -526,7 +526,7 @@ export const StocktakePage: React.FC = () => {
                 <span style={{ color: "var(--ktra-ink-soft)" }}>
                   معدود: <b>{countedCount}</b> · فروقات: <b style={{ color: varianceCount ? "#b45309" : undefined }}>{varianceCount}</b> · غير معدود: <b>{uncountedCount}</b>
                 </span>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginInlineStart: "auto" }} title="تصفية الأصناف المعروضة (لا تؤثر على التحديد اليدوي)">
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginInlineStart: "auto" }} title="تصفية المنتجات المعروضة (لا تؤثر على التحديد اليدوي)">
                   <span className="ktra-field-label">تصفية</span>
                   <select className="ktra-input" style={{ width: "auto" }} value={filterMode}
                     onChange={(e) => {
@@ -548,7 +548,7 @@ export const StocktakePage: React.FC = () => {
                       setLines(ls => ls.map(l => ({ ...l, selected: checked })));
                     }} title="تحديد/إلغاء تحديد الكل للطباعة" />
                   </th>
-                  <th>الصنف</th>
+                  <th>المنتج</th>
                   <th style={{ width: "15%" }}>رصيد النظام</th>
                   <th style={{ width: "25%" }}>الكمية المعدودة</th>
                   <th style={{ width: "15%" }}>الفرق</th>
@@ -562,7 +562,7 @@ export const StocktakePage: React.FC = () => {
                     }
                     // وضع «الكل»: شجرة التصنيفات بأي عمق — كل تصنيف أب يجمع رصيد كل ما
                     // تحته (recursive) لحد ما نوصل المنتج+البراند (ورقة). تُخطّى التصنيفات
-                    // الفارغة (بلا أصناف مُدرَجة).
+                    // الفارغة (بلا منتجات مُدرَجة).
                     const out: React.ReactNode[] = [];
                     const walk = (cat: TreeCategory, depth: number) => {
                       if (descendantLineIdxs(cat.id).length === 0) return;
@@ -572,13 +572,13 @@ export const StocktakePage: React.FC = () => {
                       for (const idx of _lineIdxByCat.get(cat.id) || []) out.push(renderLineRow(lines[idx], idx, depth + 1));
                     };
                     for (const root of _childrenOfCat.get(null) || []) walk(root, 0);
-                    // أصناف بلا تصنيف (إن وُجدت).
+                    // منتجات بلا تصنيف (إن وُجدت).
                     const uncat = _lineIdxByCat.get(UNCAT) || [];
                     if (uncat.length) {
                       out.push(renderCatHeader(UNCAT, "بدون تصنيف", 0));
                       if (!collapsedGroups.has(`c${UNCAT}`)) for (const idx of uncat) out.push(renderLineRow(lines[idx], idx, 1));
                     }
-                    // أسطر الإضافة الفارغة (بلا صنف) في الأسفل للإدخال.
+                    // أسطر الإضافة الفارغة (بلا منتج) في الأسفل للإدخال.
                     lines.forEach((l, i) => { if (l.product === "") out.push(renderLineRow(l, i, 0)); });
                     return out;
                   })()}
@@ -591,7 +591,7 @@ export const StocktakePage: React.FC = () => {
               ) : (
                 <div style={{ display: "flex", gap: 8 }}>
                   <button className="ktra-toolbtn" onClick={addLine}><Plus className="h-4 w-4" /> سطر</button>
-                  <button className="ktra-toolbtn" onClick={loadAllProducts} title="إدراج كافة الأصناف المسجلة"><List className="h-4 w-4" /> إدراج كل الأصناف</button>
+                  <button className="ktra-toolbtn" onClick={loadAllProducts} title="إدراج كافة المنتجات المسجلة"><List className="h-4 w-4" /> إدراج كل المنتجات</button>
                   <button className="ktra-toolbtn" onClick={() => void save(false)} disabled={saving} style={{ marginInlineStart: "auto" }} title="حفظ كمسودة بدون ترحيل — تُرحَّل لاحقاً من القائمة">
                     {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} حفظ
                   </button>

@@ -35,7 +35,7 @@ def env():
     c1 = Partner.objects.create(tenant=tenant, name="عميل1", partner_type="Customer", linked_account=ar)
     c2 = Partner.objects.create(tenant=tenant, name="عميل2", partner_type="Customer", linked_account=ar)
     product = Product.objects.create(
-        tenant=tenant, sku="SPR-1", name_ar="صنف", quantity_on_hand=1000, avg_cost=Decimal("10"))
+        tenant=tenant, sku="SPR-1", name_ar="منتج", quantity_on_hand=1000, avg_cost=Decimal("10"))
     return tenant, ils, usd, c1, c2, product
 
 
@@ -117,7 +117,7 @@ class SalesPriceEndpointTest(APITestCase):
         cls.c1 = Partner.objects.create(
             tenant=cls.tenant, name="عميل", partner_type="Customer", linked_account=cls.ar)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="SPRE-1", name_ar="صنف", quantity_on_hand=100, avg_cost=Decimal("5"))
+            tenant=cls.tenant, sku="SPRE-1", name_ar="منتج", quantity_on_hand=100, avg_cost=Decimal("5"))
         _post(cls.tenant, cls.ils, cls.c1, cls.product, number="S-1", date="2026-06-10", price=77)
 
     def _auth(self):
@@ -133,7 +133,7 @@ class SalesPriceEndpointTest(APITestCase):
 
 
 def test_product_sale_price_is_last_resort_only(env):
-    """«سعر البيع» في كرت الصنف سعر عام يُدخل يدوياً — لا يظهر إلا حين لا عرض
+    """«سعر البيع» في كرت المنتج سعر عام يُدخل يدوياً — لا يظهر إلا حين لا عرض
     لهذا الزبون ولا شراء سابق له. آخر سعر باعه الزبون يبقى الأعلى أولوية."""
     tenant, ils, _usd, c1, c2, product = env
     product.sale_price = Decimal("250")
@@ -157,7 +157,7 @@ def test_product_sale_price_is_last_resort_only(env):
 
 
 def test_customer_quote_beats_product_sale_price(env):
-    """عرض السعر المحفوظ للزبون أولى من السعر العام في كرت الصنف."""
+    """عرض السعر المحفوظ للزبون أولى من السعر العام في كرت المنتج."""
     from sales.models import CustomerProductQuote
 
     tenant, ils, _usd, c1, _c2, product = env
@@ -174,7 +174,7 @@ def test_customer_quote_beats_product_sale_price(env):
 
 
 def test_price_list_shows_product_sale_price_when_customer_has_nothing(env):
-    """قائمة أسعار الزبون: الصنف بلا تاريخ ولا عرض يظهر بالسعر العام موسوماً
+    """قائمة أسعار الزبون: المنتج بلا تاريخ ولا عرض يظهر بالسعر العام موسوماً
     بمصدره — وتبقى الخانة قابلة للتحرير لحفظ عرض خاص بالزبون."""
     from sales.services import customer_price_list
 

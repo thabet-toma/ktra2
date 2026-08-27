@@ -240,14 +240,14 @@ register(ReportSpec(
     key="warehouse-transfers",
     title="تحويلات المستودعات",
     category="inventory",
-    description="حركة البضاعة بين المستودعات: من أين إلى أين وكم صنفاً وهل رُحّلت.",
+    description="حركة البضاعة بين المستودعات: من أين إلى أين وكم منتجاً وهل رُحّلت.",
     filters=DATE_FILTERS + (ReportFilter("warehouse", "المستودع", "warehouse"),),
     columns=(
         ReportColumn("number", "رقم التحويل", width="130px"),
         ReportColumn("date", "التاريخ", KIND_DATE, width="110px"),
         ReportColumn("source", "من مستودع"),
         ReportColumn("destination", "إلى مستودع"),
-        ReportColumn("line_count", "عدد الأصناف", KIND_INT, total=True, width="100px"),
+        ReportColumn("line_count", "عدد المنتجات", KIND_INT, total=True, width="100px"),
         ReportColumn("state", "الحالة", width="90px"),
         ReportColumn("notes", "ملاحظات"),
     ),
@@ -292,7 +292,7 @@ register(ReportSpec(
         ReportColumn("number", "رقم الجرد", width="130px"),
         ReportColumn("date", "التاريخ", KIND_DATE, width="110px"),
         ReportColumn("warehouse", "المستودع"),
-        ReportColumn("line_count", "عدد الأصناف", KIND_INT, total=True, width="100px"),
+        ReportColumn("line_count", "عدد المنتجات", KIND_INT, total=True, width="100px"),
         ReportColumn("variance_total", "صافي الفرق", KIND_NUMBER, total=True, width="110px"),
         ReportColumn("state", "الحالة", width="90px"),
         ReportColumn("journal", "القيد", width="80px"),
@@ -329,7 +329,7 @@ register(ReportSpec(
     category="inventory",
     description="كل رقم تسلسلي وحالته — ما زال في المخزون أم خرج بفاتورة بيع.",
     filters=DATE_FILTERS + (
-        ReportFilter("product", "الصنف", "product"),
+        ReportFilter("product", "المنتج", "product"),
         ReportFilter(
             "status", "الحالة", "select",
             options=(("", "الكل"), ("in_stock", "في المخزون"), ("sold", "مُباع")),
@@ -338,7 +338,7 @@ register(ReportSpec(
     columns=(
         ReportColumn("serial", "الرقم التسلسلي", width="180px"),
         ReportColumn("sku", "الرمز", width="120px"),
-        ReportColumn("product_name", "الصنف"),
+        ReportColumn("product_name", "المنتج"),
         ReportColumn("status", "الحالة", width="100px"),
         ReportColumn("created_at", "أُدخل في", KIND_DATE, width="110px"),
     ),

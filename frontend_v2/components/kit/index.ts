@@ -82,7 +82,7 @@ export { KitCalculatorPopover } from './KitCalculatorPopover';
 export { KitTabs } from './KitTabs';
 export type { KitTabItem, KitTabsProps } from './KitTabs';
 
-// task13 M5 — المنتقي المدمج (يستبدل مودالات اختيار الأصناف كمسار أساسي)
+// task13 M5 — المنتقي المدمج (يستبدل مودالات اختيار المنتجات كمسار أساسي)
 export { KitAutocomplete } from './KitAutocomplete';
 export type { KitAutocompleteOption, KitAutocompleteProps } from './KitAutocomplete';
 

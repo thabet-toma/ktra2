@@ -48,7 +48,7 @@ class LogisticsListContractPerformanceTest(TestCase):
             tenant=cls.other_tenant, name="Hidden Supplier", partner_type="Supplier"
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="PERF-1", name_ar="صنف البحث التاريخي"
+            tenant=cls.tenant, sku="PERF-1", name_ar="منتج البحث التاريخي"
         )
         cls.deals = []
         cls.shipments = []

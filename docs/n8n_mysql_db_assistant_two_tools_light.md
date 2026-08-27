@@ -109,9 +109,9 @@ smartktra_smart-ktra	product_categories	CategoryID	int	PK تصنيف
 smartktra_smart-ktra	product_categories	TenantID	int	FK
 smartktra_smart-ktra	product_categories	Name	varchar(100)	اسم التصنيف
 smartktra_smart-ktra	product_categories	ParentID	int	FK تصنيف أب
-smartktra_smart-ktra	products	ProductID	int	PK صنف
+smartktra_smart-ktra	products	ProductID	int	PK منتج
 smartktra_smart-ktra	products	TenantID	int	FK
-smartktra_smart-ktra	products	SKU	varchar(50)	رمز صنف فريد لكل مستأجر
+smartktra_smart-ktra	products	SKU	varchar(50)	رمز منتج فريد لكل مستأجر
 smartktra_smart-ktra	products	Barcode	varchar(50)	باركود
 smartktra_smart-ktra	products	Name_AR	varchar(200)	اسم عربي
 smartktra_smart-ktra	products	Name_EN	varchar(200)	اسم إنجليزي

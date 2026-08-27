@@ -32,7 +32,7 @@ class PurchaseDocumentLineageTest(APITestCase):
             tenant=cls.tenant, name='مورد النسب', partner_type='Supplier',
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku='LNG-1', name_ar='صنف النسب',
+            tenant=cls.tenant, sku='LNG-1', name_ar='منتج النسب',
         )
 
     def setUp(self):

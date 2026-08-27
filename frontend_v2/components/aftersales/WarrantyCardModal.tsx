@@ -117,13 +117,13 @@ export const WarrantyCardModal: React.FC<Props> = ({
   }, [card]);
 
   const isAuto = card?.source === "auto_sale";
-  // البطاقة التلقائية: النسب والزبون والصنف من الفاتورة، لا يُحرَّرون هنا.
+  // البطاقة التلقائية: النسب والزبون والمنتج من الفاتورة، لا يُحرَّرون هنا.
   const lineageLocked = isAuto || !canManage;
 
   const patch = <K extends keyof WarrantyCardDraft>(key: K, value: WarrantyCardDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
 
-  /** اختيار الصنف يجلب سياسته: المدة الفارغة تُملأ منها، والمملوءة لا تُداس. */
+  /** اختيار المنتج يجلب سياسته: المدة الفارغة تُملأ منها، والمملوءة لا تُداس. */
   const pickProduct = (productId: number | null) => {
     const product = products.find((p) => p.id === productId);
     setDraft((d) => ({
@@ -153,7 +153,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
   const problems = useMemo(() => {
     const list: string[] = [];
     if (!draft.serial.trim() && !draft.device_name.trim() && !draft.product) {
-      list.push("حدّد الرقم التسلسلي أو اسم الجهاز أو الصنف");
+      list.push("حدّد الرقم التسلسلي أو اسم الجهاز أو المنتج");
     }
     if (!draft.start_date) list.push("تاريخ بدء الكفالة مطلوب");
     if (!draft.duration_months && !previewEnd) {
@@ -310,7 +310,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div>
-              <label className={labelClass} htmlFor="warranty-product">الصنف</label>
+              <label className={labelClass} htmlFor="warranty-product">المنتج</label>
               <select
                 id="warranty-product"
                 className={fieldClass}
@@ -318,7 +318,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
                 value={draft.product ?? ""}
                 onChange={(e) => pickProduct(e.target.value ? Number(e.target.value) : null)}
               >
-                <option value="">— بلا صنف من المخزون —</option>
+                <option value="">— بلا منتج من المخزون —</option>
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>{productLabel(p)}</option>
                 ))}

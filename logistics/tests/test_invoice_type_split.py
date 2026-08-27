@@ -104,7 +104,7 @@ class StockOriginSplitTest(APITestCase):
         Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
         cls.tenant = create_company("شركة المخزن", cls.user)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="S-1", name_ar="صنف",
+            tenant=cls.tenant, sku="S-1", name_ar="منتج",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
 
     def _auth(self):

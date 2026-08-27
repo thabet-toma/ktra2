@@ -138,7 +138,7 @@ class LandedCostReportViewSet(viewsets.ViewSet):
       - الشحن الدولي المُخصَّص (allocated shipping)
       - التخليص الجمركي (cost_lines + ClearancePayments)
       - الرسوم الإضافية (PurchaseInvoiceFee)
-      - إجمالي التكلفة الحقيقية + تكلفة الوحدة لكل صنف (landed_unit_price_ils)
+      - إجمالي التكلفة الحقيقية + تكلفة الوحدة لكل منتج (landed_unit_price_ils)
 
     الاستدعاءات:
       - GET /api/logistics/reports/landed-cost/                 → قائمة ملخّصة لكل الشحنات

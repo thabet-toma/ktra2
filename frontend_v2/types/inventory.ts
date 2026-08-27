@@ -4,7 +4,7 @@ export interface SqlProduct {
   barcode?: string | null;
   name_ar?: string | null;
   name_en?: string | null;
-  /** الصنف الفرعي/المجموعة الصريحة (مثل 185/65/14) — يصير عقدة أب يتجمّع تحتها. */
+  /** المنتج الفرعي/المجموعة الصريحة (مثل 185/65/14) — يصير عقدة أب يتجمّع تحتها. */
   variant_group?: string | null;
   /** البراند (روك بيلد/جلاكسي…) — يظهر بين قوسين على الورقة. */
   brand?: string | null;
@@ -27,13 +27,13 @@ export interface SqlProduct {
   reserved_quantity?: number | string;
   available_quantity?: number | string;
   avg_cost: number;
-  /** سعر البيع الافتراضي المحفوظ على الصنف (فارغ = يتبع آخر سعر بيع فعلي). */
+  /** سعر البيع الافتراضي المحفوظ على المنتج (فارغ = يتبع آخر سعر بيع فعلي). */
   sale_price?: string | number | null;
   /** W8: الوارد التراكمي (كل حركات IN) — من StockMovement. */
   purchased_qty?: string | null;
   /** W8: متوسط المبيعات الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3. */
   avg_monthly_sales?: string | null;
-  /** T-SERIAL: الصنف يتتبّع وحداته برقم تسلسلي (يفعّله كرت الصنف). */
+  /** T-SERIAL: المنتج يتتبّع وحداته برقم تسلسلي (يفعّله كرت المنتج). */
   is_serialized?: boolean;
   /** T-REORDER: «overstock» = فوق الحدّ الأقصى. */
   stock_status: "in_stock" | "low_stock" | "out_of_stock" | "overstock";

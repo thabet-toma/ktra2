@@ -49,7 +49,7 @@ def env():
     other = Partner.objects.create(
         tenant=tenant, name="زبون آخر", partner_type="Customer", linked_account=ar)
     product = Product.objects.create(
-        tenant=tenant, sku="RSV-1", name_ar="صنف محجوز",
+        tenant=tenant, sku="RSV-1", name_ar="منتج محجوز",
         quantity_on_hand=Decimal("10"), avg_cost=Decimal("1"))
     return tenant, holder, other, product
 

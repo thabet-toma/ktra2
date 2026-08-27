@@ -237,7 +237,7 @@ function mapItemFromSql(i: any, idx: number) {
     id: String(i?.id ?? `i-${idx}`),
     itemId: String(i?.product ?? i?.id ?? ""),
     seq: i?.seq ?? idx + 1,
-    name: i?.product_name || i?.name_snapshot || "صنف",
+    name: i?.product_name || i?.name_snapshot || "منتج",
     categoryId: "",
     categoryName: "",
     specifications: i?.notes || "",
@@ -452,7 +452,7 @@ function mapDealToSqlPayload(
     id: i.id && /^\d+$/.test(String(i.id)) ? Number(i.id) : undefined,
     product: i.itemId && /^\d+$/.test(String(i.itemId)) ? Number(i.itemId) : undefined,
     seq: Number(i.seq) > 0 ? Number(i.seq) : idx + 1,
-    // اسم البند كما كُتب لحظة الحفظ: تغيير اسم الصنف لاحقاً لا يعيد كتابة المستند.
+    // اسم البند كما كُتب لحظة الحفظ: تغيير اسم المنتج لاحقاً لا يعيد كتابة المستند.
     name_snapshot: String(i.name || "").slice(0, 255),
     description_line: String(i.specifications || i.notes || "").slice(0, 500),
     quantity: Number(i.quantity || 0),

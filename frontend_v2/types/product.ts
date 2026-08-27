@@ -51,7 +51,7 @@ export interface Item {
     hsCodePrimary?: string;
     hsCodeAlternative?: string;
     /**
-     * T-SUPSKU: أرقام كتالوج الموردين لهذا الصنف، مفصولةً بمسافات.
+     * T-SUPSKU: أرقام كتالوج الموردين لهذا المنتج، مفصولةً بمسافات.
      *
      * نصٌّ واحد لا مصفوفة: المنتقي يطابق ولا يعرض كلَّ رقمٍ على حدة، والحمولة
      * تُقاس على كتالوج كامل يُجلب دفعةً واحدة.
@@ -63,9 +63,9 @@ export interface Item {
     storeName?: string;
     storeDescription?: string;
     salePrice?: number;
-    /** T-SERIAL: باركود الصنف — مصدر البحث السريع بالماسح في مستندات الشراء. */
+    /** T-SERIAL: باركود المنتج — مصدر البحث السريع بالماسح في مستندات الشراء. */
     barcode?: string;
-    /** T-SERIAL: الصنف يتتبّع وحداته برقم تسلسلي (`Product.is_serialized`). */
+    /** T-SERIAL: المنتج يتتبّع وحداته برقم تسلسلي (`Product.is_serialized`). */
     isSerialized?: boolean;
 }
 

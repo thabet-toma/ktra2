@@ -160,7 +160,7 @@ def trade_dashboard(request):
         )["value"]
     )
     # T-REORDER: العدّادان من `inventory.stock_status` وحدها. كان «نفذ» يفلتر
-    # `min_stock_level__gt=0` قبل العدّ — فصنفٌ نفد ولا حدّ أدنى له لا يُعدّ
+    # `min_stock_level__gt=0` قبل العدّ — فمنتجٌ نفد ولا حدّ أدنى له لا يُعدّ
     # نافداً إطلاقاً، وهو معظم الكتالوج. رقمٌ كاذبٌ بالنقصان يقرأه المالك كل صباح.
     from inventory.stock_status import (
         STATUS_LOW, STATUS_OUT_OF_STOCK, filter_by_stock_status,
@@ -223,14 +223,14 @@ def trade_dashboard(request):
         alerts.append({
             "type": "warning",
             "title": "مخزون منخفض",
-            "message": f"{low_stock} صنف تحت الحد الأدنى",
+            "message": f"{low_stock} منتج تحت الحد الأدنى",
             "link": "stock-levels",
         })
     if out_of_stock:
         alerts.append({
             "type": "danger",
-            "title": "أصناف نافدة",
-            "message": f"{out_of_stock} صنف يحتاج إلى إعادة طلب",
+            "title": "منتجات نافدة",
+            "message": f"{out_of_stock} منتج يحتاج إلى إعادة طلب",
             "link": "stock-levels",
         })
     if sales_invoices["draft"]:

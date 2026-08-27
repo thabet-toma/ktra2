@@ -44,7 +44,7 @@ export const OfficeStat: React.FC<{
   );
 };
 
-/** وسم صغير — نوع الزبون، حالة برنامج، صنف موعد. */
+/** وسم صغير — نوع الزبون، حالة برنامج، منتج موعد. */
 export const OfficeBadge: React.FC<{ tone: string; children: React.ReactNode }> = ({ tone, children }) => (
   <span className={`inline-block rounded-lg px-2 py-1 text-xs font-bold ${tone}`}>{children}</span>
 );

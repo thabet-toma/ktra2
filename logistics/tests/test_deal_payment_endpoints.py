@@ -36,7 +36,7 @@ class _Base(TestCase):
             tenant=cls.tenant, name='Supplier P', partner_type='Supplier'
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku='DP-1', name_ar='صنف صفقة',
+            tenant=cls.tenant, sku='DP-1', name_ar='منتج صفقة',
             quantity_on_hand=Decimal('0'), avg_cost=Decimal('0'))
 
     def setUp(self):

@@ -50,7 +50,7 @@ export function readPartnerContext(
   return { id, name: getAttr("data-ctx-partner-name") || "", kind };
 }
 
-/** يقرأ سياق الصنف من مُلتقِط سمات — معرّف مطلوب، الاسم اختياري. */
+/** يقرأ سياق المنتج من مُلتقِط سمات — معرّف مطلوب، الاسم اختياري. */
 export function readItemContext(
   getAttr: (name: string) => string | null,
 ): ItemContext | null {
@@ -135,7 +135,7 @@ export function resolvePartnerContextFromTarget(
   return readPartnerContext((name) => node.getAttribute(name));
 }
 
-/** يعيد سياق الصنف من أقرب عنصر يحمل `data-ctx-item-id`، أو null. */
+/** يعيد سياق المنتج من أقرب عنصر يحمل `data-ctx-item-id`، أو null. */
 export function resolveItemContextFromTarget(
   target: EventTarget | null,
 ): ItemContext | null {

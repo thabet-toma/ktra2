@@ -83,11 +83,11 @@ register(ReportSpec(
     key="stock-valuation",
     title="تقييم المخزون",
     category="inventory",
-    description="رصيد كل صنف وقيمته بمتوسط التكلفة — قيمة البضاعة على الرفّ.",
-    filters=(ReportFilter("product", "الصنف", "product"),),
+    description="رصيد كل منتج وقيمته بمتوسط التكلفة — قيمة البضاعة على الرفّ.",
+    filters=(ReportFilter("product", "المنتج", "product"),),
     columns=(
         ReportColumn("sku", "الرمز", width="120px"),
-        ReportColumn("name", "الصنف"),
+        ReportColumn("name", "المنتج"),
         ReportColumn("brand", "الماركة", width="120px"),
         ReportColumn("category", "الفئة", width="130px"),
         ReportColumn("quantity", "الرصيد", KIND_NUMBER, total=True, width="100px"),
@@ -121,7 +121,7 @@ def _rate(value) -> str:
 def _low_stock(tenant_id: int, params: dict) -> list[dict]:
     """ما نفد وما اقترب من النفاد معاً — بحالةٍ مكتوبة على كل سطر.
 
-    كان هذا التقرير يشترط `min_stock_level > 0` قبل أن يرى الصنف، والحدّ اليدوي
+    كان هذا التقرير يشترط `min_stock_level > 0` قبل أن يرى المنتج، والحدّ اليدوي
     فارغٌ في معظم الكتالوج — فكان يصمت عن أغلب ما نفد فعلاً. صار يقرأ الحدّ
     **الفعّال** (`inventory/stock_status.py`): اليدوي إن ضُبط، وإلّا المقترَح
     المحسوب من المبيعات. و«نفذ» لا يشترط حدّاً أصلاً.
@@ -151,25 +151,25 @@ def _low_stock(tenant_id: int, params: dict) -> list[dict]:
 
 register(ReportSpec(
     key="low-stock",
-    title="الأصناف تحت حدّ الطلب",
+    title="المنتجات تحت حدّ الطلب",
     category="inventory",
     description=(
         "ما نفذ وما بلغ حدّه الأدنى معاً. الحدّ يُقرأ يدوياً إن ضُبط وإلّا يُحسب "
-        "من المبيعات، و«رصيد النوع» يقول إن كان لهذا الصنف بديلٌ متوفّر."
+        "من المبيعات، و«رصيد الصنف» يقول إن كان لهذا المنتج بديلٌ متوفّر."
     ),
     filters=(
-        ReportFilter("product", "الصنف", "product"),
+        ReportFilter("product", "المنتج", "product"),
         ReportFilter("partner", "المورّد", "supplier"),
     ),
     columns=(
         ReportColumn("sku", "الرمز", width="120px"),
-        ReportColumn("name", "الصنف"),
+        ReportColumn("name", "المنتج"),
         ReportColumn("status", "الحالة", width="80px"),
         ReportColumn("quantity", "المتاح", KIND_NUMBER, total=True, width="90px"),
         ReportColumn("min_stock_level", "الحد الأدنى", KIND_NUMBER, width="100px"),
         ReportColumn("min_source", "مصدر الحد", width="90px"),
         ReportColumn("shortage", "النقص", KIND_NUMBER, total=True, width="90px"),
-        ReportColumn("group_available", "رصيد النوع", KIND_NUMBER, width="100px"),
+        ReportColumn("group_available", "رصيد الصنف", KIND_NUMBER, width="100px"),
         ReportColumn("newest_alternative", "أحدث بديل متوفّر"),
         ReportColumn("urgency", "القرار", width="80px"),
     ),
@@ -180,7 +180,7 @@ register(ReportSpec(
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  تجديد المخزون — «ماذا أطلب، وكم» بمستوى الصنف أو النوع
+#  تجديد المخزون — «ماذا أطلب، وكم» بمستوى المنتج أو الصنف
 # ══════════════════════════════════════════════════════════════════════
 #
 # لماذا تقريران لا واحد: «تحت حدّ الطلب» سؤال حالةٍ («ما الذي نفد؟») يقرؤه
@@ -194,7 +194,7 @@ _URGENCY_OPTIONS = (
     ("dead", "راكد"),
 )
 
-_LEVEL_OPTIONS = (("item", "صنف"), ("group", "نوع"))
+_LEVEL_OPTIONS = (("item", "منتج"), ("group", "صنف"))
 
 
 def _replenishment(tenant_id: int, params: dict) -> list[dict]:
@@ -242,12 +242,12 @@ def _replenishment(tenant_id: int, params: dict) -> list[dict]:
 
 
 def _replenishment_drill(tenant_id: int, params: dict) -> list[dict]:
-    """صفّ النوع يُفتح على أصنافه — من **نفس** الدالّة التي بنت الصفّ."""
+    """صفّ الصنف يُفتح على منتجاته — من **نفس** الدالّة التي بنت الصفّ."""
     from inventory.stock_status import STATUS_LABELS
 
     group_key = params.get("group_key")
-    # فلتر «القرار» يُسقَط هنا عمداً: صفّ النوع مصنَّفٌ بأشدّ قرارٍ في أفراده،
-    # فلو صُفّي التفصيل بالقرار نفسه لغابت الأصناف التي جعلت الصفّ ما هو عليه —
+    # فلتر «القرار» يُسقَط هنا عمداً: صفّ الصنف مصنَّفٌ بأشدّ قرارٍ في أفراده،
+    # فلو صُفّي التفصيل بالقرار نفسه لغابت المنتجات التي جعلت الصفّ ما هو عليه —
     # والتنقيب جاء ليُظهر من أين جاء الرقم لا ليكرّر تصنيفه.
     params = {k: v for k, v in params.items() if k != "urgency"}
     rows = _reorder_rows(tenant_id, params, level="item")
@@ -270,27 +270,27 @@ register(ReportSpec(
     category="inventory",
     description=(
         "الحدّ الأدنى محسوباً من المبيعات ومهلة التوريد، والكمية المقترح طلبها. "
-        "«عاجل» = لا بديل في النوع. «مؤجَّل» = موديل آخر من النوع نفسه يغطّي. "
-        "«راكد» = رصيدٌ بلا مبيعات. الصنف الحديث في المخزن يعود بلا اقتراح وبسببه."
+        "«عاجل» = لا بديل في الصنف. «مؤجَّل» = موديل آخر من الصنف نفسه يغطّي. "
+        "«راكد» = رصيدٌ بلا مبيعات. المنتج الحديث في المخزن يعود بلا اقتراح وبسببه."
     ),
     filters=(
         ReportFilter("level", "المستوى", "select", options=_LEVEL_OPTIONS, default="item"),
         ReportFilter("urgency", "القرار", "select", options=_URGENCY_OPTIONS),
-        ReportFilter("product", "الصنف", "product"),
+        ReportFilter("product", "المنتج", "product"),
         ReportFilter("partner", "المورّد", "supplier"),
     ),
     columns=(
         ReportColumn("sku", "الرمز", width="110px"),
-        ReportColumn("name", "الصنف"),
+        ReportColumn("name", "المنتج"),
         ReportColumn("urgency", "القرار", width="80px"),
         ReportColumn("status", "الحالة", width="80px"),
         ReportColumn("available", "المتاح", KIND_NUMBER, total=True, width="90px"),
         ReportColumn("on_order", "قيد الطلب", KIND_NUMBER, total=True, width="90px"),
-        # «النوع» عمودٌ ظاهر عمداً: هو مفتاح قرار «مؤجَّل»، وحين يكون اسمَ الصنف
-        # نفسه يرى المستخدم فوراً أن أصنافه بلا مجموعةٍ معرَّفة — فيملأ
+        # «الصنف» عمودٌ ظاهر عمداً: هو مفتاح قرار «مؤجَّل»، وحين يكون اسمَ المنتج
+        # نفسه يرى المستخدم فوراً أن منتجاته بلا مجموعةٍ معرَّفة — فيملأ
         # `variant_group` أو `brand` بدل أن يتساءل لماذا «البدائل» صفرٌ دائماً.
-        ReportColumn("group_key", "النوع", width="140px"),
-        ReportColumn("group_available", "رصيد النوع", KIND_NUMBER, width="100px"),
+        ReportColumn("group_key", "الصنف", width="140px"),
+        ReportColumn("group_available", "رصيد الصنف", KIND_NUMBER, width="100px"),
         ReportColumn("alternatives", "بدائل", KIND_INT, width="70px"),
         ReportColumn("newest_alternative", "أحدث بديل متوفّر"),
         ReportColumn("adu", "الصرف اليومي", KIND_NUMBER, width="110px"),
@@ -305,10 +305,10 @@ register(ReportSpec(
     row_link="/products/{product_id}",
     drill=_replenishment_drill,
     drill_keys=("group_key",),
-    drill_title="أصناف هذا النوع",
+    drill_title="منتجات هذا الصنف",
     drill_columns=(
         ReportColumn("sku", "الرمز", width="110px"),
-        ReportColumn("name", "الصنف"),
+        ReportColumn("name", "المنتج"),
         ReportColumn("status", "الحالة", width="80px"),
         ReportColumn("available", "المتاح", KIND_NUMBER, total=True, width="90px"),
         ReportColumn("on_order", "قيد الطلب", KIND_NUMBER, total=True, width="90px"),
@@ -356,13 +356,13 @@ register(ReportSpec(
     category="inventory",
     description="كل حركة وارد وصادر بمصدرها ورصيدها بعد الحركة.",
     filters=DATE_FILTERS + (
-        ReportFilter("product", "الصنف", "product"),
+        ReportFilter("product", "المنتج", "product"),
         ReportFilter("warehouse", "المستودع", "warehouse"),
     ),
     columns=(
         ReportColumn("movement_date", "التاريخ", KIND_DATE, width="110px"),
         ReportColumn("sku", "الرمز", width="110px"),
-        ReportColumn("name", "الصنف"),
+        ReportColumn("name", "المنتج"),
         ReportColumn("warehouse", "المستودع", width="120px"),
         ReportColumn("movement_type", "النوع", width="80px"),
         ReportColumn("quantity", "الكمية", KIND_NUMBER, total=True, width="90px"),
@@ -403,14 +403,14 @@ register(ReportSpec(
     category="inventory",
     description="ما حجزته الطلبيات المؤكَّدة ولم يُسلَّم — نفس مصدر حارس البيع.",
     filters=DATE_FILTERS + (
-        ReportFilter("product", "الصنف", "product"),
+        ReportFilter("product", "المنتج", "product"),
         ReportFilter("partner", "العميل", "customer"),
     ),
     columns=(
         ReportColumn("order_number", "الطلبية", width="130px"),
         ReportColumn("partner_name", "العميل"),
         ReportColumn("sku", "الرمز", width="110px"),
-        ReportColumn("name", "الصنف"),
+        ReportColumn("name", "المنتج"),
         ReportColumn("quantity", "المحجوز", KIND_NUMBER, total=True, width="100px"),
         ReportColumn("reserved_until", "الحجز حتى", KIND_DATE, width="110px"),
     ),
@@ -476,14 +476,14 @@ _STOCK_DIMENSIONS: dict[str, dict] = {
         "key_of": lambda r: r["product__brand"] or "",
         "label_of": lambda r: r["product__brand"] or "— بلا ماركة —",
         "restrict": None,
-        # الماركة نصٌّ على الصنف لا مفتاحٌ خارجي: الفارغ والـNULL كلاهما «بلا
+        # الماركة نصٌّ على المنتج لا مفتاحٌ خارجي: الفارغ والـNULL كلاهما «بلا
         # ماركة»، فيجب أن يلتقطهما التنقيب معاً وإلا فتح صفّاً على لا شيء.
         "filter_of": lambda key: (
             {"product__brand": key} if key else {"product__brand__in": ["", None]}
         ),
     },
     "product": {
-        "header": "الصنف",
+        "header": "المنتج",
         "fields": ("product_id", "product__sku", "product__name_ar", "product__name_en"),
         "key_of": lambda r: str(r["product_id"] or ""),
         "label_of": lambda r: (
@@ -506,10 +506,10 @@ def _stock_dimension(params: dict) -> tuple[str, dict]:
 
 
 def _stock_detailed(params: dict) -> bool:
-    """مفصَّلاً (صفٌّ لكل بُعد×صنف) أم ملخَّصاً (صفٌّ لكل قيمة بُعد)؟
+    """مفصَّلاً (صفٌّ لكل بُعد×منتج) أم ملخَّصاً (صفٌّ لكل قيمة بُعد)؟
 
-    المفصَّل هو الافتراضي لأنه ما يُسأل عنه فعلاً («أصناف هذا المورد وكمياتها»)؛
-    والملخَّص موجود لأن خمسين مورّداً × مئتَي صنف = عشرة آلاف سطر لا تُقرأ.
+    المفصَّل هو الافتراضي لأنه ما يُسأل عنه فعلاً («منتجات هذا المورد وكمياتها»)؛
+    والملخَّص موجود لأن خمسين مورّداً × مئتَي منتج = عشرة آلاف سطر لا تُقرأ.
     كلاهما يُنقَّب إلى الحركات نفسها.
     """
     return str(params.get("detail") or "lines").strip() != "summary"
@@ -564,7 +564,7 @@ def _sale_movement_shares(tenant_id: int, qs, extra_fields=()) -> list[dict]:
     الصفّ» على عمودٍ واحد بلا أن ينبّه أحد. وبإسناده إلى الحركة يبقى كل رقم في
     الصفّ مجموعاً على **نفس** الحركات، ويمتدّ المعيار إلى الإيراد والربح مجّاناً.
 
-    النصيب = صافي سطر (الفاتورة، الصنف) × كمية هذه الحركة ÷ **كل** كمية حركات
+    النصيب = صافي سطر (الفاتورة، المنتج) × كمية هذه الحركة ÷ **كل** كمية حركات
     ذلك السطر. المقام غير مفلتر عمداً (`sales_cogs_map` يعطيه على كامل المستند):
     لو قُسِم على الكميات داخل النطاق وحدها لتضخّم نصيبُ الحركة كلما ضاقت الفترة،
     فتقرير شهرٍ يعطي إيراد سنة.
@@ -573,7 +573,7 @@ def _sale_movement_shares(tenant_id: int, qs, extra_fields=()) -> list[dict]:
     متطابق بالبناء. ثمنُه أن مجموع أنصبة فاتورةٍ قد يخالف صافيها بقرش أو قرشين:
     فرقُ تقريبٍ معلوم، ثمنُه أرخص من رقمين لا يتطابقان على الشاشة.
 
-    حركةُ بيعٍ بلا سطر مقابل (صنفٌ خرج ولا بند له) نصيبُها صفر و**ربحُها صفر لا
+    حركةُ بيعٍ بلا سطر مقابل (منتجٌ خرج ولا بند له) نصيبُها صفر و**ربحُها صفر لا
     خسارة**: تكلفتها معلومة وإيرادها مجهول، وإعلانُها خسارةً اختراعُ رقم.
     """
     from sales.services import (
@@ -616,7 +616,7 @@ def _stock_by_dimension(tenant_id: int, params: dict) -> list[dict]:
     """استعلام تجميعي **واحد** للكميات والتكلفة — لا استعلام لكل صفّ.
 
     الاتجاه يُحسم داخل الاستعلام بـ`Case/When` على نوع الحركة، وأسماءُ الطرف
-    والصنف والمستودع تأتي بضمّها في نفس `values()` — فلا جولةُ جلبٍ ثانية ولا N+1.
+    والمنتج والمستودع تأتي بضمّها في نفس `values()` — فلا جولةُ جلبٍ ثانية ولا N+1.
     والإيراد يلزمه مرورٌ ثانٍ (لا يسكن في جدول الحركات) بعدد استعلاماتٍ **ثابت**
     لا يتبع عدد الصفوف — وهو الضمان الذي يهمّ.
     """
@@ -678,7 +678,7 @@ def _stock_by_dimension(tenant_id: int, params: dict) -> list[dict]:
             "row_product": str(r.get("product_id") or "") if detailed else "",
         })
 
-    # مجمَّعاً بالبُعد ثم الأثقل حركةً أولاً — «أصناف هذا المورد» تُقرأ متجاورة.
+    # مجمَّعاً بالبُعد ثم الأثقل حركةً أولاً — «منتجات هذا المورد» تُقرأ متجاورة.
     out.sort(key=lambda row: (
         row["dim_label"],
         -abs(Decimal(row["qty_in"]) - Decimal(row["qty_out"])),
@@ -688,17 +688,17 @@ def _stock_by_dimension(tenant_id: int, params: dict) -> list[dict]:
 
 
 def _stock_by_dimension_columns(tenant_id: int, params: dict):
-    """العمود الأول يتبع البُعد المختار، وعمودا الصنف يظهران بالتفصيل وحده."""
+    """العمود الأول يتبع البُعد المختار، وعمودا المنتج يظهران بالتفصيل وحده."""
     dim_key, dim = _stock_dimension(params)
     detailed = _stock_detailed(params)
     columns = [ReportColumn("dim_label", dim["header"], width="200px")]
     if detailed and dim_key != "product":
         columns += [
             ReportColumn("sku", "الرمز", width="110px"),
-            ReportColumn("product_name", "الصنف"),
+            ReportColumn("product_name", "المنتج"),
         ]
     elif detailed:
-        # البُعد هو الصنف نفسه: يكفي رمزه — عمود الاسم يكرّر العمود الأول.
+        # البُعد هو المنتج نفسه: يكفي رمزه — عمود الاسم يكرّر العمود الأول.
         columns += [ReportColumn("sku", "الرمز", width="110px")]
     columns += [
         ReportColumn("qty_in", "الوارد", KIND_NUMBER, total=True, width="95px"),
@@ -727,7 +727,7 @@ _STOCK_DRILL_COLUMNS = (
     ReportColumn("movement_date", "التاريخ", KIND_DATE, width="105px"),
     ReportColumn("document", "المستند", width="160px"),
     ReportColumn("sku", "الرمز", width="100px"),
-    ReportColumn("product_name", "الصنف"),
+    ReportColumn("product_name", "المنتج"),
     ReportColumn("warehouse", "المستودع", width="110px"),
     ReportColumn("partner_name", "الطرف"),
     ReportColumn("qty_in", "الوارد", KIND_NUMBER, total=True, width="90px"),
@@ -800,7 +800,7 @@ register(ReportSpec(
     category="inventory",
     description=(
         "ما دخل وما خرج وبكم وبكم بِيع — بمحورٍ تختاره: المورد أو الزبون أو "
-        "المستودع أو الماركة أو الصنف. كل صفّ يُفتح على الحركات التي كوّنته "
+        "المستودع أو الماركة أو المنتج. كل صفّ يُفتح على الحركات التي كوّنته "
         "ومجموعها يطابقه في كل عمود. محورا المورد والزبون يقرآن طرف الحركة، "
         "فالتحويل المستودعي والجرد (بلا طرف) يغيبان عنهما ويظهران في بقية "
         "المحاور. والإيراد والربح مُسنَدان إلى حركة البيع نفسها بنصيبها من صافي "
@@ -815,17 +815,17 @@ register(ReportSpec(
                 ("customer", "الزبون"),
                 ("warehouse", "المستودع"),
                 ("brand", "الماركة"),
-                ("product", "الصنف"),
+                ("product", "المنتج"),
             ),
             default=_STOCK_DIM_DEFAULT,
         ),
         ReportFilter(
             "detail", "التفصيل", "select",
-            options=(("lines", "مفصَّل — صفّ لكل صنف"), ("summary", "ملخَّص")),
+            options=(("lines", "مفصَّل — صفّ لكل منتج"), ("summary", "ملخَّص")),
             default="lines",
         ),
         ReportFilter("partner", "الطرف", "partner"),
-        ReportFilter("product", "الصنف", "product"),
+        ReportFilter("product", "المنتج", "product"),
         ReportFilter("warehouse", "المستودع", "warehouse"),
     ),
     # الفهرس يُطلب بلا معاملات فيرى أعمدة البُعد الافتراضي؛ التشغيل يستبدلها.

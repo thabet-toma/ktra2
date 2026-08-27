@@ -187,7 +187,7 @@ async function installMocks(page: Page, failure: SaveFailure) {
 async function openNewInvoiceAndFill(page: Page) {
   await page.goto("/sales/invoices/new");
 
-  const product = page.getByPlaceholder("اكتب اسم الصنف…").first();
+  const product = page.getByPlaceholder("اكتب اسم المنتج…").first();
   await expect(product).toBeVisible({ timeout: 20_000 });
   await product.fill("لابتوب");
   await page.getByText("لابتوب").last().click();
@@ -217,7 +217,7 @@ test("رفض 400 بأخطاء حقول: السبب ظاهر، المحرّر م�
   await expect(banner.first()).toContainText("تاريخ الفاتورة: هذا الحقل مطلوب");
 
   // 2) المحرّر لم يُغلق.
-  await expect(page.getByPlaceholder("اكتب اسم الصنف…").first()).toBeVisible();
+  await expect(page.getByPlaceholder("اكتب اسم المنتج…").first()).toBeVisible();
 
   // 3) ما أُدخل ما زال في مكانه.
   await expect(page.getByPlaceholder("ملاحظات").first())
@@ -360,7 +360,7 @@ async function installPurchaseMocks(page: Page) {
       });
       return;
     }
-    // مورد وصنف حقيقيان — بدونهما يوقف تحقّق العميل النداءَ قبل خروجه فلا
+    // مورد ومنتج حقيقيان — بدونهما يوقف تحقّق العميل النداءَ قبل خروجه فلا
     // نختبر رفض الخادم أصلاً.
     if (url.pathname.includes("/partners/lookup/")) {
       await route.fulfill({

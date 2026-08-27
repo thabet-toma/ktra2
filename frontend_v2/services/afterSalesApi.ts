@@ -135,7 +135,7 @@ export interface WarrantyExtendInput {
 
 /**
  * القائمة مُرقَّمة دائماً (`page`): البطاقات تُنشأ آلياً مع كل وحدة مباعة، فهي
- * تنمو بعدد المبيعات لا بعدد الأصناف — جلبها كاملة يثقل الشاشة بعد أشهر.
+ * تنمو بعدد المبيعات لا بعدد المنتجات — جلبها كاملة يثقل الشاشة بعد أشهر.
  */
 export function listWarrantyCards(
   filters: WarrantyListFilters = {},

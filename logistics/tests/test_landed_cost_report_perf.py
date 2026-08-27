@@ -48,7 +48,7 @@ class LandedCostReportQueryCountTest(TestCase):
             tenant=cls.tenant, name="Landed Forwarder", partner_type="FreightForwarder",
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="LCP-1", name_ar="صنف التكلفة المستوردة",
+            tenant=cls.tenant, sku="LCP-1", name_ar="منتج التكلفة المستوردة",
         )
         cls.shipments = [cls._make_shipment(idx) for idx in range(3)]
 

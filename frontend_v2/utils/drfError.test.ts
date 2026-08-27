@@ -6,13 +6,13 @@ import { humanizeDrfError, extractDrfFieldErrors } from "./drfError.ts";
 test("flat field error gets an Arabic label prefix", () => {
   assert.equal(
     humanizeDrfError({ product: ["هذا الحقل مطلوب."] }),
-    "الصنف: هذا الحقل مطلوب.",
+    "المنتج: هذا الحقل مطلوب.",
   );
 });
 
 test("nested many=True item errors never leak raw JSON", () => {
   const out = humanizeDrfError({ items: [{}, { product: ["هذا الحقل مطلوب."] }] });
-  assert.equal(out, "الصنف: هذا الحقل مطلوب.");
+  assert.equal(out, "المنتج: هذا الحقل مطلوب.");
   assert.doesNotMatch(out, /[{}[\]]/); // لا أقواس JSON
 });
 
@@ -44,7 +44,7 @@ test("unknown technical field names are hidden, message kept", () => {
 test("duplicate messages are de-duplicated", () => {
   assert.equal(
     humanizeDrfError({ items: [{ product: ["مطلوب."] }, { product: ["مطلوب."] }] }),
-    "الصنف: مطلوب.",
+    "المنتج: مطلوب.",
   );
 });
 

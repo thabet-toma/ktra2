@@ -33,9 +33,9 @@ def env():
         tenant=tenant, code="1101-B", name="ذمم", account_type="Asset", is_active=True)
     customer = Partner.objects.create(
         tenant=tenant, name="عميل", partner_type="Customer", linked_account=ar)
-    # الصنف تكلفته 100 — البيع بأقل منه = خسارة، وبأكثر = ربح.
+    # المنتج تكلفته 100 — البيع بأقل منه = خسارة، وبأكثر = ربح.
     product = Product.objects.create(
-        tenant=tenant, sku="LOSS-1", name_ar="صنف", quantity_on_hand=100, avg_cost=100)
+        tenant=tenant, sku="LOSS-1", name_ar="منتج", quantity_on_hand=100, avg_cost=100)
     return tenant, customer, product
 
 

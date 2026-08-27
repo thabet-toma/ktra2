@@ -36,7 +36,7 @@ def env():
     cash = Account.objects.create(
         tenant=tenant, code="1110-L", name="صندوق", account_type="Asset", is_active=True)
     product = Product.objects.create(
-        tenant=tenant, sku="LC-1", name_ar="صنف", quantity_on_hand=100, avg_cost=10)
+        tenant=tenant, sku="LC-1", name_ar="منتج", quantity_on_hand=100, avg_cost=10)
     customer = Partner.objects.create(
         tenant=tenant, name="عميل نقدي", partner_type="Customer", linked_account=ar)
     return tenant, ar, rev, cash, product, customer

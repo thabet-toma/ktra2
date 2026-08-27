@@ -139,7 +139,7 @@ test('فتح التقرير مباشرةً من الرابط يقرأ المفت
 const DIM_COLUMNS = [
   { key: 'dim_label', header: 'المورد', kind: 'text', total: false, width: null },
   { key: 'sku', header: 'الرمز', kind: 'text', total: false, width: null },
-  { key: 'product_name', header: 'الصنف', kind: 'text', total: false, width: null },
+  { key: 'product_name', header: 'المنتج', kind: 'text', total: false, width: null },
   { key: 'qty_in', header: 'الوارد', kind: 'number', total: true, width: null },
   { key: 'qty_out', header: 'الصادر', kind: 'number', total: true, width: null },
 ];

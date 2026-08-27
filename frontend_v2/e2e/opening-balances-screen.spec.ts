@@ -46,7 +46,7 @@ const DRAFT = {
       linked_account: 89, is_posted: false, journal: null, posted_amount: null,
     },
   ],
-  // أصنافٌ متتبَّعة تسلسلياً: فارغة هنا — الشاشة غير المرحّلة لا تعرض اللوحة أصلاً.
+  // منتجاتٌ متتبَّعة تسلسلياً: فارغة هنا — الشاشة غير المرحّلة لا تعرض اللوحة أصلاً.
   serial_items: [] as Array<{
     product: number; product_sku: string; product_name: string;
     quantity: number; serials_registered: number;
@@ -66,7 +66,7 @@ const POSTED = {
 };
 
 /**
- * THA-411 — افتتاحٌ مرحّل يحمل صنفاً متتبَّعاً ناقصَ الترقيم: 2 مُسجَّلة من 10.
+ * THA-411 — افتتاحٌ مرحّل يحمل منتجاً متتبَّعاً ناقصَ الترقيم: 2 مُسجَّلة من 10.
  * هذه هي الحالة التي تُصدَم فيها الشركة عند أول بيع بنمط «إجباري».
  */
 const POSTED_SERIALS = {
@@ -77,7 +77,7 @@ const POSTED_SERIALS = {
   }],
 };
 
-/** كرت الصنف الذي يهبط عليه رابط اللوحة — متتبَّع، فتبويب الأرقام موجود. */
+/** كرت المنتج الذي يهبط عليه رابط اللوحة — متتبَّع، فتبويب الأرقام موجود. */
 const PRODUCT_7 = {
   id: 7, sku: 'P-007', name_ar: 'إطار 255/65/15', name_en: '', brand: '',
   is_serialized: true, is_service: false, sale_price: '420.00',
@@ -239,7 +239,7 @@ test('الشاشة تُفتح من الشريط الجانبي وتعرض الت
   await expect(page.getByRole('button', { name: /حفظ وترحيل/ })).toBeVisible();
   await page.screenshot({ path: 'e2e/parity-shots/t119-3-2-partners.png', fullPage: true });
 
-  // تبويب المخزون: الصنف والمستودع والقيمة المحسوبة (10 × 300).
+  // تبويب المخزون: المنتج والمستودع والقيمة المحسوبة (10 × 300).
   await page.getByRole('tab', { name: /مخزون/ }).click();
   await expect(page.getByText('إطار 255/65/15')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('قيمة بضاعة أول المدة')).toBeVisible();
@@ -317,16 +317,16 @@ test('إلغاء الترحيل يعيد الشاشة مسودة قابلة لل
 /**
  * THA-411 (T119-5) — بضاعة الافتتاح المتتبَّعة تسلسلياً: الافتتاح يُدخل الكمية ولا
  * يُنشئ رقماً تسلسلياً واحداً، فالبيع بنمط «إجباري» يرفضها. اللوحة تقول المُسجَّل
- * والمطلوب، ورابطها يهبط على تبويب الأرقام التسلسلية في كرت الصنف — لا على أول
+ * والمطلوب، ورابطها يهبط على تبويب الأرقام التسلسلية في كرت المنتج — لا على أول
  * تبويب فيه (التبويب يُلحق متأخراً بعد وصول `is_serialized`، وهو الفخّ نفسه).
  */
-test('الافتتاح المرحّل يعرض المسجَّل/المطلوب للأصناف المتتبَّعة ورابطه يفتح تبويب الأرقام التسلسلية', async ({ page }) => {
+test('الافتتاح المرحّل يعرض المسجَّل/المطلوب للمنتجات المتتبَّعة ورابطه يفتح تبويب الأرقام التسلسلية', async ({ page }) => {
   await setup(page, { serialsPending: true });
   await page.goto('/accounting/opening-balances');
   await expect(page.getByText('مرحّل — قيد #77')).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole('tab', { name: /مخزون/ }).click();
-  await expect(page.getByText('أصناف تتتبّع أرقاماً تسلسلية في بضاعة أول المدة')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('منتجات تتتبّع أرقاماً تسلسلية في بضاعة أول المدة')).toBeVisible({ timeout: 20_000 });
 
   // الصفّ يقول الرقمين وما ينقص بينهما — لا «خطأ» بلا مقدار.
   const row = page.getByRole('row').filter({ hasText: 'إطار 255/65/15 — P-007' });
@@ -335,7 +335,7 @@ test('الافتتاح المرحّل يعرض المسجَّل/المطلوب �
   await expect(row.getByText('ناقص 8')).toBeVisible();
   await page.screenshot({ path: 'e2e/parity-shots/t119-5-1-serial-gap.png', fullPage: true });
 
-  await row.getByRole('button', { name: /رقّم وحدات هذا الصنف/ }).click();
+  await row.getByRole('button', { name: /رقّم وحدات هذا المنتج/ }).click();
   await expect(page).toHaveURL(/\/products\/7\?tab=serials$/, { timeout: 20_000 });
 
   // الهبوط على التبويب المقصود فعلاً، لا مجرّد وصول الرابط.

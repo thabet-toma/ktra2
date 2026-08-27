@@ -67,8 +67,8 @@ class PurchaseInvoiceActivityDetailTest(APITestCase):
         ]})
         assert res.status_code == 200, res.content[:400]
         description = self._activity().description
-        assert "حذف صنف «إطار 205»" in description
-        assert "أضاف صنف «زيت محرك»" in description
+        assert "حذف منتج «إطار 205»" in description
+        assert "أضاف منتج «زيت محرك»" in description
 
     def test_untouched_invoice_keeps_the_plain_description(self):
         res = self._patch({"notes": self.invoice.notes or ""})

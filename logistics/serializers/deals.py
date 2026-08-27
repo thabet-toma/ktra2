@@ -248,7 +248,7 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
             product = item.get('product')
             if product is not None and product.tenant_id != tenant.pk:
                 raise serializers.ValidationError({
-                    'items': 'أحد الأصناف لا يتبع الشركة الحالية.',
+                    'items': 'أحد المنتجات لا يتبع الشركة الحالية.',
                 })
 
         if instance is not None:

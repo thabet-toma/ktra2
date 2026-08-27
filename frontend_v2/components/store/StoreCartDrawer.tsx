@@ -171,7 +171,7 @@ export const StoreCartDrawer: React.FC<StoreCartDrawerProps> = ({
                             type="button"
                             onClick={() => removeItem(item.productId)}
                             className="text-slate-400 hover:text-rose-500"
-                            title="حذف الصنف"
+                            title="حذف المنتج"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>

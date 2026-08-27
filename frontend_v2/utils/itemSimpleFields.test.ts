@@ -29,7 +29,7 @@ test('صفّ الخادم يُقرأ بأنواعه لا بنصوصه', () => {
 });
 
 test('التصنيف ووحدة القياس الغائبان يصيران null لا NaN', () => {
-  const fields = simpleFieldsFromProduct({ name_ar: 'صنف' });
+  const fields = simpleFieldsFromProduct({ name_ar: 'منتج' });
   assert.equal(fields.category, null);
   assert.equal(fields.uom_id, null);
   assert.equal(fields.sale_price, '');
@@ -76,7 +76,7 @@ test('مسافة زائدة حول الاسم ليست تغييراً', () => {
   assert.equal(hasSimpleChanges(before, { ...before, name_ar: '  إطار  ' }), false);
 });
 
-test('تحويل الصنف إلى خدمة يطفئ التتبّع في نفس الحمولة', () => {
+test('تحويل المنتج إلى خدمة يطفئ التتبّع في نفس الحمولة', () => {
   const before = withFields({ is_serialized: true });
   const after = { ...before, is_service: true };
   assert.deepEqual(dirtySimplePayload(before, after), { is_service: true, is_serialized: false });

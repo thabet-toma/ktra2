@@ -332,7 +332,7 @@ test("الوضع السهل: اللوحة تظهر على مسودة جديدة 
   await installMocks(page, { simpleMode: true });
   await page.goto("/sales/invoices/new");
   await page.waitForLoadState("networkidle");
-  await page.getByPlaceholder("اكتب اسم الصنف…").first().fill("لابتوب");
+  await page.getByPlaceholder("اكتب اسم المنتج…").first().fill("لابتوب");
   await page.getByText("لابتوب", { exact: true }).last().click();
 
   const panel = page.getByTestId("document-payment-panel");

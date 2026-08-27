@@ -35,7 +35,7 @@ class QuotationStatusAndNotesTest(APITestCase):
             supplier_scope=Partner.SUPPLIER_SCOPE_INTERNATIONAL,
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku='OST-1', name_ar='صنف الحالات',
+            tenant=cls.tenant, sku='OST-1', name_ar='منتج الحالات',
         )
 
     def setUp(self):

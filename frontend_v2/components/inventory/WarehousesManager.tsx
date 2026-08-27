@@ -335,7 +335,7 @@ export const WarehousesManager: React.FC = () => {
               {detailLoading ? (
                 <div className="flex items-center justify-center gap-2 py-12 ktra-text-soft">
                   <Loader2 className="h-5 w-5 animate-spin" />
-                  جارٍ تحميل الأصناف…
+                  جارٍ تحميل المنتجات…
                 </div>
               ) : detail && (
                 <>
@@ -343,7 +343,7 @@ export const WarehousesManager: React.FC = () => {
                     <div className="rounded-lg border ktra-border-soft ktra-bg-panel p-3">
                       <div className="flex items-center gap-2 text-xs ktra-text-soft">
                         <Boxes className="h-4 w-4" />
-                        عدد الأصناف ذات الرصيد
+                        عدد المنتجات ذات الرصيد
                       </div>
                       <div className="mt-1 text-xl font-bold ktra-text-ink dark:text-white">
                         {detail.item_count}
@@ -363,8 +363,8 @@ export const WarehousesManager: React.FC = () => {
                     <table className="w-full min-w-[700px] text-sm">
                       <thead className="ktra-bg-panel ktra-text-soft text-xs">
                         <tr>
-                          <th className="px-3 py-2 text-right font-medium">رقم الصنف</th>
-                          <th className="px-3 py-2 text-right font-medium">الصنف</th>
+                          <th className="px-3 py-2 text-right font-medium">رقم المنتج</th>
+                          <th className="px-3 py-2 text-right font-medium">المنتج</th>
                           <th className="px-3 py-2 text-center font-medium">الكمية</th>
                           <th className="px-3 py-2 text-center font-medium">متوسط التكلفة</th>
                           <th className="px-3 py-2 text-center font-medium">القيمة</th>
@@ -374,7 +374,7 @@ export const WarehousesManager: React.FC = () => {
                         {detail.items.length === 0 ? (
                           <tr>
                             <td colSpan={5} className="px-3 py-8 text-center ktra-text-soft">
-                              لا توجد أصناف ذات رصيد في هذا المستودع.
+                              لا توجد منتجات ذات رصيد في هذا المستودع.
                             </td>
                           </tr>
                         ) : detail.items.map((item) => (

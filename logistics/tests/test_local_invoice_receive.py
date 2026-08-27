@@ -28,7 +28,7 @@ class LocalInvoiceReceiveTest(APITestCase):
         cls.partner = Partner.objects.create(
             tenant=cls.tenant, name="مورد محلي", partner_type="Supplier")
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="LOC-1", name_ar="صنف محلي",
+            tenant=cls.tenant, sku="LOC-1", name_ar="منتج محلي",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
 
     def _auth(self):
@@ -42,7 +42,7 @@ class LocalInvoiceReceiveTest(APITestCase):
             exchange_rate=Decimal("1"), shipment=shipment,
             grand_total=Decimal("0"))
         item = PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف محلي",
+            invoice=inv, product=self.product, name="منتج محلي",
             quantity=Decimal(qty), unit_price=Decimal(price),
             total_price=(Decimal(qty) * Decimal(price)),
             is_taxable=(Decimal(vat) > 0), vat_percent=Decimal(vat))
@@ -295,7 +295,7 @@ class LocalInvoiceReceiveTest(APITestCase):
 
     def test_price_and_product_change_on_received_line_rejected(self):
         other = Product.objects.create(
-            tenant=self.tenant, sku="LOC-2", name_ar="صنف آخر",
+            tenant=self.tenant, sku="LOC-2", name_ar="منتج آخر",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
         inv, item = self._received_invoice()
 
@@ -305,7 +305,7 @@ class LocalInvoiceReceiveTest(APITestCase):
 
         res = self._patch_items(inv, [self._line(item, product=other.pk)])
         assert res.status_code == 400, res.content
-        assert "صنف" in res.json()["detail"]
+        assert "منتج" in res.json()["detail"]
 
         item.refresh_from_db()
         assert item.unit_price == Decimal("0.0000")

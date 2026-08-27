@@ -77,7 +77,7 @@ class SalesInvoiceActivityDetailTest(APITestCase):
         }]
 
     def test_added_and_removed_items_are_named_in_the_log(self):
-        """استبدال صنف بآخر = «حذف زيت» + «أضاف فلتر» باسميهما وكمية/سعر المضاف."""
+        """استبدال منتج بآخر = «حذف زيت» + «أضاف فلتر» باسميهما وكمية/سعر المضاف."""
         res = self._patch({"lines": [
             {"id": self.tire_line.id, "product": self.tire.id,
              "quantity": "2", "unit_price": "100"},
@@ -85,13 +85,13 @@ class SalesInvoiceActivityDetailTest(APITestCase):
         ]})
         assert res.status_code == 200, res.content[:400]
         activity = self._activity()
-        assert "حذف صنف «زيت محرك»" in activity.description
-        assert "أضاف صنف «فلتر هواء» (الكمية 3 · السعر 70)" in activity.description
+        assert "حذف منتج «زيت محرك»" in activity.description
+        assert "أضاف منتج «فلتر هواء» (الكمية 3 · السعر 70)" in activity.description
         assert [c["kind"] for c in activity.metadata["changes"]] == [
             "line_removed", "line_added"]
 
     def test_same_item_replaced_reads_as_a_change_not_add_and_remove(self):
-        """نفس الصنف بكمية/سعر جديدين = تغيير على البند، لا حذف وإضافة."""
+        """نفس المنتج بكمية/سعر جديدين = تغيير على البند، لا حذف وإضافة."""
         res = self._patch({"lines": [
             {"id": self.tire_line.id, "product": self.tire.id,
              "quantity": "2", "unit_price": "100"},

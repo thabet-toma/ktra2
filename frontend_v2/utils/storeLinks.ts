@@ -1,5 +1,5 @@
 /**
- * روابط المتجر العام — المشاركة على واتساب ونسخ رابط الصنف.
+ * روابط المتجر العام — المشاركة على واتساب ونسخ رابط المنتج.
  *
  * منطق خالص بلا React كي يُختبَر وحده: رابط `wa.me` هو الطريق الوحيد بين
  * الزائر وصاحب المتجر (لا سلة ولا دفع)، فرقمٌ يُبنى خطأً يعني زبوناً ضائعاً
@@ -11,7 +11,7 @@ export function storeHomePath(slug: string): string {
   return `/store/${encodeURIComponent(slug)}`;
 }
 
-/** رابط صفحة الصنف داخل متجر الشركة — نفس النمط الذي يقرؤه `index.tsx`. */
+/** رابط صفحة المنتج داخل متجر الشركة — نفس النمط الذي يقرؤه `index.tsx`. */
 export function storeProductPath(slug: string, productId: number | string): string {
   return `${storeHomePath(slug)}/p/${encodeURIComponent(String(productId))}`;
 }
@@ -59,7 +59,7 @@ export function whatsappLink(phone: string | null | undefined, message: string):
   return `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
 }
 
-/** نص رسالة الاستفسار: اسم الصنف ثم رابطه — كي يعرف البائع ما يُسأل عنه. */
+/** نص رسالة الاستفسار: اسم المنتج ثم رابطه — كي يعرف البائع ما يُسأل عنه. */
 export function productInquiryMessage(productName: string, productUrl: string): string {
   return `مرحباً، أستفسر عن: ${productName}\n${productUrl}`;
 }

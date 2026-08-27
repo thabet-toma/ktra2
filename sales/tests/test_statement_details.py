@@ -69,7 +69,7 @@ class SalesInvoiceDetailQueryCountTest(APITestCase):
         )
         cls.products = [
             Product.objects.create(
-                tenant=cls.tenant, sku=f"DETAIL-P-{i}", name_ar=f"صنف {i}",
+                tenant=cls.tenant, sku=f"DETAIL-P-{i}", name_ar=f"منتج {i}",
             )
             for i in range(6)
         ]

@@ -24,8 +24,8 @@ class ProductApiTest(APITestCase):
     def setUpTestData(cls):
         cls.owner_a = User.objects.create_user(username="items_a", password="x")
         cls.owner_b = User.objects.create_user(username="items_b", password="x")
-        cls.t_a = create_company("شركة الأصناف أ", cls.owner_a)
-        cls.t_b = create_company("شركة الأصناف ب", cls.owner_b)
+        cls.t_a = create_company("شركة المنتجات أ", cls.owner_a)
+        cls.t_b = create_company("شركة المنتجات ب", cls.owner_b)
 
     def _auth(self, user=None, tenant=None):
         self.client.force_authenticate(user=user or self.owner_a)
@@ -41,7 +41,7 @@ class ProductApiTest(APITestCase):
     # ── DEF-A2: الاسم فقط إلزامي + SKU خادمي ──
     def test_create_with_name_only_generates_sku(self):
         self._auth()
-        res = self._post({"name_ar": "صنف بالاسم فقط"})
+        res = self._post({"name_ar": "منتج بالاسم فقط"})
         assert res.status_code == 201, res.content[:300]
         data = res.json()
         assert data["sku"] == "000001"
@@ -51,8 +51,8 @@ class ProductApiTest(APITestCase):
             tenant=self.t_a, entity_type="product", entity_id=data["id"], action="create",
         )
         assert activity.user_id == self.owner_a.id
-        assert activity.entity_label == "صنف بالاسم فقط"
-        assert activity.description == "أضاف المنتج «صنف بالاسم فقط»"
+        assert activity.entity_label == "منتج بالاسم فقط"
+        assert activity.description == "أضاف المنتج «منتج بالاسم فقط»"
 
     def test_sku_sequence_increments_and_ignores_legacy_fb(self):
         self._auth()
@@ -76,7 +76,7 @@ class ProductApiTest(APITestCase):
         body = res.json()
         payload = body.get("error", {}).get("details", body)
         assert "name_ar" in str(payload)
-        assert "اسم الصنف مطلوب" in str(payload)
+        assert "اسم المنتج مطلوب" in str(payload)
 
     def test_duplicate_explicit_sku_yields_sku_field_error(self):
         self._auth()
@@ -88,7 +88,7 @@ class ProductApiTest(APITestCase):
     def test_cross_tenant_category_rejected(self):
         self._auth()
         foreign_cat = ProductCategory.objects.create(tenant=self.t_b, name="تصنيف الشركة الأخرى")
-        res = self._post({"name_ar": "صنف", "category": foreign_cat.id})
+        res = self._post({"name_ar": "منتج", "category": foreign_cat.id})
         assert res.status_code == 400
         assert "category" in str(res.json())
 
@@ -121,7 +121,7 @@ class ProductApiTest(APITestCase):
     def test_pagination_is_opt_in(self):
         self._auth()
         for i in range(3):
-            self._post({"name_ar": f"صنف {i}"})
+            self._post({"name_ar": f"منتج {i}"})
         plain = self._get().json()
         assert isinstance(plain, list) and len(plain) == 3
         paged = self._get("?page=1&page_size=2").json()
@@ -157,14 +157,14 @@ class ProductApiTest(APITestCase):
         }.issubset(row) for row in res.json())
 
     def test_lookup_list_carries_every_field_the_invoice_picker_reads(self):
-        """منتقي الصنف في الفواتير يحتاج الباركود وسعر البيع وعلَم الخدمة.
+        """منتقي المنتج في الفواتير يحتاج الباركود وسعر البيع وعلَم الخدمة.
 
-        بدونها كانت شاشات البيع تجلب العقد **الكامل** لكل الأصناف: قياس على
-        بيانات حقيقية (1490 صنفاً) أعطى 1,145 كيلوبايت و1,249 ملّي ثانية عند
+        بدونها كانت شاشات البيع تجلب العقد **الكامل** لكل المنتجات: قياس على
+        بيانات حقيقية (1490 منتجاً) أعطى 1,145 كيلوبايت و1,249 ملّي ثانية عند
         كل فتح للشاشة، مقابل عقد المنتقي 609 كيلوبايت و331 ملّي ثانية.
         """
         Product.objects.create(
-            tenant=self.t_a, sku="PICK-1", name_ar="صنف المنتقي",
+            tenant=self.t_a, sku="PICK-1", name_ar="منتج المنتقي",
             barcode="6291001", sale_price="12.50", is_service=False,
         )
         self._auth()
@@ -180,7 +180,7 @@ class ProductApiTest(APITestCase):
         # يقرآن هذين الحقلين. مكوّنٌ يقرأ حقلاً لا يرسله العقد يعرض فراغاً بصمت،
         # و`tsc` لا يكشفه (لا `@types/react` فلا فحص لخصائص JSX) — فالحارس هنا.
         assert row["stock_status"] == "out_of_stock"   # بلا رصيد ⇒ نفذ ولو بلا حدّ أدنى
-        assert row["group_key"] == "صنف المنتقي"       # بلا مجموعة صريحة ⇒ الاسم
+        assert row["group_key"] == "منتج المنتقي"       # بلا مجموعة صريحة ⇒ الاسم
         # وما زال العقد أضيق من الكامل — لا تحليلات ولا حقول الكرت.
         assert "purchased_qty" not in row
         assert "avg_monthly_sales" not in row
@@ -288,7 +288,7 @@ class ProductApiTest(APITestCase):
         assert foreign.quantity_on_hand == 7
         assert not StockMovement.objects.filter(product=foreign).exists()
 
-    # ── جدول الأصناف: فلتر حالة المخزون + ترتيب حسب الكمية/الحد الأدنى ──
+    # ── جدول المنتجات: فلتر حالة المخزون + ترتيب حسب الكمية/الحد الأدنى ──
     def _seed_stock_mix(self):
         # qty/min_stock_level للقراءة فقط في الـ serializer — نُنشئها مباشرة.
         from decimal import Decimal
@@ -323,7 +323,7 @@ class ProductApiTest(APITestCase):
                                is_for_sale_online=True)
         Product.objects.create(tenant=self.t_a, sku="OFF-1", name_ar="غير معروض",
                                is_for_sale_online=False)
-        # صنف شركة أخرى منشور — الفلتر يُطبَّق بعد فلترة الشركة لا قبلها.
+        # منتج شركة أخرى منشور — الفلتر يُطبَّق بعد فلترة الشركة لا قبلها.
         Product.objects.create(tenant=self.t_b, sku="ON-B", name_ar="جار منشور",
                                is_for_sale_online=True)
 
@@ -362,7 +362,7 @@ class ProductApiTest(APITestCase):
         url = "https://res.cloudinary.com/dd63wjj5x/raw/upload/ds.pdf"
         with patch("core.models.SystemAttachment") as MockSA:
             MockSA.objects.filter.return_value.exists.return_value = False
-            res = self._post({"name_ar": "صنف بداتا شيت", "datasheet_url": url})
+            res = self._post({"name_ar": "منتج بداتا شيت", "datasheet_url": url})
             assert res.status_code == 201, res.content[:300]
             ds_calls = [
                 c.kwargs for c in MockSA.objects.create.call_args_list
@@ -375,7 +375,7 @@ class ProductApiTest(APITestCase):
     def test_remove_datasheet_deletes_row_and_destroys_cloudinary(self):
         from unittest.mock import MagicMock
         self._auth()
-        pid = self._post({"name_ar": "صنف للحذف"}).json()["id"]
+        pid = self._post({"name_ar": "منتج للحذف"}).json()["id"]
         url = "https://res.cloudinary.com/dd63wjj5x/raw/upload/v1/ktra_uploads/ds.pdf"
         att = MagicMock(id=77, file_path=url)
         with patch("core.models.SystemAttachment") as MockSA, \
@@ -390,7 +390,7 @@ class ProductApiTest(APITestCase):
 
     def test_remove_datasheet_missing_is_404(self):
         self._auth()
-        pid = self._post({"name_ar": "صنف بلا مرفق"}).json()["id"]
+        pid = self._post({"name_ar": "منتج بلا مرفق"}).json()["id"]
         with patch("core.models.SystemAttachment") as MockSA:
             MockSA.objects.filter.return_value.first.return_value = None
             res = self.client.delete(
@@ -398,7 +398,7 @@ class ProductApiTest(APITestCase):
             )
             assert res.status_code == 404
 
-    # ── W10: اسم الصنف قابل للتعديل بعد الإنشاء (حارس أن name_ar ليس read_only) ──
+    # ── W10: اسم المنتج قابل للتعديل بعد الإنشاء (حارس أن name_ar ليس read_only) ──
     def test_patch_updates_name_ar(self):
         self._auth()
         pid = self._post({"name_ar": "الاسم القديم"}).json()["id"]
@@ -420,10 +420,10 @@ class ProductApiTest(APITestCase):
             "new": "الاسم الجديد",
         }]
 
-    # ── كرت الصنف: «سعر البيع» يُحفظ من نفس نموذج الكرت (لا شاشة منفصلة) ──
+    # ── كرت المنتج: «سعر البيع» يُحفظ من نفس نموذج الكرت (لا شاشة منفصلة) ──
     def test_sale_price_round_trips_through_api(self):
         self._auth()
-        created = self._post({"name_ar": "صنف بسعر بيع", "sale_price": "150.5"}).json()
+        created = self._post({"name_ar": "منتج بسعر بيع", "sale_price": "150.5"}).json()
         assert created["sale_price"] == "150.5000"
         res = self.client.patch(
             f"{PRODUCTS_URL}{created['id']}/", {"sale_price": "175"},
@@ -437,7 +437,7 @@ class ProductApiTest(APITestCase):
         ).latest("id")
         # G1: بلا أصفار زائدة في نصّ السجل — «150.5» لا «150.5000».
         assert activity.description == (
-            "عدّل سعر البيع للمنتج «صنف بسعر بيع» من 150.5 إلى 175"
+            "عدّل سعر البيع للمنتج «منتج بسعر بيع» من 150.5 إلى 175"
         )
         assert activity.metadata["changes"] == [{
             "field": "sale_price",
@@ -486,35 +486,35 @@ class ProductApiTest(APITestCase):
         root = ProductCategory.objects.create(tenant=self.t_a, name="جذر")
         child = ProductCategory.objects.create(tenant=self.t_a, name="ابن", parent=root)
         grandchild = ProductCategory.objects.create(tenant=self.t_a, name="حفيد", parent=child)
-        Product.objects.create(tenant=self.t_a, sku="R-1", name_ar="صنف الجذر", category=root)
-        Product.objects.create(tenant=self.t_a, sku="C-1", name_ar="صنف الابن", category=child)
-        Product.objects.create(tenant=self.t_a, sku="G-1", name_ar="صنف الحفيد", category=grandchild)
-        Product.objects.create(tenant=self.t_a, sku="O-1", name_ar="صنف خارج الشجرة")
+        Product.objects.create(tenant=self.t_a, sku="R-1", name_ar="منتج الجذر", category=root)
+        Product.objects.create(tenant=self.t_a, sku="C-1", name_ar="منتج الابن", category=child)
+        Product.objects.create(tenant=self.t_a, sku="G-1", name_ar="منتج الحفيد", category=grandchild)
+        Product.objects.create(tenant=self.t_a, sku="O-1", name_ar="منتج خارج الشجرة")
 
         names = {row["name_ar"] for row in self._get(f"?category={root.id}").json()}
-        assert names == {"صنف الجذر", "صنف الابن", "صنف الحفيد"}
+        assert names == {"منتج الجذر", "منتج الابن", "منتج الحفيد"}
 
         leaf_names = {row["name_ar"] for row in self._get(f"?category={child.id}").json()}
-        assert leaf_names == {"صنف الابن", "صنف الحفيد"}
+        assert leaf_names == {"منتج الابن", "منتج الحفيد"}
 
     def test_foreign_category_filter_returns_nothing(self):
         self._auth()
         foreign = ProductCategory.objects.create(tenant=self.t_b, name="تصنيف الشركة الأخرى")
-        Product.objects.create(tenant=self.t_a, sku="X-1", name_ar="صنفي")
+        Product.objects.create(tenant=self.t_a, sku="X-1", name_ar="منتجي")
         assert self._get(f"?category={foreign.id}").json() == []
 
     # ── M0: الكرت كان يعرض رقم الوحدة مكان اسمها ──
     def test_uom_name_returns_the_name_not_the_id(self):
         self._auth()
         uom = UnitOfMeasure.objects.create(code="PCS", name_ar="قطعة", name_en="Piece")
-        created = self._post({"name_ar": "صنف بوحدة", "uom_id": uom.id}).json()
+        created = self._post({"name_ar": "منتج بوحدة", "uom_id": uom.id}).json()
         assert created["uom_id"] == uom.id
         assert created["uom_name"] == "قطعة"
 
     def test_uom_name_falls_back_to_legacy_text(self):
         self._auth()
         product = Product.objects.create(
-            tenant=self.t_a, sku="L-1", name_ar="صنف قديم", uom_legacy="كرتونة",
+            tenant=self.t_a, sku="L-1", name_ar="منتج قديم", uom_legacy="كرتونة",
         )
         res = self.client.get(f"{PRODUCTS_URL}{product.id}/", HTTP_X_TENANT_ID=self._tenant_id)
         assert res.status_code == 200, res.content[:300]

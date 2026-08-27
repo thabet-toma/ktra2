@@ -57,7 +57,7 @@ class DashboardIsolationTest(APITestCase):
             tenant=cls.t_a, invoice_number="INV-1", partner=partner, currency=currency,
             invoice_date=timezone.localdate(), status="draft", grand_total=500,
         )
-        Product.objects.create(tenant=cls.t_a, sku="OLD-1", name_ar="صنف قديم",
+        Product.objects.create(tenant=cls.t_a, sku="OLD-1", name_ar="منتج قديم",
                                quantity_on_hand=10, avg_cost=7)
         customer = Partner.objects.create(
             tenant=cls.t_a, name="عميل قديم", partner_type="Customer"

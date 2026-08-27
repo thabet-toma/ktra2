@@ -66,7 +66,7 @@ export const StoreCartProvider: React.FC<StoreCartProviderProps> = ({ slug, chil
   const [items, setItems] = useState<CartItem[]>(() => readCart(storageKey));
 
   // تبديل المتجر يعيد تحميل سلّته: بغير ذلك تُكتب سلّة المتجر السابق فوق
-  // سلّة المتجر الجديد، فيرى الزبون أصناف متجرٍ آخر في سلّته.
+  // سلّة المتجر الجديد، فيرى الزبون منتجات متجرٍ آخر في سلّته.
   const loadedKey = useRef(storageKey);
   useEffect(() => {
     if (loadedKey.current === storageKey) return;

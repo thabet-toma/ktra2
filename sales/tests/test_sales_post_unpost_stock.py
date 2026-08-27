@@ -35,7 +35,7 @@ def env():
     customer = Partner.objects.create(
         tenant=tenant, name="عميل", partner_type="Customer", linked_account=ar)
     product = Product.objects.create(
-        tenant=tenant, sku="SS-1", name_ar="صنف", quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
+        tenant=tenant, sku="SS-1", name_ar="منتج", quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
     # رصيد افتتاحي مدعوم بحركة مخزون (كالواقع) — حتى تُعيد إعادة الاحتساب 100 بدقة.
     record_stock_movement(
         product=product, movement_type="IN", quantity=Decimal("100"),

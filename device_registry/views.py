@@ -288,7 +288,7 @@ class SensitiveDeviceViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="model_names")
     def model_names(self, request):
-        """اقتراحات الموديلات من سجلات الشركة نفسها — بلا أي ربط بأصناف المخزون."""
+        """اقتراحات الموديلات من سجلات الشركة نفسها — بلا أي ربط بمنتجات المخزون."""
         names = (
             SensitiveDevice.objects
             .filter(tenant=self.tenant)

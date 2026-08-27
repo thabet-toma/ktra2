@@ -4,7 +4,7 @@
  * المستند نوعان يحكمهما وجود «الفاتورة المرتبطة»:
  *  - مرتبط بفاتورة ⇒ اسمه من الإعدادات (افتراضياً «إرسالية شراء»)، وبنوده
  *    تُختار من بنود تلك الفاتورة حصراً بكمياتها المتبقية.
- *  - بلا فاتورة ⇒ «سند استلام» (بضاعة وصلت قبل فاتورتها): يُحدَّد المورد وأصنافه
+ *  - بلا فاتورة ⇒ «سند استلام» (بضاعة وصلت قبل فاتورتها): يُحدَّد المورد ومنتجاته
  *    وأسعارها، ويُرحَّل مقابل وسيط «بضاعة مستلَمة لم تُفوتَر».
  * التسميتان وإتاحة السند المستقل والتعديل — كلها من إعدادات الشراء.
  */
@@ -56,7 +56,7 @@ type ProductOpt = { id: number; sku?: string; name_ar?: string; name_en?: string
 type LineState = {
   /** بند الفاتورة المرتبطة — فارغ في السند المستقل. */
   item_id: number | "";
-  /** الصنف — يُختار مباشرة في السند المستقل. */
+  /** المنتج — يُختار مباشرة في السند المستقل. */
   product_id: number | "";
   product_name: string;
   ordered: number;
@@ -159,7 +159,7 @@ export const GoodsReceiptsPage: React.FC = () => {
     })();
   }, []);
 
-  /** مراجع المحرّر: فواتير قابلة للاستلام + مستودعات + موردون + أصناف. */
+  /** مراجع المحرّر: فواتير قابلة للاستلام + مستودعات + موردون + منتجات. */
   const loadRefs = useCallback(async () => {
     try {
       const tenantId = resolveTenantId();
@@ -400,7 +400,7 @@ export const GoodsReceiptsPage: React.FC = () => {
   const lineColumns: CommercialLineColumn<LineState>[] = [
     {
       key: "product_name",
-      header: "الصنف",
+      header: "المنتج",
       width: isStandalone ? "30%" : "28%",
       render: (line, idx) => (
         <KitAutocomplete
@@ -408,7 +408,7 @@ export const GoodsReceiptsPage: React.FC = () => {
           options={options}
           onPick={(id) => pickRowItem(idx, Number(id))}
           placeholder={
-            isStandalone ? "ابحث عن صنف…" : "اختر من بنود الفاتورة…"
+            isStandalone ? "ابحث عن منتج…" : "اختر من بنود الفاتورة…"
           }
         />
       ),
@@ -568,7 +568,7 @@ export const GoodsReceiptsPage: React.FC = () => {
         ...(doc.notes ? [{ label: "ملاحظات", value: doc.notes }] : []),
       ],
       columns: [
-        { header: "الصنف", value: (l: GoodsReceiptDto["lines"][number]) => l.product_name || l.item_name },
+        { header: "المنتج", value: (l: GoodsReceiptDto["lines"][number]) => l.product_name || l.item_name },
         { header: "المفوتر", value: (l) => formatQuantity(l.ordered_quantity), numeric: true },
         { header: "المستلَم في هذا المستند", value: (l) => formatQuantity(l.quantity), numeric: true },
         { header: "الباقي", value: (l) => formatQuantity(l.remaining_quantity), numeric: true },
@@ -592,7 +592,7 @@ export const GoodsReceiptsPage: React.FC = () => {
           { header: "الفاتورة", value: (r) => r.invoice_number },
           { header: "التاريخ", value: (r) => formatDateLocalized(r.invoice_date) || "—" },
           { header: "المورد", value: (r) => r.partner_name },
-          { header: "الصنف", value: (r) => r.product_name },
+          { header: "المنتج", value: (r) => r.product_name },
           { header: "المفوتر", value: (r) => formatQuantity(r.quantity), numeric: true },
           { header: "المستلَم", value: (r) => formatQuantity(r.received_quantity), numeric: true },
           { header: "الباقي", value: (r) => formatQuantity(r.remaining_quantity), numeric: true },
@@ -821,7 +821,7 @@ export const GoodsReceiptsPage: React.FC = () => {
         <table className="ktra-grid">
           <thead>
             <tr>
-              <th>الصنف</th>
+              <th>المنتج</th>
               <th>المفوتر</th>
               <th>المستلَم في هذا المستند</th>
               <th>المستلَم تراكمياً</th>
@@ -998,10 +998,10 @@ export const GoodsReceiptsPage: React.FC = () => {
             }
           }}
           onAddLine={addLine}
-          addLineLabel={isStandalone ? "إضافة صنف" : "إضافة بند من الفاتورة"}
+          addLineLabel={isStandalone ? "إضافة منتج" : "إضافة بند من الفاتورة"}
           emptyHint={
             isStandalone
-              ? "لا توجد بنود — اضغط «إضافة صنف»"
+              ? "لا توجد بنود — اضغط «إضافة منتج»"
               : "لا توجد بنود — اضغط «إضافة بند من الفاتورة»"
           }
           banner={

@@ -158,7 +158,7 @@ class ClearanceImportTest(APITestCase):
         self.partner.linked_account = ap
         self.partner.save(update_fields=["linked_account"])
         product = Product.objects.create(
-            tenant=self.tenant, sku="IMP-RECALC-1", name_ar="صنف إعادة الاحتساب",
+            tenant=self.tenant, sku="IMP-RECALC-1", name_ar="منتج إعادة الاحتساب",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
         )
         LogisticsDealItem.objects.create(

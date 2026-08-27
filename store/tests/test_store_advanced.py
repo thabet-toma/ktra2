@@ -156,7 +156,7 @@ class StoreAdvancedFeaturesTest(TestCase):
         self.assertEqual(body["products"]["results"][0]["id"], self.p_stock.id)
 
     def test_direct_store_product_creation_and_management(self):
-        """إضافة صنف جديد مباشرة للمتجر دون اشتراط وجوده في المخزن أو شجرة الأصناف."""
+        """إضافة منتج جديد مباشرة للمتجر دون اشتراط وجوده في المخزن أو شجرة المنتجات."""
         # 1. إنشاء منتج متجر مباشر (ثلاجة مثلاً)
         create_res = self.auth_client.post("/api/store/admin/products/", {
             "name_ar": "ثلاجة دولابي فاخرة LG 18 قدم",
@@ -177,10 +177,10 @@ class StoreAdvancedFeaturesTest(TestCase):
         self.assertEqual(prod_data["name_ar"], "ثلاجة دولابي فاخرة LG 18 قدم")
         self.assertEqual(len(prod_data["images"]), 2)
 
-        # 2. التحقق من عزل المنتج عن شاشات الأصناف المخزنية ومحددات فواتير البيع (ERP Isolation)
+        # 2. التحقق من عزل المنتج عن شاشات المنتجات المخزنية ومحددات فواتير البيع (ERP Isolation)
         erp_lookup_res = self.auth_client.get("/api/inventory/products/?view=lookup&search=ثلاجة")
         self.assertEqual(erp_lookup_res.status_code, 200)
-        # يجب ألا يظهر الصنف في محددات الفواتير إطلاقاً
+        # يجب ألا يظهر المنتج في محددات الفواتير إطلاقاً
         erp_lookup_data = erp_lookup_res.json()
         erp_lookup_items = erp_lookup_data if isinstance(erp_lookup_data, list) else erp_lookup_data.get("results", [])
         erp_lookup_ids = [p["id"] for p in erp_lookup_items]
@@ -188,7 +188,7 @@ class StoreAdvancedFeaturesTest(TestCase):
 
         erp_list_res = self.auth_client.get("/api/inventory/products/?search=ثلاجة")
         self.assertEqual(erp_list_res.status_code, 200)
-        # يجب ألا يظهر في شاشة إدارة الأصناف والمخزن
+        # يجب ألا يظهر في شاشة إدارة المنتجات والمخزن
         erp_list_data = erp_list_res.json()
         erp_list_items = erp_list_data if isinstance(erp_list_data, list) else erp_list_data.get("results", [])
         erp_list_ids = [p["id"] for p in erp_list_items]

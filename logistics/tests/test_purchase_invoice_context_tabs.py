@@ -41,7 +41,7 @@ class PurchaseInvoiceContextTabsTest(APITestCase):
             tenant=cls.tenant, code="1110-X", name="الصندوق",
             account_type="Asset", is_active=True)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="PCTX-1", name_ar="صنف السياق",
+            tenant=cls.tenant, sku="PCTX-1", name_ar="منتج السياق",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
 
     def _auth(self):
@@ -54,7 +54,7 @@ class PurchaseInvoiceContextTabsTest(APITestCase):
             currency=self.ils, invoice_date="2026-06-20",
             exchange_rate=Decimal("1"), grand_total=Decimal(total))
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف السياق",
+            invoice=inv, product=self.product, name="منتج السياق",
             quantity=Decimal("5"), unit_price=Decimal("100.00"),
             total_price=Decimal(total))
         return inv
@@ -87,7 +87,7 @@ class PurchaseInvoiceContextTabsTest(APITestCase):
         assert any(Decimal(str(r["qty_in"])) == Decimal("5") for r in rows), rows
 
     def test_stock_tab_is_scoped_to_the_invoice_not_the_product(self):
-        """تبويب المستند يقول ما فعلته **هذه** الفاتورة لا تاريخ الصنف."""
+        """تبويب المستند يقول ما فعلته **هذه** الفاتورة لا تاريخ المنتج."""
         first = self._invoice("PINV-CTX-3")
         self.client.post(
             f"/api/logistics/purchase-invoices/{first.pk}/post-to-accounting/",

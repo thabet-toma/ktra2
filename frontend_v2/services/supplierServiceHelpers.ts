@@ -8,8 +8,8 @@ export const getInvoicesBySupplier = (allInvoices: Invoice[], supplierId: string
 };
 
 /**
- * جلب جميع الأصناف التي تم شراؤها من مورد معين
- * يتم تجميع البيانات من الفواتير لاستخراج الأصناف الفريدة وحساب الكميات
+ * جلب جميع المنتجات التي تم شراؤها من مورد معين
+ * يتم تجميع البيانات من الفواتير لاستخراج المنتجات الفريدة وحساب الكميات
  */
 export const getItemsBySupplier = (
   allInvoices: Invoice[], 
@@ -19,7 +19,7 @@ export const getItemsBySupplier = (
   // 1. نجد الفواتير الخاصة بالمورد
   const supplierInvoices = getInvoicesBySupplier(allInvoices, supplierId);
 
-  // 2. تجميع الأصناف
+  // 2. تجميع المنتجات
   const itemsMap = new Map<string, { 
     itemData: InvoiceItem, 
     lastDate: string, 
@@ -29,7 +29,7 @@ export const getItemsBySupplier = (
 
   supplierInvoices.forEach(inv => {
     inv.items.forEach(invItem => {
-      // نستخدم اسم الصنف كمعرف فريد إذا لم يكن هناك ID ثابت، أو نستخدم ID الصنف إذا توفر
+      // نستخدم اسم المنتج كمعرف فريد إذا لم يكن هناك ID ثابت، أو نستخدم ID المنتج إذا توفر
       const key = invItem.itemId || invItem.name; 
       
       const existing = itemsMap.get(key) || { 
@@ -44,7 +44,7 @@ export const getItemsBySupplier = (
       const isNewer = !existing.lastDate || new Date(invDate) > new Date(existing.lastDate);
 
       itemsMap.set(key, {
-        itemData: invItem, // نحتفظ بآخر بيانات للصنف
+        itemData: invItem, // نحتفظ بآخر بيانات للمنتج
         lastDate: isNewer ? invDate : existing.lastDate,
         quantity: existing.quantity + Number(invItem.quantity || 0),
         spent: existing.spent + Number(invItem.totalPrice || 0)

@@ -279,7 +279,7 @@ export const StoreCatalogSlider: React.FC<StoreCatalogSliderProps> = ({
                   className="flex items-center justify-center gap-2 rounded-2xl bg-slate-800 px-4 py-3 text-xs font-bold text-slate-200 transition hover:bg-slate-700"
                 >
                   <Eye className="h-4 w-4" />
-                  <span>تفاصيل الصنف</span>
+                  <span>تفاصيل المنتج</span>
                 </button>
               )}
             </div>

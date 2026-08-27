@@ -1,7 +1,7 @@
 /**
- * T-ITEMS M3 — تحرير سريع للصنف من داخل المستند.
+ * T-ITEMS M3 — تحرير سريع للمنتج من داخل المستند.
  *
- * قبلها كان من يكتشف خطأً في اسم صنفٍ وهو في منتصف فاتورة أمام خيارين: أن
+ * قبلها كان من يكتشف خطأً في اسم منتجٍ وهو في منتصف فاتورة أمام خيارين: أن
  * يتجاهله، أو أن يضغط «الكرت الكامل» فيغادر الفاتورة إلى `/products/:id`
  * ويعود ليبدأ من جديد. Odoo تحلّ هذا بسهمٍ يفتح سجلّ المنتج من سطر الفاتورة؛
  * هنا نافذةٌ عائمة صغيرة تُبقي الفاتورة مرئيةً خلفها.
@@ -63,7 +63,7 @@ export const ItemQuickEditModal: React.FC<Props> = ({
         setLabel(String(p.display_name ?? p.name_ar ?? p.name_en ?? p.sku ?? ""));
       })
       .catch((e: unknown) => {
-        if (alive) setErr(e instanceof Error ? e.message : "فشل تحميل الصنف");
+        if (alive) setErr(e instanceof Error ? e.message : "فشل تحميل المنتج");
       })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -81,7 +81,7 @@ export const ItemQuickEditModal: React.FC<Props> = ({
       const updated = await inventoryApi.updateProduct(
         Number(productId), dirtySimplePayload(before, form),
       ) as Record<string, unknown>;
-      // `updateProduct` يُبطل كاش منتقي الأصناف بنفسه؛ الحدث يوقظ الشاشات
+      // `updateProduct` يُبطل كاش منتقي المنتجات بنفسه؛ الحدث يوقظ الشاشات
       // التي تحمل قائمتها الخاصة، و`onSaved` يزامن نسخة المستدعي الحيّة.
       eventBus.publish("products", resolveTenantId());
       onSaved(updated);
@@ -107,7 +107,7 @@ export const ItemQuickEditModal: React.FC<Props> = ({
       open
       onClose={onClose}
       name="item-quick-edit"
-      title={`تعديل سريع — ${label || "صنف"}`}
+      title={`تعديل سريع — ${label || "منتج"}`}
       defaultWidth={560}
       defaultHeight={430}
       footer={
@@ -145,7 +145,7 @@ export const ItemQuickEditModal: React.FC<Props> = ({
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            {field("اسم الصنف",
+            {field("اسم المنتج",
               <input className={input} value={form.name_ar} autoFocus
                 onChange={(e) => patch("name_ar", e.target.value)} />, 2)}
             {field("الاسم بالإنجليزية",

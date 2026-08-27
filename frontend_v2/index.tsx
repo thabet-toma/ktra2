@@ -33,7 +33,7 @@ applyThemeOnBoot();
 captureTabHandoffOnBoot();
 
 // المتجر العام: خارج `AuthProvider`/`CompanyProvider` عمداً — زائرٌ بلا جلسة لا
-// ينتظر إقلاع مساحة عمل لا تخصّه، ولا يحمّل chunk لوحة التحكم كي يرى صنفاً.
+// ينتظر إقلاع مساحة عمل لا تخصّه، ولا يحمّل chunk لوحة التحكم كي يرى منتجاً.
 // `ToastProvider` وحده مطلوب هنا (نسخ الرابط)، وهو قانون المشروع بدل `alert`.
 import { StoreCartProvider } from './contexts/StoreCartContext';
 

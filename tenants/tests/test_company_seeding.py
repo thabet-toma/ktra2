@@ -47,7 +47,7 @@ def test_new_company_business_data_empty(creator):
     # Pre-existing company with data must not leak into the new company
     old = create_company("الشركة القديمة", creator)
     Partner.objects.create(tenant=old, name="عميل قديم", partner_type="Customer")
-    Product.objects.create(tenant=old, sku="OLD-1", name_ar="صنف قديم")
+    Product.objects.create(tenant=old, sku="OLD-1", name_ar="منتج قديم")
 
     tenant = create_company("الشركة الجديدة", creator)
 

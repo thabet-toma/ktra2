@@ -206,9 +206,9 @@ class SupplierQuotationLine(models.Model):
         SupplierQuotation, on_delete=models.CASCADE, db_column='SupplierQuotationID',
         related_name='lines',
     )
-    # T-DRAFTPARTY: بند بلا صنف مسجَّل — الاسم النصّي (`name_snapshot`) يكفي داخل
-    # العرض، ويُنشأ الصنف الحقيقي عند التحويل فقط. عرضُ سعرٍ لم يُقبل لا يجوز أن
-    # يترك أصنافاً وهمية في فهرس الأصناف.
+    # T-DRAFTPARTY: بند بلا منتج مسجَّل — الاسم النصّي (`name_snapshot`) يكفي داخل
+    # العرض، ويُنشأ المنتج الحقيقي عند التحويل فقط. عرضُ سعرٍ لم يُقبل لا يجوز أن
+    # يترك منتجات وهمية في فهرس المنتجات.
     product = models.ForeignKey(
         Product, on_delete=models.PROTECT, db_column='ProductID',
         related_name='supplier_quotation_lines', null=True, blank=True,
@@ -237,7 +237,7 @@ class SupplierQuotationLine(models.Model):
                 condition=models.Q(unit_price__gte=0),
                 name='supplier_quote_line_price_gte_zero',
             ),
-            # T-DRAFTPARTY: بند بلا صنف يلزمه اسم — وإلا فهو سطر بلا معنى.
+            # T-DRAFTPARTY: بند بلا منتج يلزمه اسم — وإلا فهو سطر بلا معنى.
             models.CheckConstraint(
                 condition=(
                     models.Q(product__isnull=False)
@@ -2044,7 +2044,7 @@ class PurchaseSettings(models.Model):
         choices=STRATEGY_CHOICES,
         default=STRATEGY_LAST_PURCHASE,
         db_column="PurchaseDefaultPriceStrategy",
-        help_text="استراتيجية تعبئة سعر الوحدة تلقائياً عند اختيار صنف في بند الشراء",
+        help_text="استراتيجية تعبئة سعر الوحدة تلقائياً عند اختيار منتج في بند الشراء",
     )
     # T-A4: الصندوق الافتراضي للدفعات النقدية في فواتير الشراء (مرآة SalesSettings).
     default_cash_account = models.ForeignKey(
@@ -2082,7 +2082,7 @@ class PurchaseSettings(models.Model):
         help_text="السماح بتعديل/إلغاء الإرسالية بعد حفظها (يعكس أثرها ويعيد تطبيقه)",
     )
     # الأرقام التسلسلية في بنود الشراء: مُطفأ افتراضياً فلا أثر على شركة لم تطلبه.
-    # «إجباري» يمنع استلام بضاعة صنف تسلسلي بلا أرقام بعدد كميته.
+    # «إجباري» يمنع استلام بضاعة منتج تسلسلي بلا أرقام بعدد كميته.
     serial_entry_mode = models.CharField(
         max_length=20,
         choices=SERIAL_MODE_CHOICES,

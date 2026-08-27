@@ -1,9 +1,9 @@
-# inventory — الأصناف والمخزون: الحركة الوحيدة التي تغيّر الرصيد والتكلفة، والوحدات المُرقَّمة
+# inventory — المنتجات والمخزون: الحركة الوحيدة التي تغيّر الرصيد والتكلفة، والوحدات المُرقَّمة
 
 > مبني على قراءة الكود مباشرةً بتاريخ 2026-08-11. عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
 ## الغرض
-يملك هذا الـapp بطاقة الصنف (`Product`)، تصنيفاته ووحداته وشرائح أسعاره، المستودعات،
+يملك هذا الـapp بطاقة المنتج (`Product`)، تصنيفاته ووحداته وشرائح أسعاره، المستودعات،
 وسجلّ حركة المخزون (`StockMovement`) الذي هو **المصدر الوحيد** لتغيير `quantity_on_hand`
 و`avg_cost`. كل الأبواب — البيع، الشراء، الاستلام، التحويل بين المستودعات، الجرد —
 تمرّ من `record_stock_movement()` الذي يحدّث الرصيد ومتوسط التكلفة ذرّياً ويحفظ لقطات
@@ -13,15 +13,15 @@
 ## أهم الملفات
 | الملف | الغرض | أسطر |
 |---|---|---|
-| `inventory/services.py` | `record_stock_movement` + WAC، عكس الحركات، بطاقة الصنف، نماذج التكلفة، ترحيل التحويل والجرد | 1368 |
+| `inventory/services.py` | `record_stock_movement` + WAC، عكس الحركات، بطاقة المنتج، نماذج التكلفة، ترحيل التحويل والجرد | 1368 |
 | `inventory/views.py` | ViewSets: المنتجات، الحركات، المستودعات، التحويلات، الجرد | 891 |
 | `inventory/serials.py` | كل منطق الأرقام التسلسلية للشراء والبيع (وحدة مستقلة عن services) | 765 |
-| `inventory/models.py` | 11 موديل: الصنف، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد | 465 |
+| `inventory/models.py` | 11 موديل: المنتج، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد | 465 |
 | `inventory/stock_status.py` | **مصدر الحقيقة الوحيد لحالة المخزون** (نفذ/منخفض/فائض/متوفّر): تعبير ORM ودالّة بايثون وفلتر — يستهلكها السيريالايزر والجدول والداشبورد والتقارير | 150 |
 
-| `inventory/serializers.py` | تمثيل الصنف والحركة والمستندات | 353 |
+| `inventory/serializers.py` | تمثيل المنتج والحركة والمستندات | 353 |
 | `inventory/urls.py` | 8 routers مركّبة على `/api/inventory/` (`core/urls.py`) | 21 |
-| `inventory/agent_api.py` | نقطة بوت الفواتير للأصناف (`/api/agent/products/`، مسجَّلة في `core/urls.py`). تسكن هنا لا في `core` لأن `.importlinter` يمنع `core` من استيراد `inventory.serializers`؛ ولا تستورد `sales`/`logistics` (عقد الاتجاه المعكوس) | 115 |
+| `inventory/agent_api.py` | نقطة بوت الفواتير للمنتجات (`/api/agent/products/`، مسجَّلة في `core/urls.py`). تسكن هنا لا في `core` لأن `.importlinter` يمنع `core` من استيراد `inventory.serializers`؛ ولا تستورد `sales`/`logistics` (عقد الاتجاه المعكوس) | 115 |
 
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
@@ -30,9 +30,9 @@
 | `StockMovement` | `movement_type` (IN/OUT/ADJUST_IN/ADJUST_OUT/RETURN_IN/RETURN_OUT), `quantity`, `unit_cost`, `total_cost`, `reference_type`, `reference_id`, `quantity_before/after`, `avg_cost_before/after` | `product` (PROTECT)، `warehouse` (PROTECT)، `branch→tenants.Branch`، `partner→partners.Partner`؛ خاصية `origin` (`:270`) |
 | `ProductCategory` | `name`, `parent` | `revenue_account`, `cogs_account`, `inventory_account` → `accounting.Account` |
 | `Warehouse` | `code`, `is_default`, `is_active` | `branch→tenants.Branch` (اختياري)؛ فريد `(tenant, code)` لغير الفارغ |
-| `ProductSerial` | `serial`, `status` (`in_stock`/`sold`) | `purchase_item→logistics.PurchaseInvoiceItem`، `sales_line→sales.SalesInvoiceLine`؛ فريد `(tenant, product, serial)`، وفهرس `(tenant, serial)` لبحث المسح الذي لا يعرف الصنف (`prodserial_tenant_serial`) |
+| `ProductSerial` | `serial`, `status` (`in_stock`/`sold`) | `purchase_item→logistics.PurchaseInvoiceItem`، `sales_line→sales.SalesInvoiceLine`؛ فريد `(tenant, product, serial)`، وفهرس `(tenant, serial)` لبحث المسح الذي لا يعرف المنتج (`prodserial_tenant_serial`) |
 | `ProductPriceTier` | `tier_type` (sale/purchase), `tier_number`, `price`, `tax_inclusive` | فريد `(product, tier_type, tier_number)` |
-| `SupplierProduct` | `supplier_sku`, `supplier_name` | `supplier→partners.Partner`، `product→Product`؛ فريد `(tenant, supplier, supplier_sku)` — **لا** على `(tenant, supplier, product)`: للمورّد أن يحمل أكثر من رقم للصنف الواحد، والممنوع عكسُه (رقمٌ واحد لصنفين يجعل المطابقة تخميناً). محايد مالياً بالكامل |
+| `SupplierProduct` | `supplier_sku`, `supplier_name` | `supplier→partners.Partner`، `product→Product`؛ فريد `(tenant, supplier, supplier_sku)` — **لا** على `(tenant, supplier, product)`: للمورّد أن يحمل أكثر من رقم للمنتج الواحد، والممنوع عكسُه (رقمٌ واحد لمنتجين يجعل المطابقة تخميناً). محايد مالياً بالكامل |
 | `WarehouseTransfer` / `WarehouseTransferLine` | `transfer_number`, `is_posted`, `quantity` | `source_warehouse` / `dest_warehouse` (PROTECT) — بلا قيد محاسبي (`:384`) |
 | `Stocktake` / `StocktakeLine` | `is_posted`, `counted_quantity`, `system_quantity`, `variance` | `journal→accounting.JournalHeader` — قيد فرق الجرد |
 
@@ -53,13 +53,13 @@ def record_stock_movement(
     tenant=None,
     branch=None,
     warehouse=None,
-) -> StockMovement:  # القلب: يقفل الصنف، يطبّق WAC، يُنشئ الحركة ويحدّث الرصيد ذرّياً (سطر 154)
+) -> StockMovement:  # القلب: يقفل المنتج، يطبّق WAC، يُنشئ الحركة ويحدّث الرصيد ذرّياً (سطر 154)
 def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:  # حذف حركات مستند + إعادة احتساب (302)
 def find_stock_dependents(*, tenant_id, reference_id, reference_types) -> list[dict]:  # من بنى على هذه البضاعة (371)
 def receive_shipment_stock(shipment, movement_date=None):  # استلام شحنة استيراد (431)
-def product_profile(*, tenant_id: int, product_id: int) -> dict:  # بطاقة الصنف (710)
+def product_profile(*, tenant_id: int, product_id: int) -> dict:  # بطاقة المنتج (710)
 def category_descendant_ids(*, tenant_id: int, category_id: int) -> list[int]:  # التصنيف وكل أحفاده — نسخة واحدة يقرؤها الكرت المجمّع وفلتر `?category=` معاً
-def category_descendant_product_ids(*, tenant_id: int, category_id: int) -> list[int]:  # أصناف تصنيفٍ وأحفاده — الخادم يشتقّها بدل تعدادها في الطلب
+def category_descendant_product_ids(*, tenant_id: int, category_id: int) -> list[int]:  # منتجات تصنيفٍ وأحفاده — الخادم يشتقّها بدل تعدادها في الطلب
 def product_group_profile(*, tenant_id: int, product_ids: list[int]) -> dict:  # الكرت المجمّع (823)
 def product_stock_ledger(*, tenant_id, product_id=None, product_ids=None, limit=50, offset=0) -> dict:  # (887)
 def partner_stock_movements(*, tenant_id, partner_id, limit=50, offset=0) -> dict:  # حركات مخزون الشريك مجمَّعةً تحت المستند المسبِّب (تبويب «المال» في كرته)
@@ -104,8 +104,8 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | GET | `products/{id}/profile/` · `products/{id}/stock-ledger/` · `products/{id}/cost-breakdown/` | (405) · (411) · (433) |
 | GET | `products/{id}/stock-movements/` · `products/{id}/invoices/` | (398) · (426) |
 | GET | `products/{id}/serials/` · POST `products/{id}/serials/register/` | (559) · (570) |
-| **POST** | `products/bulk-set-group/` | تعيين «النوع» (`variant_group`) و/أو البراند على أصنافٍ محدَّدة دفعةً واحدة — `ProductViewSet` (`bulk_set_group`). الحقل الغائب من الجسم لا يُمَسّ، والفارغ يُمحى. يشترط `inventory.item.manage` |
-| **POST** | `products/apply-replenishment/` | تثبيت الحدّين المقترَحين على أصنافٍ محدَّدة — `ProductViewSet` (`apply_replenishment`). كتابةٌ حقيقية: تشترط `inventory.item.manage` وليست في `read_only_post_actions`، والمحدِّد في **جسم** الطلب |
+| **POST** | `products/bulk-set-group/` | تعيين «النوع» (`variant_group`) و/أو البراند على منتجاتٍ محدَّدة دفعةً واحدة — `ProductViewSet` (`bulk_set_group`). الحقل الغائب من الجسم لا يُمَسّ، والفارغ يُمحى. يشترط `inventory.item.manage` |
+| **POST** | `products/apply-replenishment/` | تثبيت الحدّين المقترَحين على منتجاتٍ محدَّدة — `ProductViewSet` (`apply_replenishment`). كتابةٌ حقيقية: تشترط `inventory.item.manage` وليست في `read_only_post_actions`، والمحدِّد في **جسم** الطلب |
 | POST | `products/generate_barcode/` · `products/generate_serials/` | (522) · (541) |
 | GET | `products/groups/` · `products/brands/` | (468) · (460) |
 | GET/**POST** | `products/group-profile/` · `products/group-ledger/` · `products/group-invoices/` | الكرت المجمّع — المحدِّد في **جسم** الطلب |
@@ -122,13 +122,13 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 
 | المحدِّد | المعنى |
 |---|---|
-| `{"category": 3}` | التصنيف **وكل أحفاده** — الخادم يشتقّ الأصناف (`category_descendant_product_ids`) |
+| `{"category": 3}` | التصنيف **وكل أحفاده** — الخادم يشتقّ المنتجات (`category_descendant_product_ids`) |
 | `{"ids": [1, 2, 3]}` | تعدادٌ صريح — مجموعات `group_key`، أو أسطر جردٍ بعينها |
 
 (و`group-ledger` يقبل `limit`/`offset` في الجسم نفسه.)
 
 **لماذا POST لقراءة؟** كان التعداد يسافر في سطر الطلب (`?ids=1,2,3…`): تصنيفُ
-جذرٍ فيه ~1500 صنف ⇒ عنوانٌ ~7.5KB، فوق `large_client_header_buffers 8k` في
+جذرٍ فيه ~1500 منتج ⇒ عنوانٌ ~7.5KB، فوق `large_client_header_buffers 8k` في
 nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `GET` مع `?ids=`/`?category=`
 يبقى مفهوماً لتوافق الروابط القديمة (`/product-group?ids=…`).
 
@@ -140,7 +140,7 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 ## الاعتماديات
 **يعتمد على:** (كل الاستيرادات عبر أبواب أخرى **كسولة داخل الدوال** — الملف يستورد على مستوى الوحدة من `tenants` و`partners` فقط، `models.py:2-3`)
 - `sales.models.SalesSettings` — لقرار السماح بالمخزون السالب داخل `record_stock_movement` (`inventory/services.py`)، ولنمط الأرقام التسلسلية (`inventory/serials.py`)، ولنموذج التكلفة (`inventory/services.py`).
-- `sales.services` — `reserved_quantity_map` و`last_sale_price` في بطاقة الصنف (`inventory/services.py` و`:748`)، و`reserved_quantity_map` في العرض (`inventory/views.py`).
+- `sales.services` — `reserved_quantity_map` و`last_sale_price` في بطاقة المنتج (`inventory/services.py` و`:748`)، و`reserved_quantity_map` في العرض (`inventory/views.py`).
 - `logistics.models` — `PurchaseInvoice/PurchaseInvoiceItem/PurchaseSettings` (`inventory/services.py:447,681,941` و`serials.py`)؛ و`accounting.services.post_journal` لقيد الجرد والتحويل (`services.py`, `:1281`).
 - `accounting.models.Account` عبر FKs بسلسلة نصية (`'accounting.Account'`) في `ProductCategory` و`Product` — لا استيراد مباشر.
 
@@ -151,7 +151,7 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 **قاعدة الحالة تعيش في `inventory/stock_status.py` وحدها.** كانت مكتوبة ستّ مرّات
 (السيريالايزر · فلتر الجدول · الداشبورد · تقرير تحت حدّ الطلب · `StockLevelsPage` ·
 `ItemsManagement`) وتباعدت فعلاً: الداشبورد كان يشترط حدّاً أدنى **قبل** أن يعدّ
-صنفاً نافداً فيخفي أغلب النافد، والشاشة كانت تصبغ كلّ رصيدٍ صفر «منخفضاً» بينما
+منتجاً نافداً فيخفي أغلب النافد، والشاشة كانت تصبغ كلّ رصيدٍ صفر «منخفضاً» بينما
 الخادم يسمّيه «نفذ».
 
 | القرار | أين يعيش |
@@ -161,8 +161,8 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 | الحدّ الفعّال = اليدوي إن ضُبط، وإلّا المقترَح المحسوب | `stock_status.py` (`effective_min`) |
 | الخدمة «متوفّرة» دائماً — بلا مخزونٍ يُقاس | `stock_status.py` (`stock_status_of`) |
 | المعادلات (الصرف اليومي · مخزون الأمان · الحدّان) | `core/replenishment.py` (`suggest_levels`) |
-| مهلة التوريد: وسيط (تاريخ أول وارد لفاتورة الطلبية − تاريخ الطلبية)، للصنف ثم للمورّد ثم للشركة ثم إعداد | `core/replenishment.py` (`_lead_time_samples`, `_lead_for`) |
-| قرار الطلب من الصنف **ونوعه** معاً: عاجل/مؤجَّل/راكد | `core/replenishment.py` (`_urgency_of`) |
+| مهلة التوريد: وسيط (تاريخ أول وارد لفاتورة الطلبية − تاريخ الطلبية)، للمنتج ثم للمورّد ثم للشركة ثم إعداد | `core/replenishment.py` (`_lead_time_samples`, `_lead_for`) |
+| قرار الطلب من المنتج **ونوعه** معاً: عاجل/مؤجَّل/راكد | `core/replenishment.py` (`_urgency_of`) |
 | الكتابة الوحيدة — بفعلٍ صريح من المستخدم | `core/replenishment.py` (`apply_suggested_levels`) |
 
 بارامترات الشركة الثلاثة (نافذة التحليل · المهلة الافتراضية · مدة المراجعة) على
@@ -174,14 +174,14 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 المخزون لا تحتاج غير `inventory`.
 
 **«النوع» (`variant_group`) كان بلا مدخل**: الحقل والنقطة (`products/groups/`)
-موجودان منذ task31، ولا شاشةَ تكتبه — فبقي فارغاً على **كل** صنفٍ في كل شركة،
-وبفراغه يسقط `product_group_key` على اسم الصنف: كل صنفٍ نوعٌ بذاته، فلا بدائل في
-الفاتورة ولا قرار «مؤجَّل». صار له مدخلان: حقلٌ في كرت الصنف
+موجودان منذ task31، ولا شاشةَ تكتبه — فبقي فارغاً على **كل** منتجٍ في كل شركة،
+وبفراغه يسقط `product_group_key` على اسم المنتج: كل منتجٍ نوعٌ بذاته، فلا بدائل في
+الفاتورة ولا قرار «مؤجَّل». صار له مدخلان: حقلٌ في كرت المنتج
 (`ItemForm.tsx`)، وتعيينٌ جماعي للمحدَّد من «أرصدة المخزون»
 (`StockLevelsPage.tsx` ← `products/bulk-set-group/`).
 
 ## قواعد لا يجوز كسرها
-- **لا يُعدَّل `quantity_on_hand` أو `avg_cost` إلا عبر `record_stock_movement`** (أو `_recompute_product_stock` بعد حذف حركات). هي الدالة الوحيدة التي تقفل الصنف بـ`select_for_update` داخل `transaction.atomic` (`services.py:187-188`) وتحفظ لقطات before/after على الحركة.
+- **لا يُعدَّل `quantity_on_hand` أو `avg_cost` إلا عبر `record_stock_movement`** (أو `_recompute_product_stock` بعد حذف حركات). هي الدالة الوحيدة التي تقفل المنتج بـ`select_for_update` داخل `transaction.atomic` (`services.py:187-188`) وتحفظ لقطات before/after على الحركة.
 - **الكمية موجبة دائماً**: `record_stock_movement` يرفض `quantity <= 0` (`services.py`) — الاتجاه يأتي من `movement_type` لا من إشارة الكمية.
 - **معادلة WAC**: الوارد يعدّل المتوسط `new_avg = (old_qty*old_avg + qty*cost) / new_qty`؛ **الصادر لا يغيّر `avg_cost` إطلاقاً** ويأخذ تكلفته من المتوسط الحالي (`services.py:226-229`). و`_recompute_product_stock` يعيد تطبيق نفس المعادلة بالترتيب الزمني (`:287-296`).
 - **المخزون السالب**: يُرفض الصرف إن `qty_before < quantity` إلا إذا سمح `SalesSettings.allow_negative_stock_default` أو `Product.allow_negative_stock` (`services.py:206-224`) — أي أن قرار مخزون يعيش في `sales` لا هنا.
@@ -189,16 +189,16 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
   ستّ نسخٍ متباعدة هي ما استدعى الوحدة، والسابعة ستتباعد كما تباعدت أخواتها.
 - **الاقتراح يُعرَض ولا يُكتب.** `min_stock_level` اليدوي يسبق المقترَح دائماً
   (`effective_min`)، والكتابة لا تحدث إلا عبر `apply_suggested_levels` بفعلٍ صريح.
-  وصنفٌ بلا اقتراح (سجلّ أقصر من `MIN_HISTORY_DAYS` أو بلا مبيعات) **لا يُكتب عليه
+  ومنتجٌ بلا اقتراح (سجلّ أقصر من `MIN_HISTORY_DAYS` أو بلا مبيعات) **لا يُكتب عليه
   صفر**: «لا أعرف بعد» ليست «لا تطلب أبداً».
 - **أرقام «النوع» مجاميعُ أرقام أفراده** لا حسابٌ ثانٍ عليها — كي يساوي مجموع
   التنقيب رقمَ الصفّ (`docs/modules/core.md` — 6.1.1).
-- **الصنف يُحفَظ تحت التصنيف المختار حرفياً.** كان كرت الصنف يُنشئ عند كل حفظ
-  تصنيفاً باسم الصنف ويجعل المختارَ أباً له — إنشاءٌ صامت بمطابقةٍ نصّية على
-  الشركة كلها وخطأٍ مبتلَع، فلا يعرف المستخدم أين حُفظ صنفه. التجميع وظيفةُ
+- **المنتج يُحفَظ تحت التصنيف المختار حرفياً.** كان كرت المنتج يُنشئ عند كل حفظ
+  تصنيفاً باسم المنتج ويجعل المختارَ أباً له — إنشاءٌ صامت بمطابقةٍ نصّية على
+  الشركة كلها وخطأٍ مبتلَع، فلا يعرف المستخدم أين حُفظ منتجه. التجميع وظيفةُ
   «النوع» (`variant_group`) وهو حقلٌ ظاهر يُكتب بقصد. والكرت يعرض مسار الحفظ
   («سيُحفظ تحت: أ ‹ ب») **قبل** الضغط.
-- **لا حقلَ يُعرض ولا يُحفظ.** كان في كرت الصنف نحو 25 حقلاً تُملأ ويُقال
+- **لا حقلَ يُعرض ولا يُحفظ.** كان في كرت المنتج نحو 25 حقلاً تُملأ ويُقال
   «تم الحفظ» ولا أثر لها: لا وجود لها في `ProductSerializer.Meta.fields` فيرميها
   DRF بصمت. القاعدة الآن: ما تعرضه الشاشة يصل الخادم، وما لا مكان له يُحذف من
   الشاشة. الحكم بمعيار المنتجات الاحترافية لا بما يسهل: الوحدات المتعدّدة
@@ -211,21 +211,32 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
   ما ورد يُنشأ أو يُحدَّث بمفتاح `(tier_type, tier_number)` — وهو نفسه قيد
   التفرّد — وما غاب يُحذف. وغيابُ المفتاح كلّه ≠ قائمةٌ فارغة: الأول «لا تمسّ»
   والثاني «امسح»، وبلا هذا التمييز كان كل PATCH لاسمٍ يمسح الشرائح.
-- **تجاوز الحساب على الصنف يُفحص بالشركة** (`_validate_account_overrides`)
-  كالتصنيف تماماً: الـFK لا يعرف الشركة، فمعرّفٌ من شركةٍ أخرى يُرحّل بيع الصنف
+- **تجاوز الحساب على المنتج يُفحص بالشركة** (`_validate_account_overrides`)
+  كالتصنيف تماماً: الـFK لا يعرف الشركة، فمعرّفٌ من شركةٍ أخرى يُرحّل بيع المنتج
   على دفترٍ ليس دفترها.
 - **خوارزمية شجرة التصنيفات نسخةٌ واحدة في الواجهة**:
   `frontend_v2/utils/categoryTree.ts` (`buildCategoryIndex`، `sortCategoryRows`،
   `descendantIds`، `categoryPathLabel`، `eligibleParents`). أربع نسخ متباعدة هي
   ما استدعى الوحدة، واختلافها كان يظهر عند الحالة الحدّية: التصنيف اليتيم يبقى
   جذراً قابلاً للاختيار في واحدة ويختفي من الشجرة في أخرى.
-- **المصطلح**: «تصنيف» = فئةٌ في الشجرة · «صنف» = منتج. شجرة الفاتورة كانت
-  تعكسهما وحدها، فصار «أضف صنفاً» أمراً غامضاً في موديولٍ واحد.
-- **تعديل الصنف من المستند يزامن نسختين محليّتين لا واحدة.** بعد `updateProduct`
-  (يُبطل كاش المنتقي بنفسه) يجب تحديث نسخة المستدعي الحيّة: محرّر البيع يحمل
-  `ProductRow` خاماً في `extraProducts`، ومحرّرا الشراء والصفقة يحملان `Item`
-  مُطابَقاً بـ`productToItem`. إغفال أحدهما يُبقي السطر على الاسم القديم حتى
-  ينتهي كاش المنتقي (60 ثانية) — عطلٌ يبدو عشوائياً.
+- **المصطلح — ثلاث طبقات لا اثنتان (T-PRODUCT، يَنسخ قرار T-ITEMS M2)**:
+  «تصنيف» = فئةٌ في الشجرة (`Category`) · «صنف» = العائلة/الموديل
+  (`Product.variant_group`) · «منتج» = السجلّ القابل للبيع (`Product`). كان
+  «صنف» يسمّي السجلَّ نفسه و«النوع» يسمّي عائلته، فلم يبقَ اسمٌ للطبقة الوسطى
+  وصار كلُّ حديثٍ عن الهرمية غامضاً. الترتيب الآن يطابق فصل Odoo بين
+  `product.template` والمتغيّرات.
+- **تعديل المنتج من المستند: معالِجٌ واحد بنصفين.** لكل محرّر مستندٍ
+  `applyProductUpdate` واحدة تُمرَّر بنفس المرجع إلى `ItemQuickEditModal`
+  و`ProductCardModal` (عبر `onProductSaved`) — فالقلم والبطاقة يسلّمان نفس
+  الحمولة لنفس المعالِج. النصفان: **الكتالوج** (تجاوزُ الصفّ لا إلحاقُه — إلحاقٌ
+  مشروطٌ بالغياب يُسقط كلَّ منتجٍ موجود، أي كلَّ ما يمسّه التعديل) و**السطور**
+  (إعادة تطبيق الاسم حيث يكون ملتقَطاً نسخةً على السطر: الشراء وعرض السعر؛
+  محرّر البيع يقرأ من `productsById` فلا يحتاجه).
+  حرّاسه: `frontend_v2/e2e/product-quick-edit-propagation.spec.ts` — ويُثبِّت
+  مسارَ جلب الكتالوج على الاسم القديم كي يقيس الآلية المحلية لا الجلب الثقيل.
+- **اسم المنتج في جدول المنتجات يُحرَّر في مكانه** (`ItemsManagement`): نقرتان
+  أو F2، حفظٌ متشائم عبر `dirtySimplePayload` نفسها (لا مسار حفظٍ ثانٍ)،
+  والنقرة المفردة لا تنقُل — وإلّا كان قولُ «ليس رابطاً» كذباً.
 - **تعريف «الوضع البسيط» نسخةٌ واحدة**: `frontend_v2/utils/itemSimpleFields.ts`
   (`simplePayload`، `dirtySimplePayload`) يتشاركه الكرت الكامل والإنشاء السريع
   والتحرير السريع. ثلاث شاشات تبني حمولتها بيدها = ثلاث حمولات متباعدة، وقد كان
@@ -236,19 +247,19 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
   تُخفيها ولا تمنعها — فالمنع عند الكتابة.
 - **التصنيف محدِّدٌ يعني شجرته** أينما ظهر: فلتر `?category=` وكرت المجموعة كلاهما
   يمرّ بـ`category_descendant_ids`. كان الأول exact-id والثاني شجرةً، فتصنيفُ أبٍ
-  يعرض «لا أصناف» بينما كرته المجمّع يعدّ المئات.
+  يعرض «لا منتجات» بينما كرته المجمّع يعدّ المئات.
 - **`RETURN_IN` بلا تكلفة يأخذ المتوسط الحالي** كي لا ينحرف WAC (`services.py:195-196`).
-- **عكس الحركات محصور بالمستند**: `reverse_stock_movements` يفلتر بـ`(tenant, reference_id, reference_type ∈ types)` ثم يُعيد احتساب كل صنف متأثر (`services.py:311-324`) — فلا تُمَسّ حركات مستند آخر.
+- **عكس الحركات محصور بالمستند**: `reverse_stock_movements` يفلتر بـ`(tenant, reference_id, reference_type ∈ types)` ثم يُعيد احتساب كل منتج متأثر (`services.py:311-324`) — فلا تُمَسّ حركات مستند آخر.
 - **نموذج التكلفة قرارٌ في مكان واحد**: `apply_purchase_cost_model` (`services.py`) — إن كانت الشركة على WAC المتحرك فلا يُدهَس `avg_cost` الذي بناه `record_stock_movement`؛ وإلا يُضبط من متوسط المشتريات.
-- **الوحدة المُرقَّمة تُستهلَك بترحيل البيع لا بخروجها**: `consume_sales_serials` يتخطّى البند الذي استُهلكت وحداته فعلاً فإعادة الترحيل idempotent؛ والمختار صريحاً يجب أن يكون `in_stock` ولنفس الصنف وإلا رُفض (`serials.py` — `consume_sales_serials`).
-- **«إجباري» في البيع يعني الاختيار لا التخصيص**: التخصيص التلقائي FIFO حكرٌ على `optional`؛ تحت `required` يجب أن يحمل كل بند تسلسليٍّ أرقاماً بعدد كميته، وإلّا رُفض الترحيل **قبل أي كتابة** (`serials.py` — `assert_sales_serials_declared`، مُستدعى من `sales/services/flow.py` — `post_sales_invoice`)، و`consume_sales_serials` خط الدفاع الثاني. السبب: FIFO يقول «خرجت أقدم وحدة» لا «خرجت هذه الوحدة»، فمطالبةُ كفالةٍ لاحقة تُطابَق برقمٍ لم يره أحد على العلبة. مخرج المخزون القديم بلا أرقام هو `register_existing_serials` من كرت الصنف، والرسالة تسمّيه.
-- **`_serial_row` هو المصدر الواحد لرحلة الوحدة** (`serials.py`): بطاقة الصنف
+- **الوحدة المُرقَّمة تُستهلَك بترحيل البيع لا بخروجها**: `consume_sales_serials` يتخطّى البند الذي استُهلكت وحداته فعلاً فإعادة الترحيل idempotent؛ والمختار صريحاً يجب أن يكون `in_stock` ولنفس المنتج وإلا رُفض (`serials.py` — `consume_sales_serials`).
+- **«إجباري» في البيع يعني الاختيار لا التخصيص**: التخصيص التلقائي FIFO حكرٌ على `optional`؛ تحت `required` يجب أن يحمل كل بند تسلسليٍّ أرقاماً بعدد كميته، وإلّا رُفض الترحيل **قبل أي كتابة** (`serials.py` — `assert_sales_serials_declared`، مُستدعى من `sales/services/flow.py` — `post_sales_invoice`)، و`consume_sales_serials` خط الدفاع الثاني. السبب: FIFO يقول «خرجت أقدم وحدة» لا «خرجت هذه الوحدة»، فمطالبةُ كفالةٍ لاحقة تُطابَق برقمٍ لم يره أحد على العلبة. مخرج المخزون القديم بلا أرقام هو `register_existing_serials` من كرت المنتج، والرسالة تسمّيه.
+- **`_serial_row` هو المصدر الواحد لرحلة الوحدة** (`serials.py`): بطاقة المنتج
   وشاشة الوحدات وحلّال المسح (`core/scan.py`) يقرؤونه جميعاً، والمسح **يُثريه**
   بالكفالة والصيانات وسعر الشراء ولا ينسخه — استعلامٌ ثانٍ هنا كان سيتباعد عنه
   بعد أول حقلٍ يُضاف هناك. والإثراء يُحسب **مرّةً للرقم لا مرّةً لكل وحدة**: كل
   الوحدات المطابقة تحمل الرقم نفسه (به طابقت)، فحسابُه داخل الحلقة كان N+1.
-- **رقم الصنف عند المورّد جدولُ ربط لا حقل على الصنف** (`SupplierProduct`): الصنف الواحد يأتي من أكثر من مورّد ولكلٍّ ترقيمه — وهو ما استقرّ عليه Odoo (`product.supplierinfo.product_code`) وNetSuite (`itemvendor.vendorCode`). **ولا يُحشَر رقمٌ في `name_en`** (معناه اسم الصنف بالإنجليزية)؛ النقل من الحشوة القديمة عبر `migrate_supplier_sku_from_name_en` وهو معاينةٌ بلا `--commit`. البحث يشمل الرقم (`ProductViewSet.search_fields`)، ويصل منتقي بنود المستندات عبر `supplier_codes_text` في عقد `view=lookup` وحده — العقد الكامل لا يحمله. و**لقطةُ الرقم على المستند تبقى في `logistics.PurchaseInvoiceItem.catalog_number`**: البيانات الرئيسية تتغيّر والمستند المرحّل لا يتغيّر معها.
-- **الترقيم يصف مخزوناً قائماً ولا يخلقه**: `register_existing_serials` سقفه رصيد الصنف ولا يُنشئ حركة مخزون ولا قيداً (`serials.py:247-259`).
+- **رقم المنتج عند المورّد جدولُ ربط لا حقل على المنتج** (`SupplierProduct`): المنتج الواحد يأتي من أكثر من مورّد ولكلٍّ ترقيمه — وهو ما استقرّ عليه Odoo (`product.supplierinfo.product_code`) وNetSuite (`itemvendor.vendorCode`). **ولا يُحشَر رقمٌ في `name_en`** (معناه اسم المنتج بالإنجليزية)؛ النقل من الحشوة القديمة عبر `migrate_supplier_sku_from_name_en` وهو معاينةٌ بلا `--commit`. البحث يشمل الرقم (`ProductViewSet.search_fields`)، ويصل منتقي بنود المستندات عبر `supplier_codes_text` في عقد `view=lookup` وحده — العقد الكامل لا يحمله. و**لقطةُ الرقم على المستند تبقى في `logistics.PurchaseInvoiceItem.catalog_number`**: البيانات الرئيسية تتغيّر والمستند المرحّل لا يتغيّر معها.
+- **الترقيم يصف مخزوناً قائماً ولا يخلقه**: `register_existing_serials` سقفه رصيد المنتج ولا يُنشئ حركة مخزون ولا قيداً (`serials.py:247-259`).
 - **التحويل بين المستودعات بلا قيد محاسبي** — صافي أثره على إجمالي الشركة صفر (`models.py:382-384`).
 
 ## الاختبارات المهمة
@@ -258,9 +269,9 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 | `inventory/tests/test_product_serials.py` | مصفوفة الأنماط (بدون/اختياري/إجباري) على الجانبين، دورة بيع ⇄ إلغاء ترحيل، تخصيص FIFO |
 | `inventory/tests/test_serial_invoice_journey.py` | نفس الرحلة عبر HTTP بحمولة المحرِّرين (`items[].serials` / `lines[].serials`) |
 | `inventory/tests/test_inventory_documents.py` | التحويل (أثر صفري، حركتان موسومتان) والجرد (تسوية + قيد الفرق) |
-| `inventory/tests/test_product_profile.py` | بطاقة الصنف: المؤشرات، سجلّ الحركة (الرصيد الجاري يطابق on-hand)، الفواتير المرتبطة |
+| `inventory/tests/test_product_profile.py` | بطاقة المنتج: المؤشرات، سجلّ الحركة (الرصيد الجاري يطابق on-hand)، الفواتير المرتبطة |
 | `inventory/tests/test_item_aggregates.py` | التجميعات من `StockMovement` كمصدر وحيد (وارد تراكمي، متوسط مبيعات 90/28 يوماً) |
-| `inventory/tests/test_account_overrides.py` | سلسلة الحسابات: تجاوز الصنف ← تجاوز الفئة ← الافتراضي |
+| `inventory/tests/test_account_overrides.py` | سلسلة الحسابات: تجاوز المنتج ← تجاوز الفئة ← الافتراضي |
 | `inventory/tests/test_brand_grouping.py` · `test_group_card_performance.py` | تجميع البراندات بـ`group_key`، وثبات عدد الاستعلامات (كان N+1) |
 | `inventory/tests/test_product_api.py` | توليد SKU خادمي، ترتيب/بحث/ترقيم صفحات، عزل الشركات |
-| `inventory/tests/test_supplier_products.py` | أرقام الموردين: الصنف من مورّدين، ورقمان لمورّد، ومنع الرقم الواحد لصنفين، والبحث بالرقم بلا تكرار صفّ |
+| `inventory/tests/test_supplier_products.py` | أرقام الموردين: المنتج من مورّدين، ورقمان لمورّد، ومنع الرقم الواحد لمنتجين، والبحث بالرقم بلا تكرار صفّ |

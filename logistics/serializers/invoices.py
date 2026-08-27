@@ -838,8 +838,8 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     def _guard_received_items(self, instance, existing, items_data, kept_ids):
         """بندٌ استُلمت بضاعته مُجمَّد فيما يعتمد عليه سند الاستلام.
 
-        الحركة المخزنية سُجّلت بصنفه وسعره، والوحدات المُرقَّمة تجسّدت به —
-        فحذفه أو إنقاص كميته عن المستلَم أو تبديل صنفه/سعره/أرقامه يفصل
+        الحركة المخزنية سُجّلت بمنتجه وسعره، والوحدات المُرقَّمة تجسّدت به —
+        فحذفه أو إنقاص كميته عن المستلَم أو تبديل منتجه/سعره/أرقامه يفصل
         الفاتورة عن أثرها الفعلي. الباقي (الملاحظات، الوصف، بنود جديدة،
         زيادة الكمية) يبقى مسموحاً: الاستلام الجزئي حالة مشروعة.
         """
@@ -865,7 +865,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
                     f'كمية البند {label} أقل من المستلَم ({received.normalize()}).'
                 )
             if 'product' in data and getattr(data['product'], 'pk', None) != item.product_id:
-                errors.append(f'لا يُغيَّر صنف بندٍ استُلمت بضاعته {label}.')
+                errors.append(f'لا يُغيَّر منتج بندٍ استُلمت بضاعته {label}.')
             if 'unit_price' in data and (
                 Decimal(str(data['unit_price'] or 0)) != Decimal(str(item.unit_price or 0))
             ):

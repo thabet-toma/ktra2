@@ -1341,7 +1341,7 @@ export const itemsService = {
       storeName: p.name_ar || p.name_en || "",
       storeDescription: p.online_description || "",
       // T-SERIAL: يصلان من عقد `view=lookup` — الأول للبحث بالماسح، والثاني
-      // ليعرف سطر الفاتورة أنه صنف يُتتبَّع بالوحدة.
+      // ليعرف سطر الفاتورة أنه منتج يُتتبَّع بالوحدة.
       barcode: p.barcode || "",
       isSerialized: Boolean(p.is_serialized),
       // T-SUPSKU: أرقام كتالوج الموردين — بها يبحث المستخدم في منتقي البنود،
@@ -1950,7 +1950,7 @@ const quoteApiStatus = (status: PriceOfferStatus): SupplierQuotationStatus => ({
 
 const lineToUi = (line: {
   id?: number;
-  /** T-DRAFTPARTY: null = صنف مكتوب يدوياً لم يُسجَّل بعد. */
+  /** T-DRAFTPARTY: null = منتج مكتوب يدوياً لم يُسجَّل بعد. */
   product: number | null;
   product_name?: string;
   name_snapshot?: string;
@@ -2103,7 +2103,7 @@ const dealToUi = async (row: ImportDealDto): Promise<PriceOffer> => ({
   updatedAt: row.created_at || row.order_date,
 });
 
-/** T-DRAFTPARTY: بنود عرض السعر — الصنف قد يكون null (اسم مكتوب يدوياً). */
+/** T-DRAFTPARTY: بنود عرض السعر — المنتج قد يكون null (اسم مكتوب يدوياً). */
 const uiLinesToApi = (offer: PriceOffer) => (offer.items || []).map((line, index) => ({
   product: line.itemId ? Number(line.itemId) : null,
   seq: index + 1,
@@ -2114,7 +2114,7 @@ const uiLinesToApi = (offer: PriceOffer) => (offer.items || []).map((line, index
 }));
 
 /**
- * T-DRAFTPARTY: الطلبية والصفقة مستندان ملزمان — لا يقبلان مورداً أو صنفاً
+ * T-DRAFTPARTY: الطلبية والصفقة مستندان ملزمان — لا يقبلان مورداً أو منتجاً
  * مبدئياً. المبدئي يبقى حكراً على عرض السعر، ويتجسَّد عند تحويل العرض نفسه.
  */
 const registeredLinesToApi = (offer: PriceOffer) => {
@@ -2123,7 +2123,7 @@ const registeredLinesToApi = (offer: PriceOffer) => {
   }
   const draft = (offer.items || []).find((line) => !line.itemId);
   if (draft) {
-    throw new Error(`الصنف «${draft.name || ""}» غير مسجَّل — اختره من الأصناف أو حوّل عرض السعر بدل إنشاء الطلبية مباشرةً.`);
+    throw new Error(`المنتج «${draft.name || ""}» غير مسجَّل — اختره من المنتجات أو حوّل عرض السعر بدل إنشاء الطلبية مباشرةً.`);
   }
   return uiLinesToApi(offer).map((line) => ({ ...line, product: Number(line.product) }));
 };

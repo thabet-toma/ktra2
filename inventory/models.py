@@ -62,7 +62,7 @@ class Product(models.Model):
     barcode = models.CharField(max_length=50, blank=True, null=True, db_column='Barcode')
     name_ar = models.CharField(max_length=200, blank=True, null=True, db_column='Name_AR')
     name_en = models.CharField(max_length=200, blank=True, null=True, db_column='Name_EN')
-    # تجميع البراندات تحت «صنف فرعي» (المقاس/الموديل مثل 185/65/14): المنتجات بنفس
+    # تجميع البراندات تحت «منتج فرعي» (المقاس/الموديل مثل 185/65/14): المنتجات بنفس
     # variant_group تظهر تحت عقدة أب واحدة في الشجرة/الجرد/الجدول، والبراند يميّز
     # الورقة (يظهر بين قوسين). إن تُرك variant_group فارغاً يُشتقّ group_key خادمياً
     # من الاسم (مقاس الإطار أو الاسم) — توافقاً مع البيانات القديمة.
@@ -72,7 +72,7 @@ class Product(models.Model):
     uom = models.ForeignKey(UnitOfMeasure, on_delete=models.SET_NULL, null=True, blank=True, db_column='UOMID', related_name='products')
     uom_legacy = models.CharField(max_length=20, blank=True, null=True, db_column='UOM')
     # T-ITEMS M5: وحدتان إضافيتان بمعامل تحويلٍ إلى الوحدة الرئيسية (كرتونة = 12
-    # قطعة). كانت الحقول الخمسة معروضةً في كرت الصنف ولا تُحفظ إطلاقاً — لا
+    # قطعة). كانت الحقول الخمسة معروضةً في كرت المنتج ولا تُحفظ إطلاقاً — لا
     # وجود لها في النموذج ولا في العقد؛ يكتبها المستخدم ويقرأ «تم الحفظ».
     # الوحدات المتعدّدة قياسيّةٌ في Odoo وZoho والأصيل، فوُصلت بدل أن تُحذف.
     uom2 = models.ForeignKey(
@@ -91,14 +91,14 @@ class Product(models.Model):
         max_digits=18, decimal_places=6, null=True, blank=True, db_column='UOM3Factor',
         help_text='كم وحدةً رئيسية في الوحدة الثالثة',
     )
-    # T-ITEMS M5: وصفٌ داخلي للصنف — منفصلٌ عن `online_description` الذي يخصّ
+    # T-ITEMS M5: وصفٌ داخلي للمنتج — منفصلٌ عن `online_description` الذي يخصّ
     # المتجر ويراه العالم. Odoo وZoho يفصلان بينهما للسبب نفسه.
     description = models.TextField(blank=True, null=True, db_column='Description')
     # T-ITEMS M5: موقع التخزين (الرفّ/الممر) — نصّ حرّ لا كيان: لا حركة مخزون
-    # عليه ولا رصيد، وهو ما تفعله دفترة وQuickBooks (bin) على كرت الصنف.
+    # عليه ولا رصيد، وهو ما تفعله دفترة وQuickBooks (bin) على كرت المنتج.
     storage_location = models.CharField(
         max_length=100, blank=True, null=True, db_column='StorageLocation',
-        help_text='موقع الصنف في المستودع (رفّ/ممر) — نصّ إرشادي بلا أثر مخزني',
+        help_text='موقع المنتج في المستودع (رفّ/ممر) — نصّ إرشادي بلا أثر مخزني',
     )
     weight_kg = models.DecimalField(max_digits=12, decimal_places=4, blank=True, null=True, db_column='Weight_KG')
     volume_cbm = models.DecimalField(max_digits=12, decimal_places=6, blank=True, null=True, db_column='Volume_CBM')
@@ -116,7 +116,7 @@ class Product(models.Model):
         help_text='إن عُطّل، يُرفض الصرف إذا تجاوزت الكمية المتاحة (الافتراضي: مرفوض)',
     )
     is_serialized = models.BooleanField(default=False, db_column='IsSerialized')
-    # THA-24: سياسة الكفالة على الصنف — لا حالة. النسخة الفعلية لكل وحدة مباعة
+    # THA-24: سياسة الكفالة على المنتج — لا حالة. النسخة الفعلية لكل وحدة مباعة
     # تعيش في `after_sales.WarrantyCard`، وتغيير السياسة لا يمسّ بطاقة صُرفت.
     # فارغ أو صفر = لا كفالة، فلا تُنشأ بطاقة تلقائية عند ترحيل البيع.
     warranty_months = models.PositiveSmallIntegerField(
@@ -130,18 +130,18 @@ class Product(models.Model):
     is_service = models.BooleanField(
         default=False,
         db_column='IsService',
-        help_text='إذا مفعّل: يُعامل الصنف كخدمة — لا يُخصم من المخزون ويُرحّل لحساب مبيعات الخدمات',
+        help_text='إذا مفعّل: يُعامل المنتج كخدمة — لا يُخصم من المخزون ويُرحّل لحساب مبيعات الخدمات',
     )
     is_for_sale_online = models.BooleanField(default=False, db_column='IsForSaleOnline')
     is_store_only = models.BooleanField(
         default=False,
         db_column='IsStoreOnly',
-        help_text='صنف خاص بالمتجر الإلكتروني فقط — لا يظهر في شاشة الأصناف المخزنية أو محددات فواتير البيع',
+        help_text='منتج خاص بالمتجر الإلكتروني فقط — لا يظهر في شاشة المنتجات المخزنية أو محددات فواتير البيع',
     )
     allow_preorder = models.BooleanField(
         default=False,
         db_column='AllowPreorder',
-        help_text='إتاحة بيع الصنف كطلب مسبق / عند الطلب حتى لو كان الرصيد صفراً',
+        help_text='إتاحة بيع المنتج كطلب مسبق / عند الطلب حتى لو كان الرصيد صفراً',
     )
     online_price = models.DecimalField(max_digits=18, decimal_places=2, blank=True, null=True, db_column='OnlinePrice')
     online_description = models.TextField(blank=True, null=True, db_column='OnlineDescription')
@@ -156,8 +156,8 @@ class Product(models.Model):
         max_digits=18, decimal_places=4, default=0, db_column='AvgCost',
         help_text='Weighted average cost per unit (base currency)',
     )
-    # كرت الصنف: «سعر البيع» بجانب «سعر التكلفة» — سعر البيع الافتراضي المعتمد
-    # للصنف (بالعملة الأساسية). فارغ = لا سعر محفوظ، فتُظهر البطاقة آخر سعر بيع
+    # كرت المنتج: «سعر البيع» بجانب «سعر التكلفة» — سعر البيع الافتراضي المعتمد
+    # للمنتج (بالعملة الأساسية). فارغ = لا سعر محفوظ، فتُظهر البطاقة آخر سعر بيع
     # فعلي بدلاً منه. لا أثر محاسبي — مرجع تسعير يقترحه المستند.
     sale_price = models.DecimalField(
         max_digits=18, decimal_places=4, blank=True, null=True, db_column='SalePrice',
@@ -311,7 +311,7 @@ class StockMovement(models.Model):
         # بلا أي فهرس — كل استعلام حركة = full scan. كل فهرس أدناه مربوط
         # باستعلام قائم، والعمود القائد tenant دائماً (كل قراءة مُنطاقة).
         indexes = [
-            # كشف حركات صنف/إعادة حساب رصيده: inventory/services.py:901،
+            # كشف حركات منتج/إعادة حساب رصيده: inventory/services.py:901،
             # inventory/views.py:401.
             models.Index(fields=['tenant', 'product', 'movement_date'],
                          name='idx_sm_tenant_prod_date'),
@@ -342,7 +342,7 @@ class StockMovement(models.Model):
 
 
 class ProductPriceTier(models.Model):
-    """N8-T9: 5 أسعار بيع + 5 أسعار شراء لكل صنف."""
+    """N8-T9: 5 أسعار بيع + 5 أسعار شراء لكل منتج."""
     TIER_TYPE_SALE = 'sale'
     TIER_TYPE_PURCHASE = 'purchase'
     TIER_TYPE_CHOICES = [
@@ -375,10 +375,10 @@ class ProductPriceTier(models.Model):
 
 
 class SupplierProduct(models.Model):
-    """رقم الصنف عند المورّد — جدول ربط (شركة × مورّد × رقم).
+    """رقم المنتج عند المورّد — جدول ربط (شركة × مورّد × رقم).
 
     مطابقة فواتير المورّد تجري برقم كتالوجه (מק"ט)، وهو ليس رقمنا. حقلٌ واحد
-    على `Product` كان سيكذب أوّل مرّة يأتي فيها الصنف من مورّدَين — والإطارات
+    على `Product` كان سيكذب أوّل مرّة يأتي فيها المنتج من مورّدَين — والإطارات
     هي هذه الحالة بالضبط. ولذلك استقرّ Odoo (`product.supplierinfo.product_code`)
     وNetSuite (`itemvendor.vendorCode`) على جدول ربطٍ لا حقل، كلٌّ منهما استقلالاً.
 
@@ -386,9 +386,9 @@ class SupplierProduct(models.Model):
     `PurchaseInvoiceItem.catalog_number`: البيانات الرئيسية تتغيّر، والمستند
     المرحّل يجب ألّا يتغيّر معها.
 
-    **الفرادة على (شركة، مورّد، رقم) لا على (شركة، مورّد، صنف)** عمداً: للمورّد
-    الواحد قد يكون أكثر من رقم للصنف نفسه (ترقيم قديم وجديد)، وهذا مقبول
-    ومفيد. الممنوع عكسُه — رقمٌ واحدٌ عند مورّدٍ واحد يشير إلى صنفين، فتصير
+    **الفرادة على (شركة، مورّد، رقم) لا على (شركة، مورّد، منتج)** عمداً: للمورّد
+    الواحد قد يكون أكثر من رقم للمنتج نفسه (ترقيم قديم وجديد)، وهذا مقبول
+    ومفيد. الممنوع عكسُه — رقمٌ واحدٌ عند مورّدٍ واحد يشير إلى منتجين، فتصير
     المطابقة تخميناً.
 
     محايدٌ مالياً بالكامل: لا قيد ولا حركة مخزون ولا سعر.
@@ -409,11 +409,11 @@ class SupplierProduct(models.Model):
     )
     supplier_sku = models.CharField(
         max_length=100, db_column='SupplierSKU',
-        help_text='رقم الصنف في كتالوج المورّد (مثال: 3068.82)',
+        help_text='رقم المنتج في كتالوج المورّد (مثال: 3068.82)',
     )
     supplier_name = models.CharField(
         max_length=255, blank=True, default='', db_column='SupplierName',
-        help_text='اسم الصنف كما يسمّيه المورّد (اختياري — يساعد على المطابقة)',
+        help_text='اسم المنتج كما يسمّيه المورّد (اختياري — يساعد على المطابقة)',
     )
     notes = models.CharField(
         max_length=255, blank=True, default='', db_column='Notes',
@@ -432,7 +432,7 @@ class SupplierProduct(models.Model):
             ),
         ]
         indexes = [
-            # المطابقة العكسية: «هذا الرقم — أيّ صنفٍ هو؟» عبر موردي الشركة.
+            # المطابقة العكسية: «هذا الرقم — أيّ منتجٍ هو؟» عبر موردي الشركة.
             models.Index(fields=['tenant', 'supplier_sku'], name='idx_tenant_supplier_sku'),
             models.Index(fields=['tenant', 'product'], name='idx_tenant_supplier_prod'),
         ]
@@ -442,7 +442,7 @@ class SupplierProduct(models.Model):
 
 
 class ProductSerial(models.Model):
-    """وحدة واحدة مُرقَّمة من صنف يتتبّع أرقامه التسلسلية (`Product.is_serialized`).
+    """وحدة واحدة مُرقَّمة من منتج يتتبّع أرقامه التسلسلية (`Product.is_serialized`).
 
     سجلّ الوحدة الفعلية لا نيّةَ المستخدم: تُنشأ حين تدخل البضاعة المخزن باستلام
     الشراء، وتُوسم «مُباع» حين تُرحَّل فاتورة بيعها — فيُجاب سؤال «أي وحدة ذهبت
@@ -497,7 +497,7 @@ class ProductSerial(models.Model):
                 fields=['tenant', 'product', 'status'],
                 name='prodserial_tenant_prod_stat',
             ),
-            # T-SCAN: المسح يبحث بالرقم وحده (لا يعرف صنفه — هذا سؤاله أصلاً)،
+            # T-SCAN: المسح يبحث بالرقم وحده (لا يعرف منتجه — هذا سؤاله أصلاً)،
             # والفريد `(tenant, product, serial)` لا يخدمه لأن `product` في
             # وسطه. بلا هذا الفهرس كل مسحة تمسح كل وحدات الشركة.
             models.Index(
@@ -560,7 +560,7 @@ class WarehouseTransferLine(models.Model):
 
 
 class Stocktake(models.Model):
-    """T-I2: مستند جرد فعلي. الترحيل يسوّي رصيد كل صنف ليطابق الكمية المعدودة
+    """T-I2: مستند جرد فعلي. الترحيل يسوّي رصيد كل منتج ليطابق الكمية المعدودة
     (حركات ADJUST_IN/ADJUST_OUT) ويُنشئ قيد فرق الجرد (المخزون مقابل تكلفة
     البضاعة المباعة — المعالجة المعتادة لفرو قات الجرد)."""
     id = models.AutoField(primary_key=True, db_column='StocktakeID')

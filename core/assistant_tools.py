@@ -86,9 +86,9 @@ _LEGACY_TOOL_SCHEMAS = [
         "function": {
             "name": "search_products",
             "description": (
-                "يبحث عن أصناف/منتجات بالاسم (عربي أو إنجليزي) أو رمز SKU أو الباركود، "
+                "يبحث عن منتجات/منتجات بالاسم (عربي أو إنجليزي) أو رمز SKU أو الباركود، "
                 "ويرجع الكمية المتوفرة حالياً (المتبقي في المخزون) ومتوسط التكلفة وقيمة "
-                "المخزون لكل صنف مطابق. استخدمه للأسئلة مثل «كم باقٍ من صنف كذا» أو «شو "
+                "المخزون لكل منتج مطابق. استخدمه للأسئلة مثل «كم باقٍ من منتج كذا» أو «شو "
                 "المتوفر من المنتج الفلاني»."
             ),
             "parameters": {
@@ -96,7 +96,7 @@ _LEGACY_TOOL_SCHEMAS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "نص البحث: جزء من اسم الصنف أو SKU أو الباركود.",
+                        "description": "نص البحث: جزء من اسم المنتج أو SKU أو الباركود.",
                     }
                 },
                 "required": ["query"],
@@ -268,7 +268,7 @@ def search_products(tenant, *, query: str = "", **_):
 
     q = (query or "").strip()
     if not q:
-        return {"error": "أدخل نص بحث للصنف."}
+        return {"error": "أدخل نص بحث للمنتج."}
 
     # مطابقة على الاسم العربي/الإنجليزي أو الرمز أو الباركود
     qs = Product.objects.filter(tenant=tenant).filter(
@@ -294,7 +294,7 @@ def search_products(tenant, *, query: str = "", **_):
             }
         )
     if not items:
-        return {"matches": [], "note": f"لا يوجد صنف مطابق لـ «{q}» في هذه الشركة."}
+        return {"matches": [], "note": f"لا يوجد منتج مطابق لـ «{q}» في هذه الشركة."}
     return {
         "count": len(items),
         "truncated": truncated,

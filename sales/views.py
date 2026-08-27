@@ -86,7 +86,7 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 # تفصيل حركة التعديل في سجل النشاط: ما الذي يُقارَن قبل الحفظ وبعده، وبأي اسم
-# عربي يُعرض. البنود تُقارَن بالصنف فيظهر «أضاف/حذف صنفاً» و«غيّر السعر من…إلى».
+# عربي يُعرض. البنود تُقارَن بالمنتج فيظهر «أضاف/حذف منتجاً» و«غيّر السعر من…إلى».
 INVOICE_ACTIVITY_FIELD_LABELS = {
     "customer": "العميل",
     "invoice_date": "تاريخ الفاتورة",
@@ -694,7 +694,7 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="last-price")
     def last_price(self, request):
-        """task18 DEF-C2: آخر سعر بيع لصنف (واختيارياً لعميل) من فواتير مرحَّلة."""
+        """task18 DEF-C2: آخر سعر بيع لمنتج (واختيارياً لعميل) من فواتير مرحَّلة."""
         tenant = get_tenant(request)
         if not tenant:
             return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
@@ -711,10 +711,10 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="resolve-price")
     def resolve_price(self, request):
-        """FEAT-2: السعر المقترح لبند بيع — آخر سعر دفعه هذا العميل لهذا الصنف.
+        """FEAT-2: السعر المقترح لبند بيع — آخر سعر دفعه هذا العميل لهذا المنتج.
 
         يفوّض إلى core.pricing (المصدر المشترك مع الشراء): آخر بيع للعميل ثم
-        سعر البيع الافتراضي للصنف ثم فارغ — مع تطبيع العملة وأساس الضريبة.
+        سعر البيع الافتراضي للمنتج ثم فارغ — مع تطبيع العملة وأساس الضريبة.
         """
         from core.pricing import resolve_sales_price
 

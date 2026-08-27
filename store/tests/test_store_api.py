@@ -18,7 +18,7 @@ _LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache
 
 def _product(tenant, sku, **kwargs):
     defaults = dict(
-        name_ar=f"صنف {sku}", name_en=f"Item {sku}", brand="عام",
+        name_ar=f"منتج {sku}", name_en=f"Item {sku}", brand="عام",
         is_for_sale_online=True, quantity_on_hand=Decimal("10"),
         avg_cost=Decimal("3"), online_price=Decimal("10.00"),
     )
@@ -66,7 +66,7 @@ class StoreBrowseTest(TestCase):
     def _by_id(self):
         return {item["id"]: item for item in self._list()}
 
-    # ── التوفّر: حالة مشتقّة بنفس قاعدة جدول الأصناف ──────────────────────
+    # ── التوفّر: حالة مشتقّة بنفس قاعدة جدول المنتجات ──────────────────────
     def test_availability_states_follow_the_min_stock_level_rule(self):
         items = self._by_id()
         self.assertEqual(items[self.in_stock.id]["availability"], "available")
@@ -128,7 +128,7 @@ class StoreBrowseTest(TestCase):
             CompanyName="جارتنا", SubscriptionPlan="Basic", Status="Active",
             store_slug="neighbour")
         exclusive = ProductCategory.objects.create(tenant=rival, name="حصري")
-        _product(rival, "N-1", name_ar="صنف الجارة", category=exclusive)
+        _product(rival, "N-1", name_ar="منتج الجارة", category=exclusive)
         self.assertEqual(self._list(category="حصري"), [])
 
     def test_price_sort_runs_both_ways(self):
@@ -203,7 +203,7 @@ class StoreBrowseTest(TestCase):
         rival = Tenant.objects.create(
             CompanyName="المنافس", SubscriptionPlan="Pro", Status="Active",
             store_slug="rival")
-        secret = _product(rival, "R-1", name_ar="صنف المنافس")
+        secret = _product(rival, "R-1", name_ar="منتج المنافس")
 
         mine = {item["id"] for item in self._list()}
         theirs = {

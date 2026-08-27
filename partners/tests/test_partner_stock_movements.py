@@ -25,15 +25,15 @@ class PartnerStockMovementsTest(APITestCase):
         cls.customer = Partner.objects.create(
             tenant=cls.tenant, name="عميل الحركات", partner_type="Customer")
         cls.product = Product.objects.create(
-            tenant=cls.tenant, name_ar="صنف الحركات", sku="SKU-PSM")
+            tenant=cls.tenant, name_ar="منتج الحركات", sku="SKU-PSM")
 
-        # شركة أخرى بشريكها وصنفها — لإثبات العزل.
+        # شركة أخرى بشريكها ومنتجها — لإثبات العزل.
         cls.other_user = User.objects.create_user(username="psm2", password="x")
         cls.other_tenant = create_company("شركة أخرى", cls.other_user)
         cls.other_partner = Partner.objects.create(
             tenant=cls.other_tenant, name="عميل غريب", partner_type="Customer")
         cls.other_product = Product.objects.create(
-            tenant=cls.other_tenant, name_ar="صنف غريب", sku="SKU-OTHER")
+            tenant=cls.other_tenant, name_ar="منتج غريب", sku="SKU-OTHER")
 
     def _auth(self):
         self.client.force_authenticate(user=self.user)

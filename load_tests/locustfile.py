@@ -56,7 +56,7 @@ POST_CREATED_INVOICES = os.environ.get("KTRA_LOADTEST_POST_INVOICES", "1") == "1
 #: ويجب أن تُردّ (403/404). 0 يعطّل الفحص.
 ISOLATION_PROBE_RATIO = float(os.environ.get("KTRA_LOADTEST_ISOLATION_RATIO", "0.1"))
 
-SEARCH_TERMS = ["صنف", "LT", "عميل", "01", "زبون", "A", "شركة", "20"]
+SEARCH_TERMS = ["منتج", "LT", "عميل", "01", "زبون", "A", "شركة", "20"]
 
 
 class ManifestError(RuntimeError):
@@ -353,7 +353,7 @@ class KtraUser(HttpUser):
     # ── 10% — بحث / autocomplete ──────────────────────────────────────────
     @task(6)
     def autocomplete_products(self):
-        """محدِّد الأصناف داخل المحرّرات — `view=lookup` بمصفوفة خام (بلا ترقيم)."""
+        """محدِّد المنتجات داخل المحرّرات — `view=lookup` بمصفوفة خام (بلا ترقيم)."""
         term = random.choice(SEARCH_TERMS)
         self.client.get(
             f"/api/inventory/products/?view=lookup&search={term}",

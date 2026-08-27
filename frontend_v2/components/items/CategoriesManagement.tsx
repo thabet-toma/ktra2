@@ -91,7 +91,7 @@ export const CategoriesManagement: React.FC = () => {
   };
 
   // T-ITEMS M2: الترتيب والعمق والأحفاد من `utils/categoryTree` — كانت هنا
-  // نسخةٌ ثالثة من الخوارزمية نفسها (والرابعة في جدول الأصناف المجمّع).
+  // نسخةٌ ثالثة من الخوارزمية نفسها (والرابعة في جدول المنتجات المجمّع).
   // اليتيم (أبٌ غير موجود) يعود جذراً في الوحدة، فلا يحتاج إلحاقاً بعديّاً.
   const nameById = new Map(list.map((c) => [c.id, c.name] as const));
   const rows = sortCategoryRows<Category>(list);
@@ -157,7 +157,7 @@ export const CategoriesManagement: React.FC = () => {
     },
     {
       key: "parent",
-      header: "الصنف الأب",
+      header: "التصنيف الأب",
       width: "220px",
       render: (c) => {
         if (editId === c.id) return parentSelect(c.id);

@@ -148,7 +148,7 @@ class SupplierOverpaymentBecomesAdvanceTest(APITestCase):
         cls.supplier = Partner.objects.create(
             tenant=cls.tenant, name="مورد", partner_type="Supplier")
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="SKU-OVER-1", name_ar="صنف",
+            tenant=cls.tenant, sku="SKU-OVER-1", name_ar="منتج",
             quantity_on_hand=0, avg_cost=D("0"),
         )
 

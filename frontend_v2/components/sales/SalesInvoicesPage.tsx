@@ -159,7 +159,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
 
   const loadMasterData = useCallback(async () => {
     const tenantId = resolveTenantId();
-    const parts = ["العملاء", "الأصناف", "العملات", "الحسابات", "الضرائب"] as const;
+    const parts = ["العملاء", "المنتجات", "العملات", "الحسابات", "الضرائب"] as const;
     const settled = await Promise.allSettled([
       apiGetList<PartnerRow>("partners/lookup/", { tenantId, query: { limit: 500 } }),
       listPickerProducts<ProductRow>(tenantId),

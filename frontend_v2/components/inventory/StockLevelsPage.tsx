@@ -26,9 +26,9 @@ export const StockLevelsPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<"" | "low" | "out" | "over">("");
   const [filterCategory, setFilterCategory] = useState<string>("");
-  // task16 E18: اختيار الأصناف للتصدير
+  // task16 E18: اختيار المنتجات للتصدير
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  // T-REORDER: تعيين «النوع» على المحدَّد — الحقل الذي بلا مدخلٍ جماعي يبقى فارغاً
+  // T-REORDER: تعيين «الصنف» على المحدَّد — الحقل الذي بلا مدخلٍ جماعي يبقى فارغاً
   // أبداً على كتالوجٍ من ألفٍ ونصف، وبفراغه يسقط تجميع الموديلات كلّه.
   const [groupModal, setGroupModal] = useState(false);
   const [groupValue, setGroupValue] = useState("");
@@ -61,13 +61,13 @@ export const StockLevelsPage: React.FC = () => {
     if (groupValue.trim()) fields.variant_group = groupValue.trim();
     if (brandValue.trim()) fields.brand = brandValue.trim();
     if (Object.keys(fields).length === 0) {
-      toast("اكتب نوعاً أو برانداً للتعيين.", "info");
+      toast("اكتب صنفاً أو برانداً للتعيين.", "info");
       return;
     }
     setGroupBusy(true);
     try {
       const res = await inventoryApi.bulkSetGroup(ids, fields);
-      toast(`عُيِّن على ${res.updated} صنفاً.`, "success");
+      toast(`عُيِّن على ${res.updated} منتجاً.`, "success");
       setGroupModal(false);
       setGroupValue("");
       setBrandValue("");
@@ -166,7 +166,7 @@ export const StockLevelsPage: React.FC = () => {
           <table>
             <thead>
               <tr>
-                <th>البضاعة (الصنف)</th>
+                <th>البضاعة (المنتج)</th>
                 <th>الكمية المتبقية</th>
                 <th>متوسط التكلفة</th>
                 <th>الحد الأدنى</th>
@@ -214,7 +214,7 @@ export const StockLevelsPage: React.FC = () => {
       return <span className="ktra-text-danger">نفذ</span>;
     if (p.stock_status === "low_stock")
       return <span className="ktra-text-warn">منخفض</span>;
-    // T-REORDER: «فائض» = فوق الحدّ الأقصى المضبوط على الصنف. كان الفلتر يخمّنه
+    // T-REORDER: «فائض» = فوق الحدّ الأقصى المضبوط على المنتج. كان الفلتر يخمّنه
     // بـ«أكثر من ثلاثة أضعاف الأدنى» — قاعدةٌ لا مصدر لها.
     if (p.stock_status === "overstock")
       return <span className="ktra-text-warn">فائض</span>;
@@ -237,13 +237,13 @@ export const StockLevelsPage: React.FC = () => {
       ),
     },
     { key: "sku", header: "SKU", width: "110px" },
-    { key: "name", header: "الصنف", render: (p) => (
-        // اسم الصنف قابل للنقر — يفتح حركة مخزون الصنف.
+    { key: "name", header: "المنتج", render: (p) => (
+        // اسم المنتج قابل للنقر — يفتح حركة مخزون المنتج.
         <button
           type="button"
           className="text-blue-700 hover:underline text-right"
           onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
-          title="فتح حركة مخزون الصنف"
+          title="فتح حركة مخزون المنتج"
         >
           {p.name_ar || p.name_en || "—"}
         </button>
@@ -281,12 +281,12 @@ export const StockLevelsPage: React.FC = () => {
       render: (p) => <>{p.min_stock_level ?? "—"}</> },
     { key: "max", header: "الحد الأقصى", width: "90px", align: "center", numeric: true,
       render: (p) => <>{p.max_stock_level ?? "—"}</> },
-    // T-REORDER: «النوع» ظاهر كي يُرى فارغاً. حين يكون بلا قيمة يسقط التجميع على
-    // اسم الصنف ⇒ كل صنفٍ نوعٌ بذاته ⇒ لا بدائل ولا قرار «مؤجَّل».
-    { key: "grp", header: "النوع", width: "130px",
+    // T-REORDER: «الصنف» ظاهر كي يُرى فارغاً. حين يكون بلا قيمة يسقط التجميع على
+    // اسم المنتج ⇒ كل منتجٍ صنفٌ بذاته ⇒ لا بدائل ولا قرار «مؤجَّل».
+    { key: "grp", header: "الصنف", width: "130px",
       render: (p) => p.variant_group
         ? <>{p.variant_group}</>
-        : <span className="ktra-text-soft" title="بلا نوع — لن تظهر له بدائل في الفاتورة">—</span> },
+        : <span className="ktra-text-soft" title="بلا صنف — لن تظهر له بدائل في الفاتورة">—</span> },
     { key: "status", header: "الحالة", width: "80px", align: "center", render: statusCell },
     { key: "avgcost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true,
       render: (p) => <>{fmt(Number(p.avg_cost))}</> },
@@ -294,7 +294,7 @@ export const StockLevelsPage: React.FC = () => {
       render: (p) => <>{fmt(Number(p.quantity_on_hand) * Number(p.avg_cost))}</> },
   ];
 
-  /* T-SIMPL2: أعمدة الحجز والحدّ الأقصى و«النوع» تُطوى في الوضع السهل — و«محجوز»
+  /* T-SIMPL2: أعمدة الحجز والحدّ الأقصى و«الصنف» تُطوى في الوضع السهل — و«محجوز»
      و«المتاح» يعودان لحظة يوجد حجزٌ فعلاً: رصيدٌ لا يُباع منه لا يُخفى عن بائعه. */
   const anyReserved = filtered.some((p) => Number(p.reserved_quantity || 0) > 0);
   const columns = maskColumns(
@@ -319,11 +319,11 @@ export const StockLevelsPage: React.FC = () => {
       onClick: printPdf,
       disabled: filtered.length === 0,
     },
-    /* T-SIMPL2: التعيين الجماعي لـ«النوع/البراند» إعدادُ كتالوج لا عملٌ يومي —
-       يُطوى في الوضع السهل مع عمود «النوع» الذي يخدمه. */
+    /* T-SIMPL2: التعيين الجماعي لـ«الصنف/البراند» إعدادُ كتالوج لا عملٌ يومي —
+       يُطوى في الوضع السهل مع عمود «الصنف» الذي يخدمه. */
     ...(showAdv("stock.bulk-group") ? [{
       key: "group",
-      label: `تعيين النوع${selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}`,
+      label: `تعيين الصنف${selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}`,
       icon: <Tags className="h-4 w-4" />,
       onClick: () => setGroupModal(true),
       disabled: selectedIds.size === 0,
@@ -345,7 +345,7 @@ export const StockLevelsPage: React.FC = () => {
         <>
           {summary && (
             <span className="ktra-status-item">
-              إجمالي الأصناف: <b>{summary.total_products_in_stock ?? products.length}</b>
+              إجمالي المنتجات: <b>{summary.total_products_in_stock ?? products.length}</b>
             </span>
           )}
           {summary && (
@@ -354,7 +354,7 @@ export const StockLevelsPage: React.FC = () => {
             </span>
           )}
           <span className="ktra-status-item">
-            إجمالي القيمة ({filtered.length} صنف): <b>{fmt(totalVal)}</b>
+            إجمالي القيمة ({filtered.length} منتج): <b>{fmt(totalVal)}</b>
           </span>
         </>
       )}
@@ -405,15 +405,15 @@ export const StockLevelsPage: React.FC = () => {
           <div dir="rtl" className="w-full max-w-md rounded-xl border ktra-border-soft ktra-bg-field p-4 shadow-xl"
             onClick={(e) => e.stopPropagation()}>
             <h3 className="mb-1 text-sm font-bold ktra-text-ink">
-              تعيين النوع/البراند لـ{selectedIds.size} صنف
+              تعيين الصنف/البراند لـ{selectedIds.size} منتج
             </h3>
             <p className="mb-3 text-[11px] ktra-text-soft leading-relaxed">
-              «النوع» يجمع الموديلات المتبادلة: أصنافُ النوع الواحد تظهر بدائلَ لبعضها في
+              «الصنف» يجمع الموديلات المتبادلة: منتجاتُ الصنف الواحد تظهر بدائلَ لبعضها في
               بند الفاتورة، ويقرأها تقرير التجديد فلا يطلب موديلاً قديماً وموديلٌ أحدث منه
-              على الرفّ. الحقل المتروك فارغاً هنا لا يُمَسّ على الأصناف.
+              على الرفّ. الحقل المتروك فارغاً هنا لا يُمَسّ على المنتجات.
             </p>
             <label className="mb-2 block text-xs ktra-text-soft">
-              النوع / المجموعة
+              الصنف / المجموعة
               <input className="ktra-input mt-1 w-full" value={groupValue} autoFocus
                 placeholder="مثال: ايفون 14 برو"
                 onChange={(e) => setGroupValue(e.target.value)} />
@@ -441,10 +441,10 @@ export const StockLevelsPage: React.FC = () => {
         rows={filtered}
         getRowKey={(p) => p.id}
         loading={loading}
-        emptyHint="لا توجد أصناف"
+        emptyHint="لا توجد منتجات"
         footer={
           <span className="font-bold ktra-text-ink">
-            إجمالي القيمة ({filtered.length} صنف):{" "}
+            إجمالي القيمة ({filtered.length} منتج):{" "}
             <span className="ktra-text-accent">{fmt(totalVal)}</span>
           </span>
         }

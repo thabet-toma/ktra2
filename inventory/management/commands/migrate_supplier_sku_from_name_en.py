@@ -6,7 +6,7 @@
 يشمله)، ثم يفرّغ `name_en` بعد التأكّد.
 
 بلا `--commit` لا يُكتب شيء: يطبع ما سيفعله ويقف. وبلا `--pattern` صريح لا
-يعمل أصلاً — «فرّغ حقلاً على أصنافٍ يختارها تخمين» ليس أمراً يُشغَّل بلا نيّة.
+يعمل أصلاً — «فرّغ حقلاً على منتجاتٍ يختارها تخمين» ليس أمراً يُشغَّل بلا نيّة.
 
 مثال:
     python manage.py migrate_supplier_sku_from_name_en \\
@@ -32,8 +32,8 @@ class Command(BaseCommand):
                             help='معرّف المورّد صاحب هذا الترقيم')
         parser.add_argument('--pattern', required=True,
                             help=r'نمط يطابق الرقم وحده، مثل "^\d+\.\d+$"')
-        parser.add_argument('--sku-from', default='', help='حدّ أدنى لرقم الصنف عندنا (اختياري)')
-        parser.add_argument('--sku-to', default='', help='حدّ أعلى لرقم الصنف عندنا (اختياري)')
+        parser.add_argument('--sku-from', default='', help='حدّ أدنى لرقم المنتج عندنا (اختياري)')
+        parser.add_argument('--sku-to', default='', help='حدّ أعلى لرقم المنتج عندنا (اختياري)')
         parser.add_argument('--keep-name-en', action='store_true',
                             help='انسخ الرقم ولا تفرّغ name_en (نقلٌ على مرحلتين)')
         parser.add_argument('--commit', action='store_true',
@@ -82,7 +82,7 @@ class Command(BaseCommand):
             self.stdout.write(f'  … و{len(planned) - 20} غيرها')
         for sku, code, other in clashes:
             self.stderr.write(
-                f'  تعارض: الصنف {sku} رقمه "{code}" وهو مأخوذ للصنف #{other} — تُرك.')
+                f'  تعارض: المنتج {sku} رقمه "{code}" وهو مأخوذ للمنتج #{other} — تُرك.')
 
         if not opts['commit']:
             self.stdout.write(self.style.WARNING(
@@ -96,7 +96,7 @@ class Command(BaseCommand):
                     defaults={'product': product},
                 )
                 if not opts['keep_name_en']:
-                    # `name_en` معناه «اسم الصنف بالإنجليزية» — يُترك فارغاً لا
+                    # `name_en` معناه «اسم المنتج بالإنجليزية» — يُترك فارغاً لا
                     # يحمل رقماً. والبحث لم يخسر شيئاً: صار يشمل supplier_sku.
                     product.name_en = ''
                     product.save(update_fields=['name_en'])

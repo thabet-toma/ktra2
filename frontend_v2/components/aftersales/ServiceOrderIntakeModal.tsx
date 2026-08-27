@@ -104,7 +104,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
     [lookup],
   );
 
-  /** التعبئة من الوحدة التي بعناها: الصنف والزبون معروفان، فلا يُعاد إدخالهما. */
+  /** التعبئة من الوحدة التي بعناها: المنتج والزبون معروفان، فلا يُعاد إدخالهما. */
   const fillFromUnit = useCallback(() => {
     const unit = lookup?.warranty.unit;
     if (!unit) return;
@@ -135,7 +135,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
     const named = draft.partner || (draft.customer_name || "").trim();
     if (!named) list.push("حدّد الزبون أو اكتب اسمه");
     if (!serial && !draft.product && !(draft.device_description || "").trim()) {
-      list.push("حدّد الجهاز برقمه التسلسلي أو صنفه أو وصفه");
+      list.push("حدّد الجهاز برقمه التسلسلي أو منتجه أو وصفه");
     }
     if (!(draft.complaint || "").trim()) list.push("اكتب شكوى الزبون");
     return list;
@@ -330,14 +330,14 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
               />
             </div>
             <div>
-              <label className={labelClass} htmlFor="intake-product">الصنف</label>
+              <label className={labelClass} htmlFor="intake-product">المنتج</label>
               <select
                 id="intake-product"
                 className={inputClass}
                 value={draft.product ?? ""}
                 onChange={(e) => patch("product", e.target.value ? Number(e.target.value) : null)}
               >
-                <option value="">— بلا صنف (جهاز لم نبعه) —</option>
+                <option value="">— بلا منتج (جهاز لم نبعه) —</option>
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>{productLabel(p)}</option>
                 ))}

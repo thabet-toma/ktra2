@@ -225,7 +225,7 @@ test("تبويب حساب العميل يعرض قبل/بعد من مرساة ك
   await expect(page.locator("text=1,250").first()).toBeVisible();
 });
 
-test("حركة المخزون تعرض رقم الحركة ورصيد الصنف قبل وبعد", async ({ page }) => {
+test("حركة المخزون تعرض رقم الحركة ورصيد المنتج قبل وبعد", async ({ page }) => {
   const counters: Counters = { stock: 0, ledger: 0, attachments: 0 };
   await installMocks(page, counters);
 

@@ -770,7 +770,7 @@ export const PartnerProfilePage: React.FC = () => {
                     <thead>
                       <tr className="text-[var(--ktra-ink-soft)]">
                         <th className="px-2 py-1 text-right">التاريخ</th>
-                        <th className="px-2 py-1 text-right">الصنف</th>
+                        <th className="px-2 py-1 text-right">المنتج</th>
                         <th className="px-2 py-1 text-right">الحركة</th>
                         <th className="px-2 py-1 text-right">المستودع</th>
                         <th className="px-2 py-1 text-right">وارد</th>

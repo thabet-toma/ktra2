@@ -416,7 +416,7 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
         form.is_valid(raise_exception=True)
         product = form.validated_data["product"]
         if product.tenant_id != self.tenant.pk:
-            raise ValidationError({"product": "هذا الصنف لا يتبع الشركة النشطة."})
+            raise ValidationError({"product": "هذا المنتج لا يتبع الشركة النشطة."})
         # الافتراض يتبع قرار التغطية على الأمر — أكثر ما يُضاف على أمرٍ مكفول مغطّى.
         billing = request.data.get("billing") or (
             ServiceOrderPart.BILLING_COVERED if order.warranty_covered
@@ -454,7 +454,7 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
         form.is_valid(raise_exception=True)
         product = form.validated_data.get("product")
         if product is not None and product.tenant_id != self.tenant.pk:
-            raise ValidationError({"product": "هذا الصنف لا يتبع الشركة النشطة."})
+            raise ValidationError({"product": "هذا المنتج لا يتبع الشركة النشطة."})
         part = form.save()
         self._log_part(order, part, "عُدّلت")
         return Response(ServiceOrderPartSerializer(part).data)

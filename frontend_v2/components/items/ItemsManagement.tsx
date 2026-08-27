@@ -1,8 +1,8 @@
 /**
- * N5-T3 — ItemsManagement (L4) — KitDenseTable للأصناف
+ * N5-T3 — ItemsManagement (L4) — KitDenseTable للمنتجات
  * يستخدم SQL products من inventoryApi (لا Firestore).
  */
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
@@ -24,6 +24,11 @@ import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { tenantScopedOfflineKey } from "../../utils/offlineTenantScope";
 import { useKeepOnce, useSimpleUi } from "../../hooks/useSimpleUi";
+import {
+  simpleFieldsFromProduct, dirtySimplePayload, validateSimpleFields,
+} from "../../utils/itemSimpleFields";
+import { humanizeThrown } from "../../utils/drfError";
+import { eventBus } from "../../utils/eventBus";
 
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
 const fmt = (n: number | string) => formatMoney(n, "0");
@@ -45,7 +50,7 @@ const ORDER_FIELD: Record<string, string> = {
 const STATUS_LABEL: Record<Exclude<StockStatus, "">, string> = {
   out_of_stock: "نفذ",
   low_stock: "منخفض",
-  // T-REORDER: حالةٌ رابعة يحسمها الخادم — فوق الحدّ الأقصى المضبوط على الصنف.
+  // T-REORDER: حالةٌ رابعة يحسمها الخادم — فوق الحدّ الأقصى المضبوط على المنتج.
   overstock: "فائض",
   in_stock: "متوفر",
 };
@@ -61,7 +66,7 @@ const exportItemStyle: React.CSSProperties = {
  * صار الفراغ بطاقةَ ما هو محدَّد في الشجرة، على نمط شجرة الحسابات: شريط شجرة
  * + بطاقة السجل المحدَّد.
  *
- * إطارٌ واحد للحالتين (صنف مفرد · تصنيف مجمّع): الرأس هوية وأزرار، وتحته
+ * إطارٌ واحد للحالتين (منتج مفرد · تصنيف مجمّع): الرأس هوية وأزرار، وتحته
  * تبويبات الكرت نفسها التي تعرضها الصفحة الكاملة — لا نسخة ثانية منها.
  */
 const TreePaneFrame: React.FC<{
@@ -86,9 +91,9 @@ const TreePaneFrame: React.FC<{
 );
 
 /**
- * بطاقة الصنف المفرد. التركيب بمفتاح `key` عند المستدعي: كل اختيار يُعيد
+ * بطاقة المنتج المفرد. التركيب بمفتاح `key` عند المستدعي: كل اختيار يُعيد
  * التركيب، فنتائج طلبٍ سابق بطيء تسقط على مكوّن مفكوك بدل أن تكتب فوق
- * بيانات الصنف الجديد.
+ * بيانات المنتج الجديد.
  */
 const ProductTreePane: React.FC<{
   productId: number;
@@ -96,7 +101,7 @@ const ProductTreePane: React.FC<{
   onEdit: () => void;
 }> = ({ productId, productName, onEdit }) => {
   const { profile, tabs } = useProductInsights(productId);
-  const title = profile?.name || productName || `صنف #${productId}`;
+  const title = profile?.name || productName || `منتج #${productId}`;
   return (
     <TreePaneFrame
       icon={<Package className="h-4 w-4 shrink-0 text-[var(--ktra-ink-soft)]" />}
@@ -105,7 +110,7 @@ const ProductTreePane: React.FC<{
       tabs={tabs}
       actions={
         <>
-          <button type="button" className="ktra-toolbtn" onClick={onEdit} title="تعديل هذا الصنف">
+          <button type="button" className="ktra-toolbtn" onClick={onEdit} title="تعديل هذا المنتج">
             <Edit2 className="h-4 w-4" /> تعديل
           </button>
           <button
@@ -122,7 +127,7 @@ const ProductTreePane: React.FC<{
   );
 };
 
-/** بطاقة التصنيف: الكرت المجمّع لكل الأصناف تحته (وأحفاده).
+/** بطاقة التصنيف: الكرت المجمّع لكل المنتجات تحته (وأحفاده).
  *  مع `categoryId` يشتقّ الخادمُ الأعضاء بنفسه، فلا يسافر تعدادُ 1500 معرّف في
  *  الطلب (كان يبلغ ~7.5KB في سطر الطلب فيردّه nginx بـ414). */
 const GroupTreePane: React.FC<{
@@ -139,7 +144,7 @@ const GroupTreePane: React.FC<{
     <TreePaneFrame
       icon={<FolderTree className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />}
       title={`كرت مجمّع: ${title}`}
-      badge={<span className="ktra-status-item">{count} صنف</span>}
+      badge={<span className="ktra-status-item">{count} منتج</span>}
       tabs={tabs}
       actions={
         <button
@@ -156,7 +161,7 @@ const GroupTreePane: React.FC<{
   );
 };
 
-/** ما هو محدَّد في الشجرة: صنفٌ مفرد أو تصنيفٌ مجمّع. */
+/** ما هو محدَّد في الشجرة: منتجٌ مفرد أو تصنيفٌ مجمّع. */
 type TreePreview =
   | { kind: "product"; id: number; name: string }
   | { kind: "group"; ids: number[]; name: string; categoryId?: number };
@@ -170,13 +175,25 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   }, [initialTab]);
 
   const [products, setProducts] = useState<SqlProduct[]>([]);
+  /* T-PRODUCT M2: تحرير الاسم داخل الخلية — خليةٌ واحدة قيد التحرير في كل وقت.
+     الحالة تسكن هنا لا في `GroupedItemsTable`: الإغلاق الذي يبني العمود يلتقطها
+     مباشرةً، فلا يُمَسّ عقد `DenseColumn` ولا بقية جداول التطبيق. */
+  const [nameEdit, setNameEdit] = useState<{
+    id: number; draft: string; saving: boolean; error: string | null;
+  } | null>(null);
+  // حارس الطلب الطائر: Enter يحفظ ثم يُعطّل الحقل، وتعطيلُه يُطلق `blur` — فلولا
+  // هذا الحارس لانطلق الحفظ مرتين على نفس التعديل.
+  const nameSavingRef = useRef(false);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
+  const nameEditRef = useRef<typeof nameEdit>(null);
+  useEffect(() => { nameEditRef.current = nameEdit; }, [nameEdit]);
   const { columns: maskColumns } = useSimpleUi();
   // شجرة التصنيفات (أي عمق) لعرض الجدول الشجري + الكرت المجمّع لكل تصنيف.
   const [treeCategories, setTreeCategories] = useState<TreeCategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<View>("list");
-  // T-N3: عرض الأصناف كشجرة تصنيفات (مثل شجرة المنتجات في الفواتير) أو كجدول.
+  // T-N3: عرض المنتجات كشجرة تصنيفات (مثل شجرة المنتجات في الفواتير) أو كجدول.
   // الافتراضي «جدول» (بطلب المالك) — يفتح على وضعية الجدول مباشرةً.
   const [displayMode, setDisplayMode] = useState<"tree" | "table">("table");
   const [editId, setEditId] = useState<number | null>(null);
@@ -188,7 +205,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   // المرحلة 5 / P0-12: ترقيم خادمي فعلي للعرض الجدولي.
   const [page, setPage] = useState(1);
   const [hasNext, setHasNext] = useState(false);
-  // جدول الأصناف: فلتر حالة المخزون + ترتيب حسب العمود (خادمي) + قائمة التصدير.
+  // جدول المنتجات: فلتر حالة المخزون + ترتيب حسب العمود (خادمي) + قائمة التصدير.
   const [statusFilter, setStatusFilter] = useState<StockStatus>("");
   const [sortKey, setSortKey] = useState<string>("");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -223,7 +240,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       if (ordering) params.ordering = ordering;
       // المرحلة 5 / P0-12: العرض الجدولي (الافتراضي) يجلب **صفحة واحدة** —
       // كان يدور على كل الصفحات (page_size=200) فيُصدر 8 طلبات متسلسلة لـ1490
-      // صنفاً، ويُعيد ذلك كاملاً بعد كل دورة بحث (debounce 250ms).
+      // منتجاً، ويُعيد ذلك كاملاً بعد كل دورة بحث (debounce 250ms).
       // العرض الشجري يجمّع حسب التصنيف فيحتاج المجموعة كاملة بطبيعته — يبقى
       // على الجلب الكامل، وهو ليس الوضع الافتراضي.
       let allRows: SqlProduct[];
@@ -312,6 +329,65 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     });
   }, [load, search, statusFilter, orderingParam, page, displayMode]);
 
+  const beginNameEdit = useCallback((row: SqlProduct) => {
+    if (nameSavingRef.current) return;
+    setNameEdit({ id: row.id, draft: String(row.name_ar ?? row.name_en ?? ""), saving: false, error: null });
+  }, []);
+
+  /**
+   * حفظ الاسم من داخل الخلية — **بلا مسار حفظٍ ثانٍ**: نفس تحقّق
+   * `validateSimpleFields` ونفس حمولة `dirtySimplePayload` التي يستعملها
+   * التحرير السريع من المستند والكرت الكامل.
+   *
+   * نشرُ `before` قبل تعديل الاسم حمّالٌ للمعنى: صفّ القائمة نحيلٌ مقارنةً
+   * بالكرت، فبناء `after` من الصفر يُرسل `category: null` و`sale_price: null`
+   * كتاباتٍ زائفة لم يطلبها أحد.
+   *
+   * ومتشائم لا متفائل: الجدول مفروزٌ ومصفَّحٌ خادمياً، فإظهار الاسم الجديد قبل
+   * ردّ الخادم يترك الصفّ في موضعٍ ما كان الخادم ليضعه فيه. ولا شيء يُعدَّل
+   * محلياً قبل الردّ — فلا شيء يُتراجَع عنه عند الفشل.
+   */
+  const commitNameEdit = useCallback(async (row: SqlProduct) => {
+    const state = nameEditRef.current;
+    if (!state || state.id !== row.id || nameSavingRef.current) return;
+    const draft = state.draft.trim();
+    const before = simpleFieldsFromProduct(row as unknown as Record<string, unknown>);
+    const after = { ...before, name_ar: draft };
+    const invalid = validateSimpleFields(after);
+    if (invalid) { setNameEdit({ ...state, saving: false, error: invalid }); nameInputRef.current?.focus(); return; }
+    const payload = dirtySimplePayload(before, after);
+    if (Object.keys(payload).length === 0) { setNameEdit(null); return; }
+
+    nameSavingRef.current = true;
+    setNameEdit({ ...state, saving: true, error: null });
+    try {
+      const updated = await inventoryApi.updateProduct(row.id, payload) as Record<string, unknown>;
+      // `updateProduct` يُبطل كاش منتقي المنتجات بنفسه؛ الحدث يوقظ الشاشات
+      // التي تحمل قائمتها الخاصة (فاتورة بيع مفتوحة في تبويب آخر).
+      eventBus.publish("products", resolveTenantId());
+      setNameEdit(null);
+      if (sortKey === "name_ar") {
+        // الفرز على الاسم: موضع الصفّ قرارٌ خادمي، فيُعاد الجلب بدل تخمينه.
+        reload();
+      } else {
+        // ترقيعُ حقول الاسم وحدها — لا نشر الردّ كاملاً فوق الصفّ: صفّ القائمة
+        // يحمل حقولاً محسوبة (الرصيد، المتاح، متوسط البيع) لا يعيدها ردّ التعديل.
+        setProducts((rows) => rows.map((r) => (r.id === row.id ? {
+          ...r,
+          name_ar: (updated.name_ar ?? null) as string | null,
+          name_en: (updated.name_en ?? r.name_en ?? null) as string | null,
+          display_name: (updated.display_name ?? null) as string | null,
+        } : r)));
+      }
+    } catch (e: unknown) {
+      setNameEdit({ ...state, saving: false, error: humanizeThrown(e, "تعذّر حفظ الاسم") });
+      // البقاء في التحرير مع المسوّدة: المستخدم يصحّح ويعيد المحاولة بلا إعادة كتابة.
+      setTimeout(() => nameInputRef.current?.focus(), 0);
+    } finally {
+      nameSavingRef.current = false;
+    }
+  }, [sortKey, reload]);
+
   // تصدير PDF للطباعة بخيارات: الكل / ما نفذ / المنخفضة — يجلب كل الصفحات المطابقة
   // (لا الصفحة الحالية فقط) ثم يفتح نافذة طباعة بنفس نمط تقرير أرصدة المخزون (DRY).
   const exportProducts = useCallback(async (status: StockStatus) => {
@@ -330,13 +406,13 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         if (rows.length === 0 || all.length >= count) break;
         pg++;
       }
-      if (all.length === 0) { setErr("لا توجد أصناف للتصدير بهذا الخيار."); return; }
+      if (all.length === 0) { setErr("لا توجد منتجات للتصدير بهذا الخيار."); return; }
 
       const printWindow = window.open("", "_blank");
       if (!printWindow) { setErr("الرجاء السماح بالنوافذ المنبثقة (Pop-ups) للطباعة"); return; }
 
       const today = new Date().toISOString().slice(0, 10);
-      const subset = status ? `الأصناف: ${STATUS_LABEL[status]}` : "كل الأصناف";
+      const subset = status ? `المنتجات: ${STATUS_LABEL[status]}` : "كل المنتجات";
       const esc = (v: unknown) => String(v ?? "—")
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       const rowsHtml = all.map((p) => {
@@ -359,7 +435,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       const html = `
         <html dir="rtl" lang="ar">
           <head>
-            <title>تقرير الأصناف - ${today}</title>
+            <title>تقرير المنتجات - ${today}</title>
             <style>
               body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; color: #111827; }
               h2 { text-align: center; color: #1857a4; margin-bottom: 5px; }
@@ -375,12 +451,12 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             </style>
           </head>
           <body>
-            <h2>تقرير الأصناف</h2>
+            <h2>تقرير المنتجات</h2>
             <div class="subtitle">${subset} · العدد: ${all.length} · التاريخ: ${today}</div>
             <table>
               <thead>
                 <tr>
-                  <th>رقم الصنف</th><th>اسم الصنف</th><th>التصنيف</th>
+                  <th>رقم المنتج</th><th>اسم المنتج</th><th>التصنيف</th>
                   <th>الكمية</th><th>متوسط التكلفة</th><th>الحد الأدنى</th><th>الحالة</th>
                 </tr>
               </thead>
@@ -415,7 +491,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       }
     },
     // T-RESERVE: المحجوز لطلبيات الزبائن المؤكَّدة السارية — البيع من «المتاح» لا
-    // من الرصيد، فبقاؤه مخفياً كان يجعل الحجز غير مرئي في شاشة الأصناف.
+    // من الرصيد، فبقاؤه مخفياً كان يجعل الحجز غير مرئي في شاشة المنتجات.
     { key: "reserved", header: "محجوز", width: "80px", align: "center", numeric: true,
       render: (p) => {
         const reserved = Number(p.reserved_quantity || 0);
@@ -435,45 +511,85 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         </span>
       )
     },
-    { key: "name_ar", header: "اسم الصنف", sortable: true, render: (p) => (
-      // T-ITEMS M4: نقرةُ الاسم كانت تفتح تبويباً جديداً بينما النقرة المزدوجة
-      // على الصفّ تفتح المحرّر في المكان — سلوكان متناقضان بلا فرقٍ بصري بينهما.
-      // الآن النقرة = النيّة الغالبة (تحرير هنا)، والمغادرة إلى تبويبٍ مستقل
-      // أيقونةٌ صريحة بجانبها.
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+    { key: "name_ar", header: "اسم المنتج", sortable: true, render: (p) => {
+      /* T-PRODUCT M2: الاسم كان زرّاً أزرق مسطَّراً — يقول «رابط» فلا يتوقّع منه
+         أحدٌ تحريراً، ولا كان ثمّة طريقٌ لتعديله دون مغادرة الجدول. الآن نصٌّ
+         عاديّ يُحرَّر في مكانه (نقرتان أو F2)، والمغادرةُ إلى تبويبٍ مستقل
+         أيقونةٌ صريحة بجانبه.
+         والنقرة المفردة تُركِّز ولا تفتح شيئاً: لو ظلّت تنقُل لكان قولنا «ليس
+         رابطاً» كذباً. المنافذ الثلاثة الأخرى للكرت الكامل (نقرتان على صفٍّ
+         آخر · عمود القلم · «تعديل» في الشجرة) لم تُمَسّ. */
+      const editing = nameEdit?.id === p.id;
+      return (
+      <span
+        className="group inline-flex w-full min-w-0 items-center gap-1"
+        /* مرساةُ قائمة السياق على الحاوي لا على الزرّ: الزرّ يُستبدل بحقلٍ أثناء
+           التحرير، و`contextMenuTargets` يصعد بـ`closest` — فلولا النقل لماتت
+           قائمة السياق أثناء التحرير وحده. */
+        data-ctx-item-id={p.id}
+        data-ctx-item-name={p.display_name || p.name_ar || p.name_en || ""}
+      >
+        {editing ? (
+          <input
+            ref={nameInputRef}
+            autoFocus
+            className="ktra-input min-w-0 flex-1"
+            value={nameEdit.draft}
+            disabled={nameEdit.saving}
+            aria-label="تعديل اسم المنتج"
+            aria-invalid={nameEdit.error ? true : undefined}
+            title={nameEdit.error ?? undefined}
+            onChange={(e) => setNameEdit((st) => (st ? { ...st, draft: e.target.value } : st))}
+            onClick={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") { e.preventDefault(); void commitNameEdit(p); }
+              else if (e.key === "Escape") { e.preventDefault(); setNameEdit(null); }
+            }}
+            /* Tab وفقدان التركيز يحفظان إن تغيّر شيء — عُرف الجداول. */
+            onBlur={() => { void commitNameEdit(p); }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="min-w-0 flex-1 cursor-text truncate rounded px-1 text-start hover:bg-[var(--color-surface-3)]"
+            title="نقرتان أو F2 لتعديل الاسم"
+            onClick={(e) => e.stopPropagation()}
+            /* بلا إيقاف الانتشار تفتح الإيماءةُ الواحدة المحرِّرَ الكامل أيضاً
+               (نقرتا الصفّ)، فيُلغى تركيب الحقل أثناء الكتابة. */
+            onDoubleClick={(e) => { e.stopPropagation(); beginNameEdit(p); }}
+            onKeyDown={(e) => {
+              if (e.key === "F2") { e.preventDefault(); e.stopPropagation(); beginNameEdit(p); }
+            }}
+          >
+            {p.display_name || p.name_ar || p.name_en || "—"}
+          </button>
+        )}
         <button
           type="button"
-          className="text-[var(--ktra-accent,#2563eb)] underline hover:opacity-80"
-          title="فتح كرت الصنف هنا"
-          data-ctx-item-id={p.id}
-          data-ctx-item-name={p.display_name || p.name_ar || p.name_en || ""}
-          onClick={(e) => { e.stopPropagation(); setEditId(p.id); setView("form"); }}
-        >
-          {p.display_name || p.name_ar || p.name_en || "—"}
-        </button>
-        <button
-          type="button"
-          className="ktra-iconbtn"
+          className="ktra-iconbtn opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
           title="فتح في تبويب مستقل"
           aria-label="فتح في تبويب مستقل"
           onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
         ><ExternalLink className="h-3 w-3" /></button>
       </span>
-    ) },
+      );
+    } },
     { key: "avg_monthly", header: "متوسط البيع الشهري", width: "120px", align: "center", numeric: true,
       // صافي (OUT − RETURN_IN) خلال 90 يوماً ÷ 3.
       render: (p) => <span title="متوسط المبيعات الشهري = صافي البيع (بعد المرتجعات) خلال آخر 90 يوماً ÷ 3">{p.avg_monthly_sales != null ? formatQuantity(p.avg_monthly_sales) : "—"}</span> },
-    { key: "sku", header: "رقم الصنف", width: "110px", sortable: true, render: (p) => (
+    { key: "sku", header: "رقم المنتج", width: "110px", sortable: true, render: (p) => (
         <b title={p.sku} style={{ display: "inline-block", maxWidth: "90px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>
           {p.sku}
         </b>
     ) },
     { key: "avg_cost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true, sortable: true,
       render: (p) => <>{fmt(p.avg_cost)}</> },
-    // كرت الصنف: سعر البيع المحفوظ — يُقرأ بجانب التكلفة بلا فتح الكرت.
+    // كرت المنتج: سعر البيع المحفوظ — يُقرأ بجانب التكلفة بلا فتح الكرت.
     { key: "sale_price", header: "سعر البيع", width: "100px", align: "center", numeric: true, sortable: true,
       render: (p) => (
-        <span title="سعر البيع الافتراضي المحفوظ على الصنف">
+        <span title="سعر البيع الافتراضي المحفوظ على المنتج">
           {p.sale_price != null && p.sale_price !== "" ? formatMoney(p.sale_price) : "—"}
         </span>
       ) },
@@ -481,14 +597,14 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       render: (p) => <>{p.min_stock_level ?? "—"}</> },
     { key: "max", header: "الحد الأقصى", width: "90px", align: "center", sortable: true,
       render: (p) => <>{p.max_stock_level ?? "—"}</> },
-    // T-REORDER: «النوع» يجمع الموديلات المتبادلة — وفراغه يعني ألّا بديل يُقترح
-    // في الفاتورة ولا قرار «مؤجَّل» في تقرير التجديد. يُعيَّن من كرت الصنف، أو
+    // T-REORDER: «الصنف» يجمع الموديلات المتبادلة — وفراغه يعني ألّا بديل يُقترح
+    // في الفاتورة ولا قرار «مؤجَّل» في تقرير التجديد. يُعيَّن من كرت المنتج، أو
     // للمحدَّد دفعةً واحدة من شاشة «أرصدة المخزون».
-    { key: "grp", header: "النوع", width: "120px",
+    { key: "grp", header: "الصنف", width: "120px",
       render: (p) => p.variant_group
         ? <>{p.variant_group}</>
         : <span style={{ color: "var(--ktra-ink-soft)" }}
-            title="بلا نوع — لن تظهر له بدائل في الفاتورة">—</span> },
+            title="بلا صنف — لن تظهر له بدائل في الفاتورة">—</span> },
     { key: "status", header: "الحالة", width: "80px", align: "center",
       render: (p) => {
         if (p.stock_status === "out_of_stock") return <span style={{ color: "var(--ktra-danger,#c00)" }}>نفذ</span>;
@@ -514,7 +630,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   ];
 
   /* T-SIMPL2: أعمدة التحليل (المشتراة · متوسط البيع الشهري) وإعداد الكتالوج
-     (الحدّ الأقصى · النوع) تُطوى في الوضع السهل. و«محجوز/المتاح» يعودان لحظة
+     (الحدّ الأقصى · الصنف) تُطوى في الوضع السهل. و«محجوز/المتاح» يعودان لحظة
      يوجد حجزٌ فعلاً — رصيدٌ لا يُباع منه لا يُخفى عن بائعه. */
   /* القائمة مرقَّمة، و`products` صفحةٌ واحدة: بلا تثبيت تظهر الأعمدة في صفحة
      وتختفي في التي تليها — جدولٌ يتراقص تحت يد المستخدم. */
@@ -553,7 +669,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             display: "flex", alignItems: "center", gap: "6px", cursor: "pointer"
           }}
         >
-          <Package className="h-4 w-4" /> الأصناف
+          <Package className="h-4 w-4" /> المنتجات
         </button>
         <button
           onClick={() => setActiveTab("categories")}
@@ -579,7 +695,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <strong style={{ fontSize: "var(--ktra-fs-title, 14px)", color: "var(--ktra-ink)" }}>
-              إدارة الأصناف
+              إدارة المنتجات
             </strong>
             {/* P0-12: الإجمالي من الخادم (count) لا من طول الصفحة المعروضة. */}
             <span className="ktra-status-item">الإجمالي: <b>{total}</b></span>
@@ -624,7 +740,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
                 borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.12)", minWidth: 170,
               }}>
               <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("")}>تصدير الكل</button>
-              <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("out_of_stock")}>الأصناف التي نفذت</button>
+              <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("out_of_stock")}>المنتجات التي نفذت</button>
               <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("low_stock")}>الكمية المنخفضة</button>
             </div>
           )}
@@ -641,7 +757,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         <button className="ktra-toolbtn" onClick={() => reload()} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
-        <button className="ktra-toolbtn" onClick={() => { setEditId(null); setDuplicateId(null); setView("form"); }} title="إضافة صنف (Ctrl+Ins)">
+        <button className="ktra-toolbtn" onClick={() => { setEditId(null); setDuplicateId(null); setView("form"); }} title="إضافة منتج (Ctrl+Ins)">
           <Plus className="h-4 w-4" /> إضافة
         </button>
       </div>
@@ -649,8 +765,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       {err && <div className="ktra-banner ktra-banner--err">{err}</div>}
 
       {displayMode === "tree" ? (
-        // T-N3: شجرة التصنيفات/الأصناف (نفس مكوّن شجرة المنتجات في الفواتير).
-        // نقرة مفردة على صنف → بطاقته؛ نقرة مزدوجة/اختيار → تعديله.
+        // T-N3: شجرة التصنيفات/المنتجات (نفس مكوّن شجرة المنتجات في الفواتير).
+        // نقرة مفردة على منتج → بطاقته؛ نقرة مزدوجة/اختيار → تعديله.
         <div className="flex min-h-0 flex-1 gap-2 overflow-hidden">
           <InvoiceCategoryTree
             items={products.map((p) => ({
@@ -690,7 +806,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               />
             ) : (
               <div className="flex h-full items-center justify-center p-6 text-center text-[var(--ktra-ink-soft)]">
-                اختر منتجاً من الشجرة لتظهر بطاقته هنا، أو تصنيفاً ليظهر كرته المجمّع — التسعير والمخزون والفواتير وحركة الصنف.
+                اختر منتجاً من الشجرة لتظهر بطاقته هنا، أو تصنيفاً ليظهر كرته المجمّع — التسعير والمخزون والفواتير وحركة المنتج.
               </div>
             )}
           </div>
@@ -703,7 +819,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           categories={treeCategories}
           getRowKey={(p) => p.id}
           loading={loading}
-          emptyHint="لا توجد أصناف"
+          emptyHint="لا توجد منتجات"
           onRowDoubleClick={(p) => { setEditId(p.id); setView("form"); }}
           onShowGroup={(ids, name, categoryId) =>
             openInNewTab(productGroupPath({ name, categoryId, ids }))}

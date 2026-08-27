@@ -127,12 +127,12 @@ export type ProductRow = {
   name_en?: string | null;
   quantity_on_hand: string;
   online_price?: string | null;
-  /** «سعر البيع» العام في كرت الصنف — يُقترح حين لا سعر خاص بهذا الزبون. */
+  /** «سعر البيع» العام في كرت المنتج — يُقترح حين لا سعر خاص بهذا الزبون. */
   sale_price?: string | null;
   avg_cost?: string | null;
   /** T-SERVICELINE: خدمة لا بضاعة — بلا مخزون، وإيرادها على حساب الخدمات. */
   is_service?: boolean;
-  /** T-SERIAL: الصنف يتتبّع وحداته برقم تسلسلي — يُظهر عمود الأرقام على سطره. */
+  /** T-SERIAL: المنتج يتتبّع وحداته برقم تسلسلي — يُظهر عمود الأرقام على سطره. */
   is_serialized?: boolean;
   /** T-REORDER: حالة المخزون كما يحسمها الخادم (`inventory/stock_status.py`). */
   stock_status?: string | null;
@@ -194,7 +194,7 @@ export type DraftLine = {
    *  السعر المقترح لا يُدَس على سطر مَلموس عند تغيير العميل. */
   priceTouched?: boolean;
   /** DEF-005: مصدر السعر المقترح للشارة — آخر فاتورة / عرض كرت الزبون / عرض واجهة
-   *  العروض / «default» = السعر العام في كرت الصنف. */
+   *  العروض / «default» = السعر العام في كرت المنتج. */
   priceSource?: "last_invoice" | "quote" | "sales_quote" | "default" | null;
   /** رابط فتح مصدر السعر عند النقر (عرض العروض أو تبويب عرض السعر بكرت الزبون). */
   priceSourceLink?: string | null;
@@ -202,7 +202,7 @@ export type DraftLine = {
   serials?: string[];
   /** ملاحظة الموظف على البند — لا تُطبع للعميل أبداً. */
   internal_note?: string;
-  /** ملاحظة تُطبع للعميل تحت اسم الصنف في الفاتورة. */
+  /** ملاحظة تُطبع للعميل تحت اسم المنتج في الفاتورة. */
   customer_note?: string;
 };
 
@@ -292,10 +292,10 @@ const LineNotesModal: React.FC<{
               value={forCustomer}
               onChange={(e) => setForCustomer(e.target.value)}
               className="px-2 py-1.5 border ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-sm resize-y"
-              placeholder="تُطبع تحت اسم الصنف — مدّة الكفالة، شروط التركيب، ملحقات مرفقة…"
+              placeholder="تُطبع تحت اسم المنتج — مدّة الكفالة، شروط التركيب، ملحقات مرفقة…"
             />
             <span className="text-[11px] ktra-text-soft">
-              تظهر تحت اسم الصنف في الفاتورة المطبوعة.
+              تظهر تحت اسم المنتج في الفاتورة المطبوعة.
             </span>
           </label>
 
@@ -352,7 +352,7 @@ type Props = {
     prices_include_tax: boolean;
     auto_post_invoices: boolean;
     show_journal_preview: boolean;
-    /** T-R3: تنبيه عند تكرار الصنف على سطر جديد (الافتراضي مُفعّل). */
+    /** T-R3: تنبيه عند تكرار المنتج على سطر جديد (الافتراضي مُفعّل). */
     warn_on_duplicate_item?: boolean;
     /** منع حفظ/ترحيل فاتورة بيع بخسارة (الافتراضي مُعطّل). */
     block_loss_invoices?: boolean;
@@ -431,9 +431,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [taxPercentDraft, setTaxPercentDraft] = useState<Record<string, string>>({});
   const [taxSavingKey, setTaxSavingKey] = useState<string | null>(null);
   const [productPickerLineKey, setProductPickerLineKey] = useState<string | null>(null);
-  // DEF-007/008: بطاقة الصنف (مودال مشترك) — تُفتح من الشجرة/القائمة/سطر الفاتورة.
+  // DEF-007/008: بطاقة المنتج (مودال مشترك) — تُفتح من الشجرة/القائمة/سطر الفاتورة.
   const [cardProductId, setCardProductId] = useState<number | null>(null);
-  // T-ITEMS M3: الصنف الجاري تحريره سريعاً من داخل الفاتورة (بلا مغادرتها).
+  // T-ITEMS M3: المنتج الجاري تحريره سريعاً من داخل الفاتورة (بلا مغادرتها).
   const [quickEditProductId, setQuickEditProductId] = useState<number | null>(null);
   // «موافق» (إضافة للفاتورة) يظهر فقط عند فتح البطاقة من الشجرة، لا من أيقونة (i).
   const [cardCanAdd, setCardCanAdd] = useState(false);
@@ -513,7 +513,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const dirtyRef = useRef(false);
 
   /* T-QUICKPARTY: العميل المُنشأ من داخل الفاتورة يُستعمل فوراً — نفس علاج
-     `extraProducts`: القائمة تصل من الشاشة الأم بعد بثّ حدث `partners`، وحتى
+     `productOverrides`: القائمة تصل من الشاشة الأم بعد بثّ حدث `partners`، وحتى
      يصل نعرضه محلياً. بلا هذا يبقى حقل العميل فارغاً بعد الإنشاء (والمعرَّف
      مسنداً!) — وعلى شركةٍ بأكثر من 500 عميل يبقى فارغاً للأبد لأن
      `partners/lookup/` مسقوفة عند 500. */
@@ -563,14 +563,42 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     focusBarcodeField();
   };
 
-  // T-SERVICELINE: الخدمة المُنشأة من داخل الفاتورة تُستعمل فوراً — قائمة الأصناف
-  // تصل عبر الخصائص من الشاشة الأم، فننتظر تحديثها ونعرض المُضاف محلياً حتى يصل.
-  const [extraProducts, setExtraProducts] = useState<ProductRow[]>([]);
+  /* T-SERVICELINE: الخدمة المُنشأة من داخل الفاتورة تُستعمل فوراً — قائمة المنتجات
+     تصل عبر الخصائص من الشاشة الأم، فننتظر تحديثها ونعرض المُضاف محلياً حتى يصل.
+
+     T-PRODUCT M4: كان المرشّح `!known.has(p.id)` يُسقط كل منتجٍ **موجود** — أي
+     كلَّ ما يمسّه التعديل السريع — فلم تعمل هذه المزامنة يوماً للتعديل، وإنما
+     كان السطر يتعافى بجلب الكتالوج كاملاً عبر حدث `products`: نافذةُ اسمٍ قديمٍ
+     مرئية، وجلبٌ ثقيل لتغيير حقلٍ واحد. الآن النسخة المحلية **تتجاوز** القادمة
+     من الأم بدل أن تُرمى.
+
+     والإزالة على المصفوفة نفسها لا على الخريطة وحدها: `productOptions` تُبنى من
+     المصفوفة، فتكرارُ الصفّ فيها يُظهر المنتج المعدَّل مرتين في كل قائمة إكمال. */
+  const [productOverrides, setProductOverrides] = useState<ProductRow[]>([]);
   const products = useMemo(() => {
-    if (extraProducts.length === 0) return productsProp;
-    const known = new Set(productsProp.map((p) => p.id));
-    return [...productsProp, ...extraProducts.filter((p) => !known.has(p.id))];
-  }, [productsProp, extraProducts]);
+    if (productOverrides.length === 0) return productsProp;
+    const merged = new Map<number, ProductRow>();
+    productsProp.forEach((p) => merged.set(Number(p.id), p));
+    productOverrides.forEach((p) => merged.set(Number(p.id), p));
+    return [...merged.values()];
+  }, [productsProp, productOverrides]);
+
+  /**
+   * T-PRODUCT M4 — المعالِج الواحد لكل تعديلٍ على منتج من داخل هذه الفاتورة:
+   * القلم (`ItemQuickEditModal`) والبطاقة (`ProductCardModal`) يمرّان به معاً.
+   *
+   * نصفُ الكتالوج وحده يكفي هنا: خلية البند تقرأ الاسم من `productsById` لا من
+   * نسخةٍ ملتقطة على السطر — فلا نصف سطورٍ لازم. (لا تُضِف واحداً: كتابة الاسم
+   * على السطر تجعل له مصدرَي حقيقة.)
+   */
+  const applyProductUpdate = useCallback((updated: Record<string, unknown>) => {
+    const row = updated as unknown as ProductRow;
+    if (!row?.id) return;
+    setProductOverrides((prev) => {
+      const hit = prev.some((p) => Number(p.id) === Number(row.id));
+      return hit ? prev.map((p) => (Number(p.id) === Number(row.id) ? row : p)) : [...prev, row];
+    });
+  }, []);
 
   const productsById = useMemo(() => {
     const m = new Map<number, ProductRow>();
@@ -596,7 +624,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     () => buildReservationIndex(reservationRows, customerId === "" ? null : Number(customerId)),
     [reservationRows, customerId],
   );
-  /** هل لأيّ صنف على الفاتورة حجزٌ سارٍ؟ بلا حجز يبقى «الرصيد» وحده. */
+  /** هل لأيّ منتج على الفاتورة حجزٌ سارٍ؟ بلا حجز يبقى «الرصيد» وحده. */
   const anyLineReserved = useMemo(
     () => lines.some((l) => l.product !== ""
       && totalReserved(reservationIndex.get(Number(l.product))) > 0),
@@ -610,7 +638,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [serialLineKey, setSerialLineKey] = useState<string | null>(null);
   /** T-NOTES: البند المفتوحة ملاحظتاه. */
   const [notesLineKey, setNotesLineKey] = useState<string | null>(null);
-  /** الصنف يتتبّع وحداته؟ الخدمة مستثناة — بلا مخزون فبلا وحدات. */
+  /** المنتج يتتبّع وحداته؟ الخدمة مستثناة — بلا مخزون فبلا وحدات. */
   const lineTracksSerials = useCallback(
     (row: DraftLine) => {
       if (serialMode === "off" || row.product === "") return false;
@@ -619,7 +647,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     },
     [serialMode, productsById],
   );
-  /** عمود الأرقام يظهر فقط حين تحمل الفاتورة صنفاً تسلسلياً — لا عمود فارغ. */
+  /** عمود الأرقام يظهر فقط حين تحمل الفاتورة منتجاً تسلسلياً — لا عمود فارغ. */
   const anyLineSerialized = useMemo(
     () => lines.some(lineTracksSerials),
     [lines, lineTracksSerials],
@@ -1703,8 +1731,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     markDirty();
   };
 
-  /** يُدرج صنفاً في أول سطر فارغ (أو سطر جديد) ثم يجلب سعره — مدخل موحّد
-   *  للشجرة وزر «موافق» في بطاقة الصنف. */
+  /** يُدرج منتجاً في أول سطر فارغ (أو سطر جديد) ثم يجلب سعره — مدخل موحّد
+   *  للشجرة وزر «موافق» في بطاقة المنتج. */
   const insertProductIntoInvoice = (
     productId: number,
     opts?: { quantity?: number; unitPrice?: number; source?: DraftLine["priceSource"] }
@@ -1741,7 +1769,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       const next = prev.map((r) => (r.key === key ? { ...r, ...patch } : r));
       const lastLine = next[next.length - 1];
       // T-R1: أبقِ سطراً فارغاً واحداً فقط في الذيل. أضِف سطراً جديداً عندما يكتسب
-      // آخر سطر صنفاً حقيقياً فقط — لا بناءً على الكمية. (الخلل السابق: makeEmptyLine
+      // آخر سطر منتجاً حقيقياً فقط — لا بناءً على الكمية. (الخلل السابق: makeEmptyLine
       // يبدأ بالكمية "1" فكان كل سطر فارغ يُحسب «ممتلئاً» وتتكاثر السطور الوهمية.)
       const lastHasProduct = lastLine && lastLine.product !== "" && lastLine.product !== -1;
       if (lastHasProduct) {
@@ -1804,7 +1832,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     if (docType === "SALES_INVOICE") return "last_invoice";
     if (docType === "SALES_QUOTATION") return "sales_quote";
     if (docType === "CUSTOMER_QUOTE") return "quote";
-    // سعر عام من كرت الصنف — أضعف المصادر (لا عرض لهذا الزبون ولا شراء سابق).
+    // سعر عام من كرت المنتج — أضعف المصادر (لا عرض لهذا الزبون ولا شراء سابق).
     if (docType === "PRODUCT_SALE_PRICE") return "default";
     return null;
   };
@@ -1826,19 +1854,19 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   ) => {
     const pr = productsById.get(productId);
 
-    // T-R3 / M5: تنبيه عند تكرار الصنف (نفس سلوك فاتورة الشراء)
+    // T-R3 / M5: تنبيه عند تكرار المنتج (نفس سلوك فاتورة الشراء)
     const isDuplicate = lines.some(
       (l) => l.key !== key && l.product !== "" && l.product !== -1 && Number(l.product) === Number(productId)
     );
     if (isDuplicate && (salesSettings?.warn_on_duplicate_item ?? true)) {
       const merge = await confirm({
-        message: `الصنف «${pr?.name_ar || productId}» مضاف مسبقاً في الفاتورة. اختر الإجراء:`,
+        message: `المنتج «${pr?.name_ar || productId}» مضاف مسبقاً في الفاتورة. اختر الإجراء:`,
         confirmText: "دمج الكمية",
         cancelText: "سطر جديد مستقل",
         danger: false,
       });
       if (merge) {
-        // ابحث عن السطر الأصلي الذي يحوي هذا الصنف واجمع الكميات
+        // ابحث عن السطر الأصلي الذي يحوي هذا المنتج واجمع الكميات
         setLines((prev) => {
           const next = [...prev];
           const dupIndex = next.findIndex(
@@ -1851,7 +1879,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               quantity: String((Number(next[dupIndex].quantity) || 0) + addedQty),
             };
           }
-          // أفرغ السطر الحالي (الذي اختار فيه المستخدم الصنف المكرر)
+          // أفرغ السطر الحالي (الذي اختار فيه المستخدم المنتج المكرر)
           const currentIdx = next.findIndex((l) => l.key === key);
           if (currentIdx >= 0) {
             next[currentIdx] = { ...next[currentIdx], product: "", quantity: "0", unit_price: "0", priceTouched: false };
@@ -1863,7 +1891,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       }
     }
 
-    // T-R2: عند تمرير سعر من بطاقة الصنف نستخدمه ونثبّته (priceTouched) فلا يدهسه
+    // T-R2: عند تمرير سعر من بطاقة المنتج نستخدمه ونثبّته (priceTouched) فلا يدهسه
     // الـ resolver؛ وإلا نبدأ بسعر البيع الافتراضي ثم نقترح عبر الـ resolver.
     const price =
       opts?.unitPrice != null
@@ -1896,13 +1924,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       product: productId,
       unit_price: price,
       priceSource: opts?.source ?? null,
-      // T-SERIAL: وحدات الصنف السابق لا معنى لها على صنف جديد.
+      // T-SERIAL: وحدات المنتج السابق لا معنى لها على منتج جديد.
       serials: [],
       // سعر مُدخَل من البطاقة = مُثبّت (لا يُعاد تسعيره تلقائياً).
       ...(opts?.unitPrice != null ? { quantity: String(opts.quantity ?? 1), priceTouched: true } : {}),
     });
     // FEAT-2 / DEF-005: اقترح سعر الوحدة عبر PriceResolver المشترك — آخر سعر
-    // دفعه هذا العميل لهذا الصنف (يفوز دائماً)، ثم عرض السعر اليدوي، ثم سعر البيع
+    // دفعه هذا العميل لهذا المنتج (يفوز دائماً)، ثم عرض السعر اليدوي، ثم سعر البيع
     // الافتراضي، ثم فارغ. القيمة تبقى قابلة للتعديل، ولا تُدَس على سطر حرّره
     // المستخدم يدوياً (edit-protection). الشارة تعكس مصدر السعر.
     if (networkOnline && opts?.unitPrice == null) {
@@ -2019,7 +2047,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     })();
     setPickerQuery(t);
     setProductPickerLineKey(targetKey);
-    setMsg(`لا صنف بالباركود/الرقم «${t}» — ابحث في الفهرس الكامل.`);
+    setMsg(`لا منتج بالباركود/الرقم «${t}» — ابحث في الفهرس الكامل.`);
   };
 
   // G1: عرض موحّد بلا أصفار عشرية زائدة (مع فاصل آلاف للمبالغ).
@@ -2093,14 +2121,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         if (!isPosted) resetForm();
       },
       plus: () => {
-        // فهرس الحساب/الصنف حسب الحقل المركَّز عليه
+        // فهرس الحساب/المنتج حسب الحقل المركَّز عليه
         const active = document.activeElement as HTMLElement | null;
         const field = active?.getAttribute?.("data-ktra-field");
         if (field === "customer") {
           noteKey("+ فهرس الحسابات");
           setCustomerPickerOpen(true);
         } else {
-          noteKey("+ فهرس الأصناف");
+          noteKey("+ فهرس المنتجات");
           const emptyIdx = lines.findIndex((l) => l.product === "");
           const key =
             emptyIdx >= 0 ? lines[emptyIdx].key : lines[lines.length - 1]?.key;
@@ -2168,12 +2196,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const totalQty = lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
 
   /* ───────────── أعمدة جدول البنود (KitGrid) ─────────────
-     T-RESERVEVIS: «المتاح» وحده كان يعرض الرصيد الكامل فيبدو الصنف المحجوز حراً.
+     T-RESERVEVIS: «المتاح» وحده كان يعرض الرصيد الكامل فيبدو المنتج المحجوز حراً.
      صار الرصيد صريحاً، ويظهر معه عمودا «محجوز/المتاح للبيع» فقط حين يوجد حجز
      يزاحم هذه الفاتورة — لا أعمدة فارغة على فاتورة بلا حجز. */
   const gridColumns: KitGridColumn<DraftLine>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
-    { key: "product", header: "بيان الصنف", width: "30%" },
+    { key: "product", header: "وصف المنتج", width: "30%" },
     { key: "avail", header: "الرصيد", width: "70px", align: "center", readOnly: true },
     ...(anyLineReserved ? [
       {
@@ -2211,7 +2239,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       },
     ] : []),
     { key: "quantity", header: "الكمية", width: "84px", align: "center", type: "number" },
-    // T-SERIAL: زر الوحدات على الأصناف التسلسلية وحدها، ويختفي كلياً بنمط «معطّل».
+    // T-SERIAL: زر الوحدات على المنتجات التسلسلية وحدها، ويختفي كلياً بنمط «معطّل».
     ...(anyLineSerialized ? [{
       key: "serials", header: "الوحدات", width: "92px", align: "center" as const, readOnly: true,
     }] : []),
@@ -2287,13 +2315,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     return () => { cancelled = true; };
   }, [customerId, networkOnline]);
 
-  /* task13 M5: منتقي مدمج — الكتابة في الخلية تفلتر الأصناف فورياً وتعبئ
-     السطر (المودال الكامل يبقى متاحاً من زر «…» واختصار +). لا خيار «صنف حر»
-     هنا لأن سطر فاتورة المبيعات يتطلب صنفاً معرّفاً في المخزون. */
+  /* task13 M5: منتقي مدمج — الكتابة في الخلية تفلتر المنتجات فورياً وتعبئ
+     السطر (المودال الكامل يبقى متاحاً من زر «…» واختصار +). لا خيار «منتج حر»
+     هنا لأن سطر فاتورة المبيعات يتطلب منتجاً معرّفاً في المخزون. */
   const productOptions = useMemo(
     () => products.map((p) => {
       // task24: السعر المقترح يظهر داخل الخيار مباشرة (بلا نقر): آخر بيع/عرض سعر
-      // لهذا العميل من خريطة العميل، وإلا سعر البيع الافتراضي للصنف.
+      // لهذا العميل من خريطة العميل، وإلا سعر البيع الافتراضي للمنتج.
       const cp = customerPriceMap.get(p.id);
       let price: string | undefined;
       let priceLabel: string | undefined;
@@ -2307,7 +2335,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           link: pr.document_id ? `/sales/invoices/${pr.document_id}` : undefined,
         }));
       } else if (p.sale_price != null && p.sale_price !== "" && Number(p.sale_price) > 0) {
-        // بلا عميل مختار (أو بلا أي سعر خاص به): السعر العام من كرت الصنف.
+        // بلا عميل مختار (أو بلا أي سعر خاص به): السعر العام من كرت المنتج.
         price = formatMoney(Number(p.sale_price));
         priceLabel = "سعر عام";
       } else if (p.online_price != null && p.online_price !== "" && Number(p.online_price) > 0) {
@@ -2337,7 +2365,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         price,
         priceLabel,
         prices,
-        // T-SEARCH: رقم الصنف وباركوده يُبحَث فيهما ولا يُعرضان — كانا يصلان
+        // T-SEARCH: رقم المنتج وباركوده يُبحَث فيهما ولا يُعرضان — كانا يصلان
         // الشاشة في البيانات ولا يجدهما البحث المدمج أبداً، فيضطرّ البائع لفتح
         // الفهرس الكامل لكل مسحة باركود.
         keywords: [p.sku, p.barcode].filter(Boolean).join(" ").toLowerCase(),
@@ -2348,8 +2376,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const renderProductCell = (row: DraftLine, ri: number) => {
     const selectedId = row.product && Number(row.product) > 0 ? Number(row.product) : null;
-    // T-REORDER: صنفٌ نفد أو بلغ حدّه لا يُنهي البيع ما دام في نوعه موديلٌ آخر
-    // على الرفّ. الشريط يظهر تحت السطر عند الحاجة وحدها، والنقر يستبدل الصنف
+    // T-REORDER: منتجٌ نفد أو بلغ حدّه لا يُنهي البيع ما دام في نوعه موديلٌ آخر
+    // على الرفّ. الشريط يظهر تحت السطر عند الحاجة وحدها، والنقر يستبدل المنتج
     // في السطر نفسه (فيعاد تسعيره من مصدره كأي اختيار).
     const selectedProduct = selectedId != null ? productsById.get(selectedId) : undefined;
     const alternatives = selectedProduct && needsAlternative(selectedProduct)
@@ -2365,7 +2393,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         })()}
         options={productOptions}
         disabled={readOnly}
-        placeholder="اكتب اسم الصنف…"
+        placeholder="اكتب اسم المنتج…"
         onPick={(id) => {
           void onSelectProduct(row.key, Number(id));
           setTimeout(() => {
@@ -2376,22 +2404,22 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         onEdit={readOnly ? undefined : (id) => setQuickEditProductId(Number(id))}
         onShowMore={(q) => { setPickerQuery(q); setProductPickerLineKey(row.key); }}
       />
-      {/* DEF-008: أيقونة (i) بجانب المنتج المختار على السطر → بطاقة الصنف */}
+      {/* DEF-008: أيقونة (i) بجانب المنتج المختار على السطر → بطاقة المنتج */}
       {selectedId != null && (
         <button
           type="button"
           className="ktra-ellipsis"
           onClick={() => { setCardCanAdd(false); setCardProductId(selectedId); }}
-          title="بطاقة الصنف"
+          title="بطاقة المنتج"
         ><Info className="w-3.5 h-3.5" /></button>
       )}
-      {/* T-ITEMS M3: قلمٌ بجانب (i) — تعديل الصنف دون مغادرة الفاتورة. */}
+      {/* T-ITEMS M3: قلمٌ بجانب (i) — تعديل المنتج دون مغادرة الفاتورة. */}
       {selectedId != null && !readOnly && (
         <button
           type="button"
           className="ktra-ellipsis"
           onClick={() => setQuickEditProductId(selectedId)}
-          title="تعديل سريع للصنف"
+          title="تعديل سريع للمنتج"
         ><Pencil className="w-3.5 h-3.5" /></button>
       )}
       {/* DEF-005: شارة مصدر السعر المقترح */}
@@ -2400,7 +2428,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       )}
       {row.priceSource === "default" && (
         <span className="ktra-price-badge ktra-price-badge--general"
-          title="سعر عام من كرت الصنف — لا عرض لهذا الزبون ولا شراء سابق">سعر عام</span>
+          title="سعر عام من كرت المنتج — لا عرض لهذا الزبون ولا شراء سابق">سعر عام</span>
       )}
       {(row.priceSource === "quote" || row.priceSource === "sales_quote") && (() => {
         // sales_quote ⇒ عرض «واجهة العروض»؛ quote ⇒ عرض كرت الزبون (رابط احتياطي).
@@ -2427,7 +2455,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         className="ktra-ellipsis"
         disabled={readOnly}
         onClick={() => setProductPickerLineKey(row.key)}
-        title="فهرس الأصناف الكامل (+)"
+        title="فهرس المنتجات الكامل (+)"
       >…</button>
     </div>
     {selectedProduct && needsAlternative(selectedProduct) && !readOnly && (
@@ -2442,7 +2470,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 key={alt.id}
                 type="button"
                 className="rounded border border-[var(--ktra-warn-bd)] bg-[var(--ktra-warn-bg)] px-1 py-px text-[var(--ktra-warn-fg)] hover:opacity-80"
-                title={`استبدال الصنف بـ«${formatProductPrimaryName(alt)}» — المتاح ${formatQuantity(availableOf(alt))}`}
+                title={`استبدال المنتج بـ«${formatProductPrimaryName(alt)}» — المتاح ${formatQuantity(availableOf(alt))}`}
                 onClick={() => { void onSelectProduct(row.key, alt.id); }}
               >
                 {formatProductPrimaryName(alt)} · {formatQuantity(availableOf(alt))}
@@ -3052,7 +3080,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       onClick: () => openInNewTab(`/sales/delivery-notes/new?invoice=${draftId}`),
     } as KitToolbarAction] : []),
     // T-SERVICELINE: «بدي أضيف خدمة» — إنشاؤها من داخل الفاتورة ثم وضعها في
-    // السطر مباشرةً، بدل الخروج إلى شاشة الأصناف والعودة.
+    // السطر مباشرةً، بدل الخروج إلى شاشة المنتجات والعودة.
     ...(readOnly ? [] : [{
       key: "add-service",
       label: "إضافة خدمة",
@@ -3406,7 +3434,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       columns={[
         {
           key: "name",
-          header: "الصنف",
+          header: "المنتج",
           render: (row) => {
             const pr = productsById.get(Number(row.product));
             return (
@@ -4057,7 +4085,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               getRowKey={(r) => r.key}
               onChange={readOnly ? undefined : gridOnChange}
               onAddRow={readOnly ? undefined : addRow}
-              emptyHint="لا توجد بنود — أضف صنفاً (+ فهرس الأصناف)"
+              emptyHint="لا توجد بنود — أضف منتجاً (+ فهرس المنتجات)"
             />
             {/* DEF-006: السطر الجديد يُضاف فقط عبر هذا الزر الصريح (لا من نقر خارجي/شجرة). */}
             {!readOnly && (
@@ -4164,21 +4192,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         />
       )}
 
-      {/* T-ITEMS M3: تعديل سريع للصنف من السطر — الفاتورة تبقى خلف النافذة
-          بحالتها كاملةً. الصفّ المحدَّث يحلّ محلّ نسخته في `extraProducts`،
-          والحدث يوقظ الشاشة الأم التي تحمل القائمة الرئيسية. */}
+      {/* T-ITEMS M3: تعديل سريع للمنتج من السطر — الفاتورة تبقى خلف النافذة
+          بحالتها كاملةً. الصفّ المحدَّث يتجاوز نسخته القادمة من الشاشة الأم،
+          والحدث يوقظ الشاشات الأخرى التي تحمل قائمتها الخاصة. */}
       {quickEditProductId != null && (
         <ItemQuickEditModal
           productId={quickEditProductId}
           onClose={() => setQuickEditProductId(null)}
-          onSaved={(updated) => {
-            const row = updated as unknown as ProductRow;
-            if (!row?.id) return;
-            setExtraProducts((prev) => {
-              const hit = prev.some((p) => Number(p.id) === Number(row.id));
-              return hit ? prev.map((p) => (Number(p.id) === Number(row.id) ? row : p)) : [...prev, row];
-            });
-          }}
+          onSaved={applyProductUpdate}
           onOpenFullCard={() => openInNewTab(productProfilePath(quickEditProductId))}
         />
       )}
@@ -4193,16 +4214,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           onSaved={(created: ProductRow) => {
             setShowServiceModal(false);
             if (!created?.id) return;
-            setExtraProducts((prev) => [...prev, created]);
-            // الشاشة الأم تحمل قائمة الأصناف — نُعلمها كي تُحدّثها من الخادم.
+            setProductOverrides((prev) => [...prev, created]);
+            // الشاشة الأم تحمل قائمة المنتجات — نُعلمها كي تُحدّثها من الخادم.
             try { eventBus.publish("products", resolveTenantId()); } catch { /* غير حرج */ }
-            // نفس المدخل الموحّد الذي تستعمله الشجرة وبطاقة الصنف.
+            // نفس المدخل الموحّد الذي تستعمله الشجرة وبطاقة المنتج.
             insertProductIntoInvoice(created.id);
           }}
         />
       )}
 
-      {/* فهرس الأصناف */}
+      {/* فهرس المنتجات */}
       <SalesProductPickerModal
         isOpen={productPickerLineKey !== null}
         products={products}
@@ -4216,7 +4237,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         onClose={() => setProductPickerLineKey(null)}
       />
 
-      {/* DEF-007/008: بطاقة الصنف المشتركة */}
+      {/* DEF-007/008: بطاقة المنتج المشتركة */}
       {cardProductId != null && (
         <ProductCardModal
           productId={cardProductId}
@@ -4225,6 +4246,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           suggestedPrice={cardSuggestedPrice}
           priceSource={cardPriceSource}
           onConfirm={cardCanAdd && !readOnly && !isPosted ? (opts) => insertProductIntoInvoice(cardProductId, opts) : undefined}
+          onProductSaved={applyProductUpdate}
           onClose={() => setCardProductId(null)} />
       )}
 
@@ -4258,7 +4280,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         const pr = row.product !== "" ? productsById.get(Number(row.product)) : undefined;
         return (
           <LineNotesModal
-            productName={pr ? (pr.name_ar || pr.name_en || pr.sku) : "بند بلا صنف"}
+            productName={pr ? (pr.name_ar || pr.name_en || pr.sku) : "بند بلا منتج"}
             internalNote={row.internal_note ?? ""}
             customerNote={row.customer_note ?? ""}
             readOnly={readOnly}

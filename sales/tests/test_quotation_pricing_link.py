@@ -27,7 +27,7 @@ def env():
     create_fiscal_year(tenant, 2026)
     customer = Partner.objects.create(tenant=tenant, name="عميل", partner_type="Customer")
     product = Product.objects.create(
-        tenant=tenant, sku="QL-1", name_ar="صنف", quantity_on_hand=10, avg_cost=50)
+        tenant=tenant, sku="QL-1", name_ar="منتج", quantity_on_hand=10, avg_cost=50)
     return tenant, ils, customer, product
 
 

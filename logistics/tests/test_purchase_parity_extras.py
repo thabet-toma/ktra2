@@ -34,7 +34,7 @@ class PurchaseParityExtrasTest(APITestCase):
             tenant=cls.tenant, name="مورد متكرّر", partner_type="Supplier",
             linked_account=cls.ap)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="PS-1", name_ar="صنف متكرّر",
+            tenant=cls.tenant, sku="PS-1", name_ar="منتج متكرّر",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
 
     def _auth(self):
@@ -49,7 +49,7 @@ class PurchaseParityExtrasTest(APITestCase):
             if due_offset is not None else None,
             exchange_rate=Decimal("1"), grand_total=Decimal(total))
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف متكرّر",
+            invoice=inv, product=self.product, name="منتج متكرّر",
             quantity=Decimal("3"), unit_price=Decimal("100"),
             total_price=Decimal(total))
         return inv

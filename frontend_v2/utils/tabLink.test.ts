@@ -86,7 +86,7 @@ test('المناولة تُستهلَك مرّة واحدة — التحديث �
 test('سجلٌّ متقادم يُهمَل ويُمسح', () => {
   const store = memoryStore();
   const now = 1_700_000_000_000;
-  writeHandoff(store, 'tok', { openerId: 'opener', openerLabel: 'الأصناف', at: now });
+  writeHandoff(store, 'tok', { openerId: 'opener', openerLabel: 'المنتجات', at: now });
   assert.equal(takeHandoff(store, 'tok', now + TAB_HANDOFF_TTL_MS + 1), null);
   assert.equal(store.map.size, 0);
 });
@@ -124,7 +124,7 @@ test('تحضير المناولة لا يلمس رابط التبويب الفا
 test('الكنسة تُزيل سجلّات التبويبات التي لم تُفتح، وتُبقي الطازج ولا تمسّ غيره', () => {
   const store = memoryStore();
   const now = 1_700_000_000_000;
-  writeHandoff(store, 'fresh', { openerId: 'a', openerLabel: 'الأصناف', at: now });
+  writeHandoff(store, 'fresh', { openerId: 'a', openerLabel: 'المنتجات', at: now });
   writeHandoff(store, 'stale', { openerId: 'b', openerLabel: 'الصفقات', at: now - TAB_HANDOFF_TTL_MS - 1 });
   store.setItem(`${TAB_HANDOFF_KEY_PREFIX}broken`, 'ليس JSON');
   store.setItem('ktra.uiLogLevel', 'warn');

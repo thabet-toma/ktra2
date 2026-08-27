@@ -39,7 +39,7 @@ def env():
         tax_account=vat_out, is_active=True,
     )
     product = Product.objects.create(
-        tenant=tenant, sku="P-1", name_ar="صنف", quantity_on_hand=100, avg_cost=10)
+        tenant=tenant, sku="P-1", name_ar="منتج", quantity_on_hand=100, avg_cost=10)
     return tenant, customer, tax16, product
 
 

@@ -37,7 +37,7 @@ def env():
     customer = Partner.objects.create(
         tenant=tenant, name="عميل الأرباح", partner_type="Customer", linked_account=ar)
     product = Product.objects.create(
-        tenant=tenant, sku="PR-1", name_ar="صنف ربح", quantity_on_hand=100, avg_cost=Decimal("10"))
+        tenant=tenant, sku="PR-1", name_ar="منتج ربح", quantity_on_hand=100, avg_cost=Decimal("10"))
     # حسابا التكلفة والمخزون مطلوبان لترحيل فاتورة تخصم المخزون (قيد COGS).
     cogs_acc = Account.objects.create(
         tenant=tenant, code="5101-P", name="تكلفة المبيعات", account_type="Expense", is_active=True)
@@ -132,7 +132,7 @@ def test_legacy_invoice_kind_blank_is_counted_as_sale(env):
 def test_cogs_map_keyed_by_invoice_and_product(env):
     tenant, cur, customer, product = env
     other_product = Product.objects.create(
-        tenant=tenant, sku="PR-2", name_ar="صنف آخر",
+        tenant=tenant, sku="PR-2", name_ar="منتج آخر",
         quantity_on_hand=50, avg_cost=Decimal("4"))
     inv = SalesInvoice.objects.create(
         tenant=tenant, invoice_number="P-MAP", customer=customer,

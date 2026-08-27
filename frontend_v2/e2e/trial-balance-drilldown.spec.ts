@@ -76,7 +76,7 @@ const SALES_INVOICE = {
   grand_total: '1500.00',
   lines: [
     {
-      id: 1, product: 1, product_name: 'صنف تجريبي', quantity: '1',
+      id: 1, product: 1, product_name: 'منتج تجريبي', quantity: '1',
       unit_price: '1500.00', line_total: '1500.00',
     },
   ],

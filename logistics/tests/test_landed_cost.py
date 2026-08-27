@@ -19,7 +19,7 @@ from logistics.landed_cost import (
 
 
 class _MockItemsQS:
-    """محاكاة QuerySet للأصناف — يدعم select_related().all() و __iter__."""
+    """محاكاة QuerySet للمنتجات — يدعم select_related().all() و __iter__."""
     def __init__(self, items=None):
         self._items = items or []
     def __iter__(self):
@@ -145,7 +145,7 @@ class LandedCostInvariantTest(SimpleTestCase):
         self.assertEqual(len(parts), 3)
 
     def test_single_item_no_drift(self):
-        """صنف واحد: لا انحراف ممكن."""
+        """منتج واحد: لا انحراف ممكن."""
         from types import SimpleNamespace
         items = [
             SimpleNamespace(

@@ -813,7 +813,7 @@ class ServiceOrderIsolationTest(ServiceOrderTestBase):
 
     def test_a_part_cannot_point_at_another_company_product(self):
         outsider = Product.objects.create(
-            tenant=self.other, sku="OUT-1", name_ar="صنف الغير",
+            tenant=self.other, sku="OUT-1", name_ar="منتج الغير",
         )
 
         response = self.client.post(

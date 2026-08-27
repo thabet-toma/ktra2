@@ -20,7 +20,7 @@ from tenants.services import create_company
 
 
 class StockByDimensionReportTest(APITestCase):
-    """موردان × ثلاثة أصناف، وارد وصادر ومرتجع — ومستودعان."""
+    """موردان × ثلاثة منتجات، وارد وصادر ومرتجع — ومستودعان."""
 
     @classmethod
     def setUpTestData(cls):
@@ -103,7 +103,7 @@ class StockByDimensionReportTest(APITestCase):
         other_supplier = Partner.objects.create(
             tenant=cls.other_tenant, name="مورد الجوار", partner_type="Supplier")
         other_product = Product.objects.create(
-            tenant=cls.other_tenant, sku="OTH", name_ar="صنف الجوار",
+            tenant=cls.other_tenant, sku="OTH", name_ar="منتج الجوار",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
         move(other_product, "IN", "7", "5", partner=other_supplier,
              warehouse=Warehouse.objects.get(tenant=cls.other_tenant, is_default=True),
@@ -138,7 +138,7 @@ class StockByDimensionReportTest(APITestCase):
 
     # ── المحاور ───────────────────────────────────────────────────────
     def test_supplier_dimension_lists_each_suppliers_products_and_quantities(self):
-        """«حسب المورد» ⇒ لكل مورد أصنافه وكمياتها — لا صنفَ مورّدٍ آخر معه."""
+        """«حسب المورد» ⇒ لكل مورد منتجاته وكمياتها — لا منتجَ مورّدٍ آخر معه."""
         data = self._run(group_by="supplier")
         self.assertEqual(data["columns"][0]["header"], "المورد")
 
@@ -160,7 +160,7 @@ class StockByDimensionReportTest(APITestCase):
         self.assertEqual(set(by_supplier["مورد باء"]), {"PAP"})
         self.assertEqual(Decimal(by_supplier["مورد باء"]["PAP"]["qty_in"]), Decimal("50"))
 
-        # عزل الشركة: لا مورّد جارٍ ولا صنفُه.
+        # عزل الشركة: لا مورّد جارٍ ولا منتجُه.
         self.assertNotIn("مورد الجوار", by_supplier)
         self.assertNotIn("OTH", {r["sku"] for r in data["rows"]})
 
@@ -197,7 +197,7 @@ class StockByDimensionReportTest(APITestCase):
         summary = self._run(group_by="supplier", detail="summary")
         self.assertIn("sku", {c["key"] for c in detailed["columns"]})
         self.assertNotIn("sku", {c["key"] for c in summary["columns"]})
-        # مورد ألف صنفان مفصَّلاً وصفٌّ واحد ملخَّصاً، والوارد نفسه (5 + 10).
+        # مورد ألف منتجان مفصَّلاً وصفٌّ واحد ملخَّصاً، والوارد نفسه (5 + 10).
         alef = next(r for r in summary["rows"] if r["dim_label"] == "مورد ألف")
         self.assertEqual(Decimal(alef["qty_in"]), Decimal("15"))
         self.assertEqual(len([r for r in detailed["rows"] if r["dim_label"] == "مورد ألف"]), 2)
@@ -259,7 +259,7 @@ class StockByDimensionReportTest(APITestCase):
 
     # ── تطابق الإيراد مع مصدره الوحيد ─────────────────────────────────
     def test_revenue_matches_the_platforms_single_revenue_source(self):
-        """إيراد المحور = صافي «المبيعات حسب الصنف» — لا رقمُ إيرادٍ ثانٍ.
+        """إيراد المحور = صافي «المبيعات حسب المنتج» — لا رقمُ إيرادٍ ثانٍ.
 
         الفاتورة: سطرٌ بـ2600 وخصمُ فاتورة 100 ⇒ الصافي 2500 (نصيبه من الخصم
         كامله، إذ هو السطر الوحيد). الرقم نفسه يجب أن يخرج من تقرير المبيعات
@@ -314,10 +314,10 @@ class StockByDimensionReportTest(APITestCase):
 
         before, rows_before = _count()
 
-        # صفوف جديدة بأصنافٍ وفواتير جديدة — لا تكرارٌ لصفٍّ قائم.
+        # صفوف جديدة بمنتجاتٍ وفواتير جديدة — لا تكرارٌ لصفٍّ قائم.
         for index in range(6):
             product = Product.objects.create(
-                tenant=self.tenant, sku=f"EXTRA-{index}", name_ar=f"صنف {index}",
+                tenant=self.tenant, sku=f"EXTRA-{index}", name_ar=f"منتج {index}",
                 brand="ماركة أخرى", quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
             invoice = SalesInvoice.objects.create(
                 tenant=self.tenant, invoice_number=f"SI-EX-{index}",

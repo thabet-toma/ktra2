@@ -34,7 +34,7 @@ const FEATURES: { icon: React.ElementType; title: string; desc: string; accent: 
   {
     icon: Ship,
     title: "الاستيراد والتكاليف",
-    desc: "تابع الشحنات والمصاريف والتخليص حتى احتساب التكلفة الفعلية لكل صنف.",
+    desc: "تابع الشحنات والمصاريف والتخليص حتى احتساب التكلفة الفعلية لكل منتج.",
     accent: "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-300",
   },
   {
@@ -46,7 +46,7 @@ const FEATURES: { icon: React.ElementType; title: string; desc: string; accent: 
   {
     icon: Warehouse,
     title: "المخزون والمستودعات",
-    desc: "اعرف الرصيد المتاح وحركة الأصناف ونقاط إعادة الطلب لحظة بلحظة.",
+    desc: "اعرف الرصيد المتاح وحركة المنتجات ونقاط إعادة الطلب لحظة بلحظة.",
     accent: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-300",
   },
   {

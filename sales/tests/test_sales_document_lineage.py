@@ -35,7 +35,7 @@ class SalesDocumentLineageTest(APITestCase):
             tenant=cls.tenant, name="زبون النسب", partner_type="Customer",
             linked_account=cls.ar)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="SLN-1", name_ar="صنف", quantity_on_hand=Decimal("20"),
+            tenant=cls.tenant, sku="SLN-1", name_ar="منتج", quantity_on_hand=Decimal("20"),
             is_service=True)
         FiscalPeriod.objects.create(
             tenant=cls.tenant, name="2026", start_date="2026-01-01",

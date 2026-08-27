@@ -42,7 +42,7 @@ def env(settings):
     c2 = Partner.objects.create(
         tenant=tenant, name="عميل2", partner_type="Customer", linked_account=ar)
     product = Product.objects.create(
-        tenant=tenant, sku="ALP-1", name_ar="صنف", quantity_on_hand=100,
+        tenant=tenant, sku="ALP-1", name_ar="منتج", quantity_on_hand=100,
         avg_cost=Decimal("10"))
     return tenant, cur, c1, c2, product
 
@@ -81,7 +81,7 @@ def test_returns_last_price_this_customer_paid(client, env):
 
 
 def test_falls_back_to_general_price_when_customer_never_bought_it(client, env):
-    """عميل بلا تاريخ على الصنف ⇒ آخر سعر عام — البوت يحتاج رقماً يقترحه لا فراغاً."""
+    """عميل بلا تاريخ على المنتج ⇒ آخر سعر عام — البوت يحتاج رقماً يقترحه لا فراغاً."""
     tenant, cur, c1, c2, product = env
     _post_invoice(tenant, cur, c1, product, number="A-1", date="2026-06-10", price=100)
 
@@ -101,7 +101,7 @@ def test_returns_null_when_never_sold(client, env):
 
 
 def test_another_company_cannot_see_the_price(client, env):
-    """العزل: نفس معرّف الصنف تحت شركة أخرى لا يكشف سعرها."""
+    """العزل: نفس معرّف المنتج تحت شركة أخرى لا يكشف سعرها."""
     tenant, cur, c1, c2, product = env
     _post_invoice(tenant, cur, c1, product, number="A-1", date="2026-06-10", price=100)
 

@@ -34,7 +34,7 @@ def env():
     customer = Partner.objects.create(
         tenant=tenant, name="عميل", partner_type="Customer", linked_account=ar)
     product = Product.objects.create(
-        tenant=tenant, sku="DL-1", name_ar="صنف التسليم",
+        tenant=tenant, sku="DL-1", name_ar="منتج التسليم",
         quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
     record_stock_movement(
         product=product, movement_type="IN", quantity=Decimal("100"),

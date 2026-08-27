@@ -1,12 +1,12 @@
 /**
- * DEF-007/008 — بطاقة الصنف (مودال مشترك).
- * مكوّن واحد يُعاد استخدامه في كل مداخل عرض بطاقة الصنف:
+ * DEF-007/008 — بطاقة المنتج (مودال مشترك).
+ * مكوّن واحد يُعاد استخدامه في كل مداخل عرض بطاقة المنتج:
  *   1) النقر المفرد على منتج في شجرة المنتجات.
  *   2) أيقونة (i) في قائمة بحث المنتجات (القائمة المنسدلة).
  *   3) أيقونة (i) بجانب منتج مختار على سطر فاتورة.
- * يقرأ نفس نقطة بيانات بطاقة الصنف (`inventory/products/{id}/profile/`) التي
+ * يقرأ نفس نقطة بيانات بطاقة المنتج (`inventory/products/{id}/profile/`) التي
  * يستهلكها الكرت الكامل، ويعرض نفس «النظرة العامة» (`ProductOverview`) — مصدر
- * عرض واحد للصنف، والنسخة المختصرة هنا تُحيل للكرت الكامل للتحرير.
+ * عرض واحد للمنتج، والنسخة المختصرة هنا تُحيل للكرت الكامل للتحرير.
  */
 import React, { useEffect, useState } from "react";
 import { ExternalLink, Check, Pencil } from "lucide-react";
@@ -30,12 +30,12 @@ export type ProductCardPriceSource = "last_invoice" | "quote" | "default" | null
 interface Props {
   productId: number;
   onClose: () => void;
-  /** عند تمريرها يظهر زر «موافق» الذي يُدرج الصنف في الفاتورة (بيع/شراء).
+  /** عند تمريرها يظهر زر «موافق» الذي يُدرج المنتج في الفاتورة (بيع/شراء).
    *  T-R2: في وضع الإضافة يُمرَّر الكمية والسعر المُدخلان. */
   onConfirm?: (opts?: { quantity: number; unitPrice: number }) => void;
   /** نصّ زر التأكيد (افتراضي: «موافق»). */
   confirmLabel?: string;
-  /** اسم الصنف الاحتياطي ليظهر فوراً حتى لو تعذّر تحميل بيانات البطاقة. */
+  /** اسم المنتج الاحتياطي ليظهر فوراً حتى لو تعذّر تحميل بيانات البطاقة. */
   productName?: string;
   /** T-R2: وضع الإضافة للفاتورة — يُظهر حقل الكمية والسعر مع شارة المصدر. */
   addMode?: boolean;
@@ -43,6 +43,14 @@ interface Props {
   suggestedPrice?: number | string | null;
   /** مصدر السعر المقترح للشارة. */
   priceSource?: ProductCardPriceSource;
+  /**
+   * T-PRODUCT M4: الصفّ بعد «تعديل سريع» من داخل البطاقة.
+   *
+   * كانت النتيجة تُبتلَع هنا (تُحدَّث البطاقة وحدها) فلا تصل مستدعيها أبداً —
+   * فمن عدّل الاسم من البطاقة داخل فاتورة رأى سطره على اسمه القديم. الآن
+   * البطاقة والقلم يسلّمان **نفس الحمولة لنفس المعالِج**.
+   */
+  onProductSaved?: (updated: Record<string, unknown>) => void;
 }
 
 const PRICE_SOURCE_LABEL: Record<NonNullable<ProductCardPriceSource>, string> = {
@@ -51,7 +59,7 @@ const PRICE_SOURCE_LABEL: Record<NonNullable<ProductCardPriceSource>, string> = 
   default: "السعر الافتراضي",
 };
 
-export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfirm, confirmLabel = "موافق", productName, addMode = false, suggestedPrice, priceSource = null }) => {
+export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfirm, confirmLabel = "موافق", productName, addMode = false, suggestedPrice, priceSource = null, onProductSaved }) => {
   const navigate = useNavigate();
   const [profile, setProfile] = useState<ProductProfileData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -127,10 +135,10 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
       open
       onClose={onClose}
       name={addMode ? "product-card-add" : "product-card"}
-      title={title ? `بطاقة الصنف: ${title}` : "بطاقة الصنف"}
+      title={title ? `بطاقة المنتج: ${title}` : "بطاقة المنتج"}
       defaultWidth={addMode ? 560 : 860}
       defaultHeight={addMode ? 460 : 620}
-      rootProps={{ "data-ktra-modal": "1", "aria-label": "بطاقة الصنف" } as React.HTMLAttributes<HTMLDivElement>}
+      rootProps={{ "data-ktra-modal": "1", "aria-label": "بطاقة المنتج" } as React.HTMLAttributes<HTMLDivElement>}
       footer={(
         <>
           {/* T-ITEMS M3: التعديل في مكانه أولاً — «الكرت الكامل» يغادر المستند
@@ -139,7 +147,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
             type="button"
             className="ktra-toolbtn"
             onClick={() => setQuickEdit(true)}
-            title="تعديل اسم الصنف وبياناته الأساسية دون مغادرة الشاشة"
+            title="تعديل اسم المنتج وبياناته الأساسية دون مغادرة الشاشة"
           >
             <Pencil className="w-4 h-4" /> تعديل سريع
           </button>
@@ -147,7 +155,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
             type="button"
             className="ktra-toolbtn"
             onClick={() => { onClose(); navigate(productProfilePath(productId)); }}
-            title="فتح كرت الصنف الكامل (عرض وتعديل)"
+            title="فتح كرت المنتج الكامل (عرض وتعديل)"
           >
             <ExternalLink className="w-4 h-4" /> الكرت الكامل
           </button>
@@ -157,7 +165,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
               <button
                 type="button"
                 onClick={() => { onConfirm(addMode ? confirmPayload() : undefined); onClose(); }}
-                title="إضافة الصنف إلى الفاتورة"
+                title="إضافة المنتج إلى الفاتورة"
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
               >
                 <Check className="w-4 h-4" /> {confirmLabel}
@@ -172,7 +180,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
             <div className="p-4 text-center text-[var(--ktra-ink-soft)]">جاري التحميل…</div>
           ) : error ? (
             <div role="alert" className="p-3 text-sm text-[var(--ktra-ink-soft)]">
-              تعذّر تحميل تفاصيل البطاقة. يمكنك المتابعة وإضافة الصنف للفاتورة.
+              تعذّر تحميل تفاصيل البطاقة. يمكنك المتابعة وإضافة المنتج للفاتورة.
             </div>
           ) : profile ? (
             <ProductOverview profile={profile} />
@@ -197,7 +205,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
                 rows={ledger}
                 loading={ledLoading}
                 error={ledError}
-                emptyText="لا توجد حركات مخزون لهذا الصنف."
+                emptyText="لا توجد حركات مخزون لهذا المنتج."
               />
             </div>
           )}
@@ -242,7 +250,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
         <ItemQuickEditModal
           productId={productId}
           onClose={() => setQuickEdit(false)}
-          onSaved={() => setReloadKey((k) => k + 1)}
+          onSaved={(updated) => { setReloadKey((k) => k + 1); onProductSaved?.(updated); }}
         />
       )}
     </KitFloatWindow>

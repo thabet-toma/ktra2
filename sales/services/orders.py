@@ -77,8 +77,8 @@ def _recalculate_order_totals(order) -> None:
 def confirm_sales_order(order, *, user=None):
     """تأكيد الطلبية بعد حجز الكمية فعلياً ومنع تجاوز المتاح.
 
-    تُقفل الطلبية والأصناف داخل معاملة واحدة، ثم يُطرح حجز الطلبيات المؤكدة
-    الأخرى من الرصيد الحالي. الخدمات والأصناف التي تسمح بالسالب لا تعيق التأكيد.
+    تُقفل الطلبية والمنتجات داخل معاملة واحدة، ثم يُطرح حجز الطلبيات المؤكدة
+    الأخرى من الرصيد الحالي. الخدمات والمنتجات التي تسمح بالسالب لا تعيق التأكيد.
     """
     from collections import defaultdict
 
@@ -109,7 +109,7 @@ def confirm_sales_order(order, *, user=None):
         for product_id, quantity in requested.items():
             product = products.get(product_id)
             if product is None:
-                shortages.append(f"الصنف #{product_id} غير متاح في الشركة الحالية")
+                shortages.append(f"المنتج #{product_id} غير متاح في الشركة الحالية")
                 continue
             if product.is_service or product.allow_negative_stock:
                 continue

@@ -31,7 +31,7 @@ export function setStoreSlug(
   );
 }
 
-/** ما تعرضه الشاشة عن كل صنف. */
+/** ما تعرضه الشاشة عن كل منتج. */
 export interface StoreAdminProduct {
   id: number;
   sku: string | null;
@@ -65,7 +65,7 @@ export interface StoreAdminQuery {
   page?: number;
 }
 
-/** أصناف الشركة للجدول. */
+/** منتجات الشركة للجدول. */
 export function getStoreAdminProducts(
   query: StoreAdminQuery = {},
 ): Promise<PagedList<StoreAdminProduct>> {
@@ -85,7 +85,7 @@ export function getPublishedProducts(): Promise<PagedList<StoreAdminProduct>> {
   return getStoreAdminProducts({ scope: "published", page: 1 });
 }
 
-/** تعديل نشر صنف أو سعره أو وصفه أو الطلب المسبق. */
+/** تعديل نشر منتج أو سعره أو وصفه أو الطلب المسبق. */
 export function updateProductPublishing(
   productId: number,
   patch: Partial<Pick<StoreAdminProduct,
@@ -126,9 +126,9 @@ export function deleteStoreProduct(productId: number): Promise<void> {
   return apiDelete(`store/admin/products/${productId}/`, tenantOpts());
 }
 
-/** اسم الصنف المعروض في الجدول. */
+/** اسم المنتج المعروض في الجدول. */
 export function storeAdminProductName(product: StoreAdminProduct): string {
-  return (product.name_ar || product.name_en || "").trim() || `صنف ${product.id}`;
+  return (product.name_ar || product.name_en || "").trim() || `منتج ${product.id}`;
 }
 
 // ── إعدادات المظهر والهوية (Store Theme Settings) ─────────────────────────

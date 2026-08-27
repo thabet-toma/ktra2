@@ -42,7 +42,7 @@ test('البدائل من نفس النوع فقط، وعليها رصيد، و�
   assert.deepEqual(alts.map((a) => a.id), [3, 2]);
 });
 
-test('صنف بلا نوع بلا بدائل — لا تخمين من تشابه الأسماء', () => {
+test('منتج بلا نوع بلا بدائل — لا تخمين من تشابه الأسماء', () => {
   const all = [
     item({ id: 1, group_key: '', stock_status: 'out_of_stock', quantity_on_hand: '0' }),
     item({ id: 2, group_key: '', quantity_on_hand: '30' }),

@@ -296,7 +296,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
 
     /**
      * T113-2: العرض يفتح صفقة معبّأة **غير محفوظة** — نفس سلوك زر «تحويل إلى صفقة»
-     * في شاشة العروض. لا يُنشأ شيء (صفقة/مورد/صنف) قبل «حفظ» داخل المحرّر.
+     * في شاشة العروض. لا يُنشأ شيء (صفقة/مورد/منتج) قبل «حفظ» داخل المحرّر.
      */
     const handleCreateFromPriceOffer = async (priceOfferId: string) => {
         setIsOfferModalOpen(false);

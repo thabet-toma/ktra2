@@ -291,10 +291,10 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
     return entries;
   };
 
-  // ————— إجراءات الصنف (بطاقة الصنف + تكلفته — روابط موجودة أصلاً) —————
+  // ————— إجراءات المنتج (بطاقة المنتج + تكلفته — روابط موجودة أصلاً) —————
   const itemEntries = (it: ItemContext): MenuEntry[] => [
-    { kind: "item", key: "i-card", label: `بطاقة الصنف${it.name ? `: ${it.name}` : ""}`, icon: <Package className={ICON} />, onClick: goUrl(`/products/${it.id}`) },
-    { kind: "item", key: "i-cost", label: "تكلفة الصنف", icon: <Coins className={ICON} />, onClick: goUrl(`/product-cost?product=${it.id}`) },
+    { kind: "item", key: "i-card", label: `بطاقة المنتج${it.name ? `: ${it.name}` : ""}`, icon: <Package className={ICON} />, onClick: goUrl(`/products/${it.id}`) },
+    { kind: "item", key: "i-cost", label: "تكلفة المنتج", icon: <Coins className={ICON} />, onClick: goUrl(`/product-cost?product=${it.id}`) },
   ];
 
   // إجراءات الصفحة العامّة (متاحة دائماً).
@@ -340,7 +340,7 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
     ? [{ kind: "submenu", key: "quick-actions", label: "إجراءات سريعة", icon: <Zap className={ICON} />, children: quickEntries }]
     : [];
 
-  // الترتيب: السياقي أولاً (حاسبة/حافظة ← شريك ← صنف ← سريعة) والعامّ أخيراً (رجوع/الرئيسية/تحديث/طباعة).
+  // الترتيب: السياقي أولاً (حاسبة/حافظة ← شريك ← منتج ← سريعة) والعامّ أخيراً (رجوع/الرئيسية/تحديث/طباعة).
   // نُدمج المجموعات غير الفارغة بفاصل بينها فقط — بلا فواصل بادئة/زائدة/مكرّرة.
   const groups: MenuEntry[][] = [
     editableEntries,

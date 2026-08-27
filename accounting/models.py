@@ -900,7 +900,7 @@ class OpeningBalanceAccountLine(models.Model):
 
 
 class OpeningBalanceStockLine(models.Model):
-    """بضاعة أول المدة: كمية صنف في مستودع بتكلفة وحدتها.
+    """بضاعة أول المدة: كمية منتج في مستودع بتكلفة وحدتها.
 
     المستودع إلزامي — جردٌ افتتاحي بلا موقع لا معنى له، والقيد الفريد
     `(opening, product, warehouse)` لا يعمل على عمود يقبل NULL في MySQL.

@@ -1,7 +1,7 @@
 """T-REORDER: محرّك التجديد — المعادلات، وشحّ البيانات، وقرار «النوع».
 
 يُثبت هنا ما لا تُثبته قراءة الكود: أن الرقم المقترَح هو بعينه ما تعطيه المعادلة
-بالورقة والقلم، وأن الصنف الذي لا نعرفه بعد لا يُقترَح له صفرٌ صامت، وأن نفاد
+بالورقة والقلم، وأن المنتج الذي لا نعرفه بعد لا يُقترَح له صفرٌ صامت، وأن نفاد
 موديلٍ قديمٍ يقف بجانبه موديلٌ جديد لا يُقرأ «اطلب».
 """
 import datetime
@@ -135,7 +135,7 @@ class ReplenishmentEngineTest(TestCase):
         # الفرق — والأثر يظهر في الأقصى الذي يمتدّ بمعدّل الصرف: 42 + 0.933×30 = 70.
         assert row["suggested_max"] == 70, row["suggested_max"]
 
-    # ── (7) عدّ الاستعلامات ثابت مهما بلغ عدد الأصناف ──
+    # ── (7) عدّ الاستعلامات ثابت مهما بلغ عدد المنتجات ──
     def test_query_count_does_not_grow_with_catalog_size(self):
         for i in range(20):
             self._steady_seller(f"R-7-{i}", group=f"G{i % 4}")
@@ -178,7 +178,7 @@ class ApplyReplenishmentApiTest(APITestCase):
         cls.other = create_company("شركة الغير", cls.stranger)
 
         cls.seller = Product.objects.create(
-            tenant=cls.tenant, sku="AP-1", name_ar="صنف يبيع",
+            tenant=cls.tenant, sku="AP-1", name_ar="منتج يبيع",
             quantity_on_hand=Decimal("50"),
         )
         today = datetime.date.today()
@@ -198,7 +198,7 @@ class ApplyReplenishmentApiTest(APITestCase):
             quantity=Decimal("6"), movement_date=today - datetime.timedelta(days=49),
         )
         cls.newborn = Product.objects.create(
-            tenant=cls.tenant, sku="AP-2", name_ar="صنف حديث",
+            tenant=cls.tenant, sku="AP-2", name_ar="منتج حديث",
             quantity_on_hand=Decimal("5"),
         )
         StockMovement.objects.create(
@@ -206,7 +206,7 @@ class ApplyReplenishmentApiTest(APITestCase):
             quantity=Decimal("5"), movement_date=today - datetime.timedelta(days=3),
         )
         cls.foreign = Product.objects.create(
-            tenant=cls.other, sku="AP-X", name_ar="صنف شركة أخرى",
+            tenant=cls.other, sku="AP-X", name_ar="منتج شركة أخرى",
             quantity_on_hand=Decimal("7"), min_stock_level=3,
         )
 
@@ -225,7 +225,7 @@ class ApplyReplenishmentApiTest(APITestCase):
         self.seller.refresh_from_db()
         assert self.seller.min_stock_level == 42
         assert self.seller.max_stock_level == 72
-        # الصنف الحديث لا يُكتب عليه صفر — «لا أعرف بعد» ليست «لا تطلب».
+        # المنتج الحديث لا يُكتب عليه صفر — «لا أعرف بعد» ليست «لا تطلب».
         self.newborn.refresh_from_db()
         assert self.newborn.min_stock_level is None
         assert [s["product_id"] for s in body["skipped"]] == [self.newborn.id]
@@ -266,7 +266,7 @@ class BulkSetGroupApiTest(APITestCase):
         cls.b = Product.objects.create(tenant=cls.tenant, sku="G-2", name_ar="ايفون 14 برو")
         cls.untouched = Product.objects.create(tenant=cls.tenant, sku="G-3", name_ar="شاحن")
         cls.foreign = Product.objects.create(
-            tenant=cls.other, sku="G-X", name_ar="صنف الغير", variant_group="أصلي")
+            tenant=cls.other, sku="G-X", name_ar="منتج الغير", variant_group="أصلي")
 
     def _post(self, body, user=None, tenant=None):
         self.client.force_authenticate(user=user or self.owner)
@@ -312,7 +312,7 @@ class BulkSetGroupApiTest(APITestCase):
 
     # ── الدليل الحقيقي: تعيين النوع يُشغِّل البدائل من طرفٍ لطرف ──
     def test_setting_the_type_turns_alternatives_on_end_to_end(self):
-        """قبل التعيين لا بديل لأن كل صنفٍ نوعٌ بذاته؛ وبعده يصيران نوعاً واحداً."""
+        """قبل التعيين لا بديل لأن كل منتجٍ نوعٌ بذاته؛ وبعده يصيران نوعاً واحداً."""
         Product.objects.filter(pk=self.b.pk).update(quantity_on_hand=Decimal("40"))
         before = {r["product_id"]: r for r in replenishment_rows(self.tenant.TenantID)}
         assert before[self.a.id]["alternatives"] == 0
@@ -338,7 +338,7 @@ class ReportCacheInvalidationTest(APITestCase):
         cls.owner = User.objects.create_user(username="cache_owner", password="x")
         cls.tenant = create_company("شركة الكاش", cls.owner)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="C-1", name_ar="صنف الكاش",
+            tenant=cls.tenant, sku="C-1", name_ar="منتج الكاش",
             quantity_on_hand=Decimal("5"),
         )
         today = datetime.date.today()

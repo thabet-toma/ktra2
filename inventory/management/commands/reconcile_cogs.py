@@ -1,5 +1,5 @@
-"""يصحّح تكلفة البضاعة المباعة وقائمة الدخل لكل صنف وفق نموذج «تكلفة المنتجات»
-(متوسط مرجّح بالكمية). يعيد تقييم حركات البيع ويُرحّل قيد تسوية واحداً لكل صنف
+"""يصحّح تكلفة البضاعة المباعة وقائمة الدخل لكل منتج وفق نموذج «تكلفة المنتجات»
+(متوسط مرجّح بالكمية). يعيد تقييم حركات البيع ويُرحّل قيد تسوية واحداً لكل منتج
 بفرق التكلفة (Dr ت.ب.م / Cr المخزون أو العكس) — يعالج البيع قبل وصول الشراء
 (COGS=0) والقيم المنحرفة الموجودة.
 
@@ -16,7 +16,7 @@ from inventory.services import reconcile_product_cogs
 
 
 class Command(BaseCommand):
-    help = "تسوية تكلفة المبيعات لكل صنف (متوسط مرجّح) — يصحّح قائمة الدخل."
+    help = "تسوية تكلفة المبيعات لكل منتج (متوسط مرجّح) — يصحّح قائمة الدخل."
 
     def add_arguments(self, parser):
         parser.add_argument('--apply', action='store_true', help='رحّل قيود التسوية فعلياً.')
@@ -46,6 +46,6 @@ class Command(BaseCommand):
 
         verb = 'رُحِّلت تسويات' if apply else 'ستُرحَّل تسويات'
         self.stdout.write(self.style.SUCCESS(
-            f"\n{verb}: {adjusted} صنف · صافي فرق التكلفة {total_diff}."))
+            f"\n{verb}: {adjusted} منتج · صافي فرق التكلفة {total_diff}."))
         if not apply and adjusted:
             self.stdout.write("أعد التشغيل بـ --apply لترحيل قيود التسوية.")

@@ -814,7 +814,7 @@ class PlatformDashboardAggregatesTest(APITestCase):
             tenant=self.watched, name="عميل اللوحة", partner_type="Customer",
         )
         Product.objects.create(
-            tenant=self.watched, sku="AGG-1", name_ar="صنف اللوحة",
+            tenant=self.watched, sku="AGG-1", name_ar="منتج اللوحة",
             quantity_on_hand=1, avg_cost=1,
         )
         SalesInvoice.objects.create(

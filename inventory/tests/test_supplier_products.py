@@ -1,12 +1,12 @@
-"""T-SUPSKU — رقم الصنف عند المورّد: جدول ربط لا حقل على الصنف.
+"""T-SUPSKU — رقم المنتج عند المورّد: جدول ربط لا حقل على المنتج.
 
 مطابقة فواتير المورّد تجري برقم كتالوجه (מק"ט)، وهو ليس رقمنا. كان يُحشَر في
-`Product.name_en` — ومعناه «اسم الصنف بالإنجليزية». الحشوة كانت **تعمل للبحث**
+`Product.name_en` — ومعناه «اسم المنتج بالإنجليزية». الحشوة كانت **تعمل للبحث**
 (`name_en` ضمن `search_fields`)، فالنقل يجب ألّا يفقد تلك القدرة.
 
-الحقل الواحد على الصنف كان سيكذب أوّل مرّة يأتي فيها الصنف من مورّدَين —
+الحقل الواحد على المنتج كان سيكذب أوّل مرّة يأتي فيها المنتج من مورّدَين —
 والإطارات هي هذه الحالة. الجدول يحلّها، ويحرس ما يجب حراسته فعلاً: رقمٌ واحد
-عند مورّدٍ واحد لا يشير إلى صنفين.
+عند مورّدٍ واحد لا يشير إلى منتجين.
 """
 from decimal import Decimal
 
@@ -38,7 +38,7 @@ class SupplierProductModelTest(APITestCase):
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
 
     def test_same_product_can_carry_a_code_from_each_supplier(self):
-        """جوهر السبب في اختيار الجدول: الصنف يأتي من أكثر من مورّد."""
+        """جوهر السبب في اختيار الجدول: المنتج يأتي من أكثر من مورّد."""
         SupplierProduct.objects.create(
             tenant=self.tenant, supplier=self.s1, product=self.p1,
             supplier_sku="3068.82")
@@ -112,7 +112,7 @@ class SupplierProductApiTest(APITestCase):
         assert rows[0]["supplier_display_name"] == "مورّد الإطارات"
 
     def test_reverse_lookup_by_code(self):
-        """«هذا الرقم — أيّ صنف؟» وهو سؤال مطابقة فاتورة المورّد نفسه."""
+        """«هذا الرقم — أيّ منتج؟» وهو سؤال مطابقة فاتورة المورّد نفسه."""
         self._create()
         res = self.client.get(
             "/api/inventory/supplier-products/?sku=3068.82", **self.headers)
@@ -121,7 +121,7 @@ class SupplierProductApiTest(APITestCase):
         assert rows[0]["product"] == self.product.pk
 
     def test_duplicate_code_is_refused_by_naming_the_holder(self):
-        """رسالةٌ تسمّي الصنف المالك — «قيد فريد مخروق» لا يعلّم أحداً شيئاً."""
+        """رسالةٌ تسمّي المنتج المالك — «قيد فريد مخروق» لا يعلّم أحداً شيئاً."""
         self._create()
         res = self._create(product=self.rival.pk)
         assert res.status_code == 400, res.content
@@ -147,7 +147,7 @@ class SupplierProductApiTest(APITestCase):
 
 
 class ProductSearchBySupplierCodeTest(APITestCase):
-    """البحث بالشاشات يجد الصنف برقم مورّده — وهو الغرض العملي كلّه."""
+    """البحث بالشاشات يجد المنتج برقم مورّده — وهو الغرض العملي كلّه."""
 
     @classmethod
     def setUpTestData(cls):

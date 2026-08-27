@@ -2,7 +2,7 @@
  * task13 M5 — KitAutocomplete
  * منتقي مدمج بنمط دفترة: حقل نصي داخل خلية الجدول، الكتابة تفتح قائمة
  * منسدلة صغيرة تحت الحقل تفلتر فورياً وتقدّم أقرب تطابق أولاً، مع خيار
- * «+ إضافة كصنف جديد» عند توفر onFreeText. يستبدل المودالات العريضة
+ * «+ إضافة كمنتج جديد» عند توفر onFreeText. يستبدل المودالات العريضة
  * (ItemSearchModal / SalesProductPickerModal) كمسار الإدخال الأساسي.
  *
  * القائمة تُرسم عبر portal على <body> (position:fixed) كي لا تُقص بمناطق
@@ -22,7 +22,7 @@ export interface KitPriceInfo {
 
 export interface KitAutocompleteOption {
   id: string | number;
-  /** النص الأساسي (اسم الصنف) — هدف المطابقة الأول */
+  /** النص الأساسي (اسم المنتج) — هدف المطابقة الأول */
   label: string;
   /** سطر ثانوي اختياري (موديل / SKU / رصيد) — هدف مطابقة ثانٍ */
   sub?: string;
@@ -41,19 +41,19 @@ export interface KitAutocompleteOption {
 }
 
 export interface KitAutocompleteProps {
-  /** النص المثبت حالياً في السطر (اسم الصنف المختار) */
+  /** النص المثبت حالياً في السطر (اسم المنتج المختار) */
   value: string;
   options: KitAutocompleteOption[];
   onPick: (id: string | number) => void;
-  /** DEF-008: عند توفره تظهر أيقونة (i) لكل خيار → تفتح بطاقة الصنف دون اختياره. */
+  /** DEF-008: عند توفره تظهر أيقونة (i) لكل خيار → تفتح بطاقة المنتج دون اختياره. */
   onInfo?: (id: string | number) => void;
   /** T-ITEMS M3: عند توفره يظهر قلمٌ بجانب (i) → تحريرٌ سريع دون مغادرة المستند.
    *  المقعد هنا لا في كل محرّر: تمريرة واحدة تخدم كل شاشة تستعمل المنتقي. */
   onEdit?: (id: string | number) => void;
-  /** عند توفره: خيار «+ إضافة …» يثبت النص المكتوب كصنف حر/جديد */
+  /** عند توفره: خيار «+ إضافة …» يثبت النص المكتوب كمنتج حر/جديد */
   onFreeText?: (text: string) => void;
-  /** نص خيار النص الحر — الافتراضي «إضافة … كصنف جديد». يُمرَّر له النص المكتوب
-   *  كي تصف كل شاشة ما سيحدث فعلاً (مورد مبدئي، بند نصّي…) لا «صنف» دائماً. */
+  /** نص خيار النص الحر — الافتراضي «إضافة … كمنتج جديد». يُمرَّر له النص المكتوب
+   *  كي تصف كل شاشة ما سيحدث فعلاً (مورد مبدئي، بند نصّي…) لا «منتج» دائماً. */
   createLabel?: (text: string) => string;
   placeholder?: string;
   disabled?: boolean;
@@ -283,8 +283,8 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
                 <button
                   type="button"
                   className="ktra-autocomplete-info"
-                  title="بطاقة الصنف"
-                  aria-label="بطاقة الصنف"
+                  title="بطاقة المنتج"
+                  aria-label="بطاقة المنتج"
                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onInfo(opt.id); close(); }}
                 >
                   <Info className="h-3.5 w-3.5" />
@@ -294,8 +294,8 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
                 <button
                   type="button"
                   className="ktra-autocomplete-info"
-                  title="تعديل سريع للصنف"
-                  aria-label="تعديل سريع للصنف"
+                  title="تعديل سريع للمنتج"
+                  aria-label="تعديل سريع للمنتج"
                   onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(opt.id); close(); }}
                 >
                   <Pencil className="h-3.5 w-3.5" />
@@ -336,7 +336,7 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
               <span>
                 {createLabel
                   ? createLabel((query ?? '').trim())
-                  : `إضافة «${(query ?? '').trim()}» كصنف جديد`}
+                  : `إضافة «${(query ?? '').trim()}» كمنتج جديد`}
               </span>
             </button>
           )}

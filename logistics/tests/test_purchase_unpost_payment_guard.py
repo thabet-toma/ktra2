@@ -40,7 +40,7 @@ class PurchaseUnpostPaymentGuardTest(APITestCase):
             tenant=cls.tenant, code="1110-G", name="الصندوق",
             account_type="Asset", is_active=True)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="APG-1", name_ar="صنف",
+            tenant=cls.tenant, sku="APG-1", name_ar="منتج",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
 
     def _auth(self):
@@ -58,7 +58,7 @@ class PurchaseUnpostPaymentGuardTest(APITestCase):
             ),
         )
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف",
+            invoice=inv, product=self.product, name="منتج",
             quantity=Decimal("1"), unit_price=Decimal(total),
             total_price=Decimal(total))
         return inv

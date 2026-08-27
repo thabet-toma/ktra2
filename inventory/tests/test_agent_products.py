@@ -1,11 +1,11 @@
-"""نقطة الوكيل للأصناف بعد نقلها من `core` إلى `inventory` — ومعها تصدير `brand`.
+"""نقطة الوكيل للمنتجات بعد نقلها من `core` إلى `inventory` — ومعها تصدير `brand`.
 
 النقل كان لإصلاح عقد الاستيراد (`core` ممنوع من `inventory.serializers`)، وهذا
 النوع من النقل يُسكِت نقطةً بصمت إن سقط سطر في `core/urls.py` — فالاختبار هنا
 يمرّ عبر **المسار العام** لا باستدعاء الدالة، ليثبت أن البوت الخارجي ما زال
 يجدها على عنوانها القديم حرفياً.
 
-و`brand`: البوت يطبعها في كل سطر تشخيص وفي أسباب استبعاد الأصناف؛ بدونها كان
+و`brand`: البوت يطبعها في كل سطر تشخيص وفي أسباب استبعاد المنتجات؛ بدونها كان
 يطبع أقواساً فارغة «❌ 205/65/16 () — رصيد 0».
 """
 import pytest
@@ -24,7 +24,7 @@ KEY = "test-agent-key-strong"
 def env(settings):
     settings.AGENT_DB_API_KEY = KEY
     owner = User.objects.create_user(username="agp", password="x")
-    tenant = create_company("شركة الأصناف", owner)
+    tenant = create_company("شركة المنتجات", owner)
     Product.objects.create(
         tenant=tenant, sku="AGP-1", name_ar="إطار", brand="ميشلان")
     return tenant

@@ -2,7 +2,7 @@
  * FEAT-1 — PurchaseSettingsPage: إعدادات الشراء (استراتيجية التسعير التلقائي).
  *
  * مرآة SalesSettingsPage للجانب الشرائي. تتحكّم في كيفية تعبئة سعر الوحدة
- * تلقائياً عند اختيار صنف في بند فاتورة الشراء (آخر سعر شراء / أقل سعر شراء).
+ * تلقائياً عند اختيار منتج في بند فاتورة الشراء (آخر سعر شراء / أقل سعر شراء).
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Loader2, Save, Info } from "lucide-react";
@@ -23,12 +23,12 @@ const STRATEGIES: { value: string; label: string; hint: string }[] = [
   {
     value: "LAST_PURCHASE",
     label: "آخر سعر شراء",
-    hint: "سعر الوحدة من أحدث فاتورة شراء مرحَّلة تحتوي هذا الصنف.",
+    hint: "سعر الوحدة من أحدث فاتورة شراء مرحَّلة تحتوي هذا المنتج.",
   },
   {
     value: "LOWEST_PURCHASE",
     label: "أقل سعر شراء",
-    hint: "أدنى سعر شراء تاريخي (كل الفترات) لهذا الصنف.",
+    hint: "أدنى سعر شراء تاريخي (كل الفترات) لهذا المنتج.",
   },
 ];
 
@@ -131,7 +131,7 @@ const PurchaseSettingsPage: React.FC = () => {
           <p className="text-sm text-[var(--ktra-ink-soft)] mb-3 flex items-start gap-1">
             <Info className="h-4 w-4 mt-0.5 shrink-0" />
             <span>
-              عند اختيار صنف في بند فاتورة شراء، يُقترح سعر الوحدة تلقائياً حسب
+              عند اختيار منتج في بند فاتورة شراء، يُقترح سعر الوحدة تلقائياً حسب
               هذه الاستراتيجية. القيمة المقترحة تبقى قابلة للتعديل دائماً، ولا
               تُدَس على سعر أدخلته يدوياً.
             </span>
@@ -249,7 +249,7 @@ const PurchaseSettingsPage: React.FC = () => {
             </label>
           </div>
 
-          {/* T-SERIAL: نمط الأرقام التسلسلية في بنود الشراء — يخصّ الأصناف المتتبَّعة وحدها. */}
+          {/* T-SERIAL: نمط الأرقام التسلسلية في بنود الشراء — يخصّ المنتجات المتتبَّعة وحدها. */}
           <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
             <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">
               إدخال الأرقام التسلسلية في فاتورة الشراء

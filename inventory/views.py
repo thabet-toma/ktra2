@@ -89,7 +89,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     pagination_class = OptionalPageNumberPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    # `supplier_codes__supplier_sku`: البحث يجد الصنف برقم كتالوج مورّده
+    # `supplier_codes__supplier_sku`: البحث يجد المنتج برقم كتالوج مورّده
     # (מק"ט) — وهو الرقم الذي تصل به فاتورة المورّد فعلاً. `SearchFilter`
     # يضيف `.distinct()` تلقائياً لعبوره علاقةً متعدّدة، فلا يتكرّر الصفّ.
     search_fields = [
@@ -106,7 +106,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     activity_field_labels = {
         'name_ar': 'اسم المنتج',
         'name_en': 'اسم المنتج بالإنجليزية',
-        'sku': 'رقم الصنف',
+        'sku': 'رقم المنتج',
         'barcode': 'الباركود',
         'variant_group': 'المجموعة',
         'brand': 'البراند',
@@ -129,7 +129,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         'uom2_factor': 'معامل الوحدة الثانية',
         'uom3': 'الوحدة الثالثة',
         'uom3_factor': 'معامل الوحدة الثالثة',
-        'description': 'بيان الصنف',
+        'description': 'وصف المنتج',
         'storage_location': 'موقع التخزين',
         'sale_account_override': 'حساب المبيعات',
         'sale_return_account_override': 'حساب مرتجع المبيعات',
@@ -169,15 +169,15 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         return context
 
     def get_queryset(self):
-        # task11 M7: الأصناف كانت بلا فلترة tenant في القراءة —
-        # أصناف كل الشركات تظهر للشركة الجديدة. .none() عند غياب الشركة.
+        # task11 M7: المنتجات كانت بلا فلترة tenant في القراءة —
+        # منتجات كل الشركات تظهر للشركة الجديدة. .none() عند غياب الشركة.
         tenant = self._get_tenant()
         if not tenant:
             return Product.objects.none()
         qs = super().get_queryset().filter(tenant=tenant)
         params = self.request.query_params
 
-        # استبعاد الأصناف الخاصة بالمتجر فقط من الكتالوج المخزني ومحددات الفواتير
+        # استبعاد المنتجات الخاصة بالمتجر فقط من الكتالوج المخزني ومحددات الفواتير
         store_only_param = params.get('is_store_only')
         if store_only_param == 'true':
             qs = qs.filter(is_store_only=True)
@@ -188,7 +188,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         if category_id:
             # M0: التصنيف محدِّدٌ يعني شجرته — نفس قاعدة الكرت المجمّع، من نسخةٍ
             # واحدة في `services`. كان exact-id هنا وشجرةً هناك، فتصنيفُ أبٍ
-            # يعرض «لا أصناف» بينما كرته المجمّع يعدّ المئات.
+            # يعرض «لا منتجات» بينما كرته المجمّع يعدّ المئات.
             from .services import category_descendant_ids
             try:
                 wanted = category_descendant_ids(
@@ -212,20 +212,20 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             )
         # ST-3: شاشة «متجري» تعرض المنشور وحده، وتحتاج عدده قبل فتح المتجر أول
         # مرة. بلا هذا الفلتر كان عليها تحميل الكتالوج كاملاً وتصفيته في
-        # المتصفح — على 1490 صنفاً ذلك ميغابايت لعرض صفّين.
+        # المتصفح — على 1490 منتجاً ذلك ميغابايت لعرض صفّين.
         published = params.get('is_for_sale_online')
         if published in ('true', 'false'):
             qs = qs.filter(is_for_sale_online=(published == 'true'))
-        # محددات الأصناف في الفواتير/الصفقات لا تعرض التحليلات؛ تجنّب ثلاث
+        # محددات المنتجات في الفواتير/الصفقات لا تعرض التحليلات؛ تجنّب ثلاث
         # aggregations على جدول الحركات الكبير عند طلب view=lookup. عقد القائمة
-        # الكامل يبقى كما هو افتراضياً لجدول إدارة الأصناف.
+        # الكامل يبقى كما هو افتراضياً لجدول إدارة المنتجات.
         if params.get('view') == 'lookup':
             # T-SUPSKU: أرقام الموردين تدخل حمولة المنتقي؛ الجلب المسبق يجعلها
-            # استعلاماً واحداً للصفحة كلّها لا واحداً لكل صنف.
+            # استعلاماً واحداً للصفحة كلّها لا واحداً لكل منتج.
             return qs.prefetch_related('supplier_codes')
 
         # T-ITEMS M5: الشرائح جزءٌ من العقد الكامل — بلا جلبٍ مسبق صارت
-        # استعلاماً لكل صنف في القائمة.
+        # استعلاماً لكل منتج في القائمة.
         qs = qs.prefetch_related('price_tiers')
 
         # W8: تجميعات محسوبة من StockMovement (المصدر الوحيد) — منقّطة، لا N+1.
@@ -346,7 +346,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         tenant = self._get_tenant()
-        # T-PLANLIMITS: عدد الأصناف المسموح به من خطة الشركة.
+        # T-PLANLIMITS: عدد المنتجات المسموح به من خطة الشركة.
         enforce_limits(tenant, 'inventory.products')
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -357,7 +357,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         explicit_sku = (serializer.validated_data.get('sku') or '').strip()
         if explicit_sku:
             if Product.objects.filter(tenant=tenant, sku=explicit_sku).exists():
-                raise serializers.ValidationError({'sku': 'رقم الصنف مستخدم مسبقاً لهذه الشركة.'})
+                raise serializers.ValidationError({'sku': 'رقم المنتج مستخدم مسبقاً لهذه الشركة.'})
             product = serializer.save(tenant=tenant, sku=explicit_sku)
         else:
             product = None
@@ -369,7 +369,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
                 except IntegrityError:
                     continue
             if product is None:
-                raise serializers.ValidationError({'sku': 'تعذّر توليد رقم صنف — أعد المحاولة.'})
+                raise serializers.ValidationError({'sku': 'تعذّر توليد رقم منتج — أعد المحاولة.'})
 
         self._handle_attachments(product, request.data, tenant)
         product_label = product.name_ar or product.name_en or product.sku
@@ -403,7 +403,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             elif new_sku != instance.sku and Product.objects.filter(
                 tenant=tenant, sku=new_sku
             ).exclude(pk=instance.pk).exists():
-                raise serializers.ValidationError({'sku': 'رقم الصنف مستخدم مسبقاً لهذه الشركة.'})
+                raise serializers.ValidationError({'sku': 'رقم المنتج مستخدم مسبقاً لهذه الشركة.'})
         product = serializer.save()
         self._handle_attachments(product, request.data, tenant)
         changes = build_activity_changes(
@@ -507,7 +507,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     #   • `category` — التصنيف وأحفاده، والخادم يشتقّ المعرّفات (الشكل المفضَّل)
     #   • `ids` — تعدادٌ صريح (مجموعات group_key، وأسطر جردٍ بعينها)
     # وكلاهما يُقرأ من **جسم** الطلب (POST). كان التعداد يسافر في سطر الطلب
-    # (`?ids=1,2,3…`): تصنيفُ جذرٍ فيه ~1500 صنف ⇒ عنوانٌ ~7.5KB ⇒ nginx يردّ
+    # (`?ids=1,2,3…`): تصنيفُ جذرٍ فيه ~1500 منتج ⇒ عنوانٌ ~7.5KB ⇒ nginx يردّ
     # 414/400 قبل أن يصل الطلب إلى Django (والتطوير يمرّ لأن runserver أسخى).
     # GET مع `?ids=`/`?category=` يبقى مقروءاً لتوافق الروابط القديمة.
     def _group_source(self, request):
@@ -556,7 +556,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='groups')
     def groups(self, request):
-        """قائمة المجموعات (الأصناف الفرعية) المستخدمة — لمنتقي المجموعة (اختر/أضف)."""
+        """قائمة المجموعات (المنتجات الفرعية) المستخدمة — لمنتقي المجموعة (اختر/أضف)."""
         tenant = self._get_tenant()
         if not tenant:
             return Response([])
@@ -604,12 +604,12 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='apply-replenishment')
     @requires_perm('inventory.item.manage')
     def apply_replenishment(self, request):
-        """يثبّت الحدّين المقترَحين على أصنافٍ محدَّدة — `{"product_ids": [...]}`.
+        """يثبّت الحدّين المقترَحين على منتجاتٍ محدَّدة — `{"product_ids": [...]}`.
 
         كتابةٌ حقيقية لا قراءة: **ليست** في `read_only_post_actions`، وتشترط
-        صلاحية إدارة الأصناف لا عرضها.
+        صلاحية إدارة المنتجات لا عرضها.
 
-        والمحدِّد في **جسم** الطلب لا في عنوانه: تعداد ألف صنفٍ في سطر الطلب
+        والمحدِّد في **جسم** الطلب لا في عنوانه: تعداد ألف منتجٍ في سطر الطلب
         تجاوز في الإنتاج `large_client_header_buffers` فردّ nginx 414 بينما مرّ
         التطوير — نفس درس كرت المجموعة.
         """
@@ -621,19 +621,19 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         raw = request.data.get('product_ids') or []
         if not isinstance(raw, list):
             return Response(
-                {'error': 'product_ids يجب أن تكون قائمة معرّفات أصناف'},
+                {'error': 'product_ids يجب أن تكون قائمة معرّفات منتجات'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
             ids = [int(pid) for pid in raw]
         except (TypeError, ValueError):
             return Response(
-                {'error': 'معرّف صنف غير صالح في القائمة'},
+                {'error': 'معرّف منتج غير صالح في القائمة'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if not ids:
             return Response(
-                {'error': 'لم تُحدَّد أصناف'}, status=status.HTTP_400_BAD_REQUEST,
+                {'error': 'لم تُحدَّد منتجات'}, status=status.HTTP_400_BAD_REQUEST,
             )
         result = apply_suggested_levels(tenant.TenantID, ids, user=request.user)
         return Response(result)
@@ -641,11 +641,11 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='bulk-set-group')
     @requires_perm('inventory.item.manage')
     def bulk_set_group(self, request):
-        """يضبط «النوع» و/أو البراند على أصنافٍ محدَّدة دفعةً واحدة.
+        """يضبط «النوع» و/أو البراند على منتجاتٍ محدَّدة دفعةً واحدة.
 
         لماذا نقطةٌ للجملة: `variant_group` هو مفتاح تجميع الموديلات (البدائل في
-        الفاتورة، وقرار «مؤجَّل» في تقرير التجديد)، وكان فارغاً على كل صنفٍ في كل
-        شركة لأنه بلا مدخل. ضبطُه صنفاً صنفاً على كتالوجٍ من ألفٍ ونصف يعني ألّا
+        الفاتورة، وقرار «مؤجَّل» في تقرير التجديد)، وكان فارغاً على كل منتجٍ في كل
+        شركة لأنه بلا مدخل. ضبطُه منتجاً منتجاً على كتالوجٍ من ألفٍ ونصف يعني ألّا
         يُضبط أبداً.
 
         الحقل الغائب من الجسم **لا يُمَسّ**، والحقل الفارغ يُمحى — فيمكن تصحيح
@@ -657,13 +657,13 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         raw = request.data.get('product_ids') or []
         if not isinstance(raw, list) or not raw:
             return Response(
-                {'error': 'لم تُحدَّد أصناف'}, status=status.HTTP_400_BAD_REQUEST,
+                {'error': 'لم تُحدَّد منتجات'}, status=status.HTTP_400_BAD_REQUEST,
             )
         try:
             ids = [int(pid) for pid in raw]
         except (TypeError, ValueError):
             return Response(
-                {'error': 'معرّف صنف غير صالح في القائمة'},
+                {'error': 'معرّف منتج غير صالح في القائمة'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -691,8 +691,8 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             log_activity(
                 action='update',
                 entity_type='product',
-                entity_label=f'{len(products)} صنفاً',
-                description=f'عيّن {labels} على {len(products)} صنفاً دفعةً واحدة',
+                entity_label=f'{len(products)} منتجاً',
+                description=f'عيّن {labels} على {len(products)} منتجاً دفعةً واحدة',
                 metadata={'product_ids': [p.id for p in products][:200], **fields},
                 request=request,
                 tenant=tenant,
@@ -706,7 +706,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         """باركود EAN-13 داخلي (بادئة 2) غير مستخدم لهذه الشركة، بخانة تحقق سليمة.
 
         التوليد خادمي كي يبقى فحص «غير مستخدم» على مصدر البيانات نفسه — واجهةٌ
-        تولّد رقماً محلياً قد تصطدم بصنف لم تكن قد حمّلته.
+        تولّد رقماً محلياً قد تصطدم بمنتج لم تكن قد حمّلته.
         """
         from inventory.serials import generate_product_barcode
         tenant = self._get_tenant()
@@ -740,7 +740,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='serials')
     def serials(self, request, pk=None):
-        """وحدات هذا الصنف المُرقَّمة — `?status=in_stock|sold` للفلترة."""
+        """وحدات هذا المنتج المُرقَّمة — `?status=in_stock|sold` للفلترة."""
         from inventory.serials import product_serials
         product = self.get_object()
         return Response(product_serials(
@@ -795,14 +795,14 @@ class ProductSerialViewSet(viewsets.ViewSet):
 
 
 class SupplierProductViewSet(viewsets.ModelViewSet):
-    """أرقام الأصناف عند الموردين — بياناتٌ رئيسية معزولة بالشركة.
+    """أرقام المنتجات عند الموردين — بياناتٌ رئيسية معزولة بالشركة.
 
     محايدة مالياً تماماً: لا قيد ولا حركة مخزون. الغرض واحد — أن تُطابَق فاتورة
-    المورّد برقم كتالوجه لا برقمنا، وأن يجد البحثُ الصنفَ بذلك الرقم
+    المورّد برقم كتالوجه لا برقمنا، وأن يجد البحثُ المنتجَ بذلك الرقم
     (`ProductViewSet.search_fields`).
 
-    الترشيح: `?product=` لكرت الصنف، و`?supplier=` لكرت المورّد، و`?sku=`
-    للمطابقة العكسية «هذا الرقم — أيّ صنف؟».
+    الترشيح: `?product=` لكرت المنتج، و`?supplier=` لكرت المورّد، و`?sku=`
+    للمطابقة العكسية «هذا الرقم — أيّ منتج؟».
     """
 
     queryset = SupplierProduct.objects.all()
@@ -963,11 +963,11 @@ class StockMovementViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='valuation')
     def valuation(self, request):
-        """P0-5: تقييم المخزون خادمياً — صف تجميعي واحد لكل صنف.
+        """P0-5: تقييم المخزون خادمياً — صف تجميعي واحد لكل منتج.
 
         كانت شاشة التقييم تجلب **كل حركات المخزون** إلى المتصفح وتحسب هناك
         (أضخم جدول في النظام). هنا تُحسب التجميعات نفسها بـsubqueries على
-        الفهرس (tenant, product, movement_date) وتعود ~صف/صنف، وتبديل طريقة
+        الفهرس (tenant, product, movement_date) وتعود ~صف/منتج، وتبديل طريقة
         التقييم في الشاشة يبقى client-side فورياً على هذه التجميعات:
         - first/last IN unit_cost (بترتيب movement_date,id) — لطريقتَي FIFO/LIFO.
         - متوسط unit_cost>0 للداخل والخارج — avg_purchase/avg_sale.

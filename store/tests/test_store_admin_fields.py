@@ -1,6 +1,6 @@
 """حدود لوحة إدارة المتجر: ماذا تُعدّل، وكيف تُرقّم، وما لا تفرضه على المستخدم.
 
-`store.manage` صلاحية **تسويقية** لا صلاحية مخزون. اللوحة تنشر الصنف المخزني
+`store.manage` صلاحية **تسويقية** لا صلاحية مخزون. اللوحة تنشر المنتج المخزني
 وتسحبه، لكنها لا تُعيد تعريفه: `sale_price` و`sku` و`name_ar` حقول تقرؤها
 الفوترة والتقارير، وتغييرها من هنا يجعل مسؤول تسويق يصيب سعر البيع المعتمَد
 بلا أن يدري.
@@ -25,7 +25,7 @@ class StoreAdminFieldScopeTest(TestCase):
         cls.tenant.save()
 
         cls.stock_item = Product.objects.create(
-            tenant=cls.tenant, sku="INV-01", name_ar="صنف مخزني",
+            tenant=cls.tenant, sku="INV-01", name_ar="منتج مخزني",
             sale_price=Decimal("50.00"), is_store_only=False, uom=cls.uom,
         )
 
@@ -39,7 +39,7 @@ class StoreAdminFieldScopeTest(TestCase):
             f"/api/store/admin/products/{product.id}/", payload, format="json",
         )
 
-    # ── THA-427: حقول المتجر وحدها على الصنف المخزني ───────────────────
+    # ── THA-427: حقول المتجر وحدها على المنتج المخزني ───────────────────
 
     def test_store_fields_are_editable_on_an_inventory_product(self):
         """النشر والسعر المتجري والوصف والطلب المسبق — هذا غرض اللوحة."""
@@ -68,7 +68,7 @@ class StoreAdminFieldScopeTest(TestCase):
                 self.assertEqual(res.status_code, 400, res.content[:300])
         self.stock_item.refresh_from_db()
         self.assertEqual(self.stock_item.sku, "INV-01")
-        self.assertEqual(self.stock_item.name_ar, "صنف مخزني")
+        self.assertEqual(self.stock_item.name_ar, "منتج مخزني")
 
     def test_the_refusal_names_the_rejected_fields(self):
         """رسالة تقول ماذا رُفض وأين يُعدَّل — لا رفضٌ صامت."""
@@ -77,9 +77,9 @@ class StoreAdminFieldScopeTest(TestCase):
         self.assertIn("sale_price", body)
 
     def test_a_store_only_product_stays_fully_editable(self):
-        """صنف المتجر الخالص ملكُ اللوحة — الحارس يضيّق ولا يقفل."""
+        """منتج المتجر الخالص ملكُ اللوحة — الحارس يضيّق ولا يقفل."""
         mine = Product.objects.create(
-            tenant=self.tenant, sku="ST-X", name_ar="صنف متجر",
+            tenant=self.tenant, sku="ST-X", name_ar="منتج متجر",
             is_store_only=True, uom=self.uom,
         )
         res = self._patch(mine, {"name_ar": "اسم جديد", "sale_price": "12.00"})
@@ -90,9 +90,9 @@ class StoreAdminFieldScopeTest(TestCase):
     # ── THA-425: الطلب المسبق قرار المستخدم ────────────────────────────
 
     def test_preorder_is_not_forced_on_new_products(self):
-        """«طلب مسبق» وعدٌ تجاري — لا يفرضه الكود على كل صنف يُنشأ."""
+        """«طلب مسبق» وعدٌ تجاري — لا يفرضه الكود على كل منتج يُنشأ."""
         res = self.auth.post(
-            "/api/store/admin/products/", {"name_ar": "صنف بلا وعد"}, format="json",
+            "/api/store/admin/products/", {"name_ar": "منتج بلا وعد"}, format="json",
         )
         self.assertEqual(res.status_code, 201, res.content[:300])
         self.assertFalse(Product.objects.get(pk=res.json()["id"]).allow_preorder)
@@ -100,7 +100,7 @@ class StoreAdminFieldScopeTest(TestCase):
     def test_preorder_can_still_be_asked_for(self):
         res = self.auth.post(
             "/api/store/admin/products/",
-            {"name_ar": "صنف بطلب مسبق", "allow_preorder": True}, format="json",
+            {"name_ar": "منتج بطلب مسبق", "allow_preorder": True}, format="json",
         )
         self.assertEqual(res.status_code, 201, res.content[:300])
         self.assertTrue(Product.objects.get(pk=res.json()["id"]).allow_preorder)
@@ -111,7 +111,7 @@ class StoreAdminFieldScopeTest(TestCase):
         codes = []
         for i in range(3):
             res = self.auth.post(
-                "/api/store/admin/products/", {"name_ar": f"صنف {i}"}, format="json",
+                "/api/store/admin/products/", {"name_ar": f"منتج {i}"}, format="json",
             )
             self.assertEqual(res.status_code, 201, res.content[:300])
             codes.append(Product.objects.get(pk=res.json()["id"]).sku)

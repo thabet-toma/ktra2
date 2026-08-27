@@ -7,7 +7,7 @@
 المراحل:
   1) البنية المحاسبية: عملات + شجرة حسابات + فترات مالية + مستودع + مجموعات شركاء + إعدادات مبيعات
   2) الشركاء: العملاء (Clients) + الموردون (Suppliers)
-  3) الأصناف: Products → inventory.Product (+ فئات + شرائح أسعار)
+  3) المنتجات: Products → inventory.Product (+ فئات + شرائح أسعار)
   4) فواتير المبيعات: Invoices + Invoice_items → sales.SalesInvoice (ترحيل قيد + خصم مخزون + تسوية النقدي)
   5) فواتير الشراء: Purchase_orders + Purchase_order_items → logistics.PurchaseInvoice (استلام مخزون + قيد ذمم مورد)
 
@@ -95,7 +95,7 @@ def pdate(v):
 
 
 def norm_name(s):
-    """تطبيع اسم صنف للمطابقة: إزالة التبويب وطي المسافات."""
+    """تطبيع اسم منتج للمطابقة: إزالة التبويب وطي المسافات."""
     if not s:
         return ''
     return ' '.join(str(s).replace('\t', ' ').split())
@@ -369,7 +369,7 @@ class Command(BaseCommand):
     def _get_category(self, name):
         """فئة منتج بالاسم مع ربط حسابات الإيراد/التكلفة/المخزون."""
         from inventory.models import ProductCategory
-        key = clean(name) or 'أصناف عامة'
+        key = clean(name) or 'منتجات عامة'
         cat = self._cat_cache.get(key)
         if cat:
             return cat
@@ -399,8 +399,8 @@ class Command(BaseCommand):
                           Product.objects.filter(tenant_id=self.tid).values_list('name_ar', flat=True) if x}
         n = 0
         for r in read_csv(self.csv_dir / 'Products.csv'):
-            name = norm_name(r.get('Name')) or f"صنف {clean(r.get('id'))}"
-            # idempotency: إن كان صنف بنفس الاسم موجوداً مسبقاً (إعادة تشغيل) تخطّاه.
+            name = norm_name(r.get('Name')) or f"منتج {clean(r.get('id'))}"
+            # idempotency: إن كان منتج بنفس الاسم موجوداً مسبقاً (إعادة تشغيل) تخطّاه.
             if name in existing_names:
                 continue
             sku = clean(r.get('ProductCode')) or f"P{clean(r.get('id'))}"
@@ -436,8 +436,8 @@ class Command(BaseCommand):
                     product=prod, tier_type='purchase', tier_number=1,
                     defaults={'price': bp, 'currency': self.ils})
             n += 1
-        self.summary['أصناف (من الملف)'] = n
-        self.stdout.write(f'  [products] أصناف+{n}')
+        self.summary['منتجات (من الملف)'] = n
+        self.stdout.write(f'  [products] منتجات+{n}')
 
     def _load_product_map(self):
         from inventory.models import Product
@@ -456,7 +456,7 @@ class Command(BaseCommand):
                     pass
 
     def _match_or_create_product(self, item_name):
-        """يطابق اسم البند بصنف موجود، وإلا يُنشئ صنفاً تلقائياً (AX-*)."""
+        """يطابق اسم البند بمنتج موجود، وإلا يُنشئ منتجاً تلقائياً (AX-*)."""
         from inventory.models import Product
         key = norm_name(item_name)
         if not key:
@@ -465,7 +465,7 @@ class Command(BaseCommand):
         if p:
             return p, False
         self._auto_seq += 1
-        cat = self._get_category('أصناف عامة')
+        cat = self._get_category('منتجات عامة')
         p = Product.objects.create(
             tenant=self.tenant, sku=f'AX-{self._auto_seq:05d}',
             name_ar=key[:200], category=cat,
@@ -548,7 +548,7 @@ class Command(BaseCommand):
         self.summary['فواتير مبيعات مُرحّلة'] = posted
         self.summary['فواتير مبيعات متخطّاة'] = skipped
         self.summary['فواتير مبيعات فاشلة'] = failed
-        self.summary['أصناف مُنشأة تلقائياً (مبيعات)'] = auto
+        self.summary['منتجات مُنشأة تلقائياً (مبيعات)'] = auto
         if errors:
             self.summary['أخطاء مبيعات (عيّنة)'] = ' | '.join(errors[:8])
         self.stdout.write(f'  [sales] مُرحّل {posted} · متخطّى {skipped} · فاشل {failed}')
@@ -658,7 +658,7 @@ class Command(BaseCommand):
         self.summary['فواتير شراء مُسوّاة (مدفوعة)'] = settled
         self.summary['فواتير شراء متخطّاة'] = skipped
         self.summary['فواتير شراء فاشلة'] = failed
-        self.summary['أصناف مُنشأة تلقائياً (شراء)'] = auto
+        self.summary['منتجات مُنشأة تلقائياً (شراء)'] = auto
         if errors:
             self.summary['أخطاء شراء (عيّنة)'] = ' | '.join(errors[:8])
         self.stdout.write(f'  [purchases] مُستلَم {posted} · متخطّى {skipped} · فاشل {failed}')

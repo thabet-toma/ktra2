@@ -126,7 +126,7 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
                       title={
                         r.invoice_number ? `فاتورة ${r.invoice_number}`
                         : r.source === 'default'
-                          ? 'سعر عام من كرت الصنف — لا عرض لهذا الزبون ولا شراء سابق. اكتب سعراً هنا ليصير عرضه الخاص.'
+                          ? 'سعر عام من كرت المنتج — لا عرض لهذا الزبون ولا شراء سابق. اكتب سعراً هنا ليصير عرضه الخاص.'
                           : undefined}
                     >{r.source_label}</span>
                   </td>

@@ -28,7 +28,7 @@ class TenantScopedPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
 
     `PrimaryKeyRelatedField(queryset=X.objects.all())` كان يقبل pk من أي شركة —
     `get_queryset` في الـviewset يحمي القراءة فقط، والكتابة تمرّ من الحقل
-    مباشرةً. هذا الصنف يعيد تقييد الـqueryset بشركة الطلب وقت الحلّ، فيصير
+    مباشرةً. هذا المنتج يعيد تقييد الـqueryset بشركة الطلب وقت الحلّ، فيصير
     الـpk الأجنبي «غير موجود» (نفس رسالة DRF القياسية — لا يكشف وجود الكائن).
 
     الشركة تُحلّ من request في context (المسار الإنتاجي)، أو من

@@ -28,7 +28,7 @@ export const StoreIndexPage: React.FC = () => {
         </div>
         <h1 className="mt-5 text-2xl font-black text-slate-900 dark:text-white">المتاجر الإلكترونية</h1>
         <p className="mt-4 text-sm leading-7 text-slate-600 dark:text-slate-300">
-          لكل شركة على منصة K.T.R.A متجرها الخاص برابطه المستقل، يعرض ما اختارت الشركة نشره من أصنافها
+          لكل شركة على منصة K.T.R.A متجرها الخاص برابطه المستقل، يعرض ما اختارت الشركة نشره من منتجاتها
           بأسعارها المحدّثة. لا يوجد كتالوج موحّد لكل الشركات — اطلب من الشركة رابط متجرها،
           ويكون على الشكل:
         </p>

@@ -35,10 +35,10 @@ def env():
     buyer = Partner.objects.create(
         tenant=tenant, name="المشتري", partner_type="Customer", linked_account=ar)
     product = Product.objects.create(
-        tenant=tenant, sku="RQ-1", name_ar="صنف المرجع",
+        tenant=tenant, sku="RQ-1", name_ar="منتج المرجع",
         quantity_on_hand=Decimal("50"), avg_cost=Decimal("10"))
     other = Product.objects.create(
-        tenant=tenant, sku="RQ-2", name_ar="صنف لم يُبَع",
+        tenant=tenant, sku="RQ-2", name_ar="منتج لم يُبَع",
         quantity_on_hand=Decimal("50"), avg_cost=Decimal("10"))
     original = SalesInvoice.objects.create(
         tenant=tenant, invoice_number="INV-RQ-1", customer=buyer, currency=cur,
@@ -106,7 +106,7 @@ def test_second_return_counts_the_first(env):
 
 
 def test_return_of_a_product_not_on_the_invoice_is_rejected(env):
-    """صنفٌ لم يُبَع في الفاتورة الأصلية قابلُه للإرجاع صفر."""
+    """منتجٌ لم يُبَع في الفاتورة الأصلية قابلُه للإرجاع صفر."""
     tenant, owner, cur, buyer, product, other, original = env
     res = _client(owner, tenant).post(
         "/api/sales/invoices/",

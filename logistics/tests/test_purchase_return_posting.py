@@ -35,7 +35,7 @@ def env():
     supplier = Partner.objects.create(
         tenant=tenant, name="مورد", partner_type="Supplier", linked_account=ap)
     product = Product.objects.create(
-        tenant=tenant, sku="RET-P", name_ar="صنف", quantity_on_hand=Decimal("10"),
+        tenant=tenant, sku="RET-P", name_ar="منتج", quantity_on_hand=Decimal("10"),
         avg_cost=Decimal("50"))
     return tenant, supplier, product, ap, inv
 
@@ -87,7 +87,7 @@ def _original_invoice(tenant, supplier, product, *, qty, price=50):
         partner=supplier, currency=tenant._cur, is_return=False,
     )
     PurchaseInvoiceItem.objects.create(
-        invoice=inv, product=product, name="صنف",
+        invoice=inv, product=product, name="منتج",
         quantity=Decimal(str(qty)), unit_price=Decimal(str(price)),
         total_price=Decimal(str(qty * price)),
     )

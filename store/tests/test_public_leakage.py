@@ -6,7 +6,7 @@
 
 ثلاث طبقات، كلٌّ تُمسِك ما تفوّته الأخرى:
 
-1. **عزل الشركة** — نتائج `/store/alpha/` لا تحمل صنف شركة أخرى ولا صنفاً
+1. **عزل الشركة** — نتائج `/store/alpha/` لا تحمل منتج شركة أخرى ولا منتجاً
    غير منشور، لا في القائمة ولا بالوصول المباشر بالمعرّف.
 2. **إحكام الحمولة بمساواة مجموعة المفاتيح** — `assertEqual(set(keys), WHITELIST)`
    لا `assertNotIn('avg_cost', keys)`. الفرق جوهري: الغياب الفردي يحرس ما
@@ -109,7 +109,7 @@ class StorePublicLeakageTest(TestCase):
             file_type="Product Image",
             file_path="https://res.cloudinary.com/demo/image/upload/pa.jpg")
 
-        # PA2 — صنف ألفا **غير منشور**: النشر اختيار صريح لا افتراض.
+        # PA2 — منتج ألفا **غير منشور**: النشر اختيار صريح لا افتراض.
         cls.pa2 = Product.objects.create(
             tenant=cls.tenant_a, sku="PA-2", name_ar="إطار سرّي", name_en="Secret Tyre",
             brand="ميشلان", category=cls.category_a, uom=cls.uom,
@@ -117,7 +117,7 @@ class StorePublicLeakageTest(TestCase):
             quantity_on_hand=Decimal("40"), avg_cost=Decimal("22"),
         )
 
-        # PB — صنف شركة أخرى، منشور في متجرها هي.
+        # PB — منتج شركة أخرى، منشور في متجرها هي.
         cls.pb = Product.objects.create(
             tenant=cls.tenant_b, sku="PB-1", name_ar="بطارية 70", name_en="Battery 70",
             brand="فارتا", category=cls.category_b, uom=cls.uom,

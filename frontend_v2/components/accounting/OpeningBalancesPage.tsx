@@ -63,7 +63,7 @@ const isFiscalPeriodError = (message: string): boolean =>
   message.includes("فترة مالية") || message.includes("الفترة المالية");
 
 const productLabel = (p: Product): string =>
-  p.display_name || p.name_ar || p.name_en || p.sku || `صنف #${p.id}`;
+  p.display_name || p.name_ar || p.name_en || p.sku || `منتج #${p.id}`;
 
 export const OpeningBalancesPage: React.FC = () => {
   const navigate = useNavigate();
@@ -523,11 +523,11 @@ export const OpeningBalancesPage: React.FC = () => {
   );
 
   /**
-   * THA-411 — أصناف الافتتاح المتتبَّعة تسلسلياً بعد الترحيل.
+   * THA-411 — منتجات الافتتاح المتتبَّعة تسلسلياً بعد الترحيل.
    *
    * الترحيل يُدخل الكمية للمخزن ولا يُنشئ وحدةً مُرقَّمة واحدة، فشركةٌ نمط بيعها
    * «إجباري» تُصدَم عند أول فاتورة برسالة «المتوفر في المخزن 0 والمطلوب N» بلا ما
-   * يقول أين تُرقَّم. هذه اللوحة تقول المُسجَّل والمطلوب وتفتح كرت الصنف على تبويب
+   * يقول أين تُرقَّم. هذه اللوحة تقول المُسجَّل والمطلوب وتفتح كرت المنتج على تبويب
    * الأرقام التسلسلية — لا ترقيمَ من هنا: المسار القائم هو الذي يُرقِّم.
    *
    * قبل الترحيل لا تُعرض: لا رصيد بعد يُرقَّم (سقف الترقيم رصيد المخزن).
@@ -535,16 +535,16 @@ export const OpeningBalancesPage: React.FC = () => {
   const serialItems = data?.serial_items ?? [];
   const serialsPanel = !posted || serialItems.length === 0 ? null : (
     <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs dark:border-amber-700 dark:bg-amber-950/40">
-      <div className="mb-2 font-bold">أصناف تتتبّع أرقاماً تسلسلية في بضاعة أول المدة</div>
+      <div className="mb-2 font-bold">منتجات تتتبّع أرقاماً تسلسلية في بضاعة أول المدة</div>
       <div className="mb-2 text-[var(--ktra-ink-soft)]">
         القيد الافتتاحي أدخل الكميات للمخزن ولا يُنشئ أرقاماً تسلسلية — تُنشأ من استلام الشراء.
         إن كان إدخال الرقم التسلسلي إجبارياً في البيع فلن تُباع هذه الوحدات قبل ترقيمها،
-        ورقّمها من كرت الصنف. الافتتاح صحيح بلا أرقام؛ البيع وحده هو ما يحتاجها.
+        ورقّمها من كرت المنتج. الافتتاح صحيح بلا أرقام؛ البيع وحده هو ما يحتاجها.
       </div>
       <table className="ktra-grid" data-variant="list">
         <thead>
           <tr>
-            <th>الصنف</th>
+            <th>المنتج</th>
             <th className="w-[14%]">المسجَّل</th>
             <th className="w-[14%]">المطلوب</th>
             <th className="w-[28%]"></th>
@@ -567,10 +567,10 @@ export const OpeningBalancesPage: React.FC = () => {
                     </span>
                     <button
                       type="button" className="ktra-toolbtn"
-                      title="يفتح كرت الصنف على تبويب الأرقام التسلسلية"
+                      title="يفتح كرت المنتج على تبويب الأرقام التسلسلية"
                       onClick={() => navigate(`/products/${item.product}?tab=serials`)}
                     >
-                      <Barcode className="h-3 w-3" /> رقّم وحدات هذا الصنف
+                      <Barcode className="h-3 w-3" /> رقّم وحدات هذا المنتج
                     </button>
                   </div>
                 </td>
@@ -585,14 +585,14 @@ export const OpeningBalancesPage: React.FC = () => {
   const stockTab = (
     <div className="p-2">
       <div className="mb-2 text-xs text-[var(--ktra-ink-soft)]">
-        بضاعة أول المدة: كمية وتكلفة وحدة لكل صنف/مستودع. تدخل المخزون بتاريخ القيد الافتتاحي
+        بضاعة أول المدة: كمية وتكلفة وحدة لكل منتج/مستودع. تدخل المخزون بتاريخ القيد الافتتاحي
         فيتكوّن متوسط التكلفة صحيحاً قبل أول شراء، وقيمتها تُرحَّل مدينةً على حساب المخزون في
         الأستاذ — فيتطابق الرقمان بالضرورة.
       </div>
       <table className="ktra-grid" data-variant="list">
         <thead>
           <tr>
-            <th>الصنف</th>
+            <th>المنتج</th>
             <th className="w-[18%]">المستودع</th>
             <th className="w-[13%]">الكمية</th>
             <th className="w-[13%]">تكلفة الوحدة</th>
@@ -614,7 +614,7 @@ export const OpeningBalancesPage: React.FC = () => {
               <tr key={row.key}>
                 <td>
                   {row.product !== "" ? (
-                    <span>{product ? productLabel(product) : `صنف #${row.product}`}</span>
+                    <span>{product ? productLabel(product) : `منتج #${row.product}`}</span>
                   ) : (
                     <KitAutocomplete
                       value=""

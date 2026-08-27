@@ -1,5 +1,5 @@
 /**
- * صفحة صنف واحد — `/store/<slug>/p/<id>`
+ * صفحة منتج واحد — `/store/<slug>/p/<id>`
  *
  * معرض صور متعدد، زر إضافة للسلة مع محدد كمية، زر طلب واتساب، ودعم الثيم والطلب المسبق.
  */
@@ -76,7 +76,7 @@ export const StoreProductPage: React.FC<StoreProductPageProps> = ({ slug, produc
       .catch((e: unknown) => {
         if (!alive) return;
         if (isStoreNotFound(e)) setMissing(true);
-        else setError(e instanceof Error ? e.message : "تعذّر فتح الصنف");
+        else setError(e instanceof Error ? e.message : "تعذّر فتح المنتج");
       })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };

@@ -1,5 +1,5 @@
 /**
- * N7-T8 — SqlProductsPage — KitDenseTable للأصناف
+ * N7-T8 — SqlProductsPage — KitDenseTable للمنتجات
  */
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { apiGetList } from '../../services/restApi';
@@ -72,8 +72,8 @@ export function SqlProductsPage() {
     return (
         <>
             <SqlDataPageShell
-                title="الأصناف"
-                subtitle="بيانات الأصناف من قاعدة البيانات."
+                title="المنتجات"
+                subtitle="بيانات المنتجات من قاعدة البيانات."
                 actions={
                     <div style={{ display: 'flex', gap: 6 }}>
                         <input
@@ -110,7 +110,7 @@ export function SqlProductsPage() {
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }} onClick={() => setDetailsOpen(false)}>
                     <div dir="rtl" style={{ background: 'var(--ktra-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 520, maxHeight: '90vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
                         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--ktra-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>تفاصيل الصنف</strong>
+                            <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>تفاصيل المنتج</strong>
                             <button className="ktra-toolbtn" onClick={() => setDetailsOpen(false)}>إغلاق</button>
                         </div>
                         <div style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 'var(--ktra-fs-sm)' }}>

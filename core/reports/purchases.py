@@ -194,13 +194,13 @@ def _purchases_by_product(tenant_id: int, params: dict) -> list[dict]:
 
 register(ReportSpec(
     key="purchases-by-product",
-    title="المشتريات حسب الصنف",
+    title="المشتريات حسب المنتج",
     category="purchases",
-    description="كم اشترينا من كل صنف وبأيّ متوسط سعر.",
-    filters=DATE_FILTERS + (ReportFilter("product", "الصنف", "product"),),
+    description="كم اشترينا من كل منتج وبأيّ متوسط سعر.",
+    filters=DATE_FILTERS + (ReportFilter("product", "المنتج", "product"),),
     columns=(
         ReportColumn("sku", "الرمز", width="120px"),
-        ReportColumn("name", "الصنف"),
+        ReportColumn("name", "المنتج"),
         ReportColumn("quantity", "الكمية", KIND_NUMBER, total=True, width="100px"),
         ReportColumn("total_price", "القيمة", KIND_MONEY, total=True),
         ReportColumn("avg_price", "متوسط السعر", KIND_MONEY, width="120px"),

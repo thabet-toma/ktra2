@@ -107,9 +107,9 @@ def _prices_are_public(tenant) -> bool:
 
 
 def published_products(tenant):
-    """أصناف الشركة المنشورة في متجرها — الاستعلام المقيَّد بنيوياً.
+    """منتجات الشركة المنشورة في متجرها — الاستعلام المقيَّد بنيوياً.
 
-    بوابةٌ واحدة تمرّ منها المسارات الثلاثة (القائمة، الصنف، صفحة الحملة)،
+    بوابةٌ واحدة تمرّ منها المسارات الثلاثة (القائمة، المنتج، صفحة الحملة)،
     فحجبُ السعر هنا يغطّيها كلَّها بالبناء لا بثلاثة شروط تُنسى إحداها.
     """
     price = (
@@ -161,7 +161,7 @@ def _store_media_context(tenant, products):
                     "color": row["overlay_color"] or "red_fire",
                 }
 
-    # 2. للمنتجات التي لا تملك صور متجر مخصصة، نستخدم صور الصنف العامة من SystemAttachment
+    # 2. للمنتجات التي لا تملك صور متجر مخصصة، نستخدم صور المنتج العامة من SystemAttachment
     missing_pids = [pid for pid, imgs in images.items() if not imgs]
     if missing_pids:
         rows = (
@@ -288,7 +288,7 @@ class StoreProductListView(StorePublicView):
     @classmethod
     def _filtered(cls, queryset, params):
         # `ids` تخدم إعادة تسعير السلّة بنداءٍ واحد بدل نداءٍ لكل بند. لا تفتح
-        # باباً: الاستعلام مفلتر بالشركة والنشر قبل هذا الشرط، فمعرّفُ صنفِ
+        # باباً: الاستعلام مفلتر بالشركة والنشر قبل هذا الشرط، فمعرّفُ منتجِ
         # شركةٍ أخرى يعطي فراغاً لا تسريباً.
         raw_ids = (params.get("ids") or "").strip()
         if raw_ids:
@@ -312,7 +312,7 @@ class StoreProductListView(StorePublicView):
         elif category:
             queryset = queryset.filter(category__name__iexact=category)
         # مُرتِّبٌ ثانٍ بالمعرّف دائماً: بلا فاصلٍ حاسم تتأرجح الصفوف المتساوية
-        # بين الصفحات فيظهر صنفٌ مرتين ويختفي آخر.
+        # بين الصفحات فيظهر منتجٌ مرتين ويختفي آخر.
         sort = (params.get("sort") or "").strip()
         if sort == "price_asc":
             return queryset.order_by("price", "id")
@@ -339,12 +339,12 @@ class StoreProductListView(StorePublicView):
 
 
 class StoreProductDetailView(StorePublicView):
-    """`GET /api/store/<slug>/products/<id>/` — صنف واحد، وعدّاد اليوم."""
+    """`GET /api/store/<slug>/products/<id>/` — منتج واحد، وعدّاد اليوم."""
 
     def get(self, request, slug, pk):
         tenant = _tenant_or_404(slug)
-        # المعرّف يُحلّ **داخل** الاستعلام المقيَّد لا خارجه: صنف شركة أخرى أو
-        # صنف غير منشور لا يُوجَد من هنا أصلاً، فيردّ 404 بلا فرعٍ خاص به.
+        # المعرّف يُحلّ **داخل** الاستعلام المقيَّد لا خارجه: منتج شركة أخرى أو
+        # منتج غير منشور لا يُوجَد من هنا أصلاً، فيردّ 404 بلا فرعٍ خاص به.
         product = published_products(tenant).filter(pk=pk).first()
         if product is None:
             raise Http404
@@ -417,7 +417,7 @@ class StoreCollectionDetailView(StorePublicView):
         paginator = EnforcedPageNumberPagination()
         products = list(paginator.paginate_queryset(queryset, request, view=self))
 
-        # المنتج المميّز يمرّ من نفس بوابة النشر: صنفٌ غير منشور أو صنف شركة
+        # المنتج المميّز يمرّ من نفس بوابة النشر: منتجٌ غير منشور أو منتج شركة
         # أخرى لا يُعرض لمجرّد تعيينه هنا، والحقول المحسوبة تأتي معه.
         featured = None
         if collection.featured_product_id:
@@ -446,11 +446,11 @@ class StoreCollectionDetailView(StorePublicView):
 
 
 class ProductHasHistoryError(APIException):
-    """صنفٌ له حركة لا يُحذف — يُخفى عن المتجر فقط."""
+    """منتجٌ له حركة لا يُحذف — يُخفى عن المتجر فقط."""
 
     status_code = status.HTTP_409_CONFLICT
     default_detail = (
-        "الصنف مرتبط بحركة مخزنية أو مستند بيع فلا يمكن حذفه — "
+        "المنتج مرتبط بحركة مخزنية أو مستند بيع فلا يمكن حذفه — "
         "تم إخفاؤه من المتجر بدلاً من ذلك."
     )
     default_code = "product_has_history"
@@ -540,7 +540,7 @@ class StoreCollectionAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet)
 
 
 class StoreCollectionItemAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
-    """إدارة الأصناف داخل المجموعة الإعلانية."""
+    """إدارة المنتجات داخل المجموعة الإعلانية."""
 
     permission_classes = [IsAuthenticated]
     serializer_class = StoreCollectionItemAdminSerializer
@@ -596,16 +596,16 @@ class StoreProductAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
         serializer.save(tenant=tenant)
 
     def perform_destroy(self, instance):
-        """حذف الصنف — وإن منعته حركةٌ محاسبية أو مخزنية، يُسحب من المتجر ويُقال ذلك.
+        """حذف المنتج — وإن منعته حركةٌ محاسبية أو مخزنية، يُسحب من المتجر ويُقال ذلك.
 
-        `204` هنا كذبة: الصنف باقٍ ويظهر في الجرد والتقارير، والبائع يظنّه ذهب.
+        `204` هنا كذبة: المنتج باقٍ ويظهر في الجرد والتقارير، والبائع يظنّه ذهب.
         """
-        # `store.manage` صلاحية تسويقية لا صلاحية مخزون: صنفٌ مخزني لم يتحرّك بعد
+        # `store.manage` صلاحية تسويقية لا صلاحية مخزون: منتجٌ مخزني لم يتحرّك بعد
         # يُحذف بلا مقاومة، ومعه بالتتالي شرائح أسعاره وأرقامه التسلسلية وعروض
-        # الأسعار عليه. الحذف من هنا لأصناف المتجر الخالصة وحدها.
+        # الأسعار عليه. الحذف من هنا لمنتجات المتجر الخالصة وحدها.
         if not instance.is_store_only:
             raise PermissionDenied(
-                "هذا صنف مخزني لا صنف متجر — احذفه من شاشة الأصناف بصلاحيتها. "
+                "هذا منتج مخزني لا منتج متجر — احذفه من شاشة المنتجات بصلاحيتها. "
                 "يمكنك من هنا سحبه من المتجر فقط."
             )
         try:

@@ -375,7 +375,7 @@ def is_last_manager(tenant: Tenant, membership: UserCompanyMembership) -> bool:
 def create_branch(tenant: Tenant, name: str, code: str) -> Branch:
     """task11 M4 — إنشاء فرع تحت شركة أم.
 
-    الفرع يشارك الشركة شجرةَ الحسابات والأصناف والشركاء تلقائياً (لأنها
+    الفرع يشارك الشركة شجرةَ الحسابات والمنتجات والشركاء تلقائياً (لأنها
     على مستوى الـ tenant)، بينما تُعزل فواتيره ومخزونه وقيوده عبر بُعد
     branch. دفاتر ترقيمه تُنشأ تلقائياً عند أول مستند (get_next_number).
     """

@@ -216,7 +216,7 @@ register(ReportSpec(
 
 
 def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[dict]:
-    """تجميع أسطر فواتير البيع حسب الصنف أو الماركة — قاعدة واحدة لتقريرين.
+    """تجميع أسطر فواتير البيع حسب المنتج أو الماركة — قاعدة واحدة لتقريرين.
 
     THA-60: التكلفة تُقرأ من حركات المخزون المسجَّلة لحظة الترحيل/التسليم عبر
     `sales_cogs_map` — القاعدة الموحّدة نفسها التي يستهلكها «أرباح الفواتير»،
@@ -224,7 +224,7 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
     ربح فواتير مضت ورُحّلت يتغيّر بلا أن يُمسّ أي مستند.
 
     الإيراد = صافي السطر ناقص نصيبه التناسبي من خصم الفاتورة — كي يطابق مجموعُ
-    الأصناف ربحَ «أرباح الفواتير» على الفواتير نفسها (يطرح الخصم مرّة واحدة على
+    المنتجات ربحَ «أرباح الفواتير» على الفواتير نفسها (يطرح الخصم مرّة واحدة على
     مستوى الفاتورة). التراكم بلا تقريب وسيط، والتقريب في النهاية وحدها.
 
     ما لا حركة له (مستورَد بلا حركات، أو بند لم يُسلَّم بعد) يُعلَن في عمود
@@ -257,7 +257,7 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
         qs = qs.filter(product_id=product)
 
     def _bucket_of(prod, product_id):
-        """دلو الصنف أو الماركة — مفتاحه ولافتته من المنتج نفسه."""
+        """دلو المنتج أو الماركة — مفتاحه ولافتته من المنتج نفسه."""
         if group == "product":
             key = product_id
             label = {
@@ -273,7 +273,7 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
         })
 
     buckets: dict = {}
-    # كمية البضائع لكل (فاتورة، صنف) — أساس مقارنة المُكلَّف بالمُباع.
+    # كمية البضائع لكل (فاتورة، منتج) — أساس مقارنة المُكلَّف بالمُباع.
     goods_qty: dict[tuple[int, int], Decimal] = {}
     bucket_of_product: dict[int, dict] = {}
     for line in qs:
@@ -296,7 +296,7 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
     cogs = sales_cogs_map(tenant_id=tenant_id, invoice_ids=invoice_ids)
     if product:
         cogs = {k: v for k, v in cogs.items() if k[1] == product}
-    # حركة لصنف لا سطر له في الفاتورة: تكلفتها حقيقية ولا يجوز إسقاطها، فيُجلب
+    # حركة لمنتج لا سطر له في الفاتورة: تكلفتها حقيقية ولا يجوز إسقاطها، فيُجلب
     # منتجها في استعلام واحد احتياطي بدل تجاهل المبلغ.
     missing = {pid for (_, pid) in cogs if pid not in bucket_of_product}
     if missing:
@@ -336,7 +336,7 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
 
 _PRODUCT_SALES_COLUMNS = (
     ReportColumn("sku", "الرمز", width="120px"),
-    ReportColumn("name", "الصنف"),
+    ReportColumn("name", "المنتج"),
     ReportColumn("quantity", "الكمية", KIND_NUMBER, total=True, width="100px"),
     ReportColumn("net_sales", "صافي المبيعات", KIND_MONEY, total=True),
     ReportColumn("tax_amount", "الضريبة", KIND_MONEY, total=True),
@@ -349,13 +349,13 @@ _PRODUCT_SALES_COLUMNS = (
 
 register(ReportSpec(
     key="sales-by-product",
-    title="المبيعات حسب الصنف",
+    title="المبيعات حسب المنتج",
     category="sales",
     description=(
-        "كمّ بيع كل صنف وربحه. التكلفة من حركات المخزون لحظة الترحيل/التسليم — "
+        "كمّ بيع كل منتج وربحه. التكلفة من حركات المخزون لحظة الترحيل/التسليم — "
         "تاريخية لا يحرّكها شراء لاحق. «كمية بلا تكلفة» ما لم تُسجَّل له حركة بعد."
     ),
-    filters=DATE_FILTERS + (ReportFilter("product", "الصنف", "product"),),
+    filters=DATE_FILTERS + (ReportFilter("product", "المنتج", "product"),),
     columns=_PRODUCT_SALES_COLUMNS,
     permission="sales.invoice.view",
     build=lambda t, p: _sales_line_aggregate(t, p, group="product"),
@@ -366,7 +366,7 @@ register(ReportSpec(
     title="المبيعات حسب الماركة",
     category="sales",
     description=(
-        "أي ماركة تبيع أكثر وأيّها أربح — تجميع أسطر البيع على ماركة الصنف. "
+        "أي ماركة تبيع أكثر وأيّها أربح — تجميع أسطر البيع على ماركة المنتج. "
         "التكلفة تاريخية من حركات المخزون، لا بمتوسط التكلفة اليوم."
     ),
     filters=DATE_FILTERS,

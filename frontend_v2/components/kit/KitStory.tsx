@@ -114,8 +114,8 @@ export const KitStory: React.FC = () => {
   const cols: KitGridColumn<DemoLine>[] = useMemo(
     () => [
       { key: '_n', header: 'مسلسل', width: '52px', align: 'center', readOnly: true },
-      { key: 'sku', header: 'رقم الصنف', width: '120px' },
-      { key: 'name', header: 'بيان الصنف' },
+      { key: 'sku', header: 'رقم المنتج', width: '120px' },
+      { key: 'name', header: 'وصف المنتج' },
       { key: 'unit', header: 'الوحدة', width: '90px', align: 'center' },
       { key: 'qty', header: 'الكمية', width: '90px', type: 'number' },
       { key: 'price', header: 'سعر الوحدة', width: '110px', type: 'number' },
@@ -139,7 +139,7 @@ export const KitStory: React.FC = () => {
     { key: 'grid', label: 'جدول', icon: <Table2 />, separatorBefore: true, onClick: () => setLastKey('جدول') },
     { key: 'voucher', label: 'سند الصرف', icon: <Receipt />, onClick: () => setLastKey('سند الصرف') },
     { key: 'print', label: 'طباعة الفاتورة', icon: <Printer />, onClick: () => setLastKey('طباعة') },
-    { key: 'prices', label: 'تحديث أسعار الأصناف', icon: <RefreshCw />, onClick: () => setLastKey('تحديث الأسعار') },
+    { key: 'prices', label: 'تحديث أسعار المنتجات', icon: <RefreshCw />, onClick: () => setLastKey('تحديث الأسعار') },
     { key: 'cons', label: 'مراجعة إرساليات الفاتورة', icon: <FileSearch />, onClick: () => setLastKey('الإرساليات') },
     { key: 'rep', label: 'تقارير القوائم', icon: <FileBarChart2 />, separatorBefore: true, onClick: () => setLastKey('تقارير') },
     { key: 'more', label: 'أوامر أخرى', icon: <MoreHorizontal />, onClick: () => setLastKey('أوامر') },
@@ -309,7 +309,7 @@ export const KitStory: React.FC = () => {
           <h4 className="font-bold mb-2">KitReportTable — جدول تقرير</h4>
           <KitReportTable<DemoLine>
             columns={[
-              { key: 'sku', header: 'الصنف' },
+              { key: 'sku', header: 'المنتج' },
               { key: 'name', header: 'البيان' },
               { key: 'qty', header: 'الكمية', numeric: true },
               { key: 'price', header: 'السعر', numeric: true },
@@ -399,7 +399,7 @@ const DocumentViewStoryPanel: React.FC = () => {
             { label: 'قيد اليومية', value: '#13200' },
           ]}
           columns={[
-            { key: 'name', header: 'الصنف', render: (r) => <span className="font-semibold">{r.name}</span> },
+            { key: 'name', header: 'المنتج', render: (r) => <span className="font-semibold">{r.name}</span> },
             { key: 'qty', header: 'الكمية', width: '80px', align: 'center', numeric: true, render: (r) => formatMoney(r.qty) },
             { key: 'price', header: 'سعر الوحدة', width: '110px', align: 'left', numeric: true, render: (r) => formatMoney(r.price) },
             { key: 'disc', header: 'الخصم', width: '90px', align: 'left', numeric: true, render: (r) => formatMoney(r.discount) },

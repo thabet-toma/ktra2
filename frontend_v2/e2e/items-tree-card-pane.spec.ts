@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * العرض الشجري للأصناف: الشجرة شريط 240px على اليمين، وبقية عرض الشاشة — التي
- * كانت بياضاً معطَّلاً — بطاقةُ الصنف المحدَّد. يثبّت الاختبار العقد: قبل الاختيار
+ * العرض الشجري للمنتجات: الشجرة شريط 240px على اليمين، وبقية عرض الشاشة — التي
+ * كانت بياضاً معطَّلاً — بطاقةُ المنتج المحدَّد. يثبّت الاختبار العقد: قبل الاختيار
  * دعوةٌ لاختيار منتج، وبعده تظهر البطاقة **في الصفحة نفسها** (لا تبويب جديد)
  * وتحتلّ المساحة الفارغة إلى يسار الشجرة.
  */
@@ -55,7 +55,7 @@ test.beforeEach(async ({ page }) => {
       body = [{
         id: 1,
         tenant: {
-          TenantID: 1, CompanyName: 'شركة الأصناف', SubscriptionPlan: 'Enterprise',
+          TenantID: 1, CompanyName: 'شركة المنتجات', SubscriptionPlan: 'Enterprise',
           Status: 'Active', CreatedAt: '2026-07-22T00:00:00Z', import_enabled: false,
         },
         role: 'manager', is_default: true, created_at: '2026-07-22T00:00:00Z',
@@ -97,7 +97,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('الفراغ بجانب شجرة الأصناف يصير بطاقة الصنف عند النقر على منتج', async ({ page }) => {
+test('الفراغ بجانب شجرة المنتجات يصير بطاقة المنتج عند النقر على منتج', async ({ page }) => {
   await page.goto('/items');
   await page.waitForLoadState('networkidle');
 
@@ -157,7 +157,7 @@ test('النقر على تصنيف يعرض كرته المجمّع في الب�
   expect(page.context().pages()).toHaveLength(1);
   await expect(page.getByRole('tab', { name: 'نظرة عامة (مجمّع)' })).toBeVisible();
   await expect(page.getByText('عدد البراندات')).toBeVisible();
-  await expect(page.getByText('2 صنف')).toBeVisible();
+  await expect(page.getByText('2 منتج')).toBeVisible();
 
   // الكبسة نفسها تفتح الفرع فتظهر أوراقه (اختيارٌ وكشفٌ بكبسة واحدة).
   await expect(tree.getByRole('button', { name: /بطارية 70A/ })).toBeVisible();
@@ -166,7 +166,7 @@ test('النقر على تصنيف يعرض كرته المجمّع في الب�
   await page.getByRole('tab', { name: 'البراندات' }).click();
   await expect(page.getByRole('button', { name: /بطارية 70A/ }).last()).toBeVisible();
 
-  // ومنها إلى صنف مفرد: البطاقة تتبدّل في مكانها.
+  // ومنها إلى منتج مفرد: البطاقة تتبدّل في مكانها.
   await tree.getByRole('button', { name: /إطار 205\/55 — ميشلان/ }).click();
   await expect(page.getByRole('tab', { name: 'نظرة عامة', exact: true })).toBeVisible();
   expect(page.context().pages()).toHaveLength(1);
@@ -195,8 +195,8 @@ test('طيّ الشجرة يسلّم عرضها للبطاقة — شريط لا
 });
 
 /**
- * الشكل الحاليّ للرابط: التصنيف وحده — الخادم يشتقّ أصنافه وأحفاده. تعدادُ
- * المعرّفات لتصنيفٍ فيه ~1500 صنف كان يُنتج رابطاً ~7.5KB فيردّه nginx (414)
+ * الشكل الحاليّ للرابط: التصنيف وحده — الخادم يشتقّ منتجاته وأحفاده. تعدادُ
+ * المعرّفات لتصنيفٍ فيه ~1500 منتج كان يُنتج رابطاً ~7.5KB فيردّه nginx (414)
  * قبل أن تُقلع الواجهة أصلاً.
  */
 test('الكرت المجمّع بالتصنيف (/product-group?category=) يعرض التبويبات', async ({ page }) => {

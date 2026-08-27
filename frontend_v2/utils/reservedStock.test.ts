@@ -18,7 +18,7 @@ const hold = (over: Partial<ReservationHold> = {}): ReservationHold => ({
   ...over,
 });
 
-test('المحجوز يُجمَع لكل صنف مع أصحاب الحجز', () => {
+test('المحجوز يُجمَع لكل منتج مع أصحاب الحجز', () => {
   const index = buildReservationIndex([
     hold(),
     hold({ order_id: 2, order_number: 'SO-2', customer_id: 9, customer_name: 'زبون آخر', quantity: '2' }),
@@ -42,13 +42,13 @@ test('حجز الزبون نفسه لا يُطرح من متاحه — حجزُ�
 test('المتاح للبيع = الرصيد − محجوز الآخرين', () => {
   const index = buildReservationIndex([hold()], 9);
   assert.equal(availableForSale('10', index.get(100)), 2);
-  assert.equal(availableForSale('10', undefined), 10, 'صنف بلا حجز = رصيده كلّه متاح');
+  assert.equal(availableForSale('10', undefined), 10, 'منتج بلا حجز = رصيده كلّه متاح');
 });
 
 test('تجاوز المتاح بعد الحجز يُنبِّه ويسمّي الطلبية الحاجزة', () => {
   const index = buildReservationIndex([hold()], 9);
   const warnings = reservedSaleWarnings(
-    [{ productId: 100, quantity: '5', onHand: '10', name: 'صنف محجوز' }],
+    [{ productId: 100, quantity: '5', onHand: '10', name: 'منتج محجوز' }],
     index,
   );
   assert.equal(warnings.length, 1);
@@ -57,29 +57,29 @@ test('تجاوز المتاح بعد الحجز يُنبِّه ويسمّي ال
   assert.deepEqual(warnings[0].holders, ['SO-1 (صاحب الطلبية)']);
 });
 
-test('الكمية داخل المتاح لا تُنبِّه، ولا صنف بلا حجز', () => {
+test('الكمية داخل المتاح لا تُنبِّه، ولا منتج بلا حجز', () => {
   const index = buildReservationIndex([hold()], 9);
   assert.deepEqual(
-    reservedSaleWarnings([{ productId: 100, quantity: '2', onHand: '10', name: 'صنف محجوز' }], index),
+    reservedSaleWarnings([{ productId: 100, quantity: '2', onHand: '10', name: 'منتج محجوز' }], index),
     [],
   );
   assert.deepEqual(
-    reservedSaleWarnings([{ productId: 200, quantity: '99', onHand: '1', name: 'صنف حر' }], index),
+    reservedSaleWarnings([{ productId: 200, quantity: '99', onHand: '1', name: 'منتج حر' }], index),
     [],
   );
 });
 
-test('سطران من نفس الصنف يزاحمان الحجز مجتمعَين', () => {
+test('سطران من نفس المنتج يزاحمان الحجز مجتمعَين', () => {
   const index = buildReservationIndex([hold()], 9);
   const warnings = reservedSaleWarnings([
-    { productId: 100, quantity: '1', onHand: '10', name: 'صنف محجوز' },
-    { productId: 100, quantity: '2', onHand: '10', name: 'صنف محجوز' },
+    { productId: 100, quantity: '1', onHand: '10', name: 'منتج محجوز' },
+    { productId: 100, quantity: '2', onHand: '10', name: 'منتج محجوز' },
   ], index);
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0].quantity, 3);
 });
 
-test('الخدمة والصنف المعفى خارج الحساب — كما في حارس الخادم', () => {
+test('الخدمة والمنتج المعفى خارج الحساب — كما في حارس الخادم', () => {
   const index = buildReservationIndex([hold()], 9);
   assert.deepEqual(
     reservedSaleWarnings(

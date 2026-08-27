@@ -113,7 +113,7 @@ export const StockMovementsPage: React.FC = () => {
   useEffect(() => { load(); }, [load]);
 
   const handleCreate = async () => {
-    if (!form.product || !form.quantity) { setErr("اختر الصنف والكمية."); return; }
+    if (!form.product || !form.quantity) { setErr("اختر المنتج والكمية."); return; }
     setBusy(true); setErr(null);
     try {
       await inventoryApi.createStockMovement({
@@ -142,15 +142,15 @@ export const StockMovementsPage: React.FC = () => {
       render: (m) => <>{fmtDate(m.movement_date)}</> },
     { key: "sku", header: "SKU", width: "100px",
       render: (m) => <>{m.product_sku}</> },
-    { key: "name", header: "الصنف",
+    { key: "name", header: "المنتج",
       render: (m) => (
-        // task16 A4: اسم الصنف رابط يفتح بطاقة الصنف على «حركة المخزون» مباشرة
+        // task16 A4: اسم المنتج رابط يفتح بطاقة المنتج على «حركة المخزون» مباشرة
         m.product_name ? (
           <button
             type="button"
             className="text-blue-700 hover:underline text-right"
             onClick={() => openInNewTab(productProfilePath(m.product))}
-            title="فتح حركة مخزون الصنف"
+            title="فتح حركة مخزون المنتج"
           >
             {m.product_name}
           </button>
@@ -229,7 +229,7 @@ export const StockMovementsPage: React.FC = () => {
         <div className="flex flex-wrap items-center gap-1.5">
           <select className="ktra-input w-[170px]"
             value={filterProduct} onChange={(e) => setFilterProduct(e.target.value)}>
-            <option value="">كل الأصناف</option>
+            <option value="">كل المنتجات</option>
             {products.map((p) => (
               <option key={p.id} value={p.id}>{p.sku} — {p.name_ar || p.name_en || "—"}</option>
             ))}
@@ -288,10 +288,10 @@ export const StockMovementsPage: React.FC = () => {
             </div>
             <div className="ktra-picker-body grid grid-cols-2 gap-2 p-2.5">
               <label className="ktra-field col-span-2">
-                <span className="ktra-field-label">الصنف</span>
+                <span className="ktra-field-label">المنتج</span>
                 <select className="ktra-input" value={form.product}
                   onChange={(e) => setForm((f) => ({ ...f, product: e.target.value }))}>
-                  <option value="">— اختر صنفاً —</option>
+                  <option value="">— اختر منتجاً —</option>
                   {products.map((p) => (
                     <option key={p.id} value={p.id}>{p.sku} — {p.name_ar || p.name_en}</option>
                   ))}

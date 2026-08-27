@@ -776,7 +776,7 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
             <table className="w-full text-right text-sm">
               <thead className="bg-[var(--color-surface-2)] text-[var(--color-text)]">
                 <tr>
-                  <th className="px-4 py-3 font-medium min-w-[200px]">الصنف</th>
+                  <th className="px-4 py-3 font-medium min-w-[200px]">المنتج</th>
                   <th className="px-4 py-3 font-medium text-center min-w-[80px]">الكمية</th>
                   <th className="px-4 py-3 font-medium text-center min-w-[100px]">السعر ({symbol})</th>
                   <th className="px-4 py-3 font-medium text-center min-w-[100px]">الإجمالي ({symbol})</th>

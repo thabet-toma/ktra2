@@ -1,7 +1,7 @@
 import { Invoice, Supplier, Item } from '../types';
 
 /**
- * جلب جميع الفواتير التي تحتوي على صنف معين
+ * جلب جميع الفواتير التي تحتوي على منتج معين
  */
 export const getInvoicesByItem = (allInvoices: Invoice[], itemId: string): Invoice[] => {
   return allInvoices.filter(invoice => 
@@ -10,7 +10,7 @@ export const getInvoicesByItem = (allInvoices: Invoice[], itemId: string): Invoi
 };
 
 /**
- * جلب جميع الموردين الذين تم شراء هذا الصنف منهم
+ * جلب جميع الموردين الذين تم شراء هذا المنتج منهم
  * يتم ذلك عن طريق البحث في الفواتير أولاً ثم استخراج الموردين
  */
 export const getSuppliersByItem = (
@@ -19,7 +19,7 @@ export const getSuppliersByItem = (
   itemId: string
 ): { supplier: Supplier, lastPurchaseDate: string, totalQuantity: number }[] => {
   
-  // 1. نجد الفواتير التي تحتوي الصنف
+  // 1. نجد الفواتير التي تحتوي المنتج
   const relevantInvoices = getInvoicesByItem(allInvoices, itemId);
 
   // 2. نقوم بتجميع البيانات حسب المورد

@@ -377,7 +377,7 @@ test("رحلة كاملة: استقبال بتغطية ← إصلاح ← قطع
 
   // ── قطعة مغطاة: تُضاف ثم يُرحَّل صرفها، فينقلب الزر إلى تراجع ─────────
   await doc.getByRole("button", { name: "قطع الغيار", exact: false }).click();
-  await doc.getByLabel("الصنف").selectOption("7");
+  await doc.getByLabel("المنتج").selectOption("7");
   await doc.getByLabel("المسار").selectOption("covered");
   await doc.getByRole("button", { name: "إضافة قطعة" }).click();
   await expect(doc.getByRole("row").filter({ hasText: "مغطاة بالكفالة" })).toBeVisible();
@@ -393,7 +393,7 @@ test("رحلة كاملة: استقبال بتغطية ← إصلاح ← قطع
 
   // ── قطعة مفوترة ← فاتورة مسودة تُربط بالأمر ──────────────────────────
   await doc.getByLabel("المسار").selectOption("billable");
-  await doc.getByLabel("الصنف").selectOption("7");
+  await doc.getByLabel("المنتج").selectOption("7");
   await doc.getByRole("button", { name: "إضافة قطعة" }).click();
   await doc.getByTestId("generate-invoice").click();
   await expect(doc).toContainText("فاتورة SI-42-55");

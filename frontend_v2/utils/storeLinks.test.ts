@@ -18,7 +18,7 @@ test("رابط المتجر الذي ينسخه صاحبه: مسار واحد ت
   assert.equal(storeHomeUrl("https://ktra-pro.tech", "alpha"), "https://ktra-pro.tech/store/alpha");
 });
 
-test("مسار الصنف يرمّز المعرّف والـslug فلا يكسره حرف عربي أو مسافة", () => {
+test("مسار المنتج يرمّز المعرّف والـslug فلا يكسره حرف عربي أو مسافة", () => {
   assert.equal(storeProductPath("alpha", 12), "/store/alpha/p/12");
   assert.equal(storeProductPath("متجر ألف", 3), `/store/${encodeURIComponent("متجر ألف")}/p/3`);
 });
@@ -49,7 +49,7 @@ test("رابط واتساب يحمل النص مرمّزاً، ويغيب كلي
   assert.equal(whatsappLink(null, "مرحباً"), null);
 });
 
-test("رسالة الاستفسار تحمل اسم الصنف ورابطه — البائع يعرف ما يُسأل عنه", () => {
+test("رسالة الاستفسار تحمل اسم المنتج ورابطه — البائع يعرف ما يُسأل عنه", () => {
   const message = productInquiryMessage("إطار ميشلان", "https://ktra-pro.tech/store/alpha/p/7");
   assert.match(message, /إطار ميشلان/);
   assert.match(message, /store\/alpha\/p\/7/);

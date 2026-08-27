@@ -133,7 +133,7 @@ class SupplierQuotationLineSerializer(serializers.ModelSerializer):
             'description_line', 'quantity', 'unit_price', 'line_total',
         ]
         read_only_fields = ['id', 'product_name', 'line_total']
-        # T-DRAFTPARTY: بند بلا صنف مسجَّل مسموح — اسمه النصّي يكفي داخل العرض.
+        # T-DRAFTPARTY: بند بلا منتج مسجَّل مسموح — اسمه النصّي يكفي داخل العرض.
         extra_kwargs = {
             'product': {'required': False, 'allow_null': True},
         }
@@ -358,19 +358,19 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
 
         lines = attrs.get('lines')
         if instance is None and not lines:
-            raise serializers.ValidationError({'lines': 'يجب إضافة صنف واحد على الأقل.'})
+            raise serializers.ValidationError({'lines': 'يجب إضافة منتج واحد على الأقل.'})
         if lines is not None:
             seen_seq = set()
             for index, line in enumerate(lines, start=1):
                 product = line.get('product')
                 if product is not None and product.tenant_id != tenant.pk:
                     raise serializers.ValidationError({
-                        'lines': f'الصنف في السطر {index} لا يتبع الشركة الحالية.',
+                        'lines': f'المنتج في السطر {index} لا يتبع الشركة الحالية.',
                     })
-                # T-DRAFTPARTY: السطر بلا صنف مسجّل يلزمه اسم نصّي يبقى داخل العرض.
+                # T-DRAFTPARTY: السطر بلا منتج مسجّل يلزمه اسم نصّي يبقى داخل العرض.
                 if product is None and not str(line.get('name_snapshot') or '').strip():
                     raise serializers.ValidationError({
-                        'lines': f'اكتب اسم الصنف في السطر {index} أو اختره من الأصناف.',
+                        'lines': f'اكتب اسم المنتج في السطر {index} أو اختره من المنتجات.',
                     })
                 seq = line.get('seq', index)
                 if seq in seen_seq:
@@ -567,14 +567,14 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
 
         lines = attrs.get('lines')
         if instance is None and not lines:
-            raise serializers.ValidationError({'lines': 'يجب إضافة صنف واحد على الأقل.'})
+            raise serializers.ValidationError({'lines': 'يجب إضافة منتج واحد على الأقل.'})
         if lines is not None:
             seen_seq = set()
             for index, line in enumerate(lines, start=1):
                 product = line['product']
                 if product.tenant_id != tenant.pk:
                     raise serializers.ValidationError({
-                        'lines': f'الصنف في السطر {index} لا يتبع الشركة الحالية.',
+                        'lines': f'المنتج في السطر {index} لا يتبع الشركة الحالية.',
                     })
                 seq = line.get('seq', index)
                 if seq in seen_seq:

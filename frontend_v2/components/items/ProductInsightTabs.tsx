@@ -1,10 +1,10 @@
 /**
- * كرت الصنف الموحّد — الجزء القرائي (نظرة عامة + الفواتير المرتبطة + حركة المخزون).
+ * كرت المنتج الموحّد — الجزء القرائي (نظرة عامة + الفواتير المرتبطة + حركة المخزون).
  *
  * كان هذا المحتوى حبيس `ProductProfilePage` بينما التحرير حبيس `ItemForm`،
- * فصار للصنف كرتان: واحد يُرى وآخر يُعدَّل. استُخرج هنا ليركّبه نموذج الكرت نفسه
+ * فصار للمنتج كرتان: واحد يُرى وآخر يُعدَّل. استُخرج هنا ليركّبه نموذج الكرت نفسه
  * (`ItemForm`) كتبويبات، وتستهلك بطاقةُ المودال المختصرة نفسَ النظرة العامة —
- * مصدر واحد لكل عرض للصنف. يقرأ `inventory/products/{id}/profile|stock-ledger|invoices`.
+ * مصدر واحد لكل عرض للمنتج. يقرأ `inventory/products/{id}/profile|stock-ledger|invoices`.
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGetObject } from "../../services/restApi";
@@ -39,7 +39,7 @@ export interface ProductProfileData {
   sold_value: string;
   avg_weekly_sales?: string;
   avg_monthly_sales?: string;
-  /** كرت الصنف: التسعير والربحية — كلها مشتقّة خادمياً (لا حساب في الواجهة). */
+  /** كرت المنتج: التسعير والربحية — كلها مشتقّة خادمياً (لا حساب في الواجهة). */
   sale_price?: string | null;
   last_sale_price?: string | null;
   last_sale_invoice?: string | null;
@@ -109,7 +109,7 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 
 /**
  * ترتيب المصادر في مستند البيع: آخر سعر باعه هذا الزبون ← عرض سعره ← السعر العام
- * في كرت الصنف. فالسعر العام لا يظهر للزبون إلا حين لا عرض له ولا شراء سابق.
+ * في كرت المنتج. فالسعر العام لا يظهر للزبون إلا حين لا عرض له ولا شراء سابق.
  */
 const SALE_SOURCE_LABEL: Record<"product" | "last_invoice", string> = {
   product: "سعر عام يدوي — يُقترح للزبون الذي لا عرض له ولا شراء سابق",
@@ -124,7 +124,7 @@ export const ProductOverview: React.FC<{ profile: ProductProfileData | null; loa
   if (!profile) {
     return (
       <div className="p-4 text-center text-[var(--ktra-ink-soft)]">
-        {loading ? "جاري التحميل…" : "لا توجد بيانات لهذا الصنف بعد."}
+        {loading ? "جاري التحميل…" : "لا توجد بيانات لهذا المنتج بعد."}
       </div>
     );
   }
@@ -142,7 +142,7 @@ export const ProductOverview: React.FC<{ profile: ProductProfileData | null; loa
           tone={source === "product" ? "ok" : undefined}
         />
         <Kpi label="سعر التكلفة (متوسط)" value={formatMoney(profile.avg_cost, "—")}
-          hint="المتوسط المرجّح لمشتريات الصنف المرحّلة" />
+          hint="المتوسط المرجّح لمشتريات المنتج المرحّلة" />
         <Kpi
           label="الربح للوحدة"
           value={formatMoney(profile.profit_per_unit ?? "", "—")}
@@ -158,7 +158,7 @@ export const ProductOverview: React.FC<{ profile: ProductProfileData | null; loa
         <Kpi label="آخر سعر بيع" value={formatMoney(profile.last_sale_price ?? "", "—")}
           hint={profile.last_sale_invoice
             ? `فاتورة ${profile.last_sale_invoice} · ${formatDateLocalized(profile.last_sale_date) || ""}`
-            : "لا فاتورة بيع مرحّلة لهذا الصنف"} />
+            : "لا فاتورة بيع مرحّلة لهذا المنتج"} />
         <Kpi label="آخر سعر شراء" value={formatMoney(profile.last_purchase_price ?? "", "—")}
           hint="من آخر فاتورة شراء مرحّلة (لا من متوسط التكلفة)" />
         <Kpi label="القيمة البيعية للمخزون" value={formatMoney(profile.sale_valuation ?? "", "—")}
@@ -188,12 +188,12 @@ export const ProductOverview: React.FC<{ profile: ProductProfileData | null; loa
       </Section>
 
       <Section title="التعريف">
-        <Kpi label="رقم الصنف (SKU)" value={profile.sku || "—"} />
+        <Kpi label="رقم المنتج (SKU)" value={profile.sku || "—"} />
         <Kpi label="الباركود" value={profile.barcode || "—"} />
         <Kpi label="البراند" value={profile.brand || "—"} />
         <Kpi label="التصنيف" value={profile.category || "—"} />
         <Kpi label="الوحدة" value={profile.uom || "—"} />
-        <Kpi label="نوع الصنف" value={profile.is_service ? "خدمة" : "بضاعة"} />
+        <Kpi label="طبيعة المنتج" value={profile.is_service ? "خدمة" : "بضاعة"} />
       </Section>
     </div>
   );
@@ -236,7 +236,7 @@ const invoiceColumns: LedgerColumn<InvoiceRow>[] = [
 ];
 
 /**
- * T-SERIAL: وحدات الصنف المُرقَّمة — «أي وحدة جاءت من أي مورّد وذهبت لأي زبون».
+ * T-SERIAL: وحدات المنتج المُرقَّمة — «أي وحدة جاءت من أي مورّد وذهبت لأي زبون».
  * الحالة والمستندان يأتيان من الخادم كما هي (`inventory/serials.py::_serial_row`).
  */
 const serialColumns: LedgerColumn<ProductSerialRow>[] = [
@@ -283,11 +283,11 @@ const serialColumns: LedgerColumn<ProductSerialRow>[] = [
 ];
 
 /**
- * يجلب بيانات الكرت القرائية لصنف محفوظ (`productId=null` عند صنف جديد → بلا نداءات)
+ * يجلب بيانات الكرت القرائية لمنتج محفوظ (`productId=null` عند منتج جديد → بلا نداءات)
  * ويبني تبويباته جاهزة للتركيب في `KitDocumentShell`.
  *
  * `isSerialized` يأتي من الكرت لا من نقطة `profile` (لا تحمله): تبويب الأرقام
- * التسلسلية لا يُبنى أصلاً لصنف غير متتبَّع، فلا نداء ولا تبويب فارغ.
+ * التسلسلية لا يُبنى أصلاً لمنتج غير متتبَّع، فلا نداء ولا تبويب فارغ.
  */
 export const useProductInsights = (
   productId: number | null,
@@ -367,7 +367,7 @@ export const useProductInsights = (
   /**
    * ترقيم مخزون قائم: الوحدة لا تُنشأ إلا من فاتورة شراء، فمخزون ما قبل الميزة
    * كان يبقى بلا أرقام — و«إجباري» في البيع يرفض بيعه بلا مخرج. الزر يفتح نافذة
-   * الإدخال نفسها (`capture`)، والسقف خادمي: لا ترقيم فوق رصيد الصنف.
+   * الإدخال نفسها (`capture`)، والسقف خادمي: لا ترقيم فوق رصيد المنتج.
    */
   const [registerOpen, setRegisterOpen] = useState(false);
   const inStockUnits = useMemo(
@@ -404,7 +404,7 @@ export const useProductInsights = (
     );
   }, [serials, serQuery]);
 
-  const emptyHint = "احفظ الصنف أولاً لتظهر بياناته هنا.";
+  const emptyHint = "احفظ المنتج أولاً لتظهر بياناته هنا.";
 
   const tabs: KitTab[] = [
     {
@@ -428,7 +428,7 @@ export const useProductInsights = (
               rows={invoices}
               loading={invLoading}
               error={invError}
-              emptyText="لا توجد فواتير تحتوي هذا الصنف."
+              emptyText="لا توجد فواتير تحتوي هذا المنتج."
             />
           </div>
         ),
@@ -449,7 +449,7 @@ export const useProductInsights = (
               limit={PAGE}
               offset={ledOffset}
               onPage={setLedOffset}
-              emptyText="لا توجد حركات مخزون لهذا الصنف."
+              emptyText="لا توجد حركات مخزون لهذا المنتج."
             />
           </div>
         ),
@@ -527,9 +527,9 @@ export const useProductInsights = (
 
 /* ─────────────────────────────────────────────────────────────────────────
  * الكرت المجمّع: عقدة المقاس/التصنيف تجمع كل البراندات تحتها.
- * كان كلّه محبوساً في صفحة `GroupProfilePage`، فلمّا احتاجته شجرة الأصناف
+ * كان كلّه محبوساً في صفحة `GroupProfilePage`، فلمّا احتاجته شجرة المنتجات
  * لتعرضه في بطاقتها الجانبية كان الطريق إمّا نسخةً ثانية منه أو استخراجه —
- * فاستُخرج هنا كما استُخرجت تبويبات الصنف المفرد، والصفحة صارت غلافاً فوقه.
+ * فاستُخرج هنا كما استُخرجت تبويبات المنتج المفرد، والصفحة صارت غلافاً فوقه.
  * ───────────────────────────────────────────────────────────────────────── */
 
 export interface GroupMember {
@@ -556,13 +556,13 @@ export interface GroupProfileData {
   sold_value: string;
 }
 
-/** حركة المخزون المجمّعة = صفّ حركة الصنف + البراند الذي جاءت منه. */
+/** حركة المخزون المجمّعة = صفّ حركة المنتج + البراند الذي جاءت منه. */
 export interface GroupLedgerRow extends LedgerRow {
   product_name?: string;
 }
 
 /**
- * أعمدة الحركة المجمّعة = أعمدة الصنف نفسها + «البراند» بعد التاريخ، والرصيد
+ * أعمدة الحركة المجمّعة = أعمدة المنتج نفسها + «البراند» بعد التاريخ، والرصيد
  * يُسمّى رصيد البراند لأنه جارٍ لكل براند على حدة لا للمجموعة.
  * الحقن **بالمفتاح لا بالفهرس**: تغيّر ترتيب الأعمدة المشتركة لا يزحزح شيئاً.
  */
@@ -599,9 +599,9 @@ const groupMemberColumns: LedgerColumn<GroupMember>[] = [
 
 /**
  * يجلب الكرت المجمّع ويبني تبويباته. المحدِّد إمّا تصنيفٌ (`{ category }` —
- * الخادم يشتقّ أصنافه وأحفاده فلا يسافر تعدادٌ في الطلب) وإمّا معرّفاتٌ صريحة.
+ * الخادم يشتقّ منتجاته وأحفاده فلا يسافر تعدادٌ في الطلب) وإمّا معرّفاتٌ صريحة.
  * المفتاح نصّي كي لا يُعيد مستدعٍ يبني الكائن/المصفوفة في كل رسم إطلاقَ الطلبات
- * بلا نهاية. مجموعةٌ فارغة (تصنيف بلا أصناف) ليست خطأ شبكة: لا نداء، ورسالةٌ
+ * بلا نهاية. مجموعةٌ فارغة (تصنيف بلا منتجات) ليست خطأ شبكة: لا نداء، ورسالةٌ
  * تقول ذلك.
  */
 export const useGroupInsights = (selector: ProductGroupSelector | number[]) => {
@@ -632,7 +632,7 @@ export const useGroupInsights = (selector: ProductGroupSelector | number[]) => {
     setLedOffset(0);
     if (isEmpty) {
       setProfile(null);
-      setError("لا توجد أصناف في هذه المجموعة بعد.");
+      setError("لا توجد منتجات في هذه المجموعة بعد.");
       setLoading(false);
       return;
     }

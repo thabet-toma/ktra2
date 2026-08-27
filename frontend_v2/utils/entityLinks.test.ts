@@ -94,14 +94,14 @@ test("روابط التذكيرات تقبل المسار الداخلي وتر�
 });
 
 /**
- * رابط الكرت المجمّع: التصنيف يسمو على تعداد المعرّفات. تصنيفٌ فيه ~1500 صنف
+ * رابط الكرت المجمّع: التصنيف يسمو على تعداد المعرّفات. تصنيفٌ فيه ~1500 منتج
  * كان يُنتج رابطاً ~7.5KB — فوق حدّ سطر الطلب في nginx (8KB) ⇒ 414 قبل أن
  * تُقلع الواجهة. والتعداد يبقى للمجموعات التي لا تصنيف لها وللروابط القديمة.
  */
 test("رابط الكرت المجمّع يفضّل التصنيف ولا يعدّ المعرّفات", () => {
   const many = Array.from({ length: 1500 }, (_, i) => 100000 + i);
-  const byCategory = productGroupPath({ name: "أصناف عامة", categoryId: 3, ids: many });
-  assert.equal(byCategory, `/product-group?category=3&name=${encodeURIComponent("أصناف عامة")}`);
+  const byCategory = productGroupPath({ name: "منتجات عامة", categoryId: 3, ids: many });
+  assert.equal(byCategory, `/product-group?category=3&name=${encodeURIComponent("منتجات عامة")}`);
   assert.ok(byCategory.length < 100);
   // التعداد نفسه كان سيتجاوز حدّ سطر الطلب.
   assert.ok(many.join(",").length > 8 * 1024);

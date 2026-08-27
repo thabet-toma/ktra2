@@ -25,7 +25,7 @@ class SalesQuotationListPerformanceTest(APITestCase):
             tenant=cls.tenant, name="عميل عروض", partner_type="Customer",
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="QUOTE-LIST-P", name_ar="صنف عرض",
+            tenant=cls.tenant, sku="QUOTE-LIST-P", name_ar="منتج عرض",
         )
         for i in range(6):
             quotation = SalesQuotation.objects.create(
@@ -68,4 +68,4 @@ class SalesQuotationListPerformanceTest(APITestCase):
         )
         assert detail.status_code == 200, detail.content[:300]
         assert len(detail.json()["lines"]) == 1
-        assert detail.json()["lines"][0]["product_name"] == "صنف عرض"
+        assert detail.json()["lines"][0]["product_name"] == "منتج عرض"

@@ -1,4 +1,4 @@
-"""task18 DEF-C2 — آخر سعر بيع لصنف (عام واختيارياً لعميل)."""
+"""task18 DEF-C2 — آخر سعر بيع لمنتج (عام واختيارياً لعميل)."""
 from decimal import Decimal
 
 import pytest
@@ -28,7 +28,7 @@ def env():
     c1 = Partner.objects.create(tenant=tenant, name="عميل1", partner_type="Customer", linked_account=ar)
     c2 = Partner.objects.create(tenant=tenant, name="عميل2", partner_type="Customer", linked_account=ar)
     product = Product.objects.create(
-        tenant=tenant, sku="LP-1", name_ar="صنف", quantity_on_hand=100, avg_cost=Decimal("10"))
+        tenant=tenant, sku="LP-1", name_ar="منتج", quantity_on_hand=100, avg_cost=Decimal("10"))
     return tenant, cur, c1, c2, product
 
 

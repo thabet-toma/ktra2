@@ -7,7 +7,7 @@
  * الأكواد، فالكمية تتبع القائمة لا العكس.
  *
  * `pick` (البيع): الوحدة موجودة أصلاً، فالمستخدم يختار **أيّها** يخرج — من قائمة
- * «في المخزن» لهذا الصنف، بالبحث أو بالمسح. و«تلقائي» خيار صريح لا فراغ: لا
+ * «في المخزن» لهذا المنتج، بالبحث أو بالمسح. و«تلقائي» خيار صريح لا فراغ: لا
  * يرسل أرقاماً ويترك الخادم يخصّص الأقدم (FIFO) — ويُقفَل تحت نمط «إجباري» لأن
  * الخادم يرفضه هناك (`assert_sales_serials_declared`): خيارٌ معروضٌ يُرفض عند
  * الحفظ أسوأ من خيارٍ غير معروض.
@@ -83,7 +83,7 @@ export const SerialEntryModal: React.FC<Props> = ({
     inventoryApi
       .getProductSerials(productId, "in_stock")
       .then((rows) => { if (!cancelled) { setPool(rows); setError(null); } })
-      .catch((e) => { if (!cancelled) setError(humanizeThrown(e, "تعذّر تحميل وحدات هذا الصنف")); })
+      .catch((e) => { if (!cancelled) setError(humanizeThrown(e, "تعذّر تحميل وحدات هذا المنتج")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [mode, productId]);
@@ -164,7 +164,7 @@ export const SerialEntryModal: React.FC<Props> = ({
     if (!serial) return;
     const hit = pool.find((r) => r.serial === serial);
     if (!hit) {
-      setError(`الرقم «${serial}» غير متوفر في مخزن هذا الصنف.`);
+      setError(`الرقم «${serial}» غير متوفر في مخزن هذا المنتج.`);
       return;
     }
     setError(null);
@@ -426,7 +426,7 @@ export const SerialEntryModal: React.FC<Props> = ({
                 </div>
               ) : filteredPool.length === 0 && chosenOutsidePool.length === 0 ? (
                 <div className="py-8 text-center ktra-text-soft text-sm">
-                  لا وحدات مُرقَّمة في مخزن هذا الصنف — «تلقائي» يترك البند بلا تتبّع.
+                  لا وحدات مُرقَّمة في مخزن هذا المنتج — «تلقائي» يترك البند بلا تتبّع.
                 </div>
               ) : (
                 <table className="w-full text-sm">

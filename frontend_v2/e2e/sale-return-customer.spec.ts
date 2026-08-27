@@ -63,7 +63,7 @@ const openReturnEditor = async (page: Page) => {
       const id = Number(url.pathname.match(/(50[12])/)![1]);
       return json({
         ...INVOICES.find((i) => i.id === id),
-        lines: [{ product: 71, product_name: 'صنف المرجع', quantity: '2', unit_price: '50' }],
+        lines: [{ product: 71, product_name: 'منتج المرجع', quantity: '2', unit_price: '50' }],
       });
     }
     if (url.pathname.endsWith('/sales/invoices/') && route.request().method() === 'POST') {
@@ -71,7 +71,7 @@ const openReturnEditor = async (page: Page) => {
       return json({ id: 900, invoice_number: 'SR-900' });
     }
     if (url.pathname.includes('/inventory/products/')) {
-      return json([{ id: 71, sku: 'RET-1', name_ar: 'صنف المرجع', unit_price: '50' }]);
+      return json([{ id: 71, sku: 'RET-1', name_ar: 'منتج المرجع', unit_price: '50' }]);
     }
     return json([]);
   });

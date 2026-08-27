@@ -207,7 +207,7 @@ test('الشراء بنمط «معطّل»: لا عمود أرقام ولا أث
   await install(page, state);
   await openPurchaseEditor(page);
 
-  await page.getByPlaceholder('اكتب اسم الصنف…').first().fill('لابتوب');
+  await page.getByPlaceholder('اكتب اسم المنتج…').first().fill('لابتوب');
   await page.getByText('لابتوب', { exact: true }).last().click();
 
   await expect(page.getByRole('columnheader', { name: 'الأرقام التسلسلية' })).toHaveCount(0);
@@ -220,10 +220,10 @@ test('الشراء بنمط «إجباري»: التوليد من الخادم،
   await pickSupplier(page);
   await page.getByRole('tab', { name: 'البنود والمنتجات' }).click();
 
-  await page.getByPlaceholder('اكتب اسم الصنف…').first().fill('لابتوب');
+  await page.getByPlaceholder('اكتب اسم المنتج…').first().fill('لابتوب');
   await page.getByText('لابتوب', { exact: true }).last().click();
 
-  // العمود ظهر لأن السطر يحمل صنفاً تسلسلياً، والزر أحمر لأن الأرقام ناقصة.
+  // العمود ظهر لأن السطر يحمل منتجاً تسلسلياً، والزر أحمر لأن الأرقام ناقصة.
   await expect(page.getByRole('columnheader', { name: 'الأرقام التسلسلية' })).toBeVisible();
   const chip = page.getByRole('button', { name: /^0\/1$/ });
   await expect(chip).toBeVisible();
@@ -250,7 +250,7 @@ test('الشراء بنمط «إجباري»: التوليد من الخادم،
   expect(Number(sent.items[0].quantity)).toBe(3);
 });
 
-test('الشراء: صندوق الباركود يُدخل الصنف على السطر (تكافؤ مع المبيعات)', async ({ page }) => {
+test('الشراء: صندوق الباركود يُدخل المنتج على السطر (تكافؤ مع المبيعات)', async ({ page }) => {
   const state = freshState();
   await install(page, state);
   await openPurchaseEditor(page);
@@ -260,7 +260,7 @@ test('الشراء: صندوق الباركود يُدخل الصنف على ا�
   await box.fill('2000000000015');
   await box.press('Enter');
 
-  await expect(page.getByPlaceholder('اكتب اسم الصنف…').first()).toHaveValue('ورق');
+  await expect(page.getByPlaceholder('اكتب اسم المنتج…').first()).toHaveValue('ورق');
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -270,7 +270,7 @@ test('الشراء: صندوق الباركود يُدخل الصنف على ا�
 const openSalesEditor = async (page: Page) => {
   await page.goto('/sales/invoices/new');
   await page.waitForLoadState('networkidle');
-  await expect(page.getByPlaceholder('اكتب اسم الصنف…').first())
+  await expect(page.getByPlaceholder('اكتب اسم المنتج…').first())
     .toBeVisible({ timeout: 30_000 });
 };
 
@@ -279,7 +279,7 @@ test('البيع بنمط «معطّل»: لا عمود وحدات', async ({ pa
   await install(page, state);
   await openSalesEditor(page);
 
-  await page.getByPlaceholder('اكتب اسم الصنف…').first().fill('لابتوب');
+  await page.getByPlaceholder('اكتب اسم المنتج…').first().fill('لابتوب');
   await page.getByText('لابتوب', { exact: true }).last().click();
 
   await expect(page.getByRole('columnheader', { name: 'الوحدات' })).toHaveCount(0);
@@ -290,7 +290,7 @@ test('البيع بنمط «اختياري»: «تلقائي» افتراضاً�
   await install(page, state);
   await openSalesEditor(page);
 
-  await page.getByPlaceholder('اكتب اسم الصنف…').first().fill('لابتوب');
+  await page.getByPlaceholder('اكتب اسم المنتج…').first().fill('لابتوب');
   await page.getByText('لابتوب', { exact: true }).last().click();
 
   await expect(page.getByRole('columnheader', { name: 'الوحدات' })).toBeVisible();
@@ -298,7 +298,7 @@ test('البيع بنمط «اختياري»: «تلقائي» افتراضاً�
   await expect(chip).toBeVisible();
   await chip.click();
 
-  // القائمة من نقطة «في المخزن» لهذا الصنف، و«تلقائي» خيار صريح مؤشَّر.
+  // القائمة من نقطة «في المخزن» لهذا المنتج، و«تلقائي» خيار صريح مؤشَّر.
   await expect(page.getByText('SN-0099')).toBeVisible();
   await page.getByRole('checkbox', { name: 'SN-0099' }).check();
   await expect(page.getByText(/المختار: 1 من الكمية 1/)).toBeVisible();
@@ -312,12 +312,12 @@ test('البيع بنمط «اختياري»: «تلقائي» افتراضاً�
   expect(sent.lines[0].serials).toEqual(['SN-0099']);
 });
 
-test('البيع: الصنف غير التسلسلي يبقى بلا زر وحدات حتى مع تفعيل النمط', async ({ page }) => {
+test('البيع: المنتج غير التسلسلي يبقى بلا زر وحدات حتى مع تفعيل النمط', async ({ page }) => {
   const state = freshState({ salesMode: 'required' });
   await install(page, state);
   await openSalesEditor(page);
 
-  await page.getByPlaceholder('اكتب اسم الصنف…').first().fill('ورق');
+  await page.getByPlaceholder('اكتب اسم المنتج…').first().fill('ورق');
   await page.getByText('ورق', { exact: true }).last().click();
 
   await expect(page.getByRole('columnheader', { name: 'الوحدات' })).toHaveCount(0);
@@ -328,7 +328,7 @@ test('البيع بنمط «إجباري»: «تلقائي» مُقفَل — ل
   await install(page, state);
   await openSalesEditor(page);
 
-  await page.getByPlaceholder('اكتب اسم الصنف…').first().fill('لابتوب');
+  await page.getByPlaceholder('اكتب اسم المنتج…').first().fill('لابتوب');
   await page.getByText('لابتوب', { exact: true }).last().click();
 
   // بلا اختيار: الشارة تقول 0/1 لا «تلقائي» — النقص مرئيّ قبل الحفظ.
@@ -354,16 +354,16 @@ test('البيع: ملاحظتا البند حقلان مستقلّان يصلا
   await install(page, state);
   await openSalesEditor(page);
 
-  await page.getByPlaceholder('اكتب اسم الصنف…').first().fill('ورق');
+  await page.getByPlaceholder('اكتب اسم المنتج…').first().fill('ورق');
   await page.getByText('ورق', { exact: true }).last().click();
 
-  // عمود الملاحظات لا يتبع نمط الأرقام التسلسلية — يظهر دائماً ولكل صنف.
+  // عمود الملاحظات لا يتبع نمط الأرقام التسلسلية — يظهر دائماً ولكل منتج.
   await expect(page.getByRole('columnheader', { name: 'ملاحظات' })).toBeVisible();
-  // السطر الفارغ التالي يحمل الزرّ نفسه — المقصود سطر الصنف، وهو الأول.
+  // السطر الفارغ التالي يحمل الزرّ نفسه — المقصود سطر المنتج، وهو الأول.
   await page.getByTitle('أضف ملاحظة داخلية أو ملاحظة تُطبع للزبون').first().click();
 
   await page.getByPlaceholder(/لا تُطبع للعميل/).fill('العميل ساوم — وافق المدير');
-  await page.getByPlaceholder(/تُطبع تحت اسم الصنف/).fill('كفالة سنة من تاريخ الفاتورة');
+  await page.getByPlaceholder(/تُطبع تحت اسم المنتج/).fill('كفالة سنة من تاريخ الفاتورة');
   await page.getByRole('button', { name: 'حفظ الملاحظات' }).click();
 
   // الشارة تقول أيّهما مكتوبة قبل الفتح.

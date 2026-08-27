@@ -247,21 +247,21 @@ class ShapeOrdersButNeverFiltersTest(ScanTestBase):
         self.assertIsNone(unit["customer"])
 
     def test_a_barcode_shaped_serial_still_matches_the_stock_unit(self):
-        """والعكس: رقم وحدةٍ بنيتُه EAN-13 لا يُقصر على الأصناف."""
+        """والعكس: رقم وحدةٍ بنيتُه EAN-13 لا يُقصر على المنتجات."""
         self.stock_units(BARCODE)
 
         payload = self.scan(BARCODE).json()
         self.assertEqual(payload["kind"], "barcode")
-        # نفس الرقم باركودُ الصنف **و** رقم وحدةٍ منه: كلاهما يُعرض، ولا يُخمَّن.
+        # نفس الرقم باركودُ المنتج **و** رقم وحدةٍ منه: كلاهما يُعرض، ولا يُخمَّن.
         types = [m["type"] for m in payload["matches"]]
         self.assertIn("unit", types)
         self.assertIn("product", types)
-        # والوحدة قبل الصنف — الأخصّ أولاً.
+        # والوحدة قبل المنتج — الأخصّ أولاً.
         self.assertEqual(types[0], "unit")
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# الأصناف: التامّ قبل الجزئي
+# المنتجات: التامّ قبل الجزئي
 # ══════════════════════════════════════════════════════════════════════════
 
 class ProductResolutionOrderTest(ScanTestBase):
@@ -287,7 +287,7 @@ class ProductResolutionOrderTest(ScanTestBase):
         self.assertEqual(payload["kind"], "text")
 
     def test_an_exact_sku_is_never_pushed_below_a_partial_name_hit(self):
-        """صنفٌ رمزه «PH-001» وآخرُ اسمه يحوي «PH-001» — التامّ أولاً دائماً."""
+        """منتجٌ رمزه «PH-001» وآخرُ اسمه يحوي «PH-001» — التامّ أولاً دائماً."""
         Product.objects.create(
             tenant=self.tenant, sku="PH-900", name_ar="حافظة للموديل PH-001",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
@@ -402,7 +402,7 @@ class ScopeAndIsolationTest(ScanTestBase):
         UserCompanyMembership.objects.create(
             user=clerk, tenant=self.tenant, role="staff",
         )
-        # نزع كل مصدر: الأصناف بالصلاحية، والوحدتان بالترخيص.
+        # نزع كل مصدر: المنتجات بالصلاحية، والوحدتان بالترخيص.
         RolePermission.objects.create(
             tenant=self.tenant, role="staff",
             permission_key="inventory.item.view", allowed=False,
@@ -433,7 +433,7 @@ class ScanQueryCountTest(ScanTestBase):
     def test_query_count_does_not_grow_with_the_number_of_matched_units(self):
         """وحدةٌ مطابقة أم ثلاث — الفرق يجب أن يكون ثابتاً لا مضروباً.
 
-        `unique_together` هو (شركة، صنف، رقم)، فثلاثة أصناف قد تحمل الرقم نفسه.
+        `unique_together` هو (شركة، منتج، رقم)، فثلاثة منتجات قد تحمل الرقم نفسه.
         لو أُثريت كل وحدة باستعلامها لصار المسح N+1 على أكثر مساراته سخونة.
         """
         self.stock_units(IMEI)

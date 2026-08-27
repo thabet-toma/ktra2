@@ -1,9 +1,9 @@
 /**
- * FEAT-3 — ProductProfilePage: مسار كرت الصنف (`/products/:id`).
+ * FEAT-3 — ProductProfilePage: مسار كرت المنتج (`/products/:id`).
  *
- * كان صفحةً منفصلة عن نموذج التحرير، فصار للصنف كرتان: واحد يُعرض وآخر يُعدَّل.
+ * كان صفحةً منفصلة عن نموذج التحرير، فصار للمنتج كرتان: واحد يُعرض وآخر يُعدَّل.
  * الآن هذه الصفحة غلاف رقيق فوق الكرت الموحّد `ItemForm` — نفس الشاشة التي
- * تفتحها شاشة الأصناف للتعديل والإضافة، بتبويباتها القرائية (نظرة عامة/الفواتير/
+ * تفتحها شاشة المنتجات للتعديل والإضافة، بتبويباتها القرائية (نظرة عامة/الفواتير/
  * حركة المخزون) وتحريرها في مكان واحد.
  */
 import React, { useMemo } from 'react';
@@ -27,8 +27,8 @@ export const ProductProfilePage: React.FC = () => {
   // undefined. نستخرج المعرّف من المسار مباشرة (/products/:id).
   const location = useLocation();
   // الكرت يُفتح في تبويب جديد من كل شاشة، فـ`navigate(-1)` فيه بلا وجهة:
-  // بلا سابقة نعود إلى «الأصناف» بدل أن تبقى الضغطة بلا أثر.
-  const back = useAppBack('/items', 'الأصناف');
+  // بلا سابقة نعود إلى «المنتجات» بدل أن تبقى الضغطة بلا أثر.
+  const back = useAppBack('/items', 'المنتجات');
   const id = useMemo(() => {
     const m = location.pathname.match(/\/products\/([^/]+)/);
     return m ? Number(m[1]) : NaN;
@@ -39,7 +39,7 @@ export const ProductProfilePage: React.FC = () => {
   );
 
   if (!Number.isFinite(id)) {
-    return <div className="p-4 text-[var(--ktra-danger,#c00)]">معرّف صنف غير صالح.</div>;
+    return <div className="p-4 text-[var(--ktra-danger,#c00)]">معرّف منتج غير صالح.</div>;
   }
 
   return (

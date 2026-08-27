@@ -48,7 +48,7 @@ def generate_service_invoice(order, *, user=None, labour_amount=None):  # فات
 def detach_service_invoice(order, *, user=None) -> dict:  # يفتح قفل البنود — للمسودة وحدها
 def intake_lookup(tenant, term: str) -> dict:  # البحث الموحّد عند الاستقبال
 def resolve_warranty_expense_account(tenant_id):  # «5206» تحت «52» — يُنشأ ويُثبَّت
-def resolve_labour_product(tenant_id):  # صنف خدمة «أجرة صيانة» — يُنشأ ويُثبَّت
+def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيانة» — يُنشأ ويُثبَّت
 ```
 
 ## أهم الـAPI endpoints
@@ -97,7 +97,7 @@ def resolve_labour_product(tenant_id):  # صنف خدمة «أجرة صيانة�
 ## الاعتماديات
 **يعتمد على:**
 - `accounting` — **api فقط**: `after_sales/service_orders.py` (`post_document`، `unpost_document`، `ensure_account`). لا استيراد لـ`accounting.models` إطلاقاً — يحرسه `.importlinter`.
-- `inventory` — **services**: `record_stock_movement` (حركة `SERVICE_ISSUE`)، و**models** كسولة للأصناف والوحدات المتسلسلة.
+- `inventory` — **services**: `record_stock_movement` (حركة `SERVICE_ISSUE`)، و**models** كسولة للمنتجات والوحدات المتسلسلة.
 - `sales` — **services**: `get_or_create_sales_settings`، `next_invoice_number`، `recalculate_invoice_amounts`، `get_or_create_default_customer`، و**models** (`SalesInvoice`, `SalesInvoiceLine`) لتوليد الفاتورة.
 - `core` — `modules` (`require_module`, `module_enabled`)، `access` (`require_perm`)، `api_defaults`.
 - `device_registry` — **models للقراءة فقط** داخل `intake_lookup`، وخلف فحص ترخيص الوحدة. **لا FK في أي اتجاه**.

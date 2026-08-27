@@ -292,10 +292,10 @@ def returnable_lines_for_invoice(
     original_invoice: SalesInvoice, *, exclude_invoice_id: int | None = None
 ) -> list[dict]:
     """بنود فاتورة البيع الأصلية مع (المفوتر · المرتجع سابقاً · المتبقّي القابل
-    للإرجاع) لكل صنف — تغذّي منتقي بنود المرجع، ومصدرُ الحقيقة نفسه الذي يقيس به
+    للإرجاع) لكل منتج — تغذّي منتقي بنود المرجع، ومصدرُ الحقيقة نفسه الذي يقيس به
     الحارس. مرآة `logistics/services.py` (`returnable_lines_for_invoice`).
 
-    التجميع **بالصنف** لا بالسطر: صنفٌ تكرّر في سطرين من الفاتورة يُرجَع مجموعه،
+    التجميع **بالمنتج** لا بالسطر: منتجٌ تكرّر في سطرين من الفاتورة يُرجَع مجموعه،
     وإلا فتحَ التكرارُ باباً لتجاوز الكمية بالتوزيع على السطور.
 
     `exclude_invoice_id`: مرجعٌ يُعدَّل يستثني كمياته هو من «المرتجع سابقاً» —
@@ -358,7 +358,7 @@ def guard_sales_return_quantities(
     (`logistics/services.py` — `create_purchase_return`)، وهذا نظيره.
 
     الحارس خادميّ لأن كل مسارٍ يكتب عبر الـAPI محكومٌ به — لا شاشةَ «مرجع البيع»
-    وحدها. والقياس بالصنف لا بالسطر، من `returnable_lines_for_invoice` نفسها.
+    وحدها. والقياس بالمنتج لا بالسطر، من `returnable_lines_for_invoice` نفسها.
     """
     if original_invoice is None or not lines:
         return
@@ -389,7 +389,7 @@ def guard_sales_return_quantities(
                 product_id, qty, remaining, original_invoice.invoice_number,
             )
             raise ValidationError(
-                f"الصنف «{label}»: الكمية المطلوب إرجاعها ({qty}) تتجاوز القابل "
+                f"المنتج «{label}»: الكمية المطلوب إرجاعها ({qty}) تتجاوز القابل "
                 f"للإرجاع ({remaining}) من فاتورة «{original_invoice.invoice_number}»."
             )
 
@@ -929,11 +929,11 @@ def post_sales_invoice(
         for line in lines:
             line.product = products_by_id[line.product_id]
 
-        # منع فاتورة الخسارة (إعداد اختياري، على مستوى السطر) — بعد قفل الأصناف والإجماليات.
+        # منع فاتورة الخسارة (إعداد اختياري، على مستوى السطر) — بعد قفل المنتجات والإجماليات.
         guard_loss_invoice(invoice, lines, products_by_id)
 
         # T-RESERVEGUARD: الكمية المحجوزة لطلبية زبون آخر ليست متاحة للبيع —
-        # يُفحص بعد قفل الأصناف كي لا تسبق فاتورتان بعضهما على نفس الحجز.
+        # يُفحص بعد قفل المنتجات كي لا تسبق فاتورتان بعضهما على نفس الحجز.
         guard_reserved_stock(invoice, lines, products_by_id)
 
         journal_lines: list[dict] = []
@@ -1480,7 +1480,7 @@ def _post_stock_out_for_invoice(
         if getattr(line.product, "is_service", False):
             continue
         if line.product.tenant_id != invoice.tenant_id:
-            raise ValidationError(f"الصنف {line.product_id} لا يتبع نفس الشركة.")
+            raise ValidationError(f"المنتج {line.product_id} لا يتبع نفس الشركة.")
         try:
             record_stock_movement(
                 product=line.product,
@@ -1495,7 +1495,7 @@ def _post_stock_out_for_invoice(
                 branch=invoice.branch,
             )
         except ValidationError as e:
-            raise ValidationError(f"مخزون الصنف {line.product.sku}: {e}")
+            raise ValidationError(f"مخزون المنتج {line.product.sku}: {e}")
 
 
 def issue_stock_from_invoice(invoice: SalesInvoice, *, user=None):
@@ -1526,7 +1526,7 @@ def issue_stock_from_invoice(invoice: SalesInvoice, *, user=None):
                 branch=invoice.branch,
             )
         except Exception as e:
-            raise ValidationError(f"خطأ في إذن الصرف لصنف {line.product.sku}: {e}")
+            raise ValidationError(f"خطأ في إذن الصرف لمنتج {line.product.sku}: {e}")
 
 
 def _create_auto_delivery_document(
@@ -1756,7 +1756,7 @@ def deliver_invoice_lines(
                     warehouse=warehouse,
                 )
             except ValidationError as e:
-                raise ValidationError(f"مخزون الصنف {line.product.sku}: {e}")
+                raise ValidationError(f"مخزون المنتج {line.product.sku}: {e}")
             DeliveryOrderLine.objects.create(
                 tenant=invoice.tenant,
                 delivery=delivery,
@@ -1863,7 +1863,7 @@ def create_standalone_delivery_note(
     from django.utils import timezone
 
     if not lines:
-        raise ValidationError("حدّد الأصناف والكميات المسلَّمة.")
+        raise ValidationError("حدّد المنتجات والكميات المسلَّمة.")
     if partner is None:
         raise ValidationError("حدّد العميل لسند التسليم المستقل.")
 
@@ -1883,13 +1883,13 @@ def create_standalone_delivery_note(
     for raw in lines:
         product = products.get(int(raw.get("product_id") or 0))
         if product is None:
-            raise ValidationError(f"الصنف {raw.get('product_id')} غير موجود في هذه الشركة.")
+            raise ValidationError(f"المنتج {raw.get('product_id')} غير موجود في هذه الشركة.")
         if getattr(product, "is_service", False):
-            raise ValidationError(f"الصنف «{product}» خدمة — لا يُسلَّم من المخزن.")
+            raise ValidationError(f"المنتج «{product}» خدمة — لا يُسلَّم من المخزن.")
         try:
             qty = Decimal(str(raw.get("quantity", 0)))
         except Exception:
-            raise ValidationError(f"كمية غير صالحة للصنف «{product}».")
+            raise ValidationError(f"كمية غير صالحة للمنتج «{product}».")
         if qty <= 0:
             continue
         planned.append({
@@ -1945,7 +1945,7 @@ def create_standalone_delivery_note(
                     warehouse=p["warehouse"],
                 )
             except ValidationError as e:
-                raise ValidationError(f"مخزون الصنف {p['product'].sku}: {e}")
+                raise ValidationError(f"مخزون المنتج {p['product'].sku}: {e}")
             DeliveryOrderLine.objects.create(
                 tenant=tenant,
                 delivery=doc,
@@ -1972,7 +1972,7 @@ def create_standalone_delivery_note(
                 )
                 if not inv_id:
                     raise ValidationError(
-                        f"الصنف «{p['product']}»: عيّن حساب المخزون في فئة المنتج "
+                        f"المنتج «{p['product']}»: عيّن حساب المخزون في فئة المنتج "
                         "أو حساباً افتراضياً في إعدادات المبيعات."
                     )
                 rows.append({

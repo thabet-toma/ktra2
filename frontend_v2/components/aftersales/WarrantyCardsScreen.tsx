@@ -158,7 +158,7 @@ export const WarrantyCardsScreen: React.FC = () => {
         <ShieldCheck className="h-5 w-5 text-[var(--color-primary)]" />
         <span className="text-lg font-bold text-[var(--color-text)]">بطاقات الكفالة</span>
         <span className="text-[11px] text-[var(--color-text-muted)]">
-          تُنشأ آلياً عند ترحيل فاتورة البيع لكل وحدة مُرقَّمة لصنفٍ له كفالة — والحالة
+          تُنشأ آلياً عند ترحيل فاتورة البيع لكل وحدة مُرقَّمة لمنتجٍ له كفالة — والحالة
           محسوبة من تاريخ الانتهاء، لا مُدخَلة
         </span>
         <span className="flex-1" />
@@ -178,7 +178,7 @@ export const WarrantyCardsScreen: React.FC = () => {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="lg:col-span-2">
             <label className={labelClass} htmlFor="warranty-search">
-              بحث بالرقم التسلسلي أو الزبون أو الصنف
+              بحث بالرقم التسلسلي أو الزبون أو المنتج
             </label>
             <div className="relative">
               <input
@@ -261,7 +261,7 @@ export const WarrantyCardsScreen: React.FC = () => {
             <thead>
               <tr>
                 <th>الرقم التسلسلي</th>
-                <th>الصنف / الجهاز</th>
+                <th>المنتج / الجهاز</th>
                 <th>الزبون</th>
                 <th className="hidden md:table-cell">البداية</th>
                 <th>الانتهاء</th>
@@ -325,7 +325,7 @@ export const WarrantyCardsScreen: React.FC = () => {
 
         {!loading && rows.length === 0 && (
           <div className="p-6 text-center text-sm text-[var(--color-text-muted)]">
-            لا بطاقات مطابقة — تُنشأ البطاقات مع ترحيل فواتير البيع للأصناف ذات الكفالة،
+            لا بطاقات مطابقة — تُنشأ البطاقات مع ترحيل فواتير البيع للمنتجات ذات الكفالة،
             أو أضف بطاقة يدوية لجهازٍ بِيع قبل تفعيل الوحدة.
           </div>
         )}

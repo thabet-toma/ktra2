@@ -23,7 +23,7 @@ interface NISFinancialSummaryProps {
     /** إخفاء سطر شحن الفاتورة (فواتير شيكل) */
     hideShippingRow?: boolean;
     fees?: PurchaseInvoiceFeeLine[];
-    /** عمولات تحويل دفعات الصفقة — داخلة في تكلفة الصنف وأساس ض.ق.م */
+    /** عمولات تحويل دفعات الصفقة — داخلة في تكلفة المنتج وأساس ض.ق.م */
     transferCommissionsIls?: number;
 }
 

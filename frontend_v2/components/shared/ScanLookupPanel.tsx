@@ -1,11 +1,11 @@
 /**
  * T-SCAN — «ما الذي في يدي؟»: لوحةٌ واحدة تحلّ الباركود والسيريال والـIMEI
- * ورمز الصنف وجزءَ الاسم، بلا أن يختار المستخدم النوع.
+ * ورمز المنتج وجزءَ الاسم، بلا أن يختار المستخدم النوع.
  *
  * **لماذا لوحةٌ لا شاشة**: المسح فعلٌ عابر أثناء عملٍ آخر — الموظف على الطاولة
  * والزبون أمامه يناوله علبة. إخراجُه من شاشته إلى شاشة بحثٍ يُفقده سياقه ثم
  * يُلزمه الرجوع. اللوحة تُفتح فوق ما هو فيه وتُغلق فيعود حيث كان، وما يحتاج
- * متابعةً (الفاتورة، كرت الصنف) يُفتح في **تبويب** لا في مكان عمله.
+ * متابعةً (الفاتورة، كرت المنتج) يُفتح في **تبويب** لا في مكان عمله.
  *
  * **الخادم يقرّر والواجهة تعرض**: نوعُ الرقم (`kind`) ونطاقُ الصلاحية (`scope`)
  * وترتيبُ المطابقات كلّها تصل محسوبةً من `core/scan.py`. لا Luhn هنا ولا خانة
@@ -55,7 +55,7 @@ const KIND_LABEL: Record<ScanKind, string> = {
 
 const MATCHED_ON_LABEL: Record<ScanProductMatch["matched_on"], string> = {
   barcode: "مطابقة باركود",
-  sku: "مطابقة رمز الصنف",
+  sku: "مطابقة رمز المنتج",
   partial: "مطابقة جزئية",
 };
 
@@ -230,7 +230,7 @@ const DeviceRow: React.FC<{ device: ScanDeviceMatch }> = ({ device }) => (
 const ProductRow: React.FC<{ product: ScanProductMatch }> = ({ product }) => (
   <button
     type="button"
-    onClick={() => openInNewTab(`/products/${product.id}`, "كرت الصنف")}
+    onClick={() => openInNewTab(`/products/${product.id}`, "كرت المنتج")}
     className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-start hover:bg-[var(--color-muted)]"
   >
     <PackageSearch className="h-4 w-4 text-[var(--color-text-muted)]" />
@@ -366,7 +366,7 @@ export const ScanLookupPanel: React.FC<{
               value={term}
               onChange={(event) => setTerm(event.target.value)}
               onKeyDown={(event) => { if (event.key === "Enter") void run(term); }}
-              placeholder="باركود · رقم تسلسلي · IMEI · رمز الصنف · جزء من الاسم"
+              placeholder="باركود · رقم تسلسلي · IMEI · رمز المنتج · جزء من الاسم"
               className="flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[var(--font-size-sm)] text-[var(--color-text)] outline-none focus:border-[var(--color-primary)]"
               data-testid="scan-input"
             />
@@ -423,12 +423,12 @@ export const ScanLookupPanel: React.FC<{
               data-testid="scan-unregistered"
             >
               <span className="text-[var(--font-size-sm)] font-medium text-[var(--color-text)]">
-                غير مسجَّل — لا صنف ولا وحدة ولا جهاز بهذا الرقم.
+                غير مسجَّل — لا منتج ولا وحدة ولا جهاز بهذا الرقم.
               </span>
               <div className="flex flex-wrap justify-center gap-2">
                 {/* لا زرّ «سجّل رقماً تسلسلياً» هنا: الترقيم يصف مخزوناً قائماً
-                    ويلزمه صنفٌ ورصيدٌ يسقُفه (`register_existing_serials`)،
-                    ومدخلُه كرت الصنف. زرٌّ يقود إلى طريق مسدود أسوأ من غيابه. */}
+                    ويلزمه منتجٌ ورصيدٌ يسقُفه (`register_existing_serials`)،
+                    ومدخلُه كرت المنتج. زرٌّ يقود إلى طريق مسدود أسوأ من غيابه. */}
                 {result.scope.devices && (
                   <button
                     type="button"
@@ -441,10 +441,10 @@ export const ScanLookupPanel: React.FC<{
                 {result.scope.products && (
                   <button
                     type="button"
-                    onClick={() => openInNewTab("/items", "الأصناف")}
+                    onClick={() => openInNewTab("/items", "المنتجات")}
                     className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-[var(--font-size-sm)] text-[var(--color-text)] hover:bg-[var(--color-muted)]"
                   >
-                    ابحث في الأصناف
+                    ابحث في المنتجات
                   </button>
                 )}
               </div>

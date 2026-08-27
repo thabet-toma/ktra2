@@ -116,9 +116,9 @@ export const AVAILABILITY_LABEL: Record<StoreAvailability, string> = {
   preorder: "طلب مسبق / عند الطلب",
 };
 
-/** اسم الصنف المعروض: العربي أولاً — الواجهة والزبون عربيان. */
+/** اسم المنتج المعروض: العربي أولاً — الواجهة والزبون عربيان. */
 export function storeProductName(product: StoreProduct): string {
-  return (product.name_ar || product.name_en || "").trim() || `صنف ${product.id}`;
+  return (product.name_ar || product.name_en || "").trim() || `منتج ${product.id}`;
 }
 
 const base = (slug: string) => `store/${encodeURIComponent(slug)}/`;
@@ -143,7 +143,7 @@ export function getStoreProducts(
   });
 }
 
-/** تفصيل صنف — هذا النداء وحده هو ما يزيد عدّاد المشاهدات اليومي. */
+/** تفصيل منتج — هذا النداء وحده هو ما يزيد عدّاد المشاهدات اليومي. */
 export function getStoreProduct(slug: string, productId: string | number): Promise<StoreProduct> {
   return apiGetObject<StoreProduct>(
     `${base(slug)}products/${encodeURIComponent(String(productId))}/`,
@@ -184,7 +184,7 @@ export function getStoreCollectionDetail(
   );
 }
 
-/** 404 = لا متجر بهذا الاسم، أو صنف غير منشور — حالة عرضٍ لا خطأ يُشتكى منه. */
+/** 404 = لا متجر بهذا الاسم، أو منتج غير منشور — حالة عرضٍ لا خطأ يُشتكى منه. */
 export function isStoreNotFound(error: unknown): boolean {
   return (error as { status?: number } | null)?.status === 404;
 }

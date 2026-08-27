@@ -95,7 +95,7 @@ type RowDraft = {
 const SCOPES: { key: StoreAdminScope; label: string }[] = [
   { key: "published", label: "المعروضة في المتجر" },
   { key: "unpublished", label: "غير المعروضة" },
-  { key: "all", label: "كل الأصناف" },
+  { key: "all", label: "كل المنتجات" },
 ];
 
 const draftOf = (product: StoreAdminProduct): RowDraft => ({
@@ -116,7 +116,7 @@ export const StoreSettingsPage: React.FC = () => {
   const [slugInput, setSlugInput] = useState(savedSlug);
   const [savingSlug, setSavingSlug] = useState(false);
 
-  // جدول الأصناف
+  // جدول المنتجات
   const [scope, setScope] = useState<StoreAdminScope>("published");
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<StoreAdminProduct[]>([]);
@@ -127,7 +127,7 @@ export const StoreSettingsPage: React.FC = () => {
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [savingRow, setSavingRow] = useState<number | null>(null);
 
-  // نافذة إدارة صور المتجر المخصصة للصنف
+  // نافذة إدارة صور المتجر المخصصة للمنتج
   const [selectedProductForMedia, setSelectedProductForMedia] =
     useState<StoreAdminProduct | null>(null);
   const [customImages, setCustomImages] = useState<StoreProductImageAdmin[]>([]);
@@ -333,7 +333,7 @@ export const StoreSettingsPage: React.FC = () => {
     }
   };
 
-  // تبديل حالة النشر للصنف
+  // تبديل حالة النشر للمنتج
   const togglePublish = async (product: StoreAdminProduct) => {
     const next = !product.is_for_sale_online;
     setSavingRow(product.id);
@@ -568,7 +568,7 @@ export const StoreSettingsPage: React.FC = () => {
 
   const handleDeleteStoreProduct = async (product: StoreAdminProduct) => {
     const ok = await confirm({
-      title: "حذف الصنف من المتجر",
+      title: "حذف المنتج من المتجر",
       message: `هل أنت متأكد من حذف «${storeAdminProductName(product)}» من المتجر؟`,
       confirmText: "حذف",
       cancelText: "إلغاء",
@@ -580,7 +580,7 @@ export const StoreSettingsPage: React.FC = () => {
       await deleteStoreProduct(product.id);
       setRows((prev) => prev.filter((p) => p.id !== product.id));
       setCount((prev) => Math.max(0, prev - 1));
-      toast("تم حذف الصنف من المتجر بنجاح", "success");
+      toast("تم حذف المنتج من المتجر بنجاح", "success");
     } catch (e) {
       toast(humanizeDrfError(e), "error");
     }
@@ -876,7 +876,7 @@ export const StoreSettingsPage: React.FC = () => {
                   <ShoppingBag className="h-4 w-4 text-blue-500" />
                 </div>
                 <h4 className="mt-3 text-lg font-black text-slate-900 dark:text-white">
-                  {count} صنف معروض
+                  {count} منتج معروض
                 </h4>
               </div>
 
@@ -944,7 +944,7 @@ export const StoreSettingsPage: React.FC = () => {
                   type="search"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="بحث في الأصناف…"
+                  placeholder="بحث في المنتجات…"
                   className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 pr-8 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
                 <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
@@ -957,7 +957,7 @@ export const StoreSettingsPage: React.FC = () => {
                 <table className="w-full text-right text-xs">
                   <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-500 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400">
                     <tr>
-                      <th className="p-3.5">الصنف</th>
+                      <th className="p-3.5">المنتج</th>
                       <th className="p-3.5">عرض بالمتجر</th>
                       <th className="p-3.5">سعر المتجر</th>
                       <th className="p-3.5">طلب مسبق (بدون مخزون)</th>
@@ -977,7 +977,7 @@ export const StoreSettingsPage: React.FC = () => {
                     ) : rows.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="py-12 text-center text-slate-400">
-                          لا توجد أصناف مطابقة للتصفية.
+                          لا توجد منتجات مطابقة للتصفية.
                         </td>
                       </tr>
                     ) : (
@@ -1461,7 +1461,7 @@ export const StoreSettingsPage: React.FC = () => {
           </div>
         )}
 
-        {/* ── MODAL: إدارة صور المتجر المخصصة للصنف ──────────────────────── */}
+        {/* ── MODAL: إدارة صور المتجر المخصصة للمنتج ──────────────────────── */}
         {selectedProductForMedia && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
             <div className="w-full max-w-2xl rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
@@ -1935,13 +1935,13 @@ export const StoreSettingsPage: React.FC = () => {
                 </button>
               </div>
 
-              {/* إضافة صنف للحملة */}
+              {/* إضافة منتج للحملة */}
               <div className="my-4 flex gap-2">
                 <select
                   id="add-prod-select"
                   className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
-                  <option value="">اختر صنفاً لإضافته للحملة…</option>
+                  <option value="">اختر منتجاً لإضافته للحملة…</option>
                   {rows
                     .filter((r) => !collectionItems.some((item) => item.product === r.id))
                     .map((r) => (
@@ -2036,7 +2036,7 @@ export const StoreSettingsPage: React.FC = () => {
                     إضافة منتج جديد للمتجر مباشرة
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    أضف منتجاً أو خدمة أو عرضاً خاصاً للمتجر دون الحاجة لربطه بالمخزن أو شجرة الأصناف
+                    أضف منتجاً أو خدمة أو عرضاً خاصاً للمتجر دون الحاجة لربطه بالمخزن أو شجرة المنتجات
                   </p>
                 </div>
                 <button

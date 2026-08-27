@@ -132,7 +132,7 @@ class PlanLimitGuardTest(APITestCase):
             tenant=self.tenant, name="عميل الحدود", partner_type="Customer",
         )
         product = Product.objects.create(
-            tenant=self.tenant, sku="LIMIT-1", name_ar="صنف الحدود",
+            tenant=self.tenant, sku="LIMIT-1", name_ar="منتج الحدود",
             quantity_on_hand=10, avg_cost=1,
         )
         TenantLimit.objects.create(

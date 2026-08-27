@@ -1,12 +1,12 @@
 /**
  * تجميع البراندات — الكرت المجمّع: بطاقة المقاس/الأساس (مثل عجل 185/65/14) تجمع
  * مؤشّرات وحركات وفواتير كل البراندات تحته.
- * المسار: `/product-group?category=3&name=…` — والخادم يشتقّ أصناف التصنيف
+ * المسار: `/product-group?category=3&name=…` — والخادم يشتقّ منتجات التصنيف
  * وأحفاده. `?ids=1,2,3&name=…` يبقى مفهوماً: روابطُ قديمة، ومجموعةٌ لا تصنيف
- * لها. (التعداد في الرابط كان يبلغ ~7.5KB لتصنيفٍ فيه ~1500 صنف ⇒ 414 من nginx.)
+ * لها. (التعداد في الرابط كان يبلغ ~7.5KB لتصنيفٍ فيه ~1500 منتج ⇒ 414 من nginx.)
  *
  * الصفحة غلافٌ رقيق فوق `useGroupInsights` (في `ProductInsightTabs.tsx`) —
- * البيانات والتبويبات نفسها تعرضها شجرة الأصناف في بطاقتها الجانبية، فبقاؤها
+ * البيانات والتبويبات نفسها تعرضها شجرة المنتجات في بطاقتها الجانبية، فبقاؤها
  * محبوسةً هنا كان يعني نسخةً ثانية منها.
  */
 import React, { useMemo } from 'react';
@@ -19,7 +19,7 @@ import { useGroupInsights } from './ProductInsightTabs';
 export const GroupProfilePage: React.FC = () => {
   const location = useLocation();
   // كالكرت المفرد: يُفتح في تبويب جديد، فوجهة «عودة» تُحسم لا تُخمَّن.
-  const back = useAppBack('/items', 'الأصناف');
+  const back = useAppBack('/items', 'المنتجات');
 
   const selector = useMemo(() => {
     const params = new URLSearchParams(location.search);

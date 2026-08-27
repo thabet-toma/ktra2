@@ -42,7 +42,7 @@ def snapshot_fields(instance, fields) -> dict:
 def snapshot_document_lines(lines, *, label, fields, key: str = "product_id") -> list[dict]:
     """لقطة بنود مستند قابلة للمقارنة — تُلتقط قبل الحفظ وبعده.
 
-    هوية البند = قيمة `key` + ترتيب تكرارها، كي يبقى الصنف المكرَّر سطرين
+    هوية البند = قيمة `key` + ترتيب تكرارها، كي يبقى المنتج المكرَّر سطرين
     متمايزين بدل أن يبتلع أحدهما الآخر. `label` دالة تُعيد اسم البند المعروض.
     """
     rows: list[dict] = []
@@ -113,9 +113,9 @@ def describe_activity_changes(changes: list[dict]) -> str:
     for change in changes:
         kind = change.get("kind", "field")
         if kind == "line_added":
-            parts.append(f'أضاف صنف «{change["label"]}»{_values_suffix(change)}')
+            parts.append(f'أضاف منتج «{change["label"]}»{_values_suffix(change)}')
         elif kind == "line_removed":
-            parts.append(f'حذف صنف «{change["label"]}»{_values_suffix(change)}')
+            parts.append(f'حذف منتج «{change["label"]}»{_values_suffix(change)}')
         elif kind == "line_changed":
             inner = "، ".join(
                 f'{c["label"]} من {c["old"] or "—"} إلى {c["new"] or "—"}'

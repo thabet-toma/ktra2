@@ -162,7 +162,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         // `h-full` بلا أثر حين لا يُحدَّد للجذر ارتفاع (الحالة العامة)، ويملأ
-        // المربّع حين تعطيه الشاشة ارتفاعاً عبر `className` (خانات صور الصنف).
+        // المربّع حين تعطيه الشاشة ارتفاعاً عبر `className` (خانات صور المنتج).
         className={`relative h-full border-2 border-dashed rounded-xl text-center transition-colors ${compact ? 'p-3' : 'p-8'} ${stateClasses}`}
       >
         <input

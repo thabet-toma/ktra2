@@ -53,7 +53,7 @@ def _company(name: str, username: str):
     create_fiscal_year(tenant, 2026)
     warehouse = Warehouse.objects.filter(tenant=tenant).first()
     product = Product.objects.create(
-        tenant=tenant, sku=f"OB-{username}", name_ar="صنف افتتاحي",
+        tenant=tenant, sku=f"OB-{username}", name_ar="منتج افتتاحي",
         quantity_on_hand=D("0"), avg_cost=D("0"),
     )
     return tenant, owner, warehouse, product
@@ -657,7 +657,7 @@ def test_editing_posted_partner_balance_changes_nothing_and_summary_shows_posted
     assert srow['posted_amount'] == D("-300.00")
 
 
-# ── (ي) أصناف الافتتاح المتتبَّعة تسلسلياً: المُسجَّل مقابل المطلوب (T119-5) ──
+# ── (ي) منتجات الافتتاح المتتبَّعة تسلسلياً: المُسجَّل مقابل المطلوب (T119-5) ──
 #
 # الافتتاح يُنشئ كميةً في المخزن ولا يُنشئ وحدةً مُرقَّمة واحدة، وشركةٌ نمط بيعها
 # «إجباري» تُمنع من بيع بضاعة افتتاحها عند `apply_sales_serials`. الملخّص هو ما
@@ -671,7 +671,7 @@ def _serialized_product(tenant, sku, name):
 
 
 def test_summary_reports_serialized_items_registered_vs_required(env):
-    """صنف متتبَّع في افتتاحٍ مرحّل يُذكر بنقصه، وغير المتتبَّع لا يُذكر أصلاً."""
+    """منتج متتبَّع في افتتاحٍ مرحّل يُذكر بنقصه، وغير المتتبَّع لا يُذكر أصلاً."""
     from inventory.models import ProductSerial
     from inventory.serials import register_existing_serials
 
@@ -713,8 +713,8 @@ def test_summary_reports_serialized_items_registered_vs_required(env):
 
 
 def test_serial_counts_are_per_product_and_survive_a_sale(env):
-    """صنف في مستودعين صفٌّ واحد بمجموع كميته (`ProductSerial` بلا مستودع)،
-    ووحدةٌ بيعت تبقى «مُسجَّلة» — وإلا عاد الصنف ناقص الترقيم بعد إتمامه."""
+    """منتج في مستودعين صفٌّ واحد بمجموع كميته (`ProductSerial` بلا مستودع)،
+    ووحدةٌ بيعت تبقى «مُسجَّلة» — وإلا عاد المنتج ناقص الترقيم بعد إتمامه."""
     from inventory.models import ProductSerial
     from inventory.serials import register_existing_serials
 
@@ -756,8 +756,8 @@ def test_serial_counts_do_not_leak_between_companies(env):
     tenant_a, owner_a, warehouse_a, _ = env
     tenant_b, owner_b, warehouse_b, _ = _company("شركة الأرقام", "opening_serials_b")
 
-    tracked_a = _serialized_product(tenant_a, "OB-SER-A", "صنف الشركة أ")
-    tracked_b = _serialized_product(tenant_b, "OB-SER-B", "صنف الشركة ب")
+    tracked_a = _serialized_product(tenant_a, "OB-SER-A", "منتج الشركة أ")
+    tracked_b = _serialized_product(tenant_b, "OB-SER-B", "منتج الشركة ب")
     for tenant, warehouse, tracked, owner in (
         (tenant_a, warehouse_a, tracked_a, owner_a),
         (tenant_b, warehouse_b, tracked_b, owner_b),

@@ -40,7 +40,7 @@ def env():
     a = create_company("شركة أ", owner)
     b = create_company("شركة ب", owner)
 
-    # شركة أ: عميل أشرف، مورد سامي، صنف إطار
+    # شركة أ: عميل أشرف، مورد سامي، منتج إطار
     ashraf = Partner.objects.create(tenant=a, name="أشرف عجل", partner_type="Customer")
     sami = Partner.objects.create(tenant=a, name="سامي للتوريد", partner_type="Supplier")
     Product.objects.create(tenant=a, sku="TIRE-185", name_ar="إطار 185/65/14",

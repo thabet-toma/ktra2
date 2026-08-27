@@ -38,7 +38,7 @@ class PurchaseSubledgerRoutingTest(APITestCase):
             tenant=cls.tenant, code="1110-P", name="الصندوق الرئيسي",
             account_type="Asset", is_active=True)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="PSB-1", name_ar="صنف شراء",
+            tenant=cls.tenant, sku="PSB-1", name_ar="منتج شراء",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
 
     def _auth(self):
@@ -53,7 +53,7 @@ class PurchaseSubledgerRoutingTest(APITestCase):
             payment_type=PurchaseInvoice.PAYMENT_TYPE_CASH,
             cash_or_bank_account=self.cash)
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف شراء",
+            invoice=inv, product=self.product, name="منتج شراء",
             quantity=Decimal("1"), unit_price=Decimal("1000.00"),
             total_price=Decimal("1000.00"))
 
@@ -98,7 +98,7 @@ class PurchaseSubledgerRoutingTest(APITestCase):
             payment_type=PurchaseInvoice.PAYMENT_TYPE_CASH,
             cash_or_bank_account=self.cash)
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف شراء",
+            invoice=inv, product=self.product, name="منتج شراء",
             quantity=Decimal("1"), unit_price=Decimal("1000.00"),
             total_price=Decimal("1000.00"))
 
@@ -140,7 +140,7 @@ class PurchaseSubledgerRoutingTest(APITestCase):
             payment_type=PurchaseInvoice.PAYMENT_TYPE_CREDIT,
         )
         PurchaseInvoiceItem.objects.create(
-            invoice=invoice, product=self.product, name="صنف شراء",
+            invoice=invoice, product=self.product, name="منتج شراء",
             quantity=Decimal("1"), unit_price=Decimal("500.00"),
             total_price=Decimal("500.00"),
         )
@@ -206,7 +206,7 @@ class PurchaseSubledgerRoutingTest(APITestCase):
             exchange_rate=Decimal("1"), grand_total=Decimal("1000.00"),
             payment_type=PurchaseInvoice.PAYMENT_TYPE_CREDIT)
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف شراء",
+            invoice=inv, product=self.product, name="منتج شراء",
             quantity=Decimal("1"), unit_price=Decimal("1000.00"),
             total_price=Decimal("1000.00"))
 

@@ -363,7 +363,7 @@ export const SalesSettingsPage: React.FC = () => {
 
       <Section
         title="حسابات الإيرادات"
-        description="تُستخدم عند ترحيل الفاتورة حسب نوع الصنف (منتج/خدمة)"
+        description="تُستخدم عند ترحيل الفاتورة حسب طبيعة البند (بضاعة/خدمة)"
       >
         <FieldLabel label="حساب إيراد بيع البضائع (منتج)">
           <AccountTreeField
@@ -610,7 +610,7 @@ export const SalesSettingsPage: React.FC = () => {
             <span>منع ترحيل فاتورة تسحب كمية محجوزة (يظهر المحجوز في «تقرير المحجوزات»)</span>
           </label>
         </FieldLabel>
-        {/* T-SERIAL: نمط الأرقام التسلسلية في بنود البيع — يُفعَّل على الأصناف المتتبَّعة وحدها. */}
+        {/* T-SERIAL: نمط الأرقام التسلسلية في بنود البيع — يُفعَّل على المنتجات المتتبَّعة وحدها. */}
         <FieldLabel label="إدخال الأرقام التسلسلية في فاتورة البيع">
           <select
             className={input}

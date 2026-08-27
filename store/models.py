@@ -166,7 +166,7 @@ class StoreProductImage(models.Model):
 
 
 class StoreCollection(models.Model):
-    """مجموعات الأصناف وحملات الإعلانات الترويجية وصفحات الهبوط."""
+    """مجموعات المنتجات وحملات الإعلانات الترويجية وصفحات الهبوط."""
 
     tenant = models.ForeignKey(
         Tenant,
@@ -208,7 +208,7 @@ class StoreCollection(models.Model):
 
 
 class StoreCollectionItem(models.Model):
-    """ربط الصنف بالمجموعة الإعلانية مع الترتيب."""
+    """ربط المنتج بالمجموعة الإعلانية مع الترتيب."""
 
     tenant = models.ForeignKey(
         Tenant,

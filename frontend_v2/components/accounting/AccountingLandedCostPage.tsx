@@ -212,7 +212,7 @@ const ShipmentDetail: React.FC<{
               <table style={{ width: "100%", fontSize: "0.8rem", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ background: "var(--ktra-surface-2,#f8f9fa)" }}>
-                    <th style={{ padding: "4px 8px", textAlign: "right" }}>الصنف</th>
+                    <th style={{ padding: "4px 8px", textAlign: "right" }}>المنتج</th>
                     <th style={{ padding: "4px 8px", textAlign: "right" }}>الكمية</th>
                     <th style={{ padding: "4px 8px", textAlign: "right" }}>سعر الصفقة</th>
                     <th style={{ padding: "4px 8px", textAlign: "right" }}>Landed/وحدة (ILS)</th>

@@ -384,13 +384,13 @@ export const SalesOrdersPage: React.FC = () => {
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     {
       key: "name",
-      header: "بيان الصنف",
+      header: "وصف المنتج",
       width: "45%",
       render: (line, index) => (
         <button type="button" className="flex w-full items-center justify-between gap-2 px-1 text-right"
           onClick={() => setPickerIdx(index)}>
           <span className={line.product_name ? "ktra-text-ink" : "ktra-text-soft"}>
-            {line.product_name || "اختر صنفاً…"}
+            {line.product_name || "اختر منتجاً…"}
           </span>
           <span className="ktra-text-accent">…</span>
         </button>
@@ -537,7 +537,7 @@ export const SalesOrdersPage: React.FC = () => {
           <div className="ktra-total-row ktra-total-row--grand"><span>إجمالي الطلبية</span><span className="ktra-total-value">{formatMoney(formTotal)}</span></div>
         </>}
         status={<>
-          <span className="ktra-status-item">عدد الأصناف <b>{formLines.length}</b></span>
+          <span className="ktra-status-item">عدد المنتجات <b>{formLines.length}</b></span>
           <span className="ktra-status-item">
             {reserveDays ? `الحجز ${reserveDays} أيام بعد التأكيد` : "الحجز معطّل"}
           </span>

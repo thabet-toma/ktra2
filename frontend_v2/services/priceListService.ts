@@ -13,7 +13,7 @@ import { Invoice, SupplierItemPrice } from "../types";
 
 // Price List Service
 export const priceListService = {
-  // دالة لتسجيل أسعار الأصناف من الفاتورة
+  // دالة لتسجيل أسعار المنتجات من الفاتورة
   recordPricesFromInvoice: async (invoice: Invoice) => {
     const promises = invoice.items.map(async (item) => {
       const priceRecordId = crypto.randomUUID();
@@ -37,7 +37,7 @@ export const priceListService = {
     await Promise.all(promises);
   },
 
-  // دالة لجلب سجل أسعار صنف معين
+  // دالة لجلب سجل أسعار منتج معين
   getItemPriceHistory: async (itemId: string) => {
     const q = query(
       collection(db, "supplier_prices"), 
@@ -48,7 +48,7 @@ export const priceListService = {
     return snapshot.docs.map(doc => doc.data() as SupplierItemPrice);
   },
 
-  // دالة جديدة: جلب آخر سعر من مورد معين لصنف معين
+  // دالة جديدة: جلب آخر سعر من مورد معين لمنتج معين
   getLastSupplierPrice: async (supplierId: string, itemId: string): Promise<number> => {
     if (!supplierId || !itemId) return 0;
     
@@ -75,12 +75,12 @@ export const priceListService = {
     }
   },
 
-  // دالة إضافية: جلب كل الأسعار من مورد معين لأصناف متعددة
+  // دالة إضافية: جلب كل الأسعار من مورد معين لمنتجات متعددة
   getSupplierPricesForItems: async (supplierId: string, itemIds: string[]): Promise<Record<string, number>> => {
     const prices: Record<string, number> = {};
     
     try {
-      // إذا كانت هناك مجموعة كبيرة من الأصناف، يمكن تحسين هذا
+      // إذا كانت هناك مجموعة كبيرة من المنتجات، يمكن تحسين هذا
       const q = query(
         collection(db, "supplier_prices"),
         where("supplierId", "==", supplierId),
@@ -90,7 +90,7 @@ export const priceListService = {
       
       const snapshot = await getDocs(q);
       
-      // تجميع أحدث سعر لكل صنف
+      // تجميع أحدث سعر لكل منتج
       snapshot.docs.forEach(doc => {
         const priceRecord = doc.data() as SupplierItemPrice;
         if (!prices[priceRecord.itemId]) {

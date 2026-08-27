@@ -16,7 +16,7 @@ import { useToast } from "../../../contexts/ToastContext";
 interface WizardItem {
   key: string;
   name: string;
-  productId: string;       // معرّف صنف موجود إن اختير من القائمة (وإلا يُنشأ)
+  productId: string;       // معرّف منتج موجود إن اختير من القائمة (وإلا يُنشأ)
   quantity: number;
   unitPrice: number;
 }
@@ -54,7 +54,7 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
       .then((rows) => setProducts(
         (rows as Array<Record<string, unknown>>).map((p) => ({
           id: String(p.id),
-          name: String(p.display_name || p.name_ar || p.name_en || p.sku || `صنف ${p.id ?? ""}`),
+          name: String(p.display_name || p.name_ar || p.name_en || p.sku || `منتج ${p.id ?? ""}`),
         }))
       ))
       .catch(() => setProducts([]));
@@ -87,7 +87,7 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
     if (!supplierId || validItems.length === 0) return;
     setSaving(true); setError(null);
     try {
-      // اربط كل بند بصنف حقيقي: الموجود بمعرّفه، والجديد يُنشأ Product أولاً.
+      // اربط كل بند بمنتج حقيقي: الموجود بمعرّفه، والجديد يُنشأ Product أولاً.
       const resolved = [];
       for (const it of validItems) {
         let productId = it.productId;
@@ -201,14 +201,14 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
                 {products.map((p) => <option key={p.id} value={p.name} />)}
               </datalist>
               <div className="grid grid-cols-[1fr_70px_90px_32px] gap-2 text-xs text-[var(--color-text-muted)] font-medium px-1">
-                <span>اسم الصنف</span><span>الكمية</span><span>السعر</span><span />
+                <span>اسم المنتج</span><span>الكمية</span><span>السعر</span><span />
               </div>
               {items.map((it) => (
                 <div key={it.key} className="grid grid-cols-[1fr_70px_90px_32px] gap-2 items-center">
                   <input
                     list="wizard-products" value={it.name}
                     onChange={(e) => onItemName(it.key, e.target.value)}
-                    placeholder="اكتب أو اختر صنفاً"
+                    placeholder="اكتب أو اختر منتجاً"
                     className="px-2 py-1.5 border rounded dark:bg-gray-700 border-[var(--color-border)] text-sm"
                   />
                   <input
@@ -235,7 +235,7 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
               >
                 <Plus className="w-4 h-4" /> إضافة سطر
               </button>
-              <p className="text-xs text-[var(--color-text-muted)]">الأصناف الجديدة (غير الموجودة) تُنشأ تلقائياً كمنتجات عند الإنشاء.</p>
+              <p className="text-xs text-[var(--color-text-muted)]">المنتجات الجديدة (غير الموجودة) تُنشأ تلقائياً كمنتجات عند الإنشاء.</p>
             </div>
           )}
 
@@ -247,7 +247,7 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
                 <div className="flex justify-between"><span className="text-[var(--color-text-muted)]">عدد البنود</span><b>{validItems.length}</b></div>
               </div>
               <table className="w-full text-sm">
-                <thead><tr className="text-[var(--color-text-muted)] text-xs text-right"><th className="py-1">الصنف</th><th>الكمية</th><th>السعر</th><th className="text-left">الإجمالي</th></tr></thead>
+                <thead><tr className="text-[var(--color-text-muted)] text-xs text-right"><th className="py-1">المنتج</th><th>الكمية</th><th>السعر</th><th className="text-left">الإجمالي</th></tr></thead>
                 <tbody>
                   {validItems.map((i) => (
                     <tr key={i.key} className="border-t border-[var(--color-border)]">

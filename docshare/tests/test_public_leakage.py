@@ -73,7 +73,7 @@ def test_rendered_page_never_shows_cost_or_internal_note(client, env, invoice):
     share = services.create_share(env["tenant"], DOC_SALES_INVOICE, invoice.pk)
     html = client.get(f"/s/{share.token}").content.decode("utf-8")
 
-    assert str(SECRET_COST) not in html, "تكلفة الصنف ظهرت على الصفحة العامة"
+    assert str(SECRET_COST) not in html, "تكلفة المنتج ظهرت على الصفحة العامة"
     assert SECRET_INTERNAL_NOTE not in html, "ملاحظة داخلية ظهرت على الصفحة العامة"
     # وما يجب أن يظهر ظهر فعلاً — الاختبار السالب بلا موجب يمرّ على صفحة فارغة.
     assert CUSTOMER_NOTE in html

@@ -52,7 +52,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 | `Tenant` (:18) | `TenantID` (PK), `CompanyName`, `Status` (Active/Suspended/Trial), `SubscriptionPlan` (Trial/Basic/Pro/Enterprise), `subscription_ends_at` (NULL = بلا انتهاء), `import_enabled`, `is_example`, `DomainName` (unique) | مُشار إليه بـ`tenant` FK من كل model في كل app |
 | `Currency` (:4) | `CurrencyID`, `Code`, `Symbol`, `IsBaseCurrency` | **عام بلا tenant**؛ يستورده accounting/sales/logistics |
 | `TenantSettings` (:54) | `default_vat_rate` (16.00), `fiscal_period_*`, `dashboard_month_start_day`, `font_scale`/`font_family`, `idle_timeout_minutes` (5..1440), `licensed_dealer_no` | `tenant` **OneToOne**, `currency`, `default_freight_credit_account`→Account |
-| `Branch` (:141) | `name`, `code`, `is_main`, `is_active` | `tenant`, `unique_together (tenant, code)`؛ يشارك الشجرة والأصناف والشركاء ويعزل الفواتير/المخزون/القيود |
+| `Branch` (:141) | `name`, `code`, `is_main`, `is_active` | `tenant`, `unique_together (tenant, code)`؛ يشارك الشجرة والمنتجات والشركاء ويعزل الفواتير/المخزون/القيود |
 | `TenantBook` (:203) | `document_type` (15 نوعاً), `book_number`, `last_used_number`, `is_active` | `tenant`, `branch` (NULL = دفتر شركة)، `unique_together (tenant, branch, document_type, book_number)` |
 | `UserCompanyMembership` (:279) | `role` (7 أدوار), `is_default`, `can_access_import`, `is_example_access`, `ui_mode` (`simple`/`advanced`، افتراضي `advanced`) | `user`→auth.User, `tenant`, `unique_together (user, tenant)` |
 | `RolePermission` (:312) | `role`, `permission_key`, `allowed` | `tenant`, `unique_together (tenant, role, permission_key)` |
@@ -118,7 +118,7 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 - **لا يُترك تينانت بلا مدير**: `is_last_manager` (`services.py`) + `_assert_not_last_manager` (`views.py`).
 - **حذف الشركة ممنوع من الـAPI** نهائياً (`tenants/views.py:280-282`).
 - **ترقيم المستندات عبر `TenantBook.get_next_number` فقط** — قفل صف `select_for_update` داخل `transaction.atomic` (`models.py:244-273`)؛ لا تحسب `last_used_number + 1` يدوياً.
-- **الفرع يشارك الشجرة/الأصناف/الشركاء ويعزل الفواتير والمخزون والقيود** عبر بُعد `branch` (`models.py:141-149`, `services.py:374-380`) — لا تنسخ شجرة حسابات لفرع.
+- **الفرع يشارك الشجرة/المنتجات/الشركاء ويعزل الفواتير والمخزون والقيود** عبر بُعد `branch` (`models.py:141-149`, `services.py:374-380`) — لا تنسخ شجرة حسابات لفرع.
 - **`viewer` قراءة فقط** على مستوى المنصة (`core/permissions.py`)، و`legal_accountant` يكتب من `/api/accountant/` فقط (`core/permissions.py:74-81`).
 - **الشركة الجديدة تبدأ تجريبية**: `create_company` يضبط `SubscriptionPlan='Trial'` و`Status='Trial'` و`subscription_ends_at` بعد `TRIAL_PERIOD_DAYS` — الترقية أو التمديد من لوحة المنصة، والحدود تتبع الخطة تلقائياً.
 - **انتهاء الاشتراك يمنع الكتابة وحدها**: مضيُّ `subscription_ends_at` يجعل الشركة للقراءة والطباعة والتصدير، والكتابة ترد 403 (`core/permissions.py` — `TenantRolePermission`). التاريخ **شامل** (يوم الانتهاء يوم عمل)، والسؤال عنه يمرّ بـ`core/plans.py` (`subscription_expiry`) وحده — لا تعيد حساب «هل انتهى» في نقطة ثانية. تعديل التاريخ من لوحة المنصة فقط: `subscription_ends_at` للقراءة في `TenantSerializer` عمداً. ومسارٌ يستبدل `permission_classes` (بوابة المحاسب) لا يرث الحارس — يستدعي `require_active_subscription` صراحةً.
@@ -128,7 +128,7 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 | الملف | ما يغطيه |
 |---|---|
 | `tests/test_company_isolation.py` (299) | رفض شركة بلا عضوية، تبديل الشركة، شجرة حسابات معزولة، تسلسل فواتير مستقل، من يملك إنشاء شركة |
-| `tests/test_read_isolation.py` (87) | endpoints القوائم الفعلية (أصناف/شركاء/فئات/حركات/قيود) تُرجع فارغاً لشركة جديدة ولو امتلأت أخرى |
+| `tests/test_read_isolation.py` (87) | endpoints القوائم الفعلية (منتجات/شركاء/فئات/حركات/قيود) تُرجع فارغاً لشركة جديدة ولو امتلأت أخرى |
 | `tests/test_branch_isolation.py` (96) | الفرع يشارك الشجرة ويعزل الفواتير والترقيم؛ رفض فرع شركة أخرى؛ الإنشاء manager-only |
 | `tests/test_import_access.py` (181) | نموذج الاستيراد من مستويين + إخفاء شجرة 53* عمّن لا يملك الصلاحية |
 | `tests/test_company_admin.py` (178) | تعديل الشركة manager-only، منع الحذف، إدارة الأعضاء وحماية آخر مدير |

@@ -41,7 +41,7 @@ type Product = {
   unit_price?: string;
 };
 
-/** اسم الصنف للعرض — الأصناف تُعاد بحقول name_ar/display_name/sku لا name. */
+/** اسم المنتج للعرض — المنتجات تُعاد بحقول name_ar/display_name/sku لا name. */
 const productLabel = (p?: Product): string =>
   (p &&
     (p.display_name || p.name_ar || p.name_en || p.name || p.sku)) ||
@@ -227,7 +227,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   const gridColumns: KitGridColumn<ReturnLine>[] = [
     { key: "seq", header: "#", width: "40px", align: "center", readOnly: true },
-    { key: "product", header: "الصنف", width: "30%" },
+    { key: "product", header: "المنتج", width: "30%" },
     { key: "quantity", header: "الكمية", width: "100px", align: "center", type: "number" },
     { key: "unit_price", header: "سعر الوحدة", width: "120px", align: "center", type: "number" },
     { key: "total", header: "الإجمالي", width: "120px", align: "center", readOnly: true },

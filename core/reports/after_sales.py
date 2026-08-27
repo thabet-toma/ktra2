@@ -85,7 +85,7 @@ register(ReportSpec(
     ),
     columns=(
         ReportColumn("serial", "الرقم التسلسلي", KIND_TEXT),
-        ReportColumn("device", "الجهاز / الصنف", KIND_TEXT),
+        ReportColumn("device", "الجهاز / المنتج", KIND_TEXT),
         ReportColumn("customer", "الزبون", KIND_TEXT),
         ReportColumn("phone", "الهاتف", KIND_TEXT),
         ReportColumn("start_date", "بداية الكفالة", KIND_DATE),
@@ -260,7 +260,7 @@ register(ReportSpec(
     columns=(
         ReportColumn("movement_date", "التاريخ", KIND_DATE),
         ReportColumn("order_number", "أمر الصيانة", KIND_TEXT),
-        ReportColumn("product", "الصنف", KIND_TEXT),
+        ReportColumn("product", "المنتج", KIND_TEXT),
         ReportColumn("customer", "الزبون", KIND_TEXT),
         ReportColumn("quantity", "الكمية", KIND_NUMBER, total=True),
         ReportColumn("unit_cost", "تكلفة الوحدة", KIND_MONEY),
@@ -268,7 +268,7 @@ register(ReportSpec(
     ),
     filters=(
         *DATE_FILTERS,
-        ReportFilter("product", "الصنف", "product"),
+        ReportFilter("product", "المنتج", "product"),
     ),
     build=_warranty_parts_cost,
     permission=PERM_ORDER_VIEW,

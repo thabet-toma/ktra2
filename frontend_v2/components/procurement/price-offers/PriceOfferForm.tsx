@@ -15,11 +15,12 @@ import {
 } from "../../kit";
 import {
   Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Search, Info,
-  FileText, Link2, Plus,
+  FileText, Link2, Plus, Pencil,
 } from "lucide-react";
 import { formatDateValue } from "../../../utils/formatDate";
 import { ItemSearchModal } from "./ItemSearchModal";
 import { ProductCardModal } from "../../shared/ProductCardModal";
+import { ItemQuickEditModal } from "../../items/ItemQuickEditModal";
 import { FilePreviewModal } from "../../shared/FilePreviewModal";
 import { cloudinaryService } from "../../../services/cloudinaryService";
 import { FileDropZone } from "../../ui/FileDropZone";
@@ -139,8 +140,11 @@ export const PriceOfferForm: React.FC<Props> = ({
   const [itemPickerLineKey, setItemPickerLineKey] = useState<string | null>(null);
   const [availableItems, setAvailableItems] = useState<Item[]>(items);
   // T-IMPOFFER: نفس مسار الإدخال المعتمد في باقي المنصة (فاتورة الشراء/الصفقة):
-  // إكمال تلقائي داخل الخلية، ونص حرّ يبقى في العرض، وبطاقة الصنف عبر (i).
+  // إكمال تلقائي داخل الخلية، ونص حرّ يبقى في العرض، وبطاقة المنتج عبر (i).
   const [cardProductId, setCardProductId] = useState<number | null>(null);
+  // T-PRODUCT M4: هذه الشاشة وحدها كانت بلا طريق تعديلٍ للمنتج — بطاقةٌ تُقرأ ولا
+  // تُكتب. الآن نفس قلم فاتورتَي البيع والشراء، وبنفس معالِج الانتشار.
+  const [quickEditProductId, setQuickEditProductId] = useState<number | null>(null);
 
   // إعادة تحميل عند تغيير offer prop
   useEffect(() => {
@@ -248,7 +252,7 @@ export const PriceOfferForm: React.FC<Props> = ({
     deliveryDays, internalNotes, taxRate, discountAmount, subtotal, tax, grandTotal, lines]);
 
   const handleSave = async () => {
-    // T-DRAFTPARTY: مورد مسجَّل **أو** اسم مبدئي؛ وكذلك البنود: صنف مختار أو اسم
+    // T-DRAFTPARTY: مورد مسجَّل **أو** اسم مبدئي؛ وكذلك البنود: منتج مختار أو اسم
     // مكتوب. الطلبية والصفقة تبقيان ملزمتين بالمسجَّل (يمنعهما مسار الحفظ نفسه).
     const isDraftDocument = offerType === "incoming_offer";
     if (!supplierId && !supplierDraftName.trim()) {
@@ -263,11 +267,11 @@ export const PriceOfferForm: React.FC<Props> = ({
       (line) => (line.itemId || line.name.trim()) && Number(line.quantity) > 0,
     );
     if (usableLines.length === 0) {
-      setErr("أضف صنفاً واحداً على الأقل (باختياره أو بكتابة اسمه) وحدد كميته.");
+      setErr("أضف منتجاً واحداً على الأقل (باختياره أو بكتابة اسمه) وحدد كميته.");
       return;
     }
     if (!isDraftDocument && usableLines.some((line) => !line.itemId)) {
-      setErr("الطلبية تلزمها أصناف مسجَّلة — اختر الصنف من القائمة.");
+      setErr("الطلبية تلزمها منتجات مسجَّلة — اختر المنتج من القائمة.");
       return;
     }
     // T-IMPOFFER: «غير ملائم» بلا سبب لا يُحفظ في نطاق الاستيراد — الخادم يرفضه
@@ -289,12 +293,28 @@ export const PriceOfferForm: React.FC<Props> = ({
     }
   };
 
+  /**
+   * T-PRODUCT M4 — نفس عقد فاتورة الشراء: سطر العرض يلتقط الاسم نسخةً عند
+   * الاختيار، فلا يكفي ترقيع الكتالوج وحده.
+   */
+  const applyProductUpdate = (updated: Record<string, unknown>) => {
+    const id = Number(updated.id);
+    if (!id) return;
+    const name = String(updated.display_name ?? updated.name_ar ?? updated.name_en ?? "");
+    setAvailableItems((prev) => prev.map((it) => (
+      String(it.id) === String(id) ? { ...it, name } : it
+    )));
+    setLines((prev) => prev.map((l) => (
+      String(l.itemId) === String(id) && l.name !== name ? { ...l, name } : l
+    )));
+  };
+
   const addLine = () => setLines((prev) => [...prev, blankLine()]);
   const removeLine = (key: string) => setLines((prev) => prev.filter((l) => l.key !== key));
   const updateLine = (key: string, patch: Partial<LineItem>) =>
     setLines((prev) => prev.map((l) => l.key === key ? { ...l, ...patch } : l));
 
-  /** تعبئة سطر من صنف مختار — مشتركة بين الإكمال التلقائي والمنتقي والإنشاء السريع. */
+  /** تعبئة سطر من منتج مختار — مشتركة بين الإكمال التلقائي والمنتقي والإنشاء السريع. */
   const fillLineWithItem = useCallback((lineKey: string, item: Item, lastPrice?: number) => {
     setLines((prev) => prev.map((line) => line.key === lineKey ? {
       ...line,
@@ -371,7 +391,7 @@ export const PriceOfferForm: React.FC<Props> = ({
   // ── أعمدة جدول البنود ──
   const gridColumns: KitGridColumn<LineItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
-    { key: "name", header: "بيان الصنف", width: "35%" },
+    { key: "name", header: "وصف المنتج", width: "35%" },
     { key: "specifications", header: "مواصفات", width: "20%" },
     { key: "hsCodePrimary", header: "كود HS", width: "110px" },
     { key: "quantity", header: "الكمية", width: "90px", align: "center", type: "number" },
@@ -414,14 +434,14 @@ export const PriceOfferForm: React.FC<Props> = ({
    * T-IMPOFFER — «طريقة اختيار المنتجات خطأ، لازم زي باقي المنصة».
    *
    * كانت الخلية زرّاً يفتح `ItemSearchModal` العريض: مسار مختلف عن كل شاشة أخرى
-   * (فاتورة الشراء، الصفقة، فاتورة البيع) التي تكتب اسم الصنف داخل الخلية.
+   * (فاتورة الشراء، الصفقة، فاتورة البيع) التي تكتب اسم المنتج داخل الخلية.
    * الآن نفس المكوّن المشترك `KitAutocomplete`: كتابة ← قائمة مرشَّحة ←
-   * «إضافة كصنف جديد» للنص الحر، مع (i) لبطاقة الصنف. المنتقي العريض باقٍ خلف
+   * «إضافة كمنتج جديد» للنص الحر، مع (i) لبطاقة المنتج. المنتقي العريض باقٍ خلف
    * أيقونة البحث لمن يريد الفهرس الكامل.
    *
-   * T-DRAFTPARTY: النص الحر لم يعد يفتح نافذة إنشاء صنف — يبقى **اسماً داخل
-   * العرض**. العرض قد لا يُقبل أصلاً، فلا يجوز أن يترك أصنافاً في الفهرس؛
-   * الصنف يُنشأ (أو يُطابَق بالاسم) لحظة تحويل العرض إلى صفقة/طلبية/فاتورة.
+   * T-DRAFTPARTY: النص الحر لم يعد يفتح نافذة إنشاء منتج — يبقى **اسماً داخل
+   * العرض**. العرض قد لا يُقبل أصلاً، فلا يجوز أن يترك منتجات في الفهرس؛
+   * المنتج يُنشأ (أو يُطابَق بالاسم) لحظة تحويل العرض إلى صفقة/طلبية/فاتورة.
    */
   gridColumns[1].render = (row: LineItem) => (
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -429,12 +449,13 @@ export const PriceOfferForm: React.FC<Props> = ({
         value={row.name || ""}
         options={itemOptions}
         disabled={isReadOnly}
-        placeholder="اكتب اسم الصنف…"
+        placeholder="اكتب اسم المنتج…"
         onPick={(id) => {
           const item = availableItems.find((candidate) => String(candidate.id) === String(id));
           if (item) fillLineWithItem(row.key, item);
         }}
         onInfo={(id) => { const pid = Number(id); if (pid) setCardProductId(pid); }}
+        onEdit={isReadOnly ? undefined : (id) => { const pid = Number(id); if (pid) setQuickEditProductId(pid); }}
         onFreeText={(text) => updateLine(row.key, {
           id: row.id || crypto.randomUUID(),
           itemId: "",
@@ -447,15 +468,23 @@ export const PriceOfferForm: React.FC<Props> = ({
           type="button"
           className="ktra-ellipsis"
           onClick={() => setCardProductId(Number(row.itemId))}
-          title="بطاقة الصنف"
+          title="بطاقة المنتج"
         ><Info className="h-3.5 w-3.5" /></button>
+      )}
+      {row.itemId && !isReadOnly && (
+        <button
+          type="button"
+          className="ktra-ellipsis"
+          onClick={() => setQuickEditProductId(Number(row.itemId))}
+          title="تعديل سريع للمنتج"
+        ><Pencil className="h-3.5 w-3.5" /></button>
       )}
       {!isReadOnly && (
         <button
           type="button"
           className="ktra-ellipsis"
           onClick={() => setItemPickerLineKey(row.key)}
-          title="فهرس الأصناف الكامل"
+          title="فهرس المنتجات الكامل"
         ><Search className="h-3.5 w-3.5" /></button>
       )}
     </div>
@@ -862,7 +891,7 @@ export const PriceOfferForm: React.FC<Props> = ({
       }
       status={
         <>
-          <span className="ktra-status-item">عدد الأصناف <b>{lines.length}</b></span>
+          <span className="ktra-status-item">عدد المنتجات <b>{lines.length}</b></span>
           <span className="ktra-status-item">آخر مفتاح <b>{lastKey}</b></span>
           {isReadOnly && <span className="ktra-status-item">للقراءة فقط</span>}
         </>
@@ -885,7 +914,15 @@ export const PriceOfferForm: React.FC<Props> = ({
         {cardProductId != null && (
           <ProductCardModal
             productId={cardProductId}
+            onProductSaved={applyProductUpdate}
             onClose={() => setCardProductId(null)}
+          />
+        )}
+        {quickEditProductId != null && (
+          <ItemQuickEditModal
+            productId={quickEditProductId}
+            onClose={() => setQuickEditProductId(null)}
+            onSaved={applyProductUpdate}
           />
         )}
         <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />

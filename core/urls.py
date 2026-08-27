@@ -68,7 +68,7 @@ urlpatterns = [
     path('api/agent/customers/', partners_agent_api.agent_customers),
     path('api/agent/products/', inventory_agent_api.agent_products),
     # T-SCAN: «ما الذي في يدي؟» — نقطة واحدة تحلّ الباركود والسيريال والـIMEI
-    # ورمز الصنف وجزء الاسم، بلا أن يختار المستخدم النوع.
+    # ورمز المنتج وجزء الاسم، بلا أن يختار المستخدم النوع.
     path('api/scan/', scan.scan_lookup),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.

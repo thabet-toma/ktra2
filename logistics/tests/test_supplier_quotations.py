@@ -34,10 +34,10 @@ class SupplierQuotationAPITest(APITestCase):
             tenant=cls.other_tenant, name='Factory B', partner_type='Supplier',
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku='QUOTE-1', name_ar='صنف عرض',
+            tenant=cls.tenant, sku='QUOTE-1', name_ar='منتج عرض',
         )
         cls.other_product = Product.objects.create(
-            tenant=cls.other_tenant, sku='QUOTE-OTHER-1', name_ar='صنف آخر',
+            tenant=cls.other_tenant, sku='QUOTE-OTHER-1', name_ar='منتج آخر',
         )
 
     def setUp(self):
@@ -70,7 +70,7 @@ class SupplierQuotationAPITest(APITestCase):
                 'seq': 1,
                 'quantity': '2.500',
                 'unit_price': '10.0000',
-                'description_line': 'تفصيل الصنف',
+                'description_line': 'تفصيل المنتج',
             }],
         }
         payload.update(overrides)
@@ -90,7 +90,7 @@ class SupplierQuotationAPITest(APITestCase):
         self.assertEqual(Decimal(response.data['grand_total']), Decimal('26.00'))
         quotation = SupplierQuotation.objects.get(pk=response.data['id'])
         self.assertEqual(quotation.tenant, self.tenant)
-        self.assertEqual(quotation.lines.get().name_snapshot, 'صنف عرض')
+        self.assertEqual(quotation.lines.get().name_snapshot, 'منتج عرض')
 
     def test_related_supplier_and_products_are_tenant_scoped(self):
         supplier_response = self.client.post(
@@ -127,8 +127,8 @@ class SupplierQuotationAPITest(APITestCase):
                 'seq': 1,
                 'quantity': '2.500',
                 'unit_price': '10.0000',
-                'name_snapshot': 'صنف عرض',
-                'description_line': 'تفصيل الصنف',
+                'name_snapshot': 'منتج عرض',
+                'description_line': 'تفصيل المنتج',
             }],
         }
         payload.update(overrides)
@@ -166,7 +166,7 @@ class SupplierQuotationAPITest(APITestCase):
         self.assertEqual(deal.partner, self.supplier)
         self.assertEqual(deal.total_amount, Decimal('26.00'))
         self.assertEqual(deal.items.get().product, self.product)
-        self.assertEqual(deal.items.get().name_snapshot, 'صنف عرض')
+        self.assertEqual(deal.items.get().name_snapshot, 'منتج عرض')
 
     def test_conversion_rejects_local_or_unaccepted_quote(self):
         local = self.client.post(

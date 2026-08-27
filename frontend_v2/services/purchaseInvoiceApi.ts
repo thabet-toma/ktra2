@@ -595,8 +595,8 @@ export const purchaseInvoiceApi = {
   },
 
   /**
-   * FEAT-1: السعر المقترح لصنف عند إضافته لبند فاتورة شراء. يفوّض للـ PriceResolver
-   * المشترك في الخادم (آخر/أقل سعر شراء حسب إعدادات الشراء، ثم تكلفة الصنف، ثم فارغ).
+   * FEAT-1: السعر المقترح لمنتج عند إضافته لبند فاتورة شراء. يفوّض للـ PriceResolver
+   * المشترك في الخادم (آخر/أقل سعر شراء حسب إعدادات الشراء، ثم تكلفة المنتج، ثم فارغ).
    */
   resolvePrice: async (params: {
     product: number;
@@ -624,7 +624,7 @@ export const purchaseInvoiceApi = {
 
   /**
    * task24: سعر الشراء المقترح لكل المنتجات دفعة واحدة — لعرضه داخل خيارات منتقي
-   * الأصناف بلا نقر (يتجنّب نداء resolve-price لكل صف).
+   * المنتجات بلا نقر (يتجنّب نداء resolve-price لكل صف).
    */
   priceList: async (supplierId?: number | string | null): Promise<Array<{
     product_id: number;

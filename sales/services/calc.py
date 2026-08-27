@@ -257,7 +257,7 @@ def _lock_products_for_lines(lines: list[SalesInvoiceLine]) -> dict[int, Product
     )
     found = {p.id: p for p in qs}
     if len(found) != len(pids):
-        raise ValidationError("بعض أصناف الفاتورة غير موجودة أو مكررة.")
+        raise ValidationError("بعض منتجات الفاتورة غير موجودة أو مكررة.")
     return found
 
 
@@ -297,7 +297,7 @@ def _build_cogs_journal_line_dicts(
         if not cogs_id or not inv_id:
             cname = cat.name if cat else "(بدون فئة)"
             raise ValidationError(
-                f"الصنف «{p.sku}» — الفئة «{cname}»: عيّن حساب تكلفة المبيعات والمخزون في فئة المنتج "
+                f"المنتج «{p.sku}» — الفئة «{cname}»: عيّن حساب تكلفة المبيعات والمخزون في فئة المنتج "
                 f"أو حسابات افتراضية في إعدادات المبيعات، أو عطّل خصم المخزون عند الترحيل."
             )
         pair_totals[(cogs_id, inv_id)] += amt
@@ -360,7 +360,7 @@ def guard_loss_invoice(
     """W1: يمنع حفظ/ترحيل فاتورة بيع فيها **أي سطر** يُباع بخسارة (صافي البيع أقل من
     متوسط التكلفة) عند تفعيل `SalesSettings.block_loss_invoices` — حتى لو كان إجمالي
     الفاتورة رابحاً. المراجيع مُعفاة. المفتاح OFF = السماح بحفظ فاتورة بخسارة (تجاوز
-    الحارس). يسمّي الأسطر المخالفة بالعربية (اسم الصنف + التكلفة مقابل صافي البيع).
+    الحارس). يسمّي الأسطر المخالفة بالعربية (اسم المنتج + التكلفة مقابل صافي البيع).
     """
     kind = invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE
     if kind != SalesInvoice.INVOICE_KIND_SALE:

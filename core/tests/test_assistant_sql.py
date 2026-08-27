@@ -93,9 +93,9 @@ def two_companies():
     cur = Currency.objects.get(Code="ILS")
     a = create_company("شركة أ", owner)
     b = create_company("شركة ب", owner)
-    Product.objects.create(tenant=a, sku="A-1", name_ar="صنف أ",
+    Product.objects.create(tenant=a, sku="A-1", name_ar="منتج أ",
                            quantity_on_hand=Decimal("40"), avg_cost=Decimal("10"))
-    Product.objects.create(tenant=b, sku="B-1", name_ar="صنف ب",
+    Product.objects.create(tenant=b, sku="B-1", name_ar="منتج ب",
                            quantity_on_hand=Decimal("999"), avg_cost=Decimal("1"))
     ca = Partner.objects.create(tenant=a, name="عميل أ", partner_type="Customer")
     cb = Partner.objects.create(tenant=b, name="عميل ب", partner_type="Customer")

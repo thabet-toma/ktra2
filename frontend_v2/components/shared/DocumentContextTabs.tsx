@@ -4,7 +4,7 @@
  * المستند مركز سياق لا نموذج إدخال: من داخله يُرى ماذا فعل بالمخزون وبحساب
  * الطرف. مرجع «الأصيل» يضع «رقم الحركة المخزنية» على وجه الفاتورة ويجعله مدخلاً
  * «للاستعلام عن الحركات» (`docs/aseel_reference/invoices.txt`) — فتبويب المخزون
- * هنا هو ذلك المدخل: حركات **هذا المستند**، لا تاريخ الصنف (ذاك في كرت الصنف).
+ * هنا هو ذلك المدخل: حركات **هذا المستند**، لا تاريخ المنتج (ذاك في كرت المنتج).
  *
  * **مكوّنٌ واحد للجانبين** (T-PCTX): كان في `components/sales/` ويخدم فاتورة
  * البيع وحدها، وفاتورة الشراء بلا تبويباتٍ أصلاً. الاختلاف بين الجانبين شيئان
@@ -135,7 +135,7 @@ const Notice: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 const stockColumns: LedgerColumn<ContextStockRow>[] = [
   { key: "id", header: "رقم الحركة", render: (r) => <span className="font-mono">{r.id}</span> },
   { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) || "—" },
-  { key: "product_name", header: "الصنف", render: (r) => r.product_name },
+  { key: "product_name", header: "المنتج", render: (r) => r.product_name },
   { key: "movement_type_label", header: "النوع", render: (r) => r.movement_type_label },
   { key: "warehouse", header: "المستودع", render: (r) => r.warehouse || "—" },
   {

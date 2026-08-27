@@ -89,7 +89,7 @@ const openInvoice = async (page: Page): Promise<Calls> => {
         results: [{
           id: 4001, date: '2026-07-02', movement_type: 'IN',
           movement_type_label: 'وارد', reference_type: 'PURCHASE_INVOICE',
-          product_id: 7, product_name: 'صنف السياق', warehouse: 'الرئيسي',
+          product_id: 7, product_name: 'منتج السياق', warehouse: 'الرئيسي',
           qty_in: '5', qty_out: '0', quantity_before: '0',
           running_balance: '5', unit_cost: '100', total_cost: '500',
         }],
@@ -146,7 +146,7 @@ test('تبويبا السياق لا يُجلبان حتى يُفتحا، ثم �
   await page.getByRole('tab', { name: 'حركة المخزون' }).click();
   await expect.poll(() => calls.stock, { timeout: 10000 }).toBeGreaterThan(0);
   await expect(page.getByText('4001').first()).toBeVisible();
-  await expect(page.getByText('صنف السياق').first()).toBeVisible();
+  await expect(page.getByText('منتج السياق').first()).toBeVisible();
 
   await page.getByRole('tab', { name: 'حساب المورّد' }).click();
   await expect.poll(() => calls.ledger, { timeout: 10000 }).toBeGreaterThan(0);

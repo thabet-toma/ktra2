@@ -113,7 +113,7 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
     serials?: string[] | null;
     /** ملاحظة الموظف على البند — لا تُطبع للعميل. */
     internal_note?: string | null;
-    /** ملاحظة تُطبع للعميل تحت اسم الصنف. */
+    /** ملاحظة تُطبع للعميل تحت اسم المنتج. */
     customer_note?: string | null;
   }[];
   created_at?: string;
@@ -649,7 +649,7 @@ export type CustomerPriceRow = {
   sku: string | null;
   name: string;
   price: string | null;
-  /** «default» = السعر العام في كرت الصنف (أضعف المصادر). */
+  /** «default» = السعر العام في كرت المنتج (أضعف المصادر). */
   source: "last_invoice" | "quote" | "default";
   source_label: string;
   editable: boolean;
@@ -892,7 +892,7 @@ export type SalesSettings = {
   /** T-AUTOPOST: ترحيل سندات القبض/الصرف فور الحفظ (الافتراضي: مُفعَّل). */
   auto_post_payments: boolean;
   show_journal_preview: boolean;
-  /** T-S2: تنبيه عند تكرار الصنف (يقود T-R3). */
+  /** T-S2: تنبيه عند تكرار المنتج (يقود T-R3). */
   warn_on_duplicate_item: boolean;
   /** منع حفظ/ترحيل فاتورة بيع بخسارة (الافتراضي مُعطّل). */
   block_loss_invoices: boolean;

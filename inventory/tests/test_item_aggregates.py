@@ -1,4 +1,4 @@
-"""W8 — تجميعات جدول الأصناف وبطاقته من StockMovement (المصدر الوحيد):
+"""W8 — تجميعات جدول المنتجات وبطاقته من StockMovement (المصدر الوحيد):
 - purchased_qty = الوارد التراكمي (كل حركات IN).
 - avg_monthly_sales = صافي (OUT − RETURN_IN) خلال آخر 90 يوماً ÷ 3.
 - avg_weekly_sales (البطاقة) = صافي خلال آخر 28 يوماً ÷ 4.
@@ -23,7 +23,7 @@ class ItemAggregatesTest(APITestCase):
         cls.owner = User.objects.create_user(username="agg", password="x")
         cls.tenant = create_company("شركة التجميعات", cls.owner)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="AGG-1", name_ar="صنف",
+            tenant=cls.tenant, sku="AGG-1", name_ar="منتج",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("10"))
         today = datetime.date.today()
         recent = today - datetime.timedelta(days=10)   # داخل 28 و90

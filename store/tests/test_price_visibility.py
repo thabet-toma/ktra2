@@ -1,11 +1,11 @@
 """إظهار/إخفاء أسعار المتجر — مفتاحٌ واحد على مستوى المتجر.
 
-سبب وجود المفتاح: `sale_price` على كرت الصنف حقلٌ **تشغيلي** تقرؤه الفوترة،
+سبب وجود المفتاح: `sale_price` على كرت المنتج حقلٌ **تشغيلي** تقرؤه الفوترة،
 ووجودُه لا يعني إذناً بإعلانه للعموم. متاجر الجملة تعرض الكتالوج بلا أسعار
 وتترك السعر لمحادثة — وهذا ما يفعله هذا المفتاح.
 
 الحجب في `published_products` وحدها: العمودان لا يُقرآن من القاعدة أصلاً،
-فتُغطّى المسارات الثلاثة (القائمة، الصنف، الحملة) بالبناء لا بثلاثة شروط.
+فتُغطّى المسارات الثلاثة (القائمة، المنتج، الحملة) بالبناء لا بثلاثة شروط.
 """
 from decimal import Decimal
 
@@ -36,7 +36,7 @@ class StorePriceVisibilityTest(TestCase):
 
         # سعران مزروعان: المتجري والتشغيلي — كلاهما يجب أن يختفي.
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="P-99", name_ar="صنف مُسعَّر",
+            tenant=cls.tenant, sku="P-99", name_ar="منتج مُسعَّر",
             is_for_sale_online=True, online_price=Decimal("99.00"),
             sale_price=Decimal("77.00"), quantity_on_hand=Decimal("5"),
             uom=cls.uom,
@@ -101,7 +101,7 @@ class StorePriceVisibilityTest(TestCase):
         self.assertFalse(self.public.get("/api/store/prices/").json()["show_prices"])
 
     def test_hiding_prices_does_not_hide_the_products(self):
-        """متجرٌ بلا أسعار يبقى كتالوجاً كاملاً — الحجب للأرقام لا للأصناف."""
+        """متجرٌ بلا أسعار يبقى كتالوجاً كاملاً — الحجب للأرقام لا للمنتجات."""
         self._hide_prices()
         body = self.public.get("/api/store/prices/products/").json()
         self.assertEqual(body["count"], 1)

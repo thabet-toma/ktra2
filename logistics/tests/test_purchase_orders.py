@@ -34,10 +34,10 @@ class PurchaseOrderAPITest(APITestCase):
             tenant=cls.other_tenant, name='Foreign Supplier', partner_type='Supplier',
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku='PO-ITEM-1', name_ar='صنف طلبية',
+            tenant=cls.tenant, sku='PO-ITEM-1', name_ar='منتج طلبية',
         )
         cls.other_product = Product.objects.create(
-            tenant=cls.other_tenant, sku='PO-ITEM-X', name_ar='صنف أجنبي',
+            tenant=cls.other_tenant, sku='PO-ITEM-X', name_ar='منتج أجنبي',
         )
 
     def setUp(self):
@@ -210,7 +210,7 @@ class PurchaseOrderAPITest(APITestCase):
                 'status': 'under_discussion',
                 'items': [{
                     'itemId': str(self.product.id),
-                    'name': 'لقطة صنف',
+                    'name': 'لقطة منتج',
                     'quantity': 2,
                     'unitPrice': 7,
                 }],

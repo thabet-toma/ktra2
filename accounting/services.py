@@ -779,7 +779,7 @@ def unpost_document(
             )
             if dependents:
                 listing = "؛ ".join(
-                    f"{d['label']} (الأصناف: {'، '.join(d['products'])})"
+                    f"{d['label']} (المنتجات: {'، '.join(d['products'])})"
                     for d in dependents
                 )
                 logger.warning(

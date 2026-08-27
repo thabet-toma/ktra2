@@ -140,14 +140,14 @@ export const WarehouseTransferPage: React.FC = () => {
               </div>
 
               <table className="ktra-grid" data-variant="list" style={{ marginBottom: 8 }}>
-                <thead><tr><th>الصنف</th><th style={{ width: 120 }}>الكمية</th><th style={{ width: 40 }}></th></tr></thead>
+                <thead><tr><th>المنتج</th><th style={{ width: 120 }}>الكمية</th><th style={{ width: 40 }}></th></tr></thead>
                 <tbody>
                   {lines.map((l, i) => (
                     <tr key={i}>
                       <td>
                         <select className="ktra-input" style={{ width: "100%" }} value={l.product}
                           onChange={(e) => updateLine(i, { product: e.target.value ? Number(e.target.value) : "" })}>
-                          <option value="">— اختر صنفاً —</option>
+                          <option value="">— اختر منتجاً —</option>
                           {products.map((p) => <option key={p.id} value={p.id}>{prodLabel(p)}</option>)}
                         </select>
                       </td>

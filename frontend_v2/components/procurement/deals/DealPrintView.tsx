@@ -152,7 +152,7 @@ export const DealPrintView: React.FC<DealPrintViewProps> = ({ deal, currentUser,
                             <tr>
                                 <th className="py-2 px-2 w-8 text-center border-r ktra-border-soft">#</th>
                                 <th className="py-2 px-2 text-center w-12 border-r ktra-border-soft">صورة</th>
-                                <th className="py-2 px-3 border-r ktra-border-soft">الصنف والمواصفات</th>
+                                <th className="py-2 px-3 border-r ktra-border-soft">المنتج والمواصفات</th>
                                 <th className="py-2 px-2 w-24 border-r ktra-border-soft">التصنيف</th>
                                 <th className="py-2 px-2 w-14 text-center border-r ktra-border-soft">الكمية</th>
                                 <th className="py-2 px-2 w-24 text-left border-r ktra-border-soft">سعر الوحدة</th>

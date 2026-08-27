@@ -124,7 +124,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     );
     const u2 = itemsService.subscribeToItems(
       (rows) => { if (active) setItems(rows); settle("items"); },
-      fail("items", "تعذّر تحميل الأصناف"),
+      fail("items", "تعذّر تحميل المنتجات"),
     );
     // T-IMPOFFER: الموردون مفصولون — شاشة الاستيراد تعرض الدوليين (مع غير
     // المصنَّفين) وشاشة الشراء المحليين، فلا يُختار مصنع صيني لطلبية محلية.
@@ -310,7 +310,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
 
   /**
    * T113-2: «تحويل إلى صفقة» لم يعد ينشئ شيئاً — يفتح محرّر صفقة معبّأً من العرض
-   * وغير محفوظ. لا صفقة ولا مورد ولا صنف قبل أن يضغط المستخدم «حفظ» في المحرّر.
+   * وغير محفوظ. لا صفقة ولا مورد ولا منتج قبل أن يضغط المستخدم «حفظ» في المحرّر.
    * تُقرأ نسخة طازجة من العرض قبل الفتح: القائمة قد تكون قديمة، وتحويل عرضٍ
    * حُوّل في تبويب آخر يجب أن يقول أين ذهب لا أن يفتح محرّراً مصيره الرفض.
    */
@@ -419,7 +419,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
       ) },
     { key: "date", header: "التاريخ", width: "100px",
       render: (o) => <>{fmtDate(o.createdAt)}</> },
-    { key: "items", header: "الأصناف", width: "70px", align: "center",
+    { key: "items", header: "المنتجات", width: "70px", align: "center",
       render: (o) => <>{(o.items || []).length}</> },
     // T-IMPOFFER: ملف العرض ظاهر في القائمة، والنقر عليه يفتح معاينة وسط الشاشة.
     { key: "files", header: "الملف", width: "60px", align: "center",

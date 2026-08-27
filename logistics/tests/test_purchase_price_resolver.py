@@ -34,7 +34,7 @@ def env():
     supplier = Partner.objects.create(
         tenant=tenant, name="مورد", partner_type="Supplier")
     product = Product.objects.create(
-        tenant=tenant, sku="PPR-1", name_ar="صنف", quantity_on_hand=0, avg_cost=Decimal("0"))
+        tenant=tenant, sku="PPR-1", name_ar="منتج", quantity_on_hand=0, avg_cost=Decimal("0"))
     return tenant, ils, usd, supplier, product
 
 
@@ -45,7 +45,7 @@ def _posted_pi(tenant, supplier, currency, product, *, number, date, price,
         currency=currency, invoice_date=date, exchange_rate=Decimal(exchange_rate),
         is_posted=posted)
     PurchaseInvoiceItem.objects.create(
-        invoice=inv, product=product, name="صنف",
+        invoice=inv, product=product, name="منتج",
         quantity=Decimal("1"), unit_price=Decimal(str(price)),
         total_price=Decimal(str(price)))
     return inv
@@ -141,13 +141,13 @@ def test_price_list_bulk_last_and_lowest(env):
     _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
     _posted_pi(tenant, sup, ils, product, number="P-2", date="2026-06-15", price=130)
     other = Product.objects.create(
-        tenant=tenant, sku="PPR-2", name_ar="صنف٢", quantity_on_hand=0, avg_cost=Decimal("42"))
+        tenant=tenant, sku="PPR-2", name_ar="منتج٢", quantity_on_hand=0, avg_cost=Decimal("42"))
 
     result = purchase_price_list(tenant_id=tenant.TenantID)
     # الأساسي = آخر سعر (يُعبَّأ في الخلية)
     assert Decimal(result[product.id]["unit_price"]) == Decimal("130.0000")
     assert result[product.id]["source_type"] == "PURCHASE_INVOICE"
-    # الصنف بلا تاريخ شراء → متوسط التكلفة
+    # المنتج بلا تاريخ شراء → متوسط التكلفة
     assert Decimal(result[other.id]["unit_price"]) == Decimal("42.0000")
     assert result[other.id]["source_type"] == "PRODUCT_AVG_COST"
 
@@ -238,7 +238,7 @@ class PurchasePriceEndpointTest(APITestCase):
         cls.sup = Partner.objects.create(
             tenant=cls.tenant, name="مورد", partner_type="Supplier")
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="PPRE-1", name_ar="صنف", avg_cost=Decimal("0"))
+            tenant=cls.tenant, sku="PPRE-1", name_ar="منتج", avg_cost=Decimal("0"))
         _posted_pi(cls.tenant, cls.sup, cls.ils, cls.product,
                    number="P-1", date="2026-06-01", price=100)
         _posted_pi(cls.tenant, cls.sup, cls.ils, cls.product,

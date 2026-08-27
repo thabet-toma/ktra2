@@ -495,7 +495,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({
               {filtersActive ? "لا نتائج مطابقة لبحثك" : "لا توجد منتجات معروضة بعد"}
             </h2>
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-              {filtersActive ? "جرّب كلمة أخرى أو ألغِ التصفية." : "هذا المتجر لم ينشر أصنافاً حتى الآن — عُد لاحقاً."}
+              {filtersActive ? "جرّب كلمة أخرى أو ألغِ التصفية." : "هذا المتجر لم ينشر منتجات حتى الآن — عُد لاحقاً."}
             </p>
             {filtersActive && (
               <button

@@ -33,7 +33,7 @@ class PurchaseGrIrLifecycleTest(APITestCase):
             tenant=cls.tenant, name="مورد محلي", partner_type="Supplier",
             linked_account=cls.ap)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="GRIR-1", name_ar="صنف",
+            tenant=cls.tenant, sku="GRIR-1", name_ar="منتج",
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
 
     def _auth(self):
@@ -47,7 +47,7 @@ class PurchaseGrIrLifecycleTest(APITestCase):
             partner=self.partner, currency=self.ils, invoice_date="2026-06-11",
             exchange_rate=Decimal("1"), grand_total=grand)
         PurchaseInvoiceItem.objects.create(
-            invoice=inv, product=self.product, name="صنف",
+            invoice=inv, product=self.product, name="منتج",
             quantity=Decimal(qty), unit_price=Decimal(price), total_price=grand)
         return inv
 

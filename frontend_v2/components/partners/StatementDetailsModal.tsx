@@ -16,7 +16,7 @@ import { formatDateLocalized } from "../../utils/formatDate";
 
 /**
  * كشف الحساب — «تفاصيل الحركة»: نافذة تعرض تفاصيل السطر حسب نوعه:
- *  - فاتورة بيع/شراء ⇒ البنود المُباعة/المشتراة (الصنف، الكمية، السعر، الإجمالي).
+ *  - فاتورة بيع/شراء ⇒ البنود المُباعة/المشتراة (المنتج، الكمية، السعر، الإجمالي).
  *  - سند قبض ⇒ تفاصيل الدفعة (المبلغ، التاريخ، التوزيع على الفواتير).
  *  - غير ذلك ⇒ ملخّص مقروء + رابط فتح المستند إن وُجد.
  * يعيد استخدام الجالبات القائمة (DRY) — لا نقطة نهاية جديدة.
@@ -129,7 +129,7 @@ export const StatementDetailsModal: React.FC<{
             <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  <th className={th}>الصنف</th>
+                  <th className={th}>المنتج</th>
                   <th className={th}>الكمية</th>
                   <th className={th}>السعر</th>
                   <th className={th}>الإجمالي</th>
@@ -153,7 +153,7 @@ export const StatementDetailsModal: React.FC<{
             <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  <th className={th}>الصنف</th>
+                  <th className={th}>المنتج</th>
                   <th className={th}>الكمية</th>
                   <th className={th}>السعر</th>
                   <th className={th}>الإجمالي</th>

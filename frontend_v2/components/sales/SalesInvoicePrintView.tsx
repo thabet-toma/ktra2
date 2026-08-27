@@ -158,7 +158,7 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                         <thead className="ktra-bg-panel text-white text-[10px] font-bold">
                             <tr>
                                 <th className="py-2 px-2 w-8 text-center border-r ktra-border-soft border-l">#</th>
-                                <th className="py-2 px-3 border-l ktra-border-soft">الصنف</th>
+                                <th className="py-2 px-3 border-l ktra-border-soft">المنتج</th>
                                 <th className="py-2 px-2 w-14 text-center border-l ktra-border-soft">الكمية</th>
                                 <th className="py-2 px-2 w-24 text-left border-l ktra-border-soft">سعر الوحدة</th>
                                 <th className="py-2 px-2 w-24 text-left border-l ktra-border-soft">الإجمالي</th>

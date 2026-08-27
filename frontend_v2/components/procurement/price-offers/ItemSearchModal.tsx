@@ -12,8 +12,8 @@ interface ItemSearchModalProps {
     supplierId?: string;
     /** T-SEARCH: يفتح الفهرس على نفس ما كتبه المستخدم في المنتقي المدمج. */
     initialSearch?: string;
-    /** task18 DEF-B2: يُستدعى بعد إنشاء صنف جديد (Product) ليُضيفه الأب إلى قائمة
-     *  الأصناف فوراً فيظهر في المنتقي/الإكمال التلقائي ويُعاد اختياره. */
+    /** task18 DEF-B2: يُستدعى بعد إنشاء منتج جديد (Product) ليُضيفه الأب إلى قائمة
+     *  المنتجات فوراً فيظهر في المنتقي/الإكمال التلقائي ويُعاد اختياره. */
     onItemCreated?: (item: Item) => void;
 }
 
@@ -21,7 +21,7 @@ interface ItemSearchModalProps {
  *  سطر الفاتورة — كان السطر يُعبَّأ بـ name=undefined لأن Product يحمل name_ar. */
 export const productToItem = (p: any): Item => ({
     id: String(p.id),
-    name: p.display_name || p.name_ar || p.name_en || p.sku || `صنف ${p.id ?? ""}`,
+    name: p.display_name || p.name_ar || p.name_en || p.sku || `منتج ${p.id ?? ""}`,
     categoryId: p.category != null ? String(p.category) : "",
     categoryName: p.category_name || "",
     modelNumber: p.sku || undefined,
@@ -116,7 +116,7 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
                             <Package className="w-5 h-5 ktra-text-accent dark:ktra-text-soft" />
                         </div>
                         <div>
-                            <h3 className="text-xl font-bold ktra-text-ink dark:text-white">إضافة صنف</h3>
+                            <h3 className="text-xl font-bold ktra-text-ink dark:text-white">إضافة منتج</h3>
                             <p className="text-sm ktra-text-soft dark:ktra-text-soft">اختر منتجاً من القائمة لإضافته </p>
                         </div>
                     </div>
@@ -146,7 +146,7 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
                             onClick={() => setShowAddItem(true)}
                             className="flex items-center gap-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
                         >
-                            <Plus className="w-5 h-5" /> إضافة صنف
+                            <Plus className="w-5 h-5" /> إضافة منتج
                         </button>
                     </div>
                 </div>
@@ -193,11 +193,11 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
                                             </span>
                                         )}
                                         {/* T-SUPSKU: يُعرض رقم المورّد كي يرى المستخدم
-                                            **لماذا** طابق الصنفُ ما كتبه. */}
+                                            **لماذا** طابق المنتجُ ما كتبه. */}
                                         {item.supplierCodes && (
                                             <span
                                                 className="text-xs ktra-bg-panel dark:ktra-bg-panel px-2 py-1 rounded ktra-text-soft"
-                                                title="رقم الصنف عند المورّد"
+                                                title="رقم المنتج عند المورّد"
                                             >
                                                 מק"ט {item.supplierCodes}
                                             </span>
@@ -233,7 +233,7 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
                     onSaved={(newProduct) => {
                         setShowAddItem(false);
                         // task18 DEF-B2: طبّع Product→Item فيظهر اسمه في السطر،
-                        // وأبلغ الأب ليُضيفه لقائمة الأصناف (يظهر في المنتقي لاحقاً).
+                        // وأبلغ الأب ليُضيفه لقائمة المنتجات (يظهر في المنتقي لاحقاً).
                         const item = productToItem(newProduct);
                         onItemCreated?.(item);
                         onSelectItem(item, undefined);

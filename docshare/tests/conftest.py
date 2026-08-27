@@ -38,7 +38,7 @@ def base_currency(db):
 
 @pytest.fixture
 def env(db, base_currency):
-    """شركة كاملة بفاتورة بيع وعرض سعر — والصنف يحمل تكلفةً سرّية."""
+    """شركة كاملة بفاتورة بيع وعرض سعر — والمنتج يحمل تكلفةً سرّية."""
     owner = User.objects.create_user(username="share-owner", password="x")
     tenant = create_company("شركة المشاركة", owner)
     receivable = Account.objects.create(
@@ -51,7 +51,7 @@ def env(db, base_currency):
     )
     uom = UnitOfMeasure.objects.create(code="PC-SH", name_ar="قطعة", name_en="Piece")
     product = Product.objects.create(
-        tenant=tenant, sku="SH-1", name_ar="صنف المشاركة", name_en="Shared Item",
+        tenant=tenant, sku="SH-1", name_ar="منتج المشاركة", name_en="Shared Item",
         uom=uom, quantity_on_hand=Decimal("100"), avg_cost=SECRET_COST,
     )
     return {

@@ -44,7 +44,7 @@ def test_group_key_groups_same_size_different_brands(env):
     """براندان مختلفان بنفس المقاس ⇒ نفس group_key (يتجمّعان)."""
     p1 = Product.objects.create(tenant=env, sku="T-1", name_ar="185/65/14", brand="روك بيلد")
     p2 = Product.objects.create(tenant=env, sku="T-2", name_ar="185/65/14", brand="جلاكسي")
-    # صنف عادي بلا مقاس ⇒ مفتاحه اسمه
+    # منتج عادي بلا مقاس ⇒ مفتاحه اسمه
     p3 = Product.objects.create(tenant=env, sku="O-1", name_ar="زيت محرك")
     assert product_group_key(p1) == product_group_key(p2) == "185/65/14"
     assert product_group_key(p3) == "زيت محرك"

@@ -31,7 +31,7 @@ class WarehouseTransferTest(TestCase):
         cls.wh_a = Warehouse.objects.create(tenant=cls.tenant, name="مستودع A", code="A")
         cls.wh_b = Warehouse.objects.create(tenant=cls.tenant, name="مستودع B", code="B")
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="TRF-1", name_ar="صنف تحويل",
+            tenant=cls.tenant, sku="TRF-1", name_ar="منتج تحويل",
             quantity_on_hand=Decimal("100"), avg_cost=Decimal("10"),
         )
 
@@ -106,7 +106,7 @@ class StocktakeTest(TestCase):
             tenant=cls.tenant, name="فئة جرد",
             inventory_account=cls.inv_acct, cogs_account=cls.cogs_acct)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="JRD-1", name_ar="صنف جرد", category=cls.cat,
+            tenant=cls.tenant, sku="JRD-1", name_ar="منتج جرد", category=cls.cat,
             quantity_on_hand=Decimal("100"), avg_cost=Decimal("10"))
         FiscalPeriod.objects.create(
             tenant=cls.tenant, name="2026",
@@ -182,15 +182,15 @@ class WarehouseDetailApiTest(APITestCase):
             tenant=cls.foreign_tenant, name="مستودع سري", code="WH-SECRET",
         )
         cls.first_product = Product.objects.create(
-            tenant=cls.tenant, sku="WH-001", name_ar="الصنف الأول",
+            tenant=cls.tenant, sku="WH-001", name_ar="المنتج الأول",
             avg_cost=Decimal("10"),
         )
         cls.second_product = Product.objects.create(
-            tenant=cls.tenant, sku="WH-002", name_ar="الصنف الثاني",
+            tenant=cls.tenant, sku="WH-002", name_ar="المنتج الثاني",
             avg_cost=Decimal("2.5"),
         )
         cls.zero_product = Product.objects.create(
-            tenant=cls.tenant, sku="WH-003", name_ar="صنف رصيده صفر",
+            tenant=cls.tenant, sku="WH-003", name_ar="منتج رصيده صفر",
             avg_cost=Decimal("50"),
         )
         cls.other_warehouse = Warehouse.objects.create(
@@ -295,7 +295,7 @@ class StockValuationActionTest(TestCase):
         cls.tenant = create_company("شركة التقييم", cls.user)
         cls.token = Token.objects.create(user=cls.user)
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="VAL-1", name_ar="صنف التقييم",
+            tenant=cls.tenant, sku="VAL-1", name_ar="منتج التقييم",
             quantity_on_hand=Decimal("7"), avg_cost=Decimal("12"))
         mk = StockMovement.objects.create
         # IN بـ10 ثم IN بـ20 ثم OUT بـ15 ثم ADJUST_IN بـ0 (لا يدخل المتوسط)

@@ -257,7 +257,7 @@ export function SqlDealsPage() {
                                                 <div style={{ overflowX: 'auto' }}>
                                                     <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }} dir="rtl">
                                                         <thead style={{ background: '#1f2937', color: '#fff' }}>
-                                                            <tr>{['الصنف', 'الكمية', 'سعر الوحدة', 'الإجمالي', 'ملاحظات'].map(h => <th key={h} style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #374151' }}>{h}</th>)}</tr>
+                                                            <tr>{['المنتج', 'الكمية', 'سعر الوحدة', 'الإجمالي', 'ملاحظات'].map(h => <th key={h} style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #374151' }}>{h}</th>)}</tr>
                                                         </thead>
                                                         <tbody>
                                                             {(selected.items || []).length === 0 ? <tr><td colSpan={5} style={{ padding: '10px', color: '#9ca3af' }}>لا توجد بنود.</td></tr> :

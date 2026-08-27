@@ -145,13 +145,13 @@ class StoreSlugEndpointTest(APITestCase):
         """ST-3: نفس السيناريو اليدوي، مثبَّتاً — فلا تنكسر السلسلة بصمت.
 
         الشاشة لا تملك نقطة نشر خاصة بها: تفتح المتجر بـ`set-store-slug`،
-        ثم تنشر الصنف بـPATCH على `ProductViewSet` القائم. الحلقة الثالثة —
+        ثم تنشر المنتج بـPATCH على `ProductViewSet` القائم. الحلقة الثالثة —
         أن يظهر عند الزائر — هي التي لا يثبتها أيّ اختبار في الطرفين وحده.
         """
         from inventory.models import Product
 
         product = Product.objects.create(
-            tenant=self.tenant, sku="J-1", name_ar="صنف الرحلة",
+            tenant=self.tenant, sku="J-1", name_ar="منتج الرحلة",
             sale_price="25.00", is_for_sale_online=False)
 
         self.assertEqual(self._post(self.manager, "journey-shop").status_code, 200)

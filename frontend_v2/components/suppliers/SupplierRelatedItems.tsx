@@ -20,7 +20,7 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
           <ArrowRight className="w-6 h-6 ktra-text-soft" />
         </button>
         <div>
-          <h2 className="text-xl font-bold ktra-text-ink dark:text-white">الأصناف الموردة</h2>
+          <h2 className="text-xl font-bold ktra-text-ink dark:text-white">المنتجات الموردة</h2>
           <p className="text-sm ktra-text-soft dark:ktra-text-soft">للمورد: {supplier.tradeName}</p>
         </div>
       </div>
@@ -32,7 +32,7 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
             <tr>
               <th className="px-6 py-4 w-16">#</th>
               <th className="px-6 py-4">الصورة</th>
-              <th className="px-6 py-4">اسم الصنف</th>
+              <th className="px-6 py-4">اسم المنتج</th>
               <th className="px-6 py-4">التصنيف</th>
               <th className="px-6 py-4">إجمالي الكمية</th>
               <th className="px-6 py-4">إجمالي المدفوع</th>
@@ -78,7 +78,7 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
         {data.length === 0 && (
           <div className="text-center py-12 ktra-text-soft">
             <Package className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>لا توجد أصناف مرتبطة بهذا المورد</p>
+            <p>لا توجد منتجات مرتبطة بهذا المورد</p>
           </div>
         )}
       </div>

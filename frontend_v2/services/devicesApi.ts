@@ -161,7 +161,7 @@ export function checkImei(imei: string): Promise<ImeiCheckResult> {
   );
 }
 
-/** اقتراحات الموديل من سجلات الشركة نفسها — بلا أي ربط بأصناف المخزون. */
+/** اقتراحات الموديل من سجلات الشركة نفسها — بلا أي ربط بمنتجات المخزون. */
 export function listDeviceModelNames(): Promise<string[]> {
   return apiGetList<string>(`${BASE}model_names/`, tenantOpts());
 }

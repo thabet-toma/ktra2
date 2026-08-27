@@ -1,13 +1,13 @@
 """T113-1 — «عرضٌ قبل الحفظ»: لا يُخلق أي سجل قبل ضغطة «حفظ».
 
 المالك: التحويل من عرض سعر استيراد إلى صفقة كان يقع بضغطة واحدة — صفقة مؤكَّدة
-ومورد وصنف يُخلقون معاً بلا مراجعة. المعيار الجديد: «تحويل إلى صفقة» يفتح
+ومورد ومنتج يُخلقون معاً بلا مراجعة. المعيار الجديد: «تحويل إلى صفقة» يفتح
 **معاينة** فقط (قراءات لا كتابات)، والصفقة تُولد لحظة الحفظ وحدها، وعندها
 تطالب بعرضها المصدر فتقلبه «محوَّلاً» في المعاملة نفسها.
 
 ما يثبته هذا الملف: المعاينة لا تخلّف أثراً · الحفظ ينشئ صفقة واحدة بالضبط ·
 الحفظ الثاني لنفس العرض يرتد ومعه رقم الصفقة القائمة · حرّاس العزل والنطاق
-والحالة · ولا شريك ولا صنف يُخلق ضمنياً في أي من الخطوتين.
+والحالة · ولا شريك ولا منتج يُخلق ضمنياً في أي من الخطوتين.
 """
 from decimal import Decimal
 
@@ -43,7 +43,7 @@ class DealFromQuotationPreviewTest(APITestCase):
             supplier_scope=Partner.SUPPLIER_SCOPE_INTERNATIONAL,
         )
         cls.product = Product.objects.create(
-            tenant=cls.tenant, sku='PRV-1', name_ar='صنف مسجَّل',
+            tenant=cls.tenant, sku='PRV-1', name_ar='منتج مسجَّل',
         )
 
     def setUp(self):
@@ -67,7 +67,7 @@ class DealFromQuotationPreviewTest(APITestCase):
             'is_shipping_included': False,
             'lines': [{
                 'seq': 1,
-                'name_snapshot': 'صنف مكتوب في رسالة',
+                'name_snapshot': 'منتج مكتوب في رسالة',
                 'quantity': '2.500',
                 'unit_price': '10.0000',
             }],
@@ -84,7 +84,7 @@ class DealFromQuotationPreviewTest(APITestCase):
         return response.data
 
     def deal_payload(self, quotation_id, **overrides):
-        """ما يرسله المحرّر عند «حفظ»: مورد وأصناف **محلولة** + العرض المصدر."""
+        """ما يرسله المحرّر عند «حفظ»: مورد ومنتجات **محلولة** + العرض المصدر."""
         payload = {
             'source_quotation': quotation_id,
             'partner': self.supplier.id,
@@ -99,7 +99,7 @@ class DealFromQuotationPreviewTest(APITestCase):
                 'seq': 1,
                 'quantity': '2.500',
                 'unit_price': '10.0000',
-                'name_snapshot': 'صنف مكتوب في رسالة',
+                'name_snapshot': 'منتج مكتوب في رسالة',
             }],
         }
         payload.update(overrides)
@@ -255,12 +255,12 @@ class DealFromQuotationPreviewTest(APITestCase):
         )
 
     def test_other_tenant_partner_or_product_is_rejected(self):
-        """نفس الواجهة كانت تقبل شريكاً وصنفاً من شركة أخرى بلا فحص (THA-307)."""
+        """نفس الواجهة كانت تقبل شريكاً ومنتجاً من شركة أخرى بلا فحص (THA-307)."""
         other_supplier = Partner.objects.create(
             tenant=self.other_tenant, name='مصنع شركة أخرى', partner_type='Supplier',
         )
         other_product = Product.objects.create(
-            tenant=self.other_tenant, sku='PRV-OTHER-1', name_ar='صنف شركة أخرى',
+            tenant=self.other_tenant, sku='PRV-OTHER-1', name_ar='منتج شركة أخرى',
         )
         quotation = self.create_quotation()
 

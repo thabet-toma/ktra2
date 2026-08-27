@@ -38,7 +38,7 @@ export function formatProductPrimaryName(p: SalesProductPickerItem & { display_n
   if (ar) return ar;
   if (en) return en;
   if (n) return n;
-  return p.sku || `صنف #${p.id}`;
+  return p.sku || `منتج #${p.id}`;
 }
 
 function formatProductMeta(p: SalesProductPickerItem): string {
@@ -130,7 +130,7 @@ export const SalesProductPickerModal: React.FC<Props> = ({
           <div>
             <h3 className="text-lg font-bold ktra-text-ink dark:text-white flex items-center gap-2">
               <Package className="w-5 h-5 ktra-text-soft" />
-              اختيار الصنف
+              اختيار المنتج
             </h3>
             <p className="text-xs ktra-text-soft dark:ktra-text-soft mt-1">
               ابحث بالاسم أو SKU أو الباركود، واستخدم الأسهم والـ Enter أو اضغط على البطاقة.
@@ -164,7 +164,7 @@ export const SalesProductPickerModal: React.FC<Props> = ({
               onClick={() => setShowAddModal(true)}
               className="flex items-center gap-1 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors whitespace-nowrap"
             >
-              <Plus className="w-4 h-4" /> إضافة صنف
+              <Plus className="w-4 h-4" /> إضافة منتج
             </button>
           </div>
         </div>
@@ -225,7 +225,7 @@ export const SalesProductPickerModal: React.FC<Props> = ({
           )}
           {products.length > 400 && searchTerm.trim() === "" && (
             <p className="text-center text-xs ktra-text-ink dark:ktra-text-soft py-2">
-              يُعرض أول 400 صنف — استخدم البحث لضيق النتائج.
+              يُعرض أول 400 منتج — استخدم البحث لضيق النتائج.
             </p>
           )}
         </div>

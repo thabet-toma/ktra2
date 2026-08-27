@@ -39,7 +39,7 @@ def _rates(**overrides):
     """يشدّ المعدّلات مؤقتاً — بـpatch على `THROTTLE_RATES` لا بـ`override_settings`.
 
     `SimpleRateThrottle.THROTTLE_RATES = api_settings.DEFAULT_THROTTLE_RATES`
-    سمة صنف تُقيَّم مرة واحدة عند استيراد `rest_framework.throttling`، فتعديل
+    سمة منتج تُقيَّم مرة واحدة عند استيراد `rest_framework.throttling`، فتعديل
     `settings.REST_FRAMEWORK` بعد الإقلاع لا يصلها (حتى مع `api_settings.reload()`
     الذي يمسح الكاش الداخلي وحده). القيم الإنتاجية تُقرأ من الإعدادات عند
     الإقلاع كالمعتاد — هذا قيد اختبارٍ لا قيد تشغيل.

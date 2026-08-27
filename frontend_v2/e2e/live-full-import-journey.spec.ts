@@ -66,7 +66,7 @@ async function createDeal(page: Page, supplier: string, description: string, pro
   await page.getByPlaceholder("مثال: طلبية ألواح شمسية").fill(description);
   await page.getByRole("button", { name: "التالي" }).click();
 
-  const productInput = page.getByPlaceholder("اكتب أو اختر صنفاً").first();
+  const productInput = page.getByPlaceholder("اكتب أو اختر منتجاً").first();
   const itemRow = productInput.locator("xpath=..");
   await productInput.fill(product);
   const numberInputs = itemRow.locator('input[type="number"]');
