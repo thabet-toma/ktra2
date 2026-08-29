@@ -69,6 +69,7 @@ import { accountMatchesPurpose } from "../../utils/accountTree";
 import { entityPathForReference } from "../../utils/entityLinks";
 import { DeliverGoodsModal } from "./DeliverGoodsModal";
 import { clientLogger } from "../../services/logger";
+import { useToast } from "../../contexts/ToastContext";
 import { apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { invoiceActionPermissions } from "../../utils/viewPermissions";
@@ -494,6 +495,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   /** T-PAYFULL4: سببُ الرفض يسكن أعلى المستند، والزرّ الذي أطلقه في الشريط —
       فمن ضغط وهو منزلقٌ إلى أسفل الفاتورة كان يرى «لم يحدث شيء». */
   const bannerRef = useRef<HTMLDivElement | null>(null);
+  /** T-PAYFULL5: رسالةٌ عائمة فوق كل شيء — الشريط وحده يضيع تحت الطيّة. */
+  const toast = useToast();
   const collectCashInputRef = useRef<HTMLInputElement | null>(null);
   // P3-2-b wiring: offline status + stale-data confirm for line additions.
   const { online: networkOnline } = useOnlineStatus();
@@ -2768,85 +2771,99 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
    * تتجسّد سنداً عند الترحيل، فالاحتساب بالخام يسجّلها مرّتين.
    */
   const fillCollectFull = async () => {
-    if (customerId === "") {
-      setLocalErr("اختر العميل أولاً.");
-      return;
-    }
-    /* المرحّلة: لا وجود لدفعةٍ «غير مرحّلة» عليها — سندٌ أو لا شيء. */
-    if (isPosted) {
-      if (settlement.remaining <= 0.009) {
-        setMsg("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.");
+    /* T-PAYFULL5 — كل مخرجٍ من هذه الدالّة يُسمَع.
+     *
+     * كانت رسائلها تذهب إلى شريطٍ في **رأس** المستند والزرّ في الشريط
+     * **أعلى الشاشة**، فمن ضغط وهو منزلقٌ إلى أسفل الفاتورة لم يرَ شيئاً —
+     * لا نجاحاً ولا رفضاً — وقرأها «الزرّ لا يعمل». والأسوأ: الدالّة غير
+     * متزامنة ومُعالِج النقرة بلا مصيدة، فأيّ استثناء يصير «رفضاً غير
+     * معالَج» في الطرفية وحدها: صمتٌ تامّ. الآن كلاهما مُغطّى.
+     */
+    const say = (text: string, kind: "info" | "error" = "info") => {
+      if (kind === "error") setLocalErr(text); else setMsg(text);
+      toast(text, kind === "error" ? "error" : "info");
+    };
+    clientLogger.info("sales_invoice.pay_full_clicked", {
+      draftId, isPosted, base: collectBase,
+    });
+    try {
+      if (customerId === "") { say("اختر العميل أولاً.", "error"); return; }
+
+      /* المرحّلة: لا وجود لدفعةٍ «غير مرحّلة» عليها — سندٌ أو لا شيء. */
+      if (isPosted) {
+        if (settlement.remaining <= 0.009) {
+          say("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.");
+          return;
+        }
+        setLocalErr(null);
+        setCollectCash(settlement.remaining.toFixed(2));
+        collectPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        collectCashInputRef.current?.focus();
+        say(`عُبِّئ المتبقّي ${formatMoney(settlement.remaining)} — اضغط «تسجيل دفعة» لتنفيذها.`);
+        return;
+      }
+      if (collectBase <= 0.009) {
+        say("لا مبلغ بعد — أضف بنود الفاتورة ثم اضغط «مدفوعة».");
+        return;
+      }
+
+      /* T-PAYFULL4 — المبلغ يُشتقّ من **رقم الخادم** بعد الحفظ، لا من رقم
+       * الشاشة: `attach_payment_voucher` يرفض نيّةً تتجاوز الإجمالي المخزَّن
+       * (يعيد حسابه من البنود)، فيكفي فارقُ قرشٍ ليردّ الطلب. */
+      const saved = await handleSaveDraft();
+      if (!saved) return; // `handleSaveDraft` عرض السبب في الشريط
+      if (saved.posted) {
+        say("رُحِّلت الفاتورة عند الحفظ — استعمل «تسجيل دفعة» لإخراج سند القبض.");
+        focusCollectPanel();
+        return;
+      }
+      const d = saved.detail;
+      const grand = Number(d.grand_total || 0);
+      const paidNow = Number((d as { amount_paid?: number | string }).amount_paid ?? 0);
+      /* الشيكات المرفقة تبقى كما هي، والنقد يغطّي ما تبقّى — والكتابة بدلالة
+         الاستبدال، فالضغطة الثانية تُنتج الرقم نفسه ولا تُضاعف شيئاً. */
+      const draftCheques = (d.cheques || []).filter((c) => c.status === "Draft");
+      const chequesTotal = draftCheques.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+      const target = Math.max(grand - paidNow - chequesTotal, 0);
+      if (target <= 0.009) {
+        say("الفاتورة مغطّاة بالكامل — لا متبقٍّ.");
+        return;
+      }
+      if (Math.abs(target - Number(d.attached_cash_amount || 0)) <= 0.009) {
+        say("المسودة عليها دفعة تغطّي إجماليها — لا متبقٍّ.");
+        return;
+      }
+      const cashAccount = collectCashAccountId !== ""
+        ? Number(collectCashAccountId)
+        : (d.attached_cash_account ?? null);
+      if (!cashAccount) {
+        say("لا صندوق افتراضي — اختر حساب الصندوق أو البنك في لوحة التحصيل.", "error");
+        focusCollectPanel();
         return;
       }
       setLocalErr(null);
-      setCollectCash(settlement.remaining.toFixed(2));
-      collectPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      collectCashInputRef.current?.focus();
-      setMsg(
-        `عُبِّئ المتبقّي ${formatMoney(settlement.remaining)} — اضغط «تسجيل دفعة» لتنفيذها.`,
+      const ok = await writeIntent(
+        {
+          cash: target,
+          cashAccountId: cashAccount,
+          cheques: draftCheques.map((c) => ({
+            cheque_number: c.cheque_number,
+            amount: Number(c.amount).toFixed(2),
+            due_date: c.due_date || null,
+            bank_name: c.bank_name || "",
+          })),
+        },
+        `سُجِّلت دفعة ${formatMoney(target)} غير مرحّلة — تتحوّل إلى سند قبض عند ترحيل الفاتورة.`,
       );
-      return;
+      if (!ok) return; // `writeIntent` قال السبب في الشريط وفي رسالةٍ عائمة
+      toast(`سُجِّلت دفعة ${formatMoney(target)} غير مرحّلة.`, "success");
+      /* والدليل حيث ينظر المستخدم: صفُّ الدفعة في جدول دفعات المستند. */
+      paymentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (e) {
+      const m = humanizeThrown(e, "تعذّر تسجيل الدفعة");
+      clientLogger.error("sales_invoice.pay_full_failed", { message: m });
+      say(m, "error");
     }
-    if (collectBase <= 0.009) {
-      setMsg("لا مبلغ بعد — أضف بنود الفاتورة ثم اضغط «مدفوعة».");
-      return;
-    }
-
-    /* T-PAYFULL4 — المبلغ يُشتقّ من **رقم الخادم** بعد الحفظ، لا من رقم الشاشة.
-     *
-     * `attach_payment_voucher` يرفض نيّةً تتجاوز إجمالي الفاتورة **المخزَّن**
-     * (يعيد حسابه بنفسه من البنود). فكان يكفي فارقُ قرشٍ بين حسبة الشاشة
-     * وحسبة الخادم — خصمُ سطرٍ، تقريبُ ضريبة، سطرٌ لم يصل — ليردّ الطلب
-     * ويبدو الزرّ كأنه لم يعمل. الحفظ يسبق، ثم نبني على ما أعاده هو.
-     */
-    const saved = await handleSaveDraft();
-    if (!saved) return; // `handleSaveDraft` عرض السبب في الشريط
-    if (saved.posted) {
-      // رُحِّلت تلقائياً عند الحفظ (إعداد الشركة) ⇒ لا نيّة بعد الترحيل.
-      setMsg("رُحِّلت الفاتورة عند الحفظ — استعمل «تسجيل دفعة» لإخراج سند القبض.");
-      focusCollectPanel();
-      return;
-    }
-    const d = saved.detail;
-    const grand = Number(d.grand_total || 0);
-    const paidNow = Number((d as { amount_paid?: number | string }).amount_paid ?? 0);
-    /* الشيكات المرفقة تبقى كما هي، والنقد يغطّي ما تبقّى — والكتابة بدلالة
-       الاستبدال، فالضغطة الثانية تُنتج الرقم نفسه ولا تُضاعف شيئاً. */
-    const draftCheques = (d.cheques || []).filter((c) => c.status === "Draft");
-    const chequesTotal = draftCheques.reduce((sum, c) => sum + Number(c.amount || 0), 0);
-    const target = Math.max(grand - paidNow - chequesTotal, 0);
-    if (target <= 0.009) {
-      setMsg("الفاتورة مغطّاة بالكامل — لا متبقٍّ.");
-      return;
-    }
-    if (Math.abs(target - Number(d.attached_cash_amount || 0)) <= 0.009) {
-      setMsg("المسودة عليها دفعة تغطّي إجماليها — لا متبقٍّ.");
-      return;
-    }
-    const cashAccount = collectCashAccountId !== ""
-      ? Number(collectCashAccountId)
-      : (d.attached_cash_account ?? null);
-    if (!cashAccount) {
-      setLocalErr("لا صندوق افتراضي — اختر حساب الصندوق أو البنك في لوحة التحصيل.");
-      focusCollectPanel();
-      return;
-    }
-    setLocalErr(null);
-    await writeIntent(
-      {
-        cash: target,
-        cashAccountId: cashAccount,
-        cheques: draftCheques.map((c) => ({
-          cheque_number: c.cheque_number,
-          amount: Number(c.amount).toFixed(2),
-          due_date: c.due_date || null,
-          bank_name: c.bank_name || "",
-        })),
-      },
-      `سُجِّلت دفعة ${formatMoney(target)} غير مرحّلة — تتحوّل إلى سند قبض عند ترحيل الفاتورة.`,
-    );
-    /* والدليل حيث ينظر المستخدم: صفُّ الدفعة في جدول دفعات المستند. */
-    paymentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
   /* T-PAYFULL: الوصول من زرّ «مدفوعة» في قائمة المبيعات — مرّةً واحدة بحارس
@@ -2915,7 +2932,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       onInvoiceSaved();
       return true;
     } catch (e) {
-      setLocalErr(humanizeThrown(e, "تعذّر حفظ الدفعة على المسودة"));
+      const m = humanizeThrown(e, "تعذّر حفظ الدفعة على المسودة");
+      setLocalErr(m);
+      toast(m, "error");
       return false;
     } finally {
       setCollecting(false);

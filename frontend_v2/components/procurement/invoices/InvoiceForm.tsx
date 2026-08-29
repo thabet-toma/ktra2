@@ -2502,6 +2502,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
    * تعبئةً والتنفيذ بـ«تسجيل دفعة».
    */
   const fillPayFull = async () => {
+   /* T-PAYFULL5: مُعالِج نقرةٍ غير متزامن بلا مصيدة = فشلٌ صامت — الاستثناء
+      يصير «رفضاً غير معالَج» في الطرفية ولا يرى المستخدم شيئاً. */
+   try {
+    clientLogger.info("purchase_invoice.pay_full_clicked", {
+      invoiceId: formData.id, isPosted, base: payableTotal,
+    });
     if (!formData.supplierId) { toast("اختر المورد أولاً.", "error"); return; }
 
     /* المرحّلة: لا وجود لدفعةٍ «غير مرحّلة» عليها أصلاً — ما بعد الترحيل سندٌ
@@ -2569,6 +2575,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     );
     /* والدليل حيث ينظر المستخدم: صفُّ الدفعة في جدول دفعات المستند. */
     paymentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+   } catch (e) {
+    const m = humanizeThrown(e, "تعذّر تسجيل الدفعة");
+    clientLogger.error("purchase_invoice.pay_full_failed", { message: m });
+    toast(m, "error");
+   }
   };
 
   /* T-PAYFULL: الوصول من زرّ «مدفوعة» في قائمة الفواتير. مرّةً واحدة وبحارس
