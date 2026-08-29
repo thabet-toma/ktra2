@@ -115,6 +115,21 @@
 > السلّم الواجهيّ الآن في `frontend_v2/utils/cashBox.ts`
 > (`pickDefaultCashAccount`)، وترتيبُ الشجرة ليس نيّةَ مستخدم.
 
+> **وشبكة الأمان الأخيرة لا ترى حسابات الأطراف.** بعد سلسلة الأكواد تقرأ الخطوة
+> الأخيرة **اسمَ** الحساب (`صندوق`/`نقد`/`بنك`)، والاسم ليس ملكاً للشركة وحدها:
+> `accounting/api.py` (`sync_partner_accounting`) يسمّي حساب الطرف باسم صاحبه
+> ويعيد تسميته معه، فزبونٌ اسمه «محمد نقدي» يمنح حساب ذممه اسماً يطابق «نقد»
+> حرفاً بحرف — فيصير حسابُه صندوقَ الشركة: قيدٌ يدين ويدائن الطرف نفسه، أو
+> يُدائن ذمم زبونٍ كأنها نقد، **بلا رسالة خطأ**. تُستبعد حسابات الأطراف الآن
+> قبل قراءة الاسم بـ`accounting/services.py` (`_without_partner_accounts`):
+> الرابط الموثوق (`Partner.linked_account`) والتصنيف المخزَّن (`sub_type` في
+> `receivable`/`payable`) معاً — الرابط يمسك المربوط اليوم، والتصنيف يمسك حساب
+> ذممٍ فقد رابطه أو لم يُربط بعد. وهي **دالّة لا سطر مكرَّر** لأن للقاعدة
+> مستعملاً ثانياً في مسار العرض: `core/reports/treasury.py` (`_cash_movements`)
+> كان يعدّ ذمّة زبونٍ اسمه «صندوق التوفير» حركةَ خزينة. ولم تُلغَ الشبكة — حسابٌ
+> نقديٌّ لا يخصّ طرفاً يبقى مقبولاً، وشركةٌ لا تملك إلا حساب ذمم تقع على
+> **الخطأ الإرشادي** لا على مالٍ خاطئ صامت.
+
 > **والمرفق يغلب الرأس**: `sales/services/flow.py`
 > (`_resolve_settlement_cash_account_id`) و`logistics/services.py`
 > (`settle_attached_purchase_intent`) تقرآن `attached_cash_account` **قبل**
@@ -236,7 +251,7 @@ def partner_posted_balance(tenant_id: int, partner_id: int) -> tuple[Decimal, De
 def attach_partner_posted_balance(rows, partner_id_field: str, *, supplier: bool, attr: str):  # أرصدة صفحة محمَّلة باستعلام واحد (للقوائم)
 def annotate_partner_posted_balance(queryset, partner_id_field: str, *, supplier: bool, alias: str):  # للصف الواحد/الفلترة فقط — لا للقوائم
 def resolve_import_expense_account(tenant_id: int, name: str):  # حساب مصروف استيراد تحت البند «53» أو يُنشئه
-def resolve_cash_account(tenant_id: int, *, explicit_account_id=None, user=None, currency_code: str | None = None, required: bool = True):  # السلّم الوحيد لحساب الصندوق/البنك — صريح ← افتراضي المستخدم ← افتراضي الشركة ← الإعدادات ← الشجرة ← خطأ إرشادي
+def resolve_cash_account(tenant_id: int, *, explicit_account_id=None, user=None, currency_code: str | None = None, required: bool = True):  # السلّم الوحيد لحساب الصندوق/البنك — صريح ← افتراضي المستخدم ← افتراضي الشركة ← الإعدادات ← الشجرة ← خطأ إرشادي؛ وشبكةُ الاسم الأخيرة لا تلتقط حساب طرف
 def resolve_default_cash_account(tenant_id: int):  # غلافٌ متوافق فوقها يُعيد None بدل الاستثناء
 def create_cash_box(*, tenant, name, currency_code="ILS", is_default=False, external_id=None, notes=None, user=None):  # الصندوق + حسابه تحت «1110» + وثيقة مرآته، ذرّياً
 def update_cash_box(box, *, name=None, is_active=None, notes=None, currency_code=None, user=None):  # الاسم يزامن الشجرة والمرآة؛ عملة صندوقٍ له طبقات FIFO مرفوضة
@@ -312,7 +327,9 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 - **لا تُقفل مطابقة بنكية بفرق ≥ 0.01** (`accounting/services.py` (`close_bank_reconciliation`))، وكل `JournalLine` تُطابَق مرة واحدة (`accounting/models.py` (`BankReconciliationLine`)).
 - **الفترة المُقفَلة لا تتغيّر إلا عبر `reopen/` بسبب مسجَّل** — `FiscalPeriodViewSet.perform_update`/`perform_destroy` (`accounting/views.py`) يرفضان أي تعديل أو حذف عليها، ويمنعان حذف فترة في مداها قيد مرحّل (تاريخٌ بلا فترة تغطّيه يشلّ الترحيل وإلغاءه معاً)، وكل تعديل أو حذف ناجح يُكتب في سجل التدقيق.
 - **حساب صندوق الدفع يُحلّ من `resolve_cash_account` وحدها** — لا «أوّل حساب
-  نقدي» في خادمٍ ولا واجهة، ولا محلّ ثانٍ. و`attached_cash_account` يغلب
+  نقدي» في خادمٍ ولا واجهة، ولا محلّ ثانٍ. و**حساب طرفٍ لا يُنتقى صندوقاً أبداً**:
+  شبكة الأمان الأخيرة (المطابقة بالاسم) تستبعد المربوط بـ`Partner.linked_account`
+  والمصنَّف `receivable`/`payable` قبل أن تقرأ الاسم. و`attached_cash_account` يغلب
   `cash_or_bank_account` في مسارَي البيع والشراء (`_resolve_settlement_cash_account_id`
   و`settle_attached_purchase_intent`): الأول اختيار المستخدم والثاني تعبئة تلقائية.
 - **الصندوق يُنشأ بـ`create_cash_box` وحدها** — نداءٌ واحد يكتب الحساب والربط

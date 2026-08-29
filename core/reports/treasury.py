@@ -134,21 +134,38 @@ register(ReportSpec(
 def _cash_movements(tenant_id: int, params: dict) -> list[dict]:
     """حركة الصناديق والبنوك من أسطر القيود المرحّلة على حسابات النقدية."""
     from accounting.models import Account, JournalLine
+    from accounting.services import _without_partner_accounts
 
-    cash_accounts = Account.objects.filter(
-        tenant_id=tenant_id, account_type="Asset",
-    ).filter(
+    # فرعان لا فرعٌ واحد: السلالة المعيارية **تعريفٌ** لا تخمين، والاسم تخمينٌ
+    # وحده — فحسابات الأطراف تُستبعد من الفرع الثاني وحده. `accounting/api.py`
+    # (`sync_partner_accounting`) يسمّي حساب الطرف باسم صاحبه، فزبونٌ اسمه
+    # «صندوق التوفير» كانت ذمّته تُعرَض حركةً في الخزينة: تقريرٌ يُظهر ديناً على
+    # زبون نقداً في الصندوق. لا قيد يُكتب هنا — لكن القرار يُقرأ من هنا.
+    #
+    # ولا `is_active=True` عمداً، بخلاف `accounting/services.py`
+    # (`resolve_cash_account`): ذاك يختار **أين يذهب مالٌ جديد** فالمعطَّل ممنوع،
+    # وهذا يعرض **ما جرى فعلاً** فصندوقٌ عُطّل الشهر الماضي حركتُه حقيقيةٌ
+    # مرحّلة، وإخفاؤها يجعل التقرير لا يطابق الأستاذ بلا أن يقول لماذا.
+    base = Account.objects.filter(tenant_id=tenant_id, account_type="Asset")
+    by_lineage = base.filter(
         Q(code__startswith="1101") | Q(code__startswith="1102")
-        | Q(code__startswith="1110") | Q(name__icontains="صندوق")
-        | Q(name__icontains="بنك"),
+        | Q(code__startswith="1110"),
+    )
+    by_name = _without_partner_accounts(
+        base.filter(Q(name__icontains="صندوق") | Q(name__icontains="بنك")),
+        tenant_id,
+    )
+    account_ids = (
+        set(by_lineage.values_list("id", flat=True))
+        | set(by_name.values_list("id", flat=True))
     )
     account = _int_param(params, "account")
     if account:
-        cash_accounts = cash_accounts.filter(pk=account)
+        account_ids &= {account}
 
     qs = JournalLine.objects.filter(
         tenant_id=tenant_id, journal__is_posted=True,
-        account_id__in=list(cash_accounts.values_list("id", flat=True)),
+        account_id__in=account_ids,
     ).select_related("journal", "account", "partner")
     qs = _apply_dates(qs, "journal__transaction_date", params)
 

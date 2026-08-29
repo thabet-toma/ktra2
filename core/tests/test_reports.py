@@ -479,3 +479,75 @@ class DynamicColumnsTest(APITestCase):
     def test_payload_names_who_generated_it(self):
         res = self._run(days=1)
         self.assertEqual(res.data["generated_by"], "dyn")
+
+
+class TreasuryReportExcludesPartnerAccountsTest(APITestCase):
+    """تقرير «حركة الصناديق والبنوك» كان يعدّ ذمم الزبائن نقداً.
+
+    `_cash_movements` يختار حسابات النقدية بأكواد الشجرة **أو بالاسم**
+    (`صندوق`/`بنك`) على كل أصول الشركة، و`accounting/api.py`
+    (`sync_partner_accounting`) يسمّي حساب الطرف باسم صاحبه: فزبونٌ اسمه «صندوق
+    التوفير» يصنع تحت 1103 حساب ذممٍ يطابق التخمين حرفاً بحرف، فتُدرَج حركته
+    الدائنة/المدينة في الخزينة — تقريرٌ يقول إن في الصندوق مالاً هو في الحقيقة
+    دَينٌ على زبون.
+
+    عرضٌ لا مال: لا قيد يُكتب هنا. لكن التقرير هو ما يُقرأ منه القرار.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="treas", password="x")
+        cls.currency, _ = Currency.objects.get_or_create(
+            Code="TRS", defaults={"Name": "Treasury", "Symbol": "T"})
+        cls.tenant = create_company("شركة الخزينة", cls.user)
+        create_fiscal_year(cls.tenant, 2026)
+        # زبونٌ اسمه يطابق مرشّح الاسم — والحساب يُنشئه `sync_partner_accounting`
+        # تحت «1103 المدينون التجاريون» باسم صاحبه.
+        cls.customer = Partner.objects.create(
+            tenant=cls.tenant, name="صندوق التوفير", partner_type="Customer")
+        cls.customer.refresh_from_db()
+        cls.ar_account = cls.customer.linked_account
+        cls.cash_account = Account.objects.filter(
+            tenant=cls.tenant, code__startswith="1101").first()
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+
+    def _post_line(self, account, debit, credit, *, partner=None):
+        journal = JournalHeader.objects.create(
+            tenant=self.tenant, transaction_date="2026-06-10", description="حركة",
+            is_posted=True, currency=self.currency, exchange_rate=Decimal("1"),
+        )
+        return JournalLine.objects.create(
+            tenant=self.tenant, journal=journal, account=account,
+            debit=debit, credit=credit, base_debit=debit, base_credit=credit,
+            partner=partner, description="حركة",
+        )
+
+    def _rows(self):
+        res = self.client.get(
+            "/api/reports/cash-bank-movements/",
+            {"from": "2026-01-01", "to": "2026-12-31"},
+            HTTP_X_TENANT_ID=str(self.tenant.pk),
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        return res.data["rows"]
+
+    def test_partner_receivable_movement_is_not_a_cash_movement(self):
+        self.assertIsNotNone(self.ar_account)
+        self.assertIn("صندوق", self.ar_account.name)
+        self._post_line(self.ar_account, Decimal("500"), Decimal("0"),
+                        partner=self.customer)
+        accounts = [r["account"] for r in self._rows()]
+        self.assertEqual(
+            [a for a in accounts if str(self.ar_account.code) in a], [],
+            f"حساب ذمم الزبون ظهر في الخزينة: {accounts}",
+        )
+
+    def test_a_real_cash_movement_is_still_listed(self):
+        """الحارس لا يُفرغ التقرير: حركة صندوقٍ حقيقي تبقى معروضة."""
+        self.assertIsNotNone(self.cash_account)
+        self._post_line(self.cash_account, Decimal("300"), Decimal("0"))
+        accounts = [r["account"] for r in self._rows()]
+        self.assertTrue(
+            any(str(self.cash_account.code) in a for a in accounts), accounts)

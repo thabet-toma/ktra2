@@ -19,6 +19,8 @@ from accounting.services import (
     resolve_default_cash_account, set_default_cash_box, update_cash_box,
 )
 from accounting.services import create_fiscal_year
+from partners.models import Partner
+from tenants.models import Tenant, UserCompanyMembership
 from tenants.services import create_company
 
 D = lambda v: Decimal(str(v))
@@ -283,3 +285,42 @@ class CashCountTest(APITestCase):
         self.assertIsNone(count.journal_id)
         self.assertEqual(count.status, CashCount.STATUS_POSTED)
 
+
+class CashResolverNeverPicksPartnerAccountTest(APITestCase):
+    """آخر شبكة أمان في السلّم كانت تلتقط حساب ذمم طرفٍ اسمه يحمل «نقد».
+
+    `accounting/api.py` (`sync_partner_accounting`) يسمّي حساب الطرف باسم صاحبه
+    ويعيد تسميته معه، فزبونٌ اسمه «محمد نقدي» يصير له حساب ذمم يطابق
+    `name__icontains="نقد"` حرفاً بحرف. وشركةٌ بلا صناديق مسجَّلة وبلا صندوق في
+    إعدادات المبيعات/الشراء وبلا كودٍ من `DEFAULT_CASH_ACCOUNT_CODES` تسقط على
+    تلك الشبكة، فتُسوّى فاتورتها النقدية على حساب الزبون نفسه: قيدٌ يدين ويدائن
+    الطرف ذاته، أو يُدائن ذمم زبونٍ آخر كأنها صندوق. مالٌ خاطئ بلا رسالة خطأ.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="prt", password="x", email="p@x.co")
+        # شركةٌ عارية عمداً: لا شجرة معيارية ولا صناديق ولا إعدادات — الشروط
+        # الثلاثة التي تُنزل السلّم إلى شبكته الأخيرة.
+        cls.tenant = Tenant.objects.create(TenantID=947, CompanyName="شركة بلا صندوق")
+        UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant, role="manager")
+        cls.ar = Account.objects.create(
+            tenant=cls.tenant, code="1130", name="محمد نقدي",
+            account_type="Asset", is_active=True)
+        cls.partner = Partner.objects.create(
+            tenant=cls.tenant, name="محمد نقدي", partner_type="Customer",
+            linked_account=cls.ar)
+
+    def test_partner_receivable_account_is_never_returned_as_cash(self):
+        self.partner.refresh_from_db()
+        self.assertEqual(self.partner.linked_account_id, self.ar.pk)
+        with self.assertRaises(ValidationError):
+            resolve_cash_account(self.tenant.pk)
+        self.assertIsNone(resolve_default_cash_account(self.tenant.pk))
+
+    def test_a_real_cash_named_account_is_still_the_safety_net(self):
+        """الحارس لا يُلغي الشبكة: حسابٌ نقديٌّ لا يخصّ طرفاً يبقى مقبولاً."""
+        box = Account.objects.create(
+            tenant=self.tenant, code="1301", name="صندوق الفرع",
+            account_type="Asset", is_active=True)
+        self.assertEqual(resolve_cash_account(self.tenant.pk).pk, box.pk)

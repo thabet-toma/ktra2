@@ -1232,6 +1232,35 @@ def allowed_movement_options(cheque, *, has_active_bank_accounts=None) -> list:
 DEFAULT_CASH_ACCOUNT_CODES = ("1101", "1102", "1110")
 
 
+def _without_partner_accounts(qs, tenant_id: int):
+    """يُسقط حسابات الأطراف من مرشّحي الصندوق — الذمّة ليست نقداً.
+
+    المطابقة بالاسم (`صندوق`/`نقد`/`بنك`) هي الخطوة الوحيدة التي **تخمّن**،
+    والاسم ليس ملكاً للشركة وحدها: `accounting/api.py` (`sync_partner_accounting`)
+    يسمّي حساب الطرف باسم صاحبه ويعيد تسميته معه. فزبونٌ اسمه «صندوق التوفير»
+    أو مورّدٌ اسمه «بنك فلسطين» يصنع في الشجرة حساباً يطابق التخمين حرفاً بحرف.
+    اختيارهُ صندوقاً يُنتج قيداً يدين ويدائن الحساب نفسه — **متوازناً**، فلا
+    ميزانٌ ولا مطابقةٌ تكشفه: مالٌ خاطئ صامت.
+
+    الاستبعاد بمصدرَين لأن أيّاً منهما وحده يثقب: التصنيف المخزَّن (`sub_type`)
+    يفوت شجرةً قديمةً لم تُصنَّف، ورابط الطرف يفوت حساباً قُطع رابطه وبقي في
+    الشجرة باسم صاحبه.
+
+    دالّةٌ لا سطرٌ مكرَّر لأن لها مستعملَين: هذا السلّم (مسار المال) و
+    `core/reports/treasury.py` (`_cash_movements`) (مسار العرض). ونسختان من
+    قاعدةٍ واحدة تفترقان عند أول تعديل يُنسى في إحداهما.
+    """
+    from .account_classification import SUB_TYPE_PAYABLE, SUB_TYPE_RECEIVABLE
+
+    return qs.exclude(
+        sub_type__in=(SUB_TYPE_RECEIVABLE, SUB_TYPE_PAYABLE),
+    ).exclude(
+        id__in=Partner.objects.filter(
+            tenant_id=tenant_id, linked_account_id__isnull=False,
+        ).values("linked_account_id"),
+    )
+
+
 def _default_cash_box_link(tenant_id: int, *, currency_code: str | None = None):
     """صندوق الشركة الافتراضي: المُعلَن `is_default` ← مطابق العملة ← أوّل نشط."""
     from .models import CashBoxLedgerAccount
@@ -1318,8 +1347,11 @@ def resolve_cash_account(tenant_id: int, *, explicit_account_id=None, user=None,
         hit = base.filter(code=code).first()
         if hit:
             return hit
+    # الشبكة الأخيرة تقرأ الاسم — ولا تُقرأ أسماء الأطراف معها
+    # (`_without_partner_accounts`).
     fallback = (
-        base.filter(
+        _without_partner_accounts(base, tenant_id)
+        .filter(
             Q(name__icontains="صندوق") | Q(name__icontains="نقد") | Q(name__icontains="بنك")
         )
         .order_by("code")
