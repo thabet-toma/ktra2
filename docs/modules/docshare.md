@@ -63,7 +63,7 @@
 | `sales_order` | الزبون | `confirm_sales_order` — تأكيدٌ **وحجزُ كمية** | **لا شيء في المستند** |
 | `purchase_order` | المورّد | `confirm_purchase_order` — تأكيد | **لا شيء في المستند** |
 
-**والقاعدة تعيش في خدمة واحدة يستدعيها الطرفان.** شروطُ تأكيد أمر الشراء كانت محبوسةً **داخل `PurchaseOrderViewSet.confirm`**، و`.importlinter` يمنع `docshare` من استيراد `logistics.views` — فكان البديل نسخَها (قاعدتان تنحرفان عند أول تعديل). استُخرجت إلى `logistics/services.py` (`confirm_purchase_order`)، ويحرس ذلك `docshare/tests/test_order_decisions.py` (`test_confirm_rule_lives_in_one_place_for_both_callers`) بقراءة مصدر الـview.
+**والقاعدة تعيش في خدمة واحدة يستدعيها الطرفان.** شروطُ تأكيد أمر الشراء كانت محبوسةً **داخل `PurchaseOrderViewSet.confirm`**، و`.importlinter` يمنع `docshare` من استيراد `logistics.views` — فكان البديل نسخَها (قاعدتان تنحرفان عند أول تعديل). استُخرجت إلى `logistics/services.py` (`confirm_purchase_order`)، ويحرس ذلك `logistics/tests/test_purchase_orders.py` (`test_confirm_rule_lives_in_the_service_not_in_the_view`) بقراءة مصدر الـview. **والحارس يسكن `logistics` لا هنا**: كان في `docshare/tests/test_order_decisions.py` فيستورد `logistics.views` استيراداً ساكناً — وهو نفسه العقد الذي يشرحه هذا السطر — فيكسر `lint-imports`. وما يقيسه بنيةُ `logistics` الداخلية، فالـapp يحرسها بنفسه؛ وما يخصّ `docshare` (أن القبول من الرابط يؤكّد الطلبية فعلاً) مقيسٌ سلوكياً في ملفه.
 
 **وحالةُ «مؤكدة» واحدةٌ مهما كان المُقِرّ:** أن نضغط نحن «تأكيد» بعد مكالمةٍ مع المصنع، أو أن يضغط المصنع «موافق» على الرابط — كلاهما يقول إن الطلبية مُتَّفقٌ عليها. **ومَن أقرّ ومتى** يُسجَّل في `DocumentShare` (الاسم والتوقيت وIP والسبب) وفي `ActivityLog`، لا في عمود الحالة.
 

@@ -151,6 +151,30 @@ class PurchaseOrderAPITest(APITestCase):
             SupplierQuotation.STATUS_CONVERTED,
         )
 
+    def test_confirm_rule_lives_in_the_service_not_in_the_view(self):
+        """قاعدة التأكيد في `confirm_purchase_order` وحدها — لا نسخةَ في الـview.
+
+        للطلبية طريقان إلى التأكيد: الشاشة عبر `PurchaseOrderViewSet.confirm`،
+        والمورّد نفسه من رابط المشاركة العام عبر `docshare`. نسخُ الشروط في
+        الموضعين يعني قاعدتين تنحرفان عند أول تعديل يُنسى في إحداهما.
+
+        كان هذا الحارس يسكن `docshare/tests/test_order_decisions.py` — وهو
+        مستدعي الطريق الثاني — فكان يستورد `logistics.views` من `docshare`
+        ويكسر عقد «داخليات الـapps ليست واجهات عامة» في `.importlinter`. لكن
+        ما يقيسه بنيةُ `logistics` نفسها، فمكانه هنا: الـapp يحرس تركيبه
+        الداخلي بنفسه بلا أن يمدّ أحدٌ يده إلى داخليات جاره. وأثرُ ذلك على
+        الرابط العام مقيسٌ هناك سلوكياً (القبول يغيّر الحالة فعلاً).
+        """
+        import inspect
+
+        from logistics.services import confirm_purchase_order
+        from logistics.views import procurement
+
+        self.assertTrue(callable(confirm_purchase_order))
+        source = inspect.getsource(procurement.PurchaseOrderViewSet.confirm)
+        self.assertIn("confirm_purchase_order(", source)
+        self.assertNotIn("STATUS_CONFIRMED", source, "قاعدة التأكيد عادت إلى الـview")
+
     def test_confirm_and_convert_creates_draft_invoice_without_posting_or_stock(self):
         created = self.client.post(
             '/api/logistics/purchase-orders/',

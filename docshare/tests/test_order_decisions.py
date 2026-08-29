@@ -193,18 +193,10 @@ def test_documents_that_take_no_decision_still_refuse_one(client, env, deal):
     assert "لا يقبل قراراً" in response.content.decode("utf-8")
 
 
-def test_confirm_rule_lives_in_one_place_for_both_callers():
-    """الشاشة والرابط يستدعيان الخدمة نفسها — لا نسختين تنحرفان.
-
-    كانت الشروط محبوسةً في `PurchaseOrderViewSet.confirm`، و`.importlinter`
-    يمنع `docshare` من استيراد `logistics.views` — فكان البديل نسخَها.
-    """
-    import inspect
-
-    from logistics.services import confirm_purchase_order
-    from logistics.views import procurement
-
-    assert callable(confirm_purchase_order)
-    source = inspect.getsource(procurement.PurchaseOrderViewSet.confirm)
-    assert "confirm_purchase_order(" in source
-    assert "STATUS_CONFIRMED" not in source, "قاعدة التأكيد عادت إلى الـview"
+# حارس «قاعدة التأكيد في الخدمة لا في الـview» يسكن الآن
+# `logistics/tests/test_purchase_orders.py`
+# (`test_confirm_rule_lives_in_the_service_not_in_the_view`): كان هنا فيستورد
+# `logistics.views` من `docshare` ويكسر عقد «داخليات الـapps ليست واجهات عامة»
+# في `.importlinter`. وما يقيسه بنيةُ `logistics` الداخلية، فالـapp يحرسها
+# بنفسه؛ وما يخصّ `docshare` — أن القبول من الرابط يؤكّد الطلبية فعلاً — مقيسٌ
+# أعلاه سلوكياً لا بقراءة مصدر الجار.
