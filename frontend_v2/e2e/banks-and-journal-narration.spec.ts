@@ -4,6 +4,10 @@ import { test, expect, type Page } from '@playwright/test';
  * T-BANKS / T-JRNLUX — دليلان بصريان على شكوى المالك:
  *  1) القيد يبدأ بسطرين لا ثلاثة، والبيان يتولد من الحسابات تلقائياً.
  *  2) شاشة البنوك موجودة فعلاً وتعرض البنوك والفروع والحسابات البنكية.
+ *
+ * T-JRNL-SIMPLE — والشبكة صارت خلف «متقدم»: الافتراضي قيدٌ بسيط بسطرٍ
+ * واحد — بيانٌ بارز للقيد كلّه، حسابان، ومبلغٌ يُكتب مرّة يُبنى منه
+ * طرفا القيد في الخلفية. الاختبار الأول يبقى حارساً للوضع المتقدّم نفسه.
  */
 
 const ACCOUNTS = [
@@ -82,8 +86,11 @@ test('قيد جديد يبدأ بسطرين ويولّد البيان من ال�
   await page.goto('/accounting/journals/new');
   await page.waitForLoadState('networkidle');
 
+  // الشبكة صارت خلف «متقدم» — وقواعدها هي هي بعد التبديل.
+  await page.getByRole('button', { name: 'متقدم', exact: true }).click();
+
   // سطران فقط في شبكة القيد (كان ثلاثة).
-  const accountCells = page.locator('.ktra-cell-picker');
+  const accountCells = page.locator('.ktra-grid .ktra-cell-picker');
   await expect(accountCells).toHaveCount(2);
 
   // البيان الإجمالي يبدأ فارغاً ومعلّماً «تلقائي».
@@ -99,7 +106,7 @@ test('قيد جديد يبدأ بسطرين ويولّد البيان من ال�
   await page.locator('input[data-side="debit"][data-line-idx="0"]').fill('500');
 
   // اختيار حساب دائن + مبلغ.
-  await page.locator('.ktra-cell-picker').nth(1).click();
+  await page.locator('.ktra-grid .ktra-cell-picker').nth(1).click();
   await page.locator('.ktra-picker .ktra-tree-row', { hasText: '4101' }).first().dblclick();
   await page.locator('input[data-side="credit"][data-line-idx="1"]').fill('500');
 
@@ -116,6 +123,40 @@ test('قيد جديد يبدأ بسطرين ويولّد البيان من ال�
   await expect(grid.nth(0).locator('input').first()).toHaveValue('تحصيل دفعة نقدية');
   await narration.fill('');
   await expect(narration).toHaveValue('من ح/ النقدية إلى ح/ مبيعات المنتجات');
+});
+
+test('الوضع البسيط هو الافتراضي: مبلغٌ واحد يبني طرفي القيد', async ({ page }) => {
+  await stubApi(page);
+  await page.goto('/accounting/journals/new');
+  await page.waitForLoadState('networkidle');
+
+  // لا شبكة ولا أعمدة مدين/دائن — سطرٌ واحد بحقل مبلغٍ واحد.
+  await expect(page.locator('.ktra-grid')).toHaveCount(0);
+  const amount = page.locator('input[data-ktra-field="simple-amount"]');
+  await expect(amount).toHaveCount(1);
+
+  // البيان بارزٌ فوق السطر، وللقيد كلّه لا لسطر.
+  const narration = page.locator('input[placeholder="يتولد تلقائياً: من ح/ … إلى ح/ …"]');
+  await expect(narration).toHaveCount(1);
+  await expect(page.getByText('البيان — ملاحظة القيد كلّه (تلقائي)')).toBeVisible();
+
+  // حساب مدين + حساب دائن + مبلغٌ يُكتب مرّة واحدة.
+  const sides = page.locator('.ktra-cell-picker');
+  await expect(sides).toHaveCount(2);
+  await sides.first().click();
+  await page.locator('.ktra-picker .ktra-tree-row', { hasText: '1101' }).first().dblclick();
+  await sides.nth(1).click();
+  await page.locator('.ktra-picker .ktra-tree-row', { hasText: '4101' }).first().dblclick();
+  await amount.fill('500');
+
+  // البيان تولّد من الحسابين، والقيد متوازن بلا إدخال ثانٍ.
+  await expect(narration).toHaveValue('من ح/ النقدية إلى ح/ مبيعات المنتجات');
+  await expect(page.getByText('متوازن ✓').first()).toBeVisible();
+
+  // والخلفية بنت طرفين فعلاً: المتقدّم يكشف سطرين بـ500 مديناً ودائناً.
+  await page.getByRole('button', { name: 'متقدم', exact: true }).click();
+  await expect(page.locator('input[data-side="debit"][data-line-idx="0"]')).toHaveValue('500');
+  await expect(page.locator('input[data-side="credit"][data-line-idx="1"]')).toHaveValue('500');
 });
 
 test('شاشة البنوك تعرض البنوك والفروع والحسابات البنكية', async ({ page }) => {

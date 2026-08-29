@@ -93,6 +93,46 @@ const MIN_LINES = 2;
 const startingLines = (): LineState[] =>
   Array.from({ length: MIN_LINES }, emptyLine);
 
+/* ─── الوضع البسيط: قيدٌ بطرفين ─────────────────────────────────────────────
+ * القيد البسيط (طرف مدين واحد وطرف دائن واحد) هو الغالب الأعمّ في الاستعمال
+ * اليومي، والمركّب (ثلاثة أطراف فأكثر) استثناء. فالافتراضي سطرٌ واحد: بيانٌ
+ * واحد للقيد كلّه، حسابان، ومبلغٌ يُكتب **مرّة واحدة** يملأ الجهتين خلف
+ * الستار — والشبكة الكاملة تبقى خلف زرّ «متقدم» بلا نقصان.
+ * الحالة تبقى `lines` نفسها (لا نسخة ثانية) فيبقى الحساب والتحقّق والحمولة
+ * على مصدرٍ واحد. */
+const SIMPLE_DEBIT = 0;
+const SIMPLE_CREDIT = 1;
+
+const amountOf = (v: string): number => parseFloat(v) || 0;
+const isActiveLine = (l: LineState): boolean =>
+  !!l.accountId && (amountOf(l.debit) > 0 || amountOf(l.credit) > 0);
+
+/** هل يسع هذا القيدُ الوضعَ البسيط؟ طرفٌ مدين وطرفٌ دائن لا أكثر. */
+const isSimpleShape = (ls: LineState[]): boolean => {
+  // سطرٌ محفوظ بلا مبلغ لا يُسقَط بصمت عند الطيّ إلى البسيط.
+  if (ls.some((l) => l.id && !isActiveLine(l))) return false;
+  const active = ls.filter(isActiveLine);
+  if (active.length > 2) return false;
+  return (
+    active.filter((l) => amountOf(l.debit) > 0).length <= 1 &&
+    active.filter((l) => amountOf(l.credit) > 0).length <= 1
+  );
+};
+
+/** يرتّب السطور للوضع البسيط: [0] الطرف المدين و[1] الطرف الدائن. */
+const normalizeToSimple = (ls: LineState[]): LineState[] => {
+  const debit = ls.find((l) => amountOf(l.debit) > 0)
+    || ls.find((l) => l.accountId && amountOf(l.credit) === 0)
+    || emptyLine();
+  const credit = ls.find((l) => amountOf(l.credit) > 0)
+    || ls.find((l) => l !== debit && l.accountId)
+    || emptyLine();
+  return [debit, credit === debit ? emptyLine() : credit];
+};
+
+/** الذمم تحتاج جهة: رقمٌ عليها بلا طرفٍ رصيدٌ لا صاحب له في كشف الحساب. */
+const PARTNER_SUB_TYPES = new Set(["receivable", "payable"]);
+
 const REF_TYPE_LABELS: Record<string, string> = {
   LOGISTICS_PAYMENT: "دفعة صفقة",
   PURCHASE_RECEIPT: "استلام مخزون",
@@ -157,6 +197,8 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   const [lines, setLines] = useState<LineState[]>(startingLines);
   /** كتب المستخدم البيان الإجمالي بيده — فيتوقّف التوليد التلقائي. */
   const [headerDescTouched, setHeaderDescTouched] = useState(false);
+  /** «بسيط» طرفان بمبلغٍ واحد · «متقدم» الشبكة الكاملة. */
+  const [entryMode, setEntryMode] = useState<"simple" | "advanced">("simple");
 
   // N3-T1: Kit Navigation + account picker state
   const [journalsList, setJournalsList] = useState<any[]>([]);
@@ -214,7 +256,10 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       });
       setHeaderDescTouched(!isGeneratedNarration(desc, narration));
       while (mapped.length < MIN_LINES) mapped.push(emptyLine());
-      setLines(mapped);
+      // قيدٌ بطرفين يُفتح بسيطاً، والمركّب يفتح على الشبكة الكاملة.
+      const simple = isSimpleShape(mapped);
+      setEntryMode(simple ? "simple" : "advanced");
+      setLines(simple ? normalizeToSimple(mapped) : mapped);
     },
     [toNarrationLine],
   );
@@ -240,6 +285,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         });
         setLines(startingLines());
         setHeaderDescTouched(false);
+        setEntryMode("simple");
         setPosted(false);
       } else {
         try {
@@ -336,6 +382,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       } else {
         setPosted(false);
         setLines(startingLines());
+        setEntryMode("simple");
         setHeader((h) => ({ ...h, reference_type: h.reference_type || "MANUAL" }));
         if (baseCurrency) {
           setHeader((h) => ({
@@ -427,6 +474,47 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       }
       return next;
     });
+  };
+
+  /* ── الوضع البسيط: كتابةٌ على السطرين الأوّلين بلا إضافة سطرٍ ثالث ── */
+
+  /** المبلغ يُكتب مرّة واحدة ويملأ الجهتين — لا فرق ولا «تعبئة الباقي». */
+  const updateSimpleAmount = (v: string) => {
+    if (posted) return;
+    setLines((prev) => {
+      const next = [...prev];
+      while (next.length < MIN_LINES) next.push(emptyLine());
+      next[SIMPLE_DEBIT] = { ...next[SIMPLE_DEBIT], debit: v, credit: "" };
+      next[SIMPLE_CREDIT] = { ...next[SIMPLE_CREDIT], credit: v, debit: "" };
+      return next;
+    });
+  };
+
+  const updateSimpleSide = (idx: number, patch: Partial<LineState>) => {
+    if (posted) return;
+    setLines((prev) => {
+      const next = [...prev];
+      while (next.length < MIN_LINES) next.push(emptyLine());
+      next[idx] = { ...next[idx], ...patch };
+      return next;
+    });
+  };
+
+  /** الانتقال بين الوضعين — الطيّ إلى البسيط لا يقع إلا على قيدٍ يسعه. */
+  const switchEntryMode = (m: "simple" | "advanced") => {
+    // القيد المرحَّل يبدَّل عرضه لا محتواه — رؤية طرفيه في الشبكة حقُّ قارئه.
+    if (m === entryMode) return;
+    if (m === "simple") {
+      if (!isSimpleShape(lines)) return;
+      setLines(normalizeToSimple(lines));
+    }
+    setEntryMode(m);
+  };
+
+  /** حساب ذمم عامّ (غير مربوط بطرف) — القيد عليه يلزمه اختيار الجهة. */
+  const accountNeedsPartner = (accountId: string): boolean => {
+    const a = accounts.find((x) => String(x.id) === accountId);
+    return !!a && PARTNER_SUB_TYPES.has(String(a.sub_type || "")) && !a.linked_partner;
   };
 
   const removeLine = (i: number) => {
@@ -718,6 +806,92 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     header.reference_type === 'ADJUSTMENT';
   const isAdjustment = header.reference_type === 'ADJUSTMENT';
 
+  /**
+   * حقل البيان — واحدٌ لا اثنان: يسكن ترويسة المستند في الوضع المتقدّم،
+   * ويصعد بارزاً فوق سطر القيد في الوضع البسيط. نفس الحالة ونفس منطق
+   * «تلقائي/يدوي» في الموضعين.
+   */
+  const renderNarrationInput = (prominent: boolean) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+      <input
+        className={prominent ? 'ktra-input ktra-input--lg' : 'ktra-input'}
+        style={{ flex: 1 }}
+        disabled={posted}
+        placeholder="يتولد تلقائياً: من ح/ … إلى ح/ …"
+        value={header.description}
+        onChange={(e) => {
+          // تفريغ البيان يدوياً يعيده إلى التوليد التلقائي.
+          setHeaderDescTouched(!!e.target.value.trim());
+          setHeader((h) => ({ ...h, description: e.target.value }));
+        }}
+      />
+      {!posted && headerDescTouched && (
+        <button
+          type="button"
+          className="ktra-iconbtn"
+          title="إرجاع البيان إلى التوليد التلقائي حسب الحسابات"
+          onClick={() => {
+            setHeaderDescTouched(false);
+            setLines((prev) => prev.map((l) => ({ ...l, descriptionTouched: false })));
+          }}
+        >
+          <RefreshCw className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+
+  /** طرفٌ من طرفَي القيد البسيط: حسابٌ يُختار من الشجرة + جهةٌ عند الحاجة. */
+  const renderSimpleSide = (idx: number, label: string, hint: string) => {
+    const row = lines[idx] || emptyLine();
+    const acc = accounts.find((a) => String(a.id) === row.accountId);
+    const needsPartner = accountNeedsPartner(row.accountId);
+    return (
+      <div>
+        <span className="ktra-field-label mb-1 block">{label}</span>
+        {posted ? (
+          <span className="ktra-input flex items-center text-xs">
+            {acc ? `${acc.code} — ${acc.name}` : '—'}
+          </span>
+        ) : (
+          /* غلافٌ بمظهر الحقل: `.ktra-cell-picker` شفافٌ عمداً لأنه ابن خليةٍ
+             في الشبكة، وهنا هو الحقل نفسه فيلزمه إطاره. */
+          <div className="ktra-input flex items-center overflow-hidden">
+            <button
+              type="button"
+              className="ktra-cell-picker text-start"
+              title="فتح شجرة الحسابات"
+              onClick={() => { setPickerTargetLine(idx); setShowAccountPicker(true); }}
+            >
+              {acc ? `${acc.code} — ${acc.name}` : hint}
+            </button>
+          </div>
+        )}
+        {/* الجهة تظهر عند حساب ذمم عامّ وحده — رقمٌ عليه بلا طرف لا صاحب له */}
+        {needsPartner && (
+          posted ? (
+            <span className="mt-1 block text-xs text-[var(--ktra-ink-soft)]">
+              {partners.find((p) => String(p.id) === row.partnerId)?.name || 'بلا جهة'}
+            </span>
+          ) : (
+            <select
+              className="ktra-input mt-1 block w-full"
+              value={row.partnerId}
+              onChange={(e) => updateSimpleSide(idx, { partnerId: e.target.value })}
+              title="حساب ذمم — اختر الجهة كي يظهر الرقم في كشف حسابها"
+            >
+              <option value="">— اختر الجهة —</option>
+              {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          )
+        )}
+      </div>
+    );
+  };
+
+  const simpleAmount = lines[SIMPLE_DEBIT]?.debit || lines[SIMPLE_CREDIT]?.credit || '';
+  const canFoldToSimple = isSimpleShape(lines);
+
   const isShipmentLink =
     relatedKind === "shipment" ||
     (relatedKind == null &&
@@ -852,39 +1026,16 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
               </div>
             </label>
           )}
-          {/* البيان الإجمالي — يتولد من الحسابات ما لم يُكتب يدوياً */}
-          <label className="ktra-field" style={{ gridColumn: 'span 2' }}>
-            <span className="ktra-field-label">
-              البيان الإجمالي {headerDescTouched ? '(يدوي)' : '(تلقائي)'}
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <input
-                className="ktra-input"
-                style={{ flex: 1 }}
-                disabled={posted}
-                placeholder="يتولد تلقائياً: من ح/ … إلى ح/ …"
-                value={header.description}
-                onChange={(e) => {
-                  // تفريغ البيان يدوياً يعيده إلى التوليد التلقائي.
-                  setHeaderDescTouched(!!e.target.value.trim());
-                  setHeader((h) => ({ ...h, description: e.target.value }));
-                }}
-              />
-              {!posted && headerDescTouched && (
-                <button
-                  type="button"
-                  className="ktra-iconbtn"
-                  title="إرجاع البيان إلى التوليد التلقائي حسب الحسابات"
-                  onClick={() => {
-                    setHeaderDescTouched(false);
-                    setLines((prev) => prev.map((l) => ({ ...l, descriptionTouched: false })));
-                  }}
-                >
-                  <RefreshCw className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          </label>
+          {/* البيان الإجمالي — يتولد من الحسابات ما لم يُكتب يدوياً.
+              في الوضع البسيط يصعد إلى صدر الشاشة بارزاً بدل أن يُدفن هنا. */}
+          {entryMode === 'advanced' && (
+            <label className="ktra-field" style={{ gridColumn: 'span 2' }}>
+              <span className="ktra-field-label">
+                البيان الإجمالي {headerDescTouched ? '(يدوي)' : '(تلقائي)'}
+              </span>
+              {renderNarrationInput(false)}
+            </label>
+          )}
         </>
       }
       status={
@@ -968,6 +1119,71 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         )}
       </div>
 
+      {/* ── مبدّل الوضع: بسيط (طرفان) · متقدم (شبكة كاملة) ── */}
+      <div className="ktra-tabs" style={{ marginBottom: '8px' }}>
+        <button
+          type="button"
+          className={`ktra-tab${entryMode === 'simple' ? ' ktra-tab--active' : ''}`}
+          disabled={entryMode !== 'simple' && !canFoldToSimple}
+          title={canFoldToSimple
+            ? 'قيد بطرفين: بيانٌ واحد وحسابان ومبلغٌ يُكتب مرّة'
+            : 'هذا القيد أكثر من طرفين — يُحرَّر في الوضع المتقدّم'}
+          onClick={() => switchEntryMode('simple')}
+        >
+          بسيط
+        </button>
+        <button
+          type="button"
+          className={`ktra-tab${entryMode === 'advanced' ? ' ktra-tab--active' : ''}`}
+          title="شبكة القيد الكاملة — ثلاثة أطراف فأكثر، مراكز تكلفة، بيان لكل سطر"
+          onClick={() => switchEntryMode('advanced')}
+        >
+          متقدم
+        </button>
+      </div>
+
+      {entryMode === 'simple' ? (
+        /* ── الوضع البسيط: سطرٌ واحد — بيان · مدين · دائن · مبلغ ── */
+        <div className="rounded-md border border-[var(--ktra-border,#c8b99a)] bg-[var(--ktra-surface,#fffdf8)] p-3">
+          {/* الملاحظة بارزة وللقيد كلّه — لا ملاحظةً لكل سطر */}
+          <div className="mb-3">
+            <span className="ktra-field-label">
+              البيان — ملاحظة القيد كلّه {headerDescTouched ? '(يدوي)' : '(تلقائي)'}
+            </span>
+            <div className="mt-1">{renderNarrationInput(true)}</div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            {renderSimpleSide(SIMPLE_DEBIT, 'الحساب المدين (منه)', '— اختر الحساب المدين —')}
+            {renderSimpleSide(SIMPLE_CREDIT, 'الحساب الدائن (له)', '— اختر الحساب الدائن —')}
+            <div>
+              <span className="ktra-field-label mb-1 block">
+                المبلغ{header.currency_code ? ` (${header.currency_code})` : ''}
+              </span>
+              {posted ? (
+                <span className="ktra-input ktra-num flex items-center font-bold">
+                  {fmtAmount(simpleAmount)}
+                </span>
+              ) : (
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  className="ktra-input ktra-num block w-full font-bold"
+                  data-ktra-field="simple-amount"
+                  value={simpleAmount}
+                  onChange={(e) => updateSimpleAmount(e.target.value)}
+                />
+              )}
+              <span className="mt-1 block text-[11px] text-[var(--ktra-ink-soft)]">
+                يُكتب مرّة واحدة — يُقيَّد مديناً ودائناً تلقائياً.
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : (
+      <>
       {/* ── KitGrid لبنود القيد ── */}
       <KitGrid<GridLine>
         columns={journalGridColumns}
@@ -1003,17 +1219,21 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
           </span>
         </span>
       </div>
+      </>
+      )}
 
       {/* ── أزرار سفلية ── */}
       {!posted && (
         <div style={{ display: 'flex', gap: '8px', marginTop: '10px', justifyContent: 'flex-end' }}>
-          <button
-            type="button"
-            className="ktra-toolbtn"
-            onClick={() => setLines((prev) => [...prev, emptyLine()])}
-          >
-            <Plus className="w-3 h-3" /> سطر جديد
-          </button>
+          {entryMode === 'advanced' && (
+            <button
+              type="button"
+              className="ktra-toolbtn"
+              onClick={() => setLines((prev) => [...prev, emptyLine()])}
+            >
+              <Plus className="w-3 h-3" /> سطر جديد
+            </button>
+          )}
           <button
             type="button"
             className="ktra-toolbtn"
@@ -1066,7 +1286,9 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       title="شجرة الحسابات"
       onSelect={(a) => {
         if (pickerTargetLine != null) {
-          updateLine(pickerTargetLine, { accountId: String(a.id) });
+          // الوضع البسيط يكتب على السطرين وحدهما — لا يُلحق سطراً ثالثاً.
+          if (entryMode === 'simple') updateSimpleSide(pickerTargetLine, { accountId: String(a.id) });
+          else updateLine(pickerTargetLine, { accountId: String(a.id) });
         }
         setShowAccountPicker(false);
         setPickerTargetLine(null);

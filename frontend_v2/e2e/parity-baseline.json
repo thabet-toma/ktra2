@@ -781,10 +781,8 @@
           "",
           "",
           "",
-          "",
-          "",
-          "— اختر الحساب —",
-          "— اختر الحساب —",
+          "— اختر الحساب الدائن —",
+          "— اختر الحساب المدين —",
           "إجراءات سريعة",
           "إدارة الموظفين",
           "إدارة الموظفين",
@@ -804,6 +802,7 @@
           "المساعد الذكي",
           "الواجهة السهلة",
           "الواجهة السهلة",
+          "بسيط",
           "تحديث",
           "تخزين",
           "تواصل معنا",
@@ -811,14 +810,15 @@
           "حفظ مسودة",
           "حفظ وترحيل (F12)",
           "خروج",
-          "سطر جديد",
           "صالة الصور",
           "صالة الصور",
           "طباعة",
+          "طيّ الشريط",
           "فواتير الشراء",
           "فواتير المبيعات",
           "كل الفروع",
           "ما الجديد",
+          "متقدم",
           "من نحن",
           "من نحن",
           "مهامي",
@@ -831,7 +831,7 @@
         ]
       },
       "fields": {
-        "count": 17,
+        "count": 8,
         "values": [
           "name=|placeholder=|aria-label=",
           "name=|placeholder=|aria-label=",
@@ -839,15 +839,6 @@
           "name=|placeholder=|aria-label=",
           "name=|placeholder=|aria-label=",
           "name=|placeholder=|aria-label=",
-          "name=|placeholder=|aria-label=",
-          "name=|placeholder=|aria-label=",
-          "name=|placeholder=|aria-label=",
-          "name=|placeholder=|aria-label=",
-          "name=|placeholder=|aria-label=",
-          "name=|placeholder=|aria-label=",
-          "name=|placeholder=0.00|aria-label=",
-          "name=|placeholder=0.00|aria-label=",
-          "name=|placeholder=0.00|aria-label=",
           "name=|placeholder=0.00|aria-label=",
           "name=|placeholder=يتولد تلقائياً: من ح/ … إلى ح/ …|aria-label="
         ]
@@ -857,20 +848,11 @@
         "values": []
       },
       "tableHeaders": {
-        "count": 8,
-        "values": [
-          "",
-          "#",
-          "البيان",
-          "الجهة",
-          "الحساب",
-          "دائن (Cr)",
-          "مدين (Dr)",
-          "مركز التكلفة"
-        ]
+        "count": 0,
+        "values": []
       },
       "toolbarItems": {
-        "count": 11,
+        "count": 10,
         "values": [
           "الأخير",
           "الأول",
@@ -881,7 +863,6 @@
           "حفظ مسودة",
           "حفظ وترحيل (F12)",
           "خروج",
-          "سطر جديد",
           "طباعة"
         ]
       }

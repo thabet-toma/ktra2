@@ -955,6 +955,14 @@ tbody td {
   box-shadow: 0 0 0 1px var(--ktra-accent);
 }
 :root[data-skin] .ktra-input--hl { background: var(--ktra-field-hl); }
+/* T-JRNL-SIMPLE: حقلٌ بارز. البيان في القيد البسيط ملاحظةٌ للقيد كلّه فيلزمه
+   حجمٌ أكبر — وأدوات Tailwind لا تصلح له: قاعدة `.ktra-input` أعلاه خارج
+   الطبقات فتغلب `text-base`/`text-lg` مهما كُتبت على العنصر. */
+:root[data-skin] .ktra-input--lg {
+  height: 28px;
+  font-size: calc(var(--ktra-fs) + 2px);
+  font-weight: 700;
+}
 
 /* ── Grid area ── */
 /* task13 M3: ينمو بمحتواه (flex-basis:auto) ويملأ الفراغ عند قصره؛
