@@ -790,8 +790,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   );
 
   const totals = useMemo(
-    () => computeInvoiceTotals(lineInputsForMath, taxRateMap, invoiceDiscount),
-    [lineInputsForMath, taxRateMap, invoiceDiscount]
+    /* T-TAXINCL: العلمان يُمرَّران للمرآة — بدونهما كانت فاتورة «شامل
+       الضريبة» تعرض إجمالياً أعلى ممّا سيخزّنه الخادم، فتبدو «مدفوعة»
+       ناقصةً مع كل استعمال. */
+    () => computeInvoiceTotals(lineInputsForMath, taxRateMap, invoiceDiscount,
+      { pricesIncludeTax, discountPercent }),
+    [lineInputsForMath, taxRateMap, invoiceDiscount, pricesIncludeTax, discountPercent]
   );
 
   /** حساب افتراضي لحساب الإيراد عند وصول قائمة الحسابات (أول Revenue). */
