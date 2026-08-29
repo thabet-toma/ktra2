@@ -51,6 +51,9 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
   const patchCalls: Array<Record<string, unknown>> = [];
   let draft303Intent = 0;
   let draft302Intent = 0;
+  /** عدّاد الإنشاء — الإغلاق البائت كان يُنشئ فاتورتين لضغطة «مدفوعة» واحدة،
+      والتمويه القديم يعيد المعرّف نفسه للكلّ فلا يرى الحارسُ الازدواج. */
+  const createCalls = { count: 0 };
   /** المسودة التي يُنشئها الحفظ من `/new` — بنودها وإجماليها كما يعرفها الخادم. */
   const draft302 = () => invoice({
     id: 302,
@@ -300,6 +303,7 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
       return;
     }
     if (url.pathname.endsWith("/sales/invoices/") && route.request().method() === "POST") {
+      createCalls.count += 1;
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify(invoice({
@@ -342,7 +346,7 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
     }
     await route.fulfill({ contentType: "application/json", body: "[]" });
   });
-  return { intentCalls, patchCalls };
+  return { intentCalls, patchCalls, createCalls };
 }
 
 async function openPanel(page: Page) {
@@ -507,7 +511,7 @@ test("«مدفوعة» ثم «تسجيل دفعة» ⇒ سند قبض بكامل
    كأنها نفّذته — والمالك يضغط «مدفوعة» ثم الزرّ الأساسي لا زرّ اللوحة. */
 
 test("«مدفوعة» على مسودة تسجّل دفعةً غير مرحّلة لا تحصيلاً", async ({ page }) => {
-  const { intentCalls } = await installMocks(page);
+  const { intentCalls, createCalls } = await installMocks(page);
   await page.goto("/sales/invoices/new");
   await page.waitForLoadState("networkidle");
   await page.getByPlaceholder("اكتب اسم المنتج…").first().fill("لابتوب");
@@ -522,6 +526,9 @@ test("«مدفوعة» على مسودة تسجّل دفعةً غير مرحّل
   expect(intentCalls[0]).toMatchObject({ cash_amount: "100.00", cash_account_id: 10 });
   await expect(page.getByText("غير مرحّلة", { exact: false }).first())
     .toBeVisible({ timeout: 15_000 });
+  // فاتورةٌ **واحدة** للضغطة الواحدة: writeIntent كان يقرأ `draftId` من إغلاقٍ
+  // بائت فيحفظ ثانيةً بعد حفظ «مدفوعة» — فاتورتان في القاعدة لضغطةٍ واحدة.
+  expect(createCalls.count).toBe(1);
 
   // وضغطةٌ ثانية لا تُضاعفها: الأساس `remainingAfterIntent`.
   await page.getByRole("button", { name: "مدفوعة", exact: true }).click();

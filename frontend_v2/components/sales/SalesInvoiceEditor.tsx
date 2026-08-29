@@ -2854,6 +2854,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           })),
         },
         `سُجِّلت دفعة ${formatMoney(target)} غير مرحّلة — تتحوّل إلى سند قبض عند ترحيل الفاتورة.`,
+        // المعرّف بالقيمة من الحفظ أعلاه — لا من حالةٍ لم تصل بعد.
+        { targetId: saved.id },
       );
       if (!ok) return; // `writeIntent` قال السبب في الشريط وفي رسالةٍ عائمة
       toast(`سُجِّلت دفعة ${formatMoney(target)} غير مرحّلة.`, "success");
@@ -2907,12 +2909,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       cheques: InvoiceIntentPayload["cheques"];
     },
     successMsg: string,
-    opts?: { saveFirst?: boolean },
+    opts?: { saveFirst?: boolean; targetId?: number },
   ): Promise<boolean> => {
-    /* `saveFirst`: المبلغ محسوبٌ من **الشاشة**، والنيّة تُعلَّق على صفٍّ في
-       القاعدة — فبنودٌ معدَّلة لم تُحفظ تُعلِّق دفعةً لا تطابق إجمالي المخزَّن. */
-    let targetId = draftId;
-    if (!targetId || opts?.saveFirst) {
+    /* `targetId` الصريح: من حفظ للتوّ يمرّر المعرّف **بالقيمة** — قراءة
+       `draftId` هنا إغلاقٌ بائت لا يرى حالةً وُضعت قبل أجزاء ثانية، فكانت
+       «مدفوعة» من `/new` تحفظ ثم يحفظ هذا ثانيةً: **فاتورتان** لضغطةٍ واحدة.
+       و`saveFirst`: المبلغ محسوبٌ من الشاشة والنيّة تُعلَّق على صفٍّ في
+       القاعدة — فبنودٌ معدَّلة لم تُحفظ تُعلِّق دفعةً لا تطابق المخزَّن. */
+    let targetId = opts?.targetId ?? draftId;
+    if (!targetId || (opts?.saveFirst && !opts?.targetId)) {
       const saved = await handleSaveDraft();
       if (!saved) return false;
       targetId = saved.id;

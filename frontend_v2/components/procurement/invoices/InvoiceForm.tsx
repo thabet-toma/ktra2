@@ -2315,13 +2315,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       cheques: ReturnType<typeof currentIntentCheques>;
     },
     successMsg: string,
-    opts?: { saveFirst?: boolean },
+    opts?: { saveFirst?: boolean; targetId?: number | string },
   ): Promise<boolean> => {
-    /* `saveFirst`: المبلغ محسوبٌ من **الشاشة**، والنيّة تُعلَّق على صفٍّ في
-       القاعدة — فلو كانت البنود معدَّلةً ولم تُحفظ عُلِّقت دفعةٌ لا تطابق
-       إجمالي الفاتورة المخزَّن. */
-    let targetId = formData.id;
-    if (!targetId || opts?.saveFirst) {
+    /* `targetId` الصريح: من حفظ للتوّ يمرّر المعرّف **بالقيمة** — قراءة
+       `formData.id` هنا إغلاقٌ بائت، فكانت «مدفوعة» على فاتورةٍ جديدة تحفظ
+       ثم يحفظ هذا ثانيةً: فاتورتان لضغطةٍ واحدة (مرآة عطل جانب البيع).
+       و`saveFirst`: المبلغ من الشاشة والنيّة على صفٍّ في القاعدة. */
+    let targetId = opts?.targetId ?? formData.id;
+    if (!targetId || (opts?.saveFirst && !opts?.targetId)) {
       const saved = await handleSave();
       if (!saved) return false;
       targetId = saved;
@@ -2572,6 +2573,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         })),
       },
       `سُجِّلت دفعة ${formatMoney(target)} غير مرحّلة — تتحوّل إلى سند صرف عند ترحيل الفاتورة.`,
+      // المعرّف بالقيمة من الحفظ أعلاه — لا من حالةٍ لم تصل بعد.
+      { targetId: savedId },
     );
     /* والدليل حيث ينظر المستخدم: صفُّ الدفعة في جدول دفعات المستند. */
     paymentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
