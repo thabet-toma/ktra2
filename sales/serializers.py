@@ -616,14 +616,17 @@ class SalesInvoiceSerializer(
             is_return=_is_return,
         )
         from django.db import IntegrityError
-        try:
+
+        def _create_with_lines():
+            """الإنشاء الكامل ذرّياً — يُستعمل من المحاولة الأولى ومن حلقة التصادم."""
             with transaction.atomic():
                 inv = SalesInvoice.objects.create(**validated_data)
                 for row in lines_data:
                     rw = dict(row)
                     rw.pop("id", None)
                     SalesInvoiceLine.objects.create(tenant=tenant, invoice=inv, **rw)
-                lines = list(inv.lines.select_related("tax_rate", "tax_rate__tax_account", "product"))
+                lines = list(inv.lines.select_related(
+                    "tax_rate", "tax_rate__tax_account", "product"))
                 recalculate_invoice_amounts(inv, lines)
                 SalesInvoiceLine.objects.bulk_update(
                     lines,
@@ -638,34 +641,30 @@ class SalesInvoiceSerializer(
                     ]
                 )
             return inv
+
+        try:
+            return _create_with_lines()
         except IntegrityError:
-            if not inv_num or not str(inv_num).strip():
-                book_num = validated_data.get("book_number", 0)
+            # T-NUMGAP: رقمٌ أرسله العميل صراحةً — التصادم قراره لا قرارنا.
+            if inv_num and str(inv_num).strip():
+                raise
+            # عدّاد الدفتر قد يتخلّف عن الواقع بأكثر من رقم (فواتير أُدخلت
+            # بأرقامٍ يدوية، أو استيراد قديم) — إعادة محاولةٍ **واحدة** كانت
+            # تسقط على الرقم المحجوز التالي فيخرج 500 «Duplicate entry» على
+            # المستخدم. الحلقة تتقدّم بالعدّاد حتى أوّل رقمٍ حرّ — كلُّ نداءٍ
+            # لـ`next_invoice_number` يزيد العدّاد فيتجاوز الفجوة ولا يعود
+            # إليها، والسقف يمنع الدوران إلى الأبد على قيدٍ آخر غير الرقم.
+            book_num = validated_data.get("book_number", 0)
+            last_err: IntegrityError | None = None
+            for _ in range(50):
                 validated_data["invoice_number"] = next_invoice_number(
                     tenant.TenantID, book_num, branch=validated_data.get("branch"))
-                with transaction.atomic():
-                    inv = SalesInvoice.objects.create(**validated_data)
-                    for row in lines_data:
-                        rw = dict(row)
-                        rw.pop("id", None)
-                        SalesInvoiceLine.objects.create(tenant=tenant, invoice=inv, **rw)
-                    lines = list(inv.lines.select_related("tax_rate", "tax_rate__tax_account", "product"))
-                    recalculate_invoice_amounts(inv, lines)
-                    SalesInvoiceLine.objects.bulk_update(
-                        lines,
-                        ["line_total_excl_tax", "line_tax_amount"],
-                    )
-                    _run_loss_guard(inv, lines)
-                    inv.save(
-                        update_fields=[
-                            "subtotal_excl_tax",
-                            "tax_amount",
-                            "grand_total",
-                        ]
-                    )
-                return inv
-            else:
-                raise
+                try:
+                    return _create_with_lines()
+                except IntegrityError as e:
+                    last_err = e
+                    continue
+            raise last_err
 
     def update(self, instance, validated_data):
         if instance.status != SalesInvoice.STATUS_DRAFT:
