@@ -662,12 +662,20 @@ def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
         return
     cash_account_id = _resolve_settlement_cash_account_id(invoice)
     if not cash_account_id:
+        # T-PAYFULL: التخطّي الصامت كان يُرحّل فاتورةً «نقدية» بلا تسوية ويترك
+        # العميل مديناً بكاملها — مطالبةٌ وهمية تعيش في كشف حسابه وفي أعمار
+        # الذمم إلى الأبد، والشاشة تقول «تم الترحيل» فلا شيء يُنبّه صاحبها.
+        # الرفض يجعل الشرط ظاهراً بدل أن يتحوّل إلى رقمٍ كاذب — وهو نفس ما
+        # يفعله جانب الشراء منذ T-APPAID (`_auto_settle_cash_purchase`).
         logger.warning(
-            "Cash sale %s posted without a cash account — customer left as debtor "
-            "(no auto-settlement). Set SalesSettings.default_cash_account.",
+            "Cash sale %s cannot be posted: no cash/bank account on the invoice, "
+            "in SalesSettings, nor in the chart of accounts.",
             invoice.invoice_number,
         )
-        return
+        raise ValidationError(
+            "الفاتورة نقدية ولا صندوق محدَّد عليها ولا صندوق افتراضي للشركة — "
+            "اختر حساب الصندوق/البنك أو اجعلها فاتورة ذمم (آجلة)."
+        )
     payment = CustomerPayment.objects.create(
         tenant_id=invoice.tenant_id,
         partner_id=invoice.customer_id,
@@ -711,8 +719,15 @@ def _attached_settlement_note(invoice: SalesInvoice) -> str:
 
 
 def _resolve_settlement_cash_account_id(invoice: SalesInvoice) -> int | None:
-    """صندوق تسوية الفاتورة: حسابها النقدي ← النقدي المرفق ← افتراضي الشركة."""
-    cash_account_id = invoice.cash_or_bank_account_id or invoice.attached_cash_account_id
+    """صندوق تسوية الفاتورة: النقدي المرفق ← حسابها النقدي ← افتراضي الشركة.
+
+    T-CASHBOX M1: المرفق **أولاً** لا ثانياً. `attached_cash_account` لا يكتبه
+    إلا مسار «إرفاق دفعة» (وهو `read_only` على السيريالايزر)، فهو اختيار
+    المستخدم الصريح لهذه الدفعة بعينها؛ بينما `cash_or_bank_account` على الرأس
+    تملؤه الواجهة تلقائياً. بالترتيب المعكوس كان الرأس المملوء آلياً يبتلع
+    اختيار المستخدم فيُدائَن صندوقٌ لم يخترْه أحد.
+    """
+    cash_account_id = invoice.attached_cash_account_id or invoice.cash_or_bank_account_id
     if cash_account_id:
         return cash_account_id
     # T-DEFACC: مصدر الصندوق الافتراضي واحد لكل المعاملات.

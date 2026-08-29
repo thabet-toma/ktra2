@@ -487,8 +487,13 @@ class AccountingAuditLog(models.Model):
         managed = True
 
 class CashBoxLedgerAccount(models.Model):
-    """
-    يربط صندوقاً خارجياً (مثل مستند Firestore cashBoxes/{id}) بحساب أصل (صندوق/نقدية) في الشجرة.
+    """صندوق نقدي — الكيان الأول للخزينة، وحسابُه في الشجرة وجهُه المحاسبي.
+
+    T-CASHBOX M2: كان مجرّد «جسر ربط» لصندوق خارجي (مستند مرآة
+    `cashBoxes/{id}`)، فصار هو الصندوق نفسه: يُنشأ خادمياً بمعاملة واحدة
+    (`accounting/services.py` (`create_cash_box`)) تكتب الحساب والربط ووثيقة
+    المرآة معاً. `external_id` يبقى مفتاح التوافق مع قرّاء المرآة القدامى
+    ويولّده الخادم إن لم يُمرَّر.
     """
 
     id = models.AutoField(primary_key=True, db_column="CashBoxLedgerID")
@@ -502,6 +507,14 @@ class CashBoxLedgerAccount(models.Model):
         related_name="cash_box_ledger",
         db_column="AccountID",
     )
+    #: صندوق الشركة الافتراضي. الوحدانية مفروضة في طبقة الخدمة داخل المعاملة
+    #: (`set_default_cash_box`) لا بقيد شرطي: MySQL بلا فهارس جزئية، فقيدٌ
+    #: بـ`condition=` يوجد في قاعدة الاختبارات (SQLite) ويغيب بصمت عن الإنتاج.
+    is_default = models.BooleanField(default=False, db_column="IsDefault")
+    is_active = models.BooleanField(default=True, db_column="IsActive")
+    notes = models.TextField(null=True, blank=True, db_column="Notes")
+    created_at = models.DateTimeField(
+        auto_now_add=True, null=True, blank=True, db_column="CreatedAt")
 
     class Meta:
         db_table = "cash_box_ledger_accounts"
@@ -510,6 +523,31 @@ class CashBoxLedgerAccount(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.external_id})"
+
+
+class CashBoxUserDefault(models.Model):
+    """صندوق المستخدم الافتراضي داخل شركة — أعلى درجة في سلّم حلّ الصندوق.
+
+    يسكن في `accounting` لا على عضوية `tenants`: `accounting` يستورد `tenants`
+    أصلاً، فمفتاحٌ أجنبي في الاتجاه المعاكس دورةُ استيراد.
+    """
+
+    id = models.AutoField(primary_key=True, db_column="CashBoxUserDefaultID")
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column="TenantID")
+    user = models.ForeignKey(
+        "auth.User", on_delete=models.CASCADE, db_column="UserID",
+        related_name="cash_box_defaults")
+    cash_box = models.ForeignKey(
+        CashBoxLedgerAccount, on_delete=models.CASCADE, db_column="CashBoxLedgerID",
+        related_name="user_defaults")
+
+    class Meta:
+        db_table = "cash_box_user_defaults"
+        managed = True
+        unique_together = [["tenant", "user"]]
+
+    def __str__(self):
+        return f"{self.user_id} → {self.cash_box_id}"
 
 
 class CashBoxFxLot(models.Model):
@@ -555,6 +593,100 @@ class CashBoxFxLot(models.Model):
 
     def __str__(self):
         return f"Lot {self.id}: {self.remaining_fc}/{self.original_fc} @ {self.rate}"
+
+
+class CashTransfer(models.Model):
+    """تحويل نقدي بين خزينتين — صندوق↔صندوق أو صندوق↔بنك.
+
+    T-CASHBOX M6: مستندٌ بطرفين وقيدٌ واحد، بدل أن يكون التحويل «إيداعاً هنا
+    وسحباً هناك» لا يربطهما شيء. الطرف الواحد إمّا صندوق أو حساب بنكي — يحرسه
+    `create_cash_transfer` لا قيدٌ في القاعدة (طرفان اختياريان بطبيعتهما).
+    """
+
+    id = models.AutoField(primary_key=True, db_column='CashTransferID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    number = models.IntegerField(default=0, db_column='Number')
+    transfer_date = models.DateField(db_column='TransferDate')
+    from_cash_box = models.ForeignKey(
+        CashBoxLedgerAccount, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='FromCashBoxID', related_name='transfers_out')
+    from_bank_account = models.ForeignKey(
+        'BankAccount', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='FromBankAccountID', related_name='transfers_out')
+    to_cash_box = models.ForeignKey(
+        CashBoxLedgerAccount, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='ToCashBoxID', related_name='transfers_in')
+    to_bank_account = models.ForeignKey(
+        'BankAccount', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='ToBankAccountID', related_name='transfers_in')
+    amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount',
+                                 help_text='المبلغ بعملة الطرف المُرسِل')
+    rate = models.DecimalField(max_digits=18, decimal_places=6, default=1,
+                               db_column='Rate', help_text='سعر الصرف حين تختلف العملتان')
+    notes = models.TextField(null=True, blank=True, db_column='Notes')
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='cash_transfers')
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy', related_name='cash_transfers')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'cash_transfers'
+        managed = True
+        ordering = ['-transfer_date', '-id']
+
+    def __str__(self):
+        return f"تحويل #{self.number or self.id}: {self.amount}"
+
+
+class CashCount(models.Model):
+    """جرد صندوق — عدّ النقد الفعلي ومقارنته بالرصيد الدفتري.
+
+    T-CASHBOX M6: الفرق (عجز/زيادة) يُرحَّل قيداً إلى حسابَي العجز والزيادة
+    المعرَّفين في الإعدادات — نمط Odoo (Profit/Loss Account). `denominations`
+    تفصيل عدّ الفئات كما أدخله العادّ، محفوظ للمراجعة لا للحساب: الإجمالي
+    المعتمد هو `counted_total`.
+    """
+
+    STATUS_DRAFT = 'draft'
+    STATUS_POSTED = 'posted'
+    STATUS_CHOICES = [(STATUS_DRAFT, 'مسودة'), (STATUS_POSTED, 'مرحَّل')]
+
+    id = models.AutoField(primary_key=True, db_column='CashCountID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    cash_box = models.ForeignKey(
+        CashBoxLedgerAccount, on_delete=models.PROTECT,
+        db_column='CashBoxLedgerID', related_name='counts')
+    count_date = models.DateField(db_column='CountDate')
+    book_balance = models.DecimalField(max_digits=18, decimal_places=2, default=0,
+                                       db_column='BookBalance',
+                                       help_text='الرصيد الدفتري لحظة الجرد')
+    counted_total = models.DecimalField(max_digits=18, decimal_places=2, default=0,
+                                        db_column='CountedTotal')
+    difference = models.DecimalField(max_digits=18, decimal_places=2, default=0,
+                                     db_column='Difference',
+                                     help_text='المعدود − الدفتري: موجب زيادة، سالب عجز')
+    denominations = models.JSONField(null=True, blank=True, db_column='Denominations')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES,
+                              default=STATUS_DRAFT, db_column='Status')
+    notes = models.TextField(null=True, blank=True, db_column='Notes')
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='cash_counts')
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy', related_name='cash_counts')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'cash_counts'
+        managed = True
+        ordering = ['-count_date', '-id']
+
+    def __str__(self):
+        return f"جرد {self.cash_box_id} @ {self.count_date}: {self.difference}"
 
 
 class Bank(models.Model):

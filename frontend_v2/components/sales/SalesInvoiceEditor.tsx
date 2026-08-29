@@ -22,6 +22,8 @@ import {
   type SalesInvoiceRow,
   salesInvoiceContextApi,
 } from "../../services/salesApi";
+import { accountingApi, type CashBoxLedgerLink } from "../../services/accountingApi";
+import { pickDefaultCashAccount } from "../../utils/cashBox";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { ShareDocumentModal } from "../shared/ShareDocumentModal";
@@ -97,6 +99,7 @@ import {
   ExternalLink,
   Wrench,
   StickyNote,
+  Wallet,
 } from "lucide-react";
 import { eventBus } from "../../utils/eventBus";
 import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
@@ -341,6 +344,9 @@ type Props = {
   /** M5: فتح الأستاذ العام لحساب العميل المرتبط (drill-down من رصيد العميل). */
   onOpenGeneralLedger?: (accountId: number) => void;
   initialCustomerId?: number;
+  /** T-PAYFULL: الفتح من زرّ «مدفوعة» في القائمة (`?pay=full`) — تُعبَّأ لوحة
+   *  التحصيل بكامل المتبقّي مرّةً واحدة بعد تحميل الفاتورة. */
+  autoFillCollectFull?: boolean;
   salesSettings?: {
     default_customer: number | null;
     default_currency: number | null;
@@ -395,6 +401,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   onOpenGeneralLedger,
   salesSettings,
   initialCustomerId,
+  autoFillCollectFull = false,
 }) => {
   const confirm = useConfirm();
   const { can: canPerm, uiMode } = usePermissions();
@@ -722,6 +729,18 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     () => accounts.filter(isCashboxAccount).sort((a, b) => (a.code || "").localeCompare(b.code || "")),
     [accounts]
   );
+
+  /* T-CASHBOX M1: الصناديق المسجَّلة — مصدر الافتراضي وعملتُه. الحسابات
+     المفلترة من الشجرة (`cashboxAccounts`) تبقى لملء المنتقي، لكن **ترتيبها
+     لا يختار**: الاختيار من الصندوق المُعلَن افتراضياً والمطابق للعملة. */
+  const [cashBoxes, setCashBoxes] = useState<CashBoxLedgerLink[]>([]);
+  useEffect(() => {
+    accountingApi.getCashBoxLedgers().then(setCashBoxes).catch(() => setCashBoxes([]));
+  }, []);
+  const docCurrencyCode = useMemo(
+    () => (currencyId !== "" ? currencies.find((c) => c.CurrencyID === currencyId)?.Code : undefined),
+    [currencyId, currencies],
+  );
   const revenueAccounts = useMemo(
     () => accounts.filter(isRevenueAccount).sort((a, b) => (a.code || "").localeCompare(b.code || "")),
     [accounts]
@@ -813,16 +832,24 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       setCashAccountId(salesSettings.default_cash_account);
       return;
     }
-    if (!cashboxAccounts.length) return;
-    setCashAccountId(cashboxAccounts[0].id);
-  }, [invType, cashboxAccounts, cashAccountId, salesSettings?.default_cash_account]);
+    // T-CASHBOX M1: بلا إعداد، الصندوق المسجَّل الافتراضي (المطابق للعملة إن
+    // وُجد) لا «أوّل حساب نقدي في الشجرة» — ترتيبُ الشجرة ليس نيّةَ مستخدم.
+    const pick = pickDefaultCashAccount({ boxes: cashBoxes, currency: docCurrencyCode });
+    if (pick.accountId) setCashAccountId(pick.accountId);
+  }, [invType, cashBoxes, cashAccountId, docCurrencyCode,
+      salesSettings?.default_cash_account]);
 
-  /** T4: صندوق التحصيل الافتراضي — إعدادات المبيعات ثم أول صندوق في الشجرة. */
+  /** T4: صندوق التحصيل الافتراضي — الإعداد ثم الصندوق الافتراضي بعملة المستند. */
   useEffect(() => {
     if (collectCashAccountId !== "") return;
-    const fallback = salesSettings?.default_cash_account ?? cashboxAccounts[0]?.id ?? null;
-    if (fallback != null) setCollectCashAccountId(fallback);
-  }, [collectCashAccountId, cashboxAccounts, salesSettings?.default_cash_account]);
+    const pick = pickDefaultCashAccount({
+      boxes: cashBoxes,
+      currency: docCurrencyCode,
+      settingsAccountId: salesSettings?.default_cash_account ?? null,
+    });
+    if (pick.accountId != null) setCollectCashAccountId(pick.accountId);
+  }, [collectCashAccountId, cashBoxes, docCurrencyCode,
+      salesSettings?.default_cash_account]);
 
   /* T4: رصيد العميل «على الحساب» = سنداته المرحّلة التي بقي منها غير موزَّع.
      نفس مصدر `SettleFromOnAccountModal` الذي حلّت هذه اللوحة محلّه هنا — مصدر
@@ -2713,6 +2740,41 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     collectCashInputRef.current?.focus();
   };
 
+  /**
+   * T-PAYFULL (مرآة محرّر الشراء): «مدفوعة» تضع كامل المتبقّي في خانة النقد
+   * وتنزل باللوحة — التنفيذ يبقى بزرّ «تسجيل دفعة».
+   *
+   * على المسودة الأساسُ `remainingAfterIntent` لا `remaining`: النيّة المحفوظة
+   * تتجسّد سنداً عند الترحيل، فالتعبئة بالخام تدفع مرّتين.
+   */
+  const fillCollectFull = () => {
+    if (customerId === "") {
+      setLocalErr("اختر العميل أولاً.");
+      return;
+    }
+    const remaining = isPosted ? settlement.remaining : settlement.remainingAfterIntent;
+    if (remaining <= 0.009) {
+      setMsg("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.");
+      return;
+    }
+    setLocalErr(null);
+    setCollectCash(remaining.toFixed(2));
+    collectPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    collectCashInputRef.current?.focus();
+  };
+
+  /* T-PAYFULL: الوصول من زرّ «مدفوعة» في قائمة المبيعات — مرّةً واحدة بحارس
+     `ref`، وبعد أن يصل الصندوق الافتراضي كي لا تُعبَّأ لوحةٌ لا تقبل الإرسال. */
+  const collectFullAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!autoFillCollectFull || collectFullAppliedRef.current) return;
+    if (!draftId || customerId === "" || !showCollectPanel) return;
+    if (collectCashAccountId === "") return;
+    collectFullAppliedRef.current = true;
+    fillCollectFull();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFillCollectFull, draftId, customerId, showCollectPanel, collectCashAccountId]);
+
   const patchCheque = (key: string, patch: Partial<CollectChequeRow>) =>
     setCollectCheques((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
@@ -3063,6 +3125,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       onClick: !(isPosted && remainingDue <= 0.009) ? focusCollectPanel : undefined,
       disabled: isPosted && remainingDue <= 0.009,
       separatorBefore: true,
+    } as KitToolbarAction] : []),
+    // T-PAYFULL: الطريق القصير — «مدفوعة» تعبّئ المتبقّي كاملاً، و«سند قبض»
+    // يبقى مسار الجزئي والشيكات ورصيد العميل.
+    ...(!isReturn && canPerm("sales.payment.create") && (isPosted || invoicePermissions.canSaveAndPost) ? [{
+      key: "collect-full",
+      label: isPosted && remainingDue <= 0.009 ? "مسدَّدة" : "مدفوعة",
+      icon: <Wallet />,
+      onClick: !(isPosted && remainingDue <= 0.009) ? fillCollectFull : undefined,
+      disabled: isPosted && remainingDue <= 0.009,
     } as KitToolbarAction] : []),
     // التسليم: نافذة سريعة تُنشئ إرسالية بالبنود المؤشَّرة، أو المحرّر الكامل
     // في شاشة الإرساليات بالفاتورة نفسها مربوطةً مسبقاً (مرآة فاتورة الشراء).
@@ -3575,6 +3646,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       onFillCashShortfall={() =>
         setCollectCash((collectCashNum + cashInvoiceShortfall).toFixed(2))
       }
+      onFillFull={() => setCollectCash(payment.remainingBefore.toFixed(2))}
       onMakeCredit={() => setInvType("credit")}
       onSubmit={() => void submitCollect()}
       cashAccountField={(

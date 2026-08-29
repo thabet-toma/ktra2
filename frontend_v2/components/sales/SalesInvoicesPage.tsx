@@ -33,6 +33,7 @@ import {
   Plus,
   Printer,
   FileText,
+  Wallet,
 } from "lucide-react";
 import { SalesInvoiceEditor, type PartnerRow, type ProductRow } from "./SalesInvoiceEditor";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -611,6 +612,26 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               </button>
             </>
           )}
+          {/* T-PAYFULL: «مدفوعة» من القائمة — تفتح الفاتورة ولوحة التحصيل
+              معبّأة بالمتبقّي كاملاً (مرآة زرّ فواتير الشراء). */}
+          {r.status === "posted"
+            // المرجع لا يُحصَّل — ولوحةُ التحصيل مخفيّة عليه في المحرّر، فزرٌّ
+            // هنا كان سيقود إلى طريقٍ مسدود.
+            && r.invoice_kind !== "sale_return"
+            && Number(r.grand_total || 0) - Number(r.amount_paid || 0) > 0.009 && (
+            <button
+              type="button"
+              className="ktra-toolbtn"
+              style={{ fontSize: "10px", padding: "2px 6px" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                openInNewTab(`/sales/invoices/${r.id}?pay=full`);
+              }}
+              title="تحصيل كامل المتبقّي"
+            >
+              <Wallet className="w-3 h-3" /> مدفوعة
+            </button>
+          )}
           {r.status === "posted" && !r.stock_on_post && r.delivery_status !== "delivered" && (
             <>
               <button
@@ -798,6 +819,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             onOpenGeneralLedger={onOpenGeneralLedger}
             salesSettings={salesSettings}
             initialCustomerId={new URLSearchParams(location.search).get("customer_id") ? Number(new URLSearchParams(location.search).get("customer_id")) : undefined}
+            /* T-PAYFULL: `?pay=full` من زرّ «مدفوعة» في القائمة. */
+            autoFillCollectFull={new URLSearchParams(location.search).get("pay") === "full"}
           />
         </div>
       )}

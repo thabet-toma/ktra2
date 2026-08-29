@@ -37,6 +37,18 @@ type Calls = { pay: Array<Record<string, unknown>> };
 
 const openInvoice = async (page: Page): Promise<Calls> => {
   const calls: Calls = { pay: [] };
+  /** ما سُدِّد حتى الآن في هذه الجلسة — يجعل الموجِّه يحاكي الخادم لا لقطةً جامدة. */
+  let settled = 0;
+  const paidInvoice = () => INVOICE({
+    amount_paid: settled,
+    remaining_balance: Math.max(100 - settled, 0),
+    payment_status: settled >= 100 ? 'paid' : settled > 0 ? 'partially_paid' : 'unpaid',
+    payment_status_display: settled >= 100
+      ? 'مدفوعة بالكامل' : settled > 0 ? 'مدفوعة جزئياً' : 'غير مدفوعة',
+    payment_details: settled > 0
+      ? [{ id: 555, paymentDate: '2026-08-11', amount: String(settled), isPosted: true }]
+      : [],
+  });
   await page.addInitScript(() => {
     localStorage.setItem('token', 'appay-token');
     localStorage.setItem('userId', 'appay-user');
@@ -84,6 +96,18 @@ const openInvoice = async (page: Page): Promise<Calls> => {
         { id: 21, code: '2101', name: 'ذمم الموردين', account_type: 'Liability' },
       ]);
     }
+    /* T-CASHBOX M1: الصندوق الافتراضي صار يُحلّ من **الصناديق المسجَّلة** لا من
+       أوّل حساب نقدي في الشجرة — فبلا هذين المُوجِّهَين تبقى اللوحة بلا صندوق
+       ويرفض زرُّ الدفع الإرسال. */
+    if (url.pathname.endsWith('/accounting/cash-box-accounts/my-default/')) {
+      return json({ cash_box: 1, cash_box_name: 'الصندوق الرئيسي' });
+    }
+    if (url.pathname.endsWith('/accounting/cash-box-accounts/')) {
+      return json([{
+        id: 1, name: 'الصندوق الرئيسي', account_id: 10, account_code: '1101',
+        currency_code: 'ILS', is_default: true, is_active: true,
+      }]);
+    }
     // سلفة مرحّلة للمورّد بقي منها 25 «على الحساب».
     if (url.pathname.endsWith('/logistics/supplier-payments/')) {
       return json({
@@ -95,16 +119,19 @@ const openInvoice = async (page: Page): Promise<Calls> => {
       });
     }
     if (/\/logistics\/purchase-invoices\/77\/pay\/$/.test(url.pathname)) {
-      calls.pay.push(route.request().postDataJSON());
-      return json({
-        invoice: INVOICE({
-          amount_paid: 100, remaining_balance: 0,
-          payment_status: 'paid', payment_status_display: 'مدفوعة بالكامل',
-        }),
-        payment_id: 555,
-      });
+      const body = route.request().postDataJSON();
+      calls.pay.push(body);
+      // الخادم يخصم المدفوع فعلاً — والمحرّر يُعيد الجلب بعد الدفع
+      // (`reloadInvoice`)، فلو بقي الموجِّه يعيد الفاتورة غيرَ مدفوعة لكذّبت
+      // الشاشةُ نفسَها. الحالة هنا تُحاكي الخادم بعد السند.
+      settled = Number(body.cash || 0)
+        + (body.cheques || []).reduce(
+          (s: number, c: { amount?: string }) => s + Number(c.amount || 0), 0)
+        + (body.from_on_account || []).reduce(
+          (s: number, r: { amount?: string }) => s + Number(r.amount || 0), 0);
+      return json({ invoice: paidInvoice(), payment_id: 555 });
     }
-    if (/\/logistics\/purchase-invoices\/77\/$/.test(url.pathname)) return json(INVOICE());
+    if (/\/logistics\/purchase-invoices\/77\/$/.test(url.pathname)) return json(paidInvoice());
     return json([]);
   });
   await page.goto('/purchase-invoices/77');
@@ -200,4 +227,59 @@ test('تجاوز المتبقّي يُظهر تنبيه «الفائض يُسج�
   await page.getByTestId('payment-cash').fill('150');
   await expect(page.getByTestId('payment-remaining')).toHaveText('0');
   await expect(page.getByTestId('payment-overpay-note')).toContainText('50');
+});
+
+/* ── T-PAYFULL: التسديد الكامل بلا كتابة رقم ──────────────────────────────
+   كان على المستخدم أن يقرأ المتبقّي ثم يكتبه بيده في كل تسديدٍ تام — وهو
+   الحالة الغالبة. زرّ «مدفوعة» في الشريط، و«المتبقي كاملاً» في اللوحة،
+   يعبّئان الخانة والإرسال يبقى بزرّ «تسجيل دفعة» (قرار المالك: لا سند
+   يُرحَّل بنقرةٍ واحدة بلا مراجعة الصندوق والمبلغ). */
+
+test('«المتبقي كاملاً» في اللوحة يملأ النقد بالمتبقّي ويُنزل المتبقي إلى صفر', async ({ page }) => {
+  await openInvoice(page);
+
+  await expect(page.getByTestId('payment-cash')).toHaveValue('');
+  await expect(page.getByTestId('payment-remaining')).toHaveText('100');
+
+  await page.getByTestId('payment-fill-full').click();
+
+  await expect(page.getByTestId('payment-cash')).toHaveValue('100.00');
+  await expect(page.getByTestId('payment-remaining')).toHaveText('0');
+});
+
+test('زرّ «مدفوعة» في الشريط يعبّئ اللوحة، والإرسال يُنتج سند صرف بكامل المبلغ', async ({ page }) => {
+  const calls = await openInvoice(page);
+
+  await page.getByRole('button', { name: 'مدفوعة', exact: true }).click();
+  await expect(page.getByTestId('payment-cash')).toHaveValue('100.00');
+  await expect(page.getByTestId('payment-remaining')).toHaveText('0');
+  // تعبئةٌ لا إرسال — لا نداء قبل ضغط «تسجيل دفعة».
+  expect(calls.pay).toHaveLength(0);
+
+  await page.getByTestId('payment-submit').click();
+  await expect.poll(() => calls.pay.length, { timeout: 15000 }).toBe(1);
+
+  const body = calls.pay[0] as {
+    cash: string;
+    cheques: unknown[];
+    from_on_account: unknown[];
+    post_invoice: boolean;
+  };
+  expect(body.cash).toBe('100.00');
+  expect(body.cheques).toHaveLength(0);
+  expect(body.from_on_account).toHaveLength(0);
+  expect(body.post_invoice).toBe(false);
+
+  // وبعد الردّ: الحالة تنقلب فوراً — «مسدَّدة» في الشريط واللوحة تنسحب.
+  await expect(page.getByRole('button', { name: 'مسدَّدة', exact: true }).first())
+    .toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('document-payment-panel')).toHaveCount(0);
+});
+
+test('الفتح بـ`?pay=full` من القائمة يصل واللوحة معبّأة سلفاً', async ({ page }) => {
+  await openInvoice(page);
+  await page.goto('/purchase-invoices/77?pay=full');
+
+  await expect(page.getByTestId('payment-cash')).toHaveValue('100.00', { timeout: 20000 });
+  await expect(page.getByTestId('payment-remaining')).toHaveText('0');
 });

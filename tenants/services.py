@@ -70,6 +70,8 @@ COA_DATA = [
     ('4102', 'مبيعات الخدمات (Service Sales)', 'Revenue', '41'),
     ('42', 'إيرادات أخرى (Other Revenue)', 'Revenue', '4'),
     ('4201', 'فروق صرف محقّقة (Realized FX Gain/Loss)', 'Revenue', '42'),
+    # T-CASHBOX M6: طرفا فرق جرد الصندوق — الزيادة إيراد والعجز مصروف.
+    ('4202', 'زيادة الصندوق (Cash Overage)', 'Revenue', '42'),
 
     # Expenses (5)
     ('51', 'تكلفة المبيعات (Cost of Goods Sold)', 'Expense', '5'),
@@ -79,6 +81,7 @@ COA_DATA = [
     ('5203', 'المرافق - كهرباء ومياه (Utilities)', 'Expense', '52'),
     ('5204', 'التسويق والإعلان (Marketing)', 'Expense', '52'),
     ('5205', 'مصاريف السفر (Travel Expenses)', 'Expense', '52'),
+    ('5206', 'عجز الصندوق (Cash Shortage)', 'Expense', '52'),
     # Direct / Import-related expenses
     ('53', 'مصاريف الاستيراد المباشرة (Direct Import Expenses)', 'Expense', '5'),
     ('5301', 'مصاريف الشحن الدولي (International Shipping)', 'Expense', '53'),

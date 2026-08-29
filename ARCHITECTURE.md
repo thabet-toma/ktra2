@@ -22,10 +22,10 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 <!-- AUTO:apps_table:START -->
 | App | المسؤولية | كود | اختبار | مسار الـAPI |
 |---|---|---:|---:|---|
-| `logistics` | الاستيراد والمشتريات: صفقة ← شحنة ← تخليص ← نقل ← فاتورة دولية + التكلفة المستوردة | 18,800 | 10,600 | `/api/logistics/` |
+| `logistics` | الاستيراد والمشتريات: صفقة ← شحنة ← تخليص ← نقل ← فاتورة دولية + التكلفة المستوردة | 18,800 | 10,700 | `/api/logistics/` |
 | `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة، الداشبورد، المساعد الذكي | 15,900 | 8,100 | `/api/` (متفرّق) |
-| `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 12,400 | 6,400 | `/api/accounting/` |
-| `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 11,300 | 8,200 | `/api/sales/` |
+| `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 13,500 | 6,900 | `/api/accounting/` |
+| `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 11,400 | 8,400 | `/api/sales/` |
 | `hr` | الموظفون والرواتب والحضور الجغرافي والورديات والعقود والطلبات والسلف والخدمة الذاتية | 7,100 | 3,900 | `/api/hr/` |
 | `inventory` | المنتجات والمستودعات و`StockMovement` (المصدر الوحيد للرصيد ومتوسط التكلفة) والأرقام التسلسلية وحالة المخزون وحدود التجديد | 5,600 | 3,400 | `/api/inventory/` |
 | `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية — وفوقها **طبقة مكتب** بنطاق `accountant=` لا `tenant=`: زبائن المكتب (ولو لم يكونوا شركات على المنصة) وبرامجه ومواعيده ومستنداته | 4,600 | 3,800 | `/api/accountant/` |
@@ -131,6 +131,8 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 | فاتورة بيع: إنشاء/ترحيل/إلغاء ترحيل | `modules/sales.md` + `modules/accounting.md` | `sales/services/` (`post_sales_invoice`), `sales/views.py` |
 | قيد محاسبي أو شجرة حسابات | `modules/accounting.md` | `accounting/services.py` (`post_journal`) |
 | شيكات / بنوك / مطابقة | `modules/accounting.md` | `accounting/services.py` (`transfer_cheque`), `accounting/services.py` (`INCOMING_TRANSITIONS`) |
+| صندوق نقدي: إنشاء/كشف/تحويل/جرد | `modules/accounting.md` §الخزينة | `accounting/services.py` (`create_cash_box`, `cash_box_statement`), `frontend_v2/components/finance/CashBoxList.tsx` |
+| «من أي صندوق يُدفع؟» | `modules/accounting.md` §الخزينة | `accounting/services.py` (`resolve_cash_account`), `frontend_v2/utils/cashBox.ts` |
 | حركة مخزون أو تكلفة | `modules/inventory.md` | `inventory/services.py` (`record_stock_movement`) |
 | أرقام تسلسلية | `modules/inventory.md` | `inventory/serials.py` |
 | «ما هذا الرقم؟» — مسح باركود/سيريال/IMEI | `modules/core.md` + `modules/frontend.md` | `core/scan.py` (`resolve_scan`), `frontend_v2/components/shared/ScanLookupPanel.tsx` |

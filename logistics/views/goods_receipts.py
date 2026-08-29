@@ -42,7 +42,7 @@ from partners.models import Partner
 from tenants.models import Tenant, Currency
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting import api as accounting_api
-from accounting.cashbox import resolve_default_cash_box_account
+from accounting.services import resolve_cash_account
 from accounting.services import (
     annotate_partner_posted_balance,
     create_audit_log,

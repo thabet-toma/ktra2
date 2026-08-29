@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **551**
+عدد النقاط: **560**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -84,10 +84,19 @@
 | `/api/accounting/banks/{pk}/` | `BankViewSet` | `accounting/views.py` |
 | `/api/accounting/cash-box-accounts/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
 | `/api/accounting/cash-box-accounts/deposit-journal/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
+| `/api/accounting/cash-box-accounts/my-default/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
 | `/api/accounting/cash-box-accounts/{pk}/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
+| `/api/accounting/cash-box-accounts/{pk}/adjust/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
 | `/api/accounting/cash-box-accounts/{pk}/fund-capital/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
 | `/api/accounting/cash-box-accounts/{pk}/fx-lots/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
+| `/api/accounting/cash-box-accounts/{pk}/set-default/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
+| `/api/accounting/cash-box-accounts/{pk}/statement/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
 | `/api/accounting/cash-box-accounts/{pk}/transfer-from-ils/` | `CashBoxLedgerViewSet` | `accounting/views.py` |
+| `/api/accounting/cash-counts/` | `CashCountViewSet` | `accounting/views.py` |
+| `/api/accounting/cash-counts/{pk}/` | `CashCountViewSet` | `accounting/views.py` |
+| `/api/accounting/cash-counts/{pk}/post/` | `CashCountViewSet` | `accounting/views.py` |
+| `/api/accounting/cash-transfers/` | `CashTransferViewSet` | `accounting/views.py` |
+| `/api/accounting/cash-transfers/{pk}/` | `CashTransferViewSet` | `accounting/views.py` |
 | `/api/accounting/cheques/` | `ChequeViewSet` | `accounting/views.py` |
 | `/api/accounting/cheques/deposit-batch/` | `ChequeViewSet` | `accounting/views.py` |
 | `/api/accounting/cheques/wallet/` | `ChequeViewSet` | `accounting/views.py` |

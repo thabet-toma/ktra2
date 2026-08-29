@@ -3,7 +3,7 @@ from decimal import Decimal
 from rest_framework import serializers
 from .models import (
     Account, JournalHeader, JournalLine, Cheque, ChequeMovement, CostCenter,
-    CashBoxLedgerAccount, ExchangeRate, FiscalPeriod, TaxRate,
+    CashBoxLedgerAccount, CashCount, CashTransfer, ExchangeRate, FiscalPeriod, TaxRate,
     Bank, BankBranch, BankAccount, BankReconciliation,
     OpeningBalanceAccountLine, OpeningBalanceStockLine,
 )
@@ -626,8 +626,16 @@ class CashBoxLedgerAccountSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CashBoxLedgerAccount
-        fields = ["id", "external_id", "name", "currency_code", "account_id", "account_code", "balance"]
-        read_only_fields = ["id", "account_id", "account_code", "balance"]
+        fields = [
+            "id", "external_id", "name", "currency_code", "account_id",
+            "account_code", "balance", "is_default", "is_active", "notes",
+        ]
+        # `external_id` مفتاح توافق يولّده الخادم — لا يُعدَّل بعد الإنشاء وإلا
+        # انفصل الصندوق عن وثيقة مرآته. و`is_default` يُضبط بنقطته وحدها
+        # لأن وحدانيّته تحتاج معاملة تُصفّر أشقاءه.
+        read_only_fields = [
+            "id", "account_id", "account_code", "balance", "external_id", "is_default",
+        ]
 
     def get_balance(self, obj):
         from django.db.models import Sum, DecimalField
@@ -641,6 +649,53 @@ class CashBoxLedgerAccountSerializer(serializers.ModelSerializer):
             c=Coalesce(Sum("credit"), 0, output_field=DecimalField(max_digits=18, decimal_places=2)),
         )
         return str((agg["d"] or 0) - (agg["c"] or 0))
+
+
+class CashTransferSerializer(serializers.ModelSerializer):
+    """T-CASHBOX M6: التحويل مستندٌ يُقرأ — وطرفاه يُمرَّران للخدمة لا للنموذج."""
+
+    from_name = serializers.SerializerMethodField()
+    to_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CashTransfer
+        fields = [
+            "id", "number", "transfer_date", "amount", "rate", "notes",
+            "from_cash_box", "from_bank_account", "to_cash_box", "to_bank_account",
+            "from_name", "to_name", "journal", "created_at",
+        ]
+        read_only_fields = fields
+
+    def _side_name(self, box, bank):
+        if box is not None:
+            return box.name
+        return bank.name if bank is not None else None
+
+    def get_from_name(self, obj):
+        return self._side_name(obj.from_cash_box, obj.from_bank_account)
+
+    def get_to_name(self, obj):
+        return self._side_name(obj.to_cash_box, obj.to_bank_account)
+
+
+class CashCountSerializer(serializers.ModelSerializer):
+    cash_box_name = serializers.CharField(source="cash_box.name", read_only=True)
+    currency_code = serializers.CharField(source="cash_box.currency_code", read_only=True)
+    cash_box = TenantScopedPrimaryKeyRelatedField(
+        queryset=CashBoxLedgerAccount.objects.all())
+
+    class Meta:
+        model = CashCount
+        fields = [
+            "id", "cash_box", "cash_box_name", "currency_code", "count_date",
+            "book_balance", "counted_total", "difference", "denominations",
+            "status", "notes", "journal", "created_at",
+        ]
+        # الدفتري والفرق يحسبهما الخادم لحظة الترحيل — رقمٌ من العميل هنا
+        # يجعل الجرد يشهد على نفسه.
+        read_only_fields = [
+            "id", "book_balance", "difference", "status", "journal", "created_at",
+        ]
 
 
 class ExchangeRateSerializer(serializers.ModelSerializer):

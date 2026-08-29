@@ -370,3 +370,62 @@ test("تجاوز المتبقّي يُظهر تنبيه «الفائض يُسج�
   await expect(note).toHaveText("الفائض 30 يُسجَّل دفعة على الحساب.");
   await page.screenshot({ path: `${SHOTS}/03-overpayment-notice.png`, fullPage: true });
 });
+
+/* ── T-PAYFULL: التحصيل الكامل بلا كتابة رقم (مرآة فاتورة الشراء) ─────────
+   شكوى المالك: «لما أكبس مدفوعة لازم تتغير الحالة مباشرة، يجبلي سند الدفع
+   مكانه والباقي صفر». الزرّ يعبّئ، و«تسجيل دفعة» يُنتج السند — والردّ نفسه
+   يقلب الشاشة بلا جلبٍ ثانٍ. */
+
+test("«المتبقي كاملاً» و«مدفوعة» يعبّئان النقد بكامل المتبقّي", async ({ page }) => {
+  const panel = await openPanel(page);
+
+  await expect(panel.getByLabel("المدفوع نقداً")).toHaveValue("");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("100");
+
+  // زرّ اللوحة.
+  await page.getByTestId("payment-fill-full").click();
+  await expect(panel.getByLabel("المدفوع نقداً")).toHaveValue("100.00");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("0");
+
+  // وزرّ الشريط يفعل الشيء نفسه بعد تفريغ الخانة.
+  await panel.getByLabel("المدفوع نقداً").fill("");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("100");
+  await page.getByRole("button", { name: "مدفوعة", exact: true }).click();
+  await expect(panel.getByLabel("المدفوع نقداً")).toHaveValue("100.00");
+  await expect(page.getByTestId("payment-remaining")).toHaveText("0");
+});
+
+test("«مدفوعة» ثم «تسجيل دفعة» ⇒ سند قبض بكامل المبلغ والحالة تنقلب فوراً", async ({ page }) => {
+  await openPanel(page);
+
+  await page.getByRole("button", { name: "مدفوعة", exact: true }).click();
+  const collectRequest = page.waitForRequest((request) =>
+    request.method() === "POST"
+    && new URL(request.url()).pathname.endsWith("/sales/invoices/301/collect/"),
+  );
+  await page.getByTestId("payment-submit").click();
+  const payload = (await collectRequest).postDataJSON();
+  expect(payload).toEqual({
+    cash: "100.00",
+    cash_account_id: 10,
+    cheques: [],
+    from_on_account: [],
+    post_invoice: false,
+  });
+
+  // «حركة» يراها المستخدم: السند بمكانه، والزرّ صار «مسدَّدة»، واللوحة انسحبت.
+  await expect(page.getByText("سند قبض #777", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: "مسدَّدة", exact: true }).first())
+    .toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("document-payment-panel")).toHaveCount(0);
+});
+
+test("الفتح بـ`?pay=full` من القائمة يصل واللوحة معبّأة سلفاً", async ({ page }) => {
+  await installMocks(page);
+  await page.goto("/sales/invoices/301?pay=full");
+
+  const panel = page.getByTestId("document-payment-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await expect(panel.getByLabel("المدفوع نقداً")).toHaveValue("100.00", { timeout: 15_000 });
+  await expect(page.getByTestId("payment-remaining")).toHaveText("0");
+});

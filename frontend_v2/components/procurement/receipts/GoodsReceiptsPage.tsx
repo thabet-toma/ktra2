@@ -10,7 +10,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FileSearch, Loader2, Pencil, Printer, Save, Trash2, X } from "lucide-react";
+import { FileSearch, Loader2, PackageCheck, Pencil, Printer, Save, Trash2, X } from "lucide-react";
 import {
   createGoodsReceipt,
   deleteGoodsReceipt,
@@ -81,6 +81,36 @@ const blankLine = (warehouseId: number | ""): LineState => ({
 
 const productLabel = (p: ProductOpt) => p.name_ar || p.name_en || p.sku || `#${p.id}`;
 
+/** المستودع الافتراضي من قائمة المستودعات — تُستدعى من الـmemo ومن مسار الفتح
+ *  معاً: هناك لا تكون الحالة قد وصلت بعد، فتمرّ القيمة بالمعامل لا بالإغلاق. */
+const defaultWarehouseOf = (whs: WarehouseOpt[]): number | "" =>
+  whs.find((w) => w.is_default)?.id ?? whs[0]?.id ?? "";
+
+/**
+ * «استلام الكل»: بنود الفاتورة التي بقي منها شيء ⇒ صفوفُ محرّرٍ جاهزة بالكمية
+ * المتبقّية كاملةً. الحالة الغالبة أن تصل الشحنة تامّة، فالإرسالية تُفتح مملوءة
+ * ويُنقص المستخدم منها ما نقص — لا أن يبنيها بنداً بنداً من الصفر (نفس ما تفعل
+ * Odoo في *Receive Products* وZoho في *Purchase Receive*).
+ * الطرح لا يقع هنا: `remaining_quantity` من الخادم — مصدر «الباقي» الوحيد.
+ */
+const receivableToLines = (
+  rows: ReceivableLineRow[],
+  warehouseId: number | "",
+): LineState[] =>
+  rows
+    .filter((l) => Number(l.remaining_quantity) > 0)
+    .map((l) => ({
+      item_id: l.item_id,
+      product_id: l.product,
+      product_name: l.product_name || l.name,
+      ordered: Number(l.quantity) || 0,
+      received: Number(l.received_quantity) || 0,
+      remaining: Number(l.remaining_quantity) || 0,
+      quantity: String(Number(l.remaining_quantity) || 0),
+      unit_price: String(Number(l.unit_price) || 0),
+      warehouse_id: warehouseId,
+    }));
+
 export const GoodsReceiptsPage: React.FC = () => {
   const toast = useToast();
   const confirm = useConfirm();
@@ -123,7 +153,7 @@ export const GoodsReceiptsPage: React.FC = () => {
   const docLabel = isStandalone ? labels.standalone : labels.linked;
 
   const defaultWarehouse = useMemo<number | "">(
-    () => warehouses.find((w) => w.is_default)?.id ?? warehouses[0]?.id ?? "",
+    () => defaultWarehouseOf(warehouses),
     [warehouses]
   );
 
@@ -159,8 +189,10 @@ export const GoodsReceiptsPage: React.FC = () => {
     })();
   }, []);
 
-  /** مراجع المحرّر: فواتير قابلة للاستلام + مستودعات + موردون + منتجات. */
-  const loadRefs = useCallback(async () => {
+  /** مراجع المحرّر: فواتير قابلة للاستلام + مستودعات + موردون + منتجات.
+   *  تُعيد المستودعات بالقيمة كي يستعملها مسار الفتح فوراً — الحالة لا تكون
+   *  قد وصلت بعد في نفس الدورة. */
+  const loadRefs = useCallback(async (): Promise<{ warehouses: WarehouseOpt[] }> => {
     try {
       const tenantId = resolveTenantId();
       const [invs, whs, parts, prods] = await Promise.all([
@@ -196,14 +228,25 @@ export const GoodsReceiptsPage: React.FC = () => {
       // الخادم لا يفلتر بالنوع — نُبقي الطرف المطلوب فقط.
       setPartners((parts || []).filter((p) => p.partner_type === "Supplier"));
       setProducts(prods || []);
+      return { warehouses: whs || [] };
     } catch (e) {
       setErr(e instanceof Error ? e.message : "فشل تحميل بيانات المحرّر");
+      return { warehouses: [] };
     }
   }, []);
 
-  /** تحميل بنود الفاتورة المرتبطة — مصدر خيارات منتقي البنود. */
+  /** تحميل بنود الفاتورة المرتبطة — مصدر خيارات منتقي البنود.
+   *
+   *  `autofillWarehouse` ممرَّراً ⇒ تُملأ بنود المحرّر بكامل المتبقّي فور
+   *  اختيار الفاتورة («استلام الكل» ضمنياً). التمرير بالمعامل لا بالحالة:
+   *  الدالة `useCallback([])` وإغلاقها لا يرى `defaultWarehouse` الطازج.
+   */
   const pickInvoice = useCallback(
-    async (invoiceId: number | "", keepLines = false) => {
+    async (
+      invoiceId: number | "",
+      opts?: { keepLines?: boolean; autofillWarehouse?: number | "" },
+    ) => {
+      const keepLines = opts?.keepLines === true;
       setFormInvoice(invoiceId);
       if (!keepLines) setFormLines([]);
       setInvoiceLines([]);
@@ -226,6 +269,11 @@ export const GoodsReceiptsPage: React.FC = () => {
             ? null
             : "فاتورة مستوردة — بضاعتها تُستلَم من تخليص الشحنة لا من إرسالية."
         );
+        // المستوردة لا تُعبَّأ: بضاعتها تدخل من التخليص، وتعبئتها تدعو إلى
+        // استلامٍ مزدوج. رسالة الخطأ أعلاه تشرح السبب للمستخدم.
+        if (data.is_local && opts?.autofillWarehouse !== undefined && !keepLines) {
+          setFormLines(receivableToLines(data.lines || [], opts.autofillWarehouse));
+        }
       } catch (e) {
         setErr(e instanceof Error ? e.message : "تعذر تحميل بنود الفاتورة");
       }
@@ -245,8 +293,13 @@ export const GoodsReceiptsPage: React.FC = () => {
       setFormLines([]);
       setFormInvoice("");
       setFormInvoiceLabel("");
-      await loadRefs();
-      if (invoiceId) await pickInvoice(invoiceId);
+      const refs = await loadRefs();
+      // الفتح من زرّ «استلام» في الفاتورة: تُملأ الإرسالية بكامل المتبقّي.
+      if (invoiceId) {
+        await pickInvoice(invoiceId, {
+          autofillWarehouse: defaultWarehouseOf(refs.warehouses),
+        });
+      }
     },
     [loadRefs, pickInvoice]
   );
@@ -262,7 +315,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       setFormPartner(doc.partner ?? "");
       await loadRefs();
       if (doc.invoice) {
-        await pickInvoice(doc.invoice, true);
+        await pickInvoice(doc.invoice, { keepLines: true });
       } else {
         setFormInvoice("");
         setFormInvoiceLabel("");
@@ -363,6 +416,25 @@ export const GoodsReceiptsPage: React.FC = () => {
   }, [isStandalone, products, formLines, invoiceLines, usedItems]);
 
   const addLine = () => setFormLines((ls) => [...ls, blankLine(defaultWarehouse)]);
+
+  /** «استلام الكل»: يعيد بناء البنود من كامل متبقّي الفاتورة.
+   *  صريحٌ لا تلقائي بعد الفتحة الأولى — فحذفُ صفٍّ يبقى محذوفاً، ولا يعود
+   *  ما استبعده المستخدمُ من خلفه. */
+  const fillAllRemaining = async () => {
+    if (formLines.length > 0) {
+      const ok = await confirm({
+        title: "استلام الكل",
+        message: "سيُستبدل ما في الجدول بكل المتبقّي من الفاتورة. متابعة؟",
+        confirmText: "استلام الكل",
+      });
+      if (!ok) return;
+    }
+    setFormLines(receivableToLines(invoiceLines, defaultWarehouse));
+  };
+
+  /** يظهر زرّ «استلام الكل» ما دام في الفاتورة المرتبطة باقٍ يُستلَم. */
+  const hasReceivableRemaining =
+    !isStandalone && invoiceLines.some((l) => Number(l.remaining_quantity) > 0);
 
   const updateLine = (idx: number, patch: Partial<LineState>) =>
     setFormLines((ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
@@ -921,6 +993,17 @@ export const GoodsReceiptsPage: React.FC = () => {
                   >
                     <FileSearch className="h-4 w-4" />
                   </button>
+                  {hasReceivableRemaining && (
+                    <button
+                      type="button"
+                      className="ktra-toolbtn"
+                      data-testid="receipt-fill-all"
+                      title="تعبئة الجدول بكل المتبقّي من الفاتورة"
+                      onClick={() => void fillAllRemaining()}
+                    >
+                      <PackageCheck className="h-4 w-4" /> استلام الكل
+                    </button>
+                  )}
                   {!isStandalone && (
                     <button
                       type="button"
@@ -1040,7 +1123,8 @@ export const GoodsReceiptsPage: React.FC = () => {
             emptyHint="لا توجد فواتير شراء قابلة للاستلام."
             onPick={(inv) => {
               setPickerOpen(false);
-              void pickInvoice(inv.id);
+              // نفس سلوك الفتح من الفاتورة: تُملأ بالمتبقّي كاملاً.
+              void pickInvoice(inv.id, { autofillWarehouse: defaultWarehouse });
             }}
             onClose={() => setPickerOpen(false)}
           />

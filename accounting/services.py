@@ -1223,18 +1223,82 @@ def allowed_movement_options(cheque, *, has_active_bank_accounts=None) -> list:
 
 # T-DEFACC: أكواد الصندوق/البنك في الشجرة المعيارية — 1101 النقدية، 1102 البنوك،
 # 1110 صناديق النقدية. تُستعمل حين تكون الإعدادات فارغة كي لا يبقى أي مستند بلا صندوق.
+#
+# T-CASHBOX M1 — **هذه عُقَد مجمّعة لا صناديق**: المطابقة هنا تامّة (`code=`)،
+# و«1110 صناديق النقدية» أبُ الصناديق لا صندوق؛ الصندوق الفعلي كوده `1110B0001`.
+# فبنيوياً لم تكن هذه السلسلة تُعيد صندوقاً حقيقياً أبداً: شركةٌ بعشرة صناديق
+# كانت كل سنداتها تقع على «1101 النقدية» العامّ. لذلك تسبقها الآن خطوة الصندوق
+# المسجَّل، وبقيت هي آخر شبكة أمان لشجرةٍ بلا صناديق مسجَّلة.
 DEFAULT_CASH_ACCOUNT_CODES = ("1101", "1102", "1110")
 
 
-def resolve_default_cash_account(tenant_id: int):
-    """حساب الصندوق/البنك الافتراضي للشركة — مصدر واحد لكل المستندات.
+def _default_cash_box_link(tenant_id: int, *, currency_code: str | None = None):
+    """صندوق الشركة الافتراضي: المُعلَن `is_default` ← مطابق العملة ← أوّل نشط."""
+    from .models import CashBoxLedgerAccount
 
-    فاتورة البيع، فاتورة الشراء، سند القبض وسند الصرف كانت كلٌّ منها تحلّ
-    الصندوق بطريقتها (أو تترك الحقل فارغاً فيرفض الحفظ). الترتيب الآن:
-    إعدادات المبيعات ← إعدادات الشراء ← 1101/1102/1110 ← أول حساب أصل باسم نقدي.
-    يُعيد None فقط إن كانت الشجرة بلا أي حساب نقدي.
+    base = (
+        CashBoxLedgerAccount.objects
+        .filter(tenant_id=tenant_id, is_active=True, account__is_active=True)
+        .select_related("account")
+    )
+    if currency_code:
+        matching = base.filter(currency_code__iexact=currency_code)
+        return (
+            matching.filter(is_default=True).first()
+            or matching.order_by("id").first()
+            or base.filter(is_default=True).first()
+            or base.order_by("id").first()
+        )
+    return base.filter(is_default=True).first() or base.order_by("id").first()
+
+
+def resolve_cash_account(tenant_id: int, *, explicit_account_id=None, user=None,
+                         currency_code: str | None = None, required: bool = True):
+    """سلّم حلّ حساب الصندوق/البنك — **المصدر الواحد لكل المستندات**.
+
+    T-CASHBOX M3: كان في النظام محلّان لا يتحادثان (`resolve_default_cash_account`
+    للمستندات، و`accounting/cashbox.py` (`resolve_default_cash_box_account`)
+    لدفعات الاستيراد) وثالثٌ ضمنيّ في الواجهة يلتقط «أوّل حساب نقدي في الشجرة».
+    الترتيب الآن واحد لا ثالث له:
+
+    الاختيار الصريح ← صندوق المستخدم الافتراضي ← صندوق الشركة الافتراضي ←
+    إعدادات المبيعات/الشراء ← الشجرة المعيارية (شبكة أمان) ← خطأ إرشادي.
+
+    و«أوّل حساب نقدي» ليست خطوةً هنا ولا في أي مكان: ترتيبُ الشجرة ليس نيّةَ
+    مستخدم، ومنه جاءت شكوى «الدفع دائماً من صندوق الشيقل».
     """
-    from django.db.models import Q
+    if explicit_account_id:
+        acc = Account.objects.filter(
+            pk=explicit_account_id, tenant_id=tenant_id, is_active=True,
+        ).first()
+        if not acc:
+            raise ValidationError(
+                "حساب الصندوق/البنك المحدد غير موجود أو لا يتبع هذه الشركة."
+            )
+        return acc
+
+    if user is not None and getattr(user, "is_authenticated", False):
+        from .models import CashBoxUserDefault
+
+        pref = (
+            CashBoxUserDefault.objects
+            .filter(tenant_id=tenant_id, user=user,
+                    cash_box__is_active=True, cash_box__account__is_active=True)
+            .select_related("cash_box__account")
+            .first()
+        )
+        # تفضيل المستخدم يُتخطّى إن خالف عملة المستند — صندوقٌ بعملة أخرى
+        # اختيارٌ خاطئ صامت، والسلّم يكمل إلى ما يطابق.
+        if pref and (
+            not currency_code
+            or (pref.cash_box.currency_code or "").upper() == currency_code.upper()
+        ):
+            return pref.cash_box.account
+
+    link = _default_cash_box_link(tenant_id, currency_code=currency_code)
+    if link is not None:
+        return link.account
+
     from sales.models import SalesSettings
     from logistics.models import PurchaseSettings
 
@@ -1244,6 +1308,9 @@ def resolve_default_cash_account(tenant_id: int):
     ps = PurchaseSettings.objects.filter(tenant_id=tenant_id).first()
     if ps and ps.default_cash_account_id:
         return ps.default_cash_account
+
+    from django.db.models import Q
+
     base = Account.objects.filter(
         tenant_id=tenant_id, account_type="Asset", is_active=True,
     )
@@ -1251,13 +1318,28 @@ def resolve_default_cash_account(tenant_id: int):
         hit = base.filter(code=code).first()
         if hit:
             return hit
-    return (
+    fallback = (
         base.filter(
             Q(name__icontains="صندوق") | Q(name__icontains="نقد") | Q(name__icontains="بنك")
         )
         .order_by("code")
         .first()
     )
+    if fallback is None and required:
+        raise ValidationError(
+            "لا يوجد صندوق أو حساب بنكي في هذه الشركة. أنشئ صندوقاً من شاشة "
+            "«صناديق الكاش»، أو عيّن الصندوق الافتراضي في إعدادات المبيعات."
+        )
+    return fallback
+
+
+def resolve_default_cash_account(tenant_id: int):
+    """حساب الصندوق/البنك الافتراضي للشركة — غلافٌ متوافق فوق `resolve_cash_account`.
+
+    يبقى لأن له مستدعين كثراً يتوقّعون `None` لا استثناءً عند الشجرة الفارغة.
+    الكود الجديد ينادي `resolve_cash_account` مباشرةً ليمرّر المستخدم والعملة.
+    """
+    return resolve_cash_account(tenant_id, required=False)
 
 
 #: CHQ-1 — كودا حسابَي الشيكات الواردة. 1109 لا 1108: **1108 مأخوذ إنتاجياً**
@@ -2418,6 +2500,443 @@ def bank_account_statement(bank_account, *, start_date=None, end_date=None, post
         "cleared_balance": cleared,
         "rows": rows,
     }
+
+
+# ─────────────────────────── الخزينة: الصناديق النقدية ───────────────────────────
+# T-CASHBOX: الصندوق كيانٌ أول (`CashBoxLedgerAccount`) وحسابُه في الشجرة وجهُه
+# المحاسبي. كل ما تحت هذا العنوان يمرّ بـ`post_journal` كغيره — لا استثناء.
+
+CASH_OVERAGE_ACCOUNT_CODE = "4202"   # زيادة الصندوق (إيراد)
+CASH_SHORTAGE_ACCOUNT_CODE = "5206"  # عجز الصندوق (مصروف)
+
+
+def _ensure_coa_account(tenant, code: str):
+    """حساب معياري من الشجرة، يُنشأ إن غاب — نفس نهج حسابَي الشيكات."""
+    from tenants.services import ensure_operational_account
+
+    acc = Account.objects.filter(tenant=tenant, code=code, is_active=True).first()
+    if acc is None:
+        acc = ensure_operational_account(tenant, code)
+    return acc
+
+
+def create_cash_box(*, tenant, name, currency_code="ILS", is_default=False,
+                    external_id=None, notes=None, user=None):
+    """ينشئ صندوقاً نقدياً وحسابَه في الشجرة تحت «1110» في معاملة واحدة.
+
+    T-CASHBOX M2 — على نمط `create_bank_account`. قبلها كان الإنشاء نداءين من
+    المتصفح (وثيقة المرآة أولاً ثم حساب الشجرة)، فكان فشل النداء الثاني يترك
+    صندوقاً بلا حساب: مالٌ يتحرّك بلا وجهٍ في الدفاتر، وواجهةٌ فيها زرّ إصلاح
+    يدوي. الآن نداءٌ واحد وذرّية واحدة: الحساب والربط ووثيقة المرآة معاً أو
+    لا شيء.
+    """
+    from .account_classification import SUB_TYPE_CASH_BOX
+    from .cashbox import allocate_cash_box_account_code, get_cash_box_parent_account
+    from .models import CashBoxLedgerAccount
+
+    label = (name or "").strip()
+    if not label:
+        raise ValidationError("اسم الصندوق مطلوب.")
+    if len(label) > 100:
+        # اسم الحساب في الشجرة 100 محرف — والبتر الصامت في MySQL ينتج حسابين
+        # بالاسم نفسه لا يفرّق المستخدم بينهما.
+        raise ValidationError("اسم الصندوق طويل — الحدّ 100 محرف.")
+    currency = (currency_code or "ILS").strip().upper()[:3] or "ILS"
+
+    parent = get_cash_box_parent_account(tenant)
+    if parent is None:
+        raise ValidationError(
+            "لم يُعثر على حساب أب للصناديق (1110). أنشئ «11 الأصول المتداولة» أولاً."
+        )
+    ext = (str(external_id).strip() if external_id else "") or uuid.uuid4().hex
+    if CashBoxLedgerAccount.objects.filter(tenant=tenant, external_id=ext[:128]).exists():
+        raise ValidationError("هذا المعرّف مربوط بالفعل بصندوق.")
+
+    with transaction.atomic():
+        code = allocate_cash_box_account_code(parent, tenant)
+        gl = Account.objects.create(
+            tenant=tenant, code=code, name=label[:100], parent=parent,
+            account_type=parent.account_type or "Asset", is_active=True,
+            # صندوقٌ بحكم إنشائه — لا اشتقاق لاحق من الرمز أو الاسم.
+            sub_type=SUB_TYPE_CASH_BOX,
+        )
+        first_box = not CashBoxLedgerAccount.objects.filter(tenant=tenant).exists()
+        make_default = bool(is_default) or first_box
+        if make_default:
+            CashBoxLedgerAccount.objects.filter(
+                tenant=tenant, is_default=True,
+            ).update(is_default=False)
+        box = CashBoxLedgerAccount.objects.create(
+            tenant=tenant, external_id=ext[:128], name=label[:200],
+            currency_code=currency, account=gl, is_default=make_default,
+            is_active=True, notes=(notes or None),
+        )
+        _mirror_cash_box(box, created=True)
+    logger.info(
+        "create_cash_box: tenant=%s box=%s gl=%s(%s) currency=%s default=%s",
+        getattr(tenant, "TenantID", tenant), box.pk, gl.pk, code, currency, make_default,
+    )
+    return box
+
+
+def _mirror_cash_box(box, *, created=False):
+    """يكتب وثيقة الصندوق في مرآة `bridge` ليبقى قرّاؤها القدامى يعملون.
+
+    المرآة صارت **مشتقّة**: الخادم وحده يكتبها، والرصيد فيها لا يُعتمد (مصدر
+    الرصيد هو دفتر الأستاذ). فشلُها لا يُسقط إنشاء الصندوق — التوافق ليس مالاً.
+    """
+    try:
+        from bridge.models import FirestoreMirrorDoc
+
+        # `path` فريد **عالمياً** لا لكل شركة، فالبحث به وحده والشركة تُكتب
+        # قيمةً لا مفتاحاً — وإلا اصطدم إدراجٌ ثانٍ بنفس المسار.
+        path = f"cashBoxes/{box.external_id}"
+        doc, _ = FirestoreMirrorDoc.objects.get_or_create(
+            path=path, defaults={"data": {}, "tenant": box.tenant},
+        )
+        if doc.tenant_id != box.tenant_id:
+            doc.tenant = box.tenant
+            doc.save(update_fields=["tenant"])
+        data = dict(doc.data or {})
+        data.update({
+            "id": box.external_id,
+            "name": box.name,
+            "currency": box.currency_code,
+            "isActive": box.is_active,
+        })
+        if created:
+            data.setdefault("currentBalance", 0)
+        doc.data = data
+        doc.save(update_fields=["data"])
+    except Exception:
+        logger.warning("mirror sync failed for cash box %s", box.pk, exc_info=True)
+
+
+def set_default_cash_box(box, *, user=None):
+    """يجعل الصندوق افتراضي الشركة — واحدٌ فقط، ذرّياً."""
+    from .models import CashBoxLedgerAccount
+
+    with transaction.atomic():
+        CashBoxLedgerAccount.objects.filter(
+            tenant_id=box.tenant_id, is_default=True,
+        ).exclude(pk=box.pk).update(is_default=False)
+        if not box.is_default:
+            box.is_default = True
+            box.save(update_fields=["is_default"])
+    return box
+
+
+def update_cash_box(box, *, name=None, is_active=None, notes=None,
+                    currency_code=None, user=None):
+    """تعديل صندوق — والاسم يزامن حسابَه في الشجرة والمرآة معاً.
+
+    قبلها كانت إعادة التسمية تقع في المرآة وحدها فيبقى اسم الشجرة القديم:
+    اسمان لصندوق واحد، وكشفٌ لا يطابق شجرة.
+    """
+    from .models import CashBoxFxLot
+
+    fields = []
+    if name is not None:
+        label = (name or "").strip()
+        if not label:
+            raise ValidationError("اسم الصندوق مطلوب.")
+        if len(label) > 100:
+            raise ValidationError("اسم الصندوق طويل — الحدّ 100 محرف.")
+        box.name = label[:200]
+        fields.append("name")
+    if notes is not None:
+        box.notes = notes or None
+        fields.append("notes")
+    if currency_code is not None:
+        cur = (currency_code or "").strip().upper()[:3]
+        if cur and cur != (box.currency_code or "").upper():
+            # طبقات FIFO محسوبة بعملة الصندوق — تغييرها بعدها يجعل الرصيد
+            # الدفتري بلا معنى، فيُمنع بدل أن يفسد بصمت.
+            if CashBoxFxLot.objects.filter(cash_box=box).exists():
+                raise ValidationError(
+                    "لا يمكن تغيير عملة صندوق له طبقات عملة أجنبية — أنشئ صندوقاً جديداً."
+                )
+            box.currency_code = cur
+            fields.append("currency_code")
+    if is_active is not None:
+        box.is_active = bool(is_active)
+        fields.append("is_active")
+        if not box.is_active and box.is_default:
+            box.is_default = False
+            fields.append("is_default")
+    if fields:
+        with transaction.atomic():
+            box.save(update_fields=fields)
+            if "name" in fields and box.account_id:
+                Account.objects.filter(pk=box.account_id).update(name=box.name[:100])
+            _mirror_cash_box(box)
+    return box
+
+
+def cash_box_statement(cash_box, *, start_date=None, end_date=None, posted_only=True):
+    """كشف الصندوق من دفتر الأستاذ برصيد جارٍ حقيقي.
+
+    T-CASHBOX M4 — نظير `bank_account_statement` بلا أعمدة المطابقة. قبلها كان
+    الكشف يُبنى في المتصفح بدمج سجلّ المرآة مع أسطر الأستاذ وترتيبٍ مُلفَّق
+    (الأستاذ مثبَّت على 12:00 ثم `journal_id ‰ 1000 × 0.001`)، فعمود «الرصيد»
+    لم يكن رصيداً جارياً بل مجموعاً تراكمياً لترتيبٍ عشوائي.
+    """
+    from django.db.models import Sum
+
+    qs = (
+        JournalLine.objects
+        .filter(tenant_id=cash_box.tenant_id, account_id=cash_box.account_id)
+        .select_related("journal", "partner")
+    )
+    if posted_only:
+        qs = qs.filter(journal__is_posted=True)
+
+    opening = Decimal("0.00")
+    if start_date:
+        agg = qs.filter(journal__transaction_date__lt=start_date).aggregate(
+            d=Sum("debit"), c=Sum("credit"),
+        )
+        opening = (agg["d"] or Decimal("0")) - (agg["c"] or Decimal("0"))
+        qs = qs.filter(journal__transaction_date__gte=start_date)
+    if end_date:
+        qs = qs.filter(journal__transaction_date__lte=end_date)
+
+    rows = []
+    balance = opening
+    for line in qs.order_by("journal__transaction_date", "journal_id", "id"):
+        balance += (line.debit or Decimal("0")) - (line.credit or Decimal("0"))
+        rows.append({
+            "journal_line_id": line.id,
+            "journal_id": line.journal_id,
+            "date": line.journal.transaction_date,
+            "reference_type": line.journal.reference_type,
+            "reference_id": line.journal.reference_id,
+            "description": line.description or line.journal.description or "",
+            "partner": line.partner.name if line.partner_id else None,
+            "debit": line.debit,
+            "credit": line.credit,
+            "balance": balance,
+        })
+    return {
+        "cash_box_id": cash_box.id,
+        "account_id": cash_box.account_id,
+        "currency_code": cash_box.currency_code,
+        "opening_balance": opening,
+        "closing_balance": balance,
+        "rows": rows,
+    }
+
+
+def cash_box_balance(cash_box, *, as_of=None) -> Decimal:
+    """رصيد الصندوق الدفتري من الأسطر المرحّلة."""
+    from django.db.models import Sum
+
+    qs = JournalLine.objects.filter(
+        tenant_id=cash_box.tenant_id, account_id=cash_box.account_id,
+        journal__is_posted=True,
+    )
+    if as_of:
+        qs = qs.filter(journal__transaction_date__lte=as_of)
+    agg = qs.aggregate(d=Sum("debit"), c=Sum("credit"))
+    return ((agg["d"] or Decimal("0")) - (agg["c"] or Decimal("0"))).quantize(Decimal("0.01"))
+
+
+def cash_box_adjustment(cash_box, *, direction, amount, contra_account=None,
+                        date=None, memo="", user=None):
+    """إيداع نقد في صندوق أو سحبه منه — «Put money in / Take money out».
+
+    T-CASHBOX M6: تعميم `deposit-journal` القديم الذي كان إيداعاً فقط ومفتاحه
+    `external_id`. المقابل الافتراضي حساب رأس المال (إيداع المالك)، ويجوز
+    تمريره صراحةً (مصروف نثري مثلاً).
+    """
+    from .cashbox import get_cash_box_capital_account
+
+    if direction not in ("in", "out"):
+        raise ValidationError("اتجاه الحركة يجب أن يكون in أو out.")
+    value = Decimal(str(amount or 0)).quantize(Decimal("0.01"))
+    if value <= 0:
+        raise ValidationError("المبلغ يجب أن يكون أكبر من صفر.")
+    if not cash_box.is_active:
+        raise ValidationError("الصندوق معطَّل — فعّله قبل تسجيل حركة عليه.")
+    when = date or timezone.localdate()
+
+    contra = contra_account or get_cash_box_capital_account(cash_box.tenant)
+    if contra is None:
+        raise ValidationError(
+            "لا يوجد حساب مقابل للحركة — عيّن حساب رأس مال (Equity) في الشجرة."
+        )
+    if direction == "out":
+        available = cash_box_balance(cash_box, as_of=when)
+        if value > available:
+            raise ValidationError(
+                f"رصيد {cash_box.name} لا يكفي: المتاح {available}، والمطلوب {value}."
+            )
+    label = memo.strip() or (
+        f"إيداع في {cash_box.name}" if direction == "in" else f"سحب من {cash_box.name}"
+    )
+    box_debit = value if direction == "in" else Decimal("0")
+    box_credit = Decimal("0") if direction == "in" else value
+    return post_journal(
+        tenant_id=cash_box.tenant_id,
+        transaction_date=when,
+        reference_type="CASHBOX_ADJUSTMENT",
+        reference_id=cash_box.id,
+        description=label,
+        lines_data=[
+            {"account": cash_box.account_id, "debit": box_debit,
+             "credit": box_credit, "description": label},
+            {"account": contra.id, "debit": box_credit,
+             "credit": box_debit, "description": label},
+        ],
+        user=user,
+        idempotent=False,
+    )
+
+
+def _transfer_side(box=None, bank_account=None):
+    """يتحقّق من طرف تحويلٍ واحد ويُرجع (حسابه، اسمه، عملته)."""
+    if bool(box) == bool(bank_account):
+        raise ValidationError("كل طرف من طرفَي التحويل صندوقٌ واحد أو حساب بنكي واحد.")
+    if box is not None:
+        if not box.is_active:
+            raise ValidationError(f"الصندوق {box.name} معطَّل.")
+        return box.account_id, box.name, (box.currency_code or "").upper()
+    return (
+        bank_account.account_id, bank_account.name,
+        (getattr(bank_account.currency, "code", "") or "").upper(),
+    )
+
+
+def create_cash_transfer(*, tenant, transfer_date, amount, from_cash_box=None,
+                         from_bank_account=None, to_cash_box=None,
+                         to_bank_account=None, rate=None, notes=None, user=None):
+    """تحويل نقدي بين خزينتين — مستندٌ واحد بقيدٍ واحد.
+
+    T-CASHBOX M6: كان التحويل يُسجَّل إيداعاً هنا وسحباً هناك بلا رابط، فلا
+    يُعرف أنهما حركة واحدة ولا يُعكسان معاً. أمّا التحويل إلى صندوق عملة
+    أجنبية فيُفوَّض إلى `fx_fifo.transfer_ils_to_fx` لأن طبقات FIFO هي مصدر
+    تكلفة العملة، وقيدٌ مباشر بجانبها يفسدها بصمت.
+    """
+    from .models import CashTransfer
+
+    value = Decimal(str(amount or 0)).quantize(Decimal("0.01"))
+    if value <= 0:
+        raise ValidationError("مبلغ التحويل يجب أن يكون أكبر من صفر.")
+    when = transfer_date or timezone.localdate()
+    src_account_id, src_name, src_currency = _transfer_side(from_cash_box, from_bank_account)
+    dst_account_id, dst_name, dst_currency = _transfer_side(to_cash_box, to_bank_account)
+    if src_account_id == dst_account_id:
+        raise ValidationError("لا يمكن التحويل من الخزينة إلى نفسها.")
+
+    available = (
+        cash_box_balance(from_cash_box, as_of=when) if from_cash_box is not None else None
+    )
+    if available is not None and value > available:
+        raise ValidationError(
+            f"رصيد {src_name} لا يكفي: المتاح {available}، والمطلوب {value}."
+        )
+
+    fx_rate = Decimal(str(rate or 1))
+    label = notes or f"تحويل من {src_name} إلى {dst_name}"
+
+    with transaction.atomic():
+        transfer = CashTransfer.objects.create(
+            tenant=tenant, transfer_date=when,
+            from_cash_box=from_cash_box, from_bank_account=from_bank_account,
+            to_cash_box=to_cash_box, to_bank_account=to_bank_account,
+            amount=value, rate=fx_rate, notes=notes or None,
+            created_by=user if getattr(user, "is_authenticated", False) else None,
+        )
+        transfer.number = transfer.id
+        if to_cash_box is not None and dst_currency and dst_currency != src_currency:
+            # الوجهة بعملة أخرى ⇒ المبلغ المُدخل بعملة المصدر، والوارد
+            # للصندوق الأجنبي = المبلغ ÷ السعر، وطبقة FIFO تحفظ سعرها.
+            from .fx_fifo import transfer_ils_to_fx
+
+            if fx_rate <= 0:
+                raise ValidationError("سعر الصرف مطلوب للتحويل بين عملتين مختلفتين.")
+            if from_cash_box is None:
+                raise ValidationError(
+                    "التحويل إلى صندوق عملة أجنبية يبدأ من صندوق نقدي لا من حساب بنكي."
+                )
+            fc = (value / fx_rate).quantize(Decimal("0.0001"))
+            lot = transfer_ils_to_fx(
+                to_cash_box, from_cash_box, fc, fx_rate, date=when, user=user,
+            )
+            transfer.journal = lot.journal
+        else:
+            jh = post_journal(
+                tenant_id=tenant.pk, transaction_date=when,
+                reference_type="CASH_TRANSFER", reference_id=transfer.id,
+                description=label,
+                lines_data=[
+                    {"account": dst_account_id, "debit": value,
+                     "credit": Decimal("0"), "description": label},
+                    {"account": src_account_id, "debit": Decimal("0"),
+                     "credit": value, "description": label},
+                ],
+                user=user,
+            )
+            transfer.journal = jh
+        transfer.save(update_fields=["number", "journal"])
+    logger.info(
+        "create_cash_transfer: tenant=%s transfer=%s %s→%s amount=%s",
+        tenant.pk, transfer.id, src_account_id, dst_account_id, value,
+    )
+    return transfer
+
+
+def post_cash_count(count, *, user=None):
+    """يرحّل فرق جرد الصندوق: الزيادة إيراد (4202) والعجز مصروف (5206).
+
+    T-CASHBOX M6 — نمط Odoo (Profit/Loss Account). الفرق صفراً ⇒ لا قيد،
+    والمستند يبقى سجلَّ جردٍ مطابق.
+    """
+    from .models import CashCount
+
+    if count.status == CashCount.STATUS_POSTED:
+        return count
+    box = count.cash_box
+    book = cash_box_balance(box, as_of=count.count_date)
+    counted = Decimal(str(count.counted_total or 0)).quantize(Decimal("0.01"))
+    diff = (counted - book).quantize(Decimal("0.01"))
+
+    with transaction.atomic():
+        count.book_balance = book
+        count.difference = diff
+        count.status = CashCount.STATUS_POSTED
+        if diff != 0:
+            over = diff > 0
+            contra = _ensure_coa_account(
+                box.tenant,
+                CASH_OVERAGE_ACCOUNT_CODE if over else CASH_SHORTAGE_ACCOUNT_CODE,
+            )
+            if contra is None:
+                raise ValidationError(
+                    "تعذّر تحديد حساب فرق الجرد (4202/5206) — أنشئه في شجرة الحسابات."
+                )
+            label = (
+                f"زيادة جرد {box.name}" if over else f"عجز جرد {box.name}"
+            )
+            magnitude = abs(diff)
+            count.journal = post_journal(
+                tenant_id=box.tenant_id, transaction_date=count.count_date,
+                reference_type="CASH_COUNT", reference_id=count.id,
+                description=label,
+                lines_data=[
+                    {"account": box.account_id,
+                     "debit": magnitude if over else Decimal("0"),
+                     "credit": Decimal("0") if over else magnitude,
+                     "description": label},
+                    {"account": contra.id,
+                     "debit": Decimal("0") if over else magnitude,
+                     "credit": magnitude if over else Decimal("0"),
+                     "description": label},
+                ],
+                user=user,
+            )
+        count.save(update_fields=["book_balance", "difference", "status", "journal"])
+    return count
 
 
 def bank_reconciliation_summary(reconciliation):

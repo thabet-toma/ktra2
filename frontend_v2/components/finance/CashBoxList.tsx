@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Wallet, ArrowRightLeft, Pencil, Layers } from 'lucide-react';
+import { Plus, Wallet, ArrowRightLeft, Pencil, Layers, ArrowLeftRight, Calculator } from 'lucide-react';
 import { CashBox } from '../../types';
 import { cashBoxesService } from '../../services/firestoreService';
 import { accountingApi, type CashBoxLedgerLink } from '../../services/accountingApi';
 import { CreateCashBoxModal } from './modals/CreateCashBoxModal';
 import { EditCashBoxModal } from './modals/EditCashBoxModal';
 import { FundFxBoxModal } from './modals/FundFxBoxModal';
+import { CashTransferModal } from './modals/CashTransferModal';
+import { CashCountModal } from './modals/CashCountModal';
 import { formatDateValue } from "../../utils/formatDate";
 
 interface CashBoxListProps {
@@ -20,6 +22,10 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
     const [ledgerByExt, setLedgerByExt] = useState<Record<string, CashBoxLedgerLink>>({});
     // صندوق العملة الأجنبية (الدولار) المراد تمويله بطبقات FIFO
     const [fundBox, setFundBox] = useState<CashBoxLedgerLink | null>(null);
+    // T-CASHBOX M6: عمليات الخزينة — تحويل بين الخزائن وجرد صندوق.
+    const [transferFrom, setTransferFrom] = useState<CashBoxLedgerLink | null>(null);
+    const [transferOpen, setTransferOpen] = useState(false);
+    const [countBox, setCountBox] = useState<CashBoxLedgerLink | null>(null);
     const ilsBoxes = (Object.values(ledgerByExt) as CashBoxLedgerLink[]).filter((l) => l.currency_code === 'ILS');
 
     const refreshLedgers = useCallback(async () => {
@@ -62,13 +68,22 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                         كل صندوق له حساب نقدية في شجرة المحاسبة بنفس الاسم — يُستخدم في قيود الدفع.
                     </p>
                 </div>
-                <button
-                    onClick={() => setIsCreateModalOpen(true)}
-                    className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
-                >
-                    <Plus className="w-5 h-5 ml-2" />
-                    صندوق جديد
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => { setTransferFrom(null); setTransferOpen(true); }}
+                        className="flex items-center px-4 py-2 rounded-lg border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-3)] transition"
+                    >
+                        <ArrowLeftRight className="w-5 h-5 ml-2" />
+                        تحويل بين الخزائن
+                    </button>
+                    <button
+                        onClick={() => setIsCreateModalOpen(true)}
+                        className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                    >
+                        <Plus className="w-5 h-5 ml-2" />
+                        صندوق جديد
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -98,6 +113,33 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                                             <Layers className="w-4 h-4" />
                                         </button>
                                     )}
+                                    {ledgerByExt[box.id] && (
+                                        <>
+                                            <button
+                                                type="button"
+                                                title="جرد الصندوق"
+                                                className="p-2 rounded-lg text-purple-700 hover:bg-purple-50 dark:hover:bg-gray-700"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setCountBox(ledgerByExt[box.id]);
+                                                }}
+                                            >
+                                                <Calculator className="w-4 h-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                title="تحويل من هذا الصندوق"
+                                                className="p-2 rounded-lg text-blue-700 hover:bg-blue-50 dark:hover:bg-gray-700"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setTransferFrom(ledgerByExt[box.id]);
+                                                    setTransferOpen(true);
+                                                }}
+                                            >
+                                                <ArrowLeftRight className="w-4 h-4" />
+                                            </button>
+                                        </>
+                                    )}
                                     <button
                                         type="button"
                                         title="تعديل الصندوق"
@@ -124,15 +166,29 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                             </div>
                         </div>
 
-                        <h3 className="text-lg font-bold dark:text-white mb-1">{box.name}</h3>
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <h3 className="text-lg font-bold dark:text-white">{box.name}</h3>
+                            {/* T-CASHBOX: الافتراضي مُعلَن على البطاقة — هو ما تقع
+                                عليه السندات حين لا يختار المستخدم صندوقاً. */}
+                            {ledgerByExt[box.id]?.is_default && (
+                                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-800 dark:bg-blue-900/40 dark:text-blue-200">
+                                    الافتراضي
+                                </span>
+                            )}
+                            {ledgerByExt[box.id]?.is_active === false && (
+                                <span className="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-muted)]">
+                                    معطَّل
+                                </span>
+                            )}
+                        </div>
                         {ledgerByExt[box.id] ? (
                             <p className="text-xs text-green-700 dark:text-green-400 mb-1 font-medium">
                                 حساب الشجرة:{' '}
                                 <span className="font-mono">{ledgerByExt[box.id].account_code}</span>
                             </p>
                         ) : (
-                            <p className="text-xs text-[var(--color-text-muted)] mb-1">
-                                بلا حساب في الشجرة
+                            <p className="text-xs text-amber-700 dark:text-amber-400 mb-1">
+                                بلا حساب في الشجرة — شغّل backfill_cash_boxes
                             </p>
                         )}
                         <p className="text-sm text-[var(--color-text-muted)] mb-4">تم الإنشاء: {formatDateValue(box.createdAt)}</p>
@@ -191,6 +247,19 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                 ilsBoxes={ilsBoxes}
                 onClose={() => setFundBox(null)}
                 onFunded={() => void refreshLedgers()}
+            />
+            <CashTransferModal
+                isOpen={transferOpen}
+                boxes={Object.values(ledgerByExt) as CashBoxLedgerLink[]}
+                fromBox={transferFrom}
+                onClose={() => { setTransferOpen(false); setTransferFrom(null); }}
+                onTransferred={() => void refreshLedgers()}
+            />
+            <CashCountModal
+                isOpen={countBox !== null}
+                box={countBox}
+                onClose={() => setCountBox(null)}
+                onCounted={() => void refreshLedgers()}
             />
         </div>
     );

@@ -152,6 +152,18 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 - **«الاستلام مع الترحيل» خيارُ الفاتورة الواحدة، والإعداد العام افتراضُه** — `views/invoices.py` (`post_to_accounting`) يقبل `receive_on_post` في جسم الطلب فيتقدّم على `PurchaseSettings.receive_on_post`. إغفاله يُبقي السلوك القديم حرفياً. الخيار لحظةُ ترحيلٍ لا حقلٌ محفوظ: ما بعده تقوله `receipt_status` والإرساليات.
 - **الطلبية تتحوّل كاملةً مرّةً واحدة** (`PurchaseOrder.invoice` علاقةُ واحد-لواحد) — والتجزئة على مستوى **الاستلام** لا التحويل: طلبيةٌ واحدة ← فاتورةٌ واحدة ← إرساليات متعددة. هذا ما تفعله Odoo (backorder على سند الاستلام) وZoho (عدّة Purchase Receives للطلبية). ولذلك تحمل `PurchaseOrderSerializer` تقدّم استلام فاتورتها (`invoice_receipt_progress`) فلا تنتهي الطلبية عند «محوّلة إلى فاتورة» طريقاً مسدوداً. **لا تُدخِل «كمية محوَّلة» على سطر الطلبية** — تخلق معنىً ثانياً لـ«الباقي» (للفوترة مقابل للاستلام) وتعيد الالتباس الذي أُزيل.
 - **«الباقي على البند» قاعدةٌ واحدة لا نسخ** — `services.py` (`purchase_item_receipt_quantities`): الكمية − المستلَم مقصوصاً عند الصفر وبدقّة العمود (أربع خانات). تستدعيها المواضع الستّة كلّها: تقرير البواقي (`views/goods_receipts.py` — `outstanding`)، وبنود الاستلام (`views/invoices.py` — `receivable_lines`)، وبند الإرسالية ومجموعها (`serializers/goods_receipts.py`)، وحارس `receive_purchase_invoice`، وقراءة الفاتورة (`serializers/invoices.py` — `remaining_quantity` على البند و`receipt_progress` على الرأس). **الواجهة تعرض ولا تطرح** — أيّ طرحٍ فيها نسخةٌ سابعة تفترق غداً.
+- **الإرسالية تُفتح مملوءة لا فارغة**: ربطُ فاتورةٍ بمحرّر الإرسالية
+  (`frontend_v2/components/procurement/receipts/GoodsReceiptsPage.tsx` —
+  `pickInvoice` بخيار `autofillWarehouse`) يبني بنودها من `receivable-lines`
+  بالكمية المتبقّية لكل بند والمستودع الافتراضي — الحالة الغالبة أن تصل الشحنة
+  تامّة، وكان المستخدم يبنيها بنداً بنداً بعد أن كانت البنود بيده. المستلَم
+  بالكامل لا يدخلها، والمستوردة لا تُعبَّأ (بضاعتها من تخليص الشحنة).
+  التعبئة **بالمعامل لا بـeffect**: حذفُ صفٍّ يبقى محذوفاً، وإعادةُ البناء
+  بزرّ **«استلام الكل»** صريحاً بتأكيد. المستودع يُمرَّر بالقيمة من `loadRefs`
+  لا من الحالة — عند الفتح لم تكن قد وصلت بعد. وإرسالية البيع
+  (`frontend_v2/components/sales/DeliveryNotesPage.tsx` — `deliverableToLines`
+  و«تسليم الكل») مرآةٌ حرفية، وفيها الاستثناء `stock_on_post` بدل «المستوردة»:
+  فاتورةٌ تخصم المخزون عند ترحيلها مسلَّمةٌ أصلاً فلا تُعبَّأ.
 - **لا إلغاء ترحيل لفاتورة شراء عليها سند صرف مرحّل**: `services.py`
   (`guard_purchase_invoice_payments_before_unpost`) يُستدعى من `views/invoices.py`
   (`unpost`) في مسارَي الفاتورة والمرجع. كان الحذف يطال قيود الفاتورة وحدها

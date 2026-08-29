@@ -982,8 +982,11 @@ def settle_attached_purchase_intent(invoice, *, user=None) -> Decimal:
     if amount <= 0:
         return Decimal("0.00")
 
+    # T-CASHBOX M1: المرفق **أولاً** — اختيار المستخدم في لوحة الدفع لا يكتبه
+    # إلا `attach-payment/`، بينما رأس الفاتورة تملؤه الواجهة تلقائياً. بالعكس
+    # كان الرأس يبتلع الاختيار فيُدائَن صندوقٌ آخر بصمت.
     cash_account_id = (
-        invoice.cash_or_bank_account_id or invoice.attached_cash_account_id
+        invoice.attached_cash_account_id or invoice.cash_or_bank_account_id
     )
     if not cash_account_id:
         from accounting.services import resolve_default_cash_account

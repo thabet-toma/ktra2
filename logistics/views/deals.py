@@ -45,7 +45,7 @@ from partners.models import Partner
 from tenants.models import Tenant, Currency
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting import api as accounting_api
-from accounting.cashbox import resolve_default_cash_box_account
+from accounting.services import resolve_cash_account
 from accounting.services import (
     annotate_partner_posted_balance,
     create_audit_log,
@@ -725,15 +725,18 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 return Response({'error': 'حساب البنك غير موجود'}, status=status.HTTP_400_BAD_REQUEST)
 
         if bank_account is None:
-            bank_account = resolve_default_cash_box_account(deal.tenant)
+            # T-CASHBOX M3: السلّم الموحّد بدل heuristic «أوّل صندوق USD» —
+            # تفضيل المستخدم ثم افتراضي الشركة المُعلَن ثم الإعدادات.
+            bank_account = resolve_cash_account(
+                deal.tenant_id, user=request.user, required=False,
+            )
 
         if not bank_account:
             return Response(
                 {
                     'error': (
                         'حدد حساب الصندوق: مرّر cash_box_external_id أو bank_account_id، '
-                        'أو أنشئ ربط صندوق في المحاسبة وعيّن DEFAULT_CASH_BOX_EXTERNAL_ID '
-                        'أو صندوقاً بعملة USD ليُستخدم افتراضياً.'
+                        'أو عيّن صندوقاً افتراضياً للشركة من شاشة «صناديق الكاش».'
                     ),
                 },
                 status=status.HTTP_400_BAD_REQUEST,

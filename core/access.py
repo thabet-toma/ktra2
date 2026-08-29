@@ -87,6 +87,13 @@ PERMISSIONS: list[dict] = [
     {"key": "accounting.period.manage", "label": "الفترات المالية والإغلاق السنوي", "group": GROUP_ACCOUNTING},
     {"key": "accounting.report.view", "label": "التقارير المالية", "group": GROUP_ACCOUNTING},
     {"key": "finance.cashbox.manage", "label": "صناديق الكاش (تمويل/تحويل/إيداع)", "group": GROUP_ACCOUNTING},
+    # T-CASHBOX M6: العمليات اليومية على الخزينة تنفصل عن إدارتها — نمط دفترة
+    # الذي يمنح الإيداع والسحب لكل موظف على حدة. `manage` يبقى للإنشاء
+    # والتعديل وتعيين الافتراضي.
+    {"key": "finance.cashbox.deposit", "label": "إيداع نقد في صندوق", "group": GROUP_ACCOUNTING},
+    {"key": "finance.cashbox.withdraw", "label": "سحب نقد من صندوق", "group": GROUP_ACCOUNTING},
+    {"key": "finance.cashbox.transfer", "label": "تحويل بين الخزائن", "group": GROUP_ACCOUNTING},
+    {"key": "finance.cashbox.count", "label": "جرد الصندوق وترحيل فرقه", "group": GROUP_ACCOUNTING},
     # الاستيراد (يبقى مشروطاً بتفعيل الوحدة للشركة — core.import_access)
     {"key": "import.deal.manage", "label": "إدارة صفقات الاستيراد", "group": GROUP_IMPORT},
     {"key": "import.shipment.manage", "label": "إدارة الشحنات والتخليص", "group": GROUP_IMPORT},
@@ -241,6 +248,10 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | _EMPLOYEE_SELF 
     "accounting.account.manage",
     "accounting.period.manage",
     "finance.cashbox.manage",
+    "finance.cashbox.deposit",
+    "finance.cashbox.withdraw",
+    "finance.cashbox.transfer",
+    "finance.cashbox.count",
     "import.doc.unpost",
     # المحاسب يطابق الفاتورة الدولية بالبوليصة والبيان الجمركي — يقرأ الملف
     # ولا يرفع أوراقه.

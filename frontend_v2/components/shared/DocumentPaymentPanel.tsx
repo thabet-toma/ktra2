@@ -13,7 +13,7 @@
  * «تسجيل دفعة» — كما تفعل Odoo بزرّ *Register Payment* على المستندين سواء.
  */
 import React from "react";
-import { Loader2, Plus, Receipt, Save, Trash2 } from "lucide-react";
+import { Loader2, Plus, Receipt, Save, Trash2, Wallet } from "lucide-react";
 import { formatMoney } from "../../utils/formatNumber";
 
 export type PaymentChequeRow = {
@@ -201,6 +201,8 @@ export type DocumentPaymentPanelProps = {
   onPatchCheque: (key: string, patch: Partial<PaymentChequeRow>) => void;
   onRemoveCheque: (key: string) => void;
   onFillCashShortfall: () => void;
+  /** «المتبقي كاملاً»: يضع كامل المتبقّي في خانة النقد — تعبئةٌ لا إرسال. */
+  onFillFull?: () => void;
   onMakeCredit?: () => void;
   /** T-INTENT: حفظ الدفعة على المسودة بلا ترحيل (يُعرض على المسودة وحدها). */
   onSaveIntent?: () => void;
@@ -210,8 +212,8 @@ export type DocumentPaymentPanelProps = {
 export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
   side, derived, input, isPosted, busy, cashAccountField, panelRef, cashInputRef,
   chequesOpen, onToggleCheques, onCashChange, onFromBalanceChange, onAddCheque,
-  onPatchCheque, onRemoveCheque, onFillCashShortfall, onMakeCredit, onSaveIntent,
-  onSubmit,
+  onPatchCheque, onRemoveCheque, onFillCashShortfall, onFillFull, onMakeCredit,
+  onSaveIntent, onSubmit,
 }) => {
   const w = WORDS[side];
   const fmt = (n: number) => formatMoney(n);
@@ -248,6 +250,21 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
               onChange={(e) => onCashChange(e.target.value)}
             />
           </label>
+          {/* «المتبقي كاملاً» — التسديد التام هو الحالة الغالبة، وكتابةُ الرقم
+              يدوياً كانت ضريبةً عليها (Odoo يفتح *Register Payment* والمبلغ
+              معبّأ أصلاً). تعبئةٌ فقط: الإرسال يبقى بزرّ «تسجيل دفعة» أدناه. */}
+          {onFillFull && (
+            <button
+              type="button"
+              className="ktra-toolbtn text-[11px]"
+              data-testid="payment-fill-full"
+              disabled={busy || derived.remainingBefore <= 0.009}
+              title="ضع كامل المتبقّي في خانة النقد"
+              onClick={onFillFull}
+            >
+              <Wallet className="h-3 w-3" /> المتبقي كاملاً {fmt(derived.remainingBefore)}
+            </button>
+          )}
           {cashAccountField}
         </div>
 

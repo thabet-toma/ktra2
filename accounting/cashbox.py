@@ -36,15 +36,19 @@ def get_cash_box_capital_account(tenant):
 
 
 def resolve_default_cash_box_account(tenant):
-    """
-    حساب الصندوق الافتراضي لترحيل دفعات لوجستية عند عدم تمرير cash_box_external_id.
+    """**مسحوب (T-CASHBOX M3)** — لم يبقَ له مستدعٍ إلا الأمر الإداري
+    `rewire_logistics_payment_cash_lines` الذي يعيد توجيه أسطر قيود قديمة بهذه
+    القاعدة نفسها، فتغييرها يغيّر ما يُصلحه.
 
-    الترتيب:
+    كان محلّاً ثانياً لا يتحادث مع محلّ المستندات: دفعات الاستيراد تسقط على
+    «أول صندوق USD» بينما السندات تسقط على «1101 النقدية» — صندوقان مختلفان
+    لشركةٍ واحدة بلا سبب. المحلّ الواحد الآن
+    `accounting/services.py` (`resolve_cash_account`).
+
+    الترتيب (كما كان):
     1) DEFAULT_CASH_BOX_EXTERNAL_ID من الإعدادات → CashBoxLedgerAccount
     2) أول ربط صندوق بعملة USD للمستأجر
     3) أي أول ربط صندوق للمستأجر
-
-    لا يُرجع «أول أصل» في الشجرة (كان يسبب قيوداً على أصول متداولة عامة بالخطأ).
     """
     ext = str(getattr(settings, "DEFAULT_CASH_BOX_EXTERNAL_ID", None) or "").strip()
     if ext:

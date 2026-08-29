@@ -66,9 +66,10 @@ async function asList(res: Response): Promise<any[]> {
   return Array.isArray(data) ? data : (data.results ?? []);
 }
 
-/** ربط صندوق (معرّف Firestore) بحساب في شجرة المحاسبة */
+/** صندوق نقدي — كيانٌ خادميّ وحسابُه في الشجرة وجهُه المحاسبي (T-CASHBOX). */
 export type CashBoxLedgerLink = {
   id: number;
+  /** مفتاح توافق مع قرّاء المرآة القدامى — يولّده الخادم ولا يُعدَّل. */
   external_id: string;
   name: string;
   currency_code: string;
@@ -76,6 +77,33 @@ export type CashBoxLedgerLink = {
   account_code: string;
   /** task16 E16: رصيد دفتر الأستاذ الحقيقي (مدين − دائن، قيود مرحَّلة) */
   balance?: string;
+  is_default?: boolean;
+  is_active?: boolean;
+  notes?: string | null;
+};
+
+/** سطر في كشف الصندوق الخادمي — الرصيد فيه جارٍ حقيقي لا مجموع ترتيبٍ مُلفَّق. */
+export type CashBoxStatementRow = {
+  journal_line_id: number;
+  journal_id: number;
+  date: string;
+  reference_type: string | null;
+  reference_id: number | null;
+  description: string;
+  partner: string | null;
+  debit: string;
+  credit: string;
+  balance: string;
+};
+
+export type CashBoxStatement = {
+  cash_box_id: number;
+  account_id: number;
+  currency_code: string;
+  name?: string;
+  opening_balance: string;
+  closing_balance: string;
+  rows: CashBoxStatementRow[];
 };
 
 export const accountingApi = {
@@ -528,20 +556,142 @@ export const accountingApi = {
     return res.json();
   },
 
-  /** صندوق Firestore = نفس المعرف external_id؛ يُنشأ له حساب أصول في الشجرة بنفس الاسم */
-  registerCashBoxLedger: async (body: {
-    external_id: string;
+  /** ينشئ صندوقاً: الخادم يكتب الحساب في الشجرة ووثيقة المرآة في معاملة واحدة.
+   *
+   * T-CASHBOX M2: كان الإنشاء نداءين من المتصفح (المرآة ثم الحساب) فيبقى
+   * صندوقٌ بلا حساب متى فشل الثاني. `external_id` صار اختيارياً — يولّده الخادم.
+   */
+  createCashBox: async (body: {
     name: string;
     currency_code?: string;
-  }) => {
+    external_id?: string;
+    is_default?: boolean;
+    notes?: string;
+  }): Promise<CashBoxLedgerLink> => {
     const res = await fetch(`${ACC}/cash-box-accounts/`, {
       method: "POST",
       headers: headers(),
       body: JSON.stringify(body),
     });
-    await handle(res, "registerCashBoxLedger");
+    await handle(res, "createCashBox");
     return res.json();
   },
+
+  /** تعديل صندوق — الاسم يزامن حسابه في الشجرة، والتعطيل يخفيه من المنتقيات. */
+  updateCashBox: async (
+    id: number,
+    body: { name?: string; is_active?: boolean; notes?: string; currency_code?: string },
+  ): Promise<CashBoxLedgerLink> => {
+    const res = await fetch(`${ACC}/cash-box-accounts/${id}/`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "updateCashBox");
+    return res.json();
+  },
+
+  setDefaultCashBox: async (id: number): Promise<CashBoxLedgerLink> => {
+    const res = await fetch(`${ACC}/cash-box-accounts/${id}/set-default/`, {
+      method: "POST", headers: headers(), body: "{}",
+    });
+    await handle(res, "setDefaultCashBox");
+    return res.json();
+  },
+
+  getMyDefaultCashBox: async (): Promise<{ cash_box: number | null; cash_box_name: string | null }> => {
+    const res = await fetch(`${ACC}/cash-box-accounts/my-default/`, { headers: headers() });
+    await handle(res, "getMyDefaultCashBox");
+    return res.json();
+  },
+
+  setMyDefaultCashBox: async (cashBoxId: number | null) => {
+    const res = await fetch(`${ACC}/cash-box-accounts/my-default/`, {
+      method: "PUT", headers: headers(), body: JSON.stringify({ cash_box: cashBoxId }),
+    });
+    await handle(res, "setMyDefaultCashBox");
+    return res.json();
+  },
+
+  /** كشف الصندوق برصيد جارٍ خادمي — بديل دمج المصدرين في المتصفح. */
+  getCashBoxStatement: async (
+    id: number,
+    params: { start_date?: string; end_date?: string; include_unposted?: boolean } = {},
+  ): Promise<CashBoxStatement> => {
+    const qs = new URLSearchParams();
+    if (params.start_date) qs.set("start_date", params.start_date);
+    if (params.end_date) qs.set("end_date", params.end_date);
+    if (params.include_unposted) qs.set("include_unposted", "true");
+    const suffix = qs.toString() ? `?${qs}` : "";
+    const res = await fetch(`${ACC}/cash-box-accounts/${id}/statement/${suffix}`, {
+      headers: headers(),
+    });
+    await handle(res, "getCashBoxStatement");
+    return res.json();
+  },
+
+  /** إيداع في الصندوق أو سحب منه — قيدٌ واحد، بلا خطوة مرآة منفصلة. */
+  adjustCashBox: async (
+    id: number,
+    body: {
+      direction: "in" | "out";
+      amount: string | number;
+      date?: string;
+      memo?: string;
+      contra_account?: number;
+    },
+  ) => {
+    const res = await fetch(`${ACC}/cash-box-accounts/${id}/adjust/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "adjustCashBox");
+    return res.json() as Promise<{ journal_id: number }>;
+  },
+
+  /** تحويل بين الخزائن — مستندٌ واحد بقيدٍ واحد. */
+  createCashTransfer: async (body: {
+    transfer_date: string;
+    amount: string | number;
+    from_cash_box?: number;
+    from_bank_account?: number;
+    to_cash_box?: number;
+    to_bank_account?: number;
+    rate?: string | number;
+    notes?: string;
+  }) => {
+    const res = await fetch(`${ACC}/cash-transfers/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createCashTransfer");
+    return res.json();
+  },
+
+  listCashTransfers: () =>
+    fetch(`${ACC}/cash-transfers/`, { headers: headers() }).then(asList),
+
+  /** جرد صندوق: يُفتح بالمعدود ثم يُرحَّل فرقه. */
+  createCashCount: async (body: {
+    cash_box: number;
+    count_date: string;
+    counted_total: string | number;
+    denominations?: Record<string, number>;
+    notes?: string;
+  }) => {
+    const res = await fetch(`${ACC}/cash-counts/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createCashCount");
+    return res.json();
+  },
+
+  postCashCount: async (id: number) => {
+    const res = await fetch(`${ACC}/cash-counts/${id}/post/`, {
+      method: "POST", headers: headers(), body: "{}",
+    });
+    await handle(res, "postCashCount");
+    return res.json();
+  },
+
+  listCashCounts: () =>
+    fetch(`${ACC}/cash-counts/`, { headers: headers() }).then(asList),
 
   getCashBoxLedgers: async (): Promise<CashBoxLedgerLink[]> => {
     const res = await fetch(`${ACC}/cash-box-accounts/`, { headers: headers() });

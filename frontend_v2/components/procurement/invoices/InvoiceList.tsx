@@ -21,6 +21,7 @@ import {
   ArrowRightLeft,
   ScrollText,
   Truck,
+  Wallet,
 } from "lucide-react";
 import {
   KitDocumentShell,
@@ -404,6 +405,23 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           >
             <Printer className="w-3 h-3" />
           </button>
+          {/* T-PAYFULL: «مدفوعة» من القائمة — يفتح الفاتورة ولوحة الدفع معبّأة
+              بالمتبقّي كاملاً (Zoho/دفترة تسدّدان من الصف بلا فتح المستند؛
+              نُبقي الفتح لأن الصندوق والقيد يُراجَعان قبل ترحيل السند). */}
+          {r.isPosted && !r.isReturn && rowSettlement(r).remaining > 0.009 && (
+            <button
+              type="button"
+              className="ktra-toolbtn"
+              style={{ fontSize: "10px", padding: "2px 6px" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                openInNewTab(`/purchase-invoices/${r.id}?pay=full`);
+              }}
+              title="تسجيل الدفع بكامل المتبقّي"
+            >
+              <Wallet className="w-3 h-3" /> مدفوعة
+            </button>
+          )}
           {/* استلام: يفتح محرّر إرسالية بهذه الفاتورة مربوطةً مسبقاً. */}
           {r.isPosted && !r.isReturn && r.invoiceType !== "international"
             && r.receiptStatus !== "received" && (

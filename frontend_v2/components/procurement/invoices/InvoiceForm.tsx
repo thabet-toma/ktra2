@@ -30,6 +30,7 @@ import {
   PackageCheck,
   Truck,
   Copy,
+  Wallet,
 } from "lucide-react";
 import { ProductCardModal } from "../../shared/ProductCardModal";
 import { SerialEntryModal } from "../../shared/SerialEntryModal";
@@ -116,6 +117,8 @@ import { usePermissions } from "@/contexts/PermissionsContext";
 import { useSimpleUi } from "@/hooks/useSimpleUi";
 import { clientLogger } from "@/services/logger";
 import { accountMatchesPurpose } from "@/utils/accountTree";
+import { pickDefaultCashAccount } from "@/utils/cashBox";
+import type { CashBoxLedgerLink } from "@/services/accountingApi";
 import {
   InvoiceStockTab,
   InvoicePartnerLedgerTab,
@@ -134,6 +137,9 @@ interface InvoiceFormProps {
   allDbItems: Item[];
   dealData?: any;
   readOnly?: boolean;
+  /** T-PAYFULL: الفتح من زرّ «مدفوعة» في القائمة (`?pay=full`) — تُعبَّأ لوحة
+   *  الدفع بكامل المتبقّي مرّةً واحدة عند اكتمال التحميل. */
+  autoFillPayFull?: boolean;
 }
 
 type FeeAccountRow = {
@@ -159,6 +165,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   allDbItems: initialDbItems,
   dealData,
   readOnly = false,
+  autoFillPayFull = false,
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
@@ -227,6 +234,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
      بمفرداتِ جانب المورّد. */
   const [payCash, setPayCash] = useState("");
   const [payCashAccountId, setPayCashAccountId] = useState<number | null>(null);
+  /** T-CASHBOX M1: مدخلات سلّم الصندوق — الصناديق المسجَّلة، وإعداد الشركة،
+      وتفضيل المستخدم. بديل «أوّل حساب نقدي في الشجرة». */
+  const [cashBoxes, setCashBoxes] = useState<CashBoxLedgerLink[]>([]);
+  const [purchaseDefaultCashAccountId, setPurchaseDefaultCashAccountId] =
+    useState<number | null>(null);
+  const [myDefaultBoxId, setMyDefaultBoxId] = useState<number | null>(null);
   const [payCheques, setPayCheques] = useState<PaymentChequeRow[]>([]);
   const [payChequesOpen, setPayChequesOpen] = useState(false);
   const [payFromBalance, setPayFromBalance] = useState("");
@@ -253,6 +266,20 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         console.error("[PurchaseInvoiceFees] Failed to load fee accounts", error);
         setAllAccounts([]);
       });
+  }, []);
+
+  /* T-CASHBOX M1: مدخلات سلّم الصندوق. كلٌّ منها اختياري — فشلُ أيٍّ منها
+     يترك الحقل فارغاً ليحلّه الخادم، لا يوقع على «أوّل حساب في الشجرة». */
+  useEffect(() => {
+    accountingApi.getCashBoxLedgers()
+      .then(setCashBoxes)
+      .catch(() => setCashBoxes([]));
+    purchaseInvoiceApi.getSettings()
+      .then((s) => setPurchaseDefaultCashAccountId(s?.default_cash_account ?? null))
+      .catch(() => setPurchaseDefaultCashAccountId(null));
+    accountingApi.getMyDefaultCashBox()
+      .then((r) => setMyDefaultBoxId(r?.cash_box ?? null))
+      .catch(() => setMyDefaultBoxId(null));
   }, []);
 
   /* T-SERIAL: نمط إدخال الرقم التسلسلي في الشراء. `off` (الافتراضي، وحال تعذّر
@@ -2165,13 +2192,26 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     return () => { cancelled = true; };
   }, [formData.supplierId, payAdvancesNonce]);
 
-  /** الصندوق الافتراضي للوحة — أوّل صندوق في الشجرة؛ والخادم يسقط على افتراضي
-      الشركة إن بقي فارغاً، فلا تُرفض الدفعة لفراغه. */
+  /** T-CASHBOX M1 — الصندوق الافتراضي للوحة بسلّم `utils/cashBox`.
+   *
+   * كان `allAccounts.find(accountMatchesPurpose(a,"cash"))`: أوّل حساب نقدي
+   * بترتيب الكود، أي صندوق الشيقل دائماً — بلا نظرٍ إلى إعداد «الصندوق
+   * الافتراضي للمشتريات» (كان إعداداً حيّاً لا يقرؤه أحد) ولا إلى عملة
+   * الفاتورة. والقيمة كانت تُرسَل، فتبدو اختياراً من المستخدم.
+   *
+   * و`null` مقصود حين يعجز السلّم: الخادم يحلّه بالسلّم نفسه أو يشرح النقص.
+   */
   useEffect(() => {
     if (payCashAccountId !== null) return;
-    const cashAcc = allAccounts.find((a) => accountMatchesPurpose(a, "cash"));
-    if (cashAcc) setPayCashAccountId(Number(cashAcc.id));
-  }, [payCashAccountId, allAccounts]);
+    const pick = pickDefaultCashAccount({
+      boxes: cashBoxes,
+      currency: formData.currency,
+      settingsAccountId: purchaseDefaultCashAccountId,
+      userDefaultBoxId: myDefaultBoxId,
+    });
+    if (pick.accountId) setPayCashAccountId(pick.accountId);
+  }, [payCashAccountId, cashBoxes, formData.currency,
+      purchaseDefaultCashAccountId, myDefaultBoxId]);
 
   const paymentInput = useMemo(() => ({
     base: payableTotal,
@@ -2383,6 +2423,37 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     payCashInputRef.current?.focus();
   };
 
+  /**
+   * T-PAYFULL: «مدفوعة» — الحالة الغالبة أن تُدفع الفاتورة كاملةً، وكتابةُ
+   * المبلغ يدوياً كانت ضريبةً عليها. الزرّ **يعبّئ** خانة النقد بكامل المتبقّي
+   * وينزل باللوحة، والتنفيذ يبقى بزرّ «تسجيل دفعة» — قرار المالك: لا سند
+   * يُرحَّل بنقرةٍ واحدة بلا مراجعةٍ للصندوق والمبلغ.
+   */
+  const fillPayFull = () => {
+    if (!formData.supplierId) { toast("اختر المورد أولاً.", "error"); return; }
+    const remaining = payment.remainingBefore;
+    if (remaining <= 0.009) {
+      toast("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.", "info");
+      return;
+    }
+    setPayCash(remaining.toFixed(2));
+    payPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    payCashInputRef.current?.focus();
+  };
+
+  /* T-PAYFULL: الوصول من زرّ «مدفوعة» في قائمة الفواتير. مرّةً واحدة وبحارس
+     `ref` — لا عند كل إعادة رسم، ولا بعد أن يعدّل المستخدم الخانة بنفسه.
+     الانتظار حتى يصل الصندوق الافتراضي: بلا حسابٍ تكون اللوحة معبّأة ومقفلة. */
+  const payFullAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!autoFillPayFull || payFullAppliedRef.current) return;
+    if (!formData.id || !formData.supplierId || !showPayPanel) return;
+    if (!payCashAccountId) return;
+    payFullAppliedRef.current = true;
+    fillPayFull();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFillPayFull, formData.id, formData.supplierId, showPayPanel, payCashAccountId]);
+
   /* T-PCTX: تبويبات السياق تُعرض في **وضع العرض** أيضاً — وهو الوضع الذي تُفتح
      به الفاتورة المرحّلة، أي بالضبط الحالة التي يُسأل فيها «ماذا فعلت هذه
      الفاتورة بالمخزن وبحساب المورّد؟». كان `tabs={viewMode ? [] : [...]}`
@@ -2486,6 +2557,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onFillCashShortfall={() =>
         setPayCash(((Number(payCash) || 0) + payment.cashShortfall).toFixed(2))
       }
+      onFillFull={() => setPayCash(payment.remainingBefore.toFixed(2))}
       // T-INTENT: المخرج الثاني من حارس الفاتورة النقدية — كان جانب البيع وحده
       // يمرّره، فيقف مشترٍ لا يملك تغطية الفاتورة كاملةً أمام طريق مسدود لا
       // مخرج منه إلا «أكمل المبلغ».
@@ -2636,6 +2708,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onClick: !(isPosted && supplierRemaining <= 0) ? () => focusPayPanel() : undefined,
       disabled: isPosted && supplierRemaining <= 0,
       separatorBefore: true,
+    } as KitToolbarAction] : []),
+    // T-PAYFULL: الطريق القصير بجوار الطريق المفصَّل — «مدفوعة» تعبّئ المتبقّي
+    // كاملاً، و«تسجيل دفعة» تُبقي الجزئي والشيكات على حالهما.
+    ...(canPerm("purchase.payment.create") && (isPosted || invoicePermissions.canSaveAndPost) ? [{
+      key: "pay-full",
+      label: isPosted && supplierRemaining <= 0 ? "مسدَّدة" : "مدفوعة",
+      icon: <Wallet />,
+      onClick: !(isPosted && supplierRemaining <= 0) ? () => fillPayFull() : undefined,
+      disabled: isPosted && supplierRemaining <= 0,
     } as KitToolbarAction] : []),
     // الاستلام: نافذة سريعة تُنشئ إرسالية بالبنود المؤشَّرة، أو المحرّر الكامل
     // في شاشة الإرساليات بالفاتورة نفسها مربوطةً مسبقاً.

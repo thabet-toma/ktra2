@@ -87,6 +87,26 @@ async function installMocks(page: Page) {
       });
       return;
     }
+    /* T-CASHBOX M1: الصندوق الافتراضي يُحلّ من **الصناديق المسجَّلة** لا من أوّل
+       حساب نقدي في الشجرة — فبلا هذين المُوجِّهَين تبقى اللوحة بلا صندوق ويرفض
+       زرُّ التحصيل الإرسال. */
+    if (url.pathname.endsWith("/accounting/cash-box-accounts/my-default/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ cash_box: 1, cash_box_name: "الصندوق الرئيسي" }),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/accounting/cash-box-accounts/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([{
+          id: 1, name: "الصندوق الرئيسي", account_id: 10, account_code: "1101",
+          currency_code: "ILS", is_default: true, is_active: true,
+        }]),
+      });
+      return;
+    }
     if (url.pathname.endsWith("/sales/settings/")) {
       await route.fulfill({
         contentType: "application/json",

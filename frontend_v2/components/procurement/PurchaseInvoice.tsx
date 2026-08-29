@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useLocation, matchPath } from 'react-router-dom';
 import {
   Plus, FileText, Loader2, ScrollText
@@ -212,6 +212,14 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
       setRefreshing(false);
     }
   }, [invoiceType, listFilters, listPage, toast]);
+
+  /* T-PAYFULL: `?pay=full` من زرّ «مدفوعة» في القائمة — يُقرأ من الرابط ويُمرَّر
+     للمحرّر فيعبّئ لوحة الدفع بالمتبقّي كاملاً. الرابط ذاته يفتح في تبويب جديد،
+     فلا يُحذف البارامتر: المحرّر يحرسه بـ`ref` مرّةً واحدة. */
+  const payFullRequested = useMemo(
+    () => new URLSearchParams(location.search).get("pay") === "full",
+    [location.search],
+  );
 
   /** مزامنة قائمة/نموذج الفاتورة مع المسار: /purchase-invoices و /purchase-invoices/:id */
   const applyLocationToView = useCallback(async () => {
@@ -568,6 +576,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
                 }
               }}
               allDbItems={items}
+              autoFillPayFull={payFullRequested}
             />
             {/* M2: لوحة المحاسبة والحركات المالية أصبحت تبويبات داخل المحرر
                 (single editor + inline accounting) — توحيداً مع شاشة المبيعات. */}

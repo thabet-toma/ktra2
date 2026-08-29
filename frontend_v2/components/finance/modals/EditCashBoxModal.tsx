@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { X, Link2 } from "lucide-react";
-import { cashBoxesService } from "../../../services/firestoreService";
+import { X } from "lucide-react";
 import { accountingApi, type CashBoxLedgerLink } from "../../../services/accountingApi";
 import { CashBox, Currency } from "../../../types";
 import { useToast } from "../../../contexts/ToastContext";
@@ -54,17 +53,26 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
 
   if (!isOpen || !cashBox) return null;
 
+  /** T-CASHBOX M2: التعديل خادميّ — الاسم يزامن حساب الشجرة والمرآة معاً.
+   *
+   * كان يُكتب في المرآة وحدها، فيبقى اسم الحساب في الشجرة على القديم: اسمان
+   * لصندوق واحد، وكشفٌ لا يطابق شجرةً.
+   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+    if (!ledgerLink) {
+      setFormError("هذا الصندوق بلا حساب في الشجرة — شغّل أمر backfill_cash_boxes.");
+      return;
+    }
     setIsLoading(true);
     setFormError(null);
     try {
-      await cashBoxesService.updateCashBox(cashBox.id, {
+      await accountingApi.updateCashBox(ledgerLink.id, {
         name: name.trim(),
-        currency,
+        currency_code: currency,
       });
-      toast("تم حفظ تعديل الصندوق.", "success");
+      toast("تم حفظ تعديل الصندوق، وتزامن اسم حسابه في الشجرة.", "success");
       onLedgersMaybeChanged?.();
       onClose();
     } catch (error) {
@@ -75,26 +83,34 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
     }
   };
 
-  const handleCreateGlAccount = async () => {
-    if (!name.trim()) {
-      setFormError("اكتب اسماً للصندوق أولاً — سيُستخدم كاسم الحساب في الشجرة.");
-      return;
-    }
+  const handleToggleActive = async () => {
+    if (!ledgerLink) return;
     setLinkLoading(true);
     setFormError(null);
     try {
-      await accountingApi.registerCashBoxLedger({
-        external_id: cashBox.id,
-        name: name.trim(),
-        currency_code: currency,
-      });
-      const rows = await accountingApi.getCashBoxLedgers();
-      const hit = rows.find((r) => String(r.external_id) === String(cashBox.id));
-      setLedgerLink(hit ?? null);
+      const next = !(ledgerLink.is_active !== false);
+      const updated = await accountingApi.updateCashBox(ledgerLink.id, { is_active: next });
+      setLedgerLink(updated);
       onLedgersMaybeChanged?.();
-      toast("تم إنشاء حساب في شجرة المحاسبة بنفس اسم الصندوق وربطه به.", "success");
+      toast(next ? "تم تفعيل الصندوق." : "تم تعطيل الصندوق — لن يظهر في منتقيات الدفع.", "success");
     } catch (e) {
-      setFormError(humanizeThrown(e, "تعذّر إنشاء الحساب"));
+      setFormError(humanizeThrown(e, "تعذّر تغيير حالة الصندوق"));
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
+  const handleSetDefault = async () => {
+    if (!ledgerLink) return;
+    setLinkLoading(true);
+    setFormError(null);
+    try {
+      const updated = await accountingApi.setDefaultCashBox(ledgerLink.id);
+      setLedgerLink(updated);
+      onLedgersMaybeChanged?.();
+      toast("صار هذا هو صندوق الشركة الافتراضي.", "success");
+    } catch (e) {
+      setFormError(humanizeThrown(e, "تعذّر تعيين الصندوق الافتراضي"));
     } finally {
       setLinkLoading(false);
     }
@@ -161,28 +177,46 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
             {ledgerLink === undefined ? (
               <p className="text-[var(--color-text-muted)]">جاري التحقق…</p>
             ) : ledgerLink ? (
-              <p className="text-green-800 dark:text-green-200">
-                مرتبط: حساب الشجرة{" "}
-                <span className="font-mono font-semibold">
-                  {ledgerLink.account_code}
-                </span>{" "}
-                — {ledgerLink.name}
-              </p>
-            ) : (
               <>
-                <p className="text-[var(--color-text)] mb-2">
-                  لا يوجد حساب في الشجرة لهذا الصندوق بعد.
+                <p className="text-green-800 dark:text-green-200">
+                  مرتبط: حساب الشجرة{" "}
+                  <span className="font-mono font-semibold">
+                    {ledgerLink.account_code}
+                  </span>{" "}
+                  — {ledgerLink.name}
                 </p>
-                <button
-                  type="button"
-                  disabled={linkLoading}
-                  onClick={handleCreateGlAccount}
-                  className="inline-flex items-center gap-2 rounded-md bg-[var(--color-primary)] px-3 py-2 text-xs font-medium text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
-                >
-                  <Link2 className="h-3.5 w-3.5" />
-                  {linkLoading ? "جاري الإنشاء…" : "إنشاء حساب في الشجرة بنفس الاسم"}
-                </button>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {!ledgerLink.is_default && ledgerLink.is_active !== false && (
+                    <button
+                      type="button"
+                      disabled={linkLoading}
+                      onClick={handleSetDefault}
+                      className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+                    >
+                      جعله الصندوق الافتراضي
+                    </button>
+                  )}
+                  {ledgerLink.is_default && (
+                    <span className="rounded-md bg-[var(--color-surface-3)] px-3 py-1.5 text-xs text-[var(--color-text-muted)]">
+                      الصندوق الافتراضي للشركة
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={linkLoading}
+                    onClick={handleToggleActive}
+                    className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+                  >
+                    {ledgerLink.is_active === false ? "تفعيل الصندوق" : "تعطيل الصندوق"}
+                  </button>
+                </div>
               </>
+            ) : (
+              <p className="text-[var(--color-text)]">
+                لا يوجد حساب في الشجرة لهذا الصندوق — صندوقٌ قديم من قبل توحيد
+                الإنشاء. شغّل <span className="font-mono">backfill_cash_boxes</span>{" "}
+                لربطه، فالربط صار يُنشأ مع الصندوق نفسه.
+              </p>
             )}
           </div>
 

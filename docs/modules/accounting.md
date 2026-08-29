@@ -20,7 +20,7 @@
 | `accounting/serializers.py` | عقود الـAPI + ملخّص مرجع القيد (`build_journal_reference_summary`) | 553 |
 | `accounting/opening_balance.py` | الأرصدة الافتتاحية: المستند وحفظه وترحيله وعكسه وملخّصه (`post_opening_balance`، `unpost_opening_balance`، `opening_balance_summary`) | 422 |
 | `accounting/fx_fifo.py` | طبقات FIFO لصناديق العملة الأجنبية | 185 |
-| `accounting/cashbox.py` | حلّ حسابات الصناديق النقدية وتوليد أكواد أبناء | 103 |
+| `accounting/cashbox.py` | حلّ حساب أب الصناديق وحساب رأس المال، وتوليد أكواد الأبناء (`allocate_child_account_code` — تخدم الصناديق والبنوك معاً) | 103 |
 | `accounting/account_classification.py` | اشتقاق `Account.sub_type` (`classify_tenant_accounts`، `backfill_account_sub_types`) | 168 |
 | `accounting/urls.py` | تسجيل الـrouter (19 مسار) | 44 |
 
@@ -35,7 +35,11 @@
 | `ChequeMovement` | `movement_type`، `notes` | `cheque` (CASCADE، related_name=`movements`)، `journal` (JournalHeader, SET_NULL) |
 | `BankAccount` | `name`، `account_number`، `iban`، `is_default` | `bank` (PROTECT)، `account` (OneToOne → Account, PROTECT)، جدول `company_bank_accounts` |
 | `BankReconciliation` / `…Line` | `statement_date`، `statement_balance`، `status` | `journal_line` OneToOne — الحركة تُطابَق مرة واحدة فقط |
-| `CashBoxLedgerAccount` / `CashBoxFxLot` | `external_id`، `original_fc`، `remaining_fc`، `rate` | `account` (OneToOne)، `cash_box`، `journal` |
+| `CashBoxLedgerAccount` | `external_id`، `name`، `currency_code`، `is_default`، `is_active`، `notes` | `account` (OneToOne → Account، تحت «1110»)؛ فريد `(tenant, external_id)` |
+| `CashBoxUserDefault` | — | `tenant`، `user`، `cash_box`؛ فريد `(tenant, user)` |
+| `CashBoxFxLot` | `original_fc`، `remaining_fc`، `rate`، `source` | `cash_box`، `journal` |
+| `CashTransfer` | `number`، `transfer_date`، `amount`، `rate` | طرفان اختياريان لكلٍّ من الجهتين (`from_cash_box`/`from_bank_account` و`to_*`)، `journal` |
+| `CashCount` | `count_date`، `book_balance`، `counted_total`، `difference`، `denominations`، `status` | `cash_box` (PROTECT)، `journal` |
 | `FiscalPeriod` | `start_date`، `end_date`، `status`، `is_closed` | `tenant` |
 | `ExchangeRate` | `rate`، `effective_date` | `from_currency`/`to_currency` (PROTECT)؛ فريد مع `(tenant, effective_date)` |
 | `TaxRate` | `code`، `rate`، `direction` | `tax_account` (PROTECT)؛ `unique_together (tenant, code)` |
@@ -74,6 +78,67 @@
 `accounting/views.py` (`CashBoxLedgerViewSet.create`)) تكتبان التصنيف عند
 الإنشاء. **لا تُضاف قيم إلى `ACCOUNT_TYPES`** بدلاً من ذلك — تلك الخمسة تكسر
 `accountNature`/`accountStatement` والتقارير بصمت.
+
+### الخزينة — الصندوق كيانٌ أول، وحسابُه في الشجرة وجهُه المحاسبي
+الصندوق `CashBoxLedgerAccount` يُنشأ بنداءٍ واحد ذرّي
+(`accounting/services.py` (`create_cash_box`)، على نمط `create_bank_account`)
+يكتب معاً: الحساب تحت «1110» بكود `1110B0001` وبـ`sub_type='cash_box'`، وسطر
+الصندوق، ووثيقة مرآته في `bridge`. قبلها كان الإنشاء **نداءين من المتصفح**
+(المرآة أولاً ثم الحساب) بلا معاملة تجمعهما، فسقوطُ الثاني يترك صندوقاً بلا
+حساب — مالٌ يتحرّك بلا وجهٍ في الدفاتر، وواجهةٌ فيها زرّ إصلاح يدوي.
+**المرآة صارت مشتقّة**: الخادم وحده يكتبها، ورصيدُها لا يُعتمد — مصدر الرصيد
+دفتر الأستاذ (`cash_box_balance`). و`external_id` مفتاح توافق يولّده الخادم.
+
+**دورة الحياة**: `update_cash_box` (الاسم يزامن حساب الشجرة والمرآة معاً؛ تغيير
+عملة صندوقٍ له طبقات FIFO **مرفوض** لأن رصيده الدفتري محسوب بها)، و
+`set_default_cash_box` (افتراضيٌّ واحد لكل شركة، مفروضٌ **في طبقة الخدمة داخل
+معاملة** لا بقيد شرطي: MySQL بلا فهارس جزئية). **لا حذف** — الحساب يحمل حركة،
+والتعطيل (`is_active=False`) يخفيه من المنتقيات.
+
+#### سلّم حلّ حساب الصندوق — مصدرٌ واحد
+`accounting/services.py` (`resolve_cash_account`) هو **المحلّ الوحيد** لكل
+المستندات: الاختيار الصريح ← صندوق المستخدم الافتراضي (`CashBoxUserDefault`،
+يُتخطّى إن خالف عملة المستند) ← صندوق الشركة الافتراضي ← إعدادات
+المبيعات/الشراء ← الشجرة المعيارية (شبكة أمان) ← **خطأ إرشادي**.
+`resolve_default_cash_account` صار غلافاً مفوِّضاً يُعيد `None` بدل الاستثناء
+(لمستدعيه القدامى)، و`accounting/cashbox.py`
+(`resolve_default_cash_box_account`) **مسحوب** ولم يبقَ له مستدعٍ إلا الأمر
+الإداري `rewire_logistics_payment_cash_lines`.
+
+> **«أوّل حساب نقدي» ليست خطوةً في السلّم ولا في الواجهة.** كانت السلسلة القديمة
+> تطابق `code` تماماً في `("1101","1102","1110")` — و«1110» أبُ الصناديق لا
+> صندوق — فلم تكن تُعيد صندوقاً حقيقياً **بنيوياً**: شركةٌ بعشرة صناديق تقع كل
+> سنداتها على «1101 النقدية» العامّ. وفي الواجهة كان
+> `frontend_v2/components/procurement/invoices/InvoiceForm.tsx` يملأ رأس
+> الفاتورة بـ`allAccounts.find(accountMatchesPurpose(a,"cash"))` — أوّل حساب
+> بترتيب الكود، أي صندوق الشيقل دائماً — ثم يُرسلها فتبدو اختيار المستخدم.
+> السلّم الواجهيّ الآن في `frontend_v2/utils/cashBox.ts`
+> (`pickDefaultCashAccount`)، وترتيبُ الشجرة ليس نيّةَ مستخدم.
+
+> **والمرفق يغلب الرأس**: `sales/services/flow.py`
+> (`_resolve_settlement_cash_account_id`) و`logistics/services.py`
+> (`settle_attached_purchase_intent`) تقرآن `attached_cash_account` **قبل**
+> `cash_or_bank_account`. الأول لا يكتبه إلا مسار «إرفاق دفعة» فهو اختيار
+> المستخدم الصريح، والثاني تملؤه الواجهة تلقائياً. بالترتيب المعكوس كان الرأس
+> يبتلع الاختيار فيُدائَن صندوقٌ لم يخترْه أحد.
+
+#### الكشف والعمليات
+- `cash_box_statement` — نظير `bank_account_statement` بلا أعمدة المطابقة:
+  افتتاحيٌّ وصفوفٌ برصيدٍ جارٍ وختاميّ، بترتيب `(تاريخ، قيد، سطر)` مستقر. كانت
+  الشاشة تدمج المرآة بالأستاذ **في المتصفح** بترتيبٍ مُلفَّق (الأستاذ مثبَّت على
+  `T12:00:00` ثم `journal_id ‰ 1000 × 0.001`)، فعمود «الرصيد» لم يكن رصيداً جارياً.
+- `cash_box_adjustment(direction='in'|'out')` — إيداع/سحب بقيدٍ واحد مقابل حساب
+  رأس المال (أو حسابٍ مقابل صريح). السحب يُرفض إن جاوز الرصيد. عمّم
+  `deposit-journal` القديمة (إيداعٌ فقط ومفتاحها `external_id`)، وهي باقية للتوافق.
+- `create_cash_transfer` — تحويل بين خزينتين بمستندٍ واحد وقيدٍ واحد؛ والوجهةُ
+  صندوقُ عملةٍ أجنبية تُفوَّض إلى `fx_fifo.transfer_ils_to_fx` لأن طبقات FIFO
+  مصدر تكلفة العملة، وقيدٌ مباشر بجانبها يفسدها بصمت.
+- `post_cash_count` — فرق الجرد إلى «زيادة الصندوق» (`4202`) أو «عجز الصندوق»
+  (`5206`) — نمط Odoo (Profit/Loss Account). الفرق صفراً ⇒ لا قيد.
+- الأمر `backfill_cash_boxes` (`--link` و`--history`): يربط صناديق ما قبل توحيد
+  الإنشاء بالشجرة، ويرحّل **قيداً افتتاحياً واحداً لكل صندوق** بفرق المرآة عن
+  الأستاذ في تاريخ القطع (قرار المالك: لا ترحيل حركة-بحركة يكتب في فتراتٍ سابقة).
+  بلا خيارات = تقريرٌ فقط، وهو idempotent.
 
 ### الأرصدة الافتتاحية — قيد موحّد واحد لكل شركة
 بدء التشغيل على النظام يحتاج ثلاث أرجل: أرصدة الحسابات، وأرصدة الأطراف، وبضاعة
@@ -171,7 +236,16 @@ def partner_posted_balance(tenant_id: int, partner_id: int) -> tuple[Decimal, De
 def attach_partner_posted_balance(rows, partner_id_field: str, *, supplier: bool, attr: str):  # أرصدة صفحة محمَّلة باستعلام واحد (للقوائم)
 def annotate_partner_posted_balance(queryset, partner_id_field: str, *, supplier: bool, alias: str):  # للصف الواحد/الفلترة فقط — لا للقوائم
 def resolve_import_expense_account(tenant_id: int, name: str):  # حساب مصروف استيراد تحت البند «53» أو يُنشئه
-def resolve_default_cash_account(tenant_id: int):  # حساب الصندوق الافتراضي
+def resolve_cash_account(tenant_id: int, *, explicit_account_id=None, user=None, currency_code: str | None = None, required: bool = True):  # السلّم الوحيد لحساب الصندوق/البنك — صريح ← افتراضي المستخدم ← افتراضي الشركة ← الإعدادات ← الشجرة ← خطأ إرشادي
+def resolve_default_cash_account(tenant_id: int):  # غلافٌ متوافق فوقها يُعيد None بدل الاستثناء
+def create_cash_box(*, tenant, name, currency_code="ILS", is_default=False, external_id=None, notes=None, user=None):  # الصندوق + حسابه تحت «1110» + وثيقة مرآته، ذرّياً
+def update_cash_box(box, *, name=None, is_active=None, notes=None, currency_code=None, user=None):  # الاسم يزامن الشجرة والمرآة؛ عملة صندوقٍ له طبقات FIFO مرفوضة
+def set_default_cash_box(box, *, user=None):  # افتراضيٌّ واحد لكل شركة، ذرّياً
+def cash_box_statement(cash_box, *, start_date=None, end_date=None, posted_only=True):  # افتتاحي + صفوف برصيد جارٍ + ختامي
+def cash_box_balance(cash_box, *, as_of=None) -> Decimal:  # الرصيد الدفتري من الأسطر المرحّلة
+def cash_box_adjustment(cash_box, *, direction, amount, contra_account=None, date=None, memo="", user=None):  # إيداع/سحب بقيدٍ واحد؛ السحب فوق الرصيد مرفوض
+def create_cash_transfer(*, tenant, transfer_date, amount, from_cash_box=None, from_bank_account=None, to_cash_box=None, to_bank_account=None, rate=None, notes=None, user=None):  # تحويل بمستند واحد؛ الوجهة FX تمرّ بـfx_fifo
+def post_cash_count(count, *, user=None):  # فرق الجرد إلى 4202 (زيادة) أو 5206 (عجز)
 def resolve_forex_account(tenant_id: int) -> Account | None:  # حساب فروقات العملة
 def create_audit_log(tenant, user, action, model_name, object_id, change_details):  # سطر تدقيق معزول لا يُسقط المستدعي
 ```
@@ -199,7 +273,13 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | PUT | `opening-balance/lines/` | `OpeningBalanceViewSet.save_lines` — استبدال جماعي للمسودة؛ الرِّجل الغائبة عن الطلب لا تُمَسّ، والمستند المرحَّل يُرفض تعديله |
 | POST | `opening-balance/post/` · `opening-balance/unpost/` | `OpeningBalanceViewSet` — بصلاحيتَي `accounting.journal.post` / `accounting.journal.unpost` القائمتين (لا مفاتيح جديدة) |
 | GET | `exchange-rates/get-rate/` | `ExchangeRateViewSet` |
-| GET/POST | `cost-centers/` · `tax-rates/` · `banks/` · `bank-branches/` · `cash-box-accounts/` · `purchase-receipts/` · `currencies/` | حسب `urls.py` |
+| GET/POST/PATCH | `cash-box-accounts/` · `cash-box-accounts/{id}/` | `CashBoxLedgerViewSet` — الإنشاء نداءٌ واحد ذرّي (`name` وحده يكفي؛ `external_id` يولّده الخادم)، والتعديل يزامن اسم الحساب. **لا DELETE**، و`PUT` يوجَّه إلى `PATCH` |
+| POST | `cash-box-accounts/{id}/set-default/` · `{id}/adjust/` · `{id}/fund-capital/` · `{id}/transfer-from-ils/` | افتراضي الشركة · إيداع/سحب (`direction`) · تمويل FX · تحويل من صندوق شيقل. الصلاحيات: `finance.cashbox.manage` / `.deposit` / `.withdraw` |
+| GET | `cash-box-accounts/{id}/statement/` (`start_date`/`end_date`/`include_unposted`) · `{id}/fx-lots/` | كشف برصيد جارٍ خادمي · طبقات FIFO |
+| GET/PUT | `cash-box-accounts/my-default/` | صندوق المستخدم الافتراضي؛ `cash_box: null` يحذفه |
+| GET/POST | `cash-transfers/` | `CashTransferViewSet` — بصلاحية `finance.cashbox.transfer`؛ لا تعديل ولا حذف (المعالجة بتحويل معاكس) |
+| GET/POST/PATCH | `cash-counts/` · `{id}/post/` | `CashCountViewSet` — بصلاحية `finance.cashbox.count`؛ المرحَّل لا يُعدَّل |
+| GET/POST | `cost-centers/` · `tax-rates/` · `banks/` · `bank-branches/` · `purchase-receipts/` · `currencies/` | حسب `urls.py` |
 
 **«قيد التسوية» ليس نوعاً ثانياً من القيود ولا شاشةً مستقلة** — هو وسمٌ على القيد اليدوي
 نفسه: `reference_type='ADJUSTMENT'` بتسميته العربية في `accounting/serializers.py`
@@ -231,6 +311,18 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 - **`endorsed_to` و`deposit_bank_account` قراءةٌ فقط في الـAPI** — يكتبهما `transfer_cheque` مع قيد الحركة وحده؛ وما يقرأه قيد السند (المبلغ، الاتجاه، الطرف، العملة) مقفولٌ ما دام المستند مرحّلاً (`accounting/serializers.py` (`ChequeSerializer`)).
 - **لا تُقفل مطابقة بنكية بفرق ≥ 0.01** (`accounting/services.py` (`close_bank_reconciliation`))، وكل `JournalLine` تُطابَق مرة واحدة (`accounting/models.py` (`BankReconciliationLine`)).
 - **الفترة المُقفَلة لا تتغيّر إلا عبر `reopen/` بسبب مسجَّل** — `FiscalPeriodViewSet.perform_update`/`perform_destroy` (`accounting/views.py`) يرفضان أي تعديل أو حذف عليها، ويمنعان حذف فترة في مداها قيد مرحّل (تاريخٌ بلا فترة تغطّيه يشلّ الترحيل وإلغاءه معاً)، وكل تعديل أو حذف ناجح يُكتب في سجل التدقيق.
+- **حساب صندوق الدفع يُحلّ من `resolve_cash_account` وحدها** — لا «أوّل حساب
+  نقدي» في خادمٍ ولا واجهة، ولا محلّ ثانٍ. و`attached_cash_account` يغلب
+  `cash_or_bank_account` في مسارَي البيع والشراء (`_resolve_settlement_cash_account_id`
+  و`settle_attached_purchase_intent`): الأول اختيار المستخدم والثاني تعبئة تلقائية.
+- **الصندوق يُنشأ بـ`create_cash_box` وحدها** — نداءٌ واحد يكتب الحساب والربط
+  والمرآة معاً. لا إنشاء حسابٍ من جهة ووثيقةِ صندوق من جهة أخرى.
+- **الافتراضي واحدٌ لكل شركة، مفروضٌ في الخدمة داخل معاملة** لا بقيد شرطي —
+  MySQL بلا فهارس جزئية، فقيدٌ بـ`condition=` يوجد في SQLite ويغيب عن الإنتاج.
+- **لا حذف لصندوق** (`http_method_names` بلا `delete`) — حسابه يحمل حركة؛
+  التعطيل يخفيه من المنتقيات. و`PUT` موجَّه إلى `PATCH` كي لا يتجاوز تزامنَ الاسم.
+- **رصيد الصندوق من دفتر الأستاذ لا من المرآة** — `cash_box_balance`؛ حقل
+  `currentBalance` في المرآة مشتقٌّ ولا يُعتمد.
 - **`create_audit_log` يجب أن يبقى معزولاً** — سطر تدقيق فاشل لا يجوز أن يُرجِع معاملة المستدعي (سبب اختبار `test_audit_log_isolation`).
 - **قيد افتتاحي مرحّل واحد لكل شركة** — مفروضٌ في `accounting/opening_balance.py` (`post_opening_balance`) داخل المعاملة تحت `select_for_update`، **لا بقيد فريد شرطي**: MySQL لا يدعم الفهارس الجزئية، فقيدٌ بـ`condition=` يوجد في قاعدة الاختبارات (SQLite) ويغيب بصمت عن الإنتاج. لا قيد افتتاحي ثانٍ إلا بعد عكس الأول صراحةً.
 - **أرصدة الذمم والمخزون لا تُدخل في بنود حسابات الافتتاح** — `assert_account_allowed` يرفضها (ومعها حساب `3300` نفسه وأي حساب مربوط بطرف) عند الحفظ وعند الترحيل معاً؛ أرقامها تأتي من `PARTNER_OPENING` ومن بنود المخزون، وإدخالها هنا يضاعف الرصيد.
@@ -255,6 +347,9 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | `sales/tests/test_invoice_context_tabs.py` | **المرساة** (`anchor_*`): نافذةٌ تتمركز على المستند فيبقى ظاهراً ولو تلته عشراتُ الحركات، و«قبل/بعد» يطابقان سطرَه في الكشف الكامل، وبلا تمريرها الحمولة كما كانت حرفياً (بلا `anchor` ولا `is_anchor`) |
 | `accounting/tests/test_audit_log_isolation.py` | سطر التدقيق لا يُسقط عملية المستدعي |
 | `accounting/tests/test_fx_fifo.py` | طبقات FIFO لصندوق العملة الأجنبية |
+| `accounting/tests/test_cash_box_treasury.py` | الخزينة خدميّاً: ذرّية الإنشاء (فشلٌ بعد الحساب ⇒ لا حساب يتيم)، تزامن التسمية، وحدانية الافتراضي، **سلّم الحلّ كاملاً** (ومنه أن شركةً بصناديق لا تسقط على «1101»)، الرصيد الجاري، التحويل وطبقته FIFO، وفرق الجرد بطرفيه |
+| `accounting/tests/test_cash_box_api.py` | عقد الـAPI: الإنشاء بنداء واحد، PATCH يزامن الشجرة، `my-default` ذهاباً وإياباً، الكشف، رفض السحب فوق الرصيد، عزل الشركات، وإنفاذ مفاتيح `finance.cashbox.*` |
+| `logistics/tests/test_attach_payment_box_selection.py` | **الحارس**: الصندوق المختار في لوحة الدفع هو المُدائَن ولو حمل الرأس غيره؛ والرأس يبقى مصدراً بلا اختيار؛ والسقوط على صندوقٍ حقيقي لا «1101» |
 | `accounting/tests/test_journal_pagination.py` · `test_journal_reference_perf.py` · `test_account_list_perf.py` | عقد الترقيم وغياب N+1 |
 | `accounting/tests/test_fiscal_period_lock.py` | قفل الشهر المالي من كل مسار: الترحيل وإلغاؤه والتداخل و`close/`+`reopen/`، وCRUD الفترة (صلاحية، مُقفَلة غير قابلة للتعديل أو الحذف، سجل تدقيق) |
 | `accounting/tests/test_journal_filters.py` | تصفية الدفتر بالحساب (بلا تكرار عبر الصفحات) وبالمستخدم، وختم `created_by` من مسارَي الإنشاء، ودورة قيد التسوية |

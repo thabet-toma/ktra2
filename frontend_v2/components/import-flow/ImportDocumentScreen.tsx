@@ -1111,7 +1111,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     if (cashBoxes.length > 0) return;
     void accountingApi.getCashBoxLedgers().then((rows) => {
       setCashBoxes(rows);
-      if (rows.length > 0 && !payCashBoxId) setPayCashBoxId(rows[0].external_id);
+      // T-CASHBOX M1: الصندوق الافتراضي المُعلَن لا `rows[0]` — أوّل صفٍّ في
+      // القائمة ترتيبٌ لا اختيار، ومنه جاء الدفع من صندوقٍ لم يقصده أحد.
+      if (!payCashBoxId) {
+        const live = rows.filter((b) => b.is_active !== false);
+        const preferred = live.find((b) => b.is_default);
+        if (preferred) setPayCashBoxId(preferred.external_id);
+      }
     }).catch(() => { /* ignore — surfaced when user opens the form */ });
   }, [cashBoxes.length, payCashBoxId]);
 

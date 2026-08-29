@@ -11,7 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ShareRowButton } from "../shared/ShareRowButton";
-import { FileSearch, Loader2, Pencil, Printer, Save, Trash2, X } from "lucide-react";
+import { FileSearch, Loader2, PackageCheck, Pencil, Printer, Save, Trash2, X } from "lucide-react";
 import {
   createDeliveryNote,
   deleteDeliveryNote,
@@ -80,6 +80,32 @@ const blankLine = (warehouseId: number | ""): LineState => ({
 
 const productLabel = (p: ProductOpt) => p.name_ar || p.name_en || p.sku || `#${p.id}`;
 
+/**
+ * «تسليم الكل»: بنود الفاتورة التي بقي منها شيء ⇒ صفوفُ محرّرٍ جاهزة بالكمية
+ * المتبقّية كاملةً — مرآة `receivableToLines` في إرساليات الشراء.
+ * الطرح لا يقع هنا: `remaining_quantity` من الخادم — مصدر «الباقي» الوحيد.
+ */
+const deliverableToLines = (
+  rows: DeliveryLineRow[],
+  warehouseId: number | "",
+): LineState[] =>
+  rows
+    .filter((l) => Number(l.remaining_quantity) > 0)
+    .map((l) => ({
+      line_id: l.line_id,
+      product_id: l.product,
+      product_name: l.product_name,
+      ordered: Number(l.quantity) || 0,
+      delivered: Number(l.delivered_quantity) || 0,
+      remaining: Number(l.remaining_quantity) || 0,
+      quantity: String(Number(l.remaining_quantity) || 0),
+      warehouse_id: warehouseId,
+    }));
+
+/** المستودع الافتراضي — يُمرَّر بالقيمة إلى مسار الفتح حيث لم تصل الحالة بعد. */
+const defaultWarehouseOf = (whs: WarehouseOpt[]): number | "" =>
+  whs.find((w) => w.is_default)?.id ?? whs[0]?.id ?? "";
+
 export const DeliveryNotesPage: React.FC = () => {
   const toast = useToast();
   const confirm = useConfirm();
@@ -120,7 +146,7 @@ export const DeliveryNotesPage: React.FC = () => {
   const docLabel = isStandalone ? labels.standalone : labels.linked;
 
   const defaultWarehouse = useMemo<number | "">(
-    () => warehouses.find((w) => w.is_default)?.id ?? warehouses[0]?.id ?? "",
+    () => defaultWarehouseOf(warehouses),
     [warehouses]
   );
 
@@ -165,7 +191,9 @@ export const DeliveryNotesPage: React.FC = () => {
    * فالإخفاء كان يترك القائمة فارغة لأي شركة على الإعداد الافتراضي (خصم المخزون
    * مع الترحيل) بلا تفسير.
    */
-  const loadRefs = useCallback(async () => {
+  /** تُعيد المستودعات بالقيمة كي يستعملها مسار الفتح فوراً — الحالة لا تكون
+   *  قد وصلت بعد في نفس الدورة. */
+  const loadRefs = useCallback(async (): Promise<{ warehouses: WarehouseOpt[] }> => {
     try {
       const tenantId = resolveTenantId();
       const [invs, parts, prods, whs] = await Promise.all([
@@ -202,13 +230,22 @@ export const DeliveryNotesPage: React.FC = () => {
       setPartners((parts || []).filter((p) => p.partner_type === "Customer"));
       setProducts(prods || []);
       setWarehouses(whs || []);
+      return { warehouses: (whs || []) as WarehouseOpt[] };
     } catch (e) {
       setErr(e instanceof Error ? e.message : "فشل تحميل بيانات المحرّر");
+      return { warehouses: [] };
     }
   }, []);
 
+  /** `autofillWarehouse` ممرَّراً ⇒ تُملأ البنود بكامل المتبقّي فور اختيار
+   *  الفاتورة. بالمعامل لا بالحالة: الدالة `useCallback([])` وإغلاقها لا يرى
+   *  `defaultWarehouse` الطازج. */
   const pickInvoice = useCallback(
-    async (invoiceId: number | "", keepLines = false) => {
+    async (
+      invoiceId: number | "",
+      opts?: { keepLines?: boolean; autofillWarehouse?: number | "" },
+    ) => {
+      const keepLines = opts?.keepLines === true;
       setFormInvoice(invoiceId);
       if (!keepLines) setFormLines([]);
       setInvoiceLines([]);
@@ -227,6 +264,11 @@ export const DeliveryNotesPage: React.FC = () => {
             ? "هذه الفاتورة تخصم المخزون عند الترحيل — بنودها مسلَّمة بالفعل."
             : null
         );
+        // فاتورةٌ تخصم المخزون عند ترحيلها مسلَّمةٌ أصلاً — تعبئتها تدعو إلى
+        // تسليمٍ مزدوج. رسالة الخطأ أعلاه تشرح السبب للمستخدم.
+        if (!data.stock_on_post && opts?.autofillWarehouse !== undefined && !keepLines) {
+          setFormLines(deliverableToLines(data.lines || [], opts.autofillWarehouse));
+        }
       } catch (e) {
         setErr(e instanceof Error ? e.message : "تعذر تحميل بنود الفاتورة");
       }
@@ -246,8 +288,13 @@ export const DeliveryNotesPage: React.FC = () => {
       setFormLines([]);
       setFormInvoice("");
       setFormInvoiceLabel("");
-      await loadRefs();
-      if (invoiceId) await pickInvoice(invoiceId);
+      const refs = await loadRefs();
+      // الفتح من زرّ «تسليم» في الفاتورة: تُملأ الإرسالية بكامل المتبقّي.
+      if (invoiceId) {
+        await pickInvoice(invoiceId, {
+          autofillWarehouse: defaultWarehouseOf(refs.warehouses),
+        });
+      }
     },
     [loadRefs, pickInvoice]
   );
@@ -263,7 +310,7 @@ export const DeliveryNotesPage: React.FC = () => {
       setFormPartner(doc.is_standalone ? doc.customer ?? "" : "");
       await loadRefs();
       if (doc.invoice) {
-        await pickInvoice(doc.invoice, true);
+        await pickInvoice(doc.invoice, { keepLines: true });
       } else {
         setFormInvoice("");
         setFormInvoiceLabel("");
@@ -361,6 +408,24 @@ export const DeliveryNotesPage: React.FC = () => {
   }, [isStandalone, products, formLines, invoiceLines, usedLines]);
 
   const addLine = () => setFormLines((ls) => [...ls, blankLine(defaultWarehouse)]);
+
+  /** «تسليم الكل»: يعيد بناء البنود من كامل متبقّي الفاتورة — صريحٌ لا تلقائي
+   *  بعد الفتحة الأولى، فحذفُ صفٍّ يبقى محذوفاً. */
+  const fillAllRemaining = async () => {
+    if (formLines.length > 0) {
+      const ok = await confirm({
+        title: "تسليم الكل",
+        message: "سيُستبدل ما في الجدول بكل المتبقّي من الفاتورة. متابعة؟",
+        confirmText: "تسليم الكل",
+      });
+      if (!ok) return;
+    }
+    setFormLines(deliverableToLines(invoiceLines, defaultWarehouse));
+  };
+
+  /** يظهر زرّ «تسليم الكل» ما دام في الفاتورة المرتبطة باقٍ يُسلَّم. */
+  const hasDeliverableRemaining =
+    !isStandalone && invoiceLines.some((l) => Number(l.remaining_quantity) > 0);
 
   const updateLine = (idx: number, patch: Partial<LineState>) =>
     setFormLines((ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
@@ -907,6 +972,17 @@ export const DeliveryNotesPage: React.FC = () => {
                   >
                     <FileSearch className="h-4 w-4" />
                   </button>
+                  {hasDeliverableRemaining && (
+                    <button
+                      type="button"
+                      className="ktra-toolbtn"
+                      data-testid="delivery-fill-all"
+                      title="تعبئة الجدول بكل المتبقّي من الفاتورة"
+                      onClick={() => void fillAllRemaining()}
+                    >
+                      <PackageCheck className="h-4 w-4" /> تسليم الكل
+                    </button>
+                  )}
                   {!isStandalone && (
                     <button
                       type="button"
@@ -1008,7 +1084,8 @@ export const DeliveryNotesPage: React.FC = () => {
             emptyHint="لا توجد فواتير مبيعات مرحّلة."
             onPick={(inv) => {
               setPickerOpen(false);
-              void pickInvoice(inv.id);
+              // نفس سلوك الفتح من الفاتورة: تُملأ بالمتبقّي كاملاً.
+              void pickInvoice(inv.id, { autofillWarehouse: defaultWarehouse });
             }}
             onClose={() => setPickerOpen(false)}
           />

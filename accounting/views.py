@@ -40,7 +40,8 @@ from .cashbox import (
     get_cash_box_parent_account,
 )
 from .models import (
-    Account, CashBoxLedgerAccount, JournalHeader, JournalLine, Cheque,
+    Account, CashBoxLedgerAccount, CashCount, CashTransfer,
+    JournalHeader, JournalLine, Cheque,
     CostCenter, ExchangeRate, FiscalPeriod, TaxRate,
     Bank, BankBranch, BankAccount, BankReconciliation, BankReconciliationLine,
 )
@@ -59,6 +60,8 @@ from .serializers import (
     BankAccountSerializer,
     BankReconciliationSerializer,
     CashBoxLedgerAccountSerializer,
+    CashCountSerializer,
+    CashTransferSerializer,
     JournalHeaderSerializer,
     JournalHeaderListSerializer,
     ChequeSerializer,
@@ -1246,7 +1249,11 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
     permission_classes = ApiAuthAndUser["permission_classes"]
     queryset = CashBoxLedgerAccount.objects.all().select_related("account", "tenant")
     serializer_class = CashBoxLedgerAccountSerializer
-    http_method_names = ["get", "post", "head", "options"]
+    # T-CASHBOX M2: صار للصندوق دورة حياة (تسمية/تعطيل/افتراضي). لا DELETE
+    # أبداً — حساب الصندوق يحمل حركةً، وحذفه يُيتّم قيوداً.
+    # و`put` مسموحة لأجل `my-default/` وحدها: القائمة تحجب أي فعل غير مُعلَن
+    # في `@action`، فبدونها تردّ النقطة 405 وهي مسجَّلة — عطبٌ صامت في الشاشة.
+    http_method_names = ["get", "post", "patch", "put", "head", "options"]
 
     def get_queryset(self):
         tenant = get_tenant(self.request)
@@ -1255,72 +1262,179 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
         return CashBoxLedgerAccount.objects.none()
 
     def create(self, request, *args, **kwargs):
-        external_id = (request.data.get("external_id") or "").strip()
-        name = (request.data.get("name") or "").strip()
-        currency = (request.data.get("currency_code") or "USD").strip()[:3] or "USD"
-        if not external_id or not name:
-            return Response(
-                {"error": "external_id و name مطلوبان"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        """ينشئ الصندوق وحسابه في الشجرة ووثيقة مرآته — نداءٌ واحد ذرّي.
+
+        T-CASHBOX M2: كان العميل ينادي مرّتين (المرآة ثم الحساب)، فيبقى صندوقٌ
+        بلا حساب متى فشل الثاني. الترتيب انعكس والمسؤولية انتقلت للخادم.
+        """
+        from .services import create_cash_box
+
         tenant = get_tenant(self.request)
         if not tenant:
             return Response({"error": "لا يوجد مستأجر في النظام"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if CashBoxLedgerAccount.objects.filter(tenant=tenant, external_id=external_id[:128]).exists():
-            return Response(
-                {"error": "هذا المعرف مربوط بالفعل بحساب صندوق"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        parent = get_cash_box_parent_account(tenant)
-        if not parent:
-            return Response(
-                {
-                    "error": "لم يُعثر على حساب أب للصناديق. أنشئ حساباً تحت الأصول أو عيّن CASH_BOX_PARENT_ACCOUNT_CODE في البيئة.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        code = allocate_cash_box_account_code(parent, tenant)
         try:
-            with db_transaction.atomic():
-                acc = Account.objects.create(
-                    tenant=tenant,
-                    code=code,
-                    name=name[:100],
-                    parent=parent,
-                    account_type=parent.account_type,
-                    is_active=True,
-                    # THA-111: صندوقٌ بحكم إنشائه — التصنيف يُكتب هنا فلا يحتاج
-                    # الصندوق الجديد اشتقاقاً لاحقاً من رمزه أو اسمه.
-                    sub_type=SUB_TYPE_CASH_BOX,
-                )
-                link = CashBoxLedgerAccount.objects.create(
-                    tenant=tenant,
-                    external_id=external_id[:128],
-                    name=name[:200],
-                    currency_code=currency,
-                    account=acc,
-                )
+            box = create_cash_box(
+                tenant=tenant,
+                name=request.data.get("name"),
+                currency_code=request.data.get("currency_code") or "ILS",
+                is_default=bool(request.data.get("is_default")),
+                external_id=request.data.get("external_id"),
+                notes=request.data.get("notes"),
+                user=request.user,
+            )
+        except DjangoValidationError as ve:
+            return Response({"error": "; ".join(ve.messages)}, status=status.HTTP_400_BAD_REQUEST)
         except IntegrityError as ie:
             return Response({"error": f"Database Integrity Error: {ie}"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
-            logger.exception("cash box ledger create failed")
-            return Response({"error": "حدث خطأ غير متوقع أثناء إنشاء حساب الصندوق."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.exception("cash box create failed")
+            return Response(
+                {"error": "حدث خطأ غير متوقع أثناء إنشاء الصندوق."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         create_audit_log(
             tenant=tenant,
             user=request.user,
             action="CREATE",
             model_name="CashBoxLedgerAccount",
-            object_id=link.id,
-            change_details=f"Cash box GL {external_id} -> account {acc.id}",
+            object_id=box.id,
+            change_details=f"Cash box {box.external_id} -> account {box.account_id}",
         )
         return Response(
-            CashBoxLedgerAccountSerializer(link).data,
+            CashBoxLedgerAccountSerializer(box).data,
             status=status.HTTP_201_CREATED,
         )
+
+    def update(self, request, *args, **kwargs):
+        """PUT على الصندوق = PATCH نفسه.
+
+        فتحُ `put` كان لأجل `my-default/` وحدها، لكنه يفتح معه `update` الكامل
+        لـ`ModelViewSet` — ومساره الافتراضي يكتب الحقول خاماً فيتجاوز تزامن اسم
+        الحساب وحارس تغيير العملة. التوجيه هنا يُبقي بابَ كتابةٍ واحداً.
+        """
+        return self.partial_update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        """تعديل صندوق — الاسم يزامن الشجرة والمرآة، والتعطيل يخفيه من المنتقيات."""
+        from .services import update_cash_box
+
+        box = self.get_object()
+        try:
+            update_cash_box(
+                box,
+                name=request.data.get("name"),
+                is_active=request.data.get("is_active"),
+                notes=request.data.get("notes"),
+                currency_code=request.data.get("currency_code"),
+                user=request.user,
+            )
+        except DjangoValidationError as ve:
+            return Response({"error": "; ".join(ve.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        create_audit_log(
+            tenant=box.tenant, user=request.user, action="UPDATE",
+            model_name="CashBoxLedgerAccount", object_id=box.id,
+            change_details=f"name={box.name} active={box.is_active}",
+        )
+        return Response(CashBoxLedgerAccountSerializer(box).data)
+
+    @action(detail=True, methods=["post"], url_path="set-default")
+    @requires_perm("finance.cashbox.manage")
+    def set_default(self, request, pk=None):
+        """يجعل هذا الصندوق افتراضي الشركة — واحدٌ فقط لا أكثر."""
+        from .services import set_default_cash_box
+
+        box = self.get_object()
+        if not box.is_active:
+            return Response(
+                {"error": "لا يصلح صندوقٌ معطَّل أن يكون الافتراضي."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        set_default_cash_box(box, user=request.user)
+        return Response(CashBoxLedgerAccountSerializer(box).data)
+
+    @action(detail=False, methods=["get", "put"], url_path="my-default")
+    def my_default(self, request):
+        """صندوق المستخدم الافتراضي — أعلى درجة في سلّم الحلّ بعد الاختيار الصريح."""
+        from .models import CashBoxUserDefault
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد مستأجر في النظام"}, status=status.HTTP_400_BAD_REQUEST)
+        if request.method == "GET":
+            pref = CashBoxUserDefault.objects.filter(
+                tenant=tenant, user=request.user,
+            ).select_related("cash_box").first()
+            return Response({
+                "cash_box": pref.cash_box_id if pref else None,
+                "cash_box_name": pref.cash_box.name if pref else None,
+            })
+        raw = request.data.get("cash_box")
+        if raw in (None, "", 0):
+            CashBoxUserDefault.objects.filter(tenant=tenant, user=request.user).delete()
+            return Response({"cash_box": None, "cash_box_name": None})
+        box = CashBoxLedgerAccount.objects.filter(
+            tenant=tenant, pk=raw, is_active=True,
+        ).first()
+        if not box:
+            return Response(
+                {"error": "الصندوق غير موجود أو معطَّل."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        CashBoxUserDefault.objects.update_or_create(
+            tenant=tenant, user=request.user, defaults={"cash_box": box},
+        )
+        return Response({"cash_box": box.id, "cash_box_name": box.name})
+
+    @action(detail=True, methods=["get"], url_path="statement")
+    def statement(self, request, pk=None):
+        """كشف الصندوق برصيد جارٍ خادمي — بديل الدمج العميلي القديم."""
+        from .services import cash_box_statement
+
+        box = self.get_object()
+        def _date(raw):
+            try:
+                return datetime.date.fromisoformat(str(raw)[:10]) if raw else None
+            except (TypeError, ValueError):
+                return None
+        data = cash_box_statement(
+            box,
+            start_date=_date(request.query_params.get("start_date")),
+            end_date=_date(request.query_params.get("end_date")),
+            posted_only=request.query_params.get("include_unposted") not in ("true", "1"),
+        )
+        data["name"] = box.name
+        return Response(data)
+
+    @action(detail=True, methods=["post"], url_path="adjust")
+    def adjust(self, request, pk=None):
+        """إيداع في الصندوق أو سحب منه — «Put money in / Take money out»."""
+        from .services import cash_box_adjustment
+
+        box = self.get_object()
+        direction = str(request.data.get("direction") or "in").strip().lower()
+        perm = "finance.cashbox.deposit" if direction == "in" else "finance.cashbox.withdraw"
+        require_perm(request, perm)
+        contra = None
+        raw_contra = request.data.get("contra_account")
+        if raw_contra:
+            contra = Account.objects.filter(
+                pk=raw_contra, tenant=box.tenant, is_active=True,
+            ).first()
+            if contra is None:
+                return Response(
+                    {"error": "الحساب المقابل غير موجود في هذه الشركة."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        try:
+            journal = cash_box_adjustment(
+                box, direction=direction, amount=request.data.get("amount"),
+                contra_account=contra, date=self._fx_date(request.data.get("date")),
+                memo=str(request.data.get("memo") or ""), user=request.user,
+            )
+        except DjangoValidationError as ve:
+            return Response({"error": "; ".join(ve.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"journal_id": journal.id}, status=status.HTTP_201_CREATED)
 
     # ── صندوق العملة الأجنبية: تمويل FIFO + الرصيد (صندوق الدولار) ──
     @staticmethod
@@ -1481,6 +1595,114 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
             change_details=f"CASHBOX_DEPOSIT ext={ext} amount={amount}",
         )
         return Response({"journal_id": j.id}, status=status.HTTP_201_CREATED)
+
+
+class CashTransferViewSet(viewsets.ModelViewSet):
+    """T-CASHBOX M6: التحويل بين الخزائن — مستندٌ واحد بقيدٍ واحد.
+
+    قبله كان النقل «إيداعاً هنا وسحباً هناك» لا يربطهما شيء، فلا يُعرف أنهما
+    حركةٌ واحدة. لا تعديل ولا حذف: التحويل المرحَّل يُعالَج بتحويل معاكس.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = CashTransferSerializer
+    queryset = CashTransfer.objects.all().select_related(
+        "from_cash_box", "to_cash_box", "from_bank_account", "to_bank_account")
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return CashTransfer.objects.none()
+        return self.queryset.filter(tenant=tenant)
+
+    def create(self, request, *args, **kwargs):
+        from .models import BankAccount
+        from .services import create_cash_transfer
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد مستأجر في النظام"}, status=status.HTTP_400_BAD_REQUEST)
+        require_perm(request, "finance.cashbox.transfer")
+
+        def _box(key):
+            raw = request.data.get(key)
+            return CashBoxLedgerAccount.objects.filter(tenant=tenant, pk=raw).first() if raw else None
+
+        def _bank(key):
+            raw = request.data.get(key)
+            return BankAccount.objects.filter(tenant=tenant, pk=raw).select_related("currency").first() if raw else None
+
+        try:
+            transfer = create_cash_transfer(
+                tenant=tenant,
+                transfer_date=CashBoxLedgerViewSet._fx_date(request.data.get("transfer_date")),
+                amount=request.data.get("amount"),
+                from_cash_box=_box("from_cash_box"),
+                from_bank_account=_bank("from_bank_account"),
+                to_cash_box=_box("to_cash_box"),
+                to_bank_account=_bank("to_bank_account"),
+                rate=request.data.get("rate") or 1,
+                notes=request.data.get("notes"),
+                user=request.user,
+            )
+        except DjangoValidationError as ve:
+            return Response({"error": "; ".join(ve.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            CashTransferSerializer(transfer).data, status=status.HTTP_201_CREATED,
+        )
+
+
+class CashCountViewSet(viewsets.ModelViewSet):
+    """T-CASHBOX M6: جرد الصندوق — عدّ النقد وترحيل فرقه (نمط Odoo)."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = CashCountSerializer
+    queryset = CashCount.objects.all().select_related("cash_box")
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return CashCount.objects.none()
+        return self.queryset.filter(tenant=tenant)
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        require_perm(self.request, "finance.cashbox.count")
+        count = serializer.save(
+            tenant=tenant,
+            created_by=self.request.user if self.request.user.is_authenticated else None,
+        )
+        # الرصيد الدفتري يُلتقط لحظة فتح الجرد ليُعرض للعادّ قبل الترحيل.
+        from .services import cash_box_balance
+
+        count.book_balance = cash_box_balance(count.cash_box, as_of=count.count_date)
+        count.difference = (
+            Decimal(str(count.counted_total or 0)) - count.book_balance
+        )
+        count.save(update_fields=["book_balance", "difference"])
+
+    def perform_update(self, serializer):
+        if serializer.instance.status == CashCount.STATUS_POSTED:
+            raise DjangoValidationError("الجرد المرحَّل لا يُعدَّل.")
+        require_perm(self.request, "finance.cashbox.count")
+        serializer.save()
+
+    @action(detail=True, methods=["post"], url_path="post")
+    def post_count(self, request, pk=None):
+        """يرحّل فرق الجرد: الزيادة إلى 4202 والعجز إلى 5206."""
+        from .services import post_cash_count
+
+        require_perm(request, "finance.cashbox.count")
+        count = self.get_object()
+        try:
+            post_cash_count(count, user=request.user)
+        except DjangoValidationError as ve:
+            return Response({"error": "; ".join(ve.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(CashCountSerializer(count).data)
 
 
 class PurchaseReceiptViewSet(viewsets.ViewSet):

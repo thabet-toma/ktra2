@@ -43,7 +43,7 @@ from partners.models import Partner
 from tenants.models import Tenant, Currency
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting import api as accounting_api
-from accounting.cashbox import resolve_default_cash_box_account
+from accounting.services import resolve_cash_account
 from accounting.services import (
     annotate_partner_posted_balance,
     create_audit_log,
@@ -533,14 +533,17 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 )
 
         if bank_account is None:
-            bank_account = resolve_default_cash_box_account(shipment.tenant)
+            # T-CASHBOX M3: السلّم الموحّد — تفضيل المستخدم ثم افتراضي الشركة.
+            bank_account = resolve_cash_account(
+                shipment.tenant_id, user=request.user, required=False,
+            )
 
         if not bank_account:
             return Response(
                 {
                     'error': (
                         'حدد حساب الصندوق: مرّر cash_box_external_id أو bank_account_id، '
-                        'أو أنشئ ربط صندوق وعيّن DEFAULT_CASH_BOX_EXTERNAL_ID أو صندوق USD افتراضياً.'
+                        'أو عيّن صندوقاً افتراضياً للشركة من شاشة «صناديق الكاش».'
                     ),
                 },
                 status=status.HTTP_400_BAD_REQUEST,
