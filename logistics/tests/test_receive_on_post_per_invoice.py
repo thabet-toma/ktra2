@@ -102,6 +102,48 @@ class ReceiveOnPostPerInvoiceTest(APITestCase):
         self._post(inv2)
         assert inv2.receipt_status == PurchaseInvoice.RECEIPT_FULL
 
+    def _pay_and_post(self, invoice, body):
+        """`pay/` يرحّل الفاتورة داخله حين تكون مسودة — مسار «حفظ وترحيل»
+        بلوحة دفعٍ معبّأة منذ T-PAYFULL2."""
+        cash = Account.objects.create(
+            tenant=self.tenant, code=f"1110-R{invoice.pk}", name="صندوق الخيار",
+            account_type="Asset", is_active=True)
+        res = self.client.post(
+            f"/api/logistics/purchase-invoices/{invoice.pk}/pay/",
+            {"cash": str(invoice.grand_total), "cash_account_id": cash.pk,
+             "post_invoice": True, **body},
+            format="json", **self.headers)
+        assert res.status_code in (200, 201), res.content
+        invoice.refresh_from_db()
+        self.product.refresh_from_db()
+        return res.json()
+
+    def test_choice_travels_through_the_pay_endpoint_too(self):
+        """T-PAYFULL2: الخيار يعبر مسار الدفع كما يعبر مسار الترحيل المجرّد.
+
+        الزرّ الأساسي على مسودّةٍ لوحتُها معبّأة صار يرحّل من داخل `pay/` —
+        فلولا هذا العبور لاختلف أثر الترحيل على المخزن باختلاف الزرّ الذي
+        أطلقه، والمستخدم لا يرى في ذلك فرقاً يبرّره.
+        """
+        self._set_company_default(True)
+        inv = self._make_invoice()
+
+        self._pay_and_post(inv, {"receive_on_post": False})
+
+        assert inv.is_posted
+        assert inv.receipt_status == PurchaseInvoice.RECEIPT_NOT
+        assert self.product.quantity_on_hand == Decimal("0.0000")
+
+    def test_pay_endpoint_honours_opting_in_against_an_off_default(self):
+        """والاتجاه الآخر — كي لا يكون العبور صحيحاً في نصف الحالات."""
+        self._set_company_default(False)
+        inv = self._make_invoice()
+
+        self._pay_and_post(inv, {"receive_on_post": True})
+
+        assert inv.receipt_status == PurchaseInvoice.RECEIPT_FULL
+        assert self.product.quantity_on_hand == Decimal("10.0000")
+
     def test_string_false_is_honoured_not_read_as_truthy(self):
         """`"false"` نصّاً من عميلٍ لا يُرسل JSON منطقياً — لا يُقرأ صحيحاً."""
         self._set_company_default(True)

@@ -45,6 +45,8 @@ const invoice = (overrides: Record<string, unknown> = {}) => ({
 
 async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
   const simple = Boolean(opts.simpleMode);
+  /** نيّات الدفع المعلَّقة على المسودة — ما ترسله «مدفوعة» منذ T-PAYFULL3. */
+  const intentCalls: Array<Record<string, unknown>> = [];
   await page.addInitScript((isSimple) => {
     localStorage.setItem("token", "collect-panel-token");
     localStorage.setItem("userId", "collect-panel-user");
@@ -166,6 +168,31 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
       });
       return;
     }
+    /* T-PAYFULL3: «مدفوعة» على المسودة تُعلّق **نيّة دفع** (غير مرحّلة) عبر
+       نقطة `payment-voucher/` — لا سند ولا قيد حتى تُرحَّل الفاتورة. */
+    if (url.pathname.endsWith("/sales/invoices/302/payment-voucher/")) {
+      intentCalls.push(route.request().postDataJSON());
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(invoice({
+          id: 302,
+          invoice_number: "SI-6-302",
+          // مسودة لا مرحّلة — النيّة لا تعيش إلا قبل الترحيل.
+          status: "draft",
+          journal: null,
+          // الخادم يعيد المستند كاملاً: بنودُه تعود معه، وإسقاطُها هنا كان
+          // يُفرغ الإجمالي فتصير الرسالة «أضف بنوداً» بدل «لا متبقٍّ».
+          lines: [{
+            id: 9001, product: 42, quantity: "1", unit_price: "100.00",
+            line_discount: "0", tax_rate: null,
+          }],
+          attached_cash_amount: "100.00",
+          attached_cash_account: 10,
+          pending_payment_total: "100.00",
+        })),
+      });
+      return;
+    }
     // مسودة جديدة: الحفظ يُنشئ الفاتورة، ثم يُطلب التحصيل معها الترحيلَ.
     if (url.pathname.endsWith("/sales/invoices/302/collect/")) {
       await route.fulfill({
@@ -261,6 +288,7 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
     }
     await route.fulfill({ contentType: "application/json", body: "[]" });
   });
+  return { intentCalls };
 }
 
 async function openPanel(page: Page) {
@@ -418,6 +446,59 @@ test("«مدفوعة» ثم «تسجيل دفعة» ⇒ سند قبض بكامل
   await expect(page.getByRole("button", { name: "مسدَّدة", exact: true }).first())
     .toBeVisible({ timeout: 15_000 });
   await expect(page.getByTestId("document-payment-panel")).toHaveCount(0);
+});
+
+/* T-PAYFULL2 (مرآة الشراء): «حفظ وترحيل» يحصّل ما في اللوحة بدل أن يبتلعه.
+   كان الزرّ الأساسي يرحّل ويمضي، فيبقى المبلغ المكتوب معلّقاً على شاشةٍ تبدو
+   كأنها نفّذته — والمالك يضغط «مدفوعة» ثم الزرّ الأساسي لا زرّ اللوحة. */
+
+test("«مدفوعة» على مسودة تسجّل دفعةً غير مرحّلة لا تحصيلاً", async ({ page }) => {
+  const { intentCalls } = await installMocks(page);
+  await page.goto("/sales/invoices/new");
+  await page.waitForLoadState("networkidle");
+  await page.getByPlaceholder("اكتب اسم المنتج…").first().fill("لابتوب");
+  await page.getByText("لابتوب", { exact: true }).last().click();
+
+  const panel = page.getByTestId("document-payment-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: "مدفوعة", exact: true }).click();
+
+  // نيّةٌ تُعلَّق على المسودة — لا سند ولا قيد.
+  await expect.poll(() => intentCalls.length, { timeout: 15_000 }).toBe(1);
+  expect(intentCalls[0]).toMatchObject({ cash_amount: "100.00", cash_account_id: 10 });
+  await expect(page.getByText("غير مرحّلة", { exact: false }).first())
+    .toBeVisible({ timeout: 15_000 });
+
+  // وضغطةٌ ثانية لا تُضاعفها: الأساس `remainingAfterIntent`.
+  await page.getByRole("button", { name: "مدفوعة", exact: true }).click();
+  await expect(page.getByText("لا متبقٍّ", { exact: false }).first()).toBeVisible();
+  expect(intentCalls).toHaveLength(1);
+});
+
+test("مبلغٌ يُكتب يدوياً في اللوحة يمرّ من «حفظ وترحيل» بنداء collect/ واحد", async ({ page }) => {
+  await installMocks(page);
+  await page.goto("/sales/invoices/new");
+  await page.waitForLoadState("networkidle");
+  await page.getByPlaceholder("اكتب اسم المنتج…").first().fill("لابتوب");
+  await page.getByText("لابتوب", { exact: true }).last().click();
+
+  const panel = page.getByTestId("document-payment-panel");
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  await panel.getByLabel("المدفوع نقداً").fill("100");
+
+  const collectRequest = page.waitForRequest((request) =>
+    request.method() === "POST"
+    && new URL(request.url()).pathname.endsWith("/sales/invoices/302/collect/"),
+  );
+  await page.getByRole("button", { name: /^حفظ وترحيل$/ }).click();
+  const payload = (await collectRequest).postDataJSON();
+  expect(payload).toMatchObject({
+    cash: "100.00",
+    cash_account_id: 10,
+    // الترحيل داخل نداء التحصيل — لا مسار ترحيلٍ ثانٍ ينفصل عن المال.
+    post_invoice: true,
+  });
+  await expect(page.getByText("سند قبض #778", { exact: false })).toBeVisible();
 });
 
 test("الفتح بـ`?pay=full` من القائمة يصل واللوحة معبّأة سلفاً", async ({ page }) => {

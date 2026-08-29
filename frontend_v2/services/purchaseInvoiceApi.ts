@@ -371,6 +371,9 @@ export const purchaseInvoiceApi = {
       from_on_account?: Array<{ payment_id: number; amount: string }>;
       post_invoice?: boolean;
       payment_date?: string | null;
+      /** T-PAYFULL2: يمرّ إلى `post_to_accounting` داخل النداء نفسه — الترحيل
+          مع الدفع يخضع لخيار «الاستلام مع الترحيل» كالترحيل المجرّد. */
+      receive_on_post?: boolean;
     },
   ): Promise<{ invoice: PurchaseInvoiceDto; payment_id: number | null }> => {
     const res = await safeFetch(`${API_BASE}/logistics/purchase-invoices/${id}/pay/`, {

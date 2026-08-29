@@ -2741,26 +2741,62 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   };
 
   /**
-   * T-PAYFULL (مرآة محرّر الشراء): «مدفوعة» تضع كامل المتبقّي في خانة النقد
-   * وتنزل باللوحة — التنفيذ يبقى بزرّ «تسجيل دفعة».
+   * T-PAYFULL3 (مرآة محرّر الشراء، قرار المالك): على **المسودة** «مدفوعة»
+   * تسجّل دفعةً **غير مرحّلة** بكامل المتبقّي — نيّةٌ تُحفظ على الفاتورة
+   * وتتجسّد سند قبضٍ واحداً عند الترحيل. وعلى المرحّلة تعبئةٌ فقط: لا وجود
+   * لدفعةٍ غير مرحّلة بعد الترحيل.
    *
-   * على المسودة الأساسُ `remainingAfterIntent` لا `remaining`: النيّة المحفوظة
-   * تتجسّد سنداً عند الترحيل، فالتعبئة بالخام تدفع مرّتين.
+   * والأساس على المسودة `remainingAfterIntent` لا `remaining`: النيّة المحفوظة
+   * تتجسّد سنداً عند الترحيل، فالاحتساب بالخام يسجّلها مرّتين.
    */
   const fillCollectFull = () => {
     if (customerId === "") {
       setLocalErr("اختر العميل أولاً.");
       return;
     }
-    const remaining = isPosted ? settlement.remaining : settlement.remainingAfterIntent;
+    /* المرحّلة: لا وجود لدفعةٍ «غير مرحّلة» عليها — سندٌ أو لا شيء. */
+    if (isPosted) {
+      if (settlement.remaining <= 0.009) {
+        setMsg("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.");
+        return;
+      }
+      setLocalErr(null);
+      setCollectCash(settlement.remaining.toFixed(2));
+      collectPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      collectCashInputRef.current?.focus();
+      setMsg(
+        `عُبِّئ المتبقّي ${formatMoney(settlement.remaining)} — اضغط «تسجيل دفعة» لتنفيذها.`,
+      );
+      return;
+    }
+    const remaining = settlement.remainingAfterIntent;
     if (remaining <= 0.009) {
-      setMsg("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.");
+      /* فاتورةٌ بلا بنود ليست «مسدَّدة» — الرسالة الواحدة كانت تقول ذلك على
+         مسودةٍ فارغة فيبدو الزرّ عاطلاً. مرآة محرّر الشراء. */
+      setMsg(
+        collectBase <= 0.009
+          ? "لا مبلغ بعد — أضف بنود الفاتورة ثم اضغط «مدفوعة»."
+          : "المسودة عليها دفعة تغطّي إجماليها — لا متبقٍّ.",
+      );
+      return;
+    }
+    const cashAccount = collectCashAccountId !== ""
+      ? Number(collectCashAccountId) : intentCashAccountId;
+    if (!cashAccount) {
+      setLocalErr("لا صندوق افتراضي — اختر حساب الصندوق أو البنك في لوحة التحصيل.");
+      focusCollectPanel();
       return;
     }
     setLocalErr(null);
-    setCollectCash(remaining.toFixed(2));
-    collectPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    collectCashInputRef.current?.focus();
+    void writeIntent(
+      {
+        cash: intentCash + remaining,
+        cashAccountId: cashAccount,
+        cheques: currentIntentCheques(),
+      },
+      `سُجِّلت دفعة ${formatMoney(remaining)} غير مرحّلة — تتحوّل إلى سند قبض عند ترحيل الفاتورة.`,
+      { saveFirst: true },
+    );
   };
 
   /* T-PAYFULL: الوصول من زرّ «مدفوعة» في قائمة المبيعات — مرّةً واحدة بحارس
@@ -2804,9 +2840,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       cheques: InvoiceIntentPayload["cheques"];
     },
     successMsg: string,
+    opts?: { saveFirst?: boolean },
   ): Promise<boolean> => {
+    /* `saveFirst`: المبلغ محسوبٌ من **الشاشة**، والنيّة تُعلَّق على صفٍّ في
+       القاعدة — فبنودٌ معدَّلة لم تُحفظ تُعلِّق دفعةً لا تطابق إجمالي المخزَّن. */
     let targetId = draftId;
-    if (!targetId) {
+    if (!targetId || opts?.saveFirst) {
       const saved = await handleSaveDraft();
       if (!saved) return false;
       targetId = saved.id;
@@ -3015,6 +3054,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       invoiceType: "sales",
       existingInvoice: draftId != null,
     });
+    /* T-PAYFULL2 (مرآة الشراء): لوحة التحصيل معبّأة ⇒ الزرّ الأساسي يحصّل معها.
+       `collect/` يحمل `post_invoice` أصلاً — نداءٌ واحد ذرّي يحفظ ويرحّل ويُخرج
+       سند القبض، بدل ترحيلٍ يترك المبلغ المكتوب معلّقاً بلا مصير. */
+    if (!isPosted && payment.canSubmit) {
+      await submitCollect();
+      return;
+    }
     const saved = await handleSaveDraft();
     if (!saved) return;
     if (!saved.posted && !(await handlePost(saved.id))) return;

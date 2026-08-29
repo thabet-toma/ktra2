@@ -597,6 +597,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       setActiveTabKey("fees");
       return;
     }
+    /* T-PAYFULL2: نقول الشرط قبل الرحلة — الخادم يرفض الفاتورة النقدية بلا
+       صندوق، والرفض كان يصل بعد الحفظ بلا حقلٍ مرئي يُصلحه. مرآة حارس البيع. */
+    if (formData.paymentType === "cash" && !formData.cashOrBankAccountId) {
+      toast("الفاتورة نقدية — اختر صندوق التسوية بجوار علامة «نقدي».", "error");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -787,6 +793,25 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   // M2: ترحيل الفاتورة من شريط الأدوات (موحَّد مع شاشة المبيعات).
+  /**
+   * T-RECVOPT: يُسأل حيث للجواب معنى فقط — فاتورة محلية لم تُستلَم كلّها.
+   *
+   * T-PAYFULL2: مصدرٌ واحد لمسارَي الترحيل. `pay/` يرحّل الفاتورة داخله
+   * (`post_invoice`) ولم يكن يسأل، فيختلف أثرُ الترحيل على المخزن باختلاف
+   * الزرّ الذي أطلقه — وهذا آخر ما يُحتمل في المخزون.
+   *
+   * يُعيد `null` إن ألغى المستخدم، و`undefined` إن لم يكن للسؤال معنى.
+   */
+  const askReceiveChoice = async (): Promise<boolean | undefined | null> => {
+    if (!receiveOnPostApplies({
+      isLocal: !isInternationalInvoice && !formData.shipment && !formData.dealId
+        && !formData.clearanceId,
+      isReturn: Boolean(formData.isReturn),
+      receiptStatus: formData.receiptStatus,
+    })) return undefined;
+    return askReceiveOnPost(confirm, receiveOnPostDefault);
+  };
+
   const handlePost = async (idOverride?: string | number) => {
     if (!invoicePermissions.canPost) {
       setAccErr("لا تملك صلاحية ترحيل فاتورة الشراء.");
@@ -794,18 +819,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
     const targetId = idOverride ?? formData.id;
     if (!targetId || posting) return false;
-    // T-RECVOPT: يُسأل حيث للجواب معنى فقط — فاتورة محلية لم تُستلَم كلّها.
-    let receiveChoice: boolean | undefined;
-    if (receiveOnPostApplies({
-      isLocal: !isInternationalInvoice && !formData.shipment && !formData.dealId
-        && !formData.clearanceId,
-      isReturn: Boolean(formData.isReturn),
-      receiptStatus: formData.receiptStatus,
-    })) {
-      const answer = await askReceiveOnPost(confirm, receiveOnPostDefault);
-      if (answer === null) return false;
-      receiveChoice = answer;
-    }
+    const answer = await askReceiveChoice();
+    if (answer === null) return false;
+    const receiveChoice = answer;
     setAccErr(null);
     setAccMsg(null);
     setPosting(true);
@@ -2213,6 +2229,29 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   }, [payCashAccountId, cashBoxes, formData.currency,
       purchaseDefaultCashAccountId, myDefaultBoxId]);
 
+  /** T-PAYFULL2 — صندوق الفاتورة النقدية نفسها (لا صندوق لوحة الدفع).
+   *
+   * `cash_or_bank_account` كان حقلاً ميّتاً في هذا المحرّر: النموذج يقرؤه في
+   * بناء الحمولة، والمُطابِق يملأه من الخادم، ولا **موضع واحد** يكتبه. فعلامة
+   * «نقدي» في الرأس كانت طريقاً مسدوداً: المُسلسِل يرفض
+   * (`الدفع النقدي يتطلب اختيار حساب صندوق/بنك`) ولا حقل على الشاشة يُصلح
+   * الرفض. مرآة `SalesInvoiceEditor` التي تملأه بالسلّم نفسه منذ T-CASHBOX.
+   */
+  useEffect(() => {
+    if (formData.paymentType !== "cash") return;
+    if (formData.cashOrBankAccountId) return;
+    const pick = pickDefaultCashAccount({
+      boxes: cashBoxes,
+      currency: formData.currency,
+      settingsAccountId: purchaseDefaultCashAccountId,
+      userDefaultBoxId: myDefaultBoxId,
+    });
+    if (pick.accountId) {
+      setFormData((prev) => ({ ...prev, cashOrBankAccountId: pick.accountId }));
+    }
+  }, [formData.paymentType, formData.cashOrBankAccountId, cashBoxes,
+      formData.currency, purchaseDefaultCashAccountId, myDefaultBoxId]);
+
   const paymentInput = useMemo(() => ({
     base: payableTotal,
     paid: Number(formData.amountPaid) || 0,
@@ -2268,9 +2307,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       cheques: ReturnType<typeof currentIntentCheques>;
     },
     successMsg: string,
+    opts?: { saveFirst?: boolean },
   ): Promise<boolean> => {
+    /* `saveFirst`: المبلغ محسوبٌ من **الشاشة**، والنيّة تُعلَّق على صفٍّ في
+       القاعدة — فلو كانت البنود معدَّلةً ولم تُحفظ عُلِّقت دفعةٌ لا تطابق
+       إجمالي الفاتورة المخزَّن. */
     let targetId = formData.id;
-    if (!targetId) {
+    if (!targetId || opts?.saveFirst) {
       const saved = await handleSave();
       if (!saved) return false;
       targetId = saved;
@@ -2369,7 +2412,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
    * سند الصرف داخل معاملة الخادم نفسها (`post_invoice`)، وعلى المرحّلة يُسجَّل
    * السند فوراً. الكلّ أو لا شيء — لا فاتورةٌ مرحّلة بسندٍ نصفِ مولود.
    */
-  const submitPayment = async () => {
+  const submitPayment = async (opts?: { saveFirst?: boolean }) => {
     if (!formData.supplierId) { toast("اختر المورد أولاً.", "error"); return; }
     if (!payment.canSubmit) return;
     if ((Number(payCash) || 0) > 0 && !payCashAccountId) {
@@ -2378,11 +2421,24 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
     setPaying(true);
     try {
+      /* `saveFirst`: الدخول من «حفظ وترحيل» — الاسم يَعِد بحفظ ما على الشاشة،
+         و`pay/` وحده يدفع ويرحّل ولا يحفظ تعديلات البنود. حفظةٌ واحدة هنا
+         تخدم المسارين: المعرَّف يعود منها فلا يُقرأ من حالةٍ لم تُحدَّث بعد. */
       let targetId = formData.id;
-      if (!targetId) {
+      if (!targetId || opts?.saveFirst) {
         const saved = await handleSave();
         if (!saved) return;
         targetId = saved;
+      }
+      /* T-PAYFULL2: هذا النداء يرحّل الفاتورة أيضاً حين تكون مسودة، فيلزمه سؤال
+         «الاستلام مع الترحيل» نفسه — وإلّا قرّر الإعدادُ العام وحده مصير المخزن
+         لأن المستخدم دفع بدل أن يرحّل. وبعد الحفظ لا قبله: إلغاءُ السؤال يترك
+         المسودة محفوظةً كما يفعل مسار الترحيل المجرّد. */
+      let receiveOnPost: boolean | undefined;
+      if (!isPosted) {
+        const answer = await askReceiveChoice();
+        if (answer === null) return;
+        receiveOnPost = answer;
       }
       const result = await purchaseInvoiceApi.pay(Number(targetId), {
         cash: payCash || undefined,
@@ -2398,6 +2454,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           amount: String(row.amount),
         })),
         post_invoice: !isPosted,
+        ...(receiveOnPost !== undefined ? { receive_on_post: receiveOnPost } : {}),
       });
       clientLogger.info("purchase_invoice.paid", {
         invoiceId: targetId, paymentId: result.payment_id,
@@ -2424,21 +2481,70 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   /**
-   * T-PAYFULL: «مدفوعة» — الحالة الغالبة أن تُدفع الفاتورة كاملةً، وكتابةُ
-   * المبلغ يدوياً كانت ضريبةً عليها. الزرّ **يعبّئ** خانة النقد بكامل المتبقّي
-   * وينزل باللوحة، والتنفيذ يبقى بزرّ «تسجيل دفعة» — قرار المالك: لا سند
-   * يُرحَّل بنقرةٍ واحدة بلا مراجعةٍ للصندوق والمبلغ.
+   * «مدفوعة» — الحالة الغالبة أن تُدفع الفاتورة كاملةً، وكتابةُ المبلغ يدوياً
+   * كانت ضريبةً عليها.
+   *
+   * T-PAYFULL3 (قرار المالك، عدلَ عن «تعبئة فقط»): على **المسودة** الزرّ
+   * **يسجّل دفعةً غير مرحّلة** بكامل المتبقّي — نيّةٌ تُحفظ على الفاتورة وتظهر
+   * في جدول دفعاتها موسومةً، وتتجسّد سند صرفٍ واحداً عند الترحيل
+   * (`settle_attached_purchase_intent`). لا قيدَ يُكتب الآن: مالٌ سجّله
+   * المستخدم لا مالٌ تحرّك في الدفاتر — وهذا بالضبط ما تعنيه «غير مرحّلة».
+   *
+   * وعلى **المرحّلة** لا وجود لهذه الحالة أصلاً (سندٌ أو لا شيء)، فيبقى الزرّ
+   * تعبئةً والتنفيذ بـ«تسجيل دفعة».
    */
   const fillPayFull = () => {
     if (!formData.supplierId) { toast("اختر المورد أولاً.", "error"); return; }
-    const remaining = payment.remainingBefore;
-    if (remaining <= 0.009) {
-      toast("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.", "info");
+
+    /* المرحّلة: لا وجود لدفعةٍ «غير مرحّلة» عليها أصلاً — ما بعد الترحيل سندٌ
+       أو لا شيء. فيبقى الزرّ هنا تعبئةً، والتنفيذ بـ«تسجيل دفعة». */
+    if (isPosted) {
+      const remaining = payment.remainingBefore;
+      if (remaining <= 0.009) {
+        toast("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.", "info");
+        return;
+      }
+      setPayCash(remaining.toFixed(2));
+      payPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      payCashInputRef.current?.focus();
+      toast(
+        `عُبِّئ المتبقّي ${formatMoney(remaining)} — اضغط «تسجيل دفعة» لتنفيذها.`,
+        "success",
+      );
       return;
     }
-    setPayCash(remaining.toFixed(2));
-    payPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    payCashInputRef.current?.focus();
+
+    /* المسودة: **الأساس `remainingAfterIntent`** — النيّة المحفوظة تتجسّد سنداً
+       عند الترحيل، فالاحتساب بالخام يسجّل الدفعة مرّتين. */
+    const remaining = settlement.remainingAfterIntent;
+    if (remaining <= 0.009) {
+      /* فاتورةٌ بلا بنود ليست «مسدَّدة» — والرسالة الواحدة كانت تقول ذلك على
+         مسودةٍ فارغة، فيبدو الزرّ عاطلاً وسببُه مكتوم. */
+      toast(
+        payableTotal <= 0.009
+          ? "لا مبلغ بعد — أضف بنود الفاتورة ثم اضغط «مدفوعة»."
+          : "المسودة عليها دفعة تغطّي إجماليها — لا متبقٍّ.",
+        "info",
+      );
+      return;
+    }
+    const cashAccount = payCashAccountId ?? intentCashAccountId;
+    if (!cashAccount) {
+      toast("لا صندوق افتراضي — اختر حساب الصندوق أو البنك في لوحة الدفع.", "error");
+      focusPayPanel();
+      return;
+    }
+    /* بدلالة الاستبدال كما تفعل اللوحة: نقدُ النيّة القائم **زائد** المتبقّي،
+       والشيكات المرفقة تبقى كما هي — كتابةٌ كاملة لا فرق. */
+    void writeIntent(
+      {
+        cash: intentCash + remaining,
+        cashAccountId: cashAccount,
+        cheques: currentIntentCheques(),
+      },
+      `سُجِّلت دفعة ${formatMoney(remaining)} غير مرحّلة — تتحوّل إلى سند صرف عند ترحيل الفاتورة.`,
+      { saveFirst: true },
+    );
   };
 
   /* T-PAYFULL: الوصول من زرّ «مدفوعة» في قائمة الفواتير. مرّةً واحدة وبحارس
@@ -2617,6 +2723,20 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       invoiceType: "purchase",
       existingInvoice: Boolean(formData.id),
     });
+    /* T-PAYFULL2 — اللوحة معبّأة ⇒ الزرّ الأساسي يسجّل الدفعة معها.
+     *
+     * كان «حفظ وترحيل» يحفظ ويرحّل ويترك المبلغ المكتوب في الخانة بلا مصير:
+     * يضغط المالك «مدفوعة» ثم الزرّ الأساسي، فتُرحَّل الفاتورة **غير مدفوعة**
+     * والرقم يبقى معلّقاً في شاشةٍ تبدو كأنها نفّذته. زرّان متجاوران أحدهما
+     * يبتلع عمل الآخر.
+     *
+     * لا مسار ثانٍ ولا حارس مكرَّر: `pay/` يحمل `post_invoice` أصلاً، فنداءٌ
+     * واحد ذرّي يحفظ ويرحّل ويُخرج سند الصرف — أو لا شيء.
+     */
+    if (!isPosted && payment.canSubmit) {
+      await submitPayment({ saveFirst: true });
+      return;
+    }
     const savedId = await handleSave();
     if (!savedId || !(await handlePost(savedId))) return;
     clientLogger.info("invoice.save_and_post_completed", {
@@ -3262,6 +3382,27 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               {formData.paymentType === "cash" ? "تُدفع فوراً" : "على ذمم المورّد"}
             </span>
           </label>
+          {/* T-PAYFULL2: صندوق الفاتورة النقدية — ظاهرٌ حيث يُقرَّر نوعها.
+              الخادم يشترطه، فإخفاؤه كان يحوّل علامةً واحدة إلى رفضٍ بلا مخرج. */}
+          {formData.paymentType === "cash" && (
+            <div className="ktra-field ktra-field--inline min-w-[15rem]" data-testid="purchase-cash-account">
+              <span className="ktra-field-label" style={{ flex: "unset" }}>الصندوق</span>
+              <AccountTreeField
+                className="ktra-input"
+                accounts={allAccounts}
+                value={formData.cashOrBankAccountId ?? ""}
+                purpose="cash"
+                disabled={effectiveReadOnly}
+                allowClear={false}
+                onChange={(id) => {
+                  setFormData((prev) => ({ ...prev, cashOrBankAccountId: id ?? null }));
+                  markDirty();
+                }}
+                placeholder="الصندوق / البنك"
+                title="صندوق تسوية الفاتورة النقدية"
+              />
+            </div>
+          )}
         </>
       )}
       activeTab={activeTabKey}
