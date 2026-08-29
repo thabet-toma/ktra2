@@ -43,8 +43,14 @@ const invoice = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
+async function installMocks(
+  page: Page,
+  opts: { simpleMode?: boolean; noPanelCashSources?: boolean } = {},
+) {
   const simple = Boolean(opts.simpleMode);
+  /** T-PAYFULL7: يحاكي شركةً بلا إعداد صندوقٍ ولا صناديق مسجَّلة — مصدرا
+      صندوق اللوحة معدومان، ولا يبقى إلا صندوق الفاتورة النقدية نفسها. */
+  const bareCash = Boolean(opts.noPanelCashSources);
   /** نيّات الدفع المعلَّقة على المسودة — ما ترسله «مدفوعة» منذ T-PAYFULL3. */
   const intentCalls: Array<Record<string, unknown>> = [];
   /** حفظُ المسودة الذي يسبق التعليق (`saveFirst`). */
@@ -180,12 +186,16 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
-          default_cash_account: 10,
+          default_cash_account: bareCash ? null : 10,
           default_currency: 1,
           default_customer: 8,
           default_revenue_account_product: 40,
         }),
       });
+      return;
+    }
+    if (bareCash && url.pathname.endsWith("/accounting/cash-box-accounts/")) {
+      await route.fulfill({ contentType: "application/json", body: "[]" });
       return;
     }
     if (url.pathname.endsWith("/inventory/products/")) {
@@ -581,6 +591,22 @@ test("«مدفوعة» على مسودة محفوظة ونقديّة تُظهر 
   // وهذا ما يبحث عنه المستخدم بعينه: صفٌّ في جدول دفعات المستند.
   await expect(payments).not.toContainText("لا دفعات على هذا المستند بعد");
   await expect(payments).toContainText("غير مرحّل");
+});
+
+test("«مدفوعة» تجد صندوق الفاتورة النقدية ولو تأخّر صندوق اللوحة", async ({ page }) => {
+  /* T-PAYFULL7: «مش دايماً بزبط» = سباق توقيت — صندوق اللوحة يُملأ بـeffect
+     بعد وصول الإعدادات والصناديق، فضغطةٌ سريعة تسبقه. هنا **تُمنعان معاً**
+     (لا إعداد ولا صناديق) والفاتورة نقديّة صندوقُها في رأسها: السلّم الحتمي
+     يجده — والقديم كان يرفض «لا صندوق افتراضي» وصندوقُها أمام عينيه. */
+  const { intentCalls } = await installMocks(page, { noPanelCashSources: true });
+  await page.goto("/sales/invoices/303");
+  await expect(page.getByTestId("document-payment-panel")).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole("button", { name: "مدفوعة", exact: true }).click();
+
+  await expect.poll(() => intentCalls.length, { timeout: 15_000 }).toBe(1);
+  // الصندوق = صندوق الفاتورة نفسها (10) لا خطأ «لا صندوق افتراضي».
+  expect(intentCalls[0]).toMatchObject({ cash_amount: "100.00", cash_account_id: 10 });
 });
 
 test("الفتح بـ`?pay=full` من القائمة يصل واللوحة معبّأة سلفاً", async ({ page }) => {

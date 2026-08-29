@@ -2779,6 +2779,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
      * متزامنة ومُعالِج النقرة بلا مصيدة، فأيّ استثناء يصير «رفضاً غير
      * معالَج» في الطرفية وحدها: صمتٌ تامّ. الآن كلاهما مُغطّى.
      */
+    /* حارسُ تداخُل: «مدفوعة» أثناء حفظٍ أو تعليقٍ جارٍ تُنتج سباقين — الضغطة
+       تُهمَل بهدوء والجارية تكمل. */
+    if (saving || collecting) return;
     const say = (text: string, kind: "info" | "error" = "info") => {
       if (kind === "error") setLocalErr(text); else setMsg(text);
       toast(text, kind === "error" ? "error" : "info");
@@ -2833,9 +2836,18 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         say("المسودة عليها دفعة تغطّي إجماليها — لا متبقٍّ.");
         return;
       }
-      const cashAccount = collectCashAccountId !== ""
-        ? Number(collectCashAccountId)
-        : (d.attached_cash_account ?? null);
+      /* T-PAYFULL7 — سلّم صندوقٍ **حتميّ**: «مش دايماً بزبط» كان سباقَ توقيت.
+         صندوق اللوحة يُملأ بـeffect بعد وصول الصناديق من الخادم، فضغطةٌ سريعة
+         بعد فتح الشاشة تسبقه ويُرفض الزرّ «لا صندوق» — وصندوقُ الفاتورة نفسها
+         ظاهرٌ في الرأس. السلّم الآن يقرأ المصادر مباشرةً لا حالةً وسيطة:
+         اللوحة ← صندوق الفاتورة النقدية ← نيّة سابقة ← إعداد المبيعات ←
+         الصناديق المسجَّلة. */
+      const cashAccount =
+        (collectCashAccountId !== "" ? Number(collectCashAccountId) : null)
+        ?? (invType === "cash" && cashAccountId !== "" ? Number(cashAccountId) : null)
+        ?? d.attached_cash_account
+        ?? salesSettings?.default_cash_account
+        ?? pickDefaultCashAccount({ boxes: cashBoxes, currency: docCurrencyCode }).accountId;
       if (!cashAccount) {
         say("لا صندوق افتراضي — اختر حساب الصندوق أو البنك في لوحة التحصيل.", "error");
         focusCollectPanel();

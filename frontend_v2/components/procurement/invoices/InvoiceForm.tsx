@@ -2505,6 +2505,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const fillPayFull = async () => {
    /* T-PAYFULL5: مُعالِج نقرةٍ غير متزامن بلا مصيدة = فشلٌ صامت — الاستثناء
       يصير «رفضاً غير معالَج» في الطرفية ولا يرى المستخدم شيئاً. */
+   /* حارسُ تداخُل — الضغطة أثناء حفظٍ أو دفعٍ جارٍ تُهمَل بهدوء. */
+   if (saving || paying) return;
    try {
     clientLogger.info("purchase_invoice.pay_full_clicked", {
       invoiceId: formData.id, isPosted, base: payableTotal,
@@ -2555,7 +2557,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       toast("المسودة عليها دفعة تغطّي إجماليها — لا متبقٍّ.", "info");
       return;
     }
-    const cashAccount = payCashAccountId ?? dto.attached_cash_account ?? null;
+    /* T-PAYFULL7 — سلّم صندوقٍ حتميّ (مرآة البيع): صندوق اللوحة يُملأ بـeffect
+       متأخّرٍ عن الشاشة، فضغطةٌ سريعة كانت تُرفض «لا صندوق» وصندوقُ الفاتورة
+       ظاهرٌ في رأسها. المصادر تُقرأ مباشرةً لا عبر حالةٍ وسيطة. */
+    const cashAccount =
+      payCashAccountId
+      ?? (formData.paymentType === "cash" ? formData.cashOrBankAccountId ?? null : null)
+      ?? dto.attached_cash_account
+      ?? purchaseDefaultCashAccountId
+      ?? pickDefaultCashAccount({
+        boxes: cashBoxes,
+        currency: formData.currency,
+        userDefaultBoxId: myDefaultBoxId,
+      }).accountId;
     if (!cashAccount) {
       toast("لا صندوق افتراضي — اختر حساب الصندوق أو البنك في لوحة الدفع.", "error");
       focusPayPanel();
