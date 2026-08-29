@@ -489,6 +489,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [onAccountKey, setOnAccountKey] = useState(0);
   const [collecting, setCollecting] = useState(false);
   const collectPanelRef = useRef<HTMLDivElement | null>(null);
+  /** T-PAYFULL4: «مدفوعة» تُنزِل المستخدم إلى صفّ الدفعة الذي أنشأته للتوّ. */
+  const paymentsSectionRef = useRef<HTMLDivElement | null>(null);
+  /** T-PAYFULL4: سببُ الرفض يسكن أعلى المستند، والزرّ الذي أطلقه في الشريط —
+      فمن ضغط وهو منزلقٌ إلى أسفل الفاتورة كان يرى «لم يحدث شيء». */
+  const bannerRef = useRef<HTMLDivElement | null>(null);
   const collectCashInputRef = useRef<HTMLInputElement | null>(null);
   // P3-2-b wiring: offline status + stale-data confirm for line additions.
   const { online: networkOnline } = useOnlineStatus();
@@ -1528,7 +1533,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     );
   };
 
-  const handleSaveDraft = async (): Promise<{ id: number; posted: boolean } | undefined> => {
+  useEffect(() => {
+    if (!localErr) return;
+    bannerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [localErr]);
+
+  const handleSaveDraft = async (): Promise<
+    { id: number; posted: boolean; detail: SalesInvoiceDetail } | undefined
+  > => {
     setLocalErr(null);
     setMsg(null);
     setSaveFieldErrors({});
@@ -1576,7 +1588,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       void clearLocalDraft();
       setRecoverableDraft(null);
       onInvoiceSaved();
-      return { id: activeDraftId as number, posted: savedInvoice.status === "posted" };
+      /* T-PAYFULL4: المستند كما أعاده الخادم يرافق النتيجة — من يبني على
+         أرقامه (النيّة مثلاً) يقرؤها من مصدرها لا من الشاشة. */
+      return {
+        id: activeDraftId as number,
+        posted: savedInvoice.status === "posted",
+        detail: savedInvoice,
+      };
     } catch (e) {
       setLocalErr(humanizeThrown(e, "فشل الحفظ"));
       setSaveFieldErrors(
@@ -2749,7 +2767,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
    * والأساس على المسودة `remainingAfterIntent` لا `remaining`: النيّة المحفوظة
    * تتجسّد سنداً عند الترحيل، فالاحتساب بالخام يسجّلها مرّتين.
    */
-  const fillCollectFull = () => {
+  const fillCollectFull = async () => {
     if (customerId === "") {
       setLocalErr("اختر العميل أولاً.");
       return;
@@ -2769,34 +2787,66 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       );
       return;
     }
-    const remaining = settlement.remainingAfterIntent;
-    if (remaining <= 0.009) {
-      /* فاتورةٌ بلا بنود ليست «مسدَّدة» — الرسالة الواحدة كانت تقول ذلك على
-         مسودةٍ فارغة فيبدو الزرّ عاطلاً. مرآة محرّر الشراء. */
-      setMsg(
-        collectBase <= 0.009
-          ? "لا مبلغ بعد — أضف بنود الفاتورة ثم اضغط «مدفوعة»."
-          : "المسودة عليها دفعة تغطّي إجماليها — لا متبقٍّ.",
-      );
+    if (collectBase <= 0.009) {
+      setMsg("لا مبلغ بعد — أضف بنود الفاتورة ثم اضغط «مدفوعة».");
+      return;
+    }
+
+    /* T-PAYFULL4 — المبلغ يُشتقّ من **رقم الخادم** بعد الحفظ، لا من رقم الشاشة.
+     *
+     * `attach_payment_voucher` يرفض نيّةً تتجاوز إجمالي الفاتورة **المخزَّن**
+     * (يعيد حسابه بنفسه من البنود). فكان يكفي فارقُ قرشٍ بين حسبة الشاشة
+     * وحسبة الخادم — خصمُ سطرٍ، تقريبُ ضريبة، سطرٌ لم يصل — ليردّ الطلب
+     * ويبدو الزرّ كأنه لم يعمل. الحفظ يسبق، ثم نبني على ما أعاده هو.
+     */
+    const saved = await handleSaveDraft();
+    if (!saved) return; // `handleSaveDraft` عرض السبب في الشريط
+    if (saved.posted) {
+      // رُحِّلت تلقائياً عند الحفظ (إعداد الشركة) ⇒ لا نيّة بعد الترحيل.
+      setMsg("رُحِّلت الفاتورة عند الحفظ — استعمل «تسجيل دفعة» لإخراج سند القبض.");
+      focusCollectPanel();
+      return;
+    }
+    const d = saved.detail;
+    const grand = Number(d.grand_total || 0);
+    const paidNow = Number((d as { amount_paid?: number | string }).amount_paid ?? 0);
+    /* الشيكات المرفقة تبقى كما هي، والنقد يغطّي ما تبقّى — والكتابة بدلالة
+       الاستبدال، فالضغطة الثانية تُنتج الرقم نفسه ولا تُضاعف شيئاً. */
+    const draftCheques = (d.cheques || []).filter((c) => c.status === "Draft");
+    const chequesTotal = draftCheques.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+    const target = Math.max(grand - paidNow - chequesTotal, 0);
+    if (target <= 0.009) {
+      setMsg("الفاتورة مغطّاة بالكامل — لا متبقٍّ.");
+      return;
+    }
+    if (Math.abs(target - Number(d.attached_cash_amount || 0)) <= 0.009) {
+      setMsg("المسودة عليها دفعة تغطّي إجماليها — لا متبقٍّ.");
       return;
     }
     const cashAccount = collectCashAccountId !== ""
-      ? Number(collectCashAccountId) : intentCashAccountId;
+      ? Number(collectCashAccountId)
+      : (d.attached_cash_account ?? null);
     if (!cashAccount) {
       setLocalErr("لا صندوق افتراضي — اختر حساب الصندوق أو البنك في لوحة التحصيل.");
       focusCollectPanel();
       return;
     }
     setLocalErr(null);
-    void writeIntent(
+    await writeIntent(
       {
-        cash: intentCash + remaining,
+        cash: target,
         cashAccountId: cashAccount,
-        cheques: currentIntentCheques(),
+        cheques: draftCheques.map((c) => ({
+          cheque_number: c.cheque_number,
+          amount: Number(c.amount).toFixed(2),
+          due_date: c.due_date || null,
+          bank_name: c.bank_name || "",
+        })),
       },
-      `سُجِّلت دفعة ${formatMoney(remaining)} غير مرحّلة — تتحوّل إلى سند قبض عند ترحيل الفاتورة.`,
-      { saveFirst: true },
+      `سُجِّلت دفعة ${formatMoney(target)} غير مرحّلة — تتحوّل إلى سند قبض عند ترحيل الفاتورة.`,
     );
+    /* والدليل حيث ينظر المستخدم: صفُّ الدفعة في جدول دفعات المستند. */
+    paymentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
   /* T-PAYFULL: الوصول من زرّ «مدفوعة» في قائمة المبيعات — مرّةً واحدة بحارس
@@ -2807,7 +2857,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     if (!draftId || customerId === "" || !showCollectPanel) return;
     if (collectCashAccountId === "") return;
     collectFullAppliedRef.current = true;
-    fillCollectFull();
+    void fillCollectFull();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFillCollectFull, draftId, customerId, showCollectPanel, collectCashAccountId]);
 
@@ -3178,7 +3228,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       key: "collect-full",
       label: isPosted && remainingDue <= 0.009 ? "مسدَّدة" : "مدفوعة",
       icon: <Wallet />,
-      onClick: !(isPosted && remainingDue <= 0.009) ? fillCollectFull : undefined,
+      onClick: !(isPosted && remainingDue <= 0.009) ? () => void fillCollectFull() : undefined,
       disabled: isPosted && remainingDue <= 0.009,
     } as KitToolbarAction] : []),
     // التسليم: نافذة سريعة تُنشئ إرسالية بالبنود المؤشَّرة، أو المحرّر الكامل
@@ -3219,7 +3269,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const banner =
     localErr || msg ? (
-      <div className={`ktra-banner ${localErr ? "ktra-banner--err" : "ktra-banner--ok"}`}>
+      <div
+        ref={bannerRef}
+        className={`ktra-banner ${localErr ? "ktra-banner--err" : "ktra-banner--ok"}`}
+      >
         {localErr ? (
           <AlertCircle className="h-4 w-4 shrink-0" />
         ) : (
@@ -3647,6 +3700,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const paymentsSection = isReturn ? null : (
     <InvoicePaymentsSection
       side="customer"
+      sectionRef={paymentsSectionRef}
       posted={paymentDetails || []}
       intentCash={intentCash}
       intentCashAccountLabel={

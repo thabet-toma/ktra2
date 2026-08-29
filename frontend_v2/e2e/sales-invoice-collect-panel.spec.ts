@@ -50,6 +50,24 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
   /** حفظُ المسودة الذي يسبق التعليق (`saveFirst`). */
   const patchCalls: Array<Record<string, unknown>> = [];
   let draft303Intent = 0;
+  let draft302Intent = 0;
+  /** المسودة التي يُنشئها الحفظ من `/new` — بنودها وإجماليها كما يعرفها الخادم. */
+  const draft302 = () => invoice({
+    id: 302,
+    invoice_number: "SI-6-302",
+    // مسودة لا مرحّلة — النيّة لا تعيش إلا قبل الترحيل.
+    status: "draft",
+    journal: null,
+    // الخادم يعيد المستند كاملاً: بنودُه تعود معه، وإسقاطُها كان يُفرغ
+    // الإجمالي فتصير الرسالة «أضف بنوداً» بدل «لا متبقٍّ».
+    lines: [{
+      id: 9001, product: 42, quantity: "1", unit_price: "100.00",
+      line_discount: "0", tax_rate: null,
+    }],
+    attached_cash_amount: draft302Intent.toFixed(2),
+    attached_cash_account: draft302Intent > 0 ? 10 : null,
+    pending_payment_total: draft302Intent.toFixed(2),
+  });
   /** مسودّة محفوظة نقديّة بصندوقٍ محدَّد وبندٍ واحد. */
   const draft303 = () => invoice({
     id: 303,
@@ -188,27 +206,22 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
       return;
     }
     /* T-PAYFULL3: «مدفوعة» على المسودة تُعلّق **نيّة دفع** (غير مرحّلة) عبر
-       نقطة `payment-voucher/` — لا سند ولا قيد حتى تُرحَّل الفاتورة. */
+       نقطة `payment-voucher/` — لا سند ولا قيد حتى تُرحَّل الفاتورة.
+       وT-PAYFULL4: الزرّ يحفظ أوّلاً (`PATCH`) ثم يبني على ما أعاده الخادم،
+       فالمسار كلّه لا بدّ أن يجيب عن الحفظ كما يجيب عن التعليق. */
     if (url.pathname.endsWith("/sales/invoices/302/payment-voucher/")) {
-      intentCalls.push(route.request().postDataJSON());
+      const body = route.request().postDataJSON();
+      intentCalls.push(body);
+      draft302Intent = Number((body as { cash_amount?: string }).cash_amount || 0);
       await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify(invoice({
-          id: 302,
-          invoice_number: "SI-6-302",
-          // مسودة لا مرحّلة — النيّة لا تعيش إلا قبل الترحيل.
-          status: "draft",
-          journal: null,
-          // الخادم يعيد المستند كاملاً: بنودُه تعود معه، وإسقاطُها هنا كان
-          // يُفرغ الإجمالي فتصير الرسالة «أضف بنوداً» بدل «لا متبقٍّ».
-          lines: [{
-            id: 9001, product: 42, quantity: "1", unit_price: "100.00",
-            line_discount: "0", tax_rate: null,
-          }],
-          attached_cash_amount: "100.00",
-          attached_cash_account: 10,
-          pending_payment_total: "100.00",
-        })),
+        contentType: "application/json", body: JSON.stringify(draft302()),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/sales/invoices/302/")
+        && route.request().method() !== "POST") {
+      await route.fulfill({
+        contentType: "application/json", body: JSON.stringify(draft302()),
       });
       return;
     }

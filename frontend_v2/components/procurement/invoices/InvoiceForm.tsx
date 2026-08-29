@@ -40,6 +40,7 @@ import {
   suppliersService,
 } from "@/services/firestoreService";
 import { purchaseInvoiceApi, purchaseInvoiceContextApi } from "@/services/purchaseInvoiceApi";
+import type { PurchaseInvoiceDto } from "@/types/purchaseInvoice";
 import { accountingApi } from "@/services/accountingApi";
 import { AccountTreeField } from "@/components/accounting/AccountTreePicker";
 import type { AccountPurpose } from "@/utils/accountTree";
@@ -248,6 +249,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [duplicating, setDuplicating] = useState(false);
   const [nextNumberPreview, setNextNumberPreview] = useState<string>("");
   const payPanelRef = useRef<HTMLDivElement | null>(null);
+  /** آخر فاتورة أعادها الخادم من الحفظ — مصدر الأرقام التي يعرفها هو. */
+  const lastSavedRef = useRef<PurchaseInvoiceDto | null>(null);
+  /** T-PAYFULL4: «مدفوعة» تُنزِل المستخدم إلى صفّ الدفعة الذي أنشأته للتوّ. */
+  const paymentsSectionRef = useRef<HTMLDivElement | null>(null);
   const payCashInputRef = useRef<HTMLInputElement | null>(null);
   /** يُزاد بعد كل دفعة ناجحة لإعادة جلب سلف المورّد غير الموزّعة. */
   const [payAdvancesNonce, setPayAdvancesNonce] = useState(0);
@@ -735,6 +740,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       }
       const savedMapped = mapPurchaseInvoiceDtoToInvoice(savedInvoice);
       setFormData((prev) => ({ ...prev, ...savedMapped }));
+      /* T-PAYFULL4: المستند كما خزّنه الخادم — من يبني على أرقامه (نيّة الدفع)
+         يقرؤها من هنا لا من `formData` (إغلاقٌ بائت لا يرى ما وصل للتوّ). */
+      lastSavedRef.current = savedInvoice;
       console.info("[PurchaseInvoiceFees] Saved and verified", {
         invoiceId: savedSqlId,
         feesCount: expectedFeesCount,
@@ -2493,7 +2501,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
    * وعلى **المرحّلة** لا وجود لهذه الحالة أصلاً (سندٌ أو لا شيء)، فيبقى الزرّ
    * تعبئةً والتنفيذ بـ«تسجيل دفعة».
    */
-  const fillPayFull = () => {
+  const fillPayFull = async () => {
     if (!formData.supplierId) { toast("اختر المورد أولاً.", "error"); return; }
 
     /* المرحّلة: لا وجود لدفعةٍ «غير مرحّلة» عليها أصلاً — ما بعد الترحيل سندٌ
@@ -2513,38 +2521,54 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       );
       return;
     }
-
-    /* المسودة: **الأساس `remainingAfterIntent`** — النيّة المحفوظة تتجسّد سنداً
-       عند الترحيل، فالاحتساب بالخام يسجّل الدفعة مرّتين. */
-    const remaining = settlement.remainingAfterIntent;
-    if (remaining <= 0.009) {
-      /* فاتورةٌ بلا بنود ليست «مسدَّدة» — والرسالة الواحدة كانت تقول ذلك على
-         مسودةٍ فارغة، فيبدو الزرّ عاطلاً وسببُه مكتوم. */
-      toast(
-        payableTotal <= 0.009
-          ? "لا مبلغ بعد — أضف بنود الفاتورة ثم اضغط «مدفوعة»."
-          : "المسودة عليها دفعة تغطّي إجماليها — لا متبقٍّ.",
-        "info",
-      );
+    if (payableTotal <= 0.009) {
+      toast("لا مبلغ بعد — أضف بنود الفاتورة ثم اضغط «مدفوعة».", "info");
       return;
     }
-    const cashAccount = payCashAccountId ?? intentCashAccountId;
+
+    /* T-PAYFULL4 — المبلغ يُشتقّ من **رقم الخادم** بعد الحفظ لا من رقم الشاشة.
+     *
+     * نقطة تعليق النيّة ترفض ما يتجاوز إجمالي الفاتورة **المخزَّن** (تعيد حسابه
+     * من البنود)، فكان يكفي فارقُ قرشٍ بين الحسبتين ليردّ الطلب ويبدو الزرّ
+     * كأنه لم يعمل. مرآة جانب البيع. */
+    const savedId = await handleSave();
+    if (!savedId) return; // `handleSave` عرض السبب
+    const dto = lastSavedRef.current;
+    if (!dto) { toast("تعذّرت قراءة الفاتورة بعد الحفظ.", "error"); return; }
+    const grand = Number(dto.payable_total ?? dto.grand_total ?? 0);
+    const paidNow = Number(dto.amount_paid ?? 0);
+    const draftCheques = (dto.cheques || []).filter((c) => c.status === "Draft");
+    const chequesTotal = draftCheques.reduce((sum, c) => sum + Number(c.amount || 0), 0);
+    const target = Math.max(grand - paidNow - chequesTotal, 0);
+    if (target <= 0.009) {
+      toast("الفاتورة مغطّاة بالكامل — لا متبقٍّ.", "info");
+      return;
+    }
+    if (Math.abs(target - Number(dto.attached_cash_amount || 0)) <= 0.009) {
+      toast("المسودة عليها دفعة تغطّي إجماليها — لا متبقٍّ.", "info");
+      return;
+    }
+    const cashAccount = payCashAccountId ?? dto.attached_cash_account ?? null;
     if (!cashAccount) {
       toast("لا صندوق افتراضي — اختر حساب الصندوق أو البنك في لوحة الدفع.", "error");
       focusPayPanel();
       return;
     }
-    /* بدلالة الاستبدال كما تفعل اللوحة: نقدُ النيّة القائم **زائد** المتبقّي،
-       والشيكات المرفقة تبقى كما هي — كتابةٌ كاملة لا فرق. */
-    void writeIntent(
+    await writeIntent(
       {
-        cash: intentCash + remaining,
+        cash: target,
         cashAccountId: cashAccount,
-        cheques: currentIntentCheques(),
+        cheques: draftCheques.map((c) => ({
+          cheque_number: c.cheque_number,
+          amount: Number(c.amount).toFixed(2),
+          due_date: c.due_date || null,
+          bank_name: c.bank_name || "",
+        })),
       },
-      `سُجِّلت دفعة ${formatMoney(remaining)} غير مرحّلة — تتحوّل إلى سند صرف عند ترحيل الفاتورة.`,
-      { saveFirst: true },
+      `سُجِّلت دفعة ${formatMoney(target)} غير مرحّلة — تتحوّل إلى سند صرف عند ترحيل الفاتورة.`,
     );
+    /* والدليل حيث ينظر المستخدم: صفُّ الدفعة في جدول دفعات المستند. */
+    paymentsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
 
   /* T-PAYFULL: الوصول من زرّ «مدفوعة» في قائمة الفواتير. مرّةً واحدة وبحارس
@@ -2556,7 +2580,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     if (!formData.id || !formData.supplierId || !showPayPanel) return;
     if (!payCashAccountId) return;
     payFullAppliedRef.current = true;
-    fillPayFull();
+    void fillPayFull();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFillPayFull, formData.id, formData.supplierId, showPayPanel, payCashAccountId]);
 
@@ -2605,6 +2629,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
      وضعَي التحرير والعرض كي يرى صاحبُ المسودة دفعتَه فور تسجيلها. */
   const paymentsSection = formData.isReturn ? null : (
     <InvoicePaymentsSection
+      sectionRef={paymentsSectionRef}
       side="supplier"
       posted={(formData.paymentDetails || []).map((p) => ({
         id: p.id,
@@ -2835,7 +2860,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       key: "pay-full",
       label: isPosted && supplierRemaining <= 0 ? "مسدَّدة" : "مدفوعة",
       icon: <Wallet />,
-      onClick: !(isPosted && supplierRemaining <= 0) ? () => fillPayFull() : undefined,
+      onClick: !(isPosted && supplierRemaining <= 0) ? () => void fillPayFull() : undefined,
       disabled: isPosted && supplierRemaining <= 0,
     } as KitToolbarAction] : []),
     // الاستلام: نافذة سريعة تُنشئ إرسالية بالبنود المؤشَّرة، أو المحرّر الكامل
