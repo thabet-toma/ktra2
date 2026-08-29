@@ -754,18 +754,24 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     [accounts]
   );
 
-  /** نسبة ض.ق.م الافتراضية من الإعدادات أو الافتراضي 16% */
+  /** نسبة ض.ق.م الافتراضية للأسطر الجديدة — من إعداد المبيعات.
+   * T-TAXOFF: «— بدون —» الصريحة في الإعدادات تعني **لا ضريبة** — كان
+   * الاحتياطي يفرض VAT16 فيدوسها بصمت والمستخدم أطفأها بيده. والإعداد يحمل
+   * **معرّف** النسبة (`SalesSettingsPage` يخزّن `t.id`) لا قيمتها، وكانت
+   * المقارنة هنا بالقيمة فلا تصيب إلا مصادفةً. الاحتياطي VAT16 بقي لحالة
+   * «الإعدادات لم تصل بعد» وحدها. */
   const defaultVatRateId = useMemo(() => {
-    if (salesSettings?.default_vat_rate) {
-      const settingRate = Number(salesSettings.default_vat_rate);
-      const bySettings = salesTaxRates.find((t) => Math.abs(Number(t.rate) - settingRate) < 0.02);
-      if (bySettings) return bySettings.id;
-    }
+    // الإعدادات لم تصل بعد — لا نَسِمُ سطراً قبل معرفة قرارها (كان الختم
+    // المبكّر بـVAT16 يسبق وصول «بدون» فيبقى على السطر).
+    if (!salesSettings) return undefined;
+    if (salesSettings.default_vat_rate == null) return undefined;
+    const byId = salesTaxRates.find((t) => t.id === salesSettings.default_vat_rate);
+    if (byId) return byId.id;
     const byCode = salesTaxRates.find((t) => t.code === "VAT16");
     if (byCode) return byCode.id;
     const byRate = salesTaxRates.find((t) => Math.abs(Number(t.rate) - 16) < 0.02);
     return byRate?.id;
-  }, [salesTaxRates, salesSettings?.default_vat_rate]);
+  }, [salesTaxRates, salesSettings]);
 
   const makeEmptyLine = useCallback((): DraftLine => {
     return {
@@ -1283,8 +1289,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   /** العملة تُخفى فقط حين حسمها افتراضُ الإعدادات فعلاً. */
   const showCurrencyField =
     !simpleMode || !salesSettings?.default_currency || currencyId === "";
+  /* T-TAXOFF: ضريبةٌ مُطفأة في الإعدادات («— بدون —») تُخفي واجهتها كلّها —
+     عمود الضريبة وسطور المجاميع و«شامل الضريبة» — في الوضعين لا في السهل
+     وحده. وقاعدةُ السقوط للظهور تبقى: فاتورةٌ تحمل ضريبةً فعلاً (قديمة أو
+     معدَّلة يدوياً) تُظهر واجهتها مهما قال الإعداد. */
+  const taxDisabledInSettings =
+    salesSettings != null && salesSettings.default_vat_rate == null;
+  const anyLineHasTaxRate = lines.some((l) => l.tax_rate !== "" && l.tax_rate != null);
+  const showTaxUi =
+    !taxDisabledInSettings || anyLineHasTaxRate || pricesIncludeTax;
   /** «شامل الضريبة» يبقى على افتراضي الإعدادات — والقيمة تُرسَل كما هي. */
-  const showTaxInclusiveToggle = !simpleMode;
+  const showTaxInclusiveToggle = !simpleMode && showTaxUi;
   /* THA-131: حقلا الحالة يتبعان الحالة نفسها لا وضعَ الواجهة — الاستحقاق مفهومٌ
      آجلٌ بحت، والصندوق مفهومٌ نقديٌّ بحت. فتبديل «نقدي» يبدّل الحقلين فوراً في
      الوضعين. القيمة المخفيّة تبقى كما هي (قانون قناع THA-110 أعلاه)، فلا حمولة
@@ -2301,7 +2316,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     ...(showAdv("doc.line-discount", anyLineDiscount)
       ? [{ key: "line_discount", header: "خصم سطر", width: "84px", align: "center" as const, type: "number" as const }]
       : []),
-    ...(showAdv("doc.tax", anyLineTax)
+    ...((showTaxUi && showAdv("doc.tax", anyLineTax))
       ? [{ key: "tax", header: "الضريبة", width: "150px" }]
       : []),
     // T-NOTES: ملاحظتا البند — أيقونة واحدة تفتح الاثنتين، فلا يتضخّم عرض الشبكة
@@ -2548,6 +2563,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           className={`ktra-input ${belowCost ? "border-red-500 focus:ring-red-500" : ""}`}
           type="text"
           inputMode="decimal"
+          aria-label="سعر الوحدة"
           value={row.unit_price}
           disabled={readOnly || isPosted}
           style={{ textAlign: "center", ...(belowCost ? { color: "#ef4444", borderColor: "#ef4444" } : {}) }}
@@ -2718,12 +2734,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const collectBase = isPosted ? savedGrandTotal : totals.grandTotal;
   /* T-INTENT: تسوية المستند نفسه من مشتقّةٍ واحدة يقرأها الشريط وعرضُ المستند
      والطباعة — بدل أربع حسبات كانت تفترق بصمت. */
+  /* T-AUTOPAID (قرار المالك): الفاتورة النقدية مدفوعةٌ بطبيعتها — الخادم
+     يسوّيها **بالكامل** عند الترحيل مهما كان (`_auto_settle_cash_sale` وباقي
+     المرفق نقداً)، فمسودّتها تعرض دفعتها القادمة حيّةً من أرقام الشاشة: تظهر
+     مع أول بندٍ وسعر وتتحدّث مع كل تعديل، بلا كتابةٍ للخادم قبل الحفظ ولا
+     حاجة لضغطة «مدفوعة». الصفُّ مشتقٌّ لا مخزَّن، فلا شيء يَبْلى. */
+  const draftChequesTotal = useMemo(
+    () => (attachedCheques || [])
+      .filter((c) => c.status === "Draft")
+      .reduce((s, c) => s + Number(c.amount || 0), 0),
+    [attachedCheques],
+  );
+  const intentIsAuto = !isPosted && !isReturn && invType === "cash";
+  const autoCashIntent = intentIsAuto
+    ? Math.max(collectBase - paidAmount - draftChequesTotal, 0)
+    : 0;
   const settlement = useMemo(() => deriveInvoiceSettlement({
     grandTotal: collectBase,
     paid: paidAmount,
-    pendingIntent,
+    // النقدية: النيّة الفعلية هي التغطية الكاملة القادمة — لا حالة الخادم وحدها.
+    pendingIntent: intentIsAuto ? autoCashIntent + draftChequesTotal : pendingIntent,
     isPosted,
-  }), [collectBase, paidAmount, pendingIntent, isPosted]);
+  }), [collectBase, paidAmount, pendingIntent, isPosted,
+       intentIsAuto, autoCashIntent, draftChequesTotal]);
   const remainingDue = settlement.remaining;
   const paymentInput = useMemo(() => ({
     base: collectBase,
@@ -3695,11 +3728,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       rows={filledLines}
       rowKey={(row) => row.key}
       totals={[
-        { label: "المجموع قبل الضريبة", value: money(totals.subtotalExclTax) },
+        // T-TAXOFF: ضريبةٌ مُطفأة بلا قيمة = لا سطرَي ضريبة في العرض أيضاً.
+        ...(showTaxUi
+          ? [{ label: "المجموع قبل الضريبة", value: money(totals.subtotalExclTax) }]
+          : []),
         ...(Number(invoiceDiscount) > 0
           ? [{ label: isReturn ? "خصم المرجع" : "خصم الفاتورة", value: money(Number(invoiceDiscount)) }]
           : []),
-        { label: "الضريبة", value: money(totals.taxAmount) },
+        ...(showTaxUi
+          ? [{ label: "الضريبة", value: money(totals.taxAmount) }]
+          : []),
         {
           label: isReturn ? "إجمالي المرجوع" : "الإجمالي",
           value: money(totals.grandTotal),
@@ -3742,12 +3780,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       side="customer"
       sectionRef={paymentsSectionRef}
       posted={paymentDetails || []}
-      intentCash={intentCash}
-      intentCashAccountLabel={
-        intentCashAccountId
-          ? accountsById.get(intentCashAccountId)?.name || undefined
-          : undefined
-      }
+      intentCash={intentIsAuto ? autoCashIntent : intentCash}
+      intentAuto={intentIsAuto}
+      intentCashAccountLabel={(() => {
+        // التلقائية تُصرف من صندوق رأس الفاتورة؛ وإلا فمن حساب النيّة المحفوظة.
+        const accId = intentIsAuto && cashAccountId !== ""
+          ? Number(cashAccountId)
+          : intentCashAccountId;
+        return accId ? accountsById.get(accId)?.name || undefined : undefined;
+      })()}
       intentCheques={intentCheques}
       settlement={settlement}
       paid={paidAmount}
@@ -4124,7 +4165,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 }}
               />
             </div>
-            {showAdv("doc.tax", anyLineTax) && (
+            {(showTaxUi && showAdv("doc.tax", anyLineTax)) && (
               <div className="ktra-total-row">
                 <span>المجموع قبل الضريبة</span>
                 <span className="ktra-total-value">{fmt(totals.subtotalExclTax)}</span>
@@ -4136,7 +4177,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 <span className="ktra-total-value">{discountPercent}%</span>
               </div>
             )}
-            {showAdv("doc.tax", anyLineTax) && (
+            {(showTaxUi && showAdv("doc.tax", anyLineTax)) && (
               <div className="ktra-total-row">
                 <span>الضريبة المضافة</span>
                 <span className="ktra-total-value">{fmt(totals.taxAmount)}</span>
@@ -4336,7 +4377,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             )}
             {/* T-SIMPL2: تحذير الضريبة يتبع الضريبة — من طوى عمودها لا يُنبَّه
                 إلى إعدادٍ ناقصٍ لها. ويعود لحظة تُحتسب ضريبةٌ فعلاً. */}
-            {salesTaxRates.length === 0 && showAdv("doc.tax", anyLineTax) && (
+            {salesTaxRates.length === 0 && (showTaxUi && showAdv("doc.tax", anyLineTax)) && (
               <div className="ktra-note ktra-note--warn">لا توجد نسبة ضريبة مبيعات مسجلة في الإعدادات.</div>
             )}
           </div>

@@ -50,6 +50,10 @@ export type InvoicePaymentsSectionProps = {
   side: DocumentPaymentSide;
   posted: PostedPaymentRow[];
   intentCash: number;
+  /** T-AUTOPAID: صفُّ النقد مشتقٌّ من طبيعة المستند النقدي (يُسوّى تلقائياً
+   *  عند الترحيل) لا نيّةً مخزَّنة — يتحدّث مع الشاشة ولا يُعدَّل ولا يُحذف؛
+   *  مَن لا يريده يحوّل المستند إلى آجل. */
+  intentAuto?: boolean;
   /** اسم حساب الصندوق/البنك المنويّ — للعرض فقط. */
   intentCashAccountLabel?: string;
   intentCheques: IntentChequeRow[];
@@ -69,9 +73,9 @@ export type InvoicePaymentsSectionProps = {
 const CELL = "px-2 py-1.5 text-right align-middle";
 
 export const InvoicePaymentsSection: React.FC<InvoicePaymentsSectionProps> = ({
-  side, posted, intentCash, intentCashAccountLabel, intentCheques, settlement,
-  paid, editable, busy, onAddPayment, onEditIntent, onRemoveIntentCash,
-  onRemoveIntentCheque, onOpenVoucher, sectionRef,
+  side, posted, intentCash, intentAuto, intentCashAccountLabel, intentCheques,
+  settlement, paid, editable, busy, onAddPayment, onEditIntent,
+  onRemoveIntentCash, onRemoveIntentCheque, onOpenVoucher, sectionRef,
 }) => {
   const words = WORDS[side];
   const hasIntentCash = intentCash > 0.009;
@@ -175,7 +179,14 @@ export const InvoicePaymentsSection: React.FC<InvoicePaymentsSectionProps> = ({
                     </span>
                   </td>
                   <td className={`${CELL} text-center`}>
-                    {editable && (
+                    {intentAuto ? (
+                      <span
+                        className="text-[10px] text-[var(--color-text-muted)]"
+                        title="مستند نقدي — دفعته تلقائية تتبع الإجمالي وتُسوّى عند الترحيل. للإلغاء حوِّله إلى آجل."
+                      >
+                        تلقائي
+                      </span>
+                    ) : editable && (
                       <span className="inline-flex gap-1">
                         <button
                           type="button" className="ktra-toolbtn"

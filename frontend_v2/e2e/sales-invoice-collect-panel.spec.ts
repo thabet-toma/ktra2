@@ -572,24 +572,35 @@ test("مبلغٌ يُكتب يدوياً في اللوحة يمرّ من «حف�
   await expect(page.getByText("سند قبض #778", { exact: false })).toBeVisible();
 });
 
-test("«مدفوعة» على مسودة محفوظة ونقديّة تُظهر الدفعة في جدول دفعات المستند", async ({ page }) => {
+test("المسودة النقدية تعرض دفعتها تلقائياً من أول بند وتتبع التعديل", async ({ page }) => {
+  /* T-AUTOPAID (قرار المالك): «لازم من أول ما اختار منتج وسعر يطلع [الدفع]
+     وكل ما اعدل شي يضل يتعدل معو». الفاتورة النقدية تُسوّى بالكامل تلقائياً
+     عند الترحيل، فصفُّ دفعتها القادمة ظاهرٌ قبل أي ضغطة — مشتقٌّ من أرقام
+     الشاشة لا مخزَّن، ويتبعها حيّاً. */
   const { intentCalls, patchCalls } = await installMocks(page);
   await page.goto("/sales/invoices/303");
   await expect(page.getByTestId("document-payment-panel")).toBeVisible({ timeout: 15_000 });
 
-  // قبل الضغط: الجدول خالٍ ويقولها صراحةً.
+  // قبل أي ضغطة: الصفّ التلقائي حاضر بكامل المبلغ، بلا أي نداء نيّة.
   const payments = page.getByTestId("invoice-payments-section");
-  await expect(payments).toContainText("لا دفعات على هذا المستند بعد");
+  await expect(payments).toContainText("غير مرحّل");
+  await expect(payments).toContainText("تلقائي");
+  expect(intentCalls).toHaveLength(0);
 
+  // تعديل السعر يعدّل الدفعة معه — حيّاً وبلا خادم. (المستند يُفتح عرضاً،
+  // والشبكة المعطَّلة خلف عرض المستند، فالتحرير يسبق أيّ إدخال.)
+  await page.getByRole("button", { name: "تحرير", exact: true }).click();
+  const priceInput = page.getByLabel("سعر الوحدة").first();
+  await priceInput.fill("250");
+  await expect(payments).toContainText("250");
+
+  // و«مدفوعة» تبقى تعمل: تحفظ وتثبّت النيّة على القاعدة.
+  await priceInput.fill("100");
   await page.getByRole("button", { name: "مدفوعة", exact: true }).click();
-
   await expect.poll(() => intentCalls.length, { timeout: 15_000 }).toBe(1);
   expect(intentCalls[0]).toMatchObject({ cash_amount: "100.00", cash_account_id: 10 });
   // الحفظ يسبق التعليق — المبلغ من الشاشة والنيّة تُعلَّق على صفٍّ في القاعدة.
   expect(patchCalls.length).toBeGreaterThan(0);
-
-  // وهذا ما يبحث عنه المستخدم بعينه: صفٌّ في جدول دفعات المستند.
-  await expect(payments).not.toContainText("لا دفعات على هذا المستند بعد");
   await expect(payments).toContainText("غير مرحّل");
 });
 

@@ -2188,12 +2188,31 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // صرف واحد. التوزيع يلزمه فاتورة مرحّلة، فنحفظ ونرحّل ضمن نفس النقرة بتأكيد.
   /* T-INTENT: تسوية المستند من المشتقّة المشتركة مع محرّر البيع — الرقم نفسه
      في الشريط وعرض المستند والطباعة، ولا حسبةَ ثانية تفترق غداً. */
+  /* T-AUTOPAID (مرآة البيع): فاتورة الشراء النقدية تُسوّى **بالكامل** تلقائياً
+     عند الترحيل (`_auto_settle_cash_purchase` وكنس المرفق)، فمسودّتها تعرض
+     دفعتها القادمة حيّةً من أرقام الشاشة: تظهر مع أول بندٍ وسعر وتتحدّث مع كل
+     تعديل، بلا كتابةٍ للخادم قبل الحفظ. الصفُّ مشتقٌّ لا مخزَّن. */
+  const draftChequesTotal = useMemo(
+    () => (formData.cheques || [])
+      .filter((c) => c.status === "Draft")
+      .reduce((s, c) => s + Number(c.amount || 0), 0),
+    [formData.cheques],
+  );
+  const intentIsAuto =
+    !isPosted && !formData.isReturn && formData.paymentType === "cash";
+  const autoCashIntent = intentIsAuto
+    ? Math.max(payableTotal - (Number(formData.amountPaid) || 0) - draftChequesTotal, 0)
+    : 0;
   const settlement = useMemo(() => deriveInvoiceSettlement({
     grandTotal: payableTotal,
     paid: Number(formData.amountPaid) || 0,
-    pendingIntent: Number(formData.pendingPaymentTotal) || 0,
+    // النقدية: النيّة الفعلية هي التغطية الكاملة القادمة — لا حالة الخادم وحدها.
+    pendingIntent: intentIsAuto
+      ? autoCashIntent + draftChequesTotal
+      : Number(formData.pendingPaymentTotal) || 0,
     isPosted,
-  }), [payableTotal, formData.amountPaid, formData.pendingPaymentTotal, isPosted]);
+  }), [payableTotal, formData.amountPaid, formData.pendingPaymentTotal, isPosted,
+       intentIsAuto, autoCashIntent, draftChequesTotal]);
   const supplierRemaining = Math.max(Number(formData.remainingBalance) || 0, 0);
 
   /* T-APPAY: سلف المورّد المرحّلة غير الموزَّعة — «رصيدٌ لنا عنده» يصلح لتسديد
@@ -2666,12 +2685,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         is_posted: p.isPosted,
         journal: p.journalId ?? null,
       }))}
-      intentCash={intentCash}
-      intentCashAccountLabel={
-        intentCashAccountId
-          ? allAccounts.find((a) => Number(a.id) === intentCashAccountId)?.name || undefined
-          : undefined
-      }
+      intentCash={intentIsAuto ? autoCashIntent : intentCash}
+      intentAuto={intentIsAuto}
+      intentCashAccountLabel={(() => {
+        // التلقائية تُصرف من صندوق رأس الفاتورة؛ وإلا فمن حساب النيّة المحفوظة.
+        const accId = intentIsAuto && formData.cashOrBankAccountId
+          ? Number(formData.cashOrBankAccountId)
+          : intentCashAccountId;
+        return accId
+          ? allAccounts.find((a) => Number(a.id) === accId)?.name || undefined
+          : undefined;
+      })()}
       intentCheques={intentCheques}
       settlement={settlement}
       paid={Number(formData.amountPaid) || 0}
