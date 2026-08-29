@@ -47,6 +47,25 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
   const simple = Boolean(opts.simpleMode);
   /** نيّات الدفع المعلَّقة على المسودة — ما ترسله «مدفوعة» منذ T-PAYFULL3. */
   const intentCalls: Array<Record<string, unknown>> = [];
+  /** حفظُ المسودة الذي يسبق التعليق (`saveFirst`). */
+  const patchCalls: Array<Record<string, unknown>> = [];
+  let draft303Intent = 0;
+  /** مسودّة محفوظة نقديّة بصندوقٍ محدَّد وبندٍ واحد. */
+  const draft303 = () => invoice({
+    id: 303,
+    invoice_number: "SI-10-11",
+    status: "draft",
+    journal: null,
+    invoice_type: "cash",
+    cash_or_bank_account: 10,
+    lines: [{
+      id: 9101, product: 42, quantity: "1", unit_price: "100.00",
+      line_discount: "0", tax_rate: null,
+    }],
+    attached_cash_amount: draft303Intent.toFixed(2),
+    attached_cash_account: draft303Intent > 0 ? 10 : null,
+    pending_payment_total: draft303Intent.toFixed(2),
+  });
   await page.addInitScript((isSimple) => {
     localStorage.setItem("token", "collect-panel-token");
     localStorage.setItem("userId", "collect-panel-user");
@@ -245,6 +264,28 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(invoice()) });
       return;
     }
+    /* مسودّة **محفوظة سلفاً** ونقديّة — شكل المالك حرفياً: يفتح فاتورةً لها
+       رقم (لا `/new`) ويضغط «مدفوعة». المسار هنا `PATCH` ثم `payment-voucher/`
+       لا `POST` إنشاء، وهو ما لم يكن مغطّى. */
+    if (url.pathname.endsWith("/sales/invoices/303/payment-voucher/")) {
+      intentCalls.push(route.request().postDataJSON());
+      draft303Intent = Number(
+        (route.request().postDataJSON() as { cash_amount?: string }).cash_amount || 0,
+      );
+      await route.fulfill({
+        contentType: "application/json", body: JSON.stringify(draft303()),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/sales/invoices/303/")) {
+      if (route.request().method() !== "GET") {
+        patchCalls.push(route.request().postDataJSON());
+      }
+      await route.fulfill({
+        contentType: "application/json", body: JSON.stringify(draft303()),
+      });
+      return;
+    }
     if (url.pathname.endsWith("/sales/invoices/") && route.request().method() === "POST") {
       await route.fulfill({
         contentType: "application/json",
@@ -288,7 +329,7 @@ async function installMocks(page: Page, opts: { simpleMode?: boolean } = {}) {
     }
     await route.fulfill({ contentType: "application/json", body: "[]" });
   });
-  return { intentCalls };
+  return { intentCalls, patchCalls };
 }
 
 async function openPanel(page: Page) {
@@ -499,6 +540,27 @@ test("مبلغٌ يُكتب يدوياً في اللوحة يمرّ من «حف�
     post_invoice: true,
   });
   await expect(page.getByText("سند قبض #778", { exact: false })).toBeVisible();
+});
+
+test("«مدفوعة» على مسودة محفوظة ونقديّة تُظهر الدفعة في جدول دفعات المستند", async ({ page }) => {
+  const { intentCalls, patchCalls } = await installMocks(page);
+  await page.goto("/sales/invoices/303");
+  await expect(page.getByTestId("document-payment-panel")).toBeVisible({ timeout: 15_000 });
+
+  // قبل الضغط: الجدول خالٍ ويقولها صراحةً.
+  const payments = page.getByTestId("invoice-payments-section");
+  await expect(payments).toContainText("لا دفعات على هذا المستند بعد");
+
+  await page.getByRole("button", { name: "مدفوعة", exact: true }).click();
+
+  await expect.poll(() => intentCalls.length, { timeout: 15_000 }).toBe(1);
+  expect(intentCalls[0]).toMatchObject({ cash_amount: "100.00", cash_account_id: 10 });
+  // الحفظ يسبق التعليق — المبلغ من الشاشة والنيّة تُعلَّق على صفٍّ في القاعدة.
+  expect(patchCalls.length).toBeGreaterThan(0);
+
+  // وهذا ما يبحث عنه المستخدم بعينه: صفٌّ في جدول دفعات المستند.
+  await expect(payments).not.toContainText("لا دفعات على هذا المستند بعد");
+  await expect(payments).toContainText("غير مرحّل");
 });
 
 test("الفتح بـ`?pay=full` من القائمة يصل واللوحة معبّأة سلفاً", async ({ page }) => {
