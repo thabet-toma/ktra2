@@ -283,15 +283,37 @@ class ActivityApiTest(APITestCase):
         return {r["entity_id"] for r in rows}
 
     def test_range_presets_widen_the_window_beyond_today(self):
-        """«اليوم» وحده كان يخفي كل ما سبقه — والمدى الجاهز هو مخرج المستخدم."""
+        """«اليوم» وحده كان يخفي كل ما سبقه — والمدى الجاهز هو مخرج المستخدم.
+
+        **الاتّساع يُقاس احتواءً لا بتاريخٍ مفترض.** كان الاختبار يزرع صفّاً
+        «أمس» ويشترط أن يشمله `range=month` — وهي فرضيةٌ تسقط في **أوّل كل
+        شهر**: الشهر الجاري يبدأ اليوم فأمسِ خارجه، فيفشل الاختبار بالتقويم لا
+        بالكود (وقد فشل فعلاً في 2026-09-01). الخاصّية المقصودة هي أن كل مدى
+        أوسعُ يحتوي ما قبله، وهي صحيحةٌ في كل يوم من السنة.
+        """
         self._seed_aged(101, days_ago=0)
         self._seed_aged(102, days_ago=1)
         self._seed_aged(103, days_ago=200)
 
-        assert self._entity_ids("/api/activity/?range=today") == {101}
+        today_ids = self._entity_ids("/api/activity/?range=today")
+        month_ids = self._entity_ids("/api/activity/?range=month")
+        year_ids = self._entity_ids("/api/activity/?range=year")
+        all_ids = self._entity_ids("/api/activity/?range=all")
+
+        assert today_ids == {101}
         assert self._entity_ids("/api/activity/?range=yesterday") == {102}
-        assert {101, 102} <= self._entity_ids("/api/activity/?range=month")
-        assert {101, 102, 103} <= self._entity_ids("/api/activity/?range=all")
+        assert today_ids <= month_ids <= year_ids <= all_ids
+        assert {101, 102, 103} <= all_ids
+
+        # وحين يكون في الشهر الجاري يومٌ سابق فعلاً، يجب أن يشمله «الشهر» —
+        # التأكيد الأصلي، مشروطاً بما يسمح به التقويم لا مفترضاً.
+        from django.utils import timezone
+
+        from core.date_ranges import resolve_preset
+
+        month_start, _ = resolve_preset("month")
+        if (timezone.localdate() - month_start).days >= 1:
+            assert 102 in month_ids
 
     def test_unknown_range_is_rejected_not_silently_ignored(self):
         res = self.client.get("/api/activity/?range=lastweekish", **self._h(self.manager))
