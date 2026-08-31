@@ -3,6 +3,7 @@ import { Item, SupplierItemPrice } from '../../../types';
 import { Package, X, Search, Hash, DollarSign, Plus } from 'lucide-react';
 import { collection, query, where, orderBy, getDocs, limit, db } from "../../../services/sqlApiClient";
 import { ItemQuickCreateModal } from '../../items/ItemQuickCreateModal';
+import { mapPickerProductToItem } from '../../../utils/pickerProductToItem';
 
 interface ItemSearchModalProps {
     isOpen: boolean;
@@ -18,23 +19,15 @@ interface ItemSearchModalProps {
 }
 
 /** task18 DEF-B2: تحويل Product المُنشأ (من inventory) إلى شكل Item الذي يتوقعه
- *  سطر الفاتورة — كان السطر يُعبَّأ بـ name=undefined لأن Product يحمل name_ar. */
-export const productToItem = (p: any): Item => ({
-    id: String(p.id),
-    name: p.display_name || p.name_ar || p.name_en || p.sku || `منتج ${p.id ?? ""}`,
-    categoryId: p.category != null ? String(p.category) : "",
-    categoryName: p.category_name || "",
-    modelNumber: p.sku || undefined,
-    // T-SUPSKU: رقم المورّد يصل المنتقي فيصير البحث به ممكناً — وهو الرقم
-    // الذي تصل به فاتورة المورّد فعلاً (מק"ט).
-    supplierCodes: p.supplier_codes_text || "",
-    specifications: "",
-    imageUrls: [],
-    barcode: p.barcode || "",
-    isSerialized: Boolean(p.is_serialized),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-});
+ *  سطر الفاتورة — كان السطر يُعبَّأ بـ name=undefined لأن Product يحمل name_ar.
+ *  THA-19: نقطة التحويل الموحّدة — راجع utils/pickerProductToItem.ts للخيارات
+ *  التي تحفظ سلوك هذه النافذة بالضبط (فرقها عن الشاشة الكاملة موثَّق هناك). */
+export const productToItem = (p: any): Item =>
+    mapPickerProductToItem(p, {
+        fallbackName: (row) => `منتج ${(row as any).id ?? ""}`,
+        categoryIdAcceptsZero: true,
+        emptyModelNumberAsUndefined: true,
+    });
 
 export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClose, onSelectItem, items = [], supplierId, initialSearch = '', onItemCreated }) => {
     const [searchQuery, setSearchQuery] = useState(initialSearch);

@@ -67,6 +67,7 @@ import {
 } from "../../services/procurementDocumentsApi";
 import { invalidatePickerProducts, listPickerProducts } from "../../services/inventoryApi";
 import { formatQuantity } from "../../utils/formatNumber";
+import { mapPickerProductToItem } from "../../utils/pickerProductToItem";
 import { MIN_VISIBILITY_REFRESH_MS } from "../../services/sqlApiClient";
 
 // --- Helper: Sanitize Data ---
@@ -1317,40 +1318,13 @@ export const subscribeToTasks = (callback: (tasks: Task[]) => void) => {
 
 // Items Service
 export const itemsService = {
-  _mapProductToItem: (p: any): Item => {
-    const attach = Array.isArray(p.attachments) ? p.attachments : [];
-    const urls = attach.map((a: any) => a.file_path).filter(Boolean);
-    return {
-      id: String(p.id),
-      name: p.display_name || p.name_ar || p.name_en || p.sku || `Item ${p.id}`,
-      modelNumber: p.sku || "",
-      categoryId: p.category ? String(p.category) : "",
-      categoryName: p.category_name || "",
-      subCategoryId: "",
-      subCategoryName: "",
-      brandId: "",
-      brandName: "",
-      imageUrls: urls.length ? urls : ["", "", ""],
-      hsCodePrimary: p.hs_code || "",
-      hsCodeAlternative: "",
-      quantity: p.min_stock_level || 0,
-      specifications: p.online_description || "",
-      notes: "",
-      isActive: Boolean(p.is_for_sale_online),
-      salePrice: Number(p.online_price || 0),
-      storeName: p.name_ar || p.name_en || "",
-      storeDescription: p.online_description || "",
-      // T-SERIAL: يصلان من عقد `view=lookup` — الأول للبحث بالماسح، والثاني
-      // ليعرف سطر الفاتورة أنه منتج يُتتبَّع بالوحدة.
-      barcode: p.barcode || "",
-      isSerialized: Boolean(p.is_serialized),
-      // T-SUPSKU: أرقام كتالوج الموردين — بها يبحث المستخدم في منتقي البنود،
-      // فهي الأرقام التي تصل بها فاتورة المورّد بيده.
-      supplierCodes: p.supplier_codes_text || "",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    } as Item;
-  },
+  // THA-19: نقطة التحويل الموحّدة — راجع utils/pickerProductToItem.ts للخيارات
+  // التي تحفظ سلوك هذه الشاشة بالضبط (فرقها عن نافذة البحث موثَّق هناك).
+  _mapProductToItem: (p: any): Item =>
+    mapPickerProductToItem(p, {
+      fallbackName: (row) => `Item ${(row as any).id}`,
+      extended: true,
+    }),
 
   _mapItemToProductPayload: (item: Partial<Item>) => ({
     sku: item.modelNumber || item.id || `SKU-${Date.now()}`,
