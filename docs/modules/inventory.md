@@ -16,17 +16,18 @@
 | `inventory/services.py` | `record_stock_movement` + WAC، عكس الحركات، بطاقة المنتج، نماذج التكلفة، ترحيل التحويل والجرد | 1368 |
 | `inventory/views.py` | ViewSets: المنتجات، الحركات، المستودعات، التحويلات، الجرد | 891 |
 | `inventory/serials.py` | كل منطق الأرقام التسلسلية للشراء والبيع (وحدة مستقلة عن services) | 765 |
-| `inventory/models.py` | 11 موديل: المنتج، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد | 465 |
+| `inventory/models.py` | 12 موديل: المنتج (البراند)، المنتج الأب (`ProductFamily`)، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد | 465 |
 | `inventory/stock_status.py` | **مصدر الحقيقة الوحيد لحالة المخزون** (نفذ/منخفض/فائض/متوفّر): تعبير ORM ودالّة بايثون وفلتر — يستهلكها السيريالايزر والجدول والداشبورد والتقارير | 150 |
 
 | `inventory/serializers.py` | تمثيل المنتج والحركة والمستندات | 353 |
-| `inventory/urls.py` | 8 routers مركّبة على `/api/inventory/` (`core/urls.py`) | 21 |
+| `inventory/urls.py` | 9 routers مركّبة على `/api/inventory/` (`core/urls.py`) | 21 |
 | `inventory/agent_api.py` | نقطة بوت الفواتير للمنتجات (`/api/agent/products/`، مسجَّلة في `core/urls.py`). تسكن هنا لا في `core` لأن `.importlinter` يمنع `core` من استيراد `inventory.serializers`؛ ولا تستورد `sales`/`logistics` (عقد الاتجاه المعكوس) | 115 |
 
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `Product` | `sku`, `barcode`, `variant_group`, `brand`, `quantity_on_hand`, `avg_cost`, `sale_price`, `is_serialized`, `is_service`, `allow_negative_stock`, `warranty_months`, `min_stock_level`/`max_stock_level` (ثنائي إعادة الطلب: الأدنى **هو** نقطة الطلب، والأقصى هو المستوى الذي يُطلَب حتى بلوغه) | `category→ProductCategory`, `uom→UnitOfMeasure`، و6 FKs تجاوز حسابات على `accounting.Account` (`models.py:122-151`)؛ فريد `(tenant, sku)` (`:156`) |
+| `Product` | `sku`, `barcode`, `variant_group`, `brand`, `quantity_on_hand`, `avg_cost`, `sale_price`, `is_serialized`, `is_service`, `allow_negative_stock`, `warranty_months`, `min_stock_level`/`max_stock_level` (ثنائي إعادة الطلب: الأدنى **هو** نقطة الطلب، والأقصى هو المستوى الذي يُطلَب حتى بلوغه) | `category→ProductCategory`, `uom→UnitOfMeasure`، و6 FKs تجاوز حسابات على `accounting.Account`؛ فريد `(tenant, sku)`. `family→ProductFamily` **قابلٌ للفراغ** (task20) — البراند هذا هو `Product` الكلاسيكي بلا حذف حقل |
+| `ProductFamily` (task20) | `name_ar`, `name_en`, `min_stock_level`/`max_stock_level`, `is_serialized`, `is_service`, `allow_negative_stock` | «المنتج» — الأب فوق `Product` (الشكل أ، #17). **بلا رقم إطلاقاً**: لا رصيد ولا تكلفة ولا FK من حركة؛ كل مجموعٍ يُشتقّ عند القراءة من `brands` (`Product.family` معكوساً). `category→ProductCategory`, `uom→UnitOfMeasure`، و6 FKs تجاوز حسابات على `accounting.Account` — نفس الأعمدة فيزيائياً موجودة أيضاً على `Product` (قاعدة التعايش، `inventory.services.resolve_family_field`) |
 | `StockMovement` | `movement_type` (IN/OUT/ADJUST_IN/ADJUST_OUT/RETURN_IN/RETURN_OUT), `quantity`, `unit_cost`, `total_cost`, `reference_type`, `reference_id`, `quantity_before/after`, `avg_cost_before/after` | `product` (PROTECT)، `warehouse` (PROTECT)، `branch→tenants.Branch`، `partner→partners.Partner`؛ خاصية `origin` (`:270`) |
 | `ProductCategory` | `name`, `parent` | `revenue_account`, `cogs_account`, `inventory_account` → `accounting.Account` |
 | `Warehouse` | `code`, `is_default`, `is_active` | `branch→tenants.Branch` (اختياري)؛ فريد `(tenant, code)` لغير الفارغ |
@@ -71,6 +72,9 @@ def apply_purchase_cost_model(product) -> None:  # يختار WAC المتحرك
 def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = False, user=None) -> dict:  # (1107)
 def warehouse_stock_summary(*, tenant_id: int, warehouse_id: int) -> dict:  # (78)
 def generate_next_sku(tenant) -> str:  # (140)
+def create_product_with_family(*, tenant=None, tenant_id=None, **fields) -> tuple[ProductFamily, Product]:  # نقطة الإنشاء الموحّدة الوحيدة (task20) — أربعة مسارات حيّة تمرّ من هنا: واجهة المنتجات، وتجسيد عرض المورّد، ومنتج الأجرة في `after_sales`، وجسر المزامنة `bridge`
+def sync_family_from_product(product) -> bool:  # (task20) الأب مرآةٌ تتبع صفّ البراند — اتجاه الكتابة واحدٌ لا اثنان أثناء الانتقال
+def resolve_family_field(product, field_name: str):  # قاعدة التعايش (task20) — من الأب إن وُجد، وإلا من صفّ البراند نفسه
 def post_warehouse_transfer(transfer, user=None):  # (1208)
 def unpost_warehouse_transfer(transfer, user=None):  # (1248)
 def post_stocktake(stocktake, user=None):  # (1274)
@@ -116,6 +120,7 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | POST | `warehouse-transfers/{id}/post/` · `warehouse-transfers/{id}/unpost/` | `WarehouseTransferViewSet` (844) · (856) |
 | POST | `stocktakes/{id}/post/` | `StocktakeViewSet` (881) |
 | GET | `categories/` · `uom/` | `CategoryViewSet` (38) · `UnitOfMeasureViewSet` (77) |
+| GET | `product-families/` | `ProductFamilyViewSet` (task20) — «المنتج» الأب، **قراءةٌ فقط عمداً**: يُنشأ حصراً مع براندِه الضمنيّ عبر `products/` (`create_product_with_family`) فلا يوجد «منتج بلا براندات»، والكتابة عليه مباشرةً تفتح اتجاه كتابةٍ ثانياً يترك القرّاء الحاليين (وكلّهم يقرأ من صفّ البراند) على قيمةٍ قديمة |
 
 ### الكرت المجمّع: المحدِّد في الجسم لا في العنوان
 النقاط الثلاث تقبل `POST` بجسم JSON فيه أحد محدِّدَين:
@@ -193,11 +198,12 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
   صفر**: «لا أعرف بعد» ليست «لا تطلب أبداً».
 - **أرقام «النوع» مجاميعُ أرقام أفراده** لا حسابٌ ثانٍ عليها — كي يساوي مجموع
   التنقيب رقمَ الصفّ (`docs/modules/core.md` — 6.1.1).
-- **المنتج يُحفَظ تحت التصنيف المختار حرفياً.** كان كرت المنتج يُنشئ عند كل حفظ
-  تصنيفاً باسم المنتج ويجعل المختارَ أباً له — إنشاءٌ صامت بمطابقةٍ نصّية على
-  الشركة كلها وخطأٍ مبتلَع، فلا يعرف المستخدم أين حُفظ منتجه. التجميع وظيفةُ
-  «النوع» (`variant_group`) وهو حقلٌ ظاهر يُكتب بقصد. والكرت يعرض مسار الحفظ
-  («سيُحفظ تحت: أ ‹ ب») **قبل** الضغط.
+- **المنتج يُحفَظ تحت التصنيف المختار حرفياً — بلا اختراع تصنيفٍ فرعي.** كان
+  كرت المنتج يُنشئ عند كل حفظٍ يحمل `variant_group` تصنيفاً باسمه ويجعل
+  المختارَ أباً له (`_auto_create_group_category`) — إنشاءٌ صامت بمطابقةٍ نصّية
+  على الشركة كلها. **حُذفت بلا بديل في task20** (#20): التصنيف الآن **اختياري**
+  دائماً، والتجميع وظيفة `variant_group` وحدها كحقلٍ ظاهر يُكتب بقصد — لا صلة له
+  بالتصنيف بعد الحذف.
 - **لا حقلَ يُعرض ولا يُحفظ.** كان في كرت المنتج نحو 25 حقلاً تُملأ ويُقال
   «تم الحفظ» ولا أثر لها: لا وجود لها في `ProductSerializer.Meta.fields` فيرميها
   DRF بصمت. القاعدة الآن: ما تعرضه الشاشة يصل الخادم، وما لا مكان له يُحذف من
@@ -267,6 +273,20 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 - **رقم المنتج عند المورّد جدولُ ربط لا حقل على المنتج** (`SupplierProduct`): المنتج الواحد يأتي من أكثر من مورّد ولكلٍّ ترقيمه — وهو ما استقرّ عليه Odoo (`product.supplierinfo.product_code`) وNetSuite (`itemvendor.vendorCode`). **ولا يُحشَر رقمٌ في `name_en`** (معناه اسم المنتج بالإنجليزية)؛ النقل من الحشوة القديمة عبر `migrate_supplier_sku_from_name_en` وهو معاينةٌ بلا `--commit`. البحث يشمل الرقم (`ProductViewSet.search_fields`)، ويصل منتقي بنود المستندات عبر `supplier_codes_text` في عقد `view=lookup` وحده — العقد الكامل لا يحمله. و**لقطةُ الرقم على المستند تبقى في `logistics.PurchaseInvoiceItem.catalog_number`**: البيانات الرئيسية تتغيّر والمستند المرحّل لا يتغيّر معها.
 - **الترقيم يصف مخزوناً قائماً ولا يخلقه**: `register_existing_serials` سقفه رصيد المنتج ولا يُنشئ حركة مخزون ولا قيداً (`serials.py:247-259`).
 - **التحويل بين المستودعات بلا قيد محاسبي** — صافي أثره على إجمالي الشركة صفر (`models.py:382-384`).
+- **`ProductFamily` (المنتج، الأب) لا يحمل رقماً أبداً** (task20، #17): لا رصيد،
+  لا تكلفة، لا FK من حركةٍ أو بند مستند. أي مجموعٍ على مستوى المنتج (رصيدٌ كلي،
+  تكلفةٌ مرجَّحة…) يُشتقّ عند القراءة من `brands` (`Product.family` معكوساً) —
+  تخزينُ رقمٍ هنا يكرّر العطب الذي بُني هذا النموذج ليمنعه.
+- **كل مسار إنشاء منتجٍ في الخادم يمرّ بـ`create_product_with_family` وحدها**
+  (`inventory/services.py`): تُنشئ الأب وبراندَه الضمنيّ معاً ذرّياً. مسارا
+  اليوم — `ProductSerializer.create` و`logistics.services.materialize_quotation_draft_parties`
+  — كلاهما يستدعيها؛ مسارٌ ثالثٌ ينشئ `Product` مباشرةً يُسرّب براندًا بلا أبٍ فوقه.
+- **قاعدة التعايش الانتقالية** (`resolve_family_field`): حقول #9 «على المنتج»
+  (التصنيف، الوحدة، حدّا التجديد، طبيعة الصنف، الحسابات الستّة) فيزيائياً لا
+  تزال أعمدةً على صفّ `Product` أيضاً — تُنسَخ إليه دفاعياً عند الإنشاء عبر
+  `create_product_with_family` كي لا ينكسر مستهلكٌ قائم يقرأ منها مباشرةً. لا
+  تُحذف تلك الأعمدة، ولا تُبنَ فرادةُ `(family, brand)` على فهرسٍ شرطي (MySQL
+  لا يدعمه) — لا فرادة من هذا النوع في هذا النطاق أصلاً.
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -280,4 +300,5 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 | `inventory/tests/test_account_overrides.py` | سلسلة الحسابات: تجاوز المنتج ← تجاوز الفئة ← الافتراضي |
 | `inventory/tests/test_brand_grouping.py` · `test_group_card_performance.py` | تجميع البراندات بـ`group_key`، وثبات عدد الاستعلامات (كان N+1) |
 | `inventory/tests/test_product_api.py` | توليد SKU خادمي، ترتيب/بحث/ترقيم صفحات، عزل الشركات |
+| `inventory/tests/test_product_family.py` | task20: الإنشاء الذرّي (الأب + البراند الضمني) من مساري التسجيل معاً، عزل الشركات على `ProductFamily`، وقاعدة التعايش (مع/بلا أب) |
 | `inventory/tests/test_supplier_products.py` | أرقام الموردين: المنتج من مورّدين، ورقمان لمورّد، ومنع الرقم الواحد لمنتجين، والبحث بالرقم بلا تكرار صفّ |

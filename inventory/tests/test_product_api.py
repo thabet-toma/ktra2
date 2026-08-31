@@ -463,6 +463,9 @@ class ProductApiTest(APITestCase):
         """`_auto_create_group_category` كان يقرأ `self.instance` — وهي صفة
         السيريالايزر لا الـViewSet — فكلّ تعديلٍ يمرّ بهذا الفرع يرفع
         AttributeError. الكرت يرسل الحقلين معاً في كل حفظ، فالمسار حيّ لا نادر.
+
+        task20: القاعدة نفسها حُذفت بلا بديل — لم يعد تصنيفٌ فرعي يُخترع من
+        `variant_group`، والتصنيف المُرسَل صراحةً يبقى كما هو.
         """
         self._auth()
         category = ProductCategory.objects.create(tenant=self.t_a, name="إطارات")
@@ -476,9 +479,8 @@ class ProductApiTest(APITestCase):
         assert res.status_code in (200, 202), res.content[:300]
         product = Product.objects.get(pk=pid)
         assert product.variant_group == "195/65/15"
-        # سلوك task31 يبقى: تصنيف المجموعة يُنشأ تحت التصنيف المختار.
-        assert product.category.name == "195/65/15"
-        assert product.category.parent_id == category.id
+        # task20: بلا اختراع تصنيفٍ فرعي — التصنيف يبقى ما أرسله المستخدم بالضبط.
+        assert product.category_id == category.id
 
     # ── M0: التصنيف محدِّدٌ يعني شجرته (كان exact-id هنا وشجرةً في الكرت المجمّع) ──
     def test_category_filter_includes_descendants(self):

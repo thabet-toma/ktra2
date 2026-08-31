@@ -627,6 +627,11 @@ def apply_suggested_levels(tenant_id: int, product_ids, *, user=None) -> dict:
 
     if touched:
         Product.objects.bulk_update(touched, ["min_stock_level", "max_stock_level"])
+        # #20: حدّا التجديد حقلان «أبويّان» والقراءة تفضّل الأب — فكاتبٌ لا
+        # يزامن يترك الكرت يعرض الحدَّ القديم بعد تطبيق الجديد، بلا خطأٍ ظاهر.
+        from inventory.services import sync_families_from_products
+
+        sync_families_from_products(touched)
         log_activity(
             action="update",
             entity_type="product",

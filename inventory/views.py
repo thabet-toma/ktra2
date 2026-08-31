@@ -10,18 +10,19 @@ from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import (
-    ProductCategory, Product, UnitOfMeasure, StockMovement, SupplierProduct, Warehouse,
-    WarehouseTransfer, Stocktake,
+    ProductCategory, ProductFamily, Product, UnitOfMeasure, StockMovement,
+    SupplierProduct, Warehouse, WarehouseTransfer, Stocktake,
 )
 from .serializers import (
-    CategorySerializer, ProductSerializer, ProductLookupSerializer, UnitOfMeasureSerializer,
+    CategorySerializer, ProductFamilySerializer, ProductSerializer,
+    ProductLookupSerializer, UnitOfMeasureSerializer,
     StockMovementSerializer, WarehouseSerializer,
     WarehouseTransferSerializer, StocktakeSerializer,
     SupplierProductSerializer,
 )
 from .stock_status import filter_by_stock_status, stock_status_of
 from .services import (
-    generate_next_sku, record_stock_movement,
+    generate_next_sku, record_stock_movement, sync_family_from_product,
     post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
     warehouse_stock_summary,
 )
@@ -84,6 +85,30 @@ class CategoryViewSet(viewsets.ModelViewSet):
 class UnitOfMeasureViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = UnitOfMeasure.objects.filter(is_active=True)
     serializer_class = UnitOfMeasureSerializer
+
+
+class ProductFamilyViewSet(viewsets.ReadOnlyModelViewSet):
+    """«المنتج» — الأب فوق البراند (#20). **قراءةٌ فقط في هذه المرحلة**، عمداً:
+
+    الأب يُنشأ حصراً مع براندِه الضمنيّ في نقطة الإنشاء الموحّدة
+    (`services.create_product_with_family`) — فطرفٌ يُنشئ أباً وحده يصنع «منتجاً
+    بلا براندات» وهو حالةٌ لا مكان لها في النموذج. والكتابة عليه مباشرةً تفتح
+    **اتجاه كتابةٍ ثانياً**: كل مستهلكٍ قائم لا يزال يقرأ هذه الحقول من صفّ
+    البراند، فتعديل الأب وحده يتركهم على قيمةٍ قديمة بصمت. الكاتب واحد — صفّ
+    البراند — والأب مرآةٌ تتبعه عبر `services.sync_family_from_product`.
+
+    فتحُ الكتابة هنا قرارُ تذكرةٍ لاحقة تنقل القرّاء أولاً. لا رصيد ولا تكلفة
+    هنا إطلاقاً — كل مجموعٍ مشتقٌّ عند القراءة من `Product.family`.
+    """
+    queryset = ProductFamily.objects.all().select_related('category', 'uom')
+    serializer_class = ProductFamilySerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return ProductFamily.objects.none()
+        return super().get_queryset().filter(tenant=tenant)
+
 
 class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     # task14 M2 (DEF-A5): ترتيب افتراضي حتمي «الأحدث أولاً» + بحث/فرز/ترقيم خادمي
@@ -319,34 +344,6 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         if category and category.tenant_id != tenant.pk:
             raise serializers.ValidationError({'category': 'التصنيف غير موجود لهذه الشركة.'})
 
-    def _auto_create_group_category(self, serializer, tenant, instance=None):
-        # الـinstance يصل وسيطاً من update() — كان يُقرأ self.instance غير الموجود
-        # على الـViewSet فيسقط كل تعديلٍ يحمل variant_group+category معاً بـ500.
-        variant_group = (serializer.validated_data.get('variant_group') or '').strip()
-        base_category = serializer.validated_data.get('category')
-
-        if variant_group and base_category:
-            # If editing and the incoming category is the old group category itself, use its parent as the base.
-            if instance is not None:
-                old_category_id = getattr(instance, 'category_id', None)
-                old_variant_group = (getattr(instance, 'variant_group', '') or '').strip()
-                if old_category_id == base_category.id and base_category.name == old_variant_group and base_category.parent:
-                    base_category = base_category.parent
-
-            if base_category.name == variant_group:
-                return
-            cat, _ = ProductCategory.objects.get_or_create(
-                tenant=tenant,
-                name=variant_group,
-                parent=base_category,
-                defaults={
-                    'revenue_account': base_category.revenue_account,
-                    'cogs_account': base_category.cogs_account,
-                    'inventory_account': base_category.inventory_account,
-                }
-            )
-            serializer.validated_data['category'] = cat
-
     def create(self, request, *args, **kwargs):
         tenant = self._get_tenant()
         # T-PLANLIMITS: عدد المنتجات المسموح به من خطة الشركة.
@@ -354,7 +351,6 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self._validate_category_tenant(serializer, tenant)
-        self._auto_create_group_category(serializer, tenant)
 
         # task14 M2 (DEF-A2): SKU يولَّد خادمياً عند الغياب — مع إعادة محاولة عند السباق
         explicit_sku = (serializer.validated_data.get('sku') or '').strip()
@@ -386,13 +382,21 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         )
         return Response(self.get_serializer(product).data, status=status.HTTP_201_CREATED)
 
+    def perform_destroy(self, instance):
+        # #20: حذف آخر براندٍ تحت منتجٍ يترك أباً بلا أبناء — «منتج بلا
+        # براندات» حالةٌ لا مكان لها في النموذج، ولا شيء يشير إليها فتبقى
+        # صفّاً يتيماً يظهر في كل قائمة منتجات. يُحذف معه.
+        family = instance.family
+        super().perform_destroy(instance)
+        if family is not None and not family.brands.exists():
+            family.delete()
+
     def update(self, request, *args, **kwargs):
         tenant = self._get_tenant()
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=kwargs.get('partial', False))
         serializer.is_valid(raise_exception=True)
         self._validate_category_tenant(serializer, tenant)
-        self._auto_create_group_category(serializer, tenant, instance=instance)
         tracked_labels = {
             field: label for field, label in self.activity_field_labels.items()
             if field in serializer.validated_data
@@ -408,6 +412,10 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             ).exclude(pk=instance.pk).exists():
                 raise serializers.ValidationError({'sku': 'رقم المنتج مستخدم مسبقاً لهذه الشركة.'})
         product = serializer.save()
+        # #20: اتجاه الكتابة أثناء الانتقال واحد — الكاتب هو صفّ البراند، والأب
+        # مرآةٌ تتبعه. بدونه يقرأ `resolve_family_field` أباً متجمّداً على قيمة
+        # الإنشاء فيعرض الكرت تصنيفاً قديماً بعد تعديله فعلاً.
+        sync_family_from_product(product)
         self._handle_attachments(product, request.data, tenant)
         changes = build_activity_changes(
             before=before,

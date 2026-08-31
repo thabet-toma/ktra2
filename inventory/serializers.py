@@ -1,9 +1,31 @@
 from rest_framework import serializers
 from .models import (
-    ProductCategory, Product, ProductPriceTier, UnitOfMeasure, StockMovement,
-    SupplierProduct, Warehouse, WarehouseTransfer, WarehouseTransferLine,
-    Stocktake, StocktakeLine,
+    ProductCategory, ProductFamily, Product, ProductPriceTier, UnitOfMeasure,
+    StockMovement, SupplierProduct, Warehouse, WarehouseTransfer,
+    WarehouseTransferLine, Stocktake, StocktakeLine,
 )
+
+
+class ProductFamilySerializer(serializers.ModelSerializer):
+    """«المنتج» (#20) — الأب فوق البراند. لا رصيد ولا تكلفة هنا؛ كل مجموعٍ
+    على مستواه يُشتقّ عند القراءة من برانداته (`Product.family`)."""
+
+    class Meta:
+        model = ProductFamily
+        fields = [
+            'id', 'tenant', 'name_ar', 'name_en', 'category', 'uom',
+            'min_stock_level', 'max_stock_level',
+            'is_serialized', 'is_service', 'allow_negative_stock',
+            'sale_account_override', 'sale_return_account_override',
+            'purchase_account_override', 'purchase_return_account_override',
+            'supplier_account_override', 'ending_inventory_account_override',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'tenant', 'created_at']
+        # لا `validate` هنا: الطرف قراءةٌ فقط (`ProductFamilyViewSet`) والكتابة
+        # كلُّها على صفّ البراند، فتحقُّقُ تصنيفِ الشركة يجري هناك
+        # (`ProductViewSet._validate_category_tenant`). تحقُّقٌ لا يعمل أسوأ من
+        # غيابه: يُقرأ فيُظنّ أن الطرف محروس.
 
 
 class WarehouseSerializer(serializers.ModelSerializer):
@@ -291,8 +313,10 @@ class ProductSerializer(serializers.ModelSerializer):
             ProductPriceTier.objects.filter(pk__in=stale).delete()
 
     def create(self, validated_data):
+        # #20: نقطة الإنشاء الموحّدة — تُنشئ «المنتج» وبراندَه الضمنيّ معاً.
+        from .services import create_product_with_family
         tiers = validated_data.pop('price_tiers', None)
-        product = super().create(validated_data)
+        _family, product = create_product_with_family(**validated_data)
         if tiers is not None:
             self._save_price_tiers(product, tiers)
         return product

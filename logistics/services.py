@@ -43,7 +43,7 @@ def materialize_quotation_draft_parties(quotation, *, user=None):
     from django.db import IntegrityError
 
     from inventory.models import Product
-    from inventory.services import generate_next_sku
+    from inventory.services import create_product_with_family, generate_next_sku
     from logistics.models import SupplierQuotation
     from partners.models import Partner
 
@@ -92,15 +92,15 @@ def materialize_quotation_draft_parties(quotation, *, user=None):
         ).first()
         if product is None:
             # تفرّد SKU يضمنه قيد unique(tenant, sku) — نعيد المحاولة عند السباق
-            # كما في مسار إنشاء المنتج العادي.
+            # كما في مسار إنشاء المنتج العادي. #20: المسار الثاني لإنشاء منتجٍ في
+            # الخادم — يمرّ بنقطة الإنشاء الموحّدة كي لا يُسرّب براندًا بلا أبٍ فوقه.
             for _ in range(5):
                 try:
-                    with transaction.atomic():
-                        product = Product.objects.create(
-                            tenant_id=quotation.tenant_id,
-                            sku=generate_next_sku(quotation.tenant),
-                            name_ar=name,
-                        )
+                    _family, product = create_product_with_family(
+                        tenant=quotation.tenant,
+                        sku=generate_next_sku(quotation.tenant),
+                        name_ar=name,
+                    )
                     break
                 except IntegrityError:
                     product = None

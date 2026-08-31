@@ -104,7 +104,11 @@ def resolve_labour_product(tenant_id: int):
         tenant_id=tenant_id, sku=LABOUR_PRODUCT_SKU,
     ).first()
     if product is None:
-        product = Product.objects.create(
+        # #20: كل إنشاء منتجٍ يمرّ بالنقطة الموحّدة — منتج الأجرة ليس استثناءً،
+        # وإلا صار براندًا بلا أبٍ فوقه يتسرّب من هذا الباب.
+        from inventory.services import create_product_with_family
+
+        _family, product = create_product_with_family(
             tenant_id=tenant_id,
             sku=LABOUR_PRODUCT_SKU,
             name_ar=LABOUR_PRODUCT_NAME,

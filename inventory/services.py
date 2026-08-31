@@ -11,7 +11,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ValidationError
 
-from .models import Product, StockMovement
+from .models import Product, ProductFamily, StockMovement
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -150,6 +150,111 @@ def generate_next_sku(tenant) -> str:
     )
     highest = max((int(s) for s in numeric_skus), default=0)
     return str(highest + 1).zfill(SKU_PAD)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# #20: كيان «المنتج» (`ProductFamily`) فوق «البراند» (`Product`) — نقطة
+# إنشاءٍ موحّدة، وقاعدة قراءةٍ تعايشية أثناء الانتقال المتدرّج.
+# ──────────────────────────────────────────────────────────────────────────
+
+# حقول #9 «على المنتج» — تُكتب على `ProductFamily` عند الإنشاء. أي مفتاحٍ في
+# `create_product_with_family(**fields)` غير هذه الأسماء يذهب للبراند وحده.
+FAMILY_FIELD_NAMES = (
+    'name_ar', 'name_en', 'category', 'uom',
+    'min_stock_level', 'max_stock_level',
+    'is_serialized', 'is_service', 'allow_negative_stock',
+    'sale_account_override', 'sale_return_account_override',
+    'purchase_account_override', 'purchase_return_account_override',
+    'supplier_account_override', 'ending_inventory_account_override',
+)
+
+
+def create_product_with_family(*, tenant=None, tenant_id=None, **fields):
+    """نقطة الإنشاء الموحّدة الوحيدة لمنتجٍ جديد (#20).
+
+    تُنشئ «المنتج» (`ProductFamily`، الأب) وبراندَه الضمنيّ الأوّل (`Product`)
+    معاً في عملية ذرّية واحدة — كل مسار تسجيل منتجٍ في الخادم يمرّ من هنا؛
+    تركُ مسارٍ آخر ينشئ `Product` مباشرةً يُسرّب براندًا بلا أبٍ فوقه.
+
+    حقول #9 «على المنتج» (`FAMILY_FIELD_NAMES`) تُكتب على الأب، **وتُنسَخ أيضاً
+    على البراند الضمني** لأن نفس الأعمدة لا تزال فيزيائياً على صفّه: كل
+    مستهلكٍ قائم (حالة المخزون، محرّك التجديد، بطاقة الكفالة…) يقرأ هذه
+    الأعمدة من صفّ البراند مباشرةً ولم يُحدَّث بعد ليقرأ من الأب. النسخ هنا
+    يحفظ سلوك هؤلاء بلا تغيير؛ قاعدة التعايش (`resolve_family_field`) قراءةٌ
+    مستقلّة لاحقة، لا بديلٌ عن هذا النسخ.
+    """
+    owner = {'tenant': tenant} if tenant is not None else {'tenant_id': tenant_id}
+    family_fields = {k: v for k, v in fields.items() if k in FAMILY_FIELD_NAMES}
+    with transaction.atomic():
+        family = ProductFamily.objects.create(**owner, **family_fields)
+        product = Product.objects.create(**owner, family=family, **fields)
+    return family, product
+
+
+def sync_family_from_product(product) -> bool:
+    """يُبقي مرآة الأب مطابقةً لصفّ البراند بعد أي تعديلٍ عليه (#20).
+
+    اتجاه الكتابة أثناء الانتقال **واحدٌ لا اثنان**: كل كاتبٍ قائم في النظام
+    يكتب على صفّ البراند، فالأب مرآةٌ تتبعه — لا مصدرٌ ثانٍ يُكتب مستقلاً.
+    بدون هذا التزامن يقرأ `resolve_family_field` من أبٍ متجمّدٍ على قيمة
+    الإنشاء، فيُظهر كرت المنتج تصنيفاً قديماً بعد تعديله فعلاً.
+
+    يُعاد `True` إن تغيّر شيءٌ فعلاً (لتفادي كتابةٍ بلا داعٍ).
+    """
+    if not product.family_id:
+        return False
+    family = product.family
+    changed = [
+        name for name in FAMILY_FIELD_NAMES
+        if getattr(family, f'{name}_id', getattr(family, name, None))
+        != getattr(product, f'{name}_id', getattr(product, name, None))
+    ]
+    if not changed:
+        return False
+    for name in changed:
+        attr = f'{name}_id' if hasattr(product, f'{name}_id') else name
+        setattr(family, attr, getattr(product, attr))
+    family.save(update_fields=[
+        f'{name}_id' if hasattr(family, f'{name}_id') else name for name in changed
+    ])
+    return True
+
+
+def sync_families_from_products(products) -> int:
+    """نسخة الدفعة من `sync_family_from_product` — بكتابةٍ واحدة لا واحدةٍ لكل صفّ.
+
+    كلُّ كاتبٍ لحقلٍ «أبويّ» على صفّ البراند يجب أن يمرّ من هنا أو من نظيرتها
+    المفردة: القراءة تفضّل الأب، فكاتبٌ لا يزامن يترك الشاشة على قيمةٍ قديمة
+    بلا أي خطأٍ ظاهر. (اليوم لكل أبٍ براندٌ واحد، فلا تنازع؛ حين تتعدّد
+    البراندات يصير حدّ التجديد قرار #25 لأنه حدُّ الأب لا حدُّ كل براند.)
+    """
+    families, fields = [], set()
+    for product in products:
+        if not product.family_id:
+            continue
+        family = product.family
+        for name in FAMILY_FIELD_NAMES:
+            attr = f'{name}_id' if hasattr(product, f'{name}_id') else name
+            if getattr(family, attr) != getattr(product, attr):
+                setattr(family, attr, getattr(product, attr))
+                fields.add(attr)
+        families.append(family)
+    if not families or not fields:
+        return 0
+    ProductFamily.objects.bulk_update(families, sorted(fields))
+    return len(families)
+
+
+def resolve_family_field(product, field_name: str):
+    """قاعدة التعايش (#20): الحقل يُقرأ من الأب إن كان للبراند أب، وإلا من
+    صفّ البراند نفسه — لا تُحذف الأعمدة المزدوجة من `Product` في هذا النطاق.
+
+    شبكة أمانٍ للصفوف القديمة (`family_id` فارغ) والتي لن تتحرّك بهذه الهجرة؛
+    وللبراندات الجديدة، مصدر الحقيقة الفعلي بعد أن يُعدَّل الأب مباشرةً لاحقاً
+    (تعديل الأب مستقلٌّ خارج نطاق هذه التذكرة).
+    """
+    source = product.family if product.family_id else product
+    return getattr(source, field_name)
 
 
 def record_stock_movement(
@@ -714,7 +819,9 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
     on-hand / valuation come from the canonical Product fields (A4)."""
     from django.db.models import Sum
 
-    p = Product.objects.select_related('category').get(id=product_id, tenant_id=tenant_id)
+    p = Product.objects.select_related(
+        'category', 'family', 'family__category',
+    ).get(id=product_id, tenant_id=tenant_id)
 
     pq, pv = _purchased_totals_by_product(tenant_id, [product_id]).get(product_id, (0, 0))
     sq, sv = _sold_totals_by_product(tenant_id, [product_id]).get(product_id, (0, 0))
@@ -776,6 +883,10 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
         if profit is not None and effective_sale else None
     )
 
+    # #20: قاعدة التعايش — «طبيعة الصنف»/حدّ التجديد الأدنى/التصنيف حقولٌ صار
+    # مكانها الأب؛ تُقرأ منه إن كان للبراند أب، وإلا من صفّه (كما كانت دائماً).
+    resolved_category = resolve_family_field(p, 'category')
+
     return {
         'id': p.id,
         'sku': p.sku,
@@ -783,9 +894,9 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
         'brand': (p.brand or '').strip() or None,
         'uom': p.uom_legacy or None,
         'barcode': p.barcode or None,
-        'is_service': p.is_service,
-        'min_stock_level': p.min_stock_level,
-        'category': p.category.name if p.category_id else None,
+        'is_service': resolve_family_field(p, 'is_service'),
+        'min_stock_level': resolve_family_field(p, 'min_stock_level'),
+        'category': resolved_category.name if resolved_category else None,
         'sale_price': str(sale_price) if sale_price is not None else None,
         'last_sale_price': str(last_sale_val) if last_sale_val is not None else None,
         'last_sale_invoice': last_sale['invoice_number'],

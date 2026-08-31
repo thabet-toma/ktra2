@@ -55,6 +55,74 @@ class ProductCategory(models.Model):
     def __str__(self):
         return self.name or f"Category {self.id}"
 
+class ProductFamily(models.Model):
+    """«المنتج» — الأب فوق البراند (#17/#20، الشكل أ: `Product` الحالي صار البراند).
+
+    **يُمنع من حمل أي رقم**: لا رصيد، ولا تكلفة، ولا مفتاح أجنبي من حركةٍ أو
+    بند مستند. كل مجموعٍ على مستوى المنتج (الرصيد الكلي، التكلفة المرجَّحة…)
+    يُشتقّ عند القراءة من برانداته (`Product.family`) — تخزينُ رقمٍ هنا هو
+    بالضبط العطب الذي بُني هذا النموذج ليمنعه.
+
+    الحقول هنا هي التي حسمها #9 «على المنتج»: الاسم، التصنيف، الوحدة، حدّا
+    التجديد، طبيعة الصنف، والحسابات الستّة. فيزيائياً **نفس هذه الأعمدة تبقى
+    موجودة أيضاً على صفّ البراند** (`Product`) — قاعدة التعايش الانتقالية تقرأ
+    منها إن لم يكن للبراند أبٌ بعد؛ راجع `inventory.services.resolve_family_field`.
+    """
+    id = models.AutoField(primary_key=True, db_column='ProductFamilyID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='product_families',
+    )
+    name_ar = models.CharField(max_length=200, blank=True, null=True, db_column='Name_AR')
+    name_en = models.CharField(max_length=200, blank=True, null=True, db_column='Name_EN')
+    category = models.ForeignKey(
+        ProductCategory, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CategoryID', related_name='product_families',
+    )
+    uom = models.ForeignKey(
+        UnitOfMeasure, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='UOMID', related_name='product_families',
+    )
+    min_stock_level = models.IntegerField(blank=True, null=True, db_column='MinStockLevel')
+    max_stock_level = models.IntegerField(blank=True, null=True, db_column='MaxStockLevel')
+    is_serialized = models.BooleanField(default=False, db_column='IsSerialized')
+    is_service = models.BooleanField(default=False, db_column='IsService')
+    allow_negative_stock = models.BooleanField(default=False, db_column='AllowNegativeStock')
+    sale_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='SaleAccountOverrideID', related_name='product_families_sale_override',
+    )
+    sale_return_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='SaleReturnAccountOverrideID', related_name='product_families_sale_return_override',
+    )
+    purchase_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='PurchaseAccountOverrideID', related_name='product_families_purchase_override',
+    )
+    purchase_return_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='PurchaseReturnAccountOverrideID', related_name='product_families_purchase_return_override',
+    )
+    supplier_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='SupplierAccountOverrideID', related_name='product_families_supplier_override',
+    )
+    ending_inventory_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='EndingInventoryAccountOverrideID', related_name='product_families_ending_inventory_override',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'product_families'
+        managed = True
+        verbose_name_plural = 'Product Families'
+
+    def __str__(self):
+        return self.name_ar or self.name_en or f"Family {self.id}"
+
+
 class Product(models.Model):
     id = models.AutoField(primary_key=True, db_column='ProductID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
@@ -68,6 +136,13 @@ class Product(models.Model):
     # من الاسم (مقاس الإطار أو الاسم) — توافقاً مع البيانات القديمة.
     variant_group = models.CharField(max_length=120, blank=True, default='', db_column='VariantGroup')
     brand = models.CharField(max_length=100, blank=True, default='', db_column='Brand')
+    # #20: «المنتج» فوق «البراند» (الشكل أ) — قابلٌ للفراغ عمداً: الانتقال متدرّج
+    # بلا يوم توقّف، وصفوف ما قبل هذه الهجرة تبقى بلا أبٍ (قاعدة التعايش تقرأ
+    # حينها من صفّ البراند نفسه). لا تُجعل NOT NULL ولا تُبنَ عليها فرادةٌ شرطية.
+    family = models.ForeignKey(
+        'ProductFamily', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='ProductFamilyID', related_name='brands',
+    )
     category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, null=True, blank=True, db_column='CategoryID', related_name='products')
     uom = models.ForeignKey(UnitOfMeasure, on_delete=models.SET_NULL, null=True, blank=True, db_column='UOMID', related_name='products')
     uom_legacy = models.CharField(max_length=20, blank=True, null=True, db_column='UOM')

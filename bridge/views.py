@@ -172,8 +172,17 @@ def _sync_product_from_mirror_item(item_data: dict, tenant, doc_id: str) -> None
                 for k, v in defaults.items():
                     setattr(p, k, v)
                 p.save()
+                # #20: الحقول «الأبوية» تُقرأ من الأب — فالمزامنة شرطٌ هنا كما
+                # في مسار التعديل العادي، وإلا جمّد الجسرُ الأبَ على قيمةٍ قديمة.
+                from inventory.services import sync_family_from_product
+
+                sync_family_from_product(p)
             else:
-                p = Product.objects.create(tenant=tenant, **defaults)
+                # #20: النقطة الموحّدة — جسر المزامنة الخارجي ينشئ منتجات فعلاً،
+                # فتركُه على `Product.objects.create` يُسرّب براندات بلا أبٍ فوقها.
+                from inventory.services import create_product_with_family
+
+                _family, p = create_product_with_family(tenant=tenant, **defaults)
             
             # Optionally write back sqlProductId to the dict so caller knows?
             # We are in the mapper, we can mutate doc.data before save? Yes, if we hook before save.

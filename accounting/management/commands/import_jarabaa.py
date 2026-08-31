@@ -412,7 +412,10 @@ class Command(BaseCommand):
             existing_names.add(name)
             cat = self._get_category(r.get('Category'))
             tracking = clean(r.get('TrackingType')) or ''
-            prod = Product.objects.create(
+            # #20: النقطة الموحّدة — حتى أمر الاستيراد التاريخي، فلا يبقى في
+            # المستودع مسارٌ ينشئ براندًا بلا أبٍ فوقه.
+            from inventory.services import create_product_with_family
+            _fam, prod = create_product_with_family(
                 tenant=self.tenant, sku=sku,
                 barcode=clean(r.get('Barcode')),
                 name_ar=name,
@@ -466,7 +469,9 @@ class Command(BaseCommand):
             return p, False
         self._auto_seq += 1
         cat = self._get_category('منتجات عامة')
-        p = Product.objects.create(
+        from inventory.services import create_product_with_family
+
+        _fam, p = create_product_with_family(
             tenant=self.tenant, sku=f'AX-{self._auto_seq:05d}',
             name_ar=key[:200], category=cat,
             allow_negative_stock=True, quantity_on_hand=Decimal('0'), avg_cost=Decimal('0'))
