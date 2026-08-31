@@ -137,4 +137,4 @@
 
 ### Domain docs
 
-سياق واحد (single-context): `ARCHITECTURE.md` + `docs/modules/` وقرارات معمارية في `docs/decisions/` (لا `docs/adr/`). راجع `docs/agents/domain.md`.
+سياق واحد (single-context): `ARCHITECTURE.md` + `docs/modules/` وقرارات معمارية في `docs/decisions/` — لا يوجد `docs/adr/` هنا ولا تُنشئه. راجع `docs/agents/domain.md`.
