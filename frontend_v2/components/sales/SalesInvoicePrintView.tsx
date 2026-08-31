@@ -167,8 +167,10 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                         <tbody className="text-[11px]">
                             {data.lines.map((item, index) => {
                                 if (item.product === "") return null;
+                                // THA-18: اللقطة المجمَّدة (فاتورة مرحَّلة) تسبق البحث الحي —
+                                // فلا تُعيد إعادة تسمية المنتج كتابة ما تطبعه فاتورة مؤرشفة.
                                 const pr = data.productsById.get(Number(item.product));
-                                const pName = pr ? (pr.name_ar || pr.name_en || pr.sku) : '';
+                                const pName = item.name_snapshot || (pr ? (pr.name_ar || pr.name_en || pr.sku) : '');
                                 const lineTotal = data.totals.perLine[index]?.lineTotal || 0;
                                 return (
                                     <tr key={index} className="border-b ktra-border-soft last:border-0 hover:ktra-bg-panel">

@@ -646,6 +646,17 @@ class SalesInvoiceLine(models.Model):
         max_length=500, blank=True, default="", db_column="CustomerNote",
         help_text="ملاحظة تُطبع للعميل تحت اسم المنتج في الفاتورة",
     )
+    # THA-18: لقطة اسم المنتج — تُكتب عند **الترحيل** لا عند إنشاء السطر، فتجمّد
+    # ما تعرضه الفاتورة المؤرشفة رغم أي إعادة تسمية لاحقة للمنتج. فارغة = ليست
+    # مرحَّلة (يُشتقّ الاسم من المنتج حياً)، ويمسحها إلغاء الترحيل.
+    # **احذر التشابه في الاسم**: `NameSnapshot` على بنود الشراء والصفقات
+    # (`logistics.PurchaseInvoiceItem` و`LogisticsDealItem`) عقدٌ آخر تماماً —
+    # يُكتب وقت **الإدخال** ويعدّله المستخدم. هذا الحقل خادميٌّ بحت لا يُكتب من
+    # العقد. أقرب نظيرٍ سلوكي في الشراء هو `PurchaseInvoiceItem.name` (اسمٌ
+    # مخزَّن لا يتبع المنتج)، لكنه يُكتب عند الإنشاء لا عند الترحيل.
+    name_snapshot = models.CharField(
+        max_length=255, blank=True, default="", db_column="NameSnapshot",
+    )
 
     class Meta:
         db_table = "sales_module_invoice_lines"

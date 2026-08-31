@@ -190,6 +190,10 @@ export type DraftLine = {
   key: string;
   id?: number;
   product: number | "";
+  /** THA-18: لقطة الاسم المجمَّدة عند الترحيل — تأتي من الخادم على سطرٍ محمَّل
+   *  من فاتورة مرحَّلة. فارغةٌ على المسودّة وعلى السطر الجديد، فيُشتقّ الاسم
+   *  حياً بصيغة الشاشة نفسها كما كان قبل THA-18. */
+  name_snapshot?: string;
   quantity: string;
   unit_price: string;
   line_discount: string;
@@ -1153,6 +1157,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         key: newLineKey(),
         id: ln.id,
         product: ln.product,
+        name_snapshot: ln.name_snapshot || "",
         quantity: formatQuantity(ln.quantity, "0"),
         unit_price: formatQuantity(ln.unit_price, "0"),
         line_discount: formatQuantity(ln.line_discount ?? 0, "0"),
@@ -1989,6 +1994,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     }
     updateLine(key, {
       product: productId,
+      // THA-18: تبديل المنتج على السطر يُسقط لقطة الاسم المحمَّلة (تخصّ المنتج
+      // القديم) — يعود العرض للبحث الحي عن المنتج المختار حديثاً.
+      name_snapshot: "",
       unit_price: price,
       priceSource: opts?.source ?? null,
       // T-SERIAL: وحدات المنتج السابق لا معنى لها على منتج جديد.
@@ -2455,6 +2463,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
       <KitAutocomplete
         value={(() => {
+          // THA-18: اللقطة المجمَّدة (فاتورة مرحَّلة) تُقدَّم على البحث الحي كي
+          // لا تعيد إعادة التسمية كتابة ما تعرضه فاتورة مؤرشفة. المسودّة بلا
+          // لقطة فتبقى على صيغة الشاشة نفسها — لا يتغيّر عرضها بهذه التذكرة.
+          if (row.name_snapshot) return row.name_snapshot;
           const pr = row.product ? productsById.get(Number(row.product)) : undefined;
           return pr ? formatProductPrimaryName(pr) : "";
         })()}
@@ -3679,10 +3691,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           key: "name",
           header: "المنتج",
           render: (row) => {
+            // THA-18: هذه هي الشاشة التي تُفتح عليها الفاتورة **المرحَّلة** —
+            // فاللقطة المجمَّدة تُقدَّم هنا قبل كل شيء، وإلا لعرض المستند
+            // المؤرشف اسماً أُعيدت تسميته بعد ترحيله.
             const pr = productsById.get(Number(row.product));
+            const live = pr ? pr.name_ar || pr.name_en || pr.sku : "";
             return (
               <span className="font-semibold">
-                {pr ? pr.name_ar || pr.name_en || pr.sku : "—"}
+                {row.name_snapshot || live || "—"}
               </span>
             );
           },

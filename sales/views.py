@@ -447,7 +447,9 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                 ])
                 # حركات المخزون عُكِست أعلاه ⇒ تُصفَّر الكميات المسلَّمة وتُحذف
                 # الإرساليات المبنية عليها (تُعاد بالتسليم بعد إعادة الترحيل).
-                invoice.lines.update(delivered_quantity=0)
+                # THA-18: اللقطة تخصّ مستنداً مرحَّلاً — والفاتورة عادت مسودة،
+                # فتعود تتبع اسم المنتج الحي وتتجمّد من جديد عند إعادة الترحيل.
+                invoice.lines.update(delivered_quantity=0, name_snapshot="")
                 invoice.delivery_orders.all().delete()
                 # إعادة الشيكات المرفقة إلى مسودة (عكس ترقيتها عند الترحيل).
                 # CHQ-2: عبر خدمة الشيكات — تسجّل الرجوع في سجل الشيك وتغطّي

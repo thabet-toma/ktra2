@@ -110,7 +110,7 @@ def _validate_stock_lines(tenant, lines_data, stock_on_post: bool, *, is_return:
 class SalesInvoiceLineSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
     # اسم المنتج (قراءة فقط) لعرض بنود الفاتورة في «تفاصيل الحركة» بكشف الحساب —
-    # يتبع Product.__str__ (name_ar ← name_en ← sku)، فلا يتكرّر منطق التسمية.
+    # لقطةُ الترحيل إن وُجدت، وإلا Product.__str__ (name_ar ← name_en ← sku).
     product_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
@@ -135,14 +135,25 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
             "serials",
             "internal_note",
             "customer_note",
+            # THA-18: تخرج **خاماً** لا مطويّةً في `product_name` — الواجهة تحتاج
+            # أن تفرّق بين «لقطةٌ مجمَّدة فاعرضها كما هي» و«لا لقطة فاشتقّ الاسم
+            # حياً بصيغة الشاشة»، وطيُّهما في حقل واحد يغيّر ما تعرضه المسودّات.
+            "name_snapshot",
         ]
-        read_only_fields = ["line_total_excl_tax", "line_tax_amount", "delivered_quantity"]
+        read_only_fields = [
+            "line_total_excl_tax", "line_tax_amount", "delivered_quantity",
+            "name_snapshot",
+        ]
 
     def validate_serials(self, value):
         from inventory.serials import normalize_serials
         return normalize_serials(value)
 
     def get_product_name(self, obj):
+        # THA-18: الفاتورة المرحّلة تعرض لقطتها المجمَّدة؛ غير المرحَّلة (لقطة
+        # فارغة) تتبع اسم المنتج الحي.
+        if obj.name_snapshot:
+            return obj.name_snapshot
         return str(obj.product) if obj.product_id else None
 
 

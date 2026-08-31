@@ -88,7 +88,9 @@ def build_sales_invoice(invoice) -> dict:
         .only(
             "id", "invoice_id", "quantity", "unit_price", "line_discount",
             "line_total_excl_tax", "line_tax_amount", "line_tax_percent",
-            "unit", "catalog_no", "customer_note",
+            # THA-18: `name_snapshot` في القائمة عمداً — `product_names` تقدّمها
+            # على اسم المنتج الحي، وتركُها مؤجَّلةً يجلبها باستعلامٍ لكل سطر.
+            "unit", "catalog_no", "customer_note", "name_snapshot",
             "product__name_ar", "product__name_en", "product__uom__name_ar",
             "tax_rate__rate",
         )

@@ -95,6 +95,8 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
     id: number;
     product: number;
     product_name?: string | null;
+    /** THA-18: لقطة الاسم المجمَّدة عند الترحيل — فارغة على المسودّة. */
+    name_snapshot?: string;
     quantity: string;
     delivered_quantity?: string;
     unit_price: string;

@@ -896,9 +896,14 @@ def post_sales_invoice(
         assert_sales_serials_declared(invoice, lines)
 
     recalculate_invoice_amounts(invoice, lines)
+    # THA-18: تجميد لقطة الاسم لحظة الترحيل — لا عند إنشاء السطر. مرآة لفارق
+    # الشراء (`PurchaseInvoiceItem.name`)، لكن الكتابة هنا مؤجَّلة للترحيل فلا
+    # تتبع المسودة اسماً حياً ثم تتجمّد بلا داعٍ.
+    for line in lines:
+        line.name_snapshot = str(line.product) if line.product_id else ""
     SalesInvoiceLine.objects.bulk_update(
         lines,
-        ["line_total_excl_tax", "line_tax_amount"],
+        ["line_total_excl_tax", "line_tax_amount", "name_snapshot"],
     )
     SalesInvoice.objects.filter(pk=invoice.pk).update(
         subtotal_excl_tax=invoice.subtotal_excl_tax,
