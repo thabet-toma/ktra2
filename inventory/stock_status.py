@@ -87,17 +87,54 @@ def effective_max(product, suggested_max=None) -> Decimal:
     return max(_dec(suggested_max), ZERO)
 
 
-def stock_status_of(product, *, reserved_map=None, suggested_min=None, suggested_max=None) -> str:
-    """حالة المنتج الواحد — نفس ترتيب القرار الذي يطبّقه `filter_by_stock_status`."""
+def family_available_map(tenant_id: int, *, reserved_map=None) -> dict:
+    """أرصدة كل عائلةٍ (منتج/أب) في الشركة مجمَّعةً «متاح» — استعلامٌ واحدٌ
+    للشركة كلّها، لا واحدٌ لكل صفّ (#25).
+
+    المصدر الذي تقرأه `stock_status_of` حين يكون للمنتج أبٌ: مجموع أرصدة **كل**
+    برانداته لا رصيد هذا البراند وحده — وإلا ظهر كل براندٍ «منخفضاً» كذباً في
+    منتجٍ وفير (البند 3، #25). يُبنى مرّةً لكل طلب ويُمرَّر إلى `stock_status_of`
+    صفّاً بصفّ، بنفس نمط `reserved_map` القائم — لا استعلامٌ مترابطٌ لكل صفّ،
+    فذاك النمط كلّف هذا المستودع 17 ثانية من قبل.
+    """
+    from .models import Product
+
+    totals: dict[int, Decimal] = {}
+    rows = (
+        Product.objects.filter(tenant_id=tenant_id, family_id__isnull=False)
+        .values('id', 'family_id', 'quantity_on_hand')
+    )
+    for row in rows:
+        available = _dec(row['quantity_on_hand']) - _dec((reserved_map or {}).get(row['id']))
+        totals[row['family_id']] = totals.get(row['family_id'], ZERO) + available
+    return totals
+
+
+def stock_status_of(product, *, reserved_map=None, suggested_min=None, suggested_max=None,
+                     family_totals=None) -> str:
+    """حالة المنتج الواحد — نفس ترتيب القرار الذي يطبّقه `filter_by_stock_status`.
+
+    #25: لمنتجٍ له أبٌ (`family_id`)، إن حملت `family_totals` (من
+    `family_available_map`) مجموع إخوته، الحالة تُقاس على ذلك المجموع مقابل
+    حدّ **الأب** — لا رصيد هذا البراند وحده مقابل حدّه هو. `family_totals`
+    اختياريةٌ وتُهمَل بصمتٍ حين لا تُمرَّر أو حين لا يحمل المنتج أباً بعد —
+    فلا يتغيّر سلوك مستدعٍ قائم لم يُحدَّث ليمرّرها.
+    """
     if getattr(product, "is_service", False):
         return STATUS_IN_STOCK
-    available = available_of(product, reserved_map)
+    family_id = getattr(product, 'family_id', None)
+    if family_id and family_totals is not None and family_id in family_totals:
+        available = family_totals[family_id]
+        threshold_source = product.family
+    else:
+        available = available_of(product, reserved_map)
+        threshold_source = product
     if available <= ZERO:
         return STATUS_OUT_OF_STOCK
-    minimum = effective_min(product, suggested_min)
+    minimum = effective_min(threshold_source, suggested_min)
     if minimum > ZERO and available <= minimum:
         return STATUS_LOW
-    maximum = effective_max(product, suggested_max)
+    maximum = effective_max(threshold_source, suggested_max)
     if maximum > ZERO and available > maximum:
         return STATUS_OVERSTOCK
     return STATUS_IN_STOCK

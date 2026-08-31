@@ -382,7 +382,11 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_stock_status(self, obj):
         # T-REORDER: القاعدة تعيش في `inventory/stock_status.py` وحدها.
         from .stock_status import stock_status_of
-        return stock_status_of(obj, reserved_map=self.context.get('reserved_quantity_map'))
+        return stock_status_of(
+            obj,
+            reserved_map=self.context.get('reserved_quantity_map'),
+            family_totals=self.context.get('family_available_map'),
+        )
 
 
 class ProductLookupSerializer(ProductSerializer):

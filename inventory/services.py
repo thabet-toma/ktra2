@@ -41,11 +41,27 @@ def tire_size_key(name: str) -> str | None:
 
 def product_group_key(product) -> str:
     """مفتاح تجميع المنتج (اسم المنتج الفرعي/عقدة الأب). الأولوية:
+    0) #25: أبوه (`ProductFamily`) إن وُجد — درجةٌ **فوق** السلّم القديم كلّه.
+       إخوةٌ تحت نفس الأب يتشاركون مفتاحاً واحداً دائماً، بصرف النظر عن أيّ
+       درجةٍ أدنى (المجموعة الصريحة، مقاس الإطار، أو البراند): الأب علاقةٌ
+       حقيقية اختارها المستخدم صراحةً («أضف براند») لا تخمينٌ من نصّ. بدون
+       هذه الدرجة، برندان أُضيفا تحت **نفس** الأب (#21) يحملان مفتاحين
+       مختلفين (اسميهما كبراند) فلا يتجمّعان — العطب الذي وُجدت هذه الدرجة
+       لتمنعه.
     1) `variant_group` الصريح الذي يدخله المستخدم (مثل 185/65/14) — يُنشئ مجلّداً
        يتجمّع تحته حتى لو منتج واحد.
     2) مقاس الإطار المُستخرَج من الاسم (توافق مع البيانات القائمة للعجال).
     3) البراند — فالمنتجات بنفس البراند تتجمّع تلقائياً (≥2) دون إدخال إضافي.
-    4) الاسم الأساسي. مصدر حقيقة واحد للتجميع."""
+    4) الاسم الأساسي. مصدر حقيقة واحد للتجميع.
+
+    **لا درجةٌ من السابقات حُذفت** — قرارٌ صريح (#25): منتجات ما قبل هذا
+    النموذج (`family_id` فارغ) تبقى تعمل بالسلّم القديم كاملاً بلا هجرة."""
+    family_id = getattr(product, 'family_id', None)
+    if family_id:
+        family = getattr(product, 'family', None)
+        name = ((family.name_ar or family.name_en or '').strip()
+                if family is not None else '')
+        return name or f'family:{family_id}'
     explicit = (getattr(product, 'variant_group', '') or '').strip()
     if explicit:
         return explicit
@@ -1110,9 +1126,12 @@ def category_descendant_ids(*, tenant_id: int, category_id: int) -> list[int]:
 
 
 def _group_products(tenant_id: int, product_ids: list[int]) -> list:
-    """يحلّ ويصفّي قائمة معرّفات إلى منتجات الشركة فقط (عزل المستأجر)."""
+    """يحلّ ويصفّي قائمة معرّفات إلى منتجات الشركة فقط (عزل المستأجر).
+
+    `family` مجلوبةٌ مسبقاً (#25): `product_group_key` تقرأها الآن كدرجةٍ أولى،
+    وبلا هذا الجلب صار استعلاماً لكل عضوٍ في الكرت المجمّع."""
     return list(
-        Product.objects.select_related('category')
+        Product.objects.select_related('category', 'family')
         .filter(tenant_id=tenant_id, id__in=product_ids)
         .order_by('brand', 'sku')
     )

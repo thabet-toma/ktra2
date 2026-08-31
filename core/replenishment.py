@@ -71,6 +71,7 @@ from inventory.stock_status import (
     STATUS_OUT_OF_STOCK,
     available_of,
     effective_min,
+    family_available_map,
     reserved_of,
     stock_status_of,
 )
@@ -319,7 +320,7 @@ def _history_days(first_movement, window_start, today) -> int:
 
 
 def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
-                 on_order, params, window_start, today) -> dict:
+                 on_order, params, window_start, today, family_totals=None) -> dict:
     from inventory.services import product_display_name, product_group_key
 
     net = profile.get("net", ZERO)
@@ -353,7 +354,7 @@ def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
     governing_min = effective_min(product, levels["suggested_min"])
     status = stock_status_of(
         product, reserved_map=reserved_map, suggested_min=levels["suggested_min"],
-        suggested_max=levels["suggested_max"],
+        suggested_max=levels["suggested_max"], family_totals=family_totals,
     )
     # بلا مستوىً مستهدَف لا كمية تُطلَب. وبغير هذا الشرط كان منتجٌ رصيده سالب
     # (‑401 من فوضى بياناتٍ قديمة) وبلا مبيعةٍ واحدة يُقترَح طلب 401 منه —
@@ -479,7 +480,7 @@ def replenishment_rows(tenant_id: int, *, product_ids=None, category_id=None,
 
     qs = Product.objects.filter(
         tenant_id=tenant_id, is_service=False, is_store_only=False,
-    ).select_related("category")
+    ).select_related("category", "family")
     if product_ids is not None:
         qs = qs.filter(pk__in=product_ids)
     if category_id:
@@ -499,6 +500,8 @@ def replenishment_rows(tenant_id: int, *, product_ids=None, category_id=None,
     ids = [p.id for p in products]
 
     reserved_map = reserved_quantity_map(tenant_id, ids)
+    # #25: مجموع أرصدة إخوة كل أبٍ — استعلامٌ واحدٌ للشركة كلّها لا واحدٌ لكل صفّ.
+    family_totals = family_available_map(tenant_id, reserved_map=reserved_map)
     profiles = _demand_profiles(tenant_id, ids, window_start, today)
     lead_by_product, lead_by_supplier, tenant_samples = _lead_time_samples(tenant_id)
     on_order = _on_order_map(tenant_id, ids)
@@ -521,6 +524,7 @@ def replenishment_rows(tenant_id: int, *, product_ids=None, category_id=None,
             lead=lead, lead_max=lead_max, lead_source=lead_source,
             on_order=on_order.get(product.id, ZERO),
             params=params, window_start=window_start, today=today,
+            family_totals=family_totals,
         ))
 
     groups = _group_rows(rows, params)

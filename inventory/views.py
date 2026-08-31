@@ -209,10 +209,36 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
                 self._reserved_map_cache = {}
         return self._reserved_map_cache
 
+    def _family_available_map(self):
+        """#25: مجموع أرصدة إخوة كل أبٍ في الشركة — استعلامٌ واحدٌ لكل طلب.
+
+        يقرؤه السيريالايزر ليحسب حالة المخزون على مستوى الأب لا البراند وحده
+        (`inventory/stock_status.py` — `family_available_map`). يُبنى مرّةً
+        ويُشارَك بين كل صفوف الصفحة — لا استعلامَ لكل صفّ.
+        """
+        if not hasattr(self, '_family_available_map_cache'):
+            tenant = self._get_tenant()
+            if tenant:
+                from .stock_status import family_available_map
+                self._family_available_map_cache = family_available_map(
+                    tenant.TenantID, reserved_map=self._reserved_map(),
+                )
+            else:
+                self._family_available_map_cache = {}
+        return self._family_available_map_cache
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         if self._get_tenant():
             context['reserved_quantity_map'] = self._reserved_map()
+            # منتقي المستندات (`view=lookup`) يبقى على حالة **البراند** وحده
+            # عمداً — لا سهواً: البند يبيع براندًا بعينه، فبراندٌ رصيده صفرٌ
+            # داخل منتجٍ وفير «نفذ» **حقيقةً** لمن يريد بيعه. الحالة على مستوى
+            # الأب معناها «هل عندي من هذا المنتج شيء»، وهو سؤال شاشة الأصناف
+            # لا سؤال سطر الفاتورة. (والعقد يعرض `stock_status` فعلاً — فهذا
+            # اختلاف دلالة لا حقلٌ محذوف.)
+            if self.request.query_params.get('view') != 'lookup':
+                context['family_available_map'] = self._family_available_map()
         return context
 
     def get_queryset(self):
