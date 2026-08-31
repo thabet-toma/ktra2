@@ -398,6 +398,9 @@ def convert_quotation_to_invoice(quotation, user=None):
         "currency": quotation.currency_id,
         "exchange_rate": quotation.exchange_rate,
         "invoice_type": "credit",
+        # خصم العرض يعبر إلى فاتورته — كان يسقط هنا وحده (التحويل إلى طلبية
+        # يحمله)، فيُفوتَر الزبون بأكثر ممّا عُرِض عليه وقَبِله.
+        "invoice_discount": quotation.discount_amount,
         "lines": lines_data,
     }
 

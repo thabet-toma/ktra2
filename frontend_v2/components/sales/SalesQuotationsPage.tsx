@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import {
@@ -7,6 +7,7 @@ import {
   Loader2,
   Printer,
   Share2,
+  Info,
   X,
 } from "lucide-react";
 import {
@@ -29,13 +30,15 @@ import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
 import { listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
-import { formatQuantity } from "../../utils/formatNumber";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
 import type { SqlProduct } from "../../types/inventory";
 import {
   useRecordNavigation,
   useKitKeymap,
 } from "../kit";
 import { ShareDocumentModal } from "../shared/ShareDocumentModal";
+import { ProductCardModal } from "../shared/ProductCardModal";
 import { SalesProductPickerModal, type SalesProductPickerItem, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { SalesOrdersPage } from "./SalesOrdersPage";
 import {
@@ -50,6 +53,8 @@ import {
 } from "../shared/CommercialDocumentsList";
 
 type Partner = { id: number; name: string };
+/** نسبة ضريبة من شجرة الحسابات — الحقل على البند مفتاحُها لا نسبتها المئوية. */
+type TaxRateRow = { id: number; name: string; rate: string | number; direction?: string };
 type Product = SalesProductPickerItem & { name: string; unit_price?: string };
 
 type LineState = {
@@ -97,6 +102,12 @@ export const SalesQuotationsPage: React.FC = () => {
   const [formLines, setFormLines] = useState<LineState[]>([{
     id: undefined, product_id: "", product_name: "", quantity: "1", unit_price: "", discount: "0", tax_rate: "0", total: "0"
   }]);
+
+  // خصم المستند («خصم الفاتورة») — يُعلَن على رأس العرض لا على بنوده.
+  const [formDiscount, setFormDiscount] = useState("0");
+  const [taxRates, setTaxRates] = useState<TaxRateRow[]>([]);
+  // بطاقة المنتج المشتركة — تكلفة الصنف وأسعاره دون مغادرة العرض.
+  const [cardProductId, setCardProductId] = useState<number | null>(null);
 
   const [productPickerLineIdx, setProductPickerLineIdx] = useState<number | null>(null);
 
@@ -150,6 +161,7 @@ export const SalesQuotationsPage: React.FC = () => {
       setFormDate(detail.quotation_date?.slice(0, 10) || "");
       setFormValidUntil(detail.valid_until?.slice(0, 10) || "");
       setFormNotes(detail.notes || "");
+      setFormDiscount(String(detail.discount_amount ?? "0"));
       setFormLines((detail.lines || []).map((l) => ({
         id: l.id,
         product_id: String(l.product),
@@ -264,14 +276,22 @@ export const SalesQuotationsPage: React.FC = () => {
       // task16 E17: منتقي المنتج في عرض السعر كان يحمّل شجرة الحسابات
       // (getAccounts) بدل المنتجات — يُصحَّح إلى منتجات المخزون (inventory/products).
       const tenantId = resolveTenantId();
-      const [parts, prods] = await Promise.all([
+      const [parts, prods, taxes] = await Promise.all([
         // T-PARTYPURE: عرض سعر بيع = زبائن فقط.
         accountingApi.getPartners("Customer") as Promise<Partner[]>,
         listPickerProducts<SqlProduct & { sale_price?: string; selling_price?: string }>(
           tenantId,
         ),
+        // نسب ضريبة المبيعات — عمود «الضريبة» على البند مفتاحُها لا نسبتها.
+        accountingApi.getTaxRates() as Promise<TaxRateRow[]>,
       ]);
       setPartners(parts || []);
+      setTaxRates(
+        (taxes || []).filter((t) => {
+          const d = (t.direction || "both").toLowerCase();
+          return d === "sales" || d === "both";
+        }),
+      );
       setProducts(
         (prods || []).map((p: any) => ({
           id: p.id,
@@ -322,6 +342,7 @@ export const SalesQuotationsPage: React.FC = () => {
     setFormDate(new Date().toISOString().slice(0, 10));
     setFormValidUntil(defaultValidUntil());
     setFormNotes("");
+    setFormDiscount("0");
     setFormLines([{
       id: undefined, product_id: "", product_name: "", quantity: "1", unit_price: "", discount: "0", tax_rate: "0", total: "0"
     }]);
@@ -351,10 +372,10 @@ export const SalesQuotationsPage: React.FC = () => {
       const qty = Number(updated[idx].quantity) || 0;
       const price = Number(updated[idx].unit_price) || 0;
       const disc = Number(updated[idx].discount) || 0;
-      const tax = Number(updated[idx].tax_rate) || 0;
-      const subtotal = qty * price - disc;
-      const taxAmt = subtotal * (tax / 100);
-      updated[idx].total = String(subtotal + taxAmt);
+      // إجمالي السطر = الصافي بلا ضريبة — نفس ما يخزّنه الخادم في `line_total`،
+      // فلا يتبدّل الرقم على الشاشة بعد الحفظ وإعادة الفتح. الضريبة وخصم
+      // المستند يظهران في صندوق الإجماليات وحده.
+      updated[idx].total = String(qty * price - disc);
       return updated;
     });
   };
@@ -383,6 +404,7 @@ export const SalesQuotationsPage: React.FC = () => {
         quotation_date: formDate,
         valid_until: formValidUntil || null,
         notes: formNotes,
+        discount_amount: Number(formDiscount) || 0,
         lines: validLines.map((l) => ({
           product: Number(l.product_id),
           quantity: l.quantity,
@@ -476,13 +498,37 @@ export const SalesQuotationsPage: React.FC = () => {
     return map[s] || "ktra-bg-panel ktra-text-ink";
   };
 
-  const subtotal = formLines.reduce((s, l) => s + (Number(l.total) || 0), 0);
   const lineDiscountTotal = formLines.reduce((sum, line) => sum + (Number(line.discount) || 0), 0);
   const grossSubtotal = formLines.reduce(
     (sum, line) => sum + (Number(line.quantity) || 0) * (Number(line.unit_price) || 0),
     0,
   );
-  const taxTotal = Math.max(0, subtotal - (grossSubtotal - lineDiscountTotal));
+  /** المفتاح ← النسبة المئوية؛ البند يحمل مفتاح نسبة الضريبة لا النسبة نفسها. */
+  const taxRateMap = useMemo(() => {
+    const map = new Map<number, number>();
+    taxRates.forEach((rate) => map.set(rate.id, Number(rate.rate)));
+    return map;
+  }, [taxRates]);
+  /**
+   * إجماليات العرض من وحدة حساب الفاتورة نفسها (`computeInvoiceTotals`): خصم
+   * المستند يُوزَّع على البنود ثم تُحسب الضريبة على الصافي المخصوم. مصدرٌ واحد
+   * ⇒ لا ينحرف إجمالي العرض عن إجمالي فاتورته بعد التحويل.
+   */
+  const totals = useMemo(
+    () =>
+      computeInvoiceTotals(
+        formLines.map<LineInput>((line) => ({
+          quantity: line.quantity,
+          unit_price: line.unit_price,
+          line_discount: line.discount,
+          tax_rate_id:
+            line.tax_rate && Number(line.tax_rate) > 0 ? Number(line.tax_rate) : null,
+        })),
+        taxRateMap,
+        formDiscount,
+      ),
+    [formLines, taxRateMap, formDiscount],
+  );
   const selectedQuotation = quotations.find((quotation) => quotation.id === selectedId);
 
   // DOC-SHARE: نافذة واحدة تخدم الفرعين (المحرّر والقائمة). عرضٌ ما زال
@@ -595,19 +641,52 @@ export const SalesQuotationsPage: React.FC = () => {
       header: "وصف المنتج",
       width: "35%",
       render: (line, index) => (
-        <button type="button" className="flex w-full items-center justify-between gap-2 px-1 text-right"
-          onClick={() => setProductPickerLineIdx(index)}>
-          <span className={line.product_name ? "ktra-text-ink" : "ktra-text-soft"}>
-            {line.product_name || "اختر منتجاً…"}
-          </span>
-          <span className="ktra-text-accent">…</span>
-        </button>
+        <div className="flex w-full items-center gap-1">
+          <button type="button" className="flex min-w-0 flex-1 items-center justify-between gap-2 px-1 text-right"
+            onClick={() => setProductPickerLineIdx(index)}>
+            <span className={line.product_name ? "ktra-text-ink" : "ktra-text-soft"}>
+              {line.product_name || "اختر منتجاً…"}
+            </span>
+            <span className="ktra-text-accent">…</span>
+          </button>
+          {/* بطاقة المنتج المشتركة: التكلفة وسعر البيع وآخر سعر شراء/بيع والربح
+              وحركة الصنف — نفس البطاقة التي في فاتورة البيع، فلا يُسعَّر العرض
+              على العمياء. */}
+          {line.product_id && Number(line.product_id) > 0 && (
+            <button type="button" className="ktra-iconbtn"
+              title="بطاقة المنتج — التكلفة والأسعار"
+              onClick={() => setCardProductId(Number(line.product_id))}>
+              <Info className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       ),
     },
     { key: "quantity", header: "الكمية", width: "90px", align: "center", type: "number" },
     { key: "unit_price", header: "سعر الوحدة", width: "110px", align: "center", type: "number" },
-    { key: "discount", header: "الخصم", width: "90px", align: "center", type: "number" },
-    { key: "tax_rate", header: "الضريبة %", width: "90px", align: "center", type: "number" },
+    /* «خصم البند» صراحةً — تمييزاً له عن «الخصم» في صندوق الإجماليات (خصم العرض كلّه). */
+    { key: "discount", header: "خصم البند", width: "90px", align: "center", type: "number" },
+    {
+      /* الحقل مفتاح `TaxRate` لا نسبة مئوية: كتابة «16» كانت تعني «النسبة رقم 16»
+         فتُحفظ نسبةٌ أخرى (أو يُرفض الحفظ)، والشاشة تحسب 16% وهماً. المنتقي
+         يمنع الأمرين معاً. */
+      key: "tax_rate",
+      header: "الضريبة",
+      width: "130px",
+      align: "center",
+      render: (line, index) => (
+        <select
+          className="ktra-input"
+          value={line.tax_rate && Number(line.tax_rate) > 0 ? line.tax_rate : ""}
+          onChange={(event) => handleLineChange(index, "tax_rate", event.target.value || "0")}
+        >
+          <option value="">بدون</option>
+          {taxRates.map((rate) => (
+            <option key={rate.id} value={rate.id}>{rate.name} ({rate.rate}%)</option>
+          ))}
+        </select>
+      ),
+    },
     { key: "total", header: "الإجمالي", width: "110px", align: "center", readOnly: true },
     {
       key: "del",
@@ -688,7 +767,7 @@ export const SalesQuotationsPage: React.FC = () => {
           if (key === "unit_price") return line.unit_price;
           if (key === "discount") return line.discount;
           if (key === "tax_rate") return line.tax_rate;
-          if (key === "total") return Number(line.total).toLocaleString();
+          if (key === "total") return formatMoney(line.total);
           return "";
         }}
         getLineKey={(line, index) => line.id ?? `new-${index}`}
@@ -726,10 +805,29 @@ export const SalesQuotationsPage: React.FC = () => {
         ]}
         totals={
           <>
-            <div className="ktra-total-row"><span>مجموع البنود</span><span className="ktra-total-value">{grossSubtotal.toLocaleString()}</span></div>
-            <div className="ktra-total-row"><span>الخصم</span><span className="ktra-total-value">{lineDiscountTotal.toLocaleString()}</span></div>
-            <div className="ktra-total-row"><span>الضريبة</span><span className="ktra-total-value">{taxTotal.toLocaleString()}</span></div>
-            <div className="ktra-total-row ktra-total-row--grand"><span>إجمالي العرض</span><span className="ktra-total-value">{subtotal.toLocaleString()}</span></div>
+            <div className="ktra-total-row"><span>مجموع البنود</span><span className="ktra-total-value">{formatMoney(grossSubtotal)}</span></div>
+            {/* خصم البنود يبقى مقروءاً حين يوجد — كي لا يُخلط بخصم العرض. */}
+            {lineDiscountTotal > 0 && (
+              <div className="ktra-total-row"><span>خصم البنود</span><span className="ktra-total-value">{formatMoney(lineDiscountTotal)}</span></div>
+            )}
+            {/* خصم العرض (خصم المستند) — يُكتب هنا ويسبق الضريبة، كما في الفاتورة. */}
+            <div className="ktra-total-row">
+              <span>الخصم</span>
+              <input
+                className="ktra-input ktra-total-input"
+                type="number"
+                step="0.01"
+                min="0"
+                value={formDiscount}
+                onChange={(event) => setFormDiscount(event.target.value)}
+                title="خصم على العرض كلّه — لخصم بندٍ بعينه استعمل عمود «الخصم» في السطر"
+              />
+            </div>
+            {Number(formDiscount) > 0 && (
+              <div className="ktra-total-row"><span>بعد الخصم</span><span className="ktra-total-value">{formatMoney(totals.subtotalExclTax)}</span></div>
+            )}
+            <div className="ktra-total-row"><span>الضريبة</span><span className="ktra-total-value">{formatMoney(totals.taxAmount)}</span></div>
+            <div className="ktra-total-row ktra-total-row--grand"><span>إجمالي العرض</span><span className="ktra-total-value">{formatMoney(totals.grandTotal)}</span></div>
           </>
         }
         status={<>
@@ -738,6 +836,13 @@ export const SalesQuotationsPage: React.FC = () => {
         </>}
         overlay={<>
           {shareModal}
+          {cardProductId != null && (
+            <ProductCardModal
+              productId={cardProductId}
+              productName={products.find((item) => item.id === cardProductId)?.name}
+              onClose={() => setCardProductId(null)}
+            />
+          )}
           {productPickerLineIdx !== null ? (
           <SalesProductPickerModal
             isOpen

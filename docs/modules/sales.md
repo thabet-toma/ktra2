@@ -144,6 +144,16 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
   منَع نفسه. المرآة على جانب الشراء أقدم (`create_purchase_return`). ونقطة
   `invoices/{id}/returnable-lines/` تعرض على الشاشة **نفس** الأرقام التي يقيس بها
   الحارس، فلا يرى المستخدم رقماً ويُرفض بآخر.
+- **خصم عرض السعر يسبق الضريبة ويعبر إلى فاتورته**: `SalesQuotationSerializer._apply_totals`
+  (`sales/serializers.py`) يوزّع `discount_amount` على البنود بـ`allocate_invoice_discount`
+  ثم يحسب الضريبة على الصافي المخصوم — نفس ترتيب `recalculate_invoice_amounts`. كان
+  يطرحه **بعد** الضريبة (`subtotal + tax − discount`) فتُحسب ض.ق.م على أساسٍ لم
+  يُدفع، وكان `convert_quotation_to_invoice` (`sales/services/orders.py`) يُسقط الخصم
+  كلَّه — فيُفوتَر الزبون بأكثر ممّا عُرِض عليه وقَبِله (التحويل إلى **طلبية** كان
+  يحمله منذ البداية). خصمٌ سالبٌ يُرفض، وخصمٌ يتجاوز مجموع البنود يُقصّ كما في
+  الفاتورة. الواجهة تحسب بنفس الوحدة المشتركة (`utils/salesInvoiceMath.ts`)، فلا
+  ينحرف رقم الشاشة عن رقم الخادم. **وشقيقه `SalesOrderSerializer` ما زال على
+  القاعدة القديمة** (الخصم بعد الضريبة) — شاشة الطلبيات بلا حقل خصم اليوم.
 - **العميل والمنتج يجب أن يتبعا نفس الـtenant** — يُفحص عند الترحيل (`services.py` للعميل، `:1597` للمنتج).
 
 ## الاختبارات المهمة
@@ -154,6 +164,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 | `sales/tests/test_reserved_stock_guard.py` | حجز الطلبية يمنع بيع الكمية لزبون آخر (4 قواعد) |
 | `sales/tests/test_invoice_delivery.py` | حالة التسليم والتسليم الجزئي ببنوده |
 | `sales/tests/test_sales_orders.py` | الطلبية ليست قيداً، الحجز مشتقّ، الإلغاء لا يحذف، العربون سند حقيقي |
+| `sales/tests/test_quotation_discount.py` | خصم العرض قبل الضريبة، تطابقه مع حساب الفاتورة، وعبوره عند التحويل |
 | `sales/tests/test_subledger_routing.py` | قيد الفاتورة يدين الذمم بالكامل ولا يُسوّي النقدية |
 | `sales/tests/test_block_loss_invoice.py` | رفض فاتورة فيها أي سطر بخسارة عند تفعيل المفتاح |
 | `sales/tests/test_payment_cheques.py` · `test_voucher_atomicity.py` | الشيكات المرفقة وذرّية السند |

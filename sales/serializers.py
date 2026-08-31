@@ -32,6 +32,7 @@ from .models import (
     SalesSettings,
 )
 from .services import (
+    allocate_invoice_discount,
     guard_loss_invoice,
     invoice_pending_payment_total,
     next_credit_debit_note_number,
@@ -1416,6 +1417,11 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"customer": "يجب اختيار زبون من الشركة الحالية."}
             )
+        # خصم المستند سالباً = زيادةٌ متنكّرة في هيئة خصم — تُرفض عند الباب.
+        if Decimal(str(attrs.get("discount_amount", 0) or 0)) < 0:
+            raise serializers.ValidationError(
+                {"discount_amount": "خصم العرض لا يمكن أن يكون سالباً."}
+            )
         lines = attrs.get("lines")
         if self.instance is None and not lines:
             raise serializers.ValidationError({"lines": "أضف بنداً واحداً على الأقل."})
@@ -1457,31 +1463,52 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _prepare_lines(lines_data):
-        subtotal = Decimal("0")
-        tax_amount = Decimal("0")
+        """يكتب `line_total` لكل سطر ويعيد [(الصافي، نسبة الضريبة)].
+
+        الصافي هنا **قبل** خصم المستند — كما يُخزَّن على السطر تماماً، فالسطر
+        المطبوع يبقى `كمية × سعر − خصم السطر` والخصم العام يُعلَن على الرأس.
+        """
+        pairs = []
         for line in lines_data:
             quantity = Decimal(str(line.get("quantity", 0)))
             unit_price = Decimal(str(line.get("unit_price", 0)))
             discount = Decimal(str(line.get("line_discount", 0)))
             line_total = (quantity * unit_price - discount).quantize(Decimal("0.01"))
             line["line_total"] = line_total
-            subtotal += line_total
             tax_rate = line.get("tax_rate")
-            if tax_rate:
-                tax_amount += (
-                    line_total * Decimal(str(tax_rate.rate)) / Decimal("100")
-                ).quantize(Decimal("0.01"))
-        return subtotal.quantize(Decimal("0.01")), tax_amount.quantize(Decimal("0.01"))
+            pairs.append((
+                line_total,
+                Decimal(str(tax_rate.rate)) if tax_rate else Decimal("0"),
+            ))
+        return pairs
 
     @staticmethod
-    def _apply_totals(validated_data, subtotal, tax_amount):
+    def _apply_totals(validated_data, pairs):
+        """خصم المستند يسبق الضريبة — نفس قاعدة `recalculate_invoice_amounts`.
+
+        كان الخصم يُطرح **بعد** الضريبة (`subtotal + tax − discount`) فتُحسب
+        ض.ق.م على أساسٍ لم يُدفع، ويختلف إجمالي العرض عن إجمالي فاتورته بعد
+        التحويل. الآن: الخصم يُوزَّع على الأسطر بـ`allocate_invoice_discount`
+        (القاعدة المشتركة نفسها التي يقسّم بها الإيراد)، ثم تُحسب الضريبة على
+        الصافي المخصوم، والإجمالي = مجموع الأسطر المخصومة + الضريبة بالقرش.
+        يحرس التطابقَ `test_quotation_discount.py::test_quotation_totals_match_invoice_math`.
+        """
+        cent = Decimal("0.01")
+        subtotal = sum((net for net, _rate in pairs), Decimal("0")).quantize(cent)
+        discount = Decimal(str(validated_data.get("discount_amount", 0) or 0))
+        # خصمٌ يتجاوز مجموع البنود لا يصنع إجمالياً سالباً (كما في الفاتورة).
+        if subtotal > 0 and discount > subtotal:
+            discount = subtotal
+        after_discount = Decimal("0.00")
+        tax_amount = Decimal("0.00")
+        for net, rate in pairs:
+            adjusted = allocate_invoice_discount(net, discount, subtotal).quantize(cent)
+            after_discount += adjusted
+            if rate:
+                tax_amount += (adjusted * rate / Decimal("100")).quantize(cent)
         validated_data["subtotal"] = subtotal
-        validated_data["tax_amount"] = tax_amount
-        validated_data["grand_total"] = (
-            subtotal
-            + tax_amount
-            - Decimal(str(validated_data.get("discount_amount", 0) or 0))
-        ).quantize(Decimal("0.01"))
+        validated_data["tax_amount"] = tax_amount.quantize(cent)
+        validated_data["grand_total"] = (after_discount + tax_amount).quantize(cent)
 
     @staticmethod
     def _sync_customer_prices(quotation, lines_data):
@@ -1513,7 +1540,7 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
                     {"currency": "لا توجد عملة أساسية معرّفة. عيّن عملة أساسية أو اختر عملة."}
                 )
             validated_data["currency"] = base
-        self._apply_totals(validated_data, *self._prepare_lines(lines_data))
+        self._apply_totals(validated_data, self._prepare_lines(lines_data))
         with transaction.atomic():
             quotation = SalesQuotation.objects.create(**validated_data)
             SalesQuotationLine.objects.bulk_create([
@@ -1527,13 +1554,23 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
         lines_data = validated_data.pop("lines", None)
         with transaction.atomic():
             locked = SalesQuotation.objects.select_for_update().get(pk=instance.pk)
-            if lines_data is not None:
-                subtotal, tax_amount = self._prepare_lines(lines_data)
+            # تعديل الخصم وحده (بلا بنود) يعيد الحساب من بنود العرض المحفوظة —
+            # وإلا بقيت الإجماليات على خصمها القديم بصمت.
+            recompute = lines_data is not None or "discount_amount" in validated_data
+            if recompute:
+                pairs = (
+                    self._prepare_lines(lines_data) if lines_data is not None
+                    else [
+                        (line.line_total,
+                         Decimal(str(line.tax_rate.rate)) if line.tax_rate_id else Decimal("0"))
+                        for line in locked.lines.select_related("tax_rate")
+                    ]
+                )
                 effective = {
                     "discount_amount": validated_data.get(
                         "discount_amount", locked.discount_amount)
                 }
-                self._apply_totals(effective, subtotal, tax_amount)
+                self._apply_totals(effective, pairs)
                 validated_data.update(effective)
             for field, value in validated_data.items():
                 setattr(locked, field, value)
