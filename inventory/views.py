@@ -130,7 +130,9 @@ class ProductFamilyViewSet(viewsets.ReadOnlyModelViewSet):
 
 class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     # task14 M2 (DEF-A5): ترتيب افتراضي حتمي «الأحدث أولاً» + بحث/فرز/ترقيم خادمي
-    queryset = Product.objects.all().select_related('category', 'uom')
+    # #22: `family` هنا أيضاً — `ProductLookupSerializer.get_family_name` يقرأ
+    # `obj.family.name_ar`، وبلا هذا الجلب المسبق صار استعلاماً لكل صفّ من 1490.
+    queryset = Product.objects.all().select_related('category', 'uom', 'family')
     serializer_class = ProductSerializer
     pagination_class = OptionalPageNumberPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]

@@ -183,6 +183,34 @@ def test_backfill_never_freezes_a_draft(env):
     assert detail["lines"][0]["product_name"] == "اسم جديد"
 
 
+def test_posted_and_unposted_agree_on_brand_appearing_in_the_name(env):
+    """#22: المنتج له براندٌ صريح — الاسم المرحَّل (اللقطة) والاسم المشتقّ حياً
+    (مسودّة) يجب أن يتفقا على ظهور البراند بين قوسين، لا أن يظهر في أحدهما
+    ويختفي في الآخر."""
+    tenant, owner, cur, customer, _plain_product = env
+    branded = Product.objects.create(
+        tenant=tenant, sku="NS-BRAND-1", name_ar="هاتف",
+        brand="سامسونج",
+        quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
+    record_stock_movement(
+        product=branded, movement_type="IN", quantity=Decimal("50"),
+        unit_cost=Decimal("10"), reference_type="OPENING", reference_id=0,
+        movement_date="2026-06-01", tenant=tenant)
+    branded.refresh_from_db()
+    c = _client(owner, tenant)
+
+    inv = _make_invoice(tenant, customer, branded, cur, "NS-BRAND-POST")
+    detail = c.get(f"/api/sales/invoices/{inv.id}/", format="json").json()
+    draft_name = detail["lines"][0]["product_name"]
+    assert draft_name == "هاتف (سامسونج)"
+
+    res = c.post(f"/api/sales/invoices/{inv.id}/post/", {}, format="json")
+    assert res.status_code == 200, res.content[:300]
+    posted_name = SalesInvoiceLine.objects.get(invoice=inv).name_snapshot
+    assert posted_name == "هاتف (سامسونج)"
+    assert posted_name == draft_name
+
+
 def test_backfill_tenant_flag_leaves_other_companies_untouched(env):
     """`--tenant` يحصر الأثر بشركةٍ واحدة — والحقل يخرج خاماً للواجهة."""
     from io import StringIO

@@ -899,8 +899,11 @@ def post_sales_invoice(
     # THA-18: تجميد لقطة الاسم لحظة الترحيل — لا عند إنشاء السطر. مرآة لفارق
     # الشراء (`PurchaseInvoiceItem.name`)، لكن الكتابة هنا مؤجَّلة للترحيل فلا
     # تتبع المسودة اسماً حياً ثم تتجمّد بلا داعٍ.
+    # #22: `product_display_name` لا `str(product)` — فتوافق «اسم المنتج
+    # (البراند)» مع ما يعرضه المنتقي والطباعة (راجع قرار #22 على التذكرة).
+    from inventory.services import product_display_name
     for line in lines:
-        line.name_snapshot = str(line.product) if line.product_id else ""
+        line.name_snapshot = product_display_name(line.product) if line.product_id else ""
     SalesInvoiceLine.objects.bulk_update(
         lines,
         ["line_total_excl_tax", "line_tax_amount", "name_snapshot"],

@@ -30,6 +30,8 @@ const fullProduct = {
   is_serialized: true,
   supplier_codes_text: 'A1 B2',
   attachments: [{ file_path: '/img/1.png' }, { file_path: '' }],
+  family_id: 11,
+  family_name: 'مقاس إطار',
 };
 
 test('الشاشة الكاملة: الحقول الموسّعة كلّها كما كانت', () => {
@@ -110,4 +112,27 @@ test('كلا المستدعيين: barcode وisSerialized وsupplierCodes متط
   assert.equal(full.isSerialized, modal.isSerialized);
   assert.equal(full.supplierCodes, modal.supplierCodes);
   assert.equal(full.categoryName, modal.categoryName);
+});
+
+// #22: family_id/family_name يمرّان عبر نقطة التحويل الموحّدة إلى مستدعيَيها
+// معاً — لا نسخة ثانية (الحقلان يخصّان «المنتج» الأب، لا يُختاران بندًا).
+test('كلا المستدعيين: family_id وfamily_name يمرّان كما هما', () => {
+  const full = mapPickerProductToItem(fullProduct, fullScreenOpts);
+  const modal = mapPickerProductToItem(fullProduct, searchModalOpts);
+  assert.equal(full.familyId, '11');
+  assert.equal(full.familyName, 'مقاس إطار');
+  assert.equal(modal.familyId, '11');
+  assert.equal(modal.familyName, 'مقاس إطار');
+});
+
+test('family_id/family_name غائبان أو null يصيران undefined لا نصاً "null"', () => {
+  const item = mapPickerProductToItem({ id: 1 }, searchModalOpts);
+  assert.equal(item.familyId, undefined);
+  assert.equal(item.familyName, undefined);
+
+  const nullish = mapPickerProductToItem(
+    { id: 2, family_id: null, family_name: null }, fullScreenOpts,
+  );
+  assert.equal(nullish.familyId, undefined);
+  assert.equal(nullish.familyName, undefined);
 });

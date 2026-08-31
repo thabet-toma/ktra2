@@ -13,7 +13,8 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
 from core.models import ActivityLog
-from inventory.models import Product, ProductCategory, StockMovement, UnitOfMeasure
+from inventory.models import Product, ProductCategory, ProductFamily, StockMovement, UnitOfMeasure
+from inventory.services import add_brand_to_family, create_product_with_family
 from tenants.services import create_company
 
 PRODUCTS_URL = "/api/inventory/products/"
@@ -184,6 +185,94 @@ class ProductApiTest(APITestCase):
         # وما زال العقد أضيق من الكامل — لا تحليلات ولا حقول الكرت.
         assert "purchased_qty" not in row
         assert "avg_monthly_sales" not in row
+
+    # ── #22: منتقي المنتجات في المستندات ──
+    def test_lookup_contract_gains_exactly_family_id_and_family_name(self):
+        """العقد يكسب حقلين فقط — لا يتوسّع أكثر (قرارٌ صريح على #12).
+
+        `category` تُضبَط عمداً لأن `category_name` (`source='category.name'`)
+        تُسقَط من الردّ حين تكون فارغة — لا حقلٌ ناقص، بل `SkipField` على
+        سلسلة مصدرٍ منقّطة تشير إلى `None`؛ ضبطها هنا يجعل مجموعة الحقول
+        المرجعية دقيقةً بدل أن تكذب بحسب بيانات الاختبار.
+        """
+        category = ProductCategory.objects.create(tenant=self.t_a, name="تصنيف")
+        family, product = create_product_with_family(
+            tenant=self.t_a, name_ar="منتج بأب", category=category)
+        self._auth()
+
+        res = self._get("?view=lookup")
+
+        assert res.status_code == 200, res.content[:300]
+        row = next(r for r in res.json() if r["id"] == product.id)
+        assert row["family_id"] == family.id
+        assert row["family_name"] == "منتج بأب"
+        known_before = {
+            "id", "sku", "barcode", "name_ar", "name_en", "display_name", "brand",
+            "category", "category_name", "hs_code", "min_stock_level",
+            "stock_status", "group_key", "quantity_on_hand", "reserved_quantity",
+            "available_quantity", "avg_cost", "sale_price", "is_service",
+            "is_serialized", "warranty_months", "supplier_warranty_months",
+            "is_for_sale_online", "online_price", "online_description",
+            "attachments", "supplier_codes_text",
+        }
+        assert set(row.keys()) == known_before | {"family_id", "family_name"}
+
+    def test_lookup_list_exposes_every_brand_of_a_family_each_with_the_brand_in_its_name(self):
+        """كتابة اسم المنتج تُنزل كل برانداته — كلٌّ بصيغة «اسم المنتج (البراند)».
+
+        الأساس البنيوي: كل براندٍ تحت نفس الأب يشارك `name_ar` نفسه (مزامنة
+        `sync_family_from_product`)، فبحثٌ نصّي موضعي عن اسم المنتج في الواجهة
+        يطابق الجميع تلقائياً بلا أي منطق بحثٍ إضافي.
+        """
+        family, first = create_product_with_family(tenant=self.t_a, name_ar="هاتف ذكي")
+        add_brand_to_family(family=family, brand_name="سامسونج", tenant=self.t_a)
+        second, _created = add_brand_to_family(family=family, brand_name="آبل", tenant=self.t_a)
+        self._auth()
+
+        res = self._get("?view=lookup")
+
+        assert res.status_code == 200, res.content[:300]
+        rows = [r for r in res.json() if r["family_id"] == family.id]
+        assert len(rows) == 2
+        assert {r["name_ar"] for r in rows} == {"هاتف ذكي"}
+        assert {r["display_name"] for r in rows} == {
+            "هاتف ذكي (سامسونج)", "هاتف ذكي (آبل)",
+        }
+
+    def test_lookup_list_never_returns_a_family_row(self):
+        """المنتج (الأب) غير قابل للاختيار في بندٍ بنيويّاً — لا يظهر أصلاً في
+        عقد المنتقي، الذي يُبنى فوق `Product` (البراند) لا `ProductFamily`."""
+        family, product = create_product_with_family(tenant=self.t_a, name_ar="منتج مُفرد")
+        self._auth()
+
+        res = self._get("?view=lookup")
+
+        assert res.status_code == 200, res.content[:300]
+        rows = res.json()
+        assert all("brands" not in r for r in rows)
+        row_ids = {r["id"] for r in rows}
+        assert product.id in row_ids
+        # عقد المنتقي أصلاً لا مسار له إلى `ProductFamily` — التحقّق الإيجابي
+        # هنا أن كل صفٍّ عائدٍ هو براندٌ حقيقي موجود في جدول `Product`.
+        assert row_ids == set(
+            Product.objects.filter(tenant=self.t_a).values_list("id", flat=True)
+        )
+        assert ProductFamily.objects.filter(tenant=self.t_a).count() >= 1
+
+    def test_lookup_family_name_does_not_add_a_query_per_row(self):
+        """`family_name` يُقرأ من `select_related('family')` — عقد المنتقي
+        مقيسٌ صراحةً (609ك/331مِلّي على 1490 منتجاً)، فحقلٌ يفتح استعلاماً لكل
+        صفٍّ يُعيد بالضبط ما بُني هذا العقد الضيّق ليمنعه."""
+        for i in range(10):
+            create_product_with_family(tenant=self.t_a, name_ar=f"منتج {i}", sku=f"FAMQ-{i}")
+        self._auth()
+
+        with CaptureQueriesContext(connection) as captured:
+            res = self._get("?view=lookup")
+
+        assert res.status_code == 200, res.content[:300]
+        assert len(res.json()) == 10
+        assert len(captured) <= 6, [q["sql"] for q in captured]
 
     def test_category_tree_query_count_is_constant(self):
         root = ProductCategory.objects.create(tenant=self.t_a, name="جذر")

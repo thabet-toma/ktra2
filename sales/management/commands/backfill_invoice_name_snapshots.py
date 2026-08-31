@@ -21,6 +21,7 @@ import logging
 
 from django.core.management.base import BaseCommand
 
+from inventory.services import product_display_name
 from sales.models import SalesInvoice, SalesInvoiceLine
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,9 @@ class Command(BaseCommand):
         updated = 0
         batch = []
         for line in lines.iterator(chunk_size=2000):
-            name = str(line.product)
+            # #22: `product_display_name` لا `str(product)` — يتفق مع الترحيل
+            # الجديد وطباعة «اسم المنتج (البراند)» (راجع قرار #22 على التذكرة).
+            name = product_display_name(line.product)
             if not name:
                 continue
             line.name_snapshot = name

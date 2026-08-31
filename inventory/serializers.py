@@ -404,12 +404,25 @@ class ProductLookupSerializer(ProductSerializer):
         codes = [c.supplier_sku for c in obj.supplier_codes.all() if c.supplier_sku]
         return ' '.join(codes)
 
+    # #22: معرّف واسم «المنتج» (الأب) — البند يبقى دائماً براندًا، لكن هذان
+    # الحقلان وحدهما (لا أكثر، العقد ضيّقٌ عمداً) يسمحان لمنتقي المستند بمعرفة
+    # أيّ براندات تتبع نفس المنتج بلا استرجاع الأب نفسه كخيارٍ قابل للإدراج.
+    family_id = serializers.IntegerField(read_only=True)
+    family_name = serializers.SerializerMethodField()
+
+    def get_family_name(self, obj):
+        if not obj.family_id:
+            return None
+        return obj.family.name_ar or obj.family.name_en or None
+
     class Meta(ProductSerializer.Meta):
         fields = [
             'id', 'sku', 'barcode', 'name_ar', 'name_en', 'display_name',
             # وكيل الفواتير يطبع الماركة في كل سطر تشخيص وفي أسباب استبعاد
             # المنتجات؛ بدونها كان يطبع أقواساً فارغة: «❌ 205/65/16 () — رصيد 0».
             'brand',
+            # #22: منتقي المستندات — «هذا موجود» يحمل الأب لا يعرضه خياراً.
+            'family_id', 'family_name',
             'category', 'category_name', 'hs_code', 'min_stock_level',
             # T-REORDER: حقلان يجعلان بند الفاتورة يعرف حالة المنتج وبدائله:
             # `stock_status` يصبغ الخيار (نفذ/منخفض)، و`group_key` يجمع موديلات

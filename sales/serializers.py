@@ -152,9 +152,14 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
     def get_product_name(self, obj):
         # THA-18: الفاتورة المرحّلة تعرض لقطتها المجمَّدة؛ غير المرحَّلة (لقطة
         # فارغة) تتبع اسم المنتج الحي.
+        # #22: `product_display_name` لا `str(product)` — وإلا اختلفت المسودّة
+        # عن المرحَّلة في ظهور البراند (راجع قرار #22 على التذكرة).
         if obj.name_snapshot:
             return obj.name_snapshot
-        return str(obj.product) if obj.product_id else None
+        if not obj.product_id:
+            return None
+        from inventory.services import product_display_name
+        return product_display_name(obj.product)
 
 
 class _SalesInvoicePaymentSummarySerializer(serializers.Serializer):

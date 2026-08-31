@@ -67,6 +67,10 @@ export interface Item {
     barcode?: string;
     /** T-SERIAL: المنتج يتتبّع وحداته برقم تسلسلي (`Product.is_serialized`). */
     isSerialized?: boolean;
+    /** #22: «المنتج» (الأب) الذي يتبعه هذا البراند — من `family_id`/`family_name`
+     *  في عقد `view=lookup`. الأب نفسه لا يظهر أبداً كبندٍ قابلٍ للإدراج. */
+    familyId?: string;
+    familyName?: string;
 }
 
 export interface GeminiAnalysis {

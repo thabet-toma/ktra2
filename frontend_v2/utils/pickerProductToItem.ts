@@ -59,6 +59,9 @@ export const mapPickerProductToItem = (
     // ليعرف سطر الفاتورة أنه منتج يُتتبَّع بالوحدة.
     barcode: (p as any).barcode || "",
     isSerialized: Boolean((p as any).is_serialized),
+    // #22: «المنتج» (الأب) — للسياق فقط، لا تُعرض كخيارٍ مستقل في المنتقي.
+    familyId: (p as any).family_id != null ? String((p as any).family_id) : undefined,
+    familyName: (p as any).family_name || undefined,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
