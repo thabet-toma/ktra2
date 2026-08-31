@@ -8,7 +8,9 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
+import type { AddBrandResult, ProductNameMatch } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
+import { useToast } from "../../contexts/ToastContext";
 import {
   KitDocumentShell,
   useKitKeymap,
@@ -173,6 +175,54 @@ const fld = (label: string, node: React.ReactNode, span?: number) => (
   </label>
 );
 
+/**
+ * #21: حقلٌ صغير «اسم براند + زر إضافة» — يستدعيه موضعان: كرت المنتج (يُلحق
+ * ببراند نفس المنتج المفتوح) واقتراح «هذا موجود» (يُلحق ببراند منتجٍ آخر
+ * طابق الاسم). المنطق كله عند المستدعي عبر `onSubmit`؛ هذا المكوّن حالة
+ * الإدخال المحلية فقط.
+ */
+const AddBrandField: React.FC<{
+  onSubmit: (brandName: string) => Promise<void>;
+  placeholder?: string;
+  buttonLabel?: string;
+}> = ({ onSubmit, placeholder = "اسم البراند (مثال: دانتير)", buttonLabel = "أضف براند" }) => {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const name = value.trim();
+    if (!name || busy) return;
+    setBusy(true);
+    try {
+      await onSubmit(name);
+      setValue("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex gap-2 items-center">
+      <input
+        className="ktra-input flex-1 min-w-[140px]"
+        value={value}
+        placeholder={placeholder}
+        disabled={busy}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }}
+      />
+      <button
+        type="button"
+        disabled={busy || !value.trim()}
+        onClick={() => void submit()}
+        className="ktra-btn ktra-btn-primary shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {busy ? "...جارٍ" : buttonLabel}
+      </button>
+    </div>
+  );
+};
+
 const ITEM_TYPES = [
   { v: "goods", l: "بضاعة" }, { v: "service", l: "خدمات" },
   { v: "work", l: "عمل" }, { v: "asset", l: "أصل" },
@@ -183,6 +233,7 @@ export const ItemForm: React.FC<Props> = ({
   productId, duplicateId, products, onSaved, onCancel, extraActions = [], cancelLabel = "إلغاء",
   initialTab,
 }) => {
+  const toast = useToast();
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
   // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة/أرقام تسلسلية) — يتبع المنتج المعروض.
@@ -190,6 +241,11 @@ export const ItemForm: React.FC<Props> = ({
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // #21: اقتراح «هذا موجود — أضف براند». يُظهَر فقط أثناء تسجيل منتجٍ **جديد**
+  // (currentId فارغ) — فتح منتجٍ محفوظ بالفعل سيطابق نفسه دائماً، وهو تنبيهٌ
+  // بلا فائدة. اقتراحٌ لا منع: لا يمسّ حفظ المنتج الجاري تسجيله بأي شكل.
+  const [nameOffer, setNameOffer] = useState<ProductNameMatch | null>(null);
+  const [offerDismissed, setOfferDismissed] = useState(false);
   const [lastKey, setLastKey] = useState("—");
   const [dsUploading, setDsUploading] = useState(false);
   const datasheetRef = useRef<HTMLDivElement>(null);
@@ -232,6 +288,42 @@ export const ItemForm: React.FC<Props> = ({
     }
     return names.length ? names.join(" ‹ ") : (form.category_name || null);
   }, [form.category, form.category_name, categories]);
+
+  // #21: «هذا موجود — أضف براند؟» — مُؤجَّلٌ (نمط debounce القائم في
+  // ItemsManagement.tsx: setTimeout+clearTimeout بلا مكتبة/hook مخصّص)، فلا
+  // يطلب الخادم مع كل ضغطة مفتاح. يتوقّف تماماً حين تعديل منتجٍ محفوظ — راجع
+  // تعليق `nameOffer` أعلاه.
+  useEffect(() => {
+    if (currentId != null) { setNameOffer(null); return; }
+    const name = form.name_ar.trim() || form.name_en.trim();
+    if (!name) { setNameOffer(null); return; }
+    const t = setTimeout(() => {
+      inventoryApi.checkProductName(name)
+        .then((match) => setNameOffer(match))
+        .catch(() => setNameOffer(null));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [form.name_ar, form.name_en, currentId]);
+
+  // اسمٌ جديد يُلغي رفض الاقتراح السابق — تجاهلٌ لاسمٍ بعينه لا لكل الاقتراحات.
+  useEffect(() => { setOfferDismissed(false); }, [form.name_ar, form.name_en]);
+
+  /**
+   * يُستدعى من موضعين: زرّ «أضف براند» داخل كرت منتجٍ محفوظ (يُلحق ببراند
+   * نفسه)، واقتراح «هذا موجود» أثناء التسجيل (يُلحق ببراند منتجٍ آخر). الردّ
+   * يميّز صراحةً بين تسمية البراند الضمنيّ وإنشاء صفٍّ جديد — لا يُقال «أُضيف
+   * براند» حين كان الفعل الحقيقي تسميةً لصفٍّ قائم.
+   */
+  const submitAddBrand = async (familyId: number, brandName: string): Promise<AddBrandResult> => {
+    const res = await inventoryApi.addBrand({ family_id: familyId, brand: brandName });
+    toast(
+      res.created
+        ? `أُضيف براند جديد «${res.brand}» (منتج رقم ${res.sku}) — برصيدٍ وتكلفةٍ مستقلَّين.`
+        : `سُمّي البراند الضمنيّ «${res.brand}» لنفس الصنف — لم يُنشأ صفٌّ جديد، وتاريخه ورصيده كما هما.`,
+      "success",
+    );
+    return res;
+  };
 
   const uploadDatasheetFile = async (file: File) => {
     setDsUploading(true); setErr(null); setMsg(null);
@@ -517,6 +609,35 @@ export const ItemForm: React.FC<Props> = ({
           onChange={(e) => patch("name_ar", e.target.value)} placeholder="اسم المنتج" />, 2)}
       {fld("اسم المنتج (إنجليزي)", <input className="ktra-input" value={form.name_en}
         onChange={(e) => patch("name_en", e.target.value)} />)}
+      {/* #21: «هذا موجود — أضف براند؟» — اقتراحٌ لا منع. يظهر أثناء تسجيل منتجٍ
+          جديد فقط، ويختفي بمجرّد تجاهله أو تغيير الاسم إلى ما لا يطابق شيئاً. */}
+      {nameOffer && !offerDismissed && (
+        <div className="col-span-3 flex flex-wrap items-center gap-2 rounded border border-amber-400/60 bg-amber-400/10 px-3 py-2 text-sm ktra-text-ink">
+          <span className="flex-1 min-w-[220px]">
+            يوجد منتجٌ مسجَّلٌ بهذا الاسم: «{nameOffer.name_ar || nameOffer.name_en}». أضف براندًا
+            إليه بدل تسجيل منتجٍ منفصل — أو تجاهل هذا إن كان الاسم فعلاً منتجاً آخر.
+          </span>
+          <AddBrandField
+            placeholder="اسم البراند"
+            buttonLabel="أضف براند إلى هذا المنتج"
+            onSubmit={async (brandName) => {
+              try {
+                await submitAddBrand(nameOffer.id, brandName);
+                setNameOffer(null);
+                setForm(blankForm());
+                setCurrentId(null);
+                onSaved();
+              } catch (e: unknown) {
+                toast(e instanceof Error ? e.message : "تعذّر إضافة البراند", "error");
+              }
+            }}
+          />
+          <button type="button" onClick={() => setOfferDismissed(true)}
+            className="shrink-0 text-xs underline ktra-text-soft">
+            تجاهل ومتابعة تسجيل منتجٍ جديد
+          </button>
+        </div>
+      )}
       {fld("التصنيف",
         <CategoryPicker value={form.category} onChange={(id, name) => {
           patch("category", id);
@@ -621,6 +742,24 @@ export const ItemForm: React.FC<Props> = ({
         <ValuePicker value={form.brand} onChange={(b) => patch("brand", b)}
           fetchOptions={inventoryApi.getBrands}
           emptyLabel="— بدون براند —" addPlaceholder="مثال: روك بيلد" addTitle="إضافة براند جديد" />)}
+      {/* #21: هذا الحقل أعلاه يعيد تسمية براند **هذا** الصفّ. «أضف براند» هنا
+          مختلفة تماماً: تُلحق صفّاً (أو تُسمّي الضمنيّ) تحت **نفس المنتج
+          الأب** — برصيدٍ وتكلفةٍ مستقلَّين، بلا حركة مخزون ولا قيد محاسبي.
+          متاحةٌ فقط لمنتجٍ محفوظٍ له أبٌ (كل منتج جديد يُنشأ بأبٍ تلقائياً). */}
+      {currentId != null && insights.profile?.family_id != null &&
+        fld("أضف براند إلى هذا المنتج",
+          <AddBrandField
+            onSubmit={async (brandName) => {
+              const familyId = insights.profile?.family_id;
+              if (familyId == null) return;
+              try {
+                await submitAddBrand(familyId, brandName);
+                insights.reload();
+              } catch (e: unknown) {
+                toast(e instanceof Error ? e.message : "تعذّر إضافة البراند", "error");
+              }
+            }}
+          />, 2)}
       {/* T-REORDER: «الصنف» كان حقلاً خادمياً كاملاً (`variant_group`) بنقطته
           الجاهزة (`products/groups/`) ولا مدخلَ له في أي شاشة — فبقي فارغاً على
           كل منتجٍ في كل شركة، وبفراغه يسقط تجميعُ الموديلات على اسم المنتج: كل

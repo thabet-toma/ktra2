@@ -109,6 +109,24 @@ class ProductFamilyViewSet(viewsets.ReadOnlyModelViewSet):
             return ProductFamily.objects.none()
         return super().get_queryset().filter(tenant=tenant)
 
+    @action(detail=False, methods=['get'], url_path='check-name')
+    def check_name(self, request):
+        """#21: «هذا موجود — أضف براند؟» — اقتراحٌ لا منع. يطابق اسماً
+        مطبَّعاً (`services.find_by_normalized_name`) لا حرفياً، فيلتقط أشهر
+        تنويعات الكتابة العربية (تشكيل/تطويل/مسافات/ألف-همزة) بلا أن يمنع
+        تسجيل منتجٍ آخر بالفعل باسمٍ متشابه."""
+        from .services import find_by_normalized_name
+        tenant = get_tenant(self.request)
+        name = (request.query_params.get('name') or '').strip()
+        if not tenant or not name:
+            return Response({'match': None})
+        match = find_by_normalized_name(ProductFamily.objects.filter(tenant=tenant), name)
+        if not match:
+            return Response({'match': None})
+        return Response({
+            'match': {'id': match.id, 'name_ar': match.name_ar, 'name_en': match.name_en},
+        })
+
 
 class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     # task14 M2 (DEF-A5): ترتيب افتراضي حتمي «الأحدث أولاً» + بحث/فرز/ترقيم خادمي
@@ -581,6 +599,66 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         if not tenant:
             return Response([])
         return Response(self._distinct_values(tenant, 'name_ar'))
+
+    @action(detail=False, methods=['post'], url_path='add-brand')
+    def add_brand(self, request):
+        """#21: يضيف براندًا إلى منتجٍ قائم من داخل شاشة المنتج. أوّل براندٍ
+        صريح يُسمّي البراند الضمنيّ الوحيد بدل أن يُنشئ صفّاً جديداً — انظر
+        `services.add_brand_to_family`. الكتابة تبقى على جانب البراند/المنتج
+        عمداً — لا على `ProductFamilyViewSet` القرائي حصراً."""
+        from .services import add_brand_to_family
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'detail': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+        family_id = request.data.get('family_id')
+        brand_name = (request.data.get('brand') or '').strip()
+        if not family_id:
+            raise serializers.ValidationError({'family_id': 'مطلوب.'})
+        if not brand_name:
+            raise serializers.ValidationError({'brand': 'اسم البراند مطلوب.'})
+        family = ProductFamily.objects.filter(tenant=tenant, id=family_id).first()
+        if not family:
+            return Response({'detail': 'المنتج غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+        sku = (request.data.get('sku') or '').strip() or None
+        if sku and Product.objects.filter(tenant=tenant, sku=sku).exists():
+            raise serializers.ValidationError({'sku': 'رقم المنتج مستخدم مسبقاً لهذه الشركة.'})
+        # T-PLANLIMITS: البراند الثاني فصاعداً **صفُّ منتجٍ جديد** يحتسبه الحدّ —
+        # فبلا هذا الحارس صار هذا الباب طريقاً للالتفاف على حدّ الخطة. وتسميةُ
+        # البراند الضمنيّ لا تُنشئ صفّاً فلا تُحاسَب: الشرط هو وجود براندٍ مُسمّىً
+        # سلفاً تحت الأب، وهو نفس شرط الإنشاء في `add_brand_to_family`.
+        existing = list(Product.objects.filter(family=family).values_list('brand', flat=True))
+        will_create = not (len(existing) == 1 and not (existing[0] or '').strip())
+        if will_create:
+            enforce_limits(tenant, 'inventory.products')
+        try:
+            product, created = add_brand_to_family(
+                family=family, brand_name=brand_name, tenant=tenant, sku=sku,
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                {'brand': exc.messages if hasattr(exc, 'messages') else [str(exc)]}
+            )
+        product_label = product.name_ar or product.name_en or product.sku
+        log_activity(
+            action='create' if created else 'update',
+            entity_type='product',
+            entity_id=product.id,
+            entity_label=product_label,
+            description=(
+                f'أضاف براند «{brand_name}» جديداً تحت «{product_label}»' if created
+                else f'سمّى البراند الضمنيّ «{brand_name}» تحت «{product_label}»'
+            ),
+            request=request,
+        )
+        return Response(
+            {
+                'id': product.id, 'sku': product.sku, 'brand': product.brand,
+                'family_id': product.family_id,
+                'name_ar': product.name_ar, 'name_en': product.name_en,
+                'created': created,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
     @action(detail=False, methods=['get', 'post'], url_path='group-profile')
     def group_profile(self, request):

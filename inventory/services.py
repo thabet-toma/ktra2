@@ -8,7 +8,7 @@ All stock changes go through record_stock_movement() which:
 import logging
 import re
 from decimal import Decimal
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 
 from .models import Product, ProductFamily, StockMovement
@@ -255,6 +255,138 @@ def resolve_family_field(product, field_name: str):
     """
     source = product.family if product.family_id else product
     return getattr(source, field_name)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# #21: «هذا موجود — أضف براند» — قاعدة مطابقة اسمٍ واحدة، وإلحاق براندٍ بأبٍ
+# قائم (لا بديل create_product_with_family الذي يصنع أباً جديداً).
+# ──────────────────────────────────────────────────────────────────────────
+
+_TATWEEL = 'ـ'
+# التشكيل: الفتحة/الضمة/الكسرة/السكون/الشدة/التنوين (U+064B–U+0652) والألف
+# الفوقية (U+0670).
+_ARABIC_DIACRITICS_RE = re.compile(r'[ً-ْٰ]')
+# صور الألف/الهمزة توحَّد إلى ألفٍ عارية، والألف المقصورة إلى ياء، والتاء
+# المربوطة إلى هاء — تطبيعٌ إملائي معياري (نمط مرشِّح Elasticsearch العربي).
+_ARABIC_NORMALIZE_MAP = str.maketrans({
+    'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ٱ': 'ا',
+    'ى': 'ي',
+    'ة': 'ه',
+})
+
+
+def normalize_product_name(name: str | None) -> str:
+    """اسمٌ مُطبَّعٌ لاقتراح «هذا موجود» عند تسجيل منتج (#21).
+
+    يطوي المسافات المزدوجة (نمط `norm_name` في `import_jarabaa.py`)، يُسقط
+    التطويل والتشكيل، ويوحّد صور الألف/الهمزة والألف المقصورة والتاء المربوطة
+    — يمتدّ نمط `_normalize_account_name` (accounting/services.py) بخطوةٍ
+    عربية إضافية، لا يستبدله.
+
+    **عمداً بلا مطابقة صوتية.** الحروف الساكنة لا تُمسّ: «سامسونج» تبقى
+    مختلفة عن «سامسونغ» بعد هذا التطبيع لأن الفرق حرفٌ حقيقي (ج مقابل غ) لا
+    تنويع كتابة — توحيدهما بقاعدة أفضفض كان يُنتج اقتراحاً خاطئاً بلا أساس.
+    """
+    if not name:
+        return ''
+    text = str(name).replace(_TATWEEL, '')
+    text = _ARABIC_DIACRITICS_RE.sub('', text)
+    text = text.translate(_ARABIC_NORMALIZE_MAP)
+    text = ' '.join(text.split())
+    return text.casefold()
+
+
+def build_normalized_name_index(queryset, *, fields=('name_ar', 'name_en')) -> dict:
+    """فهرسُ «اسمٌ مطبَّع ← صفّ» يُبنى **مرّةً** لمن يطابق أسماءً كثيرة.
+
+    التطبيع العربي لا يُنفَّذ في SQL (لا MySQL ولا SQLite تُطبّق الألف/الهمزة
+    والتشكيل)، فالمقارنة بايثونية حتماً. ولذلك `find_by_normalized_name` تمسح
+    مجموعة النتائج كاملةً في كل نداء — مقبولٌ لنداءٍ واحد (شاشة التسجيل)،
+    وكارثةٌ داخل حلقة: تحويل عرضٍ بخمسين بنداً على شركةٍ بـ1490 صنفاً كان
+    يحمّل 74,500 صفّاً ويطبّعها. هذه تبني الفهرس مرّةً فتصير المطابقة قاموسية.
+
+    الأوّل يفوز عند تكرار الاسم المطبَّع — كما في المسح المتتابع تماماً.
+    """
+    index: dict[str, object] = {}
+    for row in queryset.only('id', *fields):
+        for field in fields:
+            value = getattr(row, field, None)
+            if not value:
+                continue
+            key = normalize_product_name(value)
+            if key and key not in index:
+                index[key] = row
+    return index
+
+
+def find_by_normalized_name(queryset, name: str, *, fields=('name_ar', 'name_en')):
+    """قاعدة المطابقة الوحيدة لاقتراح «هذا موجود» (#21) — **موضعان** يستدعيانها
+    لا واحد: شاشة تسجيل المنتج (`ProductFamily`، عبر `check-name`) وتجسيد
+    المنتج المبدئي عند تحويل عرض المورّد (`logistics.services
+    .materialize_quotation_draft_parties`، `Product`). أوّل تطابقٍ بعد
+    التطبيع يُعاد، وإلا `None` — لا استعلام SQL يطبّع عربياً عبر MySQL/SQLite
+    معاً، فالمقارنة بايثونية على أعمدة الاسم فقط (`only`).
+    """
+    target = normalize_product_name(name)
+    if not target:
+        return None
+    for row in queryset.only('id', *fields):
+        for field in fields:
+            value = getattr(row, field, None)
+            if value and normalize_product_name(value) == target:
+                return row
+    return None
+
+
+def add_brand_to_family(*, family, brand_name: str, tenant=None, sku: str | None = None):
+    """يضيف براندًا إلى منتجٍ قائم من داخل شاشة المنتج (#21).
+
+    `create_product_with_family` أداةٌ خاطئة هنا — تصنع أباً **جديداً**. هذه
+    الدالة تُلحق براندًا بأبٍ **قائم**:
+
+    - إن كان للمنتج براندٌ ضمنيٌّ واحدٌ لا يزال بلا اسم (`Product.brand` فارغ)،
+      أوّل براندٍ صريح **يُسمّيه** — تحديثٌ لصفّه القائم فيرث رصيده وتكلفته
+      وحركاته وفواتيره كاملةً، لا صفٌّ جديد يظهر فارغاً بجانب رصيدٍ قديم.
+    - غير ذلك (أوّل براندٍ مُسمّىً بالفعل، أو أكثر من براندٍ تحت الأب) يُنشئ
+      صفّاً جديداً تحت **نفس** الأب — برصيدٍ وتكلفةٍ مستقلَّين (صفر عند
+      الإنشاء)، وبلا أبٍ ثانٍ يُخترع.
+
+    **بلا حركة مخزون ولا قيد محاسبي في الحالتين** — لا نداء هنا لـ
+    `record_stock_movement` ولا `accounting.services.post_journal`.
+    """
+    brand_name = (brand_name or '').strip()
+    if not brand_name:
+        raise ValidationError('اسم البراند مطلوب.')
+    tenant = tenant or family.tenant
+
+    with transaction.atomic():
+        brands = list(
+            Product.objects.select_for_update().filter(family=family).order_by('id')
+        )
+        if len(brands) == 1 and not (brands[0].brand or '').strip():
+            product = brands[0]
+            product.brand = brand_name
+            product.save(update_fields=['brand'])
+            return product, False
+
+        # الثاني فصاعداً: صفٌّ جديدٌ يرث حقول #9 «على المنتج» من الأب — نفس
+        # النسخ الدفاعي الذي يفعله `create_product_with_family` عند الإنشاء.
+        create_kwargs = {}
+        for name in FAMILY_FIELD_NAMES:
+            attr = f'{name}_id' if hasattr(family, f'{name}_id') else name
+            create_kwargs[attr] = getattr(family, attr)
+        create_kwargs['sku'] = sku or generate_next_sku(tenant)
+
+        for _ in range(5):
+            try:
+                with transaction.atomic():
+                    product = Product.objects.create(
+                        tenant=tenant, family=family, brand=brand_name, **create_kwargs,
+                    )
+                return product, True
+            except IntegrityError:
+                create_kwargs['sku'] = generate_next_sku(tenant)
+    raise ValidationError('تعذّر توليد رقم منتج — أعد المحاولة.')
 
 
 def record_stock_movement(
@@ -891,6 +1023,10 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
         'id': p.id,
         'sku': p.sku,
         'name': p.name_ar or p.name_en or p.sku,
+        # #21: يكشف الواجهة على المنتج (الأب) الذي يتبعه هذا البراند — الشرط
+        # الوحيد لعرض «أضف براند» من داخل شاشة المنتج. صفوفٌ يتيمة (ما قبل
+        # #20) تُرجع `None`، وهو ما يخفي الزرّ عندها بلا خطأ.
+        'family_id': p.family_id,
         'brand': (p.brand or '').strip() or None,
         'uom': p.uom_legacy or None,
         'barcode': p.barcode or None,

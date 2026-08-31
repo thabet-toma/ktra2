@@ -39,11 +39,18 @@ def materialize_quotation_draft_parties(quotation, *, user=None):
 
     المطابقة بالاسم أولاً: الاسم الموجود مسبقاً يُعاد استعماله، فلا يتضاعف مورد
     أو منتج لأن العرض كُتب يدوياً. مصدر واحد يستدعيه طُرق التحويل الثلاثة.
+
+    #21: مطابقة المنتج **مطبَّعة** لا حرفية (`inventory.services
+    .find_by_normalized_name`) — نفس قاعدة اقتراح «هذا موجود» في شاشة تسجيل
+    المنتج، موضعٌ ثانٍ لدالّةٍ واحدة لا نسخةٍ ثانية منها.
     """
     from django.db import IntegrityError
 
     from inventory.models import Product
-    from inventory.services import create_product_with_family, generate_next_sku
+    from inventory.services import (
+        build_normalized_name_index, create_product_with_family,
+        normalize_product_name, generate_next_sku,
+    )
     from logistics.models import SupplierQuotation
     from partners.models import Partner
 
@@ -79,6 +86,13 @@ def materialize_quotation_draft_parties(quotation, *, user=None):
 
     # استعلام طازج لا ذاكرة prefetch: المستدعون يجلبون `lines__product` قبل النداء،
     # فالقراءة من الذاكرة تعطي منتجات قديمة بعد الإنشاء.
+    # #21: فهرس الأسماء المطبَّعة يُبنى **مرّةً** لا مرّةً لكل بند — المطابقة
+    # العربية بايثونية حتماً (لا SQL يطبّع الألف/الهمزة)، فمسحٌ داخل الحلقة كان
+    # يحمّل أصناف الشركة كلَّها لكل سطر: عرضٌ بخمسين بنداً على شركةٍ بـ1490
+    # صنفاً = 74,500 صفّاً. ويُحدَّث بما يُنشأ هنا كي لا يتكرّر اسمٌ في العرض نفسه.
+    name_index = build_normalized_name_index(
+        Product.objects.filter(tenant_id=quotation.tenant_id)
+    )
     for line in quotation.lines.select_related('product').all():
         if line.product_id:
             continue
@@ -87,9 +101,7 @@ def materialize_quotation_draft_parties(quotation, *, user=None):
             raise ValidationError(
                 f'بند بلا اسم في العرض {quotation.quotation_number} — أكمل البنود قبل التحويل.'
             )
-        product = Product.objects.filter(
-            tenant_id=quotation.tenant_id, name_ar=name,
-        ).first()
+        product = name_index.get(normalize_product_name(name))
         if product is None:
             # تفرّد SKU يضمنه قيد unique(tenant, sku) — نعيد المحاولة عند السباق
             # كما في مسار إنشاء المنتج العادي. #20: المسار الثاني لإنشاء منتجٍ في
@@ -107,6 +119,7 @@ def materialize_quotation_draft_parties(quotation, *, user=None):
             if product is None:
                 raise ValidationError('تعذّر توليد رقم منتج — أعد المحاولة.')
             created_products.append(product)
+        name_index.setdefault(normalize_product_name(name), product)
         line.product = product
         line.save(update_fields=['product'])
         logger.info(

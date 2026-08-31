@@ -80,6 +80,24 @@ export interface ProductSerialRow {
  */
 export type ProductGroupSelector = { ids?: number[]; category?: number };
 
+/** #21: منتجٌ (عائلة) قائم يطابق الاسم المطبَّع — نتيجة `check-name`. */
+export interface ProductNameMatch {
+  id: number;
+  name_ar: string | null;
+  name_en: string | null;
+}
+
+/** #21: ردّ `products/add-brand/` — `created` يفرّق بين تسمية الضمنيّ وصفٍّ جديد. */
+export interface AddBrandResult {
+  id: number;
+  sku: string;
+  brand: string;
+  family_id: number;
+  name_ar: string | null;
+  name_en: string | null;
+  created: boolean;
+}
+
 /** جسم طلب الكرت المجمّع — يقبل مصفوفة معرّفات كما يقبل المحدِّد الكامل. */
 const groupBody = (
   sel: ProductGroupSelector | number[],
@@ -551,6 +569,33 @@ export const inventoryApi = {
     });
     await handle(res, "deleteProduct");
     invalidatePickerProducts();
+  },
+
+  // ─── #21: «هذا موجود — أضف براند» ───
+  /** اقتراحٌ لا منع: هل يطابق هذا الاسم منتجاً مسجَّلاً بعد تطبيعٍ عربي (لا حرفياً)؟ */
+  checkProductName: async (name: string): Promise<ProductNameMatch | null> => {
+    const q = encodeURIComponent(name);
+    const res = await fetch(`${INV}/product-families/check-name/?name=${q}`, {
+      headers: headers(),
+    });
+    await handle(res, "checkProductName");
+    const data = await res.json();
+    return data?.match ?? null;
+  },
+  /**
+   * يلحق براندًا بمنتجٍ قائم (`family_id`). الردّ يميّز صراحةً بين تسمية
+   * البراند الضمنيّ (`created: false`) وإنشاء صفّ جديد (`created: true`) —
+   * الفارق حقيقة يجب أن تصل المستخدم لا تفصيل تنفيذ يُطوى.
+   */
+  addBrand: async (body: { family_id: number; brand: string; sku?: string }): Promise<AddBrandResult> => {
+    const res = await fetch(`${INV}/products/add-brand/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "addBrand");
+    invalidatePickerProducts();
+    return res.json();
   },
 
   // حذف مرفق داتا شيت محفوظ (SQL + Cloudinary أفضل-جهد على الخادم)

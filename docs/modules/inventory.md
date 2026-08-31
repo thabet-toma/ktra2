@@ -75,6 +75,10 @@ def generate_next_sku(tenant) -> str:  # (140)
 def create_product_with_family(*, tenant=None, tenant_id=None, **fields) -> tuple[ProductFamily, Product]:  # نقطة الإنشاء الموحّدة الوحيدة (task20) — أربعة مسارات حيّة تمرّ من هنا: واجهة المنتجات، وتجسيد عرض المورّد، ومنتج الأجرة في `after_sales`، وجسر المزامنة `bridge`
 def sync_family_from_product(product) -> bool:  # (task20) الأب مرآةٌ تتبع صفّ البراند — اتجاه الكتابة واحدٌ لا اثنان أثناء الانتقال
 def resolve_family_field(product, field_name: str):  # قاعدة التعايش (task20) — من الأب إن وُجد، وإلا من صفّ البراند نفسه
+def normalize_product_name(name) -> str:  # (task21) تطبيعٌ إملائي عربي — تشكيل/تطويل/مسافات/ألف-همزة، بلا مطابقة صوتية
+def find_by_normalized_name(queryset, name, *, fields=('name_ar', 'name_en')):  # (task21) مطابقةٌ واحدة — شاشة التسجيل عبر `check-name`
+def build_normalized_name_index(queryset, *, fields=('name_ar', 'name_en')) -> dict:  # (task21) فهرسٌ يُبنى مرّةً — تجسيد عرض المورّد داخل حلقة البنود
+def add_brand_to_family(*, family, brand_name, tenant=None, sku=None):  # (task21) يلحق براندًا بأبٍ قائم — أوّل براندٍ صريح يُسمّي الضمنيّ (تحديث)، والثاني فصاعداً صفٌّ جديد
 def post_warehouse_transfer(transfer, user=None):  # (1208)
 def unpost_warehouse_transfer(transfer, user=None):  # (1248)
 def post_stocktake(stocktake, user=None):  # (1274)
@@ -110,6 +114,8 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | GET | `products/{id}/serials/` · POST `products/{id}/serials/register/` | (559) · (570) |
 | **POST** | `products/bulk-set-group/` | تعيين «النوع» (`variant_group`) و/أو البراند على منتجاتٍ محدَّدة دفعةً واحدة — `ProductViewSet` (`bulk_set_group`). الحقل الغائب من الجسم لا يُمَسّ، والفارغ يُمحى. يشترط `inventory.item.manage` |
 | **POST** | `products/apply-replenishment/` | تثبيت الحدّين المقترَحين على منتجاتٍ محدَّدة — `ProductViewSet` (`apply_replenishment`). كتابةٌ حقيقية: تشترط `inventory.item.manage` وليست في `read_only_post_actions`، والمحدِّد في **جسم** الطلب |
+| **POST** | `products/add-brand/` | (task21) يضيف براندًا إلى منتجٍ قائم (`{family_id, brand, sku?}`) — `ProductViewSet` (`add_brand`)، عبر `services.add_brand_to_family`. الكتابة على جانب البراند عمداً — لا على `product-families/` القرائي |
+| GET | `product-families/check-name/?name=` | (task21) اقتراح «هذا موجود» — مطابقةٌ مطبَّعة لا حرفية (`services.find_by_normalized_name`)، اقتراحٌ لا منع |
 | POST | `products/generate_barcode/` · `products/generate_serials/` | (522) · (541) |
 | GET | `products/groups/` · `products/brands/` | (468) · (460) |
 | GET/**POST** | `products/group-profile/` · `products/group-ledger/` · `products/group-invoices/` | الكرت المجمّع — المحدِّد في **جسم** الطلب |
@@ -287,6 +293,29 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
   `create_product_with_family` كي لا ينكسر مستهلكٌ قائم يقرأ منها مباشرةً. لا
   تُحذف تلك الأعمدة، ولا تُبنَ فرادةُ `(family, brand)` على فهرسٍ شرطي (MySQL
   لا يدعمه) — لا فرادة من هذا النوع في هذا النطاق أصلاً.
+- **إلحاق براندٍ بأبٍ قائم مختلفٌ عن إنشاء منتجٍ جديد** (task21، #21):
+  `add_brand_to_family` — لا `create_product_with_family` — هي الأداة، لأن
+  الأخيرة تصنع أباً **جديداً**. أوّل براندٍ صريح تحت أبٍ لا يزال بلا اسمٍ على
+  برانده الضمني (`Product.brand` فارغ) **يُسمّيه بتحديث صفّه القائم**، فيرث
+  رصيده وتكلفته وحركاته وفواتيره كاملةً — لا صفّاً جديداً فارغاً بجانب رصيدٍ
+  قديم. الثاني فصاعداً يُنشئ صفّاً جديداً تحت **نفس** الأب برصيدٍ وتكلفةٍ
+  مستقلَّين (صفر). بلا حركة مخزون ولا قيد محاسبي في الحالتين.
+- **قاعدة مطابقة اسمٍ واحدة لاقتراح «هذا موجود»** (task21): `find_by_normalized_name`
+  (فوق `normalize_product_name`) — تطبيعٌ إملائي عربي (تشكيل/تطويل/مسافات/
+  ألف-همزة/ألف مقصورة/تاء مربوطة) **بلا مطابقة صوتية** (سامسونج ≠ سامسونغ عمداً).
+  موضعان يستدعيانها لا نسخةٌ ثانية: `product-families/check-name/` و
+  `logistics.services.materialize_quotation_draft_parties`.
+- **مطابقةٌ واحدة (شاشة التسجيل) تُمسَح بـ`find_by_normalized_name`، ومطابقاتٌ
+  كثيرة داخل حلقة (تجسيد عرض المورّد) تُبنى فهرساً مرّةً بـ
+  `build_normalized_name_index` قبل الحلقة لا داخلها** — التطبيع العربي
+  بايثونيٌّ حتماً (لا SQL يوحّد الألف/الهمزة والتشكيل)، فمسحٌ لكل بند كان
+  يحمّل أصناف الشركة كاملةً لكل سطر (74,500 صفّاً على عرضٍ بخمسين بنداً وشركةٍ
+  بـ1490 صنفاً). يحرسه `logistics/tests/test_quotation_draft_parties.py`
+  (`QuotationMaterializationScanTest`) بعدّ استعلامات المسح، لا بقياس زمن.
+- **`product_profile` يكشف `family_id`** (task21): كرت المنتج في الواجهة
+  (`ItemForm.tsx`) يحتاج أب المنتج المفتوح ليعرض «أضف براند إلى هذا المنتج» —
+  `ProductSerializer` لا يحمل `family` أصلاً، فأُضيف الحقل لناتج `product_profile`
+  بدل توسيع عقد المنتج الكامل (أثرٌ أضيق).
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -301,4 +330,5 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 | `inventory/tests/test_brand_grouping.py` · `test_group_card_performance.py` | تجميع البراندات بـ`group_key`، وثبات عدد الاستعلامات (كان N+1) |
 | `inventory/tests/test_product_api.py` | توليد SKU خادمي، ترتيب/بحث/ترقيم صفحات، عزل الشركات |
 | `inventory/tests/test_product_family.py` | task20: الإنشاء الذرّي (الأب + البراند الضمني) من مساري التسجيل معاً، عزل الشركات على `ProductFamily`، وقاعدة التعايش (مع/بلا أب) |
+| `inventory/tests/test_product_offer_and_brand.py` | task21: اقتراح «هذا موجود» مطبَّعاً لا حرفياً (وعدم منعه)، أوّل براندٍ يُسمّي الضمنيّ والثاني يُنشئ صفّاً تحت نفس الأب، بلا حركة مخزون ولا قيد محاسبي، وعزل الشركات على الاقتراح — والمطابقة نفسها من موضع تجسيد عرض المورّد |
 | `inventory/tests/test_supplier_products.py` | أرقام الموردين: المنتج من مورّدين، ورقمان لمورّد، ومنع الرقم الواحد لمنتجين، والبحث بالرقم بلا تكرار صفّ |

@@ -22,6 +22,8 @@ export interface ProductProfileData {
   id: number;
   sku: string;
   name: string;
+  /** #21: معرّف «المنتج» (الأب) — وجوده شرط عرض «أضف براند» من كرت المنتج. */
+  family_id?: number | null;
   brand?: string | null;
   uom?: string | null;
   barcode?: string | null;

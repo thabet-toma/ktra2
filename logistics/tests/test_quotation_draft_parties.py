@@ -186,3 +186,70 @@ class QuotationDraftPartiesTest(APITestCase):
         )
         self.assertEqual(order.lines.get().product_id, quotation.lines.get().product_id)
         self.assertIsNotNone(order.lines.get().product_id)
+
+
+class QuotationMaterializationScanTest(APITestCase):
+    """#21: مطابقة الاسم المطبَّع لا تُمسَح مرّةً لكل بند.
+
+    التطبيع العربي بايثونيٌّ حتماً (لا SQL يوحّد الألف/الهمزة والتشكيل)، فمسحٌ
+    داخل حلقة البنود يحمّل أصناف الشركة كلَّها لكل سطر — وهو نمط الانفجار الذي
+    عضّ هذا المستودع مراراً. الفهرس يُبنى مرّةً، فعددُ مسحات جدول المنتجات لا
+    يتغيّر بتغيّر عدد البنود.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tenant = Tenant.objects.create(TenantID=982, CompanyName='Scan Co')
+        cls.user = User.objects.create_user(username='scan-quotes', password='x')
+        UserCompanyMembership.objects.create(
+            user=cls.user, tenant=cls.tenant, role='manager',
+        )
+        cls.currency = Currency.objects.create(
+            Code='SCN', Name='Scan currency', IsBaseCurrency=False,
+        )
+        cls.supplier = Partner.objects.create(
+            tenant=cls.tenant, name='مورد المسح', partner_type='Supplier',
+        )
+        Product.objects.bulk_create([
+            Product(tenant=cls.tenant, sku=f'SC-{i}', name_ar=f'صنف قائم {i}')
+            for i in range(60)
+        ])
+
+    def _quotation_with(self, line_count):
+        quotation = SupplierQuotation.objects.create(
+            tenant=self.tenant, supplier=self.supplier,
+            quotation_number=f'SQ-SCAN-{line_count}',
+            quotation_date='2026-07-26', status='accepted',
+            currency=self.currency, exchange_rate=Decimal('1'),
+        )
+        for seq in range(line_count):
+            quotation.lines.create(
+                tenant=self.tenant, seq=seq + 1,
+                name_snapshot=f'صنف يدويّ {line_count}-{seq}',
+                quantity=Decimal('1'), unit_price=Decimal('1'),
+            )
+        return quotation
+
+    def _product_scans(self, quotation):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        from logistics.services import materialize_quotation_draft_parties
+
+        with CaptureQueriesContext(connection) as captured:
+            materialize_quotation_draft_parties(quotation)
+        return sum(
+            1 for q in captured.captured_queries
+            if q['sql'].lstrip().upper().startswith('SELECT')
+            and 'products' in q['sql'].lower()
+            and 'name_ar' in q['sql'].lower()
+        )
+
+    def test_name_scan_does_not_grow_with_line_count(self):
+        few = self._product_scans(self._quotation_with(2))
+        many = self._product_scans(self._quotation_with(8))
+        assert few == many, (
+            f'مسحُ الأسماء تضاعف مع البنود ({few} ← {many}) — الفهرس يُبنى لكل سطر.'
+        )
+        # وليس صفراً: صفرٌ يعني أن الحارس لا يقيس شيئاً أصلاً.
+        assert few >= 1, 'الحارس لم يرصد مسحاً — تحقّق من مطابقة الاستعلام قبل الوثوق به.'

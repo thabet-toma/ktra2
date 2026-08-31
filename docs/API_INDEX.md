@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **562**
+عدد النقاط: **564**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -287,8 +287,10 @@
 | `/api/inventory/categories/` | `CategoryViewSet` | `inventory/views.py` |
 | `/api/inventory/categories/{pk}/` | `CategoryViewSet` | `inventory/views.py` |
 | `/api/inventory/product-families/` | `ProductFamilyViewSet` | `inventory/views.py` |
+| `/api/inventory/product-families/check-name/` | `ProductFamilyViewSet` | `inventory/views.py` |
 | `/api/inventory/product-families/{pk}/` | `ProductFamilyViewSet` | `inventory/views.py` |
 | `/api/inventory/products/` | `ProductViewSet` | `inventory/views.py` |
+| `/api/inventory/products/add-brand/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/apply-replenishment/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/brands/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/bulk-set-group/` | `ProductViewSet` | `inventory/views.py` |
