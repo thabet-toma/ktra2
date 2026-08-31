@@ -122,3 +122,19 @@
 - الملفات في `frontend_v2/` مباشرةً (`components/`، `services/`، `utils/`) — لا وجود لـ`src/`
 - استخدم `restApi.ts` كـ base client
 - CSS عبر Tailwind فقط — لا inline styles
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+القضايا في GitHub Issues لمستودع `thabet-toma/ktra2` عبر أداة `gh`. راجع `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+التسميات الافتراضية الخمس كما هي: `needs-triage` · `needs-info` · `ready-for-agent` · `ready-for-human` · `wontfix`. راجع `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+سياق واحد (single-context): `ARCHITECTURE.md` + `docs/modules/` وقرارات معمارية في `docs/decisions/` (لا `docs/adr/`). راجع `docs/agents/domain.md`.
