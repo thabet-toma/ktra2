@@ -203,3 +203,101 @@ class AutoReorderReportVisibilityTest(APITestCase):
         skus = {r["sku"] for r in data["rows"]}
         assert "AUTO-DEAD" in skus, skus
         assert "AUTO-COVERED" not in skus, skus   # مغطّىً لا راكد — لا ينتمي لهذا الفلتر
+
+
+class StaleForecastNoticeTest(APITestCase):
+    """#34/ط5: تنبّؤٌ عمره أحد عشر يوماً ⇒ تحذيرٌ فوق الجدول؛ عمره ثلاثة أيام ⇒
+    لا تحذير. العلاج الممنوع (إعادة الحساب من التقرير نفسه) غير موجودٍ هنا
+    أصلاً — التقرير يقرأ `computed_at` المخزَّن ولا يستدعي أمر الحساب أبداً."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="stale_notice", password="x")
+        cls.tenant = create_company("شركة تحذير الأرقام القديمة", cls.user)
+        cls.product = Product.objects.create(
+            tenant=cls.tenant, sku="STALE-1", name_ar="صنف تلقائي",
+            quantity_on_hand=Decimal("0"), reorder_mode=Product.REORDER_MODE_AUTO,
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+
+    def _forecast_aged(self, days):
+        from django.utils import timezone
+
+        from inventory.models import ProductDemandForecast
+
+        row = ProductDemandForecast.objects.create(
+            tenant=self.tenant, product=self.product,
+            level=Decimal("5"), trend=Decimal("0"), mad=Decimal("0"),
+            weeks_observed=10, last_week_start=datetime.date.today(),
+        )
+        # `computed_at` عمودٌ `auto_now` — `.update()` وحدها تتجاوزه لمحاكاة
+        # تنبّؤٍ قديم فعلاً بلا انتظار أسبوعٍ حقيقي.
+        ProductDemandForecast.objects.filter(pk=row.pk).update(
+            computed_at=timezone.now() - datetime.timedelta(days=days),
+        )
+
+    def test_eleven_day_old_forecast_shows_a_notice(self):
+        self._forecast_aged(11)
+        data = _run(self.client, "stock-replenishment", self.tenant.TenantID)
+        assert data["notice"], data
+
+    def test_three_day_old_forecast_shows_no_notice(self):
+        self._forecast_aged(3)
+        data = _run(self.client, "stock-replenishment", self.tenant.TenantID)
+        assert data["notice"] is None, data["notice"]
+
+    def test_no_forecast_at_all_shows_no_notice(self):
+        """الأمر لم يُشغَّل بعد على هذه الشركة إطلاقاً — لا رقم لقياس قِدَمه."""
+        data = _run(self.client, "stock-replenishment", self.tenant.TenantID)
+        assert data["notice"] is None, data["notice"]
+
+    def test_other_reports_are_not_affected_by_the_notice_field(self):
+        """الحقل اختياريٌّ (`ReportSpec.notice=None` افتراضاً) — تقريرٌ لا
+        يعلنه يعود بـ`None` بلا أثر."""
+        self._forecast_aged(11)
+        data = _run(self.client, "low-stock", self.tenant.TenantID)
+        assert data.get("notice") is None
+
+
+class SupplierMoqReportVisibilityTest(APITestCase):
+    """#34/ط9: علامة رفع الكمية إلى حدّ المورّد الأدنى تظهر في صفّ التقرير."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from inventory.models import SupplierProduct
+        from partners.models import Partner
+
+        cls.user = User.objects.create_user(username="moq_report", password="x")
+        cls.tenant = create_company("شركة تقرير حدّ المورّد", cls.user)
+        cls.today = datetime.date.today()
+
+        cls.product = Product.objects.create(
+            tenant=cls.tenant, sku="MOQ-REPORT-1", name_ar="صنفٌ بحدّ مورّد",
+            quantity_on_hand=Decimal("50"),
+        )
+        StockMovement.objects.create(
+            tenant=cls.tenant, product=cls.product, movement_type="IN",
+            quantity=Decimal("1000"), movement_date=cls.today - datetime.timedelta(days=89),
+        )
+        for week in range(1, 7):
+            StockMovement.objects.create(
+                tenant=cls.tenant, product=cls.product, movement_type="OUT",
+                quantity=Decimal("14"), movement_date=cls.today - datetime.timedelta(days=week * 7),
+            )
+        cls.supplier = Partner.objects.create(
+            tenant=cls.tenant, name="مورّد التقرير", partner_type="Supplier")
+        SupplierProduct.objects.create(
+            tenant=cls.tenant, supplier=cls.supplier, product=cls.product,
+            supplier_sku="RPT-SKU", min_order_qty=Decimal("50"),
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+
+    def test_raised_row_carries_a_visible_note(self):
+        data = _run(self.client, "stock-replenishment", self.tenant.TenantID)
+        row = next(r for r in data["rows"] if r["sku"] == "MOQ-REPORT-1")
+        assert row["moq_note"], row
+        assert "50" in row["moq_note"]

@@ -8,13 +8,15 @@ Scheduler) يستدعي هذا الأمر مرّةً في الأسبوع. مُع
     python manage.py recompute_demand_forecast              # كل الشركات
     python manage.py recompute_demand_forecast --tenant 3    # شركةٌ واحدة
 
-لا شيء يقرأ الجدول بعد هذا الأمر في هذه التذكرة — التقرير (#33) يُوصَل لاحقاً.
+تقرير «تجديد المخزون» (#33) يقرأ ما يكتبه هذا الأمر لأصناف `auto`. α/β وعمق
+السلسلة الأسبوعية مقابض لكل شركة (`logistics.PurchaseSettings` — #34)، لا
+ثوابت وحدة.
 """
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand
 
-from core.replenishment import holt_forecast, weekly_demand_series
+from core.replenishment import holt_forecast, replenishment_params, weekly_demand_series
 from inventory.models import ProductDemandForecast
 
 #: سقف دفعة الكتابة الواحدة — كافٍ لتغطية كتالوج شركة كاملة بنداءٍ واحد
@@ -23,8 +25,16 @@ BATCH_SIZE = 2000
 
 
 def _recompute_tenant(tenant_id: int) -> int:
-    """يكتب/يحدّث سلسلة كل منتجٍ له حركةٌ في هذه الشركة. يُعيد عدد الصفوف المكتوبة."""
-    series, last_week = weekly_demand_series(tenant_id)
+    """يكتب/يحدّث سلسلة كل منتجٍ له حركةٌ في هذه الشركة. يُعيد عدد الصفوف المكتوبة.
+
+    #34: α/β وعمق السلسلة مقابض لكل شركة (`logistics.PurchaseSettings`) لا
+    ثوابت وحدة — الأمر يشغَّل لكل شركةٍ على حدة أصلاً، فقراءة إعداداتها هنا
+    لا تضيف استعلاماً لكل منتج، استعلامٌ واحد للتشغيل كلّه.
+    """
+    params = replenishment_params(tenant_id)
+    series, last_week = weekly_demand_series(
+        tenant_id, history_weeks=params.forecast_history_weeks,
+    )
     if not series:
         return 0
 
@@ -38,7 +48,7 @@ def _recompute_tenant(tenant_id: int) -> int:
     to_update = []
     to_create = []
     for product_id, weekly in series.items():
-        result = holt_forecast(weekly)
+        result = holt_forecast(weekly, alpha=params.forecast_alpha, beta=params.forecast_beta)
         row = existing.get(product_id)
         if row is not None:
             row.level = result["level"]

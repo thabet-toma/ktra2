@@ -597,6 +597,11 @@ export const ReportRunnerPage: React.FC = () => {
   const content = (
     <>
       {error && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{error}</div>}
+      {result?.notice && (
+        <div className="ktra-banner ktra-banner--warn" style={{ marginBottom: "8px" }}>
+          {result.notice}
+        </div>
+      )}
       {result?.truncated && (
         <div className="ktra-banner ktra-banner--warn" style={{ marginBottom: "8px" }}>
           التقرير أكبر من أن يُعرض كاملاً: ظهر أول {result.rows.length} سطر من{" "}

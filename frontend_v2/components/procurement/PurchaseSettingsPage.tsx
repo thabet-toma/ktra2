@@ -45,6 +45,14 @@ const PurchaseSettingsPage: React.FC = () => {
   const [allowEditReceipt, setAllowEditReceipt] = useState(true);
   // T-SERIAL: نمط إدخال الرقم التسلسلي في بنود الشراء.
   const [serialMode, setSerialMode] = useState<SerialEntryMode>("off");
+  // #34: المقابض السبعة لمحرّك التجديد — رقمان قائمان وخمسة تضبط تنبّؤ هولت.
+  const [leadTimeDays, setLeadTimeDays] = useState("14");
+  const [reviewPeriodDays, setReviewPeriodDays] = useState("30");
+  const [forecastAlpha, setForecastAlpha] = useState("0.25");
+  const [forecastBeta, setForecastBeta] = useState("0.15");
+  const [forecastHistoryWeeks, setForecastHistoryWeeks] = useState("26");
+  const [forecastTrendCapRatio, setForecastTrendCapRatio] = useState("0.33");
+  const [forecastSafetyFactor, setForecastSafetyFactor] = useState("1.28");
   const [accounts, setAccounts] = useState<AccountOpt[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -65,6 +73,13 @@ const PurchaseSettingsPage: React.FC = () => {
       setAllowStandalone(s.allow_standalone_receipt !== false);
       setAllowEditReceipt(s.allow_edit_receipt !== false);
       setSerialMode(s.serial_entry_mode || "off");
+      setLeadTimeDays(String(s.default_lead_time_days ?? 14));
+      setReviewPeriodDays(String(s.review_period_days ?? 30));
+      setForecastAlpha(s.forecast_alpha ?? "0.25");
+      setForecastBeta(s.forecast_beta ?? "0.15");
+      setForecastHistoryWeeks(String(s.forecast_history_weeks ?? 26));
+      setForecastTrendCapRatio(s.forecast_trend_cap_ratio ?? "0.33");
+      setForecastSafetyFactor(s.forecast_safety_factor ?? "1.28");
       setAccounts(accs || []);
     } catch (e) {
       setBanner({ ok: false, msg: e instanceof Error ? e.message : String(e) });
@@ -90,6 +105,13 @@ const PurchaseSettingsPage: React.FC = () => {
         allow_standalone_receipt: allowStandalone,
         allow_edit_receipt: allowEditReceipt,
         serial_entry_mode: serialMode,
+        default_lead_time_days: Number(leadTimeDays) || 14,
+        review_period_days: Number(reviewPeriodDays) || 30,
+        forecast_alpha: forecastAlpha,
+        forecast_beta: forecastBeta,
+        forecast_history_weeks: Number(forecastHistoryWeeks) || 26,
+        forecast_trend_cap_ratio: forecastTrendCapRatio,
+        forecast_safety_factor: forecastSafetyFactor,
       });
       setBanner({ ok: true, msg: "حُفظت إعدادات الشراء بنجاح." });
     } catch (e) {
@@ -100,6 +122,8 @@ const PurchaseSettingsPage: React.FC = () => {
   }, [
     strategy, cashAccount, receiveOnPost, receiptLabel, standaloneLabel,
     allowStandalone, allowEditReceipt, serialMode,
+    leadTimeDays, reviewPeriodDays, forecastAlpha, forecastBeta,
+    forecastHistoryWeeks, forecastTrendCapRatio, forecastSafetyFactor,
   ]);
 
   const actions: KitToolbarAction[] = [
@@ -288,6 +312,130 @@ const PurchaseSettingsPage: React.FC = () => {
                 placeholder="— لا شيء —"
                 title="اختيار الصندوق / البنك"
               />
+            </div>
+          </div>
+
+          {/* #34: المقابض السبعة لمحرّك التجديد — رقمان قائمان (المهلة/المراجعة)
+              وخمسة تضبط تنبّؤ هولت والمسار التلقائي (ط11 على خريطة T-REORDER). */}
+          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+            <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">
+              مقابض محرّك التجديد التلقائي
+            </h3>
+            <p className="text-sm text-[var(--ktra-ink-soft)] mb-3 flex items-start gap-1">
+              <Info className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                تحكم في حساب البيع الأسبوعي والاتجاه وكمية الطلب المقترحة للأصناف
+                الموضوعة على «تلقائي». القيم الافتراضية تناسب أغلب الحالات — عدّلها
+                فقط إن شعرت أن الاقتراحات بطيئة بالتفاعل أو شديدة الحساسية.
+              </span>
+            </p>
+            <div className="grid sm:grid-cols-2 gap-3 max-w-2xl">
+              <label className="block">
+                <span className="block text-sm text-[var(--ktra-ink-soft)] mb-1">
+                  حساسية النظام للجديد (α)
+                </span>
+                <input
+                  type="number" step="0.01" min="0.01" max="0.99"
+                  className="ktra-input w-full"
+                  disabled={loading}
+                  value={forecastAlpha}
+                  onChange={(e) => setForecastAlpha(e.target.value)}
+                />
+                <span className="block text-xs text-[var(--ktra-ink-soft)] mt-1">
+                  لو حسّيته بطيء بالتفاعل زِدها، ولو بيقفز مع كل طلبية شاذّة قلّلها.
+                </span>
+              </label>
+              <label className="block">
+                <span className="block text-sm text-[var(--ktra-ink-soft)] mb-1">
+                  حساسية الاتجاه (β)
+                </span>
+                <input
+                  type="number" step="0.01" min="0.01" max="0.99"
+                  className="ktra-input w-full"
+                  disabled={loading}
+                  value={forecastBeta}
+                  onChange={(e) => setForecastBeta(e.target.value)}
+                />
+                <span className="block text-xs text-[var(--ktra-ink-soft)] mt-1">
+                  نفس فكرة حساسية الجديد، لكن لسرعة تغيّر الاتجاه (صاعد/نازل) نفسه.
+                </span>
+              </label>
+              <label className="block">
+                <span className="block text-sm text-[var(--ktra-ink-soft)] mb-1">
+                  كم أسبوعاً يرجع للوراء
+                </span>
+                <input
+                  type="number" step="1" min="6"
+                  className="ktra-input w-full"
+                  disabled={loading}
+                  value={forecastHistoryWeeks}
+                  onChange={(e) => setForecastHistoryWeeks(e.target.value)}
+                />
+                <span className="block text-xs text-[var(--ktra-ink-soft)] mt-1">
+                  طول السلسلة الأسبوعية التي يبني عليها الاتجاه — أقصر منها لا يكفي
+                  ليستقرّ.
+                </span>
+              </label>
+              <label className="block">
+                <span className="block text-sm text-[var(--ktra-ink-soft)] mb-1">
+                  سقف الاتجاه الصاعد (نسبة من البيع الأسبوعي)
+                </span>
+                <input
+                  type="number" step="0.01" min="0.01"
+                  className="ktra-input w-full"
+                  disabled={loading}
+                  value={forecastTrendCapRatio}
+                  onChange={(e) => setForecastTrendCapRatio(e.target.value)}
+                />
+                <span className="block text-xs text-[var(--ktra-ink-soft)] mt-1">
+                  يمنع بيعةً شاذّة واحدة من مضاعفة الحدّ المقترَح.
+                </span>
+              </label>
+              <label className="block">
+                <span className="block text-sm text-[var(--ktra-ink-soft)] mb-1">
+                  حجم هامش الأمان
+                </span>
+                <input
+                  type="number" step="0.01" min="0.01"
+                  className="ktra-input w-full"
+                  disabled={loading}
+                  value={forecastSafetyFactor}
+                  onChange={(e) => setForecastSafetyFactor(e.target.value)}
+                />
+                <span className="block text-xs text-[var(--ktra-ink-soft)] mt-1">
+                  كلّما زاد اتّسع مخزون الأمان مقابل تذبذب دقّة التوقّعات السابقة.
+                </span>
+              </label>
+              <label className="block">
+                <span className="block text-sm text-[var(--ktra-ink-soft)] mb-1">
+                  مهلة التوريد الافتراضية (يوم)
+                </span>
+                <input
+                  type="number" step="1" min="1"
+                  className="ktra-input w-full"
+                  disabled={loading}
+                  value={leadTimeDays}
+                  onChange={(e) => setLeadTimeDays(e.target.value)}
+                />
+                <span className="block text-xs text-[var(--ktra-ink-soft)] mt-1">
+                  تُستعمل حين لا يكفي سجلّ الطلبيات لاشتقاق مهلة المورّد فعلياً.
+                </span>
+              </label>
+              <label className="block">
+                <span className="block text-sm text-[var(--ktra-ink-soft)] mb-1">
+                  فترة المراجعة (يوم)
+                </span>
+                <input
+                  type="number" step="1" min="1"
+                  className="ktra-input w-full"
+                  disabled={loading}
+                  value={reviewPeriodDays}
+                  onChange={(e) => setReviewPeriodDays(e.target.value)}
+                />
+                <span className="block text-xs text-[var(--ktra-ink-soft)] mt-1">
+                  كل كم يوماً تراجع الطلب — تحدّد الحدّ الأقصى المقترَح فوق نقطة الطلب.
+                </span>
+              </label>
             </div>
           </div>
         </div>

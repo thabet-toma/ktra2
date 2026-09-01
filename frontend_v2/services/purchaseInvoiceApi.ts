@@ -28,6 +28,15 @@ export interface PurchaseSettingsDto {
   allow_edit_receipt: boolean;
   /** T-SERIAL: نمط إدخال الرقم التسلسلي في بنود فاتورة الشراء (الافتراضي «معطّل»). */
   serial_entry_mode: SerialEntryMode;
+  /** #34: المقابض السبعة لمحرّك التجديد (ط11 على خريطة T-REORDER) — رقمان
+   *  قائمان (مهلة/مراجعة) وخمسة جديدة تضبط تنبّؤ هولت والمسار التلقائي. */
+  default_lead_time_days: number;
+  review_period_days: number;
+  forecast_alpha: string;
+  forecast_beta: string;
+  forecast_history_weeks: number;
+  forecast_trend_cap_ratio: string;
+  forecast_safety_factor: string;
 }
 
 /** سند صرف مورد كما يعيده الخادم (مع التوزيع والمتبقّي «على الحساب»). */

@@ -157,14 +157,44 @@ def _ceil(value: Decimal) -> int:
 
 
 class ReplenishmentParams:
-    """بارامترات الشركة — من `logistics.PurchaseSettings`، وإلا الافتراضات."""
+    """بارامترات الشركة — من `logistics.PurchaseSettings`، وإلا الافتراضات.
 
-    __slots__ = ("window_days", "default_lead_time_days", "review_period_days")
+    #34/ط11: المقابض الخمسة الجديدة (`forecast_*`) تنضمّ هنا إلى الثلاثة
+    القائمة — نفس المُحمِّل الوحيد لبارامترات الشركة، لا قارئ إعداداتٍ ثانٍ.
+    الافتراضات هنا **مطابقة** لما كان ثوابت وحدة قبل هذه التذكرة (`HOLT_ALPHA`
+    وأخواتها أسفل الملف) كي تبقى شركةٌ بلا صفّ إعدادات، أو صفٌّ قديم من قبل
+    هذه الهجرة، على نفس الأرقام حرفياً.
+    """
 
-    def __init__(self, window_days=90, default_lead_time_days=14, review_period_days=30):
+    __slots__ = (
+        "window_days", "default_lead_time_days", "review_period_days",
+        "forecast_alpha", "forecast_beta", "forecast_history_weeks",
+        "forecast_trend_cap_ratio", "forecast_safety_factor",
+    )
+
+    def __init__(self, window_days=90, default_lead_time_days=14, review_period_days=30,
+                 forecast_alpha=None, forecast_beta=None, forecast_history_weeks=26,
+                 forecast_trend_cap_ratio=None, forecast_safety_factor=None):
         self.window_days = max(int(window_days or 90), 7)
         self.default_lead_time_days = max(int(default_lead_time_days or 14), 1)
         self.review_period_days = max(int(review_period_days or 30), 1)
+        # α/β بين صفر وواحد حصراً (شرط قبول #34) — قيمةٌ فاسدة تتجمّد على
+        # الافتراضي بدل أن تُسقط الحساب كلّه.
+        alpha = _dec(forecast_alpha) if forecast_alpha not in (None, "") else Decimal("0.25")
+        self.forecast_alpha = alpha if ZERO < alpha < Decimal("1") else Decimal("0.25")
+        beta = _dec(forecast_beta) if forecast_beta not in (None, "") else Decimal("0.15")
+        self.forecast_beta = beta if ZERO < beta < Decimal("1") else Decimal("0.15")
+        self.forecast_history_weeks = max(int(forecast_history_weeks or 26), 6)
+        cap_ratio = (
+            _dec(forecast_trend_cap_ratio) if forecast_trend_cap_ratio not in (None, "")
+            else Decimal("0.33")
+        )
+        self.forecast_trend_cap_ratio = cap_ratio if cap_ratio > ZERO else Decimal("0.33")
+        safety_factor = (
+            _dec(forecast_safety_factor) if forecast_safety_factor not in (None, "")
+            else Decimal("1.28")
+        )
+        self.forecast_safety_factor = safety_factor if safety_factor > ZERO else Decimal("1.28")
 
 
 def replenishment_params(tenant_id: int) -> ReplenishmentParams:
@@ -172,6 +202,8 @@ def replenishment_params(tenant_id: int) -> ReplenishmentParams:
 
     row = PurchaseSettings.objects.filter(tenant_id=tenant_id).values(
         "replenishment_window_days", "default_lead_time_days", "review_period_days",
+        "forecast_alpha", "forecast_beta", "forecast_history_weeks",
+        "forecast_trend_cap_ratio", "forecast_safety_factor",
     ).first()
     if not row:
         return ReplenishmentParams()
@@ -179,6 +211,11 @@ def replenishment_params(tenant_id: int) -> ReplenishmentParams:
         row["replenishment_window_days"],
         row["default_lead_time_days"],
         row["review_period_days"],
+        row["forecast_alpha"],
+        row["forecast_beta"],
+        row["forecast_history_weeks"],
+        row["forecast_trend_cap_ratio"],
+        row["forecast_safety_factor"],
     )
 
 
@@ -253,13 +290,14 @@ def _demand_profiles(tenant_id: int, product_ids, window_start, today) -> dict:
 
 # ── السلسلة الأسبوعية وتنبّؤ هولت: T-REORDER #32 ─────────────────────────
 
-#: معاملا هولت — ثابتان في هذه التذكرة؛ تحويلهما لمقبضين في الإعدادات مؤجَّل
-#: لتذكرة لاحقة (#34) فلا يُستبقان هنا.
+#: معاملا هولت الافتراضيان — #34: مقبضان في `logistics.PurchaseSettings`
+#: (`forecast_alpha`/`forecast_beta`) لكل شركة، وهذان الثابتان يبقيان
+#: افتراض `holt_forecast` نفسها كي تُختبر بالورقة والقلم بلا شركةٍ ولا إعداد.
 HOLT_ALPHA = Decimal("0.25")
 HOLT_BETA = Decimal("0.15")
-#: نافذة السلسلة الأسبوعية — ستة أشهر. منفصلة عمداً عن `window_days` أعلاه
-#: (تلك تقيس معدّلاً فيكفيها تسعون يوماً، وهذه تحتاج سلسلةً طويلة كي يستقرّ
-#: الاتجاه — ط11 على الخريطة).
+#: نافذة السلسلة الأسبوعية الافتراضية — ستة أشهر، ومقبضها `forecast_history_weeks`
+#: (#34). منفصلة عمداً عن `window_days` أعلاه (تلك تقيس معدّلاً فيكفيها تسعون
+#: يوماً، وهذه تحتاج سلسلةً طويلة كي يستقرّ الاتجاه — ط11 على الخريطة).
 FORECAST_HISTORY_WEEKS = 26
 #: أقلّ من ستة أسابيع مكتملة: بلا اتجاه (ط1) — المستوى متوسط آخر أسبوعين فقط.
 MIN_TREND_HISTORY_WEEKS = 6
@@ -268,16 +306,15 @@ MIN_MAD_SAMPLES = 4
 
 # ── #33: المسار التلقائي — من المستوى/الاتجاه المخزَّنين إلى حدٍّ وكمية ────
 #: عاملُ تحويل الخطأ المطلق (MAD) إلى انحرافٍ معياري تقديري (ط7 على الخريطة).
+#: ليس أحد المقابض السبعة (#34) — جزءٌ من صيغة التحويل نفسها لا إعدادٍ يُضبَط.
 MAD_TO_SIGMA = Decimal("1.25")
-#: عامل ثقةٍ (z) يضرب σ لإنتاج مخزون الأمان — ثابتٌ في هذه التذكرة؛ تحويله
-#: لمقبضٍ في الإعدادات مهمّة #34، فلا يُستبَق هنا.
-SAFETY_Z_FACTOR = Decimal("1.28")
-#: سقف الاتجاه الصاعد: الزيادة الأسبوعية لا تتجاوز المستوى ÷ 3 (ط8) — النازل
-#: بلا سقف عمداً، فخطأ المبالغة صعوداً يكلّف بضاعةً راكدة والنازل يصحّحه السوق.
-TREND_CAP_DIVISOR = Decimal("3")
+#: عامل الثقة (z) وسقف الاتجاه الصاعد كانا ثابتين هنا؛ صارا مقبضين في
+#: `logistics.PurchaseSettings` (`forecast_safety_factor`/`forecast_trend_cap_ratio`،
+#: #34) يُقرآن عبر `ReplenishmentParams` — لا ثابت وحدة بعد الآن.
 
 
-def holt_forecast(weekly_demand: list) -> dict:
+def holt_forecast(weekly_demand: list, *, alpha: Decimal = HOLT_ALPHA,
+                  beta: Decimal = HOLT_BETA) -> dict:
     """هولت (تنعيم أسّي مزدوج) على سلسلة صافي طلبٍ أسبوعية — دالّة صافية بلا
     استعلام، فتُختبر بالورقة والقلم كما `suggest_levels` أعلاه.
 
@@ -285,8 +322,13 @@ def holt_forecast(weekly_demand: list) -> dict:
     الصفر عنصرٌ لا فجوة) وخاليةً من الأسبوع الجاري غير المكتمل — هذا شرط
     المستدعي (`_weekly_series` أسفله) لا هذه الدالّة.
 
-        L_t = α·y_t + (1−α)·(L_{t−1} + T_{t−1})      α = 0.25
-        T_t = β·(L_t − L_{t−1}) + (1−β)·T_{t−1}       β = 0.15
+        L_t = α·y_t + (1−α)·(L_{t−1} + T_{t−1})      α = 0.25 افتراضياً
+        T_t = β·(L_t − L_{t−1}) + (1−β)·T_{t−1}       β = 0.15 افتراضياً
+
+    `alpha`/`beta`: مقبضا #34 (`forecast_alpha`/`forecast_beta` في
+    `logistics.PurchaseSettings`) — المستدعي (`recompute_demand_forecast`)
+    يمرّرهما لكل شركة؛ الافتراضان أعلاه يُبقيان هذه الدالّة قابلةً للاختبار
+    بلا شركة، ومطابقين لِما كانا ثابتين قبل هذه التذكرة.
 
     **التهيئة**: `L` يبدأ متوسط أوّل أسبوعين (الأسبوع الوحيد إن كان هذا كل
     السجلّ)، و`T` يبدأ صفراً. **أقلّ من ست أسابيع مكتملة**: لا اتجاه — المستوى
@@ -310,8 +352,8 @@ def holt_forecast(weekly_demand: list) -> dict:
     for actual in weekly_demand[2:]:
         forecast = level + trend
         errors.append(abs(actual - forecast))
-        new_level = HOLT_ALPHA * actual + (Decimal("1") - HOLT_ALPHA) * (level + trend)
-        trend = HOLT_BETA * (new_level - level) + (Decimal("1") - HOLT_BETA) * trend
+        new_level = alpha * actual + (Decimal("1") - alpha) * (level + trend)
+        trend = beta * (new_level - level) + (Decimal("1") - beta) * trend
         level = new_level
 
     if n < MIN_TREND_HISTORY_WEEKS:
@@ -399,19 +441,21 @@ def _weekly_series(tenant_id, product_ids, window_start, last_week_start) -> dic
     return series
 
 
-def weekly_demand_series(tenant_id: int, product_ids=None, *, today=None):
+def weekly_demand_series(tenant_id: int, product_ids=None, *, today=None,
+                         history_weeks: int = FORECAST_HISTORY_WEEKS):
     """(سلسلةٌ أسبوعية لكل منتج، اثنين آخر أسبوعٍ مكتمل) — نقطة الدخول العامة
     لهذا القسم.
 
-    النافذة `FORECAST_HISTORY_WEEKS` أسبوعاً تنتهي عند آخر أسبوعٍ مكتمل، لا
-    اليوم: الأسبوع الجاري ثلاثة أيامٍ منه فقط تكفي لسحب المستوى للأسفل في كل
-    تشغيل لو دخلت السلسلة (الحرف ب في التذكرة).
+    النافذة `history_weeks` أسبوعاً (مقبض #34 — `forecast_history_weeks` في
+    `logistics.PurchaseSettings`، افتراضها `FORECAST_HISTORY_WEEKS`) تنتهي
+    عند آخر أسبوعٍ مكتمل، لا اليوم: الأسبوع الجاري ثلاثة أيامٍ منه فقط تكفي
+    لسحب المستوى للأسفل في كل تشغيل لو دخلت السلسلة (الحرف ب في التذكرة).
     """
     from django.utils import timezone
 
     today = today or timezone.localdate()
     last_week = last_completed_week_start(today)
-    window_start = last_week - datetime.timedelta(days=7 * (FORECAST_HISTORY_WEEKS - 1))
+    window_start = last_week - datetime.timedelta(days=7 * (int(history_weeks) - 1))
     return _weekly_series(tenant_id, product_ids, window_start, last_week), last_week
 
 
@@ -517,6 +561,28 @@ def _on_order_map(tenant_id: int, product_ids=None) -> dict:
     }
 
 
+def _moq_map(tenant_id: int, product_ids=None, supplier_id=None) -> dict:
+    """حدّ المورّد الأدنى المطبَّق لكل منتج — استعلامٌ واحد للشركة كلّها (#34/ط9).
+
+    فلتر المورّد (`supplier_id`) مُعطىً ⇒ حدّ **ذاك** المورّد وحده. غيابه ⇒ أدنى
+    حدٍّ بين موردي المنتج المرتبطين جميعاً — الأقلّ تقييداً، لأن المالك قد يشتري
+    من أيّهم طلب أقل («الأقلّ تقييداً» ط9). منتجٌ بلا مورّدٍ مرتبط، أو مورّدوه بلا
+    حدٍّ مرصود، غائبٌ عن القاموس عمداً — يقرأه `_product_row` كـ`moq=None` فلا
+    يتأثّر إطلاقاً.
+    """
+    from inventory.models import SupplierProduct
+
+    qs = SupplierProduct.objects.filter(tenant_id=tenant_id, min_order_qty__isnull=False)
+    if product_ids is not None:
+        qs = qs.filter(product_id__in=product_ids)
+    if supplier_id:
+        qs = qs.filter(supplier_id=supplier_id)
+    return {
+        row["product_id"]: row["moq"]
+        for row in qs.values("product_id").annotate(moq=Min("min_order_qty"))
+    }
+
+
 # ── الحساب ────────────────────────────────────────────────────────────
 
 def _history_days(first_movement, window_start, today) -> int:
@@ -533,7 +599,7 @@ def _history_days(first_movement, window_start, today) -> int:
 
 def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
                  on_order, params, window_start, today, family_totals=None,
-                 forecast=None) -> dict:
+                 forecast=None, moq=None) -> dict:
     from inventory.services import (
         family_display_name, product_display_name, product_group_key,
     )
@@ -579,16 +645,18 @@ def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
             level = forecast["level"]
             trend = forecast["trend"]
             mad = forecast["mad"]
-            # سقف الاتجاه صعوداً فقط (ط8) — النازل بلا سقف.
+            # سقف الاتجاه صعوداً فقط (ط8) — النازل بلا سقف. النسبة مقبض #34
+            # (`forecast_trend_cap_ratio`)، افتراضها 0.33 — «تقريباً ثلث».
             trend_capped = (
-                trend if trend <= ZERO else min(trend, level / TREND_CAP_DIVISOR)
+                trend if trend <= ZERO else min(trend, level * params.forecast_trend_cap_ratio)
             )
             need = (
                 level * coverage_weeks
                 + trend_capped * coverage_weeks * (coverage_weeks + Decimal("1")) / Decimal("2")
             )
             if mad is not None:
-                safety = SAFETY_Z_FACTOR * (MAD_TO_SIGMA * mad) * coverage_weeks.sqrt()
+                # عامل الثقة مقبض #34 (`forecast_safety_factor`)، افتراضه 1.28.
+                safety = params.forecast_safety_factor * (MAD_TO_SIGMA * mad) * coverage_weeks.sqrt()
             else:
                 # سجلّ أخطاءٍ لا يكفي لـMAD (أقلّ من أربعة أسابيع مرصودة، ط7):
                 # قاعدة الذروة القائمة أفضل من لا رقم — نفس دالّة المسار اليدوي.
@@ -630,7 +698,16 @@ def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
         target = _dec(levels["suggested_max"])
     else:
         target = _dec(manual_max) if manual_max else _dec(levels["suggested_max"])
-    order_qty = (target - (available + on_order)) if target > ZERO else ZERO
+    order_qty = max((target - (available + on_order)) if target > ZERO else ZERO, ZERO)
+    # #34/ط9: حدّ المورّد الأدنى — كميةٌ مقترحة موجبة ودون الحدّ تُرفَع إليه،
+    # ويُؤشَّر على السطر أنها رُفعت («silently raising a number the owner will
+    # act on is worse than not raising it»). لا يُطلَب صنفٌ لم يكن مطلوباً أصلاً
+    # (`order_qty` صفر) لمجرّد أن للمورّد حدّاً أدنى — الحدّ يرفع اقتراحاً قائماً
+    # لا يخترع طلباً.
+    moq_dec = _dec(moq) if moq is not None else None
+    moq_raised = bool(moq_dec is not None and ZERO < order_qty < moq_dec)
+    if moq_raised:
+        order_qty = moq_dec
     if trend is None:
         trend_label = "—"
     elif trend > ZERO:
@@ -691,6 +768,9 @@ def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
         "trend": trend,
         "trend_label": trend_label,
         "coverage_weeks": coverage_weeks,
+        # #34/ط9: حدّ المورّد الأدنى المطبَّق (إن وُجد) وهل رُفعت الكمية إليه.
+        "min_order_qty": moq_dec,
+        "moq_raised": moq_raised,
     }
 
 
@@ -810,6 +890,7 @@ def replenishment_rows(tenant_id: int, *, product_ids=None, category_id=None,
     lead_by_product, lead_by_supplier, tenant_samples = _lead_time_samples(tenant_id)
     on_order = _on_order_map(tenant_id, ids)
     forecasts = _forecast_map(tenant_id, ids)
+    moq_map = _moq_map(tenant_id, ids, supplier_id)
     tenant_lead = _lead_for(tenant_samples, params.default_lead_time_days) \
         if len(tenant_samples) >= 3 else None
 
@@ -831,6 +912,7 @@ def replenishment_rows(tenant_id: int, *, product_ids=None, category_id=None,
             params=params, window_start=window_start, today=today,
             family_totals=family_totals,
             forecast=forecasts.get(product.id),
+            moq=moq_map.get(product.id),
         ))
 
     groups = _group_rows(rows, params)

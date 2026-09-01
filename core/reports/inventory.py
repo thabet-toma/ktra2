@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Callable
 
-from django.db.models import Case, DecimalField, F, Q, Sum, Value, When
+from django.db.models import Case, DecimalField, F, Max, Q, Sum, Value, When
 from django.db.models.functions import Coalesce
 
 logger = logging.getLogger("core.reports")
@@ -407,6 +407,13 @@ def _replenishment(tenant_id: int, params: dict) -> list[dict]:
         "coverage_weeks": _rate(r["coverage_weeks"]),
         "safety_stock": _qty(r["safety_stock"]),
         "reorder_mode": MODE_LABELS[r["reorder_mode"]],
+        # #34/ط9: حدّ المورّد الأدنى — إشارةٌ ظاهرة حين تُرفَع الكمية إليه، لا
+        # رفعٌ صامت («silently raising a number the owner will act on is worse
+        # than not raising it»).
+        "moq_note": (
+            f"رُفعت لحدّ المورّد الأدنى ({_qty(r['min_order_qty'])})"
+            if r.get("moq_raised") else ""
+        ),
     } for r in rows]
 
 
@@ -431,6 +438,38 @@ def _replenishment_drill(tenant_id: int, params: dict) -> list[dict]:
         "order_qty": _qty(r["order_qty"]),
         "reason": r["reason"],
     } for r in rows if r["group_key"] == group_key]
+
+
+#: #34/ط5: أقدم من أسبوعٍ ومهلة — تحذيرٌ لا حسابٌ ذاتي (الممنوع صراحةً).
+STALE_FORECAST_DAYS = 10
+
+
+def _replenishment_notice(tenant_id: int, params: dict) -> str | None:
+    """تنبّؤ تجديد المخزون أقدم من عشرة أيام ⇒ تحذيرٌ فوق الجدول.
+
+    آخر حساب = أحدث `computed_at` عبر تنبّؤات الشركة (`recompute_demand_forecast`
+    يكتبها دفعةً واحدة في نفس التشغيل، فكلّها من نفس الدفعة تقريباً). لا صفوف
+    تنبّؤ أصلاً (الأمر لم يُشغَّل قط على هذه الشركة) ⇒ لا شيء يُقاس قِدَمه بعد،
+    فلا تحذير — نفس فلسفة `REASON_NO_FORECAST` لكل صفّ (سببٌ مكتوب لا صمت).
+    """
+    from django.utils import timezone
+
+    from inventory.models import ProductDemandForecast
+
+    last = ProductDemandForecast.objects.filter(tenant_id=tenant_id).aggregate(
+        last=Max("computed_at"),
+    )["last"]
+    if last is None:
+        return None
+    age_days = (timezone.now() - last).days
+    if age_days <= STALE_FORECAST_DAYS:
+        return None
+    local_date = timezone.localtime(last).date()
+    return (
+        f"آخر حساب لتنبّؤ الطلب الأسبوعي كان بتاريخ {local_date:%Y-%m-%d} "
+        f"({age_days} يوماً) — الكميات المقترَحة للأصناف «التلقائية» قد تكون "
+        "مبنيّة على أرقامٍ قديمة. تحقّق أن مهمة recompute_demand_forecast الأسبوعية تعمل."
+    )
 
 
 register(ReportSpec(
@@ -475,9 +514,12 @@ register(ReportSpec(
         ReportColumn("safety_stock", "مخزون الأمان", KIND_NUMBER, width="100px"),
         ReportColumn("reorder_mode", "الوضع", width="70px"),
         ReportColumn("reason", "ملاحظة"),
+        # #34/ط9: حدّ المورّد الأدنى — يظهر فقط حين رُفعت الكمية إليه.
+        ReportColumn("moq_note", "حدّ المورّد الأدنى", width="160px"),
     ),
     permission="inventory.item.view",
     row_link="/products/{product_id}",
+    notice=_replenishment_notice,
     drill=_replenishment_drill,
     drill_keys=("group_key",),
     drill_title="منتجات هذا الصنف",

@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from tenants.models import Tenant, Currency
 from partners.models import Partner
@@ -2105,6 +2108,36 @@ class PurchaseSettings(models.Model):
     review_period_days = models.PositiveSmallIntegerField(
         default=30, db_column="ReviewPeriodDays",
         help_text="كل كم يوماً تراجع الطلب — تحدّد الحدّ الأقصى المقترَح فوق نقطة الطلب",
+    )
+    # ── #34: مقابض هولت والمسار التلقائي (ط11 على الخريطة) — كانت ثوابت
+    # مطبوعة في `core/replenishment.py`، فلا شاشة تقدر تضبطها لشركةٍ بعينها.
+    forecast_alpha = models.DecimalField(
+        max_digits=4, decimal_places=2, default=Decimal("0.25"),
+        validators=[MinValueValidator(Decimal("0.01")), MaxValueValidator(Decimal("0.99"))],
+        db_column="ForecastAlpha",
+        help_text="حساسية النظام للجديد — لو حسّيته بطيء بالتفاعل زِدها، ولو بيقفز مع كل طلبية شاذّة قلّلها",
+    )
+    forecast_beta = models.DecimalField(
+        max_digits=4, decimal_places=2, default=Decimal("0.15"),
+        validators=[MinValueValidator(Decimal("0.01")), MaxValueValidator(Decimal("0.99"))],
+        db_column="ForecastBeta",
+        help_text="حساسية الاتجاه — نفس فكرة حساسية الجديد لكن لسرعة تغيّر الاتجاه نفسه",
+    )
+    forecast_history_weeks = models.PositiveSmallIntegerField(
+        default=26, validators=[MinValueValidator(6)], db_column="ForecastHistoryWeeks",
+        help_text="كم أسبوعاً للوراء يبني عليها الاتجاه — أقصر من ستة أسابيع لا يكفي ليستقرّ",
+    )
+    forecast_trend_cap_ratio = models.DecimalField(
+        max_digits=4, decimal_places=2, default=Decimal("0.33"),
+        validators=[MinValueValidator(Decimal("0.01"))],
+        db_column="ForecastTrendCapRatio",
+        help_text="سقف الزيادة الأسبوعية كنسبة من البيع الأسبوعي — يمنع بيعة شاذّة من مضاعفة الحدّ",
+    )
+    forecast_safety_factor = models.DecimalField(
+        max_digits=4, decimal_places=2, default=Decimal("1.28"),
+        validators=[MinValueValidator(Decimal("0.01"))],
+        db_column="ForecastSafetyFactor",
+        help_text="حجم هامش الأمان — كلّما زاد اتّسع مخزون الأمان مقابل تذبذب دقّة التوقّعات",
     )
     updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
 

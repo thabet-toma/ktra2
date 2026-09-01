@@ -1,9 +1,11 @@
-"""#32: السلسلة الأسبوعية وتنبّؤ هولت.
+"""#32: السلسلة الأسبوعية وتنبّؤ هولت. #34: مقابضها لكل شركة.
 
 يُثبت هنا: أن `holt_forecast` تعطي بالضبط ما يعطيه القلم والورقة على حالة
 المالك (ثمانية أسابيع صفر ثم أربعة وأربعة)، وأن أسبوع الصفر جزءٌ من السلسلة
 لا فجوة، وأن الأسبوع الجاري غير المكتمل لا يدخلها أبداً، وأن أمر الإدارة
 مُعاوَد الاستدعاء بلا أثر ومعزولٌ بين الشركات وثابت الكلفة بعدد المنتجات.
+وأن α/β وعمق السلسلة مقابض تُقرأ لكل شركةٍ من `logistics.PurchaseSettings` —
+لا ثوابت وحدة (#34).
 """
 import datetime
 from decimal import Decimal
@@ -20,6 +22,7 @@ from core.replenishment import (
     weekly_demand_series,
 )
 from inventory.models import Product, ProductDemandForecast, StockMovement
+from logistics.models import PurchaseSettings
 from tenants.services import create_company
 
 ZERO = Decimal("0")
@@ -85,6 +88,24 @@ class HoltForecastPureFunctionTest(TestCase):
         weekly = [Decimal("1")] * 5
         result = holt_forecast(weekly)
         assert result["mad"] is None
+
+    def test_alpha_knob_changes_the_stored_level(self):
+        """#34: α مقبضٌ فعلي — نفس السلسلة بقيمتين مختلفتين تعطي رقمين مختلفين.
+
+        α أعلى يعني وزناً أكبر للأسبوع الأخير (4) ووزناً أقلّ لتقدير السلسلة
+        الراكدة قبله (صفر)، فمستوى α=0.6 يجب أن يفوق مستوى α=0.1 على نفس البيانات.
+        """
+        weekly = [ZERO] * 8 + [Decimal("4"), Decimal("4")]
+        low_alpha = holt_forecast(weekly, alpha=Decimal("0.10"), beta=Decimal("0.15"))
+        high_alpha = holt_forecast(weekly, alpha=Decimal("0.60"), beta=Decimal("0.15"))
+        assert low_alpha["level"] != high_alpha["level"]
+        assert high_alpha["level"] > low_alpha["level"], (high_alpha, low_alpha)
+
+    def test_beta_knob_changes_the_stored_trend(self):
+        weekly = [ZERO] * 8 + [Decimal("4"), Decimal("4")]
+        low_beta = holt_forecast(weekly, alpha=Decimal("0.25"), beta=Decimal("0.05"))
+        high_beta = holt_forecast(weekly, alpha=Decimal("0.25"), beta=Decimal("0.80"))
+        assert low_beta["trend"] != high_beta["trend"]
 
 
 class WeeklySeriesBuilderTest(TestCase):
@@ -288,3 +309,76 @@ class RecomputeDemandForecastCommandTest(TestCase):
         assert ProductDemandForecast.objects.filter(tenant=small_tenant).count() == 10
         assert ProductDemandForecast.objects.filter(tenant=large_tenant).count() == 100
         assert len(large_ctx) == len(small_ctx), (len(small_ctx), len(large_ctx))
+
+    # ── #34: الأمر يقرأ α/β وعمق السلسلة **لكل شركة** — لا افتراضاً واحداً دائماً ──
+
+    def test_command_honours_per_tenant_alpha(self):
+        """نفس سلسلة المالك بالحرف (ثمانية أصفار ثم 4،4) على شركتين بـα مختلف:
+        α الأعلى يفوق α الأدنى في المستوى المخزَّن — إثباتٌ أن الأمر قرأ إعداد
+        كلٍّ منهما لا ثابت `HOLT_ALPHA` وحده."""
+        today = datetime.date.today()
+        last_week = last_completed_week_start(today)
+        oldest_week = last_week - datetime.timedelta(weeks=9)
+
+        def _seed_owner_case(tenant, sku):
+            product = Product.objects.create(
+                tenant=tenant, sku=sku, name_ar=sku, quantity_on_hand=Decimal("0"),
+            )
+            self._move(tenant, product, "IN", 20, oldest_week)
+            self._move(tenant, product, "OUT", 4, last_week - datetime.timedelta(weeks=1))
+            self._move(tenant, product, "OUT", 4, last_week)
+            return product
+
+        low_owner = User.objects.create_user(username="alpha_low_owner", password="x")
+        low_tenant = create_company("شركة ألفا منخفضة", low_owner)
+        PurchaseSettings.objects.create(tenant=low_tenant, forecast_alpha=Decimal("0.10"))
+        low_product = _seed_owner_case(low_tenant, "ALPHA-LOW")
+
+        high_owner = User.objects.create_user(username="alpha_high_owner", password="x")
+        high_tenant = create_company("شركة ألفا مرتفعة", high_owner)
+        PurchaseSettings.objects.create(tenant=high_tenant, forecast_alpha=Decimal("0.90"))
+        high_product = _seed_owner_case(high_tenant, "ALPHA-HIGH")
+
+        call_command("recompute_demand_forecast", tenant=low_tenant.TenantID)
+        call_command("recompute_demand_forecast", tenant=high_tenant.TenantID)
+
+        low_row = ProductDemandForecast.objects.get(tenant=low_tenant, product=low_product)
+        high_row = ProductDemandForecast.objects.get(tenant=high_tenant, product=high_product)
+        assert low_row.level != high_row.level
+        assert high_row.level > low_row.level, (high_row.level, low_row.level)
+
+    def test_command_honours_per_tenant_history_weeks(self):
+        """حركةٌ منذ 19 أسبوعاً: تدخل نافذة 26 أسبوعاً ولا تدخل نافذة 6 أسابيع —
+        فسلسلة الشركة ذات النافذة الطويلة تُرصَد أطول، وهذا وحده يثبت أن الأمر
+        قرأ `forecast_history_weeks` من إعدادات كلٍّ منهما."""
+        today = datetime.date.today()
+        last_week = last_completed_week_start(today)
+        old_week = last_week - datetime.timedelta(weeks=19)
+
+        def _seed(tenant, sku):
+            product = Product.objects.create(
+                tenant=tenant, sku=sku, name_ar=sku, quantity_on_hand=Decimal("0"),
+            )
+            self._move(tenant, product, "OUT", 6, old_week)
+            self._move(tenant, product, "OUT", 3, last_week - datetime.timedelta(weeks=1))
+            self._move(tenant, product, "OUT", 3, last_week)
+            return product
+
+        short_owner = User.objects.create_user(username="hist_short_owner", password="x")
+        short_tenant = create_company("شركة سجلٍّ قصير", short_owner)
+        PurchaseSettings.objects.create(tenant=short_tenant, forecast_history_weeks=6)
+        short_product = _seed(short_tenant, "HIST-SHORT")
+
+        long_owner = User.objects.create_user(username="hist_long_owner", password="x")
+        long_tenant = create_company("شركة سجلٍّ طويل", long_owner)
+        PurchaseSettings.objects.create(tenant=long_tenant, forecast_history_weeks=26)
+        long_product = _seed(long_tenant, "HIST-LONG")
+
+        call_command("recompute_demand_forecast", tenant=short_tenant.TenantID)
+        call_command("recompute_demand_forecast", tenant=long_tenant.TenantID)
+
+        short_row = ProductDemandForecast.objects.get(tenant=short_tenant, product=short_product)
+        long_row = ProductDemandForecast.objects.get(tenant=long_tenant, product=long_product)
+        assert short_row.weeks_observed == 6, short_row.weeks_observed
+        assert long_row.weeks_observed == 20, long_row.weeks_observed
+        assert short_row.weeks_observed < long_row.weeks_observed

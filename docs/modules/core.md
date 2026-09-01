@@ -22,7 +22,7 @@
 | `core/pagination.py` | منتجا الترقيم — الإلزامي والاختياري |
 | `core/reports/` | **حزمة** — إطار التقارير + 8 وحدات دومين |
 | `core/reports_api.py` | نقطتا الفهرس والتشغيل + كاش التقارير |
-| `core/replenishment.py` | محرّك تجديد المخزون: معدّل الصرف اليومي، مهلة التوريد المرصودة، مخزون الأمان، الحدّان المقترَحان، وقرار «النوع». يسكن هنا لأنه يقرأ `inventory` و`sales` و`logistics` معاً. يحمل أيضاً (#32) السلسلة الأسبوعية وتنبّؤ هولت (`holt_forecast`, `weekly_demand_series`) — يكتبهما `management/commands/recompute_demand_forecast.py` في `inventory.ProductDemandForecast`. و(#33) فرعٌ داخل `_product_row` يقرأ هذا التنبّؤ لكل منتجٍ وضعُه `Product.reorder_mode == "auto"` — لا بانٍ ثانٍ؛ `manual` (الافتراضي) بلا تغيير حرفاً |
+| `core/replenishment.py` | محرّك تجديد المخزون: معدّل الصرف اليومي، مهلة التوريد المرصودة، مخزون الأمان، الحدّان المقترَحان، وقرار «النوع». يسكن هنا لأنه يقرأ `inventory` و`sales` و`logistics` معاً. يحمل أيضاً (#32) السلسلة الأسبوعية وتنبّؤ هولت (`holt_forecast`, `weekly_demand_series`) — يكتبهما `management/commands/recompute_demand_forecast.py` في `inventory.ProductDemandForecast`. و(#33) فرعٌ داخل `_product_row` يقرأ هذا التنبّؤ لكل منتجٍ وضعُه `Product.reorder_mode == "auto"` — لا بانٍ ثانٍ؛ `manual` (الافتراضي) بلا تغيير حرفاً. و(#34) `ReplenishmentParams`/`replenishment_params` مُحمِّلٌ واحد لسبعة مقابضَ من `logistics.PurchaseSettings` (α/β/عمق السلسلة/سقف الاتجاه/عامل الأمان + المهلة الافتراضية وفترة المراجعة القائمتان)، تصل إلى `holt_forecast` و`weekly_demand_series` و`_product_row`؛ و`_moq_map` يرفع كميةً مقترحة دون `inventory.SupplierProduct.min_order_qty` إليه ويُؤشِّر السطر |
 | `core/scan.py` | **T-SCAN** — حلّال «ما الذي في يدي؟»: نصٌّ واحد ← وحدة مُرقَّمة أو جهاز حسّاس أو منتج، ونقطته `/api/scan/` |
 | `core/payments.py` | منطق الدفع المشترك بين المبيعات والمشتريات |
 | `core/api_defaults.py` | إعدادات المصادقة الموحّدة + `PagePartnerBalanceMixin` |
@@ -188,6 +188,7 @@ register(spec: ReportSpec)                       # تسجيل تقرير جدي�
 run_report(key, tenant_id, params) -> dict       # أعمدة + صفوف + إجماليات
 report_catalog() -> list                         # الفهرس مجمَّعاً بالفئات
 ReportSpec.columns_for(tenant_id, params)        # أعمدة تُحسب عند التشغيل (عمود لكل يوم)
+ReportSpec.notice(tenant_id, params) -> str|None # تنبيهٌ اختياري فوق الجدول (#34: أرقام قديمة) — لا يُعيد الحساب أبداً
 ReportSpec.drill(tenant_id, params) + drill_keys # فتح صفّ مجمَّع على الأسطر التي كوّنته
 run_drill(key, tenant_id, params) -> dict        # أسطر التفصيل + مجموعها للمقارنة برقم الصفّ
 

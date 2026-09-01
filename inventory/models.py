@@ -584,6 +584,12 @@ class SupplierProduct(models.Model):
     notes = models.CharField(
         max_length=255, blank=True, default='', db_column='Notes',
     )
+    # #34/ط9: الحدّ الأدنى للطلبية — خاصّية العلاقة (مورّد، صنف) لا الصنف: المورّد
+    # الصيني يفرض خمسين والمحلّي يبيع بالقطعة، للصنف نفسه. `null` = لا حدّ مرصود.
+    min_order_qty = models.DecimalField(
+        max_digits=18, decimal_places=3, null=True, blank=True, db_column='MinOrderQty',
+        help_text='أقلّ كمية يقبلها هذا المورّد لهذا الصنف في الطلبية الواحدة',
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
     updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
 

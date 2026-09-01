@@ -13,7 +13,8 @@ from django.test.utils import CaptureQueriesContext
 from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase
 
-from inventory.models import Product, ProductDemandForecast, StockMovement
+from inventory.models import Product, ProductDemandForecast, StockMovement, SupplierProduct
+from partners.models import Partner
 from core.replenishment import (
     MIN_HISTORY_DAYS,
     REASON_NO_FORECAST,
@@ -22,6 +23,8 @@ from core.replenishment import (
     URGENCY_DEAD,
     URGENCY_DEFERRED,
     URGENCY_URGENT,
+    _moq_map,
+    replenishment_params,
     replenishment_rows,
     suggest_levels,
 )
@@ -357,6 +360,216 @@ class AutoReorderModeTest(TestCase):
             rows = replenishment_rows(self.tenant.TenantID, today=TODAY)
         assert len(rows) >= 40
         assert len(large) == len(small), (len(small), len(large))
+
+
+class ReplenishmentParamsForecastKnobsTest(TestCase):
+    """#34: خمسة مقابض جديدة تُقرأ من `logistics.PurchaseSettings` — أو
+    الافتراضات حين لا صفّ إعداداتٍ للشركة، ومعزولةٌ بين الشركات."""
+
+    def test_tenant_without_settings_row_uses_defaults(self):
+        owner = User.objects.create_user(username="knobs_default_owner", password="x")
+        tenant = create_company("شركة بلا إعدادات تجديد", owner)
+        params = replenishment_params(tenant.TenantID)
+        assert params.forecast_alpha == Decimal("0.25")
+        assert params.forecast_beta == Decimal("0.15")
+        assert params.forecast_history_weeks == 26
+        assert params.forecast_trend_cap_ratio == Decimal("0.33")
+        assert params.forecast_safety_factor == Decimal("1.28")
+
+    def test_tenant_settings_do_not_leak_to_another_tenant(self):
+        from logistics.models import PurchaseSettings
+
+        tuned_owner = User.objects.create_user(username="knobs_tuned_owner", password="x")
+        tuned = create_company("شركة مقابض مضبوطة", tuned_owner)
+        PurchaseSettings.objects.create(
+            tenant=tuned, forecast_alpha=Decimal("0.80"), forecast_beta=Decimal("0.70"),
+            forecast_history_weeks=12, forecast_trend_cap_ratio=Decimal("0.50"),
+            forecast_safety_factor=Decimal("2.00"),
+        )
+        bystander_owner = User.objects.create_user(username="knobs_bystander_owner", password="x")
+        bystander = create_company("شركة أخرى بلا إعدادات مقابض", bystander_owner)
+
+        tuned_params = replenishment_params(tuned.TenantID)
+        bystander_params = replenishment_params(bystander.TenantID)
+        assert tuned_params.forecast_alpha == Decimal("0.80")
+        assert tuned_params.forecast_history_weeks == 12
+        # الشركة الأخرى بلا صفّ إعداداتٍ خاصّ بها لم تتأثر بإعدادات الأولى.
+        assert bystander_params.forecast_alpha == Decimal("0.25")
+        assert bystander_params.forecast_history_weeks == 26
+
+
+class TrendCapAndSafetyFactorKnobsTest(TestCase):
+    """#34: تغيير `forecast_trend_cap_ratio`/`forecast_safety_factor` يغيّر نتيجة
+    المسار التلقائي فعلاً — نفس مستوى/اتجاه/MAD على شركتين بمقبضين مختلفين
+    يعطيان رقمين مختلفين، مثبَتَين بالورقة والقلم."""
+
+    def _tenant_with(self, *, name, **settings_kwargs):
+        from logistics.models import PurchaseSettings
+
+        owner = User.objects.create_user(username=f"knob_calc_{name}", password="x")
+        tenant = create_company(f"شركة حساب مقابض {name}", owner)
+        PurchaseSettings.objects.create(
+            tenant=tenant, default_lead_time_days=14, review_period_days=14,
+            **settings_kwargs,
+        )
+        return tenant
+
+    def test_custom_ratio_and_factor_change_the_auto_path_numbers(self):
+        default_tenant = self._tenant_with(name="default")
+        custom_tenant = self._tenant_with(
+            name="custom",
+            forecast_trend_cap_ratio=Decimal("0.10"), forecast_safety_factor=Decimal("2.56"),
+        )
+
+        def _row(tenant):
+            p = Product.objects.create(
+                tenant=tenant, sku="KNOB-CALC", name_ar="صنف حساب المقابض",
+                quantity_on_hand=Decimal("0"), reorder_mode=Product.REORDER_MODE_AUTO,
+            )
+            ProductDemandForecast.objects.create(
+                tenant=tenant, product=p, level=Decimal("10"), trend=Decimal("2"),
+                mad=Decimal("1"), weeks_observed=10, last_week_start=TODAY,
+            )
+            rows = replenishment_rows(tenant.TenantID, today=TODAY)
+            return next(r for r in rows if r["product_id"] == p.id)
+
+        default_row = _row(default_tenant)
+        custom_row = _row(custom_tenant)
+
+        # الافتراضي (سقف 0.33 وعامل أمان 1.28) — مطابقٌ حرفياً لاختبار المحرّك
+        # `AutoReorderModeTest.test_auto_formula_matches_hand_computed_numbers`.
+        assert default_row["safety_stock"] == Decimal("3.2"), default_row["safety_stock"]
+        assert default_row["suggested_max"] == 64, default_row["suggested_max"]
+
+        # المخصَّص: سقفٌ أضيق (0.10×10=1.0 < الاتجاه=2) يُمسك الاتجاه عند 1.0 لا
+        # 2، وعامل أمانٍ أعلى (2.56):
+        #   need = 10×4 + 1.0×4×5/2 = 40+10 = 50 ؛ safety = 2.56×(1.25×1)×√4 = 6.4
+        #   suggested_max = ⌈50+6.4⌉ = 57
+        assert custom_row["safety_stock"] == Decimal("6.4"), custom_row["safety_stock"]
+        assert custom_row["suggested_max"] == 57, custom_row["suggested_max"]
+
+        assert custom_row["safety_stock"] != default_row["safety_stock"]
+        assert custom_row["suggested_max"] != default_row["suggested_max"]
+
+
+class SupplierMinOrderQuantityTest(TestCase):
+    """#34/ط9: `inventory.SupplierProduct.min_order_qty` يرفع كميةً مقترحة
+    دونه ويُؤشِّر على السطر — ولا يخترع طلباً لصنفٍ كان اقتراحه صفراً."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="moq_owner", password="x")
+        cls.tenant = create_company("شركة حدّ المورّد الأدنى", cls.owner)
+
+    def _product(self, sku, *, qty="50"):
+        return Product.objects.create(
+            tenant=self.tenant, sku=sku, name_ar=sku, quantity_on_hand=Decimal(qty),
+        )
+
+    def _move(self, product, mtype, qty, days_ago):
+        StockMovement.objects.create(
+            tenant=self.tenant, product=product, movement_type=mtype,
+            quantity=Decimal(str(qty)), movement_date=TODAY - datetime.timedelta(days=days_ago),
+        )
+
+    def _steady_seller(self, sku, *, qty="50"):
+        """نفس بناء `ReplenishmentEngineTest._steady_seller`: أدنى=42 وأقصى=72،
+        فمتاحٌ ب50 يعطي طلباً مقترَحاً = 22 قبل أي حدّ مورّد."""
+        p = self._product(sku, qty=qty)
+        self._move(p, "IN", 1000, 89)
+        for week in range(1, 7):
+            self._move(p, "OUT", 14, week * 7)
+        self._move(p, "OUT", 6, 49)
+        return p
+
+    def _supplier(self, name):
+        return Partner.objects.create(tenant=self.tenant, name=name, partner_type="Supplier")
+
+    def _row_for(self, product, **kw):
+        rows = replenishment_rows(self.tenant.TenantID, today=TODAY, **kw)
+        return next(r for r in rows if r["product_id"] == product.id)
+
+    def test_quantity_below_moq_is_raised_and_flagged(self):
+        p = self._steady_seller("MOQ-1")
+        supplier = self._supplier("مورّد الحدّ")
+        SupplierProduct.objects.create(
+            tenant=self.tenant, supplier=supplier, product=p,
+            supplier_sku="SKU-1", min_order_qty=Decimal("50"),
+        )
+        row = self._row_for(p)
+        assert row["order_qty"] == Decimal("50"), row["order_qty"]   # 22 مرفوعةً إلى 50
+        assert row["moq_raised"] is True
+        assert row["min_order_qty"] == Decimal("50")
+
+    def test_product_without_a_linked_supplier_is_unaffected(self):
+        p = self._steady_seller("MOQ-2")
+        row = self._row_for(p)
+        assert row["order_qty"] == Decimal("22"), row["order_qty"]
+        assert row["moq_raised"] is False
+        assert row["min_order_qty"] is None
+
+    def test_quantity_already_above_moq_is_not_touched(self):
+        p = self._steady_seller("MOQ-3")
+        supplier = self._supplier("مورّد بحدٍّ صغير")
+        SupplierProduct.objects.create(
+            tenant=self.tenant, supplier=supplier, product=p,
+            supplier_sku="SKU-3", min_order_qty=Decimal("5"),
+        )
+        row = self._row_for(p)
+        assert row["order_qty"] == Decimal("22")
+        assert row["moq_raised"] is False
+
+    def test_zero_suggested_quantity_is_never_raised_to_the_moq(self):
+        """مخزونٌ مكتمل (اقتراحه صفر أصلاً) لا يصير طلباً وهمياً لمجرّد أن
+        للمورّد حدّاً أدنى — الحدّ يرفع اقتراحاً قائماً لا يخترع طلباً."""
+        p = self._steady_seller("MOQ-4", qty="72")   # متاحٌ = الأقصى ⇒ اقتراح صفر
+        supplier = self._supplier("مورّد لا يُستدعى")
+        SupplierProduct.objects.create(
+            tenant=self.tenant, supplier=supplier, product=p,
+            supplier_sku="SKU-4", min_order_qty=Decimal("10"),
+        )
+        row = self._row_for(p)
+        assert row["order_qty"] == Decimal("0")
+        assert row["moq_raised"] is False
+
+    def test_partner_filter_uses_that_suppliers_minimum_not_the_lowest(self):
+        p = self._steady_seller("MOQ-5")
+        supplier_a = self._supplier("مورّد أ")
+        supplier_b = self._supplier("مورّد ب")
+        SupplierProduct.objects.create(
+            tenant=self.tenant, supplier=supplier_a, product=p,
+            supplier_sku="SKU-5A", min_order_qty=Decimal("30"),
+        )
+        SupplierProduct.objects.create(
+            tenant=self.tenant, supplier=supplier_b, product=p,
+            supplier_sku="SKU-5B", min_order_qty=Decimal("100"),
+        )
+
+        # بلا فلتر مورّد ⇒ الأقلّ تقييداً بين الاثنين (30).
+        unfiltered = self._row_for(p)
+        assert unfiltered["min_order_qty"] == Decimal("30")
+        assert unfiltered["order_qty"] == Decimal("30")
+
+        # فلتر المورّد «ب» ⇒ حدّه هو (100) لا الأقلّ بين الموردين.
+        filtered_b = self._row_for(p, supplier_id=supplier_b.id)
+        assert filtered_b["min_order_qty"] == Decimal("100")
+        assert filtered_b["order_qty"] == Decimal("100")
+
+        filtered_a = self._row_for(p, supplier_id=supplier_a.id)
+        assert filtered_a["min_order_qty"] == Decimal("30")
+
+    def test_moq_lookup_is_a_single_query_for_the_whole_company(self):
+        products = [self._steady_seller(f"MOQ-Q-{i}") for i in range(5)]
+        for i, p in enumerate(products):
+            supplier = self._supplier(f"مورّد {i}")
+            SupplierProduct.objects.create(
+                tenant=self.tenant, supplier=supplier, product=p,
+                supplier_sku=f"SKU-Q-{i}", min_order_qty=Decimal("30"),
+            )
+        with CaptureQueriesContext(connection) as ctx:
+            moq_map = _moq_map(self.tenant.TenantID, [p.id for p in products])
+        assert len(moq_map) == 5
+        assert len(ctx) == 1, len(ctx)
 
 
 class ApplyReplenishmentApiTest(APITestCase):

@@ -35,7 +35,7 @@
 | `ProductPriceTier` | `tier_type` (sale/purchase), `tier_number`, `price`, `tax_inclusive` | فريد `(product, tier_type, tier_number)` |
 | `ProductMerge` (task24) | `snapshot` (JSON: لكل براند مُضموم `family_id`/`brand`/`name_ar`/`name_en` قبل الضمّ), `undone_at` | سلّة محذوفات على نمط `accounting.VoidedJournal` — `target_family→ProductFamily` (لا يُحذف أبداً)؛ `undo_product_merge` يعكسها حرفياً من `snapshot` |
 | `ProductDemandForecast` (#32) | `level`, `trend` (ستّ خانات عشرية)، `weeks_observed`, `mad`, `last_week_start`, `computed_at` | `product→Product` (`OneToOneField` — صفٌّ واحد لكل منتج). يكتبه حصراً `python manage.py recompute_demand_forecast` (`core/replenishment.py` — `holt_forecast`/`weekly_demand_series`)؛ يقرأه المسار `auto` (#33) في `core/replenishment.py` (`_product_row`) دفعةً واحدة للشركة (`_forecast_map`) |
-| `SupplierProduct` | `supplier_sku`, `supplier_name` | `supplier→partners.Partner`، `product→Product`؛ فريد `(tenant, supplier, supplier_sku)` — **لا** على `(tenant, supplier, product)`: للمورّد أن يحمل أكثر من رقم للمنتج الواحد، والممنوع عكسُه (رقمٌ واحد لمنتجين يجعل المطابقة تخميناً). محايد مالياً بالكامل |
+| `SupplierProduct` | `supplier_sku`, `supplier_name`, `min_order_qty` (#34، اختياري) | `supplier→partners.Partner`، `product→Product`؛ فريد `(tenant, supplier, supplier_sku)` — **لا** على `(tenant, supplier, product)`: للمورّد أن يحمل أكثر من رقم للمنتج الواحد، والممنوع عكسُه (رقمٌ واحد لمنتجين يجعل المطابقة تخميناً). محايد مالياً بالكامل. `min_order_qty` خاصّية العلاقة لا الصنف — المورّد الصيني يفرض خمسين والمحلّي يبيع بالقطعة، للصنف نفسه |
 | `WarehouseTransfer` / `WarehouseTransferLine` | `transfer_number`, `is_posted`, `quantity` | `source_warehouse` / `dest_warehouse` (PROTECT) — بلا قيد محاسبي (`:384`) |
 | `Stocktake` / `StocktakeLine` | `is_posted`, `counted_quantity`, `system_quantity`, `variance` | `journal→accounting.JournalHeader` — قيد فرق الجرد |
 
@@ -183,8 +183,11 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 | قرار الطلب من المنتج **ونوعه** معاً: عاجل/مؤجَّل/راكد | `core/replenishment.py` (`_urgency_of`) |
 | الكتابة الوحيدة — بفعلٍ صريح من المستخدم | `core/replenishment.py` (`apply_suggested_levels`) |
 
-بارامترات الشركة الثلاثة (نافذة التحليل · المهلة الافتراضية · مدة المراجعة) على
-`logistics.PurchaseSettings` — التجديد قرارٌ شرائي، فإعداداته حيث تعيش إعدادات الشراء.
+بارامترات الشركة على `logistics.PurchaseSettings` — التجديد قرارٌ شرائي، فإعداداته
+حيث تعيش إعدادات الشراء: الثلاثة الأصلية (نافذة التحليل · المهلة الافتراضية · مدة
+المراجعة) بالإضافة إلى خمسة مقابض هولت (#34 — `forecast_alpha/beta/history_weeks/
+trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّلٍ واحد
+(`ReplenishmentParams`/`replenishment_params`) — لا قارئ إعداداتٍ ثانٍ.
 
 **#32 — سلسلةٌ أسبوعية موازية.** المتوسط أعلاه (ADU) يدفن صنفاً باع أربعاً مرّتين
 خلال شهرين تحت «أقلّ من قطعة بالأسبوع». `core/replenishment.py` (`holt_forecast`,
@@ -203,6 +206,18 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 «قيد الطلب» قبل العرض. صفٌّ تلقائيٌّ لا يطلب شيئاً (`order_qty≤0`) يسقط من
 العرض الافتراضي لـ`stock-replenishment` — لا من المحرّك — وفلتر «راكد» يبقى
 يُظهره عمداً؛ المسار اليدوي لا يتأثر بهذا الإخفاء إطلاقاً.
+
+**#34 — المقابض السبعة، حدّ المورّد الأدنى، وتحذير الأرقام القديمة.** الثوابت
+التي كانت مطبوعةً في `core/replenishment.py` (`HOLT_ALPHA`, `HOLT_BETA`,
+`FORECAST_HISTORY_WEEKS`, سقف الاتجاه، عامل الأمان) صارت الخمسة `forecast_*` في
+`logistics.PurchaseSettings`، يقرأها `ReplenishmentParams` في مكانٍ واحد
+وتصل إلى `holt_forecast` (α/β) و`weekly_demand_series` (عمق السلسلة) و`_product_row`
+(سقف الاتجاه وعامل الأمان) — وأمر `recompute_demand_forecast` يحمّلها **لكل شركةٍ
+يعالجها** لا افتراضاً ثابتاً. `SupplierProduct.min_order_qty` (اختياري) يرفع كمية
+مقترحة دون حدّ المورّد الأدنى إليه ويُؤشِّر السطر بذلك (`_moq_map` — استعلامٌ واحد
+للشركة)؛ فلتر المورّد في التقرير يختار حدّ ذاك المورّد، وغيابه يختار الأقلّ تقييداً
+بين موردي الصنف. وتقرير `stock-replenishment` يحمل تنبيهاً (`ReportSpec.notice`)
+حين يتجاوز عمر آخر تنبّؤٍ محفوظ عشرة أيام — قراءةٌ لـ`computed_at` بلا إعادة حساب.
 
 **والمحرّك يسكن في `core/` لا هنا**: حسابه يحتاج `sales.services` (المحجوز) و
 `logistics.models` (مهلة التوريد)، و`.importlinter` يمنع `inventory` من استيرادهما
