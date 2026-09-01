@@ -128,13 +128,16 @@ export const GroupedItemsTable: React.FC<Props> = ({
           >
             {reveal && isNameCol ? (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0, width: "100%" }}>
+                {/* كلمةٌ صغيرة لا أيقونةٌ صامتة — الطلب كان «منتج وبحدّه كلمة
+                    صغيرة: أظهر براندات»، ودفنُها في `title` يعني ألّا يراها
+                    أحدٌ إلا بالتحويم. العدد داخل الكلمة نفسها فلا يتكرّر. */}
                 <button
                   type="button"
-                  className="ktra-iconbtn"
-                  title={reveal.expanded ? "طيّ البراندات" : `إظهار البراندات (${reveal.count})`}
+                  className="ktra-iconbtn ktra-iconbtn--text"
                   onClick={(e) => { e.stopPropagation(); reveal.onToggle(); }}
                 >
                   {reveal.expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
+                  {reveal.expanded ? "طيّ البراندات" : `إظهار البراندات (${reveal.count})`}
                 </button>
                 <span
                   className="truncate"
@@ -142,9 +145,6 @@ export const GroupedItemsTable: React.FC<Props> = ({
                   title={p.display_name || p.name_ar || ""}
                 >
                   {p.display_name || p.name_ar || p.name_en || "—"}
-                </span>
-                <span style={{ color: "var(--ktra-ink-soft)", fontSize: 11, flexShrink: 0 }}>
-                  ({reveal.count})
                 </span>
               </span>
             ) : (

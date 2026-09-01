@@ -1302,6 +1302,17 @@ tbody td {
   flex: none;
 }
 :root[data-skin] .ktra-iconbtn:hover { background: var(--ktra-accent-bg); }
+/* كلمة صغيرة بدل أيقونةٍ صامتة — «إظهار البراندات (٢)» يجب أن تُقرأ لا أن
+   تُكتشف بالتحويم. تَرِث حدّ `ktra-iconbtn` ولونه وتفكّ قيد 20×20. */
+:root[data-skin] .ktra-iconbtn--text {
+  width: auto;
+  height: auto;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 3px;
+  white-space: nowrap;
+}
 :root[data-skin] .ktra-iconbtn--danger { color: var(--ktra-state); }
 :root[data-skin] .ktra-iconbtn--danger:hover { background: var(--ktra-danger-soft); }
 
