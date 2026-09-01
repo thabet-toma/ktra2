@@ -490,6 +490,35 @@ def add_brand_to_family(*, family, brand_name: str, tenant=None, sku: str | None
 MERGE_GUARD_FIELDS = ('uom_id', 'is_serialized')
 
 
+def adopt_family_for_product(product, *, tenant=None):
+    """يُنشئ أباً (`ProductFamily`) لمنتجٍ قديمٍ بلا أب، مرآةً لصفّه (#24-دلتا ٣).
+
+    كل منتجٍ سُجّل قبل #20 يحمل `family_id` فارغاً — وهي **كل** بيانات الإنتاج
+    القائمة. و`merge_products` كانت تشترط أن يكون للهدف أبٌ سلفاً، فترفض كل
+    ضمٍّ على الكتالوج القديم برسالة «بلا منتجٍ أبٍ فوقه» — أي أن الأداة المبنيّة
+    لتنظيف القديم كانت عاجزةً عن لمسه. هذا الحلّ الوحيد المتاح: لا مسار آخر في
+    النظام يمنح منتجاً قائماً أباً (`create_product_with_family` تُنشئ الاثنين
+    معاً لمنتجٍ **جديد**).
+
+    الأب مرآة الصفّ بالحقول «الأبوية» نفسها التي تنسخها نقطة الإنشاء الموحّدة،
+    فلا يختلف عن أبٍ أُنشئ من هناك. ولا يُمَسّ رقمٌ واحد: الأب لا يحمل أرقاماً
+    أصلاً، والرصيد والتكلفة يبقيان على صفّ البراند حيث هما.
+
+    يُعاد `False` إن كان للمنتج أبٌ سلفاً (فلا يُنشأ ثانٍ).
+    """
+    if product.family_id:
+        return False
+    owner = {'tenant': tenant} if tenant is not None else {'tenant_id': product.tenant_id}
+    family_fields = {}
+    for name in FAMILY_FIELD_NAMES:
+        attr = f'{name}_id' if hasattr(product, f'{name}_id') else name
+        family_fields[attr] = getattr(product, attr)
+    family = ProductFamily.objects.create(**owner, **family_fields)
+    product.family_id = family.id
+    product.save(update_fields=['family_id'])
+    return True
+
+
 def merge_products(*, tenant, target_product_id, product_ids, brands=None, user=None):
     """يضمّ عدّة براندات قائمة تحت أبٍ واحد (#24).
 
@@ -526,8 +555,14 @@ def merge_products(*, tenant, target_product_id, product_ids, brands=None, user=
         )
         by_id = {p.id: p for p in products}
         target = by_id.get(int(target_product_id))
-        if target is None or target.family_id is None:
-            raise ValidationError('المنتج الهدف غير موجود لهذه الشركة، أو بلا منتجٍ أبٍ فوقه.')
+        if target is None:
+            raise ValidationError('المنتج الهدف غير موجود لهذه الشركة.')
+        # دلتا ٣: هدفٌ قديمٌ بلا أب يكتسب أباً هنا بدل أن يُرفض الضمّ — انظر
+        # `adopt_family_for_product`. لقطة كل منتجٍ تحفظ `family_id` كما كان
+        # (وهو `None` للقديم) فالتراجع يُرجعه إلى «بلا أب» حرفياً.
+        target_family_before = target.family_id
+        adopt_family_for_product(target, tenant=tenant)
+        target.refresh_from_db(fields=['family_id'])
         target_family = target.family
 
         target_guard = {f: resolve_family_field(target, f) for f in MERGE_GUARD_FIELDS}
@@ -546,15 +581,20 @@ def merge_products(*, tenant, target_product_id, product_ids, brands=None, user=
         # دلتا ٢: تعيين براند الهدف نفسه — منفصلٌ عن `moved`/`merged_product_ids`
         # عمداً: تلك تصف من *انتقل* (تغيّر أبوه)، والهدف لا يتغيّر أبوه أبداً.
         # لكن لقطته تدخل نفس `snapshot` كي يعيده `undo_product_merge` العام حرفياً.
+        # ولقطته تلزم أيضاً حين اكتسب أباً للتوّ (دلتا ٣): بلا تسجيل
+        # `family_id` السابق (`None`) يُبقيه التراجعُ تحت أبٍ لم يكن له — وهو
+        # الأثر الذي تشترط التذكرة انعدامه. لقطةٌ واحدة تكفي للسببين معاً.
         new_target_brand = brand_overrides.get(target.id)
-        if new_target_brand is not None and new_target_brand != (target.brand or ''):
+        brand_changes = new_target_brand is not None and new_target_brand != (target.brand or '')
+        if brand_changes or target_family_before is None:
             snapshot.append({
                 'product_id': target.id,
-                'family_id': target.family_id,
+                'family_id': target_family_before,
                 'brand': target.brand,
                 'name_ar': target.name_ar,
                 'name_en': target.name_en,
             })
+        if brand_changes:
             target.brand = new_target_brand
             target.save(update_fields=['brand'])
 

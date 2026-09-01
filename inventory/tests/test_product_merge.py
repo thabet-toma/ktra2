@@ -12,6 +12,7 @@ from rest_framework.test import APITestCase
 
 from accounting.models import JournalHeader
 from inventory.models import Product, ProductCategory, ProductFamily, ProductMerge, StockMovement, UnitOfMeasure
+from inventory.services import merge_products, undo_product_merge
 from tenants.services import create_company
 
 MERGE_URL = "/api/inventory/products/merge/"
@@ -322,3 +323,55 @@ class OrphanFamilyIsHiddenAfterMergeTest(APITestCase):
         assert offer.status_code == 200, offer.content[:300]
         match = offer.json()["match"]
         assert match is None or match["id"] != orphan_family_id
+
+
+class LegacyCatalogueMergeTest(APITestCase):
+    """#24-دلتا ٣: الكتالوج القديم — كل صفوفه بلا أب — هو ما بُنيت له الأداة.
+
+    قبل هذا كانت `merge_products` تشترط أباً للهدف سلفاً، فترفض كل ضمٍّ على
+    بياناتٍ حقيقية برسالة «بلا منتجٍ أبٍ فوقه»: أداةُ التنظيف عاجزةٌ عن لمس ما
+    بُنيت لتنظيفه.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="legacy-merge", password="x")
+        self.tenant = create_company("شركة الكتالوج القديم", self.user)
+        self.a = Product.objects.create(
+            tenant=self.tenant, sku="OLD-A", name_ar="215/75/15 دانتير",
+            quantity_on_hand=Decimal("10"), avg_cost=Decimal("100"))
+        self.b = Product.objects.create(
+            tenant=self.tenant, sku="OLD-B", name_ar="215/75/15 روك بيلد",
+            quantity_on_hand=Decimal("4"), avg_cost=Decimal("120"))
+
+    def test_two_products_with_no_parent_at_all_can_be_merged(self):
+        self.assertIsNone(self.a.family_id)
+        self.assertIsNone(self.b.family_id)
+
+        merge, moved = merge_products(
+            tenant=self.tenant, target_product_id=self.a.id,
+            product_ids=[self.b.id], user=self.user,
+        )
+
+        self.a.refresh_from_db()
+        self.b.refresh_from_db()
+        self.assertIsNotNone(self.a.family_id)
+        self.assertEqual(self.b.family_id, self.a.family_id)
+        self.assertEqual([p.id for p in moved], [self.b.id])
+        # الأرقام لم تُمَسّ: الأب لا يحمل رقماً، والرصيد والتكلفة على البراند.
+        self.assertEqual(self.a.quantity_on_hand, Decimal("10"))
+        self.assertEqual(self.b.quantity_on_hand, Decimal("4"))
+        self.assertEqual(self.b.avg_cost, Decimal("120"))
+
+    def test_undo_returns_the_target_to_having_no_parent_at_all(self):
+        """التراجع بلا أثر يشمل الأب الذي اكتسبه الهدف للتوّ — وإلا بقي تحت
+        أبٍ لم يكن له قبل الضمّ."""
+        merge, _ = merge_products(
+            tenant=self.tenant, target_product_id=self.a.id,
+            product_ids=[self.b.id], user=self.user,
+        )
+        undo_product_merge(tenant=self.tenant, merge_id=merge.id)
+
+        self.a.refresh_from_db()
+        self.b.refresh_from_db()
+        self.assertIsNone(self.a.family_id)
+        self.assertIsNone(self.b.family_id)
