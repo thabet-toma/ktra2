@@ -11,7 +11,7 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 
-from .models import Product, ProductFamily, StockMovement
+from .models import Product, ProductFamily, ProductMerge, StockMovement
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -457,6 +457,154 @@ def add_brand_to_family(*, family, brand_name: str, tenant=None, sku: str | None
             except IntegrityError:
                 create_kwargs['sku'] = generate_next_sku(tenant)
     raise ValidationError('تعذّر توليد رقم منتج — أعد المحاولة.')
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# #24: الضمّ الجماعي — منتجات قائمة هي في الحقيقة براندات منتجٍ واحد تُجمع
+# تحت أبٍ واحد. **بلا حركة مخزون ولا قيد محاسبي إطلاقاً**: لا نداء هنا لـ
+# `record_stock_movement` ولا `accounting.services.post_journal` — كل براند
+# يحتفظ برصيده وتكلفته وحركاته وفواتيره كما هي، فقط انتساب `family` (وتطبيع
+# الاسم، والبراند إن مُرِّر) يتغيّر. راجع القرار المسجَّل على #24 لتبرير
+# تطبيع الاسم رغم أن #13 منعه أصلاً — السبب رُفع بعد لقطة اسم بند فاتورة
+# البيع (#18).
+# ──────────────────────────────────────────────────────────────────────────
+
+MERGE_GUARD_FIELDS = ('uom_id', 'is_serialized')
+
+
+def merge_products(*, tenant, target_product_id, product_ids, brands=None, user=None):
+    """يضمّ عدّة براندات قائمة تحت أبٍ واحد (#24).
+
+    `target_product_id` يحدّد الأب الناجي (`family` الحالي لهذا البراند)؛
+    باقي `product_ids` تُعاد ربطها به. المنتجات التي ليست لهذه الشركة، أو
+    الموجودة أصلاً تحت نفس الأب، تُتجاهل بصمت — عزل الشركات هنا فلترةٌ لا
+    خطأ (نفس اصطلاح `bulk_set_group`)، والضمّ متكرّرٌ آمن (idempotent).
+
+    يُمنع فقط عند اختلاف وحدة القياس أو تتبّع التسلسلي (`MERGE_GUARD_FIELDS`)
+    — هذان فقط، بلا موانع مخترَعة (قرار #13). المقارنة عبر `resolve_family_field`
+    لأنها تُعامل الحقول «الأبوية» بقاعدة التعايش نفسها التي يقرأ منها كل شيء
+    آخر في النظام.
+
+    `brands`: تعيينٌ اختياري `{product_id: اسم البراند}` يكتبه المستخدم
+    صراحةً — **بلا اقتراحٍ آلي إطلاقاً** (قرار #13/#24). الحقل الغائب من
+    التعيين لا يُمَسّ. **الهدف براندٌ كباقي البراندات** (دلتا ٢): تعيينه في
+    `brands[target_product_id]` يُطبَّق عليه هو أيضاً لا على الإخوة المنقولين
+    وحدهم — فبعد أن يتوحّد الاسم، البراند هو المميِّز الوحيد بين صفوف المنتقي
+    («اسم المنتج (البراند)»)، وترك الهدف بلا وسيلةٍ لتسميته من هنا كان يُنتج
+    ضمّاً لا يميَّز صفّه عن بقية إخوته حين يبقى بلا براند.
+    """
+    ids = {int(i) for i in (product_ids or [])}
+    ids.add(int(target_product_id))
+    if len(ids) < 2:
+        raise ValidationError('اختر منتجين على الأقل للضمّ.')
+    brand_overrides = {
+        int(k): (v or '').strip() for k, v in (brands or {}).items() if str(v or '').strip()
+    }
+
+    with transaction.atomic():
+        products = list(
+            Product.objects.select_for_update().select_related('family')
+            .filter(tenant=tenant, id__in=ids)
+        )
+        by_id = {p.id: p for p in products}
+        target = by_id.get(int(target_product_id))
+        if target is None or target.family_id is None:
+            raise ValidationError('المنتج الهدف غير موجود لهذه الشركة، أو بلا منتجٍ أبٍ فوقه.')
+        target_family = target.family
+
+        target_guard = {f: resolve_family_field(target, f) for f in MERGE_GUARD_FIELDS}
+        others = [p for p in products if p.id != target.id]
+        for product in others:
+            for field in MERGE_GUARD_FIELDS:
+                if resolve_family_field(product, field) != target_guard[field]:
+                    label = product.name_ar or product.name_en or product.sku
+                    raise ValidationError(
+                        f'يتعذّر ضمّ «{label}»: وحدة القياس أو التتبّع التسلسلي مختلفٌ عن الهدف.'
+                    )
+
+        snapshot = []
+        moved = []
+
+        # دلتا ٢: تعيين براند الهدف نفسه — منفصلٌ عن `moved`/`merged_product_ids`
+        # عمداً: تلك تصف من *انتقل* (تغيّر أبوه)، والهدف لا يتغيّر أبوه أبداً.
+        # لكن لقطته تدخل نفس `snapshot` كي يعيده `undo_product_merge` العام حرفياً.
+        new_target_brand = brand_overrides.get(target.id)
+        if new_target_brand is not None and new_target_brand != (target.brand or ''):
+            snapshot.append({
+                'product_id': target.id,
+                'family_id': target.family_id,
+                'brand': target.brand,
+                'name_ar': target.name_ar,
+                'name_en': target.name_en,
+            })
+            target.brand = new_target_brand
+            target.save(update_fields=['brand'])
+
+        for product in others:
+            if product.family_id == target_family.id:
+                continue
+            snapshot.append({
+                'product_id': product.id,
+                'family_id': product.family_id,
+                'brand': product.brand,
+                'name_ar': product.name_ar,
+                'name_en': product.name_en,
+            })
+            product.family_id = target_family.id
+            product.name_ar = target_family.name_ar
+            product.name_en = target_family.name_en
+            if product.id in brand_overrides:
+                product.brand = brand_overrides[product.id]
+            moved.append(product)
+
+        if not moved:
+            raise ValidationError('كل المنتجات المحدَّدة تحت المنتج نفسه بالفعل.')
+
+        Product.objects.bulk_update(moved, ['family_id', 'name_ar', 'name_en', 'brand'])
+        merge = ProductMerge.objects.create(
+            tenant=tenant, target_family=target_family, snapshot=snapshot,
+            created_by=user if getattr(user, 'is_authenticated', False) else None,
+        )
+    return merge, moved
+
+
+def undo_product_merge(*, tenant, merge_id):
+    """يعكس ضمّاً بالكامل من `ProductMerge.snapshot` — بلا أثر (#24).
+
+    كل براندٍ يعود إلى أبيه وبراندِه واسمه كما كانا **حرفياً** قبل الضمّ.
+    الأب الذي كان تحته لم يُحذف في الضمّ (يُترك يتيماً)، فالتراجع يجده كما هو.
+    آمنٌ من التكرار: سجلّ ضمٍّ مُتراجَعٌ عنه (`undone_at` معبّأ) لا يُقبل ثانيةً.
+    """
+    with transaction.atomic():
+        merge = (
+            ProductMerge.objects.select_for_update()
+            .filter(tenant=tenant, id=merge_id, undone_at__isnull=True)
+            .first()
+        )
+        if merge is None:
+            raise ValidationError('سجلّ الضمّ غير موجود لهذه الشركة، أو أُلغي مسبقاً.')
+
+        rows = {row['product_id']: row for row in merge.snapshot}
+        products = {
+            p.id: p for p in
+            Product.objects.select_for_update().filter(tenant=tenant, id__in=rows.keys())
+        }
+        restored = []
+        for product_id, row in rows.items():
+            product = products.get(product_id)
+            if product is None:
+                continue
+            product.family_id = row['family_id']
+            product.brand = row['brand']
+            product.name_ar = row['name_ar']
+            product.name_en = row['name_en']
+            restored.append(product)
+
+        if restored:
+            Product.objects.bulk_update(restored, ['family_id', 'brand', 'name_ar', 'name_en'])
+        merge.undone_at = timezone.now()
+        merge.save(update_fields=['undone_at'])
+    return merge, restored
 
 
 def record_stock_movement(

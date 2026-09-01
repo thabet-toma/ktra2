@@ -281,6 +281,44 @@ class Product(models.Model):
         return self.name_ar or self.name_en or self.sku
 
 
+class ProductMerge(models.Model):
+    """سجلّ ضمٍّ قابل للتراجع (#24) — «سلّة محذوفات» على نمط `accounting.VoidedJournal`.
+
+    الضمّ لا ينقل رصيداً ولا تكلفة ولا يُنشئ حركة مخزون أو قيداً: هو إعادة
+    ربط `Product.family` فقط (+تطبيع الاسم، +البراند إن مرَّره المستخدم).
+    `snapshot` يحفظ الحالة **قبل** الضمّ لكل براند مُضموم (family_id/brand/
+    name_ar/name_en) — نصّاً لا FK، لأن الأب القديم قد يبقى يتيماً بلا
+    براندات، فحذفه لاحقاً (إن حدث) لا يجوز أن يكسر التراجع. `target_family`
+    وحده FK حقيقي لأنه لا يُحذف أبداً: هو أبٌ حيّ ببراندٍ واحد على الأقل.
+    """
+    id = models.AutoField(primary_key=True, db_column='ProductMergeID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='product_merges',
+    )
+    target_family = models.ForeignKey(
+        ProductFamily, on_delete=models.CASCADE, db_column='TargetFamilyID',
+        related_name='merges',
+    )
+    snapshot = models.JSONField(
+        db_column='Snapshot',
+        help_text='لكل براند مُضموم: {product_id, family_id, brand, name_ar, name_en} قبل الضمّ',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedByUserID', related_name='product_merges',
+    )
+    undone_at = models.DateTimeField(null=True, blank=True, db_column='UndoneAt')
+
+    class Meta:
+        db_table = 'product_merges'
+        managed = True
+
+    def __str__(self):
+        return f"ProductMerge #{self.id} → family {self.target_family_id}"
+
+
 class Warehouse(models.Model):
     """مستودع مستقل لكل شركة — وجهة استلام البضاعة وبُعد على حركات المخزون.
 

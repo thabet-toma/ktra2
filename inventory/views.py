@@ -107,7 +107,17 @@ class ProductFamilyViewSet(viewsets.ReadOnlyModelViewSet):
         tenant = get_tenant(self.request)
         if not tenant:
             return ProductFamily.objects.none()
-        return super().get_queryset().filter(tenant=tenant)
+        # #24: الأب الذي فقد برانداته كلَّها بالضمّ يبقى صفّاً في الجدول عمداً —
+        # سجلّ التراجع يحفظ معرّفه نصّاً ليُعاد الربط به، فحذفه يكسر التراجع.
+        # لكنه ليس «منتجاً» لأحد: لا براند تحته ولا رصيد ولا اسمَ يُعرض. فيبقى
+        # في القاعدة ويُحجب عن القراءة — الثابت المعلَن في #20 («منتجٌ بلا
+        # براندات حالةٌ لا مكان لها») يبقى صحيحاً في كل ما يراه المستخدم.
+        return (
+            super().get_queryset()
+            .filter(tenant=tenant)
+            .filter(brands__isnull=False)
+            .distinct()
+        )
 
     @action(detail=False, methods=['get'], url_path='check-name')
     def check_name(self, request):
@@ -120,7 +130,13 @@ class ProductFamilyViewSet(viewsets.ReadOnlyModelViewSet):
         name = (request.query_params.get('name') or '').strip()
         if not tenant or not name:
             return Response({'match': None})
-        match = find_by_normalized_name(ProductFamily.objects.filter(tenant=tenant), name)
+        # مجموعةٌ صريحة لا `get_queryset()`: تلك تحمل `select_related`، و
+        # `find_by_normalized_name` تستعمل `only` — وجانغو يرفض تأجيل حقلٍ
+        # يعبره `select_related`. والحجب نفسه مُطبَّق: أبٌ بلا براندات لا يُقترَح.
+        match = find_by_normalized_name(
+            ProductFamily.objects.filter(tenant=tenant, brands__isnull=False).distinct(),
+            name,
+        )
         if not match:
             return Response({'match': None})
         return Response({
@@ -712,6 +728,97 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=['post'], url_path='merge')
+    @requires_perm('inventory.item.manage')
+    def merge(self, request):
+        """#24: ضمٌّ جماعي — منتجاتٌ قائمة (براندات منتجٍ واحد فعلياً) تحت أبٍ
+        واحد. **بلا حركة مخزون ولا قيد محاسبي** — انظر `services.merge_products`.
+
+        المحدِّد في **جسم** الطلب لا في عنوانه (نفس درس كرت المجموعة): `product_ids`
+        قد تفوق 1500 معرّفاً، وتعدادها في سطر الطلب يتجاوز حدّ nginx.
+        """
+        from .services import merge_products
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+        target_product_id = request.data.get('target_product_id')
+        if not target_product_id:
+            raise serializers.ValidationError({'target_product_id': 'مطلوب.'})
+        raw_ids = request.data.get('product_ids') or []
+        if not isinstance(raw_ids, list):
+            return Response(
+                {'error': 'product_ids يجب أن تكون قائمة معرّفات منتجات'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            target_product_id = int(target_product_id)
+            product_ids = [int(pid) for pid in raw_ids]
+        except (TypeError, ValueError):
+            return Response({'error': 'معرّف منتج غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
+        brands = request.data.get('brands') or {}
+        if not isinstance(brands, dict):
+            return Response({'error': 'brands يجب أن يكون تعييناً'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            merge_obj, moved = merge_products(
+                tenant=tenant, target_product_id=target_product_id,
+                product_ids=product_ids, brands=brands, user=request.user,
+            )
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                {'detail': exc.messages if hasattr(exc, 'messages') else [str(exc)]}
+            )
+
+        target_label = merge_obj.target_family.name_ar or merge_obj.target_family.name_en
+        log_activity(
+            action='update',
+            entity_type='product_family',
+            entity_id=merge_obj.target_family_id,
+            entity_label=target_label,
+            description=f'ضمّ {len(moved)} منتجاً تحت «{target_label}»',
+            metadata={'merge_id': merge_obj.id, 'product_ids': [p.id for p in moved][:500]},
+            request=request,
+        )
+        return Response({
+            'merge_id': merge_obj.id,
+            'target_family_id': merge_obj.target_family_id,
+            'target_product_id': target_product_id,
+            'merged_product_ids': [p.id for p in moved],
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='merge-undo')
+    @requires_perm('inventory.item.manage')
+    def merge_undo(self, request):
+        """#24: يتراجع عن ضمٍّ بالكامل — كل براند يعود لأبيه واسمه وبراندِه
+        كما كانوا. انظر `services.undo_product_merge`."""
+        from .services import undo_product_merge
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+        merge_id = request.data.get('merge_id')
+        if not merge_id:
+            raise serializers.ValidationError({'merge_id': 'مطلوب.'})
+        try:
+            merge_obj, restored = undo_product_merge(tenant=tenant, merge_id=int(merge_id))
+        except (TypeError, ValueError):
+            return Response({'error': 'merge_id غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(
+                {'detail': exc.messages if hasattr(exc, 'messages') else [str(exc)]}
+            )
+        log_activity(
+            action='update',
+            entity_type='product_family',
+            entity_id=merge_obj.target_family_id,
+            description=f'تراجع عن ضمّ {len(restored)} منتجاً',
+            metadata={'merge_id': merge_obj.id},
+            request=request,
+        )
+        return Response({
+            'merge_id': merge_obj.id,
+            'restored_product_ids': [p.id for p in restored],
+        }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get', 'post'], url_path='group-profile')
     def group_profile(self, request):

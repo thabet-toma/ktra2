@@ -2,13 +2,17 @@
  * N5-T3 — ItemsManagement (L4) — KitDenseTable للمنتجات
  * يستخدم SQL products من inventoryApi (لا Firestore).
  */
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
 import { type DenseColumn } from "../kit/KitDenseTable";
 import { GroupedItemsTable, type TreeCategory } from "./GroupedItemsTable";
-import { Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer, Copy, ExternalLink, FolderTree } from "lucide-react";
+import { MergeProductsModal } from "./MergeProductsModal";
+import {
+  Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer, Copy, ExternalLink,
+  FolderTree, Merge, Undo2, X,
+} from "lucide-react";
 import { ItemForm } from "./ItemForm";
 import { useProductInsights, useGroupInsights } from "./ProductInsightTabs";
 import { KitTabs, type KitTab } from "../kit";
@@ -29,6 +33,10 @@ import {
 } from "../../utils/itemSimpleFields";
 import { humanizeThrown } from "../../utils/drfError";
 import { eventBus } from "../../utils/eventBus";
+import type { MergeCandidate } from "../../utils/productMerge";
+import type { MergeProductsResult } from "../../services/inventoryApi";
+import { useToast } from "../../contexts/ToastContext";
+import { useConfirm } from "../../contexts/ConfirmContext";
 
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
 const fmt = (n: number | string) => formatMoney(n, "0");
@@ -213,6 +221,19 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [exporting, setExporting] = useState(false);
   const pageSize = 50;
 
+  // #24: تحديد الضمّ — خريطةٌ لا مجموعة معرّفات: تحفظ لقطة الصفّ لحظة تحديده
+  // (الوحدة/التتبّع التسلسلي/الاسم) كي تبقى صالحة بعد تبديل الصفحة، حين يُستبدل
+  // `products` بصفحةٍ لا تحمل صفوف الصفحة السابقة المُحدَّدة.
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeSelected, setMergeSelected] = useState<Map<number, SqlProduct>>(new Map());
+  const [mergeModalOpen, setMergeModalOpen] = useState(false);
+  const [lastMerge, setLastMerge] = useState<{
+    mergeId: number; targetName: string; mergedCount: number;
+  } | null>(null);
+  const [undoingMerge, setUndoingMerge] = useState(false);
+  const toast = useToast();
+  const confirm = useConfirm();
+
   const orderingParam = sortKey
     ? `${sortDir === "desc" ? "-" : ""}${ORDER_FIELD[sortKey] ?? sortKey}`
     : "";
@@ -328,6 +349,71 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       page, mode: displayMode,
     });
   }, [load, search, statusFilter, orderingParam, page, displayMode]);
+
+  // #24: تبديل تحديد صفٍّ واحد — يلتقط الصفّ من `products` الحالية عند الإضافة
+  // (هي معروضة فعلاً وقت النقر)، ويكتفي بالمعرّف عند الإزالة.
+  const toggleMergeSelected = useCallback((id: number) => {
+    setMergeSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        const row = products.find((p) => p.id === id);
+        if (row) next.set(id, row);
+      }
+      return next;
+    });
+  }, [products]);
+
+  const mergeSelectedIds = useMemo(
+    () => new Set(mergeSelected.keys()), [mergeSelected],
+  );
+
+  const mergeCandidates: MergeCandidate[] = useMemo(
+    () => [...mergeSelected.values()].map((p) => ({
+      id: p.id,
+      // الاسم المجرَّد لا `display_name`: تلك تُلحق البراند القديم بين قوسين،
+      // وهذه النافذة تعرض البراند في عمودٍ مستقلٍّ قابلٍ للتعديل — عرضهما معاً
+      // يُبقي نصّاً قديماً بجانب حقلٍ حيّ يعدّله المستخدم فعلاً.
+      name: p.name_ar || p.name_en || p.sku || `#${p.id}`,
+      brand: p.brand || "",
+      uomId: p.uom_id ?? null,
+      isSerialized: !!p.is_serialized,
+    })),
+    [mergeSelected],
+  );
+
+  const handleMerged = useCallback((result: MergeProductsResult & { targetName: string }) => {
+    setLastMerge({
+      mergeId: result.merge_id, targetName: result.targetName,
+      mergedCount: result.merged_product_ids.length,
+    });
+    setMergeSelected(new Map());
+    setMergeMode(false);
+    reload();
+  }, [reload]);
+
+  const handleUndoMerge = useCallback(async () => {
+    if (!lastMerge) return;
+    const ok = await confirm({
+      title: "التراجع عن الضمّ",
+      message: `سيعود ${lastMerge.mergedCount} منتجاً إلى ما كانوا عليه قبل الضمّ تحت «${lastMerge.targetName}» — الاسم والانتساب كما كانا حرفياً، بلا أثرٍ آخر.`,
+      confirmText: "تراجع",
+      danger: false,
+    });
+    if (!ok) return;
+    setUndoingMerge(true);
+    try {
+      await inventoryApi.undoProductMerge(lastMerge.mergeId);
+      toast("تمّ التراجع عن الضمّ.", "success");
+      setLastMerge(null);
+      reload();
+    } catch (e: unknown) {
+      toast(humanizeThrown(e, "تعذّر التراجع عن الضمّ"), "error");
+    } finally {
+      setUndoingMerge(false);
+    }
+  }, [lastMerge, confirm, toast, reload]);
 
   const beginNameEdit = useCallback((row: SqlProduct) => {
     if (nameSavingRef.current) return;
@@ -754,6 +840,37 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           {displayMode === "tree" ? <Table2 className="h-4 w-4" /> : <ListTree className="h-4 w-4" />}
           {displayMode === "tree" ? " جدول" : " شجرة"}
         </button>
+        {/* #24: الضمّ الجماعي — عدّة منتجاتٍ هي في الحقيقة براندات منتجٍ واحد
+            تحت منتجٍ واحدٍ يختاره المستخدم. متاحٌ في عرض الجدول وحده (عمود
+            التحديد على `GroupedItemsTable`، لا الشجرة الخام). */}
+        {displayMode !== "tree" && (
+          <>
+            <button
+              type="button"
+              className="ktra-toolbtn"
+              onClick={() => {
+                setMergeMode((m) => {
+                  if (m) setMergeSelected(new Map());
+                  return !m;
+                });
+              }}
+              title="تحديد منتجات لضمّها تحت منتج واحد"
+            >
+              <Merge className="h-4 w-4" /> {mergeMode ? "إنهاء التحديد" : "ضمّ منتجات"}
+            </button>
+            {mergeMode && (
+              <button
+                type="button"
+                className="ktra-btn ktra-btn-primary"
+                disabled={mergeSelected.size < 2}
+                onClick={() => setMergeModalOpen(true)}
+                title={mergeSelected.size < 2 ? "حدّد منتجين على الأقل" : undefined}
+              >
+                ضمّ المحدَّد ({mergeSelected.size})
+              </button>
+            )}
+          </>
+        )}
         <button className="ktra-toolbtn" onClick={() => reload()} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
@@ -763,6 +880,33 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       </div>
 
       {err && <div className="ktra-banner ktra-banner--err">{err}</div>}
+
+      {/* #24: التراجع يبقى في متناول اليد بعد الضمّ — لا وسيلة API فقط. يبقى
+          ظاهراً حتى يُغلقه المستخدم صراحةً أو يتراجع، لا مؤقّتاً كالتوست. */}
+      {lastMerge && (
+        <div className="ktra-banner ktra-banner--ok">
+          <span className="flex-1">
+            تمّ ضمّ {lastMerge.mergedCount} منتجاً تحت «{lastMerge.targetName}».
+          </span>
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            disabled={undoingMerge}
+            onClick={() => void handleUndoMerge()}
+          >
+            <Undo2 className="h-4 w-4" /> {undoingMerge ? "جارٍ التراجع…" : "تراجع"}
+          </button>
+          <button
+            type="button"
+            className="ktra-iconbtn"
+            onClick={() => setLastMerge(null)}
+            aria-label="إغلاق"
+            title="إغلاق"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {displayMode === "tree" ? (
         // T-N3: شجرة التصنيفات/المنتجات (نفس مكوّن شجرة المنتجات في الفواتير).
@@ -826,8 +970,16 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           sortKey={sortKey}
           sortDir={sortDir}
           onSort={(key, dir) => { setSortKey(key); setSortDir(dir); }}
+          selection={mergeMode ? { selectedIds: mergeSelectedIds, onToggle: toggleMergeSelected } : undefined}
         />
       )}
+
+      <MergeProductsModal
+        isOpen={mergeModalOpen}
+        onClose={() => setMergeModalOpen(false)}
+        candidates={mergeCandidates}
+        onMerged={handleMerged}
+      />
 
       {/* المرحلة 5 / P0-12: تنقّل الصفحات — للعرض الجدولي وحده (الشجري يجمّع
           المجموعة كاملةً فلا معنى لتصفّحه). يظهر فقط عند وجود أكثر من صفحة. */}

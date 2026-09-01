@@ -99,6 +99,20 @@ export interface AddBrandResult {
   created: boolean;
 }
 
+/** #24: ردّ `products/merge/` — المنتجات التي انتقلت فعلاً تحت الهدف (الرفوضة لم تُرسَل أصلاً). */
+export interface MergeProductsResult {
+  merge_id: number;
+  target_family_id: number;
+  target_product_id: number;
+  merged_product_ids: number[];
+}
+
+/** #24: ردّ `products/merge-undo/` — كل ما عاد لأبيه واسمه وبراندِه كما كانوا. */
+export interface UndoMergeResult {
+  merge_id: number;
+  restored_product_ids: number[];
+}
+
 /** جسم طلب الكرت المجمّع — يقبل مصفوفة معرّفات كما يقبل المحدِّد الكامل. */
 const groupBody = (
   sel: ProductGroupSelector | number[],
@@ -273,6 +287,44 @@ export const inventoryApi = {
       body: JSON.stringify({ product_ids: productIds, ...fields }),
     });
     await handle(res, "bulkSetGroup");
+    return res.json();
+  },
+
+  /**
+   * #24: ضمٌّ جماعي — منتجاتٌ قائمة (براندات منتجٍ واحد فعلياً) تحت أبٍ واحد.
+   * **بلا حركة مخزون ولا قيد محاسبي**، ومحدِّدها في **جسم** الطلب لا عنوانه
+   * (نفس درس كرت المجموعة: تعداد ~1500 معرّف تجاوز حدّ nginx في الإنتاج).
+   * الاسم يُطبَّع خادمياً على اسم الهدف — بلا اقتراحٍ آلي لأيّ شيء آخر هنا.
+   *
+   * `brands` (دلتا ٢): تعيينٌ اختياري `{product_id: اسم البراند}` — يشمل
+   * الهدف نفسه كأي عضوٍ آخر (البراند وحده يميّز الصفوف بعد أن يتوحّد الاسم).
+   * المفتاح الغائب لا يُمَسّ؛ القيمة الفارغة تُعامَل خادمياً كغائبة.
+   */
+  mergeProducts: async (
+    targetProductId: number, productIds: number[], brands?: Record<number, string>,
+  ): Promise<MergeProductsResult> => {
+    const res = await fetch(`${INV}/products/merge/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({
+        target_product_id: targetProductId, product_ids: productIds,
+        ...(brands && Object.keys(brands).length ? { brands } : {}),
+      }),
+    });
+    await handle(res, "mergeProducts");
+    invalidatePickerProducts();
+    return res.json();
+  },
+
+  /** #24: يتراجع عن ضمٍّ بالكامل — كل براند يعود لأبيه واسمه وبراندِه كما كانوا. */
+  undoProductMerge: async (mergeId: number): Promise<UndoMergeResult> => {
+    const res = await fetch(`${INV}/products/merge-undo/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ merge_id: mergeId }),
+    });
+    await handle(res, "undoProductMerge");
+    invalidatePickerProducts();
     return res.json();
   },
 

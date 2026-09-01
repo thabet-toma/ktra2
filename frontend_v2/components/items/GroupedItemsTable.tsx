@@ -29,13 +29,21 @@ type Props = {
    *  `categoryId` يغني عن تعداد المعرّفات في الطلب (الخادم يشتقّها) — يغيب في
    *  عقدة «بدون تصنيف» وحدها فتبقى معرّفاتها صريحة. */
   onShowGroup: (ids: string[], name: string, categoryId?: number) => void;
+  /** #24: وضع تحديد الضمّ — عمود مربّعات اختيار على صفوف **المنتج المفرد**
+   *  فقط (فردٌ حقيقي، أو براندٌ مكشوفٌ من مجموعة) — لا صفوف التصنيف ولا صفّ
+   *  ملخّص المجموعة المطويّ (ذاك يمثّل عدّة براندات بمعرّفٍ مرجعيّ واحد، فتحديده
+   *  يوهم بتحديد الكلّ بينما يرسل واحداً فقط). غيابه = الجدول كما كان تماماً. */
+  selection?: {
+    selectedIds: ReadonlySet<number>;
+    onToggle: (id: number) => void;
+  };
 };
 
 const UNCAT = -1; // تصنيف افتراضي «بدون تصنيف» للمنتجات بلا تصنيف.
 
 export const GroupedItemsTable: React.FC<Props> = ({
   columns, rows, categories, getRowKey, loading, emptyHint = "لا توجد منتجات",
-  sortKey, sortDir, onSort, onRowDoubleClick, onShowGroup,
+  sortKey, sortDir, onSort, onRowDoubleClick, onShowGroup, selection,
 }) => {
   // مفتوحة افتراضياً: البدء بالطيّ كان يُخفي كل المنتجات تحت اسم التصنيف فتبدو
   // الشاشة فارغة. `collapsed` تحمل ما طواه المستخدم فقط (الجديد يبقى مفتوحاً).
@@ -92,6 +100,21 @@ export const GroupedItemsTable: React.FC<Props> = ({
     reveal?: { count: number; expanded: boolean; onToggle: () => void; rowKey: string },
   ) => (
     <tr key={reveal ? reveal.rowKey : `p-${getRowKey(p)}`} onDoubleClick={() => onRowDoubleClick?.(p)}>
+      {selection && (
+        <td style={{ textAlign: "center", width: 34 }} onClick={(e) => e.stopPropagation()}>
+          {/* صفّ ملخّص المجموعة (`reveal`) بلا مربّع — معرّفه مرجعيٌّ لا يمثّل
+              كل الأعضاء؛ افتحه لتحديد براندٍ بعينه. */}
+          {!reveal && (
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={selection.selectedIds.has(Number(getRowKey(p)))}
+              onChange={() => selection.onToggle(Number(getRowKey(p)))}
+              aria-label={`تحديد ${p.display_name || p.name_ar || p.sku || ""} للضمّ`}
+            />
+          )}
+        </td>
+      )}
       {columns.map((col, ci) => {
         const isNameCol = col.key === "name_ar";
         return (
@@ -161,6 +184,7 @@ export const GroupedItemsTable: React.FC<Props> = ({
     const ids = descendantIds(catId);
     return (
       <tr key={`c-${catId}`} style={{ background: depth === 0 ? "var(--ktra-bg-soft,#e7ecf1)" : "var(--ktra-bg-soft,#f1f3f5)" }}>
+        {selection && <td />}
         {columns.map((col, ci) => {
           if (ci === 0) {
             return (
@@ -218,6 +242,7 @@ export const GroupedItemsTable: React.FC<Props> = ({
       <table className="ktra-grid" data-variant="list">
         <thead>
           <tr>
+            {selection && <th style={{ width: 34 }} />}
             {columns.map((col) => (
               <th
                 key={col.key}
@@ -236,10 +261,10 @@ export const GroupedItemsTable: React.FC<Props> = ({
         </thead>
         <tbody>
           {loading && rows.length === 0 && (
-            <tr className="ktra-row--empty"><td colSpan={columns.length} style={{ textAlign: "center", padding: 16 }}>جاري التحميل…</td></tr>
+            <tr className="ktra-row--empty"><td colSpan={columns.length + (selection ? 1 : 0)} style={{ textAlign: "center", padding: 16 }}>جاري التحميل…</td></tr>
           )}
           {!loading && rows.length === 0 && (
-            <tr className="ktra-row--empty"><td colSpan={columns.length} style={{ textAlign: "center", padding: 16, color: "var(--ktra-ink-soft)" }}>{emptyHint}</td></tr>
+            <tr className="ktra-row--empty"><td colSpan={columns.length + (selection ? 1 : 0)} style={{ textAlign: "center", padding: 16, color: "var(--ktra-ink-soft)" }}>{emptyHint}</td></tr>
           )}
           {body}
         </tbody>
