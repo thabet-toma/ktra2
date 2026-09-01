@@ -125,3 +125,81 @@ class ReplenishmentReportTest(APITestCase):
         self.client.force_authenticate(user=other_user)
         data = _run(self.client, "stock-replenishment", other.TenantID)
         assert data["rows"] == []
+
+
+class AutoReorderReportVisibilityTest(APITestCase):
+    """#33/ط10: صفٌّ تلقائيٌّ لا يطلب شيئاً يسقط من العرض الافتراضي — لا يُحذف،
+    وفلتر «راكد» يبقى يُظهره عمداً. المسار اليدوي لا يتأثر (`OTHER-MANUAL`)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from inventory.models import ProductDemandForecast
+        from logistics.models import Currency, PurchaseOrder, PurchaseOrderLine, PurchaseSettings
+        from partners.models import Partner
+
+        cls.user = User.objects.create_user(username="auto_visibility", password="x")
+        cls.tenant = create_company("شركة رؤية المسار التلقائي", cls.user)
+        PurchaseSettings.objects.create(
+            tenant=cls.tenant, default_lead_time_days=14, review_period_days=14)
+        today = datetime.date.today()
+
+        # منتجٌ يدويٌّ عاديٌّ بلا مبيعات — بلا صفّ تنبّؤ، يبقى مرئياً كسابق عهده
+        # (ط10 مقصورةٌ على `auto` — المسار اليدوي عرضه اليوم لا يتغيّر حرفاً).
+        cls.manual_no_signal = Product.objects.create(
+            tenant=cls.tenant, sku="OTHER-MANUAL", name_ar="منتج يدوي بلا إشارة",
+            quantity_on_hand=Decimal("3"),
+        )
+
+        # صنفٌ تلقائيٌّ عليه طلبية شراءٍ مؤكَّدة تغطّي احتياجه بالكامل.
+        cls.covered = Product.objects.create(
+            tenant=cls.tenant, sku="AUTO-COVERED", name_ar="صنفٌ مغطّىً بطلبية",
+            quantity_on_hand=Decimal("0"), reorder_mode=Product.REORDER_MODE_AUTO,
+        )
+        ProductDemandForecast.objects.create(
+            tenant=cls.tenant, product=cls.covered,
+            level=Decimal("10"), trend=Decimal("0"), mad=Decimal("0"),
+            weeks_observed=10, last_week_start=today,
+        )
+        currency = Currency.objects.create(Code="ILB", Name="شيكل")
+        supplier = Partner.objects.create(
+            tenant=cls.tenant, name="مورّد التغطية", partner_type="Supplier")
+        order = PurchaseOrder.objects.create(
+            tenant=cls.tenant, order_number="PO-COVER", supplier=supplier,
+            order_date=today, currency=currency, status=PurchaseOrder.STATUS_CONFIRMED,
+        )
+        PurchaseOrderLine.objects.create(
+            tenant=cls.tenant, order=order, product=cls.covered,
+            quantity=Decimal("40"), unit_price=Decimal("1"), line_total=Decimal("40"),
+        )
+
+        # صنفٌ تلقائيٌّ لم يبع ولا قطعة — راكد.
+        cls.dead = Product.objects.create(
+            tenant=cls.tenant, sku="AUTO-DEAD", name_ar="صنفٌ تلقائيٌّ راكد",
+            quantity_on_hand=Decimal("20"), reorder_mode=Product.REORDER_MODE_AUTO,
+        )
+        StockMovement.objects.create(
+            tenant=cls.tenant, product=cls.dead, movement_type="IN",
+            quantity=Decimal("20"), movement_date=today - datetime.timedelta(days=100),
+        )
+        ProductDemandForecast.objects.create(
+            tenant=cls.tenant, product=cls.dead,
+            level=Decimal("0"), trend=Decimal("0"), mad=Decimal("0"),
+            weeks_observed=10, last_week_start=today,
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+
+    def test_covered_and_dead_auto_rows_are_absent_by_default(self):
+        data = _run(self.client, "stock-replenishment", self.tenant.TenantID)
+        skus = {r["sku"] for r in data["rows"]}
+        assert "AUTO-COVERED" not in skus, skus
+        assert "AUTO-DEAD" not in skus, skus
+        # اليدوي بلا إشارة يبقى ظاهراً كسابق عهده — لم يتغيّر حرفٌ فيه.
+        assert "OTHER-MANUAL" in skus, skus
+
+    def test_dead_row_is_reachable_under_the_dead_filter(self):
+        data = _run(self.client, "stock-replenishment", self.tenant.TenantID, urgency="dead")
+        skus = {r["sku"] for r in data["rows"]}
+        assert "AUTO-DEAD" in skus, skus
+        assert "AUTO-COVERED" not in skus, skus   # مغطّىً لا راكد — لا ينتمي لهذا الفلتر

@@ -182,6 +182,8 @@ class ProductSerializer(serializers.ModelSerializer):
             'supplier_account_override', 'ending_inventory_account_override',
             'price_tiers',
             'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level', 'max_stock_level',
+            # #33: مفتاحٌ لكل صنف — أيّ مسارٍ يحكم اقتراح التجديد (يدوي/تلقائي).
+            'reorder_mode',
             'is_serialized', 'is_service',
             # THA-24: سياسة الكفالة على المنتج — تقرأها الكفالة عند ترحيل البيع،
             # ويحرّرها المستخدم من كرت المنتج. بلا إدراجها هنا يبتلع DRF قيمتها

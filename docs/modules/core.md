@@ -22,7 +22,7 @@
 | `core/pagination.py` | منتجا الترقيم — الإلزامي والاختياري |
 | `core/reports/` | **حزمة** — إطار التقارير + 8 وحدات دومين |
 | `core/reports_api.py` | نقطتا الفهرس والتشغيل + كاش التقارير |
-| `core/replenishment.py` | محرّك تجديد المخزون: معدّل الصرف اليومي، مهلة التوريد المرصودة، مخزون الأمان، الحدّان المقترَحان، وقرار «النوع». يسكن هنا لأنه يقرأ `inventory` و`sales` و`logistics` معاً. يحمل أيضاً (#32) السلسلة الأسبوعية وتنبّؤ هولت (`holt_forecast`, `weekly_demand_series`) — يكتبهما `management/commands/recompute_demand_forecast.py` في `inventory.ProductDemandForecast` |
+| `core/replenishment.py` | محرّك تجديد المخزون: معدّل الصرف اليومي، مهلة التوريد المرصودة، مخزون الأمان، الحدّان المقترَحان، وقرار «النوع». يسكن هنا لأنه يقرأ `inventory` و`sales` و`logistics` معاً. يحمل أيضاً (#32) السلسلة الأسبوعية وتنبّؤ هولت (`holt_forecast`, `weekly_demand_series`) — يكتبهما `management/commands/recompute_demand_forecast.py` في `inventory.ProductDemandForecast`. و(#33) فرعٌ داخل `_product_row` يقرأ هذا التنبّؤ لكل منتجٍ وضعُه `Product.reorder_mode == "auto"` — لا بانٍ ثانٍ؛ `manual` (الافتراضي) بلا تغيير حرفاً |
 | `core/scan.py` | **T-SCAN** — حلّال «ما الذي في يدي؟»: نصٌّ واحد ← وحدة مُرقَّمة أو جهاز حسّاس أو منتج، ونقطته `/api/scan/` |
 | `core/payments.py` | منطق الدفع المشترك بين المبيعات والمشتريات |
 | `core/api_defaults.py` | إعدادات المصادقة الموحّدة + `PagePartnerBalanceMixin` |

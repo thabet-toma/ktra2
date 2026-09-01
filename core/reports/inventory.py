@@ -354,6 +354,13 @@ def _replenishment(tenant_id: int, params: dict) -> list[dict]:
 
     level = "group" if (params.get("level") or "item") == "group" else "item"
     rows = _reorder_rows(tenant_id, params, level=level)
+    if level == "item" and not (params.get("urgency") or None):
+        # #33/ط10: صنفٌ **تلقائي** لا يطلب شيئاً يسقط من العرض الافتراضي — لا
+        # من المحرّك (الذي يبقيه لأجل فلتر «راكد»)، بل هنا فقط. وحين يُطلب
+        # فلتر قرارٍ بعينه صراحةً (`urgency=dead` مثلاً) تُعرض مطابقاته كاملةً
+        # بصرف النظر عن الكمية. مقصورٌ على `auto`: المسار اليدوي عرضه اليوم لا
+        # يتغيّر حرفاً — منتجٌ مكتملُ الرصيد كان يظهر بكميةٍ صفرية وما زال.
+        rows = [r for r in rows if not (r["reorder_mode"] == "auto" and r["order_qty"] <= ZERO)]
     if level == "group":
         return [{
             "group_key": r["group_key"],
@@ -370,6 +377,8 @@ def _replenishment(tenant_id: int, params: dict) -> list[dict]:
             "newest_alternative": r["newest_alternative"],
             "urgency": r["urgency_label"],
         } for r in rows]
+    from core.replenishment import MODE_LABELS
+
     return [{
         "product_id": r["product_id"],
         "sku": r["sku"],
@@ -390,6 +399,14 @@ def _replenishment(tenant_id: int, params: dict) -> list[dict]:
         "order_qty": _qty(r["order_qty"]),
         "reason": r["reason"],
         "group_key": r["group_key"],
+        # #33: أعمدة تفسّر الرقم — البيع الأسبوعي والاتجاه (من `ProductDemandForecast`
+        # إن وُجد صفّه)، وأسابيع التغطية ومخزون الأمان اللذان يحكمان المسار
+        # التلقائي، ووضع الصنف نفسه (تلقائي/يدوي).
+        "weekly_sale": _qty(r["weekly_sale"]) if r["weekly_sale"] is not None else "",
+        "trend_label": r["trend_label"],
+        "coverage_weeks": _rate(r["coverage_weeks"]),
+        "safety_stock": _qty(r["safety_stock"]),
+        "reorder_mode": MODE_LABELS[r["reorder_mode"]],
     } for r in rows]
 
 
@@ -451,6 +468,12 @@ register(ReportSpec(
         ReportColumn("suggested_min", "الأدنى المقترَح", KIND_NUMBER, width="120px"),
         ReportColumn("suggested_max", "الأقصى المقترَح", KIND_NUMBER, width="120px"),
         ReportColumn("order_qty", "المقترح طلبه", KIND_NUMBER, total=True, width="110px"),
+        # #33: أعمدة تفسّر الرقم — «ما بدي رقم بينزل من السما».
+        ReportColumn("weekly_sale", "البيع الأسبوعي", KIND_NUMBER, width="100px"),
+        ReportColumn("trend_label", "الاتجاه", width="70px"),
+        ReportColumn("coverage_weeks", "أسابيع التغطية", KIND_NUMBER, width="100px"),
+        ReportColumn("safety_stock", "مخزون الأمان", KIND_NUMBER, width="100px"),
+        ReportColumn("reorder_mode", "الوضع", width="70px"),
         ReportColumn("reason", "ملاحظة"),
     ),
     permission="inventory.item.view",

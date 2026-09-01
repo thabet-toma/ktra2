@@ -13,9 +13,10 @@ from django.test.utils import CaptureQueriesContext
 from django.test import TestCase, override_settings
 from rest_framework.test import APITestCase
 
-from inventory.models import Product, StockMovement
+from inventory.models import Product, ProductDemandForecast, StockMovement
 from core.replenishment import (
     MIN_HISTORY_DAYS,
+    REASON_NO_FORECAST,
     REASON_NO_SALES,
     REASON_SHORT_HISTORY,
     URGENCY_DEAD,
@@ -163,6 +164,199 @@ class ReplenishmentEngineTest(TestCase):
         items = [r for r in self._rows() if r["group_key"] == "215/60/17"]
         assert target["suggested_min"] == sum(r["suggested_min"] for r in items) == 84
         assert target["order_qty"] == sum((r["order_qty"] for r in items), Decimal("0"))
+
+
+class AutoReorderModeTest(TestCase):
+    """#33: المسار التلقائي — من المستوى/الاتجاه المخزَّنين إلى حدٍّ وكمية.
+
+    كلّ حالة هنا مذكورةٌ بنصّها في معايير قبول التذكرة (ط1..ط10 على الخريطة).
+    الإعدادات ثابتة على مهلة 14 يوماً ومراجعة 14 يوماً ⇒ أسابيع التغطية W=4 —
+    رقمٌ يجعل الجذر التربيعي في مخزون الأمان صحيحاً (`sqrt(4)=2`) فتبقى
+    الأرقام قابلة للتحقّق بالورقة والقلم كبقية اختبارات هذا الملف.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="auto_owner", password="x")
+        cls.tenant = create_company("شركة المسار التلقائي", cls.owner)
+        from logistics.models import PurchaseSettings
+
+        PurchaseSettings.objects.create(
+            tenant=cls.tenant, default_lead_time_days=14, review_period_days=14,
+        )
+
+    def _product(self, sku, *, qty="0", mode=Product.REORDER_MODE_AUTO):
+        return Product.objects.create(
+            tenant=self.tenant, sku=sku, name_ar=sku,
+            quantity_on_hand=Decimal(qty), reorder_mode=mode,
+        )
+
+    def _forecast(self, product, *, level, trend, mad=None, weeks_observed=10):
+        return ProductDemandForecast.objects.create(
+            tenant=self.tenant, product=product,
+            level=Decimal(str(level)), trend=Decimal(str(trend)),
+            mad=None if mad is None else Decimal(str(mad)),
+            weeks_observed=weeks_observed, last_week_start=TODAY,
+        )
+
+    def _row(self, product):
+        rows = replenishment_rows(self.tenant.TenantID, today=TODAY)
+        return next(r for r in rows if r["product_id"] == product.id)
+
+    # ── الصيغة بالورقة والقلم: level=10 trend=2 mad=1 W=4 ──
+    def test_auto_formula_matches_hand_computed_numbers(self):
+        p = self._product("A-1")
+        self._forecast(p, level=10, trend=2, mad=1)
+        row = self._row(p)
+        # الاتجاه غير مسقوف (2 < 10/3): need = 10×4 + 2×4×5/2 = 40+20 = 60
+        # الأمان = 1.28×(1.25×1)×√4 = 3.2
+        assert row["safety_stock"] == Decimal("3.2"), row["safety_stock"]
+        assert row["suggested_min"] == 24, row["suggested_min"]      # 10×2+3.2⌈⌉
+        assert row["suggested_max"] == 64, row["suggested_max"]      # 60+3.2⌈⌉
+        assert row["order_qty"] == Decimal("64"), row["order_qty"]   # متاحٌ صفر
+        assert row["reason"] == ""
+        assert row["reorder_mode"] == "auto"
+        assert row["coverage_weeks"] == Decimal("4")
+
+    # ── (a) صنفٌ صاعد: الاقتراح أكبر ممّا يعطيه المتوسط المسطّح ──
+    def test_rising_trend_suggests_more_than_flat_average(self):
+        p = self._product("A-2")
+        self._forecast(p, level=10, trend=2, mad=1)
+        row = self._row(p)
+        flat_need = row["weekly_sale"] * row["coverage_weeks"]           # 10×4=40
+        actual_need = row["suggested_max"] - row["safety_stock"]          # 64−3.2=60.8
+        assert actual_need > flat_need, (actual_need, flat_need)
+        assert row["trend_label"] == "طالع"
+
+    # ── (b) طلبية شراء مؤكَّدة تغطّي الاحتياج ⇒ لا تظهر في التقرير (تقرير) ──
+    # يُثبَت في core/tests/test_reports_replenishment.py (طبقة التقرير هي من
+    # تخفي؛ المحرّك يبقيها — ط10).
+    def test_confirmed_purchase_order_is_subtracted_from_the_engine_row(self):
+        from logistics.models import Currency, PurchaseOrder, PurchaseOrderLine
+        from partners.models import Partner
+
+        p = self._product("A-3")
+        self._forecast(p, level=10, trend=0, mad=0)   # need=40, safety=0
+        currency = Currency.objects.create(Code="ILA", Name="شيكل")
+        supplier = Partner.objects.create(
+            tenant=self.tenant, name="مورّد أ٣", partner_type="Supplier")
+        order = PurchaseOrder.objects.create(
+            tenant=self.tenant, order_number="PO-A3", supplier=supplier,
+            order_date=TODAY, currency=currency, status=PurchaseOrder.STATUS_CONFIRMED,
+        )
+        PurchaseOrderLine.objects.create(
+            tenant=self.tenant, order=order, product=p,
+            quantity=Decimal("40"), unit_price=Decimal("1"), line_total=Decimal("40"),
+        )
+        row = self._row(p)
+        # «هالنقطة أهم شي بالتقرير كله»: قيد الطلب يُطرح فيصفّر الاقتراح.
+        assert row["on_order"] == Decimal("40")
+        assert row["order_qty"] == Decimal("0"), row["order_qty"]
+
+    # ── (c) لم يبع ولا قطعة: راكدٌ لا عاجل، وكميته صفر ──
+    def test_never_sold_is_flagged_dead_with_zero_quantity(self):
+        p = self._product("A-4", qty="50")
+        StockMovement.objects.create(
+            tenant=self.tenant, product=p, movement_type="IN",
+            quantity=Decimal("50"), movement_date=TODAY - datetime.timedelta(days=100),
+        )
+        self._forecast(p, level=0, trend=0, mad=0)
+        row = self._row(p)
+        assert row["reason"] == REASON_NO_SALES
+        assert row["urgency"] == URGENCY_DEAD
+        assert row["order_qty"] == Decimal("0")
+
+    # ── (d) بيعةٌ شاذّة لا تضاعف الحدّ — سقف الاتجاه الصاعد يمسك ──
+    def test_trend_cap_holds_against_a_freak_sale(self):
+        p = self._product("A-5")
+        # مستوىً يقبل قسمةً نظيفة على 3، واتجاهٌ متطرّف (100) يتجاوز السقف بكثير.
+        self._forecast(p, level=9, trend=100, mad=0)
+        row = self._row(p)
+        # مسقوفٌ عند 9/3=3: need = 9×4 + 3×4×5/2 = 36+30 = 66 لا 1036 (بلا سقف).
+        assert row["suggested_max"] == 66, row["suggested_max"]
+
+    # ── (e) مبيعاتٌ متراجعة: الكمية المقترحة تنزل، والاتجاه بلا سقفٍ نازلاً ──
+    def test_declining_trend_lowers_the_suggestion(self):
+        flat = self._product("A-6-FLAT")
+        self._forecast(flat, level=10, trend=0, mad=0)
+        declining = self._product("A-6-DOWN")
+        self._forecast(declining, level=10, trend=-1, mad=0)
+
+        flat_row = self._row(flat)
+        down_row = self._row(declining)
+        assert down_row["trend_label"] == "نازل"
+        assert down_row["suggested_max"] < flat_row["suggested_max"]
+        assert down_row["order_qty"] < flat_row["order_qty"]
+
+    # ── (g) بلا تنبّؤٍ محفوظ: لا انهيار ولا صفرٌ صامت — سببٌ مكتوب ──
+    def test_auto_without_a_stored_forecast_returns_a_reason_not_a_crash(self):
+        p = self._product("A-7")
+        row = self._row(p)
+        assert row["reason"] == REASON_NO_FORECAST
+        assert row["suggested_min"] == 0
+        assert row["order_qty"] == Decimal("0")
+
+    # ── فقدان MAD (أقل من أربعة أخطاء) لا يمنع رقماً — قاعدة الذروة تحلّ محلّه ──
+    def test_missing_mad_falls_back_to_peak_based_safety(self):
+        p = self._product("A-8", qty="0")
+        # سجلٌّ يمنح adu/adu_peak حقيقيين للمسار الاحتياطي.
+        for week in range(1, 7):
+            StockMovement.objects.create(
+                tenant=self.tenant, product=p, movement_type="OUT",
+                quantity=Decimal("14"), movement_date=TODAY - datetime.timedelta(days=week * 7))
+        StockMovement.objects.create(
+            tenant=self.tenant, product=p, movement_type="IN",
+            quantity=Decimal("1000"), movement_date=TODAY - datetime.timedelta(days=89))
+        self._forecast(p, level=10, trend=0, mad=None)
+        row = self._row(p)
+        assert row["reason"] == ""
+        assert row["safety_stock"] > Decimal("0"), row["safety_stock"]
+
+    # ── (f) يدوي: لا تغيّره أرقام التنبّؤ المحفوظة إطلاقاً ──
+    def test_manual_mode_ignores_a_stored_forecast_entirely(self):
+        p = self._steady_seller_for_manual("A-9")
+        self._forecast(p, level=999, trend=999, mad=1)   # لو تسرّب هذا لظهر فوراً
+        row = self._row(p)
+        assert row["reorder_mode"] == "manual"
+        # نفس معادلة المسار اليدوي بالضبط — الأمان والأدنى مطابقان لاختبار
+        # `ReplenishmentEngineTest.test_regular_seller_matches_hand_computed_levels`
+        # حرفياً؛ الأقصى يختلف رقمياً هنا فقط لأن هذه الشركة تراجع كل 14 يوماً
+        # لا 30 (`PurchaseSettings` في `setUpTestData`)، لا لأي تسرّبٍ من التنبّؤ:
+        # 42 + 1×14 = 56.
+        assert row["safety_stock"] == Decimal("28"), row["safety_stock"]
+        assert row["suggested_min"] == 42, row["suggested_min"]
+        assert row["suggested_max"] == 56, row["suggested_max"]
+
+    def _steady_seller_for_manual(self, sku):
+        p = Product.objects.create(
+            tenant=self.tenant, sku=sku, name_ar=sku, quantity_on_hand=Decimal("0"),
+        )
+        StockMovement.objects.create(
+            tenant=self.tenant, product=p, movement_type="IN",
+            quantity=Decimal("1000"), movement_date=TODAY - datetime.timedelta(days=89))
+        for week in range(1, 7):
+            StockMovement.objects.create(
+                tenant=self.tenant, product=p, movement_type="OUT",
+                quantity=Decimal("14"), movement_date=TODAY - datetime.timedelta(days=week * 7))
+        StockMovement.objects.create(
+            tenant=self.tenant, product=p, movement_type="OUT",
+            quantity=Decimal("6"), movement_date=TODAY - datetime.timedelta(days=49))
+        return p
+
+    # ── عدّ الاستعلامات: التنبّؤات تُقرأ دفعةً واحدة، لا لكل صفّ ──
+    def test_query_count_does_not_grow_with_auto_catalog_size(self):
+        for i in range(10):
+            p = self._product(f"A-Q-{i}")
+            self._forecast(p, level=5, trend=1, mad=1)
+        with CaptureQueriesContext(connection) as small:
+            replenishment_rows(self.tenant.TenantID, today=TODAY)
+        for i in range(10, 40):
+            p = self._product(f"A-Q-{i}")
+            self._forecast(p, level=5, trend=1, mad=1)
+        with CaptureQueriesContext(connection) as large:
+            rows = replenishment_rows(self.tenant.TenantID, today=TODAY)
+        assert len(rows) >= 40
+        assert len(large) == len(small), (len(small), len(large))
 
 
 class ApplyReplenishmentApiTest(APITestCase):

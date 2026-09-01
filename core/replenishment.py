@@ -122,8 +122,20 @@ URGENCY_LABELS = {
 #: ترتيب العرض: الأشدّ أوّلاً.
 URGENCY_ORDER = {URGENCY_URGENT: 0, URGENCY_DEFERRED: 1, URGENCY_DEAD: 2, URGENCY_OK: 3}
 
+#: تسمية وضع الصنف — نسخةٌ محلّية من `Product.REORDER_MODE_CHOICES` كي لا
+#: يستورد هذا الملف نماذج `inventory` عند التحميل (نمط الاستيراد المحلّي أعلاه).
+MODE_LABELS = {"manual": "يدوي", "auto": "تلقائي"}
+
 REASON_SHORT_HISTORY = "سجل غير كافٍ — المنتج حديث في المخزن"
 REASON_NO_SALES = "بلا مبيعات في النافذة"
+#: #33: صنفٌ على `auto` بلا صفٍّ في `ProductDemandForecast` — الأمر لم يُشغَّل
+#: بعد على هذا المنتج (أو ليس له حركة مخزون على الإطلاق فلا يدخل سلسلته أصلاً).
+#: نفس فلسفة `REASON_SHORT_HISTORY`: سببٌ مكتوب لا صفرٌ صامت.
+REASON_NO_FORECAST = "لا تنبّؤ محفوظ — لم يُشغَّل أمر الحساب بعد على هذا المنتج"
+
+TREND_UP = "طالع"
+TREND_DOWN = "نازل"
+TREND_FLAT = "ثابت"
 
 _OUT = "OUT"
 _RETURN_IN = "RETURN_IN"
@@ -253,6 +265,16 @@ FORECAST_HISTORY_WEEKS = 26
 MIN_TREND_HISTORY_WEEKS = 6
 #: أقلّ عدد أخطاء توقّع لاعتماد `MAD` رقماً — عيّنة من خطأٍ واحد أو اثنين ضجيج.
 MIN_MAD_SAMPLES = 4
+
+# ── #33: المسار التلقائي — من المستوى/الاتجاه المخزَّنين إلى حدٍّ وكمية ────
+#: عاملُ تحويل الخطأ المطلق (MAD) إلى انحرافٍ معياري تقديري (ط7 على الخريطة).
+MAD_TO_SIGMA = Decimal("1.25")
+#: عامل ثقةٍ (z) يضرب σ لإنتاج مخزون الأمان — ثابتٌ في هذه التذكرة؛ تحويله
+#: لمقبضٍ في الإعدادات مهمّة #34، فلا يُستبَق هنا.
+SAFETY_Z_FACTOR = Decimal("1.28")
+#: سقف الاتجاه الصاعد: الزيادة الأسبوعية لا تتجاوز المستوى ÷ 3 (ط8) — النازل
+#: بلا سقف عمداً، فخطأ المبالغة صعوداً يكلّف بضاعةً راكدة والنازل يصحّحه السوق.
+TREND_CAP_DIVISOR = Decimal("3")
 
 
 def holt_forecast(weekly_demand: list) -> dict:
@@ -462,6 +484,24 @@ def _lead_for(samples: list, fallback_days: int) -> tuple[Decimal, Decimal, str]
     return typical, typical * LEAD_MAX_FACTOR, "default"
 
 
+def _forecast_map(tenant_id: int, product_ids=None) -> dict:
+    """(المستوى، الاتجاه، MAD) المخزَّنة لكل منتج — استعلامٌ واحد للشركة كلّها.
+
+    نفس نمط `_on_order_map`/`reserved_map`: لا استعلام لكل صفّ. منتجٌ بلا صفّ
+    (الأمر لم يُشغَّل بعد، أو بلا حركة مخزون على الإطلاق) غائبٌ عن القاموس عمداً
+    — هذا هو الإشارة التي يقرأها `_product_row` لـ`REASON_NO_FORECAST`.
+    """
+    from inventory.models import ProductDemandForecast
+
+    qs = ProductDemandForecast.objects.filter(tenant_id=tenant_id)
+    if product_ids is not None:
+        qs = qs.filter(product_id__in=product_ids)
+    return {
+        row["product_id"]: row
+        for row in qs.values("product_id", "level", "trend", "mad", "weeks_observed")
+    }
+
+
 def _on_order_map(tenant_id: int, product_ids=None) -> dict:
     """قيد الطلب: كميات طلبيات الشراء المؤكَّدة التي لم تُحوَّل إلى فاتورة بعد."""
     from logistics.models import PurchaseOrder, PurchaseOrderLine
@@ -492,7 +532,8 @@ def _history_days(first_movement, window_start, today) -> int:
 
 
 def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
-                 on_order, params, window_start, today, family_totals=None) -> dict:
+                 on_order, params, window_start, today, family_totals=None,
+                 forecast=None) -> dict:
     from inventory.services import (
         family_display_name, product_display_name, product_group_key,
     )
@@ -502,26 +543,77 @@ def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
     history = _history_days(profile.get("first_movement"), window_start, today)
 
     available = available_of(product, reserved_map)
-    reason = ""
+    # حساب الصرف اليومي وذروته يبقى كما هو **دائماً**، مهما كان وضع المنتج:
+    # المسار اليدوي يعتمده مباشرةً، والتلقائي يستعيره فقط حين لا يكفي سجل
+    # الأخطاء لحساب MAD (أسفل)، وكلاهما يستعمل `hist_reason` لتمييز «راكد»
+    # (بلا مبيعات في النافذة) عن «حديث» (سجلٌّ أقصر من الحدّ).
+    hist_reason = ""
     if history < MIN_HISTORY_DAYS:
         adu = ZERO
         adu_peak = ZERO
-        reason = REASON_SHORT_HISTORY
+        hist_reason = REASON_SHORT_HISTORY
     else:
         adu = net / Decimal(history) if net > ZERO else ZERO
         adu_peak = peak_week / Decimal("7")
         if adu_peak < adu:
             adu_peak = adu
         if adu <= ZERO:
-            reason = REASON_NO_SALES
+            hist_reason = REASON_NO_SALES
 
-    if reason:
-        levels = {"safety_stock": ZERO, "suggested_min": 0, "suggested_max": 0}
+    lead_weeks = lead / Decimal("7")
+    review_weeks = Decimal(params.review_period_days) / Decimal("7")
+    coverage_weeks = lead_weeks + review_weeks
+
+    mode = product.reorder_mode
+    weekly_sale = forecast["level"] if forecast else None
+    trend = forecast["trend"] if forecast else None
+
+    if mode == product.REORDER_MODE_AUTO:
+        if forecast is None:
+            # لم يُشغَّل الأمر بعد على هذا المنتج، أو بلا حركة مخزونٍ إطلاقاً
+            # فلم يدخل سلسلته أصلاً (`weekly_demand_series`) — الحالتان معاً
+            # تعنيان «لا أعرف بعد»، لا صفراً صامتاً (ط1/#33).
+            reason = REASON_NO_FORECAST
+            levels = {"safety_stock": ZERO, "suggested_min": 0, "suggested_max": 0}
+        else:
+            level = forecast["level"]
+            trend = forecast["trend"]
+            mad = forecast["mad"]
+            # سقف الاتجاه صعوداً فقط (ط8) — النازل بلا سقف.
+            trend_capped = (
+                trend if trend <= ZERO else min(trend, level / TREND_CAP_DIVISOR)
+            )
+            need = (
+                level * coverage_weeks
+                + trend_capped * coverage_weeks * (coverage_weeks + Decimal("1")) / Decimal("2")
+            )
+            if mad is not None:
+                safety = SAFETY_Z_FACTOR * (MAD_TO_SIGMA * mad) * coverage_weeks.sqrt()
+            else:
+                # سجلّ أخطاءٍ لا يكفي لـMAD (أقلّ من أربعة أسابيع مرصودة، ط7):
+                # قاعدة الذروة القائمة أفضل من لا رقم — نفس دالّة المسار اليدوي.
+                safety = suggest_levels(
+                    adu=adu, adu_peak=adu_peak, lead_days=lead, lead_max_days=lead_max,
+                    review_days=params.review_period_days,
+                )["safety_stock"]
+            levels = {
+                "safety_stock": safety,
+                "suggested_min": _ceil(level * lead_weeks + safety),
+                "suggested_max": _ceil(need + safety),
+            }
+            # صنفٌ بلا مبيعاتٍ فعلياً (المستوى نفسه هابطٌ لصفر تقريباً) يبقى
+            # يُقرأ «راكد» — نفس الإشارة التي يقرأها المسار اليدوي، كي يبقى
+            # فلتر «راكد» (ط10) يراه رغم أن له صفّ تنبّؤٍ محفوظاً.
+            reason = REASON_NO_SALES if hist_reason == REASON_NO_SALES else ""
     else:
-        levels = suggest_levels(
-            adu=adu, adu_peak=adu_peak, lead_days=lead, lead_max_days=lead_max,
-            review_days=params.review_period_days,
-        )
+        reason = hist_reason
+        if reason:
+            levels = {"safety_stock": ZERO, "suggested_min": 0, "suggested_max": 0}
+        else:
+            levels = suggest_levels(
+                adu=adu, adu_peak=adu_peak, lead_days=lead, lead_max_days=lead_max,
+                review_days=params.review_period_days,
+            )
 
     manual_min = product.min_stock_level
     manual_max = product.max_stock_level
@@ -532,9 +624,21 @@ def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
     )
     # بلا مستوىً مستهدَف لا كمية تُطلَب. وبغير هذا الشرط كان منتجٌ رصيده سالب
     # (‑401 من فوضى بياناتٍ قديمة) وبلا مبيعةٍ واحدة يُقترَح طلب 401 منه —
-    # الصفر ناقص السالب.
-    target = _dec(manual_max) if manual_max else _dec(levels["suggested_max"])
+    # الصفر ناقص السالب. المسار التلقائي **لا** يستشير `manual_max` — صيغته
+    # مكتملة بذاتها (ط1/#33: «الاحتياج + الأمان − المتاح − قيد الطلب»).
+    if mode == product.REORDER_MODE_AUTO:
+        target = _dec(levels["suggested_max"])
+    else:
+        target = _dec(manual_max) if manual_max else _dec(levels["suggested_max"])
     order_qty = (target - (available + on_order)) if target > ZERO else ZERO
+    if trend is None:
+        trend_label = "—"
+    elif trend > ZERO:
+        trend_label = TREND_UP
+    elif trend < ZERO:
+        trend_label = TREND_DOWN
+    else:
+        trend_label = TREND_FLAT
     return {
         "product_id": product.id,
         "sku": product.sku or "",
@@ -579,6 +683,14 @@ def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
         "order_qty": max(order_qty, ZERO),
         "status": status,
         "reason": reason,
+        # #33: أعمدة تفسّر الرقم — «ما بدي رقم بينزل من السما» (ط1). المستوى
+        # والاتجاه من `ProductDemandForecast` إن وُجد صفّه (بصرف النظر عن
+        # الوضع: منتجٌ يدويّ قد يملك تنبّؤاً محفوظاً هو الآخر)، وإلا `None`.
+        "reorder_mode": mode,
+        "weekly_sale": weekly_sale,
+        "trend": trend,
+        "trend_label": trend_label,
+        "coverage_weeks": coverage_weeks,
     }
 
 
@@ -697,6 +809,7 @@ def replenishment_rows(tenant_id: int, *, product_ids=None, category_id=None,
     profiles = _demand_profiles(tenant_id, ids, window_start, today)
     lead_by_product, lead_by_supplier, tenant_samples = _lead_time_samples(tenant_id)
     on_order = _on_order_map(tenant_id, ids)
+    forecasts = _forecast_map(tenant_id, ids)
     tenant_lead = _lead_for(tenant_samples, params.default_lead_time_days) \
         if len(tenant_samples) >= 3 else None
 
@@ -717,6 +830,7 @@ def replenishment_rows(tenant_id: int, *, product_ids=None, category_id=None,
             on_order=on_order.get(product.id, ZERO),
             params=params, window_start=window_start, today=today,
             family_totals=family_totals,
+            forecast=forecasts.get(product.id),
         ))
 
     groups = _group_rows(rows, params)

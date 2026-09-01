@@ -137,6 +137,8 @@ type FormState = {
   uom2: number | null; uom2_factor: string;
   uom3: number | null; uom3_factor: string;
   min_stock_level: string; max_stock_level: string;
+  /** #33: مسار اقتراح التجديد — `manual` (اليدوي القائم) أو `auto` (هولت). */
+  reorder_mode: string;
   /** سعر البيع الافتراضي المحفوظ على المنتج (بجانب سعر التكلفة المحسوب). */
   sale_price: string;
   sale_tiers: PriceTier[];
@@ -158,6 +160,7 @@ const blankForm = (): FormState => ({
   uom_id: null, uom2: null, uom2_factor: "",
   uom3: null, uom3_factor: "",
   min_stock_level: "", max_stock_level: "",
+  reorder_mode: "manual",
   sale_price: "",
   sale_tiers: Array.from({ length: 5 }, blankTier),
   purchase_tiers: Array.from({ length: 5 }, blankTier),
@@ -458,6 +461,7 @@ export const ItemForm: React.FC<Props> = ({
       uom3_factor: p.uom3_factor != null ? String(p.uom3_factor) : "",
       min_stock_level: p.min_stock_level != null ? String(p.min_stock_level) : "",
       max_stock_level: p.max_stock_level != null ? String(p.max_stock_level) : "",
+      reorder_mode: p.reorder_mode === "auto" ? "auto" : "manual",
       sale_price: p.sale_price != null ? String(p.sale_price) : "",
       category: p.category ? Number(p.category) : null,
       category_name: String(p.category_name ?? ""),
@@ -514,6 +518,8 @@ export const ItemForm: React.FC<Props> = ({
         // T-REORDER: الحدّ الأقصى كان يُكتب في الشاشة ولا يُرسَل قطّ — حقلٌ ميّت
         // يظنّ المستخدم أنه ضبطه. صار حقلاً حقيقياً على النموذج ويُرسَل هنا.
         max_stock_level: form.max_stock_level ? Number(form.max_stock_level) : null,
+        // #33: مفتاحٌ لكل صنف — يبقى `manual` ما لم يُختَر التلقائي صراحةً.
+        reorder_mode: form.reorder_mode === "auto" ? "auto" : "manual",
         // سعر البيع: فارغ = لا سعر محفوظ (البطاقة ترجع لآخر سعر بيع فعلي).
         sale_price: form.sale_price.trim() ? Number(form.sale_price) : null,
         category: categoryId,
@@ -850,6 +856,13 @@ export const ItemForm: React.FC<Props> = ({
         value={form.min_stock_level} onChange={(e) => patch("min_stock_level", e.target.value)} />)}
       {fld("الحد الأقصى", <input className="ktra-input" type="number" min="0" step="1"
         value={form.max_stock_level} onChange={(e) => patch("max_stock_level", e.target.value)} />)}
+      {fld("مسار اقتراح التجديد", (
+        <select className="ktra-input" value={form.reorder_mode}
+          onChange={(e) => patch("reorder_mode", e.target.value)}>
+          <option value="manual">يدوي (الحدّان أعلاه)</option>
+          <option value="auto">تلقائي (من مبيعات المنتج المتوقّعة)</option>
+        </select>
+      ))}
       {fld("تاريخ آخر حركة", <input className="ktra-input" readOnly value="(تلقائي)" />)}
       <div style={{ gridColumn: "1/-1", fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-ink-soft)" }}>
         ملاحظة: جميع حركات المخازن ذات التاريخ قبل بداية الفترة المالية ترحل إلى رصيد أول المدة.

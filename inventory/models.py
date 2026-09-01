@@ -185,6 +185,21 @@ class Product(models.Model):
     # المحسوب من المبيعات (`inventory/replenishment.py`).
     min_stock_level = models.IntegerField(blank=True, null=True, db_column='MinStockLevel')
     max_stock_level = models.IntegerField(blank=True, null=True, db_column='MaxStockLevel')
+    # #33: مفتاح لكل صنف — أيّ مسارٍ يحكم اقتراح التجديد. `manual` (الافتراضي
+    # على الكتالوج كلّه بالهجرة) هو المسار الحالي حرفياً؛ `auto` يقرأ
+    # `ProductDemandForecast` (هولت) بدل معدّل الصرف/الذروة. حقلٌ على المنتج
+    # لا إعدادٌ للشركة — المالك يريد التحويل صنفاً صنفاً على راحته
+    # (`core/replenishment.py` — القرار ط6 في خريطة #31).
+    REORDER_MODE_MANUAL = 'manual'
+    REORDER_MODE_AUTO = 'auto'
+    REORDER_MODE_CHOICES = [
+        (REORDER_MODE_MANUAL, 'يدوي'),
+        (REORDER_MODE_AUTO, 'تلقائي'),
+    ]
+    reorder_mode = models.CharField(
+        max_length=10, choices=REORDER_MODE_CHOICES, default=REORDER_MODE_MANUAL,
+        db_column='ReorderMode',
+    )
     allow_negative_stock = models.BooleanField(
         default=False,
         db_column='AllowNegativeStock',

@@ -547,6 +547,18 @@ class ProductApiTest(APITestCase):
             tenant=self.t_a, entity_type="product", entity_id=created["id"], action="update",
         ).count() == before
 
+    # ── #33: مفتاح التجديد يُقرأ ويُكتب من كرت المنتج، والافتراضي يدوي ──
+    def test_reorder_mode_round_trips_through_api(self):
+        self._auth()
+        created = self._post({"name_ar": "منتج تجديد"}).json()
+        assert created["reorder_mode"] == "manual"
+        res = self.client.patch(
+            f"{PRODUCTS_URL}{created['id']}/", {"reorder_mode": "auto"},
+            format="json", HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert res.status_code in (200, 202), res.content[:300]
+        assert Product.objects.get(pk=created["id"]).reorder_mode == "auto"
+
     # ── M0: تعديلٌ يحمل «النوع» و«التصنيف» معاً كان يسقط 500 ──
     def test_patch_with_variant_group_and_category_succeeds(self):
         """`_auto_create_group_category` كان يقرأ `self.instance` — وهي صفة

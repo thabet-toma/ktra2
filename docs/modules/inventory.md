@@ -34,7 +34,7 @@
 | `ProductSerial` | `serial`, `status` (`in_stock`/`sold`) | `purchase_item→logistics.PurchaseInvoiceItem`، `sales_line→sales.SalesInvoiceLine`؛ فريد `(tenant, product, serial)`، وفهرس `(tenant, serial)` لبحث المسح الذي لا يعرف المنتج (`prodserial_tenant_serial`) |
 | `ProductPriceTier` | `tier_type` (sale/purchase), `tier_number`, `price`, `tax_inclusive` | فريد `(product, tier_type, tier_number)` |
 | `ProductMerge` (task24) | `snapshot` (JSON: لكل براند مُضموم `family_id`/`brand`/`name_ar`/`name_en` قبل الضمّ), `undone_at` | سلّة محذوفات على نمط `accounting.VoidedJournal` — `target_family→ProductFamily` (لا يُحذف أبداً)؛ `undo_product_merge` يعكسها حرفياً من `snapshot` |
-| `ProductDemandForecast` (#32) | `level`, `trend` (ستّ خانات عشرية)، `weeks_observed`, `mad`, `last_week_start`, `computed_at` | `product→Product` (`OneToOneField` — صفٌّ واحد لكل منتج). يكتبه حصراً `python manage.py recompute_demand_forecast` (`core/replenishment.py` — `holt_forecast`/`weekly_demand_series`)؛ لا شيء يقرأه بعد (#33 يوصله بالتقرير) |
+| `ProductDemandForecast` (#32) | `level`, `trend` (ستّ خانات عشرية)، `weeks_observed`, `mad`, `last_week_start`, `computed_at` | `product→Product` (`OneToOneField` — صفٌّ واحد لكل منتج). يكتبه حصراً `python manage.py recompute_demand_forecast` (`core/replenishment.py` — `holt_forecast`/`weekly_demand_series`)؛ يقرأه المسار `auto` (#33) في `core/replenishment.py` (`_product_row`) دفعةً واحدة للشركة (`_forecast_map`) |
 | `SupplierProduct` | `supplier_sku`, `supplier_name` | `supplier→partners.Partner`، `product→Product`؛ فريد `(tenant, supplier, supplier_sku)` — **لا** على `(tenant, supplier, product)`: للمورّد أن يحمل أكثر من رقم للمنتج الواحد، والممنوع عكسُه (رقمٌ واحد لمنتجين يجعل المطابقة تخميناً). محايد مالياً بالكامل |
 | `WarehouseTransfer` / `WarehouseTransferLine` | `transfer_number`, `is_posted`, `quantity` | `source_warehouse` / `dest_warehouse` (PROTECT) — بلا قيد محاسبي (`:384`) |
 | `Stocktake` / `StocktakeLine` | `is_posted`, `counted_quantity`, `system_quantity`, `variance` | `journal→accounting.JournalHeader` — قيد فرق الجرد |
@@ -186,13 +186,23 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 بارامترات الشركة الثلاثة (نافذة التحليل · المهلة الافتراضية · مدة المراجعة) على
 `logistics.PurchaseSettings` — التجديد قرارٌ شرائي، فإعداداته حيث تعيش إعدادات الشراء.
 
-**#32 — سلسلةٌ أسبوعية موازية، مخزَّنة لا مقروءة بعد.** المتوسط أعلاه (ADU) يدفن
-صنفاً باع أربعاً مرّتين خلال شهرين تحت «أقلّ من قطعة بالأسبوع». `core/replenishment.py`
-(`holt_forecast`, `weekly_demand_series`) يشتقّ رقمين موازيين — المستوى والاتجاه
-بتنعيمٍ أسّي مزدوج (هولت) على نفس صافي `OUT − RETURN_IN`، وأسبوع الصفر جزءٌ من
-السلسلة لا فجوة — ويكتبهما `python manage.py recompute_demand_forecast` أسبوعياً
-في `inventory.ProductDemandForecast` (لا Celery؛ مجدول النظام). **لا شيء يقرأ
-الجدول بعد** — `stock-replenishment` والحدّان أعلاه بلا تغيير؛ التوصيل تذكرة #33.
+**#32 — سلسلةٌ أسبوعية موازية.** المتوسط أعلاه (ADU) يدفن صنفاً باع أربعاً مرّتين
+خلال شهرين تحت «أقلّ من قطعة بالأسبوع». `core/replenishment.py` (`holt_forecast`,
+`weekly_demand_series`) يشتقّ رقمين موازيين — المستوى والاتجاه بتنعيمٍ أسّي مزدوج
+(هولت) على نفس صافي `OUT − RETURN_IN`، وأسبوع الصفر جزءٌ من السلسلة لا فجوة —
+ويكتبهما `python manage.py recompute_demand_forecast` أسبوعياً في
+`inventory.ProductDemandForecast` (لا Celery؛ مجدول النظام).
+
+**#33 — مفتاحٌ لكل صنف يقرأ الرقمين.** `Product.reorder_mode` (`manual` الافتراضي
+على الكتالوج كلّه، `auto` باختيار المستخدم من كرت الصنف) يحكم فرعاً داخل نفس
+`_product_row` — لا بانٍ ثانٍ. `manual` هو معادلة `suggest_levels` أعلاه حرفياً؛
+`auto` يحوّل المستوى/الاتجاه المخزَّنين إلى حدٍّ وكميةٍ: أسابيع التغطية = مهلة
+التوريد + فترة المراجعة، والاحتياج = `المستوى×W + الاتجاه المسقوف×W(W+1)/2`
+(الاتجاه مسقوفٌ صعوداً بـ`المستوى/3` وبلا سقفٍ نازلاً)، ومخزون الأمان من خطأ
+التوقّع (`1.28×1.25×MAD×√W`، وإلا قاعدة الذروة القديمة حين يغيب `MAD`)، وطرحُ
+«قيد الطلب» قبل العرض. صفٌّ تلقائيٌّ لا يطلب شيئاً (`order_qty≤0`) يسقط من
+العرض الافتراضي لـ`stock-replenishment` — لا من المحرّك — وفلتر «راكد» يبقى
+يُظهره عمداً؛ المسار اليدوي لا يتأثر بهذا الإخفاء إطلاقاً.
 
 **والمحرّك يسكن في `core/` لا هنا**: حسابه يحتاج `sales.services` (المحجوز) و
 `logistics.models` (مهلة التوريد)، و`.importlinter` يمنع `inventory` من استيرادهما
