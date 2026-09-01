@@ -519,7 +519,11 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
   (الأب) نفسه **لا يظهر أبداً** كصفٍّ في هذا العقد بنيوياً — هو مبنيٌّ فوق `Product`
   (البراند) لا `ProductFamily`. «اسم المنتج (البراند)» في المنتقي والطباعة يأتي
   من `display_name` (`product_display_name`) الموجودة أصلاً — لم تُبنَ لهذه
-  التذكرة. `family_name` يُقرأ عبر `select_related('family')` على queryset
+  التذكرة. (#41 عمّم استعمالها لاحقاً خارج `inventory`: بند الإرسالية وفاتورة
+  الشراء في `logistics`، بنود المبيعات والمرتجع والتسليم في `sales`، والكفالة
+  وأمر الصيانة وتقاريرهما في `after_sales` — كلها كانت تعرض `str(product)`،
+  وهي البراند وحده الذي يميّز إخوة الأب الواحد.) `family_name` يُقرأ عبر
+  `select_related('family')` على queryset
   `ProductViewSet` — بلا هذا الجلب صار استعلاماً لكل صفّ.
 - **قاعدة مطابقة اسمٍ واحدة لاقتراح «هذا موجود»** (task21): `find_by_normalized_name`
   (فوق `normalize_product_name`) — تطبيعٌ إملائي عربي (تشكيل/تطويل/مسافات/

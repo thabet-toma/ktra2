@@ -243,6 +243,7 @@ def _draft_purchase_invoice_from_document(
     البنود والضريبة في الحالتين — فلا تختلف فاتورةٌ عن أخرى بحسب طريق وصولها.
     """
     from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+    from inventory.services import product_display_name
 
     invoice = PurchaseInvoice.objects.create(
         tenant=source.tenant,
@@ -271,7 +272,7 @@ def _draft_purchase_invoice_from_document(
         PurchaseInvoiceItem(
             invoice=invoice,
             product=line.product,
-            name=line.name_snapshot or str(line.product),
+            name=line.name_snapshot or product_display_name(line.product),
             quantity=line.quantity,
             unit_price=line.unit_price,
             total_price=line.line_total,

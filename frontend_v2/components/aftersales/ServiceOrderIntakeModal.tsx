@@ -9,6 +9,7 @@ import {
 } from "../../services/afterSalesApi";
 import { formatDateValue, todayIso } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
+import { formatProductPrimaryName } from "../../utils/productDisplayName";
 import { warrantyRemainingText, warrantyStatusLabel } from "../../utils/warranty";
 import { warrantyPillClass } from "./warrantyStatus";
 import { useToast } from "../../contexts/ToastContext";
@@ -52,8 +53,6 @@ const inputClass =
 
 const labelClass = "mb-1 block text-[11px] text-[var(--color-text-muted)]";
 
-const productLabel = (p: ProductOption) =>
-  p.display_name || p.name_ar || p.name_en || p.sku || `#${p.id}`;
 
 const messageOf = (cause: unknown, fallback: string) =>
   cause instanceof Error ? cause.message : fallback;
@@ -339,7 +338,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
               >
                 <option value="">— بلا منتج (جهاز لم نبعه) —</option>
                 {products.map((p) => (
-                  <option key={p.id} value={p.id}>{productLabel(p)}</option>
+                  <option key={p.id} value={p.id}>{formatProductPrimaryName(p)}</option>
                 ))}
               </select>
             </div>

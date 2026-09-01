@@ -22,6 +22,7 @@ import {
 } from "../../services/afterSalesApi";
 import { formatDateTimeValue, formatDateValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
+import { formatProductPrimaryName } from "../../utils/productDisplayName";
 import {
   PART_BILLING_LABELS,
   SERVICE_FLOW,
@@ -79,8 +80,6 @@ const labelClass = "mb-1 block text-[11px] text-[var(--color-text-muted)]";
 
 const cardClass = "rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 md:p-4";
 
-const productLabel = (p: ProductOption) =>
-  p.display_name || p.name_ar || p.name_en || p.sku || `#${p.id}`;
 
 const messageOf = (cause: unknown, fallback: string) =>
   cause instanceof Error ? cause.message : fallback;
@@ -546,7 +545,7 @@ export const ServiceOrderDocument: React.FC<Props> = ({
                 >
                   <option value="">— اختر —</option>
                   {products.map((p) => (
-                    <option key={p.id} value={p.id}>{productLabel(p)}</option>
+                    <option key={p.id} value={p.id}>{formatProductPrimaryName(p)}</option>
                   ))}
                 </select>
               </div>

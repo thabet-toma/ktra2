@@ -304,13 +304,15 @@ def returnable_lines_for_invoice(
     if original_invoice is None:
         return []
 
+    from inventory.services import product_display_name
+
     orig: dict[int, dict] = {}
     for line in original_invoice.lines.all():
         if not line.product_id:
             continue
         row = orig.setdefault(line.product_id, {
             "product": line.product_id,
-            "name": str(line.product) if line.product_id else "",
+            "name": product_display_name(line.product) if line.product_id else "",
             "unit_price": Decimal(str(line.unit_price or 0)),
             "invoiced_qty": Decimal("0"),
         })
@@ -382,7 +384,8 @@ def guard_sales_return_quantities(
         remaining = allowed.get(product_id, Decimal("0"))
         if qty > remaining:
             product = Product.objects.filter(pk=product_id).first()
-            label = str(product) if product else f"#{product_id}"
+            from inventory.services import product_display_name
+            label = product_display_name(product) if product else f"#{product_id}"
             logger.warning(
                 "sales return blocked: product %s wants %s, returnable %s "
                 "(original invoice %s)",
@@ -2080,6 +2083,8 @@ def remaining_delivery_lines(invoice: SalesInvoice) -> list[dict]:
 
     مصدر حقيقة واحد مع حارس التسليم، فلا تعرض الواجهة ما يرفضه الخادم.
     """
+    from inventory.services import product_display_name
+
     rows: list[dict] = []
     for line in invoice.lines.select_related("product"):
         if getattr(line.product, "is_service", False):
@@ -2089,7 +2094,7 @@ def remaining_delivery_lines(invoice: SalesInvoice) -> list[dict]:
         rows.append({
             "line_id": line.id,
             "product": line.product_id,
-            "product_name": str(line.product),
+            "product_name": product_display_name(line.product),
             "quantity": ordered,
             "delivered_quantity": delivered,
             "remaining_quantity": max(Decimal("0"), ordered - delivered),

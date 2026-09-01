@@ -20,6 +20,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
+import { formatProductPrimaryName } from "../../utils/productDisplayName";
 import { KitDocumentShell, KitAutocomplete, KitDateInput } from "../kit";
 import type { KitTab, KitToolbarAction } from "../kit";
 import { AccountTreeField } from "./AccountTreePicker";
@@ -61,9 +62,6 @@ const previousDay = (iso: string | null | undefined): string | null => {
 /** خطأ الفترة المالية يستحق زرّاً لا نصّاً: المستخدم لا يعرف أين يُنشئ فترة. */
 const isFiscalPeriodError = (message: string): boolean =>
   message.includes("فترة مالية") || message.includes("الفترة المالية");
-
-const productLabel = (p: Product): string =>
-  p.display_name || p.name_ar || p.name_en || p.sku || `منتج #${p.id}`;
 
 export const OpeningBalancesPage: React.FC = () => {
   const navigate = useNavigate();
@@ -614,11 +612,11 @@ export const OpeningBalancesPage: React.FC = () => {
               <tr key={row.key}>
                 <td>
                   {row.product !== "" ? (
-                    <span>{product ? productLabel(product) : `منتج #${row.product}`}</span>
+                    <span>{product ? formatProductPrimaryName(product) : `منتج #${row.product}`}</span>
                   ) : (
                     <KitAutocomplete
                       value=""
-                      options={products.map((p) => ({ id: p.id, label: productLabel(p) }))}
+                      options={products.map((p) => ({ id: p.id, label: formatProductPrimaryName(p) }))}
                       onPick={(id) =>
                         setStockRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, product: Number(id) } : r)))
                       }

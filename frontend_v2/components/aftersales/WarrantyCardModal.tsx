@@ -11,6 +11,7 @@ import {
 import { deriveWarrantyEnd, warrantyRemainingText, warrantyStatusLabel } from "../../utils/warranty";
 import { formatDateValue, todayIso } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
+import { formatProductPrimaryName } from "../../utils/productDisplayName";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { warrantyPillClass } from "./warrantyStatus";
@@ -64,9 +65,6 @@ const fieldClass =
   "disabled:opacity-60";
 
 const labelClass = "mb-1 block text-[11px] text-[var(--color-text-muted)]";
-
-const productLabel = (p: ProductOption): string =>
-  p.display_name || p.name_ar || p.name_en || p.sku || `#${p.id}`;
 
 const emptyDraft = (): WarrantyCardDraft => ({
   product: null,
@@ -320,7 +318,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
               >
                 <option value="">— بلا منتج من المخزون —</option>
                 {products.map((p) => (
-                  <option key={p.id} value={p.id}>{productLabel(p)}</option>
+                  <option key={p.id} value={p.id}>{formatProductPrimaryName(p)}</option>
                 ))}
               </select>
             </div>

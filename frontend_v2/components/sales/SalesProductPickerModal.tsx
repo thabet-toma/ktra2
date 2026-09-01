@@ -3,6 +3,11 @@ import { Search, X, Package, Plus } from "lucide-react";
 import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
 import { availableOf, stockBadgeFor } from "../../utils/stockBadge";
 import { formatQuantity } from "../../utils/formatNumber";
+import { formatProductPrimaryName } from "../../utils/productDisplayName";
+
+// #40: أُعيد التصدير هنا كي لا يتغيّر أيٌّ من مستورديها القائمين من هذا
+// الموضع — الدالّة نفسها انتقلت إلى `frontend_v2/utils/productDisplayName.ts`.
+export { formatProductPrimaryName } from "../../utils/productDisplayName";
 
 /** نفس حقول المنتج في فاتورة المبيعات — منفصل لتفادي تبعية دائرية */
 export type SalesProductPickerItem = {
@@ -27,19 +32,6 @@ type Props = {
   initialSearch?: string;
   onSelect: (productId: number) => void;
 };
-
-/** عنوان مقروء للعرض — الاسم أولاً، وليس الـ SKU الطويل كعنوان رئيسي */
-export function formatProductPrimaryName(p: SalesProductPickerItem & { display_name?: string }): string {
-  if (p.display_name) return p.display_name;
-  const ar = (p.name_ar || "").trim();
-  const en = (p.name_en || "").trim();
-  const n = ((p as any).name || "").trim();
-  if (ar && en) return `${ar} — ${en}`;
-  if (ar) return ar;
-  if (en) return en;
-  if (n) return n;
-  return p.sku || `منتج #${p.id}`;
-}
 
 function formatProductMeta(p: SalesProductPickerItem): string {
   const parts: string[] = [];

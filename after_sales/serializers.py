@@ -53,7 +53,10 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
         return obj.supplier_active_on()
 
     def get_product_name(self, obj):
-        return str(obj.product) if obj.product_id else obj.device_name
+        if not obj.product_id:
+            return obj.device_name
+        from inventory.services import product_display_name
+        return product_display_name(obj.product)
 
     def get_partner_name(self, obj):
         return obj.partner.name if obj.partner_id else obj.customer_name
@@ -160,7 +163,10 @@ class ServiceOrderPartSerializer(serializers.ModelSerializer):
         ]
 
     def get_product_name(self, obj):
-        return str(obj.product) if obj.product_id else ""
+        if not obj.product_id:
+            return ""
+        from inventory.services import product_display_name
+        return product_display_name(obj.product)
 
     def get_is_materialized(self, obj):
         return obj.materialized_at is not None
@@ -237,7 +243,10 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
         return obj.partner.name if obj.partner_id else obj.customer_name
 
     def get_product_name(self, obj):
-        return str(obj.product) if obj.product_id else obj.device_description
+        if not obj.product_id:
+            return obj.device_description
+        from inventory.services import product_display_name
+        return product_display_name(obj.product)
 
     def get_technician_name(self, obj):
         if not obj.technician_id:
@@ -325,7 +334,10 @@ class ServiceOrderListSerializer(serializers.ModelSerializer):
         return obj.partner.name if obj.partner_id else obj.customer_name
 
     def get_product_name(self, obj):
-        return str(obj.product) if obj.product_id else obj.device_description
+        if not obj.product_id:
+            return obj.device_description
+        from inventory.services import product_display_name
+        return product_display_name(obj.product)
 
 
 class ServiceOrderTransitionSerializer(serializers.Serializer):

@@ -32,6 +32,7 @@ import { openInNewTab } from "../../../utils/openInNewTab";
 import { formatMoney, formatQuantity } from "../../../utils/formatNumber";
 import { formatDateLocalized, todayIso } from "../../../utils/formatDate";
 import { printReport } from "../../../utils/printReport";
+import { formatProductPrimaryName } from "../../../utils/productDisplayName";
 import { useToast } from "../../../contexts/ToastContext";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { KitAutocomplete, KitDateInput } from "../../kit";
@@ -51,7 +52,10 @@ import {
 
 type WarehouseOpt = { id: number; name: string; is_default?: boolean };
 type PartnerOpt = { id: number; name: string; partner_type?: string };
-type ProductOpt = { id: number; sku?: string; name_ar?: string; name_en?: string };
+type ProductOpt = {
+  id: number; sku?: string; name_ar?: string; name_en?: string;
+  display_name?: string | null;
+};
 
 type LineState = {
   /** بند الفاتورة المرتبطة — فارغ في السند المستقل. */
@@ -78,8 +82,6 @@ const blankLine = (warehouseId: number | ""): LineState => ({
   unit_price: "",
   warehouse_id: warehouseId,
 });
-
-const productLabel = (p: ProductOpt) => p.name_ar || p.name_en || p.sku || `#${p.id}`;
 
 /** المستودع الافتراضي من قائمة المستودعات — تُستدعى من الـmemo ومن مسار الفتح
  *  معاً: هناك لا تكون الحالة قد وصلت بعد، فتمرّ القيمة بالمعامل لا بالإغلاق. */
@@ -402,7 +404,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       const used = new Set(formLines.map((l) => l.product_id).filter(Boolean) as number[]);
       return products
         .filter((p) => !used.has(p.id))
-        .map((p) => ({ id: p.id, label: productLabel(p), sub: p.sku || "" }));
+        .map((p) => ({ id: p.id, label: formatProductPrimaryName(p), sub: p.sku || "" }));
     }
     return invoiceLines
       .filter((l) => Number(l.remaining_quantity) > 0 && !usedItems.has(l.item_id))
@@ -446,7 +448,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       updateLine(idx, {
         item_id: "",
         product_id: p.id,
-        product_name: productLabel(p),
+        product_name: formatProductPrimaryName(p),
         ordered: 0,
         received: 0,
         remaining: 0,

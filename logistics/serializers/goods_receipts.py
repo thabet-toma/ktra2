@@ -149,7 +149,10 @@ class GoodsReceiptLineSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_product_name(self, obj):
-        return str(obj.product) if obj.product_id else None
+        if not obj.product_id:
+            return None
+        from inventory.services import product_display_name
+        return product_display_name(obj.product)
 
     def get_ordered_quantity(self, obj):
         # السند المستقل بلا بند فاتورة ⇒ المفوتر = المستلَم نفسه (لا باقي).

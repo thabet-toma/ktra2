@@ -108,9 +108,12 @@ def agent_products(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+    from inventory.services import product_display_name
+
     log_activity(
         action="create", entity_type="product", entity_id=product.id,
-        entity_label=str(product), description="إضافة منتج عبر واجهة الوكيل",
+        entity_label=product_display_name(product)[:200],
+        description="إضافة منتج عبر واجهة الوكيل",
         tenant=tenant, request=request,
     )
     return Response(ProductSerializer(product).data, status=status.HTTP_201_CREATED)

@@ -427,6 +427,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         تعرض الواجهة بنداً يرفضه الخادم.
         """
         from logistics.services import purchase_item_receipt_quantities
+        from inventory.services import product_display_name
 
         invoice = self.get_object()
         rows = []
@@ -437,7 +438,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             rows.append({
                 'item_id': it.id,
                 'product': it.product_id,
-                'product_name': str(it.product),
+                'product_name': product_display_name(it.product),
                 'name': it.name,
                 'unit_price': str(it.unit_price or 0),
                 'quantity': str(ordered),

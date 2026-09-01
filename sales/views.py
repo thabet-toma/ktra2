@@ -1207,6 +1207,8 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
 
         مصدر واحد للشاشة وللطباعة/PDF، فلا يُحتسب الباقي مرتين بطريقتين.
         """
+        from inventory.services import product_display_name
+
         tenant = get_tenant(request)
         if not tenant:
             return Response({"rows": []})
@@ -1234,7 +1236,7 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
                     "invoice_date": inv.invoice_date,
                     "partner_name": inv.customer.name if inv.customer_id else "",
                     "product": line.product_id,
-                    "product_name": str(line.product),
+                    "product_name": product_display_name(line.product),
                     "quantity": str(ordered),
                     "delivered_quantity": str(delivered),
                     "remaining_quantity": str(remaining),

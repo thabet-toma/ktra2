@@ -1015,7 +1015,10 @@ class DeliveryOrderLineSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_product_name(self, obj):
-        return str(obj.product) if obj.product_id else None
+        if not obj.product_id:
+            return None
+        from inventory.services import product_display_name
+        return product_display_name(obj.product)
 
     def get_ordered_quantity(self, obj):
         # السند المستقل بلا سطر فاتورة ⇒ المفوتر = المسلَّم نفسه (لا باقي).
@@ -1107,7 +1110,7 @@ class DeliveryOrderSerializer(DeliveryOrderListSerializer):
 
 class SalesQuotationLineSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
-    # اسم المنتج (قراءة فقط) لعرض بنود عرض السعر بوضوح — يتبع Product.__str__.
+    # اسم المنتج (قراءة فقط) لعرض بنود عرض السعر بوضوح — يتبع product_display_name.
     product_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
@@ -1125,7 +1128,10 @@ class SalesQuotationLineSerializer(serializers.ModelSerializer):
         read_only_fields = ["line_total"]
 
     def get_product_name(self, obj):
-        return str(obj.product) if obj.product_id else None
+        if not obj.product_id:
+            return None
+        from inventory.services import product_display_name
+        return product_display_name(obj.product)
 
 
 class SalesOrderLineSerializer(serializers.ModelSerializer):
@@ -1147,7 +1153,10 @@ class SalesOrderLineSerializer(serializers.ModelSerializer):
         read_only_fields = ["line_total"]
 
     def get_product_name(self, obj):
-        return str(obj.product) if obj.product_id else None
+        if not obj.product_id:
+            return None
+        from inventory.services import product_display_name
+        return product_display_name(obj.product)
 
 
 class SalesOrderSerializer(serializers.ModelSerializer):

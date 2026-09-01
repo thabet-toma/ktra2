@@ -45,6 +45,7 @@ PERM_ORDER_VIEW = "aftersales.order.view"
 
 def _warranties_expiring(tenant_id: int, params: dict) -> list[dict]:
     from after_sales.models import WarrantyCard
+    from inventory.services import product_display_name
 
     today = timezone.localdate()
     window = _int_param(params, "days")
@@ -62,7 +63,7 @@ def _warranties_expiring(tenant_id: int, params: dict) -> list[dict]:
     for card in queryset:
         rows.append({
             "serial": card.serial or "",
-            "device": str(card.product) if card.product_id else card.device_name,
+            "device": product_display_name(card.product) if card.product_id else card.device_name,
             "customer": card.partner.name if card.partner_id else card.customer_name,
             "phone": card.customer_phone or "",
             "start_date": card.start_date,
@@ -109,6 +110,7 @@ register(ReportSpec(
 
 def _open_service_orders(tenant_id: int, params: dict) -> list[dict]:
     from after_sales.models import ServiceOrder, ServiceOrderPart
+    from inventory.services import product_display_name
 
     today = timezone.localdate()
     queryset = (
@@ -137,7 +139,7 @@ def _open_service_orders(tenant_id: int, params: dict) -> list[dict]:
             "age_days": (today - order.order_date).days,
             "customer": order.partner.name if order.partner_id else order.customer_name,
             "phone": order.customer_phone or "",
-            "device": str(order.product) if order.product_id else order.device_description,
+            "device": product_display_name(order.product) if order.product_id else order.device_description,
             "serial": order.serial or "",
             "status": order.get_status_display(),
             "technician": (
@@ -214,6 +216,7 @@ def _warranty_parts_cost(tenant_id: int, params: dict) -> list[dict]:
     from after_sales.models import ServiceOrder
     from after_sales.service_orders import STOCK_REF_SERVICE_ISSUE
     from inventory.models import StockMovement
+    from inventory.services import product_display_name
 
     queryset = (
         StockMovement.objects
@@ -239,7 +242,7 @@ def _warranty_parts_cost(tenant_id: int, params: dict) -> list[dict]:
         rows.append({
             "movement_date": movement.movement_date,
             "order_number": order_numbers.get(movement.reference_id, ""),
-            "product": str(movement.product) if movement.product_id else "",
+            "product": product_display_name(movement.product) if movement.product_id else "",
             "customer": movement.partner.name if movement.partner_id else "",
             "quantity": _qty(movement.quantity),
             "unit_cost": _money(movement.unit_cost),

@@ -265,6 +265,8 @@ class GoodsReceiptViewSet(BaseTenantViewSet):
             .select_related('partner')
             .prefetch_related('items__product')
         )
+        from inventory.services import product_display_name
+
         rows = []
         for inv in invoices:
             for it in inv.items.all():
@@ -279,7 +281,7 @@ class GoodsReceiptViewSet(BaseTenantViewSet):
                     'invoice_date': inv.invoice_date,
                     'partner_name': inv.partner.name if inv.partner_id else '',
                     'product': it.product_id,
-                    'product_name': str(it.product),
+                    'product_name': product_display_name(it.product),
                     'quantity': str(ordered),
                     'received_quantity': str(received),
                     'remaining_quantity': str(remaining),
