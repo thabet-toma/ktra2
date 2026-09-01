@@ -162,19 +162,26 @@ def trade_dashboard(request):
     # T-REORDER: العدّادان من `inventory.stock_status` وحدها. كان «نفذ» يفلتر
     # `min_stock_level__gt=0` قبل العدّ — فمنتجٌ نفد ولا حدّ أدنى له لا يُعدّ
     # نافداً إطلاقاً، وهو معظم الكتالوج. رقمٌ كاذبٌ بالنقصان يقرأه المالك كل صباح.
+    # #28: يتبعان حالة **الأب** لا البراند وحده — نفس ما تعرضه شارة الصفّ.
     from inventory.stock_status import (
-        STATUS_LOW, STATUS_OUT_OF_STOCK, filter_by_stock_status,
+        STATUS_LOW, STATUS_OUT_OF_STOCK, family_available_map, family_status_map,
+        filter_by_stock_status,
     )
 
     reserved_map = {}
+    family_statuses = {}
     if tenant:
         from sales.services import reserved_quantity_map
 
         reserved_map = reserved_quantity_map(tenant.TenantID)
-    low_stock_qs = filter_by_stock_status(prod_qs, STATUS_LOW, reserved_map=reserved_map)
+        family_totals = family_available_map(tenant.TenantID, reserved_map=reserved_map)
+        family_statuses = family_status_map(tenant.TenantID, family_totals=family_totals)
+    low_stock_qs = filter_by_stock_status(
+        prod_qs, STATUS_LOW, reserved_map=reserved_map, family_statuses=family_statuses,
+    )
     low_stock = low_stock_qs.count()
     out_of_stock = filter_by_stock_status(
-        prod_qs, STATUS_OUT_OF_STOCK, reserved_map=reserved_map
+        prod_qs, STATUS_OUT_OF_STOCK, reserved_map=reserved_map, family_statuses=family_statuses,
     ).count()
     movements_qs = (
         StockMovement.objects.filter(tenant=tenant)

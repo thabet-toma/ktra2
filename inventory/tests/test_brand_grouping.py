@@ -314,6 +314,134 @@ class ParentStockStatusTest(APITestCase):
         assert body["stock_status"] == "low_stock", body
 
 
+class FamilyAwareStockStatusFilterTest(APITestCase):
+    """#28: فلتر `?stock_status=` يقيس حالة الأب لا البراند وحده — نفس ما
+    تعرضه الشارة (#25). قبل هذا الإصلاح كان الفلتر يقرأ حدّ كل براندٍ على
+    صفّه هو، فيناقض الشارة في الصفّ الواحد: يُفلتر المستخدم على «منخفض»
+    فيعود صفٌّ شارتُه «متوفّر» — أو العكس، أبٌ منخفضٌ لا يظهر كل برانداته."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="fasf", password="x")
+        cls.tenant = create_company("شركة فلتر حالة الأب", cls.owner)
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.owner)
+        self.hdr = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def _filter(self, status, view=None):
+        query = f"?stock_status={status}"
+        if view:
+            query += f"&view={view}"
+        res = self.client.get(f"{PRODUCTS_URL}{query}", **self.hdr)
+        assert res.status_code == 200, res.content[:300]
+        return res.json()
+
+    def _list(self):
+        res = self.client.get(PRODUCTS_URL, **self.hdr)
+        assert res.status_code == 200, res.content[:300]
+        return {row["sku"]: row for row in res.json()}
+
+    def _add_brand(self, family_id, brand):
+        res = self.client.post(
+            f"{PRODUCTS_URL}add-brand/", {"family_id": family_id, "brand": brand},
+            format="json", **self.hdr,
+        )
+        assert res.status_code == 201, res.content[:300]
+        return Product.objects.get(pk=res.json()["id"])
+
+    # 1) براندٌ منخفضٌ وحده (2 مقابل حدٍّ 20) داخل منتجٍ وفير (أخوه 100) —
+    # الشارة تقول «متوفّر» (102 > 20)، فالفلتر يجب ألّا يُعيده تحت «منخفض».
+    def test_filter_excludes_a_brand_low_alone_inside_an_abundant_family(self):
+        res = self.client.post(
+            PRODUCTS_URL, {"name_ar": "غسّالة فائقة", "min_stock_level": 20},
+            format="json", **self.hdr,
+        )
+        assert res.status_code == 201, res.content[:300]
+        low_brand = Product.objects.get(pk=res.json()["id"])
+        low_brand.brand = "أ"
+        low_brand.save(update_fields=["brand"])
+        well_brand = self._add_brand(low_brand.family_id, "ب")
+
+        record_stock_movement(
+            product=low_brand, movement_type="IN", quantity=Decimal("2"),
+            unit_cost=Decimal("10"), movement_date="2026-06-01", tenant=self.tenant)
+        record_stock_movement(
+            product=well_brand, movement_type="IN", quantity=Decimal("100"),
+            unit_cost=Decimal("10"), movement_date="2026-06-01", tenant=self.tenant)
+
+        rows = self._list()
+        assert rows[low_brand.sku]["stock_status"] == "in_stock", rows[low_brand.sku]
+
+        low_result_skus = {r["sku"] for r in self._filter("low_stock")}
+        assert low_brand.sku not in low_result_skus, low_result_skus
+        assert well_brand.sku not in low_result_skus, low_result_skus
+
+    # 2) الأب منخفضٌ إجمالاً (0 + 10 مقابل حدٍّ 30) — يجب أن يظهر **كل**
+    # برانداته تحت «منخفض»، حتى البراند برصيدٍ صفرٍ الذي وحده كان سيُصنَّف
+    # «نافذ» لا «منخفض» — والفلتر القديم كان يفلتره خارج «منخفض» كليةً.
+    def test_filter_includes_a_zero_stock_sibling_when_the_family_is_low(self):
+        res = self.client.post(
+            PRODUCTS_URL, {"name_ar": "شاشة عرض", "min_stock_level": 30},
+            format="json", **self.hdr,
+        )
+        assert res.status_code == 201, res.content[:300]
+        zero_brand = Product.objects.get(pk=res.json()["id"])
+        zero_brand.brand = "أ"
+        zero_brand.save(update_fields=["brand"])
+        low_brand = self._add_brand(zero_brand.family_id, "ب")
+
+        record_stock_movement(
+            product=low_brand, movement_type="IN", quantity=Decimal("10"),
+            unit_cost=Decimal("10"), movement_date="2026-06-01", tenant=self.tenant)
+
+        rows = self._list()
+        assert rows[zero_brand.sku]["stock_status"] == "low_stock", rows[zero_brand.sku]
+        assert rows[low_brand.sku]["stock_status"] == "low_stock", rows[low_brand.sku]
+
+        low_result_skus = {r["sku"] for r in self._filter("low_stock")}
+        assert {zero_brand.sku, low_brand.sku} <= low_result_skus, low_result_skus
+
+    # #28: قرارٌ موثَّق لا سهوٌ — `view=lookup` يبقى برصيد البراند وحده، فالبراند
+    # الصفري داخل منتجٍ وفير يبقى «نافذ» في المنتقي، ولو اختفى من جدول الأصناف.
+    def test_lookup_view_still_judges_the_zero_brand_alone(self):
+        res = self.client.post(
+            PRODUCTS_URL, {"name_ar": "طابعة حبر"}, format="json", **self.hdr,
+        )
+        assert res.status_code == 201, res.content[:300]
+        zero_brand = Product.objects.get(pk=res.json()["id"])
+        zero_brand.brand = "أ"
+        zero_brand.save(update_fields=["brand"])
+        abundant_brand = self._add_brand(zero_brand.family_id, "ب")
+        record_stock_movement(
+            product=abundant_brand, movement_type="IN", quantity=Decimal("50"),
+            unit_cost=Decimal("10"), movement_date="2026-06-01", tenant=self.tenant)
+
+        lookup_out = self._filter("out_of_stock", view="lookup")
+        assert {r["sku"] for r in lookup_out} == {zero_brand.sku}, lookup_out
+
+        table_out = {r["sku"] for r in self._filter("out_of_stock")}
+        assert zero_brand.sku not in table_out, table_out  # الأب وفيرٌ إجمالاً
+
+    # #28: الخدمة شارتُها «متوفّر» دائماً (بلا مخزونٍ يُقاس). ولها منذ #20 أبٌ
+    # كسائر المنتجات، وأبوها بلا رصيد فحكمه «نفذ» — فلو قرأ الفلتر حكم الأب
+    # وحده لسقطت كل خدمةٍ من «متوفّر» (أبٌ شاذّ) ومن «نفذ» (استثناء الخدمة)
+    # معاً: بندٌ لا يظهر تحت أيّ حالة بينما شارته تقول «متوفّر».
+    def test_service_stays_in_stock_in_the_filter_as_its_badge_says(self):
+        res = self.client.post(
+            PRODUCTS_URL, {"name_ar": "خدمة تركيب", "is_service": True},
+            format="json", **self.hdr,
+        )
+        assert res.status_code == 201, res.content[:300]
+        service = Product.objects.get(pk=res.json()["id"])
+        assert service.family_id is not None  # الخدمة تأخذ أباً كسائر المنتجات
+
+        rows = self._list()
+        assert rows[service.sku]["stock_status"] == "in_stock", rows[service.sku]
+        assert service.sku in {r["sku"] for r in self._filter("in_stock")}
+        assert service.sku not in {r["sku"] for r in self._filter("out_of_stock")}
+
+
 class ReplenishmentAlternativesAxisTest(APITestCase):
     """البند 4: محور «البدائل» يعطي عدداً حقيقياً لمنتجٍ متعدّد البراندات."""
 
@@ -410,4 +538,31 @@ class FamilyStockStatusQueryBudgetTest(APITestCase):
 
         assert len(r1.json()) == 4      # 2 عائلة × براندان
         assert len(r2.json()) == 16     # 8 عائلات (2+6) × براندان
+        assert len(large) == len(small), (len(small), len(large))
+
+    # #28: `family_status_map` استعلامان اثنان للشركة كلّها — لا يكبران مع
+    # عدد الأبناء (`family_available_map` الواحد + استعلامٌ واحدٌ على الحدود).
+    def test_family_status_map_is_two_queries_regardless_of_row_count(self):
+        from inventory.stock_status import family_status_map
+
+        self._make_families(6)
+        with self.assertNumQueries(2):
+            family_status_map(self.tenant.TenantID)
+
+    # #28: فلتر `?stock_status=` يستخدم نفس الخريطة — عدد استعلاماته لا يكبر
+    # مع عدد الصفوف/البراندات، تماماً كالقائمة بلا فلتر.
+    def test_stock_status_filter_query_count_does_not_grow_with_brand_rows(self):
+        self._make_families(2)
+        with CaptureQueriesContext(connection) as small:
+            r1 = self.client.get(f"{PRODUCTS_URL}?stock_status=low_stock", **self.hdr)
+        assert r1.status_code == 200, r1.content[:300]
+
+        self._make_families(6)
+        with CaptureQueriesContext(connection) as large:
+            r2 = self.client.get(f"{PRODUCTS_URL}?stock_status=low_stock", **self.hdr)
+        assert r2.status_code == 200, r2.content[:300]
+
+        # هذه العائلات وفيرةٌ (23 > 5) لا منخفضة — الفلتر يستبعدها كلّها بحقّ.
+        assert r1.json() == []
+        assert r2.json() == []
         assert len(large) == len(small), (len(small), len(large))

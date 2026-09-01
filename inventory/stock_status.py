@@ -110,6 +110,18 @@ def family_available_map(tenant_id: int, *, reserved_map=None) -> dict:
     return totals
 
 
+def _status_for(available: Decimal, minimum: Decimal, maximum: Decimal) -> str:
+    """السلّم من أربعة أسطر — القرار الوحيد، يستدعيه `stock_status_of` (صفٌّ
+    واحد) و`family_status_map` (أبٌ واحد) كلاهما. لا نسخة ثانية منه (#28)."""
+    if available <= ZERO:
+        return STATUS_OUT_OF_STOCK
+    if minimum > ZERO and available <= minimum:
+        return STATUS_LOW
+    if maximum > ZERO and available > maximum:
+        return STATUS_OVERSTOCK
+    return STATUS_IN_STOCK
+
+
 def stock_status_of(product, *, reserved_map=None, suggested_min=None, suggested_max=None,
                      family_totals=None) -> str:
     """حالة المنتج الواحد — نفس ترتيب القرار الذي يطبّقه `filter_by_stock_status`.
@@ -129,15 +141,40 @@ def stock_status_of(product, *, reserved_map=None, suggested_min=None, suggested
     else:
         available = available_of(product, reserved_map)
         threshold_source = product
-    if available <= ZERO:
-        return STATUS_OUT_OF_STOCK
     minimum = effective_min(threshold_source, suggested_min)
-    if minimum > ZERO and available <= minimum:
-        return STATUS_LOW
     maximum = effective_max(threshold_source, suggested_max)
-    if maximum > ZERO and available > maximum:
-        return STATUS_OVERSTOCK
-    return STATUS_IN_STOCK
+    return _status_for(available, minimum, maximum)
+
+
+def family_status_map(tenant_id: int, *, reserved_map=None, family_totals=None) -> dict:
+    """حالة كل عائلةٍ (أبٍ) في الشركة — نفس سلّم `stock_status_of` مطبَّقاً
+    على مجموع الإخوة مقابل حدّ الأب، لا رصيد براندٍ وحده مقابل حدّه هو (#28).
+
+    استعلامان اثنان **للشركة كلّها** لا للصفّ: `family_available_map` (إن لم
+    يُمرَّر `family_totals` جاهزاً من مستدعٍ يملكه أصلاً) ثم استعلامٌ واحد على
+    `ProductFamily` لحدَّي كل أبٍ ظهر في المجموع. من يستدعيها ومعه
+    `family_totals` محسوبةً سلفاً (مثل `ProductViewSet._family_available_map`)
+    يدفع استعلاماً واحداً إضافياً فقط.
+
+    يقرأها `filter_by_stock_status` (فلتر الجدول) وعدّادا الداشبورد — كلاهما
+    عبر هذه الدالة وحدها، فلا يتفرّع السلّم في مكانٍ ثانٍ.
+    """
+    if family_totals is None:
+        family_totals = family_available_map(tenant_id, reserved_map=reserved_map)
+    if not family_totals:
+        return {}
+    from .models import ProductFamily
+
+    families = ProductFamily.objects.filter(
+        tenant_id=tenant_id, id__in=family_totals.keys(),
+    ).only('id', 'min_stock_level', 'max_stock_level')
+    return {
+        family.id: _status_for(
+            family_totals.get(family.id, ZERO),
+            effective_min(family), effective_max(family),
+        )
+        for family in families
+    }
 
 
 def available_expression(reserved_map=None):
@@ -190,25 +227,57 @@ def _not_over_q():
         available_qty__lte=F("max_stock_level"))
 
 
-def filter_by_stock_status(qs, value, *, reserved_map=None):
+def _row_status_q(value):
+    """محمول القرار على مستوى الصفّ وحده — بلا أبٍ. نفس شروط `_status_for`
+    مكتوبةً كـ`Q` بدل بايثون، لأن الفلتر يعمل في SQL."""
+    if value == STATUS_IN_STOCK:
+        # الخدمة «متوفّرة» دائماً — بلا مخزونٍ يُقاس.
+        return Q(is_service=True) | (Q(available_qty__gt=0) & _not_low_q() & _not_over_q())
+    base = ~Q(is_service=True)
+    if value == STATUS_OUT_OF_STOCK:
+        return base & Q(available_qty__lte=0)
+    if value == STATUS_LOW:
+        return base & _low_q()
+    return base & _over_q()
+
+
+def filter_by_stock_status(qs, value, *, reserved_map=None, family_statuses=None):
     """يقصر الـqueryset على حالةٍ واحدة. قيمةٌ مجهولة ⇒ لا فلترة.
 
     يقرأ الحدّ **اليدوي** وحده: المقترَح محسوبٌ في بايثون ولا يعيش في عمود، ولو
     فُلتِر به لاختلف عدّ الصفحة عن عدد الصفوف. من أراد الحدّ المقترَح فمكانه
     تقرير التجديد لا فلتر الجدول — وهو مكتوبٌ في وصف الفلتر لا مسكوتٌ عنه.
+
+    #28: `family_statuses` (من `family_status_map`) خريطةٌ اختياريةٌ
+    `{family_id: status}`. غائبةً أو فارغةً ⇒ السلوك **نفسه** حرفياً كما قبل
+    هذا التاريخ (فلا يتغيّر `?view=lookup` ولا أيّ مستدعٍ قديمٍ لم يُحدَّث).
+    حاضرةً: منتجٌ له أبٌ ظاهرٌ فيها يُفلتَر بحالة **أبيه** لا حالة صفّه — نفس
+    قاعدة `stock_status_of` — ومنتجٌ بلا أبٍ (أو أبوه غائبٌ عن الخريطة، بيانات
+    ما قبل #20) يبقى على المحمول السابق صفّاً بصفّ. «متوفّر» يُبنى من متمّم
+    الحالات الشاذّة (منخفض/نافد/فائض) لا من تعداد كل عائلةٍ متوفّرة — فقائمة
+    المعرّفات محدودةٌ بعدد العائلات الشاذّة لا بحجم الكتالوج.
     """
     if value not in STATUS_CHOICES:
         return qs
     qs = annotate_available(qs, reserved_map)
+    if not family_statuses:
+        return qs.filter(_row_status_q(value))
+
+    family_ids = list(family_statuses.keys())
+    no_family_q = ~Q(family_id__in=family_ids)
     if value == STATUS_IN_STOCK:
-        # الخدمة «متوفّرة» دائماً — بلا مخزونٍ يُقاس.
+        abnormal_ids = [fid for fid, st in family_statuses.items() if st != STATUS_IN_STOCK]
+        family_q = Q(family_id__in=family_ids) & ~Q(family_id__in=abnormal_ids)
+        # الخدمة تفوز أوّلاً — كما في `stock_status_of` حرفاً بحرف. وهي منذ #20
+        # تحمل أباً كسائر المنتجات، وأبوها بلا رصيدٍ أبداً (خدمةٌ لا تُخزَّن)
+        # فحكمُ أبيه «نفذ». بلا هذا الطرف تسقط كل خدمةٍ من الفلترين معاً:
+        # «متوفّر» يرفضها لأن أباها شاذّ، و«نفذ» يستثنيها لأنها خدمة — فلا تظهر
+        # تحت أيّ حالة بينما شارتها تقول «متوفّر».
         return qs.filter(
-            Q(is_service=True)
-            | (Q(available_qty__gt=0) & _not_low_q() & _not_over_q())
+            Q(is_service=True) | family_q | (no_family_q & _row_status_q(value))
         )
+    # الخدمة تفوز أولاً كما في `stock_status_of` — لا تدخل عائلةً شاذّةً أبداً.
     qs = qs.exclude(is_service=True)
-    if value == STATUS_OUT_OF_STOCK:
-        return qs.filter(available_qty__lte=0)
-    if value == STATUS_LOW:
-        return qs.filter(_low_q())
-    return qs.filter(_over_q())
+    matching_ids = [fid for fid, st in family_statuses.items() if st == value]
+    family_q = Q(family_id__in=matching_ids)
+    return qs.filter(family_q | (no_family_q & _row_status_q(value)))

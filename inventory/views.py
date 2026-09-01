@@ -243,6 +243,26 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
                 self._family_available_map_cache = {}
         return self._family_available_map_cache
 
+    def _family_statuses(self):
+        """#28: حالة كل أبٍ ظهر في `_family_available_map` — استعلامٌ إضافيٌّ
+        واحد فقط (`ProductFamily`)، إذ الأرصدة نفسها محسوبةٌ سلفاً.
+
+        يقرأه `get_queryset` ليُفلتر `?stock_status=` بحالة **الأب** لا حالة
+        البراند وحده — نفس القاعدة التي تعرضها الشارة (`stock_status_of`
+        عبر السيريالايزر). `view=lookup` لا يستدعيها إطلاقاً؛ يبقى فلتره على
+        حالة البراند وحده عمداً، كما `get_serializer_context`.
+        """
+        if not hasattr(self, '_family_statuses_cache'):
+            tenant = self._get_tenant()
+            if tenant:
+                from .stock_status import family_status_map
+                self._family_statuses_cache = family_status_map(
+                    tenant.TenantID, family_totals=self._family_available_map(),
+                )
+            else:
+                self._family_statuses_cache = {}
+        return self._family_statuses_cache
+
     def _family_brand_counts(self):
         """#23: عدد براندات كل أبٍ في الشركة — استعلامٌ واحدٌ لكل طلب.
 
@@ -311,10 +331,17 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         )
         # T-REORDER: فلتر حالة المخزون — من `inventory/stock_status.py` وحدها.
         # كان مكتوباً هنا نسخةً ثانية بجانب نسخة السيريالايزر، وتباعدتا.
+        # #28: يفلتر بحالة **الأب** لا البراند وحده — نفس ما تعرضه الشارة —
+        # إلا في `view=lookup` (البند يبيع براندًا بعينه، عمداً كما في
+        # `get_serializer_context`).
         stock_status = params.get('stock_status')
         if stock_status:
+            family_statuses = (
+                self._family_statuses() if params.get('view') != 'lookup' else None
+            )
             qs = filter_by_stock_status(
                 qs, stock_status, reserved_map=self._reserved_map(),
+                family_statuses=family_statuses,
             )
         # ST-3: شاشة «متجري» تعرض المنشور وحده، وتحتاج عدده قبل فتح المتجر أول
         # مرة. بلا هذا الفلتر كان عليها تحميل الكتالوج كاملاً وتصفيته في

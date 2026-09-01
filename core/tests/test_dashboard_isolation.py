@@ -311,3 +311,70 @@ class DashboardIsolationTest(APITestCase):
         assert "import_operations" not in data
         assert data["sales_invoices"]["total"] == 0
         assert data["inventory"]["total_products"] == 0
+
+
+class DashboardStockStatusFamilyAwareTest(APITestCase):
+    """#28: عدّادا الداشبورد (منخفض/نافد) يتبعان حالة الأب لا البراند وحده —
+    نفس ما يعرضه فلتر جدول الأصناف — وعائلة شركةٍ أخرى لا تسرّب إلى عدّاد هذه
+    الشركة."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner_a = User.objects.create_user(username="dsaf_a", password="x")
+        cls.owner_b = User.objects.create_user(username="dsaf_b", password="x")
+        cls.t_a = create_company("شركة عدّاد الأب أ", cls.owner_a)
+        cls.t_b = create_company("شركة عدّاد الأب ب", cls.owner_b)
+
+    def _dashboard(self, user, tenant):
+        cache.clear()
+        self.client.force_authenticate(user=user)
+        res = self.client.get("/api/dashboard/", HTTP_X_TENANT_ID=str(tenant.TenantID))
+        assert res.status_code == 200, f"{res.status_code}: {res.content[:200]}"
+        return res.json()
+
+    def _add_family(self, tenant, *, qty1, qty2, min_stock_level):
+        from inventory.services import add_brand_to_family, create_product_with_family
+        from inventory.models import Product
+
+        n = Product.objects.filter(tenant=tenant).count()
+        family, first = create_product_with_family(
+            tenant=tenant, name_ar="منتج عدّاد", min_stock_level=min_stock_level,
+            sku=f"DASH-{n}-1",
+        )
+        first.brand = "أ"
+        first.quantity_on_hand = qty1
+        first.save(update_fields=["brand", "quantity_on_hand"])
+        second, _created = add_brand_to_family(
+            family=family, brand_name="ب", tenant=tenant, sku=f"DASH-{n}-2",
+        )
+        second.quantity_on_hand = qty2
+        second.save(update_fields=["quantity_on_hand"])
+        return family
+
+    def test_low_and_out_counters_ignore_a_brand_low_alone_inside_an_abundant_family(self):
+        # براندٌ رصيده 2 مقابل حدٍّ 20 — منخفضٌ وحده، لكن أخاه 100: الأب وفير.
+        self._add_family(self.t_a, qty1=2, qty2=100, min_stock_level=20)
+
+        data = self._dashboard(self.owner_a, self.t_a)
+        assert data["inventory"]["low_stock"] == 0, data["inventory"]
+        assert data["inventory"]["out_of_stock"] == 0, data["inventory"]
+
+    def test_low_stock_counter_counts_every_family_member_when_the_family_is_low(self):
+        # الأب منخفضٌ إجمالاً (0 + 10 مقابل حدٍّ 30) — كلا البراندين يُحتسب.
+        self._add_family(self.t_a, qty1=0, qty2=10, min_stock_level=30)
+
+        data = self._dashboard(self.owner_a, self.t_a)
+        assert data["inventory"]["low_stock"] == 2, data["inventory"]
+        assert data["inventory"]["out_of_stock"] == 0, data["inventory"]
+
+    def test_a_low_family_in_another_tenant_does_not_leak_into_this_counter(self):
+        self._add_family(self.t_a, qty1=100, qty2=50, min_stock_level=5)  # وفيرة عند أ
+        for _ in range(5):
+            self._add_family(self.t_b, qty1=0, qty2=10, min_stock_level=30)  # منخفضةٌ عند ب
+
+        data_a = self._dashboard(self.owner_a, self.t_a)
+        assert data_a["inventory"]["low_stock"] == 0, data_a["inventory"]
+        assert data_a["inventory"]["out_of_stock"] == 0, data_a["inventory"]
+
+        data_b = self._dashboard(self.owner_b, self.t_b)
+        assert data_b["inventory"]["low_stock"] == 10, data_b["inventory"]  # 5 عوائل × براندان
