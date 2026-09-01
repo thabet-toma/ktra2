@@ -146,6 +146,10 @@ class ProductSerializer(serializers.ModelSerializer):
     group_key = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
     has_group = serializers.SerializerMethodField()
+    # #23: شاشة الأصناف تجمع صفوف البراندات تحت صفّ منتجٍ واحد — تحتاج معرّف
+    # الأب واسمه لتقرّر أيّ صفوفٍ تتجمّع (مرآة `ProductLookupSerializer`).
+    family_id = serializers.IntegerField(read_only=True)
+    family_name = serializers.SerializerMethodField()
     # W8: تجميعات من StockMovement (منقّطة في ProductViewSet.get_queryset — لا N+1).
     # المشتريات = الوارد التراكمي (IN). المتوسط الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3.
     purchased_qty = serializers.SerializerMethodField()
@@ -189,6 +193,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'sale_price',
             'purchased_qty', 'avg_monthly_sales',
             'stock_status', 'group_key', 'display_name', 'has_group',
+            'family_id', 'family_name',
             'created_at',
             'attachments',
         ]
@@ -223,7 +228,14 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_has_group(self, obj):
         from .services import product_has_explicit_group
-        return product_has_explicit_group(obj)
+        return product_has_explicit_group(
+            obj, family_sibling_counts=self.context.get('family_brand_counts'),
+        )
+
+    def get_family_name(self, obj):
+        if not obj.family_id:
+            return None
+        return obj.family.name_ar or obj.family.name_en or None
 
     def get_purchased_qty(self, obj):
         v = getattr(obj, 'purchased_qty', None)

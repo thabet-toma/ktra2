@@ -197,7 +197,42 @@ export const ProductOverview: React.FC<{ profile: ProductProfileData | null; loa
         <Kpi label="الوحدة" value={profile.uom || "—"} />
         <Kpi label="طبيعة المنتج" value={profile.is_service ? "خدمة" : "بضاعة"} />
       </Section>
+
+      {/* #23: «كرت المنتج يعرض المجمَّع والتفصيل معاً» — حين يتبع هذا البراند
+          منتجاً له إخوة، يظهر مجمّعهم وتفصيلهم هنا بلا مغادرة الكرت. */}
+      {profile.family_id != null && <FamilyBrandsSection familyId={profile.family_id} />}
     </div>
+  );
+};
+
+/**
+ * #23: مجمَّع براندات المنتج (الأب) + تفصيلها — يقرأ نفس نقطة الكرت المجمّع
+ * القائمة (`useGroupInsights`/`product_group_profile`) بمحدِّد `family` بدل
+ * تعداد المعرّفات؛ لا منطق تجميعٍ ثانٍ. صامتةٌ (`null`) حين لا إخوة بعد —
+ * منتجٌ ببراندٍ واحد يبقى كرته كما هو اليوم بلا قسمٍ زائد.
+ */
+const FamilyBrandsSection: React.FC<{ familyId: number }> = ({ familyId }) => {
+  const { profile: group, loading } = useGroupInsights({ family: familyId });
+  if (!loading && (!group || group.member_count <= 1)) return null;
+  return (
+    <section className="mb-3">
+      <div className="text-xs font-bold text-[var(--ktra-ink-soft)] mb-1.5 pr-0.5">
+        براندات هذا المنتج
+      </div>
+      {group && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
+          <Kpi label="إجمالي الرصيد (كل البراندات)" value={formatQuantity(group.quantity_on_hand, "—")} />
+          <Kpi label="تقييم المخزون المجمّع" value={formatMoney(group.inventory_valuation, "—")} />
+          <Kpi label="عدد البراندات" value={formatQuantity(group.member_count, "—")} />
+        </div>
+      )}
+      <LedgerTable<GroupMember>
+        columns={groupMemberColumns}
+        rows={group?.members || []}
+        loading={loading}
+        emptyText="لا توجد براندات أخرى بعد."
+      />
+    </section>
   );
 };
 
@@ -608,15 +643,17 @@ const groupMemberColumns: LedgerColumn<GroupMember>[] = [
  */
 export const useGroupInsights = (selector: ProductGroupSelector | number[]) => {
   const given: ProductGroupSelector = Array.isArray(selector) ? { ids: selector } : selector;
-  const selKey = `${given.category ?? ""}|${(given.ids ?? []).join(",")}`;
+  // #23: `family` — الأب يشتقّ الخادم برانداته كلّها (كرت المنتج المفرد).
+  const selKey = `${given.family ?? ""}|${given.category ?? ""}|${(given.ids ?? []).join(",")}`;
   const sel = useMemo<ProductGroupSelector>(() => {
-    const [cat, idsRaw] = selKey.split("|");
+    const [fam, cat, idsRaw] = selKey.split("|");
+    if (fam) return { family: Number(fam) };
     return cat
       ? { category: Number(cat) }
       : { ids: idsRaw.split(",").filter(Boolean).map(Number) };
   }, [selKey]);
-  // «فارغة» = لا تصنيف ولا معرّفات؛ التصنيف وحده كافٍ (الخادم يعدّ أعضاءه).
-  const isEmpty = !sel.category && !(sel.ids ?? []).length;
+  // «فارغة» = لا أبٌ ولا تصنيف ولا معرّفات؛ أيٌّ منها وحده كافٍ (الخادم يعدّ أعضاءه).
+  const isEmpty = !sel.family && !sel.category && !(sel.ids ?? []).length;
 
   const [profile, setProfile] = useState<GroupProfileData | null>(null);
   const [loading, setLoading] = useState(true);

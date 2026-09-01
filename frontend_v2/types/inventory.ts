@@ -14,6 +14,11 @@ export interface SqlProduct {
   display_name?: string | null;
   /** هل المجموعة صريحة — فيظهر المجلّد حتى لو منتج واحد. */
   has_group?: boolean;
+  /** #23: معرّف «المنتج» (الأب) — البراندات بنفس `family_id` تتجمّع في صفٍّ
+   *  واحد في شاشة الأصناف. غائبٌ/null لصفوفٍ ما قبل هذا النموذج. */
+  family_id?: number | null;
+  /** اسم «المنتج» (الأب) — يُعرض على الصفّ المجمَّع بدل اسم براندٍ بعينه. */
+  family_name?: string | null;
   category?: number | null;
   category_name?: string | null;
   uom_id?: number | null;

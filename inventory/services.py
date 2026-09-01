@@ -75,9 +75,34 @@ def product_group_key(product) -> str:
     return name or (product.sku or '')
 
 
-def product_has_explicit_group(product) -> bool:
-    """هل عُيِّن للمنتج منتج فرعي صريح — فيظهر مجلّده حتى لو منتجاً واحداً."""
-    return bool((getattr(product, 'variant_group', '') or '').strip())
+def product_has_explicit_group(product, *, family_sibling_counts=None) -> bool:
+    """هل للمنتج مجموعةٌ صريحة تستحقّ عنصر كشفٍ — `variant_group` القديم، أو
+    (#23) أبٌ (`family`) له أكثر من براندٍ واحد.
+
+    عدّ الإخوة استعلامٌ إضافي (سبب فصله عن الدالة): يُمرَّر `family_sibling_counts`
+    (من `family_brand_counts`، استعلامٌ واحدٌ للشركة كلّها) فيُستعمل، وإلّا
+    يُهمَل الشرط الثاني بصمتٍ فيبقى معنى الدالة القديم (`variant_group` وحده)
+    لأيّ مستدعٍ لم يُحدَّث بعد — لا يُكسَر `test_has_group_flag_still_reflects_explicit_variant_group`.
+    """
+    if (getattr(product, 'variant_group', '') or '').strip():
+        return True
+    family_id = getattr(product, 'family_id', None)
+    if family_id and family_sibling_counts:
+        return family_sibling_counts.get(family_id, 0) > 1
+    return False
+
+
+def family_brand_counts(tenant_id: int) -> dict:
+    """عدد براندات كل منتج (أب) في الشركة — استعلامٌ واحدٌ للشركة كلّها (#23).
+
+    يقرأه `product_has_explicit_group` ليقرّر ظهور عنصر «كشف البراندات» في
+    الجدول بلا استعلامٍ لكل صفّ — نفس نمط `stock_status.family_available_map`."""
+    from django.db.models import Count
+    rows = (
+        Product.objects.filter(tenant_id=tenant_id, family_id__isnull=False)
+        .values('family_id').annotate(n=Count('id'))
+    )
+    return {row['family_id']: row['n'] for row in rows}
 
 
 def product_display_name(product) -> str:
@@ -230,10 +255,32 @@ def sync_family_from_product(product) -> bool:
     for name in changed:
         attr = f'{name}_id' if hasattr(product, f'{name}_id') else name
         setattr(family, attr, getattr(product, attr))
-    family.save(update_fields=[
-        f'{name}_id' if hasattr(family, f'{name}_id') else name for name in changed
-    ])
+    fields = [f'{name}_id' if hasattr(family, f'{name}_id') else name for name in changed]
+    family.save(update_fields=fields)
+    _push_family_fields_to_siblings(family, exclude_id=product.pk, fields=fields)
     return True
+
+
+def _push_family_fields_to_siblings(family, *, exclude_id, fields) -> int:
+    """يُنزل الحقول «الأبوية» من الأب إلى بقية برانداته (#23).
+
+    الحقول هنا حقول **المنتج** لا البراند (الاسم، التصنيف، الوحدة، حدّا
+    التجديد، طبيعة الصنف، الحسابات) — فبقاؤها مختلفةً بين إخوةٍ تحت أبٍ واحد
+    تناقضٌ في النموذج لا تنويع. وهي ليست نظرية: تعديل الاسم من صفّ براندٍ
+    واحد كان يترك أشقّاءه على الاسم القديم، فيعرض صفّ المنتج المدموج اسم
+    أحدهم بينما يعرض منتقي المستندات اسمين مختلفين للشيء نفسه.
+
+    تحديثٌ واحد لكل الإخوة (لا صفّاً صفّاً)، ولا يُستدعى إلا حين تغيّر شيءٌ
+    فعلاً — فلا كتابة بلا سبب.
+    """
+    if not fields:
+        return 0
+    values = {f: getattr(family, f) for f in fields}
+    return (
+        Product.objects.filter(family_id=family.pk)
+        .exclude(pk=exclude_id)
+        .update(**values)
+    )
 
 
 def sync_families_from_products(products) -> int:
@@ -258,6 +305,13 @@ def sync_families_from_products(products) -> int:
     if not families or not fields:
         return 0
     ProductFamily.objects.bulk_update(families, sorted(fields))
+    # وتنزل إلى بقية الإخوة كما في النسخة المفردة — الحقول حقول المنتج، فبقاؤها
+    # مختلفةً بين إخوةٍ تحت أبٍ واحد تناقضٌ في النموذج.
+    written = {p.family_id: p.pk for p in products if p.family_id}
+    for family in families:
+        _push_family_fields_to_siblings(
+            family, exclude_id=written.get(family.pk), fields=sorted(fields),
+        )
     return len(families)
 
 

@@ -354,3 +354,45 @@ class ProductFamilyIntegrityTest(APITestCase):
         res = self.client.delete(f"{PRODUCTS_URL}{product.id}/", **self.hdr)
         assert res.status_code in (200, 204), res.content[:300]
         assert not ProductFamily.objects.filter(pk=family_id).exists()
+
+
+class FamilyFieldsStayOneTruthTest(APITestCase):
+    """الحقول «الأبوية» لا تتفرّق بين إخوةٍ تحت أبٍ واحد — تعديلٌ من أيّ صفّ يعمّ."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="fam_truth", password="x")
+        cls.tenant = create_company("شركة الحقيقة الواحدة", cls.owner)
+        cls.cat = ProductCategory.objects.create(tenant=cls.tenant, name="تصنيف جديد")
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.owner)
+        self.hdr = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def test_renaming_from_one_brand_row_reaches_its_siblings(self):
+        from inventory.services import add_brand_to_family, create_product_with_family
+
+        family, first = create_product_with_family(
+            tenant=self.tenant, name_ar="اسم قديم")
+        add_brand_to_family(family=family, brand_name="براند أول", tenant=self.tenant)
+        second, created = add_brand_to_family(
+            family=family, brand_name="براند ثانٍ", tenant=self.tenant)
+        assert created is True
+
+        res = self.client.patch(
+            f"{PRODUCTS_URL}{first.id}/",
+            {"name_ar": "اسم جديد", "category": self.cat.id},
+            format="json", **self.hdr,
+        )
+        assert res.status_code in (200, 202), res.content[:300]
+
+        family.refresh_from_db()
+        second.refresh_from_db()
+        assert family.name_ar == "اسم جديد"
+        # الشقيق كان يبقى على الاسم القديم، فيعرض المنتقي اسمين للشيء نفسه.
+        assert second.name_ar == "اسم جديد"
+        assert second.category_id == self.cat.id
+        # والبراند نفسه لا يُمَسّ — هو ما يميّز الصفَّين.
+        assert second.brand == "براند ثانٍ"
+        first.refresh_from_db()
+        assert first.brand == "براند أول"

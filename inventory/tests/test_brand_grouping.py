@@ -129,6 +129,38 @@ class BrandFamilyGroupingTest(APITestCase):
         plain_body = self._get(plain["id"])
         assert plain_body["has_group"] is False
 
+    # #23: الفخّ الصريح — `has_group` كانت تتجاهل الأب كلّياً. منتجٌ بأكثر من
+    # براندٍ يجب أن يُظهر عنصر «كشف البراندات»، ومنتجٌ ببراندٍ واحدٍ (الضمنيّ
+    # وحده) يبقى بلا عنصرٍ كما اليوم.
+    def test_has_group_flag_now_reflects_multi_brand_families(self):
+        first = self._register("سخّان مياه")
+        family_id = Product.objects.get(pk=first["id"]).family_id
+        # الأوّل يُسمّي الضمنيّ (200، نفس الصفّ)؛ الثاني ينشئ صفّاً جديداً (201).
+        named = self._add_brand(family_id, "أرستون")
+        assert named.status_code == 200, named.content[:300]
+        second = self._add_brand(family_id, "أريستون")
+        assert second.status_code == 201, second.content[:300]
+
+        first_body = self._get(named.json()["id"])
+        second_body = self._get(second.json()["id"])
+        assert first_body["has_group"] is True
+        assert second_body["has_group"] is True
+
+    def test_has_group_flag_stays_false_for_a_single_brand_family(self):
+        """أبٌ ببراندٍ ضمنيٍّ واحد فقط — لا شيء يُكشَف، فلا عنصر."""
+        registered = self._register("مكيّف هواء")
+        body = self._get(registered["id"])
+        assert body["has_group"] is False
+
+    # #23: شاشة الأصناف تحتاج معرّف الأب واسمه لتجمع صفوف البراندات في صفٍّ واحد.
+    def test_full_serializer_exposes_family_id_and_family_name(self):
+        first = self._register("غسّالة")
+        family_id = Product.objects.get(pk=first["id"]).family_id
+        family = ProductFamily.objects.get(pk=family_id)
+        body = self._get(first["id"])
+        assert body["family_id"] == family_id
+        assert body["family_name"] == (family.name_ar or family.name_en)
+
 
 class GroupProfileAndCatalogEndpointsTest(APITestCase):
     """نقاط الكرت المجمّع والفهارس (brands/groups/names/group-ledger) — عبر HTTP."""
@@ -194,6 +226,31 @@ class GroupProfileAndCatalogEndpointsTest(APITestCase):
         body = r.json()
         assert body["count"] == 1
         assert body["results"][0]["product_name"] == "185/65/14 (روك بيلد)"
+
+    # #23: كرت المنتج المفرد يفتح كرت إخوته بمعرّف الأب مباشرةً — لا حاجة
+    # لتعداد براندات المنتج في الطلب.
+    def test_group_profile_accepts_a_family_selector(self):
+        from inventory.services import create_product_with_family, add_brand_to_family
+
+        family, first = create_product_with_family(tenant=self.tenant, name_ar="لابتوب")
+        first.brand = "ديل"
+        first.save(update_fields=["brand"])
+        add_brand_to_family(family=family, brand_name="اتش بي", tenant=self.tenant)
+
+        r = self.client.get(f"{PRODUCTS_URL}group-profile/?family={family.id}", **self.hdr)
+        assert r.status_code == 200, r.content
+        assert r.json()["member_count"] == 2
+
+    def test_group_profile_family_selector_excludes_a_foreign_tenants_family(self):
+        other_owner = User.objects.create_user(username="bge3", password="x")
+        other = create_company("شركة ثالثة", other_owner)
+        from inventory.services import create_product_with_family
+        theirs_family, _theirs = create_product_with_family(tenant=other, name_ar="طابعة")
+
+        r = self.client.get(
+            f"{PRODUCTS_URL}group-profile/?family={theirs_family.id}", **self.hdr)
+        assert r.status_code == 200, r.content
+        assert r.json()["member_count"] == 0  # أبٌ من شركةٍ أخرى — لا تسريب
 
 
 class ParentStockStatusTest(APITestCase):
@@ -331,6 +388,14 @@ class FamilyStockStatusQueryBudgetTest(APITestCase):
         self._make_families(6)
         with self.assertNumQueries(1):
             family_available_map(self.tenant.TenantID)
+
+    # #23: `has_group` تحتاج عدّ إخوة كل أبٍ — نفس شرط عدم النمو.
+    def test_family_brand_counts_is_one_query_regardless_of_row_count(self):
+        from inventory.services import family_brand_counts
+
+        self._make_families(6)
+        with self.assertNumQueries(1):
+            family_brand_counts(self.tenant.TenantID)
 
     def test_products_list_query_count_does_not_grow_with_brand_rows(self):
         self._make_families(2)

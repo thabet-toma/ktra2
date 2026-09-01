@@ -227,6 +227,21 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
                 self._family_available_map_cache = {}
         return self._family_available_map_cache
 
+    def _family_brand_counts(self):
+        """#23: عدد براندات كل أبٍ في الشركة — استعلامٌ واحدٌ لكل طلب.
+
+        يقرأه السيريالايزر ليقرّر `has_group` (عنصر «كشف البراندات» في الجدول)
+        بلا استعلامٍ لكل صفّ — نفس نمط `_family_available_map`.
+        """
+        if not hasattr(self, '_family_brand_counts_cache'):
+            tenant = self._get_tenant()
+            if tenant:
+                from .services import family_brand_counts
+                self._family_brand_counts_cache = family_brand_counts(tenant.TenantID)
+            else:
+                self._family_brand_counts_cache = {}
+        return self._family_brand_counts_cache
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         if self._get_tenant():
@@ -239,6 +254,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             # اختلاف دلالة لا حقلٌ محذوف.)
             if self.request.query_params.get('view') != 'lookup':
                 context['family_available_map'] = self._family_available_map()
+                context['family_brand_counts'] = self._family_brand_counts()
         return context
 
     def get_queryset(self):
@@ -560,8 +576,9 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
 
     # ── تجميع البراندات: الكرت المجمّع (مجموع كل البراندات لنفس المقاس/الأساس) ──
     # النقر على عقدة التصنيف في الشجرة/الجرد يفتح هذه الكروت. أعضاء المجموعة
-    # يُحدَّدون بأحد شكلين:
+    # يُحدَّدون بأحد ثلاثة أشكال:
     #   • `category` — التصنيف وأحفاده، والخادم يشتقّ المعرّفات (الشكل المفضَّل)
+    #   • `family` — كل براندات منتجٍ (أب) بعينه (#23: كرت المنتج المفرد)
     #   • `ids` — تعدادٌ صريح (مجموعات group_key، وأسطر جردٍ بعينها)
     # وكلاهما يُقرأ من **جسم** الطلب (POST). كان التعداد يسافر في سطر الطلب
     # (`?ids=1,2,3…`): تصنيفُ جذرٍ فيه ~1500 منتج ⇒ عنوانٌ ~7.5KB ⇒ nginx يردّ
@@ -577,6 +594,14 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         ids = [int(str(p).strip()) for p in parts if str(p).strip().isdigit()]
         if ids:
             return ids
+        # #23: كرت المنتج المفرد يفتح الكرت المجمّع لإخوته بمعرّف الأب مباشرةً
+        # — لا حاجة لتعداد براندات المنتج في الطلب (الخادم يشتقّها).
+        family = str(source.get('family') or '').strip()
+        if family.isdigit() and tenant is not None:
+            return list(
+                Product.objects.filter(tenant=tenant, family_id=int(family))
+                .values_list('id', flat=True)
+            )
         category = str(source.get('category') or '').strip()
         if category.isdigit() and tenant is not None:
             from inventory.services import category_descendant_product_ids

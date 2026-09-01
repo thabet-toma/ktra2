@@ -10,6 +10,7 @@ import type { DenseColumn } from "../kit/KitDenseTable";
 import type { SqlProduct } from "../../types/inventory";
 import { formatQuantity } from "../../utils/formatNumber";
 import { buildCategoryIndex, descendantIds as descendantCategoryIds } from "../../utils/categoryTree";
+import { groupProductsByFamily, buildFamilyRow, type ProductGroup } from "../../utils/familyGrouping";
 
 export type TreeCategory = { id: number; name: string; parent: number | null };
 
@@ -43,6 +44,12 @@ export const GroupedItemsTable: React.FC<Props> = ({
   const toggle = (id: number) =>
     setCollapsed((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
+  // #23: كشف براندات منتجٍ داخل صفّه — بمعرّف الأب (`family_id`)، مطويٌّ افتراضياً
+  // (الشجرة تنتهي عند المنتج؛ البراندات تُكشَف حين تُطلَب لا دائماً).
+  const [expandedFamilies, setExpandedFamilies] = useState<Set<number>>(new Set());
+  const toggleFamily = (familyId: number) =>
+    setExpandedFamilies((s) => { const n = new Set(s); n.has(familyId) ? n.delete(familyId) : n.add(familyId); return n; });
+
   const getAlign = (col: DenseColumn<SqlProduct>) => col.align || (col.numeric ? "right" : "left");
   const handleSort = (col: DenseColumn<SqlProduct>) => {
     if (!col.sortable || !onSort) return;
@@ -73,23 +80,80 @@ export const GroupedItemsTable: React.FC<Props> = ({
       0,
     );
 
-  // سطر منتج (ورقة) — إزاحة الاسم حسب العمق.
-  const renderRow = (p: SqlProduct, depth: number) => (
-    <tr key={`p-${getRowKey(p)}`} onDoubleClick={() => onRowDoubleClick?.(p)}>
-      {columns.map((col, ci) => (
-        <td
-          key={col.key}
-          style={{
-            textAlign: getAlign(col) as React.CSSProperties["textAlign"],
-            ...(ci === 1 ? { paddingInlineStart: depth * 22 } : {}),
-          }}
-          className={col.numeric ? "ktra-num" : ""}
-        >
-          {col.render ? col.render(p, 0) : String((p as unknown as Record<string, unknown>)[col.key] ?? "")}
-        </td>
-      ))}
+  // سطر منتج (ورقة) — إزاحة الاسم حسب العمق. `reveal` حاضرةٌ فقط لصفّ منتجٍ
+  // مجمَّع (أكثر من براند): تضيف عنصر الكشف الصغير داخل عمود الاسم — لا صفٌّ
+  // إضافي (#23: «بديش يبين الأب والابن — بدي يبين منتج وبحدّو كلمة صغير أظهر
+  // براندات»). اسم الصفّ حينها اسم المنتج المشترك، لا اسم براندٍ بعينه — فتحريره
+  // هنا مضلِّل (يكتب فعلياً على براندٍ واحد فقط)، لذا يُعرض نصّاً ثابتاً بلا
+  // تحرير مضمَّن، بخلاف صفّ البراند المفرد الذي يحتفظ بسلوكه القائم كاملاً.
+  const renderRow = (
+    p: SqlProduct,
+    depth: number,
+    reveal?: { count: number; expanded: boolean; onToggle: () => void; rowKey: string },
+  ) => (
+    <tr key={reveal ? reveal.rowKey : `p-${getRowKey(p)}`} onDoubleClick={() => onRowDoubleClick?.(p)}>
+      {columns.map((col, ci) => {
+        const isNameCol = col.key === "name_ar";
+        return (
+          <td
+            key={col.key}
+            style={{
+              textAlign: getAlign(col) as React.CSSProperties["textAlign"],
+              ...(ci === 1 ? { paddingInlineStart: depth * 22 } : {}),
+            }}
+            className={col.numeric ? "ktra-num" : ""}
+          >
+            {reveal && isNameCol ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0, width: "100%" }}>
+                <button
+                  type="button"
+                  className="ktra-iconbtn"
+                  title={reveal.expanded ? "طيّ البراندات" : `إظهار البراندات (${reveal.count})`}
+                  onClick={(e) => { e.stopPropagation(); reveal.onToggle(); }}
+                >
+                  {reveal.expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
+                </button>
+                <span
+                  className="truncate"
+                  style={{ minWidth: 0, flex: 1, fontWeight: 600 }}
+                  title={p.display_name || p.name_ar || ""}
+                >
+                  {p.display_name || p.name_ar || p.name_en || "—"}
+                </span>
+                <span style={{ color: "var(--ktra-ink-soft)", fontSize: 11, flexShrink: 0 }}>
+                  ({reveal.count})
+                </span>
+              </span>
+            ) : (
+              col.render ? col.render(p, 0) : String((p as unknown as Record<string, unknown>)[col.key] ?? "")
+            )}
+          </td>
+        );
+      })}
     </tr>
   );
+
+  // #23: عقدة منتجٍ واحدة (فرد) أو مجمَّعة (أكثر من براند) — الأخيرة صفٌّ واحدٌ
+  // بمجموع الأرصدة (`buildFamilyRow`، مشتقٌّ لا مخزَّن) مع عنصر كشفٍ، وتوسيعها
+  // يُنزل كل براندٍ صفّاً مستقلاً بأرقامه الخاصة تحته — لا يمسّ منتجاً بلا أبٍ
+  // (`familyId === null`): يبقى صفّه كما هو اليوم بلا أي عنصر إضافي.
+  const renderGroupNodes = (group: ProductGroup, depth: number): React.ReactNode[] => {
+    if (group.members.length <= 1) return [renderRow(group.members[0], depth)];
+    const familyId = group.familyId as number;
+    const expanded = expandedFamilies.has(familyId);
+    const nodes: React.ReactNode[] = [
+      renderRow(buildFamilyRow(group.members), depth, {
+        count: group.members.length,
+        expanded,
+        onToggle: () => toggleFamily(familyId),
+        rowKey: `fam-${familyId}`,
+      }),
+    ];
+    if (expanded) {
+      for (const m of group.members) nodes.push(renderRow(m, depth + 1));
+    }
+    return nodes;
+  };
 
   // صفّ تصنيف: سهم طيّ + مجلّد + اسم (كبسة ⇒ كرت مجمّع) + عدد + مجموع الكمية.
   const renderCatNode = (catId: number, name: string, depth: number) => {
@@ -137,13 +201,16 @@ export const GroupedItemsTable: React.FC<Props> = ({
     body.push(renderCatNode(cat.id, cat.name, depth));
     if (!isExpanded(cat.id)) return;
     for (const ch of childrenOf.get(String(cat.id)) || []) walk(ch, depth + 1);
-    for (const p of productsOf.get(cat.id) || []) body.push(renderRow(p, depth + 1));
+    for (const group of groupProductsByFamily(productsOf.get(cat.id) || []))
+      body.push(...renderGroupNodes(group, depth + 1));
   };
   for (const root of childrenOf.get(null) || []) walk(root, 0);
   const uncategorized = productsOf.get(UNCAT) || [];
   if (uncategorized.length) {
     body.push(renderCatNode(UNCAT, "بدون تصنيف", 0));
-    if (isExpanded(UNCAT)) for (const p of uncategorized) body.push(renderRow(p, 1));
+    if (isExpanded(UNCAT)) {
+      for (const group of groupProductsByFamily(uncategorized)) body.push(...renderGroupNodes(group, 1));
+    }
   }
 
   return (

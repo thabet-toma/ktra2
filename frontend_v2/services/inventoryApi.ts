@@ -75,10 +75,11 @@ export interface ProductSerialRow {
 }
 
 /**
- * محدِّد أعضاء الكرت المجمّع: تصنيفٌ يشتقّه الخادم (`category` — يشمل الأحفاد)
- * أو تعدادٌ صريح (`ids` — مجموعات `group_key`، أو أسطر جردٍ بعينها).
+ * محدِّد أعضاء الكرت المجمّع: تصنيفٌ يشتقّه الخادم (`category` — يشمل الأحفاد)،
+ * أو منتجٌ (أب) بعينه يشتقّ الخادم كل برانداته (`family` — #23)، أو تعدادٌ
+ * صريح (`ids` — مجموعات `group_key`، أو أسطر جردٍ بعينها).
  */
-export type ProductGroupSelector = { ids?: number[]; category?: number };
+export type ProductGroupSelector = { ids?: number[]; category?: number; family?: number };
 
 /** #21: منتجٌ (عائلة) قائم يطابق الاسم المطبَّع — نتيجة `check-name`. */
 export interface ProductNameMatch {
