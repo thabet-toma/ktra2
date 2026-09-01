@@ -55,6 +55,24 @@
 الحساب كلّه **قراءةٌ محضة**. النقطة الوحيدة التي تكتب هي
 `apply_suggested_levels` أسفل الملف، وهي لا تُستدعى إلا بفعلٍ صريح من
 المستخدم — ولا تمسّ حركةَ مخزون ولا قيداً بحال.
+
+## السلسلة الأسبوعية وهولت (#32)
+
+رقما الصنف الحيّان — البيع الأسبوعي الحالي (`level`) والاتجاه (`trend`) —
+يُشتقّان بهولت (`holt_forecast`) من نفس حركة المخزون، ويُخزَّنان في
+`inventory.ProductDemandForecast` عبر
+`python manage.py recompute_demand_forecast` — لا صفحةٌ تحسبهما عند الفتح:
+هولت متسلسل، وإعادة تشغيل السلسلة كاملةً لكل صنفٍ في كل فتحة تُعلّق الصفحة.
+
+**كل تشغيلٍ يعيد حساب السلسلة كاملةً من حركة المخزون الخام — لا يخطو حالةً
+محفوظة خطوةً واحدة للأمام.** المالك وصف التحديث تدريجياً («الجديد = ربع
+الأسبوع المنتهي + ثلاثة أرباع القديم») وهذا بعينه ما تفعله المعادلة
+الاستقرائية؛ إعادة تشغيلها من الصفر تعطي **نفس** الناتج تماماً (هولت دالّةٌ لا
+حالة) وتكسب مجاناً: التعافي الذاتي (حركةٌ بتاريخٍ رجعي أو تصحيحٌ أو أسبوعٌ
+فائتٌ يُصحَّح نفسه في التشغيل التالي بلا تدخّل)، ومعاودة الاستدعاء بلا أثر
+(تشغيلان في نفس الأسبوع ⇒ نفس الأرقام بالضبط). والثمن — إعادة قراءة النافذة
+كاملةً بدل حالة صغيرة — لا يُحَسّ: استعلامان مجمَّعان للشركة كلّها (نمط
+`_demand_profiles` أعلاه بحرفيّته)، لا استعلامٌ لكل صنف.
 """
 from __future__ import annotations
 
@@ -219,6 +237,160 @@ def _demand_profiles(tenant_id: int, product_ids, window_start, today) -> dict:
         )
         entry["first_movement"] = row["first"]
     return profiles
+
+
+# ── السلسلة الأسبوعية وتنبّؤ هولت: T-REORDER #32 ─────────────────────────
+
+#: معاملا هولت — ثابتان في هذه التذكرة؛ تحويلهما لمقبضين في الإعدادات مؤجَّل
+#: لتذكرة لاحقة (#34) فلا يُستبقان هنا.
+HOLT_ALPHA = Decimal("0.25")
+HOLT_BETA = Decimal("0.15")
+#: نافذة السلسلة الأسبوعية — ستة أشهر. منفصلة عمداً عن `window_days` أعلاه
+#: (تلك تقيس معدّلاً فيكفيها تسعون يوماً، وهذه تحتاج سلسلةً طويلة كي يستقرّ
+#: الاتجاه — ط11 على الخريطة).
+FORECAST_HISTORY_WEEKS = 26
+#: أقلّ من ستة أسابيع مكتملة: بلا اتجاه (ط1) — المستوى متوسط آخر أسبوعين فقط.
+MIN_TREND_HISTORY_WEEKS = 6
+#: أقلّ عدد أخطاء توقّع لاعتماد `MAD` رقماً — عيّنة من خطأٍ واحد أو اثنين ضجيج.
+MIN_MAD_SAMPLES = 4
+
+
+def holt_forecast(weekly_demand: list) -> dict:
+    """هولت (تنعيم أسّي مزدوج) على سلسلة صافي طلبٍ أسبوعية — دالّة صافية بلا
+    استعلام، فتُختبر بالورقة والقلم كما `suggest_levels` أعلاه.
+
+    `weekly_demand`: قائمة Decimal الأقدم أوّلاً، **مكتملة الأسابيع** (أسبوع
+    الصفر عنصرٌ لا فجوة) وخاليةً من الأسبوع الجاري غير المكتمل — هذا شرط
+    المستدعي (`_weekly_series` أسفله) لا هذه الدالّة.
+
+        L_t = α·y_t + (1−α)·(L_{t−1} + T_{t−1})      α = 0.25
+        T_t = β·(L_t − L_{t−1}) + (1−β)·T_{t−1}       β = 0.15
+
+    **التهيئة**: `L` يبدأ متوسط أوّل أسبوعين (الأسبوع الوحيد إن كان هذا كل
+    السجلّ)، و`T` يبدأ صفراً. **أقلّ من ست أسابيع مكتملة**: لا اتجاه — المستوى
+    المُعاد متوسط **آخر** أسبوعين بدل ناتج الاستقراء (ط1: «صنفٌ أقلّ من ست
+    أسابيع → آخر أسبوعين مؤشّراً وبلا اتجاه»).
+
+    **`MAD`**: متوسط القيمة المطلقة لخطأ توقّع أسبوعٍ واحدٍ قدماً —
+    `|الفعلي_t − (المستوى_{t−1} + الاتجاه_{t−1})|` — على الأسابيع التي سبقها
+    توقّعٌ فعلاً؛ خطأ **التوقّع** لا انحرافٌ عن متوسط، لأنه مدخل مخزون الأمان
+    (ط7/#33). غائبٌ دون أربعة أسابيع من هذه الأخطاء.
+    """
+    n = len(weekly_demand)
+    if n == 0:
+        return {"level": ZERO, "trend": ZERO, "weeks_observed": 0, "mad": None}
+    if n == 1:
+        return {"level": weekly_demand[0], "trend": ZERO, "weeks_observed": 1, "mad": None}
+
+    level = (weekly_demand[0] + weekly_demand[1]) / Decimal("2")
+    trend = ZERO
+    errors: list = []
+    for actual in weekly_demand[2:]:
+        forecast = level + trend
+        errors.append(abs(actual - forecast))
+        new_level = HOLT_ALPHA * actual + (Decimal("1") - HOLT_ALPHA) * (level + trend)
+        trend = HOLT_BETA * (new_level - level) + (Decimal("1") - HOLT_BETA) * trend
+        level = new_level
+
+    if n < MIN_TREND_HISTORY_WEEKS:
+        # الاستقراء يُحسب دائماً (يغذّي أخطاء MAD أعلاه) لكن لا يُعتمَد ناتجه
+        # هنا — قاعدة السجل القصير في ط1 صريحة: آخر أسبوعين وبلا اتجاه.
+        level = (weekly_demand[-1] + weekly_demand[-2]) / Decimal("2")
+        trend = ZERO
+
+    mad = (sum(errors) / Decimal(len(errors))) if len(errors) >= MIN_MAD_SAMPLES else None
+    return {"level": level, "trend": trend, "weeks_observed": n, "mad": mad}
+
+
+def _week_start(day: datetime.date) -> datetime.date:
+    """اثنين الأسبوع المحتوي على `day` — يطابق تجميع `TruncWeek` الافتراضي في جانغو."""
+    return day - datetime.timedelta(days=day.weekday())
+
+
+def last_completed_week_start(today: datetime.date) -> datetime.date:
+    """اثنين آخر أسبوعٍ اكتمل فعلاً. أسبوع اليوم الجاري (ولو بدأ للتوّ) مُستبعَدٌ
+    دائماً — دلوه لا يمثّل أسبوعاً كاملاً فيسحب المستوى للأسفل في كل تشغيل."""
+    return _week_start(today) - datetime.timedelta(days=7)
+
+
+def _weekly_series(tenant_id, product_ids, window_start, last_week_start) -> dict:
+    """صافي الطلب الأسبوعي لكل منتج، الأقدم أوّلاً، بلا فجوات — استعلامان لا
+    أكثر مهما بلغ عدد المنتجات (نمط `_demand_profiles` أعلاه بحرفيّته).
+
+    أسابيع الصفر جزءٌ من السلسلة عمداً (ط1/ط2 على الخريطة): الاستعلام المجمَّع
+    يعيد الأسابيع التي فيها حركةٌ فقط، وهنا تُملأ الفجوات صفراً على شبكة أسابيع
+    كاملة من بداية سجلّ المنتج (أو بداية النافذة، أيّهما أحدث — تماماً كما
+    تحسب `_history_days` أعلاه بداية سجلّ المنتج) إلى آخر أسبوعٍ مكتمل.
+    """
+    from inventory.models import StockMovement
+
+    last_week_end = last_week_start + datetime.timedelta(days=6)
+
+    base = StockMovement.objects.filter(tenant_id=tenant_id)
+    if product_ids is not None:
+        base = base.filter(product_id__in=product_ids)
+
+    # أوّل حركةٍ للمنتج على الإطلاق — بلا حدٍّ زمني، كي لا يُقصَّر عمر منتجٍ
+    # سابقٍ للنافذة على أنه وُلد معها.
+    firsts = {
+        row["product_id"]: row["first"]
+        for row in base.values("product_id").annotate(first=Min("movement_date"))
+        if row["first"] is not None
+    }
+    if not firsts:
+        return {}
+
+    weekly = (
+        base.filter(
+            movement_date__gte=window_start,
+            movement_date__lte=last_week_end,
+            movement_type__in=(_OUT, _RETURN_IN),
+        )
+        .annotate(week=TruncWeek("movement_date"))
+        .values("product_id", "week")
+        .annotate(
+            out_qty=Sum("quantity", filter=Q(movement_type=_OUT)),
+            ret_qty=Sum("quantity", filter=Q(movement_type=_RETURN_IN)),
+        )
+    )
+    nets: dict = {}
+    for row in weekly:
+        week = row["week"]
+        week = week.date() if hasattr(week, "date") else week
+        net = _dec(row["out_qty"]) - _dec(row["ret_qty"])
+        nets.setdefault(row["product_id"], {})[week] = net
+
+    series: dict = {}
+    for product_id, first_movement in firsts.items():
+        start = max(_week_start(first_movement), window_start)
+        if start > last_week_start:
+            # كل حركات المنتج داخل الأسبوع الجاري غير المكتمل — لا أسبوعٌ
+            # واحدٌ مكتمل بعد.
+            continue
+        product_weeks = nets.get(product_id, {})
+        weeks = []
+        cursor = start
+        while cursor <= last_week_start:
+            weeks.append(product_weeks.get(cursor, ZERO))
+            cursor += datetime.timedelta(days=7)
+        series[product_id] = weeks
+    return series
+
+
+def weekly_demand_series(tenant_id: int, product_ids=None, *, today=None):
+    """(سلسلةٌ أسبوعية لكل منتج، اثنين آخر أسبوعٍ مكتمل) — نقطة الدخول العامة
+    لهذا القسم.
+
+    النافذة `FORECAST_HISTORY_WEEKS` أسبوعاً تنتهي عند آخر أسبوعٍ مكتمل، لا
+    اليوم: الأسبوع الجاري ثلاثة أيامٍ منه فقط تكفي لسحب المستوى للأسفل في كل
+    تشغيل لو دخلت السلسلة (الحرف ب في التذكرة).
+    """
+    from django.utils import timezone
+
+    today = today or timezone.localdate()
+    last_week = last_completed_week_start(today)
+    window_start = last_week - datetime.timedelta(days=7 * (FORECAST_HISTORY_WEEKS - 1))
+    return _weekly_series(tenant_id, product_ids, window_start, last_week), last_week
 
 
 def _lead_time_samples(tenant_id: int, limit: int = 300) -> tuple[dict, dict, list]:

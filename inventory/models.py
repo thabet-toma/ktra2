@@ -319,6 +319,44 @@ class ProductMerge(models.Model):
         return f"ProductMerge #{self.id} → family {self.target_family_id}"
 
 
+class ProductDemandForecast(models.Model):
+    """رقما الصنف الحيّان من هولت — البيع الأسبوعي الحالي والاتجاه (#32).
+
+    يكتبها حصراً `python manage.py recompute_demand_forecast`
+    (`core/replenishment.py` — `holt_forecast`/`weekly_demand_series`)، ولا
+    شيء يقرأها بعد في هذه التذكرة. صفٌّ واحد لكل منتج — `product` علاقةٌ
+    فريدة (`OneToOneField`) لا FK متكرّر، لأن إعادة الحساب تُحدِّث نفس الصفّ
+    ولا تراكم سجلّاً تاريخياً.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='ProductDemandForecastID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='product_demand_forecasts',
+    )
+    product = models.OneToOneField(
+        Product, on_delete=models.CASCADE, db_column='ProductID',
+        related_name='demand_forecast',
+    )
+    # ست خانات عشرية لا أربع كبقية حقول الكميات: الاستقراء (β=0.15) ينتج
+    # كسوراً تحتاج دقّةً أعلى، وأربعٌ كانت تقرّب 0.256875 إلى 0.2569 صامتةً.
+    level = models.DecimalField(max_digits=18, decimal_places=6, db_column='Level')
+    trend = models.DecimalField(max_digits=18, decimal_places=6, db_column='Trend')
+    weeks_observed = models.PositiveSmallIntegerField(db_column='WeeksObserved')
+    mad = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True, db_column='MAD',
+    )
+    last_week_start = models.DateField(db_column='LastWeekStart')
+    computed_at = models.DateTimeField(auto_now=True, db_column='ComputedAt')
+
+    class Meta:
+        db_table = 'product_demand_forecasts'
+        managed = True
+
+    def __str__(self):
+        return f"DemandForecast product={self.product_id} level={self.level} trend={self.trend}"
+
+
 class Warehouse(models.Model):
     """مستودع مستقل لكل شركة — وجهة استلام البضاعة وبُعد على حركات المخزون.
 

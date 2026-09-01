@@ -16,7 +16,7 @@
 | `inventory/services.py` | `record_stock_movement` + WAC، عكس الحركات، بطاقة المنتج، نماذج التكلفة، ترحيل التحويل والجرد | 1368 |
 | `inventory/views.py` | ViewSets: المنتجات، الحركات، المستودعات، التحويلات، الجرد | 891 |
 | `inventory/serials.py` | كل منطق الأرقام التسلسلية للشراء والبيع (وحدة مستقلة عن services) | 765 |
-| `inventory/models.py` | 12 موديل: المنتج (البراند)، المنتج الأب (`ProductFamily`)، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد | 465 |
+| `inventory/models.py` | 13 موديل: المنتج (البراند)، المنتج الأب (`ProductFamily`)، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد، وسلسلة الطلب الأسبوعية المحسوبة (`ProductDemandForecast`، #32) | 465 |
 | `inventory/stock_status.py` | **مصدر الحقيقة الوحيد لحالة المخزون** (نفذ/منخفض/فائض/متوفّر): تعبير ORM ودالّة بايثون وفلتر — يستهلكها السيريالايزر والجدول والداشبورد والتقارير | 150 |
 
 | `inventory/serializers.py` | تمثيل المنتج والحركة والمستندات | 353 |
@@ -34,6 +34,7 @@
 | `ProductSerial` | `serial`, `status` (`in_stock`/`sold`) | `purchase_item→logistics.PurchaseInvoiceItem`، `sales_line→sales.SalesInvoiceLine`؛ فريد `(tenant, product, serial)`، وفهرس `(tenant, serial)` لبحث المسح الذي لا يعرف المنتج (`prodserial_tenant_serial`) |
 | `ProductPriceTier` | `tier_type` (sale/purchase), `tier_number`, `price`, `tax_inclusive` | فريد `(product, tier_type, tier_number)` |
 | `ProductMerge` (task24) | `snapshot` (JSON: لكل براند مُضموم `family_id`/`brand`/`name_ar`/`name_en` قبل الضمّ), `undone_at` | سلّة محذوفات على نمط `accounting.VoidedJournal` — `target_family→ProductFamily` (لا يُحذف أبداً)؛ `undo_product_merge` يعكسها حرفياً من `snapshot` |
+| `ProductDemandForecast` (#32) | `level`, `trend` (ستّ خانات عشرية)، `weeks_observed`, `mad`, `last_week_start`, `computed_at` | `product→Product` (`OneToOneField` — صفٌّ واحد لكل منتج). يكتبه حصراً `python manage.py recompute_demand_forecast` (`core/replenishment.py` — `holt_forecast`/`weekly_demand_series`)؛ لا شيء يقرأه بعد (#33 يوصله بالتقرير) |
 | `SupplierProduct` | `supplier_sku`, `supplier_name` | `supplier→partners.Partner`، `product→Product`؛ فريد `(tenant, supplier, supplier_sku)` — **لا** على `(tenant, supplier, product)`: للمورّد أن يحمل أكثر من رقم للمنتج الواحد، والممنوع عكسُه (رقمٌ واحد لمنتجين يجعل المطابقة تخميناً). محايد مالياً بالكامل |
 | `WarehouseTransfer` / `WarehouseTransferLine` | `transfer_number`, `is_posted`, `quantity` | `source_warehouse` / `dest_warehouse` (PROTECT) — بلا قيد محاسبي (`:384`) |
 | `Stocktake` / `StocktakeLine` | `is_posted`, `counted_quantity`, `system_quantity`, `variance` | `journal→accounting.JournalHeader` — قيد فرق الجرد |
@@ -184,6 +185,14 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 
 بارامترات الشركة الثلاثة (نافذة التحليل · المهلة الافتراضية · مدة المراجعة) على
 `logistics.PurchaseSettings` — التجديد قرارٌ شرائي، فإعداداته حيث تعيش إعدادات الشراء.
+
+**#32 — سلسلةٌ أسبوعية موازية، مخزَّنة لا مقروءة بعد.** المتوسط أعلاه (ADU) يدفن
+صنفاً باع أربعاً مرّتين خلال شهرين تحت «أقلّ من قطعة بالأسبوع». `core/replenishment.py`
+(`holt_forecast`, `weekly_demand_series`) يشتقّ رقمين موازيين — المستوى والاتجاه
+بتنعيمٍ أسّي مزدوج (هولت) على نفس صافي `OUT − RETURN_IN`، وأسبوع الصفر جزءٌ من
+السلسلة لا فجوة — ويكتبهما `python manage.py recompute_demand_forecast` أسبوعياً
+في `inventory.ProductDemandForecast` (لا Celery؛ مجدول النظام). **لا شيء يقرأ
+الجدول بعد** — `stock-replenishment` والحدّان أعلاه بلا تغيير؛ التوصيل تذكرة #33.
 
 **والمحرّك يسكن في `core/` لا هنا**: حسابه يحتاج `sales.services` (المحجوز) و
 `logistics.models` (مهلة التوريد)، و`.importlinter` يمنع `inventory` من استيرادهما

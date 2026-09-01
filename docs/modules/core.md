@@ -22,7 +22,7 @@
 | `core/pagination.py` | منتجا الترقيم — الإلزامي والاختياري |
 | `core/reports/` | **حزمة** — إطار التقارير + 8 وحدات دومين |
 | `core/reports_api.py` | نقطتا الفهرس والتشغيل + كاش التقارير |
-| `core/replenishment.py` | محرّك تجديد المخزون: معدّل الصرف اليومي، مهلة التوريد المرصودة، مخزون الأمان، الحدّان المقترَحان، وقرار «النوع». يسكن هنا لأنه يقرأ `inventory` و`sales` و`logistics` معاً |
+| `core/replenishment.py` | محرّك تجديد المخزون: معدّل الصرف اليومي، مهلة التوريد المرصودة، مخزون الأمان، الحدّان المقترَحان، وقرار «النوع». يسكن هنا لأنه يقرأ `inventory` و`sales` و`logistics` معاً. يحمل أيضاً (#32) السلسلة الأسبوعية وتنبّؤ هولت (`holt_forecast`, `weekly_demand_series`) — يكتبهما `management/commands/recompute_demand_forecast.py` في `inventory.ProductDemandForecast` |
 | `core/scan.py` | **T-SCAN** — حلّال «ما الذي في يدي؟»: نصٌّ واحد ← وحدة مُرقَّمة أو جهاز حسّاس أو منتج، ونقطته `/api/scan/` |
 | `core/payments.py` | منطق الدفع المشترك بين المبيعات والمشتريات |
 | `core/api_defaults.py` | إعدادات المصادقة الموحّدة + `PagePartnerBalanceMixin` |
@@ -297,3 +297,4 @@ validate_payment(ctx) · post_payment(...) · document_payment_summary(total, pa
 | `core/tests/test_platform_admin.py` | حارس السوبر أدمن على **كل** مسار منصة + ثبات عدّ استعلامات اللوحة |
 | `core/tests/test_media_upload.py` | الرفع الموحّد وكتابة سجلّ البايتات معه |
 | `core/tests/test_backfill_tenant_assets.py` | نسبة الأصول القديمة لشركاتها، وألّا يُكتب حجمٌ لم يُقَس |
+| `core/tests/test_demand_forecast.py` | #32: `holt_forecast` بالورقة والقلم على حالة المالك، أسبوع الصفر لا يُسقَط، الأسبوع الجاري لا يدخل السلسلة، `recompute_demand_forecast` معاوَد الاستدعاء بلا أثر ومعزول بين الشركات وثابت عدّ الاستعلامات |
