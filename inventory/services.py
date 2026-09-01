@@ -113,6 +113,24 @@ def product_display_name(product) -> str:
         return f"{name} ({brand})".strip()
     return name
 
+def family_display_name(family, family_id=None) -> str:
+    """اسم المنتج الأب كما يُعرَض للمستخدم — صيغةٌ واحدة لا نسخ.
+
+    كُتبت هذه القاعدة أربع مرات في #26 وحدها (تقاريرُ ثلاثة + `_product_row`)،
+    وثلاثتها بمآلٍ مختلف عند الفراغ. والمستودع دفع ثمن هذا النمط من قبل: ثلاث
+    صيغٍ لاسم البند في #18 جعلت المسودّة تعرض غير ما تعرضه المرحَّلة. الاحتياط
+    هنا معرِّفٌ ظاهر لا فراغٌ صامت — أبٌ بلا اسمٍ عطبٌ يجب أن يُرى.
+
+    ليست هي `product_group_key` — تلك تُنتج **مفتاح** تجميعٍ لا لافتةً تُقرأ.
+    """
+    if family is not None:
+        name = ((family.name_ar or family.name_en or '').strip())
+        if name:
+            return name
+        family_id = family_id or getattr(family, 'id', None)
+    return f'عائلة #{family_id}' if family_id else ''
+
+
 INBOUND_TYPES = {'IN', 'ADJUST_IN', 'RETURN_IN'}
 OUTBOUND_TYPES = {'OUT', 'ADJUST_OUT', 'RETURN_OUT'}
 

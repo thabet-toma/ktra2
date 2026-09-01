@@ -156,24 +156,52 @@ register(ReportSpec(
 ))
 
 
-def _purchases_by_product(tenant_id: int, params: dict) -> list[dict]:
+def _purchases_by_product(tenant_id: int, params: dict, *, group: str = "product") -> list[dict]:
+    """#26: مجمَّعة على المنتج افتراضاً — صفٌّ واحد لكل عائلة، بمتوسط سعرٍ
+    مشتقٍّ من نسبة المجموعَين (إجمالي القيمة ÷ إجمالي الكمية) لا متوسط
+    برانداتها البسيط. منتجٌ بلا أبٍ يبقى صفّاً بمفرده كسابق عهده.
+    `group="product_brand"` (التنقيب) لا يجمع — صفٌّ لكل براند فعلياً.
+    """
+    from inventory.services import family_display_name
     from logistics.models import PurchaseInvoiceItem
 
     invoices = list(_posted_purchases(tenant_id, params).values_list("id", flat=True))
-    qs = PurchaseInvoiceItem.objects.filter(invoice_id__in=invoices).select_related("product")
-    product = _int_param(params, "product")
-    if product:
-        qs = qs.filter(product_id=product)
+    qs = PurchaseInvoiceItem.objects.filter(invoice_id__in=invoices).select_related(
+        "product", "product__family",
+    )
+    if group == "product_brand":
+        family_id = _int_param(params, "family_id")
+        product_id = _int_param(params, "product_id")
+        if family_id:
+            qs = qs.filter(product__family_id=family_id)
+        elif product_id:
+            qs = qs.filter(product_id=product_id)
+    else:
+        product = _int_param(params, "product")
+        if product:
+            qs = qs.filter(product_id=product)
 
     buckets: dict = {}
     for item in qs:
         prod = item.product
-        key = item.product_id or f"free:{item.name or item.name_snapshot or ''}"
+        # #26-دلتا: فلتر `product` يختار براندًا بعينه — صفّ عائلةٍ منقوصٍ
+        # ممنوع؛ يُعرض صفّ براندٍ حقيقيّ بدلاً منه (`sku` كما هو).
+        family_id = getattr(prod, "family_id", None) if (group == "product" and not product) else None
+        if family_id:
+            family = getattr(prod, "family", None)
+            name = family_display_name(family, family_id)
+            key = f"family:{family_id}"
+            label = {"sku": "", "name": name, "family_id": family_id, "product_id": ""}
+        else:
+            key = item.product_id or f"free:{item.name or item.name_snapshot or ''}"
+            label = {
+                "sku": getattr(prod, "sku", "") or "",
+                "name": (getattr(prod, "name_ar", None) or item.name
+                         or item.name_snapshot or ""),
+                "family_id": "", "product_id": item.product_id or "",
+            }
         bucket = buckets.setdefault(key, {
-            "sku": getattr(prod, "sku", "") or "",
-            "name": (getattr(prod, "name_ar", None) or item.name
-                     or item.name_snapshot or ""),
-            "quantity": ZERO, "total_price": ZERO,
+            **label, "quantity": ZERO, "total_price": ZERO,
         })
         bucket["quantity"] += Decimal(str(item.quantity or 0))
         bucket["total_price"] += Decimal(str(item.total_price or 0))
@@ -184,6 +212,8 @@ def _purchases_by_product(tenant_id: int, params: dict) -> list[dict]:
         rows.append({
             "sku": bucket["sku"],
             "name": bucket["name"],
+            "family_id": bucket["family_id"],
+            "product_id": bucket["product_id"],
             "quantity": _qty(qty),
             "total_price": _money(bucket["total_price"]),
             "avg_price": _money(bucket["total_price"] / qty if qty else ZERO),
@@ -192,21 +222,30 @@ def _purchases_by_product(tenant_id: int, params: dict) -> list[dict]:
     return rows
 
 
+_PURCHASES_BY_PRODUCT_COLUMNS = (
+    ReportColumn("sku", "الرمز", width="120px"),
+    ReportColumn("name", "المنتج"),
+    ReportColumn("quantity", "الكمية", KIND_NUMBER, total=True, width="100px"),
+    ReportColumn("total_price", "القيمة", KIND_MONEY, total=True),
+    ReportColumn("avg_price", "متوسط السعر", KIND_MONEY, width="120px"),
+)
+
 register(ReportSpec(
     key="purchases-by-product",
     title="المشتريات حسب المنتج",
     category="purchases",
-    description="كم اشترينا من كل منتج وبأيّ متوسط سعر.",
-    filters=DATE_FILTERS + (ReportFilter("product", "المنتج", "product"),),
-    columns=(
-        ReportColumn("sku", "الرمز", width="120px"),
-        ReportColumn("name", "المنتج"),
-        ReportColumn("quantity", "الكمية", KIND_NUMBER, total=True, width="100px"),
-        ReportColumn("total_price", "القيمة", KIND_MONEY, total=True),
-        ReportColumn("avg_price", "متوسط السعر", KIND_MONEY, width="120px"),
+    description=(
+        "كم اشترينا من كل منتج وبأيّ متوسط سعر — صفٌّ واحد لكل منتج، وينقّب "
+        "إلى برانداته."
     ),
+    filters=DATE_FILTERS + (ReportFilter("product", "المنتج", "product"),),
+    columns=_PURCHASES_BY_PRODUCT_COLUMNS,
     permission="purchase.invoice.view",
-    build=_purchases_by_product,
+    build=lambda t, p: _purchases_by_product(t, p, group="product"),
+    drill=lambda t, p: _purchases_by_product(t, p, group="product_brand"),
+    drill_keys=("family_id", "product_id"),
+    drill_title="برندات هذا المنتج",
+    drill_columns=_PURCHASES_BY_PRODUCT_COLUMNS,
 ))
 
 

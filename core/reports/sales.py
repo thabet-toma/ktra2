@@ -231,6 +231,7 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
     «كمية بلا تكلفة» بدل أن يمرّ كتكلفة صفر صامتة. الخدمات مستثناة — بلا تكلفة
     مخزون بحقّ. ثلاثة استعلامات إجمالاً: الفواتير، الأسطر، خريطة التكلفة.
     """
+    from inventory.services import family_display_name
     from sales.models import SalesInvoiceLine
     from sales.services import allocate_invoice_discount, sales_cogs_map
 
@@ -251,22 +252,62 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
 
     qs = SalesInvoiceLine.objects.filter(
         tenant_id=tenant_id, invoice_id__in=invoice_ids,
-    ).select_related("product")
-    product = _int_param(params, "product")
-    if product:
-        qs = qs.filter(product_id=product)
+    ).select_related("product", "product__family")
+    # نطاق التكلفة أدناه (`cogs`) يجب أن يوافق نطاق الأسطر هنا حرفياً — وإلا
+    # تسرّبت تكلفة منتجٍ آخر عبر مسار «حركة بلا سطر» (أدناه) عند التنقيب.
+    drill_product_ids: set[int] | None = None
+    product = None
+    if group == "product_brand":
+        family_id = _int_param(params, "family_id")
+        product_id = _int_param(params, "product_id")
+        if family_id:
+            from inventory.models import Product as _Product
+
+            drill_product_ids = set(_Product.objects.filter(
+                tenant_id=tenant_id, family_id=family_id,
+            ).values_list("id", flat=True))
+            qs = qs.filter(product_id__in=drill_product_ids)
+        elif product_id:
+            drill_product_ids = {product_id}
+            qs = qs.filter(product_id=product_id)
+    else:
+        product = _int_param(params, "product")
+        if product:
+            qs = qs.filter(product_id=product)
 
     def _bucket_of(prod, product_id):
-        """دلو المنتج أو الماركة — مفتاحه ولافتته من المنتج نفسه."""
-        if group == "product":
-            key = product_id
+        """دلو المنتج أو الماركة — مفتاحه ولافتته من المنتج نفسه.
+
+        #26: `group="product"` يتجمّع على العائلة (`ProductFamily`) حين وُجدت
+        — صفٌّ واحد لكل منتج، لا لكل براند. منتجٌ بلا أبٍ يبقى مفتاحاً بمفرده
+        كسابق عهده. `group="product_brand"` (التنقيب) لا يجمع أبداً.
+        """
+        if group == "brand":
+            key = (getattr(prod, "brand", "") or "— بلا ماركة —")
+            label = {"sku": "", "name": key, "family_id": "", "product_id": ""}
+        elif group == "product":
+            # #26-دلتا: فلتر `product` يختار براندًا بعينه — صفّ عائلةٍ منقوصٍ
+            # ممنوع؛ يُعرض صفّ براندٍ حقيقيّ بدلاً منه (`sku`/`brand` كما هما).
+            family_id = getattr(prod, "family_id", None) if not product else None
+            if family_id:
+                family = getattr(prod, "family", None)
+                name = family_display_name(family, family_id)
+                key = f"family:{family_id}"
+                label = {"sku": "", "name": name, "family_id": family_id, "product_id": ""}
+            else:
+                key = f"product:{product_id}"
+                label = {
+                    "sku": getattr(prod, "sku", "") or "",
+                    "name": getattr(prod, "name_ar", "") or getattr(prod, "name_en", "") or "",
+                    "family_id": "", "product_id": product_id,
+                }
+        else:  # product_brand — صفٌّ لكل براند فعلياً، بلا تجميع، ولو كان له أبٌ
+            key = f"product:{product_id}"
             label = {
                 "sku": getattr(prod, "sku", "") or "",
                 "name": getattr(prod, "name_ar", "") or getattr(prod, "name_en", "") or "",
+                "family_id": "", "product_id": product_id,
             }
-        else:
-            key = (getattr(prod, "brand", "") or "— بلا ماركة —")
-            label = {"sku": "", "name": key}
         return buckets.setdefault(key, {
             **label, "quantity": ZERO, "net_sales": ZERO, "tax_amount": ZERO,
             "cost": ZERO, "uncosted_qty": ZERO,
@@ -296,6 +337,8 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
     cogs = sales_cogs_map(tenant_id=tenant_id, invoice_ids=invoice_ids)
     if product:
         cogs = {k: v for k, v in cogs.items() if k[1] == product}
+    elif drill_product_ids is not None:
+        cogs = {k: v for k, v in cogs.items() if k[1] in drill_product_ids}
     # حركة لمنتج لا سطر له في الفاتورة: تكلفتها حقيقية ولا يجوز إسقاطها، فيُجلب
     # منتجها في استعلام واحد احتياطي بدل تجاهل المبلغ.
     missing = {pid for (_, pid) in cogs if pid not in bucket_of_product}
@@ -322,6 +365,8 @@ def _sales_line_aggregate(tenant_id: int, params: dict, *, group: str) -> list[d
         rows.append({
             "sku": bucket["sku"],
             "name": bucket["name"],
+            "family_id": bucket.get("family_id", ""),
+            "product_id": bucket.get("product_id", ""),
             "quantity": _qty(bucket["quantity"]),
             "net_sales": _money(bucket["net_sales"]),
             "tax_amount": _money(bucket["tax_amount"]),
@@ -352,13 +397,18 @@ register(ReportSpec(
     title="المبيعات حسب المنتج",
     category="sales",
     description=(
-        "كمّ بيع كل منتج وربحه. التكلفة من حركات المخزون لحظة الترحيل/التسليم — "
-        "تاريخية لا يحرّكها شراء لاحق. «كمية بلا تكلفة» ما لم تُسجَّل له حركة بعد."
+        "كمّ بيع كل منتج وربحه — صفٌّ واحد لكل منتج، وينقّب إلى برانداته. "
+        "التكلفة من حركات المخزون لحظة الترحيل/التسليم — تاريخية لا يحرّكها "
+        "شراء لاحق. «كمية بلا تكلفة» ما لم تُسجَّل له حركة بعد."
     ),
     filters=DATE_FILTERS + (ReportFilter("product", "المنتج", "product"),),
     columns=_PRODUCT_SALES_COLUMNS,
     permission="sales.invoice.view",
     build=lambda t, p: _sales_line_aggregate(t, p, group="product"),
+    drill=lambda t, p: _sales_line_aggregate(t, p, group="product_brand"),
+    drill_keys=("family_id", "product_id"),
+    drill_title="برندات هذا المنتج",
+    drill_columns=_PRODUCT_SALES_COLUMNS,
 ))
 
 register(ReportSpec(

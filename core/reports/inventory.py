@@ -55,47 +55,104 @@ from ._framework import (
 def _products(tenant_id: int, params: dict):
     from inventory.models import Product
 
-    qs = Product.objects.filter(tenant_id=tenant_id).select_related("category")
+    qs = Product.objects.filter(tenant_id=tenant_id).select_related("category", "family")
     product = _int_param(params, "product")
     if product:
         qs = qs.filter(pk=product)
     return qs
 
 
-def _stock_valuation(tenant_id: int, params: dict) -> list[dict]:
-    rows = []
-    for p in _products(tenant_id, params).order_by("sku"):
+def _stock_valuation(tenant_id: int, params: dict, *, group: str = "product") -> list[dict]:
+    """مجمَّعة على المنتج افتراضاً — صفٌّ واحد لكل عائلة، بمتوسط تكلفة **مرجَّح
+    بالكمية** (Σqty×cost ÷ Σqty) لا متوسط برانداتها البسيط (#26): براندٌ بقطعتين
+    بسعرٍ شاذّ لا يجوز أن يسحب متوسط المنتج معه — وزنُه في المتوسط كميّته لا
+    عدده. منتجٌ بلا أبٍ (`family_id` فارغ) يبقى صفّاً بمفرده كسابق عهده.
+
+    `group="product_brand"` (التنقيب) لا يجمع شيئاً — صفٌّ لكل براند كما كان
+    التقرير قبل #26، مقصوراً على العائلة/المنتج الذي فُتح.
+
+    #26-دلتا: فلتر `product` (`?product=`) يختار **براندًا بعينه** — قاعدةٌ
+    صارمة: صفّ العائلة أرقامه مجموع كل أبنائها أو لا يظهر أصلاً. فحين يضيق
+    الفلتر النتيجة لبراندٍ واحد، لا يُعرض صفّ عائلةٍ منقوصٍ متنكّراً بأنه
+    المجموع (فراغ `sku`/`brand` كان يُخفي أن الرقم لبراندٍ واحد لا للمنتج) —
+    يُعرض صفّ براندٍ حقيقي: `sku`/`brand` كما هما.
+    """
+    from inventory.services import family_display_name
+
+    qs = _products(tenant_id, params)
+    brand_selected = group == "product" and _int_param(params, "product") is not None
+    if group == "product_brand":
+        family_id = _int_param(params, "family_id")
+        product_id = _int_param(params, "product_id")
+        if family_id:
+            qs = qs.filter(family_id=family_id)
+        elif product_id:
+            qs = qs.filter(pk=product_id)
+
+    buckets: dict = {}
+    for p in qs.order_by("sku"):
+        family_id = p.family_id if (group == "product" and not brand_selected) else None
+        if family_id:
+            family = p.family
+            name = family_display_name(family, family_id)
+            key = f"family:{family_id}"
+            label = {"sku": "", "brand": "", "name": name, "family_id": family_id, "product_id": ""}
+        else:
+            key = f"product:{p.id}"
+            label = {
+                "sku": p.sku or "", "brand": p.brand or "",
+                "name": p.name_ar or p.name_en or "", "family_id": "", "product_id": p.id,
+            }
+        bucket = buckets.setdefault(key, {
+            **label, "category": p.category.name if p.category_id else "",
+            "quantity": ZERO, "value": ZERO,
+        })
         qty = Decimal(str(p.quantity_on_hand or 0))
         cost = Decimal(str(p.avg_cost or 0))
+        bucket["quantity"] += qty
+        bucket["value"] += qty * cost
+
+    rows = []
+    for bucket in buckets.values():
+        qty = bucket["quantity"]
         rows.append({
-            "sku": p.sku or "",
-            "name": p.name_ar or p.name_en or "",
-            "brand": p.brand or "",
-            "category": p.category.name if p.category_id else "",
+            "sku": bucket["sku"], "name": bucket["name"], "brand": bucket["brand"],
+            "category": bucket["category"], "family_id": bucket["family_id"],
+            "product_id": bucket["product_id"],
             "quantity": _qty(qty),
-            "avg_cost": _money(cost),
-            "value": _money(qty * cost),
+            "avg_cost": _money(bucket["value"] / qty if qty else ZERO),
+            "value": _money(bucket["value"]),
         })
+    rows.sort(key=lambda r: (r["sku"] or r["name"]))
     return rows
 
+
+_STOCK_VALUATION_COLUMNS = (
+    ReportColumn("sku", "الرمز", width="120px"),
+    ReportColumn("name", "المنتج"),
+    ReportColumn("brand", "الماركة", width="120px"),
+    ReportColumn("category", "الفئة", width="130px"),
+    ReportColumn("quantity", "الرصيد", KIND_NUMBER, total=True, width="100px"),
+    ReportColumn("avg_cost", "متوسط التكلفة", KIND_MONEY, width="120px"),
+    ReportColumn("value", "القيمة", KIND_MONEY, total=True),
+)
 
 register(ReportSpec(
     key="stock-valuation",
     title="تقييم المخزون",
     category="inventory",
-    description="رصيد كل منتج وقيمته بمتوسط التكلفة — قيمة البضاعة على الرفّ.",
-    filters=(ReportFilter("product", "المنتج", "product"),),
-    columns=(
-        ReportColumn("sku", "الرمز", width="120px"),
-        ReportColumn("name", "المنتج"),
-        ReportColumn("brand", "الماركة", width="120px"),
-        ReportColumn("category", "الفئة", width="130px"),
-        ReportColumn("quantity", "الرصيد", KIND_NUMBER, total=True, width="100px"),
-        ReportColumn("avg_cost", "متوسط التكلفة", KIND_MONEY, width="120px"),
-        ReportColumn("value", "القيمة", KIND_MONEY, total=True),
+    description=(
+        "رصيد كل منتج وقيمته بمتوسط التكلفة — قيمة البضاعة على الرفّ. صفٌّ "
+        "واحد لكل منتج (متوسط تكلفته مرجَّحٌ بكمية برانداته)، وينقّب إلى تفصيلها."
     ),
+    filters=(ReportFilter("product", "المنتج", "product"),),
+    columns=_STOCK_VALUATION_COLUMNS,
     permission="inventory.item.view",
-    build=_stock_valuation,
+    build=lambda t, p: _stock_valuation(t, p, group="product"),
+    drill=lambda t, p: _stock_valuation(t, p, group="product_brand"),
+    drill_keys=("family_id", "product_id"),
+    drill_title="برندات هذا المنتج",
+    drill_columns=_STOCK_VALUATION_COLUMNS,
 ))
 
 
@@ -118,64 +175,159 @@ def _rate(value) -> str:
     return str(Decimal(str(value or 0)).quantize(Decimal("0.01")))
 
 
-def _low_stock(tenant_id: int, params: dict) -> list[dict]:
+#: أشدّ أوّلاً — يحدّد أيّ عضوٍ مؤهَّلٍ يمثّل حكم صفّ العائلة (الأسوأ يفوز).
+_LOW_STOCK_SEVERITY = {"out_of_stock": 0, "low_stock": 1}
+
+
+def _low_stock_brand_row(r: dict) -> dict:
+    """صفّ برندٍ فردي بأرقامه هو — بلا تجميع، وبلا تنكّرٍ باسم عائلته.
+
+    نفس الشكل الذي كان عليه التقرير قبل #26 حرفياً: يُستعمل للتنقيب (كل
+    برانداته)، ولمنتجٍ بلا أبٍ، ولفلتر `product` (#26-دلتا): فلترٌ يختار
+    براندًا بعينه لا يجوز أن يُعاد كصفّ عائلةٍ منقوصٍ — إن طُلب براندٌ، فبراندٌ
+    حقيقيٌّ يُعاد: `sku`/`brand` كما هما، ورقمه هو رقمه لا رقم عائلته.
+    """
+    from inventory.stock_status import STATUS_LABELS
+
+    minimum = Decimal(str(r["effective_min"]))
+    available = Decimal(str(r["available"]))
+    return {
+        "sku": r["sku"], "name": r["name"],
+        "family_id": "", "product_id": r["product_id"],
+        "status": STATUS_LABELS[r["status"]],
+        "quantity": _qty(available),
+        "min_stock_level": _qty(minimum),
+        "min_source": "يدوي" if r["manual_min"] else ("محسوب" if minimum > ZERO else "—"),
+        "shortage": _qty(max(minimum - available, ZERO)),
+        "group_available": _qty(r["group_available"]),
+        "newest_alternative": r["newest_alternative"],
+        "urgency": r["urgency_label"],
+    }
+
+
+def _low_stock(tenant_id: int, params: dict, *, group: str = "product") -> list[dict]:
     """ما نفد وما اقترب من النفاد معاً — بحالةٍ مكتوبة على كل سطر.
 
     كان هذا التقرير يشترط `min_stock_level > 0` قبل أن يرى المنتج، والحدّ اليدوي
     فارغٌ في معظم الكتالوج — فكان يصمت عن أغلب ما نفد فعلاً. صار يقرأ الحدّ
     **الفعّال** (`inventory/stock_status.py`): اليدوي إن ضُبط، وإلّا المقترَح
     المحسوب من المبيعات. و«نفذ» لا يشترط حدّاً أصلاً.
+
+    #26: مجمَّعة على المنتج افتراضاً — صفّ العائلة يظهر إن كان لأيٍّ من أبنائها
+    حالة نفدٍ/انخفاض. منتجٌ بلا أبٍ يبقى صفّاً بمفرده كسابق عهده.
+
+    #26-دلتا — **قاعدة صارمة: صفّ العائلة أرقامه مجموع كل أبنائها، أو لا يظهر
+    أصلاً**. عيبان كانا يخالفانها:
+
+    1. كان يُبنى بتصفية الحالة (نفد/منخفض) **قبل** التجميع، فتغيب عنه إخوةٌ
+       متوفّرون — والمتاح المعروض كان مجموع مَن **بقي بعد التصفية** لا مجموع
+       العائلة الحقيقي الذي قِيس عليه الحكم نفسه (`stock_status_of` تقارن
+       `family_totals[family_id]` — مجموع **كل** الإخوة — بحدّ الأب). الحلّ: لا
+       تصفية حالةٍ قبل التجميع؛ يظهر صفّ العائلة إن تأهّل **أيّ** عضوٍ، وأرقامه
+       `family_available` المحسوبة أصلاً لكل صفّ (`core/replenishment.py`) —
+       لا حسابٌ ثانٍ قد ينحرف عن الحكم الفعلي. وللسبب نفسه يسرد التنقيب **كل**
+       الإخوة لا المتأهِّلين وحدهم — وإلا لم يطابق مجموعه رقم الصفّ.
+    2. فلتر `product` (`?product=`) يختار **براندًا بعينه** — لا حقيقةً عن كل
+       الإخوة. حين يضيق التقرير لفرعٍ واحدٍ من عائلة، لا يجوز أن يُعرض صفٌّ
+       باسم العائلة يحمل رقم ذلك الفرع وحده متنكّراً بأنه المجموع؛ يُعرض صفّ
+       براندٍ حقيقي بدلاً منه.
+
+    `group="product_brand"` (التنقيب) لا يجمع شيئاً ولا يصفّي حالةً — كل
+    براندات العائلة، بأرقامها هي.
     """
     from inventory.stock_status import STATUS_LABELS, STATUS_LOW, STATUS_OUT_OF_STOCK
 
+    qualifying_statuses = (STATUS_OUT_OF_STOCK, STATUS_LOW)
+    all_rows = _reorder_rows(tenant_id, params)
+
+    if group == "product_brand":
+        family_id = _int_param(params, "family_id")
+        product_id = _int_param(params, "product_id")
+        if family_id:
+            all_rows = [r for r in all_rows if r["family_id"] == family_id]
+        elif product_id:
+            all_rows = [r for r in all_rows if r["product_id"] == product_id]
+        return [_low_stock_brand_row(r) for r in all_rows]
+
+    # فلترٌ يختار براندًا بعينه (#26-دلتا، عيب 2): صفوفٌ حقيقية لا عائلة منقوصة.
+    if _int_param(params, "product"):
+        return [
+            _low_stock_brand_row(r) for r in all_rows if r["status"] in qualifying_statuses
+        ]
+
+    # المجمَّع الافتراضي (#26-دلتا، عيب 1): التجميع **قبل** تصفية الحالة.
+    groups: dict = {}
+    for r in all_rows:
+        key = f"family:{r['family_id']}" if r["family_id"] else f"product:{r['product_id']}"
+        groups.setdefault(key, []).append(r)
+
     rows = []
-    for r in _reorder_rows(tenant_id, params):
-        if r["status"] not in (STATUS_OUT_OF_STOCK, STATUS_LOW):
+    for members in groups.values():
+        qualifying = [m for m in members if m["status"] in qualifying_statuses]
+        if not qualifying:
             continue
-        minimum = r["effective_min"]
+        if not members[0]["family_id"]:
+            rows.append(_low_stock_brand_row(qualifying[0]))
+            continue
+
+        # حكم صفّ العائلة = أشدّ عضوٍ مؤهَّل — نفس المتاح لكل الإخوة
+        # (`family_available` واحدٌ للعائلة)، والحدّ يختلف حين لا حدّ يدويّ على
+        # الأب (كلٌّ يسقط على مقترَحه الخاص، عيبٌ سابقٌ لـ#25 لا يُصحَّح هنا) —
+        # فيُختار حدّ **أشدّ** حكمٍ فعلاً حدث، لا أوّل عضوٍ صودف.
+        verdict = min(qualifying, key=lambda m: _LOW_STOCK_SEVERITY[m["status"]])
+        available = Decimal(str(verdict["family_available"]))
+        minimum = Decimal(str(verdict["effective_min"]))
         rows.append({
-            "product_id": r["product_id"],
-            "sku": r["sku"],
-            "name": r["name"],
-            "status": STATUS_LABELS[r["status"]],
-            "quantity": _qty(r["available"]),
+            "sku": "", "name": verdict["family_name"] or verdict["name"],
+            "family_id": verdict["family_id"], "product_id": "",
+            "status": STATUS_LABELS[verdict["status"]],
+            "quantity": _qty(available),
             "min_stock_level": _qty(minimum),
-            "min_source": "يدوي" if r["manual_min"] else ("محسوب" if minimum > ZERO else "—"),
-            "shortage": _qty(max(minimum - r["available"], ZERO)),
-            "group_available": _qty(r["group_available"]),
-            "newest_alternative": r["newest_alternative"],
-            "urgency": r["urgency_label"],
+            "min_source": "يدوي" if verdict["manual_min"] else ("محسوب" if minimum > ZERO else "—"),
+            "shortage": _qty(max(minimum - available, ZERO)),
+            "group_available": _qty(verdict["group_available"]),
+            # صفّ العائلة يمثّل كل بدائلها فعلاً — «بديلٌ» يبقى معنىً لسطر
+            # البراند وحده حين لا يُجمَّع.
+            "newest_alternative": "",
+            "urgency": verdict["urgency_label"],
         })
     return rows
 
+
+_LOW_STOCK_COLUMNS = (
+    ReportColumn("sku", "الرمز", width="120px"),
+    ReportColumn("name", "المنتج"),
+    ReportColumn("status", "الحالة", width="80px"),
+    ReportColumn("quantity", "المتاح", KIND_NUMBER, total=True, width="90px"),
+    ReportColumn("min_stock_level", "الحد الأدنى", KIND_NUMBER, width="100px"),
+    ReportColumn("min_source", "مصدر الحد", width="90px"),
+    ReportColumn("shortage", "النقص", KIND_NUMBER, total=True, width="90px"),
+    ReportColumn("group_available", "رصيد الصنف", KIND_NUMBER, width="100px"),
+    ReportColumn("newest_alternative", "أحدث بديل متوفّر"),
+    ReportColumn("urgency", "القرار", width="80px"),
+)
 
 register(ReportSpec(
     key="low-stock",
     title="المنتجات تحت حدّ الطلب",
     category="inventory",
     description=(
-        "ما نفذ وما بلغ حدّه الأدنى معاً. الحدّ يُقرأ يدوياً إن ضُبط وإلّا يُحسب "
-        "من المبيعات، و«رصيد الصنف» يقول إن كان لهذا المنتج بديلٌ متوفّر."
+        "ما نفذ وما بلغ حدّه الأدنى معاً — صفٌّ واحد لكل منتج (مجموع برانداته "
+        "مقارَناً بحدّه). الحدّ يُقرأ يدوياً إن ضُبط وإلّا يُحسب من المبيعات، "
+        "وينقّب صفّ المنتج إلى برانداته."
     ),
     filters=(
         ReportFilter("product", "المنتج", "product"),
         ReportFilter("partner", "المورّد", "supplier"),
     ),
-    columns=(
-        ReportColumn("sku", "الرمز", width="120px"),
-        ReportColumn("name", "المنتج"),
-        ReportColumn("status", "الحالة", width="80px"),
-        ReportColumn("quantity", "المتاح", KIND_NUMBER, total=True, width="90px"),
-        ReportColumn("min_stock_level", "الحد الأدنى", KIND_NUMBER, width="100px"),
-        ReportColumn("min_source", "مصدر الحد", width="90px"),
-        ReportColumn("shortage", "النقص", KIND_NUMBER, total=True, width="90px"),
-        ReportColumn("group_available", "رصيد الصنف", KIND_NUMBER, width="100px"),
-        ReportColumn("newest_alternative", "أحدث بديل متوفّر"),
-        ReportColumn("urgency", "القرار", width="80px"),
-    ),
+    columns=_LOW_STOCK_COLUMNS,
     permission="inventory.item.view",
     row_link="/products/{product_id}",
-    build=_low_stock,
+    build=lambda t, p: _low_stock(t, p, group="product"),
+    drill=lambda t, p: _low_stock(t, p, group="product_brand"),
+    drill_keys=("family_id", "product_id"),
+    drill_title="برندات هذا المنتج",
+    drill_columns=_LOW_STOCK_COLUMNS,
 ))
 
 

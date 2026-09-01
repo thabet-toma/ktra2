@@ -321,7 +321,9 @@ def _history_days(first_movement, window_start, today) -> int:
 
 def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
                  on_order, params, window_start, today, family_totals=None) -> dict:
-    from inventory.services import product_display_name, product_group_key
+    from inventory.services import (
+        family_display_name, product_display_name, product_group_key,
+    )
 
     net = profile.get("net", ZERO)
     peak_week = profile.get("peak_week", ZERO)
@@ -368,6 +370,24 @@ def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
         "brand": product.brand or "",
         "category": product.category.name if product.category_id else "",
         "group_key": product_group_key(product),
+        # #26: مفتاح التقارير المجمَّعة على المنتج — منفصلٌ عن `group_key`
+        # (سلّم «الأنواع المتبادلة» الأوسع). عائلةٌ صريحة (`ProductFamily`)
+        # فقط، لا مقاس إطارٍ ولا براندٌ متكرّر.
+        "family_id": product.family_id,
+        "family_name": (
+            family_display_name(product.family, product.family_id)
+            if product.family_id else ""
+        ),
+        # #26-دلتا: نفس المتاح الذي **قِيس عليه حكم `status` فعلاً** حين للمنتج
+        # أبٌ (`stock_status_of` تقرأ `family_totals[family_id]` لا رصيد هذا
+        # البراند وحده) — لا رصيدٌ يُعاد جمعه من الإخوة المفلترين/الظاهرين، فقد
+        # يُسقط فلترٌ (منتج/مورّد) بعضهم فينحرف المجموع عن الحكم الفعلي. `None`
+        # لمنتجٍ بلا أبٍ. مُشتقٌّ من `family_totals` المحسوبة مرّةً للشركة كلّها
+        # في `replenishment_rows` — بلا استعلامٍ إضافي لكل صفّ.
+        "family_available": (
+            family_totals.get(product.family_id)
+            if product.family_id and family_totals is not None else None
+        ),
         "created_at": product.created_at,
         "on_hand": _dec(product.quantity_on_hand),
         "reserved": reserved_of(product, reserved_map),

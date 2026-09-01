@@ -348,7 +348,9 @@ class StockByDimensionReportTest(APITestCase):
         self.assertEqual(data["columns"][0]["header"], "المورد")
 
     def test_a_report_without_drill_says_so_instead_of_pretending(self):
+        # #26: صار لـ«تحت حدّ الطلب» تنقيبٌ (المنتج ← برانداته)؛ «المحجوز»
+        # يبقى بلا تنقيب — حركةٌ محجوزةٌ على برندٍ بعينه لا تُجمَّع أصلاً.
         res = self.client.get(
-            "/api/reports/low-stock/drill/", self._params(), **self._headers())
+            "/api/reports/reserved-stock/drill/", self._params(), **self._headers())
         self.assertEqual(res.status_code, 400, res.content)
         self.assertIn("لا يُنقَّب", res.data["error"])
