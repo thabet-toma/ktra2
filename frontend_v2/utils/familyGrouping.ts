@@ -75,11 +75,14 @@ const weightedAvgCost = (members: SqlProduct[]): number => {
 /**
  * صفٌّ واحدٌ يمثّل المنتج (الأب): مجموع أرصدة برانداته، بلا أي رقمٍ يُخزَّن —
  * يُشتقّ من صفوف الأعضاء في كل رسم. البراند المرجعي (`anchor`، أصغر معرّف)
- * يمثّل الحقول التي لا تُجمَع (السعر، الحدّان، رقم المنتج…) لأنها فيزيائياً
- * على صفّ البراند خلال المرحلة الانتقالية (#20)، ومتطابقةٌ عملياً بين الإخوة
- * عند الإنشاء (`add_brand_to_family` تنسخها من الأب). `stock_status` ليس
+ * يمثّل الحقول التي لا تُجمَع (السعر، رقم المنتج…) لأنها فيزيائياً على صفّ
+ * البراند خلال المرحلة الانتقالية (#20)، ومتطابقةٌ عملياً بين الإخوة عند
+ * الإنشاء (`add_brand_to_family` تنسخها من الأب). `stock_status` ليس
  * استثناءً فعلياً: الخادم يحسبها أصلاً على مجموع الإخوة مقابل حدّ الأب (#25)،
  * فهي متطابقةٌ بين كل الإخوة أصلاً — لا حاجة لإعادة اشتقاقها هنا.
+ * الحدّان (`min`/`max_stock_level`) ليسا متطابقين بالضرورة بعد ضمٍّ لا يُسوّي
+ * إخوته (#24) — فيُفضَّلان من `effective_*` (حدّ الأب الحاكم من الخادم، نفس
+ * ما حُوكِمت به `stock_status`) لا من قيمة المرجعي الخام (#35).
  */
 export function buildFamilyRow(members: SqlProduct[]): SqlProduct {
   const anchor = members[0];
@@ -96,5 +99,10 @@ export function buildFamilyRow(members: SqlProduct[]): SqlProduct {
     purchased_qty: purchased != null ? String(purchased) : null,
     avg_monthly_sales: monthly != null ? String(monthly) : null,
     avg_cost: weightedAvgCost(members),
+    // #35: الحدّان يُفضّلان قيمة الأب **الحاكمة** (`effective_*`، من الخادم)
+    // على حدّ البراند المرجعي الخام — وإلا عرض الصفّ رقماً غير الذي حَكَم على
+    // شارته، وهو تحديداً العيب الذي أصلحته هذه التذكرة.
+    min_stock_level: anchor.effective_min_stock_level ?? anchor.min_stock_level,
+    max_stock_level: anchor.effective_max_stock_level ?? anchor.max_stock_level,
   };
 }

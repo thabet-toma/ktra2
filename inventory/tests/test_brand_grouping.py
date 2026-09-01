@@ -566,3 +566,138 @@ class FamilyStockStatusQueryBudgetTest(APITestCase):
         assert r1.json() == []
         assert r2.json() == []
         assert len(large) == len(small), (len(small), len(large))
+
+    # #35: الحدّان الحاكمان يُشتقّان من نفس استعلام `family_status_map` — لا
+    # استعلامٌ ثالث. عدد الاستعلامات يبقى اثنين مهما كبر عدد العائلات.
+    def test_family_status_and_thresholds_is_two_queries_regardless_of_row_count(self):
+        from inventory.stock_status import family_status_and_thresholds
+
+        self._make_families(6)
+        with self.assertNumQueries(2):
+            family_status_and_thresholds(self.tenant.TenantID)
+
+    # #35: القائمة الكاملة (شارةٌ وحدٌّ حاكم معاً في كل صفّ) لا تدفع استعلاماً
+    # إضافياً — ولا يكبر عددها مع عدد العائلات، تماماً كما قبل إضافة الحدّ.
+    def test_products_list_query_count_stays_flat_with_effective_thresholds(self):
+        self._make_families(2)
+        with CaptureQueriesContext(connection) as small:
+            r1 = self.client.get(PRODUCTS_URL, **self.hdr)
+        assert r1.status_code == 200, r1.content[:300]
+
+        self._make_families(6)
+        with CaptureQueriesContext(connection) as large:
+            r2 = self.client.get(PRODUCTS_URL, **self.hdr)
+        assert r2.status_code == 200, r2.content[:300]
+
+        assert all("effective_min_stock_level" in row for row in r1.json())
+        assert all("effective_max_stock_level" in row for row in r2.json())
+        assert len(large) == len(small), (len(small), len(large))
+
+
+class FamilyGoverningThresholdTest(APITestCase):
+    """#35: الرقم المعروض على صفّ المنتج (`effective_min/max_stock_level`)
+    يطابق الحدّ الذي حَكَم على شارة الصفّ نفسه — لا حدّ البراند المرجعي الخام
+    إن اختلف بعد ضمٍّ لا يُسوّي حدود إخوته (`merge_products` لا يمسّ
+    `min_stock_level`/`max_stock_level` أصلاً، #24)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="fgt", password="x")
+        cls.tenant = create_company("شركة الحدّ الحاكم", cls.owner)
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.owner)
+        self.hdr = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def _get(self, product_id):
+        res = self.client.get(f"{PRODUCTS_URL}{product_id}/", **self.hdr)
+        assert res.status_code == 200, res.content[:300]
+        return res.json()
+
+    def _diverge(self, *, field, anchor_value, sibling_value, family_value):
+        """عائلةٌ بأخوين مختلفَي الحدّ، والأب على قيمةٍ ثالثة — يحاكي أثر ضمٍّ
+        (#24) لا يُسوّي حدود إخوته: `merge_products` يُعيد ربط `family_id`
+        وحده، فيبقى كل براندٍ على حدّه القديم بينما الأب يحمل حدّاً ثالثاً."""
+        from inventory.services import create_product_with_family
+
+        family, anchor = create_product_with_family(
+            tenant=self.tenant, name_ar="منتج", sku="ANCHOR-1", **{field: anchor_value},
+        )
+        Product.objects.create(
+            tenant=self.tenant, family=family, brand="ب٢", sku="SIB-1",
+            **{field: sibling_value},
+        )
+        # المرجعي (أصغر معرّف) ليس آخر من حُرِّر — الأب على قيمةٍ ثالثة.
+        ProductFamily.objects.filter(pk=family.pk).update(**{field: family_value})
+        return anchor
+
+    def test_min_stock_level_row_shows_family_threshold_and_it_matches_the_badge(self):
+        anchor = self._diverge(
+            field="min_stock_level", anchor_value=10, sibling_value=30, family_value=99,
+        )
+        record_stock_movement(
+            product=anchor, movement_type="IN", quantity=Decimal("50"),
+            unit_cost=Decimal("10"), movement_date="2026-06-01", tenant=self.tenant)
+
+        body = self._get(anchor.id)
+        # لو حُكمت الشارة بحدّ المرجعي الخام (10) لكانت «متوفّر» (50 > 10)؛
+        # حدّ الأب (99) يخفضها إلى «منخفض» (50 ≤ 99) — وهذا ما حُوكِمت به فعلاً.
+        assert body["stock_status"] == "low_stock", body
+        # والرقم المعروض هو نفسه الرقم الذي حكم — لا رقم المرجعي المجاور.
+        assert body["effective_min_stock_level"] == 99, body
+        assert body["min_stock_level"] == 10  # الحقل الخام لم يُمسّ — الكتابة لا تتغيّر
+
+    def test_max_stock_level_row_shows_family_threshold_and_it_matches_the_badge(self):
+        anchor = self._diverge(
+            field="max_stock_level", anchor_value=200, sibling_value=10, family_value=40,
+        )
+        record_stock_movement(
+            product=anchor, movement_type="IN", quantity=Decimal("60"),
+            unit_cost=Decimal("10"), movement_date="2026-06-01", tenant=self.tenant)
+
+        body = self._get(anchor.id)
+        # لو حُكمت الشارة بحدّ المرجعي الخام (200) لبقيت «متوفّر» (60 ≤ 200)؛
+        # حدّ الأب (40) يرفعها إلى «فائض» (60 > 40) — وهذا ما حُوكِمت به فعلاً.
+        assert body["stock_status"] == "overstock", body
+        assert body["effective_max_stock_level"] == 40, body
+        assert body["max_stock_level"] == 200  # الحقل الخام لم يُمسّ
+
+    def test_product_without_family_shows_its_own_threshold_unchanged(self):
+        product = Product.objects.create(
+            tenant=self.tenant, sku="ORPHAN-1", name_ar="بلا أب",
+            min_stock_level=15, max_stock_level=25,
+        )
+        body = self._get(product.id)
+        assert body["effective_min_stock_level"] == 15, body
+        assert body["effective_max_stock_level"] == 25, body
+        assert body["min_stock_level"] == 15
+        assert body["max_stock_level"] == 25
+
+    def test_patching_min_max_still_writes_the_brand_row_and_mirrors_up_to_family(self):
+        """البند 6: الكتابة لا تتغيّر — التعديل يبقى على صفّ البراند ويصعد
+        إلى الأب، والحقلان الكاتبان يعودان في الاستجابة كما أُرسلا رغم
+        إضافة `effective_*` القرائيَّين بجانبهما."""
+        res = self.client.post(
+            PRODUCTS_URL, {"name_ar": "جهاز", "min_stock_level": 5, "max_stock_level": 50},
+            format="json", **self.hdr,
+        )
+        assert res.status_code == 201, res.content[:300]
+        product = Product.objects.get(pk=res.json()["id"])
+
+        patch = self.client.patch(
+            f"{PRODUCTS_URL}{product.id}/",
+            {"min_stock_level": 12, "max_stock_level": 60},
+            format="json", **self.hdr,
+        )
+        assert patch.status_code == 200, patch.content[:300]
+        body = patch.json()
+        # الحقلان الكاتبان يعودان كما أُرسلا — لا يبتلعهما الحقل الجديد القرائي.
+        assert body["min_stock_level"] == 12
+        assert body["max_stock_level"] == 60
+        # ويصعدان إلى الأب كما اليوم (#20) — مصدر `effective_*` نفسه.
+        product.refresh_from_db()
+        family = product.family
+        assert family.min_stock_level == 12
+        assert family.max_stock_level == 60
+        assert body["effective_min_stock_level"] == 12
+        assert body["effective_max_stock_level"] == 60

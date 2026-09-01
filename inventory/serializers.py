@@ -150,6 +150,13 @@ class ProductSerializer(serializers.ModelSerializer):
     # الأب واسمه لتقرّر أيّ صفوفٍ تتجمّع (مرآة `ProductLookupSerializer`).
     family_id = serializers.IntegerField(read_only=True)
     family_name = serializers.SerializerMethodField()
+    # #35: الحدّ **الحاكم** — نفس المصدر الذي حكمت به `stock_status` (حدّ
+    # الأب إن كان له أبٌ ظاهرٌ في `family_thresholds`، وإلا حدّ الصفّ نفسه).
+    # قراءةٌ فقط عمداً وباسمٍ جديد: `min_stock_level`/`max_stock_level`
+    # يبقيان كما هما لأن نموذج التحرير يبعثهما في الحفظ، وتبديل معناهما
+    # يكسر جولة الكتابة بصمت.
+    effective_min_stock_level = serializers.SerializerMethodField()
+    effective_max_stock_level = serializers.SerializerMethodField()
     # W8: تجميعات من StockMovement (منقّطة في ProductViewSet.get_queryset — لا N+1).
     # المشتريات = الوارد التراكمي (IN). المتوسط الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3.
     purchased_qty = serializers.SerializerMethodField()
@@ -196,6 +203,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'purchased_qty', 'avg_monthly_sales',
             'stock_status', 'group_key', 'display_name', 'has_group',
             'family_id', 'family_name',
+            'effective_min_stock_level', 'effective_max_stock_level',
             'created_at',
             'attachments',
         ]
@@ -238,6 +246,22 @@ class ProductSerializer(serializers.ModelSerializer):
         if not obj.family_id:
             return None
         return obj.family.name_ar or obj.family.name_en or None
+
+    def _governing_thresholds(self, obj):
+        """#35: نفس شرط `stock_status_of` حرفاً — أبٌ ظاهرٌ في
+        `family_thresholds` يحكم، وإلا الصفّ نفسه (بلا أبٍ، أو أبٌ لم يظهر
+        بعد في الخريطة). خامٌ من `family_thresholds` (خريطة السياق، بلا
+        استعلامٍ إضافي) لا استدعاءٌ جديد لـ`effective_min`/`effective_max`."""
+        thresholds = self.context.get('family_thresholds')
+        if obj.family_id and thresholds and obj.family_id in thresholds:
+            return thresholds[obj.family_id]
+        return obj.min_stock_level, obj.max_stock_level
+
+    def get_effective_min_stock_level(self, obj):
+        return self._governing_thresholds(obj)[0]
+
+    def get_effective_max_stock_level(self, obj):
+        return self._governing_thresholds(obj)[1]
 
     def get_purchased_qty(self, obj):
         v = getattr(obj, 'purchased_qty', None)

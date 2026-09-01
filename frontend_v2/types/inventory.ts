@@ -28,6 +28,10 @@ export interface SqlProduct {
   min_stock_level?: number | null;
   /** T-REORDER: المستوى الذي يُطلَب حتى بلوغه (نمط min/max). */
   max_stock_level?: number | null;
+  /** #35: الحدّ **الحاكم** — نفس ما حُوكِمت به `stock_status` (حدّ الأب إن
+   *  كان له أبٌ، وإلا `min_stock_level` نفسه). قراءةٌ فقط — لا تُبعَث في الحفظ. */
+  effective_min_stock_level?: number | null;
+  effective_max_stock_level?: number | null;
   quantity_on_hand: number;
   reserved_quantity?: number | string;
   available_quantity?: number | string;

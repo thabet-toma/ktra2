@@ -243,6 +243,23 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
                 self._family_available_map_cache = {}
         return self._family_available_map_cache
 
+    def _family_status_and_thresholds(self):
+        """#35: حالة كل أبٍ وحدَّاه الحاكمان معاً — استدعاءٌ واحدٌ يُغذّي
+        كِلا الخريطتين (`_family_statuses`/`_family_thresholds`)، فاستعلام
+        `ProductFamily` الإضافيّ (فوق `_family_available_map`) لا يتضاعف بين
+        الشارة والحدّ المعروض على الصفّ.
+        """
+        if not hasattr(self, '_family_status_and_thresholds_cache'):
+            tenant = self._get_tenant()
+            if tenant:
+                from .stock_status import family_status_and_thresholds
+                self._family_status_and_thresholds_cache = family_status_and_thresholds(
+                    tenant.TenantID, family_totals=self._family_available_map(),
+                )
+            else:
+                self._family_status_and_thresholds_cache = ({}, {})
+        return self._family_status_and_thresholds_cache
+
     def _family_statuses(self):
         """#28: حالة كل أبٍ ظهر في `_family_available_map` — استعلامٌ إضافيٌّ
         واحد فقط (`ProductFamily`)، إذ الأرصدة نفسها محسوبةٌ سلفاً.
@@ -252,16 +269,17 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         عبر السيريالايزر). `view=lookup` لا يستدعيها إطلاقاً؛ يبقى فلتره على
         حالة البراند وحده عمداً، كما `get_serializer_context`.
         """
-        if not hasattr(self, '_family_statuses_cache'):
-            tenant = self._get_tenant()
-            if tenant:
-                from .stock_status import family_status_map
-                self._family_statuses_cache = family_status_map(
-                    tenant.TenantID, family_totals=self._family_available_map(),
-                )
-            else:
-                self._family_statuses_cache = {}
-        return self._family_statuses_cache
+        return self._family_status_and_thresholds()[0]
+
+    def _family_thresholds(self):
+        """#35: حدّا (أدنى، أقصى) كل أبٍ ظهر في `_family_available_map` — من
+        نفس استدعاء `_family_statuses`، بلا استعلامٍ إضافي.
+
+        يقرأه السيريالايزر ليعرض على صفّ المنتج **نفس** الحدّ الذي حُوكِمت
+        عليه شارته، لا حدّ البراند المرجعي (أصغر معرّف) الذي قد يختلف بعد ضمٍّ
+        لم يُسوِّ الحدّين.
+        """
+        return self._family_status_and_thresholds()[1]
 
     def _family_brand_counts(self):
         """#23: عدد براندات كل أبٍ في الشركة — استعلامٌ واحدٌ لكل طلب.
@@ -291,6 +309,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             if self.request.query_params.get('view') != 'lookup':
                 context['family_available_map'] = self._family_available_map()
                 context['family_brand_counts'] = self._family_brand_counts()
+                context['family_thresholds'] = self._family_thresholds()
         return context
 
     def get_queryset(self):
@@ -563,7 +582,14 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         # #20: اتجاه الكتابة أثناء الانتقال واحد — الكاتب هو صفّ البراند، والأب
         # مرآةٌ تتبعه. بدونه يقرأ `resolve_family_field` أباً متجمّداً على قيمة
         # الإنشاء فيعرض الكرت تصنيفاً قديماً بعد تعديله فعلاً.
-        sync_family_from_product(product)
+        family_changed = sync_family_from_product(product)
+        # #35: `self.get_serializer(...)` أعلاه بنى `_family_status_and_thresholds_cache`
+        # على حالة الأب **قبل** المزامنة — فردّ الاستجابة (السيريالايزر الثاني
+        # أسفل) كان يعرض حدّاً/حالةً بائتين لو غيّر هذا الحفظ حقلاً أبوياً
+        # (`min_stock_level` مثلاً). يُبطَل الاستخراج المخبوء هنا فقط، وحين
+        # تغيّر شيءٌ فعلاً — لا استعلامَ إضافي على القائمة (`GET`) التي لا تكتب.
+        if family_changed and hasattr(self, '_family_status_and_thresholds_cache'):
+            del self._family_status_and_thresholds_cache
         self._handle_attachments(product, request.data, tenant)
         changes = build_activity_changes(
             before=before,

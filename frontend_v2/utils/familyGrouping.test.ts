@@ -86,6 +86,40 @@ test('جمع الحقول النصّية-الرقمية (المشتراة/متو
   assert.equal(merged.avg_monthly_sales, '1.5');
 });
 
+// #35: الحدّان يُفضّلان القيمة الحاكمة (`effective_*`) من الخادم على قيمة
+// المرجعي الخام — وإلا عرض الصفّ رقماً غير الذي حَكَم على شارته.
+test('الحدّ الأدنى المعروض يُفضَّل من effective_min_stock_level لا من قيمة المرجعي الخام', () => {
+  const members = [
+    brand({
+      id: 5, family_id: 9, min_stock_level: 10, effective_min_stock_level: 99,
+    }),
+    brand({ id: 6, family_id: 9, min_stock_level: 30 }),
+  ];
+  const merged = buildFamilyRow(members);
+  assert.equal(merged.min_stock_level, 99);
+});
+
+test('الحدّ الأقصى المعروض يُفضَّل من effective_max_stock_level لا من قيمة المرجعي الخام', () => {
+  const members = [
+    brand({
+      id: 5, family_id: 9, max_stock_level: 10, effective_max_stock_level: 99,
+    }),
+    brand({ id: 6, family_id: 9, max_stock_level: 30 }),
+  ];
+  const merged = buildFamilyRow(members);
+  assert.equal(merged.max_stock_level, 99);
+});
+
+test('غياب الحدّ الحاكم (بيانات ما قبل #35) يُبقي حدّ المرجعي الخام كما هو', () => {
+  const members = [
+    brand({ id: 5, family_id: 9, min_stock_level: 10, max_stock_level: 20 }),
+    brand({ id: 6, family_id: 9, min_stock_level: 30, max_stock_level: 40 }),
+  ];
+  const merged = buildFamilyRow(members);
+  assert.equal(merged.min_stock_level, 10);
+  assert.equal(merged.max_stock_level, 20);
+});
+
 test('لا رقم مجمَّع يُخزَّن: `buildFamilyRow` نقيّةٌ — نفس المُدخل يُنتج نفس المُخرج، ولا يُعدَّل المُدخل', () => {
   const members = [
     brand({ id: 1, family_id: 6, quantity_on_hand: 4 }),

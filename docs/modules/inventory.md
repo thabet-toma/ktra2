@@ -356,6 +356,22 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 ثانية من سلّم القرار؛ `stock_status.py` (`_status_for`) هو ما يستدعيه
 `stock_status_of` و`family_status_map` كلاهما.
 
+**#35: الرقم المعروض على صفّ المنتج صار نفس الرقم الذي حَكَم على شارته.**
+`buildFamilyRow` (`utils/familyGrouping.ts`) كان يأخذ `min_stock_level`/
+`max_stock_level` من البراند المرجعي (أصغر معرّف) خاماً، بينما الشارة
+(`stock_status`) حُوكِمت بحدّ **الأب** (#25) — يتطابقان في المسار العادي
+(كل كاتبٍ يصعد إلى الأب عبر `sync_family_from_product`) ويتباعدان بعد ضمٍّ
+(#24) لا يمسّ حدود إخوته أصلاً. `stock_status.py` (`family_status_and_thresholds`)
+تبني الحالة والحدّين معاً من نفس استعلام `ProductFamily` (`family_status_map`
+غلافٌ رقيقٌ فوقها الآن، بنفس عدد الاستعلامات)؛ `ProductViewSet._family_thresholds`
+تشارك الاستدعاء المخبوء مع `_family_statuses` (`_family_status_and_thresholds`،
+استدعاءٌ واحدٌ لكلٍّ منهما، فلا يتضاعف الاستعلام)، وتُبطِله `update()` حين يُغيّر
+الحفظ حقلاً أبوياً فعلاً — وإلا عرض ردّ الـPATCH حدّاً بائتاً من قبل المزامنة.
+`ProductSerializer` يكسب `effective_min_stock_level`/`effective_max_stock_level`
+(قراءةٌ فقط، بجانب `min_stock_level`/`max_stock_level` الكاتبين كما هما — لا
+تبديل معنى حقلٍ يبعثه نموذج التحرير)، ومنتجٌ بلا أبٍ يعرض حدّه هو كما اليوم.
+`view=lookup` خارج النطاق عمداً (لا يعرض الحدود أصلاً، #25/#28).
+
 ## قواعد لا يجوز كسرها
 - **لا يُعدَّل `quantity_on_hand` أو `avg_cost` إلا عبر `record_stock_movement`** (أو `_recompute_product_stock` بعد حذف حركات). هي الدالة الوحيدة التي تقفل المنتج بـ`select_for_update` داخل `transaction.atomic` (`services.py:187-188`) وتحفظ لقطات before/after على الحركة.
 - **الكمية موجبة دائماً**: `record_stock_movement` يرفض `quantity <= 0` (`services.py`) — الاتجاه يأتي من `movement_type` لا من إشارة الكمية.

@@ -146,35 +146,56 @@ def stock_status_of(product, *, reserved_map=None, suggested_min=None, suggested
     return _status_for(available, minimum, maximum)
 
 
-def family_status_map(tenant_id: int, *, reserved_map=None, family_totals=None) -> dict:
-    """حالة كل عائلةٍ (أبٍ) في الشركة — نفس سلّم `stock_status_of` مطبَّقاً
-    على مجموع الإخوة مقابل حدّ الأب، لا رصيد براندٍ وحده مقابل حدّه هو (#28).
+def family_status_and_thresholds(tenant_id: int, *, reserved_map=None, family_totals=None):
+    """حالة كل عائلةٍ (أبٍ) وحدَّاها الحاكمان معاً — من نفس الاستعلام (#35).
 
     استعلامان اثنان **للشركة كلّها** لا للصفّ: `family_available_map` (إن لم
     يُمرَّر `family_totals` جاهزاً من مستدعٍ يملكه أصلاً) ثم استعلامٌ واحد على
-    `ProductFamily` لحدَّي كل أبٍ ظهر في المجموع. من يستدعيها ومعه
-    `family_totals` محسوبةً سلفاً (مثل `ProductViewSet._family_available_map`)
-    يدفع استعلاماً واحداً إضافياً فقط.
+    `ProductFamily` لحدَّي كل أبٍ ظهر في المجموع. الحالة والحدّان يُشتقّان
+    كلاهما من نفس الصفوف المجلوبة — سيريالايزر يعرض الحدّ الحاكم (`family_id،
+    min، max`) بجانب شارة `stock_status` بلا استعلامٍ ثالث (#35: الرقم
+    المعروض على صفّ المنتج كان يُؤخذ من البراند المرجعي بينما الشارة تُحاكَم
+    على حدّ الأب — فيتناقض الاثنان بعد أي ضمٍّ لا يُسوّي الحدّين).
 
-    يقرأها `filter_by_stock_status` (فلتر الجدول) وعدّادا الداشبورد — كلاهما
-    عبر هذه الدالة وحدها، فلا يتفرّع السلّم في مكانٍ ثانٍ.
+    `family_status_map` أدناه غلافٌ رقيقٌ يُبقي عقدها القديم (خريطة حالةٍ
+    وحدها) لمستدعييها الحاليّين (`filter_by_stock_status`، عدّادا الداشبورد).
     """
     if family_totals is None:
         family_totals = family_available_map(tenant_id, reserved_map=reserved_map)
     if not family_totals:
-        return {}
+        return {}, {}
     from .models import ProductFamily
 
     families = ProductFamily.objects.filter(
         tenant_id=tenant_id, id__in=family_totals.keys(),
     ).only('id', 'min_stock_level', 'max_stock_level')
-    return {
-        family.id: _status_for(
+    statuses: dict = {}
+    thresholds: dict = {}
+    for family in families:
+        statuses[family.id] = _status_for(
             family_totals.get(family.id, ZERO),
             effective_min(family), effective_max(family),
         )
-        for family in families
-    }
+        # خامٌ لا مُشتقّ عبر `effective_min`: العرض يُبقي «—» حين لا حدّ يدويّاً
+        # مضبوطاً، تماماً كحقل المنتج الخام اليوم — لا صفراً يبدّل «—» برقم.
+        thresholds[family.id] = (family.min_stock_level, family.max_stock_level)
+    return statuses, thresholds
+
+
+def family_status_map(tenant_id: int, *, reserved_map=None, family_totals=None) -> dict:
+    """حالة كل عائلةٍ (أبٍ) في الشركة — نفس سلّم `stock_status_of` مطبَّقاً
+    على مجموع الإخوة مقابل حدّ الأب، لا رصيد براندٍ وحده مقابل حدّه هو (#28).
+
+    غلافٌ رقيقٌ فوق `family_status_and_thresholds` (#35) — نفس عدد
+    الاستعلامات (اثنان) ونفس العقد، يُهمِل خريطة الحدود لمن لا يحتاجها.
+
+    يقرأها `filter_by_stock_status` (فلتر الجدول) وعدّادا الداشبورد — كلاهما
+    عبر هذه الدالة وحدها، فلا يتفرّع السلّم في مكانٍ ثانٍ.
+    """
+    statuses, _ = family_status_and_thresholds(
+        tenant_id, reserved_map=reserved_map, family_totals=family_totals,
+    )
+    return statuses
 
 
 def available_expression(reserved_map=None):
