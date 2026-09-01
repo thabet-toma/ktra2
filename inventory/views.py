@@ -354,11 +354,49 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         )
         return qs
 
+    # مرشِّحاتٌ تختار **أيّ البراندات** لا **أيّ الحقائق عنها** (تفريق #26):
+    # مع أيٍّ منها لا يُكمَّل شيء — إكمال العائلة تحت فلتر «نفد» كان سيُدخل
+    # إخوةً متوفّرين في صفٍّ يدّعي أنه المنتج، وهو الكذب نفسه من الجهة المقابلة.
+    BRAND_SELECTING_PARAMS = ('search', 'stock_status')
+
+    def _complete_families(self, products, request):
+        """يُكمل عائلات الصفحة بعد التقسيم — شرط استقامة صفّ المنتج.
+
+        التجميع يقع عند الرسم (#23) على الصفوف الواصلة وحدها، والشاشة الجدولية
+        تُرقَّم عند 50. فمنتجٌ تتوزّع براندَاته على صفحتين كان يُرسَم صفَّ
+        منتجٍ **بمجموعٍ جزئي معروضٍ على أنه مجموع المنتج** — وقد يظهر المقاس
+        نفسه في صفحتين بمجموعين مختلفين. وليست حالة حدٍّ: الترتيب الافتراضي
+        `-id` ومعرّفات الإخوة متباعدةٌ لأنها فُتحت على مدى شهور.
+
+        الإصلاح هنا لا ينقل التجميع بل يضمن اكتمال مدخلاته: بعد التقسيم يُجلب
+        **كل** إخوة عائلات الصفحة في **استعلامٍ واحد ثابت** لا واحدٍ لكل صفّ.
+        فيستحيل الصفّ الناقص بنيوياً لا احترازاً — وهي قاعدة #26 نفسها: أرقام
+        صفّ المنتج مجموع كل برانداته أو لا يظهر صفّ منتجٍ أصلاً.
+
+        **اختياري** (`complete_families=1`): شاشة الأصناف وحدها ترسله، فعقد
+        `?view=lookup` ومنتقي المستندات لا يتغيّران. ولا رقم يُخزَّن — هذا
+        جلبُ صفوفٍ لا حسابُ مجموع.
+        """
+        if request.query_params.get('complete_families') not in ('1', 'true'):
+            return products
+        if any(request.query_params.get(k) for k in self.BRAND_SELECTING_PARAMS):
+            return products
+        family_ids = {p.family_id for p in products if p.family_id}
+        if not family_ids:
+            return products
+        present = {p.id for p in products}
+        missing = [
+            p for p in self.get_queryset().filter(family_id__in=family_ids)
+            if p.id not in present
+        ]
+        return products + missing
+
     def list(self, request, *args, **kwargs):
         """Serialize attachments in one tenant-scoped query instead of one per row."""
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         products = list(page if page is not None else queryset)
+        products = self._complete_families(products, request)
 
         attachment_map = {product.id: [] for product in products}
         if products:

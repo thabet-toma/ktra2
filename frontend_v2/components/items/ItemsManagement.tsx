@@ -272,7 +272,11 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         setHasNext(false);
       } else {
         const paged = await inventoryApi.getProductsPaged({
-          ...params, page, page_size: pageSize,
+          // الخادم يُكمل عائلات الصفحة بعد التقسيم — بلا هذا يُرسم صفّ منتجٍ
+          // بمجموع البراندات الواصلة وحدها ويدّعي أنه مجموع المنتج
+          // (`inventory/views.py` — `_complete_families`). الوضع الشجري يجلب
+          // المجموعة كاملة أصلاً فلا يلزمه.
+          ...params, page, page_size: pageSize, complete_families: 1,
         });
         allRows = paged.results as SqlProduct[];
         setProducts(allRows);
@@ -971,6 +975,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           sortDir={sortDir}
           onSort={(key, dir) => { setSortKey(key); setSortDir(dir); }}
           selection={mergeMode ? { selectedIds: mergeSelectedIds, onToggle: toggleMergeSelected } : undefined}
+          brandFilterActive={Boolean(search || statusFilter)}
         />
       )}
 

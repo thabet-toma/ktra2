@@ -25,6 +25,12 @@ type Props = {
   sortDir?: "asc" | "desc";
   onSort?: (key: string, dir: "asc" | "desc") => void;
   onRowDoubleClick?: (p: SqlProduct) => void;
+  /** مرشِّحٌ يختار **أيّ البراندات** فاعلٌ الآن (بحث/حالة مخزون) — فلا تجميع:
+   *  صفوف براندٍ صريحة. صفّ منتجٍ مبنيٌّ على البراندات المطابِقة وحدها يكون
+   *  مجموعاً جزئياً يدّعي أنه المنتج، وهو ما تمنعه قاعدة #26. نفس تفريق
+   *  التقارير حرفياً: مرشِّح «أيّ البراندات» يُسقط التجميع، ومرشِّح «أيّ
+   *  الحقائق عنها» يُبقيه. */
+  brandFilterActive?: boolean;
   /** الكرت المجمّع لتصنيف: كل معرّفات المنتجات تحته (وكل أحفاده) + اسم التصنيف.
    *  `categoryId` يغني عن تعداد المعرّفات في الطلب (الخادم يشتقّها) — يغيب في
    *  عقدة «بدون تصنيف» وحدها فتبقى معرّفاتها صريحة. */
@@ -45,6 +51,7 @@ const UNCAT = -1; // تصنيف افتراضي «بدون تصنيف» للمن�
 export const GroupedItemsTable: React.FC<Props> = ({
   columns, rows, categories, getRowKey, loading, emptyHint = "لا توجد منتجات",
   sortKey, sortDir, onSort, onRowDoubleClick, onShowGroup, selection,
+  brandFilterActive,
 }) => {
   // مفتوحة افتراضياً: البدء بالطيّ كان يُخفي كل المنتجات تحت اسم التصنيف فتبدو
   // الشاشة فارغة. `collapsed` تحمل ما طواه المستخدم فقط (الجديد يبقى مفتوحاً).
@@ -163,8 +170,11 @@ export const GroupedItemsTable: React.FC<Props> = ({
   // (`familyId === null`): يبقى صفّه كما هو اليوم بلا أي عنصر إضافي.
   const renderGroupNodes = (group: ProductGroup, depth: number): React.ReactNode[] => {
     // منتجٌ بلا أبٍ (`familyId === null`) ليس منتجاً بالنموذج الجديد أصلاً —
-    // صفٌّ مفردٌ كما كان، بلا كشفٍ ولا عدد.
-    if (group.familyId == null) return [renderRow(group.members[0], depth)];
+    // صفٌّ مفردٌ كما كان، بلا كشفٍ ولا عدد. ومع مرشِّح براندٍ فاعل كذلك: كل
+    // صفٍّ براندُه، فما وصل مقصوصٌ بالفلتر لا يمثّل منتجاً.
+    if (group.familyId == null || brandFilterActive) {
+      return group.members.map((m) => renderRow(m, depth));
+    }
     // وما عداه صفّ منتجٍ **دائماً**، ولو كان تحته براندٌ واحد. كان الشرط
     // `members.length <= 1` يُسقط هذه الحالة إلى صفّ براندٍ عارٍ، فيقرأ
     // المستخدم في الجدول الواحد لغتين: «205/70/15» بجانب «185/55/16 (دانتير
