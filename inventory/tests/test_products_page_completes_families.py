@@ -69,12 +69,25 @@ class PageCompletesFamiliesTest(APITestCase):
         self.assertNotIn(self.first.id, ids)
 
     def test_a_brand_selecting_filter_is_never_completed(self):
-        """فلتر «نفد»/بحثٌ يختار **أيّ البراندات** — إكمالُه كان سيُدخل إخوةً
-        لا يطابقون داخل صفٍّ يدّعي أنه المنتج (تفريق #26)."""
+        """البحث يختار **أيّ البراندات** — إكمالُه كان سيُدخل إخوةً لا يطابقون
+        داخل صفٍّ يدّعي أنه المنتج (تفريق #26). وهو أيضاً مسار الضمّ: النسخ
+        المكرّرة تُعرَض صفّاً صفّاً كي تُؤشَّر وتُضمّ."""
         ids = self._ids(self._get(
             page=1, page_size=3, complete_families=1, search="روك بيلد"))
         self.assertIn(self.second.id, ids)
         self.assertNotIn(self.first.id, ids)
+
+    def test_stock_status_filter_is_completed_now_that_it_judges_the_family(self):
+        """فلتر الحالة **يُكمَّل** بعد #28: صار حكماً على الأب لا على البراند،
+        فيُعيد كل براندات المنتج المطابق — فالإكمال يجمع ما فرّقه التقسيم إلى
+        صفحاتٍ ولا يُدخل غريباً. وقبل #28 كان استبعاده صحيحاً: الفلتر كان يختار
+        البراندات الصفرية وحدها فإكمال عائلتها يُدخل إخوةً متوفّرين."""
+        ids = self._ids(self._get(
+            page=1, page_size=3, complete_families=1, stock_status="in_stock"))
+        self.assertIn(self.second.id, ids)
+        self.assertIn(
+            self.first.id, ids,
+            "الأخ خارج الصفحة لم يصل تحت فلتر الحالة — صفّ المنتج مجموعٌ جزئي")
 
     def test_completion_costs_one_query_no_matter_how_many_families(self):
         """استعلامٌ واحدٌ إضافي ثابت لا واحدٌ لكل صفّ — ضمان #23 يبقى."""

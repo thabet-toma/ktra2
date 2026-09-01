@@ -32,6 +32,7 @@ import {
   simpleFieldsFromProduct, dirtySimplePayload, validateSimpleFields,
 } from "../../utils/itemSimpleFields";
 import { humanizeThrown } from "../../utils/drfError";
+import { groupProductsByFamily, buildFamilyRow } from "../../utils/familyGrouping";
 import { eventBus } from "../../utils/eventBus";
 import type { MergeCandidate } from "../../utils/productMerge";
 import type { MergeProductsResult } from "../../services/inventoryApi";
@@ -487,7 +488,9 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       const all: SqlProduct[] = [];
       let pg = 1;
       for (;;) {
-        const params: Record<string, string | number> = { page: pg, page_size: 200 };
+        const params: Record<string, string | number> = {
+          page: pg, page_size: 200, complete_families: 1,
+        };
         if (status) params.stock_status = status;
         const data = await inventoryApi.getProducts(params);
         const rows = (Array.isArray(data) ? data : (data.results ?? [])) as SqlProduct[];
@@ -505,7 +508,16 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       const subset = status ? `المنتجات: ${STATUS_LABEL[status]}` : "كل المنتجات";
       const esc = (v: unknown) => String(v ?? "—")
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      const rowsHtml = all.map((p) => {
+      // التقرير يطبع **منتجات** لا براندات — نفس ما تعرضه الشاشة، ومن نفس
+      // دالّة التجميع (`utils/familyGrouping`) لا نسخةٍ ثانية منها. كان يطبع
+      // صفوف البراندات خاماً، فيظهر المقاس الواحد مرّتين بكميةِ كلِّ براندٍ
+      // على حدة بينما شارته حكمٌ على المنتج كلّه (#25) — رقمان لسؤالٍ واحد في
+      // الصفّ ذاته. والخادم يُكمل عائلات كل صفحةٍ (`complete_families=1`) فلا
+      // يُبنى صفُّ منتجٍ من بعض براندَاته.
+      const printableRows = groupProductsByFamily(all).map(
+        (g) => (g.familyId == null ? g.members[0] : buildFamilyRow(g.members)),
+      );
+      const rowsHtml = printableRows.map((p) => {
         const name = esc(p.name_ar || p.name_en || p.sku);
         const qty = Number(p.quantity_on_hand);
         const avgCost = formatMoney(p.avg_cost);
@@ -542,7 +554,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           </head>
           <body>
             <h2>تقرير المنتجات</h2>
-            <div class="subtitle">${subset} · العدد: ${all.length} · التاريخ: ${today}</div>
+            <div class="subtitle">${subset} · العدد: ${printableRows.length} · التاريخ: ${today}</div>
             <table>
               <thead>
                 <tr>
@@ -975,7 +987,12 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           sortDir={sortDir}
           onSort={(key, dir) => { setSortKey(key); setSortDir(dir); }}
           selection={mergeMode ? { selectedIds: mergeSelectedIds, onToggle: toggleMergeSelected } : undefined}
-          brandFilterActive={Boolean(search || statusFilter)}
+          // البحث وحده يُسقط التجميع إلى صفوف براندات: هو مسار الضمّ (اكتب
+          // المقاس ← تظهر النسخ المكرّرة صفّاً صفّاً ← أشّر واضمم)، ومربّع
+          // التحديد لا يحمله إلا صفّ البراند. أمّا فلتر الحالة فخرج من هذا
+          // بعد #28: صار حكماً على المنتج فيُعيد **كل** براندات المنتج
+          // المطابق، فصفّ المنتج مكتملٌ ولا يدّعي مجموعاً ناقصاً.
+          brandFilterActive={Boolean(search)}
         />
       )}
 
