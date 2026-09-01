@@ -122,7 +122,11 @@ const SALE_SOURCE_LABEL: Record<"product" | "last_invoice", string> = {
  * النظرة العامة: التسعير والربحية أولاً (سعر البيع مقابل التكلفة كما في كرت الأصيل)،
  * ثم المخزون، ثم حركة الشراء/البيع، ثم بيانات التعريف.
  */
-export const ProductOverview: React.FC<{ profile: ProductProfileData | null; loading?: boolean }> = ({ profile, loading }) => {
+export const ProductOverview: React.FC<{
+  profile: ProductProfileData | null;
+  loading?: boolean;
+  addBrandSlot?: React.ReactNode;
+}> = ({ profile, loading, addBrandSlot }) => {
   if (!profile) {
     return (
       <div className="p-4 text-center text-[var(--ktra-ink-soft)]">
@@ -200,7 +204,8 @@ export const ProductOverview: React.FC<{ profile: ProductProfileData | null; loa
 
       {/* #23: «كرت المنتج يعرض المجمَّع والتفصيل معاً» — حين يتبع هذا البراند
           منتجاً له إخوة، يظهر مجمّعهم وتفصيلهم هنا بلا مغادرة الكرت. */}
-      {profile.family_id != null && <FamilyBrandsSection familyId={profile.family_id} />}
+      {profile.family_id != null &&
+        <FamilyBrandsSection familyId={profile.family_id} addBrandSlot={addBrandSlot} />}
     </div>
   );
 };
@@ -211,14 +216,23 @@ export const ProductOverview: React.FC<{ profile: ProductProfileData | null; loa
  * تعداد المعرّفات؛ لا منطق تجميعٍ ثانٍ. صامتةٌ (`null`) حين لا إخوة بعد —
  * منتجٌ ببراندٍ واحد يبقى كرته كما هو اليوم بلا قسمٍ زائد.
  */
-const FamilyBrandsSection: React.FC<{ familyId: number }> = ({ familyId }) => {
+const FamilyBrandsSection: React.FC<{
+  familyId: number;
+  /** حقل «أضف براند» جاهزاً من المستدعي. يُمرَّر عنصراً لا دالّة كي لا تستورد
+   *  هذه الوحدة من `ItemForm` (تلك تستورد منها أصلاً — استيرادٌ دائري). */
+  addBrandSlot?: React.ReactNode;
+}> = ({ familyId, addBrandSlot }) => {
   const { profile: group, loading } = useGroupInsights({ family: familyId });
-  if (!loading && (!group || group.member_count <= 1)) return null;
+  // القسم كان يصمت لمنتجٍ ببراندٍ واحد. ومع مقبس الإضافة يجب أن يظهر: هذا
+  // بالضبط المنتج الذي يريد صاحبه أن يضيف له ثانياً، وإخفاء القسم يُخفي
+  // الطريق الوحيد إليه.
+  if (!loading && (!group || group.member_count <= 1) && !addBrandSlot) return null;
   return (
     <section className="mb-3">
       <div className="text-xs font-bold text-[var(--ktra-ink-soft)] mb-1.5 pr-0.5">
         براندات هذا المنتج
       </div>
+      {addBrandSlot && <div className="mb-2">{addBrandSlot}</div>}
       {group && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
           <Kpi label="إجمالي الرصيد (كل البراندات)" value={formatQuantity(group.quantity_on_hand, "—")} />
@@ -328,9 +342,9 @@ const serialColumns: LedgerColumn<ProductSerialRow>[] = [
  */
 export const useProductInsights = (
   productId: number | null,
-  options: { isSerialized?: boolean } = {},
+  options: { isSerialized?: boolean; addBrandSlot?: React.ReactNode } = {},
 ) => {
-  const { isSerialized = false } = options;
+  const { isSerialized = false, addBrandSlot } = options;
   const tenantId = useMemo(() => resolveTenantId(), []);
   const [profile, setProfile] = useState<ProductProfileData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -451,7 +465,7 @@ export const useProductInsights = (
         ? <div className="p-4 text-[var(--ktra-ink-soft)]">{emptyHint}</div>
         : error
           ? <div role="alert" className="p-3 text-sm text-[var(--ktra-danger,#c00)]">تعذّر تحميل النظرة العامة: {error}</div>
-          : <ProductOverview profile={profile} loading={loading} />,
+          : <ProductOverview profile={profile} loading={loading} addBrandSlot={addBrandSlot} />,
     },
     {
       key: "invoices",

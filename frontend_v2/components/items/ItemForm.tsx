@@ -237,7 +237,31 @@ export const ItemForm: React.FC<Props> = ({
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
   // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة/أرقام تسلسلية) — يتبع المنتج المعروض.
-  const insights = useProductInsights(currentId, { isSerialized: form.is_serialized });
+  // #21: «أضف براند» تسكن قسم «براندات هذا المنتج» — حيث يراها المستخدم وهو
+  // ينظر إلى برانداته. تُمرَّر عنصراً جاهزاً لا دالّة: `ProductInsightTabs`
+  // لا يجوز أن تستورد من هنا (هذا الملف يستورد منها، فيصير الاستيراد دائرياً).
+  const addBrandSlot = currentId == null ? undefined : (
+    <AddBrandField
+      buttonLabel="أضف براند"
+      placeholder="اسم البراند الجديد (مثال: دانتير)"
+      onSubmit={async (brandName) => {
+        const familyId = insightsRef.current?.profile?.family_id;
+        if (familyId == null) return;
+        try {
+          await submitAddBrand(familyId, brandName);
+          insightsRef.current?.reload();
+        } catch (e: unknown) {
+          toast(e instanceof Error ? e.message : "تعذّر إضافة البراند", "error");
+        }
+      }}
+    />
+  );
+  const insights = useProductInsights(currentId, {
+    isSerialized: form.is_serialized,
+    addBrandSlot,
+  });
+  const insightsRef = useRef(insights);
+  insightsRef.current = insights;
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -742,24 +766,11 @@ export const ItemForm: React.FC<Props> = ({
         <ValuePicker value={form.brand} onChange={(b) => patch("brand", b)}
           fetchOptions={inventoryApi.getBrands}
           emptyLabel="— بدون براند —" addPlaceholder="مثال: روك بيلد" addTitle="إضافة براند جديد" />)}
-      {/* #21: هذا الحقل أعلاه يعيد تسمية براند **هذا** الصفّ. «أضف براند» هنا
-          مختلفة تماماً: تُلحق صفّاً (أو تُسمّي الضمنيّ) تحت **نفس المنتج
-          الأب** — برصيدٍ وتكلفةٍ مستقلَّين، بلا حركة مخزون ولا قيد محاسبي.
-          متاحةٌ فقط لمنتجٍ محفوظٍ له أبٌ (كل منتج جديد يُنشأ بأبٍ تلقائياً). */}
-      {currentId != null && insights.profile?.family_id != null &&
-        fld("أضف براند إلى هذا المنتج",
-          <AddBrandField
-            onSubmit={async (brandName) => {
-              const familyId = insights.profile?.family_id;
-              if (familyId == null) return;
-              try {
-                await submitAddBrand(familyId, brandName);
-                insights.reload();
-              } catch (e: unknown) {
-                toast(e instanceof Error ? e.message : "تعذّر إضافة البراند", "error");
-              }
-            }}
-          />, 2)}
+      {/* #21: هذا الحقل أعلاه يعيد تسمية براند **هذا** الصفّ وحده. «أضف براند»
+          عمليةٌ أخرى تماماً (تُلحق صفّاً تحت نفس المنتج الأب) وقد انتقلت إلى
+          قسم «براندات هذا المنتج» في النظرة العامة — انظر `addBrandSlot` أدناه:
+          كانت هنا خلف طيّ «متقدم» المغلق افتراضياً، فيبحث عنها المستخدم ثم
+          ييأس فيُنشئ صنفاً جديداً، وهو الخلل الذي جاء النموذج كلّه ليمنعه. */}
       {/* T-REORDER: «الصنف» كان حقلاً خادمياً كاملاً (`variant_group`) بنقطته
           الجاهزة (`products/groups/`) ولا مدخلَ له في أي شاشة — فبقي فارغاً على
           كل منتجٍ في كل شركة، وبفراغه يسقط تجميعُ الموديلات على اسم المنتج: كل
