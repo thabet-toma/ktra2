@@ -15,6 +15,7 @@ AUDIT_ACTION_CODES = frozenset(
         "PKG_EXPORTED",
         "MODULE_TOGGLED",
         "PORTAL_CFG_SET",
+        "OFFICE_MIGRATED",
     }
 )
 

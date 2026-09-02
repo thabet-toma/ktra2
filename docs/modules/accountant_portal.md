@@ -10,6 +10,12 @@
 بـ`AccountantEngagement` النشط: هو ما يخلق عضوية `legal_accountant` ويحدّد نطاق صلاحياتها،
 وسحبه يحذفها. والوحدة مرخَّصة لكل شركة على حدة، وغير المرخّصة لا ترى المسار أصلاً.
 
+**ISSUE #55:** كل محاسبٍ كان مسجَّلاً قبلها صار مديرَ مكتبٍ (`accounting_firm`) عبر أمر
+ترحيلٍ مرّةً واحدة (تحت)، و`PracticeClient` القديمة بقيت كما هي بلا `engagement`/`managed_tenant`،
+وكل `AccountantEngagement` نشط صار زبون مكتبٍ من نوع `engaged`. الباب المنفصل الذي كان
+يسجّل محاسباً من صفحة الدخول (`/accountant/signup` في `frontend_v2`) أُغلق — الزر والمسار
+والاستدعاء حُذفوا من الواجهة؛ نقطة `/api/accountant/signup/` (تحت) بقيت كما هي.
+
 وفوق ذلك **طبقة مكتب (practice)**: سجلّ زبائن المكتب نفسه — بمن فيهم زبونٌ **ليس شركةً على
 المنصة** يُدخله المحاسب يدوياً — وبرامج المراجعة والمواعيد والمستندات وإعدادات المكتب.
 الفارق الجوهري بين الطبقتين: **بيانات الطبقة الأولى تخصّ الشركة والمحاسب يقرؤها، وبيانات
@@ -46,6 +52,7 @@
 | `accountant_portal/identity.py` | رموز تحقق البريد ورسائل الدعوة | 78 |
 | `accountant_portal/guards.py` | حارس قفل الفترة المسجَّل في `core.hooks` | 52 |
 | `accountant_portal/audit.py` | أكواد التدقيق المسموحة وكتابتها | 36 |
+| `accountant_portal/management/commands/migrate_accountant_offices.py` | ISSUE #55 — ترحيل idempotent: مكتب `accounting_firm` لكل محاسبٍ بلا مكتب، وربط كل `AccountantEngagement` نشط بزبون `PracticeClient` («مربوطٌ بإذنه») | 158 |
 
 ## الـModels
 
@@ -221,3 +228,4 @@ def staff_practice_dashboard(*, staff, today=None)  # ISSUE #58 (القرار 7)
 | `tests/test_demo_workspace.py` (134) · `test_platform_modules.py` (42) | فتح واجهة المحاسب وتبديل ترخيص الوحدة من لوحة المنصة (سوبر أدمن) |
 | `tests/test_client_book_tax_periods.py` | ISSUE #57 — تجهيز/جاهزية/قفل الفترة عبر `X-Tenant-Id` على دفتر عميل مُدار؛ القفل لا يمسّ دفتر المكتب ولا دفتر عميلٍ آخر |
 | `tests/test_practice_dashboard.py` | ISSUE #58 — لوحة المكتب: عدد الاستعلامات ثابتٌ من 3 إلى 60 عميلاً (`CaptureQueriesContext`)، عزل مكتبٍ عن آخر، الأتعاب من دفتر المكتب لا دفتر عميله المُدار؛ والقرار 7 — موظفٌ مُسنَد يرى عملاءه المُسنَدين فقط (لا 404، لا الكل)، وموظفٌ غير مُسنَد يرى صفراً، وموظف مكتبٍ آخر لا يرى شيئاً منه |
+| `tests/test_migrate_accountant_offices.py` | ISSUE #55 — أمر الترحيل عبر `call_command` وأثره فوق HTTP: مكتب `accounting_firm` يُنشأ لمحاسبٍ بلا مكتب ولا يُكرَّر لمن له مكتب فعلاً، زبونٌ يدويٌّ قديم يبقى بلا `engagement`/`managed_tenant`، ارتباطٌ نشط يصير زبون `engaged` (أو يُربط بزبونٍ يدويٍّ قائمٍ بنفس الاسم لا يُكرَّر)، ارتباطٌ غير نشط لا يصير زبوناً، وإعادة التشغيل idempotent |

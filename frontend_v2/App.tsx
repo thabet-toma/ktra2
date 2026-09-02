@@ -43,6 +43,7 @@ import { useCompany } from "./contexts/CompanyContext";
 import { usePermissions } from "./contexts/PermissionsContext";
 import { moduleAllowsView, permForView, templateHidesView } from "./utils/viewPermissions";
 import { companyWorkspaceDeepLink, enterPlatformShell, platformShellActive } from "./utils/officeShell";
+import { resolvePublicAuthView } from "./utils/publicAuthRoutes";
 import { activeTasksService } from "./services/activeTasksService";
 import { autoDisableScheduler } from "./services/autoDisableScheduler";
 import { PublicNavbar } from "./components/layout/PublicNavbar";
@@ -161,7 +162,6 @@ const LocalShippingPage = lazyPage(() => import("./components/logistics/LocalShi
 const MyAccountPage = lazyPage(() => import("./components/personal/MyAccountPage"));
 // الرواتب — موظفون وساعات وغيابات وكشوف، مرتبطة بشجرة الحسابات.
 const PayrollPage = lazyPage(() => import("./components/hr/PayrollPage"));
-const AccountantSignupPage = lazyPage(() => import("./components/accountant/AccountantSignupPage"));
 const CompanyAccountantEngagementsPage = lazyPage(() => import("./components/accountant/CompanyAccountantEngagementsPage"));
 const AccountantOfficeApp = lazyPage(() => import("./components/accountant/office/AccountantOfficeApp"));
 // THA-45: سجل الأجهزة الحساسة — وحدة مرخّصة، خلف نفس حارس الترخيص.
@@ -179,7 +179,7 @@ const HrRequestsPage = lazyPage(() => import("./components/hr/RequestsPage").the
 const HrContractsPage = lazyPage(() => import("./components/hr/ContractsPage").then((m) => ({ default: m.ContractsPage })));
 
 type SourcingView = "search" | "loading" | "results";
-type AuthView = "landing" | "login" | "signup" | "accountant-signup";
+type AuthView = "landing" | "login" | "signup";
 
 /**
  * حارس ترخيص الوحدة — يقرأ عَلَم `/api/permissions/me` (طلب قائم أصلاً، بلا شبكة
@@ -361,10 +361,8 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (currentUser) return;
-    const path = (location.pathname || "/").replace(/\/$/, "") || "/";
-    if (path === "/accountant/signup" || path === "/accountant/verify-email") {
-      setAuthView("accountant-signup");
-    }
+    const resolved = resolvePublicAuthView(location.pathname || "/");
+    if (resolved) setAuthView(resolved);
   }, [currentUser, location.pathname]);
 
   // SEO: عنوان تبويب/فهرسة مختلف لكل شاشة عامة (غير مصادَق عليها) — index.html
@@ -2215,9 +2213,6 @@ const App: React.FC = () => {
   }
 
   if (!currentUser) {
-    if (authView === "accountant-signup") {
-      return <AccountantSignupPage />;
-    }
     if (appView === "about-us") {
       return (
         <div>

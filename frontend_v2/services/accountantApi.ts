@@ -7,29 +7,6 @@ import type {
 } from '../types/accountant';
 import { apiGetObject, apiPatchObject, apiPostForBlob, apiPostObject } from './restApi';
 
-export type AccountantSignupInput = {
-  fullName: string;
-  email: string;
-  password: string;
-  professional_type: string;
-  tax_registration_number: string;
-  business_address: string;
-  license_number?: string;
-  license_authority?: string;
-  phone?: string;
-};
-
-export const signupAccountant = (body: AccountantSignupInput) =>
-  apiPostObject<{ accepted: boolean; email_verification_required: boolean }>(
-    'accountant/signup/', body,
-  );
-
-export const verifyAccountantEmail = (token: string) =>
-  apiPostObject<{ verified: boolean }>('accountant/verify-email/', { token });
-
-export const resendAccountantVerification = (email: string) =>
-  apiPostObject<{ accepted: boolean }>('accountant/resend-verification/', { email });
-
 export const getAccountantProfile = () =>
   apiGetObject<{ profile: AccountantProfile }>('accountant/me/');
 
