@@ -113,6 +113,36 @@ export interface ChequeDepositSlip {
   }[];
 }
 
+/**
+ * issue #56 — سند مصروف: مستندٌ عامٌّ لكل شركة بلا مورّدٍ إلزامي وبلا مخزون.
+ * المستفيد اختياري تماماً — شريكٌ (`beneficiary_partner`) أو اسمٌ حرّ
+ * (`beneficiary_name`) أو لا شيء، بخلاف سند الصرف الذي يفرض مورّداً.
+ */
+export interface ExpenseVoucherDto {
+  id: number;
+  number: number;
+  date: string;
+  expense_account: number;
+  expense_account_name?: string | null;
+  expense_account_code?: string | null;
+  amount: string;
+  tax_amount: string;
+  currency: number;
+  currency_code?: string | null;
+  exchange_rate: string;
+  payment_method: "cash" | "cheque" | "on_account";
+  cash_or_bank_account?: number | null;
+  cash_or_bank_account_name?: string | null;
+  beneficiary_partner?: number | null;
+  beneficiary_partner_name?: string | null;
+  beneficiary_name?: string | null;
+  description?: string | null;
+  attachment_url?: string | null;
+  journal?: number | null;
+  is_posted: boolean;
+  created_at?: string | null;
+}
+
 export interface ChequeDepositBatchResult {
   deposited_count: number;
   batch_ref: string;

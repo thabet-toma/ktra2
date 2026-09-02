@@ -13,6 +13,7 @@ import type {
   BankStatementDto,
   ChequeDepositBatchResult,
   ChequeDto,
+  ExpenseVoucherDto,
   OpeningBalanceDto,
   OpeningBalanceLinesInput,
 } from "../types/accounting";
@@ -987,4 +988,47 @@ export const accountingApi = {
 
   getCurrencies: () =>
     fetch(`${ACC}/currencies/`, { headers: headers() }).then(asList),
+
+  // ─── issue #56: سند مصروف — مستندٌ عامٌّ لكل شركة بلا مورّدٍ إلزامي ───
+
+  /** قائمة السندات (الأحدث أولاً — ترتيب الخادم). بلا ترقيم — نفس نهج `getCostCenters`. */
+  getExpenseVouchers: (): Promise<ExpenseVoucherDto[]> =>
+    fetch(`${ACC}/expense-vouchers/`, { headers: headers() }).then(asList) as Promise<ExpenseVoucherDto[]>,
+
+  /**
+   * ينشئ السند ويرحّله فوراً — لا خطوة ترحيل ثانية (نمط `createCashTransfer`).
+   * `expense_account` أو `expense_account_name` — أحدهما يكفي؛ الاسم يُنشئ
+   * حساباً تحت «52» إن لم يوجد. `beneficiary_partner`/`beneficiary_name`
+   * اختياريان تماماً.
+   */
+  createExpenseVoucher: async (body: {
+    date: string;
+    amount: string | number;
+    currency: number;
+    tax_amount?: string | number;
+    exchange_rate?: string | number;
+    payment_method: "cash" | "cheque" | "on_account";
+    expense_account?: number;
+    expense_account_name?: string;
+    cash_or_bank_account?: number;
+    beneficiary_partner?: number;
+    beneficiary_name?: string;
+    description?: string;
+    attachment_url?: string;
+  }): Promise<ExpenseVoucherDto> => {
+    const res = await fetch(`${ACC}/expense-vouchers/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createExpenseVoucher");
+    return res.json();
+  },
+
+  /** التراجع عن ترحيل سند مصروف — يعيد الأرصدة حرفياً. */
+  unpostExpenseVoucher: async (id: number): Promise<ExpenseVoucherDto> => {
+    const res = await fetch(`${ACC}/expense-vouchers/${id}/unpost/`, {
+      method: "POST", headers: headers(), body: "{}",
+    });
+    await handle(res, "unpostExpenseVoucher");
+    return res.json();
+  },
 };

@@ -72,6 +72,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'accounting-vat-statements': 'كشوف ضريبة القيمة المضافة',
   'accounting-year-end-close': 'الإغلاق السنوي',
   'accounting-opening-balances': 'الأرصدة الافتتاحية',
+  'accounting-expense-vouchers': 'سندات المصروف',
   'sales-return': 'مرجع البيع',
   'purchase-return': 'مرجع الشراء',
   'supplier-payments': 'سندات الصرف للموردين',

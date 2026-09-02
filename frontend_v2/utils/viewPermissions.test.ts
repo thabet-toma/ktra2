@@ -46,6 +46,8 @@ test('accounting_firm لا يخفي ما تبقيه التذكرة — المب�
     'accounting-cheques', 'sales-customer-payments', 'reports',
     // سند الصرف يبقى ولو كان مساره الخلفي تحت `/api/logistics/`.
     'supplier-payments',
+    // issue #56 — سند المصروف مستندٌ محاسبيٌّ عام، يخدم مكتب المحاسبة أيضاً.
+    'accounting-expense-vouchers',
   ]) {
     assert.equal(templateHidesView(view, 'accounting_firm'), false, view);
   }

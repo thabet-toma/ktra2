@@ -83,6 +83,8 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   // الأرصدة الافتتاحية: إدخالٌ يُنتج قيداً — الترحيل وإلغاؤه محروسان خادمياً
   // بصلاحيتَيهما، وهذا مفتاح رؤية الشاشة لا إذن الترحيل.
   "accounting-opening-balances": "accounting.journal.create",
+  // issue #56 — سند مصروف: مستندٌ عامٌّ لكل شركة بلا مورّدٍ إلزامي.
+  "accounting-expense-vouchers": "finance.expense.create",
   // شؤون الموظفين والإدارة
   users: "hr.employees.manage",
   "employee-notes": "hr.employees.manage",

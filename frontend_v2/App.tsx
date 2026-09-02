@@ -111,6 +111,7 @@ const AccountingCoaPage = lazyPage(() => import("./components/accounting/Account
 const AccountingJournalListPage = lazyPage(() => import("./components/accounting/AccountingJournalListPage").then((m) => ({ default: m.AccountingJournalListPage })));
 const AccountingJournalEntryPage = lazyPage(() => import("./components/accounting/AccountingJournalEntryPage").then((m) => ({ default: m.AccountingJournalEntryPage })));
 const AccountingChequesPage = lazyPage(() => import("./components/accounting/AccountingChequesPage").then((m) => ({ default: m.AccountingChequesPage })));
+const ExpenseVouchersPage = lazyPage(() => import("./components/accounting/ExpenseVouchersPage").then((m) => ({ default: m.ExpenseVouchersPage })));
 const BanksPage = lazyPage(() => import("./components/accounting/BanksPage").then((m) => ({ default: m.BanksPage })));
 const BankReconciliationPage = lazyPage(() => import("./components/accounting/BankReconciliationPage").then((m) => ({ default: m.BankReconciliationPage })));
 const AccountingGeneralLedgerPage = lazyPage(() => import("./components/accounting/AccountingGeneralLedgerPage").then((m) => ({ default: m.AccountingGeneralLedgerPage })));
@@ -283,6 +284,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "accounting-vat-statements": "/accounting/vat-statements",
   "accounting-year-end-close": "/accounting/year-end-close",
   "accounting-opening-balances": "/accounting/opening-balances",
+  "accounting-expense-vouchers": "/accounting/expense-vouchers",
   "property-rental": "/property-rental",
   "cash-boxes": "/cash-boxes",
   reports: "/reports",
@@ -2093,6 +2095,12 @@ const App: React.FC = () => {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <OpeningBalancesPage />;
+
+      case "accounting-expense-vouchers":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <ExpenseVouchersPage />;
 
       case "stock-levels":
         return <StockLevelsPage />;
