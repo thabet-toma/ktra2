@@ -462,10 +462,12 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
     def _log_part(self, order, part, verb: str):
         from .service_orders import log_event
         from .models import ServiceOrderEvent
+        from inventory.services import product_display_name
 
+        name = product_display_name(part.product)
         log_event(
             order, event_type=ServiceOrderEvent.TYPE_PART,
-            text=f"{verb} قطعة: {part.product} × {part.quantity} ({part.get_billing_display()})",
+            text=f"{verb} قطعة: {name} × {part.quantity} ({part.get_billing_display()})",
             user=self.request.user,
         )
 

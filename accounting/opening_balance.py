@@ -202,26 +202,29 @@ def save_opening_lines(
             OpeningBalanceAccountLine.objects.bulk_create(rows)
 
         if stock_lines is not None:
+            from inventory.services import product_display_name
+
             seen_stock = set()
             rows = []
             for raw in stock_lines:
                 product = raw['product']
                 warehouse = raw['warehouse']
                 key = (product.id, warehouse.id)
+                name = product_display_name(product)
                 if key in seen_stock:
                     raise ValidationError(
-                        f"المنتج «{product}» مكرّر في المستودع «{warehouse.name}»."
+                        f"المنتج «{name}» مكرّر في المستودع «{warehouse.name}»."
                     )
                 seen_stock.add(key)
                 quantity = Decimal(str(raw.get('quantity') or 0)).quantize(_QTY)
                 unit_cost = Decimal(str(raw.get('unit_cost') or 0)).quantize(_QTY)
                 if quantity <= 0:
                     raise ValidationError(
-                        f"كمية المنتج «{product}» يجب أن تكون أكبر من صفر."
+                        f"كمية المنتج «{name}» يجب أن تكون أكبر من صفر."
                     )
                 if unit_cost < 0:
                     raise ValidationError(
-                        f"تكلفة وحدة المنتج «{product}» لا تكون سالبة."
+                        f"تكلفة وحدة المنتج «{name}» لا تكون سالبة."
                     )
                 rows.append(OpeningBalanceStockLine(
                     tenant_id=opening.tenant_id,

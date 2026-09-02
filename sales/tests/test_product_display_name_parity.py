@@ -22,6 +22,8 @@ from sales.serializers import (
 )
 from sales.services import get_or_create_sales_settings
 from sales.services.flow import (
+    create_standalone_delivery_note,
+    deliver_invoice_lines,
     guard_sales_return_quantities,
     remaining_delivery_lines,
     returnable_lines_for_invoice,
@@ -241,6 +243,52 @@ class SalesProductDisplayNameParityTest(APITestCase):
         self.assertEqual(res.status_code, 400, res.content)
         message = str(res.data)
         self.assertIn("دبليو دبليو", message)
+
+    # ── 8) #43 — sales/services/flow.py: تسليم بنود الفاتورة (deliver_invoice_lines) ──
+
+    def test_deliver_invoice_lines_invalid_quantity_message_shows_sibling_brand(self):
+        p1, p2 = self._siblings("305/70/20", "غودير", "هانكوك")
+        inv, l1, l2 = self._posted_invoice(p1, p2, number="SP-DIQ-1")
+        inv.refresh_from_db()
+        with self.assertRaises(ValidationError) as ctx:
+            deliver_invoice_lines(inv, lines=[{"line_id": l2.id, "quantity": "not-a-number"}])
+        self.assertIn("هانكوك", str(ctx.exception))
+
+    def test_deliver_invoice_lines_service_line_message_shows_sibling_brand(self):
+        p1, p2 = self._siblings("305/70/21", "ميشلان2", "بريدجستون2")
+        Product.objects.filter(pk=p2.pk).update(is_service=True)
+        inv, l1, l2 = self._posted_invoice(p1, p2, number="SP-DIS-1")
+        inv.refresh_from_db()
+        with self.assertRaises(ValidationError) as ctx:
+            deliver_invoice_lines(inv, lines=[{"line_id": l2.id, "quantity": 1}])
+        self.assertIn("بريدجستون2", str(ctx.exception))
+
+    def test_deliver_invoice_lines_exceeds_remaining_message_shows_sibling_brand(self):
+        p1, p2 = self._siblings("305/70/22", "كومهو2", "نكسن2")
+        inv, l1, l2 = self._posted_invoice(p1, p2, number="SP-DIR-1")
+        inv.refresh_from_db()
+        with self.assertRaises(ValidationError) as ctx:
+            deliver_invoice_lines(inv, lines=[{"line_id": l2.id, "quantity": 999}])
+        self.assertIn("نكسن2", str(ctx.exception))
+
+    # ── 9) #43 — sales/services/flow.py: سند التسليم المستقل (create_standalone_delivery_note) ──
+
+    def test_standalone_delivery_note_service_message_shows_sibling_brand(self):
+        p1, p2 = self._siblings("305/70/23", "بيريلي2", "فالكن2")
+        Product.objects.filter(pk=p2.pk).update(is_service=True)
+        with self.assertRaises(ValidationError) as ctx:
+            create_standalone_delivery_note(
+                self.tenant, partner=self.customer,
+                lines=[{"product_id": p2.pk, "quantity": 1}])
+        self.assertIn("فالكن2", str(ctx.exception))
+
+    def test_standalone_delivery_note_invalid_quantity_message_shows_sibling_brand(self):
+        p1, p2 = self._siblings("305/70/24", "يوكوهاما2", "تويو2")
+        with self.assertRaises(ValidationError) as ctx:
+            create_standalone_delivery_note(
+                self.tenant, partner=self.customer,
+                lines=[{"product_id": p2.pk, "quantity": "not-a-number"}])
+        self.assertIn("تويو2", str(ctx.exception))
 
     def test_return_quantity_guard_falls_back_to_id_when_product_row_is_gone(self):
         """احتياطٌ حرفيّ كما كان: منتجٌ غير موجود أصلاً في الطلب ⇒ `#{id}`."""

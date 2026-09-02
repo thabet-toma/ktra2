@@ -28,6 +28,7 @@ from sales.models import (
 from sales.services import (
     cancel_sales_order,
     cancel_quotation,
+    confirm_sales_order,
     convert_order_to_invoice,
     convert_quotation_to_order,
     default_quotation_valid_until,
@@ -235,11 +236,48 @@ class SalesOrderApiTest(APITestCase):
         assert res.status_code == 201, res.content
         return res.json()
 
+    def _siblings(self, size, brand_a, brand_b, sku_prefix):
+        """أخوان تحت أبٍ واحد ببراندين مختلفين (#43) — عبر الخدمة مباشرةً."""
+        from inventory.services import add_brand_to_family, create_product_with_family
+
+        family, _first = create_product_with_family(
+            tenant=self.tenant, name_ar=size, sku=f"{sku_prefix}-1")
+        p1, _ = add_brand_to_family(family=family, brand_name=brand_a, tenant=self.tenant)
+        p2, _ = add_brand_to_family(
+            family=family, brand_name=brand_b, tenant=self.tenant, sku=f"{sku_prefix}-2")
+        return p1, p2
+
     def test_create_order_directly_without_a_quotation(self):
         row = self._create()
         assert row["grand_total"] == "150.00"
         assert row["status"] == "draft"
         assert row["order_number"]
+
+    # ── #43 — sales/services/orders.py: حارس الكمية بعد الحجوزات (confirm_sales_order) ──
+
+    def test_confirm_shortage_message_shows_sibling_brand(self):
+        p1, p2 = self._siblings("215/65/16", "دانتير ايكو جرين", "دانتير جريبماكس A/T", "ORD-SIB")
+        Product.objects.filter(pk=p2.pk).update(quantity_on_hand=Decimal("2"))
+        row = self._create(lines=[{"product": p2.pk, "quantity": "10", "unit_price": "50"}])
+
+        res = self.client.post(
+            f"/api/sales/orders/{row['id']}/confirm/", {}, format="json", **self.h)
+        assert res.status_code == 400, res.content
+        assert "دانتير جريبماكس A/T" in str(res.data)
+
+    def test_confirm_shortage_fallback_to_id_is_unchanged_when_product_row_is_absent(self):
+        """احتياطٌ حرفيّ كما كان: منتجٌ لا ينتمي لشركة الطلبية ⇒ `#{id}` لا اسمٌ (#39)."""
+        other_tenant = Tenant.objects.create(TenantID=990, CompanyName="Ghost Co")
+        row = self._create()
+        order = SalesOrder.objects.get(pk=row["id"])
+        product_id = order.lines.get().product_id
+        Product.objects.filter(pk=product_id).update(tenant_id=other_tenant.TenantID)
+
+        with self.assertRaises(ValidationError) as ctx:
+            confirm_sales_order(order, user=self.user)
+        message = str(ctx.exception)
+        assert f"#{product_id}" in message
+        assert "غير متاح في الشركة الحالية" in message
 
     def test_sales_quotation_create_and_update_use_amount_discount_without_forced_tax(self):
         create = self.client.post(

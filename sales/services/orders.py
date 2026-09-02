@@ -27,7 +27,7 @@ from inventory.serials import (
     release_sales_serials,
     restore_returned_sales_serials,
 )
-from inventory.services import record_stock_movement
+from inventory.services import product_display_name, record_stock_movement
 from partners.models import Partner, PartnerGroup
 from accounting.api import ensure_partner_account
 from tenants.models import Tenant
@@ -119,7 +119,8 @@ def confirm_sales_order(order, *, user=None):
             )
             if quantity > available:
                 shortages.append(
-                    f"{product}: المطلوب {quantity} والمتاح بعد الحجوزات {available}"
+                    f"{product_display_name(product)}: المطلوب {quantity} "
+                    f"والمتاح بعد الحجوزات {available}"
                 )
         if shortages:
             raise ValidationError(

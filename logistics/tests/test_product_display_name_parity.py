@@ -10,6 +10,7 @@
 from decimal import Decimal
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.test import APITestCase
 
 from accounting.models import Account, JournalHeader
@@ -353,6 +354,33 @@ class ProductDisplayNameParityTest(APITestCase):
         max_length = PurchaseInvoiceItem._meta.get_field("name").max_length
         self.assertLessEqual(len(item.name), max_length)
         self.assertTrue(PurchaseInvoiceItem.objects.filter(pk=item.pk).exists())
+
+
+    # ── 10) #43 — سند الاستلام المستقل (`create_standalone_goods_receipt`) ──
+
+    def test_standalone_receipt_invalid_quantity_message_shows_sibling_brand(self):
+        from logistics.services import create_standalone_goods_receipt
+
+        p1, p2 = self._siblings(size="205/60/16", brand_a="ألفا", brand_b="بيتا")
+        with self.assertRaises(DjangoValidationError) as ctx:
+            create_standalone_goods_receipt(
+                self.tenant, partner=self.partner,
+                lines=[{"product_id": p2.pk, "quantity": "not-a-number",
+                        "unit_price": "10", "warehouse_id": self.warehouse.pk}],
+            )
+        self.assertIn("بيتا", str(ctx.exception))
+
+    def test_standalone_receipt_missing_warehouse_message_shows_sibling_brand(self):
+        from logistics.services import create_standalone_goods_receipt
+
+        p1, p2 = self._siblings(size="215/55/17", brand_a="غاما", brand_b="دلتا")
+        with self.assertRaises(DjangoValidationError) as ctx:
+            create_standalone_goods_receipt(
+                self.tenant, partner=self.partner,
+                lines=[{"product_id": p2.pk, "quantity": "2",
+                        "unit_price": "10", "warehouse_id": 999999}],
+            )
+        self.assertIn("دلتا", str(ctx.exception))
 
 
 class GoodsReceiptLine_Unsaved:

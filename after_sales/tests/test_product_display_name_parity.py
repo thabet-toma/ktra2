@@ -10,7 +10,7 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from after_sales.models import ServiceOrder, ServiceOrderPart, WarrantyCard
+from after_sales.models import ServiceOrder, ServiceOrderEvent, ServiceOrderPart, WarrantyCard
 from after_sales.serializers import (
     ServiceOrderListSerializer,
     ServiceOrderPartSerializer,
@@ -218,6 +218,47 @@ class AfterSalesProductDisplayNameParityTest(APITestCase):
         result = run_report("after-sales-open-orders", self.tenant.TenantID, {})
         row = next(r for r in result["rows"] if r["order_number"] == "SO-RPT-FREE")
         self.assertEqual(row["device"], "جهازٌ حرّ")
+
+    # ── 5) #43 — after_sales/views.py (`_log_part`): سطر مسار أمر الصيانة ──
+
+    def test_service_order_part_timeline_event_shows_sibling_brand(self):
+        p1, p2 = self._siblings("سماعة رأس", "بوز", "سيني هايزر")
+        order_res = self.client.post(
+            ORDERS,
+            {"order_date": "2026-06-10", "partner": self.customer.pk,
+             "device_description": "سماعة", "complaint": "لا صوت"},
+            format="json", **self.headers)
+        self.assertEqual(order_res.status_code, 201, order_res.content)
+        order_id = order_res.data["id"]
+
+        res = self.client.post(
+            f"{ORDERS}{order_id}/parts/",
+            {"product": p2.pk, "quantity": "1"}, format="json", **self.headers)
+        self.assertEqual(res.status_code, 201, res.content)
+
+        event = ServiceOrderEvent.objects.filter(
+            order_id=order_id, event_type=ServiceOrderEvent.TYPE_PART).latest("id")
+        self.assertIn("سيني هايزر", event.text)
+
+    def test_pre_existing_timeline_event_text_is_untouched_by_the_fix(self):
+        """لا backfill (#38): سطرٌ قديمٌ كُتب بالصيغة العارية قبل هذا الإصلاح
+        يبقى كما هو حرفاً — التغيير من الآن فصاعداً فقط."""
+        order = ServiceOrder.objects.create(
+            tenant=self.tenant, order_number="SO-LEGACY-EVT", order_date=date(2026, 6, 1),
+            partner=self.customer, device_description="جهازٌ قديم", complaint="عطل",
+            status=ServiceOrder.STATUS_RECEIVED)
+        legacy_text = "أُضيفت قطعة: 215/65/16 × 1 (مفوترة على الزبون)"
+        legacy = ServiceOrderEvent.objects.create(
+            order=order, event_type=ServiceOrderEvent.TYPE_PART, text=legacy_text)
+
+        p1, p2 = self._siblings("مضخة مياه", "غروندفوس", "ويلو")
+        res = self.client.post(
+            f"{ORDERS}{order.id}/parts/",
+            {"product": p2.pk, "quantity": "1"}, format="json", **self.headers)
+        self.assertEqual(res.status_code, 201, res.content)
+
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.text, legacy_text)
 
     def test_warranty_cost_report_shows_distinct_brand_names_for_siblings(self):
         from after_sales.service_orders import STOCK_REF_SERVICE_ISSUE

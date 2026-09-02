@@ -70,6 +70,22 @@ def _acc(tenant, code):
     return Account.objects.get(tenant=tenant, code=code)
 
 
+def _siblings(tenant, size, brand_a, brand_b, sku_prefix):
+    """أخوان تحت أبٍ واحد ببراندين مختلفين (#43) — نظير `_siblings` في
+    `logistics/tests/test_product_display_name_parity.py`، هنا عبر الخدمة
+    مباشرةً لا الـAPI (هذا الملف اختبارات pytest لا `APITestCase`)."""
+    from inventory.services import add_brand_to_family, create_product_with_family
+
+    family, _first = create_product_with_family(
+        tenant=tenant, name_ar=size, sku=f"{sku_prefix}-1",
+    )
+    p1, _ = add_brand_to_family(family=family, brand_name=brand_a, tenant=tenant)
+    p2, _ = add_brand_to_family(
+        family=family, brand_name=brand_b, tenant=tenant, sku=f"{sku_prefix}-2",
+    )
+    return p1, p2
+
+
 def _fill_draft(tenant, warehouse, product, *, cash="5000", loan="2000",
                 qty="10", unit_cost="30"):
     """مسودة نموذجية: نقدية مدينة · قرض دائن · ١٠ وحدات بتكلفة ٣٠."""
@@ -550,6 +566,55 @@ def test_zero_amount_lines_are_dropped_and_empty_post_refused(env):
     with pytest.raises(DjangoValidationError) as exc:
         post_opening_balance(opening, user=owner)
     assert 'بنداً واحداً على الأقل' in str(exc.value)
+
+
+# ── #43: رسائل بنود المخزون تسمّي المنتج بالبراند لا بالمقاس عارياً ──────
+
+def test_duplicate_stock_line_message_shows_sibling_brand(env):
+    tenant, owner, warehouse, product = env
+    p1, p2 = _siblings(
+        tenant, "215/65/16", "دانتير ايكو جرين", "دانتير جريبماكس A/T", "OB-DUP")
+    opening = get_or_create_opening(tenant)
+    with pytest.raises(DjangoValidationError) as exc:
+        save_opening_lines(
+            opening,
+            start_date=START_DATE,
+            stock_lines=[
+                {'product': p1, 'warehouse': warehouse,
+                 'quantity': D('5'), 'unit_cost': D('10')},
+                {'product': p1, 'warehouse': warehouse,
+                 'quantity': D('3'), 'unit_cost': D('10')},
+            ],
+        )
+    assert "دانتير ايكو جرين" in str(exc.value)
+
+
+def test_non_positive_quantity_message_shows_sibling_brand(env):
+    tenant, owner, warehouse, product = env
+    p1, p2 = _siblings(tenant, "185/65/15", "أرستون", "جلاكسي", "OB-QTY")
+    opening = get_or_create_opening(tenant)
+    with pytest.raises(DjangoValidationError) as exc:
+        save_opening_lines(
+            opening,
+            start_date=START_DATE,
+            stock_lines=[{'product': p2, 'warehouse': warehouse,
+                          'quantity': D('0'), 'unit_cost': D('10')}],
+        )
+    assert "جلاكسي" in str(exc.value)
+
+
+def test_negative_unit_cost_message_shows_sibling_brand(env):
+    tenant, owner, warehouse, product = env
+    p1, p2 = _siblings(tenant, "225/45/17", "ميشلان", "بريدجستون", "OB-COST")
+    opening = get_or_create_opening(tenant)
+    with pytest.raises(DjangoValidationError) as exc:
+        save_opening_lines(
+            opening,
+            start_date=START_DATE,
+            stock_lines=[{'product': p2, 'warehouse': warehouse,
+                          'quantity': D('5'), 'unit_cost': D('-1')}],
+        )
+    assert "بريدجستون" in str(exc.value)
 
 
 def test_account_line_rejects_both_sides_at_once(env):

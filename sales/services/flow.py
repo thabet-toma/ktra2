@@ -1712,6 +1712,8 @@ def deliver_invoice_lines(
             line.product = products_by_id[line.product_id]
         lines_by_id = {l.id: l for l in inv_lines}
 
+        from inventory.services import product_display_name
+
         delivered_now: dict[int, Decimal] = {}
         warehouse_by_line: dict[int, object] = {}
         for raw in lines:
@@ -1719,22 +1721,23 @@ def deliver_invoice_lines(
             line = lines_by_id.get(int(line_id)) if line_id is not None else None
             if not line:
                 raise ValidationError(f"البند {line_id} لا ينتمي لهذه الفاتورة.")
+            name = product_display_name(line.product)
             try:
                 qty = Decimal(str(raw.get("quantity", 0)))
             except Exception:
-                raise ValidationError(f"كمية غير صالحة للبند «{line.product}».")
+                raise ValidationError(f"كمية غير صالحة للبند «{name}».")
             if qty <= 0:
                 continue
             if getattr(line.product, "is_service", False):
                 raise ValidationError(
-                    f"البند «{line.product}» خدمة — لا يُسلَّم من المخزن."
+                    f"البند «{name}» خدمة — لا يُسلَّم من المخزن."
                 )
             ordered = Decimal(str(line.quantity or 0))
             already = Decimal(str(line.delivered_quantity or 0))
             remaining = ordered - already
             if qty > remaining:
                 raise ValidationError(
-                    f"البند «{line.product}»: الكمية المطلوب تسليمها ({qty}) "
+                    f"البند «{name}»: الكمية المطلوب تسليمها ({qty}) "
                     f"تتجاوز المتبقي ({remaining})."
                 )
             delivered_now[line.id] = delivered_now.get(line.id, Decimal("0")) + qty
@@ -1910,17 +1913,20 @@ def create_standalone_delivery_note(
         )
     }
 
+    from inventory.services import product_display_name
+
     planned = []
     for raw in lines:
         product = products.get(int(raw.get("product_id") or 0))
         if product is None:
             raise ValidationError(f"المنتج {raw.get('product_id')} غير موجود في هذه الشركة.")
+        name = product_display_name(product)
         if getattr(product, "is_service", False):
-            raise ValidationError(f"المنتج «{product}» خدمة — لا يُسلَّم من المخزن.")
+            raise ValidationError(f"المنتج «{name}» خدمة — لا يُسلَّم من المخزن.")
         try:
             qty = Decimal(str(raw.get("quantity", 0)))
         except Exception:
-            raise ValidationError(f"كمية غير صالحة للمنتج «{product}».")
+            raise ValidationError(f"كمية غير صالحة للمنتج «{name}».")
         if qty <= 0:
             continue
         planned.append({

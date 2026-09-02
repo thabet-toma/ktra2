@@ -1872,16 +1872,19 @@ def create_standalone_goods_receipt(
         )
     }
 
+    from inventory.services import product_display_name
+
     planned = []
     total_value = Decimal('0')
     for raw in lines:
         product = products.get(int(raw.get('product_id') or 0))
         if product is None:
             raise ValidationError(f"المنتج {raw.get('product_id')} غير موجود في هذه الشركة.")
+        name = product_display_name(product)
         try:
             qty = Decimal(str(raw.get('quantity', 0)))
         except Exception:
-            raise ValidationError(f"كمية غير صالحة للمنتج «{product}».")
+            raise ValidationError(f"كمية غير صالحة للمنتج «{name}».")
         if qty <= 0:
             continue
         try:
@@ -1892,7 +1895,7 @@ def create_standalone_goods_receipt(
             pk=raw.get('warehouse_id'), tenant_id=tenant_id,
         ).first()
         if not wh:
-            raise ValidationError(f"المستودع المحدد للمنتج «{product}» غير موجود.")
+            raise ValidationError(f"المستودع المحدد للمنتج «{name}» غير موجود.")
         planned.append({
             'product': product, 'qty': qty, 'warehouse': wh, 'unit_cost': unit_cost,
         })
