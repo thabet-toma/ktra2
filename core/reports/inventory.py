@@ -348,6 +348,28 @@ _URGENCY_OPTIONS = (
 
 _LEVEL_OPTIONS = (("item", "منتج"), ("group", "صنف"))
 
+#: THA-45(#45): مختصرٌ افتراضاً — العشرون عموداً كانت تدفن الأربعة التي يقرأها
+#: المشتري فعلاً. `تفاصيل` تكشف الباقي؛ لا ربط بـ«الوضع السهل» (قرار المالك).
+_DETAILS_OPTIONS = (("", "مختصر"), ("1", "تفاصيل"))
+
+#: العرض المختصر — أربعة أعمدة لا أكثر، بالترتيب الذي طلبه المالك. «قيد
+#: الطلب» ليست هنا عمداً: `order_qty` يطرحها داخل الحساب أصلاً فالحماية من
+#: الطلب المزدوج في الرقم لا في العمود، والعمود تفسيرٌ محضّ يبقى تحت «تفاصيل».
+#: و`sku` كذلك تحت «تفاصيل» — فارغة دوماً على مستوى «صنف» (لا رمز لمجموعة).
+_REPLENISHMENT_SHORT_KEYS = ("name", "effective_min", "available", "order_qty")
+
+
+def _replenishment_details(params: dict) -> bool:
+    return str(params.get("details") or "").strip().lower() in ("1", "true", "yes")
+
+
+def _replenishment_columns_for(tenant_id: int, params: dict) -> tuple[ReportColumn, ...]:
+    """أربعة أعمدة افتراضاً، أو كل الأعمدة المعلَنة حين يُطلب `details`."""
+    if _replenishment_details(params):
+        return _REPLENISHMENT_COLUMNS
+    by_key = {c.key: c for c in _REPLENISHMENT_COLUMNS}
+    return tuple(by_key[key] for key in _REPLENISHMENT_SHORT_KEYS)
+
 
 def _replenishment(tenant_id: int, params: dict) -> list[dict]:
     from inventory.stock_status import STATUS_LABELS
@@ -373,6 +395,7 @@ def _replenishment(tenant_id: int, params: dict) -> list[dict]:
             "lead_days": _qty(r["lead_days"]),
             "suggested_min": _qty(r["suggested_min"]),
             "suggested_max": _qty(r["suggested_max"]),
+            "effective_min": _qty(r["effective_min"]),
             "order_qty": _qty(r["order_qty"]),
             "newest_alternative": r["newest_alternative"],
             "urgency": r["urgency_label"],
@@ -396,6 +419,7 @@ def _replenishment(tenant_id: int, params: dict) -> list[dict]:
         "manual_min": _qty(r["manual_min"]) if r["manual_min"] else "",
         "suggested_min": _qty(r["suggested_min"]),
         "suggested_max": _qty(r["suggested_max"]),
+        "effective_min": _qty(r["effective_min"]),
         "order_qty": _qty(r["order_qty"]),
         "reason": r["reason"],
         "group_key": r["group_key"],
@@ -472,6 +496,44 @@ def _replenishment_notice(tenant_id: int, params: dict) -> str | None:
     )
 
 
+#: الأعمدة كاملةً — «تفاصيل» تعيدها جميعاً، والفهرس (بلا مستأجرٍ ولا فلاتر)
+#: يراها أيضاً لأنها هي `columns` الثابتة المعلَنة (`columns_for` يستبدلها
+#: عند التشغيل وحده، لا في الفهرس).
+_REPLENISHMENT_COLUMNS = (
+    ReportColumn("sku", "الرمز", width="110px"),
+    ReportColumn("name", "المنتج"),
+    ReportColumn("urgency", "القرار", width="80px"),
+    ReportColumn("status", "الحالة", width="80px"),
+    ReportColumn("available", "المتاح", KIND_NUMBER, total=True, width="90px"),
+    ReportColumn("on_order", "قيد الطلب", KIND_NUMBER, total=True, width="90px"),
+    # «الصنف» عمودٌ ظاهر عمداً: هو مفتاح قرار «مؤجَّل»، وحين يكون اسمَ المنتج
+    # نفسه يرى المستخدم فوراً أن منتجاته بلا مجموعةٍ معرَّفة — فيملأ
+    # `variant_group` أو `brand` بدل أن يتساءل لماذا «البدائل» صفرٌ دائماً.
+    ReportColumn("group_key", "الصنف", width="140px"),
+    ReportColumn("group_available", "رصيد الصنف", KIND_NUMBER, width="100px"),
+    ReportColumn("alternatives", "بدائل", KIND_INT, width="70px"),
+    ReportColumn("newest_alternative", "أحدث بديل متوفّر"),
+    ReportColumn("adu", "الصرف اليومي", KIND_NUMBER, width="110px"),
+    ReportColumn("lead_days", "المهلة (يوم)", KIND_NUMBER, width="100px"),
+    ReportColumn("manual_min", "الحد اليدوي", KIND_NUMBER, width="100px"),
+    ReportColumn("suggested_min", "الأدنى المقترَح", KIND_NUMBER, width="120px"),
+    ReportColumn("suggested_max", "الأقصى المقترَح", KIND_NUMBER, width="120px"),
+    # THA-45(#45): الحدّ الفعلي الحاكم على القرار — اليدوي إن ضُبط وإلّا
+    # المقترَح المحسوب (`core/replenishment.py`، `effective_min`). هو ما
+    # يقرؤه المشتري لا `suggested_min`/`manual_min` منفردين.
+    ReportColumn("effective_min", "الحدّ الأدنى الحاكم", KIND_NUMBER, width="130px"),
+    ReportColumn("order_qty", "المقترح طلبه", KIND_NUMBER, total=True, width="110px"),
+    # #33: أعمدة تفسّر الرقم — «ما بدي رقم بينزل من السما».
+    ReportColumn("weekly_sale", "البيع الأسبوعي", KIND_NUMBER, width="100px"),
+    ReportColumn("trend_label", "الاتجاه", width="70px"),
+    ReportColumn("coverage_weeks", "أسابيع التغطية", KIND_NUMBER, width="100px"),
+    ReportColumn("safety_stock", "مخزون الأمان", KIND_NUMBER, width="100px"),
+    ReportColumn("reorder_mode", "الوضع", width="70px"),
+    ReportColumn("reason", "ملاحظة"),
+    # #34/ط9: حدّ المورّد الأدنى — يظهر فقط حين رُفعت الكمية إليه.
+    ReportColumn("moq_note", "حدّ المورّد الأدنى", width="160px"),
+)
+
 register(ReportSpec(
     key="stock-replenishment",
     title="تجديد المخزون — ماذا أطلب",
@@ -479,44 +541,19 @@ register(ReportSpec(
     description=(
         "الحدّ الأدنى محسوباً من المبيعات ومهلة التوريد، والكمية المقترح طلبها. "
         "«عاجل» = لا بديل في الصنف. «مؤجَّل» = موديل آخر من الصنف نفسه يغطّي. "
-        "«راكد» = رصيدٌ بلا مبيعات. المنتج الحديث في المخزن يعود بلا اقتراح وبسببه."
+        "«راكد» = رصيدٌ بلا مبيعات. المنتج الحديث في المخزن يعود بلا اقتراح وبسببه. "
+        "يفتح على أربعة أعمدة (الاسم والحدّ الأدنى الحاكم والمتاح والمقترح طلبه) "
+        "و«تفاصيل» تكشف الباقي."
     ),
     filters=(
         ReportFilter("level", "المستوى", "select", options=_LEVEL_OPTIONS, default="item"),
         ReportFilter("urgency", "القرار", "select", options=_URGENCY_OPTIONS),
         ReportFilter("product", "المنتج", "product"),
         ReportFilter("partner", "المورّد", "supplier"),
+        ReportFilter("details", "تفاصيل", "select", options=_DETAILS_OPTIONS, default=""),
     ),
-    columns=(
-        ReportColumn("sku", "الرمز", width="110px"),
-        ReportColumn("name", "المنتج"),
-        ReportColumn("urgency", "القرار", width="80px"),
-        ReportColumn("status", "الحالة", width="80px"),
-        ReportColumn("available", "المتاح", KIND_NUMBER, total=True, width="90px"),
-        ReportColumn("on_order", "قيد الطلب", KIND_NUMBER, total=True, width="90px"),
-        # «الصنف» عمودٌ ظاهر عمداً: هو مفتاح قرار «مؤجَّل»، وحين يكون اسمَ المنتج
-        # نفسه يرى المستخدم فوراً أن منتجاته بلا مجموعةٍ معرَّفة — فيملأ
-        # `variant_group` أو `brand` بدل أن يتساءل لماذا «البدائل» صفرٌ دائماً.
-        ReportColumn("group_key", "الصنف", width="140px"),
-        ReportColumn("group_available", "رصيد الصنف", KIND_NUMBER, width="100px"),
-        ReportColumn("alternatives", "بدائل", KIND_INT, width="70px"),
-        ReportColumn("newest_alternative", "أحدث بديل متوفّر"),
-        ReportColumn("adu", "الصرف اليومي", KIND_NUMBER, width="110px"),
-        ReportColumn("lead_days", "المهلة (يوم)", KIND_NUMBER, width="100px"),
-        ReportColumn("manual_min", "الحد اليدوي", KIND_NUMBER, width="100px"),
-        ReportColumn("suggested_min", "الأدنى المقترَح", KIND_NUMBER, width="120px"),
-        ReportColumn("suggested_max", "الأقصى المقترَح", KIND_NUMBER, width="120px"),
-        ReportColumn("order_qty", "المقترح طلبه", KIND_NUMBER, total=True, width="110px"),
-        # #33: أعمدة تفسّر الرقم — «ما بدي رقم بينزل من السما».
-        ReportColumn("weekly_sale", "البيع الأسبوعي", KIND_NUMBER, width="100px"),
-        ReportColumn("trend_label", "الاتجاه", width="70px"),
-        ReportColumn("coverage_weeks", "أسابيع التغطية", KIND_NUMBER, width="100px"),
-        ReportColumn("safety_stock", "مخزون الأمان", KIND_NUMBER, width="100px"),
-        ReportColumn("reorder_mode", "الوضع", width="70px"),
-        ReportColumn("reason", "ملاحظة"),
-        # #34/ط9: حدّ المورّد الأدنى — يظهر فقط حين رُفعت الكمية إليه.
-        ReportColumn("moq_note", "حدّ المورّد الأدنى", width="160px"),
-    ),
+    columns=_REPLENISHMENT_COLUMNS,
+    columns_for=_replenishment_columns_for,
     permission="inventory.item.view",
     row_link="/products/{product_id}",
     notice=_replenishment_notice,

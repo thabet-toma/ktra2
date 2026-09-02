@@ -301,3 +301,80 @@ class SupplierMoqReportVisibilityTest(APITestCase):
         row = next(r for r in data["rows"] if r["sku"] == "MOQ-REPORT-1")
         assert row["moq_note"], row
         assert "50" in row["moq_note"]
+
+
+class ReplenishmentShortViewTest(APITestCase):
+    """#45: يفتح التقرير على أربعة أعمدة (الاسم والحدّ الأدنى الحاكم والمتاح
+    والمقترح طلبه)، و«تفاصيل» تكشف الباقي. الملاك عدّ عشرين عموداً على ثلاث
+    عشرة صفحة مطبوعة لِـ«قيد الطلب» وحدها — فلا خامس يتسلّل هنا لاحقاً."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="repl_short_view", password="x")
+        cls.tenant = create_company("شركة العرض المختصر", cls.user)
+        cls.today = datetime.date.today()
+        cls.product = Product.objects.create(
+            tenant=cls.tenant, sku="SHORT-1", name_ar="صنفٌ للعرض المختصر",
+            quantity_on_hand=Decimal("5"), min_stock_level=Decimal("20"),
+        )
+        StockMovement.objects.create(
+            tenant=cls.tenant, product=cls.product, movement_type="IN",
+            quantity=Decimal("1000"), movement_date=cls.today - datetime.timedelta(days=89),
+        )
+        for week in range(1, 7):
+            StockMovement.objects.create(
+                tenant=cls.tenant, product=cls.product, movement_type="OUT",
+                quantity=Decimal("14"), movement_date=cls.today - datetime.timedelta(days=week * 7),
+            )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+
+    # ── (1) بلا `details` ⇒ أربعة أعمدة بالضبط ──
+    def test_default_has_exactly_four_columns(self):
+        data = _run(self.client, "stock-replenishment", self.tenant.TenantID)
+        keys = {c["key"] for c in data["columns"]}
+        assert len(data["columns"]) == 4, data["columns"]
+        assert keys == {"name", "effective_min", "available", "order_qty"}, keys
+
+    # ── (2) مع `details` ⇒ كل الأعمدة المعلَنة في الـspec نفسها ──
+    def test_details_returns_every_declared_column(self):
+        from core.reports._framework import REPORTS
+
+        spec = REPORTS["stock-replenishment"]
+        data = _run(self.client, "stock-replenishment", self.tenant.TenantID, details="1")
+        keys = [c["key"] for c in data["columns"]]
+        assert keys == [c.key for c in spec.columns], keys
+
+    # ── (3) إجماليات المختصر على أعمدته وحدها ──
+    def test_short_view_totals_cover_only_its_columns(self):
+        data = _run(self.client, "stock-replenishment", self.tenant.TenantID)
+        assert set(data["totals"].keys()) == {"available", "order_qty"}, data["totals"]
+
+    # ── (4) نفس الصفوف بين الوضعين — عرضٌ أضيق لا رقمٌ مختلف ──
+    def test_rows_are_identical_between_short_and_details(self):
+        short = _run(self.client, "stock-replenishment", self.tenant.TenantID)
+        full = _run(self.client, "stock-replenishment", self.tenant.TenantID, details="1")
+        assert short["rows"] == full["rows"]
+
+    # ── (5) التنقيب يعمل في الوضعين ──
+    def test_drill_works_in_both_modes(self):
+        item_row = _run(self.client, "stock-replenishment", self.tenant.TenantID, details="1")["rows"][0]
+        group_key = item_row["group_key"]
+        for details in ("", "1"):
+            res = self.client.get(
+                "/api/reports/stock-replenishment/drill/",
+                {"group_key": group_key, "details": details},
+                HTTP_X_TENANT_ID=str(self.tenant.TenantID),
+            )
+            assert res.status_code == 200, res.content[:400]
+            assert res.json()["rows"], res.json()
+
+    # ── (6) حارسٌ ضد التسرّب: تقريرٌ آخر بلا `columns_for` لا يتأثر ──
+    def test_other_report_columns_are_unaffected(self):
+        data = _run(self.client, "low-stock", self.tenant.TenantID, details="1")
+        keys = [c["key"] for c in data["columns"]]
+        assert keys == [
+            "sku", "name", "status", "quantity", "min_stock_level",
+            "min_source", "shortage", "group_available", "newest_alternative", "urgency",
+        ], keys

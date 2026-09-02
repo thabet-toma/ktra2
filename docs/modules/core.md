@@ -204,7 +204,7 @@ validate_payment(ctx) · post_payment(...) · document_payment_summary(total, pa
 |---|---|
 | `/api/reports/` · `/api/reports/<key>/` | فهرس التقارير وتشغيلها |
 | `/api/reports/<key>/drill/` | الأسطر التي كوّنت صفّاً مجمَّعاً (للتقارير المُعلِنة `drill`) |
-| `/api/reports/stock-replenishment/` | «ماذا أطلب وكم» — من `core/replenishment.py`. بمستوى المنتج أو النوع، وتنقيبٍ يفتح صفّ النوع على منتجاته |
+| `/api/reports/stock-replenishment/` | «ماذا أطلب وكم» — من `core/replenishment.py`. بمستوى المنتج أو النوع، وتنقيبٍ يفتح صفّ النوع على منتجاته. يفتح على أربعة أعمدة فقط (`columns_for`)؛ `?details=1` يكشف الباقي — غير مربوطٍ بـ«الوضع السهل» |
 | `/api/permissions/me/` | حمولة الإقلاع الواحدة: الدور · الصلاحيات · الوحدات المرخّصة · `ui_mode` — **كلّها للعرض فقط، لا تحمي endpoint** |
 | `/api/scan/?q=` | التعرّف على رقم: باركود · سيريال · IMEI · رمز منتج · جزء اسم — بلا أن يختار المستخدم النوع |
 | `/api/dashboard/` | تجميع الداشبورد |
