@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { pickActiveMembership, storedTenantId } from "../utils/tenantContext";
-import { pickOfficeTenant } from "../utils/managedBooks";
+import { orderOfficesByPreference } from "../utils/managedBooks";
 import { enterManagedBook, leaveManagedBook, managedBookOffice } from "../utils/officeShell";
 import { createManagedBook as createManagedBookApi, listManagedBooks } from "../services/managedBooksApi";
 import { apiGetObject, apiPostObject } from "../services/restApi";
@@ -152,25 +152,50 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // **ليس** في `my-companies`: بلا هذه القراءة كان الدخول إليه يُقابَل بأن
       // `pickActiveMembership` لا تجده فتُعيد الشركة الافتراضية وتكتب معرّفها
       // فوق معرّفه — أي أن الدخول للدفتر يُلغي نفسه في أول تحميل.
-      const office = pickOfficeTenant(data, explicitTenantId);
-      const officeId = office ? office.tenant.TenantID : null;
-      const books = officeId === null
-        ? []
-        : await listManagedBooks(officeId).catch(() => [] as Tenant[]);
-      if (
-        requestVersion !== requestVersionRef.current ||
-        activeUserIdRef.current !== requesterUserId
-      ) return null;
+      const offices = orderOfficesByPreference(data, {
+        bookOfficeId: managedBookOffice(),
+        activeTenantId: explicitTenantId,
+      });
+      // شركةٌ من شركاته هو ⇒ لا دفتر نبحث عنه، فمكتبٌ واحد يكفي لتعبئة القائمة.
+      const explicitIsOwnCompany = explicitTenantId != null
+        && data.some((m) => m.tenant.TenantID === explicitTenantId);
+      let officeId: number | null = offices.length ? offices[0].tenant.TenantID : null;
+      let books: Tenant[] = [];
+      let openBook: Tenant | undefined;
+      for (let i = 0; i < offices.length; i += 1) {
+        const candidate = offices[i].tenant.TenantID;
+        const list = await listManagedBooks(candidate).catch(() => [] as Tenant[]);
+        if (
+          requestVersion !== requestVersionRef.current ||
+          activeUserIdRef.current !== requesterUserId
+        ) return null;
+        if (i === 0) books = list;
+        if (explicitTenantId == null || explicitIsOwnCompany) break;
+        const found = list.find((book) => book.TenantID === explicitTenantId);
+        if (found) {
+          // المكتب المالك هو من وُجد عنده الدفتر — لا من رتّبناه أوّلاً. وإلا
+          // مضى زرُّ العودة والحصّة إلى مكتبٍ لا يملك ما نحن فيه.
+          officeId = candidate;
+          books = list;
+          openBook = found;
+          break;
+        }
+      }
       setOfficeTenantId(officeId);
       setManagedBooks(books);
 
-      const openBook = explicitTenantId == null
-        ? undefined
-        : books.find((book) => book.TenantID === explicitTenantId);
       if (openBook) {
         setCurrentCompany(openBook);
         clientLogger.info("onboarding.memberships_loaded", { count: data.length });
         return data;
+      }
+      if (explicitTenantId != null && !explicitIsOwnCompany) {
+        // لم تُحلّ الشركة المطلوبة لا في شركاته ولا في دفاتر مكاتبه ⇒ سنقع على
+        // الافتراضية بعد قليل. بلاغٌ صريح كي لا يبقى «فتحتُ دفتراً فوجدتُني في
+        // شركةٍ أخرى» بلا أثرٍ في السجل.
+        clientLogger.warn("company.explicit_tenant_unresolved", {
+          tenantId: explicitTenantId, offices: offices.length,
+        });
       }
 
       const activeMember = pickActiveMembership(data, explicitTenantId);

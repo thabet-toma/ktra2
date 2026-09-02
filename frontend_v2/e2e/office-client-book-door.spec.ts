@@ -25,8 +25,24 @@ const OFFICE_USER = {
   isSuperAdmin: false,
 };
 
-const OFFICE_TENANT = {
+/**
+ * **مكتبان** لا واحد — وهذا هو بالضبط ما كسر عند المالك: المكتب المالك للدفاتر
+ * ليس أصغرهما معرّفاً، والشركة الافتراضية هي الآخر. بمكتبٍ واحد يمرّ الاختبار
+ * أخضر ولا يرى العطب أصلاً.
+ */
+const OTHER_OFFICE = {
   TenantID: 1,
+  CompanyName: 'مكتبي الأول (الافتراضي)',
+  SubscriptionPlan: 'Enterprise',
+  Status: 'Active',
+  CreatedAt: '2026-07-01T00:00:00Z',
+  import_enabled: false,
+  template: 'accounting_firm',
+  managed_by: null,
+};
+
+const OFFICE_TENANT = {
+  TenantID: 5,
   CompanyName: 'مكتب المحاسبة',
   SubscriptionPlan: 'Enterprise',
   Status: 'Active',
@@ -45,7 +61,7 @@ const CLIENT_BOOK = {
   import_enabled: false,
   template: 'general',
   // العلامة التي يقرأها شريط «أنت داخل دفتر عميلك» — حقيقةٌ من الخادم لكل شركة.
-  managed_by: 1,
+  managed_by: 5,
 };
 
 const DASHBOARD = {
@@ -69,7 +85,7 @@ async function stubOffice(page: Page) {
     // `addInitScript` تعمل عند **كل** تنقّل — فكتابة `tenantId` بلا شرط كانت
     // تُعيد المستخدم إلى المكتب في اللحظة التي يدخل فيها دفتر عميله، فيبدو
     // العطب في المنتج وهو في المُثبِّت.
-    if (!localStorage.getItem('tenantId')) localStorage.setItem('tenantId', '1');
+    if (!localStorage.getItem('tenantId')) localStorage.setItem('tenantId', '5');
   });
 
   const books = [{ ...CLIENT_BOOK }];
@@ -88,12 +104,21 @@ async function stubOffice(page: Page) {
     if (path.endsWith('/tenants/companies/my-companies/')) {
       // الدفتر **مستثنى** هنا عمداً (#52) — وهذا بالضبط ما جعل الدخول إليه
       // يُلغي نفسه قبل #65: الشركة النشطة كانت تُحسم من هذه القائمة وحدها.
-      return json([{
-        id: 1, tenant: OFFICE_TENANT, role: 'manager', is_default: true,
-        created_at: '2026-08-01T00:00:00Z', can_access_import: false,
-      }]);
+      return json([
+        // الافتراضية هي المكتب **الآخر** — فسقوطُ حلِّ الدفتر يُلقي المستخدم
+        // فيها بالضبط كما وصف المالك.
+        {
+          id: 1, tenant: OTHER_OFFICE, role: 'manager', is_default: true,
+          created_at: '2026-07-01T00:00:00Z', can_access_import: false,
+        },
+        {
+          id: 2, tenant: OFFICE_TENANT, role: 'manager', is_default: false,
+          created_at: '2026-08-01T00:00:00Z', can_access_import: false,
+        },
+      ]);
     }
-    if (path.endsWith('/tenants/companies/1/managed-books/')) {
+    if (path.endsWith('/tenants/companies/1/managed-books/')) return json([]);
+    if (path.endsWith('/tenants/companies/5/managed-books/')) {
       if (request.method() === 'POST') {
         const body = request.postDataJSON() as { CompanyName: string; template: string };
         const created = {
@@ -106,12 +131,12 @@ async function stubOffice(page: Page) {
       return json(books);
     }
     if (path.endsWith('/permissions/me/')) {
-      const tenantId = request.headers()['x-tenant-id'] || '1';
+      const tenantId = request.headers()['x-tenant-id'] || '5';
       return json({
         role: 'manager', is_manager: true, permissions: [],
         // القالب يتبع الشركة النشطة: قناع المكتب على دفتر المكتب، وبلا قناع
         // داخل دفتر الزبون التجاري.
-        template: tenantId === '1' ? 'accounting_firm' : 'general',
+        template: tenantId === '1' || tenantId === '5' ? 'accounting_firm' : 'general',
       });
     }
     // `/api/dashboard/` لا `endsWith('/dashboard/')`: الأخير يبتلع أيضاً
@@ -146,7 +171,7 @@ test('صاحب المكتب يفتح دفتراً لزبونه ويدخله وي
   await page.getByRole('button', { name: 'افتح دفتراً جديداً' }).click();
   await page.getByPlaceholder('اسم الزبون التجاري').fill('سوبرماركت النور');
   const created = page.waitForRequest((req) =>
-    req.url().includes('/tenants/companies/1/managed-books/') && req.method() === 'POST');
+    req.url().includes('/tenants/companies/5/managed-books/') && req.method() === 'POST');
   await page.getByRole('button', { name: 'افتح الدفتر' }).click();
   await created;
   // بطاقة الدفتر في القائمة لا رسالة التنبيه العابرة التي تحمل الاسم نفسه.
@@ -159,6 +184,8 @@ test('صاحب المكتب يفتح دفتراً لزبونه ويدخله وي
   const banner = page.getByTestId('managed-book-banner');
   await expect(banner).toBeVisible({ timeout: 30_000 });
   await expect(banner).toContainText('محل أبو أحمد');
+  // وليس الشركة الافتراضية: هذا نصّ بلاغ المالك حرفياً.
+  await expect(page.getByRole('button', { name: /مكتبي الأول/ })).toHaveCount(0);
 
   // ٤) طريق العودة الظاهر — لا مبدّل شركاتٍ لا يحوي الدفتر أصلاً، ولا رابط يدوي.
   await banner.getByRole('button', { name: 'العودة إلى المكتب' }).click();
