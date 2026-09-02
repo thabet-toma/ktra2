@@ -98,6 +98,62 @@ ACCOUNTING_FIRM_DOCUMENT_TYPES = [
 
 DEFAULT_TEMPLATE = 'general'
 
+# ── ISSUE #51 — القناع الحيّ: مسارات API تختفي كاملةً لقالب مكتب المحاسبة ──
+#
+# طرحيّ لا إضافي (فرّق عن `core/modules.py` (`MODULES`)): بادئات مسار كاملة —
+# المخزون والمستودعات والجرد، الاستيراد واللوجستيات وملف الاستيراد، المتجر،
+# ما بعد البيع، والأجهزة الحساسة. يستهلكها `core.permissions.TemplateSurfacePermission`
+# (الحارس الوحيد — فحصٌ ببادئة المسار لا لمسٌ لكل ViewSet). مرآتها في الواجهة:
+# `frontend_v2/utils/viewPermissions.ts` (`TEMPLATE_HIDDEN_VIEWS`) — سِجلٌّ
+# مستقلّ بمفاتيح شاشات لا مسارات، فلا تتوقّع تطابقاً حرفياً بين الاثنين.
+TEMPLATE_HIDDEN_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
+    'accounting_firm': (
+        '/api/inventory/',
+        # `logistics` **لا تُقنَّع جملةً**: `supplier-payments` (سند الصرف) يعيش
+        # تحتها لأسبابٍ تاريخية، والتذكرة تُبقي «سندات القبض والصرف» صراحةً في
+        # «ما يبقى» — والمكتب يحتاجه فعلاً ليسدّد ذمّة `2101` التي يفتحها سند
+        # المصروف. فتُسمّى المسارات المقنَّعة واحداً واحداً.
+        '/api/logistics/supplier-quotations/',
+        '/api/logistics/purchase-orders/',
+        '/api/logistics/deals/',
+        '/api/logistics/shipments/',
+        '/api/logistics/clearances/',
+        '/api/logistics/payments/',
+        '/api/logistics/purchase-invoices/',
+        '/api/logistics/local-shipments/',
+        '/api/logistics/import-journey/',
+        '/api/logistics/reports/landed-cost/',
+        '/api/logistics/purchase-settings/',
+        '/api/logistics/goods-receipts/',
+        '/api/import-file/',
+        '/api/devices/',
+        '/api/after-sales/',
+        '/api/store/',
+    ),
+}
+
+_ALL_HIDDEN_PREFIXES = tuple(sorted({
+    prefix
+    for prefixes in TEMPLATE_HIDDEN_PATH_PREFIXES.values()
+    for prefix in prefixes
+}))
+
+
+def any_template_hides_path(path: str) -> bool:
+    """فحصٌ رخيص بلا استعلام قاعدة بيانات — هل قد يخفي *أيّ* قالب هذا المسار؟
+
+    يُستدعى أولاً في `TemplateSurfacePermission` كي لا تتحمّل شركة `general`
+    (الغالبية) استعلام `get_tenant` الإضافي على كل طلب.
+    """
+    return path.startswith(_ALL_HIDDEN_PREFIXES)
+
+
+def template_hides_path(template_key: str | None, path: str) -> bool:
+    """أيخفي قالب هذه الشركة تحديداً هذا المسار؟"""
+    prefixes = TEMPLATE_HIDDEN_PATH_PREFIXES.get(template_key or DEFAULT_TEMPLATE, ())
+    return path.startswith(prefixes)
+
+
 COMPANY_TEMPLATES = {
     'general': {
         'key': 'general',

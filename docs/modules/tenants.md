@@ -7,6 +7,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 ومعها إعدادات الشركة، فروعها، دفاتر ترقيم مستنداتها، عضويات مستخدميها وأدوارهم، وتجاوزات الصلاحيات لكل دور ولكل عضو.
 كما يملك `create_company` الذي يُقلع شركة جديدة كاملة (إعدادات + دفاتر أنواع مستنداتها + شجرة حسابات + فرع رئيسي + مستودع + عضوية مدير) — **على الخطة التجريبية بأربعة عشر يوماً** (`core/plans.py` — `trial_end_date`)، لا `Enterprise` بلا حدود ولا انتهاء.
 `create_company` يقبل `template` (كلمة مفتاحية، افتراضه `general`) يحدّد أيّ بذرة حسابات وأيّ أنواع دفاتر تُزرع — السِجلّ في `tenants/company_templates.py` (`COMPANY_TEMPLATES`). `general` ينتج ما كان يُنتَج دائماً حرفياً (10 دفاتر لكل نوع من الخمسة عشر)، و`accounting_firm` يزرع شجرة أتعاب مهنية بلا مخزون ولا استيراد وسبعة أنواع دفاتر فقط. `Tenant.template` يحفظ المفتاح المستعمَل؛ تبديله لاحقاً غير مبنيّ بعد.
+**القناع الحيّ (ISSUE #51):** `tenants/company_templates.py` (`TEMPLATE_HIDDEN_PATH_PREFIXES`) يخفي بادئات مسار API عن قالب `accounting_firm` (المخزون، ومسارات اللوجستيات والمشتريات مسمّاةً واحداً واحداً — و`supplier-payments` مستثنى عمداً لأن سند الصرف يبقى ولو كان مساره تحتها، وملف الاستيراد، والأجهزة الحساسة، وما بعد البيع، والمتجر) — طرحيّ لا إضافي، بخلاف `core/modules.py` (`MODULES`). ينفّذه `core.permissions.TemplateSurfacePermission` (404 لا 403) عبر نقطتَي تركيب: `DEFAULT_PERMISSION_CLASSES` (`core/settings.py`) للـViewSets التي لا تُصرِّح صراحةً، و`core/api_defaults.py` (`ApiAuthAndUser`) لمن يُصرِّح. الحمولة `/api/permissions/me` تحمل `template` بجانب `modules` لتحرس به الواجهة (`frontend_v2/utils/viewPermissions.ts` — `TEMPLATE_HIDDEN_VIEWS`).
 جدول `Currency` يعيش هنا أيضاً ويستورده `accounting` و`sales` و`logistics` منه.
 
 ## آلية عزل الشركات (القاعدة العابرة للنظام)
@@ -21,8 +22,8 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
    و`TenantCreateMixin.perform_create` (`core/mixins.py:22-33`) يحقن الشركة عند الإنشاء ويرفع 400 بدل السقوط إلى `tenant_id=1`.
    `BaseTenantViewSet` (`core/mixins.py`) يجمع الاثنين وترثه ViewSets كل الـapps.
 
-فوق ذلك، `DEFAULT_PERMISSION_CLASSES = [IsAuthenticated, core.permissions.TenantRolePermission]` (`core/settings.py:374-377`) —
-و`TenantRolePermission` (`core/permissions.py`) يمنع أي كتابة من دور `viewer` ويقيّد `legal_accountant` بمسارات `/api/accountant/` فقط.
+فوق ذلك، `DEFAULT_PERMISSION_CLASSES = [IsAuthenticated, TenantRolePermission, TemplateSurfacePermission]` (`core/settings.py`) —
+و`TenantRolePermission` (`core/permissions.py`) يمنع أي كتابة من دور `viewer` ويقيّد `legal_accountant` بمسارات `/api/accountant/` فقط، و`TemplateSurfacePermission` (`core/permissions.py`) يخفي مسارات القناع الحيّ (أعلاه) بـ404.
 
 **الأدوار والصلاحيات** — `UserCompanyMembership.role` من سبعة: manager / accountant / legal_accountant / sales / procurement / staff / viewer (`tenants/models.py:280-288`).
 الترتيب النهائي للصلاحية (`core/access.py:352-383`): **افتراضي الدور** (`ROLE_DEFAULTS`, `core/access.py`) ← **تجاوز الدور** (`RolePermission`) ← **تجاوز العضو** (`MemberPermission`, الأعلى).
@@ -125,6 +126,7 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 - **الشركة الجديدة تبدأ تجريبية**: `create_company` يضبط `SubscriptionPlan='Trial'` و`Status='Trial'` و`subscription_ends_at` بعد `TRIAL_PERIOD_DAYS` — الترقية أو التمديد من لوحة المنصة، والحدود تتبع الخطة تلقائياً.
 - **انتهاء الاشتراك يمنع الكتابة وحدها**: مضيُّ `subscription_ends_at` يجعل الشركة للقراءة والطباعة والتصدير، والكتابة ترد 403 (`core/permissions.py` — `TenantRolePermission`). التاريخ **شامل** (يوم الانتهاء يوم عمل)، والسؤال عنه يمرّ بـ`core/plans.py` (`subscription_expiry`) وحده — لا تعيد حساب «هل انتهى» في نقطة ثانية. تعديل التاريخ من لوحة المنصة فقط: `subscription_ends_at` للقراءة في `TenantSerializer` عمداً. ومسارٌ يستبدل `permission_classes` (بوابة المحاسب) لا يرث الحارس — يستدعي `require_active_subscription` صراحةً.
 - **`ui_mode` تفضيل عرض لا صلاحية**: لا يمنح وصولاً ولا يحجب مساراً ولا يُستشار في أي قرار خادمي. كتابته ذاتية على عضوية المستدعي وحدها (`tenants/views.py` — `set_ui_mode`)، ولم يُثقَب لأجله حارس `viewer`: رفضه 403 مقبول ومعالَج في الواجهة (`docs/modules/frontend.md`).
+- **القناع الحيّ طرحيّ لا إضافي**: لا تُدرَج شاشة جوهرية (مخزون/لوجستيات/متجر) في `core/modules.py` (`MODULES`) لإخفائها عن قالب — أضِف بادئة مسارها إلى `TEMPLATE_HIDDEN_PATH_PREFIXES` (`tenants/company_templates.py`) بدل ذلك. ومسارٌ يُصرِّح بـ`permission_classes` صراحةً (بوابة المحاسب، أو أي `ApiAuthAndUser` مباشر) لا يرث `DEFAULT_PERMISSION_CLASSES` — يلزمه `TemplateSurfacePermission` صراحةً في قائمته.
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -139,3 +141,5 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 | `tests/test_operational_accounts.py` (124) | شركة جديدة جاهزة تشغيلياً بلا حساب يدوي (1107/1110/2106-2109/2111) |
 | `tests/test_session_settings.py` (79) · `test_appearance_settings.py` (65) | مهلة الخمول والمظهر: محفوظة خادمياً، معزولة لكل شركة، ضمن نطاق صالح |
 | `tests/test_ui_mode.py` | وضع العرض: الافتراضي `advanced`، الكتابة تمسّ عضوية المستدعي في الشركة النشطة وحدها، وضعان لنفس الشخص في شركتين، قيمة غير صالحة/بلا عضوية ⇒ 400، `viewer` ما زال ممنوعاً من الكتابة، والحمولة `/permissions/me` تعكس المحفوظ (وسوبر أدمن بلا عضوية ⇒ `advanced`) |
+| `tests/test_company_template_api.py` | القالب عند الإنشاء: `general` مطابق حرفياً لما يُنتَج اليوم، `accounting_firm` يزرع شجرته ويُسقط الحسابات التجارية، مفتاح مجهول يُرفض 400 |
+| `tests/test_company_template_mask_api.py` | القناع الحيّ: `accounting_firm` يردّ 404 على المخزون/اللوجستيات/المشتريات/المتجر ويُبقي `supplier-payments` مفتوحاً، والقناع يصمد بلا ترويسة `X-Tenant-Id`، و`general` صفر تغيير |

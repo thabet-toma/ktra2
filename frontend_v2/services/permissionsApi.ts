@@ -21,6 +21,8 @@ export type MyPermissions = {
    * التعامل مع خادمٍ أقدم سليماً — الغياب يُطبَّع إلى `advanced`.
    */
   ui_mode?: UiMode;
+  /** ISSUE #51: قالب الشركة — يحرس به `TEMPLATE_HIDDEN_VIEWS` (`utils/viewPermissions.ts`). */
+  template?: string;
 };
 
 export type PermissionsMatrix = {

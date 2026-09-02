@@ -3,6 +3,7 @@ import { getMyPermissions, setMyUiMode } from '../services/permissionsApi';
 import { clientLogger } from '../services/logger';
 import { useToast } from './ToastContext';
 import { resolveTenantId } from '../utils/tenantContext';
+import { DEFAULT_COMPANY_TEMPLATE } from '../utils/companyTemplates';
 import {
   DEFAULT_UI_MODE,
   normalizeUiMode,
@@ -29,6 +30,8 @@ interface PermissionsValue {
   permissions: Set<string>;
   /** أعلام ترخيص الوحدات لهذه الشركة — تفشل مغلقة (غياب العَلَم = مطفأة). */
   modules: Record<string, boolean>;
+  /** ISSUE #51: قالب الشركة النشطة — يحرس به `TEMPLATE_HIDDEN_VIEWS`. `general` افتراضياً. */
+  template: string;
   /** هل يملك المستخدم هذه الصلاحية؟ */
   can: (key: string) => boolean;
   /** THA-110: وضع عرض الواجهة — تفضيل عرض لا صلاحية. */
@@ -49,6 +52,7 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [isManager, setIsManager] = useState(false);
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [modules, setModules] = useState<Record<string, boolean>>({});
+  const [template, setTemplate] = useState<string>(DEFAULT_COMPANY_TEMPLATE);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tick, setTick] = useState(0);
@@ -71,6 +75,7 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setIsManager(res.is_manager);
         setPermissions(new Set(res.permissions));
         setModules(res.modules || {});
+        setTemplate(res.template || DEFAULT_COMPANY_TEMPLATE);
         // الخادم مصدر الحقيقة: قيمته تحسم الـcache (وحقلٌ غائب ⇒ «متقدم»).
         const serverMode = normalizeUiMode(res.ui_mode);
         setUiModeState(serverMode);
@@ -113,8 +118,8 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const reload = useCallback(() => setTick((t) => t + 1), []);
 
   const value = useMemo<PermissionsValue>(
-    () => ({ role, isManager, permissions, modules, can, uiMode, setUiMode, loading, reload }),
-    [role, isManager, permissions, modules, can, uiMode, setUiMode, loading, reload],
+    () => ({ role, isManager, permissions, modules, template, can, uiMode, setUiMode, loading, reload }),
+    [role, isManager, permissions, modules, template, can, uiMode, setUiMode, loading, reload],
   );
 
   return <PermissionsContext.Provider value={value}>{children}</PermissionsContext.Provider>;
@@ -129,6 +134,7 @@ export function usePermissions(): PermissionsValue {
       isManager: false,
       permissions: new Set<string>(),
       modules: {},
+      template: DEFAULT_COMPANY_TEMPLATE,
       can: () => true,
       uiMode: DEFAULT_UI_MODE,
       setUiMode: () => {},

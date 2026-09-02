@@ -41,7 +41,7 @@ import { fetchUserProfile, logoutUser } from "./services/authService";
 import { useAuth } from "./contexts/AuthContext";
 import { useCompany } from "./contexts/CompanyContext";
 import { usePermissions } from "./contexts/PermissionsContext";
-import { moduleAllowsView, permForView } from "./utils/viewPermissions";
+import { moduleAllowsView, permForView, templateHidesView } from "./utils/viewPermissions";
 import { companyWorkspaceDeepLink, enterPlatformShell, platformShellActive } from "./utils/officeShell";
 import { activeTasksService } from "./services/activeTasksService";
 import { autoDisableScheduler } from "./services/autoDisableScheduler";
@@ -326,7 +326,7 @@ const App: React.FC = () => {
   const { currentUser, loading: authLoading, logout, updateUser } = useAuth();
   const { currentCompany, canAccessImport } = useCompany();
   // T-PERM: صلاحيات الشركة النشطة — تُخفي ما لا يملكه المستخدم (الخادم يفرض).
-  const { can: canPerm, isManager, modules: licensedModules } = usePermissions();
+  const { can: canPerm, isManager, modules: licensedModules, template: companyTemplate } = usePermissions();
   const canManagePermissions = canPerm("admin.permissions.manage");
   // T-PERM: حارس الدخول المباشر بالرابط — نفس خريطة الشريط الجانبي، فلا يظهر
   // رابطٌ يقود إلى لوحة التحكم. الشاشة بلا صلاحية في الخريطة مفتوحة للجميع.
@@ -1441,6 +1441,12 @@ const App: React.FC = () => {
             </>
           );
       }
+    }
+
+    // ISSUE #51: القناع الحيّ — يفشل مغلقاً **قبل** الدخول في switch الشاشات، فلا
+    // يُنزَّل chunk الشاشة المخفيّة أصلاً (لا case يُطابَق قبل هذا الشرط).
+    if (templateHidesView(String(appView), companyTemplate)) {
+      return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
     }
 
     switch (appView) {

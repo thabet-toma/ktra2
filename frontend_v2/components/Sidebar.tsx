@@ -25,7 +25,7 @@ import { readAccountantMode, writeAccountantMode } from "../utils/accountantMode
 import { clientLogger } from "../services/logger";
 import { useCompany } from "../contexts/CompanyContext";
 import { usePermissions } from "../contexts/PermissionsContext";
-import { devicesNavPlacement, moduleAllowsView } from "../utils/viewPermissions";
+import { devicesNavPlacement, moduleAllowsView, templateHidesView } from "../utils/viewPermissions";
 import { groupVisible, visibleLinks } from "../utils/navAccess";
 import { SIMPLE_VIEWS } from "../utils/uiMode";
 import { FieldHint } from "./ui/FieldHint";
@@ -45,7 +45,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const { canAccessImport } = useCompany();
   // T-PERM: القائمة مشتقّة من الصلاحيات؛ ملخص الأعمال استثناء للمدير فقط.
   // THA-110: `uiMode` تفضيل عرضٍ لا صلاحية — يُقلّم ما يُعرَض أولاً ولا يحجب مساراً.
-  const { can, isManager, permissions, modules, uiMode, setUiMode } = usePermissions();
+  const { can, isManager, permissions, modules, template, uiMode, setUiMode } = usePermissions();
+  // ISSUE #51: القناع الحيّ — نفس النقطة التي يحرس بها App.tsx الدخول المباشر.
+  const hiddenByTemplate = (view: AppView) => templateHidesView(String(view), template);
   const isSimpleMode = uiMode === 'simple';
   const { identity } = useTenantSettings();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -144,7 +146,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   ];
 
   // 5) الاستيراد
-  const importLinks: NavLink[] = [
+  const importLinksAll: NavLink[] = [
     { view: "import-offers", label: "العروض والطلبيات", icon: <ClipboardList className="h-4 w-4" /> },
     { view: "international-invoices", label: "الفواتير الدولية", icon: <FileText className="h-4 w-4" /> },
     { view: "deals-management", label: "الصفقات", icon: <Handshake className="h-4 w-4" /> },
@@ -154,9 +156,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "customs-clearance", label: "التخليص الجمركي", icon: <FileText className="h-4 w-4" /> },
     { view: "import-flow", label: "رحلة الاستيراد", icon: <Package className="h-4 w-4" /> },
   ];
+  const importLinks = importLinksAll.filter((l) => !hiddenByTemplate(l.view));
 
   // 6) المخزون — المنتجات (شجرة، T-N3) + أرصدة + حركات. (إعدادات المخزون غير مبنية — مُدرجة بخارطة الطريق.)
-  const inventoryLinks: NavLink[] = [
+  const inventoryLinksAll: NavLink[] = [
     { view: "items-management", label: "المنتجات", icon: <Boxes className="h-4 w-4" /> },
     { view: "stock-levels", label: "أرصدة المخزون", icon: <BarChart3 className="h-4 w-4" /> },
     { view: "stock-movements", label: "حركات المخزون", icon: <ArrowLeftRight className="h-4 w-4" /> },
@@ -165,6 +168,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "warehouse-transfer", label: "تحويل بين المستودعات", icon: <Truck className="h-4 w-4" /> },
     { view: "stocktake", label: "الجرد", icon: <ClipboardList className="h-4 w-4" /> },
   ];
+  const inventoryLinks = inventoryLinksAll.filter((l) => !hiddenByTemplate(l.view));
 
   // 7) المالية — الصناديق والبنوك والشيكات ومطابقة كشف البنك.
   const financeLinks: NavLink[] = [
@@ -175,7 +179,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   ];
 
   // 8) التقارير — كل تقرير يفتح في تبويبه الخاص (G2).
-  const reportsLinks: NavLink[] = [
+  const reportsLinksAll: NavLink[] = [
     // T-REPORTS: «كل التقارير» هو فهرس القسم — يقود لكل تقارير المنصة. البقية
     // اختصارات للأكثر استعمالاً كي لا يمرّ المستخدم بالفهرس في كل مرة.
     { view: "reports", label: "كل التقارير", icon: <ReportsIcon className="h-4 w-4" />, path: "/reports", newTab: true },
@@ -185,19 +189,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "accounting-balance-sheet", label: "الميزانية العمومية", icon: <BarChart3 className="h-4 w-4" />, path: "/accounting/balance-sheet", newTab: true },
     { view: "accounting-vat-report", label: "تقرير ض.ق.م", icon: <Receipt className="h-4 w-4" />, path: "/accounting/vat-report", newTab: true },
   ];
+  const reportsLinks = reportsLinksAll.filter((l) => !hiddenByTemplate(l.view));
 
   // THA-24: خدمة ما بعد البيع — وحدة مرخّصة، مُلحَقة **آخر** قسم الوحدات كما
   // أُلحقت الأجهزة الحساسة قبلها: القسم الجديد في الوسط يزحزح ما تعوّده المستخدم.
   // بند «الأجهزة الحساسة» ينتقل إلى هنا حين تُرخَّص الوحدتان معاً (قرار المالك:
   // السجل إجراء ضمن هذا النظام)، ويبقى مستقلاً حين تُرخَّص وحدته وحدها.
   const devicesPlacement = devicesNavPlacement(modules);
-  const afterSalesLinks: NavLink[] = [
+  const afterSalesLinksAll: NavLink[] = [
     { view: "after-sales", label: "بطاقات الكفالة", icon: <ShieldCheck className="h-4 w-4" /> },
     { view: "service-orders", label: "أوامر الصيانة", icon: <Wrench className="h-4 w-4" /> },
     ...(devicesPlacement === "after-sales"
       ? [{ view: "sensitive-devices" as AppView, label: "الأجهزة الحساسة", icon: <ShieldAlert className="h-4 w-4" /> }]
       : []),
   ];
+  const afterSalesLinks = afterSalesLinksAll.filter((l) => !hiddenByTemplate(l.view));
 
   // THA-110: بنود «الوضع السهل» — لا شاشة جديدة، بل نفس الشاشات القائمة بعنوانها
   // وأيقونتها المعتادتين. الخريطة `Record` فوق `SIMPLE_VIEWS`: أي بندٍ يُضاف أو
@@ -217,6 +223,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   // T5: مفتاح التلميح مشتقّ من اسم الشاشة نفسه، فلا قائمة مفاتيح ثانية تفترق.
   const simpleLinks: (NavLink & { hint: SimpleHintKey })[] = SIMPLE_VIEWS
     .filter((view) => view !== "dashboard" || isManager)
+    .filter((view) => !hiddenByTemplate(view as AppView))
     .map((view) => ({ view: view as AppView, hint: `nav.${view}` as const, ...simpleViewMeta[view] }));
 
   // فتح المجموعة التي تحتوي الشاشة النشطة تلقائياً.
@@ -477,7 +484,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
               العرض لا يظهر ولو كانت الوحدة مرخّصة.
               THA-24: حين تُرخَّص «خدمة ما بعد البيع» أيضاً ينتقل البند إلى
               قسمها أدناه — بندٌ واحد لا اثنان. */}
-          {permissions.has("devices.registry.view") && devicesPlacement === "standalone" && (
+          {permissions.has("devices.registry.view") && devicesPlacement === "standalone" &&
+            !hiddenByTemplate("sensitive-devices") && (
             <button
               onClick={() => { setView("sensitive-devices"); if (isMobile) setIsMobileMenuOpen(false); }}
               className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("sensitive-devices") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
@@ -499,7 +507,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
               `store.manage` مفتاح مستقل يُمنح لمن يدير المتجر وحده. وبلا هذه
               الصلاحية لا يظهر: المتجر واجهة الشركة للعالم لا إعدادٌ يعبث به كل
               عضو. **بندٌ واحد** — كان مكرّراً حرفياً حتى فحص ST-4. */}
-          {permissions.has("store.manage") && (
+          {permissions.has("store.manage") && !hiddenByTemplate("store-settings") && (
             <button
               onClick={() => { setView("store-settings"); if (isMobile) setIsMobileMenuOpen(false); }}
               className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("store-settings") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}

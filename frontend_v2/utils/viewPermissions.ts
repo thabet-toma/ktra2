@@ -146,6 +146,46 @@ export const VIEW_MODULES: Record<string, string> = {
   "hr-contracts": "hr_suite",
 };
 
+/**
+ * ISSUE #51 — القناع الحيّ: شاشات يخفيها قالب الشركة كاملاً (طرحي — بلا زرّ
+ * «أظهر المتقدّم»). سِجلٌّ **مستقل** عن `core/modules.py` (`MODULES`): ذاك
+ * إضافي (وحدة تُشترى فتظهر)، وهذا طرحي (شاشة جوهرية تختفي). لا تكتب
+ * `template === 'accounting_firm'` في أي شاشة — أضِف مفتاحاً هنا فقط.
+ *
+ * موضعا الاستهلاك الوحيدان: `App.tsx` (الدخول المباشر بالرابط) و`Sidebar.tsx`
+ * (الروابط). الخادم هو الحارس الفعلي (`core.permissions.TemplateSurfacePermission`
+ * يردّ 404 على مسارات API الموازية) — هذا تجميلٌ يمنع نداءً سيُرفض أصلاً.
+ */
+export const TEMPLATE_HIDDEN_VIEWS: Record<string, readonly string[]> = {
+  accounting_firm: [
+    // المخزون والمستودعات والجرد وحركاته
+    'stock-levels', 'items-management', 'items-categories', 'stock-movements',
+    'product-profile', 'product-group', 'product-cost', 'warehouses',
+    'warehouse-transfer', 'stocktake',
+    // الاستيراد واللوجستيات
+    'import-offers', 'international-invoices', 'deals-management', 'old-invoices',
+    'import-flow', 'import-file-guide', 'shipments-management', 'shipment-management',
+    'shipments', 'local-shipping', 'customs-clearance', 'clearance',
+    // المشتريات — تعيش في app اللوجستيات وتتّكئ على حسابات المخزون وتكلفة
+    // البضاعة التي تُسقطها بذرة المكتب. **`supplier-payments` مستثنى عمداً**:
+    // سند الصرف يبقى (التذكرة تُبقيه صراحةً) ولو كان مساره تحت اللوجستيات.
+    'purchase-invoices', 'price-offers', 'purchase-return', 'purchase-receipts',
+    'purchase-settings',
+    // المتجر
+    'store-settings',
+    // ما بعد البيع
+    'after-sales', 'service-orders',
+    // الأجهزة الحساسة
+    'sensitive-devices',
+  ],
+};
+
+/** أيخفي قالب هذه الشركة هذه الشاشة؟ غياب القالب أو مفتاحه = general (بلا إخفاء). */
+export const templateHidesView = (
+  view: string,
+  templateKey?: string | null,
+): boolean => (TEMPLATE_HIDDEN_VIEWS[templateKey ?? ''] ?? []).includes(view);
+
 /** صلاحية الشاشة إن وُجدت، وإلا undefined (شاشة مفتوحة). */
 export const permForView = (view: string): string | undefined =>
   VIEW_PERMISSIONS[view];

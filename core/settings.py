@@ -488,6 +488,8 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
         "core.permissions.TenantRolePermission",
+        # ISSUE #51: القناع الحيّ — قالب الشركة يخفي مسارات كاملة (404).
+        "core.permissions.TemplateSurfacePermission",
     ],
     # المرحلة 5 / P0-7 (SCALABILITY_AUDIT §1.6): قبل هذا كان الـthrottle
     # مقتصراً على 6 نقاط في accountant_portal، فكل مسارات ERP الفعلية بلا أي

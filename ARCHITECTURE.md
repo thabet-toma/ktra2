@@ -30,7 +30,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | `inventory` | المنتجات والمستودعات و`StockMovement` (المصدر الوحيد للرصيد ومتوسط التكلفة) والأرقام التسلسلية وحالة المخزون وحدود التجديد | 7,000 | 5,700 | `/api/inventory/` |
 | `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية — وفوقها **طبقة مكتب** بنطاق `accountant=` لا `tenant=`: زبائن المكتب (ولو لم يكونوا شركات على المنصة) وبرامجه ومواعيده ومستنداته | 4,600 | 3,800 | `/api/accountant/` |
 | `docshare` | مشاركة المستند برابط عام: صفحة **بلا مصادقة** يفتحها الزبون **أو المورّد** (‏HTML خادمي بوسوم Open Graph لمعاينة واتساب) + قبول/رفض عرض السعر منها. أربعة عشر نوعاً بجمهورين ومفتاحَي صلاحية | 2,900 | 1,700 | `/s/` · `/api/share/` · `/api/document-shares/` |
-| `tenants` | تعريف الشركة وعزلها: الأعضاء، الأدوار، الفروع، دفاتر الترقيم، إقلاع شركة جديدة | 2,300 | 1,500 | `/api/tenants/` |
+| `tenants` | تعريف الشركة وعزلها: الأعضاء، الأدوار، الفروع، دفاتر الترقيم، إقلاع شركة جديدة | 2,300 | 1,600 | `/api/tenants/` |
 | `after_sales` | بطاقات الكفالة وأوامر الصيانة — **وحدة مرخّصة** | 2,200 | 2,000 | `/api/after-sales/` |
 | `store` | المتجر العام: خمس نقاط قراءة **بلا مصادقة** مُقيَّدة بـ`Tenant.store_slug`، ولوحة إدارته المصادَق عليها (مظهر · صور · حملات · منتجات متجر) | 1,400 | 1,800 | `/api/store/` |
 | `partners` | بطاقة الطرف الموحّدة (عميل/مورّد/…) وحساباتها البنكية وربطها بشجرة الحسابات | 1,200 | 800 | `/api/partners/` |
@@ -78,10 +78,18 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 > **كل model يحمل `tenant` FK، وكل ViewSet يفلتر عليه. `get_queryset` بلا فلتر شركة = تسريب بيانات.**
 
 ### 2. الصلاحيات
-`DEFAULT_PERMISSION_CLASSES = [IsAuthenticated, TenantRolePermission]` (`core/settings.py`).
+`DEFAULT_PERMISSION_CLASSES = [IsAuthenticated, TenantRolePermission, TemplateSurfacePermission]` (`core/settings.py`).
 الكتالوج ومصفوفة الأدوار في `core/access.py`؛ الإنفاذ خادمي عبر `require_perm` / `@requires_perm`.
 سلسلة القرار: افتراضي الدور ← `tenants.RolePermission` (تجاوز لكل شركة) ← `MemberPermission` (لكل عضو).
 دور `viewer` قراءة فقط. أعلام `/api/permissions/me/` **للعرض فقط** — إخفاء زر لا يحمي endpoint.
+
+**القناع الحيّ (ISSUE #51):** `TemplateSurfacePermission` (`core/permissions.py`) يخفي بادئات مسار
+API كاملة (404) لقالب شركة بعينه — طرحيّ لا إضافي (بخلاف `core/modules.py` (`MODULES`) الإضافي:
+وحدة تُشترى فتظهر). السِجلّ `TEMPLATE_HIDDEN_PATH_PREFIXES` في `tenants/company_templates.py`،
+ومرآته الواجهية `TEMPLATE_HIDDEN_VIEWS` في `frontend_v2/utils/viewPermissions.ts` (سِجلٌّ مستقل
+بمفاتيح شاشات لا مسارات). ViewSet يُصرِّح بـ`permission_classes` صراحةً (بدل الاعتماد على
+`DEFAULT_PERMISSION_CLASSES`) يلزمه ضمّ `TemplateSurfacePermission` يدوياً — `core/api_defaults.py`
+(`ApiAuthAndUser`) يفعل ذلك للمسارات المشتركة.
 
 **وضع العرض ليس صلاحية.** تحمل الحمولة نفسها حقل `ui_mode` (`core/access.py` — `user_ui_mode`)
 المخزَّن على العضوية لكل (مستخدم × شركة). آليتان تعملان فوق قائمة واحدة ولا تتنازعان:

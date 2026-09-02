@@ -26,6 +26,7 @@ from core.access import (
 )
 from core.modules import MODULES, module_enabled
 from core.tenant_utils import get_tenant
+from tenants.company_templates import DEFAULT_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,10 @@ def my_permissions(request):
         "permissions": sorted(user_permissions(request.user, tenant)),
         # حقل واحد يخدم كل الوحدات — الواجهة تحرس شاشاتها به قبل أي import().
         "modules": {key: module_enabled(tenant, key) for key in MODULES},
+        # ISSUE #51: القناع الحيّ — الواجهة تحرس شاشاتها به عبر
+        # `TEMPLATE_HIDDEN_VIEWS` (`frontend_v2/utils/viewPermissions.ts`)،
+        # والخادم يفرضه فعلياً على المسارات (`core.permissions.TemplateSurfacePermission`).
+        "template": getattr(tenant, "template", DEFAULT_TEMPLATE),
         # THA-110: وضع العرض يركب هذه الحمولة نفسها (تُحمَّل عند الإقلاع) فلا
         # يكلّف طلباً شبكياً إضافياً. عرضٌ فقط — لا يحجب مساراً ولا يمنح صلاحية.
         "ui_mode": user_ui_mode(request.user, tenant),

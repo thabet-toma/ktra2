@@ -22,6 +22,7 @@ from core.access import require_perm
 from core.mixins import BaseTenantViewSet
 from core.models import SystemAttachment
 from core.pagination import EnforcedPageNumberPagination
+from core.permissions import TemplateSurfacePermission
 from core.tenant_utils import get_tenant
 from inventory.models import Product
 from store.cache import InvalidatesStoreCacheMixin, products_version
@@ -459,7 +460,7 @@ class ProductHasHistoryError(APIException):
 class StoreSettingsAdminView(InvalidatesStoreCacheMixin, APIView):
     """`GET /api/store/admin/settings/` و`PATCH` — إدارة مظهر وهوية المتجر."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TemplateSurfacePermission]
 
     def get(self, request):
         tenant = get_tenant(request)
@@ -485,7 +486,7 @@ class StoreSettingsAdminView(InvalidatesStoreCacheMixin, APIView):
 class StoreProductImageAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
     """إدارة صور المتجر المخصصة للمنتجات."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TemplateSurfacePermission]
     serializer_class = StoreProductImageAdminSerializer
     queryset = StoreProductImage.objects.all()
 
@@ -525,7 +526,7 @@ class StoreProductImageAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSe
 class StoreCollectionAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
     """إدارة المجموعات والحملات الإعلانية وصفحات الهبوط."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TemplateSurfacePermission]
     serializer_class = StoreCollectionAdminSerializer
     queryset = StoreCollection.objects.all()
 
@@ -542,7 +543,7 @@ class StoreCollectionAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet)
 class StoreCollectionItemAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
     """إدارة المنتجات داخل المجموعة الإعلانية."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TemplateSurfacePermission]
     serializer_class = StoreCollectionItemAdminSerializer
     queryset = StoreCollectionItem.objects.all()
 
@@ -562,7 +563,7 @@ class StoreCollectionItemAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantView
 class StoreProductAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
     """إدارة وإنشاء منتجات المتجر مباشرة (سواء كانت مرتبطة بالمخزون أو خاصة بالمتجر فقط)."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TemplateSurfacePermission]
     serializer_class = StoreProductAdminSerializer
     queryset = Product.objects.all()
 

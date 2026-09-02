@@ -12,6 +12,7 @@
 import logging
 
 from django.core.exceptions import PermissionDenied
+from django.http import Http404
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
 from core.plans import subscription_expired
@@ -156,3 +157,38 @@ class TenantRolePermission(BasePermission):
         if is_read:
             return True
         return role != "viewer"
+
+
+class TemplateSurfacePermission(BasePermission):
+    """ISSUE #51 — القناع الحيّ: قالب الشركة يخفي مسارات كاملة، طرحياً.
+
+    على غرار `core.modules.guard_module_surface` لكن معكوساً: `MODULES` إضافية
+    (وحدة تُشترى فتظهر)، وهذا طرحي (شاشة جوهرية تختفي). الفحص برادئة مسار عامة
+    لا لكل ViewSet — نقطة تركيب واحدة تغطي كل نقاط API الوحدة بلا لمس كل ملف.
+    404 لا 403: لا يُثبت للمستدعي أن المسار موجود أصلاً.
+    """
+
+    def has_permission(self, request, view):
+        from tenants.company_templates import any_template_hides_path, template_hides_path
+
+        if not any_template_hides_path(request.path):
+            return True
+        # الطلب غير المصادَق لا يخصّه القناع: النقاط العامة الوحيدة تحت هذه
+        # البادئات هي واجهة المتجر (`AllowAny`)، وهي أصلاً لا تصل هذا الحارس
+        # لأن قائمتها الصريحة تتخطّى `DEFAULT_PERMISSION_CLASSES`.
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return True
+
+        from core.tenant_utils import get_tenant
+
+        # **لا تُشترط ترويسة `X-Tenant-Id`.** `get_tenant` تحلّ الشركة أيضاً من
+        # شركة المستخدم الافتراضية ومن النشر أحادي الشركة، فحارسٌ يشترط
+        # الترويسة يُفتَح بحذفها — وهو بالضبط ثقب الـ`curl` الذي وُجد هذا
+        # الحارس ليسدّه.
+        tenant = get_tenant(request)
+        if tenant is None:
+            return True
+        if template_hides_path(getattr(tenant, "template", None), request.path):
+            raise Http404
+        return True

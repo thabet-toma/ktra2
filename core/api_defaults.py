@@ -7,13 +7,15 @@ from rest_framework.authentication import SessionAuthentication, TokenAuthentica
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from core.permissions import TenantRolePermission
+from core.permissions import TemplateSurfacePermission, TenantRolePermission
 
 # جلسة + توكن: الواجهة v2 ترسل Header Token؛ لوحة الإدارة / أدوات نفس الأصل قد تستخدم الجلسة.
 # task11 R2-B: TenantRolePermission — دور «مستعرض» قراءة فقط.
+# ISSUE #51: TemplateSurfacePermission — هذه القائمة صريحة فتتخطّى
+# DEFAULT_PERMISSION_CLASSES في settings.py، فيلزمها نفس الحارس هنا صراحةً.
 ApiAuthAndUser = {
     "authentication_classes": [TokenAuthentication, SessionAuthentication],
-    "permission_classes": [IsAuthenticated, TenantRolePermission],
+    "permission_classes": [IsAuthenticated, TenantRolePermission, TemplateSurfacePermission],
 }
 
 # رسالة موحّدة تُعرض عند محاولة تعديل/حذف مستند مرحَّل قبل التراجع عن الترحيل.
