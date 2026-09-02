@@ -151,6 +151,15 @@ def _validate_user_tenant_access(request, tenant: Tenant) -> None:
         .first()
     )
     if membership is None:
+        # ISSUE #52 (قرار 7): مدير المكتب يصل كل دفاتر مكتبه المُدارة بلا صفّ
+        # عضويةٍ لكل دفتر — وإلا صار الدفتر ظاهراً في `TenantViewSet` (الذي
+        # يمنحه الرؤية) وممنوعاً هنا، فيرى المدير دفتراً لا يستطيع فتحه.
+        # موظفٌ غير مُسنَد لا يمرّ: الشرط `role="manager"` على المكتب نفسه.
+        office_id = getattr(tenant, 'managed_by_id', None)
+        if office_id is not None and UserCompanyMembership.objects.filter(
+            user=user, tenant_id=office_id, role='manager',
+        ).exists():
+            return
         logger.error(
             "SECURITY ALERT: User %s attempted to access unauthorized tenant=%s. IP=%s",
             user, tenant.TenantID,

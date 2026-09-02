@@ -61,6 +61,7 @@ _BODY_ID_KEYS = {
     "client_id": ("client_not_found", "الزبون غير موجود."),
     "program_id": ("program_not_found", "البرنامج غير موجود."),
     "engagement_id": ("engagement_not_found", "الارتباط غير موجود."),
+    "managed_tenant_id": ("managed_tenant_not_found", "الدفتر المُدار غير موجود."),
 }
 
 

@@ -231,7 +231,18 @@ class TenantViewSet(viewsets.ModelViewSet):
             return Tenant.objects.none()
         if user.is_superuser:
             return Tenant.objects.all().order_by("CompanyName")
-        return Tenant.objects.filter(memberships__user=user).order_by("CompanyName")
+        # ISSUE #52: العزل هو المنتج — عضوية صريحة، أو مدير مكتبٍ يملك الدفتر
+        # المُدار (قرار 7: يرى كل دفاتر مكتبه بلا عضوية لكل واحد). موظفٌ غير
+        # مُسند، أو مستخدمٌ من مكتبٍ آخر، لا يقع تحت أيٍّ من الشرطين ⇒ 404 لا
+        # 403 (الصفّ غائبٌ عن get_queryset فيسقط `get_object` على DoesNotExist).
+        from django.db.models import Q
+
+        office_ids = UserCompanyMembership.objects.filter(
+            user=user, role="manager",
+        ).values_list("tenant_id", flat=True)
+        return Tenant.objects.filter(
+            Q(memberships__user=user) | Q(managed_by_id__in=office_ids)
+        ).distinct().order_by("CompanyName")
 
     def _can_create_company(self, user) -> bool:
         """Manager-only (M4-T3), with a bootstrap exception: a user with no
@@ -469,8 +480,43 @@ class TenantViewSet(viewsets.ModelViewSet):
             return Response([])
         from .services import ensure_example_company_access
         ensure_example_company_access(user)
-        qs = UserCompanyMembership.objects.filter(user=user).select_related("tenant").order_by("tenant__CompanyName")
+        # ISSUE #52: الدفاتر المُدارة لا تظهر هنا — مبدّل الشركات العادي ليس
+        # مكانها، بل قائمة زبائن المكتب.
+        qs = UserCompanyMembership.objects.filter(
+            user=user, tenant__managed_by__isnull=True,
+        ).select_related("tenant").order_by("tenant__CompanyName")
         return Response(UserCompanyMembershipSerializer(qs, many=True).data)
+
+    @action(detail=True, methods=["get", "post"], url_path="managed-books")
+    def managed_books(self, request, pk=None):
+        """ISSUE #52: مكتب المحاسبة يفتح دفتراً مُداراً لعميله.
+
+        GET: قائمة الدفاتر المُدارة التي يملكها هذا المكتب. POST: ينشئ دفتراً
+        جديداً بعد فحص حصّة الخطة `office.managed_books` — مدير المكتب فقط.
+        body (POST): {"CompanyName": "...", "template": "..."} (القالب اختياري).
+        """
+        office = self.get_object()
+        self._require_company_manager(request, office)
+
+        if request.method == "GET":
+            qs = Tenant.objects.filter(managed_by=office).order_by("CompanyName")
+            return Response(TenantSerializer(qs, many=True).data)
+
+        # T-PLANLIMITS: يُفحص **قبل** الإنشاء — الدفتر المُدار لا يُحذف بعدها.
+        enforce_limits(office, "office.managed_books")
+        name = request.data.get("CompanyName")
+        if not name:
+            raise DRFValidationError({"CompanyName": "اسم الدفتر مطلوب."})
+        from .company_templates import COMPANY_TEMPLATES, DEFAULT_TEMPLATE
+        from .services import create_company
+        template = request.data.get("template") or DEFAULT_TEMPLATE
+        if template not in COMPANY_TEMPLATES:
+            raise DRFValidationError({"template": f"قالب الشركة «{template}» غير معروف."})
+        try:
+            tenant = create_company(name, request.user, template=template, managed_by=office)
+        except DjangoValidationError as e:
+            raise DRFValidationError({"detail": e.messages if hasattr(e, "messages") else str(e)})
+        return Response(TenantSerializer(tenant).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"], url_path="set-default")
     def set_default(self, request):

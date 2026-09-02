@@ -206,7 +206,10 @@ def ensure_base_currencies():
     return base
 
 
-def create_company(name: str, creator_user, *, template: str = DEFAULT_TEMPLATE) -> Tenant:
+def create_company(
+    name: str, creator_user, *,
+    template: str = DEFAULT_TEMPLATE, managed_by: Tenant | None = None,
+) -> Tenant:
     """
     Creates a new Tenant, boots it with default settings, seeds its TenantBooks
     (per the template's document types), seeds its Chart of Accounts (COA) per
@@ -216,6 +219,10 @@ def create_company(name: str, creator_user, *, template: str = DEFAULT_TEMPLATE)
     ISSUE #50: `template` هو مفتاح كلمة (keyword-only) بافتراضي `general` عمداً
     — عشرات ملفات الاختبار تستدعي `create_company(name, user)` موضعياً، وبقاؤها
     تعمل بلا تعديل هو قرار 16 نفسه مطبَّقاً على التوافق.
+
+    ISSUE #52: `managed_by` كلمة مفتاحية أيضاً — دفترٌ يديره مكتب محاسبة يمرّ
+    من هذه الدالة نفسها لا مساراً موازياً، وإلا افترق الزرع (الحسابات والدفاتر
+    والفرع والمستودع الافتراضي) بين الشركة العادية والدفتر المُدار.
     """
     if not name or not name.strip():
         raise ValidationError("اسم الشركة لا يمكن أن يكون فارغاً.")
@@ -236,6 +243,7 @@ def create_company(name: str, creator_user, *, template: str = DEFAULT_TEMPLATE)
             Status="Trial",
             subscription_ends_at=trial_end_date(),
             template=template_config['key'],
+            managed_by=managed_by,
         )
 
         # 2. Create TenantSettings

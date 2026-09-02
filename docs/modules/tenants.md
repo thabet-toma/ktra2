@@ -9,6 +9,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 `create_company` يقبل `template` (كلمة مفتاحية، افتراضه `general`) يحدّد أيّ بذرة حسابات وأيّ أنواع دفاتر تُزرع — السِجلّ في `tenants/company_templates.py` (`COMPANY_TEMPLATES`). `general` ينتج ما كان يُنتَج دائماً حرفياً (10 دفاتر لكل نوع من الخمسة عشر)، و`accounting_firm` يزرع شجرة أتعاب مهنية بلا مخزون ولا استيراد وسبعة أنواع دفاتر فقط. `Tenant.template` يحفظ المفتاح المستعمَل؛ تبديله لاحقاً غير مبنيّ بعد.
 **القناع الحيّ (ISSUE #51):** `tenants/company_templates.py` (`TEMPLATE_HIDDEN_PATH_PREFIXES`) يخفي بادئات مسار API عن قالب `accounting_firm` (المخزون، ومسارات اللوجستيات والمشتريات مسمّاةً واحداً واحداً — و`supplier-payments` مستثنى عمداً لأن سند الصرف يبقى ولو كان مساره تحتها، وملف الاستيراد، والأجهزة الحساسة، وما بعد البيع، والمتجر) — طرحيّ لا إضافي، بخلاف `core/modules.py` (`MODULES`). ينفّذه `core.permissions.TemplateSurfacePermission` (404 لا 403) عبر نقطتَي تركيب: `DEFAULT_PERMISSION_CLASSES` (`core/settings.py`) للـViewSets التي لا تُصرِّح صراحةً، و`core/api_defaults.py` (`ApiAuthAndUser`) لمن يُصرِّح. الحمولة `/api/permissions/me` تحمل `template` بجانب `modules` لتحرس به الواجهة (`frontend_v2/utils/viewPermissions.ts` — `TEMPLATE_HIDDEN_VIEWS`).
 جدول `Currency` يعيش هنا أيضاً ويستورده `accounting` و`sales` و`logistics` منه.
+**الدفتر المُدار (ISSUE #52):** `Tenant.managed_by` علمٌ من جنس `is_example`/`import_enabled`/`store_slug` — FK لشركة أخرى (مكتب محاسبة) تملك هذا الدفتر وتديره. `create_company` يقبله كلمةً مفتاحية (`managed_by`) فيمرّ الزرع نفسه لا مساراً موازياً. الدفتر المُدار **لا يُعَدّ في حصّة خطة أحد** كشركة (حدّه المستقل `office.managed_books` في `core/plans.py`)، ولا يظهر في `companies/my-companies/` (`tenants/views.py` — `my_companies` يستثني `tenant__managed_by__isnull=True`)، ويُفتح من `companies/{office_id}/managed-books/` (`TenantViewSet.managed_books`) بصلاحية `admin.members.manage` على المكتب المالك. العزل: `TenantViewSet.get_queryset` يمنح مدير المكتب رؤية كل دفاتره بلا عضويةٍ صريحة لكل واحد (قرار 7)، والموظف يُسند بعضوية `UserCompanyMembership` صريحة وإلا 404 لا 403 — ولا بُعد عزلٍ ثانٍ غير `tenant`. الرؤية وحدها لا تكفي: `core/tenant_utils.py` (`_validate_user_tenant_access`) تشترط صفّ عضويةٍ على الشركة المطلوبة، فاستُثني منها مديرُ المكتب على دفاتر مكتبه — وإلا رأى في القائمة دفتراً يردّه كل نداء عملٍ بـ`X-Tenant-Id`. **والدفتر المُدار لا يشترك**: خطتُه وتاريخُ انتهائه يُقرآن من مكتبه (`core/plans.py` — `_billing_tenant`)، وإلا ورث تجربة أربعة عشر يوماً من `create_company` فأقفل على مكتبٍ مشترِكٍ ودافع بعد أسبوعين.
 
 ## آلية عزل الشركات (القاعدة العابرة للنظام)
 **لا يوجد middleware للشركة** (`core/settings.py:113-125`). العزل ثلاثي الطبقات، وكلّه على مستوى الطلب:
@@ -52,7 +53,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `Tenant` (:18) | `TenantID` (PK), `CompanyName`, `Status` (Active/Suspended/Trial), `SubscriptionPlan` (Trial/Basic/Pro/Enterprise), `subscription_ends_at` (NULL = بلا انتهاء), `import_enabled`, `is_example`, `DomainName` (unique) | مُشار إليه بـ`tenant` FK من كل model في كل app |
+| `Tenant` (:18) | `TenantID` (PK), `CompanyName`, `Status` (Active/Suspended/Trial), `SubscriptionPlan` (Trial/Basic/Pro/Enterprise), `subscription_ends_at` (NULL = بلا انتهاء), `import_enabled`, `is_example`, `managed_by` (FK لذاته — دفترٌ مُدار)، `DomainName` (unique) | مُشار إليه بـ`tenant` FK من كل model في كل app |
 | `Currency` (:4) | `CurrencyID`, `Code`, `Symbol`, `IsBaseCurrency` | **عام بلا tenant**؛ يستورده accounting/sales/logistics |
 | `TenantSettings` (:54) | `default_vat_rate` (16.00), `fiscal_period_*`, `dashboard_month_start_day`, `font_scale`/`font_family`, `idle_timeout_minutes` (5..1440), `licensed_dealer_no` | `tenant` **OneToOne**, `currency`, `default_freight_credit_account`→Account |
 | `Branch` (:141) | `name`, `code`, `is_main`, `is_active` | `tenant`, `unique_together (tenant, code)`؛ يشارك الشجرة والمنتجات والشركاء ويعزل الفواتير/المخزون/القيود |
@@ -68,7 +69,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 def ensure_operational_accounts(tenant) -> list[str]:                  # يضمن 1107/1110/2106-2109/2111 في شجرة قائمة (idempotent)
 def ensure_operational_account(tenant, code: str):                     # يضمن حساباً واحداً ويعيده — ولو غاب أبوه المعياري
 def ensure_base_currencies():                                          # يزرع ILS/USD ويعيد العملة الأساسية
-def create_company(name: str, creator_user, *, template: str = 'general') -> Tenant:  # إقلاع شركة كاملة: إعدادات + دفاتر + COA حسب القالب + فرع + مستودع + عضوية مدير
+def create_company(name: str, creator_user, *, template: str = 'general', managed_by: Tenant | None = None) -> Tenant:  # إقلاع شركة كاملة: إعدادات + دفاتر + COA حسب القالب + فرع + مستودع + عضوية مدير
 def set_example_company(tenant: Tenant | None) -> None:                # يعيّن شركة المثال الوحيدة ويزامن عضويات الوصول
 def ensure_example_company_access(user) -> None:                       # يُلحق المستخدمين الجدد بشركة المثال عند أول تحميل
 def member_payload(m: UserCompanyMembership) -> dict:                  # تمثيل عضوية موحّد (إدارة الشركة + لوحة المنصة)
@@ -96,7 +97,8 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 | POST | `companies/{pk}/members/change-role/` · `members/remove/` | views.py:345 / 365 — مع حماية آخر مدير (views.py:339) |
 | POST | `companies/{pk}/set-import-enabled/` | `set_import_enabled` (views.py:382) — سوبر أدمن |
 | POST | `companies/{pk}/members/set-import-access/` | `set_member_import_access` (views.py:401) — مدير الشركة |
-| GET | `companies/my-companies/` | `my_companies` (views.py:418) |
+| GET | `companies/my-companies/` | `my_companies` (views.py:418) — يستثني الدفاتر المُدارة (`tenant__managed_by__isnull=True`) |
+| GET/POST | `companies/{office_id}/managed-books/` | `TenantViewSet.managed_books` — مدير المكتب فقط؛ POST يفحص `office.managed_books` بـ`enforce_limits` قبل الإنشاء |
 | POST | `companies/set-default/` | `set_default` (views.py:428) |
 | POST | `companies/set-ui-mode/` | `set_ui_mode` — وضع عرض المستدعي في الشركة النشطة؛ بلا صلاحية إدارية، قيمة غير صالحة أو بلا عضوية ⇒ 400، و`viewer` ⇒ 403 من حارس المنصة |
 | GET/POST | `branches/` | `BranchViewSet` (views.py:153) — الإنشاء يتطلب `admin.settings.manage` (views.py:175-177) |
@@ -127,6 +129,7 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 - **انتهاء الاشتراك يمنع الكتابة وحدها**: مضيُّ `subscription_ends_at` يجعل الشركة للقراءة والطباعة والتصدير، والكتابة ترد 403 (`core/permissions.py` — `TenantRolePermission`). التاريخ **شامل** (يوم الانتهاء يوم عمل)، والسؤال عنه يمرّ بـ`core/plans.py` (`subscription_expiry`) وحده — لا تعيد حساب «هل انتهى» في نقطة ثانية. تعديل التاريخ من لوحة المنصة فقط: `subscription_ends_at` للقراءة في `TenantSerializer` عمداً. ومسارٌ يستبدل `permission_classes` (بوابة المحاسب) لا يرث الحارس — يستدعي `require_active_subscription` صراحةً.
 - **`ui_mode` تفضيل عرض لا صلاحية**: لا يمنح وصولاً ولا يحجب مساراً ولا يُستشار في أي قرار خادمي. كتابته ذاتية على عضوية المستدعي وحدها (`tenants/views.py` — `set_ui_mode`)، ولم يُثقَب لأجله حارس `viewer`: رفضه 403 مقبول ومعالَج في الواجهة (`docs/modules/frontend.md`).
 - **القناع الحيّ طرحيّ لا إضافي**: لا تُدرَج شاشة جوهرية (مخزون/لوجستيات/متجر) في `core/modules.py` (`MODULES`) لإخفائها عن قالب — أضِف بادئة مسارها إلى `TEMPLATE_HIDDEN_PATH_PREFIXES` (`tenants/company_templates.py`) بدل ذلك. ومسارٌ يُصرِّح بـ`permission_classes` صراحةً (بوابة المحاسب، أو أي `ApiAuthAndUser` مباشر) لا يرث `DEFAULT_PERMISSION_CLASSES` — يلزمه `TemplateSurfacePermission` صراحةً في قائمته.
+- **الدفتر المُدار لا يُحذف ولا مسار موازياً لإنشائه**: `create_company` وحدها تزرعه (كلمة `managed_by`)، والحذف ممنوع أصلاً على كل الشركات. حصّته `office.managed_books` (`core/plans.py`) تُفحص **قبل** الإنشاء بـ`enforce_limits`، ولا بُعد عزلٍ ثانٍ غير `tenant`: الوصول عضويةٌ صريحة أو مديرُ المكتب المالك (`TenantViewSet.get_queryset`).
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -143,3 +146,4 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 | `tests/test_ui_mode.py` | وضع العرض: الافتراضي `advanced`، الكتابة تمسّ عضوية المستدعي في الشركة النشطة وحدها، وضعان لنفس الشخص في شركتين، قيمة غير صالحة/بلا عضوية ⇒ 400، `viewer` ما زال ممنوعاً من الكتابة، والحمولة `/permissions/me` تعكس المحفوظ (وسوبر أدمن بلا عضوية ⇒ `advanced`) |
 | `tests/test_company_template_api.py` | القالب عند الإنشاء: `general` مطابق حرفياً لما يُنتَج اليوم، `accounting_firm` يزرع شجرته ويُسقط الحسابات التجارية، مفتاح مجهول يُرفض 400 |
 | `tests/test_company_template_mask_api.py` | القناع الحيّ: `accounting_firm` يردّ 404 على المخزون/اللوجستيات/المشتريات/المتجر ويُبقي `supplier-payments` مفتوحاً، والقناع يصمد بلا ترويسة `X-Tenant-Id`، و`general` صفر تغيير |
+| `tests/test_managed_books_api.py` | الدفتر المُدار: مكتب Basic يفتح 3 وينكسر عند الرابع، غيابه عن `my-companies` رغم عضوية صريحة، مدير المكتب يرى كل دفاتره بلا عضوية لكل واحد، موظف غير مُسند ⇒ 404، مستخدم مكتب آخر لا يرى الدفتر إطلاقاً |

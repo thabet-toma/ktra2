@@ -129,6 +129,9 @@ def client_payload(client):
         "status": client.status,
         "notes": client.notes,
         "engagement_id": client.engagement_id,
+        # ISSUE #52: النوع مشتقّ لا مخزَّن — انظر `PracticeClient.client_type`.
+        "managed_tenant_id": client.managed_tenant_id,
+        "client_type": client.client_type,
         # الشركة المرتبطة — وجودها يعني أن لهذا الزبون دفاتر على المنصة تُقرأ من
         # مسارات الارتباط، وهو ما تحتاجه الواجهة للتمييز بين نوعَي الزبائن.
         "tenant_id": client.engagement.tenant_id if client.engagement_id else None,
@@ -140,7 +143,7 @@ def get_practice_client(*, accountant, client_id):
     """زبون هذا المكتب أو «غير موجود» — صفّ مكتبٍ آخر لا يُفرَّق عن المعدوم."""
     client = (
         PracticeClient.objects.filter(accountant=accountant, pk=client_id)
-        .select_related("engagement")
+        .select_related("engagement", "managed_tenant")
         .first()
     )
     if client is None:
@@ -149,7 +152,9 @@ def get_practice_client(*, accountant, client_id):
 
 
 def list_practice_clients(*, accountant, status=None, search=None):
-    queryset = PracticeClient.objects.filter(accountant=accountant).select_related("engagement")
+    queryset = PracticeClient.objects.filter(accountant=accountant).select_related(
+        "engagement", "managed_tenant",
+    )
     if status:
         queryset = queryset.filter(status=status)
     if search:
@@ -172,6 +177,32 @@ def _resolve_engagement(*, accountant, engagement_id, exclude_client=None):
     if duplicate.exists():
         raise EngagementConflict("engagement_linked", "هذه الشركة مرتبطة بزبون آخر في مكتبك.")
     return engagement
+
+
+def _resolve_managed_tenant(*, accountant, managed_tenant_id, exclude_client=None):
+    """ربط الزبون بدفتر مُدار يملكه مكتب هذا المحاسب — دفتر مكتبٍ آخر «غير موجود».
+
+    نفس حَكَم `TenantViewSet.get_queryset`: مديرٌ للمكتب المالك وحده يربط —
+    فلا يفتح هذا المسار ثغرة لا يفتحها مسار الشركات نفسه.
+    """
+    if managed_tenant_id in (None, ""):
+        return None
+    from tenants.models import Tenant, UserCompanyMembership
+
+    tenant = Tenant.objects.filter(pk=managed_tenant_id, managed_by__isnull=False).first()
+    if tenant is None:
+        raise EngagementConflict("managed_tenant_not_found", "الدفتر المُدار غير موجود.", 404)
+    is_office_manager = UserCompanyMembership.objects.filter(
+        user=accountant, tenant_id=tenant.managed_by_id, role="manager",
+    ).exists()
+    if not is_office_manager:
+        raise EngagementConflict("managed_tenant_not_found", "الدفتر المُدار غير موجود.", 404)
+    duplicate = PracticeClient.objects.filter(accountant=accountant, managed_tenant=tenant)
+    if exclude_client is not None:
+        duplicate = duplicate.exclude(pk=exclude_client.pk)
+    if duplicate.exists():
+        raise EngagementConflict("managed_tenant_linked", "هذا الدفتر مرتبط بزبون آخر في مكتبك.")
+    return tenant
 
 
 def _apply_client_fields(client, data):
@@ -204,6 +235,9 @@ def create_practice_client(*, accountant, data):
     client.engagement = _resolve_engagement(
         accountant=accountant, engagement_id=data.get("engagement_id"),
     )
+    client.managed_tenant = _resolve_managed_tenant(
+        accountant=accountant, managed_tenant_id=data.get("managed_tenant_id"),
+    )
     try:
         client.save()
     except IntegrityError as exc:
@@ -220,6 +254,12 @@ def update_practice_client(*, accountant, client_id, data):
         client.engagement = _resolve_engagement(
             accountant=accountant,
             engagement_id=data.get("engagement_id"),
+            exclude_client=client,
+        )
+    if "managed_tenant_id" in data:
+        client.managed_tenant = _resolve_managed_tenant(
+            accountant=accountant,
+            managed_tenant_id=data.get("managed_tenant_id"),
             exclude_client=client,
         )
     try:

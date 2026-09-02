@@ -360,6 +360,11 @@ class ReviewQuery(models.Model):
 # الارتباط النشط (`AccountantEngagement`) — وهذا وحده ما يمنع زبوناً خارجياً من
 # التسرّب إلى دفاتر شركة فعلية. الملكية هنا للمحاسب: كل استعلام يبدأ بـ
 # `accountant=`.
+#
+# ISSUE #52 (قرار 5): استثناءٌ واحدٌ موثَّق — `PracticeClient.managed_tenant`
+# يربط بدفتر مُدار يملكه مكتب المحاسب نفسه (`Tenant.managed_by`). العزل هنا
+# لا يعتمد على غياب الحقل بل على `TenantViewSet.get_queryset`: دفتر مكتبٍ آخر
+# «غير موجود» له مهما حمل `PracticeClient` من إشارة إليه.
 
 
 class PracticeClient(models.Model):
@@ -392,6 +397,16 @@ class PracticeClient(models.Model):
         blank=True,
         related_name="practice_clients",
     )
+    # ISSUE #52: الحقل الثاني الذي يشتقّ منه النوع — دفترٌ مُدارٌ يملكه مكتب
+    # هذا المحاسب (`Tenant.managed_by`). **لا حقل حالة ثالث**: `client_type`
+    # (تحت) محسوبٌ من هذين الحقلين وحدهما فلا يمكن أن يناقضهما.
+    managed_tenant = models.ForeignKey(
+        "tenants.Tenant",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="practice_clients",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -406,6 +421,20 @@ class PracticeClient(models.Model):
         indexes = [
             models.Index(fields=["accountant", "status"], name="acct_pc_user_status"),
         ]
+
+    @property
+    def client_type(self) -> str:
+        """النوع مشتقٌّ من `managed_tenant` و`engagement` — لا يُخزَّن أبداً،
+        فلا يمكن أن يناقضهما كما يناقض حقل حالة ثالث مستقل."""
+        has_managed = self.managed_tenant_id is not None
+        has_engagement = self.engagement_id is not None
+        if has_managed and has_engagement:
+            return "hybrid"
+        if has_managed:
+            return "managed"
+        if has_engagement:
+            return "engaged"
+        return "unlinked"
 
 
 class PracticeProgram(models.Model):

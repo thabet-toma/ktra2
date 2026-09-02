@@ -141,8 +141,13 @@ class PracticeClientTest(TestCase):
             "active",
         )
 
-    # الجدار: لا طريق من سجلّ الممارسة إلى دفاتر شركة.
+    # الجدار: لا طريق من سجلّ الممارسة إلى دفاتر شركة — باستثناء واحد موثَّق.
     def test_no_practice_model_carries_a_tenant_link(self):
+        # ISSUE #52 (قرار 5): `PracticeClient.managed_tenant` استثناءٌ صريح —
+        # دفترٌ مُدار يملكه مكتب هذا المحاسب نفسه (`Tenant.managed_by`)، والعزل
+        # يأتي من `TenantViewSet.get_queryset` لا من غياب الحقل هنا. الجدار
+        # يبقى صلباً على كل نموذج آخر وعلى كل حقلٍ آخر في هذا النموذج.
+        allowed_links = {PracticeClient: {"managed_tenant"}}
         for model in (
             PracticeClient,
             PracticeProgram,
@@ -154,6 +159,7 @@ class PracticeClientTest(TestCase):
                 field.name
                 for field in model._meta.get_fields()
                 if field.is_relation and field.related_model is Tenant
+                and field.name not in allowed_links.get(model, set())
             ]
             self.assertEqual(leaks, [], f"{model.__name__} يحمل رابطاً إلى شركة")
 

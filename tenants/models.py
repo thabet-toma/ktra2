@@ -103,6 +103,17 @@ class Tenant(models.Model):
         max_length=32, default='general', db_column='Template',
         help_text='مفتاح قالب الشركة — يحدّد بذرة الحسابات والدفاتر عند الإنشاء',
     )
+    # ISSUE #52: الدفتر المُدار — علمٌ من جنس is_example/import_enabled/store_slug:
+    # القيمة نفسها هي العلم، فلا حقل "مُدار؟" منفصل يمكن أن يتناقض معها. مكتب
+    # محاسبة (Tenant آخر) يملك هذا الدفتر ويديره — **لا يُعَدّ في حصّة خطة أحد
+    # كشركة** (my_companies يستثنيه)، ولا يظهر في مبدّل الشركات العادي، والحذف
+    # ممنوعٌ أصلاً على كل الشركات (TenantViewSet.destroy). PROTECT: لا يُحذف
+    # مكتبٌ يملك دفاتر مُدارة سهواً.
+    managed_by = models.ForeignKey(
+        'self', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='managed_books', db_column='ManagedByTenantID',
+        help_text='مكتب المحاسبة المالك لهذا الدفتر المُدار — فارغ يعني شركة عادية',
+    )
 
     class Meta:
         db_table = 'tenants'

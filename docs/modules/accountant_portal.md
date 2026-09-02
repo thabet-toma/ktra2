@@ -14,10 +14,16 @@
 المنصة** يُدخله المحاسب يدوياً — وبرامج المراجعة والمواعيد والمستندات وإعدادات المكتب.
 الفارق الجوهري بين الطبقتين: **بيانات الطبقة الأولى تخصّ الشركة والمحاسب يقرؤها، وبيانات
 طبقة المكتب تخصّ المحاسب نفسه وهو يكتبها.** ولذلك نطاق طبقة المكتب `accountant=` لا
-`tenant=`، ولا جدول من جداولها يحمل مفتاحاً إلى `Tenant` إطلاقاً — فلا طريق منها إلى دفاتر
-شركة، ولا إلى `post_journal` أو `record_stock_movement`. الرابط الوحيد بين الطبقتين حقلٌ
-اختياري على `PracticeClient` يشير إلى `AccountantEngagement` **للمحاسب نفسه**، وهو مؤشّر
-تنقّل لا قناة بيانات: فتح دفاتر الشركة يظلّ يمرّ بالارتباط النشط وحده.
+`tenant=`، ولا جدول من جداولها يحمل مفتاحاً إلى `Tenant` — فلا طريق منها إلى دفاتر
+شركة، ولا إلى `post_journal` أو `record_stock_movement` — باستثناء واحد موثَّق (ISSUE #52):
+`PracticeClient.managed_tenant`، رابطٌ لدفتر مُدار يملكه مكتب هذا المحاسب نفسه
+(`Tenant.managed_by`)، والعزل عنده لا يعتمد على غياب الحقل بل على
+`TenantViewSet.get_queryset` (`tenants/views.py`) — دفتر مكتبٍ آخر «غير موجود» له
+مهما أشار إليه `PracticeClient`. الرابط الثاني على `PracticeClient` حقلٌ اختياري يشير
+إلى `AccountantEngagement` **للمحاسب نفسه**، وهو مؤشّر تنقّل لا قناة بيانات: فتح دفاتر
+الشركة يظلّ يمرّ بالارتباط النشط وحده. **النوع مشتقّ من الحقلين معاً** — خاصية
+`PracticeClient.client_type` (`managed` / `engaged` / `hybrid` / `unlinked`) — لا حقل
+حالة ثالث يمكن أن يناقضهما (مرآته في الواجهة: `frontend_v2/utils/officeClientType.ts`).
 
 ## أهم الملفات
 
@@ -43,7 +49,7 @@
 | `PortalSettings` | `require_reauth_for_sensitive`، `reauth_window_minutes`، `allow_grant_cost_view`، `invitation_expiry_days`، `max_active_engagements`، `lock_blocks_posting`، `default_grant_profile`، `filing_due_days`، `allow_accountant_reopen`، `export_formats` | `tenant` OneToOne |
 | `TaxPeriodReview` | `period_from/to`، `status` (in_review/needs_company_action/ready/approved/submitted/locked)، `submission_reference`، `locked_at`، `reopen_count` | `tenant`، `vat_statement` OneToOne → `sales.VatStatement`؛ `UniqueConstraint(tenant, period_from, period_to)` |
 | `ReviewQuery` | `entity_type`/`entity_id`، `severity` (blocker/warning/info)، `status` (open/answered/resolved/withdrawn)، `title`، `body`، `answer_body` | `tenant`، `engagement`، `period_review` (SET_NULL) |
-| `PracticeClient` | `trade_name` (إلزامي)، بيانات الاتصال والعنوان، `sector`، `tax_number`، `status` (active/archived) | `accountant` (PROTECT)، `engagement` (SET_NULL — اختياري، ولمالكه وحده)؛ `UniqueConstraint(accountant, trade_name)`؛ **بلا `tenant`** |
+| `PracticeClient` | `trade_name` (إلزامي)، بيانات الاتصال والعنوان، `sector`، `tax_number`، `status` (active/archived)، `client_type` (property مشتقّة: managed/engaged/hybrid/unlinked) | `accountant` (PROTECT)، `engagement` (SET_NULL — اختياري، ولمالكه وحده)، `managed_tenant` (SET_NULL — اختياري، دفترٌ مُدار يملكه مكتب هذا المحاسب — ISSUE #52)؛ `UniqueConstraint(accountant, trade_name)` |
 | `PracticeProgram` | `service_type`، `frequency` (annual/monthly/once)، `team_note`، `due_date`، `status` (planned/in_progress/done) — و«متأخر» **مشتقّ من التاريخ لا حالة مخزَّنة** | `accountant`، `client` (CASCADE)؛ **بلا `tenant`** |
 | `PracticeTask` | `title`، `due_at`، `kind` (appointment/deadline)، `status` (open/done) | `accountant`، `client` (اختياري)؛ **بلا `tenant`** |
 | `PracticeDocument` | `name`، `url`، `uploaded_at` | `accountant`، `client`، `program` (اختياري)؛ **بلا `tenant`** |

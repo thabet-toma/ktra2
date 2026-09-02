@@ -199,6 +199,26 @@ def _bulk_partners(tenant_ids, since):
     return _grouped_count(Partner.objects.all(), tenant_ids)
 
 
+def _count_managed_books(tenant_id, since):
+    """ISSUE #52: عدد الدفاتر المُدارة التي يملكها هذا المكتب (`Tenant.managed_by`)."""
+    from tenants.models import Tenant
+
+    return Tenant.objects.filter(managed_by_id=tenant_id).count()
+
+
+def _bulk_managed_books(tenant_ids, since):
+    """يجمع على `managed_by_id` لا `tenant_id` — لا حقل بهذا الاسم على Tenant."""
+    from tenants.models import Tenant
+
+    qs = Tenant.objects.filter(managed_by_id__isnull=False)
+    if tenant_ids is not None:
+        qs = qs.filter(managed_by_id__in=tenant_ids)
+    return {
+        row["managed_by_id"]: row["n"]
+        for row in qs.values("managed_by_id").order_by().annotate(n=Count("pk"))
+    }
+
+
 LIMITS = {
     spec.key: spec
     for spec in (
@@ -274,6 +294,14 @@ LIMITS = {
             count=_count_partners,
             bulk=_bulk_partners,
         ),
+        LimitSpec(
+            key="office.managed_books",
+            label="الدفاتر المُدارة",
+            unit="دفتر",
+            period=PERIOD_TOTAL,
+            count=_count_managed_books,
+            bulk=_bulk_managed_books,
+        ),
     )
 }
 
@@ -291,6 +319,7 @@ PLAN_DEFAULTS = {
         "company.branches": 1,
         "inventory.products": 500,
         "partners.records": 200,
+        "office.managed_books": 3,
     },
     "Pro": {
         "sales.invoices": 1500,
@@ -302,6 +331,7 @@ PLAN_DEFAULTS = {
         "company.branches": 3,
         "inventory.products": 5000,
         "partners.records": 2000,
+        "office.managed_books": 25,
     },
     "Enterprise": {
         "sales.invoices": None,
@@ -313,6 +343,7 @@ PLAN_DEFAULTS = {
         "company.branches": None,
         "inventory.products": None,
         "partners.records": None,
+        "office.managed_books": None,
     },
 }
 
@@ -340,7 +371,32 @@ def _tenant_id(tenant):
     return getattr(tenant, "pk", None)
 
 
+def _billing_tenant(tenant):
+    """ISSUE #52: الدفتر المُدار ليس مشتركاً — مكتبه هو المشترك.
+
+    الدفتر يُنشأ عبر `create_company` كأي شركة، فيبدأ تجريبياً بأربعة عشر يوماً.
+    ولو بقي كذلك لصار مكتبٌ **مشترِكٌ ودافع** عاجزاً عن الكتابة في دفاتر عملائه
+    بعد أسبوعين. فالخطة والانتهاء يُقرآن من المكتب المالك، ومصدر الحقيقة يبقى
+    واحداً: لا نسخةَ تاريخٍ تُنسخ عند الإنشاء ثم تفترق عند التجديد.
+
+    بلا كلفة على المسار الشائع: `managed_by_id` محمولٌ مع الشركة المحمَّلة،
+    والاستعلام الإضافي لا يقع إلا على دفترٍ مُدار فعلاً.
+    """
+    office_id = getattr(tenant, "managed_by_id", None)
+    if office_id is None:
+        return tenant
+    from tenants.models import Tenant
+
+    office = (
+        Tenant.objects.filter(pk=office_id)
+        .only("SubscriptionPlan", "subscription_ends_at", "managed_by")
+        .first()
+    )
+    return office if office is not None else tenant
+
+
 def _plan_of(tenant):
+    tenant = _billing_tenant(tenant)
     plan = getattr(tenant, "SubscriptionPlan", None)
     if plan is None:
         from tenants.models import Tenant
@@ -375,6 +431,7 @@ def subscription_expiry(tenant) -> dict:
     يقبل كائن الشركة أو معرّفها؛ الكائن لا يكلّف استعلاماً (الحقل محمول معه)،
     والمعرّف وحده يكلّف استعلاماً واحداً بعمودٍ واحد.
     """
+    tenant = _billing_tenant(tenant)
     ends_at = getattr(tenant, "subscription_ends_at", None)
     if ends_at is None and not hasattr(tenant, "subscription_ends_at"):
         from tenants.models import Tenant

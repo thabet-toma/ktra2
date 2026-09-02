@@ -89,7 +89,7 @@ class TenantSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Tenant
-        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled", "is_example", "store_slug", "subscription_ends_at", "subscription_days_left", "subscription_expired", "template"]
+        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled", "is_example", "store_slug", "subscription_ends_at", "subscription_days_left", "subscription_expired", "template", "managed_by"]
         # ST-1: `store_slug` معروض للقراءة فقط عمداً. كتابته تمرّ من
         # `TenantViewSet.set_store_slug` وحدها لأنها تحمل تحقّق الشكل والكلمات
         # المحجوزة؛ لو كان قابلاً للكتابة هنا لصار PATCH عادي على الشركة باباً
@@ -99,7 +99,9 @@ class TenantSerializer(serializers.ModelSerializer):
         # ISSUE #50: `template` للقراءة فقط أيضاً — يُضبَط مرة واحدة في
         # `create_company` عبر حقل `template` الصريح في جسد الإنشاء (لا هذا
         # المسلسل)؛ تبديله لاحقاً منطقٌ منفصل لم يُبنَ بعد (قرار 4).
-        read_only_fields = ["import_enabled", "is_example", "store_slug", "subscription_ends_at", "template"]
+        # ISSUE #52: `managed_by` للقراءة فقط — يُضبَط مرة واحدة عند الإنشاء
+        # عبر `TenantViewSet.managed_books` (POST) لا هذا المسلسل.
+        read_only_fields = ["import_enabled", "is_example", "store_slug", "subscription_ends_at", "template", "managed_by"]
 
     def get_subscription_days_left(self, obj):
         return subscription_expiry(obj)["days_left"]
