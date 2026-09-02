@@ -66,6 +66,7 @@ def dormant_customers(*, tenant_id: int, days: int | None = None) -> list[dict]:
 def build_vat_statement(tenant_id: int, period_from, period_to, *, user=None):  # (4000)
 def next_invoice_number(tenant_id: int, book_number: int = 0, branch=None) -> str:  # (3059)
 def resolve_default_account(tenant_id, code_prefixes=None, acc_type=None, name_kw=None, *, allow_any_of_type=True):  # (91)
+def resolve_product_revenue_account(tenant_id: int) -> Account:  # «4101» من الشجرة أو يُنشئه ويُثبِّته — نظير resolve_service_revenue_account (ISSUE #59) (`sales/services/calc.py`)
 def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلكها accounting.services (731)
 ```
 
@@ -158,6 +159,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
   ينحرف رقم الشاشة عن رقم الخادم. **وشقيقه `SalesOrderSerializer` ما زال على
   القاعدة القديمة** (الخصم بعد الضريبة) — شاشة الطلبيات بلا حقل خصم اليوم.
 - **العميل والمنتج يجب أن يتبعا نفس الـtenant** — يُفحص عند الترحيل (`services.py` للعميل، `:1597` للمنتج).
+- **حسابا إيراد المنتج والخدمة لا يُثبَّتان على رأس الشجرة أبداً**: `default_revenue_account_product`/`_service` (`SalesSettings`) يُتركان فارغين عند إنشاء الشركة (`get_or_create_sales_settings`) — `resolve_product_revenue_account`/`resolve_service_revenue_account` (`sales/services/calc.py`) وحدهما يملآنهما: تحلّان `4101`/`4102` من الشجرة أو تُنشئانهما وتُثبّتانهما. العيب (ISSUE #59، وقبله #53 على جانب الخدمة): أوّل حساب إيراد **بالكود** هو رأس الشجرة «4» (`'4' < '41' < '4101'`)، حسابٌ أب لا يصلح هدفاً للترحيل. `python manage.py fix_product_revenue_account_default` يُصلح صفوف `SalesSettings` القائمة **حيث كان المُثبَّت حساباً أباً فقط** (idempotent، `--dry-run`) — بلا مساس بحسابٍ أو قيدٍ مُرحَّل.
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -175,3 +177,4 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 | `sales/tests/test_invoice_collect.py` | التحصيل من داخل الفاتورة: 60 نقداً + 40 شيكاً ⇒ سند واحد وذمم صفر، الفائض على الحساب، كبت التسوية التلقائية، والتراجع الكامل عند الفشل |
 | `sales/tests/test_sale_return_quantity_guard.py` | المرجع لا يتجاوز القابل للإرجاع (تراكمياً)، ومنتجٌ خارج الفاتورة مرفوض، والتعديل لا يمنع نفسه |
 | `sales/tests/test_invoice_context_tabs.py` | تبويبات سياق الفاتورة: حركاتها المخزنية وحدها وسببُ فراغها، ومطابقة «قبل/بعد» لكشف الحساب سطراً بسطر (وأن أثر المدفوعة بالكامل = إجماليها لا صفر)، ونافذةٌ ترسو على فاتورة قديمة، والمرفق يُضاف لفاتورة مرحّلة ويُحذف بنطاق فاتورته |
+| `sales/tests/test_product_revenue_head_fix.py` | ISSUE #59: شركة بكر تُرحّل بضاعتها على `4101` لا رأس الشجرة، `resolve_product_revenue_account` تُثبِّت وتُعيد الاستعمال، وأمر `fix_product_revenue_account_default` يُصلح الصفّ الخاطئ (حساب أب) وحده، idempotent، و`--dry-run` لا يكتب |

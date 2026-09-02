@@ -181,37 +181,61 @@ def resolve_service_revenue_account(tenant_id: int) -> Account:
     return account
 
 
+def resolve_product_revenue_account(tenant_id: int) -> Account:
+    """ISSUE #59: حساب «مبيعات المنتجات» — يُطابَق من الشجرة أو يُنشأ ويُثبَّت.
+
+    نظير `resolve_service_revenue_account` على جانب المنتج: كان بيع البضاعة
+    يرتدّ إلى أوّل حساب إيراد **بالكود** متى كان `default_revenue_account_product`
+    فارغاً — وهو رأس شجرة الإيرادات «4» في دليل الحسابات المعياري (`'4' < '41'
+    < '4101'`)، حسابٌ أب لا يصلح هدفاً للترحيل. التثبيت على الإعدادات يمنع
+    إنشاء حساب ثانٍ في المرة التالية.
+    """
+    ss = get_or_create_sales_settings(tenant_id)
+    if ss.default_revenue_account_product_id:
+        return ss.default_revenue_account_product
+
+    account = resolve_default_account(
+        tenant_id, ["4101", "41"], "Revenue", "مبيعات", allow_any_of_type=False
+    )
+    if account is None:
+        parent = (
+            Account.objects.filter(
+                tenant_id=tenant_id, account_type="Revenue", is_active=True,
+            )
+            .order_by("code")
+            .first()
+        )
+        # get_or_create على (الشركة، الكود): كودٌ معطَّل بنفس الرقم موجود أصلاً
+        # يُعاد استعماله بدل أن يصطدم بقيد التفرّد.
+        account, created = Account.objects.get_or_create(
+            tenant_id=tenant_id,
+            code="4101",
+            defaults={
+                "name": "مبيعات المنتجات",
+                "account_type": "Revenue",
+                "is_active": True,
+                "parent": parent.parent if parent else None,
+            },
+        )
+        if created:
+            logger.info(
+                "sales.product_revenue_account.created tenant=%s account=%s",
+                tenant_id, account.pk,
+            )
+    ss.default_revenue_account_product = account
+    ss.save(update_fields=["default_revenue_account_product"])
+    return account
+
+
 def _default_revenue_account(tenant_id: int, *, is_service: bool = False) -> Account:
-    """يفضّل الحساب من إعدادات المبيعات (منتج/خدمة)، ثم أول حساب إيرادات نشط."""
-    # T-SERVICELINE: الخدمة لها حسابها دائماً — لا ارتداد إلى إيراد البضائع.
+    """يفضّل الحساب من إعدادات المبيعات (منتج/خدمة)، وإلا يحلّه وينشئه.
+
+    ISSUE #59 / T-SERVICELINE: كلا الجانبين له حسابه دائماً — لا ارتداد إلى
+    حساب الآخر ولا إلى رأس شجرة الإيرادات.
+    """
     if is_service:
         return resolve_service_revenue_account(tenant_id)
-    ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
-    if ss:
-        if is_service and ss.default_revenue_account_service_id:
-            return ss.default_revenue_account_service
-        if (not is_service) and ss.default_revenue_account_product_id:
-            return ss.default_revenue_account_product
-        # fallback على أي من الاثنين
-        if ss.default_revenue_account_product_id:
-            return ss.default_revenue_account_product
-        if ss.default_revenue_account_service_id:
-            return ss.default_revenue_account_service
-    acc = (
-        Account.objects.filter(
-            tenant_id=tenant_id,
-            account_type="Revenue",
-            is_active=True,
-        )
-        .order_by("id")
-        .first()
-    )
-    if not acc:
-        raise ValidationError(
-            "لا يوجد حساب إيرادات نشط للشركة. أنشئ حساب إيرادات أو حدّده على الفاتورة/فئة المنتج "
-            "أو في إعدادات المبيعات."
-        )
-    return acc
+    return resolve_product_revenue_account(tenant_id)
 
 
 def _resolve_revenue_account_for_line(invoice: SalesInvoice, line: SalesInvoiceLine) -> Account:

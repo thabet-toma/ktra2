@@ -188,15 +188,6 @@ def get_or_create_sales_settings(tenant) -> SalesSettings:
     except (Currency.DoesNotExist, Currency.MultipleObjectsReturned):
         default_currency = None
 
-    # محاولة استنتاج حساب إيرادات افتراضي
-    default_rev = (
-        Account.objects.filter(
-            tenant_id=tenant_id, account_type="Revenue", is_active=True
-        )
-        .order_by("code")
-        .first()
-    )
-
     # ضريبة VAT افتراضية
     default_vat = None
     try:
@@ -215,14 +206,15 @@ def get_or_create_sales_settings(tenant) -> SalesSettings:
         tenant_id=tenant_id,
         default_customer=default_customer,
         default_currency=default_currency,
-        default_revenue_account_product=default_rev,
-        # issue #53: **لا يُثبَّت حساب الخدمة هنا.** `default_rev` أوّل حساب
-        # إيراد بالكود — وهو رأس الشجرة «4» في دليل الحسابات المعياري، أي حسابٌ
-        # أب لا يصلح هدفاً للترحيل. وتثبيتُه هنا كان يُقصِر
-        # `resolve_service_revenue_account` (`sales/services/calc.py`) عن عمله
-        # كلّه: هي تُصرّح بأن حالها الطبيعي «كل شركة لم تُضبط يدوياً»، وتحلّ
-        # «4102 إيرادات الخدمات» وتُنشئه إن غاب ثم تُثبّته — فلا تصل إليها
-        # شركةٌ قطّ لأن الحقل مملوءٌ سلفاً بالرأس. فيُترك فارغاً لتقوم هي به.
+        # issue #53/#59: **لا يُثبَّت حسابا إيراد المنتج ولا الخدمة هنا.** أوّل
+        # حساب إيراد بالكود هو رأس الشجرة «4» في دليل الحسابات المعياري (الترتيب
+        # النصّي `'4' < '41' < '4101' < '4102'`) — حسابٌ أب لا يصلح هدفاً
+        # للترحيل. وتثبيتُه هنا كان يُقصِر `resolve_service_revenue_account` و
+        # `resolve_product_revenue_account` (`sales/services/calc.py`) عن عملهما:
+        # هما تُصرّحان بأن حالهما الطبيعي «كل شركة لم تُضبط يدوياً»، وتحلّان
+        # «4101»/«4102» أو تُنشئانهما إن غابا ثم تُثبّتانهما — فلا تصلان إليهما
+        # شركةٌ قطّ لأن الحقلين مملوءان سلفاً بالرأس. فيُتركان فارغين لتقوما بذلك.
+        default_revenue_account_product=None,
         default_revenue_account_service=None,
         default_vat_rate=default_vat,
     )
