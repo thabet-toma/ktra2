@@ -339,6 +339,110 @@ def create_company(
         return tenant
 
 
+# ── ISSUE #64: تبديل قالب الشركة (القرار 4 — يرفع القناع ولا ينزع المزروع) ──
+
+def switch_company_template(tenant: Tenant, template: str, *, actor_user=None) -> dict:
+    """يبدّل `tenant.template` ويزرع ما تحتاجه بذرة القالب الجديد ولا تملكه
+    الشركة بعد — حسابات دليلٍ وأنواع دفاتر. **لا نزع إطلاقاً**: حسابٌ أو دفترٌ
+    زرعه قالبٌ سابق يبقى كما هو (لا حذف، لا تعطيل `is_active`، لا إعادة تسمية) —
+    القناع الحيّ (`TemplateSurfacePermission`) هو ما يخفيه عن القالب الجديد، لا
+    محو الصفّ. حساب موجود بكودٍ يتكرر في القالبين (مثل `4102`) يبقى باسمه
+    القديم — لا يُعاد إنشاؤه ولا يُعاد تسميته على بذرة القالب الجديد.
+
+    ذرّي بالكامل (قفل صفّ الشركة)، ويعيد `{tenant, accounts_created,
+    book_types_created}` كي تسجّله نقطة الـAPI في سجل التدقيق ويعرضه للمستخدم.
+    """
+    template_config = COMPANY_TEMPLATES.get(template)
+    if template_config is None:
+        raise ValidationError(f"قالب الشركة «{template}» غير معروف.")
+
+    with transaction.atomic():
+        tenant = Tenant.objects.select_for_update().get(pk=tenant.pk)
+        old_template = tenant.template
+
+        # 1) الحسابات الناقصة من بذرة القالب الجديد — الصفوف مرتّبة أباً قبل
+        # ابنه في كلا السِجلّين (COA_DATA و ACCOUNTING_FIRM_COA)، فمرورٌ واحد
+        # كافٍ. حسابٌ بنفس الكود موجود مسبقاً (من القالب القديم) يُترَك كما هو.
+        coa_rows = template_config['coa'] or COA_DATA
+        wanted_codes = [row[0] for row in coa_rows]
+        account_map = {
+            acc.code: acc
+            for acc in Account.objects.filter(tenant=tenant, code__in=wanted_codes)
+        }
+        accounts_created: list[str] = []
+        for code, acc_name, acc_type, parent_code in coa_rows:
+            if code in account_map:
+                continue
+            parent = account_map.get(parent_code) if parent_code else None
+            if parent_code and parent is None:
+                logger.warning(
+                    "switch_company_template: tenant=%s missing parent %s for "
+                    "%s — skipped (seed row out of order?)",
+                    tenant.TenantID, parent_code, code,
+                )
+                continue
+            account = Account.objects.create(
+                tenant=tenant, code=code, name=acc_name,
+                account_type=acc_type, parent=parent, is_active=True,
+            )
+            account_map[code] = account
+            accounts_created.append(code)
+
+        # 2) أنواع الدفاتر الناقصة — أي نوعٍ للشركة منه دفترٌ واحد على الأقل
+        # (من أي قالب) لا يُعاد زرعه، فلا تكرار على `unique_together`.
+        doc_type_labels = dict(TenantBook.DOCUMENT_TYPES)
+        doc_types = template_config['document_types'] or list(doc_type_labels)
+        existing_doc_types = set(
+            TenantBook.objects.filter(tenant=tenant, document_type__in=doc_types)
+            .values_list('document_type', flat=True).distinct()
+        )
+        book_types_created: list[str] = []
+        for doc_type in doc_types:
+            if doc_type in existing_doc_types:
+                continue
+            doc_label = doc_type_labels[doc_type]
+            for book_number in range(1, 11):
+                TenantBook.objects.create(
+                    tenant=tenant, document_type=doc_type, book_number=book_number,
+                    name=f"{doc_label} — دفتر {book_number}",
+                    last_used_number=0, is_active=True,
+                )
+            book_types_created.append(doc_type)
+
+        tenant.template = template_config['key']
+        tenant.save(update_fields=['template'])
+
+        from accounting.models import AccountingAuditLog
+        AccountingAuditLog.objects.create(
+            tenant=tenant,
+            user=actor_user,
+            action='TEMPLATE_SWITCH',
+            model_name='Tenant',
+            object_id=tenant.pk,
+            change_details=(
+                f"template: {old_template} → {template_config['key']}; "
+                f"accounts_created={accounts_created}; "
+                f"book_types_created={book_types_created}"
+            ),
+        )
+
+    # القناع الحيّ يقرأ `tenant.template` عبر get_tenant — النشر أحادي الشركة
+    # يخزّن مرجعاً للكائن نفسه بمعزل عن هذه الصفقة (`core.tenant_utils`)، فبلا
+    # هذا الإبطال يبقى القناع يقرأ القيمة القديمة حتى إعادة تشغيل العملية.
+    from core.tenant_utils import invalidate_tenant_cache
+    invalidate_tenant_cache()
+
+    logger.info(
+        "template_switch tenant=%s %s -> %s accounts_created=%s book_types_created=%s",
+        tenant.TenantID, old_template, tenant.template, accounts_created, book_types_created,
+    )
+    return {
+        'tenant': tenant,
+        'accounts_created': accounts_created,
+        'book_types_created': book_types_created,
+    }
+
+
 def set_example_company(tenant: Tenant | None) -> None:
     """يعيّن شركة المثال الوحيدة ويزامن عضويات الوصول التلقائية بأمان."""
     user_model = get_user_model()

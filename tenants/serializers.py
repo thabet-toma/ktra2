@@ -96,9 +96,10 @@ class TenantSerializer(serializers.ModelSerializer):
         # خلفياً يضع أي قيمة (`api`, `ADMIN`, نصّاً فارغاً) بلا أي فحص.
         # تاريخ الانتهاء قرار إداري للمنصة — كتابته من لوحة السوبر أدمن وحدها
         # (`platform_company_detail`)؛ لو قُبل هنا لَمدّد كلُّ مديرٍ تجربتَه.
-        # ISSUE #50: `template` للقراءة فقط أيضاً — يُضبَط مرة واحدة في
-        # `create_company` عبر حقل `template` الصريح في جسد الإنشاء (لا هذا
-        # المسلسل)؛ تبديله لاحقاً منطقٌ منفصل لم يُبنَ بعد (قرار 4).
+        # ISSUE #50/#64: `template` للقراءة فقط أيضاً — يُضبَط عند الإنشاء عبر
+        # حقل `template` الصريح في جسد الإنشاء، وتبديله لاحقاً عبر
+        # `TenantViewSet.set_template` وحدها (تحمل بذرةً وتحقّقاً لا يصحّان في
+        # هذا المسلسل العام — نفس تعليل `store_slug` أعلاه).
         # ISSUE #52: `managed_by` للقراءة فقط — يُضبَط مرة واحدة عند الإنشاء
         # عبر `TenantViewSet.managed_books` (POST) لا هذا المسلسل.
         read_only_fields = ["import_enabled", "is_example", "store_slug", "subscription_ends_at", "template", "managed_by"]

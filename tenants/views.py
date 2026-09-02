@@ -473,6 +473,43 @@ class TenantViewSet(viewsets.ModelViewSet):
                     tenant.pk, slug, request.user.pk)
         return Response({"TenantID": tenant.pk, "store_slug": tenant.store_slug})
 
+    # ── ISSUE #64: تبديل قالب الشركة (القرار 4) ──
+    @action(detail=True, methods=["post"], url_path="set-template")
+    def set_template(self, request, pk=None):
+        """يبدّل قالب الشركة — القناع الحيّ يتبدّل فوراً، ولا يُنزَع أي مزروع.
+
+        body: {"template": "general" | "accounting_firm"}. مثل `set_store_slug`:
+        نقطة كتابةٍ خاصّة لا `PATCH` عام — `template` يبقى للقراءة فقط في
+        `TenantSerializer` لأن التبديل يحمل بذرةً وتحقّقاً لا يصحّان في مسلسلٍ
+        عام. بصلاحية `admin.settings.manage` — نفس بوابة بقية إعدادات الشركة.
+        """
+        tenant = self.get_object()
+        self._require_company_manager(request, tenant, "admin.settings.manage")
+
+        from .company_templates import COMPANY_TEMPLATES
+        template = request.data.get("template")
+        if template not in COMPANY_TEMPLATES:
+            raise DRFValidationError({"template": f"قالب الشركة «{template}» غير معروف."})
+
+        from .services import switch_company_template
+        try:
+            result = switch_company_template(tenant, template, actor_user=request.user)
+        except DjangoValidationError as e:
+            raise DRFValidationError({"detail": e.messages if hasattr(e, "messages") else str(e)})
+        tenant = result["tenant"]
+        logger.info(
+            "template-switch: tenant=%s template=%s accounts_created=%s "
+            "book_types_created=%s by_user=%s",
+            tenant.pk, tenant.template, result["accounts_created"],
+            result["book_types_created"], request.user.pk,
+        )
+        return Response({
+            "TenantID": tenant.pk,
+            "template": tenant.template,
+            "accounts_created": result["accounts_created"],
+            "book_types_created": result["book_types_created"],
+        })
+
     @action(detail=False, methods=["get"], url_path="my-companies")
     def my_companies(self, request):
         user = request.user

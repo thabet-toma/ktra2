@@ -1,8 +1,19 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Loader2, Save, Trash2, UserPlus, X } from "lucide-react";
+import { Building2, Calculator, Loader2, Save, Trash2, UserPlus, X } from "lucide-react";
 import { apiGetObject, apiPatchObject, apiPostObject } from "../../services/restApi";
 import type { Tenant, CompanyMembership } from "../../contexts/CompanyContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
+import { diffTemplateSwitch } from "../../utils/companyTemplateSwitch";
+import { VIEW_LABELS } from "./Breadcrumb";
+
+const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
+  Building2,
+  Calculator,
+};
+
+/** اسمٌ عربي مقروء للشاشة، أو مفتاحها إن لم يُسجَّل بعد في `VIEW_LABELS`. */
+const viewLabel = (view: string): string => (VIEW_LABELS as Record<string, string>)[view] ?? view;
 
 /** task12 M4 — إدارة الشركة: إعادة التسمية + الأعضاء والأدوار.
  * كانت الشركة بلا أي واجهة تعديل/أعضاء (CompanySwitcher = إنشاء وتبديل فقط). */
@@ -59,6 +70,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
   const [newRole, setNewRole] = useState("staff");
   const [busyId, setBusyId] = useState<number | null>(null);
   const [addBusy, setAddBusy] = useState(false);
+  const [switchingTemplate, setSwitchingTemplate] = useState(false);
 
   const base = tenant ? `tenants/companies/${tenant.TenantID}` : "";
 
@@ -112,6 +124,40 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
         setSavingName(false);
       }
     }, "تم حفظ اسم الشركة.");
+
+  // ISSUE #64 — تبديل قالب الشركة: يرفع القناع الحيّ ولا ينزع أي حسابٍ أو
+  // دفترٍ مزروع (القرار 4). التحذير يعرض ما سيختفي وما سيظهر فعلاً — مشتقّ من
+  // نفس السِجلّ الذي يطبّقه القناع (`utils/companyTemplateSwitch.ts`)، لا نصّاً
+  // عاماً.
+  const handleSwitchTemplate = (targetKey: CompanyTemplateKey) =>
+    run(async () => {
+      if (targetKey === tenant.template) return;
+      const targetName = COMPANY_TEMPLATES.find((t) => t.key === targetKey)?.name ?? targetKey;
+      const diff = diffTemplateSwitch(tenant.template, targetKey);
+      const lines: string[] = [];
+      if (diff.disappearing.length) {
+        lines.push(`ستختفي شاشات: ${diff.disappearing.map(viewLabel).join("، ")}.`);
+      }
+      if (diff.appearing.length) {
+        lines.push(`ستظهر شاشات: ${diff.appearing.map(viewLabel).join("، ")}.`);
+      }
+      lines.push("لا يُحذف ولا يُعطَّل أي حساب أو دفتر موجود — الحسابات والدفاتر الناقصة للقالب الجديد تُزرع فقط.");
+      const ok = await confirm({
+        title: `التبديل إلى «${targetName}»`,
+        message: lines.join("\n"),
+        confirmText: "بدّل القالب",
+        cancelText: "تراجع",
+      });
+      if (!ok) return;
+
+      setSwitchingTemplate(true);
+      try {
+        await apiPostObject(`${base}/set-template/`, { template: targetKey });
+        await onChanged();
+      } finally {
+        setSwitchingTemplate(false);
+      }
+    }, "تم تبديل قالب الشركة.");
 
   const handleAdd = () =>
     run(async () => {
@@ -216,6 +262,44 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
           </div>
           {!isManager && <p className="text-[11px] opacity-60 mt-1">تعديل الاسم متاح لمدير الشركة فقط.</p>}
         </div>
+
+        {/* قالب الشركة — ISSUE #64: التبديل يرفع القناع ولا ينزع المزروع */}
+        {isManager && (
+          <div className="mb-6">
+            <label className="text-xs font-bold opacity-80 block mb-1.5">قالب الشركة</label>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {COMPANY_TEMPLATES.map((option) => {
+                const Icon = TEMPLATE_ICONS[option.icon] ?? Building2;
+                const isCurrent = (tenant.template ?? DEFAULT_COMPANY_TEMPLATE) === option.key;
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => void handleSwitchTemplate(option.key)}
+                    disabled={isCurrent || switchingTemplate}
+                    aria-pressed={isCurrent}
+                    className={`flex items-start gap-2 rounded-lg border p-3 text-right transition disabled:cursor-not-allowed ${
+                      isCurrent
+                        ? "border-[var(--ktra-accent,#1857a4)] bg-[var(--ktra-accent,#1857a4)]/10"
+                        : "border-[var(--ktra-border,#ddd)] hover:border-[var(--ktra-accent,#1857a4)]"
+                    }`}
+                  >
+                    <Icon className="mt-0.5 h-4 w-4 shrink-0 opacity-70" />
+                    <span className="flex-1">
+                      <span className="block text-sm font-bold" style={{ color: "var(--ktra-ink)" }}>
+                        {option.name}{isCurrent ? " (الحالي)" : ""}
+                      </span>
+                      <span className="block text-[11px] opacity-70">{option.description}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] opacity-60 mt-1">
+              التبديل لا يحذف ولا يعطّل أي حساب أو دفتر — يخفي شاشات القالب الجديد لا يحتاجها فقط، ويزرع ما ينقصه.
+            </p>
+          </div>
+        )}
 
         {/* الأعضاء */}
         <div>

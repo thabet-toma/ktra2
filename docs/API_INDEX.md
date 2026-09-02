@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **574**
+عدد النقاط: **575**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -571,6 +571,7 @@
 | `/api/tenants/companies/{pk}/members/set-import-access/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/set-import-enabled/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/set-store-slug/` | `TenantViewSet` | `tenants/views.py` |
+| `/api/tenants/companies/{pk}/set-template/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/currencies/` | `CurrencyViewSet` | `tenants/views.py` |
 | `/api/tenants/currencies/{pk}/` | `CurrencyViewSet` | `tenants/views.py` |
 | `/api/tenants/handover-requests/` | `BookHandoverRequestViewSet` | `tenants/views.py` |
