@@ -173,6 +173,10 @@ export const TEMPLATE_HIDDEN_VIEWS: Record<string, readonly string[]> = {
     // سند الصرف يبقى (التذكرة تُبقيه صراحةً) ولو كان مساره تحت اللوجستيات.
     'purchase-invoices', 'price-offers', 'purchase-return', 'purchase-receipts',
     'purchase-settings',
+    // شاشات بضاعةٍ تعيش داخل مجموعة **المبيعات** فبقيت ظاهرةً لمكتبٍ بلا مخزون:
+    // الإرسالية تسلّم بضاعة، وأرباح الفواتير تُشتقّ من تكلفة البضاعة المباعة،
+    // وتقرير المحجوزات حجزُ مخزون. فاتورة الأتعاب لا تمرّ بأيٍّ منها.
+    'sales-delivery-notes', 'invoice-profits', 'reserved-stock',
     // المتجر
     'store-settings',
     // ما بعد البيع

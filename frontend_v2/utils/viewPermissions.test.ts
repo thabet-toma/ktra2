@@ -32,6 +32,14 @@ test('accounting_firm يخفي شاشات المخزون والاستيراد و
   }
 });
 
+test('accounting_firm يخفي شاشات البضاعة الساكنة داخل مجموعة المبيعات', () => {
+  // هذه الثلاث تعيش تحت «المبيعات» لا تحت «المخزون»، فبقيت ظاهرةً لمكتبٍ بلا
+  // مخزون رغم أن القناع أخفى مجموعة المخزون كاملةً.
+  for (const view of ['sales-delivery-notes', 'invoice-profits', 'reserved-stock']) {
+    assert.equal(templateHidesView(view, 'accounting_firm'), true, view);
+  }
+});
+
 test('accounting_firm يخفي شاشات المشتريات — تتّكئ على حسابات أسقطتها البذرة', () => {
   for (const view of [
     'purchase-invoices', 'purchase-receipts', 'purchase-return', 'purchase-settings',

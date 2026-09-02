@@ -116,7 +116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   type NavLink = { view: AppView; label: string; icon: React.ReactNode; path?: string; newTab?: boolean; roles?: string[]; perm?: string };
 
   // 2) المبيعات — إعدادات المبيعات آخراً (Section 9).
-  const salesLinks: NavLink[] = [
+  const salesLinksAll: NavLink[] = [
     { view: "sales-invoices", label: "فواتير المبيعات", icon: <FileText className="h-4 w-4" /> },
     { view: "sales-quotations", label: "العروض والطلبيات", icon: <ClipboardList className="h-4 w-4" /> },
     { view: "credit-debit-notes", label: "الإشعارات المدينة/الدائنة", icon: <FileText className="h-4 w-4" /> },
@@ -126,6 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "reserved-stock", label: "تقرير المحجوزات", icon: <ClipboardList className="h-4 w-4" /> },
     { view: "sales-settings", label: "إعدادات المبيعات", icon: <SettingsIcon className="h-4 w-4" /> },
   ];
+  const salesLinks = salesLinksAll.filter((l) => !hiddenByTemplate(l.view));
 
   // 3) العملاء
   const customersLinks: NavLink[] = [
@@ -135,7 +136,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   ];
 
   // 4) المشتريات
-  const purchasesLinks: NavLink[] = [
+  const purchasesLinksAll: NavLink[] = [
     { view: "purchase-invoices", label: "فواتير الشراء", icon: <NoteIcon className="h-4 w-4" /> },
     { view: "price-offers", label: "عروض الأسعار", icon: <FileText className="h-4 w-4" /> },
     { view: "purchase-receipts", label: "إرساليات الشراء", icon: <Truck className="h-4 w-4" /> },
@@ -144,6 +145,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "purchase-settings", label: "إعدادات الشراء", icon: <SettingsIcon className="h-4 w-4" /> },
     { view: "supplier-management", label: "الموردين", icon: <UsersIcon className="h-4 w-4" /> },
   ];
+  // سند الصرف والموردون يبقيان — المكتب يدفع ويسدّد ذمّة 2101؛ ما يسقط هو
+  // فواتير البضاعة وإرسالياتها ومرجعها وإعداداتها.
+  const purchasesLinks = purchasesLinksAll.filter((l) => !hiddenByTemplate(l.view));
 
   // 5) الاستيراد
   const importLinksAll: NavLink[] = [

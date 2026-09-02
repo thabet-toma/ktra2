@@ -177,11 +177,13 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Do not activate the tenant from the POST response alone. The membership
     // read is the source of truth for onboarding completion and owner role.
     const memberships = await fetchCompanies({ commit: false });
+    // `is_default` **ليس** شرط نجاح: `create_company` تجعلها افتراضية للشركة
+    // الأولى وحدها (`is_first`)، فكل شركةٍ ثانيةٍ فصاعداً كانت تُنشأ بنجاح ثم
+    // تُقابَل برسالة فشلٍ حمراء. الشرط الصحيح هو العضوية بدور مدير.
     const confirmedMembership = memberships?.find(
       (membership) =>
         membership.tenant.TenantID === newCompany.TenantID &&
-        membership.role === "manager" &&
-        membership.is_default === true
+        membership.role === "manager"
     );
     if (!confirmedMembership) {
       throw new Error("تم إرسال طلب الإنشاء، لكن تعذّر تأكيد عضوية المدير الافتراضية. أعد تحميل الصفحة للتحقق.");
