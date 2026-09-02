@@ -50,6 +50,7 @@ PRACTICE_ROUTES = (
     ("get", f"{BASE}/settings/"),
     ("patch", f"{BASE}/settings/"),
     ("get", f"{BASE}/deadlines/"),
+    ("get", f"{BASE}/dashboard/"),
 )
 
 

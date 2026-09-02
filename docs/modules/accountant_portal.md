@@ -128,6 +128,8 @@ def list_practice_documents(*, accountant, client_id=None, program_id=None)
 def create_practice_document(*, accountant, data)
 def delete_practice_document(*, accountant, document_id)
 def practice_deadlines(*, accountant, today=None)   # برامج المكتب ومواعيده + مواعيد إقرارات الشركات المرتبطة
+def practice_dashboard(*, accountant, today=None)   # ISSUE #58 — لوحة المكتب لصاحب المكتب: عملاء + استحقاقات + أتعاب غير محصّلة، بعدد استعلامات ثابت
+def staff_practice_dashboard(*, staff, today=None)  # ISSUE #58 (القرار 7) — لوحة موظفٍ بلا ملف محاسب: عملاؤه المُسنَدون فقط عبر عضويته على دفترهم المُدار؛ استحقاقات وأتعاب فارغتان دوماً
 ```
 
 ## أهم الـAPI endpoints
@@ -154,6 +156,7 @@ def practice_deadlines(*, accountant, today=None)   # برامج المكتب و
 | GET | `practice/documents/` · POST `documents/upload/` (multipart) · DELETE `documents/{id}/` | `practice_views.PracticeDocument*` — الرفع عبر `core.media_views.upload_media_file` المشتركة وبحصّة `media_upload` نفسها |
 | GET/PATCH | `practice/settings/` | `practice_views.PracticeSettingsView` |
 | GET | `practice/deadlines/` | `practice_views.PracticeDeadlinesView` — برامج المكتب ومواعيده **ومواعيد إقرارات الشركات المرتبطة** في قائمة واحدة |
+| GET | `practice/dashboard/` | `practice_views.PracticeDashboardView` (ISSUE #58) — **البوابة الوحيدة المخفَّفة** في سطح المكتب: صاحب ملفٍ مهني يرى `practice_dashboard` (عملاؤه، `practice_deadlines`، والأتعاب غير المحصّلة من دفتره هو وحده)؛ مستخدمٌ بلا `AccountantProfile` (موظف مكتب، القرار 7) يرى `staff_practice_dashboard` — عملاء الدفاتر المُدارة التي هو عضوٌ فيها (`UserCompanyMembership` على `PracticeClient.managed_tenant`، لا حقل إسنادٍ ثالث) فقط، فارغة إن لم يُسنَد له شيء — 200 لا 404. كل مسار آخر في `practice_views.py` يبقى خلف `PracticeView` (يتطلّب ملفاً مهنياً) بلا تخفيف |
 | GET | `/api/accountant/client/documents\|statements\|trend\|summary/` | `ClientDocumentsView` … |
 | POST/GET | `/api/accountant/tax/periods/prepare/` · `{id}/approve\|reopen\|mark-submitted/` · `{id}/readiness/` | `TaxPeriodPrepareView` · `TaxPeriodActionView` · `TaxPeriodReadinessView` |
 | GET/POST | `/api/accountant/review/queries/` (+ `{id}/answer\|resolve\|withdraw/`) | `ReviewQueryListCreateView` · `ReviewQueryActionView` |
@@ -192,6 +195,7 @@ def practice_deadlines(*, accountant, today=None)   # برامج المكتب و
 - **دفاتر الزبون قراءة فقط** — لا مسار كتابة على مستندات الشركة في هذه الوحدة (`views.py` — `ClientDocumentsView` وأخواتها). وطبقة المكتب **لا تنقض هذه القاعدة**: ما يكتبه المحاسب هناك بياناتُ مكتبه هو (زبائنه وبرامجه ومواعيده ومستنداته)، لا بيانات الشركة — ولا جدول من جداول المكتب يحمل مفتاحاً إلى `Tenant`.
 - **نطاق طبقة المكتب `accountant=` لا `tenant=`** — كل استعلام في `practice.py` يبدأ به، وصفُّ مكتبٍ آخر يعود **404 «غير موجود»** لا 403 (`practice.py`): ردُّ «ممنوع» يُقرّ بوجود ما يخفيه. ومسارات المكتب هوياتية فلا تحتاج `X-Tenant-Id`.
 - **`settings.ACCOUNTANT_PRACTICE_ENABLED` مُطفأً يجعل كل مسار مكتب 404** — الحارس في `initial` واحدة قبل المصادقة وقبل وجود `AccountantProfile` (`practice_views.py`).
+- **البوابة الهوياتية (`AccountantProfile` إلزامي) مُخفَّفة على `practice/dashboard/` وحده** (ISSUE #58، القرار 7): `PracticeDashboardView` لا يرث `PracticeView`، بل يعيد تطبيق فحص العَلَم وحده ثم يفرّق داخل `get()` — موظفٌ بلا ملف مهني يرى `staff_practice_dashboard` (`practice.py`) بدل 404. الإسناد بعضوية `UserCompanyMembership` على `PracticeClient.managed_tenant` نفسه — **لا حقل تعيين ثالث** — وزبونٌ بلا دفتر مُدار لا سبيل لإسناده هكذا فيبقى لصاحب المكتب وحده. أي مسار جديد تحت `practice_views.py` يجب أن يرث `PracticeView` كسائر السطح لا هذا الاستثناء.
 - **الفترة المقدَّمة مقفلة نهائياً**: `submit_tax_period` يضع `locked`، وإعادة الفتح ترفض `submitted`/`locked` (`services.py` (`reopen_tax_period`))، وحارس `guards.py` (`tax_period_lock_guard`) يمنع أي ترحيل بتاريخ داخلها ما لم تُطفئ الشركة `lock_blocks_posting`.
 - **لا اعتماد مع موانع مفتوحة** (`services.py` (`approve_tax_period`))، ولا تقديم قبل الاعتماد (`services.py` (`submit_tax_period`))، وسبب إعادة الفتح إلزامي (`services.py` (`reopen_tax_period`)).
 - **الأفعال الحسّاسة تلزمها إعادة كلمة المرور**: الاعتماد والتقديم وتعديل النطاق (`services.py` (`require_reauth`)، `views.py`)، ولا تُسجَّل كلمة المرور ولا طولها (`services.py`).
@@ -216,3 +220,4 @@ def practice_deadlines(*, accountant, today=None)   # برامج المكتب و
 | `tests/test_mysql_m2_concurrency.py` (72) · `test_mysql_audit.py` (41) | استهلاك الدعوة مرة واحدة تحت تزامن حقيقي، وثبات صفوف التدقيق (MySQL) |
 | `tests/test_demo_workspace.py` (134) · `test_platform_modules.py` (42) | فتح واجهة المحاسب وتبديل ترخيص الوحدة من لوحة المنصة (سوبر أدمن) |
 | `tests/test_client_book_tax_periods.py` | ISSUE #57 — تجهيز/جاهزية/قفل الفترة عبر `X-Tenant-Id` على دفتر عميل مُدار؛ القفل لا يمسّ دفتر المكتب ولا دفتر عميلٍ آخر |
+| `tests/test_practice_dashboard.py` | ISSUE #58 — لوحة المكتب: عدد الاستعلامات ثابتٌ من 3 إلى 60 عميلاً (`CaptureQueriesContext`)، عزل مكتبٍ عن آخر، الأتعاب من دفتر المكتب لا دفتر عميله المُدار؛ والقرار 7 — موظفٌ مُسنَد يرى عملاءه المُسنَدين فقط (لا 404، لا الكل)، وموظفٌ غير مُسنَد يرى صفراً، وموظف مكتبٍ آخر لا يرى شيئاً منه |

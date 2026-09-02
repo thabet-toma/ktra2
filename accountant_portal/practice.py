@@ -9,10 +9,12 @@
 """
 import logging
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 
@@ -698,4 +700,136 @@ def practice_deadlines(*, accountant, today=None):
             "overdue": sum(1 for item in items if item["is_overdue"]),
             "due_soon": sum(1 for item in items if 0 <= item["days_left"] <= DUE_SOON_DAYS),
         },
+    }
+
+
+# ── لوحة المكتب (ISSUE #58) ──────────────────────────────────────────────────
+#
+# ثلاثة عناصر لا رابع: قائمة العملاء وحالة كل دفتر، الاستحقاقات القريبة
+# (`practice_deadlines`)، والأتعاب غير المحصّلة. أرصدة الصفحة كلّها بعدد
+# استعلامات ثابتٍ مهما كثر العملاء — لا استعلام لكل صفّ (§الأداء).
+
+
+def _dashboard_client_row(client):
+    return {
+        "id": client.pk,
+        "trade_name": client.trade_name,
+        "status": client.status,
+        "client_type": client.client_type,
+        "last_activity": client.updated_at,
+    }
+
+
+def _office_tenant_ids(accountant):
+    """الشركات التي يديرها هذا المحاسب بصفته مالك مكتبٍ لا زبوناً مُدارَ دفتره.
+
+    `tenant__managed_by__isnull=True` يستثني دفاتر الزبائن المُدارة (ISSUE #52):
+    المحاسب عضوٌ `manager` فيها أيضاً لأنه من يشغّلها، فبلا هذا الشرط تختلط
+    مبيعات دفتر الزبون بأتعاب مكتبه نفسه.
+    """
+    from tenants.models import UserCompanyMembership
+
+    return list(
+        UserCompanyMembership.objects.filter(
+            user=accountant, role="manager", tenant__managed_by__isnull=True,
+        ).values_list("tenant_id", flat=True)
+    )
+
+
+def _unpaid_fee_invoices(accountant):
+    """فواتير الأتعاب غير المحصّلة — من دفتر مكتب المحاسب نفسه، لا من دفاتر عملائه.
+
+    استعلامان ثابتان مهما كثرت الفواتير: عضويات الإدارة، ثم فواتير البيع الآجلة
+    المرحّلة بمتبقٍّ أكبر من صفر (نفس صيغة `SalesReportViewSet.aging`).
+    """
+    from sales.models import SalesInvoice
+
+    tenant_ids = _office_tenant_ids(accountant)
+    if not tenant_ids:
+        return {"invoices": [], "total": str(Decimal("0.00"))}
+
+    rows = (
+        SalesInvoice.objects.filter(
+            tenant_id__in=tenant_ids,
+            status=SalesInvoice.STATUS_POSTED,
+            invoice_type=SalesInvoice.INVOICE_CREDIT,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+        )
+        .annotate(remaining=F("grand_total") - F("amount_paid"))
+        .filter(remaining__gt=0)
+        .select_related("customer")
+        .order_by("invoice_date", "id")
+    )
+    invoices = []
+    total = Decimal("0.00")
+    for invoice in rows:
+        total += invoice.remaining
+        invoices.append({
+            "invoice_id": invoice.pk,
+            "invoice_number": invoice.invoice_number,
+            "tenant_id": invoice.tenant_id,
+            "customer_id": invoice.customer_id,
+            "customer_name": invoice.customer.name if invoice.customer_id else "",
+            "invoice_date": invoice.invoice_date,
+            "remaining": str(invoice.remaining),
+        })
+    return {"invoices": invoices, "total": str(total)}
+
+
+def practice_dashboard(*, accountant, today=None):
+    """لوحة المكتب: العناصر الثلاثة معاً بعدد استعلامات ثابت مهما كثر العملاء."""
+    today = today or timezone.localdate()
+    clients = [_dashboard_client_row(client) for client in list_practice_clients(accountant=accountant)]
+    return {
+        "clients": clients,
+        "deadlines": practice_deadlines(accountant=accountant, today=today),
+        "unpaid_fees": _unpaid_fee_invoices(accountant),
+    }
+
+
+# ── لوحة المكتب لموظّف بلا ملف محاسب (القرار 7) ──────────────────────────────
+#
+# القيد الوحيد المتاح اليوم لإسناد زبونٍ لموظف هو نفسه الذي أسّسه ISSUE #52:
+# عضوية `UserCompanyMembership` على **دفتر العميل المُدار نفسه** — لا حقل
+# تعيين ثالث، ولا جدول إسنادٍ جديد. زبونٌ بلا دفتر مُدار (اسمٌ مجرّد، أو
+# مربوطٌ بإذن `engagement` لا تشغيل) لا يملك دفتراً تُمنح عليه عضوية أصلاً،
+# فيبقى مرئياً لصاحب المكتب (`accountant=`) وحده — لا سبيل لإسناده هكذا.
+
+
+def _staff_assigned_client_rows(staff):
+    """عملاء الدفاتر المُدارة التي هذا الموظف عضوٌ فيها — استعلامان ثابتان."""
+    from tenants.models import UserCompanyMembership
+
+    book_ids = list(
+        UserCompanyMembership.objects.filter(
+            user=staff, tenant__managed_by__isnull=False,
+        ).values_list("tenant_id", flat=True)
+    )
+    if not book_ids:
+        return []
+    clients = (
+        PracticeClient.objects.filter(managed_tenant_id__in=book_ids)
+        .select_related("engagement", "managed_tenant")
+        .order_by("trade_name", "id")
+    )
+    return [_dashboard_client_row(client) for client in clients]
+
+
+def staff_practice_dashboard(*, staff, today=None):
+    """لوحة المكتب لموظفٍ لا ملف محاسبٍ له — عملاؤه المُسنَدون فقط.
+
+    لا استحقاقات مكتبٍ ولا أتعاباً هنا: كلاهما مملوكٌ لصاحب المكتب (`accountant=`
+    على `PracticeProgram`/`PracticeTask`، أو عضوية `manager` على دفتر المكتب
+    نفسه للأتعاب) لا للموظف — فتعودان فارغتين بنفس شكل استجابة صاحب المكتب كي
+    لا تتفرّع الواجهة بحسب من يفتحها.
+    """
+    today = today or timezone.localdate()
+    return {
+        "clients": _staff_assigned_client_rows(staff),
+        "deadlines": {
+            "today": today,
+            "items": [],
+            "totals": {"count": 0, "overdue": 0, "due_soon": 0},
+        },
+        "unpaid_fees": {"invoices": [], "total": str(Decimal("0.00"))},
     }

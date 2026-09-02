@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **574**
+عدد النقاط: **575**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -37,6 +37,7 @@
 | `/api/accountant/practice/clients/` | `PracticeClientListView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/practice/clients/<int:client_id>/` | `PracticeClientDetailView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/practice/clients/<int:client_id>/restore/` | `PracticeClientRestoreView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/dashboard/` | `PracticeDashboardView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/practice/deadlines/` | `PracticeDeadlinesView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/practice/documents/` | `PracticeDocumentListView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/practice/documents/<int:document_id>/` | `PracticeDocumentDetailView` | `accountant_portal/practice_views.py` |

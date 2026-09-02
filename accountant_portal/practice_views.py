@@ -40,8 +40,10 @@ from accountant_portal.practice import (
     list_practice_documents,
     list_practice_programs,
     list_practice_tasks,
+    practice_dashboard,
     practice_deadlines,
     practice_settings_payload,
+    staff_practice_dashboard,
     program_payload,
     restore_practice_client,
     task_payload,
@@ -278,3 +280,33 @@ class PracticeDeadlinesView(PracticeView):
 
     def get(self, request):
         return Response(practice_deadlines(accountant=self.accountant))
+
+
+class PracticeDashboardView(PortalAPIView):
+    """لوحة المكتب (ISSUE #58): صاحب المكتب أو موظفٌ مُسنَد — لا مسارٌ ثالث.
+
+    **البوابة مُخفَّفة هنا وحدها** (القرار 7): بقية سطح المكتب (`PracticeView`)
+    يرفض 404 بلا `AccountantProfile` — لكن موظف المكتب مستخدمٌ شرعيٌّ لهذا
+    المسار تحديداً بلا ملفٍ مهني، فيُردّ 200 بعملائه المُسنَدين (فارغين إن لم
+    يُسنَد له شيء) لا 404. كل مسار آخر في هذا الملف يبقى خلف `PracticeView`
+    كما هو — لا تخفيفَ هناك.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def initial(self, request, *args, **kwargs):
+        if not getattr(settings, "ACCOUNTANT_PRACTICE_ENABLED", True):
+            raise Http404
+        super().initial(request, *args, **kwargs)
+
+    def handle_exception(self, exc):
+        if isinstance(exc, EngagementConflict):
+            return _conflict_response(exc)
+        return super().handle_exception(exc)
+
+    def get(self, request):
+        try:
+            request.user.accountant_profile
+        except AccountantProfile.DoesNotExist:
+            return Response(staff_practice_dashboard(staff=request.user))
+        return Response(practice_dashboard(accountant=request.user))

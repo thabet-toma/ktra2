@@ -31,6 +31,7 @@ urlpatterns = [
     path("practice/documents/<int:document_id>/", practice_views.PracticeDocumentDetailView.as_view(), name="practice-document-detail"),
     path("practice/settings/", practice_views.PracticeSettingsView.as_view(), name="practice-settings"),
     path("practice/deadlines/", practice_views.PracticeDeadlinesView.as_view(), name="practice-deadlines"),
+    path("practice/dashboard/", practice_views.PracticeDashboardView.as_view(), name="practice-dashboard"),
     path("client/documents/", views.ClientDocumentsView.as_view(), name="accountant-client-documents"),
     path("client/statements/", views.ClientStatementsView.as_view(), name="accountant-client-statements"),
     path("client/trend/", views.ClientTrendView.as_view(), name="accountant-client-trend"),

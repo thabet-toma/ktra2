@@ -1,3 +1,4 @@
+import type { OfficeDashboardPayload } from '../utils/officeDashboardSections';
 import {
   apiDelete,
   apiGetObject,
@@ -222,3 +223,12 @@ export const updatePracticeSettings = (body: Partial<PracticeSettingsRecord>) =>
 
 export const getPracticeDeadlines = () =>
   apiGetObject<PracticeDeadlines>(`${PRACTICE}/deadlines/`);
+
+/**
+ * ISSUE #58 — لوحة المكتب: العناصر الثلاثة معاً (`practice_dashboard` /
+ * `staff_practice_dashboard`). موظفٌ بلا ملف محاسب يصل هذا المسار وحده من كل
+ * سطح المكتب (القرار 7) فيرى عملاءه المُسنَدين — بقية `PRACTICE` تبقى خلف
+ * ملفٍ مهني.
+ */
+export const getPracticeDashboard = () =>
+  apiGetObject<OfficeDashboardPayload>(`${PRACTICE}/dashboard/`);
