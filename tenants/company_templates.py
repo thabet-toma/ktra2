@@ -97,6 +97,16 @@ ACCOUNTING_FIRM_DOCUMENT_TYPES = [
     'quotation', 'credit_note', 'debit_note',
 ]
 
+# ISSUE #78: خمس خدمات مهنية جاهزة، كلٌّ مربوطٌ بحساب أتعابه في `ACCOUNTING_FIRM_COA`
+# — بلا هذا الربط تبقى `4103`-`4106` حساباتٍ ميتة لا يصلها شيء. (sku, name_ar, account_code)
+ACCOUNTING_FIRM_SERVICES = [
+    ('SVC-BOOKKEEPING', 'مسك دفاتر شهري', '4103'),
+    ('SVC-VAT-RETURN', 'إعداد إقرار ض.ق.م', '4104'),
+    ('SVC-INCOME-TAX', 'إقرار ضريبة دخل سنوي', '4104'),
+    ('SVC-AUDIT', 'تدقيق ومراجعة', '4105'),
+    ('SVC-CONSULTING', 'تأسيس واستشارات', '4106'),
+]
+
 DEFAULT_TEMPLATE = 'general'
 
 # ── ISSUE #51 — القناع الحيّ: مسارات API تختفي كاملةً لقالب مكتب المحاسبة ──
@@ -166,6 +176,7 @@ COMPANY_TEMPLATES = {
         'coa': None,
         'document_types': None,
         'masked_views': [],
+        'services': None,
     },
     'accounting_firm': {
         'key': 'accounting_firm',
@@ -175,5 +186,6 @@ COMPANY_TEMPLATES = {
         'coa': ACCOUNTING_FIRM_COA,
         'document_types': ACCOUNTING_FIRM_DOCUMENT_TYPES,
         'masked_views': [],
+        'services': ACCOUNTING_FIRM_SERVICES,
     },
 }

@@ -242,8 +242,16 @@ def _resolve_revenue_account_for_line(invoice: SalesInvoice, line: SalesInvoiceL
     p = line.product
     is_service = bool(getattr(p, "is_service", False))
 
-    # P-H-7: product-level override (from inventory.Product account overrides)
-    if not is_service:
+    # ISSUE #78: تجاوز المنتج (`sale_account_override`) يسري على الخدمة أيضاً —
+    # حسابات الأتعاب المزروعة مع قالب «مكتب محاسبة» (4103-4106) كانت ميتة لأن
+    # هذا التجاوز وحده كان محروساً بـ`not is_service`. لا تُستدعى
+    # `_resolve_line_account` كاملةً للخدمة: سلسلتها الداخلية (تصنيف ← إعدادات
+    # ← 4101 مقطوع) منتجيّة الطابع وتُسقط الخدمة إلى حساب البضاعة بدل حساب
+    # الخدمات العام. تجاوزا الفاتورة والتصنيف أدناه يبقيان محروسَين كما كانا.
+    if is_service:
+        if p.sale_account_override_id:
+            return p.sale_account_override
+    else:
         from inventory.services import _resolve_line_account
         try:
             return _resolve_line_account(p, 'revenue', tenant_id=invoice.tenant_id)

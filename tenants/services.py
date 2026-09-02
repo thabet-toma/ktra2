@@ -314,10 +314,20 @@ def create_company(
             tenant=tenant, name="الفرع الرئيسي", code="MAIN", is_main=True, is_active=True)
 
         # 4.6 Default warehouse — وجهة استلام البضاعة الافتراضية
-        from inventory.models import Warehouse
+        from inventory.models import Product, Warehouse
         Warehouse.objects.create(
             tenant=tenant, name="المستودع الرئيسي", code="MAIN",
             is_default=True, is_active=True)
+
+        # 4.7 Seed template services (ISSUE #78) — بند خدميّ لكل حساب أتعابٍ في
+        # بذرة القالب، وإلا بقيت `4103`-`4106` حسابات ميتة بلا بندٍ يرحّل إليها.
+        # `general` بلا `services` (`None`) فلا شيء يُزرع — لا خدمات تجارية مفترَضة.
+        for sku, name_ar, account_code in template_config.get('services') or []:
+            Product.objects.create(
+                tenant=tenant, sku=sku, name_ar=name_ar, is_service=True,
+                quantity_on_hand=0, avg_cost=0,
+                sale_account_override=account_map.get(account_code),
+            )
 
         # 5. Create UserCompanyMembership
         # If this is the user's only company, make it the default
