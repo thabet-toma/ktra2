@@ -137,6 +137,13 @@ test('قاعدة السقوط للظهور: ما حمل قيمةً فعلية ي
   assert.equal(showAdvanced('doc.line-discount', 'simple', true), true);
 });
 
+test('issue #56 — مستفيد سند المصروف يُطوى في الوضع السهل ويظهر إن سُمِّي فعلاً', () => {
+  assert.ok('doc.expense-beneficiary' in SIMPLE_MASK);
+  assert.equal(showAdvanced('doc.expense-beneficiary', 'simple'), false);
+  assert.equal(showAdvanced('doc.expense-beneficiary', 'simple', true), true);
+  assert.equal(showAdvanced('doc.expense-beneficiary', 'advanced'), true);
+});
+
 test('مفتاحٌ خارج السِّجل يُعرض — الفشل نحو الظهور لا نحو الإخفاء الصامت', () => {
   assert.equal(showAdvanced('doc.not-a-real-key' as MaskKey, 'simple'), true);
 });

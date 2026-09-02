@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **567**
+عدد النقاط: **570**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -110,6 +110,9 @@
 | `/api/accounting/exchange-rates/` | `ExchangeRateViewSet` | `accounting/views.py` |
 | `/api/accounting/exchange-rates/get-rate/` | `ExchangeRateViewSet` | `accounting/views.py` |
 | `/api/accounting/exchange-rates/{pk}/` | `ExchangeRateViewSet` | `accounting/views.py` |
+| `/api/accounting/expense-vouchers/` | `ExpenseVoucherViewSet` | `accounting/views.py` |
+| `/api/accounting/expense-vouchers/{pk}/` | `ExpenseVoucherViewSet` | `accounting/views.py` |
+| `/api/accounting/expense-vouchers/{pk}/unpost/` | `ExpenseVoucherViewSet` | `accounting/views.py` |
 | `/api/accounting/fiscal-periods/` | `FiscalPeriodViewSet` | `accounting/views.py` |
 | `/api/accounting/fiscal-periods/create-year/` | `FiscalPeriodViewSet` | `accounting/views.py` |
 | `/api/accounting/fiscal-periods/year-end-close/` | `FiscalPeriodViewSet` | `accounting/views.py` |

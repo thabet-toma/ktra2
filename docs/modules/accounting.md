@@ -40,6 +40,7 @@
 | `CashBoxFxLot` | `original_fc`، `remaining_fc`، `rate`، `source` | `cash_box`، `journal` |
 | `CashTransfer` | `number`، `transfer_date`، `amount`، `rate` | طرفان اختياريان لكلٍّ من الجهتين (`from_cash_box`/`from_bank_account` و`to_*`)، `journal` |
 | `CashCount` | `count_date`، `book_balance`، `counted_total`، `difference`، `denominations`، `status` | `cash_box` (PROTECT)، `journal` |
+| `ExpenseVoucher` (issue #56) | `number`، `date`، `amount`، `tax_amount`، `payment_method` (`cash`\|`cheque`\|`on_account`)، `is_posted` | `expense_account` (PROTECT)، `cash_or_bank_account` (PROTECT, يُملأ فقط عند `cash`)، `beneficiary_partner` (PROTECT, **اختياري تماماً**)، `journal` (SET_NULL) |
 | `FiscalPeriod` | `start_date`، `end_date`، `status`، `is_closed` | `tenant` |
 | `ExchangeRate` | `rate`، `effective_date` | `from_currency`/`to_currency` (PROTECT)؛ فريد مع `(tenant, effective_date)` |
 | `TaxRate` | `code`، `rate`، `direction` | `tax_account` (PROTECT)؛ `unique_together (tenant, code)` |
@@ -250,7 +251,10 @@ def partner_account_statement(*, tenant_id: int, partner_id: int, is_supplier: b
 def partner_posted_balance(tenant_id: int, partner_id: int) -> tuple[Decimal, Decimal]:  # (debit, credit) من الأسطر المرحّلة بالعملة الأساسية
 def attach_partner_posted_balance(rows, partner_id_field: str, *, supplier: bool, attr: str):  # أرصدة صفحة محمَّلة باستعلام واحد (للقوائم)
 def annotate_partner_posted_balance(queryset, partner_id_field: str, *, supplier: bool, alias: str):  # للصف الواحد/الفلترة فقط — لا للقوائم
-def resolve_import_expense_account(tenant_id: int, name: str):  # حساب مصروف استيراد تحت البند «53» أو يُنشئه
+def resolve_expense_account(tenant_id: int, name: str, parent_code: str = EXPENSE_VOUCHER_PARENT_CODE):  # حساب مصروف تحت أبٍ معطى («52» افتراضياً) أو يُنشئه — تعميم issue #56
+def resolve_import_expense_account(tenant_id: int, name: str):  # غلافٌ رفيع فوق resolve_expense_account بأب «53» — لمستدعيه القائمين
+def create_expense_voucher(*, tenant, date, amount, currency, tax_amount=Decimal("0"), exchange_rate=Decimal("1"), payment_method, expense_account=None, expense_account_name=None, expense_parent_code=None, cash_or_bank_account_id=None, beneficiary_partner=None, beneficiary_name="", description="", attachment_url="", user=None):  # سند مصروف (issue #56): ينشئ ويرحّل فوراً — بلا مورّدٍ إلزامي وبلا مخزون؛ المستفيد اختياري تماماً
+def unpost_expense_voucher(voucher, *, user=None) -> dict:  # التراجع عن ترحيل سند مصروف عبر unpost_document — مرآة unpost_supplier_payment بلا شيكات
 def resolve_cash_account(tenant_id: int, *, explicit_account_id=None, user=None, currency_code: str | None = None, required: bool = True):  # السلّم الوحيد لحساب الصندوق/البنك — صريح ← افتراضي المستخدم ← افتراضي الشركة ← الإعدادات ← الشجرة ← خطأ إرشادي؛ وشبكةُ الاسم الأخيرة لا تلتقط حساب طرف
 def resolve_default_cash_account(tenant_id: int):  # غلافٌ متوافق فوقها يُعيد None بدل الاستثناء
 def create_cash_box(*, tenant, name, currency_code="ILS", is_default=False, external_id=None, notes=None, user=None):  # الصندوق + حسابه تحت «1110» + وثيقة مرآته، ذرّياً
@@ -294,6 +298,8 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | GET/PUT | `cash-box-accounts/my-default/` | صندوق المستخدم الافتراضي؛ `cash_box: null` يحذفه |
 | GET/POST | `cash-transfers/` | `CashTransferViewSet` — بصلاحية `finance.cashbox.transfer`؛ لا تعديل ولا حذف (المعالجة بتحويل معاكس) |
 | GET/POST/PATCH | `cash-counts/` · `{id}/post/` | `CashCountViewSet` — بصلاحية `finance.cashbox.count`؛ المرحَّل لا يُعدَّل |
+| GET/POST | `expense-vouchers/` | `ExpenseVoucherViewSet` (issue #56) — `create` يرحّل فوراً بصلاحية `finance.expense.create`؛ لا PATCH ولا DELETE |
+| POST | `expense-vouchers/{id}/unpost/` | `ExpenseVoucherViewSet.unpost` — بصلاحية `finance.expense.unpost` |
 | GET/POST | `cost-centers/` · `tax-rates/` · `banks/` · `bank-branches/` · `purchase-receipts/` · `currencies/` | حسب `urls.py` |
 
 **«قيد التسوية» ليس نوعاً ثانياً من القيود ولا شاشةً مستقلة** — هو وسمٌ على القيد اليدوي
@@ -344,6 +350,8 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 - **قيد افتتاحي مرحّل واحد لكل شركة** — مفروضٌ في `accounting/opening_balance.py` (`post_opening_balance`) داخل المعاملة تحت `select_for_update`، **لا بقيد فريد شرطي**: MySQL لا يدعم الفهارس الجزئية، فقيدٌ بـ`condition=` يوجد في قاعدة الاختبارات (SQLite) ويغيب بصمت عن الإنتاج. لا قيد افتتاحي ثانٍ إلا بعد عكس الأول صراحةً.
 - **أرصدة الذمم والمخزون لا تُدخل في بنود حسابات الافتتاح** — `assert_account_allowed` يرفضها (ومعها حساب `3300` نفسه وأي حساب مربوط بطرف) عند الحفظ وعند الترحيل معاً؛ أرقامها تأتي من `PARTNER_OPENING` ومن بنود المخزون، وإدخالها هنا يضاعف الرصيد.
 - **بضاعة أول المدة تُسجَّل بتاريخ `entry_date` لا `today`** (`accounting/opening_balance.py` (`post_opening_balance`)) — تاريخٌ آخر يضع الحركة في فترة أخرى ويرتّبها خطأً أمام أول شراء فعلي في متوسط التكلفة.
+- **سند المصروف (issue #56) لا يفرض مورّداً** — بخلاف `sales.SupplierPayment` (`partner` بـ`PROTECT`)، `ExpenseVoucher.beneficiary_partner` اختياريٌّ تماماً؛ «على الحساب» بلا مستفيد يقع على «2101» العام لا على حساب طرف. الترحيل حصراً عبر `create_expense_voucher` (`post_journal`) والتراجع عبر `unpost_expense_voucher` (`unpost_document`، النوع `EXPENSE_VOUCHER`).
+- **`TenantBook.get_next_number`/`next_document_number` ينشئان الدفتر كسولاً (`get_or_create`)** — شركةٌ قائمة سبقت إضافة `expense_voucher` إلى `TenantBook.DOCUMENT_TYPES` لا تُعطَّل: أول طلب رقم يخلق دفترها (`book_number=0`) بدل أن يفشل.
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -371,3 +379,4 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | `accounting/tests/test_fiscal_period_lock.py` | قفل الشهر المالي من كل مسار: الترحيل وإلغاؤه والتداخل و`close/`+`reopen/`، وCRUD الفترة (صلاحية، مُقفَلة غير قابلة للتعديل أو الحذف، سجل تدقيق) |
 | `accounting/tests/test_journal_filters.py` | تصفية الدفتر بالحساب (بلا تكرار عبر الصفحات) وبالمستخدم، وختم `created_by` من مسارَي الإنشاء، ودورة قيد التسوية |
 | `accounting/tests/test_opening_balance.py` | القيد الافتتاحي الموحّد: تاريخه وتوازنه وسطر `3300`، ومطابقة حسابات المخزون في الأستاذ لإجمالي تقرير «تقييم المخزون» بالرقم، ومنع القيد الثاني قبل العكس، والعكس وحارس الاعتمادية، والحسابات الممنوعة، والفترة الغائبة/المغلقة بلا حالة جزئية، وعزل الشركات |
+| `accounting/tests/test_expense_voucher_api.py` | سند المصروف (issue #56): كهرباء نقداً بلا مورّد، الحساب بالاسم تحت «52»، الشيك على «2111»، «على الحساب» على «2101» أو حساب المستفيد، الضريبة على «1105»، التراجع عن الترحيل، شركةٌ قائمة بلا دفتر `expense_voucher` مسبَق، عزل الشركات، وصلاحيتا `finance.expense.create`/`.unpost` |

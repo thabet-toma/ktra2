@@ -689,6 +689,72 @@ class CashCount(models.Model):
         return f"جرد {self.cash_box_id} @ {self.count_date}: {self.difference}"
 
 
+class ExpenseVoucher(models.Model):
+    """سند مصروف — مستندٌ عامٌّ لكل شركة، بلا مورّدٍ إلزامي وبلا مخزون (issue #56).
+
+    يسدّ الفجوة بين فاتورة الشراء (تلزمها 1104 مخزون) وسند الصرف
+    (`sales.SupplierPayment`، مورّده إلزامي بـ`PROTECT`): مصروفٌ عاديّ —
+    كهرباء، إيجار، بنزين — لا مورّد له ولا بضاعة. المستفيد اختياري عمداً:
+    شريكٌ إن وُجد، أو اسمٌ نصّي، أو لا شيء.
+    """
+
+    PAYMENT_CASH = 'cash'
+    PAYMENT_CHEQUE = 'cheque'
+    PAYMENT_ON_ACCOUNT = 'on_account'
+    PAYMENT_METHOD_CHOICES = [
+        (PAYMENT_CASH, 'صندوق/بنك'),
+        (PAYMENT_CHEQUE, 'شيك'),
+        (PAYMENT_ON_ACCOUNT, 'على الحساب'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='ExpenseVoucherID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    number = models.IntegerField(default=0, db_column='Number')
+    date = models.DateField(db_column='Date')
+    expense_account = models.ForeignKey(
+        Account, on_delete=models.PROTECT,
+        db_column='ExpenseAccountID', related_name='expense_vouchers')
+    amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount')
+    tax_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='TaxAmount',
+        help_text='ضريبة مدخلات (1105) — جزء من amount لا إضافة عليه')
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, db_column='CurrencyID')
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, default=1, db_column='ExchangeRate')
+    payment_method = models.CharField(
+        max_length=10, choices=PAYMENT_METHOD_CHOICES,
+        default=PAYMENT_CASH, db_column='PaymentMethod')
+    cash_or_bank_account = models.ForeignKey(
+        Account, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='CashAccountID', related_name='expense_vouchers_cash',
+        help_text='الصندوق/البنك — يُملأ فقط عند payment_method=cash')
+    beneficiary_partner = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='BeneficiaryPartnerID', related_name='expense_vouchers')
+    beneficiary_name = models.CharField(max_length=200, blank=True, default='', db_column='BeneficiaryName')
+    description = models.CharField(max_length=500, blank=True, default='', db_column='Description')
+    attachment_url = models.URLField(blank=True, default='', max_length=500, db_column='AttachmentUrl')
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='expense_vouchers')
+    is_posted = models.BooleanField(default=False, db_column='IsPosted')
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy', related_name='expense_vouchers')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'expense_vouchers'
+        managed = True
+        ordering = ['-date', '-id']
+        indexes = [
+            models.Index(fields=['tenant', '-date', '-id'], name='idx_expvouch_tenant_date'),
+        ]
+
+    def __str__(self):
+        return f"سند مصروف #{self.number or self.id}: {self.amount}"
+
+
 class Bank(models.Model):
     """T-BANKS: بنك تتعامل معه الشركة — مظلّة لفروعه وحساباته.
 
