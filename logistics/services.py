@@ -245,6 +245,8 @@ def _draft_purchase_invoice_from_document(
     from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
     from inventory.services import product_display_name
 
+    name_max_length = PurchaseInvoiceItem._meta.get_field('name').max_length
+
     invoice = PurchaseInvoice.objects.create(
         tenant=source.tenant,
         invoice_number=_next_purchase_invoice_number(source.tenant),
@@ -272,7 +274,9 @@ def _draft_purchase_invoice_from_document(
         PurchaseInvoiceItem(
             invoice=invoice,
             product=line.product,
-            name=line.name_snapshot or product_display_name(line.product),
+            # #42: هذا القيد يفيض عمود ٢٥٥ (يبلغ ٣٠٣ في أسوأ حال) — القصّ بحدّ
+            # العمود نفسه، مقروءاً من النموذج لا رقماً مطبوعاً.
+            name=(line.name_snapshot or product_display_name(line.product))[:name_max_length],
             quantity=line.quantity,
             unit_price=line.unit_price,
             total_price=line.line_total,
@@ -2121,6 +2125,7 @@ def create_purchase_return(
     import datetime
     from decimal import Decimal as _D
     from inventory.models import Product
+    from inventory.services import product_display_name
     from .models import PurchaseInvoice, PurchaseInvoiceItem
 
     if return_date is None:
@@ -2241,9 +2246,13 @@ def create_purchase_return(
             inv_net += line_net
             inv_vat += (line_net * vat_pct / _D('100')).quantize(DEC)
 
+            # #42: `name_ar` وحده هو المقاس بعد #20 (لا لافتة مميِّزة) —
+            # `product_display_name` هي الصيغة الصحيحة، لا احتياطها ولا `str(prod)`.
             PurchaseInvoiceItem.objects.create(
                 invoice=ret, product=prod,
-                name=getattr(prod, 'name_ar', None) or getattr(prod, 'name', '') or str(prod),
+                name=product_display_name(prod)[
+                    :PurchaseInvoiceItem._meta.get_field('name').max_length
+                ],
                 quantity=qty, unit_price=l['unit_price'],
                 total_price=(qty * l['unit_price']).quantize(DEC),
                 is_taxable=vat_pct > 0,

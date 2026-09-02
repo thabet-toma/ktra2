@@ -108,11 +108,14 @@ def agent_products(request):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+    from core.models import ActivityLog
     from inventory.services import product_display_name
 
+    # #42: الحدّ مقروءٌ من النموذج لا رقماً مطبوعاً — ٢٠٠ كان حرفاً سابقاً.
+    label_max_length = ActivityLog._meta.get_field('entity_label').max_length
     log_activity(
         action="create", entity_type="product", entity_id=product.id,
-        entity_label=product_display_name(product)[:200],
+        entity_label=product_display_name(product)[:label_max_length],
         description="إضافة منتج عبر واجهة الوكيل",
         tenant=tenant, request=request,
     )

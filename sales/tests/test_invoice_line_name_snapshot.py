@@ -239,3 +239,61 @@ def test_backfill_tenant_flag_leaves_other_companies_untouched(env):
     # الحقل خامّاً في العقد — الواجهة تفرّق به بين المجمَّد والمشتقّ حياً.
     detail = c.get(f"/api/sales/invoices/{inv.id}/", format="json").json()
     assert detail["lines"][0]["name_snapshot"] == "اسم قديم"
+
+
+# ── #42 جزء ٢ (العمود الثالث): `SalesInvoiceLine.name_snapshot` لا يفيض ٢٥٥ —
+# لا عند الترحيل (`sales/services/flow.py`) ولا عند التعبئة (أمر backfill) ──
+
+def test_posted_name_snapshot_column_never_overflows_and_is_persisted(env):
+    tenant, owner, cur, customer, _plain_product = env
+    long_name = "س" * 200
+    long_brand = "ب" * 100
+    product = Product.objects.create(
+        tenant=tenant, sku="NS-OVF-1", name_ar=long_name, brand=long_brand,
+        quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("10"),
+        unit_cost=Decimal("10"), reference_type="OPENING", reference_id=0,
+        movement_date="2026-06-01", tenant=tenant)
+    product.refresh_from_db()
+    c = _client(owner, tenant)
+    inv = _make_invoice(tenant, customer, product, cur, "NS-OVF-POST")
+
+    res = c.post(f"/api/sales/invoices/{inv.id}/post/", {}, format="json")
+    assert res.status_code == 200, res.content[:300]
+
+    line = SalesInvoiceLine.objects.get(invoice=inv)
+    max_length = SalesInvoiceLine._meta.get_field("name_snapshot").max_length
+    assert len(line.name_snapshot) <= max_length
+    assert SalesInvoiceLine.objects.filter(pk=line.pk).exists()
+
+
+def test_backfill_name_snapshot_column_never_overflows(env):
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    tenant, owner, cur, customer, _plain_product = env
+    long_name = "س" * 200
+    long_brand = "ب" * 100
+    product = Product.objects.create(
+        tenant=tenant, sku="NS-OVF-2", name_ar=long_name, brand=long_brand,
+        quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("10"),
+        unit_cost=Decimal("10"), reference_type="OPENING", reference_id=0,
+        movement_date="2026-06-01", tenant=tenant)
+    product.refresh_from_db()
+    c = _client(owner, tenant)
+    inv = _make_invoice(tenant, customer, product, cur, "NS-OVF-BF")
+    assert c.post(f"/api/sales/invoices/{inv.id}/post/", {}, format="json").status_code == 200
+    # محاكاة صفٍّ قديم بلا لقطة (سابقٌ لتشغيلة التعبئة).
+    SalesInvoiceLine.objects.filter(invoice=inv).update(name_snapshot="")
+
+    call_command("backfill_invoice_name_snapshots", "--apply", stdout=StringIO())
+
+    line = SalesInvoiceLine.objects.get(invoice=inv)
+    max_length = SalesInvoiceLine._meta.get_field("name_snapshot").max_length
+    assert len(line.name_snapshot) <= max_length
+    assert line.name_snapshot != ""
+    assert SalesInvoiceLine.objects.filter(pk=line.pk).exists()

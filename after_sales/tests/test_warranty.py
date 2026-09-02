@@ -290,6 +290,69 @@ class AutoWarrantyLifecycleTest(WarrantyTestBase):
         self.assertEqual(card.end_date, date(2027, 6, 15))
 
 
+class AutoWarrantyBrandDisplayTest(WarrantyTestBase):
+    """#42 جزء ١: القيمة المجمَّدة على البطاقة التلقائية تحمل البراند لا المقاس
+    عارياً من الآن فصاعداً — وبطاقةٌ قديمة لا تُمَسّ (بلا backfill)."""
+
+    def _sibling(self, brand, *, name_ar="جهاز شقيق"):
+        return Product.objects.create(
+            tenant=self.tenant, sku=f"SIB-{Product.objects.count() + 1}",
+            name_ar=name_ar, brand=brand, is_serialized=True,
+            warranty_months=12, supplier_warranty_months=24,
+            quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
+        )
+
+    def test_auto_card_device_name_carries_brand_and_pre_existing_card_is_untouched(self):
+        p1 = self._sibling("سوني")
+        p2 = self._sibling("بايونير")  # الشقيق يثبت أن الاسم العاري لا يميّز
+        legacy = WarrantyCard.objects.create(
+            tenant=self.tenant, product=p2, device_name="جهاز شقيق",  # الصيغة القديمة
+            serial="SN-LEGACY", start_date=date(2026, 1, 1), duration_months=12,
+            end_date=date(2027, 1, 1), source=WarrantyCard.SOURCE_AUTO_SALE,
+        )
+
+        self.stock_units("SN-BR1", product=p1)
+        invoice = self.sales_invoice(serials=["SN-BR1"], product=p1)
+        self.assertEqual(self.post_sale(invoice).status_code, 200)
+
+        card = WarrantyCard.objects.get(tenant=self.tenant, serial="SN-BR1")
+        self.assertEqual(card.device_name, "جهاز شقيق (سوني)")
+        self.assertIn("سوني", card.device_name)
+
+        # لا backfill: البطاقة القديمة (سُبقت هذا الإصلاح) لم تُمَسّ حرفاً.
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.device_name, "جهاز شقيق")
+
+    def test_serial_lookup_returns_a_distinguishing_product_name(self):
+        p1 = self._sibling("دِل")
+        self._sibling("إتش بي")
+        self.stock_units("SN-LK1", product=p1)
+        invoice = self.sales_invoice(serials=["SN-LK1"], product=p1)
+        self.assertEqual(self.post_sale(invoice).status_code, 200)
+
+        result = self.client.get(f"{BASE}check/?serial=SN-LK1", **self.headers()).data
+        self.assertEqual(result["unit"]["product_name"], "جهاز شقيق (دِل)")
+        self.assertIn("دِل", result["unit"]["product_name"])
+
+    def test_device_name_column_never_overflows_and_the_row_is_actually_written(self):
+        long_name = "س" * 200
+        long_brand = "ب" * 100
+        product = Product.objects.create(
+            tenant=self.tenant, sku=f"OVF-{Product.objects.count() + 1}",
+            name_ar=long_name, brand=long_brand, is_serialized=True,
+            warranty_months=12, quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
+        )
+        self.stock_units("SN-OVF1", product=product)
+        invoice = self.sales_invoice(serials=["SN-OVF1"], product=product)
+
+        self.assertEqual(self.post_sale(invoice).status_code, 200)
+
+        card = WarrantyCard.objects.get(tenant=self.tenant, serial="SN-OVF1")
+        max_length = WarrantyCard._meta.get_field("device_name").max_length
+        self.assertLessEqual(len(card.device_name), max_length)
+        self.assertTrue(WarrantyCard.objects.filter(pk=card.pk).exists())
+
+
 class WarrantyApiTest(WarrantyTestBase):
     def manual_payload(self, **overrides):
         data = {

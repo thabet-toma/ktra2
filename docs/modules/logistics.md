@@ -153,15 +153,19 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 - **الطلبية تتحوّل كاملةً مرّةً واحدة** (`PurchaseOrder.invoice` علاقةُ واحد-لواحد) — والتجزئة على مستوى **الاستلام** لا التحويل: طلبيةٌ واحدة ← فاتورةٌ واحدة ← إرساليات متعددة. هذا ما تفعله Odoo (backorder على سند الاستلام) وZoho (عدّة Purchase Receives للطلبية). ولذلك تحمل `PurchaseOrderSerializer` تقدّم استلام فاتورتها (`invoice_receipt_progress`) فلا تنتهي الطلبية عند «محوّلة إلى فاتورة» طريقاً مسدوداً. **لا تُدخِل «كمية محوَّلة» على سطر الطلبية** — تخلق معنىً ثانياً لـ«الباقي» (للفوترة مقابل للاستلام) وتعيد الالتباس الذي أُزيل.
 - **«الباقي على البند» قاعدةٌ واحدة لا نسخ** — `services.py` (`purchase_item_receipt_quantities`): الكمية − المستلَم مقصوصاً عند الصفر وبدقّة العمود (أربع خانات). تستدعيها المواضع الستّة كلّها: تقرير البواقي (`views/goods_receipts.py` — `outstanding`)، وبنود الاستلام (`views/invoices.py` — `receivable_lines`)، وبند الإرسالية ومجموعها (`serializers/goods_receipts.py`)، وحارس `receive_purchase_invoice`، وقراءة الفاتورة (`serializers/invoices.py` — `remaining_quantity` على البند و`receipt_progress` على الرأس). **الواجهة تعرض ولا تطرح** — أيّ طرحٍ فيها نسخةٌ سابعة تفترق غداً.
 - **اسم المنتج المعروض يمرّ عبر `inventory/services.py` (`product_display_name`)
-  لا `str(product)`** (#41): بند الإرسالية (`serializers/goods_receipts.py` —
+  لا `str(product)`** (#41/#42): بند الإرسالية (`serializers/goods_receipts.py` —
   `get_product_name`)، صفوف «المتبقّي للاستلام» في `views/goods_receipts.py`
   (`outstanding`) و`views/invoices.py` (`receivable_lines`) كلّها تشتقّه حياً
   عند القراءة — البراند حقلٌ على نفس صفّ المنتج فلا استعلام إضافي. **القيمة
-  المجمَّدة مختلفة**: `PurchaseInvoiceItem.name` (`services.py` —
-  `_draft_purchase_invoice_from_document`) يكتب `product_display_name` من الآن
-  فصاعداً فقط — بنودٌ حُوِّلت **قبل** هذا التاريخ تحمل المقاس عارياً بلا
+  المجمَّدة مختلفة**: `PurchaseInvoiceItem.name` يُكتب من موضعين — `services.py`
+  (`_draft_purchase_invoice_from_document`، تحويل طلبية/عرض سعر) و`services.py`
+  (`create_purchase_return`، بند مرتجع الشراء) — يكتبان `product_display_name`
+  من الآن فصاعداً فقط؛ بنودٌ حُوِّلت **قبل** هذا التاريخ تحمل المقاس عارياً بلا
   براند، وما بعده يحمل البراند بين قوسين؛ **تعايش صيغتين في العمود الواحد
-  مقبولٌ ومُعلَن**، لا عطبٌ ولا يُصلَح بأمر backfill.
+  مقبولٌ ومُعلَن**، لا عطبٌ ولا يُصلَح بأمر backfill. **وكلا الموضعين يقصّ عند
+  الكتابة بحدّ العمود نفسه** (`PurchaseInvoiceItem._meta.get_field('name')
+  .max_length`، لا رقماً مطبوعاً) — الاسم المركَّب قد يبلغ ٣٠٣ محرفاً والعمود
+  حدّه ٢٥٥؛ الفيض هنا لا يُرمى خطأً بل يُلغي القيد بصمت في MySQL (#42).
 - **الإرسالية تُفتح مملوءة لا فارغة**: ربطُ فاتورةٍ بمحرّر الإرسالية
   (`frontend_v2/components/procurement/receipts/GoodsReceiptsPage.tsx` —
   `pickInvoice` بخيار `autofillWarehouse`) يبني بنودها من `receivable-lines`

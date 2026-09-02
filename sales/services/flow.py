@@ -904,9 +904,14 @@ def post_sales_invoice(
     # تتبع المسودة اسماً حياً ثم تتجمّد بلا داعٍ.
     # #22: `product_display_name` لا `str(product)` — فتوافق «اسم المنتج
     # (البراند)» مع ما يعرضه المنتقي والطباعة (راجع قرار #22 على التذكرة).
+    # #42: هذا القيد يفيض عمود ٢٥٥ (يبلغ ٣٠٣ في أسوأ حال) — القصّ بحدّ العمود
+    # نفسه، مقروءاً من النموذج لا رقماً مطبوعاً.
     from inventory.services import product_display_name
+    name_max_length = SalesInvoiceLine._meta.get_field('name_snapshot').max_length
     for line in lines:
-        line.name_snapshot = product_display_name(line.product) if line.product_id else ""
+        line.name_snapshot = (
+            product_display_name(line.product)[:name_max_length] if line.product_id else ""
+        )
     SalesInvoiceLine.objects.bulk_update(
         lines,
         ["line_total_excl_tax", "line_tax_amount", "name_snapshot"],

@@ -284,6 +284,76 @@ class ProductDisplayNameParityTest(APITestCase):
         self.assertEqual(activity.entity_label, expected)
         self.assertLessEqual(len(activity.entity_label), 200)
 
+    # ── 8) #42 جزء ١(ب): مرجع الشراء — الفرع الأول (`name_ar`) كان يكتب لافتةً
+    # غير مميِّزة (هو المقاس نفسه بعد #20)، فإصلاح احتياط `str(prod)` وحده لا يكفي ──
+
+    def test_purchase_return_item_name_shows_distinct_brand_names_for_siblings(self):
+        p1, p2 = self._siblings(size="195/60/15", brand_a="فالكن", brand_b="نيكزن")
+        from logistics.services import create_purchase_return
+
+        ret = create_purchase_return(
+            self.tenant, original_invoice=None, partner=self.partner,
+            return_date="2026-06-20",
+            lines=[
+                {"product": p1.pk, "quantity": 2, "unit_price": 100},
+                {"product": p2.pk, "quantity": 3, "unit_price": 120},
+            ],
+        )
+        items = {i.product_id: i.name for i in PurchaseInvoiceItem.objects.filter(invoice=ret)}
+        self.assertNotEqual(items[p1.pk], items[p2.pk])
+        self.assertIn("فالكن", items[p1.pk])
+        self.assertIn("نيكزن", items[p2.pk])
+        self.assertNotEqual(items[p1.pk], "195/60/15")
+        self.assertNotEqual(items[p2.pk], "195/60/15")
+
+    # ── 9) #42 جزء ٢ (العمود الثاني): `PurchaseInvoiceItem.name` عبر تحويل
+    # طلبية إلى فاتورة — لا يفيض ٢٥٥، والصفّ مكتوبٌ فعلاً (يُقرأ من القاعدة) ──
+
+    def test_purchase_invoice_item_name_column_never_overflows_and_is_persisted(self):
+        long_name = "س" * 200
+        long_brand = "ب" * 100
+        product = Product.objects.create(
+            tenant=self.tenant, sku="OVF-PII", name_ar=long_name, brand=long_brand)
+        order = PurchaseOrder.objects.create(
+            tenant=self.tenant, order_number="PO-OVF-1", supplier=self.partner,
+            order_date="2026-06-11", currency=self.ils, exchange_rate=Decimal("1"),
+            status=PurchaseOrder.STATUS_CONFIRMED, subtotal=Decimal("100"),
+            grand_total=Decimal("100"),
+        )
+        from logistics.models import PurchaseOrderLine
+        PurchaseOrderLine.objects.create(
+            tenant=self.tenant, order=order, product=product, seq=1,
+            quantity=Decimal("1"), unit_price=Decimal("100"),
+        )
+
+        from logistics.services import convert_purchase_order_to_invoice
+        new_invoice, _created = convert_purchase_order_to_invoice(order, user=self.user)
+
+        item = PurchaseInvoiceItem.objects.get(invoice=new_invoice)
+        max_length = PurchaseInvoiceItem._meta.get_field("name").max_length
+        self.assertLessEqual(len(item.name), max_length)
+        self.assertTrue(PurchaseInvoiceItem.objects.filter(pk=item.pk).exists())
+
+    def test_purchase_return_item_name_column_never_overflows(self):
+        """نفس بند #42 جزء ١(ب) بعد الإصلاح: `product_display_name` قد تتجاوز
+        ٢٥٥ أيضاً — نفس القصّ يلزم هذا الموضع رغم أنه خارج الأعمدة الأربعة
+        المُسمَّاة صراحةً في التذكرة."""
+        long_name = "س" * 200
+        long_brand = "ب" * 100
+        product = Product.objects.create(
+            tenant=self.tenant, sku="OVF-RET", name_ar=long_name, brand=long_brand)
+        from logistics.services import create_purchase_return
+
+        ret = create_purchase_return(
+            self.tenant, original_invoice=None, partner=self.partner,
+            return_date="2026-06-20",
+            lines=[{"product": product.pk, "quantity": 1, "unit_price": 100}],
+        )
+        item = PurchaseInvoiceItem.objects.get(invoice=ret)
+        max_length = PurchaseInvoiceItem._meta.get_field("name").max_length
+        self.assertLessEqual(len(item.name), max_length)
+        self.assertTrue(PurchaseInvoiceItem.objects.filter(pk=item.pk).exists())
+
 
 class GoodsReceiptLine_Unsaved:
     """كائنٌ خفيف يطابق شكل `GoodsReceiptLine` لموضع الاحتياط وحده — لا قاعدة بيانات."""

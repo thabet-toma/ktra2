@@ -55,10 +55,12 @@ class Command(BaseCommand):
 
         updated = 0
         batch = []
+        # #42: نفس العمود الذي يكتبه الترحيل (`sales/services/flow.py`) — نفس الحدّ.
+        name_max_length = SalesInvoiceLine._meta.get_field('name_snapshot').max_length
         for line in lines.iterator(chunk_size=2000):
             # #22: `product_display_name` لا `str(product)` — يتفق مع الترحيل
             # الجديد وطباعة «اسم المنتج (البراند)» (راجع قرار #22 على التذكرة).
-            name = product_display_name(line.product)
+            name = product_display_name(line.product)[:name_max_length]
             if not name:
                 continue
             line.name_snapshot = name

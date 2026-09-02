@@ -56,6 +56,7 @@ def create_auto_warranty_cards(invoice) -> int:
     والتغطية تُفحص عندها من فاتورة الزبون لحظة الاستقبال.
     """
     from inventory.models import ProductSerial
+    from inventory.services import product_display_name
 
     if not module_enabled(invoice.tenant_id, MODULE_KEY):
         return 0
@@ -96,7 +97,12 @@ def create_auto_warranty_cards(invoice) -> int:
         created.append(WarrantyCard(
             tenant_id=invoice.tenant_id,
             product=unit.product,
-            device_name=str(unit.product),
+            # #42: `product_display_name` لا `str(product)` — بطاقةٌ مجمَّدة من الآن
+            # فصاعداً بلا backfill (قرار #38 نفسه)؛ قصٌّ بحدّ العمود يتّبع عادة
+            # `customer_name[:150]`/`customer_phone[:32]` المجاورتين لا اختراعاً.
+            device_name=product_display_name(unit.product)[
+                :WarrantyCard._meta.get_field('device_name').max_length
+            ],
             serial=unit.serial,
             product_serial=unit,
             sales_invoice_line_id=unit.sales_line_id,
@@ -176,6 +182,7 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
     الاستقبال بدل أن يرى «غير موجود» على وحدةٍ بعناها بأنفسنا.
     """
     from inventory.models import ProductSerial
+    from inventory.services import product_display_name
 
     today = today or timezone.localdate()
     serial = (serial or "").strip()
@@ -208,7 +215,7 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
             "status": unit.status,
             "status_display": unit.get_status_display(),
             "product": unit.product_id,
-            "product_name": str(unit.product),
+            "product_name": product_display_name(unit.product),
             "warranty_months": getattr(unit.product, "warranty_months", None),
             "supplier_warranty_months": getattr(
                 unit.product, "supplier_warranty_months", None,
