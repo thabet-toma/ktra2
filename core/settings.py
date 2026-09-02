@@ -516,7 +516,6 @@ REST_FRAMEWORK = {
         "user": os.environ.get("THROTTLE_RATE_USER", "300/min"),
         # المجهول = تسجيل الدخول وصفحات العرض العامة؛ أضيق لأنه سطح إساءة الاستخدام.
         "anon": os.environ.get("THROTTLE_RATE_ANON", "60/min"),
-        "accountant_signup": "5/hour",
         "accountant_verify": "10/hour",
         "accountant_invite": "20/hour",
         "accountant_engagement_request": "10/hour",

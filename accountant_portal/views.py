@@ -3,11 +3,9 @@ import io
 import logging
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.password_validation import CommonPasswordValidator
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.validators import validate_email
-from django.db import IntegrityError, transaction
-from django.db.models import Case, Count, Exists, OuterRef, Q, When
+from django.db import IntegrityError
+from django.db.models import Case, Count, Exists, OuterRef, When
 from django.http import HttpResponse
 from django.utils.dateparse import parse_date
 from django.utils import timezone
@@ -30,7 +28,6 @@ from accountant_portal.identity import (
     EmailTokenError,
     email_verification_required,
     read_email_verification_token,
-    send_existing_account_email,
     send_invitation_email,
     send_verification_email,
 )
@@ -165,89 +162,6 @@ def _engagement_data(engagement):
         "created_at": engagement.created_at,
         "updated_at": engagement.updated_at,
     }
-
-
-class AccountantSignupView(PortalAPIView):
-    permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "accountant_signup"
-
-    def post(self, request):
-        data = request.data if isinstance(request.data, dict) else {}
-        full_name = str(data.get("fullName") or "").strip()
-        email = str(data.get("email") or "").strip().lower()
-        password = data.get("password")
-        professional_type = str(data.get("professional_type") or "").strip()
-        tax_number = str(data.get("tax_registration_number") or "").strip()
-        business_address = str(data.get("business_address") or "").strip()
-
-        required = (
-            (full_name, "missing_full_name", "الاسم الكامل مطلوب."),
-            (email, "invalid_email", "البريد الإلكتروني مطلوب."),
-            (professional_type, "missing_professional_type", "الصفة المهنية مطلوبة."),
-            (tax_number, "missing_tax_registration", "رقم التسجيل الضريبي مطلوب."),
-            (business_address, "missing_business_address", "عنوان العمل الدائم مطلوب."),
-        )
-        for value, code, detail in required:
-            if not value:
-                return _error(code, detail, HTTP_400_BAD_REQUEST)
-        try:
-            validate_email(email)
-        except DjangoValidationError:
-            return _error("invalid_email", "أدخل بريداً إلكترونياً صالحاً.", HTTP_400_BAD_REQUEST)
-        if professional_type not in dict(AccountantProfile.PROFESSIONAL_TYPES):
-            return _error("invalid_professional_type", "الصفة المهنية غير صالحة.", HTTP_400_BAD_REQUEST)
-        if not isinstance(password, str) or len(password) < 10:
-            return _error("weak_password", "يجب أن تتكون كلمة المرور من 10 محارف على الأقل.", HTTP_400_BAD_REQUEST)
-        try:
-            CommonPasswordValidator().validate(password)
-        except DjangoValidationError:
-            return _error("weak_password", "كلمة المرور شائعة جداً.", HTTP_400_BAD_REQUEST)
-
-        requires_verification = email_verification_required()
-        existing = User.objects.filter(Q(username__iexact=email) | Q(email__iexact=email)).first()
-        if existing is not None:
-            send_existing_account_email(email)
-            return Response(
-                {"accepted": True, "email_verification_required": requires_verification},
-                status=HTTP_201_CREATED,
-            )
-
-        parts = full_name.split(maxsplit=1)
-        try:
-            with transaction.atomic():
-                user = User.objects.create_user(
-                    username=email,
-                    email=email,
-                    password=password,
-                    first_name=parts[0][:150],
-                    last_name=(parts[1] if len(parts) > 1 else "")[:150],
-                    is_active=True,
-                )
-                AccountantProfile.objects.create(
-                    user=user,
-                    professional_type=professional_type,
-                    tax_registration_number=tax_number,
-                    business_address=business_address,
-                    license_number=str(data.get("license_number") or "").strip(),
-                    license_authority=str(data.get("license_authority") or "").strip(),
-                    phone=str(data.get("phone") or "").strip(),
-                    email_verified_at=None if requires_verification else timezone.now(),
-                )
-        except IntegrityError:
-            if User.objects.filter(Q(username__iexact=email) | Q(email__iexact=email)).exists():
-                send_existing_account_email(email)
-                return Response(
-                    {"accepted": True, "email_verification_required": requires_verification},
-                    status=HTTP_201_CREATED,
-                )
-            return _error("duplicate_tax_registration", "رقم التسجيل الضريبي مستخدم.", HTTP_400_BAD_REQUEST)
-        if requires_verification:
-            send_verification_email(user)
-        return Response(
-            {"accepted": True, "email_verification_required": requires_verification},
-            status=HTTP_201_CREATED,
-        )
 
 
 class VerifyEmailView(PortalAPIView):

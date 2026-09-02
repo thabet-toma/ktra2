@@ -56,16 +56,6 @@ def send_verification_email(user):
     )
 
 
-def send_existing_account_email(email):
-    send_mail(
-        "حسابك موجود بالفعل",
-        "وصلنا طلب تسجيل بهذا البريد. إن كان الحساب لك، استخدم صفحة تسجيل الدخول.",
-        getattr(settings, "DEFAULT_FROM_EMAIL", "no-reply@localhost"),
-        [email],
-        fail_silently=True,
-    )
-
-
 def send_invitation_email(user, token, tenant):
     link = _frontend_url(f"/accountant/engagements?invite={token}")
     send_mail(

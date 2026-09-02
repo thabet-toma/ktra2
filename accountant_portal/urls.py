@@ -5,7 +5,6 @@ from accountant_portal import practice_views, views
 
 urlpatterns = [
     path("", views.portal_status, name="accountant-portal-status"),
-    path("signup/", views.AccountantSignupView.as_view(), name="accountant-signup"),
     path("verify-email/", views.VerifyEmailView.as_view(), name="accountant-verify-email"),
     path("resend-verification/", views.ResendVerificationView.as_view(), name="accountant-resend-verification"),
     path("me/", views.AccountantMeView.as_view(), name="accountant-me"),

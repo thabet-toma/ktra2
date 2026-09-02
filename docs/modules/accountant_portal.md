@@ -14,7 +14,14 @@
 ترحيلٍ مرّةً واحدة (تحت)، و`PracticeClient` القديمة بقيت كما هي بلا `engagement`/`managed_tenant`،
 وكل `AccountantEngagement` نشط صار زبون مكتبٍ من نوع `engaged`. الباب المنفصل الذي كان
 يسجّل محاسباً من صفحة الدخول (`/accountant/signup` في `frontend_v2`) أُغلق — الزر والمسار
-والاستدعاء حُذفوا من الواجهة؛ نقطة `/api/accountant/signup/` (تحت) بقيت كما هي.
+والاستدعاء حُذفوا من الواجهة، لكن نقطة `/api/accountant/signup/` بقيت حيّةً على الخادم.
+
+**ISSUE #60:** أُغلقت نقطة الخادم أيضاً — `AccountantSignupView` والمسار
+`/api/accountant/signup/` حُذفا (كانا يقبلان POST بلا مصادقة، فالباب كان مغلقاً
+بالضغط ومفتوحاً بـ`curl`، عيبٌ من فئة #51)، ومعها حصّة `accountant_signup` ودالّة
+`identity.py` (`send_existing_account_email`) التي لم تكن تخدم غير التسجيل. من
+يريد مكتب محاسبة يُنشئ شركةً بقالب `accounting_firm` — لا باب تسجيل خارجي منفصل.
+المحاسبون القائمون و`AccountantEngagement` النشطة لم يُمسّا؛ لا هجرة قاعدة بيانات.
 
 وفوق ذلك **طبقة مكتب (practice)**: سجلّ زبائن المكتب نفسه — بمن فيهم زبونٌ **ليس شركةً على
 المنصة** يُدخله المحاسب يدوياً — وبرامج المراجعة والمواعيد والمستندات وإعدادات المكتب.
@@ -145,7 +152,6 @@ def staff_practice_dashboard(*, staff, today=None)  # ISSUE #58 (القرار 7)
 
 | Method | المسار | الـview |
 |---|---|---|
-| POST | `/api/accountant/signup/` | `AccountantSignupView` (AllowAny · `accountant_signup`) |
 | POST | `/api/accountant/verify-email/` · `resend-verification/` | `VerifyEmailView` · `ResendVerificationView` (`accountant_verify`) |
 | GET/PATCH | `/api/accountant/me/` | `AccountantMeView` |
 | GET | `/api/accountant/workspace/companies/` | `WorkspaceCompaniesView` |
@@ -169,7 +175,7 @@ def staff_practice_dashboard(*, staff, today=None)  # ISSUE #58 (القرار 7)
 | GET/POST | `/api/accountant/review/queries/` (+ `{id}/answer\|resolve\|withdraw/`) | `ReviewQueryListCreateView` · `ReviewQueryActionView` |
 | POST/GET | `/api/accountant/review/export/` · `/api/accountant/activity/` | `ReviewPackageExportView` · `AccountantActivityView` |
 
-**حصص الطلبات** (`core/settings.py` (`DEFAULT_THROTTLE_RATES`)): `accountant_signup` 5/hour · `accountant_verify`
+**حصص الطلبات** (`core/settings.py` (`DEFAULT_THROTTLE_RATES`)): `accountant_verify`
 10/hour · `accountant_invite` 20/hour · `accountant_engagement_request` 10/hour (عبر
 `views.py` (`SuccessOnlyScopedThrottle`) — تُحسب على النجاح وحده) ·
 `accountant_company_lookup` 60/hour (حصة مستقلة عمداً، `views.py` (`CompanyLookupView`)).
@@ -216,7 +222,7 @@ def staff_practice_dashboard(*, staff, today=None)  # ISSUE #58 (القرار 7)
 |---|---|
 | `tests/test_m1_foundation.py` (408) | النماذج والقيود الفريدة، مصفوفة الوصول والدور، رفض المفاتيح المحرّمة عبر API، أكواد التدقيق |
 | `tests/test_m2_engagements.py` (656) | دورة حياة الارتباط كاملةً، النطاق الافتراضي والحزم الثلاث، حصة طلب الارتباط |
-| `tests/test_m2_identity.py` (224) | التسجيل وتحقق البريد (وسلوكه حين لا يُشترط)، حصة التسجيل |
+| `tests/test_m2_identity.py` (224) | تحقق البريد (الرمز أحاديّ الاستعمال)، بوابة `me/` تحت `ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION`، وISSUE #60 — `/api/accountant/signup/` يردّ 404 |
 | `tests/test_m3_workspace.py` (154) | لوحة شركات المحاسب: `accessible`، الفترة الأخيرة، عدّاد الموانع |
 | `tests/test_m4_review.py` (225) | طلبات التوضيح وأثرها على حالة الفترة، حزمة التصدير والتدقيق |
 | `tests/test_m5_periods.py` (505) | دورة الفترة الضريبية، فحوص الجاهزية، حارس القفل، تفاعل الفترة مع الطلبات |

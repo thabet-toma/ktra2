@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **575**
+عدد النقاط: **574**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -54,7 +54,6 @@
 | `/api/accountant/review/queries/<int:query_id>/answer/` | `ReviewQueryAnswerView` | `accountant_portal/views.py` |
 | `/api/accountant/review/queries/<int:query_id>/resolve/` | `ReviewQueryResolveView` | `accountant_portal/views.py` |
 | `/api/accountant/review/queries/<int:query_id>/withdraw/` | `ReviewQueryWithdrawView` | `accountant_portal/views.py` |
-| `/api/accountant/signup/` | `AccountantSignupView` | `accountant_portal/views.py` |
 | `/api/accountant/tax/clearance/` | `TaxClearanceView` | `accountant_portal/views.py` |
 | `/api/accountant/tax/periods/` | `TaxPeriodListView` | `accountant_portal/views.py` |
 | `/api/accountant/tax/periods/<int:period_id>/` | `TaxPeriodDetailView` | `accountant_portal/views.py` |
