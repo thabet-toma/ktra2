@@ -1601,7 +1601,8 @@ const App: React.FC = () => {
         }
 
       case "users":
-        if (currentUser!.role !== "manager")
+        // ISSUE #62: الصلاحية هي الحقيقة — نفس مفتاح الرابط في الشريط الجانبي.
+        if (!canView(appView))
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         return (
           <UserManagement
@@ -1612,7 +1613,7 @@ const App: React.FC = () => {
         );
 
       case "activity-log":
-        if (currentUser!.role !== "manager")
+        if (!canView(appView))
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         return <ActivityLogPage />;
 
@@ -1624,12 +1625,12 @@ const App: React.FC = () => {
 
       // تقارير وقت الفريق (مهام وموظفون) — كانت تشغل /reports قبل قسم التقارير.
       case "team-time-report":
-        if (currentUser!.role !== "manager")
+        if (!canView(appView))
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         return <Reports tasks={tasks} users={users} />;
 
       case "employee-notes":
-        if (currentUser!.role !== "manager")
+        if (!canView(appView))
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         return <EmployeeNotes users={users} onSaveNotes={handleSaveNotes} />;
 
@@ -1647,7 +1648,7 @@ const App: React.FC = () => {
         return <PayrollPage />;
 
       case "points-management":
-        if (currentUser!.role !== "manager")
+        if (!canView(appView))
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         return <EmployeePointsManagement users={users} />;
 
@@ -1898,7 +1899,8 @@ const App: React.FC = () => {
         return <Contact currentUser={currentUser} />;
 
       case "accounting-coa":
-        if (currentUser!.role !== "manager") {
+        // ISSUE #62: الصلاحية هي الحقيقة — نفس مفتاح الرابط في الشريط الجانبي.
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return (
@@ -1914,7 +1916,7 @@ const App: React.FC = () => {
         );
 
       case "accounting-journals":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return (
@@ -1949,7 +1951,10 @@ const App: React.FC = () => {
         );
 
       case "accounting-journal-entry":
-        if (currentUser!.role !== "manager" && currentUser!.role !== "procurement") {
+        // ISSUE #62: كان يسمح أيضاً لدور «مشتريات» — لكن المشتريات لا يملك
+        // `accounting.journal.create` افتراضياً، فكانت الشاشة تُفتح والحفظ
+        // يرتدّ 403 من الخادم. الصلاحية هي الحقيقة على الجانبين معاً الآن.
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return (
@@ -1992,25 +1997,25 @@ const App: React.FC = () => {
         );
 
       case "accounting-cheques":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <AccountingChequesPage />;
 
       case "accounting-banks":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <BanksPage />;
 
       case "accounting-bank-reconciliation":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <BankReconciliationPage />;
 
       case "accounting-general-ledger":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return (
@@ -2030,7 +2035,7 @@ const App: React.FC = () => {
         );
 
       case "accounting-trial-balance":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return (
@@ -2043,61 +2048,61 @@ const App: React.FC = () => {
         );
 
       case "accounting-vat-report":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <AccountingVatReportPage />;
 
       case "accounting-landed-cost":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <AccountingLandedCostPage />;
 
       case "accounting-fiscal-periods":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <FiscalPeriodsPage />;
 
       case "accounting-exchange-rates":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <ExchangeRatesPage />;
 
       case "accounting-balance-sheet":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <BalanceSheetPage />;
 
       case "accounting-income-statement":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <IncomeStatementPage />;
 
       case "accounting-vat-statements":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <VatStatementsPage />;
 
       case "accounting-year-end-close":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <YearEndClosePage />;
 
       case "accounting-opening-balances":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <OpeningBalancesPage />;
 
       case "accounting-expense-vouchers":
-        if (currentUser!.role !== "manager") {
+        if (!canView(appView)) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <ExpenseVouchersPage />;

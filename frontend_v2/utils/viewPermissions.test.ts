@@ -75,3 +75,42 @@ test('غياب القالب (undefined أو null) يعامَل كـgeneral — �
 test('قالب مجهول لا يطابق أي إدخال فيسقط بلا إخفاء (فشل مفتوح آمن هنا: القالب نفسه غير معروف)', () => {
   assert.equal(templateHidesView('stock-levels', 'not-a-real-template'), false);
 });
+
+/* ── ISSUE #62 — قناتان لا تتّفقان: رابط الشاشة محكوم بالصلاحية، والشاشة نفسها
+   كانت محكومة بالدور (`currentUser!.role !== "manager"` في `App.tsx`). كل شاشة
+   في هذه القائمة صار حارسها `canView` — أي هذا المفتاح نفسه — فلا يعود دور
+   المحاسب وعداً ميتاً. القائمة مأخوذة حرفياً من موقع الحارس القديم قبل الإصلاح. */
+test('ISSUE #62: كل شاشة كانت محكومة بالدور صار لها مفتاح في VIEW_PERMISSIONS', () => {
+  const formerlyRoleGatedScreens = [
+    // شؤون الموظفين والإدارة
+    'users', 'activity-log', 'team-time-report', 'employee-notes', 'points-management',
+    // المحاسبة
+    'accounting-coa', 'accounting-journals', 'accounting-journal-entry',
+    'accounting-cheques', 'accounting-banks', 'accounting-bank-reconciliation',
+    'accounting-general-ledger', 'accounting-trial-balance', 'accounting-vat-report',
+    'accounting-landed-cost', 'accounting-fiscal-periods', 'accounting-exchange-rates',
+    'accounting-balance-sheet', 'accounting-income-statement', 'accounting-vat-statements',
+    'accounting-year-end-close', 'accounting-opening-balances', 'accounting-expense-vouchers',
+  ];
+  for (const view of formerlyRoleGatedScreens) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(VIEW_PERMISSIONS, view),
+      `مفتاح مفقود: ${view} كانت محكومة بالدور ويجب أن تملك مفتاحاً الآن`,
+    );
+  }
+});
+
+/* «دفاتر عملائي» (`client-books`) وشاشات SQL الداخلية (`sql-products`
+   وأخواتها) بقيت على حارس الدور عمداً — رابطها في `Sidebar.tsx` نفسه محكوم
+   بالدور مباشرةً (`isManager` / `roles: [...]`) لا بـ`VIEW_PERMISSIONS`، فلا
+   قناتين مختلفتين هناك أصلاً. إضافة مفتاح هنا بلا تحريك ذلك الرابط كانت
+   ستفتح بابين متعارضين. */
+test('ISSUE #62: دفاتر العملاء وشاشات SQL خارج القائمة — رابطها في Sidebar محكوم بالدور مباشرةً لا بالصلاحية', () => {
+  for (const view of ['client-books', 'sql-products', 'sql-partners', 'sql-deals', 'sql-shipments']) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(VIEW_PERMISSIONS, view),
+      false,
+      `${view} ليست جزءاً من إصلاح #62 — لا تُضِف لها مفتاحاً بلا نقل حارس الرابط في Sidebar.tsx`,
+    );
+  }
+});
