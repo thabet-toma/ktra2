@@ -27,7 +27,8 @@ export type PartnerActionIcon =
   | "order"
   | "receipt"
   | "payment"
-  | "list";
+  | "list"
+  | "repeat";
 
 export interface PartnerAction {
   key: string;
@@ -86,9 +87,15 @@ export function partnerActionGroups(
         title: "إنشاء مستند",
         actions: [
           { key: "sales-invoice", label: "فاتورة مبيعات", icon: "invoice", href: `/sales/invoices/new?customer_id=${id}` },
+          // ISSUE #53 (قرار 11): فاتورة الأتعاب فاتورة بيعٍ عادية — عميل مملوء
+          // سلفاً وبندها الأول خدمي افتراضاً (`?service=1`، `SalesInvoiceEditor`).
+          { key: "fee-invoice", label: "فاتورة أتعاب", icon: "invoice", href: `/sales/invoices/new?customer_id=${id}&service=1` },
           { key: "sales-quotation", label: "عرض سعر", icon: "quotation", href: `/sales/quotations?action=new&customer_id=${id}` },
           { key: "sales-order", label: "طلبية زبون", icon: "order", href: `/sales/orders?action=new&customer_id=${id}` },
           { key: "receipt", label: "سند قبض", icon: "receipt", bridge: "receipt" },
+          // ISSUE #53 (قرار 22): نسخ آخر فاتورة للشهر الماضي بنقرة واحدة —
+          // `SalesInvoicesPage` تلتقط العلمين وتطلب النسخ فور الوصول.
+          { key: "repeat-last-invoice", label: "كرّر فاتورة الشهر الماضي", icon: "repeat", href: `/sales/invoices?repeat_last_month=1&customer=${id}` },
         ],
       },
       {

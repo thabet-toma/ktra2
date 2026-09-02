@@ -28,11 +28,26 @@ test('إجراءات العميل مستندات بيع — ولا تسرّب ل
   assert.ok(keys.includes('card'));
   assert.ok(keys.includes('statement'));
   assert.ok(keys.includes('sales-invoice'));
+  assert.ok(keys.includes('fee-invoice'));
+  assert.ok(keys.includes('repeat-last-invoice'));
   assert.ok(keys.includes('sales-quotation'));
   assert.ok(keys.includes('sales-order'));
   assert.ok(keys.includes('receipt'));
   assert.ok(!keys.includes('purchase-invoice'));
   assert.ok(!keys.includes('payment'));
+});
+
+test('ISSUE #53 — فاتورة الأتعاب تبدأ من بطاقة العميل بعميلٍ مملوء وبندٍ خدمي افتراضاً', () => {
+  const groups = partnerActionGroups({ id: '7', name: 'زبون', kind: 'customer' });
+  const byKey = new Map(groups.flatMap((g) => g.actions.map((a) => [a.key, a])));
+  assert.equal(byKey.get('fee-invoice')?.href, '/sales/invoices/new?customer_id=7&service=1');
+});
+
+test('ISSUE #53 — «كرّر فاتورة الشهر الماضي» ليست متاحةً للمورّد', () => {
+  const groups = partnerActionGroups({ id: '9', name: 'مورد', kind: 'supplier' });
+  const keys = keysOf(groups);
+  assert.ok(!keys.includes('fee-invoice'));
+  assert.ok(!keys.includes('repeat-last-invoice'));
 });
 
 test('إجراءات المورد مستندات شراء — ولا تسرّب لمستندات البيع', () => {

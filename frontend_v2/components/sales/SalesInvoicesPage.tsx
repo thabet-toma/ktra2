@@ -17,6 +17,7 @@ import {
   postSalesInvoice,
   deleteSalesInvoice,
   getSalesSettings,
+  repeatLastMonthInvoice,
   type DeliveryStatus,
   type SalesInvoiceRow,
   type SalesSettings,
@@ -302,6 +303,32 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       setEditorOpen(true);
     }
   }, [location.pathname]);
+
+  // ISSUE #53 (قرار 22): «كرّر فاتورة الشهر الماضي» — رابطٌ من بطاقة العميل
+  // بـ`?repeat_last_month=1&customer=X` على قائمة الفواتير (لا المحرر) يطلب
+  // النسخ فوراً ثم يفتح المسودة الجديدة. لا مجدولٌ ولا cron — نقرةٌ واحدة.
+  const repeatRequestedRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (location.pathname !== "/sales/invoices") return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("repeat_last_month") !== "1") return;
+    const customerId = Number(params.get("customer"));
+    if (!customerId) return;
+    const requestKey = `${customerId}-${location.key}`;
+    if (repeatRequestedRef.current === requestKey) return;
+    repeatRequestedRef.current = requestKey;
+    setErr(null);
+    setMsg(null);
+    (async () => {
+      try {
+        const created = await repeatLastMonthInvoice(customerId);
+        navigate(`/sales/invoices/${created.id}`, { replace: true });
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "تعذّر تكرار فاتورة الشهر الماضي");
+        navigate("/sales/invoices", { replace: true });
+      }
+    })();
+  }, [location.pathname, location.search, location.key, navigate]);
 
   useKitIndexKeymap({
     F2: () => {
@@ -821,6 +848,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             initialCustomerId={new URLSearchParams(location.search).get("customer_id") ? Number(new URLSearchParams(location.search).get("customer_id")) : undefined}
             /* T-PAYFULL: `?pay=full` من زرّ «مدفوعة» في القائمة. */
             autoFillCollectFull={new URLSearchParams(location.search).get("pay") === "full"}
+            /* ISSUE #53: `?service=1` من «فاتورة أتعاب» في بطاقة العميل. */
+            defaultServiceLine={new URLSearchParams(location.search).get("service") === "1"}
           />
         </div>
       )}

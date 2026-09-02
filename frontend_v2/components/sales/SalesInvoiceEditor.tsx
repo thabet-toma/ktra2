@@ -352,6 +352,9 @@ type Props = {
   /** T-PAYFULL: الفتح من زرّ «مدفوعة» في القائمة (`?pay=full`) — تُعبَّأ لوحة
    *  التحصيل بكامل المتبقّي مرّةً واحدة بعد تحميل الفاتورة. */
   autoFillCollectFull?: boolean;
+  /** ISSUE #53: الفتح من «فاتورة أتعاب» في بطاقة العميل (`?service=1`) — أول
+   *  بندٍ في فاتورةٍ جديدة يُملأ تلقائياً بأول منتج خدمي، إن وُجد. */
+  defaultServiceLine?: boolean;
   salesSettings?: {
     default_customer: number | null;
     default_currency: number | null;
@@ -407,6 +410,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   salesSettings,
   initialCustomerId,
   autoFillCollectFull = false,
+  defaultServiceLine = false,
 }) => {
   const confirm = useConfirm();
   const { can: canPerm, uiMode } = usePermissions();
@@ -2034,6 +2038,22 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         .catch(() => { /* لا سجل سابق — نُبقي السعر الافتراضي */ });
     }
   };
+
+  // ISSUE #53: فاتورة الأتعاب تبدأ ببندٍ خدمي افتراضاً (`?service=1` من بطاقة
+  // العميل) — أول منتج `is_service` في الكتالوج فقط، ومرّة واحدة على فاتورة
+  // جديدة بعد بها لم يمسّها المستخدم بعد. غياب منتج خدمي يترك السطر فارغاً
+  // كأي فاتورة جديدة (لا كيان يُستحدَث هنا).
+  const serviceDefaultAppliedRef = React.useRef(false);
+  useEffect(() => {
+    if (!defaultServiceLine || serviceDefaultAppliedRef.current) return;
+    if (draftToEditId != null || draftId != null) return;
+    if (lines.length !== 1 || lines[0].product !== "") return;
+    const svc = products.find((p) => p.is_service);
+    if (!svc) return;
+    serviceDefaultAppliedRef.current = true;
+    void onSelectProduct(lines[0].key, svc.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultServiceLine, products, lines, draftToEditId, draftId]);
 
   // FEAT-2: عند تغيير العميل بعد وجود بنود، أعِد تسعير الأسطر غير المَلموسة فقط
   // (أسعار محمَّلة/مُحرَّرة يدوياً = priceTouched، فلا تُمَسّ). أول تحميل/عميل

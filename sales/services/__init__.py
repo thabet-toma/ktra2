@@ -104,6 +104,8 @@ from .orders import (
     record_order_deposit,
     log_order_activity,
     convert_quotation_to_invoice,
+    last_month_invoice_for_customer,
+    duplicate_invoice_for_today,
     next_credit_debit_note_number,
     post_credit_debit_note,
 )
@@ -199,6 +201,8 @@ __all__ = [
     "record_order_deposit",
     "log_order_activity",
     "convert_quotation_to_invoice",
+    "last_month_invoice_for_customer",
+    "duplicate_invoice_for_today",
     "next_credit_debit_note_number",
     "post_credit_debit_note",
     "post_supplier_payment",

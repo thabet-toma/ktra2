@@ -216,7 +216,14 @@ def get_or_create_sales_settings(tenant) -> SalesSettings:
         default_customer=default_customer,
         default_currency=default_currency,
         default_revenue_account_product=default_rev,
-        default_revenue_account_service=default_rev,
+        # issue #53: **لا يُثبَّت حساب الخدمة هنا.** `default_rev` أوّل حساب
+        # إيراد بالكود — وهو رأس الشجرة «4» في دليل الحسابات المعياري، أي حسابٌ
+        # أب لا يصلح هدفاً للترحيل. وتثبيتُه هنا كان يُقصِر
+        # `resolve_service_revenue_account` (`sales/services/calc.py`) عن عمله
+        # كلّه: هي تُصرّح بأن حالها الطبيعي «كل شركة لم تُضبط يدوياً»، وتحلّ
+        # «4102 إيرادات الخدمات» وتُنشئه إن غاب ثم تُثبّته — فلا تصل إليها
+        # شركةٌ قطّ لأن الحقل مملوءٌ سلفاً بالرأس. فيُترك فارغاً لتقوم هي به.
+        default_revenue_account_service=None,
         default_vat_rate=default_vat,
     )
     filled = _fill_missing_default_accounts(settings_obj, tenant_id)

@@ -60,6 +60,8 @@ from .services import (
     convert_quotation_to_invoice,
     convert_quotation_to_order,
     document_delete_allowed,
+    duplicate_invoice_for_today,
+    last_month_invoice_for_customer,
     log_order_activity,
     record_order_deposit,
     credit_preview_for_sale,
@@ -553,6 +555,45 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
             request=request,
         )
         ser = SalesInvoiceSerializer(inv, context={"request": request})
+        return Response(ser.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="repeat-last-month")
+    def repeat_last_month(self, request):
+        """ISSUE #53 (قرار 22) — «كرّر فاتورة الشهر الماضي» بنقرة واحدة، لا
+        مجدولٌ زمني ولا cron. تبحث عن آخر فاتورة بيع لهذا العميل ضمن الشهر
+        الميلادي السابق وتنسخها بتاريخ اليوم ورقمٍ جديد من نفس الدفتر — نفس
+        مسار `duplicate_invoice` أعلاه لكن المصدر مُكتشَف من العميل لا من pk
+        صريح، فتكفي نقرةٌ واحدة من بطاقة العميل بلا اختيار الفاتورة يدوياً.
+        """
+        require_perm(request, "sales.invoice.create")
+        tenant = get_tenant(request)
+        if tenant is None:
+            return Response(
+                {"error": "لم يتم تحديد الشركة (X-Tenant-Id)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        customer_id = request.data.get("customer_id") or request.data.get("customer")
+        if not customer_id:
+            return Response({"error": "customer_id مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
+        source = last_month_invoice_for_customer(tenant.TenantID, customer_id)
+        if source is None:
+            return Response(
+                {"error": "لا توجد فاتورة للشهر الماضي لهذا العميل."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        enforce_limits(tenant, "sales.invoices", "documents.invoices")
+        try:
+            invoice = duplicate_invoice_for_today(source, user=request.user)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        log_activity(
+            action="duplicate", entity_type="sales_invoice", entity_id=invoice.id,
+            entity_label=invoice.invoice_number,
+            description=f"تكرار فاتورة الشهر الماضي — نسخ من {source.invoice_number}",
+            partner_ids=[invoice.customer_id],
+            request=request,
+        )
+        ser = SalesInvoiceSerializer(invoice, context={"request": request})
         return Response(ser.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="post")

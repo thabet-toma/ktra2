@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -418,6 +419,83 @@ def convert_quotation_to_invoice(quotation, user=None):
         quotation.invoice = invoice
         quotation.save(update_fields=["status", "invoice"])
 
+    return invoice
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ISSUE #53 — الأتعاب المتكرّرة (قرار 22): «كرّر فاتورة الشهر الماضي» بنقرةٍ
+# واحدة بدل مجدولٍ زمني أو cron. لا كيان فوترةٍ جديد — نسخٌ إلى فاتورة بيع
+# عادية بتاريخ اليوم ورقمٍ جديد من نفس الدفتر.
+# ─────────────────────────────────────────────────────────────────────────
+
+def _previous_month_bounds(today):
+    first_of_this_month = today.replace(day=1)
+    last_of_prev_month = first_of_this_month - timedelta(days=1)
+    first_of_prev_month = last_of_prev_month.replace(day=1)
+    return first_of_prev_month, last_of_prev_month
+
+
+def last_month_invoice_for_customer(tenant_id, customer_id, today=None):
+    """آخر فاتورة بيعٍ للعميل ضمن الشهر الميلادي السابق — أساس التكرار."""
+    from sales.models import SalesInvoice
+
+    today = today or timezone.localdate()
+    date_from, date_to = _previous_month_bounds(today)
+    return (
+        SalesInvoice.objects.filter(
+            tenant_id=tenant_id, customer_id=customer_id,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+            invoice_date__gte=date_from, invoice_date__lte=date_to,
+        )
+        .order_by("-invoice_date", "-id")
+        .first()
+    )
+
+
+def duplicate_invoice_for_today(source, *, user=None, today=None):
+    """ينسخ فاتورةً إلى مسودةٍ جديدة بتاريخ اليوم ورقمٍ جديد من نفس الدفتر.
+
+    نفس مسار الإنشاء (`SalesInvoiceSerializer`) الذي يستعمله `convert_quotation_to_invoice`
+    — لا كتابة مباشرة على `SalesInvoice`/`SalesInvoiceLine`، فيمرّ الترحيل اللاحق
+    بنفس محرّك `post_sales_invoice` بلا فرق عن فاتورة أُدخلت يدوياً.
+    """
+    from sales.serializers import SalesInvoiceSerializer
+
+    today = today or timezone.localdate()
+    invoice_number = next_invoice_number(
+        source.tenant_id, book_number=source.book_number, branch=source.branch,
+    )
+    lines_data = [{
+        "product": ln.product_id,
+        "quantity": ln.quantity,
+        "unit_price": ln.unit_price,
+        "line_discount": ln.line_discount,
+        "tax_rate": ln.tax_rate_id,
+    } for ln in source.lines.all()]
+
+    inv_data = {
+        "invoice_number": invoice_number,
+        "customer": source.customer_id,
+        "invoice_date": today,
+        "currency": source.currency_id,
+        "exchange_rate": source.exchange_rate,
+        "invoice_type": source.invoice_type,
+        "invoice_discount": source.invoice_discount,
+        "discount_percent": source.discount_percent,
+        "notes": source.notes or "",
+        "lines": lines_data,
+    }
+
+    inv_ser = SalesInvoiceSerializer(data=inv_data)
+    if not inv_ser.is_valid():
+        raise ValueError(f"بيانات الفاتورة غير صالحة: {inv_ser.errors}")
+
+    with transaction.atomic():
+        invoice = inv_ser.save(
+            tenant=source.tenant,
+            branch=source.branch,
+            created_by=user if (user and getattr(user, "is_authenticated", False)) else None,
+        )
     return invoice
 
 

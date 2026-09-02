@@ -282,6 +282,14 @@ export async function duplicateSalesInvoice(id: number): Promise<SalesInvoiceDet
   return apiPostObject(`${BASE}/invoices/${id}/duplicate/`, {}, { tenantId: tid() });
 }
 
+/** ISSUE #53 (قرار 22) — «كرّر فاتورة الشهر الماضي»: آخر فاتورة بيع لهذا
+ *  العميل ضمن الشهر الميلادي السابق تُنسخ بتاريخ اليوم ورقمٍ جديد من الدفتر. */
+export async function repeatLastMonthInvoice(customerId: number): Promise<SalesInvoiceDetail> {
+  return apiPostObject(
+    `${BASE}/invoices/repeat-last-month/`, { customer_id: customerId }, { tenantId: tid() },
+  );
+}
+
 export async function createDeliveryOrder(
   invoiceId: number,
   notes?: string

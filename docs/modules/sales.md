@@ -52,6 +52,8 @@ def confirm_sales_order(order, *, user=None):  # تأكيد الطلبية = ح�
 def convert_quotation_to_order(quotation, *, user=None):  # (3401)
 def convert_order_to_invoice(order, *, user=None):  # (3454)
 def convert_quotation_to_invoice(quotation, user=None):  # (3616)
+def last_month_invoice_for_customer(tenant_id, customer_id, today=None):  # آخر فاتورة بيع للعميل ضمن الشهر الميلادي السابق — أساس «كرّر فاتورة الشهر الماضي» (ISSUE #53) (`sales/services/orders.py`)
+def duplicate_invoice_for_today(source: SalesInvoice, *, user=None, today=None) -> SalesInvoice:  # نسخ فاتورة إلى مسودة بتاريخ اليوم ورقمٍ جديد من نفس الدفتر — نفس مسار `convert_quotation_to_invoice` (`sales/services/orders.py`)
 def reserved_quantity_map(tenant_id: int, product_ids=None, *, exclude_customer_id: int | None = None) -> dict:  # يستهلكها inventory (3166)
 def reserved_stock_rows(tenant_id: int, *, product_id=None, customer_id=None, date_from=None, date_to=None) -> list[dict]:  # (3185)
 def guard_reserved_stock(invoice, lines, products_by_id) -> None:  # (3244)
@@ -84,6 +86,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 | GET | `invoices/{id}/customer-ledger/` | `SalesInvoiceViewSet.customer_ledger` → `accounting/services.py` (`partner_account_statement`) بمرساة الفاتورة — الرصيد قبلها وبعدها وأثرها |
 | GET/POST · DELETE | `invoices/{id}/attachments/` · `attachments/{attachment_id}/` | `SalesInvoiceViewSet.attachments` · `delete_attachment` — تُحفظ **فوراً** لا مع الفاتورة، فيبقى الإرفاق ممكناً بعد الترحيل |
 | POST | `invoices/{id}/payment-voucher/` · `invoices/{id}/duplicate/` | (498) · (400) — الأولى غلاف قديم فوق `collect` |
+| POST | `invoices/repeat-last-month/` | `SalesInvoiceViewSet.repeat_last_month` (`views.py`) — «كرّر فاتورة الشهر الماضي» (ISSUE #53، قرار 22): يكتشف المصدر من `customer_id` في الجسم بدل pk صريح، ثم نفس آلية `duplicate` |
 | POST | `payments/{id}/post/` · `payments/{id}/unpost/` · `payments/{id}/allocate/` | `CustomerPaymentViewSet` (1099/1074/1117) |
 | POST | `quotations/{id}/convert/` · `orders/{id}/confirm/` · `orders/{id}/convert/` · `orders/{id}/deposit/` | (1396) · (1505) · (1526) · (1539) |
 | GET/PUT | `settings/current/` · POST `settings/restore-defaults/` | `SalesSettingsViewSet` (1169/1183) |

@@ -101,6 +101,7 @@ const PartnerActionIconView: React.FC<{ icon: PartnerActionIcon }> = ({ icon }) 
     case "order": return <ClipboardList className={cls} />;
     case "receipt": return <ReceiptText className={cls} />;
     case "payment": return <HandCoins className={cls} />;
+    case "repeat": return <RefreshCw className={cls} />;
     default: return <ExternalLink className={cls} />;
   }
 };
