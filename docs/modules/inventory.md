@@ -177,6 +177,7 @@ nginx ⇒ **414/400 في الإنتاج بينما التطوير يمرّ**. `G
 | الحالة تُقاس على **المتاح** (الرصيد − المحجوز) لا على الرصيد | `stock_status.py` (`available_of`, `available_expression`) |
 | «نفذ» **لا يشترط** حدّاً أدنى — المتاح ≤ 0 نفادٌ سواء ضُبط حدّ أم لا | `stock_status.py` (`stock_status_of`) |
 | الحدّ الفعّال = اليدوي إن ضُبط، وإلّا المقترَح المحسوب | `stock_status.py` (`effective_min`) |
+| المقترَح يصل شاشة الأصناف فعلاً — لا موضعاً واحداً (تقرير التجديد) يمرّره | `core/replenishment.py` (`suggested_min_maps`) عبر `ProductViewSet._suggested_min_maps` |
 | الخدمة «متوفّرة» دائماً — بلا مخزونٍ يُقاس | `stock_status.py` (`stock_status_of`) |
 | المعادلات (الصرف اليومي · مخزون الأمان · الحدّان) | `core/replenishment.py` (`suggest_levels`) |
 | مهلة التوريد: وسيط (تاريخ أول وارد لفاتورة الطلبية − تاريخ الطلبية)، للمنتج ثم للمورّد ثم للشركة ثم إعداد | `core/replenishment.py` (`_lead_time_samples`, `_lead_for`) |
@@ -371,6 +372,30 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 (قراءةٌ فقط، بجانب `min_stock_level`/`max_stock_level` الكاتبين كما هما — لا
 تبديل معنى حقلٍ يبعثه نموذج التحرير)، ومنتجٌ بلا أبٍ يعرض حدّه هو كما اليوم.
 `view=lookup` خارج النطاق عمداً (لا يعرض الحدود أصلاً، #25/#28).
+
+**#44: الحدّ المحسوب كان محبوساً في تقرير التجديد — الشاشة تحكم بحدٍّ صفريّ
+بصمت.** `effective_min` تقبل `suggested_min` منذ اليوم الأول، لكن الموضع
+الوحيد الذي مرّره كان `core/replenishment.py` (تقرير التجديد) — فأي منتجٍ بلا
+حدٍّ يدوي (معظم الكتالوج) كان حدّه على شاشة الأصناف صفراً، و`_status_for` لا
+تُرجع `low_stock` إلا حين `minimum > 0`، أي أن «منخفض» لا تظهر له إطلاقاً.
+الإصلاح لا يمسّ `effective_min`/`effective_max`/`_status_for` — الناقص وصولُ
+الرقم إليها لا صحّة القاعدة. `core/replenishment.py` (`suggested_min_maps`)
+تعيد `(خريطة منتج، خريطة عائلة)` للشركة كلّها من **نفس** الخرائط المجمَّعة
+التي يبنيها التقرير (`_demand_profiles`, `_lead_time_samples`, `_forecast_map`)
+— لا مصدر حقيقةٍ ثانٍ، ولا نسخة على `ProductDemandForecast` (نسخةٌ مجمَّدة
+أسبوعياً تنحرف عن حسابٍ حيٍّ عند أوّل تغيير في مهلة مورّد). خريطة العائلة
+مجموع الحدود المحسوبة لإخوة كل أبٍ — نفس نمط الجمع الذي تجمعه `_group_rows`
+(بمفتاح `family_id` بدل `group_key`)، لا قاعدةٌ ثانية. `ProductViewSet`
+يخبّئها لكل طلب (`_suggested_min_maps` بنفس نمط `_reserved_map`/
+`_family_available_map`) ويمرّرها إلى `stock_status_of` (الشارة) و
+`filter_by_stock_status` (الفلتر، عبر `annotate_available`/
+`_effective_min_expression` — حقنٌ بـ`Case` على معرّفات المنتجات بلا أبٍ، لا
+عمود مخزَّن ولا استعلامٌ لكل صفّ). قيمةٌ مركّبة جديدة في الفلتر والتصدير
+(`stock_status.FILTER_UNDER_MIN`، «تحت الحدّ الأدنى») تطابق `out_of_stock`
+و`low_stock` معاً؛ حالة المخزون فلترٌ على مستوى **الأب** منذ #28 فلا تُسقط
+التجميع (خلافاً لمرشِّحات اختيار البراند، #26/#30). `?view=lookup` بلا مساس:
+لا يمرَّر إليه `suggested_min_map` إطلاقاً، فيبقى على `min_stock_level` الخام
+حرفياً كما قبل #44.
 
 ## قواعد لا يجوز كسرها
 - **لا يُعدَّل `quantity_on_hand` أو `avg_cost` إلا عبر `record_stock_movement`** (أو `_recompute_product_stock` بعد حذف حركات). هي الدالة الوحيدة التي تقفل المنتج بـ`select_for_update` داخل `transaction.atomic` (`services.py:187-188`) وتحفظ لقطات before/after على الحركة.

@@ -168,6 +168,60 @@ class ReplenishmentEngineTest(TestCase):
         assert target["suggested_min"] == sum(r["suggested_min"] for r in items) == 84
         assert target["order_qty"] == sum((r["order_qty"] for r in items), Decimal("0"))
 
+    # ── #44: خريطة الحدّ الأدنى المحسوب — نفس رقم الصفّ الذي يبنيه هذا
+    # المحرّك بعينه، من نفس الخرائط المجمَّعة — لا حسابٌ ثانٍ للصيغة.
+    def test_suggested_min_maps_matches_the_engines_own_row(self):
+        from core.replenishment import suggested_min_maps
+
+        p = self._steady_seller("R-44-1")
+        row = self._row_for(p)
+        product_map, _family_map = suggested_min_maps(self.tenant.TenantID, today=TODAY)
+        assert product_map[p.id] == Decimal(str(row["suggested_min"])), (
+            product_map[p.id], row["suggested_min"])
+
+    # ── #44 القرار ج: خريطة الأب مجموع الحدود المحسوبة لإخوته — لا حسابٌ
+    # ثانٍ على مجموعهم (نفس نمط `_group_rows`، بمفتاح `family_id`).
+    def test_suggested_min_maps_sums_computed_mins_under_the_family(self):
+        from core.replenishment import suggested_min_maps
+        from inventory.services import create_product_with_family
+
+        family, first = create_product_with_family(
+            tenant=self.tenant, name_ar="عائلة 44", sku="R-44-FAM-1")
+        self._move(first, "IN", 1000, 89)
+        for week in range(1, 7):
+            self._move(first, "OUT", 14, week * 7)
+        self._move(first, "OUT", 6, 49)
+
+        second = Product.objects.create(
+            tenant=self.tenant, family=family, sku="R-44-FAM-2", name_ar="عائلة 44",
+        )
+        self._move(second, "IN", 1000, 89)
+        for week in range(1, 7):
+            self._move(second, "OUT", 14, week * 7)
+        self._move(second, "OUT", 6, 49)
+
+        product_map, family_map = suggested_min_maps(self.tenant.TenantID, today=TODAY)
+        # كلٌّ منهما بائعٌ ثابتٌ بذاته (90 صافياً على 90 يوماً) ⇒ نفس اقتراح
+        # `_steady_seller` (42) — ومجموع الأب هو مجموعهما حرفياً، لا حسابٌ ثانٍ.
+        assert product_map[first.id] == 42, product_map[first.id]
+        assert product_map[second.id] == 42, product_map[second.id]
+        assert family_map[family.id] == 84, family_map[family.id]
+
+    # ── #44 القرار ب: عدد الاستعلامات لا يكبر مع عدد المنتجات ──
+    def test_suggested_min_maps_query_count_does_not_grow_with_catalog_size(self):
+        from core.replenishment import suggested_min_maps
+
+        for i in range(10):
+            self._steady_seller(f"R-44-Q-{i}")
+        with CaptureQueriesContext(connection) as small:
+            suggested_min_maps(self.tenant.TenantID, today=TODAY)
+        for i in range(10, 40):
+            self._steady_seller(f"R-44-Q-{i}")
+        with CaptureQueriesContext(connection) as large:
+            product_map, _family_map = suggested_min_maps(self.tenant.TenantID, today=TODAY)
+        assert len(product_map) >= 40
+        assert len(large) == len(small), (len(small), len(large))
+
 
 class AutoReorderModeTest(TestCase):
     """#33: المسار التلقائي — من المستوى/الاتجاه المخزَّنين إلى حدٍّ وكمية.

@@ -255,6 +255,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
                 from .stock_status import family_status_and_thresholds
                 self._family_status_and_thresholds_cache = family_status_and_thresholds(
                     tenant.TenantID, family_totals=self._family_available_map(),
+                    suggested_min_map=self._suggested_min_family_map(),
                 )
             else:
                 self._family_status_and_thresholds_cache = ({}, {})
@@ -280,6 +281,27 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         لم يُسوِّ الحدّين.
         """
         return self._family_status_and_thresholds()[1]
+
+    def _suggested_min_maps(self):
+        """#44: الحدّ الأدنى المحسوب لكل منتج ولكل عائلة — استعلاماتٌ للشركة
+        كلّها لكل طلب، بنفس نمط `_reserved_map`/`_family_available_map`. من
+        `core.replenishment.suggested_min_maps` وحدها — لا حسابٌ ثانٍ للصيغة
+        ولا نسخةٌ مخزَّنة. `view=lookup` لا يستدعيها (عقده بلا حدودٍ أصلاً).
+        """
+        if not hasattr(self, '_suggested_min_maps_cache'):
+            tenant = self._get_tenant()
+            if tenant:
+                from core.replenishment import suggested_min_maps
+                self._suggested_min_maps_cache = suggested_min_maps(tenant.TenantID)
+            else:
+                self._suggested_min_maps_cache = ({}, {})
+        return self._suggested_min_maps_cache
+
+    def _suggested_min_product_map(self):
+        return self._suggested_min_maps()[0]
+
+    def _suggested_min_family_map(self):
+        return self._suggested_min_maps()[1]
 
     def _family_brand_counts(self):
         """#23: عدد براندات كل أبٍ في الشركة — استعلامٌ واحدٌ لكل طلب.
@@ -310,6 +332,11 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
                 context['family_available_map'] = self._family_available_map()
                 context['family_brand_counts'] = self._family_brand_counts()
                 context['family_thresholds'] = self._family_thresholds()
+                # #44: الشارة تُحاكَم بالحدّ المحسوب حين لا حدّ يدوياً — نفس
+                # الرقم الذي يعرضه تقرير التجديد، لا صفراً صامتاً. `view=lookup`
+                # يبقى بلا حدودٍ إطلاقاً (عقده الضيّق لا يتغيّر).
+                context['suggested_min_map'] = self._suggested_min_product_map()
+                context['suggested_min_family_map'] = self._suggested_min_family_map()
         return context
 
     def get_queryset(self):
@@ -355,12 +382,15 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         # `get_serializer_context`).
         stock_status = params.get('stock_status')
         if stock_status:
-            family_statuses = (
-                self._family_statuses() if params.get('view') != 'lookup' else None
-            )
+            is_lookup = params.get('view') == 'lookup'
+            family_statuses = self._family_statuses() if not is_lookup else None
+            # #44: المقترَح بلا أبٍ يُحقَن هو الآخر — `view=lookup` يبقى بلا
+            # حدودٍ إطلاقاً (`None` يُبقي `filter_by_stock_status` على
+            # `min_stock_level` الخام حرفياً، نفس ما كان قبل هذا التاريخ).
+            suggested_min_map = self._suggested_min_product_map() if not is_lookup else None
             qs = filter_by_stock_status(
                 qs, stock_status, reserved_map=self._reserved_map(),
-                family_statuses=family_statuses,
+                family_statuses=family_statuses, suggested_min_map=suggested_min_map,
             )
         # ST-3: شاشة «متجري» تعرض المنشور وحده، وتحتاج عدده قبل فتح المتجر أول
         # مرة. بلا هذا الفلتر كان عليها تحميل الكتالوج كاملاً وتصفيته في

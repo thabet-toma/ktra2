@@ -43,7 +43,10 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 const fmt = (n: number | string) => formatMoney(n, "0");
 
 type View = "list" | "form";
-type StockStatus = "" | "out_of_stock" | "low_stock" | "overstock" | "in_stock";
+// T-44: "under_min" قيمةٌ مركّبة (نفذ ∪ منخفض) يحسمها الخادم في
+// `filter_by_stock_status` — لا حالة صفٍّ فعلية، فلا تصل أبداً في `stock_status`
+// المُعاد من الخادم لكل منتج، فقط تُرسَل كفلتر/تصدير.
+type StockStatus = "" | "out_of_stock" | "low_stock" | "overstock" | "in_stock" | "under_min";
 
 // مفتاح عمود الجدول → حقل الترتيب الخادمي (OrderingFilter).
 const ORDER_FIELD: Record<string, string> = {
@@ -62,6 +65,8 @@ const STATUS_LABEL: Record<Exclude<StockStatus, "">, string> = {
   // T-REORDER: حالةٌ رابعة يحسمها الخادم — فوق الحدّ الأقصى المضبوط على المنتج.
   overstock: "فائض",
   in_stock: "متوفر",
+  // T-44: قيمة الفلتر/التصدير المركّبة — لا تصل قط في `p.stock_status` الفعلي.
+  under_min: "تحت الحدّ الأدنى",
 };
 
 const exportItemStyle: React.CSSProperties = {
@@ -823,6 +828,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           onChange={(e) => { setStatusFilter(e.target.value as StockStatus); }}
           title="فلترة حسب حالة المخزون">
           <option value="">كل الحالات</option>
+          <option value="under_min">تحت الحدّ الأدنى</option>
           <option value="out_of_stock">نفذ</option>
           <option value="low_stock">كمية منخفضة</option>
           <option value="overstock">فائض</option>
@@ -842,6 +848,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
                 borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.12)", minWidth: 170,
               }}>
               <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("")}>تصدير الكل</button>
+              <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("under_min")}>تحت الحدّ الأدنى</button>
               <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("out_of_stock")}>المنتجات التي نفذت</button>
               <button className="ktra-menu-item" style={exportItemStyle} onClick={() => exportProducts("low_stock")}>الكمية المنخفضة</button>
             </div>

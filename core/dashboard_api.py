@@ -170,18 +170,31 @@ def trade_dashboard(request):
 
     reserved_map = {}
     family_statuses = {}
+    suggested_min_map = None
     if tenant:
         from sales.services import reserved_quantity_map
 
+        # #44: العدّادان يقرآن **نفس** الحدّ الذي تُحاكَم به شارة شاشة الأصناف
+        # (اليدوي إن وُجد وإلّا المحسوب). بلا هذا تقول البطاقة «٣ منتجات تحت
+        # الحدّ الأدنى» بينما تعرض الشاشة ثلاثمئة — بنفس العبارة حرفياً.
+        # رقمان لحقيقةٍ واحدة على الشاشة التي يفتحها المالك كل صباح.
+        from core.replenishment import suggested_min_maps
+
         reserved_map = reserved_quantity_map(tenant.TenantID)
         family_totals = family_available_map(tenant.TenantID, reserved_map=reserved_map)
-        family_statuses = family_status_map(tenant.TenantID, family_totals=family_totals)
+        suggested_min_map, suggested_min_family_map = suggested_min_maps(tenant.TenantID)
+        family_statuses = family_status_map(
+            tenant.TenantID, family_totals=family_totals,
+            suggested_min_map=suggested_min_family_map,
+        )
     low_stock_qs = filter_by_stock_status(
         prod_qs, STATUS_LOW, reserved_map=reserved_map, family_statuses=family_statuses,
+        suggested_min_map=suggested_min_map,
     )
     low_stock = low_stock_qs.count()
     out_of_stock = filter_by_stock_status(
         prod_qs, STATUS_OUT_OF_STOCK, reserved_map=reserved_map, family_statuses=family_statuses,
+        suggested_min_map=suggested_min_map,
     ).count()
     movements_qs = (
         StockMovement.objects.filter(tenant=tenant)

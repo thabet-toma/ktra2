@@ -45,6 +45,13 @@ STATUS_LABELS = {
     STATUS_IN_STOCK: "متوفّر",
 }
 
+#: #44: قيمة فلتر/تصدير مركّبة تُطابق `STATUS_OUT_OF_STOCK` و`STATUS_LOW`
+#: معاً — «تحت الحدّ الأدنى». ليست حالة صفٍّ فتغيب عمداً عن `STATUS_CHOICES`
+#: (لا شارة منتجٍ تحملها)؛ الخياران المنفصلان يبقيان لمن يريدهما.
+FILTER_UNDER_MIN = "under_min"
+FILTER_CHOICES = STATUS_CHOICES + (FILTER_UNDER_MIN,)
+FILTER_LABELS = {**STATUS_LABELS, FILTER_UNDER_MIN: "تحت الحدّ الأدنى"}
+
 _QTY_FIELD = DecimalField(max_digits=18, decimal_places=4)
 
 
@@ -146,7 +153,8 @@ def stock_status_of(product, *, reserved_map=None, suggested_min=None, suggested
     return _status_for(available, minimum, maximum)
 
 
-def family_status_and_thresholds(tenant_id: int, *, reserved_map=None, family_totals=None):
+def family_status_and_thresholds(tenant_id: int, *, reserved_map=None, family_totals=None,
+                                 suggested_min_map=None):
     """حالة كل عائلةٍ (أبٍ) وحدَّاها الحاكمان معاً — من نفس الاستعلام (#35).
 
     استعلامان اثنان **للشركة كلّها** لا للصفّ: `family_available_map` (إن لم
@@ -156,6 +164,10 @@ def family_status_and_thresholds(tenant_id: int, *, reserved_map=None, family_to
     min، max`) بجانب شارة `stock_status` بلا استعلامٍ ثالث (#35: الرقم
     المعروض على صفّ المنتج كان يُؤخذ من البراند المرجعي بينما الشارة تُحاكَم
     على حدّ الأب — فيتناقض الاثنان بعد أي ضمٍّ لا يُسوّي الحدّين).
+
+    `suggested_min_map` (#44): خريطةٌ اختياريةٌ `{family_id: الحدّ المحسوب}`
+    (من `core.replenishment.suggested_min_maps`، مجموع حدود الإخوة المحسوبة —
+    القرار ج في #44). غائبةً ⇒ السلوك **نفسه** حرفياً كما قبل هذا التاريخ.
 
     `family_status_map` أدناه غلافٌ رقيقٌ يُبقي عقدها القديم (خريطة حالةٍ
     وحدها) لمستدعييها الحاليّين (`filter_by_stock_status`، عدّادا الداشبورد).
@@ -172,9 +184,10 @@ def family_status_and_thresholds(tenant_id: int, *, reserved_map=None, family_to
     statuses: dict = {}
     thresholds: dict = {}
     for family in families:
+        suggested_min = (suggested_min_map or {}).get(family.id)
         statuses[family.id] = _status_for(
             family_totals.get(family.id, ZERO),
-            effective_min(family), effective_max(family),
+            effective_min(family, suggested_min), effective_max(family),
         )
         # خامٌ لا مُشتقّ عبر `effective_min`: العرض يُبقي «—» حين لا حدّ يدويّاً
         # مضبوطاً، تماماً كحقل المنتج الخام اليوم — لا صفراً يبدّل «—» برقم.
@@ -182,7 +195,8 @@ def family_status_and_thresholds(tenant_id: int, *, reserved_map=None, family_to
     return statuses, thresholds
 
 
-def family_status_map(tenant_id: int, *, reserved_map=None, family_totals=None) -> dict:
+def family_status_map(tenant_id: int, *, reserved_map=None, family_totals=None,
+                      suggested_min_map=None) -> dict:
     """حالة كل عائلةٍ (أبٍ) في الشركة — نفس سلّم `stock_status_of` مطبَّقاً
     على مجموع الإخوة مقابل حدّ الأب، لا رصيد براندٍ وحده مقابل حدّه هو (#28).
 
@@ -194,6 +208,7 @@ def family_status_map(tenant_id: int, *, reserved_map=None, family_totals=None) 
     """
     statuses, _ = family_status_and_thresholds(
         tenant_id, reserved_map=reserved_map, family_totals=family_totals,
+        suggested_min_map=suggested_min_map,
     )
     return statuses
 
@@ -220,14 +235,43 @@ def available_expression(reserved_map=None):
     )
 
 
-def annotate_available(qs, reserved_map=None):
-    """يضيف عمود `available_qty` — والفلترة والترتيب يقرآن منه."""
-    return qs.annotate(available_qty=available_expression(reserved_map))
+def _effective_min_expression(suggested_min_map=None):
+    """تعبير ORM لـ«الحدّ الأدنى الحاكم» على مستوى الصفّ بلا أبٍ — يطابق
+    `effective_min` صفّاً بصفّ: اليدوي إن وُجد، وإلّا المقترَح (#44). نفس نمط
+    `available_expression` أعلاه — حقنٌ بـ`Case` على معرّفات المنتجات، لا
+    استعلامٌ لكل صفّ ولا عمود مخزَّن. غياب `suggested_min_map` ⇒ العمود يبقى
+    `min_stock_level` الخام حرفياً — السلوك نفسه كما قبل #44 لكل مستدعٍ لم
+    يُحدَّث ليمرّره.
+    """
+    if not suggested_min_map:
+        return F("min_stock_level")
+    whens = [
+        When(pk=pid, then=Value(_dec(v), output_field=_QTY_FIELD))
+        for pid, v in suggested_min_map.items() if _dec(v) > ZERO
+    ]
+    if not whens:
+        return F("min_stock_level")
+    return Case(
+        When(min_stock_level__gt=0, then=F("min_stock_level")),
+        *whens,
+        default=Value(ZERO, output_field=_QTY_FIELD),
+        output_field=_QTY_FIELD,
+    )
+
+
+def annotate_available(qs, reserved_map=None, suggested_min_map=None):
+    """يضيف `available_qty` دائماً، و`effective_min_qty` (#44) — الحدّ الأدنى
+    الحاكم بلا أبٍ (اليدوي إن وُجد وإلّا المقترَح)، ليقرأه الفلتر كما تقرأه
+    `stock_status_of` بالضبط. الفلترة والترتيب يقرآن من `available_qty`."""
+    return qs.annotate(
+        available_qty=available_expression(reserved_map),
+        effective_min_qty=_effective_min_expression(suggested_min_map),
+    )
 
 
 def _low_q():
-    return Q(available_qty__gt=0, min_stock_level__gt=0,
-             available_qty__lte=F("min_stock_level"))
+    return Q(available_qty__gt=0, effective_min_qty__gt=0,
+             available_qty__lte=F("effective_min_qty"))
 
 
 def _over_q():
@@ -236,11 +280,10 @@ def _over_q():
 
 
 def _not_low_q():
-    # نفيٌ مكتوبٌ صراحةً لا بـ`~Q`: العمود يقبل NULL، و`NOT (NULL > 0)` تعود
-    # NULL في MySQL — أي «كاذب» — فيسقط من «متوفّر» كلُّ منتجٍ بلا حدّ أدنى،
-    # وهو معظم الكتالوج. الصمتُ هنا أسوأ من الخطأ.
-    return Q(min_stock_level__isnull=True) | Q(min_stock_level__lte=0) | Q(
-        available_qty__gt=F("min_stock_level"))
+    # `effective_min_qty` عمودٌ محسوبٌ لا يقبل NULL (افتراضه صفرٌ في
+    # `_effective_min_expression`) — فلا حاجة لنفيٍ صريح ضدّ NULL هنا كما كان
+    # `min_stock_level` الخام يتطلّب.
+    return Q(effective_min_qty__lte=0) | Q(available_qty__gt=F("effective_min_qty"))
 
 
 def _not_over_q():
@@ -259,28 +302,41 @@ def _row_status_q(value):
         return base & Q(available_qty__lte=0)
     if value == STATUS_LOW:
         return base & _low_q()
+    if value == FILTER_UNDER_MIN:
+        # #44: نفذ ∪ منخفض معاً — نفس شرطَي `STATUS_OUT_OF_STOCK`/`STATUS_LOW`
+        # مجموعَين بـ`|` بدل استدعاءين منفصلين يوحَّدان في بايثون.
+        return base & (Q(available_qty__lte=0) | _low_q())
     return base & _over_q()
 
 
-def filter_by_stock_status(qs, value, *, reserved_map=None, family_statuses=None):
+def filter_by_stock_status(qs, value, *, reserved_map=None, family_statuses=None,
+                           suggested_min_map=None):
     """يقصر الـqueryset على حالةٍ واحدة. قيمةٌ مجهولة ⇒ لا فلترة.
 
-    يقرأ الحدّ **اليدوي** وحده: المقترَح محسوبٌ في بايثون ولا يعيش في عمود، ولو
-    فُلتِر به لاختلف عدّ الصفحة عن عدد الصفوف. من أراد الحدّ المقترَح فمكانه
-    تقرير التجديد لا فلتر الجدول — وهو مكتوبٌ في وصف الفلتر لا مسكوتٌ عنه.
+    `suggested_min_map` (#44): خريطةٌ اختياريةٌ `{product_id: الحدّ المحسوب}`
+    (من `core.replenishment.suggested_min_maps`) للمنتجات **بلا أبٍ** — الحدّ
+    الحاكم يصير اليدوي إن وُجد وإلّا هذا المحسوب، محقوناً في عمود
+    `effective_min_qty` (`_effective_min_expression`) لا استعلاماً لكل صفّ.
+    غائبةً ⇒ العمود يبقى `min_stock_level` الخام — السلوك نفسه حرفياً كما قبل
+    #44 (فلا يتغيّر `?view=lookup` ولا أيّ مستدعٍ قديمٍ لم يُحدَّث).
 
-    #28: `family_statuses` (من `family_status_map`) خريطةٌ اختياريةٌ
+    #28: `family_statuses` (من `family_status_map`، محسوبةً هي الأخرى بنفس
+    `suggested_min_map` على مستوى الأب — القرار ج في #44) خريطةٌ اختياريةٌ
     `{family_id: status}`. غائبةً أو فارغةً ⇒ السلوك **نفسه** حرفياً كما قبل
-    هذا التاريخ (فلا يتغيّر `?view=lookup` ولا أيّ مستدعٍ قديمٍ لم يُحدَّث).
-    حاضرةً: منتجٌ له أبٌ ظاهرٌ فيها يُفلتَر بحالة **أبيه** لا حالة صفّه — نفس
-    قاعدة `stock_status_of` — ومنتجٌ بلا أبٍ (أو أبوه غائبٌ عن الخريطة، بيانات
-    ما قبل #20) يبقى على المحمول السابق صفّاً بصفّ. «متوفّر» يُبنى من متمّم
-    الحالات الشاذّة (منخفض/نافد/فائض) لا من تعداد كل عائلةٍ متوفّرة — فقائمة
-    المعرّفات محدودةٌ بعدد العائلات الشاذّة لا بحجم الكتالوج.
+    هذا التاريخ. حاضرةً: منتجٌ له أبٌ ظاهرٌ فيها يُفلتَر بحالة **أبيه** لا حالة
+    صفّه — نفس قاعدة `stock_status_of` — ومنتجٌ بلا أبٍ (أو أبوه غائبٌ عن
+    الخريطة، بيانات ما قبل #20) يبقى على المحمول السابق صفّاً بصفّ. «متوفّر»
+    يُبنى من متمّم الحالات الشاذّة (منخفض/نافد/فائض) لا من تعداد كل عائلةٍ
+    متوفّرة — فقائمة المعرّفات محدودةٌ بعدد العائلات الشاذّة لا بحجم الكتالوج.
+
+    `FILTER_UNDER_MIN` (#44): قيمةٌ مركّبة — نفذ ∪ منخفض معاً، سواءٌ على
+    مستوى الصفّ (`_row_status_q`) أو الأب (مطابقةٌ لمجموعتي الحالتين معاً في
+    `family_statuses`). نفس مسار الفلترة تماماً، فيتّفق التصدير مع العدّ مع
+    الصفحات ببنية الكود لا باتفاقٍ يدوي.
     """
-    if value not in STATUS_CHOICES:
+    if value not in FILTER_CHOICES:
         return qs
-    qs = annotate_available(qs, reserved_map)
+    qs = annotate_available(qs, reserved_map, suggested_min_map)
     if not family_statuses:
         return qs.filter(_row_status_q(value))
 
@@ -299,6 +355,12 @@ def filter_by_stock_status(qs, value, *, reserved_map=None, family_statuses=None
         )
     # الخدمة تفوز أولاً كما في `stock_status_of` — لا تدخل عائلةً شاذّةً أبداً.
     qs = qs.exclude(is_service=True)
-    matching_ids = [fid for fid, st in family_statuses.items() if st == value]
+    if value == FILTER_UNDER_MIN:
+        matching_ids = [
+            fid for fid, st in family_statuses.items()
+            if st in (STATUS_OUT_OF_STOCK, STATUS_LOW)
+        ]
+    else:
+        matching_ids = [fid for fid, st in family_statuses.items() if st == value]
     family_q = Q(family_id__in=matching_ids)
     return qs.filter(family_q | (no_family_q & _row_status_q(value)))

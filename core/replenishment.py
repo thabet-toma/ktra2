@@ -597,22 +597,21 @@ def _history_days(first_movement, window_start, today) -> int:
     return max((today - start).days + 1, 1)
 
 
-def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
-                 on_order, params, window_start, today, family_totals=None,
-                 forecast=None, moq=None) -> dict:
-    from inventory.services import (
-        family_display_name, product_display_name, product_group_key,
-    )
+def _suggested_levels(product, *, profile, lead, lead_max, params, window_start, today,
+                      forecast=None) -> dict:
+    """(المستويان المقترَحان، والسبب حين يغيبان) لمنتجٍ واحد — الصيغتان
+    (اليدوي/التلقائي) مستخرَجتان هنا من `_product_row` كي يستدعيهما أيضاً
+    `suggested_min_maps` (#44) بلا نسخةٍ ثانية من الصيغة نفسها.
 
+    حساب الصرف اليومي وذروته يبقى كما هو **دائماً**، مهما كان وضع المنتج:
+    المسار اليدوي يعتمده مباشرةً، والتلقائي يستعيره فقط حين لا يكفي سجل
+    الأخطاء لحساب MAD (أسفل)، وكلاهما يستعمل `hist_reason` لتمييز «راكد»
+    (بلا مبيعات في النافذة) عن «حديث» (سجلٌّ أقصر من الحدّ).
+    """
     net = profile.get("net", ZERO)
     peak_week = profile.get("peak_week", ZERO)
     history = _history_days(profile.get("first_movement"), window_start, today)
 
-    available = available_of(product, reserved_map)
-    # حساب الصرف اليومي وذروته يبقى كما هو **دائماً**، مهما كان وضع المنتج:
-    # المسار اليدوي يعتمده مباشرةً، والتلقائي يستعيره فقط حين لا يكفي سجل
-    # الأخطاء لحساب MAD (أسفل)، وكلاهما يستعمل `hist_reason` لتمييز «راكد»
-    # (بلا مبيعات في النافذة) عن «حديث» (سجلٌّ أقصر من الحدّ).
     hist_reason = ""
     if history < MIN_HISTORY_DAYS:
         adu = ZERO
@@ -682,6 +681,36 @@ def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
                 adu=adu, adu_peak=adu_peak, lead_days=lead, lead_max_days=lead_max,
                 review_days=params.review_period_days,
             )
+
+    return {
+        "levels": levels, "reason": reason, "hist_reason": hist_reason,
+        "adu": adu, "adu_peak": adu_peak, "history": history,
+        "coverage_weeks": coverage_weeks, "mode": mode,
+        "weekly_sale": weekly_sale, "trend": trend,
+    }
+
+
+def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
+                 on_order, params, window_start, today, family_totals=None,
+                 forecast=None, moq=None) -> dict:
+    from inventory.services import (
+        family_display_name, product_display_name, product_group_key,
+    )
+
+    available = available_of(product, reserved_map)
+    calc = _suggested_levels(
+        product, profile=profile, lead=lead, lead_max=lead_max, params=params,
+        window_start=window_start, today=today, forecast=forecast,
+    )
+    levels = calc["levels"]
+    reason = calc["reason"]
+    adu = calc["adu"]
+    adu_peak = calc["adu_peak"]
+    history = calc["history"]
+    coverage_weeks = calc["coverage_weeks"]
+    mode = calc["mode"]
+    weekly_sale = calc["weekly_sale"]
+    trend = calc["trend"]
 
     manual_min = product.min_stock_level
     manual_max = product.max_stock_level
@@ -772,6 +801,68 @@ def _product_row(product, *, profile, reserved_map, lead, lead_max, lead_source,
         "min_order_qty": moq_dec,
         "moq_raised": moq_raised,
     }
+
+
+def suggested_min_maps(tenant_id: int, *, today=None) -> tuple[dict, dict]:
+    """(خريطة الحدّ الأدنى المحسوب لكل منتج، وخريطتها لكل عائلة) — استعلاماتٌ
+    للشركة كلّها لا للصفّ، من نفس الخرائط المجمَّعة التي يبني منها هذا التقرير
+    صفوفه (`_demand_profiles`, `_lead_time_samples`, `_forecast_map`) — بلا
+    حسابٍ ثانٍ للصيغة (`_suggested_levels` أعلاه، المستخرَجة من `_product_row`
+    نفسها).
+
+    خريطة الأب: مجموع الحدود المحسوبة لإخوة كل عائلة — نفس نمط الجمع الذي
+    تجمعه `_group_rows` (بمفتاح `family_id` بدل `group_key`)، لا قاعدةٌ جديدة
+    (#44 القرار ج). تقرأها `ProductViewSet` (شاشة الأصناف) لتغذية
+    `stock_status_of`/`filter_by_stock_status` بنفس الرقم الذي يعرضه هذا
+    التقرير — مصدرٌ واحد (#44 القرار أ)، لا نسخةٌ مجمَّدة على
+    `ProductDemandForecast`.
+    """
+    from django.utils import timezone
+
+    from inventory.models import Product
+
+    today = today or timezone.localdate()
+    params = replenishment_params(tenant_id)
+    window_start = today - datetime.timedelta(days=params.window_days - 1)
+
+    products = list(
+        Product.objects.filter(tenant_id=tenant_id, is_service=False, is_store_only=False)
+        .only("id", "tenant_id", "reorder_mode", "family_id")
+    )
+    if not products:
+        return {}, {}
+    ids = [p.id for p in products]
+
+    profiles = _demand_profiles(tenant_id, ids, window_start, today)
+    lead_by_product, _, tenant_samples = _lead_time_samples(tenant_id)
+    forecasts = _forecast_map(tenant_id, ids)
+    tenant_lead = (
+        _lead_for(tenant_samples, params.default_lead_time_days)
+        if len(tenant_samples) >= 3 else None
+    )
+
+    product_map: dict[int, Decimal] = {}
+    family_map: dict[int, Decimal] = {}
+    for product in products:
+        samples = lead_by_product.get(product.id) or []
+        if len(samples) >= MIN_LEAD_SAMPLES:
+            lead, lead_max, _lead_source = _lead_for(samples, params.default_lead_time_days)
+        elif tenant_lead is not None:
+            lead, lead_max = tenant_lead[0], tenant_lead[1]
+        else:
+            lead, lead_max, _lead_source = _lead_for([], params.default_lead_time_days)
+        calc = _suggested_levels(
+            product, profile=profiles.get(product.id, {}), lead=lead, lead_max=lead_max,
+            params=params, window_start=window_start, today=today,
+            forecast=forecasts.get(product.id),
+        )
+        suggested_min = _dec(calc["levels"]["suggested_min"])
+        product_map[product.id] = suggested_min
+        if product.family_id:
+            family_map[product.family_id] = (
+                family_map.get(product.family_id, ZERO) + suggested_min
+            )
+    return product_map, family_map
 
 
 def _group_rows(rows: list[dict], params: ReplenishmentParams) -> dict:

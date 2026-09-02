@@ -417,6 +417,17 @@ class ProductSerializer(serializers.ModelSerializer):
         except Exception:
             return []
 
+    def _suggested_min_for(self, obj):
+        """#44: نفس شرط `stock_status_of` حرفاً لاختيار مصدر المتاح/الحدّ —
+        أبٌ ظاهرٌ في `family_available_map` يحكم بخريطة العائلة (مجموع حدود
+        الإخوة المحسوبة)، وإلا خريطة المنتج مباشرةً."""
+        family_totals = self.context.get('family_available_map')
+        if obj.family_id and family_totals is not None and obj.family_id in family_totals:
+            family_map = self.context.get('suggested_min_family_map') or {}
+            return family_map.get(obj.family_id)
+        product_map = self.context.get('suggested_min_map') or {}
+        return product_map.get(obj.id)
+
     def get_stock_status(self, obj):
         # T-REORDER: القاعدة تعيش في `inventory/stock_status.py` وحدها.
         from .stock_status import stock_status_of
@@ -424,6 +435,9 @@ class ProductSerializer(serializers.ModelSerializer):
             obj,
             reserved_map=self.context.get('reserved_quantity_map'),
             family_totals=self.context.get('family_available_map'),
+            # #44: الحدّ المقترَح يصل الشارة أخيراً — كان يُمرَّر من موضعٍ
+            # واحدٍ في المستودع (تقرير التجديد) ولم تكن شاشة الأصناف إيّاه.
+            suggested_min=self._suggested_min_for(obj),
         )
 
 
