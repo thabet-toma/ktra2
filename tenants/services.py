@@ -101,6 +101,15 @@ COA_DATA = [
     ('5307', 'رسوم استيراد متنوعة (Misc. Import Fees)', 'Expense', '53'),
 ]
 
+#  الأكواد التي تتوقعها مسارات الترحيل (دورة الشيكات، ربط الصناديق، ذمم
+#  شركاء اللوجستيات) — لا كل الأكواد تصلح لكل قالب. ISSUE #61: قالب «مكتب
+#  محاسبة» يُسقط 2106-2109 عمداً من بذرته (لا مخزون ولا استيراد ⇒ لا وكلاء
+#  شحن ولا مخلّصين ولا ناقلين)، فإعادة زرعها هنا كانت تنقض إسقاط البذرة.
+OPERATIONAL_ACCOUNT_CODES = (
+    "1107", "1109", "1110", "2106", "2107", "2108", "2109", "2111",
+)
+
+
 def ensure_operational_accounts(tenant) -> list[str]:
     """task13 M2 — يضمن وجود الحسابات التشغيلية في شجرة قائمة (idempotent).
 
@@ -108,9 +117,15 @@ def ensure_operational_accounts(tenant) -> list[str]:
     1107 شيكات برسم التحصيل، 1109 شيكات في المحفظة، 1110 صناديق النقدية،
     2106-2109 ذمم شركاء اللوجستيات، 2111 شيكات برسم الدفع. لا يُنشأ حساب إذا
     غاب أبوه (شجرة غير معيارية) — لا دمج أعمى. يعيد قائمة الأكواد المُنشأة.
+
+    ISSUE #61: الحسابات المضمونة تُشتقّ من **بذرة قالب هذه الشركة** لا من
+    COA_DATA دائماً — وإلا أعاد `heal_company_seed` زرع 2106-2109 في شجرة
+    مكتب محاسبة أسقطتهما بذرتها عمداً. `general` (coa=None) يعني COA_DATA
+    نفسها فتبقى بلا أي تغيير.
     """
-    needed = [row for row in COA_DATA if row[0] in
-              ("1107", "1109", "1110", "2106", "2107", "2108", "2109", "2111")]
+    template_config = COMPANY_TEMPLATES.get(tenant.template) or COMPANY_TEMPLATES[DEFAULT_TEMPLATE]
+    seed_rows = template_config['coa'] or COA_DATA
+    needed = [row for row in seed_rows if row[0] in OPERATIONAL_ACCOUNT_CODES]
     created = []
     for code, acc_name, acc_type, parent_code in needed:
         if Account.objects.filter(tenant=tenant, code=code).exists():

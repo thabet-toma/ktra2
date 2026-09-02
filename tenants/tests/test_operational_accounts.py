@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from django.apps import apps as django_apps
 from django.contrib.auth.models import User
+from django.core.management import call_command
 from rest_framework.test import APITestCase
 
 from accounting.cashbox import get_cash_box_parent_account
@@ -124,3 +125,57 @@ class OperationalAccountsTest(APITestCase):
         created = ensure_operational_accounts(self.tenant)
         assert sorted(created) == ["1107", "1110", "2106", "2107", "2108"]
         assert ensure_operational_accounts(self.tenant) == []
+
+    def test_general_template_regression_all_eight_codes_still_healed(self):
+        """ISSUE #61 — تراجُع صريح: `general` ينتج ما ينتجه اليوم حرفياً، الثمانية كاملةً."""
+        Account.objects.filter(
+            tenant=self.tenant,
+            code__in=["1107", "1109", "1110", "2106", "2107", "2108", "2109", "2111"],
+        ).delete()
+        created = ensure_operational_accounts(self.tenant)
+        assert sorted(created) == [
+            "1107", "1109", "1110", "2106", "2107", "2108", "2109", "2111",
+        ]
+        assert ensure_operational_accounts(self.tenant) == []
+
+
+class OperationalAccountsTemplateAwareTest(APITestCase):
+    """ISSUE #61 — heal_company_seed لا يعيد زرع ذمم شركاء اللوجستيات في شركة
+    قالبها أسقطها من بذرته عمداً (مكتب محاسبة: لا مخزون ولا استيراد)."""
+
+    LOGISTICS_PARTNER_CODES = {"2106", "2107", "2108", "2109"}
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="ops-firm", password="x")
+        Currency.objects.get_or_create(
+            Code="ILS", defaults={"Name": "شيكل", "IsBaseCurrency": True}
+        )
+        cls.tenant = create_company("مكتب محاسبة", cls.user, template="accounting_firm")
+
+    def test_seed_never_contained_logistics_partner_accounts(self):
+        codes = set(Account.objects.filter(tenant=self.tenant).values_list("code", flat=True))
+        assert not self.LOGISTICS_PARTNER_CODES & codes
+        assert {"1107", "1109", "1110", "2111"} <= codes
+
+    def test_ensure_operational_accounts_does_not_resurrect_logistics_accounts(self):
+        created = ensure_operational_accounts(self.tenant)
+        assert created == []  # الأربعة التشغيلية موجودة فعلاً من البذرة، ولا شيء لوجستي يُزرع
+        codes = set(Account.objects.filter(tenant=self.tenant).values_list("code", flat=True))
+        assert not self.LOGISTICS_PARTNER_CODES & codes
+
+    def test_ensure_operational_accounts_still_heals_its_own_missing_accounts(self):
+        Account.objects.filter(
+            tenant=self.tenant, code__in=["1107", "1109", "1110", "2111"]
+        ).delete()
+        created = ensure_operational_accounts(self.tenant)
+        assert sorted(created) == ["1107", "1109", "1110", "2111"]
+        codes = set(Account.objects.filter(tenant=self.tenant).values_list("code", flat=True))
+        assert not self.LOGISTICS_PARTNER_CODES & codes
+
+    def test_heal_company_seed_command_respects_accounting_firm_template(self):
+        Account.objects.filter(tenant=self.tenant, code__in=["1107", "1110"]).delete()
+        call_command("heal_company_seed", tenant=self.tenant.TenantID)
+        codes = set(Account.objects.filter(tenant=self.tenant).values_list("code", flat=True))
+        assert {"1107", "1110"} <= codes
+        assert not self.LOGISTICS_PARTNER_CODES & codes
