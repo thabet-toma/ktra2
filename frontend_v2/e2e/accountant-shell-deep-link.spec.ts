@@ -54,6 +54,15 @@ async function stubAccountantSession(page: Page) {
         period_from: '2026-08-01', period_to: '2026-08-31', clients: [],
         totals: { clients: 0, vat_due: '0', profit: '0', draft_documents: 0, needs_attention: 0 },
       };
+    } else if (path.endsWith('/accountant/practice/dashboard/')) {
+      // ISSUE #58 غيّر لوحة المكتب إلى ثلاثة أقسام ولم يُحدَّث هذا المُثبِّت،
+      // فكان الردّ الافتراضي `[]` يُسقط الصفحة كلها (`payload.clients is not
+      // iterable`) — والحارس يُخفق لسببٍ لا علاقة له بما بُني له.
+      body = {
+        clients: [],
+        deadlines: { items: [], totals: { count: 0, overdue: 0, due_soon: 0 } },
+        unpaid_fees: { invoices: [], total: '0.00' },
+      };
     } else if (path.endsWith('/platform/dashboard/')) {
       body = {
         companies: { total: 0, active: 0, trial: 0, suspended: 0 },

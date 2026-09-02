@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { pickActiveMembership, storedTenantId } from "../utils/tenantContext";
+import { pickOfficeTenant } from "../utils/managedBooks";
+import { enterManagedBook, leaveManagedBook, managedBookOffice } from "../utils/officeShell";
+import { createManagedBook as createManagedBookApi, listManagedBooks } from "../services/managedBooksApi";
 import { apiGetObject, apiPostObject } from "../services/restApi";
 import { useAuth } from "./AuthContext";
 import { clientLogger } from "../services/logger";
@@ -29,6 +32,12 @@ export type Tenant = {
   subscription_expired?: boolean;
   /** ISSUE #50: مفتاح قالب الشركة — للقراءة فقط، يُضبَط مرة واحدة عند الإنشاء. */
   template?: string;
+  /**
+   * ISSUE #52/#65: المكتب المالك إن كانت هذه الشركة دفترَ عميلٍ مُدار. `null`
+   * أو غياب = شركةٌ عادية. للقراءة فقط: يُضبَط مرة واحدة عند الإنشاء من نقطة
+   * `managed-books`.
+   */
+  managed_by?: number | null;
 };
 
 export type CompanyMembership = {
@@ -49,6 +58,19 @@ interface CompanyContextType {
   canAccessImport: boolean;
   switchCompany: (companyId: number) => Promise<void>;
   createCompany: (name: string, template?: string) => Promise<Tenant>;
+  /**
+   * ISSUE #65 — دفاتر عملاء المكتب. **قناةٌ خاصة** لا امتدادٌ لـ`companies`:
+   * الدفتر مستثنى من `my-companies` عمداً (#52) كي لا يزحم مبدّل الشركات، وهذه
+   * القائمة هي بابه الوحيد.
+   */
+  managedBooks: Tenant[];
+  /** الشركة التي تلعب دور المكتب — `null` فلا دفاتر ولا باب لها. */
+  officeTenantId: number | null;
+  /** هل الشركة النشطة الآن دفترُ عميلٍ دخلناه من مكتب؟ (طريق العودة ظاهر حينها) */
+  insideManagedBook: boolean;
+  openManagedBook: (bookId: number) => void;
+  createManagedBook: (name: string, template: string) => Promise<Tenant>;
+  returnToOffice: () => void;
   /** T-IMPOFFER: الشركة التي تُفتح تلقائياً عند كل تسجيل دخول. */
   setDefaultCompany: (companyId: number) => Promise<void>;
   refreshCompanies: () => Promise<void>;
@@ -70,6 +92,8 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [currentCompany, setCurrentCompany] = useState<Tenant | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [managedBooks, setManagedBooks] = useState<Tenant[]>([]);
+  const [officeTenantId, setOfficeTenantId] = useState<number | null>(null);
   const requestVersionRef = useRef(0);
   const activeUserIdRef = useRef<string | null>(currentUser ? String(currentUser.id) : null);
   activeUserIdRef.current = currentUser ? String(currentUser.id) : null;
@@ -122,10 +146,34 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // the latter fabricates 1 when nothing is stored — that fabricated value
       // was being honoured as an explicit choice, so a fresh login opened tenant
       // 1 instead of the user's default company.
-      const activeMember = pickActiveMembership(
-        data,
-        options?.preferredTenantId ?? storedTenantId(),
-      );
+      const explicitTenantId = options?.preferredTenantId ?? storedTenantId();
+
+      // ISSUE #65: قناة دفاتر العملاء. تُقرأ قبل حسم الشركة النشطة لأن الدفتر
+      // **ليس** في `my-companies`: بلا هذه القراءة كان الدخول إليه يُقابَل بأن
+      // `pickActiveMembership` لا تجده فتُعيد الشركة الافتراضية وتكتب معرّفها
+      // فوق معرّفه — أي أن الدخول للدفتر يُلغي نفسه في أول تحميل.
+      const office = pickOfficeTenant(data, explicitTenantId);
+      const officeId = office ? office.tenant.TenantID : null;
+      const books = officeId === null
+        ? []
+        : await listManagedBooks(officeId).catch(() => [] as Tenant[]);
+      if (
+        requestVersion !== requestVersionRef.current ||
+        activeUserIdRef.current !== requesterUserId
+      ) return null;
+      setOfficeTenantId(officeId);
+      setManagedBooks(books);
+
+      const openBook = explicitTenantId == null
+        ? undefined
+        : books.find((book) => book.TenantID === explicitTenantId);
+      if (openBook) {
+        setCurrentCompany(openBook);
+        clientLogger.info("onboarding.memberships_loaded", { count: data.length });
+        return data;
+      }
+
+      const activeMember = pickActiveMembership(data, explicitTenantId);
 
       localStorage.setItem("tenantId", String(activeMember!.tenant.TenantID));
       setCurrentCompany(activeMember ? activeMember.tenant : null);
@@ -196,6 +244,57 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   /**
+   * ISSUE #65 — فتح دفترٍ جديد لعميل. **من نقطة المكتب حصراً** (`managed-books`)
+   * لا من `POST companies/`: تلك تتخطّى حصّة `office.managed_books` ولا تضبط
+   * `managed_by`، فينتج دفترٌ يزحم مبدّل الشركات ولا يُحسب على المكتب.
+   *
+   * رسالة الحصّة تصعد كما هي من الخادم (`plan_limit`) — لا تُبتلع ولا تُستبدل
+   * بـ«حدث خطأ»: هي الرسالة الوحيدة التي تقول لصاحب المكتب لماذا تَوقّف.
+   */
+  const createManagedBook = async (name: string, template: string): Promise<Tenant> => {
+    if (officeTenantId === null) {
+      throw new Error("لا يوجد مكتب محاسبة على حسابك لفتح دفاتر عملاء تحته.");
+    }
+    const book = await createManagedBookApi(officeTenantId, {
+      CompanyName: name,
+      template,
+    });
+    setManagedBooks((prev) => [...prev, book].sort(
+      (a, b) => a.CompanyName.localeCompare(b.CompanyName, "ar"),
+    ));
+    clientLogger.info("office.book_opened", { tenantId: book.TenantID, template });
+    return book;
+  };
+
+  /** الدخول إلى دفتر عميل — إعادة تحميل كاملة كما في `switchCompany`. */
+  const openManagedBook = (bookId: number) => {
+    // وجهةُ العودة: المكتب إن عُرف، وإلا الشركة التي كنّا فيها. الثاني احتياطٌ
+    // لمكتبٍ بقالبٍ غير `accounting_firm` — يبقى له طريق عودةٍ لا أن يعلق.
+    const origin = officeTenantId ?? currentCompany?.TenantID ?? null;
+    if (origin === null) return;
+    setLoading(true);
+    enterManagedBook(bookId, origin);
+    clientLogger.info("office.book_entered", { tenantId: bookId, officeTenantId: origin });
+    window.location.assign("/dashboard");
+  };
+
+  /**
+   * العودة من دفتر العميل إلى المكتب. الوجهة تتبع نوع الحساب: المحاسب القانوني
+   * بيته قشرة `/office`، وصاحب شركةٍ بقالب مكتب بيته لوحة شركته نفسها.
+   */
+  const returnToOffice = () => {
+    const office = leaveManagedBook() ?? officeTenantId;
+    if (office != null) {
+      localStorage.setItem("tenantId", String(office));
+      localStorage.removeItem("branchId");
+    }
+    clientLogger.info("office.book_left", { officeTenantId: office });
+    window.location.assign(
+      currentUser?.accountType === "legal_accountant" ? "/office" : "/dashboard",
+    );
+  };
+
+  /**
    * T-IMPOFFER: تثبيت الشركة الافتراضية. النقطة النهائية كانت موجودة في الخادم
    * (`tenants/companies/set-default/`) وبلا أي مستدعٍ في الواجهة، فلم يكن للمستخدم
    * أي طريق ليقول «هذه شركتي التي تُفتح أول ما أدخل».
@@ -217,10 +316,24 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const activeMembership = currentCompany
     ? companies.find((m) => m.tenant.TenantID === currentCompany.TenantID)
     : undefined;
+  /**
+   * ISSUE #65 — «أنا داخل دفتر عميل». شرطان: الشركة النشطة دفترٌ مُدار (حقيقةٌ
+   * من الخادم لكل شركة)، ودخلناه من مكتبٍ في هذا التبويب (مفتاح الجلسة). الثاني
+   * لازم لأن من فتح الدفتر بالرابط مباشرةً لا مكتبَ له يعود إليه، فزرُّ عودةٍ
+   * بلا وجهة أسوأ من غيابه.
+   */
+  const insideManagedBook =
+    currentCompany != null
+    && currentCompany.managed_by != null
+    && managedBookOffice() != null;
   const canAccessImport =
     !!currentCompany?.import_enabled &&
     (!!currentUser?.isSuperAdmin ||
       activeMembership?.role === "manager" ||
+      // داخل دفتر العميل لا عضويةَ في `companies` (الدفتر مستثنى من
+      // `my-companies`)، فكان مديرُ المكتب يفقد قائمة الاستيراد في دفترٍ
+      // مُرخَّصٍ لها. الدخول لا يتاح إلا لمديري المكتب، والخادم يفرض.
+      insideManagedBook ||
       !!activeMembership?.can_access_import);
 
   return (
@@ -236,6 +349,12 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         error,
         switchCompany,
         createCompany,
+        managedBooks,
+        officeTenantId,
+        insideManagedBook,
+        openManagedBook,
+        createManagedBook,
+        returnToOffice,
         setDefaultCompany,
         refreshCompanies: async () => { await fetchCompanies(); },
       }}

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Briefcase, CalendarClock, LayoutDashboard, LogOut, Scale, Settings, ShieldCheck, Users } from 'lucide-react';
+import { BookOpenCheck, Briefcase, CalendarClock, LayoutDashboard, LogOut, Scale, Settings, ShieldCheck, Users } from 'lucide-react';
 
 import type { User } from '../../../types';
+import { ClientBooksPanel } from '../../office/ClientBooksPanel';
 import { AccountantProfilePage } from '../AccountantProfilePage';
 import { EngagementRevokedGuard } from '../EngagementRevokedGuard';
 import { OfficeAgendaPage } from './OfficeAgendaPage';
@@ -11,11 +12,13 @@ import { OfficeDashboardPage } from './OfficeDashboardPage';
 import { OfficeExternalClientPage } from './OfficeExternalClientPage';
 import { OfficeSettingsPage } from './OfficeSettingsPage';
 
-type OfficeView = 'dashboard' | 'clients' | 'client' | 'practice' | 'agenda' | 'settings' | 'profile';
+type OfficeView = 'dashboard' | 'clients' | 'client' | 'practice' | 'books' | 'agenda' | 'settings' | 'profile';
 
 const NAV: { key: OfficeView; label: string; icon: React.ReactNode }[] = [
   { key: 'dashboard', label: 'لوحة المكتب', icon: <LayoutDashboard className="h-5 w-5" /> },
   { key: 'clients', label: 'زبائني', icon: <Users className="h-5 w-5" /> },
+  // ISSUE #65: دفاتر العملاء — القسم الذي كان محرّكه جاهزاً بلا بابٍ يفتحه.
+  { key: 'books', label: 'دفاتر عملائي', icon: <BookOpenCheck className="h-5 w-5" /> },
   { key: 'agenda', label: 'المواعيد والمهام', icon: <CalendarClock className="h-5 w-5" /> },
   { key: 'settings', label: 'إعدادات المكتب', icon: <Settings className="h-5 w-5" /> },
   { key: 'profile', label: 'ملفي المهني', icon: <ShieldCheck className="h-5 w-5" /> },
@@ -26,6 +29,7 @@ const TITLES: Record<OfficeView, string> = {
   clients: 'زبائن المكتب',
   client: 'ملف زبون',
   practice: 'ملف زبون المكتب',
+  books: 'دفاتر عملائي',
   agenda: 'المواعيد والمهام',
   settings: 'إعدادات المكتب',
   profile: 'ملفي المهني',
@@ -81,7 +85,8 @@ export const AccountantOfficeApp: React.FC<{
         return;
       }
       setView(
-        path.startsWith('/office/profile') ? 'profile'
+        path.startsWith('/office/books') ? 'books'
+          : path.startsWith('/office/profile') ? 'profile'
           : path.startsWith('/office/agenda') ? 'agenda'
             : path.startsWith('/office/settings') ? 'settings'
               : path.startsWith('/office/clients') ? 'clients' : 'dashboard',
@@ -215,6 +220,7 @@ export const AccountantOfficeApp: React.FC<{
                 onOpenPracticeClient={openPracticeClient}
               />
             )}
+            {view === 'books' && <ClientBooksPanel />}
             {view === 'settings' && <OfficeSettingsPage />}
             {view === 'profile' && <AccountantProfilePage />}
           </main>

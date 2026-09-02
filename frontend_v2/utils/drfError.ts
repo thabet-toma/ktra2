@@ -79,6 +79,11 @@ export function humanizeDrfError(data: unknown): string {
     const top = data as Record<string, unknown>;
     if (typeof top.detail === "string") return translate(top.detail);
     if (typeof top.error === "string") return translate(top.error);
+    // T-PLANLIMITS: `enforce_limits` يرفع {"plan_limit": "...", "limit_key": "..."}
+    // ورسالته مكتوبة للمستخدم أصلاً («بلغتَ حدّ …»). بلا هذا السطر كان المشي
+    // العام يُلحق بها مفتاحَ الحدّ التقني (`office.managed_books`) كأنه رسالة
+    // ثانية، فتصل الحصّةُ للمستخدم ملوّثةً باسم حقلٍ لا يعنيه.
+    if (typeof top.plan_limit === "string") return translate(top.plan_limit);
   }
 
   const seen = new Set<string>();

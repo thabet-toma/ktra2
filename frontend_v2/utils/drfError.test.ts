@@ -86,3 +86,12 @@ test('humanizeThrown يقرأ رسالة Error وجسم DRF المُسلسَل',
   assert.equal(humanizeThrown({ detail: 'خطأ مباشر' }), 'خطأ مباشر');
   assert.equal(humanizeThrown(new Error('')), 'حدث خطأ غير متوقع');
 });
+
+test('رسالة حصّة الخطة تصل كما هي بلا مفتاح الحدّ التقني', () => {
+  // T-PLANLIMITS: `enforce_limits` يرفع الحقلين معاً؛ المستخدم يقرأ الأول وحده.
+  const message = humanizeDrfError({
+    plan_limit: 'بلغتَ حدّ خطتك: 3 دفاتر عملاء إجمالاً.',
+    limit_key: 'office.managed_books',
+  });
+  assert.equal(message, 'بلغتَ حدّ خطتك: 3 دفاتر عملاء إجمالاً.');
+});

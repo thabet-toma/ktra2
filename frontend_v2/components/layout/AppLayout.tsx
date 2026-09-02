@@ -81,6 +81,35 @@ const SubscriptionExpiryBanner: React.FC = () => {
   );
 };
 
+/**
+ * ISSUE #65 — «أنت داخل دفتر عميلك». حالةٌ قائمة لا إشعارٌ عابر، فلا تُغلَق:
+ * كل شاشة معروضة الآن تكتب في دفتر الزبون لا في دفتر المكتب، وخلطُ الاثنين هو
+ * بالضبط ما تمنعه هذه الشاشة. والزرّ هو **طريق العودة الظاهر** الذي اشترطته
+ * التذكرة — بلا لمس عنوان URL ولا مبدّل شركاتٍ لا يحوي الدفتر أصلاً.
+ */
+const ManagedBookBanner: React.FC = () => {
+  const { currentCompany, insideManagedBook, returnToOffice } = useCompany();
+  if (!insideManagedBook || !currentCompany) return null;
+  return (
+    <div
+      role="status"
+      data-testid="managed-book-banner"
+      className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2 border-b border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-900 dark:border-indigo-900/60 dark:bg-indigo-950/50 dark:text-indigo-200"
+    >
+      <span>
+        أنت داخل دفتر عميلك «{currentCompany.CompanyName}» — كل ما تحفظه هنا يخصّه هو لا مكتبك.
+      </span>
+      <button
+        type="button"
+        onClick={returnToOffice}
+        className="rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-bold text-white"
+      >
+        العودة إلى المكتب
+      </button>
+    </div>
+  );
+};
+
 interface AppLayoutProps {
   user: User;
   activeView: AppView;
@@ -258,6 +287,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             listPath={listPath}
             userId={user.id}
           />
+          <ManagedBookBanner />
           <SubscriptionExpiryBanner />
           <main className="app-content overflow-auto flex-1">
             {children}

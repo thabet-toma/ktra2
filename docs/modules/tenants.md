@@ -102,7 +102,7 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 | POST | `companies/{pk}/set-import-enabled/` | `set_import_enabled` (views.py:382) — سوبر أدمن |
 | POST | `companies/{pk}/members/set-import-access/` | `set_member_import_access` (views.py:401) — مدير الشركة |
 | GET | `companies/my-companies/` | `my_companies` (views.py:418) — يستثني الدفاتر المُدارة (`tenant__managed_by__isnull=True`) |
-| GET/POST | `companies/{office_id}/managed-books/` | `TenantViewSet.managed_books` — مدير المكتب فقط؛ POST يفحص `office.managed_books` بـ`enforce_limits` قبل الإنشاء |
+| GET/POST | `companies/{office_id}/managed-books/` | `TenantViewSet.managed_books` — مدير المكتب فقط؛ POST يفحص `office.managed_books` بـ`enforce_limits` قبل الإنشاء. **مستدعيها في الواجهة** (ISSUE #65): `frontend_v2/services/managedBooksApi.ts` وحده — لا `POST companies/` |
 | GET/POST | `handover-requests/` | `BookHandoverRequestViewSet` (ISSUE #54) — مدير المكتب المالك ينشئ، والقائمة تُريه طلباته المُرسَلة والعميل طلباته الواردة |
 | POST | `handover-requests/{id}/accept/` | `BookHandoverRequestViewSet.accept` — العميل المدعوّ حصراً؛ يُسقط `managed_by` ذرّياً ولا يمسّ وصول المكتب |
 | POST | `companies/set-default/` | `set_default` (views.py:428) |

@@ -18,6 +18,7 @@
 | `frontend_v2/utils/windowGeometry.ts` · `frontend_v2/hooks/useDragResize.ts` | **هندسة النوافذ العائمة**: القصّ والسحب والتحجيم والحفظ (`ktra:win:<الاسم>`) + جهة إرساء الشريط |
 | `frontend_v2/components/layout/ActionBarRail.tsx` | **شريط الإجراءات القابل للإرساء** — يمين/يسار رفّاً عائماً، أو أفقياً في شريط العنوان |
 | `frontend_v2/components/layout/QuickAccessBar.tsx` · `frontend_v2/utils/quickBarPref.ts` | **شريط الوصول السريع** (رجوع + المسار + الاختصارات + مرسى المرشد) — يُطوى بضغطة أو `Ctrl+F1`، والتفضيل لكل مستخدم |
+| `frontend_v2/components/office/ClientBooksPanel.tsx` · `frontend_v2/utils/managedBooks.ts` · `frontend_v2/services/managedBooksApi.ts` | **دفاتر عملاء المكتب (ISSUE #65)**: اللوحة الواحدة تُركَّب في القشرتين (قسم «دفاتر عملائي» في `/office` وشاشة `client-books` في قشرة الشركة)، و`pickOfficeTenant` تحسم الشركة التي تلعب دور المكتب |
 | `frontend_v2/contexts/` | 9 سياقات: `Auth`, `Company`, `Permissions`, `Appearance`, `SessionSettings`, `Theme`, `Toast`, `Confirm`, `PriceVisibility` |
 | `frontend_v2/utils/navAccess.ts` | اشتقاق القائمة: الصلاحية + قناع «الوضع السهل» — **نقطة التركيب الوحيدة** |
 | `frontend_v2/utils/uiMode.ts` | «الوضع السهل»: `SIMPLE_VIEWS` وقناع العناصر (`SIMPLE_MASK`, `SIMPLE_HIDDEN_COLUMNS`, `showAdvanced`, `visibleColumns`) وcache بمفتاح الشركة |

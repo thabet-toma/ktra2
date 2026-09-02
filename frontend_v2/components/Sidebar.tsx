@@ -12,7 +12,7 @@ import { GalleryIcon } from "./icons/GalleryIcon";
 import {
   ChevronDown, ChevronUp, Package, FileText, History,
   Handshake, Users, Menu, X, ChevronRight, ChevronLeft, Info,
-  Calculator, BookMarked, Scale, BookOpen, Banknote,
+  Calculator, BookMarked, Scale, BookOpen, BookOpenCheck, Banknote,
   CalendarDays, CalendarX, ArrowLeftRight, Boxes, BarChart3, Building2,
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck,
@@ -420,6 +420,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             >
               <Home className="h-5 w-5 flex-shrink-0" />
               {showText && <span className="mr-3 text-right flex-1 font-semibold">الرئيسية</span>}
+            </button>
+          )}
+
+          {/* ISSUE #65: «دفاتر عملائي» — بابُ مكتب المحاسبة إلى دفاتر زبائنه.
+              فوق كل شيء لأنه أول ما يقصده صاحب المكتب، ومشروطٌ بقالب المكتب
+              وحده: فتح دفاترٍ لعملاء عملٌ مكتبيّ لا معنى له في شركةٍ تجارية. */}
+          {isManager && template === "accounting_firm" && (
+            <button
+              onClick={() => { setView("client-books"); if (isMobile) setIsMobileMenuOpen(false); }}
+              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("client-books") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+              title="دفاتر عملائي"
+            >
+              <BookOpenCheck className="h-5 w-5 flex-shrink-0" />
+              {showText && <span className="mr-3 text-right flex-1 font-semibold">دفاتر عملائي</span>}
             </button>
           )}
 

@@ -3,8 +3,11 @@ import test from 'node:test';
 
 import {
   companyWorkspaceDeepLink,
+  enterManagedBook,
   enterOfficeShell,
   enterPlatformShell,
+  leaveManagedBook,
+  managedBookOffice,
   platformShellActive,
 } from './officeShell.ts';
 
@@ -113,4 +116,38 @@ test('مسار مجهول لا يُحسب شاشة شركة', () => {
   assert.equal(companyWorkspaceDeepLink('/nope/whatever', VIEW_PATHS), false);
   // ولا يكفي أن يكون المسار بادئة نصية لشاشة — الحدّ عند الشرطة.
   assert.equal(companyWorkspaceDeepLink('/itemsx', VIEW_PATHS), false);
+});
+
+// ── ISSUE #65: رحلة دفتر العميل ذهاباً وإياباً ──────────────────────────────
+
+test('الدخول لدفتر عميل: قشرةٌ تجارية، والشركة النشطة هي الدفتر، والفرع يُمسح', () => {
+  const stores = withStores({ tenantId: '7', branchId: '3' }, {});
+  enterManagedBook(41, 7);
+  assert.equal(stores.local.getItem('tenantId'), '41');
+  assert.equal(stores.local.getItem('branchId'), null);
+  // بلا هذا المفتاح يرى المحاسبُ القانوني لوحةَ مكتبه لا دفتر زبونه.
+  assert.equal(stores.session.getItem('ktra_shell'), 'platform');
+  assert.equal(managedBookOffice(), 7);
+});
+
+test('العودة من الدفتر تُعيد الشركة النشطة إلى المكتب وتُنهي أثر الرحلة', () => {
+  const stores = withStores({ tenantId: '7' }, {});
+  enterManagedBook(41, 7);
+  assert.equal(leaveManagedBook(), 7);
+  assert.equal(stores.local.getItem('tenantId'), '7');
+  assert.equal(stores.session.getItem('ktra_shell'), null);
+  assert.equal(managedBookOffice(), null);
+});
+
+test('من لم يدخل دفتراً لا مكتب يعود إليه — فلا زرّ عودة يُعرض له', () => {
+  withStores({ tenantId: '41' }, {});
+  assert.equal(managedBookOffice(), null);
+  assert.equal(leaveManagedBook(), null);
+});
+
+test('الوصول إلى /office بأي طريق يُنهي رحلة الدفتر', () => {
+  const stores = withStores({ tenantId: '7' }, {});
+  enterManagedBook(41, 7);
+  assert.equal(platformShellActive('/office'), false);
+  assert.equal(stores.session.getItem('ktra_book_office'), null);
 });

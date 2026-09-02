@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArchiveRestore, ArrowRight, Building2, Link2, Pencil, Trash2 } from 'lucide-react';
+import { ArchiveRestore, ArrowRight, BookOpenCheck, Building2, Link2, Pencil, Trash2 } from 'lucide-react';
 
 import { listWorkspaceCompanies } from '../../../services/accountantApi';
 import {
@@ -7,13 +7,16 @@ import {
   getPracticeClient,
   getPracticeSettings,
   restorePracticeClient,
+  updatePracticeClient,
   type PracticeClientRecord,
   type PracticeSettingsRecord,
 } from '../../../services/accountantPracticeApi';
+import { useCompany } from '../../../contexts/CompanyContext';
 import { useConfirm } from '../../../contexts/ConfirmContext';
 import { useToast } from '../../../contexts/ToastContext';
 import type { WorkspaceCompany } from '../../../types/accountant';
 import { resolveClientBookTenantId } from '../../../utils/clientBookAccess';
+import { COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE } from '../../../utils/companyTemplates';
 import { formatDateValue } from '../../../utils/formatDate';
 import { platformHint } from '../../../utils/officeClients';
 import { OfficeClientForm } from './OfficeClientForm';
@@ -46,7 +49,14 @@ const DETAILS: { key: keyof PracticeClientRecord; label: string }[] = [
 /**
  * ملف الزبون الخارجي — سجلّ المكتب عن زبونٍ لا دفاتر له عندنا: بياناته، برامج
  * مراجعته، مستنداته، ومواعيده. **ليس دفتر حسابات**: لا قيد ولا رصيد ولا فاتورة
- * هنا؛ من أراد المكتبُ مسك دفاتره كاملةً يُربط بشركةٍ على المنصة من هذه الشاشة.
+ * هنا — لكنّ منه بابين إلى دفترٍ حقيقي، ولا ثالث لهما:
+ *
+ * - **الربط بشركةٍ قائمة على المنصة بإذنها** (`AccountantEngagement`) — الزبون
+ *   يملك دفاتره وأنت تقرؤها.
+ * - **فتح دفترٍ مُدار باسمه** (ISSUE #65) — مكتبك يملكه ويشغّله، وتدخل إليه
+ *   لتُدخل فواتيره بنفسك. يمرّ بنقطة `managed-books` وحدها (الحصّة و`managed_by`).
+ *
+ * والاثنان مستقلان: النوع مشتقٌّ منهما معاً (`client_type`) لا حقل حالة ثالث.
  */
 export const OfficeExternalClientPage: React.FC<{
   clientId: number;
@@ -55,6 +65,10 @@ export const OfficeExternalClientPage: React.FC<{
 }> = ({ clientId, onBack, onOpenPlatformFile }) => {
   const toast = useToast();
   const confirm = useConfirm();
+  // ISSUE #65: قناة الدفاتر المُدارة — نفس النقطة التي تغذّي «دفاتر عملائي».
+  const { managedBooks, officeTenantId, openManagedBook, createManagedBook } = useCompany();
+  const [bookTemplate, setBookTemplate] = useState<string>(DEFAULT_COMPANY_TEMPLATE);
+  const [openingBook, setOpeningBook] = useState(false);
   const [tab, setTab] = useState<Tab>('data');
   const [client, setClient] = useState<PracticeClientRecord | null>(null);
   const [settings, setSettings] = useState<PracticeSettingsRecord | null>(null);
@@ -127,6 +141,38 @@ export const OfficeExternalClientPage: React.FC<{
     linkedAccessible: linkedCompany?.accessible ?? false,
   });
   const visibleTabs = TABS.filter((item) => item.key !== 'tax' || bookTenantId !== null);
+  const managedBook = client.managed_tenant_id === null
+    ? undefined
+    : managedBooks.find((book) => book.TenantID === client.managed_tenant_id);
+
+  /**
+   * ISSUE #65 — «افتح دفتراً لهذا الزبون»: خطوتان لا واحدة. الدفتر يُنشأ من نقطة
+   * المكتب (فتُفحص الحصّة ويُضبط `managed_by`)، ثم يُربط بملف الزبون فيصير نوعه
+   * «مُدار» — والنوع مشتقٌّ لا مخزَّن، فالربط وحده يكفي.
+   */
+  const openBookForClient = async () => {
+    setOpeningBook(true);
+    try {
+      const book = await createManagedBook(client.trade_name, bookTemplate);
+      try {
+        const linked = await updatePracticeClient(client.id, { managed_tenant_id: book.TenantID });
+        setClient(linked.client);
+        toast(`فُتح دفتر «${book.CompanyName}» وربط بهذا الزبون.`, 'success');
+      } catch (linkError) {
+        // الدفتر أُنشئ فعلاً — قول ذلك صراحةً كي لا يعيد المستخدم المحاولة
+        // فيستهلك حصّةً ثانية على دفترٍ مكرّر.
+        toast(
+          `فُتح دفتر «${book.CompanyName}» لكن تعذّر ربطه بملف الزبون: `
+          + `${(linkError as Error).message || 'خطأ غير معروف'}. تجده في «دفاتر عملائي».`,
+          'error',
+        );
+      }
+    } catch (caught) {
+      toast((caught as Error).message || 'تعذّر فتح الدفتر.', 'error');
+    } finally {
+      setOpeningBook(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -202,6 +248,59 @@ export const OfficeExternalClientPage: React.FC<{
               <div className="mt-5 rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
                 <p className="text-xs font-bold text-slate-500 dark:text-slate-400">ملاحظات</p>
                 <p className="mt-1 whitespace-pre-line text-sm text-slate-700 dark:text-slate-200">{client.notes}</p>
+              </div>
+            )}
+          </OfficeCard>
+
+          <OfficeCard title="دفتر هذا الزبون عندك">
+            {client.managed_tenant_id !== null ? (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-200">
+                  <BookOpenCheck className="h-4 w-4 text-emerald-600" />
+                  دفترٌ مفتوحٌ لهذا الزبون تمسك حساباته فيه
+                  {managedBook ? ` — «${managedBook.CompanyName}»` : ''}.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => openManagedBook(client.managed_tenant_id as number)}
+                  className="rounded-xl bg-indigo-700 px-5 py-2.5 font-bold text-white"
+                >
+                  ادخل إلى دفتر الزبون ←
+                </button>
+              </div>
+            ) : officeTenantId === null ? (
+              <p className="text-sm text-slate-600 dark:text-slate-300">
+                فتحُ دفترٍ لزبون يحتاج شركةً بقالب «مكتب محاسبة» تديرها — أنشئها أوّلاً ثم عُد.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  افتح لهذا الزبون دفتراً مستقلاً باسمه تُدخل فيه فواتيره ومشترياته وتمسك
+                  حساباته — دفترٌ لا يظهر في مبدّل شركاتك، وتعود منه إلى مكتبك بزرّ واحد.
+                </p>
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="block">
+                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400">قالب الدفتر</span>
+                    <select
+                      value={bookTemplate}
+                      onChange={(e) => setBookTemplate(e.target.value)}
+                      className="mt-1 rounded-xl border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+                    >
+                      {COMPANY_TEMPLATES.map((item) => (
+                        <option key={item.key} value={item.key}>{item.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    disabled={openingBook}
+                    onClick={() => void openBookForClient()}
+                    className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 font-bold text-white disabled:opacity-60"
+                  >
+                    <BookOpenCheck className="h-4 w-4" />
+                    {openingBook ? 'جارٍ فتح الدفتر…' : 'افتح دفتراً لهذا الزبون'}
+                  </button>
+                </div>
               </div>
             )}
           </OfficeCard>
