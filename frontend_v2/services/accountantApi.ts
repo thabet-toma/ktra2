@@ -2,6 +2,7 @@ import type {
   AccountantEngagement,
   AccountantPermissionEntry,
   AccountantProfile,
+  TaxPeriodStatus,
   WorkspaceCompany,
 } from '../types/accountant';
 import { apiGetObject, apiPatchObject, apiPostForBlob, apiPostObject } from './restApi';
@@ -245,5 +246,67 @@ export const companyEngagementAction = (
   body: Record<string, unknown> = {},
 ) => apiPostObject<{ engagement: AccountantEngagement }>(
   `accountant/company/engagements/${id}/${action}/`, body, { tenantId },
+);
+
+// ── ISSUE #57: الفترات الضريبية على دفتر العميل ─────────────────────────────
+//
+// نفس نقاط `/api/accountant/tax/periods/...` القائمة منذ M5 — **بلا تغيير في
+// الخادم** — يُنادَى عليها هنا بـ`tenantId` دفتر العميل (المُدار أو المربوط)
+// بدل تبديل الشركة النشطة في كل التطبيق، تماماً كنداءات ملف الزبون أعلاه.
+
+export interface TaxPeriodRecord {
+  id: number;
+  tenant_id: number;
+  period_from: string;
+  period_to: string;
+  status: TaxPeriodStatus;
+  prepared_at: string | null;
+  approved_at: string | null;
+  submitted_at: string | null;
+  submission_reference: string;
+  locked_at: string | null;
+  reopen_count: number;
+  last_reopen_reason: string;
+  vat: {
+    statement_number: string;
+    total_sales_vat: string;
+    total_purchase_vat: string;
+    net_vat: string;
+  } | null;
+}
+
+export interface TaxPeriodFinding {
+  code: string;
+  severity: 'blocker' | 'warning' | 'info';
+  message: string;
+  count: number;
+  entity_type: string;
+  entity_id: number | null;
+}
+
+export const listClientTaxPeriods = (tenantId: number) =>
+  apiGetObject<{ results: TaxPeriodRecord[]; count: number }>('accountant/tax/periods/', { tenantId });
+
+export const prepareClientTaxPeriod = (
+  tenantId: number,
+  body: { period_from: string; period_to: string },
+) => apiPostObject<{ period: TaxPeriodRecord }>('accountant/tax/periods/prepare/', body, { tenantId });
+
+export const getClientTaxPeriodReadiness = (tenantId: number, periodId: number) =>
+  apiGetObject<{ findings: TaxPeriodFinding[]; blockers: number; warnings: number }>(
+    `accountant/tax/periods/${periodId}/readiness/`, { tenantId },
+  );
+
+export const approveClientTaxPeriod = (tenantId: number, periodId: number, reauthPassword: string) =>
+  apiPostObject<{ period: TaxPeriodRecord }>(
+    `accountant/tax/periods/${periodId}/approve/`, { reauth_password: reauthPassword }, { tenantId },
+  );
+
+export const submitClientTaxPeriod = (
+  tenantId: number,
+  periodId: number,
+  body: { submission_reference: string; reauth_password: string },
+) => apiPostObject<{ period: TaxPeriodRecord }>(
+  `accountant/tax/periods/${periodId}/mark-submitted/`, body, { tenantId },
 );
 

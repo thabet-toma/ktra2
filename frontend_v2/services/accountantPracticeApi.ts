@@ -37,6 +37,9 @@ export interface PracticeClientRecord {
   /** ارتباط المكتب بشركة هذا الزبون على المنصة — `null` يعني «زبون خارجي». */
   engagement_id: number | null;
   tenant_id: number | null;
+  /** ISSUE #52/#57 — دفتر يديره المكتب مباشرة (`Tenant.managed_by`). */
+  managed_tenant_id: number | null;
+  client_type: 'managed' | 'engaged' | 'hybrid' | 'unlinked';
   created_at: string;
 }
 
@@ -98,7 +101,7 @@ export interface PracticeDeadlines {
   totals: { count: number; overdue: number; due_soon: number };
 }
 
-export type PracticeClientInput = Partial<Omit<PracticeClientRecord, 'id' | 'tenant_id' | 'created_at' | 'status'>>;
+export type PracticeClientInput = Partial<Omit<PracticeClientRecord, 'id' | 'tenant_id' | 'client_type' | 'created_at' | 'status'>>;
 
 // ── الزبائن ──────────────────────────────────────────────────────────────────
 

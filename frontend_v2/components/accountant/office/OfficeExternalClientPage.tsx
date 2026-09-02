@@ -13,17 +13,20 @@ import {
 import { useConfirm } from '../../../contexts/ConfirmContext';
 import { useToast } from '../../../contexts/ToastContext';
 import type { WorkspaceCompany } from '../../../types/accountant';
+import { resolveClientBookTenantId } from '../../../utils/clientBookAccess';
 import { formatDateValue } from '../../../utils/formatDate';
 import { platformHint } from '../../../utils/officeClients';
 import { OfficeClientForm } from './OfficeClientForm';
 import { OfficeClientLinkForm } from './OfficeClientLinkForm';
+import { OfficeClientTaxPeriods } from './OfficeClientTaxPeriods';
 import { DocumentsPanel, ProgramsPanel, TasksPanel } from './OfficeClientWork';
 import { OfficeBadge, OfficeCard, OfficeError, OfficeSkeleton } from './OfficeUi';
 
-type Tab = 'data' | 'programs' | 'documents' | 'tasks';
+type Tab = 'data' | 'tax' | 'programs' | 'documents' | 'tasks';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'data', label: 'بيانات' },
+  { key: 'tax', label: 'الفترات الضريبية' },
   { key: 'programs', label: 'برامج المراجعة' },
   { key: 'documents', label: 'مستندات' },
   { key: 'tasks', label: 'مهام/مواعيد' },
@@ -118,6 +121,12 @@ export const OfficeExternalClientPage: React.FC<{
   const linkedCompany = client.engagement_id === null
     ? undefined
     : companies.find((company) => company.engagement_id === client.engagement_id);
+  const bookTenantId = resolveClientBookTenantId({
+    managedTenantId: client.managed_tenant_id,
+    linkedTenantId: client.tenant_id,
+    linkedAccessible: linkedCompany?.accessible ?? false,
+  });
+  const visibleTabs = TABS.filter((item) => item.key !== 'tax' || bookTenantId !== null);
 
   return (
     <div className="space-y-6">
@@ -159,7 +168,7 @@ export const OfficeExternalClientPage: React.FC<{
       )}
 
       <nav className="flex flex-wrap gap-2" aria-label="أقسام ملف الزبون">
-        {TABS.map((item) => (
+        {visibleTabs.map((item) => (
           <button
             key={item.key}
             type="button"
@@ -231,6 +240,10 @@ export const OfficeExternalClientPage: React.FC<{
             )}
           </OfficeCard>
         </div>
+      )}
+
+      {tab === 'tax' && bookTenantId !== null && (
+        <OfficeClientTaxPeriods tenantId={bookTenantId} companyName={client.trade_name} />
       )}
 
       {tab === 'programs' && settings && (

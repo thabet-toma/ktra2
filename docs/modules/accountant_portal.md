@@ -25,6 +25,13 @@
 `PracticeClient.client_type` (`managed` / `engaged` / `hybrid` / `unlinked`) — لا حقل
 حالة ثالث يمكن أن يناقضهما (مرآته في الواجهة: `frontend_v2/utils/officeClientType.ts`).
 
+**ISSUE #57:** مسارات `tax/periods/...` (تحت) لا تفترض دفتر المكتب — تعمل على أي
+دفترٍ يصله المستخدم بـ`X-Tenant-Id`، فيصلح لدفتر عميلٍ مُدار أو مربوطٍ بالضبط
+كما يصلح لدفتر شركة عادية؛ لا تغيير في `guards.py`/`readiness.py`/`services.py`.
+الواجهة تستدعيها من **بطاقة العميل** نفسها (`frontend_v2/components/accountant/office/OfficeClientTaxPeriods.tsx`،
+مُضافة كتبويب في `OfficeExternalClientPage.tsx`) لا من بوابةٍ منفصلة — أيّ دفترٍ
+يُستعمل يحسمه `frontend_v2/utils/clientBookAccess.ts` (المُدار يفوز عند التعارض).
+
 ## أهم الملفات
 
 | الملف | الغرض | أسطر |
@@ -208,3 +215,4 @@ def practice_deadlines(*, accountant, today=None)   # برامج المكتب و
 | `tests/test_practice_api.py` (394) | الطبقة نفسها فوق HTTP: الدورة الكاملة لكل كيان، و**404** لمحاسبٍ على صفّ غيره في كل فعل، والرفع مموّهاً، والعَلَم مُطفأً ⇒ 404 على كل المسارات |
 | `tests/test_mysql_m2_concurrency.py` (72) · `test_mysql_audit.py` (41) | استهلاك الدعوة مرة واحدة تحت تزامن حقيقي، وثبات صفوف التدقيق (MySQL) |
 | `tests/test_demo_workspace.py` (134) · `test_platform_modules.py` (42) | فتح واجهة المحاسب وتبديل ترخيص الوحدة من لوحة المنصة (سوبر أدمن) |
+| `tests/test_client_book_tax_periods.py` | ISSUE #57 — تجهيز/جاهزية/قفل الفترة عبر `X-Tenant-Id` على دفتر عميل مُدار؛ القفل لا يمسّ دفتر المكتب ولا دفتر عميلٍ آخر |
