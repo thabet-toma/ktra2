@@ -5,7 +5,8 @@
 ## الغرض
 app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: يُعرّف `Tenant` — وحدة العزل التي يحمل مفتاحَها كل model في كل app آخر —
 ومعها إعدادات الشركة، فروعها، دفاتر ترقيم مستنداتها، عضويات مستخدميها وأدوارهم، وتجاوزات الصلاحيات لكل دور ولكل عضو.
-كما يملك `create_company` الذي يُقلع شركة جديدة كاملة (إعدادات + 10 دفاتر لكل نوع مستند + شجرة حسابات + فرع رئيسي + مستودع + عضوية مدير) — **على الخطة التجريبية بأربعة عشر يوماً** (`core/plans.py` — `trial_end_date`)، لا `Enterprise` بلا حدود ولا انتهاء.
+كما يملك `create_company` الذي يُقلع شركة جديدة كاملة (إعدادات + دفاتر أنواع مستنداتها + شجرة حسابات + فرع رئيسي + مستودع + عضوية مدير) — **على الخطة التجريبية بأربعة عشر يوماً** (`core/plans.py` — `trial_end_date`)، لا `Enterprise` بلا حدود ولا انتهاء.
+`create_company` يقبل `template` (كلمة مفتاحية، افتراضه `general`) يحدّد أيّ بذرة حسابات وأيّ أنواع دفاتر تُزرع — السِجلّ في `tenants/company_templates.py` (`COMPANY_TEMPLATES`). `general` ينتج ما كان يُنتَج دائماً حرفياً (10 دفاتر لكل نوع من الخمسة عشر)، و`accounting_firm` يزرع شجرة أتعاب مهنية بلا مخزون ولا استيراد وسبعة أنواع دفاتر فقط. `Tenant.template` يحفظ المفتاح المستعمَل؛ تبديله لاحقاً غير مبنيّ بعد.
 جدول `Currency` يعيش هنا أيضاً ويستورده `accounting` و`sales` و`logistics` منه.
 
 ## آلية عزل الشركات (القاعدة العابرة للنظام)
@@ -40,6 +41,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 |---|---|---|
 | `tenants/views.py` | ViewSets: الإعدادات، الدفاتر، العملات، الشركات والأعضاء، الفروع | 445 |
 | `tenants/services.py` | `create_company` + شجرة الحسابات `COA_DATA` + شركة المثال + الفروع | 383 |
+| `tenants/company_templates.py` | سِجلّ قوالب الشركة `COMPANY_TEMPLATES` (`general` · `accounting_firm`) — بذرة كل قالب وأنواع دفاتره | 121 |
 | `tenants/models.py` | 9 models (Tenant, Settings, Branch, Book, Membership, RolePermission, …) | 361 |
 | `tenants/serializers.py` | تمثيل الشركة والإعدادات والدفاتر والعضوية | 92 |
 | `tenants/urls.py` | router تحت `/api/tenants/` | 16 |
@@ -65,7 +67,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 def ensure_operational_accounts(tenant) -> list[str]:                  # يضمن 1107/1110/2106-2109/2111 في شجرة قائمة (idempotent)
 def ensure_operational_account(tenant, code: str):                     # يضمن حساباً واحداً ويعيده — ولو غاب أبوه المعياري
 def ensure_base_currencies():                                          # يزرع ILS/USD ويعيد العملة الأساسية
-def create_company(name: str, creator_user) -> Tenant:                 # إقلاع شركة كاملة: إعدادات + دفاتر + COA + فرع + مستودع + عضوية مدير
+def create_company(name: str, creator_user, *, template: str = 'general') -> Tenant:  # إقلاع شركة كاملة: إعدادات + دفاتر + COA حسب القالب + فرع + مستودع + عضوية مدير
 def set_example_company(tenant: Tenant | None) -> None:                # يعيّن شركة المثال الوحيدة ويزامن عضويات الوصول
 def ensure_example_company_access(user) -> None:                       # يُلحق المستخدمين الجدد بشركة المثال عند أول تحميل
 def member_payload(m: UserCompanyMembership) -> dict:                  # تمثيل عضوية موحّد (إدارة الشركة + لوحة المنصة)

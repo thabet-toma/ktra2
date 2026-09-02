@@ -1,8 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useCompany, Tenant } from "../../contexts/CompanyContext";
 import { useTenantSettings } from "../../hooks/useTenantSettings";
-import { Building, Plus, ChevronDown, Check, Loader2, Settings2, Star } from "lucide-react";
+import { Building, Building2, Calculator, Plus, ChevronDown, Check, Loader2, Settings2, Star } from "lucide-react";
 import { CompanyManagementModal, ROLE_LABELS } from "./CompanyManagementModal";
+import { COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
+
+const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
+  Building2,
+  Calculator,
+};
 
 const companyLabel = (tenant: Tenant) =>
   `${tenant.CompanyName}${tenant.is_example ? " (مثال)" : ""}`;
@@ -18,6 +24,7 @@ export const CompanySwitcher: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
+  const [newCompanyTemplate, setNewCompanyTemplate] = useState<CompanyTemplateKey>(DEFAULT_COMPANY_TEMPLATE);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pinning, setPinning] = useState<number | null>(null);
@@ -62,9 +69,10 @@ export const CompanySwitcher: React.FC = () => {
     setSubmitting(true);
     setError(null);
     try {
-      const created = await createCompany(newCompanyName);
+      const created = await createCompany(newCompanyName, newCompanyTemplate);
       setShowModal(false);
       setNewCompanyName("");
+      setNewCompanyTemplate(DEFAULT_COMPANY_TEMPLATE);
       // Switch to newly created company automatically
       await switchCompany(created.TenantID);
     } catch (err) {
@@ -217,6 +225,7 @@ export const CompanySwitcher: React.FC = () => {
                   setShowModal(false);
                   setError(null);
                   setNewCompanyName("");
+                  setNewCompanyTemplate(DEFAULT_COMPANY_TEMPLATE);
                 }}
                 className="p-1 rounded-lg hover:bg-[var(--ktra-panel-hover)] transition-colors opacity-70 hover:opacity-100"
               >
@@ -245,6 +254,34 @@ export const CompanySwitcher: React.FC = () => {
                 />
               </div>
 
+              <div className="space-y-1.5">
+                <span className="block text-xs font-bold opacity-80">نوع الشركة</span>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {COMPANY_TEMPLATES.map((option) => {
+                    const Icon = TEMPLATE_ICONS[option.icon] ?? Building2;
+                    const isSelected = newCompanyTemplate === option.key;
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => setNewCompanyTemplate(option.key)}
+                        disabled={submitting}
+                        aria-pressed={isSelected}
+                        className={`flex flex-col items-start gap-1 rounded-lg border p-3 text-right transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          isSelected
+                            ? "border-[var(--ktra-accent)] bg-[var(--ktra-panel-hover)] ring-1 ring-[var(--ktra-accent)]"
+                            : "border-[var(--ktra-border)] bg-[var(--ktra-panel)]"
+                        }`}
+                      >
+                        <Icon className="w-4 h-4" style={{ color: isSelected ? "var(--ktra-accent)" : "var(--ktra-ink-soft)" }} />
+                        <span className="text-xs font-bold" style={{ color: "var(--ktra-ink)" }}>{option.name}</span>
+                        <span className="text-[11px] leading-4 opacity-70">{option.description}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="flex gap-3 justify-end pt-2">
                 <button
                   type="button"
@@ -252,6 +289,7 @@ export const CompanySwitcher: React.FC = () => {
                     setShowModal(false);
                     setError(null);
                     setNewCompanyName("");
+                    setNewCompanyTemplate(DEFAULT_COMPANY_TEMPLATE);
                   }}
                   className="px-4 py-2 text-sm font-semibold rounded-lg hover:bg-[var(--ktra-panel-hover)] transition-colors duration-150"
                   disabled={submitting}

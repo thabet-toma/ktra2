@@ -30,8 +30,8 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | `inventory` | المنتجات والمستودعات و`StockMovement` (المصدر الوحيد للرصيد ومتوسط التكلفة) والأرقام التسلسلية وحالة المخزون وحدود التجديد | 7,000 | 5,700 | `/api/inventory/` |
 | `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية — وفوقها **طبقة مكتب** بنطاق `accountant=` لا `tenant=`: زبائن المكتب (ولو لم يكونوا شركات على المنصة) وبرامجه ومواعيده ومستنداته | 4,600 | 3,800 | `/api/accountant/` |
 | `docshare` | مشاركة المستند برابط عام: صفحة **بلا مصادقة** يفتحها الزبون **أو المورّد** (‏HTML خادمي بوسوم Open Graph لمعاينة واتساب) + قبول/رفض عرض السعر منها. أربعة عشر نوعاً بجمهورين ومفتاحَي صلاحية | 2,900 | 1,700 | `/s/` · `/api/share/` · `/api/document-shares/` |
+| `tenants` | تعريف الشركة وعزلها: الأعضاء، الأدوار، الفروع، دفاتر الترقيم، إقلاع شركة جديدة | 2,300 | 1,500 | `/api/tenants/` |
 | `after_sales` | بطاقات الكفالة وأوامر الصيانة — **وحدة مرخّصة** | 2,200 | 2,000 | `/api/after-sales/` |
-| `tenants` | تعريف الشركة وعزلها: الأعضاء، الأدوار، الفروع، دفاتر الترقيم، إقلاع شركة جديدة | 2,100 | 1,400 | `/api/tenants/` |
 | `store` | المتجر العام: خمس نقاط قراءة **بلا مصادقة** مُقيَّدة بـ`Tenant.store_slug`، ولوحة إدارته المصادَق عليها (مظهر · صور · حملات · منتجات متجر) | 1,400 | 1,800 | `/api/store/` |
 | `partners` | بطاقة الطرف الموحّدة (عميل/مورّد/…) وحساباتها البنكية وربطها بشجرة الحسابات | 1,200 | 800 | `/api/partners/` |
 | `import_file` | ملف الاستيراد: قائمة تحقّق مستندات ومهامّ لكل صفقة، ترسو على الصفقة أو على شحنتها — **وحدة مرخّصة، محايدة مالياً بالكامل** | 800 | 1,000 | `/api/import-file/` |
@@ -142,7 +142,7 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 | رواتب ومسير وسلف | `modules/hr.md` | `hr/payroll.py` (`compute_payslip`), `hr/contracts.py` (`effective_terms`) |
 | حضور وانصراف وورديات | `modules/hr.md` | `hr/attendance.py` (`recompute_attendance_day`, `evaluate_punch`) |
 | إجازات وطلبات واعتمادها | `modules/hr.md` | `hr/leave.py` (`leave_balance`), `hr/requests.py` (`approve`) |
-| شركة جديدة / أعضاء / أدوار | `modules/tenants.md` | `tenants/services.py` (`create_company`) |
+| شركة جديدة / أعضاء / أدوار | `modules/tenants.md` | `tenants/services.py` (`create_company`), `tenants/company_templates.py` (`COMPANY_TEMPLATES`) |
 | صلاحيات | `modules/tenants.md` | `core/access.py` |
 | محاسب خارجي / ارتباطات | `modules/accountant_portal.md` | `accountant_portal/services.py` |
 | مكتب المحاسب: زبائنه وبرامجه ومواعيده | `modules/accountant_portal.md` | `accountant_portal/practice.py` (`list_practice_clients`) |

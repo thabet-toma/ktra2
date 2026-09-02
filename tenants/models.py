@@ -95,6 +95,14 @@ class Tenant(models.Model):
         validators=[validate_store_slug],
         help_text='معرّف المتجر العام في الرابط /store/<slug> — فارغ يعني أن المتجر مقفل',
     )
+    # ISSUE #50: قالب الشركة — يحدّد بذرة دليل الحسابات ودفاتر المستندات
+    # المزروعة عند الإنشاء (`tenants/company_templates.py`). الافتراضي
+    # `general` يعني بلا قناع وبلا تغيير سلوك (قرار 16): الشركات القائمة
+    # بعد الهجرة تُصنَّف `general` ولا تتغيّر أي شجرة حسابات عندها.
+    template = models.CharField(
+        max_length=32, default='general', db_column='Template',
+        help_text='مفتاح قالب الشركة — يحدّد بذرة الحسابات والدفاتر عند الإنشاء',
+    )
 
     class Meta:
         db_table = 'tenants'

@@ -256,9 +256,13 @@ class TenantViewSet(viewsets.ModelViewSet):
         name = request.data.get("CompanyName")
         if not name:
             raise DRFValidationError({"CompanyName": "اسم الشركة مطلوب."})
+        from .company_templates import COMPANY_TEMPLATES, DEFAULT_TEMPLATE
         from .services import create_company
+        template = request.data.get("template") or DEFAULT_TEMPLATE
+        if template not in COMPANY_TEMPLATES:
+            raise DRFValidationError({"template": f"قالب الشركة «{template}» غير معروف."})
         try:
-            tenant = create_company(name, request.user)
+            tenant = create_company(name, request.user, template=template)
         except DjangoValidationError as e:
             # Known validation errors → 400; unexpected errors propagate to the
             # shaped 500 handler (with trace_id) instead of being masked as 400.

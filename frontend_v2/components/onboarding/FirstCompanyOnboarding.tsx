@@ -1,14 +1,21 @@
 import React, { useState } from "react";
-import { ArrowLeft, Building2, CheckCircle2, Loader2, LogOut, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Building2, Calculator, CheckCircle2, Loader2, LogOut, ShieldCheck } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useCompany } from "../../contexts/CompanyContext";
 import { clientLogger } from "../../services/logger";
 import { LogoIcon } from "../icons/LogoIcon";
+import { COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
+
+const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
+  Building2,
+  Calculator,
+};
 
 export const FirstCompanyOnboarding: React.FC = () => {
   const { logout } = useAuth();
   const { createCompany } = useCompany();
   const [companyName, setCompanyName] = useState("");
+  const [template, setTemplate] = useState<CompanyTemplateKey>(DEFAULT_COMPANY_TEMPLATE);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +32,7 @@ export const FirstCompanyOnboarding: React.FC = () => {
     setError(null);
     clientLogger.info("onboarding.company_create_started");
     try {
-      await createCompany(name);
+      await createCompany(name, template);
       clientLogger.info("onboarding.company_create_succeeded", {
         durationMs: Math.round(performance.now() - startedAt),
       });
@@ -73,6 +80,33 @@ export const FirstCompanyOnboarding: React.FC = () => {
                 <span className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-200">اسم الشركة</span>
                 <input name="companyName" autoComplete="organization" autoFocus value={companyName} onChange={(event) => setCompanyName(event.target.value)} disabled={submitting} required className="w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-4 text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-white" placeholder="مثال: شركة الأفق للتجارة" />
               </label>
+              <div>
+                <span className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-200">نوع الشركة</span>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {COMPANY_TEMPLATES.map((option) => {
+                    const Icon = TEMPLATE_ICONS[option.icon] ?? Building2;
+                    const isSelected = template === option.key;
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => setTemplate(option.key)}
+                        disabled={submitting}
+                        aria-pressed={isSelected}
+                        className={`flex flex-col items-start gap-2 rounded-xl border p-4 text-right transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          isSelected
+                            ? "border-blue-500 bg-blue-50 ring-2 ring-blue-500/20 dark:bg-blue-950/30"
+                            : "border-gray-300 bg-gray-50 hover:border-blue-300 dark:border-gray-600 dark:bg-gray-900"
+                        }`}
+                      >
+                        <Icon className={`h-6 w-6 ${isSelected ? "text-blue-600" : "text-gray-500 dark:text-gray-400"}`} />
+                        <span className="font-bold text-gray-900 dark:text-white">{option.name}</span>
+                        <span className="text-xs leading-5 text-gray-600 dark:text-gray-400">{option.description}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <button type="submit" disabled={submitting} className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-4 font-bold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
                 {submitting ? <><Loader2 className="h-5 w-5 animate-spin" />جاري تجهيز شركتك...</> : <>إنشاء الشركة والمتابعة<ArrowLeft className="h-5 w-5" /></>}
               </button>

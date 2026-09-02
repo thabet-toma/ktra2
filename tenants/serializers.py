@@ -89,14 +89,17 @@ class TenantSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Tenant
-        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled", "is_example", "store_slug", "subscription_ends_at", "subscription_days_left", "subscription_expired"]
+        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled", "is_example", "store_slug", "subscription_ends_at", "subscription_days_left", "subscription_expired", "template"]
         # ST-1: `store_slug` معروض للقراءة فقط عمداً. كتابته تمرّ من
         # `TenantViewSet.set_store_slug` وحدها لأنها تحمل تحقّق الشكل والكلمات
         # المحجوزة؛ لو كان قابلاً للكتابة هنا لصار PATCH عادي على الشركة باباً
         # خلفياً يضع أي قيمة (`api`, `ADMIN`, نصّاً فارغاً) بلا أي فحص.
         # تاريخ الانتهاء قرار إداري للمنصة — كتابته من لوحة السوبر أدمن وحدها
         # (`platform_company_detail`)؛ لو قُبل هنا لَمدّد كلُّ مديرٍ تجربتَه.
-        read_only_fields = ["import_enabled", "is_example", "store_slug", "subscription_ends_at"]
+        # ISSUE #50: `template` للقراءة فقط أيضاً — يُضبَط مرة واحدة في
+        # `create_company` عبر حقل `template` الصريح في جسد الإنشاء (لا هذا
+        # المسلسل)؛ تبديله لاحقاً منطقٌ منفصل لم يُبنَ بعد (قرار 4).
+        read_only_fields = ["import_enabled", "is_example", "store_slug", "subscription_ends_at", "template"]
 
     def get_subscription_days_left(self, obj):
         return subscription_expiry(obj)["days_left"]

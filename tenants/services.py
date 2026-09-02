@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 from tenants.models import Branch, Tenant, TenantSettings, TenantBook, UserCompanyMembership
+from tenants.company_templates import COMPANY_TEMPLATES, DEFAULT_TEMPLATE
 from accounting.models import Account, Currency
 from core.plans import trial_end_date
 
@@ -205,14 +206,22 @@ def ensure_base_currencies():
     return base
 
 
-def create_company(name: str, creator_user) -> Tenant:
+def create_company(name: str, creator_user, *, template: str = DEFAULT_TEMPLATE) -> Tenant:
     """
     Creates a new Tenant, boots it with default settings, seeds its TenantBooks
-    (10 per document type), seeds its professional Chart of Accounts (COA),
-    and assigns a 'manager' membership to the creator_user.
+    (per the template's document types), seeds its Chart of Accounts (COA) per
+    the template (`tenants/company_templates.py`), and assigns a 'manager'
+    membership to the creator_user.
+
+    ISSUE #50: `template` هو مفتاح كلمة (keyword-only) بافتراضي `general` عمداً
+    — عشرات ملفات الاختبار تستدعي `create_company(name, user)` موضعياً، وبقاؤها
+    تعمل بلا تعديل هو قرار 16 نفسه مطبَّقاً على التوافق.
     """
     if not name or not name.strip():
         raise ValidationError("اسم الشركة لا يمكن أن يكون فارغاً.")
+    template_config = COMPANY_TEMPLATES.get(template)
+    if template_config is None:
+        raise ValidationError(f"قالب الشركة «{template}» غير معروف.")
 
     with transaction.atomic():
         # 1. Create Tenant
@@ -226,6 +235,7 @@ def create_company(name: str, creator_user) -> Tenant:
             SubscriptionPlan="Trial",
             Status="Trial",
             subscription_ends_at=trial_end_date(),
+            template=template_config['key'],
         )
 
         # 2. Create TenantSettings
@@ -238,8 +248,12 @@ def create_company(name: str, creator_user) -> Tenant:
             currency=base_currency
         )
 
-        # 3. Seed TenantBooks
-        for doc_type, doc_label in TenantBook.DOCUMENT_TYPES:
+        # 3. Seed TenantBooks — أنواع القالب فقط (`document_types=None` = الخمسة
+        # عشر كاملةً كما تُنتَج اليوم).
+        doc_type_labels = dict(TenantBook.DOCUMENT_TYPES)
+        doc_types = template_config['document_types'] or list(doc_type_labels)
+        for doc_type in doc_types:
+            doc_label = doc_type_labels[doc_type]
             for book_number in range(1, 11):
                 TenantBook.objects.create(
                     tenant=tenant,
@@ -250,9 +264,10 @@ def create_company(name: str, creator_user) -> Tenant:
                     is_active=True
                 )
 
-        # 4. Seed Chart of Accounts
+        # 4. Seed Chart of Accounts — بذرة القالب (`coa=None` = COA_DATA كما هي).
         account_map = {}
-        for code, acc_name, acc_type, parent_code in COA_DATA:
+        coa_rows = template_config['coa'] or COA_DATA
+        for code, acc_name, acc_type, parent_code in coa_rows:
             parent = account_map.get(parent_code) if parent_code else None
             account = Account.objects.create(
                 tenant=tenant,

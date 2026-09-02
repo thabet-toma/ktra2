@@ -27,6 +27,8 @@ export type Tenant = {
   /** 0 = آخر يوم عمل · سالب = منتهٍ · `null` = بلا انتهاء. */
   subscription_days_left?: number | null;
   subscription_expired?: boolean;
+  /** ISSUE #50: مفتاح قالب الشركة — للقراءة فقط، يُضبَط مرة واحدة عند الإنشاء. */
+  template?: string;
 };
 
 export type CompanyMembership = {
@@ -46,7 +48,7 @@ interface CompanyContextType {
   /** صلاحية وحدة الاستيراد للشركة النشطة — يشترط تفعيل الشركة للجميع (حتى السوبر أدمن). */
   canAccessImport: boolean;
   switchCompany: (companyId: number) => Promise<void>;
-  createCompany: (name: string) => Promise<Tenant>;
+  createCompany: (name: string, template?: string) => Promise<Tenant>;
   /** T-IMPOFFER: الشركة التي تُفتح تلقائياً عند كل تسجيل دخول. */
   setDefaultCompany: (companyId: number) => Promise<void>;
   refreshCompanies: () => Promise<void>;
@@ -167,9 +169,10 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const createCompany = async (name: string): Promise<Tenant> => {
+  const createCompany = async (name: string, template?: string): Promise<Tenant> => {
     const newCompany = await apiPostObject<Tenant>("tenants/companies/", {
       CompanyName: name,
+      ...(template ? { template } : {}),
     });
     // Do not activate the tenant from the POST response alone. The membership
     // read is the source of truth for onboarding completion and owner role.
