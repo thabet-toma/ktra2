@@ -3,7 +3,7 @@ from rest_framework import serializers
 
 from core.plans import subscription_expiry
 
-from .models import Branch, Tenant, TenantBook, TenantSettings, UserCompanyMembership
+from .models import Branch, BookHandoverRequest, Tenant, TenantBook, TenantSettings, UserCompanyMembership
 
 
 class BranchSerializer(serializers.ModelSerializer):
@@ -108,6 +108,23 @@ class TenantSerializer(serializers.ModelSerializer):
 
     def get_subscription_expired(self, obj):
         return subscription_expiry(obj)["expired"]
+
+
+class BookHandoverRequestSerializer(serializers.ModelSerializer):
+    """ISSUE #54 — طلب تسليم دفتر. كل الحقول للقراءة: الإنشاء والقبول من
+    خدمات `tenants.services` وحدها (`create_handover_request`/`accept_handover_request`)."""
+
+    book_name = serializers.CharField(source="book.CompanyName", read_only=True)
+    office_name = serializers.CharField(source="office.CompanyName", read_only=True)
+    invited_username = serializers.CharField(source="invited_user.username", read_only=True)
+
+    class Meta:
+        model = BookHandoverRequest
+        fields = [
+            "id", "book", "book_name", "office", "office_name",
+            "invited_username", "status", "expires_at", "accepted_at", "created_at",
+        ]
+        read_only_fields = fields
 
 
 class UserCompanyMembershipSerializer(serializers.ModelSerializer):

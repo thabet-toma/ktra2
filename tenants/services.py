@@ -1,13 +1,20 @@
 import logging
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
-from tenants.models import Branch, Tenant, TenantSettings, TenantBook, UserCompanyMembership
+from django.utils import timezone
+from tenants.models import Branch, BookHandoverRequest, Tenant, TenantSettings, TenantBook, UserCompanyMembership
 from tenants.company_templates import COMPANY_TEMPLATES, DEFAULT_TEMPLATE
 from accounting.models import Account, Currency
 from core.plans import trial_end_date
 
 logger = logging.getLogger(__name__)
+
+# ISSUE #54: صلاحية طلب التسليم — أسبوعان، مثل دعوة الارتباط المحاسبي
+# (`accountant_portal.PortalSettings.invitation_expiry_days` الافتراضي).
+HANDOVER_REQUEST_EXPIRY_DAYS = 14
 
 COA_DATA = [
     # Root Nodes
@@ -420,3 +427,112 @@ def create_branch(tenant: Tenant, name: str, code: str) -> Branch:
         name, code, branch.pk, tenant.TenantID,
     )
     return branch
+
+
+# ── ISSUE #54: تسليم الدفاتر (نمط Xero) ─────────────────────────────────
+
+def create_handover_request(*, book: Tenant, requested_by, client_identifier: str) -> BookHandoverRequest:
+    """يفتح طلب تسليم على دفتر مُدار — لا يمسّ `book` نفسه إطلاقاً.
+
+    العميل مستخدمٌ **مسجَّل مسبقاً** على المنصة، بنفس قاعدة إضافة عضو
+    (`TenantViewSet.members`): معرَّفٌ غير موجود يعني أن على العميل التسجيل
+    أولاً — لا بنية دعوةٍ بالبريد الإلكتروني منفصلة.
+    """
+    if book.managed_by_id is None:
+        raise ValidationError("هذا الدفتر ليس دفتراً مُداراً — لا تسليم لشركة عادية.")
+    if BookHandoverRequest.objects.filter(book=book, status='pending').exists():
+        raise ValidationError("يوجد طلب تسليم قائم على هذا الدفتر بالفعل.")
+
+    from django.contrib.auth.models import User as AuthUser
+    from django.db.models import Q
+
+    ident = (client_identifier or "").strip()
+    if not ident:
+        raise ValidationError("اسم مستخدم العميل أو بريده الإلكتروني مطلوب.")
+    client_user = AuthUser.objects.filter(
+        Q(username__iexact=ident) | Q(email__iexact=ident)
+    ).first()
+    if client_user is None:
+        raise ValidationError(
+            "لا يوجد مستخدم بهذا الاسم/البريد. يجب أن يسجّل العميل حسابه أولاً."
+        )
+
+    request = BookHandoverRequest.objects.create(
+        book=book,
+        office_id=book.managed_by_id,
+        invited_user=client_user,
+        created_by=requested_by,
+        expires_at=timezone.now() + timedelta(days=HANDOVER_REQUEST_EXPIRY_DAYS),
+    )
+    logger.info(
+        "handover_request_created id=%s book=%s office=%s invited_user=%s",
+        request.pk, book.pk, book.managed_by_id, client_user.pk,
+    )
+    return request
+
+
+def accept_handover_request(*, request_id: int, accepting_user) -> BookHandoverRequest:
+    """القبول وحده يُسقط `managed_by` — عَلَمُ ملكيةٍ بلا أي أثر محاسبي.
+
+    ذرّي بالكامل (قفل صفّ الطلب والدفتر معاً)، ويُبقي عضويات المكتب على
+    الدفتر كما هي — إلغاء وصول المكتب إجراءٌ منفصل صريح (`members/remove`
+    القائم أصلاً)، لا يقع تلقائياً هنا.
+
+    فحص الانتهاء (وتثبيته `expired`) خارج الصفقة الذرّية عمداً: لو كان داخلها
+    لتراجع مع كل استثناء لاحق — طلبٌ يُرفَض لسببٍ آخر كان يعود `pending` رغم
+    فوات وقته، ناقضاً «ينتهي بانتهاء صلاحيته».
+    """
+    request = BookHandoverRequest.objects.filter(pk=request_id).first()
+    if request is None or request.invited_user_id != accepting_user.pk:
+        # لا نفرّق «غير موجود» عن «ليس لك» — نفس حَكَم عزل الدفاتر المُدارة.
+        raise ValidationError("طلب التسليم غير موجود.")
+    if request.status == 'pending' and request.expires_at <= timezone.now():
+        request.status = 'expired'
+        request.save(update_fields=['status'])
+    if request.status != 'pending':
+        raise ValidationError("طلب التسليم لم يعد قابلاً للقبول (انتهت صلاحيته أو استُعمل سابقاً).")
+
+    with transaction.atomic():
+        request = BookHandoverRequest.objects.select_for_update().get(pk=request.pk)
+        if request.status != 'pending':
+            raise ValidationError("طلب التسليم لم يعد قابلاً للقبول (انتهت صلاحيته أو استُعمل سابقاً).")
+
+        book = Tenant.objects.select_for_update().get(pk=request.book_id)
+        if book.managed_by_id != request.office_id:
+            # سباق أو تسليمٌ سابقٌ أنهى الحالة المُدارة قبل هذا القبول.
+            raise ValidationError("طلب التسليم لم يعد صالحاً — حالة الدفتر تغيّرت.")
+
+        book.managed_by = None
+        changed = ['managed_by']
+        # «بلا لحظة انقطاعٍ واحدة» شرطُ قبولٍ لا تفصيلُ واجهة — وهو بالضبط ما
+        # رُفض به نمط QuickBooks. الدفتر حمل من `create_company` تجربةً تبدأ
+        # **يوم فتحه المكتب**، وما ظهر أثرها لأنه كان يقرأ اشتراكه من مكتبه
+        # (`core/plans.py` — `_billing_tenant`). لحظةَ سقوط `managed_by` يعود
+        # إلى ساعته هو — ساعةٍ قد تكون بدأت قبل شهور — فيستلم العميل شركةً
+        # للقراءة فقط. فتبدأ تجربته من اليوم. ولا نمسّ خطةً غير تجريبية:
+        # ترقيةٌ صريحة من لوحة المنصة ليست لنا أن نُسقطها.
+        if book.SubscriptionPlan == "Trial":
+            book.Status = "Trial"
+            book.subscription_ends_at = trial_end_date()
+            changed += ['Status', 'subscription_ends_at']
+        book.save(update_fields=changed)
+
+        membership, _ = UserCompanyMembership.objects.get_or_create(
+            user=accepting_user, tenant=book, defaults={'role': 'manager'},
+        )
+        if membership.role != 'manager':
+            membership.role = 'manager'
+            membership.save(update_fields=['role'])
+
+        request.status = 'accepted'
+        request.accepted_at = timezone.now()
+        request.save(update_fields=['status', 'accepted_at'])
+
+    from core.tenant_utils import invalidate_tenant_cache
+    invalidate_tenant_cache()
+
+    logger.info(
+        "handover_request_accepted id=%s book=%s former_office=%s accepted_by=%s",
+        request.pk, book.pk, request.office_id, accepting_user.pk,
+    )
+    return request

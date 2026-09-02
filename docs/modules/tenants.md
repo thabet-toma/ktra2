@@ -10,6 +10,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 **القناع الحيّ (ISSUE #51):** `tenants/company_templates.py` (`TEMPLATE_HIDDEN_PATH_PREFIXES`) يخفي بادئات مسار API عن قالب `accounting_firm` (المخزون، ومسارات اللوجستيات والمشتريات مسمّاةً واحداً واحداً — و`supplier-payments` مستثنى عمداً لأن سند الصرف يبقى ولو كان مساره تحتها، وملف الاستيراد، والأجهزة الحساسة، وما بعد البيع، والمتجر) — طرحيّ لا إضافي، بخلاف `core/modules.py` (`MODULES`). ينفّذه `core.permissions.TemplateSurfacePermission` (404 لا 403) عبر نقطتَي تركيب: `DEFAULT_PERMISSION_CLASSES` (`core/settings.py`) للـViewSets التي لا تُصرِّح صراحةً، و`core/api_defaults.py` (`ApiAuthAndUser`) لمن يُصرِّح. الحمولة `/api/permissions/me` تحمل `template` بجانب `modules` لتحرس به الواجهة (`frontend_v2/utils/viewPermissions.ts` — `TEMPLATE_HIDDEN_VIEWS`).
 جدول `Currency` يعيش هنا أيضاً ويستورده `accounting` و`sales` و`logistics` منه.
 **الدفتر المُدار (ISSUE #52):** `Tenant.managed_by` علمٌ من جنس `is_example`/`import_enabled`/`store_slug` — FK لشركة أخرى (مكتب محاسبة) تملك هذا الدفتر وتديره. `create_company` يقبله كلمةً مفتاحية (`managed_by`) فيمرّ الزرع نفسه لا مساراً موازياً. الدفتر المُدار **لا يُعَدّ في حصّة خطة أحد** كشركة (حدّه المستقل `office.managed_books` في `core/plans.py`)، ولا يظهر في `companies/my-companies/` (`tenants/views.py` — `my_companies` يستثني `tenant__managed_by__isnull=True`)، ويُفتح من `companies/{office_id}/managed-books/` (`TenantViewSet.managed_books`) بصلاحية `admin.members.manage` على المكتب المالك. العزل: `TenantViewSet.get_queryset` يمنح مدير المكتب رؤية كل دفاتره بلا عضويةٍ صريحة لكل واحد (قرار 7)، والموظف يُسند بعضوية `UserCompanyMembership` صريحة وإلا 404 لا 403 — ولا بُعد عزلٍ ثانٍ غير `tenant`. الرؤية وحدها لا تكفي: `core/tenant_utils.py` (`_validate_user_tenant_access`) تشترط صفّ عضويةٍ على الشركة المطلوبة، فاستُثني منها مديرُ المكتب على دفاتر مكتبه — وإلا رأى في القائمة دفتراً يردّه كل نداء عملٍ بـ`X-Tenant-Id`. **والدفتر المُدار لا يشترك**: خطتُه وتاريخُ انتهائه يُقرآن من مكتبه (`core/plans.py` — `_billing_tenant`)، وإلا ورث تجربة أربعة عشر يوماً من `create_company` فأقفل على مكتبٍ مشترِكٍ ودافع بعد أسبوعين.
+**تسليم الدفاتر (ISSUE #54، نمط Xero لا QuickBooks):** `tenants.models.BookHandoverRequest` طلبٌ ينشئه مدير المكتب المالك (`tenants/services.py` — `create_handover_request`) على دفترٍ مُدار، يحمل صلاحيةً زمنية (`expires_at`، أسبوعان) ويستهدف مستخدماً مسجَّلاً مسبقاً (`invited_user`) — لا يمسّ `managed_by` عند الإنشاء. القبول (`accept_handover_request`) وحده — من العميل المدعوّ حصراً، والباقي «غير موجود» — يُسقط `managed_by` ذرّياً (`transaction.atomic` حول قفل الطلب والدفتر معاً)، ويمنح العميل عضوية `manager` على الدفتر؛ فحص الانتهاء يقع **خارج** تلك الصفقة الذرّية عمداً كي لا يتراجع تثبيت `expired` مع أي رفضٍ لاحق. **لا أثر محاسبي إطلاقاً**: لا `post_journal` ولا `record_stock_movement` في أي مسار من هذا الملف. حصّة `office.managed_books` تتحرّر تلقائياً لأنها عدٌّ حيّ على `managed_by` لا عدّاداً مخزَّناً. **إلغاء وصول المكتب بعد التسليم إجراءٌ منفصل صريح** عبر `TenantViewSet.remove_member` القائم أصلاً — لا يقع تلقائياً مع القبول، ويستدعيه العميل بصفته المدير الجديد. سطح الـAPI مستقل (`BookHandoverRequestViewSet` تحت `handover-requests/`) لأن العميل قبل القبول بلا عضوية على الدفتر فلا يصلح مسار `X-Tenant-Id` الاعتيادي — هويةٌ لا شركة، كسطح `accountant_portal`.
 
 ## آلية عزل الشركات (القاعدة العابرة للنظام)
 **لا يوجد middleware للشركة** (`core/settings.py:113-125`). العزل ثلاثي الطبقات، وكلّه على مستوى الطلب:
@@ -62,6 +63,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 | `RolePermission` (:312) | `role`, `permission_key`, `allowed` | `tenant`, `unique_together (tenant, role, permission_key)` |
 | `MemberPermission` (:339) | `permission_key`, `allowed` | `membership`, `unique_together (membership, permission_key)` |
 | `WhatsAppContact` (:170) | `phone_number` (unique), `is_active` | `tenant` — حارس العزل الوحيد على مسار واتساب |
+| `BookHandoverRequest` (`models.py`) | `status` (pending/accepted/expired/cancelled), `expires_at`, `accepted_at` | `book`→Tenant، `office`→Tenant (لقطة وقت الإنشاء)، `invited_user`→auth.User (القابل الوحيد) |
 
 ## دوال الـservices العامة
 ```python
@@ -75,6 +77,8 @@ def ensure_example_company_access(user) -> None:                       # يُل�
 def member_payload(m: UserCompanyMembership) -> dict:                  # تمثيل عضوية موحّد (إدارة الشركة + لوحة المنصة)
 def is_last_manager(tenant: Tenant, membership: UserCompanyMembership) -> bool:   # هل هذه آخر عضوية مدير؟
 def create_branch(tenant: Tenant, name: str, code: str) -> Branch:     # إنشاء فرع تحت شركة أم
+def create_handover_request(*, book: Tenant, requested_by, client_identifier: str) -> BookHandoverRequest:  # ISSUE #54 — يفتح طلب تسليم، بلا مساس بـmanaged_by
+def accept_handover_request(*, request_id: int, accepting_user) -> BookHandoverRequest:                     # القبول وحده يُسقط managed_by ذرّياً — لا أثر محاسبي
 
 # tenants/models.py — ترقيم المستندات (يستهلكه كل الـapps)
 @classmethod
@@ -99,6 +103,8 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 | POST | `companies/{pk}/members/set-import-access/` | `set_member_import_access` (views.py:401) — مدير الشركة |
 | GET | `companies/my-companies/` | `my_companies` (views.py:418) — يستثني الدفاتر المُدارة (`tenant__managed_by__isnull=True`) |
 | GET/POST | `companies/{office_id}/managed-books/` | `TenantViewSet.managed_books` — مدير المكتب فقط؛ POST يفحص `office.managed_books` بـ`enforce_limits` قبل الإنشاء |
+| GET/POST | `handover-requests/` | `BookHandoverRequestViewSet` (ISSUE #54) — مدير المكتب المالك ينشئ، والقائمة تُريه طلباته المُرسَلة والعميل طلباته الواردة |
+| POST | `handover-requests/{id}/accept/` | `BookHandoverRequestViewSet.accept` — العميل المدعوّ حصراً؛ يُسقط `managed_by` ذرّياً ولا يمسّ وصول المكتب |
 | POST | `companies/set-default/` | `set_default` (views.py:428) |
 | POST | `companies/set-ui-mode/` | `set_ui_mode` — وضع عرض المستدعي في الشركة النشطة؛ بلا صلاحية إدارية، قيمة غير صالحة أو بلا عضوية ⇒ 400، و`viewer` ⇒ 403 من حارس المنصة |
 | GET/POST | `branches/` | `BranchViewSet` (views.py:153) — الإنشاء يتطلب `admin.settings.manage` (views.py:175-177) |
@@ -130,6 +136,7 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 - **`ui_mode` تفضيل عرض لا صلاحية**: لا يمنح وصولاً ولا يحجب مساراً ولا يُستشار في أي قرار خادمي. كتابته ذاتية على عضوية المستدعي وحدها (`tenants/views.py` — `set_ui_mode`)، ولم يُثقَب لأجله حارس `viewer`: رفضه 403 مقبول ومعالَج في الواجهة (`docs/modules/frontend.md`).
 - **القناع الحيّ طرحيّ لا إضافي**: لا تُدرَج شاشة جوهرية (مخزون/لوجستيات/متجر) في `core/modules.py` (`MODULES`) لإخفائها عن قالب — أضِف بادئة مسارها إلى `TEMPLATE_HIDDEN_PATH_PREFIXES` (`tenants/company_templates.py`) بدل ذلك. ومسارٌ يُصرِّح بـ`permission_classes` صراحةً (بوابة المحاسب، أو أي `ApiAuthAndUser` مباشر) لا يرث `DEFAULT_PERMISSION_CLASSES` — يلزمه `TemplateSurfacePermission` صراحةً في قائمته.
 - **الدفتر المُدار لا يُحذف ولا مسار موازياً لإنشائه**: `create_company` وحدها تزرعه (كلمة `managed_by`)، والحذف ممنوع أصلاً على كل الشركات. حصّته `office.managed_books` (`core/plans.py`) تُفحص **قبل** الإنشاء بـ`enforce_limits`، ولا بُعد عزلٍ ثانٍ غير `tenant`: الوصول عضويةٌ صريحة أو مديرُ المكتب المالك (`TenantViewSet.get_queryset`).
+- **تسليم الدفاتر لا يمسّ صفاً محاسبياً واحداً**: `accept_handover_request` يقلب `managed_by` وحده — لا `post_journal`، لا `record_stock_movement`، لا قيدٌ يُعاد. الصفقة ذرّية (`transaction.atomic` حول قفل الطلب والدفتر)، وفحص الانتهاء يقع **خارجها** عمداً كي يبقى طلبٌ فات وقته `expired` ولو رُفض القبول لسببٍ آخر. لا تسليم بلا قبول العميل المدعوّ حصراً (`invited_user`) — شرط قبولٍ لا تفصيل واجهة. **إلغاء وصول المكتب بعد التسليم منفصلٌ صريح** (`members/remove` القائم)، لا يقع تلقائياً.
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -147,3 +154,4 @@ def get_next_number(cls, tenant_id: int, document_type: str,
 | `tests/test_company_template_api.py` | القالب عند الإنشاء: `general` مطابق حرفياً لما يُنتَج اليوم، `accounting_firm` يزرع شجرته ويُسقط الحسابات التجارية، مفتاح مجهول يُرفض 400 |
 | `tests/test_company_template_mask_api.py` | القناع الحيّ: `accounting_firm` يردّ 404 على المخزون/اللوجستيات/المشتريات/المتجر ويُبقي `supplier-payments` مفتوحاً، والقناع يصمد بلا ترويسة `X-Tenant-Id`، و`general` صفر تغيير |
 | `tests/test_managed_books_api.py` | الدفتر المُدار: مكتب Basic يفتح 3 وينكسر عند الرابع، غيابه عن `my-companies` رغم عضوية صريحة، مدير المكتب يرى كل دفاتره بلا عضوية لكل واحد، موظف غير مُسند ⇒ 404، مستخدم مكتب آخر لا يرى الدفتر إطلاقاً |
+| `tests/test_book_handover_api.py` | تسليم الدفاتر (ISSUE #54): طلبٌ بلا قبول لا يغيّر شيئاً، انتهاء الصلاحية يمنع القبول، بعد القبول العميل مديرٌ والدفتر خارج `managed-books` والحصّة تتحرّر، وصول المكتب يبقى حتى `members/remove` الصريح، أرصدة دليل الحسابات (قبل/بعد قيدٍ فعلي) متطابقة حرفياً، عزل الإنشاء والقبول |

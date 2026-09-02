@@ -13,8 +13,8 @@ from core.api_defaults import ApiAuthAndUser
 from core.access import require_perm
 from core.plans import enforce_limits
 from core.tenant_utils import get_tenant
-from .models import Branch, Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
-from .serializers import BranchSerializer, TenantBookSerializer, TenantSettingsSerializer, TenantSerializer, UserCompanyMembershipSerializer
+from .models import Branch, BookHandoverRequest, Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
+from .serializers import BookHandoverRequestSerializer, BranchSerializer, TenantBookSerializer, TenantSettingsSerializer, TenantSerializer, UserCompanyMembershipSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -563,4 +563,61 @@ class TenantViewSet(viewsets.ModelViewSet):
         membership.ui_mode = mode
         membership.save(update_fields=["ui_mode"])
         return Response({"ui_mode": membership.ui_mode})
+
+
+class BookHandoverRequestViewSet(viewsets.ModelViewSet):
+    """ISSUE #54 — تسليم الدفاتر: نمط Xero — لا نقل بلا قبول العميل الفعلي.
+
+    القراءة/الإنشاء عبر عضوية المكتب المُرسِل، والقبول عبر هوية العميل
+    المدعوّ وحدها — الدفتر ليس شركة العميل بعد فلا يملك عضويةً تسمح بمسار
+    `X-Tenant-Id` الاعتيادي، تماماً كسطح `accountant_portal` (هويةٌ لا شركة).
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = BookHandoverRequestSerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return BookHandoverRequest.objects.none()
+        from django.db.models import Q
+
+        office_ids = UserCompanyMembership.objects.filter(
+            user=user, role="manager",
+        ).values_list("tenant_id", flat=True)
+        return BookHandoverRequest.objects.filter(
+            Q(office_id__in=office_ids) | Q(invited_user=user)
+        ).select_related("book", "office", "invited_user").order_by("-created_at")
+
+    def create(self, request, *args, **kwargs):
+        book_id = request.data.get("book_id")
+        book = Tenant.objects.filter(pk=book_id).first()
+        if not book:
+            raise DRFValidationError({"book_id": "الدفتر غير موجود."})
+        is_office_manager = UserCompanyMembership.objects.filter(
+            user=request.user, tenant_id=book.managed_by_id, role="manager",
+        ).exists()
+        if not is_office_manager:
+            raise DRFValidationError({"book_id": "الدفتر غير موجود."})
+        from .services import create_handover_request
+        try:
+            handover = create_handover_request(
+                book=book, requested_by=request.user,
+                client_identifier=request.data.get("client_username_or_email", ""),
+            )
+        except DjangoValidationError as e:
+            raise DRFValidationError({"detail": e.messages if hasattr(e, "messages") else str(e)})
+        return Response(BookHandoverRequestSerializer(handover).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="accept")
+    def accept(self, request, pk=None):
+        """قبول العميل الوحيد المُتاح — لا واجهة PUT/PATCH لهذا الطلب."""
+        from .services import accept_handover_request
+        try:
+            handover = accept_handover_request(request_id=pk, accepting_user=request.user)
+        except DjangoValidationError as e:
+            raise DRFValidationError({"detail": e.messages if hasattr(e, "messages") else str(e)})
+        return Response(BookHandoverRequestSerializer(handover).data)
 

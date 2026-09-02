@@ -359,6 +359,59 @@ class TenantBook(models.Model):
         return f"{self.tenant} — {self.document_type} [{self.book_number}]"
 
 
+# ── ISSUE #54: تسليم الدفاتر (نمط Xero) ─────────────────────────────────
+#
+# طلبٌ ينشئه مكتبٌ على دفترٍ مُدارٍ يملكه (`Tenant.managed_by`)، ولا يتم شيء
+# حتى يقبله العميل المدعوّ صراحةً. القبول وحده يُسقط `managed_by` — لا قيدٌ
+# يُعاد ولا رقمٌ يتغيّر، عَلَمُ ملكيةٍ وحده. حصّة `office.managed_books` تتحرّر
+# تلقائياً لأنها عدٌّ حيّ على `managed_by` (`core/plans.py`)، لا عدّاداً مخزَّناً.
+class BookHandoverRequest(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'قيد الانتظار'),
+        ('accepted', 'مقبول'),
+        ('expired', 'منتهي'),
+        ('cancelled', 'ملغى'),
+    ]
+
+    book = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='handover_requests',
+        db_column='BookTenantID',
+        help_text='الدفتر المُدار محلّ التسليم',
+    )
+    # المكتب يُسجَّل صراحةً وقت الإنشاء بدل الاعتماد على `book.managed_by`
+    # وقت القراءة — القبول يُسقط ذلك الحقل، فيضيع مصدر «مَن سلَّم لمَن» تاريخياً
+    # لو اعتمدنا عليه وحده.
+    office = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='sent_handover_requests',
+        db_column='OfficeTenantID',
+        help_text='مكتب المحاسبة المُرسِل — كما كان وقت إنشاء الطلب',
+    )
+    invited_user = models.ForeignKey(
+        'auth.User', on_delete=models.CASCADE, related_name='book_handover_requests',
+        db_column='InvitedUserID',
+        help_text='مستخدم العميل المدعوّ للقبول — هو وحده مَن يملك قبول هذا الطلب',
+    )
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+', db_column='CreatedByUserID',
+    )
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default='pending', db_column='Status')
+    expires_at = models.DateTimeField(db_column='ExpiresAt')
+    accepted_at = models.DateTimeField(null=True, blank=True, db_column='AcceptedAt')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'tenant_book_handover_requests'
+        managed = True
+        indexes = [
+            models.Index(fields=['book', 'status'], name='idx_bhr_book_status'),
+        ]
+
+    def __str__(self):
+        return f"handover({self.book_id} → {self.invited_user_id}) [{self.status}]"
+
+
 class UserCompanyMembership(models.Model):
     ROLE_CHOICES = [
         ('manager', 'مدير (Manager)'),
