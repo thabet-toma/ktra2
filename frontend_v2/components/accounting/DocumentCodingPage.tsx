@@ -30,11 +30,16 @@ import {
   CODING_PAYMENT_METHODS, DEFAULT_CODING_PAYMENT_METHOD, paymentFieldsForRow,
   type CodingPaymentMethod,
 } from "../../utils/codingRowPaymentMethod";
+import {
+  buildSavedVouchers, markVoucherUndone, mergeSavedVouchers, savedVouchersSummary,
+  type SavedVoucher, type SubmittedRowFacts,
+} from "../../utils/codingSavedVouchers";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { FileDropZone } from "../ui/FileDropZone";
 import { PaymentVoucherModal } from "../sales/PaymentVoucherParts";
 import { KitDocumentShell, KitGrid } from "../kit";
 import type { KitGridColumn, KitToolbarAction } from "../kit";
-import { MessageCircle, Plus, Save, Trash2, X } from "lucide-react";
+import { MessageCircle, Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
 import type { AccountingPartner, CodingRuleDto, VoucherBatchSaveRow } from "../../types/accounting";
 
 type AccountRow = {
@@ -74,6 +79,7 @@ const rowIsFillable = (r: CodingRow) =>
 
 export const DocumentCodingPage: React.FC = () => {
   const toast = useToast();
+  const confirm = useConfirm();
 
   const keySeqRef = useRef(0);
   const makeRow = useCallback((): CodingRow => {
@@ -107,6 +113,11 @@ export const DocumentCodingPage: React.FC = () => {
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [discussRowKey, setDiscussRowKey] = useState<number | null>(null);
+  // بلاغ المالك: سِجلُّ ما حُفظ في هذه الجلسة. الشبكة تبقى قائمةَ عملٍ لِما لم
+  // يُحفظ بعد (مسحُ الصفّ الناجح صحيح ويبقى)، وهذا السِجلّ هو الأثر الذي كان
+  // ناقصاً — يعيش في هذه الشاشة ويزول بمغادرتها، فهو ذاكرةُ جلسةٍ لا تقرير.
+  const [savedVouchers, setSavedVouchers] = useState<SavedVoucher[]>([]);
+  const [undoingKey, setUndoingKey] = useState<string | null>(null);
 
   const refreshCodingRules = useCallback(async () => {
     try {
@@ -258,7 +269,24 @@ export const DocumentCodingPage: React.FC = () => {
         ...(r.attachmentUrl ? { attachment_url: r.attachmentUrl } : {}),
       }));
 
+      // حقائقُ كل صفٍّ مُرسَل بفهرسه في الحمولة — يعرفها العميل ولا يعيدها
+      // الردّ (الحساب والطرف والمبلغ)، فتُدمج مع رقم السند ومعرّفه من الخادم.
+      const factsByIndex = new Map<number, SubmittedRowFacts>(
+        candidates.map(({ r }, i) => [i, {
+          date: r.date,
+          direction: r.direction,
+          accountLabel: r.accountText.trim(),
+          partnerLabel: r.partnerText.trim(),
+          docNumber: r.docNumber.trim(),
+          amount: r.amount || "0",
+          taxAmount: r.taxAmount || "0",
+        }]),
+      );
+
       const result = await accountingApi.batchSaveVouchers(body);
+      setSavedVouchers((prev) => mergeSavedVouchers(
+        prev, buildSavedVouchers(result.rows, factsByIndex),
+      ));
 
       const successOriginalIdx = new Set<number>();
       const errorByOriginalIdx = new Map<number, string>();
@@ -443,6 +471,36 @@ export const DocumentCodingPage: React.FC = () => {
     </div>
   );
 
+  /**
+   * التراجع عن سندٍ رُمِّز خطأً — من نفس الشاشة، بلا مغادرتها.
+   * يستدعي نقطة الاتجاه الصحيح؛ ولهذا يحمل السطر اتجاهه صراحةً
+   * (`buildSavedVouchers`) بدل الاتكال على حقلٍ اختياريّ في الردّ.
+   */
+  const undoSaved = useCallback(async (voucher: SavedVoucher) => {
+    const key = `${voucher.direction}:${voucher.id}`;
+    if (undoingKey) return;
+    const label = voucher.direction === "expense" ? "سند المصروف" : "سند الإيراد";
+    if (!(await confirm({
+      title: `التراجع عن ترحيل ${label}`,
+      message: `سيُحذف قيد ${label} #${voucher.number ?? voucher.id} وتعود الأرصدة إلى ما كانت عليه. المتابعة؟`,
+      confirmText: "ألغِ الترحيل",
+      danger: true,
+    }))) return;
+    setUndoingKey(key);
+    try {
+      if (voucher.direction === "expense") await accountingApi.unpostExpenseVoucher(voucher.id);
+      else await accountingApi.unpostRevenueVoucher(voucher.id);
+      setSavedVouchers((prev) => markVoucherUndone(prev, voucher.direction, voucher.id));
+      toast(`أُلغي ترحيل ${label} #${voucher.number ?? voucher.id}`, "success");
+    } catch (e: unknown) {
+      toast(humanizeThrown(e, "تعذّر التراجع عن الترحيل"), "error");
+    } finally {
+      setUndoingKey(null);
+    }
+  }, [confirm, toast, undoingKey]);
+
+  const savedSummary = savedVouchersSummary(savedVouchers);
+
   const gridColumns: KitGridColumn<GridRow>[] = [
     { key: "date", header: "التاريخ", width: "130px", render: renderDateCell },
     { key: "direction", header: "الاتجاه", width: "90px", render: renderDirectionCell },
@@ -500,12 +558,106 @@ export const DocumentCodingPage: React.FC = () => {
         />
       </KitDocumentShell>
 
+      {savedVouchers.length > 0 && (
+        <SavedVouchersPanel
+          vouchers={savedVouchers}
+          summary={savedSummary}
+          undoingKey={undoingKey}
+          onUndo={(voucher) => void undoSaved(voucher)}
+        />
+      )}
+
       {discussRow && (
         <DiscussRowModal row={discussRow} onClose={() => setDiscussRowKey(null)} />
       )}
     </div>
   );
 };
+
+/**
+ * بلاغ المالك: «لما بحطّ حفظ ما ببيّنو بنفس الصفحة».
+ *
+ * الصفّ الناجح يُمسح من الشبكة — وذلك صحيح: الشبكة قائمةُ عملٍ لِما لم يُحفظ
+ * بعد، وبقاءُ المحفوظ فيها يدعو لحفظه مرّتين. الناقص كان **الأثر**: إشعارٌ
+ * عابر يقول «تم حفظ ٣ سنداً» ثم شاشةٌ فارغة، فلا رقمَ سندٍ يُكتب على الورقة،
+ * ولا تحقّقَ من أن الحساب الذي اقترحه النظام هو المقصود، ولا طريقَ للتراجع
+ * عن سطرٍ رُمِّز خطأً إلا مغادرةُ الشاشة.
+ *
+ * السطرُ المتراجَع عنه يبقى مشطوباً لا يختفي: اختفاؤه يُنسي المستخدمَ فعلَه
+ * فيعيد ترميز السند ظنّاً أنه لم يُحفظ أصلاً.
+ */
+const SavedVouchersPanel: React.FC<{
+  vouchers: SavedVoucher[];
+  summary: { count: number; expense: number; revenue: number };
+  undoingKey: string | null;
+  onUndo: (voucher: SavedVoucher) => void;
+}> = ({ vouchers, summary, undoingKey, onUndo }) => (
+  <div
+    data-testid="coding-saved-vouchers"
+    className="mt-3 rounded-xl border border-[var(--ktra-border)] bg-[var(--ktra-panel)] p-3"
+  >
+    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <span className="text-sm font-bold" style={{ color: "var(--ktra-ink)" }}>
+        حُفظ في هذه الجلسة — {summary.count} سند
+      </span>
+      <span className="text-[11px]" style={{ color: "var(--ktra-ink-soft)" }}>
+        مصروف {formatMoney(summary.expense)} · إيراد {formatMoney(summary.revenue)}
+      </span>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-[12px]">
+        <thead>
+          <tr style={{ color: "var(--ktra-ink-soft)" }}>
+            <th className="p-1 text-right font-bold">الرقم</th>
+            <th className="p-1 text-right font-bold">النوع</th>
+            <th className="p-1 text-right font-bold">التاريخ</th>
+            <th className="p-1 text-right font-bold">الحساب</th>
+            <th className="p-1 text-right font-bold">الطرف</th>
+            <th className="p-1 text-right font-bold">المستند</th>
+            <th className="p-1 text-left font-bold">المبلغ</th>
+            <th className="p-1" />
+          </tr>
+        </thead>
+        <tbody>
+          {vouchers.map((voucher) => {
+            const key = `${voucher.direction}:${voucher.id}`;
+            return (
+              <tr
+                key={key}
+                data-testid={`coding-saved-${key}`}
+                className={voucher.undone ? "line-through opacity-60" : ""}
+              >
+                <td className="p-1 font-bold">#{voucher.number ?? voucher.id}</td>
+                <td className="p-1">{voucher.direction === "expense" ? "مصروف" : "إيراد"}</td>
+                <td className="p-1">{voucher.date}</td>
+                <td className="p-1">{voucher.accountLabel || "—"}</td>
+                <td className="p-1">{voucher.partnerLabel || "—"}</td>
+                <td className="p-1">{voucher.docNumber || "—"}</td>
+                <td className="p-1 text-left ktra-num">{formatMoney(voucher.amount)}</td>
+                <td className="p-1 text-left">
+                  {voucher.undone ? (
+                    <span style={{ color: "var(--ktra-ink-soft)" }}>أُلغي ترحيله</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="ktra-toolbtn"
+                      disabled={undoingKey != null}
+                      title={`إلغاء ترحيل السند #${voucher.number ?? voucher.id}`}
+                      onClick={() => onUndo(voucher)}
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      تراجع
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
 
 const DiscussRowModal: React.FC<{ row: CodingRow; onClose: () => void }> = ({ row, onClose }) => {
   const toast = useToast();

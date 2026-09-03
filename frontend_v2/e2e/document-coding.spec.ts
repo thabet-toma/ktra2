@@ -86,6 +86,9 @@ async function stub(page: Page) {
     if (path.endsWith('/partners/lookup/')) return json(PARTNERS);
     if (path.endsWith('/accounting/coding-rules/')) return json(CODING_RULES);
     if (path.endsWith('/accounting/cash-box-accounts/')) return json(CASH_BOXES);
+    if (path.includes('/accounting/expense-vouchers/') && path.endsWith('/unpost/')) {
+      return json({ id: 1001, number: 1, is_posted: false });
+    }
     if (path.endsWith('/accounting/vouchers/batch-save/') && request.method() === 'POST') {
       // الصفّان الأوّلان صحيحان، والثالث خاطئ عمداً — معيار القبول الأخير.
       return json({
@@ -173,4 +176,50 @@ test('ترميز دفعي: ثلاثة صفوف بلوحة المفاتيح، ا�
     .toContainText('مبلغ المصروف يجب أن يكون أكبر من صفر.');
   await expect(page.locator('.ktra-grid tbody tr').first().getByPlaceholder('رقم الفاتورة/الإيصال'))
     .toHaveValue('F-1003');
+
+  // ── بلاغ المالك: «ما ببيّنو بنفس الصفحة» ──
+  // الصفّان الناجحان مُسحا من الشبكة (صحيح: هي قائمةُ عملٍ لِما لم يُحفظ)،
+  // والأثر الذي كان ناقصاً هو هذا السِجلّ — رقمُ كل سند وحسابه ومبلغه بلا
+  // مغادرة الشاشة، وطريقُ تراجعٍ عن سطرٍ رُمِّز خطأً.
+  const savedPanel = page.getByTestId('coding-saved-vouchers');
+  await expect(savedPanel).toBeVisible({ timeout: 10_000 });
+  await expect(savedPanel).toContainText('حُفظ في هذه الجلسة — 2 سند');
+  await expect(page.getByTestId('coding-saved-expense:1001')).toContainText('#1');
+  await expect(page.getByTestId('coding-saved-expense:1001')).toContainText('5203 كهرباء');
+  // الصفّ الثاني تجاوز الاقتراح إلى «5201 إيجار» — السِجلّ يقول ما حُفظ فعلاً
+  // لا ما اقترحه النظام، وهذا نصفُ فائدته.
+  await expect(page.getByTestId('coding-saved-expense:1002')).toContainText('5201 إيجار');
+  // والصفّ الفاشل لا يدخل السِجلّ — مكانه الشبكة برسالة خطئه (أعلاه).
+  await expect(savedPanel.locator('tbody tr')).toHaveCount(2);
+});
+
+test('التراجع عن سندٍ رُمِّز خطأً — من نفس الشاشة، ويبقى مشطوباً لا يختفي', async ({ page }) => {
+  test.setTimeout(90_000);
+  await stub(page);
+
+  await page.goto('/accounting/document-coding');
+  const grid = page.locator('.ktra-grid');
+  await expect(grid).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#ktra-coding-partners option[value="مورد الكهرباء"]')).toHaveCount(1, { timeout: 30_000 });
+
+  const row0 = page.locator('.ktra-grid tbody tr').nth(0);
+  await row0.getByPlaceholder('رقم الفاتورة/الإيصال').fill('F-2001');
+  await row0.getByPlaceholder('حساب المصروف/الإيراد').fill('5203 كهرباء');
+  await row0.locator('input[type="number"]').first().fill('100');
+
+  await page.getByRole('button', { name: 'حفظ', exact: true }).click();
+  const saved = page.getByTestId('coding-saved-expense:1001');
+  await expect(saved).toBeVisible({ timeout: 15_000 });
+
+  // نقطةُ الإلغاء تُستدعى بالاتجاه الصحيح — سند **مصروف** لا إيراد.
+  const unpost = page.waitForRequest((req) =>
+    req.url().includes('/accounting/expense-vouchers/1001/unpost/') && req.method() === 'POST');
+  await saved.getByRole('button', { name: /تراجع/ }).click();
+  await page.getByRole('button', { name: 'ألغِ الترحيل' }).click();
+  await unpost;
+
+  // يبقى ظاهراً مشطوباً: اختفاؤه يُنسي المستخدمَ فعلَه فيعيد ترميز السند.
+  await expect(saved).toBeVisible();
+  await expect(saved).toContainText('أُلغي ترحيله');
+  await expect(page.getByTestId('coding-saved-vouchers')).toContainText('حُفظ في هذه الجلسة — 0 سند');
 });
