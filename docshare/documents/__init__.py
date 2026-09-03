@@ -22,6 +22,8 @@ from docshare.documents._contract import (  # noqa: F401  (سطح عام مُع�
     DECISION_DISPLAY_KEYS,
     DECISION_LOGIC_KEYS,
     PAYLOAD_FIELDS,
+    QUOTE_DISPLAY_KEYS,
+    QUOTE_LOGIC_KEYS,
     TONE_DANGER,
     TONE_MUTED,
     TONE_OK,
@@ -37,6 +39,7 @@ from docshare.documents._contract import (  # noqa: F401  (سطح عام مُع�
     meta,
     money,
     payload,
+    quote_display,
     total,
 )
 from docshare.documents.aftersales_docs import (  # noqa: F401
@@ -48,15 +51,18 @@ from docshare.documents.aftersales_docs import (  # noqa: F401
 )
 from docshare.documents.purchase_docs import (  # noqa: F401
     PURCHASE_DOC_TYPES,
+    QUOTE_PURCHASE_RFQ,
     build_local_purchase_invoice,
     build_logistics_deal,
     build_purchase_invoice,
     build_purchase_order,
+    build_purchase_rfq,
     build_supplier_quotation,
     load_local_purchase_invoice,
     load_logistics_deal,
     load_purchase_invoice,
     load_purchase_order,
+    load_purchase_rfq,
     load_supplier_quotation,
 )
 from docshare.documents.voucher_docs import (  # noqa: F401

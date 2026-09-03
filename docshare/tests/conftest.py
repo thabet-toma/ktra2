@@ -99,6 +99,7 @@ SAMPLE_FIXTURES = {
     "credit_debit_note": "credit_debit_note",
     "warranty_card": "warranty_card",
     "service_order": "service_order",
+    "purchase_rfq": "purchase_rfq",
 }
 
 
@@ -135,6 +136,10 @@ SECRET_FEES_PERCENT = Decimal("33.33")
 SECRET_SOURCE_LINK = "https://alibaba.example/سرّ-المصدر-لا-يخرج"
 SECRET_REMAINING = Decimal("7777.77")
 SECRET_LANDED_RATE = Decimal("0.919191")
+#: ISSUE #115 — السعر التقديري رقمٌ داخليّ بحت على `PurchaseRFQLine`، ولا يخرج
+#: إلى المورّد أبداً. تقنية الزرع نفسها: رقمٌ فريد يبحث عنه اختبار التسريب
+#: حرفياً في الصفحة العامة، فوجوده إخفاقٌ لا لبس فيه.
+SECRET_ESTIMATED_PRICE = Decimal("999.99")
 
 
 @pytest.fixture
@@ -232,6 +237,40 @@ def supplier_offer(env, supplier):
         line_total=Decimal("1000"),
     )
     return row
+
+
+@pytest.fixture
+def purchase_rfq(env):
+    """طلبية بلا أسعار، مُرسَلة — الحالة الوحيدة القابلة للتسعير من رابط."""
+    from logistics.models import PurchaseRFQ, PurchaseRFQLine
+
+    row = PurchaseRFQ.objects.create(
+        tenant=env["tenant"], rfq_number="SH-RFQ-1", rfq_date="2026-08-12",
+        status=PurchaseRFQ.STATUS_SENT, notes="ملاحظات الطلبية",
+    )
+    PurchaseRFQLine.objects.create(
+        tenant=env["tenant"], rfq=row, product=env["product"], seq=1,
+        specs="مواصفات تجريبية", quantity=Decimal("10"),
+        unit_of_measure="قطعة",
+        # سرّ داخليّ لا يخرج للمورّد إطلاقاً — يبحث عنه اختبار التسريب حرفياً.
+        estimated_price=SECRET_ESTIMATED_PRICE,
+    )
+    return row
+
+
+@pytest.fixture
+def rfq_recipient(env, supplier, purchase_rfq):
+    """مستقبِلٌ على الطلبية **بلا** رابطٍ بعد — الاختبارات تصنع الرابط بنفسها
+    (`docshare.services.create_share(..., dedupe=False)`) كي تحاكي وقت
+    الوصل الفعليّ."""
+    from django.utils import timezone
+
+    from logistics.models import PurchaseRFQRecipient
+
+    return PurchaseRFQRecipient.objects.create(
+        tenant=env["tenant"], rfq=purchase_rfq, supplier=supplier,
+        sent_at=timezone.now(),
+    )
 
 
 @pytest.fixture

@@ -73,7 +73,31 @@ class DocSharePublicBase(APIView):
     renderer_classes = [TemplateHTMLRenderer]
 
 
+def _attach_quote_prefill(share, document, payload):
+    """يُلحق بكل بندٍ سعرَ **صاحب هذا الرابط** إن كان قد أرسله من قبل.
+
+    في طبقة العرض لا في الباني: `build_*` لا يعرف بالرابط ولا يجوز أن يعرف —
+    حمولتُه مدقَّقةٌ بالقائمة البيضاء في `test_public_leakage.py` وتبقى كما هي.
+    والقيمةُ هنا سعرُ المورّد نفسِه لا رقمٌ من دفترنا، فلا تسريب.
+    """
+    quote_spec = (DOC_TYPES.get(share.doc_type) or {}).get("quote") or {}
+    prefill_fn = quote_spec.get("prefill")
+    if not prefill_fn:
+        return
+    prefill = prefill_fn(document, share) or {}
+    if not prefill:
+        return
+    for line in payload.get("lines") or []:
+        value = prefill.get(line.get("id"))
+        if value is not None:
+            # **نصّاً لا `Decimal`**: تعريبُ جانغو يقلب النقطة العشرية فاصلةً
+            # («11,5000»)، و`<input type="number">` يرفض تلك القيمة صامتاً —
+            # فتُعرَض الخانةُ فارغةً وكأن شيئاً لم يُرسَل.
+            line["price"] = format(value, "f")
+
+
 def _page_context(request, share, document, payload):
+    _attach_quote_prefill(share, document, payload)
     company = company_card(share.tenant)
     today = timezone.localdate()
     expired_offer = bool(payload["valid_until"] and payload["valid_until"] < today)
@@ -91,6 +115,11 @@ def _page_context(request, share, document, payload):
             decision and decision["open"] and not expired_offer and not share.decision
         ),
         "decision_error": "",
+        "quote_error": "",
+        # ISSUE #115: العَلَم يصل عبر `?submitted=1` بعد إعادة توجيه ناجحة
+        # (Post/Redirect/Get) — التسعير يُقبل مراراً فلا معنى لقفل الصفحة على
+        # «تمّ» دائم كما يفعل `share.decision` مع القرار.
+        "quote_submitted": request.GET.get("submitted") == "1",
         **_mount_urls(request, share.token),
     }
 
@@ -109,6 +138,7 @@ def _mount_urls(request, token):
     return {
         "page_url": reverse(f"{namespace}:docshare-public", args=[token]),
         "decision_url": reverse(f"{namespace}:docshare-decision", args=[token]),
+        "quote_url": reverse(f"{namespace}:docshare-quote", args=[token]),
     }
 
 class DocSharePublicView(DocSharePublicBase):
@@ -189,6 +219,62 @@ class DocShareDecisionView(DocSharePublicBase):
             HttpResponseRedirect(_mount_urls(request, token)["page_url"]),
             status_code=302,
         )
+
+
+class DocShareQuoteView(DocSharePublicBase):
+    """`POST …/quote/` — تسعير المورّد على طلبٍ (ISSUE #115).
+
+    مسارٌ **مستقلّ تماماً** عن `DocShareDecisionView`: الكتابة أسعارُ بنودٍ لا
+    قرارُ قبول/رفض، وتُقبل مراراً ما دام النوع يقول إن الباب مفتوح — لا مرّةً
+    واحدة كالقرار. الحقول `price_<line_id>` تصل من صناديق السعر في الجدول
+    (مربوطة بالنموذج عبر `form="…"` لا بتداخل HTML، فالجدول يبقى خارج
+    `<form>`)، ويجمعها هذا الـview في قاموسٍ `{line_id: raw_price}` يفسّره
+    النوع نفسه — لا معرفة هنا بشكل بنود أيّ مستند.
+    """
+
+    def post(self, request, token):
+        name = (request.data.get("name") or "").strip()
+        prices = {}
+        for key, value in request.data.items():
+            if not key.startswith("price_"):
+                continue
+            line_id = key[len("price_"):]
+            if line_id.isdigit():
+                prices[int(line_id)] = value
+
+        try:
+            services.submit_quote(token, name, prices, request)
+        except services.ShareGone:
+            return _notice(
+                request,
+                "انتهت صلاحية هذا الرابط",
+                "لم يعد هذا الرابط صالحاً. اطلب من مُرسِله رابطاً جديداً.",
+                status.HTTP_410_GONE,
+            )
+        except services.ShareNotFound:
+            return _notice(
+                request,
+                "الرابط غير صالح",
+                "لا يوجد مستند خلف هذا الرابط.",
+                status.HTTP_404_NOT_FOUND,
+            )
+        except services.DecisionRefused as exc:
+            try:
+                share, document, payload = services.resolve_share(token)
+            except (services.ShareGone, services.ShareNotFound):
+                return _notice(
+                    request, "الرابط غير صالح", "لا يوجد مستند خلف هذا الرابط.",
+                    status.HTTP_404_NOT_FOUND,
+                )
+            context = _page_context(request, share, document, payload)
+            context["quote_error"] = str(exc)
+            return _harden(
+                Response(context, template_name=SHARE_TEMPLATE),
+                status_code=status.HTTP_409_CONFLICT,
+            )
+
+        url = _mount_urls(request, token)["page_url"]
+        return _harden(HttpResponseRedirect(f"{url}?submitted=1"), status_code=302)
 
 
 class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):

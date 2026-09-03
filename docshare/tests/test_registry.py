@@ -61,6 +61,20 @@ def test_every_decision_spec_is_complete():
         )
 
 
+def test_every_quote_spec_is_complete():
+    """مرآةُ `test_every_decision_spec_is_complete` — لمسار التسعير (ISSUE #115)."""
+    from docshare.documents import QUOTE_DISPLAY_KEYS, QUOTE_LOGIC_KEYS
+
+    required = set(QUOTE_DISPLAY_KEYS) | set(QUOTE_LOGIC_KEYS)
+    for doc_type, spec in DOC_TYPES.items():
+        quote = spec.get("quote")
+        if quote is None:
+            continue
+        assert required <= set(quote), (
+            f"{doc_type}: مواصفة التسعير ينقصها {required - set(quote)}"
+        )
+
+
 @pytest.mark.parametrize("key", sorted(DOC_TYPES))
 def test_permission_key_exists_in_the_catalog(key):
     """صلاحيةٌ باسمٍ مطبعيّ = `require_perm` يرفض الجميع أبداً، بلا رسالة تشرح."""

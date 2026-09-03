@@ -19,6 +19,10 @@
 و`payload()` تقيس المجموعة، و`tests/test_purchase_leakage.py` يزرع القيم
 الحسّاسة ويبحث عنها حرفياً في الصفحة المُصيَّرة.
 """
+from decimal import Decimal
+
+from django.core.exceptions import ValidationError
+
 from docshare.documents._contract import (
     AUDIENCE_SUPPLIER,
     TONE_DANGER,
@@ -34,6 +38,7 @@ from docshare.documents._contract import (
     money,
     payload,
     product_names,
+    quote_display,
     tax_percent,
     tone_for,
     total,
@@ -42,6 +47,7 @@ from logistics.models import (
     LogisticsDeal,
     PurchaseInvoice,
     PurchaseOrder,
+    PurchaseRFQ,
     SupplierQuotation,
 )
 from sales.models import SalesInvoice
@@ -614,6 +620,176 @@ def build_local_purchase_invoice(invoice) -> dict:
     )
 
 
+# ── طلب عرض سعر (RFQ) — رابط المورّد الخاص (ISSUE #115) ────────────────────
+#
+# **مسارٌ يكتب لا يقبل قراراً فقط**: المورّد يرى بنوده وكمياته ووحداتِه
+# ومواصفاتِه، ويكتب سعراً أمام كل بند — لا `estimated_price` ولا «أقل سعر»
+# يخرجان إليه إطلاقاً (مواصفة #108 §٥). سطر الجدول هنا **ليس** `line_row()`
+# العام: ذاك يحمل `unit_price`/`line_discount`/`tax_percent`/`line_total`
+# وكلّها لا معنى لها على طلبيةٍ بلا سعر — فمجموعة مفاتيحه قائمة سماحٍ ثانية
+# (`RFQ_LINE_WHITELIST` في `tests/test_public_leakage.py`)، مطابقةً حرفياً
+# لِـ`SUPPLIER_ALLOWED_KEYS` في `frontend_v2/utils/procurementColumns.ts`:
+# تسلسل · الصنف · المواصفات · الكمية · وحدة القياس — لا أكثر.
+
+_RFQ_COLUMNS = (
+    "id", "tenant_id", "rfq_number", "rfq_date", "status", "scope", "notes",
+    "reply_deadline",
+)
+
+
+def load_purchase_rfq(tenant_id: int, doc_id: int):
+    return (
+        PurchaseRFQ.objects
+        .filter(pk=doc_id, tenant_id=tenant_id)
+        .only(*_RFQ_COLUMNS)
+        .first()
+    )
+
+
+def build_purchase_rfq(rfq) -> dict:
+    lines = []
+    line_qs = (
+        rfq.lines
+        .select_related("product")
+        .only(
+            "id", "rfq_id", "seq", "name_snapshot", "specs", "quantity",
+            "unit_of_measure", "product__name_ar", "product__name_en",
+            # `estimated_price` **لا** يُذكر هنا: العمود لا يُحمَّل من القاعدة
+            # أصلاً، فلا تسريب ممكن حتى بخطأ عرضٍ لاحق —
+            # `tests/test_purchase_leakage.py` يقيس ذلك بـ`get_deferred_fields`.
+        )
+        .order_by("seq", "id")
+    )
+    for line in line_qs:
+        name_ar, _name_en = product_names(line)
+        lines.append({
+            "id": line.id,
+            "seq": line.seq,
+            "name": name_ar,
+            "specs": line.specs or "",
+            "quantity": money(line.quantity),
+            "unit": line.unit_of_measure or "",
+        })
+
+    # لا طرفَ واحداً على المستند نفسه: الطلبية تخرج لعدّة موردين، وكلٌّ منهم
+    # يفتحها من رابطه الخاص (`PurchaseRFQRecipient.share`) — الشركةُ لا المورّد
+    # هي «الطرف» الذي يُخاطَب، فبطاقة الطرف فارغة عمداً.
+    return payload(
+        kind="purchase_rfq",
+        title="طلب عرض سعر",
+        number=rfq.rfq_number or "",
+        date=rfq.rfq_date,
+        status_label=rfq.get_status_display(),
+        status_tone={
+            PurchaseRFQ.STATUS_DRAFT: TONE_WARN,
+            PurchaseRFQ.STATUS_SENT: TONE_MUTED,
+            PurchaseRFQ.STATUS_AWARDED: TONE_OK,
+            PurchaseRFQ.STATUS_CANCELLED: TONE_DANGER,
+        }.get(rfq.status, TONE_MUTED),
+        party_title="",
+        party=None,
+        currency=None,
+        meta_rows=[
+            meta("التاريخ", rfq.rfq_date, VALUE_DATE),
+            meta("آخر موعد للردّ", rfq.reply_deadline, VALUE_DATE),
+        ],
+        lines=lines,
+        # لا جدول أسعار عام على هذه الصفحة — سعرُ كل مورّدٍ خانةٌ فارغة يملؤها
+        # هو في كتلة التسعير أدناه، لا عموداً ثابتاً في الجدول.
+        show_line_prices=False,
+        totals_rows=[],
+        grand_total=Decimal(0),
+        notes=rfq.notes,
+        quote=quote_display(QUOTE_PURCHASE_RFQ, rfq),
+    )
+
+
+def _rfq_quote_is_open(rfq) -> bool:
+    """مفتوحةٌ للتسعير ما دامت «مُرسَلة» — البابُ يقفل بالترسية أو الإلغاء."""
+    return rfq.status == PurchaseRFQ.STATUS_SENT
+
+
+def _rfq_quote_closed_reason(rfq) -> str:
+    if rfq.status == PurchaseRFQ.STATUS_AWARDED:
+        return "أُرسيت هذه الطلبية على مورّدٍ آخر ولم تعد تقبل أسعاراً."
+    if rfq.status == PurchaseRFQ.STATUS_CANCELLED:
+        return "أُلغيت هذه الطلبية."
+    return "لم تعد هذه الطلبية تقبل الأسعار."
+
+
+def _apply_purchase_rfq_quote(rfq, *, name, prices, request, share, ip):
+    """يربط الأسعار بمستقبِل هذا الرابط تحديداً — لا بالطلبية عموماً.
+
+    الاتجاه **`PurchaseRFQRecipient.share → DocumentShare`** لا العكس: هذه
+    الدالّة وحدها (لا `docshare/services.py` العامّة) تعرف بوجود `PurchaseRFQ`
+    و`PurchaseRFQRecipient` — نفس نمط `_apply_purchase_order_decision` أعلاه
+    التي تستدعي `logistics.services.confirm_purchase_order`.
+    """
+    from logistics.models import PurchaseRFQRecipient
+    from logistics.services import submit_rfq_supplier_quote
+
+    recipient = (
+        PurchaseRFQRecipient.objects
+        .select_related("supplier")
+        .filter(share_id=share.pk, rfq_id=rfq.pk)
+        .first()
+    )
+    if recipient is None:
+        raise ValidationError("هذا الرابط غير مربوطٍ بمورّدٍ على هذه الطلبية.")
+    submit_rfq_supplier_quote(recipient, name=name, prices=prices, ip=ip)
+
+
+def _rfq_quote_prefill(rfq, share) -> dict:
+    """أسعارُ **هذا المورّد وحده** كما أرسلها آخر مرّة — لتعبئة خاناته حين يعود.
+
+    بلا هذا يجد المورّدُ خاناتٍ فارغةً كلَّها فيضطرّ أن يعيد كتابة كلّ سعرٍ كي
+    يصحّح واحداً — و«يمكنكم التعديل» تصير وعداً لا يُوفى عملياً.
+
+    وهي **دالّةُ عرضٍ لا بناء**: لا تدخل `build_purchase_rfq` ولا حمولتَه
+    المدقَّقة بالقائمة البيضاء. تُستدعى في طبقة العرض حيث الرابطُ معروف، فما
+    يظهر هو سعرُ صاحب الرابط نفسِه — لا سعرُ منافسه، ولا رقمٌ من دفترنا.
+    """
+    from logistics.models import PurchaseRFQRecipient
+
+    recipient = (
+        PurchaseRFQRecipient.objects
+        .filter(share_id=share.pk, rfq_id=rfq.pk)
+        .select_related("quotation")
+        .first()
+    )
+    if recipient is None or recipient.quotation_id is None:
+        return {}
+    by_seq = {
+        line.seq: line.unit_price
+        for line in recipient.quotation.lines.only("id", "quotation_id", "seq", "unit_price")
+    }
+    return {
+        line.id: by_seq[line.seq]
+        for line in rfq.lines.only("id", "rfq_id", "seq")
+        if line.seq in by_seq
+    }
+
+
+QUOTE_PURCHASE_RFQ = {
+    "title": "أسعاركم على هذه الطلبية",
+    "hint": (
+        "اكتبوا السعر أمام كل بند، ثم اسمكم، وأكّدوا. يمكنكم تعديل الأسعار "
+        "بإرسال النموذج مجدداً ما دامت الطلبية مفتوحة."
+    ),
+    "price_label": "السعر",
+    "confirm_label": "إرسال الأسعار",
+    "submitted_note": "أُرسلت أسعاركم. يمكنكم تعديلها ما دامت الطلبية مفتوحة.",
+    "closed_note": "لم يعد بالإمكان إرسال الأسعار أو تعديلها.",
+    "is_open": _rfq_quote_is_open,
+    "closed_reason": _rfq_quote_closed_reason,
+    "apply": _apply_purchase_rfq_quote,
+    # مفتاحٌ **اختياريّ** (ليس في `QUOTE_LOGIC_KEYS`) — نوعٌ لا يعرضه لا يُخفق.
+    "prefill": _rfq_quote_prefill,
+    "entity_type": "purchase_rfq",
+    "entity_label": lambda doc: doc.rfq_number or f"RFQ-draft-{doc.pk}",
+}
+
+
 PURCHASE_DOC_TYPES = {
     "purchase_invoice": {
         "label": "فاتورة شراء",
@@ -654,5 +830,14 @@ PURCHASE_DOC_TYPES = {
         "permission": "purchase.document.share",
         "audience": AUDIENCE_SUPPLIER,
         "decision": None,
+    },
+    "purchase_rfq": {
+        "label": "طلب عرض سعر",
+        "loader": load_purchase_rfq,
+        "builder": build_purchase_rfq,
+        "permission": "purchase.document.share",
+        "audience": AUDIENCE_SUPPLIER,
+        "decision": None,
+        "quote": QUOTE_PURCHASE_RFQ,
     },
 }

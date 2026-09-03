@@ -94,12 +94,18 @@ def active_share(tenant, doc_type: str, doc_id: int):
 
 @transaction.atomic
 def create_share(tenant, doc_type: str, doc_id: int, *, days: int = DEFAULT_EXPIRY_DAYS,
-                 user=None, request=None) -> DocumentShare:
+                 user=None, request=None, dedupe: bool = True) -> DocumentShare:
     """ينشئ رابطاً جديداً — أو يعيد الحيّ القائم بدل إغراق المستند بروابط.
 
     ولعرض سعر ما زال **مسودة**: يَنقله إلى «أُرسل». بدون ذلك يضغط الزبون
     «موافق» فيسقط على آلة حالات `SalesQuotation`، لأن القبول لا يجوز إلا من
     «أُرسل». وهذا هو معنى الإرسال نفسه في Odoo وZoho: مشاركةُ العرض هي إرساله.
+
+    **`dedupe=False`** (ISSUE #115): طلبيةٌ واحدة تخرج لعدّة موردين، وكلٌّ منهم
+    يحتاج رابطه **الخاص** — إعادة استعمال «الرابط الحيّ القائم» هنا كانت ستعطي
+    المورّد الثاني رابط الأوّل نفسه. `DocumentShare` بلا قيد فرادة على
+    `(tenant, doc_type, doc_id)` أصلاً (موثَّقٌ في `models.py`)، فتعدّد الروابط
+    لمستندٍ واحد مسموحٌ بنيوياً؛ هذا العَلَم يقول متى يُستعمل ذلك التعدّد.
     """
     if doc_type not in DOC_TYPES:
         raise ShareNotFound(doc_type)
@@ -110,9 +116,10 @@ def create_share(tenant, doc_type: str, doc_id: int, *, days: int = DEFAULT_EXPI
     if document is None:
         raise ShareNotFound(f"{doc_type}#{doc_id}")
 
-    existing = active_share(tenant, doc_type, doc_id)
-    if existing is not None:
-        return existing
+    if dedupe:
+        existing = active_share(tenant, doc_type, doc_id)
+        if existing is not None:
+            return existing
 
     share = DocumentShare.objects.create(
         tenant=tenant,
@@ -293,6 +300,84 @@ def record_decision(token: str, decision: str, name: str, request,
             "decided_by_name": name,
             "note": note,
             "ip": share.decided_ip,
+            "share_id": share.pk,
+        },
+        request=request,
+        tenant=share.tenant,
+        user=None,
+    )
+    return share
+
+
+@transaction.atomic
+def submit_quote(token: str, name: str, prices: dict, request) -> DocumentShare:
+    """يسجّل أسعار المستلم على المستند — مسارٌ **مستقلّ تماماً** عن `record_decision`.
+
+    ISSUE #115: هذه الدالّة لا تعرف شيئاً عن `PurchaseRFQ` — نفس حياد
+    `record_decision` عن `SalesQuotation`/`PurchaseOrder`. «أيّ نوعٍ يقبل
+    تسعيراً وكيف يُطبَّق؟» سؤالٌ يجيب عنه `DOC_TYPES[…]["quote"]` وحده
+    (`documents/purchase_docs.py`)، فالاتجاه يبقى `PurchaseRFQRecipient.share
+    → DocumentShare` لا العكس.
+
+    والفرق عن القرار جوهريّ لا تفصيل: القرار **مرّةً واحدة** ثم يُقفَل
+    (`if share.decision: raise DecisionRefused`)؛ هنا السعر بيانٌ يُصحَّح،
+    فتُقبل كتاباتٌ متعدّدة ما دام النوع يقول إن الباب مفتوح.
+    """
+    share = (
+        DocumentShare.objects
+        .select_for_update()
+        .select_related("tenant")
+        .filter(token=token)
+        .first()
+    )
+    if share is None:
+        raise ShareNotFound(token)
+    if not share.is_live:
+        raise ShareGone(token)
+    spec = DOC_TYPES.get(share.doc_type)
+    if spec is None:
+        raise ShareNotFound(share.doc_type)
+    quote_spec = spec.get("quote")
+    if quote_spec is None:
+        raise DecisionRefused("هذا المستند لا يقبل تسعيراً.")
+
+    name = (name or "").strip()[:120]
+    if not name:
+        raise DecisionRefused("الاسم مطلوب لإرسال الأسعار.")
+
+    document = spec["loader"](share.tenant_id, share.doc_id)
+    if document is None:
+        raise ShareNotFound(f"{share.doc_type}#{share.doc_id}")
+    if not quote_spec["is_open"](document):
+        raise DecisionRefused(quote_spec["closed_reason"](document))
+
+    ip = _client_ip(request)
+    try:
+        quote_spec["apply"](
+            document, name=name, prices=prices, request=request,
+            share=share, ip=ip,
+        )
+    except ValidationError as exc:
+        raise DecisionRefused(" ".join(exc.messages) or "تعذّر حفظ الأسعار.") from exc
+
+    # آخرُ من كتب على هذا الرابط ومتى — تُحدَّث في كل إرسال (لا مرّةً واحدة
+    # كحقل `decision`)، لأن السعر يُعدَّل مراراً والاسم قد يتغيّر معه.
+    share.decided_name = name
+    share.decided_ip = ip
+    share.decided_at = timezone.now()
+    share.save(update_fields=["decided_name", "decided_ip", "decided_at"])
+
+    log_activity(
+        action="update",
+        entity_type=quote_spec["entity_type"],
+        entity_id=document.pk,
+        entity_label=quote_spec["entity_label"](document),
+        description=f"مورّدٌ أرسل أسعاره من الرابط العام — بتوقيع {name}",
+        metadata={
+            "source": "public_share",
+            "doc_type": share.doc_type,
+            "submitted_by_name": name,
+            "ip": ip,
             "share_id": share.pk,
         },
         request=request,

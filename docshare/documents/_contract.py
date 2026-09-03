@@ -43,6 +43,9 @@ PAYLOAD_FIELDS = (
     "currency_code", "currency_symbol",
     "meta_rows", "show_lines", "show_line_prices", "lines", "totals_rows",
     "grand_total", "notes", "decision", "valid_until",
+    # ISSUE #115: مسارٌ ثانٍ مستقلّ عن `decision` — أسعارُ بنود تُعدَّل مراراً
+    # لا قرارُ قبول/رفض يُقفَل بعد مرّة. `None` لكل نوعٍ لا يقبل تسعيراً.
+    "quote",
 )
 
 #: نبرة شارة الحالة. النماذج لا تتفق على مفردات الحالة (`posted` هنا و`Open`
@@ -150,6 +153,7 @@ def payload(
     valid_until=None,
     show_lines: bool = True,
     show_line_prices: bool = True,
+    quote=None,
 ) -> dict:
     """المُنشئ الوحيد للحمولة العامة — ومجموعةُ مفاتيحها خاصيةٌ فيه.
 
@@ -176,6 +180,7 @@ def payload(
         "notes": notes or "",
         "decision": decision,
         "valid_until": valid_until,
+        "quote": quote,
     }
     built.update(_party_card(party, party_title))
     built.update(_currency_card(currency))
@@ -252,6 +257,32 @@ def decision_display(spec, document):
     if spec is None:
         return None
     display = {key: spec[key] for key in DECISION_DISPLAY_KEYS}
+    display["open"] = bool(spec["is_open"](document))
+    return display
+
+
+# ── تسعير المورّد (ISSUE #115) ──────────────────────────────────────────────
+#
+# مسارٌ **مستقلّ تماماً** عن القرار أعلاه — لا تمديدٌ لـ`apply` القرار، ولا
+# مشاركةٌ لحقوله. الفرق جوهريّ: القرار قبولٌ/رفضٌ يُقفَل بعد مرّة، والتسعير
+# أسعارُ بنودٍ تُعدَّل مراراً ما دام المستند مفتوحاً. راجع `docshare/services.py`
+# (`submit_quote`) و`documents/purchase_docs.py` (`QUOTE_PURCHASE_RFQ`).
+
+#: مفاتيح العرض في مواصفة التسعير — وحدها تخرج إلى الصفحة.
+QUOTE_DISPLAY_KEYS = (
+    "title", "hint", "price_label", "confirm_label",
+    "submitted_note", "closed_note",
+)
+
+#: مواصفة تسعيرٍ كاملة = مفاتيح العرض + هذه. النقصُ يُخفِق `tests/test_registry.py`.
+QUOTE_LOGIC_KEYS = ("is_open", "closed_reason", "apply", "entity_type", "entity_label")
+
+
+def quote_display(spec, document):
+    """جزءُ العرض من مواصفة التسعير + هل البابُ مفتوحٌ الآن — مرآةُ `decision_display`."""
+    if spec is None:
+        return None
+    display = {key: spec[key] for key in QUOTE_DISPLAY_KEYS}
     display["open"] = bool(spec["is_open"](document))
     return display
 

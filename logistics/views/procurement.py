@@ -278,6 +278,29 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
         )
 
 
+def _wire_rfq_recipient_shares(tenant, rfq, request):
+    """يمنح كلّ مستقبِلٍ بلا رابطٍ خاصٍّ به رابطاً — ISSUE #115.
+
+    استيرادٌ كسول لـ`docshare.services`: نفس نمط `logistics/views/reports.py`
+    مع `import_file.services` — لا اعتماديةٌ ثابتة عند إقلاع التطبيقات، والاتجاه
+    يبقى `logistics → docshare` لا العكس (`docshare` لا يستورد `logistics` قط).
+
+    **`dedupe=False`**: طلبيةٌ واحدة تخرج لعدّة موردين، وكلٌّ منهم يحتاج
+    توكِنه **الخاص** — إعادة استعمال آخر رابطٍ حيّ لنفس (tenant, doc_type, doc_id)
+    كانت ستُعطي المورّد الثاني رابط الأوّل نفسه.
+    """
+    from docshare.models import DOC_PURCHASE_RFQ
+    from docshare import services as docshare_services
+
+    for recipient in rfq.recipients.filter(share__isnull=True):
+        share = docshare_services.create_share(
+            tenant, DOC_PURCHASE_RFQ, rfq.pk,
+            user=getattr(request, 'user', None), request=request, dedupe=False,
+        )
+        recipient.share = share
+        recipient.save(update_fields=['share'])
+
+
 # ── ISSUE #112 — الطلبية (طلب عروض أسعار): الأبّ الذي يسبق `SupplierQuotation`
 
 class PurchaseRFQViewSet(BaseTenantViewSet):
@@ -373,6 +396,10 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             rfq.status = PurchaseRFQ.STATUS_SENT
             rfq.save(update_fields=['rfq_number', 'status', 'updated_at'])
 
+            # ISSUE #115: رابطٌ خاصٌّ لكلّ مستقبِلٍ لا يملك واحداً بعد — يغطّي
+            # موردي `supplier_ids` أعلاه وأيّ مستقبِلٍ أُضيف قبل الإرسال (نادر).
+            _wire_rfq_recipient_shares(tenant, rfq, request)
+
         log_activity(
             action='update',
             entity_type='purchase_rfq',
@@ -458,6 +485,12 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
                 request=request,
                 partner_ids=[supplier.pk],
             )
+            # ISSUE #115: الطلبية بعد الإرسال مستقبِلوها كلّهم يحملون رابطاً —
+            # المستقبِل المضاف الآن ليس استثناءً. قبل الإرسال (نادر) يبقى بلا
+            # رابطٍ حتى فعل `send/`، الذي يغطّيه هو أيضاً.
+            if rfq.status == PurchaseRFQ.STATUS_SENT:
+                _wire_rfq_recipient_shares(tenant, rfq, request)
+                recipient.refresh_from_db()
         return Response(
             PurchaseRFQRecipientSerializer(recipient).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,

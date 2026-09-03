@@ -196,6 +196,74 @@
   </div>
   {% endif %}
 
+  {% comment %}
+  ISSUE #115 — تسعير المورّد على طلبٍ: جدولٌ خاصٌّ بلا صناديق سعرٍ ثابتة
+  (`doc.show_lines` مضبوط `False` لهذا النوع كي لا يتكرّر الجدول العام)، تليه
+  كتلة التسعير. القائمة السماحُ هنا مطابقةٌ لِـ`getSupplierColumns` في
+  `frontend_v2/utils/procurementColumns.ts`: تسلسل/الصنف/المواصفات/الكمية/
+  الوحدة — لا سعرَ تقديرياً ولا «أقل سعر».
+  {% endcomment %}
+  {% if doc.quote %}
+  <table>
+    <thead>
+      <tr>
+        <th class="num" style="width:38px">#</th>
+        <th>الصنف</th>
+        <th>المواصفات</th>
+        <th class="num" style="width:64px">الوحدة</th>
+        <th class="num" style="width:80px">الكمية</th>
+        {% if doc.quote.open %}<th class="num" style="width:120px">{{ doc.quote.price_label }}</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in doc.lines %}
+      <tr>
+        <td class="num">{{ line.seq }}</td>
+        <td>{{ line.name }}</td>
+        <td>{{ line.specs }}</td>
+        <td class="num">{{ line.unit }}</td>
+        <td class="num">{{ line.quantity|qty }}</td>
+        {% if doc.quote.open %}
+        <td class="num">
+          {% comment %}
+          `form="rfq-quote-form"` يربط الحقل بالنموذج بلا تداخل HTML — الجدول
+          يبقى خارج `<form>` فتُقرأ بنية الصفحة بلا فروع HTML مقحمة داخل جدول.
+          {% endcomment %}
+          <input type="number" step="0.0001" min="0" inputmode="decimal"
+                 name="price_{{ line.id }}" form="rfq-quote-form" required
+                 value="{{ line.price|default_if_none:'' }}">
+        </td>
+        {% endif %}
+      </tr>
+      {% empty %}
+      <tr><td colspan="{% if doc.quote.open %}6{% else %}5{% endif %}" class="num muted">لا توجد بنود</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if quote_error %}
+    <div class="alert no-print" style="margin-top:0">{{ quote_error }}</div>
+  {% elif quote_submitted %}
+    <div class="settled">{{ doc.quote.submitted_note }}</div>
+  {% endif %}
+
+  {% if doc.quote.open %}
+    <div class="decide no-print">
+      <h3>{{ doc.quote.title }}</h3>
+      <p class="muted" style="margin:0">{{ doc.quote.hint }}</p>
+      <form method="post" action="{{ quote_url }}" id="rfq-quote-form">
+        <input type="text" name="name" maxlength="120" required
+               placeholder="الاسم الكامل" autocomplete="name">
+        <div class="acts">
+          <button class="btn btn-primary" type="submit">{{ doc.quote.confirm_label }}</button>
+        </div>
+      </form>
+    </div>
+  {% else %}
+    <div class="notes no-print">{{ doc.quote.closed_note }}</div>
+  {% endif %}
+  {% endif %}
+
   {% if doc.notes %}<div class="notes"><strong>ملاحظات:</strong><br>{{ doc.notes }}</div>{% endif %}
 
   {% comment %}

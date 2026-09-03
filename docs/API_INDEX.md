@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **589**
+عدد النقاط: **591**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -552,6 +552,7 @@
 | `/api/share/<str:token>` | `DocSharePublicView` | `docshare/views.py` |
 | `/api/share/<str:token>/` | `DocSharePublicView` | `docshare/views.py` |
 | `/api/share/<str:token>/decision/` | `DocShareDecisionView` | `docshare/views.py` |
+| `/api/share/<str:token>/quote/` | `DocShareQuoteView` | `docshare/views.py` |
 | `/api/store/<slug:slug>/` | `StoreProfileView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/` | `StoreCollectionListView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/<slug:collection_slug>/` | `StoreCollectionDetailView` | `store/views.py` |
@@ -597,4 +598,5 @@
 | `/s/<str:token>` | `DocSharePublicView` | `docshare/views.py` |
 | `/s/<str:token>/` | `DocSharePublicView` | `docshare/views.py` |
 | `/s/<str:token>/decision/` | `DocShareDecisionView` | `docshare/views.py` |
+| `/s/<str:token>/quote/` | `DocShareQuoteView` | `docshare/views.py` |
 <!-- AUTO:api_index:END -->

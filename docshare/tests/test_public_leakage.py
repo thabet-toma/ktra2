@@ -25,6 +25,7 @@ from docshare.documents import (
     DECISION_DISPLAY_KEYS,
     DOC_TYPES,
     PAYLOAD_FIELDS,
+    QUOTE_DISPLAY_KEYS,
     company_card,
     load_sales_invoice,
 )
@@ -43,9 +44,18 @@ LINE_WHITELIST = {
     "quantity", "unit_price", "line_discount", "tax_percent", "line_total",
 }
 
+#: ISSUE #115: بنودُ طلب عرض السعر شكلٌ مختلفٌ عمداً — لا `unit_price` ولا
+#: `line_total` (المورّد هو من يكتب السعر، لا يقرأه)، ولا `catalog_no`/`note`
+#: (ليسا في `SUPPLIER_ALLOWED_KEYS` بـ`procurementColumns.ts`). `id` إضافيٌّ
+#: هنا وحده لربط صندوق السعر بالبند في النموذج — رقمُ سطرٍ داخليّ لا يسرّب شيئاً.
+RFQ_LINE_WHITELIST = {"id", "seq", "name", "specs", "quantity", "unit"}
+
+LINE_WHITELIST_BY_TYPE = {"purchase_rfq": RFQ_LINE_WHITELIST}
+
 META_ROW_KEYS = {"label", "value", "kind"}
 TOTAL_ROW_KEYS = {"label", "value", "strong"}
 DECISION_KEYS = set(DECISION_DISPLAY_KEYS) | {"open"}
+QUOTE_KEYS = set(QUOTE_DISPLAY_KEYS) | {"open"}
 
 
 def test_every_registered_doc_type_has_a_sample():
@@ -64,14 +74,17 @@ def test_every_type_payload_matches_the_whitelist_exactly(samples):
         payload = spec["builder"](loaded)
 
         assert set(payload) == set(PAYLOAD_FIELDS), doc_type
+        line_whitelist = LINE_WHITELIST_BY_TYPE.get(doc_type, LINE_WHITELIST)
         for line in payload["lines"]:
-            assert set(line) == LINE_WHITELIST, doc_type
+            assert set(line) == line_whitelist, doc_type
         for row in payload["meta_rows"]:
             assert set(row) == META_ROW_KEYS, doc_type
         for row in payload["totals_rows"]:
             assert set(row) == TOTAL_ROW_KEYS, doc_type
         if payload["decision"] is not None:
             assert set(payload["decision"]) == DECISION_KEYS, doc_type
+        if payload["quote"] is not None:
+            assert set(payload["quote"]) == QUOTE_KEYS, doc_type
 
 
 def test_company_card_keys_match_whitelist_exactly(env):

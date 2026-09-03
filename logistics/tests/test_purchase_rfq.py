@@ -319,6 +319,67 @@ class PurchaseRFQTenantIsolationTest(PurchaseRFQAPITestBase):
             self.assertEqual(len(rows), 0)
 
 
+class PurchaseRFQShareWiringTest(PurchaseRFQAPITestBase):
+    """ISSUE #115: `send/` و`recipients/` يمنحان كلّ مستقبِلٍ رابطه الخاص."""
+
+    def test_send_with_supplier_ids_wires_a_share_per_recipient(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+
+        send = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/send/',
+            {'supplier_ids': [self.supplier_a.id, self.supplier_b.id]},
+            format='json',
+        )
+        self.assertEqual(send.status_code, 200, send.content)
+
+        recipients = list(PurchaseRFQRecipient.objects.filter(rfq_id=rfq_id))
+        self.assertEqual(len(recipients), 2)
+        for recipient in recipients:
+            self.assertIsNotNone(recipient.share_id)
+
+        # كلٌّ منهما توكِنٌ مستقلّ — لا رابطاً واحداً مُعاد استعماله للاثنين.
+        tokens = {r.share.token for r in recipients}
+        self.assertEqual(len(tokens), 2)
+        for recipient in recipients:
+            self.assertEqual(recipient.share.doc_type, 'purchase_rfq')
+            self.assertEqual(recipient.share.doc_id, rfq_id)
+
+    def test_recipient_added_after_send_gets_a_share_too(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+
+        add_recipient = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/recipients/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
+        self.assertEqual(add_recipient.status_code, 201, add_recipient.content)
+        self.assertIsNotNone(add_recipient.data['share'])
+
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        self.assertIsNotNone(recipient.share_id)
+
+    def test_recipient_added_before_send_gets_a_share_once_sent(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+
+        # مستقبِلٌ يُضاف والطلبية ما تزال مسودّة — حالةٌ نادرة يسمح بها الحارس.
+        add_recipient = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/recipients/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
+        self.assertEqual(add_recipient.status_code, 201, add_recipient.content)
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        self.assertIsNone(recipient.share_id)
+
+        send = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+        self.assertEqual(send.status_code, 200, send.content)
+
+        recipient.refresh_from_db()
+        self.assertIsNotNone(recipient.share_id)
+
+
 class SupplierQuotationRfqLinkTest(PurchaseRFQAPITestBase):
     def test_supplier_quotation_optional_rfq_field_defaults_to_none(self):
         """SupplierQuotation.rfq اختياري — عروضٌ مستقلّة قائمة تبقى صحيحة بلا ربط."""

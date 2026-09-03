@@ -5,7 +5,7 @@ and AP account resolution.
 """
 
 import logging
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -332,6 +332,112 @@ def confirm_purchase_order(order):
         'purchase_order.confirm order=%s tenant=%s', locked.id, locked.tenant_id,
     )
     return locked
+
+
+@transaction.atomic
+def submit_rfq_supplier_quote(recipient, *, name: str, prices: dict, ip: str = ''):
+    """يُنشئ أو يحدّث عرض السعر المتولّد من ردّ المورّد على رابطه الخاص (ISSUE #115).
+
+    القاعدة الوحيدة التي تكتب `SupplierQuotation` من رابطٍ عام — تُستدعى من
+    `docshare/documents/purchase_docs.py` (`_apply_purchase_rfq_quote`) وحدها،
+    نفس نمط `confirm_purchase_order` أعلاه. `docshare` لا يستورد شيئاً من هنا
+    غير هذه الدالّة، فيبقى جاهلاً بشكل `PurchaseRFQRecipient`/`SupplierQuotation`.
+
+    **الفرق عن عرضٍ يُدخله موظف**: هذا يتولّد **باسم المورّد** لا موظفنا،
+    ومرّةً واحدة لكل مستقبِل (`PurchaseRFQRecipient.quotation` OneToOne) —
+    الرد الثاني من نفس الرابط يُحدِّث بنود العرض نفسه، لا ينشئ عرضاً ثانياً.
+    """
+    from logistics.models import PurchaseRFQ, SupplierQuotation, SupplierQuotationLine
+
+    rfq = PurchaseRFQ.objects.select_for_update().get(pk=recipient.rfq_id)
+    if rfq.status != PurchaseRFQ.STATUS_SENT:
+        raise ValidationError('لم تعد الطلبية تقبل الأسعار — أُغلقت أو أُلغيت.')
+
+    rfq_lines = list(rfq.lines.all())
+    if not rfq_lines:
+        raise ValidationError('لا بنود في هذه الطلبية.')
+
+    parsed_prices = {}
+    for line in rfq_lines:
+        raw = prices.get(line.id)
+        if raw in (None, ''):
+            raise ValidationError('الرجاء إدخال سعر لكل بند.')
+        try:
+            price = Decimal(str(raw))
+        except (InvalidOperation, ValueError, TypeError):
+            raise ValidationError('سعر غير صالح.')
+        if price < 0:
+            raise ValidationError('السعر لا يمكن أن يكون سالباً.')
+        parsed_prices[line.id] = price
+
+    quotation = recipient.quotation
+    if quotation is None:
+        from accounting.services import next_document_number
+        from tenants.models import Currency
+
+        # لا حقل عملة على `PurchaseRFQ` نفسها (طلبيةٌ بلا أسعار) — العرض
+        # المتولّد يحتاج واحدة، فيُختار الأساس. نفس نمط `create_purchase_return`.
+        currency = (
+            Currency.objects.filter(IsBaseCurrency=True).first()
+            or Currency.objects.order_by('CurrencyID').first()
+        )
+        if currency is None:
+            raise ValidationError('لا توجد عملة معرّفة للشركة.')
+
+        prefix = 'IQ' if rfq.scope == PurchaseRFQ.SCOPE_IMPORT else 'PQ'
+        sequence = next_document_number(rfq.tenant_id, f'supplier_quotation_{rfq.scope}')
+        quotation = SupplierQuotation.objects.create(
+            tenant=rfq.tenant,
+            rfq=rfq,
+            scope=rfq.scope,
+            supplier=recipient.supplier,
+            quotation_number=f'{prefix}-{sequence:04d}',
+            quotation_date=timezone.localdate(),
+            currency=currency,
+            status=SupplierQuotation.STATUS_SENT,
+            order_name=rfq.rfq_number or '',
+            supplier_contact=name,
+        )
+    else:
+        quotation.supplier_contact = name
+        quotation.save(update_fields=['supplier_contact', 'updated_at'])
+
+    subtotal = Decimal('0')
+    for line in rfq_lines:
+        price = parsed_prices[line.id]
+        line_total = (Decimal(line.quantity) * price).quantize(DEC)
+        subtotal += line_total
+        SupplierQuotationLine.objects.update_or_create(
+            quotation=quotation, seq=line.seq,
+            defaults=dict(
+                tenant=rfq.tenant, product=line.product,
+                name_snapshot=line.name_snapshot,
+                unit_of_measure=line.unit_of_measure,
+                quantity=line.quantity,
+                unit_price=price,
+                line_total=line_total,
+            ),
+        )
+    quotation.subtotal = subtotal.quantize(DEC)
+    quotation.tax_amount = Decimal('0')
+    quotation.grand_total = subtotal.quantize(DEC)
+    quotation.save(update_fields=['subtotal', 'tax_amount', 'grand_total', 'updated_at'])
+
+    update_fields = []
+    if recipient.quotation_id != quotation.pk:
+        recipient.quotation = quotation
+        update_fields.append('quotation')
+    if recipient.replied_at is None:
+        recipient.replied_at = timezone.now()
+        update_fields.append('replied_at')
+    if update_fields:
+        recipient.save(update_fields=update_fields)
+
+    logger.info(
+        'purchase_rfq.supplier_quote rfq=%s recipient=%s quotation=%s ip=%s',
+        rfq.pk, recipient.pk, quotation.pk, ip,
+    )
+    return quotation
 
 
 @transaction.atomic

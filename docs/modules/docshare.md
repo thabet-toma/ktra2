@@ -44,6 +44,7 @@
 | `local_purchase_invoice` | `sales.SalesInvoice` (شراء/مرجع شراء) | `customer` (وهو المورّد) | مورّد | بلا شاشة — انظر أسفل |
 | `warranty_card` | `after_sales.WarrantyCard` | `partner` أو `customer_name` | زبون | **وحدة مرخّصة** |
 | `service_order` | `after_sales.ServiceOrder` | `partner` أو `customer_name` | زبون | **وحدة مرخّصة**؛ التقدير بعد اعتماده |
+| `purchase_rfq` | `logistics.PurchaseRFQ` | — (لا طرف واحد؛ الرابط خاصّ **بمستقبِل** عبر `PurchaseRFQRecipient.share`) | مورّد | **لا يقبل قراراً — يقبل تسعيراً** (`quote` لا `decision`)؛ انظر §«تسعير المورّد» أدناه |
 
 **ثلاث قواعد عرضٍ تعمّمت من هذه الأنواع، وكلٌّ منها منعٌ مقصود:**
 - **`show_lines=False`** للسندات والإشعارات والكفالة: جدولٌ بعناوين «الصنف/الوحدة/الكمية/ض.%» فوق إيصال قبضٍ ضجيجٌ يُربك من يقرؤه. وتوزيعاتُ السند تنزل **صفوفَ بيانات** (فاتورةً فاتورةً بمبلغها)، و«على الحساب» **يُشتقّ طرحاً** لا يُقرأ من عمودٍ ثانٍ قد يخالفه.
@@ -79,8 +80,57 @@
 |---|---|---|
 | GET | `s/<token>` · `api/share/<token>/` | صفحة المستند (HTML خادمي) — `docshare/views.py` (`DocSharePublicView`) |
 | POST | `s/<token>/decision/` | قبول الزبون أو رفضه لعرض السعر — `docshare/views.py` (`DocShareDecisionView`) |
+| POST | `s/<token>/quote/` | تسعير المورّد على طلب عرض سعر — `docshare/views.py` (`DocShareQuoteView`)، ISSUE #115 |
 | GET/POST | `api/document-shares/` | سطح الإدارة: قائمة الروابط وإنشاؤها — `docshare/views.py` (`DocumentShareViewSet`) |
 | POST | `api/document-shares/<id>/revoke/` | إبطال فوري |
+
+## تسعير المورّد على طلب عرض سعر (ISSUE #115، مواصفة #108 §٥)
+
+**مسارٌ ثانٍ مستقلّ تماماً عن §«القرار» أعلاه — لا تمديدٌ لـ`record_decision`.**
+تمديدُها كان يغيّر توقيع `apply` لأربعةَ عشرَ نوعاً لأجل نوعٍ واحد. الفروق
+جوهرية لا تفصيلية:
+
+| | القرار (`decision`) | التسعير (`quote`) |
+|---|---|---|
+| الكتابة | قبول/رفض | أسعارُ بنود |
+| التكرار | مرّةً واحدة ثم يُقفل | يُعدَّل مراراً حتى إغلاق الطلبية |
+| السبب | القرار نهائيّ بطبعه | السعر بيانٌ يُصحَّح |
+
+**الآلية موازيةٌ حرفياً للقرار** لكن بمفاتيح خاصة بها: `DOC_TYPES[…]["quote"]`
+(بدل `["decision"]`)، بمواصفة `QUOTE_DISPLAY_KEYS`/`QUOTE_LOGIC_KEYS`
+(`docshare/documents/_contract.py`) و`docshare/services.py` (`submit_quote`)
+بدل `record_decision`. الحمولة العامة اكتسبت مفتاح `quote` (إلى جانب
+`decision` القائم) — `None` لكل نوعٍ لا يقبل تسعيراً.
+
+**الاتجاه `PurchaseRFQRecipient.share → DocumentShare` لا العكس** —
+`docshare` لا يستورد شيئاً من `logistics` غير `PurchaseRFQ` (للعرض) في
+`documents/purchase_docs.py` وحدها؛ الكتابة الفعلية (`_apply_purchase_rfq_quote`)
+تستدعي `logistics.services.submit_rfq_supplier_quote` — نفس نمط
+`_apply_purchase_order_decision` مع `confirm_purchase_order`. `docshare/services.py`
+العامّة لا تعرف بوجود `PurchaseRFQ` إطلاقاً.
+
+**حمولة `purchase_rfq` قائمة سماحٍ منفصلة عن بقية الأنواع**: بنودها
+`{id, seq, name, specs, quantity, unit}` — لا `unit_price`/`line_total`
+(المورّد يكتب السعر، لا يقرأه) ولا `catalog_no`/`note`. مطابقةٌ حرفية
+لـ`SUPPLIER_ALLOWED_KEYS` في `frontend_v2/utils/procurementColumns.ts`
+(`getSupplierColumns`) — و`estimated_price` على `PurchaseRFQLine` **لا يُحمَّل
+من القاعدة أصلاً** في استعلام الباني، فلا تسريب ممكن حتى بخطأ عرضٍ لاحق.
+
+**رابطٌ خاصٌّ لكلّ مستقبِل لا رابطٌ واحد للطلبية**: `docshare/services.py`
+(`create_share`) اكتسبت `dedupe: bool = True` — الافتراض يبقى «أعد استعمال
+الرابط الحيّ» (لا إغراق مستندٍ بروابط عند ضغط «شارك» مرتين)، لكن طلبيةً واحدة
+تخرج لعدّة موردين وكلٌّ يحتاج توكِنه **الخاص**؛ `logistics/views/procurement.py`
+(`_wire_rfq_recipient_shares`، تُستدعى من `send/` و`recipients/`) يمرّر
+`dedupe=False` فيمنح كلّ `PurchaseRFQRecipient` بلا `share` رابطاً جديداً.
+هذا يتّكئ على أن `DocumentShare` **بلا قيد فرادة** على `(tenant, doc_type,
+doc_id)` أصلاً — عدّة روابط لمستندٍ واحد مسموحٌ بنيوياً بلا هجرة.
+
+**الردّ يولّد `SupplierQuotation`**: `logistics.services.submit_rfq_supplier_quote`
+— مرّةً واحدة لكل مستقبِل (`PurchaseRFQRecipient.quotation` `OneToOne`)، والردّ
+الثاني من نفس الرابط **يُحدِّث** بنود نفس العرض لا ينشئ عرضاً ثانياً. الاسم
+المُدخَل يُسجَّل على `SupplierQuotation.supplier_contact`، والاسم/الـIP أيضاً
+على `DocumentShare.decided_name`/`decided_ip` (تُحدَّث في كل إرسال، لا مرّةً
+واحدة كحقل `decision`).
 
 **السطح العام مسجَّل مرتين عمداً:** nginx على الإنتاج يخدم الـSPA من القرص ويمرّر `/api/` و`/admin/` و`/media/` و`/django-static/` وحدها إلى جانغو؛ وأي مسار آخر — ومنه `/s/…` — يسقط في `location /` فيردّ **صفحة الـSPA بحالة 200**. فالمسار القصير يحتاج سطر `location` جديداً (خطوة نشر أدناه)، وحتى يُضاف يعمل `/api/share/<token>/` كاملاً.
 
