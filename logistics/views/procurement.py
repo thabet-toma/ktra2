@@ -434,6 +434,15 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
 
     @action(detail=True, methods=['post'])
     def award(self, request, pk=None):
+        """ISSUE #116 (مواصفة #108 §٨) — ترسيةٌ كاملةٌ لموردٍ واحد في هذه
+        المرحلة: `supplier` في جسم الطلب يحسم أيّ ردّ (`SupplierQuotation`)
+        هو الفائز. عرضُه يُقبَل (`STATUS_ACCEPTED`) ثم يمرّ بنفس مسار قبول
+        عرضٍ محلّيّ يدويّ — **لا منطق ترحيل جديد هنا**، تركيبُ خدمات قائمة
+        (`convert_local_quotation_to_order`/`_invoice`) وراء مفتاح
+        `PurchaseSettings.use_purchase_orders` (#117) وحده يحسم أيّهما.
+        """
+        from logistics.services import get_or_create_purchase_settings
+
         tenant = get_tenant(request)
         with transaction.atomic():
             rfq = PurchaseRFQ.objects.select_for_update().get(
@@ -441,6 +450,45 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             )
             if rfq.status != PurchaseRFQ.STATUS_SENT:
                 raise ValidationError('يمكن ترسية الطلبيات المُرسَلة فقط.')
+
+            supplier_id = request.data.get('supplier')
+            if not supplier_id:
+                raise ValidationError({'supplier': 'اختر المورد الذي تُرسى عليه الطلبية.'})
+
+            recipient = rfq.recipients.select_related('quotation', 'supplier').filter(
+                supplier_id=supplier_id,
+            ).first()
+            if recipient is None:
+                raise ValidationError({'supplier': 'هذا المورد ليس من مستقبِلي الطلبية.'})
+            if recipient.quotation_id is None:
+                raise ValidationError({'supplier': 'لم يردّ هذا المورد بعرض سعر بعد.'})
+
+            quotation = SupplierQuotation.objects.select_for_update().get(
+                pk=recipient.quotation_id,
+            )
+            quotation.status = SupplierQuotation.STATUS_ACCEPTED
+            quotation.save(update_fields=['status', 'updated_at'])
+
+            settings_obj = get_or_create_purchase_settings(tenant)
+            try:
+                if settings_obj.use_purchase_orders:
+                    document, _created = convert_local_quotation_to_order(
+                        quotation, user=request.user,
+                    )
+                    document_type = 'purchase_order'
+                    document_number = document.order_number
+                else:
+                    document, _created = convert_local_quotation_to_invoice(
+                        quotation, user=request.user,
+                    )
+                    document_type = 'purchase_invoice'
+                    document_number = document.invoice_number
+            except DjangoValidationError as exc:
+                detail = getattr(exc, 'message_dict', None) or getattr(
+                    exc, 'messages', None,
+                ) or [str(exc)]
+                raise ValidationError(detail)
+
             rfq.status = PurchaseRFQ.STATUS_AWARDED
             rfq.save(update_fields=['status', 'updated_at'])
 
@@ -449,10 +497,115 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             entity_type='purchase_rfq',
             entity_id=rfq.id,
             entity_label=rfq.rfq_number,
-            description='ترسية الطلبية',
+            description=f'ترسية الطلبية على {recipient.supplier.name}',
             request=request,
+            partner_ids=[recipient.supplier_id],
         )
-        return Response(PurchaseRFQSerializer(rfq, context={'request': request}).data)
+        data = PurchaseRFQSerializer(rfq, context={'request': request}).data
+        data['awarded_supplier_id'] = recipient.supplier_id
+        data['awarded_document'] = {
+            'type': document_type,
+            'id': document.pk,
+            'number': document_number,
+        }
+        return Response(data)
+
+    @action(detail=True, methods=['get'])
+    def comparison(self, request, pk=None):
+        """ISSUE #116 (مواصفة #108 §٨) — مصفوفة الموردين: شاشةٌ مستقلّة عند
+        الطلب، صفٌّ لكل بند وعمودٌ لكل موردٍ **ردّ فعلياً** (مورّدٌ لم يردّ
+        بعد لا عمود له — فراغٌ لا يُفسَّر خطأً كرفض).
+
+        **خطُّ الأساس هنا التقديريّ لا «أقل سعر»** — خلافاً لعمود العرض
+        الواحد (#113): هناك تحاكم المورّد إلى تاريخك، وهنا تحاكم الموردين
+        إلى هدفك، ولا يُجمَع العمودان في شاشةٍ واحدة.
+        `PurchaseRFQLine.estimated_price` مخزَّنٌ بالعملة الأساسية أصلاً
+        (#112 §١) فلا تحويل عليه؛ سعر كلّ موردٍ يُحوَّل هنا بسعر صرف عرضه هو.
+
+        **حساب النسبة المئوية الملوّنة لا يعيش هنا** — الردّ يحمل الأرقام
+        الخام فقط (تقديريّ وسعرٌ لكلٍّ بالعملة الأساسية)، والنسبة حسابٌ
+        واجهيّ صرف (`computeDeltaPercent`، #113) كي لا تنكتب القاعدة مرّتين
+        بلغتين. ثلاثة قيود من المواصفة محروسة هنا:
+        - بندٌ بلا سعر تقديريّ ← `estimated_price: None` — لا صفراً.
+        - بندٌ لم يُسعّره موردٌ بعينه ← `None` في `prices[]` لذلك المورد، ولا
+          يدخل إجماليّ بضاعته (لا يُحتسَب صفراً).
+        - `goods_total_base` وحده في الاستجابة — **لا حقل شحنٍ إطلاقاً**
+          (قرار المالك 2026-09-03، ناسخاً إجمالي #107 الشامل؛ الشحن باقٍ في
+          الصفقة والتكلفة النهائية، الساقط ظهوره في هذه الشاشة وحدها).
+
+        **داخليّةٌ بحتة**: لا `doc_type` مسجَّلاً لها في `docshare.documents`
+        — محاولة مشاركتها ترتدّ 400 بنيوياً (`docshare/tests/`).
+        """
+        from inventory.services import product_display_name
+
+        tenant = get_tenant(request)
+        rfq = (
+            PurchaseRFQ.objects.select_related('tenant')
+            .prefetch_related(
+                'lines__product',
+                'recipients__supplier',
+                'recipients__quotation__currency',
+                'recipients__quotation__lines',
+            )
+            .get(pk=self.get_object().pk, tenant=tenant)
+        )
+        lines = list(rfq.lines.all())
+        unit_q = Decimal('0.0001')
+
+        suppliers_payload = []
+        for recipient in rfq.recipients.all():
+            quotation = recipient.quotation
+            if quotation is None:
+                continue  # لم يردّ بعد — لا عمود له في المصفوفة
+            rate = quotation.exchange_rate if quotation.exchange_rate else Decimal('1')
+            quotation_lines_by_seq = {ql.seq: ql for ql in quotation.lines.all()}
+
+            prices: dict = {}
+            goods_total = Decimal('0')
+            for line in lines:
+                qline = quotation_lines_by_seq.get(line.seq)
+                if qline is None:
+                    prices[str(line.id)] = None
+                    continue
+                unit_price_base = (Decimal(qline.unit_price) * rate).quantize(unit_q)
+                prices[str(line.id)] = str(unit_price_base)
+                goods_total += Decimal(line.quantity) * unit_price_base
+
+            suppliers_payload.append({
+                'supplier_id': recipient.supplier_id,
+                'supplier_name': recipient.supplier.name,
+                'quotation_id': quotation.id,
+                'quotation_number': quotation.quotation_number,
+                'currency_code': quotation.currency.Code,
+                'exchange_rate': str(rate),
+                'replied_at': recipient.replied_at,
+                'prices': prices,
+                'goods_total_base': str(goods_total.quantize(Decimal('0.01'))),
+            })
+
+        payload = {
+            'rfq_id': rfq.id,
+            'rfq_number': rfq.rfq_number,
+            'status': rfq.status,
+            'lines': [
+                {
+                    'id': line.id,
+                    'seq': line.seq,
+                    'product_id': line.product_id,
+                    'name': line.name_snapshot or (
+                        product_display_name(line.product) if line.product_id else ''
+                    ),
+                    'quantity': str(line.quantity),
+                    'unit_of_measure': line.unit_of_measure,
+                    'estimated_price': (
+                        str(line.estimated_price) if line.estimated_price is not None else None
+                    ),
+                }
+                for line in lines
+            ],
+            'suppliers': suppliers_payload,
+        }
+        return Response(payload)
 
     @action(detail=True, methods=['post'], url_path='recipients')
     def add_recipient(self, request, pk=None):

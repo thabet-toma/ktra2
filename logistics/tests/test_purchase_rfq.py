@@ -11,7 +11,7 @@ from rest_framework.test import APITestCase
 from inventory.models import Product
 from logistics.models import PurchaseRFQ, PurchaseRFQRecipient, SupplierQuotation
 from partners.models import Partner
-from tenants.models import Tenant, UserCompanyMembership
+from tenants.models import Currency, Tenant, UserCompanyMembership
 
 
 class PurchaseRFQAPITestBase(APITestCase):
@@ -19,6 +19,9 @@ class PurchaseRFQAPITestBase(APITestCase):
     def setUpTestData(cls):
         cls.tenant = Tenant.objects.create(TenantID=881, CompanyName='RFQ Co')
         cls.other_tenant = Tenant.objects.create(TenantID=882, CompanyName='Other RFQ Co')
+        # ISSUE #116: الترسية تحتاج عملة أساسية موجودة — `submit_rfq_supplier_quote`
+        # يختار عملة العرض المتولّد منها إن لم تُمرَّر صراحةً.
+        cls.currency = Currency.objects.create(Code='ILS', Name='New Shekel', IsBaseCurrency=True)
         cls.user = User.objects.create_user(username='rfq-owner', password='x')
         UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant, role='manager')
         UserCompanyMembership.objects.create(user=cls.user, tenant=cls.other_tenant, role='manager')
@@ -169,19 +172,56 @@ class PurchaseRFQLifecycleTest(PurchaseRFQAPITestBase):
         self.assertEqual(response.data['notes'], 'ملاحظة بعد الإرسال')
 
     def test_draft_to_sent_to_awarded_transitions_are_allowed(self):
+        """ISSUE #116: الترسية تحتاج مورداً ردّ فعلياً — تُنتج فاتورة شراء
+        افتراضياً (`use_purchase_orders` مطفأ)."""
+        from logistics.services import submit_rfq_supplier_quote
+
         data = self.create_rfq()
         rfq_id = data['id']
+        line_id = data['lines'][0]['id']
 
-        send = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+        send = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/send/',
+            {'supplier_ids': [self.supplier_a.id]}, format='json',
+        )
         self.assertEqual(send.status_code, 200, send.content)
 
-        award = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/award/')
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        submit_rfq_supplier_quote(recipient, name='Rep A', prices={line_id: Decimal('10')})
+
+        award = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/award/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
         self.assertEqual(award.status_code, 200, award.content)
         self.assertEqual(award.data['status'], 'awarded')
+        self.assertEqual(award.data['awarded_document']['type'], 'purchase_invoice')
+        self.assertIsNotNone(award.data['awarded_document']['id'])
 
     def test_cannot_award_a_draft_rfq(self):
         data = self.create_rfq()
         award = self.client.post(f"/api/logistics/purchase-rfqs/{data['id']}/award/")
+        self.assertEqual(award.status_code, 400, award.content)
+
+    def test_award_requires_a_supplier(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+        award = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/award/')
+        self.assertEqual(award.status_code, 400, award.content)
+        self.assertIn('supplier', award.data)
+
+    def test_cannot_award_to_a_supplier_who_has_not_replied(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+        self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/send/',
+            {'supplier_ids': [self.supplier_a.id]}, format='json',
+        )
+        award = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/award/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
         self.assertEqual(award.status_code, 400, award.content)
 
     def test_cannot_send_a_non_draft_rfq_twice(self):
@@ -192,10 +232,22 @@ class PurchaseRFQLifecycleTest(PurchaseRFQAPITestBase):
         self.assertEqual(second_send.status_code, 400, second_send.content)
 
     def test_cannot_cancel_an_awarded_rfq(self):
+        from logistics.services import submit_rfq_supplier_quote
+
         data = self.create_rfq()
         rfq_id = data['id']
-        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
-        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/award/')
+        line_id = data['lines'][0]['id']
+        self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/send/',
+            {'supplier_ids': [self.supplier_a.id]}, format='json',
+        )
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        submit_rfq_supplier_quote(recipient, name='Rep A', prices={line_id: Decimal('10')})
+        award = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/award/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
+        self.assertEqual(award.status_code, 200, award.content)
         cancel = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/cancel/')
         self.assertEqual(cancel.status_code, 400, cancel.content)
 

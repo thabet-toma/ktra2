@@ -32,7 +32,10 @@ export type ShareDocType =
   | "logistics_deal"
   | "supplier_quotation"
   | "local_purchase_invoice"
-  | "supplier_payment";
+  | "supplier_payment"
+  // ISSUE #115: رابط المورّد الخاص على طلب عرض السعر — لا يقبل قراراً (accept/reject)
+  // بل تسعيراً (`quote`)، انظر `docs/modules/docshare.md` §«تسعير المورّد».
+  | "purchase_rfq";
 export type ShareDecision = "" | "accepted" | "rejected";
 
 export interface DocumentShare {

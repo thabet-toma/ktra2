@@ -435,8 +435,62 @@ export async function cancelPurchaseRfq(id: number): Promise<PurchaseRFQDto> {
   return apiPostObject(`${BASE}/purchase-rfqs/${id}/cancel/`, {}, { tenantId: tenantId() });
 }
 
-export async function awardPurchaseRfq(id: number): Promise<PurchaseRFQDto> {
-  return apiPostObject(`${BASE}/purchase-rfqs/${id}/award/`, {}, { tenantId: tenantId() });
+/** ISSUE #116 (مواصفة #108 §٨): ترسيةٌ كاملةٌ لموردٍ واحد — `supplierId` يحسم
+ * أيّ ردّ فائزٌ، ويعود المستند الناتج (أمر شراء أو فاتورة بحسب المفتاح). */
+export interface PurchaseRFQAwardResult extends PurchaseRFQDto {
+  awarded_supplier_id: number;
+  awarded_document: { type: "purchase_order" | "purchase_invoice"; id: number; number: string };
+}
+
+export async function awardPurchaseRfq(
+  id: number,
+  supplierId: number,
+): Promise<PurchaseRFQAwardResult> {
+  return apiPostObject(
+    `${BASE}/purchase-rfqs/${id}/award/`,
+    { supplier: supplierId },
+    { tenantId: tenantId() },
+  );
+}
+
+// ── ISSUE #116 (مواصفة #108 §٨) — مصفوفة الموردين: شاشةٌ مستقلّة عند الطلب ──
+
+export interface RfqComparisonLineDto {
+  id: number;
+  seq: number;
+  product_id: number | null;
+  name: string;
+  quantity: string;
+  unit_of_measure: string;
+  /** بالعملة الأساسية دائماً — `null` بلا سعرٍ تقديريّ (فارغ لا صفر). */
+  estimated_price: string | null;
+}
+
+export interface RfqComparisonSupplierDto {
+  supplier_id: number;
+  supplier_name: string;
+  quotation_id: number;
+  quotation_number: string;
+  currency_code: string;
+  exchange_rate: string;
+  replied_at: string | null;
+  /** مفتاحٌ = معرّف بند الطلبية (نصّاً) — `null` = لم يُسعّره هذا المورد. */
+  prices: Record<string, string | null>;
+  /** إجماليّ البضاعة وحده بالعملة الأساسية — لا حقل شحنٍ إطلاقاً. */
+  goods_total_base: string;
+}
+
+export interface RfqComparisonDto {
+  rfq_id: number;
+  rfq_number: string | null;
+  status: PurchaseRFQStatus;
+  lines: RfqComparisonLineDto[];
+  /** موردٌ لم يردّ بعد لا عمود له هنا. */
+  suppliers: RfqComparisonSupplierDto[];
+}
+
+export async function getRfqComparison(id: number): Promise<RfqComparisonDto> {
+  return apiGetObject(`${BASE}/purchase-rfqs/${id}/comparison/`, { tenantId: tenantId() });
 }
 
 /** المسموح بعد الإرسال (#112 §٧): مستقبِلٌ جديد بلا مسّ البنود أو الحالة. */

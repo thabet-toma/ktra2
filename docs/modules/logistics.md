@@ -130,7 +130,8 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | POST | `purchase-invoices/{pk}/post-to-accounting/` · `receive/` · `unpost/` · `returns/` | views.py:3400 / 2991 / 4047 / 3027 |
 | GET | `import-journey/` · `reports/landed-cost/?shipment_id=` | views.py:4557 / 4588 |
 | GET/POST | `goods-receipts/` · `goods-receipts/outstanding/` · `purchase-settings/current/` | views.py:4783 / 4935 / 5038 |
-| POST | `purchase-rfqs/{pk}/send/` · `cancel/` · `award/` · `recipients/` | **ISSUE #112**: أوّل إرسال يقفل البنود ويخصّص الرقم؛ `recipients/` وحده مسموحٌ بعد الإرسال (`PurchaseRFQViewSet`، `logistics/views/procurement.py`) |
+| POST | `purchase-rfqs/{pk}/send/` · `cancel/` · `award/` · `recipients/` | **ISSUE #112**: أوّل إرسال يقفل البنود ويخصّص الرقم؛ `recipients/` وحده مسموحٌ بعد الإرسال. **`award/`** (ISSUE #116) يحمل `supplier` إلزامياً — يقبل عرض الفائز وينتج أمر شراء أو فاتورة بحسب `use_purchase_orders` (`PurchaseRFQViewSet`، `logistics/views/procurement.py`) |
+| GET | `purchase-rfqs/{pk}/comparison/` | **ISSUE #116**: مصفوفة الموردين — صفٌّ لكل بند وعمودٌ لكل موردٍ ردّ فعلياً، بالعملة الأساسية، بلا حقل شحن. خطُّ الأساس `estimated_price` لا «أقل سعر» (ذاك داخل العرض الواحد وحده، #113). داخليّةٌ بحتة — لا `doc_type` لها في `docshare` |
 | — | باقي الموارد بالـrouter: `supplier-quotations/`, `purchase-rfqs/`, `purchase-orders/`, `payments/`, `supplier-payments/`, `local-shipments/` | urls.py |
 
 ## الاعتماديات
@@ -290,6 +291,24 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   (`logistics/services.py`، مسار «تحويل عرض سعر إلى طلبية») — ترفضان مطفأً؛
   القراءة والفتح والاستلام (`GoodsReceipt.invoice` مربوطٌ بالفاتورة لا بأمر
   الشراء) بلا تغيير، ولا قيدَ محاسبياً لأمر الشراء أصلاً فلا أثر في الدفاتر.
+- **ISSUE #116 — المقارنة والترسية: مستويان لا يجوز خلطهما** (مواصفة #108 §٨،
+  قرار المالك 2026-09-03). داخل عرضٍ واحد يبقى خطُّ الأساس «أقل سعر» (#113)؛
+  مصفوفة الموردين (`comparison/`) وحدها تحاكم إلى `PurchaseRFQLine.estimated_price`
+  — **لا يُجمَع العمودان في شاشةٍ واحدة**. المصفوفة **داخليّةٌ بحتة**: لا
+  `doc_type` لها في `docshare.documents` (`docshare/tests/test_purchase_rfq_comparison_not_shareable.py`
+  يحرس غيابها صراحةً). **حساب الفارق المئوي دالّةٌ واحدة** —
+  `frontend_v2/utils/purchasePriceHint.ts` (`computeDeltaPercent`) تخدم عمود
+  العرض والمصفوفة معاً بخطّي أساس مختلفين؛ الخادم لا يحسب نسبةً أبداً، يعيد
+  الأرقام الخام (تقديريّ وسعرَ كلّ موردٍ بالعملة الأساسية) فقط. **إجماليٌّ
+  واحد**: `goods_total_base` = Σ(كمية × سعر) للبنود المسعَّرة وحدها — بندٌ لم
+  يُسعّره موردٌ بعينه لا يدخل الإجمالي صفراً، و**لا حقل شحنٍ في الاستجابة
+  إطلاقاً** (ناسخاً إجمالي #107 الشامل؛ الشحن باقٍ في الصفقة والتكلفة
+  النهائية). **`award/` يحمل `supplier` إلزامياً** الآن — يحسم أيّ ردّ
+  (`SupplierQuotation`) فائزٌ، يقبله (`STATUS_ACCEPTED`) ثم يمرّ حرفياً بمسار
+  قبول عرضٍ محلّيّ يدويّ (`convert_local_quotation_to_order`/`_invoice`) —
+  **لا منطق ترحيل جديد**، تركيبُ خدمات قائمة وراء مفتاح `use_purchase_orders`
+  (#117) وحده. مورّدٌ لم يردّ بعد لا عمود له في المصفوفة أصلاً (فراغٌ لا
+  يُفسَّر خطأً كرفض).
 
 ## إلغاء ترحيل الدفعات (وُحِّد في المرحلة 2 + معالجتها 2026-08-11)
 إلغاء ترحيل دفعة صفقة (`unpost_payment_from_accounting`) ودفعة تخليص (`unpost_payment`)
@@ -325,3 +344,4 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | `tests/test_tenant_isolation.py` (75) | لا تسرّب صفقات بين الشركات؛ 400 بلا ترويسة الشركة |
 | `tests/test_purchase_rfq.py` (ISSUE #112) | بندٌ بلا سعر ولا HS · قفل البنود عند أوّل إرسال (400) وقبول مستقبِل جديد · الحالات المسموحة/الممنوعة · عدّاد الردود المشتقّ · ترقيمٌ عند أوّل إرسال بلا حرق مسودّة مهجورة · عزل الشركة |
 | `tests/test_use_purchase_orders_setting.py` (ISSUE #117) | مطفأً: الإنشاء المباشر و«تحويل عرض إلى طلبية» يُرفضان (400)، وقراءة/فتح أمرٍ قائم مقبولة بلا حجب · هجرة `0082` تُشعله لشركةٍ لها أمرٌ قائم فقط (وتتجاهل المحذوف ناعماً) وتترك غيرها مطفأً |
+| `tests/test_purchase_rfq_award_and_comparison.py` (ISSUE #116) | `award/` ينتج فاتورة أو أمر شراء بحسب `use_purchase_orders` · يُرفض بلا `supplier` أو لموردٍ لم يردّ أو مرّتين · `comparison/`: بندٌ بلا تقديريّ يعود `None`، بندٌ لم يُسعّره موردٌ لا يُحتسَب صفراً في إجماليّه، توحيد العملات بسعر صرفٍ صريح، مورّدٌ لم يردّ بلا عمود، لا حقل شحنٍ في الاستجابة، عزل الشركة |

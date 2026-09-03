@@ -22,19 +22,19 @@ import {
   type KitGridColumn,
   type KitToolbarAction,
 } from "../../kit";
-import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Award, Ban, UserPlus, Printer, FileSpreadsheet } from "lucide-react";
+import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Ban, UserPlus, Printer, FileSpreadsheet, GitCompare } from "lucide-react";
 import {
   CommercialDocumentEditor,
   type CommercialHeaderField,
 } from "../../shared/CommercialDocumentEditor";
 import {
   addPurchaseRfqRecipient,
-  awardPurchaseRfq,
   cancelPurchaseRfq,
   createPurchaseRfq,
   sendPurchaseRfq,
   updatePurchaseRfq,
   type ProcurementScope,
+  type PurchaseRFQAwardResult,
   type PurchaseRFQDto,
   type PurchaseRFQLineDto,
 } from "../../../services/procurementDocumentsApi";
@@ -49,6 +49,7 @@ import { formatDateValue } from "../../../utils/formatDate";
 import { useToast } from "../../../contexts/ToastContext";
 import type { Item, Supplier } from "../../../types";
 import { PurchaseRFQPrintView } from "./PurchaseRFQPrintView";
+import { RfqComparisonMatrix } from "./RfqComparisonMatrix";
 
 type RfqLineItem = {
   key: string;
@@ -120,6 +121,9 @@ export const PurchaseRFQForm: React.FC<Props> = ({
   const [addRecipientId, setAddRecipientId] = useState("");
   const [showPrintView, setShowPrintView] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // ISSUE #116 (مواصفة #108 §٨): شاشةٌ مستقلّة تُفتح عند الطلب — لا تُفرَض
+  // على المحرِّر اليومي. الترسية صارت تمرّ من داخلها (تختار مورداً أولاً).
+  const [showComparison, setShowComparison] = useState(false);
 
   useEffect(() => { setCurrent(rfq); }, [rfq]);
 
@@ -259,21 +263,6 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     }
   };
 
-  const handleAward = async () => {
-    if (!current) return;
-    setSaving(true);
-    try {
-      const awarded = await awardPurchaseRfq(current.id);
-      setCurrent(awarded);
-      onSaved(awarded);
-      toast(`تمّت ترسية الطلبية ${awarded.rfq_number || ""}`.trim(), "success");
-    } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : "تعذّرت الترسية", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleCancelRfq = async () => {
     if (!current) return;
     setSaving(true);
@@ -346,8 +335,12 @@ export const PurchaseRFQForm: React.FC<Props> = ({
       onClick: !saving ? () => void handleSend() : undefined, disabled: saving,
     }] : []),
     ...(current && current.status === "sent" ? [{
-      key: "award", label: "ترسية", icon: <Award />,
-      onClick: !saving ? () => void handleAward() : undefined, disabled: saving,
+      key: "award", label: "مقارنة الموردين وترسية", icon: <GitCompare />,
+      onClick: () => setShowComparison(true),
+    }] : []),
+    ...(current && current.status === "awarded" ? [{
+      key: "comparison", label: "مقارنة الموردين", icon: <GitCompare />,
+      onClick: () => setShowComparison(true),
     }] : []),
     ...(current && (current.status === "draft" || current.status === "sent") ? [{
       key: "cancel-rfq", label: "إلغاء الطلبية", icon: <Ban />, danger: true,
@@ -551,6 +544,21 @@ export const PurchaseRFQForm: React.FC<Props> = ({
       <div className="fixed inset-0 z-[100] ktra-bg-field overflow-y-auto">
         <PurchaseRFQPrintView rfq={current} onClose={() => setShowPrintView(false)} />
       </div>
+    );
+  }
+
+  if (showComparison && current) {
+    return (
+      <RfqComparisonMatrix
+        rfqId={current.id}
+        rfqNumber={current.rfq_number}
+        canAward={current.status === "sent"}
+        onClose={() => setShowComparison(false)}
+        onAwarded={(result: PurchaseRFQAwardResult) => {
+          setCurrent(result);
+          onSaved(result);
+        }}
+      />
     );
   }
 
