@@ -6,14 +6,17 @@
  * لفاتورة» تظهران بنفس النص («معتمد للشحن») ولا شيء يقول أيّهما عرضٌ وأيّهما
  * طلبية — فيبدو التحويل كأنه لم يحدث. هذه الطبقة نقيّة (بلا React) فتُختبر.
  */
-export type ProcurementDocKind = "quotation" | "import_quotation" | "order";
+export type ProcurementDocKind = "quotation" | "import_quotation" | "order" | "rfq";
 
-/** نوع المستند من معرّف الواجهة الموحّد (`quote-12` / `order-7`). */
+/** نوع المستند من معرّف الواجهة الموحّد (`quote-12` / `order-7` / `rfq-3`). */
 export const procurementDocKind = (
   id: string,
   scope: "purchase" | "import" = "purchase",
 ): ProcurementDocKind => {
   if (String(id).startsWith("order-")) return "order";
+  // ISSUE #113: الطلبية (`PurchaseRFQ`) واحدة بلا تفريق محلي/استيراد — بُعد
+  // النطاق سقط من مصفوفة الأعمدة (#108 §٤)، والحالة نفسها في القالبين.
+  if (String(id).startsWith("rfq-")) return "rfq";
   return scope === "import" ? "import_quotation" : "quotation";
 };
 
@@ -21,6 +24,7 @@ export const PROCUREMENT_KIND_LABELS: Record<ProcurementDocKind, string> = {
   quotation: "عرض سعر",
   import_quotation: "عرض استيراد",
   order: "طلبية شراء",
+  rfq: "طلبية",
 };
 
 const QUOTATION_STATUS_LABELS: Record<string, string> = {
@@ -41,6 +45,14 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
   draft: "مسودة",
   confirmed: "مؤكَّدة",
   converted: "محوَّلة إلى فاتورة",
+  cancelled: "ملغاة",
+};
+
+/** ISSUE #112 §٧ — أربع حالات مخزَّنة فقط، وما سواها («وردت عروض») يُشتقّ. */
+const RFQ_STATUS_LABELS: Record<string, string> = {
+  draft: "مسودة",
+  sent: "مُرسَلة",
+  awarded: "مُرساة",
   cancelled: "ملغاة",
 };
 
@@ -67,6 +79,7 @@ const STATUS_TABLES: Record<ProcurementDocKind, Record<string, string>> = {
   quotation: QUOTATION_STATUS_LABELS,
   import_quotation: IMPORT_QUOTATION_STATUS_LABELS,
   order: ORDER_STATUS_LABELS,
+  rfq: RFQ_STATUS_LABELS,
 };
 
 /**
@@ -112,7 +125,7 @@ export const canConvertImportOffer = (backendStatus: string | undefined): boolea
 
 /** المستند المنتهي دورته لا يقبل إجراءات — يُعرض للقراءة فقط. */
 export const isProcurementDocClosed = (backendStatus: string | undefined): boolean =>
-  ["converted", "cancelled", "rejected", "expired", "invoiced", "closed"].includes(
+  ["converted", "cancelled", "rejected", "expired", "invoiced", "closed", "awarded"].includes(
     String(backendStatus || ""),
   );
 

@@ -142,7 +142,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   // 4) المشتريات
   const purchasesLinksAll: NavLink[] = [
     { view: "purchase-invoices", label: "فواتير الشراء", icon: <NoteIcon className="h-4 w-4" /> },
-    { view: "price-offers", label: "عروض الأسعار", icon: <FileText className="h-4 w-4" /> },
+    { view: "price-offers", label: "العروض والطلبيات", icon: <FileText className="h-4 w-4" /> },
     { view: "purchase-receipts", label: "إرساليات الشراء", icon: <Truck className="h-4 w-4" /> },
     { view: "purchase-return", label: "مرجع الشراء", icon: <FileText className="h-4 w-4" /> },
     { view: "supplier-payments", label: "سندات الصرف للموردين", icon: <Banknote className="h-4 w-4" /> },

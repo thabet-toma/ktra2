@@ -4,7 +4,7 @@
  * القالب: SalesInvoiceEditor.tsx
  */
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { PriceOffer, PriceOfferItem, PriceOfferStatus, PriceOfferType, Supplier, Item } from "../../../types";
+import { PriceOffer, PriceOfferItem, PriceOfferStatus, Supplier, Item } from "../../../types";
 import type { PriceOfferAttachment, PriceOfferNote } from "../../../types/offer";
 import type { PriceOfferScope } from "../../../services/firestoreService";
 import {
@@ -29,13 +29,19 @@ import {
   CommercialDocumentEditor,
   type CommercialHeaderField,
 } from "../../shared/CommercialDocumentEditor";
+import { purchaseInvoiceApi } from "../../../services/purchaseInvoiceApi";
+import {
+  buildPurchasePriceHintChip,
+  computeDeltaPercent,
+  type PurchasePriceListEntry,
+} from "../../../utils/purchasePriceHint";
+import { getScreenColumns } from "../../../utils/procurementColumns";
 
-// مستندا دورة الشراء؛ اتجاه العميل يخص شاشة البيع المنفصلة.
-const OFFER_TYPES = [
-  { v: "incoming_offer", l: "عرض سعر من مورد" },
-  { v: "outgoing_order", l: "طلبية إلى مورد" },
-];
-
+// ISSUE #113: كانت هذه الشاشة تخدم مستندين بلافتة `offerType` وحدها — «عرض
+// سعر من مورد» و«طلبية إلى مورد» — بلا أن تُحفظ اللافتة في الخادم إطلاقاً
+// (تزول عند إعادة التحميل). الطلبية صارت كياناً حقيقياً (`PurchaseRFQ`،
+// `PurchaseRFQForm.tsx`) يُنشأ من نقطة انطلاق منفصلة في `PriceOfferManagement`
+// — هذا المحرِّر صار مخصَّصاً لـ«عرض سعر» (`SupplierQuotation`) وحده.
 const STATUS_LABELS: Record<string, string> = {
   initial: "مسودة", pending_info: "بانتظار معلومات",
   under_discussion: "قيد المناقشة", approved_for_shipping: "معتمد للشحن", rejected: "مرفوض",
@@ -108,7 +114,6 @@ export const PriceOfferForm: React.FC<Props> = ({
     offer.offerDate || new Date().toISOString().slice(0, 10)
   );
   const [validUntil, setValidUntil] = useState(offer.validUntil || "");
-  const [offerType, setOfferType] = useState<PriceOfferType>(offer.offerType || "incoming_offer");
   const [status, setStatus] = useState<PriceOfferStatus>(offer.status || "initial");
   const [currency, setCurrency] = useState(offer.currency || "USD");
   const [exchangeRate, setExchangeRate] = useState(String(offer.exchangeRate ?? 1));
@@ -147,6 +152,30 @@ export const PriceOfferForm: React.FC<Props> = ({
   // T-PRODUCT M4: هذه الشاشة وحدها كانت بلا طريق تعديلٍ للمنتج — بطاقةٌ تُقرأ ولا
   // تُكتب. الآن نفس قلم فاتورتَي البيع والشراء، وبنفس معالِج الانتشار.
   const [quickEditProductId, setQuickEditProductId] = useState<number | null>(null);
+  // ISSUE #113 (مواصفة #108 §٤/§٨): «أقل سعر» — عمودٌ كامل داخل العرض مع
+  // الفارق نسبةً مئوية ملوّنة، مقارنةً بتاريخ الشراء (لا بموردٍ آخر). نفس
+  // مصدر منتقي فاتورة الشراء (`purchase_price_list`)، ونفس البناء
+  // (`buildPurchasePriceHintChip`) الذي يضمن وسم «أقل شراء» بأنه بالعملة
+  // الأساسية إن اختلفت عملة عملة العرض.
+  const [lowestPriceMap, setLowestPriceMap] = useState<Map<number, PurchasePriceListEntry>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    purchaseInvoiceApi
+      .priceList(supplierId || null)
+      .then((rows) => {
+        if (cancelled) return;
+        const m = new Map<number, PurchasePriceListEntry>();
+        for (const r of rows) {
+          const lowest = (r.prices || []).find(
+            (p) => (p.source_label || p.label || '').startsWith('أقل شراء'),
+          );
+          if (lowest) m.set(r.product_id, lowest as PurchasePriceListEntry);
+        }
+        setLowestPriceMap(m);
+      })
+      .catch(() => { /* بلا تاريخ شراء — يُعرض السعر عارياً بلا نسبة */ });
+    return () => { cancelled = true; };
+  }, [supplierId]);
 
   // إعادة تحميل عند تغيير offer prop
   useEffect(() => {
@@ -158,7 +187,6 @@ export const PriceOfferForm: React.FC<Props> = ({
     setFactoryName(offer.factoryName || "");
     setOfferDate(offer.offerDate || new Date().toISOString().slice(0, 10));
     setValidUntil(offer.validUntil || "");
-    setOfferType(offer.offerType || "incoming_offer");
     setCurrency(offer.currency || "USD");
     setExchangeRate(String(offer.exchangeRate ?? 1));
     setStatus(offer.status || "initial");
@@ -206,7 +234,6 @@ export const PriceOfferForm: React.FC<Props> = ({
     supplierId,
     supplierDraftName: supplierId ? "" : supplierDraftName.trim(),
     factoryName: selectedSupplier?.tradeName || supplierDraftName.trim() || factoryName,
-    offerType,
     offerDate,
     validUntil: validUntil || undefined,
     currency,
@@ -248,21 +275,17 @@ export const PriceOfferForm: React.FC<Props> = ({
     updatedAt: new Date().toISOString(),
     createdAt: offer.createdAt || new Date().toISOString(),
     createdBy: offer.createdBy || "user",
-  }), [offer, offerNumber, orderName, orderDescription, supplierId, supplierDraftName, factoryName, selectedSupplier, supplierAddress, offerType, offerDate, validUntil,
+  }), [offer, offerNumber, orderName, orderDescription, supplierId, supplierDraftName, factoryName, selectedSupplier, supplierAddress, offerDate, validUntil,
     currency, exchangeRate, status, shippingMethod, paymentMethod, shippingCost, shippingIncluded,
     alibabaLink, supplierContact, decisionReason, attachments,
     deliveryDays, internalNotes, taxRate, discountAmount, subtotal, tax, grandTotal, lines]);
 
   const handleSave = async () => {
     // T-DRAFTPARTY: مورد مسجَّل **أو** اسم مبدئي؛ وكذلك البنود: منتج مختار أو اسم
-    // مكتوب. الطلبية والصفقة تبقيان ملزمتين بالمسجَّل (يمنعهما مسار الحفظ نفسه).
-    const isDraftDocument = offerType === "incoming_offer";
+    // مكتوب — هذا المحرِّر يخدم «عرض سعر» وحده (ISSUE #113)، والمورد والمنتج
+    // المبدئيان مسموحان فيه دوماً؛ يتجسّدان شركاءَ حقيقيين عند التحويل فقط.
     if (!supplierId && !supplierDraftName.trim()) {
       setErr("اختر مورداً مسجَّلاً أو اكتب اسم المورد.");
-      return;
-    }
-    if (!supplierId && !isDraftDocument) {
-      setErr("الطلبية تلزمها مورد مسجَّل — المورد المبدئي متاح في عرض السعر فقط.");
       return;
     }
     const usableLines = lines.filter(
@@ -270,10 +293,6 @@ export const PriceOfferForm: React.FC<Props> = ({
     );
     if (usableLines.length === 0) {
       setErr("أضف منتجاً واحداً على الأقل (باختياره أو بكتابة اسمه) وحدد كميته.");
-      return;
-    }
-    if (!isDraftDocument && usableLines.some((line) => !line.itemId)) {
-      setErr("الطلبية تلزمها منتجات مسجَّلة — اختر المنتج من القائمة.");
       return;
     }
     // T-IMPOFFER: «غير ملائم» بلا سبب لا يُحفظ في نطاق الاستيراد — الخادم يرفضه
@@ -400,14 +419,22 @@ export const PriceOfferForm: React.FC<Props> = ({
   ];
 
   // ── أعمدة جدول البنود ──
+  // ISSUE #113 (مواصفة #108 §٤): كود HS خرج من مصفوفة العروض والطلبيات كلّها —
+  // الرمز الجمركي لا يخصّ مورداً يُسعّر، مكانه الصفقة والتخليص. لم يكن مخزَّناً
+  // على بند العرض أصلاً (كان يُقرأ من كرت المنتج للعرض فقط) فحذفه هنا عرضٌ لا
+  // حذف بيانات. و«أقل سعر» عمودٌ كامل هنا (مقابل كونه مصدر تعبئة فقط في
+  // الطلبية) — انظر `utils/procurementColumns.ts` للمصفوفة الكاملة.
+  const lowestPriceHeader = getScreenColumns('offer').find((c) => c.key === 'lowestPrice')?.header
+    ?? 'أقل سعر';
   const gridColumns: KitGridColumn<LineItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
-    { key: "name", header: "وصف المنتج", width: "35%" },
-    { key: "specifications", header: "مواصفات", width: "20%" },
-    { key: "hsCodePrimary", header: "كود HS", width: "110px" },
+    { key: "name", header: "وصف المنتج", width: "30%" },
+    { key: "specifications", header: "مواصفات", width: "18%" },
     { key: "quantity", header: "الكمية", width: "90px", align: "center", type: "number" },
+    { key: "unitOfMeasure", header: "وحدة القياس", width: "90px", align: "center" },
     { key: "unitPrice", header: "سعر الوحدة", width: "110px", align: "center", type: "number" },
     { key: "total", header: "الإجمالي", width: "110px", align: "center", readOnly: true },
+    { key: "lowestPrice", header: lowestPriceHeader, width: "150px", align: "center", readOnly: true },
     { key: "del", header: "", width: "36px", align: "center" },
   ];
 
@@ -416,8 +443,8 @@ export const PriceOfferForm: React.FC<Props> = ({
     if (key === "seq") return idx + 1;
     if (key === "name") return row.name;
     if (key === "specifications") return row.specifications || "";
-    if (key === "hsCodePrimary") return row.hsCodePrimary || "";
     if (key === "quantity") return String(row.quantity);
+    if (key === "unitOfMeasure") return row.unitOfMeasure || "";
     if (key === "unitPrice") return String(row.unitPrice);
     if (key === "total") return fmt((Number(row.quantity) || 0) * (Number(row.unitPrice) || 0));
     return "";
@@ -429,7 +456,7 @@ export const PriceOfferForm: React.FC<Props> = ({
     const patch: Partial<LineItem> = {};
     if (key === "name") patch.name = val;
     else if (key === "specifications") patch.specifications = val;
-    else if (key === "hsCodePrimary") patch.hsCodePrimary = val;
+    else if (key === "unitOfMeasure") patch.unitOfMeasure = val;
     else if (key === "quantity") patch.quantity = Number(val) || 0;
     else if (key === "unitPrice") patch.unitPrice = Number(val) || 0;
     updateLine(row.key, patch);
@@ -441,6 +468,36 @@ export const PriceOfferForm: React.FC<Props> = ({
         <Trash2 className="h-3 w-3" />
       </button>
     );
+
+  /**
+   * ISSUE #113 (مواصفة #108 §٤/§٨): «أقل سعر» — عمودٌ كامل بجانب سعر المورد،
+   * والفارق نسبةً مئوية ملوّنة (أحمر = المورد أغلى، أخضر = أرخص أو مساوٍ).
+   * بندٌ بلا تاريخ شراء ← يُعرض «—» عارياً بلا نسبة ولا لون — مقارنةٌ مُختلَقة
+   * أسوأ من لا مقارنة.
+   */
+  const lowestPriceColumn = gridColumns.find((c) => c.key === "lowestPrice");
+  if (lowestPriceColumn) {
+    lowestPriceColumn.render = (row: LineItem) => {
+      const productId = row.itemId ? Number(row.itemId) : null;
+      const lowest = productId ? lowestPriceMap.get(productId) : undefined;
+      if (!lowest) return <span className="ktra-text-soft">—</span>;
+      const chip = buildPurchasePriceHintChip(lowest);
+      const delta = computeDeltaPercent(Number(row.unitPrice) || 0, Number(lowest.unit_price));
+      return (
+        <div className="flex flex-col items-center leading-tight" title={chip.label}>
+          <span>{chip.value}</span>
+          {delta != null && (
+            <span
+              className="text-[10px] font-semibold"
+              style={{ color: delta > 0 ? "var(--ktra-danger, #c00)" : "var(--ktra-ok, #267346)" }}
+            >
+              {delta > 0 ? "+" : ""}{formatNumber(delta, { maxDecimals: 1 })}%
+            </span>
+          )}
+        </div>
+      );
+    };
+  }
   /**
    * T-IMPOFFER — «طريقة اختيار المنتجات خطأ، لازم زي باقي المنصة».
    *
@@ -767,16 +824,6 @@ export const PriceOfferForm: React.FC<Props> = ({
         value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />,
     },
     {
-      key: "type",
-      label: "نوع العرض",
-      control: (
-        <select className="ktra-input" disabled={isReadOnly}
-          value={offerType} onChange={(e) => setOfferType(e.target.value as PriceOfferType)}>
-          {OFFER_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
-        </select>
-      ),
-    },
-    {
       key: "party",
       label: "المورد / الحساب",
       /**
@@ -854,8 +901,8 @@ export const PriceOfferForm: React.FC<Props> = ({
 
   return (
     <CommercialDocumentEditor<LineItem>
-      title={scope === "import" ? "عرض / طلبية استيراد" : "عرض سعر / طلبية شراء"}
-      state={`${statusLabels[status]} — ${OFFER_TYPES.find((t) => t.v === offerType)?.l ?? offerType}`}
+      title={scope === "import" ? "عرض سعر استيراد" : "عرض سعر"}
+      state={statusLabels[status]}
       actions={toolbarActions}
       headerFields={headerFields}
       lines={lines}

@@ -60,6 +60,7 @@ import {
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
+import { buildPurchasePriceHintChips } from "@/utils/purchasePriceHint";
 import { inventoryApi } from "@/services/inventoryApi";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
@@ -1621,11 +1622,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         price: pp ? formatMoney(Number(pp.price)) : undefined,
         // لا آخر/أقل شراء ولا متوسط تكلفة → نص «بدون سعر» بدل الفراغ.
         priceLabel: pp ? pp.label : "بدون سعر",
-        prices: pp?.prices?.map((p: any) => ({
-          label: p.source_label || p.label,
-          value: formatMoney(Number(p.unit_price)),
-          link: p.document_id ? `/purchase-invoices/${p.document_id}` : undefined,
-        })),
+        // ISSUE #113: «أقل شراء» بالعملة الأساسية بينما «آخر شراء» بعملة
+        // الفاتورة المصدر — بلا تمييز يبدو الأقلّ معطوباً لمن يشتري بعملة
+        // غير الأساسية. buildPurchasePriceHintChips وحدها تبني هذه الرقاقات
+        // (مصدرٌ واحد يشاركه منتقي بند الطلبية).
+        prices: buildPurchasePriceHintChips(pp?.prices, {
+          invoiceLink: (id) => `/purchase-invoices/${id}`,
+        }).map(({ label, value, link }) => ({ label, value, link: link ?? undefined })),
       };
     }),
     [allDbItems, purchasePriceMap],

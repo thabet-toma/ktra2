@@ -24,7 +24,10 @@ import {
   convertSupplierQuotationToPurchaseInvoice,
   convertSupplierQuotationToPurchaseOrder,
   getSupplierQuotation,
+  listPurchaseRfqs,
+  type PurchaseRFQDto,
 } from "../../services/procurementDocumentsApi";
+import { PurchaseRFQForm } from "./price-offers/PurchaseRFQForm";
 import { quotationToDraftDeal } from "../../utils/quotationToDraftDeal";
 import { documentSerialDisplay, elideDocumentNumber } from "../../utils/documentNumberDisplay";
 import { ConvertTargetDialog, type ConvertTarget } from "../sales/ConvertTargetDialog";
@@ -80,8 +83,14 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
   const statusLabels = scope === "import" ? IMPORT_STATUS_LABELS : STATUS_LABELS;
   const toast = useToast();
   const navigate = useNavigate();
-  const [viewMode, setViewMode] = useState<"list" | "form">("list");
+  // ISSUE #113: الشاشة تفرّق بين إنشاء «طلبية» (`PurchaseRFQ` — كيانٌ حقيقي
+  // بلا سعر إلزامي) وإنشاء «عرض» (`SupplierQuotation`، كما كانت). `rfq-form`
+  // مسارٌ مستقلّ لا يمرّ بـ`offerType` المحذوف.
+  const [viewMode, setViewMode] = useState<"list" | "form" | "rfq-form">("list");
+  const [activeTab, setActiveTab] = useState<"offers" | "rfqs">("offers");
   const [offers, setOffers] = useState<PriceOffer[]>([]);
+  const [rfqs, setRfqs] = useState<PurchaseRFQDto[]>([]);
+  const [currentRfq, setCurrentRfq] = useState<PurchaseRFQDto | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,7 +115,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     setLoading(true);
     setError(null);
     let active = true;
-    const pending = new Set(["offers", "items", "suppliers"]);
+    const pending = new Set(["offers", "items", "suppliers", "rfqs"]);
     const settle = (key: string) => {
       pending.delete(key);
       if (active && pending.size === 0) setLoading(false);
@@ -133,6 +142,10 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
       fail("suppliers", "تعذّر تحميل الموردين"),
       scope === "import" ? "international" : "local",
     );
+    // ISSUE #113: الطلبيات (`PurchaseRFQ`) — نفس نطاق المحلي/الاستيراد.
+    listPurchaseRfqs(scope === "import" ? "import" : "local")
+      .then((rows) => { if (active) setRfqs(rows); settle("rfqs"); })
+      .catch(fail("rfqs", "تعذّر تحميل الطلبيات"));
     return () => {
       active = false;
       u1();
@@ -223,6 +236,26 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // ISSUE #113: نقطة انطلاق منفصلة تماماً لإنشاء «طلبية» — لا offerType، ولا
+  // مسار مشترك مع نموذج العرض.
+  const openNewRfq = () => {
+    setCurrentRfq(null);
+    setViewMode("rfq-form");
+  };
+
+  const openEditRfq = (row: PurchaseRFQDto) => {
+    setCurrentRfq(row);
+    setViewMode("rfq-form");
+  };
+
+  const handleRfqSaved = (saved: PurchaseRFQDto) => {
+    setCurrentRfq(saved);
+    setRfqs((prev) => {
+      const exists = prev.some((r) => r.id === saved.id);
+      return exists ? prev.map((r) => (r.id === saved.id ? saved : r)) : [saved, ...prev];
+    });
   };
 
   const handleSave = async (offerData: Partial<PriceOffer>) => {
@@ -575,6 +608,46 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     },
   ];
 
+  // ISSUE #113 (مواصفة #108 §٧): أعمدة قائمة الطلبيات — «وردت عروض» عدّادٌ
+  // مشتقّ (`replies_count`/`recipients_count`) لا حقلٌ مخزَّن.
+  const RFQ_STATUS_COLORS: Record<PurchaseRFQDto["status"], string> = {
+    draft: "var(--ktra-ink-soft)",
+    sent: "var(--ktra-accent, #1857a4)",
+    awarded: "var(--ktra-ok, #267346)",
+    cancelled: "var(--ktra-danger, #c00)",
+  };
+  const rfqColumns: DenseColumn<PurchaseRFQDto>[] = [
+    { key: "rfq_number", header: "رقم الطلبية", width: "130px",
+      render: (r) => <b className="tabular-nums">{r.rfq_number || `مسودة #${r.id}`}</b> },
+    { key: "rfq_date", header: "التاريخ", width: "100px", render: (r) => <>{fmtDate(r.rfq_date)}</> },
+    { key: "items", header: "البنود", width: "70px", align: "center",
+      render: (r) => <>{r.lines.length}</> },
+    { key: "recipients", header: "الموردون", width: "130px", align: "center",
+      render: (r) => <>{r.recipients_count ? `${r.replies_count} من ${r.recipients_count} ردّوا` : "—"}</> },
+    { key: "reply_deadline", header: "مهلة الردّ", width: "100px",
+      render: (r) => <>{r.reply_deadline ? fmtDate(r.reply_deadline) : "—"}</> },
+    { key: "status", header: "الحالة", width: "110px",
+      render: (r) => (
+        <span style={{ color: RFQ_STATUS_COLORS[r.status] }}>
+          {procurementStatusLabel(procurementDocKind(`rfq-${r.id}`), r.status)}
+        </span>
+      ) },
+    { key: "actions", header: "إجراءات", width: "100px", align: "center",
+      render: (r) => (
+        <button className="ktra-text-accent hover:underline text-xs"
+          onClick={(e) => { e.stopPropagation(); openEditRfq(r); }}>
+          {r.status === "draft" ? "تعديل" : "فتح"}
+        </button>
+      ) },
+  ];
+  const filteredRfqs = useMemo(() => {
+    const s = search.toLowerCase();
+    if (!s) return rfqs;
+    return rfqs.filter((r) =>
+      (r.rfq_number || "").toLowerCase().includes(s)
+      || (r.notes || "").toLowerCase().includes(s));
+  }, [rfqs, search]);
+
   if (viewMode === "form") {
     return (
       <PriceOfferForm
@@ -593,32 +666,84 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     );
   }
 
+  if (viewMode === "rfq-form") {
+    return (
+      <PurchaseRFQForm
+        rfq={currentRfq}
+        items={items}
+        suppliers={suppliers}
+        scope={scope === "import" ? "import" : "local"}
+        onSaved={handleRfqSaved}
+        onCancel={() => setViewMode("list")}
+      />
+    );
+  }
+
   return (
     <>
-      <CommercialDocumentsList<PriceOffer>
-        title={scope === "import" ? "عروض وطلبيات الاستيراد" : "عروض وطلبيات الشراء"}
-        state={scope === "import" ? "مستندات الاستيراد" : "مستندات الشراء"}
-        rows={filtered}
-        columns={columns}
-        getRowKey={(offer) => offer.id}
-        loading={loading}
-        error={error}
-        emptyHint="لا توجد عروض أو طلبيات"
-        countLabel={`${offers.length} مستند`}
-        searchValue={search}
-        searchPlaceholder="بحث بالرقم / اسم أو وصف الطلبية / المورد…"
-        onSearchChange={setSearch}
-        statusValue={filterStatus}
-        statusOptions={[
-          { value: "all", label: "كل الحالات" },
-          ...Object.entries(statusLabels).map(([value, label]) => ({ value, label })),
-        ]}
-        onStatusChange={(value) => setFilterStatus(value as PriceOfferStatus | "all")}
-        onNew={openNew}
-        onReload={() => setReloadKey((key) => key + 1)}
-        newLabel="عرض / طلبية جديدة"
-        onRowDoubleClick={(offer) => void openEdit(offer)}
-      />
+      {/* ISSUE #113: تفريقٌ صريح بين «طلبية» (بلا سعر إلزامي، RFQ حقيقي) و
+          «عرض» (عرض سعر من مورد) — لا نموذجٌ واحد يخلط بينهما بلافتة. */}
+      <div className="flex items-center gap-1 px-1 pb-1">
+        <button type="button"
+          className={`rounded-t-lg px-3 py-1.5 text-xs font-semibold ${
+            activeTab === "offers" ? "ktra-bg-panel ktra-text-ink" : "ktra-text-soft"
+          }`}
+          onClick={() => setActiveTab("offers")}>
+          العروض والأوامر ({offers.length})
+        </button>
+        <button type="button"
+          className={`rounded-t-lg px-3 py-1.5 text-xs font-semibold ${
+            activeTab === "rfqs" ? "ktra-bg-panel ktra-text-ink" : "ktra-text-soft"
+          }`}
+          onClick={() => setActiveTab("rfqs")}>
+          الطلبيات ({rfqs.length})
+        </button>
+      </div>
+      {activeTab === "rfqs" ? (
+        <CommercialDocumentsList<PurchaseRFQDto>
+          title={scope === "import" ? "طلبيات الاستيراد" : "طلبيات الشراء"}
+          state="بلا سعر إلزامي — يُرسل للموردين ليسعّروا"
+          rows={filteredRfqs}
+          columns={rfqColumns}
+          getRowKey={(r) => r.id}
+          loading={loading}
+          error={error}
+          emptyHint="لا توجد طلبيات بعد"
+          countLabel={`${rfqs.length} طلبية`}
+          searchValue={search}
+          searchPlaceholder="بحث برقم الطلبية / الملاحظات…"
+          onSearchChange={setSearch}
+          onNew={openNewRfq}
+          onReload={() => setReloadKey((key) => key + 1)}
+          newLabel="طلبية جديدة"
+          onRowDoubleClick={(r) => openEditRfq(r)}
+        />
+      ) : (
+        <CommercialDocumentsList<PriceOffer>
+          title={scope === "import" ? "عروض وطلبيات الاستيراد" : "عروض وطلبيات الشراء"}
+          state={scope === "import" ? "مستندات الاستيراد" : "مستندات الشراء"}
+          rows={filtered}
+          columns={columns}
+          getRowKey={(offer) => offer.id}
+          loading={loading}
+          error={error}
+          emptyHint="لا توجد عروض أو أوامر شراء"
+          countLabel={`${offers.length} مستند`}
+          searchValue={search}
+          searchPlaceholder="بحث بالرقم / اسم أو وصف الطلبية / المورد…"
+          onSearchChange={setSearch}
+          statusValue={filterStatus}
+          statusOptions={[
+            { value: "all", label: "كل الحالات" },
+            ...Object.entries(statusLabels).map(([value, label]) => ({ value, label })),
+          ]}
+          onStatusChange={(value) => setFilterStatus(value as PriceOfferStatus | "all")}
+          onNew={openNew}
+          onReload={() => setReloadKey((key) => key + 1)}
+          newLabel="عرض جديد"
+          onRowDoubleClick={(offer) => void openEdit(offer)}
+        />
+      )}
       <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
       {convertOffer && (
         <ConvertTargetDialog

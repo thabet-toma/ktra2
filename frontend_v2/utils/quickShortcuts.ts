@@ -39,7 +39,7 @@ export const SHORTCUTABLE_VIEWS: { view: AppView; label: string; icon: ShortcutI
   { view: "sales-invoices", label: "فواتير المبيعات", icon: "sales-invoice" },
   { view: "purchase-invoices", label: "فواتير الشراء", icon: "purchase-invoice" },
   { view: "sales-quotations", label: "عروض الأسعار", icon: "quotation" },
-  { view: "price-offers", label: "عروض الموردين", icon: "supplier-offer" },
+  { view: "price-offers", label: "العروض والطلبيات", icon: "supplier-offer" },
   { view: "items-management", label: "المنتجات", icon: "items" },
   { view: "supplier-management", label: "الموردون", icon: "suppliers" },
   { view: "sales-customers", label: "العملاء", icon: "customers" },

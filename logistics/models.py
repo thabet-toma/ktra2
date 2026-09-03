@@ -226,6 +226,14 @@ class SupplierQuotationLine(models.Model):
     name_snapshot = models.CharField(max_length=255, blank=True, default='', db_column='NameSnapshot')
     description_line = models.TextField(blank=True, default='', db_column='DescriptionLine')
     quantity = models.DecimalField(max_digits=18, decimal_places=3, db_column='Quantity')
+    # ISSUE #113 (مواصفة #108 §٤): وحدة القياس عمودٌ في **الطلبية والعرض** معاً.
+    # ورقةٌ تقول «١٠» ولا تقول «١٠ ماذا» تدعو المورد أن يُسعّر الصندوق بدل
+    # الحبّة — ولا يُكتشَف الفرق إلّا عند الاستلام. نفس حقل `PurchaseRFQLine`
+    # اسماً وطولاً كي ينتقل بين المستندين بلا ترجمة.
+    unit_of_measure = models.CharField(
+        max_length=20, blank=True, default='', db_column='UnitOfMeasure',
+        help_text='وحدة قياس البند — حبّة/صندوق/كرتون… كي يعرف المورد ما يُسعّره',
+    )
     unit_price = models.DecimalField(max_digits=18, decimal_places=4, db_column='UnitPrice')
     line_total = models.DecimalField(
         max_digits=18, decimal_places=2, default=0, db_column='LineTotal',

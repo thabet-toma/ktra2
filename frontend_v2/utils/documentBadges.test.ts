@@ -91,6 +91,17 @@ test('الشطب علامة «غير ملائم» لا علامة انتهاء �
   assert.equal(isOfferStruckThrough('draft'), false);
 });
 
+test('ISSUE #113: الطلبية (rfq-) نوعٌ رابع بلا تفريق محلي/استيراد', () => {
+  assert.equal(procurementDocKind('rfq-5'), 'rfq');
+  assert.equal(procurementDocKind('rfq-5', 'import'), 'rfq');
+  assert.equal(PROCUREMENT_KIND_LABELS.rfq, 'طلبية');
+  assert.equal(procurementStatusLabel('rfq', 'draft'), 'مسودة');
+  assert.equal(procurementStatusLabel('rfq', 'sent'), 'مُرسَلة');
+  assert.equal(procurementStatusLabel('rfq', 'awarded'), 'مُرساة');
+  assert.equal(procurementStatusLabel('rfq', 'cancelled'), 'ملغاة');
+  assert.equal(isProcurementDocClosed('awarded'), true);
+});
+
 test('التحويل إلى صفقة متاح للملائم فقط ومرة واحدة', () => {
   assert.equal(canConvertImportOffer('accepted'), true);
   assert.equal(canConvertImportOffer('converted'), false);

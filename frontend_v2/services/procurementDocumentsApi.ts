@@ -326,3 +326,127 @@ export async function convertSupplierQuotationToPurchaseInvoice(id: number): Pro
     { tenantId: tenantId() },
   );
 }
+
+// ── ISSUE #112/#113 — الطلبية (PurchaseRFQ): تسبق عرض السعر، بلا سعر إلزامي ──
+
+export type PurchaseRFQStatus = "draft" | "sent" | "awarded" | "cancelled";
+
+export interface PurchaseRFQLineDto {
+  id?: number;
+  /** بلا منتج مسجَّل مسموح — اسمه النصّي (`name_snapshot`) يكفي داخل الطلبية. */
+  product: number | null;
+  product_name?: string;
+  seq?: number;
+  name_snapshot?: string;
+  specs?: string;
+  quantity: string;
+  unit_of_measure?: string;
+  /** داخليّ بحت — لا يخرج إلى رابط المورد ولا الطباعة ولا Excel أبداً (#112 §١). */
+  estimated_price?: string | null;
+}
+
+export interface PurchaseRFQRecipientDto {
+  id: number;
+  supplier: number;
+  supplier_name?: string;
+  share: number | null;
+  quotation: number | null;
+  quotation_number?: string | null;
+  sent_at: string | null;
+  replied_at: string | null;
+  created_at?: string;
+}
+
+export interface PurchaseRFQDto {
+  id: number;
+  /** فارغ حتى أوّل إرسال — لا يُخصَّص عند الإنشاء (#112 §الترقيم). */
+  rfq_number: string | null;
+  scope: ProcurementScope;
+  scope_display?: string;
+  rfq_date: string;
+  status: PurchaseRFQStatus;
+  status_display?: string;
+  reply_deadline?: string | null;
+  notes?: string;
+  lines: PurchaseRFQLineDto[];
+  recipients: PurchaseRFQRecipientDto[];
+  /** «وردت عروض» — عدّادان مشتقّان لا حقلان مخزَّنان (#112 §٧). */
+  recipients_count: number;
+  replies_count: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type PurchaseRFQWrite = {
+  scope: ProcurementScope;
+  rfq_date: string;
+  reply_deadline?: string | null;
+  notes?: string;
+  lines: PurchaseRFQLineDto[];
+};
+
+export async function listPurchaseRfqs(
+  scope?: ProcurementScope,
+): Promise<PurchaseRFQDto[]> {
+  return apiGetList(`${BASE}/purchase-rfqs/`, {
+    tenantId: tenantId(),
+    query: scope ? { scope } : undefined,
+  });
+}
+
+export async function getPurchaseRfq(id: number): Promise<PurchaseRFQDto> {
+  return apiGetObject(`${BASE}/purchase-rfqs/${id}/`, { tenantId: tenantId() });
+}
+
+export async function createPurchaseRfq(
+  body: PurchaseRFQWrite,
+): Promise<PurchaseRFQDto> {
+  return apiPostObject(`${BASE}/purchase-rfqs/`, body, { tenantId: tenantId() });
+}
+
+/** مسموحٌ على المسودة وحدها — البنود تُقفل عند أوّل إرسال (400 بعده، #112 §٧). */
+export async function updatePurchaseRfq(
+  id: number,
+  body: Partial<PurchaseRFQWrite>,
+): Promise<PurchaseRFQDto> {
+  return apiPatchObject(`${BASE}/purchase-rfqs/${id}/`, body, { tenantId: tenantId() });
+}
+
+export async function deletePurchaseRfq(id: number): Promise<void> {
+  return apiDelete(`${BASE}/purchase-rfqs/${id}/`, { tenantId: tenantId() });
+}
+
+/**
+ * أوّل إرسال: يقفل البنود ويخصّص الرقم إن لم يكن مخصّصاً. `supplierIds`
+ * اختياري — موردون يُضافون مستقبِلين قبل الإرسال مباشرةً.
+ */
+export async function sendPurchaseRfq(
+  id: number,
+  supplierIds: number[] = [],
+): Promise<PurchaseRFQDto> {
+  return apiPostObject(
+    `${BASE}/purchase-rfqs/${id}/send/`,
+    { supplier_ids: supplierIds },
+    { tenantId: tenantId() },
+  );
+}
+
+export async function cancelPurchaseRfq(id: number): Promise<PurchaseRFQDto> {
+  return apiPostObject(`${BASE}/purchase-rfqs/${id}/cancel/`, {}, { tenantId: tenantId() });
+}
+
+export async function awardPurchaseRfq(id: number): Promise<PurchaseRFQDto> {
+  return apiPostObject(`${BASE}/purchase-rfqs/${id}/award/`, {}, { tenantId: tenantId() });
+}
+
+/** المسموح بعد الإرسال (#112 §٧): مستقبِلٌ جديد بلا مسّ البنود أو الحالة. */
+export async function addPurchaseRfqRecipient(
+  id: number,
+  supplierId: number,
+): Promise<PurchaseRFQRecipientDto> {
+  return apiPostObject(
+    `${BASE}/purchase-rfqs/${id}/recipients/`,
+    { supplier: supplierId },
+    { tenantId: tenantId() },
+  );
+}

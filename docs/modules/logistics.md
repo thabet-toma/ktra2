@@ -57,7 +57,7 @@
 | `LocalShipment` (:1210) | `shipment_number` (LS-XXXX), `capitalize_to_inventory`, `exchange_rate`, `status` | `clearance`, `shipment` (كلاهما اختياري) |
 | `PurchaseInvoice` (:1435) | `invoice_number`, `invoice_type` (local/international), `grand_total`, `import_*_rate` | `deal`, `shipment`, `clearance`, `partner`, `source_quotation` **FK** (كان OneToOne — #112) |
 | `PurchaseInvoiceItem/Fee/Payment` (:1629/:1730/:1699) · `GoodsReceipt`/`Line` (:1811/:1883) | البنود والرسوم والدفعات · سند الاستلام | `invoice` · `movement`→StockMovement |
-| `LogisticsPayment` (:746) · `PurchaseOrder` (:248) · `PurchaseSettings` (:1926) | دفعات الصفقة/الشحنة · الطلبية · `receive_on_post` | `deal`/`shipment`/`journal` · `tenant`، `PurchaseOrder.quotation` **FK** (كان OneToOne — #112) |
+| `LogisticsPayment` (:746) · `PurchaseOrder` (:248) · `PurchaseSettings` (:1926) | دفعات الصفقة/الشحنة · الطلبية · `receive_on_post`، `use_purchase_orders` (#117) | `deal`/`shipment`/`journal` · `tenant`، `PurchaseOrder.quotation` **FK** (كان OneToOne — #112) |
 
 ## دوال الـservices العامة
 ```python
@@ -272,7 +272,9 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   (`recipients_count`/`replies_count`) لا حقلٌ مخزَّن. **ولا كود HS على بندها
   إطلاقاً** — مورّدٌ يُسعّر لا يُسأل عن الرمز الجمركي (قرار المالك #108 §4).
   السعر التقديريّ (`estimated_price`) رقمٌ داخليّ فقط؛ مسار خروجه المحروس
-  (رابط المورد/الطباعة/Excel) خارج هذه التذكرة.
+  (رابط المورد/الطباعة/Excel) خارج هذه التذكرة — أما **الأساس الذي يبنيه**
+  (مصفوفة الأعمدة بقائمة سماح) فبُني في ISSUE #113، انظر
+  `docs/modules/frontend.md` (`utils/procurementColumns.ts`).
 - **`PurchaseOrder.quotation` و`PurchaseInvoice.source_quotation` صارا
   `ForeignKey` لا `OneToOneField`** (ISSUE #112 — الترسية المجزّأة تحتاج بنيةً
   تسمح بأكثر من مستند لاحق لعرضٍ واحد، خارج نطاق هذه التذكرة لكن القيد رُفع
@@ -280,6 +282,14 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   و`quotation.local_invoice` صارا مديرَي علاقة عكسية (querysets) — `.first()`
   لا وصولاً مباشراً و`except DoesNotExist` (`logistics/services.py`،
   `logistics/serializers/procurement.py`).
+- **ISSUE #117 — أمر الشراء خطوة اختيارية**: `PurchaseSettings.use_purchase_orders`
+  (افتراضه `False` — السلسلة الجديدة طلبية ← عروض ← فاتورة بلا أمر شراء؛ هجرة
+  `0082` تُشعله لكل شركةٍ لها أمرُ شراءٍ قائم فعلاً). **المفتاح يحكم الإنشاء لا
+  الرؤية**: نقطتا الإنشاء الوحيدتان — `PurchaseOrderViewSet.perform_create`
+  (`logistics/views/procurement.py`) و`convert_local_quotation_to_order`
+  (`logistics/services.py`، مسار «تحويل عرض سعر إلى طلبية») — ترفضان مطفأً؛
+  القراءة والفتح والاستلام (`GoodsReceipt.invoice` مربوطٌ بالفاتورة لا بأمر
+  الشراء) بلا تغيير، ولا قيدَ محاسبياً لأمر الشراء أصلاً فلا أثر في الدفاتر.
 
 ## إلغاء ترحيل الدفعات (وُحِّد في المرحلة 2 + معالجتها 2026-08-11)
 إلغاء ترحيل دفعة صفقة (`unpost_payment_from_accounting`) ودفعة تخليص (`unpost_payment`)
@@ -314,3 +324,4 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | `tests/test_purchase_invoice_pay.py` | الدفع من داخل الفاتورة: سندٌ واحد، الفائض سلفة، التراجع الكامل عند الفشل |
 | `tests/test_tenant_isolation.py` (75) | لا تسرّب صفقات بين الشركات؛ 400 بلا ترويسة الشركة |
 | `tests/test_purchase_rfq.py` (ISSUE #112) | بندٌ بلا سعر ولا HS · قفل البنود عند أوّل إرسال (400) وقبول مستقبِل جديد · الحالات المسموحة/الممنوعة · عدّاد الردود المشتقّ · ترقيمٌ عند أوّل إرسال بلا حرق مسودّة مهجورة · عزل الشركة |
+| `tests/test_use_purchase_orders_setting.py` (ISSUE #117) | مطفأً: الإنشاء المباشر و«تحويل عرض إلى طلبية» يُرفضان (400)، وقراءة/فتح أمرٍ قائم مقبولة بلا حجب · هجرة `0082` تُشعله لشركةٍ لها أمرٌ قائم فقط (وتتجاهل المحذوف ناعماً) وتترك غيرها مطفأً |

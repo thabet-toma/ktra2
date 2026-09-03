@@ -5,9 +5,11 @@ export type PriceOfferStatus = 'initial' | 'pending_info' | 'under_discussion' |
 
 export interface PriceOfferItem extends InvoiceItem {
     factoryImageUrl?: string;
+    /** ISSUE #113 (مواصفة #108 §٤): وحدة القياس عمودٌ في الطلبية والعرض معاً —
+     *  ورقةٌ تقول «١٠» ولا تقول «١٠ ماذا» تدعو المورد أن يُسعّر الصندوق بدل
+     *  الحبّة، ولا يُكتشَف الفرق إلّا عند الاستلام. */
+    unitOfMeasure?: string;
 }
-
-export type PriceOfferType = 'incoming_offer' | 'outgoing_offer' | 'incoming_order' | 'outgoing_order';
 
 /** T-IMPOFFER: ملف عرض السعر كما وصل من المورد (رابط مستضاف، لا محتوى). */
 export interface PriceOfferAttachment {
@@ -35,7 +37,6 @@ export interface PriceOffer {
      *  `supplierId` فارغاً، ويصير شريكاً حقيقياً عند التحويل فقط. */
     supplierDraftName?: string;
     factoryName?: string;
-    offerType?: PriceOfferType;
     offerDate?: string;
     validUntil?: string;
     currency?: string;

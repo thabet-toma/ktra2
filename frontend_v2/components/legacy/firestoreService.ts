@@ -52,7 +52,6 @@ import { resolveTenantId } from "../../utils/tenantContext";
 import {
   cancelPurchaseOrder,
   confirmPurchaseOrder,
-  createPurchaseOrder,
   createSupplierQuotation,
   getPurchaseOrder,
   getSupplierQuotation,
@@ -1929,6 +1928,7 @@ const lineToUi = (line: {
   product_name?: string;
   name_snapshot?: string;
   description_line?: string;
+  unit_of_measure?: string;
   quantity: string;
   unit_price: string;
   line_total?: string;
@@ -1939,6 +1939,8 @@ const lineToUi = (line: {
   categoryId: "",
   categoryName: "",
   specifications: line.description_line || "",
+  // ISSUE #113: وحدة القياس تعبر بين الشاشة والخادم — لا تُسقَط في الطريق.
+  unitOfMeasure: line.unit_of_measure || "",
   imageUrls: [],
   quantity: Number(line.quantity || 0),
   unitPrice: Number(line.unit_price || 0),
@@ -1954,7 +1956,6 @@ const quoteToUi = async (row: SupplierQuotationDto): Promise<PriceOffer> => ({
   supplierId: row.supplier ? String(row.supplier) : "",
   supplierDraftName: row.supplier ? "" : (row.supplier_draft_name || ""),
   factoryName: row.supplier_name || "",
-  offerType: "incoming_offer",
   offerDate: row.quotation_date,
   validUntil: row.valid_until || undefined,
   currency: await currencyCode(row.currency, row.currency_code),
@@ -2008,7 +2009,6 @@ const orderToUi = async (row: PurchaseOrderDto): Promise<PriceOffer> => ({
   offerNumber: row.order_number,
   supplierId: String(row.supplier),
   factoryName: row.supplier_name || "",
-  offerType: "outgoing_order",
   offerDate: row.order_date,
   validUntil: row.expected_delivery_date || undefined,
   currency: await currencyCode(row.currency, row.currency_code),
@@ -2053,7 +2053,6 @@ const dealToUi = async (row: ImportDealDto): Promise<PriceOffer> => ({
   offerNumber: row.ref_number,
   supplierId: String(row.partner),
   factoryName: row.partner_name || "",
-  offerType: "outgoing_order",
   offerDate: row.order_date,
   currency: await currencyCode(row.currency, row.currency_code),
   exchangeRate: Number(row.currency_rate || 1),
@@ -2083,6 +2082,7 @@ const uiLinesToApi = (offer: PriceOffer) => (offer.items || []).map((line, index
   seq: index + 1,
   name_snapshot: line.name || "",
   description_line: line.specifications || "",
+  unit_of_measure: line.unitOfMeasure || "",
   quantity: String(Number(line.quantity || 0)),
   unit_price: String(Number(line.unitPrice || 0)),
 }));
@@ -2152,54 +2152,19 @@ export const priceOffersService = {
     };
   },
 
+  /**
+   * ISSUE #113: كانت هذه الدالّة تفرّع على `offer.offerType` لإنشاء `PurchaseOrder`
+   * أو `LogisticsDeal` مباشرةً — وهو المسار الذي أنتج «طلبية» بأسعار وهمية
+   * (لا مكان لكميات بلا أسعار قبل `PurchaseRFQ`؛ مواصفة #108 §المشكلة رقم 1).
+   * `offerType` حُذف بلا بديل هنا: إنشاء الطلبية الحقيقي صار من نقطة انطلاق
+   * منفصلة في `PriceOfferManagement` (`PurchaseRFQForm` → `/purchase-rfqs/`)،
+   * وإنشاء أمر الشراء (`PurchaseOrder`) يبقى من مساره الشرعي وحده — تحويل عرضٍ
+   * مقبول (`convertSupplierQuotationToPurchaseOrder`) أو تأكيده — لا إنشاءً
+   * حرّاً من هذا النموذج. هذه الدالّة تُنشئ «عرض سعر» (`SupplierQuotation`) دوماً.
+   */
   addPriceOfferToDb: async (offer: PriceOffer, scope: PriceOfferScope = "purchase") => {
     const currency = await currencyId(offer.currency);
     if (!currency) throw new Error("لا توجد عملة معرفة في النظام.");
-    if (offer.offerType === "outgoing_order" || offer.offerType === "incoming_order") {
-      if (scope === "import") {
-        const row = await apiPostObject<ImportDealDto>("logistics/deals/", {
-          partner: Number(offer.supplierId),
-          order_date: offer.offerDate,
-          currency,
-          currency_rate: offer.exchangeRate || 1,
-          status: "Open",
-          stage: "draft",
-          notes: offer.internalNotes || "",
-          shipping_method: offer.shippingMethod || "Sea",
-          payment_method: offer.paymentMethod || "T/T",
-          delivery_days: Number(offer.deliveryDays || 0),
-          production_days: Number(offer.productionDays || 0),
-          shipping_cost_estimate: Number(offer.shippingCost || 0),
-          is_shipping_included: Boolean(offer.shippingIncluded),
-          discount_amount: Number(offer.discountAmount || 0),
-          items: registeredLinesToApi(offer),
-        }, { tenantId: resolveTenantId() });
-        return dealToUi(row);
-      }
-      const row = await createPurchaseOrder({
-        order_number: offer.offerNumber || undefined,
-        supplier: Number(offer.supplierId),
-        quotation: null,
-        order_date: offer.offerDate || new Date().toISOString().slice(0, 10),
-        expected_delivery_date: offer.validUntil || null,
-        currency,
-        exchange_rate: String(offer.exchangeRate || 1),
-        discount_amount: String(offer.discountAmount || 0),
-        tax_rate: String(offer.taxRate || 0),
-        shipping_cost: String(offer.shippingCost || 0),
-        is_shipping_included: Boolean(offer.shippingIncluded),
-        shipping_method: offer.shippingMethod || "",
-        payment_method: offer.paymentMethod || "",
-        delivery_days: Number(offer.deliveryDays || 0),
-        notes: offer.internalNotes || "",
-        lines: registeredLinesToApi(offer),
-      });
-      return orderToUi(
-        offer.status === "approved_for_shipping"
-          ? await confirmPurchaseOrder(row.id)
-          : row,
-      );
-    }
     const row = await createSupplierQuotation({
       quotation_number: offer.offerNumber || undefined,
       order_name: offer.orderName || "",

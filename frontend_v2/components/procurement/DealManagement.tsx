@@ -169,8 +169,12 @@ export const DealManagement: React.FC<DealManagementProps> = ({
 
     useEffect(() => {
         const unsubOffers = priceOffersService.subscribeToPriceOffers((offers) => {
+            // ISSUE #113: offerType حُذف (لافتةٌ لا تُحفظ في الخادم). المستند
+            // الوحيد الذي يصل بنطاق 'import' هنا هو «عرض سعر» (`quote-` — نطاق
+            // الاستيراد لا يجلب أوامر شراء، انظر subscribeToPriceOffers)، فبادئة
+            // المعرّف نفس الفحص المتّبع في PriceOfferManagement.tsx.
             setPriceOffers(offers.filter(o =>
-                o.offerType === 'incoming_offer' && o.status === 'approved_for_shipping'
+                o.id.startsWith('quote-') && o.status === 'approved_for_shipping'
             ));
         }, 'import');
         // T-IMPOFFER: قائمة الصفقات تعرض أسماء موردي الاستيراد وحدهم.

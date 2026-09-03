@@ -43,7 +43,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'purchase-invoices': 'فواتير الشراء',
   'international-invoices': 'الفواتير الدولية',
   'old-invoices': 'أرشيف الفواتير',
-  'price-offers': 'عروض الأسعار',
+  'price-offers': 'العروض والطلبيات',
   'import-offers': 'عروض وطلبيات الاستيراد',
   'deals-management': 'إدارة الصفقات',
   'items-management': 'المنتجات',

@@ -133,7 +133,8 @@ class SupplierQuotationLineSerializer(serializers.ModelSerializer):
         model = SupplierQuotationLine
         fields = [
             'id', 'product', 'product_name', 'seq', 'name_snapshot',
-            'description_line', 'quantity', 'unit_price', 'line_total',
+            'description_line', 'quantity', 'unit_of_measure',
+            'unit_price', 'line_total',
         ]
         read_only_fields = ['id', 'product_name', 'line_total']
         # T-DRAFTPARTY: بند بلا منتج مسجَّل مسموح — اسمه النصّي يكفي داخل العرض.
