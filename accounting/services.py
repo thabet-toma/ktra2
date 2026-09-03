@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
 from .models import Account, ExchangeRate, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter, TaxRate, VoidedJournal
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from partners.models import Partner
 from tenants.models import Currency, TenantBook
 from core.hooks import run_tax_period_guards
@@ -3600,6 +3600,127 @@ def unpost_revenue_voucher(voucher, *, user=None) -> dict:
         )
     logger.info("unpost_revenue_voucher: tenant=%s voucher=%s", voucher.tenant_id, voucher.id)
     return result
+
+
+# ─────────────────────────────────────────────────────────
+#  issue #84 (#77 القسم ٧) — الحفظ الدفعي وقواعد الترميز
+# ─────────────────────────────────────────────────────────
+
+VOUCHER_DIRECTION_EXPENSE = 'expense'
+VOUCHER_DIRECTION_REVENUE = 'revenue'
+VOUCHER_DIRECTIONS = (VOUCHER_DIRECTION_EXPENSE, VOUCHER_DIRECTION_REVENUE)
+
+
+def upsert_coding_rule(tenant_id: int, partner_id: int, account_id: int):
+    """يكتب قاعدة الترميز (شركة، طرف) ← حساب — عند الحفظ لا عند الاقتراح.
+
+    طرفٌ واحد ⇒ قاعدةٌ واحدة: ترميزٌ لاحق لنفس الطرف يستبدل حسابها لا يكرّرها.
+    """
+    from .models import PartnerAccountCodingRule
+
+    rule, _created = PartnerAccountCodingRule.objects.update_or_create(
+        tenant_id=tenant_id, partner_id=partner_id,
+        defaults={"account_id": account_id},
+    )
+    return rule
+
+
+def batch_save_vouchers(*, tenant, rows: list[dict], user=None) -> dict:
+    """نقطة الحفظ الدفعية (issue #84): كل صفٍّ سندَ إيرادٍ أو سندَ مصروف،
+    كلٌّ بمعاملته الذرّية الخاصة — صفٌّ سقط لا يُسقط البقية.
+
+    كل `row` قاموسٌ بنفس مدخلات `create_expense_voucher`/`create_revenue_voucher`
+    زائداً `index` (رقم الصفّ الأصلي في الطلب، يعود كما هو في النتيجة) و`direction`
+    (`expense` أو `revenue`) — كائناتٌ محلولة مسبقاً (`currency`/`account`/`partner`)
+    لا معرّفات خام، فتحقّق الانتماء للشركة مسؤولية طبقة العرض.
+
+    صفٌّ ناجحٌ له طرفٌ وحسابٌ (المُدخَل أو المُنشَأ بالاسم) يكتب قاعدة الترميز
+    **داخل معاملة الصفّ نفسها** — فشل كتابة القاعدة يسقط السند معها لا يُبقيه
+    يتيماً بلا ترميز.
+
+    Returns: dict بمفاتيح `rows` (نتيجة كل صفّ: `index`/`success` و`id`/`number`
+    عند النجاح أو `error` عند الفشل)، و`succeeded`، و`failed`.
+    """
+    from .models import ExpenseVoucher, RevenueVoucher
+
+    results = []
+    for row in rows:
+        index = row.get("index")
+        direction = row.get("direction")
+        try:
+            with transaction.atomic():
+                if direction == VOUCHER_DIRECTION_EXPENSE:
+                    voucher = create_expense_voucher(
+                        tenant=tenant,
+                        date=row.get("date"),
+                        amount=row.get("amount"),
+                        tax_amount=row.get("tax_amount") or Decimal("0"),
+                        currency=row.get("currency"),
+                        exchange_rate=row.get("exchange_rate") or Decimal("1"),
+                        payment_method=row.get("payment_method") or ExpenseVoucher.PAYMENT_CASH,
+                        expense_account=row.get("account"),
+                        expense_account_name=row.get("account_name"),
+                        expense_parent_code=row.get("parent_code"),
+                        cash_or_bank_account_id=row.get("cash_or_bank_account_id"),
+                        beneficiary_partner=row.get("partner"),
+                        beneficiary_name=row.get("partner_name") or "",
+                        description=row.get("description") or "",
+                        attachment_url=row.get("attachment_url") or "",
+                        kind=row.get("kind"),
+                        user=user,
+                    )
+                    account_id = voucher.expense_account_id
+                elif direction == VOUCHER_DIRECTION_REVENUE:
+                    voucher = create_revenue_voucher(
+                        tenant=tenant,
+                        date=row.get("date"),
+                        amount=row.get("amount"),
+                        tax_amount=row.get("tax_amount") or Decimal("0"),
+                        currency=row.get("currency"),
+                        exchange_rate=row.get("exchange_rate") or Decimal("1"),
+                        payment_method=row.get("payment_method") or RevenueVoucher.PAYMENT_CASH,
+                        revenue_account=row.get("account"),
+                        revenue_account_name=row.get("account_name"),
+                        revenue_parent_code=row.get("parent_code"),
+                        cash_or_bank_account_id=row.get("cash_or_bank_account_id"),
+                        payer_partner=row.get("partner"),
+                        payer_name=row.get("partner_name") or "",
+                        description=row.get("description") or "",
+                        attachment_url=row.get("attachment_url") or "",
+                        kind=row.get("kind"),
+                        user=user,
+                    )
+                    account_id = voucher.revenue_account_id
+                else:
+                    raise ValidationError(
+                        f"اتجاه الصفّ غير معروف: {direction!r} — expense أو revenue فقط."
+                    )
+
+                partner = row.get("partner")
+                if partner is not None and account_id is not None:
+                    upsert_coding_rule(tenant.pk, partner.id, account_id)
+
+            results.append({
+                "index": index, "success": True,
+                "id": voucher.id, "number": voucher.number, "direction": direction,
+            })
+        except ValidationError as ve:
+            detail = "؛ ".join(ve.messages) if hasattr(ve, "messages") else str(ve)
+            results.append({"index": index, "success": False, "error": detail})
+        except (InvalidOperation, TypeError, ValueError):
+            results.append({
+                "index": index, "success": False,
+                "error": "قيمة رقمية غير صالحة في الصفّ (المبلغ أو الضريبة أو سعر الصرف).",
+            })
+        except Exception:  # noqa: BLE001 — صفٌّ فاشلٌ يجب ألا يُسقط الدفعة كاملة
+            logger.exception("batch_save_vouchers: row %s failed unexpectedly", index)
+            results.append({
+                "index": index, "success": False,
+                "error": "خطأ غير متوقع أثناء حفظ الصفّ — راجع سجلّ الخادم.",
+            })
+
+    succeeded = sum(1 for r in results if r["success"])
+    return {"rows": results, "succeeded": succeeded, "failed": len(results) - succeeded}
 
 
 def bank_reconciliation_summary(reconciliation):

@@ -17,6 +17,8 @@ from .views import (
     CashTransferViewSet,
     ExpenseVoucherViewSet,
     RevenueVoucherViewSet,
+    PartnerAccountCodingRuleViewSet,
+    VoucherBatchSaveView,
     OpeningBalanceViewSet,
     PurchaseReceiptViewSet,
     ExchangeRateViewSet,
@@ -42,6 +44,7 @@ router.register(r'cash-transfers', CashTransferViewSet, basename='cash-transfers
 router.register(r'cash-counts', CashCountViewSet, basename='cash-counts')
 router.register(r'expense-vouchers', ExpenseVoucherViewSet, basename='expense-vouchers')
 router.register(r'revenue-vouchers', RevenueVoucherViewSet, basename='revenue-vouchers')
+router.register(r'coding-rules', PartnerAccountCodingRuleViewSet, basename='coding-rules')
 router.register(r'purchase-receipts', PurchaseReceiptViewSet, basename='purchase-receipts')
 router.register(r'exchange-rates', ExchangeRateViewSet, basename='exchange-rates')
 router.register(r'fiscal-periods', FiscalPeriodViewSet, basename='fiscal-periods')
@@ -50,6 +53,7 @@ router.register(r'tax-rates', TaxRateViewSet, basename='tax-rates')
 router.register(r'currencies', CurrencyViewSet, basename='currencies')
 
 urlpatterns = [
+    path('vouchers/batch-save/', VoucherBatchSaveView.as_view(), name='vouchers-batch-save'),
     path('', include(router.urls)),
 ]
 

@@ -5,12 +5,12 @@ from decimal import Decimal, InvalidOperation
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction as db_transaction
 from django.db.models import Exists, OuterRef, Prefetch, Q
-from rest_framework import serializers as drf_serializers, viewsets, status
+from rest_framework import serializers as drf_serializers, views, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from core.access import require_perm, requires_perm
+from core.access import PERMISSIONS, require_perm, requires_perm, user_has_perm
 from core.pagination import EnforcedPageNumberPagination
 from core.api_defaults import ApiAuthAndUser
 from partners.models import Partner
@@ -42,6 +42,7 @@ from .cashbox import (
 from .models import (
     Account, CashBoxLedgerAccount, CashCount, CashTransfer,
     JournalHeader, JournalLine, Cheque, ExpenseVoucher, RevenueVoucher,
+    PartnerAccountCodingRule,
     CostCenter, ExchangeRate, FiscalPeriod, TaxRate,
     Bank, BankBranch, BankAccount, BankReconciliation, BankReconciliationLine,
 )
@@ -64,6 +65,7 @@ from .serializers import (
     CashTransferSerializer,
     ExpenseVoucherSerializer,
     RevenueVoucherSerializer,
+    PartnerAccountCodingRuleSerializer,
     JournalHeaderSerializer,
     JournalHeaderListSerializer,
     ChequeSerializer,
@@ -77,9 +79,12 @@ from .serializers import (
 )
 from .services import (
     GRANULARITY_MONTHLY,
+    VOUCHER_DIRECTION_EXPENSE,
+    VOUCHER_DIRECTION_REVENUE,
     assert_no_period_overlap,
     bank_account_statement,
     bank_reconciliation_summary,
+    batch_save_vouchers,
     close_bank_reconciliation,
     create_bank_account,
     validate_journal_entry,
@@ -1833,6 +1838,162 @@ class RevenueVoucherViewSet(viewsets.ModelViewSet):
             return Response({"error": "; ".join(ve.messages)}, status=status.HTTP_400_BAD_REQUEST)
         voucher.refresh_from_db()
         return Response(RevenueVoucherSerializer(voucher).data)
+
+
+class PartnerAccountCodingRuleViewSet(viewsets.ModelViewSet):
+    """issue #84 — قواعد الترميز: (شركة، طرف) ← حساب.
+
+    تُكتب حصراً كأثرٍ جانبيّ لصفٍّ ناجح في `VoucherBatchSaveView` — **لا POST
+    هنا**. المحاسب يراها من هذه القائمة ويعدّل حسابها أو يحذفها (#77 القسم ٧).
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = PartnerAccountCodingRuleSerializer
+    queryset = PartnerAccountCodingRule.objects.all().select_related("partner", "account")
+    http_method_names = ["get", "patch", "delete", "head", "options"]
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return PartnerAccountCodingRule.objects.none()
+        return self.queryset.filter(tenant=tenant).order_by("partner__name")
+
+    def perform_update(self, serializer):
+        require_perm(self.request, "finance.coding_rule.manage")
+        tenant = get_tenant(self.request)
+        account = serializer.validated_data.get("account")
+        if account is not None and account.tenant_id != tenant.pk:
+            raise DjangoValidationError("الحساب لا يتبع هذه الشركة.")
+        instance = serializer.save()
+        create_audit_log(
+            tenant=tenant, user=self.request.user, action="UPDATE",
+            model_name="PartnerAccountCodingRule", object_id=instance.id,
+            change_details=f"Coding rule updated: partner={instance.partner_id} account={instance.account_id}",
+        )
+
+    def perform_destroy(self, instance):
+        require_perm(self.request, "finance.coding_rule.manage")
+        tenant = get_tenant(self.request)
+        create_audit_log(
+            tenant=tenant, user=self.request.user, action="DELETE",
+            model_name="PartnerAccountCodingRule", object_id=instance.id,
+            change_details=f"Coding rule deleted: partner={instance.partner_id}",
+        )
+        instance.delete()
+
+
+class VoucherBatchSaveView(views.APIView):
+    """issue #84 (#77 القسم ٧) — نقطة الحفظ الدفعية: صفوفٌ كل صفٍّ سندَ إيرادٍ
+    أو مصروف، كلٌّ بمعاملته الذرّية الخاصة عبر `accounting.services.batch_save_vouchers`.
+
+    جسم الطلب: `{"rows": [{"direction": "expense"|"revenue", "date", "amount",
+    "tax_amount", "currency", "account"?, "account_name"?, "partner"?,
+    "partner_name"?, "payment_method"?, "cash_or_bank_account"?,
+    "attachment_url"?, "description"?, "kind"?}, ...]}`.
+
+    الاستجابة `{"rows": [...], "succeeded": N, "failed": M}` — صفٌّ لكل مُدخَل
+    بترتيب الفهرس الأصلي، بلا توقّف عند أول فشل.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    _PERM_BY_DIRECTION = {
+        VOUCHER_DIRECTION_EXPENSE: "finance.expense.create",
+        VOUCHER_DIRECTION_REVENUE: "finance.revenue.create",
+    }
+
+    @staticmethod
+    def _perm_label(key):
+        return next((p["label"] for p in PERMISSIONS if p["key"] == key), key)
+
+    def post(self, request):
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد مستأجر في النظام"}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw_rows = request.data.get("rows")
+        if not isinstance(raw_rows, list) or not raw_rows:
+            return Response(
+                {"error": "rows يجب أن تكون قائمة صفوفٍ غير فارغة."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        prepared = []
+        prevalidation_errors = {}
+        for index, raw in enumerate(raw_rows):
+            if not isinstance(raw, dict):
+                prevalidation_errors[index] = "صفٌّ غير صالح."
+                continue
+
+            direction = raw.get("direction")
+            perm_key = self._PERM_BY_DIRECTION.get(direction)
+            if perm_key is None:
+                prevalidation_errors[index] = (
+                    f"اتجاه الصفّ غير معروف: {direction!r} — expense أو revenue فقط."
+                )
+                continue
+            if not user_has_perm(request.user, tenant, perm_key):
+                prevalidation_errors[index] = f"صلاحية «{self._perm_label(perm_key)}» غير ممنوحة لدورك."
+                continue
+
+            currency = Currency.objects.filter(pk=raw.get("currency")).first()
+            if currency is None:
+                prevalidation_errors[index] = "العملة مطلوبة."
+                continue
+
+            account = None
+            account_id = raw.get("account")
+            if account_id:
+                account = Account.objects.filter(pk=account_id, tenant=tenant).first()
+                if not account:
+                    prevalidation_errors[index] = "الحساب غير موجود أو لا يتبع هذه الشركة."
+                    continue
+
+            partner = None
+            partner_id = raw.get("partner")
+            if partner_id:
+                partner = Partner.objects.filter(pk=partner_id, tenant=tenant).first()
+                if not partner:
+                    prevalidation_errors[index] = "الطرف غير موجود أو لا يتبع هذه الشركة."
+                    continue
+
+            prepared.append({
+                "index": index,
+                "direction": direction,
+                "date": CashBoxLedgerViewSet._fx_date(raw.get("date")),
+                "amount": raw.get("amount"),
+                "tax_amount": raw.get("tax_amount") or 0,
+                "currency": currency,
+                "exchange_rate": raw.get("exchange_rate") or 1,
+                "payment_method": raw.get("payment_method") or ExpenseVoucher.PAYMENT_CASH,
+                "account": account,
+                "account_name": raw.get("account_name"),
+                "parent_code": raw.get("parent_code"),
+                "cash_or_bank_account_id": raw.get("cash_or_bank_account"),
+                "partner": partner,
+                "partner_name": raw.get("partner_name") or "",
+                "description": raw.get("description") or "",
+                "attachment_url": raw.get("attachment_url") or "",
+                "kind": raw.get("kind"),
+            })
+
+        service_result = (
+            batch_save_vouchers(tenant=tenant, rows=prepared, user=request.user)
+            if prepared else {"rows": [], "succeeded": 0, "failed": 0}
+        )
+
+        merged = list(service_result["rows"])
+        for index, message in prevalidation_errors.items():
+            merged.append({"index": index, "success": False, "error": message})
+        merged.sort(key=lambda r: r["index"])
+
+        succeeded = sum(1 for r in merged if r["success"])
+        return Response(
+            {"rows": merged, "succeeded": succeeded, "failed": len(merged) - succeeded},
+            status=status.HTTP_200_OK,
+        )
 
 
 class PurchaseReceiptViewSet(viewsets.ViewSet):

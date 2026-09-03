@@ -4,7 +4,7 @@ from rest_framework import serializers
 from .models import (
     Account, JournalHeader, JournalLine, Cheque, ChequeMovement, CostCenter,
     CashBoxLedgerAccount, CashCount, CashTransfer, ExchangeRate, ExpenseVoucher,
-    RevenueVoucher,
+    RevenueVoucher, PartnerAccountCodingRule,
     FiscalPeriod, TaxRate,
     Bank, BankBranch, BankAccount, BankReconciliation,
     OpeningBalanceAccountLine, OpeningBalanceStockLine,
@@ -755,6 +755,24 @@ class RevenueVoucherSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class PartnerAccountCodingRuleSerializer(serializers.ModelSerializer):
+    """issue #84 — قاعدة ترميز (شركة، طرف) ← حساب. تُكتب من `batch_save_vouchers`
+    وحدها؛ هذا الـserializer للقراءة والتعديل (PATCH يغيّر الحساب) والحذف —
+    لا POST هنا، فالإنشاء أثرٌ جانبيّ للحفظ الدفعي لا فعلٌ مستقل."""
+
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    account_name = serializers.CharField(source="account.name", read_only=True)
+    account_code = serializers.CharField(source="account.code", read_only=True)
+
+    class Meta:
+        model = PartnerAccountCodingRule
+        fields = [
+            "id", "partner", "partner_name", "account", "account_name",
+            "account_code", "updated_at",
+        ]
+        read_only_fields = ["id", "partner", "partner_name", "account_name", "account_code", "updated_at"]
 
 
 class ExchangeRateSerializer(serializers.ModelSerializer):

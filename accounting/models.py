@@ -846,6 +846,37 @@ class RevenueVoucher(models.Model):
         return f"سند إيراد #{self.number or self.id}: {self.amount}"
 
 
+class PartnerAccountCodingRule(models.Model):
+    """قاعدة ترميز — (شركة، طرف) ← حساب (issue #84، #77 القسم ٧).
+
+    تُكتب عند حفظ صفٍّ ناجح في نقطة الحفظ الدفعية (سندُ إيرادٍ أو مصروفٍ له
+    طرفٌ وحسابٌ معاً) — لا عند مجرّد اقتراح الحساب — وتُقرأ لاقتراح الحساب في
+    الصفّ التالي؛ اقتراحٌ يتجاوزه المحاسب بلا سؤال. قاعدةٌ واحدة لكل (شركة،
+    طرف): إعادة الترميز تستبدلها لا تراكمها.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='PartnerAccountCodingRuleID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    partner = models.ForeignKey(
+        Partner, on_delete=models.CASCADE, db_column='PartnerID',
+        related_name='accounting_coding_rules',
+    )
+    account = models.ForeignKey(
+        Account, on_delete=models.PROTECT, db_column='AccountID',
+        related_name='partner_coding_rules',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+
+    class Meta:
+        db_table = 'partner_account_coding_rules'
+        managed = True
+        unique_together = [['tenant', 'partner']]
+
+    def __str__(self):
+        return f"{self.partner_id} → {self.account_id}"
+
+
 class Bank(models.Model):
     """T-BANKS: بنك تتعامل معه الشركة — مظلّة لفروعه وحساباته.
 

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **579**
+عدد النقاط: **582**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -103,6 +103,8 @@
 | `/api/accounting/cheques/{pk}/` | `ChequeViewSet` | `accounting/views.py` |
 | `/api/accounting/cheques/{pk}/movements/` | `ChequeViewSet` | `accounting/views.py` |
 | `/api/accounting/cheques/{pk}/transfer/` | `ChequeViewSet` | `accounting/views.py` |
+| `/api/accounting/coding-rules/` | `PartnerAccountCodingRuleViewSet` | `accounting/views.py` |
+| `/api/accounting/coding-rules/{pk}/` | `PartnerAccountCodingRuleViewSet` | `accounting/views.py` |
 | `/api/accounting/cost-centers/` | `CostCenterViewSet` | `accounting/views.py` |
 | `/api/accounting/cost-centers/{pk}/` | `CostCenterViewSet` | `accounting/views.py` |
 | `/api/accounting/currencies/` | `CurrencyViewSet` | `accounting/views.py` |
@@ -138,6 +140,7 @@
 | `/api/accounting/tax-rates/{pk}/` | `TaxRateViewSet` | `accounting/views.py` |
 | `/api/accounting/trial-balance/` | `TrialBalanceView` | `accounting/views.py` |
 | `/api/accounting/vat-report/` | `VatReportView` | `accounting/views.py` |
+| `/api/accounting/vouchers/batch-save/` | `VoucherBatchSaveView` | `accounting/views.py` |
 | `/api/activity/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/activity/` | `ActivityLogViewSet` | `core/activity_views.py` |
 | `/api/activity/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |

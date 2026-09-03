@@ -100,6 +100,9 @@ PERMISSIONS: list[dict] = [
     # issue #80 — سند إيراد: مرآة سند المصروف بعكس الاتجاه، بلا فاتورة بيع.
     {"key": "finance.revenue.create", "label": "تسجيل سند إيراد وترحيله", "group": GROUP_ACCOUNTING},
     {"key": "finance.revenue.unpost", "label": "التراجع عن ترحيل سند إيراد", "group": GROUP_ACCOUNTING},
+    # issue #84 — قواعد ترميز (شركة، طرف) ← حساب: تُكتب من الحفظ الدفعي، وتُعدَّل
+    # وتُحذف من هنا وحدها.
+    {"key": "finance.coding_rule.manage", "label": "تعديل قواعد ترميز الأطراف وحذفها", "group": GROUP_ACCOUNTING},
     # الاستيراد (يبقى مشروطاً بتفعيل الوحدة للشركة — core.import_access)
     {"key": "import.deal.manage", "label": "إدارة صفقات الاستيراد", "group": GROUP_IMPORT},
     {"key": "import.shipment.manage", "label": "إدارة الشحنات والتخليص", "group": GROUP_IMPORT},
@@ -262,6 +265,7 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | _EMPLOYEE_SELF 
     "finance.expense.unpost",
     "finance.revenue.create",
     "finance.revenue.unpost",
+    "finance.coding_rule.manage",
     "import.doc.unpost",
     # المحاسب يطابق الفاتورة الدولية بالبوليصة والبيان الجمركي — يقرأ الملف
     # ولا يرفع أوراقه.

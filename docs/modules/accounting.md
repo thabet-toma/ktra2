@@ -42,6 +42,7 @@
 | `CashCount` | `count_date`، `book_balance`، `counted_total`، `difference`، `denominations`، `status` | `cash_box` (PROTECT)، `journal` |
 | `ExpenseVoucher` (issue #56) | `number`، `date`، `amount`، `tax_amount`، `payment_method` (`cash`\|`cheque`\|`on_account`)، `kind` (`normal`\|`return`، issue #80)، `is_posted` | `expense_account` (PROTECT)، `cash_or_bank_account` (PROTECT, يُملأ فقط عند `cash`)، `beneficiary_partner` (PROTECT, **اختياري تماماً**)، `journal` (SET_NULL) |
 | `RevenueVoucher` (issue #80) | `number`، `date`، `amount`، `tax_amount`، `payment_method` (`cash`\|`cheque`\|`on_account`)، `kind` (`normal`\|`return`)، `is_posted` | `revenue_account` (PROTECT)، `cash_or_bank_account` (PROTECT, يُملأ فقط عند `cash`)، `payer_partner` (PROTECT, **اختياري تماماً**)، `journal` (SET_NULL) — مرآة حرفية لـ`ExpenseVoucher` |
+| `PartnerAccountCodingRule` (issue #84) | — | `partner` (CASCADE)، `account` (PROTECT)؛ فريد `(tenant, partner)` — قاعدة ترميز واحدة لكل طرف، تُكتب عند حفظ صفٍّ ناجح في الحفظ الدفعي وتُقترح في الصفّ التالي |
 | `FiscalPeriod` | `start_date`، `end_date`، `status`، `is_closed` | `tenant` |
 | `ExchangeRate` | `rate`، `effective_date` | `from_currency`/`to_currency` (PROTECT)؛ فريد مع `(tenant, effective_date)` |
 | `TaxRate` | `code`، `rate`، `direction` | `tax_account` (PROTECT)؛ `unique_together (tenant, code)` |
@@ -261,6 +262,8 @@ def create_expense_voucher(*, tenant, date, amount, currency, tax_amount=Decimal
 def unpost_expense_voucher(voucher, *, user=None) -> dict:  # التراجع عن ترحيل سند مصروف عبر unpost_document — مرآة unpost_supplier_payment بلا شيكات
 def create_revenue_voucher(*, tenant, date, amount, currency, tax_amount=Decimal("0"), exchange_rate=Decimal("1"), payment_method, revenue_account=None, revenue_account_name=None, revenue_parent_code=None, cash_or_bank_account_id=None, payer_partner=None, payer_name="", description="", attachment_url="", kind=None, user=None):  # سند إيراد (issue #80): مرآة create_expense_voucher حرفياً بعكس الاتجاه؛ الدافع اختياري تماماً، «على الحساب» يَدين ذمّة الدافع أو 1103 العام
 def unpost_revenue_voucher(voucher, *, user=None) -> dict:  # التراجع عن ترحيل سند إيراد عبر unpost_document — مرآة unpost_expense_voucher
+def upsert_coding_rule(tenant_id: int, partner_id: int, account_id: int):  # قاعدة الترميز (شركة، طرف) ← حساب — عند الحفظ لا الاقتراح؛ طرفٌ واحد ⇒ قاعدةٌ واحدة (issue #84)
+def batch_save_vouchers(*, tenant, rows: list[dict], user=None) -> dict:  # نقطة الحفظ الدفعية: كل صفٍّ سندَ إيرادٍ أو مصروف بمعاملته الذرّية الخاصة؛ يكتب قاعدة الترميز داخل معاملة الصفّ الناجح (issue #84)
 def resolve_cash_account(tenant_id: int, *, explicit_account_id=None, user=None, currency_code: str | None = None, required: bool = True):  # السلّم الوحيد لحساب الصندوق/البنك — صريح ← افتراضي المستخدم ← افتراضي الشركة ← الإعدادات ← الشجرة ← خطأ إرشادي؛ وشبكةُ الاسم الأخيرة لا تلتقط حساب طرف
 def resolve_default_cash_account(tenant_id: int):  # غلافٌ متوافق فوقها يُعيد None بدل الاستثناء
 def create_cash_box(*, tenant, name, currency_code="ILS", is_default=False, external_id=None, notes=None, user=None):  # الصندوق + حسابه تحت «1110» + وثيقة مرآته، ذرّياً
@@ -308,6 +311,8 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | POST | `expense-vouchers/{id}/unpost/` | `ExpenseVoucherViewSet.unpost` — بصلاحية `finance.expense.unpost` |
 | GET/POST | `revenue-vouchers/` | `RevenueVoucherViewSet` (issue #80) — مرآة `ExpenseVoucherViewSet`؛ `create` يرحّل فوراً بصلاحية `finance.revenue.create`؛ لا PATCH ولا DELETE |
 | POST | `revenue-vouchers/{id}/unpost/` | `RevenueVoucherViewSet.unpost` — بصلاحية `finance.revenue.unpost` |
+| POST | `vouchers/batch-save/` | `VoucherBatchSaveView` (issue #84) — صفوفٌ كل صفٍّ سندَ إيرادٍ أو مصروف، كلٌّ بمعاملته الذرّية الخاصة (`batch_save_vouchers`)؛ الاستجابة `200` دائماً مع `rows`/`succeeded`/`failed` — صفٌّ فاشل (تحقّقٍ أو صلاحية أو خطأ ترحيل) لا يُسقط البقية. صفٌّ ناجحٌ بطرفٍ وحساب يكتب قاعدة ترميز `(tenant, partner)` |
+| GET/PATCH/DELETE | `coding-rules/` · `coding-rules/{id}/` | `PartnerAccountCodingRuleViewSet` (issue #84) — قواعد الترميز `(tenant, partner) → account`؛ **لا POST** (الإنشاء أثرٌ جانبي للحفظ الدفعي وحده)، والتعديل/الحذف بصلاحية `finance.coding_rule.manage` |
 | GET/POST | `cost-centers/` · `tax-rates/` · `banks/` · `bank-branches/` · `purchase-receipts/` · `currencies/` | حسب `urls.py` |
 
 **«قيد التسوية» ليس نوعاً ثانياً من القيود ولا شاشةً مستقلة** — هو وسمٌ على القيد اليدوي
