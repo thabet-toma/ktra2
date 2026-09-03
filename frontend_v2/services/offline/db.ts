@@ -92,6 +92,24 @@ export interface InvoiceDraft {
   updated_at: string;
 }
 
+/**
+ * ISSUE #118 — مسودّة مستندٍ محلّية عامّة (كل محرِّر ينضمّ عبر `useDocumentDraft`،
+ * لا نسخةٌ خاصة لكل نوع مستند مثل `invoice_drafts` القديم). المفتاح من
+ * `documentDraft.ts` (`buildDocumentDraftKey`) — شركة + نوع + (معرّف مستند
+ * قائم أو معرّف تبويب لمستند جديد).
+ */
+export interface DocumentDraft {
+  key: string;
+  tenant_id: number;
+  doc_type: string;
+  doc_id: string | null;
+  tab_id: string;
+  data: string;
+  /** ختم تعديل المستند في الخادم لحظة بدء جلسة المسودّة — للمقارنة عند العودة. */
+  doc_updated_at: string | null;
+  updated_at: string;
+}
+
 const db = new Dexie('ktra_offline') as Dexie & {
   products: EntityTable<ProductCache, 'id'>;
   partners: EntityTable<PartnerCache, 'id'>;
@@ -104,6 +122,7 @@ const db = new Dexie('ktra_offline') as Dexie & {
   id_mappings: EntityTable<IdMapping, 'temp_id'>;
   invoice_drafts: EntityTable<InvoiceDraft, 'draft_id'>;
   api_list_cache: EntityTable<ApiListCache, 'url'>;
+  document_drafts: EntityTable<DocumentDraft, 'key'>;
 };
 
 db.version(1).stores({
@@ -124,6 +143,12 @@ db.version(2).stores({
 
 db.version(3).stores({
   api_list_cache: 'url, updated_at',
+});
+
+// ISSUE #118: مسودّات المستندات العامة — `tenant_id` و`doc_type` للكنس
+// والاستعلامات اليتيمة، `updated_at` لمكنسة الـ٣٠ يوماً.
+db.version(4).stores({
+  document_drafts: 'key, tenant_id, doc_type, updated_at, [tenant_id+doc_type]',
 });
 
 export default db;

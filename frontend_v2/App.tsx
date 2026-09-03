@@ -527,6 +527,12 @@ const App: React.FC = () => {
       void m.autoRecoverInvalidTenant?.();
     });
 
+    // ISSUE #118 §٥: مكنسة الـ٣٠ يوماً لمسودّات المستندات المحلية — مرّة عند
+    // الإقلاع، لا سياسة تنظيف اليوم (invoice_drafts يتراكم بلا حدّ).
+    import("./services/offline/documentDraftMaintenance").then((m) => {
+      void m.sweepExpiredDocumentDrafts?.();
+    });
+
     // تنظيف عند إغلاق التطبيق أو تغيير المستخدم
     return () => {
       if (currentUser && currentUser.role === "manager") {

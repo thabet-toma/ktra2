@@ -97,6 +97,13 @@ export const logoutUser = async () => {
     localStorage.removeItem("userId");
     localStorage.removeItem("tenantId");
     localStorage.removeItem("branchId");
+    // ISSUE #118: مسودّات المستندات المحلية فيها أسماء عملاء وأسعار — جهازٌ
+    // مشترك يوجب مسحها عند الخروج (و`IdleTimeoutGuard` ينادي logoutUser نفسها
+    // عند مهلة الخمول، فالمسح يغطّي الحالتين بنقطة واحدة). أفضل جهد: فشل
+    // IndexedDB (تصفّح خاص) لا يجوز أن يوقف تسجيل الخروج.
+    import("./offline/documentDraftMaintenance")
+        .then((m) => m.clearAllDocumentDrafts())
+        .catch(() => { /* best-effort */ });
 };
 
 export const fetchUserProfile = async (uid: string): Promise<User | null> => {

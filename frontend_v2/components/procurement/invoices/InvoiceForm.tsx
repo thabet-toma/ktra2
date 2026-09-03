@@ -128,7 +128,8 @@ import {
 } from "@/components/shared/DocumentContextTabs";
 import { invoiceActionPermissions } from "@/utils/viewPermissions";
 import { getPurchaseInvoiceFeeEditorState } from "./purchaseInvoiceFeeEditorState";
-import { formatDateLocalized } from "../../../utils/formatDate";
+import { formatDateLocalized, formatTimeValue } from "../../../utils/formatDate";
+import { useDocumentDraft } from "@/hooks/useDocumentDraft";
 
 interface InvoiceFormProps {
   invoice: Partial<Invoice> | null;
@@ -371,9 +372,78 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     },
   });
 
+  /* ── ISSUE #118: مسودّة محلية (IndexedDB) — فاتورة الشراء لا تحفظ اليوم
+     شيئاً إطلاقاً. الحمولة كائنٌ خفيف يكفي وحده لإعادة بناء الشاشة؛ لا صلة
+     بحمولة الحفظ الخادمية (`invoiceToSqlPayload`) التي يبنيها `handleSave`
+     بنفسه — المسودّة نصٌّ محلي لا مستندٌ خادميّ نصفي. */
+  const draftPayload = useMemo(
+    () => ({ formData, dealInfo, installments, installmentPlanEnabled }),
+    [formData, dealInfo, installments, installmentPlanEnabled],
+  );
+
+  const onRestoreDraft = useCallback(
+    (restored: {
+      formData: Partial<Invoice>;
+      dealInfo: DealInvoiceInfo;
+      installments: InvoiceInstallment[];
+      installmentPlanEnabled: boolean;
+    }) => {
+      setFormData(restored.formData);
+      setDealInfo(restored.dealInfo);
+      setInstallments(restored.installments);
+      setInstallmentPlanEnabled(restored.installmentPlanEnabled);
+      // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تسجَّل «ملموسة»
+      // فوراً كي يبقى الحارس وسياسة الحفظ متّسقين مع ما يراه المستخدم فعلاً.
+      dirtyRef.current = true;
+      setViewMode(false);
+    },
+    [],
+  );
+
+  const {
+    draftSavedAt,
+    restoredBanner: draftBanner,
+    discardDraft,
+  } = useDocumentDraft<{
+    formData: Partial<Invoice>;
+    dealInfo: DealInvoiceInfo;
+    installments: InvoiceInstallment[];
+    installmentPlanEnabled: boolean;
+  }>({
+    docType: "purchase_invoice",
+    docId: formData.id ?? null,
+    payload: draftPayload,
+    isTouched: dirtyRef.current,
+    onRestore: onRestoreDraft,
+    isPosted: Boolean(formData.isPosted),
+    docUpdatedAt: formData.id ? formData.updatedAt ?? null : null,
+  });
+
+  /** «تراجع» على شريط الاستعادة: يعيد المستند إلى نسخته المحفوظة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    if (initialInvoice?.id) {
+      setFormData(initialInvoice);
+      setInstallments(initialInvoice.installments || []);
+      setInstallmentPlanEnabled(initialInvoice.installmentPlanEnabled || false);
+      setDealInfo(
+        initialInvoice.dealInfo ||
+          dealData || { createdBy: currentUser.id, createdAt: new Date().toISOString() },
+      );
+      setViewMode(true);
+    } else {
+      setFormData({});
+      setDealInfo({ createdBy: currentUser.id, createdAt: new Date().toISOString() });
+      setInstallments([]);
+      setInstallmentPlanEnabled(false);
+    }
+    dirtyRef.current = false;
+    void discardDraft();
+  }, [initialInvoice, dealData, currentUser.id, discardDraft]);
+
   const guardedCancel = async () => {
     if (!formData.id && !(formData.items || []).some(i => i.itemId) && !formData.supplierId) {
       // Empty draft, no need to warn
+      void discardDraft();
       onCancel();
       return;
     }
@@ -382,6 +452,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         return;
       }
     }
+    // تجاهلٌ صريح: المستخدم أكّد الخروج دون حفظ (أو لم يكن هناك ما يُحفظ أصلاً).
+    void discardDraft();
     if (initialInvoice?.id && !viewMode) {
       // فاتورة محفوظة كانت قيد التحرير: الإلغاء يتراجع عن التعديلات ويعيد وضع
       // العرض داخل نفس الفاتورة، لا يغادرها لقائمة الفواتير.
@@ -771,6 +843,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       if (onSave) onSave({ id: savedSqlId });
       toast("تم حفظ الفاتورة بنجاح", "success");
       dirtyRef.current = false;
+      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      void discardDraft();
       return savedSqlId;
     } catch (error) {
       // console suppressed
@@ -2964,6 +3038,38 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     </div>
   ) : null;
 
+  /* ISSUE #118: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى مُطبَّقٌ
+     على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً؛ هو
+     إخبارٌ لا سؤال، ومعه «تراجع» وحده. */
+  const draftRestoreBanner = draftBanner ? (
+    <div
+      className="ktra-banner ktra-banner--warn"
+      role="status"
+      data-testid="draft-restored-banner"
+    >
+      <Info className="h-4 w-4 shrink-0" />
+      <span>
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّر المستند بعد مسودتك (مسودتك ${formatTimeValue(draftBanner.updatedAt)}) — لم تُستعَد تلقائياً.`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
+      </span>
+      {draftBanner.eligibility === "restore" && (
+        <button
+          type="button"
+          className="ktra-toolbtn"
+          onClick={handleUndoDraft}
+          data-testid="draft-restored-undo"
+        >
+          <Undo2 className="h-4 w-4" />
+          تراجع
+        </button>
+      )}
+    </div>
+  ) : null;
+
   /* ───────────── العرض المستندي (شراء محلية / دولية) ─────────────
      يشترك المساران في هذا النموذج، فالعرض واحد ويتبدّل عنوانه ورسومه حسب النوع. */
   const invCurrency = formData.currency || "ILS";
@@ -3687,11 +3793,18 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           <span className="ktra-status-item">الحالة <b>{formData.isPosted ? "مرحّلة" : formData.isHistorical ? "مؤرشفة" : formData.id ? "مسودة" : "جديدة"}</b></span>
           <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
           <span className="ktra-status-item">{effectiveReadOnly ? "للقراءة فقط" : "قابل للتعديل ✓"}</span>
+          {/* issue #109 §٦: مؤشّر دائم كي لا يضغط المستخدم «حفظ» احتياطاً كل دقيقة. */}
+          {draftSavedAt && !effectiveReadOnly && (
+            <span className="ktra-status-item" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          )}
         </>
       }
     >
       {saveErrorBanner}
       {accBanner}
+      {draftRestoreBanner}
       {/* وضع القراءة: مستند مُنسَّق بدل شبكة الإدخال المعطّلة. */}
       {viewMode && invoiceDocumentView}
       {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}
