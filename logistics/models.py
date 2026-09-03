@@ -49,6 +49,12 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
         related_name='supplier_quotations',
     )
     quotation_number = models.CharField(max_length=50, db_column='QuotationNumber')
+    # ISSUE #112 §١: الطلبية الأمّ التي وردَ منها هذا العرض — اختياريّ. العروضُ
+    # المستقلّة القائمة اليوم (وغداً) تبقى صحيحة بلا ربط؛ لا هجرة بيانات.
+    rfq = models.ForeignKey(
+        'PurchaseRFQ', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='PurchaseRFQID', related_name='quotations',
+    )
     scope = models.CharField(
         max_length=10, choices=SCOPE_CHOICES, default=SCOPE_LOCAL, db_column='Scope',
     )
@@ -276,7 +282,12 @@ class PurchaseOrder(SoftDeleteMixin, models.Model):
         Partner, on_delete=models.PROTECT, db_column='SupplierID',
         related_name='purchase_orders',
     )
-    quotation = models.OneToOneField(
+    # ISSUE #112: OneToOne → ForeignKey — الترسية المجزّأة (بندٌ من موردٍ وبندٌ
+    # من آخر) تحتاج أن ينتج عن عرضٍ واحدٍ أكثر من طلبية/فاتورة بنيوياً؛ التنفيذ
+    # نفسه خارج هذه المرحلة لكن القيد يُرفع الآن لأن رفعه لاحقاً هجرةٌ على جدولٍ
+    # ممتلئ. `related_name='local_order'` بقي كما هو — الاستدعاء صار `.first()`
+    # لا وصولاً مباشراً (`logistics/services.py`, `serializers/procurement.py`).
+    quotation = models.ForeignKey(
         SupplierQuotation, on_delete=models.PROTECT, null=True, blank=True,
         db_column='SupplierQuotationID', related_name='local_order',
     )
@@ -418,6 +429,196 @@ class PurchaseOrderLine(models.Model):
 
     def __str__(self):
         return f'{self.order.order_number} / {self.seq}'
+
+
+# ── ISSUE #112 — دورة الشراء: طلبيةٌ بلا سعر تسبق عرض المورّد ───────────────
+# `SupplierQuotation` = ردّ المورد؛ الناقص كان الأبّ الذي يجمع الردود على
+# قائمة أصنافٍ وكمياتٍ واحدة. مواصفة #108 §1، قرارا #92 و#106.
+
+class PurchaseRFQ(SoftDeleteMixin, models.Model):
+    """طلبية (طلب عروض أسعار) — أصنافٌ وكمياتٌ بلا أيّ سعر، تخرج لعدّة موردين."""
+
+    SCOPE_LOCAL = SupplierQuotation.SCOPE_LOCAL
+    SCOPE_IMPORT = SupplierQuotation.SCOPE_IMPORT
+    SCOPE_CHOICES = SupplierQuotation.SCOPE_CHOICES
+
+    STATUS_DRAFT = 'draft'
+    STATUS_SENT = 'sent'
+    STATUS_AWARDED = 'awarded'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, 'مسودة'),
+        (STATUS_SENT, 'مُرسَلة'),
+        (STATUS_AWARDED, 'مُرساة'),
+        (STATUS_CANCELLED, 'ملغاة'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='PurchaseRFQID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='purchase_rfqs',
+    )
+    # ISSUE #112 §الترقيم: الرقم يُخصَّص عند **أوّل إرسال** لا عند الإنشاء —
+    # مسودّةٌ مهجورة لا يجوز أن تحرق رقماً (الزيادة في `TenantBook` لا تُعكَس).
+    # لذلك `NULL` لا `''`: قيد الفرادة أدناه يسمح بعدّة `NULL` (نفس نمط
+    # `Tenant.store_slug` و`TenantBook.branch`) بينما فراغٌ متكرّر كان سيصطدم
+    # بالقيد من أوّل مسودّة ثانية.
+    rfq_number = models.CharField(
+        max_length=50, null=True, blank=True, default=None, db_column='RfqNumber',
+    )
+    scope = models.CharField(
+        max_length=10, choices=SCOPE_CHOICES, default=SCOPE_LOCAL, db_column='Scope',
+    )
+    rfq_date = models.DateField(db_column='RfqDate')
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_column='Status',
+    )
+    reply_deadline = models.DateField(
+        null=True, blank=True, db_column='ReplyDeadline',
+        help_text='مهلة ردّ الموردين — اختيارية',
+    )
+    notes = models.TextField(blank=True, default='', db_column='Notes')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID', related_name='created_purchase_rfqs',
+    )
+
+    class Meta:
+        db_table = 'purchase_rfqs'
+        ordering = ['-rfq_date', '-id']
+        indexes = [
+            models.Index(fields=['tenant', 'status', '-rfq_date'],
+                         name='idx_rfq_tenant_status'),
+        ]
+        constraints = [
+            # NULL متعدد مسموح (مسودّات بلا رقم بعد) — الفرادة تسري على الأرقام
+            # المخصَّصة فعلاً وحدها.
+            models.UniqueConstraint(
+                fields=['tenant', 'rfq_number'], name='uniq_purchase_rfq_number',
+            ),
+        ]
+
+    def __str__(self):
+        return self.rfq_number or f'RFQ-draft-{self.pk}'
+
+
+class PurchaseRFQLine(models.Model):
+    """بند الطلبية: صنفٌ وكميةٌ ووحدةُ قياسٍ — بلا سعرٍ إلزاميّ وبلا كودِ HS.
+
+    كودُ HS غائبٌ عمداً (قرار المالك في #108 §4): مورّدٌ يُسعّر لا يُسأل عن
+    الرمز الجمركي — مكانه الصفقة والتخليص.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='PurchaseRFQLineID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='purchase_rfq_lines',
+    )
+    rfq = models.ForeignKey(
+        PurchaseRFQ, on_delete=models.CASCADE, db_column='PurchaseRFQID',
+        related_name='lines',
+    )
+    # نفس نمط `SupplierQuotationLine.product`: بند بلا منتج مسجَّل — الاسم
+    # النصّي يكفي داخل الطلبية، ويُنشأ المنتج الحقيقي عند التحويل فقط إن وُجد.
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, db_column='ProductID',
+        related_name='purchase_rfq_lines', null=True, blank=True,
+    )
+    seq = models.PositiveIntegerField(default=1, db_column='Seq')
+    name_snapshot = models.CharField(max_length=255, blank=True, default='', db_column='NameSnapshot')
+    specs = models.TextField(blank=True, default='', db_column='Specs')
+    quantity = models.DecimalField(max_digits=18, decimal_places=3, db_column='Quantity')
+    unit_of_measure = models.CharField(
+        max_length=20, blank=True, default='', db_column='UnitOfMeasure',
+        help_text='وحدة قياس البند — حبّة/صندوق/كرتون… كي يعرف المورد ما يُسعّره',
+    )
+    # ISSUE #112 §١: رقمٌ **داخليّ** يُعبَّأ تلقائياً من «أقلّ سعر» ويعدّله
+    # المالك بحرّية — ولا يخرج إلى أيّ سطحٍ خارجيّ (رابط المورد/الطباعة/Excel)
+    # إطلاقاً. فارغٌ حين لا شراءَ سابق.
+    estimated_price = models.DecimalField(
+        max_digits=18, decimal_places=4, null=True, blank=True,
+        db_column='EstimatedPrice',
+        help_text='سعرٌ تقديريٌّ داخليّ — لا يُرسَل للمورّد أبداً',
+    )
+
+    class Meta:
+        db_table = 'purchase_rfq_lines'
+        ordering = ['seq', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['rfq', 'seq'], name='uniq_purchase_rfq_line_seq',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(quantity__gt=0),
+                name='purchase_rfq_line_qty_gt_zero',
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(estimated_price__isnull=True)
+                    | models.Q(estimated_price__gte=0)
+                ),
+                name='purchase_rfq_line_est_price_gte_zero',
+            ),
+            # بند بلا منتج مسجَّل يلزمه اسم — وإلا فهو سطر بلا معنى.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(product__isnull=False)
+                    | ~models.Q(name_snapshot='')
+                ),
+                name='purchase_rfq_line_named',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.rfq_id} / {self.seq}'
+
+
+class PurchaseRFQRecipient(models.Model):
+    """مورّدٌ واحد أُرسلت إليه الطلبية — ورابطه الخاص وعرضه المتولّد إن ردّ."""
+
+    id = models.AutoField(primary_key=True, db_column='PurchaseRFQRecipientID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='purchase_rfq_recipients',
+    )
+    rfq = models.ForeignKey(
+        PurchaseRFQ, on_delete=models.CASCADE, db_column='PurchaseRFQID',
+        related_name='recipients',
+    )
+    supplier = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, db_column='SupplierID',
+        related_name='rfq_recipients',
+    )
+    # ISSUE #112 §5 (تمهيداً — سلكه الفعلي في تذكرة لاحقة): الرابط الخاص لهذا
+    # المورّد وحده. `SET_NULL`: إبطال/حذف الرابط في `docshare` لا يجوز أن يمسّ
+    # سجلّ «أُرسلت لهذا المورّد» نفسه.
+    share = models.ForeignKey(
+        'docshare.DocumentShare', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='DocumentShareID', related_name='rfq_recipients',
+    )
+    # ردّ هذا المورّد بعينه — عرضٌ واحدٌ لكلّ مستقبِل. `SET_NULL`: حذف العرض
+    # (نادر) لا يجوز أن يحذف سجلّ المستقبِل معه.
+    quotation = models.OneToOneField(
+        SupplierQuotation, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='SupplierQuotationID', related_name='rfq_recipient',
+    )
+    sent_at = models.DateTimeField(null=True, blank=True, db_column='SentAt')
+    replied_at = models.DateTimeField(null=True, blank=True, db_column='RepliedAt')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'purchase_rfq_recipients'
+        ordering = ['id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['rfq', 'supplier'], name='uniq_purchase_rfq_recipient_supplier',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.rfq_id} → {self.supplier_id}'
 
 
 class LogisticsDeal(SoftDeleteMixin, models.Model):
@@ -1567,7 +1768,8 @@ class PurchaseInvoice(models.Model):
     )
     # T-PLINEAGE: الفاتورة المولودة من عرض سعر مباشرةً (بلا طلبية وسيطة). النسب
     # عبر الطلبية يبقى على `PurchaseOrder.invoice` — لكل طريق رابطه.
-    source_quotation = models.OneToOneField(
+    # ISSUE #112: OneToOne → ForeignKey لنفس سبب `PurchaseOrder.quotation` أعلاه.
+    source_quotation = models.ForeignKey(
         SupplierQuotation, on_delete=models.PROTECT, null=True, blank=True,
         db_column='SourceSupplierQuotationID', related_name='local_invoice',
     )

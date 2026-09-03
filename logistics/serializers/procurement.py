@@ -41,6 +41,9 @@ from logistics.text_utils import (
 from logistics.models import (
     SupplierQuotation,
     SupplierQuotationLine,
+    PurchaseRFQ,
+    PurchaseRFQLine,
+    PurchaseRFQRecipient,
     PurchaseOrder,
     PurchaseOrderLine,
     LogisticsDeal,
@@ -197,23 +200,18 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         return {'id': deal.id, 'ref_number': deal.ref_number, 'stage': deal.stage}
 
     def get_converted_order(self, obj):
-        try:
-            order = obj.local_order
-        except PurchaseOrder.DoesNotExist:
+        # ISSUE #112: local_order صار FK عكسياً (manager) بعد رفع OneToOne.
+        order = obj.local_order.first()
+        if order is None:
             return None
         return {'id': order.id, 'order_number': order.order_number, 'status': order.status}
 
     def get_converted_invoice(self, obj):
         """الفاتورة الناتجة — مباشرةً من العرض أو عبر الطلبية التي وُلدت منه."""
-        try:
-            invoice = obj.local_invoice
-        except PurchaseInvoice.DoesNotExist:
-            invoice = None
+        invoice = obj.local_invoice.first()
         if invoice is None:
-            try:
-                invoice = obj.local_order.invoice
-            except PurchaseOrder.DoesNotExist:
-                invoice = None
+            order = obj.local_order.first()
+            invoice = order.invoice if order else None
         if invoice is None:
             return None
         return {
@@ -459,6 +457,156 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             ])
         self._recalculate(instance)
         return instance
+
+
+# ── ISSUE #112 — الطلبية (طلب عروض): الأبّ الذي يسبق `SupplierQuotation` ───
+
+class PurchaseRFQLineSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.name_ar', read_only=True)
+
+    class Meta:
+        model = PurchaseRFQLine
+        fields = [
+            'id', 'product', 'product_name', 'seq', 'name_snapshot',
+            'specs', 'quantity', 'unit_of_measure', 'estimated_price',
+        ]
+        read_only_fields = ['id', 'product_name']
+        # نفس نمط SupplierQuotationLine: بند بلا منتج مسجَّل مسموح — اسمه
+        # النصّي يكفي داخل الطلبية.
+        extra_kwargs = {
+            'product': {'required': False, 'allow_null': True},
+        }
+
+
+class PurchaseRFQRecipientSerializer(serializers.ModelSerializer):
+    supplier_name = serializers.CharField(source='supplier.name', read_only=True)
+    quotation_number = serializers.CharField(
+        source='quotation.quotation_number', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = PurchaseRFQRecipient
+        fields = [
+            'id', 'supplier', 'supplier_name', 'share', 'quotation',
+            'quotation_number', 'sent_at', 'replied_at', 'created_at',
+        ]
+        read_only_fields = [
+            'id', 'supplier_name', 'share', 'quotation', 'quotation_number',
+            'sent_at', 'replied_at', 'created_at',
+        ]
+
+
+class PurchaseRFQSerializer(serializers.ModelSerializer):
+    lines = PurchaseRFQLineSerializer(many=True)
+    recipients = PurchaseRFQRecipientSerializer(many=True, read_only=True)
+    scope_display = serializers.CharField(source='get_scope_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    # ISSUE #112 §٧: «وردت عروض» تُعدّ ولا تُكتب — عدّادان مشتقّان من الردود،
+    # لا حقلٌ مخزَّن.
+    recipients_count = serializers.SerializerMethodField()
+    replies_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PurchaseRFQ
+        fields = [
+            'id', 'rfq_number', 'scope', 'scope_display', 'rfq_date',
+            'status', 'status_display', 'reply_deadline', 'notes',
+            'lines', 'recipients', 'recipients_count', 'replies_count',
+            'created_at', 'updated_at',
+        ]
+        # rfq_number/status: لا يُكتبان مباشرةً — يُخصَّصان عبر أفعال دورة الحياة
+        # (`send`/`cancel`/`award`) لا عبر PATCH عام. رقم الطلبية يُخصَّص عند
+        # أوّل إرسال لا عند الإنشاء (لا تُحرق مسودّةٌ مهجورة رقماً).
+        read_only_fields = [
+            'id', 'rfq_number', 'status', 'status_display', 'scope_display',
+            'recipients', 'recipients_count', 'replies_count',
+            'created_at', 'updated_at',
+        ]
+
+    def get_recipients_count(self, obj):
+        return len(obj.recipients.all())
+
+    def get_replies_count(self, obj):
+        return len([r for r in obj.recipients.all() if r.replied_at])
+
+    def validate(self, attrs):
+        tenant = get_tenant(self.context.get('request'))
+        if tenant is None:
+            raise serializers.ValidationError({'tenant': 'لا يوجد شركة محددة لهذا الطلب.'})
+
+        instance = self.instance
+        # ISSUE #112 §٧: البنود تُقفل عند **أوّل إرسال** لا عند الترسية —
+        # تعديل كمية بعد ورود عروض يجعل المقارنة كذباً صامتاً. المسموح بعد
+        # الإرسال: الملاحظات والمهلة وحدهما (إضافة مستقبِل والإلغاء أفعالٌ
+        # مستقلّة لا تمرّ من هنا). من أراد تعديل البنود: نسخة جديدة.
+        if instance is not None and instance.status != PurchaseRFQ.STATUS_DRAFT:
+            allowed_fields = {'notes', 'reply_deadline'}
+            offending = sorted(set(attrs.keys()) - allowed_fields)
+            if offending:
+                raise serializers.ValidationError(
+                    'الطلبية بعد الإرسال: التعديل يقتصر على الملاحظات والمهلة'
+                    f' — الحقول التالية ممنوعة: {", ".join(offending)}.'
+                )
+
+        lines = attrs.get('lines')
+        if instance is None and not lines:
+            raise serializers.ValidationError({'lines': 'يجب إضافة بند واحد على الأقل.'})
+        if lines is not None:
+            seen_seq = set()
+            for index, line in enumerate(lines, start=1):
+                product = line.get('product')
+                if product is not None and product.tenant_id != tenant.pk:
+                    raise serializers.ValidationError({
+                        'lines': f'المنتج في السطر {index} لا يتبع الشركة الحالية.',
+                    })
+                if product is None and not str(line.get('name_snapshot') or '').strip():
+                    raise serializers.ValidationError({
+                        'lines': f'اكتب اسم المنتج في السطر {index} أو اختره من المنتجات.',
+                    })
+                seq = line.get('seq', index)
+                if seq in seen_seq:
+                    raise serializers.ValidationError({
+                        'lines': f'رقم ترتيب السطر {seq} مكرر.',
+                    })
+                seen_seq.add(seq)
+        return attrs
+
+    @staticmethod
+    def _line_values(rfq, line, index):
+        product = line.get('product')
+        return {
+            **line,
+            'tenant': rfq.tenant,
+            'rfq': rfq,
+            'product': product,
+            'seq': line.get('seq') or index,
+            'name_snapshot': line.get('name_snapshot')
+            or getattr(product, 'name_ar', '')
+            or getattr(product, 'name_en', ''),
+        }
+
+    @transaction.atomic
+    def create(self, validated_data):
+        lines = validated_data.pop('lines')
+        rfq = PurchaseRFQ.objects.create(**validated_data)
+        PurchaseRFQLine.objects.bulk_create([
+            PurchaseRFQLine(**self._line_values(rfq, line, index))
+            for index, line in enumerate(lines, start=1)
+        ])
+        return rfq
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        lines = validated_data.pop('lines', None)
+        instance = super().update(instance, validated_data)
+        if lines is not None:
+            instance.lines.all().delete()
+            PurchaseRFQLine.objects.bulk_create([
+                PurchaseRFQLine(**self._line_values(instance, line, index))
+                for index, line in enumerate(lines, start=1)
+            ])
+        return instance
+
 
 class PurchaseOrderLineSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name_ar', read_only=True)

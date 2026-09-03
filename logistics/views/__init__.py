@@ -2,7 +2,11 @@
 حسب دومين رحلة الاستيراد. صفر تغيير سلوك — نقل كود حرفي، والأسماء العامة تُعاد
 تصديرها هنا فيبقى `from logistics.views import X` شغّالاً كما كان.
 """
-from .procurement import SupplierQuotationViewSet, PurchaseOrderViewSet
+from .procurement import (
+    SupplierQuotationViewSet,
+    PurchaseRFQViewSet,
+    PurchaseOrderViewSet,
+)
 from .deals import LogisticsDealViewSet, LogisticsPaymentViewSet
 from .shipments import LogisticsShipmentViewSet
 from .clearance import LogisticsClearanceViewSet
@@ -23,7 +27,7 @@ from .goods_receipts import GoodsReceiptViewSet
 from .purchase_settings import PurchaseSettingsViewSet
 
 __all__ = [
-    "SupplierQuotationViewSet", "PurchaseOrderViewSet",
+    "SupplierQuotationViewSet", "PurchaseRFQViewSet", "PurchaseOrderViewSet",
     "LogisticsDealViewSet", "LogisticsPaymentViewSet",
     "LogisticsShipmentViewSet", "LogisticsClearanceViewSet",
     "PurchaseInvoiceViewSet", "SupplierPaymentViewSet",

@@ -153,10 +153,11 @@ def convert_local_quotation_to_order(quotation, *, user=None):
         .prefetch_related('lines__product')
         .get(pk=quotation.pk)
     )
-    try:
-        return quotation.local_order, False
-    except PurchaseOrder.DoesNotExist:
-        pass
+    # ISSUE #112: quotation.local_order صار FK عكسياً (manager) لا وصولاً
+    # مباشراً بعد رفع OneToOne — .first() يحلّ محلّ except DoesNotExist.
+    existing_order = quotation.local_order.first()
+    if existing_order is not None:
+        return existing_order, False
 
     if quotation.scope != SupplierQuotation.SCOPE_LOCAL:
         raise ValidationError('يمكن تحويل عروض الشراء المحلية فقط إلى طلبية شراء.')
@@ -376,19 +377,16 @@ def convert_local_quotation_to_invoice(quotation, *, user=None):
         .prefetch_related('lines__product')
         .get(pk=quotation.pk)
     )
-    try:
-        return quotation.local_invoice, False
-    except PurchaseInvoice.DoesNotExist:
-        pass
+    # ISSUE #112: نفس تكييف .first() في convert_local_quotation_to_order أعلاه.
+    existing_invoice = quotation.local_invoice.first()
+    if existing_invoice is not None:
+        return existing_invoice, False
 
     if quotation.scope != SupplierQuotation.SCOPE_LOCAL:
         raise ValidationError('يمكن تحويل عروض الشراء المحلية فقط إلى فاتورة شراء.')
     if quotation.status != SupplierQuotation.STATUS_ACCEPTED:
         raise ValidationError('يجب اعتماد عرض الشراء قبل تحويله إلى فاتورة.')
-    try:
-        existing_order = quotation.local_order
-    except PurchaseOrder.DoesNotExist:
-        existing_order = None
+    existing_order = quotation.local_order.first()
     if existing_order is not None:
         raise ValidationError(
             f'عرض السعر {quotation.quotation_number} محوَّل إلى طلبية '

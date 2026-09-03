@@ -45,16 +45,19 @@
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `SupplierQuotation` (:11) | `scope` (local/import), `status` (9 حالات), `supplier_draft_name` | `supplier`→Partner (nullable), `import_deal`/`local_invoice` OneToOne |
+| `SupplierQuotation` (:11) | `scope` (local/import), `status` (9 حالات), `supplier_draft_name` | `supplier`→Partner (nullable), `rfq`→`PurchaseRFQ` (nullable، #112)، `import_deal` OneToOne، `local_order`/`local_invoice` FK عكسي (بعد #112 — كانا OneToOne) |
+| `PurchaseRFQ` (`logistics/models.py`) | `rfq_number` (NULL حتى أوّل إرسال)، `scope`، `status` (draft/sent/awarded/cancelled)، `reply_deadline` | `tenant`، `lines`، `recipients`، `quotations` (عكسي من `SupplierQuotation.rfq`) — **ISSUE #112**، مواصفة #108 |
+| `PurchaseRFQLine` (`logistics/models.py`) | `quantity`، `unit_of_measure`، `specs`، `estimated_price` (داخليّ، nullable) — **بلا `unit_price` وبلا كود HS** | `rfq`، `product` (nullable) + `name_snapshot` (نمط `SupplierQuotationLine`) |
+| `PurchaseRFQRecipient` (`logistics/models.py`) | `sent_at`، `replied_at` | `rfq`، `supplier`→Partner، `share`→`docshare.DocumentShare` (nullable، تُسلَك لاحقاً)، `quotation` OneToOne (nullable) |
 | `LogisticsDeal` (:409) | `ref_number`, `stage`, `shipping_workflow_status`, `total_amount`, `total_cbm`, `total_weight_kg`, `payment_status` | `tenant`, `partner`, `currency`, `source_quotation` OneToOne, `shipments` M2M |
 | `LogisticsShipment` (:846) | `shipment_number`, `chargeable_unit` (cbm/kg), `freight_rate`, `total_shipping_cost_usd`, `freight_is_posted` | `deals` M2M عبر `LogisticsShipmentDeal`, `freight_journal`, `transit_journal` |
 | `LogisticsShipmentDeal` (:1046) | `allocated_shipping_cost`, `extra_costs` | `unique_together (shipment, deal)` |
 | `LogisticsClearance` (:1077) | `declaration_number`, `grand_total`, `exchange_rate` | `shipment` **OneToOne**, `customs_broker`, `lines`, `payments` |
 | `LogisticsClearanceLine` (:1177) | `line_type`, `debit`/`credit`, `vat_percent` | `clearance`, `account` |
 | `LocalShipment` (:1210) | `shipment_number` (LS-XXXX), `capitalize_to_inventory`, `exchange_rate`, `status` | `clearance`, `shipment` (كلاهما اختياري) |
-| `PurchaseInvoice` (:1435) | `invoice_number`, `invoice_type` (local/international), `grand_total`, `import_*_rate` | `deal`, `shipment`, `clearance`, `partner`, `source_quotation` |
+| `PurchaseInvoice` (:1435) | `invoice_number`, `invoice_type` (local/international), `grand_total`, `import_*_rate` | `deal`, `shipment`, `clearance`, `partner`, `source_quotation` **FK** (كان OneToOne — #112) |
 | `PurchaseInvoiceItem/Fee/Payment` (:1629/:1730/:1699) · `GoodsReceipt`/`Line` (:1811/:1883) | البنود والرسوم والدفعات · سند الاستلام | `invoice` · `movement`→StockMovement |
-| `LogisticsPayment` (:746) · `PurchaseOrder` (:248) · `PurchaseSettings` (:1926) | دفعات الصفقة/الشحنة · الطلبية · `receive_on_post` | `deal`/`shipment`/`journal` · `tenant` |
+| `LogisticsPayment` (:746) · `PurchaseOrder` (:248) · `PurchaseSettings` (:1926) | دفعات الصفقة/الشحنة · الطلبية · `receive_on_post` | `deal`/`shipment`/`journal` · `tenant`، `PurchaseOrder.quotation` **FK** (كان OneToOne — #112) |
 
 ## دوال الـservices العامة
 ```python
@@ -127,7 +130,8 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | POST | `purchase-invoices/{pk}/post-to-accounting/` · `receive/` · `unpost/` · `returns/` | views.py:3400 / 2991 / 4047 / 3027 |
 | GET | `import-journey/` · `reports/landed-cost/?shipment_id=` | views.py:4557 / 4588 |
 | GET/POST | `goods-receipts/` · `goods-receipts/outstanding/` · `purchase-settings/current/` | views.py:4783 / 4935 / 5038 |
-| — | باقي الموارد بالـrouter: `supplier-quotations/`, `purchase-orders/`, `payments/`, `supplier-payments/`, `local-shipments/` | urls.py:16-28 |
+| POST | `purchase-rfqs/{pk}/send/` · `cancel/` · `award/` · `recipients/` | **ISSUE #112**: أوّل إرسال يقفل البنود ويخصّص الرقم؛ `recipients/` وحده مسموحٌ بعد الإرسال (`PurchaseRFQViewSet`، `logistics/views/procurement.py`) |
+| — | باقي الموارد بالـrouter: `supplier-quotations/`, `purchase-rfqs/`, `purchase-orders/`, `payments/`, `supplier-payments/`, `local-shipments/` | urls.py |
 
 ## الاعتماديات
 **يعتمد على:**
@@ -257,6 +261,25 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   `pending_payment_total` في الزوج الواجب اتفاقه (Python + SQL) وفي المُسلسِلين
   معاً، خارج «المدفوع» وخارج `payment_status`.
 - **العزل بالشركة إلزامي** (كل ViewSet يرث `BaseTenantViewSet`، `core/mixins.py`)، و**إلغاء الترحيل يحتاج** `import.doc.unpost` (views.py:760, 2104, 2176, 2275, 2296, 2593).
+- **ISSUE #112 — الطلبية تسبق عرض المورّد**: `PurchaseRFQ` أبٌ يجمع ردود
+  `SupplierQuotation` تحته (`rfq` FK اختياري على العرض — عروضٌ مستقلّة قائمة
+  تبقى صحيحة بلا ربط). **بنودها تُقفل عند أوّل إرسال لا عند الترسية** —
+  `PurchaseRFQSerializer.validate` يرفض أيّ حقل غير `notes`/`reply_deadline`
+  على طلبية ليست `draft` (400 على تعديل بند). المسموح بعد الإرسال: إضافة
+  مستقبِل (`POST .../recipients/`) والإلغاء والملاحظات والمهلة وحدها.
+  **الرقم يُخصَّص عند أوّل إرسال لا عند الإنشاء** (`rfq_number` يبقى `NULL`
+  حتى فعل `send/` — مسودّة مهجورة لا تحرق رقماً). «وردت عروض» عدّادٌ مشتقّ
+  (`recipients_count`/`replies_count`) لا حقلٌ مخزَّن. **ولا كود HS على بندها
+  إطلاقاً** — مورّدٌ يُسعّر لا يُسأل عن الرمز الجمركي (قرار المالك #108 §4).
+  السعر التقديريّ (`estimated_price`) رقمٌ داخليّ فقط؛ مسار خروجه المحروس
+  (رابط المورد/الطباعة/Excel) خارج هذه التذكرة.
+- **`PurchaseOrder.quotation` و`PurchaseInvoice.source_quotation` صارا
+  `ForeignKey` لا `OneToOneField`** (ISSUE #112 — الترسية المجزّأة تحتاج بنيةً
+  تسمح بأكثر من مستند لاحق لعرضٍ واحد، خارج نطاق هذه التذكرة لكن القيد رُفع
+  الآن قبل أن تمتلئ الجداول). **الاستدعاء تغيّر لا الحقل**: `quotation.local_order`
+  و`quotation.local_invoice` صارا مديرَي علاقة عكسية (querysets) — `.first()`
+  لا وصولاً مباشراً و`except DoesNotExist` (`logistics/services.py`،
+  `logistics/serializers/procurement.py`).
 
 ## إلغاء ترحيل الدفعات (وُحِّد في المرحلة 2 + معالجتها 2026-08-11)
 إلغاء ترحيل دفعة صفقة (`unpost_payment_from_accounting`) ودفعة تخليص (`unpost_payment`)
@@ -290,3 +313,4 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | `tests/test_purchase_paid_is_computed.py` | «المدفوع» من السندات والقيد لا من نوع الفاتورة؛ والقائمة والتفصيل يتفقان |
 | `tests/test_purchase_invoice_pay.py` | الدفع من داخل الفاتورة: سندٌ واحد، الفائض سلفة، التراجع الكامل عند الفشل |
 | `tests/test_tenant_isolation.py` (75) | لا تسرّب صفقات بين الشركات؛ 400 بلا ترويسة الشركة |
+| `tests/test_purchase_rfq.py` (ISSUE #112) | بندٌ بلا سعر ولا HS · قفل البنود عند أوّل إرسال (400) وقبول مستقبِل جديد · الحالات المسموحة/الممنوعة · عدّاد الردود المشتقّ · ترقيمٌ عند أوّل إرسال بلا حرق مسودّة مهجورة · عزل الشركة |

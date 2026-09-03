@@ -18,6 +18,9 @@ from ._helpers import (
 from .procurement import (
     SupplierQuotationLineSerializer,
     SupplierQuotationSerializer,
+    PurchaseRFQLineSerializer,
+    PurchaseRFQRecipientSerializer,
+    PurchaseRFQSerializer,
     PurchaseOrderLineSerializer,
     PurchaseOrderSerializer,
 )
@@ -75,6 +78,9 @@ __all__ = [
     "_sync_shipment_agent_payments",
     "SupplierQuotationLineSerializer",
     "SupplierQuotationSerializer",
+    "PurchaseRFQLineSerializer",
+    "PurchaseRFQRecipientSerializer",
+    "PurchaseRFQSerializer",
     "PurchaseOrderLineSerializer",
     "PurchaseOrderSerializer",
     "LogisticsPaymentSerializer",

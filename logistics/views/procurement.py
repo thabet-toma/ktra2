@@ -13,9 +13,13 @@ from django.db.models import (
     Value,
 )
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from logistics.models import (
     SupplierQuotation,
+    PurchaseRFQ,
+    PurchaseRFQLine,
+    PurchaseRFQRecipient,
     PurchaseOrder,
     LogisticsDeal, LogisticsDealItem, LogisticsShipment,
     LogisticsClearance, LogisticsShipmentDeal,
@@ -26,6 +30,8 @@ from logistics.models import (
 from sales.models import SupplierPayment
 from logistics.serializers import (
     SupplierQuotationSerializer,
+    PurchaseRFQSerializer,
+    PurchaseRFQRecipientSerializer,
     PurchaseOrderSerializer,
     LogisticsDealSerializer, LogisticsDealListSerializer, LogisticsDealItemSerializer,
     LogisticsShipmentSerializer, LogisticsShipmentListSerializer, LogisticsClearanceSerializer,
@@ -268,6 +274,192 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
                     'invoice_number': invoice.invoice_number,
                 },
             },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+# ── ISSUE #112 — الطلبية (طلب عروض أسعار): الأبّ الذي يسبق `SupplierQuotation`
+
+class PurchaseRFQViewSet(BaseTenantViewSet):
+    serializer_class = PurchaseRFQSerializer
+    queryset = PurchaseRFQ.objects.all()
+
+    def get_queryset(self):
+        qs = (
+            super().get_queryset()
+            .select_related('tenant', 'created_by')
+            .prefetch_related(
+                'lines__product', 'recipients__supplier', 'recipients__quotation',
+            )
+        )
+        scope = str(self.request.query_params.get('scope') or '').strip()
+        rfq_status = str(self.request.query_params.get('status') or '').strip()
+        search = str(self.request.query_params.get('search') or '').strip()
+        if scope:
+            qs = qs.filter(scope=scope)
+        if rfq_status:
+            qs = qs.filter(status=rfq_status)
+        if search:
+            qs = qs.filter(
+                Q(rfq_number__icontains=search)
+                | Q(notes__icontains=search)
+                | Q(lines__name_snapshot__icontains=search)
+                | Q(lines__product__name_ar__icontains=search)
+                | Q(lines__product__name_en__icontains=search)
+            ).distinct()
+        return qs.order_by('-rfq_date', '-id')
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        kwargs = {'tenant': tenant}
+        if self.request.user.is_authenticated:
+            kwargs['created_by'] = self.request.user
+        rfq = serializer.save(**kwargs)
+        log_activity(
+            action='create',
+            entity_type='purchase_rfq',
+            entity_id=rfq.id,
+            entity_label=rfq.rfq_number or f'RFQ-draft-{rfq.id}',
+            description='إنشاء طلبية (طلب عروض أسعار)',
+            request=self.request,
+        )
+
+    def perform_destroy(self, instance):
+        if instance.status != PurchaseRFQ.STATUS_DRAFT:
+            raise ValidationError('يمكن حذف الطلبية وهي مسودة فقط.')
+        super().perform_destroy(instance)
+
+    @action(detail=True, methods=['post'])
+    def send(self, request, pk=None):
+        """أوّل إرسال: يقفل البنود، يخصّص الرقم إن لم يكن مخصّصاً، ويحوّل الحالة.
+
+        `supplier_ids` اختياري في جسم الطلب — قائمة موردين يُضافون مستقبِلين
+        قبل الإرسال (بديل «إضافة مستقبِل» المنفصلة لمن يعرف موردّيه سلفاً).
+        """
+        tenant = get_tenant(request)
+        with transaction.atomic():
+            rfq = PurchaseRFQ.objects.select_for_update().get(
+                pk=self.get_object().pk, tenant=tenant,
+            )
+            if rfq.status != PurchaseRFQ.STATUS_DRAFT:
+                raise ValidationError('لا يمكن إرسال طلبية ليست مسودة.')
+            if not rfq.lines.exists():
+                raise ValidationError('أضف بنداً واحداً على الأقل قبل الإرسال.')
+
+            supplier_ids = request.data.get('supplier_ids') or []
+            if not isinstance(supplier_ids, list):
+                raise ValidationError({'supplier_ids': 'يجب أن تكون قائمة معرّفات موردين.'})
+            for supplier_id in supplier_ids:
+                supplier = Partner.objects.filter(
+                    pk=supplier_id, tenant=tenant, partner_type='Supplier',
+                ).first()
+                if supplier is None:
+                    raise ValidationError({
+                        'supplier_ids': f'المورد {supplier_id} غير موجود أو لا يتبع الشركة الحالية.',
+                    })
+                PurchaseRFQRecipient.objects.get_or_create(
+                    tenant=tenant, rfq=rfq, supplier=supplier,
+                )
+
+            now = timezone.now()
+            rfq.recipients.filter(sent_at__isnull=True).update(sent_at=now)
+
+            # ISSUE #112 §الترقيم: يُخصَّص هنا فقط — أوّل إرسال، لا عند الإنشاء.
+            # `if not rfq.rfq_number` يجعل الفعل idempotent: إعادة استدعائه
+            # (لن يحدث فعلياً بعد أن صارت الحالة sent أعلاه) لن يحرق رقماً ثانياً.
+            if not rfq.rfq_number:
+                sequence = next_document_number(tenant.pk, 'purchase_rfq')
+                rfq.rfq_number = f'RFQ-{sequence:04d}'
+            rfq.status = PurchaseRFQ.STATUS_SENT
+            rfq.save(update_fields=['rfq_number', 'status', 'updated_at'])
+
+        log_activity(
+            action='update',
+            entity_type='purchase_rfq',
+            entity_id=rfq.id,
+            entity_label=rfq.rfq_number,
+            description='إرسال الطلبية للموردين',
+            request=request,
+        )
+        return Response(PurchaseRFQSerializer(rfq, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        tenant = get_tenant(request)
+        with transaction.atomic():
+            rfq = PurchaseRFQ.objects.select_for_update().get(
+                pk=self.get_object().pk, tenant=tenant,
+            )
+            if rfq.status not in (PurchaseRFQ.STATUS_DRAFT, PurchaseRFQ.STATUS_SENT):
+                raise ValidationError('لا يمكن إلغاء طلبية مُرساة أو ملغاة أصلاً.')
+            rfq.status = PurchaseRFQ.STATUS_CANCELLED
+            rfq.save(update_fields=['status', 'updated_at'])
+
+        log_activity(
+            action='update',
+            entity_type='purchase_rfq',
+            entity_id=rfq.id,
+            entity_label=rfq.rfq_number or f'RFQ-draft-{rfq.id}',
+            description='إلغاء الطلبية',
+            request=request,
+        )
+        return Response(PurchaseRFQSerializer(rfq, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'])
+    def award(self, request, pk=None):
+        tenant = get_tenant(request)
+        with transaction.atomic():
+            rfq = PurchaseRFQ.objects.select_for_update().get(
+                pk=self.get_object().pk, tenant=tenant,
+            )
+            if rfq.status != PurchaseRFQ.STATUS_SENT:
+                raise ValidationError('يمكن ترسية الطلبيات المُرسَلة فقط.')
+            rfq.status = PurchaseRFQ.STATUS_AWARDED
+            rfq.save(update_fields=['status', 'updated_at'])
+
+        log_activity(
+            action='update',
+            entity_type='purchase_rfq',
+            entity_id=rfq.id,
+            entity_label=rfq.rfq_number,
+            description='ترسية الطلبية',
+            request=request,
+        )
+        return Response(PurchaseRFQSerializer(rfq, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='recipients')
+    def add_recipient(self, request, pk=None):
+        """المسموح بعد الإرسال (#108 §٧): إضافة مستقبِل — لا يمسّ البنود ولا الحالة."""
+        tenant = get_tenant(request)
+        rfq = self.get_object()
+        if rfq.status in (PurchaseRFQ.STATUS_CANCELLED, PurchaseRFQ.STATUS_AWARDED):
+            raise ValidationError('لا يمكن إضافة مستقبِل لطلبية ملغاة أو مُرساة.')
+        supplier_id = request.data.get('supplier')
+        if not supplier_id:
+            raise ValidationError({'supplier': 'اختر مورداً.'})
+        supplier = Partner.objects.filter(
+            pk=supplier_id, tenant=tenant, partner_type='Supplier',
+        ).first()
+        if supplier is None:
+            raise ValidationError({'supplier': 'المورد غير موجود أو لا يتبع الشركة الحالية.'})
+        recipient, created = PurchaseRFQRecipient.objects.get_or_create(
+            tenant=tenant, rfq=rfq, supplier=supplier,
+            defaults={
+                'sent_at': timezone.now() if rfq.status == PurchaseRFQ.STATUS_SENT else None,
+            },
+        )
+        if created:
+            log_activity(
+                action='update',
+                entity_type='purchase_rfq',
+                entity_id=rfq.id,
+                entity_label=rfq.rfq_number or f'RFQ-draft-{rfq.id}',
+                description=f'إضافة مستقبِل: {supplier.name}',
+                request=request,
+                partner_ids=[supplier.pk],
+            )
+        return Response(
+            PurchaseRFQRecipientSerializer(recipient).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 

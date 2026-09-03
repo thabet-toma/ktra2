@@ -321,6 +321,8 @@ class TenantBook(models.Model):
         ('deal', 'صفقة'),
         ('shipment', 'شحنة'),
         ('clearance', 'تخليص جمركي'),
+        # ISSUE #112: طلبية (طلب عروض أسعار) تسبق عرض المورّد — مواصفة #108.
+        ('purchase_rfq', 'طلبية شراء (طلب عروض)'),
     ]
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
