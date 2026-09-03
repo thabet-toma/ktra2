@@ -287,3 +287,40 @@ COMPANY_TEMPLATES = {
         'services': None,
     },
 }
+
+
+# ── أين يُعرض كل قالب؟ ──────────────────────────────────────────────────
+#
+# القوالب ليست قائمةً واحدة تُعرض في كل باب. لها بابان مختلفان:
+#
+# - **إنشاء شركة** (`companies/` و`companies/{id}/set-template/`): شركةُ المستخدم
+#   نفسه. `client_book` **لا مكان له هنا**: دفتر العميل ليس شركةً يملكها أحد،
+#   بل دفترٌ يفتحه مكتبُ محاسبةٍ لزبونه تحت حصّة `office.managed_books`،
+#   وشاشةُ بدايته وقناعه ووحدتُه المرخَّصة (issue #87) كلّها مبنيّة على وجود
+#   مكتبٍ فوقه. من أنشأه كشركةٍ مستقلّة حصل على دفترٍ بلا مكتب: بلا زرّ عودة،
+#   وبلا مكانٍ يظهر فيه.
+# - **فتح دفتر عميل** (`companies/{id}/managed-books/`): `client_book` وحده.
+#   القالبان الآخران يفتحان ERP كاملاً للزبون — وهو نقيض ما بُني له هذا الباب.
+BOOK_ONLY_TEMPLATES: frozenset[str] = frozenset({'client_book'})
+SELF_SERVE_TEMPLATES: tuple[str, ...] = tuple(
+    key for key in COMPANY_TEMPLATES if key not in BOOK_ONLY_TEMPLATES
+)
+DEFAULT_BOOK_TEMPLATE = 'client_book'
+
+
+def assert_self_serve_template(template_key: str) -> None:
+    """قالبٌ يصلح لشركةٍ يملكها المستخدم — لا قالب دفترٍ يلزمه مكتبٌ فوقه."""
+    if template_key in BOOK_ONLY_TEMPLATES:
+        raise ValueError(
+            f'قالب «{COMPANY_TEMPLATES[template_key]["name"]}» لا يُنشأ كشركة '
+            'مستقلّة — يفتحه مكتب المحاسبة لزبونه من «دفاتر عملائي».'
+        )
+
+
+def assert_book_template(template_key: str) -> None:
+    """قالبٌ يصلح لدفتر زبونٍ يمسكه مكتب."""
+    if template_key not in BOOK_ONLY_TEMPLATES:
+        raise ValueError(
+            f'قالب «{COMPANY_TEMPLATES[template_key]["name"]}» يفتح نظاماً '
+            'كاملاً لا دفتراً — دفاتر العملاء تُفتح بقالب «دفتر عميل».'
+        )

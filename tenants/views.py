@@ -267,11 +267,17 @@ class TenantViewSet(viewsets.ModelViewSet):
         name = request.data.get("CompanyName")
         if not name:
             raise DRFValidationError({"CompanyName": "اسم الشركة مطلوب."})
-        from .company_templates import COMPANY_TEMPLATES, DEFAULT_TEMPLATE
+        from .company_templates import (
+            COMPANY_TEMPLATES, DEFAULT_TEMPLATE, assert_self_serve_template,
+        )
         from .services import create_company
         template = request.data.get("template") or DEFAULT_TEMPLATE
         if template not in COMPANY_TEMPLATES:
             raise DRFValidationError({"template": f"قالب الشركة «{template}» غير معروف."})
+        try:
+            assert_self_serve_template(template)
+        except ValueError as e:
+            raise DRFValidationError({"template": str(e)})
         try:
             tenant = create_company(name, request.user, template=template)
         except DjangoValidationError as e:
@@ -486,10 +492,14 @@ class TenantViewSet(viewsets.ModelViewSet):
         tenant = self.get_object()
         self._require_company_manager(request, tenant, "admin.settings.manage")
 
-        from .company_templates import COMPANY_TEMPLATES
+        from .company_templates import COMPANY_TEMPLATES, assert_self_serve_template
         template = request.data.get("template")
         if template not in COMPANY_TEMPLATES:
             raise DRFValidationError({"template": f"قالب الشركة «{template}» غير معروف."})
+        try:
+            assert_self_serve_template(template)
+        except ValueError as e:
+            raise DRFValidationError({"template": str(e)})
 
         from .services import switch_company_template
         try:
@@ -544,11 +554,17 @@ class TenantViewSet(viewsets.ModelViewSet):
         name = request.data.get("CompanyName")
         if not name:
             raise DRFValidationError({"CompanyName": "اسم الدفتر مطلوب."})
-        from .company_templates import COMPANY_TEMPLATES, DEFAULT_TEMPLATE
+        from .company_templates import (
+            COMPANY_TEMPLATES, DEFAULT_BOOK_TEMPLATE, assert_book_template,
+        )
         from .services import create_company
-        template = request.data.get("template") or DEFAULT_TEMPLATE
+        template = request.data.get("template") or DEFAULT_BOOK_TEMPLATE
         if template not in COMPANY_TEMPLATES:
             raise DRFValidationError({"template": f"قالب الشركة «{template}» غير معروف."})
+        try:
+            assert_book_template(template)
+        except ValueError as e:
+            raise DRFValidationError({"template": str(e)})
         try:
             tenant = create_company(name, request.user, template=template, managed_by=office)
         except DjangoValidationError as e:

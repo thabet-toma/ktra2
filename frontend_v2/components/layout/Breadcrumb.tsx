@@ -73,6 +73,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'accounting-year-end-close': 'الإغلاق السنوي',
   'accounting-opening-balances': 'الأرصدة الافتتاحية',
   'accounting-expense-vouchers': 'سندات المصروف',
+  'accounting-revenue-vouchers': 'سندات الإيراد',
   'document-coding': 'ترميز مستندات',
   'client-books': 'دفاتر عملائي',
   'sales-return': 'مرجع البيع',

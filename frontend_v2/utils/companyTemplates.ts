@@ -45,6 +45,24 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   },
 ];
 
+/**
+ * قوالبُ **إنشاء شركة**: ما يملكه المستخدم لنفسه. `client_book` ليس منها —
+ * دفتر العميل يفتحه مكتبُ محاسبةٍ لزبونه من «دفاتر عملائي» تحت حصّة
+ * `office.managed_books`، وشاشةُ بدايته وقناعه ووحدته المرخَّصة كلّها مبنيّة
+ * على وجود مكتبٍ فوقه؛ من أنشأه شركةً مستقلّة حصل على دفترٍ بلا مكتب.
+ * الخادم يفرض القاعدة نفسها (`tenants.company_templates.assert_self_serve_template`)
+ * — هذه القائمة عرضٌ لها لا مصدرُها.
+ */
+export const SELF_SERVE_COMPANY_TEMPLATES: readonly CompanyTemplate[] =
+  COMPANY_TEMPLATES.filter((template) => template.key !== 'client_book');
+
+/**
+ * قوالبُ **دفتر العميل**: `client_book` وحده. القالبان الآخران يفتحان نظاماً
+ * كاملاً للزبون — نقيضُ ما بُني له هذا الباب. يفرضها الخادم بـ`assert_book_template`.
+ */
+export const CLIENT_BOOK_TEMPLATES: readonly CompanyTemplate[] =
+  COMPANY_TEMPLATES.filter((template) => template.key === 'client_book');
+
 export function companyTemplateByKey(key: string): CompanyTemplate | undefined {
   return COMPANY_TEMPLATES.find((template) => template.key === key);
 }

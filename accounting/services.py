@@ -3250,6 +3250,11 @@ def create_expense_voucher(
         raise ValidationError("نوع السند غير صالح.")
 
     if expense_account is None:
+        if _voucher_account_entry_is_linked(tenant_id):
+            raise ValidationError(
+                "إعدادات الشركة تُلزم بربط سند المصروف بحسابٍ من شجرة الحسابات "
+                "— اختر الحساب بدل كتابة اسمه."
+            )
         if not expense_account_name:
             raise ValidationError("حدّد حساب المصروف أو اكتب اسمه لإنشائه.")
         expense_account, _created = resolve_expense_account(
@@ -3402,6 +3407,23 @@ REVENUE_VOUCHER_VAT_OUTPUT_CODE = "2104"
 REVENUE_VOUCHER_TRADE_RECEIVABLES_CODE = "1103"
 
 
+def _voucher_account_entry_is_linked(tenant_id: int) -> bool:
+    """أيُلزِم إعدادُ الشركة كاتبَ السند بحسابٍ من الشجرة بدل النصّ الحرّ؟
+
+    مصدرٌ واحد للقاعدة يقرأه سندا المصروف والإيراد معاً وترميزُ المستندات
+    الدفعيّ — فلا تنحرف بوابةٌ عن أخرى. غياب صفّ الإعدادات = `free` (السلوك
+    القائم منذ issue #56).
+    """
+    from tenants.models import TenantSettings
+
+    mode = (
+        TenantSettings.objects.filter(tenant_id=tenant_id)
+        .values_list("voucher_account_entry_mode", flat=True)
+        .first()
+    )
+    return mode == TenantSettings.VOUCHER_ACCOUNT_ENTRY_LINKED
+
+
 def create_revenue_voucher(
     *, tenant, date, amount, currency, tax_amount=Decimal("0"), exchange_rate=Decimal("1"),
     payment_method, revenue_account=None, revenue_account_name=None, revenue_parent_code=None,
@@ -3445,6 +3467,11 @@ def create_revenue_voucher(
         raise ValidationError("نوع السند غير صالح.")
 
     if revenue_account is None:
+        if _voucher_account_entry_is_linked(tenant_id):
+            raise ValidationError(
+                "إعدادات الشركة تُلزم بربط سند الإيراد بحسابٍ من شجرة الحسابات "
+                "— اختر الحساب بدل كتابة اسمه."
+            )
         if not revenue_account_name:
             raise ValidationError("حدّد حساب الإيراد أو اكتب اسمه لإنشائه.")
         revenue_account, _created = resolve_revenue_account(

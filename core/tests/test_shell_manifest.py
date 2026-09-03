@@ -34,8 +34,33 @@ class ShellManifestFunctionTest(SimpleTestCase):
         group_ids = [g["id"] for g in manifest["groups"]]
         self.assertEqual(
             group_ids,
-            ["home", "entry", "receipt-payment", "parties", "accounts", "declarations", "settings"],
+            ["home", "entry", "receipt-payment", "parties", "accounts", "results",
+             "declarations", "settings"],
         )
+
+    def test_client_book_shows_where_profit_and_tax_land(self):
+        """بلاغ المالك: «مش واضح لما أسجّل مصروف وإيراد وين ببين الأرباح عشان الضريبة».
+
+        الأربعة (إيراد · مصروف · ربح · ضريبة صافية) كانت تُعرض على شاشة البداية
+        وحدها (`ClientBookFinancialPosition`)، ولا قائمةَ دخلٍ ولا ميزانيةً في
+        الشريط كلّه — فمن غادر شاشة البداية لم يجد طريق عودة، وبدا القالبُ
+        دفترَ إدخالٍ بلا نتيجة.
+        """
+        views = {v for g in shell_manifest("client_book")["groups"] for v in g["views"]}
+        self.assertIn("accounting-income-statement", views)
+        self.assertIn("accounting-balance-sheet", views)
+        self.assertIn("dashboard", views)
+
+    def test_client_book_entry_group_carries_both_vouchers(self):
+        """سندا المصروف والإيراد مادّةُ هذا القالب اليومية — في «الإدخال» معاً.
+
+        سند الإيراد كان بلا شاشةٍ في الواجهة أصلاً (نقاطه الخادمية من #80 بلا
+        مستدعٍ)، فلم يكن له مكانٌ يُذكر فيه.
+        """
+        entry = next(
+            g for g in shell_manifest("client_book")["groups"] if g["id"] == "entry")
+        self.assertIn("accounting-expense-vouchers", entry["views"])
+        self.assertIn("accounting-revenue-vouchers", entry["views"])
 
     def test_unbuilt_views_are_declared_not_hidden(self):
         """القاعدة الملزِمة تخصّ القناع لا البناء: شاشةٌ لم تُبنَ بعد تبقى مذكورة،

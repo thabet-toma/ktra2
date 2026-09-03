@@ -90,6 +90,7 @@ export type AppView =
     | "accounting-year-end-close"
     | "accounting-opening-balances"
     | "accounting-expense-vouchers"
+    | "accounting-revenue-vouchers"
     | "document-coding"
     | "client-books"
     | "sales-return"

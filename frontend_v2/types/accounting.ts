@@ -143,6 +143,31 @@ export interface ExpenseVoucherDto {
   created_at?: string | null;
 }
 
+export interface RevenueVoucherDto {
+  id: number;
+  number: number;
+  date: string;
+  revenue_account: number;
+  revenue_account_name?: string | null;
+  revenue_account_code?: string | null;
+  amount: string;
+  tax_amount: string;
+  currency: number;
+  currency_code?: string | null;
+  exchange_rate: string;
+  payment_method: "cash" | "cheque" | "on_account";
+  cash_or_bank_account?: number | null;
+  cash_or_bank_account_name?: string | null;
+  payer_partner?: number | null;
+  payer_partner_name?: string | null;
+  payer_name?: string | null;
+  description?: string | null;
+  attachment_url?: string | null;
+  journal?: number | null;
+  is_posted: boolean;
+  created_at?: string | null;
+}
+
 export interface ChequeDepositBatchResult {
   deposited_count: number;
   batch_ref: string;

@@ -186,6 +186,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "accounting-cheques", label: "الشيكات", icon: <Receipt className="h-4 w-4" /> },
     // issue #56 — سند مصروف: مستندٌ عامٌّ لكل شركة بلا مورّدٍ إلزامي.
     { view: "accounting-expense-vouchers", label: "سندات المصروف", icon: <FileSignature className="h-4 w-4" /> },
+    { view: "accounting-revenue-vouchers", label: "سندات الإيراد", icon: <FileSignature className="h-4 w-4" /> },
   ];
 
   // 8) التقارير — كل تقرير يفتح في تبويبه الخاص (G2).

@@ -4,7 +4,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useCompany } from "../../contexts/CompanyContext";
 import { clientLogger } from "../../services/logger";
 import { LogoIcon } from "../icons/LogoIcon";
-import { COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
+import { SELF_SERVE_COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
 
 const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   Building2,
@@ -83,7 +83,7 @@ export const FirstCompanyOnboarding: React.FC = () => {
               <div>
                 <span className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-200">نوع الشركة</span>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {COMPANY_TEMPLATES.map((option) => {
+                  {SELF_SERVE_COMPANY_TEMPLATES.map((option) => {
                     const Icon = TEMPLATE_ICONS[option.icon] ?? Building2;
                     const isSelected = template === option.key;
                     return (

@@ -16,7 +16,7 @@ import { useConfirm } from '../../../contexts/ConfirmContext';
 import { useToast } from '../../../contexts/ToastContext';
 import type { WorkspaceCompany } from '../../../types/accountant';
 import { resolveClientBookTenantId } from '../../../utils/clientBookAccess';
-import { COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE } from '../../../utils/companyTemplates';
+import { DEFAULT_CLIENT_BOOK_TEMPLATE, companyTemplateByKey } from '../../../utils/companyTemplates';
 import { formatDateValue } from '../../../utils/formatDate';
 import { platformHint } from '../../../utils/officeClients';
 import { OfficeClientForm } from './OfficeClientForm';
@@ -67,7 +67,9 @@ export const OfficeExternalClientPage: React.FC<{
   const confirm = useConfirm();
   // ISSUE #65: قناة الدفاتر المُدارة — نفس النقطة التي تغذّي «دفاتر عملائي».
   const { managedBooks, officeTenantId, openManagedBook, createManagedBook } = useCompany();
-  const [bookTemplate, setBookTemplate] = useState<string>(DEFAULT_COMPANY_TEMPLATE);
+  // القالب ثابت: هذا البابُ يفتح **دفتر عميل**. كان يفتح على `general`
+  // (نظامٌ تجاريٌّ كامل) وهو نقيض الغرض، ويفرض الخادم القاعدة نفسها.
+  const bookTemplate = DEFAULT_CLIENT_BOOK_TEMPLATE;
   const [openingBook, setOpeningBook] = useState(false);
   const [tab, setTab] = useState<Tab>('data');
   const [client, setClient] = useState<PracticeClientRecord | null>(null);
@@ -287,18 +289,15 @@ export const OfficeExternalClientPage: React.FC<{
                   حساباته — دفترٌ لا يظهر في مبدّل شركاتك، وتعود منه إلى مكتبك بزرّ واحد.
                 </p>
                 <div className="flex flex-wrap items-end gap-3">
-                  <label className="block">
+                  <div>
                     <span className="text-xs font-bold text-slate-500 dark:text-slate-400">قالب الدفتر</span>
-                    <select
-                      value={bookTemplate}
-                      onChange={(e) => setBookTemplate(e.target.value)}
-                      className="mt-1 rounded-xl border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+                    <p
+                      data-testid="external-client-book-template"
+                      className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                     >
-                      {COMPANY_TEMPLATES.map((item) => (
-                        <option key={item.key} value={item.key}>{item.name}</option>
-                      ))}
-                    </select>
-                  </label>
+                      {companyTemplateByKey(bookTemplate)?.name}
+                    </p>
+                  </div>
                   <button
                     type="button"
                     disabled={openingBook}

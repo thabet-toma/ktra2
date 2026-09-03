@@ -202,6 +202,24 @@ class TenantSettings(models.Model):
         help_text="مهلة إنهاء الجلسة عند الخمول بالدقائق (5..1440)",
     )
 
+    # سند المصروف/الإيراد: أيُلزَم كاتبُه باختيار حسابٍ من الشجرة، أم يكفيه
+    # أن يكتب اسم المصروف نصّاً فيُنشأ له حسابٌ تحت أبيه المعياري؟
+    # الافتراضي `free` — هو السلوك القائم منذ issue #56، وتغييرُه افتراضاً كان
+    # يكسر كل شركةٍ تكتب مصاريفها نصّاً اليوم. من يريد شجرةً مضبوطة لا تنبت
+    # فيها حسابات جديدة مع كل سند يختار `linked`.
+    VOUCHER_ACCOUNT_ENTRY_FREE = 'free'
+    VOUCHER_ACCOUNT_ENTRY_LINKED = 'linked'
+    VOUCHER_ACCOUNT_ENTRY_CHOICES = [
+        (VOUCHER_ACCOUNT_ENTRY_FREE, 'نصّ حرّ — يُنشأ الحساب إن لم يوجد'),
+        (VOUCHER_ACCOUNT_ENTRY_LINKED, 'حساب من الشجرة إلزاماً'),
+    ]
+    voucher_account_entry_mode = models.CharField(
+        max_length=10, default=VOUCHER_ACCOUNT_ENTRY_FREE,
+        choices=VOUCHER_ACCOUNT_ENTRY_CHOICES,
+        db_column='VoucherAccountEntryMode',
+        help_text='سندا المصروف والإيراد: نصّ حرّ يُنشئ حساباً، أم ربطٌ بحسابٍ قائم',
+    )
+
     # T-HR: هل يُعلَن غياب الموظف في يومٍ لا وردية مُسنَدة له فيه؟
     # الافتراضي **لا**: شركةٌ فعّلت الحضور ولم تبنِ جداولها بعد كانت ستستيقظ
     # على موظفيها كلّهم «غائبين» بأثرٍ مالي في مسير الرواتب.

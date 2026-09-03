@@ -56,6 +56,8 @@ class TenantSettingsSerializer(serializers.ModelSerializer):
             "idle_timeout_minutes",
             # الموارد البشرية (per-company)
             "hr_absence_requires_shift",
+            # سندا المصروف/الإيراد: نصّ حرّ أم ربطٌ بحساب
+            "voucher_account_entry_mode",
         ]
 
 

@@ -114,6 +114,7 @@ const AccountingJournalListPage = lazyPage(() => import("./components/accounting
 const AccountingJournalEntryPage = lazyPage(() => import("./components/accounting/AccountingJournalEntryPage").then((m) => ({ default: m.AccountingJournalEntryPage })));
 const AccountingChequesPage = lazyPage(() => import("./components/accounting/AccountingChequesPage").then((m) => ({ default: m.AccountingChequesPage })));
 const ExpenseVouchersPage = lazyPage(() => import("./components/accounting/ExpenseVouchersPage").then((m) => ({ default: m.ExpenseVouchersPage })));
+const RevenueVouchersPage = lazyPage(() => import("./components/accounting/RevenueVouchersPage").then((m) => ({ default: m.RevenueVouchersPage })));
 // ISSUE #85: شاشة الترميز الدفعي — القسم ٧ من #77، فوق نقطة الحفظ التي بنتها #84.
 const DocumentCodingPage = lazyPage(() => import("./components/accounting/DocumentCodingPage").then((m) => ({ default: m.DocumentCodingPage })));
 const ClientBooksPanel = lazyPage(() => import("./components/office/ClientBooksPanel").then((m) => ({ default: m.ClientBooksPanel })));
@@ -292,6 +293,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "accounting-year-end-close": "/accounting/year-end-close",
   "accounting-opening-balances": "/accounting/opening-balances",
   "accounting-expense-vouchers": "/accounting/expense-vouchers",
+  "accounting-revenue-vouchers": "/accounting/revenue-vouchers",
   "document-coding": "/accounting/document-coding",
   "client-books": "/client-books",
   "property-rental": "/property-rental",
@@ -2124,6 +2126,12 @@ const App: React.FC = () => {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <ExpenseVouchersPage />;
+
+      case "accounting-revenue-vouchers":
+        if (!canView(appView)) {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <RevenueVouchersPage />;
 
       case "document-coding":
         if (!canView(appView)) {

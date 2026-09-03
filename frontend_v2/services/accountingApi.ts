@@ -15,6 +15,7 @@ import type {
   ChequeDto,
   CodingRuleDto,
   ExpenseVoucherDto,
+  RevenueVoucherDto,
   OpeningBalanceDto,
   OpeningBalanceLinesInput,
   VoucherBatchSaveResult,
@@ -1032,6 +1033,52 @@ export const accountingApi = {
       method: "POST", headers: headers(), body: "{}",
     });
     await handle(res, "unpostExpenseVoucher");
+    return res.json();
+  },
+
+  // ─── issue #80: سند إيراد — مرآة سند المصروف بعكس الاتجاه ───
+  //
+  // النقاط الثلاث موجودة في الخادم منذ #80 وبلا مستدعٍ واحد في الواجهة: كان
+  // سند الإيراد يُكتب من شاشة الترميز الدفعي وحدها ثم لا يُرى في أي قائمة —
+  // مالٌ يدخل الدفاتر بلا شاشةٍ تعرضه ولا طريقَ للتراجع عنه.
+
+  /** قائمة سندات الإيراد (الأحدث أولاً — ترتيب الخادم). */
+  getRevenueVouchers: (): Promise<RevenueVoucherDto[]> =>
+    fetch(`${ACC}/revenue-vouchers/`, { headers: headers() }).then(asList) as Promise<RevenueVoucherDto[]>,
+
+  /**
+   * ينشئ السند ويرحّله فوراً. `revenue_account` أو `revenue_account_name` —
+   * أحدهما يكفي؛ الاسم يُنشئ حساباً تحت «42» إن لم يوجد (ما لم يُلزِم إعدادُ
+   * الشركة بالربط بحسابٍ قائم). `payer_partner`/`payer_name` اختياريان.
+   */
+  createRevenueVoucher: async (body: {
+    date: string;
+    amount: string | number;
+    currency: number;
+    tax_amount?: string | number;
+    exchange_rate?: string | number;
+    payment_method: "cash" | "cheque" | "on_account";
+    revenue_account?: number;
+    revenue_account_name?: string;
+    cash_or_bank_account?: number;
+    payer_partner?: number;
+    payer_name?: string;
+    description?: string;
+    attachment_url?: string;
+  }): Promise<RevenueVoucherDto> => {
+    const res = await fetch(`${ACC}/revenue-vouchers/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createRevenueVoucher");
+    return res.json();
+  },
+
+  /** التراجع عن ترحيل سند إيراد — يعيد الأرصدة حرفياً. */
+  unpostRevenueVoucher: async (id: number): Promise<RevenueVoucherDto> => {
+    const res = await fetch(`${ACC}/revenue-vouchers/${id}/unpost/`, {
+      method: "POST", headers: headers(), body: "{}",
+    });
+    await handle(res, "unpostRevenueVoucher");
     return res.json();
   },
 

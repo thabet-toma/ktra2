@@ -1,14 +1,14 @@
 /**
- * issue #56 — سند مصروف: مستندٌ عامٌّ لكل شركة، بلا مورّدٍ إلزامي وبلا مخزون.
+ * issue #80 — سند إيراد: مرآةُ شاشة سند المصروف بعكس الاتجاه.
  *
- * المشكلة قبل هذه الشاشة كانت شخصاً لا نقطة API: «قيدٌ يدوي يلزمه من يعرف
- * المدين من الدائن — صاحب المحلّ لا يعرف». النموذج هنا يسأل بلغته: كم، بماذا
- * صُرف، وكيف دُفع — ويُقرّر عنه المدين والدائن، مع معاينة القيد قبل الحفظ
- * (`utils/expenseVoucherEntryPreview.ts`، نفس نهج `voucherEntryPreview.ts`
- * لسندَي القبض والصرف).
+ * الخادم بناها كاملةً منذ #80 (`RevenueVoucherViewSet` + `create_revenue_voucher`
+ * + `unpost_revenue_voucher`) وبقيت **بلا مستدعٍ واحد في الواجهة**: كان سند
+ * الإيراد يُكتب من شاشة الترميز الدفعي وحدها ثم لا يظهر في أي قائمة — فمن
+ * سجّل إيراداً لم يجد ما سجّله، ولا طريقاً للتراجع عنه إلا بحذف قيده من دفتر
+ * اليومية يدوياً.
  *
- * الحفظ يرحّل فوراً (لا مسودة وسطى — الخادم `create_expense_voucher` يفعل
- * الاثنين في نداء واحد)، والتراجع فعلٌ صريح خلف تأكيد.
+ * الشاشة مرآةٌ متعمَّدة لـ`ExpenseVouchersPage`: نفس الأعمدة ونفس النموذج ونفس
+ * معاينة القيد — من عرف أختها لا يتعلّم هذه من جديد.
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { accountingApi } from "../../services/accountingApi";
@@ -18,39 +18,39 @@ import { usePermissions } from "../../contexts/PermissionsContext";
 import { useSimpleUi } from "../../hooks/useSimpleUi";
 import { useTenantSettings } from "../../hooks/useTenantSettings";
 import { humanizeThrown } from "../../utils/drfError";
-import { voucherAccountEntryIsLinked } from "../../utils/voucherAccountEntryMode";
 import { formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
 import { AccountTreeField } from "./AccountTreePicker";
 import { PaymentVoucherModal } from "../sales/PaymentVoucherParts";
 import {
-  buildExpenseVoucherEntryPreview,
-  EXPENSE_PAYMENT_METHODS,
-  expenseVoucherRequiresCashAccount,
-  type ExpensePaymentMethod,
-} from "../../utils/expenseVoucherEntryPreview";
+  buildRevenueVoucherEntryPreview,
+  REVENUE_PAYMENT_METHODS,
+  revenueVoucherRequiresCashAccount,
+  type RevenuePaymentMethod,
+} from "../../utils/revenueVoucherEntryPreview";
+import { voucherAccountEntryIsLinked } from "../../utils/voucherAccountEntryMode";
 import { KitDocumentShell, KitDenseTable } from "../kit";
 import type { KitToolbarAction, DenseColumn } from "../kit";
 import { Plus, RotateCcw } from "lucide-react";
-import type { AccountingPartner, ExpenseVoucherDto } from "../../types/accounting";
+import type { AccountingPartner, RevenueVoucherDto } from "../../types/accounting";
 
 type AccountRow = {
   id: number; code: string | null; name: string | null; parent: number | null; account_type?: string | null;
 };
 type CurrencyRow = { CurrencyID: number; Code: string };
 
-const PAYMENT_METHOD_LABEL: Record<ExpensePaymentMethod, string> =
-  Object.fromEntries(EXPENSE_PAYMENT_METHODS.map((m) => [m.value, m.label])) as Record<ExpensePaymentMethod, string>;
+const PAYMENT_METHOD_LABEL: Record<RevenuePaymentMethod, string> =
+  Object.fromEntries(REVENUE_PAYMENT_METHODS.map((m) => [m.value, m.label])) as Record<RevenuePaymentMethod, string>;
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export const ExpenseVouchersPage: React.FC = () => {
+export const RevenueVouchersPage: React.FC = () => {
   const toast = useToast();
   const confirm = useConfirm();
   const { can } = usePermissions();
   const { show: showAdv } = useSimpleUi();
 
-  const [rows, setRows] = useState<ExpenseVoucherDto[]>([]);
+  const [rows, setRows] = useState<RevenueVoucherDto[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyRow[]>([]);
   const [partners, setPartners] = useState<AccountingPartner[]>([]);
@@ -65,7 +65,7 @@ export const ExpenseVouchersPage: React.FC = () => {
     setErr(null);
     try {
       const [vouchers, accs, currs, parts] = await Promise.all([
-        accountingApi.getExpenseVouchers(),
+        accountingApi.getRevenueVouchers(),
         accountingApi.getAccounts() as Promise<AccountRow[]>,
         accountingApi.getCurrencies() as Promise<CurrencyRow[]>,
         accountingApi.getPartners() as Promise<AccountingPartner[]>,
@@ -92,24 +92,24 @@ export const ExpenseVouchersPage: React.FC = () => {
     [accounts],
   );
 
-  const beneficiaryLabelOf = useCallback(
-    (r: ExpenseVoucherDto) => r.beneficiary_partner_name || r.beneficiary_name || "—",
+  const payerLabelOf = useCallback(
+    (r: RevenueVoucherDto) => r.payer_partner_name || r.payer_name || "—",
     [],
   );
 
-  const doUnpost = useCallback(async (row: ExpenseVoucherDto) => {
+  const doUnpost = useCallback(async (row: RevenueVoucherDto) => {
     if (busy) return;
     if (!(await confirm({
-      title: "التراجع عن ترحيل سند المصروف",
-      message: `سيُحذف قيد سند المصروف #${row.number} وتعود الأرصدة إلى ما كانت عليه. المتابعة؟`,
+      title: "التراجع عن ترحيل سند الإيراد",
+      message: `سيُحذف قيد سند الإيراد #${row.number} وتعود الأرصدة إلى ما كانت عليه. المتابعة؟`,
       confirmText: "ألغِ الترحيل",
       danger: true,
     }))) return;
     setBusy(true);
     setErr(null);
     try {
-      await accountingApi.unpostExpenseVoucher(row.id);
-      toast(`أُلغي ترحيل سند المصروف #${row.number}`, "success");
+      await accountingApi.unpostRevenueVoucher(row.id);
+      toast(`أُلغي ترحيل سند الإيراد #${row.number}`, "success");
       await load();
     } catch (e: unknown) {
       setErr(humanizeThrown(e, "تعذّر التراجع عن الترحيل"));
@@ -118,21 +118,21 @@ export const ExpenseVouchersPage: React.FC = () => {
     }
   }, [busy, confirm, load, toast]);
 
-  const columns: DenseColumn<ExpenseVoucherDto>[] = [
+  const columns: DenseColumn<RevenueVoucherDto>[] = [
     { key: "date", header: "التاريخ", width: "110px", render: (r) => formatDateLocalized(r.date) || r.date },
     { key: "number", header: "الرقم", width: "70px", render: (r) => r.number || "—" },
     {
-      key: "expense_account", header: "حساب المصروف", width: "180px",
-      render: (r) => (r.expense_account_code
-        ? `${r.expense_account_code} — ${r.expense_account_name ?? ""}`
-        : accountLabelOf(r.expense_account)),
+      key: "revenue_account", header: "حساب الإيراد", width: "180px",
+      render: (r) => (r.revenue_account_code
+        ? `${r.revenue_account_code} — ${r.revenue_account_name ?? ""}`
+        : accountLabelOf(r.revenue_account)),
     },
     { key: "amount", header: "المبلغ", width: "100px", numeric: true, render: (r) => formatMoney(r.amount) },
     {
-      key: "payment_method", header: "طريقة الدفع", width: "100px",
+      key: "payment_method", header: "طريقة القبض", width: "100px",
       render: (r) => PAYMENT_METHOD_LABEL[r.payment_method] || r.payment_method,
     },
-    { key: "beneficiary", header: "المستفيد", width: "140px", render: (r) => beneficiaryLabelOf(r) },
+    { key: "payer", header: "الدافع", width: "140px", render: (r) => payerLabelOf(r) },
     { key: "description", header: "الوصف", render: (r) => r.description || "—" },
     {
       key: "status", header: "الحالة", width: "90px",
@@ -145,12 +145,12 @@ export const ExpenseVouchersPage: React.FC = () => {
     {
       key: "actions", header: "", width: "110px",
       render: (r) => (
-        r.is_posted && can("finance.expense.unpost") ? (
+        r.is_posted && can("finance.revenue.unpost") ? (
           <button
             type="button"
             className="ktra-toolbtn"
             disabled={busy}
-            title={`إلغاء ترحيل سند المصروف #${r.number}`}
+            title={`إلغاء ترحيل سند الإيراد #${r.number}`}
             onClick={() => void doUnpost(r)}
           >
             <RotateCcw className="w-3 h-3" />
@@ -162,8 +162,8 @@ export const ExpenseVouchersPage: React.FC = () => {
   ];
 
   const actions: KitToolbarAction[] = [
-    ...(can("finance.expense.create") ? [{
-      key: "new", label: "سند مصروف جديد",
+    ...(can("finance.revenue.create") ? [{
+      key: "new", label: "سند إيراد جديد",
       icon: <Plus className="w-4 h-4" />, onClick: () => setCreating(true),
     }] : []),
     { key: "refresh", label: "تحديث", onClick: () => void load() },
@@ -174,24 +174,24 @@ export const ExpenseVouchersPage: React.FC = () => {
       {err && !creating && (
         <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>
       )}
-      <KitDocumentShell title="سندات المصروف" actions={actions} status={<span className="ktra-status-item">{rows.length} سند</span>}>
-        <KitDenseTable<ExpenseVoucherDto>
+      <KitDocumentShell title="سندات الإيراد" actions={actions} status={<span className="ktra-status-item">{rows.length} سند</span>}>
+        <KitDenseTable<RevenueVoucherDto>
           columns={columns}
           rows={rows}
           getRowKey={(r) => r.id}
           loading={loading}
-          emptyHint="لا سندات مصروف بعد"
+          emptyHint="لا سندات إيراد بعد"
           exportable
-          exportFilename="expense-vouchers"
+          exportFilename="revenue-vouchers"
         />
       </KitDocumentShell>
 
       {creating && (
-        <NewExpenseVoucherModal
+        <NewRevenueVoucherModal
           accounts={accounts}
           currencies={currencies}
           partners={partners}
-          showBeneficiary={(keepIfSet) => showAdv("doc.expense-beneficiary", keepIfSet)}
+          showPayer={(keepIfSet) => showAdv("doc.revenue-payer", keepIfSet)}
           onClose={() => setCreating(false)}
           onSaved={() => { setCreating(false); void load(); }}
         />
@@ -200,30 +200,30 @@ export const ExpenseVouchersPage: React.FC = () => {
   );
 };
 
-const NewExpenseVoucherModal: React.FC<{
+const NewRevenueVoucherModal: React.FC<{
   accounts: AccountRow[];
   currencies: CurrencyRow[];
   partners: AccountingPartner[];
-  showBeneficiary: (keepIfSet: boolean) => boolean;
+  showPayer: (keepIfSet: boolean) => boolean;
   onClose: () => void;
   onSaved: () => void;
-}> = ({ accounts, currencies, partners, showBeneficiary, onClose, onSaved }) => {
+}> = ({ accounts, currencies, partners, showPayer, onClose, onSaved }) => {
   const toast = useToast();
   const { preferences } = useTenantSettings();
-  // نفس الإعداد الذي يفرضه الخادم في `create_expense_voucher`: تُخفى خانةُ
+  // نفس الإعداد الذي يفرضه الخادم في `create_revenue_voucher`: تُخفى خانةُ
   // الاسم الحرّ حين يُلزِم بالربط، فلا يكتب المستخدم فيها ثم يُردّ بخطأ.
   const linkedOnly = voucherAccountEntryIsLinked(preferences?.voucher_account_entry_mode);
   const [date, setDate] = useState(today());
   const [amount, setAmount] = useState("");
   const [taxAmount, setTaxAmount] = useState("0");
   const [currencyId, setCurrencyId] = useState<number | "">(currencies[0]?.CurrencyID ?? "");
-  const [exchangeRate, setExchangeRate] = useState("1");
-  const [paymentMethod, setPaymentMethod] = useState<ExpensePaymentMethod>("cash");
-  const [expenseAccountId, setExpenseAccountId] = useState<number | "">("");
-  const [expenseAccountName, setExpenseAccountName] = useState("");
+  const [exchangeRate] = useState("1");
+  const [paymentMethod, setPaymentMethod] = useState<RevenuePaymentMethod>("cash");
+  const [revenueAccountId, setRevenueAccountId] = useState<number | "">("");
+  const [revenueAccountName, setRevenueAccountName] = useState("");
   const [cashAccountId, setCashAccountId] = useState<number | "">("");
-  const [beneficiaryPartnerId, setBeneficiaryPartnerId] = useState<number | "">("");
-  const [beneficiaryName, setBeneficiaryName] = useState("");
+  const [payerPartnerId, setPayerPartnerId] = useState<number | "">("");
+  const [payerName, setPayerName] = useState("");
   const [description, setDescription] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -231,30 +231,30 @@ const NewExpenseVoucherModal: React.FC<{
   const amountNum = Number(amount) || 0;
   const taxNum = Number(taxAmount) || 0;
 
-  const expenseAccountLabel = useMemo(() => {
-    if (expenseAccountId) {
-      const a = accounts.find((x) => x.id === expenseAccountId);
+  const revenueAccountLabel = useMemo(() => {
+    if (revenueAccountId) {
+      const a = accounts.find((x) => x.id === revenueAccountId);
       return a ? `${a.code ?? ""} ${a.name ?? ""}`.trim() : "";
     }
-    return expenseAccountName.trim();
-  }, [accounts, expenseAccountId, expenseAccountName]);
+    return revenueAccountName.trim();
+  }, [accounts, revenueAccountId, revenueAccountName]);
 
   const cashAccountLabel = useMemo(() => {
     const a = accounts.find((x) => x.id === cashAccountId);
     return a ? `${a.code ?? ""} ${a.name ?? ""}`.trim() : null;
   }, [accounts, cashAccountId]);
 
-  const beneficiaryLabel = beneficiaryPartnerId
-    ? (partners.find((p) => p.id === beneficiaryPartnerId)?.name || null)
-    : (beneficiaryName.trim() || null);
+  const payerLabel = payerPartnerId
+    ? (partners.find((p) => p.id === payerPartnerId)?.name || null)
+    : (payerName.trim() || null);
 
-  const preview = buildExpenseVoucherEntryPreview({
-    expenseAccountLabel: expenseAccountLabel || "حساب المصروف",
+  const preview = buildRevenueVoucherEntryPreview({
+    revenueAccountLabel: revenueAccountLabel || "حساب الإيراد",
     amount: amountNum,
     taxAmount: taxNum,
     paymentMethod,
     cashAccountLabel,
-    beneficiaryLabel,
+    payerLabel,
   });
 
   const submit = useCallback(async () => {
@@ -262,14 +262,14 @@ const NewExpenseVoucherModal: React.FC<{
       setErr("المبلغ يجب أن يكون أكبر من صفر");
       return;
     }
-    if (!expenseAccountId && (linkedOnly || !expenseAccountName.trim())) {
+    if (!revenueAccountId && (linkedOnly || !revenueAccountName.trim())) {
       setErr(linkedOnly
-        ? "إعدادات الشركة تُلزم باختيار حساب المصروف من الشجرة"
-        : "اختر حساب المصروف من الشجرة أو اكتب اسمه");
+        ? "إعدادات الشركة تُلزم باختيار حساب الإيراد من الشجرة"
+        : "اختر حساب الإيراد من الشجرة أو اكتب اسمه");
       return;
     }
-    if (expenseVoucherRequiresCashAccount(paymentMethod) && !cashAccountId) {
-      setErr("حدّد الصندوق/البنك الذي دُفع منه");
+    if (revenueVoucherRequiresCashAccount(paymentMethod) && !cashAccountId) {
+      setErr("حدّد الصندوق/البنك الذي قُبض فيه");
       return;
     }
     if (!currencyId) {
@@ -279,37 +279,36 @@ const NewExpenseVoucherModal: React.FC<{
     setSubmitting(true);
     setErr(null);
     try {
-      const saved = await accountingApi.createExpenseVoucher({
+      const saved = await accountingApi.createRevenueVoucher({
         date,
         amount: amountNum,
         tax_amount: taxNum,
         currency: Number(currencyId),
         exchange_rate: exchangeRate || "1",
         payment_method: paymentMethod,
-        ...(expenseAccountId ? { expense_account: Number(expenseAccountId) } : {}),
-        ...(!expenseAccountId && expenseAccountName.trim() ? { expense_account_name: expenseAccountName.trim() } : {}),
-        ...(expenseVoucherRequiresCashAccount(paymentMethod) && cashAccountId ? { cash_or_bank_account: Number(cashAccountId) } : {}),
-        ...(beneficiaryPartnerId ? { beneficiary_partner: Number(beneficiaryPartnerId) } : {}),
-        ...(!beneficiaryPartnerId && beneficiaryName.trim() ? { beneficiary_name: beneficiaryName.trim() } : {}),
+        ...(revenueAccountId ? { revenue_account: Number(revenueAccountId) } : {}),
+        ...(!revenueAccountId && revenueAccountName.trim() ? { revenue_account_name: revenueAccountName.trim() } : {}),
+        ...(revenueVoucherRequiresCashAccount(paymentMethod) && cashAccountId ? { cash_or_bank_account: Number(cashAccountId) } : {}),
+        ...(payerPartnerId ? { payer_partner: Number(payerPartnerId) } : {}),
+        ...(!payerPartnerId && payerName.trim() ? { payer_name: payerName.trim() } : {}),
         ...(description.trim() ? { description: description.trim() } : {}),
       });
-      toast(`تم تسجيل سند المصروف #${saved.number} وترحيله`, "success");
+      toast(`تم تسجيل سند الإيراد #${saved.number} وترحيله`, "success");
       onSaved();
     } catch (e: unknown) {
-      setErr(humanizeThrown(e, "فشل حفظ سند المصروف"));
+      setErr(humanizeThrown(e, "فشل حفظ سند الإيراد"));
     } finally {
       setSubmitting(false);
     }
-  }, [amountNum, taxNum, currencyId, exchangeRate, paymentMethod, expenseAccountId, expenseAccountName,
-      linkedOnly, cashAccountId, beneficiaryPartnerId, beneficiaryName, description, date, onSaved, toast]);
+  }, [amountNum, taxNum, currencyId, exchangeRate, paymentMethod, revenueAccountId, revenueAccountName,
+      linkedOnly, cashAccountId, payerPartnerId, payerName, description, date, onSaved, toast]);
 
-  // قاعدة السقوط للظهور: مستفيدٌ سُمِّي فعلاً (من فتح النافذة على تعديل لاحق
-  // أو من إدخال جارٍ) يبقى ظاهراً في الوضع السهل رغم طيّه افتراضياً.
-  const showBeneficiaryField = showBeneficiary(Boolean(beneficiaryPartnerId || beneficiaryName));
+  // قاعدة السقوط للظهور: دافعٌ سُمِّي فعلاً يبقى ظاهراً في الوضع السهل.
+  const showPayerField = showPayer(Boolean(payerPartnerId || payerName));
 
   return (
     <PaymentVoucherModal
-      title="سند مصروف جديد"
+      title="سند إيراد جديد"
       error={err}
       submitting={submitting}
       submitLabel="حفظ وترحيل"
@@ -334,39 +333,39 @@ const NewExpenseVoucherModal: React.FC<{
         </label>
 
         <label className="ktra-field" style={{ gridColumn: linkedOnly ? "span 3" : "span 2" }}>
-          <span className="ktra-field-label">حساب المصروف — ماذا صُرف *</span>
+          <span className="ktra-field-label">حساب الإيراد — ماذا قُبض *</span>
           <AccountTreeField
             accounts={accounts}
-            value={expenseAccountId}
-            onChange={(id) => { setExpenseAccountId(id ?? ""); if (id) setExpenseAccountName(""); }}
-            purpose="expense"
-            title="اختيار حساب المصروف"
+            value={revenueAccountId}
+            onChange={(id) => { setRevenueAccountId(id ?? ""); if (id) setRevenueAccountName(""); }}
+            purpose="revenue"
+            title="اختيار حساب الإيراد"
             placeholder="— اختر من الشجرة —"
           />
         </label>
         {!linkedOnly && (
           <label className="ktra-field">
-            <span className="ktra-field-label">أو اسم مصروف جديد</span>
+            <span className="ktra-field-label">أو اسم إيراد جديد</span>
             <input
               className="ktra-input"
-              placeholder="مثال: اشتراك إنترنت"
-              value={expenseAccountName}
-              disabled={!!expenseAccountId}
-              onChange={(e) => setExpenseAccountName(e.target.value)}
+              placeholder="مثال: عمولة وساطة"
+              value={revenueAccountName}
+              disabled={!!revenueAccountId}
+              onChange={(e) => setRevenueAccountName(e.target.value)}
             />
           </label>
         )}
 
         <label className="ktra-field">
-          <span className="ktra-field-label">طريقة الدفع</span>
+          <span className="ktra-field-label">طريقة القبض</span>
           <select
             className="ktra-input" value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value as ExpensePaymentMethod)}
+            onChange={(e) => setPaymentMethod(e.target.value as RevenuePaymentMethod)}
           >
-            {EXPENSE_PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            {REVENUE_PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
         </label>
-        {expenseVoucherRequiresCashAccount(paymentMethod) && (
+        {revenueVoucherRequiresCashAccount(paymentMethod) && (
           <label className="ktra-field" style={{ gridColumn: "span 2" }}>
             <span className="ktra-field-label">الصندوق / البنك *</span>
             <AccountTreeField
@@ -380,28 +379,28 @@ const NewExpenseVoucherModal: React.FC<{
         )}
 
         <label className="ktra-field">
-          <span className="ktra-field-label">ضريبة مدخلات (اختياري)</span>
+          <span className="ktra-field-label">ضريبة مخرجات (اختياري)</span>
           <input type="number" step="0.01" className="ktra-input ktra-num" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} />
         </label>
       </div>
 
-      {showBeneficiaryField && (
+      {showPayerField && (
         <div className="mt-3 grid grid-cols-2 gap-2">
           <label className="ktra-field">
-            <span className="ktra-field-label">المستفيد (اختياري)</span>
+            <span className="ktra-field-label">الدافع (اختياري)</span>
             <select
-              className="ktra-input" value={beneficiaryPartnerId}
-              onChange={(e) => { setBeneficiaryPartnerId(e.target.value ? Number(e.target.value) : ""); if (e.target.value) setBeneficiaryName(""); }}
+              className="ktra-input" value={payerPartnerId}
+              onChange={(e) => { setPayerPartnerId(e.target.value ? Number(e.target.value) : ""); if (e.target.value) setPayerName(""); }}
             >
-              <option value="">— بلا مستفيد —</option>
+              <option value="">— بلا دافع —</option>
               {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </label>
           <label className="ktra-field">
             <span className="ktra-field-label">أو اسم حرّ</span>
             <input
-              className="ktra-input" value={beneficiaryName} disabled={!!beneficiaryPartnerId}
-              onChange={(e) => setBeneficiaryName(e.target.value)}
+              className="ktra-input" value={payerName} disabled={!!payerPartnerId}
+              onChange={(e) => setPayerName(e.target.value)}
             />
           </label>
         </div>
@@ -421,4 +420,4 @@ const NewExpenseVoucherModal: React.FC<{
   );
 };
 
-export default ExpenseVouchersPage;
+export default RevenueVouchersPage;

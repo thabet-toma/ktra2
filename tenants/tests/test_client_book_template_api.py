@@ -13,21 +13,36 @@ from rest_framework.test import APITestCase
 from accounting.models import Account, ExpenseVoucher, RevenueVoucher
 from accounting.services import create_fiscal_year, create_expense_voucher, create_revenue_voucher
 from tenants.company_templates import CLIENT_BOOK_COA, CLIENT_BOOK_DOCUMENT_TYPES
-from tenants.models import Currency, Tenant, TenantBook
+from tenants.models import Currency, Tenant, TenantBook, UserCompanyMembership
 from tenants.services import create_company
 
 URL = "/api/tenants/companies/"
 
 
 class ClientBookTemplateSeedApiTest(APITestCase):
+    """البذرة تُقاس من **بابها**: `managed-books/` لا `companies/`.
+
+    كان الملف يزرع الدفتر من نقطة إنشاء الشركة العامّة — وهي الآن تردّه 400
+    (بلاغ المالك: «لما أنشئ شركة بيجي دفتر زبون — قيّمه»). الدفتر ليس شركةً
+    يملكها أحد، والباب الوحيد الذي يفتحه هو باب المكتب. الاختبار يقيس البذرة
+    نفسها بالضبط، من الطريق الذي يسلكه المنتج فعلاً.
+    """
+
     def setUp(self):
         self.user = User.objects.create_user(username="cb-owner", password="x")
+        self.office = Tenant.objects.create(
+            CompanyName="مكتب البذرة", SubscriptionPlan="Pro", Status="Active")
+        UserCompanyMembership.objects.create(
+            user=self.user, tenant=self.office, role="manager")
         self.client.force_authenticate(user=self.user)
 
+    def _open_book(self, name):
+        return self.client.post(
+            f"{URL}{self.office.pk}/managed-books/",
+            {"CompanyName": name, "template": "client_book"}, format="json")
+
     def test_seeds_the_stated_tree_with_no_inventory_or_cogs_account(self):
-        res = self.client.post(
-            URL, {"CompanyName": "دفتر عميل تجريبي", "template": "client_book"},
-            format="json")
+        res = self._open_book("دفتر عميل تجريبي")
         self.assertEqual(res.status_code, 201, res.content)
         body = res.json()
         self.assertEqual(body["template"], "client_book")
@@ -45,9 +60,7 @@ class ClientBookTemplateSeedApiTest(APITestCase):
         self.assertEqual(operating.count(), 13)
 
     def test_seeds_only_its_five_document_types(self):
-        res = self.client.post(
-            URL, {"CompanyName": "دفتر عميل ثانٍ", "template": "client_book"},
-            format="json")
+        res = self._open_book("دفتر عميل ثانٍ")
         self.assertEqual(res.status_code, 201, res.content)
         tenant = Tenant.objects.get(pk=res.json()["TenantID"])
 

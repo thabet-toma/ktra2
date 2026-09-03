@@ -85,6 +85,7 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "accounting-opening-balances": "accounting.journal.create",
   // issue #56 — سند مصروف: مستندٌ عامٌّ لكل شركة بلا مورّدٍ إلزامي.
   "accounting-expense-vouchers": "finance.expense.create",
+  "accounting-revenue-vouchers": "finance.revenue.create",
   // issue #85 — الترميز الدفعي: صفوفه سندا إيراد ومصروف معاً، والخادم يفحص
   // صلاحية كلٍّ منهما لكل صفٍّ على حدة (`VoucherBatchSaveView`) — هذا مفتاح
   // رؤية الشاشة وحده لا إذن كل سطرٍ فيها.

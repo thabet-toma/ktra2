@@ -18,23 +18,38 @@ export interface TenantIdentity {
   logo_url?: string | null;
 }
 
+/**
+ * تفضيلاتُ الشركة التي تقرأها شاشاتٌ غير شاشة الهوية. تُقرأ من **نفس** ردّ
+ * `settings/current/` الذي يجلبه هذا الخطّاف أصلاً — لا نداء ثانٍ لحقلٍ واحد.
+ */
+export interface TenantPreferences {
+  /** `free` | `linked` — انظر `utils/voucherAccountEntryMode.ts`. */
+  voucher_account_entry_mode?: string | null;
+}
+
 export function useTenantSettings(): {
   identity: TenantIdentity | null;
+  preferences: TenantPreferences | null;
   loading: boolean;
 } {
   const [identity, setIdentity] = useState<TenantIdentity | null>(null);
+  const [preferences, setPreferences] = useState<TenantPreferences | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
     // P2-9: الشريط الجانبي ومبدّل الشركات يركّبان هذا الخطّاف معاً عند الإقلاع؛
     // المصدر المشترك يجعلهما طلباً واحداً بدل اثنين.
-    getTenantSettings<TenantIdentity>(resolveTenantId())
+    getTenantSettings<TenantIdentity & TenantPreferences>(resolveTenantId())
       .then((s) => {
-        if (alive) setIdentity(s);
+        if (!alive) return;
+        setIdentity(s);
+        setPreferences(s);
       })
       .catch(() => {
-        if (alive) setIdentity(null);
+        if (!alive) return;
+        setIdentity(null);
+        setPreferences(null);
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -44,5 +59,5 @@ export function useTenantSettings(): {
     };
   }, []);
 
-  return { identity, loading };
+  return { identity, preferences, loading };
 }

@@ -3,7 +3,7 @@ import { BookOpenCheck, Building2, Loader2, Plus } from 'lucide-react';
 
 import { useCompany } from '../../contexts/CompanyContext';
 import { useToast } from '../../contexts/ToastContext';
-import { COMPANY_TEMPLATES, DEFAULT_CLIENT_BOOK_TEMPLATE, companyTemplateByKey } from '../../utils/companyTemplates';
+import { DEFAULT_CLIENT_BOOK_TEMPLATE, companyTemplateByKey } from '../../utils/companyTemplates';
 import { formatDateValue } from '../../utils/formatDate';
 
 /**
@@ -29,7 +29,10 @@ export const ClientBooksPanel: React.FC = () => {
   } = useCompany();
   const [opening, setOpening] = useState(false);
   const [name, setName] = useState('');
-  const [template, setTemplate] = useState<string>(DEFAULT_CLIENT_BOOK_TEMPLATE);
+  // القالب ثابتٌ لا خيار: البابُ هذا يفتح **دفتر عميل** وحده. القالبان
+  // الآخران يفتحان نظاماً كاملاً للزبون — نقيضُ ما بُني له، ويفرض الخادم
+  // القاعدة نفسها (`assert_book_template`).
+  const template = DEFAULT_CLIENT_BOOK_TEMPLATE;
   const [saving, setSaving] = useState(false);
 
   if (officeTenantId === null) {
@@ -93,18 +96,15 @@ export const ClientBooksPanel: React.FC = () => {
                 className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
               />
             </label>
-            <label className="block">
+            <div>
               <span className="text-xs font-bold text-slate-500 dark:text-slate-400">قالب الدفتر</span>
-              <select
-                value={template}
-                onChange={(e) => setTemplate(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
+              <p
+                data-testid="client-book-template"
+                className="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
               >
-                {COMPANY_TEMPLATES.map((item) => (
-                  <option key={item.key} value={item.key}>{item.name}</option>
-                ))}
-              </select>
-            </label>
+                {companyTemplateByKey(template)?.name}
+              </p>
+            </div>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             {companyTemplateByKey(template)?.description}

@@ -30,6 +30,7 @@ import { cloudinaryService } from "../../services/cloudinaryService";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { usePasteImageUpload } from "../../utils/clipboardImage";
 import { usePermissions } from "../../contexts/PermissionsContext";
+import { VOUCHER_ACCOUNT_ENTRY_MODES } from "../../utils/voucherAccountEntryMode";
 import { Save, RefreshCw, Database, X, Upload } from "lucide-react";
 
 /** ── Types ───────────────────────────────────────────────────────────── */
@@ -56,6 +57,7 @@ type TenantSettingsData = {
   default_freight_credit_account?: number | null;
   mixture_auto_fill_enabled?: boolean;
   barcode_action?: string | null;
+  voucher_account_entry_mode?: string | null;
 };
 
 type TenantBookRow = {
@@ -351,6 +353,16 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
           onChange={(e) => upd("barcode_action", e.target.value)}>
           <option value="index">فتح فهرس المنتجات</option>
           <option value="cashier">فتح فاتورة كاشير</option>
+        </select>
+      ))}
+      {fld("حساب سند المصروف/الإيراد", (
+        <select className="ktra-input"
+          title="نصّ حرّ: تكتب اسم المصروف فيُفتح له حساب. من الشجرة: لا تنبت حسابات جديدة مع كل سند."
+          value={settings?.voucher_account_entry_mode || "free"}
+          onChange={(e) => upd("voucher_account_entry_mode", e.target.value)}>
+          {VOUCHER_ACCOUNT_ENTRY_MODES.map((m) => (
+            <option key={m.value} value={m.value}>{m.label}</option>
+          ))}
         </select>
       ))}
       {fld("رسالة إشعار الأوفلاين", (

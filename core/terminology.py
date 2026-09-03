@@ -38,6 +38,7 @@ def _default_terms() -> dict[str, str]:
     terms["nav.parties"] = "الأطراف"
     terms["nav.accounts"] = "الحسابات"
     terms["nav.declarations"] = "الإقرارات"
+    terms["nav.results"] = "النتيجة والضريبة"
     terms["nav.settings"] = "الإعدادات"
     terms["action.document_coding"] = "ترميز مستندات"
     terms["empty.shell"] = "لا يوجد شيء هنا بعد."

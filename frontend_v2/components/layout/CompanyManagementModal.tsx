@@ -3,7 +3,7 @@ import { Building2, Calculator, Loader2, Save, Trash2, UserPlus, X } from "lucid
 import { apiGetObject, apiPatchObject, apiPostObject } from "../../services/restApi";
 import type { Tenant, CompanyMembership } from "../../contexts/CompanyContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
-import { COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
+import { SELF_SERVE_COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, companyTemplateByKey, type CompanyTemplateKey } from "../../utils/companyTemplates";
 import { diffTemplateSwitch } from "../../utils/companyTemplateSwitch";
 import { VIEW_LABELS } from "./Breadcrumb";
 
@@ -132,7 +132,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
   const handleSwitchTemplate = (targetKey: CompanyTemplateKey) =>
     run(async () => {
       if (targetKey === tenant.template) return;
-      const targetName = COMPANY_TEMPLATES.find((t) => t.key === targetKey)?.name ?? targetKey;
+      const targetName = companyTemplateByKey(targetKey)?.name ?? targetKey;
       const diff = diffTemplateSwitch(tenant.template, targetKey);
       const lines: string[] = [];
       if (diff.disappearing.length) {
@@ -268,7 +268,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
           <div className="mb-6">
             <label className="text-xs font-bold opacity-80 block mb-1.5">قالب الشركة</label>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {COMPANY_TEMPLATES.map((option) => {
+              {SELF_SERVE_COMPANY_TEMPLATES.map((option) => {
                 const Icon = TEMPLATE_ICONS[option.icon] ?? Building2;
                 const isCurrent = (tenant.template ?? DEFAULT_COMPANY_TEMPLATE) === option.key;
                 return (

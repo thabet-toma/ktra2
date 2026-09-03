@@ -342,15 +342,20 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     ? companies.find((m) => m.tenant.TenantID === currentCompany.TenantID)
     : undefined;
   /**
-   * ISSUE #65 — «أنا داخل دفتر عميل». شرطان: الشركة النشطة دفترٌ مُدار (حقيقةٌ
-   * من الخادم لكل شركة)، ودخلناه من مكتبٍ في هذا التبويب (مفتاح الجلسة). الثاني
-   * لازم لأن من فتح الدفتر بالرابط مباشرةً لا مكتبَ له يعود إليه، فزرُّ عودةٍ
+   * ISSUE #65 — «أنا داخل دفتر عميل». الشرط الأول حقيقةٌ من الخادم: الشركة
+   * النشطة دفترٌ مُدار. والثاني أن تكون **للعودة وجهةٌ معروفة** — زرُّ عودةٍ
    * بلا وجهة أسوأ من غيابه.
+   *
+   * وكانت الوجهة تُقرأ من مفتاح الجلسة وحده، فمن فتح الدفتر بالرابط أو فقد
+   * مفتاح تبويبه بقي داخله بلا زرِّ خروج، وطريقُه الوحيد مبدّلُ الشركات فوق —
+   * وهو لا يعرض الدفتر أصلاً. و`officeTenantId` وجهةٌ صحيحة تماماً: `loadCompanies`
+   * تبحث عن المكتب **المالك** للشركة النشطة في كل مكاتب المستخدم (لا تكتفي
+   * بالأول)، فمتى عُرف كان هو المكتب الذي يعود إليه فعلاً.
    */
   const insideManagedBook =
     currentCompany != null
     && currentCompany.managed_by != null
-    && managedBookOffice() != null;
+    && (managedBookOffice() != null || officeTenantId != null);
   const canAccessImport =
     !!currentCompany?.import_enabled &&
     (!!currentUser?.isSuperAdmin ||

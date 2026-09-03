@@ -51,6 +51,7 @@ SHELL_MANIFESTS: dict[str, dict] = {
                 "views": [
                     "cash-boxes", "accounting-banks", "accounting-bank-reconciliation",
                     "accounting-cheques", "accounting-expense-vouchers",
+                    "accounting-revenue-vouchers",
                     "supplier-payments", "supplier-management",
                 ],
             },
@@ -92,7 +93,14 @@ SHELL_MANIFESTS: dict[str, dict] = {
             {
                 "id": "entry",
                 "label_term": "nav.entry",
-                "views": ["document-coding", "accounting-journal-entry"],
+                # سندا المصروف والإيراد **هنا** لا في «الحسابات»: هما مادّةُ هذا
+                # القالب اليومية — رزمةُ الورق التي يفتح المحاسبُ الدفترَ من
+                # أجلها — لا فرعٌ من إدارة شجرة الحسابات. وكان سند الإيراد بلا
+                # شاشةٍ أصلاً فلم يكن له مكانٌ يُذكر فيه.
+                "views": [
+                    "document-coding", "accounting-expense-vouchers",
+                    "accounting-revenue-vouchers", "accounting-journal-entry",
+                ],
             },
             {
                 "id": "receipt-payment",
@@ -110,7 +118,19 @@ SHELL_MANIFESTS: dict[str, dict] = {
                 "views": [
                     "accounting-coa", "accounting-journals", "accounting-general-ledger",
                     "accounting-trial-balance", "cash-boxes", "accounting-banks",
-                    "accounting-bank-reconciliation", "accounting-expense-vouchers",
+                    "accounting-bank-reconciliation",
+                ],
+            },
+            {
+                # سببُ مسك الدفتر أصلاً: كم ربح، وكم عليه من ضريبة. كانت شاشة
+                # «الوضع المالي» تعرض الأربعة على شاشة البداية ثم لا يجد من
+                # غادرها طريقاً يعود به، ولا قائمةَ دخلٍ ولا ميزانيةً في الشريط
+                # كلّه — فبدا القالبُ دفترَ إدخالٍ بلا نتيجة.
+                "id": "results",
+                "label_term": "nav.results",
+                "views": [
+                    "dashboard", "accounting-income-statement",
+                    "accounting-balance-sheet", "reports",
                 ],
             },
             {

@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useCompany, Tenant } from "../../contexts/CompanyContext";
 import { useTenantSettings } from "../../hooks/useTenantSettings";
-import { Building, Building2, Calculator, Plus, ChevronDown, Check, Loader2, Settings2, Star } from "lucide-react";
+import { Building, Building2, Calculator, Plus, ChevronDown, Check, Loader2, LogOut, Settings2, Star } from "lucide-react";
 import { CompanyManagementModal, ROLE_LABELS } from "./CompanyManagementModal";
-import { COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
+import { SELF_SERVE_COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
 
 const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   Building2,
@@ -14,7 +14,7 @@ const companyLabel = (tenant: Tenant) =>
   `${tenant.CompanyName}${tenant.is_example ? " (مثال)" : ""}`;
 
 export const CompanySwitcher: React.FC = () => {
-  const { companies, currentCompany, switchCompany, createCompany, setDefaultCompany, loading, refreshCompanies } = useCompany();
+  const { companies, currentCompany, switchCompany, createCompany, setDefaultCompany, loading, refreshCompanies, insideManagedBook, returnToOffice } = useCompany();
   const { identity } = useTenantSettings();
   const activeMembership = companies.find(
     (membership) => membership.tenant.TenantID === currentCompany?.TenantID
@@ -110,6 +110,21 @@ export const CompanySwitcher: React.FC = () => {
 
       {isOpen && (
         <div className="absolute right-0 mt-1.5 w-64 rounded-xl shadow-xl bg-[var(--ktra-bg)] border border-[var(--ktra-border)] z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+          {/* داخل دفتر عميل: الدفتر **ليس** في هذه القائمة (مستثنى من
+              `my-companies`)، فمن فتح المبدّل باحثاً عن طريق الخروج كان يجده
+              فارغاً من الدفتر الذي هو فيه. الخروج هنا حيث يبحث عنه. */}
+          {insideManagedBook && (
+            <button
+              type="button"
+              data-testid="switcher-leave-book"
+              onClick={() => { setIsOpen(false); returnToOffice(); }}
+              className="flex w-full items-center gap-2 border-b border-[var(--ktra-border-soft)] bg-indigo-50 px-4 py-2.5 text-right text-sm font-bold text-indigo-800 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:text-indigo-200"
+            >
+              <LogOut className="h-4 w-4" />
+              اخرج من دفتر «{currentCompany ? companyLabel(currentCompany) : ""}» وعُد إلى مكتبك
+            </button>
+          )}
+
           <div className="px-4 py-2.5 bg-[var(--ktra-panel)] border-b border-[var(--ktra-border-soft)]">
             <span className="text-[11px] font-bold tracking-wider uppercase opacity-60">الشركات والمجموعات</span>
           </div>
@@ -257,7 +272,7 @@ export const CompanySwitcher: React.FC = () => {
               <div className="space-y-1.5">
                 <span className="block text-xs font-bold opacity-80">نوع الشركة</span>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {COMPANY_TEMPLATES.map((option) => {
+                  {SELF_SERVE_COMPANY_TEMPLATES.map((option) => {
                     const Icon = TEMPLATE_ICONS[option.icon] ?? Building2;
                     const isSelected = newCompanyTemplate === option.key;
                     return (
