@@ -25,6 +25,7 @@ from core import (
 from core.activity_views import ActivityLogViewSet
 from core.platform_admin_api import DevelopmentNoteViewSet, PlatformRouter
 from inventory import agent_api as inventory_agent_api
+from inventory.views import ProductLookupViewSet
 from partners import agent_api as partners_agent_api
 from sales import agent_api as sales_agent_api
 
@@ -70,6 +71,10 @@ urlpatterns = [
     # T-SCAN: «ما الذي في يدي؟» — نقطة واحدة تحلّ الباركود والسيريال والـIMEI
     # ورمز المنتج وجزء الاسم، بلا أن يختار المستخدم النوع.
     path('api/scan/', scan.scan_lookup),
+    # ISSUE #88: منتقي المستندات — عقد `view=lookup` وحده، خارج بادئة
+    # `/api/inventory/` كي لا يبتلعه قناع قالب المكتب (`TemplateSurfacePermission`
+    # يفحص بادئة المسار لا معاملات الاستعلام). راجع `ProductLookupViewSet`.
+    path('api/lookup/products/', ProductLookupViewSet.as_view({'get': 'list'})),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.
     path('api/reports/', reports_api.reports_catalog),

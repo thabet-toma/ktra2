@@ -205,8 +205,15 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
     def _get_tenant(self):
         return get_tenant(self.request)
 
+    def _is_lookup(self):
+        """عقد المنتقي (`view=lookup`) — دالّةٌ واحدة يقرأها كل فرعٍ بدل تكرار
+        شرط `request.query_params.get('view') == 'lookup'` ثلاث مرات. ISSUE #88:
+        `ProductLookupViewSet` (أسفله) تُعيدها `True` دائماً بصرف النظر عن
+        المُرسَل — نفس المنطق حرفياً بلا نسخة ثانية منه."""
+        return self.request.query_params.get('view') == 'lookup'
+
     def get_serializer_class(self):
-        if self.action == 'list' and self.request.query_params.get('view') == 'lookup':
+        if self.action == 'list' and self._is_lookup():
             return ProductLookupSerializer
         return ProductSerializer
 
@@ -328,7 +335,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             # الأب معناها «هل عندي من هذا المنتج شيء»، وهو سؤال شاشة الأصناف
             # لا سؤال سطر الفاتورة. (والعقد يعرض `stock_status` فعلاً — فهذا
             # اختلاف دلالة لا حقلٌ محذوف.)
-            if self.request.query_params.get('view') != 'lookup':
+            if not self._is_lookup():
                 context['family_available_map'] = self._family_available_map()
                 context['family_brand_counts'] = self._family_brand_counts()
                 context['family_thresholds'] = self._family_thresholds()
@@ -382,7 +389,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         # `get_serializer_context`).
         stock_status = params.get('stock_status')
         if stock_status:
-            is_lookup = params.get('view') == 'lookup'
+            is_lookup = self._is_lookup()
             family_statuses = self._family_statuses() if not is_lookup else None
             # #44: المقترَح بلا أبٍ يُحقَن هو الآخر — `view=lookup` يبقى بلا
             # حدودٍ إطلاقاً (`None` يُبقي `filter_by_stock_status` على
@@ -401,7 +408,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         # محددات المنتجات في الفواتير/الصفقات لا تعرض التحليلات؛ تجنّب ثلاث
         # aggregations على جدول الحركات الكبير عند طلب view=lookup. عقد القائمة
         # الكامل يبقى كما هو افتراضياً لجدول إدارة المنتجات.
-        if params.get('view') == 'lookup':
+        if self._is_lookup():
             # T-SUPSKU: أرقام الموردين تدخل حمولة المنتقي؛ الجلب المسبق يجعلها
             # استعلاماً واحداً للصفحة كلّها لا واحداً لكل منتج.
             return qs.prefetch_related('supplier_codes')
@@ -1150,6 +1157,28 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
                 tenant_id=product.tenant_id, product_id=product.id,
             ),
         }, status=status.HTTP_201_CREATED)
+
+
+class ProductLookupViewSet(ProductViewSet):
+    """ISSUE #88 — عقد `view=lookup` وحده، خارج بادئة `/api/inventory/`.
+
+    قناع قالب `accounting_firm`/`client_book` (`tenants/company_templates.py`
+    — `TEMPLATE_HIDDEN_PATH_PREFIXES`) يخفي بادئة `/api/inventory/` كاملةً
+    بفحص بادئة المسار (`core/permissions.py` — `TemplateSurfacePermission`)،
+    فمنتقي المستندات (فواتير المكتب — خدمات #78 — من بينها) لا يصله أبداً ولو
+    حمل معاملَ `?view=lookup`: الحارس يفحص بادئة المسار لا معاملات الاستعلام.
+    نقطةٌ مستقلة تحت `/api/lookup/products/` (`core/urls.py`) تخرج من نطاق
+    القناع، بنفس منطق `ProductViewSet` **حرفياً** — لا نسخة ثانية من
+    `get_queryset`/الفلاتر/السيريالايزر — محصورة بـ`list` وحده (لا كتابة هنا
+    أصلاً)، وتفرض وضع `lookup` بصرف النظر عمّا أُرسل عبر `_is_lookup`.
+    العزل وحارس الصلاحية موروثان من `ProductViewSet` كأي نقطة أخرى — تصفية
+    `tenant` في `get_queryset` و`DEFAULT_PERMISSION_CLASSES` (لا صلاحيةٌ إضافية
+    هنا: نفس ما يراه أي عضوٍ عبر `/api/inventory/products/?view=lookup` اليوم).
+    """
+    http_method_names = ['get', 'head', 'options']
+
+    def _is_lookup(self):
+        return True
 
 
 class ProductSerialViewSet(viewsets.ViewSet):

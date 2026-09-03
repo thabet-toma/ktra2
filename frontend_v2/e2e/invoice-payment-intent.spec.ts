@@ -147,7 +147,10 @@ async function installMocks(page: Page) {
       });
       return;
     }
-    if (url.pathname.endsWith("/inventory/products/")) {
+    if (
+      url.pathname.endsWith("/inventory/products/")
+      || url.pathname.endsWith("/lookup/products/")
+    ) {
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify([{

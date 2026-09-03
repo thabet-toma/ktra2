@@ -82,7 +82,10 @@ test.beforeEach(async ({ page }) => {
       }];
     } else if (path.endsWith('/permissions/me/')) {
       body = { role: 'manager', is_manager: true, permissions: [] };
-    } else if (path.endsWith('/inventory/products/') || path.endsWith('/inventory/products')) {
+    } else if (
+      path.endsWith('/inventory/products/') || path.endsWith('/inventory/products')
+      || path.endsWith('/lookup/products/') || path.endsWith('/lookup/products')
+    ) {
       body = [PRODUCT];
     } else if (path.endsWith(`/inventory/products/${PRODUCT.id}/profile/`)) {
       body = PROFILE;

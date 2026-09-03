@@ -214,7 +214,9 @@ async function mockServer(page: Page): Promise<{ orders: MockOrder[] }> {
         modules: { after_sales: true, sensitive_devices: false },
       });
     }
-    if (path.includes("/inventory/products/")) return json(PRODUCTS);
+    if (path.includes("/inventory/products/") || path.includes("/lookup/products/")) {
+      return json(PRODUCTS);
+    }
     if (path.includes("/partners/lookup/")) return json(PARTNERS);
 
     if (path.includes("/after-sales/service-orders/")) {

@@ -94,7 +94,7 @@ const install = async (page: Page, state: State) => {
     }
 
     // ── الكتالوج ──
-    if (path.endsWith('/inventory/products/')) {
+    if (path.endsWith('/inventory/products/') || path.endsWith('/lookup/products/')) {
       return json([SERIALIZED, PLAIN]);
     }
     if (path.endsWith('/inventory/products/generate_serials/') && method === 'POST') {

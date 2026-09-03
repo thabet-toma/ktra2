@@ -63,7 +63,9 @@ async function baseRoutes(page: Page, user: string, perms: string[]): Promise<Ct
     if (/\/inventory\/products\/42\/(stock-ledger|invoices|serials)\/$/.test(path)) {
       return json({ count: 0, results: [] });
     }
-    if (path.endsWith('/inventory/products/')) return json([CATALOG_PRODUCT]);
+    if (path.endsWith('/inventory/products/') || path.endsWith('/lookup/products/')) {
+      return json([CATALOG_PRODUCT]);
+    }
     if (path.endsWith('/inventory/uoms/')) return json([]);
     if (path.endsWith('/inventory/categories/')) return json([]);
 

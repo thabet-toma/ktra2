@@ -747,6 +747,12 @@ export const invalidatePickerProducts = (): void => {
  * قياس على 1490 منتجاً أعطى 1,145 كيلوبايت / 1,249 مِلّي ثانية عند **كل** فتح
  * للشاشة، مقابل 609 / 331 لعقد المنتقي. مصدر واحد لكل شاشات المستندات كي لا
  * ترتدّ إحداها للعقد الكامل بصمت.
+ *
+ * ISSUE #88: نقطةٌ مستقلة `/api/lookup/products/` لا `inventory/products/` —
+ * قناع قالب المكتب (`tenants/company_templates.py`) يخفي بادئة `/api/inventory/`
+ * كاملةً ببادئة المسار (`TemplateSurfacePermission`)، فمعاملُ `view=lookup` لا
+ * يفتحه. مسارٌ واحد لكل القوالب — لا تفريعَ بالقالب هنا؛ `ProductLookupViewSet`
+ * (`inventory/views.py`) تفرض عقد المنتقي نفسه بصرف النظر عن الاستعلام.
  */
 export const listPickerProducts = <T>(tenantId?: number): Promise<T[]> => {
   const key = pickerCacheKey(tenantId);
@@ -759,7 +765,7 @@ export const listPickerProducts = <T>(tenantId?: number): Promise<T[]> => {
   let req = pickerProductsInFlight.get(key);
   if (!req) {
     const generationAtLaunch = pickerProductsGeneration;
-    req = apiGetList<T>("inventory/products/", { tenantId, query: { view: "lookup" } })
+    req = apiGetList<T>("lookup/products/", { tenantId })
       .then((rows) => {
         if (generationAtLaunch === pickerProductsGeneration) {
           pickerProductsCache.set(key, { at: Date.now(), rows: rows as unknown[] });

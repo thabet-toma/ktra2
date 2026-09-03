@@ -2493,7 +2493,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         })()}
         options={productOptions}
         disabled={readOnly}
-        placeholder={`اكتب اسم ${term("line.item")}…`}
+        placeholder={`اكتب اسم ال${term("line.item")}…`}
         onPick={(id) => {
           void onSelectProduct(row.key, Number(id));
           setTimeout(() => {

@@ -111,7 +111,10 @@ const openDraftInvoice = async (page: Page, receiveOnPost: boolean) => {
       return json({ journal_id: 777, message: 'تم الترحيل بنجاح' });
     }
     if (/\/logistics\/purchase-invoices\/44\/$/.test(url.pathname)) return json(DRAFT_INVOICE);
-    if (url.pathname.includes('/inventory/products/')) return json(LOOKUP);
+    if (
+      url.pathname.includes('/inventory/products/')
+      || url.pathname.includes('/lookup/products/')
+    ) return json(LOOKUP);
     return json([]);
   });
   await page.goto('/purchase-invoices/44');

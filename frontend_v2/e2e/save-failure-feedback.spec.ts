@@ -151,7 +151,10 @@ async function installMocks(page: Page, failure: SaveFailure) {
       });
       return;
     }
-    if (url.pathname.endsWith("/inventory/products/")) {
+    if (
+      url.pathname.endsWith("/inventory/products/")
+      || url.pathname.endsWith("/lookup/products/")
+    ) {
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify([{
@@ -374,7 +377,10 @@ async function installPurchaseMocks(page: Page) {
       });
       return;
     }
-    if (url.pathname.endsWith("/inventory/products/")) {
+    if (
+      url.pathname.endsWith("/inventory/products/")
+      || url.pathname.endsWith("/lookup/products/")
+    ) {
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify([{

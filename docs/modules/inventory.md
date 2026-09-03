@@ -108,11 +108,12 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 ```
 
 ## أهم الـAPI endpoints
-كلها تحت البادئة `/api/inventory/` (`core/urls.py`).
+كلها تحت البادئة `/api/inventory/` (`core/urls.py`)، عدا `/api/lookup/products/` (أسفله).
 
 | Method | المسار | الـview |
 |---|---|---|
 | GET/POST | `products/` | `ProductViewSet` (`views.py`) |
+| GET | `/api/lookup/products/` (خارج `/api/inventory/`، مركَّبة في `core/urls.py`) | `ProductLookupViewSet` (`views.py`) — ISSUE #88: فرعٌ من `ProductViewSet` يفرض عقد `?view=lookup` دائماً (`_is_lookup`)، بلا نسخة ثانية من الفلاتر أو السيريالايزر. يخدم منتقي المستندات كلَّه (`listPickerProducts`، `frontend_v2/services/inventoryApi.ts`) — بادئةٌ مستقلة كي لا يبتلعها قناع قالب `accounting_firm`/`client_book` (`TemplateSurfacePermission` يفحص بادئة المسار لا معاملات الاستعلام)، وإلا استحال على تلك القوالب اختيار بنودها الخدمية (#78) من شاشة الفاتورة. `GET` وحده — لا كتابة على هذه النقطة. العزل والصلاحية موروثان من `ProductViewSet` كأي نقطة أخرى (تصفية `tenant` + `DEFAULT_PERMISSION_CLASSES`) |
 | GET | `products/{id}/profile/` · `products/{id}/stock-ledger/` · `products/{id}/cost-breakdown/` | (405) · (411) · (433) |
 | GET | `products/{id}/stock-movements/` · `products/{id}/invoices/` | (398) · (426) |
 | GET | `products/{id}/serials/` · POST `products/{id}/serials/register/` | (559) · (570) |
@@ -580,6 +581,7 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 | `inventory/tests/test_account_overrides.py` | سلسلة الحسابات: تجاوز المنتج ← تجاوز الفئة ← الافتراضي |
 | `inventory/tests/test_brand_grouping.py` · `test_group_card_performance.py` | تجميع البراندات بـ`group_key` (الأب درجةٌ أولى، #25)، حالة المخزون من مجموع الإخوة مقابل حدّ الأب، محور «البدائل»، وثبات عدد الاستعلامات (كان N+1) |
 | `inventory/tests/test_product_api.py` | توليد SKU خادمي، ترتيب/بحث/ترقيم صفحات، عزل الشركات |
+| `inventory/tests/test_product_lookup_endpoint.py` | ISSUE #88: `/api/inventory/products/` يبقى مقنَّعاً لقالب `accounting_firm`، `/api/lookup/products/` يتخطّى القناع ويحمل خدمات #78، تطابق حرفي مع عقد `?view=lookup` القديم لـ`general`، عزل الشركات، رفض الكتابة، ورحلةٌ كاملة عبر HTTP: اختيار «مسك دفاتر شهري» من المنتقي ← إنشاء الفاتورة ← ترحيلها على `4103` |
 | `inventory/tests/test_product_family.py` | task20: الإنشاء الذرّي (الأب + البراند الضمني) من مساري التسجيل معاً، عزل الشركات على `ProductFamily`، وقاعدة التعايش (مع/بلا أب) |
 | `inventory/tests/test_product_offer_and_brand.py` | task21: اقتراح «هذا موجود» مطبَّعاً لا حرفياً (وعدم منعه)، أوّل براندٍ يُسمّي الضمنيّ والثاني يُنشئ صفّاً تحت نفس الأب، بلا حركة مخزون ولا قيد محاسبي، وعزل الشركات على الاقتراح — والمطابقة نفسها من موضع تجسيد عرض المورّد |
 | `inventory/tests/test_product_merge.py` | task24: ضمٌّ جماعي تحت أبٍ واحد بمحدِّدٍ في الجسم (≥1500 معرّف)، بلا حركة مخزون ولا قيد (عدّاً قبل/بعد)، منعٌ عند اختلاف الوحدة أو التتبّع التسلسلي فقط، تراجعٌ كامل بلا أثر (ولا يُقبل مرّتين)، وعزل الشركات على الهدف والمصدر معاً؛ `OrphanFamilyIsHiddenAfterMergeTest` — الأب اليتيم يبقى في القاعدة (تراجعٌ لاحقٌ سليم) ويغيب عن `product-families/` و`check-name/` معاً؛ (دلتا ٢) براندٌ مُمرَّرٌ للهدف وللأخ معاً يُطبَّق على كليهما (لا الأخ وحده)، والتراجع يعيد براند الهدف أيضاً ضمن `restored_product_ids` |

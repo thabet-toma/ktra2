@@ -70,7 +70,10 @@ const openReturnEditor = async (page: Page) => {
       creates.push(JSON.parse(route.request().postData() || '{}'));
       return json({ id: 900, invoice_number: 'SR-900' });
     }
-    if (url.pathname.includes('/inventory/products/')) {
+    if (
+      url.pathname.includes('/inventory/products/')
+      || url.pathname.includes('/lookup/products/')
+    ) {
       return json([{ id: 71, sku: 'RET-1', name_ar: 'منتج المرجع', unit_price: '50' }]);
     }
     return json([]);

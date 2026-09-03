@@ -270,11 +270,14 @@ const install = async (page: Page, state: ServerState) => {
       }, 201);
     }
 
-    // قائمة المنتجات: عقد الشاشة الكاملة (مرقَّم) وعقد المنتقي (`?view=lookup`) —
+    // قائمة المنتجات: عقد الشاشة الكاملة (مرقَّم، `/inventory/products/`) وعقد
+    // المنتقي (ISSUE #88: نقطةٌ مستقلة `/lookup/products/` لا `?view=lookup`) —
     // كلاهما يقرآن من نفس الصفّ الذي كتبته 1 و3.
+    if (path.endsWith("/lookup/products/") && method === "GET") {
+      return json(state.product ? [productPickerRow(state)] : []);
+    }
     if (path.endsWith("/inventory/products/") && method === "GET") {
       const rows = state.product ? [productPickerRow(state)] : [];
-      if (url.searchParams.get("view") === "lookup") return json(rows);
       return json({ count: rows.length, next: null, previous: null, results: rows });
     }
 
