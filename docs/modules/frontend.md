@@ -42,6 +42,28 @@
 `finance/` · `hr/` · `reports/` · `settings/` · `superadmin/`.
 والمشترك: `kit/` (عُدّة الواجهة) · `common/` · `shared/` · `ui/` · `layout/`.
 
+**ISSUE #87 — شاشتا البداية للقالبين**: `App.tsx` (حالة `dashboard`) تحسم
+بـ`utils/homeScreen.ts` (`resolveHomeScreen(template)` — دالّةٌ صرفة، سبق فرع
+المدير/الموظف) أيّ شاشةٍ تُرسَم بدل `Dashboard.tsx` العامة، قبل بناء
+`core/shell_manifest.py` (ISSUE #83: `start_view: "dashboard"` لكلا القالبين —
+مفتاح الشاشة نفسه، والمحتوى وحده يتغيّر): `accounting_firm` ⇒
+`components/office/OfficeHomeDashboard.tsx` — ثلاثة عناصر لا رابع (القرار 24
+في #46: زبائن المكتب وحالة دفتر كلٍّ منهم · استحقاقات قريبة · أتعاب غير
+محصّلة)، يستهلك `practice/dashboard/` (ISSUE #58) كما هي بلا شاشة تنقّلٍ بين
+شركات (تلك تبقى في `AccountantOfficeApp`/`OfficeDashboardPage` على `/office`).
+`client_book` ⇒ `components/office/ClientBookFinancialPosition.tsx` — إيراد ·
+مصروف · ربح · ضريبة صافية للفترة، مع اتجاه ستة أشهر، يستهلك
+`ClientSummaryView`/`ClientTrendView` (`accountant_portal`) حرفياً بلا نقطة
+جديدة؛ الضريبة الصافية من `client_financial_summary` وحدها (issue #79،
+`vat_period_totals`). `general` بلا تغيير. يحرسه `utils/homeScreen.test.ts`.
+**مراجعة**: `client_book` صار يُرخَّص لوحدة `accountant_portal` تلقائياً عند
+الزرع (`tenants/services.py` — `create_company`، `docs/modules/tenants.md`)،
+لكن دفاتر **قائمة** أُنشئت قبل هذا الإصلاح تبقى بلا ترخيص. `ClientBookFinancialPosition.tsx`
+يفحص `usePermissions().modules.accountant_portal` استباقياً عبر
+`utils/homeScreen.ts` (`resolveModuleGate` — دالّةٌ صرفة) **قبل** أي نداء شبكة:
+تحميل الصلاحيات ⇒ هيكل عظمي، `false`/غياب المفتاح ⇒ رسالة عربية صريحة تقول
+الناقص وكيف يُفتح (لا 404 خام ولا شاشة بيضاء)، `true` صراحةً ⇒ الشاشة كما هي.
+
 **T-SCAN — التعرّف على رقم**: زرّ البحث في الترويسة (`layout/GlobalSearch.tsx`)
 كان روابط سريعة بلا حقل بحثٍ واحد؛ صار يفتح `shared/ScanLookupPanel.tsx` — حقلٌ
 واحد يقبل الباركود والسيريال والـIMEI ورمز المنتج وجزءَ الاسم، وزرّ كاميرا

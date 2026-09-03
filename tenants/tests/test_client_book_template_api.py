@@ -182,3 +182,57 @@ class GeneralAndAccountingFirmUnaffectedTest(APITestCase):
         tenant = create_company("مكتب محاسبة بعد #81", user, template="accounting_firm")
         codes = set(Account.objects.filter(tenant=tenant).values_list("code", flat=True))
         self.assertEqual(codes, {row[0] for row in ACCOUNTING_FIRM_COA})
+
+
+class ClientBookAccountantPortalLicenseTest(APITestCase):
+    """ISSUE #87 (مراجعة) — شاشة «الوضع المالي» تُردّ 404 بلا هذا الترخيص، وكانت
+    شاشة بداية `client_book` معطوبة من أول يوم لأن `create_company` لم يكن
+    يزرعه. `general` و`accounting_firm` لا يُلمَسان (اللوحة الأخيرة هوياتيّة
+    النطاق ولا تمرّ بـ`guard_module_surface` أصلاً)."""
+
+    def _auth(self, tenant):
+        self.client.force_authenticate(user=self.user)
+        return {"HTTP_X_TENANT_ID": str(tenant.TenantID)}
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="cb-license", password="x")
+
+    def test_client_book_licenses_accountant_portal_on_creation(self):
+        from core.modules import module_enabled
+
+        tenant = create_company("دفتر عميل مرخَّص", self.user, template="client_book")
+        self.assertTrue(module_enabled(tenant, "accountant_portal"))
+
+    def test_financial_position_endpoints_return_200_not_404(self):
+        tenant = create_company("دفتر عميل — نقاط الوضع المالي", self.user, template="client_book")
+        headers = self._auth(tenant)
+        res = self.client.get(
+            "/api/accountant/client/summary/?from=2026-01-01&to=2026-01-31", **headers)
+        self.assertEqual(res.status_code, 200, res.content)
+        res = self.client.get("/api/accountant/client/trend/?months=6", **headers)
+        self.assertEqual(res.status_code, 200, res.content)
+
+    def test_general_is_not_licensed(self):
+        from core.modules import module_enabled
+
+        tenant = create_company("شركة عامة — بلا ترخيص", self.user)
+        self.assertFalse(module_enabled(tenant, "accountant_portal"))
+
+    def test_accounting_firm_is_not_licensed(self):
+        """لوحة المكتب لا تحتاج الترخيص أصلاً (بلا `X-Tenant-Id`)، فلا داعي لزرعه هنا."""
+        from core.modules import module_enabled
+
+        tenant = create_company("مكتب محاسبة — بلا ترخيص إضافي", self.user, template="accounting_firm")
+        self.assertFalse(module_enabled(tenant, "accountant_portal"))
+
+    def test_switching_template_to_client_book_does_not_retroactively_license(self):
+        """نقطة زرعٍ واحدة (القرار 8 في #46) — `switch_company_template` لا
+        تمنح تراخيص وحدات، فدفترٌ حوّل قالبه لاحقاً يبقى غير مرخَّص حتى يُفعَّل
+        يدوياً من لوحة المنصة."""
+        from core.modules import module_enabled
+        from tenants.services import switch_company_template
+
+        tenant = create_company("شركة تبدّل قالبها", self.user)
+        self.assertFalse(module_enabled(tenant, "accountant_portal"))
+        switch_company_template(tenant, "client_book")
+        self.assertFalse(module_enabled(tenant, "accountant_portal"))

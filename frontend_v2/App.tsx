@@ -42,6 +42,7 @@ import { useAuth } from "./contexts/AuthContext";
 import { useCompany } from "./contexts/CompanyContext";
 import { usePermissions } from "./contexts/PermissionsContext";
 import { moduleAllowsView, permForView, templateHidesView } from "./utils/viewPermissions";
+import { resolveHomeScreen } from "./utils/homeScreen";
 import { companyWorkspaceDeepLink, enterPlatformShell, platformShellActive } from "./utils/officeShell";
 import { resolvePublicAuthView } from "./utils/publicAuthRoutes";
 import { activeTasksService } from "./services/activeTasksService";
@@ -114,6 +115,9 @@ const AccountingJournalEntryPage = lazyPage(() => import("./components/accountin
 const AccountingChequesPage = lazyPage(() => import("./components/accounting/AccountingChequesPage").then((m) => ({ default: m.AccountingChequesPage })));
 const ExpenseVouchersPage = lazyPage(() => import("./components/accounting/ExpenseVouchersPage").then((m) => ({ default: m.ExpenseVouchersPage })));
 const ClientBooksPanel = lazyPage(() => import("./components/office/ClientBooksPanel").then((m) => ({ default: m.ClientBooksPanel })));
+// ISSUE #87: شاشتا بداية القالبين — لوحة المكتب (accounting_firm) والوضع المالي (client_book).
+const OfficeHomeDashboard = lazyPage(() => import("./components/office/OfficeHomeDashboard").then((m) => ({ default: m.OfficeHomeDashboard })));
+const ClientBookFinancialPosition = lazyPage(() => import("./components/office/ClientBookFinancialPosition").then((m) => ({ default: m.ClientBookFinancialPosition })));
 const BanksPage = lazyPage(() => import("./components/accounting/BanksPage").then((m) => ({ default: m.BanksPage })));
 const BankReconciliationPage = lazyPage(() => import("./components/accounting/BankReconciliationPage").then((m) => ({ default: m.BankReconciliationPage })));
 const AccountingGeneralLedgerPage = lazyPage(() => import("./components/accounting/AccountingGeneralLedgerPage").then((m) => ({ default: m.AccountingGeneralLedgerPage })));
@@ -1569,12 +1573,23 @@ const App: React.FC = () => {
         }
         return <DevelopmentNotesPage />;
 
-      case "dashboard":
+      case "dashboard": {
+        // ISSUE #87: شاشتا بداية القالبين — تسبقان فرع isManager فكلا القالبين
+        // يفتحان على شاشتهما بصرف النظر عن الدور (نفس منطق `templateHidesView`
+        // أعلاه: القالب يحسم قبل أي تفريعٍ آخر).
+        const homeScreen = resolveHomeScreen(companyTemplate);
+        if (homeScreen === "office-dashboard") {
+          return <OfficeHomeDashboard />;
+        }
+        if (homeScreen === "financial-position") {
+          return <ClientBookFinancialPosition />;
+        }
         // T-DASHPERIOD: مؤشرات الشركة المالية للمدير فقط، وإلا اللوحة الشخصية.
         if (isManager) {
           return <TradeDashboard userName={currentUser!.name} onNavigate={setViewAndSyncPath} />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+      }
 
       case "tasks":
         return (

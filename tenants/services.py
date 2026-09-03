@@ -8,6 +8,7 @@ from django.utils import timezone
 from tenants.models import Branch, BookHandoverRequest, Tenant, TenantSettings, TenantBook, UserCompanyMembership
 from tenants.company_templates import COMPANY_TEMPLATES, DEFAULT_TEMPLATE
 from accounting.models import Account, Currency
+from core.models import TenantModule
 from core.plans import trial_end_date
 
 logger = logging.getLogger(__name__)
@@ -328,6 +329,29 @@ def create_company(
                 quantity_on_hand=0, avg_cost=0,
                 sale_account_override=account_map.get(account_code),
             )
+
+        # 4.8 ترخيص `accountant_portal` لدفتر العميل وحده (ISSUE #87 — مراجعة).
+        # القالب **هو** المنتج: `client_book` لا يُفتح إلا مكتبُ محاسبةٍ يدفع
+        # حصّة `office.managed_books`، وشاشة بدايته («الوضع المالي»،
+        # `ClientBookFinancialPosition.tsx`) تستهلك نقاطاً تحت `guard_module_surface`
+        # فتردّ 404 بلا هذا الترخيص — كانت شاشة الإقلاع الوحيدة التي بُنيت لهذا
+        # القالب تفتح على عطل من أول يوم. `accounting_firm` لا يُلمَس: لوحته
+        # (`practice/dashboard/`) هوياتيّة النطاق ولا تمرّ بهذا الحارس أصلاً
+        # (`accountant_portal/services.py` — `getPracticeDashboard` بلا
+        # `X-Tenant-Id` عمداً)، و`general` لا علاقة له بالوحدة إطلاقاً. **لا
+        # تُكرَّر هذه البذرة في `switch_company_template`** — نقطة الزرع واحدة
+        # (القرار 8 في #46)، وتبديل القالب لاحقاً لا يمنح تراخيص وحدات.
+        if template_config['key'] == 'client_book':
+            from core.modules import invalidate_module_cache
+            TenantModule.objects.create(
+                tenant=tenant,
+                module_key='accountant_portal',
+                enabled=True,
+                enabled_by=creator_user,
+                enabled_at=timezone.now(),
+                plan_note='زُرعت تلقائياً مع قالب دفتر العميل — ISSUE #87',
+            )
+            invalidate_module_cache(tenant.pk)
 
         # 5. Create UserCompanyMembership
         # If this is the user's only company, make it the default
