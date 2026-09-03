@@ -55,6 +55,13 @@ export interface KitAutocompleteProps {
   /** نص خيار النص الحر — الافتراضي «إضافة … كمنتج جديد». يُمرَّر له النص المكتوب
    *  كي تصف كل شاشة ما سيحدث فعلاً (مورد مبدئي، بند نصّي…) لا «منتج» دائماً. */
   createLabel?: (text: string) => string;
+  /** ISSUE #110: يُنادى مع **كل حرف** يكتبه المستخدم — لا عند المغادرة (blur/close).
+   *  اختياري ومنفصل تماماً عن `onFreeText`: `close()` يُستدعى من نقرة خارج الحقل
+   *  ومن تمرير الصفحة وتغيير حجم النافذة، فيمحو `query` بلا نداء `onFreeText`
+   *  (وإغلاق التبويب لا يُطلق حدث مغادرة أصلاً). من يريد ألا يضيع النص المكتوب
+   *  يستعمل هذه الخاصية ليحتفظ به في حالة الشاشة بنفسه — لا تُطلِق أي فعلٍ ثانٍ
+   *  (كفتح نافذة إنشاء) تلقائياً، فذلك قرار الشاشة المستدعية وحدها. */
+  onTextChange?: (text: string) => void;
   placeholder?: string;
   disabled?: boolean;
   maxResults?: number;
@@ -100,6 +107,7 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
   disabled,
   maxResults = MAX_DEFAULT,
   onShowMore,
+  onTextChange,
 }) => {
   const { visible: showPrices } = usePriceVisibility(); // خصوصية: إخفاء الأسعار أمام الزبون
   const [query, setQuery] = useState<string | null>(null); // null = غير مفتوح، يعرض value
@@ -198,7 +206,12 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
         value={open ? (query ?? '') : value}
         onFocus={openList}
         onClick={openList}
-        onChange={(e) => { setQuery(e.target.value); setSel(0); reposition(); }}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setSel(0);
+          reposition();
+          onTextChange?.(e.target.value);
+        }}
         onKeyDown={onKeyDown}
       />
       {open && pos && createPortal(
