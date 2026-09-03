@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   COMPANY_TEMPLATES,
+  DEFAULT_CLIENT_BOOK_TEMPLATE,
   DEFAULT_COMPANY_TEMPLATE,
   companyTemplateByKey,
 } from './companyTemplates.ts';
@@ -24,6 +25,14 @@ test('قالب مكتب المحاسبة مُدرَج بمفتاحه المطا�
   const firm = companyTemplateByKey('accounting_firm');
   assert.ok(firm);
   assert.equal(firm?.name, 'مكتب محاسبة');
+});
+
+test('ISSUE #81: قالب دفتر العميل مُدرَج، وهو افتراضي `ClientBooksPanel` لا الافتراضي العام', () => {
+  const clientBook = companyTemplateByKey('client_book');
+  assert.ok(clientBook);
+  assert.equal(clientBook?.name, 'دفتر عميل');
+  assert.equal(DEFAULT_CLIENT_BOOK_TEMPLATE, 'client_book');
+  assert.notEqual(DEFAULT_CLIENT_BOOK_TEMPLATE, DEFAULT_COMPANY_TEMPLATE);
 });
 
 test('مفتاح غير معروف لا يعيد أي قالب', () => {

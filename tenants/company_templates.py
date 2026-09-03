@@ -107,6 +107,74 @@ ACCOUNTING_FIRM_SERVICES = [
     ('SVC-CONSULTING', 'تأسيس واستشارات', '4106'),
 ]
 
+# ── ISSUE #81 — بذرة قالب «دفتر عميل» (القسم ١ من #77) — من التذكرة حرفياً ──
+#
+# دفترٌ يفتحه مكتب محاسبة (ISSUE #65 `ClientBooksPanel`) ليمسك حسابات زبونه
+# **يدوياً بالسندات**، لا بفواتير بيع وشراء ولا بمخزون — الجرد دوريّ يُقفله
+# المحاسب بقيدٍ واحد. من يحتاج مخزوناً فعلياً يلزمه قالب `general`.
+#
+# `52` هو نفسه `EXPENSE_VOUCHER_PARENT_CODE` و`42` هو `REVENUE_VOUCHER_PARENT_CODE`
+# (`accounting/services.py`) — أب حساب مصروف/إيراد يُنشأ بالاسم من داخل السند
+# يهبط هنا افتراضاً، فوجودهما في هذه البذرة ليس اختيارياً.
+CLIENT_BOOK_COA = [
+    # Root nodes
+    ('1', 'الأصول', 'Asset', None),
+    ('2', 'الالتزامات', 'Liability', None),
+    ('3', 'حقوق الملكية', 'Equity', None),
+    ('4', 'الإيرادات', 'Revenue', None),
+    ('5', 'المصروفات', 'Expense', None),
+
+    # Assets (1)
+    ('11', 'الأصول المتداولة', 'Asset', '1'),
+    ('1101', 'النقدية', 'Asset', '11'),
+    ('1102', 'البنوك', 'Asset', '11'),
+    ('1103', 'المدينون التجاريون (ذمم عملاء)', 'Asset', '11'),
+    ('1105', 'ضريبة القيمة المضافة - مدخلات', 'Asset', '11'),
+
+    # Liabilities (2)
+    ('21', 'الالتزامات المتداولة', 'Liability', '2'),
+    ('2101', 'الدائنون التجاريون (ذمم موردين)', 'Liability', '21'),
+    ('2103', 'مصاريف مستحقة', 'Liability', '21'),
+    ('2104', 'ضريبة القيمة المضافة - مخرجات', 'Liability', '21'),
+
+    # Equity (3)
+    ('31', 'رأس المال', 'Equity', '3'),
+    ('3101', 'رأس المال المدفوع', 'Equity', '31'),
+    ('32', 'الأرباح المحتجزة', 'Equity', '3'),
+    ('33', 'مسحوبات المالك', 'Equity', '3'),
+
+    # Revenue (4)
+    ('41', 'المبيعات', 'Revenue', '4'),
+    ('4101', 'إيرادات المبيعات', 'Revenue', '41'),
+    ('42', 'إيرادات أخرى', 'Revenue', '4'),
+
+    # Expenses (5) — لا 51 تكلفة بضاعة مباعة ولا 1104 مخزون: المشتريات مصروفٌ
+    # مباشر، والجرد الدوري يُسوّى بقيدٍ يدوي واحد لا بحساب مخزون حيّ.
+    ('51', 'المشتريات', 'Expense', '5'),
+    ('52', 'المصاريف التشغيلية', 'Expense', '5'),
+    ('5201', 'إيجار', 'Expense', '52'),
+    ('5202', 'رواتب وأجور', 'Expense', '52'),
+    ('5203', 'كهرباء ومياه', 'Expense', '52'),
+    ('5204', 'اتصالات وإنترنت', 'Expense', '52'),
+    ('5205', 'نقل ومحروقات', 'Expense', '52'),
+    ('5206', 'قرطاسية ومطبوعات', 'Expense', '52'),
+    ('5207', 'صيانة وإصلاحات', 'Expense', '52'),
+    ('5208', 'مصاريف بنكية وعمولات', 'Expense', '52'),
+    ('5209', 'دعاية وإعلان', 'Expense', '52'),
+    ('5210', 'رسوم ورخص واشتراكات', 'Expense', '52'),
+    ('5211', 'أتعاب مهنية', 'Expense', '52'),
+    ('5212', 'تأمين', 'Expense', '52'),
+    ('5213', 'اهتلاك', 'Expense', '52'),
+    ('53', 'مصاريف نثرية', 'Expense', '5'),
+]
+
+# دفاتر القالب المزروعة — خمسة أنواع فقط: سندات القبض والصرف والمصروف والإيراد
+# وقيد اليومية. لا فواتير بيع/شراء ولا إشعارات دائنة/مدينة (لا مرجع لها بلا فواتير).
+CLIENT_BOOK_DOCUMENT_TYPES = [
+    'receipt_voucher', 'payment_voucher', 'expense_voucher', 'revenue_voucher',
+    'journal_entry',
+]
+
 DEFAULT_TEMPLATE = 'general'
 
 # ── ISSUE #51 — القناع الحيّ: مسارات API تختفي كاملةً لقالب مكتب المحاسبة ──
@@ -117,29 +185,46 @@ DEFAULT_TEMPLATE = 'general'
 # (الحارس الوحيد — فحصٌ ببادئة المسار لا لمسٌ لكل ViewSet). مرآتها في الواجهة:
 # `frontend_v2/utils/viewPermissions.ts` (`TEMPLATE_HIDDEN_VIEWS`) — سِجلٌّ
 # مستقلّ بمفاتيح شاشات لا مسارات، فلا تتوقّع تطابقاً حرفياً بين الاثنين.
+# مشترَكة بين `accounting_firm` و`client_book`: مخزون واستيراد ولوجستيات ومتجر
+# وما بعد بيع وأجهزة حسّاسة — أيّ قالبٍ بلا حركة بضاعة فعلية لا يحتاجها.
+# `logistics` **لا تُقنَّع جملةً**: `supplier-payments` (سند الصرف) يعيش تحتها
+# لأسبابٍ تاريخية، وكلا القالبين يُبقي «سندات القبض والصرف» صراحةً في «ما يبقى»
+# — يحتاجه المكتب فعلاً ليسدّد ذمّة `2101` التي يفتحها سند المصروف. فتُسمّى
+# المسارات المقنَّعة واحداً واحداً.
+_GOODS_MOVEMENT_HIDDEN_PATHS = (
+    '/api/inventory/',
+    '/api/logistics/supplier-quotations/',
+    '/api/logistics/purchase-orders/',
+    '/api/logistics/deals/',
+    '/api/logistics/shipments/',
+    '/api/logistics/clearances/',
+    '/api/logistics/payments/',
+    '/api/logistics/purchase-invoices/',
+    '/api/logistics/local-shipments/',
+    '/api/logistics/import-journey/',
+    '/api/logistics/reports/landed-cost/',
+    '/api/logistics/purchase-settings/',
+    '/api/logistics/goods-receipts/',
+    '/api/import-file/',
+    '/api/devices/',
+    '/api/after-sales/',
+    '/api/store/',
+)
+
 TEMPLATE_HIDDEN_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
-    'accounting_firm': (
-        '/api/inventory/',
-        # `logistics` **لا تُقنَّع جملةً**: `supplier-payments` (سند الصرف) يعيش
-        # تحتها لأسبابٍ تاريخية، والتذكرة تُبقي «سندات القبض والصرف» صراحةً في
-        # «ما يبقى» — والمكتب يحتاجه فعلاً ليسدّد ذمّة `2101` التي يفتحها سند
-        # المصروف. فتُسمّى المسارات المقنَّعة واحداً واحداً.
-        '/api/logistics/supplier-quotations/',
-        '/api/logistics/purchase-orders/',
-        '/api/logistics/deals/',
-        '/api/logistics/shipments/',
-        '/api/logistics/clearances/',
-        '/api/logistics/payments/',
-        '/api/logistics/purchase-invoices/',
-        '/api/logistics/local-shipments/',
-        '/api/logistics/import-journey/',
-        '/api/logistics/reports/landed-cost/',
-        '/api/logistics/purchase-settings/',
-        '/api/logistics/goods-receipts/',
-        '/api/import-file/',
-        '/api/devices/',
-        '/api/after-sales/',
-        '/api/store/',
+    'accounting_firm': _GOODS_MOVEMENT_HIDDEN_PATHS,
+    # ISSUE #81: `client_book` يُقنِّع كل ما يُقنِّعه `accounting_firm` — ويزيد
+    # عليه فواتير البيع نفسها (لا فواتير بيع/شراء في هذا القالب، السندات وحدها)
+    # وأوامر البيع وعروض الأسعار والإرساليات والمحجوزات — بضاعةٌ لا مكان لها في
+    # دفتر لا مخزون فيه. «أرباح الفواتير» فرعٌ من `/api/sales/invoices/` فتقنيعها
+    # يقنِّعه معه بلا سطرٍ إضافي. حساب العميل نفسه (`/api/sales/payments/` سند
+    # القبض) يبقى مفتوحاً — أحد الدفاتر الخمسة المزروعة.
+    'client_book': _GOODS_MOVEMENT_HIDDEN_PATHS + (
+        '/api/sales/invoices/',
+        '/api/sales/quotations/',
+        '/api/sales/orders/',
+        '/api/sales/delivery-orders/',
+        '/api/sales/reports/reserved-stock/',
     ),
 }
 
@@ -187,5 +272,18 @@ COMPANY_TEMPLATES = {
         'document_types': ACCOUNTING_FIRM_DOCUMENT_TYPES,
         'masked_views': [],
         'services': ACCOUNTING_FIRM_SERVICES,
+    },
+    'client_book': {
+        'key': 'client_book',
+        'name': 'دفتر عميل',
+        'icon': 'book-open-check',
+        'description': (
+            'دفتر مكتب محاسبة لزبونٍ يُمسَك بالسندات — نقدية وبنوك وذمم ومصاريف '
+            'تشغيلية، بلا مخزون ولا فواتير بيع أو شراء.'
+        ),
+        'coa': CLIENT_BOOK_COA,
+        'document_types': CLIENT_BOOK_DOCUMENT_TYPES,
+        'masked_views': [],
+        'services': None,
     },
 }

@@ -7,7 +7,7 @@
  * الافتراضي — بلا قناع وبلا تغيير سلوك (قرار 16).
  */
 
-export type CompanyTemplateKey = 'general' | 'accounting_firm';
+export type CompanyTemplateKey = 'general' | 'accounting_firm' | 'client_book';
 
 export type CompanyTemplate = {
   key: CompanyTemplateKey;
@@ -18,6 +18,11 @@ export type CompanyTemplate = {
 };
 
 export const DEFAULT_COMPANY_TEMPLATE: CompanyTemplateKey = 'general';
+
+// ISSUE #81: قالب الدفتر الذي يفتحه مكتب المحاسبة لزبونه من `ClientBooksPanel`
+// — ليس الافتراضي العام (`DEFAULT_COMPANY_TEMPLATE`) الذي يبقى `general` لكل
+// مسار إنشاء شركة آخر.
+export const DEFAULT_CLIENT_BOOK_TEMPLATE: CompanyTemplateKey = 'client_book';
 
 export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
   {
@@ -31,6 +36,12 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
     name: 'مكتب محاسبة',
     icon: 'Calculator',
     description: 'أتعاب مهنية بلا مخزون ولا استيراد — سبعة أنواع مستندات فقط.',
+  },
+  {
+    key: 'client_book',
+    name: 'دفتر عميل',
+    icon: 'BookOpenCheck',
+    description: 'دفتر مكتب محاسبة يُمسَك بالسندات — بلا مخزون ولا فواتير بيع أو شراء.',
   },
 ];
 

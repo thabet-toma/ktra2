@@ -158,32 +158,40 @@ export const VIEW_MODULES: Record<string, string> = {
  * (الروابط). الخادم هو الحارس الفعلي (`core.permissions.TemplateSurfacePermission`
  * يردّ 404 على مسارات API الموازية) — هذا تجميلٌ يمنع نداءً سيُرفض أصلاً.
  */
+// مشترَكة بين `accounting_firm` و`client_book` (ISSUE #81) — أيّ قالبٍ بلا
+// مخزون فعلي لا يحتاج شاشات حركة البضاعة هذه.
+const GOODS_MOVEMENT_HIDDEN_VIEWS = [
+  // المخزون والمستودعات والجرد وحركاته
+  'stock-levels', 'items-management', 'items-categories', 'stock-movements',
+  'product-profile', 'product-group', 'product-cost', 'warehouses',
+  'warehouse-transfer', 'stocktake',
+  // الاستيراد واللوجستيات
+  'import-offers', 'international-invoices', 'deals-management', 'old-invoices',
+  'import-flow', 'import-file-guide', 'shipments-management', 'shipment-management',
+  'shipments', 'local-shipping', 'customs-clearance', 'clearance',
+  // المشتريات — تعيش في app اللوجستيات وتتّكئ على حسابات المخزون وتكلفة
+  // البضاعة التي تُسقطها بذرة المكتب. **`supplier-payments` مستثنى عمداً**:
+  // سند الصرف يبقى (التذكرة تُبقيه صراحةً) ولو كان مساره تحت اللوجستيات.
+  'purchase-invoices', 'price-offers', 'purchase-return', 'purchase-receipts',
+  'purchase-settings',
+  // شاشات بضاعةٍ تعيش داخل مجموعة **المبيعات** فبقيت ظاهرةً لمكتبٍ بلا مخزون:
+  // الإرسالية تسلّم بضاعة، وأرباح الفواتير تُشتقّ من تكلفة البضاعة المباعة،
+  // وتقرير المحجوزات حجزُ مخزون. فاتورة الأتعاب لا تمرّ بأيٍّ منها.
+  'sales-delivery-notes', 'invoice-profits', 'reserved-stock',
+  // المتجر
+  'store-settings',
+  // ما بعد البيع
+  'after-sales', 'service-orders',
+  // الأجهزة الحساسة
+  'sensitive-devices',
+] as const;
+
 export const TEMPLATE_HIDDEN_VIEWS: Record<string, readonly string[]> = {
-  accounting_firm: [
-    // المخزون والمستودعات والجرد وحركاته
-    'stock-levels', 'items-management', 'items-categories', 'stock-movements',
-    'product-profile', 'product-group', 'product-cost', 'warehouses',
-    'warehouse-transfer', 'stocktake',
-    // الاستيراد واللوجستيات
-    'import-offers', 'international-invoices', 'deals-management', 'old-invoices',
-    'import-flow', 'import-file-guide', 'shipments-management', 'shipment-management',
-    'shipments', 'local-shipping', 'customs-clearance', 'clearance',
-    // المشتريات — تعيش في app اللوجستيات وتتّكئ على حسابات المخزون وتكلفة
-    // البضاعة التي تُسقطها بذرة المكتب. **`supplier-payments` مستثنى عمداً**:
-    // سند الصرف يبقى (التذكرة تُبقيه صراحةً) ولو كان مساره تحت اللوجستيات.
-    'purchase-invoices', 'price-offers', 'purchase-return', 'purchase-receipts',
-    'purchase-settings',
-    // شاشات بضاعةٍ تعيش داخل مجموعة **المبيعات** فبقيت ظاهرةً لمكتبٍ بلا مخزون:
-    // الإرسالية تسلّم بضاعة، وأرباح الفواتير تُشتقّ من تكلفة البضاعة المباعة،
-    // وتقرير المحجوزات حجزُ مخزون. فاتورة الأتعاب لا تمرّ بأيٍّ منها.
-    'sales-delivery-notes', 'invoice-profits', 'reserved-stock',
-    // المتجر
-    'store-settings',
-    // ما بعد البيع
-    'after-sales', 'service-orders',
-    // الأجهزة الحساسة
-    'sensitive-devices',
-  ],
+  accounting_firm: GOODS_MOVEMENT_HIDDEN_VIEWS,
+  // ISSUE #81: «دفتر عميل» يُمسَك بالسندات وحدها — فوق قناع `accounting_firm`
+  // يسقط البيع نفسه: لا فاتورة بيع ولا أمر بيع ولا عرض سعر. سند القبض
+  // (`sales-customer-payments`) يبقى — أحد الدفاتر الخمسة المزروعة.
+  client_book: [...GOODS_MOVEMENT_HIDDEN_VIEWS, 'sales-invoices', 'sales-quotations', 'sales-orders'],
 };
 
 /** أيخفي قالب هذه الشركة هذه الشاشة؟ غياب القالب أو مفتاحه = general (بلا إخفاء). */

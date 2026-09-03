@@ -61,8 +61,53 @@ test('accounting_firm لا يخفي ما تبقيه التذكرة — المب�
   }
 });
 
+/* ── ISSUE #81 — «دفتر عميل»: قناع accounting_firm + سطح البيع نفسه ────── */
+
+test('كل مفتاح في TEMPLATE_HIDDEN_VIEWS.client_book موجود في خريطة الشاشات — لا مفاتيح ميتة', () => {
+  for (const view of TEMPLATE_HIDDEN_VIEWS.client_book) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(VIEW_PERMISSIONS, view),
+      `مفتاح ميت: ${view} غير موجود في VIEW_PERMISSIONS`,
+    );
+  }
+});
+
+test('لا مفاتيح مكررة داخل قائمة client_book', () => {
+  const views = TEMPLATE_HIDDEN_VIEWS.client_book;
+  assert.equal(new Set(views).size, views.length);
+});
+
+test('client_book يخفي كل ما يخفيه accounting_firm', () => {
+  for (const view of TEMPLATE_HIDDEN_VIEWS.accounting_firm) {
+    assert.equal(templateHidesView(view, 'client_book'), true, view);
+  }
+});
+
+test('client_book يزيد فوق ذلك فواتير البيع وأوامر البيع وعروض الأسعار', () => {
+  for (const view of ['sales-invoices', 'sales-quotations', 'sales-orders']) {
+    assert.equal(templateHidesView(view, 'client_book'), true, view);
+  }
+});
+
+test('client_book لا يخفي سند القبض ولا سند الصرف ولا سند المصروف ولا المحاسبة', () => {
+  for (const view of [
+    'sales-customer-payments', 'supplier-payments', 'accounting-expense-vouchers',
+    'accounting-coa', 'accounting-journals', 'sales-customers',
+  ]) {
+    assert.equal(templateHidesView(view, 'client_book'), false, view);
+  }
+});
+
+test('accounting_firm لا يخفي فواتير البيع — الفرق الوحيد بينه وبين client_book', () => {
+  assert.equal(templateHidesView('sales-invoices', 'accounting_firm'), false);
+  assert.equal(templateHidesView('sales-invoices', 'client_book'), true);
+});
+
 test('general: صفر تغيير — لا شاشة مخفية مهما كانت', () => {
   for (const view of TEMPLATE_HIDDEN_VIEWS.accounting_firm) {
+    assert.equal(templateHidesView(view, 'general'), false, view);
+  }
+  for (const view of TEMPLATE_HIDDEN_VIEWS.client_book) {
     assert.equal(templateHidesView(view, 'general'), false, view);
   }
 });

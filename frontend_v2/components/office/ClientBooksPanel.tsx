@@ -3,7 +3,7 @@ import { BookOpenCheck, Building2, Loader2, Plus } from 'lucide-react';
 
 import { useCompany } from '../../contexts/CompanyContext';
 import { useToast } from '../../contexts/ToastContext';
-import { COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, companyTemplateByKey } from '../../utils/companyTemplates';
+import { COMPANY_TEMPLATES, DEFAULT_CLIENT_BOOK_TEMPLATE, companyTemplateByKey } from '../../utils/companyTemplates';
 import { formatDateValue } from '../../utils/formatDate';
 
 /**
@@ -14,8 +14,9 @@ import { formatDateValue } from '../../utils/formatDate';
  * يُصدر فاتورة أتعاب لزبونه ولا يستطيع أن يمسك دفاتره.
  *
  * لوحة واحدة تُركَّب في القشرتين: قشرة المحاسب القانوني (`/office`) وقائمةُ
- * شركةٍ بقالب مكتب محاسبة. **القالب الافتراضي للدفتر `general` لا قالب المكتب**:
- * الزبون محلٌّ تجاري له مخزون ومشتريات، والقالب المحاسبي وُضع لمكتبٍ لا لزبونه.
+ * شركةٍ بقالب مكتب محاسبة. **القالب الافتراضي للدفتر `client_book` (ISSUE #81)**
+ * لا `general` ولا قالب المكتب نفسه: الزبون يُمسَك بالسندات — لا فواتير بيع
+ * وشراء ولا مخزون — والقالب المحاسبي (`accounting_firm`) وُضع لمكتبٍ لا لزبونه.
  */
 export const ClientBooksPanel: React.FC = () => {
   const toast = useToast();
@@ -28,7 +29,7 @@ export const ClientBooksPanel: React.FC = () => {
   } = useCompany();
   const [opening, setOpening] = useState(false);
   const [name, setName] = useState('');
-  const [template, setTemplate] = useState<string>(DEFAULT_COMPANY_TEMPLATE);
+  const [template, setTemplate] = useState<string>(DEFAULT_CLIENT_BOOK_TEMPLATE);
   const [saving, setSaving] = useState(false);
 
   if (officeTenantId === null) {
