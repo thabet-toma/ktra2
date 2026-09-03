@@ -29,6 +29,7 @@ import { getSalesSettings, updateSalesSettings, type SalesSettings } from "../..
 import { cloudinaryService } from "../../services/cloudinaryService";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { usePasteImageUpload } from "../../utils/clipboardImage";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import { Save, RefreshCw, Database, X, Upload } from "lucide-react";
 
 /** ── Types ───────────────────────────────────────────────────────────── */
@@ -70,24 +71,6 @@ type TenantBookRow = {
 type CurrencyRow = { CurrencyID: number; Code: string; Name?: string | null };
 type AccountRow = { id: number; code?: string | null; name?: string | null; parent?: number | null; account_type?: string | null };
 
-const DOC_TYPE_LABELS: Record<string, string> = {
-  sales_invoice: "فاتورة مبيعات",
-  purchase_invoice: "فاتورة شراء",
-  sales_return: "مرجع بيع",
-  purchase_return: "مرجع شراء",
-  receipt_voucher: "سند قبض",
-  payment_voucher: "سند صرف",
-  multi_receipt: "إيصال قبض متعدد",
-  multi_payment: "سند صرف متعدد",
-  credit_note: "إشعار دائن",
-  debit_note: "إشعار مدين",
-  quotation: "عرض سعر",
-  journal_entry: "قيد محاسبة",
-  deal: "صفقة",
-  shipment: "شحنة",
-  clearance: "تخليص جمركي",
-};
-
 /** ── Helper: labelled field ──────────────────────────────────────────── */
 
 const fld = (label: string, node: React.ReactNode) => (
@@ -108,6 +91,9 @@ export interface GroupConstantsPageProps {
 
 export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentUserName, onClose }) => {
   const tenantId = resolveTenantId();
+  // ISSUE #82: اسم نوع المستند من المعجم — يحلّ محلّ خريطةٍ محلية كانت تكرر
+  // `TenantBook.DOCUMENT_TYPES` بلا وعي بالقالب (وناقصة سندَي المصروف والإيراد).
+  const { term } = usePermissions();
   const [settings, setSettings] = useState<TenantSettingsData | null>(null);
   const [books, setBooks] = useState<TenantBookRow[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyRow[]>([]);
@@ -386,7 +372,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
       header: "نوع المستند",
       width: "25%",
       readOnly: true,
-      render: (r) => <span>{DOC_TYPE_LABELS[r.document_type] || r.document_type}</span>,
+      render: (r) => <span>{term(`doc.${r.document_type}`)}</span>,
     },
     { key: "book_number", header: "رقم الدفتر", width: "80px", align: "center", readOnly: true },
     {

@@ -71,7 +71,7 @@ export interface KitViewSection {
 }
 
 export interface KitDocumentViewProps<T> {
-  /** «فاتورة مبيعات» */
+  /** اسم نوع المستند — من المعجم (`term(...)`) لا نصّاً حرفياً؛ راجع ISSUE #82 */
   title: string;
   /** «SALES INVOICE» — سطر لاتيني صغير تحت العنوان */
   subtitle?: string;

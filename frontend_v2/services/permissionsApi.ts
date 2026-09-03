@@ -23,6 +23,8 @@ export type MyPermissions = {
   ui_mode?: UiMode;
   /** ISSUE #51: قالب الشركة — يحرس به `TEMPLATE_HIDDEN_VIEWS` (`utils/viewPermissions.ts`). */
   template?: string;
+  /** ISSUE #82: المعجم — قاموسٌ مسطّح بمفاتيح مصطلحات (`doc.*`، `line.*`)، يُقرأ بـ`term(key)`. */
+  terms?: Record<string, string>;
 };
 
 export type PermissionsMatrix = {

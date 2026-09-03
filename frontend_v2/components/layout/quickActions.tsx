@@ -31,10 +31,14 @@ export type QuickAction = {
  * يبني مجموعات الإجراءات السريعة حسب دور المستخدم.
  * @param go مصنع onClick: يتلقّى (view, id?) ويعيد المعالج (يتيح للمستهلك إغلاق
  *           قائمته بعد التنقّل).
+ * @param salesInvoiceLabel ISSUE #82: اسم فاتورة المبيعات من المعجم
+ *        (`usePermissions().term('doc.sales_invoice')`) — يتبدّل باسمه البديل
+ *        في مكتب المحاسبة.
  */
 export function buildQuickActionGroups(
   user: User,
   go: (view: AppView, id?: string) => () => void,
+  salesInvoiceLabel: string,
 ): QuickAction[][] {
   const isManager = user.role === "manager";
   const canInvoice = user.role === "manager" || user.role === "procurement";
@@ -43,7 +47,7 @@ export function buildQuickActionGroups(
     [
       {
         key: "new-sales",
-        label: "فاتورة مبيعات",
+        label: salesInvoiceLabel,
         icon: <FilePlus2 className="w-4 h-4" />,
         onClick: go("sales-invoices", "new"),
         show: canInvoice,

@@ -12,6 +12,7 @@ from .models import (
 from inventory.models import Product, Warehouse
 from partners.models import Partner
 from core.api_defaults import TenantScopedPrimaryKeyRelatedField
+from core.terminology import term as tenant_term
 
 class AccountSerializer(serializers.ModelSerializer):
     """يُرجع معلومات المورد المرتبط بالحساب (الاسم التجاري / المستعار) إن وُجد."""
@@ -169,10 +170,11 @@ def build_journal_reference_summary(obj, pay_map=None, sales_map=None, cust_map=
                 inv = SalesInvoice.objects.select_related("customer").filter(pk=rid).first()
             if inv:
                 cust = getattr(inv.customer, "name", "") or ""
-                return f"فاتورة مبيعات {inv.invoice_number}" + (f" — {cust}" if cust else "")
+                inv_label = tenant_term(obj.tenant, "doc.sales_invoice")
+                return f"{inv_label} {inv.invoice_number}" + (f" — {cust}" if cust else "")
         except Exception:
             pass
-        return f"فاتورة مبيعات · #{rid}"
+        return f"{tenant_term(obj.tenant, 'doc.sales_invoice')} · #{rid}"
 
     if rt == "SALES_DELIVERY_COGS" and rid:
         return f"تكلفة بضاعة مباعة عند التسليم · فاتورة #{rid}"
@@ -210,7 +212,9 @@ def get_deal_ref_number(obj, pay_map=None):
 
 
 SOURCE_LABEL_MAP = {
-    "SALES_INVOICE": "فاتورة مبيعات",
+    # ISSUE #82: "SALES_INVOICE" مقصودةٌ غائبة من هنا — اسمها يأتي من المعجم
+    # (`core.terminology.term`) لأنه يتبدّل بقالب الشركة (اسمه البديل في مكتب
+    # المحاسبة)، لا من قاموسٍ ثابت لكل الشركات.
     "SALES_DELIVERY_COGS": "تكلفة بضاعة مباعة",
     "CUSTOMER_PAYMENT": "تحصيل عميل",
     "PURCHASE_INVOICE": "فاتورة شراء",
@@ -227,8 +231,11 @@ SOURCE_LABEL_MAP = {
 }
 
 
-def _get_source_label(rt: str) -> str:
-    return SOURCE_LABEL_MAP.get((rt or "").strip(), rt or "")
+def _get_source_label(rt: str, tenant=None) -> str:
+    key = (rt or "").strip()
+    if key == "SALES_INVOICE":
+        return tenant_term(tenant, "doc.sales_invoice")
+    return SOURCE_LABEL_MAP.get(key, rt or "")
 
 
 def _get_tenant_name(obj) -> str:
@@ -294,7 +301,7 @@ class JournalHeaderListSerializer(serializers.ModelSerializer):
         return _get_tenant_name(obj)
 
     def get_source_label(self, obj):
-        return _get_source_label(obj.reference_type)
+        return _get_source_label(obj.reference_type, obj.tenant)
 
 
 class JournalHeaderSerializer(serializers.ModelSerializer):
@@ -342,7 +349,7 @@ class JournalHeaderSerializer(serializers.ModelSerializer):
         return _get_tenant_name(obj)
 
     def get_source_label(self, obj):
-        return _get_source_label(obj.reference_type)
+        return _get_source_label(obj.reference_type, obj.tenant)
 
     def create(self, validated_data):
         lines_data = validated_data.pop('lines')

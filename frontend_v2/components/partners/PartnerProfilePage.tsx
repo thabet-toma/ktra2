@@ -32,6 +32,7 @@ import {
 } from '../../services/salesApi';
 import { purchaseInvoiceApi } from '../../services/purchaseInvoiceApi';
 import { useAppBack } from '../../hooks/useAppBack';
+import { usePermissions } from '../../contexts/PermissionsContext';
 
 interface PartnerApi {
   id: number;
@@ -142,6 +143,8 @@ export const PartnerProfilePage: React.FC = () => {
     return m ? decodeURIComponent(m[1]) : undefined;
   }, [location.search]);
   const navigate = useNavigate();
+  // ISSUE #82: اسم فاتورة المبيعات من المعجم — يتبدّل باسمه البديل في مكتب المحاسبة.
+  const { term } = usePermissions();
   // كشف الحساب يُفتح في تبويب جديد من الفواتير والقوائم، فبلا سابقة
   // تُعاد الضغطة إلى «دليل الأطراف» بدل أن تصطدم بجدار.
   const back = useAppBack('/partners-directory', 'دليل الأطراف');
@@ -975,7 +978,7 @@ export const PartnerProfilePage: React.FC = () => {
                   : []),
                 {
                   key: 'new-invoice',
-                  label: 'فاتورة مبيعات جديدة',
+                  label: `${term('doc.sales_invoice')} جديدة`,
                   onClick: () => navigate(`/sales/invoices/new?customer_id=${id}`),
                 },
                 {

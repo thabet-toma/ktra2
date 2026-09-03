@@ -17,6 +17,7 @@
 | `core/mixins.py` | `BaseTenantViewSet` — الفلترة التلقائية بالشركة |
 | `core/access.py` | كتالوج الصلاحيات ومصفوفة الأدوار والإنفاذ |
 | `core/permissions.py` · `core/permissions_api.py` | منتج الصلاحية لـDRF + نقطة `/api/permissions/me/` |
+| `core/terminology.py` | **ISSUE #82 — المعجم**: قاموس تسميةٍ مسطّح (`doc.*`، `line.item`) يتبدّل بقالب الشركة — `term(tenant, key)`، يُسلَّم على حمولة `/api/permissions/me/` (`terms`) |
 | `core/modules.py` | أي وحدة مرخّصة مفعّلة لأي شركة |
 | `core/plans.py` | حدود الخطط (عدد الفواتير/المستخدمين…) وعمر الاشتراك (`subscription_expiry`) |
 | `core/pagination.py` | منتجا الترقيم — الإلزامي والاختياري |
@@ -194,6 +195,10 @@ run_drill(key, tenant_id, params) -> dict        # أسطر التفصيل + م�
 
 # core/payments.py — الدفع المشترك
 validate_payment(ctx) · post_payment(...) · document_payment_summary(total, paid)
+
+# core/terminology.py — المعجم (ISSUE #82)
+term(tenant, key) -> str            # مصطلحٌ واحد؛ مفتاح/قالب غائب يسقط للافتراضي بلا رمي
+terms_payload(tenant) -> dict       # القاموس كاملاً بعد قناع القالب — يُسلَّم على /api/permissions/me
 ```
 
 ## أهم الـAPI endpoints
@@ -205,7 +210,7 @@ validate_payment(ctx) · post_payment(...) · document_payment_summary(total, pa
 | `/api/reports/` · `/api/reports/<key>/` | فهرس التقارير وتشغيلها |
 | `/api/reports/<key>/drill/` | الأسطر التي كوّنت صفّاً مجمَّعاً (للتقارير المُعلِنة `drill`) |
 | `/api/reports/stock-replenishment/` | «ماذا أطلب وكم» — من `core/replenishment.py`. بمستوى المنتج أو النوع، وتنقيبٍ يفتح صفّ النوع على منتجاته. يفتح على أربعة أعمدة فقط (`columns_for`)؛ `?details=1` يكشف الباقي — غير مربوطٍ بـ«الوضع السهل» |
-| `/api/permissions/me/` | حمولة الإقلاع الواحدة: الدور · الصلاحيات · الوحدات المرخّصة · `ui_mode` — **كلّها للعرض فقط، لا تحمي endpoint** |
+| `/api/permissions/me/` | حمولة الإقلاع الواحدة: الدور · الصلاحيات · الوحدات المرخّصة · `ui_mode` · `terms` (ISSUE #82 — المعجم) — **كلّها للعرض فقط، لا تحمي endpoint** |
 | `/api/scan/?q=` | التعرّف على رقم: باركود · سيريال · IMEI · رمز منتج · جزء اسم — بلا أن يختار المستخدم النوع |
 | `/api/dashboard/` | تجميع الداشبورد |
 | `/api/platform/…` | لوحة السوبر أدمن |
@@ -283,12 +288,29 @@ validate_payment(ctx) · post_payment(...) · document_payment_summary(total, pa
    بترخيص وحدتها **ثم** صلاحيتها. ردٌّ فارغ لمن لا يحقّ له يُقرأ «الرقم غير
    مسجَّل» وهو مسجَّل — فالرفض الصريح أصدق. و`scope` يعود مع الردّ كي ترسم
    الواجهة أزرارها بما هو متاح فعلاً.
+12. **المعجم مصدرٌ خادميٌّ وحيد (ISSUE #82) — لا نسخة ثانية من اسم مصطلح.**
+   `core/terminology.py` (`term`/`terms_payload`) يُسلَّم على حمولة
+   `/api/permissions/me/` نفسها (`terms`) — القرار 8 في #46: لا آلية ثالثة.
+   مفتاح نوع المستند (`sales_invoice`) لا يُمسّ أبداً، اسمه وحده يُقرأ من هنا؛
+   والكلمات المحسومة في #48 («فاتورة أتعاب» و«خدمة» بدل «منتج» في قوالب
+   المكتب) لا تُكتب حرفياً في أي شاشة أو serializer آخر. يحرسه
+   `core/tests/test_terminology_guard.py` بمسحٍ شامل لشجرة الإنتاج
+   (`.py`/`.ts`/`.tsx`، مستثنياً `tests/`/`e2e/`/`migrations/`/`docs/`) عن
+   **العبارات المركّبة** (كلمتان فأكثر) **التي تحمل تجاوزاً فعلياً بين
+   قالبين** — مشتقّةً من `core.terminology` نفسها لا مكتوبة يدوياً؛ الكلمات
+   المفردة («منتج»/«خدمة») مستثناة عمداً (تتكرران في سياقاتٍ لا علاقة لها
+   بالمعجم، مثل «خدمة ما بعد البيع»). أي تطابقٍ خارج `ALLOWLIST` الصريحة
+   (بسببٍ مكتوب لكل مدخل: تعليق، أو أوصاف سجلّ نشاط تاريخية، أو دالّة صرفة
+   بتغيير توقيعٍ خارج النطاق) يُسقط الحارس أحمر. لا يشمل هذا المعجم أوصاف
+   سجلّ النشاط المخزَّنة (`core/activity.py`) ولا `verbose_name` في الهجرات.
 
 ## الاختبارات المهمة
 
 | الملف | يحرس |
 |---|---|
 | `core/tests/test_docs_freshness.py` | ألا تتعفّن وثائق التنقّل بصمت |
+| `core/tests/test_terminology.py` | `term`/`terms_payload`: general بلا تغيير، تجاوزات القالب، مفتاح/قالب غائب بلا رمي، الحمولة على `/api/permissions/me` |
+| `core/tests/test_terminology_guard.py` | حارس التسمية — مسحٌ شامل لشجرة الإنتاج، لا عودة نصٍّ حرفيّ خارج `ALLOWLIST` المُعلَّلة، وألا يتعفّن الاستدعاء ولا القائمة |
 | `core/tests/test_cache_resilience.py` | ألا يُسقط تعثّر الكاش الطلبَ |
 | `core/tests/test_global_throttle.py` | حدود المعدّل العامة |
 | `core/tests/test_reports.py` | صحة التقارير وثبات عدّ الاستعلامات |

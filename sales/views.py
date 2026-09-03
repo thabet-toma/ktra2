@@ -26,6 +26,7 @@ from core.pagination import EnforcedPageNumberPagination
 from core.api_defaults import ApiAuthAndUser, PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.plans import enforce_limits
 from core.tenant_utils import get_branch, get_tenant
+from core.terminology import term as tenant_term
 from .models import (
     CreditDebitNote,
     CustomerPayment,
@@ -435,7 +436,7 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                     journal_reference_types=["SALES_INVOICE", "SALES_DELIVERY_COGS"],
                     stock_reference_types=["SALE", "STOCK_ISSUE"],
                     user=request.user,
-                    document_label=f"فاتورة مبيعات {invoice.invoice_number}",
+                    document_label=f"{tenant_term(invoice.tenant, 'doc.sales_invoice')} {invoice.invoice_number}",
                     recycle=True,
                 )
                 invoice.status = SalesInvoice.STATUS_DRAFT

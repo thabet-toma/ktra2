@@ -29,6 +29,7 @@
 | `frontend_v2/components/ui/FileDropZone.tsx` | **منطقة رفع الصور الموحّدة**: اختيار + سحب وإفلات + لصق — لا `<input type="file">` للصور خارجها |
 | `frontend_v2/utils/clipboardImage.ts` | سجلّ مناطق اللصق ومُوجِّهه (`resolvePasteZone`, `usePasteZone`, `usePasteImageUpload`) |
 | `frontend_v2/utils/formatNumber.ts` | **كل عرض رقمي يمرّ من هنا** |
+| `frontend_v2/utils/terms.ts` | **ISSUE #82 — المعجم**: `resolveTerm` (نقطة القراءة الصرفة) — مصدر الحقيقة `terms` في حمولة `/api/permissions/me/`؛ `usePermissions().term(key)` الغلاف التفاعلي |
 | `frontend_v2/utils/formatDate.ts` | التواريخ — لا `toLocaleDateString` بلغة عربية |
 | `frontend_v2/services/tenantSettingsApi.ts` | مصدر مشترك لإعدادات الشركة (نافذة 60ث) |
 | `frontend_v2/components/legacy/firestoreService.ts` | الجسر القديم — **يُستورَد ديناميكياً** لا ثابتاً |
@@ -79,6 +80,7 @@
 | الصلاحيات | `/api/permissions/me/` **للعرض فقط** — إخفاء زر ليس حماية |
 | الوحدات المرخّصة | غير المفعّلة ترد **404** لا 403 — عالِج الحالتين |
 | وضع العرض | `ui_mode` يصل ضمن حمولة `/api/permissions/me/` نفسها (بلا طلب إضافي)، ويُحفَظ بـ`POST /api/tenants/companies/set-ui-mode/` |
+| المعجم (ISSUE #82) | `terms` يصل ضمن حمولة `/api/permissions/me/` نفسها — لا تكتب اسم مصطلحٍ حرفياً في شاشة، اقرأه بـ`term(key)` (`usePermissions()`، `utils/terms.ts`) |
 
 ## «الوضع السهل» — قناعُ عرضٍ فوق نفس الواجهة
 

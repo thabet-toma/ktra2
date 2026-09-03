@@ -4,6 +4,7 @@ import { clientLogger } from '../services/logger';
 import { useToast } from './ToastContext';
 import { resolveTenantId } from '../utils/tenantContext';
 import { DEFAULT_COMPANY_TEMPLATE } from '../utils/companyTemplates';
+import { resolveTerm } from '../utils/terms';
 import {
   DEFAULT_UI_MODE,
   normalizeUiMode,
@@ -34,6 +35,11 @@ interface PermissionsValue {
   template: string;
   /** هل يملك المستخدم هذه الصلاحية؟ */
   can: (key: string) => boolean;
+  /**
+   * ISSUE #82: المعجم — نقطة القراءة الواحدة. مفتاحٌ غائب يسقط للافتراضي
+   * بلا رمي (`resolveTerm`). لا تكتب اسم مصطلحٍ حرفياً في شاشة — مرّ من هنا.
+   */
+  term: (key: string) => string;
   /** THA-110: وضع عرض الواجهة — تفضيل عرض لا صلاحية. */
   uiMode: UiMode;
   setUiMode: (mode: UiMode) => void;
@@ -53,6 +59,7 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [modules, setModules] = useState<Record<string, boolean>>({});
   const [template, setTemplate] = useState<string>(DEFAULT_COMPANY_TEMPLATE);
+  const [terms, setTerms] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tick, setTick] = useState(0);
@@ -76,6 +83,7 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setPermissions(new Set(res.permissions));
         setModules(res.modules || {});
         setTemplate(res.template || DEFAULT_COMPANY_TEMPLATE);
+        setTerms(res.terms || {});
         // الخادم مصدر الحقيقة: قيمته تحسم الـcache (وحقلٌ غائب ⇒ «متقدم»).
         const serverMode = normalizeUiMode(res.ui_mode);
         setUiModeState(serverMode);
@@ -117,9 +125,11 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
 
+  const term = useCallback((key: string) => resolveTerm(terms, key), [terms]);
+
   const value = useMemo<PermissionsValue>(
-    () => ({ role, isManager, permissions, modules, template, can, uiMode, setUiMode, loading, reload }),
-    [role, isManager, permissions, modules, template, can, uiMode, setUiMode, loading, reload],
+    () => ({ role, isManager, permissions, modules, template, can, term, uiMode, setUiMode, loading, reload }),
+    [role, isManager, permissions, modules, template, can, term, uiMode, setUiMode, loading, reload],
   );
 
   return <PermissionsContext.Provider value={value}>{children}</PermissionsContext.Provider>;
@@ -136,6 +146,7 @@ export function usePermissions(): PermissionsValue {
       modules: {},
       template: DEFAULT_COMPANY_TEMPLATE,
       can: () => true,
+      term: (key: string) => resolveTerm(undefined, key),
       uiMode: DEFAULT_UI_MODE,
       setUiMode: () => {},
       loading: false,

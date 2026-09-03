@@ -413,7 +413,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   defaultServiceLine = false,
 }) => {
   const confirm = useConfirm();
-  const { can: canPerm, uiMode } = usePermissions();
+  // ISSUE #82: اسما نوع الفاتورة وبند السطر من المعجم — يتبدّلان في مكتب المحاسبة.
+  const { can: canPerm, uiMode, term } = usePermissions();
   // الربح الإجمالي يتبع زر العين (الخصوصية): يختفي حين تُخفى الأسعار/الأرباح.
   const { visible: profitVisible } = usePriceVisibility();
   const [draftId, setDraftId] = useState<number | null>(null);
@@ -2296,7 +2297,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
      يزاحم هذه الفاتورة — لا أعمدة فارغة على فاتورة بلا حجز. */
   const gridColumns: KitGridColumn<DraftLine>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
-    { key: "product", header: "وصف المنتج", width: "30%" },
+    { key: "product", header: `وصف ${term("line.item")}`, width: "30%" },
     { key: "avail", header: "الرصيد", width: "70px", align: "center", readOnly: true },
     ...(anyLineReserved ? [
       {
@@ -2492,7 +2493,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         })()}
         options={productOptions}
         disabled={readOnly}
-        placeholder="اكتب اسم المنتج…"
+        placeholder={`اكتب اسم ${term("line.item")}…`}
         onPick={(id) => {
           void onSelectProduct(row.key, Number(id));
           setTimeout(() => {
@@ -3604,7 +3605,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const documentView = (
     <KitDocumentView<DraftLine>
-      title={isReturn ? "مرجع بيع" : "فاتورة مبيعات"}
+      title={isReturn ? "مرجع بيع" : term("doc.sales_invoice")}
       subtitle={isReturn ? "SALES RETURN / CREDIT NOTE" : "SALES INVOICE"}
       documentNumber={invoiceNumber || (draftId ? `#${draftId}` : "مسودة")}
       status={
@@ -3709,7 +3710,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       columns={[
         {
           key: "name",
-          header: "المنتج",
+          header: term("line.item"),
           render: (row) => {
             // THA-18: هذه هي الشاشة التي تُفتح عليها الفاتورة **المرحَّلة** —
             // فاللقطة المجمَّدة تُقدَّم هنا قبل كل شيء، وإلا لعرض المستند
@@ -3890,7 +3891,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     >
       <KitDocumentShell
         gridFitContent={viewMode}
-        title={isReturn ? "مرجع بيع" : "فاتورة مبيعات"}
+        title={isReturn ? "مرجع بيع" : term("doc.sales_invoice")}
         state={docState}
         company={
           postedJournalId != null ? `قيد محاسبي #${postedJournalId}` : undefined

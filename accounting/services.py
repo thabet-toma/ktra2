@@ -11,6 +11,7 @@ from decimal import Decimal
 from partners.models import Partner
 from tenants.models import Currency, TenantBook
 from core.hooks import run_tax_period_guards
+from core.terminology import term as tenant_term
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
@@ -1793,10 +1794,12 @@ def cheque_document_is_posted(cheque):
 
 #: المستند الذي دخل الشيك الدفاتر ضمنه، مرتَّباً بأولوية الدقّة لكل اتجاه:
 #: السند أدقّ من الفاتورة (الشيك يُسجَّل داخله)، فيتصدّر حين يوجد الاثنان.
+#: ISSUE #82: `None` علامةٌ خاصة لـ`sales_invoice` — اسمها يتبدّل بقالب الشركة
+#: (اسمها البديل في مكتب المحاسبة)، فيُحلّ من المعجم عند الاستدعاء لا هنا.
 _CHEQUE_SOURCE_DOCUMENTS = {
     'Incoming': (
         ('customer_payment', 'سند قبض'),
-        ('sales_invoice', 'فاتورة مبيعات'),
+        ('sales_invoice', None),
     ),
     'Outgoing': (
         ('supplier_payment', 'سند صرف'),
@@ -1813,9 +1816,13 @@ def cheque_source_document(cheque) -> dict | None:
     هذا الحقل هو الخيط الذي يجعل الخروج ممكناً — والشاشة تبني عليه زر «ترحيل
     السند» ورابط المستند. يعيد None لورقةٍ يتيمة (legacy) فيبقى مسارها كما هو.
     """
-    for field, label in _CHEQUE_SOURCE_DOCUMENTS.get(cheque.direction, ()):
+    for field, static_label in _CHEQUE_SOURCE_DOCUMENTS.get(cheque.direction, ()):
         if getattr(cheque, f"{field}_id", None) is None:
             continue
+        label = (
+            tenant_term(cheque.tenant, "doc.sales_invoice")
+            if field == "sales_invoice" else static_label
+        )
         doc = getattr(cheque, field)
         number = (
             getattr(doc, 'invoice_number', None)

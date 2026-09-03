@@ -6,6 +6,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { formatMoney } from '../../utils/formatNumber';
+import { usePermissions } from '../../contexts/PermissionsContext';
 import { getSkin } from '../../styles/skin';
 import {
   Plus,
@@ -359,6 +360,8 @@ const DateInputStoryPanel: React.FC = () => {
 type StoryLine = { name: string; qty: number; price: number; discount: number; total: number };
 
 const DocumentViewStoryPanel: React.FC = () => {
+  // ISSUE #82: حتى بيانات معرض المكوّنات تقرأ العنوان من المعجم — لا نسخة حرفية.
+  const { term } = usePermissions();
   const rows: StoryLine[] = [
     { name: 'بطارية 15 كيلو zj مايكل', qty: 10, price: 783, discount: 0, total: 7830 },
     { name: 'بطارية 30 كيلو zj مايكل', qty: 10, price: 1231, discount: 0, total: 12310 },
@@ -373,7 +376,7 @@ const DocumentViewStoryPanel: React.FC = () => {
       </p>
       <div className="border rounded-xl overflow-hidden bg-[var(--color-surface-2)]">
         <KitDocumentView<StoryLine>
-          title="فاتورة مبيعات"
+          title={term("doc.sales_invoice")}
           subtitle="SALES INVOICE"
           documentNumber="SI-2026-0042"
           status={{ label: 'مرحّلة', tone: 'ok' }}

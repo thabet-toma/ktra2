@@ -27,6 +27,7 @@ import {
 import { partnerActionGroups, type PartnerActionIcon } from "../../utils/partnerActions";
 import { AppView, User } from "../../types";
 import { clientLogger } from "../../services/logger";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import { buildQuickActionGroups, visibleQuickActionGroups, QuickAction } from "./quickActions";
 import { KitCalculatorPopover } from "../kit/KitCalculatorPopover";
 import {
@@ -89,6 +90,8 @@ const ROW_H = 32;
 const ICON = "w-3.5 h-3.5";
 
 export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
+  // ISSUE #82: اسم فاتورة المبيعات من المعجم — يتبدّل باسمه البديل في مكتب المحاسبة.
+  const { term } = usePermissions();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [calc, setCalc] = useState<CalcState | null>(null);
   const [submenu, setSubmenu] = useState<SubmenuState | null>(null);
@@ -307,7 +310,7 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
   ];
 
   // الإجراءات السريعة (نفس تعريف الشريط، مُرشَّحة بالدور).
-  const quickGroups = visibleQuickActionGroups(buildQuickActionGroups(user, (view, id) => go(view, id)));
+  const quickGroups = visibleQuickActionGroups(buildQuickActionGroups(user, (view, id) => go(view, id), term("doc.sales_invoice")));
   const quickEntries: MenuEntry[] = [];
   quickGroups.forEach((group: QuickAction[], gi) => {
     if (gi > 0) quickEntries.push({ kind: "sep" });

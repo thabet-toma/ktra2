@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { useTenantSettings } from '../../hooks/useTenantSettings';
+import { usePermissions } from '../../contexts/PermissionsContext';
 import { Printer, X, FileText, Building2 } from 'lucide-react';
 import { formatMoney, formatQuantity } from '../../utils/formatNumber';
 import type { PartnerRow, ProductRow, DraftLine } from './SalesInvoiceEditor';
@@ -42,6 +43,8 @@ interface Props {
 export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
     const componentRef = useRef<HTMLDivElement>(null);
     const { identity } = useTenantSettings();
+    // ISSUE #82: اسم الفاتورة المطبوعة من المعجم — يتبدّل باسمه البديل في مكتب المحاسبة.
+    const { term } = usePermissions();
 
     const handlePrint = () => {
         window.print();
@@ -108,7 +111,7 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                                 </div>
                             )}
                             <h1 className={`font-black leading-none ${data.isReturn ? 'text-red-700' : 'ktra-text-ink'} ${identity?.company_name_primary ? 'text-base mt-1' : 'text-2xl'}`}>
-                                {data.isReturn ? 'مرجع بيع / إشعار دائن' : 'فاتورة مبيعات'}
+                                {data.isReturn ? 'مرجع بيع / إشعار دائن' : term('doc.sales_invoice')}
                             </h1>
                             <p className="text-xs font-bold ktra-text-soft mt-1">{data.isReturn ? 'SALES RETURN / CREDIT NOTE' : 'SALES INVOICE'}</p>
                         </div>

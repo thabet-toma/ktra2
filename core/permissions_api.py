@@ -26,6 +26,7 @@ from core.access import (
 )
 from core.modules import MODULES, module_enabled
 from core.tenant_utils import get_tenant
+from core.terminology import terms_payload
 from tenants.company_templates import DEFAULT_TEMPLATE
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,10 @@ def my_permissions(request):
         # THA-110: وضع العرض يركب هذه الحمولة نفسها (تُحمَّل عند الإقلاع) فلا
         # يكلّف طلباً شبكياً إضافياً. عرضٌ فقط — لا يحجب مساراً ولا يمنح صلاحية.
         "ui_mode": user_ui_mode(request.user, tenant),
+        # ISSUE #82: المعجم — نقطة التسليم الوحيدة (القرار 8 في #46: لا آلية
+        # ثالثة). قاموسٌ مسطّح بمفاتيح مصطلحات (`doc.*`، `line.*`)، والواجهة
+        # تقرأه بـ`term(key)` بدل كتابة الاسم حرفياً في كل شاشة.
+        "terms": terms_payload(tenant),
     })
 
 
