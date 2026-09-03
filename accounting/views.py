@@ -41,7 +41,7 @@ from .cashbox import (
 )
 from .models import (
     Account, CashBoxLedgerAccount, CashCount, CashTransfer,
-    JournalHeader, JournalLine, Cheque, ExpenseVoucher,
+    JournalHeader, JournalLine, Cheque, ExpenseVoucher, RevenueVoucher,
     CostCenter, ExchangeRate, FiscalPeriod, TaxRate,
     Bank, BankBranch, BankAccount, BankReconciliation, BankReconciliationLine,
 )
@@ -63,6 +63,7 @@ from .serializers import (
     CashCountSerializer,
     CashTransferSerializer,
     ExpenseVoucherSerializer,
+    RevenueVoucherSerializer,
     JournalHeaderSerializer,
     JournalHeaderListSerializer,
     ChequeSerializer,
@@ -1710,6 +1711,7 @@ class ExpenseVoucherViewSet(viewsets.ModelViewSet):
                 beneficiary_name=data.get("beneficiary_name") or "",
                 description=data.get("description") or "",
                 attachment_url=data.get("attachment_url") or "",
+                kind=data.get("kind") or ExpenseVoucher.KIND_NORMAL,
                 user=request.user,
             )
         except DjangoValidationError as ve:
@@ -1734,6 +1736,103 @@ class ExpenseVoucherViewSet(viewsets.ModelViewSet):
             return Response({"error": "; ".join(ve.messages)}, status=status.HTTP_400_BAD_REQUEST)
         voucher.refresh_from_db()
         return Response(ExpenseVoucherSerializer(voucher).data)
+
+
+class RevenueVoucherViewSet(viewsets.ModelViewSet):
+    """issue #80 — سند إيراد: مرآة `ExpenseVoucherViewSet` بعكس الاتجاه.
+
+    الإنشاء يرحّل فوراً (نمط `CashTransferViewSet`) — لا مسودة وسطى: `create`
+    يستدعي `create_revenue_voucher` كاملةً، ولا يمرّ بـ`serializer.save()`.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = RevenueVoucherSerializer
+    queryset = RevenueVoucher.objects.all().select_related(
+        "revenue_account", "cash_or_bank_account", "payer_partner", "currency")
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return RevenueVoucher.objects.none()
+        return self.queryset.filter(tenant=tenant)
+
+    def create(self, request, *args, **kwargs):
+        from .services import create_revenue_voucher
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد مستأجر في النظام"}, status=status.HTTP_400_BAD_REQUEST)
+        require_perm(request, "finance.revenue.create")
+
+        data = request.data
+        currency = Currency.objects.filter(pk=data.get("currency")).first()
+        if currency is None:
+            return Response({"error": "العملة مطلوبة."}, status=status.HTTP_400_BAD_REQUEST)
+
+        revenue_account = None
+        revenue_account_id = data.get("revenue_account")
+        if revenue_account_id:
+            revenue_account = Account.objects.filter(pk=revenue_account_id, tenant=tenant).first()
+            if not revenue_account:
+                return Response(
+                    {"error": "حساب الإيراد غير موجود أو لا يتبع هذه الشركة."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        payer_partner = None
+        partner_id = data.get("payer_partner")
+        if partner_id:
+            payer_partner = Partner.objects.filter(pk=partner_id, tenant=tenant).first()
+            if not payer_partner:
+                return Response(
+                    {"error": "الطرف الدافع غير موجود أو لا يتبع هذه الشركة."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        try:
+            voucher = create_revenue_voucher(
+                tenant=tenant,
+                date=CashBoxLedgerViewSet._fx_date(data.get("date")),
+                amount=data.get("amount"),
+                tax_amount=data.get("tax_amount") or 0,
+                currency=currency,
+                exchange_rate=data.get("exchange_rate") or 1,
+                payment_method=data.get("payment_method") or RevenueVoucher.PAYMENT_CASH,
+                revenue_account=revenue_account,
+                revenue_account_name=data.get("revenue_account_name"),
+                revenue_parent_code=data.get("revenue_parent_code"),
+                cash_or_bank_account_id=data.get("cash_or_bank_account"),
+                payer_partner=payer_partner,
+                payer_name=data.get("payer_name") or "",
+                description=data.get("description") or "",
+                attachment_url=data.get("attachment_url") or "",
+                kind=data.get("kind") or RevenueVoucher.KIND_NORMAL,
+                user=request.user,
+            )
+        except DjangoValidationError as ve:
+            return Response({"error": "; ".join(ve.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+        create_audit_log(
+            tenant=tenant, user=request.user, action="CREATE", model_name="RevenueVoucher",
+            object_id=voucher.id,
+            change_details=f"Revenue voucher #{voucher.number} amount={voucher.amount}",
+        )
+        return Response(RevenueVoucherSerializer(voucher).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="unpost")
+    def unpost(self, request, pk=None):
+        from .services import unpost_revenue_voucher
+
+        require_perm(request, "finance.revenue.unpost")
+        voucher = self.get_object()
+        try:
+            unpost_revenue_voucher(voucher, user=request.user)
+        except DjangoValidationError as ve:
+            return Response({"error": "; ".join(ve.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        voucher.refresh_from_db()
+        return Response(RevenueVoucherSerializer(voucher).data)
 
 
 class PurchaseReceiptViewSet(viewsets.ViewSet):

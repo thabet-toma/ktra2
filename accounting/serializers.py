@@ -4,6 +4,7 @@ from rest_framework import serializers
 from .models import (
     Account, JournalHeader, JournalLine, Cheque, ChequeMovement, CostCenter,
     CashBoxLedgerAccount, CashCount, CashTransfer, ExchangeRate, ExpenseVoucher,
+    RevenueVoucher,
     FiscalPeriod, TaxRate,
     Bank, BankBranch, BankAccount, BankReconciliation,
     OpeningBalanceAccountLine, OpeningBalanceStockLine,
@@ -716,9 +717,34 @@ class ExpenseVoucherSerializer(serializers.ModelSerializer):
         fields = [
             "id", "number", "date", "expense_account", "expense_account_name",
             "expense_account_code", "amount", "tax_amount", "currency", "currency_code",
-            "exchange_rate", "payment_method", "cash_or_bank_account",
+            "exchange_rate", "payment_method", "kind", "cash_or_bank_account",
             "cash_or_bank_account_name", "beneficiary_partner", "beneficiary_partner_name",
             "beneficiary_name", "description", "attachment_url", "journal", "is_posted",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class RevenueVoucherSerializer(serializers.ModelSerializer):
+    """issue #80 — سند إيراد. القراءة وحدها: الإنشاء يمرّ بـ`create_revenue_voucher`
+    عبر `RevenueVoucherViewSet.create` لا بحفظ هذا الـserializer (مرآة `ExpenseVoucherSerializer`)."""
+
+    revenue_account_name = serializers.CharField(source="revenue_account.name", read_only=True)
+    revenue_account_code = serializers.CharField(source="revenue_account.code", read_only=True)
+    cash_or_bank_account_name = serializers.CharField(
+        source="cash_or_bank_account.name", read_only=True, default=None)
+    payer_partner_name = serializers.CharField(
+        source="payer_partner.name", read_only=True, default=None)
+    currency_code = serializers.CharField(source="currency.Code", read_only=True)
+
+    class Meta:
+        model = RevenueVoucher
+        fields = [
+            "id", "number", "date", "revenue_account", "revenue_account_name",
+            "revenue_account_code", "amount", "tax_amount", "currency", "currency_code",
+            "exchange_rate", "payment_method", "kind", "cash_or_bank_account",
+            "cash_or_bank_account_name", "payer_partner", "payer_partner_name",
+            "payer_name", "description", "attachment_url", "journal", "is_posted",
             "created_at",
         ]
         read_only_fields = fields

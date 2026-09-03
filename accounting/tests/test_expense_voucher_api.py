@@ -132,6 +132,33 @@ class ExpenseVoucherApiTest(APITestCase):
         self.assertEqual(vat_line.debit, D("80.00"))
         self.assertEqual(expense_line.debit, D("500.00"))
 
+    # ── issue #80: مرتجعٌ بمبلغٍ موجب يقلب الاتجاه ───────────────────────
+    def test_return_kind_flips_journal_direction_with_positive_amount(self):
+        res = self.client.post(
+            f"{ACC}/expense-vouchers/", self._payload(kind="return"), format="json", **self._auth())
+        self.assertEqual(res.status_code, 201, res.content)
+        body = res.json()
+        self.assertEqual(body["kind"], "return")
+        self.assertEqual(D(body["amount"]), D("500.00"))  # موجب دوماً
+
+        voucher = ExpenseVoucher.objects.get(pk=body["id"])
+        lines = list(voucher.journal.lines.select_related("account"))
+        # عاديّ: مدين المصروف / دائن الصندوق — مرتجع: العكس تماماً، بلا سالب.
+        cash_line = next(ln for ln in lines if ln.account_id == self.cash.pk)
+        expense_line = next(ln for ln in lines if ln.account_id == self.electricity.pk)
+        self.assertEqual(cash_line.debit, D("500.00"))
+        self.assertEqual(cash_line.credit, D("0.00"))
+        self.assertEqual(expense_line.credit, D("500.00"))
+        self.assertEqual(expense_line.debit, D("0.00"))
+        for ln in lines:
+            self.assertGreaterEqual(ln.debit, D("0.00"))
+            self.assertGreaterEqual(ln.credit, D("0.00"))
+
+    def test_invalid_kind_rejected(self):
+        res = self.client.post(
+            f"{ACC}/expense-vouchers/", self._payload(kind="bogus"), format="json", **self._auth())
+        self.assertEqual(res.status_code, 400, res.content)
+
     # ── معيار القبول: إلغاء الترحيل يعيد الأرصدة حرفياً ─────────────────
     def test_unpost_reverses_balances_exactly(self):
         res = self.client.post(

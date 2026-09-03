@@ -16,6 +16,7 @@ from .views import (
     CashCountViewSet,
     CashTransferViewSet,
     ExpenseVoucherViewSet,
+    RevenueVoucherViewSet,
     OpeningBalanceViewSet,
     PurchaseReceiptViewSet,
     ExchangeRateViewSet,
@@ -40,6 +41,7 @@ router.register(r'cash-box-accounts', CashBoxLedgerViewSet, basename='cash-box-a
 router.register(r'cash-transfers', CashTransferViewSet, basename='cash-transfers')
 router.register(r'cash-counts', CashCountViewSet, basename='cash-counts')
 router.register(r'expense-vouchers', ExpenseVoucherViewSet, basename='expense-vouchers')
+router.register(r'revenue-vouchers', RevenueVoucherViewSet, basename='revenue-vouchers')
 router.register(r'purchase-receipts', PurchaseReceiptViewSet, basename='purchase-receipts')
 router.register(r'exchange-rates', ExchangeRateViewSet, basename='exchange-rates')
 router.register(r'fiscal-periods', FiscalPeriodViewSet, basename='fiscal-periods')

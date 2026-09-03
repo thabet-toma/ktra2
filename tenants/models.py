@@ -293,6 +293,7 @@ class TenantBook(models.Model):
         ('receipt_voucher', 'سند قبض'),
         ('payment_voucher', 'سند صرف'),
         ('expense_voucher', 'سند مصروف'),
+        ('revenue_voucher', 'سند إيراد'),
         ('multi_receipt', 'إيصال قبض متعدد'),
         ('multi_payment', 'سند صرف متعدد'),
         ('credit_note', 'إشعار دائن'),

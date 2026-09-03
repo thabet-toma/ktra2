@@ -689,6 +689,17 @@ class CashCount(models.Model):
         return f"جرد {self.cash_box_id} @ {self.count_date}: {self.difference}"
 
 
+#: issue #80 — عاديّ/مرتجع على سندَي المصروف والإيراد معاً: يقلب اتجاه القيد
+#: (مدين↔دائن) ويُبقي المبلغ موجباً، مرآة `SalesInvoice.INVOICE_KIND_CHOICES`
+#: (بيع/مرجع بيع). ثابتٌ واحد يُشارَك بين الموديلين بدل تكرار نفس السلسلتين.
+VOUCHER_KIND_NORMAL = 'normal'
+VOUCHER_KIND_RETURN = 'return'
+VOUCHER_KIND_CHOICES = [
+    (VOUCHER_KIND_NORMAL, 'عاديّ'),
+    (VOUCHER_KIND_RETURN, 'مرتجع'),
+]
+
+
 class ExpenseVoucher(models.Model):
     """سند مصروف — مستندٌ عامٌّ لكل شركة، بلا مورّدٍ إلزامي وبلا مخزون (issue #56).
 
@@ -707,6 +718,10 @@ class ExpenseVoucher(models.Model):
         (PAYMENT_ON_ACCOUNT, 'على الحساب'),
     ]
 
+    KIND_NORMAL = VOUCHER_KIND_NORMAL
+    KIND_RETURN = VOUCHER_KIND_RETURN
+    KIND_CHOICES = VOUCHER_KIND_CHOICES
+
     id = models.AutoField(primary_key=True, db_column='ExpenseVoucherID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     number = models.IntegerField(default=0, db_column='Number')
@@ -724,6 +739,9 @@ class ExpenseVoucher(models.Model):
     payment_method = models.CharField(
         max_length=10, choices=PAYMENT_METHOD_CHOICES,
         default=PAYMENT_CASH, db_column='PaymentMethod')
+    kind = models.CharField(
+        max_length=10, choices=KIND_CHOICES, default=KIND_NORMAL, db_column='Kind',
+        help_text='عاديّ أو مرتجع — يقلب اتجاه القيد ويُبقي المبلغ موجباً (issue #80).')
     cash_or_bank_account = models.ForeignKey(
         Account, on_delete=models.PROTECT, null=True, blank=True,
         db_column='CashAccountID', related_name='expense_vouchers_cash',
@@ -753,6 +771,79 @@ class ExpenseVoucher(models.Model):
 
     def __str__(self):
         return f"سند مصروف #{self.number or self.id}: {self.amount}"
+
+
+class RevenueVoucher(models.Model):
+    """سند إيراد — مرآة حرفية لـ`ExpenseVoucher` بعكس الاتجاه (issue #80).
+
+    يسدّ الفجوة نفسها من جهة الإيراد: عمولة، خدمة عارضة، إيجارٌ نحصّله — إيرادٌ
+    لا فاتورة بيع له ولا بضاعة. الدافع اختياري عمداً: شريكٌ إن وُجد، أو اسمٌ
+    نصّي، أو لا شيء. **لا يُنشئ منتجاً خدمياً ولا يفرّغ `SalesInvoiceLine.product`**
+    — مرفوضان صراحةً في المواصفة (#77 القسم ٢).
+    """
+
+    PAYMENT_CASH = 'cash'
+    PAYMENT_CHEQUE = 'cheque'
+    PAYMENT_ON_ACCOUNT = 'on_account'
+    PAYMENT_METHOD_CHOICES = [
+        (PAYMENT_CASH, 'صندوق/بنك'),
+        (PAYMENT_CHEQUE, 'شيك'),
+        (PAYMENT_ON_ACCOUNT, 'على الحساب'),
+    ]
+
+    KIND_NORMAL = VOUCHER_KIND_NORMAL
+    KIND_RETURN = VOUCHER_KIND_RETURN
+    KIND_CHOICES = VOUCHER_KIND_CHOICES
+
+    id = models.AutoField(primary_key=True, db_column='RevenueVoucherID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    number = models.IntegerField(default=0, db_column='Number')
+    date = models.DateField(db_column='Date')
+    revenue_account = models.ForeignKey(
+        Account, on_delete=models.PROTECT,
+        db_column='RevenueAccountID', related_name='revenue_vouchers')
+    amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount')
+    tax_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='TaxAmount',
+        help_text='ضريبة مخرجات (2104) — جزء من amount لا إضافة عليه')
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, db_column='CurrencyID')
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, default=1, db_column='ExchangeRate')
+    payment_method = models.CharField(
+        max_length=10, choices=PAYMENT_METHOD_CHOICES,
+        default=PAYMENT_CASH, db_column='PaymentMethod')
+    kind = models.CharField(
+        max_length=10, choices=KIND_CHOICES, default=KIND_NORMAL, db_column='Kind',
+        help_text='عاديّ أو مرتجع — يقلب اتجاه القيد ويُبقي المبلغ موجباً (issue #80).')
+    cash_or_bank_account = models.ForeignKey(
+        Account, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='CashAccountID', related_name='revenue_vouchers_cash',
+        help_text='الصندوق/البنك — يُملأ فقط عند payment_method=cash')
+    payer_partner = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='PayerPartnerID', related_name='revenue_vouchers')
+    payer_name = models.CharField(max_length=200, blank=True, default='', db_column='PayerName')
+    description = models.CharField(max_length=500, blank=True, default='', db_column='Description')
+    attachment_url = models.URLField(blank=True, default='', max_length=500, db_column='AttachmentUrl')
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='revenue_vouchers')
+    is_posted = models.BooleanField(default=False, db_column='IsPosted')
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy', related_name='revenue_vouchers')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'revenue_vouchers'
+        managed = True
+        ordering = ['-date', '-id']
+        indexes = [
+            models.Index(fields=['tenant', '-date', '-id'], name='idx_revvouch_tenant_date'),
+        ]
+
+    def __str__(self):
+        return f"سند إيراد #{self.number or self.id}: {self.amount}"
 
 
 class Bank(models.Model):

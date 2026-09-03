@@ -19,6 +19,7 @@ from accounting.models import Account, TaxRate
 from accounting.services import (
     create_expense_voucher,
     create_fiscal_year,
+    create_revenue_voucher,
     unpost_expense_voucher,
     vat_period_totals,
 )
@@ -137,6 +138,92 @@ def test_three_viewers_agree_on_the_same_number_from_three_document_kinds():
     assert Decimal(summary["output_vat"]) == Decimal("160.00")
     assert Decimal(summary["input_vat"]) == Decimal("105.00")
     assert Decimal(summary["vat_due"]) == Decimal("55.00")
+
+
+# ── issue #80: سند الإيراد يظهر في كشف ض.ق.م تلقائياً بلا شيفرةٍ خاصة ────────
+# (بفضل issue #79): ضريبة المخرجات تُرحَّل على نفس حساب `TaxRate` باتجاه
+# `sales` الذي تستعمله فاتورة البيع فعلاً — 2104 — فتلتقطها `vat_period_totals`
+# بلا أي تعديل على `_resolve_vat_account_ids`.
+
+def test_revenue_voucher_output_vat_appears_in_vat_statement_without_special_code():
+    tenant, user, ils = _setup_tenant("vat-revenue-voucher")
+    cash = Account.objects.get(tenant=tenant, code="1101")
+
+    create_revenue_voucher(
+        tenant=tenant, date=date(2026, 6, 18), amount=Decimal("232.00"), currency=ils,
+        tax_amount=Decimal("32.00"), payment_method="cash",
+        revenue_account_name="إيراد سند اختبار", cash_or_bank_account_id=cash.pk, user=user,
+    )
+
+    ledger = vat_period_totals(tenant.pk, date(2026, 6, 1), date(2026, 6, 30))
+    assert ledger["output"]["balance_payable"] == Decimal("32.00")
+
+    stmt = build_vat_statement(tenant.pk, date(2026, 6, 1), date(2026, 6, 30), user=user)
+    assert stmt.total_sales_vat == Decimal("32.00")
+
+
+# ── issue #80 (مراجعة الالتزام) — الاختبار الحاسم: شركة «دفتر عميل» بلا
+# TaxRate إطلاقاً — محاسبٌ يرمّز سندات إيرادٍ ومصروفٍ ولا يفتح فاتورة بيعٍ
+# واحدة. `create_revenue_voucher` يكتب على «2104» بالكود مباشرةً، والاشتقاق
+# وحده (TaxRate فقط) كان يُصفِّر مخرجاتها في الكشف بصمت.
+
+def test_revenue_voucher_output_vat_appears_even_without_any_tax_rate():
+    user = User.objects.create_user(username="vat-revenue-no-taxrate", password="x")
+    ils = Currency.objects.filter(Code="ILS").first() or Currency.objects.create(
+        Code="ILS", Name="شيكل", Symbol="₪", IsBaseCurrency=True,
+    )
+    tenant = create_company("شركة دفتر عميل بلا نسبة ضريبة", user)
+    create_fiscal_year(tenant, 2026)
+    cash = Account.objects.get(tenant=tenant, code="1101")
+
+    # لا SalesSettings مُنشأة، ولا TaxRate على الإطلاق لهذه الشركة.
+    assert not TaxRate.objects.filter(tenant=tenant).exists()
+
+    create_revenue_voucher(
+        tenant=tenant, date=date(2026, 6, 20), amount=Decimal("116.00"), currency=ils,
+        tax_amount=Decimal("16.00"), payment_method="cash",
+        revenue_account_name="أتعاب مسك دفاتر", cash_or_bank_account_id=cash.pk, user=user,
+    )
+
+    ledger = vat_period_totals(tenant.pk, date(2026, 6, 1), date(2026, 6, 30))
+    assert ledger["output"]["balance_payable"] == Decimal("16.00")
+
+    stmt = build_vat_statement(tenant.pk, date(2026, 6, 1), date(2026, 6, 30), user=user)
+    assert stmt.total_sales_vat == Decimal("16.00")
+
+
+# ── issue #80 (مراجعة الالتزام) — شركة نسبتُها على حسابٍ غير «2104»: السند
+# يكتب حيث تكتب فاتورة البيع فعلاً، لا على الكود المعياري وحده.
+
+def test_revenue_voucher_writes_to_the_same_account_as_a_non_standard_sales_tax_rate():
+    user = User.objects.create_user(username="vat-revenue-nonstd", password="x")
+    ils = Currency.objects.filter(Code="ILS").first() or Currency.objects.create(
+        Code="ILS", Name="شيكل", Symbol="₪", IsBaseCurrency=True,
+    )
+    tenant = create_company("شركة نسبة ضريبة على حساب غير معياري", user)
+    create_fiscal_year(tenant, 2026)
+    cash = Account.objects.get(tenant=tenant, code="1101")
+    non_standard_output = Account.objects.create(
+        tenant=tenant, code="2190", name="ضريبة مخرجات — حساب مخصّص",
+        account_type="Liability", is_active=True,
+    )
+    TaxRate.objects.create(
+        tenant=tenant, name="ض.ق.م مخرجات مخصّصة", code="VAT-CUSTOM-OUT",
+        rate=Decimal("16.00"), tax_account=non_standard_output, direction="sales",
+    )
+
+    voucher = create_revenue_voucher(
+        tenant=tenant, date=date(2026, 6, 22), amount=Decimal("116.00"), currency=ils,
+        tax_amount=Decimal("16.00"), payment_method="cash",
+        revenue_account_name="أتعاب استشارات", cash_or_bank_account_id=cash.pk, user=user,
+    )
+
+    vat_line = voucher.journal.lines.get(account_id=non_standard_output.pk)
+    assert vat_line.credit == Decimal("16.00")
+    assert not voucher.journal.lines.filter(account__code="2104").exists()
+
+    ledger = vat_period_totals(tenant.pk, date(2026, 6, 1), date(2026, 6, 30))
+    assert ledger["output"]["balance_payable"] == Decimal("16.00")
 
 
 # ── حارس فكّ الترحيل داخل فترة كشف نهائي ─────────────────────────────────────

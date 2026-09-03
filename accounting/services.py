@@ -188,6 +188,10 @@ def resolve_forex_account(tenant_id: int) -> Account | None:
 IMPORT_EXPENSE_PARENT_CODE = "53"
 #: issue #56 — أب حسابات المصروف العام لكل شركة («52 المصاريف التشغيلية»).
 EXPENSE_VOUCHER_PARENT_CODE = "52"
+#: issue #80 — أب حسابات الإيراد العام لكل شركة («42 إيرادات أخرى») — مرآة
+#: `EXPENSE_VOUCHER_PARENT_CODE`، موجودٌ في كل بذرة شجرة معيارية (بذر الشركة
+#: الافتراضي وقالب المكتب المحاسبي معاً).
+REVENUE_VOUCHER_PARENT_CODE = "42"
 
 
 def _normalize_account_name(value: str) -> str:
@@ -198,9 +202,12 @@ def _normalize_account_name(value: str) -> str:
     return text.casefold()
 
 
-def resolve_expense_account(tenant_id: int, name: str, parent_code: str = EXPENSE_VOUCHER_PARENT_CODE):
-    """يُرجع (حساب، أُنشئ؟) لمصروفٍ بالاسم المكتوب تحت أبٍ معطى — تعميم issue #56
-    لـ`resolve_import_expense_account` (الذي كان خاصّاً بشجرة الاستيراد «53» وحدها).
+def _resolve_named_account_under_parent(
+    tenant_id: int, name: str, parent_code: str, account_type: str,
+):
+    """يُرجع (حساب، أُنشئ؟) لحسابٍ بالاسم المكتوب تحت أبٍ معطى — النواة المشتركة
+    بين `resolve_expense_account` (issue #56) و`resolve_revenue_account` (issue #80)،
+    يفصل بينهما `account_type` وحده.
 
     إن وُجد حساب بنفس الاسم (تطبيع: فراغات + تجاهل الجزء الإنجليزي) تحت `parent_code`
     يُعاد كما هو، وإلا يُنشأ حساب جديد ابناً مباشراً له. يُرجع (None, False) إن لم
@@ -211,7 +218,7 @@ def resolve_expense_account(tenant_id: int, name: str, parent_code: str = EXPENS
         return None, False
     parent = Account.objects.filter(tenant_id=tenant_id, code=parent_code).first()
     if parent is None:
-        logger.warning("expense account parent %s missing tenant=%s", parent_code, tenant_id)
+        logger.warning("named account parent %s missing tenant=%s", parent_code, tenant_id)
         return None, False
 
     subtree = list(
@@ -247,7 +254,7 @@ def resolve_expense_account(tenant_id: int, name: str, parent_code: str = EXPENS
                     code=candidate,
                     name=clean,
                     parent=parent,
-                    account_type="Expense",
+                    account_type=account_type,
                     is_active=True,
                 )
             break
@@ -257,10 +264,22 @@ def resolve_expense_account(tenant_id: int, name: str, parent_code: str = EXPENS
     else:  # pragma: no cover - مساحة الترقيم لا تنفد عملياً
         raise ValueError("تعذّر تخصيص رقم حساب جديد تحت الأب المحدد.")
     logger.info(
-        "expense account created tenant=%s code=%s name=%s parent=%s",
-        tenant_id, account.code, account.name, parent_code,
+        "named account created tenant=%s code=%s name=%s parent=%s type=%s",
+        tenant_id, account.code, account.name, parent_code, account_type,
     )
     return account, True
+
+
+def resolve_expense_account(tenant_id: int, name: str, parent_code: str = EXPENSE_VOUCHER_PARENT_CODE):
+    """يُرجع (حساب، أُنشئ؟) لمصروفٍ بالاسم المكتوب تحت أبٍ معطى — تعميم issue #56
+    لـ`resolve_import_expense_account` (الذي كان خاصّاً بشجرة الاستيراد «53» وحدها)."""
+    return _resolve_named_account_under_parent(tenant_id, name, parent_code, "Expense")
+
+
+def resolve_revenue_account(tenant_id: int, name: str, parent_code: str = REVENUE_VOUCHER_PARENT_CODE):
+    """يُرجع (حساب، أُنشئ؟) لإيرادٍ بالاسم المكتوب تحت أبٍ معطى — مرآة
+    `resolve_expense_account` (issue #80)."""
+    return _resolve_named_account_under_parent(tenant_id, name, parent_code, "Revenue")
 
 
 def resolve_import_expense_account(tenant_id: int, name: str):
@@ -729,9 +748,16 @@ def _resolve_vat_account_ids(tenant_id: int) -> tuple[set[int], set[int]]:
     """مجموعتا حسابات ضريبة المدخلات/المخرجات — **اتحاد** كل ما قد يكتب فيه أيّ
     مسار ترحيل قائم، لا اشتقاقٌ واحد فقط (issue #79، مراجعة الالتزام).
 
-    المخرجات: حسابات `TaxRate` باتجاه `sales`/`both` وحدها — كل مسار يُرحِّل
-    ضريبة مخرجات (`sales/services/calc.py` — `_build_tax_buckets`) يمرّ بحساب
-    نسبة `TaxRate.tax_account` صراحةً، فلا حاجة لسقوطٍ هنا.
+    المخرجات: حسابات `TaxRate` باتجاه `sales`/`both` **∪ سلسلة السقوط الحرفية**
+    (الكود `2104`، ثم `Liability` باسمٍ يحوي «ضريبة» أو «VAT») — **issue #80،
+    مراجعة الالتزام**: `create_revenue_voucher` يكتب على `2104` بالكود مباشرةً
+    (مرآة `_resolve_vat_input_account` للمدخلات)، فشركةٌ بلا `TaxRate` إطلاقاً
+    (حال «دفتر العميل» في #81: محاسبٌ يرمّز سندات إيرادٍ ومصروفٍ ولا يفتح
+    فاتورة بيعٍ واحدة) كانت تُصفِّر مخرجاتها المُرحَّلة فعلاً في الكشف —
+    الاشتقاق وحده أعمى عن شركةٍ لا تفتح فواتير بيعٍ أصلاً. كل مسار يُرحِّل
+    ضريبة مخرجات من فاتورة (`sales/services/calc.py` — `_build_tax_buckets`)
+    يمرّ بحساب نسبة `TaxRate.tax_account` صراحةً فيبقى داخل الاتحاد أصلاً؛
+    السقوط يضيف السند وحده.
 
     المدخلات: `SalesSettings.vat_input_account` ∪ `TaxRate` باتجاه
     `purchase`/`both` **∪ سلسلة السقوط الحرفية** (الكود `1105`، ثم `Asset`
@@ -780,6 +806,18 @@ def _resolve_vat_account_ids(tenant_id: int) -> tuple[set[int], set[int]]:
             )
         )
     input_ids.update(a.id for a in by_code)
+
+    # مرآة سقوط المدخلات — issue #80: الكود `2104` إن وُجد، وإلا **كل** حساب
+    # `Liability` اسمه يحوي «ضريبة» أو «VAT» — لا أوّلَ واحدٍ منها، فشركةٌ
+    # بحسابَي ضريبة مخرجاتٍ بلا كود `2104` لا يُسقَط أحدهما بصمت.
+    output_by_code = list(Account.objects.filter(tenant_id=tenant_id, code="2104"))
+    if not output_by_code:
+        output_by_code = list(
+            Account.objects.filter(tenant_id=tenant_id, account_type="Liability").filter(
+                Q(name__icontains="ضريبة") | Q(name__icontains="VAT")
+            )
+        )
+    output_ids.update(a.id for a in output_by_code)
 
     return input_ids, output_ids
 
@@ -3173,7 +3211,7 @@ def create_expense_voucher(
     *, tenant, date, amount, currency, tax_amount=Decimal("0"), exchange_rate=Decimal("1"),
     payment_method, expense_account=None, expense_account_name=None, expense_parent_code=None,
     cash_or_bank_account_id=None, beneficiary_partner=None, beneficiary_name="",
-    description="", attachment_url="", user=None,
+    description="", attachment_url="", kind=None, user=None,
 ):
     """ينشئ سند مصروف ويرحّله فوراً — نداءٌ واحد ذرّي (نمط `create_cash_transfer`).
 
@@ -3184,6 +3222,10 @@ def create_expense_voucher(
 
     `beneficiary_partner` اختياري تماماً — الفرق الجوهري عن `SupplierPayment`
     الذي يفرض مورّداً. بلا مستفيد ولا شريك، «على الحساب» يقع على 2101 العام.
+
+    `kind` (issue #80): `KIND_NORMAL` (افتراضي) أو `KIND_RETURN` — الأخير يقلب
+    اتجاه كل أسطر القيد (مدين↔دائن) بعد بنائها بالمبلغ الموجب نفسه، مرآة عكس
+    إشارات فروع `SalesInvoice.invoice_kind` الأربعة في `sales/services/flow.py`.
     """
     from .models import ExpenseVoucher
 
@@ -3196,6 +3238,9 @@ def create_expense_voucher(
         raise ValidationError("ضريبة المدخلات غير صالحة.")
     exchange_rate = Decimal(str(exchange_rate or 1))
     when = date or timezone.localdate()
+    kind = kind or ExpenseVoucher.KIND_NORMAL
+    if kind not in (ExpenseVoucher.KIND_NORMAL, ExpenseVoucher.KIND_RETURN):
+        raise ValidationError("نوع السند غير صالح.")
 
     if expense_account is None:
         if not expense_account_name:
@@ -3257,11 +3302,27 @@ def create_expense_voucher(
             "description": "ضريبة مدخلات — سند مصروف",
         })
 
+    journal_lines = [
+        *debit_lines,
+        {
+            "account": credit_account.id, "partner": credit_partner_id,
+            "debit": Decimal("0"), "credit": amount,
+            "description": f"سند مصروف — {beneficiary_label or 'بلا مستفيد'}",
+        },
+    ]
+    # issue #80: المرتجع يقلب مدين↔دائن بعد بناء الأسطر بالمبلغ الموجب نفسه —
+    # مرآة عكس إشارات القيد للمراجيع في `sales/services/flow.py`.
+    if kind == ExpenseVoucher.KIND_RETURN:
+        for jl in journal_lines:
+            jl["debit"], jl["credit"] = jl["credit"], jl["debit"]
+
+    kind_label = "مرتجع " if kind == ExpenseVoucher.KIND_RETURN else ""
+
     with transaction.atomic():
         voucher = ExpenseVoucher.objects.create(
             tenant=tenant, date=when, expense_account=expense_account,
             amount=amount, tax_amount=tax_amount, currency=currency,
-            exchange_rate=exchange_rate, payment_method=payment_method,
+            exchange_rate=exchange_rate, payment_method=payment_method, kind=kind,
             cash_or_bank_account_id=(
                 cash_or_bank_account_id if payment_method == ExpenseVoucher.PAYMENT_CASH else None
             ),
@@ -3274,15 +3335,11 @@ def create_expense_voucher(
         jh = post_journal(
             tenant_id=tenant_id, transaction_date=when,
             reference_type="EXPENSE_VOUCHER", reference_id=voucher.id,
-            description=f"{label} — {beneficiary_label}" if beneficiary_label else label,
-            lines_data=[
-                *debit_lines,
-                {
-                    "account": credit_account.id, "partner": credit_partner_id,
-                    "debit": Decimal("0"), "credit": amount,
-                    "description": f"سند مصروف — {beneficiary_label or 'بلا مستفيد'}",
-                },
-            ],
+            description=(
+                f"{kind_label}{label} — {beneficiary_label}" if beneficiary_label
+                else f"{kind_label}{label}"
+            ),
+            lines_data=journal_lines,
             currency=currency, exchange_rate=exchange_rate, user=user,
         )
         voucher.journal = jh
@@ -3294,8 +3351,8 @@ def create_expense_voucher(
         object_id=voucher.id, change_details=f"Posted expense voucher journal={jh.id}",
     )
     logger.info(
-        "create_expense_voucher: tenant=%s voucher=%s amount=%s method=%s",
-        tenant_id, voucher.id, amount, payment_method,
+        "create_expense_voucher: tenant=%s voucher=%s amount=%s method=%s kind=%s",
+        tenant_id, voucher.id, amount, payment_method, kind,
     )
     return voucher
 
@@ -3326,6 +3383,215 @@ def unpost_expense_voucher(voucher, *, user=None) -> dict:
             ),
         )
     logger.info("unpost_expense_voucher: tenant=%s voucher=%s", voucher.tenant_id, voucher.id)
+    return result
+
+
+# ─────────────────────────────────────────────────────────
+#  issue #80 — سند إيراد: مرآة سند المصروف بعكس الاتجاه
+# ─────────────────────────────────────────────────────────
+
+#: كودا الحسابين المعياريين اللذين يَدين بهما سند الإيراد خارج «صندوق/بنك».
+REVENUE_VOUCHER_VAT_OUTPUT_CODE = "2104"
+REVENUE_VOUCHER_TRADE_RECEIVABLES_CODE = "1103"
+
+
+def create_revenue_voucher(
+    *, tenant, date, amount, currency, tax_amount=Decimal("0"), exchange_rate=Decimal("1"),
+    payment_method, revenue_account=None, revenue_account_name=None, revenue_parent_code=None,
+    cash_or_bank_account_id=None, payer_partner=None, payer_name="",
+    description="", attachment_url="", kind=None, user=None,
+):
+    """ينشئ سند إيراد ويرحّله فوراً — مرآة حرفية لـ`create_expense_voucher` (issue #80).
+
+    الترحيل حصراً عبر `post_journal`:
+        مدين: الصندوق/البنك · 1107 شيكات برسم التحصيل · 1103/حساب الدافع
+            دائن: حساب الإيراد
+            دائن: ضريبة مخرجات (`TaxRate.tax_account` sales/both، وإلا 2104)     (إن وُجدت ضريبة)
+
+    `payer_partner` اختياري تماماً — لا فاتورة بيع ولا عميلٌ ملزَم. بلا دافع
+    ولا شريك، «على الحساب» يقع على 1103 العام ويَدين ذمّة العميل باسمه إن وُجد
+    (مرآة فرع الدائنين في `create_expense_voucher`).
+
+    **حساب ضريبة المخرجات (issue #80، مراجعة الالتزام)**: `TaxRate.tax_account`
+    باتجاه `sales`/`both` أولاً — نفس الحساب الذي تكتب عليه فاتورة البيع فعلاً،
+    فلا يختلف السند عنها في شركةٍ نسبتُها على حسابٍ غير `2104` — ثم سقوطٌ إلى
+    الكود المعياري `2104`. `vat_period_totals` (`_resolve_vat_account_ids`)
+    تقرأ نفس السلسلة بالضبط للمخرجات، فالكاتب والقارئ يتّفقان دائماً.
+
+    `kind` (issue #80): `KIND_NORMAL` (افتراضي) أو `KIND_RETURN` — الأخير يقلب
+    اتجاه كل أسطر القيد (مدين↔دائن) بعد بنائها بالمبلغ الموجب نفسه، مرآة عكس
+    إشارات فروع `SalesInvoice.invoice_kind` الأربعة في `sales/services/flow.py`.
+    """
+    from .models import RevenueVoucher
+
+    tenant_id = tenant.pk
+    amount = Decimal(str(amount or 0)).quantize(Decimal("0.01"))
+    if amount <= 0:
+        raise ValidationError("مبلغ الإيراد يجب أن يكون أكبر من صفر.")
+    tax_amount = Decimal(str(tax_amount or 0)).quantize(Decimal("0.01"))
+    if tax_amount < 0 or tax_amount > amount:
+        raise ValidationError("ضريبة المخرجات غير صالحة.")
+    exchange_rate = Decimal(str(exchange_rate or 1))
+    when = date or timezone.localdate()
+    kind = kind or RevenueVoucher.KIND_NORMAL
+    if kind not in (RevenueVoucher.KIND_NORMAL, RevenueVoucher.KIND_RETURN):
+        raise ValidationError("نوع السند غير صالح.")
+
+    if revenue_account is None:
+        if not revenue_account_name:
+            raise ValidationError("حدّد حساب الإيراد أو اكتب اسمه لإنشائه.")
+        revenue_account, _created = resolve_revenue_account(
+            tenant_id, revenue_account_name,
+            revenue_parent_code or REVENUE_VOUCHER_PARENT_CODE,
+        )
+        if revenue_account is None:
+            raise ValidationError(
+                "تعذّر تحديد حساب الإيراد — تأكد من وجود «42 إيرادات أخرى» "
+                "في شجرة الحسابات."
+            )
+    elif revenue_account.tenant_id != tenant_id:
+        raise ValidationError("حساب الإيراد لا يتبع هذه الشركة.")
+
+    debit_partner_id = None
+    if payment_method == RevenueVoucher.PAYMENT_CHEQUE:
+        from sales.services.calc import resolve_cheques_under_collection_account
+        debit_account = resolve_cheques_under_collection_account(tenant_id)
+    elif payment_method == RevenueVoucher.PAYMENT_ON_ACCOUNT:
+        if payer_partner is not None:
+            if payer_partner.tenant_id != tenant_id:
+                raise ValidationError("الدافع لا يتبع هذه الشركة.")
+            from sales.services.flow import _resolve_ar_account_for_partner
+            debit_account = _resolve_ar_account_for_partner(payer_partner)
+            debit_partner_id = payer_partner.id
+        else:
+            debit_account = _ensure_coa_account(tenant, REVENUE_VOUCHER_TRADE_RECEIVABLES_CODE)
+            if debit_account is None:
+                raise ValidationError(
+                    "تعذّر تحديد حساب المدينين (1103) للإيراد على الحساب."
+                )
+    else:
+        debit_account = resolve_cash_account(
+            tenant_id, explicit_account_id=cash_or_bank_account_id, user=user, required=True)
+
+    net_revenue = (amount - tax_amount).quantize(Decimal("0.01"))
+    label = description or "سند إيراد"
+    payer_label = payer_name or (payer_partner.name if payer_partner else "")
+
+    credit_lines = [{
+        "account": revenue_account.id, "partner": None,
+        "debit": Decimal("0"), "credit": net_revenue,
+        "description": label,
+    }]
+    if tax_amount > 0:
+        # issue #80 (مراجعة الالتزام): `TaxRate.tax_account` باتجاه sales/both
+        # أولاً — كي يكتب السند حيث تكتب فاتورة البيع فعلاً في شركةٍ نسبتُها
+        # على حسابٍ غير «2104» — ثم السقوط إلى الكود المعياري كما كان.
+        vat_account = (
+            TaxRate.objects.filter(
+                tenant_id=tenant_id, direction__in=["sales", "both"],
+            )
+            .exclude(tax_account__isnull=True)
+            .select_related("tax_account")
+            .values_list("tax_account_id", flat=True)
+            .first()
+        )
+        vat_account = (
+            Account.objects.filter(pk=vat_account).first() if vat_account else None
+        ) or Account.objects.filter(
+            tenant_id=tenant_id, code=REVENUE_VOUCHER_VAT_OUTPUT_CODE, account_type="Liability",
+        ).first()
+        if not vat_account:
+            raise ValidationError(
+                "ضريبة المخرجات > 0 تتطلب نسبة ضريبة مخرجات (TaxRate) أو حساب "
+                "«2104 ضريبة القيمة المضافة - مخرجات» من نوع Liability."
+            )
+        credit_lines.append({
+            "account": vat_account.id, "partner": None,
+            "debit": Decimal("0"), "credit": tax_amount,
+            "description": "ضريبة مخرجات — سند إيراد",
+        })
+
+    journal_lines = [
+        {
+            "account": debit_account.id, "partner": debit_partner_id,
+            "debit": amount, "credit": Decimal("0"),
+            "description": f"سند إيراد — {payer_label or 'بلا دافع'}",
+        },
+        *credit_lines,
+    ]
+    # issue #80: المرتجع يقلب مدين↔دائن بعد بناء الأسطر بالمبلغ الموجب نفسه —
+    # مرآة عكس إشارات القيد للمراجيع في `sales/services/flow.py`.
+    if kind == RevenueVoucher.KIND_RETURN:
+        for jl in journal_lines:
+            jl["debit"], jl["credit"] = jl["credit"], jl["debit"]
+
+    kind_label = "مرتجع " if kind == RevenueVoucher.KIND_RETURN else ""
+
+    with transaction.atomic():
+        voucher = RevenueVoucher.objects.create(
+            tenant=tenant, date=when, revenue_account=revenue_account,
+            amount=amount, tax_amount=tax_amount, currency=currency,
+            exchange_rate=exchange_rate, payment_method=payment_method, kind=kind,
+            cash_or_bank_account_id=(
+                cash_or_bank_account_id if payment_method == RevenueVoucher.PAYMENT_CASH else None
+            ),
+            payer_partner=payer_partner, payer_name=payer_name or "",
+            description=description or "", attachment_url=attachment_url or "",
+            created_by=user if getattr(user, "is_authenticated", False) else None,
+        )
+        voucher.number = next_document_number(tenant_id, "revenue_voucher")
+
+        jh = post_journal(
+            tenant_id=tenant_id, transaction_date=when,
+            reference_type="REVENUE_VOUCHER", reference_id=voucher.id,
+            description=(
+                f"{kind_label}{label} — {payer_label}" if payer_label
+                else f"{kind_label}{label}"
+            ),
+            lines_data=journal_lines,
+            currency=currency, exchange_rate=exchange_rate, user=user,
+        )
+        voucher.journal = jh
+        voucher.is_posted = True
+        voucher.save(update_fields=["number", "journal", "is_posted"])
+
+    create_audit_log(
+        tenant=tenant, user=user, action="POST", model_name="RevenueVoucher",
+        object_id=voucher.id, change_details=f"Posted revenue voucher journal={jh.id}",
+    )
+    logger.info(
+        "create_revenue_voucher: tenant=%s voucher=%s amount=%s method=%s kind=%s",
+        tenant_id, voucher.id, amount, payment_method, kind,
+    )
+    return voucher
+
+
+def unpost_revenue_voucher(voucher, *, user=None) -> dict:
+    """التراجع عن ترحيل سند إيراد — مرآة `unpost_expense_voucher`."""
+    from .models import RevenueVoucher
+
+    if not voucher.is_posted:
+        raise ValidationError("السند غير مرحّل.")
+    with transaction.atomic():
+        voucher = RevenueVoucher.objects.select_for_update().get(pk=voucher.pk)
+        if not voucher.is_posted:
+            raise ValidationError("السند غير مرحّل.")
+        result = unpost_document(
+            tenant_id=voucher.tenant_id, reference_id=voucher.id,
+            journal_reference_types=["REVENUE_VOUCHER"], user=user,
+            document_label=f"سند إيراد #{voucher.id}",
+        )
+        voucher.is_posted = False
+        voucher.journal = None
+        voucher.save(update_fields=["is_posted", "journal"])
+        create_audit_log(
+            tenant=voucher.tenant, user=user, action="UNPOST", model_name="RevenueVoucher",
+            object_id=voucher.id,
+            change_details=(
+                f"Unposted revenue voucher {voucher.id}: {result['journals_deleted']} journal(s)"
+            ),
+        )
+    logger.info("unpost_revenue_voucher: tenant=%s voucher=%s", voucher.tenant_id, voucher.id)
     return result
 
 

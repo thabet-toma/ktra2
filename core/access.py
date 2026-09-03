@@ -97,6 +97,9 @@ PERMISSIONS: list[dict] = [
     # issue #56 — سند مصروف: مستند مصاريف عام لكل الشركات، بلا مورّدٍ إلزامي.
     {"key": "finance.expense.create", "label": "تسجيل سند مصروف وترحيله", "group": GROUP_ACCOUNTING},
     {"key": "finance.expense.unpost", "label": "التراجع عن ترحيل سند مصروف", "group": GROUP_ACCOUNTING},
+    # issue #80 — سند إيراد: مرآة سند المصروف بعكس الاتجاه، بلا فاتورة بيع.
+    {"key": "finance.revenue.create", "label": "تسجيل سند إيراد وترحيله", "group": GROUP_ACCOUNTING},
+    {"key": "finance.revenue.unpost", "label": "التراجع عن ترحيل سند إيراد", "group": GROUP_ACCOUNTING},
     # الاستيراد (يبقى مشروطاً بتفعيل الوحدة للشركة — core.import_access)
     {"key": "import.deal.manage", "label": "إدارة صفقات الاستيراد", "group": GROUP_IMPORT},
     {"key": "import.shipment.manage", "label": "إدارة الشحنات والتخليص", "group": GROUP_IMPORT},
@@ -257,6 +260,8 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | _EMPLOYEE_SELF 
     "finance.cashbox.count",
     "finance.expense.create",
     "finance.expense.unpost",
+    "finance.revenue.create",
+    "finance.revenue.unpost",
     "import.doc.unpost",
     # المحاسب يطابق الفاتورة الدولية بالبوليصة والبيان الجمركي — يقرأ الملف
     # ولا يرفع أوراقه.

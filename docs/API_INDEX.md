@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **575**
+عدد النقاط: **578**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -131,6 +131,9 @@
 | `/api/accounting/opening-balance/post/` | `OpeningBalanceViewSet` | `accounting/views.py` |
 | `/api/accounting/opening-balance/unpost/` | `OpeningBalanceViewSet` | `accounting/views.py` |
 | `/api/accounting/purchase-receipts/` | `PurchaseReceiptViewSet` | `accounting/views.py` |
+| `/api/accounting/revenue-vouchers/` | `RevenueVoucherViewSet` | `accounting/views.py` |
+| `/api/accounting/revenue-vouchers/{pk}/` | `RevenueVoucherViewSet` | `accounting/views.py` |
+| `/api/accounting/revenue-vouchers/{pk}/unpost/` | `RevenueVoucherViewSet` | `accounting/views.py` |
 | `/api/accounting/tax-rates/` | `TaxRateViewSet` | `accounting/views.py` |
 | `/api/accounting/tax-rates/{pk}/` | `TaxRateViewSet` | `accounting/views.py` |
 | `/api/accounting/trial-balance/` | `TrialBalanceView` | `accounting/views.py` |
