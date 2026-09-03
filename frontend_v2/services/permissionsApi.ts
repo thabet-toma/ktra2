@@ -1,5 +1,6 @@
 import { resolveTenantId } from "../utils/tenantContext";
 import type { UiMode } from "../utils/uiMode";
+import type { ShellManifest } from "../utils/shellManifest.ts";
 import { apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "./restApi";
 
 const tid = () => resolveTenantId();
@@ -25,6 +26,13 @@ export type MyPermissions = {
   template?: string;
   /** ISSUE #82: المعجم — قاموسٌ مسطّح بمفاتيح مصطلحات (`doc.*`، `line.*`)، يُقرأ بـ`term(key)`. */
   terms?: Record<string, string>;
+  /**
+   * ISSUE #83: بيان الشريط — مجموعاته وترتيبه وشاشة بدايته وإجراؤه الأول.
+   * `null`/غائبٌ لـ`general` (والقوالب بلا بيان): الشريط اليدوي في
+   * `Sidebar.tsx` يبقى حرفياً. عرضٌ لا تصريح — `utils/shellManifest.ts`
+   * تُقصي منه ما يرفضه القناع الحيّ قبل أي رسم.
+   */
+  shell?: ShellManifest | null;
 };
 
 export type PermissionsMatrix = {

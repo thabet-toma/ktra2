@@ -30,6 +30,7 @@
 | `frontend_v2/utils/clipboardImage.ts` | سجلّ مناطق اللصق ومُوجِّهه (`resolvePasteZone`, `usePasteZone`, `usePasteImageUpload`) |
 | `frontend_v2/utils/formatNumber.ts` | **كل عرض رقمي يمرّ من هنا** |
 | `frontend_v2/utils/terms.ts` | **ISSUE #82 — المعجم**: `resolveTerm` (نقطة القراءة الصرفة) — مصدر الحقيقة `terms` في حمولة `/api/permissions/me/`؛ `usePermissions().term(key)` الغلاف التفاعلي |
+| `frontend_v2/utils/shellManifest.ts` | **ISSUE #83 — بيان الشريط**: نقطة القراءة الصرفة فوق `shell` في حمولة `/api/permissions/me/` — `filterShellGroups`/`resolveManifestView` تُقصيان ما يرفضه القناع الحيّ (`viewPermissions.ts`) أو ترخيص وحدة أو شاشةً لم تُبنَ بعد (`unbuilt_views`)؛ `buildShellSections` تضيف فوقها الصلاحية (`visibleLinks`/`permForView`) فتُعيد أقسام الشريط الجاهزة للرسم — دالّةٌ صرفة بلا React يستهلكها `Sidebar.tsx`؛ `resolveShellFirstAction` يخدم شريط الإجراءات وقائمة الفأرة اليمنى. `null` لـ`general` — لا تغيير |
 | `frontend_v2/utils/formatDate.ts` | التواريخ — لا `toLocaleDateString` بلغة عربية |
 | `frontend_v2/services/tenantSettingsApi.ts` | مصدر مشترك لإعدادات الشركة (نافذة 60ث) |
 | `frontend_v2/components/legacy/firestoreService.ts` | الجسر القديم — **يُستورَد ديناميكياً** لا ثابتاً |
@@ -81,6 +82,7 @@
 | الوحدات المرخّصة | غير المفعّلة ترد **404** لا 403 — عالِج الحالتين |
 | وضع العرض | `ui_mode` يصل ضمن حمولة `/api/permissions/me/` نفسها (بلا طلب إضافي)، ويُحفَظ بـ`POST /api/tenants/companies/set-ui-mode/` |
 | المعجم (ISSUE #82) | `terms` يصل ضمن حمولة `/api/permissions/me/` نفسها — لا تكتب اسم مصطلحٍ حرفياً في شاشة، اقرأه بـ`term(key)` (`usePermissions()`، `utils/terms.ts`) |
+| بيان الشريط (ISSUE #83) | `shell` يصل ضمن حمولة `/api/permissions/me/` نفسها — `null` لـ`general`. عرضٌ لا تصريح: أي مستهلكٍ يمرّ شاشاته عبر `filterShellGroups`/`resolveManifestView` (`utils/shellManifest.ts`) قبل الرسم أو التنقّل — لا رسم شاشةٍ يرفضها القناع الحيّ لمجرّد ذكر البيان لها |
 
 ## «الوضع السهل» — قناعُ عرضٍ فوق نفس الواجهة
 
@@ -624,6 +626,20 @@ Pointer Events + `setPointerCapture` — حدثٌ واحد للفأرة والل
    الخاصية (`extraCustomers` / `extraProducts` في `SalesInvoiceEditor.tsx`).
    **ونافذةٌ تُفتح من الحقل مباشرةً يجب أن تُعطَّل معها لوحةُ مفاتيح المستند**
    (`useKitKeymap({ enabled })`) وإلّا صفّر `Esc` داخلها المستندَ كلَّه.
+
+14. **الشريط (ISSUE #83) فرعان في `Sidebar.tsx` — لا مسارٌ ثالث.** `shell`
+   (`usePermissions()`) موجودٌ ⇒ يُرسَم من `buildShellSections` (مجموعاته
+   وترتيبه وتسمياته من البيان)؛ غائبٌ (`general`، وهو الغالبية) ⇒ الفرع
+   القديم **حرفاً بحرف بلا لمسة واحدة**. مجموعات القالب اليدوية
+   («المبيعات»/«العملاء»/… حتى «التقارير») لم تُحذف — تعيش الآن داخل فرع
+   `else` وحده. الأزرار العامة (المعرض، من نحن، تواصل، إدارة المهام…) خارج
+   الفرعين، مشتركة بلا تكرار — **باستثناءين مقصودين لمنع رابطٍ مكرَّر
+   بمعنى**: زرّ «الإعدادات» العام يختفي إن كانت «الإعدادات» إحدى مجموعات
+   البيان (`manifestCoversSettings`)، وزرّ «وضع المحاسب» (A5) يختفي مع
+   البيان (لا مجموعة محاسبةٍ يدوية يعيد ترتيبها). **مفتاحا «الرئيسية»
+   و«دفاتر عملائي» كانا مقصورين على المدير بلا مدخلٍ في كتالوج الصلاحيات** —
+   `buildShellSections` تُطبّق القاعدة نفسها (`managerOnlyViews`) وإلا
+   انفتح البندان لكل الأدوار بمجرّد دخولهما البيان.
 
 ## التحقق
 

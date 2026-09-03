@@ -27,6 +27,7 @@ import { useCompany } from "../contexts/CompanyContext";
 import { usePermissions } from "../contexts/PermissionsContext";
 import { devicesNavPlacement, moduleAllowsView, templateHidesView } from "../utils/viewPermissions";
 import { groupVisible, visibleLinks } from "../utils/navAccess";
+import { buildShellSections } from "../utils/shellManifest";
 import { SIMPLE_VIEWS } from "../utils/uiMode";
 import { FieldHint } from "./ui/FieldHint";
 import type { SimpleHintKey } from "../constants/simpleHints";
@@ -45,7 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const { canAccessImport } = useCompany();
   // T-PERM: القائمة مشتقّة من الصلاحيات؛ ملخص الأعمال استثناء للمدير فقط.
   // THA-110: `uiMode` تفضيل عرضٍ لا صلاحية — يُقلّم ما يُعرَض أولاً ولا يحجب مساراً.
-  const { can, isManager, permissions, modules, template, uiMode, setUiMode } = usePermissions();
+  const { can, isManager, permissions, modules, template, uiMode, setUiMode, term, shell } = usePermissions();
   // ISSUE #51: القناع الحيّ — نفس النقطة التي يحرس بها App.tsx الدخول المباشر.
   const hiddenByTemplate = (view: AppView) => templateHidesView(String(view), template);
   const isSimpleMode = uiMode === 'simple';
@@ -67,6 +68,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
   const [afterSalesExpanded, setAfterSalesExpanded] = useState(false);
   const [platformExpanded, setPlatformExpanded] = useState(true);
+  // ISSUE #83: مجموعات بيان الشريط تُوسَّع بمفتاحها (id) لا بفهرسها — إدراج
+  // مجموعةٍ في البيان لا يزيح توسيع مجموعةٍ أخرى.
+  const [manifestExpanded, setManifestExpanded] = useState<Record<string, boolean>>({});
 
   const accountingLinks: { view: AppView; label: string; icon: React.ReactNode; perm?: string }[] = [
     { view: "accounting-coa", label: "شجرة الحسابات", icon: <BookMarked className="h-4 w-4" /> },
@@ -232,6 +236,31 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     .filter((view) => !hiddenByTemplate(view as AppView))
     .map((view) => ({ view: view as AppView, hint: `nav.${view}` as const, ...simpleViewMeta[view] }));
 
+  // ISSUE #83: بيان الشريط — `buildShellSections` (`utils/shellManifest.ts`)
+  // يحسم أيّ شاشةٍ تظهر وفي أيّ مجموعة (القناع ثم الصلاحية، نفس الدالتين
+  // القائمتين لا فحصاً موازياً)؛ هنا فقط نُلبس كل مفتاح شاشةٍ أيقونته وتسميته
+  // المحليّتين — دمجٌ لِما عُرِّف أعلاه بالفعل، لا تعريفٌ مزدوج. `[]` حين لا
+  // بيان لهذا القالب (`general`)، فلا يستهلكها أحد.
+  const manifestLinkMeta: Record<string, { label: string; icon: React.ReactNode }> = {
+    dashboard: { label: "الرئيسية", icon: <Home className="h-4 w-4" /> },
+    "client-books": { label: "دفاتر عملائي", icon: <BookOpenCheck className="h-4 w-4" /> },
+    "accounting-journal-entry": { label: "قيد اليومية", icon: <ArrowLeftRight className="h-4 w-4" /> },
+    settings: { label: "الإعدادات", icon: <SettingsIcon className="h-4 w-4" /> },
+  };
+  ([
+    ...accountingLinks, ...salesLinksAll, ...customersLinks, ...purchasesLinksAll,
+    ...importLinksAll, ...inventoryLinksAll, ...financeLinks, ...reportsLinksAll,
+    ...userManagementLinks, ...afterSalesLinksAll,
+  ] as { view: AppView; label: string; icon: React.ReactNode }[]).forEach((l) => {
+    if (!manifestLinkMeta[String(l.view)]) manifestLinkMeta[String(l.view)] = { label: l.label, icon: l.icon };
+  });
+  // «الرئيسية» و«دفاتر عملائي» كانتا مقصورتين على المدير بلا مدخل في كتالوج
+  // الصلاحيات — القاعدة نفسها هنا كي لا تنقلب متاحةً للجميع بمجرّد دخولها البيان.
+  const shellSections = buildShellSections(shell, template, modules, can, user.role, ["dashboard", "client-books"], isManager);
+  // الإعدادات تظهر مرّةً: إن كانت مجموعةً في البيان (دفتر عميل) لا تتكرّر كزرٍّ
+  // عامٍّ أسفل القائمة.
+  const manifestCoversSettings = shellSections.some((g) => g.views.includes("settings"));
+
   // فتح المجموعة التي تحتوي الشاشة النشطة تلقائياً.
   useEffect(() => {
     const inAny = (links: NavLink[]) => links.some((l) => l.view === activeView);
@@ -245,6 +274,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     if (inAny(afterSalesLinks)) setAfterSalesExpanded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView]);
+
+  // ISSUE #83: يفتح مجموعة البيان التي تحوي الشاشة النشطة — بمفتاحها (id) لا
+  // بفهرسها، فترتيب البيان لا يقفز بالمستخدم عند تبديل الشاشة.
+  useEffect(() => {
+    if (!shell) return;
+    const owner = shellSections.find((g) => g.views.includes(activeView));
+    if (owner) setManifestExpanded((prev) => (prev[owner.id] ? prev : { ...prev, [owner.id]: true }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, shell]);
 
 
   // A5: تبديل «وضع المحاسب». الأثر فوري ومرئي — المحاسبة تُفتح، والمبيعات
@@ -322,6 +360,43 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     const accountingGroup = groupVisible(withPerms(accountingLinks), can, user.role)
       ? renderGroup("المحاسبة", <Calculator className="h-5 w-5 flex-shrink-0" />, accountingExpanded, () => setAccountingExpanded(!accountingExpanded), accountingLinks)
       : null;
+
+    // ISSUE #83: بيان الشريط — يُرسَم بدلاً من مجموعات القالب اليدوية أدناه حين
+    // يوجد بيانٌ لهذا القالب (`general` بلا بيان: `shellSections` أصلاً `[]`،
+    // ولا يُستهلَك هذا المتغيّر من الفرع الذي يرسم الشريط اليدوي كما هو). نفس
+    // `renderGroup` — لا رسمَ ثانياً، ولا نمطاً مكرّراً.
+    const manifestGroupIcons: Record<string, React.ReactNode> = {
+      home: <Home className="h-5 w-5 flex-shrink-0" />,
+      clients: <BookOpenCheck className="h-5 w-5 flex-shrink-0" />,
+      fees: <Receipt className="h-5 w-5 flex-shrink-0" />,
+      treasury: <Landmark className="h-5 w-5 flex-shrink-0" />,
+      "office-accounting": <Calculator className="h-5 w-5 flex-shrink-0" />,
+      reports: <ReportsIcon className="h-5 w-5 flex-shrink-0" />,
+      office: <Building2 className="h-5 w-5 flex-shrink-0" />,
+      entry: <FileSignature className="h-5 w-5 flex-shrink-0" />,
+      "receipt-payment": <Banknote className="h-5 w-5 flex-shrink-0" />,
+      parties: <Users className="h-5 w-5 flex-shrink-0" />,
+      accounts: <BookMarked className="h-5 w-5 flex-shrink-0" />,
+      declarations: <ClipboardList className="h-5 w-5 flex-shrink-0" />,
+      settings: <SettingsIcon className="h-5 w-5 flex-shrink-0" />,
+    };
+    const manifestSections = shellSections.map((g) => {
+      const links: NavLink[] = g.views.map((v) => {
+        const meta = manifestLinkMeta[v];
+        return { view: v as AppView, label: meta?.label ?? v, icon: meta?.icon ?? <FileText className="h-4 w-4" /> };
+      });
+      return (
+        <React.Fragment key={g.id}>
+          {renderGroup(
+            term(g.label_term ?? g.id),
+            manifestGroupIcons[g.id] ?? <FileText className="h-5 w-5 flex-shrink-0" />,
+            !!manifestExpanded[g.id],
+            () => setManifestExpanded((prev) => ({ ...prev, [g.id]: !prev[g.id] })),
+            links,
+          )}
+        </React.Fragment>
+      );
+    });
 
     return (
       <div className="flex flex-col h-full bg-[var(--color-surface-2)] border-l border-[var(--color-border)] transition-all duration-300 relative">
@@ -411,6 +486,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             </div>
           )}
 
+          {/* ISSUE #83: بيان الشريط — حين يوجد بيانٌ لهذا القالب يُرسَم الشريط
+              **منه** بدلاً من مجموعات القالب اليدوية أدناه (المصدر الجذري الذي
+              فتحته التذكرة: مجموعاتٌ مكتوبةٌ لتاجر، والقالب يحذف منها فيبقى
+              هيكلٌ مثقوب). `general` بلا بيان (`shell` هنا `null` — القيمة
+              نفسها التي بناها `usePermissions()`): الفرع القائم أدناه **حرفاً
+              بحرف بلا لمسة واحدة**. */}
+          {shell ? (
+            manifestSections
+          ) : (<>
           {/* 1) الرئيسية — ملخص مؤشرات الشركة للمدير فقط (T-DASHPERIOD) */}
           {isManager && (
             <button
@@ -471,6 +555,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           {/* 8) التقارير — كل تقرير يفتح في تبويبه الخاص (G2) */}
           {groupVisible(withPerms(reportsLinks), can, user.role) &&
             renderGroup("التقارير", <ReportsIcon className="h-5 w-5 flex-shrink-0" />, reportsExpanded, () => setReportsExpanded(!reportsExpanded), reportsLinks)}
+          </>)}
 
           <button
             onClick={() => { setView("gallery"); if (isMobile) setIsMobileMenuOpen(false); }}
@@ -538,6 +623,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             </button>
           )}
 
+          {/* ISSUE #83: حين تحمل مجموعات البيان «الإعدادات» (دفتر عميل) لا يتكرّر
+              الزرّ العام أسفل القائمة — رابطٌ واحد للشاشة لا اثنان. */}
+          {!manifestCoversSettings && (
           <button
             onClick={() => { setView("settings"); if (isMobile) setIsMobileMenuOpen(false); }}
             className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("settings") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
@@ -546,6 +634,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             <SettingsIcon className="h-5 w-5 flex-shrink-0" />
             {showText && <span className="mr-3 text-right flex-1">الإعدادات</span>}
           </button>
+          )}
 
           {/* task16 E19: إدارة الموظفين */}
           <div className="space-y-0.5">
@@ -632,8 +721,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
           {/* A5: «وضع المحاسب» — مبدّل ترتيبٍ لصاحب هذا المتصفح وحده، في ذيل
               القائمة حيث تعيش تفضيلات العرض لا بنود التنقّل.
-              THA-110: يختفي في الوضع السهل — ترتيبُ قائمةٍ لا وجود لها. */}
-          {!isSimpleMode && (
+              THA-110: يختفي في الوضع السهل — ترتيبُ قائمةٍ لا وجود لها.
+              ISSUE #83: ويختفي حين يُرسَم الشريط من بيان القالب — لا مجموعة
+              محاسبةٍ يدوية يعيد ترتيبها، فيصير الزرّ تحكّماً بلا أثر. */}
+          {!isSimpleMode && !shell && (
           <button
             type="button"
             onClick={toggleAccountantMode}

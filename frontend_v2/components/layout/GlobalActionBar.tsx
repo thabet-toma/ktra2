@@ -11,6 +11,7 @@ import { AppView, User } from "../../types";
 import type { DockSide } from "../../utils/windowGeometry";
 import { clientLogger } from "../../services/logger";
 import { usePermissions } from "../../contexts/PermissionsContext";
+import { resolveShellFirstAction } from "../../utils/shellManifest";
 import {
   buildQuickActionGroups,
   visibleQuickActionGroups,
@@ -33,7 +34,7 @@ interface Props {
 
 export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate, dock = "top" }) => {
   // ISSUE #82: اسم فاتورة المبيعات من المعجم — يتبدّل باسمه البديل في مكتب المحاسبة.
-  const { term } = usePermissions();
+  const { term, shell, template, modules } = usePermissions();
   const [isOpen, setIsOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
@@ -66,8 +67,11 @@ export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate, dock = "top
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // ISSUE #83: إجراء البيان الأول (`shell.first_action`) — `null` لـ`general`
+  // فيبقى الافتراض القديم في `buildQuickActionGroups` (اسم المستند من المعجم) كما هو.
+  const firstAction = resolveShellFirstAction(shell, template, term, modules);
   // orderVersion يُغيَّر بعد كل سحب فقط لإجبار إعادة التصيير — visibleGroups تُقرأ من localStorage بكل مرة أصلاً.
-  const visibleGroups = visibleQuickActionGroups(buildQuickActionGroups(user, go, term("doc.sales_invoice")));
+  const visibleGroups = visibleQuickActionGroups(buildQuickActionGroups(user, go, term("doc.sales_invoice"), firstAction));
 
   if (visibleGroups.length === 0) return null;
 

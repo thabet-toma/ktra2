@@ -24,6 +24,23 @@ def _default_terms() -> dict[str, str]:
     terms = {f"doc.{key}": label for key, label in doc_labels.items()}
     # ISSUE #48: الافتراضي التجاري — تُستبدَل «خدمة» في قوالب المكتب أدناه.
     terms["line.item"] = "منتج"
+    # ISSUE #83: تسميات بيان الشريط (`core/shell_manifest.py`) — مجموعاته
+    # وإجراؤه الأول ونصّ حالته الفارغة. مفاتيح لا شاشات، كأخواتها أعلاه.
+    terms["nav.home"] = "الرئيسية"
+    terms["nav.clients"] = "عملائي"
+    terms["nav.fees"] = "الأتعاب"
+    terms["nav.treasury"] = "الخزينة والمصاريف"
+    terms["nav.office_accounting"] = "محاسبة المكتب"
+    terms["nav.reports"] = "التقارير"
+    terms["nav.office"] = "المكتب"
+    terms["nav.entry"] = "الإدخال"
+    terms["nav.receipt_payment"] = "القبض والدفع"
+    terms["nav.parties"] = "الأطراف"
+    terms["nav.accounts"] = "الحسابات"
+    terms["nav.declarations"] = "الإقرارات"
+    terms["nav.settings"] = "الإعدادات"
+    terms["action.document_coding"] = "ترميز مستندات"
+    terms["empty.shell"] = "لا يوجد شيء هنا بعد."
     return terms
 
 
@@ -34,9 +51,12 @@ TEMPLATE_TERM_OVERRIDES: dict[str, dict[str, str]] = {
     "accounting_firm": {
         "doc.sales_invoice": "فاتورة أتعاب",
         "line.item": "خدمة",
+        # ISSUE #83: نصّ الحالة الفارغة لبيان الشريط.
+        "empty.shell": "لم تُصدر فاتورة أتعابٍ بعد — ابدأ من هنا.",
     },
     "client_book": {
         "line.item": "خدمة",
+        "empty.shell": "لا مستندات مرمّزة بعد — ابدأ بترميز أول مستند.",
     },
 }
 

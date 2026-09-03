@@ -34,22 +34,30 @@ export type QuickAction = {
  * @param salesInvoiceLabel ISSUE #82: اسم فاتورة المبيعات من المعجم
  *        (`usePermissions().term('doc.sales_invoice')`) — يتبدّل باسمه البديل
  *        في مكتب المحاسبة.
+ * @param firstAction ISSUE #83: إجراء البيان الأول (`shell.first_action`)،
+ *        محلولاً عبر `resolveManifestView` — يستبدل الافتراض الأعمى «فاتورة
+ *        مبيعات» حين يعرّف قالب الشركة إجراءه الخاص (مثل «ترميز مستندات» في
+ *        دفتر عميل). غيابه (`general` وما بلا بيان) يبقي السلوك القديم حرفياً.
  */
 export function buildQuickActionGroups(
   user: User,
   go: (view: AppView, id?: string) => () => void,
   salesInvoiceLabel: string,
+  firstAction?: { view: string; label: string } | null,
 ): QuickAction[][] {
   const isManager = user.role === "manager";
   const canInvoice = user.role === "manager" || user.role === "procurement";
+  // البيان (#83) يعيد شاشةً مُحلولة (تسقط إلى `dashboard` عند اللزوم) بمفتاحٍ
+  // نصّي عام؛ التوكيد آمنٌ لأن `resolveManifestView` تضمن قيمة `AppView` صالحة.
+  const primaryAction = firstAction ?? { view: "sales-invoices" as AppView, label: salesInvoiceLabel };
 
   return [
     [
       {
         key: "new-sales",
-        label: salesInvoiceLabel,
+        label: primaryAction.label,
         icon: <FilePlus2 className="w-4 h-4" />,
-        onClick: go("sales-invoices", "new"),
+        onClick: go(primaryAction.view as AppView, "new"),
         show: canInvoice,
       },
       {

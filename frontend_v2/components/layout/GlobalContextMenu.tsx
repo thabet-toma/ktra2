@@ -28,6 +28,7 @@ import { partnerActionGroups, type PartnerActionIcon } from "../../utils/partner
 import { AppView, User } from "../../types";
 import { clientLogger } from "../../services/logger";
 import { usePermissions } from "../../contexts/PermissionsContext";
+import { resolveShellFirstAction } from "../../utils/shellManifest";
 import { buildQuickActionGroups, visibleQuickActionGroups, QuickAction } from "./quickActions";
 import { KitCalculatorPopover } from "../kit/KitCalculatorPopover";
 import {
@@ -91,7 +92,7 @@ const ICON = "w-3.5 h-3.5";
 
 export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
   // ISSUE #82: اسم فاتورة المبيعات من المعجم — يتبدّل باسمه البديل في مكتب المحاسبة.
-  const { term } = usePermissions();
+  const { term, shell, template, modules } = usePermissions();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [calc, setCalc] = useState<CalcState | null>(null);
   const [submenu, setSubmenu] = useState<SubmenuState | null>(null);
@@ -310,7 +311,9 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
   ];
 
   // الإجراءات السريعة (نفس تعريف الشريط، مُرشَّحة بالدور).
-  const quickGroups = visibleQuickActionGroups(buildQuickActionGroups(user, (view, id) => go(view, id), term("doc.sales_invoice")));
+  // ISSUE #83: إجراء البيان الأول — `null` لـ`general` فيبقى الافتراض القديم.
+  const firstAction = resolveShellFirstAction(shell, template, term, modules);
+  const quickGroups = visibleQuickActionGroups(buildQuickActionGroups(user, (view, id) => go(view, id), term("doc.sales_invoice"), firstAction));
   const quickEntries: MenuEntry[] = [];
   quickGroups.forEach((group: QuickAction[], gi) => {
     if (gi > 0) quickEntries.push({ kind: "sep" });

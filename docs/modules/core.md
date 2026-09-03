@@ -17,7 +17,8 @@
 | `core/mixins.py` | `BaseTenantViewSet` — الفلترة التلقائية بالشركة |
 | `core/access.py` | كتالوج الصلاحيات ومصفوفة الأدوار والإنفاذ |
 | `core/permissions.py` · `core/permissions_api.py` | منتج الصلاحية لـDRF + نقطة `/api/permissions/me/` |
-| `core/terminology.py` | **ISSUE #82 — المعجم**: قاموس تسميةٍ مسطّح (`doc.*`، `line.item`) يتبدّل بقالب الشركة — `term(tenant, key)`، يُسلَّم على حمولة `/api/permissions/me/` (`terms`) |
+| `core/terminology.py` | **ISSUE #82 — المعجم**: قاموس تسميةٍ مسطّح (`doc.*`، `line.item`، `nav.*`، `action.*`، `empty.shell`) يتبدّل بقالب الشركة — `term(tenant, key)`، يُسلَّم على حمولة `/api/permissions/me/` (`terms`) |
+| `core/shell_manifest.py` | **ISSUE #83 — بيان الواجهة**: شريطٌ لكل قالب — بياناتٌ لا شجرة مكوّنات (مجموعاتٌ وترتيبها بمفاتيح المعجم، شاشة البداية، الإجراء الأول، نصّ الحالة الفارغة). `shell_manifest(template_key)` تعيد `None` لـ`general`؛ يُسلَّم على حمولة `/api/permissions/me/` (`shell`) — عرضٌ لا تصريح، القناع لا يُمَسّ |
 | `core/modules.py` | أي وحدة مرخّصة مفعّلة لأي شركة |
 | `core/plans.py` | حدود الخطط (عدد الفواتير/المستخدمين…) وعمر الاشتراك (`subscription_expiry`) |
 | `core/pagination.py` | منتجا الترقيم — الإلزامي والاختياري |
@@ -303,6 +304,14 @@ terms_payload(tenant) -> dict       # القاموس كاملاً بعد قنا�
    (بسببٍ مكتوب لكل مدخل: تعليق، أو أوصاف سجلّ نشاط تاريخية، أو دالّة صرفة
    بتغيير توقيعٍ خارج النطاق) يُسقط الحارس أحمر. لا يشمل هذا المعجم أوصاف
    سجلّ النشاط المخزَّنة (`core/activity.py`) ولا `verbose_name` في الهجرات.
+13. **بيان الشريط (ISSUE #83) عرضٌ لا تصريح — لا يعيد تعريف القناع.**
+   `core/shell_manifest.py` قد يذكر شاشةً يرفضها القناع الحيّ القائم
+   (`TEMPLATE_HIDDEN_VIEWS` في `frontend_v2/utils/viewPermissions.ts`) أو
+   وحدةً غير مرخّصة أو شاشةً لم تُبنَ بعد (`UNBUILT_VIEWS`) — الواجهة
+   (`frontend_v2/utils/shellManifest.ts` — `filterShellGroups`/`resolveManifestView`)
+   تُقصيها قبل أي رسم، ولا نسخة مقنَّعة موازية تُبنى خادمياً لهذا الغرض.
+   `general` بلا بيان (`shell_manifest` تعيد `None`) — الشريط اليدوي في
+   `Sidebar.tsx` يبقى حرفياً.
 
 ## الاختبارات المهمة
 
@@ -311,6 +320,7 @@ terms_payload(tenant) -> dict       # القاموس كاملاً بعد قنا�
 | `core/tests/test_docs_freshness.py` | ألا تتعفّن وثائق التنقّل بصمت |
 | `core/tests/test_terminology.py` | `term`/`terms_payload`: general بلا تغيير، تجاوزات القالب، مفتاح/قالب غائب بلا رمي، الحمولة على `/api/permissions/me` |
 | `core/tests/test_terminology_guard.py` | حارس التسمية — مسحٌ شامل لشجرة الإنتاج، لا عودة نصٍّ حرفيّ خارج `ALLOWLIST` المُعلَّلة، وألا يتعفّن الاستدعاء ولا القائمة |
+| `core/tests/test_shell_manifest.py` | بيان الشريط (#83): `general` بلا بيان، شكل بيان `accounting_firm`/`client_book` (مجموعاته وإجراؤه الأول)، الشاشات غير المبنيّة مذكورة لا مخفيّة، لا مرجع مشترك بين نداءات `shell_manifest`، والحمولة على `/api/permissions/me/` |
 | `core/tests/test_cache_resilience.py` | ألا يُسقط تعثّر الكاش الطلبَ |
 | `core/tests/test_global_throttle.py` | حدود المعدّل العامة |
 | `core/tests/test_reports.py` | صحة التقارير وثبات عدّ الاستعلامات |

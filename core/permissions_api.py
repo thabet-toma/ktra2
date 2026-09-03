@@ -25,6 +25,7 @@ from core.access import (
     visible_role_labels,
 )
 from core.modules import MODULES, module_enabled
+from core.shell_manifest import shell_manifest
 from core.tenant_utils import get_tenant
 from core.terminology import terms_payload
 from tenants.company_templates import DEFAULT_TEMPLATE
@@ -90,6 +91,10 @@ def my_permissions(request):
         # ثالثة). قاموسٌ مسطّح بمفاتيح مصطلحات (`doc.*`، `line.*`)، والواجهة
         # تقرأه بـ`term(key)` بدل كتابة الاسم حرفياً في كل شاشة.
         "terms": terms_payload(tenant),
+        # ISSUE #83: بيان الشريط — مجموعاته وترتيبه وشاشة بدايته وإجراؤه الأول.
+        # `None` لـ`general` (والقوالب بلا بيان): الشريط اليدوي في `Sidebar.tsx`
+        # يبقى حرفياً بلا مسّ. عرضٌ لا تصريح — القناع الحيّ لا يُمسّ هنا.
+        "shell": shell_manifest(getattr(tenant, "template", None)),
     })
 
 
