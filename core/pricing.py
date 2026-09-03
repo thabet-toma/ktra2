@@ -225,9 +225,13 @@ def purchase_price_list(
     `supplier_id` (اختياري): «آخر شراء» يُحصر بذلك المورد وحده بوسم «آخر شراء من
     المورد»، بينما «أقل شراء» يبقى عاماً عبر كل الموردين؛ وإن لم يسبق الشراء من
     هذا المورد تُعبَّأ الخلية بأقل سعر عام.
-    السعر أحادي العملة كما سُجِّل — تحويل العملة لكل سطر يبقى في `resolve_purchase_price`.
-    السلسلة: تاريخ الشراء المرحَّل ← متوسط تكلفة المنتج ← لا شيء. (`strategy` يبقى
-    للتوافق مع نداء الـ endpoint ولا يؤثّر على القيمة الأساسية هنا.)
+    «آخر شراء» أحادي العملة كما سُجِّل — تحويل العملة لكل سطر يبقى في
+    `resolve_purchase_price`. أما «أقل شراء» (ISSUE #111) فبالعملة **الأساسية**
+    مُحوَّلاً بسعر صرف فاتورته هو (لا سعر اليوم)، ومعه المورد والتاريخ — انظر
+    `_purchase_lowest_prices_base_currency`.
+    السلسلة: تاريخ الشراء المرحَّل ← متوسط تكلفة المنتج (لـ«آخر شراء» فقط، ولا
+    يُستعمَل أبداً لـ«أقل شراء») ← لا شيء. (`strategy` يبقى للتوافق مع نداء الـ
+    endpoint ولا يؤثّر على القيمة الأساسية هنا.)
     """
     from inventory.models import Product
     from logistics.models import PurchaseInvoiceItem
@@ -244,11 +248,8 @@ def purchase_price_list(
     result: dict[int, dict] = {}
     for item in qs:
         unit = _dec(item.unit_price)
-        cur = result.setdefault(item.product_id, {
-            "last": None,
-            "lowest": None,
-        })
-        
+        cur = result.setdefault(item.product_id, {"last": None})
+
         if cur["last"] is None and (
             not supplier_id or item.invoice.partner_id == supplier_id
         ):
@@ -259,15 +260,13 @@ def purchase_price_list(
                 "document_id": item.invoice_id,
             }
 
-        if cur["lowest"] is None or unit < _dec(cur["lowest"]["unit_price"]):
-            cur["lowest"] = {
-                "unit_price": str(unit.quantize(_UNIT_Q)),
-                "source_type": "PURCHASE_INVOICE",
-                "source_label": "أقل شراء",
-                "document_id": item.invoice_id,
-            }
+    # ISSUE #111: «أقل شراء» بالعملة الأساسية — تجميعٌ واحد في SQL عبر كل
+    # المنتجات دفعة واحدة، لا مقارنة بايثون على أرقام بعملات مختلفة.
+    lowest_by_product = _purchase_lowest_prices_base_currency(tenant_id=tenant_id)
 
-    # احتياطي: متوسط تكلفة المنتج لمن لا تاريخ شراء له.
+    # احتياطي: متوسط تكلفة المنتج لمن لا تاريخ شراء له — لـ«آخر شراء» وحدها.
+    # «أقل شراء» لا يسقط إلى avg_cost أبداً (ISSUE #111 #5): متوسط التكلفة ليس
+    # سعر سوق.
     for p in Product.objects.filter(tenant_id=tenant_id).only("id", "avg_cost"):
         if p.id in result:
             continue
@@ -280,24 +279,24 @@ def purchase_price_list(
                     "source_label": "متوسط التكلفة",
                     "document_id": None,
                 },
-                "lowest": None
             }
 
     final_result: dict[int, dict] = {}
-    for pid, data in result.items():
+    all_product_ids = set(result.keys()) | set(lowest_by_product.keys())
+    for pid in all_product_ids:
+        data = result.get(pid) or {}
+        last = data.get("last")
+        lowest = lowest_by_product.get(pid)
+
         prices = []
-        if data["last"]:
-            prices.append(data["last"])
+        if last:
+            prices.append(last)
         # القائمة تعرض «آخر شراء» و«أقل شراء» معاً دائماً عند وجود تاريخ شراء (بصرف
         # النظر عن الاستراتيجية) ليطّلع المستخدم على الاثنين؛ القيمة الأساسية
-        # (unit_price) هي آخر سعر — وهي ما تُعبَّأ به الخلية عند الاختيار.
-        # لا تكرار: إن كان «أقل شراء» هو نفسه سطر «آخر شراء» تُعرض رقاقة واحدة.
-        if data["lowest"] and not (
-            data["last"]
-            and data["last"]["document_id"] == data["lowest"]["document_id"]
-            and data["last"]["unit_price"] == data["lowest"]["unit_price"]
-        ):
-            prices.append(data["lowest"])
+        # (unit_price) هي آخر سعر إن وُجد، وإلا أقل سعر (بالأساسية). لا تكرار:
+        # إن كان «أقل شراء» نفس مستند «آخر شراء» تُعرض رقاقة واحدة.
+        if lowest and not (last and last["document_id"] == lowest["document_id"]):
+            prices.append(lowest)
 
         if prices:
             final_result[pid] = {
@@ -312,6 +311,78 @@ def purchase_price_list(
         tenant_id, supplier_id, len(final_result),
     )
     return final_result
+
+
+def _purchase_lowest_prices_base_currency(
+    *, tenant_id: int, product_ids=None,
+) -> dict[int, dict]:
+    """ISSUE #111: أقل سعر شراء لكل منتج، **بالعملة الأساسية**، مُحوَّلاً بسعر
+    صرف فاتورته هو (سعرُ الأمس بصرف الأمس — لا سعر اليوم). المصدر فواتيرُ
+    الشراء المرحَّلة وحدها، ولا سقوطَ إلى `avg_cost` أبداً: منتجٌ بلا شراء
+    مرحَّل ببساطة **لا يظهر** في القاموس المُعاد.
+
+    تجميعٌ واحد في SQL عبر كل المنتجات المطلوبة دفعة واحدة (استعلامٌ واحد
+    بترتيبٍ على القيمة المحوَّلة محسوبةً في قاعدة البيانات) — لا استعلامٌ لكل
+    منتج ولا استعلامٌ مترابط (correlated) لكل صفّ (درس
+    `correlated-subquery-on-lists`: 17 ثانية لصفحةٍ واحدة).
+
+    يُرجع {product_id: {"unit_price" (أساسية), "source_type", "source_label",
+    "document_id", "document_number", "document_date", "supplier_id",
+    "supplier_name"}}.
+    """
+    from django.db.models import Case, DecimalField, ExpressionWrapper, F, Value, When
+
+    from logistics.models import PurchaseInvoiceItem
+
+    # سعر صرف السطر إن وُجد وإلا سعر صرف الفاتورة (مطابقةً لـ `_src_purchase_rate`).
+    # وصفرُ الصرف يُعامَل واحداً لا صفراً: لولا ذلك لصارت فاتورةٌ بسعر صرفٍ
+    # صفر «أقلَّ شراءٍ» أبديّاً بقيمة صفر — كذبةٌ صامتة تتصدّر كل مقارنة.
+    eff_rate = Case(
+        When(line_exchange_rate__gt=0, then=F("line_exchange_rate")),
+        When(invoice__exchange_rate__gt=0, then=F("invoice__exchange_rate")),
+        default=Value(Decimal("1")),
+        output_field=DecimalField(max_digits=18, decimal_places=6),
+    )
+    base_price_expr = ExpressionWrapper(
+        F("unit_price") * eff_rate,
+        output_field=DecimalField(max_digits=24, decimal_places=6),
+    )
+
+    qs = PurchaseInvoiceItem.objects.filter(
+        invoice__tenant_id=tenant_id,
+        invoice__is_posted=True,
+        unit_price__gt=0,
+    )
+    if product_ids is not None:
+        qs = qs.filter(product_id__in=product_ids)
+
+    # استعلامٌ واحد: التحويل والترتيب على القيمة المحوَّلة يحدثان في قاعدة
+    # البيانات؛ أولّ سطر لكل منتج (بعد الترتيب) هو أقلّ سعرٍ بالأساسية —
+    # ومرور بايثون بعدها خطّيٌّ واحد (لا متداخل) لالتقاط رأس كل مجموعة فقط.
+    rows = (
+        qs.annotate(base_price=base_price_expr)
+        .select_related("invoice", "invoice__partner")
+        .order_by("product_id", "base_price", "invoice__invoice_date", "invoice_id", "id")
+    )
+
+    result: dict[int, dict] = {}
+    for item in rows:
+        pid = item.product_id
+        if pid in result:
+            continue  # المنتج مُعالَج — الصفّ الحالي أعلى من أقلّه بالترتيب
+        price = _dec(item.base_price)
+        inv = item.invoice
+        result[pid] = {
+            "unit_price": str(price.quantize(_UNIT_Q)),
+            "source_type": "PURCHASE_INVOICE",
+            "source_label": "أقل شراء",
+            "document_id": inv.id,
+            "document_number": inv.invoice_number,
+            "document_date": inv.invoice_date.isoformat() if inv.invoice_date else None,
+            "supplier_id": inv.partner_id,
+            "supplier_name": inv.partner.name if inv.partner_id else None,
+        }
+    return result
 
 
 def _lowest_purchase_item(qs):

@@ -294,3 +294,86 @@ class PurchasePriceEndpointTest(APITestCase):
         prices = {p["source_label"]: Decimal(p["unit_price"]) for p in row["prices"]}
         assert prices.get("آخر شراء من المورد") == Decimal("130.0000")
         assert prices.get("أقل شراء") == Decimal("60.0000")
+
+
+class PurchaseLowestPriceCurrencyTest(APITestCase):
+    """ISSUE #111: «أقل سعر» (purchase_price_list) يقارن بالعملة **الأساسية**
+    بعد التحويل بسعر صرف كلّ فاتورة هي — لا الرقم الخام المخزَّن. اختبارٌ على
+    سطح DRF (نقطة `price-list/`) لا بالاستدعاء المباشر لـ`purchase_price_list`.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="lowcur", password="x")
+        cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
+        cls.usd = Currency.objects.create(Code="USD", Name="دولار")
+        cls.tenant = create_company("شركة أقل سعر", cls.user)
+        cls.sup_usd = Partner.objects.create(
+            tenant=cls.tenant, name="مورد دولار", partner_type="Supplier")
+        cls.sup_ils = Partner.objects.create(
+            tenant=cls.tenant, name="مورد شيكل", partner_type="Supplier")
+        cls.product = Product.objects.create(
+            tenant=cls.tenant, sku="LOWCUR-1", name_ar="منتج", avg_cost=Decimal("999"))
+        # الرقم الخام أصغر (12) لكنه بالدولار بسعر صرف 3.6 → 43.2 شيكلاً أساسياً.
+        # وهي الأحدث تاريخاً (فتصير «آخر شراء») — كي يبقى «أقل شراء» مستنداً مختلفاً
+        # ويُثبت الاختباران معاً بلا تكرارٍ يُسقط أحدهما.
+        cls.usd_invoice = _posted_pi(
+            cls.tenant, cls.sup_usd, cls.usd, cls.product,
+            number="USD-1", date="2026-06-10", price=12, exchange_rate="3.6")
+        # الرقم الخام أكبر (20) لكنه بالشيكل (الأساسية) — فعلياً الأقلّ (20 < 43.2)،
+        # وتاريخه أسبق فلا يصير «آخر شراء».
+        cls.ils_invoice = _posted_pi(
+            cls.tenant, cls.sup_ils, cls.ils, cls.product,
+            number="ILS-1", date="2026-06-01", price=20)
+
+    def _auth(self):
+        self.client.force_authenticate(user=self.user)
+        return {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def test_lowest_price_compares_base_currency_not_raw_number(self):
+        res = self.client.get(
+            "/api/logistics/purchase-invoices/price-list/", **self._auth())
+        assert res.status_code == 200, res.content
+        row = next(r for r in res.json() if r["product_id"] == self.product.id)
+        lowest = next(p for p in row["prices"] if p["source_label"] == "أقل شراء")
+        # الصحيح: فاتورة الشيكل (20) — لا فاتورة الدولار الخام الأصغر (12) التي
+        # كان الكود القديم يختارها بلا نظرٍ إلى العملة.
+        assert Decimal(lowest["unit_price"]) == Decimal("20.0000")
+        assert lowest["document_id"] == self.ils_invoice.id
+        assert lowest["document_number"] == "ILS-1"
+        assert lowest["supplier_id"] == self.sup_ils.id
+        assert lowest["supplier_name"] == "مورد شيكل"
+        assert lowest["document_date"] == "2026-06-01"
+        # لا سقوط إلى avg_cost أبداً لـ«أقل شراء» — القيمة من الفاتورة لا 999.
+        assert Decimal(lowest["unit_price"]) != Decimal("999.0000")
+
+    def test_no_purchase_history_leaves_lowest_empty_not_avg_cost(self):
+        other = Product.objects.create(
+            tenant=self.tenant, sku="LOWCUR-2", name_ar="منتج بلا شراء",
+            avg_cost=Decimal("77"))
+        res = self.client.get(
+            "/api/logistics/purchase-invoices/price-list/", **self._auth())
+        assert res.status_code == 200, res.content
+        row = next((r for r in res.json() if r["product_id"] == other.id), None)
+        assert row is not None  # احتياطي avg_cost يبقى يملأ «آخر شراء» وحدها
+        labels = [p["source_label"] for p in row["prices"]]
+        assert "أقل شراء" not in labels
+        assert row["source_label"] == "متوسط التكلفة"
+        assert Decimal(row["unit_price"]) == Decimal("77.0000")
+
+    def test_tenant_isolation_on_lowest_price(self):
+        other_owner = User.objects.create_user(username="lowcur2", password="x")
+        other_tenant = create_company("شركة أخرى", other_owner)
+        other_sup = Partner.objects.create(
+            tenant=other_tenant, name="مورد آخر", partner_type="Supplier")
+        # فاتورةٌ أرخص بكثير في شركة أخرى — يجب ألّا تُسرَّب إلى حساب هذه الشركة
+        # ولو تشاركتا نفس صفّ المنتج (تجميع SQL مبنيّ على product_id عبر الجدول).
+        _posted_pi(
+            other_tenant, other_sup, self.ils, self.product,
+            number="OTH-1", date="2026-06-05", price=1)
+        res = self.client.get(
+            "/api/logistics/purchase-invoices/price-list/", **self._auth())
+        assert res.status_code == 200, res.content
+        row = next(r for r in res.json() if r["product_id"] == self.product.id)
+        lowest = next(p for p in row["prices"] if p["source_label"] == "أقل شراء")
+        assert Decimal(lowest["unit_price"]) == Decimal("20.0000")
