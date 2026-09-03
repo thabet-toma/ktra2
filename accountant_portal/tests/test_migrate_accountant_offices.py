@@ -39,6 +39,15 @@ def _run_migration(dry_run=False):
     return out.getvalue()
 
 
+def _run_full_migration():
+    """ISSUE #55 ثم ISSUE #86 — تسلسل النشر الفعلي: مكتبٌ لكل محاسب، ثم زبائنه
+    (بمن فيهم من صاروا PracticeClient لتوّهم بالسطر أعلاه) إلى أطراف مكتبه."""
+    _run_migration()
+    out = StringIO()
+    call_command("migrate_practice_clients_to_partners", stdout=out)
+    return out.getvalue()
+
+
 class MigrateAccountantOfficesTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
@@ -123,7 +132,9 @@ class MigrateAccountantOfficesTest(APITestCase):
         self.assertEqual(self.manual_client.client_type, "unlinked")
 
     def test_active_engagement_becomes_engaged_client_on_dashboard(self):
-        _run_migration()
+        # ISSUE #86: لوحة المكتب تقرأ أطراف شركة المكتب — تحتاج تسلسل النشر
+        # الكامل (#55 ثم #86) لا #55 وحدها.
+        _run_full_migration()
         api = self._api_for(self.fresh_accountant)
         res = api.get(DASHBOARD)
         self.assertEqual(res.status_code, 200, res.content)
@@ -136,7 +147,8 @@ class MigrateAccountantOfficesTest(APITestCase):
         self.assertNotIn("شركة رفضت الارتباط ٥٥", rows)
 
     def test_active_engagement_links_to_existing_manually_named_client_not_duplicated(self):
-        _run_migration()
+        # ISSUE #86: قائمة الزبائن الآن أطراف شركة المكتب — نفس ملاحظة الاختبار أعلاه.
+        _run_full_migration()
         api = self._api_for(self.existing_accountant)
         res = api.get(CLIENTS)
         self.assertEqual(res.status_code, 200, res.content)
@@ -146,7 +158,11 @@ class MigrateAccountantOfficesTest(APITestCase):
         ]
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["client_type"], "engaged")
-        self.assertEqual(matches[0]["id"], self.pre_named_client.pk)
+        # لا مضاعفة عند الترحيل الثاني: طرفٌ واحد لهذا الزبون مهما أُعيد التشغيل.
+        from partners.models import Partner
+        self.assertEqual(
+            Partner.objects.filter(name="شركة عميل مربوطة سلفاً ٥٥").count(), 1,
+        )
 
     def test_counts_before_after_lose_nothing_and_idempotent_rerun(self):
         active_before = AccountantEngagement.objects.filter(status="active").count()

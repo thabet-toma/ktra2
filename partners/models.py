@@ -104,7 +104,31 @@ class Partner(models.Model):
         max_length=7, null=True, blank=True, db_column='RowColor',
         help_text='لون HEX (مثل #ff0000) لتلوين صف الشريك في الجداول',
     )
-    
+
+    # ── ISSUE #86: زبون مكتب المحاسبة — الطرف نفسه، لا سجلّ منفصل ───────────
+    # `PracticeClient` (accountant_portal) كان يحمل هذين الحقلين ولا يحملهما
+    # الطرف؛ كل حقل آخر كان له مطابقٌ هنا فعلاً. مرجعاً بسلسلة FK إلى نموذجَين
+    # في app آخر عبر سلسلة نصّية — كما `linked_account`/`default_cost_center`
+    # أعلاه إلى `accounting` — فلا استيراد فعلي يفتح دورة اعتماديات.
+    sector = models.CharField(
+        max_length=120, blank=True, null=True, db_column='Sector',
+        help_text='قطاع نشاط الطرف — يُستعمل في سجلّ عملاء مكتب المحاسبة.',
+    )
+    mobile = models.CharField(max_length=30, blank=True, null=True, db_column='Mobile')
+    # ISSUE #52 (قرار 9 في #46) — النوع مشتقٌّ من الحقلين معاً، لا حقل حالة
+    # ثالث: انظر `client_type` تحت. مرآة `PracticeClient.engagement/managed_tenant`.
+    engagement = models.ForeignKey(
+        'accountant_portal.AccountantEngagement', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='partner_clients',
+        db_column='AccountantEngagementID',
+        help_text='ارتباط مكتب محاسبة بشركة هذا الطرف على المنصة — بإذنها.',
+    )
+    managed_tenant = models.ForeignKey(
+        'tenants.Tenant', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='managed_by_partner_clients', db_column='ManagedTenantID',
+        help_text='دفترٌ مُدار يملكه مكتب محاسبة لهذا الطرف (`Tenant.managed_by`).',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 
     class Meta:
@@ -120,6 +144,20 @@ class Partner(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def client_type(self) -> str:
+        """نوع زبون مكتب المحاسبة — مشتقٌّ من `managed_tenant`/`engagement` فقط
+        (مرآة `accountant_portal.models.PracticeClient.client_type` قبل ISSUE #86)."""
+        has_managed = self.managed_tenant_id is not None
+        has_engagement = self.engagement_id is not None
+        if has_managed and has_engagement:
+            return 'hybrid'
+        if has_managed:
+            return 'managed'
+        if has_engagement:
+            return 'engaged'
+        return 'unlinked'
 
 
 class CustomerNote(models.Model):

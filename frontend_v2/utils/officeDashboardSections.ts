@@ -15,7 +15,8 @@ export type OfficeClientBookType = 'managed' | 'engaged' | 'hybrid' | 'unlinked'
 export interface OfficeDashboardClientRow {
   id: number;
   trade_name: string;
-  status: 'active' | 'archived';
+  /** ISSUE #86: `Partner` لا يحمل مفهوم أرشفة — دوماً «نشط». */
+  status: 'active';
   client_type: OfficeClientBookType;
   last_activity: string;
 }
@@ -27,8 +28,8 @@ export interface OfficeDashboardDeadlineItem {
   kind: 'program' | 'appointment' | 'deadline' | 'filing';
   id: number | null;
   title: string;
-  client_id: number | null;
-  client_name: string;
+  partner_id: number | null;
+  partner_name: string;
   tenant_id: number | null;
   due_date: string;
   status: string;

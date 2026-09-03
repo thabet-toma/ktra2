@@ -21,7 +21,7 @@ const payload: OfficeDashboardPayload = {
     { id: 1, trade_name: 'أ', status: 'active', client_type: 'managed', last_activity: '2026-09-01' },
     { id: 2, trade_name: 'ب', status: 'active', client_type: 'engaged', last_activity: '2026-09-01' },
     { id: 3, trade_name: 'ج', status: 'active', client_type: 'engaged', last_activity: '2026-09-01' },
-    { id: 4, trade_name: 'د', status: 'archived', client_type: 'unlinked', last_activity: '2026-08-01' },
+    { id: 4, trade_name: 'د', status: 'active', client_type: 'unlinked', last_activity: '2026-08-01' },
   ],
   deadlines: { items: [], totals: { count: 5, overdue: 2, due_soon: 1 } },
   unpaid_fees: {

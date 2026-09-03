@@ -7,6 +7,9 @@
 قاعدة الأداء (§الأداء): عدد الاستعلامات لا يكبر بعدد العملاء — مكتبٌ بستّين
 عميلاً يقع في نفس عطب «الكرت المجمّع» (30 ثانية على 1490 صنفاً) إن كُتبت
 اللوحة صفّاً صفّاً.
+
+ISSUE #86: عملاء المكتب صاروا أطراف شركة المكتب (`partners.Partner`) — كل
+عميلٍ هنا صفٌّ في `Partner` بـ`tenant=` شركة المكتب نفسها، لا `PracticeClient`.
 """
 from datetime import date
 from decimal import Decimal
@@ -17,7 +20,7 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient, APITestCase
 
-from accountant_portal.models import AccountantEngagement, AccountantProfile, PracticeClient
+from accountant_portal.models import AccountantEngagement, AccountantProfile
 from partners.models import Partner
 from sales.models import SalesInvoice
 from tenants.models import Currency, UserCompanyMembership
@@ -37,6 +40,10 @@ def make_office(username, tax_number):
     return user
 
 
+def make_client(tenant, name, **extra):
+    return Partner.objects.create(tenant=tenant, partner_type="Customer", name=name, **extra)
+
+
 def api_for(user):
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=user).key}")
@@ -45,7 +52,7 @@ def api_for(user):
 
 def _fee_invoice(tenant, currency, number, *, grand_total, amount_paid=Decimal("0")):
     customer = Partner.objects.create(
-        tenant=tenant, name=f"زبون أتعاب {number}", partner_type="customer",
+        tenant=tenant, name=f"زبون أتعاب {number}", partner_type="Customer",
     )
     return SalesInvoice.objects.create(
         tenant=tenant,
@@ -74,9 +81,9 @@ class PracticeDashboardQueryCountTest(APITestCase):
         cls.office_manager = make_office("office-58-scale", "TAX-58-SCALE")
         cls.office = create_company("مكتب المحاسبة ٥٨", cls.office_manager)
         for i in range(3):
-            PracticeClient.objects.create(
-                accountant=cls.office_manager, trade_name=f"زبون {i}",
-            )
+            make_client(cls.office, f"زبون {i}")
+        # ISSUE #86: عميل الفاتورة نفسه طرفٌ في نفس شركة المكتب فيُحتسَب زبوناً —
+        # هذا هو الاندماج المقصود، فيدخل في عدّ «الزبائن» أيضاً (+1).
         _fee_invoice(cls.office, cls.currency, "FEE-1", grand_total=Decimal("500.00"))
 
     def setUp(self):
@@ -87,17 +94,16 @@ class PracticeDashboardQueryCountTest(APITestCase):
         with CaptureQueriesContext(connection) as small:
             small_response = self.api.get(BASE)
         self.assertEqual(small_response.status_code, 200, small_response.content)
-        self.assertEqual(len(small_response.json()["clients"]), 3)
+        # +1: عميل فاتورة الأتعاب طرفٌ في الشركة نفسها فيُحسَب زبوناً (انظر الملاحظة أعلاه).
+        self.assertEqual(len(small_response.json()["clients"]), 4)
 
         for i in range(3, 60):
-            PracticeClient.objects.create(
-                accountant=self.office_manager, trade_name=f"زبون {i}",
-            )
+            make_client(self.office, f"زبون {i}")
 
         with CaptureQueriesContext(connection) as big:
             big_response = self.api.get(BASE)
         self.assertEqual(big_response.status_code, 200, big_response.content)
-        self.assertEqual(len(big_response.json()["clients"]), 60)
+        self.assertEqual(len(big_response.json()["clients"]), 61)
 
         self.assertEqual(
             len(big.captured_queries), len(small.captured_queries),
@@ -112,11 +118,13 @@ class PracticeDashboardIsolationTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
         cls.office_a = make_office("office-58-a", "TAX-58-A")
+        cls.tenant_a = create_company("مكتب أ ٥٨", cls.office_a)
         cls.office_b = make_office("office-58-b", "TAX-58-B")
+        cls.tenant_b = create_company("مكتب ب ٥٨", cls.office_b)
         for i in range(60):
-            PracticeClient.objects.create(accountant=cls.office_a, trade_name=f"زبون أ {i}")
+            make_client(cls.tenant_a, f"زبون أ {i}")
         for i in range(3):
-            PracticeClient.objects.create(accountant=cls.office_b, trade_name=f"زبون ب {i}")
+            make_client(cls.tenant_b, f"زبون ب {i}")
 
     def test_each_office_sees_only_its_own_client_count(self):
         response_a = api_for(self.office_a).get(BASE)
@@ -146,20 +154,14 @@ class PracticeDashboardContentTest(APITestCase):
         cls.managed_book = create_company(
             "دفتر عميل مُدار ٥٨", cls.office_manager, managed_by=cls.office,
         )
-        cls.unlinked_client = PracticeClient.objects.create(
-            accountant=cls.office_manager, trade_name="زبون خارجي",
-        )
-        cls.managed_client = PracticeClient.objects.create(
-            accountant=cls.office_manager, trade_name="زبون مُدار", managed_tenant=cls.managed_book,
-        )
+        cls.unlinked_client = make_client(cls.office, "زبون خارجي")
+        cls.managed_client = make_client(cls.office, "زبون مُدار", managed_tenant=cls.managed_book)
         other_company = create_company("شركة مرتبطة ٥٨", cls.office_manager)
         cls.engagement = AccountantEngagement.objects.create(
             accountant=cls.office_manager, tenant=other_company,
             status="active", initiated_by="accountant",
         )
-        cls.engaged_client = PracticeClient.objects.create(
-            accountant=cls.office_manager, trade_name="زبون مرتبط", engagement=cls.engagement,
-        )
+        cls.engaged_client = make_client(cls.office, "زبون مرتبط", engagement=cls.engagement)
         # أتعاب في دفتر المكتب نفسه — غير محصّلة جزئياً.
         _fee_invoice(cls.office, cls.currency, "FEE-58-1", grand_total=Decimal("500.00"),
                      amount_paid=Decimal("200.00"))
@@ -206,16 +208,12 @@ class PracticeDashboardStaffAccessTest(APITestCase):
             for i in range(3)
         ]
         cls.managed_clients = [
-            PracticeClient.objects.create(
-                accountant=cls.office_manager, trade_name=f"زبون مُدار {i}",
-                managed_tenant=cls.managed_books[i],
-            )
+            make_client(cls.office, f"زبون مُدار {i}", managed_tenant=cls.managed_books[i])
             for i in range(3)
         ]
         # ثلاثة زبائن بلا دفترٍ مُدار — لا سبيل لإسنادهم لموظف عبر عضوية دفتر.
         cls.unlinked_clients = [
-            PracticeClient.objects.create(accountant=cls.office_manager, trade_name=f"زبون خارجي {i}")
-            for i in range(3)
+            make_client(cls.office, f"زبون خارجي {i}") for i in range(3)
         ]
 
         cls.staff = User.objects.create_user("office-58-staff", email="staff58@example.com")
@@ -276,9 +274,7 @@ class PracticeDashboardStaffAccessTest(APITestCase):
             for i in range(7)
         ]
         for i, book in enumerate(extra_books):
-            PracticeClient.objects.create(
-                accountant=self.office_manager, trade_name=f"زبون إضافي {i}", managed_tenant=book,
-            )
+            make_client(self.office, f"زبون إضافي {i}", managed_tenant=book)
             UserCompanyMembership.objects.create(user=self.staff, tenant=book, role="staff")
 
         with CaptureQueriesContext(connection) as big:

@@ -45,6 +45,54 @@
 مُضافة كتبويب في `OfficeExternalClientPage.tsx`) لا من بوابةٍ منفصلة — أيّ دفترٍ
 يُستعمل يحسمه `frontend_v2/utils/clientBookAccess.ts` (المُدار يفوز عند التعارض).
 
+**ISSUE #86 — «مكانٌ واحد»:** `PracticeClient` **مجمَّدٌ للكتابة**. زبون المكتب صار
+`partners.Partner` نفسه داخل شركة مكتب المحاسب (`office_tenant_id`) — لا سجلّ
+منفصل، وفاتورة أتعابه فاتورة بيع عادية بمحاسبتها الكاملة (#46/#11). `Partner`
+اكتسب `sector`/`mobile` (الحقلان البنيويّان الوحيدان اللذان كان `PracticeClient`
+يحملهما ولا يحملهما) و`engagement`/`managed_tenant` (مراجع نصّية — لا استيراد
+فعلي من `partners` إلى `accountant_portal`) مع `client_type` مشتقّاً بنفس منطق
+ISSUE #52 (القرار 9 في #46). `PracticeProgram`/`PracticeTask`/`PracticeDocument`
+بقيت نماذجها كما هي، مضافاً إليها `partner` (الحقل الحيّ) بجانب `client` (مجمَّدٌ
+للكتابة — صفٌّ تاريخي يبقى مقروءاً في مسار السقوط تحت). أمر
+`migrate_practice_clients_to_partners` (idempotent، `--dry-run`، لا حذف) ينقل
+زبائن كل محاسبٍ له مكتب (نتيجة ISSUE #55) إلى أطراف شركته، بعلامتَي `CustomerNote`
+منفصلتَين: `MIGRATION_MARKER_TARGET_TYPE` (`'practice_client_migration'`، تمنع
+التكرار وتحفظ نصّاً تاريخياً — جهة الاتصال والحالة والملاحظات) و
+`PROFILE_NOTE_TARGET_TYPE` (`'practice_client_profile'`، JSON حيٌّ يقرؤه
+ويكتبه `practice.py` كأي زبونٍ عادي). موعد حذف `PracticeClient` نفسه موثَّقٌ في
+`docs/decisions/practice_client_retirement.md` — لا حذف قبل دورة ضريبية كاملة
+من نجاح الأمر على الإنتاج.
+
+**مراجعة 2 (نفس اليوم) — قراءةٌ انتقالية بلا فقد شاشة:** المراجعة الأولى جعلت
+محاسباً لم يُرحَّل بعد (أو تعثّر ترحيله، أو أضاف له `migrate_accountant_offices`
+زبوناً جديداً بعد ترحيله) يفتح «زبائني» خاويةً رغم بياناتٍ سليمة في القاعدة —
+خرقٌ لقيدٍ منصوص: «محاسبٌ تعثّر ترحيله يبقى على سطحه القديم». `list_office_partners`
+الآن **تدمج** أطراف شركة المكتب مع كل `PracticeClient` لم يُرحَّل بعد
+(`_unmigrated_practice_clients` — علامة `MIGRATION_MARKER_TARGET_TYPE` وحدها
+تقرّر، لا «هل القائمة فارغة»)، بمعرّفٍ **سالبٍ** عمداً (`_legacy_client_payload`)
+لا يتقاطع أبداً مع معرّف `Partner` الموجب — فكتابةٌ عليه (`get_office_partner`
+الصارمة، ومسارات PATCH كلها) تُخفق بأمان 404 بدل أن تصيب صفّاً خطأً أو تكتب على
+`PracticeClient`. `get_office_client_view` وحدها تفهم المعرّف السالب للقراءة
+(`GET .../clients/{id}/`)؛ الكتابة تبقى صارمةً موجبة الطرف حصراً. `PracticeProgram`/
+`Task`/`Document` تعرض `partner_id`/`partner_name` بنفس القاعدة (`_client_ref`) —
+صفٌّ قديمٌ لم يُرحَّل يعرض اسم زبونه من `client.trade_name` لا فراغاً، وتصفيته
+بمعرّفه السالب تعمل (`_filter_by_client_ref`). عناوين `<int:client_id>` تحوّلت
+`<str:client_id>` في `urls.py` (محوّل `int` القياسي يرفض إشارة السالب).
+
+**مراجعة 2 أيضاً — الأرشفة وجهة الاتصال عادتا:** المراجعة الأولى حذفت أرشفة
+زبون المكتب و`contact_first`/`contact_last`/`notes` بلا إذنٍ من التذكرة.
+الأرشفة صارت `PracticeClientArchive` (جدولٌ صغير `(accountant, partner)` — حالة
+**طبقة المكتب** لا الطرف، فـ`Partner` نفسه يبقى فاعلاً في كل مكانٍ آخر يستعمله).
+جهة الاتصال والملاحظات تعيش في `CustomerNote` بـ`target_type=PROFILE_NOTE_TARGET_TYPE`
+(JSON محدَّثٌ في مكانه، لا حقل بنيويّ جديد على `Partner`) — `_load_profile_notes`/
+`_save_profile_note`، باستعلامٍ مجمَّعٍ واحد لكل قائمة لا استعلامٍ لكل صفّ.
+`PracticeClientListView`/`DetailView` صارا يقرآن/يكتبان `Partner` (عبر
+`list_office_partners`/`get_office_client_view`/`create_office_partner`/
+`update_office_partner`)، والربط بارتباطٍ على المنصة أو بدفترٍ مُدار في
+`PracticeClientLinkView` وحدها (`PATCH .../clients/{id}/link/`) — فعلٌ حسّاس
+مستقلّ عن تعديل بيانات الاتصال. `PracticeClientDetailView.delete`/
+`PracticeClientRestoreView` عادتا (`archive_office_partner`/`restore_office_partner`).
+
 ## أهم الملفات
 
 | الملف | الغرض | أسطر |
@@ -60,6 +108,7 @@
 | `accountant_portal/guards.py` | حارس قفل الفترة المسجَّل في `core.hooks` | 52 |
 | `accountant_portal/audit.py` | أكواد التدقيق المسموحة وكتابتها | 36 |
 | `accountant_portal/management/commands/migrate_accountant_offices.py` | ISSUE #55 — ترحيل idempotent: مكتب `accounting_firm` لكل محاسبٍ بلا مكتب، وربط كل `AccountantEngagement` نشط بزبون `PracticeClient` («مربوطٌ بإذنه») | 158 |
+| `accountant_portal/management/commands/migrate_practice_clients_to_partners.py` | ISSUE #86 — ترحيل idempotent ثانٍ (بعد #55): كل `PracticeClient` تابعٍ لمحاسبٍ له مكتب ينتقل إلى `partners.Partner` داخل شركته، وتُربط برامجه/مواعيده/مستنداته بالطرف الجديد؛ لا حذف، لا كتابة على `PracticeClient` | 190 |
 
 ## الـModels
 
@@ -70,10 +119,11 @@
 | `PortalSettings` | `require_reauth_for_sensitive`، `reauth_window_minutes`، `allow_grant_cost_view`، `invitation_expiry_days`، `max_active_engagements`، `lock_blocks_posting`، `default_grant_profile`، `filing_due_days`، `allow_accountant_reopen`، `export_formats` | `tenant` OneToOne |
 | `TaxPeriodReview` | `period_from/to`، `status` (in_review/needs_company_action/ready/approved/submitted/locked)، `submission_reference`، `locked_at`، `reopen_count` | `tenant`، `vat_statement` OneToOne → `sales.VatStatement`؛ `UniqueConstraint(tenant, period_from, period_to)` |
 | `ReviewQuery` | `entity_type`/`entity_id`، `severity` (blocker/warning/info)، `status` (open/answered/resolved/withdrawn)، `title`، `body`، `answer_body` | `tenant`، `engagement`، `period_review` (SET_NULL) |
-| `PracticeClient` | `trade_name` (إلزامي)، بيانات الاتصال والعنوان، `sector`، `tax_number`، `status` (active/archived)، `client_type` (property مشتقّة: managed/engaged/hybrid/unlinked) | `accountant` (PROTECT)، `engagement` (SET_NULL — اختياري، ولمالكه وحده)، `managed_tenant` (SET_NULL — اختياري، دفترٌ مُدار يملكه مكتب هذا المحاسب — ISSUE #52)؛ `UniqueConstraint(accountant, trade_name)` |
-| `PracticeProgram` | `service_type`، `frequency` (annual/monthly/once)، `team_note`، `due_date`، `status` (planned/in_progress/done) — و«متأخر» **مشتقّ من التاريخ لا حالة مخزَّنة** | `accountant`، `client` (CASCADE)؛ **بلا `tenant`** |
-| `PracticeTask` | `title`، `due_at`، `kind` (appointment/deadline)، `status` (open/done) | `accountant`، `client` (اختياري)؛ **بلا `tenant`** |
-| `PracticeDocument` | `name`، `url`، `uploaded_at` | `accountant`، `client`، `program` (اختياري)؛ **بلا `tenant`** |
+| `PracticeClient` **(مجمَّدٌ للكتابة — ISSUE #86)** | `trade_name` (إلزامي)، بيانات الاتصال والعنوان، `sector`، `tax_number`، `status` (active/archived)، `client_type` (property مشتقّة: managed/engaged/hybrid/unlinked) | `accountant` (PROTECT)، `engagement` (SET_NULL)، `managed_tenant` (SET_NULL)؛ `UniqueConstraint(accountant, trade_name)` — **قراءةٌ فقط** عبر مسار السقوط (`_unmigrated_practice_clients`) لكل صفٍّ بلا علامة نقل، وبلا كتابةٍ جديدة أبداً؛ انظر `docs/decisions/practice_client_retirement.md` |
+| `PracticeClientArchive` **(جديد — مراجعة 2 من ISSUE #86)** | `archived_at` | `accountant` (CASCADE)، `partner` (CASCADE)؛ `UniqueConstraint(accountant, partner)` — وجود الصفّ = مؤرشف؛ حالة **طبقة المكتب** لا الطرف |
+| `PracticeProgram` | `service_type`، `frequency` (annual/monthly/once)، `team_note`، `due_date`، `status` (planned/in_progress/done) — و«متأخر» **مشتقّ من التاريخ لا حالة مخزَّنة** | `accountant`، `partner` (CASCADE، اختياري — الحقل الحيّ)، `client` (CASCADE، اختياري، مجمَّد)؛ **بلا `tenant`** |
+| `PracticeTask` | `title`، `due_at`، `kind` (appointment/deadline)، `status` (open/done) | `accountant`، `partner` (SET_NULL، اختياري — الحقل الحيّ)، `client` (SET_NULL، اختياري، مجمَّد)؛ **بلا `tenant`** |
+| `PracticeDocument` | `name`، `url`، `uploaded_at` | `accountant`، `partner` (CASCADE، اختياري — الحقل الحيّ)، `client` (CASCADE، اختياري، مجمَّد)، `program` (اختياري)؛ **بلا `tenant`** |
 | `PracticeSettings` | `default_program_due_days` (15)، `service_types` (JSON — أربعة أنواع عربية افتراضاً) | `profile` OneToOne → `AccountantProfile`؛ الصفّ كسول وغيابه = الافتراضات كاملةً |
 
 ## دوال الـservices العامة
@@ -124,21 +174,24 @@ def update_portal_settings(*, tenant, actor, data)  # لمدير الشركة و
 # التوقيعات فقط — منسوخة حرفياً من accountant_portal/practice.py
 def get_practice_settings(accountant)    # get_or_create كسول — الغياب = الافتراضات
 def update_practice_settings(*, accountant, data)
-def list_practice_clients(*, accountant, status=None, search=None)
-def get_practice_client(*, accountant, client_id)   # صفّ محاسبٍ آخر ⇒ 404 «غير موجود»
-def create_practice_client(*, accountant, data)     # trade_name إلزامي وفريد لكل محاسب
-def update_practice_client(*, accountant, client_id, data)
-def archive_practice_client(*, accountant, client_id)   # الحذف أرشفة دائماً
-def restore_practice_client(*, accountant, client_id)
-def list_practice_programs(*, accountant, client_id=None, status=None)
+def office_tenant_id(accountant)   # شركة مكتب هذا المحاسب أو None — لم يُرحَّل بعد (ISSUE #55)
+def list_office_partners(*, accountant, search=None, status=None)   # ISSUE #86 — أطراف مُرحَّلة + PracticeClient لم يُرحَّل بعد (سقوط قراءة)
+def get_office_partner(*, accountant, partner_id)   # صارمة: Partner فقط، معرّفٌ موجبٌ فقط — تُستعمل في كل كتابة
+def get_office_client_view(*, accountant, client_id)   # عرضٌ للقراءة وحدها — يفهم المعرّف السالب (زبونٌ لم يُرحَّل)
+def create_office_partner(*, accountant, data)     # trade_name إلزامي؛ 409 بلا شركة مكتب؛ يعيد حمولة جاهزة
+def update_office_partner(*, accountant, partner_id, data)   # صارمة كـget_office_partner
+def link_office_partner(*, accountant, partner_id, data)   # engagement_id/managed_tenant_id وحدهما — فعلٌ حسّاس مستقلّ
+def archive_office_partner(*, accountant, partner_id)   # PracticeClientArchive — حالة طبقة المكتب لا الطرف
+def restore_office_partner(*, accountant, partner_id)
+def list_practice_programs(*, accountant, partner_id=None, status=None)
 def create_practice_program(*, accountant, data, today=None)   # نوع الخدمة من PracticeSettings
 def update_practice_program(*, accountant, program_id, data)
 def delete_practice_program(*, accountant, program_id)
-def list_practice_tasks(*, accountant, client_id=None, status=None)
+def list_practice_tasks(*, accountant, partner_id=None, status=None)
 def create_practice_task(*, accountant, data)
 def update_practice_task(*, accountant, task_id, data)
 def delete_practice_task(*, accountant, task_id)
-def list_practice_documents(*, accountant, client_id=None, program_id=None)
+def list_practice_documents(*, accountant, partner_id=None, program_id=None)
 def create_practice_document(*, accountant, data)
 def delete_practice_document(*, accountant, document_id)
 def practice_deadlines(*, accountant, today=None)   # برامج المكتب ومواعيده + مواعيد إقرارات الشركات المرتبطة
@@ -163,7 +216,7 @@ def staff_practice_dashboard(*, staff, today=None)  # ISSUE #58 (القرار 7)
 | PATCH | `/api/accountant/company/engagements/{id}/scope/` | `CompanyScopeView` |
 | GET/PATCH | `/api/accountant/company/settings/` | `CompanyPortalSettingsView` |
 | GET | `/api/accountant/practice/overview/` | `PracticeOverviewView` |
-| GET/POST | `/api/accountant/practice/clients/` · GET/PATCH/DELETE `clients/{id}/` · POST `clients/{id}/restore/` | `practice_views.PracticeClient*` — الحذف **أرشفة** لا إزالة |
+| GET/POST | `/api/accountant/practice/clients/` · GET/PATCH/DELETE `clients/{id}/` · POST `clients/{id}/restore/` · PATCH `clients/{id}/link/` | `practice_views.PracticeClient*` — ISSUE #86: الزبون `partners.Partner` داخل شركة المكتب؛ الحذف **أرشفة** (`PracticeClientArchive`) لا إزالة؛ `link/` وحدها تعدّل `engagement_id`/`managed_tenant_id` (فعلٌ حسّاس)؛ `GET clients/{id}/` يفهم معرّفاً سالباً (زبونٌ لم يُرحَّل بعد، قراءةٌ فقط)؛ المسار `<str:client_id>` لا `<int:>` لأجل ذلك |
 | GET/POST | `practice/programs/` · PATCH/DELETE `programs/{id}/` | `practice_views.PracticeProgram*` |
 | GET/POST | `practice/tasks/` · PATCH/DELETE `tasks/{id}/` | `practice_views.PracticeTask*` |
 | GET | `practice/documents/` · POST `documents/upload/` (multipart) · DELETE `documents/{id}/` | `practice_views.PracticeDocument*` — الرفع عبر `core.media_views.upload_media_file` المشتركة وبحصّة `media_upload` نفسها |
@@ -191,8 +244,8 @@ def staff_practice_dashboard(*, staff, today=None)  # ISSUE #58 (القرار 7)
 
 ## الاعتماديات
 
-**يعتمد على:** `core` — `permission_keys`/`require_perm`/`user_tenant_role` (`services.py`، `views.py`)، `guard_module_surface`/`require_module`/`module_enabled` (`views.py`)، `log_activity` (`services.py`)، `core.hooks.register_tax_period_guard` (`guards.py`) · `tenants` — نماذج `MemberPermission`/`UserCompanyMembership` مباشرةً (`services.py`) · `accounting` — `AccountingAuditLog` (`audit.py`)، `JournalLine` قراءةً، و`vat_period_totals` (issue #79: مصدر أرقام الضريبة الوحيد في `client_financial_summary`، `services.py`) · `sales` — `build_vat_statement` (`services.py`) و`SalesInvoice` قراءةً (`services.py`).
-طبقة المكتب لا تعتمد على `accounting` ولا `inventory` إطلاقاً — `practice.py` لا يستورد منهما شيئاً.
+**يعتمد على:** `core` — `permission_keys`/`require_perm`/`user_tenant_role` (`services.py`، `views.py`)، `guard_module_surface`/`require_module`/`module_enabled` (`views.py`)، `log_activity` (`services.py`)، `core.hooks.register_tax_period_guard` (`guards.py`) · `tenants` — نماذج `MemberPermission`/`UserCompanyMembership` مباشرةً (`services.py`) · `accounting` — `AccountingAuditLog` (`audit.py`)، `JournalLine` قراءةً، و`vat_period_totals` (issue #79: مصدر أرقام الضريبة الوحيد في `client_financial_summary`، `services.py`) · `sales` — `build_vat_statement` (`services.py`) و`SalesInvoice` قراءةً (`services.py`) و`SalesInvoice` قراءةً في `practice.py` (`_unpaid_fee_invoices`، ISSUE #58) · `partners` — **models** فقط (`Partner`، `CustomerNote` — ISSUE #86، `practice.py`): زبون المكتب صار طرفاً، فقراءته وكتابته تمرّان بنموذج `Partner` مباشرةً؛ لا استيراد لـ`partners.serializers`/`views` (محرَّمةٌ عبر `.importlinter`).
+طبقة المكتب لا تعتمد على `accounting` ولا `inventory` إطلاقاً — `practice.py` لا يستورد منهما شيئاً؛ اعتمادها الوحيد خارج `core`/`tenants` هو `partners.models` (زبونها، ISSUE #86) و`sales.models.SalesInvoice` (الأتعاب غير المحصّلة، ISSUE #58).
 
 **يعتمد عليه:** `core/tenant_utils.py` (فحص الارتباط النشط)، `core/permissions.py` و`core/access.py` و`core/permissions_api.py` (تنقية الصلاحيات المحرّمة)، `core/platform_admin_api.py`، و`hr/views.py` + `hr/payroll_api.py` + `hr/auth_api.py`.
 
@@ -205,8 +258,9 @@ def staff_practice_dashboard(*, staff, today=None)  # ISSUE #58 (القرار 7)
 - **`/api/inventory/` و`/api/hr/` و`/api/logistics/` محجوبة** عن المحاسب (`permissions.py` (`_RESTRICTED_ROUTE_PREFIXES`))، وكل كتابة له خارج `/api/accountant/` مرفوضة (`core/permissions.py`).
 - **حارس انتهاء الاشتراك يُستدعى يدوياً هنا**: مسارات الوحدة تعلن `permission_classes = [IsAuthenticated]` فلا يمرّ بها `TenantRolePermission` — ومعه يغيب منعُ الكتابة على شركةٍ انتهى اشتراكها. تُستدعى `core/permissions.py` (`require_active_subscription`) في `views.py` (`TenantScopedView.tenant_for`) و(`CompanyPortalSettingsView._tenant`). أي مسار جديد يحلّ شركةً بنفسه دونهما يفتح الباب الخلفي من جديد.
 - **رمز الدعوة لا يُخزَّن خاماً** — sha256 فقط، ويُستهلك مرة واحدة تحت `select_for_update` (`services.py` (`accept_company_invitation`)).
-- **دفاتر الزبون قراءة فقط** — لا مسار كتابة على مستندات الشركة في هذه الوحدة (`views.py` — `ClientDocumentsView` وأخواتها). وطبقة المكتب **لا تنقض هذه القاعدة**: ما يكتبه المحاسب هناك بياناتُ مكتبه هو (زبائنه وبرامجه ومواعيده ومستنداته)، لا بيانات الشركة — ولا جدول من جداول المكتب يحمل مفتاحاً إلى `Tenant`.
-- **نطاق طبقة المكتب `accountant=` لا `tenant=`** — كل استعلام في `practice.py` يبدأ به، وصفُّ مكتبٍ آخر يعود **404 «غير موجود»** لا 403 (`practice.py`): ردُّ «ممنوع» يُقرّ بوجود ما يخفيه. ومسارات المكتب هوياتية فلا تحتاج `X-Tenant-Id`.
+- **دفاتر الزبون قراءة فقط** — لا مسار كتابة على مستندات الشركة في هذه الوحدة (`views.py` — `ClientDocumentsView` وأخواتها). وطبقة المكتب **لا تنقض هذه القاعدة**: ما يكتبه المحاسب هناك بياناتُ مكتبه هو (زبائنه وبرامجه ومواعيده ومستنداته)، لا بيانات الشركة. `PracticeProgram`/`PracticeTask`/`PracticeDocument`/`PracticeSettings` بلا `tenant`؛ زبون المكتب وحده (`Partner`، ISSUE #86) يحمله عمداً — هو **داخل شركة المكتب نفسها**، لا شركة زبونٍ حقيقي.
+- **نطاق طبقة المكتب `accountant=` لا `tenant=`** — كل استعلام على `PracticeProgram`/`PracticeTask`/`PracticeDocument`/`PracticeSettings` في `practice.py` يبدأ به، وصفُّ مكتبٍ آخر يعود **404 «غير موجود»** لا 403 (`practice.py`): ردُّ «ممنوع» يُقرّ بوجود ما يخفيه. ومسارات المكتب هوياتية فلا تحتاج `X-Tenant-Id`. **الزبون وحده استثناء (ISSUE #86)**: `Partner` يحمل `tenant=` (شركة المكتب)، والعزل عنده `tenant=office_tenant_id(accountant)` بدل `accountant=` مباشرةً — نفس فلسفة «غير موجود» لا «ممنوع»، ونفس غياب `X-Tenant-Id` من الطلب (الخادم يحسم شركة المكتب من هوية المحاسب لا من ترويسة العميل).
+- **القراءة الانتقالية تسقط، والكتابة لا** (مراجعة 2 من ISSUE #86): زبونٌ لم يُرحَّل بعد (`_unmigrated_practice_clients`) يظهر في `list_office_partners`/`get_office_client_view` بمعرّفٍ **سالبٍ**، فكل مسار كتابة (`get_office_partner`، `update_office_partner`، `link_office_partner`، إنشاء برنامج/موعد/مستند بـ`partner_id`) يرفضه 404 بأمان — معرّف Partner لا يكون سالباً أبداً. لا سطرٌ يكتب على `PracticeClient` من أي دالةٍ في هذا المسار. المسارات `<str:client_id>` لا `<int:>` في `urls.py` لهذا السبب وحده.
 - **`settings.ACCOUNTANT_PRACTICE_ENABLED` مُطفأً يجعل كل مسار مكتب 404** — الحارس في `initial` واحدة قبل المصادقة وقبل وجود `AccountantProfile` (`practice_views.py`).
 - **البوابة الهوياتية (`AccountantProfile` إلزامي) مُخفَّفة على `practice/dashboard/` وحده** (ISSUE #58، القرار 7): `PracticeDashboardView` لا يرث `PracticeView`، بل يعيد تطبيق فحص العَلَم وحده ثم يفرّق داخل `get()` — موظفٌ بلا ملف مهني يرى `staff_practice_dashboard` (`practice.py`) بدل 404. الإسناد بعضوية `UserCompanyMembership` على `PracticeClient.managed_tenant` نفسه — **لا حقل تعيين ثالث** — وزبونٌ بلا دفتر مُدار لا سبيل لإسناده هكذا فيبقى لصاحب المكتب وحده. أي مسار جديد تحت `practice_views.py` يجب أن يرث `PracticeView` كسائر السطح لا هذا الاستثناء.
 - **الفترة المقدَّمة مقفلة نهائياً**: `submit_tax_period` يضع `locked`، وإعادة الفتح ترفض `submitted`/`locked` (`services.py` (`reopen_tax_period`))، وحارس `guards.py` (`tax_period_lock_guard`) يمنع أي ترحيل بتاريخ داخلها ما لم تُطفئ الشركة `lock_blocks_posting`.
@@ -228,8 +282,9 @@ def staff_practice_dashboard(*, staff, today=None)  # ISSUE #58 (القرار 7)
 | `tests/test_m5_periods.py` (505) | دورة الفترة الضريبية، فحوص الجاهزية، حارس القفل، تفاعل الفترة مع الطلبات |
 | `tests/test_m7_hardening.py` (188) | حجب الأسرار عن السجلات، حقن الأسطر، منع التعديل عبر مسار بديل، تدقيق كل فعل حسّاس |
 | `tests/test_office_client_files.py` (263) | ملف الزبون قراءةً فقط: فواتير، مصاريف، ملخص، بيانات مالية، لوحة المكتب |
-| `tests/test_practice_clients.py` (435) | طبقة المكتب على مستوى الخدمات: عزل المحاسبين، رفض ربط ارتباط ليس للمحاسب، الأرشفة بدل الحذف، كسل `PracticeSettings` |
-| `tests/test_practice_api.py` (394) | الطبقة نفسها فوق HTTP: الدورة الكاملة لكل كيان، و**404** لمحاسبٍ على صفّ غيره في كل فعل، والرفع مموّهاً، والعَلَم مُطفأً ⇒ 404 على كل المسارات |
+| `tests/test_practice_clients.py` | طبقة المكتب على مستوى الخدمات: زبون المكتب (`Partner`) عزلاً بـ`tenant=office_tenant_id`، 409 بلا شركة مكتب، رفض ربط ارتباط ليس للمحاسب، كسل `PracticeSettings`؛ `PracticeClientArchiveTest` (الأرشفة/الاسترجاع بلا مسّ الطرف)، `PracticeClientProfileFieldsTest` (جهة الاتصال والملاحظات رحلة ذهاب وعود)، `LegacyClientFallbackTest` (مراجعة 2: محاسبٌ غير مُرحَّل يرى زبائنه القدامى بمعرّفٍ سالب، الكتابة عليهم تُرفض، ولا كتابة على `PracticeClient` أبداً) |
+| `tests/test_practice_api.py` | الطبقة نفسها فوق HTTP: الدورة الكاملة لكل كيان (زبون=`Partner`، برامج/مواعيد/مستندات بـ`partner_id`)، أرشفة/استرجاع، جهة الاتصال عبر الشبكة، و**404** لمحاسبٍ على صفّ غيره في كل فعل، مسار `clients/{id}/link/` المنفصل، والرفع مموّهاً، والعَلَم مُطفأً ⇒ 404 على كل المسارات؛ `PracticeLegacyClientFallbackApiTest` (الزبون القديم يظهر بمعرّفٍ سالب فوق HTTP ويُفتح للقراءة وحدها، ولا يظهر لمكتبٍ آخر) |
+| `tests/test_migrate_practice_clients_to_partners.py` | ISSUE #86 — أمر النقل: زبونٌ عاديٌّ ومربوطٌ يُنقلان إلى `Partner` داخل شركة المكتب بعلامتَي `CustomerNote` (تاريخية + ملفّ تعريف حيّ)، البرامج/المواعيد/المستندات تُربط بالطرف الجديد بلا مسّ `client`، محاسبٌ بلا مكتب يُتخطّى لا يُكسَر، الحقول الأضيق تُقصّ لا تسقط، `--dry-run` لا يكتب، وإعادة التشغيل idempotent (تُكمل ربط صفوفٍ أضيفت لاحقاً)، وجهة الاتصال/الملاحظات تُقرأ حيّةً بعد النقل لا نصّاً تاريخياً وحده |
 | `tests/test_mysql_m2_concurrency.py` (72) · `test_mysql_audit.py` (41) | استهلاك الدعوة مرة واحدة تحت تزامن حقيقي، وثبات صفوف التدقيق (MySQL) |
 | `tests/test_demo_workspace.py` (134) · `test_platform_modules.py` (42) | فتح واجهة المحاسب وتبديل ترخيص الوحدة من لوحة المنصة (سوبر أدمن) |
 | `tests/test_client_book_tax_periods.py` | ISSUE #57 — تجهيز/جاهزية/قفل الفترة عبر `X-Tenant-Id` على دفتر عميل مُدار؛ القفل لا يمسّ دفتر المكتب ولا دفتر عميلٍ آخر |

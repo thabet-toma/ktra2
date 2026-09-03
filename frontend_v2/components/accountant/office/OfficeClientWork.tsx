@@ -132,7 +132,7 @@ const ProgramForm: React.FC<{
       const saved = program
         ? (await updatePracticeProgram(program.id, { ...draft, due_date: draft.due_date || null })).program
         : (await createPracticeProgram({
-          client_id: clientId,
+          partner_id: clientId,
           ...draft,
           due_date: draft.due_date || undefined,
         })).program;
@@ -534,7 +534,7 @@ const TaskForm: React.FC<{
         title: title.trim(),
         due_at: dueAt,
         kind,
-        client_id: client ? Number(client) : null,
+        partner_id: client ? Number(client) : null,
       });
       toast('أُضيف الموعد إلى أجندة المكتب.', 'success');
       onSaved();
@@ -665,7 +665,7 @@ export const TasksPanel: React.FC<{
                   </p>
                   <p className={`mt-1 text-xs ${overdueTone(task.is_overdue)}`}>
                     {TASK_KINDS[task.kind]} · {formatDateTimeValue(task.due_at)}
-                    {task.client_name && ` · ${task.client_name}`}
+                    {task.partner_name && ` · ${task.partner_name}`}
                     {task.is_overdue && ' · متأخّر'}
                   </p>
                 </div>

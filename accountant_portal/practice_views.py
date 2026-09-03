@@ -24,9 +24,8 @@ from rest_framework.status import (
 
 from accountant_portal.models import AccountantProfile
 from accountant_portal.practice import (
-    archive_practice_client,
-    client_payload,
-    create_practice_client,
+    archive_office_partner,
+    create_office_partner,
     create_practice_document,
     create_practice_program,
     create_practice_task,
@@ -34,20 +33,22 @@ from accountant_portal.practice import (
     delete_practice_program,
     delete_practice_task,
     document_payload,
-    get_practice_client,
+    get_office_client_view,
+    get_office_partner,
     get_practice_settings,
-    list_practice_clients,
+    link_office_partner,
+    list_office_partners,
     list_practice_documents,
     list_practice_programs,
     list_practice_tasks,
     practice_dashboard,
     practice_deadlines,
     practice_settings_payload,
+    restore_office_partner,
     staff_practice_dashboard,
     program_payload,
-    restore_practice_client,
     task_payload,
-    update_practice_client,
+    update_office_partner,
     update_practice_program,
     update_practice_settings,
     update_practice_task,
@@ -60,7 +61,7 @@ from core.media_views import MediaUploadError, MediaUploadThrottle, upload_media
 #: معرّفات تصل من الجسم لا من المسار، فقد تصل غير رقمية. المعرّف غير الرقمي
 #: «غير موجود» كسائر المعرّفات المفقودة — لا 500 من `filter(pk="abc")`.
 _BODY_ID_KEYS = {
-    "client_id": ("client_not_found", "الزبون غير موجود."),
+    "partner_id": ("client_not_found", "الزبون غير موجود."),
     "program_id": ("program_not_found", "البرنامج غير موجود."),
     "engagement_id": ("engagement_not_found", "الارتباط غير موجود."),
     "managed_tenant_id": ("managed_tenant_not_found", "الدفتر المُدار غير موجود."),
@@ -114,40 +115,56 @@ class PracticeView(PortalAPIView):
 
 
 class PracticeClientListView(PracticeView):
+    """ISSUE #86: زبائن المكتب = أطراف شركة المكتب (`partners.Partner`)، مدموجةً
+    بمن لم يُرحَّل بعد من `PracticeClient` (سقوط قراءةٍ انتقالي — `list_office_partners`)."""
+
     def get(self, request):
-        clients = list_practice_clients(
+        clients = list_office_partners(
             accountant=self.accountant,
-            status=request.query_params.get("status"),
             search=request.query_params.get("search"),
+            status=request.query_params.get("status"),
         )
-        return _collection([client_payload(client) for client in clients])
+        return _collection(clients)
 
     def post(self, request):
-        client = create_practice_client(accountant=self.accountant, data=_payload(request))
-        return Response({"client": client_payload(client)}, status=HTTP_201_CREATED)
+        client = create_office_partner(accountant=self.accountant, data=_payload(request))
+        return Response({"client": client}, status=HTTP_201_CREATED)
 
 
 class PracticeClientDetailView(PracticeView):
+    """GET يفهم المعرّف السالب (زبونٌ قديمٌ — `get_office_client_view`)؛ PATCH
+    صارمةٌ (`update_office_partner`، موجبٌ فقط) — لا كتابة على `PracticeClient`."""
+
     def get(self, request, client_id):
-        client = get_practice_client(accountant=self.accountant, client_id=client_id)
-        return Response({"client": client_payload(client)})
+        return Response({"client": get_office_client_view(accountant=self.accountant, client_id=client_id)})
 
     def patch(self, request, client_id):
-        client = update_practice_client(
-            accountant=self.accountant, client_id=client_id, data=_payload(request),
+        client = update_office_partner(
+            accountant=self.accountant, partner_id=client_id, data=_payload(request),
         )
-        return Response({"client": client_payload(client)})
+        return Response({"client": client})
 
     def delete(self, request, client_id):
-        """الحذف أرشفة — ملف الزبون تاريخٌ مهني لا يُمحى، فيعود الصفّ في الرد."""
-        client = archive_practice_client(accountant=self.accountant, client_id=client_id)
-        return Response({"client": client_payload(client)})
+        """الحذف أرشفة — حالة طبقة المكتب (`PracticeClientArchive`) لا الطرف."""
+        client = archive_office_partner(accountant=self.accountant, partner_id=client_id)
+        return Response({"client": client})
+
+
+class PracticeClientLinkView(PracticeView):
+    """ربط زبونٍ بارتباطٍ على المنصة أو بدفترٍ مُدار — فعلٌ حسّاس مستقلّ عن
+    تعديل بيانات الاتصال، مطابقٌ لتصميم `OfficeClientLinkForm.tsx`."""
+
+    def patch(self, request, client_id):
+        client = link_office_partner(
+            accountant=self.accountant, partner_id=client_id, data=_payload(request),
+        )
+        return Response({"client": client})
 
 
 class PracticeClientRestoreView(PracticeView):
     def post(self, request, client_id):
-        client = restore_practice_client(accountant=self.accountant, client_id=client_id)
-        return Response({"client": client_payload(client)})
+        client = restore_office_partner(accountant=self.accountant, partner_id=client_id)
+        return Response({"client": client})
 
 
 # ── البرامج ──────────────────────────────────────────────────────────────────
@@ -157,7 +174,7 @@ class PracticeProgramListView(PracticeView):
     def get(self, request):
         programs = list_practice_programs(
             accountant=self.accountant,
-            client_id=request.query_params.get("client_id"),
+            partner_id=request.query_params.get("partner_id"),
             status=request.query_params.get("status"),
         )
         return _collection([program_payload(program) for program in programs])
@@ -186,7 +203,7 @@ class PracticeTaskListView(PracticeView):
     def get(self, request):
         tasks = list_practice_tasks(
             accountant=self.accountant,
-            client_id=request.query_params.get("client_id"),
+            partner_id=request.query_params.get("partner_id"),
             status=request.query_params.get("status"),
         )
         return _collection([task_payload(task) for task in tasks])
@@ -215,7 +232,7 @@ class PracticeDocumentListView(PracticeView):
     def get(self, request):
         documents = list_practice_documents(
             accountant=self.accountant,
-            client_id=request.query_params.get("client_id"),
+            partner_id=request.query_params.get("partner_id"),
             program_id=request.query_params.get("program_id"),
         )
         return _collection([document_payload(document) for document in documents])
@@ -234,7 +251,7 @@ class PracticeDocumentUploadView(PracticeView):
         data = _payload(request)
         # العزل يُفحص **قبل** الرفع: كل رفع يقفل worker طوال رفع Cloudinary
         # المتزامن، فلا يُدفع ثمنه لزبون ليس زبونك.
-        client = get_practice_client(accountant=self.accountant, client_id=data.get("client_id"))
+        client = get_office_partner(accountant=self.accountant, partner_id=data.get("partner_id"))
         try:
             # بلا `tenant`: مستند المكتب يملكه المحاسب لا زبونه — وزبون المكتب
             # قد لا يكون شركةً على المنصة أصلاً. نسبُ بايتاته لشركة الزبون
@@ -248,7 +265,7 @@ class PracticeDocumentUploadView(PracticeView):
         document = create_practice_document(
             accountant=self.accountant,
             data={
-                "client_id": client.pk,
+                "partner_id": client.pk,
                 "program_id": data.get("program_id"),
                 "name": str(data.get("name") or "").strip() or getattr(upload, "name", ""),
                 "url": url,

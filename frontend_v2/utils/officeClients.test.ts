@@ -28,13 +28,14 @@ const practiceClient = (over: Partial<PracticeClientRecord> = {}): PracticeClien
   address: '',
   sector: '',
   tax_number: '',
-  status: 'active',
   notes: '',
+  status: 'active',
   engagement_id: null,
   tenant_id: null,
   managed_tenant_id: null,
   client_type: 'unlinked',
   created_at: '2026-08-01T00:00:00Z',
+  legacy: false,
   ...over,
 });
 

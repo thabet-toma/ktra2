@@ -28,7 +28,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 11,800 | 9,700 | `/api/sales/` |
 | `hr` | الموظفون والرواتب والحضور الجغرافي والورديات والعقود والطلبات والسلف والخدمة الذاتية | 7,100 | 3,900 | `/api/hr/` |
 | `inventory` | المنتجات والمستودعات و`StockMovement` (المصدر الوحيد للرصيد ومتوسط التكلفة) والأرقام التسلسلية وحالة المخزون وحدود التجديد | 7,000 | 5,900 | `/api/inventory/` |
-| `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية — وفوقها **طبقة مكتب** بنطاق `accountant=` لا `tenant=`: زبائن المكتب (ولو لم يكونوا شركات على المنصة) وبرامجه ومواعيده ومستنداته | 4,900 | 4,500 | `/api/accountant/` |
+| `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية — وفوقها **طبقة مكتب** بنطاق `accountant=` لا `tenant=`: زبائن المكتب (ولو لم يكونوا شركات على المنصة) وبرامجه ومواعيده ومستنداته | 5,500 | 4,900 | `/api/accountant/` |
 | `tenants` | تعريف الشركة وعزلها: الأعضاء، الأدوار، الفروع، دفاتر الترقيم، إقلاع شركة جديدة | 2,900 | 2,600 | `/api/tenants/` |
 | `docshare` | مشاركة المستند برابط عام: صفحة **بلا مصادقة** يفتحها الزبون **أو المورّد** (‏HTML خادمي بوسوم Open Graph لمعاينة واتساب) + قبول/رفض عرض السعر منها. أربعة عشر نوعاً بجمهورين ومفتاحَي صلاحية | 2,900 | 1,700 | `/s/` · `/api/share/` · `/api/document-shares/` |
 | `after_sales` | بطاقات الكفالة وأوامر الصيانة — **وحدة مرخّصة** | 2,200 | 2,000 | `/api/after-sales/` |
@@ -66,6 +66,13 @@ hr · accountant_portal · after_sales · core  ──►  accounting (+ غير�
 
 **`accounting` هو الـgod module**: مستورد مباشرةً من `sales`, `logistics`, `inventory`, `partners`, `hr`, `tenants`, `accountant_portal`, `core`.
 `sales/models.py` و `logistics/models.py` يستوردان `Account/JournalHeader/TaxRate` كـFKs على مستوى الوحدة — أي تغيير سكيمة يموّج في migrations أربعة apps.
+
+**ISSUE #86:** `accountant_portal` صار يستورد `partners.models.Partner` مباشرةً
+(`accountant_portal/practice.py`) — زبون مكتب المحاسبة صار طرفاً لا سجلّاً
+منفصلاً. الاتجاه يبقى وحيداً: `partners` لا يستورد `accountant_portal` بكود
+حقيقي أبداً — حقلا `Partner.engagement`/`Partner.managed_tenant` مراجع نصّية
+(`'accountant_portal.AccountantEngagement'`) يحلّها جانغو عبر سجلّ الـapps لا
+استيراداً فعلياً، فلا دورة اعتماديات.
 
 ## قواعد عابرة للنظام
 
@@ -153,7 +160,7 @@ API كاملة (404) لقالب شركة بعينه — طرحيّ لا إضاف
 | شركة جديدة / أعضاء / أدوار | `modules/tenants.md` | `tenants/services.py` (`create_company`), `tenants/company_templates.py` (`COMPANY_TEMPLATES`) |
 | صلاحيات | `modules/tenants.md` | `core/access.py` |
 | محاسب خارجي / ارتباطات | `modules/accountant_portal.md` | `accountant_portal/services.py` |
-| مكتب المحاسب: زبائنه وبرامجه ومواعيده | `modules/accountant_portal.md` | `accountant_portal/practice.py` (`list_practice_clients`) |
+| مكتب المحاسب: زبائنه وبرامجه ومواعيده | `modules/accountant_portal.md` | `accountant_portal/practice.py` (`list_office_partners`) |
 | تقارير | `modules/core.md` | `core/reports/` (`run_report`), `core/reports_api.py` |
 | عزل الشركة / حلّ الـtenant | `modules/core.md` + هذا الملف §1 | `core/tenant_utils.py` (`get_tenant`) |
 | صلاحيات / وحدات مرخّصة / كاش | `modules/core.md` | `core/access.py`, `core/modules.py` |
@@ -206,6 +213,7 @@ python -m pytest -q -n auto          # البوابة قبل أي commit (‎~80
 | ~~ملفات عملاقة~~ ✅ عولج (المرحلة 3) — الأربعة الكبرى صارت حزماً | `logistics/views/`, `sales/services/`, `logistics/serializers/`, `core/reports/` | `docs/REFACTOR_PROMPTS.md` مرحلة 3 |
 | ~~اختناقات التوسّع (كاش ملفّي، ترقيم opt-in، فهارس ناقصة)~~ ✅ عولجت (المرحلة 5) — و**قِيست** في المرحلة 6: الاختناق المتبقي **واحد فقط وهو سعة الـworkers لا الكود** | `core/settings.py` | `docs/LOAD_TEST_RESULTS.md` |
 | ~~القاعدة لا تُبنى من الهجرات~~ ✅ عولج 2026-08-12 — انظر الملاحظة أسفل الجدول | `core/models.py` (`SystemAttachment`) | `docs/SCALABILITY_AUDIT.md` (P0-14) |
+| `accountant_portal.PracticeClient` مجمَّدٌ بموعد حذف — زبون المكتب صار `partners.Partner` (ISSUE #86) | `accountant_portal/models.py`، `accountant_portal/management/commands/migrate_practice_clients_to_partners.py` | `docs/decisions/practice_client_retirement.md` |
 
 > ### ✅ البناء من صفر يعمل — وكان مكسوراً حتى 2026-08-12
 > `SystemAttachment` (`core/models.py`) كان معرَّفاً بـ**`managed = False`** —

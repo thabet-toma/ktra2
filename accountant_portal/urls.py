@@ -19,8 +19,11 @@ urlpatterns = [
     path("practice/overview/", views.PracticeOverviewView.as_view(), name="accountant-practice-overview"),
     # سطح مكتب المحاسبة (B2) — خلف `settings.ACCOUNTANT_PRACTICE_ENABLED`.
     path("practice/clients/", practice_views.PracticeClientListView.as_view(), name="practice-clients"),
-    path("practice/clients/<int:client_id>/", practice_views.PracticeClientDetailView.as_view(), name="practice-client-detail"),
-    path("practice/clients/<int:client_id>/restore/", practice_views.PracticeClientRestoreView.as_view(), name="practice-client-restore"),
+    # `<str:>` لا `<int:>` عمداً: زبونٌ قديمٌ لم يُرحَّل بعد يُعرَض بمعرّفٍ سالب
+    # (`get_office_client_view`)، ومحوّل `int` القياسي لا يقبل إشارة السالب.
+    path("practice/clients/<str:client_id>/", practice_views.PracticeClientDetailView.as_view(), name="practice-client-detail"),
+    path("practice/clients/<str:client_id>/link/", practice_views.PracticeClientLinkView.as_view(), name="practice-client-link"),
+    path("practice/clients/<str:client_id>/restore/", practice_views.PracticeClientRestoreView.as_view(), name="practice-client-restore"),
     path("practice/programs/", practice_views.PracticeProgramListView.as_view(), name="practice-programs"),
     path("practice/programs/<int:program_id>/", practice_views.PracticeProgramDetailView.as_view(), name="practice-program-detail"),
     path("practice/tasks/", practice_views.PracticeTaskListView.as_view(), name="practice-tasks"),

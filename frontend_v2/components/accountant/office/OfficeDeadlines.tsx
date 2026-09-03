@@ -41,7 +41,7 @@ export const DeadlineRow: React.FC<{
     <div className="min-w-0">
       <p className="font-bold text-slate-900 dark:text-white">{item.title}</p>
       <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-        {item.client_name || 'المكتب'} · {formatDateValue(item.due_date)}
+        {item.partner_name || 'المكتب'} · {formatDateValue(item.due_date)}
       </p>
     </div>
     <div className="flex flex-wrap items-center gap-2">
@@ -49,7 +49,7 @@ export const DeadlineRow: React.FC<{
       <span className={`text-sm font-bold ${item.is_overdue ? 'text-red-700 dark:text-red-300' : 'text-slate-600 dark:text-slate-300'}`}>
         {deadlineDueLabel(item)}
       </span>
-      {onOpen && (item.client_id || item.tenant_id) && (
+      {onOpen && (item.partner_id || item.tenant_id) && (
         <button type="button" onClick={() => onOpen(item)} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold dark:border-slate-700">
           افتح الملف
         </button>
@@ -86,7 +86,7 @@ export const DeadlinesStrip: React.FC<{
     ) : (
       <ul className="space-y-2">
         {items.slice(0, limit).map((item) => (
-          <DeadlineRow key={`${item.kind}-${item.id ?? item.client_name}-${item.due_date}`} item={item} onOpen={onOpen} />
+          <DeadlineRow key={`${item.kind}-${item.id ?? item.partner_name}-${item.due_date}`} item={item} onOpen={onOpen} />
         ))}
       </ul>
     )}

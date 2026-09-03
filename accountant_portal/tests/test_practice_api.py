@@ -4,6 +4,10 @@
 المتصفح، وأن **صفّ مكتبٍ آخر «غير موجود» (404) لا «ممنوع»** حتى من فوق الشبكة،
 وأن إطفاء العَلَم يُخفي السطح كاملاً بـ404 — فلا يكشف الردُّ أن هناك ما يُطفأ.
 
+ISSUE #86: زبون المكتب صار `partners.Partner` — كل اختبارٍ هنا يُنشئ شركة مكتب
+أولاً (`tenants.services.create_company`)، تماماً كما يفعل محاسبٌ رُحِّل فعلاً
+(ISSUE #55).
+
 Cloudinary مُموّه (mock) — لا اتصال شبكي، على نمط `core/tests/test_media_upload.py`.
 """
 from unittest.mock import patch
@@ -18,12 +22,13 @@ from rest_framework.test import APIClient
 
 from accountant_portal.models import (
     AccountantProfile,
-    PracticeClient,
     PracticeDocument,
     PracticeProgram,
     PracticeTask,
 )
 from core.models import TenantAsset
+from partners.models import Partner
+from tenants.services import create_company
 
 BASE = "/api/accountant/practice"
 
@@ -36,6 +41,7 @@ PRACTICE_ROUTES = (
     ("patch", f"{BASE}/clients/1/"),
     ("delete", f"{BASE}/clients/1/"),
     ("post", f"{BASE}/clients/1/restore/"),
+    ("patch", f"{BASE}/clients/1/link/"),
     ("get", f"{BASE}/programs/"),
     ("post", f"{BASE}/programs/"),
     ("patch", f"{BASE}/programs/1/"),
@@ -63,6 +69,7 @@ def make_office(username, tax_number):
         business_address="رام الله",
         email_verified_at=timezone.now(),
     )
+    create_company(f"مكتب {username}", user)
     return user
 
 
@@ -90,6 +97,7 @@ class PracticeClientApiTest(PracticeApiBase):
         )
         self.assertEqual(created.status_code, 201, created.content[:300])
         client_id = created.json()["client"]["id"]
+        self.assertTrue(Partner.objects.filter(pk=client_id, partner_type="Customer").exists())
 
         listed = self.api_a.get(f"{BASE}/clients/")
         self.assertEqual(listed.status_code, 200)
@@ -105,11 +113,11 @@ class PracticeClientApiTest(PracticeApiBase):
         self.assertEqual(patched.status_code, 200)
         self.assertEqual(patched.json()["client"]["phone"], "0567")
 
-        # الحذف أرشفة: الصفّ باقٍ ويعود بـrestore.
+        # الحذف أرشفة — الصفّ باقٍ (`Partner` نفسه لا يُمسّ) ويعود بـrestore.
         archived = self.api_a.delete(f"{BASE}/clients/{client_id}/")
         self.assertEqual(archived.status_code, 200)
         self.assertEqual(archived.json()["client"]["status"], "archived")
-        self.assertTrue(PracticeClient.objects.filter(pk=client_id).exists())
+        self.assertTrue(Partner.objects.filter(pk=client_id).exists())
         self.assertEqual(
             self.api_a.get(f"{BASE}/clients/?status=active").json()["count"], 0,
         )
@@ -137,7 +145,7 @@ class PracticeClientApiTest(PracticeApiBase):
             self.assertEqual(response.status_code, 404, response.content[:300])
             self.assertEqual(response.json()["code"], "client_not_found")
         self.assertEqual(self.api_b.get(f"{BASE}/clients/").json()["count"], 0)
-        PracticeClient.objects.get(pk=client_id)  # لم يُمسّ
+        Partner.objects.get(pk=client_id)  # لم يُمسّ
 
     def test_a_user_without_a_professional_profile_never_sees_the_surface(self):
         plain = User.objects.create_user("plain-api-user")
@@ -152,6 +160,76 @@ class PracticeClientApiTest(PracticeApiBase):
 
         self.assertIn(response.status_code, (401, 403))
 
+    def test_creating_a_client_before_an_office_exists_is_a_clear_conflict(self):
+        officeless = User.objects.create_user("officeless-accountant")
+        AccountantProfile.objects.create(
+            user=officeless, professional_type="accountant",
+            tax_registration_number="TAX-NO-OFFICE", business_address="نابلس",
+        )
+
+        response = api_for(officeless).post(
+            f"{BASE}/clients/", {"trade_name": "زبون بلا مكتب"}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "office_required")
+
+    def test_contact_fields_and_notes_round_trip_over_http(self):
+        created = self.api_a.post(
+            f"{BASE}/clients/",
+            {
+                "trade_name": "زبون مع جهة اتصال", "contact_first": "سامي",
+                "contact_last": "خالد", "notes": "يفضّل الاتصال مساءً",
+            },
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.content[:300])
+        self.assertEqual(created.json()["client"]["contact_first"], "سامي")
+        self.assertEqual(created.json()["client"]["notes"], "يفضّل الاتصال مساءً")
+
+        listed = self.api_a.get(f"{BASE}/clients/")
+        self.assertEqual(listed.json()["results"][0]["contact_last"], "خالد")
+
+
+class PracticeLegacyClientFallbackApiTest(PracticeApiBase):
+    """مراجعة 2 من ISSUE #86 — محاسبٌ تعثّر ترحيله يبقى على سطحه القديم حتى
+    عبر الشبكة، ومحاسبٌ منقولٌ لا يرى شيئاً من زبائن غيره القدامى."""
+
+    def setUp(self):
+        super().setUp()
+        from accountant_portal.models import PracticeClient
+
+        self.legacy_client = PracticeClient.objects.create(
+            accountant=self.office_a, trade_name="زبونٌ قديم", contact_first="منى",
+        )
+
+    def test_the_legacy_client_shows_up_in_the_list_with_a_negative_id(self):
+        response = self.api_a.get(f"{BASE}/clients/")
+
+        self.assertEqual(response.status_code, 200, response.content[:300])
+        names = {row["trade_name"]: row for row in response.json()["results"]}
+        self.assertIn("زبونٌ قديم", names)
+        self.assertEqual(names["زبونٌ قديم"]["id"], -self.legacy_client.pk)
+        self.assertTrue(names["زبونٌ قديم"]["legacy"])
+
+    def test_the_legacy_client_detail_opens_read_only(self):
+        response = self.api_a.get(f"{BASE}/clients/{-self.legacy_client.pk}/")
+
+        self.assertEqual(response.status_code, 200, response.content[:300])
+        self.assertEqual(response.json()["client"]["contact_first"], "منى")
+
+        refused = self.api_a.patch(
+            f"{BASE}/clients/{-self.legacy_client.pk}/", {"phone": "000"}, format="json",
+        )
+        self.assertEqual(refused.status_code, 404)
+        self.assertEqual(refused.json()["code"], "client_not_found")
+
+    def test_another_office_never_sees_this_legacy_client(self):
+        response = self.api_b.get(f"{BASE}/clients/")
+
+        names = {row["trade_name"] for row in response.json()["results"]}
+        self.assertNotIn("زبونٌ قديم", names)
+
 
 class PracticeProgramAndTaskApiTest(PracticeApiBase):
     def setUp(self):
@@ -163,14 +241,14 @@ class PracticeProgramAndTaskApiTest(PracticeApiBase):
     def test_the_full_program_cycle_works_over_http(self):
         created = self.api_a.post(
             f"{BASE}/programs/",
-            {"client_id": self.client_id, "service_type": "رواتب", "due_date": "2026-09-01"},
+            {"partner_id": self.client_id, "service_type": "رواتب", "due_date": "2026-09-01"},
             format="json",
         )
         self.assertEqual(created.status_code, 201, created.content[:300])
         program_id = created.json()["program"]["id"]
-        self.assertEqual(created.json()["program"]["client_name"], "معرض السلام")
+        self.assertEqual(created.json()["program"]["partner_name"], "معرض السلام")
 
-        listed = self.api_a.get(f"{BASE}/programs/?client_id={self.client_id}")
+        listed = self.api_a.get(f"{BASE}/programs/?partner_id={self.client_id}")
         self.assertEqual(listed.json()["count"], 1)
 
         patched = self.api_a.patch(
@@ -185,7 +263,7 @@ class PracticeProgramAndTaskApiTest(PracticeApiBase):
     def test_an_unknown_service_type_is_422_until_it_is_configured(self):
         response = self.api_a.post(
             f"{BASE}/programs/",
-            {"client_id": self.client_id, "service_type": "خدمة لم تُعرَّف"},
+            {"partner_id": self.client_id, "service_type": "خدمة لم تُعرَّف"},
             format="json",
         )
 
@@ -195,7 +273,7 @@ class PracticeProgramAndTaskApiTest(PracticeApiBase):
     def test_another_office_cannot_touch_a_program(self):
         program_id = self.api_a.post(
             f"{BASE}/programs/",
-            {"client_id": self.client_id, "service_type": "رواتب"},
+            {"partner_id": self.client_id, "service_type": "رواتب"},
             format="json",
         ).json()["program"]["id"]
 
@@ -237,7 +315,7 @@ class PracticeProgramAndTaskApiTest(PracticeApiBase):
     def test_the_agenda_merges_the_offices_dues_and_shows_no_other_office(self):
         self.api_a.post(
             f"{BASE}/programs/",
-            {"client_id": self.client_id, "service_type": "ض.ق.م شهرية", "due_date": "2026-01-05"},
+            {"partner_id": self.client_id, "service_type": "ض.ق.م شهرية", "due_date": "2026-01-05"},
             format="json",
         )
         self.api_a.post(
@@ -250,6 +328,40 @@ class PracticeProgramAndTaskApiTest(PracticeApiBase):
         self.assertEqual(agenda.json()["totals"]["count"], 2)
         self.assertEqual(agenda.json()["totals"]["overdue"], 1)
         self.assertEqual(self.api_b.get(f"{BASE}/deadlines/").json()["totals"]["count"], 0)
+
+
+class PracticeClientLinkApiTest(PracticeApiBase):
+    def setUp(self):
+        super().setUp()
+        self.client_id = self.api_a.post(
+            f"{BASE}/clients/", {"trade_name": "زبون للربط"}, format="json",
+        ).json()["client"]["id"]
+        self.tenant = create_company("شركة الزبون", self.office_a)
+        from accountant_portal.models import AccountantEngagement
+        self.engagement = AccountantEngagement.objects.create(
+            accountant=self.office_a, tenant=self.tenant, status="active", initiated_by="company",
+        )
+
+    def test_linking_sets_the_engagement_and_leaves_contact_fields_untouched(self):
+        response = self.api_a.patch(
+            f"{BASE}/clients/{self.client_id}/link/",
+            {"engagement_id": self.engagement.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content[:300])
+        self.assertEqual(response.json()["client"]["engagement_id"], self.engagement.pk)
+        self.assertEqual(response.json()["client"]["client_type"], "engaged")
+
+    def test_another_office_cannot_link_someone_elses_client(self):
+        response = self.api_b.patch(
+            f"{BASE}/clients/{self.client_id}/link/",
+            {"engagement_id": self.engagement.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["code"], "client_not_found")
 
 
 class PracticeSettingsApiTest(PracticeApiBase):
@@ -297,7 +409,7 @@ class PracticeDocumentUploadApiTest(PracticeApiBase):
 
         response = self.api_a.post(
             f"{BASE}/documents/upload/",
-            {"file": upload, "client_id": self.client_id, "name": "كشف حساب"},
+            {"file": upload, "partner_id": self.client_id, "name": "كشف حساب"},
             format="multipart",
         )
 
@@ -307,7 +419,7 @@ class PracticeDocumentUploadApiTest(PracticeApiBase):
         self.assertEqual(document.name, "كشف حساب")
         self.assertEqual(document.accountant_id, self.office_a.pk)
         self.assertEqual(mock_upload.call_args.kwargs.get("resource_type"), "raw")
-        listed = self.api_a.get(f"{BASE}/documents/?client_id={self.client_id}")
+        listed = self.api_a.get(f"{BASE}/documents/?partner_id={self.client_id}")
         self.assertEqual(listed.json()["count"], 1)
 
     @patch("cloudinary.uploader.upload")
@@ -322,7 +434,7 @@ class PracticeDocumentUploadApiTest(PracticeApiBase):
 
         self.api_a.post(
             f"{BASE}/documents/upload/",
-            {"file": upload, "client_id": self.client_id},
+            {"file": upload, "partner_id": self.client_id},
             format="multipart",
         )
 
@@ -340,7 +452,7 @@ class PracticeDocumentUploadApiTest(PracticeApiBase):
 
         response = self.api_a.post(
             f"{BASE}/documents/upload/",
-            {"file": upload, "client_id": self.client_id},
+            {"file": upload, "partner_id": self.client_id},
             format="multipart",
         )
 
@@ -352,7 +464,7 @@ class PracticeDocumentUploadApiTest(PracticeApiBase):
 
         response = self.api_b.post(
             f"{BASE}/documents/upload/",
-            {"file": upload, "client_id": self.client_id},
+            {"file": upload, "partner_id": self.client_id},
             format="multipart",
         )
 
@@ -364,7 +476,7 @@ class PracticeDocumentUploadApiTest(PracticeApiBase):
 
     def test_a_missing_file_is_400_before_any_row_is_written(self):
         response = self.api_a.post(
-            f"{BASE}/documents/upload/", {"client_id": self.client_id}, format="multipart",
+            f"{BASE}/documents/upload/", {"partner_id": self.client_id}, format="multipart",
         )
 
         self.assertEqual(response.status_code, 400)
@@ -377,7 +489,7 @@ class PracticeDocumentUploadApiTest(PracticeApiBase):
 
         response = self.api_a.post(
             f"{BASE}/documents/upload/",
-            {"file": upload, "client_id": self.client_id},
+            {"file": upload, "partner_id": self.client_id},
             format="multipart",
         )
 
@@ -390,7 +502,7 @@ class PracticeDocumentUploadApiTest(PracticeApiBase):
         upload = SimpleUploadedFile("d.pdf", b"%PDF-1.4", content_type="application/pdf")
         document_id = self.api_a.post(
             f"{BASE}/documents/upload/",
-            {"file": upload, "client_id": self.client_id},
+            {"file": upload, "partner_id": self.client_id},
             format="multipart",
         ).json()["document"]["id"]
 

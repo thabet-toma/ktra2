@@ -77,7 +77,8 @@ const externalHint = (client: PracticeClientRecord) => {
  * مجموعة ترتيب أبجدي عربي.
  *
  * المؤرشفون **لا يُحذفون من القائمة** — يُجمعون في آخرها كي يبقى الاسترجاع
- * ممكناً؛ الأرشفة ليست طريقاً مسدوداً.
+ * ممكناً؛ الأرشفة ليست طريقاً مسدوداً (مراجعة 2 من ISSUE #86: حالة طبقة
+ * المكتب، لا الطرف — انظر `PracticeClientRecord.status`).
  */
 export function mergeOfficeClients(
   engagements: WorkspaceCompany[],

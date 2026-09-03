@@ -1,7 +1,8 @@
-"""مكتب المحاسبة — طبقة بيانات الممارسة: زبائن يدويون، برامج، مواعيد، إعدادات.
+"""مكتب المحاسبة — طبقة بيانات الممارسة: زبائن (أطراف)، برامج، مواعيد، إعدادات.
 
-الجدار المحروس هنا: زبون المكتب **سجلّ ممارسة لا دفترَ حسابات** — لا `tenant` في
-أي نموذج، وصفّ مكتبٍ آخر «غير موجود» لا «ممنوع»، والحذف أرشفة.
+ISSUE #86: زبون المكتب صار `partners.Partner` داخل شركة مكتب المحاسب — الجدار
+المحروس هنا صار: `PracticeProgram`/`PracticeTask`/`PracticeDocument` بلا
+`tenant`، وصفّ مكتبٍ آخر (أو زبونٍ خارج شركة المكتب) «غير موجود» لا «ممنوع».
 """
 from datetime import date, timedelta
 
@@ -19,22 +20,27 @@ from accountant_portal.models import (
     PracticeTask,
 )
 from accountant_portal.practice import (
-    archive_practice_client,
-    create_practice_client,
+    MIGRATION_MARKER_TARGET_TYPE,
+    archive_office_partner,
+    create_office_partner,
     create_practice_document,
     create_practice_program,
     create_practice_task,
-    get_practice_client,
+    get_office_client_view,
+    get_office_partner,
     get_practice_settings,
-    list_practice_clients,
+    list_office_partners,
+    office_tenant_id,
     practice_deadlines,
     program_payload,
-    restore_practice_client,
-    update_practice_client,
+    restore_office_partner,
+    update_office_partner,
     update_practice_settings,
 )
 from accountant_portal.services import EngagementConflict
+from partners.models import CustomerNote, Partner
 from tenants.models import Tenant
+from tenants.services import create_company
 
 
 TODAY = date(2026, 8, 14)
@@ -52,15 +58,21 @@ def make_accountant(username, tax_number):
     return user
 
 
-class PracticeClientTest(TestCase):
+def make_office(username, tax_number):
+    """محاسبٌ له مكتب فعلاً — نتيجة `migrate_accountant_offices` (ISSUE #55)."""
+    user = make_accountant(username, tax_number)
+    create_company(f"مكتب {username}", user)
+    return user
+
+
+class OfficeClientTest(TestCase):
     def setUp(self):
-        self.office_a = make_accountant("office-a", "TAX-PRACTICE-A")
-        self.office_b = make_accountant("office-b", "TAX-PRACTICE-B")
-        self.client_a = create_practice_client(
+        self.office_a = make_office("office-a", "TAX-PRACTICE-A")
+        self.office_b = make_office("office-b", "TAX-PRACTICE-B")
+        self.client_a = create_office_partner(
             accountant=self.office_a,
             data={
                 "trade_name": "مخبز النور",
-                "contact_first": "سامي",
                 "phone": "0599",
                 "email": "noor@example.com",
                 "sector": "أغذية",
@@ -70,104 +82,71 @@ class PracticeClientTest(TestCase):
     # t1 — العزل: صفّ مكتبٍ آخر لا يُفرَّق عن المعدوم.
     def test_another_office_reading_a_client_gets_a_miss_not_a_forbidden(self):
         with self.assertRaises(EngagementConflict) as caught:
-            get_practice_client(accountant=self.office_b, client_id=self.client_a.pk)
+            get_office_partner(accountant=self.office_b, partner_id=self.client_a["id"])
 
         self.assertEqual(caught.exception.status_code, 404)
         self.assertEqual(caught.exception.code, "client_not_found")
         self.assertNotEqual(caught.exception.status_code, 403)
 
-    def test_another_office_cannot_edit_or_archive_this_client(self):
-        for call in (
-            lambda: update_practice_client(
-                accountant=self.office_b, client_id=self.client_a.pk, data={"phone": "0000"},
-            ),
-            lambda: archive_practice_client(accountant=self.office_b, client_id=self.client_a.pk),
-        ):
-            with self.assertRaises(EngagementConflict) as caught:
-                call()
-            self.assertEqual(caught.exception.status_code, 404)
-        self.client_a.refresh_from_db()
-        self.assertEqual(self.client_a.phone, "0599")
-        self.assertEqual(self.client_a.status, "active")
+    def test_another_office_cannot_edit_this_client(self):
+        with self.assertRaises(EngagementConflict) as caught:
+            update_office_partner(
+                accountant=self.office_b, partner_id=self.client_a["id"], data={"phone": "0000"},
+            )
+        self.assertEqual(caught.exception.status_code, 404)
+        partner = Partner.objects.get(pk=self.client_a["id"])
+        self.assertEqual(partner.phone, "0599")
 
     def test_listing_returns_only_this_offices_clients(self):
-        create_practice_client(accountant=self.office_b, data={"trade_name": "زبون مكتب آخر"})
+        create_office_partner(accountant=self.office_b, data={"trade_name": "زبون مكتب آخر"})
 
-        names = [item.trade_name for item in list_practice_clients(accountant=self.office_a)]
+        names = [item["trade_name"] for item in list_office_partners(accountant=self.office_a)]
 
         self.assertEqual(names, ["مخبز النور"])
 
-    def test_trade_name_is_required_and_unique_inside_one_office(self):
-        with self.assertRaises(EngagementConflict) as missing:
-            create_practice_client(accountant=self.office_a, data={"trade_name": "   "})
-        with self.assertRaises(EngagementConflict) as duplicate:
-            create_practice_client(accountant=self.office_a, data={"trade_name": "مخبز النور"})
+    def test_client_lives_inside_the_offices_own_tenant(self):
+        partner = Partner.objects.get(pk=self.client_a["id"])
+        self.assertEqual(partner.tenant_id, office_tenant_id(self.office_a))
+        self.assertEqual(partner.partner_type, "Customer")
 
-        self.assertEqual(missing.exception.status_code, 400)
-        self.assertEqual(duplicate.exception.code, "duplicate_client")
-        # نفس الاسم في مكتب آخر مقبول — الفضاء الاسمي لكل مكتب.
+    def test_the_same_trade_name_is_accepted_in_two_offices(self):
+        # الفضاء الاسمي لكل شركة على حِدة — Partner لا يفرض تفرّداً على الاسم.
         self.assertIsNotNone(
-            create_practice_client(accountant=self.office_b, data={"trade_name": "مخبز النور"}).pk
+            create_office_partner(accountant=self.office_b, data={"trade_name": "مخبز النور"})["id"]
         )
 
     def test_invalid_email_is_refused_before_saving(self):
         with self.assertRaises(EngagementConflict) as caught:
-            create_practice_client(
+            create_office_partner(
                 accountant=self.office_a, data={"trade_name": "زبون", "email": "لا-بريد"},
             )
 
         self.assertEqual(caught.exception.code, "invalid_email")
-        self.assertFalse(PracticeClient.objects.filter(trade_name="زبون").exists())
+        self.assertFalse(Partner.objects.filter(name="زبون").exists())
 
-    # t3 — الحذف أرشفة، لا إتلاف.
-    def test_deleting_a_client_archives_the_row_and_keeps_its_history(self):
-        create_practice_program(
-            accountant=self.office_a,
-            data={"client_id": self.client_a.pk, "service_type": "رواتب"},
-            today=TODAY,
-        )
+    def test_a_client_cannot_be_created_without_an_office(self):
+        officeless = make_accountant("officeless", "TAX-NO-OFFICE")
 
-        archived = archive_practice_client(accountant=self.office_a, client_id=self.client_a.pk)
+        with self.assertRaises(EngagementConflict) as caught:
+            create_office_partner(accountant=officeless, data={"trade_name": "زبون بلا مكتب"})
 
-        self.assertEqual(archived.status, "archived")
-        self.assertTrue(PracticeClient.objects.filter(pk=self.client_a.pk).exists())
-        self.assertEqual(PracticeProgram.objects.filter(client=self.client_a).count(), 1)
-        self.assertEqual(
-            [item.pk for item in list_practice_clients(accountant=self.office_a, status="active")],
-            [],
-        )
-        self.assertEqual(
-            restore_practice_client(accountant=self.office_a, client_id=self.client_a.pk).status,
-            "active",
-        )
+        self.assertEqual(caught.exception.code, "office_required")
 
-    # الجدار: لا طريق من سجلّ الممارسة إلى دفاتر شركة — باستثناء واحد موثَّق.
+    # الجدار: لا طريق من البرامج/المواعيد/المستندات إلى دفاتر شركة أخرى.
     def test_no_practice_model_carries_a_tenant_link(self):
-        # ISSUE #52 (قرار 5): `PracticeClient.managed_tenant` استثناءٌ صريح —
-        # دفترٌ مُدار يملكه مكتب هذا المحاسب نفسه (`Tenant.managed_by`)، والعزل
-        # يأتي من `TenantViewSet.get_queryset` لا من غياب الحقل هنا. الجدار
-        # يبقى صلباً على كل نموذج آخر وعلى كل حقلٍ آخر في هذا النموذج.
-        allowed_links = {PracticeClient: {"managed_tenant"}}
-        for model in (
-            PracticeClient,
-            PracticeProgram,
-            PracticeTask,
-            PracticeDocument,
-            PracticeSettings,
-        ):
+        for model in (PracticeProgram, PracticeTask, PracticeDocument, PracticeSettings):
             leaks = [
                 field.name
                 for field in model._meta.get_fields()
                 if field.is_relation and field.related_model is Tenant
-                and field.name not in allowed_links.get(model, set())
             ]
             self.assertEqual(leaks, [], f"{model.__name__} يحمل رابطاً إلى شركة")
 
 
 class PracticeEngagementLinkTest(TestCase):
     def setUp(self):
-        self.office_a = make_accountant("link-a", "TAX-LINK-A")
-        self.office_b = make_accountant("link-b", "TAX-LINK-B")
+        self.office_a = make_office("link-a", "TAX-LINK-A")
+        self.office_b = make_office("link-b", "TAX-LINK-B")
         self.tenant = Tenant.objects.create(CompanyName="شركة مرتبطة")
         self.other_tenant = Tenant.objects.create(CompanyName="شركة مكتب آخر")
         self.engagement_a = AccountantEngagement.objects.create(
@@ -186,46 +165,46 @@ class PracticeEngagementLinkTest(TestCase):
     # t2 — ربط ارتباط مكتبٍ آخر مرفوض، وبنفس رسالة «غير موجود».
     def test_linking_another_offices_engagement_is_refused_as_a_miss(self):
         with self.assertRaises(EngagementConflict) as caught:
-            create_practice_client(
+            create_office_partner(
                 accountant=self.office_a,
                 data={"trade_name": "زبون مربوط خطأً", "engagement_id": self.engagement_b.pk},
             )
 
         self.assertEqual(caught.exception.status_code, 404)
         self.assertEqual(caught.exception.code, "engagement_not_found")
-        self.assertFalse(PracticeClient.objects.filter(trade_name="زبون مربوط خطأً").exists())
+        self.assertFalse(Partner.objects.filter(name="زبون مربوط خطأً").exists())
 
     def test_updating_a_client_cannot_steal_another_offices_engagement(self):
-        client = create_practice_client(accountant=self.office_a, data={"trade_name": "زبون"})
+        client = create_office_partner(accountant=self.office_a, data={"trade_name": "زبون"})
 
         with self.assertRaises(EngagementConflict) as caught:
-            update_practice_client(
+            update_office_partner(
                 accountant=self.office_a,
-                client_id=client.pk,
+                partner_id=client["id"],
                 data={"engagement_id": self.engagement_b.pk},
             )
 
         self.assertEqual(caught.exception.status_code, 404)
-        client.refresh_from_db()
-        self.assertIsNone(client.engagement_id)
+        partner = Partner.objects.get(pk=client["id"])
+        self.assertIsNone(partner.engagement_id)
 
     def test_linking_this_offices_engagement_exposes_the_company(self):
-        client = create_practice_client(
+        client = create_office_partner(
             accountant=self.office_a,
             data={"trade_name": "زبون على المنصة", "engagement_id": self.engagement_a.pk},
         )
 
-        self.assertEqual(client.engagement_id, self.engagement_a.pk)
-        self.assertEqual(client.engagement.tenant_id, self.tenant.pk)
+        self.assertEqual(client["engagement_id"], self.engagement_a.pk)
+        self.assertEqual(client["tenant_id"], self.tenant.pk)
 
     def test_one_company_cannot_be_linked_to_two_clients_of_the_same_office(self):
-        create_practice_client(
+        create_office_partner(
             accountant=self.office_a,
             data={"trade_name": "الزبون الأول", "engagement_id": self.engagement_a.pk},
         )
 
         with self.assertRaises(EngagementConflict) as caught:
-            create_practice_client(
+            create_office_partner(
                 accountant=self.office_a,
                 data={"trade_name": "الزبون الثاني", "engagement_id": self.engagement_a.pk},
             )
@@ -277,16 +256,16 @@ class PracticeSettingsTest(TestCase):
 
 class PracticeProgramAndAgendaTest(TestCase):
     def setUp(self):
-        self.office = make_accountant("agenda-office", "TAX-AGENDA")
-        self.other = make_accountant("agenda-other", "TAX-AGENDA-2")
-        self.client_row = create_practice_client(
+        self.office = make_office("agenda-office", "TAX-AGENDA")
+        self.other = make_office("agenda-other", "TAX-AGENDA-2")
+        self.client_row = create_office_partner(
             accountant=self.office, data={"trade_name": "معرض السلام"},
         )
 
     def test_a_program_without_a_due_date_takes_the_office_default_window(self):
         program = create_practice_program(
             accountant=self.office,
-            data={"client_id": self.client_row.pk, "service_type": "ض.ق.م شهرية"},
+            data={"partner_id": self.client_row["id"], "service_type": "ض.ق.م شهرية"},
             today=TODAY,
         )
 
@@ -298,7 +277,7 @@ class PracticeProgramAndAgendaTest(TestCase):
         with self.assertRaises(EngagementConflict) as caught:
             create_practice_program(
                 accountant=self.office,
-                data={"client_id": self.client_row.pk, "service_type": "خدمة لم تُعرَّف"},
+                data={"partner_id": self.client_row["id"], "service_type": "خدمة لم تُعرَّف"},
                 today=TODAY,
             )
         self.assertEqual(caught.exception.code, "unknown_service_type")
@@ -309,7 +288,7 @@ class PracticeProgramAndAgendaTest(TestCase):
         self.assertIsNotNone(
             create_practice_program(
                 accountant=self.office,
-                data={"client_id": self.client_row.pk, "service_type": "خدمة لم تُعرَّف"},
+                data={"partner_id": self.client_row["id"], "service_type": "خدمة لم تُعرَّف"},
                 today=TODAY,
             ).pk
         )
@@ -318,7 +297,7 @@ class PracticeProgramAndAgendaTest(TestCase):
         program = create_practice_program(
             accountant=self.office,
             data={
-                "client_id": self.client_row.pk,
+                "partner_id": self.client_row["id"],
                 "service_type": "رواتب",
                 "due_date": "2026-08-01",
             },
@@ -334,7 +313,7 @@ class PracticeProgramAndAgendaTest(TestCase):
         with self.assertRaises(EngagementConflict) as caught:
             create_practice_program(
                 accountant=self.other,
-                data={"client_id": self.client_row.pk, "service_type": "رواتب"},
+                data={"partner_id": self.client_row["id"], "service_type": "رواتب"},
                 today=TODAY,
             )
 
@@ -343,17 +322,17 @@ class PracticeProgramAndAgendaTest(TestCase):
     def test_documents_stay_inside_the_office_and_match_their_client(self):
         program = create_practice_program(
             accountant=self.office,
-            data={"client_id": self.client_row.pk, "service_type": "رواتب"},
+            data={"partner_id": self.client_row["id"], "service_type": "رواتب"},
             today=TODAY,
         )
-        other_client = create_practice_client(
+        other_client = create_office_partner(
             accountant=self.office, data={"trade_name": "زبون آخر"},
         )
 
         document = create_practice_document(
             accountant=self.office,
             data={
-                "client_id": self.client_row.pk,
+                "partner_id": self.client_row["id"],
                 "program_id": program.pk,
                 "name": "كشف رواتب",
                 "url": "https://files.example/x.pdf",
@@ -365,7 +344,7 @@ class PracticeProgramAndAgendaTest(TestCase):
             create_practice_document(
                 accountant=self.office,
                 data={
-                    "client_id": other_client.pk,
+                    "partner_id": other_client["id"],
                     "program_id": program.pk,
                     "name": "ملف",
                     "url": "https://files.example/y.pdf",
@@ -381,7 +360,7 @@ class PracticeProgramAndAgendaTest(TestCase):
         create_practice_program(
             accountant=self.office,
             data={
-                "client_id": self.client_row.pk,
+                "partner_id": self.client_row["id"],
                 "service_type": "ض.ق.م شهرية",
                 "due_date": "2026-08-10",
             },
@@ -390,7 +369,7 @@ class PracticeProgramAndAgendaTest(TestCase):
         create_practice_task(
             accountant=self.office,
             data={
-                "client_id": self.client_row.pk,
+                "partner_id": self.client_row["id"],
                 "title": "زيارة الزبون",
                 "due_at": "2026-08-18",
                 "kind": "appointment",
@@ -399,7 +378,7 @@ class PracticeProgramAndAgendaTest(TestCase):
         done = create_practice_program(
             accountant=self.office,
             data={
-                "client_id": self.client_row.pk,
+                "partner_id": self.client_row["id"],
                 "service_type": "رواتب",
                 "due_date": "2026-08-02",
                 "status": "done",
@@ -422,7 +401,7 @@ class PracticeProgramAndAgendaTest(TestCase):
     def test_the_agenda_never_shows_another_offices_rows(self):
         create_practice_program(
             accountant=self.office,
-            data={"client_id": self.client_row.pk, "service_type": "رواتب"},
+            data={"partner_id": self.client_row["id"], "service_type": "رواتب"},
             today=TODAY,
         )
 
@@ -437,5 +416,169 @@ class PracticeProgramAndAgendaTest(TestCase):
             data={"title": "اجتماع الفريق", "due_at": "2026-08-20T09:30:00", "kind": "deadline"},
         )
 
-        self.assertIsNone(task.client_id)
+        self.assertIsNone(task.partner_id)
         self.assertEqual(PracticeTask.objects.filter(accountant=self.office).count(), 1)
+
+
+class PracticeClientArchiveTest(TestCase):
+    """مراجعة 2 من ISSUE #86: الأرشفة عادت — حالة طبقة المكتب
+    (`PracticeClientArchive`) لا الطرف (`Partner` بلا مفهوم أرشفة)."""
+
+    def setUp(self):
+        self.office = make_office("archive-office", "TAX-ARCHIVE")
+        self.client_a = create_office_partner(accountant=self.office, data={"trade_name": "مخبز الأمل"})
+
+    def test_deleting_a_client_archives_it_and_keeps_its_programs(self):
+        create_practice_program(
+            accountant=self.office,
+            data={"partner_id": self.client_a["id"], "service_type": "رواتب"},
+            today=TODAY,
+        )
+
+        archived = archive_office_partner(accountant=self.office, partner_id=self.client_a["id"])
+
+        self.assertEqual(archived["status"], "archived")
+        # الطرف نفسه لم يُمسّ — لا حذف ولا تعطيل، فهو يبقى فاعلاً لفواتير الأتعاب.
+        self.assertTrue(Partner.objects.filter(pk=self.client_a["id"]).exists())
+        self.assertEqual(
+            PracticeProgram.objects.filter(partner_id=self.client_a["id"]).count(), 1,
+        )
+        self.assertEqual(
+            [row["id"] for row in list_office_partners(accountant=self.office, status="active")], [],
+        )
+
+        restored = restore_office_partner(accountant=self.office, partner_id=self.client_a["id"])
+        self.assertEqual(restored["status"], "active")
+        self.assertEqual(
+            [row["id"] for row in list_office_partners(accountant=self.office, status="active")],
+            [self.client_a["id"]],
+        )
+
+    def test_another_office_cannot_archive_or_restore_this_client(self):
+        other = make_office("archive-other", "TAX-ARCHIVE-OTHER")
+
+        for call in (
+            lambda: archive_office_partner(accountant=other, partner_id=self.client_a["id"]),
+            lambda: restore_office_partner(accountant=other, partner_id=self.client_a["id"]),
+        ):
+            with self.assertRaises(EngagementConflict) as caught:
+                call()
+            self.assertEqual(caught.exception.status_code, 404)
+        self.assertEqual(
+            [row["status"] for row in list_office_partners(accountant=self.office)], ["active"],
+        )
+
+
+class PracticeClientProfileFieldsTest(TestCase):
+    """مراجعة 2 من ISSUE #86: جهة الاتصال والملاحظات عادتا — بلا حقلٍ بنيويّ
+    جديد على `Partner` (سِجلٌّ جانبيّ محدَّثٌ في مكانه، `PROFILE_NOTE_TARGET_TYPE`)."""
+
+    def setUp(self):
+        self.office = make_office("profile-office", "TAX-PROFILE")
+
+    def test_contact_and_notes_round_trip_through_create_list_and_update(self):
+        client = create_office_partner(
+            accountant=self.office,
+            data={
+                "trade_name": "زبون",
+                "contact_first": "سامي",
+                "contact_last": "خالد",
+                "notes": "يفضّل الاتصال مساءً",
+            },
+        )
+        self.assertEqual(client["contact_first"], "سامي")
+        self.assertEqual(client["contact_last"], "خالد")
+        self.assertEqual(client["notes"], "يفضّل الاتصال مساءً")
+
+        listed = list_office_partners(accountant=self.office)
+        self.assertEqual(listed[0]["contact_first"], "سامي")
+        self.assertEqual(listed[0]["notes"], "يفضّل الاتصال مساءً")
+
+        updated = update_office_partner(
+            accountant=self.office, partner_id=client["id"], data={"notes": "غيّر رقمه"},
+        )
+        self.assertEqual(updated["notes"], "غيّر رقمه")
+        # الحقول التي لم تُرسَل في هذا التحديث لا تُمسَح.
+        self.assertEqual(updated["contact_first"], "سامي")
+
+    def test_a_client_with_no_profile_note_yet_returns_empty_strings_not_an_error(self):
+        client = create_office_partner(accountant=self.office, data={"trade_name": "زبون بلا ملاحظات"})
+
+        self.assertEqual(client["contact_first"], "")
+        self.assertEqual(client["notes"], "")
+
+
+class LegacyClientFallbackTest(TestCase):
+    """مراجعة 2 من ISSUE #86 — القيد المنصوص: «محاسبٌ تعثّر ترحيله يبقى على
+    سطحه القديم — لا يُحذف شيء قبل نجاح النقل». القراءة تسقط إلى `PracticeClient`
+    لكل زبونٍ لم يُرحَّل بعد؛ الكتابة تبقى حصراً على `Partner`.
+    """
+
+    def setUp(self):
+        self.unmigrated = make_office("legacy-unmigrated", "TAX-LEGACY-UNMIGRATED")
+        self.legacy_client = PracticeClient.objects.create(
+            accountant=self.unmigrated, trade_name="زبونٌ قديم",
+            contact_first="سامي", notes="ملاحظة قديمة",
+        )
+        self.migrated = make_office("legacy-migrated", "TAX-LEGACY-MIGRATED")
+        self.migrated_partner = create_office_partner(
+            accountant=self.migrated, data={"trade_name": "زبونٌ منقول"},
+        )
+
+    def test_an_unmigrated_accountant_still_sees_their_old_clients(self):
+        rows = list_office_partners(accountant=self.unmigrated)
+
+        self.assertEqual([row["trade_name"] for row in rows], ["زبونٌ قديم"])
+        self.assertTrue(rows[0]["legacy"])
+        self.assertEqual(rows[0]["id"], -self.legacy_client.pk)
+
+    def test_a_migrated_offices_roster_is_unaffected_by_another_offices_legacy_data(self):
+        rows = list_office_partners(accountant=self.migrated)
+
+        self.assertEqual([row["trade_name"] for row in rows], ["زبونٌ منقول"])
+        self.assertFalse(rows[0]["legacy"])
+
+    def test_migrating_this_specific_client_removes_it_from_the_legacy_fallback(self):
+        tenant_id = office_tenant_id(self.unmigrated)
+        partner = Partner.objects.create(tenant_id=tenant_id, partner_type="Customer", name="زبونٌ قديم")
+        CustomerNote.objects.create(
+            tenant_id=tenant_id, partner=partner,
+            target_type=MIGRATION_MARKER_TARGET_TYPE, target_id=str(self.legacy_client.pk),
+            title="م",
+        )
+
+        rows = list_office_partners(accountant=self.unmigrated)
+
+        self.assertEqual([row["trade_name"] for row in rows], ["زبونٌ قديم"])
+        self.assertFalse(rows[0]["legacy"])
+        self.assertEqual(rows[0]["id"], partner.pk)
+
+    def test_legacy_client_detail_is_readable_but_writes_are_refused(self):
+        view = get_office_client_view(accountant=self.unmigrated, client_id=-self.legacy_client.pk)
+
+        self.assertEqual(view["trade_name"], "زبونٌ قديم")
+        self.assertEqual(view["contact_first"], "سامي")
+        self.assertEqual(view["notes"], "ملاحظة قديمة")
+
+        with self.assertRaises(EngagementConflict) as caught:
+            update_office_partner(
+                accountant=self.unmigrated, partner_id=-self.legacy_client.pk, data={"phone": "000"},
+            )
+        self.assertEqual(caught.exception.code, "client_not_found")
+        # PracticeClient نفسه لم يُمَسّ — لا كتابة جديدة عليه أبداً.
+        self.legacy_client.refresh_from_db()
+        self.assertEqual(self.legacy_client.phone, "")
+
+    def test_the_fallback_path_never_writes_to_practice_client(self):
+        before = list(PracticeClient.objects.filter(pk=self.legacy_client.pk).values())[0]
+
+        list_office_partners(accountant=self.unmigrated)
+        get_office_client_view(accountant=self.unmigrated, client_id=-self.legacy_client.pk)
+
+        after = list(PracticeClient.objects.filter(pk=self.legacy_client.pk).values())[0]
+        self.assertEqual(before, after)
+
+    def test_an_unknown_negative_id_is_a_miss_not_a_crash(self):
+        with self.assertRaises(EngagementConflict) as caught:
+            get_office_client_view(accountant=self.unmigrated, client_id=-999999)
+        self.assertEqual(caught.exception.status_code, 404)

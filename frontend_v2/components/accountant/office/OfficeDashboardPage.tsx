@@ -49,10 +49,10 @@ export const OfficeDashboardPage: React.FC<{
   // الشركة، وبرنامج أو موعد مكتب يفتح ملف الزبون.
   const openDeadline = (item: PracticeDeadlineItem) => {
     if (item.kind === 'filing' && item.tenant_id) {
-      onOpenClient({ tenant_id: item.tenant_id, company_name: item.client_name });
+      onOpenClient({ tenant_id: item.tenant_id, company_name: item.partner_name });
       return;
     }
-    if (item.client_id) onOpenPracticeClient(item.client_id);
+    if (item.partner_id) onOpenPracticeClient(item.partner_id);
   };
 
   if (loading) return <OfficeSkeleton rows={6} />;

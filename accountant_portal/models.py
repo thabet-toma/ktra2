@@ -365,6 +365,16 @@ class ReviewQuery(models.Model):
 # يربط بدفتر مُدار يملكه مكتب المحاسب نفسه (`Tenant.managed_by`). العزل هنا
 # لا يعتمد على غياب الحقل بل على `TenantViewSet.get_queryset`: دفتر مكتبٍ آخر
 # «غير موجود» له مهما حمل `PracticeClient` من إشارة إليه.
+#
+# ISSUE #86: `PracticeClient` **مجمَّدٌ** منذ هذه التذكرة — زبون المكتب صار
+# `partners.Partner` نفسه داخل شركة مكتب المحاسب (`accountant_portal.practice`
+# — `office_tenant_id`/`get_office_partner`)، وحقلاه `engagement`/`managed_tenant`
+# انتقلا مُرفَقين بالطرف (`partners/models.py`) مع النوع المشتقّ `client_type`.
+# `PracticeProgram`/`PracticeTask`/`PracticeDocument` تبقى نماذجها كما هي، لكن
+# مفتاحها الحيّ صار `partner` — `client` (إلى هذا النموذج) بقي بلا كتابة ولا
+# قراءة جديدة، صفوفاً تاريخية فقط حتى تذكرة الحذف الموثَّقة في
+# `docs/decisions/practice_client_retirement.md`. لا حذف قبل دورة ضريبية كاملة
+# من نجاح أمر `migrate_practice_clients_to_partners`.
 
 
 class PracticeClient(models.Model):
@@ -452,10 +462,23 @@ class PracticeProgram(models.Model):
         on_delete=models.PROTECT,
         related_name="practice_programs",
     )
+    # ISSUE #86: مجمَّد — لا يُقرأ ولا يُكتب بعد الترحيل. يبقى للسجل التاريخي
+    # وحده حتى تذكرة الحذف (`docs/decisions/practice_client_retirement.md`).
     client = models.ForeignKey(
         PracticeClient,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="programs",
+    )
+    # الحقل الحيّ: زبون المكتب هو الطرف نفسه (`partners.Partner`) — انظر
+    # الملاحظة أعلى قسم المكتب.
+    partner = models.ForeignKey(
+        "partners.Partner",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="practice_programs",
     )
     service_type = models.CharField(max_length=120)
     frequency = models.CharField(max_length=10, choices=FREQUENCIES, default="monthly")
@@ -485,12 +508,20 @@ class PracticeTask(models.Model):
         on_delete=models.PROTECT,
         related_name="practice_tasks",
     )
+    # ISSUE #86: مجمَّد — انظر الملاحظة على `PracticeProgram.client` أعلاه.
     client = models.ForeignKey(
         PracticeClient,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="tasks",
+    )
+    partner = models.ForeignKey(
+        "partners.Partner",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="practice_tasks",
     )
     title = models.CharField(max_length=200)
     due_at = models.DateTimeField()
@@ -514,10 +545,20 @@ class PracticeDocument(models.Model):
         on_delete=models.PROTECT,
         related_name="practice_documents",
     )
+    # ISSUE #86: مجمَّد — انظر الملاحظة على `PracticeProgram.client` أعلاه.
     client = models.ForeignKey(
         PracticeClient,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="documents",
+    )
+    partner = models.ForeignKey(
+        "partners.Partner",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="practice_documents",
     )
     program = models.ForeignKey(
         PracticeProgram,
@@ -550,3 +591,32 @@ class PracticeSettings(models.Model):
 
     class Meta:
         db_table = "acct_portal_practice_settings"
+
+
+class PracticeClientArchive(models.Model):
+    """أرشفة زبون مكتب (ISSUE #86 مراجعة 2) — حالة **طبقة المكتب** لا الطرف.
+
+    `partners.Partner` لا يحمل مفهوم أرشفة، وإضافته كان سيتجاوز الإذن (`sector`/
+    `mobile` وحدهما مُجازان على الطرف). الأرشفة بيانات مكتبٍ كسائر طبقة المكتب،
+    فتعيش هنا بلا `tenant` — وجود الصفّ يعني «مؤرشف»، غيابه يعني «نشط».
+    """
+
+    accountant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="practice_client_archives",
+    )
+    partner = models.ForeignKey(
+        "partners.Partner",
+        on_delete=models.CASCADE,
+        related_name="practice_archive_flags",
+    )
+    archived_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "acct_portal_practice_client_archive"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["accountant", "partner"], name="uniq_practice_client_archive",
+            ),
+        ]

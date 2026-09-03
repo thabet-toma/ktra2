@@ -6,8 +6,8 @@ import {
   archivePracticeClient,
   getPracticeClient,
   getPracticeSettings,
+  linkPracticeClient,
   restorePracticeClient,
-  updatePracticeClient,
   type PracticeClientRecord,
   type PracticeSettingsRecord,
 } from '../../../services/accountantPracticeApi';
@@ -155,7 +155,7 @@ export const OfficeExternalClientPage: React.FC<{
     try {
       const book = await createManagedBook(client.trade_name, bookTemplate);
       try {
-        const linked = await updatePracticeClient(client.id, { managed_tenant_id: book.TenantID });
+        const linked = await linkPracticeClient(client.id, { managed_tenant_id: book.TenantID });
         setClient(linked.client);
         toast(`فُتح دفتر «${book.CompanyName}» وربط بهذا الزبون.`, 'success');
       } catch (linkError) {
@@ -185,6 +185,7 @@ export const OfficeExternalClientPage: React.FC<{
             <h1 className="flex flex-wrap items-center gap-2 text-2xl font-black text-slate-900 dark:text-white">
               {client.trade_name}
               {archived && <OfficeBadge tone="bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200">مؤرشف</OfficeBadge>}
+              {client.legacy && <OfficeBadge tone="bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200">لم يُنقل بعد</OfficeBadge>}
             </h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               ملف مكتب — سجلّ الزبون وبرامجه ومواعيده · فُتح في {formatDateValue(client.created_at)}
@@ -210,6 +211,13 @@ export const OfficeExternalClientPage: React.FC<{
       {archived && (
         <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
           هذا الملف مؤرشف — يُقرأ ويُسترجع، ولا يظهر في الأجندة. اضغط «استرجاع» لإعادته للعمل.
+        </p>
+      )}
+
+      {client.legacy && (
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+          هذا زبونٌ قديمٌ من سجلّ المكتب لم يُنقل بعد إلى الطرف الحديث — يُقرأ فقط،
+          والتعديل والأرشفة سيُرفضان حتى يُرحَّل. لا فقد للبيانات — راجع مكتب الدعم.
         </p>
       )}
 

@@ -44,7 +44,7 @@ export const OfficeAgendaPage: React.FC<{
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    Promise.all([getPracticeDeadlines(), listPracticeClients({ status: 'active' })])
+    Promise.all([getPracticeDeadlines(), listPracticeClients()])
       .then(([deadlines, clientsRes]) => {
         setData(deadlines);
         setClients(clientsRes.results.map((client) => ({ id: client.id, name: client.trade_name })));
@@ -57,10 +57,10 @@ export const OfficeAgendaPage: React.FC<{
 
   const open = (item: PracticeDeadlineItem) => {
     if (item.kind === 'filing' && item.tenant_id) {
-      onOpenPlatformClient({ tenant_id: item.tenant_id, company_name: item.client_name });
+      onOpenPlatformClient({ tenant_id: item.tenant_id, company_name: item.partner_name });
       return;
     }
-    if (item.client_id) onOpenPracticeClient(item.client_id);
+    if (item.partner_id) onOpenPracticeClient(item.partner_id);
   };
 
   if (loading) return <OfficeSkeleton rows={6} />;
@@ -107,7 +107,7 @@ export const OfficeAgendaPage: React.FC<{
         ) : (
           <ul className="space-y-2">
             {visible.map((item) => (
-              <DeadlineRow key={`${item.kind}-${item.id ?? item.client_name}-${item.due_date}`} item={item} onOpen={open} />
+              <DeadlineRow key={`${item.kind}-${item.id ?? item.partner_name}-${item.due_date}`} item={item} onOpen={open} />
             ))}
           </ul>
         )}

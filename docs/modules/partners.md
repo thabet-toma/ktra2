@@ -25,7 +25,7 @@
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `Partner` | `name`، `partner_type`، `supplier_scope`، `tax_number`، `credit_limit`، `opening_balance`، `opening_balance_date`، `assigned_price_tier`، `end_of_dealing_date`، `row_color` | `tenant` (CASCADE)، `group` → `PartnerGroup`، `linked_account` → `accounting.Account` (SET_NULL)، `default_cost_center` → `accounting.CostCenter`، `currency` |
+| `Partner` | `name`، `partner_type`، `supplier_scope`، `tax_number`، `credit_limit`، `opening_balance`، `opening_balance_date`، `assigned_price_tier`، `end_of_dealing_date`، `row_color`، `sector`، `mobile` (ISSUE #86) | `tenant` (CASCADE)، `group` → `PartnerGroup`، `linked_account` → `accounting.Account` (SET_NULL)، `default_cost_center` → `accounting.CostCenter`، `currency`، `engagement` → `accountant_portal.AccountantEngagement` (SET_NULL، مرجع نصّي، ISSUE #86)، `managed_tenant` → `tenants.Tenant` (SET_NULL، مرجع نصّي، ISSUE #86)؛ `client_type` property مشتقّة (managed/engaged/hybrid/unlinked) — زبون مكتب محاسبة إن وُجدا |
 | `PartnerGroup` | `name`، `group_type` | `account_receivable` / `account_payable` → `accounting.Account` (SET_NULL) |
 | `PartnerBankAccount` | `bank_name`، `account_number`، `iban`، `swift_code`، `beneficiary_name`، `is_default`، `is_active` | `partner` (CASCADE)، `currency` (PROTECT)؛ `unique_together (tenant, partner, account_number)` |
 | `CustomerNote` | `title`، `body`، `remind_on`، `is_done`، `priority`، `target_type/id/label/path` | `partner` (CASCADE، nullable)، `created_by`؛ 4 فهارس مركّبة تبدأ بـ`tenant` |
@@ -69,7 +69,8 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 - `core` — **services**: `partners/views.py:12-14` (`ApiAuthAndUser`، `enforce_limits`، `get_tenant`) والحدّ `partners.records` عند الإنشاء (`views.py`)، و`core.payments.document_payment_summary` (`views.py`).
 - `sales` / `logistics` — **models كسولة داخل الإجراءات فقط**: `views.py:74-75` و`views.py:141-144` (`SalesInvoice`، `PurchaseInvoice`) — استيراد داخل الدالة عمداً لكسر الدوران.
 
-**يعتمد عليه:** `accounting` (`accounting/models.py`)، `sales` (`sales/models.py`)، `inventory` (`inventory/models.py`)، `logistics` (`logistics/models.py`)، `core` (`core/plans.py`)، `bridge` (`bridge/views.py`). عملياً كل موديل فاتورة أو حركة في المشروع يحمل FK إلى `Partner`.
+**يعتمد عليه:** `accounting` (`accounting/models.py`)، `sales` (`sales/models.py`)، `inventory` (`inventory/models.py`)، `logistics` (`logistics/models.py`)، `core` (`core/plans.py`)، `bridge` (`bridge/views.py`)، `accountant_portal` (**models** — `accountant_portal/practice.py` يستورد `partners.models.Partner`/`CustomerNote` مباشرةً، ISSUE #86: زبون مكتب المحاسبة صار طرفاً). عملياً كل موديل فاتورة أو حركة في المشروع يحمل FK إلى `Partner`.
+`Partner.engagement`/`Partner.managed_tenant` مراجعُ نصّية إلى `accountant_portal.AccountantEngagement`/`tenants.Tenant` — الاتجاه يبقى وحيداً: `partners` لا يستورد `accountant_portal` بكود حقيقي أبداً.
 
 ## قواعد لا يجوز كسرها
 - **`partners/apps.py:7-8` يستورد `partners.signals` داخل `ready()`** — إزالته تُعطّل إنشاء حسابات الأطراف والأرصدة الافتتاحية بصمت.

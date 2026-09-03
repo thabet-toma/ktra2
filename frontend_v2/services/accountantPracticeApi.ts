@@ -22,6 +22,14 @@ export type PracticeProgramFrequency = 'annual' | 'monthly' | 'once';
 export type PracticeTaskStatus = 'open' | 'done';
 export type PracticeTaskKind = 'appointment' | 'deadline';
 
+/**
+ * ISSUE #86 (مراجعة 2): زبون المكتب صار `partners.Partner` داخل شركة مكتب
+ * المحاسب — لا سجلّ منفصل. `contact_first`/`contact_last`/`notes` بلا حقلٍ
+ * بنيويّ على الطرف؛ الخادم يخزّنها في سِجلٍّ جانبيّ ويُظهرها هنا كأي حقلٍ عادي.
+ * `status` أرشفةُ **طبقة المكتب** (`PracticeClientArchive`) لا الطرف نفسه.
+ * `legacy: true` يعني أن هذا الصفّ لم يُرحَّل بعد (معرّفه سالبٌ عمداً)، فيُقرأ
+ * ولا يُكتب حتى يُرحَّل — انظر `docs/decisions/practice_client_retirement.md`.
+ */
 export interface PracticeClientRecord {
   id: number;
   trade_name: string;
@@ -33,8 +41,8 @@ export interface PracticeClientRecord {
   address: string;
   sector: string;
   tax_number: string;
-  status: PracticeClientStatus;
   notes: string;
+  status: PracticeClientStatus;
   /** ارتباط المكتب بشركة هذا الزبون على المنصة — `null` يعني «زبون خارجي». */
   engagement_id: number | null;
   tenant_id: number | null;
@@ -42,12 +50,14 @@ export interface PracticeClientRecord {
   managed_tenant_id: number | null;
   client_type: 'managed' | 'engaged' | 'hybrid' | 'unlinked';
   created_at: string;
+  /** معرّفٌ سالبٌ = زبونٌ قديمٌ لم يُرحَّل بعد — قراءةٌ فقط، لا PATCH عليه. */
+  legacy: boolean;
 }
 
 export interface PracticeProgramRecord {
   id: number;
-  client_id: number;
-  client_name: string;
+  partner_id: number;
+  partner_name: string;
   service_type: string;
   frequency: PracticeProgramFrequency;
   team_note: string;
@@ -59,8 +69,8 @@ export interface PracticeProgramRecord {
 
 export interface PracticeTaskRecord {
   id: number;
-  client_id: number | null;
-  client_name: string;
+  partner_id: number | null;
+  partner_name: string;
   title: string;
   due_at: string;
   status: PracticeTaskStatus;
@@ -70,7 +80,7 @@ export interface PracticeTaskRecord {
 
 export interface PracticeDocumentRecord {
   id: number;
-  client_id: number;
+  partner_id: number;
   program_id: number | null;
   name: string;
   url: string;
@@ -87,8 +97,8 @@ export interface PracticeDeadlineItem {
   kind: 'program' | 'appointment' | 'deadline' | 'filing';
   id: number | null;
   title: string;
-  client_id: number | null;
-  client_name: string;
+  partner_id: number | null;
+  partner_name: string;
   tenant_id: number | null;
   due_date: string;
   status: string;
@@ -102,7 +112,7 @@ export interface PracticeDeadlines {
   totals: { count: number; overdue: number; due_soon: number };
 }
 
-export type PracticeClientInput = Partial<Omit<PracticeClientRecord, 'id' | 'tenant_id' | 'client_type' | 'created_at' | 'status'>>;
+export type PracticeClientInput = Partial<Omit<PracticeClientRecord, 'id' | 'tenant_id' | 'client_type' | 'created_at' | 'status' | 'legacy'>>;
 
 // ── الزبائن ──────────────────────────────────────────────────────────────────
 
@@ -111,6 +121,7 @@ export const listPracticeClients = (params: { status?: string; search?: string }
     query: { status: params.status || undefined, search: params.search || undefined },
   });
 
+/** `clientId` قد يكون سالباً (زبونٌ قديمٌ لم يُرحَّل بعد) — القراءة تفهمه. */
 export const getPracticeClient = (clientId: number) =>
   apiGetObject<{ client: PracticeClientRecord }>(`${PRACTICE}/clients/${clientId}/`);
 
@@ -120,22 +131,29 @@ export const createPracticeClient = (body: PracticeClientInput) =>
 export const updatePracticeClient = (clientId: number, body: PracticeClientInput) =>
   apiPatchObject<{ client: PracticeClientRecord }>(`${PRACTICE}/clients/${clientId}/`, body);
 
-/** الحذف أرشفة — ملف الزبون تاريخٌ مهني، والاسترجاع من قائمة المؤرشفين. */
+/** الحذف أرشفة — حالة طبقة المكتب، والاسترجاع من قائمة المؤرشفين. */
 export const archivePracticeClient = (clientId: number) =>
   apiDelete(`${PRACTICE}/clients/${clientId}/`);
 
 export const restorePracticeClient = (clientId: number) =>
   apiPostObject<{ client: PracticeClientRecord }>(`${PRACTICE}/clients/${clientId}/restore/`, {});
 
+/** ربط/فكّ الارتباط بشركة على المنصة أو بدفترٍ مُدار — فعلٌ حسّاس مستقلّ عن
+ * تعديل بيانات الاتصال العادية (`updatePracticeClient`). */
+export const linkPracticeClient = (
+  clientId: number,
+  body: Partial<{ engagement_id: number | null; managed_tenant_id: number | null }>,
+) => apiPatchObject<{ client: PracticeClientRecord }>(`${PRACTICE}/clients/${clientId}/link/`, body);
+
 // ── برامج المراجعة ───────────────────────────────────────────────────────────
 
 export const listPracticePrograms = (params: { clientId?: number; status?: string } = {}) =>
   apiGetObject<{ results: PracticeProgramRecord[]; count: number }>(`${PRACTICE}/programs/`, {
-    query: { client_id: params.clientId, status: params.status || undefined },
+    query: { partner_id: params.clientId, status: params.status || undefined },
   });
 
 export const createPracticeProgram = (body: {
-  client_id: number;
+  partner_id: number;
   service_type: string;
   frequency?: PracticeProgramFrequency;
   team_note?: string;
@@ -163,13 +181,13 @@ export const deletePracticeProgram = (programId: number) =>
 
 export const listPracticeTasks = (params: { clientId?: number; status?: string } = {}) =>
   apiGetObject<{ results: PracticeTaskRecord[]; count: number }>(`${PRACTICE}/tasks/`, {
-    query: { client_id: params.clientId, status: params.status || undefined },
+    query: { partner_id: params.clientId, status: params.status || undefined },
   });
 
 export const createPracticeTask = (body: {
   title: string;
   due_at: string;
-  client_id?: number | null;
+  partner_id?: number | null;
   kind?: PracticeTaskKind;
   status?: PracticeTaskStatus;
 }) => apiPostObject<{ task: PracticeTaskRecord }>(`${PRACTICE}/tasks/`, body);
@@ -179,7 +197,7 @@ export const updatePracticeTask = (
   body: Partial<{
     title: string;
     due_at: string;
-    client_id: number | null;
+    partner_id: number | null;
     kind: PracticeTaskKind;
     status: PracticeTaskStatus;
   }>,
@@ -192,7 +210,7 @@ export const deletePracticeTask = (taskId: number) =>
 
 export const listPracticeDocuments = (params: { clientId?: number; programId?: number } = {}) =>
   apiGetObject<{ results: PracticeDocumentRecord[]; count: number }>(`${PRACTICE}/documents/`, {
-    query: { client_id: params.clientId, program_id: params.programId },
+    query: { partner_id: params.clientId, program_id: params.programId },
   });
 
 /** الرفع multipart — نفس قلب Cloudinary ونفس حصّته في `core/media_views.py`. */
@@ -204,7 +222,7 @@ export const uploadPracticeDocument = (input: {
 }) => {
   const form = new FormData();
   form.append('file', input.file);
-  form.append('client_id', String(input.clientId));
+  form.append('partner_id', String(input.clientId));
   if (input.name) form.append('name', input.name);
   if (input.programId) form.append('program_id', String(input.programId));
   return apiPostFormData<{ document: PracticeDocumentRecord }>(`${PRACTICE}/documents/upload/`, form);

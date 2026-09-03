@@ -7,8 +7,8 @@ import {
   requestAccountantEngagement,
 } from '../../../services/accountantApi';
 import {
+  linkPracticeClient,
   listPracticeClients,
-  updatePracticeClient,
   type PracticeClientRecord,
 } from '../../../services/accountantPracticeApi';
 import { useToast } from '../../../contexts/ToastContext';
@@ -60,7 +60,7 @@ export const OfficeClientLinkForm: React.FC<{
   useEffect(load, [load]);
 
   const link = async (engagementId: number, successMessage: string) => {
-    const response = await updatePracticeClient(client.id, { engagement_id: engagementId });
+    const response = await linkPracticeClient(client.id, { engagement_id: engagementId });
     toast(successMessage, 'success');
     onLinked(response.client);
   };

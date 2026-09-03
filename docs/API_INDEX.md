@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **582**
+عدد النقاط: **583**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -35,8 +35,9 @@
 | `/api/accountant/me/` | `AccountantMeView` | `accountant_portal/views.py` |
 | `/api/accountant/me/submit-verification/` | `SubmitProfileVerificationView` | `accountant_portal/views.py` |
 | `/api/accountant/practice/clients/` | `PracticeClientListView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/clients/<int:client_id>/` | `PracticeClientDetailView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/clients/<int:client_id>/restore/` | `PracticeClientRestoreView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/clients/<str:client_id>/` | `PracticeClientDetailView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/clients/<str:client_id>/link/` | `PracticeClientLinkView` | `accountant_portal/practice_views.py` |
+| `/api/accountant/practice/clients/<str:client_id>/restore/` | `PracticeClientRestoreView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/practice/dashboard/` | `PracticeDashboardView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/practice/deadlines/` | `PracticeDeadlinesView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/practice/documents/` | `PracticeDocumentListView` | `accountant_portal/practice_views.py` |
