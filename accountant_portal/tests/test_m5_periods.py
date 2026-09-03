@@ -10,7 +10,7 @@ from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from accounting.models import Account, AccountingAuditLog, Currency
+from accounting.models import Account, AccountingAuditLog, Currency, JournalHeader, JournalLine, TaxRate
 from accounting.services import post_journal
 from accountant_portal.models import PortalSettings, ReviewQuery, TaxPeriodReview
 from accountant_portal.readiness import run_readiness_checks
@@ -19,7 +19,7 @@ from accountant_portal.models import AccountantProfile
 from core.models import TenantModule
 from core.modules import invalidate_module_cache
 from partners.models import Partner
-from sales.models import SalesInvoice
+from sales.models import SalesInvoice, SalesSettings
 from tenants.models import MemberPermission, Tenant, UserCompanyMembership
 
 
@@ -67,6 +67,56 @@ class TaxPeriodBaseTest(APITestCase):
         )
         self.headers = {"HTTP_X_TENANT_ID": str(self.tenant.pk)}
 
+        # issue #79: كشف ض.ق.م يُبنى من الدفتر لا من `tax_amount` على الفاتورة —
+        # حسابا الضريبة والقيد المطابق للفاتورة عبر `_tax_journal` أدناه.
+        self.output_vat_account = Account.objects.create(
+            tenant=self.tenant, code="2104", name="ضريبة القيمة المضافة - مخرجات",
+            account_type="Liability",
+        )
+        self.input_vat_account = Account.objects.create(
+            tenant=self.tenant, code="1105", name="ضريبة القيمة المضافة - مدخلات",
+            account_type="Asset",
+        )
+        self.vat_contra_account = Account.objects.create(
+            tenant=self.tenant, code="1103", name="ذمم/دائنون — اختبار", account_type="Asset",
+        )
+        TaxRate.objects.create(
+            tenant=self.tenant, name="ض.ق.م مخرجات", code="VAT-OUT",
+            rate=Decimal("16.00"), tax_account=self.output_vat_account, direction="sales",
+        )
+        TaxRate.objects.create(
+            tenant=self.tenant, name="ض.ق.م مدخلات", code="VAT-IN",
+            rate=Decimal("16.00"), tax_account=self.input_vat_account, direction="purchase",
+        )
+        SalesSettings.objects.create(tenant=self.tenant, vat_input_account=self.input_vat_account)
+
+    def _tax_journal(self, invoice):
+        """قيدٌ حقيقي لضريبة الفاتورة — الدفتر هو ما يقرأه `build_vat_statement` الآن."""
+        amount = Decimal(str(invoice.tax_amount or 0))
+        if amount == 0 or invoice.status != SalesInvoice.STATUS_POSTED:
+            return
+        kind = invoice.invoice_kind
+        if kind == SalesInvoice.INVOICE_KIND_SALE:
+            vat_debit, vat_credit, account = Decimal("0"), amount, self.output_vat_account
+        elif kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+            vat_debit, vat_credit, account = amount, Decimal("0"), self.output_vat_account
+        elif kind == SalesInvoice.INVOICE_KIND_PURCHASE:
+            vat_debit, vat_credit, account = amount, Decimal("0"), self.input_vat_account
+        else:  # purchase_return
+            vat_debit, vat_credit, account = Decimal("0"), amount, self.input_vat_account
+        header = JournalHeader.objects.create(
+            tenant=self.tenant, transaction_date=invoice.invoice_date,
+            description=f"ضريبة — {invoice.invoice_number}", is_posted=True,
+        )
+        JournalLine.objects.create(
+            tenant=self.tenant, journal=header, account=account,
+            debit=vat_debit, credit=vat_credit,
+        )
+        JournalLine.objects.create(
+            tenant=self.tenant, journal=header, account=self.vat_contra_account,
+            debit=vat_credit, credit=vat_debit,
+        )
+
     def _invoice(self, number, day, **overrides):
         payload = {
             "tenant": self.tenant,
@@ -80,7 +130,9 @@ class TaxPeriodBaseTest(APITestCase):
             "grand_total": Decimal("116.00"),
         }
         payload.update(overrides)
-        return SalesInvoice.objects.create(**payload)
+        invoice = SalesInvoice.objects.create(**payload)
+        self._tax_journal(invoice)
+        return invoice
 
     def _prepare(self, period_from=date(2026, 6, 1), period_to=date(2026, 6, 30)):
         self.client.force_authenticate(self.accountant)

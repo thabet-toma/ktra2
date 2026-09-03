@@ -191,7 +191,7 @@ def staff_practice_dashboard(*, staff, today=None)  # ISSUE #58 (القرار 7)
 
 ## الاعتماديات
 
-**يعتمد على:** `core` — `permission_keys`/`require_perm`/`user_tenant_role` (`services.py`، `views.py`)، `guard_module_surface`/`require_module`/`module_enabled` (`views.py`)، `log_activity` (`services.py`)، `core.hooks.register_tax_period_guard` (`guards.py`) · `tenants` — نماذج `MemberPermission`/`UserCompanyMembership` مباشرةً (`services.py`) · `accounting` — `AccountingAuditLog` (`audit.py`) و`JournalLine` قراءةً (`services.py`) · `sales` — `build_vat_statement` (`services.py`) و`SalesInvoice` قراءةً (`services.py`).
+**يعتمد على:** `core` — `permission_keys`/`require_perm`/`user_tenant_role` (`services.py`، `views.py`)، `guard_module_surface`/`require_module`/`module_enabled` (`views.py`)، `log_activity` (`services.py`)، `core.hooks.register_tax_period_guard` (`guards.py`) · `tenants` — نماذج `MemberPermission`/`UserCompanyMembership` مباشرةً (`services.py`) · `accounting` — `AccountingAuditLog` (`audit.py`)، `JournalLine` قراءةً، و`vat_period_totals` (issue #79: مصدر أرقام الضريبة الوحيد في `client_financial_summary`، `services.py`) · `sales` — `build_vat_statement` (`services.py`) و`SalesInvoice` قراءةً (`services.py`).
 طبقة المكتب لا تعتمد على `accounting` ولا `inventory` إطلاقاً — `practice.py` لا يستورد منهما شيئاً.
 
 **يعتمد عليه:** `core/tenant_utils.py` (فحص الارتباط النشط)، `core/permissions.py` و`core/access.py` و`core/permissions_api.py` (تنقية الصلاحيات المحرّمة)، `core/platform_admin_api.py`، و`hr/views.py` + `hr/payroll_api.py` + `hr/auth_api.py`.

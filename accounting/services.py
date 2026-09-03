@@ -5,7 +5,8 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from .models import Account, ExchangeRate, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter, VoidedJournal
+from django.db.models import Q, Sum
+from .models import Account, ExchangeRate, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter, TaxRate, VoidedJournal
 from decimal import Decimal
 from partners.models import Partner
 from tenants.models import Currency, TenantBook
@@ -724,6 +725,180 @@ def post_journal(
     return jh
 
 
+def _resolve_vat_account_ids(tenant_id: int) -> tuple[set[int], set[int]]:
+    """مجموعتا حسابات ضريبة المدخلات/المخرجات — **اتحاد** كل ما قد يكتب فيه أيّ
+    مسار ترحيل قائم، لا اشتقاقٌ واحد فقط (issue #79، مراجعة الالتزام).
+
+    المخرجات: حسابات `TaxRate` باتجاه `sales`/`both` وحدها — كل مسار يُرحِّل
+    ضريبة مخرجات (`sales/services/calc.py` — `_build_tax_buckets`) يمرّ بحساب
+    نسبة `TaxRate.tax_account` صراحةً، فلا حاجة لسقوطٍ هنا.
+
+    المدخلات: `SalesSettings.vat_input_account` ∪ `TaxRate` باتجاه
+    `purchase`/`both` **∪ سلسلة السقوط الحرفية** (الكود `1105`، ثم `Asset`
+    باسمٍ يحوي «ضريبة») **لأن مسارات الترحيل الفعلية لا تقرأ الاشتقاق
+    أعلاه أصلاً**: `logistics/services.py` (`_resolve_vat_input_account`)
+    و`accounting/views.py` (مسار استلام فاتورة شراء قديم) يجدان الحساب بالكود
+    ثم بالاسم مباشرةً بلا مرورٍ بـ`SalesSettings` أو `TaxRate`؛
+    `logistics/views/invoices.py` يقرأ `SalesSettings` أولاً لكنه **يسقط** إلى
+    نفس الكود إن غاب. فالاشتقاق وحده كان يُصفِّر ضريبة مدخلاتٍ مُرحَّلة فعلاً
+    لشركةٍ لم تُعيَّن فيها `SalesSettings.vat_input_account` — وهو الحال
+    الافتراضي (لا شيء يملؤه عند إنشاء الشركة) — فيُبالَغ في «الصافي المستحق».
+    الاتحاد يبقى صحيحاً حتى لو أُصلحت مسارات الترحيل لاحقاً لتقرأ الاشتقاق؛
+    ومن يُوحِّدها فعلاً يحذف هذا السقوط.
+    """
+    from sales.models import SalesSettings
+
+    input_ids: set[int] = set()
+    output_ids: set[int] = set()
+
+    vat_input_id = (
+        SalesSettings.objects.filter(tenant_id=tenant_id)
+        .exclude(vat_input_account__isnull=True)
+        .values_list("vat_input_account_id", flat=True)
+        .first()
+    )
+    if vat_input_id:
+        input_ids.add(vat_input_id)
+
+    for direction, account_id in TaxRate.objects.filter(tenant_id=tenant_id).values_list(
+        "direction", "tax_account_id"
+    ):
+        if direction in ("purchase", "both"):
+            input_ids.add(account_id)
+        if direction in ("sales", "both"):
+            output_ids.add(account_id)
+
+    # السقوط نسخةٌ حرفية عمّا كانت `VatReportView` تفعله قبل التوحيد: الكود
+    # `1105` إن وُجد، وإلا **كل** حساب أصلٍ اسمه يحوي «ضريبة» أو «VAT» — لا
+    # أوّلَ واحدٍ منها. شركةٌ بحسابَي ضريبة مدخلاتٍ بلا كود `1105` كانت تُجمَع
+    # حساباها معاً، وتضييقُها إلى واحدٍ يُسقط ضريبةً مُرحَّلة بصمت.
+    by_code = list(Account.objects.filter(tenant_id=tenant_id, code="1105"))
+    if not by_code:
+        by_code = list(
+            Account.objects.filter(tenant_id=tenant_id, account_type="Asset").filter(
+                Q(name__icontains="ضريبة") | Q(name__icontains="VAT")
+            )
+        )
+    input_ids.update(a.id for a in by_code)
+
+    return input_ids, output_ids
+
+
+def vat_period_totals(tenant_id: int, period_from, period_to, *, posted_only: bool = True) -> dict:
+    """مصدر الحقيقة الوحيد لأرقام ض.ق.م لفترة — من الدفتر لا من الفواتير (issue #79).
+
+    كل قيدٍ يمرّ عبر `post_journal`، فالدفتر وحده يرى كل مصدر ضريبة: سند
+    المصروف، إيصال الاستلام، فاتورة الشراء، فاتورة البيع، واستحقاقات
+    اللوجستيات. `sales.services.build_vat_statement` (يحفظ)، `VatReportView`
+    (يعرض المعاينة)، و`accountant_portal.services.client_financial_summary`
+    (ملخص الزبون) يستدعونها وحدها — فيتّفقون دائماً على الرقم بدل ثلاث حسبات
+    منفصلة كانت تختلف.
+
+    Returns: dict بمفاتيح `input`/`output` (كلٌّ منهما `accounts`/`total_debit`/
+    `total_credit`/`balance`، والمخرجات معها `balance_payable`)، و`net_payable`،
+    و`input_lines`/`output_lines` (تفصيل الحركات).
+    """
+    input_ids, output_ids = _resolve_vat_account_ids(tenant_id)
+
+    line_filters = {
+        "tenant_id": tenant_id,
+        "journal__transaction_date__gte": period_from,
+        "journal__transaction_date__lte": period_to,
+    }
+    if posted_only:
+        line_filters["journal__is_posted"] = True
+
+    def _summarize(account_ids):
+        if not account_ids:
+            return {
+                "accounts": [],
+                "total_debit": Decimal("0.00"),
+                "total_credit": Decimal("0.00"),
+                "balance": Decimal("0.00"),
+            }
+        accounts = list(Account.objects.filter(id__in=account_ids).order_by("code"))
+        agg = JournalLine.objects.filter(account_id__in=account_ids, **line_filters).aggregate(
+            dr=Sum("base_debit"), cr=Sum("base_credit"),
+        )
+        dr = Decimal(agg["dr"] or 0).quantize(Decimal("0.01"))
+        cr = Decimal(agg["cr"] or 0).quantize(Decimal("0.01"))
+        return {
+            "accounts": [
+                {"id": a.id, "code": a.code, "name": a.name, "type": a.account_type}
+                for a in accounts
+            ],
+            "total_debit": dr,
+            "total_credit": cr,
+            "balance": dr - cr,
+        }
+
+    def _lines(account_ids):
+        if not account_ids:
+            return []
+        rows = (
+            JournalLine.objects.filter(account_id__in=account_ids, **line_filters)
+            .select_related("journal", "partner", "account")
+            .order_by("journal__transaction_date", "journal_id", "id")
+        )
+        out = []
+        for r in rows:
+            out.append({
+                "date": r.journal.transaction_date.isoformat() if r.journal and r.journal.transaction_date else None,
+                "journal_id": r.journal_id,
+                "reference_type": getattr(r.journal, "reference_type", None),
+                "reference_id": getattr(r.journal, "reference_id", None),
+                "account_code": r.account.code if r.account else None,
+                "description": r.description or (getattr(r.journal, "description", "") or ""),
+                "debit": Decimal(r.base_debit or 0),
+                "credit": Decimal(r.base_credit or 0),
+                "partner": r.partner.name if r.partner else None,
+            })
+        return out
+
+    input_summary = _summarize(input_ids)
+    output_summary = _summarize(output_ids)
+
+    # Input VAT: طبيعتها مدينة — الرصيد = Debit - Credit (موجب).
+    # Output VAT: طبيعتها دائنة — المستحق للدولة = Credit - Debit.
+    input_balance = input_summary["balance"]
+    output_balance_payable = (-output_summary["balance"]).quantize(Decimal("0.01"))
+    net_payable = (output_balance_payable - input_balance).quantize(Decimal("0.01"))
+
+    return {
+        "period_from": period_from,
+        "period_to": period_to,
+        "input": input_summary,
+        "output": {**output_summary, "balance_payable": output_balance_payable},
+        "net_payable": net_payable,
+        "input_lines": _lines(input_ids),
+        "output_lines": _lines(output_ids),
+    }
+
+
+def assert_no_final_vat_statement(tenant_id, transaction_date, document_label=""):
+    """يمنع فكّ ترحيل مستندٍ مؤرَّخ داخل فترة كشف ض.ق.م `final` (issue #79).
+
+    الكشف النهائي إقرارٌ مُقدَّم لدائرة الضريبة — **لا أثر رجعي عليه**:
+    تصحيحه بإقرارٍ معدَّل لا بتعديل صامت على مستند داخل فترته. الكشوف
+    `draft` لا تُقيَّد بشيء هنا.
+    """
+    from sales.models import VatStatement
+
+    stmt = VatStatement.objects.filter(
+        tenant_id=tenant_id,
+        status=VatStatement.STATUS_FINAL,
+        period_from__lte=transaction_date,
+        period_to__gte=transaction_date,
+    ).first()
+    if stmt:
+        raise ValidationError(
+            f"تعذّر التراجع عن ترحيل {document_label or 'هذا المستند'}: تاريخه "
+            f"({transaction_date}) داخل فترة كشف ضريبة نهائي «{stmt.statement_number}» "
+            f"({stmt.period_from} → {stmt.period_to}). الكشوف النهائية لا تُعدَّل بأثر "
+            f"رجعي — صحّح بإقرار معدَّل لا بتغيير هذا المستند."
+        )
+
+
 def assert_period_open_for_unpost(tenant_id, transaction_date, document_label=""):
     """A2/THA-184 — إلغاء الترحيل تعديلٌ على الفترة، فيمرّ بحرّاسها نفسهم.
 
@@ -830,6 +1005,7 @@ def unpost_document(
             )
         for txn_date in sorted(d for d in affected_dates if d):
             assert_period_open_for_unpost(tenant_id, txn_date, document_label)
+            assert_no_final_vat_statement(tenant_id, txn_date, document_label)
 
         # Feature 2: حجز رقم القيد الأساسي في سلّة المحذوفات قبل الحذف.
         if recycle and primary_ref_type:

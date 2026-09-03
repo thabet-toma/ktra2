@@ -1107,20 +1107,19 @@ class TrialBalanceView(viewsets.ViewSet):
 
 
 class VatReportView(viewsets.ViewSet):
-    """تقرير ضريبة القيمة المضافة: مدخلات مقابل مخرجات مع الصافي المستحق.
-
-    يبحث عن حسابات ضريبة:
-      - Input (مدخلات): code=1105 أو account_type=Asset واسم يحتوي "ضريبة"
-      - Output (مخرجات): code=2104 أو account_type=Liability واسم يحتوي "ضريبة"
-
-    ويجمع حركات JournalLine داخل الفترة لكل نوع.
+    """معاينة تقرير ضريبة القيمة المضافة — مصدرها `accounting.services.vat_period_totals`
+    وحدها (issue #79)، نفس الدالّة التي يستدعيها `build_vat_statement` (الحفظ)
+    و`client_financial_summary` (ملخص الزبون في `accountant_portal`)، فيتّفق
+    الثلاثة دائماً على الرقم. مجموعة حسابات الضريبة تُشتقّ من
+    `SalesSettings.vat_input_account` وحسابات `TaxRate.tax_account` — لا كوداً
+    ثابتاً («1105»/«2104» كانا خطأً هنا).
 
     الاستجابة:
       {
         "start_date", "end_date",
-        "input": {account_id, code, name, total_debit, total_credit, balance, lines_count},
-        "output": {...},
-        "net_payable": output_balance - input_balance,   // موجب = مستحق للحكومة
+        "input": {accounts, total_debit, total_credit, balance},
+        "output": {..., "balance_payable"},
+        "net_payable": output_balance_payable - input_balance,   // موجب = مستحق للحكومة
         "input_lines": [{date, journal_id, description, debit, credit, partner}],
         "output_lines": [...]
       }
@@ -1130,7 +1129,7 @@ class VatReportView(viewsets.ViewSet):
     permission_classes = ApiAuthAndUser["permission_classes"]
 
     def list(self, request):
-        from django.db.models import Sum, Q as QQ
+        from .services import vat_period_totals
 
         tenant = get_tenant(request)
         if not tenant:
@@ -1144,100 +1143,35 @@ class VatReportView(viewsets.ViewSet):
             start_date = f"{today.year}-01-01"
             end_date = f"{today.year}-12-31"
 
-        def _find_accounts(code, acc_type, name_contains):
-            q = Account.objects.filter(tenant=tenant, is_active=True)
-            # 1) أولوية للكود
-            by_code = q.filter(code=code)
-            if by_code.exists():
-                return list(by_code)
-            # 2) fallback بالنوع والاسم
-            return list(q.filter(account_type=acc_type).filter(
-                QQ(name__icontains=name_contains) | QQ(name__icontains='VAT')
-            ))
+        totals = vat_period_totals(
+            tenant.pk, start_date, end_date, posted_only=not include_unposted,
+        )
 
-        input_accounts = _find_accounts('1105', 'Asset', 'ضريبة')
-        output_accounts = _find_accounts('2104', 'Liability', 'ضريبة')
-
-        line_filters = {
-            'tenant': tenant,
-            'journal__transaction_date__range': [start_date, end_date],
-        }
-        if not include_unposted:
-            line_filters['journal__is_posted'] = True
-
-        def _summarize(accounts):
-            if not accounts:
-                return {
-                    'accounts': [],
-                    'total_debit': 0.0,
-                    'total_credit': 0.0,
-                    'balance': 0.0,
-                    'lines_count': 0,
-                }
-            ids = [a.id for a in accounts]
-            agg = (
-                JournalLine.objects
-                .filter(account_id__in=ids, **line_filters)
-                .aggregate(dr=Sum('base_debit'), cr=Sum('base_credit'))
-            )
-            dr = float(agg['dr'] or 0)
-            cr = float(agg['cr'] or 0)
+        def _summary(block):
             return {
-                'accounts': [
-                    {'id': a.id, 'code': a.code, 'name': a.name, 'type': a.account_type}
-                    for a in accounts
-                ],
-                'total_debit': round(dr, 2),
-                'total_credit': round(cr, 2),
-                'balance': round(dr - cr, 2),
+                'accounts': block['accounts'],
+                'total_debit': float(block['total_debit']),
+                'total_credit': float(block['total_credit']),
+                'balance': float(block['balance']),
             }
 
-        def _lines(accounts):
-            if not accounts:
-                return []
-            ids = [a.id for a in accounts]
-            rows = (
-                JournalLine.objects
-                .filter(account_id__in=ids, **line_filters)
-                .select_related('journal', 'partner', 'account')
-                .order_by('journal__transaction_date', 'journal_id', 'id')
-            )
-            out = []
-            for r in rows:
-                out.append({
-                    'date': r.journal.transaction_date.isoformat() if r.journal and r.journal.transaction_date else None,
-                    'journal_id': r.journal_id,
-                    'reference_type': getattr(r.journal, 'reference_type', None),
-                    'reference_id': getattr(r.journal, 'reference_id', None),
-                    'account_code': r.account.code if r.account else None,
-                    'description': r.description or (getattr(r.journal, 'description', '') or ''),
-                    'debit': float(r.base_debit or 0),
-                    'credit': float(r.base_credit or 0),
-                    'partner': r.partner.name if r.partner else None,
-                })
-            return out
-
-        input_summary = _summarize(input_accounts)
-        output_summary = _summarize(output_accounts)
-
-        # Input VAT: طبيعتها مدينة — الرصيد = Debit - Credit (موجب)
-        # Output VAT: طبيعتها دائنة — الرصيد المستحق للدولة = Credit - Debit
-        input_balance = input_summary['balance']
-        output_balance_payable = round(-output_summary['balance'], 2)
-        # net = output المستحق - input (لأن المدخلات تُطرح من المخرجات)
-        net_payable = round(output_balance_payable - input_balance, 2)
+        def _lines(rows):
+            return [
+                {**row, 'debit': float(row['debit']), 'credit': float(row['credit'])}
+                for row in rows
+            ]
 
         return Response({
             'start_date': start_date,
             'end_date': end_date,
-            'input': input_summary,
+            'input': _summary(totals['input']),
             'output': {
-                **output_summary,
-                'balance_payable': output_balance_payable,
+                **_summary(totals['output']),
+                'balance_payable': float(totals['output']['balance_payable']),
             },
-            'net_payable': net_payable,
-            'input_lines': _lines(input_accounts),
-            'output_lines': _lines(output_accounts),
+            'net_payable': float(totals['net_payable']),
+            'input_lines': _lines(totals['input_lines']),
+            'output_lines': _lines(totals['output_lines']),
         })
 
 

@@ -115,6 +115,7 @@ from .supplier_vat import (
     unpost_supplier_payment,
     allocate_supplier_payment,
     build_vat_statement,
+    vat_statement_diff_report,
 )
 
 __all__ = [
@@ -211,4 +212,5 @@ __all__ = [
     "unpost_supplier_payment",
     "allocate_supplier_payment",
     "build_vat_statement",
+    "vat_statement_diff_report",
 ]

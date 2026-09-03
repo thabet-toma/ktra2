@@ -9,13 +9,13 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from accounting.models import Account, Currency, JournalHeader, JournalLine
+from accounting.models import Account, Currency, JournalHeader, JournalLine, TaxRate
 from accountant_portal.models import AccountantProfile
 from accountant_portal.services import accept_company_invitation, create_company_invitation
 from core.models import TenantModule
 from core.modules import invalidate_module_cache
 from partners.models import Partner
-from sales.models import SalesInvoice
+from sales.models import SalesInvoice, SalesSettings
 from tenants.models import Tenant, UserCompanyMembership
 
 
@@ -57,9 +57,6 @@ class ClientFileTest(APITestCase):
         self.customer = Partner.objects.create(
             tenant=self.client_tenant, name="زبون البيع", partner_type="customer", tax_number="11",
         )
-        self.sale = self._invoice("SI-OF-1", SalesInvoice.INVOICE_KIND_SALE, Decimal("1000"), Decimal("160"))
-        self.purchase = self._invoice("PI-OF-1", SalesInvoice.INVOICE_KIND_PURCHASE, Decimal("400"), Decimal("64"))
-        self._invoice("SI-OLD", SalesInvoice.INVOICE_KIND_SALE, Decimal("999"), Decimal("99"), day=date(2026, 1, 5))
 
         self.revenue = Account.objects.create(
             tenant=self.client_tenant, code="4101", name="إيراد مبيعات", account_type="Revenue",
@@ -70,6 +67,26 @@ class ClientFileTest(APITestCase):
         self.cash = Account.objects.create(
             tenant=self.client_tenant, code="1101", name="صندوق", account_type="Asset",
         )
+        # issue #79: كشف/ملخص الضريبة يُبنيان من الدفتر لا من `tax_amount` —
+        # حسابا الضريبة + TaxRate لكل اتجاه، وقيدٌ مطابق لكل فاتورة أدناه.
+        self.output_vat_account = Account.objects.create(
+            tenant=self.client_tenant, code="2104", name="ضريبة القيمة المضافة - مخرجات",
+            account_type="Liability",
+        )
+        self.input_vat_account = Account.objects.create(
+            tenant=self.client_tenant, code="1105", name="ضريبة القيمة المضافة - مدخلات",
+            account_type="Asset",
+        )
+        TaxRate.objects.create(
+            tenant=self.client_tenant, name="ض.ق.م مخرجات", code="VAT-OUT",
+            rate=Decimal("16.00"), tax_account=self.output_vat_account, direction="sales",
+        )
+        SalesSettings.objects.create(tenant=self.client_tenant, vat_input_account=self.input_vat_account)
+
+        self.sale = self._invoice("SI-OF-1", SalesInvoice.INVOICE_KIND_SALE, Decimal("1000"), Decimal("160"))
+        self.purchase = self._invoice("PI-OF-1", SalesInvoice.INVOICE_KIND_PURCHASE, Decimal("400"), Decimal("64"))
+        self._invoice("SI-OLD", SalesInvoice.INVOICE_KIND_SALE, Decimal("999"), Decimal("99"), day=date(2026, 1, 5))
+
         self._journal(self.revenue, credit=Decimal("1000"))
         self._journal(self.expense, debit=Decimal("300"))
 
@@ -77,7 +94,7 @@ class ClientFileTest(APITestCase):
         self.client.force_authenticate(self.accountant)
 
     def _invoice(self, number, kind, subtotal, tax, day=date(2026, 6, 10)):
-        return SalesInvoice.objects.create(
+        invoice = SalesInvoice.objects.create(
             tenant=self.client_tenant,
             invoice_number=number,
             customer=self.customer,
@@ -88,6 +105,35 @@ class ClientFileTest(APITestCase):
             subtotal_excl_tax=subtotal,
             tax_amount=tax,
             grand_total=subtotal + tax,
+        )
+        self._tax_journal(invoice)
+        return invoice
+
+    def _tax_journal(self, invoice):
+        """قيدٌ حقيقي لضريبة الفاتورة — issue #79: الملخّص يقرأ الدفتر لا الفاتورة."""
+        amount = Decimal(str(invoice.tax_amount or 0))
+        if amount == 0:
+            return
+        kind = invoice.invoice_kind
+        if kind == SalesInvoice.INVOICE_KIND_SALE:
+            vat_debit, vat_credit, account = Decimal("0"), amount, self.output_vat_account
+        elif kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+            vat_debit, vat_credit, account = amount, Decimal("0"), self.output_vat_account
+        elif kind == SalesInvoice.INVOICE_KIND_PURCHASE:
+            vat_debit, vat_credit, account = amount, Decimal("0"), self.input_vat_account
+        else:  # purchase_return
+            vat_debit, vat_credit, account = Decimal("0"), amount, self.input_vat_account
+        header = JournalHeader.objects.create(
+            tenant=self.client_tenant, transaction_date=invoice.invoice_date,
+            description=f"ضريبة — {invoice.invoice_number}", is_posted=True,
+        )
+        JournalLine.objects.create(
+            tenant=self.client_tenant, journal=header, account=account,
+            debit=vat_debit, credit=vat_credit,
+        )
+        JournalLine.objects.create(
+            tenant=self.client_tenant, journal=header, account=self.cash,
+            debit=vat_credit, credit=vat_debit,
         )
 
     def _journal(self, account, debit=Decimal("0"), credit=Decimal("0")):
@@ -167,9 +213,13 @@ class ClientFileTest(APITestCase):
 
         data = response.data["summary"]
         self.assertEqual(data["equity"], "5000.00")
-        # النقد: 5000 رأس مال + 1000 إيراد − 300 مصروف
-        self.assertEqual(data["assets"], "5700.00")
-        self.assertEqual(data["liabilities"], "0.00")
+        # issue #79: قيود الضريبة الحقيقية (على 1105/2104) صارت جزءاً من الدفتر —
+        # النقد: 5000 رأس مال + 1000 إيراد − 300 مصروف + 160 ضريبة SI-OF-1
+        # − 64 ضريبة PI-OF-1 + 99 ضريبة SI-OLD (تاريخها يناير لكن ضمن التراكمي
+        # حتى نهاية الفترة) = 5895، وحساب ضريبة المدخلات (1105) أصلٌ بذاته = 64.
+        self.assertEqual(data["assets"], "5959.00")
+        # ضريبة المخرجات (2104) التزامٌ حقيقي الآن: 160 (SI-OF-1) + 99 (SI-OLD).
+        self.assertEqual(data["liabilities"], "259.00")
         self.assertEqual(data["revenue"], "1000.00")
 
     def test_returns_reduce_both_vat_sides(self):
@@ -226,7 +276,9 @@ class PracticeAndStatementsTest(ClientFileTest):
         self.assertEqual(income["expense_total"], "300.00")
         self.assertEqual(income["profit"], "700.00")
         self.assertEqual([row["name"] for row in income["expenses"]], ["إيجار"])
-        self.assertEqual(balance["asset_total"], "700.00")
+        # issue #79: قيود الضريبة الحقيقية أضافت للنقد 160 (SI-OF-1) − 64
+        # (PI-OF-1) + 99 (SI-OLD) = 895، وضريبة المدخلات (1105) أصلٌ بذاته = 64.
+        self.assertEqual(balance["asset_total"], "959.00")
 
     def test_trend_returns_a_row_for_every_month_even_the_empty_ones(self):
         response = self._get("/api/accountant/client/trend/?months=6")

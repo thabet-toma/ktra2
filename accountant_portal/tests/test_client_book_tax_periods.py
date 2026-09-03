@@ -15,7 +15,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
-from accounting.models import Account
+from accounting.models import Account, JournalHeader, JournalLine, TaxRate
 from accounting.services import create_fiscal_year
 from accountant_portal.models import TaxPeriodReview
 from core.models import TenantModule
@@ -28,6 +28,20 @@ from tenants.services import create_company
 ACC = "/api/accounting"
 TAX = "/api/accountant/tax/periods"
 PASSWORD = "Office-Manager-Pass-77"
+
+
+def _configure_vat_accounts(tenant):
+    """issue #79: TaxRate باتجاه المخرجات على «2104» — كلاهما مزروع في COA_DATA."""
+    output_account = Account.objects.get(tenant=tenant, code="2104")
+    input_account = Account.objects.get(tenant=tenant, code="1105")
+    TaxRate.objects.create(
+        tenant=tenant, name="ض.ق.م مخرجات", code="VAT-OUT",
+        rate=Decimal("16.00"), tax_account=output_account, direction="sales",
+    )
+    TaxRate.objects.create(
+        tenant=tenant, name="ض.ق.م مدخلات", code="VAT-IN",
+        rate=Decimal("16.00"), tax_account=input_account, direction="purchase",
+    )
 
 
 def _invoice(tenant, currency, number, day, **overrides):
@@ -46,7 +60,45 @@ def _invoice(tenant, currency, number, day, **overrides):
         "grand_total": Decimal("116.00"),
     }
     payload.update(overrides)
-    return SalesInvoice.objects.create(**payload)
+    invoice = SalesInvoice.objects.create(**payload)
+    _post_tax_journal(invoice)
+    return invoice
+
+
+def _post_tax_journal(invoice):
+    """قيدٌ حقيقي لضريبة الفاتورة — `build_vat_statement` (issue #79) يقرأ الدفتر لا `tax_amount`."""
+    amount = Decimal(str(invoice.tax_amount or 0))
+    if amount == 0 or invoice.status != SalesInvoice.STATUS_POSTED:
+        return
+    tenant = invoice.tenant
+    try:
+        contra = Account.objects.get(tenant=tenant, code="1103")
+        if invoice.invoice_kind == SalesInvoice.INVOICE_KIND_PURCHASE:
+            vat_account = Account.objects.get(tenant=tenant, code="1105")
+            vat_debit, vat_credit = amount, Decimal("0")
+        elif invoice.invoice_kind == SalesInvoice.INVOICE_KIND_PURCHASE_RETURN:
+            vat_account = Account.objects.get(tenant=tenant, code="1105")
+            vat_debit, vat_credit = Decimal("0"), amount
+        elif invoice.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+            vat_account = Account.objects.get(tenant=tenant, code="2104")
+            vat_debit, vat_credit = amount, Decimal("0")
+        else:  # sale
+            vat_account = Account.objects.get(tenant=tenant, code="2104")
+            vat_debit, vat_credit = Decimal("0"), amount
+    except Account.DoesNotExist:
+        return
+    header = JournalHeader.objects.create(
+        tenant=tenant, transaction_date=invoice.invoice_date,
+        description=f"ضريبة — {invoice.invoice_number}", is_posted=True,
+    )
+    JournalLine.objects.create(
+        tenant=tenant, journal=header, account=vat_account,
+        debit=vat_debit, credit=vat_credit,
+    )
+    JournalLine.objects.create(
+        tenant=tenant, journal=header, account=contra,
+        debit=vat_credit, credit=vat_debit,
+    )
 
 
 class ClientBookTaxPeriodRoutingTest(APITestCase):
@@ -65,6 +117,7 @@ class ClientBookTaxPeriodRoutingTest(APITestCase):
         TenantModule.objects.create(tenant=cls.book, module_key="accountant_portal", enabled=True)
         create_fiscal_year(cls.book, 2026)
         create_fiscal_year(cls.office, 2026)
+        _configure_vat_accounts(cls.book)
 
     def setUp(self):
         invalidate_module_cache(self.book.pk)

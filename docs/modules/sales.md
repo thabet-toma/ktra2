@@ -63,7 +63,8 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:  # (
 def sales_cogs_map(*, tenant_id: int, invoice_ids) -> dict[tuple[int, int], dict]:  # يستهلكها core.reports (2685)
 def invoice_profits(*, tenant_id: int, branch=None, date_from=None, date_to=None, customer_id=None) -> dict:  # (2725)
 def dormant_customers(*, tenant_id: int, days: int | None = None) -> list[dict]:  # (226)
-def build_vat_statement(tenant_id: int, period_from, period_to, *, user=None):  # (4000)
+def build_vat_statement(tenant_id: int, period_from, period_to, *, user=None):  # الأرقام من accounting.services.vat_period_totals وحدها — الدفتر لا الفواتير (issue #79)
+def vat_statement_diff_report(tenant_id: int) -> list[dict]:  # تقرير فرقٍ للقراءة فقط: محفوظ كل كشف مقابل ما يحسبه vat_period_totals الآن — بلا كتابة (issue #79)
 def next_invoice_number(tenant_id: int, book_number: int = 0, branch=None) -> str:  # (3059)
 def resolve_default_account(tenant_id, code_prefixes=None, acc_type=None, name_kw=None, *, allow_any_of_type=True):  # (91)
 def resolve_product_revenue_account(tenant_id: int) -> Account:  # «4101» من الشجرة أو يُنشئه ويُثبِّته — نظير resolve_service_revenue_account (ISSUE #59) (`sales/services/calc.py`)
@@ -162,6 +163,8 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 - **تجاوز حساب المنتج (`Product.sale_account_override`) يسري على الخدمة أيضاً (ISSUE #78)**: `_resolve_revenue_account_for_line` (`sales/services/calc.py`) كانت تحرس هذا التجاوز بـ`not is_service` — فأي بندٍ خدميّ يسقط حتماً إلى `_default_revenue_account(is_service=True)` (حساب الخدمات العام) ولو حمل المنتج حساب أتعابٍ خاص، وهو ما جعل `4103`-`4106` المزروعة مع قالب «مكتب محاسبة» حسابات ميتة. الآن: خدمةٌ بتجاوزٍ مضبوط تُرحَّل عليه مباشرةً (بلا استدعاء `inventory.services._resolve_line_account` كاملةً — سلسلتها الداخلية منتجيّة الطابع وتُسقط الخدمة إلى حساب البضاعة بدل العام)، وخدمةٌ بلا تجاوز تسقط إلى الحساب العام كما كانت. **تجاوزا الفاتورة والتصنيف يبقيان محروسَين بـ`not is_service` كما هما** — لا توسّع في الأثر خارج تجاوز المنتج نفسه.
 - **حسابا إيراد المنتج والخدمة لا يُثبَّتان على رأس الشجرة أبداً**: `default_revenue_account_product`/`_service` (`SalesSettings`) يُتركان فارغين عند إنشاء الشركة (`get_or_create_sales_settings`) — `resolve_product_revenue_account`/`resolve_service_revenue_account` (`sales/services/calc.py`) وحدهما يملآنهما: تحلّان `4101`/`4102` من الشجرة أو تُنشئانهما وتُثبّتانهما. العيب (ISSUE #59، وقبله #53 على جانب الخدمة): أوّل حساب إيراد **بالكود** هو رأس الشجرة «4» (`'4' < '41' < '4101'`)، حسابٌ أب لا يصلح هدفاً للترحيل. `python manage.py fix_product_revenue_account_default` يُصلح صفوف `SalesSettings` القائمة **حيث كان المُثبَّت حساباً أباً فقط** (idempotent، `--dry-run`) — بلا مساس بحسابٍ أو قيدٍ مُرحَّل.
 
+- **كشف ض.ق.م (issue #79)**: `build_vat_statement` (`sales/services/supplier_vat.py`) ما عاد يقرأ `tax_amount` على `SalesInvoice` — يستدعي `accounting.services.vat_period_totals` (الدفتر) وحدها، نفس الدالّة التي تستدعيها `VatReportView` (`accounting`) و`client_financial_summary` (`accountant_portal`)، فيتّفق الثلاثة دائماً. **فرادة (شركة، من، إلى) هي حارس الاحتساب المزدوج الآن** — سقط `vat_statement__isnull=True` كآلية اختيار (الحقل `SalesInvoice.vat_statement` يبقى للتاريخ/التتبّع لا للاحتساب). فكّ ترحيل مستندٍ مؤرَّخ داخل فترة كشف `VatStatement.status='final'` مرفوض من `accounting.services.unpost_document` — لا أثر رجعي على كشفٍ نهائي.
+
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
 |---|---|
@@ -180,3 +183,5 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 | `sales/tests/test_invoice_context_tabs.py` | تبويبات سياق الفاتورة: حركاتها المخزنية وحدها وسببُ فراغها، ومطابقة «قبل/بعد» لكشف الحساب سطراً بسطر (وأن أثر المدفوعة بالكامل = إجماليها لا صفر)، ونافذةٌ ترسو على فاتورة قديمة، والمرفق يُضاف لفاتورة مرحّلة ويُحذف بنطاق فاتورته |
 | `sales/tests/test_product_revenue_head_fix.py` | ISSUE #59: شركة بكر تُرحّل بضاعتها على `4101` لا رأس الشجرة، `resolve_product_revenue_account` تُثبِّت وتُعيد الاستعمال، وأمر `fix_product_revenue_account_default` يُصلح الصفّ الخاطئ (حساب أب) وحده، idempotent، و`--dry-run` لا يكتب |
 | `sales/tests/test_office_service_fee_accounts.py` | ISSUE #78: قالب `accounting_firm` يزرع خمس خدمات مربوطة بحساباتها؛ بند «مسك دفاتر شهري» يُرحَّل على `4103` لا `4102`؛ خدمةٌ بلا حساب خاص تسقط إلى `4102` كالسابق؛ منتجٌ غير خدميّ (بتجاوزٍ أو بدونه) بلا تغيير — اختبار تراجعٍ صريح؛ و`general` صفر خدماتٍ مزروعة |
+| `sales/tests/test_vat_statement_returns.py` | مراجيع البيع/الشراء تُخصم لا تُضاف في `build_vat_statement` — الفواتير هنا مرفقة بقيود حقيقية على حسابي الضريبة المشتقّين (issue #79) |
+| `accounting/tests/test_vat_single_source.py` | issue #79 كاملةً: اتفاق العارضين الثلاثة، حارس فكّ الترحيل داخل فترة كشف `final`، غياب الأثر الرجعي، وتقرير الفرق للقراءة فقط |

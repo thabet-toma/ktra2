@@ -900,10 +900,15 @@ def client_expense_rows(*, tenant, date_from, date_to):
 
 
 def client_financial_summary(*, tenant, date_from, date_to):
-    """ملخص الزبون: الربح والضريبة بحسبة مباشرة يفهمها صاحب المكتب فوراً."""
+    """ملخص الزبون: الربح والضريبة بحسبة مباشرة يفهمها صاحب المكتب فوراً.
+
+    الضريبة من `accounting.services.vat_period_totals` وحدها (issue #79) —
+    نفس الدالّة التي يستدعيها `VatReportView` و`build_vat_statement` — لا حسبة
+    ثالثة من فواتير المبيعات كانت تختلف عنهما.
+    """
     from django.db.models import Case, DecimalField, Sum, When
     from accounting.models import JournalLine
-    from sales.models import SalesInvoice
+    from accounting.services import vat_period_totals
 
     decimal_field = DecimalField(max_digits=18, decimal_places=2)
     ledger = JournalLine.objects.filter(
@@ -928,29 +933,7 @@ def client_financial_summary(*, tenant, date_from, date_to):
             )
         ),
     )
-    vat = SalesInvoice.objects.filter(
-        tenant=tenant,
-        status="posted",
-        invoice_date__gte=date_from,
-        invoice_date__lte=date_to,
-    ).aggregate(
-        output_vat=Sum(
-            Case(
-                When(invoice_kind="sale", then=F("tax_amount")),
-                When(invoice_kind="sale_return", then=-F("tax_amount")),
-                default=Decimal("0"),
-                output_field=decimal_field,
-            )
-        ),
-        input_vat=Sum(
-            Case(
-                When(invoice_kind="purchase", then=F("tax_amount")),
-                When(invoice_kind="purchase_return", then=-F("tax_amount")),
-                default=Decimal("0"),
-                output_field=decimal_field,
-            )
-        ),
-    )
+    vat_totals = vat_period_totals(tenant.pk, date_from, date_to)
 
     # الميزانية تراكمية حتى نهاية الفترة لا داخلها — أصول وخصوم وحقوق ملكية.
     balances = JournalLine.objects.filter(
@@ -984,8 +967,8 @@ def client_financial_summary(*, tenant, date_from, date_to):
 
     revenue = _money(ledger["revenue"])
     expenses = _money(ledger["expenses"])
-    output_vat = _money(vat["output_vat"])
-    input_vat = _money(vat["input_vat"])
+    output_vat = _money(vat_totals["output"]["balance_payable"])
+    input_vat = _money(vat_totals["input"]["balance"])
     assets = _money(balances["assets"])
     liabilities = _money(balances["liabilities"])
     equity = _money(balances["equity"])

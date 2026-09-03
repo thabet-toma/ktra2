@@ -311,13 +311,20 @@ def build_vat_statement(
     *,
     user=None,
 ):
-    """يُولّد كشف ض.ق.م دوري — يَجمع الفواتير المرحَّلة في الفترة بـvat_statement IS NULL.
+    """يُولّد كشف ض.ق.م دوري — الأرقام من `accounting.services.vat_period_totals`
+    وحدها (issue #79): الدفتر يرى كل مصدر ضريبة (سند مصروف، إيصال استلام،
+    فاتورة شراء، فاتورة بيع) لا فواتير المبيعات وحدها. نفس الدالّة يستدعيها
+    `VatReportView` (المعاينة) و`client_financial_summary` (ملخص الزبون في
+    `accountant_portal`) فيتّفق الثلاثة دائماً على الرقم.
 
-    P-H-6: مَلفوف بـtransaction.atomic() + select_for_update على الفواتير المؤهَّلة
-    لمنع سباق مُولِّدَيْن مُتزامنَيْن. كما يَرفض الفترات المتداخلة مع كشوف موجودة.
+    P-H-6: مَلفوف بـtransaction.atomic()، ويَرفض الفترات المتداخلة مع كشوف
+    موجودة — فرادة (شركة، من، إلى) هي حارس الاحتساب المزدوج الوحيد الآن
+    (سقط `vat_statement__isnull=True` كآلية اختيار؛ الحقل يبقى للتاريخ). قفل
+    `select_for_update` على فواتير الفترة يبقى لتسلسل مُولِّدَين متزامنَين على
+    فترتين متقاطعتين — لا للاحتساب.
     """
     from sales.models import VatStatement
-    from accounting.services import next_document_number
+    from accounting.services import next_document_number, vat_period_totals
 
     with transaction.atomic():
         # P-H-6: reject overlapping period windows for the same tenant.
@@ -336,35 +343,22 @@ def build_vat_statement(
             )
 
         # Lock the candidate invoices so a concurrent generator cannot
-        # claim the same rows under a different statement.
-        invoices = list(
+        # build an overlapping statement while this one is in flight —
+        # مُجرّد قفلٍ للتزامن؛ الأرقام أدناه من الدفتر لا من هذه الفواتير.
+        invoice_ids = list(
             SalesInvoice.objects.select_for_update().filter(
                 tenant_id=tenant_id,
                 status=SalesInvoice.STATUS_POSTED,
                 invoice_date__gte=period_from,
                 invoice_date__lte=period_to,
-                vat_statement__isnull=True,
-            ).select_related('currency')
+            ).values_list('pk', flat=True)
         )
 
-        total_sales_vat = Decimal('0.00')
-        total_purchase_vat = Decimal('0.00')
+        totals = vat_period_totals(tenant_id, period_from, period_to)
+        total_sales_vat = totals['output']['balance_payable']
+        total_purchase_vat = totals['input']['balance']
+        net_vat = totals['net_payable']
 
-        # task11 R2-A2: المراجيع تُخصم لا تُضاف — مرجع البيع يخفّض ضريبة
-        # المخرجات ومرجع الشراء يخفّض ضريبة المدخلات (كانت تُجمع موجبة
-        # فيتضخم الكشف من الجهتين).
-        for inv in invoices:
-            amt = Decimal(str(inv.tax_amount or 0))
-            if inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE:
-                total_sales_vat += amt
-            elif inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
-                total_sales_vat -= amt
-            elif inv.invoice_kind == SalesInvoice.INVOICE_KIND_PURCHASE:
-                total_purchase_vat += amt
-            else:  # purchase_return
-                total_purchase_vat -= amt
-
-        net_vat = (total_sales_vat - total_purchase_vat).quantize(Decimal('0.01'))
         stmt_no = f"VAT-{next_document_number(tenant_id, 'vat_statement')}"
 
         stmt = VatStatement.objects.create(
@@ -372,14 +366,13 @@ def build_vat_statement(
             statement_number=stmt_no,
             period_from=period_from,
             period_to=period_to,
-            total_sales_vat=total_sales_vat.quantize(Decimal('0.01')),
-            total_purchase_vat=total_purchase_vat.quantize(Decimal('0.01')),
+            total_sales_vat=total_sales_vat,
+            total_purchase_vat=total_purchase_vat,
             net_vat=net_vat,
             created_by=user,
         )
 
-        # Re-issue the update by pk to use the lock acquired above.
-        invoice_ids = [inv.pk for inv in invoices]
+        # تاريخٌ لا احتساب: يربط فواتير الفترة بالكشف للتتبّع فقط.
         updated = SalesInvoice.objects.filter(pk__in=invoice_ids).update(vat_statement=stmt)
 
         create_audit_log(
@@ -388,8 +381,40 @@ def build_vat_statement(
             action="CREATE",
             model_name="VatStatement",
             object_id=stmt.id,
-            change_details=f"Created VAT statement {stmt_no}: {updated} invoices linked, net={net_vat}",
+            change_details=f"Created VAT statement {stmt_no}: {updated} invoice(s) tagged, net={net_vat} (ledger-sourced)",
         )
         return stmt
+
+
+def vat_statement_diff_report(tenant_id: int) -> list[dict]:
+    """تقرير فرقٍ للقراءة فقط (issue #79): لكل كشف ض.ق.م محفوظ، المحفوظ مقابل
+    ما تحسبه `accounting.services.vat_period_totals` الآن لنفس الفترة. **لا
+    يكتب صفاً ولا يمسّ كشفاً محفوظاً** — الكشوف `final` القائمة لا أثر رجعي
+    عليها؛ تصحيحها بإقرار معدَّل لا بإعادة احتساب صامتة.
+    """
+    from sales.models import VatStatement
+    from accounting.services import vat_period_totals
+
+    rows = []
+    for stmt in VatStatement.objects.filter(tenant_id=tenant_id).order_by('period_from'):
+        computed = vat_period_totals(tenant_id, stmt.period_from, stmt.period_to)
+        computed_net = computed['net_payable']
+        stored_net = Decimal(stmt.net_vat)
+        rows.append({
+            'statement_id': stmt.id,
+            'statement_number': stmt.statement_number,
+            'period_from': stmt.period_from,
+            'period_to': stmt.period_to,
+            'status': stmt.status,
+            'stored_sales_vat': Decimal(stmt.total_sales_vat),
+            'stored_purchase_vat': Decimal(stmt.total_purchase_vat),
+            'stored_net_vat': stored_net,
+            'computed_sales_vat': computed['output']['balance_payable'],
+            'computed_purchase_vat': computed['input']['balance'],
+            'computed_net_vat': computed_net,
+            'matches': stored_net == computed_net,
+            'difference': computed_net - stored_net,
+        })
+    return rows
 
 
