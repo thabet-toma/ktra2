@@ -9,15 +9,27 @@
  * Enter ينزل صفّاً (`KitGrid` — نفس محرّك قيد اليومية)، وTab ينتقل حقلاً
  * بترتيب DOM الطبيعي بلا جافاسكربت إضافي. الحساب يُقترح من الطرف فور كتابة
  * اسمٍ رُمِّز من قبل، وتجاوز الاقتراح مجرّد كتابةٍ فوقه — بلا سؤال ولا تحذير.
+ *
+ * **متابعة #85 — عمود «طريقة الدفع»**: الافتراضي `cash` (`utils/codingRowPaymentMethod.ts`)
+ * بعد تحقّق — `resolve_cash_account` (`accounting/services.py`) يحلّ صندوقاً
+ * (1101 المزروع في `client_book`) لدفترٍ طازج بلا رمي، ولا حارس رصيدٍ سالبٍ
+ * يمنع الترحيل في هذه الوحدة، فـ«نقد» يعمل من اليوم الأول. صفّ «نقد» يُرفق
+ * بصندوق الشركة الافتراضي إن عُرف (`utils/cashBox.ts` — `pickDefaultCashAccount`،
+ * لا خوارزمية جديدة)، وإلا يُترك الحقل غائباً ليحلّه الخادم كما يفعل اليوم.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { accountingApi } from "../../services/accountingApi";
+import { accountingApi, type CashBoxLedgerLink } from "../../services/accountingApi";
 import { createReviewQuery } from "../../services/accountantApi";
 import { cloudinaryService } from "../../services/cloudinaryService";
 import { useToast } from "../../contexts/ToastContext";
 import { humanizeThrown } from "../../utils/drfError";
 import { formatMoney } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
+import { pickDefaultCashAccount } from "../../utils/cashBox";
+import {
+  CODING_PAYMENT_METHODS, DEFAULT_CODING_PAYMENT_METHOD, paymentFieldsForRow,
+  type CodingPaymentMethod,
+} from "../../utils/codingRowPaymentMethod";
 import { FileDropZone } from "../ui/FileDropZone";
 import { PaymentVoucherModal } from "../sales/PaymentVoucherParts";
 import { KitDocumentShell, KitGrid } from "../kit";
@@ -35,6 +47,7 @@ type CodingRow = {
   key: number;
   date: string;
   direction: Direction;
+  paymentMethod: CodingPaymentMethod;
   partnerText: string;
   partnerId: number | null;
   docNumber: string;
@@ -69,6 +82,7 @@ export const DocumentCodingPage: React.FC = () => {
       key: keySeqRef.current,
       date: today(),
       direction: "expense",
+      paymentMethod: DEFAULT_CODING_PAYMENT_METHOD,
       partnerText: "",
       partnerId: null,
       docNumber: "",
@@ -88,6 +102,7 @@ export const DocumentCodingPage: React.FC = () => {
   const [currencies, setCurrencies] = useState<CurrencyRow[]>([]);
   const [partners, setPartners] = useState<AccountingPartner[]>([]);
   const [codingRules, setCodingRules] = useState<CodingRuleDto[]>([]);
+  const [cashBoxes, setCashBoxes] = useState<CashBoxLedgerLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -106,16 +121,18 @@ export const DocumentCodingPage: React.FC = () => {
     setLoading(true);
     setErr(null);
     try {
-      const [accs, currs, parts, rules] = await Promise.all([
+      const [accs, currs, parts, rules, boxes] = await Promise.all([
         accountingApi.getAccounts() as Promise<AccountRow[]>,
         accountingApi.getCurrencies() as Promise<CurrencyRow[]>,
         accountingApi.getPartners() as Promise<AccountingPartner[]>,
         accountingApi.getCodingRules(),
+        accountingApi.getCashBoxLedgers(),
       ]);
       setAccounts(accs || []);
       setCurrencies(currs || []);
       setPartners(parts || []);
       setCodingRules(rules || []);
+      setCashBoxes(boxes || []);
     } catch (e: unknown) {
       setErr(humanizeThrown(e, "فشل التحميل"));
     } finally {
@@ -138,6 +155,13 @@ export const DocumentCodingPage: React.FC = () => {
   );
   const revenueAccountOptions = useMemo(
     () => accounts.filter((a) => a.account_type === "Revenue"), [accounts],
+  );
+
+  // متابعة #85: الصندوق/البنك الافتراضي للشركة لصفوف الدفع النقدي — نفس السلّم
+  // المشترك (`utils/cashBox.ts`)، لا خوارزمية جديدة. `null` لا يمنع الحفظ:
+  // الخادم (`resolve_cash_account`) يحلّه بسلّمه نفسه إن غاب هنا.
+  const defaultCashAccountId = useMemo(
+    () => pickDefaultCashAccount({ boxes: cashBoxes }).accountId, [cashBoxes],
   );
 
   const updateRow = useCallback((idx: number, patch: Partial<CodingRow>) => {
@@ -225,9 +249,9 @@ export const DocumentCodingPage: React.FC = () => {
         tax_amount: r.taxAmount || "0",
         currency: defaultCurrencyId,
         exchange_rate: "1",
-        // بلا صندوق/بنك في هذه الشاشة عمداً — الترميز الدفعي يسجّل «على الحساب»؛
-        // تسوية النقد مسارٌ آخر (سندات القبض/الصرف).
-        payment_method: "on_account",
+        // متابعة #85: طريقة الدفع فعلية من الصفّ — «نقد» يُرفق بصندوقٍ افتراضي
+        // معلوم إن وُجد، و«على الحساب» كما كانت دوماً بلا حقل إضافي.
+        ...paymentFieldsForRow(r.paymentMethod, defaultCashAccountId),
         ...(r.accountId ? { account: r.accountId } : (r.accountText.trim() ? { account_name: r.accountText.trim() } : {})),
         ...(r.partnerId ? { partner: r.partnerId } : (r.partnerText.trim() ? { partner_name: r.partnerText.trim() } : {})),
         ...(r.docNumber.trim() ? { description: r.docNumber.trim() } : {}),
@@ -266,7 +290,7 @@ export const DocumentCodingPage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [rows, defaultCurrencyId, makeRow, toast, refreshCodingRules]);
+  }, [rows, defaultCurrencyId, defaultCashAccountId, makeRow, toast, refreshCodingRules]);
 
   type GridRow = CodingRow & { _idx: number };
   const gridRows: GridRow[] = rows.map((r, i) => ({ ...r, _idx: i }));
@@ -311,6 +335,16 @@ export const DocumentCodingPage: React.FC = () => {
     >
       <option value="expense">مصروف</option>
       <option value="revenue">إيراد</option>
+    </select>
+  );
+
+  const renderPaymentMethodCell = (row: GridRow) => (
+    <select
+      className="ktra-input" data-ktra-key="1"
+      value={row.paymentMethod}
+      onChange={(e) => updateRow(row._idx, { paymentMethod: e.target.value as CodingPaymentMethod })}
+    >
+      {CODING_PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
     </select>
   );
 
@@ -412,6 +446,7 @@ export const DocumentCodingPage: React.FC = () => {
   const gridColumns: KitGridColumn<GridRow>[] = [
     { key: "date", header: "التاريخ", width: "130px", render: renderDateCell },
     { key: "direction", header: "الاتجاه", width: "90px", render: renderDirectionCell },
+    { key: "paymentMethod", header: "طريقة الدفع", width: "100px", render: renderPaymentMethodCell },
     { key: "partner", header: "الطرف", width: "16%", render: renderPartnerCell },
     { key: "docNumber", header: "رقم المستند", width: "14%", render: renderDocNumberCell },
     { key: "amount", header: "المبلغ", width: "110px", type: "number", render: renderAmountCell },

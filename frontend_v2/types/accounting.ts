@@ -239,6 +239,8 @@ export interface VoucherBatchSaveRow {
   currency: number;
   exchange_rate?: string | number;
   payment_method?: string;
+  /** متابعة #85 — «نقد» وحدها تستعمله؛ خادمياً `cash_or_bank_account_id`. */
+  cash_or_bank_account?: number;
   account?: number;
   account_name?: string;
   partner?: number;

@@ -4,6 +4,9 @@ import { expect, test, type Page } from '@playwright/test';
  * ISSUE #85 — شاشة الترميز الدفعي: ثلاثة صفوف بلوحة المفاتيح، اقتراحُ الحساب
  * من الطرف، تجاوزُه بلا سؤال، حفظٌ دفعيّ واحد، وصفٌّ خاطئ يبقى وحده.
  *
+ * متابعة #85 — عمود «طريقة الدفع»: صفٌّ «على الحساب» وصفٌّ «نقد» في نفس
+ * الحفظة، وكلاهما ينجح؛ صفّ النقد يحمل الصندوق الافتراضي المُستجلَب فعلاً.
+ *
  * `test.setTimeout` صريحة — رحلةٌ متعدّدة الخطوات فوق تحميلٍ باردٍ لصفحة lazy
  * (نفس ملاحظة `e2e/office-client-book-door.spec.ts`).
  */
@@ -32,6 +35,13 @@ const PARTNERS = [{ id: 77, name: 'مورد الكهرباء' }];
 const CODING_RULES = [{
   id: 9, partner: 77, partner_name: 'مورد الكهرباء',
   account: 501, account_name: 'كهرباء', account_code: '5203', updated_at: '2026-08-01T00:00:00Z',
+}];
+
+// متابعة #85: صندوق الشركة الافتراضي — يثبت أن صفّ «نقد» يُرفق به فعلاً لا
+// بحدسٍ محلي في الاختبار وحده.
+const CASH_BOXES = [{
+  id: 1, external_id: 'box-1', name: 'الصندوق الرئيسي', currency_code: 'ILS',
+  account_id: 601, account_code: '1101', is_default: true, is_active: true,
 }];
 
 const TENANT = {
@@ -75,6 +85,7 @@ async function stub(page: Page) {
     if (path.endsWith('/accounting/currencies/')) return json(CURRENCIES);
     if (path.endsWith('/partners/lookup/')) return json(PARTNERS);
     if (path.endsWith('/accounting/coding-rules/')) return json(CODING_RULES);
+    if (path.endsWith('/accounting/cash-box-accounts/')) return json(CASH_BOXES);
     if (path.endsWith('/accounting/vouchers/batch-save/') && request.method() === 'POST') {
       // الصفّان الأوّلان صحيحان، والثالث خاطئ عمداً — معيار القبول الأخير.
       return json({
@@ -90,7 +101,7 @@ async function stub(page: Page) {
   });
 }
 
-test('ترميز دفعي: ثلاثة صفوف بلوحة المفاتيح، اقتراح وتجاوز، حفظٌ واحد، وصفّ خاطئ يبقى وحده', async ({ page }) => {
+test('ترميز دفعي: ثلاثة صفوف بلوحة المفاتيح، اقتراح وتجاوز، طريقتا دفع، حفظٌ واحد، وصفّ خاطئ يبقى وحده', async ({ page }) => {
   test.setTimeout(90_000);
   await stub(page);
 
@@ -105,6 +116,9 @@ test('ترميز دفعي: ثلاثة صفوف بلوحة المفاتيح، ا�
   const row = (i: number) => page.locator('.ktra-grid tbody tr').nth(i);
 
   // ── الصفّ الأول: بلوحة المفاتيح — طرفٌ بلا قاعدة ترميز سابقة (اسمٌ حرّ) ──
+  // «طريقة الدفع» (العمود الثاني select) — بلوحة المفاتيح: تبديلٌ صريح عن
+  // الافتراضي «نقد» إلى «على الحساب» عبر selectOption (لا نقر فأرة).
+  await row(0).locator('select').nth(1).selectOption('on_account');
   await row(0).getByPlaceholder('اسم الطرف (اختياري)').fill('زبون مباشر');
   await row(0).getByPlaceholder('رقم الفاتورة/الإيصال').fill('F-1001');
   await row(0).getByPlaceholder('حساب المصروف/الإيراد').fill('5203 كهرباء');
@@ -114,7 +128,9 @@ test('ترميز دفعي: ثلاثة صفوف بلوحة المفاتيح، ا�
   await amount0.press('Enter');
   await expect(page.locator('.ktra-grid tbody tr')).toHaveCount(2, { timeout: 5000 });
 
-  // ── الصفّ الثاني: اقتراح الحساب فور كتابة الطرف المرمَّز مسبقاً ──
+  // ── الصفّ الثاني: اقتراح الحساب فور كتابة الطرف المرمَّز مسبقاً، وطريقة
+  // الدفع «نقد» (الافتراضي) مُعاد اختيارها صراحةً بلوحة المفاتيح أيضاً ──
+  await row(1).locator('select').nth(1).selectOption('cash');
   const accountInput1 = row(1).getByPlaceholder('حساب المصروف/الإيراد');
   await row(1).getByPlaceholder('اسم الطرف (اختياري)').fill('مورد الكهرباء');
   await expect(accountInput1).toHaveValue('5203 كهرباء');
@@ -139,8 +155,17 @@ test('ترميز دفعي: ثلاثة صفوف بلوحة المفاتيح، ا�
     req.url().includes('/accounting/vouchers/batch-save/') && req.method() === 'POST');
   await page.getByRole('button', { name: 'حفظ', exact: true }).click();
   const request = await saveRequest;
-  const body = request.postDataJSON() as { rows: unknown[] };
+  const body = request.postDataJSON() as {
+    rows: Array<{ payment_method?: string; cash_or_bank_account?: number }>;
+  };
   expect(body.rows).toHaveLength(3);
+
+  // متابعة #85: صفٌّ «على الحساب» بلا صندوق، وصفٌّ «نقد» بصندوقه الافتراضي
+  // المُستجلَب من الخادم — كلاهما في الحفظة نفسها.
+  expect(body.rows[0].payment_method).toBe('on_account');
+  expect(body.rows[0].cash_or_bank_account).toBeUndefined();
+  expect(body.rows[1].payment_method).toBe('cash');
+  expect(body.rows[1].cash_or_bank_account).toBe(601);
 
   // ── الصفّ الخاطئ يبقى وحده بعد الحفظ ──
   await expect(page.locator('.ktra-grid tbody tr')).toHaveCount(1, { timeout: 10_000 });
