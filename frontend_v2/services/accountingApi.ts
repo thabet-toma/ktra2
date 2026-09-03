@@ -13,9 +13,12 @@ import type {
   BankStatementDto,
   ChequeDepositBatchResult,
   ChequeDto,
+  CodingRuleDto,
   ExpenseVoucherDto,
   OpeningBalanceDto,
   OpeningBalanceLinesInput,
+  VoucherBatchSaveResult,
+  VoucherBatchSaveRow,
 } from "../types/accounting";
 
 // كل نداءات هذا العميل القديمة تمر الآن من دورة الطلب المحدودة والموحّدة.
@@ -1030,5 +1033,36 @@ export const accountingApi = {
     });
     await handle(res, "unpostExpenseVoucher");
     return res.json();
+  },
+
+  // ─── issue #84/#85: الحفظ الدفعي وقواعد الترميز — شاشة الترميز الدفعي ───
+
+  /**
+   * صفوفٌ كل صفٍّ سندَ إيرادٍ أو مصروف، كلٌّ بمعاملته الذرّية الخاصة —
+   * `200` دائماً، النجاح والفشل في `rows` بترتيب الفهرس المُرسَل.
+   */
+  batchSaveVouchers: async (rows: VoucherBatchSaveRow[]): Promise<VoucherBatchSaveResult> => {
+    const res = await fetch(`${ACC}/vouchers/batch-save/`, {
+      method: "POST", headers: headers(), body: JSON.stringify({ rows }),
+    });
+    await handle(res, "batchSaveVouchers");
+    return res.json();
+  },
+
+  /** قواعد الترميز الحالية — لبناء خريطة الاقتراح (طرف ← حساب) في الشاشة. بلا ترقيم. */
+  getCodingRules: (): Promise<CodingRuleDto[]> =>
+    fetch(`${ACC}/coding-rules/`, { headers: headers() }).then(asList) as Promise<CodingRuleDto[]>,
+
+  updateCodingRule: async (id: number, accountId: number): Promise<CodingRuleDto> => {
+    const res = await fetch(`${ACC}/coding-rules/${id}/`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify({ account: accountId }),
+    });
+    await handle(res, "updateCodingRule");
+    return res.json();
+  },
+
+  deleteCodingRule: async (id: number): Promise<void> => {
+    const res = await fetch(`${ACC}/coding-rules/${id}/`, { method: "DELETE", headers: headers() });
+    await handle(res, "deleteCodingRule");
   },
 };

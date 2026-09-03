@@ -17,15 +17,16 @@
 `general` بلا بيان (`shell_manifest` تعيد `None`) — الشريط الحالي المكتوب
 يدوياً في `Sidebar.tsx` يبقى حرفياً بلا مسّ؛ فراغُ البيان هو آلية التراجع.
 
-شاشتان مذكورتان أدناه لم تُبنيا بعد (`UNBUILT_VIEWS`) وتأتيان في تذكرةٍ لاحقة:
-«المكتب» (`office-desk`، لوحة مكتب مكتب المحاسبة) و«ترميز مستندات»
-(`document-coding`، واجهة `POST vouchers/batch-save/` — issue #84 بناها
-خادمياً بلا شاشة). الواجهة تسقط بأيّهما إلى `dashboard`.
+شاشةٌ واحدة مذكورة أدناه لم تُبنَ بعد (`UNBUILT_VIEWS`) وتأتي في تذكرةٍ لاحقة:
+«المكتب» (`office-desk`، لوحة مكتب مكتب المحاسبة). الواجهة تسقط بها إلى
+`dashboard`. **«ترميز مستندات» (`document-coding`) بُنيت في issue #85** —
+`frontend_v2/components/accounting/DocumentCodingPage.tsx` فوق
+`POST vouchers/batch-save/` التي بنتها #84 خادمياً — وخرجت من هذه القائمة.
 """
 import copy
 
-# شاشتان يذكرهما البيان بلا شاشةٍ فعلية بعد — الواجهة تسقط بهما إلى `dashboard`.
-UNBUILT_VIEWS: frozenset[str] = frozenset({"office-desk", "document-coding"})
+# شاشةٌ واحدة يذكرها البيان بلا شاشةٍ فعلية بعد — الواجهة تسقط بها إلى `dashboard`.
+UNBUILT_VIEWS: frozenset[str] = frozenset({"office-desk"})
 
 SHELL_MANIFESTS: dict[str, dict] = {
     "accounting_firm": {

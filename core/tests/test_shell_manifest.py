@@ -43,9 +43,15 @@ class ShellManifestFunctionTest(SimpleTestCase):
         firm = shell_manifest("accounting_firm")
         book = shell_manifest("client_book")
         self.assertIn("office-desk", [v for g in firm["groups"] for v in g["views"]])
-        self.assertIn("document-coding", [v for g in book["groups"] for v in g["views"]])
         self.assertEqual(set(firm["unbuilt_views"]), UNBUILT_VIEWS)
         self.assertEqual(set(book["unbuilt_views"]), UNBUILT_VIEWS)
+
+    def test_document_coding_is_no_longer_unbuilt(self):
+        """issue #85 بنى الشاشة (`DocumentCodingPage.tsx`) — لم تعد تسقط إلى
+        `dashboard` رغم بقائها مذكورة في مجموعة «الإدخال» لدفتر العميل."""
+        book = shell_manifest("client_book")
+        self.assertIn("document-coding", [v for g in book["groups"] for v in g["views"]])
+        self.assertNotIn("document-coding", UNBUILT_VIEWS)
 
     def test_manifest_does_not_mutate_shared_state_across_calls(self):
         """`shell_manifest` يعيد نسخةً عميقة — تعديل صفوف مجموعةٍ في ناتج نداءٍ

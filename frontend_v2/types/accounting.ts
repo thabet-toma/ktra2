@@ -216,6 +216,53 @@ export interface ChequeWalletDto {
   net_open: string;
 }
 
+/**
+ * issue #84 — قاعدة ترميز (شركة، طرف) ← حساب: تُقرأ لبناء اقتراح الحساب
+ * ولا تُنشأ من الواجهة (أثرٌ جانبيّ للحفظ الدفعي وحده).
+ */
+export interface CodingRuleDto {
+  id: number;
+  partner: number;
+  partner_name: string;
+  account: number;
+  account_name: string;
+  account_code: string;
+  updated_at: string;
+}
+
+/** issue #84 — صفٌّ يُرسَل إلى `POST vouchers/batch-save/`. */
+export interface VoucherBatchSaveRow {
+  direction: "expense" | "revenue";
+  date: string;
+  amount: string | number;
+  tax_amount?: string | number;
+  currency: number;
+  exchange_rate?: string | number;
+  payment_method?: string;
+  account?: number;
+  account_name?: string;
+  partner?: number;
+  partner_name?: string;
+  description?: string;
+  attachment_url?: string;
+}
+
+/** issue #84 — نتيجة صفٍّ واحد بعد الحفظ الدفعي. */
+export interface VoucherBatchSaveRowResult {
+  index: number;
+  success: boolean;
+  id?: number;
+  number?: number;
+  direction?: string;
+  error?: string;
+}
+
+export interface VoucherBatchSaveResult {
+  rows: VoucherBatchSaveRowResult[];
+  succeeded: number;
+  failed: number;
+}
+
 export interface TrialBalanceRow {
   id: number;
   code: string | null;

@@ -287,3 +287,27 @@ export const submitClientTaxPeriod = (
   `accountant/tax/periods/${periodId}/mark-submitted/`, body, { tenantId },
 );
 
+// ── issue #85 — «ناقِش»: يفتح `ReviewQuery` القائم من التذكرة #46 لا محادثة جديدة ──
+
+export interface ReviewQueryRecord {
+  id: number;
+  entity_type: string;
+  entity_id: number | null;
+  entity_label: string;
+  title: string;
+  body: string;
+  severity: 'blocker' | 'warning' | 'info';
+  status: 'open' | 'answered' | 'resolved' | 'withdrawn';
+}
+
+export const createReviewQuery = (
+  tenantId: number,
+  body: {
+    title: string;
+    body: string;
+    severity?: 'blocker' | 'warning' | 'info';
+    entity_type?: string;
+    entity_label?: string;
+  },
+) => apiPostObject<{ query: ReviewQueryRecord }>('accountant/review/queries/', body, { tenantId });
+
