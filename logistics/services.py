@@ -164,6 +164,14 @@ def convert_local_quotation_to_order(quotation, *, user=None):
     if quotation.status != SupplierQuotation.STATUS_ACCEPTED:
         raise ValidationError('يجب اعتماد عرض الشراء قبل تحويله إلى طلبية.')
 
+    # ISSUE #117: المفتاح يحكم الإنشاء لا الرؤية — لا طلبية جديدة مطفأً، لكن
+    # طلبيةً قائمة (سُطر 158) تعود كما هي بلا حجب.
+    settings_obj = get_or_create_purchase_settings(quotation.tenant)
+    if not settings_obj.use_purchase_orders:
+        raise ValidationError(
+            'خطوة أمر الشراء معطّلة من إعدادات الشراء — التسلسل الافتراضي طلبية ← عروض ← فاتورة.'
+        )
+
     # T-DRAFTPARTY: المورد/المنتجات المبدئية تصير سجلات حقيقية هنا لا قبل ذلك.
     materialize_quotation_draft_parties(quotation, user=user)
 

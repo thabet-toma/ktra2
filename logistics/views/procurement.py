@@ -497,7 +497,16 @@ class PurchaseOrderViewSet(BaseTenantViewSet):
         return qs.order_by('-order_date', '-id')
 
     def perform_create(self, serializer):
+        from logistics.services import get_or_create_purchase_settings
+
         tenant = get_tenant(self.request)
+        # ISSUE #117: المفتاح يحكم الإنشاء لا الرؤية — أمرٌ قائم يبقى مقروءاً
+        # ومفتوحاً حتى بعد إطفاء الإعداد؛ الإنشاء وحده يُرفض.
+        settings_obj = get_or_create_purchase_settings(tenant)
+        if not settings_obj.use_purchase_orders:
+            raise ValidationError(
+                'خطوة أمر الشراء معطّلة من إعدادات الشراء — التسلسل الافتراضي طلبية ← عروض ← فاتورة.'
+            )
         kwargs = {'tenant': tenant}
         if self.request.user.is_authenticated:
             kwargs['created_by'] = self.request.user

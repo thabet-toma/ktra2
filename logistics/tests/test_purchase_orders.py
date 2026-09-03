@@ -39,6 +39,12 @@ class PurchaseOrderAPITest(APITestCase):
         cls.other_product = Product.objects.create(
             tenant=cls.other_tenant, sku='PO-ITEM-X', name_ar='منتج أجنبي',
         )
+        # ISSUE #117: هذا الملف يختبر أمر الشراء نفسه — الإعداد الجديد مطفأ
+        # افتراضاً، فيلزم إشعاله هنا كي يبقى الملف يختبر ما صُمّم لاختباره.
+        from logistics.services import get_or_create_purchase_settings
+        ps = get_or_create_purchase_settings(cls.tenant)
+        ps.use_purchase_orders = True
+        ps.save(update_fields=['use_purchase_orders'])
 
     def setUp(self):
         self.client.force_authenticate(user=self.user)

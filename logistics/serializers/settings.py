@@ -138,6 +138,7 @@ class PurchaseSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = PurchaseSettings
         fields = ['id', 'purchase_default_price_strategy', 'default_cash_account',
+                  'use_purchase_orders',
                   'receive_on_post', 'receipt_doc_label', 'standalone_receipt_label',
                   'allow_standalone_receipt', 'allow_edit_receipt',
                   'serial_entry_mode',

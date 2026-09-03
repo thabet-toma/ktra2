@@ -216,6 +216,12 @@ class QuotationMaterializationNormalizedMatchTest(APITestCase):
         cls.supplier = Partner.objects.create(
             tenant=cls.tenant, name="مورد محلي", partner_type="Supplier",
         )
+        # ISSUE #117: هذا الاختبار يحوّل عرضاً إلى طلبية شراء — الإعداد الجديد
+        # مطفأ افتراضاً، فيلزم إشعاله هنا كي يبقى الملف يختبر ما صُمّم لاختباره.
+        from logistics.services import get_or_create_purchase_settings
+        ps = get_or_create_purchase_settings(cls.tenant)
+        ps.use_purchase_orders = True
+        ps.save(update_fields=["use_purchase_orders"])
 
     def setUp(self):
         self.client.force_authenticate(user=self.owner)

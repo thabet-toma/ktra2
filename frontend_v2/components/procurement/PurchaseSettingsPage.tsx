@@ -36,6 +36,8 @@ const PurchaseSettingsPage: React.FC = () => {
   const [strategy, setStrategy] = useState<string>("LAST_PURCHASE");
   // T-A4: الصندوق الافتراضي لفواتير الشراء.
   const [cashAccount, setCashAccount] = useState<number | null>(null);
+  // ISSUE #117: أمر الشراء خطوة اختيارية بين عرض السعر والفاتورة — مطفأً افتراضاً.
+  const [usePurchaseOrders, setUsePurchaseOrders] = useState(false);
   // استلام البضاعة للمخزن مع الترحيل، أو تأجيله لنافذة الاستلام ببنودها.
   const [receiveOnPost, setReceiveOnPost] = useState(true);
   // مستند الاستلام: تسميتاه (مرتبط/مستقل) وإتاحة المستقل والتعديل.
@@ -67,6 +69,7 @@ const PurchaseSettingsPage: React.FC = () => {
       ]);
       setStrategy(s.purchase_default_price_strategy || "LAST_PURCHASE");
       setCashAccount(s.default_cash_account ?? null);
+      setUsePurchaseOrders(s.use_purchase_orders === true);
       setReceiveOnPost(s.receive_on_post !== false);
       setReceiptLabel(s.receipt_doc_label || "إرسالية شراء");
       setStandaloneLabel(s.standalone_receipt_label || "سند استلام");
@@ -99,6 +102,7 @@ const PurchaseSettingsPage: React.FC = () => {
       await purchaseInvoiceApi.updateSettings({
         purchase_default_price_strategy: strategy,
         default_cash_account: cashAccount,
+        use_purchase_orders: usePurchaseOrders,
         receive_on_post: receiveOnPost,
         receipt_doc_label: receiptLabel.trim() || "إرسالية شراء",
         standalone_receipt_label: standaloneLabel.trim() || "سند استلام",
@@ -120,7 +124,7 @@ const PurchaseSettingsPage: React.FC = () => {
       setSaving(false);
     }
   }, [
-    strategy, cashAccount, receiveOnPost, receiptLabel, standaloneLabel,
+    strategy, cashAccount, usePurchaseOrders, receiveOnPost, receiptLabel, standaloneLabel,
     allowStandalone, allowEditReceipt, serialMode,
     leadTimeDays, reviewPeriodDays, forecastAlpha, forecastBeta,
     forecastHistoryWeeks, forecastTrendCapRatio, forecastSafetyFactor,
@@ -194,6 +198,28 @@ const PurchaseSettingsPage: React.FC = () => {
               ))}
             </div>
           )}
+
+          {/* ISSUE #117: أمر الشراء خطوة اختيارية — يحكم الإنشاء لا الرؤية. */}
+          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+            <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">خطوة أمر الشراء</h3>
+            <p className="text-sm text-[var(--ktra-ink-soft)] mb-2 flex items-start gap-1">
+              <Info className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                معطّلاً (الافتراضي): السلسلة طلبية ← عروض ← فاتورة بلا أمر شراء. مفعّلاً:
+                يُضاف أمر شراء بين اعتماد عرض السعر والفاتورة. الإطفاء لا يخفي أوامر
+                الشراء القائمة — تبقى مرئيةً ومفتوحةً للاطّلاع، والمُعطَّل هو إنشاء أمرٍ جديد وحده.
+              </span>
+            </p>
+            <label className="flex items-center gap-2 cursor-pointer select-none text-[var(--ktra-ink)]">
+              <input
+                type="checkbox"
+                disabled={loading}
+                checked={usePurchaseOrders}
+                onChange={(e) => setUsePurchaseOrders(e.target.checked)}
+              />
+              <span>تفعيل خطوة أمر الشراء في سلسلة الشراء المحلي</span>
+            </label>
+          </div>
 
           {/* استلام البضاعة مع الترحيل — مرآة «خصم المخزون عند الترحيل» في المبيعات. */}
           <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">

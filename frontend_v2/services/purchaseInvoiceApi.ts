@@ -19,6 +19,8 @@ const NETWORK_HINT =
 export interface PurchaseSettingsDto {
   purchase_default_price_strategy: string;
   default_cash_account: number | null;
+  /** ISSUE #117: تفعيل خطوة «أمر الشراء» بين عرض السعر والفاتورة (افتراضياً معطّلة). */
+  use_purchase_orders: boolean;
   receive_on_post: boolean;
   /** تسمية مستند الاستلام المرتبط بفاتورة (يحرّرها المستخدم). */
   receipt_doc_label: string;
