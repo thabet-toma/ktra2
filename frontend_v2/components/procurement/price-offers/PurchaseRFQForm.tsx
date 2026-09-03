@@ -22,7 +22,7 @@ import {
   type KitGridColumn,
   type KitToolbarAction,
 } from "../../kit";
-import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Award, Ban, UserPlus } from "lucide-react";
+import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Award, Ban, UserPlus, Printer, FileSpreadsheet } from "lucide-react";
 import {
   CommercialDocumentEditor,
   type CommercialHeaderField,
@@ -48,6 +48,7 @@ import { getScreenColumns, type ProcurementColumnKey } from "../../../utils/proc
 import { formatDateValue } from "../../../utils/formatDate";
 import { useToast } from "../../../contexts/ToastContext";
 import type { Item, Supplier } from "../../../types";
+import { PurchaseRFQPrintView } from "./PurchaseRFQPrintView";
 
 type RfqLineItem = {
   key: string;
@@ -117,6 +118,8 @@ export const PurchaseRFQForm: React.FC<Props> = ({
   const [msg, setMsg] = useState<string | null>(null);
   const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
   const [addRecipientId, setAddRecipientId] = useState("");
+  const [showPrintView, setShowPrintView] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => { setCurrent(rfq); }, [rfq]);
 
@@ -286,6 +289,33 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     }
   };
 
+  /**
+   * ISSUE #114 — ملفّ Excel للمورد: صفَّا عناوين (عبري/عربي)، وعمود سعر
+   * فارغ. `buildRfqSupplierXlsxBuffer` تبني الحمولة بقائمة سماح وحدها —
+   * لا يُمرَّر «السعر التقديري» مهما حمله `current`.
+   */
+  const handleExportXlsx = async () => {
+    if (!current) return;
+    setExporting(true);
+    try {
+      const { buildRfqSupplierXlsxBuffer } = await import("../../../utils/purchaseRfqXlsx");
+      const buffer = await buildRfqSupplierXlsxBuffer(current);
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${current.rfq_number || "طلبية"}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "تعذّر توليد ملف Excel", "error");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   useKitKeymap({
     F12: () => { if (!saving && !isLocked) void handleSave(); },
     Escape: () => onCancel(),
@@ -298,6 +328,15 @@ export const PurchaseRFQForm: React.FC<Props> = ({
       onClick: !isLocked && !saving ? () => void handleSave() : undefined,
       disabled: isLocked || saving },
     { key: "cancel", label: "رجوع", icon: <X />, onClick: onCancel, separatorBefore: true },
+    ...(current ? [{
+      key: "print", label: "طباعة", icon: <Printer />,
+      onClick: () => setShowPrintView(true), separatorBefore: true,
+    }] : []),
+    ...(current ? [{
+      key: "export-xlsx", label: exporting ? "...تصدير" : "تصدير Excel",
+      icon: exporting ? <Loader2 className="animate-spin" /> : <FileSpreadsheet />,
+      onClick: !exporting ? () => void handleExportXlsx() : undefined, disabled: exporting,
+    }] : []),
     ...(current && current.status === "draft" ? [{
       key: "send", label: "إرسال للموردين", icon: <Send />,
       onClick: !saving ? () => void handleSend() : undefined, disabled: saving,
@@ -506,6 +545,14 @@ export const PurchaseRFQForm: React.FC<Props> = ({
       )}
     </div>
   );
+
+  if (showPrintView && current) {
+    return (
+      <div className="fixed inset-0 z-[100] ktra-bg-field overflow-y-auto">
+        <PurchaseRFQPrintView rfq={current} onClose={() => setShowPrintView(false)} />
+      </div>
+    );
+  }
 
   return (
     <CommercialDocumentEditor<RfqLineItem>
