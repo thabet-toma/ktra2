@@ -50,6 +50,28 @@ def test_supplier_page_never_shows_the_estimated_price_or_lowest_price(
     assert "قطعة" in html
 
 
+def test_each_line_is_rendered_exactly_once_not_twice(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """جدولان يمرّان على `doc.lines` نفسِها = كلُّ صنفٍ مرّتين أمام المورّد.
+
+    القالبُ يفترض إطفاءَ الجدول العام لهذا النوع ويقوله في تعليقه، والباني لم
+    يكن يمرّر `show_lines=False` — فالورقةُ التي يُسعِّر منها المورّد كانت تُظهر
+    كلَّ بندٍ مكرَّراً بخانتَي سعرٍ لا واحدة. حارسٌ على العدد لا على الوجود.
+    """
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    html = client.get(f"/s/{share.token}").content.decode("utf-8")
+
+    line = purchase_rfq.lines.order_by("seq", "id").first()
+    name = line.name_snapshot or (line.product and line.product.name_ar) or ""
+    assert name, "البند بلا اسم — الاختبار نفسه لا معنى له حينها"
+    assert html.count(name) == 1, (
+        f"اسم البند «{name}» ظهر {html.count(name)} مرّة — الجدولان يتكرّران"
+    )
+    # وخانةُ السعر لكلّ بندٍ واحدةٌ لا اثنتان.
+    assert html.count(f'name="price_{line.id}"') == 1
+
+
 def test_estimated_price_is_not_even_loaded_from_the_database(purchase_rfq):
     from docshare.documents import DOC_TYPES
 
