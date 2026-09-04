@@ -33,7 +33,28 @@ import { FieldHint } from "./ui/FieldHint";
 import type { SimpleHintKey } from "../constants/simpleHints";
 import { permForView } from "../utils/viewPermissions";
 import { useTenantSettings } from "../hooks/useTenantSettings";
+import { listPurchaseRfqs, type PurchaseRFQDto } from "../services/procurementDocumentsApi";
 
+// ISSUE #115 قصّة ٣٠ §٦: شارة «ردٌّ جديد» على بند «العروض والطلبيات» — بلا
+// جدول إشعارات جديد على الخادم (المواصفة تنصّ صراحةً «صفر جداول جديدة»).
+// العدد مشتقٌّ من بيانات الطلبيات القائمة أصلاً (`recipients[].replied_at`)،
+// و«غير مقروء» محليٌّ بنفس نمط `WhatsNewButton.tsx` (`SEEN_KEY` في localStorage)
+// لا نمطٌ ثانٍ يُخترع هنا.
+type RfqBadgeScope = "local" | "import";
+const RFQ_SEEN_STORAGE_KEY: Record<RfqBadgeScope, string> = {
+  local: "ktra_rfq_replies_seen_local",
+  import: "ktra_rfq_replies_seen_import",
+};
+const readRfqSeenIds = (scope: RfqBadgeScope): Set<number> => {
+  try {
+    const raw = localStorage.getItem(RFQ_SEEN_STORAGE_KEY[scope]);
+    return new Set(raw ? (JSON.parse(raw) as number[]) : []);
+  } catch {
+    return new Set();
+  }
+};
+const repliedRecipientIds = (rows: PurchaseRFQDto[]): number[] =>
+  rows.flatMap((rfq) => rfq.recipients.filter((r) => r.replied_at).map((r) => r.id));
 
 interface SidebarProps {
   user: User;
@@ -51,6 +72,54 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const hiddenByTemplate = (view: AppView) => templateHidesView(String(view), template);
   const isSimpleMode = uiMode === 'simple';
   const { identity } = useTenantSettings();
+
+  // ISSUE #115 قصّة ٣٠ §٦: عدّاد ردود الطلبية غير المطّلَع عليها — لكلا بندي
+  // «العروض والطلبيات» (الشراء المحلي والاستيراد، لكلٍّ نطاقه الخاص في
+  // `PurchaseRFQ`). يُجلب مرّة عند إتاحة البند فقط — لا استطلاعٌ متكرر.
+  const [rfqRepliedIds, setRfqRepliedIds] = useState<Record<RfqBadgeScope, number[]>>({ local: [], import: [] });
+  const [rfqUnseenCount, setRfqUnseenCount] = useState<Record<RfqBadgeScope, number>>({ local: 0, import: 0 });
+  const localRfqPerm = permForView("price-offers");
+  const importRfqPerm = permForView("import-offers");
+  const canSeeLocalRfq = !localRfqPerm || can(localRfqPerm);
+  const canSeeImportRfq = canAccessImport && (!importRfqPerm || can(importRfqPerm));
+  useEffect(() => {
+    const wantLocal = canSeeLocalRfq && !templateHidesView("price-offers", template);
+    const wantImport = canSeeImportRfq && !templateHidesView("import-offers", template);
+    if (!wantLocal && !wantImport) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [localRows, importRows] = await Promise.all([
+          // «مُرسَلة» وحدها — الطلبيةُ المُرساة أو الملغاة لا يصلها ردٌّ جديد،
+          // وجلبُ القائمة كاملةً عند كل إقلاعٍ ثمنٌ لا تستحقّه شارة.
+          wantLocal ? listPurchaseRfqs("local", "sent") : Promise.resolve([]),
+          wantImport ? listPurchaseRfqs("import", "sent") : Promise.resolve([]),
+        ]);
+        if (cancelled) return;
+        const localIds = repliedRecipientIds(localRows);
+        const importIds = repliedRecipientIds(importRows);
+        setRfqRepliedIds({ local: localIds, import: importIds });
+        setRfqUnseenCount({
+          local: localIds.filter((id) => !readRfqSeenIds("local").has(id)).length,
+          import: importIds.filter((id) => !readRfqSeenIds("import").has(id)).length,
+        });
+      } catch {
+        // الشارة تفصيلٌ تجميلي — فشل جلبها لا يجوز أن يُسقط الشريط الجانبي.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [canSeeLocalRfq, canSeeImportRfq, template]);
+
+  // فتح البند = «اطّلع» — يُسجَّل ما عُرف من ردود حتى الآن فتختفي الشارة.
+  const markRfqRepliesSeen = (scope: RfqBadgeScope) => {
+    try {
+      localStorage.setItem(RFQ_SEEN_STORAGE_KEY[scope], JSON.stringify(rfqRepliedIds[scope]));
+    } catch {
+      // لا صلاحية تخزين محلي — الشارة تعود في الزيارة القادمة، لا كسر يحدث.
+    }
+    setRfqUnseenCount((prev) => ({ ...prev, [scope]: 0 }));
+  };
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   // A5: «وضع المحاسب» — ترتيبُ عرضٍ محفوظ لصاحب هذا المتصفح، يضع المحاسبة أولاً.
@@ -117,7 +186,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "points-history" as AppView, label: "سجل نقاطي", icon: <PointsIcon className="h-5 w-5" />, roles: ['employee', 'procurement', 'manager'] },
   ];
 
-  type NavLink = { view: AppView; label: string; icon: React.ReactNode; path?: string; newTab?: boolean; roles?: string[]; perm?: string };
+  type NavLink = { view: AppView; label: string; icon: React.ReactNode; path?: string; newTab?: boolean; roles?: string[]; perm?: string; badge?: number };
 
   // 2) المبيعات — إعدادات المبيعات آخراً (Section 9).
   const salesLinksAll: NavLink[] = [
@@ -142,7 +211,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   // 4) المشتريات
   const purchasesLinksAll: NavLink[] = [
     { view: "purchase-invoices", label: "فواتير الشراء", icon: <NoteIcon className="h-4 w-4" /> },
-    { view: "price-offers", label: "العروض والطلبيات", icon: <FileText className="h-4 w-4" /> },
+    { view: "price-offers", label: "العروض والطلبيات", icon: <FileText className="h-4 w-4" />, badge: rfqUnseenCount.local || undefined },
     { view: "purchase-receipts", label: "إرساليات الشراء", icon: <Truck className="h-4 w-4" /> },
     { view: "purchase-return", label: "مرجع الشراء", icon: <FileText className="h-4 w-4" /> },
     { view: "supplier-payments", label: "سندات الصرف للموردين", icon: <Banknote className="h-4 w-4" /> },
@@ -155,7 +224,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
   // 5) الاستيراد
   const importLinksAll: NavLink[] = [
-    { view: "import-offers", label: "العروض والطلبيات", icon: <ClipboardList className="h-4 w-4" /> },
+    { view: "import-offers", label: "العروض والطلبيات", icon: <ClipboardList className="h-4 w-4" />, badge: rfqUnseenCount.import || undefined },
     { view: "international-invoices", label: "الفواتير الدولية", icon: <FileText className="h-4 w-4" /> },
     { view: "deals-management", label: "الصفقات", icon: <Handshake className="h-4 w-4" /> },
     { view: "shipments-management", label: "الشحنات", icon: <Ship className="h-4 w-4" /> },
@@ -340,13 +409,27 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                 key={link.view + (link.path || "")}
                 onClick={() => {
                   if (link.newTab && link.path) openInNewTab(link.path);
-                  else { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }
+                  else {
+                    setView(link.view);
+                    // ISSUE #115 قصّة ٣٠ §٦: فتح الشاشة = اطّلاعٌ على ردودها المعروفة الآن.
+                    if (link.view === "price-offers") markRfqRepliesSeen("local");
+                    else if (link.view === "import-offers") markRfqRepliesSeen("import");
+                    if (isMobile) setIsMobileMenuOpen(false);
+                  }
                 }}
                 className={`flex items-center gap-2 w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) && !link.newTab ? "text-[var(--color-primary-emphasis)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
                 title={link.newTab ? `${link.label} (تبويب جديد)` : link.label}
               >
                 <span className="flex-shrink-0">{link.icon}</span>
                 <span className="flex-1 text-right">{link.label}</span>
+                {!!link.badge && (
+                  <span
+                    className="mr-1 inline-flex h-4 min-w-4 flex-shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white"
+                    title={`${link.badge} ردّاً جديداً`}
+                  >
+                    {link.badge}
+                  </span>
+                )}
                 {link.newTab && <ExternalLink className="h-3 w-3 opacity-60 flex-shrink-0" />}
               </button>
             ))}

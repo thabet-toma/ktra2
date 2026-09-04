@@ -25,6 +25,7 @@ import {
   convertSupplierQuotationToPurchaseOrder,
   getSupplierQuotation,
   listPurchaseRfqs,
+  duplicatePurchaseRfq,
   type PurchaseRFQDto,
 } from "../../services/procurementDocumentsApi";
 import { PurchaseRFQForm } from "./price-offers/PurchaseRFQForm";
@@ -33,6 +34,7 @@ import { documentSerialDisplay, elideDocumentNumber } from "../../utils/document
 import { ConvertTargetDialog, type ConvertTarget } from "../sales/ConvertTargetDialog";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { useToast } from "../../contexts/ToastContext";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import {
   canConvertImportOffer,
   isOfferStruckThrough,
@@ -82,6 +84,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
   const scope: PriceOfferScope = props.scope ?? "purchase";
   const statusLabels = scope === "import" ? IMPORT_STATUS_LABELS : STATUS_LABELS;
   const toast = useToast();
+  const confirm = useConfirm();
   const navigate = useNavigate();
   // ISSUE #113: الشاشة تفرّق بين إنشاء «طلبية» (`PurchaseRFQ` — كيانٌ حقيقي
   // بلا سعر إلزامي) وإنشاء «عرض» (`SupplierQuotation`، كما كانت). `rfq-form`
@@ -256,6 +259,35 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
       const exists = prev.some((r) => r.id === saved.id);
       return exists ? prev.map((r) => (r.id === saved.id ? saved : r)) : [saved, ...prev];
     });
+  };
+
+  /**
+   * ISSUE #112 (فجوة مُعادة فتحها): طلبيةٌ مُرسَلة/مُرساة/ملغاة بنودُها مقفلة
+   * (#108 §٧) — من أراد التعديل يفتح نسخةً جديدة (مسودّة بلا رقم ولا مستقبِلين)
+   * بدل بناء طلبية من الصفر.
+   */
+  const handleDuplicateRfq = async (row: PurchaseRFQDto) => {
+    const label = row.rfq_number || `مسودة #${row.id}`;
+    const ok = await confirm({
+      message: `إنشاء نسخة جديدة (مسودة) من الطلبية ${label}؟ البنود تُنسَخ كاملةً، ولا يُنسَخ الموردون ولا الروابط المُرسلة.`,
+      confirmText: "نسخة جديدة",
+      danger: false,
+    });
+    if (!ok) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const copy = await duplicatePurchaseRfq(row.id);
+      setRfqs((prev) => [copy, ...prev]);
+      toast(`تم إنشاء نسخة جديدة (مسودة) من الطلبية ${label}`, "success");
+      openEditRfq(copy);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "تعذّر إنشاء نسخة جديدة من الطلبية";
+      setError(message);
+      toast(message, "error");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSave = async (offerData: Partial<PriceOffer>) => {
@@ -632,12 +664,22 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
           {procurementStatusLabel(procurementDocKind(`rfq-${r.id}`), r.status)}
         </span>
       ) },
-    { key: "actions", header: "إجراءات", width: "100px", align: "center",
+    { key: "actions", header: "إجراءات", width: "170px", align: "center",
       render: (r) => (
-        <button className="ktra-text-accent hover:underline text-xs"
-          onClick={(e) => { e.stopPropagation(); openEditRfq(r); }}>
-          {r.status === "draft" ? "تعديل" : "فتح"}
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <button className="ktra-text-accent hover:underline text-xs"
+            onClick={(e) => { e.stopPropagation(); openEditRfq(r); }}>
+            {r.status === "draft" ? "تعديل" : "فتح"}
+          </button>
+          {/* ISSUE #112: البنود مقفلة بعد أوّل إرسال — «نسخة جديدة» مخرجُ من
+              تغيّر احتياجه. المسودّة تُفتح للتعديل مباشرةً فلا حاجة للزرّ هنا. */}
+          {r.status !== "draft" && (
+            <button className="ktra-text-accent hover:underline text-xs" disabled={saving}
+              onClick={(e) => { e.stopPropagation(); void handleDuplicateRfq(r); }}>
+              نسخة جديدة
+            </button>
+          )}
+        </div>
       ) },
   ];
   const filteredRfqs = useMemo(() => {
@@ -669,6 +711,11 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
   if (viewMode === "rfq-form") {
     return (
       <PurchaseRFQForm
+        /* ISSUE #112: تغيّرُ هويّة الطلبية المفتوحة (فتحُ «نسخة جديدة» من داخل
+           المحرِّر) يجب أن يُعيد تركيب المحرِّر — حالتُه الداخلية تُبنى من
+           الخاصّية مرّةً واحدة عند التركيب، فبلا مفتاحٍ يبقى المحرِّر على
+           الطلبية القديمة والعنوان وحده يتغيّر. */
+        key={currentRfq?.id ?? "new"}
         rfq={currentRfq}
         items={items}
         suppliers={suppliers}

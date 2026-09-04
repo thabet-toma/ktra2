@@ -313,6 +313,9 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             .select_related('tenant', 'created_by')
             .prefetch_related(
                 'lines__product', 'recipients__supplier', 'recipients__quotation',
+            # ISSUE #115: المُسلسِل يبني `share_url` لكل مستقبِل — بلا هذا استعلامٌ
+            # لكل صفٍّ في القائمة والتفصيل معاً.
+            'recipients__share',
             )
         )
         scope = str(self.request.query_params.get('scope') or '').strip()
@@ -647,6 +650,77 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
         return Response(
             PurchaseRFQRecipientSerializer(recipient).data,
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=['post'])
+    def duplicate(self, request, pk=None):
+        """ISSUE #112 (فجوة مُعادة فتحها): «نسخةٌ جديدة» لمن تغيّر احتياجُه
+        بعد أوّل إرسال — مواصفة #108 §٧ «ومن أراد التعديل: نسخةٌ جديدة» لم
+        تكن منفَّذة، فالبنود مقفلة (`validate` أعلاه) بلا مخرج.
+
+        تُنشئ مسودّةً جديدة: النطاق والملاحظات وكلّ البنود (المنتج،
+        `name_snapshot`، المواصفات، الكمية، وحدة القياس، `estimated_price`)
+        منسوخةٌ حرفياً. **لا يُنسَخ المستقبِلون ولا الروابط ولا العروض** —
+        هؤلاء يخصّون الإرسال الفعلي للأصل، ونسخُهم يعني رابطاً "مُرسلاً" لم
+        يُرسَل فعلياً لأحد.
+
+        **لا رقم يُستهلَك هنا** — النسخة مسودّة (`rfq_number=None`) حتى
+        `send/` تخصّص لها رقماً بنفس آلية أوّل إرسال (#112 §الترقيم)؛
+        `TenantBook.last_used_number` لا يتحرّك بمجرّد النسخ.
+
+        **لا حقل مصدرٍ جديد على النموذج** (لا هجرة لهذه المهمة) — الربط
+        بالأصل سطرٌ في الملاحظات يذكر رقمه/معرّفه، لا FK.
+
+        مسموحٌ من أيّ حالة (مسودّة/مُرسَلة/مُرساة/ملغاة): نسخُ مسودّةٍ غير
+        ضارّ، ونسخُ طلبيةٍ مُرساة أو ملغاة هو بالضبط الحالة التي تبرّر هذا
+        الفعل — احتياجٌ عاد بعد أن أُقفلت الأولى أو أُلغيت.
+        """
+        tenant = get_tenant(request)
+        original = PurchaseRFQ.objects.prefetch_related('lines').get(
+            pk=self.get_object().pk, tenant=tenant,
+        )
+
+        origin_label = original.rfq_number or f'RFQ-draft-{original.pk}'
+        lineage_note = f'نسخة جديدة من الطلبية {origin_label}'
+        original_notes = (original.notes or '').strip()
+        combined_notes = (
+            f'{original_notes}\n{lineage_note}' if original_notes else lineage_note
+        )
+
+        with transaction.atomic():
+            copy = PurchaseRFQ.objects.create(
+                tenant=tenant,
+                scope=original.scope,
+                rfq_date=timezone.now().date(),
+                notes=combined_notes,
+                created_by=request.user if request.user.is_authenticated else None,
+            )
+            PurchaseRFQLine.objects.bulk_create([
+                PurchaseRFQLine(
+                    tenant=tenant,
+                    rfq=copy,
+                    product=line.product,
+                    seq=line.seq,
+                    name_snapshot=line.name_snapshot,
+                    specs=line.specs,
+                    quantity=line.quantity,
+                    unit_of_measure=line.unit_of_measure,
+                    estimated_price=line.estimated_price,
+                )
+                for line in original.lines.all()
+            ])
+
+        log_activity(
+            action='create',
+            entity_type='purchase_rfq',
+            entity_id=copy.id,
+            entity_label=f'RFQ-draft-{copy.id}',
+            description=f'نسخة جديدة من الطلبية {origin_label}',
+            request=request,
+        )
+        return Response(
+            PurchaseRFQSerializer(copy, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
         )
 
 

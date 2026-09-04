@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **592**
+عدد النقاط: **593**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -413,6 +413,7 @@
 | `/api/logistics/purchase-rfqs/{pk}/award/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-rfqs/{pk}/cancel/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-rfqs/{pk}/comparison/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/purchase-rfqs/{pk}/duplicate/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-rfqs/{pk}/recipients/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-rfqs/{pk}/send/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-settings/` | `PurchaseSettingsViewSet` | `logistics/views/purchase_settings.py` |

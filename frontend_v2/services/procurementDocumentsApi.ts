@@ -355,6 +355,11 @@ export interface PurchaseRFQRecipientDto {
   sent_at: string | null;
   replied_at: string | null;
   created_at?: string;
+  /** رابط مشاركة هذا المستقبِل وحده — ISSUE #115 قصّة ١٣. فارغ إن لم يُرسَل بعد. */
+  share_url?: string | null;
+  share_expires_at?: string | null;
+  share_revoked_at?: string | null;
+  share_is_live?: boolean;
 }
 
 export interface PurchaseRFQDto {
@@ -387,11 +392,23 @@ export type PurchaseRFQWrite = {
 
 export async function listPurchaseRfqs(
   scope?: ProcurementScope,
+  status?: string,
 ): Promise<PurchaseRFQDto[]> {
+  const query: Record<string, string> = {};
+  if (scope) query.scope = scope;
+  if (status) query.status = status;
   return apiGetList(`${BASE}/purchase-rfqs/`, {
     tenantId: tenantId(),
-    query: scope ? { scope } : undefined,
+    query: Object.keys(query).length ? query : undefined,
   });
+}
+
+/**
+ * ISSUE #112: «نسخةٌ جديدة» من طلبيةٍ مقفلة — مسودّةٌ بلا رقم ولا مستقبِلين،
+ * والأصلُ لا يُمَسّ. الترقيمُ يبقى عند أوّل إرسال.
+ */
+export async function duplicatePurchaseRfq(id: number): Promise<PurchaseRFQDto> {
+  return apiPostObject(`${BASE}/purchase-rfqs/${id}/duplicate/`, {}, { tenantId: tenantId() });
 }
 
 export async function getPurchaseRfq(id: number): Promise<PurchaseRFQDto> {

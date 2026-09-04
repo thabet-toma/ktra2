@@ -22,7 +22,7 @@ import {
   type KitGridColumn,
   type KitToolbarAction,
 } from "../../kit";
-import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Ban, UserPlus, Printer, FileSpreadsheet, GitCompare } from "lucide-react";
+import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Ban, UserPlus, Printer, FileSpreadsheet, GitCompare, Copy, ShieldOff } from "lucide-react";
 import {
   CommercialDocumentEditor,
   type CommercialHeaderField,
@@ -31,6 +31,8 @@ import {
   addPurchaseRfqRecipient,
   cancelPurchaseRfq,
   createPurchaseRfq,
+  duplicatePurchaseRfq,
+  getPurchaseRfq,
   sendPurchaseRfq,
   updatePurchaseRfq,
   type ProcurementScope,
@@ -47,6 +49,8 @@ import {
 import { getScreenColumns, type ProcurementColumnKey } from "../../../utils/procurementColumns";
 import { formatDateValue } from "../../../utils/formatDate";
 import { useToast } from "../../../contexts/ToastContext";
+import { useConfirm } from "../../../contexts/ConfirmContext";
+import { revokeDocumentShare } from "../../../services/docShareApi";
 import type { Item, Supplier } from "../../../types";
 import { PurchaseRFQPrintView } from "./PurchaseRFQPrintView";
 import { RfqComparisonMatrix } from "./RfqComparisonMatrix";
@@ -108,7 +112,11 @@ export const PurchaseRFQForm: React.FC<Props> = ({
   rfq, items, suppliers, scope, isReadOnly = false, onSaved, onCancel,
 }) => {
   const toast = useToast();
+  const confirm = useConfirm();
   const [current, setCurrent] = useState<PurchaseRFQDto | null>(rfq);
+  // ISSUE #115 قصّة ١٦: معرّف رابط المشاركة الجاري إبطاله — لتعطيل زرّه وحده
+  // لا كل الشاشة، فإبطال رابط مورّدٍ لا يُجمّد قائمة المستقبِلين الأخرى.
+  const [revokingShareId, setRevokingShareId] = useState<number | null>(null);
   const [rfqDate, setRfqDate] = useState(rfq?.rfq_date || new Date().toISOString().slice(0, 10));
   const [replyDeadline, setReplyDeadline] = useState(rfq?.reply_deadline || "");
   const [notes, setNotes] = useState(rfq?.notes || "");
@@ -263,6 +271,70 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     }
   };
 
+  // ISSUE #115 قصّة ١٣: نسخ رابط المستقبِل الخاص — نفس نمط `ShareDocumentModal`.
+  const handleCopyShareLink = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("نُسخ الرابط", "success");
+    } catch {
+      toast("انسخ الرابط يدوياً", "info");
+    }
+  };
+
+  // ISSUE #115 قصّة ١٦: إبطال رابطٍ أُرسل بالخطأ — نقطة `revoke` القائمة في
+  // `docshare`، لا نقطة جديدة. إعادة قراءة الطلبية بعدها أوثق من تحديث محليّ.
+  const handleRevokeShare = async (shareId: number) => {
+    if (!current) return;
+    const ok = await confirm({
+      title: "إبطال الرابط",
+      message: "سيتوقف رابط هذا المورّد عن العمل فوراً. لا يمكن التراجع.",
+      confirmText: "إبطال",
+      danger: true,
+    });
+    if (!ok) return;
+
+    setRevokingShareId(shareId);
+    try {
+      await revokeDocumentShare(shareId);
+      const refreshed = await getPurchaseRfq(current.id);
+      setCurrent(refreshed);
+      onSaved(refreshed);
+      toast("أُبطل الرابط", "success");
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "تعذّر إبطال الرابط", "error");
+    } finally {
+      setRevokingShareId(null);
+    }
+  };
+
+  /**
+   * ISSUE #112 قصّة ٤٤ (#108 §٧): البنودُ تُقفل عند أوّل إرسال — ومن تغيّر
+   * احتياجُه بعدها يأخذ **نسخةً جديدة** بدل أن يبنيها من الصفر. النسخةُ مسودّةٌ
+   * بلا رقم ولا مستقبِلين، والأصلُ لا يُمَسّ.
+   */
+  const handleDuplicate = async () => {
+    if (!current) return;
+    const label = current.rfq_number || `مسودة #${current.id}`;
+    const ok = await confirm({
+      title: "نسخة جديدة",
+      message: `إنشاء نسخة جديدة (مسودة) من الطلبية ${label}؟ البنود تُنسَخ كاملةً، ولا يُنسَخ الموردون ولا الروابط المُرسلة.`,
+      confirmText: "نسخة جديدة",
+    });
+    if (!ok) return;
+    setSaving(true);
+    try {
+      const copy = await duplicatePurchaseRfq(current.id);
+      // المُستدعي يُبدّل الطلبية المفتوحة، ومفتاحُ التركيب هناك يُعيد بناء
+      // المحرِّر على النسخة الجديدة.
+      onSaved(copy);
+      toast("فُتحت نسخة جديدة (مسودة)", "success");
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "تعذّر إنشاء نسخة جديدة", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleCancelRfq = async () => {
     if (!current) return;
     setSaving(true);
@@ -341,6 +413,11 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     ...(current && current.status === "awarded" ? [{
       key: "comparison", label: "مقارنة الموردين", icon: <GitCompare />,
       onClick: () => setShowComparison(true),
+    }] : []),
+    ...(current && current.status !== "draft" ? [{
+      key: "duplicate", label: "نسخة جديدة", icon: <Copy />,
+      onClick: !saving ? () => void handleDuplicate() : undefined, disabled: saving,
+      separatorBefore: true,
     }] : []),
     ...(current && (current.status === "draft" || current.status === "sent") ? [{
       key: "cancel-rfq", label: "إلغاء الطلبية", icon: <Ban />, danger: true,
@@ -487,11 +564,38 @@ export const PurchaseRFQForm: React.FC<Props> = ({
               </span>
               <ul className="space-y-1">
                 {current.recipients.map((r) => (
-                  <li key={r.id} className="flex items-center justify-between rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1.5 text-xs">
-                    <span>{r.supplier_name || supplierName(r.supplier)}</span>
-                    <span className="ktra-text-soft">
-                      {r.replied_at ? "وصل ردّه" : r.sent_at ? "بانتظار الردّ" : "لم يُرسَل"}
-                    </span>
+                  <li key={r.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span>{r.supplier_name || supplierName(r.supplier)}</span>
+                      <span className="ktra-text-soft">
+                        {r.replied_at ? "وصل ردّه" : r.sent_at ? "بانتظار الردّ" : "لم يُرسَل"}
+                      </span>
+                    </div>
+                    {/* ISSUE #115 قصّة ١٣/١٦: الرابط يظهر فقط لمن أُرسل له فعلاً وله رابطٌ حيّ. */}
+                    {r.share_url && r.share_is_live ? (
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <input readOnly dir="ltr" value={r.share_url}
+                          onFocus={(e) => e.currentTarget.select()}
+                          className="ktra-input flex-1 truncate font-mono text-[11px]" />
+                        <button type="button" title="نسخ الرابط"
+                          className="ktra-iconbtn"
+                          onClick={() => void handleCopyShareLink(r.share_url!)}>
+                          <Copy className="h-3.5 w-3.5" />
+                        </button>
+                        {r.share ? (
+                          <button type="button" title="إبطال الرابط"
+                            disabled={revokingShareId === r.share}
+                            className="ktra-iconbtn ktra-iconbtn--danger"
+                            onClick={() => void handleRevokeShare(r.share!)}>
+                            <ShieldOff className="h-3.5 w-3.5" />
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : r.share_url ? (
+                      <div className="mt-1 text-[11px] text-red-700">
+                        {r.share_revoked_at ? "أُبطل الرابط" : "انتهت صلاحية الرابط"}
+                      </div>
+                    ) : null}
                   </li>
                 ))}
               </ul>

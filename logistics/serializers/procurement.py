@@ -480,21 +480,47 @@ class PurchaseRFQLineSerializer(serializers.ModelSerializer):
 
 
 class PurchaseRFQRecipientSerializer(serializers.ModelSerializer):
+    """مستقبِلٌ واحد — ورابطُ مشاركته الخاصّ إن كان له رابطٌ حيّ (ISSUE #115 قصّة ١٣).
+
+    الرابط مبنيٌّ عبر `docshare.services.public_url` لا مُلفَّقاً هنا — نفس
+    استيرادٍ كسولٍ لـ`docshare` كما في `_wire_rfq_recipient_shares`
+    (`logistics/views/procurement.py`)، فالاتجاه يبقى `logistics → docshare`
+    لا العكس. `token` الخام لا يُكشَف: الرابط الجاهز يكفي الشاشة والنسخ.
+    """
     supplier_name = serializers.CharField(source='supplier.name', read_only=True)
     quotation_number = serializers.CharField(
         source='quotation.quotation_number', read_only=True, default=None,
     )
+    share_url = serializers.SerializerMethodField()
+    share_expires_at = serializers.DateTimeField(
+        source='share.expires_at', read_only=True, default=None,
+    )
+    share_revoked_at = serializers.DateTimeField(
+        source='share.revoked_at', read_only=True, default=None,
+    )
+    share_is_live = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseRFQRecipient
         fields = [
             'id', 'supplier', 'supplier_name', 'share', 'quotation',
             'quotation_number', 'sent_at', 'replied_at', 'created_at',
+            'share_url', 'share_expires_at', 'share_revoked_at', 'share_is_live',
         ]
         read_only_fields = [
             'id', 'supplier_name', 'share', 'quotation', 'quotation_number',
             'sent_at', 'replied_at', 'created_at',
+            'share_url', 'share_expires_at', 'share_revoked_at', 'share_is_live',
         ]
+
+    def get_share_url(self, obj) -> str | None:
+        if obj.share_id is None:
+            return None
+        from docshare import services as docshare_services
+        return docshare_services.public_url(obj.share)
+
+    def get_share_is_live(self, obj) -> bool:
+        return bool(obj.share and obj.share.is_live)
 
 
 class PurchaseRFQSerializer(serializers.ModelSerializer):

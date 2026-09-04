@@ -11,7 +11,7 @@ from rest_framework.test import APITestCase
 from inventory.models import Product
 from logistics.models import PurchaseRFQ, PurchaseRFQRecipient, SupplierQuotation
 from partners.models import Partner
-from tenants.models import Currency, Tenant, UserCompanyMembership
+from tenants.models import Currency, Tenant, TenantBook, UserCompanyMembership
 
 
 class PurchaseRFQAPITestBase(APITestCase):
@@ -431,6 +431,51 @@ class PurchaseRFQShareWiringTest(PurchaseRFQAPITestBase):
         recipient.refresh_from_db()
         self.assertIsNotNone(recipient.share_id)
 
+    def test_recipient_serializer_exposes_public_share_url_not_bare_token(self):
+        """إعادة فتح #115 قصّة ١٣: الرابط يظهر عبر السيريالايزر لا التوكن الخام."""
+        data = self.create_rfq()
+        rfq_id = data['id']
+        send = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/send/',
+            {'supplier_ids': [self.supplier_a.id]}, format='json',
+        )
+        self.assertEqual(send.status_code, 200, send.content)
+
+        detail = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/')
+        self.assertEqual(detail.status_code, 200, detail.content)
+        recipient = detail.data['recipients'][0]
+
+        recipient_row = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        token = recipient_row.share.token
+
+        self.assertIsNotNone(recipient['share_url'])
+        self.assertIn(token, recipient['share_url'])
+        self.assertNotIn('token', recipient)  # التوكن الخام لا يُكشَف بمفرده
+        self.assertTrue(recipient['share_is_live'])
+        self.assertIsNotNone(recipient['share_expires_at'])
+        self.assertIsNone(recipient['share_revoked_at'])
+
+    def test_revoked_share_reflects_in_recipient_serializer(self):
+        """إعادة فتح #115 قصّة ١٦: الإبطال عبر نقطة docshare القائمة يظهر فوراً في الطلبية."""
+        data = self.create_rfq()
+        rfq_id = data['id']
+        self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/send/',
+            {'supplier_ids': [self.supplier_a.id]}, format='json',
+        )
+        recipient_row = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        share_id = recipient_row.share_id
+
+        revoke = self.client.post(f'/api/document-shares/{share_id}/revoke/')
+        self.assertEqual(revoke.status_code, 200, revoke.content)
+
+        detail = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/')
+        recipient = detail.data['recipients'][0]
+        self.assertFalse(recipient['share_is_live'])
+        self.assertIsNotNone(recipient['share_revoked_at'])
+        # الرابط نفسه يبقى مقروءاً — الواجهة تقرّر إخفاءه بحالة «أُبطِل»، لا الخادم يمحوه.
+        self.assertIsNotNone(recipient['share_url'])
+
 
 class SupplierQuotationRfqLinkTest(PurchaseRFQAPITestBase):
     def test_supplier_quotation_optional_rfq_field_defaults_to_none(self):
@@ -448,3 +493,141 @@ class SupplierQuotationRfqLinkTest(PurchaseRFQAPITestBase):
     def _currency_id(self):
         from tenants.models import Currency
         return Currency.objects.create(Code='RFQ', Name='RFQ currency').pk
+
+
+class PurchaseRFQDuplicateTest(PurchaseRFQAPITestBase):
+    """إعادة فتح القضية #112 — «نسخةٌ جديدة» من طلبيةٍ مقفلة (مواصفة #108 §٧)."""
+
+    def _book_last_used(self):
+        book = TenantBook.objects.filter(
+            tenant=self.tenant, document_type='purchase_rfq', branch__isnull=True,
+        ).first()
+        return book.last_used_number if book else 0
+
+    def test_duplicate_a_sent_rfq_creates_draft_with_same_lines_no_recipients_no_number(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+        send = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/send/',
+            {'supplier_ids': [self.supplier_a.id]}, format='json',
+        )
+        self.assertEqual(send.status_code, 200, send.content)
+        book_after_send = self._book_last_used()
+        self.assertGreater(book_after_send, 0)
+
+        original_line = PurchaseRFQ.objects.get(pk=rfq_id).lines.get()
+
+        response = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/duplicate/')
+        self.assertEqual(response.status_code, 201, response.content)
+        copy = response.data
+
+        self.assertNotEqual(copy['id'], rfq_id)
+        self.assertEqual(copy['status'], 'draft')
+        self.assertIsNone(copy['rfq_number'])
+        self.assertEqual(copy['recipients'], [])
+        self.assertEqual(copy['recipients_count'], 0)
+        self.assertEqual(copy['scope'], data['scope'])
+
+        self.assertEqual(len(copy['lines']), 1)
+        copy_line = copy['lines'][0]
+        self.assertEqual(copy_line['product'], original_line.product_id)
+        self.assertEqual(copy_line['name_snapshot'], original_line.name_snapshot)
+        self.assertEqual(copy_line['specs'], original_line.specs)
+        self.assertEqual(copy_line['quantity'], str(original_line.quantity))
+        self.assertEqual(copy_line['unit_of_measure'], original_line.unit_of_measure)
+        self.assertEqual(copy_line['estimated_price'], original_line.estimated_price)
+        # سطرٌ في الملاحظات يذكر الأصل — لا حقل مصدر جديد على النموذج.
+        self.assertIn(send.data['rfq_number'], copy['notes'])
+
+        copy_rfq = PurchaseRFQ.objects.get(pk=copy['id'])
+        self.assertEqual(copy_rfq.recipients.count(), 0)
+
+        # لا رقم استُهلك بمجرّد النسخ.
+        self.assertEqual(self._book_last_used(), book_after_send)
+
+    def test_duplicate_does_not_modify_the_original(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+        send = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/send/',
+            {'supplier_ids': [self.supplier_a.id]}, format='json',
+        )
+        self.assertEqual(send.status_code, 200, send.content)
+
+        response = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/duplicate/')
+        self.assertEqual(response.status_code, 201, response.content)
+
+        original = PurchaseRFQ.objects.get(pk=rfq_id)
+        self.assertEqual(original.status, PurchaseRFQ.STATUS_SENT)
+        self.assertEqual(original.rfq_number, send.data['rfq_number'])
+        self.assertEqual(original.lines.count(), 1)
+        self.assertEqual(original.recipients.count(), 1)
+        self.assertEqual(original.notes, data['notes'])
+
+    def test_duplicate_estimated_price_is_copied(self):
+        lines = [{
+            'product': self.product.id, 'seq': 1, 'quantity': '3.000',
+            'unit_of_measure': 'صندوق', 'estimated_price': '12.5000',
+        }]
+        data = self.create_rfq(lines=lines)
+        rfq_id = data['id']
+        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+
+        response = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/duplicate/')
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data['lines'][0]['estimated_price'], '12.5000')
+
+    def test_duplicate_from_another_tenant_is_not_found(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+
+        self.client.credentials(HTTP_X_TENANT_ID=str(self.other_tenant.TenantID))
+        response = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/duplicate/')
+        self.assertEqual(response.status_code, 404, response.content)
+
+    def test_duplicate_allowed_from_draft(self):
+        data = self.create_rfq()
+        response = self.client.post(f"/api/logistics/purchase-rfqs/{data['id']}/duplicate/")
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data['status'], 'draft')
+        self.assertIsNone(response.data['rfq_number'])
+
+    def test_duplicate_allowed_from_awarded(self):
+        from logistics.services import submit_rfq_supplier_quote
+
+        data = self.create_rfq()
+        rfq_id = data['id']
+        line_id = data['lines'][0]['id']
+        self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/send/',
+            {'supplier_ids': [self.supplier_a.id]}, format='json',
+        )
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        submit_rfq_supplier_quote(recipient, name='Rep A', prices={line_id: Decimal('10')})
+        award = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/award/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
+        self.assertEqual(award.status_code, 200, award.content)
+
+        response = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/duplicate/')
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data['status'], 'draft')
+        self.assertEqual(len(response.data['lines']), 1)
+
+        original = PurchaseRFQ.objects.get(pk=rfq_id)
+        self.assertEqual(original.status, PurchaseRFQ.STATUS_AWARDED)
+
+    def test_duplicate_allowed_from_cancelled(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+        cancel = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/cancel/')
+        self.assertEqual(cancel.status_code, 200, cancel.content)
+
+        response = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/duplicate/')
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data['status'], 'draft')
+
+        original = PurchaseRFQ.objects.get(pk=rfq_id)
+        self.assertEqual(original.status, PurchaseRFQ.STATUS_CANCELLED)
