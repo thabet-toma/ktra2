@@ -332,3 +332,28 @@ export function subscribeLinkedTabs(cb: (tabs: LinkedTab[]) => void): () => void
   cb(linkedTabs());
   return () => { listeners.delete(cb); };
 }
+
+/**
+ * يفتح قناة الحضور بلا اشتراكٍ لعرض — لمستهلكٍ يحتاج فقط معرفة «هل هذا
+ * التبويب حيّ؟» (issue #119: إنذار الكتابة فوق مسودّة مستندٍ مفتوحٍ في تبويبٍ
+ * آخر) لا قائمة التبويبات المرتبطة. يُعيد دالّة إغلاق الاشتراك — القناة نفسها
+ * تبقى مفتوحة (مُشتركة مع كل مستهلك آخر) ما دام مستهلكٌ واحد على الأقل حيّاً.
+ */
+export function subscribeTabPresence(): () => void {
+  const noop = () => {};
+  listeners.add(noop);
+  openChannel();
+  return () => { listeners.delete(noop); };
+}
+
+/**
+ * تبويبٌ **حيّ الآن** بمعرّفه — بلا تصفية «المرتبطة» (خلاف `linkedTabs`، وهو
+ * ما يلزم إنذار الكتابة المتزامنة: أيّ تبويبٍ آخر يفتح نفس المستند، لا فقط ما
+ * فتحناه نحن أو فتحنا منه). يعتمد على `peers` وهي لا تُملأ إلا بعد فتح القناة
+ * (`subscribeTabPresence`/`subscribeLinkedTabs`) وتبادل `hello`/`who` —
+ * فحصٌ مبكرٌ جداً بعد الفتح قد يُعطي سلباً كاذباً بلا ضمان، وهذا مقبول هنا:
+ * تنبيهٌ ناقصٌ أهون من قناةٍ مفتوحة بلا مستهلك.
+ */
+export function isTabIdLive(id: string): boolean {
+  return peers.has(id);
+}

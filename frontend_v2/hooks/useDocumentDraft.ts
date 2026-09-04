@@ -14,12 +14,16 @@ import Dexie from "dexie";
 
 import db from "@/services/offline/db";
 import { resolveTenantId } from "@/utils/tenantContext";
-import { tabId } from "@/utils/tabLink";
+import { tabId, subscribeTabPresence, isTabIdLive } from "@/utils/tabLink";
 import { isOfflineRecordForTenant } from "@/utils/offlineTenantScope";
+import { useToast } from "@/contexts/ToastContext";
 import {
   buildDocumentDraftKey,
+  draftPreviewLine,
   evaluateDraftRestore,
+  selectOrphanDrafts,
   shouldPersistDraft,
+  shouldWarnCrossTabWrite,
   type DraftRestoreEligibility,
 } from "@/utils/documentDraft";
 
@@ -43,10 +47,24 @@ export interface UseDocumentDraftOptions<TPayload> {
   docUpdatedAt?: string | null;
 }
 
-export interface DocumentDraftBanner {
+export interface DocumentDraftBanner<TPayload> {
   /** وقت آخر حفظ محلي للمسودّة المستعادة/المعروضة. */
   updatedAt: string;
   eligibility: DraftRestoreEligibility;
+  /**
+   * الحمولة المفسَّرة دائماً — حتى لـ`stale`/`posted` حيث لا استعادة تلقائية:
+   * المستدعي يعرض زرّ «استعرض مسودتي» (issue #119 §٩) الذي يطبّقها يدوياً
+   * (`onRestore(banner.payload)`) بعد قرار المستخدم لا الخطّاف.
+   */
+  payload: TPayload;
+}
+
+/** يتيمٌ لواجهة الاستعراض — مسودّة مستندٍ جديد أخرى غير هذه (issue #119 §٧). */
+export interface OrphanDraftSummary {
+  key: string;
+  updatedAt: string;
+  /** سطر محتواها الأوّل (`draftPreviewLine`) — لتمييز يتيمٍ عن آخر. */
+  previewLine: string;
 }
 
 const NEW_DRAFT_SESSION_KEY = "ktra:draftSessionTabId";
@@ -75,22 +93,28 @@ function newDocumentSessionTabId(): string {
   }
 }
 
-export interface UseDocumentDraftResult {
+export interface UseDocumentDraftResult<TPayload> {
   /** وقت آخر حفظ محلي ناجح في هذه الجلسة (ISO)، أو `null` إن لم يُحفظ شيء بعد. */
   draftSavedAt: string | null;
   /** فشلت آخر محاولة حفظ فعلاً (حصّة ممتلئة، تصفّح خاص…) — للافتة «احفظ يدوياً». */
   draftSaveFailed: boolean;
   /** مسودّة استُعيدت تلقائياً أو عُرضت للاطّلاع عند الفتح، أو `null`. */
-  restoredBanner: DocumentDraftBanner | null;
+  restoredBanner: DocumentDraftBanner<TPayload> | null;
   /** يخفي الشريط دون مسّ المسودّة نفسها. */
   dismissBanner: () => void;
   /** يمسح المسودّة المحلية فوراً — بعد حفظ ناجح، تجاهل صريح، أو «تراجع». */
   discardDraft: () => Promise<void>;
+  /**
+   * مسودّات مستندٍ جديد **يتيمة** لنفس الشركة والنوع (docId فارغ في الخطّاف)
+   * — فارغة دائماً لمستندٍ قائم. issue #119 §٧.
+   */
+  orphanDrafts: OrphanDraftSummary[];
 }
 
 export function useDocumentDraft<TPayload>(
   options: UseDocumentDraftOptions<TPayload>,
-): UseDocumentDraftResult {
+): UseDocumentDraftResult<TPayload> {
+  const toast = useToast();
   const {
     docType,
     docId,
@@ -111,7 +135,12 @@ export function useDocumentDraft<TPayload>(
 
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const [draftSaveFailed, setDraftSaveFailed] = useState(false);
-  const [restoredBanner, setRestoredBanner] = useState<DocumentDraftBanner | null>(null);
+  const [restoredBanner, setRestoredBanner] = useState<DocumentDraftBanner<TPayload> | null>(null);
+  const [orphanDrafts, setOrphanDrafts] = useState<OrphanDraftSummary[]>([]);
+
+  // هويّات التبويبات التي أُنذر عنها بالفعل لهذه الهويّة (مفتاح) — «مرّةً
+  // واحدة» (issue #119 §٨)، لا تُصفَّر إلا بتغيّر الهويّة نفسها.
+  const warnedTabsRef = useRef<Set<string>>(new Set());
 
   // مراجع حيّة كي تقرأ الكتابة المؤجَّلة (مؤقّت/إخفاء/تفكيك) آخر قيمة بلا
   // إعادة تسجيل مستمعين مع كل حرف يُكتب.
@@ -136,6 +165,19 @@ export function useDocumentDraft<TPayload>(
     sessionDocUpdatedAtRef.current = docUpdatedAt;
   }
 
+  // «مرّةً واحدة» (issue #119 §٨) مقيّدةٌ بهويّة المستند نفسها — هويّةٌ جديدة
+  // (مستندٌ آخر) تستحقّ إنذارها الخاص لو تعارضت.
+  const warnedKeyTrackerRef = useRef<string | null>(null);
+  if (warnedKeyTrackerRef.current !== key) {
+    warnedKeyTrackerRef.current = key;
+    warnedTabsRef.current = new Set();
+  }
+
+  // فتح قناة الحضور مبكراً (لا عند أوّل كتابة) — الحضور يُبنى بتبادل
+  // `hello`/`who` غير متزامن، فبلا هذا يصل فحصُ الحيويّة أوّل كتابةٍ مؤجَّلة
+  // (٥٠٠ms) قبل أن يتعرّف على أيّ تبويبٍ آخر أصلاً.
+  useEffect(() => subscribeTabPresence(), []);
+
   const writeNow = useCallback(async (): Promise<void> => {
     if (!shouldPersistDraft(isTouchedRef.current)) return;
     const row = {
@@ -148,6 +190,28 @@ export function useDocumentDraft<TPayload>(
       doc_updated_at: sessionDocUpdatedAtRef.current,
       updated_at: new Date().toISOString(),
     };
+    // إنذارُ «مفتوحٌ في نافذةٍ أخرى» (issue #119 §٨) — قبل الكتابة الفعلية لا
+    // بعدها: قرارٌ صريح ثم تمضي الكتابة كما هي، لا دمج ولا منع. فشل هذا الفحص
+    // وحده (تصفّح خاص، قناةٌ محجوبة) لا يجوز أن يمنع الكتابة نفسها — معزولٌ في
+    // try/catch خاصّ به.
+    try {
+      const existing = await db.document_drafts.get(key);
+      const previousTabId = existing?.tab_id ?? null;
+      if (
+        previousTabId &&
+        shouldWarnCrossTabWrite({
+          previousTabId,
+          thisTabId,
+          isOtherTabLive: isTabIdLive(previousTabId),
+          alreadyWarnedForKey: warnedTabsRef.current.has(previousTabId),
+        })
+      ) {
+        warnedTabsRef.current.add(previousTabId);
+        toast("هذا المستند مفتوحٌ في نافذةٍ أخرى.", "info");
+      }
+    } catch {
+      /* أفضل جهد — لا يجوز أن يمنع فشلُ فحص التعارض الكتابةَ نفسها */
+    }
     try {
       await db.transaction("rw", db.document_drafts, async () => {
         await db.document_drafts.put(row);
@@ -167,7 +231,7 @@ export function useDocumentDraft<TPayload>(
       // امتلاء الحصّة أو تصفّح خاص — الصمت عن فشلٍ معلوم أسوأ من التحذير (§١٠).
       setDraftSaveFailed(true);
     }
-  }, [key, tenantId, docType, docId, thisTabId]);
+  }, [key, tenantId, docType, docId, thisTabId, toast]);
 
   // ── القراءة والاستعادة عند فتح هذه الهويّة (مفتاح) ─────────────────────
   useEffect(() => {
@@ -186,7 +250,9 @@ export function useDocumentDraft<TPayload>(
         if (eligibility === "restore") {
           onRestore(parsed);
         }
-        if (!cancelled) setRestoredBanner({ updatedAt: row.updated_at, eligibility });
+        // الحمولة تُحمَل في الشريط حتى لـ`stale`/`posted` — «استعرض مسودتي»
+        // (issue #119 §٩) يطبّقها يدوياً من طرف المستدعي، لا استعادةً صامتة.
+        if (!cancelled) setRestoredBanner({ updatedAt: row.updated_at, eligibility, payload: parsed });
       } catch {
         /* مسودّة تالفة أو IndexedDB غير متاحة — تُتجاهَل بصمت، لا تُسقط الشاشة */
       }
@@ -197,6 +263,48 @@ export function useDocumentDraft<TPayload>(
     // مرّة واحدة لكل هويّة مستند (مفتاح) — لا عند كل تغيّر حمولة.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
+
+  // ── اليتامى: مسودّات مستندٍ جديد أخرى لنفس الشركة والنوع (issue #119 §٧) ──
+  // فقط على شاشة «مستندٍ جديد» — `docId` فارغ. مستندٌ قائم مفتاحه على معرّف
+  // المستند نفسه فلا يتامى بهذا المعنى (راجع `selectOrphanDrafts`).
+  useEffect(() => {
+    if (docId != null && docId !== "") {
+      setOrphanDrafts([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await db.document_drafts
+          .where("[tenant_id+doc_type]")
+          .equals([tenantId, docType])
+          .toArray();
+        const scoped = rows.filter((r) => isOfflineRecordForTenant(r, tenantId) && r.data);
+        const orphans = selectOrphanDrafts(
+          scoped.map((r) => ({ key: r.key, docId: r.doc_id, updatedAt: r.updated_at })),
+          key,
+        );
+        if (cancelled) return;
+        setOrphanDrafts(
+          orphans.map((o) => {
+            const row = scoped.find((r) => r.key === o.key);
+            return {
+              key: o.key,
+              updatedAt: o.updatedAt,
+              previewLine: row ? draftPreviewLine(row.data) : "",
+            };
+          }),
+        );
+      } catch {
+        /* IndexedDB غير متاحة — لا يتامى يُعرَضون بدل إسقاط الشاشة */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // مرّة واحدة لكل هويّة مستند جديد — لا عند كل تغيّر حمولة.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId, docType, docId, key]);
 
   // ── الكتابة بعد ٥٠٠ms من آخر تغيير ───────────────────────────────────────
   useEffect(() => {
@@ -236,5 +344,5 @@ export function useDocumentDraft<TPayload>(
     setDraftSavedAt(null);
   }, [key]);
 
-  return { draftSavedAt, draftSaveFailed, restoredBanner, dismissBanner, discardDraft };
+  return { draftSavedAt, draftSaveFailed, restoredBanner, dismissBanner, discardDraft, orphanDrafts };
 }

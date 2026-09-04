@@ -82,6 +82,82 @@ export function evaluateDraftRestore(
   return "restore";
 }
 
+/* ───────────────────────── اليتامى — مستندٌ جديد (§٧) ─────────────────────── */
+
+export interface OrphanDraftCandidate {
+  key: string;
+  /** `null`/فارغ لمسودّة مستندٍ جديد (المفتاحُ على معرّف تبويب) — الأخرى تُستبعد. */
+  docId: string | null;
+  updatedAt: string;
+}
+
+/**
+ * يتامى مستندٍ جديد لنفس الشركة والنوع (المستدعي يُقيِّد الاستعلام بالفعل عبر
+ * الفهرس `[tenant_id+doc_type]`) — باستثناء مسودّة **هذا التبويب نفسه**
+ * (`currentKey`)، الأحدث أوّلاً. مسودّاتٌ لمستندٍ **قائم** (`docId` معروف)
+ * ليست يتيمة بهذا المعنى: مفتاحها على معرّف المستند لا التبويب، فمن يفتحه من
+ * أيّ تبويب يرى نفس المسودّة — لا تزاحم.
+ */
+export function selectOrphanDrafts<T extends OrphanDraftCandidate>(
+  drafts: T[],
+  currentKey: string,
+): T[] {
+  return drafts
+    .filter((d) => (d.docId == null || d.docId === "") && d.key !== currentKey)
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+}
+
+/**
+ * سطر محتوى المسودّة الأوّل — تمييزٌ بصريّ بين يتيمين لا أكثر، لا استخلاصٌ
+ * دلاليّ (الحمولة تختلف شكلاً بين نوع مستندٍ وآخر، ولا معرفة هنا بحقولها).
+ * تمثيلٌ نصّيّ ثابتٌ للحمولة (`JSON.stringify` مضغوطاً بلا أسطر) مقصوصٌ بطول
+ * أقصى — أوثق من تخمين حقلٍ بعينه («اسم المورّد»؟ «اسم العميل»؟) قد لا يوجد.
+ */
+export function draftPreviewLine(data: string, maxLen = 100): string {
+  let text: string;
+  try {
+    text = JSON.stringify(JSON.parse(data));
+  } catch {
+    text = data;
+  }
+  const firstLine = (text.split("\n")[0] ?? "").trim();
+  return firstLine.length > maxLen ? `${firstLine.slice(0, maxLen)}…` : firstLine;
+}
+
+/** نصّ شريط اليتامى بجمعٍ عربيّ صحيح — لا نصّ مثنّىً ثابت لعددٍ متغيّر. */
+export function orphanDraftsBannerText(count: number): string {
+  if (count <= 0) return "";
+  if (count === 1) return "لديك مسودةٌ واحدة غير محفوظة";
+  if (count === 2) return "لديك مسودتان غير محفوظتين";
+  return `لديك ${count} مسودّات غير محفوظة`;
+}
+
+/* ──────────────────── نفس المستند في تبويبين — إنذارٌ مرّة (§٨) ────────────── */
+
+export interface CrossTabWriteWarningInput {
+  /** `tab_id` الصفّ الموجود قبل هذه الكتابة، أو `null` إن لم توجد مسودّة بعد. */
+  previousTabId: string | null;
+  /** معرّف هذا التبويب — الحاضر الآن، لا معرّف مسودّة المستند الجديد الثابت. */
+  thisTabId: string;
+  /** التبويب الآخر لا يزال حيّاً (وعي الحضور في `utils/tabLink.ts`)؟ */
+  isOtherTabLive: boolean;
+  /** أُطلق الإنذار لهذه الهويّة (مفتاح المسودّة) في هذه الجلسة من قبل؟ */
+  alreadyWarnedForKey: boolean;
+}
+
+/**
+ * القرار: تنبيهٌ صريحٌ **مرّةً واحدة** لكل هويّة مسودّة — لا في كل كتابة، ولا
+ * لتبويبٍ أُغلق فعلاً (ختمه باقٍ في الصفّ لكنه لم يعد حيّاً). الكتابة نفسها لا
+ * تتوقّف على هذا القرار — «ثمّ تمضي» (issue #119): لا دمج ولا منع، تنبيهٌ ثم
+ * الكتابة تجري كما هي.
+ */
+export function shouldWarnCrossTabWrite(input: CrossTabWriteWarningInput): boolean {
+  if (input.alreadyWarnedForKey) return false;
+  if (input.previousTabId == null) return false;
+  if (input.previousTabId === input.thisTabId) return false;
+  return input.isOtherTabLive;
+}
+
 /* ───────────────────────── متى تُمحى — ٣٠ يوماً (§٥) ──────────────────────── */
 
 export const DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;

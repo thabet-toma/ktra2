@@ -4,10 +4,14 @@ import test from "node:test";
 import {
   DRAFT_MAX_AGE_MS,
   buildDocumentDraftKey,
+  draftPreviewLine,
   evaluateDraftRestore,
   isDraftExpired,
+  orphanDraftsBannerText,
   selectExpiredDraftKeys,
+  selectOrphanDrafts,
   shouldPersistDraft,
+  shouldWarnCrossTabWrite,
 } from "./documentDraft.ts";
 
 /* ─────────────────────────── هويّة المسودّة ─────────────────────────── */
@@ -182,4 +186,125 @@ test("selectExpiredDraftKeys يفرز ٣١ يوماً عن ٢٩ يوماً في 
     { key: "today", updatedAt: now },
   ];
   assert.deepEqual(selectExpiredDraftKeys(drafts, now), ["old:31d"]);
+});
+
+/* ─────────────────────────── اليتامى — مستندٌ جديد ─────────────────────────── */
+
+test("selectOrphanDrafts يستبعد مسودّة هذا التبويب نفسه ومسودّات المستندات القائمة", () => {
+  const drafts = [
+    { key: "1:purchase_invoice:tab:a", docId: null, updatedAt: "2026-09-03T10:00:00.000Z" },
+    { key: "1:purchase_invoice:tab:b", docId: null, updatedAt: "2026-09-03T11:00:00.000Z" },
+    { key: "1:purchase_invoice:doc:42", docId: "42", updatedAt: "2026-09-03T12:00:00.000Z" },
+  ];
+  const orphans = selectOrphanDrafts(drafts, "1:purchase_invoice:tab:a");
+  assert.deepEqual(
+    orphans.map((o) => o.key),
+    ["1:purchase_invoice:tab:b"],
+  );
+});
+
+test("selectOrphanDrafts ترتّب الأحدث أوّلاً", () => {
+  const drafts = [
+    { key: "old", docId: null, updatedAt: "2026-09-01T00:00:00.000Z" },
+    { key: "new", docId: null, updatedAt: "2026-09-03T00:00:00.000Z" },
+    { key: "mid", docId: null, updatedAt: "2026-09-02T00:00:00.000Z" },
+  ];
+  const orphans = selectOrphanDrafts(drafts, "current");
+  assert.deepEqual(
+    orphans.map((o) => o.key),
+    ["new", "mid", "old"],
+  );
+});
+
+test("selectOrphanDrafts بلا يتامى يعيد مصفوفة فارغة", () => {
+  assert.deepEqual(selectOrphanDrafts([], "current"), []);
+});
+
+test("draftPreviewLine يعيد أوّل سطر من تمثيل الحمولة", () => {
+  const data = JSON.stringify({ formData: { supplierInvoiceNumber: "SUP-1" } });
+  assert.equal(draftPreviewLine(data), data);
+});
+
+test("draftPreviewLine يقصّ نصّاً طويلاً بحدّ أقصى", () => {
+  const longValue = "x".repeat(200);
+  const data = JSON.stringify({ note: longValue });
+  const line = draftPreviewLine(data, 50);
+  assert.equal(line.length, 51); // 50 حرفاً + «…»
+  assert.ok(line.endsWith("…"));
+});
+
+test("draftPreviewLine على JSON تالف يعيد النصّ الخام بدل الانهيار", () => {
+  assert.equal(draftPreviewLine("not json at all"), "not json at all");
+});
+
+test("orphanDraftsBannerText: مفرد/مثنّى/جمع بصياغة عربية صحيحة", () => {
+  assert.equal(orphanDraftsBannerText(0), "");
+  assert.equal(orphanDraftsBannerText(1), "لديك مسودةٌ واحدة غير محفوظة");
+  assert.equal(orphanDraftsBannerText(2), "لديك مسودتان غير محفوظتين");
+  assert.equal(orphanDraftsBannerText(3), "لديك 3 مسودّات غير محفوظة");
+});
+
+/* ─────────────────────── نفس المستند في تبويبين — إنذارٌ مرّة ─────────────────── */
+
+test("لا مسودّة سابقة ⇒ لا إنذار (أوّل كتابة)", () => {
+  assert.equal(
+    shouldWarnCrossTabWrite({
+      previousTabId: null,
+      thisTabId: "tab-b",
+      isOtherTabLive: true,
+      alreadyWarnedForKey: false,
+    }),
+    false,
+  );
+});
+
+test("نفس التبويب يكتب فوق ختمه ⇒ لا إنذار", () => {
+  assert.equal(
+    shouldWarnCrossTabWrite({
+      previousTabId: "tab-a",
+      thisTabId: "tab-a",
+      isOtherTabLive: true,
+      alreadyWarnedForKey: false,
+    }),
+    false,
+  );
+});
+
+test("تبويبٌ آخر حيّ وختمه مختلف ⇒ إنذار", () => {
+  assert.equal(
+    shouldWarnCrossTabWrite({
+      previousTabId: "tab-a",
+      thisTabId: "tab-b",
+      isOtherTabLive: true,
+      alreadyWarnedForKey: false,
+    }),
+    true,
+  );
+});
+
+test("تبويبٌ آخر لم يعد حيّاً ⇒ لا إنذار — ختمٌ باقٍ من تبويبٍ أُغلق", () => {
+  assert.equal(
+    shouldWarnCrossTabWrite({
+      previousTabId: "tab-a",
+      thisTabId: "tab-b",
+      isOtherTabLive: false,
+      alreadyWarnedForKey: false,
+    }),
+    false,
+  );
+});
+
+test("الإنذار يطلق مرّةً واحدة لا مع كل كتابة — alreadyWarnedForKey يمنع التكرار", () => {
+  const input = {
+    previousTabId: "tab-a",
+    thisTabId: "tab-b",
+    isOtherTabLive: true,
+    alreadyWarnedForKey: false,
+  };
+  assert.equal(shouldWarnCrossTabWrite(input), true, "أوّل كتابة متعارضة تُنذر");
+  assert.equal(
+    shouldWarnCrossTabWrite({ ...input, alreadyWarnedForKey: true }),
+    false,
+    "الكتابة التالية لنفس الهويّة لا تُنذر ثانيةً",
+  );
 });
