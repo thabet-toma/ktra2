@@ -302,3 +302,105 @@ test('حالة فشلٍ مُصطنَعة: كتابة IndexedDB معطَّلة �
 
   expect(await dispatchBeforeUnload(page)).toBe(true);
 });
+
+/**
+ * ISSUE #121 (الدفعة الأولى): فاتورة البيع تنضمّ إلى الخطّاف المشترك.
+ * `SalesInvoiceEditor.tsx` كانت تكتب مسودّتها بآليّةٍ خاصّة (`db.invoice_drafts`،
+ * دفعة M4) فيها ثلاثة عيوب: (١) الاستعادة كانت تُعرَض لفاتورةٍ جديدة وحدها —
+ * من فتح فاتورة قائمة وعدّلها لا يُعرَض عليه شيء أبداً (مسار كتابةٍ أعمى)؛
+ * (٢) مفتاحٌ ثابت واحد ("new") لكل الفواتير الجديدة؛ و(٣) مسودّةٌ برأسٍ بلا
+ * بنودٍ كانت تُلقى قبل أن تُعرَض للاستعادة أصلاً. الآن تستهلك `useDocumentDraft`
+ * كما تفعل `InvoiceForm.tsx` (issue #118) — نفس الهويّة والحارس المقلوب.
+ *
+ * نقطة اللمس: تبويب «ملاحظات» — نصٌّ حرّ **مرئيٌّ افتراضياً** (`activeTabKey`
+ * الابتدائي هو "notes" في `SalesInvoiceEditor.tsx`) بلا فتح أي نافذة اختيار
+ * عميل/صنف، ويمرّ عبر `setNotes`+`markDirty()` مباشرة (تحقّقٌ من الكود قبل
+ * الاختبار) — مرآة حقل «رقم فاتورة المورد» في الرحلة الأمّ أعلاه.
+ */
+async function stubSalesInvoice(page: Page, tenantIds: number[] = [1]) {
+  await page.addInitScript(() => {
+    localStorage.setItem('token', 'draft-e2e-token');
+    localStorage.setItem('userId', 'draft-e2e-user');
+  });
+  await switchTenant(page, tenantIds[0]);
+
+  await page.route('**/*', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const isApi = url.port === '8000' || url.pathname.startsWith('/api/');
+    if (!isApi) return route.continue();
+    const path = url.pathname;
+    const json = (body: unknown, status = 200) => route.fulfill({
+      status, contentType: 'application/json', body: JSON.stringify(body),
+    });
+
+    if (path.endsWith('/hr/users/draft-e2e-user/')) return json(USER);
+    if (path.endsWith('/tenants/companies/my-companies/')) {
+      return json(tenantIds.map((id, i) => ({
+        id, tenant: tenant(id, `شركة اختبار ${id}`), role: 'manager',
+        is_default: i === 0, created_at: '2026-01-01T00:00:00Z', can_access_import: false,
+      })));
+    }
+    if (path.endsWith('/permissions/me/')) {
+      return json({
+        role: 'manager', is_manager: true,
+        permissions: [
+          'sales.invoice.view', 'sales.invoice.create', 'sales.invoice.edit',
+          'sales.invoice.post', 'sales.payment.create',
+        ],
+        modules: {}, template: 'general', terms: {}, shell: null, ui_mode: 'advanced',
+      });
+    }
+    if (path.endsWith('/sales/settings/current/')) {
+      return json({
+        id: 1, default_customer: null, default_currency: null,
+        default_revenue_account_product: null, default_revenue_account_service: null,
+        default_cash_account: null, default_inventory_account: null,
+        default_cogs_account: null, default_ar_account: null,
+        default_payment_type: 'credit', stock_on_post_default: true,
+        allow_negative_stock_default: true, default_vat_rate: null,
+        prices_include_tax: false, auto_post_invoices: false, auto_post_payments: true,
+        show_journal_preview: true, warn_on_duplicate_item: true,
+        block_loss_invoices: false, dormant_customer_days: 30,
+        quotation_valid_days: 14, order_reserve_days: 7, allow_document_delete: true,
+        block_reserved_stock_sale: true, serial_entry_mode: 'off',
+        default_shipping_origin: '', default_shipping_destination: '',
+        delivery_doc_label: '', standalone_delivery_label: '',
+        allow_standalone_delivery: true, allow_edit_delivery: true,
+      });
+    }
+    if (path.endsWith('/hr/auth/logout/') && request.method() === 'POST') {
+      return json({ detail: 'ok' });
+    }
+    if (path.startsWith('/api/partners/lookup/')) return json([]);
+    if (path.startsWith('/api/lookup/products/')) return json([]);
+    // كل ما عداها (الحسابات، العملات، الضرائب، المحجوزات، قائمة الفواتير…)
+    // يكفيه فارغٌ عام — `toPagedList` (services/restApi.ts) يتعامل مع مصفوفةٍ
+    // فارغة كصفحةٍ فارغة بأمان، والشاشة تتعامل مع القوائم الفارغة بأمان أيضاً.
+    return json([]);
+  });
+}
+
+test('الرحلة الأمّ لفاتورة البيع: اكتب، أخفِ التبويب، أعِد التحميل ← المحتوى موجود والشريط ظاهر (issue #121)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await stubSalesInvoice(page);
+
+  await page.goto('/sales/invoices/new');
+  const notesField = page.getByPlaceholder('ملاحظات الفاتورة…');
+  await expect(notesField).toBeVisible({ timeout: 30_000 });
+
+  await notesField.fill('SALES-DRAFT-001');
+  await expect(notesField).toHaveValue('SALES-DRAFT-001');
+
+  // إخفاء التبويب — الحدّ الأخير المضمون للكتابة (لا beforeunload، issue #109 §٣).
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+  await page.reload();
+  await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByPlaceholder('ملاحظات الفاتورة…')).toHaveValue('SALES-DRAFT-001');
+});

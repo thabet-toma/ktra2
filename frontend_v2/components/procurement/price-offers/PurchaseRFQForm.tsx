@@ -15,14 +15,14 @@
  * يعكس ذلك: التحرير الحرّ على المسودة وحدها، وبعد الإرسال يبقى الإلغاء
  * والترسية وإضافة مستقبِل جديد فقط.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   KitAutocomplete,
   useKitKeymap,
   type KitGridColumn,
   type KitToolbarAction,
 } from "../../kit";
-import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Ban, UserPlus, Printer, FileSpreadsheet, GitCompare, Copy, ShieldOff } from "lucide-react";
+import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Ban, UserPlus, Printer, FileSpreadsheet, GitCompare, Copy, ShieldOff, Info, Undo2 } from "lucide-react";
 import {
   CommercialDocumentEditor,
   type CommercialHeaderField,
@@ -47,7 +47,9 @@ import {
   type PurchasePriceListEntry,
 } from "../../../utils/purchasePriceHint";
 import { getScreenColumns, type ProcurementColumnKey } from "../../../utils/procurementColumns";
-import { formatDateValue } from "../../../utils/formatDate";
+import { formatDateValue, formatTimeValue } from "../../../utils/formatDate";
+import { useDocumentDraft } from "../../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../../utils/documentDraft";
 import { useToast } from "../../../contexts/ToastContext";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { revokeDocumentShare } from "../../../services/docShareApi";
@@ -132,6 +134,18 @@ export const PurchaseRFQForm: React.FC<Props> = ({
   // ISSUE #116 (مواصفة #108 §٨): شاشةٌ مستقلّة تُفتح عند الطلب — لا تُفرَض
   // على المحرِّر اليومي. الترسية صارت تمرّ من داخلها (تختار مورداً أولاً).
   const [showComparison, setShowComparison] = useState(false);
+  // ISSUE #121 (issue #118/#109 §٢): مسودّة محلية. البنود مقفلة بعد أوّل إرسال
+  // (`isLocked` أدناه) — لا معنى لحفظ مسودّة لشاشةٍ لا تُعدَّل، فـ`isTouched`
+  // مشروطة بأن تكون الطلبية لا تزال قابلةً للتحرير فعلاً (قرارٌ محلي — انظر
+  // تقرير القضية #121).
+  // ISSUE #121: **حالةٌ لا مرجع.** العلامةُ تُرفَع من داخل أثرٍ يجري **بعد**
+  // الرسم، فمرجعٌ صامتٌ يُبقي `isTouched` كاذبةً في الرسمة نفسِها التي كان
+  // يجب أن تُجدوِل الكتابة — ويُضيع من عدّل تعديلاً واحداً وغادر. الحالةُ
+  // تُعيد الرسم فيرى الخطّافُ العلامةَ فوراً.
+  const [isDirty, setIsDirty] = useState(false);
+  const markDirty = useCallback((value: boolean) => setIsDirty(value), []);
+  const skipNextDirtyRef = useRef(true);
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   useEffect(() => { setCurrent(rfq); }, [rfq]);
 
@@ -156,6 +170,134 @@ export const PurchaseRFQForm: React.FC<Props> = ({
   // البنود تُقفل عند أوّل إرسال — لا عند الترسية (#112 §٧).
   const isLocked = isReadOnly || (current != null && current.status !== "draft");
   const isNew = current == null;
+
+  /* ISSUE #121: الحمولة المحلية — كائنٌ خفيف يكفي وحده لإعادة بناء الشاشة. */
+  const draftPayload = useMemo(
+    () => ({ rfqDate, replyDeadline, notes, lines }),
+    [rfqDate, replyDeadline, notes, lines],
+  );
+  type RfqDraftPayload = typeof draftPayload;
+
+  const onRestoreDraft = useCallback((restored: RfqDraftPayload) => {
+    setRfqDate(restored.rfqDate);
+    setReplyDeadline(restored.replyDeadline);
+    setNotes(restored.notes);
+    setLines(restored.lines);
+    // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تُسجَّل «ملموسة» فوراً.
+    markDirty(true);
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<RfqDraftPayload>({
+    docType: "purchase_rfq",
+    docId: current?.id ?? null,
+    payload: draftPayload,
+    // القرار (يُذكر في تقرير القضية #121): الحفظ المحلي يتوقّف بمجرّد أن تُقفَل
+    // البنود (`isLocked`) — الملاحظات تبقى قابلةً للكتابة بعدها في الواجهة، لكن
+    // لا مسار حفظٍ خادمي لها أصلاً بعد القفل (زرّ «تخزين» نفسه معطَّل حينها)،
+    // فمسودّة محلية عندها لا تخدم غرضاً حقيقياً.
+    isTouched: isDirty && !isLocked,
+    onRestore: onRestoreDraft,
+    isPosted: isLocked,
+    docUpdatedAt: current?.updated_at ?? null,
+  });
+
+  useEffect(() => {
+    if (skipNextDirtyRef.current) {
+      skipNextDirtyRef.current = false;
+      return;
+    }
+    markDirty(true);
+  }, [draftPayload]);
+
+  /* ISSUE #121 (نمط الحارس المقلوب — issue #120): يعترض المغادرة فقط إن فشل
+     الحفظ المحلي فعلاً — لا دائماً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع»: يعيد البنود/الملاحظات إلى حالة الطلبية المحمَّلة (فارغة لطلبية جديدة) ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    setRfqDate(rfq?.rfq_date || new Date().toISOString().slice(0, 10));
+    setReplyDeadline(rfq?.reply_deadline || "");
+    setNotes(rfq?.notes || "");
+    setLines(rfq?.lines?.length ? rfq.lines.map(lineFromDto) : [blankLine()]);
+    skipNextDirtyRef.current = true;
+    markDirty(false);
+    void discardDraft();
+  }, [rfq, discardDraft]);
+
+  const draftSaveFailedBanner = draftSaveFailed && !isLocked ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذه الطلبية — اضغط «تخزين» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  const draftRestoreBanner = draftBanner ? (
+    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <span>
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّرت الطلبية بعد مسودتك (عُدِّلت ${formatTimeValue(current?.updated_at || "")}، ومسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذه الطلبية — بنودُها مقفَلة، للاطّلاع فقط.`}
+      </span>
+      {draftBanner.eligibility === "restore" && (
+        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+          <Undo2 className="h-4 w-4" /> تراجع
+        </button>
+      )}
+      {draftBanner.eligibility === "stale" && (
+        <>
+          <button type="button" className="ktra-toolbtn"
+            onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
+            استعرض مسودتي
+          </button>
+          <button type="button" className="ktra-toolbtn"
+            onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+            تجاهلها
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <div className="flex flex-col gap-1">
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul className="list-disc pr-4 text-xs">
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+          ))}
+        </ul>
+      </div>
+      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+        <X className="h-4 w-4" /> إخفاء
+      </button>
+    </div>
+  ) : null;
 
   const addLine = () => setLines((prev) => [...prev, blankLine()]);
   const removeLine = (key: string) => setLines((prev) => prev.filter((l) => l.key !== key));
@@ -221,6 +363,9 @@ export const PurchaseRFQForm: React.FC<Props> = ({
         : await updatePurchaseRfq(current!.id, body);
       setCurrent(saved);
       setMsg("تم الحفظ.");
+      // ISSUE #121 (issue #118 §٥): حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      markDirty(false);
+      void discardDraft();
       onSaved(saved);
       return saved;
     } catch (e: unknown) {
@@ -242,6 +387,9 @@ export const PurchaseRFQForm: React.FC<Props> = ({
       const sent = await sendPurchaseRfq(target.id, supplierIds);
       setCurrent(sent);
       setSelectedRecipients(new Set());
+      // البنود صارت مقفلة — أيّ مسودّةٍ محلية سابقة لم تعد تخدم غرضاً.
+      markDirty(false);
+      void discardDraft();
       toast(`تم إرسال الطلبية ${sent.rfq_number || ""}`.trim(), "success");
       onSaved(sent);
     } catch (e: unknown) {
@@ -341,6 +489,8 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     try {
       const cancelled = await cancelPurchaseRfq(current.id);
       setCurrent(cancelled);
+      markDirty(false);
+      void discardDraft();
       onSaved(cancelled);
       toast("أُلغيت الطلبية.", "success");
     } catch (e: unknown) {
@@ -508,12 +658,21 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     };
   }
 
-  const banner = (err || msg) ? (
+  const saveBanner = (err || msg) ? (
     <div className={`ktra-banner ${err ? "ktra-banner--err" : "ktra-banner--ok"}`}>
       {err ? <AlertCircle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
       <span>{err || msg}</span>
     </div>
   ) : null;
+
+  const banner = (
+    <>
+      {draftSaveFailedBanner}
+      {saveBanner}
+      {draftRestoreBanner}
+      {orphanDraftsBanner}
+    </>
+  );
 
   const headerFields: CommercialHeaderField[] = [
     {
@@ -697,6 +856,11 @@ export const PurchaseRFQForm: React.FC<Props> = ({
             <span className="ktra-status-item">أُنشئت {formatDateValue(current.created_at)}</span>
           )}
           {isLocked && <span className="ktra-status-item">البنود مقفَلة — أُرسلت الطلبية</span>}
+          {draftSavedAt && !isLocked && (
+            <span className="ktra-status-item" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          )}
         </>
       }
     />

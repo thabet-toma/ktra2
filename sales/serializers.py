@@ -424,6 +424,10 @@ class SalesInvoiceSerializer(
             "tax_amount",
             "grand_total",
             "amount_paid",
+            # ISSUE #121 (مواصفة #109 §٩): ختمُ تعديل المستند يُقارَن بختم
+            # المسودّة المحلية — بدونه تُستعاد مسودّةٌ متأخّرةٌ فوق تعديلٍ
+            # أحدثَ منها بصمت.
+            "updated_at",
             "remaining_balance",
             "pending_payment_total",
             "payment_status",
@@ -468,6 +472,7 @@ class SalesInvoiceSerializer(
             "tax_amount",
             "grand_total",
             "amount_paid",
+            "updated_at",
             "remaining_balance",
             "pending_payment_total",
             "payment_status",

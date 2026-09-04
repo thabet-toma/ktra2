@@ -73,10 +73,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { invoiceActionPermissions } from "../../utils/viewPermissions";
-import {
-  isOfflineRecordForTenant,
-  tenantScopedOfflineKey,
-} from "../../utils/offlineTenantScope";
+import { isOfflineRecordForTenant } from "../../utils/offlineTenantScope";
 import {
   AlertCircle,
   CheckCircle2,
@@ -108,8 +105,10 @@ import { ItemQuickEditModal } from "../items/ItemQuickEditModal";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
 import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
-import { formatDateTimeValue } from "../../utils/formatDate";
+import { formatTimeValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 import { FieldError } from "../ui/FieldError";
 import {
   KitDocumentShell,
@@ -535,6 +534,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const navLoadingRef = useRef(false);
 
   const dirtyRef = useRef(false);
+  /* ISSUE #121 (مواصفة #109 §٩): ختمُ تعديل المستند لحظةَ فتحه — يُقارَن بختم
+     المسودّة فيُعرَف «الخادمُ أحدث» بدل استعادةٍ صامتةٍ فوق تعديلٍ أحدث. */
+  const [docUpdatedAt, setDocUpdatedAt] = useState<string | null>(null);
 
   /* T-QUICKPARTY: العميل المُنشأ من داخل الفاتورة يُستعمل فوراً — نفس علاج
      `productOverrides`: القائمة تصل من الشاشة الأم بعد بثّ حدث `partners`، وحتى
@@ -1102,6 +1104,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   ]);
 
   const applyDetail = useCallback((d: SalesInvoiceDetail) => {
+    setDocUpdatedAt(d.updated_at ?? null);
     setInvoiceNumber(d.invoice_number || "");
     setCustomerId(d.customer);
     setInvDate(d.invoice_date);
@@ -1261,22 +1264,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     return () => clearTimeout(t);
   }, [customerId, totals.grandTotal, draftId]);
 
-  // ── M4: beforeunload guard ─────────────────────────────────────────────
-  // ISSUE #120: الحارسُ يُقلَب («حاوِلِ الحفظَ أوّلاً، ولا تعترض إلّا إن فشل»)
-  // **بعد** أن تنضمّ هذه الشاشة إلى `useDocumentDraft` (issue #121) — لا قبلها.
-  // حفظُها المحلّيّ اليوم أعمى (يكتب ولا يُعيد، مواصفة #109)، فلا إشارةَ فشلٍ
-  // يُشترط بها الاعتراض. حذفُه الآن يستبدل حواراً مزعجاً بضياعٍ صامت.
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (dirtyRef.current && invoiceStatus === "draft") {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [invoiceStatus]);
-
   const markDirty = () => {
     dirtyRef.current = true;
   };
@@ -1404,108 +1391,57 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     sourceDiscountAmtOverride,
   ]);
 
-  // ── M4: local-draft persistence (Dexie) ────────────────────────────────
+  // ── ISSUE #121: مسودّة محلية عبر الخطّاف المشترك (issue #118) ────────────
+  // كانت هذه الشاشة تكتب إلى `db.invoice_drafts` بآليّتها الخاصة (M4) وفيها
+  // ثلاثة عيوب: (١) الاستعادة كانت تُعرَض لفاتورةٍ جديدة وحدها — من فتح فاتورة
+  // قائمة وعدّلها لا يُعرَض عليه شيء أبداً (مسار كتابةٍ أعمى)؛ (٢) مفتاحٌ ثابت
+  // واحد ("new") لكل الفواتير الجديدة — نفس عطب `useDocumentDraft` الذي أُصلح
+  // في issue #119؛ و(٣) مسودّةٌ برأسٍ بلا بنود كانت تُلقى (`hasContent` في
+  // الآلية القديمة). الخطّاف المشترك يُصلح الثلاثة معاً: هويّته على `docId`
+  // (مستندٌ قائم) أو تبويبٍ (مستندٌ جديد)، وقرار الكتابة الوحيد فيه «لُمِس».
   const activeTenantId = resolveTenantId();
-  const localDraftKey = tenantScopedOfflineKey(
-    activeTenantId,
-    draftId ? String(draftId) : "new",
-  );
 
-  const clearLocalDraft = useCallback(async () => {
-    try {
-      await db.invoice_drafts.delete(localDraftKey);
-    } catch {
-      /* best-effort cleanup */
-    }
-  }, [localDraftKey]);
+  const draftPayload = useMemo(() => buildPayload(), [buildPayload]);
 
-  // Debounced autosave: mirrors the in-progress draft to IndexedDB so an
-  // accidental reload/close does not lose unsaved work. Declared AFTER
-  // buildPayload so the dependency reference is past its TDZ.
-  useEffect(() => {
-    if (!dirtyRef.current || invoiceStatus !== "draft") return;
-    const t = window.setTimeout(() => {
-      void db.invoice_drafts
-        .put({
-          draft_id: localDraftKey,
-          tenant_id: activeTenantId,
-          data: JSON.stringify(buildPayload()),
-          updated_at: new Date().toISOString(),
-        })
-        .catch((err) => console.error("Autosave to Dexie failed:", err));
-    }, 2000);
-    return () => clearTimeout(t);
-  }, [buildPayload, localDraftKey, invoiceStatus]);
-
-  // Restore-on-return: for a brand-new (unsaved) invoice, offer to recover the
-  // last autosaved draft instead of silently discarding it.
-  const [recoverableDraft, setRecoverableDraft] = useState<{
-    data: Record<string, unknown>;
-    updated_at: string;
-  } | null>(null);
-
-  useEffect(() => {
-    if (draftToEditId != null || draftId != null) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const row = await db.invoice_drafts.get(localDraftKey);
-        if (
-          cancelled ||
-          !row?.data ||
-          !isOfflineRecordForTenant(row, activeTenantId)
-        ) return;
-        const parsed = JSON.parse(row.data) as Record<string, unknown>;
-        const hasContent =
-          Array.isArray(parsed.lines) && (parsed.lines as unknown[]).length > 0;
-        if (hasContent) setRecoverableDraft({ data: parsed, updated_at: row.updated_at });
-      } catch {
-        /* corrupt/absent draft — ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // run once on mount for a fresh invoice
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const hydrateFromLocalDraft = useCallback(
-    (p: Record<string, unknown>) => {
-      const s = (v: unknown, fb = "") => (v == null ? fb : String(v));
-      setCustomerId((p.customer as number) ?? "");
-      if (p.invoice_date) setInvDate(s(p.invoice_date));
-      setDueDate(s(p.due_date));
-      if (p.invoice_type === "cash" || p.invoice_type === "credit")
-        setInvType(p.invoice_type);
-      setCurrencyId((p.currency as number) ?? "");
-      setExchangeRate(formatNumber(p.exchange_rate ?? 1, { maxDecimals: 6, fallback: "1" }));
-      setInvoiceDiscount(formatQuantity(p.invoice_discount, "0"));
-      setStockOnPost(p.stock_on_post !== false);
-      setNotes(s(p.notes));
-      setBookNumber(s(p.book_number, "0"));
-      setSecondDate(s(p.second_date));
-      setLicensedDealerNo(s(p.licensed_dealer_no));
-      setSettlementInvoiceNo(s(p.settlement_invoice_no));
-      setPricesIncludeTax(Boolean(p.prices_include_tax));
-      setDiscountPercent(formatQuantity(p.discount_percent, "0"));
-      setSourceDiscountPctOverride(
-        p.source_discount_percent_override == null
-          ? ""
-          : formatQuantity(p.source_discount_percent_override, "")
-      );
-      setSourceDiscountAmtOverride(
-        p.source_discount_amount_override == null
-          ? ""
-          : formatQuantity(p.source_discount_amount_override, "")
-      );
-      if (p.cash_or_bank_account != null)
-        setCashAccountId(p.cash_or_bank_account as number);
-      if (p.revenue_account != null) setRevenueAccountId(p.revenue_account as number);
-      const rawLines = Array.isArray(p.lines) ? (p.lines as Record<string, unknown>[]) : [];
-      if (rawLines.length) {
-        setLines(
-          rawLines.map((ln) => ({
+  /** يُعيد بناء الشاشة من حمولة مسودّة (شكل `buildPayload` نفسه) — استعادةٌ
+   *  تلقائية من الخطّاف، أو تطبيقٌ يدوي على مسودّةٍ «باتت قديمة» (`stale`).
+   *  سطرٌ افتراضي فارغ يحلّ محل بنودٍ غائبة بدل شبكةٍ فارغة تماماً — رأسٌ بلا
+   *  بنودٍ مسودّةٌ صحيحة (عيب ٣ أعلاه)، لا حالةً يُعامَل غيابها كخطأ. */
+  const onRestoreDraft = useCallback((p: Record<string, unknown>) => {
+    const s = (v: unknown, fb = "") => (v == null ? fb : String(v));
+    setCustomerId((p.customer as number) ?? "");
+    if (p.invoice_date) setInvDate(s(p.invoice_date));
+    setDueDate(s(p.due_date));
+    if (p.invoice_type === "cash" || p.invoice_type === "credit")
+      setInvType(p.invoice_type);
+    setCurrencyId((p.currency as number) ?? "");
+    setExchangeRate(formatNumber(p.exchange_rate ?? 1, { maxDecimals: 6, fallback: "1" }));
+    setInvoiceDiscount(formatQuantity(p.invoice_discount, "0"));
+    setStockOnPost(p.stock_on_post !== false);
+    setNotes(s(p.notes));
+    setBookNumber(s(p.book_number, "0"));
+    setSecondDate(s(p.second_date));
+    setLicensedDealerNo(s(p.licensed_dealer_no));
+    setSettlementInvoiceNo(s(p.settlement_invoice_no));
+    setPricesIncludeTax(Boolean(p.prices_include_tax));
+    setDiscountPercent(formatQuantity(p.discount_percent, "0"));
+    setSourceDiscountPctOverride(
+      p.source_discount_percent_override == null
+        ? ""
+        : formatQuantity(p.source_discount_percent_override, "")
+    );
+    setSourceDiscountAmtOverride(
+      p.source_discount_amount_override == null
+        ? ""
+        : formatQuantity(p.source_discount_amount_override, "")
+    );
+    if (p.cash_or_bank_account != null)
+      setCashAccountId(p.cash_or_bank_account as number);
+    if (p.revenue_account != null) setRevenueAccountId(p.revenue_account as number);
+    const rawLines = Array.isArray(p.lines) ? (p.lines as Record<string, unknown>[]) : [];
+    setLines(
+      rawLines.length
+        ? rawLines.map((ln) => ({
             key: newLineKey(),
             id: typeof ln.id === "number" ? ln.id : undefined,
             product: (ln.product as number) ?? "",
@@ -1517,12 +1453,63 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             // FEAT-2: أسعار مستعادة من المسودة مُثبّتة — لا يُعاد تسعيرها تلقائياً.
             priceTouched: true,
           }))
-        );
+        : [initialBlankLine()],
+    );
+    dirtyRef.current = true;
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<Record<string, unknown>>({
+    docType: "sales_invoice",
+    docId: draftId,
+    payload: draftPayload,
+    isTouched: dirtyRef.current,
+    onRestore: onRestoreDraft,
+    isPosted,
+    // ختمُ الخادم لحظةَ فتح المستند — كان `SalesInvoiceSerializer` لا يكشف
+    // `updated_at` إطلاقاً فسقط فحصُ «تغيّر المستند بعد مسودتك» (#109 §٩)؛
+    // كُشف الآن، ولمستندٍ جديدٍ لا ختمَ أصلاً فيبقى `null`.
+    docUpdatedAt: draftId != null ? docUpdatedAt : null,
+  });
+
+  /* ISSUE #121: الحارسُ يُقلَب أخيراً — يعترض المغادرة فقط إن فشل الحفظُ
+     المحلّيّ فعلاً (`draftSaveFailed`)، لا كلّما وُجد تعديلٌ غير محفوظ. مرآة
+     `InvoiceForm.tsx` (issue #120) بعد انضمام هذه الشاشة للخطّاف المشترك. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
       }
-      dirtyRef.current = true;
-    },
-    []
-  );
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
+
+  /** «تراجع» على شريط الاستعادة: يعيد المستند إلى نسخته المحفوظة (من الخادم
+   *  لمستندٍ قائم، أو فارغاً لمستندٍ جديد) ويمسح المسودّة. */
+  const handleUndoDraft = async () => {
+    dirtyRef.current = false;
+    if (draftId != null) {
+      try {
+        const d = await getSalesInvoice(draftId);
+        applyDetail(d);
+      } catch {
+        /* أفضل جهد — البقاء على الحالة الحالية أفضل من كسر الشاشة */
+      }
+    } else {
+      resetForm();
+    }
+    void discardDraft();
+  };
 
   const validateClient = (): string | null => {
     if (customerId === "") return "اختر العميل.";
@@ -1620,9 +1607,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       }
 
       dirtyRef.current = false;
-      // M4: the draft is now persisted server-side — drop the local recovery copy.
-      void clearLocalDraft();
-      setRecoverableDraft(null);
+      // ISSUE #121 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      void discardDraft();
       onInvoiceSaved();
       /* T-PAYFULL4: المستند كما أعاده الخادم يرافق النتيجة — من يبني على
          أرقامه (النيّة مثلاً) يقرؤها من مصدرها لا من الشاشة. */
@@ -1684,8 +1670,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           ? `تم الترحيل — القيد #${posted.journal}`
           : "تم الترحيل بنجاح."
       );
-      void clearLocalDraft();
-      setRecoverableDraft(null);
+      void discardDraft();
       onInvoiceSaved();
       return true;
     } catch (e) {
@@ -3446,43 +3431,100 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       </div>
     ) : null;
 
-  // M4: recover an autosaved-but-unsaved draft (only offered for a fresh invoice).
-  const restoreBanner = recoverableDraft ? (
-    <div className="ktra-banner ktra-banner--ok" role="status">
+  /* ISSUE #121: الحفظ المحلي فشل فعلاً (حصّة ممتلئة، تصفّح خاص…) — لافتةٌ
+     لاصقة تطلب حفظاً يدوياً بدل الانتظار الصامت حتى تحاول المغادرة. مرآة
+     `InvoiceForm.tsx` (issue #120). */
+  const draftSaveFailedBanner = draftSaveFailed && !readOnly ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
       <AlertCircle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  /* ISSUE #118/#121: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى
+     مُطبَّقٌ على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً؛
+     هو إخبارٌ لا سؤال، ومعه «تراجع» وحده. */
+  const draftRestoreBanner = draftBanner ? (
+    <div
+      className="ktra-banner ktra-banner--warn"
+      role="status"
+      data-testid="draft-restored-banner"
+    >
+      <Info className="h-4 w-4 shrink-0" />
       <span>
-        توجد مسودة غير محفوظة محليّاً (
-        {formatDateTimeValue(recoverableDraft.updated_at)}). هل تريد
-        استعادتها؟
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّر المستند بعد مسودتك (ومسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
       </span>
+      {draftBanner.eligibility === "restore" && (
+        <button
+          type="button"
+          className="ktra-toolbtn"
+          onClick={() => void handleUndoDraft()}
+          data-testid="draft-restored-undo"
+        >
+          <Undo2 className="h-4 w-4" />
+          تراجع
+        </button>
+      )}
+      {draftBanner.eligibility === "stale" && (
+        <>
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            onClick={() => onRestoreDraft(draftBanner.payload)}
+            data-testid="draft-stale-preview"
+          >
+            استعرض مسودتي
+          </button>
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            onClick={() => void discardDraft()}
+            data-testid="draft-stale-discard"
+          >
+            تجاهلها
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  /* شريط اليتامى (issue #119 §٧): مسودّات مستندٍ جديد أخرى لنفس النوع تُركت
+     في تبويبات أخرى — تاريخ كلٍّ وسطر محتواها الأوّل كي تُميَّز. */
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div
+      className="ktra-banner"
+      role="status"
+      data-testid="orphan-drafts-banner"
+    >
+      <Info className="h-4 w-4 shrink-0" />
+      <div className="flex flex-col gap-1">
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul className="list-disc pr-4 text-xs">
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>
+              {formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}
+            </li>
+          ))}
+        </ul>
+      </div>
       <button
         type="button"
-        className="mr-3 underline font-semibold hover:no-underline"
-        onClick={async () => {
-          if (dirtyRef.current) {
-            const confirmed = await confirm({
-              message: "لديك تعديلات غير محفوظة حالياً. هل أنت متأكد من استعادة المسودة وفقدان هذه التعديلات؟",
-              confirmText: "استعادة",
-              cancelText: "إلغاء",
-              danger: false,
-            });
-            if (!confirmed) return;
-          }
-          hydrateFromLocalDraft(recoverableDraft.data);
-          setRecoverableDraft(null);
-        }}
+        className="ktra-toolbtn"
+        onClick={() => setOrphanBarDismissed(true)}
+        data-testid="orphan-drafts-dismiss"
       >
-        استعادة
-      </button>
-      <button
-        type="button"
-        className="mr-3 underline font-semibold hover:no-underline"
-        onClick={() => {
-          void db.invoice_drafts.delete(localDraftKey);
-          setRecoverableDraft(null);
-        }}
-      >
-        تجاهل
+        <X className="h-4 w-4" />
+        إخفاء
       </button>
     </div>
   ) : null;
@@ -4361,13 +4403,22 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             <span className="ktra-status-item">
               {readOnly ? "للقراءة فقط" : "قابل للتعديل ✓"}
             </span>
+            {/* issue #121 (issue #109 §٦): مؤشّر دائم كي لا يضغط المستخدم
+                «حفظ» احتياطاً كل دقيقة. */}
+            {draftSavedAt && !readOnly && (
+              <span className="ktra-status-item" data-testid="draft-saved-indicator">
+                مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+              </span>
+            )}
           </>
         }
       >
+        {draftSaveFailedBanner}
         {banner}
         {reservedWarningBanner}
         {stockWarningBanner}
-        {restoreBanner}
+        {draftRestoreBanner}
+        {orphanDraftsBanner}
         {/* وضع القراءة: مستند مُنسَّق بدل شبكة الإدخال المعطّلة. */}
         {viewMode && documentView}
         {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}

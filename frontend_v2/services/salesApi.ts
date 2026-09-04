@@ -70,6 +70,8 @@ export type AttachedCheque = {
 };
 
 export type SalesInvoiceDetail = SalesInvoiceRow & {
+  /** ختمُ تعديل المستند على الخادم — مقارنةُ المسودّة المتأخّرة (#109 §٩). */
+  updated_at?: string | null;
   /** T-RETURNUI: الفاتورة الأصلية التي يعود إليها المرجع (للمراجيع فقط). */
   original_invoice?: number | null;
   original_invoice_number?: string | null;

@@ -3,7 +3,7 @@
  * المرجع: العروض والطلبيات.txt:4-9
  * القالب: SalesInvoiceEditor.tsx
  */
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { PriceOffer, PriceOfferItem, PriceOfferStatus, Supplier, Item } from "../../../types";
 import type { PriceOfferAttachment, PriceOfferNote } from "../../../types/offer";
 import type { PriceOfferScope } from "../../../services/firestoreService";
@@ -15,9 +15,9 @@ import {
 } from "../../kit";
 import {
   Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Search, Info,
-  FileText, Link2, Plus, Pencil, Share2,
+  FileText, Link2, Plus, Pencil, Share2, Undo2,
 } from "lucide-react";
-import { formatDateValue } from "../../../utils/formatDate";
+import { formatDateValue, formatTimeValue } from "../../../utils/formatDate";
 import { ItemSearchModal } from "./ItemSearchModal";
 import { ProductCardModal } from "../../shared/ProductCardModal";
 import { ItemQuickEditModal } from "../../items/ItemQuickEditModal";
@@ -36,6 +36,8 @@ import {
   type PurchasePriceListEntry,
 } from "../../../utils/purchasePriceHint";
 import { getScreenColumns } from "../../../utils/procurementColumns";
+import { useDocumentDraft } from "../../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../../utils/documentDraft";
 
 // ISSUE #113: كانت هذه الشاشة تخدم مستندين بلافتة `offerType` وحدها — «عرض
 // سعر من مورد» و«طلبية إلى مورد» — بلا أن تُحفظ اللافتة في الخادم إطلاقاً
@@ -141,6 +143,18 @@ export const PriceOfferForm: React.FC<Props> = ({
       ? offer.items.map((it) => ({ ...it, key: newLineKey() }))
       : [blankLine()]
   );
+  // ISSUE #121 (issue #118/#109 §٢): مسودّة محلية — هذا المحرِّر لا يحفظ شيئاً
+  // اليوم عند إغلاق التبويب بلا حفظ. «لُمِس» يُرفع عند أوّل تعديل مستخدم فعلي،
+  // لا عند التعبئة البرمجية عند تحميل عرضٍ آخر (`[offer.id]` أدناه) — الحيلة:
+  // تخطّي أوّل تشغيلٍ لأثر تغيّر الحمولة بعد كل إعادة تعبئة (تحميل/تراجع).
+  // ISSUE #121: **حالةٌ لا مرجع.** العلامةُ تُرفَع من داخل أثرٍ يجري **بعد**
+  // الرسم، فمرجعٌ صامتٌ يُبقي `isTouched` كاذبةً في الرسمة نفسِها التي كان
+  // يجب أن تُجدوِل الكتابة — ويُضيع من عدّل تعديلاً واحداً وغادر. الحالةُ
+  // تُعيد الرسم فيرى الخطّافُ العلامةَ فوراً.
+  const [isDirty, setIsDirty] = useState(false);
+  const markDirty = useCallback((value: boolean) => setIsDirty(value), []);
+  const skipNextDirtyRef = useRef(true);
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [lastKey, setLastKey] = useState("—");
@@ -177,35 +191,42 @@ export const PriceOfferForm: React.FC<Props> = ({
     return () => { cancelled = true; };
   }, [supplierId]);
 
-  // إعادة تحميل عند تغيير offer prop
-  useEffect(() => {
-    setOfferNumber(offer.offerNumber || "");
-    setOrderName(offer.orderName || "");
-    setOrderDescription(offer.orderDescription || "");
-    setSupplierId(offer.supplierId || "");
-    setSupplierDraftName(offer.supplierDraftName || "");
-    setFactoryName(offer.factoryName || "");
-    setOfferDate(offer.offerDate || new Date().toISOString().slice(0, 10));
-    setValidUntil(offer.validUntil || "");
-    setCurrency(offer.currency || "USD");
-    setExchangeRate(String(offer.exchangeRate ?? 1));
-    setStatus(offer.status || "initial");
-    setShippingMethod(offer.shippingMethod || "");
-    setPaymentMethod(offer.paymentMethod || "");
-    setDeliveryDays(String(offer.deliveryDays ?? ""));
-    setShippingCost(String(offer.shippingCost ?? 0));
-    setShippingIncluded(Boolean(offer.shippingIncluded));
-    setAlibabaLink(offer.alibabaLink || "");
-    setSupplierContact(offer.supplierContact || "");
-    setDecisionReason(offer.decisionReason || "");
-    setAttachments(offer.attachments || []);
-    setNotesLog(offer.notesLog || []);
+  // إعادة تحميل عند تغيير offer prop — ومصدر «تراجع» عن مسودّة مستعادة (أدناه).
+  const resetFieldsFromOffer = useCallback((source: Partial<PriceOffer>) => {
+    setOfferNumber(source.offerNumber || "");
+    setOrderName(source.orderName || "");
+    setOrderDescription(source.orderDescription || "");
+    setSupplierId(source.supplierId || "");
+    setSupplierDraftName(source.supplierDraftName || "");
+    setFactoryName(source.factoryName || "");
+    setOfferDate(source.offerDate || new Date().toISOString().slice(0, 10));
+    setValidUntil(source.validUntil || "");
+    setCurrency(source.currency || "USD");
+    setExchangeRate(String(source.exchangeRate ?? 1));
+    setStatus(source.status || "initial");
+    setShippingMethod(source.shippingMethod || "");
+    setPaymentMethod(source.paymentMethod || "");
+    setDeliveryDays(String(source.deliveryDays ?? ""));
+    setShippingCost(String(source.shippingCost ?? 0));
+    setShippingIncluded(Boolean(source.shippingIncluded));
+    setAlibabaLink(source.alibabaLink || "");
+    setSupplierContact(source.supplierContact || "");
+    setDecisionReason(source.decisionReason || "");
+    setAttachments(source.attachments || []);
+    setNotesLog(source.notesLog || []);
     setNewNote("");
-    setInternalNotes(offer.internalNotes || "");
-    setTaxRate(String(offer.taxRate ?? 0));
-    setDiscountAmount(String(offer.discountAmount ?? 0));
-    setLines(offer.items?.length ? offer.items.map((it) => ({ ...it, key: newLineKey() })) : [blankLine()]);
-  }, [offer.id]);
+    setInternalNotes(source.internalNotes || "");
+    setTaxRate(String(source.taxRate ?? 0));
+    setDiscountAmount(String(source.discountAmount ?? 0));
+    setLines(source.items?.length ? source.items.map((it) => ({ ...it, key: newLineKey() })) : [blankLine()]);
+  }, []);
+
+  useEffect(() => {
+    resetFieldsFromOffer(offer);
+    // إعادة تعبئةٍ برمجية — لا تُحسب «لمساً»؛ تخطَّ أثر تغيّر الحمولة التالي.
+    skipNextDirtyRef.current = true;
+    markDirty(false);
+  }, [offer.id, resetFieldsFromOffer]);
 
   useEffect(() => {
     setAvailableItems(items);
@@ -225,6 +246,169 @@ export const PriceOfferForm: React.FC<Props> = ({
   const supplierAddress = selectedSupplier
     ? [selectedSupplier.street, selectedSupplier.city, selectedSupplier.country].filter(Boolean).join(", ")
     : "";
+
+  /* ISSUE #121: الحمولة المحلية — كائنٌ خفيف يكفي وحده لإعادة بناء الشاشة عبر
+     `onRestore`؛ لا صلة بحمولة الحفظ الخادمية (`buildPayload` أدناه، الذي يحمل
+     أيضاً مشتقّات كـ`supplierSnapshot`/`grandTotal` لا حاجة لتخزينها محلياً). */
+  const draftPayload = useMemo(
+    () => ({
+      offerNumber, orderName, orderDescription, supplierId, supplierDraftName,
+      factoryName, offerDate, validUntil, status, currency, exchangeRate,
+      shippingMethod, paymentMethod, deliveryDays, shippingCost, shippingIncluded,
+      alibabaLink, supplierContact, decisionReason, attachments, internalNotes,
+      notesLog, taxRate, discountAmount, lines,
+    }),
+    [offerNumber, orderName, orderDescription, supplierId, supplierDraftName,
+      factoryName, offerDate, validUntil, status, currency, exchangeRate,
+      shippingMethod, paymentMethod, deliveryDays, shippingCost, shippingIncluded,
+      alibabaLink, supplierContact, decisionReason, attachments, internalNotes,
+      notesLog, taxRate, discountAmount, lines],
+  );
+
+  type PriceOfferDraftPayload = typeof draftPayload;
+
+  const onRestoreDraft = useCallback((restored: PriceOfferDraftPayload) => {
+    setOfferNumber(restored.offerNumber);
+    setOrderName(restored.orderName);
+    setOrderDescription(restored.orderDescription);
+    setSupplierId(restored.supplierId);
+    setSupplierDraftName(restored.supplierDraftName);
+    setFactoryName(restored.factoryName);
+    setOfferDate(restored.offerDate);
+    setValidUntil(restored.validUntil);
+    setStatus(restored.status);
+    setCurrency(restored.currency);
+    setExchangeRate(restored.exchangeRate);
+    setShippingMethod(restored.shippingMethod);
+    setPaymentMethod(restored.paymentMethod);
+    setDeliveryDays(restored.deliveryDays);
+    setShippingCost(restored.shippingCost);
+    setShippingIncluded(restored.shippingIncluded);
+    setAlibabaLink(restored.alibabaLink);
+    setSupplierContact(restored.supplierContact);
+    setDecisionReason(restored.decisionReason);
+    setAttachments(restored.attachments);
+    setInternalNotes(restored.internalNotes);
+    setNotesLog(restored.notesLog);
+    setTaxRate(restored.taxRate);
+    setDiscountAmount(restored.discountAmount);
+    setLines(restored.lines);
+    // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تُسجَّل «ملموسة» فوراً.
+    markDirty(true);
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<PriceOfferDraftPayload>({
+    docType: "price_offer",
+    docId: offer.id ?? null,
+    payload: draftPayload,
+    isTouched: isDirty,
+    onRestore: onRestoreDraft,
+    // T-DRAFT: لا مفهوم «ترحيل» في عروض الأسعار — أقرب مرادف هو إغلاق الشاشة
+    // للتحرير (`isReadOnly`، القادم من حالة الخادم في `PriceOfferManagement`:
+    // محوَّل/مؤكَّد/ملغى/مفوتَر/مغلق). طالما القراءة فقط تمنع أي تعديل أصلاً لا
+    // يمكن أن يصبح `isTouched` صحيحاً وقتها، فهذا لا يغيّر متى تُكتب المسودّة —
+    // فقط يمنع استعادةً تلقائية صامتة إن أُغلق المستند من نافذةٍ أخرى بعد كتابتها.
+    isPosted: isReadOnly,
+    docUpdatedAt: offer.updatedAt ?? null,
+  });
+
+  // isTouched مشتقّة من تغيّر الحمولة الفعلي لا من كل معالِج على حدة (عشرات
+  // الحقول هنا) — تخطّي أوّل تشغيلٍ بعد كل إعادة تعبئة برمجية (تحميل/تراجع/استعادة)
+  // كي لا تُحسب تعبئةً «لمساً». انظر `resetFieldsFromOffer` و`handleUndoDraft`.
+  useEffect(() => {
+    if (skipNextDirtyRef.current) {
+      skipNextDirtyRef.current = false;
+      return;
+    }
+    markDirty(true);
+  }, [draftPayload]);
+
+  /* ISSUE #121 (نمط الحارس المقلوب — issue #120): يعترض المغادرة فقط إن فشل
+     الحفظ المحلي فعلاً — لا دائماً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع» على شريط الاستعادة: يعيد الشاشة إلى نسخة العرض المحمَّلة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    resetFieldsFromOffer(offer);
+    skipNextDirtyRef.current = true;
+    markDirty(false);
+    void discardDraft();
+  }, [offer, resetFieldsFromOffer, discardDraft]);
+
+  const draftSaveFailedBanner = draftSaveFailed && !isReadOnly ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «تخزين» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  const draftRestoreBanner = draftBanner ? (
+    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <span>
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّر المستند بعد مسودتك (عُدِّل ${formatTimeValue(offer.updatedAt || "")}، ومسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند — للاطّلاع فقط (غير قابل للتعديل حالياً).`}
+      </span>
+      {draftBanner.eligibility === "restore" && (
+        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+          <Undo2 className="h-4 w-4" /> تراجع
+        </button>
+      )}
+      {draftBanner.eligibility === "stale" && (
+        <>
+          <button type="button" className="ktra-toolbtn"
+            onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
+            استعرض مسودتي
+          </button>
+          <button type="button" className="ktra-toolbtn"
+            onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+            تجاهلها
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <div className="flex flex-col gap-1">
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul className="list-disc pr-4 text-xs">
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+          ))}
+        </ul>
+      </div>
+      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+        <X className="h-4 w-4" /> إخفاء
+      </button>
+    </div>
+  ) : null;
 
   const buildPayload = useCallback((): Partial<PriceOffer> => ({
     ...offer,
@@ -309,6 +493,9 @@ export const PriceOfferForm: React.FC<Props> = ({
     try {
       await onSave(buildPayload());
       setMsg("تم الحفظ.");
+      // ISSUE #121 (issue #118 §٥): حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      markDirty(false);
+      void discardDraft();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
     }
@@ -572,12 +759,21 @@ export const PriceOfferForm: React.FC<Props> = ({
     </div>
   );
 
-  const banner = (err || msg) ? (
+  const saveBanner = (err || msg) ? (
     <div className={`ktra-banner ${err ? "ktra-banner--err" : "ktra-banner--ok"}`}>
       {err ? <AlertCircle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
       <span>{err || msg}</span>
     </div>
   ) : null;
+
+  const banner = (
+    <>
+      {draftSaveFailedBanner}
+      {saveBanner}
+      {draftRestoreBanner}
+      {orphanDraftsBanner}
+    </>
+  );
 
   /**
    * T-OFFERSTATE: الملاحظات كانت مربّعاً واحداً قصيراً يُدهس عند كل تعديل.
@@ -966,6 +1162,12 @@ export const PriceOfferForm: React.FC<Props> = ({
           <span className="ktra-status-item">عدد المنتجات <b>{lines.length}</b></span>
           <span className="ktra-status-item">آخر مفتاح <b>{lastKey}</b></span>
           {isReadOnly && <span className="ktra-status-item">للقراءة فقط</span>}
+          {/* issue #121 (issue #109 §٦): مؤشّر دائم كي لا يضغط المستخدم «تخزين» احتياطاً كل دقيقة. */}
+          {draftSavedAt && !isReadOnly && (
+            <span className="ktra-status-item" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          )}
         </>
       }
       overlay={<>
