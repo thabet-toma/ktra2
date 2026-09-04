@@ -403,6 +403,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   const {
     draftSavedAt,
+    draftSaveFailed,
     restoredBanner: draftBanner,
     discardDraft,
     orphanDrafts,
@@ -420,6 +421,23 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     isPosted: Boolean(formData.isPosted),
     docUpdatedAt: formData.id ? formData.updatedAt ?? null : null,
   });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ
+     فعلاً (`draftSaveFailed` من الخطّاف المشترك، #118)، لا دائماً. طالما
+     IndexedDB متاحة (الحال الغالب) لا يظهر هذا الحارس عملياً أبداً — نصّ
+     `beforeunload` لا يُخصَّص أصلاً، فهو سؤالٌ احتياطيّ لا شبكةُ أمان؛
+     شبكةُ الأمان الحقيقية هي الكتابة عند `visibilitychange→hidden` وعند
+     تفكيك المكوّن داخل الخطّاف نفسه. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
 
   // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها؛
   // يعود ظاهراً عند فتح شاشة «فاتورة جديدة» التالية.
@@ -3044,6 +3062,23 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     </div>
   ) : null;
 
+  /* ISSUE #120: الحفظ المحلي فشل فعلاً (حصّة ممتلئة، تصفّح خاص…) — لافتةٌ
+     لاصقة تطلب حفظاً يدوياً بدل الانتظار الصامت حتى تحاول المغادرة. الصمتُ
+     عن فشلٍ نعرفه أسوأُ من التحذير (issue #109 §١٠)، فهذه تظهر فوراً لا عند
+     المغادرة وحدها — الحارس المقلوب أعلاه (`draftSaveFailed`) يعترض المغادرة
+     أيضاً في هذه الحالة، لكن هذه اللافتة هي ما يراه المستخدم وهو لا يزال هنا. */
+  const draftSaveFailedBanner = draftSaveFailed && !effectiveReadOnly ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
   /* ISSUE #118: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى مُطبَّقٌ
      على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً؛ هو
      إخبارٌ لا سؤال، ومعه «تراجع» وحده. */
@@ -3861,6 +3896,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </>
       }
     >
+      {draftSaveFailedBanner}
       {saveErrorBanner}
       {accBanner}
       {draftRestoreBanner}

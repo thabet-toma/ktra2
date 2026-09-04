@@ -524,6 +524,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   // Browser warning on close while dirty (تعديل على سجل محفوظ فقط —
   // الشحنة الجديدة الفارغة لا تستحق تحذير مغادرة)
+  // ISSUE #120: الحارسُ يُقلَب («حاوِلِ الحفظَ أوّلاً») **بعد** أن تنضمّ الشاشة
+  // إلى `useDocumentDraft` (issue #121) — لا قبلها. هذه الشاشة لا تحفظ مسودّةً
+  // محلياً بعدُ، فحذفُ الحارس هنا يستبدل حواراً مزعجاً بضياعٍ صامت. يبقى حتى
+  // تصير هناك محاولةُ حفظٍ فعلية يُشترط بفشلها.
   useEffect(() => {
     if (!isShipmentDirty || !shipment) return undefined;
     const onUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };

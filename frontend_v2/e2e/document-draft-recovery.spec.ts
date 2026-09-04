@@ -230,3 +230,75 @@ test('الخروج يمحو المسودّات المحلية (خصوصية جه
 
   await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBe(0);
 });
+
+/**
+ * ISSUE #120 — الحارس مقلوب: يُحاول الحفظ المحلي أوّلاً، ولا يعترض المغادرة
+ * إلّا إن فشل فعلاً. `InvoiceForm.tsx` هو المستهلك الوحيد لـ`useDocumentDraft`
+ * (issue #118)، فهو حامل الحارس المقلوب الوحيد — و`SalesInvoiceEditor.tsx`
+ * و`ImportDocumentScreen.tsx` يحتفظان بحارسهما القديم غير المشروط عمداً حتى
+ * تنضمّا إلى الخطّاف المشترك (issue #121): بلا محاولة حفظٍ فعلية لا معنى
+ * لشرط «إلّا إن فشل»، وحذفُ الحارس قبلها يستبدل حواراً مزعجاً بضياعٍ صامت.
+ *
+ * التحقّق **لا** يعتمد على حوار متصفّح حقيقي (سلوك beforeunload في Chromium
+ * تحت الأتمتة متقلّب بين إصدارات Playwright) بل على إرسال حدث `beforeunload`
+ * صناعياً وقراءة `event.defaultPrevented` مباشرة — فحصٌ حتميّ لنفس الشرط الذي
+ * يقرّره مستمع الحارس في الكود (`e.preventDefault()` من عدمه).
+ */
+async function dispatchBeforeUnload(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const ev = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
+}
+
+test('الحارس المقلوب: الحفظ المحلي ينجح ← بلا اعتراض مغادرة والعمل محفوظ فعلاً (issue #120)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await stub(page);
+
+  await page.goto('/purchase-invoices/new');
+  const docField = page.getByPlaceholder(SUPPLIER_DOC_FIELD);
+  await expect(docField).toBeVisible({ timeout: 30_000 });
+  await docField.fill('SUP-DRAFT-NODIALOG');
+  await expect(docField).toHaveValue('SUP-DRAFT-NODIALOG');
+
+  // مؤشّر «حُفظ HH:mm» (issue #120 §٣) هو إثبات نجاح الحفظ المحلي فعلياً —
+  // لا انتظار توقيتٍ أعمى للكتابة المؤجَّلة (٥٠٠ms).
+  await expect(page.getByTestId('draft-saved-indicator')).toBeVisible({ timeout: 10_000 });
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+  // ولا لافتة فشلٍ لاصقة، ولا اعتراض مغادرة حقيقي.
+  await expect(page.getByTestId('draft-save-failed-banner')).toHaveCount(0);
+  expect(await dispatchBeforeUnload(page)).toBe(false);
+});
+
+test('حالة فشلٍ مُصطنَعة: كتابة IndexedDB معطَّلة ← اللافتة اللاصقة تظهر والمغادرة تُستوقَف (issue #120)', async ({ page }) => {
+  test.setTimeout(60_000);
+
+  // اصطناعٌ نظيف للفشل من داخل الاختبار وحده — لا مِقبض اختبارٍ في كود
+  // الإنتاج: تعطيل `IDBObjectStore.put` لمخزن `document_drafts` تحديداً (بلا
+  // مسّ مخازن أخرى) يحاكي حصّةً ممتلئة أو تصفّحاً خاصاً بلا محاكاة تلك البيئات
+  // فعلياً. يُسجَّل قبل أي تنقّل كي يسري على كل تحميل صفحة.
+  await page.addInitScript(() => {
+    const originalPut = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: unknown[]) {
+      if (this.name === 'document_drafts') {
+        throw new DOMException('محاكاة فشل كتابة (issue #120 e2e)', 'QuotaExceededError');
+      }
+      return (originalPut as (...a: unknown[]) => IDBRequest).apply(this, args);
+    };
+  });
+  await stub(page);
+
+  await page.goto('/purchase-invoices/new');
+  const docField = page.getByPlaceholder(SUPPLIER_DOC_FIELD);
+  await expect(docField).toBeVisible({ timeout: 30_000 });
+  await docField.fill('SUP-DRAFT-FAIL');
+
+  await expect(page.getByTestId('draft-save-failed-banner')).toBeVisible({ timeout: 10_000 });
+  // لا مؤشّر «حُفظ» — الكتابة فشلت فعلاً، لا وهم نجاح.
+  await expect(page.getByTestId('draft-saved-indicator')).toHaveCount(0);
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBe(0);
+
+  expect(await dispatchBeforeUnload(page)).toBe(true);
+});

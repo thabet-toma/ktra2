@@ -1262,6 +1262,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   }, [customerId, totals.grandTotal, draftId]);
 
   // ── M4: beforeunload guard ─────────────────────────────────────────────
+  // ISSUE #120: الحارسُ يُقلَب («حاوِلِ الحفظَ أوّلاً، ولا تعترض إلّا إن فشل»)
+  // **بعد** أن تنضمّ هذه الشاشة إلى `useDocumentDraft` (issue #121) — لا قبلها.
+  // حفظُها المحلّيّ اليوم أعمى (يكتب ولا يُعيد، مواصفة #109)، فلا إشارةَ فشلٍ
+  // يُشترط بها الاعتراض. حذفُه الآن يستبدل حواراً مزعجاً بضياعٍ صامت.
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (dirtyRef.current && invoiceStatus === "draft") {
