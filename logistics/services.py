@@ -397,6 +397,8 @@ def submit_rfq_supplier_quote(recipient, *, name: str, prices: dict, ip: str = '
             status=SupplierQuotation.STATUS_SENT,
             order_name=rfq.rfq_number or '',
             supplier_contact=name,
+            # ISSUE #122: ختمٌ صريح — هذا المسارُ وحده هو «سعّره المورّد بنفسه».
+            entry_source=SupplierQuotation.ENTRY_SUPPLIER_LINK,
         )
     else:
         quotation.supplier_contact = name
@@ -411,6 +413,11 @@ def submit_rfq_supplier_quote(recipient, *, name: str, prices: dict, ip: str = '
             quotation=quotation, seq=line.seq,
             defaults=dict(
                 tenant=rfq.tenant, product=line.product,
+                # ISSUE #122: البندُ الأبّ نفسُه لا ترتيبُه. المطابقةُ بـ`seq`
+                # في المصفوفة تكذب متى حُذف بندٌ من عرضٍ يُحرَّر بحرّية فتُرقَّم
+                # البقيةُ من جديد — وهذا المسارُ يمرّ على بنود الطلبية أصلاً،
+                # فالإسنادُ سطرٌ واحد.
+                rfq_line=line,
                 name_snapshot=line.name_snapshot,
                 unit_of_measure=line.unit_of_measure,
                 quantity=line.quantity,

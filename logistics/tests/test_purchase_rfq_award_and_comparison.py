@@ -293,6 +293,8 @@ class RfqComparisonTest(RfqAwardAndComparisonTestBase):
         self.assertEqual(set(supplier_row.keys()), {
             'supplier_id', 'supplier_name', 'quotation_id', 'quotation_number',
             'currency_code', 'exchange_rate', 'replied_at', 'prices', 'goods_total_base',
+            # ISSUE #122: شارةُ مصدر الإدخال — الحقل الوحيد الذي كسبته المصفوفة.
+            'entry_source',
         })
 
     def test_comparison_from_another_tenant_is_not_readable(self):
@@ -301,3 +303,222 @@ class RfqComparisonTest(RfqAwardAndComparisonTestBase):
         self.client.credentials(HTTP_X_TENANT_ID=str(self.other_tenant.TenantID))
         response = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/comparison/')
         self.assertEqual(response.status_code, 404)
+
+
+class RfqOfferEnteredFromTheEditorTest(RfqAwardAndComparisonTestBase):
+    """ISSUE #122 — المورّدُ الذي سعّر هاتفياً: عرضٌ يُولَد من صفّ مستقبِله.
+
+    لا نافذةَ تسعيرٍ مستقلّة ولا نقطةَ API ثانية: يُفتَح **محرِّرُ العروض
+    نفسُه** عرضاً جديداً غيرَ محفوظ، مُعبَّأً ببنود الطلبية وكمياتها وبأسعارٍ
+    فارغة. فالتسعيرُ الجزئيّ (يُحذَف سطرُ ما لا يحمله المورّد) والعملةُ
+    والتصحيحُ كلُّها تسقط من المحرِّر القائم — والذي تكسبه القاعدة هو النَسَب:
+    `rfq_recipient` عند الإنشاء، و`rfq_line` على كلّ سطر.
+    """
+
+    def create_and_send_rfq_with_three_lines(self, suppliers=None):
+        suppliers = suppliers if suppliers is not None else [self.supplier_a]
+        payload = {
+            'scope': 'local',
+            'rfq_date': '2026-09-01',
+            'lines': [
+                {'product': self.product1.id, 'seq': 1, 'quantity': '5.000',
+                 'unit_of_measure': 'حبة'},
+                {'product': self.product2.id, 'seq': 2, 'quantity': '2.000',
+                 'unit_of_measure': 'كرتون'},
+                {'seq': 3, 'quantity': '3.000', 'name_snapshot': 'صنف ثالث',
+                 'unit_of_measure': 'حبة'},
+            ],
+        }
+        created = self.client.post('/api/logistics/purchase-rfqs/', payload, format='json')
+        self.assertEqual(created.status_code, 201, created.content)
+        send = self.client.post(
+            f'/api/logistics/purchase-rfqs/{created.data["id"]}/send/',
+            {'supplier_ids': [s.id for s in suppliers]}, format='json',
+        )
+        self.assertEqual(send.status_code, 200, send.content)
+        return created.data
+
+    def post_offer(self, *, recipient, supplier, lines, **overrides):
+        payload = {
+            'scope': 'local',
+            'supplier': supplier.id,
+            'quotation_date': '2026-09-02',
+            'currency': self.base_currency.pk,
+            'exchange_rate': '1',
+            'rfq_recipient': recipient.id,
+            'lines': lines,
+        }
+        payload.update(overrides)
+        return self.client.post(
+            '/api/logistics/supplier-quotations/', payload, format='json',
+        )
+
+    def test_offer_born_from_a_recipient_becomes_that_suppliers_column_and_can_be_awarded(self):
+        data = self.create_and_send_rfq(estimated_prices=(Decimal('10'), Decimal('20')))
+        rfq_id = data['id']
+        line_ids = [line['id'] for line in data['lines']]
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+
+        response = self.post_offer(
+            recipient=recipient, supplier=self.supplier_a,
+            lines=[
+                {'product': self.product1.id, 'seq': 1, 'quantity': '5.000',
+                 'unit_price': '9', 'rfq_line': line_ids[0]},
+                {'product': self.product2.id, 'seq': 2, 'quantity': '2.000',
+                 'unit_price': '19', 'rfq_line': line_ids[1]},
+            ],
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data['rfq'], rfq_id)
+        self.assertEqual(response.data['entry_source'], 'manual')
+
+        # المستقبِلُ صار «ردّ»: بعرضٍ وبوقتِ ردّ.
+        recipient.refresh_from_db()
+        self.assertEqual(recipient.quotation_id, response.data['id'])
+        self.assertIsNotNone(recipient.replied_at)
+
+        # ويظهر في المصفوفة كأيّ مورّدٍ ردّ.
+        comparison = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/comparison/')
+        self.assertEqual(comparison.status_code, 200, comparison.content)
+        supplier_row = comparison.data['suppliers'][0]
+        self.assertEqual(supplier_row['supplier_id'], self.supplier_a.id)
+        self.assertEqual(supplier_row['prices'][str(line_ids[0])], '9.0000')
+        self.assertEqual(supplier_row['goods_total_base'], '83.00')  # 5×9 + 2×19
+
+        # وتصحّ الترسيةُ عليه بلا استثناء.
+        award = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/award/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
+        self.assertEqual(award.status_code, 200, award.content)
+        self.assertEqual(award.data['awarded_supplier_id'], self.supplier_a.id)
+
+    def test_offer_whose_middle_line_was_deleted_lines_prices_up_against_the_right_items(self):
+        """الحارسُ الذي يبرّر `rfq_line` وحدَه.
+
+        المورّدُ لا يحمل الصنف الثاني فيُحذف سطرُه من المحرِّر وتُرقَّم البقيةُ
+        ١ و٢. المطابقةُ بـ`seq` كانت تضع سعرَ **الصنف الثالث** تحت الثاني —
+        كذبةٌ صامتة في الشاشة التي بُنيت لتمنع الكذب.
+        """
+        data = self.create_and_send_rfq_with_three_lines()
+        rfq_id = data['id']
+        line_ids = [line['id'] for line in data['lines']]
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+
+        response = self.post_offer(
+            recipient=recipient, supplier=self.supplier_a,
+            lines=[
+                {'product': self.product1.id, 'seq': 1, 'quantity': '5.000',
+                 'unit_price': '9', 'rfq_line': line_ids[0]},
+                # البند الثاني محذوف — والثالثُ ورث الترتيبَ ٢.
+                {'seq': 2, 'quantity': '3.000', 'name_snapshot': 'صنف ثالث',
+                 'unit_price': '30', 'rfq_line': line_ids[2]},
+            ],
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+
+        comparison = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/comparison/')
+        self.assertEqual(comparison.status_code, 200, comparison.content)
+        supplier_row = comparison.data['suppliers'][0]
+        prices = supplier_row['prices']
+        self.assertEqual(prices[str(line_ids[0])], '9.0000')
+        self.assertIsNone(prices[str(line_ids[1])])   # لا يحمله — فراغٌ لا سعر
+        self.assertEqual(prices[str(line_ids[2])], '30.0000')
+        # 5×9 + 3×30 = 135 — البند المحذوف غائبٌ لا صفريّ القيمة.
+        self.assertEqual(supplier_row['goods_total_base'], '135.00')
+
+    def test_correcting_the_offer_later_does_not_lose_the_line_lineage(self):
+        """المورّدُ عاد بسعرٍ جديد فصُحّح عرضُه — والنَسَبُ يجب أن ينجو.
+
+        `update` على الخادم **يحذف البنود ويعيد بناءها** من الحمولة، فحفظٌ ثانٍ
+        لا يحمل `rfq_line` يمحو النَسَبَ بصمت وترتدّ المصفوفةُ إلى مطابقة `seq`
+        الكاذبة. والحفظُ الثاني هو الحالةُ الشائعة لا النادرة: تصحيحُ سعرٍ سُمع
+        خطأً على الهاتف.
+        """
+        data = self.create_and_send_rfq_with_three_lines()
+        rfq_id = data['id']
+        line_ids = [line['id'] for line in data['lines']]
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+
+        created = self.post_offer(
+            recipient=recipient, supplier=self.supplier_a,
+            lines=[
+                {'product': self.product1.id, 'seq': 1, 'quantity': '5.000',
+                 'unit_price': '9', 'rfq_line': line_ids[0]},
+                {'seq': 2, 'quantity': '3.000', 'name_snapshot': 'صنف ثالث',
+                 'unit_price': '30', 'rfq_line': line_ids[2]},
+            ],
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+
+        patched = self.client.patch(
+            f"/api/logistics/supplier-quotations/{created.data['id']}/",
+            {'lines': [
+                {'product': self.product1.id, 'seq': 1, 'quantity': '5.000',
+                 'unit_price': '8', 'rfq_line': line_ids[0]},
+                {'seq': 2, 'quantity': '3.000', 'name_snapshot': 'صنف ثالث',
+                 'unit_price': '28', 'rfq_line': line_ids[2]},
+            ]},
+            format='json',
+        )
+        self.assertEqual(patched.status_code, 200, patched.content)
+
+        comparison = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/comparison/')
+        prices = comparison.data['suppliers'][0]['prices']
+        self.assertEqual(prices[str(line_ids[0])], '8.0000')
+        self.assertIsNone(prices[str(line_ids[1])])
+        # لو ضاع النَسَبُ لسقطت المطابقةُ إلى `seq` فوضعت ٢٨ تحت البند الثاني.
+        self.assertEqual(prices[str(line_ids[2])], '28.0000')
+
+    def test_comparison_distinguishes_who_priced_it_himself_from_who_we_entered_for(self):
+        data = self.create_and_send_rfq(suppliers=[self.supplier_a, self.supplier_b])
+        rfq_id = data['id']
+        line_ids = [line['id'] for line in data['lines']]
+        recipient_a = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        recipient_b = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_b)
+
+        # (أ) سعّر بنفسه من رابطه، و(ب) أدخلناه عنه من المحرِّر.
+        submit_rfq_supplier_quote(
+            recipient_a, name='Rep A',
+            prices={line_ids[0]: Decimal('10'), line_ids[1]: Decimal('20')},
+        )
+        response = self.post_offer(
+            recipient=recipient_b, supplier=self.supplier_b,
+            lines=[
+                {'product': self.product1.id, 'seq': 1, 'quantity': '5.000',
+                 'unit_price': '11', 'rfq_line': line_ids[0]},
+                {'product': self.product2.id, 'seq': 2, 'quantity': '2.000',
+                 'unit_price': '21', 'rfq_line': line_ids[1]},
+            ],
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+
+        comparison = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/comparison/')
+        sources = {
+            row['supplier_id']: row['entry_source'] for row in comparison.data['suppliers']
+        }
+        self.assertEqual(sources[self.supplier_a.id], 'supplier_link')
+        self.assertEqual(sources[self.supplier_b.id], 'manual')
+
+    def test_offer_in_a_currency_other_than_base_is_converted_in_the_matrix(self):
+        data = self.create_and_send_rfq(estimated_prices=(Decimal('37'), None))
+        rfq_id = data['id']
+        line_ids = [line['id'] for line in data['lines']]
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+
+        response = self.post_offer(
+            recipient=recipient, supplier=self.supplier_a,
+            currency=self.usd.pk, exchange_rate='3.7',
+            lines=[
+                {'product': self.product1.id, 'seq': 1, 'quantity': '5.000',
+                 'unit_price': '10', 'rfq_line': line_ids[0]},
+            ],
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+
+        comparison = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/comparison/')
+        supplier_row = comparison.data['suppliers'][0]
+        self.assertEqual(supplier_row['currency_code'], 'USD')
+        # عشرةُ دولاراتٍ = ٣٧ بالأساسية — لا «١٢ دولاراً أقلّ من ٤٥ شيكلاً».
+        self.assertEqual(supplier_row['prices'][str(line_ids[0])], '37.0000')
+        self.assertEqual(supplier_row['goods_total_base'], '185.00')

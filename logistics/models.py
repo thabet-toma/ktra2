@@ -43,6 +43,17 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
         (STATUS_CONVERTED, 'Converted'),
     ]
 
+    # ISSUE #122: مَن كتب هذا الرقم؟ المورّدُ بنفسه على رابطه الخاص، أم موظّفُنا
+    # عنه بعد مكالمة. **حقلٌ صريحٌ لا استنتاجٌ من `created_by IS NULL`** — ذاك
+    # يعمل اليوم صدفةً (مسارُ الرابط لا يمرّر مُنشئاً) ويكذب أوّلَ مرّةٍ يُنشئ
+    # فيها مسارٌ ثالثٌ عرضاً. والعمودان ليسا سواءً في الثقة عند المقارنة.
+    ENTRY_SUPPLIER_LINK = 'supplier_link'
+    ENTRY_MANUAL = 'manual'
+    ENTRY_SOURCE_CHOICES = [
+        (ENTRY_SUPPLIER_LINK, 'سعّره المورّد'),
+        (ENTRY_MANUAL, 'أُدخل عنه'),
+    ]
+
     id = models.AutoField(primary_key=True, db_column='SupplierQuotationID')
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, db_column='TenantID',
@@ -160,6 +171,13 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
         User, on_delete=models.SET_NULL, null=True, blank=True,
         db_column='CreatedBy_UserID', related_name='created_supplier_quotations',
     )
+    # ISSUE #122: أطولُ قيمةٍ `supplier_link` (١٣ حرفاً) والعمود ٢٠ — العمود
+    # الأضيقُ من قيمته يُلغي القيد بصمتٍ على MySQL وSQLite لا تكشفه.
+    entry_source = models.CharField(
+        max_length=20, choices=ENTRY_SOURCE_CHOICES, default=ENTRY_MANUAL,
+        db_column='EntrySource',
+        help_text='مصدر إدخال العرض: سعّره المورّد على رابطه، أم أُدخل عنه',
+    )
 
     class Meta:
         db_table = 'supplier_quotations'
@@ -214,6 +232,16 @@ class SupplierQuotationLine(models.Model):
     quotation = models.ForeignKey(
         SupplierQuotation, on_delete=models.CASCADE, db_column='SupplierQuotationID',
         related_name='lines',
+    )
+    # ISSUE #122: بندُ الطلبية الأبّ الذي يُسعّره هذا السطر — نَسَبٌ صريح.
+    # كانت المصفوفةُ (`comparison/`) تطابق بـ`seq`، وهي مطابقةٌ تكذب لحظةَ يُحذف
+    # بندٌ من عرضٍ يُحرَّر بحرّية فتُرقَّم البقيةُ من جديد: سعرُ الصنف الثاني
+    # يظهر تحت الثالث ولا شيء في الشاشة يقول ذلك. فارغٌ في العروض المستقلّة
+    # (بلا طلبية) وفي الصفوف السابقة لهذه التذكرة — و`comparison/` تسقط عليها
+    # إلى `seq` كما كانت.
+    rfq_line = models.ForeignKey(
+        'PurchaseRFQLine', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='PurchaseRFQLineID', related_name='quotation_lines',
     )
     # T-DRAFTPARTY: بند بلا منتج مسجَّل — الاسم النصّي (`name_snapshot`) يكفي داخل
     # العرض، ويُنشأ المنتج الحقيقي عند التحويل فقط. عرضُ سعرٍ لم يُقبل لا يجوز أن

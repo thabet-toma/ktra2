@@ -36,6 +36,7 @@ import {
   type PurchasePriceListEntry,
 } from "../../../utils/purchasePriceHint";
 import { getScreenColumns } from "../../../utils/procurementColumns";
+import { useConfirm } from "../../../contexts/ConfirmContext";
 import { useDocumentDraft } from "../../../hooks/useDocumentDraft";
 import { orphanDraftsBannerText } from "../../../utils/documentDraft";
 
@@ -104,6 +105,7 @@ export const PriceOfferForm: React.FC<Props> = ({
   offer, items, suppliers, isReadOnly = false, saving = false,
   scope = "purchase", onSave, onCancel,
 }) => {
+  const confirm = useConfirm();
   const [offerNumber, setOfferNumber] = useState(offer.offerNumber || "");
   const [showShareModal, setShowShareModal] = useState(false);
   const [orderName, setOrderName] = useState(offer.orderName || "");
@@ -267,6 +269,23 @@ export const PriceOfferForm: React.FC<Props> = ({
 
   type PriceOfferDraftPayload = typeof draftPayload;
 
+  /**
+   * ISSUE #122: هويّة المسودّة المحلية — لا `offer.id` وحده.
+   *
+   * مسودّة «عرضٍ جديد» مفتاحها على **التبويب** لا على المستند
+   * (`buildDocumentDraftKey`)، فكلُّ عرضٍ جديد في هذا التبويب يتشارك مفتاحاً
+   * واحداً؛ وأهليّةُ الاستعادة لمستندٍ جديد هي `restore` دائماً (ختمان
+   * `null` — `evaluateDraftRestore`). فعرضٌ مبذورٌ من طلبية كان سيُفتح
+   * معبّأً ثمّ تدهسه مسودّةٌ متروكةٌ من عرضٍ سابقٍ لا صلةَ له، بصمت.
+   *
+   * المستقبِلُ يعطي هويّةً ثابتة: مسودّةٌ لكلّ مورّدٍ في طلبيته — لا تُدهَس،
+   * ولا تدهس مسودّةَ «عرضٍ جديد» العامّة، وتُستأنَف إن عاد إليها. وليست
+   * معرّفَ حفظ: الحفظ يفرّق بين إنشاءٍ وتعديلٍ بـ`offer.id` وحده.
+   */
+  const draftDocId =
+    offer.id
+    || (offer.rfqRecipientId != null ? `rfq-recipient-${offer.rfqRecipientId}` : null);
+
   const onRestoreDraft = useCallback((restored: PriceOfferDraftPayload) => {
     setOfferNumber(restored.offerNumber);
     setOrderName(restored.orderName);
@@ -305,7 +324,7 @@ export const PriceOfferForm: React.FC<Props> = ({
     orphanDrafts,
   } = useDocumentDraft<PriceOfferDraftPayload>({
     docType: "price_offer",
-    docId: offer.id ?? null,
+    docId: draftDocId,
     payload: draftPayload,
     isTouched: isDirty,
     onRestore: onRestoreDraft,
@@ -478,6 +497,35 @@ export const PriceOfferForm: React.FC<Props> = ({
     if (usableLines.length === 0) {
       setErr("أضف منتجاً واحداً على الأقل (باختياره أو بكتابة اسمه) وحدد كميته.");
       return;
+    }
+    // ISSUE #122: العرضُ المبذور من طلبية تصل بنودُه **كلُّها بسعر صفر** — وهذا
+    // كلُّ غرضها — فبندٌ يُنسى بلا تسعير يُحفَظ صفراً ويدخل المقارنة **مجّاناً**:
+    // يبدو هذا المورّد أرخصَ ممّن سعّره فعلاً، وتُرسى عليه الطلبية. وهو عينُ
+    // الكذب الذي فُتحت له #122، من بابٍ آخر — بل أرجحُ وقوعاً هنا: عشرةُ بنودٍ
+    // تصل مصفَّرةً دفعةً واحدة، لا سطرٌ يكتبه المستخدم سطراً سطراً.
+    //
+    // ولا يُمنَع الصفر: مورّدٌ يُهدي بنداً أو يضمّه لغيره أمرٌ وارد. يُسأل عنه
+    // بصريح ما سيحدث، ويبقى القرارُ للمالك. والقاعدةُ محصورةٌ بالعرض المبذور:
+    // العرضُ الحرّ لا مصفوفةَ تقارنه فلا يكذب على أحد.
+    if (offer.rfqRecipientId != null) {
+      const unpriced = usableLines.filter((line) => !(Number(line.unitPrice) > 0));
+      if (unpriced.length > 0) {
+        const names = unpriced.map((line) => line.name.trim() || "بند بلا اسم").join(" · ");
+        const ok = await confirm({
+          title: "بنودٌ بلا سعر",
+          message: (
+            <div className="space-y-1.5 text-right">
+              <p>{`${formatNumber(unpriced.length)} من البنود سعرُها صفر: ${names}`}</p>
+              <p>ستدخل مصفوفة المقارنة كأنّ المورّد يمنحها مجّاناً، فيظهر أرخصَ ممّا هو.</p>
+              <p>إن كان لا يحملها فاحذف سطرَها؛ وإن كانت مجّانيةً فعلاً فتابع.</p>
+            </div>
+          ),
+          confirmText: "تابع الحفظ",
+          cancelText: "رجوع للتصحيح",
+          danger: false,
+        });
+        if (!ok) return;
+      }
     }
     // T-IMPOFFER: «غير ملائم» بلا سبب لا يُحفظ في نطاق الاستيراد — الخادم يرفضه
     // أيضاً، والتحقّق هنا يوفّر رحلة شبكة ويضع الرسالة قرب الحقل. الشراء المحلي

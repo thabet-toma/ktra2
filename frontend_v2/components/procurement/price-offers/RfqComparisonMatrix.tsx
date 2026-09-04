@@ -27,6 +27,7 @@ import {
   getRfqComparison,
   type PurchaseRFQAwardResult,
   type RfqComparisonDto,
+  type SupplierQuotationEntrySource,
 } from "../../../services/procurementDocumentsApi";
 import { computeDeltaPercent } from "../../../utils/purchasePriceHint";
 import { formatMoney, formatNumber } from "../../../utils/formatNumber";
@@ -41,6 +42,17 @@ interface Props {
   onClose: () => void;
   onAwarded: (result: PurchaseRFQAwardResult) => void;
 }
+
+/** ISSUE #122: من كتب أسعار هذا العمود — نصّاً لا لوناً وحده. */
+const ENTRY_SOURCE_LABELS: Record<SupplierQuotationEntrySource, string> = {
+  supplier_link: "سعّره بنفسه",
+  manual: "أُدخل عنه",
+};
+
+const ENTRY_SOURCE_BADGE_CLASS: Record<SupplierQuotationEntrySource, string> = {
+  supplier_link: "rounded-full border border-emerald-300 bg-emerald-50 px-1.5 py-px text-[9px] font-medium text-emerald-800",
+  manual: "rounded-full border border-amber-300 bg-amber-50 px-1.5 py-px text-[9px] font-medium text-amber-800",
+};
 
 const SUPPLIER_COL_WIDTH = 190;
 const FROZEN_WIDTHS = { product: 220, quantity: 90, estimated: 150 };
@@ -148,6 +160,14 @@ export const RfqComparisonMatrix: React.FC<Props> = ({
                           <span className="ktra-text-soft text-[10px]">
                             {s.currency_code} · {s.quotation_number}
                           </span>
+                          {/* ISSUE #122: عمودٌ سعّره المورّد بنفسه وعمودٌ أدخلناه عنه
+                              ليسا سواءً في الثقة — شارةٌ عرضيّةٌ صرف بلا أيّ حساب.
+                              حقلٌ اختياريّ: خادمٌ لا يرسله لا يُظهر شارةً كاذبة. */}
+                          {s.entry_source && (
+                            <span className={ENTRY_SOURCE_BADGE_CLASS[s.entry_source]}>
+                              {ENTRY_SOURCE_LABELS[s.entry_source]}
+                            </span>
+                          )}
                         </div>
                       </th>
                     ))}

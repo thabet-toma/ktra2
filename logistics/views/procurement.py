@@ -561,12 +561,25 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             if quotation is None:
                 continue  # لم يردّ بعد — لا عمود له في المصفوفة
             rate = quotation.exchange_rate if quotation.exchange_rate else Decimal('1')
-            quotation_lines_by_seq = {ql.seq: ql for ql in quotation.lines.all()}
+            # ISSUE #122: المطابقةُ بالنَسَب (`rfq_line`) لا بالترتيب (`seq`).
+            # العرضُ الذي يُدخَل من المحرِّر يحتمل حذفَ بندٍ من وسطه فتُرقَّم
+            # البقيةُ من جديد — ومطابقةُ `seq` حينها تضع سعر الصنف الثاني تحت
+            # الثالث بلا أن يقول شيءٌ في الشاشة. والسقوطُ إلى `seq` مقصورٌ على
+            # عرضٍ **لا نَسَبَ في أيّ من سطوره**: عروضُ ما قبل هذه التذكرة،
+            # وقد كتبها مسارُ الرابط وحدَه مارّاً على بنود الطلبية بالترتيب.
+            quotation_lines = list(quotation.lines.all())
+            has_lineage = any(ql.rfq_line_id for ql in quotation_lines)
+            if has_lineage:
+                lines_by_key = {
+                    ql.rfq_line_id: ql for ql in quotation_lines if ql.rfq_line_id
+                }
+            else:
+                lines_by_key = {ql.seq: ql for ql in quotation_lines}
 
             prices: dict = {}
             goods_total = Decimal('0')
             for line in lines:
-                qline = quotation_lines_by_seq.get(line.seq)
+                qline = lines_by_key.get(line.id if has_lineage else line.seq)
                 if qline is None:
                     prices[str(line.id)] = None
                     continue
@@ -581,6 +594,9 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
                 'quotation_number': quotation.quotation_number,
                 'currency_code': quotation.currency.Code,
                 'exchange_rate': str(rate),
+                # ISSUE #122: سعّره المورّد بنفسه أم أدخلناه عنه — ليسا سواءً
+                # في الثقة. شارةٌ عرضيّةٌ صرف، لا حسابَ جديداً في المصفوفة.
+                'entry_source': quotation.entry_source,
                 'replied_at': recipient.replied_at,
                 'prices': prices,
                 'goods_total_base': str(goods_total.quantize(Decimal('0.01'))),

@@ -631,3 +631,162 @@ class PurchaseRFQDuplicateTest(PurchaseRFQAPITestBase):
 
         original = PurchaseRFQ.objects.get(pk=rfq_id)
         self.assertEqual(original.status, PurchaseRFQ.STATUS_CANCELLED)
+
+
+class SupplierQuotationBornFromRfqGuardsTest(PurchaseRFQAPITestBase):
+    """ISSUE #122 — حرّاسُ العرض المولود من الطلبية.
+
+    الباب الذي فُتح (`rfq` قابلاً للكتابة و`rfq_recipient` عند الإنشاء) ليس
+    باباً مشرَعاً: طلبيةُ شركةٍ أخرى، وطلبيةٌ ليست «مُرسَلة»، ومستقبِلٌ ردّ
+    أصلاً — كلُّها ترتدّ. والمسودّةُ مقصودةٌ في الرفض: بنودُها غير مقفلة
+    ورقمُها لم يُخصَّص، فسعرٌ عليها يُسعّر شيئاً قد يتغيّر.
+    """
+
+    def offer_payload(self, *, rfq_line_id, supplier=None, **overrides):
+        payload = {
+            'scope': 'local',
+            'supplier': (supplier or self.supplier_a).id,
+            'quotation_date': '2026-08-02',
+            'currency': self.currency.pk,
+            'exchange_rate': '1',
+            'lines': [{
+                'product': self.product.id, 'seq': 1, 'quantity': '5.000',
+                'unit_price': '10', 'rfq_line': rfq_line_id,
+            }],
+        }
+        payload.update(overrides)
+        return payload
+
+    def post_offer(self, payload):
+        return self.client.post(
+            '/api/logistics/supplier-quotations/', payload, format='json',
+        )
+
+    def send_rfq(self, suppliers=None):
+        suppliers = suppliers if suppliers is not None else [self.supplier_a]
+        data = self.create_rfq()
+        send = self.client.post(
+            f'/api/logistics/purchase-rfqs/{data["id"]}/send/',
+            {'supplier_ids': [s.id for s in suppliers]}, format='json',
+        )
+        self.assertEqual(send.status_code, 200, send.content)
+        return data
+
+    def test_recipient_who_already_has_a_quotation_is_rejected(self):
+        from logistics.services import submit_rfq_supplier_quote
+
+        data = self.send_rfq()
+        line_id = data['lines'][0]['id']
+        recipient = PurchaseRFQRecipient.objects.get(
+            rfq_id=data['id'], supplier=self.supplier_a,
+        )
+        submit_rfq_supplier_quote(recipient, name='Rep A', prices={line_id: Decimal('10')})
+
+        response = self.post_offer(self.offer_payload(
+            rfq_line_id=line_id, rfq_recipient=recipient.id,
+        ))
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn('rfq_recipient', response.data)
+        # ولا عرضَ ثانياً وُلد رغم الارتداد.
+        self.assertEqual(
+            SupplierQuotation.objects.filter(rfq_id=data['id']).count(), 1,
+        )
+
+    def test_rfq_of_another_tenant_is_rejected(self):
+        data = self.send_rfq()
+        line_id = data['lines'][0]['id']
+        recipient = PurchaseRFQRecipient.objects.get(
+            rfq_id=data['id'], supplier=self.supplier_a,
+        )
+
+        self.client.credentials(HTTP_X_TENANT_ID=str(self.other_tenant.TenantID))
+        response = self.post_offer(self.offer_payload(
+            rfq_line_id=line_id, supplier=self.other_supplier,
+            rfq=data['id'], rfq_recipient=recipient.id,
+            lines=[{
+                'product': self.other_product.id, 'seq': 1, 'quantity': '5.000',
+                'unit_price': '10',
+            }],
+        ))
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn('rfq', response.data)
+
+    def test_offer_on_a_draft_rfq_is_rejected(self):
+        data = self.create_rfq()
+        added = self.client.post(
+            f'/api/logistics/purchase-rfqs/{data["id"]}/recipients/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
+        self.assertEqual(added.status_code, 201, added.content)
+
+        response = self.post_offer(self.offer_payload(
+            rfq_line_id=data['lines'][0]['id'], rfq_recipient=added.data['id'],
+        ))
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn('rfq', response.data)
+
+    def test_offer_on_an_awarded_rfq_is_rejected(self):
+        from logistics.services import submit_rfq_supplier_quote
+
+        data = self.send_rfq(suppliers=[self.supplier_a, self.supplier_b])
+        line_id = data['lines'][0]['id']
+        recipient_a = PurchaseRFQRecipient.objects.get(
+            rfq_id=data['id'], supplier=self.supplier_a,
+        )
+        recipient_b = PurchaseRFQRecipient.objects.get(
+            rfq_id=data['id'], supplier=self.supplier_b,
+        )
+        submit_rfq_supplier_quote(recipient_a, name='Rep A', prices={line_id: Decimal('10')})
+        award = self.client.post(
+            f'/api/logistics/purchase-rfqs/{data["id"]}/award/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
+        self.assertEqual(award.status_code, 200, award.content)
+
+        response = self.post_offer(self.offer_payload(
+            rfq_line_id=line_id, supplier=self.supplier_b,
+            rfq_recipient=recipient_b.id,
+        ))
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn('rfq', response.data)
+
+    def test_offer_on_a_cancelled_rfq_is_rejected(self):
+        data = self.send_rfq()
+        recipient = PurchaseRFQRecipient.objects.get(
+            rfq_id=data['id'], supplier=self.supplier_a,
+        )
+        cancel = self.client.post(f'/api/logistics/purchase-rfqs/{data["id"]}/cancel/')
+        self.assertEqual(cancel.status_code, 200, cancel.content)
+
+        response = self.post_offer(self.offer_payload(
+            rfq_line_id=data['lines'][0]['id'], rfq_recipient=recipient.id,
+        ))
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn('rfq', response.data)
+
+    def test_line_pointing_at_another_rfqs_line_is_rejected(self):
+        first = self.send_rfq()
+        second = self.send_rfq(suppliers=[self.supplier_b])
+        recipient = PurchaseRFQRecipient.objects.get(
+            rfq_id=first['id'], supplier=self.supplier_a,
+        )
+
+        response = self.post_offer(self.offer_payload(
+            rfq_line_id=second['lines'][0]['id'], rfq_recipient=recipient.id,
+        ))
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn('lines', response.data)
+
+    def test_recipient_of_a_different_rfq_is_rejected(self):
+        first = self.send_rfq()
+        second = self.send_rfq(suppliers=[self.supplier_b])
+        stranger = PurchaseRFQRecipient.objects.get(
+            rfq_id=second['id'], supplier=self.supplier_b,
+        )
+
+        response = self.post_offer(self.offer_payload(
+            rfq_line_id=first['lines'][0]['id'], supplier=self.supplier_b,
+            rfq=first['id'], rfq_recipient=stranger.id,
+        ))
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn('rfq_recipient', response.data)

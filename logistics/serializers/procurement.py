@@ -134,12 +134,16 @@ class SupplierQuotationLineSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'product', 'product_name', 'seq', 'name_snapshot',
             'description_line', 'quantity', 'unit_of_measure',
-            'unit_price', 'line_total',
+            'unit_price', 'line_total', 'rfq_line',
         ]
         read_only_fields = ['id', 'product_name', 'line_total']
         # T-DRAFTPARTY: بند بلا منتج مسجَّل مسموح — اسمه النصّي يكفي داخل العرض.
+        # ISSUE #122: `rfq_line` نَسَبُ السطر إلى بند الطلبية — تمرّره الشاشة
+        # كما جاءها في التعبئة الأولى. فارغٌ في العرض المستقلّ، وفارغٌ أيضاً في
+        # سطرٍ يضيفه المورّد من عنده ولم تطلبه الطلبية (فلا عمود له في المصفوفة).
         extra_kwargs = {
             'product': {'required': False, 'allow_null': True},
+            'rfq_line': {'required': False, 'allow_null': True},
         }
 
 class SupplierQuotationSerializer(serializers.ModelSerializer):
@@ -155,6 +159,14 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
     # لا يقود إلى شيء، والواجهة تحتاج المعرّف لفتحه بنقرة.
     converted_order = serializers.SerializerMethodField()
     converted_invoice = serializers.SerializerMethodField()
+    # ISSUE #122: المستقبِلُ الذي وُلد هذا العرضُ عنه — كتابةٌ عند الإنشاء فقط.
+    # النَسَبُ يُولَد مع العرض ولا يُلحَق به بعد حين: ربطُ عرضٍ قائمٍ بطلبيةٍ
+    # لاحقاً كان يعني مطابقةَ بنودٍ كُتبت بحرّية ببنودِ طلبيةٍ مقفلة — وهي
+    # مطابقةٌ بالاسم تكذب. أمّا العرضُ المولود من الطلبية فيحمل نسبَه سطراً سطراً.
+    rfq_recipient = serializers.PrimaryKeyRelatedField(
+        queryset=PurchaseRFQRecipient.objects.all(),
+        write_only=True, required=False, allow_null=True,
+    )
 
     class Meta:
         model = SupplierQuotation
@@ -171,18 +183,23 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             'order_name', 'order_description', 'notes',
             'alibaba_link', 'supplier_contact', 'decision_reason', 'attachments',
             'notes_log',
+            'rfq', 'rfq_recipient', 'entry_source',
             'lines', 'converted_deal', 'converted_order', 'converted_invoice',
             'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'subtotal', 'tax_amount', 'grand_total', 'converted_deal',
             'converted_order', 'converted_invoice', 'is_draft_supplier',
+            # ISSUE #122: مَن كتب الرقم يُختَم في الخادم لا يُرسَل من الشاشة —
+            # وإلّا صارت «سعّره المورّد» شارةً يُدّعى بها.
+            'entry_source',
             'created_at', 'updated_at',
         ]
         extra_kwargs = {
             'quotation_number': {'required': False, 'allow_blank': True},
             'supplier': {'required': False, 'allow_null': True},
             'supplier_draft_name': {'required': False, 'allow_blank': True},
+            'rfq': {'required': False, 'allow_null': True},
         }
 
     def get_supplier_name(self, obj):
@@ -294,6 +311,45 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         if 'supplier_draft_name' in attrs or supplier is not None:
             attrs['supplier_draft_name'] = draft_name
 
+        # ── ISSUE #122: النَسَبُ إلى الطلبية — يُولَد مع العرض لا يُلحَق به ──
+        # المورّدُ الذي سعّر هاتفياً يُدخَل عرضُه من محرِّر العروض نفسه، مولوداً
+        # من صفّ مستقبِله في الطلبية: فيحمل الطلبيةَ أبّاً وبنودَها نَسَباً،
+        # ويصير عموداً في المصفوفة كأيّ مورّدٍ ردّ.
+        rfq = attrs.get('rfq', getattr(instance, 'rfq', None))
+        recipient = attrs.get('rfq_recipient')
+        if recipient is not None and instance is not None:
+            raise serializers.ValidationError({
+                'rfq_recipient': 'ربط العرض بمستقبِل الطلبية يجري عند إنشائه وحده.',
+            })
+        if recipient is not None and rfq is None:
+            rfq = recipient.rfq
+            attrs['rfq'] = rfq
+        if 'rfq' in attrs and rfq is not None:
+            if rfq.tenant_id != tenant.pk:
+                raise serializers.ValidationError({
+                    'rfq': 'الطلبية لا تتبع الشركة الحالية.',
+                })
+            if rfq.status != PurchaseRFQ.STATUS_SENT:
+                raise serializers.ValidationError({
+                    'rfq': 'لا يُسجَّل عرضٌ إلا على طلبية مُرسَلة — المسودّة بنودُها '
+                           'لم تُقفَل بعد، والمُرساةُ والملغاةُ انتهى أمرُهما.',
+                })
+        if recipient is not None:
+            if recipient.tenant_id != tenant.pk:
+                raise serializers.ValidationError({
+                    'rfq_recipient': 'المستقبِل لا يتبع الشركة الحالية.',
+                })
+            if recipient.rfq_id != rfq.pk:
+                raise serializers.ValidationError({
+                    'rfq_recipient': 'هذا المستقبِل ليس من مستقبِلي الطلبية.',
+                })
+            # عرضٌ واحدٌ لكلّ مستقبِل (`PurchaseRFQRecipient.quotation` OneToOne) —
+            # المورّدُ الذي عاد بسعرٍ جديد يُعدَّل عرضُه لا يُنشأ له ثانٍ.
+            if recipient.quotation_id is not None:
+                raise serializers.ValidationError({
+                    'rfq_recipient': 'لهذا المورّد عرضٌ مسجَّلٌ على الطلبية — عدّله بدل إنشاء عرضٍ ثانٍ.',
+                })
+
         scope = attrs.get('scope', getattr(instance, 'scope', SupplierQuotation.SCOPE_LOCAL))
         tax_rate = attrs.get('tax_rate', getattr(instance, 'tax_rate', Decimal('0')))
         if scope == SupplierQuotation.SCOPE_IMPORT and Decimal(str(tax_rate or 0)) != 0:
@@ -371,6 +427,12 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError({
                         'lines': f'اكتب اسم المنتج في السطر {index} أو اختره من المنتجات.',
                     })
+                # ISSUE #122: نَسَبُ السطر لا يجوز أن يشير إلى بندٍ في طلبيةٍ أخرى.
+                rfq_line = line.get('rfq_line')
+                if rfq_line is not None and (rfq is None or rfq_line.rfq_id != rfq.pk):
+                    raise serializers.ValidationError({
+                        'lines': f'بند الطلبية المرتبط بالسطر {index} ليس من هذه الطلبية.',
+                    })
                 seq = line.get('seq', index)
                 if seq in seen_seq:
                     raise serializers.ValidationError({
@@ -435,15 +497,45 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         quotation.grand_total = (taxable + tax_amount + shipping).quantize(Decimal('0.01'))
         quotation.save(update_fields=['subtotal', 'tax_amount', 'grand_total', 'updated_at'])
 
+    @staticmethod
+    def _bind_rfq_recipient(recipient, quotation):
+        """ISSUE #122: يربط العرضَ بمستقبِله ويختم وقت الردّ.
+
+        القفلُ هنا لا في `validate` وحدها: `PurchaseRFQRecipient.quotation`
+        علاقةُ واحدٍ لواحد، وطلبان متزامنان يمرّان من التحقّق معاً ثم يصطدمان
+        في القاعدة — فيُقرأ الاصطدامُ 500 بدل رسالةٍ مفهومة.
+
+        و`replied_at` وقتُ **أوّل** ردّ لا آخره — نفس قاعدة مسار الرابط العام
+        (`submit_rfq_supplier_quote`)، فتصحيحُ العرض لاحقاً لا يُعيد تأريخ الردّ.
+        """
+        locked = PurchaseRFQRecipient.objects.select_for_update().get(pk=recipient.pk)
+        if locked.quotation_id is not None:
+            raise serializers.ValidationError({
+                'rfq_recipient': 'لهذا المورّد عرضٌ مسجَّلٌ على الطلبية — عدّله بدل إنشاء عرضٍ ثانٍ.',
+            })
+        locked.quotation = quotation
+        update_fields = ['quotation']
+        if locked.replied_at is None:
+            locked.replied_at = timezone.now()
+            update_fields.append('replied_at')
+        locked.save(update_fields=update_fields)
+
     @transaction.atomic
     def create(self, validated_data):
         lines = validated_data.pop('lines')
+        recipient = validated_data.pop('rfq_recipient', None)
+        if recipient is not None:
+            # عرضٌ وُلد من صفّ مستقبِلٍ في الطلبية = أدخلناه نحن عنه. ومَن
+            # أدخله يأتي من `perform_create` (`created_by`) كأيّ مستند.
+            validated_data['entry_source'] = SupplierQuotation.ENTRY_MANUAL
         quotation = SupplierQuotation.objects.create(**validated_data)
         SupplierQuotationLine.objects.bulk_create([
             SupplierQuotationLine(**self._line_values(quotation, line, index))
             for index, line in enumerate(lines, start=1)
         ])
         self._recalculate(quotation)
+        if recipient is not None:
+            self._bind_rfq_recipient(recipient, quotation)
         return quotation
 
     @transaction.atomic

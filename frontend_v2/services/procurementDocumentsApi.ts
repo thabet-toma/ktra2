@@ -37,6 +37,14 @@ export interface SupplierQuotationLineDto {
   line_total?: string;
 }
 
+/**
+ * ISSUE #122: من كتب أسعار هذا العرض — `supplier_link` سعّره المورّد بنفسه من
+ * رابطه الخاص، و`manual` أدخلناه عنه (هاتفياً غالباً). حقلٌ صريحٌ لا استنتاج:
+ * ترك التمييز في `created_by IS NULL` يعمل صدفةً اليوم ويكذب أوّل مرّةٍ
+ * يُنشئ فيها مسارٌ ثالثٌ عرضاً.
+ */
+export type SupplierQuotationEntrySource = "supplier_link" | "manual";
+
 export interface SupplierQuotationDto {
   id: number;
   scope: ProcurementScope;
@@ -77,6 +85,16 @@ export interface SupplierQuotationDto {
   attachments?: SupplierQuotationAttachmentDto[];
   /** T-OFFERSTATE: دفتر ملاحظات مؤرَّخ — التاريخ والكاتب يُختمان في الخادم. */
   notes_log?: SupplierQuotationNoteDto[];
+  // ── ISSUE #122: نسبُ العرض إلى طلبيةٍ ومستقبِلٍ فيها ──
+  /**
+   * الطلبية التي وُلد منها هذا العرض، والمستقبِلُ الذي يُسعَّر عنه. يُكتبان
+   * عند **الإنشاء وحده** — عرضٌ يُنقَل من طلبيةٍ لأخرى بعد كتابته يعني
+   * مقارنةً بأسعارٍ قيلت في سياقٍ آخر. `null` = عرضٌ حرٌّ بلا طلبية.
+   */
+  rfq?: number | null;
+  rfq_recipient?: number | null;
+  /** يُحسم في الخادم لا هنا — راجع `SupplierQuotationEntrySource`. */
+  entry_source?: SupplierQuotationEntrySource;
   /** الصفقة الناتجة عن التحويل — كائن لا رقم، فرقم الصفقة يُعرض بجانب الحالة. */
   converted_deal?: { id: number; ref_number: string; stage?: string | null } | null;
   /** T-PLINEAGE: المستند الناتج محلياً — طلبية أو فاتورة، بالرقم والمعرّف. */
@@ -115,6 +133,8 @@ export type SupplierQuotationWrite = Omit<
   | "converted_invoice"
   | "created_at"
   | "updated_at"
+  /* ISSUE #122: الخادم يحسم مَن سعّر — لا تكتبه الواجهة ولو أرسلته. */
+  | "entry_source"
 > & {
   quotation_number?: string;
 };
@@ -495,6 +515,12 @@ export interface RfqComparisonSupplierDto {
   prices: Record<string, string | null>;
   /** إجماليّ البضاعة وحده بالعملة الأساسية — لا حقل شحنٍ إطلاقاً. */
   goods_total_base: string;
+  /**
+   * ISSUE #122: مَن كتب هذا العمود. شارةٌ عرضيّةٌ صرف بلا أيّ حساب — عمودٌ
+   * سعّره المورّد بنفسه وعمودٌ أدخلناه عنه ليسا سواءً في الثقة، والمصفوفةُ
+   * تقولها بدل أن يتذكّرها المالك.
+   */
+  entry_source?: SupplierQuotationEntrySource;
 }
 
 export interface RfqComparisonDto {

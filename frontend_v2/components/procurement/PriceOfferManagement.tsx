@@ -27,9 +27,11 @@ import {
   listPurchaseRfqs,
   duplicatePurchaseRfq,
   type PurchaseRFQDto,
+  type PurchaseRFQRecipientDto,
 } from "../../services/procurementDocumentsApi";
 import { PurchaseRFQForm } from "./price-offers/PurchaseRFQForm";
 import { quotationToDraftDeal } from "../../utils/quotationToDraftDeal";
+import { rfqToDraftOffer } from "../../utils/rfqToDraftOffer";
 import { documentSerialDisplay, elideDocumentNumber } from "../../utils/documentNumberDisplay";
 import { ConvertTargetDialog, type ConvertTarget } from "../sales/ConvertTargetDialog";
 import { openInNewTab } from "../../utils/openInNewTab";
@@ -251,6 +253,48 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
   const openEditRfq = (row: PurchaseRFQDto) => {
     setCurrentRfq(row);
     setViewMode("rfq-form");
+  };
+
+  /**
+   * ISSUE #122: مستقبِلٌ في طلبية ← محرِّرُ العرض.
+   *
+   * وجهتان لا ثالثة: من **ردّ** يُفتح عرضُه القائم (العلاقة واحدٌ لواحد على
+   * الخادم، فعرضٌ ثانٍ للمورّد نفسه يعني عمودَين له في المقارنة)، ومن **لم
+   * يردّ** يُفتح له عرضٌ جديد **غير محفوظ** معبّأٌ ببنود الطلبية بلا أسعار —
+   * لا يُنشأ في الخادم شيءٌ قبل «حفظ» (نفس نمط `openDraftDealFromOffer`).
+   */
+  const openRecipientOffer = async (
+    recipient: PurchaseRFQRecipientDto,
+    row: PurchaseRFQDto,
+  ) => {
+    if (recipient.quotation != null) {
+      const documentId = `quote-${recipient.quotation}`;
+      const existing = offers.find((o) => o.id === documentId);
+      // `openEdit` وحدها تملك قاعدة «للقراءة فقط» — لا تُنسَخ هنا، فتُستدعى
+      // بعرضٍ حقيقيّ دائماً. عرضٌ ردّ للتوّ قد لا يكون في القائمة بعد.
+      if (existing) {
+        await openEdit(existing);
+        return;
+      }
+      try {
+        const detail = await priceOffersService.getPriceOfferById(documentId, scope);
+        if (detail) await openEdit(detail);
+        else toast("تعذّر فتح عرض هذا المورّد.", "error");
+      } catch (cause) {
+        toast(cause instanceof Error ? cause.message : "تعذّر فتح عرض هذا المورّد", "error");
+      }
+      return;
+    }
+    syncOpenDocumentPath();
+    setCurrentOffer(
+      rfqToDraftOffer(
+        row,
+        recipient,
+        suppliers.find((s) => String(s.id) === String(recipient.supplier))?.tradeName || "",
+      ),
+    );
+    setIsReadOnly(false);
+    setViewMode("form");
   };
 
   const handleRfqSaved = (saved: PurchaseRFQDto) => {
@@ -722,6 +766,8 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
         scope={scope === "import" ? "import" : "local"}
         onSaved={handleRfqSaved}
         onCancel={() => setViewMode("list")}
+        /* ISSUE #122: زرّ صفّ المستقبِل — «حوّل إلى عرض» / «افتح عرضه». */
+        onOpenRecipientOffer={(recipient, row) => void openRecipientOffer(recipient, row)}
       />
     );
   }

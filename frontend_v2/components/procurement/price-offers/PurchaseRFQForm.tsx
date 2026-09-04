@@ -22,7 +22,7 @@ import {
   type KitGridColumn,
   type KitToolbarAction,
 } from "../../kit";
-import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Ban, UserPlus, Printer, FileSpreadsheet, GitCompare, Copy, ShieldOff, Info, Undo2 } from "lucide-react";
+import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Ban, UserPlus, Printer, FileSpreadsheet, GitCompare, Copy, ShieldOff, Info, Undo2, FileText } from "lucide-react";
 import {
   CommercialDocumentEditor,
   type CommercialHeaderField,
@@ -39,6 +39,7 @@ import {
   type PurchaseRFQAwardResult,
   type PurchaseRFQDto,
   type PurchaseRFQLineDto,
+  type PurchaseRFQRecipientDto,
 } from "../../../services/procurementDocumentsApi";
 import { purchaseInvoiceApi } from "../../../services/purchaseInvoiceApi";
 import {
@@ -108,10 +109,18 @@ interface Props {
   isReadOnly?: boolean;
   onSaved: (rfq: PurchaseRFQDto) => void;
   onCancel: () => void;
+  /**
+   * ISSUE #122: المورّد الذي سعّر على الهاتف — يُفتح له محرِّرُ العرض القائم
+   * (عرضٌ جديد غير محفوظ معبّأ ببنود الطلبية بلا أسعار، أو عرضُه إن كان قد
+   * ردّ). القرارُ بين الاثنين عند المُستدعي لأنّه من يملك شاشة العروض؛ هنا
+   * الزرُّ وحده. بلا هذه الخاصّية لا يُعرض الزرّ إطلاقاً.
+   */
+  onOpenRecipientOffer?: (recipient: PurchaseRFQRecipientDto, rfq: PurchaseRFQDto) => void;
 }
 
 export const PurchaseRFQForm: React.FC<Props> = ({
   rfq, items, suppliers, scope, isReadOnly = false, onSaved, onCancel,
+  onOpenRecipientOffer,
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
@@ -724,11 +733,28 @@ export const PurchaseRFQForm: React.FC<Props> = ({
               <ul className="space-y-1">
                 {current.recipients.map((r) => (
                   <li key={r.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1.5 text-xs">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span>{r.supplier_name || supplierName(r.supplier)}</span>
-                      <span className="ktra-text-soft">
-                        {r.replied_at ? "وصل ردّه" : r.sent_at ? "بانتظار الردّ" : "لم يُرسَل"}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="ktra-text-soft">
+                          {r.replied_at ? "وصل ردّه" : r.sent_at ? "بانتظار الردّ" : "لم يُرسَل"}
+                        </span>
+                        {/* ISSUE #122: المورّد الذي يُسعّر على الهاتف يدخل من هنا —
+                            لا نافذةَ إدخالٍ ثانية، بل محرِّرُ العرض نفسه معبّأً
+                            ببنود الطلبية بلا أسعار. وعلى `sent` وحدها: المسودّة
+                            بنودُها غير مقفلة، والمُرساةُ والملغاةُ انتهى أمرُهما.
+                            وعرضٌ واحدٌ لكلّ مستقبِل — من ردّ يُفتح عرضُه لا يُنشأ ثانٍ. */}
+                        {onOpenRecipientOffer && current.status === "sent" && (
+                          <button type="button" className="ktra-toolbtn"
+                            title={r.quotation != null
+                              ? "فتح عرض هذا المورّد للتصحيح"
+                              : "فتح محرِّر عرضٍ جديد معبّأً ببنود الطلبية"}
+                            onClick={() => onOpenRecipientOffer(r, current)}>
+                            <FileText className="h-3.5 w-3.5" />
+                            {r.quotation != null ? "افتح عرضه" : "حوّل إلى عرض"}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {/* ISSUE #115 قصّة ١٣/١٦: الرابط يظهر فقط لمن أُرسل له فعلاً وله رابطٌ حيّ. */}
                     {r.share_url && r.share_is_live ? (

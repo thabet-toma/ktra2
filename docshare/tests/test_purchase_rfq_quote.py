@@ -358,3 +358,60 @@ def test_prefill_never_shows_a_rivals_price_on_this_link(
     # القيمة المعبّأة وحدها، لا الرقم الخام: «11.5» يظهر في CSS الصفحة
     # (`font-size:11.5px`) فيُنتج إخفاقاً كاذباً.
     assert 'value="11.5000"' not in rival_html
+
+
+# ── ISSUE #122 (حارسُ عدم الانحدار): المسارُ العامّ لم يتغيّر بحرف ──────────
+
+def test_public_link_still_refuses_a_partially_priced_reply(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """«غير متوفّر» بابٌ فُتح للمحرِّر الداخليّ وحدَه — لا لنموذج المورّد.
+
+    الرقمُ الناقصُ على الرابط لا يُقرأ «لا أحمله» بل «نسيتُ الخانة»: لا أحدَ
+    خلفه يسأل. فالقاعدةُ هناك تبقى سعراً لكلّ بند، وتوسيعُ ما حولها لا يجوز
+    أن يُرخيها.
+    """
+    from logistics.models import PurchaseRFQLine
+
+    second = PurchaseRFQLine.objects.create(
+        tenant=env["tenant"], rfq=purchase_rfq, seq=2,
+        name_snapshot="بند ثانٍ", quantity=Decimal("4"), unit_of_measure="قطعة",
+    )
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    first = _line_id(purchase_rfq)
+
+    half = client.post(
+        f"/s/{share.token}/quote/", {"name": "نصف جواب", f"price_{first}": "10"},
+    )
+    assert half.status_code == 409
+    rfq_recipient.refresh_from_db()
+    assert rfq_recipient.quotation_id is None
+
+    # وبالسعرين معاً يمرّ — فالرفضُ أعلاه سببه النقصُ لا شيءٌ آخر.
+    whole = client.post(
+        f"/s/{share.token}/quote/",
+        {"name": "جواب كامل", f"price_{first}": "10", f"price_{second.pk}": "20"},
+    )
+    assert whole.status_code == 302
+    rfq_recipient.refresh_from_db()
+    assert rfq_recipient.quotation.lines.count() == 2
+
+
+def test_public_link_stamps_supplier_link_and_the_rfq_line_lineage(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """العمودُ الذي سعّره المورّدُ بنفسه يُختَم كذلك — لا يُستنتَج لاحقاً."""
+    from logistics.models import SupplierQuotation
+
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    line_id = _line_id(purchase_rfq)
+    response = client.post(
+        f"/s/{share.token}/quote/", {"name": "أبو خالد", f"price_{line_id}": "12"},
+    )
+    assert response.status_code == 302
+
+    rfq_recipient.refresh_from_db()
+    quotation = rfq_recipient.quotation
+    assert quotation.entry_source == SupplierQuotation.ENTRY_SUPPLIER_LINK
+    # ونَسَبُ السطر يُكتَب هنا أيضاً — المصفوفةُ تطابق بالنَسَب لا بالترتيب.
+    assert quotation.lines.first().rfq_line_id == line_id

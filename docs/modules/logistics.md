@@ -45,7 +45,8 @@
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `SupplierQuotation` (:11) | `scope` (local/import), `status` (9 حالات), `supplier_draft_name` | `supplier`→Partner (nullable), `rfq`→`PurchaseRFQ` (nullable، #112)، `import_deal` OneToOne، `local_order`/`local_invoice` FK عكسي (بعد #112 — كانا OneToOne) |
+| `SupplierQuotation` (:11) | `scope` (local/import), `status` (9 حالات), `supplier_draft_name`, `entry_source` (`supplier_link`/`manual` — **ISSUE #122**، مختومٌ خادمياً وقراءةٌ فقط في المُسلسِل) | `supplier`→Partner (nullable), `rfq`→`PurchaseRFQ` (nullable، #112 — **قابلٌ للكتابة منذ #122**)، `import_deal` OneToOne، `local_order`/`local_invoice` FK عكسي (بعد #112 — كانا OneToOne) |
+| `SupplierQuotationLine` (`logistics/models.py`) | `seq`، `unit_of_measure`، `unit_price`، `line_total` | `quotation`، `product` (nullable) + `name_snapshot`، `rfq_line`→`PurchaseRFQLine` (nullable، **ISSUE #122**: نَسَبُ السطر إلى بند الطلبية — عليه تطابق المصفوفة لا على `seq`) |
 | `PurchaseRFQ` (`logistics/models.py`) | `rfq_number` (NULL حتى أوّل إرسال)، `scope`، `status` (draft/sent/awarded/cancelled)، `reply_deadline` | `tenant`، `lines`، `recipients`، `quotations` (عكسي من `SupplierQuotation.rfq`) — **ISSUE #112**، مواصفة #108 |
 | `PurchaseRFQLine` (`logistics/models.py`) | `quantity`، `unit_of_measure`، `specs`، `estimated_price` (داخليّ، nullable) — **بلا `unit_price` وبلا كود HS** | `rfq`، `product` (nullable) + `name_snapshot` (نمط `SupplierQuotationLine`) |
 | `PurchaseRFQRecipient` (`logistics/models.py`) | `sent_at`، `replied_at` | `rfq`، `supplier`→Partner، `share`→`docshare.DocumentShare` (nullable، **مسلوكة — ISSUE #115**: `_wire_rfq_recipient_shares` في `send/`/`recipients/`)، `quotation` OneToOne (nullable). المُسلسِل يكشف `share_url` (من `docshare.services.public_url`) و`share_is_live`/`share_expires_at`/`share_revoked_at` — **بلا `token` خام**؛ و`get_queryset` يجلب `recipients__share` مسبقاً |
@@ -131,7 +132,7 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | GET | `import-journey/` · `reports/landed-cost/?shipment_id=` | views.py:4557 / 4588 |
 | GET/POST | `goods-receipts/` · `goods-receipts/outstanding/` · `purchase-settings/current/` | views.py:4783 / 4935 / 5038 |
 | POST | `purchase-rfqs/{pk}/send/` · `cancel/` · `award/` · `recipients/` · `duplicate/` | **ISSUE #112**: أوّل إرسال يقفل البنود ويخصّص الرقم؛ `recipients/` وحده مسموحٌ بعد الإرسال. **`award/`** (ISSUE #116) يحمل `supplier` إلزامياً — يقبل عرض الفائز وينتج أمر شراء أو فاتورة بحسب `use_purchase_orders` (`PurchaseRFQViewSet`، `logistics/views/procurement.py`). **`duplicate/`** (ISSUE #112، فجوةٌ مُعادةُ الفتح) تنسخ طلبيةً مقفلةً مسودّةً جديدة — بنودُها كلُّها بما فيها `estimated_price`، **بلا مستقبِلين ولا روابط ولا رقم** (`TenantBook` لا يتحرّك حتى أوّل إرسال)، والأصلُ لا يُمَسّ؛ النَّسبُ سطرٌ في `notes` لا حقلٌ جديد |
-| GET | `purchase-rfqs/{pk}/comparison/` | **ISSUE #116**: مصفوفة الموردين — صفٌّ لكل بند وعمودٌ لكل موردٍ ردّ فعلياً، بالعملة الأساسية، بلا حقل شحن. خطُّ الأساس `estimated_price` لا «أقل سعر» (ذاك داخل العرض الواحد وحده، #113). داخليّةٌ بحتة — لا `doc_type` لها في `docshare` |
+| GET | `purchase-rfqs/{pk}/comparison/` | **ISSUE #116**: مصفوفة الموردين — صفٌّ لكل بند وعمودٌ لكل موردٍ ردّ فعلياً، بالعملة الأساسية، بلا حقل شحن. خطُّ الأساس `estimated_price` لا «أقل سعر» (ذاك داخل العرض الواحد وحده، #113). داخليّةٌ بحتة — لا `doc_type` لها في `docshare`. **ISSUE #122**: كلُّ عمودٍ يحمل `entry_source` (سعّره المورّد أم أدخلناه عنه)، والمطابقةُ صارت على `SupplierQuotationLine.rfq_line` — و`seq` سقوطٌ لعروضٍ لا نَسَبَ في أيٍّ من سطورها وحدها |
 | — | باقي الموارد بالـrouter: `supplier-quotations/`, `purchase-rfqs/`, `purchase-orders/`, `payments/`, `supplier-payments/`, `local-shipments/` | urls.py |
 
 ## الاعتماديات
@@ -309,6 +310,27 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   **لا منطق ترحيل جديد**، تركيبُ خدمات قائمة وراء مفتاح `use_purchase_orders`
   (#117) وحده. مورّدٌ لم يردّ بعد لا عمود له في المصفوفة أصلاً (فراغٌ لا
   يُفسَّر خطأً كرفض).
+- **ISSUE #122 — المورّدُ الذي سعّر هاتفياً: عرضٌ يُولَد من الطلبية لا نافذةٌ
+  ثانية** (قرار المالك 2026-09-04). لا نقطةَ API جديدة ولا نموذجَ تسعيرٍ
+  مستقلّ: يُفتَح **محرِّرُ العروض نفسُه** عرضاً جديداً غيرَ محفوظ، مُعبَّأً
+  ببنود الطلبية وكمياتها وبأسعارٍ فارغة — فالتسعيرُ الجزئيّ (يُحذَف سطرُ ما
+  لا يحمله المورّد) واختيارُ العملة وسعرِ الصرف والتصحيحُ اللاحق كلُّها تسقط
+  من المحرِّر القائم. الذي كسبته القاعدةُ شيئان لا ثالث لهما: **`rfq` صار
+  قابلاً للكتابة** على `SupplierQuotationSerializer` ومعه `rfq_recipient`
+  (كتابةٌ عند الإنشاء وحده) — والنَسَبُ يُولَد مع العرض ولا يُلحَق به بعد حين
+  (ربطُ عرضٍ **قائمٍ** بطلبيةٍ لاحقاً يبقى خارج النطاق: مطابقةُ بنودٍ كُتبت
+  بحرّية ببنودِ طلبيةٍ مقفلة مطابقةٌ بالاسم تكذب)؛ **و`SupplierQuotationLine
+  .rfq_line`** يحمل بند الطلبية الأبّ لكلّ سطر. الحرّاسُ على الإنشاء: الطلبيةُ
+  من هذه الشركة، وحالتُها `sent` وحدها (المسودّةُ مرفوضةٌ قصداً — بنودُها لم
+  تُقفَل ورقمُها لم يُخصَّص)، والمستقبِلُ من تلك الطلبية ولم يردّ بعرضٍ سلفاً
+  (`PurchaseRFQRecipient.quotation` OneToOne، وقفلُ الصفّ في
+  `SupplierQuotationSerializer._bind_rfq_recipient` لا في التحقّق وحده)،
+  وسطرٌ لا يشير إلى بندٍ في طلبيةٍ أخرى. وعند الربط: `recipient.quotation`
+  و`replied_at` (وقتُ **أوّل** ردّ لا آخره) و`entry_source='manual'`
+  و`created_by` من `perform_create` كأيّ مستند. **ومسارُ الرابط العامّ لم
+  يتغيّر بحرف**: `submit_rfq_supplier_quote` تبقى نقطةَ كتابته الوحيدة وتفرض
+  سعراً لكلّ بند، وكسبت ختمَين فقط (`entry_source='supplier_link'`
+  و`rfq_line` على كلّ سطر) — يحرسهما `docshare/tests/test_purchase_rfq_quote.py`.
 
 ## إلغاء ترحيل الدفعات (وُحِّد في المرحلة 2 + معالجتها 2026-08-11)
 إلغاء ترحيل دفعة صفقة (`unpost_payment_from_accounting`) ودفعة تخليص (`unpost_payment`)
@@ -342,6 +364,6 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | `tests/test_purchase_paid_is_computed.py` | «المدفوع» من السندات والقيد لا من نوع الفاتورة؛ والقائمة والتفصيل يتفقان |
 | `tests/test_purchase_invoice_pay.py` | الدفع من داخل الفاتورة: سندٌ واحد، الفائض سلفة، التراجع الكامل عند الفشل |
 | `tests/test_tenant_isolation.py` (75) | لا تسرّب صفقات بين الشركات؛ 400 بلا ترويسة الشركة |
-| `tests/test_purchase_rfq.py` (ISSUE #112) | بندٌ بلا سعر ولا HS · قفل البنود عند أوّل إرسال (400) وقبول مستقبِل جديد · الحالات المسموحة/الممنوعة · عدّاد الردود المشتقّ · ترقيمٌ عند أوّل إرسال بلا حرق مسودّة مهجورة · عزل الشركة |
+| `tests/test_purchase_rfq.py` (ISSUE #112 · #122) | بندٌ بلا سعر ولا HS · قفل البنود عند أوّل إرسال (400) وقبول مستقبِل جديد · الحالات المسموحة/الممنوعة · عدّاد الردود المشتقّ · ترقيمٌ عند أوّل إرسال بلا حرق مسودّة مهجورة · عزل الشركة · **#122**: حرّاسُ العرض المولود من الطلبية — مستقبِلٌ ردّ سلفاً، طلبيةُ شركةٍ أخرى، مسودّة/مُرساة/ملغاة، مستقبِلٌ من طلبيةٍ أخرى، سطرٌ يشير إلى بند طلبيةٍ أخرى |
 | `tests/test_use_purchase_orders_setting.py` (ISSUE #117) | مطفأً: الإنشاء المباشر و«تحويل عرض إلى طلبية» يُرفضان (400)، وقراءة/فتح أمرٍ قائم مقبولة بلا حجب · هجرة `0082` تُشعله لشركةٍ لها أمرٌ قائم فقط (وتتجاهل المحذوف ناعماً) وتترك غيرها مطفأً |
-| `tests/test_purchase_rfq_award_and_comparison.py` (ISSUE #116) | `award/` ينتج فاتورة أو أمر شراء بحسب `use_purchase_orders` · يُرفض بلا `supplier` أو لموردٍ لم يردّ أو مرّتين · `comparison/`: بندٌ بلا تقديريّ يعود `None`، بندٌ لم يُسعّره موردٌ لا يُحتسَب صفراً في إجماليّه، توحيد العملات بسعر صرفٍ صريح، مورّدٌ لم يردّ بلا عمود، لا حقل شحنٍ في الاستجابة، عزل الشركة |
+| `tests/test_purchase_rfq_award_and_comparison.py` (ISSUE #116 · #122) | `award/` ينتج فاتورة أو أمر شراء بحسب `use_purchase_orders` · يُرفض بلا `supplier` أو لموردٍ لم يردّ أو مرّتين · `comparison/`: بندٌ بلا تقديريّ يعود `None`، بندٌ لم يُسعّره موردٌ لا يُحتسَب صفراً في إجماليّه، توحيد العملات بسعر صرفٍ صريح، مورّدٌ لم يردّ بلا عمود، لا حقل شحنٍ في الاستجابة، عزل الشركة · **#122**: عرضٌ مولودٌ من مستقبِلٍ يصير عمودَه وتصحّ الترسيةُ عليه · **عرضٌ حُذف سطرُه الأوسط تبقى أسعارُه تحت بنودها** (يسقط بلا `rfq_line`) · `entry_source` يميّز العمودَين · عملةٌ غير الأساس تُحوَّل |

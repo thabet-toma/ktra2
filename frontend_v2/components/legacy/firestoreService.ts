@@ -1932,8 +1932,14 @@ const lineToUi = (line: {
   quantity: string;
   unit_price: string;
   line_total?: string;
+  rfq_line?: number | null;
 }) => ({
   id: String(line.id ?? `${line.product ?? "draft"}-${Math.random()}`),
+  // ISSUE #122: نَسَبُ السطر يعود من الخادم كما ذهب إليه. بلا هذه القراءة
+  // يُفقَد النَسَبُ عند **أوّل تعديل**: `update` على الخادم يحذف البنود
+  // ويعيد بناءها من الحمولة، فسطرٌ عاد بلا `rfq_line` يُحفَظ بلا نَسَب،
+  // وترتدّ المصفوفةُ إلى مطابقة `seq` الكاذبة التي فُتحت #122 لقتلها.
+  rfqLineId: line.rfq_line ?? undefined,
   itemId: line.product ? String(line.product) : "",
   name: line.name_snapshot || line.product_name || (line.product ? `#${line.product}` : ""),
   categoryId: "",
@@ -2085,6 +2091,9 @@ const uiLinesToApi = (offer: PriceOffer) => (offer.items || []).map((line, index
   unit_of_measure: line.unitOfMeasure || "",
   quantity: String(Number(line.quantity || 0)),
   unit_price: String(Number(line.unitPrice || 0)),
+  // ISSUE #122: يُرسَل في الإنشاء **وفي التعديل** — الخادم يحذف البنود ويعيد
+  // بناءها من هذه الحمولة، فإسقاطُه هنا يمحو النَسَبَ بصمتٍ عند أوّل حفظٍ ثانٍ.
+  rfq_line: line.rfqLineId ?? null,
 }));
 
 /**
@@ -2172,6 +2181,11 @@ export const priceOffersService = {
       scope: scope === "import" ? "import" : "local",
       supplier: offer.supplierId ? Number(offer.supplierId) : null,
       supplier_draft_name: offer.supplierId ? "" : (offer.supplierDraftName || ""),
+      // ISSUE #122: نسبُ العرض إلى طلبيته ومستقبِلها — عند الإنشاء وحده
+      // (`updatePriceOfferInDb` لا يرسلهما: الربط لا يُنقل بعد كتابته).
+      // يُحذفان إن لم يكن العرضُ مبذوراً من طلبية، فلا يُرسَل `null` يدهس ربطاً.
+      ...(offer.rfqId ? { rfq: offer.rfqId } : {}),
+      ...(offer.rfqRecipientId ? { rfq_recipient: offer.rfqRecipientId } : {}),
       quotation_date: offer.offerDate || new Date().toISOString().slice(0, 10),
       valid_until: offer.validUntil || null,
       status: quoteApiStatus(offer.status),
