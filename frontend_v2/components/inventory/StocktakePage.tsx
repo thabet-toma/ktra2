@@ -3,7 +3,7 @@
  * إنشاء + ترحيل: يسوّي رصيد كل منتج ليطابق العدّ (ADJUST_IN/OUT) ويُنشئ قيد فرق
  * الجرد (المخزون ↔ ت.ب.م). يعتمد على /api/inventory/stocktakes/.
  */
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import { KitDocumentShell, KitAutocomplete, type KitToolbarAction } from "../kit";
@@ -13,8 +13,13 @@ import { openInNewTab } from "../../utils/openInNewTab";
 import { productGroupPath } from "../../utils/entityLinks";
 import type { TreeCategory } from "../items/GroupedItemsTable";
 import { clientLogger } from "../../services/logger";
-import { Plus, Send, Trash2, RefreshCw, X, List, Save, Printer, Info, ChevronDown, ChevronLeft } from "lucide-react";
-import { formatDateLocalized } from "../../utils/formatDate";
+import {
+  Plus, Send, Trash2, RefreshCw, X, List, Save, Printer, Info, ChevronDown, ChevronLeft,
+  AlertTriangle, Undo2,
+} from "lucide-react";
+import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 
 type Wh = { id: number; name: string };
 type Prod = {
@@ -94,6 +99,14 @@ export const StocktakePage: React.FC = () => {
   // editingPosted = هل هو مُرحَّل (عرض فقط، لا تعديل).
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingPosted, setEditingPosted] = useState(false);
+
+  // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم فعليّ
+  // (عدّ كمية، اختيار منتج، إضافة/حذف سطر…) لا داخل تبديل تحديد الطباعة (ليس
+  // تعديلاً على المستند نفسه) ولا داخل تحميل مستندٍ محفوظ (`openStocktake`).
+  const [touched, setTouched] = useState(false);
+  const markTouched = () => setTouched(true);
+  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -221,8 +234,8 @@ export const StocktakePage: React.FC = () => {
 
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
-  const addLine = () => setLines((ls) => [...ls, { product: "", counted_quantity: "", selected: false }]);
-  const removeLine = (i: number) => setLines((ls) => (ls.length <= 1 ? ls : ls.filter((_, idx) => idx !== i)));
+  const addLine = () => { setLines((ls) => [...ls, { product: "", counted_quantity: "", selected: false }]); markTouched(); };
+  const removeLine = (i: number) => { setLines((ls) => (ls.length <= 1 ? ls : ls.filter((_, idx) => idx !== i))); markTouched(); };
 
   const loadAllProducts = () => {
     if (sortedProducts.length === 0) return;
@@ -235,15 +248,18 @@ export const StocktakePage: React.FC = () => {
       selected: false,
     }));
     setLines(newLines);
+    markTouched();
   };
 
   const resetForm = () => {
     setDate(today); setWarehouse(""); setNotes(""); setFilterMode("all");
     setLines([{ product: "", counted_quantity: "", selected: false }]); setShowForm(false);
-    setEditingId(null); setEditingPosted(false);
+    setEditingId(null); setEditingPosted(false); setTouched(false);
   };
 
   // فتح مستند جرد محفوظ للعرض/المتابعة: المسودة تُفتح للتعديل، والمُرحَّل للعرض فقط.
+  // تحميلٌ لا لمسٌ — `touched` يُصفَّر معه (ISSUE #121: لا يُشتقّ الحفظُ المحلّي
+  // من فتح مستندٍ قائم، بل من تعديله فعلاً بعد ذلك).
   const openStocktake = async (id: number) => {
     setErr(null); setMsg(null);
     try {
@@ -262,11 +278,77 @@ export const StocktakePage: React.FC = () => {
       setEditingPosted(!!d.is_posted);
       setFilterMode("all");
       setShowForm(true);
+      setTouched(false);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "فشل فتح المستند");
     }
   };
+
+  /* ISSUE #121: مسودّة محلية (IndexedDB، issue #118) — هذه الشاشة تفتح مستنداً
+   * جديداً (`editingId === null`) أو موجوداً (`openStocktake`)، فـ`docId` =
+   * `editingId` فعلياً لا ثابت. الحمولة كائنٌ خفيف يكفي وحده لإعادة بناء
+   * النموذج — لا صلة بحمولة الحفظ الخادمية (`payload` داخل `save`). لا سباقَ
+   * هنا بين تحميل الأصناف غير المتزامن (`load`) وبناء الصفوف: `load` لا يمسّ
+   * `lines`/`date`/`warehouse`/`notes` إطلاقاً (يملأ فقط `products`/`warehouses`
+   * لعرض الاسم/الرصيد حيّاً)، فاستعادة `lines` لا تُكتب فوقها ولا تُكتَب هي فوقها. */
+  const draftPayload = useMemo(
+    () => ({ date, warehouse, notes, lines }),
+    [date, warehouse, notes, lines],
+  );
+
+  const onRestoreDraft = useCallback(
+    (restored: { date: string; warehouse: number | ""; notes: string; lines: Line[] }) => {
+      setDate(restored.date);
+      setWarehouse(restored.warehouse);
+      setNotes(restored.notes);
+      setLines(restored.lines);
+      // مسودّةٌ قد تخصّ مستنداً جديداً كان مطويّاً خلف القائمة — أظهر النموذج.
+      setShowForm(true);
+      // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تُسجَّل «ملموسة».
+      setTouched(true);
+    },
+    [],
+  );
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<{ date: string; warehouse: number | ""; notes: string; lines: Line[] }>({
+    docType: "stocktake",
+    docId: editingId,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    isPosted: editingPosted,
+    // GAP معروف: `Stocktake` (inventory/models.py) لا يحمل `updated_at` —
+    // `created_at` فقط. فلا مصدر حقيقي لـ«تغيّر المستند بعد مسودتك» (issue
+    // #109 §٩) لهذه الشاشة، و`null` هنا يُعطّل ذلك الفحص بصمت. إصلاحه خادميّ
+    // (إضافة الحقل + migration + الserializer) وخارج نطاق هذه المهمة.
+    docUpdatedAt: null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع» على شريط الاستعادة: يعيد النموذج إلى حالته الفارغة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    resetForm();
+    void discardDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discardDraft]);
 
   // حفظ الجرد: post=false ⇒ مسودة فقط (تُرحَّل لاحقاً من القائمة)، post=true ⇒ حفظ وترحيل.
   const save = async (post: boolean) => {
@@ -293,6 +375,9 @@ export const StocktakePage: React.FC = () => {
         : editingId != null
           ? "✓ تم تحديث المسودة (بدون ترحيل)"
           : "✓ تم حفظ الجرد كمسودة (بدون ترحيل) — يمكنك ترحيله لاحقاً من القائمة");
+      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح (بمساري «حفظ» و«حفظ وترحيل» معاً) ⇒
+      // انتهت وظيفة المسودّة المحلية.
+      void discardDraft();
       resetForm();
       await load();
     } catch (e) {
@@ -382,7 +467,7 @@ export const StocktakePage: React.FC = () => {
             </div>
           ) : (
             <KitAutocomplete value="" options={productOptions}
-              onPick={(id) => updateLine(i, { product: Number(id) })}
+              onPick={(id) => { updateLine(i, { product: Number(id) }); markTouched(); }}
               onInfo={(id) => setCardProductId(Number(id))}
               placeholder="اكتب المقاس أو الاسم أو الكود للبحث…" />
           )}
@@ -390,7 +475,7 @@ export const StocktakePage: React.FC = () => {
         <td style={{ textAlign: "center", color: "var(--ktra-ink-soft)" }}>{lineSys(l)}</td>
         <td><input type="number" min="0" step="any" className="ktra-input" style={{ width: "100%" }}
           data-qty-for={l.product} value={l.counted_quantity} placeholder="عدّ…" disabled={editingPosted}
-          onChange={(e) => updateLine(i, { counted_quantity: e.target.value })}
+          onChange={(e) => { updateLine(i, { counted_quantity: e.target.value }); markTouched(); }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); document.querySelector<HTMLInputElement>("#stocktake-locate input")?.focus(); } }} /></td>
         <td style={{ textAlign: "center", fontWeight: 700, color: diffColor }}>
           {d === null ? "—" : d > 0 ? `+${trimNum(d)}` : trimNum(d)}
@@ -479,15 +564,99 @@ export const StocktakePage: React.FC = () => {
     { key: "back", label: "عودة", icon: <X />, onClick: () => navigate(-1), danger: true, separatorBefore: true },
   ];
 
+  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً بدل
+   * الانتظار الصامت حتى تحاول المغادرة. */
+  const draftSaveFailedBanner = draftSaveFailed ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  /* ISSUE #118: شريط الاستعادة التلقائية — المحتوى مُطبَّقٌ على النموذج فعلاً
+   * (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً، وهو يُظهِر النموذج بنفسه. */
+  const draftRestoreBanner = draftBanner ? (
+    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <span>
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا الجرد المُرحَّل — للاطّلاع فقط.`}
+      </span>
+      {draftBanner.eligibility === "restore" && (
+        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+          <Undo2 className="h-4 w-4" />
+          تراجع
+        </button>
+      )}
+      {draftBanner.eligibility === "stale" && (
+        <>
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            onClick={() => onRestoreDraft(draftBanner.payload)}
+            data-testid="draft-stale-preview"
+          >
+            استعرض مسودتي
+          </button>
+          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+            تجاهلها
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  /* شريط اليتامى (issue #119 §٧): مسودّات جردٍ جديد أخرى تُركت في تبويبات أخرى. */
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <div className="flex flex-col gap-1">
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul className="list-disc pr-4 text-xs">
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+          ))}
+        </ul>
+      </div>
+      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+        <X className="h-4 w-4" />
+        إخفاء
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <KitDocumentShell title="الجرد (جرد المخزون)" state={`${rows.length} مستند`} actions={actions}>
+      <KitDocumentShell
+        title="الجرد (جرد المخزون)"
+        state={`${rows.length} مستند`}
+        actions={actions}
+        status={
+          showForm && draftSavedAt ? (
+            <span className="ktra-status-item" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          ) : undefined
+        }
+      >
         <div style={{ padding: 8 }}>
           {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: 8 }}>{err}</div>}
           {msg && <div className="ktra-banner" style={{ marginBottom: 8, color: "var(--ktra-ok,#2d7d46)" }}>{msg}</div>}
+          {draftSaveFailedBanner}
+          {orphanDraftsBanner}
 
           {showForm && (
             <div className="ktra-bg-panel" style={{ border: "1px solid var(--ktra-border)", borderRadius: 6, padding: 10, marginBottom: 12 }}>
+              {draftRestoreBanner}
               {editingId != null && (
                 <div className="ktra-banner" style={{ marginBottom: 8, color: editingPosted ? "#b45309" : "var(--ktra-ink)" }}>
                   {editingPosted
@@ -497,14 +666,14 @@ export const StocktakePage: React.FC = () => {
               )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 <label className="ktra-field"><span className="ktra-field-label">التاريخ</span>
-                  <input type="date" className="ktra-input" value={date} disabled={editingPosted} onChange={(e) => setDate(e.target.value)} /></label>
+                  <input type="date" className="ktra-input" value={date} disabled={editingPosted} onChange={(e) => { setDate(e.target.value); markTouched(); }} /></label>
                 <label className="ktra-field"><span className="ktra-field-label">المستودع</span>
-                  <select className="ktra-input" value={warehouse} disabled={editingPosted} onChange={(e) => setWarehouse(e.target.value ? Number(e.target.value) : "")}>
+                  <select className="ktra-input" value={warehouse} disabled={editingPosted} onChange={(e) => { setWarehouse(e.target.value ? Number(e.target.value) : ""); markTouched(); }}>
                     <option value="">— كل المخزون —</option>
                     {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select></label>
                 <label className="ktra-field" style={{ flex: 1, minWidth: 160 }}><span className="ktra-field-label">ملاحظات</span>
-                  <input className="ktra-input" value={notes} disabled={editingPosted} onChange={(e) => setNotes(e.target.value)} /></label>
+                  <input className="ktra-input" data-testid="stocktake-notes" value={notes} disabled={editingPosted} onChange={(e) => { setNotes(e.target.value); markTouched(); }} /></label>
               </div>
 
               {/* قفز لمنتج: اكتب الكود/الاسم → اختر أو Enter ⇒ تنزل القائمة على المنتج والمؤشّر بخانة الكمية */}

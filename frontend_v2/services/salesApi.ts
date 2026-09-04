@@ -1027,6 +1027,8 @@ export async function getReservedStock(params?: {
 // Sales Quotations (العروض والطلبيات — T4-01)
 // -------------------------------------------------------------
 export type SalesQuotationRow = {
+  /** ختمُ تعديل المستند على الخادم — مقارنةُ المسودّة المتأخّرة (#109 §٩). */
+  updated_at?: string | null;
   id: number;
   quotation_number: string;
   customer: number;
@@ -1135,6 +1137,8 @@ export type SalesOrderLineRow = {
 };
 
 export type SalesOrderRow = {
+  /** ختمُ تعديل المستند على الخادم — مقارنةُ المسودّة المتأخّرة (#109 §٩). */
+  updated_at?: string | null;
   id: number;
   order_number: string;
   customer: number;

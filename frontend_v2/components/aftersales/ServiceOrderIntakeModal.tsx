@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Search, ShieldAlert, ShieldCheck, X } from "lucide-react";
+import { AlertTriangle, Info, Loader2, Search, ShieldAlert, ShieldCheck, Undo2, X } from "lucide-react";
 import {
   createServiceOrder,
   lookupIntake,
@@ -7,12 +7,14 @@ import {
   type ServiceOrderDetail,
   type ServiceOrderDraft,
 } from "../../services/afterSalesApi";
-import { formatDateValue, todayIso } from "../../utils/formatDate";
+import { formatDateValue, formatTimeValue, todayIso } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { formatProductPrimaryName } from "../../utils/productDisplayName";
 import { warrantyRemainingText, warrantyStatusLabel } from "../../utils/warranty";
 import { warrantyPillClass } from "./warrantyStatus";
 import { useToast } from "../../contexts/ToastContext";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 
 /**
  * THA-24 م4 — استقبال جهاز: معرّفٌ واحد يُسأل عنه، وثلاثة مصادر تُجيب.
@@ -57,30 +59,43 @@ const labelClass = "mb-1 block text-[11px] text-[var(--color-text-muted)]";
 const messageOf = (cause: unknown, fallback: string) =>
   cause instanceof Error ? cause.message : fallback;
 
+/** الحمولة الافتراضية عند فتح المودال — نفس الشكل المطلوب لإعادة بناء الشاشة
+ *  من مسودّة محلية (issue #118)، فتُستعمل لكلا الغرضين. */
+const buildDefaultDraft = (): Partial<ServiceOrderDraft> => ({
+  order_date: todayIso(),
+  partner: null,
+  customer_name: "",
+  customer_phone: "",
+  product: null,
+  serial: "",
+  device_description: "",
+  received_condition: "",
+  accessories: "",
+  complaint: "",
+  warranty_covered: false,
+});
+
 export const ServiceOrderIntakeModal: React.FC<Props> = ({
   products, customers, onClose, onCreated,
 }) => {
   const toast = useToast();
-  const [draft, setDraft] = useState<Partial<ServiceOrderDraft>>({
-    order_date: todayIso(),
-    partner: null,
-    customer_name: "",
-    customer_phone: "",
-    product: null,
-    serial: "",
-    device_description: "",
-    received_condition: "",
-    accessories: "",
-    complaint: "",
-    warranty_covered: false,
-  });
+  const [draft, setDraft] = useState<Partial<ServiceOrderDraft>>(buildDefaultDraft);
   const [lookup, setLookup] = useState<IntakeLookup | null>(null);
   const [looking, setLooking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const patch = <K extends keyof ServiceOrderDraft>(key: K, value: ServiceOrderDraft[K]) =>
+  // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم (لا
+  // مشتقّة داخل useEffect؛ راجع تعليق hooks/useDocumentDraft.ts).
+  const [touched, setTouched] = useState(false);
+  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
+  const markTouched = () => setTouched(true);
+
+  const patch = <K extends keyof ServiceOrderDraft>(key: K, value: ServiceOrderDraft[K]) => {
+    markTouched();
     setDraft((d) => ({ ...d, [key]: value }));
+  };
 
   const serial = (draft.serial || "").trim();
 
@@ -107,6 +122,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
   const fillFromUnit = useCallback(() => {
     const unit = lookup?.warranty.unit;
     if (!unit) return;
+    markTouched();
     setDraft((d) => ({
       ...d,
       product: unit.product ?? d.product ?? null,
@@ -120,6 +136,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
   const fillFromDevice = useCallback((index: number) => {
     const device = lookup?.sensitive_devices[index];
     if (!device) return;
+    markTouched();
     setDraft((d) => ({
       ...d,
       device_description: d.device_description || device.model_name,
@@ -140,6 +157,60 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
     return list;
   }, [draft, serial]);
 
+  /* ISSUE #121: مسودّة محلية (IndexedDB، issue #118) — هذا المودال يفتح أمر
+   * صيانة جديداً دائماً (لا تحرير أمرٍ قائم)، فـ`docId`/`isPosted`/
+   * `docUpdatedAt` ثوابت مثل `SalesReturnEditor`. `draft` نفسه خفيفٌ ويكفي
+   * وحده لإعادة بناء الشاشة، فيُستعمل كحمولةٍ مباشرةً — لا صلة بحمولة الحفظ
+   * الخادمية (`createServiceOrder`) التي تضيف `serial`/`warranty_card`
+   * المشتقّين. `lookup`/`looking`/`busy`/`err` مستبعدة عمداً: نتائج بحثٍ
+   * وحالة تحميل/خطأ تُعاد اشتقاقها من `draft.serial` عند إعادة التحميل، لا
+   * جزءاً من الشاشة المطلوب استعادتها. */
+  const draftPayload = draft;
+
+  const onRestoreDraft = useCallback((restored: Partial<ServiceOrderDraft>) => {
+    setDraft(restored);
+    // استعادةٌ من مسودّة تعني اختلافاً عن الشاشة الفارغة — تُسجَّل «ملموسة»
+    // فوراً كي يبقى الحارس وسياسة الحفظ متّسقين مع ما يراه المستخدم فعلاً.
+    setTouched(true);
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<Partial<ServiceOrderDraft>>({
+    docType: "service_order_intake",
+    docId: null,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    isPosted: false,
+    docUpdatedAt: null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع» على شريط الاستعادة: يعيد النموذج إلى حالته الفارغة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    setDraft(buildDefaultDraft());
+    setLookup(null);
+    setTouched(false);
+    void discardDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discardDraft]);
+
   const save = async () => {
     if (problems.length > 0) { setErr(problems.join(" · ")); return; }
     setBusy(true);
@@ -152,6 +223,9 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
         warranty_card: activeCard?.id ?? null,
       });
       toast(`فُتح أمر الصيانة ${order.order_number}`, "success");
+      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      setTouched(false);
+      void discardDraft();
       onCreated(order);
     } catch (e) {
       setErr(messageOf(e, "تعذّر فتح أمر الصيانة"));
@@ -178,6 +252,76 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
             <X className="h-4 w-4 text-[var(--color-text-muted)]" />
           </button>
         </header>
+
+        {/* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً بدل
+         * الانتظار الصامت حتى تحاول المغادرة. */}
+        {draftSaveFailed && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            data-testid="draft-save-failed-banner"
+            className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+          >
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+          </div>
+        )}
+
+        {/* ISSUE #118: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى مُطبَّقٌ
+         * على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً. مودالٌ
+         * ينشئ سجلاً جديداً دائماً هنا، فواقعياً لا تصل الأهلية إلا "restore" —
+         * "stale"/"posted" مُنفَّذتان بلا استخدام فعلي كي يبقى النمط موحّداً. */}
+        {draftBanner && (
+          <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+            <Info className="h-4 w-4 shrink-0" />
+            <span>
+              {draftBanner.eligibility === "restore" &&
+                `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+              {draftBanner.eligibility === "stale" &&
+                `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+              {draftBanner.eligibility === "posted" &&
+                `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
+            </span>
+            {draftBanner.eligibility === "restore" && (
+              <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+                <Undo2 className="h-4 w-4" /> تراجع
+              </button>
+            )}
+            {draftBanner.eligibility === "stale" && (
+              <>
+                <button
+                  type="button"
+                  className="ktra-toolbtn"
+                  onClick={() => onRestoreDraft(draftBanner.payload)}
+                  data-testid="draft-stale-preview"
+                >
+                  استعرض مسودتي
+                </button>
+                <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+                  تجاهلها
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* شريط اليتامى (issue #119 §٧): مسودّات فتح أمرٍ جديد أخرى تُركت في تبويبات أخرى. */}
+        {orphanDrafts.length > 0 && !orphanBarDismissed && (
+          <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+            <Info className="h-4 w-4 shrink-0" />
+            <div className="flex flex-col gap-1">
+              <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+              <ul className="list-disc pr-4 text-xs">
+                {orphanDrafts.map((o) => (
+                  <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+                ))}
+              </ul>
+            </div>
+            <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+              <X className="h-4 w-4" /> إخفاء
+            </button>
+          </div>
+        )}
 
         <div className="space-y-4 p-3 md:p-4">
           {/* ── المعرّف والبحث الموحّد ──────────────────────────────────── */}
@@ -285,6 +429,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
                 className={inputClass}
                 value={draft.partner ?? ""}
                 onChange={(e) => {
+                  markTouched();
                   const id = e.target.value ? Number(e.target.value) : null;
                   const found = customers.find((c) => c.id === id);
                   setDraft((d) => ({
@@ -404,6 +549,12 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
           <span className="text-[11px] text-[var(--color-text-muted)]">
             {problems.length > 0 ? problems.join(" · ") : "جاهز للفتح"}
           </span>
+          {/* issue #109 §٦: مؤشّر دائم كي لا يضغط المستخدم «حفظ» احتياطاً كل دقيقة — لا يوجد حفظٌ خادميّ فوريّ في هذا المودال أصلاً. */}
+          {draftSavedAt && (
+            <span className="ktra-status-item text-[11px] text-[var(--color-text-muted)]" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          )}
           <span className="flex-1" />
           <button
             type="button"

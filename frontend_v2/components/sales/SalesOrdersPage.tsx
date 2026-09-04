@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ShareRowButton } from "../shared/ShareRowButton";
 import {
   Trash2, Save, Loader2, X, CheckCircle, Banknote, FileText, ExternalLink,
+  AlertTriangle, Info, Undo2,
 } from "lucide-react";
 import {
   listSalesOrders,
@@ -30,12 +31,14 @@ import { apiGetList } from "../../services/restApi";
 import { listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { formatMoney } from "../../utils/formatNumber";
-import { formatDateLocalized, todayIso } from "../../utils/formatDate";
+import { formatDateLocalized, formatTimeValue, todayIso } from "../../utils/formatDate";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { isReservationActive } from "../../utils/documentBadges";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 import { SalesProductPickerModal, type SalesProductPickerItem, formatProductPrimaryName } from "./SalesProductPickerModal";
 import {
   CommercialDocumentEditor,
@@ -65,6 +68,16 @@ type LineState = {
 const blankLine = (): LineState => ({
   product_id: "", product_name: "", quantity: "1", unit_price: "",
 });
+
+/** ISSUE #121: حمولة المسودّة المحلية — خفيفة تكفي وحدها لإعادة بناء الشاشة
+ *  (issue #118)، لا صلة بحمولة الحفظ الخادمية التي يبنيها `save`. */
+interface SalesOrderDraftPayload {
+  formCustomer: string;
+  formDate: string;
+  formDelivery: string;
+  formNotes: string;
+  formLines: LineState[];
+}
 
 const STATUS_TONE: Record<string, string> = {
   draft: "ktra-bg-panel ktra-text-ink",
@@ -97,6 +110,12 @@ export const SalesOrdersPage: React.FC = () => {
   const [formNotes, setFormNotes] = useState("");
   const [formLines, setFormLines] = useState<LineState[]>([blankLine()]);
   const [pickerIdx, setPickerIdx] = useState<number | null>(null);
+
+  // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم.
+  const [touched, setTouched] = useState(false);
+  const markTouched = () => setTouched(true);
+  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   // نافذة العربون
   const [depositFor, setDepositFor] = useState<SalesOrderRow | null>(null);
@@ -159,6 +178,7 @@ export const SalesOrdersPage: React.FC = () => {
     setFormDelivery("");
     setFormNotes("");
     setFormLines([blankLine()]);
+    setTouched(false);
   };
 
   const openOrder = async (id: number) => {
@@ -178,6 +198,8 @@ export const SalesOrdersPage: React.FC = () => {
           unit_price: l.unit_price,
         })),
       );
+      // تعبئةٌ من الخادم — لا تُعامَل كتعديل مستخدم (issue #121).
+      setTouched(false);
       setShowForm(true);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
@@ -227,6 +249,8 @@ export const SalesOrdersPage: React.FC = () => {
       setShowForm(false);
       resetForm();
       await load();
+      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      void discardDraft();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
     } finally {
@@ -311,13 +335,13 @@ export const SalesOrdersPage: React.FC = () => {
       key: "date",
       label: "تاريخ الطلبية",
       control: <input type="date" className="ktra-input" value={formDate}
-        onChange={(event) => setFormDate(event.target.value)} />,
+        onChange={(event) => { markTouched(); setFormDate(event.target.value); }} />,
     },
     {
       key: "delivery",
       label: "تاريخ التسليم",
       control: <input type="date" className="ktra-input" value={formDelivery}
-        onChange={(event) => setFormDelivery(event.target.value)} />,
+        onChange={(event) => { markTouched(); setFormDelivery(event.target.value); }} />,
     },
     {
       key: "type",
@@ -329,7 +353,7 @@ export const SalesOrdersPage: React.FC = () => {
       label: "الزبون / الحساب",
       control: (
         <select className="ktra-input" value={formCustomer}
-          onChange={(event) => setFormCustomer(event.target.value)}>
+          onChange={(event) => { markTouched(); setFormCustomer(event.target.value); }}>
           <option value="">— اختر الزبون —</option>
           {partners.map((partner) => (
             <option key={partner.id} value={partner.id}>{partner.name}</option>
@@ -407,7 +431,7 @@ export const SalesOrdersPage: React.FC = () => {
       align: "center",
       render: (_line, index) => (
         <button type="button" className="ktra-iconbtn ktra-iconbtn--danger"
-          onClick={() => setFormLines((lines) => lines.length > 1 ? lines.filter((_, rowIndex) => rowIndex !== index) : lines)}
+          onClick={() => { markTouched(); setFormLines((lines) => lines.length > 1 ? lines.filter((_, rowIndex) => rowIndex !== index) : lines); }}
           title="حذف السطر">
           <Trash2 className="h-3 w-3" />
         </button>
@@ -507,6 +531,124 @@ export const SalesOrdersPage: React.FC = () => {
     },
   ];
 
+  /* ISSUE #121: مسودّة محلية (IndexedDB، issue #118) — هذه الشاشة لا تحفظ
+   * شيئاً محلياً اليوم. الحمولة كائنٌ خفيف يكفي وحده لإعادة بناء الشاشة؛ لا
+   * صلة بحمولة الحفظ الخادمية التي يبنيها `save`. */
+  const draftPayload = useMemo<SalesOrderDraftPayload>(
+    () => ({ formCustomer, formDate, formDelivery, formNotes, formLines }),
+    [formCustomer, formDate, formDelivery, formNotes, formLines],
+  );
+
+  const onRestoreDraft = useCallback((restored: SalesOrderDraftPayload) => {
+    setFormCustomer(restored.formCustomer);
+    setFormDate(restored.formDate);
+    setFormDelivery(restored.formDelivery);
+    setFormNotes(restored.formNotes);
+    setFormLines(restored.formLines);
+    setTouched(true);
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<SalesOrderDraftPayload>({
+    docType: "sales_order",
+    docId: selectedId,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    // لا حقل `is_posted` حقيقي للطلبية — الحالتان النهائيتان («محوَّلة»/«ملغاة»)
+    // تُعامَلان معاملة «مرحَّل»: اطّلاعٌ على المسودّة فقط بلا استعادةٍ تلقائية.
+    isPosted: !!selectedOrder && (selectedOrder.status === "converted" || selectedOrder.status === "cancelled"),
+    // ختمُ الخادم لحظةَ فتح المستند — كان المُسلسِل لا يكشف `updated_at`
+    // فسقط فحصُ «تغيّر المستند بعد مسودتك» (#109 §٩)؛ كُشف ووُصِل.
+    docUpdatedAt: selectedOrder?.updated_at ?? null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع» على شريط الاستعادة: يعيد الشاشة إلى حالتها المحفوظة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    if (selectedId != null) void openOrder(selectedId);
+    else resetForm();
+    void discardDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, discardDraft]);
+
+  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً. */
+  const draftSaveFailedBanner = draftSaveFailed ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذه الطلبية — اضغط «تخزين» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  /* ISSUE #118: شريط الاستعادة التلقائية — إخبارٌ لا سؤال. */
+  const draftRestoreBanner = draftBanner ? (
+    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <span>
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّرت الطلبية بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذه الطلبية المنتهية — للاطّلاع فقط.`}
+      </span>
+      {draftBanner.eligibility === "restore" && (
+        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+          <Undo2 className="h-4 w-4" /> تراجع
+        </button>
+      )}
+      {draftBanner.eligibility === "stale" && (
+        <>
+          <button type="button" className="ktra-toolbtn" onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
+            استعرض مسودتي
+          </button>
+          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+            تجاهلها
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  /* شريط اليتامى (issue #119 §٧): مسودّات طلبيةٍ جديدة أخرى تُركت في تبويبات أخرى. */
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <div className="flex flex-col gap-1">
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul className="list-disc pr-4 text-xs">
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+          ))}
+        </ul>
+      </div>
+      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+        <X className="h-4 w-4" /> إخفاء
+      </button>
+    </div>
+  ) : null;
+
   if (showForm) {
     return (
       <CommercialDocumentEditor<LineState>
@@ -527,17 +669,25 @@ export const SalesOrdersPage: React.FC = () => {
         getLineKey={(line, index) => line.id ?? `new-${index}`}
         onLineChange={(index, key, value) => {
           if (key !== "quantity" && key !== "unit_price") return;
+          markTouched();
           setFormLines((lines) => lines.map((line, rowIndex) =>
             rowIndex === index ? { ...line, [key]: value } : line));
         }}
-        onAddLine={() => setFormLines((lines) => [...lines, blankLine()])}
-        banner={err ? <div className="ktra-banner ktra-banner--err">{err}</div> : undefined}
+        onAddLine={() => { markTouched(); setFormLines((lines) => [...lines, blankLine()]); }}
+        banner={
+          <>
+            {draftSaveFailedBanner}
+            {draftRestoreBanner}
+            {orphanDraftsBanner}
+            {err ? <div className="ktra-banner ktra-banner--err">{err}</div> : null}
+          </>
+        }
         tabs={[{
           key: "notes",
           label: "الملاحظات",
           content: <div className="px-1 py-2">
-            <textarea className="ktra-input w-full" rows={4} value={formNotes}
-              onChange={(event) => setFormNotes(event.target.value)} placeholder="ملاحظات الطلبية…" />
+            <textarea className="ktra-input w-full" rows={4} value={formNotes} data-testid="order-notes"
+              onChange={(event) => { markTouched(); setFormNotes(event.target.value); }} placeholder="ملاحظات الطلبية…" />
           </div>,
         }]}
         totals={<>
@@ -550,6 +700,11 @@ export const SalesOrdersPage: React.FC = () => {
           <span className="ktra-status-item">
             {reserveDays ? `الحجز ${reserveDays} أيام بعد التأكيد` : "الحجز معطّل"}
           </span>
+          {draftSavedAt && (
+            <span className="ktra-status-item" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          )}
         </>}
         overlay={pickerIdx !== null ? (
           <SalesProductPickerModal
@@ -557,6 +712,7 @@ export const SalesOrdersPage: React.FC = () => {
             products={products}
             onClose={() => setPickerIdx(null)}
             onSelect={(productId) => {
+              markTouched();
               const product = products.find((item) => Number(item.id) === Number(productId));
               setFormLines((lines) => lines.map((line, index) => index === pickerIdx ? {
                 ...line,

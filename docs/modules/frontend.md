@@ -725,13 +725,28 @@ useDocumentDraft({ docType, docId, payload, isTouched, onRestore, isPosted?, doc
   `IDBObjectStore.put` لمخزن `document_drafts` وحده من جانب الاختبار، بلا
   مِقبض اختبارٍ في كود الإنتاج.
 
-**ISSUE #121 — المستهلكون (ثلاث دفعات من أربع):** `InvoiceForm.tsx` (فاتورة
+**ISSUE #121 — المستهلكون (٢٤ محرِّراً؛ الدفعات الأربع):** `InvoiceForm.tsx` (فاتورة
 الشراء) · `SalesInvoiceEditor.tsx` (فاتورة البيع) · `PriceOfferForm.tsx` ·
 `PurchaseRFQForm.tsx` · `SalesCustomerPaymentsPage.tsx` ·
 `NewSupplierPaymentModal.tsx` · `ExpenseVouchersPage.tsx` ·
 `RevenueVouchersPage.tsx` · `AccountingJournalEntryPage.tsx` ·
-`SalesReturnEditor.tsx` · `PurchaseReturnEditor.tsx`. الباقي (الدفعة الرابعة)
-بحسب الاستعمال.
+`SalesReturnEditor.tsx` · `PurchaseReturnEditor.tsx` · `SalesQuotationsPage.tsx` ·
+`SalesOrdersPage.tsx` · `DeliveryNotesPage.tsx` · `CreditDebitNotesPage.tsx` ·
+`GoodsReceiptsPage.tsx` · `OldInvoiceFormModal.tsx` · `StocktakePage.tsx` ·
+`WarehouseTransferPage.tsx` · `ServiceOrderIntakeModal.tsx` ·
+`WarrantyCardModal.tsx` · `ContractsPage.tsx` · `ItemForm.tsx` ·
+`PartnerEditorModal.tsx`.
+
+**و٢٥ محرِّراً استُثنيت بقرار** لا بإهمال: الصفقةُ ورحلةُ الشحنة تحفظان خادمياً
+بـ`PATCH` فوريّ (مشكلتُهما معكوسة — تُثبِّتان أثراً لم يُطلَب)؛ وورشةُ الشيكات
+والمطابقةُ ومستندُ أمر الصيانة كلُّ إجراءٍ فيها نداءٌ فوريّ بلا حالةٍ متراكمة؛
+والأرصدةُ الافتتاحية لها «حفظ مسودة» خادميّ؛ والبقيّةُ نماذجُ صغيرة.
+
+- **الإغلاقُ بلا سؤال ليس تجاهلاً صريحاً**: لا تمحُ المسودّة على `Esc` أو نقرةٍ
+  خارج الإطار أو زرّ «إلغاء». السابقةُ الوحيدة التي تمحو عند الإلغاء
+  (`InvoiceForm.guardedCancel`) تفعل ذلك **بعد تأكيدٍ صريح**.
+- **الشاشةُ ذاتُ موضعَي تصفيرٍ تلقائيَّين تحتاج حارساً لا يُستهلَك**، ويُستهلَك
+  بيد المستخدم وحدها — وإلّا فُرِّغ النموذج فوق مسودّةٍ استُعيدت للتوّ.
 - **شاشةٌ لها موضعا تصفيرٍ تلقائيّان تحتاج حارساً لا يُستهلَك**: صفحةُ القيد
   تُصفَّر من محمّلها غير المتزامن **ومن** `useRecordNavigation`، وكلاهما يصل بعد
   قراءة المسودّة. حارسٌ لمرّةٍ واحدة يستهلكه أوّلُهما فيكتب الثاني فوق المسودّة

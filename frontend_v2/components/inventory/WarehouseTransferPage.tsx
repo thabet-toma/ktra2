@@ -3,12 +3,14 @@
  * إنشاء + ترحيل (صرف من المصدر/استلام في الوجهة بالتكلفة المتوسطة، صافي صفري على
  * إجمالي الشركة). يعتمد على /api/inventory/warehouse-transfers/.
  */
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import { KitDocumentShell, type KitToolbarAction } from "../kit";
-import { Plus, Save, Send, Trash2, RefreshCw, X } from "lucide-react";
-import { formatDateLocalized } from "../../utils/formatDate";
+import { Plus, Save, Send, Trash2, RefreshCw, X, AlertTriangle, Info, Undo2 } from "lucide-react";
+import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 
 type Wh = { id: number; name: string; code?: string };
 type Prod = { id: number; sku: string; name_ar?: string; name_en?: string };
@@ -39,6 +41,12 @@ export const WarehouseTransferPage: React.FC = () => {
   const [lines, setLines] = useState<Line[]>([{ product: "", quantity: "1" }]);
   const [saving, setSaving] = useState(false);
 
+  // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم.
+  const [touched, setTouched] = useState(false);
+  const markTouched = () => setTouched(true);
+  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
@@ -60,15 +68,77 @@ export const WarehouseTransferPage: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
-  const updateLine = (i: number, patch: Partial<Line>) =>
+  const updateLine = (i: number, patch: Partial<Line>) => {
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
-  const addLine = () => setLines((ls) => [...ls, { product: "", quantity: "1" }]);
-  const removeLine = (i: number) => setLines((ls) => (ls.length <= 1 ? ls : ls.filter((_, idx) => idx !== i)));
+    markTouched();
+  };
+  const addLine = () => { setLines((ls) => [...ls, { product: "", quantity: "1" }]); markTouched(); };
+  const removeLine = (i: number) => { setLines((ls) => (ls.length <= 1 ? ls : ls.filter((_, idx) => idx !== i))); markTouched(); };
 
   const resetForm = () => {
     setDate(today); setSource(""); setDest(""); setNotes("");
     setLines([{ product: "", quantity: "1" }]); setShowForm(false);
+    setTouched(false);
   };
+
+  /* ISSUE #121: مسودّة محلية (IndexedDB، issue #118) — هذه الشاشة تُنشئ تحويلاً
+   * جديداً دائماً (لا تحرير تحويلٍ قائم — `postExisting` يرحّل من القائمة مباشرةً
+   * بلا فتحه في هذا النموذج)، فـ`docId`/`isPosted`/`docUpdatedAt` ثوابت. الحمولة
+   * كائنٌ خفيف يكفي وحده لإعادة بناء النموذج؛ لا صلة بحمولة الحفظ الخادمية. */
+  const draftPayload = useMemo(
+    () => ({ date, source, dest, notes, lines }),
+    [date, source, dest, notes, lines],
+  );
+
+  const onRestoreDraft = useCallback(
+    (restored: { date: string; source: number | ""; dest: number | ""; notes: string; lines: Line[] }) => {
+      setDate(restored.date);
+      setSource(restored.source);
+      setDest(restored.dest);
+      setNotes(restored.notes);
+      setLines(restored.lines);
+      // مسودّةٌ قد تخصّ نموذجاً كان مطويّاً خلف القائمة — أظهره.
+      setShowForm(true);
+      // استعادةٌ من مسودّة تعني اختلافاً عن الشاشة الفارغة — تُسجَّل «ملموسة».
+      setTouched(true);
+    },
+    [],
+  );
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<{ date: string; source: number | ""; dest: number | ""; notes: string; lines: Line[] }>({
+    docType: "warehouse_transfer",
+    docId: null,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    isPosted: false,
+    docUpdatedAt: null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع» على شريط الاستعادة: يعيد النموذج إلى حالته الفارغة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    resetForm();
+    void discardDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discardDraft]);
 
   const saveAndPost = async () => {
     setErr(null); setMsg(null);
@@ -85,6 +155,10 @@ export const WarehouseTransferPage: React.FC = () => {
         notes,
         lines: filled.map((l) => ({ product: l.product, quantity: l.quantity })),
       });
+      // ISSUE #121: تسلسل الإنشاءَ ثمّ الترحيل — الإنشاء وحده يكفي كي يبلغ
+      // العمل الخادمَ، فتُمحى المسودّة هنا ولا تُترَك لتكرّر تحويلاً آخر لو
+      // فشل الترحيل التالي (نفس السجل صار موجوداً على الخادم بالفعل).
+      void discardDraft();
       await inventoryApi.postWarehouseTransfer(created.id);
       setMsg("✓ تم إنشاء التحويل وترحيله");
       resetForm();
@@ -113,30 +187,114 @@ export const WarehouseTransferPage: React.FC = () => {
     { key: "back", label: "عودة", icon: <X />, onClick: () => navigate(-1), danger: true, separatorBefore: true },
   ];
 
+  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً بدل
+   * الانتظار الصامت حتى تحاول المغادرة. */
+  const draftSaveFailedBanner = draftSaveFailed ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ وترحيل» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  /* ISSUE #118: شريط الاستعادة التلقائية — المحتوى مُطبَّقٌ على النموذج فعلاً
+   * (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً، وهو يُظهِر النموذج بنفسه. */
+  const draftRestoreBanner = draftBanner ? (
+    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <span>
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند — للاطّلاع فقط.`}
+      </span>
+      {draftBanner.eligibility === "restore" && (
+        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+          <Undo2 className="h-4 w-4" />
+          تراجع
+        </button>
+      )}
+      {draftBanner.eligibility === "stale" && (
+        <>
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            onClick={() => onRestoreDraft(draftBanner.payload)}
+            data-testid="draft-stale-preview"
+          >
+            استعرض مسودتي
+          </button>
+          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+            تجاهلها
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  /* شريط اليتامى (issue #119 §٧): مسودّات تحويلٍ جديد أخرى تُركت في تبويبات أخرى. */
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <div className="flex flex-col gap-1">
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul className="list-disc pr-4 text-xs">
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+          ))}
+        </ul>
+      </div>
+      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+        <X className="h-4 w-4" />
+        إخفاء
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <KitDocumentShell title="تحويل بين المستودعات" state={`${rows.length} مستند`} actions={actions}>
+      <KitDocumentShell
+        title="تحويل بين المستودعات"
+        state={`${rows.length} مستند`}
+        actions={actions}
+        status={
+          showForm && draftSavedAt ? (
+            <span className="ktra-status-item" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          ) : undefined
+        }
+      >
         <div style={{ padding: 8 }}>
           {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: 8 }}>{err}</div>}
           {msg && <div className="ktra-banner" style={{ marginBottom: 8, color: "var(--ktra-ok,#2d7d46)" }}>{msg}</div>}
+          {draftSaveFailedBanner}
+          {orphanDraftsBanner}
 
           {showForm && (
             <div className="ktra-bg-panel" style={{ border: "1px solid var(--ktra-border)", borderRadius: 6, padding: 10, marginBottom: 12 }}>
+              {draftRestoreBanner}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 <label className="ktra-field"><span className="ktra-field-label">التاريخ</span>
-                  <input type="date" className="ktra-input" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+                  <input type="date" className="ktra-input" value={date} onChange={(e) => { setDate(e.target.value); markTouched(); }} /></label>
                 <label className="ktra-field"><span className="ktra-field-label">من مستودع</span>
-                  <select className="ktra-input" value={source} onChange={(e) => setSource(e.target.value ? Number(e.target.value) : "")}>
+                  <select className="ktra-input" value={source} onChange={(e) => { setSource(e.target.value ? Number(e.target.value) : ""); markTouched(); }}>
                     <option value="">—</option>
                     {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select></label>
                 <label className="ktra-field"><span className="ktra-field-label">إلى مستودع</span>
-                  <select className="ktra-input" value={dest} onChange={(e) => setDest(e.target.value ? Number(e.target.value) : "")}>
+                  <select className="ktra-input" value={dest} onChange={(e) => { setDest(e.target.value ? Number(e.target.value) : ""); markTouched(); }}>
                     <option value="">—</option>
                     {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select></label>
                 <label className="ktra-field" style={{ flex: 1, minWidth: 160 }}><span className="ktra-field-label">ملاحظات</span>
-                  <input className="ktra-input" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+                  <input className="ktra-input" data-testid="transfer-notes" value={notes} onChange={(e) => { setNotes(e.target.value); markTouched(); }} /></label>
               </div>
 
               <table className="ktra-grid" data-variant="list" style={{ marginBottom: 8 }}>

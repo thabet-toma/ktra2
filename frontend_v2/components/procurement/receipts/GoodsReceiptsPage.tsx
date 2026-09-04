@@ -8,9 +8,21 @@
  *    وأسعارها، ويُرحَّل مقابل وسيط «بضاعة مستلَمة لم تُفوتَر».
  * التسميتان وإتاحة السند المستقل والتعديل — كلها من إعدادات الشراء.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FileSearch, Loader2, PackageCheck, Pencil, Printer, Save, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  FileSearch,
+  Info,
+  Loader2,
+  PackageCheck,
+  Pencil,
+  Printer,
+  Save,
+  Trash2,
+  Undo2,
+  X,
+} from "lucide-react";
 import {
   createGoodsReceipt,
   deleteGoodsReceipt,
@@ -30,12 +42,14 @@ import { apiGetList } from "../../../services/restApi";
 import { resolveTenantId } from "../../../utils/tenantContext";
 import { openInNewTab } from "../../../utils/openInNewTab";
 import { formatMoney, formatQuantity } from "../../../utils/formatNumber";
-import { formatDateLocalized, todayIso } from "../../../utils/formatDate";
+import { formatDateLocalized, formatTimeValue, todayIso } from "../../../utils/formatDate";
 import { printReport } from "../../../utils/printReport";
 import { formatProductPrimaryName } from "../../../utils/productDisplayName";
 import { useToast } from "../../../contexts/ToastContext";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { KitAutocomplete, KitDateInput } from "../../kit";
+import { useDocumentDraft } from "../../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../../utils/documentDraft";
 import {
   CommercialDocumentEditor,
   type CommercialLineColumn,
@@ -150,6 +164,13 @@ export const GoodsReceiptsPage: React.FC = () => {
   const [invoiceLines, setInvoiceLines] = useState<ReceivableLineRow[]>([]);
   const [invoiceMeta, setInvoiceMeta] = useState<string>("");
   const [saving, setSaving] = useState(false);
+
+  // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم (لا
+  // مشتقّة داخل useEffect؛ راجع تعليق `useDocumentDraft.ts` نفسه).
+  const [touched, setTouched] = useState(false);
+  const markTouched = () => setTouched(true);
+  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   const isStandalone = formInvoice === "";
   const docLabel = isStandalone ? labels.standalone : labels.linked;
@@ -288,6 +309,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       setMode("form");
       setViewDoc(null);
       setEditingId(null);
+      setTouched(false);
       setFormDate(todayIso());
       setFormNotes("");
       setFormSupplierRef("");
@@ -311,6 +333,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       setMode("form");
       setViewDoc(null);
       setEditingId(doc.id);
+      setTouched(false);
       setFormDate(doc.receipt_date || todayIso());
       setFormNotes(doc.notes || "");
       setFormSupplierRef(doc.supplier_ref || "");
@@ -344,6 +367,191 @@ export const GoodsReceiptsPage: React.FC = () => {
     [loadRefs, pickInvoice]
   );
 
+  /* ISSUE #121: مسودّة محلية (IndexedDB، issue #118) — هذه الشاشة تفتح مستنداً
+   * جديداً (`editingId === null`) أو موجوداً (`openEdit`)، فـ`docId` = `editingId`
+   * فعلياً لا ثابت. الحمولة كائنٌ خفيف يكفي وحده لإعادة بناء المحرّر: بنود
+   * الفاتورة المرتبطة (`invoiceLines`) تُعاد جلبها عبر `pickInvoice` عند
+   * الاستعادة تماماً كما يفعل `openEdit` — لا صلة بحمولة الحفظ الخادمية. */
+  const draftPayload = useMemo(
+    () => ({
+      formInvoice,
+      formInvoiceLabel,
+      formPartner,
+      formSupplierRef,
+      formDate,
+      formNotes,
+      formLines,
+    }),
+    [formInvoice, formInvoiceLabel, formPartner, formSupplierRef, formDate, formNotes, formLines]
+  );
+
+  /* ISSUE #121: فتحُ الشاشة عبر رابطٍ خاص («استلام» داخل الفاتورة ⇒
+   * `/purchase-receipts/new?invoice=NN`) نيّةٌ صريحة لإرساليةٍ جديدة لفاتورةٍ
+   * بعينها — تُقاس مرّةً عند أوّل تصيير فقط (بلا اعتماد على ترتيب سباقٍ بين
+   * قراءة IndexedDB وجلب مراجع الفاتورة، كلاهما غير متزامن) فتستبعد استعادة
+   * مسودّة «مستندٍ جديد» أخرى قد تتعارض معها. لا صلة بفتح مستندٍ قائم
+   * (`editingId` غير فارغ) — هناك الاستعادة تسري كالمعتاد. */
+  const cameFromDeepLinkRef = useRef(location.pathname.endsWith("/new"));
+
+  const onRestoreDraft = useCallback(
+    (restored: {
+      formInvoice: number | "";
+      formInvoiceLabel: string;
+      formPartner: number | "";
+      formSupplierRef: string;
+      formDate: string;
+      formNotes: string;
+      formLines: LineState[];
+    }) => {
+      if (cameFromDeepLinkRef.current && editingId == null) return;
+      setMode("form");
+      setViewDoc(null);
+      setFormInvoice(restored.formInvoice);
+      setFormInvoiceLabel(restored.formInvoiceLabel);
+      setFormPartner(restored.formPartner);
+      setFormSupplierRef(restored.formSupplierRef);
+      setFormDate(restored.formDate);
+      setFormNotes(restored.formNotes);
+      setFormLines(restored.formLines);
+      // بنود الفاتورة المرتبطة (منتقي الإضافة + «استلام الكل») تُعاد جلبها —
+      // الحمولة لا تحملها (خفيفة)، وبنود المحرّر نفسها محفوظة (keepLines).
+      if (restored.formInvoice !== "") {
+        void pickInvoice(restored.formInvoice, { keepLines: true });
+      }
+      // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تُسجَّل «ملموسة».
+      setTouched(true);
+    },
+    [editingId, pickInvoice]
+  );
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<{
+    formInvoice: number | "";
+    formInvoiceLabel: string;
+    formPartner: number | "";
+    formSupplierRef: string;
+    formDate: string;
+    formNotes: string;
+    formLines: LineState[];
+  }>({
+    docType: "goods_receipt",
+    docId: editingId,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    isPosted: false,
+    // GAP معروف: `GoodsReceipt` (logistics/models.py) لا يحمل `updated_at` —
+    // `created_at` فقط. فلا مصدر حقيقي لـ«تغيّر المستند بعد مسودتك» (issue
+    // #109 §٩) لهذه الشاشة، و`null` هنا يُعطّل ذلك الفحص بصمت. إصلاحه خادميّ
+    // (إضافة الحقل + migration + الserializer) وخارج نطاق هذه المهمة.
+    docUpdatedAt: null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع» على شريط الاستعادة: يعيد المحرّر إلى حالته الفارغة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    setFormDate(todayIso());
+    setFormNotes("");
+    setFormSupplierRef("");
+    setFormPartner("");
+    setFormLines([]);
+    setFormInvoice("");
+    setFormInvoiceLabel("");
+    setInvoiceLines([]);
+    setInvoiceMeta("");
+    setTouched(false);
+    void discardDraft();
+  }, [discardDraft]);
+
+  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً بدل
+   * الانتظار الصامت حتى تحاول المغادرة. */
+  const draftSaveFailedBanner = draftSaveFailed ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  /* ISSUE #118: شريط الاستعادة التلقائية — يُخفى حين تُفتَح الشاشة عبر رابطٍ
+   * خاص («استلام» داخل فاتورة) لمستندٍ جديد كي لا يُعرَض «تراجع» عن استعادةٍ
+   * لم تُطبَّق أصلاً (`onRestoreDraft` تتجاهلها في هذه الحالة بعينها). */
+  const draftRestoreBanner =
+    draftBanner && !(cameFromDeepLinkRef.current && editingId == null) ? (
+      <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+        <Info className="h-4 w-4 shrink-0" />
+        <span>
+          {draftBanner.eligibility === "restore" &&
+            `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+          {draftBanner.eligibility === "stale" &&
+            `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+          {draftBanner.eligibility === "posted" &&
+            `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند — للاطّلاع فقط.`}
+        </span>
+        {draftBanner.eligibility === "restore" && (
+          <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+            <Undo2 className="h-4 w-4" />
+            تراجع
+          </button>
+        )}
+        {draftBanner.eligibility === "stale" && (
+          <>
+            <button
+              type="button"
+              className="ktra-toolbtn"
+              onClick={() => onRestoreDraft(draftBanner.payload)}
+              data-testid="draft-stale-preview"
+            >
+              استعرض مسودتي
+            </button>
+            <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+              تجاهلها
+            </button>
+          </>
+        )}
+      </div>
+    ) : null;
+
+  /* شريط اليتامى (issue #119 §٧): مسودّات إرساليةٍ جديدة أخرى تُركت في تبويبات أخرى.
+   * يظهر في كلا الوضعين (قائمة/محرِّر) — العلاقة بالتبويبات الأخرى لا بما يُعرَض هنا. */
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <div className="flex flex-col gap-1">
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul className="list-disc pr-4 text-xs">
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+          ))}
+        </ul>
+      </div>
+      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+        <X className="h-4 w-4" />
+        إخفاء
+      </button>
+    </div>
+  ) : null;
+
   // «إرسالية جديدة» من داخل فاتورة الشراء: /purchase-receipts/new?invoice=12
   useEffect(() => {
     if (!location.pathname.endsWith("/new")) return;
@@ -366,10 +574,25 @@ export const GoodsReceiptsPage: React.FC = () => {
     [toast]
   );
 
+  /* ISSUE #121: «رجوع» بلا حفظ — يترك مسودّة المستند المفتوح كما هي (تُمحى فقط
+   * بحفظٍ ناجح أو «تراجع» صريح)، فيصفّر حقول النموذج هنا معاً مع الهويّة
+   * (`editingId`) في نفس الدفعة المتزامنة كي لا تتسرّب بنودُ مستندٍ كان يُحرَّر
+   * إلى مسودّة «مستندٍ جديد» التالية (نفس مبدأ `onSelect(null)` في محرّر القيد
+   * اليدوي — تصفيرٌ متزامنٌ صريح، لا حالةٌ مشتقّة). */
   const closeForm = () => {
     setMode("list");
     setViewDoc(null);
     setEditingId(null);
+    setFormDate(todayIso());
+    setFormNotes("");
+    setFormSupplierRef("");
+    setFormPartner("");
+    setFormLines([]);
+    setFormInvoice("");
+    setFormInvoiceLabel("");
+    setInvoiceLines([]);
+    setInvoiceMeta("");
+    setTouched(false);
     void load();
   };
 
@@ -417,7 +640,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       }));
   }, [isStandalone, products, formLines, invoiceLines, usedItems]);
 
-  const addLine = () => setFormLines((ls) => [...ls, blankLine(defaultWarehouse)]);
+  const addLine = () => { setFormLines((ls) => [...ls, blankLine(defaultWarehouse)]); markTouched(); };
 
   /** «استلام الكل»: يعيد بناء البنود من كامل متبقّي الفاتورة.
    *  صريحٌ لا تلقائي بعد الفتحة الأولى — فحذفُ صفٍّ يبقى محذوفاً، ولا يعود
@@ -432,14 +655,17 @@ export const GoodsReceiptsPage: React.FC = () => {
       if (!ok) return;
     }
     setFormLines(receivableToLines(invoiceLines, defaultWarehouse));
+    markTouched();
   };
 
   /** يظهر زرّ «استلام الكل» ما دام في الفاتورة المرتبطة باقٍ يُستلَم. */
   const hasReceivableRemaining =
     !isStandalone && invoiceLines.some((l) => Number(l.remaining_quantity) > 0);
 
-  const updateLine = (idx: number, patch: Partial<LineState>) =>
+  const updateLine = (idx: number, patch: Partial<LineState>) => {
     setFormLines((ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+    markTouched();
+  };
 
   const pickRowItem = (idx: number, pickedId: number) => {
     if (isStandalone) {
@@ -534,7 +760,7 @@ export const GoodsReceiptsPage: React.FC = () => {
           type="button"
           className="ktra-toolbtn ktra-toolbtn--danger"
           title="حذف السطر"
-          onClick={() => setFormLines((ls) => ls.filter((_, i) => i !== idx))}
+          onClick={() => { setFormLines((ls) => ls.filter((_, i) => i !== idx)); markTouched(); }}
         >
           <Trash2 className="h-3 w-3" />
         </button>
@@ -621,6 +847,8 @@ export const GoodsReceiptsPage: React.FC = () => {
           : `تم إنشاء ${saved.receipt_number} واستلام البضاعة.`,
         "success"
       );
+      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      void discardDraft();
       closeForm();
     } catch (e) {
       toast(e instanceof Error ? e.message : "فشل حفظ الإرسالية", "error");
@@ -1011,7 +1239,7 @@ export const GoodsReceiptsPage: React.FC = () => {
                       type="button"
                       className="ktra-toolbtn"
                       title="إزالة الربط (سند مستقل)"
-                      onClick={() => void pickInvoice("")}
+                      onClick={() => { markTouched(); void pickInvoice(""); }}
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -1027,9 +1255,10 @@ export const GoodsReceiptsPage: React.FC = () => {
                   className="ktra-input"
                   disabled={!isStandalone}
                   value={formPartner === "" ? "" : String(formPartner)}
-                  onChange={(e) =>
-                    setFormPartner(e.target.value ? Number(e.target.value) : "")
-                  }
+                  onChange={(e) => {
+                    setFormPartner(e.target.value ? Number(e.target.value) : "");
+                    markTouched();
+                  }}
                 >
                   <option value="">
                     {isStandalone ? "— اختر مورداً —" : "من الفاتورة المرتبطة"}
@@ -1048,8 +1277,9 @@ export const GoodsReceiptsPage: React.FC = () => {
               control: (
                 <input
                   className="ktra-input"
+                  data-testid="receipt-supplier-ref"
                   value={formSupplierRef}
-                  onChange={(e) => setFormSupplierRef(e.target.value)}
+                  onChange={(e) => { setFormSupplierRef(e.target.value); markTouched(); }}
                   placeholder="بوليصة، إشعار تسليم…"
                 />
               ),
@@ -1057,7 +1287,12 @@ export const GoodsReceiptsPage: React.FC = () => {
             {
               key: "date",
               label: "التاريخ",
-              control: <KitDateInput value={formDate} onChange={setFormDate} />,
+              control: (
+                <KitDateInput
+                  value={formDate}
+                  onChange={(v) => { setFormDate(v); markTouched(); }}
+                />
+              ),
             },
             {
               key: "notes",
@@ -1066,7 +1301,7 @@ export const GoodsReceiptsPage: React.FC = () => {
                 <input
                   className="ktra-input"
                   value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
+                  onChange={(e) => { setFormNotes(e.target.value); markTouched(); }}
                   placeholder="اسم المستلم / رقم المركبة…"
                 />
               ),
@@ -1090,11 +1325,16 @@ export const GoodsReceiptsPage: React.FC = () => {
               : "لا توجد بنود — اضغط «إضافة بند من الفاتورة»"
           }
           banner={
-            err ? (
-              <div className="ktra-banner ktra-banner--err" role="alert">
-                {err}
-              </div>
-            ) : undefined
+            <>
+              {err && (
+                <div className="ktra-banner ktra-banner--err" role="alert">
+                  {err}
+                </div>
+              )}
+              {draftSaveFailedBanner}
+              {draftRestoreBanner}
+              {orphanDraftsBanner}
+            </>
           }
           status={
             <>
@@ -1114,6 +1354,12 @@ export const GoodsReceiptsPage: React.FC = () => {
                   </b>
                 </span>
               )}
+              {/* issue #109 §٦: مؤشّر دائم كي لا يضغط المستخدم «حفظ» احتياطاً كل دقيقة. */}
+              {draftSavedAt && (
+                <span className="ktra-status-item" data-testid="draft-saved-indicator">
+                  مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+                </span>
+              )}
             </>
           }
         />
@@ -1125,6 +1371,7 @@ export const GoodsReceiptsPage: React.FC = () => {
             emptyHint="لا توجد فواتير شراء قابلة للاستلام."
             onPick={(inv) => {
               setPickerOpen(false);
+              markTouched();
               // نفس سلوك الفتح من الفاتورة: تُملأ بالمتبقّي كاملاً.
               void pickInvoice(inv.id, { autofillWarehouse: defaultWarehouse });
             }}
@@ -1148,6 +1395,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       searchValue={search}
       searchPlaceholder="بحث برقم المستند / الفاتورة / المورد…"
       onSearchChange={setSearch}
+      detailPanel={orphanDraftsBanner}
       onNew={() => void openNew()}
       onReload={() => void load()}
       newLabel="إرسالية جديدة"

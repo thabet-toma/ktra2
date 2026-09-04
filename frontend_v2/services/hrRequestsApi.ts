@@ -148,6 +148,8 @@ export interface ContractComponentRow {
 }
 
 export interface ContractRow {
+  /** ختمُ تعديل المستند على الخادم — مقارنةُ المسودّة المتأخّرة (#109 §٩). */
+  updated_at?: string | null;
   id: number;
   employee: number;
   employee_name: string;

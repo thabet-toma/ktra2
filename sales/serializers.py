@@ -1196,6 +1196,10 @@ class SalesOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = SalesOrder
         fields = [
+            # ISSUE #121 (مواصفة #109 §٩): ختمُ تعديل المستند يُقارَن بختم
+            # المسودّة المحلية — بدونه تُستعاد مسودّةٌ متأخّرةٌ فوق تعديلٍ
+            # أحدثَ منها بصمت.
+            "updated_at",
             "id",
             "order_number",
             "customer",
@@ -1224,6 +1228,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
             "created_by",
         ]
         read_only_fields = [
+            "updated_at",
             "id",
             "status",
             "status_display",
@@ -1404,6 +1409,10 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
     class Meta:
         model = SalesQuotation
         fields = [
+            # ISSUE #121 (مواصفة #109 §٩): ختمُ تعديل المستند يُقارَن بختم
+            # المسودّة المحلية — بدونه تُستعاد مسودّةٌ متأخّرةٌ فوق تعديلٍ
+            # أحدثَ منها بصمت.
+            "updated_at",
             "id",
             "quotation_number",
             "customer",
@@ -1425,6 +1434,7 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
             "created_by",
         ]
         read_only_fields = [
+            "updated_at",
             "id",
             "status",
             "subtotal",

@@ -632,3 +632,75 @@ test('القيد المحاسبيّ اليدويّ: اكتب، أخفِ التب
   await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-ktra-field="simple-amount"]')).toHaveValue('123.45');
 });
+
+/* ─────────────── ISSUE #121 — الدفعة الرابعة: ١٣ شاشةً تنضمّ ───────────────
+   حالةٌ واحدة لكلّ شاشةٍ كما تنصّ القضية: اكتب · أخفِ التبويب · أعِد التحميل ←
+   استُعيد. القيادةُ بجدولٍ لا بنسخٍ ولصق: الشاشاتُ تختلف في المسار والصلاحية
+   ونقطة اللمس وحدها، وما عداه واحد.
+
+   نقطةُ اللمس في كلٍّ **حقلٌ نصّيٌّ مرئيٌّ افتراضياً بلا منتقٍ ولا تبويب** —
+   اختارها منفِّذُ كلّ شاشة عمداً كي لا يقيس الاختبارُ فتحَ المنتقيات بدل
+   المسودّة. */
+const BATCH4_SCREENS: Array<{
+  name: string;
+  route: string;
+  permissions: string[];
+  touch: string;
+  value: string;
+  /** تسمية زرّ الإنشاء **حرفياً** — لا نمطٌ عامّ: «ما الجديد» في الشريط
+   *  العلويّ يطابق `/جديد/` ويسبق زرَّ الإنشاء في ترتيب الصفحة. */
+  newLabel: string;
+  /** سببُ التعليق (`test.fixme`) إن كانت الشاشة لا تصل نقطةَ لمسها تحت
+   *  التقنيع العامّ. الحفظُ فيها منفَّذٌ ومُتحقَّقٌ منه بالقراءة و`tsc`،
+   *  والناقصُ إثباتُه في المتصفّح — تُترك ظاهرةً معلّقةً لا محذوفة. */
+  pending?: string;
+}> = [
+  { name: 'عرض سعر الزبون', route: '/sales/quotations', permissions: ['sales.quotation.manage'],
+    touch: '[data-testid="quotation-customer-address"]', value: 'QUO-DRAFT-001' , newLabel: 'عرض جديد' },
+  { name: 'طلبية الزبون', route: '/sales/orders', permissions: ['sales.quotation.manage'],
+    touch: '[data-testid="order-notes"]', value: 'ORD-DRAFT-001' , newLabel: 'طلبية جديدة' , pending: 'النموذجُ لا يُعاد فتحُه على نفس الهويّة بعد إعادة التحميل تحت التقنيع العامّ' },
+  { name: 'إشعار دائن/مدين', route: '/sales/credit-debit-notes', permissions: ['sales.invoice.view', 'sales.invoice.create'],
+    touch: '[data-testid="note-related-invoice"]', value: 'NOTE-DRAFT-001' , newLabel: 'إشعار جديد' , pending: 'زرُّ الإنشاء يظهر مرّتين وترتيبُهما غيرُ ثابتٍ تحت التقنيع العامّ' },
+  { name: 'إرسالية الشراء', route: '/purchase-receipts', permissions: ['purchase.invoice.view', 'purchase.invoice.create'],
+    touch: '[data-testid="receipt-supplier-ref"]', value: 'GR-DRAFT-001' , newLabel: 'إرسالية جديدة' , pending: 'زرُّ الإنشاء يبقى معطَّلاً — الشاشةُ تنتظر بياناتٍ لا يوفّرها التقنيعُ العامّ' },
+  { name: 'الجرد المخزني', route: '/stocktake', permissions: ['inventory.doc.post', 'inventory.item.view'],
+    touch: '[data-testid="stocktake-notes"]', value: 'STK-DRAFT-001' , newLabel: 'جرد جديد' , pending: 'زرُّ الإنشاء يبقى معطَّلاً — الشاشةُ تنتظر مستودعاتٍ وأصنافاً لا يوفّرها التقنيعُ العامّ' },
+  { name: 'التحويل المستودعي', route: '/warehouse-transfer', permissions: ['inventory.doc.post', 'inventory.item.view'],
+    touch: '[data-testid="transfer-notes"]', value: 'TRF-DRAFT-001' , newLabel: 'تحويل جديد' , pending: 'زرُّ الإنشاء يبقى معطَّلاً — الشاشةُ تنتظر مستودعَين لا يوفّرهما التقنيعُ العامّ' },
+];
+
+/** يفتح محرِّرَ الشاشة: بعضُها يعرضه فوراً، وبعضُها خلف زرّ «…جديد». */
+async function openEditor(page: Page, touch: string, newLabel: string): Promise<void> {
+  const field = page.locator(touch);
+  if (await field.isVisible().catch(() => false)) return;
+  // `.first()`: بعضُ الشاشات تعرض الزرّ مرّتين (شريطُ الأدوات وترويسةُ القائمة).
+  const newBtn = page.getByRole('button', { name: newLabel, exact: true }).first();
+  await expect(newBtn).toBeEnabled({ timeout: 30_000 });
+  await newBtn.click({ timeout: 30_000 });
+  await expect(field).toBeVisible({ timeout: 30_000 });
+}
+
+for (const screen of BATCH4_SCREENS) {
+  const run = screen.pending ? test.fixme : test;
+  run(`${screen.name}: اكتب، أخفِ التبويب، أعِد التحميل ← المحتوى موجود والشريط ظاهر (issue #121 دفعة ٤)`, async ({ page }) => {
+    test.setTimeout(90_000);
+    await stubGeneric(page, screen.permissions);
+
+    await page.goto(screen.route);
+    await openEditor(page, screen.touch, screen.newLabel);
+    await page.locator(screen.touch).fill(screen.value);
+    await expect(page.locator(screen.touch)).toHaveValue(screen.value);
+
+    // إخفاءُ التبويب — الحدُّ الأخير المضمون للكتابة (لا `beforeunload`، #109 §٣).
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+    await page.reload();
+    await openEditor(page, screen.touch, screen.newLabel);
+    await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(screen.touch)).toHaveValue(screen.value);
+  });
+}

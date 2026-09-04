@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { humanizeThrown } from "../../utils/drfError";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import {
@@ -14,6 +14,10 @@ import {
   ChevronsLeft,
   Printer,
   FileDown,
+  AlertTriangle,
+  Info,
+  Undo2,
+  X,
 } from "lucide-react";
 import { KitSpinner } from "../kit/KitStates";
 import { ShareRowButton } from "../shared/ShareRowButton";
@@ -29,7 +33,9 @@ import {
   KitTabs,
 } from "../kit";
 import { RefreshCw } from "lucide-react";
-import { formatDateLocalized } from "../../utils/formatDate";
+import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 
 const tid = () => resolveTenantId();
 const BASE = "sales/credit-debit-notes";
@@ -50,6 +56,20 @@ type NoteRow = {
 };
 
 type Partner = { id: number; name: string };
+
+/** ISSUE #121: حمولة المسودّة المحلية — خفيفة تكفي وحدها لإعادة بناء الشاشة
+ *  (issue #118)، لا صلة بحمولة الحفظ الخادمية التي يبنيها `handleSave`. */
+interface NoteDraftPayload {
+  formType: "credit" | "debit";
+  formCustomer: string;
+  formDate: string;
+  formAmount: string;
+  formReason: string;
+  formIncludesTax: boolean;
+  formTaxRate: string;
+  formRelatedInvoice: string;
+  formVatStatementNo: string;
+}
 
 export const CreditDebitNotesPage: React.FC = () => {
   const [notes, setNotes] = useState<NoteRow[]>([]);
@@ -72,6 +92,12 @@ export const CreditDebitNotesPage: React.FC = () => {
   const [formRelatedInvoice, setFormRelatedInvoice] = useState("");
   const [formVatStatementNo, setFormVatStatementNo] = useState("");
   const [activeTab, setActiveTab] = useState<"main" | "notes" | "accounts">("main");
+
+  // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم.
+  const [touched, setTouched] = useState(false);
+  const markTouched = () => setTouched(true);
+  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   // N4-T5: حساب المبلغ بدون ضريبة / مبلغ الضريبة / الإجمالي
   const amt = Number(formAmount) || 0;
@@ -105,6 +131,8 @@ export const CreditDebitNotesPage: React.FC = () => {
           setFormDate(found.note_date?.slice(0, 10) || "");
           setFormAmount(found.amount);
           setFormReason(found.reason || "");
+          // تعبئةٌ من الخادم — لا تُعامَل كتعديل مستخدم (issue #121).
+          setTouched(false);
           setShowForm(true);
         }
       }
@@ -161,6 +189,11 @@ export const CreditDebitNotesPage: React.FC = () => {
     setFormDate(new Date().toISOString().slice(0, 10));
     setFormAmount("");
     setFormReason("");
+    setFormIncludesTax(false);
+    setFormTaxRate("17");
+    setFormRelatedInvoice("");
+    setFormVatStatementNo("");
+    setTouched(false);
   };
 
   const handleSave = async () => {
@@ -192,6 +225,8 @@ export const CreditDebitNotesPage: React.FC = () => {
       resetForm();
       setShowForm(false);
       await loadAll();
+      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      void discardDraft();
     } catch (e: unknown) {
       setErr(humanizeThrown(e, "فشل الحفظ"));
     } finally {
@@ -222,6 +257,148 @@ export const CreditDebitNotesPage: React.FC = () => {
     };
     return map[s] || "ktra-bg-panel ktra-text-ink";
   };
+
+  const selectedNote = notes.find((n) => n.id === selectedId);
+
+  /* ISSUE #121: مسودّة محلية (IndexedDB، issue #118) — هذه الشاشة لا تحفظ
+   * شيئاً محلياً اليوم. الحمولة كائنٌ خفيف يكفي وحده لإعادة بناء الشاشة؛ لا
+   * صلة بحمولة الحفظ الخادمية التي يبنيها `handleSave`. */
+  const draftPayload = useMemo<NoteDraftPayload>(
+    () => ({
+      formType, formCustomer, formDate, formAmount, formReason,
+      formIncludesTax, formTaxRate, formRelatedInvoice, formVatStatementNo,
+    }),
+    [
+      formType, formCustomer, formDate, formAmount, formReason,
+      formIncludesTax, formTaxRate, formRelatedInvoice, formVatStatementNo,
+    ],
+  );
+
+  const onRestoreDraft = useCallback((restored: NoteDraftPayload) => {
+    setFormType(restored.formType);
+    setFormCustomer(restored.formCustomer);
+    setFormDate(restored.formDate);
+    setFormAmount(restored.formAmount);
+    setFormReason(restored.formReason);
+    setFormIncludesTax(restored.formIncludesTax);
+    setFormTaxRate(restored.formTaxRate);
+    setFormRelatedInvoice(restored.formRelatedInvoice);
+    setFormVatStatementNo(restored.formVatStatementNo);
+    setTouched(true);
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<NoteDraftPayload>({
+    docType: "credit_debit_note",
+    docId: selectedId,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    isPosted: selectedNote?.status === "posted",
+    // GAP معروف: `NoteRow` (هذا الملف — لا مسلسِلاً في services/salesApi.ts)
+    // لا يحمل حقل updated_at، والخادم لا يعرضه. فلا مصدر حقيقي لـ`docUpdatedAt`
+    // هنا، و`null` دائماً يُعطّل بصمت فحص «تغيّر المستند بعد مسودّتك» (issue
+    // #109 §٩) لهذه الشاشة وحدها. إصلاحه خادميّ وخارج نطاق هذه المهمة.
+    docUpdatedAt: null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع» على شريط الاستعادة: يعيد الشاشة إلى حالتها المحفوظة (السجلّ
+   *  المحمَّل أصلاً في `notes` — بلا نداءٍ للخادم) ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    if (selectedId != null) {
+      const found = notes.find((n) => n.id === selectedId);
+      if (found) {
+        setFormType(found.note_type);
+        setFormCustomer(String(found.customer));
+        setFormDate(found.note_date?.slice(0, 10) || "");
+        setFormAmount(found.amount);
+        setFormReason(found.reason || "");
+      }
+    } else {
+      resetForm();
+    }
+    setTouched(false);
+    void discardDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, notes, discardDraft]);
+
+  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً. */
+  const draftSaveFailedBanner = draftSaveFailed ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذا الإشعار — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  /* ISSUE #118: شريط الاستعادة التلقائية — إخبارٌ لا سؤال. */
+  const draftRestoreBanner = draftBanner ? (
+    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <span>
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّر الإشعار بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا الإشعار المرحَّل — للاطّلاع فقط.`}
+      </span>
+      {draftBanner.eligibility === "restore" && (
+        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+          <Undo2 className="h-4 w-4" /> تراجع
+        </button>
+      )}
+      {draftBanner.eligibility === "stale" && (
+        <>
+          <button type="button" className="ktra-toolbtn" onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
+            استعرض مسودتي
+          </button>
+          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+            تجاهلها
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  /* شريط اليتامى (issue #119 §٧): مسودّات إشعارٍ جديد أخرى تُركت في تبويبات أخرى. */
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <div className="flex flex-col gap-1">
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul className="list-disc pr-4 text-xs">
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+          ))}
+        </ul>
+      </div>
+      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+        <X className="h-4 w-4" /> إخفاء
+      </button>
+    </div>
+  ) : null;
 
   return (
     <div
@@ -257,6 +434,11 @@ export const CreditDebitNotesPage: React.FC = () => {
         <>
           <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
           <span className="ktra-status-item">{notes.length} إشعار</span>
+          {showForm && draftSavedAt && (
+            <span className="ktra-status-item" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          )}
         </>
       }
     >
@@ -339,6 +521,10 @@ export const CreditDebitNotesPage: React.FC = () => {
               <button onClick={() => setShowForm(false)} className="p-1 hover:ktra-bg-panel rounded"><FileDown className="w-5 h-5" /></button>
             </div>
 
+            {draftSaveFailedBanner}
+            {draftRestoreBanner}
+            {orphanDraftsBanner}
+
             {/* N4-T5 tabs using KitTabs */}
             <KitTabs
               activeTab={activeTab}
@@ -357,6 +543,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                           onChange={(e) => {
                             const value = e.target.value as "credit" | "debit";
                             clientLogger.info("credit_debit_note.type_changed", { noteType: value });
+                            markTouched();
                             setFormType(value);
                           }}
                           className="w-full border rounded p-1.5 text-sm"
@@ -373,28 +560,28 @@ export const CreditDebitNotesPage: React.FC = () => {
                       </div>
                       <div>
                         <label className="block text-xs font-medium mb-1">التاريخ</label>
-                        <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded p-1.5 text-sm" />
+                        <input type="date" value={formDate} onChange={(e) => { markTouched(); setFormDate(e.target.value); }} className="w-full border rounded p-1.5 text-sm" />
                       </div>
                       <div className="col-span-2">
                         <label className="block text-xs font-medium mb-1">العميل</label>
-                        <select value={formCustomer} onChange={(e) => setFormCustomer(e.target.value)} className="w-full border rounded p-1.5 text-sm" data-ktra-key="1">
+                        <select value={formCustomer} onChange={(e) => { markTouched(); setFormCustomer(e.target.value); }} className="w-full border rounded p-1.5 text-sm" data-ktra-key="1">
                           <option value="">-- اختر (+) --</option>
                           {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                       </div>
                       <div>
                         <label className="block text-xs font-medium mb-1">رقم فاتورة المقاصة</label>
-                        <input type="text" value={formRelatedInvoice} onChange={(e) => setFormRelatedInvoice(e.target.value)} className="w-full border rounded p-1.5 text-sm font-mono" placeholder="رقم الفاتورة المرتبطة" />
+                        <input type="text" data-testid="note-related-invoice" value={formRelatedInvoice} onChange={(e) => { markTouched(); setFormRelatedInvoice(e.target.value); }} className="w-full border rounded p-1.5 text-sm font-mono" placeholder="رقم الفاتورة المرتبطة" />
                       </div>
                       <div>
                         <label className="block text-xs font-medium mb-1">كشف الضريبة</label>
-                        <input type="text" value={formVatStatementNo} onChange={(e) => setFormVatStatementNo(e.target.value)} className="w-full border rounded p-1.5 text-sm" placeholder="رقم كشف الضريبة" />
+                        <input type="text" value={formVatStatementNo} onChange={(e) => { markTouched(); setFormVatStatementNo(e.target.value); }} className="w-full border rounded p-1.5 text-sm" placeholder="رقم كشف الضريبة" />
                       </div>
 
                       {/* المبلغ + ضريبة */}
                       <div className="col-span-2 ktra-bg-panel border ktra-border-soft rounded p-2 mt-2">
                         <label className="flex items-center gap-2 text-xs mb-2">
-                          <input type="checkbox" checked={formIncludesTax} onChange={(e) => setFormIncludesTax(e.target.checked)} />
+                          <input type="checkbox" checked={formIncludesTax} onChange={(e) => { markTouched(); setFormIncludesTax(e.target.checked); }} />
                           المبلغ يشمل قيمة الضريبة المضافة
                         </label>
                         <div className="grid grid-cols-2 gap-2">
@@ -404,13 +591,13 @@ export const CreditDebitNotesPage: React.FC = () => {
                               type="number" step="0.01"
                               data-ktra-field="remaining-amount"
                               value={formAmount}
-                              onChange={(e) => setFormAmount(e.target.value)}
+                              onChange={(e) => { markTouched(); setFormAmount(e.target.value); }}
                               className="w-full border rounded p-1 text-sm font-mono"
                             />
                           </div>
                           <div>
                             <label className="block text-[11px] mb-0.5">نسبة ض.ق.م %</label>
-                            <input type="number" step="0.01" value={formTaxRate} onChange={(e) => setFormTaxRate(e.target.value)} className="w-full border rounded p-1 text-sm font-mono" />
+                            <input type="number" step="0.01" value={formTaxRate} onChange={(e) => { markTouched(); setFormTaxRate(e.target.value); }} className="w-full border rounded p-1 text-sm font-mono" />
                           </div>
                           <div>
                             <label className="block text-[11px] mb-0.5">المبلغ بدون ضريبة</label>
@@ -435,7 +622,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                   content: (
                     <div>
                       <label className="block text-xs font-medium mb-1">السبب / الملاحظات</label>
-                      <textarea value={formReason} onChange={(e) => setFormReason(e.target.value)} className="w-full border rounded p-2" rows={6} />
+                      <textarea value={formReason} onChange={(e) => { markTouched(); setFormReason(e.target.value); }} className="w-full border rounded p-2" rows={6} />
                     </div>
                   )
                 },

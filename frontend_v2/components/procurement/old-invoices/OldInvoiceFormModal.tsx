@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Invoice, InvoiceItem, Item, Supplier, SupplierItemPrice, DealInvoiceInfo } from '../../../types';
 import {
     X, Save, FileText, Paperclip, Trash2,
-    Calculator, ExternalLink, Building // ✅ تمت إضافة Building
+    Calculator, ExternalLink, Building, // ✅ تمت إضافة Building
+    AlertTriangle, Info, Undo2
 } from 'lucide-react';
 import { cloudinaryService } from '@/services/cloudinaryService';
 import { FileDropZone } from '../../ui/FileDropZone';
@@ -12,6 +13,9 @@ import { SupplierSearch } from './SupplierSearch';
 import { ItemSearchModal } from '../price-offers/ItemSearchModal';
 import { ItemsTableSection } from '../../forms/shared/ItemsTableSection';
 import { collection, query, where, orderBy, getDocs, limit, db } from "../../../services/sqlApiClient";
+import { useDocumentDraft } from '../../../hooks/useDocumentDraft';
+import { orphanDraftsBannerText } from '../../../utils/documentDraft';
+import { formatTimeValue } from '../../../utils/formatDate';
 
 interface OldInvoiceFormModalProps {
     isOpen: boolean;
@@ -78,57 +82,68 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
     const [itemSearchQuery, setItemSearchQuery] = useState('');
     const toast = useToast();
 
-    // Load initial data
-    useEffect(() => {
-        if (isOpen && initialData) {
-            setInvoiceDate(initialData.invoiceDate || '');
-            setInvoiceNumber(initialData.invoiceNumber || '');
-            setInvoiceLink(initialData.invoiceLink || '');
-            setSupplierId(initialData.supplierId);
-            setFactoryName(initialData.factoryName || '');
-            // ⚠️ تعديل: لا نضع الاسم في البحث عند التحميل، المكون سيعرض الاسم بناءً على ID
-            setSupplierSearch('');
+    // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم فعليّ
+    // (لا داخل useEffect؛ راجع تعليق `useDocumentDraft.ts` نفسه).
+    const [touched, setTouched] = useState(false);
+    const markTouched = () => setTouched(true);
+    // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+    const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
-            // Set Items
-            if (initialData.items) {
-                setInvoiceItems(initialData.items);
-            }
+    /** يملأ النموذج من فاتورةٍ أرشيفية قائمة — تحميلٌ لا لمسٌ. مشتركةٌ بين فتح
+     *  المودال العادي (`initialData`) و«تراجع» عن مسودّةٍ لنفس الفاتورة. */
+    const populateFromInvoice = (data: Invoice) => {
+        setInvoiceDate(data.invoiceDate || '');
+        setInvoiceNumber(data.invoiceNumber || '');
+        setInvoiceLink(data.invoiceLink || '');
+        setSupplierId(data.supplierId);
+        setFactoryName(data.factoryName || '');
+        // ⚠️ تعديل: لا نضع الاسم في البحث عند التحميل، المكون سيعرض الاسم بناءً على ID
+        setSupplierSearch('');
 
-            setNotes(initialData.notes || '');
-            setImageUrls(initialData.imageUrls || []);
+        // Set Items
+        setInvoiceItems(data.items || []);
 
-            // Handle PDFs
-            const pdfs = initialData.pdfFiles?.map(f => ({
-                name: f.name || 'document.pdf',
-                url: f.url,
-                size: f.size || 0,
-                type: f.type || 'application/pdf'
-            })) || [];
-            setPdfFiles(pdfs);
+        setNotes(data.notes || '');
+        setImageUrls(data.imageUrls || []);
 
-            setDiscount(initialData.discountAmount || 0);
-            setTaxRate(initialData.taxRate || 0);
-            setTaxAmountState(initialData.taxAmount || 0);
-            setTaxType(initialData.taxType || 'percentage');
-            setShippingCost(initialData.shippingCost || 0);
-            setShippingIncluded(initialData.shippingIncluded || false);
+        // Handle PDFs — الحقل غير معلَنٍ على نوع `Invoice` (فجوةٌ سابقة على هذه
+        // المهمة: البيانات الفعلية القادمة من الخادم/الأرشيف تحمله رغم ذلك)،
+        // فيُقرأ بأمانٍ عبر Cast ضيّق بدل تعديل النوع خارج نطاق المهمة.
+        const pdfs = (data as unknown as { pdfFiles?: Array<{ name?: string; url: string; size?: number; type?: string }> }).pdfFiles?.map(f => ({
+            name: f.name || 'document.pdf',
+            url: f.url,
+            size: f.size || 0,
+            type: f.type || 'application/pdf'
+        })) || [];
+        setPdfFiles(pdfs);
 
-            if (initialData.dealInfo) {
-                setProductionDays(initialData.dealInfo.productionDays);
-                setDeliveryDays(initialData.dealInfo.deliveryDays);
-                setPaymentMethod(initialData.dealInfo.paymentMethod || '');
-                setShippingMethod(initialData.dealInfo.shippingMethod || '');
-                setWarrantyDuration(initialData.dealInfo.warrantyDuration);
-                setCertificates(initialData.dealInfo.certificates || '');
-                setShipmentNotes(initialData.dealInfo.shipmentNotes || '');
-            }
-            setTotalWeight(initialData.totalWeight);
-            setTotalVolume(initialData.totalVolume);
-        } else if (isOpen) {
-            // Reset form for new entry
-            resetForm();
+        setDiscount(data.discountAmount || 0);
+        setTaxRate(data.taxRate || 0);
+        setTaxAmountState(data.taxAmount || 0);
+        setTaxType(data.taxType || 'percentage');
+        setShippingCost(data.shippingCost || 0);
+        setShippingIncluded(data.shippingIncluded || false);
+
+        if (data.dealInfo) {
+            setProductionDays(data.dealInfo.productionDays);
+            setDeliveryDays(data.dealInfo.deliveryDays);
+            setPaymentMethod(data.dealInfo.paymentMethod || '');
+            setShippingMethod(data.dealInfo.shippingMethod || '');
+            setWarrantyDuration(data.dealInfo.warrantyDuration);
+            setCertificates(data.dealInfo.certificates || '');
+            setShipmentNotes(data.dealInfo.shipmentNotes || '');
+        } else {
+            setProductionDays(undefined);
+            setDeliveryDays(undefined);
+            setPaymentMethod('');
+            setShippingMethod('');
+            setWarrantyDuration(undefined);
+            setCertificates('');
+            setShipmentNotes('');
         }
-    }, [isOpen, initialData]);
+        setTotalWeight(data.totalWeight);
+        setTotalVolume(data.totalVolume);
+    };
 
     const resetForm = () => {
         setInvoiceDate(new Date().toISOString().split('T')[0]);
@@ -156,7 +171,23 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
         setTotalWeight(undefined);
         setTotalVolume(undefined);
         setShipmentNotes('');
+        setTouched(false);
     };
+
+    // Load initial data — تحميلٌ متزامنٌ من props (initialData جاهزة في الذاكرة
+    // بلا fetch)، فينفّذ بالكامل قبل أن تصل استعادةُ المسودّة غير المتزامنة
+    // (IndexedDB) — لا سباقَ إذن، والاستعادة (إن أهّلتها) تكتب فوق هذا التحميل
+    // لاحقاً كالمعتاد (ISSUE #121 الدرس ٢).
+    useEffect(() => {
+        if (isOpen && initialData) {
+            populateFromInvoice(initialData);
+            setTouched(false);
+        } else if (isOpen) {
+            // Reset form for new entry
+            resetForm();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, initialData]);
 
     // Helper: Fetch last price
     const fetchLastPrice = async (itemId: string, currentSupplierId: string) => {
@@ -191,6 +222,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
             // ✅ نصفر البحث، لأن المكون سيعرض "البطاقة الصغيرة" للمورد المختار داخلياً
             setSupplierSearch('');
         }
+        markTouched();
     };
 
     // Item Management
@@ -211,6 +243,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
         setCurrentItemIndex(invoiceItems.length);
         setItemSearchQuery('');
         setShowItemSearchModal(true);
+        markTouched();
     };
 
     const updateItem = (index: number, field: keyof InvoiceItem, value: any) => {
@@ -223,10 +256,12 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
 
         newItems[index] = item;
         setInvoiceItems(newItems);
+        markTouched();
     };
 
     const removeItem = (index: number) => {
         setInvoiceItems(invoiceItems.filter((_, i) => i !== index));
+        markTouched();
     };
 
     const handleSelectItem = async (item: Item, lastPrice?: number) => {
@@ -257,6 +292,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
         setInvoiceItems(newItems);
         setShowItemSearchModal(false);
         setCurrentItemIndex(null);
+        markTouched();
     };
 
     // File Uploads — الاختيار والسحب واللصق (Ctrl+V) صارت كلها داخل `FileDropZone`،
@@ -270,6 +306,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                 if (imageUrl) newUrls.push(imageUrl);
             }
             setImageUrls(prev => [...prev, ...newUrls]);
+            if (newUrls.length > 0) markTouched();
         } catch (error) {
             // console suppressed
             toast('فشل رفع الصور.', 'error');
@@ -303,6 +340,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                 });
             }
             setPdfFiles(prev => [...prev, ...newPdfFiles]);
+            markTouched();
         } catch (error) {
             // console suppressed
             toast('حدث خطأ أثناء معالجة ملفات PDF.', 'error');
@@ -323,6 +361,102 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
     }
 
     const grandTotal = afterDiscount + taxAmount;
+
+    /* ISSUE #121: مسودّة محلية (IndexedDB، issue #118) — هذه الشاشةُ مودالٌ يبقى
+     * مُركَّباً طوال عمر الصفحة الأمّ (`isOpen` يتحكّم بالعرض فقط)، ويحرّر فاتورةً
+     * أرشيفية قائمة (`initialData`) أو ينشئ جديدة. `docId`/`docUpdatedAt` من
+     * `initialData` مباشرةً — الفاتورة الأرشيفية تحمل `updatedAt` حقيقياً من
+     * الخادم دائماً (خلافاً لبعض شاشات هذه الدفعة)، فلا فجوة هنا. لا مفهوم
+     * «ترحيل» لفاتورةٍ أرشيفية (isPosted: false دائماً). الحمولة كائنٌ خفيف
+     * يكفي وحده لإعادة بناء النموذج — تستثني المجاميع المُشتقّة (subtotal/
+     * taxAmount/grandTotal) لأنها تُحسَب من البنود نفسها، لا تُخزَّن. */
+    const draftPayload = useMemo(
+        () => ({
+            invoiceDate, invoiceNumber, invoiceLink, supplierId, factoryName,
+            invoiceItems, notes, imageUrls, pdfFiles,
+            discount, taxRate, taxAmountState, taxType, shippingCost, shippingIncluded,
+            productionDays, deliveryDays, paymentMethod, shippingMethod,
+            warrantyDuration, certificates, totalWeight, totalVolume, shipmentNotes,
+        }),
+        [
+            invoiceDate, invoiceNumber, invoiceLink, supplierId, factoryName,
+            invoiceItems, notes, imageUrls, pdfFiles,
+            discount, taxRate, taxAmountState, taxType, shippingCost, shippingIncluded,
+            productionDays, deliveryDays, paymentMethod, shippingMethod,
+            warrantyDuration, certificates, totalWeight, totalVolume, shipmentNotes,
+        ],
+    );
+
+    type OldInvoiceDraftPayload = typeof draftPayload;
+
+    const onRestoreDraft = useCallback((restored: OldInvoiceDraftPayload) => {
+        setInvoiceDate(restored.invoiceDate);
+        setInvoiceNumber(restored.invoiceNumber);
+        setInvoiceLink(restored.invoiceLink);
+        setSupplierId(restored.supplierId);
+        setFactoryName(restored.factoryName);
+        setSupplierSearch('');
+        setInvoiceItems(restored.invoiceItems);
+        setNotes(restored.notes);
+        setImageUrls(restored.imageUrls);
+        setPdfFiles(restored.pdfFiles);
+        setDiscount(restored.discount);
+        setTaxRate(restored.taxRate);
+        setTaxAmountState(restored.taxAmountState);
+        setTaxType(restored.taxType);
+        setShippingCost(restored.shippingCost);
+        setShippingIncluded(restored.shippingIncluded);
+        setProductionDays(restored.productionDays);
+        setDeliveryDays(restored.deliveryDays);
+        setPaymentMethod(restored.paymentMethod);
+        setShippingMethod(restored.shippingMethod);
+        setWarrantyDuration(restored.warrantyDuration);
+        setCertificates(restored.certificates);
+        setTotalWeight(restored.totalWeight);
+        setTotalVolume(restored.totalVolume);
+        setShipmentNotes(restored.shipmentNotes);
+        // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة/الشاشة الفارغة —
+        // تُسجَّل «ملموسة».
+        setTouched(true);
+    }, []);
+
+    const {
+        draftSavedAt,
+        draftSaveFailed,
+        restoredBanner: draftBanner,
+        discardDraft,
+        orphanDrafts,
+    } = useDocumentDraft<OldInvoiceDraftPayload>({
+        docType: 'old_purchase_invoice',
+        docId: initialData?.id ?? null,
+        payload: draftPayload,
+        isTouched: touched,
+        onRestore: onRestoreDraft,
+        isPosted: false,
+        docUpdatedAt: initialData?.updatedAt ?? null,
+    });
+
+    /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (draftSaveFailed) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [draftSaveFailed]);
+
+    /** «تراجع» على شريط الاستعادة: يعيد النموذج إلى آخر نسخةٍ محفوظة (أو
+     *  الحالة الفارغة لفاتورةٍ جديدة) ويمسح المسودّة. */
+    const handleUndoDraft = useCallback(() => {
+        if (initialData) populateFromInvoice(initialData);
+        else resetForm();
+        setTouched(false);
+        void discardDraft();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialData, discardDraft]);
 
     // Submit
     const handleSubmit = async () => {
@@ -365,6 +499,8 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
             };
 
             await onSave(invoiceData);
+            // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+            void discardDraft();
         } catch (error) {
             // console suppressed
             // السبب الحقيقي بدل جملة عامة؛ النافذة تبقى مفتوحة بمدخلاتها.
@@ -373,6 +509,76 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
             setIsSaving(false);
         }
     };
+
+    /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً بدل
+     * الانتظار الصامت حتى تحاول المغادرة. */
+    const draftSaveFailedBanner = draftSaveFailed ? (
+        <div
+            role="alert"
+            aria-live="assertive"
+            data-testid="draft-save-failed-banner"
+            className="flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+        >
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+        </div>
+    ) : null;
+
+    /* ISSUE #118: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى مُطبَّقٌ
+     * على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً. */
+    const draftRestoreBanner = draftBanner ? (
+        <div className="ktra-banner ktra-banner--warn flex items-center gap-2 px-4 py-2" role="status" data-testid="draft-restored-banner">
+            <Info className="h-4 w-4 shrink-0" />
+            <span className="flex-1">
+                {draftBanner.eligibility === 'restore' &&
+                    `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+                {draftBanner.eligibility === 'stale' &&
+                    `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+                {draftBanner.eligibility === 'posted' &&
+                    `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند — للاطّلاع فقط.`}
+            </span>
+            {draftBanner.eligibility === 'restore' && (
+                <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+                    <Undo2 className="h-4 w-4" />
+                    تراجع
+                </button>
+            )}
+            {draftBanner.eligibility === 'stale' && (
+                <>
+                    <button
+                        type="button"
+                        className="ktra-toolbtn"
+                        onClick={() => onRestoreDraft(draftBanner.payload)}
+                        data-testid="draft-stale-preview"
+                    >
+                        استعرض مسودتي
+                    </button>
+                    <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+                        تجاهلها
+                    </button>
+                </>
+            )}
+        </div>
+    ) : null;
+
+    /* شريط اليتامى (issue #119 §٧): مسودّات فاتورةٍ جديدة أخرى تُركت في تبويبات أخرى. */
+    const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+        <div className="ktra-banner flex items-center gap-2 px-4 py-2" role="status" data-testid="orphan-drafts-banner">
+            <Info className="h-4 w-4 shrink-0" />
+            <div className="flex flex-col gap-1 flex-1">
+                <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+                <ul className="list-disc pr-4 text-xs">
+                    {orphanDrafts.map((o) => (
+                        <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || '—'}</li>
+                    ))}
+                </ul>
+            </div>
+            <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+                <X className="h-4 w-4" />
+                إخفاء
+            </button>
+        </div>
+    ) : null;
 
     if (!isOpen) return null;
 
@@ -399,6 +605,10 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                     </button>
                 </div>
 
+                {draftSaveFailedBanner}
+                {draftRestoreBanner}
+                {orphanDraftsBanner}
+
                 {/* Content */}
                 <div className="p-6 md:p-8 space-y-8 overflow-y-auto max-h-[calc(100vh-150px)]">
 
@@ -413,7 +623,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                     <input
                                         type="date"
                                         value={invoiceDate}
-                                        onChange={(e) => setInvoiceDate(e.target.value)}
+                                        onChange={(e) => { setInvoiceDate(e.target.value); markTouched(); }}
                                         className="w-full px-4 py-3 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel ktra-text-ink dark:text-white focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
@@ -423,8 +633,9 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                     </label>
                                     <input
                                         type="text"
+                                        data-testid="old-invoice-number"
                                         value={invoiceNumber}
-                                        onChange={(e) => setInvoiceNumber(e.target.value)}
+                                        onChange={(e) => { setInvoiceNumber(e.target.value); markTouched(); }}
                                         placeholder="مثال: 00123"
                                         className="w-full px-4 py-3 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel ktra-text-ink dark:text-white focus:ring-2 focus:ring-blue-500"
                                     />
@@ -439,7 +650,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                     <input
                                         type="url"
                                         value={invoiceLink}
-                                        onChange={(e) => setInvoiceLink(e.target.value)}
+                                        onChange={(e) => { setInvoiceLink(e.target.value); markTouched(); }}
                                         placeholder="https://example.com/invoice/123"
                                         className="w-full pr-10 pl-4 py-3 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel ktra-text-ink dark:text-white focus:ring-2 focus:ring-blue-500 text-left"
                                         dir="ltr"
@@ -464,6 +675,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                     setSupplierId('');
                                     setFactoryName('');
                                     setSupplierSearch('');
+                                    markTouched();
                                 }}
                                 type="factory"
                                 onOpenAddModal={onAddSupplier} // اختياري: إذا أردت تفعيل زر الإضافة
@@ -514,6 +726,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                 shipmentNotes: setShipmentNotes
                             };
                             if (setters[field]) setters[field](value);
+                            markTouched();
                         }}
                     />
 
@@ -528,7 +741,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                 <textarea
                                     rows={3}
                                     value={notes}
-                                    onChange={(e) => setNotes(e.target.value)}
+                                    onChange={(e) => { setNotes(e.target.value); markTouched(); }}
                                     className="w-full px-4 py-3 rounded-lg border ktra-border-soft dark:ktra-border-soft ktra-bg-field dark:ktra-bg-panel focus:ring-2 focus:ring-blue-500"
                                     placeholder="ملاحظات إضافية..."
                                 />
@@ -570,7 +783,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                                 <img src={url} alt="Attachment" className="w-10 h-10 rounded object-cover" />
                                                 <span className="text-sm truncate max-w-[150px]">Image {i + 1}</span>
                                             </div>
-                                            <button onClick={() => setImageUrls(prev => prev.filter((_, idx) => idx !== i))} className="ktra-text-soft hover:ktra-bg-panel p-1 rounded">
+                                            <button onClick={() => { setImageUrls(prev => prev.filter((_, idx) => idx !== i)); markTouched(); }} className="ktra-text-soft hover:ktra-bg-panel p-1 rounded">
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>
@@ -584,7 +797,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                                     <div className="text-xs ktra-text-soft">{(file.size / 1024).toFixed(1)} KB</div>
                                                 </div>
                                             </div>
-                                            <button onClick={() => setPdfFiles(prev => prev.filter((_, idx) => idx !== i))} className="ktra-text-soft hover:ktra-bg-panel p-1 rounded">
+                                            <button onClick={() => { setPdfFiles(prev => prev.filter((_, idx) => idx !== i)); markTouched(); }} className="ktra-text-soft hover:ktra-bg-panel p-1 rounded">
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>
@@ -609,7 +822,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                     <input
                                         type="number"
                                         value={discount}
-                                        onChange={e => setDiscount(parseFloat(e.target.value) || 0)}
+                                        onChange={e => { setDiscount(parseFloat(e.target.value) || 0); markTouched(); }}
                                         className="w-24 px-2 py-1 text-right border rounded ktra-bg-field dark:ktra-bg-panel"
                                     />
                                 </div>
@@ -623,6 +836,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                                 const val = parseFloat(e.target.value) || 0;
                                                 if (taxType === 'amount') setTaxAmountState(val);
                                                 else setTaxRate(val);
+                                                markTouched();
                                             }}
                                             className="w-16 px-2 py-1 text-right border rounded ktra-bg-field dark:ktra-bg-panel"
                                         />
@@ -646,6 +860,12 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                             {isSaving ? <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" /> : <Save className="w-5 h-5" />}
                             {initialData ? 'حفظ التعديلات' : 'أرشفة الفاتورة'}
                         </button>
+                        {/* issue #109 §٦: مؤشّر دائم كي لا يضغط المستخدم «حفظ» احتياطاً كل دقيقة. */}
+                        {draftSavedAt && (
+                            <p className="text-xs text-center ktra-text-soft mt-2" data-testid="draft-saved-indicator">
+                                مسودة محلية — حُفظ {formatTimeValue(draftSavedAt)}
+                            </p>
+                        )}
                     </div>
                 </div>
 

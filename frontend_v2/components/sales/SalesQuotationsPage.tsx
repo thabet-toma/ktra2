@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import {
@@ -9,6 +9,8 @@ import {
   Share2,
   Info,
   X,
+  AlertTriangle,
+  Undo2,
 } from "lucide-react";
 import {
   listQuotationsPage,
@@ -31,7 +33,10 @@ import { apiGetList } from "../../services/restApi";
 import { listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { formatTimeValue } from "../../utils/formatDate";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 import type { SqlProduct } from "../../types/inventory";
 import {
   useRecordNavigation,
@@ -67,6 +72,21 @@ type LineState = {
   tax_rate: string;
   total: string;
 };
+
+/** ISSUE #121: حمولة المسودّة المحلية — خفيفة تكفي وحدها لإعادة بناء الشاشة
+ *  (issue #118)، لا صلة بحمولة الحفظ الخادمية التي يبنيها `handleSave`. */
+interface SalesQuotationDraftPayload {
+  formCustomer: string;
+  formDate: string;
+  formValidUntil: string;
+  formNotes: string;
+  formIsActive: boolean;
+  formPricesIncludeTax: boolean;
+  formCustomerAddress: string;
+  formCustomerTaxNumber: string;
+  formDiscount: string;
+  formLines: LineState[];
+}
 
 export const SalesQuotationsPage: React.FC = () => {
   const confirm = useConfirm();
@@ -105,6 +125,13 @@ export const SalesQuotationsPage: React.FC = () => {
 
   // خصم المستند («خصم الفاتورة») — يُعلَن على رأس العرض لا على بنوده.
   const [formDiscount, setFormDiscount] = useState("0");
+
+  // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم (لا
+  // مشتقّة داخل useEffect؛ حالةٌ مشتقّة تفوّت بالضبط حالة «عُدِّل ثم غادر»).
+  const [touched, setTouched] = useState(false);
+  const markTouched = () => setTouched(true);
+  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
   const [taxRates, setTaxRates] = useState<TaxRateRow[]>([]);
   // بطاقة المنتج المشتركة — تكلفة الصنف وأسعاره دون مغادرة العرض.
   const [cardProductId, setCardProductId] = useState<number | null>(null);
@@ -172,6 +199,8 @@ export const SalesQuotationsPage: React.FC = () => {
         tax_rate: String(l.tax_rate || 0),
         total: l.line_total,
       })));
+      // تعبئةٌ من الخادم — لا تُعامَل كتعديل مستخدم (issue #121).
+      setTouched(false);
       setShowForm(true);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
@@ -346,9 +375,11 @@ export const SalesQuotationsPage: React.FC = () => {
     setFormLines([{
       id: undefined, product_id: "", product_name: "", quantity: "1", unit_price: "", discount: "0", tax_rate: "0", total: "0"
     }]);
+    setTouched(false);
   };
 
   const handleAddLine = () => {
+    markTouched();
     setFormLines([...formLines, {
       id: undefined, product_id: "", product_name: "", quantity: "1", unit_price: "", discount: "0", tax_rate: "0", total: "0"
     }]);
@@ -356,6 +387,7 @@ export const SalesQuotationsPage: React.FC = () => {
 
   const handleRemoveLine = (idx: number) => {
     if (formLines.length > 1) {
+      markTouched();
       setFormLines(formLines.filter((_, i) => i !== idx));
     }
   };
@@ -365,6 +397,7 @@ export const SalesQuotationsPage: React.FC = () => {
   };
 
   const handleLineUpdate = (idx: number, updates: Partial<LineState>) => {
+    markTouched();
     setFormLines((prev) => {
       const updated = [...prev];
       updated[idx] = { ...updated[idx], ...updates };
@@ -422,6 +455,8 @@ export const SalesQuotationsPage: React.FC = () => {
       resetForm();
       setShowForm(false);
       await loadQuotations();
+      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      void discardDraft();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
     } finally {
@@ -531,6 +566,146 @@ export const SalesQuotationsPage: React.FC = () => {
   );
   const selectedQuotation = quotations.find((quotation) => quotation.id === selectedId);
 
+  /* ISSUE #121: مسودّة محلية (IndexedDB، issue #118) — هذه الشاشة لا تحفظ
+   * شيئاً محلياً اليوم. الحمولة كائنٌ خفيف يكفي وحده لإعادة بناء الشاشة؛ لا
+   * صلة بحمولة الحفظ الخادمية التي يبنيها `handleSave`. */
+  const draftPayload = useMemo<SalesQuotationDraftPayload>(
+    () => ({
+      formCustomer,
+      formDate,
+      formValidUntil,
+      formNotes,
+      formIsActive,
+      formPricesIncludeTax,
+      formCustomerAddress,
+      formCustomerTaxNumber,
+      formDiscount,
+      formLines,
+    }),
+    [
+      formCustomer, formDate, formValidUntil, formNotes, formIsActive,
+      formPricesIncludeTax, formCustomerAddress, formCustomerTaxNumber,
+      formDiscount, formLines,
+    ],
+  );
+
+  const onRestoreDraft = useCallback((restored: SalesQuotationDraftPayload) => {
+    setFormCustomer(restored.formCustomer);
+    setFormDate(restored.formDate);
+    setFormValidUntil(restored.formValidUntil);
+    setFormNotes(restored.formNotes);
+    setFormIsActive(restored.formIsActive);
+    setFormPricesIncludeTax(restored.formPricesIncludeTax);
+    setFormCustomerAddress(restored.formCustomerAddress);
+    setFormCustomerTaxNumber(restored.formCustomerTaxNumber);
+    setFormDiscount(restored.formDiscount);
+    setFormLines(restored.formLines);
+    // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تُسجَّل «ملموسة».
+    setTouched(true);
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<SalesQuotationDraftPayload>({
+    docType: "sales_quotation",
+    docId: selectedId,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    // لا حقل `is_posted` حقيقي لعرض السعر — الحالتان النهائيتان («محوَّل»/«ملغى»)
+    // تُعامَلان معاملة «مرحَّل»: اطّلاعٌ على المسودّة فقط بلا استعادةٍ تلقائية،
+    // فمستندٌ انتهى أمره لا يُعاد فتحه لتعديل صامت.
+    isPosted: !!selectedQuotation && (selectedQuotation.status === "converted" || selectedQuotation.status === "cancelled"),
+    // ختمُ الخادم لحظةَ فتح المستند — كان المُسلسِل لا يكشف `updated_at`
+    // فسقط فحصُ «تغيّر المستند بعد مسودتك» (#109 §٩)؛ كُشف ووُصِل.
+    docUpdatedAt: selectedQuotation?.updated_at ?? null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع» على شريط الاستعادة: يعيد الشاشة إلى حالتها المحفوظة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    if (selectedId != null) void openQuotation(selectedId);
+    else resetForm();
+    void discardDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, discardDraft]);
+
+  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً. */
+  const draftSaveFailedBanner = draftSaveFailed ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertTriangle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذا العرض — اضغط «تخزين» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  /* ISSUE #118: شريط الاستعادة التلقائية — إخبارٌ لا سؤال. */
+  const draftRestoreBanner = draftBanner ? (
+    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <span>
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّر العرض بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا العرض المنتهي — للاطّلاع فقط.`}
+      </span>
+      {draftBanner.eligibility === "restore" && (
+        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+          <Undo2 className="h-4 w-4" /> تراجع
+        </button>
+      )}
+      {draftBanner.eligibility === "stale" && (
+        <>
+          <button type="button" className="ktra-toolbtn" onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
+            استعرض مسودتي
+          </button>
+          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+            تجاهلها
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  /* شريط اليتامى (issue #119 §٧): مسودّات عرضٍ جديد أخرى تُركت في تبويبات أخرى. */
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <div className="flex flex-col gap-1">
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul className="list-disc pr-4 text-xs">
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+          ))}
+        </ul>
+      </div>
+      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+        <X className="h-4 w-4" /> إخفاء
+      </button>
+    </div>
+  ) : null;
+
   // DOC-SHARE: نافذة واحدة تخدم الفرعين (المحرّر والقائمة). عرضٌ ما زال
   // مسودة: إنشاء الرابط هو إرساله فعلياً، والنافذة تُنبّه قبل الضغط.
   const sharedQuotation = quotations.find((quotation) => quotation.id === shareId);
@@ -583,13 +758,13 @@ export const SalesQuotationsPage: React.FC = () => {
       key: "date",
       label: "التاريخ",
       control: <input className="ktra-input" type="date" value={formDate}
-        onChange={(event) => setFormDate(event.target.value)} />,
+        onChange={(event) => { markTouched(); setFormDate(event.target.value); }} />,
     },
     {
       key: "validUntil",
       label: "صالح حتى",
       control: <input className="ktra-input" type="date" value={formValidUntil}
-        onChange={(event) => setFormValidUntil(event.target.value)} />,
+        onChange={(event) => { markTouched(); setFormValidUntil(event.target.value); }} />,
     },
     {
       key: "type",
@@ -601,7 +776,7 @@ export const SalesQuotationsPage: React.FC = () => {
       label: "الزبون / الحساب",
       control: (
         <select className="ktra-input" value={formCustomer}
-          onChange={(event) => setFormCustomer(event.target.value)} data-ktra-key="1">
+          onChange={(event) => { markTouched(); setFormCustomer(event.target.value); }} data-ktra-key="1">
           <option value="">— اختر الزبون —</option>
           {partners.map((partner) => (
             <option key={partner.id} value={partner.id}>{partner.name}</option>
@@ -618,14 +793,14 @@ export const SalesQuotationsPage: React.FC = () => {
     {
       key: "address",
       label: "عنوان الزبون",
-      control: <input className="ktra-input" value={formCustomerAddress}
-        onChange={(event) => setFormCustomerAddress(event.target.value)} />,
+      control: <input className="ktra-input" data-testid="quotation-customer-address" value={formCustomerAddress}
+        onChange={(event) => { markTouched(); setFormCustomerAddress(event.target.value); }} />,
     },
     {
       key: "taxNumber",
       label: "الرقم الضريبي",
       control: <input className="ktra-input font-mono" value={formCustomerTaxNumber}
-        onChange={(event) => setFormCustomerTaxNumber(event.target.value)} />,
+        onChange={(event) => { markTouched(); setFormCustomerTaxNumber(event.target.value); }} />,
     },
     {
       key: "status",
@@ -773,14 +948,21 @@ export const SalesQuotationsPage: React.FC = () => {
         getLineKey={(line, index) => line.id ?? `new-${index}`}
         onLineChange={(index, key, value) => handleLineChange(index, key, value)}
         onAddLine={handleAddLine}
-        banner={err ? <div className="ktra-banner ktra-banner--err">{err}</div> : undefined}
+        banner={
+          <>
+            {draftSaveFailedBanner}
+            {draftRestoreBanner}
+            {orphanDraftsBanner}
+            {err ? <div className="ktra-banner ktra-banner--err">{err}</div> : null}
+          </>
+        }
         tabs={[
           {
             key: "notes",
             label: "الملاحظات",
             content: <div className="px-1 py-2">
               <textarea className="ktra-input w-full" rows={4} value={formNotes}
-                onChange={(event) => setFormNotes(event.target.value)} placeholder="ملاحظات العرض…" />
+                onChange={(event) => { markTouched(); setFormNotes(event.target.value); }} placeholder="ملاحظات العرض…" />
             </div>,
           },
           {
@@ -789,12 +971,12 @@ export const SalesQuotationsPage: React.FC = () => {
             content: <div className="flex flex-wrap gap-4 px-1 py-3">
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={formIsActive}
-                  onChange={(event) => setFormIsActive(event.target.checked)} />
+                  onChange={(event) => { markTouched(); setFormIsActive(event.target.checked); }} />
                 العرض فعّال
               </label>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={formPricesIncludeTax}
-                  onChange={(event) => setFormPricesIncludeTax(event.target.checked)} />
+                  onChange={(event) => { markTouched(); setFormPricesIncludeTax(event.target.checked); }} />
                 الأسعار تشمل ض.ق.م
               </label>
               {formValidUntil && new Date(formValidUntil) < new Date() && (
@@ -819,7 +1001,7 @@ export const SalesQuotationsPage: React.FC = () => {
                 step="0.01"
                 min="0"
                 value={formDiscount}
-                onChange={(event) => setFormDiscount(event.target.value)}
+                onChange={(event) => { markTouched(); setFormDiscount(event.target.value); }}
                 title="خصم على العرض كلّه — لخصم بندٍ بعينه استعمل عمود «الخصم» في السطر"
               />
             </div>
@@ -833,6 +1015,12 @@ export const SalesQuotationsPage: React.FC = () => {
         status={<>
           <span className="ktra-status-item">عدد المنتجات <b>{formLines.length}</b></span>
           <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+          {/* issue #109 §٦: مؤشّر دائم — لا حفظٌ خادميّ فوريّ في هذه الشاشة. */}
+          {draftSavedAt && (
+            <span className="ktra-status-item" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          )}
         </>}
         overlay={<>
           {shareModal}

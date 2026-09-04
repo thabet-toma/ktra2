@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FileSignature, Plus, Loader2, X, Check, AlertTriangle, Trash2, Play, Square,
-  PlayCircle, Calculator,
+  PlayCircle, Calculator, Info, Undo2,
 } from "lucide-react";
 import {
   activateContract, computePayrollRun, createContract, createPayrollRun,
@@ -13,11 +13,13 @@ import {
 import { listEmployees, type Employee } from "../../services/payrollApi";
 import { currentMonth } from "../../utils/attendance";
 import { formatNumber } from "../../utils/formatNumber";
-import { formatDateLocalized } from "../../utils/formatDate";
+import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 
 /**
  * T-HR M6/M7 — «العقود ومسير الرواتب».
@@ -73,6 +75,14 @@ const EMPTY_CONTRACT: ContractDraft = {
   job_title: "", notes: "", components: [],
 };
 
+/**
+ * ISSUE #121 — حمولة مسودّة محرِّر العقد المحلّية. **حقول الشاشة فقط** بلا
+ * `id`: هويّة المستند (`docId`) تُمرَّر مستقلّةً إلى `useDocumentDraft`، فلا
+ * داعي لتكرارها داخل الحمولة التي تُعيد بناء الشاشة عبر `onRestore` — راجع
+ * نفس الفصل بين الهويّة والحمولة في `AccountingJournalEntryPage.tsx`.
+ */
+type ContractDraftPayload = Omit<ContractDraft, "id">;
+
 export const ContractsPage: React.FC = () => {
   const permissions = usePermissions();
   const toast = useToast();
@@ -88,7 +98,7 @@ export const ContractsPage: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [draft, setDraft] = useState<ContractDraft | null>(null);
+  const [showContractModal, setShowContractModal] = useState(false);
   const [runDraft, setRunDraft] = useState<{ name: string; month: string } | null>(null);
 
   const reload = useCallback(async () => {
@@ -122,36 +132,6 @@ export const ContractsPage: React.FC = () => {
       await reload();
     } catch (cause) {
       toast(humanizeThrown(cause, "تعذّر تنفيذ الإجراء."), "error");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveContract = async () => {
-    if (!draft || !draft.employee || !draft.start_date) {
-      toast("اختر الموظف وتاريخ بداية العقد.", "error");
-      return;
-    }
-    const payload: Record<string, unknown> = {
-      employee: Number(draft.employee),
-      start_date: draft.start_date,
-      end_date: draft.end_date || null,
-      pay_type: draft.pay_type,
-      monthly_salary: draft.monthly_salary || "0",
-      hourly_rate: draft.hourly_rate || "0",
-      overtime_multiplier: draft.overtime_multiplier || null,
-      job_title: draft.job_title,
-      notes: draft.notes,
-      components: draft.components.filter((c) => c.name.trim()),
-    };
-    setBusy(true);
-    try {
-      await createContract(payload);
-      toast("أُنشئ العقد مسودّةً — فعّله ليصير مصدر أرقام الراتب.", "success");
-      setDraft(null);
-      await reload();
-    } catch (cause) {
-      toast(humanizeThrown(cause, "تعذّر حفظ العقد."), "error");
     } finally {
       setBusy(false);
     }
@@ -247,7 +227,7 @@ export const ContractsPage: React.FC = () => {
         <h1 className="text-lg font-bold">العقود ومسير الرواتب</h1>
         <div className="ms-auto flex gap-2">
           {tab === "contracts" && canManage && (
-            <button type="button" className={btnPrimary} onClick={() => setDraft({ ...EMPTY_CONTRACT })}>
+            <button type="button" className={btnPrimary} onClick={() => setShowContractModal(true)}>
               <Plus size={14} /> عقد جديد
             </button>
           )}
@@ -495,172 +475,376 @@ export const ContractsPage: React.FC = () => {
         </div>
       )}
 
-      {draft && (
-        <div className="fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/40 p-3">
-          <div className={`${cardClass} w-full max-w-lg`}>
-            <div className="mb-3 flex items-center gap-2">
-              <h2 className="font-bold">عقد جديد</h2>
-              <button type="button" className="ms-auto" onClick={() => setDraft(null)} aria-label="إغلاق">
-                <X size={16} />
+      {showContractModal && (
+        <ContractEditorModal
+          employees={employees}
+          onClose={() => setShowContractModal(false)}
+          onSaved={() => { setShowContractModal(false); void reload(); }}
+        />
+      )}
+    </div>
+  );
+};
+
+/**
+ * ISSUE #121 — محرِّر العقد بمسودّةٍ محلّية (IndexedDB)، معزولٌ في مكوّنٍ خاص
+ * كي يُولَد `useDocumentDraft` ويُهدَم معه: فتحُ النافذة تهيئةٌ واحدة نظيفة
+ * (`useState` الأوّلي)، وإغلاقها هدمٌ للمكوّن بالكامل — فلا تعدّدَ نقاطٍ تُصفِّر
+ * نفس الحالة تتزاحم لاحقاً (بخلاف `AccountingJournalEntryPage.tsx` حيث حالة
+ * القيد تعيش في الصفحة نفسها وتحتاج `draftRestoredRef`). سابقة النمط:
+ * `NewExpenseVoucherModal` في `ExpenseVouchersPage.tsx`.
+ *
+ * **هذه الشاشة إنشاءٌ فقط اليوم** — لا مسار لفتح عقدٍ قائم للتعديل (`draft.id`
+ * لا يُملأ من أي مكان في هذا الملف)، فـ`docId` دوماً `null` عملياً، و`isPosted`
+ * لا ينطبق: لا حالة «مرحَّل/مغلق» يُعاد فتحها هنا لتصير للاطّلاع فقط.
+ */
+const ContractEditorModal: React.FC<{
+  employees: Employee[];
+  onClose: () => void;
+  onSaved: () => void;
+}> = ({ employees, onClose, onSaved }) => {
+  const toast = useToast();
+  const [draft, setDraft] = useState<ContractDraft>({ ...EMPTY_CONTRACT });
+  const [submitting, setSubmitting] = useState(false);
+
+  // ISSUE #121/#118: علامة «لُمِس» تُرفَع synchronously داخل كل تعديل مستخدم عبر
+  // هذا الغلاف — لا عبر useEffect يشتقّها من الحمولة (راجع تعليل InvoiceForm.tsx
+  // ودرس ExpenseVouchersPage.tsx: `dirtyRef`/`markTouched`).
+  const [touched, setTouched] = useState(false);
+  const updateDraft = useCallback((patch: Partial<ContractDraft>) => {
+    setDraft((prev) => ({ ...prev, ...patch }));
+    setTouched(true);
+  }, []);
+
+  const draftPayload = useMemo<ContractDraftPayload>(
+    () => ({
+      employee: draft.employee,
+      start_date: draft.start_date,
+      end_date: draft.end_date,
+      pay_type: draft.pay_type,
+      monthly_salary: draft.monthly_salary,
+      hourly_rate: draft.hourly_rate,
+      overtime_multiplier: draft.overtime_multiplier,
+      job_title: draft.job_title,
+      notes: draft.notes,
+      components: draft.components,
+    }),
+    [draft],
+  );
+
+  const onRestoreDraft = useCallback((restored: ContractDraftPayload) => {
+    setDraft((prev) => ({ ...prev, ...restored }));
+    setTouched(true);
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<ContractDraftPayload>({
+    docType: "employment_contract",
+    docId: draft.id ?? null,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    isPosted: false,
+    // `null` هنا صحيحٌ لا ثغرة: هذه النافذة **تُنشئ عقداً جديداً دائماً** (لا
+    // مسار تحرير عقدٍ قائم في الشاشة)، فلا مستندَ خادميٌّ له ختمُ تعديلٍ
+    // يُقارَن أصلاً. و`ContractSerializer` يكشف `updated_at` فعلاً، فمتى فُتح
+    // مسارُ التحرير صار الوصلُ سطراً واحداً.
+    docUpdatedAt: null,
+  });
+
+  // ISSUE #120: حارسٌ مقلوب — يعترض المغادرة فقط إن فشل الحفظ المحلي فعلاً.
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
+
+  /** «تراجع» على شريط الاستعادة: يعيد النموذج فارغاً ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    setDraft({ ...EMPTY_CONTRACT });
+    setTouched(false);
+    void discardDraft();
+  }, [discardDraft]);
+
+  /** إغلاقٌ بلا حفظ — **ولا تُمحى المسودّة**. «إلغاء» و«×» تقعان بلا أيّ سؤال،
+   *  وهما ليستا تجاهلاً صريحاً: المسودّةُ وُجدت لتنجوَ من الخروج غير المؤكَّد
+   *  (مواصفة #109: «ولا حذفَ صامتٌ أبداً»). السابقةُ `InvoiceForm.guardedCancel`
+   *  تمحوها **بعد تأكيدٍ صريح** لا قبله. المحوُ هنا: حفظٌ ناجح · «تراجع». */
+  const closeWithoutSaving = useCallback(() => {
+    onClose();
+  }, [onClose]);
+
+  const saveContract = async () => {
+    if (!draft.employee || !draft.start_date) {
+      toast("اختر الموظف وتاريخ بداية العقد.", "error");
+      return;
+    }
+    const payload: Record<string, unknown> = {
+      employee: Number(draft.employee),
+      start_date: draft.start_date,
+      end_date: draft.end_date || null,
+      pay_type: draft.pay_type,
+      monthly_salary: draft.monthly_salary || "0",
+      hourly_rate: draft.hourly_rate || "0",
+      overtime_multiplier: draft.overtime_multiplier || null,
+      job_title: draft.job_title,
+      notes: draft.notes,
+      components: draft.components.filter((c) => c.name.trim()),
+    };
+    setSubmitting(true);
+    try {
+      await createContract(payload);
+      toast("أُنشئ العقد مسودّةً — فعّله ليصير مصدر أرقام الراتب.", "success");
+      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      void discardDraft();
+      onSaved();
+    } catch (cause) {
+      toast(humanizeThrown(cause, "تعذّر حفظ العقد."), "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/40 p-3">
+      <div className={`${cardClass} w-full max-w-lg`}>
+        {draftSaveFailed && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            data-testid="draft-save-failed-banner"
+            className="sticky top-0 z-40 mb-2 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+          >
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+          </div>
+        )}
+        {draftBanner && (
+          <div className="ktra-banner ktra-banner--warn mb-2" role="status" data-testid="draft-restored-banner">
+            <Info className="h-4 w-4 shrink-0" />
+            <span>
+              {draftBanner.eligibility === "restore" &&
+                `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+              {draftBanner.eligibility === "stale" &&
+                `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+              {draftBanner.eligibility === "posted" &&
+                `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
+            </span>
+            {draftBanner.eligibility === "restore" && (
+              <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+                <Undo2 className="h-4 w-4" /> تراجع
               </button>
-            </div>
-            <div className="space-y-2">
-              <div>
-                <label className={labelClass} htmlFor="ct-employee">الموظف</label>
-                <select
-                  id="ct-employee"
-                  className={inputClass}
-                  value={draft.employee}
-                  onChange={(event) => setDraft({
-                    ...draft, employee: event.target.value ? Number(event.target.value) : "",
-                  })}
+            )}
+            {draftBanner.eligibility === "stale" && (
+              <>
+                <button
+                  type="button"
+                  className="ktra-toolbtn"
+                  onClick={() => onRestoreDraft(draftBanner.payload)}
+                  data-testid="draft-stale-preview"
                 >
-                  <option value="">— اختر —</option>
-                  {employees.map((employee) => (
-                    <option key={employee.id} value={employee.id}>{employee.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className={labelClass} htmlFor="ct-start">بداية العقد</label>
-                  <input id="ct-start" type="date" className={inputClass} value={draft.start_date}
-                    onChange={(event) => setDraft({ ...draft, start_date: event.target.value })} />
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="ct-end">نهايته (اختياري)</label>
-                  <input id="ct-end" type="date" className={inputClass} value={draft.end_date}
-                    onChange={(event) => setDraft({ ...draft, end_date: event.target.value })} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className={labelClass} htmlFor="ct-paytype">دورة الأجر</label>
-                  <select id="ct-paytype" className={inputClass} value={draft.pay_type}
-                    onChange={(event) => setDraft({
-                      ...draft, pay_type: event.target.value as "monthly" | "hourly",
-                    })}>
-                    <option value="monthly">شهري</option>
-                    <option value="hourly">بالساعة</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="ct-amount">
-                    {draft.pay_type === "monthly" ? "الراتب الشهري" : "أجر الساعة"}
-                  </label>
-                  <input
-                    id="ct-amount"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    className={inputClass}
-                    value={draft.pay_type === "monthly" ? draft.monthly_salary : draft.hourly_rate}
-                    onChange={(event) => setDraft(
-                      draft.pay_type === "monthly"
-                        ? { ...draft, monthly_salary: event.target.value }
-                        : { ...draft, hourly_rate: event.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className={labelClass} htmlFor="ct-ot">مضاعف الساعة الإضافية</label>
-                  <input id="ct-ot" type="number" min={1} max={5} step="0.25" className={inputClass}
-                    placeholder="يتبع الوردية"
-                    value={draft.overtime_multiplier}
-                    onChange={(event) => setDraft({ ...draft, overtime_multiplier: event.target.value })} />
-                </div>
-                <div>
-                  <label className={labelClass} htmlFor="ct-title">المسمّى في العقد</label>
-                  <input id="ct-title" className={inputClass} value={draft.job_title}
-                    onChange={(event) => setDraft({ ...draft, job_title: event.target.value })} />
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-1 flex items-center gap-2">
-                  <span className={labelClass}>بنود التعويض</span>
-                  <button
-                    type="button"
-                    className="text-xs underline"
-                    onClick={() => setDraft({
-                      ...draft,
-                      components: [...draft.components,
-                        { kind: "earning", name: "", amount: "0" }],
-                    })}
-                  >
-                    + إضافة بند
-                  </button>
-                </div>
-                {draft.components.map((component, index) => (
-                  <div key={index} className="mb-1 flex gap-1">
-                    <select
-                      className={`${inputClass} w-28`}
-                      value={component.kind}
-                      onChange={(event) => {
-                        const next = [...draft.components];
-                        next[index] = { ...component, kind: event.target.value as "earning" | "deduction" };
-                        setDraft({ ...draft, components: next });
-                      }}
-                    >
-                      <option value="earning">استحقاق</option>
-                      <option value="deduction">خصم</option>
-                    </select>
-                    <input
-                      className={inputClass}
-                      placeholder="اسم البند"
-                      value={component.name}
-                      onChange={(event) => {
-                        const next = [...draft.components];
-                        next[index] = { ...component, name: event.target.value };
-                        setDraft({ ...draft, components: next });
-                      }}
-                    />
-                    <input
-                      className={`${inputClass} w-32`}
-                      type="number"
-                      step="0.01"
-                      value={component.amount}
-                      onChange={(event) => {
-                        const next = [...draft.components];
-                        next[index] = { ...component, amount: event.target.value };
-                        setDraft({ ...draft, components: next });
-                      }}
-                    />
-                    <button
-                      type="button"
-                      className={btnGhost}
-                      onClick={() => setDraft({
-                        ...draft,
-                        components: draft.components.filter((_, i) => i !== index),
-                      })}
-                      aria-label="حذف البند"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
+                  استعرض مسودتي
+                </button>
+                <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+                  تجاهلها
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {orphanDrafts.length > 0 && !orphanBarDismissed && (
+          <div className="ktra-banner mb-2" role="status" data-testid="orphan-drafts-banner">
+            <Info className="h-4 w-4 shrink-0" />
+            <div className="flex flex-col gap-1">
+              <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+              <ul className="list-disc pr-4 text-xs">
+                {orphanDrafts.map((o) => (
+                  <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
                 ))}
-                <p className="text-[11px] text-[var(--color-text-muted)]">
-                  البنود مبالغُ ثابتة تُضاف إلى بدلات القسيمة أو خصوماتها. العمولة تُدخَل
-                  بندَ استحقاقٍ بمبلغها المحسوب.
-                </p>
-              </div>
-
-              <div>
-                <label className={labelClass} htmlFor="ct-notes">ملاحظات</label>
-                <textarea id="ct-notes" className={`${inputClass} h-16 py-2`} value={draft.notes}
-                  onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
-              </div>
+              </ul>
             </div>
-            <div className="mt-3 flex justify-end gap-2">
-              <button type="button" className={btnGhost} onClick={() => setDraft(null)}>إلغاء</button>
-              <button type="button" className={btnPrimary} disabled={busy} onClick={() => void saveContract()}>
-                {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} حفظ مسودّة
-              </button>
+            <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+              <X className="h-4 w-4" /> إخفاء
+            </button>
+          </div>
+        )}
+
+        <div className="mb-3 flex items-center gap-2">
+          <h2 className="font-bold">عقد جديد</h2>
+          <button type="button" className="ms-auto" onClick={closeWithoutSaving} aria-label="إغلاق">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="space-y-2">
+          <div>
+            <label className={labelClass} htmlFor="ct-employee">الموظف</label>
+            <select
+              id="ct-employee"
+              className={inputClass}
+              value={draft.employee}
+              onChange={(event) => updateDraft({
+                employee: event.target.value ? Number(event.target.value) : "",
+              })}
+            >
+              <option value="">— اختر —</option>
+              {employees.map((employee) => (
+                <option key={employee.id} value={employee.id}>{employee.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className={labelClass} htmlFor="ct-start">بداية العقد</label>
+              <input id="ct-start" type="date" className={inputClass} value={draft.start_date}
+                onChange={(event) => updateDraft({ start_date: event.target.value })} />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="ct-end">نهايته (اختياري)</label>
+              <input id="ct-end" type="date" className={inputClass} value={draft.end_date}
+                onChange={(event) => updateDraft({ end_date: event.target.value })} />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className={labelClass} htmlFor="ct-paytype">دورة الأجر</label>
+              <select id="ct-paytype" className={inputClass} value={draft.pay_type}
+                onChange={(event) => updateDraft({
+                  pay_type: event.target.value as "monthly" | "hourly",
+                })}>
+                <option value="monthly">شهري</option>
+                <option value="hourly">بالساعة</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="ct-amount">
+                {draft.pay_type === "monthly" ? "الراتب الشهري" : "أجر الساعة"}
+              </label>
+              <input
+                id="ct-amount"
+                type="number"
+                min={0}
+                step="0.01"
+                className={inputClass}
+                value={draft.pay_type === "monthly" ? draft.monthly_salary : draft.hourly_rate}
+                onChange={(event) => updateDraft(
+                  draft.pay_type === "monthly"
+                    ? { monthly_salary: event.target.value }
+                    : { hourly_rate: event.target.value })}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className={labelClass} htmlFor="ct-ot">مضاعف الساعة الإضافية</label>
+              <input id="ct-ot" type="number" min={1} max={5} step="0.25" className={inputClass}
+                placeholder="يتبع الوردية"
+                value={draft.overtime_multiplier}
+                onChange={(event) => updateDraft({ overtime_multiplier: event.target.value })} />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="ct-title">المسمّى في العقد</label>
+              <input id="ct-title" className={inputClass} value={draft.job_title}
+                onChange={(event) => updateDraft({ job_title: event.target.value })} />
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-1 flex items-center gap-2">
+              <span className={labelClass}>بنود التعويض</span>
+              <button
+                type="button"
+                className="text-xs underline"
+                onClick={() => updateDraft({
+                  components: [...draft.components,
+                    { kind: "earning", name: "", amount: "0" }],
+                })}
+              >
+                + إضافة بند
+              </button>
+            </div>
+            {draft.components.map((component, index) => (
+              <div key={index} className="mb-1 flex gap-1">
+                <select
+                  className={`${inputClass} w-28`}
+                  value={component.kind}
+                  onChange={(event) => {
+                    const next = [...draft.components];
+                    next[index] = { ...component, kind: event.target.value as "earning" | "deduction" };
+                    updateDraft({ components: next });
+                  }}
+                >
+                  <option value="earning">استحقاق</option>
+                  <option value="deduction">خصم</option>
+                </select>
+                <input
+                  className={inputClass}
+                  placeholder="اسم البند"
+                  value={component.name}
+                  onChange={(event) => {
+                    const next = [...draft.components];
+                    next[index] = { ...component, name: event.target.value };
+                    updateDraft({ components: next });
+                  }}
+                />
+                <input
+                  className={`${inputClass} w-32`}
+                  type="number"
+                  step="0.01"
+                  value={component.amount}
+                  onChange={(event) => {
+                    const next = [...draft.components];
+                    next[index] = { ...component, amount: event.target.value };
+                    updateDraft({ components: next });
+                  }}
+                />
+                <button
+                  type="button"
+                  className={btnGhost}
+                  onClick={() => updateDraft({
+                    components: draft.components.filter((_, i) => i !== index),
+                  })}
+                  aria-label="حذف البند"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+            <p className="text-[11px] text-[var(--color-text-muted)]">
+              البنود مبالغُ ثابتة تُضاف إلى بدلات القسيمة أو خصوماتها. العمولة تُدخَل
+              بندَ استحقاقٍ بمبلغها المحسوب.
+            </p>
+          </div>
+
+          <div>
+            <label className={labelClass} htmlFor="ct-notes">ملاحظات</label>
+            <textarea id="ct-notes" className={`${inputClass} h-16 py-2`} value={draft.notes}
+              onChange={(event) => updateDraft({ notes: event.target.value })} />
+          </div>
         </div>
-      )}
+        <div className="mt-3 flex items-center justify-end gap-2">
+          {draftSavedAt && (
+            <span className="ktra-status-item me-auto" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          )}
+          <button type="button" className={btnGhost} onClick={closeWithoutSaving}>إلغاء</button>
+          <button type="button" className={btnPrimary} disabled={submitting} onClick={() => void saveContract()}>
+            {submitting ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} حفظ مسودّة
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

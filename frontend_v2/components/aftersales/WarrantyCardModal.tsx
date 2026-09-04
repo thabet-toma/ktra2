@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { CalendarPlus, Loader2, ShieldCheck, Trash2, X } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CalendarPlus, Info, Loader2, ShieldCheck, Trash2, Undo2, X } from "lucide-react";
 import {
   createWarrantyCard,
   deleteWarrantyCard,
@@ -9,12 +9,14 @@ import {
   type WarrantyCardRow,
 } from "../../services/afterSalesApi";
 import { deriveWarrantyEnd, warrantyRemainingText, warrantyStatusLabel } from "../../utils/warranty";
-import { formatDateValue, todayIso } from "../../utils/formatDate";
+import { formatDateValue, formatTimeValue, todayIso } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { formatProductPrimaryName } from "../../utils/productDisplayName";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { warrantyPillClass } from "./warrantyStatus";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 
 /**
  * THA-24 م2 — بطاقة كفالة واحدة: إنشاء يدوية، تعديل، تمديد، حذف.
@@ -109,20 +111,46 @@ export const WarrantyCardModal: React.FC<Props> = ({
   const [extendMonths, setExtendMonths] = useState("");
   const [extendReason, setExtendReason] = useState("");
 
+  /* ISSUE #121: مسودّة محلية (IndexedDB) — «لُمِس» يُرفَع مزامنةً داخل كل
+   * معالج تعديلٍ حقيقي (patch/pickProduct/pickCustomer وحقول التمديد)، لا
+   * داخل useEffect مبنيٍّ على الحمولة. لا تُرفع عند التعبئة البرمجية من
+   * `card` (الأسفل) ولا عند الاستعادة الناجحة (تُرفع صراحةً هناك). */
+  const [touched, setTouched] = useState(false);
+
+  /* بطاقتان يُعاد فيهما ضبط `draft`/`extendMonths`/`extendReason` تلقائياً
+   * لا بفعل المستخدم: (١) تغيّر `card` (بطاقة أخرى، أو نفس البطاقة بمرجعٍ
+   * جديد بعد `onChanged()`)، و(٢) نجاح `extend()` الذي يُصفّر حقول التمديد
+   * ويحدّث `draft` من نسخة الخادم. الحارس هنا يحمي الأولى فقط: قراءة
+   * المسودّة من IndexedDB غيرُ متزامنة، فلو تغيّر مرجع `card` (تحديثٌ خلفي في
+   * القائمة) بعد استعادةٍ ناجحة، يمحو هذا الأثر مسودّةً استُعيدت للتوّ. مرّةً
+   * واحدة لكل استعادة — راجع `AccountingJournalEntryPage.tsx` (issue #121). */
+  const draftRestoredRef = useRef(false);
+
   useEffect(() => {
+    if (draftRestoredRef.current) {
+      draftRestoredRef.current = false;
+      return;
+    }
     setDraft(card ? draftOf(card) : emptyDraft());
+    setExtendMonths("");
+    setExtendReason("");
     setErr(null);
+    // تعبئةٌ من الخادم — لا تُعامَل كتعديل مستخدم (issue #121).
+    setTouched(false);
   }, [card]);
 
   const isAuto = card?.source === "auto_sale";
   // البطاقة التلقائية: النسب والزبون والمنتج من الفاتورة، لا يُحرَّرون هنا.
   const lineageLocked = isAuto || !canManage;
 
-  const patch = <K extends keyof WarrantyCardDraft>(key: K, value: WarrantyCardDraft[K]) =>
+  const patch = <K extends keyof WarrantyCardDraft>(key: K, value: WarrantyCardDraft[K]) => {
+    setTouched(true);
     setDraft((d) => ({ ...d, [key]: value }));
+  };
 
   /** اختيار المنتج يجلب سياسته: المدة الفارغة تُملأ منها، والمملوءة لا تُداس. */
   const pickProduct = (productId: number | null) => {
+    setTouched(true);
     const product = products.find((p) => p.id === productId);
     setDraft((d) => ({
       ...d,
@@ -134,6 +162,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
 
   /** اختيار الزبون يلتقط اسمه وهاتفه لقطةً — البطاقة وثيقة لحظتها. */
   const pickCustomer = (partnerId: number | null) => {
+    setTouched(true);
     const partner = customers.find((p) => p.id === partnerId);
     setDraft((d) => ({
       ...d,
@@ -162,6 +191,72 @@ export const WarrantyCardModal: React.FC<Props> = ({
     }
     return list;
   }, [draft, previewEnd]);
+
+  /* ── ISSUE #121: مسودّة محلية (IndexedDB) — بطاقة الكفالة لا تحفظ شيئاً
+   * محلياً اليوم. الحمولة كائنٌ خفيف يكفي وحده لإعادة بناء الشاشة (`draft` +
+   * حقول تمديدٍ لم تُرسَل بعد) — لا صلة بحمولة الحفظ الخادمية التي يبنيها
+   * `save`/`extend` بنفسيهما. حقلا التمديد (`extendMonths`/`extendReason`)
+   * إدخال مستخدمٍ حقيقي مثل `draft` تماماً، فيدخلان الحمولة معه. */
+  const draftPayload = useMemo(
+    () => ({ draft, extendMonths, extendReason }),
+    [draft, extendMonths, extendReason],
+  );
+
+  const onRestoreDraft = useCallback(
+    (restored: { draft: WarrantyCardDraft; extendMonths: string; extendReason: string }) => {
+      setDraft(restored.draft);
+      setExtendMonths(restored.extendMonths);
+      setExtendReason(restored.extendReason);
+      // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تُسجَّل «ملموسة»
+      // فوراً كي يبقى الحارس وسياسة الحفظ متّسقين مع ما يراه المستخدم فعلاً.
+      setTouched(true);
+      draftRestoredRef.current = true;
+    },
+    [],
+  );
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<{ draft: WarrantyCardDraft; extendMonths: string; extendReason: string }>({
+    docType: "warranty_card",
+    docId: card?.id ?? null,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    // لا مفهوم «ترحيل» محاسبي على هذه الشاشة، لكن `!canManage` تُقفل كل
+    // الحقول فعلياً (الحفظ والحذف والتمديد كلّها مشروطة بها) فتصير هي الحالة
+    // «عرضٌ فقط» التي يعنيها العقد — شريط اطّلاعٍ بلا استعادةٍ تلقائية.
+    isPosted: !canManage,
+    docUpdatedAt: card?.updated_at ?? null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها. */
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
+
+  /** «تراجع» على شريط الاستعادة: يعيد البطاقة إلى نسختها المحفوظة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    setDraft(card ? draftOf(card) : emptyDraft());
+    setExtendMonths("");
+    setExtendReason("");
+    setTouched(false);
+    void discardDraft();
+  }, [card, discardDraft]);
 
   const save = async () => {
     if (problems.length > 0) {
@@ -199,6 +294,9 @@ export const WarrantyCardModal: React.FC<Props> = ({
         await createWarrantyCard(payload);
         toast("تم إنشاء بطاقة كفالة يدوية", "success");
       }
+      setTouched(false);
+      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      void discardDraft();
       onChanged();
       onClose();
     } catch (e) {
@@ -225,6 +323,10 @@ export const WarrantyCardModal: React.FC<Props> = ({
       setDraft(draftOf(saved));
       setExtendMonths("");
       setExtendReason("");
+      setTouched(false);
+      // التمديد تغييرٌ فعليٌّ مرحَّلٌ على نفس البطاقة — انتهت وظيفة المسودّة
+      // المحلية هنا تماماً كنجاح `save` (issue #118 §٥)، لا إعادة ضبطٍ خلفية.
+      void discardDraft();
       toast(`تم التمديد حتى ${formatDateValue(saved.end_date)}`, "success");
       onChanged();
     } catch (e) {
@@ -289,6 +391,64 @@ export const WarrantyCardModal: React.FC<Props> = ({
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {/* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً.
+         * لا تُعرض على بطاقةٍ عرضٍ فقط (`!canManage` ⇒ `isPosted`): لا زر «حفظ»
+         * فيها أصلاً يمكن الضغط عليه. */}
+        {draftSaveFailed && canManage && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            data-testid="draft-save-failed-banner"
+            className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+          >
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+          </div>
+        )}
+
+        {/* ISSUE #118: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى
+         * مُطبَّقٌ على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً. */}
+        {draftBanner && (
+          <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+            <Info className="h-4 w-4 shrink-0" />
+            <span>
+              {draftBanner.eligibility === "restore" &&
+                `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+              {draftBanner.eligibility === "stale" &&
+                `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+              {draftBanner.eligibility === "posted" &&
+                `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
+            </span>
+            {draftBanner.eligibility === "restore" && (
+              <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+                <Undo2 className="h-4 w-4" /> تراجع
+              </button>
+            )}
+            {draftBanner.eligibility === "stale" && (
+              <>
+                <button type="button" className="ktra-toolbtn" onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">استعرض مسودتي</button>
+                <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">تجاهلها</button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* شريط اليتامى (issue #119 §٧) — فقط على بطاقةٍ جديدة (`docId` فارغ). */}
+        {!card && orphanDrafts.length > 0 && !orphanBarDismissed && (
+          <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+            <Info className="h-4 w-4 shrink-0" />
+            <div className="flex flex-col gap-1">
+              <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+              <ul className="list-disc pr-4 text-xs">
+                {orphanDrafts.map((o) => <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>)}
+              </ul>
+            </div>
+            <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+              <X className="h-4 w-4" /> إخفاء
+            </button>
+          </div>
+        )}
 
         <div className="space-y-4 p-3 md:p-4">
           {err && (
@@ -411,6 +571,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
                 disabled={lineageLocked}
                 value={draft.duration_months ?? ""}
                 onChange={(e) => {
+                  setTouched(true);
                   const months = e.target.value ? Number(e.target.value) : null;
                   // المدة تُعيد اشتقاق النهاية على البطاقة اليدوية: من غيّر المدة
                   // يقصد نهايةً جديدة، وإبقاء القديمة يجعل الحقلين يتناقضان.
@@ -501,7 +662,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
                   placeholder="أشهر تُضاف"
                   aria-label="عدد الأشهر المضافة"
                   value={extendMonths}
-                  onChange={(e) => setExtendMonths(e.target.value)}
+                  onChange={(e) => { setTouched(true); setExtendMonths(e.target.value); }}
                 />
                 <input
                   className={`${fieldClass} flex-1`}
@@ -509,7 +670,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
                   placeholder="سبب التمديد (يُوثَّق في الملاحظات)"
                   aria-label="سبب التمديد"
                   value={extendReason}
-                  onChange={(e) => setExtendReason(e.target.value)}
+                  onChange={(e) => { setTouched(true); setExtendReason(e.target.value); }}
                 />
                 <button
                   type="button"
@@ -531,7 +692,12 @@ export const WarrantyCardModal: React.FC<Props> = ({
           )}
         </div>
 
-        <div className="flex flex-col-reverse gap-2 border-t border-[var(--color-border)] p-3 sm:flex-row">
+        <div className="flex flex-col-reverse gap-2 border-t border-[var(--color-border)] p-3 sm:flex-row sm:items-center">
+          {draftSavedAt && (
+            <span className="ktra-status-item sm:me-auto" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          )}
           {card && !isAuto && canManage && (
             <button
               type="button"

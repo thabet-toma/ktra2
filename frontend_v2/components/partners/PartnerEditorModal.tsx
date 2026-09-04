@@ -1,5 +1,9 @@
-import React, { useEffect, useState } from "react";
-import { Building2, Plus, Save, Trash2, X } from "lucide-react";
+import React, {
+  useCallback, useEffect, useMemo, useRef, useState,
+} from "react";
+import {
+  AlertTriangle, Building2, Info, Plus, Save, Trash2, Undo2, X,
+} from "lucide-react";
 import {
   apiGetList, apiGetObject, apiPatchObject, apiPostObject,
 } from "../../services/restApi";
@@ -8,6 +12,9 @@ import { resolveTenantId } from "../../utils/tenantContext";
 import { eventBus } from "../../utils/eventBus";
 import { KitDateInput } from "../kit/KitDateInput";
 import type { PartnerBankAccount } from "../../utils/partnerChequeDefaults";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { formatTimeValue } from "../../utils/formatDate";
 
 export type PartnerType =
   | "Customer"
@@ -103,6 +110,15 @@ const blankBank = (currency: number | "", isDefault: boolean): BankForm => ({
   is_default: isDefault,
 });
 
+type PartnerFormState = ReturnType<typeof emptyForm>;
+
+/** ISSUE #121: حمولة المسودّة المحلية — خفيفة تكفي وحدها لإعادة بناء الشاشة
+ *  (issue #118)، لا صلة بحمولة الحفظ الخادمية التي يبنيها `save`. */
+interface PartnerDraftPayload {
+  form: PartnerFormState;
+  banks: BankForm[];
+}
+
 export const PartnerEditorModal: React.FC<{
   open: boolean;
   partnerId?: number | null;
@@ -128,6 +144,44 @@ export const PartnerEditorModal: React.FC<{
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم (لا
+  // مشتقّة داخل useEffect؛ حالةٌ مشتقّة تفوّت بالضبط حالة «عُدِّل مرّةً ثم
+  // غادر» التي صُمِّمت الميزة لأجلها).
+  const [touched, setTouched] = useState(false);
+  const markTouched = () => setTouched(true);
+  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
+  // نقطة إعادة التهيئة الوحيدة في هذا الملف (جلب تفاصيل الطرف أدناه) غير
+  // متزامنة، واستعادة المسودّة من IndexedDB (داخل الخطّاف) غير متزامنة أيضاً
+  // — فأيّهما وصل ثانياً يكتب فوق الآخر. حارسٌ لمرّةٍ واحدة (نمط
+  // AccountingJournalEntryPage): استعادةٌ تُسجَّل هنا فتُستهلَك في معالجة
+  // اكتمال الجلب أدناه (تُتخطّى مرّةً واحدة) لا تتكرّر بعدها.
+  const draftRestoredRef = useRef(false);
+
+  /** يحوِّل استجابة الخادم إلى حالة النموذج — مشتركةٌ بين جلب التحميل الأولي
+   *  وإعادة الجلب عند «تراجع» عن مسودّة مستعادة. */
+  const applyPartnerToForm = useCallback((partner: PartnerDetail) => {
+    setForm({
+      name: partner.name || "",
+      legal_name: partner.legal_name || "",
+      partner_type: fixedType || partner.partner_type,
+      supplier_scope: (partner.supplier_scope || "") as SupplierScope,
+      tax_number: partner.tax_number || "",
+      phone: partner.phone || "",
+      email: partner.email || "",
+      street_address: partner.street_address || "",
+      city: partner.city || "",
+      state_or_province: partner.state_or_province || "",
+      postal_code: partner.postal_code || "",
+      country: partner.country || "",
+      credit_limit: partner.credit_limit || "",
+      currency: partner.currency || "",
+      default_cost_center: partner.default_cost_center || "",
+      end_of_dealing_date: partner.end_of_dealing_date || "",
+      assigned_price_tier: partner.assigned_price_tier || "",
+    });
+    setBanks(partner.bank_accounts || []);
+  }, [fixedType]);
 
   useEffect(() => {
     if (!open) return;
@@ -144,53 +198,125 @@ export const PartnerEditorModal: React.FC<{
         if (cancelled) return;
         setCurrencies(currencyRows);
         setCostCenters(costCenterRows);
-        if (partner) {
-          setForm({
-            name: partner.name || "",
-            legal_name: partner.legal_name || "",
-            partner_type: fixedType || partner.partner_type,
-            supplier_scope: (partner.supplier_scope || "") as SupplierScope,
-            tax_number: partner.tax_number || "",
-            phone: partner.phone || "",
-            email: partner.email || "",
-            street_address: partner.street_address || "",
-            city: partner.city || "",
-            state_or_province: partner.state_or_province || "",
-            postal_code: partner.postal_code || "",
-            country: partner.country || "",
-            credit_limit: partner.credit_limit || "",
-            currency: partner.currency || "",
-            default_cost_center: partner.default_cost_center || "",
-            end_of_dealing_date: partner.end_of_dealing_date || "",
-            assigned_price_tier: partner.assigned_price_tier || "",
-          });
-          setBanks(partner.bank_accounts || []);
-        } else {
-          setForm(emptyForm(fixedType || initialType));
-          setBanks([]);
+        // ISSUE #121: مسودّةٌ استُعيدت للتوّ (سباقٌ مع هذا الجلب نفسه) — لا
+        // تُطمَس بنسخة الخادم. العلامة تُستهلَك فور قراءتها كي لا تمنع تحميلاً
+        // لاحقاً حقيقياً (تبديل partnerId مثلاً بينما المكوّن نفسه لا يُعاد تركيبه).
+        if (draftRestoredRef.current) {
+          draftRestoredRef.current = false;
+          return;
         }
+        if (partner) {
+          applyPartnerToForm(partner);
+          return;
+        }
+        setForm(emptyForm(fixedType || initialType));
+        setBanks([]);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : "تعذّر تحميل بطاقة الطرف.");
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [fixedType, initialType, open, partnerId, tenantId]);
+  }, [fixedType, initialType, open, partnerId, tenantId, applyPartnerToForm]);
+
+  // ISSUE #121: مسودّة محلية (IndexedDB، issue #118) — بطاقة الطرف لا تحفظ
+  // شيئاً محلياً اليوم. الحمولة كائنٌ خفيف (النموذج + الحسابات البنكية) يكفي
+  // وحده لإعادة بناء الشاشة؛ لا صلة بحمولة الحفظ الخادمية التي يبنيها `save`.
+  const draftPayload = useMemo<PartnerDraftPayload>(
+    () => ({ form, banks }),
+    [form, banks],
+  );
+
+  const onRestoreDraft = useCallback((restored: PartnerDraftPayload) => {
+    setForm(restored.form);
+    setBanks(restored.banks);
+    draftRestoredRef.current = true;
+    // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة/محمَّلة — تُسجَّل
+    // «ملموسة» فوراً كي يبقى الحارس وسياسة الحفظ متّسقين مع ما يراه المستخدم.
+    setTouched(true);
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<PartnerDraftPayload>({
+    docType: "partner",
+    docId: partnerId ?? null,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    // بطاقة الطرف لا تحمل مفهوم «مرحَّل» كالمستندات المحاسبية — لا قيدٌ يمنع
+    // تعديلها بعد الحفظ (بخلاف فاتورةٍ أو سندٍ مرحَّل)، فلا حالة عرضٍ فقط هنا.
+    isPosted: false,
+    // GAP معروف: نموذج `Partner` (partners/models.py) يحمل `created_at` وحده
+    // (auto_now_add) — بلا حقل `updated_at`/`auto_now` إطلاقاً، ولا حتى على
+    // مستوى القاعدة، و`PartnerSerializer`/`PartnerListSerializer`
+    // (partners/serializers.py) لا يعرضان واحداً تبعاً لذلك. فلا مصدر حقيقي
+    // لـ`docUpdatedAt` في هذه الشاشة، و`null` دائماً هنا يُعطّل بصمت فحص
+    // «تغيّر المستند بعد مسودّتك» (issue #109 §٩) لبطاقة الطرف وحدها. إصلاحه
+    // خادميّ (إضافة updated_at للنموذج + migration + الـserializer) وخارج
+    // نطاق هذه المهمة.
+    docUpdatedAt: null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع» على شريط الاستعادة: يعيد البطاقة إلى نسختها المحفوظة/المحمَّلة
+   *  (جلبٌ جديد لطرفٍ قائم، أو نموذجٌ فارغ لطرفٍ جديد) ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(async () => {
+    if (partnerId) {
+      try {
+        const partner = await apiGetObject<PartnerDetail>(`partners/${partnerId}/`, { tenantId });
+        applyPartnerToForm(partner);
+      } catch {
+        /* أفضل جهد — تعذّر إعادة الجلب لا يجوز أن يمنع مسح المسودّة */
+      }
+    } else {
+      setForm(emptyForm(fixedType || initialType));
+      setBanks([]);
+    }
+    setTouched(false);
+    void discardDraft();
+  }, [partnerId, tenantId, fixedType, initialType, applyPartnerToForm, discardDraft]);
 
   if (!open) return null;
 
   const patchBank = (index: number, patch: Partial<BankForm>) => {
+    markTouched();
     setBanks((rows) => rows.map((row, i) => (
       i === index ? { ...row, ...patch } : row
     )));
   };
 
   const chooseDefault = (index: number) => {
+    markTouched();
     setBanks((rows) => rows.map((row, i) => ({
       ...row,
       is_default: i === index,
       is_active: i === index ? true : row.is_active,
     })));
+  };
+
+  /** إغلاقٌ بلا حفظ — **ولا تُمحى المسودّة**. الإغلاقُ هنا يقع بنقرةٍ خارج
+   *  الإطار أو بزرّ الإنهاء بلا أيّ سؤال، وهو **ليس تجاهلاً صريحاً**: المسودّةُ
+   *  وُجدت أصلاً لتنجوَ من الخروج غير المؤكَّد (مواصفة #109: «ولا حذفَ صامتٌ
+   *  أبداً»). تُمحى عند حفظٍ ناجح أو «تراجع» صريح لا غير — والسابقةُ في
+   *  `InvoiceForm.guardedCancel` تمحوها **بعد تأكيدٍ صريح** لا قبله. */
+  const handleCancel = () => {
+    onClose();
   };
 
   const save = async () => {
@@ -267,6 +393,9 @@ export const PartnerEditorModal: React.FC<{
         bank_accounts: effectiveBanks.length,
       });
       eventBus.publish("partners", tenantId);
+      setTouched(false);
+      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      void discardDraft();
       onSaved(saved);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "فشل حفظ بطاقة الطرف.");
@@ -280,6 +409,7 @@ export const PartnerEditorModal: React.FC<{
     value: string,
     key: keyof typeof form,
     type = "text",
+    testId?: string,
   ) => (
     <label className="ktra-field">
       <span className="ktra-field-label">{label}</span>
@@ -287,7 +417,11 @@ export const PartnerEditorModal: React.FC<{
         className="ktra-input"
         type={type}
         value={value}
-        onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))}
+        data-testid={testId}
+        onChange={(e) => {
+          markTouched();
+          setForm((current) => ({ ...current, [key]: e.target.value }));
+        }}
       />
     </label>
   );
@@ -296,7 +430,7 @@ export const PartnerEditorModal: React.FC<{
     <div
       className={embedded ? "w-full" : "fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"}
       dir="rtl"
-      onMouseDown={(e) => { if (!embedded && e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (!embedded && e.target === e.currentTarget) handleCancel(); }}
     >
       <div className={embedded ? "w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]" : "max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl"}>
         <div className={`${embedded ? "" : "sticky top-0 z-10 "}flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4`}>
@@ -307,11 +441,72 @@ export const PartnerEditorModal: React.FC<{
               <p className="text-xs text-[var(--color-text-muted)]">بيانات موحّدة تُستخدم في الفواتير والسندات والشيكات</p>
             </div>
           </div>
-          {!embedded && <button type="button" className="ktra-toolbtn" onClick={onClose}><X className="h-4 w-4" /></button>}
+          {!embedded && <button type="button" className="ktra-toolbtn" onClick={handleCancel}><X className="h-4 w-4" /></button>}
         </div>
+
+        {draftSaveFailed && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            data-testid="draft-save-failed-banner"
+            className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+          >
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+          </div>
+        )}
 
         <div className="space-y-5 p-4">
           {error && <div className="ktra-banner ktra-banner--err">{error}</div>}
+          {draftBanner && (
+            <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+              <Info className="h-4 w-4 shrink-0" />
+              <span>
+                {draftBanner.eligibility === "restore" &&
+                  `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+                {draftBanner.eligibility === "stale" &&
+                  `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+                {draftBanner.eligibility === "posted" &&
+                  `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
+              </span>
+              {draftBanner.eligibility === "restore" && (
+                <button type="button" className="ktra-toolbtn" onClick={() => void handleUndoDraft()} data-testid="draft-restored-undo">
+                  <Undo2 className="h-4 w-4" /> تراجع
+                </button>
+              )}
+              {draftBanner.eligibility === "stale" && (
+                <>
+                  <button
+                    type="button"
+                    className="ktra-toolbtn"
+                    onClick={() => onRestoreDraft(draftBanner.payload)}
+                    data-testid="draft-stale-preview"
+                  >
+                    استعرض مسودتي
+                  </button>
+                  <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+                    تجاهلها
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          {orphanDrafts.length > 0 && !orphanBarDismissed && (
+            <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+              <Info className="h-4 w-4 shrink-0" />
+              <div className="flex flex-col gap-1">
+                <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+                <ul className="list-disc pr-4 text-xs">
+                  {orphanDrafts.map((o) => (
+                    <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+                  ))}
+                </ul>
+              </div>
+              <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+                <X className="h-4 w-4" /> إخفاء
+              </button>
+            </div>
+          )}
           {loading ? (
             <div className="p-8 text-center text-sm text-[var(--color-text-muted)]">جاري تحميل البطاقة…</div>
           ) : (
@@ -325,9 +520,12 @@ export const PartnerEditorModal: React.FC<{
                       <select
                         className="ktra-input"
                         value={form.partner_type}
-                        onChange={(e) => setForm((current) => ({
-                          ...current, partner_type: e.target.value as PartnerType,
-                        }))}
+                        onChange={(e) => {
+                          markTouched();
+                          setForm((current) => ({
+                            ...current, partner_type: e.target.value as PartnerType,
+                          }));
+                        }}
                       >
                         {TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
                       </select>
@@ -339,9 +537,12 @@ export const PartnerEditorModal: React.FC<{
                       <select
                         className="ktra-input"
                         value={form.supplier_scope}
-                        onChange={(e) => setForm((current) => ({
-                          ...current, supplier_scope: e.target.value as SupplierScope,
-                        }))}
+                        onChange={(e) => {
+                          markTouched();
+                          setForm((current) => ({
+                            ...current, supplier_scope: e.target.value as SupplierScope,
+                          }));
+                        }}
                       >
                         {SUPPLIER_SCOPES.map((scope) => (
                           <option key={scope.value} value={scope.value}>{scope.label}</option>
@@ -349,7 +550,7 @@ export const PartnerEditorModal: React.FC<{
                       </select>
                     </label>
                   )}
-                  {field("الاسم *", form.name, "name")}
+                  {field("الاسم *", form.name, "name", "text", "partner-name-input")}
                   {field("الاسم القانوني", form.legal_name, "legal_name")}
                   {field("الرقم الضريبي", form.tax_number, "tax_number")}
                   {field("الهاتف", form.phone, "phone", "tel")}
@@ -360,10 +561,13 @@ export const PartnerEditorModal: React.FC<{
                     <select
                       className="ktra-input"
                       value={form.currency}
-                      onChange={(e) => setForm((current) => ({
-                        ...current,
-                        currency: e.target.value ? Number(e.target.value) : "",
-                      }))}
+                      onChange={(e) => {
+                        markTouched();
+                        setForm((current) => ({
+                          ...current,
+                          currency: e.target.value ? Number(e.target.value) : "",
+                        }));
+                      }}
                     >
                       <option value="">—</option>
                       {currencies.map((currency) => (
@@ -376,10 +580,13 @@ export const PartnerEditorModal: React.FC<{
                     <select
                       className="ktra-input"
                       value={form.default_cost_center}
-                      onChange={(e) => setForm((current) => ({
-                        ...current,
-                        default_cost_center: e.target.value ? Number(e.target.value) : "",
-                      }))}
+                      onChange={(e) => {
+                        markTouched();
+                        setForm((current) => ({
+                          ...current,
+                          default_cost_center: e.target.value ? Number(e.target.value) : "",
+                        }));
+                      }}
                     >
                       <option value="">—</option>
                       {costCenters.map((center) => <option key={center.id} value={center.id}>{center.name}</option>)}
@@ -390,9 +597,12 @@ export const PartnerEditorModal: React.FC<{
                     <KitDateInput
                       className="ktra-input"
                       value={form.end_of_dealing_date}
-                      onChange={(value) => setForm((current) => ({
-                        ...current, end_of_dealing_date: value,
-                      }))}
+                      onChange={(value) => {
+                        markTouched();
+                        setForm((current) => ({
+                          ...current, end_of_dealing_date: value,
+                        }));
+                      }}
                     />
                   </label>
                   <label className="ktra-field">
@@ -400,10 +610,13 @@ export const PartnerEditorModal: React.FC<{
                     <select
                       className="ktra-input"
                       value={form.assigned_price_tier}
-                      onChange={(e) => setForm((current) => ({
-                        ...current,
-                        assigned_price_tier: e.target.value ? Number(e.target.value) : "",
-                      }))}
+                      onChange={(e) => {
+                        markTouched();
+                        setForm((current) => ({
+                          ...current,
+                          assigned_price_tier: e.target.value ? Number(e.target.value) : "",
+                        }));
+                      }}
                     >
                       <option value="">—</option>
                       <option value="1">تجزئة</option>
@@ -437,10 +650,13 @@ export const PartnerEditorModal: React.FC<{
                   <button
                     type="button"
                     className="ktra-toolbtn"
-                    onClick={() => setBanks((rows) => [
-                      ...rows,
-                      blankBank(form.currency || currencies[0]?.CurrencyID || "", rows.length === 0),
-                    ])}
+                    onClick={() => {
+                      markTouched();
+                      setBanks((rows) => [
+                        ...rows,
+                        blankBank(form.currency || currencies[0]?.CurrencyID || "", rows.length === 0),
+                      ]);
+                    }}
                   >
                     <Plus className="h-3 w-3" /> حساب بنكي
                   </button>
@@ -494,7 +710,15 @@ export const PartnerEditorModal: React.FC<{
                               <input type="checkbox" checked={bank.is_active} onChange={(e) => patchBank(index, { is_active: e.target.checked, is_default: e.target.checked ? bank.is_default : false })} />
                               فعّال
                             </label>
-                            <button type="button" className="text-red-600" onClick={() => setBanks((rows) => rows.filter((_, i) => i !== index))} title="حذف الحساب">
+                            <button
+                              type="button"
+                              className="text-red-600"
+                              onClick={() => {
+                                markTouched();
+                                setBanks((rows) => rows.filter((_, i) => i !== index));
+                              }}
+                              title="حذف الحساب"
+                            >
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
@@ -508,11 +732,20 @@ export const PartnerEditorModal: React.FC<{
           )}
         </div>
 
-        <div className={`${embedded ? "" : "sticky bottom-0 "}flex justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-4`}>
-          <button type="button" className="ktra-toolbtn" onClick={onClose}>{embedded ? "العودة للتفاصيل" : "إلغاء"}</button>
-          <button type="button" className="ktra-toolbtn bg-blue-600 text-white" disabled={loading || saving} onClick={() => void save()}>
-            <Save className="h-4 w-4" /> {saving ? "جاري الحفظ…" : "حفظ البطاقة"}
-          </button>
+        <div className={`${embedded ? "" : "sticky bottom-0 "}flex items-center justify-between gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-4`}>
+          <div>
+            {draftSavedAt && (
+              <span className="ktra-status-item" data-testid="draft-saved-indicator">
+                مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" className="ktra-toolbtn" onClick={handleCancel}>{embedded ? "العودة للتفاصيل" : "إلغاء"}</button>
+            <button type="button" className="ktra-toolbtn bg-blue-600 text-white" disabled={loading || saving} onClick={() => void save()}>
+              <Save className="h-4 w-4" /> {saving ? "جاري الحفظ…" : "حفظ البطاقة"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

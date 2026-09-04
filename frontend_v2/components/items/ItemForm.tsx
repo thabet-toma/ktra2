@@ -6,7 +6,7 @@
  * تبويبات «نظرة عامة» و«الفواتير المرتبطة» و«حركة المخزون» تأتي من
  * `useProductInsights` (كانت حبيسة صفحة `ProductProfilePage` المنفصلة).
  */
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { AddBrandResult, ProductNameMatch } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
@@ -17,7 +17,7 @@ import {
   useRecordNavigation,
   type KitToolbarAction,
 } from "../kit";
-import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Upload, FileText } from "lucide-react";
+import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Upload, FileText, Info, Undo2 } from "lucide-react";
 import { CategoryPicker } from "../inventory/CategoryPicker";
 import { ValuePicker } from "../inventory/ValuePicker";
 import { accountingApi } from "../../services/accountingApi";
@@ -29,6 +29,9 @@ import { useProductInsights } from "./ProductInsightTabs";
 import { SupplierCodesTab } from "./SupplierCodesTab";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { completeEan13, ean13Svg, isValidEan13, printBarcodeLabels } from "../../utils/barcode";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { formatTimeValue } from "../../utils/formatDate";
 
 type Props = {
   productId: number | null;
@@ -171,6 +174,13 @@ const blankForm = (): FormState => ({
   datasheets: [],
 });
 
+/**
+ * ISSUE #121: حمولة المسودّة المحلية — نسخةٌ من `FormState` بلا الحقلين ذوي
+ * الأثر الجانبي الخادمي قبل الحفظ (باركود محجوز/مرفقات مرفوعة فعلياً) —
+ * راجع التعليق التفصيلي عند `draftPayload` داخل المكوّن.
+ */
+type ItemDraftPayload = Omit<FormState, "barcode" | "datasheets">;
+
 const fld = (label: string, node: React.ReactNode, span?: number) => (
   <label className="ktra-field" style={span ? { gridColumn: `span ${span}` } : {}}>
     <span className="ktra-field-label">{label}</span>
@@ -239,6 +249,17 @@ export const ItemForm: React.FC<Props> = ({
   const toast = useToast();
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
+  // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم
+  // (`patch`، رفع/حذف الداتا شيت، استعادة مسودّة) لا عبر مراقبة `form` بأثر
+  // رجعي؛ التعبئة البرمجية (`applyProduct`) لا تلمسها عمداً.
+  const dirtyRef = useRef(false);
+  // ISSUE #121: حارسٌ لمرّةٍ واحدة — راجع تعليق `resetToBlank` أدناه.
+  /* ISSUE #121: «إلغاء» و`Esc` **لا يمحوان المسودّة**. مغادرةٌ بلا سؤال ليست
+     تجاهلاً صريحاً، والمسودّةُ وُجدت لتنجوَ منها (مواصفة #109: «ولا حذفَ صامتٌ
+     أبداً»). السابقةُ `InvoiceForm.guardedCancel` تمحوها **بعد تأكيدٍ صريح**.
+     يبقى المحوُ عند: حفظٍ ناجح · «تراجع» · وبدءِ سجلٍّ جديدٍ صراحةً (فمفتاح
+     المسودّة نفسُه، وتركُها يعني استعادتَها فوق نموذجٍ بدأه المستخدم فارغاً). */
+  const draftRestoredRef = useRef(false);
   // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة/أرقام تسلسلية) — يتبع المنتج المعروض.
   // #21: «أضف براند» تسكن قسم «براندات هذا المنتج» — حيث يراها المستخدم وهو
   // ينظر إلى برانداته. تُمرَّر عنصراً جاهزاً لا دالّة: `ProductInsightTabs`
@@ -356,6 +377,7 @@ export const ItemForm: React.FC<Props> = ({
     setDsUploading(true); setErr(null); setMsg(null);
     try {
       const url = await cloudinaryService.uploadFile(file);
+      dirtyRef.current = true;
       setForm((f) => ({ ...f, datasheets: [...f.datasheets, { id: null, url }] }));
       setMsg("تم رفع الملف — احفظ (F12) لتخزين الرابط.");
     } catch (ex: unknown) {
@@ -388,11 +410,38 @@ export const ItemForm: React.FC<Props> = ({
         return;
       }
     }
+    dirtyRef.current = true;
     setForm((f) => ({ ...f, datasheets: f.datasheets.filter((_, j) => j !== index) }));
   };
 
-  const patch = <K extends keyof FormState>(k: K, v: FormState[K]) =>
+  const patch = <K extends keyof FormState>(k: K, v: FormState[K]) => {
+    dirtyRef.current = true;
     setForm((f) => ({ ...f, [k]: v }));
+  };
+
+  /**
+   * ISSUE #121: إعادة الكرت لحالة «منتج جديد» — نقطة توحيد لخمسة مواضع كانت
+   * تكرّر `setForm(blankForm()); setCurrentId(null);` (تحميل أوّلي بلا معرّف،
+   * تنقّلٌ بلا سجلّ، Ctrl+Ins، زرّ «إضافة»، ونجاح «أضف براند» من اقتراح
+   * الاسم). الحارس: قراءةُ المسودّة من IndexedDB **غيرُ متزامنة**، فقد تصل
+   * بعد أن يُعيد أحدُ الموضعين التلقائيَّين الكرتَ للفراغ — أو قبله فيُمحى ما
+   * استُعيد للتوّ، ويرى المستخدم شريطَ «استُعيدت مسودّتك» فوق نموذجٍ فارغ.
+   *
+   * **والحارسُ لا يُستهلَك في الموضع التلقائيّ**: المواضعُ التلقائية اثنان
+   * (التحميلُ الأوّليّ بلا معرّف، والتنقّلُ بلا سجلّ)، واستهلاكُه في أحدهما
+   * يترك الآخر يُفرِّغ الكرت. الاستهلاكُ في يد المستخدم وحدها — حين يطلب
+   * «سجلاًّ جديداً» صراحةً (`explicit`)، وحينها يُفرَّغ الكرت دائماً.
+   * (نفسُ الدرس المدفوع في `AccountingJournalEntryPage.tsx`.)
+   */
+  const resetToBlank = useCallback((explicit = false) => {
+    if (explicit) {
+      draftRestoredRef.current = false;
+    } else if (draftRestoredRef.current) {
+      return;
+    }
+    setForm(blankForm());
+    setCurrentId(null);
+  }, []);
 
   // ── T-SERIAL: الباركود ─────────────────────────────────────────────────
   const [barcodeBusy, setBarcodeBusy] = useState(false);
@@ -491,7 +540,7 @@ export const ItemForm: React.FC<Props> = ({
       });
       return;
     }
-    if (productId == null) { setForm(blankForm()); setCurrentId(null); return; }
+    if (productId == null) { resetToBlank(); return; }
     inventoryApi.getProduct(productId).then(p => applyProduct(p, false)).catch((e: unknown) => {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     });
@@ -573,6 +622,9 @@ export const ItemForm: React.FC<Props> = ({
       } catch { /* تجاهل */ }
       // النظرة العامة تُقرأ من الخادم — أعِد تحميلها كي يظهر سعر البيع الجديد وربحه.
       insights.reload();
+      // ISSUE #121: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
+      dirtyRef.current = false;
+      void discardDraft();
       onSaved();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
@@ -584,17 +636,96 @@ export const ItemForm: React.FC<Props> = ({
   const nav = useRecordNavigation<SqlProduct>({
     items: products, getId: (p) => p.id, currentId,
     onSelect: (id) => {
-      if (id == null) { setForm(blankForm()); setCurrentId(null); return; }
+      if (id == null) { resetToBlank(); return; }
       inventoryApi.getProduct(Number(id)).then(p => applyProduct(p, false)).catch((e: unknown) => {
         setErr(e instanceof Error ? e.message : "فشل التحميل");
       });
     },
   });
 
+  /**
+   * ISSUE #121: حمولة المسودّة المحلية — كائنٌ خفيف يكفي وحده لإعادة بناء
+   * الشاشة، لا حمولة الحفظ الخادمية (`payload` في `handleSave` مبنيّةٌ بشكل
+   * منفصل تماماً وتخضع لقواعد `ProductSerializer` لا لشكل هذا الكائن).
+   *
+   * الباركود والمرفقات (`datasheets`) مستبعدان عمداً من الحمولة: كلاهما
+   * يبلغ الخادم قبل الحفظ فعلاً — `handleGenerateBarcode` يحجز باركوداً على
+   * الخادم (`inventoryApi.generateBarcode`)، ورفع ملف الداتا شيت
+   * (`uploadDatasheetFile` ← `cloudinaryService.uploadFile`) يرفع الملف
+   * فعلياً — ثم يدخل الناتج `form` كنصّ/رابط عاديّ. استعادة مسودّةٍ مهجورة
+   * لا يجوز أن تُعيد إدراج باركوداً محجوزاً قد يكون تجاوزه الزمن أو استُبدل
+   * فعلاً، ولا رابط ملفٍّ رُفع بالفعل بلا تتبّع دورة حياته محلياً — المسودّة
+   * نصٌّ محليٌّ يعيد بناء ما كُتب يدوياً فقط، لا نتائج طلباتٍ خادمية سابقة.
+   * الثمن: باركودٌ كُتب يدوياً (لا وُلِّد) لن يُستعاد أيضاً — نفس الحقل يخدم
+   * الإدخالين ولا طريقة رخيصة للتمييز بينهما محلياً؛ مقبولٌ ضمن هذه المهمة.
+   */
+  const draftPayload = useMemo<ItemDraftPayload>(() => {
+    const { barcode: _barcode, datasheets: _datasheets, ...rest } = form;
+    return rest;
+  }, [form]);
+
+  const onRestoreDraft = useCallback((restored: ItemDraftPayload) => {
+    setForm((f) => ({ ...f, ...restored }));
+    // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تُسجَّل «ملموسة»
+    // فوراً كي يبقى الحارس وسياسة الحفظ متّسقين مع ما يراه المستخدم فعلاً.
+    dirtyRef.current = true;
+    draftRestoredRef.current = true;
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<ItemDraftPayload>({
+    docType: "item",
+    docId: currentId ?? null,
+    payload: draftPayload,
+    isTouched: dirtyRef.current,
+    onRestore: onRestoreDraft,
+    // المنتجات بلا مفهوم «مرحَّل» محاسبي — لا حالة إغلاقٍ طبيعية تقابله على
+    // `SqlProduct` اليوم (لا `is_active`/`archived`)، فالقيمة ثابتة دائماً.
+    isPosted: false,
+    // GAP معروف: `SqlProduct` (types/inventory.ts) لا يحمل حقل updated_at
+    // إطلاقاً، و`ProductSerializer` لا يعرض واحداً. فلا مصدر حقيقي
+    // لـ`docUpdatedAt` في هذا الكرت، و`null` دائماً يُعطّل بصمت فحص «تغيّر
+    // المستند بعد مسودّتك» (issue #109 §٩) لكرت المنتج وحده. إصلاحه خادميّ
+    // (إضافة updated_at للنموذج + migration + الserializer) وخارج نطاق هذه
+    // المهمة (نمط `AccountingJournalEntryPage.tsx`).
+    docUpdatedAt: null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
+
+  /** «تراجع» على شريط الاستعادة: يعيد الكرت إلى نسخته المحفوظة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    if (currentId != null) {
+      inventoryApi.getProduct(currentId).then(p => applyProduct(p, false)).catch(() => { /* أفضل جهد */ });
+    } else {
+      setForm(blankForm());
+    }
+    dirtyRef.current = false;
+    void discardDraft();
+  }, [currentId, applyProduct, discardDraft]);
+
   useKitKeymap({
     F12: () => { setLastKey("F12 حفظ"); if (!saving) void handleSave(); },
     Escape: () => { setLastKey("Esc إلغاء"); onCancel(); },
-    CtrlIns: () => { setLastKey("Ctrl+Ins جديد"); setForm(blankForm()); setCurrentId(null); },
+    CtrlIns: () => { setLastKey("Ctrl+Ins جديد"); void discardDraft(); resetToBlank(true); },
     CtrlHome: () => { setLastKey("Ctrl+Home"); nav.first(); },
     CtrlEnd: () => { setLastKey("Ctrl+End"); nav.last(); },
     CtrlPageUp: () => { setLastKey("Ctrl+PgUp"); nav.prev(); },
@@ -602,12 +733,12 @@ export const ItemForm: React.FC<Props> = ({
   }, { enabled: true });
 
   const toolbarActions: KitToolbarAction[] = [
-    { key: "new", label: "إضافة", icon: <Plus />, onClick: () => { setForm(blankForm()); setCurrentId(null); } },
+    { key: "new", label: "إضافة", icon: <Plus />, onClick: () => { void discardDraft(); resetToBlank(true); } },
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)",
       icon: saving ? <Loader2 className="animate-spin" /> : <Save />,
       onClick: !saving ? () => void handleSave() : undefined, disabled: saving },
     ...extraActions,
-    { key: "cancel", label: cancelLabel, icon: <X />, onClick: onCancel, danger: true },
+    { key: "cancel", label: cancelLabel, icon: <X />, onClick: () => onCancel(), danger: true },
   ];
 
   // منتج جديد يفتح على حقول الإدخال؛ المنتج المحفوظ يفتح على نظرته العامة.
@@ -619,6 +750,68 @@ export const ItemForm: React.FC<Props> = ({
    * يهبط على أول تبويب. المفتاح يصمد حتى لو تأخّر تبويبه، والنقر يبقى كما هو.
    */
   const [activeTab, setActiveTab] = useState(openingTab);
+
+  /* ISSUE #120: الحفظ المحلي فشل فعلاً (حصّة ممتلئة، تصفّح خاص…) — لافتةٌ
+     لاصقة تطلب حفظاً يدوياً بدل الانتظار الصامت حتى تحاول المغادرة. */
+  const draftSaveFailedBanner = draftSaveFailed ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  /* ISSUE #118: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى مُطبَّقٌ
+     على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً؛ هو
+     إخبارٌ لا سؤال، ومعه «تراجع» وحده. */
+  const draftRestoreBanner = draftBanner ? (
+    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <span>
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
+      </span>
+      {draftBanner.eligibility === "restore" && (
+        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+          <Undo2 className="h-4 w-4" /> تراجع
+        </button>
+      )}
+      {draftBanner.eligibility === "stale" && (
+        <>
+          <button type="button" className="ktra-toolbtn" onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">استعرض مسودتي</button>
+          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">تجاهلها</button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  /* شريط اليتامى (issue #119 §٧): مسودّات «منتجٍ جديد» أخرى تُركت في
+     تبويباتٍ أخرى — بلا استعادة (الاستعادة محصورة بمسودّة هذا التبويب/
+     المستند نفسه). */
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+      <Info className="h-4 w-4 shrink-0" />
+      <div className="flex flex-col gap-1">
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul className="list-disc pr-4 text-xs">
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+          ))}
+        </ul>
+      </div>
+      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+        <X className="h-4 w-4" /> إخفاء
+      </button>
+    </div>
+  ) : null;
 
   const banner = (err || msg) ? (
     <div className={`ktra-banner ${err ? "ktra-banner--err" : "ktra-banner--ok"}`}>
@@ -654,8 +847,8 @@ export const ItemForm: React.FC<Props> = ({
               try {
                 await submitAddBrand(nameOffer.id, brandName);
                 setNameOffer(null);
-                setForm(blankForm());
-                setCurrentId(null);
+                void discardDraft();
+                resetToBlank(true);
                 onSaved();
               } catch (e: unknown) {
                 toast(e instanceof Error ? e.message : "تعذّر إضافة البراند", "error");
@@ -1116,9 +1309,17 @@ export const ItemForm: React.FC<Props> = ({
             <span className="ktra-status-item">المتاح <b>{formatQuantity(insights.profile?.available_quantity ?? "", "—")}</b></span>
             <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
             <span className="ktra-status-item">آخر مفتاح <b>{lastKey}</b></span>
+            {draftSavedAt && (
+              <span className="ktra-status-item" data-testid="draft-saved-indicator">
+                مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+              </span>
+            )}
           </>
         }
       >
+        {draftSaveFailedBanner}
+        {draftRestoreBanner}
+        {orphanDraftsBanner}
         {banner}
       </KitDocumentShell>
     </div>
