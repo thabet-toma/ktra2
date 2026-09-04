@@ -19,7 +19,7 @@ import { useSimpleUi } from "../../hooks/useSimpleUi";
 import { useTenantSettings } from "../../hooks/useTenantSettings";
 import { humanizeThrown } from "../../utils/drfError";
 import { formatMoney } from "../../utils/formatNumber";
-import { formatDateLocalized } from "../../utils/formatDate";
+import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
 import { AccountTreeField } from "./AccountTreePicker";
 import { PaymentVoucherModal } from "../sales/PaymentVoucherParts";
 import {
@@ -29,9 +29,11 @@ import {
   type RevenuePaymentMethod,
 } from "../../utils/revenueVoucherEntryPreview";
 import { voucherAccountEntryIsLinked } from "../../utils/voucherAccountEntryMode";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 import { KitDocumentShell, KitDenseTable } from "../kit";
 import type { KitToolbarAction, DenseColumn } from "../kit";
-import { Plus, RotateCcw } from "lucide-react";
+import { Plus, RotateCcw, AlertCircle, Info, Undo2, X } from "lucide-react";
 import type { AccountingPartner, RevenueVoucherDto } from "../../types/accounting";
 
 type AccountRow = {
@@ -228,6 +230,12 @@ const NewRevenueVoucherModal: React.FC<{
   const [err, setErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // issue #121/#118: علامة «لُمِس» تُرفَع مباشرةً داخل كل onChange — لا عبر
+  // useEffect يشتقّها من الحمولة (يفوّت حالة «عُدِّل ثم غادر بلا حفظ» التي
+  // تخدمها هذه الميزة أصلاً). راجع تعليل InvoiceForm.tsx (dirtyRef).
+  const [touched, setTouched] = useState(false);
+  const markTouched = () => setTouched(true);
+
   const amountNum = Number(amount) || 0;
   const taxNum = Number(taxAmount) || 0;
 
@@ -256,6 +264,95 @@ const NewRevenueVoucherModal: React.FC<{
     cashAccountLabel,
     payerLabel,
   });
+
+  // issue #121: هذا النموذج إنشاءٌ فقط — لا سند سابق يُفتح هنا للتعديل، فـ
+  // `docId`/`docUpdatedAt` دوماً `null` و`isPosted` دوماً `false`.
+  type RevenueVoucherDraftPayload = {
+    date: string;
+    amount: string;
+    taxAmount: string;
+    currencyId: number | "";
+    paymentMethod: RevenuePaymentMethod;
+    revenueAccountId: number | "";
+    revenueAccountName: string;
+    cashAccountId: number | "";
+    payerPartnerId: number | "";
+    payerName: string;
+    description: string;
+  };
+
+  const draftPayload = useMemo<RevenueVoucherDraftPayload>(
+    () => ({
+      date, amount, taxAmount, currencyId, paymentMethod,
+      revenueAccountId, revenueAccountName, cashAccountId,
+      payerPartnerId, payerName, description,
+    }),
+    [date, amount, taxAmount, currencyId, paymentMethod,
+      revenueAccountId, revenueAccountName, cashAccountId,
+      payerPartnerId, payerName, description],
+  );
+
+  const onRestoreDraft = useCallback((restored: RevenueVoucherDraftPayload) => {
+    setDate(restored.date);
+    setAmount(restored.amount);
+    setTaxAmount(restored.taxAmount);
+    setCurrencyId(restored.currencyId);
+    setPaymentMethod(restored.paymentMethod);
+    setRevenueAccountId(restored.revenueAccountId);
+    setRevenueAccountName(restored.revenueAccountName);
+    setCashAccountId(restored.cashAccountId);
+    setPayerPartnerId(restored.payerPartnerId);
+    setPayerName(restored.payerName);
+    setDescription(restored.description);
+    setTouched(true);
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<RevenueVoucherDraftPayload>({
+    docType: "revenue_voucher",
+    docId: null,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    isPosted: false,
+    docUpdatedAt: null,
+  });
+
+  // ISSUE #120: حارسٌ مقلوب — يعترض المغادرة فقط إن فشل الحفظ المحلي فعلاً.
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
+
+  /** «تراجع» على شريط الاستعادة: يعيد النموذج إلى حالته الفارغة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(() => {
+    setDate(today());
+    setAmount("");
+    setTaxAmount("0");
+    setCurrencyId(currencies[0]?.CurrencyID ?? "");
+    setPaymentMethod("cash");
+    setRevenueAccountId("");
+    setRevenueAccountName("");
+    setCashAccountId("");
+    setPayerPartnerId("");
+    setPayerName("");
+    setDescription("");
+    setTouched(false);
+    void discardDraft();
+  }, [currencies, discardDraft]);
 
   const submit = useCallback(async () => {
     if (amountNum <= 0) {
@@ -315,18 +412,91 @@ const NewRevenueVoucherModal: React.FC<{
       onClose={onClose}
       onSubmit={() => void submit()}
     >
+      {draftSaveFailed && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          data-testid="draft-save-failed-banner"
+          className="ktra-banner ktra-banner--err mb-2"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ وترحيل» يدوياً كي لا يضيع عملك.</span>
+        </div>
+      )}
+      {draftBanner && (
+        <div className="ktra-banner ktra-banner--warn mb-2" role="status" data-testid="draft-restored-banner">
+          <Info className="h-4 w-4 shrink-0" />
+          <span>
+            {draftBanner.eligibility === "restore" &&
+              `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+            {draftBanner.eligibility === "stale" &&
+              `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+            {draftBanner.eligibility === "posted" &&
+              `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند — للاطّلاع فقط.`}
+          </span>
+          {draftBanner.eligibility === "restore" && (
+            <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+              <Undo2 className="h-4 w-4" />
+              تراجع
+            </button>
+          )}
+          {draftBanner.eligibility === "stale" && (
+            <>
+              <button
+                type="button"
+                className="ktra-toolbtn"
+                onClick={() => onRestoreDraft(draftBanner.payload)}
+                data-testid="draft-stale-preview"
+              >
+                استعرض مسودتي
+              </button>
+              <button
+                type="button"
+                className="ktra-toolbtn"
+                onClick={() => void discardDraft()}
+                data-testid="draft-stale-discard"
+              >
+                تجاهلها
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {orphanDrafts.length > 0 && !orphanBarDismissed && (
+        <div className="ktra-banner mb-2" role="status" data-testid="orphan-drafts-banner">
+          <Info className="h-4 w-4 shrink-0" />
+          <div className="flex flex-col gap-1">
+            <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+            <ul className="list-disc pr-4 text-xs">
+              {orphanDrafts.map((o) => (
+                <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+              ))}
+            </ul>
+          </div>
+          <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+            <X className="h-4 w-4" />
+            إخفاء
+          </button>
+        </div>
+      )}
+      {draftSavedAt && (
+        <div className="mb-2 text-[11px] text-[var(--ktra-ink-soft)]" data-testid="draft-saved-indicator">
+          مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
         <label className="ktra-field">
           <span className="ktra-field-label">التاريخ</span>
-          <input type="date" className="ktra-input" value={date} onChange={(e) => setDate(e.target.value)} />
+          <input type="date" className="ktra-input" value={date} onChange={(e) => { setDate(e.target.value); markTouched(); }} />
         </label>
         <label className="ktra-field">
           <span className="ktra-field-label">المبلغ *</span>
-          <input type="number" step="0.01" className="ktra-input ktra-num" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <input type="number" step="0.01" className="ktra-input ktra-num" value={amount} onChange={(e) => { setAmount(e.target.value); markTouched(); }} />
         </label>
         <label className="ktra-field">
           <span className="ktra-field-label">العملة</span>
-          <select className="ktra-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value ? Number(e.target.value) : "")}>
+          <select className="ktra-input" value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markTouched(); }}>
             <option value="">—</option>
             {currencies.map((c) => <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>)}
           </select>
@@ -337,7 +507,7 @@ const NewRevenueVoucherModal: React.FC<{
           <AccountTreeField
             accounts={accounts}
             value={revenueAccountId}
-            onChange={(id) => { setRevenueAccountId(id ?? ""); if (id) setRevenueAccountName(""); }}
+            onChange={(id) => { setRevenueAccountId(id ?? ""); if (id) setRevenueAccountName(""); markTouched(); }}
             purpose="revenue"
             title="اختيار حساب الإيراد"
             placeholder="— اختر من الشجرة —"
@@ -351,7 +521,7 @@ const NewRevenueVoucherModal: React.FC<{
               placeholder="مثال: عمولة وساطة"
               value={revenueAccountName}
               disabled={!!revenueAccountId}
-              onChange={(e) => setRevenueAccountName(e.target.value)}
+              onChange={(e) => { setRevenueAccountName(e.target.value); markTouched(); }}
             />
           </label>
         )}
@@ -360,7 +530,7 @@ const NewRevenueVoucherModal: React.FC<{
           <span className="ktra-field-label">طريقة القبض</span>
           <select
             className="ktra-input" value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value as RevenuePaymentMethod)}
+            onChange={(e) => { setPaymentMethod(e.target.value as RevenuePaymentMethod); markTouched(); }}
           >
             {REVENUE_PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
@@ -371,7 +541,7 @@ const NewRevenueVoucherModal: React.FC<{
             <AccountTreeField
               accounts={accounts}
               value={cashAccountId}
-              onChange={(id) => setCashAccountId(id ?? "")}
+              onChange={(id) => { setCashAccountId(id ?? ""); markTouched(); }}
               purpose="cash"
               title="اختيار الصندوق / البنك"
             />
@@ -380,7 +550,7 @@ const NewRevenueVoucherModal: React.FC<{
 
         <label className="ktra-field">
           <span className="ktra-field-label">ضريبة مخرجات (اختياري)</span>
-          <input type="number" step="0.01" className="ktra-input ktra-num" value={taxAmount} onChange={(e) => setTaxAmount(e.target.value)} />
+          <input type="number" step="0.01" className="ktra-input ktra-num" value={taxAmount} onChange={(e) => { setTaxAmount(e.target.value); markTouched(); }} />
         </label>
       </div>
 
@@ -390,7 +560,7 @@ const NewRevenueVoucherModal: React.FC<{
             <span className="ktra-field-label">الدافع (اختياري)</span>
             <select
               className="ktra-input" value={payerPartnerId}
-              onChange={(e) => { setPayerPartnerId(e.target.value ? Number(e.target.value) : ""); if (e.target.value) setPayerName(""); }}
+              onChange={(e) => { setPayerPartnerId(e.target.value ? Number(e.target.value) : ""); if (e.target.value) setPayerName(""); markTouched(); }}
             >
               <option value="">— بلا دافع —</option>
               {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -400,7 +570,7 @@ const NewRevenueVoucherModal: React.FC<{
             <span className="ktra-field-label">أو اسم حرّ</span>
             <input
               className="ktra-input" value={payerName} disabled={!!payerPartnerId}
-              onChange={(e) => setPayerName(e.target.value)}
+              onChange={(e) => { setPayerName(e.target.value); markTouched(); }}
             />
           </label>
         </div>
@@ -408,7 +578,14 @@ const NewRevenueVoucherModal: React.FC<{
 
       <label className="ktra-field" style={{ marginTop: "12px", display: "block" }}>
         <span className="ktra-field-label">الوصف (اختياري)</span>
-        <textarea className="ktra-input" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+        <textarea
+          className="ktra-input"
+          rows={2}
+          placeholder="وصف سند الإيراد"
+          data-testid="revenue-voucher-description"
+          value={description}
+          onChange={(e) => { setDescription(e.target.value); markTouched(); }}
+        />
       </label>
 
       <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--ktra-ink-soft)" }}>

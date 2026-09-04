@@ -24,6 +24,8 @@ import {
   Printer,
   RefreshCw,
   Undo2,
+  AlertCircle,
+  Info,
 } from "lucide-react";
 import {
   listCustomerPayments,
@@ -62,13 +64,15 @@ import {
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { VoucherAllocationModal } from "../shared/VoucherAllocationModal";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
-import { formatDateLocalized } from "../../utils/formatDate";
+import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
 import { buildVoucherEntryPreview } from "../../utils/voucherEntryPreview";
 import {
   buildPartnerChequeDefaults,
   validateChequeLines,
   type PartnerBankAccount,
 } from "../../utils/partnerChequeDefaults";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 
 type Partner = { id: number; name: string; legal_name?: string | null };
 type Account = { id: number; code: string; name: string; account_type?: string };
@@ -602,6 +606,101 @@ export const NewPaymentModal: React.FC<{
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ISSUE #121: مسودّة محلية عبر الخطّاف المشترك (issue #118) — سند القبض
+  // مستندٌ جديد دائماً هنا (لا تحرير سندٍ قائم عبر هذه النافذة)، فـ`docId`
+  // ثابتٌ على `null` و`isPosted` تبقى `false` و`docUpdatedAt` بلا مصدر (لا
+  // مستند سابق يُقارَن به). «لُمِس» حالةٌ تُرفَع مباشرةً داخل كل معالج تغيير —
+  // لا اشتقاقاً من الحمولة داخل أثرٍ يجري بعد الرسم (الدرس المكلف في issue #121).
+  const [touched, setTouched] = useState(false);
+  const markTouched = () => setTouched(true);
+
+  const draftPayload = useMemo(
+    () => ({
+      partnerId, date, cashAmount, currencyId, exchangeRate, cashAccountId,
+      notes, withholdingPct, withholdingAmt, cheques, allocations,
+    }),
+    [partnerId, date, cashAmount, currencyId, exchangeRate, cashAccountId, notes, withholdingPct, withholdingAmt, cheques, allocations],
+  );
+
+  const onRestoreDraft = useCallback((p: {
+    partnerId: number | "";
+    date: string;
+    cashAmount: string;
+    currencyId: number | "";
+    exchangeRate: string;
+    cashAccountId: number | "";
+    notes: string;
+    withholdingPct: string;
+    withholdingAmt: string;
+    cheques: ChequeLine[];
+    allocations: Array<{ invoice: number; invoice_number?: string; amount: string }>;
+  }) => {
+    setPartnerId(p.partnerId);
+    setDate(p.date);
+    setCashAmount(p.cashAmount);
+    setCurrencyId(p.currencyId);
+    setExchangeRate(p.exchangeRate);
+    setCashAccountId(p.cashAccountId);
+    setNotes(p.notes);
+    setWithholdingPct(p.withholdingPct);
+    setWithholdingAmt(p.withholdingAmt);
+    setCheques(p.cheques || []);
+    setAllocations(p.allocations || []);
+    setTouched(true);
+  }, []);
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft({
+    docType: "customer_payment_voucher",
+    docId: null,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    isPosted: false,
+    docUpdatedAt: null,
+  });
+
+  /* الحارسُ مقلوب — يعترض المغادرة فقط إن فشل الحفظ المحلي فعلاً (مرآة
+     `InvoiceForm.tsx`، issue #120). */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
+
+  const handleUndoDraft = useCallback(() => {
+    setPartnerId(initialPartnerId ?? initialPartner?.id ?? "");
+    setDate(today);
+    setCashAmount(initialInvoice ? String(initialInvoice.remaining) : "");
+    setCurrencyId("");
+    setExchangeRate("1");
+    setCashAccountId(effectiveDefaultCashAccountId);
+    setNotes("");
+    setWithholdingPct("0");
+    setWithholdingAmt("0");
+    setCheques([]);
+    setAllocations(
+      initialInvoice
+        ? [{ invoice: initialInvoice.id, invoice_number: initialInvoice.number, amount: String(initialInvoice.remaining) }]
+        : [],
+    );
+    setTouched(false);
+    void discardDraft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPartnerId, initialPartner, initialInvoice, today, effectiveDefaultCashAccountId, discardDraft]);
+
   useEffect(() => {
     if (
       providedPartners !== undefined &&
@@ -747,6 +846,7 @@ export const NewPaymentModal: React.FC<{
           amount: r.amount,
         })),
       );
+      markTouched();
       setError(null);
     } catch (e: unknown) {
       setError(humanizeThrown(e, "فشل اقتراح التوزيع"));
@@ -769,16 +869,19 @@ export const NewPaymentModal: React.FC<{
       ...as,
       { invoice: inv.invoice_id, invoice_number: inv.invoice_number, amount: String(amt.toFixed(2)) },
     ]);
+    markTouched();
     setPickInvoiceId("");
     setError(null);
   };
 
   const updateAlloc = (idx: number, amt: string) => {
     setAllocations((as) => as.map((a, i) => (i === idx ? { ...a, amount: amt } : a)));
+    markTouched();
   };
 
   const removeAlloc = (idx: number) => {
     setAllocations((as) => as.filter((_, i) => i !== idx));
+    markTouched();
   };
 
   // T-AUTOPOST: الحفظ يُرحّل مباشرةً حسب إعداد الشركة، والزر الثانوي هو البديل الصريح.
@@ -860,6 +963,64 @@ export const NewPaymentModal: React.FC<{
       onClose={onClose}
       onSubmit={() => void submit(effectiveAutoPost)}
     >
+      {/* ISSUE #121: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً. */}
+      {draftSaveFailed && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          data-testid="draft-save-failed-banner"
+          className="mb-2 flex items-center gap-2 rounded border border-red-200 bg-red-100 px-3 py-2 text-[11px] font-medium text-red-800"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>تعذّر حفظ نسخة محلية من هذا السند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
+        </div>
+      )}
+      {/* ISSUE #121: شريط الاستعادة التلقائية — بلا لافتة تسأل. */}
+      {draftBanner && (
+        <div className="ktra-banner ktra-banner--warn mb-2" role="status" data-testid="draft-restored-banner">
+          <Info className="h-4 w-4 shrink-0" />
+          <span>
+            {draftBanner.eligibility === "restore" &&
+              `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+            {draftBanner.eligibility === "stale" &&
+              `تغيّر السند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+            {draftBanner.eligibility === "posted" &&
+              `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) — للاطّلاع فقط.`}
+          </span>
+          {draftBanner.eligibility === "restore" && (
+            <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
+              <Undo2 className="h-4 w-4" /> تراجع
+            </button>
+          )}
+          {draftBanner.eligibility === "stale" && (
+            <>
+              <button type="button" className="ktra-toolbtn" onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
+                استعرض مسودتي
+              </button>
+              <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
+                تجاهلها
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {/* ISSUE #121: شريط اليتامى — مسودّات سندٍ قبضٍ جديد أخرى تُركت بتبويبات أخرى. */}
+      {orphanDrafts.length > 0 && !orphanBarDismissed && (
+        <div className="ktra-banner mb-2" role="status" data-testid="orphan-drafts-banner">
+          <Info className="h-4 w-4 shrink-0" />
+          <div className="flex flex-col gap-1">
+            <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+            <ul className="list-disc pr-4 text-xs">
+              {orphanDrafts.map((o) => (
+                <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+              ))}
+            </ul>
+          </div>
+          <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
+            <X className="h-4 w-4" /> إخفاء
+          </button>
+        </div>
+      )}
       {/* ملاحظة عاجلة مستحقة على هذا العميل — تظهر قبل إتمام السند. */}
       <PartnerNoteAlert partnerId={partnerId === "" ? null : partnerId} className="mb-2" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
@@ -874,6 +1035,7 @@ export const NewPaymentModal: React.FC<{
               onChange={(e) => {
                 setPartnerId(e.target.value ? Number(e.target.value) : "");
                 setAllocations([]);
+                markTouched();
               }}
             >
               <option value="">— اختر —</option>
@@ -883,7 +1045,7 @@ export const NewPaymentModal: React.FC<{
         </label>
         <label className="ktra-field">
           <span className="ktra-field-label">التاريخ</span>
-          <input type="date" className="ktra-input" value={date} onChange={(e) => setDate(e.target.value)} />
+          <input type="date" className="ktra-input" value={date} onChange={(e) => { setDate(e.target.value); markTouched(); }} />
         </label>
 
         <label className="ktra-field">
@@ -891,14 +1053,14 @@ export const NewPaymentModal: React.FC<{
           <AccountTreeField
             accounts={accounts}
             value={cashAccountId}
-            onChange={(id) => setCashAccountId(id ?? "")}
+            onChange={(id) => { setCashAccountId(id ?? ""); markTouched(); }}
             purpose="cash"
             title="اختيار الصندوق / البنك"
           />
         </label>
         <label className="ktra-field">
           <span className="ktra-field-label">العملة *</span>
-          <select className="ktra-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value ? Number(e.target.value) : "")}>
+          <select className="ktra-input" value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markTouched(); }}>
             {currencies.map((c) => (
               <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}{c.Name ? ` — ${c.Name}` : ""}</option>
             ))}
@@ -906,19 +1068,19 @@ export const NewPaymentModal: React.FC<{
         </label>
         <label className="ktra-field">
           <span className="ktra-field-label">سعر الصرف</span>
-          <input type="number" step="0.000001" className="ktra-input ktra-num" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+          <input type="number" step="0.000001" className="ktra-input ktra-num" value={exchangeRate} onChange={(e) => { setExchangeRate(e.target.value); markTouched(); }} />
         </label>
       </div>
 
       <PaymentFinanceFields
         cashAmount={cashAmount}
-        onCashAmount={setCashAmount}
+        onCashAmount={(v) => { setCashAmount(v); markTouched(); }}
         totalCheques={totalCheques}
         total={amtNum}
         withholdingPct={withholdingPct}
-        onWithholdingPct={setWithholdingPct}
+        onWithholdingPct={(v) => { setWithholdingPct(v); markTouched(); }}
         withholdingAmt={withholdingAmt}
-        onWithholdingAmt={setWithholdingAmt}
+        onWithholdingAmt={(v) => { setWithholdingAmt(v); markTouched(); }}
         netLabel="مبلغ الحساب"
       />
 
@@ -1007,15 +1169,22 @@ export const NewPaymentModal: React.FC<{
 
       <ChequeGrid
         cheques={cheques}
-        onChange={setCheques}
+        onChange={(next) => { setCheques(next); markTouched(); }}
         onError={setError}
         newLineDefaults={chequeDefaults}
       />
 
       <label className="ktra-field" style={{ marginTop: "12px", display: "block" }}>
         <span className="ktra-field-label">ملاحظات</span>
-        <textarea className="ktra-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <textarea className="ktra-input" rows={2} placeholder="ملاحظات السند…" value={notes} onChange={(e) => { setNotes(e.target.value); markTouched(); }} />
       </label>
+
+      {/* ISSUE #121: مؤشّر «حُفظ HH:mm» — لا يضغط المستخدم «حفظ» احتياطاً. */}
+      {draftSavedAt && (
+        <div style={{ fontSize: "11px", marginTop: "6px", color: "var(--ktra-ink-soft)" }} data-testid="draft-saved-indicator">
+          مسودة محلية — حُفظ {formatTimeValue(draftSavedAt)}
+        </div>
+      )}
 
       {/* T-CHQ3/و: كان السطر يقول «Dr الصندوق» دائماً ولو كان السند كلّه شيكات —
           وهو كذبٌ على المستخدم: الشيك لا يدخل الصندوق حتى يُحصَّل. الخادم يقسم

@@ -725,10 +725,19 @@ useDocumentDraft({ docType, docId, payload, isTouched, onRestore, isPosted?, doc
   `IDBObjectStore.put` لمخزن `document_drafts` وحده من جانب الاختبار، بلا
   مِقبض اختبارٍ في كود الإنتاج.
 
-**ISSUE #121 — المستهلكون (دفعتان من أربع):** `InvoiceForm.tsx` (فاتورة
+**ISSUE #121 — المستهلكون (ثلاث دفعات من أربع):** `InvoiceForm.tsx` (فاتورة
 الشراء) · `SalesInvoiceEditor.tsx` (فاتورة البيع) · `PriceOfferForm.tsx` ·
-`PurchaseRFQForm.tsx`. الباقي على دفعات (السندات · القيد · المرتجعات · ثمّ
-البقيّة بحسب الاستعمال).
+`PurchaseRFQForm.tsx` · `SalesCustomerPaymentsPage.tsx` ·
+`NewSupplierPaymentModal.tsx` · `ExpenseVouchersPage.tsx` ·
+`RevenueVouchersPage.tsx` · `AccountingJournalEntryPage.tsx` ·
+`SalesReturnEditor.tsx` · `PurchaseReturnEditor.tsx`. الباقي (الدفعة الرابعة)
+بحسب الاستعمال.
+- **شاشةٌ لها موضعا تصفيرٍ تلقائيّان تحتاج حارساً لا يُستهلَك**: صفحةُ القيد
+  تُصفَّر من محمّلها غير المتزامن **ومن** `useRecordNavigation`، وكلاهما يصل بعد
+  قراءة المسودّة. حارسٌ لمرّةٍ واحدة يستهلكه أوّلُهما فيكتب الثاني فوق المسودّة
+  — والنتيجةُ شريطُ «استُعيدت» فوق نموذجٍ فارغ. الاستهلاكُ في يد المستخدم وحدها.
+- **`JournalHeader` بلا `updated_at`** (لا في النموذج ولا في القاعدة) — فحصُ
+  «تغيّر المستند بعد مسودتك» ساقطٌ عن القيد اليدويّ بثغرةٍ موثَّقةٍ في الكود.
 - **فاتورة البيع لم تُضَف إليها المسودّة — أُصلحت مسودّتُها**: آليّتُها الخاصة
   (`db.invoice_drafts`) كانت تُعرَض استعادتُها للجديدة وحدها، بمفتاحٍ واحدٍ
   لكلّها، وتُلقي الرأسَ بلا بنود. حُذفت كاملةً.

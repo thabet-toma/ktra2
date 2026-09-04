@@ -404,3 +404,231 @@ test('الرحلة الأمّ لفاتورة البيع: اكتب، أخفِ ا�
   await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByPlaceholder('ملاحظات الفاتورة…')).toHaveValue('SALES-DRAFT-001');
 });
+
+/**
+ * ISSUE #121 (الدفعة الثالثة): السندات والقيد المحاسبيّ والمرتجعات. كل شاشةٍ
+ * تنضمّ بحالةٍ واحدة فقط (اكتب ← أخفِ ← أعِد التحميل ← استُعيد) — منطق القرار
+ * نفسه مُختبَرٌ مرّةً في `documentDraft.test.ts`، فلا داعي لإعادة الرحلة الأمّ
+ * الكاملة (شركتان/خروج/حارسٌ مقلوب) لكل مستهلكٍ جديد.
+ *
+ * `stubGeneric` أعمّ من `stub`/`stubSalesInvoice`: كل الشاشات هنا سنداتٌ أو
+ * محرّراتٌ تُنشئ مستنداً جديداً دائماً (لا تحرير مستندٍ قائم) فتكتفي بفراغٍ عامّ
+ * (`json([])`) لكل نداءٍ غير مُعرَّف — القوائم تتعامل مع مصفوفةٍ فارغة بأمان
+ * (`toPagedList` في `services/restApi.ts`)، والإعدادات الغائبة (`.catch(() =>
+ * null)` في كل الشاشات المعنية) لا تُسقط الشاشة.
+ */
+async function stubGeneric(
+  page: Page,
+  extraPermissions: string[],
+  tenantIds: number[] = [1],
+): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.setItem('token', 'draft-e2e-token');
+    localStorage.setItem('userId', 'draft-e2e-user');
+  });
+  await switchTenant(page, tenantIds[0]);
+
+  await page.route('**/*', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const isApi = url.port === '8000' || url.pathname.startsWith('/api/');
+    if (!isApi) return route.continue();
+    const path = url.pathname;
+    const json = (body: unknown, status = 200) => route.fulfill({
+      status, contentType: 'application/json', body: JSON.stringify(body),
+    });
+
+    if (path.endsWith('/hr/users/draft-e2e-user/')) return json(USER);
+    if (path.endsWith('/tenants/companies/my-companies/')) {
+      return json(tenantIds.map((id, i) => ({
+        id, tenant: tenant(id, `شركة اختبار ${id}`), role: 'manager',
+        is_default: i === 0, created_at: '2026-01-01T00:00:00Z', can_access_import: false,
+      })));
+    }
+    if (path.endsWith('/permissions/me/')) {
+      return json({
+        role: 'manager', is_manager: true,
+        permissions: extraPermissions,
+        modules: {}, template: 'general', terms: {}, shell: null, ui_mode: 'advanced',
+      });
+    }
+    if (path.endsWith('/hr/auth/logout/') && request.method() === 'POST') {
+      return json({ detail: 'ok' });
+    }
+    return json([]);
+  });
+}
+
+test('سند القبض: اكتب، أخفِ التبويب، أعِد التحميل، أعِد فتح النافذة ← المحتوى موجود والشريط ظاهر (issue #121)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await stubGeneric(page, ['sales.payment.view', 'sales.payment.create']);
+
+  await page.goto('/sales/customer-payments');
+  await page.getByRole('button', { name: 'سند قبض جديد' }).click();
+  const notesField = page.getByPlaceholder('ملاحظات السند…');
+  await expect(notesField).toBeVisible({ timeout: 30_000 });
+  await notesField.fill('RECEIPT-DRAFT-001');
+  await expect(notesField).toHaveValue('RECEIPT-DRAFT-001');
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+  // إعادة تحميل الصفحة تُغلق النافذة (لا مسار خاص بها) — إعادة فتحها من نفس
+  // التبويب تعيد قراءة المسودّة بنفس الهويّة (مفتاحٌ ثابتٌ عبر `sessionStorage`).
+  await page.reload();
+  await page.getByRole('button', { name: 'سند قبض جديد' }).click();
+  await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByPlaceholder('ملاحظات السند…')).toHaveValue('RECEIPT-DRAFT-001');
+});
+
+test('سند الصرف: اكتب، أخفِ التبويب، أعِد التحميل، أعِد فتح النافذة ← المحتوى موجود والشريط ظاهر (issue #121)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await stubGeneric(page, ['purchase.payment.view', 'purchase.payment.create']);
+
+  await page.goto('/supplier-payments');
+  await page.getByRole('button', { name: 'سند صرف جديد' }).click();
+  const notesField = page.getByPlaceholder('ملاحظات السند…');
+  await expect(notesField).toBeVisible({ timeout: 30_000 });
+  await notesField.fill('PAYMENT-DRAFT-001');
+  await expect(notesField).toHaveValue('PAYMENT-DRAFT-001');
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+  await page.reload();
+  await page.getByRole('button', { name: 'سند صرف جديد' }).click();
+  await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByPlaceholder('ملاحظات السند…')).toHaveValue('PAYMENT-DRAFT-001');
+});
+
+test('سند المصروف: اكتب، أخفِ التبويب، أعِد التحميل، أعِد فتح النافذة ← المحتوى موجود والشريط ظاهر (issue #121)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await stubGeneric(page, ['finance.expense.create']);
+
+  await page.goto('/accounting/expense-vouchers');
+  await page.getByRole('button', { name: 'سند مصروف جديد' }).click();
+  const descField = page.getByTestId('expense-voucher-description');
+  await expect(descField).toBeVisible({ timeout: 30_000 });
+  await descField.fill('EXPENSE-DRAFT-001');
+  await expect(descField).toHaveValue('EXPENSE-DRAFT-001');
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+  await page.reload();
+  await page.getByRole('button', { name: 'سند مصروف جديد' }).click();
+  await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('expense-voucher-description')).toHaveValue('EXPENSE-DRAFT-001');
+});
+
+test('سند الإيراد: اكتب، أخفِ التبويب، أعِد التحميل، أعِد فتح النافذة ← المحتوى موجود والشريط ظاهر (issue #121)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await stubGeneric(page, ['finance.revenue.create']);
+
+  await page.goto('/accounting/revenue-vouchers');
+  await page.getByRole('button', { name: 'سند إيراد جديد' }).click();
+  const descField = page.getByTestId('revenue-voucher-description');
+  await expect(descField).toBeVisible({ timeout: 30_000 });
+  await descField.fill('REVENUE-DRAFT-001');
+  await expect(descField).toHaveValue('REVENUE-DRAFT-001');
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+  await page.reload();
+  await page.getByRole('button', { name: 'سند إيراد جديد' }).click();
+  await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('revenue-voucher-description')).toHaveValue('REVENUE-DRAFT-001');
+});
+
+/**
+ * ISSUE #121 — دَينٌ من الدفعة الثانية: `PriceOfferForm.tsx` و`PurchaseRFQForm.tsx`
+ * انضمّتا فعلاً للخطّاف المشترك وحفظهما يعمل، ولم تُكتب حالتاهما لأنّ هذا الملفّ
+ * كان مشغولاً حينها. كلتاهما تُفتحان من `PriceOfferManagement.tsx` (مسار
+ * `/price-offers`، تبويبان: «العروض والأوامر» الافتراضي و«الطلبيات»).
+ */
+test('عرض السعر: اكتب، أخفِ التبويب، أعِد التحميل، أعِد فتح النموذج ← المحتوى موجود والشريط ظاهر (issue #121 دَين)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await stubGeneric(page, ['purchase.invoice.view', 'purchase.invoice.create', 'purchase.invoice.edit']);
+
+  await page.goto('/price-offers');
+  await page.getByRole('button', { name: 'عرض جديد' }).click();
+  const notesField = page.getByPlaceholder('ملاحظات داخلية…');
+  await expect(notesField).toBeVisible({ timeout: 30_000 });
+  await notesField.fill('OFFER-DRAFT-001');
+  await expect(notesField).toHaveValue('OFFER-DRAFT-001');
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+  await page.reload();
+  await page.getByRole('button', { name: 'عرض جديد' }).click();
+  await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByPlaceholder('ملاحظات داخلية…')).toHaveValue('OFFER-DRAFT-001');
+});
+
+/* ISSUE #121 — معلَّقةٌ لا محذوفة: شاشةُ «العروض والطلبيات» لا تُركَّب تحت
+   `stubGeneric` (الشريطُ الجانبي يظهر ومنطقةُ المحتوى تبقى فارغةً بلا خطأ في
+   الطرفية أصلاً) — يلزمها تقنيعٌ مفصَّلٌ خاصٌّ بها كـ`stubSalesInvoice`. حفظُ
+   المسودّة في الشاشتين منفَّذٌ ومُتحقَّقٌ منه بالقراءة و`tsc`، والناقصُ إثباتُه
+   في المتصفّح. تُترك ظاهرةً معلّقةً لا محذوفة كي لا يُنسى الدَّين. */
+test.fixme('الطلبية: اكتب، أخفِ التبويب، أعِد التحميل، أعِد فتح النموذج ← المحتوى موجود والشريط ظاهر (issue #121 دَين)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await stubGeneric(page, ['purchase.invoice.view', 'purchase.invoice.create', 'purchase.invoice.edit']);
+
+  await page.goto('/price-offers');
+  await page.getByRole('button', { name: /^الطلبيات/ }).click();
+  await page.getByRole('button', { name: 'طلبية جديدة' }).click();
+  const notesField = page.getByPlaceholder('ملاحظات داخلية عن الطلبية…');
+  await expect(notesField).toBeVisible({ timeout: 30_000 });
+  await notesField.fill('RFQ-DRAFT-001');
+  await expect(notesField).toHaveValue('RFQ-DRAFT-001');
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+  await page.reload();
+  await page.getByRole('button', { name: /الطلبيات/ }).click();
+  await page.getByRole('button', { name: 'طلبية جديدة' }).click();
+  await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByPlaceholder('ملاحظات داخلية عن الطلبية…')).toHaveValue('RFQ-DRAFT-001');
+});
+
+test('القيد المحاسبيّ اليدويّ: اكتب، أخفِ التبويب، أعِد التحميل ← المحتوى موجود والشريط ظاهر (issue #121)', async ({ page }) => {
+  test.setTimeout(60_000);
+  await stubGeneric(page, ['accounting.journal.view', 'accounting.journal.create']);
+
+  await page.goto('/accounting/journals/new');
+  const amountField = page.locator('[data-ktra-field="simple-amount"]');
+  await expect(amountField).toBeVisible({ timeout: 30_000 });
+  await amountField.fill('123.45');
+  await expect(amountField).toHaveValue('123.45');
+
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+  await page.reload();
+  await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-ktra-field="simple-amount"]')).toHaveValue('123.45');
+});

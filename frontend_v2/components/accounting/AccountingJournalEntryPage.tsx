@@ -1,9 +1,12 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { accountingApi } from "../../services/accountingApi";
 import { formatMoney, formatNumber } from "../../utils/formatNumber";
+import { formatTimeValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { useToast } from "../../contexts/ToastContext";
+import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { orphanDraftsBannerText } from "../../utils/documentDraft";
 import type {
   AccountingAccount,
   AccountingPartner,
@@ -20,9 +23,11 @@ import {
   ExternalLink,
   Handshake,
   AlertTriangle,
+  AlertCircle,
   Info,
   Printer,
   RefreshCw,
+  Undo2,
   X,
   Search,
 } from "lucide-react";
@@ -200,6 +205,15 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   /** «بسيط» طرفان بمبلغٍ واحد · «متقدم» الشبكة الكاملة. */
   const [entryMode, setEntryMode] = useState<"simple" | "advanced">("simple");
 
+  /* ISSUE #121: مسودّة محلية (IndexedDB) — هذه الشاشة لا تحفظ شيئاً محلياً
+     اليوم. علامة «لُمِس» حالةٌ صريحة تُرفَع **مزامنةً** داخل كل معالج تعديلٍ
+     حقيقي (لا داخل useEffect مبنيٍّ على الحمولة — ذاك يفوّت بالضبط حالة
+     «عدّل ثم غادر» التي من أجلها هذه الميزة، لأنه يُنفَّذ بعد الرسم). لا تُرفع
+     عند التعبئة البرمجية من الخادم (`hydrateFromJournal`, `handleUndoDraft`). */
+  const [touched, setTouched] = useState(false);
+  /** شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها. */
+  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
+
   // N3-T1: Kit Navigation + account picker state
   const [journalsList, setJournalsList] = useState<any[]>([]);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
@@ -224,6 +238,8 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   const hydrateFromJournal = useCallback(
     (j: any, accs: AccountingAccount[], parts: AccountingPartner[]) => {
       setPosted(!!j.is_posted);
+      // تعبئةٌ من الخادم — لا تُعامَل كتعديل مستخدم (issue #121).
+      setTouched(false);
       const desc = j.description || "";
       setHeader((h) => ({
         ...h,
@@ -264,12 +280,24 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     [toNarrationLine],
   );
 
+  /* ISSUE #121: قراءةُ المسودّة من IndexedDB غيرُ متزامنة، وإعادةُ تهيئة
+     «قيدٍ جديد» أدناه غيرُ متزامنةٍ أيضاً (تنتظر وصولَ قائمة القيود) — فأيُّهما
+     وصل ثانياً كتب فوق الآخر. بلا هذا الحارس تُستعاد المسودّة فعلاً ثمّ تُمحى
+     من الشاشة بعد أجزاء من الثانية، فيرى المستخدمُ شريطَ «استُعيدت» فوق نموذجٍ
+     فارغ — أسوأ من ألّا تُستعاد. حارسٌ لمرّةٍ واحدة: أوّلُ تهيئةٍ بعد استعادةٍ
+     تُتخطّى، وما بعدها (ضغطُ «جديد» صراحةً) يُصفّر كالمعتاد. */
+  const draftRestoredRef = useRef(false);
+
   const nav = useRecordNavigation<any>({
     items: journalsList,
     getId: (j) => j.id || 0,
     currentId: journalId,
     onSelect: async (id) => {
       if (id === null) {
+        if (draftRestoredRef.current) {
+          draftRestoredRef.current = false;
+          return;
+        }
         // New journal - reset form
         setHeader({
           transaction_date: new Date().toISOString().split("T")[0],
@@ -287,6 +315,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         setHeaderDescTouched(false);
         setEntryMode("simple");
         setPosted(false);
+        setTouched(false);
       } else {
         try {
           const j = await accountingApi.getJournal(Number(id));
@@ -297,6 +326,102 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       }
     },
   });
+
+  /* ── ISSUE #121: مسودّة محلية (IndexedDB) — القيد اليدوي لا يحفظ شيئاً
+     محلياً اليوم. الحمولة كائنٌ خفيف يكفي وحده لإعادة بناء الشاشة؛ لا صلة
+     بحمولة الحفظ الخادمية (`buildPayload`). */
+  const draftPayload = useMemo(
+    () => ({ header, lines, entryMode, headerDescTouched }),
+    [header, lines, entryMode, headerDescTouched],
+  );
+
+  const onRestoreDraft = useCallback(
+    (restored: {
+      header: typeof header;
+      lines: LineState[];
+      entryMode: "simple" | "advanced";
+      headerDescTouched: boolean;
+    }) => {
+      setHeader(restored.header);
+      setLines(restored.lines);
+      setEntryMode(restored.entryMode);
+      setHeaderDescTouched(restored.headerDescTouched);
+      draftRestoredRef.current = true;
+      // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تُسجَّل «ملموسة».
+      setTouched(true);
+    },
+    [],
+  );
+
+  const {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner: draftBanner,
+    discardDraft,
+    orphanDrafts,
+  } = useDocumentDraft<{
+    header: typeof header;
+    lines: LineState[];
+    entryMode: "simple" | "advanced";
+    headerDescTouched: boolean;
+  }>({
+    docType: "journal_entry",
+    docId: journalId,
+    payload: draftPayload,
+    isTouched: touched,
+    onRestore: onRestoreDraft,
+    isPosted: posted,
+    // GAP معروف: `JournalHeader` (accounting/models.py) لا يحمل حقل
+    // updated_at/timestamps إطلاقاً — ولا حتى على مستوى القاعدة — و
+    // `JournalHeaderSerializer` لا يعرض واحداً. فلا مصدر حقيقي لـ`docUpdatedAt`
+    // في هذه الشاشة، و`null` دائماً هنا يُعطّل بصمت فحص «تغيّر المستند بعد
+    // مسودّتك» (issue #109 §٩) لشاشة القيد اليدوي وحدها. إصلاحه خادميّ
+    // (إضافة updated_at للنموذج + migration + الserializer) وخارج نطاق هذه المهمة.
+    docUpdatedAt: null,
+  });
+
+  /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (draftSaveFailed) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftSaveFailed]);
+
+  /** «تراجع» على شريط الاستعادة: يعيد القيد إلى نسخته المحفوظة ويمسح المسودّة. */
+  const handleUndoDraft = useCallback(async () => {
+    if (journalId != null) {
+      try {
+        const j = await accountingApi.getJournal(journalId);
+        hydrateFromJournal(j, accounts, partners);
+      } catch {
+        /* أفضل جهد — تعذّر إعادة الجلب لا يجوز أن يمنع مسح المسودّة */
+      }
+    } else {
+      setHeader({
+        transaction_date: new Date().toISOString().split("T")[0],
+        description: "",
+        reference_type: "MANUAL",
+        reference_id: "",
+        reference_summary: "",
+        deal_ref_number: "",
+        currency: "",
+        exchange_rate: "1",
+        currency_code: "",
+        source_label: "",
+      });
+      setLines(startingLines());
+      setHeaderDescTouched(false);
+      setEntryMode("simple");
+      setPosted(false);
+    }
+    setTouched(false);
+    void discardDraft();
+  }, [journalId, accounts, partners, hydrateFromJournal, discardDraft]);
 
   // N3-T1: Kit keyboard shortcuts.
   useKitKeymap({
@@ -379,8 +504,27 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         const j = await accountingApi.getJournal(journalId);
         if (j.currency == null && baseCurrency) j.currency = baseCurrency.CurrencyID;
         hydrateFromJournal(j, activeAccounts, part as AccountingPartner[]);
+      } else if (draftRestoredRef.current) {
+        // الحارسُ **لا يُستهلَك هنا**: موضعا التصفير التلقائيّ اثنان (هذا،
+        // وإعادةُ تهيئة «قيدٍ جديد» في `nav.onSelect`) وأيّهما استهلكه ترك
+        // الآخر يكتب فوق المسودّة. الاستهلاكُ في اليد الواحدة التي يُصفّرها
+        // المستخدم صراحةً.
+        // ISSUE #121: هذا التحميلُ غيرُ متزامن (حسابات وعملات ومراكز كلفة)،
+        // فيصل **بعد** استعادة المسودّة ويكتب فوقها — فيرى المستخدم شريط
+        // «استُعيدت» فوق نموذجٍ فارغ. يُتخطّى تصفيرُ النموذج مرّةً واحدة، وتبقى
+        // العملةُ الأساسية تُملأ إن كانت المسودّة لم تحمل واحدة.
+        setPosted(false);
+        if (baseCurrency) {
+          setHeader((h) => (h.currency ? h : {
+            ...h,
+            currency: String(baseCurrency.CurrencyID),
+            exchange_rate: "1",
+            currency_code: baseCurrency.Code,
+          }));
+        }
       } else {
         setPosted(false);
+        setTouched(false);
         setLines(startingLines());
         setEntryMode("simple");
         setHeader((h) => ({ ...h, reference_type: h.reference_type || "MANUAL" }));
@@ -463,6 +607,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   /* ── line helpers ── */
   const updateLine = (i: number, patch: Partial<LineState>) => {
     if (posted) return;
+    setTouched(true);
     setLines((prev) => {
       const next = [...prev];
       const row = { ...next[i], ...patch };
@@ -481,6 +626,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   /** المبلغ يُكتب مرّة واحدة ويملأ الجهتين — لا فرق ولا «تعبئة الباقي». */
   const updateSimpleAmount = (v: string) => {
     if (posted) return;
+    setTouched(true);
     setLines((prev) => {
       const next = [...prev];
       while (next.length < MIN_LINES) next.push(emptyLine());
@@ -492,6 +638,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
 
   const updateSimpleSide = (idx: number, patch: Partial<LineState>) => {
     if (posted) return;
+    setTouched(true);
     setLines((prev) => {
       const next = [...prev];
       while (next.length < MIN_LINES) next.push(emptyLine());
@@ -519,6 +666,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
 
   const removeLine = (i: number) => {
     if (posted) return;
+    setTouched(true);
     setLines((prev) => {
       const next = prev.filter((_, idx) => idx !== i);
       return next.length ? next : [emptyLine()];
@@ -822,6 +970,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         onChange={(e) => {
           // تفريغ البيان يدوياً يعيده إلى التوليد التلقائي.
           setHeaderDescTouched(!!e.target.value.trim());
+          setTouched(true);
           setHeader((h) => ({ ...h, description: e.target.value }));
         }}
       />
@@ -898,6 +1047,89 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       header.reference_type === "LOGISTICS_PAYMENT" &&
       /\bشحنة\b/i.test(header.description || ""));
 
+  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتة تطلب حفظاً يدوياً بدل الانتظار
+     الصامت حتى تحاول المغادرة. */
+  const draftSaveFailedBanner = draftSaveFailed && !posted ? (
+    <div
+      role="alert"
+      aria-live="assertive"
+      data-testid="draft-save-failed-banner"
+      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0" />
+      <span>تعذّر حفظ نسخة محلية من هذا القيد — اضغط «تخزين» يدوياً كي لا يضيع عملك.</span>
+    </div>
+  ) : null;
+
+  /* ISSUE #118: شريط الاستعادة التلقائية — إخبارٌ لا سؤال، ومعه «تراجع» وحده. */
+  const draftRestoreBanner = draftBanner ? (
+    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
+      <Info className="w-4 h-4" style={{ marginInlineEnd: '6px' }} />
+      <span>
+        {draftBanner.eligibility === "restore" &&
+          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "stale" &&
+          `تغيّر القيد بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
+        {draftBanner.eligibility === "posted" &&
+          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا القيد المرحَّل — للاطّلاع فقط.`}
+      </span>
+      {draftBanner.eligibility === "restore" && (
+        <button
+          type="button"
+          className="ktra-toolbtn"
+          onClick={() => void handleUndoDraft()}
+          data-testid="draft-restored-undo"
+        >
+          <Undo2 className="h-4 w-4" /> تراجع
+        </button>
+      )}
+      {draftBanner.eligibility === "stale" && (
+        <>
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            onClick={() => onRestoreDraft(draftBanner.payload)}
+            data-testid="draft-stale-preview"
+          >
+            استعرض مسودتي
+          </button>
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            onClick={() => void discardDraft()}
+            data-testid="draft-stale-discard"
+          >
+            تجاهلها
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  /* شريط اليتامى (issue #119 §٧): مسودّات قيدٍ جديد أخرى تُركت في تبويبات أخرى. */
+  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
+    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
+      <Info className="w-4 h-4" style={{ marginInlineEnd: '6px' }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
+        <ul style={{ listStyle: 'disc', paddingInlineStart: '16px', fontSize: '11px' }}>
+          {orphanDrafts.map((o) => (
+            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
+          ))}
+        </ul>
+      </div>
+      <button
+        type="button"
+        className="ktra-toolbtn"
+        style={{ marginInlineStart: 'auto' }}
+        onClick={() => setOrphanBarDismissed(true)}
+        data-testid="orphan-drafts-dismiss"
+      >
+        <X className="w-4 h-4" /> إخفاء
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div
       style={{ minHeight: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
@@ -951,7 +1183,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
               type="date"
               disabled={posted}
               value={header.transaction_date}
-              onChange={(e) => setHeader((h) => ({ ...h, transaction_date: e.target.value }))}
+              onChange={(e) => { setTouched(true); setHeader((h) => ({ ...h, transaction_date: e.target.value })); }}
             />
           </label>
           {/* العملة */}
@@ -963,6 +1195,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
               value={header.currency}
               onChange={(e) => {
                 const sel = currencies.find((c) => String(c.CurrencyID) === e.target.value);
+                setTouched(true);
                 setHeader((h) => ({
                   ...h,
                   currency: e.target.value,
@@ -989,7 +1222,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
               min="0"
               disabled={posted || !!currencies.find((c) => String(c.CurrencyID) === header.currency)?.IsBaseCurrency}
               value={header.exchange_rate}
-              onChange={(e) => setHeader((h) => ({ ...h, exchange_rate: e.target.value }))}
+              onChange={(e) => { setTouched(true); setHeader((h) => ({ ...h, exchange_rate: e.target.value })); }}
             />
           </label>
           {/* نوع المرجع — يحدده النظام من مصدر القيد ولا يُدخَل يدوياً */}
@@ -1015,12 +1248,13 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
                   type="checkbox"
                   disabled={posted}
                   checked={isAdjustment}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    setTouched(true);
                     setHeader((h) => ({
                       ...h,
                       reference_type: e.target.checked ? 'ADJUSTMENT' : 'MANUAL',
-                    }))
-                  }
+                    }));
+                  }}
                 />
                 <span style={{ fontSize: '11px' }}>قيد تسوية محاسبية</span>
               </div>
@@ -1059,9 +1293,18 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
               متوازن ✓
             </span>
           )}
+          {/* issue #121: مؤشّر دائم كي لا يضغط المستخدم «تخزين» احتياطاً كل دقيقة. */}
+          {draftSavedAt && !posted && (
+            <span className="ktra-status-item" data-testid="draft-saved-indicator">
+              مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
+            </span>
+          )}
         </>
       }
     >
+    {draftSaveFailedBanner}
+    {draftRestoreBanner}
+    {orphanDraftsBanner}
     <div style={{ height: '100%', overflow: 'auto', padding: '8px 12px', background: 'var(--ktra-bg, #fffbf5)' }}>
 
       {/* ── ارتباط بصفقة/شحنة (تنقّل) ── */}
@@ -1191,7 +1434,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         getCell={gridGetCell}
         getRowKey={(r) => r._idx}
         onChange={gridOnChange}
-        onAddRow={() => setLines((prev) => [...prev, emptyLine()])}
+        onAddRow={() => { setTouched(true); setLines((prev) => [...prev, emptyLine()]); }}
         variant="journal"
         emptyHint="ابدأ إدخال بنود القيد — Enter للسطر التالي"
       />
@@ -1229,7 +1472,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
             <button
               type="button"
               className="ktra-toolbtn"
-              onClick={() => setLines((prev) => [...prev, emptyLine()])}
+              onClick={() => { setTouched(true); setLines((prev) => [...prev, emptyLine()]); }}
             >
               <Plus className="w-3 h-3" /> سطر جديد
             </button>
