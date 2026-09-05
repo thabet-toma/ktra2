@@ -11,8 +11,12 @@ from decimal import Decimal
 from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 
-from .models import Product, ProductFamily, ProductMerge, StockMovement
+from .models import (
+    Product, ProductFamily, ProductMerge, StockLayer, StockLayerConsumption,
+    StockMovement,
+)
 from django.utils import timezone
+from . import fifo
 
 logger = logging.getLogger(__name__)
 
@@ -665,6 +669,78 @@ def undo_product_merge(*, tenant, merge_id):
     return merge, restored
 
 
+def _last_layer_unit_cost(*, tenant_id: int, product_id: int) -> Decimal:
+    """آخر كلفة وحدة معروفة لمنتج — كلفة وحدة آخر طبقةٍ أُنشئت له (بصرف النظر
+    عن نفادها)، أو صفر إن لم توجد طبقةٌ إطلاقاً.
+
+    تُستعمل حصراً لتسعير الطبقة المؤقّتة (`is_provisional`) عند نفاد الطبقات
+    المفتوحة و`avg_cost` الحالي صفرٌ معاً — ترتيب «آخر كلفة معروفة» الكامل في
+    `record_stock_movement`: `avg_before` إن كان > 0، وإلا هذه الدالة، وإلا صفر.
+    """
+    last = (
+        StockLayer.objects.filter(tenant_id=tenant_id, product_id=product_id)
+        .order_by('-layer_date', '-id')
+        .only('unit_cost')
+        .first()
+    )
+    return Decimal(str(last.unit_cost)) if last is not None else Decimal('0')
+
+
+def _post_provisional_reconciliation_diff(*, movement, prod, real_unit_cost, details):
+    """قيدُ الفرق حين يسدّ وارِدٌ طبقاتٍ مؤقّتة معلَّقة (مواصفة #137/تذكرة #136).
+
+    المبلغ = Σ (الكلفة الحقيقية − الكلفة المؤقّتة) × الكمية المسدودة، عبر كل
+    طبقةٍ شاركت في السدّ (`details`، من `inventory.fifo.reconcile_provisional`).
+
+    الاتجاه — نظير `post_stocktake` بالضبط:
+      الحقيقية أعلى من المخمَّنة (ت.ب.م سُجِّلت وقت البيع أقلّ من الحقيقة):
+        مدين ت.ب.م / دائن المخزون بالفرق.
+      الحقيقية أقلّ من المخمَّنة: العكس — مدين المخزون / دائن ت.ب.م.
+
+    **بلا فحص فترة البيعة الأصلية إطلاقاً** — قرارُ مالكٍ محسوم (#136): التاريخ
+    هو تاريخ حركة الورود دائماً (`movement.movement_date`)، و`post_journal`
+    يتحقّق من فترة *هذا* التاريخ فقط عبر مسارها المعتاد. فرقٌ صفريٌّ إجمالاً
+    (الحالة الغالبة) ⟵ لا قيد إطلاقاً — لا طبقاتٍ معلَّقة أصلاً (`details`
+    فارغة) أو تطابقت الكلفتان تماماً.
+    """
+    if not details:
+        return None
+
+    from accounting.services import post_journal
+
+    total_diff = Decimal('0')
+    for d in details:
+        total_diff += (real_unit_cost - d.provisional_unit_cost) * d.filled_qty
+    total_diff = total_diff.quantize(Decimal('0.01'))
+    if total_diff == 0:
+        return None
+
+    inv_acct = _resolve_line_account(prod, 'inventory', tenant_id=movement.tenant_id)
+    cogs_acct = _resolve_line_account(prod, 'cogs', tenant_id=movement.tenant_id)
+    amount = abs(total_diff)
+    description = f"فرق تسوية طبقة مؤقّتة — حركة استلام #{movement.id}"
+
+    if total_diff > 0:
+        lines_data = [
+            {'account': cogs_acct.id, 'debit': amount, 'credit': Decimal('0'), 'description': description},
+            {'account': inv_acct.id, 'debit': Decimal('0'), 'credit': amount, 'description': description},
+        ]
+    else:
+        lines_data = [
+            {'account': inv_acct.id, 'debit': amount, 'credit': Decimal('0'), 'description': description},
+            {'account': cogs_acct.id, 'debit': Decimal('0'), 'credit': amount, 'description': description},
+        ]
+
+    return post_journal(
+        tenant_id=movement.tenant_id,
+        transaction_date=movement.movement_date,
+        reference_type='STOCK_PROVISIONAL_RECONCILE',
+        reference_id=movement.id,
+        description=description,
+        lines_data=lines_data,
+    )
+
+
 def record_stock_movement(
     *,
     product: Product,
@@ -679,14 +755,31 @@ def record_stock_movement(
     tenant=None,
     branch=None,
     warehouse=None,
+    restores_movement: StockMovement | None = None,
 ) -> StockMovement:
     """
     Record a stock movement and update Product stock/cost atomically.
 
-    WAC formula (inbound):
-        new_avg = (old_qty * old_avg + incoming_qty * incoming_cost) / new_qty
+    الكلفة FIFO لا WAC (مواصفة #137 المرحلة 2): كل حركةٍ واردة (IN/ADJUST_IN/
+    RETURN_IN) تُنشئ طبقة كلفة (`inventory.fifo.create_layer`) بسعرها الفعلي؛
+    وكل حركةٍ صادرة (OUT/ADJUST_OUT/RETURN_OUT) تستهلك الطبقات المفتوحة
+    بترتيب الورود (`inventory.fifo.consume`) فتحمل كلفة كل جزءٍ سعر طبقته
+    الفعلي — لا متوسطاً مذاباً. `Product.avg_cost` صار رقماً **مشتقّاً**
+    (`inventory.fifo.derived_avg_cost`: قيمة الطبقات المفتوحة ÷ كميّتها)
+    للعرض فقط، لا مصدر كلفةٍ يُبنى عليه أي احتساب.
 
-    Outbound movements use existing avg_cost (no change to avg_cost).
+    نفاد الطبقات المفتوحة قبل تغطية صرفٍ كاملاً (مخزون سالب مسموح): تُنشأ
+    طبقة مؤقّتة (`is_provisional=True`) بالكمية غير المغطّاة، بآخر كلفةٍ
+    معروفة (`avg_before` إن كان > 0، وإلا `_last_layer_unit_cost`، وإلا صفر)،
+    ثم تُستهلك فوراً — حارس منع المخزون السالب (`allow_negative_stock`) لا
+    يتغيّر بحرف؛ هذا يعالج فقط ما يتجاوزه هو أصلاً.
+
+    `restores_movement`: مرّرها مع حركةٍ واردة (مرتجع بيعٍ يشير إلى حركة
+    الصرف الأصلية) لإرجاع البضاعة إلى *نفس* طبقتها وموقعها في رتل FIFO
+    (`inventory.fifo.restore`) بدل إنشاء طبقة جديدة في آخر الرتل — فتُشتقّ
+    `unit_cost`/`total_cost` من كلفة الاستهلاك المستعاد فعلاً. يجب أن تكون
+    من نفس الشركة ونفس المنتج، وإلا `ValidationError`. إن لم يكن لها صفوف
+    استهلاك (استُعيدت من قبل) تتصرّف الدالة كحركةٍ واردةٍ عاديّة.
     """
     quantity = Decimal(str(quantity))
     unit_cost = Decimal(str(unit_cost))
@@ -704,18 +797,27 @@ def record_stock_movement(
         qty_before = Decimal(str(prod.quantity_on_hand))
         avg_before = Decimal(str(prod.avg_cost))
 
+        # مواصفة #137: بضاعةٌ قائمةٌ بلا طبقاتٍ تغطّيها (كلُّ صنفٍ في قاعدةٍ
+        # سابقةٍ لـFIFO) تُرأب بطبقةٍ افتتاحيّةٍ محايدةٍ على الميزانية قبل أيّ
+        # استهلاك — وإلّا صُنِّفت بضاعتُها «غيرَ مغطّاة» فصارت طبقةً مؤقّتة
+        # وانهارت كلفةُ الصنف إلى صفرٍ من أوّل بيعة. يقع داخل قفل صفّ المنتج.
+        fifo.backfill_opening_layer(
+            tenant_id=prod.tenant_id, product_id=prod.pk,
+            quantity_on_hand=qty_before, avg_cost=avg_before,
+        )
+
+        if restores_movement is not None:
+            if restores_movement.tenant_id != prod.tenant_id:
+                raise ValidationError(
+                    "حركة الاستعادة (restores_movement) من شركةٍ أخرى — غير مسموح."
+                )
+            if restores_movement.product_id != prod.pk:
+                raise ValidationError(
+                    "حركة الاستعادة (restores_movement) تخصّ منتجاً آخر — غير مسموح."
+                )
+
         if movement_type in INBOUND_TYPES:
-            # Sales return (RETURN_IN): preserve WAC by using current avg_cost
-            if movement_type == 'RETURN_IN' and unit_cost == 0:
-                unit_cost = avg_before
             new_qty = qty_before + quantity
-            total_cost = quantity * unit_cost
-            if new_qty > 0:
-                new_avg = (
-                    (qty_before * avg_before) + (quantity * unit_cost)
-                ) / new_qty
-            else:
-                new_avg = unit_cost
         else:
             # ── Negative stock prevention (يتجاوزها allow_negative_stock على المنتج أو الإعداد العام) ──
             if qty_before < quantity:
@@ -738,14 +840,11 @@ def record_stock_movement(
                     )
 
             new_qty = qty_before - quantity
-            total_cost = quantity * avg_before
-            unit_cost = avg_before
-            new_avg = avg_before
 
         new_qty = new_qty.quantize(Decimal('0.0001'))
-        new_avg = new_avg.quantize(Decimal('0.0001'))
-        total_cost = total_cost.quantize(Decimal('0.01'))
 
+        # الصفّ يُنشأ أولاً (consume/restore تحتاجانه)؛ unit_cost/total_cost
+        # أدناه قيمٌ مؤقّتة تُستبدَل بعد عمليات FIFO عبر save(update_fields=...).
         movement = StockMovement.objects.create(
             tenant=tenant or prod.tenant,
             branch=branch,
@@ -754,7 +853,7 @@ def record_stock_movement(
             movement_type=movement_type,
             quantity=quantity,
             unit_cost=unit_cost,
-            total_cost=total_cost,
+            total_cost=Decimal('0'),
             reference_type=reference_type,
             reference_id=reference_id,
             partner=partner,
@@ -763,11 +862,98 @@ def record_stock_movement(
             quantity_before=qty_before,
             quantity_after=new_qty,
             avg_cost_before=avg_before,
-            avg_cost_after=new_avg,
+            avg_cost_after=avg_before,
         )
 
+        if movement_type in INBOUND_TYPES:
+            restored_consumptions = (
+                list(StockLayerConsumption.objects.filter(movement=restores_movement))
+                if restores_movement is not None else []
+            )
+            if restored_consumptions:
+                restored_cost = sum(
+                    (c.quantity * c.unit_cost for c in restored_consumptions), Decimal('0')
+                )
+                fifo.restore(restores_movement)
+                total_cost = restored_cost.quantize(Decimal('0.01'))
+                unit_cost = (
+                    (total_cost / quantity).quantize(Decimal('0.0001'))
+                    if quantity > 0 else Decimal('0')
+                )
+            else:
+                # حركةٌ واردةٌ عادية (بلا restores_movement، أو restores_movement
+                # بلا صفوف استهلاك — استُعيدت من قبل): طبقة جديدة كالمعتاد.
+                #
+                # مرتجعُ بيعٍ بلا كلفةٍ صريحة: كلفتُه المتوسّطُ الجاري — وهو تحت
+                # FIFO رقمٌ **مشتقٌّ** من الطبقات المفتوحة (`derived_avg_cost`)
+                # لا متوسّطٌ مرجَّح. المسارُ الصادق أن يشير المرتجع إلى حركة
+                # الصرف الأصلية عبر `restores_movement` فيعود لطبقته بالضبط؛
+                # وهذا احتياطٌ لمن لم يمرّرها بعد. بدونه تدخل البضاعة الراجعة
+                # **بكلفة صفر** فتُفرَّغ قيمةُ المخزون ويُنفَخ ربحُ كل بيعةٍ
+                # تستهلكها لاحقاً — انحدارٌ صامت لا يكشفه إلا الميزان.
+                if movement_type == 'RETURN_IN' and unit_cost == 0:
+                    unit_cost = avg_before
+                # مواصفة #137/تذكرة #136: سدّ الطبقات المؤقّتة المعلَّقة (بيوعٌ
+                # على مخزون سالب) أوّلاً بهذا الوارِد قبل أن تُنشأ طبقةٌ جديدة
+                # بالباقي — هذا ما يُصلح ثابت Σ remaining_qty == quantity_on_hand.
+                #
+                # استثناءٌ واحد: WAREHOUSE_TRANSFER موثَّقٌ صراحةً (`Warehouse
+                # Transfer`/`post_warehouse_transfer`) بأنه نقلٌ موقعيٌّ صافي
+                # أثره على إجمالي الشركة صفرٌ دائماً وبلا أي قيدٍ محاسبي. صرفُ
+                # التحويل نفسه (الخطوة التي سبقت هذه مباشرةً، نفس المستند) هو
+                # مصدر أي طبقةٍ مؤقّتة هنا حين يفتقر المنتج لطبقاتٍ حقيقية خلفه
+                # (بياناتٌ قديمة سابقة على FIFO) — لو سوّى استلامُ التحويل ذلك
+                # المعلَّق الذي خلقه هو نفسه للتوّ لتصفّرت الطبقة الجديدة
+                # (remaining_qty) وانكسر افتراض «صافي الشركة لا يتغيّر»، فيبقى
+                # المسار القديم (طبقة جديدة عادية بلا تسوية) لهذا النوع وحده.
+                if reference_type == 'WAREHOUSE_TRANSFER':
+                    fifo.create_layer(movement=movement, quantity=quantity, unit_cost=unit_cost)
+                    total_cost = (quantity * unit_cost).quantize(Decimal('0.01'))
+                else:
+                    reconcile_result = fifo.reconcile_provisional(
+                        movement=movement, quantity=quantity, unit_cost=unit_cost,
+                    )
+                    total_cost = (quantity * unit_cost).quantize(Decimal('0.01'))
+                    _post_provisional_reconciliation_diff(
+                        movement=movement, prod=prod, real_unit_cost=unit_cost,
+                        details=reconcile_result.details,
+                    )
+        else:
+            result = fifo.consume(movement=movement, quantity=quantity)
+            total_consumed_cost = result.cost
+            if result.uncovered_qty > 0:
+                # آخر كلفة معروفة: avg_before إن كان > 0، وإلا كلفة وحدة آخر
+                # طبقةٍ للمنتج (_last_layer_unit_cost)، وإلا صفر.
+                last_known_cost = (
+                    avg_before if avg_before > 0
+                    else _last_layer_unit_cost(tenant_id=prod.tenant_id, product_id=prod.pk)
+                )
+                fifo.create_layer(
+                    movement=movement, quantity=result.uncovered_qty,
+                    unit_cost=last_known_cost, provisional=True,
+                )
+                extra = fifo.consume(movement=movement, quantity=result.uncovered_qty)
+                total_consumed_cost += extra.cost
+                logger.warning(
+                    "NEGATIVE STOCK ALLOWED: product=%s sku=%s — طبقة مؤقّتة (is_provisional) "
+                    "أُنشئت بكلفة وحدة %s لتغطية %s وحدة غير مغطّاة بالطبقات المفتوحة.",
+                    prod.pk, prod.sku, last_known_cost, result.uncovered_qty,
+                )
+            total_cost = total_consumed_cost.quantize(Decimal('0.01'))
+            unit_cost = (
+                (total_cost / quantity).quantize(Decimal('0.0001'))
+                if quantity > 0 else Decimal('0')
+            )
+
+        new_avg = fifo.derived_avg_cost(tenant_id=prod.tenant_id, product_id=prod.pk)
+
+        movement.unit_cost = unit_cost
+        movement.total_cost = total_cost
+        movement.avg_cost_after = new_avg.quantize(Decimal('0.0001'))
+        movement.save(update_fields=['unit_cost', 'total_cost', 'avg_cost_after'])
+
         prod.quantity_on_hand = new_qty
-        prod.avg_cost = new_avg
+        prod.avg_cost = new_avg.quantize(Decimal('0.0001'))
         prod.save(update_fields=['quantity_on_hand', 'avg_cost'])
 
         logger.info(
@@ -780,12 +966,15 @@ def record_stock_movement(
 
 
 def _recompute_product_stock(product: Product) -> None:
-    """أعد احتساب الرصيد ومتوسط التكلفة لمنتج بإعادة تشغيل كل حركاته المتبقية.
+    """أعد احتساب رصيد منتج بإعادة تشغيل كل حركاته المتبقية، ومتوسط تكلفته من
+    طبقات FIFO المفتوحة (مواصفة #137 المرحلة 2).
 
     تُستدعى بعد حذف حركات مستند ما (إلغاء الترحيل/الحذف) لتعيد ضبط
-    quantity_on_hand و avg_cost بدقة بغضّ النظر عن ترتيب الحركات — بدلاً من
-    تعديل تقريبي قد يفسد متوسط التكلفة (WAC). تُطبّق نفس معادلة
-    record_stock_movement بالترتيب الزمني (التاريخ ثم المعرّف).
+    quantity_on_hand بالمشي في دفتر الحركات المتبقية (كما كانت دائماً)،
+    و avg_cost من `inventory.fifo.derived_avg_cost` (قيمة الطبقات المفتوحة ÷
+    كميّتها) بدل صيغة WAC القديمة — الطبقات نفسها **لا تُعاد بناؤها هنا**؛
+    حالتها بعد `reverse_stock_movements` (التي تستدعي `fifo.restore` قبل
+    الحذف) هي مصدر الحقيقة.
     """
     with transaction.atomic():
         prod = Product.objects.select_for_update().get(pk=product.pk)
@@ -794,22 +983,16 @@ def _recompute_product_stock(product: Product) -> None:
             .order_by('movement_date', 'id')
         )
         qty = Decimal('0')
-        avg = Decimal('0')
         for m in movements:
             mqty = Decimal(str(m.quantity))
-            munit = Decimal(str(m.unit_cost or 0))
             if m.movement_type in INBOUND_TYPES:
-                new_qty = qty + mqty
-                if new_qty > 0:
-                    avg = ((qty * avg) + (mqty * munit)) / new_qty
-                else:
-                    avg = munit
-                qty = new_qty
+                qty += mqty
             else:
-                qty = qty - mqty
-                # avg_cost لا يتغيّر بحركات الصرف (متطابق مع record_stock_movement)
+                qty -= mqty
         prod.quantity_on_hand = qty.quantize(Decimal('0.0001'))
-        prod.avg_cost = avg.quantize(Decimal('0.0001'))
+        prod.avg_cost = fifo.derived_avg_cost(
+            tenant_id=prod.tenant_id, product_id=prod.pk,
+        ).quantize(Decimal('0.0001'))
         prod.save(update_fields=['quantity_on_hand', 'avg_cost'])
 
 
@@ -819,6 +1002,16 @@ def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
     تُستخدم في «إلغاء الترحيل»/الحذف لإرجاع المخزون لما كان عليه قبل المستند.
     النطاق محصور تماماً بـ (tenant, reference_id, reference_type ∈ reference_types)
     فلا تُمَسّ حركات أي مستند آخر. تُرجع عدد الحركات المحذوفة.
+
+    مواصفة #137 المرحلة 2 — ثغرةٌ سُدّت هنا: `StockLayer.source_movement` بـ
+    `on_delete=CASCADE`، فحذف حركةٍ واردة (هذا المستند) يمحو طبقتها **وصفوف
+    استهلاكها** بصمت (`StockLayerConsumption.layer` بـCASCADE أيضاً) — حتى لو
+    كانت مبيعاتٌ لاحقة (خارج هذا المستند) قد أكلت منها، فيُفقَد سجلّ كلفة تلك
+    المبيعات بلا إنذار. **حارسٌ صريحٌ هنا** (لا اعتماد على `find_stock_dependents`
+    القائمة — قد تمسك الحالة وقد لا تمسكها): إن كانت أيُّ طبقةٍ أنتجتها حركةٌ من
+    هذا المستند قد استُهلكت بحركةٍ **ليست** ضمنه، تُرفع `ValidationError` قبل
+    أي حذف. ثم تُستعاد كل حركةٍ صادرة من هذا المستند إلى طبقاتها الأصلية
+    (`inventory.fifo.restore`) قبل الحذف — فلا يُفقَد موضعها في رتل FIFO.
     """
     if not reference_types:
         return 0
@@ -831,9 +1024,41 @@ def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
     )
     if not movements:
         return 0
+
+    movement_ids = [m.id for m in movements]
+
+    # ⚠️ الحارس الصريح: طبقةٌ أنتجها هذا المستند واستهلكها صرفٌ من خارجه.
+    produced_layer_ids = list(
+        StockLayer.objects.filter(source_movement_id__in=movement_ids)
+        .values_list('id', flat=True)
+    )
+    if produced_layer_ids:
+        leaking = (
+            StockLayerConsumption.objects
+            .filter(layer_id__in=produced_layer_ids)
+            .exclude(movement_id__in=movement_ids)
+            .select_related('layer__product')
+            .first()
+        )
+        if leaking is not None:
+            product = leaking.layer.product
+            label = product.name_ar or product.name_en or product.sku or f"#{product.pk}"
+            raise ValidationError(
+                f"يتعذّر التراجع عن هذا المستند — بضاعةٌ منه للمنتج «{label}» "
+                "بيعت فعلاً (استُهلكت طبقتها بحركةٍ لاحقة خارج هذا المستند). "
+                "ألغِ ترحيل تلك الحركة أولاً."
+            )
+
     affected_products = {m.product_id: m.product for m in movements}
     count = len(movements)
-    StockMovement.objects.filter(id__in=[m.id for m in movements]).delete()
+    with transaction.atomic():
+        # الرَّدّ: كل حركةٍ صادرة ضمن هذا المستند تعيد كميّتها إلى طبقاتها
+        # الأصلية وموقعها في رتل FIFO — قبل الحذف لا بعده، وضمن نفس المعاملة
+        # الذرّية كي لا يبقى ردٌّ جزئيٌّ بلا حذفٍ يتبعه عند أي عطل.
+        for m in movements:
+            if m.movement_type in OUTBOUND_TYPES:
+                fifo.restore(m)
+        StockMovement.objects.filter(id__in=movement_ids).delete()
     for prod in affected_products.values():
         _recompute_product_stock(prod)
     logger.info(

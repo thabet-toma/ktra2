@@ -774,3 +774,145 @@ class StocktakeLine(models.Model):
 
     def __str__(self):
         return f"{self.product}: عُدّ {self.counted_quantity}"
+
+
+# ════════════════════════════════════════════════════════════════════
+# مواصفة #137 — المرحلة 1: طبقات FIFO للمخزون (`inventory/fifo.py`)
+# ════════════════════════════════════════════════════════════════════
+
+
+class StockLayer(models.Model):
+    """طبقة كلفة واردة — نظير `CashBoxFxLot` (`accounting/fx_fifo.py`) لكن للمخزون.
+
+    كل حركة واردة (استلام شراء، تسوية إضافة، مرتجع) تُنشئ طبقة بسعرها الفعلي
+    وقت الورود. الصرف اللاحق يستهلك الطبقات بترتيب الورود (الأقدم أولاً) بدل
+    أن تُحسب الكلفة بمتوسطٍ متحرّك — فيُعرف بالضبط أيّ وارِدٍ باعت أيّ حركةُ صرف،
+    وبأيّ سعرٍ، بدل رقمٍ واحدٍ مُذاب على كل الوحدات.
+
+    **الطبقة على مستوى (الشركة، المنتج) لا على مستوى المستودع** — قرارٌ محسوم
+    عمداً لا سهواً: `Product.quantity_on_hand` رقمٌ واحدٌ على مستوى الشركة
+    (لا رصيد لكل مستودع على المنتج نفسه)، فتقسيم طبقات الكلفة حسب المستودع كان
+    يُنتج طبقات «مقفلة» في مستودعٍ لا يمكن أن يستهلكها صرفٌ من مستودعٍ آخر رغم
+    أن رصيد الشركة الواحد يسمح بذلك فعلياً. لذلك `warehouse` هنا حقل **أثرٍ**
+    (أيّ مستودعٍ استقبل هذه الدفعة، للتتبّع والتقارير) لا حقل تقسيمٍ يدخل في
+    منطق الاستهلاك — الاستهلاك (`inventory.fifo.consume`) يفلتر بـ(tenant,
+    product) فقط ويتجاهل `warehouse` تماماً.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='StockLayerID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='stock_layers',
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, db_column='ProductID',
+        related_name='stock_layers',
+    )
+    warehouse = models.ForeignKey(
+        'Warehouse', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='WarehouseID', related_name='stock_layers',
+        help_text=(
+            'المستودع الذي وصلت إليه هذه الدفعة — للأثر والتتبّع فقط، لا للتقسيم: '
+            'الطبقة على مستوى الشركة والمنتج معاً (نظير Product.quantity_on_hand '
+            'الذي هو رقمٌ واحدٌ على مستوى الشركة)، والاستهلاك لا يُقيَّد بمستودعٍ بعينه.'
+        ),
+    )
+    layer_date = models.DateField(
+        db_column='LayerDate', help_text='تاريخ ورود البضاعة (من حركة المخزون المصدر)',
+    )
+    original_qty = models.DecimalField(
+        max_digits=18, decimal_places=4, db_column='OriginalQty',
+        help_text='الكمية الأصلية وقت إنشاء الطبقة',
+    )
+    remaining_qty = models.DecimalField(
+        max_digits=18, decimal_places=4, db_column='RemainingQty',
+        help_text='المتبقّي غير المُستهلَك بعد (يُستهلَك FIFO)',
+    )
+    unit_cost = models.DecimalField(
+        max_digits=18, decimal_places=4, db_column='UnitCost',
+        help_text='كلفة الوحدة الفعلية لهذه الطبقة',
+    )
+    source_movement = models.ForeignKey(
+        StockMovement, on_delete=models.CASCADE, null=True, blank=True,
+        db_column='SourceMovementID', related_name='produced_layers',
+        help_text='حركة المخزون الواردة التي أنشأت هذه الطبقة — فارغ للطبقات '
+                  'الافتتاحية التي ينتجها أمر إعادة بناء الرصيد (مرحلة لاحقة)',
+    )
+    is_provisional = models.BooleanField(
+        default=False, db_column='IsProvisional',
+        help_text='طبقة مؤقّتة نتجت عن بيعٍ على مخزون سالب — تُستعمل في مرحلة لاحقة',
+    )
+    # مواصفة #137/تذكرة #136: الكمية من هذه الطبقة المؤقّتة التي وصلتها بضاعةٌ
+    # حقيقيّةٌ وسُوّيت كلفتها — جزئياً أو كلياً (`inventory.fifo.reconcile_provisional`).
+    # المعلَّق المتبقي لطبقةٍ = original_qty - reconciled_qty. صفرٌ دائماً على
+    # الطبقات غير المؤقّتة (is_provisional=False).
+    reconciled_qty = models.DecimalField(
+        max_digits=18, decimal_places=4, default=0, db_column='ReconciledQty',
+        help_text=(
+            'الكمية من هذه الطبقة المؤقّتة التي سُوّيت كلفتها ببضاعةٍ حقيقيّةٍ وصلت لاحقاً '
+            '(تسويةٌ جزئية مسموحة). المعلَّق = original_qty - reconciled_qty.'
+        ),
+    )
+
+    class Meta:
+        db_table = 'stock_layers'
+        managed = True
+        ordering = ['layer_date', 'id']  # ترتيب FIFO — مطابق لـ CashBoxFxLot
+        indexes = [
+            # استعلام الطبقات المفتوحة لمنتجٍ في شركة: inventory/fifo.py (consume،
+            # open_layers_value، open_layers_quantity).
+            models.Index(
+                fields=['tenant', 'product', 'remaining_qty'],
+                name='idx_stocklayer_tenant_prod_rem',
+            ),
+        ]
+
+    def __str__(self):
+        return f"Layer {self.id}: {self.remaining_qty}/{self.original_qty} @ {self.unit_cost}"
+
+
+class StockLayerConsumption(models.Model):
+    """سجلّ استهلاك: أيّ طبقةٍ أكل منها أيّ صرفٍ وكم — نظير تسجيل `consume_fifo`
+    (`accounting/fx_fifo.py`) لكن كسجلٍّ صريح لا تعديلٍ مباشر على الطبقة وحدها.
+
+    هذا الجدول هو ما يجعل الرَّدّ (`inventory.fifo.restore`) دقيقاً بالضبط: حين
+    يُلغى ترحيل حركة الصرف، القراءة من هذه الصفوف تعرف أيّ طبقةٍ بعينها أُخذ
+    منها وبأيّ كمية، فتُعاد الكمية إلى *نفس* الطبقة في *نفس* موقعها في رتل
+    FIFO — لا طبقة جديدة تُنشأ في آخر الرتل بكمية الإرجاع، وهو ما كان سيُغيّر
+    ترتيب الاستهلاك اللاحق. بدون سجلٍّ منفصل لا يوجد مصدر حقيقة لـ«من أين
+    أُخذ» بعد أن تتغيّر `remaining_qty` على الطبقة نفسها.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='StockLayerConsumptionID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='stock_layer_consumptions',
+    )
+    movement = models.ForeignKey(
+        StockMovement, on_delete=models.CASCADE, db_column='MovementID',
+        related_name='layer_consumptions',
+    )
+    layer = models.ForeignKey(
+        StockLayer, on_delete=models.CASCADE, db_column='StockLayerID',
+        related_name='consumptions',
+    )
+    quantity = models.DecimalField(
+        max_digits=18, decimal_places=4, db_column='Quantity',
+        help_text='الكمية المأخوذة من هذه الطبقة لهذه الحركة',
+    )
+    unit_cost = models.DecimalField(
+        max_digits=18, decimal_places=4, db_column='UnitCost',
+        help_text='كلفة وحدة الطبقة لحظة الاستهلاك — لقطة لا مرجعاً متحرّكاً',
+    )
+
+    class Meta:
+        db_table = 'stock_layer_consumptions'
+        managed = True
+        ordering = ['id']
+        indexes = [
+            # كل استهلاكات حركةٍ بعينها — restore() تقرأها بمفتاح الحركة.
+            models.Index(fields=['tenant', 'movement'], name='idx_slc_tenant_movement'),
+        ]
+
+    def __str__(self):
+        return f"Consumption {self.id}: layer={self.layer_id} qty={self.quantity}"

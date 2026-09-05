@@ -24,6 +24,7 @@ from rest_framework.test import APIClient
 from accounting.models import Account, JournalHeader, TaxRate
 from accounting.services import create_fiscal_year
 from inventory.models import Product
+from inventory.services import record_stock_movement
 from partners.models import Partner
 from sales.models import CustomerPayment, SalesInvoice
 from sales.services import get_or_create_sales_settings
@@ -68,8 +69,19 @@ def env():
     customer = Partner.objects.create(
         tenant=tenant, name="عميل الوضع السهل", partner_type="Customer")
     product = Product.objects.create(
-        tenant=tenant, sku="SM-1", name_ar="منتج", quantity_on_hand=Decimal("1000"),
-        avg_cost=Decimal("40"))
+        tenant=tenant, sku="SM-1", name_ar="منتج", quantity_on_hand=Decimal("0"),
+        avg_cost=Decimal("0"))
+    # FIFO-137: رصيدٌ مسنودٌ بحركة استلامٍ فعلية — لا رقمٌ مكتوبٌ يدوياً على
+    # المنتج بلا طبقةٍ خلفه. قيد ت.ب.م تحت FIFO يُبنى الآن من كلفة حركة
+    # المخزون الفعلية (`sales/services/calc.py`) لا من `Product.avg_cost`؛
+    # وبلا طبقة حقيقية هنا كانت أول فاتورة تستهلك طبقةً مؤقّتة (is_provisional)
+    # تُستهلك بكاملها فوراً فيستقرّ `avg_cost` المشتقّ على صفر — وفاتورة هذا
+    # الاختبار الثانية (بنفس المنتج) تحتاج رصيداً حقيقياً باقياً لتُقارَن بأولاها.
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("1000"),
+        unit_cost=Decimal("40"), reference_type="OPENING", reference_id=0,
+        movement_date="2026-06-01", tenant=tenant)
+    product.refresh_from_db()
     return tenant, owner, ils, cash, rev, tax16, customer, product
 
 

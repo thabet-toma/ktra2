@@ -299,9 +299,28 @@ def _build_cogs_journal_line_dicts(
     invoice: SalesInvoice,
     lines: list[SalesInvoiceLine],
     products_by_id: dict[int, Product],
+    *,
+    costs_by_product: dict[int, Decimal],
     quantities: dict[int, Decimal] | None = None,
 ) -> list[dict]:
-    """Dr COGS / Cr Inventory — مبالغ من متوسط التكلفة قبل الصرف (نفس منطق حركة المخزون).
+    """Dr COGS / Cr Inventory — المبلغ من الكلفة الفعليّة المسجَّلة على حركات
+    المخزون (FIFO، مواصفة #137)، لا من `Product.avg_cost`.
+
+    `Product.avg_cost` صار تحت #137 (المرحلة 2) رقماً **مشتقّاً للعرض** —
+    قيمة الطبقات المفتوحة ÷ كميّتها (`inventory.fifo.derived_avg_cost`) — لا
+    مصدر كلفةٍ يُبنى عليه أي قيدٍ محاسبي. القراءة القديمة من هذا الحقل (qty ×
+    avg) كانت تنحرف عن `StockMovement.total_cost` الفعلي كلّما عبرت البيعةُ
+    طبقتين بسعرين مختلفين (متوسّطٌ مذاب لا كلفة الطبقات المستهلَكة فعلاً)، بل
+    وتُنتج **صفراً كاذباً** إن استُهلكت كل الطبقات المفتوحة قبل هذا الاستدعاء
+    (لا بضاعة متبقية ⇒ `derived_avg_cost` = 0) رغم أن البيعة الحالية لها كلفة
+    حقيقية موجبة سجّلتها حركتها الخاصة — فيُسقطها `if amt <= 0` بصمت.
+
+    `costs_by_product`: {معرّف المنتج ← مجموع `StockMovement.total_cost` الفعلي}
+    من حركات المخزون التي أُنشئت **لهذا المستند تحديداً** (وزُوِّدت *قبل*
+    استدعاء هذه الدالة — الترتيب الصحيح الآن: حركة المخزون أولاً، ثم قيدها).
+    إلزاميٌّ بلا احتياطٍ إلى `avg_cost`: مستدعٍ لا يملك هذه الكلفة بعد يعني أن
+    حركة المخزون لم تُنشأ بعد — خللٌ في ترتيب الاستدعاء يجب أن يُصلَح لا أن
+    يُخفى بقيمة وهمية تُعيد نفس عطب الانحراف الصامت.
 
     quantities: كمية بديلة لكل سطر (بمعرّف السطر) — يستعملها التسليم الجزئي كي
     تكون التكلفة على المُسلَّم فعلاً لا على كامل السطر. None = كامل الكمية.
@@ -312,6 +331,7 @@ def _build_cogs_journal_line_dicts(
     fb_inv = ss.default_inventory_account_id
 
     pair_totals: dict[tuple[int, int], Decimal] = defaultdict(Decimal)
+    seen_products: set[int] = set()
     for line in lines:
         p = products_by_id[line.product_id]
         if getattr(p, 'is_service', False):
@@ -321,8 +341,18 @@ def _build_cogs_journal_line_dicts(
         ))
         if qty <= 0:
             continue
-        avg = Decimal(str(p.avg_cost))
-        amt = (qty * avg).quantize(DEC)
+        if line.product_id in seen_products:
+            # كلفة هذا المنتج جُمعت بالفعل (من سطرٍ سابق لنفس المنتج) — دمجٌ
+            # واحد لكل منتج، مطابقةً لتجميع حركات المخزون في `costs_by_product`.
+            continue
+        seen_products.add(line.product_id)
+        amt = costs_by_product.get(line.product_id)
+        if amt is None:
+            raise ValidationError(
+                f"المنتج «{p.sku}»: لا توجد كلفة مخزونٍ فعليّة مسجَّلة له في "
+                f"هذا المستند — تأكد من إنشاء حركة المخزون قبل بناء قيد التكلفة."
+            )
+        amt = Decimal(str(amt)).quantize(DEC)
         if amt <= 0:
             continue
         cat = p.category

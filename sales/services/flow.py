@@ -967,6 +967,45 @@ def post_sales_invoice(
         # يُفحص بعد قفل المنتجات كي لا تسبق فاتورتان بعضهما على نفس الحجز.
         guard_reserved_stock(invoice, lines, products_by_id)
 
+        # ── FIFO-137: حركات المخزون تُنشأ هنا، قبل بناء قيد ت.ب.م ───────────
+        # الكلفة الحقيقية تحت FIFO تُقرأ من الحركة المُنشأة فعلاً
+        # (`StockMovement.total_cost`) لا من `Product.avg_cost` — رقمٌ مشتقٌّ
+        # للعرض تحت #137 وقد يستقرّ على صفر إن استُهلكت كل الطبقات المفتوحة،
+        # بصرف النظر عن كلفة هذه البيعة نفسها. القيد يحتاج الحركةَ قبل بنائه؛
+        # هذا عكسُ الترتيب القديم (قيدٌ من رقمٍ محفوظ سلفاً على المنتج، ثم
+        # حركة). أثرٌ جانبي مقصود: حارس المخزون السالب في `record_stock_movement`
+        # يقع هنا الآن — قبل كتابة القيد — بدل بعده؛ تحسّنٌ لا كسر (لا يُكتب
+        # دفترٌ ثمّ يُلغى).
+        stock_movements: list[StockMovement] = []
+        if invoice.stock_on_post:
+            if is_return:
+                # N8-T11 + P-H-2: stock reconciliation by return direction.
+                # sale_return → RETURN_IN  (goods come back from customer)
+                # purchase_return → RETURN_OUT (goods leave back to supplier)
+                is_purchase_return = kind == SalesInvoice.INVOICE_KIND_PURCHASE_RETURN
+                mv_type = "RETURN_OUT" if is_purchase_return else "RETURN_IN"
+                for line in lines:
+                    if getattr(line.product, "is_service", False):
+                        continue
+                    stock_movements.append(record_stock_movement(
+                        product=line.product,
+                        movement_type=mv_type,
+                        quantity=line.quantity,
+                        reference_type="SALE",
+                        reference_id=invoice.id,
+                        partner=invoice.customer,
+                        movement_date=invoice.invoice_date,
+                        notes=f"مرتجع {invoice.invoice_number}",
+                        tenant=invoice.tenant,
+                        branch=invoice.branch,
+                    ))
+            else:
+                stock_movements = _post_stock_out_for_invoice(invoice, lines, user=user)
+
+        costs_by_product: dict[int, Decimal] = defaultdict(Decimal)
+        for mv in stock_movements:
+            costs_by_product[mv.product_id] += Decimal(str(mv.total_cost))
+
         journal_lines: list[dict] = []
 
         # ── T1: المرفق مع الفاتورة يُفحص هنا ولا يُرحَّل هنا ──────────────────
@@ -1063,7 +1102,8 @@ def post_sales_invoice(
             )
 
         if invoice.stock_on_post:
-            journal_lines.extend(_build_cogs_journal_line_dicts(invoice, lines, products_by_id))
+            journal_lines.extend(_build_cogs_journal_line_dicts(
+                invoice, lines, products_by_id, costs_by_product=costs_by_product))
 
         # ── M2-T4 (G6): Source-discount / withholding ──────────────────────
         # Source discount = the slice of the invoice the customer holds back as
@@ -1170,30 +1210,9 @@ def post_sales_invoice(
         # الفاتورة (`post_customer_payment`) — فلا تُرقّى هنا.
 
         if invoice.stock_on_post:
-            if is_return:
-                # N8-T11 + P-H-2: stock reconciliation by return direction.
-                # sale_return → RETURN_IN  (goods come back from customer)
-                # purchase_return → RETURN_OUT (goods leave back to supplier)
-                is_purchase_return = kind == SalesInvoice.INVOICE_KIND_PURCHASE_RETURN
-                mv_type = "RETURN_OUT" if is_purchase_return else "RETURN_IN"
-                for line in lines:
-                    if getattr(line.product, "is_service", False):
-                        continue
-                    record_stock_movement(
-                        product=line.product,
-                        movement_type=mv_type,
-                        quantity=line.quantity,
-                        reference_type="SALE",
-                        reference_id=invoice.id,
-                        partner=invoice.customer,
-                        movement_date=invoice.invoice_date,
-                        notes=f"مرجع {invoice.invoice_number}",
-                        tenant=invoice.tenant,
-                        branch=invoice.branch,
-                    )
-            else:
-                _post_stock_out_for_invoice(invoice, lines, user=user)
-            # البضاعة خرجت مع الترحيل ⇒ الفاتورة مسلَّمة بالكامل، وتُوثَّق
+            # FIFO-137: حركات المخزون (`stock_movements`) أُنشئت بالفعل أعلاه —
+            # قبل بناء قيد ت.ب.م وقبل `post_journal` — فلا تُعاد هنا. ما تبقّى
+            # توثيقٌ: الفاتورة مسلَّمة بالكامل بمجرّد خروج البضاعة، وتُوثَّق
             # بإرسالية تلقائية بكامل الكمية (مرآة إرسالية الشراء التلقائية).
             for line in lines:
                 if getattr(line.product, "is_service", False):
@@ -1501,19 +1520,30 @@ def _post_stock_out_for_invoice(
     lines: list[SalesInvoiceLine],
     *,
     user=None,
-) -> None:
-    # Idempotency: skip if stock movement already exists for this invoice
-    if StockMovement.objects.filter(
-        reference_type="SALE", reference_id=invoice.id
-    ).exists():
-        return
+) -> list[StockMovement]:
+    """يخصم مخزون بنود الفاتورة (منتجاتها لا خدماتها)، ويُعيد الحركات المُنشأة.
+
+    FIFO-137: القيمة المُعادة تغذّي `costs_by_product` في `post_sales_invoice`
+    (`StockMovement.total_cost` الفعلي — لا `Product.avg_cost`) لبناء قيد
+    ت.ب.م منها مباشرةً بعد هذا الاستدعاء.
+
+    Idempotency: استدعاءٌ ثانٍ لنفس الفاتورة (حركاتها موجودة أصلاً) يُعيد تلك
+    الحركات القائمة دون إنشاء غيرها — لا `None` كما كان، وإلا خسر المستدعي
+    كلفتها فبنى قيداً بلا كلفة.
+    """
+    existing = list(
+        StockMovement.objects.filter(reference_type="SALE", reference_id=invoice.id)
+    )
+    if existing:
+        return existing
+    movements: list[StockMovement] = []
     for line in lines:
         if getattr(line.product, "is_service", False):
             continue
         if line.product.tenant_id != invoice.tenant_id:
             raise ValidationError(f"المنتج {line.product_id} لا يتبع نفس الشركة.")
         try:
-            record_stock_movement(
+            movements.append(record_stock_movement(
                 product=line.product,
                 movement_type="OUT",
                 quantity=line.quantity,
@@ -1524,9 +1554,10 @@ def _post_stock_out_for_invoice(
                 notes=f"بيع فاتورة {invoice.invoice_number}",
                 tenant=invoice.tenant,
                 branch=invoice.branch,
-            )
+            ))
         except ValidationError as e:
             raise ValidationError(f"مخزون المنتج {line.product.sku}: {e}")
+    return movements
 
 
 def issue_stock_from_invoice(invoice: SalesInvoice, *, user=None):
@@ -1769,6 +1800,7 @@ def deliver_invoice_lines(
             delivery.delivery_date = delivery.delivery_date or invoice.invoice_date
             delivery.save(update_fields=["delivery_number", "delivery_date"])
 
+        costs_by_product: dict[int, Decimal] = defaultdict(Decimal)
         for line_id, qty in delivered_now.items():
             line = lines_by_id[line_id]
             warehouse = warehouse_by_line.get(line_id)
@@ -1791,6 +1823,10 @@ def deliver_invoice_lines(
                 )
             except ValidationError as e:
                 raise ValidationError(f"مخزون المنتج {line.product.sku}: {e}")
+            # FIFO-137: الكلفة الفعليّة لهذا التسليم من حركته نفسها — لا من
+            # `product.avg_cost` الذي حدّثته الحركة للتوّ (رقمٌ مشتقٌّ للعرض،
+            # قد يستقرّ على صفر إن استُهلكت كل الطبقات المفتوحة).
+            costs_by_product[line.product_id] += Decimal(str(movement.total_cost))
             DeliveryOrderLine.objects.create(
                 tenant=invoice.tenant,
                 delivery=delivery,
@@ -1807,7 +1843,8 @@ def deliver_invoice_lines(
 
         # قيد تكلفة المبيعات للكمية المسلَّمة في هذه الإرسالية وحدها.
         cogs_rows = _build_cogs_journal_line_dicts(
-            invoice, inv_lines, products_by_id, quantities=delivered_now,
+            invoice, inv_lines, products_by_id,
+            costs_by_product=costs_by_product, quantities=delivered_now,
         )
         cogs_journal = None
         if cogs_rows:
@@ -1932,14 +1969,11 @@ def create_standalone_delivery_note(
         planned.append({
             "product": product,
             "qty": qty,
-            "cost": (qty * Decimal(str(product.avg_cost or 0))).quantize(DEC),
             "warehouse": _resolve_delivery_warehouse(tenant_id, raw),
         })
 
     if not planned:
         raise ValidationError("لا يوجد ما يُسلَّم — تحقق من الكميات.")
-
-    total_cost = sum((p["cost"] for p in planned), Decimal("0"))
 
     with transaction.atomic():
         doc = delivery
@@ -1983,6 +2017,12 @@ def create_standalone_delivery_note(
                 )
             except ValidationError as e:
                 raise ValidationError(f"مخزون المنتج {p['product'].sku}: {e}")
+            # FIFO-137: الكلفة الفعليّة من الحركة التي أنشأها record_stock_movement
+            # للتوّ — لا `product.avg_cost` (رقمٌ مشتقٌّ للعرض قد يُحدَّثه هذا
+            # الاستهلاك نفسه إلى صفر إن لم تبقَ طبقات مفتوحة). كانت تُحسب قبل
+            # هذا الاستدعاء — بل قبل `transaction.atomic()` بأكملها — فتحمل
+            # كلفةً قديمة قد لا تطابق ما استهلكته الحركة الفعلية.
+            p["cost"] = Decimal(str(movement.total_cost))
             DeliveryOrderLine.objects.create(
                 tenant=tenant,
                 delivery=doc,
@@ -1992,6 +2032,8 @@ def create_standalone_delivery_note(
                 quantity=p["qty"],
                 movement=movement,
             )
+
+        total_cost = sum((p["cost"] for p in planned), Decimal("0"))
 
         journal = None
         if total_cost > 0:
