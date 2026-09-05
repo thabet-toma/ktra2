@@ -128,6 +128,7 @@ logger = logging.getLogger("logistics.serializers")
 
 class SupplierQuotationLineSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name_ar', read_only=True)
+    internal_note_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = SupplierQuotationLine
@@ -135,8 +136,22 @@ class SupplierQuotationLineSerializer(serializers.ModelSerializer):
             'id', 'product', 'product_name', 'seq', 'name_snapshot',
             'description_line', 'quantity', 'unit_of_measure',
             'unit_price', 'line_total', 'rfq_line',
+            # ISSUE #133 غ٣ (مواصفة #130 §١): ملاحظتان لا حقلٌ واحد.
+            'supplier_note', 'internal_note', 'internal_note_by',
+            'internal_note_by_name', 'internal_note_at',
         ]
-        read_only_fields = ['id', 'product_name', 'line_total']
+        read_only_fields = [
+            'id', 'product_name', 'line_total',
+            # `supplier_note` نصّ المورّد نفسه — **للقراءة فقط بنيوياً هنا**،
+            # لا استثناءً يُتذكَّر: يُكتب حصراً من
+            # `logistics.services.submit_rfq_supplier_quote` (رابط المورّد
+            # العام). محرّر العروض الداخليّ (`SupplierQuotationSerializer
+            # .update`) ينقله حرفياً من السطر القديم بدل أن يفقده — لا من
+            # هذا الحقل. `internal_note_by`/`internal_note_at` يُختمان في
+            # الخادم عند تغيّر `internal_note` فعلياً، لا يُرسَلان من الشاشة.
+            'supplier_note', 'internal_note_by', 'internal_note_by_name',
+            'internal_note_at',
+        ]
         # T-DRAFTPARTY: بند بلا منتج مسجَّل مسموح — اسمه النصّي يكفي داخل العرض.
         # ISSUE #122: `rfq_line` نَسَبُ السطر إلى بند الطلبية — تمرّره الشاشة
         # كما جاءها في التعبئة الأولى. فارغٌ في العرض المستقلّ، وفارغٌ أيضاً في
@@ -144,7 +159,11 @@ class SupplierQuotationLineSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'product': {'required': False, 'allow_null': True},
             'rfq_line': {'required': False, 'allow_null': True},
+            'internal_note': {'required': False, 'allow_blank': True},
         }
+
+    def get_internal_note_by_name(self, obj):
+        return obj.internal_note_by.get_username() if obj.internal_note_by_id else ''
 
 class SupplierQuotationSerializer(serializers.ModelSerializer):
     lines = SupplierQuotationLineSerializer(many=True)
@@ -184,6 +203,8 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             'alibaba_link', 'supplier_contact', 'decision_reason', 'attachments',
             'notes_log',
             'rfq', 'rfq_recipient', 'entry_source',
+            # ISSUE #133 غ٣: ملاحظة المورّد العامة على الطلبية كلّها.
+            'general_note',
             'lines', 'converted_deal', 'converted_order', 'converted_invoice',
             'created_at', 'updated_at',
         ]
@@ -193,6 +214,9 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             # ISSUE #122: مَن كتب الرقم يُختَم في الخادم لا يُرسَل من الشاشة —
             # وإلّا صارت «سعّره المورّد» شارةً يُدّعى بها.
             'entry_source',
+            # ISSUE #133 غ٣: ملاحظة المورّد العامة — نفس قفل `supplier_note`،
+            # تُكتب حصراً من `submit_rfq_supplier_quote` (رابط المورّد العام).
+            'general_note',
             'created_at', 'updated_at',
         ]
         extra_kwargs = {
@@ -456,11 +480,18 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         return attrs
 
     @staticmethod
-    def _line_values(quotation, line, index):
+    def _line_values(quotation, line, index, *, old_line=None, request=None):
+        """قيمُ السطر الجديد — و`old_line` (ISSUE #133 غ٣) ما يُنقَل حرفياً
+        لا ما يُشتقّ: `update()` أدناه يحذف كل سطرٍ ويعيد إنشاءه بمعرّفٍ
+        جديد، و`supplier_note` **للقراءة فقط** في هذا المُسلسِل (لا يصل في
+        `line` أصلاً) — فبلا نقلٍ صريح من السطر القديم المطابق يضيع نصّ
+        المورّد في أول حفظٍ يجريه المشتري على العرض، وهو بعينه ما تكتب هذه
+        التذكرة لمنعه.
+        """
         product = line.get('product')
         quantity = Decimal(str(line['quantity']))
         unit_price = Decimal(str(line['unit_price']))
-        return {
+        values = {
             **line,
             'tenant': quotation.tenant,
             'quotation': quotation,
@@ -471,6 +502,24 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             or getattr(product, 'name_en', ''),
             'line_total': (quantity * unit_price).quantize(Decimal('0.01')),
         }
+        # نصّ المورّد يُنقَل حرفياً من السطر القديم — لا مصدر آخر يكتبه هنا.
+        values['supplier_note'] = old_line.supplier_note if old_line else ''
+        new_internal_note = line.get(
+            'internal_note', old_line.internal_note if old_line else '',
+        )
+        values['internal_note'] = new_internal_note
+        old_internal_note = old_line.internal_note if old_line else ''
+        if old_line is not None and new_internal_note == old_internal_note:
+            # لم تتغيّر — كاتبها وتاريخها يبقيان كما كانا لا يُعاد ختمهما.
+            values['internal_note_by'] = old_line.internal_note_by
+            values['internal_note_at'] = old_line.internal_note_at
+        else:
+            user = getattr(request, 'user', None)
+            values['internal_note_by'] = (
+                user if user is not None and user.is_authenticated else None
+            )
+            values['internal_note_at'] = timezone.now() if new_internal_note else None
+        return values
 
     @staticmethod
     def _recalculate(quotation):
@@ -529,8 +578,11 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             # أدخله يأتي من `perform_create` (`created_by`) كأيّ مستند.
             validated_data['entry_source'] = SupplierQuotation.ENTRY_MANUAL
         quotation = SupplierQuotation.objects.create(**validated_data)
+        request = self.context.get('request')
         SupplierQuotationLine.objects.bulk_create([
-            SupplierQuotationLine(**self._line_values(quotation, line, index))
+            SupplierQuotationLine(
+                **self._line_values(quotation, line, index, request=request),
+            )
             for index, line in enumerate(lines, start=1)
         ])
         self._recalculate(quotation)
@@ -543,11 +595,27 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         lines = validated_data.pop('lines', None)
         instance = super().update(instance, validated_data)
         if lines is not None:
+            # ISSUE #133 غ٣: السطور تُحذف وتُعاد بمعرّفاتٍ جديدة — نصّ المورّد
+            # (وتاريخُ تعليقنا الداخليّ) يضيعان ما لم يُنقَلا يدوياً من السطر
+            # القديم **المطابق**. المطابقة بالنَسَب (`rfq_line`) أولاً — نفس
+            # قاعدة #122 في `comparison/` — وبـ`seq` لما لا نَسَب له.
+            old_lines = list(instance.lines.all())
+            old_by_rfq_line = {
+                ol.rfq_line_id: ol for ol in old_lines if ol.rfq_line_id
+            }
+            old_by_seq = {ol.seq: ol for ol in old_lines}
+            request = self.context.get('request')
             instance.lines.all().delete()
-            SupplierQuotationLine.objects.bulk_create([
-                SupplierQuotationLine(**self._line_values(instance, line, index))
-                for index, line in enumerate(lines, start=1)
-            ])
+            new_rows = []
+            for index, line in enumerate(lines, start=1):
+                rfq_line = line.get('rfq_line')
+                old_line = old_by_rfq_line.get(rfq_line.pk) if rfq_line else None
+                if old_line is None:
+                    old_line = old_by_seq.get(line.get('seq') or index)
+                new_rows.append(SupplierQuotationLine(**self._line_values(
+                    instance, line, index, old_line=old_line, request=request,
+                )))
+            SupplierQuotationLine.objects.bulk_create(new_rows)
         self._recalculate(instance)
         return instance
 

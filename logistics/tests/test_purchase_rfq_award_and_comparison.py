@@ -55,11 +55,11 @@ class RfqAwardAndComparisonTestBase(APITestCase):
         self.client.force_authenticate(user=self.user)
         self.client.credentials(HTTP_X_TENANT_ID=str(self.tenant.TenantID))
 
-    def create_and_send_rfq(self, *, estimated_prices=(None, None), suppliers=None):
+    def create_and_send_rfq(self, *, estimated_prices=(None, None), suppliers=None, scope='local'):
         """طلبيةٌ ببندين، تُرسَل مباشرةً للموردين المُمرَّرين."""
         suppliers = suppliers if suppliers is not None else [self.supplier_a]
         payload = {
-            'scope': 'local',
+            'scope': scope,
             'rfq_date': '2026-09-01',
             'lines': [
                 {
@@ -138,6 +138,62 @@ class RfqAwardProducesRightDocumentTest(RfqAwardAndComparisonTestBase):
             {'supplier': self.supplier_b.id}, format='json',
         )
         self.assertEqual(award.status_code, 400, award.content)
+
+    def test_award_on_import_scope_accepts_offer_and_stops_no_conversion(self):
+        """ISSUE #133 غ١ (قرار المالك 2026-09-04): بالاستيراد الطلبيةُ والعرضُ
+        الشيءُ نفسُه — الترسية تقبل عرض الفائز وتُغلق الطلبية عليه، ولا تحوّل
+        شيئاً. التحويل إلى صفقة يمرّ لاحقاً بمسار «تحويل إلى صفقة» على العرض
+        المقبول — لا منطق تحويل هنا.
+        """
+        from logistics.models import LogisticsDeal
+
+        data = self.create_and_send_rfq(
+            estimated_prices=(Decimal('10'), Decimal('20')), scope='import',
+        )
+        rfq_id = data['id']
+        self.assertEqual(data['scope'], 'import')
+        line_ids = [line['id'] for line in data['lines']]
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        submit_rfq_supplier_quote(
+            recipient, name='Rep A',
+            prices={line_ids[0]: Decimal('10'), line_ids[1]: Decimal('20')},
+        )
+
+        award = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/award/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
+        self.assertEqual(award.status_code, 200, award.content)
+        self.assertEqual(award.data['status'], 'awarded')
+        self.assertEqual(award.data['awarded_supplier_id'], self.supplier_a.id)
+        self.assertIsNone(award.data['awarded_document'])
+
+        recipient.refresh_from_db()
+        self.assertEqual(recipient.quotation.status, SupplierQuotation.STATUS_ACCEPTED)
+        # لا صفقة ولا فاتورة ولا أمر شراء نتج عن الترسية بالاستيراد.
+        self.assertFalse(LogisticsDeal.objects.filter(tenant=self.tenant).exists())
+        self.assertFalse(PurchaseInvoice.objects.filter(tenant=self.tenant).exists())
+        self.assertFalse(PurchaseOrder.objects.filter(tenant=self.tenant).exists())
+
+    def test_award_on_purchase_scope_still_produces_invoice_regression_guard(self):
+        """حارسُ انحدارٍ: الشراء المحلّي يبقى ينتج فاتورة كما كان — التفريع
+        بين النطاقين في `award` لا يجوز أن يمسّ مسار الشراء المحلّي."""
+        data = self.create_and_send_rfq(scope='local')
+        rfq_id = data['id']
+        line_ids = [line['id'] for line in data['lines']]
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        submit_rfq_supplier_quote(
+            recipient, name='Rep A',
+            prices={line_ids[0]: Decimal('10'), line_ids[1]: Decimal('20')},
+        )
+
+        award = self.client.post(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/award/',
+            {'supplier': self.supplier_a.id}, format='json',
+        )
+        self.assertEqual(award.status_code, 200, award.content)
+        self.assertIsNotNone(award.data['awarded_document'])
+        self.assertEqual(award.data['awarded_document']['type'], 'purchase_invoice')
 
     def test_cannot_award_an_already_awarded_rfq_twice(self):
         data = self.create_and_send_rfq()
@@ -293,8 +349,15 @@ class RfqComparisonTest(RfqAwardAndComparisonTestBase):
         self.assertEqual(set(supplier_row.keys()), {
             'supplier_id', 'supplier_name', 'quotation_id', 'quotation_number',
             'currency_code', 'exchange_rate', 'replied_at', 'prices', 'goods_total_base',
-            # ISSUE #122: شارةُ مصدر الإدخال — الحقل الوحيد الذي كسبته المصفوفة.
+            # ISSUE #122: شارةُ مصدر الإدخال.
             'entry_source',
+            # ISSUE #133 غ٣ (مواصفة #130 §١): ملاحظةُ المورّد على كلّ بند
+            # (`notes`) وملاحظتُه العامة على الطلبية كلّها (`general_note`) —
+            # سببُ وجود المصفوفة أصلاً «هذا ما عندي بدل ما طلبت». وتعليقنا
+            # الداخليّ (`internal_notes`) يظهر هنا أيضاً — هذه شاشةٌ مصادَقٌ
+            # عليها لا السطح العام، ومعه `quotation_line_ids` ليربط بند
+            # الطلبية بسطر العرض الذي يُكتَب عليه التعليق.
+            'notes', 'general_note', 'internal_notes', 'quotation_line_ids',
         })
 
     def test_comparison_from_another_tenant_is_not_readable(self):
@@ -303,6 +366,96 @@ class RfqComparisonTest(RfqAwardAndComparisonTestBase):
         self.client.credentials(HTTP_X_TENANT_ID=str(self.other_tenant.TenantID))
         response = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/comparison/')
         self.assertEqual(response.status_code, 404)
+
+    # ── ISSUE #133 غ٣ (مواصفة #130 §١، مراجعة الجولة الثانية) ──────────────
+    #
+    # الملاحظتان يجب أن تصلا معاً إلى المصفوفة — سببُ وجودها أصلاً — ونقطةُ
+    # الكتابة الوحيدة للتعليق الداخليّ (`set_line_internal_note`) يجب ألّا
+    # تمسّ نصّ المورّد بحرف، لأنها تعيش على السطر نفسه لا على نسخةٍ منه.
+
+    def test_comparison_carries_both_the_suppliers_note_and_our_internal_reply(self):
+        data = self.create_and_send_rfq(estimated_prices=(Decimal('10'), Decimal('20')))
+        rfq_id = data['id']
+        line_ids = [line['id'] for line in data['lines']]
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        submit_rfq_supplier_quote(
+            recipient, name='Rep A',
+            prices={line_ids[0]: Decimal('9'), line_ids[1]: Decimal('19')},
+            notes={line_ids[0]: 'عندنا مقاسٌ أكبر بقليل فقط'},
+            general_note='لا نورّد خارج المدينة',
+        )
+
+        response = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/comparison/')
+        self.assertEqual(response.status_code, 200, response.content)
+        supplier_row = response.data['suppliers'][0]
+        self.assertEqual(
+            supplier_row['notes'][str(line_ids[0])], 'عندنا مقاسٌ أكبر بقليل فقط',
+        )
+        self.assertIsNone(supplier_row['notes'][str(line_ids[1])])
+        self.assertEqual(supplier_row['general_note'], 'لا نورّد خارج المدينة')
+        # لا تعليق داخليّ بعد — نصٌّ فارغ وكاتبٌ فارغ، لا مفتاحٌ غائب.
+        self.assertEqual(supplier_row['internal_notes'][str(line_ids[0])]['text'], '')
+        self.assertEqual(supplier_row['internal_notes'][str(line_ids[0])]['by'], '')
+
+    def test_writing_an_internal_note_leaves_the_suppliers_text_byte_for_byte_unchanged(self):
+        data = self.create_and_send_rfq(estimated_prices=(Decimal('10'), Decimal('20')))
+        rfq_id = data['id']
+        line_ids = [line['id'] for line in data['lines']]
+        recipient = PurchaseRFQRecipient.objects.get(rfq_id=rfq_id, supplier=self.supplier_a)
+        submit_rfq_supplier_quote(
+            recipient, name='Rep A',
+            prices={line_ids[0]: Decimal('9'), line_ids[1]: Decimal('19')},
+            notes={line_ids[0]: 'نصّ المورّد الأصلي — لا يُمَسّ'},
+        )
+        quotation = recipient.quotation
+        quotation_line = quotation.lines.get(rfq_line_id=line_ids[0])
+
+        comparison_before = self.client.get(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/comparison/',
+        ).data
+        quotation_line_id = (
+            comparison_before['suppliers'][0]['quotation_line_ids'][str(line_ids[0])]
+        )
+        self.assertEqual(quotation_line_id, quotation_line.pk)
+
+        # نقطة الكتابة الوحيدة للتعليق الداخليّ — من المصفوفة حيث يقرأ
+        # المشتري ملاحظة المورّد ويردّ عليها، لا من محرّر العروض.
+        response = self.client.post(
+            f'/api/logistics/supplier-quotations/{quotation.pk}/lines/{quotation_line_id}/internal-note/',
+            {'internal_note': 'نتحقّق من هذا مع المستودع قبل الترسية'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            response.data['internal_note'], 'نتحقّق من هذا مع المستودع قبل الترسية',
+        )
+        self.assertEqual(response.data['internal_note_by_name'], 'rfq-award-owner')
+        self.assertIsNotNone(response.data['internal_note_at'])
+        # والنصّ المقفَل غائبٌ عن جسم الاستجابة كتابةً — يعود للقراءة فقط.
+        self.assertEqual(response.data['supplier_note'], 'نصّ المورّد الأصلي — لا يُمَسّ')
+
+        quotation_line.refresh_from_db()
+        self.assertEqual(quotation_line.supplier_note, 'نصّ المورّد الأصلي — لا يُمَسّ')
+        self.assertEqual(
+            quotation_line.internal_note, 'نتحقّق من هذا مع المستودع قبل الترسية',
+        )
+        self.assertEqual(quotation_line.internal_note_by_id, self.user.pk)
+
+        # وتظهر الآن في المصفوفة أيضاً — بجانب نصّ المورّد لا بدلاً عنه.
+        comparison_after = self.client.get(
+            f'/api/logistics/purchase-rfqs/{rfq_id}/comparison/',
+        ).data
+        supplier_row = comparison_after['suppliers'][0]
+        self.assertEqual(
+            supplier_row['notes'][str(line_ids[0])], 'نصّ المورّد الأصلي — لا يُمَسّ',
+        )
+        self.assertEqual(
+            supplier_row['internal_notes'][str(line_ids[0])]['text'],
+            'نتحقّق من هذا مع المستودع قبل الترسية',
+        )
+        self.assertEqual(
+            supplier_row['internal_notes'][str(line_ids[0])]['by'], 'rfq-award-owner',
+        )
 
 
 class RfqOfferEnteredFromTheEditorTest(RfqAwardAndComparisonTestBase):

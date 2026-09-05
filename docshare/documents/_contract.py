@@ -269,9 +269,13 @@ def decision_display(spec, document):
 # (`submit_quote`) و`documents/purchase_docs.py` (`QUOTE_PURCHASE_RFQ`).
 
 #: مفاتيح العرض في مواصفة التسعير — وحدها تخرج إلى الصفحة.
+#: ISSUE #133 غ٤/غ٧: `notes_label`/`general_note_label` أُضيفا حين صار
+#: للمورّد عمود ملاحظاتٍ وملاحظةٌ عامة (مواصفة #130 §١) — وكل قيمةٍ نصّيةٍ هنا
+#: **زوجٌ** `(عربي, إنجليزي)` لا سلسلةً واحدة، كي تُصيَّر الصفحة بلغتين
+#: بسطرين مستقلَّين (لا نصّاً مختلطاً في عقدةٍ واحدة).
 QUOTE_DISPLAY_KEYS = (
     "title", "hint", "price_label", "confirm_label",
-    "submitted_note", "closed_note",
+    "submitted_note", "closed_note", "notes_label", "general_note_label",
 )
 
 #: مواصفة تسعيرٍ كاملة = مفاتيح العرض + هذه. النقصُ يُخفِق `tests/test_registry.py`.

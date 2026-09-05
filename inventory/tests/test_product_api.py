@@ -188,7 +188,8 @@ class ProductApiTest(APITestCase):
 
     # ── #22: منتقي المنتجات في المستندات ──
     def test_lookup_contract_gains_exactly_family_id_and_family_name(self):
-        """العقد يكسب حقلين فقط — لا يتوسّع أكثر (قرارٌ صريح على #12).
+        """العقد يكسب حقلين فقط (لا يتوسّع أكثر، قرارٌ صريح على #12) — بالإضافة
+        إلى زوجٍ لاحقٍ صريح آخر: السعر التقديري (#133).
 
         `category` تُضبَط عمداً لأن `category_name` (`source='category.name'`)
         تُسقَط من الردّ حين تكون فارغة — لا حقلٌ ناقص، بل `SkipField` على
@@ -215,7 +216,12 @@ class ProductApiTest(APITestCase):
             "is_for_sale_online", "online_price", "online_description",
             "attachments", "supplier_codes_text",
         }
-        assert set(row.keys()) == known_before | {"family_id", "family_name"}
+        # #133: زوجٌ صريحٌ آخر أُضيف لاحقاً — السعر التقديري (أقلّ شراء ضمن
+        # آخر ٥ فواتير) ومصدره، ليقرأه منتقي المستندات بلا فتح كرت المنتج.
+        assert set(row.keys()) == known_before | {
+            "family_id", "family_name",
+            "indicative_purchase_price", "indicative_purchase_price_source",
+        }
 
     def test_lookup_list_exposes_every_brand_of_a_family_each_with_the_brand_in_its_name(self):
         """كتابة اسم المنتج تُنزل كل برانداته — كلٌّ بصيغة «اسم المنتج (البراند)».
@@ -262,7 +268,11 @@ class ProductApiTest(APITestCase):
     def test_lookup_family_name_does_not_add_a_query_per_row(self):
         """`family_name` يُقرأ من `select_related('family')` — عقد المنتقي
         مقيسٌ صراحةً (609ك/331مِلّي على 1490 منتجاً)، فحقلٌ يفتح استعلاماً لكل
-        صفٍّ يُعيد بالضبط ما بُني هذا العقد الضيّق ليمنعه."""
+        صفٍّ يُعيد بالضبط ما بُني هذا العقد الضيّق ليمنعه.
+
+        الحدّ صار ٧ لا ٦ بعد #133: `indicative_purchase_price`/`_source` يقرآن
+        من خريطةٍ واحدة (`_indicative_purchase_price_map`) — استعلامٌ إضافيٌّ
+        **واحد** ثابت مهما بلغ عدد الصفوف، لا استعلاماً لكل صفّ."""
         for i in range(10):
             create_product_with_family(tenant=self.t_a, name_ar=f"منتج {i}", sku=f"FAMQ-{i}")
         self._auth()
@@ -272,7 +282,7 @@ class ProductApiTest(APITestCase):
 
         assert res.status_code == 200, res.content[:300]
         assert len(res.json()) == 10
-        assert len(captured) <= 6, [q["sql"] for q in captured]
+        assert len(captured) <= 7, [q["sql"] for q in captured]
 
     def test_category_tree_query_count_is_constant(self):
         root = ProductCategory.objects.create(tenant=self.t_a, name="جذر")

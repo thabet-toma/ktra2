@@ -45,8 +45,8 @@
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `SupplierQuotation` (:11) | `scope` (local/import), `status` (9 حالات), `supplier_draft_name`, `entry_source` (`supplier_link`/`manual` — **ISSUE #122**، مختومٌ خادمياً وقراءةٌ فقط في المُسلسِل) | `supplier`→Partner (nullable), `rfq`→`PurchaseRFQ` (nullable، #112 — **قابلٌ للكتابة منذ #122**)، `import_deal` OneToOne، `local_order`/`local_invoice` FK عكسي (بعد #112 — كانا OneToOne) |
-| `SupplierQuotationLine` (`logistics/models.py`) | `seq`، `unit_of_measure`، `unit_price`، `line_total` | `quotation`، `product` (nullable) + `name_snapshot`، `rfq_line`→`PurchaseRFQLine` (nullable، **ISSUE #122**: نَسَبُ السطر إلى بند الطلبية — عليه تطابق المصفوفة لا على `seq`) |
+| `SupplierQuotation` (:11) | `scope` (local/import), `status` (9 حالات), `supplier_draft_name`, `entry_source` (`supplier_link`/`manual` — **ISSUE #122**، مختومٌ خادمياً وقراءةٌ فقط في المُسلسِل)، `general_note` (ملاحظة المورّد العامة على الطلبية كلّها — ISSUE #133) | `supplier`→Partner (nullable), `rfq`→`PurchaseRFQ` (nullable، #112 — **قابلٌ للكتابة منذ #122**)، `import_deal` OneToOne، `local_order`/`local_invoice` FK عكسي (بعد #112 — كانا OneToOne) |
+| `SupplierQuotationLine` (`logistics/models.py`) | `seq`، `unit_of_measure`، `unit_price`، `line_total`، `supplier_note` (نصّ المورّد — `read_only_fields` يقفله عن كتابة المكتب، ISSUE #133)، `internal_note`/`internal_note_by`/`internal_note_at` (تعليقنا نحن، مسارٌ مستقلّ) | `quotation`، `product` (nullable) + `name_snapshot`، `rfq_line`→`PurchaseRFQLine` (nullable، **ISSUE #122**: نَسَبُ السطر إلى بند الطلبية — عليه تطابق المصفوفة لا على `seq`) |
 | `PurchaseRFQ` (`logistics/models.py`) | `rfq_number` (NULL حتى أوّل إرسال)، `scope`، `status` (draft/sent/awarded/cancelled)، `reply_deadline` | `tenant`، `lines`، `recipients`، `quotations` (عكسي من `SupplierQuotation.rfq`) — **ISSUE #112**، مواصفة #108 |
 | `PurchaseRFQLine` (`logistics/models.py`) | `quantity`، `unit_of_measure`، `specs`، `estimated_price` (داخليّ، nullable) — **بلا `unit_price` وبلا كود HS** | `rfq`، `product` (nullable) + `name_snapshot` (نمط `SupplierQuotationLine`) |
 | `PurchaseRFQRecipient` (`logistics/models.py`) | `sent_at`، `replied_at` | `rfq`، `supplier`→Partner، `share`→`docshare.DocumentShare` (nullable، **مسلوكة — ISSUE #115**: `_wire_rfq_recipient_shares` في `send/`/`recipients/`)، `quotation` OneToOne (nullable). المُسلسِل يكشف `share_url` (من `docshare.services.public_url`) و`share_is_live`/`share_expires_at`/`share_revoked_at` — **بلا `token` خام**؛ و`get_queryset` يجلب `recipients__share` مسبقاً |
@@ -131,7 +131,7 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | POST | `purchase-invoices/{pk}/post-to-accounting/` · `receive/` · `unpost/` · `returns/` | views.py:3400 / 2991 / 4047 / 3027 |
 | GET | `import-journey/` · `reports/landed-cost/?shipment_id=` | views.py:4557 / 4588 |
 | GET/POST | `goods-receipts/` · `goods-receipts/outstanding/` · `purchase-settings/current/` | views.py:4783 / 4935 / 5038 |
-| POST | `purchase-rfqs/{pk}/send/` · `cancel/` · `award/` · `recipients/` · `duplicate/` | **ISSUE #112**: أوّل إرسال يقفل البنود ويخصّص الرقم؛ `recipients/` وحده مسموحٌ بعد الإرسال. **`award/`** (ISSUE #116) يحمل `supplier` إلزامياً — يقبل عرض الفائز وينتج أمر شراء أو فاتورة بحسب `use_purchase_orders` (`PurchaseRFQViewSet`، `logistics/views/procurement.py`). **`duplicate/`** (ISSUE #112، فجوةٌ مُعادةُ الفتح) تنسخ طلبيةً مقفلةً مسودّةً جديدة — بنودُها كلُّها بما فيها `estimated_price`، **بلا مستقبِلين ولا روابط ولا رقم** (`TenantBook` لا يتحرّك حتى أوّل إرسال)، والأصلُ لا يُمَسّ؛ النَّسبُ سطرٌ في `notes` لا حقلٌ جديد |
+| POST | `purchase-rfqs/{pk}/send/` · `cancel/` · `award/` · `recipients/` · `duplicate/` | **ISSUE #112**: أوّل إرسال يقفل البنود ويخصّص الرقم؛ `recipients/` وحده مسموحٌ بعد الإرسال. **`award/`** (ISSUE #116) يحمل `supplier` إلزامياً — يقبل عرض الفائز دائماً، لكن ما بعده نطاقيٌّ (ISSUE #133): **شراءٌ محلّي** ينتج أمر شراء أو فاتورة بحسب `use_purchase_orders`، أمّا **الاستيراد** فيقبل العرض ويُغلق الطلبية **ويتوقّف** — `awarded_document` يعود `null`، والتحويل إلى صفقة يمرّ لاحقاً بمسار «تحويل إلى صفقة» على العرض المقبول (`PurchaseRFQViewSet`، `logistics/views/procurement.py`). **`duplicate/`** (ISSUE #112، فجوةٌ مُعادةُ الفتح) تنسخ طلبيةً مقفلةً مسودّةً جديدة — بنودُها كلُّها بما فيها `estimated_price`، **بلا مستقبِلين ولا روابط ولا رقم** (`TenantBook` لا يتحرّك حتى أوّل إرسال)، والأصلُ لا يُمَسّ؛ النَّسبُ سطرٌ في `notes` لا حقلٌ جديد |
 | GET | `purchase-rfqs/{pk}/comparison/` | **ISSUE #116**: مصفوفة الموردين — صفٌّ لكل بند وعمودٌ لكل موردٍ ردّ فعلياً، بالعملة الأساسية، بلا حقل شحن. خطُّ الأساس `estimated_price` لا «أقل سعر» (ذاك داخل العرض الواحد وحده، #113). داخليّةٌ بحتة — لا `doc_type` لها في `docshare`. **ISSUE #122**: كلُّ عمودٍ يحمل `entry_source` (سعّره المورّد أم أدخلناه عنه)، والمطابقةُ صارت على `SupplierQuotationLine.rfq_line` — و`seq` سقوطٌ لعروضٍ لا نَسَبَ في أيٍّ من سطورها وحدها |
 | — | باقي الموارد بالـrouter: `supplier-quotations/`, `purchase-rfqs/`, `purchase-orders/`, `payments/`, `supplier-payments/`, `local-shipments/` | urls.py |
 
@@ -270,7 +270,11 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   على طلبية ليست `draft` (400 على تعديل بند). المسموح بعد الإرسال: إضافة
   مستقبِل (`POST .../recipients/`) والإلغاء والملاحظات والمهلة وحدها.
   **الرقم يُخصَّص عند أوّل إرسال لا عند الإنشاء** (`rfq_number` يبقى `NULL`
-  حتى فعل `send/` — مسودّة مهجورة لا تحرق رقماً). «وردت عروض» عدّادٌ مشتقّ
+  حتى فعل `send/` — مسودّة مهجورة لا تحرق رقماً). **وتسلسلٌ مستقلّ بادئةً
+  ورقماً للاستيراد** (ISSUE #133): `IRFQ-` بدل `RFQ-` — كانا يتشاركان
+  عدّاداً واحداً فتُسقط طلبيةُ استيرادٍ واحدة تُرسَل بين طلبيتين محلّيّتين
+  رقمَ الثانية منهما؛ الشراء المحلّي يبقى على مفتاحه وبادئته القديمين
+  حرفياً بلا إعادة ترقيم. «وردت عروض» عدّادٌ مشتقّ
   (`recipients_count`/`replies_count`) لا حقلٌ مخزَّن. **ولا كود HS على بندها
   إطلاقاً** — مورّدٌ يُسعّر لا يُسأل عن الرمز الجمركي (قرار المالك #108 §4).
   السعر التقديريّ (`estimated_price`) رقمٌ داخليّ فقط؛ مسار خروجه المحروس
@@ -304,12 +308,19 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   واحد**: `goods_total_base` = Σ(كمية × سعر) للبنود المسعَّرة وحدها — بندٌ لم
   يُسعّره موردٌ بعينه لا يدخل الإجمالي صفراً، و**لا حقل شحنٍ في الاستجابة
   إطلاقاً** (ناسخاً إجمالي #107 الشامل؛ الشحن باقٍ في الصفقة والتكلفة
-  النهائية). **`award/` يحمل `supplier` إلزامياً** الآن — يحسم أيّ ردّ
-  (`SupplierQuotation`) فائزٌ، يقبله (`STATUS_ACCEPTED`) ثم يمرّ حرفياً بمسار
-  قبول عرضٍ محلّيّ يدويّ (`convert_local_quotation_to_order`/`_invoice`) —
-  **لا منطق ترحيل جديد**، تركيبُ خدمات قائمة وراء مفتاح `use_purchase_orders`
-  (#117) وحده. مورّدٌ لم يردّ بعد لا عمود له في المصفوفة أصلاً (فراغٌ لا
-  يُفسَّر خطأً كرفض).
+  النهائية). **`award/` يحمل `supplier` إلزامياً** — يحسم أيّ ردّ
+  (`SupplierQuotation`) فائزٌ ويقبله (`STATUS_ACCEPTED`) دائماً، ثم يتفرّع
+  بحسب نطاق الطلبية (ISSUE #133، قرار المالك 2026-09-04): **شراءٌ محلّي**
+  يمرّ حرفياً بمسار قبول عرضٍ محلّيّ يدويّ
+  (`convert_local_quotation_to_order`/`_invoice`) — **لا منطق ترحيل جديد**،
+  تركيبُ خدمات قائمة وراء مفتاح `use_purchase_orders` (#117) وحده؛
+  **استيرادٌ** يقبل العرض ويُغلق الطلبية **ويتوقّف هنا بلا تحويل** — كلتا
+  دالّتَي التحويل محلّيّتان فقط بحكم `SupplierQuotation.scope`، وكانت
+  المكالمة قبل هذه التذكرة تُرفَض 400 بعد تأكيدٍ يقول «لا رجعة» — زرٌّ ميتٌ
+  بلا اختبارٍ واحد يغطّيه. التحويل إلى صفقة استيراد يمرّ لاحقاً بمسار
+  «تحويل إلى صفقة» القائم أصلاً على العرض المقبول — صفقةٌ تحتاج شحناً
+  وتخليصاً وتكلفةً مستوردة لا تُولَد من ضغطة واحدة. مورّدٌ لم يردّ بعد لا
+  عمود له في المصفوفة أصلاً (فراغٌ لا يُفسَّر خطأً كرفض).
 - **ISSUE #122 — المورّدُ الذي سعّر هاتفياً: عرضٌ يُولَد من الطلبية لا نافذةٌ
   ثانية** (قرار المالك 2026-09-04). لا نقطةَ API جديدة ولا نموذجَ تسعيرٍ
   مستقلّ: يُفتَح **محرِّرُ العروض نفسُه** عرضاً جديداً غيرَ محفوظ، مُعبَّأً
@@ -328,9 +339,36 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   وسطرٌ لا يشير إلى بندٍ في طلبيةٍ أخرى. وعند الربط: `recipient.quotation`
   و`replied_at` (وقتُ **أوّل** ردّ لا آخره) و`entry_source='manual'`
   و`created_by` من `perform_create` كأيّ مستند. **ومسارُ الرابط العامّ لم
-  يتغيّر بحرف**: `submit_rfq_supplier_quote` تبقى نقطةَ كتابته الوحيدة وتفرض
-  سعراً لكلّ بند، وكسبت ختمَين فقط (`entry_source='supplier_link'`
-  و`rfq_line` على كلّ سطر) — يحرسهما `docshare/tests/test_purchase_rfq_quote.py`.
+  يتغيّر بحرف بهذه التذكرة**: `submit_rfq_supplier_quote` تبقى نقطةَ كتابته
+  الوحيدة وتفرض سعراً لكلّ بند، وكسبت هنا ختمَين فقط (`entry_source='supplier_link'`
+  و`rfq_line` على كلّ سطر). **وتذكرةٌ لاحقة (#133) وسّعتها ثلاثاً**: عملةٌ
+  اختياريّة للمورّد الأجنبي — عملةٌ لا سعر صرف لها للشركة تُرفَض لا تُخزَّن
+  بسعر 1 (إغلاقٌ للثغرة نفسها التي أغلقها #111 عائدةً من باب ثالث)؛ وملاحظةٌ
+  عامة على الطلبية كلّها (`SupplierQuotation.general_note`) وملاحظةٌ لكلّ
+  بند (`SupplierQuotationLine.supplier_note`) — نفس نقطة الكتابة الوحيدة
+  لـ`entry_source`/`rfq_line` أعلاه. يحرس الثلاثة معاً `docshare/tests/test_purchase_rfq_quote.py`.
+- **ISSUE #133 — فجوة رؤية لا تسريب: افتراض النطاق المحلّي مقصورٌ على `list`
+  وحده** — `SupplierQuotationViewSet.get_queryset` و`PurchaseRFQViewSet.get_queryset`
+  بلا `?scope=` صريح يعودان بالشراء المحلّي وحده، لكن على فعل **القائمة
+  فقط**؛ تطبيقه شاملاً كان يكسر `get_object()` على مستندٍ استيراديّ فيحجب
+  `send/`، `award/`، `comparison/`، `recipients/` عنه بحجّة افتراضٍ لا علاقة
+  له بها. هذه فجوةُ **رؤيةٍ داخل الشركة نفسها** بين شاشتَي الشراء المحلّي
+  والاستيراد لا سهواً في العزل — عزل الـtenant عبر `TenantQuerySetMixin`
+  سليمٌ ولم يمسّه هذا التغيير، وكل مستدعٍ في الواجهة يرسل `scope` صراحةً على
+  قوائمه اليوم.
+- **ISSUE #133 — ملاحظتان لا واحدة على سطر العرض**: نصّ المورّد
+  (`SupplierQuotationLine.supplier_note`) دليلٌ لا يُعدَّل — `read_only_fields`
+  يقفله أمام أيّ كتابةٍ من سطح المكتب، ويُحمَل حرفياً عبر مسار حفظ العرض
+  الذي يحذف كل سطورها ويعيد إنشاءها؛ الكاتبُ الوحيد له `submit_rfq_supplier_quote`
+  من الرابط العام. وتعليقنا عليه (`internal_note`/`internal_note_by`/`internal_note_at`)
+  مسارٌ آخر تماماً: نقطةٌ جديدة (`SupplierQuotationViewSet` (`set_line_internal_note`)،
+  `POST supplier-quotations/{pk}/lines/{line_id}/internal-note/`) تكتب سطراً
+  واحداً بعينه بلا لمس بقية العرض، ومحرّرُ العروض القائم يقبله أيضاً في
+  حمولة الحفظ. **مصفوفة المقارنة (`comparison/`) هي حيث يُقرآن معاً** —
+  ملاحظةُ المورّد سببُ وجودها («هذا ما عندي بدل ما طلبت»)، وتعليقنا يُكتب
+  منها. **ولا يخرج تعليقنا الداخليّ إلى صفحة المشاركة العامة أبداً** —
+  حمولة `purchase_rfq` التي يراها المورّد لا تحمل غير حقوله هو
+  (`docshare/documents/purchase_docs.py`).
 
 ## إلغاء ترحيل الدفعات (وُحِّد في المرحلة 2 + معالجتها 2026-08-11)
 إلغاء ترحيل دفعة صفقة (`unpost_payment_from_accounting`) ودفعة تخليص (`unpost_payment`)
@@ -366,4 +404,6 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | `tests/test_tenant_isolation.py` (75) | لا تسرّب صفقات بين الشركات؛ 400 بلا ترويسة الشركة |
 | `tests/test_purchase_rfq.py` (ISSUE #112 · #122) | بندٌ بلا سعر ولا HS · قفل البنود عند أوّل إرسال (400) وقبول مستقبِل جديد · الحالات المسموحة/الممنوعة · عدّاد الردود المشتقّ · ترقيمٌ عند أوّل إرسال بلا حرق مسودّة مهجورة · عزل الشركة · **#122**: حرّاسُ العرض المولود من الطلبية — مستقبِلٌ ردّ سلفاً، طلبيةُ شركةٍ أخرى، مسودّة/مُرساة/ملغاة، مستقبِلٌ من طلبيةٍ أخرى، سطرٌ يشير إلى بند طلبيةٍ أخرى |
 | `tests/test_use_purchase_orders_setting.py` (ISSUE #117) | مطفأً: الإنشاء المباشر و«تحويل عرض إلى طلبية» يُرفضان (400)، وقراءة/فتح أمرٍ قائم مقبولة بلا حجب · هجرة `0082` تُشعله لشركةٍ لها أمرٌ قائم فقط (وتتجاهل المحذوف ناعماً) وتترك غيرها مطفأً |
-| `tests/test_purchase_rfq_award_and_comparison.py` (ISSUE #116 · #122) | `award/` ينتج فاتورة أو أمر شراء بحسب `use_purchase_orders` · يُرفض بلا `supplier` أو لموردٍ لم يردّ أو مرّتين · `comparison/`: بندٌ بلا تقديريّ يعود `None`، بندٌ لم يُسعّره موردٌ لا يُحتسَب صفراً في إجماليّه، توحيد العملات بسعر صرفٍ صريح، مورّدٌ لم يردّ بلا عمود، لا حقل شحنٍ في الاستجابة، عزل الشركة · **#122**: عرضٌ مولودٌ من مستقبِلٍ يصير عمودَه وتصحّ الترسيةُ عليه · **عرضٌ حُذف سطرُه الأوسط تبقى أسعارُه تحت بنودها** (يسقط بلا `rfq_line`) · `entry_source` يميّز العمودَين · عملةٌ غير الأساس تُحوَّل |
+| `tests/test_purchase_rfq_award_and_comparison.py` (ISSUE #116 · #122 · #133) | بالشراء المحلّي `award/` ينتج فاتورة أو أمر شراء بحسب `use_purchase_orders` · يُرفض بلا `supplier` أو لموردٍ لم يردّ أو مرّتين · **بالاستيراد يقبل العرض ويتوقّف بلا تحويل** — لا صفقة ولا فاتورة ولا أمر شراء (`test_award_on_import_scope_accepts_offer_and_stops_no_conversion`)، وحارسُ انحدارٍ يثبّت أن الشراء المحلّي لم يتأثّر بالتفريع (`test_award_on_purchase_scope_still_produces_invoice_regression_guard`) · `comparison/`: بندٌ بلا تقديريّ يعود `None`، بندٌ لم يُسعّره موردٌ لا يُحتسَب صفراً في إجماليّه، توحيد العملات بسعر صرفٍ صريح، مورّدٌ لم يردّ بلا عمود، لا حقل شحنٍ في الاستجابة، عزل الشركة · **#122**: عرضٌ مولودٌ من مستقبِلٍ يصير عمودَه وتصحّ الترسيةُ عليه · **عرضٌ حُذف سطرُه الأوسط تبقى أسعارُه تحت بنودها** (يسقط بلا `rfq_line`) · `entry_source` يميّز العمودَين · عملةٌ غير الأساس تُحوَّل |
+| `docshare/tests/test_purchase_rfq_quote.py` (ISSUE #133) | تسعير المورّد على الرابط العام: خيارُ عملةٍ افتراضُه الأساس ويستبعد عملةً بلا سعر صرفٍ مُعرَّف (`test_currency_options_exclude_a_currency_with_no_configured_rate`)، وتقديمُ عملةٍ كذلك يُرفض لا يُخزَّن بسعر 1 (`test_submitting_a_currency_with_no_configured_rate_is_refused_not_defaulted`)، وتسعيرٌ بعملةٍ أجنبية يُحفَظ بها ويُحوَّل في المصفوفة (`test_supplier_priced_in_a_foreign_currency_is_stored_in_that_currency` · `test_foreign_currency_quote_is_converted_in_the_comparison_matrix`) · ملاحظةُ السطر وملاحظةُ الطلبية العامة تُخزَّنان وتعودان (`test_supplier_line_note_is_stored_and_comes_back_on_read` · `test_supplier_general_note_for_the_whole_rfq_is_stored_and_returned`)، وتعليقنا الداخليّ لا يمسّ نصّ المورّد ولا يُكتب من أي مسارٍ منصّة (`test_internal_note_never_alters_the_suppliers_text_and_no_platform_path_can_edit_it`)، ولا يتسرّب إلى الصفحة العامة (`test_comparison_matrix_carries_the_suppliers_note_and_our_reply_never_leaks_to_the_public_page`) · رسالةُ خطأٍ يقدر المورّد أن يستحضرها فعلياً تُعرض عربياً وإنجليزياً معاً (`test_a_validation_error_the_supplier_can_actually_trigger_is_shown_bilingually`) · عنوان الصفحة يتبع نطاق الطلبية (`test_page_title_follows_the_rfq_scope`) |
+| `tests/test_purchase_price_resolver.py` (ISSUE #111 · #133) | «السعر التقديري» (`core.pricing.indicative_purchase_prices`): يستبعد ما تحت أرضية النافذة (`test_indicative_price_excludes_old_floor_outside_window`)، ويستعمل ما هو موجود إن كان تاريخ الشراء أقصر من النافذة (`test_indicative_price_fewer_than_window_uses_what_exists`)، يغيب كلّياً بلا شراء مرحَّل (`test_indicative_price_absent_when_no_purchase_history`)، فاتورةٌ بسطرين لنفس المنتج تُحتسَب مرّةً واحدة (`test_indicative_price_counts_multi_line_invoice_once`)، وكلّ فاتورةٍ تُحوَّل بسعر صرفها هي لا سعر اليوم — حالةُ عملتين مختلفتين (`test_indicative_price_normalizes_each_invoice_at_its_own_rate`)، واستعلامٌ واحد للمجموعة كلّها (`test_indicative_price_bulk_computation_is_single_query`) |

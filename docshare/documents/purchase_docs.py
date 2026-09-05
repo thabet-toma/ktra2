@@ -190,7 +190,7 @@ def build_purchase_invoice(invoice) -> dict:
     grand_total = money(invoice.grand_total)
     return payload(
         kind="purchase_invoice",
-        title="مرجع شراء" if invoice.is_return else "فاتورة شراء",
+        title="مرتجع شراء" if invoice.is_return else "فاتورة شراء",
         number=invoice.invoice_number,
         date=invoice.invoice_date,
         status_label=invoice.get_status_display(),
@@ -449,6 +449,9 @@ _SUPPLIER_QUOTATION_COLUMNS = (
     "supplier__name", "supplier__street_address", "supplier__city",
     "supplier__phone", "supplier__tax_number",
     "currency__Code", "currency__Symbol",
+    # ISSUE #133 غ٣: ملاحظة المورّد العامة على الطلبية كلّها — تظهر في طباعة
+    # هذا العرض أيضاً (مواصفة #130 §١، «الداخلية في الشاشة فقط» لا تشمل هذه).
+    "general_note",
 )
 
 
@@ -471,6 +474,9 @@ def build_supplier_quotation(offer) -> dict:
             "id", "quotation_id", "name_snapshot", "description_line",
             "quantity", "unit_price", "line_total",
             "product__name_ar", "product__name_en", "product__uom__name_ar",
+            # ISSUE #133 غ٣ (مواصفة #130 §١): «نصّه هو» يظهر في طباعة العرض —
+            # لا `internal_note` إطلاقاً، ذاك للشاشة وحدها ولا يُحمَّل هنا حتى.
+            "supplier_note",
         )
         .order_by("seq", "id")
     )
@@ -479,7 +485,9 @@ def build_supplier_quotation(offer) -> dict:
         lines.append(line_row(
             name=name_ar,
             name_en=name_en,
-            note=line.description_line,
+            # نصّ المورّد نفسه له الأولوية — هو ما كتبه على رابطه العام؛
+            # `description_line` مجرّد وصفٍ يدويّ حين لا رابط (عرضٌ أُدخل عنه).
+            note=line.supplier_note or line.description_line,
             unit=line.product.uom.name_ar if line.product_id and line.product.uom_id else "",
             quantity=line.quantity,
             unit_price=line.unit_price,
@@ -509,6 +517,8 @@ def build_supplier_quotation(offer) -> dict:
             meta("الحجم (CBM)", offer.total_cbm or "", VALUE_QTY),
             meta("الوزن (كغ)", offer.total_weight_kg or "", VALUE_QTY),
             meta("العملة", offer.currency.Code if offer.currency_id else ""),
+            # ISSUE #133 غ٣: ملاحظته العامة على الطلبية كلّها — لا الداخلية.
+            meta("ملاحظة المورّد العامة", offer.general_note, VALUE_TEXT),
         ],
         lines=lines,
         totals_rows=[
@@ -590,7 +600,7 @@ def build_local_purchase_invoice(invoice) -> dict:
     is_return = invoice.invoice_kind == SalesInvoice.INVOICE_KIND_PURCHASE_RETURN
     return payload(
         kind="local_purchase_invoice",
-        title="مرجع شراء" if is_return else "فاتورة شراء",
+        title="مرتجع شراء" if is_return else "فاتورة شراء",
         number=invoice.invoice_number,
         date=invoice.invoice_date,
         status_label=invoice.get_status_display(),
@@ -676,7 +686,14 @@ def build_purchase_rfq(rfq) -> dict:
     # هي «الطرف» الذي يُخاطَب، فبطاقة الطرف فارغة عمداً.
     return payload(
         kind="purchase_rfq",
-        title="طلب عرض سعر",
+        # ISSUE #133 غ٥: العنوان يتبع النطاق — كان ثابتاً بلا تمييزٍ بين طلبية
+        # شراءٍ محلّي وطلبية استيراد، ومورّدٌ يفتح الرابطين معاً (حالةٌ فعلية:
+        # نفس المصنع يورّد محلّياً ودولياً) لا يفرّق بينهما من العنوان وحده.
+        title=(
+            "طلب عرض سعر — استيراد"
+            if rfq.scope == PurchaseRFQ.SCOPE_IMPORT
+            else "طلب عرض سعر — شراء محلّي"
+        ),
         number=rfq.rfq_number or "",
         date=rfq.rfq_date,
         status_label=rfq.get_status_display(),
@@ -728,6 +745,16 @@ def _apply_purchase_rfq_quote(rfq, *, name, prices, request, share, ip):
     الدالّة وحدها (لا `docshare/services.py` العامّة) تعرف بوجود `PurchaseRFQ`
     و`PurchaseRFQRecipient` — نفس نمط `_apply_purchase_order_decision` أعلاه
     التي تستدعي `logistics.services.confirm_purchase_order`.
+
+    **ISSUE #133 غ٢**: `currency` حقلٌ اختياريّ يصل في جسم النموذج (`request
+    .data`) — لا توقيعاً جديداً على `submit_quote`/`apply` العامّين، فبقيّة
+    أنواع التسعير المستقبليّة لا تُلزَم به. مورّدٌ لا يختار عملة (النموذج
+    القديم، أو رابطٌ لم يُحدَّث بعد) يقع على عملة الأساس كما كان قبل هذه
+    التذكرة تماماً.
+
+    **ISSUE #133 غ٣**: نفس النمط بالضبط لملاحظتَي المورّد — `general_note`
+    (حقلٌ عامٌّ واحد) و`note_<line_id>` (بجانب `price_<line_id>` الموجود) —
+    كلاهما اختياريّ فلا يكسر رابطاً قديماً بلا خانات ملاحظات.
     """
     from logistics.models import PurchaseRFQRecipient
     from logistics.services import submit_rfq_supplier_quote
@@ -740,7 +767,17 @@ def _apply_purchase_rfq_quote(rfq, *, name, prices, request, share, ip):
     )
     if recipient is None:
         raise ValidationError("هذا الرابط غير مربوطٍ بمورّدٍ على هذه الطلبية.")
-    submit_rfq_supplier_quote(recipient, name=name, prices=prices, ip=ip)
+    currency_id = request.data.get("currency") or None
+    general_note = str(request.data.get("general_note") or "").strip()
+    notes = {}
+    for line in rfq.lines.only("id"):
+        raw = request.data.get(f"note_{line.id}")
+        if raw is not None:
+            notes[line.id] = str(raw).strip()
+    submit_rfq_supplier_quote(
+        recipient, name=name, prices=prices, ip=ip, currency_id=currency_id,
+        general_note=general_note, notes=notes,
+    )
 
 
 def _rfq_quote_prefill(rfq, share) -> dict:
@@ -752,6 +789,13 @@ def _rfq_quote_prefill(rfq, share) -> dict:
     وهي **دالّةُ عرضٍ لا بناء**: لا تدخل `build_purchase_rfq` ولا حمولتَه
     المدقَّقة بالقائمة البيضاء. تُستدعى في طبقة العرض حيث الرابطُ معروف، فما
     يظهر هو سعرُ صاحب الرابط نفسِه — لا سعرُ منافسه، ولا رقمٌ من دفترنا.
+
+    **ISSUE #133 غ٢**: تحمل الآن `currency_id` أيضاً — عملةُ آخر إرسالٍ، كي
+    يعود القائمة مضبوطةً على عملته لا الأساس دائماً.
+
+    **ISSUE #133 غ٣**: وتحمل ملاحظاته أيضاً — `notes` لكلّ بند و`general_note`
+    على الطلبية كلّها — بنفس الحجّة: بلا تعبئةٍ يضطرّ المورّد أن يكتب ملاحظته
+    من جديد كي يصحّح كلمةً واحدة.
     """
     from logistics.models import PurchaseRFQRecipient
 
@@ -763,32 +807,138 @@ def _rfq_quote_prefill(rfq, share) -> dict:
     )
     if recipient is None or recipient.quotation_id is None:
         return {}
+    quotation = recipient.quotation
     by_seq = {
-        line.seq: line.unit_price
-        for line in recipient.quotation.lines.only("id", "quotation_id", "seq", "unit_price")
+        line.seq: line
+        for line in quotation.lines.only(
+            "id", "quotation_id", "seq", "unit_price", "supplier_note",
+        )
     }
+    prices = {}
+    notes = {}
+    for line in rfq.lines.only("id", "rfq_id", "seq"):
+        qline = by_seq.get(line.seq)
+        if qline is None:
+            continue
+        prices[line.id] = qline.unit_price
+        notes[line.id] = qline.supplier_note
     return {
-        line.id: by_seq[line.seq]
-        for line in rfq.lines.only("id", "rfq_id", "seq")
-        if line.seq in by_seq
+        "prices": prices, "notes": notes,
+        "currency_id": quotation.currency_id,
+        "general_note": quotation.general_note,
     }
 
+
+def _rfq_quote_currency_options(rfq) -> list:
+    """قائمة العملات التي يقدر المورّد أن يسعّر بها — ISSUE #133 غ٢.
+
+    **الأساس دائماً، وأيّ عملةٍ أخرى فقط إن أمكن تحويلها اليوم فعلياً**
+    (`accounting.services.get_exchange_rate`). عملةٌ بلا سعر صرفٍ مسجَّل
+    مُستبعَدةٌ من القائمة لا معروضةٌ بلا حساب: لو دخلت الاختيار وسُجِّل سعرٌ
+    ملفَّق (١) عند الحفظ لعاد العرض الأجنبيّ إلى بالضبط ما جاءت هذه التذكرة
+    لمنعه — قيمةٌ لا تمثّل شيئاً حقيقياً تدخل مصفوفة المقارنة وكأنها تمثّل.
+    `submit_rfq_supplier_quote` (`logistics/services.py`) يرفض صراحةً أيّ
+    `currency_id` لا سعر له — هذا الاستبعاد هنا هو ما يجعل ذاك الرفض حالةً
+    استثنائية (نموذجٌ مُتلاعَبٌ به، أو سعرٌ زال بين فتح الصفحة وإرسالها) لا
+    مساراً يوميّاً.
+
+    **دالّةُ عرضٍ اختياريّة** مثل `prefill` أعلاه بالضبط: لا تدخل الحمولة
+    المبنيّة (`build_purchase_rfq`) ولا قائمتها البيضاء — الأساس لا يعرف
+    بوجود الرابط، فلا يجوز أن يعرف بقائمة عملات النظام كلّها. تُستدعى في طبقة
+    العرض وحدها (`docshare/views.py`) حيث الطلبُ معروف.
+    """
+    from django.core.exceptions import ValidationError
+
+    from accounting.services import get_exchange_rate
+    from tenants.models import Currency
+
+    currencies = list(Currency.objects.all().order_by("-IsBaseCurrency", "Code"))
+    base_currency = next((c for c in currencies if c.IsBaseCurrency), None)
+
+    options = []
+    for currency in currencies:
+        if base_currency is None or currency.pk == base_currency.pk:
+            options.append({
+                "id": currency.pk, "code": currency.Code, "is_base": currency.IsBaseCurrency,
+            })
+            continue
+        try:
+            get_exchange_rate(rfq.tenant_id, currency.pk, base_currency.pk)
+        except ValidationError:
+            continue
+        options.append({"id": currency.pk, "code": currency.Code, "is_base": False})
+    return options
+
+
+#: ISSUE #133 غ٤: كلُّ نصٍّ ثابتٍ هنا **زوجٌ** `(عربي, إنجليزي)` — الصفحة
+#: تُصيَّرهما سطرين مستقلَّين (`share.html`، `dir` مستقلٌّ لكلّ سطر). مورّدٌ
+#: أجنبيّ يفتح رابط الطلبية لا يجد صفحةً عربيةً بالكامل بعد اليوم.
+#: ISSUE #133 غ٤ (مراجعة الجولة الثانية — «رسائلُ التحقّق» بندٌ صريح في
+#: المواصفة): كلّ رسالة رفضٍ يقدر المورّدُ فعلياً أن يستحقّها من هذا النموذج
+#: العامّ — بالنصّ العربيّ الحرفيّ كما تخرج من `docshare.services.submit_quote`
+#: (`DecisionRefused`)، `logistics.services.submit_rfq_supplier_quote`،
+#: و`_rfq_quote_closed_reason`/`_apply_purchase_rfq_quote` أعلاه. **مفتاحٌ
+#: اختياريّ** (ليس في `QUOTE_LOGIC_KEYS`) يقرؤه `docshare/views.py` وحده عند
+#: التقاط `DecisionRefused` — نوعٌ لا يعرّفه يبقى برسالةٍ عربية فقط، لا يُخفق.
+#: **ما تعمّدت تركه خارج هذا القاموس**: رسالة `accounting.services
+#: .get_exchange_rate` (تُثار من `_resolve_quote_currency` أعلاه) — نصٌّ
+#: ديناميكيّ يحمل مُعرّفات وتاريخاً فلا يطابقه بحثٌ حرفيّ، وهي أصلاً غيرُ
+#: قابلة للحدوث من نموذجٍ سليم (‏`_rfq_quote_currency_options` تستبعد كل
+#: عملةٍ بلا سعرٍ قابلٍ للحسم من القائمة أصلاً)، ولا يجوز لي أن أترجم رسالةً
+#: عامّة في `accounting` (خارج نطاق ملكيّتي هنا) لأجل مسارٍ واحد.
+_RFQ_QUOTE_ERROR_TRANSLATIONS = {
+    "هذا المستند لا يقبل تسعيراً.": "This document does not accept pricing.",
+    "الاسم مطلوب لإرسال الأسعار.": "Your name is required to submit prices.",
+    "لم تعد الطلبية تقبل الأسعار — أُغلقت أو أُلغيت.":
+        "This RFQ no longer accepts prices — it has been closed or cancelled.",
+    "لا بنود في هذه الطلبية.": "This RFQ has no lines.",
+    "الرجاء إدخال سعر لكل بند.": "Please enter a price for every line.",
+    "سعر غير صالح.": "Invalid price.",
+    "السعر لا يمكن أن يكون سالباً.": "Price cannot be negative.",
+    "لا توجد عملة معرّفة للشركة.": "No currency is configured for this company.",
+    "هذا الرابط غير مربوطٍ بمورّدٍ على هذه الطلبية.":
+        "This link is not linked to a supplier on this RFQ.",
+    "أُرسيت هذه الطلبية على مورّدٍ آخر ولم تعد تقبل أسعاراً.":
+        "This RFQ has been awarded to another supplier and no longer accepts prices.",
+    "أُلغيت هذه الطلبية.": "This RFQ has been cancelled.",
+    "لم تعد هذه الطلبية تقبل الأسعار.": "This RFQ no longer accepts prices.",
+}
 
 QUOTE_PURCHASE_RFQ = {
-    "title": "أسعاركم على هذه الطلبية",
+    "title": ("أسعاركم على هذه الطلبية", "Your prices for this RFQ"),
     "hint": (
         "اكتبوا السعر أمام كل بند، ثم اسمكم، وأكّدوا. يمكنكم تعديل الأسعار "
-        "بإرسال النموذج مجدداً ما دامت الطلبية مفتوحة."
+        "بإرسال النموذج مجدداً ما دامت الطلبية مفتوحة.",
+        "Enter a price for each line, then your name, and confirm. You may "
+        "resend this form to update your prices while the RFQ is still open.",
     ),
-    "price_label": "السعر",
-    "confirm_label": "إرسال الأسعار",
-    "submitted_note": "أُرسلت أسعاركم. يمكنكم تعديلها ما دامت الطلبية مفتوحة.",
-    "closed_note": "لم يعد بالإمكان إرسال الأسعار أو تعديلها.",
+    "price_label": ("السعر", "Price"),
+    "confirm_label": ("إرسال الأسعار", "Submit prices"),
+    "submitted_note": (
+        "أُرسلت أسعاركم. يمكنكم تعديلها ما دامت الطلبية مفتوحة.",
+        "Your prices have been submitted. You may edit them while the RFQ "
+        "is open.",
+    ),
+    "closed_note": (
+        "لم يعد بالإمكان إرسال الأسعار أو تعديلها.",
+        "Submitting or editing prices is no longer possible.",
+    ),
+    # ISSUE #133 غ٤/غ٦: عمود الملاحظات الذي يحلّ محلّ عمود المواصفات — هنا
+    # يكتب المورّد ما عنده لو اختلف قليلاً عمّا طلبنا.
+    "notes_label": ("ملاحظاتكم", "Your notes"),
+    "general_note_label": (
+        "ملاحظة عامة على الطلبية كلّها",
+        "General note on the whole RFQ",
+    ),
     "is_open": _rfq_quote_is_open,
     "closed_reason": _rfq_quote_closed_reason,
     "apply": _apply_purchase_rfq_quote,
-    # مفتاحٌ **اختياريّ** (ليس في `QUOTE_LOGIC_KEYS`) — نوعٌ لا يعرضه لا يُخفق.
+    # مفاتيح **اختياريّة** (ليست في `QUOTE_LOGIC_KEYS`) — نوعٌ لا يعرضها لا يُخفق.
     "prefill": _rfq_quote_prefill,
+    # ISSUE #133 غ٢: قائمة العملات المعروضة في نموذج التسعير العام.
+    "currency_options": _rfq_quote_currency_options,
+    # ISSUE #133 غ٤: ترجمة رسائل الرفض التي يستحقّها المورّد فعلياً.
+    "error_translations": _RFQ_QUOTE_ERROR_TRANSLATIONS,
     "entity_type": "purchase_rfq",
     "entity_label": lambda doc: doc.rfq_number or f"RFQ-draft-{doc.pk}",
 }

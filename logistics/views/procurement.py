@@ -30,6 +30,7 @@ from logistics.models import (
 from sales.models import SupplierPayment
 from logistics.serializers import (
     SupplierQuotationSerializer,
+    SupplierQuotationLineSerializer,
     PurchaseRFQSerializer,
     PurchaseRFQRecipientSerializer,
     PurchaseOrderSerializer,
@@ -117,6 +118,22 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
         search = str(self.request.query_params.get('search') or '').strip()
         if scope:
             qs = qs.filter(scope=scope)
+        elif self.action == 'list':
+            # ISSUE #133 غ٤: بلا `?scope=` صريح **على القائمة** يعود الشراء
+            # المحلّي وحده لا النطاقان معاً. مقصورٌ على `list` عمداً — فعلٌ
+            # تفصيليّ (`retrieve`/`send`/`award`/…) لا يمرّر `scope` في جسمه
+            # أصلاً ولا يجوز أن يُحجب عن مستندٍ استيراديّ بسبب هذا الافتراض.
+            #
+            # هذه فجوةُ **رؤيةٍ داخل الشركة نفسها** بين شاشتَي الشراء المحلّي
+            # والاستيراد — لا تسريبَ بين شركات، فعزل الـtenant عبر
+            # `TenantQuerySetMixin` (في `super().get_queryset()` أعلاه) سليمٌ
+            # ولا يمسّه هذا التغيير. كل مستدعٍ في الواجهة يرسل `scope` صراحةً
+            # على قوائمه اليوم (`listSupplierQuotations` يفرضه معامِلاً
+            # إلزامياً)، فالافتراضية هنا حراسةٌ لطلبٍ عارٍ لا مساراً حيّاً.
+            # صلاحيةُ قراءةٍ لكل موديول تبقى خارج النطاق عمداً — الحارس العام
+            # (`TenantRolePermission`) يمرّر كل قراءة اليوم، وسدُّ ذاك تغييرٌ
+            # في نموذج الصلاحيات لا في هذه الشاشة.
+            qs = qs.filter(scope=SupplierQuotation.SCOPE_LOCAL)
         if quote_status:
             qs = qs.filter(status=quote_status)
         if supplier.isdigit():
@@ -199,6 +216,33 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
         if instance.status == SupplierQuotation.STATUS_CONVERTED:
             raise ValidationError('عرض السعر المحوّل لا يمكن حذفه.')
         super().perform_destroy(instance)
+
+    @action(detail=True, methods=['post'], url_path=r'lines/(?P<line_id>\d+)/internal-note')
+    def set_line_internal_note(self, request, pk=None, line_id=None):
+        """ISSUE #133 غ٣ (مواصفة #130 §١): كتابةُ تعليقنا الداخليّ على سطر
+        عرضٍ من مصفوفة المقارنة — حيث يقرأ المشتري ملاحظة المورّد ويردّ عليها
+        فعلياً. تُحدِّث سطراً واحداً بعينه فقط، فلا تمسّ `supplier_note` ولا
+        بقية سطور العرض ولا إجمالياته.
+
+        **وليست المسارَ الوحيد**: `SupplierQuotationSerializer` يقبل
+        `internal_note` في حمولة الحفظ أيضاً (ويحمله `_line_values` عبر
+        حذفِ السطور وإعادةِ إنشائها، مع إبقاء الكاتب والتاريخ إن لم يتغيّر
+        النصّ). الفرقُ أنّ هذه النقطة لا تمرّ بذلك الحذف أصلاً — فهي الأسلمُ
+        لحقلٍ يُراد له أن يبقى مربوطاً بسطره عبر الزمن، لا الوحيدة. وقولُ
+        «الوحيدة» هنا كان يكذب: `supplier_note` وحدَه مقفولٌ بنيوياً
+        (`read_only_fields`)، أمّا هذا فمكتوبٌ من مسارين.
+        """
+        quotation = self.get_object()
+        line = quotation.lines.filter(pk=line_id).first()
+        if line is None:
+            raise ValidationError('السطر غير موجود على هذا العرض.')
+        note = str(request.data.get('internal_note') or '').strip()
+        if note != line.internal_note:
+            line.internal_note = note
+            line.internal_note_by = request.user if request.user.is_authenticated else None
+            line.internal_note_at = timezone.now()
+            line.save(update_fields=['internal_note', 'internal_note_by', 'internal_note_at'])
+        return Response(SupplierQuotationLineSerializer(line).data)
 
     # T113-1: «تحويل إلى صفقة» بضغطة حُذف. الصفقة تُنشأ من `POST /api/logistics/deals/`
     # ومعها `source_quotation`، فتطالب بالعرض وتقلبه «محوَّلاً» في المعاملة نفسها
@@ -323,6 +367,14 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
         search = str(self.request.query_params.get('search') or '').strip()
         if scope:
             qs = qs.filter(scope=scope)
+        elif self.action == 'list':
+            # ISSUE #133 غ٤: مرآةُ نفس الفجوة على `SupplierQuotationViewSet`
+            # أعلاه — مقصورٌ على `list` (`send`/`award`/`cancel`/`comparison`/
+            # `recipients` كلّها تفعل `self.get_object()` بلا `scope` في
+            # جسمها، فتُحجَب عن مستندٍ استيراديّ لو شمَلها هذا الافتراض).
+            # نفس التبرير حرفياً: رؤيةٌ داخل الشركة، لا تسريبَ عبرها، وصلاحية
+            # القراءة لكل موديول خارج النطاق.
+            qs = qs.filter(scope=PurchaseRFQ.SCOPE_LOCAL)
         if rfq_status:
             qs = qs.filter(status=rfq_status)
         if search:
@@ -393,9 +445,21 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             # ISSUE #112 §الترقيم: يُخصَّص هنا فقط — أوّل إرسال، لا عند الإنشاء.
             # `if not rfq.rfq_number` يجعل الفعل idempotent: إعادة استدعائه
             # (لن يحدث فعلياً بعد أن صارت الحالة sent أعلاه) لن يحرق رقماً ثانياً.
+            #
+            # ISSUE #133 غ٣: تسلسلٌ مستقلّ بادئةً ورقماً للاستيراد — كان
+            # مشتركاً مع الشراء المحلّي (`purchase_rfq` وحده)، فطلبيةُ استيرادٍ
+            # واحدة تُرسَل بين طلبيتين محلّيّتين تُسقط رقم الثانية `0003` بدل
+            # `0002`. الشراء المحلّي يبقى على مفتاحه وبادئته القديمين حرفياً —
+            # لا إعادة ترقيم لسجلٍّ موجود، والتفرّع في مفتاح العدّاد نفسه لا في
+            # قيمة `rfq_number` المخزَّنة سلفاً. مرآةُ `IQ`/`PQ` على العرض
+            # (`SupplierQuotation.quotation_number`).
             if not rfq.rfq_number:
-                sequence = next_document_number(tenant.pk, 'purchase_rfq')
-                rfq.rfq_number = f'RFQ-{sequence:04d}'
+                if rfq.scope == PurchaseRFQ.SCOPE_IMPORT:
+                    book_key, prefix = 'purchase_rfq_import', 'IRFQ'
+                else:
+                    book_key, prefix = 'purchase_rfq', 'RFQ'
+                sequence = next_document_number(tenant.pk, book_key)
+                rfq.rfq_number = f'{prefix}-{sequence:04d}'
             rfq.status = PurchaseRFQ.STATUS_SENT
             rfq.save(update_fields=['rfq_number', 'status', 'updated_at'])
 
@@ -439,10 +503,21 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
     def award(self, request, pk=None):
         """ISSUE #116 (مواصفة #108 §٨) — ترسيةٌ كاملةٌ لموردٍ واحد في هذه
         المرحلة: `supplier` في جسم الطلب يحسم أيّ ردّ (`SupplierQuotation`)
-        هو الفائز. عرضُه يُقبَل (`STATUS_ACCEPTED`) ثم يمرّ بنفس مسار قبول
-        عرضٍ محلّيّ يدويّ — **لا منطق ترحيل جديد هنا**، تركيبُ خدمات قائمة
-        (`convert_local_quotation_to_order`/`_invoice`) وراء مفتاح
-        `PurchaseSettings.use_purchase_orders` (#117) وحده يحسم أيّهما.
+        هو الفائز. عرضُه يُقبَل (`STATUS_ACCEPTED`) دائماً — ثم يتفرّع المسار
+        بحسب نطاق الطلبية (ISSUE #133 غ١، قرار المالك 2026-09-04):
+
+        - **شراءٌ محلّي**: يمرّ حرفياً بمسار قبول عرضٍ محلّيّ يدويّ — لا منطق
+          ترحيل جديد هنا، تركيبُ خدمات قائمة
+          (`convert_local_quotation_to_order`/`_invoice`) وراء مفتاح
+          `PurchaseSettings.use_purchase_orders` (#117) وحده يحسم أيّهما.
+        - **استيراد**: «بالاستيراد الطلبية والعرض نفس الشي؛ لمّا أُرسي طلبية
+          يصير عرض» — الترسية تقبل العرض وتُغلق الطلبية عليه **وتتوقّف هنا**،
+          بلا استدعاء أيّ من دالّتَي التحويل (كلتاهما محلّيةٌ فقط بحكم
+          `SupplierQuotation.scope`، والمكالمة تُرفض 400 بلا هذا التفريع —
+          وهو ما كان يحدث قبل هذه التذكرة: تأكيدٌ يقول «لا رجعة» ثم خطأٌ عن
+          «الشراء المحلي»). التحويل إلى صفقة استيراد يمرّ لاحقاً بمسار
+          «تحويل إلى صفقة» القائم أصلاً على العرض المقبول — صفقةٌ تحتاج شحناً
+          وتخليصاً وتكلفةً مستوردة لا تُولَد من ضغطة واحدة.
         """
         from logistics.services import get_or_create_purchase_settings
 
@@ -472,25 +547,32 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             quotation.status = SupplierQuotation.STATUS_ACCEPTED
             quotation.save(update_fields=['status', 'updated_at'])
 
-            settings_obj = get_or_create_purchase_settings(tenant)
-            try:
-                if settings_obj.use_purchase_orders:
-                    document, _created = convert_local_quotation_to_order(
-                        quotation, user=request.user,
-                    )
-                    document_type = 'purchase_order'
-                    document_number = document.order_number
-                else:
-                    document, _created = convert_local_quotation_to_invoice(
-                        quotation, user=request.user,
-                    )
-                    document_type = 'purchase_invoice'
-                    document_number = document.invoice_number
-            except DjangoValidationError as exc:
-                detail = getattr(exc, 'message_dict', None) or getattr(
-                    exc, 'messages', None,
-                ) or [str(exc)]
-                raise ValidationError(detail)
+            document = None
+            document_type = None
+            document_number = None
+            if rfq.scope == PurchaseRFQ.SCOPE_IMPORT:
+                # لا تحويل هنا — العرض المقبول هو نهاية المطاف بهذه الشاشة.
+                pass
+            else:
+                settings_obj = get_or_create_purchase_settings(tenant)
+                try:
+                    if settings_obj.use_purchase_orders:
+                        document, _created = convert_local_quotation_to_order(
+                            quotation, user=request.user,
+                        )
+                        document_type = 'purchase_order'
+                        document_number = document.order_number
+                    else:
+                        document, _created = convert_local_quotation_to_invoice(
+                            quotation, user=request.user,
+                        )
+                        document_type = 'purchase_invoice'
+                        document_number = document.invoice_number
+                except DjangoValidationError as exc:
+                    detail = getattr(exc, 'message_dict', None) or getattr(
+                        exc, 'messages', None,
+                    ) or [str(exc)]
+                    raise ValidationError(detail)
 
             rfq.status = PurchaseRFQ.STATUS_AWARDED
             rfq.save(update_fields=['status', 'updated_at'])
@@ -506,11 +588,10 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
         )
         data = PurchaseRFQSerializer(rfq, context={'request': request}).data
         data['awarded_supplier_id'] = recipient.supplier_id
-        data['awarded_document'] = {
-            'type': document_type,
-            'id': document.pk,
-            'number': document_number,
-        }
+        data['awarded_document'] = (
+            {'type': document_type, 'id': document.pk, 'number': document_number}
+            if document is not None else None
+        )
         return Response(data)
 
     @action(detail=True, methods=['get'])
@@ -577,14 +658,37 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
                 lines_by_key = {ql.seq: ql for ql in quotation_lines}
 
             prices: dict = {}
+            notes: dict = {}
+            # ISSUE #133 غ٣ (مواصفة #130 §١، مراجعة الجولة الثانية): هذه
+            # الشاشة **مصادَقٌ عليها** (لا السطح العام في `docshare`) — فعرضُ
+            # تعليقنا الداخليّ هنا ليس تسريباً، بل هو بالضبط مكانه الطبيعيّ:
+            # حيث يقرأ المشتري ملاحظة المورّد ويردّ عليها فعلياً. `internal_notes`
+            # يحمل النصّ وكاتبه وتاريخه؛ و`quotation_line_ids` يربط بندَ
+            # الطلبية بسطر العرض الفعليّ الذي يُكتَب عليه التعليق
+            # (`SupplierQuotationViewSet.set_line_internal_note`) — نقطة
+            # الكتابة الوحيدة، بديلاً عن محرّر العروض حيث تُحذف السطور وتُعاد
+            # عند كل حفظ.
+            internal_notes: dict = {}
+            quotation_line_ids: dict = {}
             goods_total = Decimal('0')
             for line in lines:
                 qline = lines_by_key.get(line.id if has_lineage else line.seq)
                 if qline is None:
                     prices[str(line.id)] = None
+                    notes[str(line.id)] = None
+                    internal_notes[str(line.id)] = None
                     continue
                 unit_price_base = (Decimal(qline.unit_price) * rate).quantize(unit_q)
                 prices[str(line.id)] = str(unit_price_base)
+                # ISSUE #133 غ٣: ملاحظةُ المورّد سببُ وجود المصفوفة نفسه —
+                # «هذا ما عندي بدل ما طلبت».
+                notes[str(line.id)] = qline.supplier_note or None
+                internal_notes[str(line.id)] = {
+                    'text': qline.internal_note or '',
+                    'by': qline.internal_note_by.get_username() if qline.internal_note_by_id else '',
+                    'at': qline.internal_note_at.isoformat() if qline.internal_note_at else None,
+                }
+                quotation_line_ids[str(line.id)] = qline.id
                 goods_total += Decimal(line.quantity) * unit_price_base
 
             suppliers_payload.append({
@@ -599,6 +703,11 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
                 'entry_source': quotation.entry_source,
                 'replied_at': recipient.replied_at,
                 'prices': prices,
+                'notes': notes,
+                'internal_notes': internal_notes,
+                'quotation_line_ids': quotation_line_ids,
+                # ISSUE #133 غ٣: ملاحظته العامة على الطلبية كلّها — لا الداخلية.
+                'general_note': quotation.general_note or '',
                 'goods_total_base': str(goods_total.quantize(Decimal('0.01'))),
             })
 

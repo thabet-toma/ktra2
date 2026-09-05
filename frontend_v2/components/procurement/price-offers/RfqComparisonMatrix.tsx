@@ -19,12 +19,24 @@
  * بندٌ لم يُسعَّر (لا تقديريّ) أو لم يُسعّره موردٌ بعينه يُعرَض **فارغاً لا
  * صفراً** («—»). الإجمالي المعروض لكل مورد **البضاعة وحدها** —
  * `goods_total_base` من الخادم، ولا حقل شحنٍ في الاستجابة أصلاً.
+ *
+ * **ISSUE #133 غ٣ (مواصفة #130 §١):** نصّ المورّد (`notes`) وتعليقُنا
+ * الداخليّ (`internal_notes`) يظهران معاً في كلّ خليّة — منفصلَين بصرياً
+ * ونصّاً («المورّد:» مقابل تعليقٍ بلا بادئة، بكاتبه وتاريخه) لا مدموجَين:
+ * دمجُهما هو بعينه محو الأصل الذي بُني السكيمة لمنعه. نصّ المورّد **للقراءة
+ * فقط** هنا كما في كل سطحٍ آخر؛ التعليق يُكتب من هذه الشاشة عبر
+ * `setSupplierQuotationLineInternalNote` — لا عبر محرّر العروض
+ * (`PriceOfferForm.tsx`، الذي يحذف السطور ويعيد إنشاءها عند كل حفظ، فهو
+ * أخطر نقطةٍ ممكنةٍ لحقلٍ يُراد له أن يبقى مربوطاً بسطره). **`PriceOfferForm
+ * .tsx` لا يعرض أياً من الملاحظتين اليوم** — فجوةٌ معروفة ومؤجَّلة عمداً، لا
+ * سهواً.
  */
 import React, { useEffect, useState } from "react";
-import { X, Loader2, AlertCircle, Award } from "lucide-react";
+import { X, Loader2, AlertCircle, Award, MessageSquare, Check } from "lucide-react";
 import {
   awardPurchaseRfq,
   getRfqComparison,
+  setSupplierQuotationLineInternalNote,
   type PurchaseRFQAwardResult,
   type RfqComparisonDto,
   type SupplierQuotationEntrySource,
@@ -39,6 +51,13 @@ interface Props {
   rfqNumber: string | null;
   /** الترسية متاحة فقط لطلبيةٍ ما زالت `sent` — استدعاءٌ من `PurchaseRFQForm`. */
   canAward: boolean;
+  /**
+   * ISSUE #133 غ١ (قرار المالك 2026-09-04): بالاستيراد الترسية تقبل العرض
+   * وتُغلق الطلبية عليه فقط — التحويل إلى صفقة خطوةٌ لاحقة منفصلة؛ بالشراء
+   * المحلّي تُنتَج فاتورة أو أمر شراء فوراً. الفرق يصل هنا **مسمّىً بغرضه**
+   * من `PurchaseRFQForm` (حيث النطاق معروف) لا فحصَ نطاقٍ ضمنياً هنا.
+   */
+  awardStopsAtAcceptedOffer: boolean;
   onClose: () => void;
   onAwarded: (result: PurchaseRFQAwardResult) => void;
 }
@@ -62,8 +81,11 @@ const FROZEN_STARTS = {
   estimated: FROZEN_WIDTHS.product + FROZEN_WIDTHS.quantity,
 };
 
+/** ISSUE #133 غ٣: مفتاح خليّة التعليق الداخليّ — مورّدٌ × بند. */
+const internalNoteKey = (supplierId: number, lineId: number) => `${supplierId}:${lineId}`;
+
 export const RfqComparisonMatrix: React.FC<Props> = ({
-  rfqId, rfqNumber, canAward, onClose, onAwarded,
+  rfqId, rfqNumber, canAward, awardStopsAtAcceptedOffer, onClose, onAwarded,
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
@@ -71,6 +93,10 @@ export const RfqComparisonMatrix: React.FC<Props> = ({
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [awardingSupplierId, setAwardingSupplierId] = useState<number | null>(null);
+  // ISSUE #133 غ٣: خليّة التعليق الداخليّ التي تُحرَّر الآن، ومسوَّدتها.
+  const [editingNoteKey, setEditingNoteKey] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingNoteKey, setSavingNoteKey] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,7 +113,9 @@ export const RfqComparisonMatrix: React.FC<Props> = ({
   const handleAward = async (supplierId: number, supplierName: string) => {
     const ok = await confirm({
       title: "ترسية الطلبية",
-      message: `سيتمّ إرساء كامل الطلبية على «${supplierName}» — تُنتَج فاتورة أو أمر شراء بحسب إعدادات الشراء. لا يمكن التراجع بعد الترسية.`,
+      message: awardStopsAtAcceptedOffer
+        ? `سيُقبَل عرض «${supplierName}» وتُغلَق الطلبية عليه. لا فاتورة ولا أمر شراء الآن — حوّل العرض المقبول إلى صفقة استيراد من شاشة العروض متى جهّزت الشحن. لا يمكن التراجع بعد الترسية.`
+        : `سيتمّ إرساء كامل الطلبية على «${supplierName}» — تُنتَج فاتورة أو أمر شراء بحسب إعدادات الشراء. لا يمكن التراجع بعد الترسية.`,
       confirmText: "ترسية",
       danger: false,
     });
@@ -95,13 +123,62 @@ export const RfqComparisonMatrix: React.FC<Props> = ({
     setAwardingSupplierId(supplierId);
     try {
       const result = await awardPurchaseRfq(rfqId, supplierId);
-      toast(`تمّت ترسية الطلبية على ${supplierName}.`, "success");
+      toast(
+        awardStopsAtAcceptedOffer
+          ? `قُبل عرض ${supplierName} — حوّله إلى صفقة استيراد متى جهّزت.`
+          : `تمّت ترسية الطلبية على ${supplierName}.`,
+        "success",
+      );
       onAwarded(result);
       onClose();
     } catch (e: unknown) {
       toast(e instanceof Error ? e.message : "تعذّرت الترسية", "error");
     } finally {
       setAwardingSupplierId(null);
+    }
+  };
+
+  /**
+   * ISSUE #133 غ٣: يحفظ تعليقنا على سطرٍ بعينه من عرض مورّدٍ بعينه — سطرٌ
+   * واحدٌ فقط، لا يمسّ نصّ المورّد ولا بقية سطور العرض. يُحدِّث الحالة
+   * محلياً بعد النجاح بدل إعادة تحميل المصفوفة كاملةً.
+   */
+  const handleSaveInternalNote = async (
+    supplierId: number,
+    lineId: number,
+    quotationId: number,
+    quotationLineId: number,
+  ) => {
+    const key = internalNoteKey(supplierId, lineId);
+    setSavingNoteKey(key);
+    try {
+      const saved = await setSupplierQuotationLineInternalNote(
+        quotationId, quotationLineId, noteDraft.trim(),
+      );
+      setData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          suppliers: prev.suppliers.map((s) => (
+            s.supplier_id !== supplierId ? s : {
+              ...s,
+              internal_notes: {
+                ...s.internal_notes,
+                [String(lineId)]: {
+                  text: saved.internal_note ?? "",
+                  by: saved.internal_note_by_name ?? "",
+                  at: saved.internal_note_at ?? null,
+                },
+              },
+            }
+          )),
+        };
+      });
+      setEditingNoteKey(null);
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "تعذّر حفظ التعليق", "error");
+    } finally {
+      setSavingNoteKey(null);
     }
   };
 
@@ -168,6 +245,16 @@ export const RfqComparisonMatrix: React.FC<Props> = ({
                               {ENTRY_SOURCE_LABELS[s.entry_source]}
                             </span>
                           )}
+                          {/* ISSUE #133 غ٣: ملاحظته العامة على الطلبية كلّها —
+                              «هذا ما عندي بدل ما طلبت» على مستوى الطلبية لا سطر. */}
+                          {s.general_note && (
+                            <span
+                              className="max-w-full truncate text-[10px] italic ktra-text-soft"
+                              title={s.general_note}
+                            >
+                              «{s.general_note}»
+                            </span>
+                          )}
                         </div>
                       </th>
                     ))}
@@ -200,6 +287,14 @@ export const RfqComparisonMatrix: React.FC<Props> = ({
                           const raw = s.prices[String(line.id)];
                           const price = raw != null ? Number(raw) : null;
                           const delta = price != null ? computeDeltaPercent(price, estimated) : null;
+                          // ISSUE #133 غ٣: ملاحظته على هذا البند تحديداً —
+                          // «هذا ما عندي بدل ما طلبت» على مستوى السطر.
+                          const note = s.notes?.[String(line.id)];
+                          const internal = s.internal_notes?.[String(line.id)] ?? null;
+                          const quotationLineId = s.quotation_line_ids?.[String(line.id)];
+                          const noteKey = internalNoteKey(s.supplier_id, line.id);
+                          const isEditing = editingNoteKey === noteKey;
+                          const isSaving = savingNoteKey === noteKey;
                           return (
                             <td key={s.supplier_id} className="p-2 text-center">
                               {price == null ? (
@@ -214,6 +309,66 @@ export const RfqComparisonMatrix: React.FC<Props> = ({
                                     >
                                       {delta > 0 ? "+" : ""}{formatNumber(delta, { maxDecimals: 1 })}%
                                     </span>
+                                  )}
+                                  {/* ISSUE #133 غ٣: نصّ المورّد نفسه — للقراءة
+                                      فقط، ومنسوبٌ صراحةً له لا مدموجاً بتعليقنا. */}
+                                  {note && (
+                                    <span
+                                      className="mt-0.5 max-w-full truncate text-[10px] italic ktra-text-soft"
+                                      title={`المورّد: ${note}`}
+                                    >
+                                      المورّد: «{note}»
+                                    </span>
+                                  )}
+                                  {/* تعليقنا الداخليّ — منفصلٌ بصرياً عن نصّ
+                                      المورّد أعلاه، بكاتبه وتاريخه. */}
+                                  {isEditing ? (
+                                    <div className="mt-1 flex w-full max-w-[170px] flex-col items-stretch gap-1">
+                                      <textarea
+                                        className="w-full rounded border border-[var(--color-border)] p-1 text-[10px]"
+                                        rows={2}
+                                        value={noteDraft}
+                                        autoFocus
+                                        onChange={(e) => setNoteDraft(e.target.value)}
+                                        placeholder="تعليقك الداخليّ…"
+                                      />
+                                      <div className="flex justify-center gap-1">
+                                        <button
+                                          type="button"
+                                          className="ktra-iconbtn h-5 w-5"
+                                          disabled={isSaving || quotationLineId == null}
+                                          onClick={() => quotationLineId != null && void handleSaveInternalNote(
+                                            s.supplier_id, line.id, s.quotation_id, quotationLineId,
+                                          )}
+                                          aria-label="حفظ التعليق"
+                                        >
+                                          {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="ktra-iconbtn h-5 w-5"
+                                          onClick={() => setEditingNoteKey(null)}
+                                          aria-label="إلغاء"
+                                        >
+                                          <X className="h-3 w-3" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="mt-0.5 flex max-w-full items-center gap-1 truncate text-[10px] text-[var(--color-text-muted)] hover:underline"
+                                      onClick={() => {
+                                        setEditingNoteKey(noteKey);
+                                        setNoteDraft(internal?.text ?? "");
+                                      }}
+                                      title={internal?.text ? `${internal.text} — ${internal.by || "—"}` : "أضف تعليقاً داخلياً"}
+                                    >
+                                      <MessageSquare className="h-2.5 w-2.5 shrink-0" />
+                                      {internal?.text
+                                        ? <span className="truncate">{internal.text}</span>
+                                        : <span className="italic">أضف تعليقاً…</span>}
+                                    </button>
                                   )}
                                 </div>
                               )}

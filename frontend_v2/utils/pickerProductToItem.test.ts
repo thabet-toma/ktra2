@@ -32,6 +32,10 @@ const fullProduct = {
   attachments: [{ file_path: '/img/1.png' }, { file_path: '' }],
   family_id: 11,
   family_name: 'مقاس إطار',
+  stock_status: 'low_stock',
+  is_service: false,
+  available_quantity: '3',
+  quantity_on_hand: '8',
 };
 
 test('الشاشة الكاملة: الحقول الموسّعة كلّها كما كانت', () => {
@@ -135,4 +139,30 @@ test('family_id/family_name غائبان أو null يصيران undefined لا �
   );
   assert.equal(nullish.familyId, undefined);
   assert.equal(nullish.familyName, undefined);
+});
+
+// ISSUE #133: شارة المخزون والمتاح بعد الحجز على جانب الشراء تحتاج هذه الحقول
+// من نفس صفّ `?view=lookup` الذي تحمله `Item` أصلاً — لا تنزل عن نقطة التحويل
+// الموحّدة إلى مطابقٍ ثانٍ. أساسية (`base`) لا حقلاً موسّعاً: نافذة البحث
+// (`onItemCreated`/quick-create) تغذّي نفس مصفوفة `allDbItems` التي يبني منها
+// المنتقي شارته، فحقلٌ يصل مستدعياً واحداً دون الآخر يُنتج بندَ شارةً صامتاً.
+test('كلا المستدعيين: stock_status وis_service وavailable_quantity وquantity_on_hand يمرّان كما هما', () => {
+  const full = mapPickerProductToItem(fullProduct, fullScreenOpts);
+  const modal = mapPickerProductToItem(fullProduct, searchModalOpts);
+  assert.equal(full.stock_status, 'low_stock');
+  assert.equal(full.is_service, false);
+  assert.equal(full.available_quantity, '3');
+  assert.equal(full.quantity_on_hand, '8');
+  assert.equal(modal.stock_status, 'low_stock');
+  assert.equal(modal.is_service, false);
+  assert.equal(modal.available_quantity, '3');
+  assert.equal(modal.quantity_on_hand, '8');
+});
+
+test('stock_status/is_service/available_quantity/quantity_on_hand غائبون يصيرون undefined', () => {
+  const item = mapPickerProductToItem({ id: 1 }, searchModalOpts);
+  assert.equal(item.stock_status, undefined);
+  assert.equal(item.is_service, undefined);
+  assert.equal(item.available_quantity, undefined);
+  assert.equal(item.quantity_on_hand, undefined);
 });

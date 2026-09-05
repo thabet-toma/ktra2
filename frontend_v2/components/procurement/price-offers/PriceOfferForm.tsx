@@ -323,7 +323,9 @@ export const PriceOfferForm: React.FC<Props> = ({
     discardDraft,
     orphanDrafts,
   } = useDocumentDraft<PriceOfferDraftPayload>({
-    docType: "price_offer",
+    // ISSUE #133 غ٥: مرآةُ نفس التصحيح على `PurchaseRFQForm.tsx` — مفتاحٌ لكل
+    // نطاق كي لا تظهر مسودّةٌ يتيمة لعرض شراء محلّي في شاشة عرض استيراد.
+    docType: `price_offer_${scope}`,
     docId: draftDocId,
     payload: draftPayload,
     isTouched: isDirty,

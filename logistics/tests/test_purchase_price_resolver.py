@@ -10,7 +10,14 @@ import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from core.pricing import PriceStrategy, purchase_price_list, resolve_purchase_price
+from core.pricing import (
+    INDICATIVE_PRICE_INVOICE_WINDOW,
+    INDICATIVE_PRICE_LABEL,
+    PriceStrategy,
+    indicative_purchase_prices,
+    purchase_price_list,
+    resolve_purchase_price,
+)
 from inventory.models import Product
 from logistics.models import (
     PurchaseInvoice,
@@ -154,7 +161,7 @@ def test_price_list_bulk_last_and_lowest(env):
     # prices تعرض آخر (130) وأقل (100) معاً للاطّلاع
     prices = {p["source_label"]: Decimal(p["unit_price"]) for p in result[product.id]["prices"]}
     assert prices.get("آخر شراء") == Decimal("130.0000")
-    assert prices.get("أقل شراء") == Decimal("100.0000")
+    assert prices.get("أقل شراء (آخر ٥)") == Decimal("100.0000")
 
     # القيمة الأساسية آخر سعر حتى لو طُلبت استراتيجية «الأدنى» (لا تؤثّر على القائمة)
     low = purchase_price_list(tenant_id=tenant.TenantID, strategy=PriceStrategy.LOWEST_PURCHASE)
@@ -181,7 +188,7 @@ def test_price_list_last_is_supplier_scoped_lowest_is_global(env):
     # آخر شراء = من المورد «أ» فقط (لا 80 الأحدث من المورد «ب»)
     assert prices.get("آخر شراء من المورد") == Decimal("100.0000")
     # أقل شراء = الأدنى عبر كل الموردين
-    assert prices.get("أقل شراء") == Decimal("80.0000")
+    assert prices.get("أقل شراء (آخر ٥)") == Decimal("80.0000")
     # الخلية تُعبَّأ بآخر سعر للمورد نفسه
     assert Decimal(out[product.id]["unit_price"]) == Decimal("100.0000")
 
@@ -293,7 +300,7 @@ class PurchasePriceEndpointTest(APITestCase):
         assert Decimal(row["unit_price"]) == Decimal("130.0000")
         prices = {p["source_label"]: Decimal(p["unit_price"]) for p in row["prices"]}
         assert prices.get("آخر شراء من المورد") == Decimal("130.0000")
-        assert prices.get("أقل شراء") == Decimal("60.0000")
+        assert prices.get("أقل شراء (آخر ٥)") == Decimal("60.0000")
 
 
 class PurchaseLowestPriceCurrencyTest(APITestCase):
@@ -335,7 +342,7 @@ class PurchaseLowestPriceCurrencyTest(APITestCase):
             "/api/logistics/purchase-invoices/price-list/", **self._auth())
         assert res.status_code == 200, res.content
         row = next(r for r in res.json() if r["product_id"] == self.product.id)
-        lowest = next(p for p in row["prices"] if p["source_label"] == "أقل شراء")
+        lowest = next(p for p in row["prices"] if p["source_label"] == "أقل شراء (آخر ٥)")
         # الصحيح: فاتورة الشيكل (20) — لا فاتورة الدولار الخام الأصغر (12) التي
         # كان الكود القديم يختارها بلا نظرٍ إلى العملة.
         assert Decimal(lowest["unit_price"]) == Decimal("20.0000")
@@ -357,7 +364,7 @@ class PurchaseLowestPriceCurrencyTest(APITestCase):
         row = next((r for r in res.json() if r["product_id"] == other.id), None)
         assert row is not None  # احتياطي avg_cost يبقى يملأ «آخر شراء» وحدها
         labels = [p["source_label"] for p in row["prices"]]
-        assert "أقل شراء" not in labels
+        assert "أقل شراء (آخر ٥)" not in labels
         assert row["source_label"] == "متوسط التكلفة"
         assert Decimal(row["unit_price"]) == Decimal("77.0000")
 
@@ -375,5 +382,115 @@ class PurchaseLowestPriceCurrencyTest(APITestCase):
             "/api/logistics/purchase-invoices/price-list/", **self._auth())
         assert res.status_code == 200, res.content
         row = next(r for r in res.json() if r["product_id"] == self.product.id)
-        lowest = next(p for p in row["prices"] if p["source_label"] == "أقل شراء")
+        lowest = next(p for p in row["prices"] if p["source_label"] == "أقل شراء (آخر ٥)")
         assert Decimal(lowest["unit_price"]) == Decimal("20.0000")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# #133 — السعر التقديري = أقلّ سعرٍ ضمن آخر ٥ مشتريات مرحَّلة (لا كل الفترات)
+# ──────────────────────────────────────────────────────────────────────────
+def test_indicative_price_excludes_old_floor_outside_window(env):
+    """حالة 1: أكثر من ٥ مشتريات مرحَّلة — سعرٌ قديم أرخص يقع **خارج** نافذة
+    آخر ٥ فاتورة، فيجب ألّا يظهر إطلاقاً بدل أقلّ سعرٍ ضمن النافذة فعلاً."""
+    tenant, ils, _usd, sup, product = env
+    assert INDICATIVE_PRICE_INVOICE_WINDOW == 5  # الأرقام أدناه مبنيّة على هذه القيمة تحديداً
+    _posted_pi(tenant, sup, ils, product, number="OLD", date="2026-01-01", price=1)
+    _posted_pi(tenant, sup, ils, product, number="P-2", date="2026-02-01", price=50)
+    _posted_pi(tenant, sup, ils, product, number="P-3", date="2026-03-01", price=90)
+    _posted_pi(tenant, sup, ils, product, number="P-4", date="2026-04-01", price=70)
+    _posted_pi(tenant, sup, ils, product, number="P-5", date="2026-05-01", price=60)
+    _posted_pi(tenant, sup, ils, product, number="P-6", date="2026-06-01", price=80)
+
+    result = indicative_purchase_prices(tenant_id=tenant.TenantID)
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("50.0000")
+    assert Decimal(result[product.id]["unit_price"]) != Decimal("1.0000")
+    assert result[product.id]["document_number"] == "P-2"
+    assert result[product.id]["source_label"] == INDICATIVE_PRICE_LABEL
+    assert result[product.id]["source_label"] == "أقل شراء (آخر ٥)"
+
+
+def test_indicative_price_fewer_than_window_uses_what_exists(env):
+    """حالة 2: أقل من ٥ مشتريات — يُحسب مما هو موجود، ولا يُحجب المنتج."""
+    tenant, ils, _usd, sup, product = env
+    _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
+    _posted_pi(tenant, sup, ils, product, number="P-2", date="2026-06-15", price=80)
+
+    result = indicative_purchase_prices(tenant_id=tenant.TenantID)
+    assert product.id in result
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("80.0000")
+
+
+def test_indicative_price_absent_when_no_purchase_history(env):
+    """حالة 3: صفر مشتريات مرحَّلة — المفتاح **غائبٌ** من القاموس، لا صفر ولا
+    سقوطٌ إلى avg_cost (هذا رقمُ تفاوضٍ لا تكلفة)."""
+    tenant, _ils, _usd, _sup, product = env
+    product.avg_cost = Decimal("999")
+    product.save(update_fields=["avg_cost"])
+
+    result = indicative_purchase_prices(tenant_id=tenant.TenantID)
+    assert product.id not in result
+
+
+def test_indicative_price_counts_multi_line_invoice_once(env):
+    """حالة 4: فاتورةٌ واحدة بسطرين لنفس المنتج تُحتسب فاتورةً **واحدة** ضمن
+    نافذة الخمس — لا سطرين يزاحمان فاتورةً أقدم فتخرج ظلماً من النافذة."""
+    tenant, ils, _usd, sup, product = env
+    old = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number="OLD", partner=sup, currency=ils,
+        invoice_date="2026-01-01", exchange_rate=Decimal("1"), is_posted=True)
+    PurchaseInvoiceItem.objects.create(
+        invoice=old, product=product, name="منتج", quantity=Decimal("1"),
+        unit_price=Decimal("1"), total_price=Decimal("1"))
+
+    dual = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number="DUAL", partner=sup, currency=ils,
+        invoice_date="2026-02-01", exchange_rate=Decimal("1"), is_posted=True)
+    PurchaseInvoiceItem.objects.create(
+        invoice=dual, product=product, name="منتج سطر أ", quantity=Decimal("1"),
+        unit_price=Decimal("40"), total_price=Decimal("40"))
+    PurchaseInvoiceItem.objects.create(
+        invoice=dual, product=product, name="منتج سطر ب", quantity=Decimal("1"),
+        unit_price=Decimal("90"), total_price=Decimal("90"))
+
+    _posted_pi(tenant, sup, ils, product, number="P-3", date="2026-03-01", price=70)
+    _posted_pi(tenant, sup, ils, product, number="P-4", date="2026-04-01", price=60)
+    _posted_pi(tenant, sup, ils, product, number="P-5", date="2026-05-01", price=80)
+    _posted_pi(tenant, sup, ils, product, number="P-6", date="2026-06-01", price=95)
+
+    result = indicative_purchase_prices(tenant_id=tenant.TenantID)
+    # النافذة (آخر ٥ فاتورة): DUAL، P-3، P-4، P-5، P-6 — لا OLD. أقلّهم سطر
+    # DUAL الأرخص (40) — لا سعر OLD القديم (1) ولا سطر DUAL الآخر (90).
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("40.0000")
+    assert result[product.id]["document_number"] == "DUAL"
+
+
+def test_indicative_price_normalizes_each_invoice_at_its_own_rate(env):
+    """حالة 5 (ISSUE #111 لا اختيارية): فاتورتان بعملتين مختلفتين — يجب أن
+    تُقارَن كلٌّ منهما بسعر صرف **مستندها هو**، لا رقمها الخام. رقمٌ خامٌ أصغر
+    (12 دولاراً) قد يكون أكبر فعلياً بعد التحويل (43.2 شيكلاً) من رقمٍ خامٍ
+    أكبر (20 شيكلاً بالفعل)."""
+    tenant, ils, usd, sup, product = env
+    _posted_pi(tenant, sup, usd, product, number="USD-1", date="2026-06-10",
+               price=12, exchange_rate="3.6")  # 12 × 3.6 = 43.2 أساسياً
+    _posted_pi(tenant, sup, ils, product, number="ILS-1", date="2026-06-01",
+               price=20)  # 20 أساسياً فعلاً — وهو الأقلّ الحقيقي
+
+    result = indicative_purchase_prices(tenant_id=tenant.TenantID)
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("20.0000")
+    assert result[product.id]["document_number"] == "ILS-1"
+
+
+def test_indicative_price_bulk_computation_is_single_query(env, django_assert_num_queries):
+    """حالة 6: حارسُ الاستعلام الواحد — تجميعٌ عبر كل منتجات الشركة في استعلام
+    SQL واحد (دالّة نافذة)، لا استعلامٌ لكل منتج ولا استعلامٌ مترابط لكل صفّ."""
+    tenant, ils, _usd, sup, product = env
+    other = Product.objects.create(
+        tenant=tenant, sku="PPR-3", name_ar="منتج آخر", quantity_on_hand=0,
+        avg_cost=Decimal("0"))
+    for i, price in enumerate((100, 80, 60, 40, 20, 10), start=1):
+        _posted_pi(tenant, sup, ils, product, number=f"Q-{i}",
+                   date=f"2026-0{i}-01", price=price)
+    _posted_pi(tenant, sup, ils, other, number="O-1", date="2026-01-01", price=55)
+
+    with django_assert_num_queries(1):
+        indicative_purchase_prices(tenant_id=tenant.TenantID)

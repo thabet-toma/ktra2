@@ -38,6 +38,15 @@ export interface KitAutocompleteOption {
   /** T-SEARCH: نصٌّ إضافي يُبحَث فيه ولا يُعرض — SKU والباركود والهاتف.
    *  يُمرَّر بحروف صغيرة مسبقاً، فالمطابقة تجري لكل ضغطة مفتاح. */
   keywords?: string;
+  /** ISSUE #133 (منتقي أصنافٍ واحد للبيع والشراء): السعر التقديري للشراء
+   *  (أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة، `ProductLookupSerializer`
+   *  — `indicative_purchase_price`/`_source`) — حقلٌ مستقلّ عن `price`/
+   *  `prices` أعلاه (تلك لسعر **البيع** المقترح، هذا لسعر **الشراء**
+   *  التقديري وهو للتفاوض لا تكلفة). **غيابه هنا هو القرار**: الشاشة
+   *  المستدعية تقرّر تمريره أو لا عبر `utils/pickerFieldVisibility.ts`
+   *  (`getPickerFieldVisibility`) — لا فحص ثانٍ لزرّ العين هنا، كي يبقى
+   *  مصدر القرار واحداً. */
+  indicativePurchasePrice?: KitPriceInfo | null;
 }
 
 export interface KitAutocompleteProps {
@@ -291,6 +300,22 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
                     {opt.priceLabel}
                   </span>
                 ) : null}
+                {/* #133: السعر التقديري للشراء — مستقلّ عن سعر البيع أعلاه،
+                    ولا فحص `showPrices` هنا: حضور الحقل نفسه هو القرار
+                    (`getPickerFieldVisibility` عند المستدعي). */}
+                {opt.indicativePurchasePrice && (
+                  <span
+                    className="ktra-autocomplete-price !ml-0"
+                    title={opt.indicativePurchasePrice.label || undefined}
+                  >
+                    {opt.indicativePurchasePrice.value}
+                    {opt.indicativePurchasePrice.label && (
+                      <em className="ktra-autocomplete-price-src">
+                        {opt.indicativePurchasePrice.label}
+                      </em>
+                    )}
+                  </span>
+                )}
               </button>
               {onInfo && (
                 <button

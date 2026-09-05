@@ -85,6 +85,22 @@ def test_estimated_price_is_not_even_loaded_from_the_database(purchase_rfq):
     build_purchase_rfq(document)  # لا يرمي، ولا يستدعي `estimated_price` إطلاقاً
 
 
+def test_page_title_follows_the_rfq_scope(client, env, purchase_rfq, rfq_recipient):
+    """ISSUE #133 غ٥: العنوان كان ثابتاً («طلب عرض سعر») بلا تمييزٍ بين شراءٍ
+    محلّي واستيراد."""
+    from logistics.models import PurchaseRFQ
+
+    share_local = _wire_share(env, purchase_rfq, rfq_recipient)
+    local_html = client.get(f"/s/{share_local.token}").content.decode("utf-8")
+    assert "طلب عرض سعر — شراء محلّي" in local_html
+    assert "طلب عرض سعر — استيراد" not in local_html
+
+    purchase_rfq.scope = PurchaseRFQ.SCOPE_IMPORT
+    purchase_rfq.save(update_fields=["scope"])
+    import_html = client.get(f"/s/{share_local.token}").content.decode("utf-8")
+    assert "طلب عرض سعر — استيراد" in import_html
+
+
 def test_two_suppliers_get_two_different_links_and_never_see_each_other(
     client, env, supplier, purchase_rfq, rfq_recipient,
 ):
@@ -198,6 +214,21 @@ def test_quote_missing_a_line_price_is_refused(client, env, purchase_rfq, rfq_re
     assert response.status_code == 409
     rfq_recipient.refresh_from_db()
     assert rfq_recipient.quotation_id is None
+
+
+def test_a_validation_error_the_supplier_can_actually_trigger_is_shown_bilingually(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """ISSUE #133 غ٤ (مراجعة الجولة الثانية): «رسائلُ التحقّق» بندٌ صريح في
+    المواصفة ضمن ما يجب أن يظهر بلغتين — سعرٌ ناقصٌ خطأٌ يقع فيه مورّدٌ
+    حقيقيّ عن غير قصد، لا حالة تلاعبٍ بالنموذج. مورّدٌ يقف عند رسالةٍ لا
+    يقرؤها توقّف تماماً في اللحظة التي حاول فيها أن يساعد."""
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    response = client.post(f"/s/{share.token}/quote/", {"name": "بلا سعر كامل"})
+    assert response.status_code == 409
+    html = response.content.decode("utf-8")
+    assert "الرجاء إدخال سعر لكل بند." in html
+    assert "Please enter a price for every line." in html
 
 
 # ── إغلاق الطلبية ────────────────────────────────────────────────────────
@@ -397,6 +428,150 @@ def test_public_link_still_refuses_a_partially_priced_reply(
     assert rfq_recipient.quotation.lines.count() == 2
 
 
+# ── ISSUE #133 غ٢: عملة المورّد الأجنبيّ ─────────────────────────────────
+
+def test_quote_page_offers_a_currency_selector_defaulting_to_base(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """عملةٌ **بسعر صرفٍ قابلٍ للحسم اليوم** تدخل الاختيار — بلا سعرٍ مسجَّل
+    لا مكان لها فيه (انظر الاختبار التالي)."""
+    from datetime import date
+
+    from accounting.models import ExchangeRate
+    from tenants.models import Currency
+
+    usd = Currency.objects.create(Code="USD", Name="دولار", IsBaseCurrency=False)
+    ExchangeRate.objects.create(
+        tenant=env["tenant"], from_currency=usd, to_currency=env["currency"],
+        rate=Decimal("3.7"), effective_date=date(2020, 1, 1),
+    )
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    html = client.get(f"/s/{share.token}").content.decode("utf-8")
+
+    assert 'name="currency"' in html
+    assert ">ILS<" in html or "ILS" in html
+    assert ">USD<" in html or "USD" in html
+
+
+def test_currency_options_exclude_a_currency_with_no_configured_rate(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """عملةٌ بلا سعر صرفٍ مسجَّل لا تدخل القائمة أصلاً — لا نعرض اختياراً لا
+    نحسن تحويله، فلا يُحفظ سعرٌ ملفَّق (١) عند القبول عليه لاحقاً."""
+    from tenants.models import Currency
+
+    Currency.objects.create(Code="EUR", Name="يورو", IsBaseCurrency=False)
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    html = client.get(f"/s/{share.token}").content.decode("utf-8")
+
+    assert "ILS" in html
+    assert "EUR" not in html
+
+
+def test_submitting_a_currency_with_no_configured_rate_is_refused_not_defaulted(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """محاكاةُ نموذجٍ مُتلاعَبٍ به (عملةٌ لم تُعرَض في القائمة أصلاً) —
+    يُرفَض صراحةً بدل تخزين سعر صرفٍ ملفَّق ١. هذا هو بالضبط العطب الذي
+    كتبت هذه التذكرة لإغلاقه: لا يجوز أن يعود بابٌ خلفيّ إليه."""
+    from tenants.models import Currency
+
+    eur = Currency.objects.create(Code="EUR", Name="يورو", IsBaseCurrency=False)
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    line_id = _line_id(purchase_rfq)
+
+    response = client.post(
+        f"/s/{share.token}/quote/",
+        {"name": "مصنع أوروبي", f"price_{line_id}": "10", "currency": str(eur.pk)},
+    )
+    assert response.status_code == 409
+    rfq_recipient.refresh_from_db()
+    assert rfq_recipient.quotation_id is None
+
+
+def test_supplier_priced_in_a_foreign_currency_is_stored_in_that_currency(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """مورّدٌ صينيّ يكتب ١٠ يقصد دولارات — قبل هذه التذكرة كانت تُحفظ ١٠
+    شيكلاً بصمت (العملة الأساسية دائماً)، أرخص مما هي حقيقةً فيربح أفضلَ
+    عرضٍ بالمقارنة وهو ليس كذلك."""
+    from datetime import date
+
+    from accounting.models import ExchangeRate
+    from tenants.models import Currency
+
+    usd = Currency.objects.create(Code="USD", Name="دولار", IsBaseCurrency=False)
+    ExchangeRate.objects.create(
+        tenant=env["tenant"], from_currency=usd, to_currency=env["currency"],
+        rate=Decimal("3.7"), effective_date=date(2020, 1, 1),
+    )
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    line_id = _line_id(purchase_rfq)
+
+    response = client.post(
+        f"/s/{share.token}/quote/",
+        {"name": "مصنع أجنبي", f"price_{line_id}": "10", "currency": str(usd.pk)},
+    )
+    assert response.status_code == 302
+
+    rfq_recipient.refresh_from_db()
+    quotation = rfq_recipient.quotation
+    assert quotation.currency_id == usd.pk
+    assert quotation.exchange_rate == Decimal("3.700000")
+    # السعر المخزَّن بعملة المورّد نفسها — ١٠ دولارات لا ١٠ شواكل.
+    assert quotation.lines.first().unit_price == Decimal("10.0000")
+
+
+def test_foreign_currency_quote_is_converted_in_the_comparison_matrix(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    from datetime import date
+
+    from accounting.models import ExchangeRate
+    from tenants.models import Currency
+
+    usd = Currency.objects.create(Code="USD", Name="دولار", IsBaseCurrency=False)
+    ExchangeRate.objects.create(
+        tenant=env["tenant"], from_currency=usd, to_currency=env["currency"],
+        rate=Decimal("3.7"), effective_date=date(2020, 1, 1),
+    )
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    line_id = _line_id(purchase_rfq)
+    client.post(
+        f"/s/{share.token}/quote/",
+        {"name": "مصنع أجنبي", f"price_{line_id}": "10", "currency": str(usd.pk)},
+    )
+
+    from django.contrib.auth.models import User
+    from rest_framework.test import APIClient
+
+    api = APIClient()
+    api.force_authenticate(user=env["owner"])
+    api.credentials(HTTP_X_TENANT_ID=str(env["tenant"].pk))
+    response = api.get(f"/api/logistics/purchase-rfqs/{purchase_rfq.pk}/comparison/")
+    assert response.status_code == 200, response.content
+    supplier_row = response.data["suppliers"][0]
+    assert supplier_row["currency_code"] == "USD"
+    # ١٠ دولارات × ٣٫٧ = ٣٧ بالعملة الأساسية — لا ١٠ شواكل.
+    assert supplier_row["prices"][str(line_id)] == "37.0000"
+
+
+def test_currency_missing_from_submission_defaults_to_base_as_before(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """رابطٌ لم يُحدَّث بعد (أو نموذجٌ قديم مخزَّن في المتصفّح) بلا حقل عملة —
+    السلوك يبقى حرفياً كما قبل هذه التذكرة: عملة الأساس."""
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    line_id = _line_id(purchase_rfq)
+    response = client.post(
+        f"/s/{share.token}/quote/", {"name": "بلا عملة", f"price_{line_id}": "10"},
+    )
+    assert response.status_code == 302
+    rfq_recipient.refresh_from_db()
+    assert rfq_recipient.quotation.currency_id == env["currency"].pk
+    assert rfq_recipient.quotation.exchange_rate == Decimal("1")
+
+
 def test_public_link_stamps_supplier_link_and_the_rfq_line_lineage(
     client, env, purchase_rfq, rfq_recipient,
 ):
@@ -415,3 +590,143 @@ def test_public_link_stamps_supplier_link_and_the_rfq_line_lineage(
     assert quotation.entry_source == SupplierQuotation.ENTRY_SUPPLIER_LINK
     # ونَسَبُ السطر يُكتَب هنا أيضاً — المصفوفةُ تطابق بالنَسَب لا بالترتيب.
     assert quotation.lines.first().rfq_line_id == line_id
+
+
+# ── ISSUE #133 غ٣ (مواصفة #130 §١): ملاحظتان لا حقلٌ واحد ──────────────────
+#
+# نصّ المورّد نفسه على السطر، وملاحظةٌ عامّة على الطلبية كلّها — كلاهما يُكتب
+# من رابط المورّد العام وحده (`submit_rfq_supplier_quote`)، ودمجهما مع تعليقنا
+# الداخلي هو بعينه محو الأصل. انظر أيضاً `docshare/documents/purchase_docs.py`
+# (`build_purchase_rfq`, `QUOTE_PURCHASE_RFQ`) و`docshare/views.py`
+# (`_attach_quote_prefill`).
+
+def test_supplier_line_note_is_stored_and_comes_back_on_read(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    line_id = _line_id(purchase_rfq)
+    response = client.post(
+        f"/s/{share.token}/quote/",
+        {
+            "name": "أبو خالد", f"price_{line_id}": "10",
+            f"note_{line_id}": "عندي مقاس آخر فقط، الباقي مطابق",
+        },
+    )
+    assert response.status_code == 302
+
+    rfq_recipient.refresh_from_db()
+    line = rfq_recipient.quotation.lines.first()
+    assert line.supplier_note == "عندي مقاس آخر فقط، الباقي مطابق"
+
+    # ويعود على القراءة أيضاً — يُعبّأ في خانة الملاحظات حين يفتح المورّد رابطه
+    # ثانية، بنفس منطق تعبئة السعر (`_rfq_quote_prefill`).
+    html = client.get(f"/s/{share.token}").content.decode("utf-8")
+    assert "عندي مقاس آخر فقط، الباقي مطابق" in html
+
+
+def test_supplier_general_note_for_the_whole_rfq_is_stored_and_returned(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """المورّد قد يردّ على الطلبية ككلّ («لا نورّد لهذه المنطقة») — ولا موضع
+    لذلك في سطر."""
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    line_id = _line_id(purchase_rfq)
+    response = client.post(
+        f"/s/{share.token}/quote/",
+        {
+            "name": "أبو خالد", f"price_{line_id}": "10",
+            "general_note": "لا نورّد لهذه المنطقة حالياً",
+        },
+    )
+    assert response.status_code == 302
+
+    rfq_recipient.refresh_from_db()
+    assert rfq_recipient.quotation.general_note == "لا نورّد لهذه المنطقة حالياً"
+
+    html = client.get(f"/s/{share.token}").content.decode("utf-8")
+    assert "لا نورّد لهذه المنطقة حالياً" in html
+
+
+def test_internal_note_never_alters_the_suppliers_text_and_no_platform_path_can_edit_it(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """حارسُ سلامة الدليل (T-132): نصّ المورّد بايتاً بايت بعد أن نكتب ملاحظتنا
+    الداخلية، ومحرِّرُ العروض الداخليّ — السطح الوحيد الذي يعدّل عرضاً بعد
+    إنشائه — لا يقدر أن يمسّه: `supplier_note` للقراءة فقط بنيوياً في مُسلسِله،
+    لا فرعَ تحقّقٍ يتجاهل قيمةً وصلت."""
+    from logistics.serializers.procurement import SupplierQuotationLineSerializer
+
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    line_id = _line_id(purchase_rfq)
+    client.post(
+        f"/s/{share.token}/quote/",
+        {
+            "name": "أبو خالد", f"price_{line_id}": "10",
+            f"note_{line_id}": "نصّ المورّد الأصلي",
+        },
+    )
+    rfq_recipient.refresh_from_db()
+    line = rfq_recipient.quotation.lines.first()
+    assert line.supplier_note == "نصّ المورّد الأصلي"
+
+    # الحقل للقراءة فقط بنيوياً في المُسلسِل الداخليّ — لا اعتماد على أن يتذكّر
+    # كلّ فرعٍ ألّا يكتبه.
+    assert SupplierQuotationLineSerializer().fields["supplier_note"].read_only
+
+    # ولو حاول أحدٌ تمريره في تعديلٍ يدويّ عبر المُسلسِل نفسه، النصّ لا يتغيّر.
+    serializer = SupplierQuotationLineSerializer(
+        instance=line, data={"supplier_note": "تلاعب"}, partial=True,
+    )
+    serializer.is_valid(raise_exception=True)
+    saved = serializer.save()
+    saved.refresh_from_db()
+    assert saved.supplier_note == "نصّ المورّد الأصلي"
+
+    # وكتابةُ ملاحظتنا الداخلية على نفس السطر لا تمسّ نصّ المورّد بحرف.
+    line.internal_note = "نتحقّق من هذا مع المستودع"
+    line.save(update_fields=["internal_note"])
+    line.refresh_from_db()
+    assert line.supplier_note == "نصّ المورّد الأصلي"
+
+
+def test_comparison_matrix_carries_the_suppliers_note_and_our_reply_never_leaks_to_the_public_page(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """ملاحظةُ المورّد سببُ وجود المصفوفة أصلاً («هذا ما عندي بدل ما طلبت») —
+    وتعليقُنا الداخليّ يظهر **بجانبها في هذه الشاشة المصادَق عليها وحدها**
+    (مراجعة الجولة الثانية — مصفوفة المقارنة هي نقطة كتابته أيضاً، انظر
+    `logistics/tests/test_purchase_rfq_award_and_comparison.py`)، ولا يخرج
+    أبداً إلى السطح العامّ بلا مصادقة الذي يفتحه المورّد نفسه."""
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    line_id = _line_id(purchase_rfq)
+    client.post(
+        f"/s/{share.token}/quote/",
+        {
+            "name": "أبو خالد", f"price_{line_id}": "10",
+            f"note_{line_id}": "ملاحظة المورّد الظاهرة",
+        },
+    )
+    rfq_recipient.refresh_from_db()
+    line = rfq_recipient.quotation.lines.first()
+    line.internal_note = "سرّنا-الداخلي-لا-يخرج-للمورّد"
+    line.save(update_fields=["internal_note"])
+
+    from rest_framework.test import APIClient
+
+    api = APIClient()
+    api.force_authenticate(user=env["owner"])
+    api.credentials(HTTP_X_TENANT_ID=str(env["tenant"].pk))
+    response = api.get(f"/api/logistics/purchase-rfqs/{purchase_rfq.pk}/comparison/")
+    assert response.status_code == 200, response.content
+    supplier_row = response.data["suppliers"][0]
+    assert supplier_row["notes"][str(line_id)] == "ملاحظة المورّد الظاهرة"
+    # الشاشة المصادَق عليها **تعرض** التعليق الداخليّ الآن — هذا هو مكانه
+    # الطبيعيّ (مصفوفة المقارنة، لا محرّر العروض)، لا تسريباً.
+    assert (
+        supplier_row["internal_notes"][str(line_id)]["text"]
+        == "سرّنا-الداخلي-لا-يخرج-للمورّد"
+    )
+
+    # وعلى السطح العامّ الذي يفتحه المورّد نفسه — الغائب دائماً بلا استثناء.
+    public_html = client.get(f"/s/{share.token}").content.decode("utf-8")
+    assert "سرّنا-الداخلي-لا-يخرج-للمورّد" not in public_html

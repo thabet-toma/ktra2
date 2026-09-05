@@ -74,11 +74,15 @@ class DocSharePublicBase(APIView):
 
 
 def _attach_quote_prefill(share, document, payload):
-    """يُلحق بكل بندٍ سعرَ **صاحب هذا الرابط** إن كان قد أرسله من قبل.
+    """يُلحق بكل بندٍ سعرَ **صاحب هذا الرابط** إن كان قد أرسله من قبل، ومعه
+    عملتُه (ISSUE #133 غ٢) وملاحظاته (غ٣) — `prefill_fn` يعيد `{"prices":
+    {...}, "notes": {...}, "currency_id": ..., "general_note": ...}` منذ
+    هذه التذكرة.
 
     في طبقة العرض لا في الباني: `build_*` لا يعرف بالرابط ولا يجوز أن يعرف —
     حمولتُه مدقَّقةٌ بالقائمة البيضاء في `test_public_leakage.py` وتبقى كما هي.
-    والقيمةُ هنا سعرُ المورّد نفسِه لا رقمٌ من دفترنا، فلا تسريب.
+    والقيمةُ هنا سعرُ المورّد نفسِه وملاحظتُه هو لا رقمٌ أو نصٌّ من دفترنا،
+    فلا تسريب.
     """
     quote_spec = (DOC_TYPES.get(share.doc_type) or {}).get("quote") or {}
     prefill_fn = quote_spec.get("prefill")
@@ -87,17 +91,46 @@ def _attach_quote_prefill(share, document, payload):
     prefill = prefill_fn(document, share) or {}
     if not prefill:
         return
+    prices = prefill.get("prices") or {}
+    notes = prefill.get("notes") or {}
     for line in payload.get("lines") or []:
-        value = prefill.get(line.get("id"))
+        line_id = line.get("id")
+        value = prices.get(line_id)
         if value is not None:
             # **نصّاً لا `Decimal`**: تعريبُ جانغو يقلب النقطة العشرية فاصلةً
             # («11,5000»)، و`<input type="number">` يرفض تلك القيمة صامتاً —
             # فتُعرَض الخانةُ فارغةً وكأن شيئاً لم يُرسَل.
             line["price"] = format(value, "f")
+        note_value = notes.get(line_id)
+        if note_value:
+            line["note"] = note_value
+    if payload.get("quote") is not None:
+        currency_id = prefill.get("currency_id")
+        if currency_id is not None:
+            payload["quote"]["selected_currency_id"] = currency_id
+        general_note = prefill.get("general_note")
+        if general_note:
+            payload["quote"]["general_note_value"] = general_note
+
+
+def _attach_quote_currency_options(share, document, payload):
+    """يُلحق قائمة العملات المتاحة للتسعير — ISSUE #133 غ٢.
+
+    مفتاحٌ اختياريّ مثل `prefill` تماماً: نوعٌ لا يُعرّفه لا يكسب قائمة عملات
+    ولا يُخفق شيء. الحمولة المبنيّة نفسها لا تعرف بهذا — القائمة البيضاء في
+    `test_public_leakage.py` تُقاس على مخرَج الباني مباشرةً، وهذه الدالّة
+    تعمل بعده في طبقة العرض.
+    """
+    quote_spec = (DOC_TYPES.get(share.doc_type) or {}).get("quote") or {}
+    options_fn = quote_spec.get("currency_options")
+    if not options_fn or payload.get("quote") is None:
+        return
+    payload["quote"]["currency_options"] = options_fn(document)
 
 
 def _page_context(request, share, document, payload):
     _attach_quote_prefill(share, document, payload)
+    _attach_quote_currency_options(share, document, payload)
     company = company_card(share.tenant)
     today = timezone.localdate()
     expired_offer = bool(payload["valid_until"] and payload["valid_until"] < today)
@@ -116,6 +149,7 @@ def _page_context(request, share, document, payload):
         ),
         "decision_error": "",
         "quote_error": "",
+        "quote_error_en": "",
         # ISSUE #115: العَلَم يصل عبر `?submitted=1` بعد إعادة توجيه ناجحة
         # (Post/Redirect/Get) — التسعير يُقبل مراراً فلا معنى لقفل الصفحة على
         # «تمّ» دائم كما يفعل `share.decision` مع القرار.
@@ -267,7 +301,16 @@ class DocShareQuoteView(DocSharePublicBase):
                     status.HTTP_404_NOT_FOUND,
                 )
             context = _page_context(request, share, document, payload)
-            context["quote_error"] = str(exc)
+            error_message = str(exc)
+            context["quote_error"] = error_message
+            # ISSUE #133 غ٤ (مراجعة الجولة الثانية): «رسائلُ التحقّق» بندٌ
+            # صريح في المواصفة — مورّدٌ يُخطئ يستحقّ أن يقرأ لماذا بلغته. مفتاح
+            # اختياريّ على مواصفة النوع (`error_translations`)؛ نوعٌ لا
+            # يعرّفه (أو رسالةٌ غير مُترجَمة فيه) يترك السطر الإنجليزيّ فارغاً
+            # فيختفي — لا يظهر نصٌّ عربيٌّ مكرَّرٌ يتظاهر بأنه إنجليزيّ.
+            quote_spec = (DOC_TYPES.get(share.doc_type) or {}).get("quote") or {}
+            translations = quote_spec.get("error_translations") or {}
+            context["quote_error_en"] = translations.get(error_message, "")
             return _harden(
                 Response(context, template_name=SHARE_TEMPLATE),
                 status_code=status.HTTP_409_CONFLICT,

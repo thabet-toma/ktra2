@@ -72,6 +72,18 @@
            border-radius:10px; padding:12px 15px; margin-top:18px; font-size:13px}
   .foot{margin-top:26px; padding-top:14px; border-top:1px solid var(--line);
         font-size:11.5px; color:var(--muted); text-align:center}
+  {% comment %}
+  ISSUE #133 غ٤ (مواصفة #130 §١): كلّ نصٍّ ثابتٍ هنا سطران مستقلّان — العربيّ
+  فوق، والإنجليزيّ تحته أصغر وأخفت. `.bi-en` عنصرٌ **مستقلّ** باتجاهه (لا نصّان
+  في عقدةٍ واحدة): `<bdi>`/خلطُ الاتجاهين داخل نصٍّ واحد يُنتج ترقيماً مبعثراً.
+  {% endcomment %}
+  .bi-en{display:block; direction:ltr; text-align:right; font-size:11.5px;
+         color:var(--muted); margin-top:2px}
+  .rfq-invite{border:1px solid #bfdbfe; background:#eff6ff; border-radius:10px;
+              padding:12px 15px; margin-bottom:18px; font-size:13.5px}
+  .rfq-invite .bi-en{color:#1d4ed8}
+  textarea.line-note{width:100%; min-width:140px; font:inherit; padding:6px 8px;
+              border:1px solid #cbd5e1; border-radius:6px; resize:vertical}
 {% endblock %}
 
 {% block body %}
@@ -107,6 +119,18 @@
       {% endif %}
     </div>
   </div>
+
+  {% comment %}
+  ISSUE #133 غ٧ (مواصفة #130 §١): ملاحظةٌ بارزةٌ أعلى الصفحة تدعو المورّد
+  صراحةً لاستعمال عمود الملاحظات لو اختلف ما عنده قليلاً عمّا طلبنا — لا
+  ندعه يترك السعر فارغاً أو يسعّر صنفاً غير الذي نريد لغياب موضعٍ يقول فيه
+  ذلك. تظهر ما دام باب التسعير مفتوحاً فقط.
+  {% endcomment %}
+  {% if doc.quote and doc.quote.open %}
+  <div class="rfq-invite">
+    <span class="bi"><span dir="rtl">عندكم صنفٌ مختلفٌ قليلاً عمّا طلبنا، أو مقاسٌ آخر متوفّر؟ اكتبوا ذلك في عمود «{{ doc.quote.notes_label.0 }}» أمام البند — نرحّب باقتراحكم، ولسنا متمسّكين بالحرف.</span><span class="bi-en" dir="ltr">Have a slightly different item, or another size in stock? Tell us in the “{{ doc.quote.notes_label.1 }}” column next to the line — we welcome the suggestion and are not bound to the exact spec.</span></span>
+  </div>
+  {% endif %}
 
   <div class="cards">
     <div class="card">
@@ -199,30 +223,47 @@
   {% comment %}
   ISSUE #115 — تسعير المورّد على طلبٍ: جدولٌ خاصٌّ بلا صناديق سعرٍ ثابتة
   (`doc.show_lines` مضبوط `False` لهذا النوع كي لا يتكرّر الجدول العام)، تليه
-  كتلة التسعير. القائمة السماحُ هنا مطابقةٌ لِـ`getSupplierColumns` في
-  `frontend_v2/utils/procurementColumns.ts`: تسلسل/الصنف/المواصفات/الكمية/
-  الوحدة — لا سعرَ تقديرياً ولا «أقل سعر».
+  كتلة التسعير.
+
+  ISSUE #133 غ٦ (مواصفة #130 §١): المواصفاتُ نزلت سطراً صغيراً تحت اسم
+  الصنف (نفس نمط `catalog_no`/`note` في `line_row` العام)، والعمودُ الذي
+  شغلته صار «ملاحظاتكم» فارغاً يكتب فيه المورّد. القائمة السماح على البنود
+  (`RFQ_LINE_WHITELIST`، `tests/test_public_leakage.py`) لا تتغيّر — «سعرٌ
+  لكلّ بند» و«ملاحظةٌ لكلّ بند» كلاهما يُلحَق في طبقة العرض لا الباني
+  (`docshare/views.py` — `_attach_quote_prefill`)، فبقاء `specs` في
+  الحمولة لازمٌ لعرضها تحت الاسم مهما تغيّر مكانها في الجدول.
   {% endcomment %}
   {% if doc.quote %}
   <table>
     <thead>
       <tr>
         <th class="num" style="width:38px">#</th>
-        <th>الصنف</th>
-        <th>المواصفات</th>
-        <th class="num" style="width:64px">الوحدة</th>
-        <th class="num" style="width:80px">الكمية</th>
-        {% if doc.quote.open %}<th class="num" style="width:120px">{{ doc.quote.price_label }}</th>{% endif %}
+        <th><span class="bi"><span dir="rtl">الصنف</span><span class="bi-en" dir="ltr">Item</span></span></th>
+        <th class="num" style="width:64px"><span class="bi"><span dir="rtl">الوحدة</span><span class="bi-en" dir="ltr">Unit</span></span></th>
+        <th class="num" style="width:80px"><span class="bi"><span dir="rtl">الكمية</span><span class="bi-en" dir="ltr">Qty</span></span></th>
+        <th style="width:200px"><span class="bi"><span dir="rtl">{{ doc.quote.notes_label.0 }}</span><span class="bi-en" dir="ltr">{{ doc.quote.notes_label.1 }}</span></span></th>
+        {% if doc.quote.open %}<th class="num" style="width:120px"><span class="bi"><span dir="rtl">{{ doc.quote.price_label.0 }}</span><span class="bi-en" dir="ltr">{{ doc.quote.price_label.1 }}</span></span></th>{% endif %}
       </tr>
     </thead>
     <tbody>
       {% for line in doc.lines %}
       <tr>
         <td class="num">{{ line.seq }}</td>
-        <td>{{ line.name }}</td>
-        <td>{{ line.specs }}</td>
+        <td>
+          {{ line.name }}
+          {% if line.specs %}<span class="item-note" dir="rtl">{{ line.specs }}</span>{% endif %}
+        </td>
         <td class="num">{{ line.unit }}</td>
         <td class="num">{{ line.quantity|qty }}</td>
+        <td>
+          {% if doc.quote.open %}
+          <textarea class="line-note" rows="2" maxlength="500"
+                    name="note_{{ line.id }}" form="rfq-quote-form"
+                    dir="auto">{{ line.note|default_if_none:'' }}</textarea>
+          {% else %}
+            {{ line.note|default:"" }}
+          {% endif %}
+        </td>
         {% if doc.quote.open %}
         <td class="num">
           {% comment %}
@@ -236,31 +277,65 @@
         {% endif %}
       </tr>
       {% empty %}
-      <tr><td colspan="{% if doc.quote.open %}6{% else %}5{% endif %}" class="num muted">لا توجد بنود</td></tr>
+      <tr><td colspan="{% if doc.quote.open %}7{% else %}6{% endif %}" class="num muted">لا توجد بنود</td></tr>
       {% endfor %}
     </tbody>
   </table>
 
   {% if quote_error %}
-    <div class="alert no-print" style="margin-top:0">{{ quote_error }}</div>
+    {% comment %}
+    ISSUE #133 غ٤ (مراجعة الجولة الثانية): رسائلُ التحقّق بلغتين أيضاً —
+    مورّدٌ يقف عند خطأٍ لا يقرؤه توقّف تماماً في اللحظة التي حاول فيها أن
+    يساعد. `quote_error_en` يغيب (سطرٌ فارغ فيختفي) لرسالةٍ لم تُترجَم بعد
+    بدل أن يُظهر تكراراً عربياً يتظاهر بأنه إنجليزيّ.
+    {% endcomment %}
+    <div class="alert no-print" style="margin-top:0">
+      <span class="bi"><span dir="rtl">{{ quote_error }}</span>{% if quote_error_en %}<span class="bi-en" dir="ltr">{{ quote_error_en }}</span>{% endif %}</span>
+    </div>
   {% elif quote_submitted %}
-    <div class="settled">{{ doc.quote.submitted_note }}</div>
+    <div class="settled"><span class="bi"><span dir="rtl">{{ doc.quote.submitted_note.0 }}</span><span class="bi-en" dir="ltr">{{ doc.quote.submitted_note.1 }}</span></span></div>
   {% endif %}
 
   {% if doc.quote.open %}
     <div class="decide no-print">
-      <h3>{{ doc.quote.title }}</h3>
-      <p class="muted" style="margin:0">{{ doc.quote.hint }}</p>
+      <h3><span class="bi"><span dir="rtl">{{ doc.quote.title.0 }}</span><span class="bi-en" dir="ltr">{{ doc.quote.title.1 }}</span></span></h3>
+      <p class="muted" style="margin:0"><span class="bi"><span dir="rtl">{{ doc.quote.hint.0 }}</span><span class="bi-en" dir="ltr">{{ doc.quote.hint.1 }}</span></span></p>
       <form method="post" action="{{ quote_url }}" id="rfq-quote-form">
         <input type="text" name="name" maxlength="120" required
-               placeholder="الاسم الكامل" autocomplete="name">
+               placeholder="الاسم الكامل / Full name" autocomplete="name">
+        {% comment %}
+        ISSUE #133 غ٢: المورّدُ الأجنبيّ يسعّر بعملته لا عملتنا — بلا هذا كان
+        كلُّ سعرٍ يُسجَّل بالعملة الأساسية بصمت، فيدخل المقارنةَ أرخصَ أو
+        أغلى ممّا هو حقيقةً. الاختيار هنا اختياريّ (`doc.quote.currency_options`
+        قد تغيب لنوعِ تسعيرٍ آخر مستقبلاً) والافتراض عملة الأساس.
+        {% endcomment %}
+        {% if doc.quote.currency_options %}
+        <select name="currency" form="rfq-quote-form" required>
+          {% for opt in doc.quote.currency_options %}
+          <option value="{{ opt.id }}"
+            {% if opt.id == doc.quote.selected_currency_id or not doc.quote.selected_currency_id and opt.is_base %}selected{% endif %}>
+            {{ opt.code }}
+          </option>
+          {% endfor %}
+        </select>
+        {% endif %}
+        {% comment %}
+        ISSUE #133 غ٣ (مواصفة #130 §١): ملاحظةٌ عامّةٌ على الطلبية كلّها —
+        بجانب ملاحظة كلّ سطر أعلاه. المورّدُ قد يردّ على الطلبية ككلّ («لا
+        نورّد لهذه المنطقة») ولا موضع لذلك في سطر.
+        {% endcomment %}
+        <label style="display:block; margin-top:10px">
+          <span class="bi"><span dir="rtl">{{ doc.quote.general_note_label.0 }}</span><span class="bi-en" dir="ltr">{{ doc.quote.general_note_label.1 }}</span></span>
+        </label>
+        <textarea name="general_note" form="rfq-quote-form" rows="2" maxlength="1000"
+                  dir="auto">{{ doc.quote.general_note_value|default:"" }}</textarea>
         <div class="acts">
-          <button class="btn btn-primary" type="submit">{{ doc.quote.confirm_label }}</button>
+          <button class="btn btn-primary" type="submit"><span class="bi"><span dir="rtl">{{ doc.quote.confirm_label.0 }}</span><span class="bi-en" dir="ltr">{{ doc.quote.confirm_label.1 }}</span></span></button>
         </div>
       </form>
     </div>
   {% else %}
-    <div class="notes no-print">{{ doc.quote.closed_note }}</div>
+    <div class="notes no-print"><span class="bi"><span dir="rtl">{{ doc.quote.closed_note.0 }}</span><span class="bi-en" dir="ltr">{{ doc.quote.closed_note.1 }}</span></span></div>
   {% endif %}
   {% endif %}
 

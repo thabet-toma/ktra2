@@ -62,6 +62,10 @@ import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
 import { buildPurchasePriceHintChips } from "@/utils/purchasePriceHint";
 import { inventoryApi } from "@/services/inventoryApi";
+import { getReservedStock, type ReservedStockRow } from "@/services/salesApi";
+import { buildReservationIndex, totalReserved, availableForSale } from "@/utils/reservedStock";
+import { stockBadgeFor } from "@/utils/stockBadge";
+import { getPickerFieldVisibility } from "@/utils/pickerFieldVisibility";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
 import { ItemQuickEditModal } from "../../items/ItemQuickEditModal";
@@ -1703,16 +1707,57 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     return () => { cancelled = true; };
   }, [formData.supplierId]);
 
+  /* ISSUE #133 (منتقي أصنافٍ واحد للبيع والشراء): نفس ما يراه البائع — شارة
+     حالة المخزون والمتاح بعد الحجز، لا حسابٌ ثانٍ ولا طلبٌ ثانٍ. `allDbItems`
+     يصل أصلاً من نفس عقد `?view=lookup` (عبر `itemsService.subscribeToItems`
+     في الأب)، و`stock_status`/`is_service`/`available_quantity`/
+     `quantity_on_hand` تصل الآن ضمن `Item` نفسه (THA-19
+     `mapPickerProductToItem` صار يحملها) — إعادة طلب `listPickerProducts` هنا
+     كانت ستُنزّل نفس العقد الموزون (685 كيلوبايت/1490 منتجاً) مرّتين لكل فتح
+     شاشة، وهذا العقد ضُيِّق أصلاً لهذا السبب بعينه (راجع تعليق
+     `listPickerProducts` في `services/inventoryApi.ts`). */
+
+  /* نفس تقرير «المحجوزات» الذي يقرأه جانب البيع (`getReservedStock`) — بلا
+     استثناء زبون هنا: لا زبون على فاتورة شراء أصلاً، فكل حجزٍ «لغيرها». هذا
+     تقريرٌ منفصلٌ فعلاً عن حمولة المنتج، فلا بديل له من `allDbItems`. */
+  const [reservationRows, setReservationRows] = useState<ReservedStockRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    getReservedStock()
+      .then((rows) => { if (!cancelled) setReservationRows(rows); })
+      .catch(() => { if (!cancelled) setReservationRows([]); });
+    return () => { cancelled = true; };
+  }, []);
+  const reservationIndex = useMemo(() => buildReservationIndex(reservationRows), [reservationRows]);
+
+  /* العين (`PriceVisibilityContext`) تحكم `indicativePurchasePrice` وحده في
+     هذه الدالّة — لا وجود لتلك العين على جانب الشراء أصلاً (لا زبونَ واقفاً
+     أمام شاشة الشراء يُحتمل أن يلمح شيئاً)، و`stockBadge`/
+     `availableAfterReservation` غير محكومَين بها بنصّ الدالّة نفسه بصرف
+     النظر عن السياق. القيمة `true` هنا بلا معنى عملي فعلاً، لا اختياراً صامتاً. */
+  const pickerVisibility = useMemo(() => getPickerFieldVisibility("purchase", true), []);
+
   /* task13 M5: منتقي مدمج في خلية اسم المنتج (يحل محل المودال كمسار أساسي) */
   const itemOptions = useMemo(
     () => allDbItems.map((it) => {
       const pp = purchasePriceMap.get(Number(it.id));
+      const reservation = reservationIndex.get(Number(it.id));
+      const reserved = totalReserved(reservation);
+      const onHand = Number(it.quantity_on_hand ?? 0);
       return {
         id: it.id,
         label: it.name,
+        // ISSUE #133: نفس شارة «نفذ/منخفض» التي يراها البائع — القاعدة عند
+        // الخادم وحده (`inventory/stock_status.py`)، هنا قراءةٌ لا حساب.
+        badge: pickerVisibility.stockBadge
+          ? stockBadgeFor({ id: Number(it.id), stock_status: it.stock_status, is_service: it.is_service })
+          : undefined,
         // T-RESERVEVIS: رصيد المنتج بجانب اسمه — كان جانب البيع وحده يعرضه،
         // فيطلب المشتري ما عنده منه رفٌّ ممتلئ.
-        sub: `الرصيد: ${formatQuantity(Number(it.quantity || 0))}`,
+        // ISSUE #133: والمحجوز يُذكر في الخيار نفسه أيضاً — نفس ما يراه البائع.
+        sub: pickerVisibility.availableAfterReservation && reserved > 0
+          ? `الرصيد: ${formatQuantity(onHand, "—")} · محجوز: ${formatQuantity(reserved, "—")} · المتاح: ${formatQuantity(availableForSale(onHand, reservation), "—")}`
+          : `الرصيد: ${formatQuantity(onHand, "—")}`,
         // T-SEARCH: الباركود ورقم الموديل وأرقام كتالوج الموردين يُبحَث فيها
         // ولا تُعرض — وهي ما يكتبه المشتري فعلاً وقت الطلب.
         keywords: [it.barcode, it.modelNumber, it.supplierCodes]
@@ -1729,7 +1774,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         }).map(({ label, value, link }) => ({ label, value, link: link ?? undefined })),
       };
     }),
-    [allDbItems, purchasePriceMap],
+    [allDbItems, purchasePriceMap, reservationIndex, pickerVisibility],
   );
 
   /** T-SEARCH: المورّد يُبحَث باسمه وهاتفه ورقمه — مرآة منتقي العميل. */
@@ -1921,7 +1966,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           style={{ marginBottom: "8px", display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", background: "var(--color-danger-bg, #fef2f2)", color: "var(--color-danger, #b91c1c)", fontWeight: 600 }}
         >
           <span style={{ padding: "2px 10px", borderRadius: "999px", background: "var(--color-danger, #b91c1c)", color: "#fff", fontSize: "12px" }}>
-            مرجع شراء ↩
+            مرتجع شراء ↩
           </span>
           <span style={{ fontWeight: 400 }}>
             هذا مستند إرجاع بضاعة للمورد — يعكس فاتورة الشراء (يُخرج الكمية ويُخفّض ذمم المورد).
@@ -3175,7 +3220,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     <KitDocumentView<InvoiceItem>
       title={
         formData.isReturn
-          ? "مرجع شراء (إرجاع للمورد)"
+          ? "مرتجع شراء (إرجاع للمورد)"
           : isInternationalInvoice
             ? "فاتورة شراء دولية"
             : "فاتورة شراء"
@@ -3400,12 +3445,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     <KitDocumentShell
       gridFitContent={viewMode}
       title={formData.isReturn
-        ? "مرجع شراء (إرجاع للمورد)"
+        ? "مرتجع شراء (إرجاع للمورد)"
         : isInternationalInvoice ? "فاتورة شراء دولية" : "فاتورة الشراء"}
       state={
         formData.id
-          ? `${formData.isReturn ? "مرجع" : isInternationalInvoice ? "فاتورة دولية" : "فاتورة"} ${formData.invoiceNumber || `#${formData.id}`}`
-          : (formData.isReturn ? "مرجع جديد" : isInternationalInvoice ? "فاتورة دولية جديدة" : "فاتورة جديدة")
+          ? `${formData.isReturn ? "مرتجع" : isInternationalInvoice ? "فاتورة دولية" : "فاتورة"} ${formData.invoiceNumber || `#${formData.id}`}`
+          : (formData.isReturn ? "مرتجع جديد" : isInternationalInvoice ? "فاتورة دولية جديدة" : "فاتورة جديدة")
       }
       company={
         formData.glPurchaseReceiptJournalId != null ? `قيد محاسبي #${formData.glPurchaseReceiptJournalId}` : undefined

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **593**
+عدد النقاط: **594**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -443,6 +443,7 @@
 | `/api/logistics/supplier-quotations/{pk}/` | `SupplierQuotationViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/supplier-quotations/{pk}/convert-to-purchase-invoice/` | `SupplierQuotationViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/supplier-quotations/{pk}/convert-to-purchase-order/` | `SupplierQuotationViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/supplier-quotations/{pk}/lines/{line_id}/internal-note/` | `SupplierQuotationViewSet` | `logistics/views/procurement.py` |
 | `/api/lookup/products/` | `ProductLookupViewSet` | `inventory/views.py` |
 | `/api/mapper/{subpath}/?` | `MapperView` | `bridge/views.py` |
 | `/api/media/upload/` | `media_upload` | `core/media_views.py` |

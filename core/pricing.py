@@ -32,6 +32,17 @@ logger = logging.getLogger(__name__)
 _UNIT_Q = Decimal("0.0001")
 _ZERO = Decimal("0")
 
+# ISSUE #133: «السعر التقديري» = أقلّ سعرٍ ضمن آخر N فاتورة شراء **مرحَّلة**
+# لكل منتج — لا كلّ الفترات. مكانٌ واحد يحكم الرقم: تغييرها إلى 3 أو 10 سطرٌ
+# واحد (`_purchase_lowest_prices_base_currency`/`indicative_purchase_prices`
+# هما المستهلِك الوحيد). التسمية المعروضة تُشتقّ منها كي لا يفترق الرقم عن
+# لافتته عند تغيير النافذة.
+INDICATIVE_PRICE_INVOICE_WINDOW = 5
+_ARABIC_DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+INDICATIVE_PRICE_LABEL = (
+    f"أقل شراء (آخر {str(INDICATIVE_PRICE_INVOICE_WINDOW).translate(_ARABIC_DIGITS)})"
+)
+
 
 class PriceStrategy:
     """Supported resolution strategies."""
@@ -226,9 +237,11 @@ def purchase_price_list(
     المورد»، بينما «أقل شراء» يبقى عاماً عبر كل الموردين؛ وإن لم يسبق الشراء من
     هذا المورد تُعبَّأ الخلية بأقل سعر عام.
     «آخر شراء» أحادي العملة كما سُجِّل — تحويل العملة لكل سطر يبقى في
-    `resolve_purchase_price`. أما «أقل شراء» (ISSUE #111) فبالعملة **الأساسية**
-    مُحوَّلاً بسعر صرف فاتورته هو (لا سعر اليوم)، ومعه المورد والتاريخ — انظر
-    `_purchase_lowest_prices_base_currency`.
+    `resolve_purchase_price`. أما «أقل شراء» (ISSUE #111/#133) فبالعملة
+    **الأساسية** مُحوَّلاً بسعر صرف فاتورته هو (لا سعر اليوم)، ومحصوراً بآخر
+    `INDICATIVE_PRICE_INVOICE_WINDOW` فاتورة شراء مرحَّلة تحتوي المنتج — لا كل
+    الفترات (قرار المالك #133؛ التسمية `INDICATIVE_PRICE_LABEL` تحمل النافذة
+    صراحةً)، ومعه المورد والتاريخ — انظر `_purchase_lowest_prices_base_currency`.
     السلسلة: تاريخ الشراء المرحَّل ← متوسط تكلفة المنتج (لـ«آخر شراء» فقط، ولا
     يُستعمَل أبداً لـ«أقل شراء») ← لا شيء. (`strategy` يبقى للتوافق مع نداء الـ
     endpoint ولا يؤثّر على القيمة الأساسية هنا.)
@@ -316,21 +329,33 @@ def purchase_price_list(
 def _purchase_lowest_prices_base_currency(
     *, tenant_id: int, product_ids=None,
 ) -> dict[int, dict]:
-    """ISSUE #111: أقل سعر شراء لكل منتج، **بالعملة الأساسية**، مُحوَّلاً بسعر
-    صرف فاتورته هو (سعرُ الأمس بصرف الأمس — لا سعر اليوم). المصدر فواتيرُ
-    الشراء المرحَّلة وحدها، ولا سقوطَ إلى `avg_cost` أبداً: منتجٌ بلا شراء
-    مرحَّل ببساطة **لا يظهر** في القاموس المُعاد.
+    """ISSUE #111/#133: أقل سعر شراء لكل منتج ضمن **آخر
+    `INDICATIVE_PRICE_INVOICE_WINDOW` فاتورة شراء مرحَّلة تحتوي المنتج** (لا كل
+    الفترات — قرار المالك #133)، **بالعملة الأساسية**، مُحوَّلاً بسعر صرف
+    فاتورته هو (سعرُ الأمس بصرف الأمس — لا سعر اليوم). المصدر فواتيرُ الشراء
+    المرحَّلة وحدها، ولا سقوطَ إلى `avg_cost` أبداً: منتجٌ بلا شراء مرحَّل
+    ببساطة **لا يظهر** في القاموس المُعاد. هذا رقمٌ للقراءة والتفاوض — ليس
+    تكلفةً، ولا يُقرأ منه `avg_cost` ولا طريقة التقييم بأي حال.
 
-    تجميعٌ واحد في SQL عبر كل المنتجات المطلوبة دفعة واحدة (استعلامٌ واحد
-    بترتيبٍ على القيمة المحوَّلة محسوبةً في قاعدة البيانات) — لا استعلامٌ لكل
-    منتج ولا استعلامٌ مترابط (correlated) لكل صفّ (درس
-    `correlated-subquery-on-lists`: 17 ثانية لصفحةٍ واحدة).
+    تجميعٌ واحد في SQL عبر كل المنتجات المطلوبة دفعة واحدة: دالّة نافذة
+    (`DenseRank`) تُرقّم فواتير كل منتج الأحدث أولاً (فاتورةٌ بسطرين للمنتج
+    نفسه تحمل رقماً واحداً — التقسيم على `(product_id)` والترتيب على
+    `(invoice__invoice_date, invoice_id)` فقط، لا على معرّف السطر)، ثم مرورٌ
+    بايثونيّ خطّي واحد يتجاهل ما وراء النافذة ويلتقط الأقلّ ضمنها — لا
+    استعلامٌ لكل منتج ولا استعلامٌ مترابط (correlated) لكل صفّ (درس
+    `correlated-subquery-on-lists`: 17 ثانية لصفحةٍ واحدة). الفلترة على رقم
+    النافذة تبقى في بايثون عمداً: قواعد البيانات ترفض `WHERE` على ناتج دالّة
+    نافذة مباشرةً، ولفّها بمستعلمٍ فرعي يضاعف الاستعلام بلا داعٍ ما دام مرورٌ
+    خطّي واحد كافياً.
 
     يُرجع {product_id: {"unit_price" (أساسية), "source_type", "source_label",
     "document_id", "document_number", "document_date", "supplier_id",
     "supplier_name"}}.
     """
-    from django.db.models import Case, DecimalField, ExpressionWrapper, F, Value, When
+    from django.db.models import (
+        Case, DecimalField, ExpressionWrapper, F, Value, When, Window,
+    )
+    from django.db.models.functions import DenseRank
 
     from logistics.models import PurchaseInvoiceItem
 
@@ -356,11 +381,22 @@ def _purchase_lowest_prices_base_currency(
     if product_ids is not None:
         qs = qs.filter(product_id__in=product_ids)
 
-    # استعلامٌ واحد: التحويل والترتيب على القيمة المحوَّلة يحدثان في قاعدة
-    # البيانات؛ أولّ سطر لكل منتج (بعد الترتيب) هو أقلّ سعرٍ بالأساسية —
-    # ومرور بايثون بعدها خطّيٌّ واحد (لا متداخل) لالتقاط رأس كل مجموعة فقط.
+    # #133: رتبة كل سطر بين فواتير **نفس المنتج** — الأحدث تاريخاً رتبةً ١، وما
+    # يليه ٢... `DenseRank` (لا `Rank`) يعطي كل أسطر **نفس الفاتورة** الرتبة
+    # ذاتها لأن التقسيم/الترتيب على `(product_id)`/`(invoice_date, invoice_id)`
+    # فقط — بلا معرّف السطر — فلا تُحسب فاتورةٌ بسطرين مرّتين ضمن النافذة.
+    invoice_rank = Window(
+        expression=DenseRank(),
+        partition_by=[F("product_id")],
+        order_by=[F("invoice__invoice_date").desc(), F("invoice_id").desc()],
+    )
+
+    # استعلامٌ واحد: التحويل، الترتيب على القيمة المحوَّلة، ورتبة النافذة كلّها
+    # تُحسب في قاعدة البيانات. الترتيب هنا (على `base_price` تصاعدياً لكل
+    # منتج) يبقى كما كان قبل #133 — فقط الحلقة أدناه صارت تتخطّى ما وراء
+    # نافذة الفواتير الأخيرة بدل أخذ أوّل صفّ مطلقاً.
     rows = (
-        qs.annotate(base_price=base_price_expr)
+        qs.annotate(base_price=base_price_expr, invoice_rank=invoice_rank)
         .select_related("invoice", "invoice__partner")
         .order_by("product_id", "base_price", "invoice__invoice_date", "invoice_id", "id")
     )
@@ -370,12 +406,14 @@ def _purchase_lowest_prices_base_currency(
         pid = item.product_id
         if pid in result:
             continue  # المنتج مُعالَج — الصفّ الحالي أعلى من أقلّه بالترتيب
+        if item.invoice_rank > INDICATIVE_PRICE_INVOICE_WINDOW:
+            continue  # #133: خارج نافذة آخر N فاتورة لهذا المنتج — لا يُحتسَب
         price = _dec(item.base_price)
         inv = item.invoice
         result[pid] = {
             "unit_price": str(price.quantize(_UNIT_Q)),
             "source_type": "PURCHASE_INVOICE",
-            "source_label": "أقل شراء",
+            "source_label": INDICATIVE_PRICE_LABEL,
             "document_id": inv.id,
             "document_number": inv.invoice_number,
             "document_date": inv.invoice_date.isoformat() if inv.invoice_date else None,
@@ -383,6 +421,23 @@ def _purchase_lowest_prices_base_currency(
             "supplier_name": inv.partner.name if inv.partner_id else None,
         }
     return result
+
+
+def indicative_purchase_prices(
+    *, tenant_id: int, product_ids=None,
+) -> dict[int, dict]:
+    """#133: «السعر التقديري» — واجهةٌ عامة حول `_purchase_lowest_prices_base_currency`
+    لاستهلاكٍ خارج هذه الوحدة (شاشة الأصناف، كرت المنتج، عقد المنتقي
+    `ProductLookupSerializer`، تقرير PDF). رقمٌ للقراءة والتفاوض مع المورد —
+    ليس تكلفةً ولا يمسّ `avg_cost` ولا طريقة التقييم بأي حال؛ منتجٌ بلا شراء
+    مرحَّل **غائبٌ** من القاموس المُعاد لا صفرٌ ولا سقوطٌ لأي رقم آخر.
+
+    نفس شكل الإرجاع حرفياً: {product_id: {"unit_price", "source_type"
+    ("PURCHASE_INVOICE")، "source_label" (`INDICATIVE_PRICE_LABEL`)،
+    "document_id", "document_number", "document_date", "supplier_id",
+    "supplier_name"}}.
+    """
+    return _purchase_lowest_prices_base_currency(tenant_id=tenant_id, product_ids=product_ids)
 
 
 def _lowest_purchase_item(qs):

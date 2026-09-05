@@ -1,6 +1,16 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { accountingApi } from "../../services/accountingApi";
+import { accountingApi, type CashBoxLedgerLink } from "../../services/accountingApi";
+import { pickDefaultCashAccount } from "../../utils/cashBox";
+import {
+  applyQuickEntryAmount,
+  emptyQuickEntryAmounts,
+  noQuickEntryTouch,
+  suggestQuickEntrySides,
+  type QuickEntryAmounts,
+  type QuickEntryKind,
+  type QuickEntryTouched,
+} from "../../utils/journalQuickEntry";
 import { formatMoney, formatNumber } from "../../utils/formatNumber";
 import { formatTimeValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
@@ -135,6 +145,48 @@ const normalizeToSimple = (ls: LineState[]): LineState[] => {
   return [debit, credit === debit ? emptyLine() : credit];
 };
 
+/* ─── T-JQE (issue #133): شريط القيد السريع بثلاث خانات ─────────────────────
+ * مقبوضات/مدفوعات/عمليات ذمم تحلّ محلّ خانة «المبلغ» الواحدة. الحساب الفعلي
+ * على `lines[SIMPLE_DEBIT/CREDIT]` هو مصدر الحقيقة دوماً — هذا استنتاجٌ عرضيّ
+ * وحده: أيّ خانةٍ من الثلاث تُظهر الرقم عند تحميل قيدٍ محفوظ أو طيّه من
+ * المتقدّم.
+ *
+ * `forceTouched` يفرّق بين مصدرين لا يتساويان:
+ *  - قيدٌ **محمَّل من الخادم** (`hydrateFromJournal`): حساباه حقيقتان محفوظتان
+ *    لا اقتراحان، فتُعامَلان «ملموستين» دائماً — بصرف النظر عن مطابقتهما
+ *    للصندوق الافتراضي الحالي (قد يتغيّر الإعداد لاحقاً) — كي لا يدهسهما
+ *    تغييرُ المبلغ.
+ *  - قيدٌ **يُركَّب في المتصفح** ويُطوى من المتقدّم إلى البسيط
+ *    (`switchEntryMode`): لم يُحفظ بعد، فحسابٌ يطابق الصندوق الافتراضي حرفياً
+ *    غالباً وصل إلى هناك من هذا الاقتراح نفسه في جولةٍ سابقة — فرضُ «ملموس»
+ *    هنا كان يُجمِّد الاقتراح بقية الجلسة (العطل المُبلَّغ عنه: طيّ إلى البسيط
+ *    يُسكت التلقين تماماً). فتُحسب اللمسة هنا بالمقارنة: حسابٌ **مُدخَل فعلاً
+ *    ويخالف** الافتراضي الحالي فقط يُعامَل ملموساً (اختيارٌ يدوي واضح)؛ حقلٌ
+ *    فارغ أو يطابق الافتراضي يبقى مفتوحاً لاقتراحٍ لاحق. */
+function inferQuickEntryDisplay(
+  normalized: LineState[],
+  defaultCashAccountId: number | null,
+  opts: { forceTouched: boolean } = { forceTouched: true },
+): { kind: QuickEntryKind; amounts: QuickEntryAmounts; touched: QuickEntryTouched } {
+  const debitAcc = normalized[SIMPLE_DEBIT]?.accountId ? Number(normalized[SIMPLE_DEBIT].accountId) : null;
+  const creditAcc = normalized[SIMPLE_CREDIT]?.accountId ? Number(normalized[SIMPLE_CREDIT].accountId) : null;
+  const amt = normalized[SIMPLE_DEBIT]?.debit || normalized[SIMPLE_CREDIT]?.credit || "";
+  let kind: QuickEntryKind = "receivable";
+  if (defaultCashAccountId != null && debitAcc === defaultCashAccountId) kind = "receipts";
+  else if (defaultCashAccountId != null && creditAcc === defaultCashAccountId) kind = "payments";
+  const touched: QuickEntryTouched = opts.forceTouched
+    ? { debit: true, credit: true }
+    : {
+        debit: debitAcc != null && debitAcc !== defaultCashAccountId,
+        credit: creditAcc != null && creditAcc !== defaultCashAccountId,
+      };
+  return {
+    kind,
+    amounts: { ...emptyQuickEntryAmounts(), [kind]: amt },
+    touched,
+  };
+}
+
 /** الذمم تحتاج جهة: رقمٌ عليها بلا طرفٍ رصيدٌ لا صاحب له في كشف الحساب. */
 const PARTNER_SUB_TYPES = new Set(["receivable", "payable"]);
 
@@ -205,6 +257,22 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   /** «بسيط» طرفان بمبلغٍ واحد · «متقدم» الشبكة الكاملة. */
   const [entryMode, setEntryMode] = useState<"simple" | "advanced">("simple");
 
+  /* T-JQE (issue #133): شريط القيد السريع بثلاث خانات — مقبوضات · مدفوعات ·
+     عمليات ذمم — تحلّ محلّ خانة «المبلغ» الواحدة في الوضع البسيط. */
+  const [cashBoxes, setCashBoxes] = useState<CashBoxLedgerLink[]>([]);
+  const [quickKind, setQuickKind] = useState<QuickEntryKind>("receipts");
+  const [quickAmounts, setQuickAmounts] = useState<QuickEntryAmounts>(emptyQuickEntryAmounts());
+  /** حسابٌ عدّله المستخدم بيده على أحد طرفَي الوضع البسيط — **حالة** لا مرجعاً
+      يُقرأ داخل effect، كي لا يضيع تعديلُ مستخدمٍ عدّل ثم غادر. */
+  const [quickTouched, setQuickTouched] = useState<QuickEntryTouched>(noQuickEntryTouch());
+  /** الصندوق الافتراضي مصدره إعدادات الشركة (`CashBoxLedgerAccount.is_default`
+      عبر `pickDefaultCashAccount`) — لا تخمينٌ من بادئة كود الشجرة (`^110` كانت
+      تبتلع 1103/1104 تاريخياً). */
+  const defaultCashAccountId = useMemo(
+    () => pickDefaultCashAccount({ boxes: cashBoxes }).accountId,
+    [cashBoxes],
+  );
+
   /* ISSUE #121: مسودّة محلية (IndexedDB) — هذه الشاشة لا تحفظ شيئاً محلياً
      اليوم. علامة «لُمِس» حالةٌ صريحة تُرفَع **مزامنةً** داخل كل معالج تعديلٍ
      حقيقي (لا داخل useEffect مبنيٍّ على الحمولة — ذاك يفوّت بالضبط حالة
@@ -236,7 +304,12 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
 
   /** ملء النموذج من قيد محمَّل — مشترك بين التحميل الأول والتنقّل بين السجلات. */
   const hydrateFromJournal = useCallback(
-    (j: any, accs: AccountingAccount[], parts: AccountingPartner[]) => {
+    (
+      j: any,
+      accs: AccountingAccount[],
+      parts: AccountingPartner[],
+      defCashAccountId: number | null = null,
+    ) => {
       setPosted(!!j.is_posted);
       // تعبئةٌ من الخادم — لا تُعامَل كتعديل مستخدم (issue #121).
       setTouched(false);
@@ -275,7 +348,22 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       // قيدٌ بطرفين يُفتح بسيطاً، والمركّب يفتح على الشبكة الكاملة.
       const simple = isSimpleShape(mapped);
       setEntryMode(simple ? "simple" : "advanced");
-      setLines(simple ? normalizeToSimple(mapped) : mapped);
+      const normalized = simple ? normalizeToSimple(mapped) : mapped;
+      setLines(normalized);
+      if (simple) {
+        // قيدٌ محمَّلٌ من الخادم — حساباه حقيقتان محفوظتان لا اقتراحان، فتُفرَض
+        // «ملموس» (الافتراضي `forceTouched: true`) بصرف النظر عن مطابقتهما
+        // للصندوق الافتراضي الحالي؛ خلافاً لطيّ المتقدّم إلى البسيط أثناء
+        // التركيب (انظر `switchEntryMode`).
+        const disp = inferQuickEntryDisplay(normalized, defCashAccountId);
+        setQuickKind(disp.kind);
+        setQuickAmounts(disp.amounts);
+        setQuickTouched(disp.touched);
+      } else {
+        setQuickKind("receipts");
+        setQuickAmounts(emptyQuickEntryAmounts());
+        setQuickTouched(noQuickEntryTouch());
+      }
     },
     [toNarrationLine],
   );
@@ -316,10 +404,13 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         setEntryMode("simple");
         setPosted(false);
         setTouched(false);
+        setQuickKind("receipts");
+        setQuickAmounts(emptyQuickEntryAmounts());
+        setQuickTouched(noQuickEntryTouch());
       } else {
         try {
           const j = await accountingApi.getJournal(Number(id));
-          hydrateFromJournal(j, accounts, partners);
+          hydrateFromJournal(j, accounts, partners, defaultCashAccountId);
         } catch (err) {
           // console suppressed
         }
@@ -331,8 +422,8 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
      محلياً اليوم. الحمولة كائنٌ خفيف يكفي وحده لإعادة بناء الشاشة؛ لا صلة
      بحمولة الحفظ الخادمية (`buildPayload`). */
   const draftPayload = useMemo(
-    () => ({ header, lines, entryMode, headerDescTouched }),
-    [header, lines, entryMode, headerDescTouched],
+    () => ({ header, lines, entryMode, headerDescTouched, quickKind, quickAmounts, quickTouched }),
+    [header, lines, entryMode, headerDescTouched, quickKind, quickAmounts, quickTouched],
   );
 
   const onRestoreDraft = useCallback(
@@ -341,11 +432,17 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       lines: LineState[];
       entryMode: "simple" | "advanced";
       headerDescTouched: boolean;
+      quickKind?: QuickEntryKind;
+      quickAmounts?: QuickEntryAmounts;
+      quickTouched?: QuickEntryTouched;
     }) => {
       setHeader(restored.header);
       setLines(restored.lines);
       setEntryMode(restored.entryMode);
       setHeaderDescTouched(restored.headerDescTouched);
+      setQuickKind(restored.quickKind ?? "receipts");
+      setQuickAmounts(restored.quickAmounts ?? emptyQuickEntryAmounts());
+      setQuickTouched(restored.quickTouched ?? noQuickEntryTouch());
       draftRestoredRef.current = true;
       // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تُسجَّل «ملموسة».
       setTouched(true);
@@ -364,6 +461,9 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     lines: LineState[];
     entryMode: "simple" | "advanced";
     headerDescTouched: boolean;
+    quickKind: QuickEntryKind;
+    quickAmounts: QuickEntryAmounts;
+    quickTouched: QuickEntryTouched;
   }>({
     docType: "journal_entry",
     docId: journalId,
@@ -397,7 +497,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     if (journalId != null) {
       try {
         const j = await accountingApi.getJournal(journalId);
-        hydrateFromJournal(j, accounts, partners);
+        hydrateFromJournal(j, accounts, partners, defaultCashAccountId);
       } catch {
         /* أفضل جهد — تعذّر إعادة الجلب لا يجوز أن يمنع مسح المسودّة */
       }
@@ -418,10 +518,13 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       setHeaderDescTouched(false);
       setEntryMode("simple");
       setPosted(false);
+      setQuickKind("receipts");
+      setQuickAmounts(emptyQuickEntryAmounts());
+      setQuickTouched(noQuickEntryTouch());
     }
     setTouched(false);
     void discardDraft();
-  }, [journalId, accounts, partners, hydrateFromJournal, discardDraft]);
+  }, [journalId, accounts, partners, hydrateFromJournal, discardDraft, defaultCashAccountId]);
 
   // N3-T1: Kit keyboard shortcuts.
   useKitKeymap({
@@ -486,24 +589,30 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     setLoading(true);
     setErr(null);
     try {
-      const [acc, part, cc, cur] = await Promise.all([
+      const [acc, part, cc, cur, boxes] = await Promise.all([
         accountingApi.getAccounts(),
         accountingApi.getPartners().catch(() => []),
         accountingApi.getCostCenters().catch(() => []),
         accountingApi.getCurrencies().catch(() => []),
+        accountingApi.getCashBoxLedgers().catch(() => []),
       ]);
       const activeAccounts = (acc as AccountingAccount[]).filter((a) => a.is_active);
       setAccounts(activeAccounts);
       setPartners(part as AccountingPartner[]);
       setCostCenters(cc as CostCenterDto[]);
       setCurrencies(cur as CurrencyDto[]);
+      setCashBoxes(boxes as CashBoxLedgerLink[]);
+      // الصندوق الافتراضي هنا محسوبٌ محلياً من الصناديق المجلوبة للتوّ — حالة
+      // `cashBoxes` لا تنعكس إلا بعد إعادة رسم لاحقة، فقراءتها هنا تُطالع نسخةً
+      // قديمة (سباق نفس المشكلة التي عولجت لعملة الأساس أدناه).
+      const defCashAccountId = pickDefaultCashAccount({ boxes: boxes as CashBoxLedgerLink[] }).accountId;
 
       const baseCurrency = (cur as CurrencyDto[]).find((c) => c.IsBaseCurrency);
 
       if (journalId != null) {
         const j = await accountingApi.getJournal(journalId);
         if (j.currency == null && baseCurrency) j.currency = baseCurrency.CurrencyID;
-        hydrateFromJournal(j, activeAccounts, part as AccountingPartner[]);
+        hydrateFromJournal(j, activeAccounts, part as AccountingPartner[], defCashAccountId);
       } else if (draftRestoredRef.current) {
         // الحارسُ **لا يُستهلَك هنا**: موضعا التصفير التلقائيّ اثنان (هذا،
         // وإعادةُ تهيئة «قيدٍ جديد» في `nav.onSelect`) وأيّهما استهلكه ترك
@@ -527,6 +636,9 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         setTouched(false);
         setLines(startingLines());
         setEntryMode("simple");
+        setQuickKind("receipts");
+        setQuickAmounts(emptyQuickEntryAmounts());
+        setQuickTouched(noQuickEntryTouch());
         setHeader((h) => ({ ...h, reference_type: h.reference_type || "MANUAL" }));
         if (baseCurrency) {
           setHeader((h) => ({
@@ -621,20 +733,9 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     });
   };
 
-  /* ── الوضع البسيط: كتابةٌ على السطرين الأوّلين بلا إضافة سطرٍ ثالث ── */
-
-  /** المبلغ يُكتب مرّة واحدة ويملأ الجهتين — لا فرق ولا «تعبئة الباقي». */
-  const updateSimpleAmount = (v: string) => {
-    if (posted) return;
-    setTouched(true);
-    setLines((prev) => {
-      const next = [...prev];
-      while (next.length < MIN_LINES) next.push(emptyLine());
-      next[SIMPLE_DEBIT] = { ...next[SIMPLE_DEBIT], debit: v, credit: "" };
-      next[SIMPLE_CREDIT] = { ...next[SIMPLE_CREDIT], credit: v, debit: "" };
-      return next;
-    });
-  };
+  /* ── الوضع البسيط: كتابةٌ على السطرين الأوّلين بلا إضافة سطرٍ ثالث ──
+   * خانة «المبلغ» الواحدة القديمة استُبدلت بشريط القيد السريع بثلاث خانات
+   * (T-JQE، issue #133) — أدناه `handleQuickAmountChange`. */
 
   const updateSimpleSide = (idx: number, patch: Partial<LineState>) => {
     if (posted) return;
@@ -647,13 +748,68 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     });
   };
 
+  /** كتابة رقمٍ في إحدى الخانات الثلاث (T-JQE، issue #133): يُفرغ الخانتين
+      الأخريين (لا قيدَ يزعم قبضاً ودفعاً معاً)، يملأ طرفَي القيد البسيط
+      بالمبلغ نفسه، ويقترح حساب الصندوق الافتراضي على الجهة المناسبة —
+      مقبوضات على المدين، مدفوعات على الدائن، وعمليات ذمم بلا اقتراح على أيٍّ
+      منهما — ما لم يكن المستخدم قد لمس تلك الجهة بيده. */
+  const handleQuickAmountChange = (kind: QuickEntryKind, value: string) => {
+    if (posted) return;
+    setTouched(true);
+    setQuickKind(kind);
+    setQuickAmounts((prev) => applyQuickEntryAmount(prev, kind, value));
+    const amt = parseFloat(value) || 0;
+    setLines((prev) => {
+      const next = [...prev];
+      while (next.length < MIN_LINES) next.push(emptyLine());
+      next[SIMPLE_DEBIT] = { ...next[SIMPLE_DEBIT], debit: value, credit: "" };
+      next[SIMPLE_CREDIT] = { ...next[SIMPLE_CREDIT], credit: value, debit: "" };
+      const debitId = next[SIMPLE_DEBIT].accountId ? Number(next[SIMPLE_DEBIT].accountId) : null;
+      const creditId = next[SIMPLE_CREDIT].accountId ? Number(next[SIMPLE_CREDIT].accountId) : null;
+      const sides = suggestQuickEntrySides({
+        kind,
+        // الخانة النشطة قبل هذه الكتابة — تُقرأ من الحالة قبل أن يحدّثها
+        // `setQuickKind(kind)` أعلاه، فتحمل «السابقة» فعلاً لا الجديدة.
+        previousKind: quickKind,
+        amount: amt,
+        defaultCashAccountId,
+        touched: quickTouched,
+        current: { debitAccountId: debitId, creditAccountId: creditId },
+      });
+      // المقارنة بالقيمة القديمة تشمل التراجع إلى `null` أيضاً — لا فرقاً
+      // من طرازٍ واحد يتجاهل الحساب حين يُفرَغ. `sides.*AccountId` يحمل
+      // القيمة النهائية سواءٌ أكانت اقتراحاً جديداً أم تراجعاً إلى بلا حساب.
+      if (sides.debitAccountId !== debitId) {
+        next[SIMPLE_DEBIT] = {
+          ...next[SIMPLE_DEBIT],
+          accountId: sides.debitAccountId != null ? String(sides.debitAccountId) : "",
+        };
+      }
+      if (sides.creditAccountId !== creditId) {
+        next[SIMPLE_CREDIT] = {
+          ...next[SIMPLE_CREDIT],
+          accountId: sides.creditAccountId != null ? String(sides.creditAccountId) : "",
+        };
+      }
+      return next;
+    });
+  };
+
   /** الانتقال بين الوضعين — الطيّ إلى البسيط لا يقع إلا على قيدٍ يسعه. */
   const switchEntryMode = (m: "simple" | "advanced") => {
     // القيد المرحَّل يبدَّل عرضه لا محتواه — رؤية طرفيه في الشبكة حقُّ قارئه.
     if (m === entryMode) return;
     if (m === "simple") {
       if (!isSimpleShape(lines)) return;
-      setLines(normalizeToSimple(lines));
+      const normalized = normalizeToSimple(lines);
+      setLines(normalized);
+      // قيدٌ يُركَّب في المتصفح لا محمَّلٌ من الخادم — لا يُفرَض «ملموس» على
+      // الجهتين (انظر تعليق `inferQuickEntryDisplay`)، وإلا جمّد الطيّ من
+      // المتقدّم كلَّ اقتراحٍ لاحق بقية الجلسة.
+      const disp = inferQuickEntryDisplay(normalized, defaultCashAccountId, { forceTouched: false });
+      setQuickKind(disp.kind);
+      setQuickAmounts(disp.amounts);
+      setQuickTouched(disp.touched);
     }
     setEntryMode(m);
   };
@@ -1038,7 +1194,6 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     );
   };
 
-  const simpleAmount = lines[SIMPLE_DEBIT]?.debit || lines[SIMPLE_CREDIT]?.credit || '';
   const canFoldToSimple = isSimpleShape(lines);
 
   const isShipmentLink =
@@ -1386,7 +1541,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       </div>
 
       {entryMode === 'simple' ? (
-        /* ── الوضع البسيط: سطرٌ واحد — بيان · مدين · دائن · مبلغ ── */
+        /* ── الوضع البسيط: بيان · شريط قيدٍ سريع بثلاث خانات · مدين/دائن ── */
         <div className="rounded-md border border-[var(--ktra-border,#c8b99a)] bg-[var(--ktra-surface,#fffdf8)] p-3">
           {/* الملاحظة بارزة وللقيد كلّه — لا ملاحظةً لكل سطر */}
           <div className="mb-3">
@@ -1396,33 +1551,98 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
             <div className="mt-1">{renderNarrationInput(true)}</div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
+          {/* ── T-JQE (issue #133): شريط القيد السريع — مقبوضات · مدفوعات ·
+              عمليات ذمم، متمانعة: رقمٌ في خانة يُفرغ الخانتين الأخريين. ── */}
+          <div className="mb-3">
+            <div className="grid gap-3 md:grid-cols-3">
+              {(
+                [
+                  { kind: 'receipts' as QuickEntryKind, label: 'مقبوضات' },
+                  { kind: 'payments' as QuickEntryKind, label: 'مدفوعات' },
+                  { kind: 'receivable' as QuickEntryKind, label: 'عمليات ذمم' },
+                ]
+              ).map(({ kind, label }) => (
+                <div key={kind}>
+                  <span className="ktra-field-label mb-1 block">
+                    {label}{header.currency_code ? ` (${header.currency_code})` : ''}
+                  </span>
+                  {posted ? (
+                    <span className="ktra-input ktra-num flex items-center font-bold">
+                      {quickKind === kind ? fmtAmount(quickAmounts[kind]) : '—'}
+                    </span>
+                  ) : (
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="0.00"
+                      className="ktra-input ktra-num block w-full font-bold"
+                      data-ktra-field={`quick-amount-${kind}`}
+                      value={quickAmounts[kind]}
+                      onChange={(e) => handleQuickAmountChange(kind, e.target.value)}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            {!posted && !defaultCashAccountId && (
+              <p className="mt-1 text-[11px] text-[var(--ktra-ink-soft)]">
+                لا صندوق افتراضي مُعرَّف للشركة — عرّفه من{' '}
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => navigate('/cash-boxes')}
+                >
+                  شاشة الصناديق
+                </button>{' '}
+                ليُقترح تلقائياً على المقبوضات والمدفوعات؛ الحقول تعمل الآن بلا اقتراح.
+              </p>
+            )}
+            <p className="mt-1 text-[11px] text-[var(--ktra-ink-soft)]">
+              يُكتب المبلغ في خانةٍ واحدة — يُقيَّد مديناً ودائناً تلقائياً.
+            </p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
             {renderSimpleSide(SIMPLE_DEBIT, 'الحساب المدين (منه)', '— اختر الحساب المدين —')}
             {renderSimpleSide(SIMPLE_CREDIT, 'الحساب الدائن (له)', '— اختر الحساب الدائن —')}
-            <div>
-              <span className="ktra-field-label mb-1 block">
-                المبلغ{header.currency_code ? ` (${header.currency_code})` : ''}
-              </span>
-              {posted ? (
-                <span className="ktra-input ktra-num flex items-center font-bold">
-                  {fmtAmount(simpleAmount)}
-                </span>
-              ) : (
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder="0.00"
-                  className="ktra-input ktra-num block w-full font-bold"
-                  data-ktra-field="simple-amount"
-                  value={simpleAmount}
-                  onChange={(e) => updateSimpleAmount(e.target.value)}
-                />
-              )}
-              <span className="mt-1 block text-[11px] text-[var(--ktra-ink-soft)]">
-                يُكتب مرّة واحدة — يُقيَّد مديناً ودائناً تلقائياً.
-              </span>
-            </div>
+          </div>
+
+          {/* ── مراجعة ما أُدخل قبل الحفظ ── */}
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-[var(--ktra-ink-soft)]">
+                  <th className="px-1 py-1 text-start font-normal">الحساب</th>
+                  <th className="px-1 py-1 text-center font-normal">مدين</th>
+                  <th className="px-1 py-1 text-center font-normal">دائن</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[SIMPLE_DEBIT, SIMPLE_CREDIT].map((idx) => {
+                  const row = lines[idx] || emptyLine();
+                  const acc = accounts.find((a) => String(a.id) === row.accountId);
+                  return (
+                    <tr key={idx} className="border-t border-[var(--ktra-border,#c8b99a)]">
+                      <td className="px-1 py-1">{acc ? `${acc.code} — ${acc.name}` : '—'}</td>
+                      <td className="px-1 py-1 text-center ktra-num">
+                        {parseFloat(row.debit) > 0 ? fmtAmount(row.debit) : ''}
+                      </td>
+                      <td className="px-1 py-1 text-center ktra-num">
+                        {parseFloat(row.credit) > 0 ? fmtAmount(row.credit) : ''}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-[var(--ktra-border,#c8b99a)] font-semibold">
+                  <td className="px-1 py-1">الإجمالي</td>
+                  <td className="px-1 py-1 text-center ktra-num">{fmtAmount(totalDebit)}</td>
+                  <td className="px-1 py-1 text-center ktra-num">{fmtAmount(totalCredit)}</td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
         </div>
       ) : (
@@ -1530,7 +1750,13 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       onSelect={(a) => {
         if (pickerTargetLine != null) {
           // الوضع البسيط يكتب على السطرين وحدهما — لا يُلحق سطراً ثالثاً.
-          if (entryMode === 'simple') updateSimpleSide(pickerTargetLine, { accountId: String(a.id) });
+          if (entryMode === 'simple') {
+            updateSimpleSide(pickerTargetLine, { accountId: String(a.id) });
+            // T-JQE: تعديلٌ يدويٌّ لحساب الجهة — لا يعود اقتراح الصندوق
+            // الافتراضي يدهسه حين يتغيّر المبلغ لاحقاً.
+            if (pickerTargetLine === SIMPLE_DEBIT) setQuickTouched((t) => ({ ...t, debit: true }));
+            else if (pickerTargetLine === SIMPLE_CREDIT) setQuickTouched((t) => ({ ...t, credit: true }));
+          }
           else updateLine(pickerTargetLine, { accountId: String(a.id) });
         }
         setShowAccountPicker(false);

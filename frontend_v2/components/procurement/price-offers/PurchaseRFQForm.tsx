@@ -203,7 +203,10 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     discardDraft,
     orphanDrafts,
   } = useDocumentDraft<RfqDraftPayload>({
-    docType: "purchase_rfq",
+    // ISSUE #133 غ٥: مفتاحٌ لكل نطاق — بلا هذا كانت مسودّةٌ يتيمة لطلبية شراء
+    // محلّي تظهر في شاشة طلبية استيراد (وعكسها)، فالبحث عن اليتامى يفلتر
+    // بـ`[tenant_id+doc_type]` وحده ولم يكن النطاق جزءاً من `doc_type`.
+    docType: `purchase_rfq_${scope}`,
     docId: current?.id ?? null,
     payload: draftPayload,
     // القرار (يُذكر في تقرير القضية #121): الحفظ المحلي يتوقّف بمجرّد أن تُقفَل
@@ -842,6 +845,7 @@ export const PurchaseRFQForm: React.FC<Props> = ({
         rfqId={current.id}
         rfqNumber={current.rfq_number}
         canAward={current.status === "sent"}
+        awardStopsAtAcceptedOffer={scope === "import"}
         onClose={() => setShowComparison(false)}
         onAwarded={(result: PurchaseRFQAwardResult) => {
           setCurrent(result);

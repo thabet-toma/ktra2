@@ -62,6 +62,14 @@ export const mapPickerProductToItem = (
     // #22: «المنتج» (الأب) — للسياق فقط، لا تُعرض كخيارٍ مستقل في المنتقي.
     familyId: (p as any).family_id != null ? String((p as any).family_id) : undefined,
     familyName: (p as any).family_name || undefined,
+    // ISSUE #133: أساسيةٌ لا موسّعة عمداً — نافذة البحث (`ItemSearchModal`)
+    // وتدفّق الإنشاء السريع (`onItemCreated`/`onSaved`) يغذّيان نفس مصفوفة
+    // `allDbItems` التي يبني منها المنتقي شارته، فحقلٌ موسَّعٌ فقط كان سيصل
+    // مستدعياً واحداً دون الآخر وينتج بندَ شارةً صامتاً في نصف الحالات.
+    stock_status: (p as any).stock_status,
+    is_service: (p as any).is_service,
+    available_quantity: (p as any).available_quantity,
+    quantity_on_hand: (p as any).quantity_on_hand,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

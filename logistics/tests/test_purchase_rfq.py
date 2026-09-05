@@ -300,6 +300,40 @@ class PurchaseRFQNumberingTest(PurchaseRFQAPITestBase):
         # المسودّة المهجورة بينهما لم تحرق رقماً — الثانية المُرسَلة فعلياً تحمل 0002 لا 0003.
         self.assertEqual(send_second.data['rfq_number'], 'RFQ-0002')
 
+    def test_import_scope_rfqs_number_from_their_own_sequence_with_a_distinct_prefix(self):
+        """ISSUE #133 غ٣: طلبيتا استيرادٍ لا تشارك التسلسل مع طلبيات الشراء
+        المحلّي (ولا مع بعضهما فراغاً) — نفس نمط `IQ`/`PQ` على عرض السعر.
+        الطلبيات المحلّية تبقى على تسلسلها القديم (`RFQ-####`) بلا مساس."""
+        local_first = self.create_rfq(scope='local')
+        import_first = self.create_rfq(scope='import')
+        import_second = self.create_rfq(scope='import')
+        local_second = self.create_rfq(scope='local')
+
+        send_local_first = self.client.post(
+            f"/api/logistics/purchase-rfqs/{local_first['id']}/send/",
+        )
+        send_import_first = self.client.post(
+            f"/api/logistics/purchase-rfqs/{import_first['id']}/send/",
+        )
+        send_import_second = self.client.post(
+            f"/api/logistics/purchase-rfqs/{import_second['id']}/send/",
+        )
+        send_local_second = self.client.post(
+            f"/api/logistics/purchase-rfqs/{local_second['id']}/send/",
+        )
+        for response in (
+            send_local_first, send_import_first, send_import_second, send_local_second,
+        ):
+            self.assertEqual(response.status_code, 200, response.content)
+
+        # التسلسل المحلّي مستقلٌّ عن ترتيب الإرسال العام — ١ ثم ٢ رغم أن
+        # طلبيتي الاستيراد أُرسلتا بينهما.
+        self.assertEqual(send_local_first.data['rfq_number'], 'RFQ-0001')
+        self.assertEqual(send_local_second.data['rfq_number'], 'RFQ-0002')
+        # وتسلسل الاستيراد مستقلّ بادئةً ورقماً.
+        self.assertEqual(send_import_first.data['rfq_number'], 'IRFQ-0001')
+        self.assertEqual(send_import_second.data['rfq_number'], 'IRFQ-0002')
+
     def test_send_requires_at_least_one_line(self):
         response = self.client.post(
             '/api/logistics/purchase-rfqs/',
@@ -313,6 +347,29 @@ class PurchaseRFQNumberingTest(PurchaseRFQAPITestBase):
         PurchaseRFQ.objects.get(pk=rfq_id).lines.all().delete()
         send = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
         self.assertEqual(send.status_code, 400, send.content)
+
+
+class PurchaseRFQDefaultScopeTest(PurchaseRFQAPITestBase):
+    """ISSUE #133 غ٤: بلا `?scope=` القائمة تعود بنطاقٍ واحد لا الاثنين معاً —
+    مرآة `SupplierQuotationDefaultScopeTest`. رؤيةٌ داخل الشركة نفسها، لا
+    تسريب بين شركات (العزل بالـtenant سليمٌ ولا يمسّه هذا الاختبار)."""
+
+    def test_bare_list_returns_one_scope_not_both(self):
+        local = self.create_rfq(scope='local')
+        imported = self.create_rfq(scope='import')
+
+        bare = self.client.get('/api/logistics/purchase-rfqs/')
+        self.assertEqual(bare.status_code, 200, bare.content)
+        scopes = {row['scope'] for row in bare.data}
+        self.assertEqual(scopes, {'local'})
+        self.assertIn(local['id'], [row['id'] for row in bare.data])
+        self.assertNotIn(imported['id'], [row['id'] for row in bare.data])
+
+        explicit_import = self.client.get(
+            '/api/logistics/purchase-rfqs/', {'scope': 'import'},
+        )
+        self.assertEqual(explicit_import.status_code, 200, explicit_import.content)
+        self.assertIn(imported['id'], [row['id'] for row in explicit_import.data])
 
 
 class PurchaseRFQReplyCounterTest(PurchaseRFQAPITestBase):

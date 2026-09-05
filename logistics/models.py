@@ -178,6 +178,15 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
         db_column='EntrySource',
         help_text='مصدر إدخال العرض: سعّره المورّد على رابطه، أم أُدخل عنه',
     )
+    # ISSUE #133 غ٣ (مواصفة #130 §١): ملاحظةُ المورّد **العامّة** على الطلبية
+    # كلّها — بجانب ملاحظة كلّ سطر (`SupplierQuotationLine.supplier_note`
+    # أدناه). المورّدُ قد يردّ على الطلبية ككلّ («لا نورّد لهذه المنطقة»)، ولا
+    # موضع لذلك في سطر. تُكتب حصراً من `logistics.services.submit_rfq_supplier_quote`
+    # (رابط المورّد العام) — للقراءة فقط في `SupplierQuotationSerializer`
+    # الداخليّ، نفس قفل `SupplierQuotationLine.supplier_note`. `TextField` لا
+    # `CharField`: عمودٌ قصير يُلغي القيد بصمتٍ على MySQL ولا يكشفه SQLite
+    # (نفس عطل `doc_type`/`ActivityLog.action` الموثَّق في `docs/modules/docshare.md`).
+    general_note = models.TextField(blank=True, default='', db_column='GeneralNote')
 
     class Meta:
         db_table = 'supplier_quotations'
@@ -265,6 +274,24 @@ class SupplierQuotationLine(models.Model):
     unit_price = models.DecimalField(max_digits=18, decimal_places=4, db_column='UnitPrice')
     line_total = models.DecimalField(
         max_digits=18, decimal_places=2, default=0, db_column='LineTotal',
+    )
+    # ISSUE #133 غ٣ (مواصفة #130 §١): ملاحظتان لا حقلٌ واحد — دمجُهما هو
+    # بعينه محو الأصل. `supplier_note` نصّ المورّد نفسه على هذا البند —
+    # يُكتب حصراً من `logistics.services.submit_rfq_supplier_quote` (رابط
+    # المورّد العام) ويُقفل بعده أمام أيّ مسارٍ داخليّ: للقراءة فقط في
+    # `SupplierQuotationLineSerializer`، ومحرِّرُ العروض ينقله حرفياً بين
+    # حذف السطور وإعادة إنشائها (`SupplierQuotationSerializer.update`) بدل أن
+    # يفقده. «خلّي ملاحظاته زي ما هي» — عند خلافٍ يكون الدليل.
+    supplier_note = models.TextField(blank=True, default='', db_column='SupplierNote')
+    # تعليقنا نحن على ردّ المورّد — منفصلٌ بنيوياً بكاتبه وتاريخه، يظهر في
+    # الشاشة فقط ولا يخرج إلى أيّ سطحٍ عام (مصفوفة المقارنة، الطباعة).
+    internal_note = models.TextField(blank=True, default='', db_column='InternalNote')
+    internal_note_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='InternalNoteBy_UserID', related_name='+',
+    )
+    internal_note_at = models.DateTimeField(
+        null=True, blank=True, db_column='InternalNoteAt',
     )
 
     class Meta:

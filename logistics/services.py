@@ -335,7 +335,10 @@ def confirm_purchase_order(order):
 
 
 @transaction.atomic
-def submit_rfq_supplier_quote(recipient, *, name: str, prices: dict, ip: str = ''):
+def submit_rfq_supplier_quote(
+    recipient, *, name: str, prices: dict, ip: str = '', currency_id=None,
+    general_note: str = '', notes: dict | None = None,
+):
     """يُنشئ أو يحدّث عرض السعر المتولّد من ردّ المورّد على رابطه الخاص (ISSUE #115).
 
     القاعدة الوحيدة التي تكتب `SupplierQuotation` من رابطٍ عام — تُستدعى من
@@ -343,11 +346,28 @@ def submit_rfq_supplier_quote(recipient, *, name: str, prices: dict, ip: str = '
     نفس نمط `confirm_purchase_order` أعلاه. `docshare` لا يستورد شيئاً من هنا
     غير هذه الدالّة، فيبقى جاهلاً بشكل `PurchaseRFQRecipient`/`SupplierQuotation`.
 
+    **ISSUE #133 غ٢**: `currency_id` اختياريّ — موردٌ أجنبيّ (والاستيراد
+    مورّدوه أجانب بالتعريف) يكتب بعملته لا عملتنا. غيابه أو موافقته لعملة
+    الأساس يُبقي السلوك القديم حرفياً (عملة الأساس، سعر صرف = 1). عملةٌ أخرى
+    تُحوَّل بسعر صرفٍ يُحسَم **الآن** (`accounting.services.get_exchange_rate`)
+    ويُحفظ على العرض — فيصير «سعر صرف المستند نفسه» الذي تُحاكم إليه مصفوفة
+    المقارنة لاحقاً (`comparison/`)، لا سعر اليوم المتغيّر عند كل قراءة.
+
     **الفرق عن عرضٍ يُدخله موظف**: هذا يتولّد **باسم المورّد** لا موظفنا،
     ومرّةً واحدة لكل مستقبِل (`PurchaseRFQRecipient.quotation` OneToOne) —
     الرد الثاني من نفس الرابط يُحدِّث بنود العرض نفسه، لا ينشئ عرضاً ثانياً.
+
+    **ISSUE #133 غ٣**: `general_note` (ملاحظة المورّد العامة على الطلبية كلّها)
+    و`notes` (‏`{line_id: raw_note}` — ملاحظته على كلّ بند) اختياريّان
+    ويُكتبان هنا وحدها — نفس نقطة الكتابة الوحيدة لـ`entry_source`/`rfq_line`
+    في #122. القاعدةُ الوحيدة التي تكتب `SupplierQuotationLine.supplier_note`
+    و`SupplierQuotation.general_note` — محرِّرُ العروض الداخليّ يقرؤهما فقط
+    (`SupplierQuotationLineSerializer`/`SupplierQuotationSerializer`، للقراءة
+    فقط بنيوياً)، فنصّ المورّد يبقى كما كتبه عند خلاف.
     """
     from logistics.models import PurchaseRFQ, SupplierQuotation, SupplierQuotationLine
+
+    notes = notes or {}
 
     rfq = PurchaseRFQ.objects.select_for_update().get(pk=recipient.rfq_id)
     if rfq.status != PurchaseRFQ.STATUS_SENT:
@@ -370,19 +390,53 @@ def submit_rfq_supplier_quote(recipient, *, name: str, prices: dict, ip: str = '
             raise ValidationError('السعر لا يمكن أن يكون سالباً.')
         parsed_prices[line.id] = price
 
+    from tenants.models import Currency
+
+    # لا حقل عملة على `PurchaseRFQ` نفسها (طلبيةٌ بلا أسعار) — العرض المتولّد
+    # يحتاج واحدة، فيُختار الأساس افتراضياً. نفس نمط `create_purchase_return`.
+    base_currency = (
+        Currency.objects.filter(IsBaseCurrency=True).first()
+        or Currency.objects.order_by('CurrencyID').first()
+    )
+    if base_currency is None:
+        raise ValidationError('لا توجد عملة معرّفة للشركة.')
+
+    def _resolve_quote_currency():
+        """عملةُ هذا الإرسال وسعرُ صرفها — ISSUE #133 غ٢.
+
+        غيابُ `currency_id` أو موافقتُه لعملة الأساس = عملة الأساس بسعر 1
+        (السلوك القديم حرفياً). عملةٌ أخرى تُحوَّل بسعر صرفٍ **يُحسم الآن**
+        لا يُترك للقراءة اللاحقة.
+
+        **لا سقوطَ صامتاً إلى 1**: `currency_options` (أدناه) تستبعد أصلاً أيّ
+        عملةٍ بلا سعرٍ قابلٍ للحسم اليوم، فوصولُ `currency_id` كهذا من طلبٍ
+        عاديّ لا يحدث. وصولُه فعلياً (نموذجٌ مُتلاعَبٌ به، أو سعرٌ زال بين
+        فتح الصفحة وإرسالها) اعتلالٌ حقيقيّ يستحقّ رفضاً صريحاً — تخزينُ 1
+        كان يعني بالضبط ما كُتبت هذه التذكرة لمنعه: عرضاً أجنبياً يدخل
+        المقارنة بقيمةٍ ملفَّقة فيبدو أرخص أو أغلى ممّا هو حقيقةً.
+        """
+        if not currency_id:
+            return base_currency, Decimal('1')
+        candidate = Currency.objects.filter(pk=currency_id).first()
+        if candidate is None or candidate.pk == base_currency.pk:
+            return base_currency, Decimal('1')
+        from accounting.services import get_exchange_rate
+
+        try:
+            rate = get_exchange_rate(rfq.tenant_id, candidate.pk, base_currency.pk)
+        except ValidationError:
+            logger.warning(
+                'purchase_rfq.supplier_quote no_exchange_rate rfq=%s currency=%s',
+                rfq.pk, candidate.pk,
+            )
+            raise
+        return candidate, rate
+
     quotation = recipient.quotation
     if quotation is None:
         from accounting.services import next_document_number
-        from tenants.models import Currency
 
-        # لا حقل عملة على `PurchaseRFQ` نفسها (طلبيةٌ بلا أسعار) — العرض
-        # المتولّد يحتاج واحدة، فيُختار الأساس. نفس نمط `create_purchase_return`.
-        currency = (
-            Currency.objects.filter(IsBaseCurrency=True).first()
-            or Currency.objects.order_by('CurrencyID').first()
-        )
-        if currency is None:
-            raise ValidationError('لا توجد عملة معرّفة للشركة.')
+        currency, exchange_rate = _resolve_quote_currency()
 
         prefix = 'IQ' if rfq.scope == PurchaseRFQ.SCOPE_IMPORT else 'PQ'
         sequence = next_document_number(rfq.tenant_id, f'supplier_quotation_{rfq.scope}')
@@ -394,15 +448,32 @@ def submit_rfq_supplier_quote(recipient, *, name: str, prices: dict, ip: str = '
             quotation_number=f'{prefix}-{sequence:04d}',
             quotation_date=timezone.localdate(),
             currency=currency,
+            exchange_rate=exchange_rate,
             status=SupplierQuotation.STATUS_SENT,
             order_name=rfq.rfq_number or '',
             supplier_contact=name,
             # ISSUE #122: ختمٌ صريح — هذا المسارُ وحده هو «سعّره المورّد بنفسه».
             entry_source=SupplierQuotation.ENTRY_SUPPLIER_LINK,
+            # ISSUE #133 غ٣: ملاحظة المورّد العامة — تُكتب هنا وحدها.
+            general_note=general_note,
         )
     else:
+        update_fields = ['supplier_contact', 'updated_at']
         quotation.supplier_contact = name
-        quotation.save(update_fields=['supplier_contact', 'updated_at'])
+        # التصحيح اللاحق قد يغيّر العملة أيضاً (سعّر بالخطأ بعملةٍ ثم صحّح) —
+        # لا يُلمس شيء إن لم يصل `currency_id` أصلاً (تعديل سعرٍ عادي).
+        if currency_id:
+            currency, exchange_rate = _resolve_quote_currency()
+            if currency.pk != quotation.currency_id:
+                quotation.currency = currency
+                quotation.exchange_rate = exchange_rate
+                update_fields += ['currency', 'exchange_rate']
+        # ISSUE #133 غ٣: المورّدُ يعدّل ملاحظته العامة بحرّية مراراً — نفس قاعدة
+        # السعر، ما دامت الطلبية مفتوحة.
+        if general_note != quotation.general_note:
+            quotation.general_note = general_note
+            update_fields.append('general_note')
+        quotation.save(update_fields=update_fields)
 
     subtotal = Decimal('0')
     for line in rfq_lines:
@@ -423,6 +494,10 @@ def submit_rfq_supplier_quote(recipient, *, name: str, prices: dict, ip: str = '
                 quantity=line.quantity,
                 unit_price=price,
                 line_total=line_total,
+                # ISSUE #133 غ٣: نصّ المورّد على هذا البند تحديداً — نفس
+                # منطق السعر: يُعاد كتابته على كل إرسال، فتصحيحُه لاحقاً
+                # («في الحقيقة ٥ لا ٤ قطع») يمرّ من نفس الرابط.
+                supplier_note=str(notes.get(line.id) or '').strip(),
             ),
         )
     quotation.subtotal = subtotal.quantize(DEC)

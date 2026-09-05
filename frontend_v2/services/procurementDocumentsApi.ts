@@ -35,6 +35,19 @@ export interface SupplierQuotationLineDto {
   quantity: string;
   unit_price: string;
   line_total?: string;
+  /** ISSUE #122: بند الطلبية الأبّ — نَسَبٌ صريح، فارغ في العروض المستقلّة. */
+  rfq_line?: number | null;
+  /**
+   * ISSUE #133 غ٣ (مواصفة #130 §١): نصّ المورّد نفسه على هذا البند — **للقراءة
+   * فقط**، يصل من رابطه العام وحده (`submit_rfq_supplier_quote`) ويبقى كما
+   * كتبه بعد الإرسال. لا يُرسَل من هذه الشاشة أبداً.
+   */
+  supplier_note?: string;
+  /** تعليقنا نحن على ردّ المورّد — منفصلٌ بنيوياً، وقابلٌ للكتابة من هنا. */
+  internal_note?: string;
+  internal_note_by?: number | null;
+  internal_note_by_name?: string;
+  internal_note_at?: string | null;
 }
 
 /**
@@ -95,6 +108,12 @@ export interface SupplierQuotationDto {
   rfq_recipient?: number | null;
   /** يُحسم في الخادم لا هنا — راجع `SupplierQuotationEntrySource`. */
   entry_source?: SupplierQuotationEntrySource;
+  /**
+   * ISSUE #133 غ٣ (مواصفة #130 §١): ملاحظة المورّد العامة على الطلبية كلّها —
+   * **للقراءة فقط**، تصل من رابطه العام وحده. بجانب ملاحظة كلّ سطر
+   * (`SupplierQuotationLineDto.supplier_note`).
+   */
+  general_note?: string;
   /** الصفقة الناتجة عن التحويل — كائن لا رقم، فرقم الصفقة يُعرض بجانب الحالة. */
   converted_deal?: { id: number; ref_number: string; stage?: string | null } | null;
   /** T-PLINEAGE: المستند الناتج محلياً — طلبية أو فاتورة، بالرقم والمعرّف. */
@@ -476,7 +495,11 @@ export async function cancelPurchaseRfq(id: number): Promise<PurchaseRFQDto> {
  * أيّ ردّ فائزٌ، ويعود المستند الناتج (أمر شراء أو فاتورة بحسب المفتاح). */
 export interface PurchaseRFQAwardResult extends PurchaseRFQDto {
   awarded_supplier_id: number;
-  awarded_document: { type: "purchase_order" | "purchase_invoice"; id: number; number: string };
+  /**
+   * ISSUE #133 غ١: `null` بالاستيراد — الترسية تقبل العرض وتُغلق الطلبية
+   * عليه بلا تحويل؛ لا فاتورة ولا أمر شراء إلا بالشراء المحلّي.
+   */
+  awarded_document: { type: "purchase_order" | "purchase_invoice"; id: number; number: string } | null;
 }
 
 export async function awardPurchaseRfq(
@@ -513,6 +536,24 @@ export interface RfqComparisonSupplierDto {
   replied_at: string | null;
   /** مفتاحٌ = معرّف بند الطلبية (نصّاً) — `null` = لم يُسعّره هذا المورد. */
   prices: Record<string, string | null>;
+  /**
+   * ISSUE #133 غ٣ (مواصفة #130 §١): ملاحظةُ المورّد على كلّ بند — سببُ وجود
+   * المصفوفة أصلاً («هذا ما عندي بدل ما طلبت»). `null` = لم يكتب شيئاً، أو
+   * لم يُسعّر هذا البند.
+   */
+  notes: Record<string, string | null>;
+  /** ملاحظته العامة على الطلبية كلّها — لا الداخلية. */
+  general_note: string;
+  /**
+   * تعليقنا نحن على ردّ المورّد — منفصلٌ بنيوياً عن `notes` (نصّه هو).
+   * يظهر هنا لأن هذه شاشةٌ مصادَقٌ عليها لا السطح العام؛ يُكتب عبر
+   * `setSupplierQuotationLineInternalNote` وحدها — **لا** عبر محرّر العروض
+   * (يحذف السطور ويعيد إنشاءها عند كل حفظ).
+   */
+  internal_notes: Record<string, { text: string; by: string; at: string | null } | null>;
+  /** مفتاحٌ = معرّف بند الطلبية؛ القيمة = معرّف `SupplierQuotationLine` الفعليّ
+   *  الذي يُكتَب عليه التعليق الداخليّ عبر `setSupplierQuotationLineInternalNote`. */
+  quotation_line_ids: Record<string, number>;
   /** إجماليّ البضاعة وحده بالعملة الأساسية — لا حقل شحنٍ إطلاقاً. */
   goods_total_base: string;
   /**
@@ -534,6 +575,27 @@ export interface RfqComparisonDto {
 
 export async function getRfqComparison(id: number): Promise<RfqComparisonDto> {
   return apiGetObject(`${BASE}/purchase-rfqs/${id}/comparison/`, { tenantId: tenantId() });
+}
+
+/**
+ * ISSUE #133 غ٣ (مواصفة #130 §١): نقطةُ الكتابة الوحيدة لتعليقنا الداخليّ على
+ * سطر عرضٍ بعينه — من مصفوفة المقارنة حيث يقرأ المشتري ملاحظة المورّد
+ * (`RfqComparisonSupplierDto.notes`) ويردّ عليها فعلياً. **لا تمرّ بمحرّر
+ * العروض** (`PriceOfferForm.tsx` — ذاك يحذف كلّ سطور العرض ويعيد إنشاءها عند
+ * أيّ حفظ، فأخطر نقطةٍ ممكنةٍ لحقلٍ يُراد له أن يبقى مربوطاً بسطره عبر الزمن).
+ * `quotationLineId` يأتي من `RfqComparisonSupplierDto.quotation_line_ids` —
+ * ليس معرّف بند الطلبية.
+ */
+export async function setSupplierQuotationLineInternalNote(
+  quotationId: number,
+  quotationLineId: number,
+  internalNote: string,
+): Promise<SupplierQuotationLineDto> {
+  return apiPostObject(
+    `${BASE}/supplier-quotations/${quotationId}/lines/${quotationLineId}/internal-note/`,
+    { internal_note: internalNote },
+    { tenantId: tenantId() },
+  );
 }
 
 /** المسموح بعد الإرسال (#112 §٧): مستقبِلٌ جديد بلا مسّ البنود أو الحالة. */

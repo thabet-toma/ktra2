@@ -132,6 +132,29 @@ class ProductPriceTierSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
 
+def _indicative_purchase_price_map(context) -> dict:
+    """#133: خريطة «السعر التقديري» (`core.pricing.indicative_purchase_prices`)
+    مخبَّأةً في `context` الطلب — تُحسب **مرّةً واحدة** لكل قائمة/صفحة مهما
+    بلغ عدد صفوفها، لا لكل صفّ. `context` قاموسٌ مشتركٌ بين كل صفوف نفس
+    القائمة (نمط `ListSerializer`)، فالتخبئة هنا تعادل تمرير خريطةٍ جاهزة عبر
+    `get_serializer_context` — بلا حاجة لمسّ `ProductViewSet` (خارج ملكية هذا
+    المسار). غياب `request`/الشركة ⇒ خريطةٌ فارغة، لا استثناء."""
+    if '_indicative_purchase_price_map' not in context:
+        request = context.get('request')
+        tenant_id = None
+        if request is not None:
+            from core.tenant_utils import get_tenant
+            tenant = get_tenant(request)
+            tenant_id = tenant.TenantID if tenant else None
+        if tenant_id:
+            from core.pricing import indicative_purchase_prices
+            context['_indicative_purchase_price_map'] = indicative_purchase_prices(
+                tenant_id=tenant_id)
+        else:
+            context['_indicative_purchase_price_map'] = {}
+    return context['_indicative_purchase_price_map']
+
+
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     price_tiers = ProductPriceTierSerializer(many=True, required=False)
@@ -161,6 +184,11 @@ class ProductSerializer(serializers.ModelSerializer):
     # المشتريات = الوارد التراكمي (IN). المتوسط الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3.
     purchased_qty = serializers.SerializerMethodField()
     avg_monthly_sales = serializers.SerializerMethodField()
+    # #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة (لا كل
+    # الفترات، ولا avg_cost). خريطةٌ واحدة للقائمة كلّها (`_indicative_purchase_price_map`)
+    # لا استعلامَ لكل صفّ.
+    indicative_purchase_price = serializers.SerializerMethodField()
+    indicative_purchase_price_source = serializers.SerializerMethodField()
 
     # task14 M2 (DEF-A2): رقم المنتج اختياري — يولَّد خادمياً عند الغياب
     sku = serializers.CharField(max_length=50, required=False, allow_blank=True)
@@ -201,6 +229,8 @@ class ProductSerializer(serializers.ModelSerializer):
             # كرت المنتج: سعر البيع الافتراضي — قابل للتحرير بجانب التكلفة المحسوبة.
             'sale_price',
             'purchased_qty', 'avg_monthly_sales',
+            # #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة.
+            'indicative_purchase_price', 'indicative_purchase_price_source',
             'stock_status', 'group_key', 'display_name', 'has_group',
             'family_id', 'family_name',
             'effective_min_stock_level', 'effective_max_stock_level',
@@ -276,6 +306,14 @@ class ProductSerializer(serializers.ModelSerializer):
         returned = getattr(obj, 'returned_qty_90d', None) or 0
         net = _D(str(sold)) - _D(str(returned))
         return str((net / _D('3')).quantize(_D('0.01')))
+
+    def get_indicative_purchase_price(self, obj):
+        row = _indicative_purchase_price_map(self.context).get(obj.id)
+        return row['unit_price'] if row else None
+
+    def get_indicative_purchase_price_source(self, obj):
+        row = _indicative_purchase_price_map(self.context).get(obj.id)
+        return row['source_label'] if row else None
 
     ACCOUNT_OVERRIDE_FIELDS = (
         'sale_account_override', 'sale_return_account_override',
@@ -487,6 +525,10 @@ class ProductLookupSerializer(ProductSerializer):
             'stock_status', 'group_key',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity',
             'avg_cost', 'sale_price', 'is_service', 'is_serialized',
+            # #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة،
+            # ومعه لافتة مصدره (لا يُخلط برقم تكلفة). حقلان قصيران فقط — لا
+            # توسيع للعقد الضيّق عمداً (قياس 1490 منتجاً: 1,145 كيلوبايت مقابل 685).
+            'indicative_purchase_price', 'indicative_purchase_price_source',
             # THA-24: نافذة البطاقة اليدوية تملأ المدة من سياسة المنتج المختار،
             # فلا يعيد المستخدم كتابة ما تعرفه المنظومة.
             'warranty_months', 'supplier_warranty_months',

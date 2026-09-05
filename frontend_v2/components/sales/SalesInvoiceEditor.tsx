@@ -65,6 +65,7 @@ import { formatMoney, formatQuantity, formatNumber } from "../../utils/formatNum
 import { openInNewTab } from "../../utils/openInNewTab";
 import { productProfilePath } from "../../utils/entityLinks";
 import { availableOf, needsAlternative, stockAlternatives, stockBadgeFor } from "../../utils/stockBadge";
+import { getPickerFieldVisibility } from "../../utils/pickerFieldVisibility";
 import { accountMatchesPurpose } from "../../utils/accountTree";
 import { entityPathForReference } from "../../utils/entityLinks";
 import { DeliverGoodsModal } from "./DeliverGoodsModal";
@@ -143,6 +144,13 @@ export type ProductRow = {
   group_key?: string | null;
   /** المتاح بعد الحجز — يرسله عقد المنتقي بجانب الرصيد. */
   available_quantity?: string | number | null;
+  /** ISSUE #133: السعر التقديري للشراء — أقلّ شراء ضمن آخر ٥ فواتير شراء
+   *  مرحَّلة (`ProductLookupSerializer`). `null` لمنتجٍ بلا شراء مرحَّل بعد —
+   *  يُعرض «—» حينها لا صفراً. ليس تكلفة، ولا يُعرض إلا خلف زرّ العين. */
+  indicative_purchase_price?: string | null;
+  /** لافتة مصدر السعر التقديري (`core/pricing.py` — `INDICATIVE_PRICE_LABEL`،
+   *  «أقلّ شراء (آخر ٥)») — تصل جاهزة من الخادم، لا تُعاد صياغتها هنا. */
+  indicative_purchase_price_source?: string | null;
 };
 
 export type PartnerRow = {
@@ -2403,11 +2411,33 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   /* task13 M5: منتقي مدمج — الكتابة في الخلية تفلتر المنتجات فورياً وتعبئ
      السطر (المودال الكامل يبقى متاحاً من زر «…» واختصار +). لا خيار «منتج حر»
      هنا لأن سطر فاتورة المبيعات يتطلب منتجاً معرّفاً في المخزون. */
+  // ISSUE #133: نفس دالّة سياسة الحقول التي تخدم جانب الشراء — سياق «بيع»
+  // وحالة زرّ العين الحقيقية (`profitVisible`، `PriceVisibilityContext`) لا
+  // قيمة مفترضة. طيّ الحقل هنا عرضٌ لا حراسة: `products` وصل كاملاً من
+  // الخادم بصرف النظر عن نتيجة هذه الدالّة.
+  const pickerVisibility = useMemo(
+    () => getPickerFieldVisibility("sale", profitVisible),
+    [profitVisible],
+  );
+
   const productOptions = useMemo(
     () => products.map((p) => {
       // task24: السعر المقترح يظهر داخل الخيار مباشرة (بلا نقر): آخر بيع/عرض سعر
       // لهذا العميل من خريطة العميل، وإلا سعر البيع الافتراضي للمنتج.
       const cp = customerPriceMap.get(p.id);
+      // #133: السعر التقديري للشراء (أقلّ شراء ضمن آخر ٥) — حقلٌ مستقلّ عن
+      // سعر البيع أعلاه. غيابٌ خلف زرّ العين المغلق يعني عدم تمرير الحقل
+      // أصلاً إلى `KitAutocomplete` (لا فحصاً ثانياً هناك). قيمة `null` (لا
+      // شراء مرحَّل بعد) تُعرض «—» صراحةً — ليست صفراً وليست تكلفة.
+      const indicativePurchasePrice = pickerVisibility.indicativePurchasePrice
+        ? {
+            value:
+              p.indicative_purchase_price != null
+                ? formatMoney(Number(p.indicative_purchase_price))
+                : "—",
+            label: p.indicative_purchase_price_source || "",
+          }
+        : undefined;
       let price: string | undefined;
       let priceLabel: string | undefined;
       let prices: any[] | undefined;
@@ -2450,13 +2480,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         price,
         priceLabel,
         prices,
+        indicativePurchasePrice,
         // T-SEARCH: رقم المنتج وباركوده يُبحَث فيهما ولا يُعرضان — كانا يصلان
         // الشاشة في البيانات ولا يجدهما البحث المدمج أبداً، فيضطرّ البائع لفتح
         // الفهرس الكامل لكل مسحة باركود.
         keywords: [p.sku, p.barcode].filter(Boolean).join(" ").toLowerCase(),
       };
     }),
-    [products, customerPriceMap, reservationIndex],
+    [products, customerPriceMap, reservationIndex, pickerVisibility],
   );
 
   const renderProductCell = (row: DraftLine, ri: number) => {
@@ -3651,7 +3682,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const documentView = (
     <KitDocumentView<DraftLine>
-      title={isReturn ? "مرجع بيع" : term("doc.sales_invoice")}
+      title={isReturn ? "مرتجع بيع" : term("doc.sales_invoice")}
       subtitle={isReturn ? "SALES RETURN / CREDIT NOTE" : "SALES INVOICE"}
       documentNumber={invoiceNumber || (draftId ? `#${draftId}` : "مسودة")}
       status={
@@ -3706,7 +3737,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         },
       ]}
       meta={[
-        { label: isReturn ? "تاريخ المرجع" : "تاريخ الفاتورة", value: invDate || "—" },
+        { label: isReturn ? "تاريخ المرتجع" : "تاريخ الفاتورة", value: invDate || "—" },
         // THA-131: نوع الدفع مرئيٌّ في العرض كما في التحرير — والاستحقاق يتبعه،
         // فلا يقرأ أحدٌ «الاستحقاق —» على فاتورة نقدية ويظنّه بياناً ناقصاً.
         ...(!isReturn ? [{ label: "نوع الدفع", value: invType === "cash" ? "نقدي" : "آجل" }] : []),
@@ -3816,7 +3847,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           ? [{ label: "المجموع قبل الضريبة", value: money(totals.subtotalExclTax) }]
           : []),
         ...(Number(invoiceDiscount) > 0
-          ? [{ label: isReturn ? "خصم المرجع" : "خصم الفاتورة", value: money(Number(invoiceDiscount)) }]
+          ? [{ label: isReturn ? "خصم المرتجع" : "خصم الفاتورة", value: money(Number(invoiceDiscount)) }]
           : []),
         ...(showTaxUi
           ? [{ label: "الضريبة", value: money(totals.taxAmount) }]
@@ -3937,7 +3968,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     >
       <KitDocumentShell
         gridFitContent={viewMode}
-        title={isReturn ? "مرجع بيع" : term("doc.sales_invoice")}
+        title={isReturn ? "مرتجع بيع" : term("doc.sales_invoice")}
         state={docState}
         company={
           postedJournalId != null ? `قيد محاسبي #${postedJournalId}` : undefined
@@ -4653,7 +4684,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           onClose={() => setShowShareModal(false)}
           docType="sales_invoice"
           docId={draftId}
-          docLabel={`${isReturn ? "مرجع بيع" : "فاتورة"} ${invoiceNumber}`}
+          docLabel={`${isReturn ? "مرتجع بيع" : "فاتورة"} ${invoiceNumber}`}
           partyName={selectedCustomer?.name}
         />
       )}

@@ -42,6 +42,11 @@ export interface SqlProduct {
   purchased_qty?: string | null;
   /** W8: متوسط المبيعات الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3. */
   avg_monthly_sales?: string | null;
+  /** #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة (لا
+   *  avg_cost ولا كل الفترات). غائبٌ (null) لمنتجٍ بلا شراء مرحَّل — لا صفر. */
+  indicative_purchase_price?: string | null;
+  /** لافتة مصدر السعر التقديري، مثل «أقل شراء (آخر ٥)» — تحمل النافذة صراحةً. */
+  indicative_purchase_price_source?: string | null;
   /** T-SERIAL: المنتج يتتبّع وحداته برقم تسلسلي (يفعّله كرت المنتج). */
   is_serialized?: boolean;
   /** T-REORDER: «overstock» = فوق الحدّ الأقصى. */

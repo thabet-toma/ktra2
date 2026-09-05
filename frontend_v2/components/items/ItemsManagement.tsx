@@ -53,7 +53,6 @@ const ORDER_FIELD: Record<string, string> = {
   sku: "sku",
   name_ar: "name_ar",
   qty: "quantity_on_hand",
-  avg_cost: "avg_cost",
   sale_price: "sale_price",
   min: "min_stock_level",
   max: "max_stock_level",
@@ -525,7 +524,10 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       const rowsHtml = printableRows.map((p) => {
         const name = esc(p.name_ar || p.name_en || p.sku);
         const qty = Number(p.quantity_on_hand);
-        const avgCost = formatMoney(p.avg_cost);
+        // #133: نفس رقم الشاشة (أقلّ شراء ضمن آخر ٥ فواتير) — لا avg_cost —
+        // كي تتطابق الورقة مع الجدول. فراغه (بلا شراء مرحَّل) يُطبع "—" لا صفراً.
+        const indicativePrice = p.indicative_purchase_price != null
+          ? formatMoney(p.indicative_purchase_price) : "—";
         const cls = p.stock_status === "out_of_stock" ? "danger" : p.stock_status === "low_stock" ? "warn" : "";
         return `
           <tr>
@@ -533,7 +535,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             <td>${name}</td>
             <td>${esc(p.category_name || "—")}</td>
             <td class="num ${cls}" style="direction: ltr">${qty}</td>
-            <td class="num" style="direction: ltr">${avgCost}</td>
+            <td class="num" style="direction: ltr">${indicativePrice}</td>
             <td class="num" style="direction: ltr">${p.min_stock_level ?? "—"}</td>
             <td class="${cls}">${STATUS_LABEL[p.stock_status]}</td>
           </tr>`;
@@ -564,7 +566,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               <thead>
                 <tr>
                   <th>رقم المنتج</th><th>اسم المنتج</th><th>التصنيف</th>
-                  <th>الكمية</th><th>متوسط التكلفة</th><th>الحد الأدنى</th><th>الحالة</th>
+                  <th>الكمية</th><th>أقلّ شراء (آخر ٥)</th><th>الحد الأدنى</th><th>الحالة</th>
                 </tr>
               </thead>
               <tbody>${rowsHtml}</tbody>
@@ -691,8 +693,15 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           {p.sku}
         </b>
     ) },
-    { key: "avg_cost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true, sortable: true,
-      render: (p) => <>{fmt(p.avg_cost)}</> },
+    // #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة، لا
+    // avg_cost (رقمُ قراءةٍ وتفاوضٍ لا تكلفة). فراغه لمنتجٍ بلا شراء مرحَّل
+    // يُعرض "—" لا صفراً. غير قابل للفرز خادمياً (لا عمود مخزَّن).
+    { key: "indicative_purchase_price", header: "أقلّ شراء (آخر ٥)", width: "120px", align: "center", numeric: true,
+      render: (p) => (
+        <span title={p.indicative_purchase_price_source || undefined}>
+          {p.indicative_purchase_price != null ? fmt(p.indicative_purchase_price) : "—"}
+        </span>
+      ) },
     // كرت المنتج: سعر البيع المحفوظ — يُقرأ بجانب التكلفة بلا فتح الكرت.
     { key: "sale_price", header: "سعر البيع", width: "100px", align: "center", numeric: true, sortable: true,
       render: (p) => (

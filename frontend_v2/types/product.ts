@@ -71,6 +71,18 @@ export interface Item {
      *  في عقد `view=lookup`. الأب نفسه لا يظهر أبداً كبندٍ قابلٍ للإدراج. */
     familyId?: string;
     familyName?: string;
+    /** ISSUE #133: حالة المخزون (نفذ/منخفض) كما يحسمها الخادم
+     *  (`inventory/stock_status.py`) — تصل جاهزة ضمن عقد `view=lookup`، لا
+     *  تُعاد حسابها هنا. تغذّي شارة المنتقي (`utils/stockBadge`). */
+    stock_status?: string | null;
+    /** ISSUE #133: خدمة لا بضاعة — بلا مخزون، فبلا شارة ولا حجز يُحسب لها. */
+    is_service?: boolean | null;
+    /** ISSUE #133: المتاح بعد خصم المحجوز كما يرسله عقد المنتقي بجانب الرصيد. */
+    available_quantity?: string | number | null;
+    /** ISSUE #133: الرصيد الفعلي (لا `quantity` أعلاه — ذاك الحدّ الأدنى
+     *  `min_stock_level` لنموذج تحرير الصنف). يغذّي «الرصيد: X» في شارة
+     *  المنتقي والحساب المحلي للمتاح بعد الحجز (`utils/reservedStock`). */
+    quantity_on_hand?: string | number | null;
 }
 
 export interface GeminiAnalysis {

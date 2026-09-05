@@ -197,3 +197,36 @@ class SupplierQuotationAPITest(APITestCase):
         self.assertEqual(draft_convert.status_code, 400, draft_convert.content)
         self.assertIn('source_quotation', draft_convert.data)
         self.assertEqual(LogisticsDeal.objects.count(), 0)
+
+
+class SupplierQuotationDefaultScopeTest(SupplierQuotationAPITest):
+    """ISSUE #133 غ٤: بلا `?scope=` القائمة تعود بنطاقٍ واحد لا الاثنين معاً.
+
+    هذه رؤيةٌ داخل الشركة نفسها — لا تسريب بين شركات (العزل عبر
+    `TenantQuerySetMixin` سليمٌ ولا يمسّه هذا الاختبار)، وصلاحيةُ قراءةٍ لكل
+    موديول تبقى خارج النطاق (الحارس العام يمرّر كل قراءة اليوم).
+    """
+
+    def test_bare_list_returns_one_scope_not_both(self):
+        local = self.client.post(
+            '/api/logistics/supplier-quotations/',
+            self.payload(scope='local'), format='json',
+        )
+        self.assertEqual(local.status_code, 201, local.content)
+        imported = self.client.post(
+            '/api/logistics/supplier-quotations/',
+            self.payload(scope='import'), format='json',
+        )
+        self.assertEqual(imported.status_code, 201, imported.content)
+
+        bare = self.client.get('/api/logistics/supplier-quotations/')
+        self.assertEqual(bare.status_code, 200, bare.content)
+        scopes = {row['scope'] for row in bare.data}
+        self.assertEqual(scopes, {'local'})
+        self.assertNotIn(imported.data['id'], [row['id'] for row in bare.data])
+
+        explicit_import = self.client.get(
+            '/api/logistics/supplier-quotations/', {'scope': 'import'},
+        )
+        self.assertEqual(explicit_import.status_code, 200, explicit_import.content)
+        self.assertIn(imported.data['id'], [row['id'] for row in explicit_import.data])

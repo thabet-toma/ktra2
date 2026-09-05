@@ -2,8 +2,10 @@ import React, { useMemo, useState, useEffect } from "react";
 import { Search, X, Package, Plus } from "lucide-react";
 import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
 import { availableOf, stockBadgeFor } from "../../utils/stockBadge";
-import { formatQuantity } from "../../utils/formatNumber";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { formatProductPrimaryName } from "../../utils/productDisplayName";
+import { usePriceVisibility } from "../../contexts/PriceVisibilityContext";
+import { getPickerFieldVisibility } from "../../utils/pickerFieldVisibility";
 
 // #40: أُعيد التصدير هنا كي لا يتغيّر أيٌّ من مستورديها القائمين من هذا
 // الموضع — الدالّة نفسها انتقلت إلى `frontend_v2/utils/productDisplayName.ts`.
@@ -23,6 +25,11 @@ export type SalesProductPickerItem = {
   /** المتاح بعد الحجز (عقد المنتقي يرسله بجانب الرصيد). */
   available_quantity?: string | number | null;
   is_service?: boolean | null;
+  /** ISSUE #133: السعر التقديري للشراء — أقلّ شراء ضمن آخر ٥ فواتير شراء
+   *  مرحَّلة (`ProductLookupSerializer`). `null` = لا شراء مرحَّل بعد. */
+  indicative_purchase_price?: string | null;
+  /** لافتة مصدر السعر التقديري، جاهزة من الخادم («أقلّ شراء (آخر ٥)»). */
+  indicative_purchase_price_source?: string | null;
 };
 
 type Props = {
@@ -52,6 +59,13 @@ export const SalesProductPickerModal: React.FC<Props> = ({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
   const activeItemRef = React.useRef<HTMLButtonElement | null>(null);
+  // ISSUE #133: الفهرس الكامل خلف المنتقي المدمج — نفس سياسة الحقول
+  // والعين، كي لا يفترق عرض هذه النافذة عن `KitAutocomplete` في نفس الفاتورة.
+  const { visible: profitVisible } = usePriceVisibility();
+  const pickerVisibility = useMemo(
+    () => getPickerFieldVisibility("sale", profitVisible),
+    [profitVisible],
+  );
 
   useEffect(() => {
     if (isOpen) {
@@ -210,6 +224,18 @@ export const SalesProductPickerModal: React.FC<Props> = ({
                         >{badge.text}</span>
                       )}
                     </div>
+                    {/* #133: السعر التقديري للشراء — خلف زرّ العين (خصوصية
+                        الشاشة أمام الزبون)، «—» لا صفراً حين لا شراء مرحَّل. */}
+                    {pickerVisibility.indicativePurchasePrice && (
+                      <div className="mt-1 text-[10px] ktra-text-soft dark:ktra-text-soft">
+                        {p.indicative_purchase_price_source || "أقلّ شراء"}:{" "}
+                        <span className="font-mono">
+                          {p.indicative_purchase_price != null
+                            ? formatMoney(Number(p.indicative_purchase_price))
+                            : "—"}
+                        </span>
+                      </div>
+                    )}
                   </button>
                 );
               })}

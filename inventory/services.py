@@ -1278,6 +1278,14 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
         else None
     )
 
+    # #133: السعر التقديري — أقلّ سعرٍ ضمن آخر INDICATIVE_PRICE_INVOICE_WINDOW
+    # فاتورة شراء مرحَّلة لهذا المنتج. رقمُ قراءةٍ وتفاوضٍ لا تكلفة — لا يمسّ
+    # avg_cost ولا طريقة التقييم بأي حال؛ منتجٌ بلا شراء مرحَّل يعرضه فارغاً
+    # (لا سقوط إلى avg_cost).
+    from core.pricing import indicative_purchase_prices
+    indicative = indicative_purchase_prices(
+        tenant_id=tenant_id, product_ids=[product_id]).get(product_id)
+
     if sale_price is not None:
         effective_sale, sale_source = sale_price, 'product'
     elif last_sale_val is not None:
@@ -1314,6 +1322,10 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
         'last_sale_invoice': last_sale['invoice_number'],
         'last_sale_date': last_sale['invoice_date'],
         'last_purchase_price': str(last_purchase_val) if last_purchase_val is not None else None,
+        # #133: السعر التقديري (أقلّ شراء ضمن آخر ٥ فواتير) + لافتة نافذته —
+        # الرقم بلا نافذته يُقرأ خطأً على أنه أقلّ سعرٍ عبر كل الفترات.
+        'indicative_purchase_price': indicative['unit_price'] if indicative else None,
+        'indicative_purchase_price_label': indicative['source_label'] if indicative else None,
         'effective_sale_price': str(effective_sale) if effective_sale is not None else None,
         'sale_price_source': sale_source,
         'profit_per_unit': str(profit) if profit is not None else None,
