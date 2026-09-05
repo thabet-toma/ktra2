@@ -290,7 +290,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
       });
       const num = created?.invoice_number ? ` رقم ${created.invoice_number}` : "";
       setMsg(
-        `✓ تم حفظ مرجع البيع${num} كمسودة. افتحه من «فواتير المبيعات» واضغط «ترحيل» ` +
+        `✓ تم حفظ مرتجع البيع${num} كمسودة. افتحه من «فواتير المبيعات» واضغط «ترحيل» ` +
         "لإعادة الكمية للمخزون وتخفيض ذمم العميل."
       );
       setLines([{ _idx: 0, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" }]);
@@ -300,7 +300,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
       // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
       void discardDraft();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل حفظ/ترحيل مرجع البيع.");
+      setErr(e instanceof Error ? e.message : "فشل حفظ/ترحيل مرتجع البيع.");
     } finally {
       setSaving(false);
     }
@@ -372,7 +372,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
   const actions: KitToolbarAction[] = [
     {
       key: "save",
-      label: saving ? "..." : "حفظ المرجع كمسودة (F12)",
+      label: saving ? "..." : "حفظ المرتجع كمسودة (F12)",
       icon: <Save />,
       onClick: () => void submit(),
       disabled: saving,
@@ -471,7 +471,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
   const tabs: KitTab[] = [
     {
       key: "main",
-      label: "بيانات المرجع",
+      label: "بيانات المرتجع",
       content: (
         <div style={{ padding: "8px" }}>
           {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}><AlertTriangle className="w-3 h-3 inline" /> {err}</div>}
@@ -506,8 +506,8 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <KitDocumentShell
-        title="مرجع البيع (Sale Return)"
-        state={originalInvoiceId ? `للفاتورة #${originalInvoiceId}` : "مرجع جديد"}
+        title="مرتجع البيع (Sale Return)"
+        state={originalInvoiceId ? `للفاتورة #${originalInvoiceId}` : "مرتجع جديد"}
         actions={actions}
         header={
           <>

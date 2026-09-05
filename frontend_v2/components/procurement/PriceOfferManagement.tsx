@@ -794,7 +794,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
       </div>
       {activeTab === "rfqs" ? (
         <CommercialDocumentsList<PurchaseRFQDto>
-          title={scope === "import" ? "طلبيات الاستيراد" : "طلبيات الشراء"}
+          title={scope === "import" ? "طلبيات دولية" : "طلبيات الشراء"}
           state="بلا سعر إلزامي — يُرسل للموردين ليسعّروا"
           rows={filteredRfqs}
           columns={rfqColumns}
@@ -813,8 +813,8 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
         />
       ) : (
         <CommercialDocumentsList<PriceOffer>
-          title={scope === "import" ? "عروض وطلبيات الاستيراد" : "عروض وطلبيات الشراء"}
-          state={scope === "import" ? "مستندات الاستيراد" : "مستندات الشراء"}
+          title={scope === "import" ? "عروض وطلبيات دولية" : "عروض وطلبيات الشراء"}
+          state={scope === "import" ? "مستندات دولية" : "مستندات الشراء"}
           rows={filtered}
           columns={columns}
           getRowKey={(offer) => offer.id}

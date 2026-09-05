@@ -121,7 +121,7 @@ def build_sales_invoice(invoice) -> dict:
 
     return payload(
         kind="invoice",
-        title="مرجع بيع" if is_return else "فاتورة بيع",
+        title="مرتجع بيع" if is_return else "فاتورة بيع",
         number=invoice.invoice_number,
         date=invoice.invoice_date,
         status_label=invoice.get_status_display(),

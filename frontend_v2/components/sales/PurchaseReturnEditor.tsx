@@ -217,7 +217,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
     setLines(clamped);
     setPickerOpen(false);
     markTouched();
-    setMsg("تم اختيار البنود — راجع الكميات ثم احفظ المرجع.");
+    setMsg("تم اختيار البنود — راجع الكميات ثم احفظ المرتجع.");
   };
 
   const updateLine = (i: number, patch: Partial<ReturnLine>) => {
@@ -343,7 +343,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
       );
       const num = ret?.invoice_number ? ` رقم ${ret.invoice_number}` : "";
       setMsg(
-        `✓ تم حفظ مرجع الشراء${num} كمسودة. افتحه من «فواتير الشراء» واضغط «ترحيل» ` +
+        `✓ تم حفظ مرتجع الشراء${num} كمسودة. افتحه من «فواتير الشراء» واضغط «ترحيل» ` +
         "لإخراج الكمية وتخفيض ذمم المورد."
       );
       setLines([{ _idx: 0, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" }]);
@@ -353,7 +353,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
       // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
       void discardDraft();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل حفظ/ترحيل مرجع الشراء.");
+      setErr(e instanceof Error ? e.message : "فشل حفظ/ترحيل مرتجع الشراء.");
     } finally {
       setSaving(false);
     }
@@ -417,7 +417,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
   const actions: KitToolbarAction[] = [
     {
       key: "save",
-      label: saving ? "..." : "حفظ المرجع كمسودة (F12)",
+      label: saving ? "..." : "حفظ المرتجع كمسودة (F12)",
       icon: <Save />,
       onClick: () => void submit(),
       disabled: saving,
@@ -519,7 +519,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
   const tabs: KitTab[] = [
     {
       key: "main",
-      label: "بيانات المرجع",
+      label: "بيانات المرتجع",
       content: (
         <div style={{ padding: "8px" }}>
           {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}><AlertTriangle className="w-3 h-3 inline" /> {err}</div>}
@@ -554,8 +554,8 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <KitDocumentShell
-        title="مرجع الشراء (Purchase Return)"
-        state={originalInvoiceId ? `للفاتورة #${originalInvoiceId}` : "مرجع جديد"}
+        title="مرتجع الشراء (Purchase Return)"
+        state={originalInvoiceId ? `للفاتورة #${originalInvoiceId}` : "مرتجع جديد"}
         actions={actions}
         header={
           <>

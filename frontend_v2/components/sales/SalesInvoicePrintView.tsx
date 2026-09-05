@@ -111,14 +111,14 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                                 </div>
                             )}
                             <h1 className={`font-black leading-none ${data.isReturn ? 'text-red-700' : 'ktra-text-ink'} ${identity?.company_name_primary ? 'text-base mt-1' : 'text-2xl'}`}>
-                                {data.isReturn ? 'مرجع بيع / إشعار دائن' : term('doc.sales_invoice')}
+                                {data.isReturn ? 'مرتجع بيع / إشعار دائن' : term('doc.sales_invoice')}
                             </h1>
                             <p className="text-xs font-bold ktra-text-soft mt-1">{data.isReturn ? 'SALES RETURN / CREDIT NOTE' : 'SALES INVOICE'}</p>
                         </div>
                     </div>
 
                     <div className="text-left text-xs space-y-1">
-                        <div className="flex gap-2 justify-end"><span className="font-bold ktra-text-ink text-sm">{data.invoiceNumber || 'مسودة'}</span> <span className="ktra-text-soft">{data.isReturn ? 'رقم المرجع:' : 'رقم الفاتورة:'}</span></div>
+                        <div className="flex gap-2 justify-end"><span className="font-bold ktra-text-ink text-sm">{data.invoiceNumber || 'مسودة'}</span> <span className="ktra-text-soft">{data.isReturn ? 'رقم المرتجع:' : 'رقم الفاتورة:'}</span></div>
                         {data.isReturn && data.originalInvoiceNumber && (
                             <div className="flex gap-2 justify-end"><span className="font-bold ktra-text-ink" dir="ltr">{data.originalInvoiceNumber}</span> <span className="ktra-text-soft">مرجع للفاتورة:</span></div>
                         )}
@@ -144,7 +144,7 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                         </div>
                         <div className="p-3 space-y-2">
                             {data.isReturn ? (
-                                <div className="flex justify-between"><span className="ktra-text-soft">نوع المستند:</span> <span className="font-bold text-red-700">مرجع بيع</span></div>
+                                <div className="flex justify-between"><span className="ktra-text-soft">نوع المستند:</span> <span className="font-bold text-red-700">مرتجع بيع</span></div>
                             ) : (
                                 <>
                                     <div className="flex justify-between"><span className="ktra-text-soft">نوع الفاتورة:</span> <span className="font-bold">{data.invoiceType === 'cash' ? 'نقدي' : 'ذمم'}</span></div>

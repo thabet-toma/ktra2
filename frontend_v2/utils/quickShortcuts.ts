@@ -47,7 +47,7 @@ export const SHORTCUTABLE_VIEWS: { view: AppView; label: string; icon: ShortcutI
   { view: "accounting-journals", label: "دفتر اليومية", icon: "journal" },
   { view: "cash-boxes", label: "الصناديق", icon: "cashboxes" },
   { view: "reports", label: "التقارير", icon: "reports" },
-  { view: "import-offers", label: "عروض وطلبيات الاستيراد", icon: "import-offers" },
+  { view: "import-offers", label: "عروض وطلبيات دولية", icon: "import-offers" },
   { view: "international-invoices", label: "الفواتير الدولية", icon: "international-invoices" },
   { view: "deals-management", label: "الصفقات", icon: "deals" },
   { view: "shipments-management", label: "الشحنات", icon: "shipments" },

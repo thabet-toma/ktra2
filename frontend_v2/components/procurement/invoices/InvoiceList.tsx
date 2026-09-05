@@ -225,7 +225,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             background: r.isReturn ? "rgba(176,74,0,0.12)" : "rgba(37,99,235,0.10)",
           }}
         >
-          {r.isReturn ? "مرجع" : r.invoiceType === "international" ? "فاتورة دولية" : "فاتورة"}
+          {r.isReturn ? "مرتجع" : r.invoiceType === "international" ? "فاتورة دولية" : "فاتورة"}
         </span>
       ),
     },

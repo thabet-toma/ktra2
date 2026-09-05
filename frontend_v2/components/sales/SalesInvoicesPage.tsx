@@ -462,7 +462,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               padding: "0 4px",
             }}
           >
-            مرجع بيع
+            مرتجع بيع
           </span>
         ) : (
           <span style={{ fontSize: "11px" }}>{r.invoice_type === "cash" ? "نقدي" : "آجل"}</span>
