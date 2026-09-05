@@ -1575,22 +1575,30 @@ class SalesSettingsViewSet(viewsets.ViewSet):
         ss = get_or_create_sales_settings(tenant)
         from sales.services import resolve_default_account
 
-        def resolve(code_prefixes=None, acc_type=None, name_kw=None):
+        def resolve(code_prefixes=None, acc_type=None, name_kw=None, *, allow_parent=False):
             return resolve_default_account(
-                tenant.TenantID, code_prefixes, acc_type, name_kw
+                tenant.TenantID, code_prefixes, acc_type, name_kw,
+                allow_parent=allow_parent,
             )
 
         # T-DEFACC: 1103 = المدينون التجاريون و1201 = الأراضي و1106 = دفعات
         # الموردين — لم تكن أيٌّ منها صندوقاً ولا ذمم عملاء. الأكواد الصحيحة:
         # النقدية/البنوك/صناديق النقدية للصندوق، والمدينون التجاريون للذمم.
+        #
+        # وكلُّها **أهدافُ ترحيل** فيُستبعد منها الحسابُ الأب (`allow_parent`
+        # افتراضُه هنا `False` عكسَ الدالّة نفسِها): مطابقةُ البادئة تُرجع الأبَ
+        # قبل فروعه، فكانت «استعادةُ الافتراضيات» تُثبّت رأسَ الشجرة هدفَ ترحيل.
+        # والذمّةُ `1103` وحدَها تُستثنى — أبٌ **مقصود**، أبُ حسابات الزبائن.
         ss.default_cash_account = resolve(["1101", "1102", "1110"], "Asset", "صندوق")
-        ss.default_ar_account = resolve(["1103"], "Asset", "مدينون")
-        ss.default_revenue_account_product = resolve(["4101", "41"], "Revenue", "مبيعات")
+        ss.default_ar_account = resolve(
+            ["1103"], "Asset", "مدينون", allow_parent=True,
+        )
+        ss.default_revenue_account_product = resolve(["4101"], "Revenue", "مبيعات")
         ss.default_revenue_account_service = (
             resolve(["4102"], "Revenue", "خدمات") or ss.default_revenue_account_product
         )
         ss.default_inventory_account = resolve(["1104", "1105"], "Asset", "مخزون")
-        ss.default_cogs_account = resolve(["5101", "51"], "Expense", "تكلفة")
+        ss.default_cogs_account = resolve(["5101"], "Expense", "تكلفة")
         ss.save(update_fields=[
             "default_cash_account", "default_ar_account",
             "default_revenue_account_product", "default_revenue_account_service",

@@ -149,7 +149,8 @@ def resolve_service_revenue_account(tenant_id: int) -> Account:
         return ss.default_revenue_account_service
 
     account = resolve_default_account(
-        tenant_id, ["4102", "42"], "Revenue", "خدمات", allow_any_of_type=False
+        tenant_id, ["4102"], "Revenue", "خدمات",
+        allow_any_of_type=False, allow_parent=False,
     )
     if account is None:
         parent = (
@@ -195,7 +196,8 @@ def resolve_product_revenue_account(tenant_id: int) -> Account:
         return ss.default_revenue_account_product
 
     account = resolve_default_account(
-        tenant_id, ["4101", "41"], "Revenue", "مبيعات", allow_any_of_type=False
+        tenant_id, ["4101"], "Revenue", "مبيعات",
+        allow_any_of_type=False, allow_parent=False,
     )
     if account is None:
         parent = (

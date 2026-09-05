@@ -91,14 +91,33 @@ def get_or_create_default_customer(tenant) -> Partner:
 
 
 def resolve_default_account(
-    tenant_id, code_prefixes=None, acc_type=None, name_kw=None, *, allow_any_of_type=True
+    tenant_id, code_prefixes=None, acc_type=None, name_kw=None, *,
+    allow_any_of_type=True, allow_parent=True,
 ):
     """أفضل حساب مطابق من شجرة الشركة: الكود، ثم النوع+الاسم، ثم أول حساب من النوع.
 
     `allow_any_of_type=False` يمنع الرجوع الأعمى لأول حساب من النوع (قد يكون
     حساباً رئيسياً لا يصلح للترحيل) — يُستخدم عند تعبئة الافتراضيات تلقائياً.
+
+    `allow_parent=False` يستبعد كلّ حسابٍ **له أبناء** في هذه الشركة. تُمرَّر من
+    كل مستدعٍ يقصد **هدفَ ترحيل**، لأنّ مطابقة البادئة تُرجع الأبَ نفسَه قبل
+    فروعه: `code__startswith("41")` يطابق `"41"`، و`order_by("code")` يقدّمه على
+    `"4102"` لأنّ الأقصر يسبق ما هو امتدادٌ له نصّياً. فشركةٌ فيها `41` بلا
+    `4101` كانت تُرحِّل إيرادَ كلّ بضاعةٍ تُباع على **رأس شجرة الإيرادات**.
+
+    ولا تُمرَّر حيث يكون الأبُ **مقصوداً**: `1103` (المدينون التجاريون) أبُ
+    حسابات الزبائن، وعليه يقع ما هو «على الحساب» بلا زبونٍ بعينه — واستبعادُه
+    هناك يُرجع حسابَ زبونٍ عشوائيّ، وهو أفدح ممّا نتّقيه.
+
+    والاستبعادُ استعلامٌ فرعيٌّ واحد لا فحصٌ لكل مرشَّح (`children.exists()` في
+    حلقةٍ = استعلامٌ لكل صفّ — سابقة `correlated-subquery-on-lists`).
     """
     qs = Account.objects.filter(tenant_id=tenant_id, is_active=True)
+    if not allow_parent:
+        parents = Account.objects.filter(
+            tenant_id=tenant_id, parent__isnull=False,
+        ).values("parent_id")
+        qs = qs.exclude(pk__in=parents)
     for cp in (code_prefixes or []):
         hit = qs.filter(code__startswith=cp).order_by("code").first()
         if hit:
@@ -125,21 +144,24 @@ def _fill_missing_default_accounts(settings_obj: SalesSettings, tenant_id) -> li
     filled: list[str] = []
     if settings_obj.default_cogs_account_id is None:
         acc = resolve_default_account(
-            tenant_id, ["5101", "51"], "Expense", "تكلفة", allow_any_of_type=False
+            tenant_id, ["5101"], "Expense", "تكلفة",
+            allow_any_of_type=False, allow_parent=False,
         )
         if acc:
             settings_obj.default_cogs_account = acc
             filled.append("default_cogs_account")
     if settings_obj.default_inventory_account_id is None:
         acc = resolve_default_account(
-            tenant_id, ["1104"], "Asset", "مخزون", allow_any_of_type=False
+            tenant_id, ["1104"], "Asset", "مخزون",
+            allow_any_of_type=False, allow_parent=False,
         )
         if acc:
             settings_obj.default_inventory_account = acc
             filled.append("default_inventory_account")
     if settings_obj.default_cash_account_id is None:
         acc = resolve_default_account(
-            tenant_id, ["1101", "1102", "1110"], "Asset", "صندوق", allow_any_of_type=False
+            tenant_id, ["1101", "1102", "1110"], "Asset", "صندوق",
+            allow_any_of_type=False, allow_parent=False,
         )
         if acc:
             settings_obj.default_cash_account = acc
@@ -147,6 +169,8 @@ def _fill_missing_default_accounts(settings_obj: SalesSettings, tenant_id) -> li
     if settings_obj.default_ar_account_id is None:
         # 1103 = المدينون التجاريون (أب حسابات الزبائن). القائمة القديمة كانت
         # ["1201", "1106"] — أراضٍ ودفعات موردين، لا علاقة لهما بذمم العملاء.
+        # **وحدَها هنا يبقى `allow_parent` على أصله**: الأبُ مقصود، وعليه يقع ما
+        # هو «على الحساب» بلا زبونٍ بعينه. استبعادُه يُرجع حسابَ زبونٍ عشوائيّ.
         acc = resolve_default_account(
             tenant_id, ["1103"], "Asset", "مدينون", allow_any_of_type=False
         )
