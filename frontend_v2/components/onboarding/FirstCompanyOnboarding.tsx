@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ArrowLeft, Building2, Calculator, CheckCircle2, Loader2, LogOut, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Building2, Calculator, Disc, CheckCircle2, Loader2, LogOut, ShieldCheck } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { useCompany } from "../../contexts/CompanyContext";
 import { clientLogger } from "../../services/logger";
@@ -9,6 +9,7 @@ import { SELF_SERVE_COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTem
 const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   Building2,
   Calculator,
+  Disc,
 };
 
 export const FirstCompanyOnboarding: React.FC = () => {

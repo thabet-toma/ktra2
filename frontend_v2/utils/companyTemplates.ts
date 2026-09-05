@@ -7,7 +7,7 @@
  * الافتراضي — بلا قناع وبلا تغيير سلوك (قرار 16).
  */
 
-export type CompanyTemplateKey = 'general' | 'accounting_firm' | 'client_book';
+export type CompanyTemplateKey = 'general' | 'accounting_firm' | 'client_book' | 'tyres';
 
 export type CompanyTemplate = {
   key: CompanyTemplateKey;
@@ -42,6 +42,12 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
     name: 'دفتر عميل',
     icon: 'BookOpenCheck',
     description: 'دفتر مكتب محاسبة يُمسَك بالسندات — بلا مخزون ولا فواتير بيع أو شراء.',
+  },
+  {
+    key: 'tyres',
+    name: 'إطارات',
+    icon: 'Disc',
+    description: 'مطابقٌ اليوم لقالب «عام / تجاري» حرفياً — مفتاحٌ مستقل تُعلَّق عليه تخصيصات قطاع الإطارات لاحقاً.',
   },
 ];
 

@@ -41,6 +41,12 @@ test('مفتاح غير معروف لا يعيد أي قالب', () => {
   assert.equal(companyTemplateByKey('not-a-real-template'), undefined);
 });
 
+test('قالب «إطارات» مُدرَج بمفتاحه المطابق لما يرسله الخادم', () => {
+  const tyres = companyTemplateByKey('tyres');
+  assert.ok(tyres);
+  assert.equal(tyres?.name, 'إطارات');
+});
+
 test('لا مفاتيح مكررة في السِجلّ', () => {
   const keys = COMPANY_TEMPLATES.map((template) => template.key);
   assert.equal(new Set(keys).size, keys.length);
@@ -56,7 +62,12 @@ test('لا مفاتيح مكررة في السِجلّ', () => {
 test('بابُ إنشاء شركة لا يعرض «دفتر عميل»', () => {
   const keys = SELF_SERVE_COMPANY_TEMPLATES.map((t) => t.key);
   assert.equal(keys.includes('client_book'), false);
-  assert.deepEqual(keys, ['general', 'accounting_firm']);
+  assert.deepEqual(keys, ['general', 'accounting_firm', 'tyres']);
+});
+
+test('قالب «إطارات» يظهر في باب إنشاء شركة (self-serve)', () => {
+  const keys = SELF_SERVE_COMPANY_TEMPLATES.map((t) => t.key);
+  assert.ok(keys.includes('tyres'));
 });
 
 test('بابُ دفاتر العملاء يعرض «دفتر عميل» وحده', () => {

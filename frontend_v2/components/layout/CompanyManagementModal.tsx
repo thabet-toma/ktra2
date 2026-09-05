@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Building2, Calculator, Loader2, Save, Trash2, UserPlus, X } from "lucide-react";
+import { Building2, Calculator, Disc, Loader2, Save, Trash2, UserPlus, X } from "lucide-react";
 import { apiGetObject, apiPatchObject, apiPostObject } from "../../services/restApi";
 import type { Tenant, CompanyMembership } from "../../contexts/CompanyContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
@@ -10,6 +10,7 @@ import { VIEW_LABELS } from "./Breadcrumb";
 const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   Building2,
   Calculator,
+  Disc,
 };
 
 /** اسمٌ عربي مقروء للشاشة، أو مفتاحها إن لم يُسجَّل بعد في `VIEW_LABELS`. */
