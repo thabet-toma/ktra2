@@ -9,6 +9,7 @@
 from decimal import Decimal
 
 from django.contrib.auth.models import User
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from inventory.models import Product
@@ -456,6 +457,79 @@ class RfqComparisonTest(RfqAwardAndComparisonTestBase):
         self.assertEqual(
             supplier_row['internal_notes'][str(line_ids[0])]['by'], 'rfq-award-owner',
         )
+
+    def test_saving_the_offer_from_the_editor_keeps_the_note_and_its_stamp(self):
+        """ISSUE #133 غ٣: محرِّرُ العروض يرسل `internal_note` في **كلّ** حفظ،
+        لأنّ `update()` يحذف كلّ سطرٍ ويعيد إنشاءه من الحمولة — فإسقاطُه هناك
+        يمحو التعليقَ بصمت. وهذا المسارُ الثاني للكتابة (غيرُ نقطة
+        `internal-note/`) يحرسه هذا الاختبار في ثلاث نقاط:
+
+        أنّ نصّ المورّد ينجو من الهدم وإعادة البناء، وأنّ حفظاً **لا يغيّر
+        التعليق** لا يعيد ختمه (وإلّا صار كلُّ حفظٍ يكذب فينسب تعليقاً قديماً
+        إلى تاريخٍ جديد)، وأنّ تغييرَه فعلاً يُختَم من جديد.
+        """
+        data = self.create_and_send_rfq(estimated_prices=(Decimal('10'), Decimal('20')))
+        line_ids = [line['id'] for line in data['lines']]
+        recipient = PurchaseRFQRecipient.objects.get(
+            rfq_id=data['id'], supplier=self.supplier_a,
+        )
+        submit_rfq_supplier_quote(
+            recipient, name='Rep A',
+            prices={line_ids[0]: Decimal('9'), line_ids[1]: Decimal('19')},
+            notes={line_ids[0]: 'نصّ المورّد — يعبر الهدم سليماً'},
+        )
+        quotation = recipient.quotation
+        line = quotation.lines.get(rfq_line_id=line_ids[0])
+        self.client.post(
+            f'/api/logistics/supplier-quotations/{quotation.pk}/lines/{line.pk}/internal-note/',
+            {'internal_note': 'نتحقّق مع المستودع'}, format='json',
+        )
+        line.refresh_from_db()
+        stamped_at, stamped_by = line.internal_note_at, line.internal_note_by_id
+        self.assertIsNotNone(stamped_at)
+
+        def save_from_editor(internal_note):
+            """حفظٌ من المحرِّر: كلُّ السطور بحمولتها كاملةً، بلا `supplier_note`
+            (نصُّ المورّد لا يُرسَل من الشاشة أبداً)."""
+            payload = {
+                'supplier': self.supplier_a.id,
+                'quotation_date': str(timezone.localdate()),
+                'currency': quotation.currency_id,
+                'exchange_rate': str(quotation.exchange_rate),
+                'lines': [
+                    {
+                        'product': ln.product_id,
+                        'seq': ln.seq,
+                        'quantity': str(ln.quantity),
+                        'unit_price': str(ln.unit_price),
+                        'rfq_line': ln.rfq_line_id,
+                        'internal_note': (
+                            internal_note if ln.rfq_line_id == line_ids[0]
+                            else ln.internal_note
+                        ),
+                    }
+                    for ln in quotation.lines.order_by('seq')
+                ],
+            }
+            response = self.client.put(
+                f'/api/logistics/supplier-quotations/{quotation.pk}/',
+                payload, format='json',
+            )
+            self.assertEqual(response.status_code, 200, response.content)
+            return quotation.lines.get(rfq_line_id=line_ids[0])
+
+        # حفظٌ بلا تغييرٍ للتعليق — النصّان كما هما، والختمُ لا يُعاد.
+        saved = save_from_editor('نتحقّق مع المستودع')
+        self.assertEqual(saved.supplier_note, 'نصّ المورّد — يعبر الهدم سليماً')
+        self.assertEqual(saved.internal_note, 'نتحقّق مع المستودع')
+        self.assertEqual(saved.internal_note_at, stamped_at)
+        self.assertEqual(saved.internal_note_by_id, stamped_by)
+
+        # وحفظٌ يغيّره فعلاً — يُختَم من جديد، ونصّ المورّد يبقى مع ذلك سليماً.
+        saved = save_from_editor('تحقّقنا: المقاس مقبول')
+        self.assertEqual(saved.internal_note, 'تحقّقنا: المقاس مقبول')
+        self.assertNotEqual(saved.internal_note_at, stamped_at)
+        self.assertEqual(saved.supplier_note, 'نصّ المورّد — يعبر الهدم سليماً')
 
 
 class RfqOfferEnteredFromTheEditorTest(RfqAwardAndComparisonTestBase):

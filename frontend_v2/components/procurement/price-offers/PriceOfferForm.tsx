@@ -15,7 +15,7 @@ import {
 } from "../../kit";
 import {
   Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Search, Info,
-  FileText, Link2, Plus, Pencil, Share2, Undo2,
+  FileText, Link2, Plus, Pencil, Share2, Undo2, MessageSquare,
 } from "lucide-react";
 import { formatDateValue, formatTimeValue } from "../../../utils/formatDate";
 import { ItemSearchModal } from "./ItemSearchModal";
@@ -567,6 +567,10 @@ export const PriceOfferForm: React.FC<Props> = ({
     )));
   };
 
+  // ISSUE #133 §٤: أيُّ سطرٍ فُتح تعليقُه الداخليّ للكتابة — واحدٌ في كلّ مرّة،
+  // كي لا يتحوّل عمودُ الملاحظات إلى صفٍّ من الصناديق يزيح الجدول كلّه.
+  const [noteEditKey, setNoteEditKey] = useState<string | null>(null);
+
   const addLine = () => setLines((prev) => [...prev, blankLine()]);
   const removeLine = (key: string) => setLines((prev) => prev.filter((l) => l.key !== key));
   const updateLine = (key: string, patch: Partial<LineItem>) =>
@@ -672,6 +676,10 @@ export const PriceOfferForm: React.FC<Props> = ({
     { key: "unitPrice", header: "سعر الوحدة", width: "110px", align: "center", type: "number" },
     { key: "total", header: "الإجمالي", width: "110px", align: "center", readOnly: true },
     { key: "lowestPrice", header: lowestPriceHeader, width: "150px", align: "center", readOnly: true },
+    // ISSUE #133 §٤: عمودُ الملاحظات — نصّ المورّد وتعليقُنا عليه في خليّةٍ
+    // واحدة، مفصولَين بصرياً. `readOnly` كي لا يبني الجدولُ حقلَ إدخالٍ عاماً
+    // فوق ما نرسمه بأنفسنا.
+    { key: "notes", header: "ملاحظات", width: "190px", readOnly: true },
     { key: "del", header: "", width: "36px", align: "center" },
   ];
 
@@ -735,6 +743,77 @@ export const PriceOfferForm: React.FC<Props> = ({
       );
     };
   }
+  /**
+   * ISSUE #133 §٤ (مواصفة #130 §١): ملاحظتان على البند لا واحدة.
+   *
+   * `supplierNote` نصُّ المورّد نفسه كما كتبه في رابطه العام — **للقراءة فقط**،
+   * ومنسوبٌ إليه صراحةً كي لا يُقرأ يوماً على أنّه رأيُنا نحن. و`internalNote`
+   * تعليقُنا على ردّه: يُكتب من هنا ويُحفظ مع العرض، وختمُه (من ومتى) يُضرب في
+   * الخادم — فكلُّ تعديلٍ محليّ يمحو الختمَ المعروض حتى يعود بحفظٍ ناجح، ولا
+   * يُنسَب تعليقٌ جديدٌ إلى كاتب التعليق القديم.
+   *
+   * الخليّة تُعرض مطويّةً: سطرٌ مقتضبٌ بعنوانٍ كامل (`title`)، والكتابة تُفتَح
+   * بنقرةٍ واحدة. جدولُ بنودٍ فيه صندوقُ نصٍّ مفتوحٌ في كلّ صفٍّ لا يُقرأ.
+   */
+  const notesColumn = gridColumns.find((c) => c.key === "notes");
+  if (notesColumn) {
+    notesColumn.render = (row: LineItem) => {
+      const supplierNote = (row.supplierNote || "").trim();
+      const internalNote = row.internalNote || "";
+      const stamp = [
+        row.internalNoteBy || "",
+        row.internalNoteAt ? formatDateValue(row.internalNoteAt) : "",
+      ].filter(Boolean).join(" · ");
+      const isEditing = noteEditKey === row.key;
+      return (
+        <div className="flex flex-col items-stretch gap-0.5 py-0.5 text-start leading-tight">
+          {supplierNote && (
+            <span
+              className="truncate text-[10px] italic ktra-text-soft"
+              title={`المورّد: ${supplierNote}`}
+            >
+              المورّد: «{supplierNote}»
+            </span>
+          )}
+          {isEditing && !isReadOnly ? (
+            <textarea
+              className="ktra-input w-full resize-y text-[11px]"
+              rows={2}
+              autoFocus
+              value={internalNote}
+              placeholder="تعليقك الداخليّ…"
+              onChange={(e) => updateLine(row.key, {
+                internalNote: e.target.value,
+                internalNoteBy: "",
+                internalNoteAt: "",
+              })}
+              onBlur={() => setNoteEditKey(null)}
+            />
+          ) : isReadOnly ? (
+            <span className="truncate text-[10px] ktra-text-soft" title={internalNote || undefined}>
+              {internalNote || "—"}
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="flex items-center gap-1 truncate text-[10px] ktra-text-soft"
+              onClick={() => setNoteEditKey(row.key)}
+              title={internalNote || "أضف تعليقاً داخلياً على هذا البند"}
+            >
+              <MessageSquare className="h-3 w-3 shrink-0" />
+              <span className="truncate">{internalNote || "تعليق داخليّ"}</span>
+            </button>
+          )}
+          {internalNote.trim() && (
+            <span className="truncate text-[10px] ktra-text-soft" title={stamp || undefined}>
+              {stamp || "لم يُحفظ بعد"}
+            </span>
+          )}
+        </div>
+      );
+    };
+  }
+
   /**
    * T-IMPOFFER — «طريقة اختيار المنتجات خطأ، لازم زي باقي المنصة».
    *

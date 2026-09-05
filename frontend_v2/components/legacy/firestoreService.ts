@@ -36,6 +36,7 @@ import {
   Invoice, 
   Supplier, 
   PriceOffer, 
+  PriceOfferItem,
   PriceOfferStatus,
   Deal, 
   DealStatus, 
@@ -1933,6 +1934,12 @@ const lineToUi = (line: {
   unit_price: string;
   line_total?: string;
   rfq_line?: number | null;
+  /** ISSUE #133 §٤: ملاحظتا البند — نصّ المورّد وتعليقنا عليه. اختياريّان:
+   *  مستنداتٌ أخرى تمرّ بنفس المُحوِّل (الطلبية) ولا تحملهما. */
+  supplier_note?: string;
+  internal_note?: string;
+  internal_note_by_name?: string;
+  internal_note_at?: string | null;
 }) => ({
   id: String(line.id ?? `${line.product ?? "draft"}-${Math.random()}`),
   // ISSUE #122: نَسَبُ السطر يعود من الخادم كما ذهب إليه. بلا هذه القراءة
@@ -1951,6 +1958,12 @@ const lineToUi = (line: {
   quantity: Number(line.quantity || 0),
   unitPrice: Number(line.unit_price || 0),
   totalPrice: Number(line.line_total || 0),
+  // ISSUE #133 §٤: نصّ المورّد يُقرأ ولا يُكتب؛ تعليقنا يُقرأ ويُكتب، وختمُه
+  // (من ومتى) يأتي من الخادم فيُعرض كما وصل.
+  supplierNote: line.supplier_note || "",
+  internalNote: line.internal_note || "",
+  internalNoteBy: line.internal_note_by_name || "",
+  internalNoteAt: line.internal_note_at || "",
 });
 
 const quoteToUi = async (row: SupplierQuotationDto): Promise<PriceOffer> => ({
@@ -2083,7 +2096,7 @@ const dealToUi = async (row: ImportDealDto): Promise<PriceOffer> => ({
 });
 
 /** T-DRAFTPARTY: بنود عرض السعر — المنتج قد يكون null (اسم مكتوب يدوياً). */
-const uiLinesToApi = (offer: PriceOffer) => (offer.items || []).map((line, index) => ({
+const uiLineToApi = (line: PriceOfferItem, index: number) => ({
   product: line.itemId ? Number(line.itemId) : null,
   seq: index + 1,
   name_snapshot: line.name || "",
@@ -2094,7 +2107,20 @@ const uiLinesToApi = (offer: PriceOffer) => (offer.items || []).map((line, index
   // ISSUE #122: يُرسَل في الإنشاء **وفي التعديل** — الخادم يحذف البنود ويعيد
   // بناءها من هذه الحمولة، فإسقاطُه هنا يمحو النَسَبَ بصمتٍ عند أوّل حفظٍ ثانٍ.
   rfq_line: line.rfqLineId ?? null,
-}));
+});
+
+const uiLinesToApi = (offer: PriceOffer) => (offer.items || []).map(uiLineToApi);
+
+/**
+ * ISSUE #133 §٤: تعليقنا الداخليّ على البند — حكرٌ على عرض السعر، فالطلبية
+ * والفاتورة لا حقلَ لهما به. ويُرسَل في **كلّ** حفظ: الخادم يحذف البنود ويعيد
+ * بناءها من الحمولة (`SupplierQuotationSerializer._line_values`)، فإسقاطُه هنا
+ * يمحو التعليق بصمتٍ عند أوّل حفظٍ ثانٍ. و`supplier_note` لا يُرسَل أبداً —
+ * نصُّ المورّد ملكُه، والخادم ينسخه من السطر القديم كما هو.
+ */
+const quotationLinesToApi = (offer: PriceOffer) => (offer.items || []).map(
+  (line, index) => ({ ...uiLineToApi(line, index), internal_note: line.internalNote || "" }),
+);
 
 /**
  * T-DRAFTPARTY: الطلبية والصفقة مستندان ملزمان — لا يقبلان مورداً أو منتجاً
@@ -2208,7 +2234,7 @@ export const priceOffersService = {
       decision_reason: offer.decisionReason || "",
       attachments: offer.attachments || [],
       notes_log: offer.notesLog || [],
-      lines: uiLinesToApi(offer),
+      lines: quotationLinesToApi(offer),
     });
     return quoteToUi(row);
   },
@@ -2244,7 +2270,7 @@ export const priceOffersService = {
         decision_reason: offer.decisionReason || "",
         attachments: offer.attachments || [],
         notes_log: offer.notesLog || [],
-        lines: uiLinesToApi(offer),
+        lines: quotationLinesToApi(offer),
       });
       return quoteToUi(row);
     }
