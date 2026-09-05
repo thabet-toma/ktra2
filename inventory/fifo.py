@@ -289,40 +289,96 @@ def pending_provisional_layers(*, tenant_id: int) -> list:
     ]
 
 
-def restore(movement: StockMovement) -> int:
-    """يعكس استهلاك حركةٍ بعينها: يقرأ صفوف `StockLayerConsumption` الخاصة بها،
-    يُعيد `quantity` إلى `remaining_qty` لكل طبقة، ثم يحذف صفوف الاستهلاك.
+class RestoreResult(NamedTuple):
+    """ناتج `restore_partial()`: الكميّةُ المردودة فعلاً وكلفتُها وعددُ صفوف
+    الاستهلاك التي مسّها الردّ (فُكّت كلياً أو نُقصت)."""
 
-    هذا هو ما يجعل إلغاء الترحيل يُرجع المخزون لحالته قبلُ بالضبط: الطبقة
-    نفسها (بمعرّفها وتاريخها) لم تُحذف قط، فموقعها في رتل FIFO محفوظ — إعادة
-    الترحيل لاحقاً تستهلك من نفس الطبقات بنفس الترتيب تماماً.
+    quantity: Decimal
+    cost: Decimal
+    rows: int
 
-    يُرجع عدد صفوف الاستهلاك التي أُعيدت (وحُذفت).
+
+def restore_partial(*, movements, quantity=None) -> RestoreResult:
+    """يردّ استهلاكَ حركةٍ (أو حركاتِ مستندٍ واحدٍ لمنتجٍ واحد) إلى طبقاتها —
+    كلَّه أو `quantity` منه — **بعكس ترتيب الاستهلاك**.
+
+    ولماذا العكس؟ لأنّ النتيجة تصير **مطابقةً تماماً** لما لو كانت البيعةُ
+    الأصليّة بالكميّة الباقية بعد المرتجع: بيعُ عشرةٍ استهلك ثمانياً من طبقةٍ
+    قديمة واثنتين من أحدثَ منها؛ ومرتجعُ خمسٍ يفكّ الاثنتين ثمّ ثلاثاً من
+    القديمة، فيبقى مستهلَكاً خمسٌ من القديمة وحدها — وهو بعينه ما كانت FIFO
+    ستفعله لو بيعت خمسٌ ابتداءً. أمّا الردُّ بترتيب الاستهلاك نفسِه فيترك
+    وحداتٍ من الطبقة الأحدث مستهلَكةً بلا سبب، ويقلب كلفةَ ما تبقّى.
+
+    صفُّ استهلاكٍ يُفكّ **جزئياً** تُنقَص كميّتُه ولا يُحذف — سجلُّ ما بقي
+    مستهلَكاً يبقى صادقاً، فمرتجعٌ ثانٍ لاحقاً يجد ما يفكّه.
+
+    `quantity=None` ⟵ ردٌّ كامل. والكميّةُ الأكبر ممّا استُهلك فعلاً تُردّ إلى
+    حدّ المتاح ولا ترمي — المستدعي يقارن `RestoreResult.quantity` بما طلبه.
     """
+    movement_list = movements if isinstance(movements, (list, tuple, set)) else [movements]
+    movement_ids = [m.pk if hasattr(m, "pk") else m for m in movement_list]
+    if not movement_ids:
+        return RestoreResult(Decimal("0"), Decimal("0"), 0)
+
     with transaction.atomic():
         consumptions = list(
             StockLayerConsumption.objects.select_for_update()
-            .filter(movement=movement)
-            .select_related("layer")
+            .filter(movement_id__in=movement_ids)
+            .order_by("-id")
         )
         if not consumptions:
-            return 0
-        layer_ids = [c.layer_id for c in consumptions]
-        # قفل الطبقات نفسها قبل تعديلها — تناظر القفل في consume().
+            return RestoreResult(Decimal("0"), Decimal("0"), 0)
+
+        remaining = None if quantity is None else _d(quantity).quantize(Q4)
         locked_layers = {
             layer.pk: layer
-            for layer in StockLayer.objects.select_for_update().filter(pk__in=layer_ids)
+            for layer in StockLayer.objects.select_for_update().filter(
+                pk__in=[c.layer_id for c in consumptions]
+            )
         }
+        restored_qty = Decimal("0")
+        restored_cost = Decimal("0")
+        rows = 0
+        drop_ids = []
         for c in consumptions:
+            if remaining is not None and remaining <= 0:
+                break
+            take = c.quantity if remaining is None else min(c.quantity, remaining)
+            if take <= 0:
+                continue
             layer = locked_layers[c.layer_id]
-            layer.remaining_qty = (layer.remaining_qty + c.quantity).quantize(Q4)
+            layer.remaining_qty = (layer.remaining_qty + take).quantize(Q4)
             layer.save(update_fields=["remaining_qty"])
-        count = len(consumptions)
-        StockLayerConsumption.objects.filter(
-            pk__in=[c.pk for c in consumptions]
-        ).delete()
-        return count
+            restored_qty += take
+            restored_cost += take * c.unit_cost
+            rows += 1
+            if take >= c.quantity:
+                drop_ids.append(c.pk)
+            else:
+                c.quantity = (c.quantity - take).quantize(Q4)
+                c.save(update_fields=["quantity"])
+            if remaining is not None:
+                remaining -= take
 
+        if drop_ids:
+            StockLayerConsumption.objects.filter(pk__in=drop_ids).delete()
+        return RestoreResult(
+            quantity=restored_qty.quantize(Q4),
+            cost=restored_cost.quantize(Q4),
+            rows=rows,
+        )
+
+
+def restore(movement: StockMovement) -> int:
+    """ردٌّ **كامل** لاستهلاك حركةٍ بعينها — مسارُ إلغاء الترحيل.
+
+    الطبقة نفسُها (بمعرّفها وتاريخها) لا تُحذف قطّ، فموقعُها في رتل FIFO محفوظ:
+    إعادةُ الترحيل لاحقاً تستهلك من نفس الطبقات بنفس الترتيب تماماً، فعشرُ
+    دوراتٍ تنتهي إلى الحالة التي بدأت منها حرفاً بحرف.
+
+    يُرجع عدد صفوف الاستهلاك التي أُعيدت.
+    """
+    return restore_partial(movements=[movement], quantity=None).rows
 
 def open_layers_value(*, tenant_id: int, product_ids) -> dict:
     """قيمة الطبقات المفتوحة لكل منتج (Σ remaining_qty × unit_cost) — استعلامٌ

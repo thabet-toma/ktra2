@@ -806,15 +806,22 @@ def record_stock_movement(
             quantity_on_hand=qty_before, avg_cost=avg_before,
         )
 
+        restore_sources = []
         if restores_movement is not None:
-            if restores_movement.tenant_id != prod.tenant_id:
-                raise ValidationError(
-                    "حركة الاستعادة (restores_movement) من شركةٍ أخرى — غير مسموح."
-                )
-            if restores_movement.product_id != prod.pk:
-                raise ValidationError(
-                    "حركة الاستعادة (restores_movement) تخصّ منتجاً آخر — غير مسموح."
-                )
+            restore_sources = (
+                list(restores_movement)
+                if isinstance(restores_movement, (list, tuple, set))
+                else [restores_movement]
+            )
+            for src in restore_sources:
+                if src.tenant_id != prod.tenant_id:
+                    raise ValidationError(
+                        "حركة الاستعادة (restores_movement) من شركةٍ أخرى — غير مسموح."
+                    )
+                if src.product_id != prod.pk:
+                    raise ValidationError(
+                        "حركة الاستعادة (restores_movement) تخصّ منتجاً آخر — غير مسموح."
+                    )
 
         if movement_type in INBOUND_TYPES:
             new_qty = qty_before + quantity
@@ -866,16 +873,25 @@ def record_stock_movement(
         )
 
         if movement_type in INBOUND_TYPES:
-            restored_consumptions = (
-                list(StockLayerConsumption.objects.filter(movement=restores_movement))
-                if restores_movement is not None else []
+            # مرتجعٌ يشير إلى صرفه الأصليّ: يُفكّ من استهلاكه **بمقدار الكميّة
+            # الراجعة وحدها** وبعكس ترتيب الاستهلاك، فتعود البضاعة إلى طبقاتها
+            # ومواقعِها. والراجعُ الزائد عمّا استُهلك (مرتجعٌ أكبر من البيعة)
+            # يسقط إلى المسار العاديّ أدناه بطبقةٍ جديدةٍ للفائض وحده.
+            restored = (
+                fifo.restore_partial(movements=restore_sources, quantity=quantity)
+                if restore_sources else None
             )
-            if restored_consumptions:
-                restored_cost = sum(
-                    (c.quantity * c.unit_cost for c in restored_consumptions), Decimal('0')
-                )
-                fifo.restore(restores_movement)
-                total_cost = restored_cost.quantize(Decimal('0.01'))
+            if restored is not None and restored.quantity > 0:
+                total_cost = restored.cost.quantize(Decimal('0.01'))
+                surplus = (quantity - restored.quantity).quantize(Decimal('0.0001'))
+                if surplus > 0:
+                    surplus_cost = (
+                        restored.cost / restored.quantity
+                    ).quantize(Decimal('0.0001'))
+                    fifo.create_layer(
+                        movement=movement, quantity=surplus, unit_cost=surplus_cost,
+                    )
+                    total_cost = (total_cost + surplus * surplus_cost).quantize(Decimal('0.01'))
                 unit_cost = (
                     (total_cost / quantity).quantize(Decimal('0.0001'))
                     if quantity > 0 else Decimal('0')

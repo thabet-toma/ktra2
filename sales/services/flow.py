@@ -54,6 +54,7 @@ DEC = Decimal("0.01")
 # المرحلة 3: مراجع عبر وحدات الحزمة (نفس الملف سابقاً) — الرسم البياني لا-دوري.
 from .foundation import get_or_create_sales_settings
 from .numbering import guard_reserved_stock
+from .pricing import SALES_STOCK_REFERENCE_TYPES
 from .calc import _build_cogs_journal_line_dicts, _build_tax_buckets, _lock_products_for_lines, _partner_open_balance_excluding_invoice, _resolve_ar_account, _revenue_credit_journal_rows, guard_loss_invoice, recalculate_invoice_amounts, resolve_cheques_under_collection_account
 
 def _validate_cheque_payloads(
@@ -984,6 +985,19 @@ def post_sales_invoice(
                 # purchase_return → RETURN_OUT (goods leave back to supplier)
                 is_purchase_return = kind == SalesInvoice.INVOICE_KIND_PURCHASE_RETURN
                 mv_type = "RETURN_OUT" if is_purchase_return else "RETURN_IN"
+                # FIFO-137: مرتجعُ بيعٍ يشير إلى فاتورته الأصليّة يعود إلى
+                # **طبقاتِ صرفِها هي** وموقعِها في الرتل، لا بمتوسّطٍ جارٍ ولا
+                # بآخر كلفةِ شراء — فربحُ الفاتورة يصفّر عند المرتجع الكامل،
+                # وكلفةُ ما تبقّى تصير كما لو بيعت الكميّةُ الباقية ابتداءً.
+                # تُجلَب حركاتُ الأصل **دفعةً واحدة** لا استعلاماً لكلّ سطر.
+                origins_by_product: dict[int, list] = defaultdict(list)
+                if not is_purchase_return and invoice.original_invoice_id:
+                    for mv in StockMovement.objects.filter(
+                        tenant_id=invoice.tenant_id,
+                        reference_type__in=SALES_STOCK_REFERENCE_TYPES,
+                        reference_id=invoice.original_invoice_id,
+                    ):
+                        origins_by_product[mv.product_id].append(mv)
                 for line in lines:
                     if getattr(line.product, "is_service", False):
                         continue
@@ -998,6 +1012,7 @@ def post_sales_invoice(
                         notes=f"مرتجع {invoice.invoice_number}",
                         tenant=invoice.tenant,
                         branch=invoice.branch,
+                        restores_movement=origins_by_product.get(line.product_id) or None,
                     ))
             else:
                 stock_movements = _post_stock_out_for_invoice(invoice, lines, user=user)
