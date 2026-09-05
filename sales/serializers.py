@@ -586,7 +586,7 @@ class SalesInvoiceSerializer(
         if customer.pk != original.customer_id:
             raise serializers.ValidationError({
                 "customer": (
-                    f"مرجع الفاتورة «{original.invoice_number}» يُقيَّد على "
+                    f"مرتجع الفاتورة «{original.invoice_number}» يُقيَّد على "
                     f"مشتريها «{original.customer.name}» — لا على طرفٍ آخر."
                 )
             })

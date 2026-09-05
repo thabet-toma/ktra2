@@ -1386,7 +1386,7 @@ def pay_purchase_invoice(
 
     if getattr(invoice, 'is_return', False):
         raise ValidationError(
-            "مرجع الشراء لا يُدفع — هو يخفّض ذمم المورد بحكم تعريفه."
+            "مرتجع الشراء لا يُدفع — هو يخفّض ذمم المورد بحكم تعريفه."
         )
 
     payment = None
@@ -2525,7 +2525,7 @@ def post_purchase_return(invoice, *, user=None):
                     reference_id=invoice.id,
                     partner=partner,
                     movement_date=return_date,
-                    notes=f"مرجع شراء {invoice.invoice_number}",
+                    notes=f"مرتجع شراء {invoice.invoice_number}",
                     tenant=tenant,
                 )
                 movements.append(mv)
@@ -2552,7 +2552,7 @@ def post_purchase_return(invoice, *, user=None):
                 transaction_date=return_date,
                 reference_type='PURCHASE_RETURN',
                 reference_id=invoice.id,
-                description=f"مرجع شراء {invoice.invoice_number} | {partner.name}"[:500],
+                description=f"مرتجع شراء {invoice.invoice_number} | {partner.name}"[:500],
                 lines_data=lines_payload,
                 currency=invoice.currency,
                 exchange_rate=base_factor,

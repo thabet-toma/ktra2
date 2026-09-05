@@ -451,7 +451,7 @@ def release_returned_purchase_serials(return_invoice) -> int:
     return release_purchase_serials(
         tenant_id=tenant_id,
         quantities_by_item=wanted,
-        document_label=f"مرجع الشراء {return_invoice.invoice_number}",
+        document_label=f"مرتجع الشراء {return_invoice.invoice_number}",
         action_label='ترحيل',
     )
 

@@ -1935,7 +1935,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                         journal_reference_types=['PURCHASE_RETURN'],
                         stock_reference_types=['PURCHASE_RETURN'],
                         user=request.user,
-                        document_label=f"مرجع شراء {invoice.invoice_number}",
+                        document_label=f"مرتجع شراء {invoice.invoice_number}",
                         recycle=True,
                     )
                     invoice.is_posted = False
