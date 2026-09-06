@@ -5,6 +5,7 @@
 from .procurement import (
     SupplierQuotationViewSet,
     PurchaseRFQViewSet,
+    PublicSupplierQuoteRequestViewSet,
     PurchaseOrderViewSet,
 )
 from .deals import LogisticsDealViewSet, LogisticsPaymentViewSet
@@ -27,7 +28,8 @@ from .goods_receipts import GoodsReceiptViewSet
 from .purchase_settings import PurchaseSettingsViewSet
 
 __all__ = [
-    "SupplierQuotationViewSet", "PurchaseRFQViewSet", "PurchaseOrderViewSet",
+    "SupplierQuotationViewSet", "PurchaseRFQViewSet",
+    "PublicSupplierQuoteRequestViewSet", "PurchaseOrderViewSet",
     "LogisticsDealViewSet", "LogisticsPaymentViewSet",
     "LogisticsShipmentViewSet", "LogisticsClearanceViewSet",
     "PurchaseInvoiceViewSet", "SupplierPaymentViewSet",

@@ -46,6 +46,10 @@ export interface Item {
     brandName?: string;
     specifications: string;
     imageUrls: string[];
+    /** #147 M2: صورة البراند المرجعية الواحدة (`Product.image_url`) — يراها
+     *  المورّد على رابط طلب عرض السعر العام؛ منفصلة عن `imageUrls` (مرفقات
+     *  الداتا شيت). */
+    imageUrl?: string;
     quantity?: number;
     notes?: string;
     hsCodePrimary?: string;

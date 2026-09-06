@@ -22,7 +22,7 @@ import {
   type KitGridColumn,
   type KitToolbarAction,
 } from "../../kit";
-import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Ban, UserPlus, Printer, FileSpreadsheet, GitCompare, Copy, ShieldOff, Info, Undo2, FileText } from "lucide-react";
+import { Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Send, Ban, UserPlus, Printer, FileSpreadsheet, GitCompare, Copy, ShieldOff, FileText, Globe, ImageIcon } from "lucide-react";
 import {
   CommercialDocumentEditor,
   type CommercialHeaderField,
@@ -31,17 +31,22 @@ import {
   addPurchaseRfqRecipient,
   cancelPurchaseRfq,
   createPurchaseRfq,
+  createPurchaseRfqPublicLink,
   duplicatePurchaseRfq,
   getPurchaseRfq,
   sendPurchaseRfq,
+  stopPurchaseRfqPublicLink,
   updatePurchaseRfq,
   type ProcurementScope,
   type PurchaseRFQAwardResult,
   type PurchaseRFQDto,
   type PurchaseRFQLineDto,
+  type PurchaseRFQPublicLinkDto,
   type PurchaseRFQRecipientDto,
 } from "../../../services/procurementDocumentsApi";
 import { purchaseInvoiceApi } from "../../../services/purchaseInvoiceApi";
+import { inventoryApi } from "../../../services/inventoryApi";
+import { cloudinaryService } from "../../../services/cloudinaryService";
 import {
   buildPurchasePriceHintChips,
   formatLowestPurchaseHint,
@@ -50,7 +55,7 @@ import {
 import { getScreenColumns, type ProcurementColumnKey } from "../../../utils/procurementColumns";
 import { formatDateValue, formatTimeValue } from "../../../utils/formatDate";
 import { useDocumentDraft } from "../../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../../utils/documentDraft";
+import { DocumentDraftBanners } from "../../shared/DocumentDraftBanners";
 import { useToast } from "../../../contexts/ToastContext";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { revokeDocumentShare } from "../../../services/docShareApi";
@@ -118,6 +123,81 @@ interface Props {
   onOpenRecipientOffer?: (recipient: PurchaseRFQRecipientDto, rfq: PurchaseRFQDto) => void;
 }
 
+/**
+ * #147 M2: صورة سطرٍ واحد — رفعٌ مباشر إلى المنتج، ونسخ صورة براندٍ شقيقٍ
+ * إن وُجد. لا يظهر أصلاً لسطرٍ بلا منتجٍ مسجَّل (`itemId` فارغ) — لا مكان
+ * لصورةٍ على بندٍ نصّيّ حرّ.
+ */
+const RfqLineImageControl: React.FC<{
+  imageUrl?: string;
+  siblings: { id: string; name: string; imageUrl: string }[];
+  uploading: boolean;
+  disabled: boolean;
+  onUpload: (file: File) => void;
+  onCopySibling: (url: string) => void;
+}> = ({ imageUrl, siblings, uploading, disabled, onUpload, onCopySibling }) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  return (
+    <div className="relative flex shrink-0 items-center gap-1">
+      <button
+        type="button"
+        title={imageUrl ? "تغيير صورة المنتج" : "رفع صورة للمنتج"}
+        disabled={disabled || uploading}
+        onClick={() => inputRef.current?.click()}
+        className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] disabled:opacity-60"
+      >
+        {uploading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : imageUrl ? (
+          <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <ImageIcon className="h-4 w-4 ktra-text-soft" aria-hidden="true" />
+        )}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) onUpload(file);
+        }}
+      />
+      {siblings.length > 0 && (
+        <>
+          <button
+            type="button"
+            title="انسخ صورة براندٍ آخر من نفس المنتج"
+            disabled={disabled}
+            className="ktra-iconbtn"
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+          {menuOpen && (
+            <div className="absolute top-full right-0 z-20 mt-1 w-48 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-lg">
+              {siblings.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="flex w-full items-center gap-2 px-2 py-1 text-right text-[11px] hover:bg-[var(--color-surface-2)]"
+                  onClick={() => { onCopySibling(s.imageUrl); setMenuOpen(false); }}
+                >
+                  <img src={s.imageUrl} alt="" className="h-5 w-5 shrink-0 rounded object-cover" />
+                  <span className="min-w-0 truncate">{s.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 export const PurchaseRFQForm: React.FC<Props> = ({
   rfq, items, suppliers, scope, isReadOnly = false, onSaved, onCancel,
   onOpenRecipientOffer,
@@ -143,6 +223,18 @@ export const PurchaseRFQForm: React.FC<Props> = ({
   // ISSUE #116 (مواصفة #108 §٨): شاشةٌ مستقلّة تُفتح عند الطلب — لا تُفرَض
   // على المحرِّر اليومي. الترسية صارت تمرّ من داخلها (تختار مورداً أولاً).
   const [showComparison, setShowComparison] = useState(false);
+  // مواصفة #147 (المرحلة 3ب): الرابط العامّ — رابطٌ واحد لأيّ مورّدٍ مجهول،
+  // منفصلٌ تماماً عن روابط المستقبِلين المسمَّين أعلاه. لا يصل مع الطلبية
+  // نفسها (نقطة `public-link/` وحدها تعيد الرابط الكامل)، فيبقى `null` حتى
+  // يضغط المستخدم الزرّ — حتى لو كان هناك رابطٌ حيٌّ من جلسةٍ سابقة
+  // (`current.public_share_is_live` يقول ذلك، لكن بلا الرابط نفسه).
+  const [publicLink, setPublicLink] = useState<PurchaseRFQPublicLinkDto | null>(null);
+  const [publicLinkBusy, setPublicLinkBusy] = useState(false);
+  // #147 M2: صورة كل بند — تُحفَظ على المنتج مباشرةً (`inventoryApi.updateProduct`)
+  // لا على الطلبية، فتحديثٌ محلّي فوريٌّ يكفي إظهارها بلا انتظار إعادة تحميل
+  // `items` من الأب (الذي لا نملك أمر تحديثه من هنا).
+  const [imageOverrides, setImageOverrides] = useState<Record<string, string>>({});
+  const [uploadingImageFor, setUploadingImageFor] = useState<string | null>(null);
   // ISSUE #121 (issue #118/#109 §٢): مسودّة محلية. البنود مقفلة بعد أوّل إرسال
   // (`isLocked` أدناه) — لا معنى لحفظ مسودّة لشاشةٍ لا تُعدَّل، فـ`isTouched`
   // مشروطة بأن تكون الطلبية لا تزال قابلةً للتحرير فعلاً (قرارٌ محلي — انظر
@@ -154,7 +246,6 @@ export const PurchaseRFQForm: React.FC<Props> = ({
   const [isDirty, setIsDirty] = useState(false);
   const markDirty = useCallback((value: boolean) => setIsDirty(value), []);
   const skipNextDirtyRef = useRef(true);
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   useEffect(() => { setCurrent(rfq); }, [rfq]);
 
@@ -196,13 +287,7 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     markDirty(true);
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<RfqDraftPayload>({
+  const draftApi = useDocumentDraft<RfqDraftPayload>({
     // ISSUE #133 غ٥: مفتاحٌ لكل نطاق — بلا هذا كانت مسودّةٌ يتيمة لطلبية شراء
     // محلّي تظهر في شاشة طلبية استيراد (وعكسها)، فالبحث عن اليتامى يفلتر
     // بـ`[tenant_id+doc_type]` وحده ولم يكن النطاق جزءاً من `doc_type`.
@@ -218,6 +303,7 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     isPosted: isLocked,
     docUpdatedAt: current?.updated_at ?? null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   useEffect(() => {
     if (skipNextDirtyRef.current) {
@@ -250,66 +336,6 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     markDirty(false);
     void discardDraft();
   }, [rfq, discardDraft]);
-
-  const draftSaveFailedBanner = draftSaveFailed && !isLocked ? (
-    <div
-      role="alert"
-      aria-live="assertive"
-      data-testid="draft-save-failed-banner"
-      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-    >
-      <AlertCircle className="h-4 w-4 shrink-0" />
-      <span>تعذّر حفظ نسخة محلية من هذه الطلبية — اضغط «تخزين» يدوياً كي لا يضيع عملك.</span>
-    </div>
-  ) : null;
-
-  const draftRestoreBanner = draftBanner ? (
-    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <span>
-        {draftBanner.eligibility === "restore" &&
-          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "stale" &&
-          `تغيّرت الطلبية بعد مسودتك (عُدِّلت ${formatTimeValue(current?.updated_at || "")}، ومسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "posted" &&
-          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذه الطلبية — بنودُها مقفَلة، للاطّلاع فقط.`}
-      </span>
-      {draftBanner.eligibility === "restore" && (
-        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-          <Undo2 className="h-4 w-4" /> تراجع
-        </button>
-      )}
-      {draftBanner.eligibility === "stale" && (
-        <>
-          <button type="button" className="ktra-toolbtn"
-            onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
-            استعرض مسودتي
-          </button>
-          <button type="button" className="ktra-toolbtn"
-            onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-            تجاهلها
-          </button>
-        </>
-      )}
-    </div>
-  ) : null;
-
-  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
-    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <div className="flex flex-col gap-1">
-        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-        <ul className="list-disc pr-4 text-xs">
-          {orphanDrafts.map((o) => (
-            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-          ))}
-        </ul>
-      </div>
-      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-        <X className="h-4 w-4" /> إخفاء
-      </button>
-    </div>
-  ) : null;
 
   const addLine = () => setLines((prev) => [...prev, blankLine()]);
   const removeLine = (key: string) => setLines((prev) => prev.filter((l) => l.key !== key));
@@ -344,6 +370,67 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     })),
     [items, lowestPriceMap],
   );
+
+  // #147 M2: رابط رصيد الصورة الحالية لصنفٍ ما — التحديث المحلّي (`imageOverrides`)
+  // يسبق ما وصل مع `items` (قد يكون أُنشئ في نفس هذه الجلسة).
+  const imageUrlForItemId = useCallback(
+    (itemId: string): string | undefined => imageOverrides[itemId] ?? items.find(
+      (it) => String(it.id) === itemId,
+    )?.imageUrl,
+    [items, imageOverrides],
+  );
+
+  // #147 «انسخ صورة براندٍ آخر من نفس المنتج»: إخوة نفس الأب (`familyId`) ممّن
+  // يحملون صورة فعلاً — فارغة إن لم يوجد أخٌ بصورة، فلا يظهر الزرّ إطلاقاً.
+  const siblingsWithImageFor = useCallback((itemId: string): { id: string; name: string; imageUrl: string }[] => {
+    const product = items.find((it) => String(it.id) === itemId);
+    if (!product?.familyId) return [];
+    return items
+      .filter((it) => it.familyId === product.familyId && String(it.id) !== itemId)
+      .map((it) => ({ id: String(it.id), name: it.name, imageUrl: imageUrlForItemId(String(it.id)) || "" }))
+      .filter((s) => s.imageUrl);
+  }, [items, imageUrlForItemId]);
+
+  // ISSUE #147 قصّة تحذيرية (البند 4): بنودٌ باختيار صنفٍ حقيقيّ بلا صورة —
+  // تحذيرٌ لا منع، فبندٌ نصّيّ حرّ (بلا `itemId`) لا مكان له لصورةٍ أصلاً.
+  const linesWithoutImage = useMemo(
+    () => lines.filter((l) => l.itemId && !imageUrlForItemId(l.itemId)),
+    [lines, imageUrlForItemId],
+  );
+
+  const confirmMissingImagesIfAny = async (actionLabel: string): Promise<boolean> => {
+    if (linesWithoutImage.length === 0) return true;
+    const names = linesWithoutImage.map((l) => l.name || "بندٌ بلا اسم").join("، ");
+    return confirm({
+      title: "بنودٌ بلا صورة",
+      message: `هذه البنود بلا صورة منتج: ${names}. الصورة اختيارية — يمكنك ${actionLabel} بدونها.`,
+      confirmText: "متابعة",
+    });
+  };
+
+  const handleImageUpload = async (itemId: string, file: File) => {
+    setUploadingImageFor(itemId);
+    try {
+      const url = await cloudinaryService.uploadFile(file);
+      await inventoryApi.updateProduct(Number(itemId), { image_url: url });
+      setImageOverrides((prev) => ({ ...prev, [itemId]: url }));
+      toast("تم حفظ صورة المنتج — ستظهر في كل مكانٍ يظهر فيه هذا المنتج، لا في هذه الطلبية وحدها.", "success");
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "تعذّر رفع الصورة", "error");
+    } finally {
+      setUploadingImageFor(null);
+    }
+  };
+
+  const handleCopySiblingImage = async (itemId: string, url: string) => {
+    try {
+      await inventoryApi.updateProduct(Number(itemId), { image_url: url });
+      setImageOverrides((prev) => ({ ...prev, [itemId]: url }));
+      toast("نُسخت الصورة إلى هذا المنتج.", "success");
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "تعذّر نسخ الصورة", "error");
+    }
+  };
 
   const handleSave = async (): Promise<PurchaseRFQDto | null> => {
     const usableLines = lines.filter((l) => (l.itemId || l.name.trim()) && Number(l.quantity) > 0);
@@ -389,6 +476,7 @@ export const PurchaseRFQForm: React.FC<Props> = ({
   };
 
   const handleSend = async () => {
+    if (!(await confirmMissingImagesIfAny("الإرسال"))) return;
     setErr(null); setMsg(null);
     setSaving(true);
     try {
@@ -464,6 +552,51 @@ export const PurchaseRFQForm: React.FC<Props> = ({
       toast(e instanceof Error ? e.message : "تعذّر إبطال الرابط", "error");
     } finally {
       setRevokingShareId(null);
+    }
+  };
+
+  // مواصفة #147 (المرحلة 3ب): إنشاء/جلب الرابط العامّ — الفعل نفسه idempotent
+  // خادمياً (يعيد الحيّ القائم بدل مضاعفة الروابط)، فزرٌّ واحد يكفي للحالتين.
+  const handleCreatePublicLink = async () => {
+    if (!current) return;
+    if (!(await confirmMissingImagesIfAny("إنشاء الرابط العام"))) return;
+    setPublicLinkBusy(true);
+    try {
+      const link = await createPurchaseRfqPublicLink(current.id);
+      setPublicLink(link);
+      const refreshed = await getPurchaseRfq(current.id);
+      setCurrent(refreshed);
+      onSaved(refreshed);
+      toast("الرابط العام جاهز.", "success");
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "تعذّر إنشاء الرابط العام", "error");
+    } finally {
+      setPublicLinkBusy(false);
+    }
+  };
+
+  // «أوقف استقبال العروض» — 400 من الخادم إن لم يكن هناك رابطٌ حيٌّ أصلاً
+  // (تُعرض رسالةً عادية، لا عطباً) — راجع `stop_public_link` في الخادم.
+  const handleStopPublicLink = async () => {
+    if (!current) return;
+    const ok = await confirm({
+      title: "إيقاف استقبال العروض",
+      message: "سيتوقف الرابط العام عن العمل فوراً، ولن يقدر أيّ مورّدٍ جديد الردّ عبره. لا يمكن التراجع.",
+      confirmText: "إيقاف",
+      danger: true,
+    });
+    if (!ok) return;
+    setPublicLinkBusy(true);
+    try {
+      const refreshed = await stopPurchaseRfqPublicLink(current.id);
+      setCurrent(refreshed);
+      setPublicLink(null);
+      onSaved(refreshed);
+      toast("أُوقف استقبال العروض على الرابط العام.", "success");
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "لا يوجد رابطٌ عامٌّ نشطٌ لهذه الطلبية", "error");
+    } finally {
+      setPublicLinkBusy(false);
     }
   };
 
@@ -627,19 +760,34 @@ export const PurchaseRFQForm: React.FC<Props> = ({
   const productColumn = gridColumns.find((c) => c.key === "product");
   if (productColumn) {
     productColumn.render = (row: RfqLineItem) => (
-      <KitAutocomplete
-        value={row.name || ""}
-        options={itemOptions}
-        disabled={isLocked}
-        placeholder="اكتب اسم الصنف…"
-        onPick={(id) => {
-          const item = items.find((candidate) => String(candidate.id) === String(id));
-          if (item) fillLineWithItem(row.key, item);
-        }}
-        onFreeText={(text) => updateLine(row.key, { itemId: "", name: text.trim() })}
-        onTextChange={row.itemId ? undefined : (text) => updateLine(row.key, { itemId: "", name: text })}
-        createLabel={(text) => `إبقاء «${text}» كبند نصّي في الطلبية`}
-      />
+      <div className="flex items-center gap-1.5">
+        {/* #147 M2: بلا منتجٍ مسجَّل (بندٌ نصّيّ حرّ) لا تحكّم — لا مكان لصورةٍ هناك. */}
+        {row.itemId && (
+          <RfqLineImageControl
+            imageUrl={imageUrlForItemId(row.itemId)}
+            siblings={siblingsWithImageFor(row.itemId)}
+            uploading={uploadingImageFor === row.itemId}
+            disabled={isLocked}
+            onUpload={(file) => void handleImageUpload(row.itemId, file)}
+            onCopySibling={(url) => void handleCopySiblingImage(row.itemId, url)}
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <KitAutocomplete
+            value={row.name || ""}
+            options={itemOptions}
+            disabled={isLocked}
+            placeholder="اكتب اسم الصنف…"
+            onPick={(id) => {
+              const item = items.find((candidate) => String(candidate.id) === String(id));
+              if (item) fillLineWithItem(row.key, item);
+            }}
+            onFreeText={(text) => updateLine(row.key, { itemId: "", name: text.trim() })}
+            onTextChange={row.itemId ? undefined : (text) => updateLine(row.key, { itemId: "", name: text })}
+            createLabel={(text) => `إبقاء «${text}» كبند نصّي في الطلبية`}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -677,12 +825,18 @@ export const PurchaseRFQForm: React.FC<Props> = ({
     </div>
   ) : null;
 
+  // #147 M2: قولٌ صريحٌ مرّةً واحدة فوق الجدول — لا عند كل ضغطة رفع، فالمفاجأة
+  // الحقيقية («أين ستظهر هذه الصورة؟») تُقال قبل أن يضغط لا بعده.
+  const hasAnyRegisteredLine = lines.some((l) => l.itemId);
   const banner = (
     <>
-      {draftSaveFailedBanner}
+      <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={isDirty && !isLocked} readOnly={isLocked} />
       {saveBanner}
-      {draftRestoreBanner}
-      {orphanDraftsBanner}
+      {hasAnyRegisteredLine && (
+        <p className="px-1 text-[11px] ktra-text-soft">
+          صورة الصنف تُحفَظ على المنتج نفسه — تظهر في كل مكانٍ يظهر فيه هذا المنتج، لا في هذه الطلبية وحدها.
+        </p>
+      )}
     </>
   );
 
@@ -728,6 +882,53 @@ export const PurchaseRFQForm: React.FC<Props> = ({
         <p className="ktra-hint">احفظ الطلبية أولاً قبل اختيار الموردين — أو استعمل «حفظ وإرسال».</p>
       ) : (
         <>
+          {/* مواصفة #147 (المرحلة 3ب): رابطٌ عامٌّ واحد — منفصلٌ تماماً عن
+              روابط المستقبِلين المسمَّين أدناه، فهذا يصل أيّ مورّدٍ لم تُسجّله
+              بعد، لا مستقبِلاً بعينه. */}
+          <div className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-text)]">
+              <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+              رابطٌ عامٌّ واحد — لأيّ مورّد، حتى غير المسجَّلين عندك
+            </div>
+            <p className="text-[11px] ktra-text-soft">
+              أرسِله لمن تشاء (واتساب، بريد، أيّ قناة) — ردّه لا يُنشئ مورّداً في
+              دفاترك تلقائياً، بل يصل إلى «عروض عامة» بانتظار اعتمادك أنت أوّلاً.
+            </p>
+            {current.public_share_is_live && (
+              <p className="text-[11px] font-semibold text-emerald-700">
+                رابطٌ حيّ الآن
+                {current.public_share_expires_at
+                  ? ` — ينتهي ${formatDateValue(current.public_share_expires_at)} (يتبع مهلة ردّ الطلبية)`
+                  : ""}
+              </p>
+            )}
+            {publicLink ? (
+              <div className="flex items-center gap-1.5">
+                <input readOnly dir="ltr" value={publicLink.public_url}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="ktra-input flex-1 truncate font-mono text-[11px]" />
+                <button type="button" title="نسخ الرابط" className="ktra-iconbtn"
+                  onClick={() => void handleCopyShareLink(publicLink.public_url)}>
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : null}
+            <div className="flex items-center gap-2">
+              <button type="button" className="ktra-btn" disabled={publicLinkBusy}
+                onClick={() => void handleCreatePublicLink()}>
+                {publicLinkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Globe className="h-3.5 w-3.5" />}
+                {publicLink || current.public_share_is_live ? "إظهار/تجديد الرابط" : "إنشاء رابط عام"}
+              </button>
+              {current.public_share_is_live && (
+                <button type="button" disabled={publicLinkBusy}
+                  className="flex items-center gap-1.5 rounded-lg border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                  onClick={() => void handleStopPublicLink()}>
+                  <ShieldOff className="h-3.5 w-3.5" /> أوقف استقبال العروض
+                </button>
+              )}
+            </div>
+          </div>
+
           {current.recipients.length > 0 && (
             <div className="space-y-1">
               <span className="ktra-field-label">

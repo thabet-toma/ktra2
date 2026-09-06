@@ -62,15 +62,15 @@ interface Props {
   onAwarded: (result: PurchaseRFQAwardResult) => void;
 }
 
-/** ISSUE #122: من كتب أسعار هذا العمود — نصّاً لا لوناً وحده. */
-const ENTRY_SOURCE_LABELS: Record<SupplierQuotationEntrySource, string> = {
-  supplier_link: "سعّره بنفسه",
-  manual: "أُدخل عنه",
-};
-
+/**
+ * ISSUE #122 + مواصفة #147 (البند 9): من كتب أسعار هذا العمود — نصّاً لا لوناً
+ * وحده. النصّ نفسه **من الخادم** (`entry_source_display`، `get_entry_source_display`)
+ * لا مكرَّراً هنا حرفياً — هذا القاموس لونٌ فقط.
+ */
 const ENTRY_SOURCE_BADGE_CLASS: Record<SupplierQuotationEntrySource, string> = {
   supplier_link: "rounded-full border border-emerald-300 bg-emerald-50 px-1.5 py-px text-[9px] font-medium text-emerald-800",
   manual: "rounded-full border border-amber-300 bg-amber-50 px-1.5 py-px text-[9px] font-medium text-amber-800",
+  public_link: "rounded-full border border-sky-300 bg-sky-50 px-1.5 py-px text-[9px] font-medium text-sky-800",
 };
 
 const SUPPLIER_COL_WIDTH = 190;
@@ -240,9 +240,9 @@ export const RfqComparisonMatrix: React.FC<Props> = ({
                           {/* ISSUE #122: عمودٌ سعّره المورّد بنفسه وعمودٌ أدخلناه عنه
                               ليسا سواءً في الثقة — شارةٌ عرضيّةٌ صرف بلا أيّ حساب.
                               حقلٌ اختياريّ: خادمٌ لا يرسله لا يُظهر شارةً كاذبة. */}
-                          {s.entry_source && (
+                          {s.entry_source && s.entry_source_display && (
                             <span className={ENTRY_SOURCE_BADGE_CLASS[s.entry_source]}>
-                              {ENTRY_SOURCE_LABELS[s.entry_source]}
+                              {s.entry_source_display}
                             </span>
                           )}
                           {/* ISSUE #133 غ٣: ملاحظته العامة على الطلبية كلّها —

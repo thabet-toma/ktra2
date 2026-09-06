@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FileSignature, Plus, Loader2, X, Check, AlertTriangle, Trash2, Play, Square,
-  PlayCircle, Calculator, Info, Undo2,
+  PlayCircle, Calculator,
 } from "lucide-react";
 import {
   activateContract, computePayrollRun, createContract, createPayrollRun,
@@ -19,7 +19,7 @@ import { usePermissions } from "../../contexts/PermissionsContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 
 /**
  * T-HR M6/M7 — «العقود ومسير الرواتب».
@@ -537,13 +537,7 @@ const ContractEditorModal: React.FC<{
     setTouched(true);
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<ContractDraftPayload>({
+  const draftApi = useDocumentDraft<ContractDraftPayload>({
     docType: "employment_contract",
     docId: draft.id ?? null,
     payload: draftPayload,
@@ -556,6 +550,7 @@ const ContractEditorModal: React.FC<{
     // مسارُ التحرير صار الوصلُ سطراً واحداً.
     docUpdatedAt: null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   // ISSUE #120: حارسٌ مقلوب — يعترض المغادرة فقط إن فشل الحفظ المحلي فعلاً.
   useEffect(() => {
@@ -568,8 +563,6 @@ const ContractEditorModal: React.FC<{
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [draftSaveFailed]);
-
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   /** «تراجع» على شريط الاستعادة: يعيد النموذج فارغاً ويمسح المسودّة. */
   const handleUndoDraft = useCallback(() => {
@@ -620,66 +613,7 @@ const ContractEditorModal: React.FC<{
   return (
     <div className="fixed inset-0 z-40 grid place-items-center overflow-y-auto bg-black/40 p-3">
       <div className={`${cardClass} w-full max-w-lg`}>
-        {draftSaveFailed && (
-          <div
-            role="alert"
-            aria-live="assertive"
-            data-testid="draft-save-failed-banner"
-            className="sticky top-0 z-40 mb-2 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-          >
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
-          </div>
-        )}
-        {draftBanner && (
-          <div className="ktra-banner ktra-banner--warn mb-2" role="status" data-testid="draft-restored-banner">
-            <Info className="h-4 w-4 shrink-0" />
-            <span>
-              {draftBanner.eligibility === "restore" &&
-                `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-              {draftBanner.eligibility === "stale" &&
-                `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-              {draftBanner.eligibility === "posted" &&
-                `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
-            </span>
-            {draftBanner.eligibility === "restore" && (
-              <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-                <Undo2 className="h-4 w-4" /> تراجع
-              </button>
-            )}
-            {draftBanner.eligibility === "stale" && (
-              <>
-                <button
-                  type="button"
-                  className="ktra-toolbtn"
-                  onClick={() => onRestoreDraft(draftBanner.payload)}
-                  data-testid="draft-stale-preview"
-                >
-                  استعرض مسودتي
-                </button>
-                <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-                  تجاهلها
-                </button>
-              </>
-            )}
-          </div>
-        )}
-        {orphanDrafts.length > 0 && !orphanBarDismissed && (
-          <div className="ktra-banner mb-2" role="status" data-testid="orphan-drafts-banner">
-            <Info className="h-4 w-4 shrink-0" />
-            <div className="flex flex-col gap-1">
-              <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-              <ul className="list-disc pr-4 text-xs">
-                {orphanDrafts.map((o) => (
-                  <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-                ))}
-              </ul>
-            </div>
-            <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-              <X className="h-4 w-4" /> إخفاء
-            </button>
-          </div>
-        )}
+        <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
 
         <div className="mb-3 flex items-center gap-2">
           <h2 className="font-bold">عقد جديد</h2>

@@ -138,3 +138,100 @@ class PartnerDuplicateBankAccountTest(APITestCase):
             format="json", **self.headers,
         )
         self.assertEqual(res.status_code, 200, res.content)
+
+
+class PartnerSuggestMatchesTest(APITestCase):
+    """مواصفة #147 (المرحلة 3أ) — `suggest_partner_matches`: تقترح مرتَّبةً،
+    لا تُنشئ ولا تُدمج ولا تحجب أبداً."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="suggest-boss", password="x")
+        cls.tenant = Tenant.objects.create(TenantID=941, CompanyName="Suggest Co")
+        UserCompanyMembership.objects.create(
+            user=cls.user, tenant=cls.tenant, role="manager", is_default=True,
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+        self.headers = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def test_exact_email_match_ranks_first(self):
+        from partners.serializers import suggest_partner_matches
+
+        Partner.objects.create(
+            tenant=self.tenant, name="مطابقة بالاسم فقط", partner_type="Supplier",
+        )
+        by_email = Partner.objects.create(
+            tenant=self.tenant, name="طرفٌ مختلف كليّاً",
+            partner_type="Supplier", email="Match@Example.com",
+        )
+        results = suggest_partner_matches(
+            tenant_id=self.tenant.pk, name="لا علاقة بالاسم",
+            email="match@example.com",
+        )
+        self.assertEqual(results[0]["partner_id"], by_email.id)
+        self.assertIn("email", results[0]["signals"])
+
+    def test_arabic_name_variants_match_despite_hamza_diacritics_and_tatweel(self):
+        from partners.serializers import suggest_partner_matches
+
+        existing = Partner.objects.create(
+            tenant=self.tenant, name="أحمد للمقاولات", partner_type="Supplier",
+        )
+        results = suggest_partner_matches(
+            tenant_id=self.tenant.pk, name="ـاحـمّـد لـلمـقاولات", email="",
+        )
+        ids = [r["partner_id"] for r in results]
+        self.assertIn(existing.id, ids)
+
+    def test_company_name_with_trading_suffix_suggests_the_bare_name(self):
+        from partners.serializers import suggest_partner_matches
+
+        existing = Partner.objects.create(
+            tenant=self.tenant, name="الأمل", partner_type="Supplier",
+        )
+        results = suggest_partner_matches(
+            tenant_id=self.tenant.pk, name="شركة الأمل للتجارة", email="",
+        )
+        ids = [r["partner_id"] for r in results]
+        self.assertIn(existing.id, ids)
+
+    def test_partner_already_a_named_recipient_on_the_rfq_is_flagged(self):
+        from django.utils import timezone
+        from logistics.models import PurchaseRFQ, PurchaseRFQRecipient
+        from partners.serializers import suggest_partner_matches
+
+        supplier = Partner.objects.create(
+            tenant=self.tenant, name="مورد مستقبِل", partner_type="Supplier",
+            email="recipient@example.com",
+        )
+        rfq = PurchaseRFQ.objects.create(
+            tenant=self.tenant, rfq_date=timezone.localdate(),
+        )
+        PurchaseRFQRecipient.objects.create(
+            tenant=self.tenant, rfq=rfq, supplier=supplier,
+        )
+
+        flagged = suggest_partner_matches(
+            tenant_id=self.tenant.pk, name="مورد مستقبِل",
+            email="recipient@example.com", rfq_id=rfq.id,
+        )
+        self.assertTrue(flagged[0]["already_recipient"])
+
+        unflagged = suggest_partner_matches(
+            tenant_id=self.tenant.pk, name="مورد مستقبِل",
+            email="recipient@example.com", rfq_id=None,
+        )
+        self.assertFalse(unflagged[0]["already_recipient"])
+
+    def test_suggestions_never_block_creating_a_partner_with_a_similar_name(self):
+        Partner.objects.create(
+            tenant=self.tenant, name="اسمٌ شبيه", partner_type="Supplier",
+        )
+        res = self.client.post(
+            "/api/partners/",
+            {"name": "اسمٌ شبيه", "partner_type": "Customer"},
+            format="json", **self.headers,
+        )
+        self.assertEqual(res.status_code, 201, res.content)

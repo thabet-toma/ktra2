@@ -2009,6 +2009,8 @@ const quoteToUi = async (row: SupplierQuotationDto): Promise<PriceOffer> => ({
     ?? undefined,
   alibabaLink: row.alibaba_link || "",
   supplierContact: row.supplier_contact || "",
+  entrySource: row.entry_source,
+  entrySourceDisplay: row.entry_source_display || "",
   decisionReason: row.decision_reason || "",
   attachments: row.attachments || [],
   notesLog: row.notes_log || [],

@@ -109,7 +109,7 @@ import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
 import { formatTimeValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 import { FieldError } from "../ui/FieldError";
 import {
   KitDocumentShell,
@@ -1466,13 +1466,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     dirtyRef.current = true;
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<Record<string, unknown>>({
+  const draftApi = useDocumentDraft<Record<string, unknown>>({
     docType: "sales_invoice",
     docId: draftId,
     payload: draftPayload,
@@ -1484,6 +1478,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     // كُشف الآن، ولمستندٍ جديدٍ لا ختمَ أصلاً فيبقى `null`.
     docUpdatedAt: draftId != null ? docUpdatedAt : null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   /* ISSUE #121: الحارسُ يُقلَب أخيراً — يعترض المغادرة فقط إن فشل الحفظُ
      المحلّيّ فعلاً (`draftSaveFailed`)، لا كلّما وُجد تعديلٌ غير محفوظ. مرآة
@@ -1498,9 +1493,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [draftSaveFailed]);
-
-  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   /** «تراجع» على شريط الاستعادة: يعيد المستند إلى نسخته المحفوظة (من الخادم
    *  لمستندٍ قائم، أو فارغاً لمستندٍ جديد) ويمسح المسودّة. */
@@ -3462,103 +3454,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       </div>
     ) : null;
 
-  /* ISSUE #121: الحفظ المحلي فشل فعلاً (حصّة ممتلئة، تصفّح خاص…) — لافتةٌ
-     لاصقة تطلب حفظاً يدوياً بدل الانتظار الصامت حتى تحاول المغادرة. مرآة
-     `InvoiceForm.tsx` (issue #120). */
-  const draftSaveFailedBanner = draftSaveFailed && !readOnly ? (
-    <div
-      role="alert"
-      aria-live="assertive"
-      data-testid="draft-save-failed-banner"
-      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-    >
-      <AlertCircle className="h-4 w-4 shrink-0" />
-      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
-    </div>
-  ) : null;
-
-  /* ISSUE #118/#121: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى
-     مُطبَّقٌ على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً؛
-     هو إخبارٌ لا سؤال، ومعه «تراجع» وحده. */
-  const draftRestoreBanner = draftBanner ? (
-    <div
-      className="ktra-banner ktra-banner--warn"
-      role="status"
-      data-testid="draft-restored-banner"
-    >
-      <Info className="h-4 w-4 shrink-0" />
-      <span>
-        {draftBanner.eligibility === "restore" &&
-          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "stale" &&
-          `تغيّر المستند بعد مسودتك (ومسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "posted" &&
-          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
-      </span>
-      {draftBanner.eligibility === "restore" && (
-        <button
-          type="button"
-          className="ktra-toolbtn"
-          onClick={() => void handleUndoDraft()}
-          data-testid="draft-restored-undo"
-        >
-          <Undo2 className="h-4 w-4" />
-          تراجع
-        </button>
-      )}
-      {draftBanner.eligibility === "stale" && (
-        <>
-          <button
-            type="button"
-            className="ktra-toolbtn"
-            onClick={() => onRestoreDraft(draftBanner.payload)}
-            data-testid="draft-stale-preview"
-          >
-            استعرض مسودتي
-          </button>
-          <button
-            type="button"
-            className="ktra-toolbtn"
-            onClick={() => void discardDraft()}
-            data-testid="draft-stale-discard"
-          >
-            تجاهلها
-          </button>
-        </>
-      )}
-    </div>
-  ) : null;
-
-  /* شريط اليتامى (issue #119 §٧): مسودّات مستندٍ جديد أخرى لنفس النوع تُركت
-     في تبويبات أخرى — تاريخ كلٍّ وسطر محتواها الأوّل كي تُميَّز. */
-  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
-    <div
-      className="ktra-banner"
-      role="status"
-      data-testid="orphan-drafts-banner"
-    >
-      <Info className="h-4 w-4 shrink-0" />
-      <div className="flex flex-col gap-1">
-        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-        <ul className="list-disc pr-4 text-xs">
-          {orphanDrafts.map((o) => (
-            <li key={o.key}>
-              {formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}
-            </li>
-          ))}
-        </ul>
-      </div>
-      <button
-        type="button"
-        className="ktra-toolbtn"
-        onClick={() => setOrphanBarDismissed(true)}
-        data-testid="orphan-drafts-dismiss"
-      >
-        <X className="h-4 w-4" />
-        إخفاء
-      </button>
-    </div>
-  ) : null;
 
   const fld = (label: string, node: React.ReactNode) => (
     <label className="ktra-field">
@@ -4444,12 +4339,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           </>
         }
       >
-        {draftSaveFailedBanner}
+        <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={() => void handleUndoDraft()} isTouched={dirtyRef.current} readOnly={readOnly} />
         {banner}
         {reservedWarningBanner}
         {stockWarningBanner}
-        {draftRestoreBanner}
-        {orphanDraftsBanner}
         {/* وضع القراءة: مستند مُنسَّق بدل شبكة الإدخال المعطّلة. */}
         {viewMode && documentView}
         {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}

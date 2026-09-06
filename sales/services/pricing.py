@@ -276,13 +276,19 @@ def last_sale_price(
     }
 
 
-def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
+def customer_price_list(
+    *, tenant_id: int, customer_id: int, exclude_quotation_id: int | None = None,
+) -> list[dict]:
     """DEF-004: عرض السعر لكل العميل عبر كامل الكتالوج.
 
     لكل منتج فعّال:
       - إن اشتراه العميل سابقاً (فاتورة بيع مرحَّلة) → سعر آخر فاتورة (للقراءة فقط).
       - وإلا → عرض السعر اليدوي المحفوظ (قابل للتحرير)، أو فارغ إن لم يُحفظ.
     لا أثر محاسبي — مصدر تسعير احتياطي فقط.
+
+    T-PICKUNIFY (#147 M4): `exclude_quotation_id` يستبعد عرضاً بعينه من رتبة
+    `SalesQuotationLine` — عرض السعر المفتوح للتحرير لا يجوز أن يُسعِّر نفسه
+    من سطوره هو (نفس فكرة استثناء الفاتورة الحالية في معاينة السقف الائتماني).
     """
     from sales.models import CustomerProductQuote
 
@@ -320,11 +326,15 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
     # في القائمة (وخيارات الفاتورة) حتى للعروض القديمة التي لم تُعبّئ كرت الزبون.
     from sales.models import SalesQuotationLine
 
+    sq_qs = SalesQuotationLine.objects.filter(
+        tenant_id=tenant_id, quotation__customer_id=customer_id,
+    )
+    if exclude_quotation_id is not None:
+        sq_qs = sq_qs.exclude(quotation_id=exclude_quotation_id)
+
     sq_by_product: dict[int, dict] = {}
     for sl in (
-        SalesQuotationLine.objects.filter(
-            tenant_id=tenant_id, quotation__customer_id=customer_id,
-        )
+        sq_qs
         .order_by("product_id", "-quotation__quotation_date", "-quotation_id", "-id")
         .values("product_id", "unit_price", "quotation__quotation_number")
     ):

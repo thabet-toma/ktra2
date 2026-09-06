@@ -218,9 +218,15 @@ class ProductApiTest(APITestCase):
         }
         # #133: زوجٌ صريحٌ آخر أُضيف لاحقاً — السعر التقديري (أقلّ شراء ضمن
         # آخر ٥ فواتير) ومصدره، ليقرأه منتقي المستندات بلا فتح كرت المنتج.
+        #
+        # #147: وحقلٌ ثالثٌ صريح — `image_url`. توسيعٌ **مقصود** لا سهو:
+        # صفحةُ طلب عرض السعر العامّة تعرض صورة كلّ صنفٍ للمورّد الذي يسعّر،
+        # ومحرِّرُ بند الطلبية يرفعها من مكانه — وكلاهما يقرأ المنتجات من عقد
+        # المنتقي لا من العقد الكامل. حقلٌ نصّيٌّ واحد (رابط) لا كائن.
         assert set(row.keys()) == known_before | {
             "family_id", "family_name",
             "indicative_purchase_price", "indicative_purchase_price_source",
+            "image_url",
         }
 
     def test_lookup_list_exposes_every_brand_of_a_family_each_with_the_brand_in_its_name(self):

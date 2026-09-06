@@ -238,6 +238,11 @@
     <thead>
       <tr>
         <th class="num" style="width:38px">#</th>
+        {% comment %}
+        مواصفة #147 (المرحلة 3ب): الصورة **على صفحة الرابط وحدها** — الطباعة
+        وExcel خارج نطاقها (قرار المالك)، فهي عمودٌ في هذا الجدول فقط.
+        {% endcomment %}
+        <th class="num" style="width:56px"><span class="bi"><span dir="rtl">صورة</span><span class="bi-en" dir="ltr">Image</span></span></th>
         <th><span class="bi"><span dir="rtl">الصنف</span><span class="bi-en" dir="ltr">Item</span></span></th>
         <th class="num" style="width:64px"><span class="bi"><span dir="rtl">الوحدة</span><span class="bi-en" dir="ltr">Unit</span></span></th>
         <th class="num" style="width:80px"><span class="bi"><span dir="rtl">الكمية</span><span class="bi-en" dir="ltr">Qty</span></span></th>
@@ -249,6 +254,14 @@
       {% for line in doc.lines %}
       <tr>
         <td class="num">{{ line.seq }}</td>
+        <td class="num">
+          {% if line.image_url %}
+          <img src="{{ line.image_url }}" alt="" style="max-width:44px; max-height:44px; object-fit:contain">
+          {% else %}
+          {% comment %}لا صورة مكسورة أبداً — عنصر نصّي محايد بدل `<img>` بلا مصدر.{% endcomment %}
+          <span class="muted" aria-hidden="true">—</span>
+          {% endif %}
+        </td>
         <td>
           {{ line.name }}
           {% if line.specs %}<span class="item-note" dir="rtl">{{ line.specs }}</span>{% endif %}
@@ -269,15 +282,19 @@
           {% comment %}
           `form="rfq-quote-form"` يربط الحقل بالنموذج بلا تداخل HTML — الجدول
           يبقى خارج `<form>` فتُقرأ بنية الصفحة بلا فروع HTML مقحمة داخل جدول.
+          ISSUE #147: `required` **مشروطٌ** بالجمهور — الرابط العامّ يسمح
+          بتسعيرٍ جزئيّ (`record_public_quote_request` تكتفي ببندٍ واحد على
+          الأقل)، والمورّد المسمّى يبقى مُلزَماً بكلّ بند كما كان تماماً.
           {% endcomment %}
           <input type="number" step="0.0001" min="0" inputmode="decimal"
-                 name="price_{{ line.id }}" form="rfq-quote-form" required
+                 name="price_{{ line.id }}" form="rfq-quote-form"
+                 {% if not share.is_public %}required{% endif %}
                  value="{{ line.price|default_if_none:'' }}">
         </td>
         {% endif %}
       </tr>
       {% empty %}
-      <tr><td colspan="{% if doc.quote.open %}7{% else %}6{% endif %}" class="num muted">لا توجد بنود</td></tr>
+      <tr><td colspan="{% if doc.quote.open %}8{% else %}7{% endif %}" class="num muted">لا توجد بنود</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -303,6 +320,18 @@
       <form method="post" action="{{ quote_url }}" id="rfq-quote-form">
         <input type="text" name="name" maxlength="120" required
                placeholder="الاسم الكامل / Full name" autocomplete="name">
+        {% comment %}
+        مواصفة #147 (المرحلة 3ب): البريد والهاتف **للرابط العامّ وحده** — مورّدٌ
+        مسمّى معروفٌ لدينا سلفاً بهاتفه وبريده على بطاقته، والرابط العامّ لا
+        يعرف صاحبه إلا بما يكتبه هو. البريد إلزاميّ (`record_public_quote_request`
+        يرفض بدونه)، والهاتف اختياريّ. لا رقم بنكٍ ولا رقمٍ ضريبيّ هنا إطلاقاً.
+        {% endcomment %}
+        {% if share.is_public %}
+        <input type="email" name="email" maxlength="100" required
+               placeholder="البريد الإلكتروني / Email" autocomplete="email">
+        <input type="tel" name="phone" maxlength="20"
+               placeholder="الهاتف (اختياري) / Phone (optional)" autocomplete="tel">
+        {% endif %}
         {% comment %}
         ISSUE #133 غ٢: المورّدُ الأجنبيّ يسعّر بعملته لا عملتنا — بلا هذا كان
         كلُّ سعرٍ يُسجَّل بالعملة الأساسية بصمت، فيدخل المقارنةَ أرخصَ أو

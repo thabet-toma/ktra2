@@ -523,6 +523,286 @@ def submit_rfq_supplier_quote(
 
 
 @transaction.atomic
+def record_public_quote_request(
+    rfq, *, share=None, name: str, email: str, phone: str = '',
+    prices: dict, currency_id=None, general_note: str = '',
+    notes: dict | None = None, ip: str = '',
+):
+    """يُسجّل ردّ **مجهولٍ** على رابطٍ عام — مواصفة #147 (المرحلة 3أ).
+
+    **دائماً صفٌّ جديد، أبداً تحديثٌ لسابق** — خلافاً لـ`submit_rfq_supplier_quote`
+    أعلاه (رابطٌ خاصٌّ لمورّدٍ معروف مسبقاً بـ`quotation` واحدة عبر
+    `OneToOneField`، فالردّ الثاني يصحّح الأوّل): هنا لا حساب يربط الغريب
+    الثاني بالأوّل — الدهسُ كان يعني أنّ غريباً يمحو سعر غريبٍ آخر بصمت.
+    ولا يكتب `Partner` ولا `SupplierQuotation` إطلاقاً؛ ذاك عمل
+    `approve_public_quote_request` وحده، بعد موافقةٍ صريحة.
+
+    **تسعيرٌ جزئيّ مسموح** خلافاً لـ`submit_rfq_supplier_quote` الذي يُلزم
+    سعراً لكلّ بند — موردٌ لا يخزّن صنفاً يترك سطره فارغاً، وبندٌ واحدٌ
+    مسعَّرٌ على الأقل يكفي لقبول الردّ.
+    """
+    from logistics.models import (
+        PurchaseRFQ, PublicSupplierQuoteRequest, PublicSupplierQuoteRequestLine,
+    )
+
+    notes = notes or {}
+    name = str(name or '').strip()
+    email = str(email or '').strip()
+    if not name:
+        raise ValidationError('الاسم مطلوب.')
+    if not email:
+        raise ValidationError('البريد الإلكتروني مطلوب.')
+
+    rfq = PurchaseRFQ.objects.select_for_update().get(pk=rfq.pk)
+    if rfq.status != PurchaseRFQ.STATUS_SENT:
+        raise ValidationError('لم تعد الطلبية تقبل الأسعار — أُغلقت أو أُلغيت.')
+
+    rfq_lines = list(rfq.lines.all())
+    if not rfq_lines:
+        raise ValidationError('لا بنود في هذه الطلبية.')
+
+    parsed_prices = {}
+    for line in rfq_lines:
+        raw = prices.get(line.id)
+        if raw in (None, ''):
+            continue  # ISSUE #147: تسعيرٌ جزئيّ مسموح — بند بلا سعر يُترك فارغاً.
+        try:
+            price = Decimal(str(raw))
+        except (InvalidOperation, ValueError, TypeError):
+            raise ValidationError('سعر غير صالح.')
+        if price < 0:
+            raise ValidationError('السعر لا يمكن أن يكون سالباً.')
+        parsed_prices[line.id] = price
+
+    if not parsed_prices:
+        raise ValidationError('أدخل سعراً لبند واحد على الأقل.')
+
+    currency = None
+    if currency_id:
+        from tenants.models import Currency
+
+        currency = Currency.objects.filter(pk=currency_id).first()
+
+    request_row = PublicSupplierQuoteRequest.objects.create(
+        tenant=rfq.tenant,
+        rfq=rfq,
+        share=share,
+        supplier_name=name,
+        supplier_email=email,
+        supplier_phone=str(phone or '').strip(),
+        currency=currency,
+        general_note=str(general_note or '').strip(),
+        submitted_ip=str(ip or '')[:64],
+    )
+    PublicSupplierQuoteRequestLine.objects.bulk_create([
+        PublicSupplierQuoteRequestLine(
+            tenant=rfq.tenant,
+            request=request_row,
+            rfq_line=line,
+            name_snapshot=line.name_snapshot
+            or getattr(line.product, 'name_ar', '')
+            or getattr(line.product, 'name_en', ''),
+            seq_snapshot=line.seq,
+            unit_price=parsed_prices[line.id],
+            supplier_note=str(notes.get(line.id) or '').strip(),
+        )
+        for line in rfq_lines if line.id in parsed_prices
+    ])
+
+    logger.info(
+        'purchase_rfq.public_quote_request rfq=%s request=%s ip=%s',
+        rfq.pk, request_row.pk, ip,
+    )
+    return request_row
+
+
+@transaction.atomic
+def approve_public_quote_request(request_row, *, partner=None, partner_data=None, user=None):
+    """يعتمد ردّاً مجهولاً — الشريك وعرض السعر يُولدان معاً بمعاملةٍ واحدة
+    لا تتجزّأ، مواصفة #147 (المرحلة 3أ)، قرارات المالك المقفلة:
+
+    - **لا شريك بلا عرض ولا عرض بلا شريك** — الاثنان يُكتبان معاً أو لا شيء.
+    - **لا `PurchaseRFQRecipient` يُنشأ هنا**: لم نُرسل لهذا الشخص، وكتابةُ
+      واحدةٍ كانت تكذب في سجل التدقيق («أُرسل إليه» لم يحدث) وتصطدم بقيد
+      `uniq(rfq, supplier)` لو صار الشريكُ نفسُه مستقبِلاً مسمّىً لاحقاً.
+      `SupplierQuotation.rfq` وحده كافٍ رابطاً — نفس منطق مصفوفة `comparison/`.
+    - **سطرٌ يتيم (`rfq_line=None` بعد حذف بند الطلبية) يُتجاوَز** — الصفّ
+      الأصل يبقيه ظاهراً للقراءة، والعرض المولود هنا لا يحمله.
+    """
+    from logistics.models import (
+        PurchaseRFQ, PublicSupplierQuoteRequest, SupplierQuotation,
+        SupplierQuotationLine,
+    )
+    from partners.models import Partner
+
+    locked = PublicSupplierQuoteRequest.objects.select_for_update().get(pk=request_row.pk)
+    if locked.status != PublicSupplierQuoteRequest.STATUS_PENDING:
+        raise ValidationError('هذا الردّ سبق أن قُرِّر بشأنه.')
+
+    rfq = PurchaseRFQ.objects.select_for_update().get(pk=locked.rfq_id)
+
+    if partner is not None:
+        if partner.tenant_id != rfq.tenant_id:
+            raise ValidationError('الشريك لا يتبع الشركة الحالية.')
+        supplier = partner
+    else:
+        data = partner_data or {}
+        supplier = Partner.objects.create(
+            tenant=rfq.tenant,
+            name=str(data.get('name') or locked.supplier_name),
+            partner_type='Supplier',
+            email=data.get('email') or locked.supplier_email,
+            phone=data.get('phone') or locked.supplier_phone,
+        )
+
+    from tenants.models import Currency
+
+    base_currency = (
+        Currency.objects.filter(IsBaseCurrency=True).first()
+        or Currency.objects.order_by('CurrencyID').first()
+    )
+    if base_currency is None:
+        raise ValidationError('لا توجد عملة معرّفة للشركة.')
+
+    currency = locked.currency or base_currency
+    if currency.pk == base_currency.pk:
+        exchange_rate = Decimal('1')
+    else:
+        from accounting.services import get_exchange_rate
+
+        exchange_rate = get_exchange_rate(rfq.tenant_id, currency.pk, base_currency.pk)
+
+    from accounting.services import next_document_number
+
+    prefix = 'IQ' if rfq.scope == PurchaseRFQ.SCOPE_IMPORT else 'PQ'
+    sequence = next_document_number(rfq.tenant_id, f'supplier_quotation_{rfq.scope}')
+    quotation = SupplierQuotation.objects.create(
+        tenant=rfq.tenant,
+        rfq=rfq,
+        scope=rfq.scope,
+        supplier=supplier,
+        quotation_number=f'{prefix}-{sequence:04d}',
+        quotation_date=timezone.localdate(),
+        currency=currency,
+        exchange_rate=exchange_rate,
+        status=SupplierQuotation.STATUS_SENT,
+        order_name=rfq.rfq_number or '',
+        supplier_contact=locked.supplier_name,
+        # مواصفة #147: ختمٌ صريح — هذا المسارُ وحده «رابطٌ عامٌّ اعتُمد يدوياً».
+        entry_source=SupplierQuotation.ENTRY_PUBLIC_LINK,
+        general_note=locked.general_note,
+    )
+
+    subtotal = Decimal('0')
+    quotation_lines = []
+    for line in locked.lines.select_related('rfq_line__product').all():
+        if line.rfq_line_id is None:
+            continue  # سطرٌ يتيم — يُتجاوَز عند التحويل، يبقى ظاهراً على الصفّ.
+        line_total = (Decimal(line.rfq_line.quantity) * line.unit_price).quantize(DEC)
+        subtotal += line_total
+        quotation_lines.append(SupplierQuotationLine(
+            tenant=rfq.tenant,
+            quotation=quotation,
+            product=line.rfq_line.product,
+            rfq_line=line.rfq_line,
+            seq=line.seq_snapshot,
+            name_snapshot=line.name_snapshot,
+            unit_of_measure=line.rfq_line.unit_of_measure,
+            quantity=line.rfq_line.quantity,
+            unit_price=line.unit_price,
+            line_total=line_total,
+            supplier_note=line.supplier_note,
+        ))
+    SupplierQuotationLine.objects.bulk_create(quotation_lines)
+    quotation.subtotal = subtotal.quantize(DEC)
+    quotation.tax_amount = Decimal('0')
+    quotation.grand_total = subtotal.quantize(DEC)
+    quotation.save(update_fields=['subtotal', 'tax_amount', 'grand_total', 'updated_at'])
+
+    locked.status = PublicSupplierQuoteRequest.STATUS_APPROVED
+    locked.approved_partner = supplier
+    locked.approved_quotation = quotation
+    locked.decided_at = timezone.now()
+    locked.decided_by = user if user is not None and getattr(user, 'is_authenticated', False) else None
+    locked.save(update_fields=[
+        'status', 'approved_partner', 'approved_quotation', 'decided_at', 'decided_by',
+    ])
+
+    logger.info(
+        'purchase_rfq.public_quote_request.approve request=%s quotation=%s partner=%s',
+        locked.pk, quotation.pk, supplier.pk,
+    )
+    return quotation
+
+
+@transaction.atomic
+def reject_public_quote_request(request_row, *, user=None):
+    """يرفض ردّاً مجهولاً — الصفّ يبقى بحالة `rejected`، لا حذف ولا قائمة حظر
+    (مواصفة #147). التكرار من نفس المرسِل صفٌّ جديدٌ مستقلّ يُقرَّر بمفرده."""
+    from logistics.models import PublicSupplierQuoteRequest
+
+    locked = PublicSupplierQuoteRequest.objects.select_for_update().get(pk=request_row.pk)
+    if locked.status != PublicSupplierQuoteRequest.STATUS_PENDING:
+        raise ValidationError('هذا الردّ سبق أن قُرِّر بشأنه.')
+    locked.status = PublicSupplierQuoteRequest.STATUS_REJECTED
+    locked.decided_at = timezone.now()
+    locked.decided_by = user if user is not None and getattr(user, 'is_authenticated', False) else None
+    locked.save(update_fields=['status', 'decided_at', 'decided_by'])
+    return locked
+
+
+def public_rfq_share_expiry_days(rfq) -> int:
+    """أيّامُ صلاحيةِ رابطٍ عامّ جديد على هذه الطلبية — مواصفة #147 (المرحلة 3ب).
+
+    **تتّبع مهلة الردّ لا الشهر الافتراضي**: رابطٌ يكتب لا يُقرأ مرّةً — يبقى
+    متداولاً بين غرباء طالما الطلبية مفتوحة، فمدّته الطبيعية هي مدّة الطلبية
+    نفسها لا ثلاثين يوماً ثابتة.
+
+    **التقريب لأعلى إلى أقرب مدّةٍ مسموحة** (`docshare.services
+    .ALLOWED_EXPIRY_DAYS`) لا القيمة الحرفية بين التاريخين: ذلك الثابت مجموعةٌ
+    مغلقة (٧/٣٠/٩٠) يفرضها `create_share` على كل رابطٍ في المنصّة — قيمةٌ
+    خارجها تسقط صامتةً إلى الشهر الافتراضي (`days not in ALLOWED_EXPIRY_DAYS`)،
+    فرابطٌ مهلته خمسة أيام كان سيُمنح شهراً كاملاً بدل أن يُقرَّب لأقرب مدّةٍ
+    فعلية تغطّيه. **تنازلٌ واعٍ**: المهلة المعروضة قد تتجاوز الموعد الفعلي
+    ببضعة أيام (تُقرَّب لأعلى)، أو تقصر عنه إن تجاوزت أقصى مدّةٍ مسموحة (٩٠
+    يوماً) — الموردون يتفاوتون في الردّ، وتمديد الرابط يدوياً يبقى ممكناً.
+    """
+    from docshare.services import ALLOWED_EXPIRY_DAYS, DEFAULT_EXPIRY_DAYS
+
+    if not rfq.reply_deadline:
+        return DEFAULT_EXPIRY_DAYS
+    needed = (rfq.reply_deadline - timezone.localdate()).days
+    if needed <= 0:
+        return DEFAULT_EXPIRY_DAYS
+    for allowed in sorted(ALLOWED_EXPIRY_DAYS):
+        if needed <= allowed:
+            return allowed
+    return max(ALLOWED_EXPIRY_DAYS)
+
+
+def revoke_live_public_rfq_share(tenant, rfq, *, user=None, request=None):
+    """يُبطل الرابط العامّ **الحيّ** لهذه الطلبية إن وُجد — مواصفة #147 (المرحلة
+    3ب، البند 6): ترسيةٌ أو إلغاءٌ **يُغلقان الرابط تلقائياً** فوق رفض
+    `docshare.documents.purchase_docs._rfq_quote_is_open` نفسِه للإرسال —
+    حِزامٌ وحمّالة: الصفّ يقرأ الآن ميّتاً (`is_revoked`) لا مرفوضاً بصمت عند
+    كل محاولة إرسال. الصفّ **يبقى** — `revoke_share` لا تحذف أبداً.
+
+    نفس الاستدعاء يخدم الإبطال اليدويّ («أوقف استقبال العروض») — يعيد الصفَّ
+    المُبطَل أو `None` إن لم يكن هناك رابطٌ عامٌّ حيٌّ أصلاً، كي يميّز المستدعي
+    (الفعل اليدويّ) بين إبطالٍ فعليّ ولا شيء ليُبطَل.
+    """
+    from docshare.models import DOC_PURCHASE_RFQ
+    from docshare import services as docshare_services
+
+    share = docshare_services.active_share(
+        tenant, DOC_PURCHASE_RFQ, rfq.pk, is_public=True,
+    )
+    if share is None:
+        return None
+    return docshare_services.revoke_share(share, user=user, request=request)
+
+
+@transaction.atomic
 def convert_purchase_order_to_invoice(order, *, user=None):
     """أنشئ فاتورة شراء محلية مسودة؛ لا قيد ولا حركة مخزون قبل الترحيل/الاستلام."""
     from logistics.models import PurchaseOrder

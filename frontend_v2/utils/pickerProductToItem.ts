@@ -55,6 +55,9 @@ export const mapPickerProductToItem = (
     supplierCodes: (p as any).supplier_codes_text || "",
     specifications: opts.extended ? (p as any).online_description || "" : "",
     imageUrls: opts.extended ? extractImageUrls(p) : [],
+    // #147 M2: صورة البراند المرجعية — تصل ضمن عقدَي المنتقي والكامل معاً،
+    // فمحرّر بند طلب عرض السعر (غير موسَّع) يحتاجها كما يحتاج الشاشة الكاملة.
+    imageUrl: (p as any).image_url || undefined,
     // T-SERIAL: يصلان من عقد `view=lookup` — الأول للبحث بالماسح، والثاني
     // ليعرف سطر الفاتورة أنه منتج يُتتبَّع بالوحدة.
     barcode: (p as any).barcode || "",

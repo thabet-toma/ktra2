@@ -158,6 +158,24 @@ export function shouldWarnCrossTabWrite(input: CrossTabWriteWarningInput): boole
   return input.isOtherTabLive;
 }
 
+/* ─────────────── فتح يتيمٍ فوق عملٍ غير محفوظ — تحذيرٌ أولاً (issue #146) ────── */
+
+export interface OrphanOpenGuardInput {
+  /** يوجد تعديلٌ مستخدمٍ غير محفوظ على الشاشة الآن — نفس علامة «لُمِس»
+   *  (`isTouched`) التي تقرر أصلاً هل تُكتب المسودّة الحالية. */
+  isTouched: boolean;
+}
+
+/**
+ * فتح مسودّةٍ يتيمة يستبدل حالة الشاشة كاملةً (`onRestore`) — فاستبدالها
+ * فوق عملٍ لُمِس بلا تحذير يمحو ذلك العمل صامتاً، وهو بالضبط العطب الذي منعته
+ * قواعد issue #118–#121 عن الإغلاق والحذف. القرار وحيدٌ هو «لُمِس أم لا»، بلا
+ * فحص محتوى إضافي — نفس بساطة `shouldPersistDraft`.
+ */
+export function wouldOpeningOrphanClobberUnsavedWork(input: OrphanOpenGuardInput): boolean {
+  return input.isTouched === true;
+}
+
 /* ───────────────────────── متى تُمحى — ٣٠ يوماً (§٥) ──────────────────────── */
 
 export const DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;

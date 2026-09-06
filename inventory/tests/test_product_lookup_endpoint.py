@@ -158,3 +158,75 @@ class OfficeBookkeepingServiceInvoiceHttpTest(APITestCase):
             journal_id=journal_id, account=fees_4103, credit=Decimal("500.00"),
         ).exists()
         self.assertTrue(credited, "القيد لم يُدائن 4103 بمبلغ الخدمة المختارة")
+
+
+class ProductReferenceImageContractTest(APITestCase):
+    """#147 — صورةٌ مرجعيةٌ واحدة للبراند: تصل في عقد المنتقي وتُكتب من العقد الكامل.
+
+    الصورةُ سببُ وجودها المورّدُ الذي يُسعّر على رابط الطلبية العامّ: يقرأ اسماً
+    وكميّةً ولا يعرف ما هو الصنف. وصفحةُ الرابط ومحرِّرُ بند الطلبية كلاهما يقرأ
+    المنتجات من **عقد المنتقي** لا من العقد الكامل — فغيابُ الحقل هناك يعني
+    ميزةً ميّتةً وإن كُتب الحقل في القاعدة.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        # قالب `general` لا `accounting_firm`: الأخير يُقنّع `/api/inventory/`
+        # كاملةً (وهو سببُ وجود نقطة المنتقي المستقلة أصلاً)، وجولةُ الكتابة
+        # أدناه تمرّ من العقد الكامل هناك.
+        cls.tenant, cls.owner, cls.ils = _make_tenant(
+            "lookup-image", template="general")
+        cls.with_image = Product.objects.create(
+            tenant=cls.tenant, sku="IMG-1", name_ar="صنفٌ له صورة",
+            image_url="https://example.test/a.jpg",
+        )
+        cls.without_image = Product.objects.create(
+            tenant=cls.tenant, sku="IMG-0", name_ar="صنفٌ بلا صورة",
+        )
+
+    def _auth(self):
+        self.client.force_authenticate(user=self.owner)
+        return {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def _lookup_row(self, product_id):
+        res = self.client.get(LOOKUP_URL, **self._auth())
+        self.assertEqual(res.status_code, 200, res.content)
+        return next(row for row in res.json() if row["id"] == product_id)
+
+    def test_picker_contract_carries_the_stored_image(self):
+        row = self._lookup_row(self.with_image.pk)
+        self.assertEqual(row["image_url"], "https://example.test/a.jpg")
+
+    def test_product_without_image_reports_empty_string_not_missing_and_not_null(self):
+        """شكلٌ واحدٌ تتعامل معه الواجهة: `""` لا مفتاحٌ غائبٌ ولا `null`.
+
+        ثلاثةُ أشكالٍ لغيابِ الصورة تعني ثلاثةَ فحوصٍ في كلّ مستهلك، وواحدٌ
+        منها سيُنسى.
+        """
+        row = self._lookup_row(self.without_image.pk)
+        self.assertIn("image_url", row)
+        self.assertEqual(row["image_url"], "")
+
+    def test_image_round_trips_through_the_full_product_contract(self):
+        """كرت الصنف يكتبها والعقد الكامل يعيدها — وإلّا فالرفع بلا حفظ."""
+        auth = self._auth()
+        res = self.client.patch(
+            f"{INVENTORY_PRODUCTS_URL}{self.without_image.pk}/",
+            {"image_url": "https://example.test/b.png"}, format="json", **auth,
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+
+        self.without_image.refresh_from_db()
+        self.assertEqual(self.without_image.image_url, "https://example.test/b.png")
+        self.assertEqual(self._lookup_row(self.without_image.pk)["image_url"],
+                         "https://example.test/b.png")
+
+    def test_another_company_never_sees_this_image(self):
+        other_tenant, other_owner, _ = _make_tenant(
+            "lookup-image-other", template="general")
+        self.client.force_authenticate(user=other_owner)
+        res = self.client.get(
+            LOOKUP_URL, **{"HTTP_X_TENANT_ID": str(other_tenant.TenantID)})
+        self.assertEqual(res.status_code, 200, res.content)
+        urls = {row.get("image_url") for row in res.json()}
+        self.assertNotIn("https://example.test/a.jpg", urls)

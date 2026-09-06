@@ -78,13 +78,22 @@ def public_url(share: DocumentShare) -> str:
     return f"{base}{path}/{share.token}"
 
 
-def active_share(tenant, doc_type: str, doc_id: int):
-    """أحدث رابط حيّ لهذا المستند، أو `None`."""
+def active_share(tenant, doc_type: str, doc_id: int, *, is_public: bool = False):
+    """أحدث رابط حيّ لهذا المستند **ضمن هذا الجمهور**، أو `None`.
+
+    **الجمهور جزءٌ من الاستعلام لا فلترةٌ لاحقة** (مواصفة #147، إصلاح عطبٍ
+    حيّ): بلا هذا كانت تُعاد أحدث رابطٍ حيّ للمستند بصرف النظر عن جمهوره —
+    طلبيةٌ أُرسلت لموردٍ مسمّى (`dedupe=False`)، ثم طُلب لها رابطٌ عامّ
+    (`create_share(dedupe=True)`)، كانت تُعيد رابط ذلك المورّد الخاص نفسه.
+    المالك يوزّعه للعموم، وصفحة التسعير المعبَّأة (`_rfq_quote_prefill`) تُظهر
+    أسعار ذلك المورّد لكلّ من يفتحه — بالضبط التسريب الذي بُنيت هذه الميزة
+    لمنعه.
+    """
     now = timezone.now()
     return (
         DocumentShare.objects
         .filter(
-            tenant=tenant, doc_type=doc_type, doc_id=doc_id,
+            tenant=tenant, doc_type=doc_type, doc_id=doc_id, is_public=is_public,
             revoked_at__isnull=True, expires_at__gt=now,
         )
         .order_by("-created_at", "-id")
@@ -94,7 +103,8 @@ def active_share(tenant, doc_type: str, doc_id: int):
 
 @transaction.atomic
 def create_share(tenant, doc_type: str, doc_id: int, *, days: int = DEFAULT_EXPIRY_DAYS,
-                 user=None, request=None, dedupe: bool = True) -> DocumentShare:
+                 user=None, request=None, dedupe: bool = True,
+                 is_public: bool = False) -> DocumentShare:
     """ينشئ رابطاً جديداً — أو يعيد الحيّ القائم بدل إغراق المستند بروابط.
 
     ولعرض سعر ما زال **مسودة**: يَنقله إلى «أُرسل». بدون ذلك يضغط الزبون
@@ -106,6 +116,10 @@ def create_share(tenant, doc_type: str, doc_id: int, *, days: int = DEFAULT_EXPI
     المورّد الثاني رابط الأوّل نفسه. `DocumentShare` بلا قيد فرادة على
     `(tenant, doc_type, doc_id)` أصلاً (موثَّقٌ في `models.py`)، فتعدّد الروابط
     لمستندٍ واحد مسموحٌ بنيوياً؛ هذا العَلَم يقول متى يُستعمل ذلك التعدّد.
+
+    **`is_public`** (مواصفة #147، المرحلة 3ب): جمهورُ الرابط — راية صريحة لا
+    استنتاج. `dedupe=True` يدوّر **ضمن هذا الجمهور وحده** (`active_share`
+    أعلاه) — رابطٌ خاصٌّ قائمٌ لا يُعاد أبداً حين يُطلب رابطٌ عامّ، ولا العكس.
     """
     if doc_type not in DOC_TYPES:
         raise ShareNotFound(doc_type)
@@ -117,7 +131,7 @@ def create_share(tenant, doc_type: str, doc_id: int, *, days: int = DEFAULT_EXPI
         raise ShareNotFound(f"{doc_type}#{doc_id}")
 
     if dedupe:
-        existing = active_share(tenant, doc_type, doc_id)
+        existing = active_share(tenant, doc_type, doc_id, is_public=is_public)
         if existing is not None:
             return existing
 
@@ -128,6 +142,7 @@ def create_share(tenant, doc_type: str, doc_id: int, *, days: int = DEFAULT_EXPI
         token=secrets.token_urlsafe(TOKEN_BYTES),
         expires_at=timezone.now() + timedelta(days=days),
         created_by=user if (user and user.is_authenticated) else None,
+        is_public=is_public,
     )
 
     # خطافُ «ما معنى أن يُشارَك هذا النوع؟» — يعرفه النوع لا هذه الدالّة.

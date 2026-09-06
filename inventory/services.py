@@ -354,38 +354,11 @@ def resolve_family_field(product, field_name: str):
 # قائم (لا بديل create_product_with_family الذي يصنع أباً جديداً).
 # ──────────────────────────────────────────────────────────────────────────
 
-_TATWEEL = 'ـ'
-# التشكيل: الفتحة/الضمة/الكسرة/السكون/الشدة/التنوين (U+064B–U+0652) والألف
-# الفوقية (U+0670).
-_ARABIC_DIACRITICS_RE = re.compile(r'[ً-ْٰ]')
-# صور الألف/الهمزة توحَّد إلى ألفٍ عارية، والألف المقصورة إلى ياء، والتاء
-# المربوطة إلى هاء — تطبيعٌ إملائي معياري (نمط مرشِّح Elasticsearch العربي).
-_ARABIC_NORMALIZE_MAP = str.maketrans({
-    'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ٱ': 'ا',
-    'ى': 'ي',
-    'ة': 'ه',
-})
-
-
-def normalize_product_name(name: str | None) -> str:
-    """اسمٌ مُطبَّعٌ لاقتراح «هذا موجود» عند تسجيل منتج (#21).
-
-    يطوي المسافات المزدوجة (نمط `norm_name` في `import_jarabaa.py`)، يُسقط
-    التطويل والتشكيل، ويوحّد صور الألف/الهمزة والألف المقصورة والتاء المربوطة
-    — يمتدّ نمط `_normalize_account_name` (accounting/services.py) بخطوةٍ
-    عربية إضافية، لا يستبدله.
-
-    **عمداً بلا مطابقة صوتية.** الحروف الساكنة لا تُمسّ: «سامسونج» تبقى
-    مختلفة عن «سامسونغ» بعد هذا التطبيع لأن الفرق حرفٌ حقيقي (ج مقابل غ) لا
-    تنويع كتابة — توحيدهما بقاعدة أفضفض كان يُنتج اقتراحاً خاطئاً بلا أساس.
-    """
-    if not name:
-        return ''
-    text = str(name).replace(_TATWEEL, '')
-    text = _ARABIC_DIACRITICS_RE.sub('', text)
-    text = text.translate(_ARABIC_NORMALIZE_MAP)
-    text = ' '.join(text.split())
-    return text.casefold()
+# مواصفة #147 (المرحلة 3أ): البدائيّة انتقلت إلى `core.text` — `partners`
+# تحتاج نفس التطبيع لمطابقة موردٍ مجهول، واستيرادها من `inventory` مباشرةً
+# حافّة اعتماديةٍ سيّئة. الاسم والسلوك هنا **حرفيّان** كما كانا، فلا نقطة
+# استدعاء تتغيّر.
+from core.text import normalize_arabic_text as normalize_product_name  # noqa: E402,F401
 
 
 def build_normalized_name_index(queryset, *, fields=('name_ar', 'name_en')) -> dict:

@@ -534,6 +534,60 @@ class PurchaseRFQShareWiringTest(PurchaseRFQAPITestBase):
         self.assertIsNotNone(recipient['share_url'])
 
 
+class PurchaseRFQPublicShareVisibilityTest(PurchaseRFQAPITestBase):
+    """مواصفة #147 (خريطة #138، البند 27): الطلبية تُبلّغ عن رابطها العامّ
+    الحيّ بلا كشف التوكن — التذكير بنسيان رابطٍ مفتوح يحتاج هذا الحقل."""
+
+    def test_detail_reports_no_live_public_link_by_default(self):
+        data = self.create_rfq()
+        detail = self.client.get(f"/api/logistics/purchase-rfqs/{data['id']}/")
+        self.assertEqual(detail.status_code, 200, detail.content)
+        self.assertFalse(detail.data['public_share_is_live'])
+        self.assertIsNone(detail.data['public_share_expires_at'])
+
+    def test_public_link_action_makes_detail_and_list_report_it_live(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+
+        link = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/public-link/')
+        self.assertEqual(link.status_code, 200, link.content)
+        self.assertNotIn('token', link.data)
+
+        detail = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/')
+        self.assertTrue(detail.data['public_share_is_live'])
+        self.assertIsNotNone(detail.data['public_share_expires_at'])
+
+        # نفس الحقل عبر القائمة — المسار الذي يبني الخريطة مرّةً للشركة كلّها
+        # لا استعلاماً لكل صفّ (`PurchaseRFQViewSet._public_shares_map`).
+        listing = self.client.get('/api/logistics/purchase-rfqs/', {'scope': 'local'})
+        self.assertEqual(listing.status_code, 200, listing.content)
+        row = next(r for r in listing.data if r['id'] == rfq_id)
+        self.assertTrue(row['public_share_is_live'])
+
+    def test_stop_public_link_makes_it_report_dead_again(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/public-link/')
+
+        stop = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/stop-public-link/')
+        self.assertEqual(stop.status_code, 200, stop.content)
+        self.assertFalse(stop.data['public_share_is_live'])
+
+        detail = self.client.get(f'/api/logistics/purchase-rfqs/{rfq_id}/')
+        self.assertFalse(detail.data['public_share_is_live'])
+        self.assertIsNone(detail.data['public_share_expires_at'])
+
+    def test_stop_public_link_with_no_live_link_returns_400(self):
+        data = self.create_rfq()
+        rfq_id = data['id']
+        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+
+        stop = self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/stop-public-link/')
+        self.assertEqual(stop.status_code, 400, stop.content)
+
+
 class SupplierQuotationRfqLinkTest(PurchaseRFQAPITestBase):
     def test_supplier_quotation_optional_rfq_field_defaults_to_none(self):
         """SupplierQuotation.rfq اختياري — عروضٌ مستقلّة قائمة تبقى صحيحة بلا ربط."""
@@ -847,3 +901,274 @@ class SupplierQuotationBornFromRfqGuardsTest(PurchaseRFQAPITestBase):
         ))
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn('rfq_recipient', response.data)
+
+
+class PublicSupplierQuoteRequestTest(PurchaseRFQAPITestBase):
+    """مواصفة #147 (المرحلة 3أ) — مساحة انتظار ردود الروابط العامة والاعتماد.
+
+    التسجيل يُستدعى مباشرةً (`record_public_quote_request`) — سطح الاستقبال
+    العام نفسه مواصفةٌ لاحقة، هذه المرحلة تبني الوجهة والاعتماد فقط.
+    """
+
+    def send_rfq(self):
+        data = self.create_rfq()
+        send = self.client.post(f"/api/logistics/purchase-rfqs/{data['id']}/send/")
+        self.assertEqual(send.status_code, 200, send.content)
+        return PurchaseRFQ.objects.get(pk=data['id'])
+
+    def test_recording_a_public_request_creates_pending_row_with_no_partner_or_quotation(self):
+        from logistics.services import record_public_quote_request
+        from logistics.models import PublicSupplierQuoteRequest
+
+        rfq = self.send_rfq()
+        line = rfq.lines.get()
+        request_row = record_public_quote_request(
+            rfq, name='غريبٌ عن السوق', email='stranger@example.com',
+            prices={line.id: Decimal('12')},
+        )
+        self.assertEqual(request_row.status, PublicSupplierQuoteRequest.STATUS_PENDING)
+        self.assertEqual(Partner.objects.filter(name='غريبٌ عن السوق').count(), 0)
+        self.assertEqual(SupplierQuotation.objects.filter(rfq=rfq).count(), 0)
+        self.assertEqual(request_row.lines.count(), 1)
+
+    def test_second_submission_appends_a_second_row_and_leaves_the_first_untouched(self):
+        from logistics.services import record_public_quote_request
+        from logistics.models import PublicSupplierQuoteRequest
+
+        rfq = self.send_rfq()
+        line = rfq.lines.get()
+        first = record_public_quote_request(
+            rfq, name='الأول', email='first@example.com',
+            prices={line.id: Decimal('10')},
+        )
+        second = record_public_quote_request(
+            rfq, name='الثاني', email='second@example.com',
+            prices={line.id: Decimal('15')},
+        )
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertEqual(PublicSupplierQuoteRequest.objects.filter(rfq=rfq).count(), 2)
+        first.refresh_from_db()
+        self.assertEqual(first.supplier_name, 'الأول')
+        self.assertEqual(first.lines.get().unit_price, Decimal('10.0000'))
+
+    def test_partial_pricing_is_accepted_but_zero_priced_lines_is_rejected(self):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from logistics.services import record_public_quote_request
+
+        data = self.create_rfq(lines=[
+            {'product': self.product.id, 'seq': 1, 'quantity': '1.000'},
+            {'name_snapshot': 'صنف ثانٍ', 'seq': 2, 'quantity': '2.000'},
+        ])
+        rfq_id = data['id']
+        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+        rfq = PurchaseRFQ.objects.get(pk=rfq_id)
+        lines = list(rfq.lines.order_by('seq'))
+
+        request_row = record_public_quote_request(
+            rfq, name='مورد جزئي', email='partial@example.com',
+            prices={lines[0].id: Decimal('5')},
+        )
+        self.assertEqual(request_row.lines.count(), 1)
+
+        with self.assertRaises(DjangoValidationError):
+            record_public_quote_request(
+                rfq, name='بلا سعر', email='none@example.com', prices={},
+            )
+
+    def test_recording_on_a_non_sent_rfq_is_rejected(self):
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from logistics.services import record_public_quote_request
+
+        data = self.create_rfq()
+        rfq = PurchaseRFQ.objects.get(pk=data['id'])
+        line = rfq.lines.get()
+        with self.assertRaises(DjangoValidationError):
+            record_public_quote_request(
+                rfq, name='مبكر', email='early@example.com',
+                prices={line.id: Decimal('5')},
+            )
+
+    def test_approval_creates_partner_and_quotation_together_and_sets_public_link_entry_source(self):
+        from logistics.services import record_public_quote_request
+
+        rfq = self.send_rfq()
+        line = rfq.lines.get()
+        request_row = record_public_quote_request(
+            rfq, name='مورد جديد', email='new-sup@example.com', phone='0590000000',
+            prices={line.id: Decimal('20')},
+        )
+        approve = self.client.post(
+            f'/api/logistics/public-supplier-quote-requests/{request_row.id}/approve/',
+        )
+        self.assertEqual(approve.status_code, 200, approve.content)
+        request_row.refresh_from_db()
+        self.assertEqual(request_row.status, 'approved')
+        self.assertIsNotNone(request_row.approved_partner_id)
+        self.assertIsNotNone(request_row.approved_quotation_id)
+        quotation = SupplierQuotation.objects.get(pk=request_row.approved_quotation_id)
+        self.assertEqual(quotation.entry_source, SupplierQuotation.ENTRY_PUBLIC_LINK)
+        self.assertEqual(quotation.supplier_id, request_row.approved_partner_id)
+        self.assertEqual(quotation.rfq_id, rfq.id)
+        partner = Partner.objects.get(pk=request_row.approved_partner_id)
+        self.assertEqual(partner.name, 'مورد جديد')
+        self.assertEqual(partner.email, 'new-sup@example.com')
+
+    def test_approving_into_an_existing_partner_reuses_it(self):
+        from logistics.services import record_public_quote_request
+
+        rfq = self.send_rfq()
+        line = rfq.lines.get()
+        request_row = record_public_quote_request(
+            rfq, name=self.supplier_a.name, email='someone@example.com',
+            prices={line.id: Decimal('9')},
+        )
+        before_count = Partner.objects.filter(tenant=self.tenant).count()
+        approve = self.client.post(
+            f'/api/logistics/public-supplier-quote-requests/{request_row.id}/approve/',
+            {'partner': self.supplier_a.id}, format='json',
+        )
+        self.assertEqual(approve.status_code, 200, approve.content)
+        self.assertEqual(Partner.objects.filter(tenant=self.tenant).count(), before_count)
+        request_row.refresh_from_db()
+        self.assertEqual(request_row.approved_partner_id, self.supplier_a.id)
+
+    def test_approval_creates_no_recipient(self):
+        from logistics.services import record_public_quote_request
+
+        rfq = self.send_rfq()
+        line = rfq.lines.get()
+        request_row = record_public_quote_request(
+            rfq, name='بلا مستقبِل', email='no-recipient@example.com',
+            prices={line.id: Decimal('7')},
+        )
+        before = PurchaseRFQRecipient.objects.filter(rfq=rfq).count()
+        approve = self.client.post(
+            f'/api/logistics/public-supplier-quote-requests/{request_row.id}/approve/',
+        )
+        self.assertEqual(approve.status_code, 200, approve.content)
+        self.assertEqual(PurchaseRFQRecipient.objects.filter(rfq=rfq).count(), before)
+
+    def test_orphaned_line_is_skipped_at_approval_but_stays_readable(self):
+        from logistics.services import record_public_quote_request
+
+        data = self.create_rfq(lines=[
+            {'product': self.product.id, 'seq': 1, 'quantity': '1.000'},
+            {'name_snapshot': 'صنف يُحذف', 'seq': 2, 'quantity': '1.000'},
+        ])
+        rfq_id = data['id']
+        self.client.post(f'/api/logistics/purchase-rfqs/{rfq_id}/send/')
+        rfq = PurchaseRFQ.objects.get(pk=rfq_id)
+        lines = list(rfq.lines.order_by('seq'))
+        request_row = record_public_quote_request(
+            rfq, name='مورد بندين', email='two-lines@example.com',
+            prices={lines[0].id: Decimal('3'), lines[1].id: Decimal('4')},
+        )
+        lines[1].delete()
+
+        detail = self.client.get(
+            f'/api/logistics/public-supplier-quote-requests/{request_row.id}/',
+        )
+        self.assertEqual(detail.status_code, 200, detail.content)
+        self.assertEqual(len(detail.data['lines']), 2)
+
+        approve = self.client.post(
+            f'/api/logistics/public-supplier-quote-requests/{request_row.id}/approve/',
+        )
+        self.assertEqual(approve.status_code, 200, approve.content)
+        quotation = SupplierQuotation.objects.get(pk=approve.data['quotation_id'])
+        self.assertEqual(quotation.lines.count(), 1)
+
+    def test_rejection_keeps_the_row_with_status_rejected(self):
+        from logistics.services import record_public_quote_request
+
+        rfq = self.send_rfq()
+        line = rfq.lines.get()
+        request_row = record_public_quote_request(
+            rfq, name='مرفوض', email='rejected@example.com',
+            prices={line.id: Decimal('1')},
+        )
+        reject = self.client.post(
+            f'/api/logistics/public-supplier-quote-requests/{request_row.id}/reject/',
+        )
+        self.assertEqual(reject.status_code, 200, reject.content)
+        request_row.refresh_from_db()
+        self.assertEqual(request_row.status, 'rejected')
+        self.assertIsNotNone(request_row.decided_at)
+
+    def test_approving_an_already_decided_row_is_refused(self):
+        from logistics.services import record_public_quote_request
+
+        rfq = self.send_rfq()
+        line = rfq.lines.get()
+        request_row = record_public_quote_request(
+            rfq, name='مقرَّر', email='decided@example.com',
+            prices={line.id: Decimal('2')},
+        )
+        first_approve = self.client.post(
+            f'/api/logistics/public-supplier-quote-requests/{request_row.id}/approve/',
+        )
+        self.assertEqual(first_approve.status_code, 200, first_approve.content)
+        second_approve = self.client.post(
+            f'/api/logistics/public-supplier-quote-requests/{request_row.id}/approve/',
+        )
+        self.assertEqual(second_approve.status_code, 400, second_approve.content)
+
+    def test_approved_quotation_is_reachable_from_the_rfq_for_comparison(self):
+        from logistics.services import record_public_quote_request
+
+        rfq = self.send_rfq()
+        line = rfq.lines.get()
+        request_row = record_public_quote_request(
+            rfq, name='للمقارنة', email='compare@example.com',
+            prices={line.id: Decimal('6')},
+        )
+        approve = self.client.post(
+            f'/api/logistics/public-supplier-quote-requests/{request_row.id}/approve/',
+        )
+        self.assertEqual(approve.status_code, 200, approve.content)
+        self.assertIn(
+            approve.data['quotation_id'],
+            list(rfq.quotations.values_list('id', flat=True)),
+        )
+
+    def test_approved_public_quotation_enters_the_comparison_matrix(self):
+        """مواصفة #147 المرحلة 5أ (البند 9): عرضٌ وُلد من رابطٍ عامٍّ لا
+        `PurchaseRFQRecipient` له (#144) — يجب أن يظهر في `/comparison/`
+        كأيّ عمود آخر، بشارة `entry_source_display` وحدها تفرّقه."""
+        from logistics.services import record_public_quote_request
+        from logistics.models import SupplierQuotation
+
+        rfq = self.send_rfq()
+        line = rfq.lines.get()
+        request_row = record_public_quote_request(
+            rfq, name='رابطٌ عام', email='public-link@example.com',
+            prices={line.id: Decimal('11')},
+        )
+        approve = self.client.post(
+            f'/api/logistics/public-supplier-quote-requests/{request_row.id}/approve/',
+        )
+        self.assertEqual(approve.status_code, 200, approve.content)
+
+        comparison = self.client.get(f'/api/logistics/purchase-rfqs/{rfq.id}/comparison/')
+        self.assertEqual(comparison.status_code, 200, comparison.content)
+        rows = {row['quotation_id']: row for row in comparison.data['suppliers']}
+        self.assertIn(approve.data['quotation_id'], rows)
+        row = rows[approve.data['quotation_id']]
+        self.assertEqual(row['entry_source'], SupplierQuotation.ENTRY_PUBLIC_LINK)
+        self.assertEqual(row['entry_source_display'], 'من رابط عام')
+        self.assertEqual(row['prices'][str(line.id)], '11.0000')
+
+    def test_list_endpoint_is_tenant_isolated(self):
+        from logistics.services import record_public_quote_request
+
+        rfq = self.send_rfq()
+        line = rfq.lines.get()
+        record_public_quote_request(
+            rfq, name='محليّ', email='local@example.com',
+            prices={line.id: Decimal('8')},
+        )
+        self.client.credentials(HTTP_X_TENANT_ID=str(self.other_tenant.TenantID))
+        listing = self.client.get('/api/logistics/public-supplier-quote-requests/')
+        self.assertEqual(listing.status_code, 200, listing.content)
+        rows = listing.data['results'] if isinstance(listing.data, dict) else listing.data
+        self.assertEqual(len(rows), 0)

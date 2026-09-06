@@ -148,6 +148,85 @@ def test_sales_invoice_cannot_be_shared_as_a_local_purchase(env, invoice):
         services.create_share(env["tenant"], "local_purchase_invoice", invoice.pk)
 
 
+def test_estimated_price_is_still_deferred_on_the_public_path(
+    client, env, purchase_rfq,
+):
+    """مواصفة #147 (المرحلة 3ب): نفس الحارس على الرابط **العامّ** — الباني
+    واحدٌ لكلا الجمهورين، فالتحميل المحدود يسري عليهما معاً بلا تفرّع."""
+    from docshare import services
+    from docshare.documents import DOC_TYPES
+    from docshare.documents.purchase_docs import build_purchase_rfq
+    from docshare.models import DOC_PURCHASE_RFQ
+
+    share = services.create_share(
+        env["tenant"], DOC_PURCHASE_RFQ, purchase_rfq.pk, is_public=True,
+    )
+    html = client.get(f"/s/{share.token}").content.decode("utf-8")
+    from docshare.tests.conftest import SECRET_ESTIMATED_PRICE
+
+    for form in (str(SECRET_ESTIMATED_PRICE), f"{SECRET_ESTIMATED_PRICE:,}"):
+        assert form not in html, f"السعر التقديري ظهر على الرابط العامّ بالصورة «{form}»"
+
+    document = DOC_TYPES["purchase_rfq"]["loader"](purchase_rfq.tenant_id, purchase_rfq.pk)
+    line = document.lines.only("id").first()
+    deferred = line.get_deferred_fields()
+    assert "estimated_price" in deferred
+    build_purchase_rfq(document)  # لا يرمي، ولا يستدعي `estimated_price` إطلاقاً
+
+
+def test_product_image_reaches_the_public_rfq_payload(env, purchase_rfq):
+    """مواصفة #147 (المرحلة 3ب): الصورة تصل الحمولة — لا `estimated_price`."""
+    from docshare.documents import DOC_TYPES
+
+    product = purchase_rfq.lines.first().product
+    product.image_url = "https://cdn.example/products/shared-item.png"
+    product.save(update_fields=["image_url"])
+
+    document = DOC_TYPES["purchase_rfq"]["loader"](purchase_rfq.tenant_id, purchase_rfq.pk)
+    payload = DOC_TYPES["purchase_rfq"]["builder"](document)
+    line = payload["lines"][0]
+    assert line["image_url"] == product.image_url
+
+
+def test_public_rfq_page_shows_no_trace_of_other_respondents_not_even_a_count(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """مواصفة #147 (المرحلة 3ب): لا أسعار غيرك، ولا أسماؤهم، **ولا حتى عددهم**
+    — العددُ وحده معلومةُ تفاوضٍ («كم عرضاً وصل؟»). البناء هنا يضمن ذلك بنيوياً:
+    `build_purchase_rfq` لا يستعلم `PublicSupplierQuoteRequest` إطلاقاً (يحرسه
+    اختبار القائمة البيضاء أعلاه)، وهذا الاختبار يثبته بالقيم على صفحةٍ فعلية.
+    """
+    from docshare import services
+    from docshare.models import DOC_PURCHASE_RFQ
+    from logistics.services import record_public_quote_request, submit_rfq_supplier_quote
+
+    line_id = purchase_rfq.lines.first().pk
+    submit_rfq_supplier_quote(
+        rfq_recipient, name="مصنع المشاركة السرّي", prices={line_id: "77.77"},
+    )
+    record_public_quote_request(
+        purchase_rfq, name="غريبٌ أوّل", email="stranger-one@example.com",
+        prices={line_id: "55.55"},
+    )
+    record_public_quote_request(
+        purchase_rfq, name="غريبٌ ثانٍ", email="stranger-two@example.com",
+        prices={line_id: "33.33"},
+    )
+
+    share = services.create_share(
+        env["tenant"], DOC_PURCHASE_RFQ, purchase_rfq.pk, is_public=True,
+    )
+    html = client.get(f"/s/{share.token}").content.decode("utf-8")
+
+    for leaked in (
+        "مصنع المشاركة السرّي", "غريبٌ أوّل", "غريبٌ ثانٍ",
+        "stranger-one@example.com", "stranger-two@example.com",
+    ):
+        assert leaked not in html, f"«{leaked}» ظهر على الرابط العامّ"
+    for price in ("77.77", "55.55", "33.33"):
+        assert price not in html, f"سعرٌ لمستجيبٍ آخر («{price}») ظهر على الرابط العامّ"
+
+
 def test_arabic_page_never_shows_an_english_status_label(client, env, deal, supplier_offer):
     """`LogisticsDeal` و`SupplierQuotation` يحملان `choices` إنجليزية.
 

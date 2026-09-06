@@ -350,8 +350,9 @@ class RfqComparisonTest(RfqAwardAndComparisonTestBase):
         self.assertEqual(set(supplier_row.keys()), {
             'supplier_id', 'supplier_name', 'quotation_id', 'quotation_number',
             'currency_code', 'exchange_rate', 'replied_at', 'prices', 'goods_total_base',
-            # ISSUE #122: شارةُ مصدر الإدخال.
-            'entry_source',
+            # ISSUE #122: شارةُ مصدر الإدخال. مواصفة #147 (المرحلة 5أ): النصّ
+            # العربيّ الجاهز بجانبها — الواجهة تقرأه بدل تكرار `choices` الحقل.
+            'entry_source', 'entry_source_display',
             # ISSUE #133 غ٣ (مواصفة #130 §١): ملاحظةُ المورّد على كلّ بند
             # (`notes`) وملاحظتُه العامة على الطلبية كلّها (`general_note`) —
             # سببُ وجود المصفوفة أصلاً «هذا ما عندي بدل ما طلبت». وتعليقنا

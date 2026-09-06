@@ -9,8 +9,7 @@ import {
   Share2,
   Info,
   X,
-  AlertTriangle,
-  Undo2,
+  Search,
 } from "lucide-react";
 import {
   listQuotationsPage,
@@ -21,13 +20,14 @@ import {
   convertQuotation,
   cancelQuotation,
   getCustomerPriceList,
+  getReservedStock,
   getSalesSettings,
   type SalesQuotationRow,
   type SalesQuotationDetail,
+  type ReservedStockRow,
 } from "../../services/salesApi";
 import { useToast } from "../../contexts/ToastContext";
 import { ConvertTargetDialog } from "./ConvertTargetDialog";
-import { clientLogger } from "../../services/logger";
 import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
 import { listPickerProducts } from "../../services/inventoryApi";
@@ -36,15 +36,25 @@ import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { formatTimeValue } from "../../utils/formatDate";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 import type { SqlProduct } from "../../types/inventory";
 import {
   useRecordNavigation,
   useKitKeymap,
+  KitAutocomplete,
 } from "../kit";
 import { ShareDocumentModal } from "../shared/ShareDocumentModal";
 import { ProductCardModal } from "../shared/ProductCardModal";
 import { SalesProductPickerModal, type SalesProductPickerItem, formatProductPrimaryName } from "./SalesProductPickerModal";
+import { ItemQuickEditModal } from "../items/ItemQuickEditModal";
+import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
+import { eventBus } from "../../utils/eventBus";
+import { usePriceVisibility } from "../../contexts/PriceVisibilityContext";
+import { getPickerFieldVisibility } from "../../utils/pickerFieldVisibility";
+import { stockBadgeFor } from "../../utils/stockBadge";
+import { availableForSale, buildReservationIndex, totalReserved } from "../../utils/reservedStock";
+import { openInNewTab } from "../../utils/openInNewTab";
+import { productProfilePath } from "../../utils/entityLinks";
 import { SalesOrdersPage } from "./SalesOrdersPage";
 import {
   CommercialDocumentEditor,
@@ -71,6 +81,9 @@ type LineState = {
   discount: string;
   tax_rate: string;
   total: string;
+  /** T-PICKUNIFY (#147): سعرٌ لمَسه المستخدم (كتابةً، أو من بطاقة المنتج، أو
+   *  من مسودّة مستعادة) — لا يُعاد تسعيره تلقائياً عند تبديل الزبون. */
+  priceTouched?: boolean;
 };
 
 /** ISSUE #121: حمولة المسودّة المحلية — خفيفة تكفي وحدها لإعادة بناء الشاشة
@@ -130,13 +143,18 @@ export const SalesQuotationsPage: React.FC = () => {
   // مشتقّة داخل useEffect؛ حالةٌ مشتقّة تفوّت بالضبط حالة «عُدِّل ثم غادر»).
   const [touched, setTouched] = useState(false);
   const markTouched = () => setTouched(true);
-  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
   const [taxRates, setTaxRates] = useState<TaxRateRow[]>([]);
   // بطاقة المنتج المشتركة — تكلفة الصنف وأسعاره دون مغادرة العرض.
   const [cardProductId, setCardProductId] = useState<number | null>(null);
 
   const [productPickerLineIdx, setProductPickerLineIdx] = useState<number | null>(null);
+  // T-SEARCH: نصُّ البحث المنقول إلى الفهرس الكامل عند «+N أخرى» — نفس فاتورة البيع.
+  const [pickerQuery, setPickerQuery] = useState("");
+  // ISSUE #147 US48: «+ إضافة كمنتج جديد» للنصّ الذي كتبه البائع بلا تطابق —
+  // خلافاً لشاشة الشراء لا يوجد بندٌ نصّي بلا منتج هنا؛ الإنشاء يُدرج المنتج
+  // في السطر نفسه فوراً (نفس نمط «خدمة» في فاتورة البيع).
+  const [quickCreateLineIdx, setQuickCreateLineIdx] = useState<number | null>(null);
+  const [quickCreateName, setQuickCreateName] = useState("");
 
   // معاينة بنود العرض داخل القائمة (طيّ/فتح) — لتُرى البنود بلا فتح النموذج.
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -144,35 +162,136 @@ export const SalesQuotationsPage: React.FC = () => {
     Record<number, Array<{ name: string; quantity: string; unit_price: string; line_total: string }>>
   >({});
 
-  // سعر الزبون من كرته (عرض السعر اليدوي / آخر فاتورة) — يُملأ عند اختيار المنتج.
-  const [customerPriceMap, setCustomerPriceMap] = useState<Map<number, string>>(new Map());
+  // ISSUE #147 M4: تعديل سريع لمنتج من داخل منتقي البند — نفس قلم باقي المستندات.
+  const [quickEditProductId, setQuickEditProductId] = useState<number | null>(null);
+  const applyProductUpdate = useCallback((updated: Record<string, unknown>) => {
+    const row = updated as { id?: number };
+    if (!row?.id) return;
+    setProducts((prev) => prev.map((p) => {
+      if (p.id !== row.id) return p;
+      const merged = { ...p, ...updated } as Product;
+      merged.name = (updated as any).name_ar || (updated as any).name_en || (updated as any).sku || merged.name;
+      return merged;
+    }));
+  }, []);
+
+  /* ISSUE #147 M4: سعر هذا الزبون تحديداً (آخر فاتورة/عرض سعر/سعر عام) — سلّمٌ
+   * واحد من الخادم (`sales.services.pricing.customer_price_list`)، نفس الذي
+   * تقرأه فاتورة البيع. تُجلَب دفعةً واحدة عند اختيار الزبون وتُخزَّن مؤقتاً
+   * بمفتاحه كي لا يُعاد الجلب عند التنقل ذهاباً وإياباً بين الزبائن. بلا زبونٍ
+   * مختار: لا خريطة ولا حقل سعرٍ في المنتقي إطلاقاً — راجع القرار §B.5.
+   * `exclude_quotation`: العرض المفتوح للتحرير يُستبعد من رتبة عروضه هو —
+   * وإلا لاقترح على نفسه رقمه هو كأنه تاريخٌ سابق للزبون. */
+  const customerPriceCacheRef = useRef<Map<string, Map<number, { price: string; source: "last_invoice" | "quote" | "default"; source_label: string }>>>(new Map());
+  const [customerPriceMap, setCustomerPriceMap] = useState<
+    Map<number, { price: string; source: "last_invoice" | "quote" | "default"; source_label: string }>
+  >(new Map());
   useEffect(() => {
     if (!formCustomer) { setCustomerPriceMap(new Map()); return; }
+    const cacheKey = selectedId != null ? `${formCustomer}:x${selectedId}` : formCustomer;
+    const cached = customerPriceCacheRef.current.get(cacheKey);
+    if (cached) { setCustomerPriceMap(cached); return; }
     let alive = true;
-    getCustomerPriceList(formCustomer)
+    getCustomerPriceList(formCustomer, selectedId != null ? { excludeQuotation: selectedId } : undefined)
       .then((rows) => {
         if (!alive) return;
-        const m = new Map<number, string>();
+        const m = new Map<number, { price: string; source: "last_invoice" | "quote" | "default"; source_label: string }>();
         for (const r of rows) {
-          if (r.price != null && String(r.price).trim() !== "") m.set(r.product_id, String(r.price));
+          // #147: **وجودُ السعر لا كونُه موجباً** — سطرٌ بِيع فعلاً بصفر
+          // (هديّة، أو بندٌ مجّانيّ ضمن صفقة) رقمٌ حقيقيٌّ في تاريخ هذا
+          // الزبون، وإسقاطُه يجعل الشاشة تقول «لا سابقة» وهي كاذبة. القاعدة
+          // الذهبية «فارغٌ يبقى فارغاً» تمنع اختلاقَ صفرٍ لا وجود له، لا
+          // إخفاءَ صفرٍ موجود. (فاتورة البيع ما زالت على `> 0` — فارقٌ
+          // سابقٌ لهذه المواصفة، يُحسَم على حدة.)
+          if (r.price != null && String(r.price).trim() !== "") {
+            m.set(r.product_id, { price: String(r.price), source: r.source, source_label: r.source_label });
+          }
         }
+        customerPriceCacheRef.current.set(cacheKey, m);
         setCustomerPriceMap(m);
       })
       .catch(() => { if (alive) setCustomerPriceMap(new Map()); });
     return () => { alive = false; };
-  }, [formCustomer]);
+  }, [formCustomer, selectedId]);
 
-  // السعر المقترح لبند العرض: سعر كرت الزبون إن وُجد، وإلا سعر المنتج الافتراضي.
-  const quotePriceFor = useCallback(
-    (productId: number, fallback?: string): string => {
-      const cp = customerPriceMap.get(productId);
-      if (cp != null && cp !== "") {
-        clientLogger.info("quotation.customer_price_applied", { product: productId });
-        return cp;
-      }
-      return fallback || "0";
-    },
-    [customerPriceMap]
+  /* ISSUE #147 M4: عند تبديل الزبون بعد وجود بنود، أعِد تسعير الأسطر غير
+   * المَلموسة فقط من الخريطة أعلاه المحمَّلة أصلاً — بلا أي نداء شبكة جديد
+   * لكل سطر (خلافاً لفاتورة البيع). أول تحميل/فتح مستندٍ محفوظ ليس «تبديلاً»
+   * من المستخدم؛ `openQuotation`/`resetForm` يُصفّران `prevCustomerRef` قبل
+   * التعبئة كي لا يُقرأ فتح عرضٍ آخر كأنه تبديل زبون يدوي يمسح أسعاره المحفوظة. */
+  const prevCustomerRef = useRef<string | null>(null);
+  const customerChangedRef = useRef(false);
+  useEffect(() => {
+    if (prevCustomerRef.current === null) { prevCustomerRef.current = formCustomer; return; }
+    if (prevCustomerRef.current === formCustomer) return;
+    prevCustomerRef.current = formCustomer;
+    customerChangedRef.current = true;
+  }, [formCustomer]);
+  useEffect(() => {
+    if (!customerChangedRef.current) return;
+    customerChangedRef.current = false;
+    setFormLines((prev) => prev.map((l) => {
+      if (!l.product_id || l.priceTouched) return l;
+      const cp = customerPriceMap.get(Number(l.product_id));
+      return { ...l, unit_price: cp ? cp.price : "" };
+    }));
+  }, [customerPriceMap]);
+
+  // ISSUE #133/#147: نفس دالّة سياسة الحقول التي تخدم فاتورة البيع — سياق «بيع».
+  const { visible: profitVisible } = usePriceVisibility();
+  const pickerVisibility = useMemo(() => getPickerFieldVisibility("sale", profitVisible), [profitVisible]);
+
+  /* T-RESERVEVIS: الحجوزات السارية — نفس صفوف «تقرير المحجوزات» التي يحرسها
+     الخادم عند تأكيد طلبية أخرى، فـ«المتاح للبيع» في المنتقي ليس تخميناً. */
+  const [reservationRows, setReservationRows] = useState<ReservedStockRow[]>([]);
+  useEffect(() => {
+    let alive = true;
+    getReservedStock()
+      .then((rows) => { if (alive) setReservationRows(rows); })
+      .catch(() => { if (alive) setReservationRows([]); });
+    return () => { alive = false; };
+  }, []);
+  const reservationIndex = useMemo(
+    () => buildReservationIndex(reservationRows, formCustomer ? Number(formCustomer) : null),
+    [reservationRows, formCustomer],
+  );
+
+  /* ISSUE #147 M4: خيارات المنتقي المدمج — نفس بناء فاتورة البيع (`itemOptions`
+   * في `SalesInvoiceEditor.tsx`): سعرُ هذا الزبون بمصدره، شارة المخزون، والمتاح
+   * بعد الحجز. بلا زبون: لا `price`/`priceLabel` إطلاقاً — لا سعرَ عاماً بديلاً
+   * هنا (خلافاً للفاتورة)، لأن عمود «سعر هذا الزبون» يكذب إن ظهر بلا زبون. */
+  const itemOptions = useMemo(
+    () => products.map((p) => {
+      const cp = formCustomer ? customerPriceMap.get(p.id) : undefined;
+      const indicativePurchasePrice = pickerVisibility.indicativePurchasePrice
+        ? {
+            value: p.indicative_purchase_price != null
+              ? formatMoney(Number(p.indicative_purchase_price))
+              : "—",
+            label: p.indicative_purchase_price_source || "",
+          }
+        : undefined;
+      const entry = reservationIndex.get(p.id);
+      const reserved = totalReserved(entry);
+      const onHand = Number(p.quantity_on_hand || 0);
+      return {
+        id: p.id,
+        label: formatProductPrimaryName(p),
+        badge: pickerVisibility.stockBadge ? stockBadgeFor(p) : undefined,
+        sub: p.is_service
+          ? "خدمة — بلا مخزون"
+          : reserved > 0
+          ? `الرصيد: ${formatQuantity(onHand)} · محجوز: ${formatQuantity(reserved)} · المتاح للبيع: ${formatQuantity(availableForSale(onHand, entry))}`
+          : `الرصيد: ${formatQuantity(onHand)}`,
+        price: cp ? formatMoney(Number(cp.price)) : undefined,
+        priceLabel: cp
+          ? (cp.source === "quote" ? "عرض سعر" : cp.source === "default" ? "سعر عام" : "آخر بيع")
+          : undefined,
+        indicativePurchasePrice,
+        keywords: [p.sku, p.barcode].filter(Boolean).join(" ").toLowerCase(),
+      };
+    }),
+    [products, customerPriceMap, formCustomer, pickerVisibility, reservationIndex],
   );
 
   // Kit Navigation
@@ -184,6 +303,10 @@ export const SalesQuotationsPage: React.FC = () => {
     try {
       const detail = await getQuotation(id);
       setSelectedId(detail.id);
+      // ISSUE #147 M4: تحميلٌ من الخادم ليس «تبديل زبون» من المستخدم — تُضبط
+      // القيمة المرجعية مباشرةً على زبون هذا العرض (لا `null`: فتح عرضٍ آخر
+      // بنفس الزبون لا يُغيّر حالة formCustomer فلا يُشغَّل أثر إعادة الضبط).
+      prevCustomerRef.current = String(detail.customer);
       setFormCustomer(String(detail.customer));
       setFormDate(detail.quotation_date?.slice(0, 10) || "");
       setFormValidUntil(detail.valid_until?.slice(0, 10) || "");
@@ -331,6 +454,12 @@ export const SalesQuotationsPage: React.FC = () => {
           name_en: p.name_en || "",
           name: p.name_ar || p.name_en || p.name || p.sku || `#${p.id}`,
           unit_price: p.sale_price ?? p.selling_price ?? p.unit_price ?? "",
+          // ISSUE #147 M4: كانت تُسقَط هنا فتصل شارة المخزون والسعر التقديري
+          // معدومةً دائماً إلى المنتقي المدمج.
+          stock_status: p.stock_status ?? null,
+          is_service: p.is_service ?? false,
+          indicative_purchase_price: p.indicative_purchase_price ?? null,
+          indicative_purchase_price_source: p.indicative_purchase_price_source ?? null,
         }))
       );
     } catch (e: unknown) {
@@ -367,6 +496,8 @@ export const SalesQuotationsPage: React.FC = () => {
 
   const resetForm = () => {
     setSelectedId(null);
+    // ISSUE #147 M4: عرضٌ جديد يبدأ صفحةً بيضاء — لا «تبديل زبون» يُعاد به تسعير شيء.
+    prevCustomerRef.current = "";
     setFormCustomer("");
     setFormDate(new Date().toISOString().slice(0, 10));
     setFormValidUntil(defaultValidUntil());
@@ -393,6 +524,8 @@ export const SalesQuotationsPage: React.FC = () => {
   };
 
   const handleLineChange = (idx: number, field: string, value: string) => {
+    // ISSUE #147 M4: تحرير السعر يدوياً يُلمَس فلا يُعاد تسعيره عند تبديل الزبون.
+    if (field === "unit_price") { handleLineUpdate(idx, { unit_price: value, priceTouched: true }); return; }
     handleLineUpdate(idx, { [field]: value });
   };
 
@@ -590,6 +723,8 @@ export const SalesQuotationsPage: React.FC = () => {
   );
 
   const onRestoreDraft = useCallback((restored: SalesQuotationDraftPayload) => {
+    // ISSUE #147 M4: استعادةٌ ليست «تبديل زبون» يُعاد به تسعير شيء.
+    prevCustomerRef.current = restored.formCustomer;
     setFormCustomer(restored.formCustomer);
     setFormDate(restored.formDate);
     setFormValidUntil(restored.formValidUntil);
@@ -599,18 +734,14 @@ export const SalesQuotationsPage: React.FC = () => {
     setFormCustomerAddress(restored.formCustomerAddress);
     setFormCustomerTaxNumber(restored.formCustomerTaxNumber);
     setFormDiscount(restored.formDiscount);
-    setFormLines(restored.formLines);
+    // ISSUE #147 M4 §B.7: سعرٌ من مسودّة مستعادة يُعامَل «ملموساً» — لا يجوز
+    // أن يمحوه أول تبديل زبونٍ لاحق يظنّه سعراً تلقائياً لم يُقرَّر بعد.
+    setFormLines(restored.formLines.map((l) => (l.product_id ? { ...l, priceTouched: true } : l)));
     // استعادةٌ من مسودّة تعني اختلافاً عن آخر نسخة محفوظة — تُسجَّل «ملموسة».
     setTouched(true);
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<SalesQuotationDraftPayload>({
+  const draftApi = useDocumentDraft<SalesQuotationDraftPayload>({
     docType: "sales_quotation",
     docId: selectedId,
     payload: draftPayload,
@@ -624,6 +755,7 @@ export const SalesQuotationsPage: React.FC = () => {
     // فسقط فحصُ «تغيّر المستند بعد مسودتك» (#109 §٩)؛ كُشف ووُصِل.
     docUpdatedAt: selectedQuotation?.updated_at ?? null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
   useEffect(() => {
@@ -644,67 +776,6 @@ export const SalesQuotationsPage: React.FC = () => {
     void discardDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, discardDraft]);
-
-  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً. */
-  const draftSaveFailedBanner = draftSaveFailed ? (
-    <div
-      role="alert"
-      aria-live="assertive"
-      data-testid="draft-save-failed-banner"
-      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-    >
-      <AlertTriangle className="h-4 w-4 shrink-0" />
-      <span>تعذّر حفظ نسخة محلية من هذا العرض — اضغط «تخزين» يدوياً كي لا يضيع عملك.</span>
-    </div>
-  ) : null;
-
-  /* ISSUE #118: شريط الاستعادة التلقائية — إخبارٌ لا سؤال. */
-  const draftRestoreBanner = draftBanner ? (
-    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <span>
-        {draftBanner.eligibility === "restore" &&
-          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "stale" &&
-          `تغيّر العرض بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "posted" &&
-          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا العرض المنتهي — للاطّلاع فقط.`}
-      </span>
-      {draftBanner.eligibility === "restore" && (
-        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-          <Undo2 className="h-4 w-4" /> تراجع
-        </button>
-      )}
-      {draftBanner.eligibility === "stale" && (
-        <>
-          <button type="button" className="ktra-toolbtn" onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
-            استعرض مسودتي
-          </button>
-          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-            تجاهلها
-          </button>
-        </>
-      )}
-    </div>
-  ) : null;
-
-  /* شريط اليتامى (issue #119 §٧): مسودّات عرضٍ جديد أخرى تُركت في تبويبات أخرى. */
-  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
-    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <div className="flex flex-col gap-1">
-        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-        <ul className="list-disc pr-4 text-xs">
-          {orphanDrafts.map((o) => (
-            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-          ))}
-        </ul>
-      </div>
-      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-        <X className="h-4 w-4" /> إخفاء
-      </button>
-    </div>
-  ) : null;
 
   // DOC-SHARE: نافذة واحدة تخدم الفرعين (المحرّر والقائمة). عرضٌ ما زال
   // مسودة: إنشاء الرابط هو إرساله فعلياً، والنافذة تُنبّه قبل الضغط.
@@ -812,18 +883,39 @@ export const SalesQuotationsPage: React.FC = () => {
   const editorColumns: CommercialLineColumn<LineState>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     {
+      /* ISSUE #147 M4: كانت هذه الخلية زرّاً يفتح المودال العريض وحده — مسارٌ
+         مختلف عن كل شاشة بيع أخرى (فاتورة البيع). الآن نفس `KitAutocomplete`
+         المشترك: كتابة ← قائمة مرشَّحة تحمل سعر هذا الزبون بمصدره، مع (i)
+         لبطاقة المنتج وقلمٍ لتعديله سريعاً. المودال العريض يبقى خلف أيقونة
+         البحث لمن يريد الفهرس الكامل — لا يُحذف. */
       key: "name",
       header: "وصف المنتج",
       width: "35%",
       render: (line, index) => (
         <div className="flex w-full items-center gap-1">
-          <button type="button" className="flex min-w-0 flex-1 items-center justify-between gap-2 px-1 text-right"
-            onClick={() => setProductPickerLineIdx(index)}>
-            <span className={line.product_name ? "ktra-text-ink" : "ktra-text-soft"}>
-              {line.product_name || "اختر منتجاً…"}
-            </span>
-            <span className="ktra-text-accent">…</span>
-          </button>
+          <KitAutocomplete
+            value={line.product_name || ""}
+            options={itemOptions}
+            placeholder="اكتب اسم المنتج…"
+            onPick={(id) => {
+              const pid = Number(id);
+              const product = products.find((item) => item.id === pid);
+              const cp = formCustomer ? customerPriceMap.get(pid) : undefined;
+              handleLineUpdate(index, {
+                product_id: String(pid),
+                product_name: product ? formatProductPrimaryName(product) : `#${pid}`,
+                // ISSUE #147 §B.4: لا رتبة سعرٍ لهذا الزبون ⇒ فارغ، لا صفر ولا سعرٌ عام مخمَّن.
+                unit_price: cp ? cp.price : "",
+                // منتجٌ جديد على السطر ⇒ سعرٌ تلقائيٌّ جديد لم يلمسه أحد بعد.
+                priceTouched: false,
+              });
+            }}
+            onInfo={(id) => setCardProductId(Number(id))}
+            onEdit={(id) => setQuickEditProductId(Number(id))}
+            onShowMore={(q) => { setPickerQuery(q); setProductPickerLineIdx(index); }}
+            onFreeText={(text) => { setQuickCreateName(text); setQuickCreateLineIdx(index); }}
+            createLabel={(text) => `إضافة «${text}» كمنتج جديد`}
+          />
           {/* بطاقة المنتج المشتركة: التكلفة وسعر البيع وآخر سعر شراء/بيع والربح
               وحركة الصنف — نفس البطاقة التي في فاتورة البيع، فلا يُسعَّر العرض
               على العمياء. */}
@@ -834,6 +926,11 @@ export const SalesQuotationsPage: React.FC = () => {
               <Info className="h-3.5 w-3.5" />
             </button>
           )}
+          <button type="button" className="ktra-iconbtn"
+            title="فهرس المنتجات الكامل"
+            onClick={() => setProductPickerLineIdx(index)}>
+            <Search className="h-3.5 w-3.5" />
+          </button>
         </div>
       ),
     },
@@ -950,9 +1047,7 @@ export const SalesQuotationsPage: React.FC = () => {
         onAddLine={handleAddLine}
         banner={
           <>
-            {draftSaveFailedBanner}
-            {draftRestoreBanner}
-            {orphanDraftsBanner}
+            <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
             {err ? <div className="ktra-banner ktra-banner--err">{err}</div> : null}
           </>
         }
@@ -1031,17 +1126,73 @@ export const SalesQuotationsPage: React.FC = () => {
               onClose={() => setCardProductId(null)}
             />
           )}
+          {quickEditProductId != null && (
+            <ItemQuickEditModal
+              productId={quickEditProductId}
+              onClose={() => setQuickEditProductId(null)}
+              onSaved={applyProductUpdate}
+              onOpenFullCard={() => openInNewTab(productProfilePath(quickEditProductId))}
+            />
+          )}
+          {/* ISSUE #147 US48: النصّ المكتوب بلا تطابق يصبح منتجاً حقيقياً —
+              الحقل مفتاحٌ أجنبي إجباري هنا، خلافاً لبند الشراء النصّي الحر. */}
+          {quickCreateLineIdx !== null && (
+            <ItemQuickCreateModal
+              isOpen
+              initialName={quickCreateName}
+              onClose={() => setQuickCreateLineIdx(null)}
+              onSaved={(created: any) => {
+                const idx = quickCreateLineIdx;
+                setQuickCreateLineIdx(null);
+                if (!created?.id) return;
+                const mapped: Product = {
+                  id: created.id,
+                  sku: created.sku || "",
+                  barcode: created.barcode,
+                  quantity_on_hand: String(created.quantity_on_hand ?? "0"),
+                  name_ar: created.name_ar || created.name || "",
+                  name_en: created.name_en || "",
+                  name: created.name_ar || created.name_en || created.sku || `#${created.id}`,
+                  unit_price: created.sale_price ?? created.selling_price ?? "",
+                  stock_status: created.stock_status ?? null,
+                  is_service: created.is_service ?? false,
+                  indicative_purchase_price: created.indicative_purchase_price ?? null,
+                  indicative_purchase_price_source: created.indicative_purchase_price_source ?? null,
+                };
+                setProducts((prev) => [...prev, mapped]);
+                // الشاشة الأم تحمل قائمة المنتجات — نُعلمها كي تُحدّثها من الخادم.
+                try { eventBus.publish("products", resolveTenantId()); } catch { /* غير حرج */ }
+                // نفس مدخل onPick تماماً — بما في ذلك بحث سعر هذا الزبون (سيعود
+                // فارغاً حكماً لمنتجٍ جديد، لا صفراً: القرار §B.4).
+                const cp = formCustomer ? customerPriceMap.get(created.id) : undefined;
+                if (idx !== null) {
+                  handleLineUpdate(idx, {
+                    product_id: String(created.id),
+                    product_name: mapped.name,
+                    unit_price: cp ? cp.price : "",
+                    priceTouched: false,
+                  });
+                }
+              }}
+            />
+          )}
           {productPickerLineIdx !== null ? (
           <SalesProductPickerModal
             isOpen
             products={products}
+            // T-SEARCH: يفتح على نفس ما كتبه المستخدم — «+N أخرى» ينقل الاستعلام
+            // بدل أن يبدأ من صفحة بيضاء (نفس فاتورة البيع).
+            initialSearch={pickerQuery}
             onSelect={(productId) => {
               const product = products.find((item) => item.id === productId);
+              const cp = formCustomer ? customerPriceMap.get(productId) : undefined;
               handleLineUpdate(productPickerLineIdx, {
                 product_id: String(productId),
+                priceTouched: false,
                 ...(product ? {
                   product_name: formatProductPrimaryName(product),
-                  unit_price: quotePriceFor(productId, product.unit_price),
+                  // ISSUE #147 §B.4: لا رتبة سعرٍ لهذا الزبون ⇒ فارغ، لا سعرٌ عام مخمَّن.
+                  unit_price: cp ? cp.price : "",
                 } : {}),
               });
               setProductPickerLineIdx(null);
@@ -1080,6 +1231,13 @@ export const SalesQuotationsPage: React.FC = () => {
 
   return (
     <>
+      {/* issue #146: اليتامى يُبحث عنها هنا — قبل فتح أي نموذج، لا داخله وحده. */}
+      <DocumentDraftBanners
+        draft={draftApi}
+        onApplyDraft={(payload) => { onRestoreDraft(payload); setShowForm(true); }}
+        onUndo={handleUndoDraft}
+        isTouched={touched}
+      />
       <CommercialDocumentsList<SalesQuotationRow>
         title="عروض وطلبيات البيع"
         state="عروض الأسعار"

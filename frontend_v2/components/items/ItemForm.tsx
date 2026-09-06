@@ -17,7 +17,7 @@ import {
   useRecordNavigation,
   type KitToolbarAction,
 } from "../kit";
-import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Upload, FileText, Info, Undo2 } from "lucide-react";
+import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Upload, FileText } from "lucide-react";
 import { CategoryPicker } from "../inventory/CategoryPicker";
 import { ValuePicker } from "../inventory/ValuePicker";
 import { accountingApi } from "../../services/accountingApi";
@@ -30,7 +30,7 @@ import { SupplierCodesTab } from "./SupplierCodesTab";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { completeEan13, ean13Svg, isValidEan13, printBarcodeLabels } from "../../utils/barcode";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 import { formatTimeValue } from "../../utils/formatDate";
 
 type Props = {
@@ -133,6 +133,8 @@ type FormState = {
   supplier_warranty_months: string;
   /** بيانٌ داخلي — منفصل عن وصف المتجر الذي يراه العالم. */
   description: string;
+  /** #147 M2: صورة البراند المرجعية الواحدة — يراها المورّد على رابط طلب عرض السعر. */
+  image_url: string;
   /** موقع التخزين (رفّ/ممر) — إرشادي بلا أثر مخزني. */
   storage_location: string;
   /** وحدة القياس — معرّفٌ من جدول الوحدات لا نصّ حرّ: النصّ لم يكن يُحفظ أصلاً. */
@@ -160,6 +162,7 @@ const blankForm = (): FormState => ({
   barcode: "", is_serialized: false,
   warranty_months: "", supplier_warranty_months: "",
   description: "", storage_location: "",
+  image_url: "",
   uom_id: null, uom2: null, uom2_factor: "",
   uom3: null, uom3_factor: "",
   min_stock_level: "", max_stock_level: "",
@@ -297,6 +300,7 @@ export const ItemForm: React.FC<Props> = ({
   const [lastKey, setLastKey] = useState("—");
   const [dsUploading, setDsUploading] = useState(false);
   const datasheetRef = useRef<HTMLDivElement>(null);
+  const [imgUploading, setImgUploading] = useState(false);
   // T-ITEMS M1: الكشف التدريجي — «بيانات عامة» تفتح على الحقول التي تلزم كل
   // منتج، وما دونها خلف زرٍّ واحد. المستخدم المتقدّم يفتحه مرّةً ويبقى مفتوحاً
   // ما دام الكرت مفتوحاً.
@@ -371,6 +375,29 @@ export const ItemForm: React.FC<Props> = ({
       "success",
     );
     return res;
+  };
+
+  // #147 M2: صورة البراند المرجعية — رابطٌ واحد لا معرض، بنفس نمط رفع الداتا
+  // شيت (Cloudinary)، لكن يستبدل القيمة بدل أن يُلحقها.
+  const uploadImageFile = async (file: File) => {
+    setImgUploading(true); setErr(null); setMsg(null);
+    try {
+      const url = await cloudinaryService.uploadFile(file);
+      dirtyRef.current = true;
+      patch("image_url", url);
+      setMsg("تم رفع الصورة — احفظ (F12) لتخزين الرابط.");
+    } catch (ex: unknown) {
+      setErr(ex instanceof Error ? ex.message : "فشل رفع الصورة");
+    } finally {
+      setImgUploading(false);
+    }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    await uploadImageFile(file);
   };
 
   const uploadDatasheetFile = async (file: File) => {
@@ -503,6 +530,7 @@ export const ItemForm: React.FC<Props> = ({
       variant_group: String(p.variant_group ?? ""),
       description: String(p.description ?? ""),
       storage_location: String(p.storage_location ?? ""),
+      image_url: String(p.image_url ?? ""),
       uom_id: p.uom_id != null ? Number(p.uom_id) : null,
       uom2: p.uom2 != null ? Number(p.uom2) : null,
       uom2_factor: p.uom2_factor != null ? String(p.uom2_factor) : "",
@@ -581,6 +609,8 @@ export const ItemForm: React.FC<Props> = ({
         uom3_factor: form.uom3_factor.trim() ? Number(form.uom3_factor) : null,
         description: form.description.trim() || null,
         storage_location: form.storage_location.trim() || null,
+        // #147 M2: صورة البراند المرجعية — فارغة تعني بلا صورة (لا null، الحقل نصّي بلا NULL).
+        image_url: form.image_url.trim(),
         sale_account_override: form.sale_account,
         sale_return_account_override: form.sale_return_account,
         purchase_account_override: form.purchase_account,
@@ -672,13 +702,7 @@ export const ItemForm: React.FC<Props> = ({
     draftRestoredRef.current = true;
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<ItemDraftPayload>({
+  const draftApi = useDocumentDraft<ItemDraftPayload>({
     docType: "item",
     docId: currentId ?? null,
     payload: draftPayload,
@@ -695,6 +719,7 @@ export const ItemForm: React.FC<Props> = ({
     // المهمة (نمط `AccountingJournalEntryPage.tsx`).
     docUpdatedAt: null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
   useEffect(() => {
@@ -707,9 +732,6 @@ export const ItemForm: React.FC<Props> = ({
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [draftSaveFailed]);
-
-  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   /** «تراجع» على شريط الاستعادة: يعيد الكرت إلى نسخته المحفوظة ويمسح المسودّة. */
   const handleUndoDraft = useCallback(() => {
@@ -750,68 +772,6 @@ export const ItemForm: React.FC<Props> = ({
    * يهبط على أول تبويب. المفتاح يصمد حتى لو تأخّر تبويبه، والنقر يبقى كما هو.
    */
   const [activeTab, setActiveTab] = useState(openingTab);
-
-  /* ISSUE #120: الحفظ المحلي فشل فعلاً (حصّة ممتلئة، تصفّح خاص…) — لافتةٌ
-     لاصقة تطلب حفظاً يدوياً بدل الانتظار الصامت حتى تحاول المغادرة. */
-  const draftSaveFailedBanner = draftSaveFailed ? (
-    <div
-      role="alert"
-      aria-live="assertive"
-      data-testid="draft-save-failed-banner"
-      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-    >
-      <AlertCircle className="h-4 w-4 shrink-0" />
-      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
-    </div>
-  ) : null;
-
-  /* ISSUE #118: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى مُطبَّقٌ
-     على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً؛ هو
-     إخبارٌ لا سؤال، ومعه «تراجع» وحده. */
-  const draftRestoreBanner = draftBanner ? (
-    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <span>
-        {draftBanner.eligibility === "restore" &&
-          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "stale" &&
-          `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "posted" &&
-          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
-      </span>
-      {draftBanner.eligibility === "restore" && (
-        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-          <Undo2 className="h-4 w-4" /> تراجع
-        </button>
-      )}
-      {draftBanner.eligibility === "stale" && (
-        <>
-          <button type="button" className="ktra-toolbtn" onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">استعرض مسودتي</button>
-          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">تجاهلها</button>
-        </>
-      )}
-    </div>
-  ) : null;
-
-  /* شريط اليتامى (issue #119 §٧): مسودّات «منتجٍ جديد» أخرى تُركت في
-     تبويباتٍ أخرى — بلا استعادة (الاستعادة محصورة بمسودّة هذا التبويب/
-     المستند نفسه). */
-  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
-    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <div className="flex flex-col gap-1">
-        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-        <ul className="list-disc pr-4 text-xs">
-          {orphanDrafts.map((o) => (
-            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-          ))}
-        </ul>
-      </div>
-      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-        <X className="h-4 w-4" /> إخفاء
-      </button>
-    </div>
-  ) : null;
 
   const banner = (err || msg) ? (
     <div className={`ktra-banner ${err ? "ktra-banner--err" : "ktra-banner--ok"}`}>
@@ -979,6 +939,27 @@ export const ItemForm: React.FC<Props> = ({
         <ValuePicker value={form.variant_group} onChange={(g) => patch("variant_group", g)}
           fetchOptions={inventoryApi.getGroups}
           emptyLabel="— بدون صنف —" addPlaceholder="مثال: ايفون 14 برو" addTitle="صنف جديد" />)}
+      {fld("صورة الصنف — يراها المورّد على رابط الطلبية",
+        <div className="flex items-center gap-2">
+          {form.image_url ? (
+            <>
+              <img src={form.image_url} alt="صورة الصنف"
+                className="h-14 w-14 rounded border border-[var(--ktra-line,#d7d7d7)] object-cover" />
+              <button type="button" className="ktra-iconbtn ktra-iconbtn--danger"
+                title="إزالة الصورة" onClick={() => patch("image_url", "")}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </>
+          ) : (
+            <label className="ktra-input inline-flex w-max items-center gap-1.5"
+              style={{ cursor: imgUploading ? "wait" : "pointer" }}>
+              {imgUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              <span>{imgUploading ? "...جارٍ الرفع" : "رفع صورة"}</span>
+              <input type="file" accept="image/*" hidden disabled={imgUploading}
+                onChange={handleImageUpload} />
+            </label>
+          )}
+        </div>)}
       {fld("ملفات الداتا شيت (PDF أو صور)",
         <div ref={datasheetRef}>
           <label className="ktra-input" style={{
@@ -1317,9 +1298,7 @@ export const ItemForm: React.FC<Props> = ({
           </>
         }
       >
-        {draftSaveFailedBanner}
-        {draftRestoreBanner}
-        {orphanDraftsBanner}
+        <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={dirtyRef.current} />
         {banner}
       </KitDocumentShell>
     </div>

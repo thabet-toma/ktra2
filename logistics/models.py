@@ -47,11 +47,21 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
     # عنه بعد مكالمة. **حقلٌ صريحٌ لا استنتاجٌ من `created_by IS NULL`** — ذاك
     # يعمل اليوم صدفةً (مسارُ الرابط لا يمرّر مُنشئاً) ويكذب أوّلَ مرّةٍ يُنشئ
     # فيها مسارٌ ثالثٌ عرضاً. والعمودان ليسا سواءً في الثقة عند المقارنة.
+    #
+    # مواصفة #147 (المرحلة 3أ): وصل المسارُ الثالث فعلاً — ردٌّ من رابطٍ عامٍّ
+    # لمجهولٍ لا مستقبِلٍ مسجَّل (`PublicSupplierQuoteRequest`)، معتمَدٌ يدوياً
+    # قبل أن يصير `SupplierQuotation`. **ليس `supplier_link`**: ذاك يفترض
+    # مستقبِلاً معروفاً سلفاً بحساب مورّد (`PurchaseRFQRecipient.supplier`
+    # NOT NULL) وثقته أعلى — أمّا هذا فاسمٌ كتبه غريبٌ بنفسه ولم نتحقّق منه
+    # إلا بموافقة المالك على الاعتماد. دمجهما في قيمةٍ واحدة كان يمحو الفرق
+    # الذي بُني الحقل من أجله أصلاً.
     ENTRY_SUPPLIER_LINK = 'supplier_link'
     ENTRY_MANUAL = 'manual'
+    ENTRY_PUBLIC_LINK = 'public_link'
     ENTRY_SOURCE_CHOICES = [
         (ENTRY_SUPPLIER_LINK, 'سعّره المورّد'),
         (ENTRY_MANUAL, 'أُدخل عنه'),
+        (ENTRY_PUBLIC_LINK, 'من رابط عام'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='SupplierQuotationID')
@@ -682,6 +692,142 @@ class PurchaseRFQRecipient(models.Model):
 
     def __str__(self):
         return f'{self.rfq_id} → {self.supplier_id}'
+
+
+class PublicSupplierQuoteRequest(models.Model):
+    """ردّ مورّدٍ **مجهول** على رابطٍ عامّ لطلبية — مواصفة #147 (المرحلة 3أ).
+
+    مساحةُ انتظار لا كتابٌ للدفاتر: طلبُ أسعارٍ من غريبٍ لا يملك حساب مورّد
+    ولا `PurchaseRFQRecipient` (ذاك `supplier` عنده NOT NULL عمداً — لا يُمسّ
+    هنا). لا يلمس هذا الصفّ أيّ `Partner` ولا `SupplierQuotation` ولا مصفوفة
+    المقارنة إلا بعد موافقة صريحة (`approve_public_quote_request`) — العرضُ
+    **يُولَد** عندها، لا يُستنتَج من صفٍّ قائم.
+
+    **صفٌّ جديد لكلّ إرسال، أبداً تحديثٌ لسابقه**: لا نعرف أنّ المرسِل الثاني
+    هو الأوّل نفسه (لا حساب يربطهما)، والدهسُ يعني أن غريباً يمحو سعر غريبٍ
+    آخر بصمت. تكرارُ الاسم/البريد يُقترَح لا يُدمَج تلقائياً
+    (`partners.suggest_partner_matches`) — بشرٌ يقرّر.
+    """
+
+    STATUS_PENDING = 'pending'
+    STATUS_APPROVED = 'approved'
+    STATUS_REJECTED = 'rejected'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'بانتظار المراجعة'),
+        (STATUS_APPROVED, 'مقبول'),
+        (STATUS_REJECTED, 'مرفوض'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='PublicSupplierQuoteRequestID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='public_supplier_quote_requests',
+    )
+    rfq = models.ForeignKey(
+        PurchaseRFQ, on_delete=models.CASCADE, db_column='PurchaseRFQID',
+        related_name='public_quote_requests',
+    )
+    # SET_NULL: إبطال الرابط في `docshare` لا يجوز أن يحذف ردّاً وصل فعلاً
+    # عبره — نفس منطق `PurchaseRFQRecipient.share` أعلاه.
+    share = models.ForeignKey(
+        'docshare.DocumentShare', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='DocumentShareID', related_name='public_quote_requests',
+    )
+    # اسمٌ نصّيٌّ حرّ **كما كُتب** — لا تطبيع للتخزين ولا للعرض. التطبيع
+    # (`partners.suggest_partner_matches`) للمطابقة وحدها، لا لتغيير ما كتبه
+    # المرسِل عن نفسه.
+    supplier_name = models.CharField(max_length=200, db_column='SupplierName')
+    supplier_email = models.EmailField(max_length=100, db_column='SupplierEmail')
+    supplier_phone = models.CharField(
+        max_length=20, blank=True, default='', db_column='SupplierPhone',
+    )
+    # لا يُكتب في هذه المرحلة إطلاقاً — موجودٌ الآن حتى لا تحتاج ميزة تحقّق
+    # البريد لاحقاً (رمزٌ لمرّةٍ واحدة) هجرةً ثانية.
+    email_verified_at = models.DateTimeField(
+        null=True, blank=True, db_column='EmailVerifiedAt',
+    )
+    # غيابها = عملة الأساس — نفس اتفاقية `submit_rfq_supplier_quote`.
+    currency = models.ForeignKey(
+        Currency, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CurrencyID', related_name='public_supplier_quote_requests',
+    )
+    general_note = models.TextField(blank=True, default='', db_column='GeneralNote')
+    submitted_ip = models.CharField(
+        max_length=64, blank=True, default='', db_column='SubmittedIP',
+    )
+    submitted_at = models.DateTimeField(auto_now_add=True, db_column='SubmittedAt')
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING,
+        db_column='Status',
+    )
+    approved_partner = models.ForeignKey(
+        Partner, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='ApprovedPartnerID', related_name='approved_public_quote_requests',
+    )
+    approved_quotation = models.ForeignKey(
+        SupplierQuotation, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='ApprovedSupplierQuotationID',
+        related_name='born_from_public_request',
+    )
+    decided_at = models.DateTimeField(null=True, blank=True, db_column='DecidedAt')
+    decided_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='DecidedBy_UserID', related_name='decided_public_quote_requests',
+    )
+
+    class Meta:
+        db_table = 'public_supplier_quote_requests'
+        ordering = ['-submitted_at', '-id']
+        indexes = [
+            models.Index(fields=['tenant', 'rfq', 'status'],
+                         name='idx_pubqr_tenant_rfq_status'),
+        ]
+
+    def __str__(self):
+        return f'{self.rfq_id} ← {self.supplier_name}'
+
+
+class PublicSupplierQuoteRequestLine(models.Model):
+    """سطرُ سعرٍ واحد على ردّ مجهول — تسعيرٌ جزئيّ مسموح (لا كإجبار
+    `submit_rfq_supplier_quote` سعراً لكل بند)."""
+
+    id = models.AutoField(primary_key=True, db_column='PublicSupplierQuoteRequestLineID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='public_supplier_quote_request_lines',
+    )
+    request = models.ForeignKey(
+        PublicSupplierQuoteRequest, on_delete=models.CASCADE,
+        db_column='PublicSupplierQuoteRequestID', related_name='lines',
+    )
+    # SET_NULL: بندُ الطلبية قد يُحذف بعد أن وصل الردّ — والسطر يبقى مقروءاً
+    # (`name_snapshot`/`seq_snapshot` أدناه) ولو صار بلا نَسَب، فقط لا يُحوَّل
+    # عند الاعتماد.
+    rfq_line = models.ForeignKey(
+        'PurchaseRFQLine', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='PurchaseRFQLineID', related_name='public_quote_lines',
+    )
+    # لقطةٌ إلزاميّة لا يكفي عنها الـFK: لو حُذف بند الطلبية بعد وصول هذا
+    # الردّ، سعرٌ كتبه إنسانٌ حقيقيّ لا يجوز أن يختفي معه — يبقى السطر ظاهراً
+    # بهاتين القيمتين، وغيرَ قابلٍ للتحويل عند الاعتماد فقط (`rfq_line` صار
+    # `None`).
+    name_snapshot = models.CharField(max_length=255, db_column='NameSnapshot')
+    seq_snapshot = models.PositiveIntegerField(db_column='SeqSnapshot')
+    unit_price = models.DecimalField(max_digits=18, decimal_places=4, db_column='UnitPrice')
+    supplier_note = models.TextField(blank=True, default='', db_column='SupplierNote')
+
+    class Meta:
+        db_table = 'public_supplier_quote_request_lines'
+        ordering = ['seq_snapshot', 'id']
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(unit_price__gte=0),
+                name='pub_qr_line_price_gte_zero',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.request_id} · {self.name_snapshot}'
 
 
 class LogisticsDeal(SoftDeleteMixin, models.Model):

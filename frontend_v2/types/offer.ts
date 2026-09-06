@@ -106,6 +106,12 @@ export interface PriceOffer {
     alibabaLink?: string;
     /** T-IMPOFFER: رقم التواصل مع مندوب المورد لهذا العرض. */
     supplierContact?: string;
+    /**
+     * مواصفة #147 (البند 9): مصدر إدخال العرض — `public_link` وحده يُعرض شارةً.
+     * `entrySourceDisplay` النصّ الجاهز من الخادم — لا تُعِد كتابته.
+     */
+    entrySource?: string;
+    entrySourceDisplay?: string;
     /** T-IMPOFFER: سبب اعتبار العرض «غير ملائم» — إلزامي عند الرفض. */
     decisionReason?: string;
     /** T-IMPOFFER: ملفات العرض المرفوعة (PDF/صور). */

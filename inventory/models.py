@@ -175,6 +175,12 @@ class Product(models.Model):
         max_length=100, blank=True, null=True, db_column='StorageLocation',
         help_text='موقع المنتج في المستودع (رفّ/ممر) — نصّ إرشادي بلا أثر مخزني',
     )
+    # #147 M2: صورةٌ مرجعيةٌ واحدة للبراند — يراها المورّد على رابط طلب عرض
+    # السعر (RFQ) العام حين يقرأ سطراً لا يعرف عنه إلا الاسم والكمية. رابطٌ
+    # نصّي لا حقل ملف/صورة (المشروع بلا حقول ملفات عمداً؛ الرفع يمرّ عبر
+    # Cloudinary من الواجهة). عمداً على البراند لا على `ProductFamily` —
+    # لا سلسلة تراجعٍ عبر الأب هنا.
+    image_url = models.CharField(max_length=500, blank=True, default='', db_column='ImageURL')
     weight_kg = models.DecimalField(max_digits=12, decimal_places=4, blank=True, null=True, db_column='Weight_KG')
     volume_cbm = models.DecimalField(max_digits=12, decimal_places=6, blank=True, null=True, db_column='Volume_CBM')
     hs_code = models.CharField(max_length=20, blank=True, null=True, db_column='HS_Code')

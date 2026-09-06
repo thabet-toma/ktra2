@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **594**
+عدد النقاط: **601**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -379,6 +379,11 @@
 | `/api/logistics/local-shipments/{pk}/unpost/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/payments/` | `LogisticsPaymentViewSet` | `logistics/views/deals.py` |
 | `/api/logistics/payments/{pk}/` | `LogisticsPaymentViewSet` | `logistics/views/deals.py` |
+| `/api/logistics/public-supplier-quote-requests/` | `PublicSupplierQuoteRequestViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/public-supplier-quote-requests/{pk}/` | `PublicSupplierQuoteRequestViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/public-supplier-quote-requests/{pk}/approve/` | `PublicSupplierQuoteRequestViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/public-supplier-quote-requests/{pk}/matches/` | `PublicSupplierQuoteRequestViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/public-supplier-quote-requests/{pk}/reject/` | `PublicSupplierQuoteRequestViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-invoices/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/clearance-import-options/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/import-from-clearance/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
@@ -414,8 +419,10 @@
 | `/api/logistics/purchase-rfqs/{pk}/cancel/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-rfqs/{pk}/comparison/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-rfqs/{pk}/duplicate/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/purchase-rfqs/{pk}/public-link/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-rfqs/{pk}/recipients/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-rfqs/{pk}/send/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/purchase-rfqs/{pk}/stop-public-link/` | `PurchaseRFQViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-settings/` | `PurchaseSettingsViewSet` | `logistics/views/purchase_settings.py` |
 | `/api/logistics/purchase-settings/current/` | `PurchaseSettingsViewSet` | `logistics/views/purchase_settings.py` |
 | `/api/logistics/purchase-settings/{pk}/` | `PurchaseSettingsViewSet` | `logistics/views/purchase_settings.py` |

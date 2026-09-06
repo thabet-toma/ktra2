@@ -11,16 +11,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  AlertTriangle,
   FileSearch,
-  Info,
   Loader2,
   PackageCheck,
   Pencil,
   Printer,
   Save,
   Trash2,
-  Undo2,
   X,
 } from "lucide-react";
 import {
@@ -49,7 +46,7 @@ import { useToast } from "../../../contexts/ToastContext";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { KitAutocomplete, KitDateInput } from "../../kit";
 import { useDocumentDraft } from "../../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../../utils/documentDraft";
+import { DocumentDraftBanners } from "../../shared/DocumentDraftBanners";
 import {
   CommercialDocumentEditor,
   type CommercialLineColumn,
@@ -169,8 +166,6 @@ export const GoodsReceiptsPage: React.FC = () => {
   // مشتقّة داخل useEffect؛ راجع تعليق `useDocumentDraft.ts` نفسه).
   const [touched, setTouched] = useState(false);
   const markTouched = () => setTouched(true);
-  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   const isStandalone = formInvoice === "";
   const docLabel = isStandalone ? labels.standalone : labels.linked;
@@ -424,13 +419,7 @@ export const GoodsReceiptsPage: React.FC = () => {
     [editingId, pickInvoice]
   );
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<{
+  const draftApi = useDocumentDraft<{
     formInvoice: number | "";
     formInvoiceLabel: string;
     formPartner: number | "";
@@ -451,6 +440,7 @@ export const GoodsReceiptsPage: React.FC = () => {
     // (إضافة الحقل + migration + الserializer) وخارج نطاق هذه المهمة.
     docUpdatedAt: null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
   useEffect(() => {
@@ -479,78 +469,14 @@ export const GoodsReceiptsPage: React.FC = () => {
     void discardDraft();
   }, [discardDraft]);
 
-  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً بدل
-   * الانتظار الصامت حتى تحاول المغادرة. */
-  const draftSaveFailedBanner = draftSaveFailed ? (
-    <div
-      role="alert"
-      aria-live="assertive"
-      data-testid="draft-save-failed-banner"
-      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-    >
-      <AlertTriangle className="h-4 w-4 shrink-0" />
-      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
-    </div>
-  ) : null;
-
-  /* ISSUE #118: شريط الاستعادة التلقائية — يُخفى حين تُفتَح الشاشة عبر رابطٍ
-   * خاص («استلام» داخل فاتورة) لمستندٍ جديد كي لا يُعرَض «تراجع» عن استعادةٍ
-   * لم تُطبَّق أصلاً (`onRestoreDraft` تتجاهلها في هذه الحالة بعينها). */
-  const draftRestoreBanner =
-    draftBanner && !(cameFromDeepLinkRef.current && editingId == null) ? (
-      <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
-        <Info className="h-4 w-4 shrink-0" />
-        <span>
-          {draftBanner.eligibility === "restore" &&
-            `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-          {draftBanner.eligibility === "stale" &&
-            `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-          {draftBanner.eligibility === "posted" &&
-            `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند — للاطّلاع فقط.`}
-        </span>
-        {draftBanner.eligibility === "restore" && (
-          <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-            <Undo2 className="h-4 w-4" />
-            تراجع
-          </button>
-        )}
-        {draftBanner.eligibility === "stale" && (
-          <>
-            <button
-              type="button"
-              className="ktra-toolbtn"
-              onClick={() => onRestoreDraft(draftBanner.payload)}
-              data-testid="draft-stale-preview"
-            >
-              استعرض مسودتي
-            </button>
-            <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-              تجاهلها
-            </button>
-          </>
-        )}
-      </div>
-    ) : null;
-
-  /* شريط اليتامى (issue #119 §٧): مسودّات إرساليةٍ جديدة أخرى تُركت في تبويبات أخرى.
-   * يظهر في كلا الوضعين (قائمة/محرِّر) — العلاقة بالتبويبات الأخرى لا بما يُعرَض هنا. */
-  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
-    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <div className="flex flex-col gap-1">
-        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-        <ul className="list-disc pr-4 text-xs">
-          {orphanDrafts.map((o) => (
-            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-          ))}
-        </ul>
-      </div>
-      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-        <X className="h-4 w-4" />
-        إخفاء
-      </button>
-    </div>
-  ) : null;
+  /* ISSUE #118: شريط الاستعادة التلقائية يُخفى حين تُفتَح الشاشة عبر رابطٍ خاص
+   * («استلام» داخل فاتورة) لمستندٍ جديد كي لا يُعرَض «تراجع» عن استعادةٍ لم
+   * تُطبَّق أصلاً (`onRestoreDraft` تتجاهلها في هذه الحالة بعينها) — الحفظُ
+   * المحلّيّ الفاشل واليتامى غير معنيَّين بهذا الاستثناء فيبقيان كما هما. */
+  const draftApiForBanner =
+    cameFromDeepLinkRef.current && editingId == null
+      ? { ...draftApi, restoredBanner: null }
+      : draftApi;
 
   // «إرسالية جديدة» من داخل فاتورة الشراء: /purchase-receipts/new?invoice=12
   useEffect(() => {
@@ -1331,9 +1257,7 @@ export const GoodsReceiptsPage: React.FC = () => {
                   {err}
                 </div>
               )}
-              {draftSaveFailedBanner}
-              {draftRestoreBanner}
-              {orphanDraftsBanner}
+              <DocumentDraftBanners draft={draftApiForBanner} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
             </>
           }
           status={
@@ -1395,7 +1319,9 @@ export const GoodsReceiptsPage: React.FC = () => {
       searchValue={search}
       searchPlaceholder="بحث برقم المستند / الفاتورة / المورد…"
       onSearchChange={setSearch}
-      detailPanel={orphanDraftsBanner}
+      detailPanel={
+        <DocumentDraftBanners draft={draftApiForBanner} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
+      }
       onNew={() => void openNew()}
       onReload={() => void load()}
       newLabel="إرسالية جديدة"

@@ -30,6 +30,7 @@ import {
   type PurchaseRFQRecipientDto,
 } from "../../services/procurementDocumentsApi";
 import { PurchaseRFQForm } from "./price-offers/PurchaseRFQForm";
+import { PublicQuoteRequestsSection } from "./price-offers/PublicQuoteRequestsSection";
 import { quotationToDraftDeal } from "../../utils/quotationToDraftDeal";
 import { rfqToDraftOffer } from "../../utils/rfqToDraftOffer";
 import { documentSerialDisplay, elideDocumentNumber } from "../../utils/documentNumberDisplay";
@@ -835,6 +836,16 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
           onReload={() => setReloadKey((key) => key + 1)}
           newLabel="عرض جديد"
           onRowDoubleClick={(offer) => void openEdit(offer)}
+        />
+      )}
+      {/* مواصفة #147 (المرحلة 5أ، خريطة #138 القرار 5): جدولٌ ثانٍ داخل تبويب
+          «العروض والأوامر» — لا تبويبٌ ثالث، ويختفي كلياً بلا ردود (يتولّى
+          المكوّن نفسه ذلك). */}
+      {activeTab === "offers" && (
+        <PublicQuoteRequestsSection
+          rfqs={rfqs}
+          reloadSignal={reloadKey}
+          onApproved={() => setReloadKey((key) => key + 1)}
         />
       )}
       <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />

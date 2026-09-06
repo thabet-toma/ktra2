@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom";
 import { ShareRowButton } from "../shared/ShareRowButton";
 import {
-  AlertTriangle, FileSearch, Info, Loader2, PackageCheck, Pencil, Printer, Save, Trash2, Undo2, X,
+  FileSearch, Loader2, PackageCheck, Pencil, Printer, Save, Trash2, X,
 } from "lucide-react";
 import {
   createDeliveryNote,
@@ -39,7 +39,7 @@ import { printReport } from "../../utils/printReport";
 import { useToast } from "../../contexts/ToastContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 import { KitAutocomplete, KitDateInput } from "../kit";
 import {
   CommercialDocumentEditor,
@@ -161,8 +161,6 @@ export const DeliveryNotesPage: React.FC = () => {
   // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم.
   const [touched, setTouched] = useState(false);
   const markTouched = () => setTouched(true);
-  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
   /* ISSUE #121: موضعا تصفيرٍ/تحميلٍ غيرِ متزامنَين يشتركان في نفس هويّة
    * المسودّة (`editingId` لا يتغيّر أثناءهما): `openNew` (تحميل مراجع ثم
    * تعبئة بنود الفاتورة تلقائياً) و`openEdit` (تحميل مراجع ثم إعادة بناء
@@ -200,13 +198,7 @@ export const DeliveryNotesPage: React.FC = () => {
     setTouched(true);
   }, [applyDraftPayload]);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<DeliveryDraftPayload>({
+  const draftApi = useDocumentDraft<DeliveryDraftPayload>({
     docType: "delivery_note",
     docId: editingId,
     payload: draftPayload,
@@ -224,6 +216,7 @@ export const DeliveryNotesPage: React.FC = () => {
     // (إضافة updated_at حقيقي + migration + الserializer) وخارج نطاق هذه المهمة.
     docUpdatedAt: null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
   useEffect(() => {
@@ -1038,67 +1031,6 @@ export const DeliveryNotesPage: React.FC = () => {
     );
   }
 
-  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً. */
-  const draftSaveFailedBanner = draftSaveFailed ? (
-    <div
-      role="alert"
-      aria-live="assertive"
-      data-testid="draft-save-failed-banner"
-      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-    >
-      <AlertTriangle className="h-4 w-4 shrink-0" />
-      <span>تعذّر حفظ نسخة محلية من هذه الإرسالية — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
-    </div>
-  ) : null;
-
-  /* ISSUE #118: شريط الاستعادة التلقائية — إخبارٌ لا سؤال. */
-  const draftRestoreBanner = draftBanner ? (
-    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <span>
-        {draftBanner.eligibility === "restore" &&
-          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "stale" &&
-          `تغيّرت الإرسالية بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "posted" &&
-          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند — للاطّلاع فقط.`}
-      </span>
-      {draftBanner.eligibility === "restore" && (
-        <button type="button" className="ktra-toolbtn" onClick={() => void handleUndoDraft()} data-testid="draft-restored-undo">
-          <Undo2 className="h-4 w-4" /> تراجع
-        </button>
-      )}
-      {draftBanner.eligibility === "stale" && (
-        <>
-          <button type="button" className="ktra-toolbtn" onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
-            استعرض مسودتي
-          </button>
-          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-            تجاهلها
-          </button>
-        </>
-      )}
-    </div>
-  ) : null;
-
-  /* شريط اليتامى (issue #119 §٧): مسودّات إرساليةٍ جديدة أخرى تُركت في تبويبات أخرى. */
-  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
-    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <div className="flex flex-col gap-1">
-        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-        <ul className="list-disc pr-4 text-xs">
-          {orphanDrafts.map((o) => (
-            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-          ))}
-        </ul>
-      </div>
-      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-        <X className="h-4 w-4" /> إخفاء
-      </button>
-    </div>
-  ) : null;
-
   if (mode === "form") {
     const actions: CommercialToolbarAction[] = [
       {
@@ -1258,9 +1190,7 @@ export const DeliveryNotesPage: React.FC = () => {
           }
           banner={
             <>
-              {draftSaveFailedBanner}
-              {draftRestoreBanner}
-              {orphanDraftsBanner}
+              <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={() => void handleUndoDraft()} isTouched={touched} />
               {err ? (
                 <div className="ktra-banner ktra-banner--err" role="alert">
                   {err}

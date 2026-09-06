@@ -15,7 +15,7 @@ import {
 } from "../../kit";
 import {
   Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Search, Info,
-  FileText, Link2, Plus, Pencil, Share2, Undo2, MessageSquare,
+  FileText, Link2, Plus, Pencil, Share2, MessageSquare,
 } from "lucide-react";
 import { formatDateValue, formatTimeValue } from "../../../utils/formatDate";
 import { ItemSearchModal } from "./ItemSearchModal";
@@ -38,7 +38,7 @@ import {
 import { getScreenColumns } from "../../../utils/procurementColumns";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { useDocumentDraft } from "../../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../../utils/documentDraft";
+import { DocumentDraftBanners } from "../../shared/DocumentDraftBanners";
 
 // ISSUE #113: كانت هذه الشاشة تخدم مستندين بلافتة `offerType` وحدها — «عرض
 // سعر من مورد» و«طلبية إلى مورد» — بلا أن تُحفظ اللافتة في الخادم إطلاقاً
@@ -156,7 +156,6 @@ export const PriceOfferForm: React.FC<Props> = ({
   const [isDirty, setIsDirty] = useState(false);
   const markDirty = useCallback((value: boolean) => setIsDirty(value), []);
   const skipNextDirtyRef = useRef(true);
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [lastKey, setLastKey] = useState("—");
@@ -316,13 +315,7 @@ export const PriceOfferForm: React.FC<Props> = ({
     markDirty(true);
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<PriceOfferDraftPayload>({
+  const draftApi = useDocumentDraft<PriceOfferDraftPayload>({
     // ISSUE #133 غ٥: مرآةُ نفس التصحيح على `PurchaseRFQForm.tsx` — مفتاحٌ لكل
     // نطاق كي لا تظهر مسودّةٌ يتيمة لعرض شراء محلّي في شاشة عرض استيراد.
     docType: `price_offer_${scope}`,
@@ -338,6 +331,7 @@ export const PriceOfferForm: React.FC<Props> = ({
     isPosted: isReadOnly,
     docUpdatedAt: offer.updatedAt ?? null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   // isTouched مشتقّة من تغيّر الحمولة الفعلي لا من كل معالِج على حدة (عشرات
   // الحقول هنا) — تخطّي أوّل تشغيلٍ بعد كل إعادة تعبئة برمجية (تحميل/تراجع/استعادة)
@@ -370,66 +364,6 @@ export const PriceOfferForm: React.FC<Props> = ({
     markDirty(false);
     void discardDraft();
   }, [offer, resetFieldsFromOffer, discardDraft]);
-
-  const draftSaveFailedBanner = draftSaveFailed && !isReadOnly ? (
-    <div
-      role="alert"
-      aria-live="assertive"
-      data-testid="draft-save-failed-banner"
-      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-    >
-      <AlertCircle className="h-4 w-4 shrink-0" />
-      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «تخزين» يدوياً كي لا يضيع عملك.</span>
-    </div>
-  ) : null;
-
-  const draftRestoreBanner = draftBanner ? (
-    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <span>
-        {draftBanner.eligibility === "restore" &&
-          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "stale" &&
-          `تغيّر المستند بعد مسودتك (عُدِّل ${formatTimeValue(offer.updatedAt || "")}، ومسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "posted" &&
-          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند — للاطّلاع فقط (غير قابل للتعديل حالياً).`}
-      </span>
-      {draftBanner.eligibility === "restore" && (
-        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-          <Undo2 className="h-4 w-4" /> تراجع
-        </button>
-      )}
-      {draftBanner.eligibility === "stale" && (
-        <>
-          <button type="button" className="ktra-toolbtn"
-            onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
-            استعرض مسودتي
-          </button>
-          <button type="button" className="ktra-toolbtn"
-            onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-            تجاهلها
-          </button>
-        </>
-      )}
-    </div>
-  ) : null;
-
-  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
-    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <div className="flex flex-col gap-1">
-        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-        <ul className="list-disc pr-4 text-xs">
-          {orphanDrafts.map((o) => (
-            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-          ))}
-        </ul>
-      </div>
-      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-        <X className="h-4 w-4" /> إخفاء
-      </button>
-    </div>
-  ) : null;
 
   const buildPayload = useCallback((): Partial<PriceOffer> => ({
     ...offer,
@@ -897,10 +831,8 @@ export const PriceOfferForm: React.FC<Props> = ({
 
   const banner = (
     <>
-      {draftSaveFailedBanner}
+      <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={isDirty} readOnly={isReadOnly} />
       {saveBanner}
-      {draftRestoreBanner}
-      {orphanDraftsBanner}
     </>
   );
 

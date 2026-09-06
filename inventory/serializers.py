@@ -210,6 +210,9 @@ class ProductSerializer(serializers.ModelSerializer):
             # (وحدتان إضافيتان بمعاملَيهما، الوصف الداخلي، موقع التخزين).
             'uom2', 'uom2_factor', 'uom3', 'uom3_factor',
             'description', 'storage_location',
+            # #147 M2: صورة مرجعية واحدة للبراند — يراها المورّد على رابط طلب
+            # عرض السعر العام. رابطٌ نصّي ترفعه الواجهة عبر Cloudinary.
+            'image_url',
             # تجاوزات الحسابات على مستوى المنتج (نمط Odoo: حساب إيراد/مصروف
             # على المنتج يسبق حساب تصنيفه).
             'sale_account_override', 'sale_return_account_override',
@@ -518,6 +521,9 @@ class ProductLookupSerializer(ProductSerializer):
             # #22: منتقي المستندات — «هذا موجود» يحمل الأب لا يعرضه خياراً.
             'family_id', 'family_name',
             'category', 'category_name', 'hs_code', 'min_stock_level',
+            # #147 M2: صورة البراند المرجعية — صفحة طلب عرض السعر العامة ومحرِّر
+            # بندها يعرضانها من هنا (نفس عقد المنتقي)، لا بجلب المنتج كاملاً.
+            'image_url',
             # T-REORDER: حقلان يجعلان بند الفاتورة يعرف حالة المنتج وبدائله:
             # `stock_status` يصبغ الخيار (نفذ/منخفض)، و`group_key` يجمع موديلات
             # النوع الواحد فيقترح المنتقي بديلاً بدل أن يقف عند «الرصيد 0».

@@ -1625,7 +1625,14 @@ class CustomerPriceListViewSet(viewsets.ViewSet):
         cid = request.query_params.get("customer")
         if not cid or not str(cid).isdigit():
             return Response({"error": "باراميتر customer مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
-        rows = customer_price_list(tenant_id=tenant.TenantID, customer_id=int(cid))
+        # T-PICKUNIFY (#147 M4): عرض السعر المفتوح للتحرير يستبعد نفسه من
+        # رتبة SalesQuotationLine — وإلا لقرأ رقمه هو كأنه تاريخ سابق.
+        exclude_q = request.query_params.get("exclude_quotation")
+        exclude_quotation_id = int(exclude_q) if exclude_q and str(exclude_q).isdigit() else None
+        rows = customer_price_list(
+            tenant_id=tenant.TenantID, customer_id=int(cid),
+            exclude_quotation_id=exclude_quotation_id,
+        )
         return Response(rows)
 
     @action(detail=False, methods=["put", "post"], url_path="save")

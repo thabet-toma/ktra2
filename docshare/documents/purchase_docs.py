@@ -664,9 +664,11 @@ def build_purchase_rfq(rfq) -> dict:
         .only(
             "id", "rfq_id", "seq", "name_snapshot", "specs", "quantity",
             "unit_of_measure", "product__name_ar", "product__name_en",
-            # `estimated_price` **لا** يُذكر هنا: العمود لا يُحمَّل من القاعدة
-            # أصلاً، فلا تسريب ممكن حتى بخطأ عرضٍ لاحق —
+            # مواصفة #147 (المرحلة 3ب): صورة المنتج تصل للمورّد فيعرف ما يُسعّره —
+            # عمودٌ واحدٌ فقط يُضاف؛ `estimated_price` **لا** يُذكر هنا: العمود لا
+            # يُحمَّل من القاعدة أصلاً، فلا تسريب ممكن حتى بخطأ عرضٍ لاحق —
             # `tests/test_purchase_leakage.py` يقيس ذلك بـ`get_deferred_fields`.
+            "product__image_url",
         )
         .order_by("seq", "id")
     )
@@ -679,6 +681,7 @@ def build_purchase_rfq(rfq) -> dict:
             "specs": line.specs or "",
             "quantity": money(line.quantity),
             "unit": line.unit_of_measure or "",
+            "image_url": (line.product.image_url if line.product_id else "") or "",
         })
 
     # لا طرفَ واحداً على المستند نفسه: الطلبية تخرج لعدّة موردين، وكلٌّ منهم
@@ -738,13 +741,31 @@ def _rfq_quote_closed_reason(rfq) -> str:
     return "لم تعد هذه الطلبية تقبل الأسعار."
 
 
-def _apply_purchase_rfq_quote(rfq, *, name, prices, request, share, ip):
-    """يربط الأسعار بمستقبِل هذا الرابط تحديداً — لا بالطلبية عموماً.
+def _rfq_public_share(share) -> bool:
+    """رابطٌ عامٌّ لا صاحب واحد له — نفس الفحص يخدم التطبيق والتعبئة معاً.
 
-    الاتجاه **`PurchaseRFQRecipient.share → DocumentShare`** لا العكس: هذه
-    الدالّة وحدها (لا `docshare/services.py` العامّة) تعرف بوجود `PurchaseRFQ`
-    و`PurchaseRFQRecipient` — نفس نمط `_apply_purchase_order_decision` أعلاه
-    التي تستدعي `logistics.services.confirm_purchase_order`.
+    مواصفة #147 (المرحلة 3ب): مكانٌ واحد لا اثنان. فحصان منفصلان في دالّتين
+    (`_apply_purchase_rfq_quote` و`_rfq_quote_prefill`) كانا سينحرفان يوم
+    يتغيّر تعريف «عامّ» (راية أخرى، أو شرطٌ إضافي) في واحدةٍ ويُنسى في الثانية.
+    """
+    return bool(share.is_public)
+
+
+def _apply_purchase_rfq_quote(rfq, *, name, prices, request, share, ip):
+    """يربط الأسعار بمستقبِل هذا الرابط — أو، لرابطٍ عامّ، بجدول انتظار المجهول.
+
+    **ثلاثةُ فروعٍ بالترتيب** (مواصفة #147، المرحلة 3ب):
+    (أ) رابطٌ لمستقبِلٍ مسمّى — الطريق **القديم بلا حرفٍ واحد**، الاتجاه
+        `PurchaseRFQRecipient.share → DocumentShare` لا العكس: هذه الدالّة
+        وحدها (لا `docshare/services.py` العامّة) تعرف بوجود `PurchaseRFQ`
+        و`PurchaseRFQRecipient` — نفس نمط `_apply_purchase_order_decision`
+        أعلاه التي تستدعي `logistics.services.confirm_purchase_order`.
+    (ب) وإلا، رابطٌ **عامّ** (`_rfq_public_share`) — ردٌّ مجهولٌ ينزل جدول
+        انتظارٍ منفصل (`logistics.services.record_public_quote_request`)،
+        لا `SupplierQuotation` مباشرةً.
+    (ج) وإلا — الرفضُ القديم بلا تغيير.
+    الترتيبُ يهمّ: (أ) أولاً كي لا يُخفَض مورّدٌ مسمّى إلى جدول الانتظار لو
+    حمل رابطه الراية خطأً بأيّ عطبٍ مستقبليّ.
 
     **ISSUE #133 غ٢**: `currency` حقلٌ اختياريّ يصل في جسم النموذج (`request
     .data`) — لا توقيعاً جديداً على `submit_quote`/`apply` العامّين، فبقيّة
@@ -754,10 +775,17 @@ def _apply_purchase_rfq_quote(rfq, *, name, prices, request, share, ip):
 
     **ISSUE #133 غ٣**: نفس النمط بالضبط لملاحظتَي المورّد — `general_note`
     (حقلٌ عامٌّ واحد) و`note_<line_id>` (بجانب `price_<line_id>` الموجود) —
-    كلاهما اختياريّ فلا يكسر رابطاً قديماً بلا خانات ملاحظات.
+    كلاهما اختياريّ فلا يكسر رابطاً قديماً بلا خانات ملاحظات. القراءةُ هنا
+    انتقلت **قبل** فرع المستقبِل (لا بعده كما كانت) لأن الفرعين (أ) و(ب)
+    يحتاجانها معاً — القيمُ المقروءة والنداءُ لِـ`submit_rfq_supplier_quote`
+    في الفرع (أ) بلا أيّ تغيير.
+
+    **مواصفة #147**: `email` (إلزاميّ) و`phone` (اختياريّ) حقلان يصلان في
+    جسم النموذج **للرابط العامّ وحده** — بنفس نمط `currency`/`general_note`
+    لا توقيعاً جديداً على العقد العامّ.
     """
     from logistics.models import PurchaseRFQRecipient
-    from logistics.services import submit_rfq_supplier_quote
+    from logistics.services import record_public_quote_request, submit_rfq_supplier_quote
 
     recipient = (
         PurchaseRFQRecipient.objects
@@ -765,8 +793,6 @@ def _apply_purchase_rfq_quote(rfq, *, name, prices, request, share, ip):
         .filter(share_id=share.pk, rfq_id=rfq.pk)
         .first()
     )
-    if recipient is None:
-        raise ValidationError("هذا الرابط غير مربوطٍ بمورّدٍ على هذه الطلبية.")
     currency_id = request.data.get("currency") or None
     general_note = str(request.data.get("general_note") or "").strip()
     notes = {}
@@ -774,10 +800,28 @@ def _apply_purchase_rfq_quote(rfq, *, name, prices, request, share, ip):
         raw = request.data.get(f"note_{line.id}")
         if raw is not None:
             notes[line.id] = str(raw).strip()
-    submit_rfq_supplier_quote(
-        recipient, name=name, prices=prices, ip=ip, currency_id=currency_id,
-        general_note=general_note, notes=notes,
-    )
+
+    if recipient is not None:
+        # (أ) الطريق القديم — بلا حرفٍ واحد.
+        submit_rfq_supplier_quote(
+            recipient, name=name, prices=prices, ip=ip, currency_id=currency_id,
+            general_note=general_note, notes=notes,
+        )
+        return
+
+    if _rfq_public_share(share):
+        # (ب) رابطٌ عامّ — مجهولٌ ينزل جدول انتظارٍ منفصل، لا عرض سعرٍ مباشرة.
+        email = str(request.data.get("email") or "").strip()
+        phone = str(request.data.get("phone") or "").strip()
+        record_public_quote_request(
+            rfq, share=share, name=name, email=email, phone=phone,
+            prices=prices, currency_id=currency_id, general_note=general_note,
+            notes=notes, ip=ip,
+        )
+        return
+
+    # (ج) لا مستقبِلٌ مسمّى ولا رابطٌ عامّ.
+    raise ValidationError("هذا الرابط غير مربوطٍ بمورّدٍ على هذه الطلبية.")
 
 
 def _rfq_quote_prefill(rfq, share) -> dict:
@@ -796,7 +840,15 @@ def _rfq_quote_prefill(rfq, share) -> dict:
     **ISSUE #133 غ٣**: وتحمل ملاحظاته أيضاً — `notes` لكلّ بند و`general_note`
     على الطلبية كلّها — بنفس الحجّة: بلا تعبئةٍ يضطرّ المورّد أن يكتب ملاحظته
     من جديد كي يصحّح كلمةً واحدة.
+
+    **مواصفة #147، بلا استثناء**: رابطٌ عامّ لا صاحب واحد له — «أسعاره كما
+    أرسلها آخر مرّة» سؤالٌ لا معنى له حين «هو» ليس شخصاً واحداً، وتعبئةُ ردّ
+    غريبٍ أمام غريبٍ آخر بالضبط التسريب الذي بُنيت هذه الميزة لمنعه. الفحصُ
+    (`_rfq_public_share`) نفسُه الذي يفرّع `_apply_purchase_rfq_quote` أعلاه.
     """
+    if _rfq_public_share(share):
+        return {}
+
     from logistics.models import PurchaseRFQRecipient
 
     recipient = (
@@ -902,6 +954,11 @@ _RFQ_QUOTE_ERROR_TRANSLATIONS = {
         "This RFQ has been awarded to another supplier and no longer accepts prices.",
     "أُلغيت هذه الطلبية.": "This RFQ has been cancelled.",
     "لم تعد هذه الطلبية تقبل الأسعار.": "This RFQ no longer accepts prices.",
+    # مواصفة #147 (المرحلة 3ب): رسائل `record_public_quote_request` — يصلها
+    # مجهولٌ يملأ النموذج العامّ فقط، لا مورّدٌ مسمّى.
+    "الاسم مطلوب.": "Your name is required.",
+    "البريد الإلكتروني مطلوب.": "Your email is required.",
+    "أدخل سعراً لبند واحد على الأقل.": "Enter a price for at least one line.",
 }
 
 QUOTE_PURCHASE_RFQ = {

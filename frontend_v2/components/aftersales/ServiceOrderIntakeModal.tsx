@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Info, Loader2, Search, ShieldAlert, ShieldCheck, Undo2, X } from "lucide-react";
+import { Loader2, Search, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import {
   createServiceOrder,
   lookupIntake,
@@ -14,7 +14,7 @@ import { warrantyRemainingText, warrantyStatusLabel } from "../../utils/warranty
 import { warrantyPillClass } from "./warrantyStatus";
 import { useToast } from "../../contexts/ToastContext";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 
 /**
  * THA-24 م4 — استقبال جهاز: معرّفٌ واحد يُسأل عنه، وثلاثة مصادر تُجيب.
@@ -88,8 +88,6 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
   // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم (لا
   // مشتقّة داخل useEffect؛ راجع تعليق hooks/useDocumentDraft.ts).
   const [touched, setTouched] = useState(false);
-  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
   const markTouched = () => setTouched(true);
 
   const patch = <K extends keyof ServiceOrderDraft>(key: K, value: ServiceOrderDraft[K]) => {
@@ -174,13 +172,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
     setTouched(true);
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<Partial<ServiceOrderDraft>>({
+  const draftApi = useDocumentDraft<Partial<ServiceOrderDraft>>({
     docType: "service_order_intake",
     docId: null,
     payload: draftPayload,
@@ -189,6 +181,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
     isPosted: false,
     docUpdatedAt: null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
   useEffect(() => {
@@ -253,75 +246,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
           </button>
         </header>
 
-        {/* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً بدل
-         * الانتظار الصامت حتى تحاول المغادرة. */}
-        {draftSaveFailed && (
-          <div
-            role="alert"
-            aria-live="assertive"
-            data-testid="draft-save-failed-banner"
-            className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-          >
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
-          </div>
-        )}
-
-        {/* ISSUE #118: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى مُطبَّقٌ
-         * على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً. مودالٌ
-         * ينشئ سجلاً جديداً دائماً هنا، فواقعياً لا تصل الأهلية إلا "restore" —
-         * "stale"/"posted" مُنفَّذتان بلا استخدام فعلي كي يبقى النمط موحّداً. */}
-        {draftBanner && (
-          <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
-            <Info className="h-4 w-4 shrink-0" />
-            <span>
-              {draftBanner.eligibility === "restore" &&
-                `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-              {draftBanner.eligibility === "stale" &&
-                `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-              {draftBanner.eligibility === "posted" &&
-                `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
-            </span>
-            {draftBanner.eligibility === "restore" && (
-              <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-                <Undo2 className="h-4 w-4" /> تراجع
-              </button>
-            )}
-            {draftBanner.eligibility === "stale" && (
-              <>
-                <button
-                  type="button"
-                  className="ktra-toolbtn"
-                  onClick={() => onRestoreDraft(draftBanner.payload)}
-                  data-testid="draft-stale-preview"
-                >
-                  استعرض مسودتي
-                </button>
-                <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-                  تجاهلها
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* شريط اليتامى (issue #119 §٧): مسودّات فتح أمرٍ جديد أخرى تُركت في تبويبات أخرى. */}
-        {orphanDrafts.length > 0 && !orphanBarDismissed && (
-          <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
-            <Info className="h-4 w-4 shrink-0" />
-            <div className="flex flex-col gap-1">
-              <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-              <ul className="list-disc pr-4 text-xs">
-                {orphanDrafts.map((o) => (
-                  <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-                ))}
-              </ul>
-            </div>
-            <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-              <X className="h-4 w-4" /> إخفاء
-            </button>
-          </div>
-        )}
+        <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
 
         <div className="space-y-4 p-3 md:p-4">
           {/* ── المعرّف والبحث الموحّد ──────────────────────────────────── */}

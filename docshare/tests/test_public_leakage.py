@@ -48,7 +48,9 @@ LINE_WHITELIST = {
 #: `line_total` (المورّد هو من يكتب السعر، لا يقرأه)، ولا `catalog_no`/`note`
 #: (ليسا في `SUPPLIER_ALLOWED_KEYS` بـ`procurementColumns.ts`). `id` إضافيٌّ
 #: هنا وحده لربط صندوق السعر بالبند في النموذج — رقمُ سطرٍ داخليّ لا يسرّب شيئاً.
-RFQ_LINE_WHITELIST = {"id", "seq", "name", "specs", "quantity", "unit"}
+#: `image_url` (مواصفة #147، المرحلة 3ب): صورةُ المنتج — تصل المورّد فيعرف ما
+#: يُسعّره، ولا تحمل شيئاً حسّاساً (الرابط نفسه معروضٌ للجميع أصلاً).
+RFQ_LINE_WHITELIST = {"id", "seq", "name", "specs", "quantity", "unit", "image_url"}
 
 LINE_WHITELIST_BY_TYPE = {"purchase_rfq": RFQ_LINE_WHITELIST}
 

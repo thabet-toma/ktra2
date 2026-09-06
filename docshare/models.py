@@ -107,6 +107,12 @@ class DocumentShare(models.Model):
     token = models.CharField(
         max_length=64, unique=True, db_index=True, db_column="Token",
     )
+    #: مواصفة #147 (المرحلة 3ب) — راية **صريحة** ومخزَّنة، لا استنتاجٌ من غياب
+    #: مستقبِلٍ مسمّى (`PurchaseRFQRecipient.share`). أيّ عطبٍ يحذف صفّ ذلك
+    #: المستقبِل كان سيحوّل رابط موردٍ خاصٍّ إلى عامٍّ بصمت — وهو بالضبط عطبُ
+    #: Odoo الموثَّق: مشاركةٌ برمزٍ فقط تنسب كلَّ مجهولٍ إلى شريك السجلّ نفسه.
+    #: الجمهور هنا حقيقةٌ تُكتب لحظة الإنشاء لا تُشتقّ لاحقاً.
+    is_public = models.BooleanField(default=False, db_column="IsPublic")
     #: **إلزامي بلا قيمة فارغة** — «رابط بلا انتهاء» حالةٌ لا نريد أن توجد أصلاً.
     expires_at = models.DateTimeField(db_column="ExpiresAt")
     revoked_at = models.DateTimeField(null=True, blank=True, db_column="RevokedAt")

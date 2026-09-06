@@ -24,9 +24,9 @@ import {
   type KitToolbarAction,
   type KitTab,
 } from "../kit";
-import { Plus, Save, X, RefreshCw, AlertTriangle, Trash2, Info, Undo2 } from "lucide-react";
+import { Plus, Save, X, RefreshCw, AlertTriangle, Trash2 } from "lucide-react";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 
 type Product = {
   id: number;
@@ -117,8 +117,6 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
   // حالة «عُدِّل مرّةً ثم غادر» التي صُمِّمت الميزة لأجلها).
   const [touched, setTouched] = useState(false);
   const markTouched = () => setTouched(true);
-  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -267,13 +265,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
     setTouched(true);
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<PurchaseReturnDraftPayload>({
+  const draftApi = useDocumentDraft<PurchaseReturnDraftPayload>({
     docType: "purchase_return",
     docId: null,
     payload: draftPayload,
@@ -282,6 +274,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
     isPosted: false,
     docUpdatedAt: null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
   useEffect(() => {
@@ -442,80 +435,6 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
     ...(onBack ? [{ key: "back", label: "خروج", icon: <X />, onClick: onBack, danger: true } as KitToolbarAction] : []),
   ];
 
-  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً بدل
-   * الانتظار الصامت حتى تحاول المغادرة. */
-  const draftSaveFailedBanner = draftSaveFailed ? (
-    <div
-      role="alert"
-      aria-live="assertive"
-      data-testid="draft-save-failed-banner"
-      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-    >
-      <AlertTriangle className="h-4 w-4 shrink-0" />
-      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
-    </div>
-  ) : null;
-
-  /* ISSUE #118: شريط الاستعادة التلقائية — بلا لافتة تسأل. المحتوى مُطبَّقٌ
-   * على النموذج فعلاً (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً. */
-  const draftRestoreBanner = draftBanner ? (
-    <div
-      className="ktra-banner ktra-banner--warn"
-      role="status"
-      data-testid="draft-restored-banner"
-    >
-      <Info className="h-4 w-4 shrink-0" />
-      <span>
-        {draftBanner.eligibility === "restore" &&
-          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "stale" &&
-          `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "posted" &&
-          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
-      </span>
-      {draftBanner.eligibility === "restore" && (
-        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-          <Undo2 className="h-4 w-4" />
-          تراجع
-        </button>
-      )}
-      {draftBanner.eligibility === "stale" && (
-        <>
-          <button
-            type="button"
-            className="ktra-toolbtn"
-            onClick={() => onRestoreDraft(draftBanner.payload)}
-            data-testid="draft-stale-preview"
-          >
-            استعرض مسودتي
-          </button>
-          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-            تجاهلها
-          </button>
-        </>
-      )}
-    </div>
-  ) : null;
-
-  /* شريط اليتامى (issue #119 §٧): مسودّات مرجعٍ جديد أخرى تُركت في تبويبات أخرى. */
-  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
-    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <div className="flex flex-col gap-1">
-        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-        <ul className="list-disc pr-4 text-xs">
-          {orphanDrafts.map((o) => (
-            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-          ))}
-        </ul>
-      </div>
-      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-        <X className="h-4 w-4" />
-        إخفاء
-      </button>
-    </div>
-  ) : null;
-
   const tabs: KitTab[] = [
     {
       key: "main",
@@ -603,9 +522,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
           </>
         }
       >
-        {draftSaveFailedBanner}
-        {draftRestoreBanner}
-        {orphanDraftsBanner}
+        <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
       </KitDocumentShell>
 
       {/* W6: منتقي بنود المرجع — اختَر البنود واضبط كمية الإرجاع (مقيّدة بالمتبقّي). */}

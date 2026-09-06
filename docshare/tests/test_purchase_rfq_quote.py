@@ -730,3 +730,124 @@ def test_comparison_matrix_carries_the_suppliers_note_and_our_reply_never_leaks_
     # وعلى السطح العامّ الذي يفتحه المورّد نفسه — الغائب دائماً بلا استثناء.
     public_html = client.get(f"/s/{share.token}").content.decode("utf-8")
     assert "سرّنا-الداخلي-لا-يخرج-للمورّد" not in public_html
+
+
+# ── مواصفة #147 (المرحلة 3ب): الرابط العامّ — مجهولٌ بلا `PurchaseRFQRecipient` ──
+
+def _public_share(env, rfq):
+    return services.create_share(env["tenant"], DOC_PURCHASE_RFQ, rfq.pk, is_public=True)
+
+
+def test_public_link_accepts_a_submission_with_no_recipient_and_creates_a_public_request(
+    client, env, purchase_rfq,
+):
+    from logistics.models import PublicSupplierQuoteRequest
+
+    share = _public_share(env, purchase_rfq)
+    line_id = _line_id(purchase_rfq)
+
+    response = client.post(
+        f"/s/{share.token}/quote/",
+        {
+            "name": "مصنع مجهول", "email": "unknown@example.com",
+            "phone": "0599999999", f"price_{line_id}": "42",
+        },
+    )
+    assert response.status_code == 302, response.content
+
+    assert PublicSupplierQuoteRequest.objects.filter(rfq=purchase_rfq).count() == 1
+    request_row = PublicSupplierQuoteRequest.objects.get(rfq=purchase_rfq)
+    assert request_row.supplier_name == "مصنع مجهول"
+    assert request_row.supplier_email == "unknown@example.com"
+    assert request_row.supplier_phone == "0599999999"
+    assert request_row.share_id == share.pk
+    assert request_row.lines.count() == 1
+    assert request_row.lines.first().unit_price == Decimal("42.0000")
+
+    # لا `SupplierQuotation` تولّدت من هذا الردّ — جدولُ انتظارٍ لا كتابة مباشرة.
+    from logistics.models import SupplierQuotation
+
+    assert not SupplierQuotation.objects.filter(rfq=purchase_rfq).exists()
+
+
+def test_a_second_submission_on_the_same_public_link_appends_a_second_row(
+    client, env, purchase_rfq,
+):
+    from logistics.models import PublicSupplierQuoteRequest
+
+    share = _public_share(env, purchase_rfq)
+    line_id = _line_id(purchase_rfq)
+
+    client.post(
+        f"/s/{share.token}/quote/",
+        {"name": "غريبٌ أوّل", "email": "one@example.com", f"price_{line_id}": "10"},
+    )
+    client.post(
+        f"/s/{share.token}/quote/",
+        {"name": "غريبٌ ثانٍ", "email": "two@example.com", f"price_{line_id}": "20"},
+    )
+
+    assert PublicSupplierQuoteRequest.objects.filter(rfq=purchase_rfq).count() == 2
+    names = set(
+        PublicSupplierQuoteRequest.objects.filter(rfq=purchase_rfq)
+        .values_list("supplier_name", flat=True)
+    )
+    assert names == {"غريبٌ أوّل", "غريبٌ ثانٍ"}
+
+
+def test_prefill_on_a_public_link_is_always_empty_even_after_a_submission(
+    client, env, purchase_rfq,
+):
+    share = _public_share(env, purchase_rfq)
+    line_id = _line_id(purchase_rfq)
+
+    client.post(
+        f"/s/{share.token}/quote/",
+        {"name": "غريبٌ", "email": "x@example.com", f"price_{line_id}": "99.9"},
+    )
+    html = client.get(f"/s/{share.token}").content.decode("utf-8")
+    assert 'value="99.9000"' not in html
+    assert 'value=""' in html or f'name="price_{line_id}"' in html
+
+
+def test_named_recipient_path_is_unchanged_after_the_public_link_branch_was_added(
+    client, env, purchase_rfq, rfq_recipient,
+):
+    """(أ) الطريقُ القديم بلا حرفٍ واحد: لا يزال يُنشئ/يحدّث `SupplierQuotation`
+    عبر المستقبِل، ولا يزال يعبّئ سعر هذا المورّد نفسه عند عودته."""
+    share = _wire_share(env, purchase_rfq, rfq_recipient)
+    line_id = _line_id(purchase_rfq)
+
+    response = client.post(
+        f"/s/{share.token}/quote/", {"name": "مورّدٌ مسمّى", f"price_{line_id}": "15"},
+    )
+    assert response.status_code == 302
+
+    rfq_recipient.refresh_from_db()
+    assert rfq_recipient.quotation_id is not None
+    assert rfq_recipient.quotation.supplier_id == rfq_recipient.supplier_id
+
+    from logistics.models import PublicSupplierQuoteRequest
+
+    assert not PublicSupplierQuoteRequest.objects.filter(rfq=purchase_rfq).exists()
+
+    html = client.get(f"/s/{share.token}").content.decode("utf-8")
+    assert 'value="15.0000"' in html
+
+
+def test_a_share_neither_public_nor_bound_to_a_recipient_is_still_rejected(
+    client, env, purchase_rfq,
+):
+    """(ج) لا شيء تغيّر هنا: رابطٌ عاديّ (`is_public=False` الافتراضي) بلا
+    مستقبِلٍ مربوطٍ به يبقى مرفوضاً برسالته القديمة نفسها."""
+    share = services.create_share(
+        env["tenant"], DOC_PURCHASE_RFQ, purchase_rfq.pk, dedupe=False,
+    )
+    assert share.is_public is False
+    line_id = _line_id(purchase_rfq)
+
+    response = client.post(
+        f"/s/{share.token}/quote/", {"name": "غريبٌ", f"price_{line_id}": "10"},
+    )
+    assert response.status_code == 409
+    assert "هذا الرابط غير مربوطٍ بمورّدٍ على هذه الطلبية." in response.content.decode("utf-8")

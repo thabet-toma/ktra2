@@ -20,6 +20,7 @@ from logistics.models import (
     PurchaseRFQ,
     PurchaseRFQLine,
     PurchaseRFQRecipient,
+    PublicSupplierQuoteRequest,
     PurchaseOrder,
     LogisticsDeal, LogisticsDealItem, LogisticsShipment,
     LogisticsClearance, LogisticsShipmentDeal,
@@ -33,6 +34,7 @@ from logistics.serializers import (
     SupplierQuotationLineSerializer,
     PurchaseRFQSerializer,
     PurchaseRFQRecipientSerializer,
+    PublicSupplierQuoteRequestSerializer,
     PurchaseOrderSerializer,
     LogisticsDealSerializer, LogisticsDealListSerializer, LogisticsDealItemSerializer,
     LogisticsShipmentSerializer, LogisticsShipmentListSerializer, LogisticsClearanceSerializer,
@@ -77,7 +79,7 @@ from core.api_defaults import PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.access import require_perm, requires_perm
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
-from core.mixins import BaseTenantViewSet
+from core.mixins import BaseTenantViewSet, TenantQuerySetMixin
 from core.plans import enforce_limits
 from logistics.landed_cost import (
     import_invoices_from_clearance,
@@ -96,6 +98,8 @@ from logistics.services import (
     convert_local_quotation_to_order,
     convert_purchase_order_to_invoice,
     confirm_purchase_order,
+    approve_public_quote_request,
+    reject_public_quote_request,
 )
 
 logger = logging.getLogger("logistics.views")
@@ -387,6 +391,34 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             ).distinct()
         return qs.order_by('-rfq_date', '-id')
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['public_shares_map'] = self._public_shares_map()
+        return context
+
+    def _public_shares_map(self):
+        """مواصفة #147 (خريطة #138، البند 27) — «رابطٌ عامٌّ مفتوحٌ ولم يردّ
+        عليه أحد» يلزم `PurchaseRFQSerializer` معرفةَ رابطٍ عامٍّ حيٍّ لكلّ
+        طلبية. لا علاقة FK تصل الطلبية بمشاركتها العامة (`DocumentShare` عامّ
+        بـ`doc_type`/`doc_id` لا مخصَّصٌ بجدولٍ وسيط، خلافاً لـ`recipients__share`
+        أعلاه) — فبلا هذه الخريطة كان السيريالايزر سيستعلم عن `DocumentShare`
+        مرّةً لكل صفٍّ في القائمة. استعلامٌ واحدٌ للشركة كلّها هنا يكفي: الروابط
+        العامة الحيّة نادرة أصلاً (الإلغاء والترسية يُبطلانها تلقائياً).
+        """
+        if not hasattr(self, '_public_shares_map_cache'):
+            tenant = get_tenant(self.request)
+            if tenant is None:
+                self._public_shares_map_cache = {}
+            else:
+                from docshare.models import DOC_PURCHASE_RFQ, DocumentShare
+
+                shares = DocumentShare.objects.filter(
+                    tenant=tenant, doc_type=DOC_PURCHASE_RFQ, is_public=True,
+                    revoked_at__isnull=True, expires_at__gt=timezone.now(),
+                )
+                self._public_shares_map_cache = {s.doc_id: s for s in shares}
+        return self._public_shares_map_cache
+
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
         kwargs = {'tenant': tenant}
@@ -488,6 +520,11 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
                 raise ValidationError('لا يمكن إلغاء طلبية مُرساة أو ملغاة أصلاً.')
             rfq.status = PurchaseRFQ.STATUS_CANCELLED
             rfq.save(update_fields=['status', 'updated_at'])
+            # مواصفة #147 (المرحلة 3ب، البند 6ب): إلغاءٌ يُغلق الرابط العامّ
+            # تلقائياً — حِزامٌ فوق حمّالة `_rfq_quote_is_open`.
+            from logistics.services import revoke_live_public_rfq_share
+
+            revoke_live_public_rfq_share(tenant, rfq, user=request.user, request=request)
 
         log_activity(
             action='update',
@@ -576,6 +613,11 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
 
             rfq.status = PurchaseRFQ.STATUS_AWARDED
             rfq.save(update_fields=['status', 'updated_at'])
+            # مواصفة #147 (المرحلة 3ب، البند 6ب): ترسيةٌ تُغلق الرابط العامّ
+            # تلقائياً — نفس منطق `cancel()` أعلاه.
+            from logistics.services import revoke_live_public_rfq_share
+
+            revoke_live_public_rfq_share(tenant, rfq, user=request.user, request=request)
 
         log_activity(
             action='update',
@@ -593,6 +635,62 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             if document is not None else None
         )
         return Response(data)
+
+    @action(detail=True, methods=['post'], url_path='public-link')
+    def public_link(self, request, pk=None):
+        """ينشئ رابطاً **عامّاً** لهذه الطلبية — أو يعيد الحيّ القائم (مواصفة
+        #147، المرحلة 3ب). لا صلة بـ`_wire_rfq_recipient_shares`: ذاك رابطٌ
+        خاصٌّ لكلّ مستقبِلٍ مسمّى (`is_public=False`، `dedupe=False`)؛ هذا
+        رابطٌ واحدٌ لأيّ مجهولٍ يحمله (`is_public=True`، `dedupe=True` ضمن
+        جمهوره — `docshare.services.active_share`).
+
+        مدّةُ الصلاحية تتبع مهلة ردّ الطلبية لا الشهر الافتراضي
+        (`public_rfq_share_expiry_days`).
+        """
+        from docshare.models import DOC_PURCHASE_RFQ
+        from docshare import services as docshare_services
+        from logistics.services import public_rfq_share_expiry_days
+
+        tenant = get_tenant(request)
+        rfq = self.get_object()
+        share = docshare_services.create_share(
+            tenant, DOC_PURCHASE_RFQ, rfq.pk,
+            days=public_rfq_share_expiry_days(rfq),
+            user=request.user, request=request, is_public=True,
+        )
+        return Response({
+            'share_id': share.pk,
+            'public_url': docshare_services.public_url(share),
+            'expires_at': share.expires_at,
+        })
+
+    @action(detail=True, methods=['post'], url_path='stop-public-link')
+    def stop_public_link(self, request, pk=None):
+        """«أوقف استقبال العروض» — إبطالٌ يدويٌّ للرابط العامّ الحيّ (مواصفة
+        #147، المرحلة 3ب، البند 6ج). الصفّ يبقى — `revoke_live_public_rfq_share`
+        لا تحذف أبداً؛ ٤٠٠ صريحة إن لم يكن هناك رابطٌ عامٌّ حيٌّ أصلاً بدل نجاحٍ
+        صامت لا يعني شيئاً.
+        """
+        from logistics.services import revoke_live_public_rfq_share
+
+        tenant = get_tenant(request)
+        rfq = self.get_object()
+        with transaction.atomic():
+            share = revoke_live_public_rfq_share(
+                tenant, rfq, user=request.user, request=request,
+            )
+        if share is None:
+            raise ValidationError('لا يوجد رابطٌ عامٌّ نشطٌ لهذه الطلبية.')
+
+        log_activity(
+            action='update',
+            entity_type='purchase_rfq',
+            entity_id=rfq.id,
+            entity_label=rfq.rfq_number or f'RFQ-draft-{rfq.id}',
+            description='إيقاف استقبال العروض على الرابط العامّ',
+            request=request,
+        )
+        return Response(PurchaseRFQSerializer(rfq, context={'request': request}).data)
 
     @action(detail=True, methods=['get'])
     def comparison(self, request, pk=None):
@@ -630,17 +728,16 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
                 'recipients__supplier',
                 'recipients__quotation__currency',
                 'recipients__quotation__lines',
+                'quotations__currency',
+                'quotations__supplier',
+                'quotations__lines',
             )
             .get(pk=self.get_object().pk, tenant=tenant)
         )
         lines = list(rfq.lines.all())
         unit_q = Decimal('0.0001')
 
-        suppliers_payload = []
-        for recipient in rfq.recipients.all():
-            quotation = recipient.quotation
-            if quotation is None:
-                continue  # لم يردّ بعد — لا عمود له في المصفوفة
+        def _supplier_quotation_payload(quotation, *, supplier_id, supplier_name, replied_at):
             rate = quotation.exchange_rate if quotation.exchange_rate else Decimal('1')
             # ISSUE #122: المطابقةُ بالنَسَب (`rfq_line`) لا بالترتيب (`seq`).
             # العرضُ الذي يُدخَل من المحرِّر يحتمل حذفَ بندٍ من وسطه فتُرقَّم
@@ -691,9 +788,9 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
                 quotation_line_ids[str(line.id)] = qline.id
                 goods_total += Decimal(line.quantity) * unit_price_base
 
-            suppliers_payload.append({
-                'supplier_id': recipient.supplier_id,
-                'supplier_name': recipient.supplier.name,
+            return {
+                'supplier_id': supplier_id,
+                'supplier_name': supplier_name,
                 'quotation_id': quotation.id,
                 'quotation_number': quotation.quotation_number,
                 'currency_code': quotation.currency.Code,
@@ -701,7 +798,8 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
                 # ISSUE #122: سعّره المورّد بنفسه أم أدخلناه عنه — ليسا سواءً
                 # في الثقة. شارةٌ عرضيّةٌ صرف، لا حسابَ جديداً في المصفوفة.
                 'entry_source': quotation.entry_source,
-                'replied_at': recipient.replied_at,
+                'entry_source_display': quotation.get_entry_source_display(),
+                'replied_at': replied_at,
                 'prices': prices,
                 'notes': notes,
                 'internal_notes': internal_notes,
@@ -709,7 +807,37 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
                 # ISSUE #133 غ٣: ملاحظته العامة على الطلبية كلّها — لا الداخلية.
                 'general_note': quotation.general_note or '',
                 'goods_total_base': str(goods_total.quantize(Decimal('0.01'))),
-            })
+            }
+
+        suppliers_payload = []
+        for recipient in rfq.recipients.all():
+            quotation = recipient.quotation
+            if quotation is None:
+                continue  # لم يردّ بعد — لا عمود له في المصفوفة
+            suppliers_payload.append(_supplier_quotation_payload(
+                quotation,
+                supplier_id=recipient.supplier_id,
+                supplier_name=recipient.supplier.name,
+                replied_at=recipient.replied_at,
+            ))
+        # مواصفة #147 (المرحلة 3أ، قرار #145): عرضٌ وُلد من رابطٍ عامٍّ معتمَد
+        # لا يملك `PurchaseRFQRecipient` بتصميمٍ مقصود (#144) — فلا يدخل الحلقة
+        # أعلاه. يدخل المصفوفة هنا بنفس الشكل تماماً؛ شارة `entry_source` وحدها
+        # تُفرّقه، ولا ترتيبَ خاصاً ولا احتسابَ إضافياً (البند 9، خريطة #138).
+        covered_quotation_ids = {
+            recipient.quotation_id for recipient in rfq.recipients.all()
+            if recipient.quotation_id
+        }
+        for quotation in rfq.quotations.all():
+            if quotation.id in covered_quotation_ids:
+                continue
+            suppliers_payload.append(_supplier_quotation_payload(
+                quotation,
+                supplier_id=quotation.supplier_id,
+                supplier_name=quotation.supplier.name if quotation.supplier_id
+                else (quotation.supplier_draft_name or ''),
+                replied_at=quotation.created_at,
+            ))
 
         payload = {
             'rfq_id': rfq.id,
@@ -847,6 +975,114 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             PurchaseRFQSerializer(copy, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class PublicSupplierQuoteRequestViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
+    """مساحة انتظار ردود الروابط العامة — مواصفة #147 (المرحلة 3أ).
+
+    للقراءة والاعتماد/الرفض فقط: لا `create`/`update`/`destroy` — الكتابةُ
+    الأولى تجيء من سطحٍ عام لاحق (`record_public_quote_request`)، وهذا
+    الـViewSet يبني الوجهة الداخلية التي يستقبلها القرار، لا الطريقَ العام.
+    """
+    serializer_class = PublicSupplierQuoteRequestSerializer
+    queryset = PublicSupplierQuoteRequest.objects.all()
+
+    def get_queryset(self):
+        qs = (
+            super().get_queryset()
+            .select_related(
+                'tenant', 'rfq', 'share', 'currency',
+                'approved_partner', 'approved_quotation', 'decided_by',
+            )
+            .prefetch_related('lines__rfq_line')
+        )
+        rfq_id = str(self.request.query_params.get('rfq') or '').strip()
+        status_param = str(self.request.query_params.get('status') or '').strip()
+        if rfq_id.isdigit():
+            qs = qs.filter(rfq_id=int(rfq_id))
+        if status_param:
+            qs = qs.filter(status=status_param)
+        return qs.order_by('-submitted_at', '-id')
+
+    @action(detail=True, methods=['get'])
+    def matches(self, request, pk=None):
+        """اقتراحاتُ مطابقةٍ لطرفٍ قائم — لا تُلزم ولا تحجب الاعتماد."""
+        from partners.serializers import suggest_partner_matches
+
+        row = self.get_object()
+        tenant = get_tenant(request)
+        results = suggest_partner_matches(
+            tenant_id=tenant.pk if tenant else None,
+            name=row.supplier_name,
+            email=row.supplier_email,
+            rfq_id=row.rfq_id,
+        )
+        return Response(results)
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        row = self.get_object()
+        tenant = get_tenant(request)
+        partner_id = request.data.get('partner')
+        partner = None
+        if partner_id:
+            partner = Partner.objects.filter(
+                pk=partner_id, tenant=tenant, partner_type='Supplier',
+            ).first()
+            if partner is None:
+                raise ValidationError({
+                    'partner': 'المورد غير موجود أو لا يتبع الشركة الحالية.',
+                })
+        try:
+            quotation = approve_public_quote_request(
+                row, partner=partner, user=request.user,
+            )
+        except DjangoValidationError as exc:
+            detail = getattr(exc, 'message_dict', None) or getattr(
+                exc, 'messages', None,
+            ) or [str(exc)]
+            raise ValidationError(detail)
+        row.refresh_from_db()
+        log_activity(
+            action='update',
+            entity_type='public_supplier_quote_request',
+            entity_id=row.pk,
+            entity_label=row.supplier_name,
+            description=f'اعتماد ردّ مورّدٍ من رابطٍ عام إلى عرض {quotation.quotation_number}',
+            request=request,
+            partner_ids=[quotation.supplier_id],
+            metadata={'quotation_id': quotation.id},
+        )
+        return Response({
+            'status': 'approved',
+            'quotation_id': quotation.id,
+            'request': PublicSupplierQuoteRequestSerializer(
+                row, context={'request': request},
+            ).data,
+        })
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        row = self.get_object()
+        try:
+            reject_public_quote_request(row, user=request.user)
+        except DjangoValidationError as exc:
+            detail = getattr(exc, 'message_dict', None) or getattr(
+                exc, 'messages', None,
+            ) or [str(exc)]
+            raise ValidationError(detail)
+        row.refresh_from_db()
+        log_activity(
+            action='update',
+            entity_type='public_supplier_quote_request',
+            entity_id=row.pk,
+            entity_label=row.supplier_name,
+            description='رفض ردّ مورّدٍ من رابطٍ عام',
+            request=request,
+        )
+        return Response(PublicSupplierQuoteRequestSerializer(
+            row, context={'request': request},
+        ).data)
 
 
 class PurchaseOrderViewSet(BaseTenantViewSet):

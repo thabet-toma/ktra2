@@ -11,7 +11,6 @@
  * نقدٌ خرج من الصندوق. (خصم المصدر في الواجهة لا يُحفَظ بعد.)
  */
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { AlertCircle, Info, Undo2, X } from "lucide-react";
 import { accountingApi } from "../../services/accountingApi";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { apiGetObject } from "../../services/restApi";
@@ -34,7 +33,7 @@ import {
   type ChequeLine,
 } from "./PaymentVoucherParts";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 
 export type SupplierPaymentPartner = { id: number; name: string };
 /** صف الشريك كما يعيده lookup (يحمل النوع) — نفلتره على الموردين فقط. */
@@ -133,13 +132,7 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
     setTouched(true);
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft({
+  const draftApi = useDocumentDraft({
     docType: "supplier_payment_voucher",
     docId: null,
     payload: draftPayload,
@@ -148,6 +141,7 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
     isPosted: false,
     docUpdatedAt: null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   /* الحارسُ مقلوب — يعترض المغادرة فقط إن فشل الحفظ المحلي فعلاً (مرآة
      `InvoiceForm.tsx`، issue #120). */
@@ -161,8 +155,6 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [draftSaveFailed]);
-
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   const handleUndoDraft = useCallback(() => {
     setSupplierId(initialPartner?.id ?? "");
@@ -330,64 +322,7 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
       onClose={onClose}
       onSubmit={() => void submit(autoPost)}
     >
-      {/* ISSUE #121: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً. */}
-      {draftSaveFailed && (
-        <div
-          role="alert"
-          aria-live="assertive"
-          data-testid="draft-save-failed-banner"
-          className="mb-2 flex items-center gap-2 rounded border border-red-200 bg-red-100 px-3 py-2 text-[11px] font-medium text-red-800"
-        >
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>تعذّر حفظ نسخة محلية من هذا السند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
-        </div>
-      )}
-      {/* ISSUE #121: شريط الاستعادة التلقائية — بلا لافتة تسأل. */}
-      {draftBanner && (
-        <div className="ktra-banner ktra-banner--warn mb-2" role="status" data-testid="draft-restored-banner">
-          <Info className="h-4 w-4 shrink-0" />
-          <span>
-            {draftBanner.eligibility === "restore" &&
-              `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-            {draftBanner.eligibility === "stale" &&
-              `تغيّر السند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-            {draftBanner.eligibility === "posted" &&
-              `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) — للاطّلاع فقط.`}
-          </span>
-          {draftBanner.eligibility === "restore" && (
-            <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-              <Undo2 className="h-4 w-4" /> تراجع
-            </button>
-          )}
-          {draftBanner.eligibility === "stale" && (
-            <>
-              <button type="button" className="ktra-toolbtn" onClick={() => onRestoreDraft(draftBanner.payload)} data-testid="draft-stale-preview">
-                استعرض مسودتي
-              </button>
-              <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-                تجاهلها
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {/* ISSUE #121: شريط اليتامى — مسودّات سندٍ صرفٍ جديد أخرى تُركت بتبويبات أخرى. */}
-      {orphanDrafts.length > 0 && !orphanBarDismissed && (
-        <div className="ktra-banner mb-2" role="status" data-testid="orphan-drafts-banner">
-          <Info className="h-4 w-4 shrink-0" />
-          <div className="flex flex-col gap-1">
-            <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-            <ul className="list-disc pr-4 text-xs">
-              {orphanDrafts.map((o) => (
-                <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-              ))}
-            </ul>
-          </div>
-          <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-            <X className="h-4 w-4" /> إخفاء
-          </button>
-        </div>
-      )}
+      <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
       {/* ملاحظة عاجلة مستحقة على هذا المورد — تظهر قبل إتمام السند. */}
       <PartnerNoteAlert partnerId={supplierId === "" ? null : supplierId} className="mb-2" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>

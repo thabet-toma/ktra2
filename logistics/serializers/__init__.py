@@ -21,6 +21,8 @@ from .procurement import (
     PurchaseRFQLineSerializer,
     PurchaseRFQRecipientSerializer,
     PurchaseRFQSerializer,
+    PublicSupplierQuoteRequestLineSerializer,
+    PublicSupplierQuoteRequestSerializer,
     PurchaseOrderLineSerializer,
     PurchaseOrderSerializer,
 )
@@ -81,6 +83,8 @@ __all__ = [
     "PurchaseRFQLineSerializer",
     "PurchaseRFQRecipientSerializer",
     "PurchaseRFQSerializer",
+    "PublicSupplierQuoteRequestLineSerializer",
+    "PublicSupplierQuoteRequestSerializer",
     "PurchaseOrderLineSerializer",
     "PurchaseOrderSerializer",
     "LogisticsPaymentSerializer",

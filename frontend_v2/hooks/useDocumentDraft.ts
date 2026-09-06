@@ -109,6 +109,15 @@ export interface UseDocumentDraftResult<TPayload> {
    * — فارغة دائماً لمستندٍ قائم. issue #119 §٧.
    */
   orphanDrafts: OrphanDraftSummary[];
+  /**
+   * issue #146: يقرأ حمولة يتيمٍ بعينه (`OrphanDraftSummary.key`) — المستدعي
+   * يقرّر بنفسه هل يطبّقها (`onRestore(payload)`) بعد تحذير «سيستبدل عملك
+   * الحالي» إن لزم؛ الدالّة نفسها لا تُطبّق شيئاً ولا تُحذّر — قراءةٌ صرفة.
+   * `null` إن تعذّرت القراءة أو لم تعد موجودة (يتيمٌ حُذف من تبويبٍ آخر).
+   */
+  loadOrphanDraft: (key: string) => Promise<TPayload | null>;
+  /** issue #146: يمحو يتيماً بعينه فوراً — لا استرجاع؛ المستدعي يؤكّد صراحةً قبلها. */
+  deleteOrphanDraft: (key: string) => Promise<void>;
 }
 
 export function useDocumentDraft<TPayload>(
@@ -344,5 +353,37 @@ export function useDocumentDraft<TPayload>(
     setDraftSavedAt(null);
   }, [key]);
 
-  return { draftSavedAt, draftSaveFailed, restoredBanner, dismissBanner, discardDraft, orphanDrafts };
+  // issue #146: قراءةٌ صرفة بمفتاح يتيمٍ بعينه — لا تُطبَّق ولا تُحذّر، ذلك
+  // للمستدعي (شريط اليتامى المشترك) بعد قرار المستخدم.
+  const loadOrphanDraft = useCallback(async (orphanKey: string): Promise<TPayload | null> => {
+    try {
+      const row = await db.document_drafts.get(orphanKey);
+      if (!row || !row.data || !isOfflineRecordForTenant(row, tenantId)) return null;
+      return JSON.parse(row.data) as TPayload;
+    } catch {
+      return null;
+    }
+  }, [tenantId]);
+
+  // issue #146: حذفٌ صريح ليتيمٍ بعينه — القائمة المحلية تُحدَّث فوراً بلا
+  // انتظار دورة الاستعلام التالية (تبقى مقيَّدةً بهويّة مستندٍ جديد واحدة).
+  const deleteOrphanDraft = useCallback(async (orphanKey: string): Promise<void> => {
+    try {
+      await db.document_drafts.delete(orphanKey);
+    } catch {
+      /* أفضل جهد — القائمة المحلية تُحدَّث بأي حال */
+    }
+    setOrphanDrafts((prev) => prev.filter((o) => o.key !== orphanKey));
+  }, []);
+
+  return {
+    draftSavedAt,
+    draftSaveFailed,
+    restoredBanner,
+    dismissBanner,
+    discardDraft,
+    orphanDrafts,
+    loadOrphanDraft,
+    deleteOrphanDraft,
+  };
 }

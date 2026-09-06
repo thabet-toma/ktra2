@@ -7,10 +7,10 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import { KitDocumentShell, type KitToolbarAction } from "../kit";
-import { Plus, Save, Send, Trash2, RefreshCw, X, AlertTriangle, Info, Undo2 } from "lucide-react";
+import { Plus, Save, Send, Trash2, RefreshCw, X } from "lucide-react";
 import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 
 type Wh = { id: number; name: string; code?: string };
 type Prod = { id: number; sku: string; name_ar?: string; name_en?: string };
@@ -44,8 +44,6 @@ export const WarehouseTransferPage: React.FC = () => {
   // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم.
   const [touched, setTouched] = useState(false);
   const markTouched = () => setTouched(true);
-  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,13 +103,7 @@ export const WarehouseTransferPage: React.FC = () => {
     [],
   );
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<{ date: string; source: number | ""; dest: number | ""; notes: string; lines: Line[] }>({
+  const draftApi = useDocumentDraft<{ date: string; source: number | ""; dest: number | ""; notes: string; lines: Line[] }>({
     docType: "warehouse_transfer",
     docId: null,
     payload: draftPayload,
@@ -120,6 +112,7 @@ export const WarehouseTransferPage: React.FC = () => {
     isPosted: false,
     docUpdatedAt: null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
   useEffect(() => {
@@ -187,76 +180,6 @@ export const WarehouseTransferPage: React.FC = () => {
     { key: "back", label: "عودة", icon: <X />, onClick: () => navigate(-1), danger: true, separatorBefore: true },
   ];
 
-  /* ISSUE #120: الحفظ المحلي فشل فعلاً — لافتةٌ لاصقة تطلب حفظاً يدوياً بدل
-   * الانتظار الصامت حتى تحاول المغادرة. */
-  const draftSaveFailedBanner = draftSaveFailed ? (
-    <div
-      role="alert"
-      aria-live="assertive"
-      data-testid="draft-save-failed-banner"
-      className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-    >
-      <AlertTriangle className="h-4 w-4 shrink-0" />
-      <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ وترحيل» يدوياً كي لا يضيع عملك.</span>
-    </div>
-  ) : null;
-
-  /* ISSUE #118: شريط الاستعادة التلقائية — المحتوى مُطبَّقٌ على النموذج فعلاً
-   * (`onRestoreDraft`) قبل أن يصل هذا الشريط أصلاً، وهو يُظهِر النموذج بنفسه. */
-  const draftRestoreBanner = draftBanner ? (
-    <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <span>
-        {draftBanner.eligibility === "restore" &&
-          `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "stale" &&
-          `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-        {draftBanner.eligibility === "posted" &&
-          `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند — للاطّلاع فقط.`}
-      </span>
-      {draftBanner.eligibility === "restore" && (
-        <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-          <Undo2 className="h-4 w-4" />
-          تراجع
-        </button>
-      )}
-      {draftBanner.eligibility === "stale" && (
-        <>
-          <button
-            type="button"
-            className="ktra-toolbtn"
-            onClick={() => onRestoreDraft(draftBanner.payload)}
-            data-testid="draft-stale-preview"
-          >
-            استعرض مسودتي
-          </button>
-          <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-            تجاهلها
-          </button>
-        </>
-      )}
-    </div>
-  ) : null;
-
-  /* شريط اليتامى (issue #119 §٧): مسودّات تحويلٍ جديد أخرى تُركت في تبويبات أخرى. */
-  const orphanDraftsBanner = orphanDrafts.length > 0 && !orphanBarDismissed ? (
-    <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
-      <Info className="h-4 w-4 shrink-0" />
-      <div className="flex flex-col gap-1">
-        <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-        <ul className="list-disc pr-4 text-xs">
-          {orphanDrafts.map((o) => (
-            <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-          ))}
-        </ul>
-      </div>
-      <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-        <X className="h-4 w-4" />
-        إخفاء
-      </button>
-    </div>
-  ) : null;
-
   return (
     <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <KitDocumentShell
@@ -274,12 +197,10 @@ export const WarehouseTransferPage: React.FC = () => {
         <div style={{ padding: 8 }}>
           {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: 8 }}>{err}</div>}
           {msg && <div className="ktra-banner" style={{ marginBottom: 8, color: "var(--ktra-ok,#2d7d46)" }}>{msg}</div>}
-          {draftSaveFailedBanner}
-          {orphanDraftsBanner}
+          <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
 
           {showForm && (
             <div className="ktra-bg-panel" style={{ border: "1px solid var(--ktra-border)", borderRadius: 6, padding: 10, marginBottom: 12 }}>
-              {draftRestoreBanner}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 <label className="ktra-field"><span className="ktra-field-label">التاريخ</span>
                   <input type="date" className="ktra-input" value={date} onChange={(e) => { setDate(e.target.value); markTouched(); }} /></label>

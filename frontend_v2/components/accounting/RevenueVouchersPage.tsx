@@ -30,10 +30,10 @@ import {
 } from "../../utils/revenueVoucherEntryPreview";
 import { voucherAccountEntryIsLinked } from "../../utils/voucherAccountEntryMode";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 import { KitDocumentShell, KitDenseTable } from "../kit";
 import type { KitToolbarAction, DenseColumn } from "../kit";
-import { Plus, RotateCcw, AlertCircle, Info, Undo2, X } from "lucide-react";
+import { Plus, RotateCcw } from "lucide-react";
 import type { AccountingPartner, RevenueVoucherDto } from "../../types/accounting";
 
 type AccountRow = {
@@ -307,13 +307,7 @@ const NewRevenueVoucherModal: React.FC<{
     setTouched(true);
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<RevenueVoucherDraftPayload>({
+  const draftApi = useDocumentDraft<RevenueVoucherDraftPayload>({
     docType: "revenue_voucher",
     docId: null,
     payload: draftPayload,
@@ -322,6 +316,7 @@ const NewRevenueVoucherModal: React.FC<{
     isPosted: false,
     docUpdatedAt: null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   // ISSUE #120: حارسٌ مقلوب — يعترض المغادرة فقط إن فشل الحفظ المحلي فعلاً.
   useEffect(() => {
@@ -334,8 +329,6 @@ const NewRevenueVoucherModal: React.FC<{
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [draftSaveFailed]);
-
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
 
   /** «تراجع» على شريط الاستعادة: يعيد النموذج إلى حالته الفارغة ويمسح المسودّة. */
   const handleUndoDraft = useCallback(() => {
@@ -412,73 +405,7 @@ const NewRevenueVoucherModal: React.FC<{
       onClose={onClose}
       onSubmit={() => void submit()}
     >
-      {draftSaveFailed && (
-        <div
-          role="alert"
-          aria-live="assertive"
-          data-testid="draft-save-failed-banner"
-          className="ktra-banner ktra-banner--err mb-2"
-        >
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ وترحيل» يدوياً كي لا يضيع عملك.</span>
-        </div>
-      )}
-      {draftBanner && (
-        <div className="ktra-banner ktra-banner--warn mb-2" role="status" data-testid="draft-restored-banner">
-          <Info className="h-4 w-4 shrink-0" />
-          <span>
-            {draftBanner.eligibility === "restore" &&
-              `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-            {draftBanner.eligibility === "stale" &&
-              `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-            {draftBanner.eligibility === "posted" &&
-              `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند — للاطّلاع فقط.`}
-          </span>
-          {draftBanner.eligibility === "restore" && (
-            <button type="button" className="ktra-toolbtn" onClick={handleUndoDraft} data-testid="draft-restored-undo">
-              <Undo2 className="h-4 w-4" />
-              تراجع
-            </button>
-          )}
-          {draftBanner.eligibility === "stale" && (
-            <>
-              <button
-                type="button"
-                className="ktra-toolbtn"
-                onClick={() => onRestoreDraft(draftBanner.payload)}
-                data-testid="draft-stale-preview"
-              >
-                استعرض مسودتي
-              </button>
-              <button
-                type="button"
-                className="ktra-toolbtn"
-                onClick={() => void discardDraft()}
-                data-testid="draft-stale-discard"
-              >
-                تجاهلها
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {orphanDrafts.length > 0 && !orphanBarDismissed && (
-        <div className="ktra-banner mb-2" role="status" data-testid="orphan-drafts-banner">
-          <Info className="h-4 w-4 shrink-0" />
-          <div className="flex flex-col gap-1">
-            <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-            <ul className="list-disc pr-4 text-xs">
-              {orphanDrafts.map((o) => (
-                <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-              ))}
-            </ul>
-          </div>
-          <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-            <X className="h-4 w-4" />
-            إخفاء
-          </button>
-        </div>
-      )}
+      <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
       {draftSavedAt && (
         <div className="mb-2 text-[11px] text-[var(--ktra-ink-soft)]" data-testid="draft-saved-indicator">
           مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>

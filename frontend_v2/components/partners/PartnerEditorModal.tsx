@@ -2,7 +2,7 @@ import React, {
   useCallback, useEffect, useMemo, useRef, useState,
 } from "react";
 import {
-  AlertTriangle, Building2, Info, Plus, Save, Trash2, Undo2, X,
+  Building2, Plus, Save, Trash2, X,
 } from "lucide-react";
 import {
   apiGetList, apiGetObject, apiPatchObject, apiPostObject,
@@ -13,7 +13,7 @@ import { eventBus } from "../../utils/eventBus";
 import { KitDateInput } from "../kit/KitDateInput";
 import type { PartnerBankAccount } from "../../utils/partnerChequeDefaults";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
-import { orphanDraftsBannerText } from "../../utils/documentDraft";
+import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 import { formatTimeValue } from "../../utils/formatDate";
 
 export type PartnerType =
@@ -149,8 +149,6 @@ export const PartnerEditorModal: React.FC<{
   // غادر» التي صُمِّمت الميزة لأجلها).
   const [touched, setTouched] = useState(false);
   const markTouched = () => setTouched(true);
-  // شريط اليتامى (issue #119 §٧) — إخفاءٌ محليّ بلا مسّ المسودّات نفسها.
-  const [orphanBarDismissed, setOrphanBarDismissed] = useState(false);
   // نقطة إعادة التهيئة الوحيدة في هذا الملف (جلب تفاصيل الطرف أدناه) غير
   // متزامنة، واستعادة المسودّة من IndexedDB (داخل الخطّاف) غير متزامنة أيضاً
   // — فأيّهما وصل ثانياً يكتب فوق الآخر. حارسٌ لمرّةٍ واحدة (نمط
@@ -236,13 +234,7 @@ export const PartnerEditorModal: React.FC<{
     setTouched(true);
   }, []);
 
-  const {
-    draftSavedAt,
-    draftSaveFailed,
-    restoredBanner: draftBanner,
-    discardDraft,
-    orphanDrafts,
-  } = useDocumentDraft<PartnerDraftPayload>({
+  const draftApi = useDocumentDraft<PartnerDraftPayload>({
     docType: "partner",
     docId: partnerId ?? null,
     payload: draftPayload,
@@ -261,6 +253,7 @@ export const PartnerEditorModal: React.FC<{
     // نطاق هذه المهمة.
     docUpdatedAt: null,
   });
+  const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
   /* ISSUE #120: الحارسُ مقلوب — يعترض المغادرةَ فقط إن فشل الحفظُ المحلّيّ فعلاً. */
   useEffect(() => {
@@ -444,69 +437,10 @@ export const PartnerEditorModal: React.FC<{
           {!embedded && <button type="button" className="ktra-toolbtn" onClick={handleCancel}><X className="h-4 w-4" /></button>}
         </div>
 
-        {draftSaveFailed && (
-          <div
-            role="alert"
-            aria-live="assertive"
-            data-testid="draft-save-failed-banner"
-            className="sticky top-0 z-40 flex items-center gap-2 border-b border-red-200 bg-red-100 px-4 py-2 text-sm font-medium text-red-800"
-          >
-            <AlertTriangle className="h-4 w-4 shrink-0" />
-            <span>تعذّر حفظ نسخة محلية من هذا المستند — اضغط «حفظ» يدوياً كي لا يضيع عملك.</span>
-          </div>
-        )}
+        <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={() => void handleUndoDraft()} isTouched={touched} />
 
         <div className="space-y-5 p-4">
           {error && <div className="ktra-banner ktra-banner--err">{error}</div>}
-          {draftBanner && (
-            <div className="ktra-banner ktra-banner--warn" role="status" data-testid="draft-restored-banner">
-              <Info className="h-4 w-4 shrink-0" />
-              <span>
-                {draftBanner.eligibility === "restore" &&
-                  `استُعيدت مسودةٌ غير محفوظة (${formatTimeValue(draftBanner.updatedAt)})`}
-                {draftBanner.eligibility === "stale" &&
-                  `تغيّر المستند بعد مسودتك (مسودتُك ${formatTimeValue(draftBanner.updatedAt)})`}
-                {draftBanner.eligibility === "posted" &&
-                  `توجد مسودّةٌ محلية غير محفوظة (${formatTimeValue(draftBanner.updatedAt)}) لهذا المستند المرحَّل — للاطّلاع فقط.`}
-              </span>
-              {draftBanner.eligibility === "restore" && (
-                <button type="button" className="ktra-toolbtn" onClick={() => void handleUndoDraft()} data-testid="draft-restored-undo">
-                  <Undo2 className="h-4 w-4" /> تراجع
-                </button>
-              )}
-              {draftBanner.eligibility === "stale" && (
-                <>
-                  <button
-                    type="button"
-                    className="ktra-toolbtn"
-                    onClick={() => onRestoreDraft(draftBanner.payload)}
-                    data-testid="draft-stale-preview"
-                  >
-                    استعرض مسودتي
-                  </button>
-                  <button type="button" className="ktra-toolbtn" onClick={() => void discardDraft()} data-testid="draft-stale-discard">
-                    تجاهلها
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-          {orphanDrafts.length > 0 && !orphanBarDismissed && (
-            <div className="ktra-banner" role="status" data-testid="orphan-drafts-banner">
-              <Info className="h-4 w-4 shrink-0" />
-              <div className="flex flex-col gap-1">
-                <span>{orphanDraftsBannerText(orphanDrafts.length)}</span>
-                <ul className="list-disc pr-4 text-xs">
-                  {orphanDrafts.map((o) => (
-                    <li key={o.key}>{formatTimeValue(o.updatedAt)} — {o.previewLine || "—"}</li>
-                  ))}
-                </ul>
-              </div>
-              <button type="button" className="ktra-toolbtn" onClick={() => setOrphanBarDismissed(true)} data-testid="orphan-drafts-dismiss">
-                <X className="h-4 w-4" /> إخفاء
-              </button>
-            </div>
-          )}
           {loading ? (
             <div className="p-8 text-center text-sm text-[var(--color-text-muted)]">جاري تحميل البطاقة…</div>
           ) : (

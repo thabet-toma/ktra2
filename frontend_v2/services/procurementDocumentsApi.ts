@@ -56,7 +56,7 @@ export interface SupplierQuotationLineDto {
  * ترك التمييز في `created_by IS NULL` يعمل صدفةً اليوم ويكذب أوّل مرّةٍ
  * يُنشئ فيها مسارٌ ثالثٌ عرضاً.
  */
-export type SupplierQuotationEntrySource = "supplier_link" | "manual";
+export type SupplierQuotationEntrySource = "supplier_link" | "manual" | "public_link";
 
 export interface SupplierQuotationDto {
   id: number;
@@ -108,6 +108,9 @@ export interface SupplierQuotationDto {
   rfq_recipient?: number | null;
   /** يُحسم في الخادم لا هنا — راجع `SupplierQuotationEntrySource`. */
   entry_source?: SupplierQuotationEntrySource;
+  /** النصّ العربيّ الجاهز لـ`entry_source` (`get_entry_source_display`) — لا
+   *  تُعِد كتابته في الواجهة، اقرأه من هنا. */
+  entry_source_display?: string;
   /**
    * ISSUE #133 غ٣ (مواصفة #130 §١): ملاحظة المورّد العامة على الطلبية كلّها —
    * **للقراءة فقط**، تصل من رابطه العام وحده. بجانب ملاحظة كلّ سطر
@@ -417,6 +420,14 @@ export interface PurchaseRFQDto {
   /** «وردت عروض» — عدّادان مشتقّان لا حقلان مخزَّنان (#112 §٧). */
   recipients_count: number;
   replies_count: number;
+  /**
+   * مواصفة #147 (خريطة #138، البند 27): هل لهذه الطلبية رابطٌ عامٌّ حيٌّ
+   * الآن — بلا كشف الرابط نفسه ولا التوكن. تُستعمَل لتذكير المالك برابطٍ
+   * مفتوحٍ نسيه (`PublicQuoteRequestsSection.tsx`)، وللنصّ المعروض في محرِّر
+   * الطلبية قبل استدعاء `public-link/` فعلياً.
+   */
+  public_share_is_live?: boolean;
+  public_share_expires_at?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -562,6 +573,8 @@ export interface RfqComparisonSupplierDto {
    * تقولها بدل أن يتذكّرها المالك.
    */
   entry_source?: SupplierQuotationEntrySource;
+  /** النصّ العربيّ الجاهز — نفس اتفاقية `SupplierQuotationDto.entry_source_display`. */
+  entry_source_display?: string;
 }
 
 export interface RfqComparisonDto {
@@ -606,6 +619,123 @@ export async function addPurchaseRfqRecipient(
   return apiPostObject(
     `${BASE}/purchase-rfqs/${id}/recipients/`,
     { supplier: supplierId },
+    { tenantId: tenantId() },
+  );
+}
+
+// ── مواصفة #147 (المرحلة 3ب) — الرابط العامّ: مورّدٌ مجهولٌ واحد يكفيه رابطٌ واحد ──
+
+export interface PurchaseRFQPublicLinkDto {
+  share_id: number;
+  public_url: string;
+  expires_at: string | null;
+}
+
+/** ينشئ رابطاً عامّاً جديداً — أو يعيد الحيّ القائم (idempotent، `dedupe=True` خادمياً). */
+export async function createPurchaseRfqPublicLink(id: number): Promise<PurchaseRFQPublicLinkDto> {
+  return apiPostObject(`${BASE}/purchase-rfqs/${id}/public-link/`, {}, { tenantId: tenantId() });
+}
+
+/** «أوقف استقبال العروض» — 400 إن لم يكن هناك رابطٌ عامٌّ حيّ أصلاً. */
+export async function stopPurchaseRfqPublicLink(id: number): Promise<PurchaseRFQDto> {
+  return apiPostObject(`${BASE}/purchase-rfqs/${id}/stop-public-link/`, {}, { tenantId: tenantId() });
+}
+
+// ── مواصفة #147 (المرحلة 5أ) — «عروض عامة»: ردود موردين مجهولين على رابطٍ عام ──
+
+export type PublicSupplierQuoteRequestStatus = "pending" | "approved" | "rejected";
+
+export interface PublicSupplierQuoteRequestLineDto {
+  id: number;
+  rfq_line: number | null;
+  name_snapshot: string;
+  seq_snapshot: number;
+  /** تسعيرٌ جزئيّ مسموح — سطرٌ واحدٌ في هذه القائمة لكلّ بندٍ **سعّره** المورّد فقط. */
+  unit_price: string;
+  supplier_note: string;
+}
+
+export interface PublicSupplierQuoteRequestDto {
+  id: number;
+  rfq: number;
+  rfq_number: string | null;
+  share: number | null;
+  /** كما كتبه المورّد المجهول بنفسه — بلا تطبيع ولا تنسيق (البند 5). */
+  supplier_name: string;
+  supplier_email: string;
+  supplier_phone: string;
+  currency: number | null;
+  /** `null` = عملة الأساس — نفس اتفاقية `SupplierQuotationDto`. */
+  currency_code: string | null;
+  general_note: string;
+  submitted_ip: string;
+  submitted_at: string;
+  status: PublicSupplierQuoteRequestStatus;
+  status_display: string;
+  approved_partner: number | null;
+  approved_quotation: number | null;
+  decided_at: string | null;
+  decided_by: number | null;
+  decided_by_name: string;
+  lines: PublicSupplierQuoteRequestLineDto[];
+}
+
+/** اقتراحُ مطابقةٍ لطرفٍ قائم — لا يُلزم ولا يحجب الاعتماد (`partners.suggest_partner_matches`). */
+export interface PublicQuoteRequestMatchDto {
+  partner_id: number;
+  name: string;
+  signals: Array<"email" | "name" | "tax_number">;
+  /** تحذيرٌ خاص: هذا الطرف مستقبِلٌ مسمّىً أصلاً على هذه الطلبية. */
+  already_recipient: boolean;
+}
+
+export async function listPublicSupplierQuoteRequests(params?: {
+  rfq?: number;
+  status?: PublicSupplierQuoteRequestStatus;
+}): Promise<PublicSupplierQuoteRequestDto[]> {
+  const query: Record<string, string> = {};
+  if (params?.rfq) query.rfq = String(params.rfq);
+  if (params?.status) query.status = params.status;
+  return apiGetList(`${BASE}/public-supplier-quote-requests/`, {
+    tenantId: tenantId(),
+    query: Object.keys(query).length ? query : undefined,
+  });
+}
+
+export async function getPublicSupplierQuoteRequestMatches(
+  id: number,
+): Promise<PublicQuoteRequestMatchDto[]> {
+  return apiGetList(`${BASE}/public-supplier-quote-requests/${id}/matches/`, {
+    tenantId: tenantId(),
+  });
+}
+
+/**
+ * يعتمد الردّ — الشريك والعرض يُولدان معاً بمعاملةٍ واحدة على الخادم.
+ * `partnerId` غائبٌ = «أنشئ مورّداً جديداً» بالاسم والبريد كما وصلا في الردّ.
+ */
+export async function approvePublicSupplierQuoteRequest(
+  id: number,
+  partnerId?: number | null,
+): Promise<{
+  status: "approved";
+  quotation_id: number;
+  request: PublicSupplierQuoteRequestDto;
+}> {
+  return apiPostObject(
+    `${BASE}/public-supplier-quote-requests/${id}/approve/`,
+    partnerId ? { partner: partnerId } : {},
+    { tenantId: tenantId() },
+  );
+}
+
+/** الصفّ يبقى بحالة `rejected` — لا حذف. */
+export async function rejectPublicSupplierQuoteRequest(
+  id: number,
+): Promise<PublicSupplierQuoteRequestDto> {
+  return apiPostObject(
+    `${BASE}/public-supplier-quote-requests/${id}/reject/`,
+    {},
     { tenantId: tenantId() },
   );
 }

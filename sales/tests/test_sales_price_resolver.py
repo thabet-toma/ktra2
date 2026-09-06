@@ -187,3 +187,59 @@ def test_price_list_shows_product_sale_price_when_customer_has_nothing(env):
     assert row["source"] == "default"
     assert Decimal(row["price"]) == Decimal("250")
     assert row["editable"] is True
+
+
+def test_exclude_quotation_id_removes_its_own_line_from_the_ladder(env):
+    """T-PICKUNIFY (#147 M4): عرض السعر المفتوح للتحرير لا يجوز أن يقترح على
+    نفسه رقمه هو — يُستبعد من رتبة `SalesQuotationLine` ويسقط الترشيح إلى
+    الرتبة التالية (لا شيء هنا، فبلا سعرٍ على الإطلاق)."""
+    from sales.models import SalesQuotation, SalesQuotationLine
+    from sales.services import customer_price_list
+
+    tenant, ils, _usd, c1, _c2, product = env
+    quotation = SalesQuotation.objects.create(
+        tenant=tenant, quotation_number="Q-1", customer=c1, quotation_date="2026-07-01",
+        currency=ils)
+    SalesQuotationLine.objects.create(
+        tenant=tenant, quotation=quotation, product=product,
+        quantity=Decimal("1"), unit_price=Decimal("321"))
+
+    # بلا استبعاد: العرض نفسه هو مصدر الرتبة.
+    row = next(r for r in customer_price_list(
+        tenant_id=tenant.TenantID, customer_id=c1.id) if r["product_id"] == product.id)
+    assert row["source"] == "quote"
+    assert Decimal(row["price"]) == Decimal("321")
+
+    # مع الاستبعاد: لا رتبة أخرى (لا فاتورة، لا سعر عام) ⇒ لا سعر إطلاقاً.
+    row = next(r for r in customer_price_list(
+        tenant_id=tenant.TenantID, customer_id=c1.id,
+        exclude_quotation_id=quotation.id) if r["product_id"] == product.id)
+    assert row["price"] is None
+
+
+def test_exclude_quotation_id_falls_through_to_next_rung(env):
+    """استبعاد العرض المفتوح يسقط الترشيح إلى المصدر التالي في السلّم (عرض
+    كرت الزبون اليدوي) لا إلى فراغ — الرتب الأخرى غير مصابة بالاستبعاد."""
+    from sales.models import CustomerProductQuote, SalesQuotation, SalesQuotationLine
+    from sales.services import customer_price_list
+
+    tenant, ils, _usd, c1, _c2, product = env
+    CustomerProductQuote.objects.create(
+        tenant=tenant, customer=c1, product=product, unit_price=Decimal("150"))
+    quotation = SalesQuotation.objects.create(
+        tenant=tenant, quotation_number="Q-2", customer=c1, quotation_date="2026-07-01",
+        currency=ils)
+    SalesQuotationLine.objects.create(
+        tenant=tenant, quotation=quotation, product=product,
+        quantity=Decimal("1"), unit_price=Decimal("321"))
+
+    # بلا استبعاد: عرض «واجهة العروض» (SalesQuotationLine) يسبق عرض كرت الزبون اليدوي.
+    row = next(r for r in customer_price_list(
+        tenant_id=tenant.TenantID, customer_id=c1.id) if r["product_id"] == product.id)
+    assert Decimal(row["price"]) == Decimal("321")
+
+    # مع استبعاد ذلك العرض: يسقط الترشيح إلى عرض كرت الزبون اليدوي، لا إلى فراغ.
+    row = next(r for r in customer_price_list(
+        tenant_id=tenant.TenantID, customer_id=c1.id,
+        exclude_quotation_id=quotation.id) if r["product_id"] == product.id)
+    assert Decimal(row["price"]) == Decimal("150")

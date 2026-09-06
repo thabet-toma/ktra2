@@ -608,25 +608,6 @@ export async function getCreditPreview(params: {
 }
 
 // -------------------------------------------------------------
-// task18 DEF-C2: آخر سعر بيع للوحدة (عام أو لعميل محدّد)
-// -------------------------------------------------------------
-export type LastSalePriceResponse = {
-  unit_price: string | null;
-  invoice_number: string | null;
-  invoice_date: string | null;
-};
-
-export async function getLastSalePrice(params: {
-  product: number;
-  customer?: number | "";
-}): Promise<LastSalePriceResponse> {
-  const q = new URLSearchParams();
-  q.set("product", String(params.product));
-  if (params.customer != null && params.customer !== "") q.set("customer", String(params.customer));
-  return apiGetObject(`sales/invoices/last-price/?${q.toString()}`, { tenantId: tid() });
-}
-
-// -------------------------------------------------------------
 // FEAT-2: السعر المقترح لبند البيع عبر PriceResolver المشترك
 // (آخر سعر دفعه العميل ← سعر البيع الافتراضي ← فارغ) مع تطبيع العملة/الضريبة.
 // -------------------------------------------------------------
@@ -675,8 +656,14 @@ export type CustomerPriceRow = {
   }>;
 };
 
-export async function getCustomerPriceList(customerId: number | string): Promise<CustomerPriceRow[]> {
+export async function getCustomerPriceList(
+  customerId: number | string,
+  /** T-PICKUNIFY (#147 M4): عرض سعر مفتوح للتحرير يستبعد نفسه من رتبة عروضه —
+   *  وإلا لقرأ رقمه هو كأنه تاريخٌ سابق للزبون. */
+  opts?: { excludeQuotation?: number | string },
+): Promise<CustomerPriceRow[]> {
   const q = new URLSearchParams({ customer: String(customerId) });
+  if (opts?.excludeQuotation != null) q.set("exclude_quotation", String(opts.excludeQuotation));
   return apiGetList(`sales/customer-price-list/?${q.toString()}`, { tenantId: tid() });
 }
 

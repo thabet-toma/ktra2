@@ -44,6 +44,8 @@ from logistics.models import (
     PurchaseRFQ,
     PurchaseRFQLine,
     PurchaseRFQRecipient,
+    PublicSupplierQuoteRequest,
+    PublicSupplierQuoteRequestLine,
     PurchaseOrder,
     PurchaseOrderLine,
     LogisticsDeal,
@@ -173,6 +175,11 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
     currency_code = serializers.CharField(source='currency.Code', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     scope_display = serializers.CharField(source='get_scope_display', read_only=True)
+    # مواصفة #147 (المرحلة 3أ): «سعّره المورّد» / «أُدخل عنه» / «من رابط عام» —
+    # النصّ العربيّ مصدره الوحيد `choices` الحقل نفسه، لا تكراره حرفياً بالواجهة.
+    entry_source_display = serializers.CharField(
+        source='get_entry_source_display', read_only=True,
+    )
     converted_deal = serializers.SerializerMethodField()
     # T-PLINEAGE: المستند الناتج عن التحويل بالاسم والمعرّف — «محوَّل» بلا وجهة
     # لا يقود إلى شيء، والواجهة تحتاج المعرّف لفتحه بنقرة.
@@ -202,7 +209,7 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             'order_name', 'order_description', 'notes',
             'alibaba_link', 'supplier_contact', 'decision_reason', 'attachments',
             'notes_log',
-            'rfq', 'rfq_recipient', 'entry_source',
+            'rfq', 'rfq_recipient', 'entry_source', 'entry_source_display',
             # ISSUE #133 غ٣: ملاحظة المورّد العامة على الطلبية كلّها.
             'general_note',
             'lines', 'converted_deal', 'converted_order', 'converted_invoice',
@@ -213,7 +220,7 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             'converted_order', 'converted_invoice', 'is_draft_supplier',
             # ISSUE #122: مَن كتب الرقم يُختَم في الخادم لا يُرسَل من الشاشة —
             # وإلّا صارت «سعّره المورّد» شارةً يُدّعى بها.
-            'entry_source',
+            'entry_source', 'entry_source_display',
             # ISSUE #133 غ٣: ملاحظة المورّد العامة — نفس قفل `supplier_note`،
             # تُكتب حصراً من `submit_rfq_supplier_quote` (رابط المورّد العام).
             'general_note',
@@ -683,6 +690,52 @@ class PurchaseRFQRecipientSerializer(serializers.ModelSerializer):
         return bool(obj.share and obj.share.is_live)
 
 
+# ── مواصفة #147 (المرحلة 3أ): مساحة انتظار ردود الروابط العامة ─────────────
+
+class PublicSupplierQuoteRequestLineSerializer(serializers.ModelSerializer):
+    """سطرٌ للقراءة فقط — يُكتب حصراً من `logistics.services.record_public_quote_request`
+    (رابطٌ عامٌّ لاحق، مواصفة #147). لا مسار داخليّ يعدّل سطر ردٍّ مجهول."""
+
+    class Meta:
+        model = PublicSupplierQuoteRequestLine
+        fields = [
+            'id', 'rfq_line', 'name_snapshot', 'seq_snapshot',
+            'unit_price', 'supplier_note',
+        ]
+        read_only_fields = fields
+
+
+class PublicSupplierQuoteRequestSerializer(serializers.ModelSerializer):
+    """ردّ مجهولٌ للقراءة فقط — الكتابة عبر `record_public_quote_request`
+    و`approve_public_quote_request`/`reject_public_quote_request` وحدها،
+    لا عبر هذا المُسلسِل. لا `create`/`update` هنا عمداً: سطح الكتابة العام
+    (رابط المورّد المجهول نفسه) مواصفةٌ لاحقة، وهذا يبني المساحة التي تنتظره."""
+
+    lines = PublicSupplierQuoteRequestLineSerializer(many=True, read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    currency_code = serializers.CharField(
+        source='currency.Code', read_only=True, default=None,
+    )
+    rfq_number = serializers.CharField(
+        source='rfq.rfq_number', read_only=True, default=None,
+    )
+    decided_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PublicSupplierQuoteRequest
+        fields = [
+            'id', 'rfq', 'rfq_number', 'share', 'supplier_name',
+            'supplier_email', 'supplier_phone', 'currency', 'currency_code',
+            'general_note', 'submitted_ip', 'submitted_at', 'status',
+            'status_display', 'approved_partner', 'approved_quotation',
+            'decided_at', 'decided_by', 'decided_by_name', 'lines',
+        ]
+        read_only_fields = fields
+
+    def get_decided_by_name(self, obj):
+        return obj.decided_by.get_username() if obj.decided_by_id else ''
+
+
 class PurchaseRFQSerializer(serializers.ModelSerializer):
     lines = PurchaseRFQLineSerializer(many=True)
     recipients = PurchaseRFQRecipientSerializer(many=True, read_only=True)
@@ -692,6 +745,14 @@ class PurchaseRFQSerializer(serializers.ModelSerializer):
     # لا حقلٌ مخزَّن.
     recipients_count = serializers.SerializerMethodField()
     replies_count = serializers.SerializerMethodField()
+    # مواصفة #147 (خريطة #138، البند 27) — «رابطٌ عامٌّ مفتوحٌ ولم يردّ عليه
+    # أحد» يلزم الواجهة معرفة وجود رابطٍ حيّ بلا استدعاء `public-link/` (ذاك
+    # الفعل **ينشئ** لو لم يوجد، فاستدعاؤه للعرض وحده كان يُنشئ روابط لم
+    # يطلبها أحد). نفس قفل `PurchaseRFQRecipientSerializer.share_url` أعلاه:
+    # **لا توكن خام** — هذان الحقلان لا يكشفان الرابط نفسه، فقط «أهناك رابطٌ
+    # حيّ؟» ومتى ينتهي.
+    public_share_is_live = serializers.SerializerMethodField()
+    public_share_expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseRFQ
@@ -699,6 +760,7 @@ class PurchaseRFQSerializer(serializers.ModelSerializer):
             'id', 'rfq_number', 'scope', 'scope_display', 'rfq_date',
             'status', 'status_display', 'reply_deadline', 'notes',
             'lines', 'recipients', 'recipients_count', 'replies_count',
+            'public_share_is_live', 'public_share_expires_at',
             'created_at', 'updated_at',
         ]
         # rfq_number/status: لا يُكتبان مباشرةً — يُخصَّصان عبر أفعال دورة الحياة
@@ -707,6 +769,7 @@ class PurchaseRFQSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'id', 'rfq_number', 'status', 'status_display', 'scope_display',
             'recipients', 'recipients_count', 'replies_count',
+            'public_share_is_live', 'public_share_expires_at',
             'created_at', 'updated_at',
         ]
 
@@ -715,6 +778,26 @@ class PurchaseRFQSerializer(serializers.ModelSerializer):
 
     def get_replies_count(self, obj):
         return len([r for r in obj.recipients.all() if r.replied_at])
+
+    def _live_public_share(self, obj):
+        """من خريطة السياق حين تتوفّر (`PurchaseRFQViewSet` — استعلامٌ واحدٌ
+        للقائمة كلّها)، وإلا استعلامٌ مباشرٌ لهذا الصفّ وحده — مسارات `send`/
+        `cancel`/`award`/`duplicate`/`stop_public_link` تبني هذا السيريالايزر
+        مباشرةً بلا المرور بـ`get_serializer_context`، وصفٌّ واحدٌ هنا لا يعني
+        N+1."""
+        if 'public_shares_map' in self.context:
+            return self.context['public_shares_map'].get(obj.id)
+        from docshare.models import DOC_PURCHASE_RFQ
+        from docshare.services import active_share
+
+        return active_share(obj.tenant, DOC_PURCHASE_RFQ, obj.id, is_public=True)
+
+    def get_public_share_is_live(self, obj):
+        return self._live_public_share(obj) is not None
+
+    def get_public_share_expires_at(self, obj):
+        share = self._live_public_share(obj)
+        return share.expires_at.isoformat() if share else None
 
     def validate(self, attrs):
         tenant = get_tenant(self.context.get('request'))

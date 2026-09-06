@@ -12,6 +12,7 @@ import {
   selectOrphanDrafts,
   shouldPersistDraft,
   shouldWarnCrossTabWrite,
+  wouldOpeningOrphanClobberUnsavedWork,
 } from "./documentDraft.ts";
 
 /* ─────────────────────────── هويّة المسودّة ─────────────────────────── */
@@ -242,6 +243,16 @@ test("orphanDraftsBannerText: مفرد/مثنّى/جمع بصياغة عربية
   assert.equal(orphanDraftsBannerText(1), "لديك مسودةٌ واحدة غير محفوظة");
   assert.equal(orphanDraftsBannerText(2), "لديك مسودتان غير محفوظتين");
   assert.equal(orphanDraftsBannerText(3), "لديك 3 مسودّات غير محفوظة");
+});
+
+/* ─────────── فتح يتيمٍ فوق عملٍ غير محفوظ — تحذيرٌ أولاً (issue #146) ─────────── */
+
+test("شاشةٌ بلا تعديلٍ مستخدم ⇒ فتح اليتيم لا يحذّر", () => {
+  assert.equal(wouldOpeningOrphanClobberUnsavedWork({ isTouched: false }), false);
+});
+
+test("شاشةٌ عليها تعديلٌ غير محفوظ ⇒ فتح اليتيم يحذّر أوّلاً", () => {
+  assert.equal(wouldOpeningOrphanClobberUnsavedWork({ isTouched: true }), true);
 });
 
 /* ─────────────────────── نفس المستند في تبويبين — إنذارٌ مرّة ─────────────────── */
