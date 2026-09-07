@@ -344,6 +344,13 @@ class QueryBudgetTest(TestCase):
                     tenant=cls.tenant, collection=campaign, store_product=p)
 
     def test_query_count_does_not_grow_with_product_count(self):
+        """THA-166 م٤: الصفحة الأولى بلا `?page=` صريح تحمل العدّاداتِ أيضاً
+        (قسم أ)، فالأساس ارتفع من 6 إلى 13 — سبعةٌ إضافيةٌ لبناء `facets` و
+        `price_range` (عدّاد الفئات: تجميعٌ + شجرة الفئات، عدّاد الماركات:
+        تجميعٌ واحد، ثلاثُ راياتٍ: `on_sale`/`is_new`/`in_stock`، ومدى السعر)
+        — كلّها ثابتةُ العدد بصرف النظر عن عدد المنتجات، وهو ما يبقى الاختبار
+        يحرسه فعلياً. حارسُ التناسب مع عدد الفئات/الماركات في
+        `test_store_facets.py` (`FacetQueryBudgetTest`)."""
         with CaptureQueriesContext(connection) as ctx:
             res = APIClient().get(
                 f"/api/store/{self.tenant.store_slug}/products/",
@@ -353,9 +360,10 @@ class QueryBudgetTest(TestCase):
         self.assertEqual(len(res.json()["results"]), 20)
         query_count = len(ctx.captured_queries)
         self.assertLessEqual(
-            query_count, 6,
+            query_count, 13,
             f"عددُ الاستعلامات ({query_count}) يجب أن يبقى ثابتاً لا متناسباً "
             "مع عدد المنتجات (20 هنا) — تحقّق من عدم وجود استعلامٍ لكل صفّ. "
-            "الأساس اليوم 6: الشركة، إعدادات الأسعار، عدّ الصفحة، الاستعلام "
-            "الرئيسي (بضمّ Max لخصم الحملة)، تحضير فئات المنتجات، وصور المتجر.",
+            "الأساس اليوم 13 (بعد THA-166 م٤): الشركة، إعدادات الأسعار، عدّ "
+            "الصفحة، الاستعلام الرئيسي (بضمّ Max لخصم الحملة)، تحضير فئات "
+            "المنتجات، صور المتجر، وسبعُ استعلاماتٍ للعدّادات السياقية.",
         )

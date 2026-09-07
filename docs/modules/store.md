@@ -1,6 +1,6 @@
 # store — المتجر العام للمنتجات (سطح بلا مصادقة فوق كتالوج المنتجات)
 
-> مبني على قراءة الكود مباشرةً بتاريخ 2026-08-13 (ST-1)، ومُحدَّث 2026-08-19 (ST-5: المظهر والحملات والسلة ولوحة إدارة المتجر)، 2026-09-07 (THA-166 م٢: القراءةُ العامة تحوّلت إلى `StoreProduct`، وظهر الخصم)، و2026-09-07 (THA-166 م٣: شاشاتُ إدارة المتجر على العقد الجديد + استيراد من الأصناف — الفجوة أُغلقت). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
+> مبني على قراءة الكود مباشرةً بتاريخ 2026-08-13 (ST-1)، ومُحدَّث 2026-08-19 (ST-5: المظهر والحملات والسلة ولوحة إدارة المتجر)، 2026-09-07 (THA-166 م٢: القراءةُ العامة تحوّلت إلى `StoreProduct`، وظهر الخصم)، 2026-09-07 (THA-166 م٣: شاشاتُ إدارة المتجر على العقد الجديد + استيراد من الأصناف — الفجوة أُغلقت)، و2026-09-07 (THA-166 م٤: الفلترةُ بعدّاداتٍ سياقية). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
 ## الغرض
 app تخدم سطحين لا سطحاً واحداً: **زائراً مجهولاً** بخمس نقاط قراءة تحت `/api/store/<slug>/` (بطاقة الشركة ومظهرها · شبكة المنتجات المنشورة · صفحة المنتج · قائمة الحملات · صفحة هبوط الحملة)، و**مديراً مصادَقاً عليه** بنقاط `/api/store/admin/…` يضبط منها المظهر والصور والحملات ومنتجات المتجر.
@@ -26,7 +26,7 @@ app تخدم سطحين لا سطحاً واحداً: **زائراً مجهول�
 | الطريقة | المسار | ماذا تُرجع |
 |---|---|---|
 | GET | `store/<slug>/` | بطاقة الشركة من `TenantSettings`: الاسم، الشعار، الهاتف، العنوان، **رمز العملة** |
-| GET | `store/<slug>/products/` | المنتجات المنشورة — بحث `q`، تصفية `brand` و`category` (بالمعرّف **أو بالاسم**)، فرز `sort=price_asc\|price_desc`، **ترقيم إلزامي** |
+| GET | `store/<slug>/products/` | المنتجات المنشورة — بحث `q`، تصفية `brand`/`category` (معرّفاتٌ متعدّدة بفواصل **أو اسمٌ مفرد**)، رايات `on_sale`/`is_new`/`in_stock`، مدى `min_price`/`max_price`، فرز `sort=price_asc\|price_desc`، **ترقيم إلزامي**، وعدّادات `facets`/`price_range` (انظر «الفلترةُ بعدّادات» أدناه) |
 | GET | `store/<slug>/products/<id>/` | منتج واحد + كتابة عدّاد المشاهدة |
 | GET | `store/<slug>/collections/` | الحملات النشطة (`StoreCollection`) مع عدد منتجاتها |
 | GET | `store/<slug>/collections/<collection_slug>/` | صفحة هبوط الحملة: بياناتها + منتجها المميّز + منتجاتها مُرقَّمة |
@@ -65,6 +65,78 @@ app تخدم سطحين لا سطحاً واحداً: **زائراً مجهول�
 
 **التصفية بالتصنيف تقبل الاسم كما تقبل المعرّف** (`StoreProductListView._filtered`، عبر M2M `categories`، مع `distinct()` كي لا يتكرّر صفّ منتجٍ في أكثر من فئة): تاريخياً الحمولة العامة نشرت `category_name` وحده، والاسم بقي مقبولاً للتوافق؛ ومنذ م٢ `categories[].id` منشورٌ أيضاً فالمعرّف صار خياراً كاملاً بدوره.
 الاسم لا يفتح باباً: الاستعلام مفلتر بالشركة قبل هذا الشرط، فاسم تصنيف شركة أخرى يعطي فراغاً لا تسريباً (`test_a_category_name_from_another_tenant_returns_nothing`).
+
+## الفلترةُ بعدّادات (THA-166 م٤)
+
+**ردٌّ واحدٌ لا نقطةٌ ثانية**: `GET /api/store/<slug>/products/` يردّ
+`{count, next, previous, results, facets, price_range}` — `facets` و
+`price_range` إضافتان على عقد الترقيم القائم لا نقطة `/facets/` منفصلة (بحث
+#157: الفصلُ يُضاعف الرحلات وينتج أعداداً لا تطابق المعروض؛ نقطة WooCommerce
+المنفصلة نتاجُ معماريّة ووردبريس لا اختيارِ تصميم).
+
+**العدّاداتُ سياقيّةٌ بالاستثناء الانفصاليّ** (`store/views.py`،
+`StoreProductListView._filtered(exclude_axis=…)`): كلُّ محورٍ يُعدُّ بعد
+إسقاط فلترِ *نفسِه* وحدَه، مع إبقاء بقيّة المحاور. مثال: زبونٌ اختار الماركة
+«سامسونج» والفئة «هواتف» — عدّاداتُ **الفئات** تُحسَب داخل «سامسونج» (فلترُ
+الماركة يبقى، وفلترُ الفئة يسقط)، وعدّاداتُ **الماركات** تُحسَب داخل «هواتف»
+(والعكس) — فتبقى بقيّةُ الماركات ظاهرةً بأعدادها ويستطيع الزبون إضافةَ
+ماركةٍ ثانية. حُسبت لو بعد تطبيق فلتر الماركة لظهرت «سامسونج» وحدها بعددٍ
+يساوي النتائج، ولانغلق المحورُ على نفسه — وهذا بالضبط ما تثبته
+`store/tests/test_store_facets.py::DisjunctiveExceptionTest` في الاتجاهين.
+
+⚠️ **لازمةٌ حتميّة: مجموعُ عدّاداتِ محورٍ انفصاليٍّ قد يتجاوز `count`.**
+`categories` علاقةُ M2M — منتجٌ في فئتين يُحسَب في عدّاد كلٍّ منهما، فمجموعُ
+عدّادات الفئات قد يفوق عدد النتائج الفعليّ. **هذا ليس عطباً** — هو نفسُ نمط
+WooCommerce وAlgolia الموثَّق في بحث #157، ومُثبَتٌ اختباراً
+(`FacetSumExceedsCountTest`) لا مُصحَّحاً.
+
+**المحاور الأربعة:**
+- **الفئات** — شجريّةٌ بمستويين، **والعدُّ شاملٌ للأبناء**: أبٌ بلا منتجٍ
+  مباشرٍ وتحته ابنٌ بعشرة ⇒ الأبُ يُظهر عشرة لا صفراً (`_category_facet`).
+  **العدُّ عددُ منتجاتٍ متمايزة لا مجموع عدّادين** — منتجٌ موسومٌ بالأب
+  وابنه معاً (`M2M`، استعمالٌ طبيعيٌّ لا شاذّ) كان يُحسَب مرّتين فيَعِد الأبُ
+  بعددٍ أكبر من منتجاته الفعليّة قبل تصحيحٍ بعد المراجعة (سطرٌ منفصلٌ عن
+  لازمة تجاوز المجموع أدناه: تلك عن محاورَ *مختلفة*، وهذه عن قيمةٍ واحدةٍ
+  تكذب على نفسها). التنفيذ: استعلامٌ واحد يقرأ أزواج (منتج، فئة) خاماً، ثم
+  اتحادُ مجموعتَي معرّفات المنتجات (الأب + كل ابن) في بايثون — لا `SUM` على
+  عدّين مستقلّين. استعلامان ثابتان بصرف النظر عن عدد الفئات أو المنتجات
+  (الأزواج + قراءةُ شجرة الفئات كاملةً)، ومُثبَتٌ اختباراً
+  (`TreeCategoryCountTest.test_product_tagged_with_both_parent_and_child_is_not_double_counted`).
+- **الماركات** — من `StoreBrand`، تجميعٌ واحد.
+- **الرايات** (`flags{on_sale, is_new, in_stock}`):
+  - `on_sale` — خصمٌ سارٍ فعلاً: `effective_price < price` (منتجٍ مفردٍ أو حملة، نفس منطق `published_products`).
+  - `in_stock` — **`stock_state == 'in_stock'` وحدَها دون `preorder`**: من يفلتر بالتوفّر يقصد «أقدر آخذه هلّق»، ومن أراد الطلب المسبق يجده بلا هذا الفلتر.
+  - `is_new` — `created_at >= now() - new_product_days` أيام. **بلا `__date` إطلاقاً** (`core/date_ranges.py`: جداول المناطق الزمنية الفارغة في MySQL تُعيده صفر صفوفٍ بلا خطأ) — المقارنة على `datetime` مباشرة. `StoreSettings.new_product_days` (هجرة `0010`، افتراضه **٣٠**) قرارٌ لكل شركة — لا تعريف قياسيّ لهذه الراية عند أيّ منصّة (بحث #157).
+- **مدى السعر** (`price_range: {min, max}`) — حدّان مستمرّان `min_price`/`max_price`، **لا شرائحُ جاهزة** (إجماعٌ ثلاثيٌّ في #157)، على `effective_price` (بعد الخصم) لا `price` الخام. **سياقيٌّ باستثناء فلتر السعر نفسِه** — قرارُ استعمالٍ لا سابقة (`_price_range_facet`): لو حُسب شاملاً لاختيار الزبون لانطبق المنزلقُ على قبضته ولما استطاع توسيعَه ثانيةً. **يغيب من الحمولة كلّياً** حين `show_prices=false` (ومعاملا السعر يُهمَلان تماماً حينها، `_apply_price_range`).
+
+**تعدّدُ الاختيار** — `brand=1,5` و`category=3,9` بفواصل: **OR داخل المحور، AND
+بين المحاور** (إجماعٌ ثلاثيٌّ في #157). **المعرّفاتُ لا الأسماء** طريق
+التعدّد؛ الاسمُ المفرد (`brand=سامسونج`) يبقى مقبولاً للتوافق الخلفيّ
+(الواجهة الحاليّة تستعمله ولن تُعاد كتابتها إلا في المرحلة الأخيرة).
+`_apply_category` تستعمل `Q(categories__id__in=…)`، والقائمةُ النهائية تُغلَق
+بـ`.distinct()` (M2M يكرّر الصفّ)، بينما العدّاداتُ تستعمل
+`Count('id', distinct=True)` بدل `.distinct()` على الاستعلام — نفس نمط
+WooCommerce المُسنَد في #157.
+
+**العدّاداتُ تعود عند `page == 1` فقط** (أو بلا `page=` أصلاً) **وتُحذَف من
+الصفحات التالية** — التصفّحُ لا يغيّرها، وحسابُها في كلّ صفحةٍ إهدارُ تجميعٍ
+محضٌ على مسارٍ عامٍّ مخنوق (`store_public`). `include_facets=1` يفتحها
+صراحةً لمن وصل مباشرةً إلى صفحةٍ تالية.
+
+**الكاش** — `StoreProductListView.CACHE_PARAMS` كسبت ستّة معاملات:
+`min_price`, `max_price`, `on_sale`, `is_new`, `in_stock`, `include_facets`.
+**كل معاملٍ يقرؤه `_filtered` يجب أن يدخل هذه القائمة** وإلا خُدِم قديماً
+بصمتٍ من الكاش — حارسٌ آليٌّ في `test_store_facets.py::CacheFingerprintGuardTest`
+(`test_every_filtered_read_param_is_covered_by_cache_params`) يقارن مجموعة
+المعاملات المقروءة فعلياً بـ`CACHE_PARAMS` بدل تعداد الحالات يدوياً، على غرار
+قائمة `test_public_leakage.py` البيضاء.
+
+**الأداء** — SQL يكفي بمقاس هذا المتجر: لا محرّك بحثٍ ولا Celery (#157).
+عددُ استعلامات بناء العدّادات **ثابتٌ** بصرف النظر عن عدد المنتجات أو
+الفئات أو الماركات (`FacetQueryBudgetTest`) — لا استعلامَ لكل فئةٍ ولا لكل
+صفّ (درسا ٣٥٠١ استعلام و١٧ ثانية موثَّقان في المستودع). الأساس ارتفع من ٦
+إلى ١٣ استعلاماً على الصفحة الأولى (`test_store_catalog_public.py::QueryBudgetTest`)
+— سبعةٌ إضافيةٌ لبناء `facets`/`price_range`.
 
 ## الصور
 روابط Cloudinary عامة أصلاً لمن يملك الرابط. `core/media_views.py` (`media_upload`) يخدم **الرفع** لا التسليم، فلا توكن هنا ولا حاجة إليه.
@@ -134,7 +206,8 @@ app تخدم سطحين لا سطحاً واحداً: **زائراً مجهول�
 | `catalog_mode_default` | ❌ | ✅ `StorefrontPage` |
 | `show_prices` | ❌ (يُضاف في EXEC-5) | ✅ الخادم يحجب السعر من الحمولة |
 | `primary_color` · `accent_color` · `background_color` · `theme_preset` · `allow_cart` | ❌ | ❌ |
-الخمسة الأخيرة **حقول محجوزة بلا أثر**: تُحفظ وتُقرأ عبر الـAPI ولا تغيّر بكسلاً واحداً. `allow_cart=false` **لا يُخفي السلة**. تُوصَل في THA-424.
+| `new_product_days` (م٤) | ❌ (لا واجهةَ ضبطٍ بعد) | لا تقرؤه الواجهة مباشرةً — يقود فلتر `is_new` **خادميّاً** في `StoreProductListView` |
+الخمسة الأخيرة (السطر قبل الأخير) **حقول محجوزة بلا أثر**: تُحفظ وتُقرأ عبر الـAPI ولا تغيّر بكسلاً واحداً. `allow_cart=false` **لا يُخفي السلة**. تُوصَل في THA-424.
 
 **صور المتجر** — `store/models.py` (`StoreProductImage`): صور تسويقية مستقلة عن مرفقات المنتج، مرتَّبة، بغلافٍ واحد، وبنصٍّ إعلاني فوق الغلاف (`cover_overlay`).
 الأولوية لها؛ ومَن لا يملك صورة متجر يسقط إلى `SystemAttachment` كما قبل — `store/views.py` (`_store_media_context`) يجمع الاثنتين لصفحة كاملة باستعلامين لا باستعلام لكل منتج.
@@ -215,14 +288,15 @@ app تخدم سطحين لا سطحاً واحداً: **زائراً مجهول�
 ## أهم الملفات
 | الملف | الغرض |
 |---|---|
-| `store/views.py` | النقاط العامة + نقاط الإدارة + `published_products` (الاستعلام المقيَّد + الخصم بـSQL) + الكاش + العدّاد + `StoreProductAdminViewSet.import_from_inventory` (م٣: الجسر الوحيد المسموح مع المخزون) |
+| `store/views.py` | النقاط العامة + نقاط الإدارة + `published_products` (الاستعلام المقيَّد + الخصم بـSQL) + الكاش + العدّاد + `StoreProductAdminViewSet.import_from_inventory` (م٣) + عدّاداتُ `StoreProductListView` السياقية (`_filtered(exclude_axis=…)`, `_category_facet`, `_brand_facet`, `_flags_facet`, `_price_range_facet`) (م٤) |
 | `store/serializers.py` | القائمة البيضاء المصرَّحة حقلاً حقلاً (سبعةَ عشر منذ م٢) + `TenantScopedPrimaryKeyRelatedField` |
-| `store/models.py` | `StoreProductView` · `StoreSettings` · `StoreProductImage` · `StoreCollection(Item)` · `StoreProduct` · `StoreBrand` · `StoreCategory` · `StorePriceHistory` — وحرّاسا الحفظ `StoreProduct._reject_non_positive_sale_price` و`StoreCollection._reject_price_killing_discount` (م٢) |
+| `store/models.py` | `StoreProductView` · `StoreSettings` (كسبت `new_product_days` م٤) · `StoreProductImage` · `StoreCollection(Item)` · `StoreProduct` · `StoreBrand` · `StoreCategory` · `StorePriceHistory` — وحرّاسا الحفظ `StoreProduct._reject_non_positive_sale_price` و`StoreCollection._reject_price_killing_discount` (م٢) |
 | `store/slugs.py` | `build_unique_slug` — النسخةُ **الحيّة** لتوليد slug عربيٍّ فريد، يستعملها `StoreProduct.save()` وحده |
 | `store/migrations/0006_migrate_catalog_to_store_product.py` | نسخُ الأصناف المستحقّة إلى `StoreProduct` — مُضيفةٌ محضة وقابلةٌ لإعادة التشغيل. تحمل نسخةً **مجمَّدةً** مستقلّةً من منطق الـslug (`_build_unique_slug_frozen`) ولا تستورد من `store/slugs.py` عمداً — هجرةٌ يجب أن تُنتج نفسَ النتيجة بعد سنوات بلا تأثّرٍ بتطوّر الكود الحيّ |
 | `store/migrations/0007_m2_product_fk_nullable.py` | إسقاطُ قيد `NOT NULL` عن `product` في الجداول الثلاثة — بلا حذفٍ ولا مسٍّ للبيانات (م٢) |
 | `store/migrations/0008_m2_featured_store_product.py` | إضافةُ `StoreCollection.featured_store_product` (م٢) |
 | `store/migrations/0009_populate_featured_store_product.py` | مِلءُ الحقل الجديد من `featured_product` القديم عبر `imported_from_product_id` — مُضيفةٌ محضة (م٢) |
+| `store/migrations/0010_storesettings_new_product_days.py` | إضافةُ `StoreSettings.new_product_days` (افتراضه ٣٠) لفلتر `is_new` (م٤) |
 | `store/urls.py` | المسارات تحت `/api/store/` — بما فيها `admin/brands` و`admin/categories` (م٢) |
 | `store/tests/test_public_leakage.py` | معيار النجاح السالب: إثبات غياب التسريب + القائمة البيضاء الموسَّعة (م٢) |
 | `store/tests/test_store_catalog_public.py` | **م٢**: الخصمُ (الأكبر يفوز، منتجٌ ضدّ حملة، حملةٌ ضدّ حملة)، سريانُ الحملة بالتاريخ، الحرّاسان، حجبُ الأسعار، وحدُّ الاستعلامات |
@@ -236,6 +310,7 @@ app تخدم سطحين لا سطحاً واحداً: **زائراً مجهول�
 | `store/tests/test_publish_flow.py` | مراجعةُ أول تفعيل، وفوريّةُ الظهور والاختفاء — عبر `/api/store/admin/products/` منذ م٢ |
 | `store/tests/test_store_surface.py` | إبطال الكاش عند النشر/السحب، وترقيم الحملات، وانتقاء المنتجات بـ`ids` |
 | `store/tests/test_store_import_from_inventory.py` | **م٣**: استيراد من الأصناف — نسخٌ صحيح، تخطّي المستورد سلفاً، عزل الشركة، صفر صفٍّ متغيّر في `inventory.Product` |
+| `store/tests/test_store_facets.py` | **م٤**: الاستثناءُ الانفصاليّ في الاتجاهين، تجاوزُ مجموع محورٍ لـ`count`، العدُّ الشجريّ الشامل، تعدّدُ الاختيار (OR/AND)، ظهور/غياب العدّادات بالصفحة، مدى السعر السياقيّ وغيابه عند حجب الأسعار، `in_stock` دون `preorder`، حدُّ `is_new`، حارسا بصمة الكاش والأداء |
 | `frontend_v2/contexts/StoreCartContext.tsx` | سلة المتصفح ورسالة الواتساب |
 | `frontend_v2/components/settings/StoreCategoriesPage.tsx` | شجرة فئات المتجر — شاشةٌ مستقلّة على `/store-categories` (م٣) |
 | `frontend_v2/components/settings/StoreImportFromInventoryModal.tsx` | منتقي «استيراد من الأصناف» متعدّد الاختيار (م٣) |

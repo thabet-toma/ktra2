@@ -125,9 +125,16 @@ class StoreBrowseTest(TestCase):
         self.assertEqual(descending, sorted(descending, key=float, reverse=True))
 
     def test_pagination_is_enforced_not_opt_in(self):
-        """بلا `?page=` أيضاً — نقطة مجهولة لا تبثّ الكتالوج كاملاً بطلب واحد."""
+        """بلا `?page=` أيضاً — نقطة مجهولة لا تبثّ الكتالوج كاملاً بطلب واحد.
+
+        THA-166 م٤: بلا `?page=` يعني الصفحة الأولى، فالردّ يحمل `facets` و
+        `price_range` أيضاً (قسم أ من المواصفة) — عقدٌ جديدٌ لا كسرٌ في الترقيم.
+        """
         bare = self.client.get("/api/store/demo/products/").json()
-        self.assertEqual(set(bare), {"count", "next", "previous", "results"})
+        self.assertEqual(
+            set(bare),
+            {"count", "next", "previous", "results", "facets", "price_range"},
+        )
 
     def test_page_size_is_capped(self):
         """سقف `max_page_size` يمنع تحويل `?page_size=` إلى مُضخِّم إساءة."""

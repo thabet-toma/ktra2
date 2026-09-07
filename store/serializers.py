@@ -221,6 +221,7 @@ class StoreSettingsAdminSerializer(serializers.ModelSerializer):
             "background_style", "banner_image_url", "instagram_url",
             "tiktok_url", "facebook_url", "snapchat_url", "whatsapp_number",
             "catalog_mode_default", "allow_cart", "show_prices",
+            "new_product_days",
         ]
 
 

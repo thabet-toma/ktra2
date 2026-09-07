@@ -127,6 +127,13 @@ class StoreSettings(models.Model):
     show_prices = models.BooleanField(
         default=True, db_column="ShowPrices"
     )
+    # THA-166 م٤: عمر «الجديد» بالأيام لفلتر `is_new`. لا تعريف قياسيّ لهذه
+    # الراية عند أيّ منصّة — قرارٌ لكل شركة: بائع سيّاراتٍ و«الجديد» عنده
+    # ليسا نفس «الجديد» عند بقّال. ٣٠ افتراضاً كي لا يفقد متجرٌ قائم فلترته
+    # بمجرّد الترقية.
+    new_product_days = models.PositiveIntegerField(
+        default=30, db_column="NewProductDays"
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
     updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
 

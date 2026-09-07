@@ -5,12 +5,13 @@
 بالمئة خلف المصادقة.
 """
 import hashlib
-from decimal import Decimal
+from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import (
-    Case, Count, DecimalField, ExpressionWrapper, F, Max, Prefetch, Q, Value, When,
+    Case, Count, DecimalField, ExpressionWrapper, F, Max, Min, Prefetch, Q, Value, When,
 )
 from django.db.models.functions import Coalesce, Least
 from django.http import Http404
@@ -65,6 +66,22 @@ PRODUCT_IMAGE_TYPES = ("Product Image", "Image")
 #: ساعةٍ لا حدثُ حفظٍ يُبطل الكاش، فهذا الرقم هو أقصى تأخيرٍ ممكن لظهور خصمٍ
 #: جديد أو اختفاء خصمٍ منتهٍ. يجب أن يبقى ≤ 300 (خمس دقائق).
 LIST_CACHE_SECONDS = 60
+
+
+def _format_money(value):
+    """نصٌّ ثابتُ الخانتين أو `None` — نفس منطق `StoreProductSerializer._money`
+    لكن هنا لملخّص `price_range` لا لبند منتج."""
+    if value is None:
+        return None
+    return str(value.quantize(Decimal("0.01")))
+
+
+def _new_product_days(tenant):
+    """عمر «الجديد» بالأيام لهذه الشركة — ٣٠ افتراضاً حين لا صفّ إعداداتٍ أصلاً
+    (نفس نمط `_prices_are_public`: غياب الصفّ ليس خطأً)."""
+    return getattr(
+        getattr(tenant, "store_theme_settings", None), "new_product_days", 30
+    )
 
 
 def _hidden_price_expression():
@@ -310,14 +327,29 @@ class StoreProfileView(StorePublicView):
 
 
 class StoreProductListView(StorePublicView):
-    """`GET /api/store/<slug>/products/` — بحث وتصفية وفرز وترقيم، مكاشَة دقيقة."""
+    """`GET /api/store/<slug>/products/` — بحث وتصفية وفرز وترقيم وعدّاداتٌ سياقية.
+
+    **العدّاداتُ سياقيّةٌ بالاستثناء الانفصاليّ (مواصفة #166 م٤):** كلُّ محورٍ
+    (فئة، ماركة، رايةٌ، مدى سعر) يُحسَب بعد إسقاط فلترِ نفسِه وحدَه، مع إبقاء
+    بقيّة المحاور. **لازمةٌ يجب معرفتها قبل قراءة الأرقام:** مجموعُ عدّاداتِ
+    محورٍ انفصاليٍّ (الفئات تحديداً، لأنها M2M) **قد يتجاوز `count`** — منتجٌ
+    في فئتين يُحسَب في عدّاد كلٍّ منهما، فمجموعُهما يفوق عدد المنتجات الفعليّ.
+    هذا ليس عطباً: هو نفسُ نمط WooCommerce/Algolia الموثَّق في بحث #157.
+    """
 
     #: المعاملات التي تدخل بصمة الكاش. ما ليس هنا لا يغيّر النتيجة، فلا يُضخّم
     #: عدد المفاتيح (`utm_*` وحدها كانت ستصنع مفتاحاً لكل رابط مشارَك).
-    CACHE_PARAMS = ("q", "brand", "category", "sort", "page", "page_size", "ids")
+    CACHE_PARAMS = (
+        "q", "brand", "category", "sort", "page", "page_size", "ids",
+        "min_price", "max_price", "on_sale", "is_new", "in_stock",
+        "include_facets",
+    )
 
     #: سقف معرّفات `ids` — السلة أكبر مستهلك لها، وطلبٌ مجهول لا يُملي طول قائمته.
     MAX_IDS = 60
+
+    #: أسماء محاور الاستثناء الانفصاليّ — تُمرَّر إلى `_filtered(exclude_axis=…)`.
+    FACET_AXES = ("brand", "category", "on_sale", "is_new", "in_stock", "price")
 
     def _cache_key(self, tenant, slug, params):
         """مفتاح يحمل الـslug (عزل الشركة) والنسخة (الإبطال عند النشر)."""
@@ -339,14 +371,99 @@ class StoreProductListView(StorePublicView):
                 wanted.append(int(chunk))
         return wanted
 
+    @staticmethod
+    def _parse_multi(raw):
+        """قيمةٌ مفصولةٌ بفواصل ← (معرّفاتٌ، أسماء) — المعرّفاتُ لا الأسماء
+        هي طريق تعدّد الاختيار (مواصفة #166 م٤)؛ الاسمُ يبقى مقبولاً للتوافق
+        الخلفيّ (الواجهة الحاليّة تستعمله) بمفردٍ كان أو عدّة."""
+        ids, names = [], []
+        for chunk in (raw or "").split(","):
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            if chunk.isdigit():
+                ids.append(int(chunk))
+            else:
+                names.append(chunk)
+        return ids, names
+
+    @staticmethod
+    def _truthy(raw):
+        return (raw or "").strip().lower() in ("1", "true", "yes")
+
+    @staticmethod
+    def _parse_decimal(raw):
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        try:
+            return Decimal(raw)
+        except InvalidOperation:
+            return None
+
     @classmethod
-    def _filtered(cls, queryset, params):
+    def _apply_brand(cls, queryset, raw):
+        ids, names = cls._parse_multi(raw)
+        if not ids and not names:
+            return queryset
+        q = Q()
+        if ids:
+            q |= Q(brand_id__in=ids)
+        for name in names:
+            q |= Q(brand__name__iexact=name)
+        return queryset.filter(q)
+
+    @classmethod
+    def _apply_category(cls, queryset, raw):
+        # `distinct()` **لا** هنا: هذا الفلتر يُستعمَل أيضاً لبناء عدّادات
+        # المحاور الأخرى (`_filtered(exclude_axis=…)`)، وقائمةُ النتائج
+        # النهائية وحدَها هي التي تحتاج `distinct()` — العدّ يستعمل
+        # `Count('id', distinct=True)` بدلاً منه (قسم و في المواصفة).
+        ids, names = cls._parse_multi(raw)
+        if not ids and not names:
+            return queryset
+        q = Q()
+        if ids:
+            q |= Q(categories__id__in=ids)
+        for name in names:
+            q |= Q(categories__name__iexact=name)
+        return queryset.filter(q)
+
+    @classmethod
+    def _apply_is_new(cls, queryset, tenant):
+        threshold = timezone.now() - timedelta(days=_new_product_days(tenant))
+        return queryset.filter(created_at__gte=threshold)
+
+    @classmethod
+    def _apply_price_range(cls, queryset, params, prices_public):
+        # **حين `show_prices=false` معاملا السعر يُهمَلان تماماً** — لا معنى
+        # لفلترة عمودٍ محجوبٍ أصلاً عن القراءة (`published_products`).
+        if not prices_public:
+            return queryset
+        min_price = cls._parse_decimal(params.get("min_price"))
+        max_price = cls._parse_decimal(params.get("max_price"))
+        if min_price is not None:
+            queryset = queryset.filter(effective_price__gte=min_price)
+        if max_price is not None:
+            queryset = queryset.filter(effective_price__lte=max_price)
+        return queryset
+
+    @classmethod
+    def _filtered(cls, queryset, params, tenant, exclude_axis=None):
+        """يطبّق كلّ الفلاتر عدا `exclude_axis` — هو ما يتيح الاستثناء
+        الانفصاليّ: عدّادُ محورٍ يُحسَب بعد إسقاط فلترِ نفسِه وحدَه (قسم ب).
+
+        **كل معاملٍ يُقرَأ هنا يجب أن يدخل `CACHE_PARAMS` أعلاه** — وإلا
+        خُدِم قديماً بصمتٍ من الكاش (قسم و). `store/tests/test_store_facets.py`
+        (`test_cache_fingerprint_covers_every_filtered_param`) يحرس هذا آلياً.
+        """
         # `ids` تخدم إعادة تسعير السلّة بنداءٍ واحد بدل نداءٍ لكل بند. لا تفتح
         # باباً: الاستعلام مفلتر بالشركة والنشر قبل هذا الشرط، فمعرّفُ منتجِ
-        # شركةٍ أخرى يعطي فراغاً لا تسريباً.
+        # شركةٍ أخرى يعطي فراغاً لا تسريباً. ليست محور استثناءٍ (نطاقٌ لا فلترة).
         raw_ids = (params.get("ids") or "").strip()
         if raw_ids:
             queryset = queryset.filter(id__in=cls._parse_ids(raw_ids))
+        # البحث النصّي كذلك ليس محور استثناء — لا عدّاد له في هذه المرحلة.
         search = (params.get("q") or "").strip()
         if search:
             queryset = queryset.filter(
@@ -354,19 +471,26 @@ class StoreProductListView(StorePublicView):
                 | Q(name_en__icontains=search)
                 | Q(brand__name__icontains=search)
             )
-        brand = (params.get("brand") or "").strip()
-        if brand:
-            queryset = queryset.filter(brand__name__iexact=brand)
-        # الاستعلام مفلتر بالشركة أصلاً، فتصنيف شركةٍ أخرى يعطي نتيجة فارغة لا
-        # تسريباً. والاسم مقبول كالمعرّف: الحمولة العامة تنشر `category_name`
-        # ولا تنشر معرّف الفئة الأولى وحدَها، فبالمعرّف وحده تعجز الواجهة عن
-        # بناء قائمة تصنيفات. `distinct()` لأن `categories` علاقةُ M2M — منتجٌ
-        # في أكثر من فئة يتكرّر صفّه في الضمّ بلا هذا.
-        category = (params.get("category") or "").strip()
-        if category.isdigit():
-            queryset = queryset.filter(categories__id=int(category)).distinct()
-        elif category:
-            queryset = queryset.filter(categories__name__iexact=category).distinct()
+        if exclude_axis != "brand":
+            queryset = cls._apply_brand(queryset, params.get("brand"))
+        if exclude_axis != "category":
+            queryset = cls._apply_category(queryset, params.get("category"))
+        if exclude_axis != "on_sale" and cls._truthy(params.get("on_sale")):
+            # خصمٌ سارٍ من `sale_price` أو حملة — تماماً ما يحسبه `effective_price`.
+            queryset = queryset.filter(price__isnull=False, effective_price__lt=F("price"))
+        if exclude_axis != "is_new" and cls._truthy(params.get("is_new")):
+            queryset = cls._apply_is_new(queryset, tenant)
+        if exclude_axis != "in_stock" and cls._truthy(params.get("in_stock")):
+            # `in_stock` وحدَها — `preorder` مقصودٌ خارج هذا الفلتر (قسم ج).
+            queryset = queryset.filter(stock_state=StoreProduct.STOCK_IN_STOCK)
+        if exclude_axis != "price":
+            queryset = cls._apply_price_range(
+                queryset, params, _prices_are_public(tenant)
+            )
+        return queryset
+
+    @staticmethod
+    def _sorted(queryset, params):
         # مُرتِّبٌ ثانٍ بالمعرّف دائماً: بلا فاصلٍ حاسم تتأرجح الصفوف المتساوية
         # بين الصفحات فيظهر منتجٌ مرتين ويختفي آخر. الفرزُ بـ`effective_price`
         # (السعر بعد الخصم) لا بعمود `price` الخام — هو ما يُعرَض فعلياً.
@@ -377,6 +501,100 @@ class StoreProductListView(StorePublicView):
             return queryset.order_by("-effective_price", "id")
         return queryset.order_by("name_ar", "id")
 
+    def _category_facet(self, base_qs, params, tenant):
+        """عدّادٌ شجريٌّ شاملٌ للأبناء — أبٌ بلا منتجٍ مباشرٍ وتحته ابنٌ بعشرة
+        يُظهر عشرة لا صفراً (قسم ج). **العدُّ عدد منتجاتٍ متمايزة لا مجموع
+        عدّادات** — منتجٌ موسومٌ بالأب وابنه معاً `M2M` هو الاستعمالُ الطبيعيّ
+        لا الشاذّ، وجمعُ عدّادين مباشرين كان يحسبه مرّتين فيَعِد الأبُ بعددٍ
+        أكبر من منتجاته الفعليّة (تصحيحٌ بعد المراجعة: هذا عطبٌ مستقلٌّ عن
+        لازمة «مجموع عدّاداتِ محاورَ مختلفة قد يتجاوز count» — تلك عن محاور
+        منفصلة، وهذه عن قيمةٍ واحدةٍ تكذب على نفسها).
+
+        استعلامان ثابتان بصرف النظر عن عدد الفئات أو المنتجات: قراءةُ أزواج
+        (منتج، فئة) خاماً مرّةً واحدة، وقراءةٌ واحدة لشجرة الفئات كاملةً —
+        ثم اتحادُ مجموعتي معرّفات المنتجات (الأب + كل ابن) في بايثون، لا
+        `SUM` على عدّين مستقلّين."""
+        qs = self._filtered(base_qs, params, tenant, exclude_axis="category")
+        product_ids_by_category = {}
+        for product_id, category_id in (
+            qs.exclude(categories__isnull=True).values_list("id", "categories__id")
+        ):
+            product_ids_by_category.setdefault(category_id, set()).add(product_id)
+        categories = list(
+            StoreCategory.objects.filter(tenant=tenant, is_active=True)
+            .order_by("sort_order", "id")
+        )
+        children_by_parent = {}
+        for c in categories:
+            if c.parent_id:
+                children_by_parent.setdefault(c.parent_id, []).append(c.id)
+        payload = []
+        for c in categories:
+            own = product_ids_by_category.get(c.id, set())
+            if c.parent_id is None:
+                union = set(own)
+                for child_id in children_by_parent.get(c.id, []):
+                    union |= product_ids_by_category.get(child_id, set())
+                total = len(union)
+            else:
+                total = len(own)
+            payload.append({
+                "id": c.id, "name": c.name, "parent_id": c.parent_id, "count": total,
+            })
+        return payload
+
+    def _brand_facet(self, base_qs, params, tenant):
+        qs = self._filtered(base_qs, params, tenant, exclude_axis="brand")
+        rows = (
+            qs.exclude(brand_id__isnull=True)
+            .values("brand_id", "brand__name", "brand__sort_order")
+            .annotate(cnt=Count("id", distinct=True))
+            .order_by("brand__sort_order", "brand_id")
+        )
+        return [
+            {"id": row["brand_id"], "name": row["brand__name"], "count": row["cnt"]}
+            for row in rows
+        ]
+
+    def _flags_facet(self, base_qs, params, tenant, prices_public):
+        if prices_public:
+            on_sale_qs = self._filtered(base_qs, params, tenant, exclude_axis="on_sale")
+            on_sale_count = (
+                on_sale_qs.filter(price__isnull=False, effective_price__lt=F("price"))
+                .distinct().count()
+            )
+        else:
+            on_sale_count = 0
+        is_new_qs = self._filtered(base_qs, params, tenant, exclude_axis="is_new")
+        is_new_count = self._apply_is_new(is_new_qs, tenant).distinct().count()
+        in_stock_qs = self._filtered(base_qs, params, tenant, exclude_axis="in_stock")
+        in_stock_count = (
+            in_stock_qs.filter(stock_state=StoreProduct.STOCK_IN_STOCK).distinct().count()
+        )
+        return {
+            "on_sale": on_sale_count,
+            "is_new": is_new_count,
+            "in_stock": in_stock_count,
+        }
+
+    def _price_range_facet(self, base_qs, params, tenant):
+        """مدى السعر سياقيٌّ باستثناء فلتر السعر نفسِه — قرارُ استعمالٍ لا
+        سابقة (قسم هـ): لو حُسب شاملاً لاختيار الزبون لانطبق المنزلقُ على
+        قبضته ولما استطاع توسيعه ثانيةً."""
+        qs = self._filtered(base_qs, params, tenant, exclude_axis="price")
+        agg = qs.aggregate(min_price=Min("effective_price"), max_price=Max("effective_price"))
+        return {
+            "min": _format_money(agg["min_price"]),
+            "max": _format_money(agg["max_price"]),
+        }
+
+    def _build_facets(self, base_qs, params, tenant, prices_public):
+        return {
+            "categories": self._category_facet(base_qs, params, tenant),
+            "brands": self._brand_facet(base_qs, params, tenant),
+            "flags": self._flags_facet(base_qs, params, tenant, prices_public),
+        }
+
     def get(self, request, slug):
         tenant = _tenant_or_404(slug)
         cache_key = self._cache_key(tenant, tenant.store_slug, request.query_params)
@@ -384,13 +602,32 @@ class StoreProductListView(StorePublicView):
         if cached is not None:
             return Response(cached)
 
-        queryset = self._filtered(published_products(tenant), request.query_params)
+        base_qs = published_products(tenant)
+        queryset = self._sorted(
+            self._filtered(base_qs, request.query_params, tenant).distinct(),
+            request.query_params,
+        )
         paginator = EnforcedPageNumberPagination()
         products = list(paginator.paginate_queryset(queryset, request, view=self))
+        prices_public = _prices_are_public(tenant)
         context = _store_media_context(tenant, products)
-        context["prices_public"] = _prices_are_public(tenant)
+        context["prices_public"] = prices_public
         data = StoreProductSerializer(products, many=True, context=context).data
         payload = paginator.get_paginated_response(data).data
+
+        # العدّاداتُ تعود عند `page == 1` فقط، وتُحذَف من الصفحات التالية —
+        # التصفّحُ لا يغيّرها، وحسابُها في كلّ صفحةٍ إهدارُ تجميعٍ محضٌ على
+        # مسارٍ عامٍّ مخنوق. `include_facets=1` يفتحها صراحةً لمن وصل مباشرةً
+        # إلى صفحةٍ تالية (قسم أ).
+        page_param = (request.query_params.get("page") or "").strip()
+        is_first_page = page_param in ("", "1")
+        if is_first_page or self._truthy(request.query_params.get("include_facets")):
+            payload["facets"] = self._build_facets(base_qs, request.query_params, tenant, prices_public)
+            if prices_public:
+                payload["price_range"] = self._price_range_facet(
+                    base_qs, request.query_params, tenant
+                )
+
         cache.set(cache_key, payload, LIST_CACHE_SECONDS)
         return Response(payload)
 
@@ -468,7 +705,12 @@ class StoreCollectionDetailView(StorePublicView):
             .values_list("store_product_id", flat=True)
         )
         queryset = published_products(tenant).filter(id__in=product_ids)
-        queryset = StoreProductListView._filtered(queryset, request.query_params)
+        queryset = StoreProductListView._sorted(
+            StoreProductListView._filtered(
+                queryset, request.query_params, tenant
+            ).distinct(),
+            request.query_params,
+        )
 
         paginator = EnforcedPageNumberPagination()
         products = list(paginator.paginate_queryset(queryset, request, view=self))
