@@ -97,6 +97,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'smart-assistant': 'المساعد الذكي',
   store: 'المتجر',
   'store-settings': 'متجري',
+  'store-categories': 'فئات المتجر',
   'ui-kit': 'مكوّنات الواجهة',
   'sales-classic': 'فاتورة المبيعات (كلاسيكي)',
   'sales-quotations': 'عروض وطلبيات البيع',

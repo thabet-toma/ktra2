@@ -161,6 +161,8 @@ const SalesSettingsPage = lazyPage(() => import("./components/sales/SalesSetting
 const PermissionsPage = lazyPage(() => import("./components/settings/PermissionsPage"));
 // ST-3: «متجري» — فتح المتجر العام واختيار رابطه وتحديد ما يُعرض فيه.
 const StoreSettingsPage = lazyPage(() => import("./components/settings/StoreSettingsPage"));
+// THA-166 م٣: شجرة فئات المتجر — شاشةٌ مستقلّة عمداً (قرار مواصفة #166).
+const StoreCategoriesPage = lazyPage(() => import("./components/settings/StoreCategoriesPage"));
 const PurchaseSettingsPage = lazyPage(() => import("./components/procurement/PurchaseSettingsPage"));
 const GoodsReceiptsPage = lazyPage(() => import("./components/procurement/receipts/GoodsReceiptsPage"));
 const DeliveryNotesPage = lazyPage(() => import("./components/sales/DeliveryNotesPage"));
@@ -310,6 +312,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   // ST-3: «متجري» عكسها — شاشة مصادَق عليها داخل القشرة، ومسارها لا يبدأ بـ
   // `/store/` كي لا يزاحم مسارات المتجر العام في `index.tsx`.
   "store-settings": "/store-settings",
+  "store-categories": "/store-categories",
   "group-constants": "/group-constants",
   "ui-kit": "/ui-kit",
   "sales-classic": "/sales-classic",
@@ -1725,6 +1728,12 @@ const App: React.FC = () => {
       case "store-settings":
         if (canView(appView)) {
           return <StoreSettingsPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "store-categories":
+        if (canView(appView)) {
+          return <StoreCategoriesPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 

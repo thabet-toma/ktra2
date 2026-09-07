@@ -31,20 +31,28 @@ export function setStoreSlug(
   );
 }
 
-/** ما تعرضه الشاشة عن كل منتج. */
+/** حالة توفّر منتج المتجر — إعلانٌ من التاجر لا رقمٌ مشتقّ من رصيد. */
+export type StoreStockState = "in_stock" | "out_of_stock" | "preorder";
+
+/** ما تعرضه الشاشة عن كل منتج — يطابق `StoreProduct` (THA-166 م٣). */
 export interface StoreAdminProduct {
   id: number;
-  sku: string | null;
   name_ar: string | null;
   name_en: string | null;
-  brand: string | null;
-  category_name: string | null;
-  is_for_sale_online: boolean;
-  allow_preorder: boolean;
-  online_price: string | null;
-  online_description: string | null;
-  /** سعر البيع الافتراضي — هو ما يعرضه المتجر حين يُترك سعر المتجر فارغاً. */
+  slug: string;
+  brand: number | null;
+  categories: number[];
+  unit: string;
+  price: string | null;
+  /** مبلغٌ مطلقٌ لا نسبة — السعر بعد الخصم نفسه. */
   sale_price: string | null;
+  stock_state: StoreStockState;
+  description: string | null;
+  is_active: boolean;
+  sort_order: number;
+  images: string[];
+  imported_from_product_id: number | null;
+  created_at?: string;
 }
 
 /** حجم صفحة الجدول. */
@@ -52,12 +60,6 @@ export const STORE_ADMIN_PAGE_SIZE = 25;
 
 /** تبويب الجدول: الكل، أو المنشور وحده، أو غير المنشور وحده. */
 export type StoreAdminScope = "all" | "published" | "unpublished";
-
-const SCOPE_PARAM: Record<StoreAdminScope, string | undefined> = {
-  all: undefined,
-  published: "true",
-  unpublished: "false",
-};
 
 export interface StoreAdminQuery {
   scope?: StoreAdminScope;
@@ -85,34 +87,24 @@ export function getPublishedProducts(): Promise<PagedList<StoreAdminProduct>> {
   return getStoreAdminProducts({ scope: "published", page: 1 });
 }
 
-/** تعديل نشر منتج أو سعره أو وصفه أو الطلب المسبق. */
-export function updateProductPublishing(
-  productId: number,
-  patch: Partial<Pick<StoreAdminProduct,
-    "is_for_sale_online" | "allow_preorder" | "online_price" | "online_description">>,
-): Promise<StoreAdminProduct> {
-  return apiPatchObject<StoreAdminProduct>(
-    `store/admin/products/${productId}/`,
-    patch,
-    tenantOpts(),
-  );
-}
-
-export interface CreateStoreProductPayload {
+export interface StoreProductPayload {
   name_ar: string;
   name_en?: string;
-  brand?: string;
-  sku?: string;
-  online_price?: string;
-  online_description?: string;
-  allow_preorder?: boolean;
-  is_for_sale_online?: boolean;
+  brand?: number | null;
+  categories?: number[];
+  unit?: string;
+  price?: string | null;
+  sale_price?: string | null;
+  stock_state?: StoreStockState;
+  description?: string;
+  is_active?: boolean;
+  sort_order?: number;
   initial_images?: string[];
 }
 
 /** إضافة منتج جديد للمتجر الإلكتروني مباشرة. */
 export function createStoreProduct(
-  payload: CreateStoreProductPayload,
+  payload: StoreProductPayload,
 ): Promise<StoreAdminProduct> {
   return apiPostObject<StoreAdminProduct>(
     "store/admin/products/",
@@ -121,14 +113,125 @@ export function createStoreProduct(
   );
 }
 
-/** حذف أو إلغاء نشر منتج من المتجر. */
+/** تعديل منتج قائم — أيّ حقلٍ من حقول `StoreProduct` (لا حصر بعد م٢). */
+export function updateStoreProduct(
+  productId: number,
+  patch: Partial<StoreProductPayload>,
+): Promise<StoreAdminProduct> {
+  return apiPatchObject<StoreAdminProduct>(
+    `store/admin/products/${productId}/`,
+    patch,
+    tenantOpts(),
+  );
+}
+
+/** حذف منتج من المتجر. */
 export function deleteStoreProduct(productId: number): Promise<void> {
   return apiDelete(`store/admin/products/${productId}/`, tenantOpts());
+}
+
+/** نتيجة «استيراد من الأصناف» — الجسر الوحيد المسموح بين المخزون والمتجر. */
+export interface ImportFromInventoryResult {
+  imported_count: number;
+  skipped_count: number;
+  imported_ids: number[];
+  message: string;
+}
+
+/** ينسخ أصنافاً مخزنيّةً مرّةً واحدةً إلى كتالوج المتجر المستقلّ — بلا علاقةٍ
+ * ولا مزامنة لاحقة، ويتخطّى ما استُورد من قبل. */
+export function importStoreProductsFromInventory(
+  productIds: number[],
+): Promise<ImportFromInventoryResult> {
+  return apiPostObject<ImportFromInventoryResult>(
+    "store/admin/products/import-from-inventory/",
+    { product_ids: productIds },
+    tenantOpts(),
+  );
 }
 
 /** اسم المنتج المعروض في الجدول. */
 export function storeAdminProductName(product: StoreAdminProduct): string {
   return (product.name_ar || product.name_en || "").trim() || `منتج ${product.id}`;
+}
+
+// ── الماركات (Store Brands) ────────────────────────────────────────────
+
+export interface StoreAdminBrand {
+  id: number;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export function getStoreAdminBrands(): Promise<StoreAdminBrand[]> {
+  return apiGetPagedList<StoreAdminBrand>("store/admin/brands/", {
+    ...tenantOpts(),
+    query: { page_size: 500 },
+  }).then((paged) => paged.results);
+}
+
+export function createStoreAdminBrand(
+  payload: Pick<StoreAdminBrand, "name"> & Partial<Pick<StoreAdminBrand, "sort_order" | "is_active">>,
+): Promise<StoreAdminBrand> {
+  return apiPostObject<StoreAdminBrand>("store/admin/brands/", payload, tenantOpts());
+}
+
+export function updateStoreAdminBrand(
+  id: number,
+  patch: Partial<StoreAdminBrand>,
+): Promise<StoreAdminBrand> {
+  return apiPatchObject<StoreAdminBrand>(`store/admin/brands/${id}/`, patch, tenantOpts());
+}
+
+export function deleteStoreAdminBrand(id: number): Promise<void> {
+  return apiDelete(`store/admin/brands/${id}/`, tenantOpts());
+}
+
+// ── الفئات (Store Categories) ──────────────────────────────────────────
+
+export interface StoreAdminCategory {
+  id: number;
+  name: string;
+  parent: number | null;
+  slug: string;
+  sort_order: number;
+  is_active: boolean;
+  image_url: string;
+  created_at?: string;
+}
+
+export function getStoreAdminCategories(): Promise<StoreAdminCategory[]> {
+  return apiGetPagedList<StoreAdminCategory>("store/admin/categories/", {
+    ...tenantOpts(),
+    query: { page_size: 500 },
+  }).then((paged) => paged.results);
+}
+
+export interface StoreCategoryPayload {
+  name: string;
+  parent?: number | null;
+  sort_order?: number;
+  is_active?: boolean;
+  image_url?: string;
+}
+
+export function createStoreAdminCategory(
+  payload: StoreCategoryPayload,
+): Promise<StoreAdminCategory> {
+  return apiPostObject<StoreAdminCategory>("store/admin/categories/", payload, tenantOpts());
+}
+
+export function updateStoreAdminCategory(
+  id: number,
+  patch: Partial<StoreCategoryPayload>,
+): Promise<StoreAdminCategory> {
+  return apiPatchObject<StoreAdminCategory>(`store/admin/categories/${id}/`, patch, tenantOpts());
+}
+
+export function deleteStoreAdminCategory(id: number): Promise<void> {
+  return apiDelete(`store/admin/categories/${id}/`, tenantOpts());
 }
 
 // ── إعدادات المظهر والهوية (Store Theme Settings) ─────────────────────────
@@ -169,7 +272,7 @@ export function updateStoreThemeSettings(
 
 export interface StoreProductImageAdmin {
   id: number;
-  product: number;
+  store_product: number;
   image_url: string;
   sort_order: number;
   is_cover: boolean;
@@ -180,15 +283,15 @@ export interface StoreProductImageAdmin {
   created_at?: string;
 }
 
-export function getStoreProductImages(productId: number): Promise<StoreProductImageAdmin[]> {
+export function getStoreProductImages(storeProductId: number): Promise<StoreProductImageAdmin[]> {
   return apiGetObject<StoreProductImageAdmin[]>("store/admin/product-images/", {
     ...tenantOpts(),
-    query: { product_id: productId },
+    query: { store_product_id: storeProductId },
   });
 }
 
 export function createStoreProductImage(payload: {
-  product: number;
+  store_product: number;
   image_url: string;
   sort_order?: number;
   is_cover?: boolean;

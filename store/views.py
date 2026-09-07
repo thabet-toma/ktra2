@@ -15,6 +15,8 @@ from django.db.models import (
 from django.db.models.functions import Coalesce, Least
 from django.http import Http404
 from django.utils import timezone
+from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -25,6 +27,7 @@ from core.models import SystemAttachment
 from core.pagination import EnforcedPageNumberPagination
 from core.permissions import TemplateSurfacePermission
 from core.tenant_utils import get_tenant
+from inventory.models import Product
 from store.cache import InvalidatesStoreCacheMixin, products_version
 from store.models import (
     StoreBrand,
@@ -671,5 +674,134 @@ class StoreProductAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
             )
 
         return qs.order_by("-created_at", "-id")
+
+    #: سقفُ عدد المعرّفات لكل طلب استيراد — لكل عنصرٍ ثلاثةُ استعلامات فعلياً
+    #: (`save()` تفحص فرادة الـslug وتكتب `StorePriceHistory`)، فطلبٌ بلا سقفٍ
+    #: من مستخدمٍ مصادَقٍ يُشغّل عشرات الآلاف من الاستعلامات (نفس عائلة درس
+    #: `MAX_IDS` في `StoreProductListView` أعلاه).
+    IMPORT_MAX_IDS = 500
+
+    @action(detail=False, methods=["post"], url_path="import-from-inventory")
+    def import_from_inventory(self, request):
+        """`POST /api/store/admin/products/import-from-inventory/` — الجسرُ
+        الوحيدُ المسموح بين المخزون والمتجر: نسخٌ مرّةً واحدةً بلا علاقةٍ ولا
+        مزامنة (مواصفة #166 م٣). لا يمسّ `inventory.Product` بصفٍّ واحد.
+
+        قاعدة السعر مطابقةٌ حرفياً لـ`store/migrations/0006_...` (`_price_expression`
+        المجمَّدة): `online_price` الموجب يغلب، وإلا `sale_price`. وكذلك
+        `stock_state`: `preorder` إن كان `allow_preorder` وإلا `in_stock` —
+        نفس الاشتقاق حرفياً، وإلا هبط المنتج نفسُه بحالتين مختلفتين حسب
+        الطريق الذي جاء منه.
+
+        **لا تُنسخ الفئات عمداً** (خلافاً للهجرة التي سطّحت فئات المخزون
+        مرّةً واحدة): شجرة فئات المتجر صارت ملكَ التاجر بعد الانفصال، وإعادةُ
+        اشتقاق فئاتٍ تسويقيةٍ من فئاتٍ محاسبيةٍ عند كل استيرادٍ تُعيد ربط
+        الشجرتين وتُولّد فئاتٍ لم يطلبها أحد. المستورَد يصل بلا فئة، والتاجر
+        يصنّفه بنفسه — والواجهة تنبّه لهذا صراحةً (`docs/modules/store.md`).
+        """
+        tenant = get_tenant(request)
+        raw_ids = request.data.get("product_ids")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise ValidationError({"product_ids": "يجب إرسال قائمة معرّفات أصنافٍ غير فارغة."})
+        if len(raw_ids) > self.IMPORT_MAX_IDS:
+            raise ValidationError({
+                "product_ids": (
+                    f"الحدّ الأقصى {self.IMPORT_MAX_IDS} صنفاً في الطلب الواحد "
+                    f"— أُرسل {len(raw_ids)}."
+                ),
+            })
+        try:
+            product_ids = sorted({int(pid) for pid in raw_ids})
+        except (TypeError, ValueError):
+            raise ValidationError({"product_ids": "كل معرّفٍ يجب أن يكون رقماً صحيحاً."})
+
+        products = list(
+            Product.objects.filter(tenant=tenant, id__in=product_ids)
+            .select_related("uom")
+            .only(
+                "id", "tenant_id", "name_ar", "name_en", "description", "brand",
+                "online_price", "sale_price", "allow_preorder", "uom_id", "uom__name_ar",
+            )
+        )
+        found_ids = [p.id for p in products]
+
+        already_imported_ids = set(
+            StoreProduct.objects.filter(
+                tenant=tenant, imported_from_product_id__in=found_ids,
+            ).values_list("imported_from_product_id", flat=True)
+        )
+        to_import = [p for p in products if p.id not in already_imported_ids]
+
+        # ── الماركات: استعلامان لا استعلامٌ لكل منتج، وأوّل إملاءٍ يبقى ────
+        wanted_brand_first_seen = {}
+        for p in to_import:
+            raw = (p.brand or "").strip()
+            if raw:
+                wanted_brand_first_seen.setdefault(raw.lower(), raw)
+        existing_brands = {
+            b.name.strip().lower(): b for b in StoreBrand.objects.filter(tenant=tenant)
+        }
+        missing_brand_names = [
+            name for key, name in wanted_brand_first_seen.items() if key not in existing_brands
+        ]
+        if missing_brand_names:
+            StoreBrand.objects.bulk_create(
+                [StoreBrand(tenant=tenant, name=name) for name in missing_brand_names]
+            )
+            existing_brands = {
+                b.name.strip().lower(): b for b in StoreBrand.objects.filter(tenant=tenant)
+            }
+
+        # الوحدةُ الطلبُ كلُّه: إمّا استوردتَ ما طلبتَ أو لم تستورد — بلا هذا
+        # القفل، فشلٌ في منتصف القائمة يترك دفعةً جزئيةً والرسالةُ التي يراها
+        # التاجر تكذب عليه (يقرأ خطأً ويظنّ أن شيئاً لم يقع).
+        created = []
+        with transaction.atomic():
+            for p in to_import:
+                brand_key = (p.brand or "").strip().lower()
+                brand = existing_brands.get(brand_key) if brand_key else None
+                # قاعدة الهجرة 0006 حرفياً — `online_price` الموجب يغلب.
+                price = p.online_price if (p.online_price or 0) > 0 else p.sale_price
+                stock_state = (
+                    StoreProduct.STOCK_PREORDER if p.allow_preorder
+                    else StoreProduct.STOCK_IN_STOCK
+                )
+                uom_name = p.uom.name_ar if p.uom_id and p.uom else ""
+                store_product = StoreProduct(
+                    tenant=tenant,
+                    name_ar=p.name_ar or p.name_en or "",
+                    name_en=p.name_en or "",
+                    brand=brand,
+                    unit=uom_name or "",
+                    price=price,
+                    stock_state=stock_state,
+                    description=p.description or "",
+                    imported_from_product_id=p.id,
+                )
+                # `save()` تبقى داخل الحلقة عمداً — لا `bulk_create`: هي التي
+                # تولّد الـslug الفريد وتكتب `StorePriceHistory`، ونقلُهما
+                # إلى مسارٍ ثالث يُكرّر منطقاً يعيش في مكانٍ واحد بالفعل.
+                # السقفُ أعلاه (`IMPORT_MAX_IDS`) هو ما يحدّ كلفة الاستعلامات
+                # هنا، لا استبدال `save()`.
+                store_product.save()
+                created.append(store_product)
+
+        skipped_count = len(already_imported_ids)
+        imported_count = len(created)
+        if imported_count and skipped_count:
+            message = f"{imported_count} استُوردت، {skipped_count} كانت مستوردةً سلفاً."
+        elif imported_count:
+            message = f"{imported_count} استُوردت."
+        elif skipped_count:
+            message = f"لا جديد — {skipped_count} كانت مستوردةً سلفاً."
+        else:
+            message = "لم يُعثر على أصنافٍ صالحة للاستيراد."
+
+        return Response({
+            "imported_count": imported_count,
+            "skipped_count": skipped_count,
+            "imported_ids": [sp.id for sp in created],
+            "message": message,
+        })
 
 

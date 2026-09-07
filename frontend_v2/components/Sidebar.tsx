@@ -17,7 +17,7 @@ import {
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck,
   Gauge, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
-  PlayCircle, Network, Fingerprint, CalendarCheck, Inbox, FileSignature,
+  PlayCircle, Network, Fingerprint, CalendarCheck, Inbox, FileSignature, Layers,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { enterOfficeShell } from "../utils/officeShell";
@@ -704,6 +704,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             >
               <Store className="h-5 w-5 flex-shrink-0" />
               {showText && <span className="mr-3 text-right flex-1">متجري</span>}
+            </button>
+          )}
+
+          {/* THA-166 م٣: شجرة فئات المتجر — شاشةٌ مستقلّة بقرار مواصفة #166،
+              نفس مفتاح `store.manage` ونفس قناع القالب. */}
+          {permissions.has("store.manage") && !hiddenByTemplate("store-categories") && (
+            <button
+              onClick={() => { setView("store-categories"); if (isMobile) setIsMobileMenuOpen(false); }}
+              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("store-categories") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+              title="فئات المتجر — شجرة التصفّح بمستويين"
+            >
+              <Layers className="h-5 w-5 flex-shrink-0" />
+              {showText && <span className="mr-3 text-right flex-1">فئات المتجر</span>}
             </button>
           )}
 

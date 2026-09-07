@@ -101,6 +101,8 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   permissions: "admin.permissions.manage",
   // ST-3: «متجري» — فتح المتجر العام واختيار رابطه وتحديد ما يُنشر فيه.
   "store-settings": "store.manage",
+  // THA-166 م٣: شجرة فئات المتجر — نفس مفتاح إدارة المتجر، شاشةٌ مستقلّة.
+  "store-categories": "store.manage",
   "company-accountant-engagements": "admin.members.manage",
   // THA-45: وحدة الأجهزة الحساسة — مشروطة أيضاً بترخيص الوحدة أدناه.
   "sensitive-devices": "devices.registry.view",
@@ -184,7 +186,7 @@ const GOODS_MOVEMENT_HIDDEN_VIEWS = [
   // وتقرير المحجوزات حجزُ مخزون. فاتورة الأتعاب لا تمرّ بأيٍّ منها.
   'sales-delivery-notes', 'invoice-profits', 'reserved-stock',
   // المتجر
-  'store-settings',
+  'store-settings', 'store-categories',
   // ما بعد البيع
   'after-sales', 'service-orders',
   // الأجهزة الحساسة

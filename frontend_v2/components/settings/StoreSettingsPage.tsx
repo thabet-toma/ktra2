@@ -51,6 +51,8 @@ import { CloudinaryService } from "../../services/cloudinaryService";
 import { clientLogger } from "../../services/logger";
 import {
   addStoreCollectionItemAdmin,
+  createStoreAdminBrand,
+  createStoreAdminCategory,
   createStoreCollectionAdmin,
   createStoreProduct,
   createStoreProductImage,
@@ -59,50 +61,67 @@ import {
   deleteStoreProduct,
   deleteStoreProductImage,
   getPublishedProducts,
+  getStoreAdminBrands,
+  getStoreAdminCategories,
   getStoreAdminProducts,
   getStoreCollectionItemsAdmin,
   getStoreCollectionsAdmin,
   getStoreProductImages,
   getStoreThemeSettings,
+  importStoreProductsFromInventory,
   setStoreSlug,
   storeAdminProductName,
-  updateProductPublishing,
   updateStoreCollectionAdmin,
+  updateStoreProduct,
   updateStoreProductImage,
   updateStoreThemeSettings,
+  type StoreAdminBrand,
+  type StoreAdminCategory,
   type StoreAdminProduct,
   type StoreAdminScope,
   type StoreCollectionAdmin,
   type StoreCollectionItemAdmin,
   type StoreProductImageAdmin,
+  type StoreProductPayload,
+  type StoreStockState,
   type StoreThemeSettings,
 } from "../../services/storeAdminApi";
+import { StoreImportFromInventoryModal } from "./StoreImportFromInventoryModal";
 import { humanizeDrfError } from "../../utils/drfError";
 import { formatNumber } from "../../utils/formatNumber";
 import { storeHomeUrl } from "../../utils/storeLinks";
 import { KitDocumentShell, type KitToolbarAction } from "../kit";
 
+/** حالة التوفّر — تسميةٌ بما هي، لا «الرصيد» (مواصفة #166 م٣). */
+const STOCK_STATE_LABELS: Record<StoreStockState, string> = {
+  in_stock: "متوفر",
+  out_of_stock: "نفد",
+  preorder: "بالطلب",
+};
+
+const emptyProductForm = (): StoreProductPayload => ({
+  name_ar: "",
+  name_en: "",
+  brand: null,
+  categories: [],
+  unit: "",
+  price: "",
+  sale_price: "",
+  stock_state: "in_stock",
+  description: "",
+  is_active: true,
+  sort_order: 0,
+});
+
 const cloudinaryService = new CloudinaryService();
 
 type ActiveTab = "overview" | "products" | "campaigns" | "theme";
-
-type RowDraft = {
-  online_price: string;
-  online_description: string;
-  allow_preorder: boolean;
-};
 
 const SCOPES: { key: StoreAdminScope; label: string }[] = [
   { key: "published", label: "المعروضة في المتجر" },
   { key: "unpublished", label: "غير المعروضة" },
   { key: "all", label: "كل المنتجات" },
 ];
-
-const draftOf = (product: StoreAdminProduct): RowDraft => ({
-  online_price: product.online_price ?? "",
-  online_description: product.online_description ?? "",
-  allow_preorder: product.allow_preorder ?? false,
-});
 
 export const StoreSettingsPage: React.FC = () => {
   const { currentCompany, refreshCompanies } = useCompany();
@@ -120,12 +139,30 @@ export const StoreSettingsPage: React.FC = () => {
   const [scope, setScope] = useState<StoreAdminScope>("published");
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<StoreAdminProduct[]>([]);
-  const [drafts, setDrafts] = useState<Record<number, RowDraft>>({});
   const [count, setCount] = useState(0);
   const [hasNext, setHasNext] = useState(false);
   const [page, setPage] = useState(1);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [savingRow, setSavingRow] = useState<number | null>(null);
+
+  // الماركات والفئات — لقائمتَي الاختيار في نموذج المنتج
+  const [brands, setBrands] = useState<StoreAdminBrand[]>([]);
+  const [categories, setCategories] = useState<StoreAdminCategory[]>([]);
+
+  // نافذة استيراد أصنافٍ من المخزون — الجسر الوحيد المسموح (مواصفة #166 م٣)
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+
+  // نافذة الإنشاء السريع لماركة أو فئة من داخل نموذج المنتج
+  const [quickCreateBrandOpen, setQuickCreateBrandOpen] = useState(false);
+  const [quickCreateBrandName, setQuickCreateBrandName] = useState("");
+  const [savingQuickBrand, setSavingQuickBrand] = useState(false);
+  const [quickCreateCategoryOpen, setQuickCreateCategoryOpen] = useState(false);
+  const [quickCreateCategoryForm, setQuickCreateCategoryForm] = useState<{
+    name: string;
+    parent: number | null;
+  }>({ name: "", parent: null });
+  const [savingQuickCategory, setSavingQuickCategory] = useState(false);
 
   // نافذة إدارة صور المتجر المخصصة للمنتج
   const [selectedProductForMedia, setSelectedProductForMedia] =
@@ -145,19 +182,11 @@ export const StoreSettingsPage: React.FC = () => {
   const [savingOverlay, setSavingOverlay] = useState(false);
   const [downloadingAd, setDownloadingAd] = useState(false);
 
-  // نافذة إضافة منتج جديد للمتجر مباشرة
-  const [isCreatingProductModal, setIsCreatingProductModal] = useState(false);
-  const [creatingProduct, setCreatingProduct] = useState(false);
-  const [newProductForm, setNewProductForm] = useState({
-    name_ar: "",
-    name_en: "",
-    brand: "",
-    sku: "",
-    online_price: "",
-    online_description: "",
-    allow_preorder: true,
-    is_for_sale_online: true,
-  });
+  // نافذة إنشاء/تعديل منتج المتجر — نفس النموذج للحالتين
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  const [editingProductId, setEditingProductId] = useState<number | null>(null);
+  const [savingProduct, setSavingProduct] = useState(false);
+  const [productForm, setProductForm] = useState<StoreProductPayload>(emptyProductForm());
   const [newProductImages, setNewProductImages] = useState<string[]>([]);
   const [uploadingNewProductImage, setUploadingNewProductImage] = useState(false);
 
@@ -218,11 +247,6 @@ export const StoreSettingsPage: React.FC = () => {
       try {
         const paged = await getStoreAdminProducts({ scope, search, page: nextPage });
         setRows((prev) => (replace ? paged.results : [...prev, ...paged.results]));
-        setDrafts((prev) => {
-          const next = replace ? {} : { ...prev };
-          for (const item of paged.results) next[item.id] = draftOf(item);
-          return next;
-        });
         setCount(paged.count);
         setHasNext(paged.hasNext);
         setPage(nextPage);
@@ -241,6 +265,53 @@ export const StoreSettingsPage: React.FC = () => {
     }, 350);
     return () => window.clearTimeout(timer);
   }, [loadProducts]);
+
+  // تحميل الماركات والفئات — تغذية قوائم الاختيار في نموذج المنتج
+  const loadBrandsAndCategories = useCallback(async () => {
+    try {
+      const [brandRows, categoryRows] = await Promise.all([
+        getStoreAdminBrands(),
+        getStoreAdminCategories(),
+      ]);
+      setBrands(brandRows);
+      setCategories(categoryRows);
+    } catch (e) {
+      toast(humanizeDrfError(e), "error");
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (activeTab === "products") {
+      void loadBrandsAndCategories();
+    }
+  }, [activeTab, loadBrandsAndCategories]);
+
+  // `Esc` يُغلق نافذة الإنشاء السريع وحدَها — فخٌّ موثَّقٌ في هذا المستودع:
+  // `Esc` صفّر النموذج الأمّ من قبل. بلا معالجةٍ صريحة هنا يبقى المفتاح
+  // معطَّلاً على هاتين النافذتين، لا مُعالَجاً بأمان.
+  useEffect(() => {
+    if (!quickCreateBrandOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setQuickCreateBrandOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [quickCreateBrandOpen]);
+
+  useEffect(() => {
+    if (!quickCreateCategoryOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setQuickCreateCategoryOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [quickCreateCategoryOpen]);
 
   // تحميل المجموعات
   const loadCollections = useCallback(async () => {
@@ -333,63 +404,21 @@ export const StoreSettingsPage: React.FC = () => {
     }
   };
 
-  // تبديل حالة النشر للمنتج
-  const togglePublish = async (product: StoreAdminProduct) => {
-    const next = !product.is_for_sale_online;
+  // تبديل حالة النشر للمنتج (`is_active`)
+  const toggleActive = async (product: StoreAdminProduct) => {
+    const next = !product.is_active;
     setSavingRow(product.id);
     try {
-      await updateProductPublishing(product.id, { is_for_sale_online: next });
+      await updateStoreProduct(product.id, { is_active: next });
       if (scope === "all") {
         setRows((prev) =>
-          prev.map((r) => (r.id === product.id ? { ...r, is_for_sale_online: next } : r)),
+          prev.map((r) => (r.id === product.id ? { ...r, is_active: next } : r)),
         );
       } else {
         setRows((prev) => prev.filter((r) => r.id !== product.id));
         setCount((c) => Math.max(0, c - 1));
       }
       toast(next ? "تم عرض المنتج في المتجر" : "تم إلغاء عرض المنتج", "success");
-    } catch (e) {
-      toast(humanizeDrfError(e), "error");
-    } finally {
-      setSavingRow(null);
-    }
-  };
-
-  // تبديل إتاحة الطلب المسبق (Pre-order toggle)
-  const togglePreorder = async (product: StoreAdminProduct) => {
-    const next = !product.allow_preorder;
-    setSavingRow(product.id);
-    try {
-      await updateProductPublishing(product.id, { allow_preorder: next });
-      setRows((prev) =>
-        prev.map((r) => (r.id === product.id ? { ...r, allow_preorder: next } : r)),
-      );
-      toast(
-        next
-          ? "ميزة الطلب المسبق مفعّلة — يمكن للزبائن طلبه حتى لو نفد المخزون"
-          : "تم إلغاء ميزة الطلب المسبق",
-        "success",
-      );
-    } catch (e) {
-      toast(humanizeDrfError(e), "error");
-    } finally {
-      setSavingRow(null);
-    }
-  };
-
-  // حفظ تعديلات الصف (السعر الخاص والوصف)
-  const saveProductRow = async (product: StoreAdminProduct) => {
-    const draft = drafts[product.id];
-    if (!draft) return;
-    setSavingRow(product.id);
-    try {
-      const saved = await updateProductPublishing(product.id, {
-        online_price: draft.online_price.trim() === "" ? null : draft.online_price.trim(),
-        online_description: draft.online_description.trim(),
-        allow_preorder: draft.allow_preorder,
-      });
-      setRows((prev) => prev.map((r) => (r.id === product.id ? { ...r, ...saved } : r)));
-      toast("تم حفظ التعديلات", "success");
     } catch (e) {
       toast(humanizeDrfError(e), "error");
     } finally {
@@ -419,7 +448,7 @@ export const StoreSettingsPage: React.FC = () => {
     try {
       const url = await cloudinaryService.uploadFile(file);
       const created = await createStoreProductImage({
-        product: selectedProductForMedia.id,
+        store_product: selectedProductForMedia.id,
         image_url: url,
         is_cover: customImages.length === 0,
         sort_order: customImages.length + 1,
@@ -529,40 +558,131 @@ export const StoreSettingsPage: React.FC = () => {
     }
   };
 
-  const handleCreateStoreProduct = async () => {
-    if (!newProductForm.name_ar.trim()) {
+  const openCreateProductModal = () => {
+    setEditingProductId(null);
+    setProductForm(emptyProductForm());
+    setNewProductImages([]);
+    setIsProductModalOpen(true);
+  };
+
+  const openEditProductModal = (product: StoreAdminProduct) => {
+    setEditingProductId(product.id);
+    setProductForm({
+      name_ar: product.name_ar ?? "",
+      name_en: product.name_en ?? "",
+      brand: product.brand,
+      categories: product.categories,
+      unit: product.unit ?? "",
+      price: product.price ?? "",
+      sale_price: product.sale_price ?? "",
+      stock_state: product.stock_state,
+      description: product.description ?? "",
+      is_active: product.is_active,
+      sort_order: product.sort_order,
+    });
+    setNewProductImages([]);
+    setIsProductModalOpen(true);
+  };
+
+  const handleSaveProductForm = async () => {
+    if (!productForm.name_ar.trim()) {
       toast("يرجى إدخال اسم المنتج بالعربية", "error");
       return;
     }
-    setCreatingProduct(true);
+    setSavingProduct(true);
     try {
-      const created = await createStoreProduct({
-        ...newProductForm,
-        initial_images: newProductImages,
-      });
-      setRows((prev) => [created, ...prev]);
-      setDrafts((prev) => ({
-        ...prev,
-        [created.id]: draftOf(created),
-      }));
-      setCount((prev) => prev + 1);
-      setIsCreatingProductModal(false);
-      setNewProductForm({
-        name_ar: "",
-        name_en: "",
-        brand: "",
-        sku: "",
-        online_price: "",
-        online_description: "",
-        allow_preorder: true,
-        is_for_sale_online: true,
-      });
+      if (editingProductId) {
+        const saved = await updateStoreProduct(editingProductId, productForm);
+        setRows((prev) => prev.map((r) => (r.id === saved.id ? saved : r)));
+        toast("تم حفظ تعديلات المنتج", "success");
+      } else {
+        const created = await createStoreProduct({
+          ...productForm,
+          initial_images: newProductImages,
+        });
+        setRows((prev) => [created, ...prev]);
+        setCount((prev) => prev + 1);
+        toast("تمت إضافة المنتج للمتجر بنجاح!", "success");
+      }
+      setIsProductModalOpen(false);
+      setEditingProductId(null);
+      setProductForm(emptyProductForm());
       setNewProductImages([]);
-      toast("تمت إضافة المنتج للمتجر بنجاح!", "success");
+    } catch (e) {
+      // THA-166 م٣: رسالة الخادم صريحة (مثلاً «سعر العرض يجب أن يكون أكبر من
+      // صفر») — تُعرض كما هي، لا «حدث خطأ» عام.
+      toast(humanizeDrfError(e), "error");
+    } finally {
+      setSavingProduct(false);
+    }
+  };
+
+  // ── الإنشاء السريع لماركة أو فئة من داخل نموذج المنتج ─────────────────
+  // النمط المعتمد: الاسم يُحمَل إلى النافذة، والمعرّف يعود بحالةٍ محلية
+  // ويُختار تلقائياً — وإغلاق النافذة السريعة لا يمسّ نموذج المنتج الأصلي.
+  const handleQuickCreateBrand = async () => {
+    const name = quickCreateBrandName.trim();
+    if (!name) {
+      toast("يرجى إدخال اسم الماركة", "error");
+      return;
+    }
+    setSavingQuickBrand(true);
+    try {
+      const created = await createStoreAdminBrand({ name });
+      setBrands((prev) => [...prev, created]);
+      setProductForm((prev) => ({ ...prev, brand: created.id }));
+      setQuickCreateBrandOpen(false);
+      setQuickCreateBrandName("");
+      toast(`تمت إضافة الماركة «${created.name}»`, "success");
     } catch (e) {
       toast(humanizeDrfError(e), "error");
     } finally {
-      setCreatingProduct(false);
+      setSavingQuickBrand(false);
+    }
+  };
+
+  const handleQuickCreateCategory = async () => {
+    const name = quickCreateCategoryForm.name.trim();
+    if (!name) {
+      toast("يرجى إدخال اسم الفئة", "error");
+      return;
+    }
+    setSavingQuickCategory(true);
+    try {
+      const created = await createStoreAdminCategory({
+        name,
+        parent: quickCreateCategoryForm.parent,
+      });
+      setCategories((prev) => [...prev, created]);
+      setProductForm((prev) => ({
+        ...prev,
+        categories: [...(prev.categories || []), created.id],
+      }));
+      setQuickCreateCategoryOpen(false);
+      setQuickCreateCategoryForm({ name: "", parent: null });
+      toast(`تمت إضافة الفئة «${created.name}»`, "success");
+    } catch (e) {
+      // مثال: محاولة إسناد أبٍ له أبٌ بالفعل — الخادم يرفضها 400 بنصٍّ عربي صريح.
+      toast(humanizeDrfError(e), "error");
+    } finally {
+      setSavingQuickCategory(false);
+    }
+  };
+
+  // ── استيراد من الأصناف — الجسر الوحيد المسموح بين المخزون والمتجر ─────
+  const handleImportFromInventory = async (productIds: number[]) => {
+    setImporting(true);
+    try {
+      const result = await importStoreProductsFromInventory(productIds);
+      toast(result.message, result.imported_count > 0 ? "success" : "info");
+      setIsImportModalOpen(false);
+      if (result.imported_count > 0) {
+        await loadProducts(1, true);
+      }
+    } catch (e) {
+      toast(humanizeDrfError(e), "error");
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -901,24 +1021,21 @@ export const StoreSettingsPage: React.FC = () => {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setNewProductForm({
-                      name_ar: "",
-                      name_en: "",
-                      brand: "",
-                      sku: "",
-                      online_price: "",
-                      online_description: "",
-                      allow_preorder: true,
-                      is_for_sale_online: true,
-                    });
-                    setNewProductImages([]);
-                    setIsCreatingProductModal(true);
-                  }}
+                  onClick={openCreateProductModal}
                   className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm shadow-blue-600/20 transition hover:bg-blue-700"
                 >
                   <Plus className="h-4 w-4" />
                   <span>إضافة منتج جديد للمتجر</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsImportModalOpen(true)}
+                  className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-1.5 text-xs font-bold text-blue-700 shadow-sm transition hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300"
+                  title="نسخُ أصنافٍ من مخزونك إلى كتالوج المتجر — مرّةً واحدةً بلا مزامنة لاحقة"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>استيراد من الأصناف</span>
                 </button>
 
                 <div className="mx-1 hidden h-4 w-px bg-slate-200 sm:block dark:bg-slate-700" />
@@ -958,10 +1075,10 @@ export const StoreSettingsPage: React.FC = () => {
                   <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-500 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-400">
                     <tr>
                       <th className="p-3.5">المنتج</th>
+                      <th className="p-3.5">الماركة</th>
+                      <th className="p-3.5">السعر</th>
+                      <th className="p-3.5">حالة التوفّر</th>
                       <th className="p-3.5">عرض بالمتجر</th>
-                      <th className="p-3.5">سعر المتجر</th>
-                      <th className="p-3.5">طلب مسبق (بدون مخزون)</th>
-                      <th className="p-3.5">وصف المتجر</th>
                       <th className="p-3.5 text-center">صور المتجر</th>
                       <th className="p-3.5 text-center">إجراءات</th>
                     </tr>
@@ -982,74 +1099,67 @@ export const StoreSettingsPage: React.FC = () => {
                       </tr>
                     ) : (
                       rows.map((product) => {
-                        const draft = drafts[product.id] || draftOf(product);
                         const isBusy = savingRow === product.id;
+                        const brandName = brands.find((b) => b.id === product.brand)?.name;
                         return (
                           <tr key={product.id} className="transition hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
                             <td className="p-3.5 font-bold text-slate-900 dark:text-white">
                               <div>{storeAdminProductName(product)}</div>
-                              <div className="text-[10px] font-mono text-slate-400">{product.sku || `ID: ${product.id}`}</div>
+                              <div className="text-[10px] font-mono text-slate-400">{product.slug}</div>
+                            </td>
+
+                            <td className="p-3.5 text-slate-600 dark:text-slate-300">
+                              {brandName || "—"}
+                            </td>
+
+                            <td className="p-3.5">
+                              {product.sale_price ? (
+                                <div>
+                                  <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                                    {formatNumber(product.sale_price)}
+                                  </span>
+                                  {product.price && (
+                                    <span className="mr-1.5 text-[10px] text-slate-400 line-through">
+                                      {formatNumber(product.price)}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : product.price ? (
+                                <span className="font-bold text-slate-900 dark:text-white">
+                                  {formatNumber(product.price)}
+                                </span>
+                              ) : (
+                                <span className="text-slate-400">عند الطلب</span>
+                              )}
+                            </td>
+
+                            <td className="p-3.5">
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-[11px] font-bold ${
+                                  product.stock_state === "in_stock"
+                                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                    : product.stock_state === "preorder"
+                                      ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                                      : "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+                                }`}
+                              >
+                                {STOCK_STATE_LABELS[product.stock_state]}
+                              </span>
                             </td>
 
                             <td className="p-3.5">
                               <button
                                 type="button"
-                                onClick={() => togglePublish(product)}
+                                onClick={() => toggleActive(product)}
                                 disabled={isBusy}
                                 className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-[11px] font-bold transition ${
-                                  product.is_for_sale_online
+                                  product.is_active
                                     ? "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300"
                                     : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"
                                 }`}
                               >
-                                {product.is_for_sale_online ? "معروض" : "مخفي"}
+                                {product.is_active ? "معروض" : "مخفي"}
                               </button>
-                            </td>
-
-                            <td className="p-3.5">
-                              <input
-                                type="text"
-                                value={draft.online_price}
-                                onChange={(e) =>
-                                  setDrafts((prev) => ({
-                                    ...prev,
-                                    [product.id]: { ...draft, online_price: e.target.value },
-                                  }))
-                                }
-                                placeholder={product.sale_price ? `الافتراضي (${product.sale_price})` : "سعر خاص"}
-                                className="w-28 rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                              />
-                            </td>
-
-                            <td className="p-3.5">
-                              <button
-                                type="button"
-                                onClick={() => togglePreorder(product)}
-                                disabled={isBusy}
-                                className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1 text-[11px] font-bold transition ${
-                                  product.allow_preorder
-                                    ? "bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300"
-                                    : "bg-slate-100 text-slate-400 hover:text-slate-600 dark:bg-slate-800"
-                                }`}
-                                title="يتيح بيع المنتج واستقبال الطلبات حتى لو كان الرصيد المخزني صفراً"
-                              >
-                                {product.allow_preorder ? "مفعّل (عند الطلب)" : "معطل"}
-                              </button>
-                            </td>
-
-                            <td className="p-3.5">
-                              <input
-                                type="text"
-                                value={draft.online_description}
-                                onChange={(e) =>
-                                  setDrafts((prev) => ({
-                                    ...prev,
-                                    [product.id]: { ...draft, online_description: e.target.value },
-                                  }))
-                                }
-                                placeholder="وصف مخصص للمتجر…"
-                                className="w-48 rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-900 focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                              />
                             </td>
 
                             <td className="p-3.5 text-center">
@@ -1067,11 +1177,10 @@ export const StoreSettingsPage: React.FC = () => {
                               <div className="flex items-center justify-center gap-1">
                                 <button
                                   type="button"
-                                  onClick={() => saveProductRow(product)}
-                                  disabled={isBusy}
-                                  className="rounded-xl bg-slate-900 px-3 py-1 text-xs font-bold text-white transition hover:bg-blue-600 disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-blue-600"
+                                  onClick={() => openEditProductModal(product)}
+                                  className="rounded-xl bg-slate-900 px-3 py-1 text-xs font-bold text-white transition hover:bg-blue-600 dark:bg-slate-700 dark:hover:bg-blue-600"
                                 >
-                                  {isBusy ? "…" : "حفظ"}
+                                  تعديل
                                 </button>
                                 <button
                                   type="button"
@@ -2026,22 +2135,22 @@ export const StoreSettingsPage: React.FC = () => {
           </div>
         )}
 
-        {/* ── MODAL: إضافة منتج جديد للمتجر مباشرة ────────────────────── */}
-        {isCreatingProductModal && (
+        {/* ── MODAL: إنشاء / تعديل منتج المتجر ─────────────────────────── */}
+        {isProductModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
             <div className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-center justify-between border-b border-slate-100 pb-4 dark:border-slate-800">
                 <div>
                   <h3 className="text-base font-black text-slate-900 dark:text-white">
-                    إضافة منتج جديد للمتجر مباشرة
+                    {editingProductId ? "تعديل منتج المتجر" : "إضافة منتج جديد للمتجر مباشرة"}
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    أضف منتجاً أو خدمة أو عرضاً خاصاً للمتجر دون الحاجة لربطه بالمخزن أو شجرة المنتجات
+                    كتالوج المتجر مستقلٌّ عن المخزون — أضف منتجاً أو خدمة أو عرضاً خاصاً بلا حاجة لصنفٍ مخزني
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsCreatingProductModal(false)}
+                  onClick={() => setIsProductModalOpen(false)}
                   className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
                 >
                   <X className="h-5 w-5" />
@@ -2055,59 +2164,146 @@ export const StoreSettingsPage: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    value={newProductForm.name_ar}
+                    value={productForm.name_ar}
                     onChange={(e) =>
-                      setNewProductForm((prev) => ({ ...prev, name_ar: e.target.value }))
+                      setProductForm((prev) => ({ ...prev, name_ar: e.target.value }))
                     }
                     placeholder="مثال: ثلاجة دولابي فاخرة LG 18 قدم"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>
 
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    الاسم بالإنجليزية (اختياري)
+                  </label>
+                  <input
+                    type="text"
+                    value={productForm.name_en}
+                    onChange={(e) =>
+                      setProductForm((prev) => ({ ...prev, name_en: e.target.value }))
+                    }
+                    placeholder="LG Refrigerator 18 Cu Ft"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    dir="ltr"
+                  />
+                </div>
+
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
-                      الاسم بالإنجليزية (اختياري)
+                      الماركة
                     </label>
-                    <input
-                      type="text"
-                      value={newProductForm.name_en}
-                      onChange={(e) =>
-                        setNewProductForm((prev) => ({ ...prev, name_en: e.target.value }))
-                      }
-                      placeholder="LG Refrigerator 18 Cu Ft"
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                      dir="ltr"
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        value={productForm.brand ?? ""}
+                        onChange={(e) =>
+                          setProductForm((prev) => ({
+                            ...prev,
+                            brand: e.target.value ? Number(e.target.value) : null,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                      >
+                        <option value="">بلا ماركة</option>
+                        {brands.map((b) => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => { setQuickCreateBrandName(""); setQuickCreateBrandOpen(true); }}
+                        title="إضافة ماركة جديدة"
+                        className="shrink-0 rounded-xl border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
 
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
-                      الماركة / البراند (Brand)
+                      الوحدة
                     </label>
                     <input
                       type="text"
-                      value={newProductForm.brand}
+                      value={productForm.unit}
                       onChange={(e) =>
-                        setNewProductForm((prev) => ({ ...prev, brand: e.target.value }))
+                        setProductForm((prev) => ({ ...prev, unit: e.target.value }))
                       }
-                      placeholder="مثال: LG / Samsung"
+                      placeholder="مثال: قطعة / كرتونة"
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      الفئات
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickCreateCategoryForm({ name: "", parent: null });
+                        setQuickCreateCategoryOpen(true);
+                      }}
+                      className="flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      <Plus className="h-3 w-3" />
+                      فئة جديدة
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800">
+                    {categories.length === 0 ? (
+                      <span className="p-1 text-[11px] text-slate-400">لا فئات بعد.</span>
+                    ) : (
+                      categories.map((cat) => {
+                        const checked = (productForm.categories || []).includes(cat.id);
+                        return (
+                          <label
+                            key={cat.id}
+                            className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-bold transition ${
+                              checked
+                                ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                                : "border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) =>
+                                setProductForm((prev) => {
+                                  const current = prev.categories || [];
+                                  return {
+                                    ...prev,
+                                    categories: e.target.checked
+                                      ? [...current, cat.id]
+                                      : current.filter((id) => id !== cat.id),
+                                  };
+                                })
+                              }
+                              className="h-3 w-3 accent-blue-600"
+                            />
+                            <span>{cat.parent ? `${categories.find((p) => p.id === cat.parent)?.name || ""} / ` : ""}{cat.name}</span>
+                          </label>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
-                      سعر البيع بالمتجر
+                      السعر
                     </label>
                     <input
                       type="number"
                       step="any"
-                      value={newProductForm.online_price}
+                      value={productForm.price ?? ""}
                       onChange={(e) =>
-                        setNewProductForm((prev) => ({ ...prev, online_price: e.target.value }))
+                        setProductForm((prev) => ({ ...prev, price: e.target.value }))
                       }
                       placeholder="مثال: 3500"
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
@@ -2116,19 +2312,45 @@ export const StoreSettingsPage: React.FC = () => {
 
                   <div>
                     <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
-                      رمز المنتج SKU (يولّد تلقائياً إن تُرك فارغاً)
+                      سعر التخفيض (مبلغٌ مطلق)
                     </label>
                     <input
-                      type="text"
-                      value={newProductForm.sku}
+                      type="number"
+                      step="any"
+                      value={productForm.sale_price ?? ""}
                       onChange={(e) =>
-                        setNewProductForm((prev) => ({ ...prev, sku: e.target.value }))
+                        setProductForm((prev) => ({ ...prev, sale_price: e.target.value }))
                       }
-                      placeholder="ST-XXXX"
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-mono focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                      dir="ltr"
+                      placeholder="السعر بعد الخصم نفسه — لا نسبة"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                     />
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      مبلغٌ مطلق هو السعر بعد الخصم نفسه — وليس نسبة خصم.
+                    </p>
                   </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    حالة التوفّر
+                  </label>
+                  <select
+                    value={productForm.stock_state}
+                    onChange={(e) =>
+                      setProductForm((prev) => ({
+                        ...prev,
+                        stock_state: e.target.value as StoreStockState,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    {(Object.keys(STOCK_STATE_LABELS) as StoreStockState[]).map((key) => (
+                      <option key={key} value={key}>{STOCK_STATE_LABELS[key]}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    حالةٌ يعلنها التاجر بنفسه — وليست رصيداً محسوباً.
+                  </p>
                 </div>
 
                 <div>
@@ -2137,130 +2359,248 @@ export const StoreSettingsPage: React.FC = () => {
                   </label>
                   <textarea
                     rows={3}
-                    value={newProductForm.online_description}
+                    value={productForm.description}
                     onChange={(e) =>
-                      setNewProductForm((prev) => ({ ...prev, online_description: e.target.value }))
+                      setProductForm((prev) => ({ ...prev, description: e.target.value }))
                     }
                     placeholder="شرح موجز عن المنتج والمواصفات التي يراها الزبائن…"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
                 </div>
 
-                {/* خيارات الطلب المسبق والنشر */}
-                <div className="space-y-2 rounded-2xl border border-slate-100 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
-                  <label className="flex cursor-pointer items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        إتاحة البيع بالطلب المسبق / عند الطلب
-                      </span>
-                      <p className="text-[10px] text-slate-400">
-                        يتيح للزبائن طلب المنتج عبر السلة والواتساب حتى بدون توفر رصيد مخزني حالي
-                      </p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={newProductForm.allow_preorder}
-                      onChange={(e) =>
-                        setNewProductForm((prev) => ({ ...prev, allow_preorder: e.target.checked }))
-                      }
-                      className="h-4 w-4 rounded accent-blue-600"
-                    />
-                  </label>
-
-                  <label className="flex cursor-pointer items-center justify-between border-t border-slate-200/60 pt-2 dark:border-slate-700/60">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-slate-100 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
                     <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                      نشر وعرض المنتج فورياً في المتجر
+                      نشر وعرض المنتج في المتجر
                     </span>
                     <input
                       type="checkbox"
-                      checked={newProductForm.is_for_sale_online}
+                      checked={productForm.is_active ?? true}
                       onChange={(e) =>
-                        setNewProductForm((prev) => ({ ...prev, is_for_sale_online: e.target.checked }))
+                        setProductForm((prev) => ({ ...prev, is_active: e.target.checked }))
                       }
                       className="h-4 w-4 rounded accent-blue-600"
                     />
                   </label>
-                </div>
 
-                {/* قسم رفع الصور للمنتج الجديد */}
-                <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                      صور المنتج في المتجر ({newProductImages.length})
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      الترتيب
                     </label>
-                    <label className="flex cursor-pointer items-center gap-1 rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300">
-                      {uploadingNewProductImage ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <ImagePlus className="h-3.5 w-3.5 text-blue-500" />
-                      )}
-                      <span>{uploadingNewProductImage ? "جارٍ الرفع…" : "رفع صورة"}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        disabled={uploadingNewProductImage}
-                        onChange={handleUploadNewProductImage}
-                        className="hidden"
-                      />
-                    </label>
+                    <input
+                      type="number"
+                      value={productForm.sort_order ?? 0}
+                      onChange={(e) =>
+                        setProductForm((prev) => ({ ...prev, sort_order: Number(e.target.value) }))
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
                   </div>
-
-                  {newProductImages.length > 0 && (
-                    <div className="grid grid-cols-3 gap-2">
-                      {newProductImages.map((imgUrl, idx) => (
-                        <div
-                          key={idx}
-                          className="group relative overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800"
-                        >
-                          <img
-                            src={imgUrl}
-                            alt=""
-                            className="aspect-square w-full object-cover"
-                          />
-                          {idx === 0 && (
-                            <span className="absolute top-1 right-1 rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white shadow">
-                              الغلاف
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setNewProductImages((prev) => prev.filter((_, i) => i !== idx))
-                            }
-                            className="absolute bottom-1 left-1 rounded bg-rose-600 p-1 text-white opacity-90 transition hover:opacity-100"
-                            title="حذف الصورة"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
+
+                {/* قسم رفع الصور — عند الإنشاء فقط، التعديل يستعمل «إدارة الصور» */}
+                {!editingProductId && (
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        صور المنتج في المتجر ({newProductImages.length})
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-1 rounded-xl bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300">
+                        {uploadingNewProductImage ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <ImagePlus className="h-3.5 w-3.5 text-blue-500" />
+                        )}
+                        <span>{uploadingNewProductImage ? "جارٍ الرفع…" : "رفع صورة"}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          disabled={uploadingNewProductImage}
+                          onChange={handleUploadNewProductImage}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    {newProductImages.length > 0 && (
+                      <div className="grid grid-cols-3 gap-2">
+                        {newProductImages.map((imgUrl, idx) => (
+                          <div
+                            key={idx}
+                            className="group relative overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800"
+                          >
+                            <img
+                              src={imgUrl}
+                              alt=""
+                              className="aspect-square w-full object-cover"
+                            />
+                            {idx === 0 && (
+                              <span className="absolute top-1 right-1 rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white shadow">
+                                الغلاف
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setNewProductImages((prev) => prev.filter((_, i) => i !== idx))
+                              }
+                              className="absolute bottom-1 left-1 rounded bg-rose-600 p-1 text-white opacity-90 transition hover:opacity-100"
+                              title="حذف الصورة"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="mt-2 flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setIsCreatingProductModal(false)}
-                  disabled={creatingProduct}
+                  onClick={() => setIsProductModalOpen(false)}
+                  disabled={savingProduct}
                   className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"
                 >
                   إلغاء
                 </button>
                 <button
                   type="button"
-                  onClick={handleCreateStoreProduct}
-                  disabled={creatingProduct}
+                  onClick={handleSaveProductForm}
+                  disabled={savingProduct}
                   className="flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2 text-xs font-bold text-white shadow-md shadow-blue-600/20 hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {creatingProduct && <Loader2 className="h-4 w-4 animate-spin" />}
-                  <span>{creatingProduct ? "جارٍ الإضافة…" : "إضافة المنتج للمتجر"}</span>
+                  {savingProduct && <Loader2 className="h-4 w-4 animate-spin" />}
+                  <span>
+                    {savingProduct
+                      ? "جارٍ الحفظ…"
+                      : editingProductId
+                        ? "حفظ التعديلات"
+                        : "إضافة المنتج للمتجر"}
+                  </span>
                 </button>
               </div>
             </div>
           </div>
         )}
+
+        {/* ── MODAL: إنشاء ماركة سريعاً من داخل نموذج المنتج ─────────────── */}
+        {quickCreateBrandOpen && (
+          <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+            onClick={(e) => e.target === e.currentTarget && setQuickCreateBrandOpen(false)}
+          >
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <div className="mb-3 flex items-center justify-between">
+                <h4 className="text-sm font-black text-slate-900 dark:text-white">إضافة ماركة جديدة</h4>
+                <button type="button" onClick={() => setQuickCreateBrandOpen(false)} className="text-slate-400 hover:text-slate-700">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <input
+                type="text"
+                autoFocus
+                value={quickCreateBrandName}
+                onChange={(e) => setQuickCreateBrandName(e.target.value)}
+                placeholder="اسم الماركة"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+              />
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQuickCreateBrandOpen(false)}
+                  className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleQuickCreateBrand}
+                  disabled={savingQuickBrand}
+                  className="rounded-xl bg-blue-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {savingQuickBrand ? "جارٍ الإضافة…" : "إضافة"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── MODAL: إنشاء فئة سريعاً من داخل نموذج المنتج ────────────────── */}
+        {quickCreateCategoryOpen && (
+          <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+            onClick={(e) => e.target === e.currentTarget && setQuickCreateCategoryOpen(false)}
+          >
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <div className="mb-3 flex items-center justify-between">
+                <h4 className="text-sm font-black text-slate-900 dark:text-white">إضافة فئة جديدة</h4>
+                <button type="button" onClick={() => setQuickCreateCategoryOpen(false)} className="text-slate-400 hover:text-slate-700">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  autoFocus
+                  value={quickCreateCategoryForm.name}
+                  onChange={(e) => setQuickCreateCategoryForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="اسم الفئة"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                />
+                <div>
+                  <label className="mb-1 block text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                    فئةٌ أب (اختياري — العمق الأقصى مستويان)
+                  </label>
+                  <select
+                    value={quickCreateCategoryForm.parent ?? ""}
+                    onChange={(e) =>
+                      setQuickCreateCategoryForm((prev) => ({
+                        ...prev,
+                        parent: e.target.value ? Number(e.target.value) : null,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="">بلا أب (فئة رئيسية)</option>
+                    {categories
+                      .filter((c) => c.parent === null)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQuickCreateCategoryOpen(false)}
+                  className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleQuickCreateCategory}
+                  disabled={savingQuickCategory}
+                  className="rounded-xl bg-blue-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {savingQuickCategory ? "جارٍ الإضافة…" : "إضافة"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── MODAL: استيراد من الأصناف ────────────────────────────────── */}
+        <StoreImportFromInventoryModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          onImport={handleImportFromInventory}
+          importing={importing}
+        />
       </div>
     </KitDocumentShell>
   );

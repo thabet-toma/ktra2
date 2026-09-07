@@ -41,6 +41,7 @@ export type AppView =
     | "gallery"
     | "store"
     | "store-settings"
+    | "store-categories"
     | "accounting-coa"
     | "accounting-journals"
     | "accounting-journal-entry"
