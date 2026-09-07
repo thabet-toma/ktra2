@@ -16,6 +16,8 @@ export interface ReceiveOnPostTarget {
   isLocal: boolean;
   isReturn: boolean;
   receiptStatus?: string;
+  /** `PurchaseSettings.receive_on_post` — مفعّلاً يُسكِت السؤال. انظر أدناه. */
+  autoReceiveSetting: boolean;
 }
 
 /**
@@ -23,11 +25,21 @@ export interface ReceiveOnPostTarget {
  *
  * لا معنى له على مرجع شراء (يُخرج البضاعة لا يُدخلها)، ولا على فاتورة مستوردة
  * (لا تمرّ من هنا)، ولا على فاتورة استُلمت بضاعتها كلّها سلفاً.
+ *
+ * ولا معنى له حين يكون الإعداد العام مفعّلاً: من ضبط شركته على «الاستلام مع
+ * الترحيل» أجاب السؤال مرّةً في الإعدادات، وإعادةُ سؤاله عند كل ترحيل تطلب
+ * منه تأكيد قراره لا اتّخاذه. يبقى السؤال حيث يفيد فعلاً — الإعداد مطفأ
+ * (الاستلام على دفعات هو العادة) وهذه الفاتورة وصلت كاملة، فيقول «نعم» لها
+ * وحدها. أي أنّ الحوار يظهر للاستثناء لا للقاعدة.
+ *
+ * وحين يُسكَت السؤال لا يُرسَل `receive_on_post` في جسم الطلب أصلاً، فيقرّر
+ * الخادمُ بالإعداد نفسِه — لا قيمةَ تُلفَّق هنا.
  */
 export function receiveOnPostApplies(target: ReceiveOnPostTarget): boolean {
   return (
     target.isLocal
     && !target.isReturn
+    && !target.autoReceiveSetting
     && (target.receiptStatus || "not_received") !== "received"
   );
 }

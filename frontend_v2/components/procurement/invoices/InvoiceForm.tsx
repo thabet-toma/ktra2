@@ -910,6 +910,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         && !formData.clearanceId,
       isReturn: Boolean(formData.isReturn),
       receiptStatus: formData.receiptStatus,
+      autoReceiveSetting: receiveOnPostDefault,
     })) return undefined;
     return askReceiveOnPost(confirm, receiveOnPostDefault);
   };

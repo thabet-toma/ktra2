@@ -203,6 +203,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
       isLocal: Boolean(invoice.is_local),
       isReturn: Boolean(invoice.is_return),
       receiptStatus: invoice.receipt_status,
+      autoReceiveSetting: receiveOnPostDefault,
     })) {
       const answer = await askReceiveOnPost(
         confirmDialog, receiveOnPostDefault,

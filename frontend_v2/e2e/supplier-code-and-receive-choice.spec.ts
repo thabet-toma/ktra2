@@ -157,3 +157,18 @@ test('الترحيل يسأل عن الاستلام، والجواب يصل ال
   await expect.poll(() => posts.length).toBe(1);
   expect(posts[0].body).toEqual({ receive_on_post: true });
 });
+
+test('الإعداد مفعّلاً: الترحيل لا يسأل، ولا يُرسل الحقل فيقرّر الخادمُ بالإعداد', async ({ page }) => {
+  // من ضبط شركته على «الاستلام مع الترحيل» أجاب مرّة في الإعدادات؛ إعادةُ
+  // سؤاله عند كل ترحيل تطلب تأكيد قرارٍ لا اتّخاذَه.
+  const { posts } = await openDraftInvoice(page, true);
+
+  await page.getByRole('button', { name: /^ترحيل/ }).first().click();
+
+  // لا حوار: الترحيل يقع مباشرة.
+  await expect.poll(() => posts.length).toBe(1);
+  await expect(page.getByRole('checkbox')).toHaveCount(0);
+
+  // والجسم فارغ عمداً — لا تُلفَّق قيمةٌ في الواجهة، والخادم يقرأ الإعداد.
+  expect(posts[0].body).toEqual({});
+});
