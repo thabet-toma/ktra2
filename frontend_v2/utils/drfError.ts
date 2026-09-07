@@ -37,6 +37,9 @@ const FIELD_LABELS: Record<string, string> = {
   vat_percent: "نسبة الضريبة",
   discount_amount: "قيمة الخصم",
   discount_percent: "نسبة الخصم",
+  sale_price: "سعر التخفيض",
+  starts_at: "تاريخ بداية الحملة",
+  ends_at: "تاريخ نهاية الحملة",
   // الرواتب — رسالة رقمية بلا اسم حقل لا تدلّ المستخدم على مكان الخلل.
   employee: "الموظف",
   monthly_salary: "الراتب الشهري",

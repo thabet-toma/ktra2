@@ -2,7 +2,7 @@
  * سياق سلة مشتريات المتجر العام — حفظ المنتجات في المتصفح وتوليد رسالة طلب الواتساب.
  */
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { StoreProduct, storeProductName } from "../services/storeApi";
+import { createStoreOrderIntent, StoreProduct, storeProductName } from "../services/storeApi";
 import { formatMoney, formatQuantity } from "../utils/formatNumber";
 
 export interface CartItem {
@@ -38,6 +38,11 @@ interface StoreCartContextType {
     currency: string | null,
     customer: CustomerOrderDetails,
   ) => string;
+  /**
+   * يسجّل نيّة الطلب على الخادم — أفضل جهدٍ لا يُنتظر: القياس مساعدٌ لا مصدر
+   * حقيقة، وزبونٌ يُمنَع من الطلب لأن عدّاداً تعثّر خسارةٌ حقيقيّة (مواصفة #166 م٥).
+   */
+  registerOrderIntent: (collectionSlug?: string | null) => void;
 }
 
 const StoreCartContext = createContext<StoreCartContextType | undefined>(undefined);
@@ -181,6 +186,17 @@ export const StoreCartProvider: React.FC<StoreCartProviderProps> = ({ slug, chil
       .join("\n");
   };
 
+  const registerOrderIntent = (collectionSlug?: string | null) => {
+    if (items.length === 0) return;
+    createStoreOrderIntent(
+      slug,
+      items.map((item) => ({ product_id: item.productId, quantity: item.quantity })),
+      collectionSlug,
+    ).catch(() => {
+      // فشلُ التسجيل لا يمنع الطلب أبداً — القياس مساعدٌ لا مصدر حقيقة.
+    });
+  };
+
   return (
     <StoreCartContext.Provider
       value={{
@@ -194,6 +210,7 @@ export const StoreCartProvider: React.FC<StoreCartProviderProps> = ({ slug, chil
         isCartOpen,
         setIsCartOpen,
         buildWhatsAppMessage,
+        registerOrderIntent,
       }}
     >
       {children}

@@ -9,6 +9,7 @@ from store.views import (
     StoreCollectionDetailView,
     StoreCollectionItemAdminViewSet,
     StoreCollectionListView,
+    StoreOrderIntentView,
     StoreProductAdminViewSet,
     StoreProductDetailView,
     StoreProductImageAdminViewSet,
@@ -69,6 +70,11 @@ urlpatterns = [
         "<slug:slug>/collections/<slug:collection_slug>/",
         StoreCollectionDetailView.as_view(),
         name="store-collection-detail",
+    ),
+    path(
+        "<slug:slug>/order-intent/",
+        StoreOrderIntentView.as_view(),
+        name="store-order-intent",
     ),
     path("<slug:slug>/", StoreProfileView.as_view(), name="store-profile"),
 ]

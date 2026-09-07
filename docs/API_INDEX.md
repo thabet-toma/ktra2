@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **606**
+عدد النقاط: **607**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -566,6 +566,7 @@
 | `/api/store/<slug:slug>/` | `StoreProfileView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/` | `StoreCollectionListView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/<slug:collection_slug>/` | `StoreCollectionDetailView` | `store/views.py` |
+| `/api/store/<slug:slug>/order-intent/` | `StoreOrderIntentView` | `store/views.py` |
 | `/api/store/<slug:slug>/products/` | `StoreProductListView` | `store/views.py` |
 | `/api/store/<slug:slug>/products/<int:pk>/` | `StoreProductDetailView` | `store/views.py` |
 | `/api/store/admin/brands/` | `StoreBrandAdminViewSet` | `store/views.py` |

@@ -12,6 +12,7 @@ import {
   Copy,
   ExternalLink,
   Download,
+  Eye,
   Flame,
   Globe,
   Image as ImageIcon,
@@ -46,6 +47,7 @@ import {
 
 import { useCompany } from "../../contexts/CompanyContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import { useToast } from "../../contexts/ToastContext";
 import { CloudinaryService } from "../../services/cloudinaryService";
 import { clientLogger } from "../../services/logger";
@@ -99,6 +101,22 @@ const STOCK_STATE_LABELS: Record<StoreStockState, string> = {
   preorder: "بالطلب",
 };
 
+/** ISO ← `<input type="datetime-local">` — نفس تحويل `AttendancePage.tsx` (`new Date(...).toISOString()`). */
+function toDatetimeLocalInput(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** فراغٌ ⇒ `null` صريحٌ يُرسَل — لا يُهمَل الحقل، فيُمحى تاريخٌ سابق فعلاً. */
+function fromDatetimeLocalInput(value: string): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 const emptyProductForm = (): StoreProductPayload => ({
   name_ar: "",
   name_en: "",
@@ -127,6 +145,12 @@ export const StoreSettingsPage: React.FC = () => {
   const { currentCompany, refreshCompanies } = useCompany();
   const confirm = useConfirm();
   const toast = useToast();
+  // مواصفة #166 م٥ — نسبة الخصم وتواريخ سريان الحملة تحت `store.pricing` لا
+  // `store.manage` وحدها. التعطيل هنا راحةُ استعمالٍ لا أمان — الحارس
+  // الحقيقي خادميّ (`store/serializers.py`)، وأي 400 منه يظهر كما هو
+  // (`humanizeDrfError` أسفل هذا الملف).
+  const { can: canPerm } = usePermissions();
+  const canPriceCampaign = canPerm("store.pricing");
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("overview");
 
@@ -1226,6 +1250,10 @@ export const StoreSettingsPage: React.FC = () => {
                     banner_image_url: "",
                     badge_text: "خصم خاص",
                     is_active: true,
+                    discount_percent: "0",
+                    starts_at: null,
+                    ends_at: null,
+                    priority: 0,
                   });
                   setIsEditingCollectionModal(true);
                 }}
@@ -1271,6 +1299,22 @@ export const StoreSettingsPage: React.FC = () => {
                       <div className="mt-4 flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
                         <Tag className="h-3.5 w-3.5 text-blue-500" />
                         <span>{col.items_count || 0} منتجات بالحملة</span>
+                      </div>
+
+                      {/* القياس (مواصفة #166 م٥) — مشاهدات · طلبات · نسبة تحويل */}
+                      <div className="mt-2 flex items-center gap-3 text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                        <span className="flex items-center gap-1" title="مشاهدات صفحة الحملة">
+                          <Eye className="h-3.5 w-3.5" />
+                          {formatNumber(col.views_count || 0)}
+                        </span>
+                        <span className="flex items-center gap-1" title="طلباتٌ عبر واتساب من هذه الحملة">
+                          <ShoppingBag className="h-3.5 w-3.5" />
+                          {formatNumber(col.orders_count || 0)}
+                        </span>
+                        <span className="flex items-center gap-1" title="نسبة التحويل">
+                          <ArrowUpRight className="h-3.5 w-3.5" />
+                          {col.conversion_rate != null ? `${formatNumber(col.conversion_rate)}٪` : "—"}
+                        </span>
                       </div>
                     </div>
 
@@ -1985,6 +2029,90 @@ export const StoreSettingsPage: React.FC = () => {
                     placeholder="شرح موجز عن العرض لرواد مواقع التواصل…"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                   />
+                </div>
+
+                {/* مواصفة #166 م٥ — التسعير: نسبة الخصم وتواريخ السريان، تحت `store.pricing` */}
+                {!canPriceCampaign && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5 text-[11px] font-bold text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+                    لا تملك صلاحية «التسعير في المتجر العام» — نسبة الخصم وتواريخ السريان محجوبة، ويمكنك متابعة بقية الحملة (العنوان واللافتة والوصف والتفعيل) بحرّية.
+                  </div>
+                )}
+
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    نسبة الخصم — على كل منتجات الحملة (٪)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={99.99}
+                    step="0.01"
+                    disabled={!canPriceCampaign}
+                    value={collectionForm.discount_percent ?? "0"}
+                    onChange={(e) =>
+                      setCollectionForm((prev) => ({ ...prev, discount_percent: e.target.value }))
+                    }
+                    placeholder="مثال: 20 لخصمٍ ٢٠٪ — نسبةٌ لا مبلغٌ مطلق"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    نسبةٌ مئويّة تسري على كل منتجات الحملة معاً — لا كـ«سعر التخفيض» على المنتج المفرد وهو مبلغٌ مطلق.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      تبدأ في
+                    </label>
+                    <input
+                      type="datetime-local"
+                      disabled={!canPriceCampaign}
+                      value={toDatetimeLocalInput(collectionForm.starts_at)}
+                      onChange={(e) =>
+                        setCollectionForm((prev) => ({
+                          ...prev, starts_at: fromDatetimeLocalInput(e.target.value),
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                    <p className="mt-1 text-[10px] text-slate-400">فارغةٌ = سارية منذ الآن (بلا بداية)</p>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      تنتهي في
+                    </label>
+                    <input
+                      type="datetime-local"
+                      disabled={!canPriceCampaign}
+                      value={toDatetimeLocalInput(collectionForm.ends_at)}
+                      onChange={(e) =>
+                        setCollectionForm((prev) => ({
+                          ...prev, ends_at: fromDatetimeLocalInput(e.target.value),
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                    <p className="mt-1 text-[10px] text-slate-400">فارغةٌ = بلا انتهاء</p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    الأولوية
+                  </label>
+                  <input
+                    type="number"
+                    step={1}
+                    value={collectionForm.priority ?? 0}
+                    onChange={(e) =>
+                      setCollectionForm((prev) => ({ ...prev, priority: Number(e.target.value) || 0 }))
+                    }
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  />
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    يحسم التعادل بين حملتين بنفس نسبة الخصم — الأعلى يفوز.
+                  </p>
                 </div>
 
                 <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3 dark:bg-slate-800">

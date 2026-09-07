@@ -4,7 +4,7 @@
  * الخادم `store/views.py`: بلا مصادقة إطلاقاً (`authentication_classes = []`)،
  * والشركة تأتي من الـslug في المسار لا من ترويسة، وكل «غير موجود» **404**.
  */
-import { apiGetObject, apiGetPagedList, type PagedList } from "./restApi";
+import { apiGetObject, apiGetPagedList, apiPostObject, type PagedList } from "./restApi";
 
 /** بطاقة الشركة وإعدادات المظهر والهوية كما يراها زائر. */
 export interface StoreProfile {
@@ -47,7 +47,11 @@ export interface StoreImageOverlayData {
   color?: "red_fire" | "gold_luxury" | "emerald_fresh" | "blue_pro" | "neon_purple" | "dark_glass" | string;
 }
 
-/** الحمولة العامة كاملةً — عشرة حقول، وما ليس هنا لا يُرسله الخادم. */
+/**
+ * الحمولة العامة — العقد الأصليّ (أحد عشر حقلاً) + ستٌّ إضافيةٌ محضة منذ
+ * THA-166 م٢ (`docs/modules/store.md`). الحقول الإضافية اختياريّة هنا: خادمٌ
+ * أقدم لا يرسلها، فسقوطها لا يكسر شاشةً لا تقرؤها.
+ */
 export interface StoreProduct {
   id: number;
   name_ar: string | null;
@@ -60,6 +64,14 @@ export interface StoreProduct {
   description: string | null;
   images: string[];
   cover_overlay?: StoreImageOverlayData | null;
+  slug?: string;
+  /** السعر قبل الخصم — موجودٌ فقط حين يكون هناك خصمٌ فعليّ (منتجٍ مفردٍ أو حملة). */
+  original_price?: string | null;
+  /** نسبةٌ صحيحةٌ للشارة فقط — `null` بلا خصمٍ فعليّ. */
+  discount_percent?: number | null;
+  categories?: { id: number; name: string; slug: string }[];
+  stock_state?: string;
+  brand_id?: number | null;
 }
 
 export type StoreSort = "" | "price_asc" | "price_desc";
@@ -187,5 +199,26 @@ export function getStoreCollectionDetail(
 /** 404 = لا متجر بهذا الاسم، أو منتج غير منشور — حالة عرضٍ لا خطأ يُشتكى منه. */
 export function isStoreNotFound(error: unknown): boolean {
   return (error as { status?: number } | null)?.status === 404;
+}
+
+/** بند نيّة الطلب المُرسَل — لا سعر هنا: الخادم يحسبه من `StoreProduct` وحده. */
+export interface StoreOrderIntentItem {
+  product_id: number;
+  quantity: number;
+}
+
+/**
+ * يسجّل نيّةَ طلبٍ على الخادم **قبل** فتح واتساب (مواصفة #166 م٥) — لقطةٌ
+ * مساعدة لا مصدر حقيقة، فاستدعاؤها لا يُنتظر ولا يمنع فتح رابط الطلب أبداً.
+ */
+export function createStoreOrderIntent(
+  slug: string,
+  items: StoreOrderIntentItem[],
+  collectionSlug?: string | null,
+): Promise<{ ok: boolean }> {
+  return apiPostObject<{ ok: boolean }>(`${base(slug)}order-intent/`, {
+    items,
+    collection_slug: collectionSlug || undefined,
+  });
 }
 

@@ -3,6 +3,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
+from core.access import user_has_perm
 from core.tenant_utils import get_tenant
 from inventory.models import Product
 from store.models import (
@@ -14,6 +15,41 @@ from store.models import (
     StoreProductImage,
     StoreSettings,
 )
+
+#: مواصفة #166 م٥ — الحقول الماليّة التي تلزمها `store.pricing` لا `store.manage`
+#: وحدها، وقيمتُها الأساس (ما يُقارَن به عند الإنشاء، إذ لا `instance` بعد).
+PRICING_GUARDED_PRODUCT_FIELDS = {"price": None, "sale_price": None}
+PRICING_GUARDED_COLLECTION_FIELDS = {
+    "discount_percent": Decimal("0"), "starts_at": None, "ends_at": None,
+}
+
+
+def _reject_unauthorized_pricing_changes(serializer, attrs, guarded_fields):
+    """يرفض بـ400 صريحة تسمّي الحقل تغيير حقلٍ ماليٍّ بلا `store.pricing`.
+
+    **الرفضُ على محاولة التغيير لا على وجود المفتاح في الحمولة**: من يحفظ
+    نفس القيمة القائمة (أو الافتراض عند الإنشاء) لا يُمنَع — وإلا استحال على
+    من يفتقد التسعير تعديلُ وصفٍ أو اسمٍ في نفس الطلب (مواصفة #166 م٥).
+    """
+    request = serializer.context.get("request")
+    if request is None:
+        return
+    tenant = get_tenant(request)
+    if user_has_perm(getattr(request, "user", None), tenant, "store.pricing"):
+        return
+    instance = serializer.instance
+    errors = {}
+    for field, default in guarded_fields.items():
+        if field not in attrs:
+            continue
+        current = getattr(instance, field) if instance is not None else default
+        if attrs[field] != current:
+            errors[field] = (
+                "صلاحية «التسعير في المتجر العام» غير ممنوحة لدورك — "
+                "لا يمكنك تعديل هذا الحقل."
+            )
+    if errors:
+        raise serializers.ValidationError(errors)
 
 
 class TenantScopedPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):
@@ -313,6 +349,12 @@ class StoreCollectionAdminSerializer(_ConvertsModelValidationErrors, serializers
         queryset=StoreProduct.objects.all(), required=False, allow_null=True
     )
     items_count = serializers.IntegerField(read_only=True, default=0)
+    # مواصفة #166 م٥ — القياس: مشاهداتُ صفحة الحملة وطلباتُها، من الحقول
+    # المُجمَّعة على `get_queryset` (`store/views.py`،
+    # `StoreCollectionAdminViewSet.get_queryset`) — لا استعلامٌ هنا.
+    views_count = serializers.IntegerField(read_only=True, default=0)
+    orders_count = serializers.IntegerField(read_only=True, default=0)
+    conversion_rate = serializers.SerializerMethodField()
 
     class Meta:
         model = StoreCollection
@@ -320,9 +362,23 @@ class StoreCollectionAdminSerializer(_ConvertsModelValidationErrors, serializers
             "id", "title", "slug", "description", "banner_image_url",
             "badge_text", "featured_product", "featured_store_product",
             "is_active", "sort_order", "starts_at", "ends_at",
-            "discount_percent", "priority", "items_count", "created_at",
+            "discount_percent", "priority", "items_count", "views_count",
+            "orders_count", "conversion_rate", "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+    def get_conversion_rate(self, obj):
+        """قسمةٌ واحدةٌ مجّانيّةٌ ودالّة — `None` بلا مشاهدات كي لا تُقرأ صفراً
+        كأداءٍ سيّئ بدل «لا بيانات بعد» (مواصفة #166 م٥)."""
+        views = getattr(obj, "views_count", 0) or 0
+        if not views:
+            return None
+        orders = getattr(obj, "orders_count", 0) or 0
+        return round(orders / views * 100, 1)
+
+    def validate(self, attrs):
+        _reject_unauthorized_pricing_changes(self, attrs, PRICING_GUARDED_COLLECTION_FIELDS)
+        return super().validate(attrs)
 
 
 class StoreBrandAdminSerializer(serializers.ModelSerializer):
@@ -388,6 +444,10 @@ class StoreProductAdminSerializer(_ConvertsModelValidationErrors, serializers.Mo
         return list(
             obj.images.order_by("sort_order", "id").values_list("image_url", flat=True)
         )
+
+    def validate(self, attrs):
+        _reject_unauthorized_pricing_changes(self, attrs, PRICING_GUARDED_PRODUCT_FIELDS)
+        return super().validate(attrs)
 
     def create(self, validated_data):
         initial_images = validated_data.pop("initial_images", [])

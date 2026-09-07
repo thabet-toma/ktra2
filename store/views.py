@@ -11,7 +11,8 @@ from decimal import Decimal, InvalidOperation
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import (
-    Case, Count, DecimalField, ExpressionWrapper, F, Max, Min, Prefetch, Q, Value, When,
+    Case, Count, DecimalField, ExpressionWrapper, F, IntegerField, Max, Min, OuterRef,
+    Prefetch, Q, Subquery, Sum, Value, When,
 )
 from django.db.models.functions import Coalesce, Least
 from django.http import Http404
@@ -28,6 +29,7 @@ from core.models import SystemAttachment
 from core.pagination import EnforcedPageNumberPagination
 from core.permissions import TemplateSurfacePermission
 from core.tenant_utils import get_tenant
+from docshare.services import is_crawler
 from inventory.models import Product
 from store.cache import InvalidatesStoreCacheMixin, products_version
 from store.models import (
@@ -35,6 +37,8 @@ from store.models import (
     StoreCategory,
     StoreCollection,
     StoreCollectionItem,
+    StoreCollectionView,
+    StoreOrderIntent,
     StoreProduct,
     StoreProductImage,
     StoreProductView,
@@ -698,6 +702,7 @@ class StoreCollectionDetailView(StorePublicView):
         )
         if collection is None:
             raise Http404
+        self._record_view(tenant, collection, request)
 
         product_ids = list(
             StoreCollectionItem.objects.filter(collection=collection)
@@ -743,6 +748,120 @@ class StoreCollectionDetailView(StorePublicView):
             "collection": collection_data,
             "products": paginated_products,
         })
+
+    @staticmethod
+    def _record_view(tenant, collection, request):
+        """عدّاد مشاهدة يومي ذرّي — نفس نمط `StoreProductDetailView._record_view`
+        حرفياً على `StoreCollectionView` (مواصفة #166 م٥).
+
+        **ترشيح الروبوتات إلزامي هنا** (خلافاً للمنتج): زاحفٌ يفتح رابط حملة
+        من TikTok/Meta لبناء معاينة يُضخّم «مشاهدات» الحملة تحديداً — وهو
+        الرقم الذي يُقاس به نجاح الإعلان. `is_crawler` نفسها المستعملة أصلاً
+        للروابط العامة في `docshare/services.py` — لا مرشِّح ثانٍ.
+        """
+        if is_crawler(request):
+            return
+        today = timezone.localdate()
+        rows = StoreCollectionView.objects.filter(
+            tenant=tenant, collection=collection, view_date=today,
+        ).update(count=F("count") + 1)
+        if rows:
+            return
+        try:
+            with transaction.atomic():
+                StoreCollectionView.objects.create(
+                    tenant=tenant, collection=collection, view_date=today, count=1,
+                )
+        except IntegrityError:
+            StoreCollectionView.objects.filter(
+                tenant=tenant, collection=collection, view_date=today,
+            ).update(count=F("count") + 1)
+
+
+class StoreOrderIntentView(StorePublicView):
+    """`POST /api/store/<slug>/order-intent/` — لقطةُ نيّة طلبٍ **قبل** القفز
+    إلى واتساب (مواصفة #166 م٥).
+
+    نقطةُ كتابةٍ عامّة بلا مصادقة — محروسةٌ بسقفٍ على عدد البنود، وبحساب
+    `total` على الخادم دائماً (لا يُوثَق بما يرسله العميل)، وبإسقاط معرّفات
+    منتجاتٍ لا تخصّ هذه الشركة أو غير منشورة بصمت (نفس نمط `ids` في
+    `StoreProductListView._filtered`: معرّفٌ أجنبي يُعطي فراغاً لا تسريباً).
+    """
+
+    #: سقفٌ على عدد البنود لكل طلب — لكل بندٍ استعلامُ مطابقةٍ واحد ضمن
+    #: `id__in`، فطلبٌ بلا سقفٍ من زائرٍ مجهول مُضخِّم إساءة (نفس عائلة
+    #: `MAX_IDS`/`IMPORT_MAX_IDS` في هذا الملف).
+    MAX_ITEMS = 50
+    #: سقفٌ صريح على كميّة البند الواحد — رقمٌ خياليٌّ (١٠^١٨) في حمولة عميل
+    #: لا يفجّر حساب المجموع، بل يُقصّ صامتاً إلى حدٍّ معقول.
+    MAX_QUANTITY_PER_ITEM = 100_000
+
+    def post(self, request, slug):
+        tenant = _tenant_or_404(slug)
+        raw_items = request.data.get("items")
+        if not isinstance(raw_items, list) or not raw_items:
+            raise ValidationError({"items": "يجب إرسال بنودٍ غير فارغة."})
+        if len(raw_items) > self.MAX_ITEMS:
+            raise ValidationError({
+                "items": f"الحدّ الأقصى {self.MAX_ITEMS} بنداً في الطلب الواحد.",
+            })
+
+        parsed = []
+        for row in raw_items:
+            if not isinstance(row, dict):
+                continue
+            try:
+                product_id = int(row.get("product_id"))
+                quantity = int(row.get("quantity") or 1)
+            except (TypeError, ValueError):
+                continue
+            if product_id <= 0 or quantity <= 0:
+                continue
+            parsed.append((product_id, min(quantity, self.MAX_QUANTITY_PER_ITEM)))
+        if not parsed:
+            raise ValidationError({"items": "لا بنود صالحة في الطلب."})
+
+        product_ids = [pid for pid, _ in parsed]
+        products = {
+            p.id: p for p in published_products(tenant).filter(id__in=product_ids)
+        }
+        prices_public = _prices_are_public(tenant)
+
+        items_snapshot = []
+        total = Decimal("0")
+        for product_id, quantity in parsed:
+            product = products.get(product_id)
+            if product is None:
+                continue
+            # السعر يُحسَب من الخادم حصراً — ما أرسله العميل لا يُقرأ إطلاقاً.
+            unit_price = product.effective_price if prices_public else None
+            total += (unit_price or Decimal("0")) * quantity
+            items_snapshot.append({
+                "product_id": product.id,
+                "name": product.name_ar or product.name_en or "",
+                "quantity": quantity,
+                "unit_price": _format_money(unit_price),
+            })
+        if not items_snapshot:
+            raise ValidationError({"items": "لا بنود صالحة لهذه الشركة."})
+
+        collection = None
+        collection_slug = str(request.data.get("collection_slug") or "").strip()
+        if collection_slug:
+            collection = StoreCollection.objects.filter(
+                tenant=tenant, slug=collection_slug, is_active=True,
+            ).first()
+
+        if is_crawler(request):
+            # فشلُ التسجيل لا يمنع الطلب أبداً — والزائر (بشرياً كان أو
+            # روبوتاً) يرى نفس الاستجابة الناجحة، فلا يتوقّف تدفّق الواجهة.
+            return Response({"ok": True}, status=201)
+
+        StoreOrderIntent.objects.create(
+            tenant=tenant, collection=collection,
+            items=items_snapshot, total=total.quantize(Decimal("0.01")),
+        )
+        return Response({"ok": True}, status=201)
 
 
 # ── واجهات إدارة المتجر المصادق عليها (Store Admin) ────────────────────────
@@ -828,7 +947,28 @@ class StoreCollectionAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet)
 
     def get_queryset(self):
         qs = super().get_queryset()
-        return qs.annotate(items_count=Count("items")).order_by("sort_order", "id")
+        # مواصفة #166 م٥ — `views_count`/`orders_count` بـ`Subquery` عدديّة لا
+        # `Count`/`Sum` مباشرَين على `JOIN` ثانٍ: ضمّان مباشران فوق `items`
+        # يتضاعفان تقاطعياً (فان-أوت) فيَعِدان بأرقامٍ أكبر من الحقيقة — نفس
+        # عائلة درس «group-card n+1». الـ`Subquery` القياسيّة معزولةٌ عن ضمّ
+        # `items` القائم، فلا تفاعل بينها.
+        views_sq = (
+            StoreCollectionView.objects.filter(collection=OuterRef("pk"))
+            .values("collection").annotate(total=Sum("count")).values("total")
+        )
+        orders_sq = (
+            StoreOrderIntent.objects.filter(collection=OuterRef("pk"))
+            .values("collection").annotate(total=Count("id")).values("total")
+        )
+        return qs.annotate(
+            items_count=Count("items", distinct=True),
+            views_count=Coalesce(
+                Subquery(views_sq, output_field=IntegerField()), Value(0)
+            ),
+            orders_count=Coalesce(
+                Subquery(orders_sq, output_field=IntegerField()), Value(0)
+            ),
+        ).order_by("sort_order", "id")
 
 
 class StoreCollectionItemAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):

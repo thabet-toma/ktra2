@@ -1,6 +1,6 @@
 # store — المتجر العام للمنتجات (سطح بلا مصادقة فوق كتالوج المنتجات)
 
-> مبني على قراءة الكود مباشرةً بتاريخ 2026-08-13 (ST-1)، ومُحدَّث 2026-08-19 (ST-5: المظهر والحملات والسلة ولوحة إدارة المتجر)، 2026-09-07 (THA-166 م٢: القراءةُ العامة تحوّلت إلى `StoreProduct`، وظهر الخصم)، 2026-09-07 (THA-166 م٣: شاشاتُ إدارة المتجر على العقد الجديد + استيراد من الأصناف — الفجوة أُغلقت)، و2026-09-07 (THA-166 م٤: الفلترةُ بعدّاداتٍ سياقية). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
+> مبني على قراءة الكود مباشرةً بتاريخ 2026-08-13 (ST-1)، ومُحدَّث 2026-08-19 (ST-5: المظهر والحملات والسلة ولوحة إدارة المتجر)، 2026-09-07 (THA-166 م٢: القراءةُ العامة تحوّلت إلى `StoreProduct`، وظهر الخصم)، 2026-09-07 (THA-166 م٣: شاشاتُ إدارة المتجر على العقد الجديد + استيراد من الأصناف — الفجوة أُغلقت)، 2026-09-07 (THA-166 م٤: الفلترةُ بعدّاداتٍ سياقية)، و2026-09-08 (THA-166 م٥: شقّ صلاحيّة `store.pricing`، وقياسُ الحملة). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
 ## الغرض
 app تخدم سطحين لا سطحاً واحداً: **زائراً مجهولاً** بخمس نقاط قراءة تحت `/api/store/<slug>/` (بطاقة الشركة ومظهرها · شبكة المنتجات المنشورة · صفحة المنتج · قائمة الحملات · صفحة هبوط الحملة)، و**مديراً مصادَقاً عليه** بنقاط `/api/store/admin/…` يضبط منها المظهر والصور والحملات ومنتجات المتجر.
@@ -29,7 +29,8 @@ app تخدم سطحين لا سطحاً واحداً: **زائراً مجهول�
 | GET | `store/<slug>/products/` | المنتجات المنشورة — بحث `q`، تصفية `brand`/`category` (معرّفاتٌ متعدّدة بفواصل **أو اسمٌ مفرد**)، رايات `on_sale`/`is_new`/`in_stock`، مدى `min_price`/`max_price`، فرز `sort=price_asc\|price_desc`، **ترقيم إلزامي**، وعدّادات `facets`/`price_range` (انظر «الفلترةُ بعدّادات» أدناه) |
 | GET | `store/<slug>/products/<id>/` | منتج واحد + كتابة عدّاد المشاهدة |
 | GET | `store/<slug>/collections/` | الحملات النشطة (`StoreCollection`) مع عدد منتجاتها |
-| GET | `store/<slug>/collections/<collection_slug>/` | صفحة هبوط الحملة: بياناتها + منتجها المميّز + منتجاتها مُرقَّمة |
+| GET | `store/<slug>/collections/<collection_slug>/` | صفحة هبوط الحملة: بياناتها + منتجها المميّز + منتجاتها مُرقَّمة + **كتابةُ عدّاد مشاهدةٍ يوميّ** (م٥) |
+| POST | `store/<slug>/order-intent/` | **(م٥)** لقطةُ نيّة طلبٍ قبل القفز إلى واتساب — `{items:[{product_id, quantity}], collection_slug?}`، بلا مصادقة |
 
 كلها بلا مصادقة إطلاقاً (`authentication_classes = []`): توكن يُرسَل إلى نقطة متجر لا يقدر أن يغيّر حرفاً في الرد — خاصية بنيوية لا وعدٌ في مراجعة.
 والشركة تأتي من الـslug في المسار وحده، لا من ترويسة `X-Tenant-Id`.
@@ -156,6 +157,32 @@ WooCommerce المُسنَد في #157.
 `store/models.py` (`StoreProductView`) — تجميع يومي `(tenant, product, view_date, count)` يكتبه `store/views.py` (`_record_view`) بـ`F('count') + 1` ذرّي، **عند فتح صفحة منتج فقط** لا مع كل طلب قائمة.
 لماذا جدول جانبي لا عمود على `Product`: صفّ المنتج يعيش في قلب الـERP، وكتابةُ زائرٍ مجهول عليه تقفل صفّاً ساخناً وتُدخِل مسار كتابة غير مصادَق عليه إلى جدول تحرسه قواعد المخزون.
 
+## قياسُ الحملة — مشاهدات وطلبات (THA-166 م٥)
+
+طلب المالك: «كم شوهد وكم طُلب» للحملة — رقمان على صفّ الحملة في شاشة الإدارة، لا شاشة تحليلاتٍ مستقلّة.
+
+**`StoreCollectionView`** (`store/models.py`) — نظيرٌ حرفيٌّ لـ`StoreProductView` بفرادةٍ يوميّة `(tenant, collection, view_date)`، لا تعميمٌ لمحورٍ متعدّد الأشكال: `StoreProductView` مرتبطٌ ومفهرسٌ ويعمل، والنظيرُ عشرةُ أسطرٍ تُبقي الاستعلاماتِ مباشرة. يكتبه `StoreCollectionDetailView.get()` (`store/views.py`، `_record_view`) بنفس نمط الـupsert الذرّي حرفياً (`UPDATE … F('count') + 1`، وسقوطٌ لـ`IntegrityError` عند سباق إنشاءٍ متزامن إلى تحديث الصفّ القائم بدل صفٍّ ثانٍ لليوم نفسه) — القيدُ الفريد هو ما يضمن الذرّية.
+
+**ترشيح الروبوتات إلزاميٌّ هنا خلافاً لعدّاد المنتج**: زاحفٌ يفتح رابط حملة من TikTok/Meta لبناء معاينة يُضخّم تحديداً الرقم الذي يُقاس به نجاح الإعلان. `docshare.services.is_crawler` (السابقة القائمة للروابط العامة) تُستعمَل كما هي — لا مرشِّح ثانٍ.
+
+**`StoreOrderIntent`** (`store/models.py`) — لقطةُ نيّةٍ لا مستند: `tenant`, `collection→null`, `items` (JSON), `total`, `created_at`. **ما ليس فيه صراحةً**: لا اسمَ زبونٍ ولا هاتفَ ولا عنوان، لا حالةَ ولا دورةَ حياة، لا حجزَ مخزونٍ، لا قيدَ ولا مستند، ولا تظهر في أيّ شاشةِ مبيعاتٍ أو محاسبة. **`items` لقطةُ محتوىً لا عدّادٌ أصمّ**: السؤال المعلَن «كم طلب»، والسؤال الحقيقيّ خلفه «شو بطلبوا» — عمودٌ واحدٌ يحوّل الرقم إلى معرفةٍ تُستعمَل.
+
+يُكتَب من نقطةٍ عامّةٍ بلا مصادقة `POST /api/store/<slug>/order-intent/` (`StoreOrderIntentView`)، على نمط بقيّة نقاط المتجر العامة (`AllowAny`، `authentication_classes = []`، `throttle_scope = "store_public"`). **نقطةُ كتابةٍ عامّة فمحروسة**:
+- سقفٌ على عدد البنود (`MAX_ITEMS = 50`) وعلى كمية البند الواحد (`MAX_QUANTITY_PER_ITEM`) — تجاوز السقف الأول 400 صريحة، وتجاوز الثاني يُقصّ صامتاً.
+- **`total` يُحسَب على الخادم دائماً من `published_products`** (نفس منطق `effective_price` بعد الخصم) — ما يرسله العميل في `total` لا يُقرأ إطلاقاً. حين تكون الأسعار محجوبة (`show_prices=false`) يُسجَّل البند بسعر وحدةٍ `null` ويُحتسَب بصفر، لا يُرفَض الطلب كلّه.
+- معرّفات منتجاتٍ لشركةٍ أخرى أو غير منشورة **تُسقَط بصمت** (نفس نمط `ids` في `StoreProductListView._filtered`) — رفضُ الطلب كلّه فقط إذا لم يبقَ بندٌ صالحٌ واحد.
+- **روبوتٌ يحصل على استجابة ناجحة (201) بلا أي كتابة** — لا يُظهر للزاحف فرقاً، ولا يُضخّم عدّاد «الطلبات».
+
+**عرضٌ على صفّ الحملة وحده**: `StoreCollectionAdminViewSet.get_queryset` (`store/views.py`) يُلحق `views_count`/`orders_count` بـ`Subquery` عدديّة منفصلة — لا `Count`/`Sum` مباشَرين فوق `JOIN` ثانٍ إلى جانب `items_count` القائم (كانا سيتضاعفان تقاطعياً، نفس عائلة درس «group-card n+1»). `StoreCollectionAdminSerializer.conversion_rate` قسمةٌ واحدةٌ مجّانيّةٌ ودالّة (`orders_count / views_count × 100`، مقرَّبة لعُشر)، و`null` صراحةً بلا مشاهدات — محروسٌ بـ`store.manage` كبقية شاشة الإدارة.
+
+**الواجهة**: `StoreCartContext`/`StoreCartDrawer.tsx` يسجّلان النيّة (`createStoreOrderIntent`) **قبل** فتح رابط واتساب — **وفشلُ التسجيل لا يمنع الطلب أبداً**: القياس مساعدٌ لا مصدر حقيقة، وزبونٌ يُمنَع من الطلب لأن عدّاداً تعثّر خسارةٌ حقيقيّة مقابل رقمٍ ناقص. `StoreCampaignPage.tsx` يمرّر `collectionSlug` فتُربَط النيّة بالحملة عند الطلب من صفحة هبوطها مباشرة؛ سلّةٌ عامة من الواجهة الرئيسية تُسجَّل بلا حملة (`collection=null`). وصفحةُ الحملة تُسجّل مشاهدةً تلقائياً بمجرّد فتحها (لا نداءٌ إضافيٌّ من الواجهة) — تماماً كصفحة المنتج اليوم.
+
+**حدودٌ صريحة لهذه الجولة — كلّ واحدٍ بابٌ إلى منتَج تحليلاتٍ كامل، ولا شيء منها هنا:**
+- **نَعُدّ الزياراتِ لا الزوّار.** عدُّ الزوّار يستلزم كعكةً أو بصمةَ متصفّح — وكلاهما تتبّعٌ لم يُطلَب في متجرٍ صُمّم مجهولاً.
+- لا قمعُ تحويلٍ، لا مصادرُ وإحالات، لا رحلةُ زائرٍ بعينه، لا سلاسلُ زمنيّةٌ ولا رسوم، لا نَسبُ إيرادٍ للحملة، ولا اختبارٌ مقارَن.
+
+الحارس: `store/tests/test_store_measurement.py`.
+
 ## الواجهة العامة (ST-2)
 شاشات المتجر تعيش في `frontend_v2/components/store/` وتُوجَّه من `frontend_v2/index.tsx` **خارج `AuthProvider`/`CompanyProvider`**: زائرٌ بلا جلسة لا ينتظر إقلاع مساحة عمل لا تخصّه.
 ثلاثة مسارات: `/store` (صفحة تعريف، أو تحويل إلى `VITE_DEFAULT_STORE_SLUG` إن ضُبط) · `/store/<slug>` (الشبكة) · `/store/<slug>/p/<id>` (المنتج).
@@ -192,6 +219,22 @@ WooCommerce المُسنَد في #157.
 | `frontend_v2/utils/storeLinks.ts` (`storeHomeUrl`) | بناء الرابط المنسوخ — نفس باني مسارات المتجر العام |
 | `store/tests/test_store_import_from_inventory.py` | نقطة الاستيراد: نسخٌ صحيح، تخطّي المستورد سلفاً، عزل الشركة، صفر صفٍّ متغيّر في `inventory.Product` (م٣) |
 | `frontend_v2/e2e/store-catalog-publish-journey.spec.ts` | الرحلة الحقيقية: إنشاءٌ من اللوحة ← ظهورٌ في المتجر العام (م٣) |
+
+## شقّ صلاحيّة التسعير — `store.pricing` (THA-166 م٥)
+
+**العلّة:** قبل هذه المرحلة كان `store.manage` يحكم محتوىً بلا سعرٍ حقيقيّ — لا خصمَ ولا حملةً مسعِّرة، فلم يكن ثمّة سلطةٌ ماليّةٌ تُقاس. الخريطةُ نفسها (كتالوجٌ مستقلّ بسعرٍ حقيقيّ منذ م٢) هي التي خلقت تلك السلطة، فصار من يرفع صورةً يملك أن يخصم ٥٠٪.
+
+**الشقّ:** `store.manage` يبقى للمحتوى (المنتجات والفئات والماركات والصور والمجموعات وإعدادات المظهر)، ومفتاحٌ جديد `store.pricing` في `core/access.py` يحكم المال وحده: `price`/`sale_price` على `StoreProduct`، و`discount_percent`/`starts_at`/`ends_at` على `StoreCollection`. **الحملةُ حالةٌ مختلطة**: إنشاؤها وتسميتُها ولافتتُها وأعضاؤها تحت `store.manage`؛ نسبةُ خصمها وتواريخُ سريانها تحت `store.pricing` — مسوِّقٌ يبني الحملةَ كاملةً ويتركها بخصمٍ صفريٍّ حتى يعتمدها من يملك التسعير.
+
+**الحارس خادميٌّ على مستوى المُسلسِل لا إخفاءُ حقلٍ في الشاشة** — `store/serializers.py` (`_reject_unauthorized_pricing_changes`)، مُستدعاةٌ من `validate()` في `StoreProductAdminSerializer` و`StoreCollectionAdminSerializer`. من يفتقد `store.pricing` ويرسل تغييراً فعلياً على حقلٍ مالي يُرفَض **بـ400 صريحة تسمّي الحقل** (`{"price": "..."}`)، لا تجاهلاً صامتاً — التجاهل الصامت أسوأ: التاجر يظنّ أنه سعّر ولم يُسعّر. **والقيمة غير المتغيّرة لا تُرفَض أبداً**: الرفض على محاولة *التغيير* لا على وجود المفتاح في الحمولة (مقارنةٌ بالقيمة القائمة على `instance`، أو بالافتراض `None`/`0` عند الإنشاء) — وإلا استحال على من لا يملك التسعير تعديلُ اسمٍ أو وصفٍ في نفس الطلب.
+
+**تصحيحٌ بعد المراجعة — الحلقة المفقودة كانت في الواجهة لا في الحارس**: الحارسُ الخادميّ صحّ من أول تنفيذ، لكن نموذج الحملة في `StoreSettingsPage.tsx` لم يكن يعرض `discount_percent`/`starts_at`/`ends_at`/`priority` إطلاقاً — فلا أحد يقدر أن يُدخل نسبة خصمٍ من الشاشة، وكل منطق الاشتقاق والقياس المبنيّ حولها (م٢/م٤/م٥) كان غير قابلٍ للاستعمال عملياً. أُضيفت الحقول الأربعة إلى نموذج الحملة القائم (لا شاشة جديدة): `discount_percent`/`starts_at`/`ends_at` معطَّلةٌ في الواجهة لمن لا يملك `store.pricing` (تعطيلٌ للراحة لا للأمان — الحارس الخادمي هو الحقيقي)، و`priority` تحت `store.manage` وحدها (ليست مالاً). **وفجوةٌ ثانية أعمق اكتُشفت أثناء الإصلاح**: `StoreProductCard.tsx` لم يكن يعرض `original_price`/`discount_percent` القادمين من العقد العام أصلاً منذ م٢ — فحتى حملةٌ بخصمٍ فعليٍّ ونافذةٍ سارية كانت لا تظهر للزائر بصرياً. أُضيف شارةُ خصمٍ حمراء وسعرٌ أساسٌ مشطوبٌ على البطاقة (Tailwind فقط، `formatNumber` لا `toFixed`)، بلا مساسٍ بمنطق الخصم ولا بالعقد العام نفسه — الحقول كانت موجودة في استجابة الخادم منذ البداية، والنقص كان في الاستهلاك الواجهيّ فقط. الحارس: `frontend_v2/e2e/store-campaign-pricing-journey.spec.ts` يُثبت السلسلة كاملةً من إنشاء الحملة إلى ظهور الخصم للزائر.
+
+**لا انكفاء عند الترقية**: هجرةُ بياناتٍ `tenants/migrations/0033_grant_store_pricing.py` تمنح `store.pricing` لكل تجاوز `RolePermission`/`MemberPermission` كان يمنح `store.manage=True` صراحةً وقت الترحيل — كل من كان يقدر أن يسعّر أمس ما زال يقدر اليوم. **المدير مستثنى بنيوياً**: يملك `"*"` في `core.access.ROLE_DEFAULTS` بلا أي صفٍّ مخزَّنٍ في هذين الجدولين، فلا شيء يُنسَخ له والهجرة لا تلمسه.
+
+**لا أثر على المتجر العام إطلاقاً** — كلا المفتاحين صلاحيّتا إدارةٍ خلف المصادقة؛ `published_products` والعقد العام لم يتغيّرا بحرف.
+
+الحارس: `store/tests/test_store_pricing_permission.py`.
 
 ## المظهر والحملات والسلة ولوحة الإدارة (ST-5)
 
@@ -288,16 +331,17 @@ WooCommerce المُسنَد في #157.
 ## أهم الملفات
 | الملف | الغرض |
 |---|---|
-| `store/views.py` | النقاط العامة + نقاط الإدارة + `published_products` (الاستعلام المقيَّد + الخصم بـSQL) + الكاش + العدّاد + `StoreProductAdminViewSet.import_from_inventory` (م٣) + عدّاداتُ `StoreProductListView` السياقية (`_filtered(exclude_axis=…)`, `_category_facet`, `_brand_facet`, `_flags_facet`, `_price_range_facet`) (م٤) |
-| `store/serializers.py` | القائمة البيضاء المصرَّحة حقلاً حقلاً (سبعةَ عشر منذ م٢) + `TenantScopedPrimaryKeyRelatedField` |
-| `store/models.py` | `StoreProductView` · `StoreSettings` (كسبت `new_product_days` م٤) · `StoreProductImage` · `StoreCollection(Item)` · `StoreProduct` · `StoreBrand` · `StoreCategory` · `StorePriceHistory` — وحرّاسا الحفظ `StoreProduct._reject_non_positive_sale_price` و`StoreCollection._reject_price_killing_discount` (م٢) |
+| `store/views.py` | النقاط العامة + نقاط الإدارة + `published_products` (الاستعلام المقيَّد + الخصم بـSQL) + الكاش + العدّاد + `StoreProductAdminViewSet.import_from_inventory` (م٣) + عدّاداتُ `StoreProductListView` السياقية (`_filtered(exclude_axis=…)`, `_category_facet`, `_brand_facet`, `_flags_facet`, `_price_range_facet`) (م٤) + `StoreCollectionDetailView._record_view` وعدّاداتُ `StoreCollectionAdminViewSet` و`StoreOrderIntentView` (م٥) |
+| `store/serializers.py` | القائمة البيضاء المصرَّحة حقلاً حقلاً (سبعةَ عشر منذ م٢) + `TenantScopedPrimaryKeyRelatedField` + `_reject_unauthorized_pricing_changes` (حارس `store.pricing`، م٥) |
+| `store/models.py` | `StoreProductView` · `StoreSettings` (كسبت `new_product_days` م٤) · `StoreProductImage` · `StoreCollection(Item)` · `StoreProduct` · `StoreBrand` · `StoreCategory` · `StorePriceHistory` — وحرّاسا الحفظ `StoreProduct._reject_non_positive_sale_price` و`StoreCollection._reject_price_killing_discount` (م٢) · `StoreCollectionView` و`StoreOrderIntent` (م٥) |
 | `store/slugs.py` | `build_unique_slug` — النسخةُ **الحيّة** لتوليد slug عربيٍّ فريد، يستعملها `StoreProduct.save()` وحده |
 | `store/migrations/0006_migrate_catalog_to_store_product.py` | نسخُ الأصناف المستحقّة إلى `StoreProduct` — مُضيفةٌ محضة وقابلةٌ لإعادة التشغيل. تحمل نسخةً **مجمَّدةً** مستقلّةً من منطق الـslug (`_build_unique_slug_frozen`) ولا تستورد من `store/slugs.py` عمداً — هجرةٌ يجب أن تُنتج نفسَ النتيجة بعد سنوات بلا تأثّرٍ بتطوّر الكود الحيّ |
 | `store/migrations/0007_m2_product_fk_nullable.py` | إسقاطُ قيد `NOT NULL` عن `product` في الجداول الثلاثة — بلا حذفٍ ولا مسٍّ للبيانات (م٢) |
 | `store/migrations/0008_m2_featured_store_product.py` | إضافةُ `StoreCollection.featured_store_product` (م٢) |
 | `store/migrations/0009_populate_featured_store_product.py` | مِلءُ الحقل الجديد من `featured_product` القديم عبر `imported_from_product_id` — مُضيفةٌ محضة (م٢) |
 | `store/migrations/0010_storesettings_new_product_days.py` | إضافةُ `StoreSettings.new_product_days` (افتراضه ٣٠) لفلتر `is_new` (م٤) |
-| `store/urls.py` | المسارات تحت `/api/store/` — بما فيها `admin/brands` و`admin/categories` (م٢) |
+| `store/migrations/0011_m5_collection_view_and_order_intent.py` | إضافةُ `StoreCollectionView` و`StoreOrderIntent` (م٥) |
+| `store/urls.py` | المسارات تحت `/api/store/` — بما فيها `admin/brands` و`admin/categories` (م٢) و`order-intent/` (م٥) |
 | `store/tests/test_public_leakage.py` | معيار النجاح السالب: إثبات غياب التسريب + القائمة البيضاء الموسَّعة (م٢) |
 | `store/tests/test_store_catalog_public.py` | **م٢**: الخصمُ (الأكبر يفوز، منتجٌ ضدّ حملة، حملةٌ ضدّ حملة)، سريانُ الحملة بالتاريخ، الحرّاسان، حجبُ الأسعار، وحدُّ الاستعلامات |
 | `store/tests/test_store_catalog_models.py` | نماذج الكتالوج المستقلّ: عمق الفئات، فرادة الـslug، سجلّ الأسعار |
@@ -311,7 +355,11 @@ WooCommerce المُسنَد في #157.
 | `store/tests/test_store_surface.py` | إبطال الكاش عند النشر/السحب، وترقيم الحملات، وانتقاء المنتجات بـ`ids` |
 | `store/tests/test_store_import_from_inventory.py` | **م٣**: استيراد من الأصناف — نسخٌ صحيح، تخطّي المستورد سلفاً، عزل الشركة، صفر صفٍّ متغيّر في `inventory.Product` |
 | `store/tests/test_store_facets.py` | **م٤**: الاستثناءُ الانفصاليّ في الاتجاهين، تجاوزُ مجموع محورٍ لـ`count`، العدُّ الشجريّ الشامل، تعدّدُ الاختيار (OR/AND)، ظهور/غياب العدّادات بالصفحة، مدى السعر السياقيّ وغيابه عند حجب الأسعار، `in_stock` دون `preorder`، حدُّ `is_new`، حارسا بصمة الكاش والأداء |
-| `frontend_v2/contexts/StoreCartContext.tsx` | سلة المتصفح ورسالة الواتساب |
+| `tenants/migrations/0033_grant_store_pricing.py` | **م٥**: يمنح `store.pricing` لكل تجاوز `RolePermission`/`MemberPermission` كان يمنح `store.manage` — لا انكفاء عند الترقية |
+| `store/tests/test_store_pricing_permission.py` | **م٥**: حارس `store.pricing` على `StoreProduct`/`StoreCollection`، القيمة غير المتغيّرة لا تُرفَض، وتحقّق الهجرة |
+| `store/tests/test_store_measurement.py` | **م٥**: عدّاد `StoreCollectionView` (بترشيح روبوتات)، `StoreOrderIntent` (حساب `total` خادميّاً، إسقاط معرّفات أجنبية، حدّ البنود)، وعرض `views_count`/`orders_count`/`conversion_rate` بلا فان-أوت |
+| `frontend_v2/e2e/store-campaign-pricing-journey.spec.ts` | **م٥ (تصحيح)**: حملةٌ بخصمٍ ونافذةٍ سارية من اللوحة ← ظهورٌ فعليٌّ مخفَّضٌ في المتجر العام؛ وحقول التسعير معطَّلةٌ لمن لا يملك `store.pricing` مع قدرته على بناء بقية الحملة |
+| `frontend_v2/contexts/StoreCartContext.tsx` | سلة المتصفح ورسالة الواتساب + تسجيل نيّة الطلب قبل فتح واتساب (م٥) |
 | `frontend_v2/components/settings/StoreCategoriesPage.tsx` | شجرة فئات المتجر — شاشةٌ مستقلّة على `/store-categories` (م٣) |
 | `frontend_v2/components/settings/StoreImportFromInventoryModal.tsx` | منتقي «استيراد من الأصناف» متعدّد الاختيار (م٣) |
 | `frontend_v2/e2e/store-catalog-publish-journey.spec.ts` | إثبات الرحلة: إنشاءٌ من اللوحة ← ظهورٌ في المتجر العام (م٣) |

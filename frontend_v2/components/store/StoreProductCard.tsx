@@ -121,8 +121,13 @@ export const StoreProductCard: React.FC<StoreProductCardProps> = ({
         {/* شريط الإعلان الترويجي المخصص */}
         <StoreImageOverlay overlay={product.cover_overlay} />
 
-        <div className="absolute top-2.5 left-2.5 z-10">
+        <div className="absolute top-2.5 left-2.5 z-10 flex flex-col items-start gap-1.5">
           <StoreAvailabilityBadge availability={product.availability} />
+          {product.discount_percent ? (
+            <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-black text-white shadow-sm">
+              خصم {formatNumber(product.discount_percent)}٪
+            </span>
+          ) : null}
         </div>
 
         {/* زر الإضافة السريعة للسلة العائم */}
@@ -166,7 +171,14 @@ export const StoreProductCard: React.FC<StoreProductCardProps> = ({
         )}
 
         <div className="mt-auto flex items-center justify-between pt-3">
-          <StorePrice price={product.price} currency={currency} className="text-base" />
+          <div className="flex flex-col">
+            {product.original_price ? (
+              <span className="text-[11px] font-semibold text-slate-400 line-through dark:text-slate-500">
+                {formatNumber(product.original_price, { maxDecimals: 2, group: true })} {currency}
+              </span>
+            ) : null}
+            <StorePrice price={product.price} currency={currency} className="text-base" />
+          </div>
           <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400">
             التفاصيل
           </span>

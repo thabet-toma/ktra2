@@ -12,12 +12,15 @@ interface StoreCartDrawerProps {
   storeName: string;
   storePhone?: string | null;
   currency: string | null;
+  /** الحملة التي فُتح منها الدرج، إن وُجدت — تربط نيّة الطلب بها (مواصفة #166 م٥). */
+  collectionSlug?: string | null;
 }
 
 export const StoreCartDrawer: React.FC<StoreCartDrawerProps> = ({
   storeName,
   storePhone,
   currency,
+  collectionSlug,
 }) => {
   const toast = useToast();
   const {
@@ -30,6 +33,7 @@ export const StoreCartDrawer: React.FC<StoreCartDrawerProps> = ({
     isCartOpen,
     setIsCartOpen,
     buildWhatsAppMessage,
+    registerOrderIntent,
   } = useStoreCart();
 
   const [customerName, setCustomerName] = useState("");
@@ -55,6 +59,7 @@ export const StoreCartDrawer: React.FC<StoreCartDrawerProps> = ({
     }
 
     setSending(true);
+    registerOrderIntent(collectionSlug);
     const message = buildWhatsAppMessage(storeName, currency, {
       name: customerName,
       phone: customerPhone,

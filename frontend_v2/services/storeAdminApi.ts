@@ -335,6 +335,15 @@ export interface StoreCollectionAdmin {
   is_active: boolean;
   sort_order: number;
   items_count?: number;
+  discount_percent?: string;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  /** يحسم التعادل بين حملتين بنفس نسبة الخصم — الأعلى يفوز. تحت `store.manage` (ليست مالاً). */
+  priority?: number;
+  /** مواصفة #166 م٥ — القياس: مشاهداتُ صفحة الحملة، وطلباتها، ونسبة التحويل. */
+  views_count?: number;
+  orders_count?: number;
+  conversion_rate?: number | null;
   created_at?: string;
 }
 

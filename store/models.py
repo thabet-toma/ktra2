@@ -532,6 +532,71 @@ class StoreProduct(models.Model):
         return f"{self.name_ar} ({self.slug})"
 
 
+class StoreCollectionView(models.Model):
+    """عدّاد مشاهدات صفحة حملة واحدة في يوم واحد — نظيرٌ لـ`StoreProductView`
+    أعلاه بفرادةٍ يوميّة (مواصفة #166 م٥).
+
+    **نظيرٌ لا تعميم**: `StoreProductView` مرتبطٌ ومفهرسٌ ويعمل، وهذا النموذج
+    عشرةُ أسطرٍ تُبقي الاستعلاماتِ مباشرة — تعميمُ الأول إلى محورٍ متعدّد
+    الأشكال كان يُعقّد قارئَين لأجل جدولٍ ثالثٍ لا وجودَ له.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="store_collection_views",
+        db_column="TenantID")
+    collection = models.ForeignKey(
+        "StoreCollection", on_delete=models.CASCADE, related_name="views",
+        db_column="CollectionID")
+    view_date = models.DateField(db_column="ViewDate")
+    count = models.PositiveIntegerField(default=0, db_column="Count")
+
+    class Meta:
+        db_table = "store_collection_views"
+        managed = True
+        # نفس نمط `StoreProductView.Meta` حرفياً — القيد هو ما يجعل الـupsert
+        # ذرّياً: سباقُ إنشاءٍ متزامن يُخفق بـIntegrity فيسقط إلى
+        # `UPDATE … F('count') + 1` بدل صفٍّ ثانٍ لليوم نفسه.
+        unique_together = [["tenant", "collection", "view_date"]]
+
+    def __str__(self):
+        return f"{self.collection_id} — {self.view_date}: {self.count}"
+
+
+class StoreOrderIntent(models.Model):
+    """نيّةُ طلبٍ من زائرٍ مجهول، تُكتَب على الخادم **قبل** القفز إلى واتساب
+    (مواصفة #166 م٥).
+
+    **ليست مستنداً**: لا اسمَ زبونٍ ولا هاتفَ ولا عنوان، لا حالةَ ولا دورةَ
+    حياة، لا حجزَ مخزونٍ، لا قيدَ ولا مستند، ولا تظهر في أيّ شاشةِ مبيعاتٍ أو
+    محاسبة. صفٌّ يُعدُّ ويُقرأ، لا وثيقةٌ تُعالَج — السلّةُ تبقى واتساباً
+    (قرارُ مالكٍ صريح).
+
+    **`items` لقطةُ محتوىً لا عدّادٌ أصمّ**: السؤال المعلَن «كم طلب»، والسؤال
+    الحقيقيّ خلفه «شو بطلبوا» — عمودٌ واحدٌ يحوّل الرقم إلى معرفةٍ تُستعمَل.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="store_order_intents",
+        db_column="TenantID")
+    collection = models.ForeignKey(
+        "StoreCollection", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="order_intents", db_column="CollectionID")
+    items = models.JSONField(default=list, db_column="Items")
+    # يُحسَب على الخادم من `StoreProduct.effective_price` عند الكتابة — لا يُوثَق
+    # بما يرسله العميل إطلاقاً (`store/views.py`، `StoreOrderIntentView`).
+    total = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="Total")
+    created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+
+    class Meta:
+        db_table = "store_order_intents"
+        managed = True
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"StoreOrderIntent {self.id} — tenant {self.tenant_id}"
+
+
 class StorePriceHistory(models.Model):
     """سجلّ تغييرات سعر منتج المتجر — بيانٌ صامت، لا يظهر في أيّ عقدٍ عامّ ولا
     إداريّ في هذه المرحلة (مواصفة #166).

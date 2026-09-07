@@ -384,6 +384,7 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
         storeName={storeName}
         storePhone={profile?.phone}
         currency={profile?.currency ?? null}
+        collectionSlug={collectionSlug}
       />
     </div>
   );

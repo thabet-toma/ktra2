@@ -136,6 +136,13 @@ PERMISSIONS: list[dict] = [
     # يفتح بذلك واجهةً تعرض أسعار الشركة لكل زائر بلا جلسة. المدير يملكه ضمناً
     # («*») ويمنحه لمن يدير المتجر من شاشة الصلاحيات القائمة.
     {"key": "store.manage", "label": "إدارة المتجر العام", "group": GROUP_ADMIN},
+    # مواصفة #166 م٥: شقّ صلاحيّة التسعير عن `store.manage`. `store.manage`
+    # يحكم المحتوى (المنتجات والفئات والماركات والصور والمجموعات ومظهرها)،
+    # وهذا المفتاح وحده يحكم المال: `price`/`sale_price` على `StoreProduct`،
+    # و`discount_percent`/`starts_at`/`ends_at` على `StoreCollection`. قبل
+    # الفصل كان رافع الصورة يملك سلطة خصم ٥٠٪ بلا أي حارسٍ يقيسها — الخريطةُ
+    # نفسها (كتالوجٌ مستقلّ بسعرٍ حقيقيّ منذ م٢) هي ما خلق تلك السلطة.
+    {"key": "store.pricing", "label": "التسعير في المتجر العام (الأسعار والخصومات)", "group": GROUP_ADMIN},
     # بوابة المحاسب القانوني — لا تظهر إلا للشركات المرخّصة للوحدة.
     {"key": "tax.period.view", "label": "عرض فترات المراجعة الضريبية", "group": GROUP_TAX, "module": "accountant_portal"},
     {"key": "tax.period.prepare", "label": "تجهيز الفترة وتشغيل قائمة الجاهزية", "group": GROUP_TAX, "module": "accountant_portal"},
