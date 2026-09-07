@@ -1,10 +1,16 @@
+from decimal import ROUND_HALF_UP, Decimal
+
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from core.tenant_utils import get_tenant
-from inventory.models import Product, ProductCategory
+from inventory.models import Product
 from store.models import (
+    StoreBrand,
+    StoreCategory,
     StoreCollection,
     StoreCollectionItem,
+    StoreProduct,
     StoreProductImage,
     StoreSettings,
 )
@@ -57,27 +63,103 @@ class StoreProfileSerializer(serializers.Serializer):
 
 
 class StoreProductSerializer(serializers.Serializer):
-    """المنتج كما يُنشر للعالم — عشرة حقول صريحة، كلٌّ منها قرار."""
+    """المنتج كما يُنشر للعالم — مصدره `store.StoreProduct` المستقلّ منذ
+    THA-166 م٢. العقد الأصليّ (أحد عشر حقلاً) **يبقى كما هو حرفياً** —
+    الواجهة الحالية تقرؤه ولن تُعاد كتابتها قبل م٧ — وستٌّ إضافيةٌ محضة.
+    """
 
     id = serializers.IntegerField(read_only=True)
     name_ar = serializers.CharField(read_only=True, allow_null=True)
     name_en = serializers.CharField(read_only=True, allow_null=True)
-    brand = serializers.CharField(read_only=True, allow_null=True)
-    category_name = serializers.CharField(
-        source="category.name", read_only=True, allow_null=True
-    )
-    uom_name = serializers.CharField(
-        source="uom.name_ar", read_only=True, allow_null=True
-    )
-    price = serializers.DecimalField(
-        max_digits=18, decimal_places=2, read_only=True, allow_null=True
-    )
-    availability = serializers.CharField(read_only=True)
-    description = serializers.CharField(
-        source="online_description", read_only=True, allow_null=True
-    )
+    brand = serializers.SerializerMethodField()
+    category_name = serializers.SerializerMethodField()
+    uom_name = serializers.CharField(source="unit", read_only=True, allow_null=True)
+    price = serializers.SerializerMethodField()
+    availability = serializers.SerializerMethodField()
+    description = serializers.CharField(read_only=True, allow_null=True)
     images = serializers.SerializerMethodField()
     cover_overlay = serializers.SerializerMethodField(read_only=True)
+
+    # ── THA-166 م٢: إضافاتٌ محضة ────────────────────────────────────────
+    slug = serializers.CharField(read_only=True)
+    original_price = serializers.SerializerMethodField()
+    discount_percent = serializers.SerializerMethodField()
+    categories = serializers.SerializerMethodField()
+    stock_state = serializers.CharField(read_only=True)
+    brand_id = serializers.IntegerField(read_only=True, allow_null=True)
+
+    #: `stock_state` (إعلانٌ من التاجر) ← `availability` (حالةٌ عامة) — و
+    #: `limited` سقطت عمداً: كانت تُحسَب من رصيدٍ مخزنيّ لا وجود له هنا.
+    _AVAILABILITY_BY_STOCK_STATE = {
+        "in_stock": "available",
+        "out_of_stock": "out",
+        "preorder": "preorder",
+    }
+
+    def _prices_public(self):
+        return self.context.get("prices_public", True)
+
+    def _sorted_categories(self, obj):
+        """فئات المنتج مرتّبةً — من ذاكرة `prefetch_related` بلا استعلامٍ إضافي."""
+        return list(obj.categories.all())
+
+    def get_brand(self, obj):
+        return obj.brand.name if obj.brand_id else ""
+
+    def get_category_name(self, obj):
+        cats = self._sorted_categories(obj)
+        return cats[0].name if cats else ""
+
+    def get_categories(self, obj):
+        return [
+            {"id": c.id, "name": c.name, "slug": c.slug}
+            for c in self._sorted_categories(obj)
+        ]
+
+    def get_availability(self, obj):
+        return self._AVAILABILITY_BY_STOCK_STATE.get(obj.stock_state, "available")
+
+    @staticmethod
+    def _money(value):
+        """يقرّب العرضَ إلى خانتين لا القيمةَ المخزَّنة — السعر الخام يبقى
+        تامّاً في القاعدة، لكن دقّته الفعلية على SQLite/MySQL تتذبذب بحسب
+        مسار الحساب (`effective_price` عبر `Case`/`Least` قد يفقد الصفر
+        اللاحق). ونصٌّ صريح لا `Decimal` خام: `SerializerMethodField` لا يمرّ
+        بـ`DecimalField.to_representation()` الذي يُخرج نصّاً دائماً، فيسقط
+        على ترميز DRF العام لـ`Decimal` (رقمٌ لا نص حين `COERCE_DECIMAL_TO_STRING`
+        غير مضبوطة) — وكل عملاء العقد (إعادة تسعير السلّة بـ`ids` مثلاً)
+        يتوقّعون نصّاً ثابت الخانتين كبقية أسعار المنصة."""
+        if value is None:
+            return None
+        return str(value.quantize(Decimal("0.01")))
+
+    def get_price(self, obj):
+        if not self._prices_public():
+            return None
+        return self._money(obj.effective_price)
+
+    def _discount_pair(self, obj):
+        """(السعر الأساس، السعر الفعليّ) — أو `(None, None)` حين لا يُعلَن
+        السعر، فلا نلمس `obj.price` أصلاً حينها (مؤجَّلٌ عمداً عن القاعدة)."""
+        if not self._prices_public():
+            return None, None
+        return obj.price, obj.effective_price
+
+    def get_original_price(self, obj):
+        """ما قبل الخصم — `null` صراحةً إلّا حين تكون هناك خصمٌ فعليّ حقاً
+        (الحارس الأوّل: `original_price` أكبر من `price` فعلياً وإلّا فلا خصم)."""
+        base, effective = self._discount_pair(obj)
+        if base is None or effective is None or effective >= base:
+            return None
+        return self._money(base)
+
+    def get_discount_percent(self, obj):
+        """نسبةٌ صحيحةٌ للشارة فقط — التقريب هنا عرضٌ لا يمسّ `price` المخزَّن."""
+        base, effective = self._discount_pair(obj)
+        if base is None or effective is None or effective >= base:
+            return None
+        pct = (base - effective) / base * 100
+        return int(pct.to_integral_value(rounding=ROUND_HALF_UP))
 
     def get_images(self, obj):
         """روابط صور المنتج — من خريطة مجهّزة باستعلام واحد للصفحة كلها."""
@@ -142,13 +224,47 @@ class StoreSettingsAdminSerializer(serializers.ModelSerializer):
         ]
 
 
+def _django_error_detail(exc):
+    """يحوّل رسائل `django.core.exceptions.ValidationError` إلى شكلٍ يقبله
+    `rest_framework.exceptions.ValidationError` — قاموسٌ بالحقل حين تتوفّر
+    الخريطة، وإلا قائمةٌ عامة."""
+    if hasattr(exc, "message_dict"):
+        return exc.message_dict
+    return {"non_field_errors": exc.messages}
+
+
+class _ConvertsModelValidationErrors:
+    """يحوّل `ValidationError` النموذج (من `Model.save()`) إلى `400` صريح.
+
+    بلا هذا، حارسٌ يرمي من `save()` (مثل `StoreProduct._reject_non_positive_sale_price`
+    أو `StoreCollection._reject_price_killing_discount`) يفجّر استثناءً غير
+    معالَج فيردّ **500** في وجه المستخدم — نفس درسِ قيد `unique(tenant, sku)`
+    الذي عولج سابقاً بتحقّقٍ صريح في `validate()`. هنا التحويل عامٌّ فلا
+    يتكرّر لكل حارسٍ جديد بمنطقه الخاص.
+    """
+
+    def create(self, validated_data):
+        try:
+            return super().create(validated_data)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(_django_error_detail(exc))
+
+    def update(self, instance, validated_data):
+        try:
+            return super().update(instance, validated_data)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(_django_error_detail(exc))
+
+
 class StoreProductImageAdminSerializer(serializers.ModelSerializer):
-    product = TenantScopedPrimaryKeyRelatedField(queryset=Product.objects.all())
+    store_product = TenantScopedPrimaryKeyRelatedField(
+        queryset=StoreProduct.objects.all()
+    )
 
     class Meta:
         model = StoreProductImage
         fields = [
-            "id", "product", "image_url", "sort_order", "is_cover",
+            "id", "store_product", "image_url", "sort_order", "is_cover",
             "caption", "overlay_text", "overlay_style", "overlay_color", "created_at",
         ]
         read_only_fields = ["id", "created_at"]
@@ -158,40 +274,42 @@ class StoreCollectionItemAdminSerializer(serializers.ModelSerializer):
     collection = TenantScopedPrimaryKeyRelatedField(
         queryset=StoreCollection.objects.all()
     )
-    product = TenantScopedPrimaryKeyRelatedField(queryset=Product.objects.all())
-    product_name = serializers.CharField(source="product.name_ar", read_only=True)
-    sku = serializers.CharField(source="product.sku", read_only=True)
-    price = serializers.DecimalField(
-        source="product.online_price", max_digits=18, decimal_places=2, read_only=True, allow_null=True
+    store_product = TenantScopedPrimaryKeyRelatedField(
+        queryset=StoreProduct.objects.all()
     )
+    store_product_name = serializers.SerializerMethodField()
+    price = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = StoreCollectionItem
         fields = [
-            "id", "collection", "product", "product_name", "sku", "price", "image_url", "sort_order",
+            "id", "collection", "store_product", "store_product_name", "price",
+            "image_url", "sort_order",
         ]
         read_only_fields = ["id"]
 
+    def get_store_product_name(self, obj):
+        return obj.store_product.name_ar if obj.store_product_id else None
+
+    def get_price(self, obj):
+        return obj.store_product.price if obj.store_product_id else None
+
     def get_image_url(self, obj):
-        if not obj.product_id:
+        if not obj.store_product_id:
             return None
-        custom = obj.product.store_custom_images.first()
-        if custom:
-            return custom.image_url
-        from core.models import SystemAttachment
-        att = SystemAttachment.objects.filter(
-            tenant_id=obj.tenant_id,
-            related_table="products",
-            related_id=obj.product_id,
-            file_type__in=["Product Image", "Image"],
-        ).first()
-        return att.file_path if att else None
+        image = obj.store_product.images.order_by("sort_order", "id").first()
+        return image.image_url if image else None
 
 
-class StoreCollectionAdminSerializer(serializers.ModelSerializer):
+class StoreCollectionAdminSerializer(_ConvertsModelValidationErrors, serializers.ModelSerializer):
     featured_product = TenantScopedPrimaryKeyRelatedField(
         queryset=Product.objects.all(), required=False, allow_null=True
+    )
+    # THA-166 م٢ (تصحيح): المرساةُ الحيّة للعرض العام — `featured_product`
+    # أعلاه بقي بلا حذفٍ ولا كتابةٍ فعلية جديدة إليه من هنا، فقط للتوافق.
+    featured_store_product = TenantScopedPrimaryKeyRelatedField(
+        queryset=StoreProduct.objects.all(), required=False, allow_null=True
     )
     items_count = serializers.IntegerField(read_only=True, default=0)
 
@@ -199,30 +317,51 @@ class StoreCollectionAdminSerializer(serializers.ModelSerializer):
         model = StoreCollection
         fields = [
             "id", "title", "slug", "description", "banner_image_url",
-            "badge_text", "featured_product", "is_active", "sort_order",
-            "items_count", "created_at",
+            "badge_text", "featured_product", "featured_store_product",
+            "is_active", "sort_order", "starts_at", "ends_at",
+            "discount_percent", "priority", "items_count", "created_at",
         ]
         read_only_fields = ["id", "created_at"]
 
 
-#: ما تملك لوحة المتجر تعديله على منتجٍ **مخزني**. `store.manage` صلاحية
-#: تسويقية: تنشر المنتج وتسحبه وتصف واجهته، ولا تُعيد تعريفه. `sale_price`
-#: و`sku` و`name_ar` تقرؤها الفوترة والتقارير، وتغييرها من هنا يجعل مسؤول
-#: تسويق يصيب سعر البيع المعتمَد بلا أن يدري. منتج المتجر الخالص
-#: (`is_store_only`) ملكُ اللوحة كاملاً فلا يخضع لهذا الحصر.
-STORE_EDITABLE_ON_INVENTORY = frozenset({
-    "is_for_sale_online", "allow_preorder", "online_price", "online_description",
-})
+class StoreBrandAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StoreBrand
+        fields = ["id", "name", "sort_order", "is_active", "created_at"]
+        read_only_fields = ["id", "created_at"]
 
 
-class StoreProductAdminSerializer(serializers.ModelSerializer):
-    """إدارة وإنشاء منتجات المتجر الإلكتروني مباشرة."""
+class StoreCategoryAdminSerializer(_ConvertsModelValidationErrors, serializers.ModelSerializer):
+    """إدارة فئات كتالوج المتجر — العمقُ محدودٌ بمستويين، والحارسُ
+    (`StoreCategory._reject_third_level`) يعمل من `save()` فيرجع **400**
+    هنا عبر `_ConvertsModelValidationErrors` لا `500`."""
 
-    category = TenantScopedPrimaryKeyRelatedField(
-        queryset=ProductCategory.objects.all(), required=False, allow_null=True
+    parent = TenantScopedPrimaryKeyRelatedField(
+        queryset=StoreCategory.objects.all(), required=False, allow_null=True
     )
-    category_name = serializers.CharField(
-        source="category.name", read_only=True, allow_null=True
+
+    class Meta:
+        model = StoreCategory
+        fields = [
+            "id", "name", "parent", "slug", "sort_order", "is_active",
+            "image_url", "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+
+class StoreProductAdminSerializer(_ConvertsModelValidationErrors, serializers.ModelSerializer):
+    """إدارة كتالوج المتجر المستقلّ (`StoreProduct`) مباشرة.
+
+    THA-166 م٢ (تصحيح): لا تكتب على `inventory.Product` إطلاقاً — القراءةُ
+    والكتابةُ ينتقلان معاً. `sale_price ≤ 0` يرفضه `StoreProduct.save()` عند
+    الحفظ، ويعود **400** لا **500** عبر `_ConvertsModelValidationErrors`.
+    """
+
+    brand = TenantScopedPrimaryKeyRelatedField(
+        queryset=StoreBrand.objects.all(), required=False, allow_null=True,
+    )
+    categories = TenantScopedPrimaryKeyRelatedField(
+        queryset=StoreCategory.objects.all(), many=True, required=False,
     )
     images = serializers.SerializerMethodField(read_only=True)
     initial_images = serializers.ListField(
@@ -232,123 +371,40 @@ class StoreProductAdminSerializer(serializers.ModelSerializer):
     )
 
     class Meta:
-        model = Product
+        model = StoreProduct
         fields = [
-            "id",
-            "sku",
-            "name_ar",
-            "name_en",
-            "brand",
-            "is_for_sale_online",
-            "is_store_only",
-            "allow_preorder",
-            "online_price",
-            "sale_price",
-            "online_description",
-            "category",
-            "category_name",
-            "images",
-            "initial_images",
+            "id", "name_ar", "name_en", "slug", "brand", "categories", "unit",
+            "price", "sale_price", "stock_state", "description", "is_active",
+            "sort_order", "images", "initial_images", "imported_from_product_id",
             "created_at",
         ]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = ["id", "slug", "imported_from_product_id", "created_at"]
         extra_kwargs = {
-            "sku": {"required": False, "allow_blank": True},
             "name_ar": {"required": True},
         }
 
     def get_images(self, obj):
-        custom = list(obj.store_custom_images.values_list("image_url", flat=True))
-        if custom:
-            return custom
-        from core.models import SystemAttachment
-
         return list(
-            SystemAttachment.objects.filter(
-                tenant_id=obj.tenant_id,
-                related_table="products",
-                related_id=obj.id,
-                file_type__in=["Product Image", "Image"],
-            ).values_list("file_path", flat=True)
-        )
-
-    def validate(self, attrs):
-        """المنتج المخزني: حقول المتجر وحدها. والرمز المُدخل: فريد داخل الشركة."""
-        instance = self.instance
-        if instance is not None and not instance.is_store_only:
-            refused = sorted(set(attrs) - STORE_EDITABLE_ON_INVENTORY)
-            if refused:
-                raise serializers.ValidationError({
-                    field: (
-                        "هذا منتج مخزني — لا يُعدَّل هذا الحقل من لوحة المتجر. "
-                        "عدّله من شاشة المنتجات بصلاحيتها."
-                    )
-                    for field in refused
-                })
-
-        sku = (attrs.get("sku") or "").strip()
-        if sku:
-            # عند الإنشاء لا يكون `tenant` في `attrs` بعد — يحقنه العرض عند
-            # `save()` — فيُقرأ من سياق الطلب وإلا مرّ التحقّق على لا شيء.
-            tenant = (
-                attrs.get("tenant")
-                or getattr(instance, "tenant", None)
-                or get_tenant(self.context.get("request"))
-            )
-            clash = Product.objects.filter(tenant=tenant, sku=sku)
-            if instance is not None:
-                clash = clash.exclude(pk=instance.pk)
-            if clash.exists():
-                # القيد `unique(tenant, sku)` كان يفجّر IntegrityError أي 500 في
-                # وجه المستخدم — وهو خطأ إدخالٍ لا انهيار خادم.
-                raise serializers.ValidationError(
-                    {"sku": "رقم المنتج مستخدم مسبقاً لهذه الشركة."}
-                )
-        return attrs
-
-    @staticmethod
-    def _next_store_sku(tenant):
-        """رمزٌ تسلسلي عبر عدّاد المنصة نفسه — لا عشوائيٌّ يتصادم.
-
-        `TenantBook.get_next_number` هو الآلية الذرّية (`select_for_update`)
-        التي تُرقّم بها كل مستندات المنصة. التخطّي المحدود يعالج رقماً حجزه
-        المستخدم يدوياً بنفس الصيغة.
-        """
-        from tenants.models import TenantBook
-
-        for _ in range(20):
-            number = TenantBook.get_next_number(tenant.pk, "store_product", 0)
-            candidate = f"ST-{number:06d}"
-            if not Product.objects.filter(tenant=tenant, sku=candidate).exists():
-                return candidate
-        raise serializers.ValidationError(
-            {"sku": "تعذّر توليد رقم منتج — أدخله يدوياً."}
+            obj.images.order_by("sort_order", "id").values_list("image_url", flat=True)
         )
 
     def create(self, validated_data):
         initial_images = validated_data.pop("initial_images", [])
         tenant = validated_data.get("tenant")
-
-        if not (validated_data.get("sku") or "").strip():
-            validated_data["sku"] = self._next_store_sku(tenant)
-
-        validated_data.setdefault("is_store_only", True)
-        validated_data.setdefault("is_for_sale_online", True)
-        # `allow_preorder` لا يُفرض: «طلب مسبق» وعدٌ تجاري بتوفير المنتج عند
-        # الطلب — قرارُ صاحب المتجر لا افتراضُ الكود. يسود افتراضي النموذج.
-
         product = super().create(validated_data)
-
         for idx, img_url in enumerate(initial_images):
             if img_url and img_url.strip():
                 StoreProductImage.objects.create(
                     tenant=tenant,
-                    product=product,
+                    store_product=product,
                     image_url=img_url.strip(),
                     is_cover=(idx == 0),
                     sort_order=idx + 1,
                 )
-
         return product
+
+    def update(self, instance, validated_data):
+        validated_data.pop("initial_images", None)
+        return super().update(instance, validated_data)
 
 

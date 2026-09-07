@@ -1,25 +1,22 @@
-"""اختبارات الميزات المتقدمة للمتجر: صور مخصصة، طلب مسبق، مظهر وخلفية، ومجموعات إعلانية."""
+"""اختبارات الميزات المتقدمة للمتجر: صور مخصصة، طلب مسبق، مظهر وخلفية، ومجموعات إعلانية.
+
+THA-166 م٢ (تصحيح): لوحة إدارة المتجر تكتب على `StoreProduct` حصراً — لا على
+`inventory.Product`. عزل الكتالوجين صار **بنيوياً** (نماذج مختلفتان تماماً) لا
+سلوكياً يُثبَت بفحص عدم ظهورٍ في شاشات المخزون.
+"""
 from decimal import Decimal
 from django.contrib.auth.models import User
 from django.test import TestCase
 from rest_framework.test import APIClient
 
 from core.models import SystemAttachment
-from inventory.models import Product, ProductCategory, UnitOfMeasure
-from store.models import (
-    StoreCollection,
-    StoreCollectionItem,
-    StoreProductImage,
-    StoreSettings,
-)
-from tenants.models import RolePermission, Tenant, TenantSettings, UserCompanyMembership
+from store.models import StoreProduct, StoreProductImage
 from tenants.services import create_company
 
 
 class StoreAdvancedFeaturesTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.uom = UnitOfMeasure.objects.create(code="PCS", name_ar="قطعة")
         cls.user = User.objects.create_user(username="admin_user", password="password123")
         cls.tenant = create_company("شركة المودة", cls.user)
         cls.tenant.store_slug = "almawada"
@@ -30,24 +27,17 @@ class StoreAdvancedFeaturesTest(TestCase):
         settings_row.phone = "0599000000"
         settings_row.save()
 
-        cls.cat = ProductCategory.objects.create(tenant=cls.tenant, name="أزياء")
-
-        cls.p_stock = Product.objects.create(
-            tenant=cls.tenant, sku="P-01", name_ar="فستان سهرة",
-            is_for_sale_online=True, online_price=Decimal("150.00"),
-            quantity_on_hand=Decimal("10"), category=cls.cat, uom=cls.uom,
+        cls.p_stock = StoreProduct.objects.create(
+            tenant=cls.tenant, name_ar="فستان سهرة", price=Decimal("150.00"),
+            stock_state=StoreProduct.STOCK_IN_STOCK,
         )
-        cls.p_preorder = Product.objects.create(
-            tenant=cls.tenant, sku="P-02", name_ar="عباية فاخرة تفصيل",
-            is_for_sale_online=True, online_price=Decimal("220.00"),
-            quantity_on_hand=Decimal("0"), allow_preorder=True,
-            category=cls.cat, uom=cls.uom,
+        cls.p_preorder = StoreProduct.objects.create(
+            tenant=cls.tenant, name_ar="عباية فاخرة تفصيل", price=Decimal("220.00"),
+            stock_state=StoreProduct.STOCK_PREORDER,
         )
-        cls.p_out = Product.objects.create(
-            tenant=cls.tenant, sku="P-03", name_ar="حقيبة نفدت",
-            is_for_sale_online=True, online_price=Decimal("80.00"),
-            quantity_on_hand=Decimal("0"), allow_preorder=False,
-            category=cls.cat, uom=cls.uom,
+        cls.p_out = StoreProduct.objects.create(
+            tenant=cls.tenant, name_ar="حقيبة نفدت", price=Decimal("80.00"),
+            stock_state=StoreProduct.STOCK_OUT_OF_STOCK,
         )
 
     def setUp(self):
@@ -57,21 +47,27 @@ class StoreAdvancedFeaturesTest(TestCase):
         self.auth_client.defaults["HTTP_X_TENANT_ID"] = str(self.tenant.TenantID)
 
     def test_preorder_availability_status(self):
-        """المنتج برصيد 0 و allow_preorder=True تظهر حالته preorder."""
+        """`stock_state='preorder'` ⇒ «preorder»، و`out_of_stock` ⇒ «out»."""
         res = self.public_client.get(f"/api/store/almawada/products/{self.p_preorder.id}/")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["availability"], "preorder")
 
-        # المنتج برصيد 0 وبلا preorder تظهر حالته out
         res_out = self.public_client.get(f"/api/store/almawada/products/{self.p_out.id}/")
         self.assertEqual(res_out.status_code, 200)
         self.assertEqual(res_out.json()["availability"], "out")
 
     def test_custom_store_images_priority(self):
-        """صور المتجر المخصصة تأخذ الأولوية وترتب بحسب is_cover و sort_order."""
+        """صور المتجر المخصصة تأخذ الأولوية وترتب بحسب is_cover و sort_order.
+
+        السقوط إلى `SystemAttachment` لا يعمل إلّا للمنتجات المستوردة —
+        `p_stock` هنا مستوردٌ صورياً (`imported_from_product_id`) لتمكين ذلك.
+        """
+        self.p_stock.imported_from_product_id = 5001
+        self.p_stock.save(update_fields=["imported_from_product_id"])
+
         # 1. صورة عامة في SystemAttachment
         SystemAttachment.objects.create(
-            tenant=self.tenant, related_table="products", related_id=self.p_stock.id,
+            tenant=self.tenant, related_table="products", related_id=5001,
             file_type="Product Image", file_path="https://img.com/fallback.jpg",
         )
         # قبل إضافة صور مخصصة: يظهر fallback
@@ -80,11 +76,11 @@ class StoreAdvancedFeaturesTest(TestCase):
 
         # 2. إضافة صورتين مخصصتين للمتجر
         StoreProductImage.objects.create(
-            tenant=self.tenant, product=self.p_stock,
+            tenant=self.tenant, store_product=self.p_stock,
             image_url="https://img.com/custom-2.jpg", sort_order=2, is_cover=False,
         )
         StoreProductImage.objects.create(
-            tenant=self.tenant, product=self.p_stock,
+            tenant=self.tenant, store_product=self.p_stock,
             image_url="https://img.com/custom-cover.jpg", sort_order=1, is_cover=True,
         )
 
@@ -123,19 +119,19 @@ class StoreAdvancedFeaturesTest(TestCase):
             "slug": "eid-offers",
             "description": "تشكيلة خاصة بأفضل الأسعار مع توصيل فوري",
             "badge_text": "خصم 20%",
-            "featured_product": self.p_preorder.id,
+            "featured_store_product": self.p_preorder.id,
             "is_active": True,
         }, format="json")
-        self.assertEqual(col_res.status_code, 201)
+        self.assertEqual(col_res.status_code, 201, col_res.content[:300])
         col_id = col_res.json()["id"]
 
         # إضافة منتجات للمجموعة
         item_res = self.auth_client.post("/api/store/admin/collection-items/", {
             "collection": col_id,
-            "product": self.p_stock.id,
+            "store_product": self.p_stock.id,
             "sort_order": 1,
         }, format="json")
-        self.assertEqual(item_res.status_code, 201)
+        self.assertEqual(item_res.status_code, 201, item_res.content[:300])
 
         # استعراض قائمة المجموعات العامة
         list_res = self.public_client.get("/api/store/almawada/collections/")
@@ -161,38 +157,22 @@ class StoreAdvancedFeaturesTest(TestCase):
         create_res = self.auth_client.post("/api/store/admin/products/", {
             "name_ar": "ثلاجة دولابي فاخرة LG 18 قدم",
             "name_en": "LG Side-by-Side Refrigerator 18 Cu Ft",
-            "brand": "LG",
-            "online_price": "3500.00",
-            "online_description": "تبريد ذكي إنفرتر مع موزع مياه وضمان 10 سنوات",
-            "allow_preorder": True,
+            "price": "3500.00",
+            "description": "تبريد ذكي إنفرتر مع موزع مياه وضمان 10 سنوات",
+            "stock_state": StoreProduct.STOCK_PREORDER,
             "initial_images": ["https://img.com/fridge1.jpg", "https://img.com/fridge2.jpg"],
         }, format="json")
-        self.assertEqual(create_res.status_code, 201)
+        self.assertEqual(create_res.status_code, 201, create_res.content[:300])
         prod_data = create_res.json()
         prod_id = prod_data["id"]
-        self.assertTrue(prod_data["sku"].startswith("ST-"))
-        self.assertTrue(prod_data["is_for_sale_online"])
-        self.assertTrue(prod_data["is_store_only"])
-        self.assertTrue(prod_data["allow_preorder"])
+        self.assertTrue(prod_data["is_active"])
+        self.assertEqual(prod_data["stock_state"], "preorder")
         self.assertEqual(prod_data["name_ar"], "ثلاجة دولابي فاخرة LG 18 قدم")
         self.assertEqual(len(prod_data["images"]), 2)
 
-        # 2. التحقق من عزل المنتج عن شاشات المنتجات المخزنية ومحددات فواتير البيع (ERP Isolation)
-        erp_lookup_res = self.auth_client.get("/api/inventory/products/?view=lookup&search=ثلاجة")
-        self.assertEqual(erp_lookup_res.status_code, 200)
-        # يجب ألا يظهر المنتج في محددات الفواتير إطلاقاً
-        erp_lookup_data = erp_lookup_res.json()
-        erp_lookup_items = erp_lookup_data if isinstance(erp_lookup_data, list) else erp_lookup_data.get("results", [])
-        erp_lookup_ids = [p["id"] for p in erp_lookup_items]
-        self.assertNotIn(prod_id, erp_lookup_ids)
-
-        erp_list_res = self.auth_client.get("/api/inventory/products/?search=ثلاجة")
-        self.assertEqual(erp_list_res.status_code, 200)
-        # يجب ألا يظهر في شاشة إدارة المنتجات والمخزن
-        erp_list_data = erp_list_res.json()
-        erp_list_items = erp_list_data if isinstance(erp_list_data, list) else erp_list_data.get("results", [])
-        erp_list_ids = [p["id"] for p in erp_list_items]
-        self.assertNotIn(prod_id, erp_list_ids)
+        # 2. عزل الكتالوجين بنيويٌّ منذ THA-166 م١: `StoreProduct` ليس
+        # `inventory.Product` — لا يمكن أن يظهر في شاشات المخزون أصلاً، فلا
+        # حاجة لفحصٍ سلوكيٍّ يثبت غيابه هناك.
 
         # 3. التحقق من ظهور المنتج في قائمة المتجر العامة للزوار
         pub_list_res = self.public_client.get("/api/store/almawada/products/?q=ثلاجة")
@@ -204,15 +184,14 @@ class StoreAdvancedFeaturesTest(TestCase):
         self.assertEqual(pub_data["results"][0]["availability"], "preorder")
         self.assertEqual(len(pub_data["results"][0]["images"]), 2)
 
-        # 3. تعديل سعر ووصف المنتج
+        # 4. تعديل سعر المنتج
         patch_res = self.auth_client.patch(f"/api/store/admin/products/{prod_id}/", {
-            "online_price": "3399.00",
-            "brand": "LG Electronics",
+            "price": "3399.00",
         }, format="json")
-        self.assertEqual(patch_res.status_code, 200)
-        self.assertEqual(patch_res.json()["online_price"], "3399.00")
+        self.assertEqual(patch_res.status_code, 200, patch_res.content[:300])
+        self.assertEqual(patch_res.json()["price"], "3399.00")
 
-        # 4. حذف المنتج من المتجر
+        # 5. حذف المنتج من المتجر
         del_res = self.auth_client.delete(f"/api/store/admin/products/{prod_id}/")
         self.assertIn(del_res.status_code, [200, 204])
 
@@ -224,7 +203,7 @@ class StoreAdvancedFeaturesTest(TestCase):
         """تخصيص نص إعلاني وبادج مائل فوق صورة المنتج والتحقق من ظهوره في المتجر العام."""
         # 1. إضافة صورة مخصصة مع شريط إعلاني ترويجي
         img_res = self.auth_client.post("/api/store/admin/product-images/", {
-            "product": self.p_stock.id,
+            "store_product": self.p_stock.id,
             "image_url": "https://img.com/promo-stock.jpg",
             "is_cover": True,
             "sort_order": 1,
@@ -232,7 +211,7 @@ class StoreAdvancedFeaturesTest(TestCase):
             "overlay_style": "diagonal_ribbon",
             "overlay_color": "red_fire",
         }, format="json")
-        self.assertEqual(img_res.status_code, 201)
+        self.assertEqual(img_res.status_code, 201, img_res.content[:300])
         img_data = img_res.json()
         self.assertEqual(img_data["overlay_text"], "🔥 عرض خاص لأسبوع — السعر 100 ₪")
         self.assertEqual(img_data["overlay_style"], "diagonal_ribbon")
@@ -255,5 +234,3 @@ class StoreAdvancedFeaturesTest(TestCase):
         detail_data = detail_res.json()
         self.assertIsNotNone(detail_data.get("cover_overlay"))
         self.assertEqual(detail_data["cover_overlay"]["text"], "🔥 عرض خاص لأسبوع — السعر 100 ₪")
-
-

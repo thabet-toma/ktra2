@@ -4,15 +4,18 @@
 (`test_the_whole_journey_open_then_publish_then_it_is_public`)، وقواعد السعر
 والتوفّر في `test_store_api.py` — فلا تُكرَّر هنا. ما يبقى بلا حارس ثلاثة:
 
-1. **مراجعة أول تفعيل** — الاستعلام الذي يقرؤه الحوار قبل فتح المتجر. سببها
-   أن `is_for_sale_online` علمٌ قديم سابق للمتجر (ورفيقه `online_price` تقرؤه
-   الفوترة)، فقد يكون معلَّماً على منتجات بلا نيّة نشر، وتصير علنيةً لحظةَ
-   اختيار المعرّف.
+1. **مراجعة أول تفعيل** — الاستعلام الذي يقرؤه الحوار قبل فتح المتجر: ما هو
+   **مُفعَّل بالفعل** (`is_active=True`) في كتالوج المتجر المستقلّ سيصير
+   علنياً لحظة اختيار المعرّف.
 2. **فورية الظهور** — قائمة المتجر تُكاش ٦٠ ثانية، لكن كتابات النشر تُبطل
    الكاش (THA-423، `store/cache.py`)، فالنشر يظهر فوراً. كان يتأخّر دقيقةً
    قبل الإبطال، وهو ما كان يجعل الناشر يظنّ الحفظ فشل فيعيد الكرّة.
 3. **الاتجاه العكسي** — إلغاء النشر يُخفي المنتج فعلاً؛ لا قيمة لمفتاحٍ يفتح
    ولا يُغلق.
+
+THA-166 م٢ (تصحيح): «النشر» صار PATCH على `/api/store/admin/products/<id>/`
+(`is_active`) لا `/api/inventory/products/` — لوحة إدارة المتجر تكتب على
+`StoreProduct` حصراً منذ أن انتقلت الكتابة مع القراءة معاً.
 """
 from decimal import Decimal
 
@@ -21,7 +24,7 @@ from django.core.cache import cache
 from django.test import override_settings
 from rest_framework.test import APIClient, APITestCase
 
-from inventory.models import Product
+from store.models import StoreProduct
 from tenants.models import Tenant
 from tenants.services import create_company
 
@@ -36,16 +39,14 @@ class StorePublishFlowTest(APITestCase):
         self.manager = User.objects.create_user(username="flow-owner", password="x")
         self.tenant = create_company("شركة الرحلة", self.manager)
 
-        # منتجٌ عُلِّم «للبيع عبر الإنترنت» قبل وجود المتجر — الحالة التي وُضعت
+        # منتجٌ مُفعَّلٌ (`is_active=True`) قبل فتح المتجر — الحالة التي وُضعت
         # مراجعة أول تفعيل من أجلها بالضبط.
-        self.legacy = Product.objects.create(
-            tenant=self.tenant, sku="OLD-1", name_ar="منتج مُسعَّر قديماً",
-            is_for_sale_online=True, sale_price=Decimal("25.00"),
-            quantity_on_hand=Decimal("5"))
-        self.fresh = Product.objects.create(
-            tenant=self.tenant, sku="NEW-1", name_ar="منتج لم يُنشر بعد",
-            is_for_sale_online=False, sale_price=Decimal("40.00"),
-            quantity_on_hand=Decimal("8"))
+        self.legacy = StoreProduct.objects.create(
+            tenant=self.tenant, name_ar="منتج مُسعَّر قديماً",
+            price=Decimal("25.00"), is_active=True)
+        self.fresh = StoreProduct.objects.create(
+            tenant=self.tenant, name_ar="منتج لم يُنشر بعد",
+            price=Decimal("40.00"), is_active=False)
 
     def _manager(self):
         client = APIClient()
@@ -66,8 +67,8 @@ class StorePublishFlowTest(APITestCase):
 
     def _publish(self, product, published, **extra):
         res = self._manager().patch(
-            f"/api/inventory/products/{product.pk}/",
-            {"is_for_sale_online": published, **extra}, format="json",
+            f"/api/store/admin/products/{product.pk}/",
+            {"is_active": published, **extra}, format="json",
             HTTP_X_TENANT_ID=str(self.tenant.pk))
         self.assertEqual(res.status_code, 200, res.content[:300])
 
@@ -76,16 +77,19 @@ class StorePublishFlowTest(APITestCase):
         """الحوار لا يخمّن: يقرأ نفس القائمة التي سيراها الزائر بعد الفتح.
 
         المتجر ما زال مقفلاً هنا (`store_slug` فارغ)، والقائمة تُقرأ مع ذلك —
-        وهذا هو المقصود: تُعرَض **قبل** الفتح لا بعده.
+        وهذا هو المقصود: تُعرَض **قبل** الفتح لا بعده. `scope=published` على
+        لوحة إدارة المتجر هو المعادل الجديد لفلتر `is_for_sale_online=true`
+        القديم على شاشة المنتجات.
         """
         self.assertIsNone(Tenant.objects.get(pk=self.tenant.pk).store_slug)
         res = self._manager().get(
-            "/api/inventory/products/?view=lookup&is_for_sale_online=true&page=1",
+            "/api/store/admin/products/?scope=published",
             HTTP_X_TENANT_ID=str(self.tenant.pk))
         self.assertEqual(res.status_code, 200, res.content[:300])
         body = res.json()
-        self.assertEqual(body["count"], 1)
-        self.assertEqual(body["results"][0]["name_ar"], "منتج مُسعَّر قديماً")
+        results = body["results"] if isinstance(body, dict) else body
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["name_ar"], "منتج مُسعَّر قديماً")
 
         # وما عُرِض هو حرفياً ما يصير علنياً بعد الفتح — لا أكثر ولا أقل.
         self._open_store()
@@ -102,7 +106,7 @@ class StorePublishFlowTest(APITestCase):
         self._open_store()
         self.assertEqual(self._public_names(), {"منتج مُسعَّر قديماً"})  # يملأ الكاش
 
-        self._publish(self.fresh, True, online_price="33.00")
+        self._publish(self.fresh, True, price="33.00")
         self.assertEqual(
             self._public_names(), {"منتج مُسعَّر قديماً", "منتج لم يُنشر بعد"})
 

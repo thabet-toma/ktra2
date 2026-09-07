@@ -13,40 +13,34 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from inventory.models import Product, UnitOfMeasure
-from store.models import StoreCollection, StoreCollectionItem, StoreSettings
+from store.models import StoreCollection, StoreCollectionItem, StoreProduct, StoreSettings
 from store.tests.test_public_leakage import _walk
 from tenants.services import create_company
 
-#: تمثيلات السعرين المزروعين كما قد تخرج من ORM/DRF.
+#: تمثيلات السعر المزروع (`StoreProduct.price`) كما قد تخرج من ORM/DRF.
 PRICE_TRACES = {
     99, 99.0, Decimal("99"), "99", "99.0", "99.00", "99.0000",
-    77, 77.0, Decimal("77"), "77", "77.0", "77.00", "77.0000",
 }
 
 
 class StorePriceVisibilityTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.uom = UnitOfMeasure.objects.create(code="PCS", name_ar="قطعة")
         cls.user = User.objects.create_user(username="pv", password="pw123456")
         cls.tenant = create_company("شركة الأسعار", cls.user)
         cls.tenant.store_slug = "prices"
         cls.tenant.save()
 
-        # سعران مزروعان: المتجري والتشغيلي — كلاهما يجب أن يختفي.
-        cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="P-99", name_ar="منتج مُسعَّر",
-            is_for_sale_online=True, online_price=Decimal("99.00"),
-            sale_price=Decimal("77.00"), quantity_on_hand=Decimal("5"),
-            uom=cls.uom,
+        # THA-166 م٢: القراءة العامة تقرأ `StoreProduct` — السعر المزروع هنا وحده.
+        cls.product = StoreProduct.objects.create(
+            tenant=cls.tenant, name_ar="منتج مُسعَّر", price=Decimal("99.00"),
         )
         cls.collection = StoreCollection.objects.create(
             tenant=cls.tenant, title="حملة", slug="camp",
-            featured_product=cls.product,
+            featured_store_product=cls.product,
         )
         StoreCollectionItem.objects.create(
-            tenant=cls.tenant, collection=cls.collection, product=cls.product,
+            tenant=cls.tenant, collection=cls.collection, store_product=cls.product,
         )
 
     def setUp(self):

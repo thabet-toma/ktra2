@@ -5,15 +5,16 @@
 بالمئة خلف المصادقة.
 """
 import hashlib
+from decimal import Decimal
 
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
-from django.db.models.deletion import ProtectedError
-from django.db.models import Case, CharField, Count, DecimalField, F, Q, Value, When
+from django.db.models import (
+    Case, Count, DecimalField, ExpressionWrapper, F, Max, Prefetch, Q, Value, When,
+)
+from django.db.models.functions import Coalesce, Least
 from django.http import Http404
 from django.utils import timezone
-from rest_framework import status, viewsets
-from rest_framework.exceptions import APIException, PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -24,16 +25,20 @@ from core.models import SystemAttachment
 from core.pagination import EnforcedPageNumberPagination
 from core.permissions import TemplateSurfacePermission
 from core.tenant_utils import get_tenant
-from inventory.models import Product
 from store.cache import InvalidatesStoreCacheMixin, products_version
 from store.models import (
+    StoreBrand,
+    StoreCategory,
     StoreCollection,
     StoreCollectionItem,
+    StoreProduct,
     StoreProductImage,
     StoreProductView,
     StoreSettings,
 )
 from store.serializers import (
+    StoreBrandAdminSerializer,
+    StoreCategoryAdminSerializer,
     StoreCollectionAdminSerializer,
     StoreCollectionDetailSerializer,
     StoreCollectionItemAdminSerializer,
@@ -46,13 +51,6 @@ from store.serializers import (
 )
 from tenants.models import Tenant
 
-#: الأعمدة التي يُسمح لها بمغادرة القاعدة. ما ليس هنا لا يُحمَّل — بما فيها
-#: `quantity_on_hand` و`avg_cost` و`sale_price` و`min_stock_level`.
-PUBLIC_PRODUCT_COLUMNS = (
-    "id", "name_ar", "name_en", "brand", "online_description",
-    "category__name", "uom__name_ar", "allow_preorder",
-)
-
 #: أنواع المرفقات التي تُعدّ صورة منتج. الحصر إيجابي عمداً: «كل ما ليس داتا
 #: شيت» كان سينشر أي مرفق يُضاف مستقبلاً (عرض سعر، فاتورة مورد) على الملأ.
 #: `Product Image` يكتبها `inventory/views.py`، و`Image` تركتها هجرة الوسائط.
@@ -60,42 +58,16 @@ PRODUCT_IMAGE_TYPES = ("Product Image", "Image")
 
 #: مدة كاش القائمة. دقيقةٌ تكفي لامتصاص موجة مشاركةٍ على واتساب، وكتابات
 #: النشر تُبطله فوراً عبر `store/cache.py` فلا ينتظر صاحب المتجر انتهاءها.
+#: **وسقفٌ لظهور/اختفاء الحملات أيضاً** (THA-166 M2): بدء أو انتهاء حملةٍ حدثُ
+#: ساعةٍ لا حدثُ حفظٍ يُبطل الكاش، فهذا الرقم هو أقصى تأخيرٍ ممكن لظهور خصمٍ
+#: جديد أو اختفاء خصمٍ منتهٍ. يجب أن يبقى ≤ 300 (خمس دقائق).
 LIST_CACHE_SECONDS = 60
 
 
-def _availability_expression():
-    """حالة التوفّر — نصّ لا رقم، محسوبة في SQL.
-
-    متوفر / كمية محدودة / غير متوفر / طلب مسبق (عند تفعيل allow_preorder).
-    """
-    return Case(
-        When(is_service=True, then=Value("available")),
-        When(allow_preorder=True, quantity_on_hand__lte=0, then=Value("preorder")),
-        When(quantity_on_hand__lte=0, then=Value("out")),
-        When(
-            min_stock_level__gt=0,
-            quantity_on_hand__lte=F("min_stock_level"),
-            then=Value("limited"),
-        ),
-        default=Value("available"),
-        output_field=CharField(),
-    )
-
-
-def _price_expression():
-    """سعر المتجر — `online_price` الموجب، وإلا `sale_price`."""
-    return Case(
-        When(online_price__gt=0, then=F("online_price")),
-        default=F("sale_price"),
-        output_field=DecimalField(max_digits=18, decimal_places=2),
-    )
-
-
 def _hidden_price_expression():
-    """السعر محجوب — ثابتُ `NULL` لا يقرأ عمودَي السعر من القاعدة أصلاً.
+    """السعر محجوب — ثابتُ `NULL` لا يقرأ عمود السعر من القاعدة أصلاً.
 
-    الحجب هنا لا في العرض ولا في الواجهة: ما لا يُقرَّر نشره لا يغادر القاعدة،
-    وهي القاعدة نفسها التي تحرس الرصيد والتكلفة في `PUBLIC_PRODUCT_COLUMNS`.
+    الحجب هنا لا في العرض ولا في الواجهة: ما لا يُقرَّر نشره لا يغادر القاعدة.
     """
     return Value(None, output_field=DecimalField(max_digits=18, decimal_places=2))
 
@@ -107,22 +79,88 @@ def _prices_are_public(tenant) -> bool:
     )
 
 
+def _active_campaign_discount_percent():
+    """أعلى نسبة خصم حملةٍ **سارية الآن** يشترك فيها المنتج — `Max` عبر ضمّ
+    على العلاقة العكسيّة، لا استعلامٌ مترابطٌ لكلّ صف (THA-166 M2).
+
+    **لا يُستعمَل `__date` إطلاقاً**: جداول المناطق الزمنية الفارغة في MySQL
+    تجعله يعيد صفر صفوفٍ بلا أيّ خطأ (`core/date_ranges.py`) — وحملةٌ لا تبدأ
+    في موعدها عطبٌ صامتٌ من هذا النوع بالضبط. المقارنة على `datetime` مباشرةً.
+    """
+    now = timezone.now()
+    is_active_now = (
+        Q(collection_items__collection__is_active=True)
+        & (
+            Q(collection_items__collection__starts_at__isnull=True)
+            | Q(collection_items__collection__starts_at__lte=now)
+        )
+        & (
+            Q(collection_items__collection__ends_at__isnull=True)
+            | Q(collection_items__collection__ends_at__gte=now)
+        )
+    )
+    return Max("collection_items__collection__discount_percent", filter=is_active_now)
+
+
 def published_products(tenant):
-    """منتجات الشركة المنشورة في متجرها — الاستعلام المقيَّد بنيوياً.
+    """منتجات كتالوج المتجر المستقلّ المنشورة — الاستعلام المقيَّد بنيوياً.
 
     بوابةٌ واحدة تمرّ منها المسارات الثلاثة (القائمة، المنتج، صفحة الحملة)،
-    فحجبُ السعر هنا يغطّيها كلَّها بالبناء لا بثلاثة شروط تُنسى إحداها.
+    فحجبُ السعر وحساب الخصم هنا يغطّيانها كلَّها بالبناء لا بثلاثة شروط تُنسى
+    إحداها (THA-166 M2).
+
+    `effective_price` هو السعر الفعليّ بعد أكبر خصمٍ ينطبق — منتجٍ مفردٍ أو
+    حملة، الأكبر يفوز — مُحسَبٌ في SQL لا بايثون لأنه ما سيُفرَز به ويُفلتَر
+    عليه في مرحلةٍ تالية.
     """
-    price = (
-        _price_expression() if _prices_are_public(tenant)
-        else _hidden_price_expression()
+    qs = (
+        StoreProduct.objects.filter(tenant=tenant, is_active=True)
+        .select_related("brand")
+        .prefetch_related(
+            Prefetch(
+                "categories",
+                queryset=StoreCategory.objects.order_by("sort_order", "id"),
+            )
+        )
     )
-    return (
-        Product.objects
-        .filter(tenant=tenant, is_for_sale_online=True)
-        .select_related("category", "uom")
-        .annotate(availability=_availability_expression(), price=price)
-        .only(*PUBLIC_PRODUCT_COLUMNS)
+    if not _prices_are_public(tenant):
+        return qs.annotate(effective_price=_hidden_price_expression()).defer(
+            "price", "sale_price"
+        )
+
+    qs = qs.annotate(campaign_discount_percent=_active_campaign_discount_percent())
+    qs = qs.annotate(
+        campaign_price=Case(
+            When(
+                Q(campaign_discount_percent__gt=0) & Q(price__isnull=False),
+                then=ExpressionWrapper(
+                    F("price")
+                    * (Value(Decimal("100")) - F("campaign_discount_percent"))
+                    / Value(Decimal("100")),
+                    output_field=DecimalField(max_digits=18, decimal_places=4),
+                ),
+            ),
+            default=Value(None, output_field=DecimalField(max_digits=18, decimal_places=4)),
+            output_field=DecimalField(max_digits=18, decimal_places=4),
+        )
+    )
+    # الأكبر خصماً يفوز: أصغر سعرٍ بين خصم المنتج المفرد (`sale_price`، مبلغٌ
+    # مطلق) وخصم الحملة (`campaign_price`)، بعد تعويض الغائب بالسعر الأساس
+    # (`Coalesce`) — وإلا أبطل `LEAST`/`MIN` القياسيّ الناتجَ كلّه بـ`NULL`
+    # حين يغيب أحد طرفيه. هذا التعويض نفسه هو ما يضمن ألّا يتجاوز الناتج
+    # السعرَ الأساس أبداً (فلا يُعرَض «خصمٌ» أعلى من السعر — الحارس الأوّل).
+    return qs.annotate(
+        effective_price=Case(
+            When(
+                price__isnull=True,
+                then=Value(None, output_field=DecimalField(max_digits=18, decimal_places=2)),
+            ),
+            default=Least(
+                Coalesce(F("sale_price"), F("price"), output_field=DecimalField(max_digits=18, decimal_places=4)),
+                Coalesce(F("campaign_price"), F("price"), output_field=DecimalField(max_digits=18, decimal_places=4)),
+            ),
+            output_field=DecimalField(max_digits=18, decimal_places=2),
+        )
     )
 
 
@@ -130,7 +168,8 @@ def _store_media_context(tenant, products):
     """روابط الصور والنصوص الإعلانية المخصصة لمجموعة منتجات — استعلام مجمّع."""
     if not products:
         return {"images": {}, "cover_overlays": {}}
-    product_ids = [p.id for p in products if p]
+    products = [p for p in products if p]
+    product_ids = [p.id for p in products]
     images = {pid: [] for pid in product_ids}
     cover_overlays = {}
 
@@ -138,11 +177,11 @@ def _store_media_context(tenant, products):
     custom_rows = (
         StoreProductImage.objects.filter(
             tenant=tenant,
-            product_id__in=product_ids,
+            store_product_id__in=product_ids,
         )
         .order_by("-is_cover", "sort_order", "id")
         .values(
-            "product_id",
+            "store_product_id",
             "image_url",
             "overlay_text",
             "overlay_style",
@@ -151,7 +190,7 @@ def _store_media_context(tenant, products):
         )
     )
     for row in custom_rows:
-        pid = row["product_id"]
+        pid = row["store_product_id"]
         img_url = row["image_url"]
         if pid in images and img_url:
             images[pid].append(img_url)
@@ -162,22 +201,33 @@ def _store_media_context(tenant, products):
                     "color": row["overlay_color"] or "red_fire",
                 }
 
-    # 2. للمنتجات التي لا تملك صور متجر مخصصة، نستخدم صور المنتج العامة من SystemAttachment
-    missing_pids = [pid for pid, imgs in images.items() if not imgs]
-    if missing_pids:
+    # 2. للمنتجات المستوردة من صنفٍ مخزني ولا صورة متجر مخصّصة لها: نسقط إلى
+    #    صور المنتج العامة من `SystemAttachment` — منتجٌ أنشأه التاجر من الصفر
+    #    لا مرفقاتِ مخزونٍ له أصلاً فلا معنى لهذا السقوط بالنسبة له.
+    fallback_targets = {
+        p.id: p.imported_from_product_id
+        for p in products
+        if p.imported_from_product_id and not images.get(p.id)
+    }
+    if fallback_targets:
+        reverse_map = {}
+        for store_pid, inv_pid in fallback_targets.items():
+            reverse_map.setdefault(inv_pid, []).append(store_pid)
         rows = (
             SystemAttachment.objects.filter(
                 tenant=tenant,
                 related_table="products",
-                related_id__in=missing_pids,
+                related_id__in=list(reverse_map),
                 file_type__in=PRODUCT_IMAGE_TYPES,
             )
             .order_by("id")
             .values_list("related_id", "file_path")
         )
         for related_id, file_path in rows:
-            if related_id in images and file_path:
-                images[related_id].append(file_path)
+            if not file_path:
+                continue
+            for store_pid in reverse_map.get(related_id, ()):
+                images[store_pid].append(file_path)
 
     return {"images": images, "cover_overlays": cover_overlays}
 
@@ -299,26 +349,29 @@ class StoreProductListView(StorePublicView):
             queryset = queryset.filter(
                 Q(name_ar__icontains=search)
                 | Q(name_en__icontains=search)
-                | Q(brand__icontains=search)
+                | Q(brand__name__icontains=search)
             )
         brand = (params.get("brand") or "").strip()
         if brand:
-            queryset = queryset.filter(brand__iexact=brand)
+            queryset = queryset.filter(brand__name__iexact=brand)
         # الاستعلام مفلتر بالشركة أصلاً، فتصنيف شركةٍ أخرى يعطي نتيجة فارغة لا
         # تسريباً. والاسم مقبول كالمعرّف: الحمولة العامة تنشر `category_name`
-        # ولا تنشر المعرّف، فبالمعرّف وحده تعجز الواجهة عن بناء قائمة تصنيفات.
+        # ولا تنشر معرّف الفئة الأولى وحدَها، فبالمعرّف وحده تعجز الواجهة عن
+        # بناء قائمة تصنيفات. `distinct()` لأن `categories` علاقةُ M2M — منتجٌ
+        # في أكثر من فئة يتكرّر صفّه في الضمّ بلا هذا.
         category = (params.get("category") or "").strip()
         if category.isdigit():
-            queryset = queryset.filter(category_id=int(category))
+            queryset = queryset.filter(categories__id=int(category)).distinct()
         elif category:
-            queryset = queryset.filter(category__name__iexact=category)
+            queryset = queryset.filter(categories__name__iexact=category).distinct()
         # مُرتِّبٌ ثانٍ بالمعرّف دائماً: بلا فاصلٍ حاسم تتأرجح الصفوف المتساوية
-        # بين الصفحات فيظهر منتجٌ مرتين ويختفي آخر.
+        # بين الصفحات فيظهر منتجٌ مرتين ويختفي آخر. الفرزُ بـ`effective_price`
+        # (السعر بعد الخصم) لا بعمود `price` الخام — هو ما يُعرَض فعلياً.
         sort = (params.get("sort") or "").strip()
         if sort == "price_asc":
-            return queryset.order_by("price", "id")
+            return queryset.order_by("effective_price", "id")
         if sort == "price_desc":
-            return queryset.order_by("-price", "id")
+            return queryset.order_by("-effective_price", "id")
         return queryset.order_by("name_ar", "id")
 
     def get(self, request, slug):
@@ -331,9 +384,9 @@ class StoreProductListView(StorePublicView):
         queryset = self._filtered(published_products(tenant), request.query_params)
         paginator = EnforcedPageNumberPagination()
         products = list(paginator.paginate_queryset(queryset, request, view=self))
-        data = StoreProductSerializer(
-            products, many=True, context=_store_media_context(tenant, products),
-        ).data
+        context = _store_media_context(tenant, products)
+        context["prices_public"] = _prices_are_public(tenant)
+        data = StoreProductSerializer(products, many=True, context=context).data
         payload = paginator.get_paginated_response(data).data
         cache.set(cache_key, payload, LIST_CACHE_SECONDS)
         return Response(payload)
@@ -350,29 +403,28 @@ class StoreProductDetailView(StorePublicView):
         if product is None:
             raise Http404
         self._record_view(tenant, product.id)
-        return Response(
-            StoreProductSerializer(
-                product, context=_store_media_context(tenant, [product]),
-            ).data
-        )
+        context = _store_media_context(tenant, [product])
+        context["prices_public"] = _prices_are_public(tenant)
+        return Response(StoreProductSerializer(product, context=context).data)
 
     @staticmethod
-    def _record_view(tenant, product_id):
+    def _record_view(tenant, store_product_id):
         today = timezone.localdate()
         rows = StoreProductView.objects.filter(
-            tenant=tenant, product_id=product_id, view_date=today,
+            tenant=tenant, store_product_id=store_product_id, view_date=today,
         ).update(count=F("count") + 1)
         if rows:
             return
         try:
             with transaction.atomic():
                 StoreProductView.objects.create(
-                    tenant=tenant, product_id=product_id, view_date=today, count=1,
+                    tenant=tenant, store_product_id=store_product_id,
+                    view_date=today, count=1,
                 )
         except IntegrityError:
             # زائرٌ آخر سبقنا إلى إنشاء صفّ اليوم — نزيد صفَّه بدل خلق ثانٍ.
             StoreProductView.objects.filter(
-                tenant=tenant, product_id=product_id, view_date=today,
+                tenant=tenant, store_product_id=store_product_id, view_date=today,
             ).update(count=F("count") + 1)
 
 
@@ -410,30 +462,35 @@ class StoreCollectionDetailView(StorePublicView):
         product_ids = list(
             StoreCollectionItem.objects.filter(collection=collection)
             .order_by("sort_order", "id")
-            .values_list("product_id", flat=True)
+            .values_list("store_product_id", flat=True)
         )
         queryset = published_products(tenant).filter(id__in=product_ids)
         queryset = StoreProductListView._filtered(queryset, request.query_params)
 
         paginator = EnforcedPageNumberPagination()
         products = list(paginator.paginate_queryset(queryset, request, view=self))
+        prices_public = _prices_are_public(tenant)
 
-        # المنتج المميّز يمرّ من نفس بوابة النشر: منتجٌ غير منشور أو منتج شركة
-        # أخرى لا يُعرض لمجرّد تعيينه هنا، والحقول المحسوبة تأتي معه.
+        # المنتج المميّز يمرّ من نفس بوابة النشر عبر `featured_store_product` —
+        # المرساةُ الحيّة منذ تصحيح تقسيم المراحل (`featured_product` القديم
+        # يبقى يشير إلى `inventory.Product` بلا حذف، لكنه لم يعد يُقرأ هنا).
         featured = None
-        if collection.featured_product_id:
+        if collection.featured_store_product_id:
             featured = (
                 published_products(tenant)
-                .filter(pk=collection.featured_product_id)
+                .filter(pk=collection.featured_store_product_id)
                 .first()
             )
         featured_context = _store_media_context(tenant, [featured] if featured else [])
         featured_context["featured_product"] = featured
+        featured_context["prices_public"] = prices_public
         collection_data = StoreCollectionDetailSerializer(
             collection, context=featured_context
         ).data
+        products_context = _store_media_context(tenant, products)
+        products_context["prices_public"] = prices_public
         products_data = StoreProductSerializer(
-            products, many=True, context=_store_media_context(tenant, products)
+            products, many=True, context=products_context
         ).data
         paginated_products = paginator.get_paginated_response(products_data).data
 
@@ -444,17 +501,6 @@ class StoreCollectionDetailView(StorePublicView):
 
 
 # ── واجهات إدارة المتجر المصادق عليها (Store Admin) ────────────────────────
-
-
-class ProductHasHistoryError(APIException):
-    """منتجٌ له حركة لا يُحذف — يُخفى عن المتجر فقط."""
-
-    status_code = status.HTTP_409_CONFLICT
-    default_detail = (
-        "المنتج مرتبط بحركة مخزنية أو مستند بيع فلا يمكن حذفه — "
-        "تم إخفاؤه من المتجر بدلاً من ذلك."
-    )
-    default_code = "product_has_history"
 
 
 class StoreSettingsAdminView(InvalidatesStoreCacheMixin, APIView):
@@ -484,7 +530,7 @@ class StoreSettingsAdminView(InvalidatesStoreCacheMixin, APIView):
 
 
 class StoreProductImageAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
-    """إدارة صور المتجر المخصصة للمنتجات."""
+    """إدارة صور المتجر المخصصة لمنتجات الكتالوج المستقلّ (`StoreProduct`)."""
 
     permission_classes = [IsAuthenticated, TemplateSurfacePermission]
     serializer_class = StoreProductImageAdminSerializer
@@ -497,19 +543,19 @@ class StoreProductImageAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSe
 
     def get_queryset(self):
         qs = super().get_queryset()
-        product_id = self.request.query_params.get("product_id")
-        if product_id and product_id.isdigit():
-            qs = qs.filter(product_id=int(product_id))
+        store_product_id = self.request.query_params.get("store_product_id")
+        if store_product_id and store_product_id.isdigit():
+            qs = qs.filter(store_product_id=int(store_product_id))
         return qs.order_by("sort_order", "id")
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
         # إذا تم تعيينها كـ cover، نقوم بإلغاء cover عن الصور الأخرى لهذا المنتج
         is_cover = serializer.validated_data.get("is_cover", False)
-        product = serializer.validated_data.get("product")
-        if is_cover and product:
+        store_product = serializer.validated_data.get("store_product")
+        if is_cover and store_product:
             StoreProductImage.objects.filter(
-                tenant=tenant, product=product
+                tenant=tenant, store_product=store_product
             ).update(is_cover=False)
         serializer.save(tenant=tenant)
 
@@ -518,7 +564,7 @@ class StoreProductImageAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSe
         instance = serializer.instance
         if is_cover and instance:
             StoreProductImage.objects.filter(
-                tenant=instance.tenant, product=instance.product
+                tenant=instance.tenant, store_product=instance.store_product
             ).exclude(pk=instance.pk).update(is_cover=False)
         serializer.save()
 
@@ -557,15 +603,15 @@ class StoreCollectionItemAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantView
         collection_id = self.request.query_params.get("collection_id")
         if collection_id and collection_id.isdigit():
             qs = qs.filter(collection_id=int(collection_id))
-        return qs.select_related("product").order_by("sort_order", "id")
+        return qs.select_related("store_product").order_by("sort_order", "id")
 
 
-class StoreProductAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
-    """إدارة وإنشاء منتجات المتجر مباشرة (سواء كانت مرتبطة بالمخزون أو خاصة بالمتجر فقط)."""
+class StoreBrandAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
+    """إدارة ماركات كتالوج المتجر المستقلّ (THA-166 م٢)."""
 
     permission_classes = [IsAuthenticated, TemplateSurfacePermission]
-    serializer_class = StoreProductAdminSerializer
-    queryset = Product.objects.all()
+    serializer_class = StoreBrandAdminSerializer
+    queryset = StoreBrand.objects.all()
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -573,48 +619,57 @@ class StoreProductAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
         require_perm(request, "store.manage", tenant=tenant)
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related("category", "uom")
+        return super().get_queryset().order_by("sort_order", "id")
+
+
+class StoreCategoryAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
+    """إدارة فئات كتالوج المتجر المستقلّ — شجرةٌ بمستويين محروسة عند الحفظ
+    (THA-166 م٢)."""
+
+    permission_classes = [IsAuthenticated, TemplateSurfacePermission]
+    serializer_class = StoreCategoryAdminSerializer
+    queryset = StoreCategory.objects.all()
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        tenant = get_tenant(request)
+        require_perm(request, "store.manage", tenant=tenant)
+
+    def get_queryset(self):
+        return super().get_queryset().select_related("parent").order_by("sort_order", "id")
+
+
+class StoreProductAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
+    """إدارة كتالوج المتجر المستقلّ (`StoreProduct`) مباشرة — لا تكتب على
+    `inventory.Product` إطلاقاً (THA-166 م٢ تصحيح: القراءةُ والكتابةُ
+    ينتقلان معاً، لا مساراً يقرأ من جدولٍ ويكتب في آخر)."""
+
+    permission_classes = [IsAuthenticated, TemplateSurfacePermission]
+    serializer_class = StoreProductAdminSerializer
+    queryset = StoreProduct.objects.all()
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        tenant = get_tenant(request)
+        require_perm(request, "store.manage", tenant=tenant)
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related("brand").prefetch_related("categories")
         scope = self.request.query_params.get("scope")
         search = (self.request.query_params.get("search") or "").strip()
 
         if scope == "published":
-            qs = qs.filter(is_for_sale_online=True)
+            qs = qs.filter(is_active=True)
         elif scope == "unpublished":
-            qs = qs.filter(is_for_sale_online=False)
+            qs = qs.filter(is_active=False)
 
         if search:
             qs = qs.filter(
                 Q(name_ar__icontains=search)
                 | Q(name_en__icontains=search)
-                | Q(sku__icontains=search)
-                | Q(brand__icontains=search)
+                | Q(brand__name__icontains=search)
             )
 
         return qs.order_by("-created_at", "-id")
-
-    def perform_create(self, serializer):
-        tenant = get_tenant(self.request)
-        serializer.save(tenant=tenant)
-
-    def perform_destroy(self, instance):
-        """حذف المنتج — وإن منعته حركةٌ محاسبية أو مخزنية، يُسحب من المتجر ويُقال ذلك.
-
-        `204` هنا كذبة: المنتج باقٍ ويظهر في الجرد والتقارير، والبائع يظنّه ذهب.
-        """
-        # `store.manage` صلاحية تسويقية لا صلاحية مخزون: منتجٌ مخزني لم يتحرّك بعد
-        # يُحذف بلا مقاومة، ومعه بالتتالي شرائح أسعاره وأرقامه التسلسلية وعروض
-        # الأسعار عليه. الحذف من هنا لمنتجات المتجر الخالصة وحدها.
-        if not instance.is_store_only:
-            raise PermissionDenied(
-                "هذا منتج مخزني لا منتج متجر — احذفه من شاشة المنتجات بصلاحيتها. "
-                "يمكنك من هنا سحبه من المتجر فقط."
-            )
-        try:
-            with transaction.atomic():
-                instance.delete()
-        except ProtectedError:
-            instance.is_for_sale_online = False
-            instance.save(update_fields=["is_for_sale_online"])
-            raise ProductHasHistoryError()
 
 

@@ -3,6 +3,8 @@ from django.urls import include, path
 from rest_framework.routers import SimpleRouter
 
 from store.views import (
+    StoreBrandAdminViewSet,
+    StoreCategoryAdminViewSet,
     StoreCollectionAdminViewSet,
     StoreCollectionDetailView,
     StoreCollectionItemAdminViewSet,
@@ -25,6 +27,16 @@ router.register(
     r"admin/product-images",
     StoreProductImageAdminViewSet,
     basename="store-admin-product-images",
+)
+router.register(
+    r"admin/brands",
+    StoreBrandAdminViewSet,
+    basename="store-admin-brands",
+)
+router.register(
+    r"admin/categories",
+    StoreCategoryAdminViewSet,
+    basename="store-admin-categories",
 )
 router.register(
     r"admin/collections",

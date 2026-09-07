@@ -29,9 +29,12 @@ class StoreProductView(models.Model):
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, related_name="store_product_views",
         db_column="TenantID")
+    # THA-166 M2: نُقلت إلى `null=True` — منتجُ متجرٍ من الصفر لا صنفَ مخزونٍ
+    # خلفه، فمشاهدةُ صفحته لا يمكن أن تكتب هنا. `store_product` أدناه هو
+    # المرساة الحيّة لهذا الصفّ من الآن؛ هذا الحقل يبقى للصفوف القديمة فقط.
     product = models.ForeignKey(
         Product, on_delete=models.CASCADE, related_name="store_views",
-        db_column="ProductID")
+        null=True, blank=True, db_column="ProductID")
     # THA-166 M1: يشير إلى منتج المتجر المستقلّ (`StoreProduct`) — أضيف بلا حذف
     # `product` القائم. null=True لأن كل صفٍّ قائمٍ يبقى بلا قيمة حتى تُنسَخ
     # الهجرةُ التوابع؛ قارئ هذا الحقل يأتي في مرحلةٍ لاحقة.
@@ -144,10 +147,14 @@ class StoreProductImage(models.Model):
         related_name="store_product_images",
         db_column="TenantID",
     )
+    # THA-166 M2: نُقلت إلى `null=True` — انظر التعليق المطابق على
+    # `StoreProductView.product`.
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
         related_name="store_custom_images",
+        null=True,
+        blank=True,
         db_column="ProductID",
     )
     # THA-166 M1: منتج المتجر المستقلّ — أضيف بلا حذف `product` القائم، انظر
@@ -214,6 +221,17 @@ class StoreCollection(models.Model):
         related_name="featured_store_collections",
         db_column="FeaturedProductID",
     )
+    # THA-166 م٢: المرساةُ الحيّة منذ أن صارت القراءةُ العامة تقرأ `StoreProduct`
+    # حصراً — `featured_product` أعلاه بقي بلا حذفٍ (فضاءُ معرّفاته `inventory.Product`
+    # منفصلٌ تماماً عن هذا)، لكن العرضَ العامّ يقرأ هذا الحقلَ وحده الآن.
+    featured_store_product = models.ForeignKey(
+        "StoreProduct",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="featured_in_collections",
+        db_column="FeaturedStoreProductID",
+    )
     is_active = models.BooleanField(default=True, db_column="IsActive")
     sort_order = models.PositiveIntegerField(default=0, db_column="SortOrder")
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
@@ -232,6 +250,23 @@ class StoreCollection(models.Model):
         managed = True
         unique_together = [["tenant", "slug"]]
         ordering = ["sort_order", "id"]
+
+    def _reject_price_killing_discount(self):
+        """نسبةُ خصمٍ ≥ 100٪ تُنزل سعر كلّ عضوٍ في الحملة إلى صفرٍ أو دونه —
+        مرفوضةٌ عند الحفظ بخطأ تحقّقٍ صريح لا قصّاً بصمتٍ (مواصفة #166 م٢)."""
+        if self.discount_percent is not None and self.discount_percent >= 100:
+            raise ValidationError(
+                {"discount_percent": "نسبة خصم الحملة يجب أن تكون أقل من 100٪."}
+            )
+
+    def clean(self):
+        self._reject_price_killing_discount()
+
+    def save(self, *args, **kwargs):
+        # الحارسُ هنا لا في `clean()` وحدها — نفس نمط `StoreCategory` و
+        # `StoreProduct` أعلاه: `objects.create()` كان سيتجاوزه بصمت.
+        self._reject_price_killing_discount()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.title} ({self.slug})"
@@ -252,10 +287,14 @@ class StoreCollectionItem(models.Model):
         related_name="items",
         db_column="CollectionID",
     )
+    # THA-166 M2: نُقلت إلى `null=True` — انظر التعليق المطابق على
+    # `StoreProductView.product`.
     product = models.ForeignKey(
         Product,
         on_delete=models.CASCADE,
         related_name="store_collection_memberships",
+        null=True,
+        blank=True,
         db_column="ProductID",
     )
     # THA-166 M1: منتج المتجر المستقلّ — أضيف بلا حذف `product` القائم، انظر
@@ -442,7 +481,23 @@ class StoreProduct(models.Model):
         unique_together = [["tenant", "slug"]]
         ordering = ["sort_order", "id"]
 
+    def _reject_non_positive_sale_price(self):
+        """خصمٌ يُنزل السعرَ إلى صفرٍ أو دونه مرفوضٌ عند الحفظ — لا يُقصّ
+        بصمتٍ إلى صفر (مواصفة #166 م٢). `sale_price` هنا **مبلغٌ مطلق** هو
+        السعر بعد الخصم نفسه، فسعرٌ صفريٌّ أو سالبٌ في متجرٍ خطأُ إدخالٍ دائماً.
+        """
+        if self.sale_price is not None and self.sale_price <= 0:
+            raise ValidationError(
+                {"sale_price": "سعر العرض يجب أن يكون أكبر من صفر."}
+            )
+
+    def clean(self):
+        self._reject_non_positive_sale_price()
+
     def save(self, *args, **kwargs):
+        # الحارسُ هنا لا في `clean()` وحدها — جانغو لا ينادي `clean()` من
+        # `save()` تلقائياً (نفس نمط `StoreCategory._reject_third_level`).
+        self._reject_non_positive_sale_price()
         is_new = self._state.adding
         if not self.slug:
             self.slug = build_unique_slug(

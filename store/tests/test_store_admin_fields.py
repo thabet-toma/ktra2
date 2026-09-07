@@ -1,9 +1,13 @@
-"""حدود لوحة إدارة المتجر: ماذا تُعدّل، وكيف تُرقّم، وما لا تفرضه على المستخدم.
+"""لوحة إدارة المتجر على `StoreProduct` — CRUD كامل، وحرّاسا الحفظ يعودان 400.
 
-`store.manage` صلاحية **تسويقية** لا صلاحية مخزون. اللوحة تنشر المنتج المخزني
-وتسحبه، لكنها لا تُعيد تعريفه: `sale_price` و`sku` و`name_ar` حقول تقرؤها
-الفوترة والتقارير، وتغييرها من هنا يجعل مسؤول تسويق يصيب سعر البيع المعتمَد
-بلا أن يدري.
+THA-166 م٢ (تصحيح): هذا الملف كان يحرس حصر الحقول القابلة للتعديل على منتجٍ
+**مخزني** (`inventory.Product`, `STORE_EDITABLE_ON_INVENTORY`) وتوليد رمزٍ
+تسلسليٍّ (`sku`) — كلاهما مفهومٌ خاصٌّ بالمسار القديم الذي لم تعد لوحة المتجر
+تكتب عليه. `StoreProduct` لا `sku` له، ولا تمييز «مخزني/متجر خالص»: كل صفٍّ
+فيه ملكُ اللوحة كاملاً بالتعريف (يُنسَخ مرّةً من `inventory.Product` إن وُجد
+ثم يتباعدان — `imported_from_product_id` رقمٌ مجرَّدٌ لا يعيد فتح تلك الصلة).
+لذلك حُذف حصر الحقول من الكود (`STORE_EDITABLE_ON_INVENTORY`) ومن هنا،
+واستُبدلت اختبارات توليد الـSKU باختبار الحرّاسين الفعليّين (م٢).
 """
 from decimal import Decimal
 
@@ -11,135 +15,184 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from inventory.models import Product, UnitOfMeasure
+from store.models import StoreBrand, StoreCategory, StoreProduct
 from tenants.services import create_company
 
 
-class StoreAdminFieldScopeTest(TestCase):
+class StoreProductAdminCrudTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.uom = UnitOfMeasure.objects.create(code="PCS", name_ar="قطعة")
         cls.user = User.objects.create_user(username="fs", password="pw123456")
         cls.tenant = create_company("شركة الحقول", cls.user)
         cls.tenant.store_slug = "fields"
         cls.tenant.save()
-
-        cls.stock_item = Product.objects.create(
-            tenant=cls.tenant, sku="INV-01", name_ar="منتج مخزني",
-            sale_price=Decimal("50.00"), is_store_only=False, uom=cls.uom,
-        )
+        cls.brand = StoreBrand.objects.create(tenant=cls.tenant, name="عام")
+        cls.category = StoreCategory.objects.create(
+            tenant=cls.tenant, name="فئة", slug="cat-1")
 
     def setUp(self):
         self.auth = APIClient()
         self.auth.force_authenticate(user=self.user)
         self.auth.defaults["HTTP_X_TENANT_ID"] = str(self.tenant.TenantID)
 
-    def _patch(self, product, payload):
-        return self.auth.patch(
-            f"/api/store/admin/products/{product.id}/", payload, format="json",
+    # ── إنشاءٌ كاملٌ وأدنى ────────────────────────────────────────────────
+
+    def test_minimal_creation_needs_only_the_arabic_name(self):
+        res = self.auth.post(
+            "/api/store/admin/products/", {"name_ar": "منتجٌ بسيط"}, format="json",
         )
+        self.assertEqual(res.status_code, 201, res.content[:300])
+        body = res.json()
+        self.assertTrue(body["is_active"])
+        self.assertEqual(body["stock_state"], StoreProduct.STOCK_IN_STOCK)
+        self.assertTrue(body["slug"])  # يُولَّد تلقائياً
 
-    # ── THA-427: حقول المتجر وحدها على المنتج المخزني ───────────────────
+    def test_name_ar_is_required(self):
+        res = self.auth.post("/api/store/admin/products/", {}, format="json")
+        self.assertEqual(res.status_code, 400)
 
-    def test_store_fields_are_editable_on_an_inventory_product(self):
-        """النشر والسعر المتجري والوصف والطلب المسبق — هذا غرض اللوحة."""
-        res = self._patch(self.stock_item, {
-            "is_for_sale_online": True,
-            "online_price": "60.00",
-            "online_description": "وصف للمتجر",
-            "allow_preorder": True,
-        })
+    def test_full_creation_with_brand_categories_and_images(self):
+        res = self.auth.post("/api/store/admin/products/", {
+            "name_ar": "ثلاجة دولابي فاخرة", "name_en": "Fridge",
+            "brand": self.brand.id, "categories": [self.category.id],
+            "unit": "قطعة", "price": "3500.00", "sale_price": "3200.00",
+            "stock_state": StoreProduct.STOCK_PREORDER,
+            "description": "وصفٌ كامل",
+            "initial_images": ["https://img.com/a.jpg", "https://img.com/b.jpg"],
+        }, format="json")
+        self.assertEqual(res.status_code, 201, res.content[:300])
+        body = res.json()
+        self.assertEqual(body["brand"], self.brand.id)
+        self.assertEqual(body["categories"], [self.category.id])
+        self.assertEqual(body["stock_state"], "preorder")
+        self.assertEqual(len(body["images"]), 2)
+
+    def test_the_slug_is_read_only_and_auto_generated(self):
+        res = self.auth.post(
+            "/api/store/admin/products/",
+            {"name_ar": "منتج", "slug": "attempted-override"}, format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.content[:300])
+        self.assertNotEqual(res.json()["slug"], "attempted-override")
+
+    # ── التعديل — كل الحقول مفتوحة (لا حصر «مخزني/متجر») ────────────────
+
+    def test_every_field_is_editable_because_the_product_is_wholly_the_panels(self):
+        product = StoreProduct.objects.create(
+            tenant=self.tenant, name_ar="قديم", price=Decimal("50.00"),
+        )
+        res = self.auth.patch(f"/api/store/admin/products/{product.id}/", {
+            "name_ar": "اسمٌ جديد", "price": "60.00",
+            "stock_state": StoreProduct.STOCK_OUT_OF_STOCK,
+            "description": "وصفٌ جديد",
+        }, format="json")
         self.assertEqual(res.status_code, 200, res.content[:300])
-        self.stock_item.refresh_from_db()
-        self.assertTrue(self.stock_item.is_for_sale_online)
-        self.assertEqual(self.stock_item.online_price, Decimal("60.00"))
+        product.refresh_from_db()
+        self.assertEqual(product.name_ar, "اسمٌ جديد")
+        self.assertEqual(product.price, Decimal("60.00"))
+        self.assertEqual(product.stock_state, StoreProduct.STOCK_OUT_OF_STOCK)
 
-    def test_operational_fields_are_refused_on_an_inventory_product(self):
-        """`sale_price` تقرؤه الفوترة — لا يُمسّ بصلاحية تسويقية."""
-        res = self._patch(self.stock_item, {"sale_price": "5.00"})
+    def test_categories_can_be_replaced_on_update(self):
+        product = StoreProduct.objects.create(tenant=self.tenant, name_ar="منتج")
+        other_cat = StoreCategory.objects.create(
+            tenant=self.tenant, name="فئة أخرى", slug="cat-2")
+        res = self.auth.patch(f"/api/store/admin/products/{product.id}/", {
+            "categories": [other_cat.id],
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        self.assertEqual(list(product.categories.values_list("id", flat=True)), [other_cat.id])
+
+    # ── THA-166 م٢: حرّاسا الحفظ يعودان 400 لا 500 ──────────────────────
+
+    def test_zero_sale_price_is_a_400_not_a_500(self):
+        res = self.auth.post("/api/store/admin/products/", {
+            "name_ar": "منتج", "price": "100.00", "sale_price": "0.00",
+        }, format="json")
         self.assertEqual(res.status_code, 400, res.content[:300])
-        self.stock_item.refresh_from_db()
-        self.assertEqual(self.stock_item.sale_price, Decimal("50.00"))
+        self.assertIn("sale_price", str(res.content, "utf-8"))
 
-    def test_identity_fields_are_refused_on_an_inventory_product(self):
-        for payload in ({"sku": "HACK"}, {"name_ar": "اسم آخر"}, {"brand": "براند"}):
-            with self.subTest(payload=payload):
-                res = self._patch(self.stock_item, payload)
-                self.assertEqual(res.status_code, 400, res.content[:300])
-        self.stock_item.refresh_from_db()
-        self.assertEqual(self.stock_item.sku, "INV-01")
-        self.assertEqual(self.stock_item.name_ar, "منتج مخزني")
+    def test_negative_sale_price_is_a_400_not_a_500(self):
+        res = self.auth.post("/api/store/admin/products/", {
+            "name_ar": "منتج", "price": "100.00", "sale_price": "-5.00",
+        }, format="json")
+        self.assertEqual(res.status_code, 400, res.content[:300])
 
-    def test_the_refusal_names_the_rejected_fields(self):
-        """رسالة تقول ماذا رُفض وأين يُعدَّل — لا رفضٌ صامت."""
-        res = self._patch(self.stock_item, {"sale_price": "5.00"})
-        body = str(res.content, "utf-8")
-        self.assertIn("sale_price", body)
-
-    def test_a_store_only_product_stays_fully_editable(self):
-        """منتج المتجر الخالص ملكُ اللوحة — الحارس يضيّق ولا يقفل."""
-        mine = Product.objects.create(
-            tenant=self.tenant, sku="ST-X", name_ar="منتج متجر",
-            is_store_only=True, uom=self.uom,
+    def test_updating_into_a_non_positive_sale_price_is_also_a_400(self):
+        product = StoreProduct.objects.create(
+            tenant=self.tenant, name_ar="منتج", price=Decimal("100.00"),
         )
-        res = self._patch(mine, {"name_ar": "اسم جديد", "sale_price": "12.00"})
+        res = self.auth.patch(f"/api/store/admin/products/{product.id}/", {
+            "sale_price": "0.00",
+        }, format="json")
+        self.assertEqual(res.status_code, 400, res.content[:300])
+        product.refresh_from_db()
+        self.assertIsNone(product.sale_price)
+
+    # ── الحذف والفلترة بالحالة ───────────────────────────────────────────
+
+    def test_scope_published_and_unpublished_filter_by_is_active(self):
+        StoreProduct.objects.create(tenant=self.tenant, name_ar="منشور", is_active=True)
+        StoreProduct.objects.create(tenant=self.tenant, name_ar="مسحوب", is_active=False)
+
+        published = self.auth.get("/api/store/admin/products/?scope=published").json()
+        unpublished = self.auth.get("/api/store/admin/products/?scope=unpublished").json()
+        published_rows = published["results"] if isinstance(published, dict) else published
+        unpublished_rows = unpublished["results"] if isinstance(unpublished, dict) else unpublished
+        self.assertTrue(all(r["is_active"] for r in published_rows))
+        self.assertTrue(all(not r["is_active"] for r in unpublished_rows))
+
+
+class StoreBrandAndCategoryAdminCrudTest(TestCase):
+    """CRUD بسيط للماركات والفئات — نفس الحراسة ونفس فلتر الشركة (THA-166 م٢)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="bc", password="pw123456")
+        cls.tenant = create_company("شركة الماركات", cls.user)
+        cls.tenant.store_slug = "brands-cats"
+        cls.tenant.save()
+
+    def setUp(self):
+        self.auth = APIClient()
+        self.auth.force_authenticate(user=self.user)
+        self.auth.defaults["HTTP_X_TENANT_ID"] = str(self.tenant.TenantID)
+
+    def test_brand_crud(self):
+        res = self.auth.post(
+            "/api/store/admin/brands/", {"name": "سامسونج"}, format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.content[:300])
+        brand_id = res.json()["id"]
+
+        listed = self.auth.get("/api/store/admin/brands/").json()
+        rows = listed["results"] if isinstance(listed, dict) else listed
+        self.assertIn(brand_id, [r["id"] for r in rows])
+
+        res = self.auth.patch(
+            f"/api/store/admin/brands/{brand_id}/", {"sort_order": 5}, format="json",
+        )
         self.assertEqual(res.status_code, 200, res.content[:300])
-        mine.refresh_from_db()
-        self.assertEqual(mine.name_ar, "اسم جديد")
 
-    # ── THA-425: الطلب المسبق قرار المستخدم ────────────────────────────
+    def test_category_depth_guard_returns_400_via_the_api(self):
+        """`StoreCategory._reject_third_level` يعود 400 عبر الـAPI — نفس نمط
+        الحارس على `StoreProduct.sale_price`، لا 500."""
+        grandparent = StoreCategory.objects.create(
+            tenant=self.tenant, name="جد", slug="grandparent")
+        parent = StoreCategory.objects.create(
+            tenant=self.tenant, name="أب", slug="parent", parent=grandparent)
+        res = self.auth.post("/api/store/admin/categories/", {
+            "name": "حفيد", "slug": "grandchild", "parent": parent.id,
+        }, format="json")
+        self.assertEqual(res.status_code, 400, res.content[:300])
 
-    def test_preorder_is_not_forced_on_new_products(self):
-        """«طلب مسبق» وعدٌ تجاري — لا يفرضه الكود على كل منتج يُنشأ."""
-        res = self.auth.post(
-            "/api/store/admin/products/", {"name_ar": "منتج بلا وعد"}, format="json",
+    def test_category_and_brand_are_scoped_to_the_tenant(self):
+        other_user = User.objects.create_user(username="bc2", password="pw123456")
+        other = create_company("شركة أخرى", other_user)
+        foreign_category = StoreCategory.objects.create(
+            tenant=other, name="فئة أجنبية", slug="foreign")
+
+        res = self.auth.patch(
+            f"/api/store/admin/categories/{foreign_category.id}/",
+            {"name": "استيلاء"}, format="json",
         )
-        self.assertEqual(res.status_code, 201, res.content[:300])
-        self.assertFalse(Product.objects.get(pk=res.json()["id"]).allow_preorder)
-
-    def test_preorder_can_still_be_asked_for(self):
-        res = self.auth.post(
-            "/api/store/admin/products/",
-            {"name_ar": "منتج بطلب مسبق", "allow_preorder": True}, format="json",
-        )
-        self.assertEqual(res.status_code, 201, res.content[:300])
-        self.assertTrue(Product.objects.get(pk=res.json()["id"]).allow_preorder)
-
-    # ── THA-426: الترقيم تسلسلي لا عشوائي ──────────────────────────────
-
-    def test_generated_skus_are_sequential_and_do_not_collide(self):
-        codes = []
-        for i in range(3):
-            res = self.auth.post(
-                "/api/store/admin/products/", {"name_ar": f"منتج {i}"}, format="json",
-            )
-            self.assertEqual(res.status_code, 201, res.content[:300])
-            codes.append(Product.objects.get(pk=res.json()["id"]).sku)
-        self.assertEqual(len(set(codes)), 3, codes)
-        for code in codes:
-            self.assertRegex(code, r"^ST-\d{6}$")
-
-    def test_a_duplicate_explicit_sku_is_a_400_not_a_500(self):
-        """رمزٌ مكرّر يُدخله المستخدم خطأُ إدخال لا انهيار خادم."""
-        first = self.auth.post(
-            "/api/store/admin/products/",
-            {"name_ar": "الأول", "sku": "DUP-1"}, format="json",
-        )
-        self.assertEqual(first.status_code, 201, first.content[:300])
-        second = self.auth.post(
-            "/api/store/admin/products/",
-            {"name_ar": "الثاني", "sku": "DUP-1"}, format="json",
-        )
-        self.assertEqual(second.status_code, 400, second.content[:300])
-
-    def test_a_generated_sku_skips_one_a_user_already_took(self):
-        """المستخدم حجز `ST-000001` يدوياً — التوليد يتخطّاه بدل أن ينهار."""
-        Product.objects.create(
-            tenant=self.tenant, sku="ST-000001", name_ar="محجوز يدوياً",
-            is_store_only=True, uom=self.uom,
-        )
-        res = self.auth.post(
-            "/api/store/admin/products/", {"name_ar": "التالي"}, format="json",
-        )
-        self.assertEqual(res.status_code, 201, res.content[:300])
-        self.assertNotEqual(Product.objects.get(pk=res.json()["id"]).sku, "ST-000001")
+        self.assertEqual(res.status_code, 404)

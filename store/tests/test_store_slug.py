@@ -145,31 +145,33 @@ class StoreSlugEndpointTest(APITestCase):
         """ST-3: نفس السيناريو اليدوي، مثبَّتاً — فلا تنكسر السلسلة بصمت.
 
         الشاشة لا تملك نقطة نشر خاصة بها: تفتح المتجر بـ`set-store-slug`،
-        ثم تنشر المنتج بـPATCH على `ProductViewSet` القائم. الحلقة الثالثة —
-        أن يظهر عند الزائر — هي التي لا يثبتها أيّ اختبار في الطرفين وحده.
+        ثم تنشر المنتج بـPATCH على `StoreProductAdminViewSet` (THA-166 م٢:
+        صار هو مصدر الحقيقة، لا `ProductViewSet`). الحلقة الثالثة — أن يظهر
+        عند الزائر — هي التي لا يثبتها أيّ اختبار في الطرفين وحده.
         """
-        from inventory.models import Product
+        from store.models import StoreProduct
 
-        product = Product.objects.create(
-            tenant=self.tenant, sku="J-1", name_ar="منتج الرحلة",
-            sale_price="25.00", is_for_sale_online=False)
+        product = StoreProduct.objects.create(
+            tenant=self.tenant, name_ar="منتج الرحلة",
+            price="25.00", is_active=False)
 
         self.assertEqual(self._post(self.manager, "journey-shop").status_code, 200)
 
         # النشر — نفس النداء الذي ترسله الشاشة، بلا سيريالايزر ثانٍ.
         patch = self._client(self.manager).patch(
-            f"/api/inventory/products/{product.pk}/",
-            {"is_for_sale_online": True, "online_price": "19.90"}, format="json",
+            f"/api/store/admin/products/{product.pk}/",
+            {"is_active": True, "price": "19.90"}, format="json",
             HTTP_X_TENANT_ID=str(self.tenant.pk),
         )
         self.assertEqual(patch.status_code, 200, patch.content[:300])
 
         # وفلتر الشاشة يراه في تبويب «المعروضة».
         listed = self._client(self.manager).get(
-            "/api/inventory/products/?is_for_sale_online=true",
+            "/api/store/admin/products/?scope=published",
             HTTP_X_TENANT_ID=str(self.tenant.pk),
         ).json()
-        self.assertEqual([row["id"] for row in listed], [product.pk])
+        listed_rows = listed["results"] if isinstance(listed, dict) else listed
+        self.assertEqual([row["id"] for row in listed_rows], [product.pk])
 
         # والزائر — بلا أي توكن — يراه بسعر المتجر.
         public = APIClient().get("/api/store/journey-shop/products/")

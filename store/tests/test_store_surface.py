@@ -1,4 +1,8 @@
-"""تصليب السطح العام: إبطال كاش النشر، ترقيم الحملات، وانتقاء المنتجات بمعرّفاتها."""
+"""تصليب السطح العام: إبطال كاش النشر، ترقيم الحملات، وانتقاء المنتجات بمعرّفاتها.
+
+THA-166 م٢ (تصحيح): المصدر `store.StoreProduct`، والنشر/الإخفاء PATCH على
+`/api/store/admin/products/` (`is_active`) لا `/api/inventory/products/`.
+"""
 from decimal import Decimal
 
 from django.contrib.auth.models import User
@@ -6,8 +10,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from inventory.models import Product, UnitOfMeasure
-from store.models import StoreCollection
+from store.models import StoreCollection, StoreProduct
 from tenants.services import create_company
 
 #: اختبارات الكاش تحتاج كاشاً حقيقياً: `core/test_settings.py` يفرض DummyCache
@@ -26,17 +29,15 @@ REAL_CACHE = override_settings(
 class StorePublicSurfaceTest(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.uom = UnitOfMeasure.objects.create(code="PCS", name_ar="قطعة")
         cls.user = User.objects.create_user(username="surf", password="pw123456")
         cls.tenant = create_company("شركة السطح", cls.user)
         cls.tenant.store_slug = "surface"
         cls.tenant.save()
 
         cls.published = [
-            Product.objects.create(
-                tenant=cls.tenant, sku=f"S-{i:02d}", name_ar=f"منتج {i}",
-                is_for_sale_online=True, online_price=Decimal("10.00"),
-                quantity_on_hand=Decimal("5"), uom=cls.uom,
+            StoreProduct.objects.create(
+                tenant=cls.tenant, name_ar=f"منتج {i}",
+                price=Decimal("10.00"), is_active=True,
             )
             for i in range(1, 6)
         ]
@@ -55,14 +56,13 @@ class StorePublicSurfaceTest(TestCase):
         """نشر منتج يظهر فوراً — الكاش لا يحجبه دقيقةً كاملة."""
         before = self.public.get("/api/store/surface/products/").json()["count"]
 
-        hidden = Product.objects.create(
-            tenant=self.tenant, sku="S-NEW", name_ar="منتج جديد",
-            is_for_sale_online=False, online_price=Decimal("20.00"),
-            quantity_on_hand=Decimal("3"), uom=self.uom,
+        hidden = StoreProduct.objects.create(
+            tenant=self.tenant, name_ar="منتج جديد",
+            price=Decimal("20.00"), is_active=False,
         )
         res = self.auth.patch(
-            f"/api/inventory/products/{hidden.id}/",
-            {"is_for_sale_online": True}, format="json",
+            f"/api/store/admin/products/{hidden.id}/",
+            {"is_active": True}, format="json",
         )
         self.assertIn(res.status_code, (200, 202), res.content[:300])
 
@@ -77,8 +77,8 @@ class StorePublicSurfaceTest(TestCase):
         self.public.get("/api/store/surface/products/")  # يملأ الكاش
 
         res = self.auth.patch(
-            f"/api/inventory/products/{target.id}/",
-            {"is_for_sale_online": False}, format="json",
+            f"/api/store/admin/products/{target.id}/",
+            {"is_active": False}, format="json",
         )
         self.assertIn(res.status_code, (200, 202), res.content[:300])
 
@@ -92,16 +92,14 @@ class StorePublicSurfaceTest(TestCase):
         other = create_company("شركة أخرى", other_user)
         other.store_slug = "surface2"
         other.save()
-        Product.objects.create(
-            tenant=other, sku="O-01", name_ar="منتج الأخرى",
-            is_for_sale_online=True, online_price=Decimal("30.00"),
-            quantity_on_hand=Decimal("1"), uom=self.uom,
+        StoreProduct.objects.create(
+            tenant=other, name_ar="منتج الأخرى", price=Decimal("30.00"), is_active=True,
         )
         first = self.public.get("/api/store/surface2/products/").json()["count"]
 
         self.auth.patch(
-            f"/api/inventory/products/{self.published[0].id}/",
-            {"online_price": "77.00"}, format="json",
+            f"/api/store/admin/products/{self.published[0].id}/",
+            {"price": "77.00"}, format="json",
         )
         second = self.public.get("/api/store/surface2/products/").json()["count"]
         self.assertEqual(first, second)
@@ -143,10 +141,8 @@ class StorePublicSurfaceTest(TestCase):
     def test_ids_does_not_leak_another_tenants_product(self):
         other_user = User.objects.create_user(username="surf3", password="pw123456")
         other = create_company("ثالثة", other_user)
-        foreign = Product.objects.create(
-            tenant=other, sku="F-01", name_ar="منتج أجنبي",
-            is_for_sale_online=True, online_price=Decimal("50.00"),
-            quantity_on_hand=Decimal("1"), uom=self.uom,
+        foreign = StoreProduct.objects.create(
+            tenant=other, name_ar="منتج أجنبي", price=Decimal("50.00"), is_active=True,
         )
         body = self.public.get(
             "/api/store/surface/products/", {"ids": str(foreign.id)},

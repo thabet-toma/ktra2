@@ -2,6 +2,10 @@
 
 ما يحرسه هذا الملف ليس العدّ بل **حدوده**: أين يُكتب، وأين لا يُكتب أبداً،
 وأنه لا يلمس صفّ المنتج نفسه.
+
+THA-166 م٢: المصدر `store.StoreProduct`، والعدّاد يكتب `store_product` —
+`product` (`inventory.Product`) يبقى فارغاً لصفوفٍ جديدة (انظر التعليق على
+`StoreProductView.product`).
 """
 from decimal import Decimal
 
@@ -9,8 +13,7 @@ from django.utils import timezone
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from inventory.models import Product
-from store.models import StoreProductView
+from store.models import StoreProduct, StoreProductView
 from tenants.models import Tenant
 
 
@@ -20,10 +23,9 @@ class StoreViewCounterTest(TestCase):
         cls.tenant = Tenant.objects.create(
             CompanyName="متجر العدّاد", SubscriptionPlan="Pro", Status="Active",
             store_slug="counter")
-        cls.product = Product.objects.create(
-            tenant=cls.tenant, sku="C-1", name_ar="منتج مشاهَد",
-            is_for_sale_online=True, online_price=Decimal("9.00"),
-            quantity_on_hand=Decimal("4"), avg_cost=Decimal("2"))
+        cls.product = StoreProduct.objects.create(
+            tenant=cls.tenant, name_ar="منتج مشاهَد", price=Decimal("9.00"),
+        )
 
     def setUp(self):
         self.client = APIClient()
@@ -34,7 +36,7 @@ class StoreViewCounterTest(TestCase):
 
     def _row(self):
         return StoreProductView.objects.filter(
-            tenant=self.tenant, product=self.product,
+            tenant=self.tenant, store_product=self.product,
             view_date=timezone.localdate()).first()
 
     def test_opening_a_product_page_counts_one_view(self):
@@ -45,7 +47,7 @@ class StoreViewCounterTest(TestCase):
         for _ in range(3):
             self._open_detail()
         self.assertEqual(
-            StoreProductView.objects.filter(product=self.product).count(), 1,
+            StoreProductView.objects.filter(store_product=self.product).count(), 1,
             "التجميع يومي — صفّ واحد لليوم لا صفّ لكل مشاهدة")
         self.assertEqual(self._row().count, 3)
 
@@ -58,24 +60,23 @@ class StoreViewCounterTest(TestCase):
         other = Tenant.objects.create(
             CompanyName="أخرى", SubscriptionPlan="Basic", Status="Active",
             store_slug="counter-other")
-        hidden = Product.objects.create(
-            tenant=other, sku="H-1", name_ar="مخفي", is_for_sale_online=True)
+        hidden = StoreProduct.objects.create(
+            tenant=other, name_ar="مخفي", is_active=False)
         res = self.client.get(f"/api/store/counter/products/{hidden.id}/")
         self.assertEqual(res.status_code, 404)
         self.assertFalse(StoreProductView.objects.exists())
 
     def test_the_counter_never_touches_the_product_row(self):
-        """صفّ المنتج يعيش في قلب الـERP — مسارٌ مجهول لا يكتب عليه.
+        """صفّ منتج المتجر لا يمسّه مسارٌ مجهول.
 
-        الرصيد والتكلفة يبقيان بالضبط كما كانا: المتجر قراءة فقط، و
-        `record_stock_movement` يبقى الكاتب الوحيد للرصيد.
+        السعر والحالة يبقيان بالضبط كما كانا — صفحة المنتج قراءةٌ فقط، والعدّاد
+        يكتب `StoreProductView` وحده، لا `StoreProduct` نفسه.
         """
-        before = Product.objects.get(pk=self.product.pk)
+        before = StoreProduct.objects.get(pk=self.product.pk)
         self._open_detail()
-        after = Product.objects.get(pk=self.product.pk)
-        self.assertEqual(after.quantity_on_hand, before.quantity_on_hand)
-        self.assertEqual(after.avg_cost, before.avg_cost)
-        self.assertEqual(after.online_price, before.online_price)
+        after = StoreProduct.objects.get(pk=self.product.pk)
+        self.assertEqual(after.price, before.price)
+        self.assertEqual(after.is_active, before.is_active)
 
     def test_counters_are_isolated_per_tenant(self):
         self._open_detail()
