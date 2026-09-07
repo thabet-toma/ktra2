@@ -1345,6 +1345,24 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     suppliers,
   ]);
 
+  /** اسم المورد الاحتياطي لمحرِّر بحث المورّد (`SupplierSearch`) حين يغيب
+   * الشريك عن مصفوفة `suppliers` (تجاوز سقف `partners/lookup/`، أو مورّدٌ من
+   * نوعٍ آخر). ترتيبُه **يخالف** `headerSupplierName` عمداً: القضية #159
+   * نصّت أن يتبع هذا الموضعُ بالذات ترتيبَ `InvoiceList.tsx` (`supplierName`)
+   * و`InvoicePrintView.tsx` (`getSupplierName`) — كلاهما يقدّم
+   * `supplierSnapshot.tradeName` (مصدره `partner_name` الخادميّ) على
+   * `factoryName` (حقلٌ خادميٌّ مستقلّ، `factory_name`)، فلا يعرض المحرِّرُ
+   * اسماً تختلف عنه القائمةُ والطباعةُ لنفس الفاتورة. */
+  const supplierSearchFallbackName = useMemo(() => (
+    String(formData.supplierSnapshot?.tradeName ?? "").trim() ||
+    String(formData.factoryName ?? "").trim() ||
+    String(formData.dealInfo?.supplierSnapshot?.tradeName ?? "").trim()
+  ), [
+    formData.supplierSnapshot,
+    formData.factoryName,
+    formData.dealInfo?.supplierSnapshot,
+  ]);
+
   /** فواتير شيكل بنسبة: مزامنة taxAmount/grandTotal مع الأساس (غالباً كانت tax_amount=0 في DB) */
   useEffect(() => {
     if (effectiveReadOnly) return;
@@ -1999,6 +2017,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         readOnly={effectiveReadOnly}
         items={formData.items}
         onOpenAddSupplier={() => setShowAddSupplierModal(true)}
+        supplierFallbackName={supplierSearchFallbackName}
       />
     </div>
   );

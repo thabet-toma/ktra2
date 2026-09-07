@@ -12,6 +12,10 @@ interface SupplierSearchProps {
   onOpenAddModal?: () => void;
   type?: SupplierType;
   onViewSupplier?: (id: string) => void;
+  /** الاسم الذي يحمله المستند نفسه — يُعرض حين يتعذّر إيجاد الشريك بالمعرِّف
+   * ضمن `suppliers` (مثال: تجاوز سقف صفوف `partners/lookup/`). القائمة وسيلة
+   * اختيار، والاسم المحفوظ في المستند هو الحقيقة عند غيابه عنها. */
+  documentFallbackName?: string;
 }
 
 export const SupplierSearch: React.FC<SupplierSearchProps> = ({
@@ -24,6 +28,7 @@ export const SupplierSearch: React.FC<SupplierSearchProps> = ({
   onOpenAddModal,
   onViewSupplier,
   type,
+  documentFallbackName,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,6 +46,10 @@ export const SupplierSearch: React.FC<SupplierSearchProps> = ({
   }, []);
 
   const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId);
+  const fallbackName = (documentFallbackName || "").trim();
+  // الشريك مختارٌ بمعرِّفه (`selectedSupplierId`) لكنّه غائبٌ عن `suppliers` —
+  // العرضُ يسقط إلى اسم المستند بدل الظهور فارغاً وكأنّ لا مورّد مُختار.
+  const showFallbackName = !selectedSupplier && !!selectedSupplierId && !!fallbackName;
 
   // ✅ دالة للحصول على الاسم البارز (المستعار أولاً)
   const getDisplayName = (supplier: Supplier) => {
@@ -151,6 +160,33 @@ export const SupplierSearch: React.FC<SupplierSearchProps> = ({
               </button>
             </div>
           </div>
+        ) : showFallbackName ? (
+          // --- الشريك غائبٌ عن المصفوفة، لكن المستند يحمل اسمه ---
+          <div className="flex items-center justify-between w-full p-2 pl-3">
+            <div className="flex items-center gap-2 overflow-hidden">
+              <span className="p-1 ktra-bg-accent-bg dark:ktra-bg-panel/30 rounded ktra-text-accent dark:ktra-text-soft">
+                {getTypeIcon(type)}
+              </span>
+              <div className="flex flex-col truncate">
+                <span className="text-sm font-semibold ktra-text-ink dark:text-white truncate">
+                  {fallbackName}
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClearSupplier();
+                  if (inputRef.current) inputRef.current.focus();
+                }}
+                className="p-1.5 hover:ktra-bg-panel dark:hover:ktra-bg-panel/20 ktra-text-soft hover:ktra-text-soft dark:hover:ktra-text-soft rounded-md transition-colors"
+                title="إزالة المورد"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         ) : (
           // --- حالة البحث (حقل إدخال) ---
           <>
@@ -173,7 +209,7 @@ export const SupplierSearch: React.FC<SupplierSearchProps> = ({
       </div>
 
       {/* 2. القائمة المنسدلة (Dropdown) */}
-      {isOpen && !selectedSupplier && (
+      {isOpen && !selectedSupplier && !showFallbackName && (
         <div className="absolute z-50 w-full mt-1 ktra-bg-field dark:ktra-bg-panel border ktra-border-soft dark:ktra-border-soft rounded-lg shadow-lg max-h-60 overflow-y-auto">
           {filteredSuppliers.length > 0 ? (
             <ul className="py-1">

@@ -23,6 +23,8 @@ interface InvoiceBasicInfoProps {
   items?: any[];
   /** task16 C9: فتح مودال إضافة مورد inline من حقل البحث عن المورد */
   onOpenAddSupplier?: () => void;
+  /** اسم المورّد المحفوظ في الفاتورة نفسها — يُعرض حين يغيب الشريك عن `suppliers`. */
+  supplierFallbackName?: string;
 }
 
 export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
@@ -32,6 +34,7 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
   readOnly,
   items = [],
   onOpenAddSupplier,
+  supplierFallbackName,
 }) => {
   const [supplierSearch, setSupplierSearch] = useState("");
   const [showDetails, setShowDetails] = useState(false);
@@ -119,6 +122,7 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
               onClearSupplier={() => setData({ ...data, supplierId: "", factoryName: "" })}
               onOpenAddModal={readOnly ? undefined : onOpenAddSupplier}
               type="factory"
+              documentFallbackName={supplierFallbackName}
             />
           </div>
         </div>
