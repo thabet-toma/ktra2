@@ -182,6 +182,24 @@ app تخدم سطحين لا سطحاً واحداً: **زائراً مجهول�
 (`online_price=99` و`sale_price=77`) ومسحٌ تكراري لكل حمولة عامة بحثاً عن أيٍّ من
 تمثيلاتهما. إخفاء السعر **لا يُخفي المنتجات**: الكتالوج يبقى كاملاً بحالة توفّره.
 
+## كتالوجُ المتجر المستقلّ (THA-166 M1) — نماذجُ وهجرةٌ فقط، بلا قارئ بعد
+
+**قرار مالكٍ حاكم: كتالوجُ المتجر مستقلٌّ تماماً عن `inventory.Product` — لا مخزونَ ولا محاسبةَ أبداً.**
+هذه المرحلةُ الأولى من مواصفة #166 مضيفةٌ محضة: نماذجُ جديدة وهجرةُ نسخٍ، **ولا `View` ولا `Serializer` يقرآن الجداولَ الجديدة بعد** — السطحُ العامّ (`published_products`) والإداريّ يبقيان كما هما تماماً حتى مرحلةٍ تالية.
+
+`store/models.py`:
+- **`StoreProduct`** — الصفّ المستقلّ: `name_ar`/`name_en`/`slug` (فريدٌ لكل شركة، يُولَّد من `store/slugs.py` (`build_unique_slug`) عند الحفظ إن تُرك فارغاً)، `brand`→`StoreBrand`، `categories` M2M→`StoreCategory`، `unit` **نصٌّ حرّ** (لا FK إلى `inventory.UnitOfMeasure`)، `price`/`sale_price` قابلان للفراغ، `stock_state` (`in_stock`/`out_of_stock`/`preorder`) **إعلانٌ من التاجر لا رقمٌ محسوب**، و`imported_from_product_id` — **رقمٌ مجرَّدٌ عمداً لا `ForeignKey`**: مفتاحٌ أجنبيٌّ هنا يعيد بناء الاقتران الذي قطعه قرارُ المالك.
+- **`StoreBrand(tenant, name, sort_order, is_active)`** — ماركةٌ جدولٌ لا نصٌّ حرّ، فرادة `(tenant, name)`.
+- **`StoreCategory(tenant, name, parent→self, slug, sort_order, is_active, image_url)`** — شجرةٌ **مستقلّةٌ تماماً** عن `inventory.ProductCategory` المحاسبية، فرادة `(tenant, slug)`. **العمقُ محدودٌ بمستويين بالتحقّق لا بالبنية** (لا حفيد، ولا فئة أباً لنفسها، **ولا إسنادُ أبٍ لفئةٍ لها أبناء** — الحالة الثالثة تنتج نفس انتهاك العمق من الجهة المعاكسة) — رفعُ السقف لاحقاً تغييرُ سطرِ تحقّقٍ لا هجرةَ بنية. الحارسُ (`_reject_third_level`) موصولٌ بـ`clean()` **و`save()` معاً** عمداً: جانغو لا ينادي `clean()` من `save()` تلقائياً، فـ`objects.create()` كان سيتجاوزه بصمت لولا هذا الربط الصريح. `bulk_create` يبقى خارج المسار عمداً (تعتمد عليه الهجرة).
+- **`StorePriceHistory(tenant, store_product, price, changed_at)`** — يُكتَب من `StoreProduct.save()` مباشرةً (لا إشارة) عند كل تغيير سعرٍ فعليّ، **ولا يظهر في أيّ عقدٍ عامّ ولا إداريّ بعد** — تلبيةً للمادة 6a الأوروبية (أدنى سعرٍ خلال ٣٠ يوماً)؛ التاريخ لا يُسترجَع بأثرٍ رجعيّ فالتسجيلُ يبدأ من أوّل يوم.
+- **`StoreCollection`** كسبت `starts_at`/`ends_at` (كلاهما `null` — بلا بدايةٍ/نهايةٍ) و`discount_percent` و`priority`. **لا `StoreCampaign` منفصل**: مجموعةٌ ذاتُ تواريخَ وخصمٍ تُسمّى «حملة» في الواجهة، الفرقُ حالةٌ لا نوع.
+- **`StoreProductImage`/`StoreProductView`/`StoreCollectionItem`** كسبت حقلاً `store_product` FK→`StoreProduct` (`null=True`, `CASCADE`) **بجانب** `product` القائم — لا حذف ولا تغيير عليه. فرادة `StoreProductView` و`StoreCollectionItem` اكتسبت نظيرةً موازيةً بالحقل الجديد بلا كسر القديمة.
+
+**هجرةُ البيانات** `store/migrations/0006_migrate_catalog_to_store_product.py` — `RunPython` بدالّة تراجعٍ صريحة، **مُضيفةٌ محضة** (لا تحذف/تعدّل صفّاً في `inventory.Product`)، **قابلةٌ لإعادة التشغيل** يحرسها `imported_from_product_id`.
+معيارُ الاستحقاق **أوسعُ من راية `is_for_sale_online`** عمداً: يُنسَخ كلُّ منتجٍ له **أيضاً** صفٌّ في `StoreProductImage` أو عضويّةٌ في `StoreCollectionItem` — الصورةُ والعضويّةُ إعلانا نيّةٍ لا يقلّان صراحةً عن الراية. السعرُ المنسوخ حرفياً منطقُ `_price_expression` الحاليّ (`online_price` الموجب وإلّا `sale_price`). الماركاتُ تُوحَّد لكلّ شركةٍ بغير حساسيةٍ لحالة الأحرف، والفئاتُ تُسطَّح بمستوىً واحد من فئات `inventory.ProductCategory` المُستعمَلة فعلاً — **بلا رابطٍ دائم** بها. `StoreProductImage`/`StoreCollectionItem` **لا يتيمَ ممكنٌ فيهما** (الهجرة تتوقّف بخطأٍ صريح إن وجدت واحداً)؛ `StoreProductView` يتيمُه مُتوقَّعٌ (منتجٌ شوهد ثم لم يُستحقّ) **ويُحذَف**.
+
+**قيدٌ معماريٌّ لا يُنقَض**: لا استيراد من `inventory` إلى `store/models.py` ولا العكس — `imported_from_product_id` رقمٌ مجرَّدٌ للسبب نفسه.
+
 ## ما لا تفعله هذه الـapp
 لا تكتب قيداً ولا حركة مخزون. `quantity_on_hand` يبقى كاشاً مشتقاً لا يكتبه إلا `inventory/services.py` (`record_stock_movement`)، و`StockMovement` يبقى المصدر الوحيد للرصيد.
 لا طلب شراء ولا دفع ولا تحصيل: السلة تنتهي عند رسالة واتساب يرسلها الزبون، ولا شيء منها يصل الخادم.
@@ -192,7 +210,9 @@ app تخدم سطحين لا سطحاً واحداً: **زائراً مجهول�
 |---|---|
 | `store/views.py` | النقاط العامة + نقاط الإدارة + الاستعلام المقيَّد + التوفّر والسعر + الكاش + العدّاد |
 | `store/serializers.py` | القائمة البيضاء المصرَّحة حقلاً حقلاً + `TenantScopedPrimaryKeyRelatedField` |
-| `store/models.py` | `StoreProductView` · `StoreSettings` · `StoreProductImage` · `StoreCollection(Item)` |
+| `store/models.py` | `StoreProductView` · `StoreSettings` · `StoreProductImage` · `StoreCollection(Item)` · `StoreProduct` · `StoreBrand` · `StoreCategory` · `StorePriceHistory` |
+| `store/slugs.py` | `build_unique_slug` — النسخةُ **الحيّة** لتوليد slug عربيٍّ فريد، يستعملها `StoreProduct.save()` وحده |
+| `store/migrations/0006_migrate_catalog_to_store_product.py` | نسخُ الأصناف المستحقّة إلى `StoreProduct` — مُضيفةٌ محضة وقابلةٌ لإعادة التشغيل. تحمل نسخةً **مجمَّدةً** مستقلّةً من منطق الـslug (`_build_unique_slug_frozen`) ولا تستورد من `store/slugs.py` عمداً — هجرةٌ يجب أن تُنتج نفسَ النتيجة بعد سنوات بلا تأثّرٍ بتطوّر الكود الحيّ |
 | `store/urls.py` | المسارات تحت `/api/store/` |
 | `store/tests/test_public_leakage.py` | معيار النجاح السالب: إثبات غياب التسريب |
 | `store/tests/test_store_api.py` | التوفّر والسعر والبحث والفرز والصور والكاش |
