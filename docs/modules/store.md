@@ -1,6 +1,6 @@
 # store — المتجر العام للمنتجات (سطح بلا مصادقة فوق كتالوج المنتجات)
 
-> مبني على قراءة الكود مباشرةً بتاريخ 2026-08-13 (ST-1)، ومُحدَّث 2026-08-19 (ST-5: المظهر والحملات والسلة ولوحة إدارة المتجر)، 2026-09-07 (THA-166 م٢: القراءةُ العامة تحوّلت إلى `StoreProduct`، وظهر الخصم)، 2026-09-07 (THA-166 م٣: شاشاتُ إدارة المتجر على العقد الجديد + استيراد من الأصناف — الفجوة أُغلقت)، 2026-09-07 (THA-166 م٤: الفلترةُ بعدّاداتٍ سياقية)، و2026-09-08 (THA-166 م٥: شقّ صلاحيّة `store.pricing`، وقياسُ الحملة). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
+> مبني على قراءة الكود مباشرةً بتاريخ 2026-08-13 (ST-1)، ومُحدَّث 2026-08-19 (ST-5: المظهر والحملات والسلة ولوحة إدارة المتجر)، 2026-09-07 (THA-166 م٢: القراءةُ العامة تحوّلت إلى `StoreProduct`، وظهر الخصم)، 2026-09-07 (THA-166 م٣: شاشاتُ إدارة المتجر على العقد الجديد + استيراد من الأصناف — الفجوة أُغلقت)، 2026-09-07 (THA-166 م٤: الفلترةُ بعدّاداتٍ سياقية)، 2026-09-08 (THA-166 م٥: شقّ صلاحيّة `store.pricing`، وقياسُ الحملة)، و2026-09-08 (THA-166 م٦: كتلُ الصفحة الرئيسية). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
 ## الغرض
 app تخدم سطحين لا سطحاً واحداً: **زائراً مجهولاً** بخمس نقاط قراءة تحت `/api/store/<slug>/` (بطاقة الشركة ومظهرها · شبكة المنتجات المنشورة · صفحة المنتج · قائمة الحملات · صفحة هبوط الحملة)، و**مديراً مصادَقاً عليه** بنقاط `/api/store/admin/…` يضبط منها المظهر والصور والحملات ومنتجات المتجر.
@@ -183,6 +183,44 @@ WooCommerce المُسنَد في #157.
 
 الحارس: `store/tests/test_store_measurement.py`.
 
+## كتلُ الصفحة الرئيسية (THA-166 م٦)
+
+**العلّة:** سطوحُ الإعلان قبل هذه المرحلة كانت حقولَ روابطَ نصّيةً متناثرة بلا ترتيبٍ ولا تعدّد (`StoreSettings.banner_image_url` لافتةٌ **واحدة**، `StoreCollection.banner_image_url` لكل حملة على حدة) — ولا نموذج `Ad`/`Banner`. طلب المالك التحكّم بالترتيب صراحةً، وتخطيطٌ ثابتٌ يُشغَّل ويُطفأ لا يعطيه ذلك.
+
+`store/models.py` (`StoreHomeBlock`): `tenant, kind, title, subtitle, image_url, image_url_mobile, link_kind, link_id, link_url, source_id, limit, sort_order, is_active`. `link_id`/`source_id` أعدادٌ مجرَّدة عمداً لا `ForeignKey` — الهدف متعدّدُ الأشكال حسب `kind`/`link_kind` (حملةٌ أو فئةٌ أو منتج)، نفس منطق `imported_from_product_id`.
+
+**الأنواع الستّة:**
+| `kind` | المصدر | يظهر إن |
+|---|---|---|
+| `hero` | لا مصدر — صورةٌ وعنوانٌ ووجهة | دائماً (بلا حارس محتوى) |
+| `campaign_row` | `source_id` = `StoreCollection` | الحملةُ سارية الآن (`is_active` + نافذة `starts_at`/`ends_at`) ولها منتجاتٌ منشورة |
+| `category_row` | `source_id` = `StoreCategory` | للفئة منتجاتٌ منشورة |
+| `featured` | `source_id` = `StoreCollection` (تُقرأ عناصرها بلا شرط نافذة الحملة) | للمجموعة عناصر |
+| `most_viewed` | `StoreProductView` المجمَّعة أصلاً | يوجد منتجٌ منشورٌ بمشاهدةٍ واحدة على الأقل |
+| `active_campaigns` | لا `source_id` — كل حملات الشركة الساريـة | توجد حملةٌ سارية واحدة على الأقل |
+
+`campaign_row`/`featured` يشتركان في نفس مصدر البيانات (`StoreCollectionItem`) والفرقُ حارسُ نافذة التاريخ وحده — إعادة استعمال البنية الموجودة للمجموعات بدل جدولِ ربطٍ ثانٍ.
+
+**الوجهةُ مُصنَّفةٌ لا رابطٌ حرّ**: `link_kind ∈ {collection, category, product, url, none}`. حرّاسا `StoreHomeBlock._reject_invalid_source`/`_reject_invalid_link` (نمط `_reject_third_level`: من `clean()` و`save()` معاً) يتحقّقان أن الهدف من نفس الشركة وموجودٌ فعلاً عند الحفظ، ويعودان **400** عبر `StoreHomeBlockAdminSerializer`(`_ConvertsModelValidationErrors`) لا 500. **وتُكشَف عند الحذف**: `store/views.py` (`_home_blocks_referencing`/`_raise_if_blocks_reference`) يمنع حذف حملةٍ/فئةٍ/منتجٍ ما زال مُستهدَفاً بكتلةٍ (`perform_destroy` على `StoreCollectionAdminViewSet`/`StoreCategoryAdminViewSet`/`StoreProductAdminViewSet`) بدل ترك الكتلة تشير إلى لا شيء بصمت.
+
+**سقفٌ صريح ١٠ كتلٍ مفعَّلة لكل شركة** (`StoreHomeBlock.MAX_ACTIVE_BLOCKS`، `_reject_over_the_active_cap`) — الحدّ يُفحص عند التفعيل فقط، فكتلةٌ معطَّلة لا تُحتسَب. `limit` (افتراضه ١٢) يحدّ عدد عناصر كل صفّ.
+
+**قاعدة السقوط، أهمُّ قرارٍ في المرحلة**: متجرٌ بلا كتلةٍ واحدةٍ مفعَّلة يعرض ما يعرضه اليومَ بالضبط — `/api/store/<slug>/products/` و`/api/store/<slug>/` **لا يستوردان من `StoreHomeBlock` إطلاقاً**، فلا فرق يُرى. وكتلةٌ مفعَّلةٌ بلا محتوىً (حملةٌ منتهية، فئةٌ فارغة، صفر مشاهدات، صفر حملاتٍ سارية) **تُحذف من الردّ كلّياً** — لا تظهر بعنوانٍ فوق فراغ. الحارس: `store/tests/test_store_home.py` (`HomeFallbackRuleTest`, `HomeEmptyBlockDisappearsTest`).
+
+**نقطةٌ عامّةٌ منفصلة عن `StoreProfileView` عمداً**: `GET /api/store/<slug>/home/` (`StoreHomeView`) — لا حقلٌ إضافي على البروفايل. السبب: `campaign_row`/`active_campaigns` يحملان الزمن في نتيجتهما فيلزمهما سقفُ كاشٍ قصير (**٥ دقائق**، `HOME_CACHE_SECONDS`)، بينما `StoreProfileView` **غير مكاشٍ أصلاً** اليوم — خلطُهما يُجبر إمّا إسقاط كاش البروفايل بالكامل أو تحميله بمنطقٍ زمنيّ لا علاقة له بالمظهر والهوية. مفتاح الكاش `store:<slug>:home:v<نسخة>` يستعمل **نفس** عدّاد `products_version` الذي تُبطله كل كتابةٍ إدارية (`InvalidatesStoreCacheMixin` على `StoreHomeBlockAdminViewSet`) — فلا آلية إبطالٍ ثانية، وأي كتابةٍ على منتجٍ أو حملةٍ أو كتلةٍ تُبطل كاش الصفحة الرئيسية فوراً أيضاً. **بلا `__date` إطلاقاً** على مقارنات نافذة الحملة (`_active_campaigns_queryset`/`_collection_is_active_campaign`) — مقارنةٌ على `datetime` مباشرة (`core/date_ranges.py`).
+
+**الأداء — استعلاماتٌ مجمَّعة ثابتة العدد**: `_home_block_context` تجمع كل معرّفات المصادر/الوجهات عبر كل الكتل أولاً (`_collect_home_block_sources`) ثم تجلب دفعةً واحدة: حملاتٌ (مصدرٌ + وجهة، دمجٌ في نفس الاستعلام)، عناصر تلك الحملات، أزواج (منتج، فئة) للصفوف الفئوية، تجميع الأكثر مشاهدة (`Sum` واحد)، الحملات السارية، ثم **استعلامٌ واحدٌ أخير** يجلب كل المنتجات المطلوبة عبر `published_products(tenant).filter(id__in=…)` — **نفس بنّاء العقد العامّ** الذي يمرّ منه المتجر، لا مُسلسِلٌ ثانٍ. الإجمالي **١١ استعلاماً ثابتاً** بصرف النظر عن عدد الكتل (حتى ١٠) أو حجم الكتالوج — مُثبَتٌ بـ`HomeQueryBudgetTest.test_query_count_is_independent_of_block_and_catalog_size` (نفس منهج درس ٣٥٠١ استعلام في `FacetQueryBudgetTest`).
+
+**الحمولة**: `{"blocks": [...]}`، كل كتلةٍ بسبعة مفاتيحَ ثابتة بصرف النظر عن `kind` (`id, kind, title, subtitle, image_url, image_url_mobile, link, products, campaigns`) — `products`/`campaigns` فارغتان لما لا يخصّه النوع، فتبقى مساواةُ مجموعة المفاتيح ممكنة الاختبار بلا تفريع. `link` ثلاثةُ مفاتيح ثابتة أيضاً (`kind, target, url`): `target` سلاجُ الحملة أو معرّفُ الفئة/المنتج، و`url` للرابط الخارجي وحده. منتجاتُ الصفوف ومنتج الحملة كلاهما عبر `StoreProductSerializer` القائم بنفس سياق الصور (`_store_media_context`)، وبطاقاتُ `active_campaigns` عبر `StoreCollectionSerializer` القائم — **لا مُسلسِلٌ ثانٍ للمنتج أو الحملة**.
+
+## الواجهةُ الإدارية والعامة (THA-166 م٦)
+
+`frontend_v2/components/settings/StoreSettingsPage.tsx` كسبت تبويباً خامساً «الصفحة الرئيسية»: قائمةُ الكتل مرتَّبةً بأسهم نقلٍ (تُطبِّع `sort_order` إلى فهارس متتالية عند كل نقلة — لا قيمةً نسبية)، تفعيل/تعطيل بضغطة، عدّاد «س/١٠» يتلوّن أحمر عند الاكتمال، ونافذة إنشاء/تعديل واحدة: منتقي الوجهة يتبدّل حسب `link_kind` (قائمةٌ منسدلة لحملةٍ/فئة، بحثٌ مؤجَّلٌ لمنتج عبر `getStoreAdminProducts`، حقل نصّي للرابط الخارجي)، ومنتقي المصدر يظهر فقط لـ`campaign_row`/`category_row`/`featured`. `image_url_mobile` اختياريٌّ مع تلميحٍ صريح أنّ غيابه يعني قصّاً مركزياً. رسائل الخادم (سقف العشر، وجهةٌ من شركةٍ أخرى) تُعرض كما هي عبر `humanizeDrfError` — لا رسالة عامة. صفرُ `alert`/`confirm`: `useToast`/`useConfirm` القائمان.
+
+`frontend_v2/components/store/StoreHomeBlocks.tsx` (ملفٌّ مستقلٌّ تحت `components/store/` على غرار `StoreCatalogSlider`) يُصيِّر الكتل في `StorefrontPage.tsx` **فوق** الشبكة القائمة، والشبكةُ تبقى تحتها كما هي: `hero` بلافتةٍ (`<picture>` مع `image_url_mobile` عبر `<source media="(max-width: 640px)">`)، وصفوفُ `campaign_row`/`category_row`/`featured`/`most_viewed` بتمريرٍ أفقيٍّ على الجوّال (`overflow-x-auto`) وشبكةٍ من `sm:` — **بطاقةُ المنتج هي `StoreProductCard` نفسُها**، لا نسخةٌ ثانية. `active_campaigns` ببطاقات حملةٍ منفصلة (صورة + شارة + عنوان). لا يستورد من `components/kit` أيّ مكوّنٍ يجرّ سياقاً — يبقى مسار المتجر خفيفاً وكسولَ التحميل.
+
+الحارس: `store/tests/test_store_home.py` (النموذج والنقطة العامة معاً) و`frontend_v2/e2e/store-home-blocks-journey.spec.ts` (الرحلة: كتلةٌ من اللوحة ← ظهورٌ في الصفحة الرئيسية العامة، ومتجرٌ بلا كتلٍ بلا أثر).
+
 ## الواجهة العامة (ST-2)
 شاشات المتجر تعيش في `frontend_v2/components/store/` وتُوجَّه من `frontend_v2/index.tsx` **خارج `AuthProvider`/`CompanyProvider`**: زائرٌ بلا جلسة لا ينتظر إقلاع مساحة عمل لا تخصّه.
 ثلاثة مسارات: `/store` (صفحة تعريف، أو تحويل إلى `VITE_DEFAULT_STORE_SLUG` إن ضُبط) · `/store/<slug>` (الشبكة) · `/store/<slug>/p/<id>` (المنتج).
@@ -273,7 +311,7 @@ WooCommerce المُسنَد في #157.
 
 **لا رمز منتج (`sku`) على `StoreProduct`** — الحقل غير موجودٍ على هذا النموذج أصلاً (كان تسلسلياً `ST-{n:06d}` على `inventory.Product` في المسار القديم، عبر `TenantBook.get_next_number`؛ ذاك المسار لم يعد مستعمَلاً من لوحة المتجر). `slug` هو المعرّف النصّي الوحيد، ويُولَّد تلقائياً (`store/slugs.py`) ولا يُكتب من الـAPI (`read_only`).
 
-**حذف منتج المتجر** — `StoreProductAdminViewSet` بلا `perform_destroy` مخصّص: حذفٌ مباشر (`204`) دائماً. **لا `ProtectedError` ممكنة على `StoreProduct`**: كل توابعه (`StoreProductImage`، `StoreProductView`، `StoreCollectionItem`) `CASCADE`، ولا صلة له بحركةٍ مخزنية أو فاتورة — حارسُ الـ409/403 القديم (`ProductHasHistoryError`، تمييز `is_store_only`) كان خاصّاً بمسار `inventory.Product` ولا معنى له هنا.
+**حذف منتج المتجر** — `StoreProductAdminViewSet.perform_destroy` (منذ THA-166 م٦) يرفض الحذفَ بـ400 إن كان المنتج ما زال وجهةَ كتلة صفحةٍ رئيسية (`link_kind='product'`)، وإلا حذفٌ مباشر (`204`). **لا `ProtectedError` ممكنة على `StoreProduct`**: كل توابعه (`StoreProductImage`، `StoreProductView`، `StoreCollectionItem`) `CASCADE`، ولا صلة له بحركةٍ مخزنية أو فاتورة — حارسُ الـ409/403 القديم (`ProductHasHistoryError`، تمييز `is_store_only`) كان خاصّاً بمسار `inventory.Product` ولا معنى له هنا؛ الحارس الوحيد اليوم هو اعتماد كتلة الصفحة الرئيسية.
 
 ## إظهار/إخفاء الأسعار — `StoreSettings.show_prices`
 
@@ -331,9 +369,13 @@ WooCommerce المُسنَد في #157.
 ## أهم الملفات
 | الملف | الغرض |
 |---|---|
-| `store/views.py` | النقاط العامة + نقاط الإدارة + `published_products` (الاستعلام المقيَّد + الخصم بـSQL) + الكاش + العدّاد + `StoreProductAdminViewSet.import_from_inventory` (م٣) + عدّاداتُ `StoreProductListView` السياقية (`_filtered(exclude_axis=…)`, `_category_facet`, `_brand_facet`, `_flags_facet`, `_price_range_facet`) (م٤) + `StoreCollectionDetailView._record_view` وعدّاداتُ `StoreCollectionAdminViewSet` و`StoreOrderIntentView` (م٥) |
-| `store/serializers.py` | القائمة البيضاء المصرَّحة حقلاً حقلاً (سبعةَ عشر منذ م٢) + `TenantScopedPrimaryKeyRelatedField` + `_reject_unauthorized_pricing_changes` (حارس `store.pricing`، م٥) |
-| `store/models.py` | `StoreProductView` · `StoreSettings` (كسبت `new_product_days` م٤) · `StoreProductImage` · `StoreCollection(Item)` · `StoreProduct` · `StoreBrand` · `StoreCategory` · `StorePriceHistory` — وحرّاسا الحفظ `StoreProduct._reject_non_positive_sale_price` و`StoreCollection._reject_price_killing_discount` (م٢) · `StoreCollectionView` و`StoreOrderIntent` (م٥) |
+| `store/views.py` | النقاط العامة + نقاط الإدارة + `published_products` (الاستعلام المقيَّد + الخصم بـSQL) + الكاش + العدّاد + `StoreProductAdminViewSet.import_from_inventory` (م٣) + عدّاداتُ `StoreProductListView` السياقية (`_filtered(exclude_axis=…)`, `_category_facet`, `_brand_facet`, `_flags_facet`, `_price_range_facet`) (م٤) + `StoreCollectionDetailView._record_view` وعدّاداتُ `StoreCollectionAdminViewSet` و`StoreOrderIntentView` (م٥) + `StoreHomeView` وبنّاءُ سياقها المجمَّع (`_home_block_context`, `_serialize_home_block`) وحارسُ الحذف (`_home_blocks_referencing`) (م٦) |
+| `store/serializers.py` | القائمة البيضاء المصرَّحة حقلاً حقلاً (سبعةَ عشر منذ م٢) + `TenantScopedPrimaryKeyRelatedField` + `_reject_unauthorized_pricing_changes` (حارس `store.pricing`، م٥) + `StoreHomeBlockAdminSerializer` (م٦) |
+| `store/models.py` | `StoreProductView` · `StoreSettings` (كسبت `new_product_days` م٤) · `StoreProductImage` · `StoreCollection(Item)` · `StoreProduct` · `StoreBrand` · `StoreCategory` · `StorePriceHistory` — وحرّاسا الحفظ `StoreProduct._reject_non_positive_sale_price` و`StoreCollection._reject_price_killing_discount` (م٢) · `StoreCollectionView` و`StoreOrderIntent` (م٥) · `StoreHomeBlock` وحرّاسها الثلاثة (م٦) |
+| `store/migrations/0012_store_home_block.py` | إضافةُ `StoreHomeBlock` (م٦) |
+| `store/tests/test_store_home.py` | **م٦**: قاعدة السقوط، اختفاء الكتلة الفارغة، نافذة الحملة، سقف العشر، وجهةٌ/مصدرٌ لشركةٍ أخرى، حارسُ الحذف، وحدُّ الاستعلامات |
+| `frontend_v2/components/store/StoreHomeBlocks.tsx` | تصييرُ الكتل فوق شبكة `StorefrontPage.tsx` (م٦) |
+| `frontend_v2/e2e/store-home-blocks-journey.spec.ts` | الرحلة: كتلةٌ من اللوحة ← ظهورٌ في الصفحة الرئيسية العامة (م٦) |
 | `store/slugs.py` | `build_unique_slug` — النسخةُ **الحيّة** لتوليد slug عربيٍّ فريد، يستعملها `StoreProduct.save()` وحده |
 | `store/migrations/0006_migrate_catalog_to_store_product.py` | نسخُ الأصناف المستحقّة إلى `StoreProduct` — مُضيفةٌ محضة وقابلةٌ لإعادة التشغيل. تحمل نسخةً **مجمَّدةً** مستقلّةً من منطق الـslug (`_build_unique_slug_frozen`) ولا تستورد من `store/slugs.py` عمداً — هجرةٌ يجب أن تُنتج نفسَ النتيجة بعد سنوات بلا تأثّرٍ بتطوّر الكود الحيّ |
 | `store/migrations/0007_m2_product_fk_nullable.py` | إسقاطُ قيد `NOT NULL` عن `product` في الجداول الثلاثة — بلا حذفٍ ولا مسٍّ للبيانات (م٢) |

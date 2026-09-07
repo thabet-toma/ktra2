@@ -631,3 +631,154 @@ class StorePriceHistory(models.Model):
     def __str__(self):
         return f"{self.store_product_id} @ {self.changed_at}: {self.price}"
 
+
+class StoreHomeBlock(models.Model):
+    """كتلةٌ قابلة للترتيب على الصفحة الرئيسية للمتجر — تحسينٌ اختياريٌّ فوق
+    الشبكة القائمة، لا استبدالٌ لها (مواصفة #166 م٦).
+
+    **قاعدة السقوط، أهمُّ قرارٍ هنا:** متجرٌ بلا صفٍّ مفعَّلٍ هنا يعرض نفس
+    الشبكة التي يعرضها اليوم بالضبط — القراءة العامة (`store/views.py`،
+    `StoreHomeView`) لا تلمس `published_products`/`StoreProfileView` بحرف.
+
+    `source_id` و`link_id` أعدادٌ مجرَّدة عمداً لا `ForeignKey`: الهدف
+    متعدّدُ الأشكال حسب `kind`/`link_kind` (حملةٌ أو فئةٌ أو منتج) فلا حقلٌ
+    واحد يقدر أن يُشير إليها جميعاً — نفس منطق `imported_from_product_id`
+    أعلاه على `StoreProduct`.
+    """
+
+    KIND_HERO = "hero"
+    KIND_CAMPAIGN_ROW = "campaign_row"
+    KIND_CATEGORY_ROW = "category_row"
+    KIND_FEATURED = "featured"
+    KIND_MOST_VIEWED = "most_viewed"
+    KIND_ACTIVE_CAMPAIGNS = "active_campaigns"
+    KIND_CHOICES = [
+        (KIND_HERO, "لافتة كبرى"),
+        (KIND_CAMPAIGN_ROW, "صفّ حملة"),
+        (KIND_CATEGORY_ROW, "صفّ فئة"),
+        (KIND_FEATURED, "صفّ منتقىً باليد"),
+        (KIND_MOST_VIEWED, "الأكثر مشاهدة"),
+        (KIND_ACTIVE_CAMPAIGNS, "الحملات السارية"),
+    ]
+    #: الأنواع التي تُقرأ منتجاتها من `source_id` — حملةٌ للأوليين، فئةٌ للثالث.
+    KINDS_WITH_COLLECTION_SOURCE = (KIND_CAMPAIGN_ROW, KIND_FEATURED)
+    KINDS_WITH_CATEGORY_SOURCE = (KIND_CATEGORY_ROW,)
+
+    LINK_COLLECTION = "collection"
+    LINK_CATEGORY = "category"
+    LINK_PRODUCT = "product"
+    LINK_URL = "url"
+    LINK_NONE = "none"
+    LINK_KIND_CHOICES = [
+        (LINK_COLLECTION, "حملة"),
+        (LINK_CATEGORY, "فئة"),
+        (LINK_PRODUCT, "منتج"),
+        (LINK_URL, "رابط خارجي"),
+        (LINK_NONE, "بلا وجهة"),
+    ]
+
+    #: سقفٌ صريح لكل شركة — الصفحة الرئيسية واجهةٌ لا خلاصةُ أخبار.
+    MAX_ACTIVE_BLOCKS = 10
+    DEFAULT_LIMIT = 12
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="store_home_blocks",
+        db_column="TenantID",
+    )
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, db_column="Kind")
+    title = models.CharField(max_length=200, blank=True, default="", db_column="Title")
+    subtitle = models.CharField(max_length=300, blank=True, default="", db_column="Subtitle")
+    image_url = models.CharField(max_length=500, blank=True, default="", db_column="ImageUrl")
+    image_url_mobile = models.CharField(
+        max_length=500, blank=True, default="", db_column="ImageUrlMobile"
+    )
+    link_kind = models.CharField(
+        max_length=20, choices=LINK_KIND_CHOICES, default=LINK_NONE, db_column="LinkKind"
+    )
+    link_id = models.PositiveIntegerField(null=True, blank=True, db_column="LinkID")
+    link_url = models.CharField(max_length=500, blank=True, default="", db_column="LinkUrl")
+    source_id = models.PositiveIntegerField(null=True, blank=True, db_column="SourceID")
+    limit = models.PositiveIntegerField(default=DEFAULT_LIMIT, db_column="Limit")
+    sort_order = models.PositiveIntegerField(default=0, db_column="SortOrder")
+    is_active = models.BooleanField(default=True, db_column="IsActive")
+    created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+    updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
+
+    class Meta:
+        db_table = "store_home_blocks"
+        managed = True
+        ordering = ["sort_order", "id"]
+
+    def _reject_invalid_source(self):
+        """`source_id` مصدرُ منتجات الصفّ — يلزم الأنواعَ الثلاثة أدناه فقط،
+        ويُتحقَّق أنه ينتمي لنفس الشركة (لا تعفّنٌ صامت، مواصفة #166 م٦)."""
+        if self.kind in self.KINDS_WITH_COLLECTION_SOURCE:
+            if not self.source_id or not StoreCollection.objects.filter(
+                tenant_id=self.tenant_id, pk=self.source_id
+            ).exists():
+                raise ValidationError(
+                    {"source_id": "يجب اختيار حملةٍ موجودةٍ من نفس الشركة."}
+                )
+        elif self.kind in self.KINDS_WITH_CATEGORY_SOURCE:
+            if not self.source_id or not StoreCategory.objects.filter(
+                tenant_id=self.tenant_id, pk=self.source_id
+            ).exists():
+                raise ValidationError(
+                    {"source_id": "يجب اختيار فئةٍ موجودةٍ من نفس الشركة."}
+                )
+
+    def _reject_invalid_link(self):
+        """الوجهةُ مُصنَّفةٌ لا رابطٌ حرّ (قسم أ من المواصفة) — تُتحقَّق هنا
+        عند الحفظ، لا تُترَك لتتعفّن بحذف الهدف لاحقاً."""
+        if self.link_kind == self.LINK_COLLECTION:
+            if not self.link_id or not StoreCollection.objects.filter(
+                tenant_id=self.tenant_id, pk=self.link_id
+            ).exists():
+                raise ValidationError({"link_id": "وجهة الرابط (حملة) غير موجودة في هذه الشركة."})
+        elif self.link_kind == self.LINK_CATEGORY:
+            if not self.link_id or not StoreCategory.objects.filter(
+                tenant_id=self.tenant_id, pk=self.link_id
+            ).exists():
+                raise ValidationError({"link_id": "وجهة الرابط (فئة) غير موجودة في هذه الشركة."})
+        elif self.link_kind == self.LINK_PRODUCT:
+            if not self.link_id or not StoreProduct.objects.filter(
+                tenant_id=self.tenant_id, pk=self.link_id
+            ).exists():
+                raise ValidationError({"link_id": "وجهة الرابط (منتج) غير موجودة في هذه الشركة."})
+        elif self.link_kind == self.LINK_URL:
+            if not self.link_url.strip():
+                raise ValidationError({"link_url": "الرابط الخارجي مطلوبٌ لهذا النوع من الوجهات."})
+
+    def _reject_over_the_active_cap(self):
+        """سقفٌ صريح: عشر كتلٍ مفعَّلةٍ كحدٍّ أقصى لكل شركة (قسم ج) — الصفحة
+        الرئيسية واجهةٌ لا خلاصةَ أخبار، وبلا سقفٍ يتحوّل الحمّالُ إلى تمريرٍ
+        لا ينتهي وتُدفَع كلفةُ استعلامٍ لكلّ صفّ."""
+        if not self.is_active:
+            return
+        active_count = (
+            StoreHomeBlock.objects.filter(tenant_id=self.tenant_id, is_active=True)
+            .exclude(pk=self.pk)
+            .count()
+        )
+        if active_count >= self.MAX_ACTIVE_BLOCKS:
+            raise ValidationError(
+                {"is_active": f"الحدّ الأقصى {self.MAX_ACTIVE_BLOCKS} كتلٍ مفعَّلةٍ لكل متجر."}
+            )
+
+    def clean(self):
+        self._reject_invalid_source()
+        self._reject_invalid_link()
+        self._reject_over_the_active_cap()
+
+    def save(self, *args, **kwargs):
+        # الحرّاسُ هنا لا في `clean()` وحدها — نفس نمط `StoreCategory`/
+        # `StoreProduct` أعلاه: جانغو لا ينادي `clean()` من `save()` تلقائياً،
+        # و`objects.create()` كان سيتجاوزها بصمت.
+        self._reject_invalid_source()
+        self._reject_invalid_link()
+        self._reject_over_the_active_cap()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.get_kind_display()} — {self.title or self.id}"
+

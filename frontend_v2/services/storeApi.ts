@@ -76,6 +76,46 @@ export interface StoreProduct {
 
 export type StoreSort = "" | "price_asc" | "price_desc";
 
+/** كتلُ الصفحة الرئيسية (THA-166 م٦) — سبعةُ حقولٍ ثابتة بصرف النظر عن
+ * `kind`: `products`/`campaigns` فارغتان لما لا يخصّها النوع. */
+export type StoreHomeBlockKind =
+  | "hero"
+  | "campaign_row"
+  | "category_row"
+  | "featured"
+  | "most_viewed"
+  | "active_campaigns";
+
+export type StoreHomeLinkKind = "collection" | "category" | "product" | "url" | "none";
+
+/** وجهةٌ مُصنَّفة — `target` سلاجُ الحملة/معرّف الفئة أو المنتج، و`url` للرابط الخارجي وحده. */
+export interface StoreHomeLink {
+  kind: StoreHomeLinkKind;
+  target: string | number | null;
+  url: string | null;
+}
+
+export interface StoreHomeBlock {
+  id: number;
+  kind: StoreHomeBlockKind;
+  title: string;
+  subtitle: string;
+  image_url: string | null;
+  image_url_mobile: string | null;
+  link: StoreHomeLink;
+  products: StoreProduct[];
+  campaigns: StoreCollection[];
+}
+
+export interface StoreHomePayload {
+  blocks: StoreHomeBlock[];
+}
+
+/** كتلُ الصفحة الرئيسية — `{blocks: []}` لمتجرٍ لم يضبط شيئاً (قاعدة السقوط). */
+export function getStoreHome(slug: string): Promise<StoreHomePayload> {
+  return apiGetObject<StoreHomePayload>(`${base(slug)}home/`);
+}
+
 export interface StoreProductQuery {
   q?: string;
   brand?: string;

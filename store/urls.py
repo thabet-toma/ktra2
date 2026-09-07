@@ -9,6 +9,8 @@ from store.views import (
     StoreCollectionDetailView,
     StoreCollectionItemAdminViewSet,
     StoreCollectionListView,
+    StoreHomeBlockAdminViewSet,
+    StoreHomeView,
     StoreOrderIntentView,
     StoreProductAdminViewSet,
     StoreProductDetailView,
@@ -49,6 +51,11 @@ router.register(
     StoreCollectionItemAdminViewSet,
     basename="store-admin-collection-items",
 )
+router.register(
+    r"admin/home-blocks",
+    StoreHomeBlockAdminViewSet,
+    basename="store-admin-home-blocks",
+)
 
 urlpatterns = [
     # نقاط إدارة المتجر المصادق عليها
@@ -76,6 +83,7 @@ urlpatterns = [
         StoreOrderIntentView.as_view(),
         name="store-order-intent",
     ),
+    path("<slug:slug>/home/", StoreHomeView.as_view(), name="store-home"),
     path("<slug:slug>/", StoreProfileView.as_view(), name="store-profile"),
 ]
 

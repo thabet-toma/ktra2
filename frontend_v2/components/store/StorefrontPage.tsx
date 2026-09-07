@@ -26,11 +26,13 @@ import { useToast } from "../../contexts/ToastContext";
 import { useDocumentDescription, useDocumentTitle } from "../../hooks/useDocumentTitle";
 import {
   getStoreCollections,
+  getStoreHome,
   getStoreProducts,
   getStoreProfile,
   isStoreNotFound,
   STORE_SORTS,
   type StoreCollection,
+  type StoreHomeBlock,
   type StoreProduct,
   type StoreProfile,
   type StoreSort,
@@ -38,6 +40,7 @@ import {
 import { whatsappLink } from "../../utils/storeLinks";
 import { StoreCartDrawer } from "./StoreCartDrawer";
 import { StoreCatalogSlider } from "./StoreCatalogSlider";
+import { StoreHomeBlocks } from "./StoreHomeBlocks";
 import { StoreProductCard } from "./StoreProductCard";
 
 interface StorefrontPageProps {
@@ -74,6 +77,7 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({
 
   const [profile, setProfile] = useState<StoreProfile | null>(null);
   const [collections, setCollections] = useState<StoreCollection[]>([]);
+  const [homeBlocks, setHomeBlocks] = useState<StoreHomeBlock[]>([]);
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [facets, setFacets] = useState<Facets>({ brands: [], categories: [] });
   const [count, setCount] = useState(0);
@@ -116,11 +120,17 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({
       getStoreCollections(slug)
         .then((paged) => paged.results)
         .catch(() => [] as StoreCollection[]),
+      // كتلُ الصفحة الرئيسية تحسينٌ اختياري — فشلُها لا يعطّل فتح المتجر،
+      // وحمولةٌ غير متوقّعة الشكل تسقط إلى فراغ بدل كسر التصيير (قاعدة السقوط).
+      getStoreHome(slug)
+        .then((payload) => (Array.isArray(payload?.blocks) ? payload.blocks : []))
+        .catch(() => [] as StoreHomeBlock[]),
     ])
-      .then(([profData, colsData]) => {
+      .then(([profData, colsData, blocksData]) => {
         if (!alive) return;
         setProfile(profData);
         setCollections(colsData);
+        setHomeBlocks(blocksData);
         if (profData.catalog_mode_default === "slideshow") {
           setViewMode("slideshow");
         }
@@ -406,6 +416,14 @@ export const StorefrontPage: React.FC<StorefrontPageProps> = ({
           </div>
         </div>
       )}
+
+      {/* كتلُ الصفحة الرئيسية — فوق الشبكة القائمة، والشبكةُ تبقى تحتها كما هي */}
+      <StoreHomeBlocks
+        blocks={homeBlocks}
+        profile={profile}
+        onOpenProduct={onOpenProduct}
+        onOpenCollection={onOpenCollection}
+      />
 
       {/* شريط البحث والتصفية */}
       <div className="mx-auto max-w-7xl px-4 pt-6 sm:px-6">

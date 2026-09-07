@@ -38,6 +38,7 @@ from store.models import (
     StoreCollection,
     StoreCollectionItem,
     StoreCollectionView,
+    StoreHomeBlock,
     StoreOrderIntent,
     StoreProduct,
     StoreProductImage,
@@ -51,6 +52,7 @@ from store.serializers import (
     StoreCollectionDetailSerializer,
     StoreCollectionItemAdminSerializer,
     StoreCollectionSerializer,
+    StoreHomeBlockAdminSerializer,
     StoreProductAdminSerializer,
     StoreProductImageAdminSerializer,
     StoreProductSerializer,
@@ -259,6 +261,245 @@ def _store_media_context(tenant, products):
 def _image_map(tenant, products):
     """روابط الصور لمجموعة منتجات — استعلام مجمّع، أولوية لصور المتجر المخصصة."""
     return _store_media_context(tenant, products)["images"]
+
+
+def _active_campaigns_queryset(tenant, now):
+    """حملاتٌ سارية الآن — نفس شرط `_active_campaign_discount_percent` أعلاه
+    لكن على `StoreCollection` مباشرة لا كضمّ على المنتج. **بلا `__date`
+    إطلاقاً** (`core/date_ranges.py`) — مقارنةٌ على `datetime` مباشرة."""
+    return (
+        StoreCollection.objects.filter(tenant=tenant, is_active=True)
+        .filter(Q(starts_at__isnull=True) | Q(starts_at__lte=now))
+        .filter(Q(ends_at__isnull=True) | Q(ends_at__gte=now))
+    )
+
+
+def _collection_is_active_campaign(collection, now):
+    """نفس شرط `_active_campaigns_queryset` مطبَّقاً بايثونياً على كائنٍ
+    مجلوبٍ سلفاً — لا استعلامَ إضافياً لكل كتلة."""
+    if not collection.is_active:
+        return False
+    if collection.starts_at and collection.starts_at > now:
+        return False
+    if collection.ends_at and collection.ends_at < now:
+        return False
+    return True
+
+
+def _collect_home_block_sources(blocks):
+    """يجمع كل معرّفات المصادر/الوجهات المطلوبة عبر كل الكتل دفعةً واحدة —
+    هذا هو ما يبقي عددَ الاستعلامات ثابتاً بصرف النظر عن عدد الكتل (قسم ج)."""
+    collection_ids = set()
+    category_ids = set()
+    needs_most_viewed = False
+    needs_active_campaigns = False
+    for b in blocks:
+        if b.kind in StoreHomeBlock.KINDS_WITH_COLLECTION_SOURCE and b.source_id:
+            collection_ids.add(b.source_id)
+        if b.kind in StoreHomeBlock.KINDS_WITH_CATEGORY_SOURCE and b.source_id:
+            category_ids.add(b.source_id)
+        if b.kind == StoreHomeBlock.KIND_MOST_VIEWED:
+            needs_most_viewed = True
+        if b.kind == StoreHomeBlock.KIND_ACTIVE_CAMPAIGNS:
+            needs_active_campaigns = True
+        # وجهة «حملة» تُضاف لنفس الدفعة — فلا استعلامٌ ثانٍ لحلّ الـslug.
+        if b.link_kind == StoreHomeBlock.LINK_COLLECTION and b.link_id:
+            collection_ids.add(b.link_id)
+    return collection_ids, category_ids, needs_most_viewed, needs_active_campaigns
+
+
+def _home_block_context(tenant, blocks):
+    """يبني كل ما تحتاجه كتلُ الصفحة الرئيسية باستعلاماتٍ مجمَّعةٍ ثابتة
+    العدد — لا استعلامَ لكل كتلة (درسُ ٣٥٠١ استعلام، قسم ج)."""
+    now = timezone.now()
+    collection_ids, category_ids, needs_most_viewed, needs_active_campaigns = (
+        _collect_home_block_sources(blocks)
+    )
+
+    collections_by_id = {}
+    if collection_ids:
+        collections_by_id = {
+            c.id: c
+            for c in StoreCollection.objects.filter(tenant=tenant, pk__in=collection_ids)
+        }
+
+    product_ids_by_collection = {}
+    if collections_by_id:
+        for collection_id, store_product_id in (
+            StoreCollectionItem.objects.filter(collection_id__in=collections_by_id.keys())
+            .order_by("sort_order", "id")
+            .values_list("collection_id", "store_product_id")
+        ):
+            if store_product_id is None:
+                continue
+            product_ids_by_collection.setdefault(collection_id, []).append(store_product_id)
+
+    product_ids_by_category = {}
+    if category_ids:
+        for product_id, category_id in (
+            published_products(tenant)
+            .filter(categories__id__in=category_ids)
+            .order_by("sort_order", "id")
+            .values_list("id", "categories__id")
+        ):
+            product_ids_by_category.setdefault(category_id, []).append(product_id)
+
+    most_viewed_ids = []
+    if needs_most_viewed:
+        most_viewed_ids = list(
+            StoreProductView.objects.filter(tenant=tenant, store_product_id__isnull=False)
+            .values("store_product_id")
+            .annotate(total=Sum("count"))
+            .order_by("-total")
+            .values_list("store_product_id", flat=True)[:100]
+        )
+
+    active_campaigns = []
+    if needs_active_campaigns:
+        active_campaigns = list(
+            _active_campaigns_queryset(tenant, now)
+            .annotate(items_count=Count("items"))
+            .order_by("-priority", "sort_order", "id")
+        )
+
+    all_product_ids = set(most_viewed_ids)
+    for ids in product_ids_by_collection.values():
+        all_product_ids.update(ids)
+    for ids in product_ids_by_category.values():
+        all_product_ids.update(ids)
+
+    products_by_id = {}
+    if all_product_ids:
+        products_by_id = {
+            p.id: p for p in published_products(tenant).filter(id__in=all_product_ids)
+        }
+
+    media_context = _store_media_context(tenant, list(products_by_id.values()))
+    media_context["prices_public"] = _prices_are_public(tenant)
+
+    return {
+        "now": now,
+        "collections_by_id": collections_by_id,
+        "product_ids_by_collection": product_ids_by_collection,
+        "product_ids_by_category": product_ids_by_category,
+        "most_viewed_ids": most_viewed_ids,
+        "active_campaigns": active_campaigns,
+        "products_by_id": products_by_id,
+        "media_context": media_context,
+    }
+
+
+def _hydrate_home_products(product_ids, ctx, limit):
+    """يحوّل قائمة معرّفاتٍ مرتَّبة إلى بيانات منتجٍ عامة — **من نفس بنّاء
+    العقد العامّ** (`StoreProductSerializer`) الذي يمرّ منه المتجر، لا
+    مُسلسِلٌ ثانٍ يفترق يوماً فيسرّب (قسم د)."""
+    picked = []
+    for pid in product_ids:
+        product = ctx["products_by_id"].get(pid)
+        if product is None:
+            continue
+        picked.append(product)
+        if len(picked) >= limit:
+            break
+    return StoreProductSerializer(picked, many=True, context=ctx["media_context"]).data
+
+
+def _serialize_home_link(block, ctx):
+    """الوجهةُ مُصنَّفةٌ لا رابطٌ حرّ — ثلاثةُ مفاتيحَ ثابتة بصرف النظر عن
+    `link_kind` كي تبقى القائمة البيضاء تعادلاً بسيطاً لمجموعة مفاتيح."""
+    if block.link_kind == StoreHomeBlock.LINK_COLLECTION:
+        collection = ctx["collections_by_id"].get(block.link_id)
+        return {"kind": "collection", "target": collection.slug if collection else None, "url": None}
+    if block.link_kind == StoreHomeBlock.LINK_CATEGORY:
+        return {"kind": "category", "target": block.link_id, "url": None}
+    if block.link_kind == StoreHomeBlock.LINK_PRODUCT:
+        return {"kind": "product", "target": block.link_id, "url": None}
+    if block.link_kind == StoreHomeBlock.LINK_URL:
+        return {"kind": "url", "target": None, "url": block.link_url or None}
+    return {"kind": "none", "target": None, "url": None}
+
+
+def _serialize_home_block(block, ctx):
+    """يعيد حمولة الكتلة، أو `None` إن كانت بلا محتوىً — قاعدة السقوط تفرض
+    حذف الكتلة كلّياً حينها لا عرض عنوانٍ فوق فراغ (قسم ب)."""
+    base = {
+        "id": block.id,
+        "kind": block.kind,
+        "title": block.title,
+        "subtitle": block.subtitle,
+        "image_url": block.image_url or None,
+        "image_url_mobile": block.image_url_mobile or None,
+        "link": _serialize_home_link(block, ctx),
+        "products": [],
+        "campaigns": [],
+    }
+
+    if block.kind == StoreHomeBlock.KIND_HERO:
+        return base
+
+    if block.kind in StoreHomeBlock.KINDS_WITH_COLLECTION_SOURCE:
+        collection = ctx["collections_by_id"].get(block.source_id)
+        if collection is None:
+            return None
+        if block.kind == StoreHomeBlock.KIND_CAMPAIGN_ROW and not _collection_is_active_campaign(
+            collection, ctx["now"]
+        ):
+            return None
+        products = _hydrate_home_products(
+            ctx["product_ids_by_collection"].get(block.source_id, []), ctx, block.limit
+        )
+        if not products:
+            return None
+        base["products"] = products
+        return base
+
+    if block.kind == StoreHomeBlock.KIND_CATEGORY_ROW:
+        products = _hydrate_home_products(
+            ctx["product_ids_by_category"].get(block.source_id, []), ctx, block.limit
+        )
+        if not products:
+            return None
+        base["products"] = products
+        return base
+
+    if block.kind == StoreHomeBlock.KIND_MOST_VIEWED:
+        products = _hydrate_home_products(ctx["most_viewed_ids"], ctx, block.limit)
+        if not products:
+            return None
+        base["products"] = products
+        return base
+
+    if block.kind == StoreHomeBlock.KIND_ACTIVE_CAMPAIGNS:
+        campaigns = ctx["active_campaigns"][: block.limit]
+        if not campaigns:
+            return None
+        base["campaigns"] = StoreCollectionSerializer(campaigns, many=True).data
+        return base
+
+    return None
+
+
+def _home_blocks_referencing(tenant, *, link_kind=None, link_id=None, source_kinds=(), source_id=None):
+    """يبحث عن كتلَ صفحةٍ رئيسيةٍ تشير إلى هدفٍ بعينه — يُستعمَل لكشف
+    الاعتماد عند محاولة حذف حملةٍ/فئةٍ/منتجٍ ما زال مُستهدَفاً (قسم أ:
+    «تُتحقَّق عند الحفظ وتُكشَف عند الحذف»)."""
+    query = Q(pk__in=[])
+    if link_kind and link_id:
+        query |= Q(link_kind=link_kind, link_id=link_id)
+    if source_kinds and source_id:
+        query |= Q(kind__in=source_kinds, source_id=source_id)
+    return StoreHomeBlock.objects.filter(tenant=tenant).filter(query)
+
+
+def _raise_if_blocks_reference(blocking_qs):
+    titles = [t or "بلا عنوان" for t in blocking_qs.values_list("title", flat=True)]
+    if titles:
+        raise ValidationError({
+            "non_field_errors": [
+                "هذا العنصر مستخدَمٌ في كتلة الصفحة الرئيسية (" + "، ".join(titles) + ") "
+                "— عدّل الكتلة أو احذفها أولاً."
+            ]
+        })
 
 
 def _tenant_or_404(slug):
@@ -778,6 +1019,52 @@ class StoreCollectionDetailView(StorePublicView):
             ).update(count=F("count") + 1)
 
 
+class StoreHomeView(StorePublicView):
+    """`GET /api/store/<slug>/home/` — كتلُ الصفحة الرئيسية المرتَّبة
+    (مواصفة #166 م٦).
+
+    **نقطةٌ منفصلة عن `StoreProfileView` عمداً** لا حقلٌ إضافيٌّ فيها:
+    `campaign_row`/`active_campaigns` يحملان الزمن في نتيجتهما فيلزمهما
+    سقفُ عمرِ كاشٍ قصير (≤ ٥ دقائق، قسم د)، بينما `StoreProfileView` اليوم
+    **غير مكاشٍ أصلاً** — خلطُهما يُجبر إمّا إسقاط كاش البروفايل بالكامل أو
+    تحميله بمنطقٍ زمنيّ لا علاقة له بالمظهر والهوية. والفصل يبقي قاعدة
+    السقوط (قسم ب) نظيفةً بالبناء: متجرٌ بلا كتلٍ لا يغيّر ردَّ `/products/`
+    ولا `/`  بحرفٍ واحد، لأن لا شيء منهما يستورد من هذا الملف.
+    """
+
+    #: ≤ ٣٠٠ (خمس دقائق) — بدءُ/انتهاءُ حملةٍ حدثُ ساعةٍ لا حدثُ حفظ (قسم د).
+    HOME_CACHE_SECONDS = 300
+
+    def _cache_key(self, tenant):
+        # نفس عدّاد النسخة الذي يُبطل كاش المنتجات — كتابةٌ على كتلةٍ من
+        # لوحة الإدارة تمرّ بـ`InvalidatesStoreCacheMixin` فتزيده، فتُبطل
+        # هذا المفتاح فوراً بلا آلية إبطالٍ ثانية.
+        version = products_version(tenant.pk)
+        return f"store:{tenant.store_slug}:home:v{version}"
+
+    def get(self, request, slug):
+        tenant = _tenant_or_404(slug)
+        cache_key = self._cache_key(tenant)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        blocks = list(
+            StoreHomeBlock.objects.filter(tenant=tenant, is_active=True)
+            .order_by("sort_order", "id")[: StoreHomeBlock.MAX_ACTIVE_BLOCKS]
+        )
+        ctx = _home_block_context(tenant, blocks)
+        serialized = []
+        for block in blocks:
+            data = _serialize_home_block(block, ctx)
+            if data is not None:
+                serialized.append(data)
+
+        payload = {"blocks": serialized}
+        cache.set(cache_key, payload, self.HOME_CACHE_SECONDS)
+        return Response(payload)
+
+
 class StoreOrderIntentView(StorePublicView):
     """`POST /api/store/<slug>/order-intent/` — لقطةُ نيّة طلبٍ **قبل** القفز
     إلى واتساب (مواصفة #166 م٥).
@@ -970,6 +1257,19 @@ class StoreCollectionAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet)
             ),
         ).order_by("sort_order", "id")
 
+    def perform_destroy(self, instance):
+        # الوجهةُ الحرّة تتعفّن، والمصنَّفةُ تُكشَف عند الحذف (قسم أ) — حملةٌ
+        # ما زالت مصدراً لـ`campaign_row`/`featured` أو وجهةَ كتلةٍ أخرى
+        # تمنع حذفها بدل ترك الكتلة تشير إلى لا شيء بصمت.
+        _raise_if_blocks_reference(
+            _home_blocks_referencing(
+                instance.tenant,
+                link_kind=StoreHomeBlock.LINK_COLLECTION, link_id=instance.pk,
+                source_kinds=StoreHomeBlock.KINDS_WITH_COLLECTION_SOURCE, source_id=instance.pk,
+            )
+        )
+        instance.delete()
+
 
 class StoreCollectionItemAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
     """إدارة المنتجات داخل المجموعة الإعلانية."""
@@ -1023,6 +1323,16 @@ class StoreCategoryAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
     def get_queryset(self):
         return super().get_queryset().select_related("parent").order_by("sort_order", "id")
 
+    def perform_destroy(self, instance):
+        _raise_if_blocks_reference(
+            _home_blocks_referencing(
+                instance.tenant,
+                link_kind=StoreHomeBlock.LINK_CATEGORY, link_id=instance.pk,
+                source_kinds=StoreHomeBlock.KINDS_WITH_CATEGORY_SOURCE, source_id=instance.pk,
+            )
+        )
+        instance.delete()
+
 
 class StoreProductAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
     """إدارة كتالوج المتجر المستقلّ (`StoreProduct`) مباشرة — لا تكتب على
@@ -1056,6 +1366,15 @@ class StoreProductAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
             )
 
         return qs.order_by("-created_at", "-id")
+
+    def perform_destroy(self, instance):
+        _raise_if_blocks_reference(
+            _home_blocks_referencing(
+                instance.tenant,
+                link_kind=StoreHomeBlock.LINK_PRODUCT, link_id=instance.pk,
+            )
+        )
+        instance.delete()
 
     #: سقفُ عدد المعرّفات لكل طلب استيراد — لكل عنصرٍ ثلاثةُ استعلامات فعلياً
     #: (`save()` تفحص فرادة الـslug وتكتب `StorePriceHistory`)، فطلبٌ بلا سقفٍ
@@ -1185,5 +1504,23 @@ class StoreProductAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
             "imported_ids": [sp.id for sp in created],
             "message": message,
         })
+
+
+class StoreHomeBlockAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
+    """إدارة كتل الصفحة الرئيسية (THA-166 م٦) — محتوىً تحت `store.manage`
+    وحدها، لا `store.pricing`: كتلةٌ لا تحمل سعراً أو خصماً بذاتها، هي فقط
+    تُشير إلى حملةٍ أو فئةٍ أو منتجٍ موجودَين سلفاً بحقوقهما الخاصة."""
+
+    permission_classes = [IsAuthenticated, TemplateSurfacePermission]
+    serializer_class = StoreHomeBlockAdminSerializer
+    queryset = StoreHomeBlock.objects.all()
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        tenant = get_tenant(request)
+        require_perm(request, "store.manage", tenant=tenant)
+
+    def get_queryset(self):
+        return super().get_queryset().order_by("sort_order", "id")
 
 

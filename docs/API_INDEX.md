@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **607**
+عدد النقاط: **610**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -566,6 +566,7 @@
 | `/api/store/<slug:slug>/` | `StoreProfileView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/` | `StoreCollectionListView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/<slug:collection_slug>/` | `StoreCollectionDetailView` | `store/views.py` |
+| `/api/store/<slug:slug>/home/` | `StoreHomeView` | `store/views.py` |
 | `/api/store/<slug:slug>/order-intent/` | `StoreOrderIntentView` | `store/views.py` |
 | `/api/store/<slug:slug>/products/` | `StoreProductListView` | `store/views.py` |
 | `/api/store/<slug:slug>/products/<int:pk>/` | `StoreProductDetailView` | `store/views.py` |
@@ -577,6 +578,8 @@
 | `/api/store/admin/collection-items/{pk}/` | `StoreCollectionItemAdminViewSet` | `store/views.py` |
 | `/api/store/admin/collections/` | `StoreCollectionAdminViewSet` | `store/views.py` |
 | `/api/store/admin/collections/{pk}/` | `StoreCollectionAdminViewSet` | `store/views.py` |
+| `/api/store/admin/home-blocks/` | `StoreHomeBlockAdminViewSet` | `store/views.py` |
+| `/api/store/admin/home-blocks/{pk}/` | `StoreHomeBlockAdminViewSet` | `store/views.py` |
 | `/api/store/admin/product-images/` | `StoreProductImageAdminViewSet` | `store/views.py` |
 | `/api/store/admin/product-images/{pk}/` | `StoreProductImageAdminViewSet` | `store/views.py` |
 | `/api/store/admin/products/` | `StoreProductAdminViewSet` | `store/views.py` |

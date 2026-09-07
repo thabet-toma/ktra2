@@ -408,3 +408,82 @@ export function deleteStoreCollectionItemAdmin(id: number): Promise<void> {
   return apiDelete(`store/admin/collection-items/${id}/`, tenantOpts());
 }
 
+// ── كتلُ الصفحة الرئيسية (Store Home Blocks — THA-166 م٦) ─────────────────
+
+export type StoreHomeBlockKind =
+  | "hero"
+  | "campaign_row"
+  | "category_row"
+  | "featured"
+  | "most_viewed"
+  | "active_campaigns";
+
+export type StoreHomeLinkKind = "collection" | "category" | "product" | "url" | "none";
+
+/** سقفٌ صريح لكل شركة — رسالةُ الخادم عند تجاوزه تُعرض كما هي (400). */
+export const STORE_HOME_BLOCK_MAX_ACTIVE = 10;
+
+/** الحدّ الافتراضي لعدد عناصر الصفّ عند عدم تحديده. */
+export const STORE_HOME_BLOCK_DEFAULT_LIMIT = 12;
+
+export interface StoreHomeBlockAdmin {
+  id: number;
+  kind: StoreHomeBlockKind;
+  title: string;
+  subtitle: string;
+  image_url: string;
+  image_url_mobile: string;
+  link_kind: StoreHomeLinkKind;
+  link_id: number | null;
+  link_url: string;
+  source_id: number | null;
+  limit: number;
+  sort_order: number;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface StoreHomeBlockPayload {
+  kind: StoreHomeBlockKind;
+  title?: string;
+  subtitle?: string;
+  image_url?: string;
+  image_url_mobile?: string;
+  link_kind?: StoreHomeLinkKind;
+  link_id?: number | null;
+  link_url?: string;
+  source_id?: number | null;
+  limit?: number;
+  sort_order?: number;
+  is_active?: boolean;
+}
+
+export function getStoreHomeBlocksAdmin(): Promise<StoreHomeBlockAdmin[]> {
+  return apiGetPagedList<StoreHomeBlockAdmin>("store/admin/home-blocks/", {
+    ...tenantOpts(),
+    query: { page_size: 100 },
+  }).then((paged) => paged.results);
+}
+
+export function createStoreHomeBlockAdmin(
+  payload: StoreHomeBlockPayload,
+): Promise<StoreHomeBlockAdmin> {
+  return apiPostObject<StoreHomeBlockAdmin>("store/admin/home-blocks/", payload, tenantOpts());
+}
+
+export function updateStoreHomeBlockAdmin(
+  id: number,
+  patch: Partial<StoreHomeBlockPayload>,
+): Promise<StoreHomeBlockAdmin> {
+  return apiPatchObject<StoreHomeBlockAdmin>(
+    `store/admin/home-blocks/${id}/`,
+    patch,
+    tenantOpts(),
+  );
+}
+
+export function deleteStoreHomeBlockAdmin(id: number): Promise<void> {
+  return apiDelete(`store/admin/home-blocks/${id}/`, tenantOpts());
+}
+

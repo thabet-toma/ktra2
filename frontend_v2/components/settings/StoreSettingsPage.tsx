@@ -6,6 +6,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
   ArrowUpRight,
   Check,
   CheckCircle2,
@@ -15,6 +17,7 @@ import {
   Eye,
   Flame,
   Globe,
+  Home as HomeIcon,
   Image as ImageIcon,
   ImagePlus,
   Layers,
@@ -56,10 +59,12 @@ import {
   createStoreAdminBrand,
   createStoreAdminCategory,
   createStoreCollectionAdmin,
+  createStoreHomeBlockAdmin,
   createStoreProduct,
   createStoreProductImage,
   deleteStoreCollectionAdmin,
   deleteStoreCollectionItemAdmin,
+  deleteStoreHomeBlockAdmin,
   deleteStoreProduct,
   deleteStoreProductImage,
   getPublishedProducts,
@@ -68,12 +73,16 @@ import {
   getStoreAdminProducts,
   getStoreCollectionItemsAdmin,
   getStoreCollectionsAdmin,
+  getStoreHomeBlocksAdmin,
   getStoreProductImages,
   getStoreThemeSettings,
   importStoreProductsFromInventory,
   setStoreSlug,
   storeAdminProductName,
+  STORE_HOME_BLOCK_DEFAULT_LIMIT,
+  STORE_HOME_BLOCK_MAX_ACTIVE,
   updateStoreCollectionAdmin,
+  updateStoreHomeBlockAdmin,
   updateStoreProduct,
   updateStoreProductImage,
   updateStoreThemeSettings,
@@ -83,6 +92,10 @@ import {
   type StoreAdminScope,
   type StoreCollectionAdmin,
   type StoreCollectionItemAdmin,
+  type StoreHomeBlockAdmin,
+  type StoreHomeBlockKind,
+  type StoreHomeBlockPayload,
+  type StoreHomeLinkKind,
   type StoreProductImageAdmin,
   type StoreProductPayload,
   type StoreStockState,
@@ -133,7 +146,32 @@ const emptyProductForm = (): StoreProductPayload => ({
 
 const cloudinaryService = new CloudinaryService();
 
-type ActiveTab = "overview" | "products" | "campaigns" | "theme";
+type ActiveTab = "overview" | "products" | "campaigns" | "theme" | "home";
+
+/** تسميةٌ عربية لكل نوع كتلة — لا تُسمَّى الحملة «campaign_row» في الواجهة. */
+const HOME_BLOCK_KIND_LABELS: Record<StoreHomeBlockKind, string> = {
+  hero: "لافتة كبرى",
+  campaign_row: "صفّ حملة",
+  category_row: "صفّ فئة",
+  featured: "صفّ منتقىً باليد",
+  most_viewed: "الأكثر مشاهدة",
+  active_campaigns: "الحملات السارية",
+};
+
+const emptyHomeBlockForm = (): StoreHomeBlockPayload => ({
+  kind: "hero",
+  title: "",
+  subtitle: "",
+  image_url: "",
+  image_url_mobile: "",
+  link_kind: "none",
+  link_id: null,
+  link_url: "",
+  source_id: null,
+  limit: STORE_HOME_BLOCK_DEFAULT_LIMIT,
+  sort_order: 0,
+  is_active: true,
+});
 
 const SCOPES: { key: StoreAdminScope; label: string }[] = [
   { key: "published", label: "المعروضة في المتجر" },
@@ -255,6 +293,18 @@ export const StoreSettingsPage: React.FC = () => {
   const [loadingTheme, setLoadingTheme] = useState(false);
   const [savingTheme, setSavingTheme] = useState(false);
 
+  // كتلُ الصفحة الرئيسية (THA-166 م٦)
+  const [homeBlocks, setHomeBlocks] = useState<StoreHomeBlockAdmin[]>([]);
+  const [loadingHomeBlocks, setLoadingHomeBlocks] = useState(false);
+  const [isHomeBlockModalOpen, setIsHomeBlockModalOpen] = useState(false);
+  const [editingHomeBlockId, setEditingHomeBlockId] = useState<number | null>(null);
+  const [homeBlockForm, setHomeBlockForm] = useState<StoreHomeBlockPayload>(emptyHomeBlockForm());
+  const [savingHomeBlock, setSavingHomeBlock] = useState(false);
+  const [homeProductQuery, setHomeProductQuery] = useState("");
+  const [homeProductResults, setHomeProductResults] = useState<StoreAdminProduct[]>([]);
+  const [homeProductSelected, setHomeProductSelected] = useState<StoreAdminProduct | null>(null);
+  const [searchingHomeProducts, setSearchingHomeProducts] = useState(false);
+
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -365,13 +415,172 @@ export const StoreSettingsPage: React.FC = () => {
     }
   }, [savedSlug]);
 
+  // تحميل كتل الصفحة الرئيسية
+  const loadHomeBlocks = useCallback(async () => {
+    if (!savedSlug) return;
+    setLoadingHomeBlocks(true);
+    try {
+      const data = await getStoreHomeBlocksAdmin();
+      setHomeBlocks(data);
+    } catch (e) {
+      toast(humanizeDrfError(e), "error");
+    } finally {
+      setLoadingHomeBlocks(false);
+    }
+  }, [savedSlug, toast]);
+
   useEffect(() => {
     if (activeTab === "campaigns") {
       void loadCollections();
     } else if (activeTab === "theme") {
       void loadThemeSettings();
+    } else if (activeTab === "home") {
+      void loadHomeBlocks();
+      void loadCollections();
+      void loadBrandsAndCategories();
     }
-  }, [activeTab, loadCollections, loadThemeSettings]);
+  }, [activeTab, loadCollections, loadThemeSettings, loadHomeBlocks, loadBrandsAndCategories]);
+
+  const activeHomeBlocksCount = useMemo(
+    () => homeBlocks.filter((b) => b.is_active).length,
+    [homeBlocks],
+  );
+
+  // بحثٌ مؤجَّلٌ عن منتجٍ ليكون وجهة كتلة (`link_kind === "product"`)
+  useEffect(() => {
+    if (homeBlockForm.link_kind !== "product") return;
+    const query = homeProductQuery.trim();
+    if (!query) {
+      setHomeProductResults([]);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setSearchingHomeProducts(true);
+      getStoreAdminProducts({ scope: "published", search: query, page: 1 })
+        .then((paged) => setHomeProductResults(paged.results))
+        .catch(() => setHomeProductResults([]))
+        .finally(() => setSearchingHomeProducts(false));
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [homeProductQuery, homeBlockForm.link_kind]);
+
+  const openCreateHomeBlockModal = () => {
+    setEditingHomeBlockId(null);
+    setHomeBlockForm(emptyHomeBlockForm());
+    setHomeProductSelected(null);
+    setHomeProductQuery("");
+    setHomeProductResults([]);
+    setIsHomeBlockModalOpen(true);
+  };
+
+  const openEditHomeBlockModal = (block: StoreHomeBlockAdmin) => {
+    setEditingHomeBlockId(block.id);
+    setHomeBlockForm({
+      kind: block.kind,
+      title: block.title,
+      subtitle: block.subtitle,
+      image_url: block.image_url,
+      image_url_mobile: block.image_url_mobile,
+      link_kind: block.link_kind,
+      link_id: block.link_id,
+      link_url: block.link_url,
+      source_id: block.source_id,
+      limit: block.limit,
+      sort_order: block.sort_order,
+      is_active: block.is_active,
+    });
+    setHomeProductSelected(null);
+    setHomeProductQuery("");
+    setHomeProductResults([]);
+    setIsHomeBlockModalOpen(true);
+  };
+
+  const handleSelectHomeLinkProduct = (product: StoreAdminProduct) => {
+    setHomeProductSelected(product);
+    setHomeBlockForm((prev) => ({ ...prev, link_id: product.id }));
+    setHomeProductResults([]);
+    setHomeProductQuery("");
+  };
+
+  const handleUploadHomeBlockImage = async (
+    field: "image_url" | "image_url_mobile",
+    file: File,
+  ) => {
+    try {
+      const url = await cloudinaryService.uploadFile(file);
+      setHomeBlockForm((prev) => ({ ...prev, [field]: url }));
+    } catch {
+      toast("فشل رفع الصورة", "error");
+    }
+  };
+
+  const handleSaveHomeBlockForm = async () => {
+    setSavingHomeBlock(true);
+    try {
+      if (editingHomeBlockId) {
+        const saved = await updateStoreHomeBlockAdmin(editingHomeBlockId, homeBlockForm);
+        setHomeBlocks((prev) => prev.map((b) => (b.id === saved.id ? saved : b)));
+        toast("تم حفظ تعديلات الكتلة", "success");
+      } else {
+        const created = await createStoreHomeBlockAdmin(homeBlockForm);
+        setHomeBlocks((prev) => [...prev, created]);
+        toast("تمت إضافة الكتلة", "success");
+      }
+      setIsHomeBlockModalOpen(false);
+    } catch (e) {
+      // رسالةُ الخادم عند تجاوز سقف الكتل المفعَّلة (400) تظهر كما هي — لا رسالة عامة.
+      toast(humanizeDrfError(e), "error");
+    } finally {
+      setSavingHomeBlock(false);
+    }
+  };
+
+  const handleDeleteHomeBlock = async (block: StoreHomeBlockAdmin) => {
+    const ok = await confirm({
+      title: "حذف كتلة الصفحة الرئيسية",
+      message: `هل أنت متأكد من حذف «${block.title || HOME_BLOCK_KIND_LABELS[block.kind]}»؟`,
+      confirmText: "حذف",
+      cancelText: "إلغاء",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteStoreHomeBlockAdmin(block.id);
+      setHomeBlocks((prev) => prev.filter((b) => b.id !== block.id));
+      toast("تم حذف الكتلة", "success");
+    } catch (e) {
+      // مثال: الحملة المصدر ما زالت مستخدَمةً في كتلةٍ أخرى — رسالة الخادم صريحة.
+      toast(humanizeDrfError(e), "error");
+    }
+  };
+
+  const handleToggleHomeBlockActive = async (block: StoreHomeBlockAdmin) => {
+    try {
+      const saved = await updateStoreHomeBlockAdmin(block.id, { is_active: !block.is_active });
+      setHomeBlocks((prev) => prev.map((b) => (b.id === saved.id ? saved : b)));
+    } catch (e) {
+      toast(humanizeDrfError(e), "error");
+    }
+  };
+
+  const handleMoveHomeBlock = async (block: StoreHomeBlockAdmin, direction: -1 | 1) => {
+    const sorted = [...homeBlocks].sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+    const index = sorted.findIndex((b) => b.id === block.id);
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= sorted.length) return;
+    const reordered = [...sorted];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+    try {
+      const updated = await Promise.all(
+        reordered.map((row, i) =>
+          row.sort_order === i ? row : updateStoreHomeBlockAdmin(row.id, { sort_order: i }),
+        ),
+      );
+      setHomeBlocks(updated);
+    } catch (e) {
+      toast(humanizeDrfError(e), "error");
+    }
+  };
 
   // فتح / تغيير معرّف المتجر
   const handleSaveSlug = async () => {
@@ -913,6 +1122,19 @@ export const StoreSettingsPage: React.FC = () => {
           >
             <Palette className="h-4 w-4" />
             <span>المظهر والتخصيص</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("home")}
+            className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition ${
+              activeTab === "home"
+                ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
+                : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            }`}
+          >
+            <HomeIcon className="h-4 w-4" />
+            <span>الصفحة الرئيسية</span>
           </button>
         </div>
 
@@ -1610,6 +1832,467 @@ export const StoreSettingsPage: React.FC = () => {
                 {savingTheme ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                 <span>حفظ كافة تخصيصات المظهر</span>
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── TAB 5: HOME BLOCKS ─────────────────────────────────────────── */}
+        {activeTab === "home" && (
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  كتلُ الصفحة الرئيسية
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  لافتاتٌ وصفوفُ منتجاتٍ فوق شبكة المتجر — بلا كتلةٍ مفعَّلة تبقى الصفحة كما هي تماماً.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span
+                  className={`rounded-xl px-3 py-1.5 text-xs font-bold ${
+                    activeHomeBlocksCount >= STORE_HOME_BLOCK_MAX_ACTIVE
+                      ? "bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300"
+                      : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                  }`}
+                >
+                  {formatNumber(activeHomeBlocksCount)} / {formatNumber(STORE_HOME_BLOCK_MAX_ACTIVE)} كتلٍ مفعَّلة
+                </span>
+                <button
+                  type="button"
+                  onClick={openCreateHomeBlockModal}
+                  className="flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-sm shadow-blue-600/20 transition hover:bg-blue-700"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>إضافة كتلة</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              {loadingHomeBlocks ? (
+                <div className="py-12 text-center text-slate-400">
+                  <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+                  <span className="mt-2 block text-xs">جارٍ تحميل الكتل…</span>
+                </div>
+              ) : homeBlocks.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400">
+                  لا كتل بعد — الصفحة الرئيسية تعرض الشبكة الافتراضية تماماً كما هي اليوم.
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                  {[...homeBlocks]
+                    .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+                    .map((block, idx, arr) => (
+                      <div key={block.id} className="flex items-center justify-between gap-3 p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex flex-col">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => handleMoveHomeBlock(block, -1)}
+                              className="text-slate-400 hover:text-slate-700 disabled:opacity-30 dark:hover:text-slate-200"
+                              title="نقل لأعلى"
+                            >
+                              <ArrowUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === arr.length - 1}
+                              onClick={() => handleMoveHomeBlock(block, 1)}
+                              className="text-slate-400 hover:text-slate-700 disabled:opacity-30 dark:hover:text-slate-200"
+                              title="نقل لأسفل"
+                            >
+                              <ArrowDown className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                                {HOME_BLOCK_KIND_LABELS[block.kind]}
+                              </span>
+                              <span className="text-sm font-bold text-slate-900 dark:text-white">
+                                {block.title || "بلا عنوان"}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400">
+                              حدُّ العناصر: {formatNumber(block.limit)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleHomeBlockActive(block)}
+                            className={`rounded-xl px-2.5 py-1 text-[11px] font-bold transition ${
+                              block.is_active
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"
+                            }`}
+                          >
+                            {block.is_active ? "مفعَّلة" : "معطَّلة"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditHomeBlockModal(block)}
+                            className="rounded-xl bg-slate-900 px-3 py-1 text-xs font-bold text-white transition hover:bg-blue-600 dark:bg-slate-700 dark:hover:bg-blue-600"
+                          >
+                            تعديل
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteHomeBlock(block)}
+                            className="rounded-xl p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/50"
+                            title="حذف"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── MODAL: إضافة / تعديل كتلة صفحة رئيسية ─────────────────────── */}
+        {isHomeBlockModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4 dark:border-slate-800">
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  {editingHomeBlockId ? "تعديل كتلة" : "إضافة كتلة جديدة"}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsHomeBlockModalOpen(false)}
+                  className="rounded-xl p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    نوع الكتلة
+                  </label>
+                  <select
+                    value={homeBlockForm.kind}
+                    onChange={(e) =>
+                      setHomeBlockForm((prev) => ({
+                        ...prev,
+                        kind: e.target.value as StoreHomeBlockKind,
+                        source_id: null,
+                      }))
+                    }
+                    disabled={!!editingHomeBlockId}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:opacity-60"
+                  >
+                    {(Object.entries(HOME_BLOCK_KIND_LABELS) as [StoreHomeBlockKind, string][]).map(
+                      ([key, label]) => (
+                        <option key={key} value={key}>{label}</option>
+                      ),
+                    )}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      العنوان
+                    </label>
+                    <input
+                      type="text"
+                      value={homeBlockForm.title}
+                      onChange={(e) => setHomeBlockForm((prev) => ({ ...prev, title: e.target.value }))}
+                      placeholder="مثال: تخفيضات الصيف"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      العنوان الفرعي
+                    </label>
+                    <input
+                      type="text"
+                      value={homeBlockForm.subtitle}
+                      onChange={(e) => setHomeBlockForm((prev) => ({ ...prev, subtitle: e.target.value }))}
+                      placeholder="مثال: خصمٌ حتى ٣٠٪ على المكيّفات"
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                {homeBlockForm.kind === "hero" && (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                        صورة اللافتة
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                        <Upload className="h-4 w-4" />
+                        <span>{homeBlockForm.image_url ? "تغيير الصورة" : "رفع صورة"}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void handleUploadHomeBlockImage("image_url", f);
+                          }}
+                        />
+                      </label>
+                      {homeBlockForm.image_url && (
+                        <img src={homeBlockForm.image_url} alt="" className="mt-2 h-16 w-full rounded-lg object-cover" />
+                      )}
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                        صورة الجوّال (اختياري)
+                      </label>
+                      <label className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                        <Upload className="h-4 w-4" />
+                        <span>{homeBlockForm.image_url_mobile ? "تغيير الصورة" : "رفع صورة"}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void handleUploadHomeBlockImage("image_url_mobile", f);
+                          }}
+                        />
+                      </label>
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        بنسبةٍ أطولَ للجوّال — بلا رفعها يُقصّ الأصلُ مركزياً على الشاشة الضيّقة.
+                      </p>
+                      {homeBlockForm.image_url_mobile && (
+                        <img src={homeBlockForm.image_url_mobile} alt="" className="mt-2 h-16 w-full rounded-lg object-cover" />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {(homeBlockForm.kind === "campaign_row" || homeBlockForm.kind === "featured") && (
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      الحملة المصدر
+                    </label>
+                    <select
+                      value={homeBlockForm.source_id ?? ""}
+                      onChange={(e) =>
+                        setHomeBlockForm((prev) => ({
+                          ...prev,
+                          source_id: e.target.value ? Number(e.target.value) : null,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="">اختر حملة…</option>
+                      {collections.map((c) => (
+                        <option key={c.id} value={c.id}>{c.title}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {homeBlockForm.kind === "category_row" && (
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      الفئة المصدر
+                    </label>
+                    <select
+                      value={homeBlockForm.source_id ?? ""}
+                      onChange={(e) =>
+                        setHomeBlockForm((prev) => ({
+                          ...prev,
+                          source_id: e.target.value ? Number(e.target.value) : null,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="">اختر فئة…</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    وجهة الكتلة عند الضغط
+                  </label>
+                  <select
+                    value={homeBlockForm.link_kind}
+                    onChange={(e) =>
+                      setHomeBlockForm((prev) => ({
+                        ...prev,
+                        link_kind: e.target.value as StoreHomeLinkKind,
+                        link_id: null,
+                        link_url: "",
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="none">بلا وجهة</option>
+                    <option value="collection">حملة</option>
+                    <option value="category">فئة</option>
+                    <option value="product">منتج</option>
+                    <option value="url">رابط خارجي</option>
+                  </select>
+
+                  {homeBlockForm.link_kind === "collection" && (
+                    <select
+                      value={homeBlockForm.link_id ?? ""}
+                      onChange={(e) =>
+                        setHomeBlockForm((prev) => ({
+                          ...prev,
+                          link_id: e.target.value ? Number(e.target.value) : null,
+                        }))
+                      }
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="">اختر حملة…</option>
+                      {collections.map((c) => (
+                        <option key={c.id} value={c.id}>{c.title}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {homeBlockForm.link_kind === "category" && (
+                    <select
+                      value={homeBlockForm.link_id ?? ""}
+                      onChange={(e) =>
+                        setHomeBlockForm((prev) => ({
+                          ...prev,
+                          link_id: e.target.value ? Number(e.target.value) : null,
+                        }))
+                      }
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    >
+                      <option value="">اختر فئة…</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  {homeBlockForm.link_kind === "product" && (
+                    <div className="mt-2">
+                      {homeBlockForm.link_id ? (
+                        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-800">
+                          <span>
+                            {homeProductSelected
+                              ? storeAdminProductName(homeProductSelected)
+                              : `منتج #${homeBlockForm.link_id}`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setHomeBlockForm((prev) => ({ ...prev, link_id: null }));
+                              setHomeProductSelected(null);
+                            }}
+                            className="text-rose-500 hover:text-rose-700"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <input
+                            type="search"
+                            value={homeProductQuery}
+                            onChange={(e) => setHomeProductQuery(e.target.value)}
+                            placeholder="ابحث عن منتج…"
+                            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                          />
+                          {searchingHomeProducts && (
+                            <p className="mt-1 text-[10px] text-slate-400">جارٍ البحث…</p>
+                          )}
+                          {homeProductResults.length > 0 && (
+                            <div className="mt-1 max-h-40 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                              {homeProductResults.map((p) => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => handleSelectHomeLinkProduct(p)}
+                                  className="block w-full px-3 py-1.5 text-right text-xs hover:bg-slate-50 dark:hover:bg-slate-800"
+                                >
+                                  {storeAdminProductName(p)}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {homeBlockForm.link_kind === "url" && (
+                    <input
+                      type="url"
+                      value={homeBlockForm.link_url}
+                      onChange={(e) => setHomeBlockForm((prev) => ({ ...prev, link_url: e.target.value }))}
+                      placeholder="https://…"
+                      className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      حدُّ عدد العناصر
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={homeBlockForm.limit}
+                      onChange={(e) =>
+                        setHomeBlockForm((prev) => ({
+                          ...prev,
+                          limit: Number(e.target.value) || STORE_HOME_BLOCK_DEFAULT_LIMIT,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs focus:border-blue-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <label className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={homeBlockForm.is_active}
+                        onChange={(e) => setHomeBlockForm((prev) => ({ ...prev, is_active: e.target.checked }))}
+                        className="h-4 w-4 rounded accent-blue-600"
+                      />
+                      مفعَّلة
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsHomeBlockModalOpen(false)}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveHomeBlockForm}
+                  disabled={savingHomeBlock}
+                  className="flex items-center gap-2 rounded-2xl bg-blue-600 px-6 py-2 text-xs font-black text-white shadow-lg shadow-blue-600/30 transition hover:bg-blue-700 active:scale-95 disabled:opacity-50"
+                >
+                  {savingHomeBlock ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  <span>حفظ الكتلة</span>
+                </button>
+              </div>
             </div>
           </div>
         )}

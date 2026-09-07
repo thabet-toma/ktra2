@@ -11,6 +11,7 @@ from store.models import (
     StoreCategory,
     StoreCollection,
     StoreCollectionItem,
+    StoreHomeBlock,
     StoreProduct,
     StoreProductImage,
     StoreSettings,
@@ -467,5 +468,24 @@ class StoreProductAdminSerializer(_ConvertsModelValidationErrors, serializers.Mo
     def update(self, instance, validated_data):
         validated_data.pop("initial_images", None)
         return super().update(instance, validated_data)
+
+
+class StoreHomeBlockAdminSerializer(_ConvertsModelValidationErrors, serializers.ModelSerializer):
+    """إدارة كتل الصفحة الرئيسية (THA-166 م٦). `link_id`/`source_id` أعدادٌ
+    مجرَّدة لا `TenantScopedPrimaryKeyRelatedField` — الهدف متعدّدُ الأشكال
+    حسب `kind`/`link_kind`، فحارسا الحفظ على النموذج
+    (`StoreHomeBlock._reject_invalid_source`/`_reject_invalid_link`) هما ما
+    يتحقّقان من الانتماء لنفس الشركة، ويعودان **400** عبر
+    `_ConvertsModelValidationErrors` لا 500. وكذلك سقفُ العشر
+    (`_reject_over_the_active_cap`)."""
+
+    class Meta:
+        model = StoreHomeBlock
+        fields = [
+            "id", "kind", "title", "subtitle", "image_url", "image_url_mobile",
+            "link_kind", "link_id", "link_url", "source_id", "limit",
+            "sort_order", "is_active", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
 
 
