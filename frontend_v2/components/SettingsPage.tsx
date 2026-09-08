@@ -15,8 +15,18 @@ import { useAppearance, FONT_SCALE_OPTIONS, FONT_FAMILY_OPTIONS } from '../conte
 import { useSessionSettings, IDLE_MIN_MINUTES, IDLE_MAX_MINUTES } from '../contexts/SessionSettingsContext';
 import { getSkin, setSkin, UiSkin } from '../styles/skin';
 import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
 import { useSimpleUi } from '../hooks/useSimpleUi';
 import { humanizeThrown } from '../utils/drfError';
+import { formatDateTimeValue } from '../utils/formatDate';
+import {
+    listLoginDevices,
+    evictLoginDevice,
+    evictOtherLoginDevices,
+    setPrimaryLoginDevice,
+    renameLoginDevice,
+    type LoginDevice,
+} from '../services/loginDevicesApi';
 
 interface SettingsPageProps {
     user: User;
@@ -24,6 +34,7 @@ interface SettingsPageProps {
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const toast = useToast();
+    const confirm = useConfirm();
     const { show: showAdv } = useSimpleUi();
     const [profileForm, setProfileForm] = useState({
         name: user.name,
@@ -47,6 +58,89 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const { idleTimeoutMinutes, setIdleTimeoutMinutes } = useSessionSettings();
     const [idleInput, setIdleInput] = useState<string>(() => String(idleTimeoutMinutes));
     const [uiSkin, setUiSkin] = useState<UiSkin>(() => getSkin());
+
+    // ── أجهزة الدخول (ISSUE #168) ────────────────────────────────────────────
+    const [devices, setDevices] = useState<LoginDevice[]>([]);
+    // نصُّ حارس الجهاز الأساسيّ حين يكون هذا الجهاز ثانويّاً — تفسيرٌ لا فراغ.
+    const [devicesGuard, setDevicesGuard] = useState<string | null>(null);
+    const [devicesInvitation, setDevicesInvitation] = useState<string | null>(null);
+    const [primaryPrompt, setPrimaryPrompt] = useState(false);
+    const [primaryPassword, setPrimaryPassword] = useState('');
+    const [renamingId, setRenamingId] = useState<number | null>(null);
+    const [renameValue, setRenameValue] = useState('');
+
+    const loadDevices = React.useCallback(async () => {
+        try {
+            const res = await listLoginDevices();
+            if (res.kind === 'primary_required') {
+                setDevicesGuard(res.detail);
+                setDevices([]);
+                setDevicesInvitation(null);
+                return;
+            }
+            setDevicesGuard(null);
+            setDevices(res.devices);
+            setDevicesInvitation(res.has_primary ? null : res.primary_invitation);
+        } catch (e) {
+            toast(humanizeThrown(e, 'تعذّر جلب أجهزة الدخول.'), 'error');
+        }
+    }, [toast]);
+
+    useEffect(() => { void loadDevices(); }, [loadDevices]);
+
+    const handleEvictDevice = async (d: LoginDevice) => {
+        if (!(await confirm({
+            title: 'إنهاء جهاز',
+            message: `سيتوقّف «${d.name}» عن العمل عند أوّل طلبٍ يرسله. متابعة؟`,
+            confirmText: 'إنهاء',
+        }))) return;
+        try {
+            toast(await evictLoginDevice(d.id), 'success');
+            await loadDevices();
+        } catch (e) {
+            toast(humanizeThrown(e, 'تعذّر إنهاء الجهاز.'), 'error');
+        }
+    };
+
+    const handleEvictOthers = async () => {
+        if (!(await confirm({
+            title: 'إخراج كل الأجهزة الأخرى',
+            message: 'ستتوقّف كلُّ أجهزتك الأخرى ويبقى هذا الجهاز وحده. متابعة؟',
+            confirmText: 'إخراج',
+        }))) return;
+        try {
+            const n = await evictOtherLoginDevices();
+            toast(n > 0 ? `تم إنهاء ${n} من الأجهزة الأخرى.` : 'لا أجهزة أخرى لإنهائها.', 'success');
+            await loadDevices();
+        } catch (e) {
+            toast(humanizeThrown(e, 'تعذّر إنهاء الأجهزة الأخرى.'), 'error');
+        }
+    };
+
+    const handleSetPrimary = async () => {
+        try {
+            await setPrimaryLoginDevice(primaryPassword);
+            setPrimaryPrompt(false);
+            setPrimaryPassword('');
+            toast('تم تعيين هذا الجهاز أساسيّاً.', 'success');
+            await loadDevices();
+        } catch (e) {
+            toast(humanizeThrown(e, 'تعذّر تعيين الجهاز الأساسيّ.'), 'error');
+        }
+    };
+
+    // التسميةُ تحريرٌ داخل البطاقة: لا `window.prompt`، ولا حوارَ مخترَعٌ لهذه
+    // الشاشة وحدها (المستودع فيه `useConfirm` ولا مقابلَ له للإدخال).
+    const commitRename = async (id: number) => {
+        try {
+            await renameLoginDevice(id, renameValue.trim());
+            setRenamingId(null);
+            setRenameValue('');
+            await loadDevices();
+        } catch (e) {
+            toast(humanizeThrown(e, 'تعذّرت إعادة التسمية.'), 'error');
+        }
+    };
 
     // مزامنة حقل الإدخال مع القيمة القادمة من الخادم بعد المزامنة الأوّلية.
     useEffect(() => { setIdleInput(String(idleTimeoutMinutes)); }, [idleTimeoutMinutes]);
@@ -345,6 +439,132 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                         ))}
                     </div>
                 </div>
+            </div>
+
+            {/* أجهزةُ الدخول — ISSUE #168. شاشةُ أمانٍ شخصيّةٌ لصاحب الحساب، وموضعُها
+                هنا بجانب «تغيير كلمة المرور» و«الجلسة والخمول» لا في لوحة إدارة. */}
+            <div style={sectionStyle}>
+                <div style={sectionTitleStyle}>أجهزة الدخول</div>
+                <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
+                    كلُّ جهازٍ دخل بحسابك له مفتاحُه الخاصّ، فإنهاءُ أحدها لا يُخرج البقيّة.
+                    «آخر نشاط» يُحدَّث كل خمس دقائق تقريباً.
+                </p>
+
+                {devicesGuard ? (
+                    // الجهازُ الثانويُّ يرى تفسيراً يسمّي الأساسيَّ لا فراغاً بلا سبب.
+                    <div style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>
+                        <p style={{ marginBottom: 10 }}>{devicesGuard}</p>
+                        <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px', fontWeight: 700 }}
+                            onClick={() => setPrimaryPrompt(true)}>
+                            اجعل هذا الجهاز أساسيّاً
+                        </button>
+                    </div>
+                ) : (
+                    <>
+                        {devicesInvitation && (
+                            <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-accent, #1857a4)', marginBottom: 10 }}>
+                                {devicesInvitation}
+                            </p>
+                        )}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {devices.map((d) => (
+                                <div key={d.id} style={{
+                                    border: '1px solid var(--ktra-border)', borderRadius: 6, padding: '10px 12px',
+                                    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                                }}>
+                                    <div style={{ flex: 1, minWidth: 200 }}>
+                                        <div style={{ fontSize: 'var(--ktra-fs-sm)', fontWeight: 600, color: 'var(--ktra-ink)' }}>
+                                            {d.name}
+                                            {d.is_current && (
+                                                <span style={{ color: 'var(--ktra-ok, #267346)', marginRight: 6, fontWeight: 700 }}>
+                                                    — هذا الجهاز
+                                                </span>
+                                            )}
+                                            {d.is_primary && (
+                                                <span style={{ color: 'var(--ktra-accent, #1857a4)', marginRight: 6, fontWeight: 700 }}>
+                                                    — الأساسيّ
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: 'var(--ktra-ink-soft)' }}>
+                                            {d.ip_address || 'بلا عنوان'} · دخل {formatDateTimeValue(d.created_at) || '—'}
+                                            {' · '}آخر نشاط {formatDateTimeValue(d.last_active_at) || '—'}
+                                        </div>
+                                    </div>
+                                    {renamingId === d.id ? (
+                                        <>
+                                            <input
+                                                className="ktra-input"
+                                                style={{ maxWidth: 160 }}
+                                                autoFocus
+                                                placeholder="حاسوب المكتب"
+                                                value={renameValue}
+                                                onChange={e => setRenameValue(e.target.value)}
+                                                onKeyDown={e => {
+                                                    if (e.key === 'Enter') { e.preventDefault(); void commitRename(d.id); }
+                                                    if (e.key === 'Escape') { setRenamingId(null); setRenameValue(''); }
+                                                }}
+                                            />
+                                            <button type="button" className="ktra-toolbtn" style={{ padding: '4px 10px', fontWeight: 700 }}
+                                                onClick={() => void commitRename(d.id)}>
+                                                حفظ
+                                            </button>
+                                        </>
+                                    ) : (
+                                        <button type="button" className="ktra-toolbtn" style={{ padding: '4px 10px' }}
+                                            onClick={() => { setRenamingId(d.id); setRenameValue(d.label || ''); }}>
+                                            تسمية
+                                        </button>
+                                    )}
+                                    {/* الأساسيُّ لا يُخرَج من هنا — الخروجُ العاديُّ بابُه. */}
+                                    {!d.is_primary && (
+                                        <button type="button" className="ktra-toolbtn" style={{ padding: '4px 10px', color: 'var(--ktra-danger, #b42318)' }}
+                                            onClick={() => void handleEvictDevice(d)}>
+                                            إنهاء
+                                        </button>
+                                    )}
+                                </div>
+                            ))}
+                            {devices.length === 0 && (
+                                <span style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)' }}>
+                                    لا أجهزة لعرضها.
+                                </span>
+                            )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                            <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px', fontWeight: 700 }}
+                                onClick={() => setPrimaryPrompt(true)}>
+                                اجعل هذا الجهاز أساسيّاً
+                            </button>
+                            <button type="button" className="ktra-toolbtn"
+                                style={{ padding: '5px 14px', fontWeight: 700, color: 'var(--ktra-danger, #b42318)' }}
+                                onClick={() => void handleEvictOthers()}>
+                                أخرِج كلَّ الأجهزة الأخرى
+                            </button>
+                        </div>
+                    </>
+                )}
+
+                {primaryPrompt && (
+                    <div style={{ borderTop: '1px solid var(--ktra-border)', marginTop: 12, paddingTop: 12, maxWidth: 320 }}>
+                        <div style={fieldStyle}>
+                            {/* حقلٌ داخل الصفحة لا `window.prompt` — كلمةُ المرور لا تمرّ بحوار متصفّح. */}
+                            <label style={labelStyle}>كلمة المرور لتأكيد التنصيب</label>
+                            <input className="ktra-input" type="password" value={primaryPassword}
+                                onChange={e => setPrimaryPassword(e.target.value)} />
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                            <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px', fontWeight: 700 }}
+                                onClick={() => void handleSetPrimary()}>
+                                تأكيد
+                            </button>
+                            <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px' }}
+                                onClick={() => { setPrimaryPrompt(false); setPrimaryPassword(''); }}>
+                                إلغاء
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* خصوصية عرض الأسعار والأرباح (زر العين) */}
