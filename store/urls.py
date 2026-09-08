@@ -5,6 +5,7 @@ from rest_framework.routers import SimpleRouter
 from store.views import (
     StoreBrandAdminViewSet,
     StoreCategoryAdminViewSet,
+    StoreCategoryDetailView,
     StoreCollectionAdminViewSet,
     StoreCollectionDetailView,
     StoreCollectionItemAdminViewSet,
@@ -67,6 +68,11 @@ urlpatterns = [
         "<slug:slug>/products/<int:pk>/",
         StoreProductDetailView.as_view(),
         name="store-product-detail",
+    ),
+    path(
+        "<slug:slug>/categories/<int:pk>/",
+        StoreCategoryDetailView.as_view(),
+        name="store-category-detail",
     ),
     path(
         "<slug:slug>/collections/",

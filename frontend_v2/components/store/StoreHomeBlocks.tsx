@@ -14,8 +14,16 @@ import { StoreProductCard } from "./StoreProductCard";
 interface StoreHomeBlocksProps {
   blocks: StoreHomeBlock[];
   profile: StoreProfile | null;
-  onOpenProduct: (productId: number) => void;
+  onOpenProduct: (productId: number, name?: string) => void;
   onOpenCollection?: (collectionSlug: string) => void;
+  onOpenCategory?: (categoryId: number) => void;
+}
+
+/** `link.target` قد يصل رقماً أو نصاً (توافقٌ خلفي) — المعرّف وحده الحاكم. */
+function targetCategoryId(target: string | number | null): number | null {
+  if (target === null || target === undefined) return null;
+  const n = typeof target === "number" ? target : parseInt(target, 10);
+  return Number.isFinite(n) ? n : null;
 }
 
 /** صفٌّ أفقيٌّ قابلٌ للتمرير على الجوّال، وشبكةٌ من فوق `sm:` — لا عمودٌ طويلٌ يبتلع الصفحة. */
@@ -27,6 +35,7 @@ export const StoreHomeBlocks: React.FC<StoreHomeBlocksProps> = ({
   profile,
   onOpenProduct,
   onOpenCollection,
+  onOpenCategory,
 }) => {
   if (!blocks.length) return null;
 
@@ -35,8 +44,10 @@ export const StoreHomeBlocks: React.FC<StoreHomeBlocksProps> = ({
       {blocks.map((block) => {
         if (block.kind === "hero") {
           const isCollectionLink = block.link.kind === "collection" && typeof block.link.target === "string";
+          const categoryId = block.link.kind === "category" ? targetCategoryId(block.link.target) : null;
+          const isCategoryLink = categoryId !== null;
           const isUrlLink = block.link.kind === "url" && !!block.link.url;
-          const clickable = isCollectionLink || isUrlLink;
+          const clickable = isCollectionLink || isCategoryLink || isUrlLink;
 
           const content = (
             <>
@@ -96,6 +107,18 @@ export const StoreHomeBlocks: React.FC<StoreHomeBlocksProps> = ({
               </button>
             );
           }
+          if (isCategoryLink && onOpenCategory && categoryId !== null) {
+            return (
+              <button
+                key={block.id}
+                type="button"
+                onClick={() => onOpenCategory(categoryId)}
+                className={`w-full text-right ${wrapperClass}`}
+              >
+                {content}
+              </button>
+            );
+          }
           return (
             <div key={block.id} className={wrapperClass}>
               {content}
@@ -143,6 +166,7 @@ export const StoreHomeBlocks: React.FC<StoreHomeBlocksProps> = ({
           block.link.kind === "collection" && typeof block.link.target === "string"
             ? block.link.target
             : null;
+        const seeAllCategoryId = block.link.kind === "category" ? targetCategoryId(block.link.target) : null;
         return (
           <div key={block.id}>
             <div className="mb-3 flex items-center justify-between gap-3">
@@ -158,7 +182,17 @@ export const StoreHomeBlocks: React.FC<StoreHomeBlocksProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenCollection(seeAllSlug)}
-                  className="flex shrink-0 items-center gap-1 text-xs font-bold text-blue-600 hover:underline dark:text-blue-400"
+                  className="flex shrink-0 items-center gap-1 text-xs font-bold text-[var(--store-primary,#2563eb)] hover:underline"
+                >
+                  <span>عرض الكل</span>
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {seeAllCategoryId !== null && onOpenCategory && (
+                <button
+                  type="button"
+                  onClick={() => onOpenCategory(seeAllCategoryId)}
+                  className="flex shrink-0 items-center gap-1 text-xs font-bold text-[var(--store-primary,#2563eb)] hover:underline"
                 >
                   <span>عرض الكل</span>
                   <ArrowLeft className="h-3.5 w-3.5" />
@@ -171,7 +205,7 @@ export const StoreHomeBlocks: React.FC<StoreHomeBlocksProps> = ({
                   <StoreProductCard
                     product={product}
                     currency={profile?.currency ?? null}
-                    onOpen={(item) => onOpenProduct(item.id)}
+                    onOpen={(item) => onOpenProduct(item.id, item.name_ar || item.name_en || undefined)}
                   />
                 </div>
               ))}

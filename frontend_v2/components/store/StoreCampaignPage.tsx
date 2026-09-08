@@ -3,18 +3,16 @@
  *
  * مخصصة لروابط الحملات الإعلانية على TikTok و Meta و WhatsApp و Snapchat.
  */
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
-  Copy,
-  ExternalLink,
+  Clock,
   Flame,
-  ImageOff,
   MessageCircle,
+  Search,
   Share2,
   ShoppingBag,
-  Sparkles,
   Store,
 } from "lucide-react";
 import { LoadingSpinner } from "../LoadingSpinner";
@@ -25,21 +23,30 @@ import {
   getStoreCollectionDetail,
   getStoreProfile,
   isStoreNotFound,
+  STORE_SORTS,
   StoreCollectionDetail,
-  StoreProduct,
   storeProductName,
   StoreProfile,
+  type StoreProductQuery,
+  type StoreSort,
 } from "../../services/storeApi";
+import { campaignCountdown } from "../../utils/campaignCountdown";
+import { formatNumber } from "../../utils/formatNumber";
 import { productInquiryMessage, whatsappLink } from "../../utils/storeLinks";
 import { StoreCartDrawer } from "./StoreCartDrawer";
-import { StoreAvailabilityBadge, StorePrice, StoreProductCard } from "./StoreProductCard";
+import { StoreCatalogGrid } from "./StoreCatalogGrid";
+import { StoreFacetFilters, StoreFilterChips } from "./StoreFacetFilters";
+import { StoreAvailabilityBadge, StorePrice } from "./StoreProductCard";
 import { StoreImageOverlay } from "./StoreImageOverlay";
+import { StoreImagePlaceholder } from "./StoreImagePlaceholder";
+import { storeColorVars } from "./storeTheme";
+import { useStoreCatalog } from "./useStoreCatalog";
 
 interface StoreCampaignPageProps {
   slug: string;
   collectionSlug: string;
   onNavigateHome: () => void;
-  onOpenProduct: (productId: number) => void;
+  onOpenProduct: (productId: number, name?: string) => void;
 }
 
 export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
@@ -53,12 +60,23 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
 
   const [profile, setProfile] = useState<StoreProfile | null>(null);
   const [collection, setCollection] = useState<StoreCollectionDetail | null>(null);
-  const [products, setProducts] = useState<StoreProduct[]>([]);
   const [activeImageIdx, setActiveImageIdx] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
 
-  const [loading, setLoading] = useState(true);
-  const [missing, setMissing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // دالّةُ جلبٍ محقونة في `useStoreCatalog` المشتركة — تحلّ محلّ نسخةٍ يدويّة
+  // من `load`/`loadMore`/الـdebounce كانت مستقلّة هنا وحدها (THA-166 م٧،
+  // تصحيحٌ بعد المراجعة: كانت الصفحاتُ الثلاث تتباعد فعلاً). `StoreCollectionDetailView`
+  // يبني الآن `facets`/`price_range` بنفس دوالّ `StoreProductListView`، فشريط
+  // الفلاتر يعمل هنا كما في الرئيسية والفئة تماماً.
+  const fetchCampaignProducts = useCallback(
+    (query: StoreProductQuery) =>
+      getStoreCollectionDetail(slug, collectionSlug, query).then((campData) => {
+        setCollection(campData.collection);
+        return campData.products;
+      }),
+    [slug, collectionSlug],
+  );
+  const catalog = useStoreCatalog(slug, { fetcher: fetchCampaignProducts });
 
   const storeName = profile?.name || "المتجر";
   const campaignTitle = collection?.title || "عرض خاص";
@@ -70,33 +88,26 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    setMissing(false);
-    setError(null);
-
-    Promise.all([
-      getStoreProfile(slug),
-      getStoreCollectionDetail(slug, collectionSlug),
-    ])
-      .then(([prof, campData]) => {
-        if (!alive) return;
-        setProfile(prof);
-        setCollection(campData.collection);
-        setProducts(campData.products.results);
+    getStoreProfile(slug)
+      .then((prof) => {
+        if (alive) setProfile(prof);
       })
-      .catch((e: unknown) => {
-        if (!alive) return;
-        if (isStoreNotFound(e)) setMissing(true);
-        else setError(e instanceof Error ? e.message : "تعذّر تحميل صفحة العرض");
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-
+      .catch(() => undefined);
     return () => {
       alive = false;
     };
-  }, [slug, collectionSlug]);
+  }, [slug]);
+
+  // العدّادُ حيٌّ — تحديثٌ كل دقيقة يكفي (ليس عرض ثوانٍ)، ولا يستهلك فحصاً كثيفاً.
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const countdown = useMemo(
+    () => campaignCountdown(collection?.ends_at, now),
+    [collection?.ends_at, now],
+  );
 
   const handleShare = async () => {
     const url = window.location.href;
@@ -120,7 +131,7 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
     }
   };
 
-  if (loading) {
+  if (catalog.loading && !collection) {
     return (
       <div dir="rtl" className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
         <LoadingSpinner showText={false} />
@@ -128,7 +139,7 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
     );
   }
 
-  if (missing || !collection) {
+  if (catalog.missing || !collection) {
     return (
       <div dir="rtl" className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-white font-sans">
         <div className="w-full max-w-md rounded-3xl bg-slate-900 p-8 text-center shadow-2xl border border-slate-800">
@@ -149,7 +160,7 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
   }
 
   const featured = collection.featured_product;
-  const isSingleProductLanding = Boolean(featured && products.length <= 1);
+  const isSingleProductLanding = Boolean(featured && catalog.products.length <= 1);
   const featuredImages = featured?.images || [];
   const activeFeaturedImage = featuredImages[activeImageIdx] || featuredImages[0] || null;
 
@@ -161,7 +172,11 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
     : null;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-600 selection:text-white" dir="rtl">
+    <div
+      className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-600 selection:text-white"
+      dir="rtl"
+      style={storeColorVars(profile)}
+    >
       {/* الترويسة الأنيقة */}
       <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
@@ -189,7 +204,7 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
             <button
               type="button"
               onClick={() => setIsCartOpen(true)}
-              className="relative flex items-center gap-1.5 rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white shadow-lg shadow-blue-600/30 transition hover:bg-blue-700"
+              className="relative flex items-center gap-1.5 rounded-xl bg-[var(--store-primary,#2563eb)] px-3 py-1.5 text-xs font-bold text-white shadow-lg transition hover:opacity-90"
             >
               <ShoppingBag className="h-4 w-4" />
               <span>السلة</span>
@@ -232,6 +247,18 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
               {collection.description}
             </p>
           )}
+          {/* عدّادُ الانتهاء — يختفي حين لا `ends_at`، أو انتهت الحملة، أو
+              تجاوزت مدّةً معقولة (لا تاريخ بدءٍ يُعرَض أبداً، THA-166 م٧). */}
+          {countdown && (
+            <div className="mx-auto mt-4 inline-flex items-center gap-2 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs font-black text-rose-300">
+              <Clock className="h-4 w-4" />
+              <span>
+                {countdown.days > 0
+                  ? `ينتهي العرض خلال ${formatNumber(countdown.days)} يوم و${formatNumber(countdown.hours)} ساعة`
+                  : `ينتهي العرض خلال ${formatNumber(countdown.hours)} ساعة و${formatNumber(countdown.minutes)} دقيقة`}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* إذا كانت الحملة لمنتج واحد مميز (Single Product Ad Landing) */}
@@ -248,16 +275,14 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
                       className="h-full w-full object-contain"
                     />
                   ) : (
-                    <div className="flex h-full w-full items-center justify-center text-slate-600">
-                      <ImageOff className="h-16 w-16" />
-                    </div>
+                    <StoreImagePlaceholder name={storeProductName(featured)} className="bg-slate-900" />
                   )}
                   {/* شريط الإعلان المخصص */}
                   {activeImageIdx === 0 && (
                     <StoreImageOverlay overlay={featured.cover_overlay} />
                   )}
 
-                  <div className="absolute top-3 left-3">
+                  <div className="absolute top-3 start-3">
                     <StoreAvailabilityBadge availability={featured.availability} />
                   </div>
                 </div>
@@ -292,13 +317,24 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
                     {storeProductName(featured)}
                   </h2>
 
-                  <div className="mt-4 flex items-baseline gap-3">
+                  <div className="mt-4 flex flex-wrap items-baseline gap-3">
                     <StorePrice
                       price={featured.price}
                       currency={profile?.currency ?? null}
                       onDark
+                      discounted={Boolean(featured.original_price)}
                       className="text-3xl"
                     />
+                    {featured.original_price ? (
+                      <span className="text-base font-semibold text-slate-500 line-through">
+                        {formatNumber(featured.original_price, { maxDecimals: 2, group: true })} {profile?.currency ?? ""}
+                      </span>
+                    ) : null}
+                    {featured.discount_percent ? (
+                      <span className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-black text-white">
+                        خصم {formatNumber(featured.discount_percent)}٪
+                      </span>
+                    ) : null}
                   </div>
 
                   {featured.description && (
@@ -329,7 +365,7 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
                   <button
                     type="button"
                     onClick={() => addItem(featured, 1)}
-                    className="flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-3.5 text-xs font-bold text-white shadow-lg shadow-blue-600/30 transition hover:bg-blue-700 active:scale-95"
+                    className="flex items-center justify-center gap-2 rounded-2xl bg-[var(--store-primary,#2563eb)] px-5 py-3.5 text-xs font-bold text-white shadow-lg transition hover:opacity-90 active:scale-95"
                   >
                     <ShoppingBag className="h-4 w-4" />
                     <span>أضف إلى السلة</span>
@@ -351,17 +387,58 @@ export const StoreCampaignPage: React.FC<StoreCampaignPageProps> = ({
             </div>
           </div>
         ) : (
-          /* في حال تشكيلة منتجات الحملة */
-          <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 sm:gap-6">
-              {products.map((p) => (
-                <StoreProductCard
-                  key={p.id}
-                  product={p}
-                  currency={profile?.currency ?? null}
-                  onClick={() => onOpenProduct(p.id)}
-                />
-              ))}
+          /* في حال تشكيلة منتجات الحملة — نفس الجسد المشترك (فلاتر + شبكة +
+             فرز) الذي تستهلكه الرئيسية والفئة، بعد أن صار `StoreCollectionDetailView`
+             يبني `facets`/`price_range` مقيَّدةً بمنتجات هذه الحملة وحدها. */
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+            <StoreFacetFilters
+              facets={catalog.facets}
+              priceRange={catalog.priceRange}
+              currency={profile?.currency ?? null}
+              catalog={catalog}
+            />
+            <div className="min-w-0 flex-1 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="relative max-w-xs flex-1">
+                  <input
+                    type="search"
+                    value={catalog.searchInput}
+                    onChange={(e) => catalog.setSearchInput(e.target.value)}
+                    placeholder="ابحث ضمن العرض…"
+                    aria-label="بحث ضمن منتجات العرض"
+                    className="h-10 w-full rounded-2xl border border-slate-800 bg-slate-900 ps-10 pe-4 text-xs text-white placeholder:text-slate-500 focus:border-[var(--store-primary,#2563eb)] focus:outline-none"
+                  />
+                  <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                </div>
+                <select
+                  value={catalog.sort}
+                  onChange={(e) => catalog.setSort(e.target.value as StoreSort)}
+                  aria-label="ترتيب النتائج"
+                  className="h-10 rounded-2xl border border-slate-800 bg-slate-900 px-3 text-xs font-bold text-slate-200 focus:border-[var(--store-primary,#2563eb)] focus:outline-none"
+                >
+                  {STORE_SORTS.map((option) => (
+                    <option key={option.key} value={option.key}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <StoreFilterChips facets={catalog.facets} catalog={catalog} />
+
+              <StoreCatalogGrid
+                products={catalog.products}
+                count={catalog.count}
+                currency={profile?.currency ?? null}
+                loading={catalog.loading}
+                loadingMore={catalog.loadingMore}
+                hasNext={catalog.hasNext}
+                error={catalog.error}
+                filtersActive={catalog.filtersActive}
+                onOpenProduct={onOpenProduct}
+                onLoadMore={() => void catalog.loadMore()}
+                onClearFilters={catalog.clearFilters}
+                slug={slug}
+                storePhone={profile?.phone}
+              />
             </div>
           </div>
         )}

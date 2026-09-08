@@ -7,7 +7,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Copy,
-  ImageOff,
   MessageCircle,
   Minus,
   Plus,
@@ -27,10 +26,13 @@ import {
   type StoreProduct,
   type StoreProfile,
 } from "../../services/storeApi";
+import { formatNumber } from "../../utils/formatNumber";
 import { productInquiryMessage, whatsappLink } from "../../utils/storeLinks";
 import { StoreCartDrawer } from "./StoreCartDrawer";
 import { StoreAvailabilityBadge, StorePrice } from "./StoreProductCard";
 import { StoreImageOverlay } from "./StoreImageOverlay";
+import { StoreImagePlaceholder } from "./StoreImagePlaceholder";
+import { storeThemeStyle } from "./storeTheme";
 
 interface StoreProductPageProps {
   slug: string;
@@ -139,16 +141,7 @@ export const StoreProductPage: React.FC<StoreProductPageProps> = ({ slug, produc
     <div
       dir="rtl"
       className="min-h-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100"
-      style={
-        profile?.background_image_url
-          ? {
-              backgroundImage: `url(${profile.background_image_url})`,
-              backgroundSize: profile.background_style === "cover" ? "cover" : "auto",
-              backgroundRepeat: profile.background_style === "repeat_pattern" ? "repeat" : "no-repeat",
-              backgroundAttachment: "fixed",
-            }
-          : undefined
-      }
+      style={storeThemeStyle(profile)}
     >
       <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-900/90">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3 sm:px-6">
@@ -174,7 +167,7 @@ export const StoreProductPage: React.FC<StoreProductPageProps> = ({ slug, produc
             <button
               type="button"
               onClick={() => setIsCartOpen(true)}
-              className="relative inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-blue-600 px-3 text-xs font-bold text-white shadow-md shadow-blue-600/20 transition hover:bg-blue-700"
+              className="relative inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-[var(--store-primary,#2563eb)] px-3 text-xs font-bold text-white shadow-md transition hover:opacity-90"
             >
               <ShoppingBag className="h-4 w-4" />
               <span>السلة</span>
@@ -202,7 +195,7 @@ export const StoreProductPage: React.FC<StoreProductPageProps> = ({ slug, produc
               {images[activeImage] ? (
                 <img src={images[activeImage]} alt={name} className="h-full w-full object-contain transition duration-300" />
               ) : (
-                <ImageOff className="h-16 w-16 text-slate-300 dark:text-slate-700" />
+                <StoreImagePlaceholder name={name} />
               )}
               {activeImage === 0 && <StoreImageOverlay overlay={product.cover_overlay} />}
             </div>
@@ -241,8 +234,23 @@ export const StoreProductPage: React.FC<StoreProductPageProps> = ({ slug, produc
                 <p className="mt-1 text-sm text-slate-400 font-medium" dir="ltr">{product.name_en}</p>
               ) : null}
 
-              <div className="mt-4">
-                <StorePrice price={product.price} currency={profile?.currency ?? null} className="text-3xl" />
+              <div className="mt-4 flex flex-wrap items-baseline gap-3">
+                <StorePrice
+                  price={product.price}
+                  currency={profile?.currency ?? null}
+                  discounted={Boolean(product.original_price)}
+                  className="text-3xl"
+                />
+                {product.original_price ? (
+                  <span className="text-base font-semibold text-slate-400 line-through dark:text-slate-500">
+                    {formatNumber(product.original_price, { maxDecimals: 2, group: true })} {profile?.currency ?? ""}
+                  </span>
+                ) : null}
+                {product.discount_percent ? (
+                  <span className="rounded-full bg-rose-600 px-2.5 py-1 text-xs font-black text-white shadow-sm">
+                    خصم {formatNumber(product.discount_percent)}٪
+                  </span>
+                ) : null}
               </div>
 
               {product.description ? (
@@ -287,7 +295,7 @@ export const StoreProductPage: React.FC<StoreProductPageProps> = ({ slug, produc
                   <button
                     type="button"
                     onClick={handleAddToCart}
-                    className="flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-blue-600 px-6 font-bold text-white shadow-lg shadow-blue-600/30 transition hover:bg-blue-700 active:scale-[0.99]"
+                    className="flex min-h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--store-primary,#2563eb)] px-6 font-bold text-white shadow-lg transition hover:opacity-90 active:scale-[0.99]"
                   >
                     <ShoppingBag className="h-5 w-5" />
                     <span>أضف إلى السلة</span>

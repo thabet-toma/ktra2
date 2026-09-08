@@ -141,7 +141,7 @@ export const StoreCartDrawer: React.FC<StoreCartDrawerProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsCartOpen(false)}
-                  className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white transition hover:bg-blue-700"
+                  className="mt-5 rounded-xl bg-[var(--store-primary,#2563eb)] px-5 py-2.5 text-xs font-bold text-white transition hover:opacity-90"
                 >
                   متابعة التسوق
                 </button>

@@ -11,9 +11,54 @@ export function storeHomePath(slug: string): string {
   return `/store/${encodeURIComponent(slug)}`;
 }
 
-/** رابط صفحة المنتج داخل متجر الشركة — نفس النمط الذي يقرؤه `index.tsx`. */
-export function storeProductPath(slug: string, productId: number | string): string {
-  return `${storeHomePath(slug)}/p/${encodeURIComponent(String(productId))}`;
+/**
+ * جزءٌ نصّيٌّ صالحٌ لرابط — يُستعمَل زخرفةً بعد المعرّف الحاكم، لا مصدرَ حقيقة.
+ * لا سيرفر يبنيه ولا يقرؤه؛ تصحيح إملاءٍ في الاسم لا يكسر رابطاً قديماً لأن
+ * المعرّف وحده يُقرأ عند الفتح (انظر `parseLeadingId` أدناه).
+ */
+export function slugifyForUrl(text: string): string {
+  return text
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^\p{L}\p{N}-]+/gu, "")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+/**
+ * رابط صفحة المنتج داخل متجر الشركة — نفس النمط الذي يقرؤه `index.tsx`.
+ * `name` اختياريّ: بلا اسمٍ يبقى الرابط `/p/<id>` كما كان دائماً (توافقٌ خلفي
+ * حرفيّ)؛ معه يصير `/p/<id>-<slug>` — والمعرّف وحده هو ما يُقرأ عند الفتح.
+ */
+export function storeProductPath(
+  slug: string,
+  productId: number | string,
+  name?: string | null,
+): string {
+  const slugPart = name ? slugifyForUrl(name) : "";
+  const segment = slugPart ? `${productId}-${slugPart}` : String(productId);
+  return `${storeHomePath(slug)}/p/${encodeURIComponent(segment)}`;
+}
+
+/**
+ * يقرأ المعرّف الحاكم من جزء المسار `<id>` أو `<id>-<slug>` — الشقّ النصّيّ
+ * زخرفةٌ محضة (انظر `slugifyForUrl` أعلاه)، فرابطٌ قديمٌ بلا شقّ يبقى يعمل.
+ */
+export function parseLeadingId(param: string): string {
+  const match = /^(\d+)/.exec((param || "").trim());
+  return match ? match[1] : param;
+}
+
+/** رابط صفحة الفئة — نفس نمط `storeProductPath` (معرّفٌ حاكمٌ + زخرفةٌ نصّية). */
+export function storeCategoryPath(
+  slug: string,
+  categoryId: number | string,
+  name?: string | null,
+): string {
+  const slugPart = name ? slugifyForUrl(name) : "";
+  const segment = slugPart ? `${categoryId}-${slugPart}` : String(categoryId);
+  return `${storeHomePath(slug)}/cat/${encodeURIComponent(segment)}`;
 }
 
 /**
@@ -30,8 +75,9 @@ export function storeProductUrl(
   origin: string,
   slug: string,
   productId: number | string,
+  name?: string | null,
 ): string {
-  return `${origin.replace(/\/+$/, "")}${storeProductPath(slug, productId)}`;
+  return `${origin.replace(/\/+$/, "")}${storeProductPath(slug, productId, name)}`;
 }
 
 /**
@@ -62,4 +108,20 @@ export function whatsappLink(phone: string | null | undefined, message: string):
 /** نص رسالة الاستفسار: اسم المنتج ثم رابطه — كي يعرف البائع ما يُسأل عنه. */
 export function productInquiryMessage(productName: string, productUrl: string): string {
   return `مرحباً، أستفسر عن: ${productName}\n${productUrl}`;
+}
+
+/**
+ * رابط واتساب جاهزٌ للاستفسار عن منتج — الفعلُ الأساسيّ في بطاقة منتجٍ
+ * سعرُه مخفيٌّ (مواصفة #166 م٧، قسم هـ). `origin` يأتي من المتصفح لا ثابت،
+ * كنظيراتها أعلاه؛ `null` إن كان رقم المتجر غير دوليّ.
+ */
+export function productWhatsappHref(
+  origin: string,
+  phone: string | null | undefined,
+  storeSlug: string,
+  productId: number | string,
+  productName: string,
+): string | null {
+  const url = storeProductUrl(origin, storeSlug, productId);
+  return whatsappLink(phone, productInquiryMessage(productName, url));
 }

@@ -25,9 +25,11 @@ THA-166 م٢: المصدر صار `store.StoreProduct` — الكتالوجُ ا
 from decimal import Decimal
 
 from django.test import TestCase
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.test import APIClient
 
-from store.models import StoreBrand, StoreProduct
+from store.models import StoreBrand, StoreCollection, StoreCollectionItem, StoreProduct
 from tenants.models import Tenant, TenantSettings
 
 #: العقد العام للمنتج — كل مفتاح هنا قرارٌ واعٍ بنشره للعالم.
@@ -45,6 +47,16 @@ PUBLIC_WHITELIST = {
 #: الحالات النصية للتوفّر — حالة لا رقم. `limited` سقطت (THA-166 م٢): كانت
 #: تُحسَب من رصيدٍ مخزنيّ، والرصيدُ مقطوعٌ عن كتالوج المتجر المستقلّ بقرار مالك.
 AVAILABILITY_STATES = {"available", "out", "preorder"}
+
+#: العقد العام لتفصيل الحملة داخل `GET /collections/<slug>/` (THA-166 م٧).
+#: `ends_at` وحدها من زوج التاريخين تُنشَر — عدّادُ انتهاءٍ للواجهة.
+#: **`starts_at` ممنوعٌ عمداً**: «بدأ قبل شهر» يقول للزبون إن هذا معروضٌ
+#: قديم. ولا `discount_percent` ولا `priority` — الخصمُ مطبَّقٌ على الأسعار
+#: فعلياً (`effective_price`) ولا حاجة للزائر برقم النسبة الخام.
+COLLECTION_DETAIL_WHITELIST = {
+    "id", "title", "slug", "description", "banner_image_url", "badge_text",
+    "ends_at", "featured_product",
+}
 
 #: العقد العام لبطاقة الشركة وإعدادات المظهر والهوية العامة.
 PROFILE_WHITELIST = {
@@ -190,3 +202,47 @@ class StorePublicLeakageTest(TestCase):
 
     def test_store_profile_of_a_closed_store_is_404(self):
         self.assertEqual(self.client.get("/api/store/gamma/").status_code, 404)
+
+
+class StoreCollectionDetailLeakageTest(TestCase):
+    """THA-166 م٧ — `ends_at` مُنشَرٌ صراحةً، و`starts_at` غائبٌ عمداً."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tenant = Tenant.objects.create(
+            CompanyName="شركة الحملات", SubscriptionPlan="Pro", Status="Active",
+            store_slug="campaigns-leak")
+        cls.ends_at = timezone.now() + timezone.timedelta(days=3)
+        cls.collection = StoreCollection.objects.create(
+            tenant=cls.tenant, title="عرضٌ محدود", slug="limited-offer",
+            is_active=True, starts_at=timezone.now() - timezone.timedelta(days=1),
+            ends_at=cls.ends_at, discount_percent=Decimal("15.00"), priority=7,
+        )
+        cls.product = StoreProduct.objects.create(
+            tenant=cls.tenant, name_ar="منتجٌ داخل العرض", price=Decimal("40.00"),
+            is_active=True)
+        StoreCollectionItem.objects.create(
+            tenant=cls.tenant, collection=cls.collection, store_product=cls.product)
+
+    def test_collection_keys_are_exactly_the_whitelist(self):
+        res = APIClient().get(f"/api/store/{self.tenant.store_slug}/collections/limited-offer/")
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        body = res.json()["collection"]
+        self.assertEqual(set(body.keys()), COLLECTION_DETAIL_WHITELIST)
+
+    def test_ends_at_is_published(self):
+        body = self.client_get()
+        self.assertIsNotNone(body["ends_at"])
+        # مقارنةُ اللحظة الزمنية عبر كائنَي `datetime` واعيين — لا مقارنةَ نصٍّ
+        # حرفية، فتمثيل المنطقة الزمنية في الـJSON قد يختلف شكلاً لا جوهراً.
+        self.assertEqual(parse_datetime(body["ends_at"]), self.ends_at)
+
+    def test_starts_at_discount_percent_and_priority_are_never_published(self):
+        body = self.client_get()
+        self.assertNotIn("starts_at", body)
+        self.assertNotIn("discount_percent", body)
+        self.assertNotIn("priority", body)
+
+    def client_get(self):
+        res = APIClient().get(f"/api/store/{self.tenant.store_slug}/collections/limited-offer/")
+        return res.json()["collection"]

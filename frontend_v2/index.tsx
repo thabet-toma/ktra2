@@ -20,6 +20,7 @@ import { PermissionsProvider } from './contexts/PermissionsContext';
 import { applySkinOnBoot } from './styles/skin';
 import { captureTabHandoffOnBoot } from './utils/tabLink';
 import { migrateLegacyStorageKeys } from './utils/legacyStorageKeys';
+import { parseLeadingId, storeCategoryPath, storeProductPath } from './utils/storeLinks';
 
 import './styles/index.css';
 
@@ -41,6 +42,7 @@ const StoreIndexPage = React.lazy(() => import('./components/store/StoreIndexPag
 const StorefrontPage = React.lazy(() => import('./components/store/StorefrontPage').then((module) => ({ default: module.StorefrontPage })));
 const StoreProductPage = React.lazy(() => import('./components/store/StoreProductPage').then((module) => ({ default: module.StoreProductPage })));
 const StoreCampaignPage = React.lazy(() => import('./components/store/StoreCampaignPage').then((module) => ({ default: module.StoreCampaignPage })));
+const StoreCategoryPage = React.lazy(() => import('./components/store/StoreCategoryPage').then((module) => ({ default: module.StoreCategoryPage })));
 
 const PublicStoreShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { slug = 'default' } = useParams();
@@ -62,14 +64,18 @@ const StoreIndexRoute: React.FC = () => {
 
 // شاشات المتجر لا تعرف المسارات ولا تستورد `react-router`: المحوِّلان هنا
 // يحوّلان معاملات المسار إلى props، فيبقى التوجيه في ملف واحد.
+//
+// روابط المنتج والفئة `id[-slug]`: المعرّف وحده الحاكم (THA-166 م٧، قسم د)
+// — تصحيح إملاءٍ في الاسم لا يكسر رابطاً قديماً شارَكه زبونٌ على واتساب.
 const StorefrontRoute: React.FC = () => {
   const { slug = '' } = useParams();
   const navigate = useNavigate();
   return (
     <StorefrontPage
       slug={slug}
-      onOpenProduct={(productId) => navigate(`/store/${encodeURIComponent(slug)}/p/${productId}`)}
+      onOpenProduct={(productId, name) => navigate(storeProductPath(slug, productId, name))}
       onOpenCollection={(collectionSlug) => navigate(`/store/${encodeURIComponent(slug)}/c/${encodeURIComponent(collectionSlug)}`)}
+      onOpenCategory={(categoryId) => navigate(storeCategoryPath(slug, categoryId))}
     />
   );
 };
@@ -80,7 +86,7 @@ const StoreProductRoute: React.FC = () => {
   return (
     <StoreProductPage
       slug={slug}
-      productId={productId}
+      productId={parseLeadingId(decodeURIComponent(productId))}
       onBack={() => navigate(`/store/${encodeURIComponent(slug)}`)}
     />
   );
@@ -94,7 +100,20 @@ const StoreCampaignRoute: React.FC = () => {
       slug={slug}
       collectionSlug={collectionSlug}
       onNavigateHome={() => navigate(`/store/${encodeURIComponent(slug)}`)}
-      onOpenProduct={(productId) => navigate(`/store/${encodeURIComponent(slug)}/p/${productId}`)}
+      onOpenProduct={(productId, name) => navigate(storeProductPath(slug, productId, name))}
+    />
+  );
+};
+
+const StoreCategoryRoute: React.FC = () => {
+  const { slug = '', categoryParam = '' } = useParams();
+  const navigate = useNavigate();
+  return (
+    <StoreCategoryPage
+      slug={slug}
+      categoryParam={categoryParam}
+      onOpenProduct={(productId, name) => navigate(storeProductPath(slug, productId, name))}
+      onBack={() => navigate(`/store/${encodeURIComponent(slug)}`)}
     />
   );
 };
@@ -189,6 +208,7 @@ root.render(
           <Route path="/store/:slug" element={<PublicStoreShell><StorefrontRoute /></PublicStoreShell>} />
           <Route path="/store/:slug/p/:productId" element={<PublicStoreShell><StoreProductRoute /></PublicStoreShell>} />
           <Route path="/store/:slug/c/:collectionSlug" element={<PublicStoreShell><StoreCampaignRoute /></PublicStoreShell>} />
+          <Route path="/store/:slug/cat/:categoryParam" element={<PublicStoreShell><StoreCategoryRoute /></PublicStoreShell>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

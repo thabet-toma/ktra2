@@ -9,7 +9,6 @@ import {
   ChevronRight,
   Eye,
   Grid,
-  ImageOff,
   MessageCircle,
   Share2,
   ShoppingBag,
@@ -21,16 +20,17 @@ import {
   storeProductName,
   StoreProfile,
 } from "../../services/storeApi";
-import { productInquiryMessage, whatsappLink } from "../../utils/storeLinks";
+import { productInquiryMessage, storeProductUrl, whatsappLink } from "../../utils/storeLinks";
 import { StoreAvailabilityBadge, StorePrice } from "./StoreProductCard";
 import { StoreImageOverlay } from "./StoreImageOverlay";
+import { StoreImagePlaceholder } from "./StoreImagePlaceholder";
 
 interface StoreCatalogSliderProps {
   products: StoreProduct[];
   profile: StoreProfile | null;
   slug: string;
   onCloseCatalog: () => void;
-  onOpenProductDetail: (productId: number) => void;
+  onOpenProductDetail: (productId: number, name?: string) => void;
 }
 
 export const StoreCatalogSlider: React.FC<StoreCatalogSliderProps> = ({
@@ -74,7 +74,7 @@ export const StoreCatalogSlider: React.FC<StoreCatalogSliderProps> = ({
 
   const handleShare = async () => {
     if (!product) return;
-    const url = `${window.location.origin}/store/${encodeURIComponent(slug)}/p/${product.id}`;
+    const url = storeProductUrl(window.location.origin, slug, product.id, storeProductName(product));
     if (navigator.share) {
       try {
         await navigator.share({
@@ -194,10 +194,7 @@ export const StoreCatalogSlider: React.FC<StoreCatalogSliderProps> = ({
                 className="h-full w-full object-contain transition-all duration-300"
               />
             ) : (
-              <div className="flex h-full w-full flex-col items-center justify-center text-slate-600">
-                <ImageOff className="h-16 w-16" />
-                <span className="mt-2 text-xs">لا توجد صور لهذا المنتج</span>
-              </div>
+              <StoreImagePlaceholder name={name} className="bg-slate-900" />
             )}
 
             {/* شريط الإعلان المخصص */}
@@ -206,7 +203,7 @@ export const StoreCatalogSlider: React.FC<StoreCatalogSliderProps> = ({
             )}
 
             {/* بادج التوفر */}
-            <div className="absolute top-4 left-4">
+            <div className="absolute top-4 start-4">
               <StoreAvailabilityBadge availability={product.availability} />
             </div>
 
@@ -275,7 +272,7 @@ export const StoreCatalogSlider: React.FC<StoreCatalogSliderProps> = ({
               ) : (
                 <button
                   type="button"
-                  onClick={() => onOpenProductDetail(product.id)}
+                  onClick={() => onOpenProductDetail(product.id, name)}
                   className="flex items-center justify-center gap-2 rounded-2xl bg-slate-800 px-4 py-3 text-xs font-bold text-slate-200 transition hover:bg-slate-700"
                 >
                   <Eye className="h-4 w-4" />
@@ -300,7 +297,7 @@ export const StoreCatalogSlider: React.FC<StoreCatalogSliderProps> = ({
 
         <button
           type="button"
-          onClick={() => onOpenProductDetail(product.id)}
+          onClick={() => onOpenProductDetail(product.id, name)}
           className="text-xs text-blue-400 hover:underline"
         >
           فتح صفحة المنتج الكاملة

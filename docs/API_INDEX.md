@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **610**
+عدد النقاط: **611**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -564,6 +564,7 @@
 | `/api/share/<str:token>/decision/` | `DocShareDecisionView` | `docshare/views.py` |
 | `/api/share/<str:token>/quote/` | `DocShareQuoteView` | `docshare/views.py` |
 | `/api/store/<slug:slug>/` | `StoreProfileView` | `store/views.py` |
+| `/api/store/<slug:slug>/categories/<int:pk>/` | `StoreCategoryDetailView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/` | `StoreCollectionListView` | `store/views.py` |
 | `/api/store/<slug:slug>/collections/<slug:collection_slug>/` | `StoreCollectionDetailView` | `store/views.py` |
 | `/api/store/<slug:slug>/home/` | `StoreHomeView` | `store/views.py` |

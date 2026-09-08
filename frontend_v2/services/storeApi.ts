@@ -118,10 +118,74 @@ export function getStoreHome(slug: string): Promise<StoreHomePayload> {
 
 export interface StoreProductQuery {
   q?: string;
+  /** معرّفات ماركات مفصولة بفواصل (OR داخل المحور)، أو اسمٌ مفردٌ للتوافق الخلفي. */
   brand?: string;
+  /** معرّفات فئات مفصولة بفواصل (OR داخل المحور)، أو اسمٌ مفردٌ للتوافق الخلفي. */
   category?: string;
+  onSale?: boolean;
+  isNew?: boolean;
+  inStock?: boolean;
+  minPrice?: string;
+  maxPrice?: string;
   sort?: StoreSort;
   page?: number;
+  /** يفرض عودة `facets`/`price_range` على صفحةٍ غير الأولى (THA-166 م٧). */
+  includeFacets?: boolean;
+}
+
+/** عدّاد فئةٍ واحدة — شجريّ شاملٌ للأبناء (`docs/modules/store.md`). */
+export interface StoreFacetCategory {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  count: number;
+}
+
+export interface StoreFacetBrand {
+  id: number;
+  name: string;
+  count: number;
+}
+
+export interface StoreFacetFlags {
+  on_sale: number;
+  is_new: number;
+  in_stock: number;
+}
+
+/** محاورُ الفلترة السياقيّة — قد يتجاوز مجموع عدّادات محورٍ عددَ النتائج (قصدياً). */
+export interface StoreFacets {
+  categories: StoreFacetCategory[];
+  brands: StoreFacetBrand[];
+  flags: StoreFacetFlags;
+}
+
+/** مدى السعر السياقيّ — غائبٌ كلّياً حين تُحجَب الأسعار عن هذا المتجر. */
+export interface StorePriceRange {
+  min: string | null;
+  max: string | null;
+}
+
+/** استجابة `/products/` الخام — `facets`/`price_range` فقط في الصفحة الأولى
+ * (أو بـ`includeFacets`)؛ غائبان تماماً فيما عداها. */
+export interface StoreProductListResult {
+  results: StoreProduct[];
+  count: number;
+  hasNext: boolean;
+  facets?: StoreFacets;
+  price_range?: StorePriceRange;
+}
+
+function toStoreProductListResult(raw: unknown): StoreProductListResult {
+  const payload = (raw || {}) as Record<string, unknown>;
+  const results = Array.isArray(payload.results) ? (payload.results as StoreProduct[]) : [];
+  return {
+    results,
+    count: Number(payload.count ?? results.length) || results.length,
+    hasNext: payload.next != null,
+    facets: payload.facets as StoreFacets | undefined,
+    price_range: payload.price_range as StorePriceRange | undefined,
+  };
 }
 
 /** المجموعة والحملة الإعلانية كما تظهر في القائمة العامة. */
@@ -144,12 +208,30 @@ export interface StoreCollectionDetail {
   description: string | null;
   banner_image_url: string | null;
   badge_text: string | null;
+  /** THA-166 م٧ — عدّادُ الانتهاء وحده؛ `starts_at` غيرُ منشورٍ عمداً. */
+  ends_at: string | null;
   featured_product: StoreProduct | null;
+}
+
+/** رأسُ صفحة الفئة العامّ (THA-166 م٧) — اسمٌ وصورةٌ وأبٌ لمسار التنقّل. */
+export interface StoreCategoryDetail {
+  id: number;
+  name: string;
+  slug: string;
+  image_url: string | null;
+  parent: { id: number; name: string; slug: string } | null;
+}
+
+export function getStoreCategory(slug: string, categoryId: number | string): Promise<StoreCategoryDetail> {
+  return apiGetObject<StoreCategoryDetail>(
+    `${base(slug)}categories/${encodeURIComponent(String(categoryId))}/`,
+  );
 }
 
 export interface StoreCampaignResponse {
   collection: StoreCollectionDetail;
-  products: PagedList<StoreProduct>;
+  /** الخادم لا يبني `facets`/`price_range` لهذه النقطة — الحقلان غائبان دائماً. */
+  products: StoreProductListResult;
 }
 
 /** حجم الصفحة: يملأ شبكة أربعة أعمدة ست مرات، وتحته سقف الخادم (200). */
@@ -179,20 +261,32 @@ export function getStoreProfile(slug: string): Promise<StoreProfile> {
   return apiGetObject<StoreProfile>(base(slug));
 }
 
+/** بناء معاملات `/products/` من `StoreProductQuery` — مشتركةٌ بين المتجر والحملة. */
+function buildProductQueryParams(query: StoreProductQuery) {
+  return {
+    page: query.page ?? 1,
+    page_size: STORE_PAGE_SIZE,
+    q: query.q?.trim() || undefined,
+    brand: query.brand?.trim() || undefined,
+    category: query.category?.trim() || undefined,
+    sort: query.sort || undefined,
+    on_sale: query.onSale ? 1 : undefined,
+    is_new: query.isNew ? 1 : undefined,
+    in_stock: query.inStock ? 1 : undefined,
+    min_price: query.minPrice?.trim() || undefined,
+    max_price: query.maxPrice?.trim() || undefined,
+    include_facets: query.includeFacets ? 1 : undefined,
+  };
+}
+
+/** `GET /products/` بعدّاداتٍ سياقيّة (`facets`/`price_range` بالصفحة الأولى). */
 export function getStoreProducts(
   slug: string,
   query: StoreProductQuery = {},
-): Promise<PagedList<StoreProduct>> {
-  return apiGetPagedList<StoreProduct>(`${base(slug)}products/`, {
-    query: {
-      page: query.page ?? 1,
-      page_size: STORE_PAGE_SIZE,
-      q: query.q?.trim() || undefined,
-      brand: query.brand?.trim() || undefined,
-      category: query.category?.trim() || undefined,
-      sort: query.sort || undefined,
-    },
-  });
+): Promise<StoreProductListResult> {
+  return apiGetObject<unknown>(`${base(slug)}products/`, {
+    query: buildProductQueryParams(query),
+  }).then(toStoreProductListResult);
 }
 
 /** تفصيل منتج — هذا النداء وحده هو ما يزيد عدّاد المشاهدات اليومي. */
@@ -221,19 +315,13 @@ export function getStoreCollectionDetail(
   collectionSlug: string,
   query: StoreProductQuery = {},
 ): Promise<StoreCampaignResponse> {
-  return apiGetObject<StoreCampaignResponse>(
+  return apiGetObject<{ collection: StoreCollectionDetail; products: unknown }>(
     `${base(slug)}collections/${encodeURIComponent(collectionSlug)}/`,
-    {
-      query: {
-        page: query.page ?? 1,
-        page_size: STORE_PAGE_SIZE,
-        q: query.q?.trim() || undefined,
-        brand: query.brand?.trim() || undefined,
-        category: query.category?.trim() || undefined,
-        sort: query.sort || undefined,
-      },
-    },
-  );
+    { query: buildProductQueryParams(query) },
+  ).then((raw) => ({
+    collection: raw.collection,
+    products: toStoreProductListResult(raw.products),
+  }));
 }
 
 /** 404 = لا متجر بهذا الاسم، أو منتج غير منشور — حالة عرضٍ لا خطأ يُشتكى منه. */

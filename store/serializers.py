@@ -223,7 +223,14 @@ class StoreCollectionSerializer(serializers.Serializer):
 
 
 class StoreCollectionDetailSerializer(serializers.Serializer):
-    """تفاصيل المجموعة / الحملة الإعلانية لصفحة الهبوط مع منتجها المميز."""
+    """تفاصيل المجموعة / الحملة الإعلانية لصفحة الهبوط مع منتجها المميز.
+
+    THA-166 م٧: `ends_at` وحدها من زوج `starts_at`/`ends_at` تُنشَر —
+    عدّادُ انتهاءٍ للواجهة (قرارُ مواصفةٍ صريح). **`starts_at` لا يُنشَر
+    أبداً**: «بدأ قبل شهر» يقول للزبون إن هذا معروضٌ قديم. ولا `discount_percent`
+    ولا `priority` — الخصمُ مطبَّقٌ على الأسعار فعلياً (`effective_price`)
+    ولا حاجة للزائر برقم النسبة الخام أو أولويّة العرض الداخلية.
+    """
 
     id = serializers.IntegerField(read_only=True)
     title = serializers.CharField(read_only=True)
@@ -231,6 +238,7 @@ class StoreCollectionDetailSerializer(serializers.Serializer):
     description = serializers.CharField(read_only=True, allow_null=True)
     banner_image_url = serializers.CharField(read_only=True, allow_null=True)
     badge_text = serializers.CharField(read_only=True, allow_null=True)
+    ends_at = serializers.DateTimeField(read_only=True, allow_null=True)
     featured_product = serializers.SerializerMethodField()
 
     def get_featured_product(self, obj):
@@ -243,6 +251,33 @@ class StoreCollectionDetailSerializer(serializers.Serializer):
         if featured is None:
             return None
         return StoreProductSerializer(featured, context=self.context).data
+
+
+class StoreCategoryPublicSerializer(serializers.Serializer):
+    """تفصيل فئةٍ عامٌّ لرأس صفحة الفئة (THA-166 م٧) — اسمٌ وصورةٌ وأبٌ
+
+    للمسار (`{id, name, slug}` أو `null`)، لا شيء غيرها. القائمة العامة
+    للمنتجات (`facets.categories`) لا تنشر `slug`/`image_url` أصلاً — هذه
+    النقطة سدُّ فجوةٍ لرأس الصفحة وحده، لا كتالوجاً ثانياً للفئات.
+    """
+
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    slug = serializers.CharField(read_only=True)
+    image_url = serializers.SerializerMethodField()
+    parent = serializers.SerializerMethodField()
+
+    def get_image_url(self, obj):
+        # الحقل `blank=True, default=""` على النموذج — فراغٌ يعني «لا صورة»
+        # ويُنشَر `null` كبقية حقول الصور في هذا العقد (`banner_image_url`
+        # ونظائرها)، لا نصّاً فارغاً.
+        return obj.image_url or None
+
+    def get_parent(self, obj):
+        if obj.parent_id is None:
+            return None
+        parent = obj.parent
+        return {"id": parent.id, "name": parent.name, "slug": parent.slug}
 
 
 # ── سيريالايزرات الإدارة والمصادقة (Store Admin) ──────────────────────────

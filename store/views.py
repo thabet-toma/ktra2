@@ -48,6 +48,7 @@ from store.models import (
 from store.serializers import (
     StoreBrandAdminSerializer,
     StoreCategoryAdminSerializer,
+    StoreCategoryPublicSerializer,
     StoreCollectionAdminSerializer,
     StoreCollectionDetailSerializer,
     StoreCollectionItemAdminSerializer,
@@ -913,6 +914,26 @@ class StoreProductDetailView(StorePublicView):
             ).update(count=F("count") + 1)
 
 
+class StoreCategoryDetailView(StorePublicView):
+    """`GET /api/store/<slug>/categories/<id>/` — رأسُ صفحة الفئة العامة (م٧).
+
+    سدُّ فجوةٍ: `facets.categories` في `/products/` تنشر `id`/`name`/
+    `parent_id`/`count` وحدها (كافيةٌ لعدّادات الفلترة، لا لرأس صفحة فيه
+    صورة). هذه النقطة وحدها تنشر `slug`/`image_url`/أباً كاملاً.
+    """
+
+    def get(self, request, slug, pk):
+        tenant = _tenant_or_404(slug)
+        category = (
+            StoreCategory.objects.filter(tenant=tenant, is_active=True, pk=pk)
+            .select_related("parent")
+            .first()
+        )
+        if category is None:
+            raise Http404
+        return Response(StoreCategoryPublicSerializer(category).data)
+
+
 class StoreCollectionListView(StorePublicView):
     """`GET /api/store/<slug>/collections/` — المجموعات والحملات الترويجية النشطة."""
 
@@ -950,11 +971,16 @@ class StoreCollectionDetailView(StorePublicView):
             .order_by("sort_order", "id")
             .values_list("store_product_id", flat=True)
         )
-        queryset = published_products(tenant).filter(id__in=product_ids)
-        queryset = StoreProductListView._sorted(
-            StoreProductListView._filtered(
-                queryset, request.query_params, tenant
-            ).distinct(),
+        # THA-166 م٧: `base_qs` مقيَّدٌ بمنتجات هذه الحملة وحدها — عدّاداتُ
+        # الفلترة (أدناه) تُحسَب داخل هذا النطاق، لا كتالوج الشركة كلّه.
+        base_qs = published_products(tenant).filter(id__in=product_ids)
+        # استعمال مثيلٍ لا استيراد دوالَّ ثانية: `_category_facet`/`_brand_facet`/
+        # `_flags_facet`/`_price_range_facet`/`_build_facets` توابعُ مثيلٍ في
+        # `StoreProductListView` (لا تلمس `self` سوى استدعاء بعضها بعضاً)،
+        # فمثيلٌ عابرٌ هنا يعيد استعمالها حرفياً بدل نسخِ منطق العدّادات.
+        list_view = StoreProductListView()
+        queryset = list_view._sorted(
+            list_view._filtered(base_qs, request.query_params, tenant).distinct(),
             request.query_params,
         )
 
@@ -984,6 +1010,19 @@ class StoreCollectionDetailView(StorePublicView):
             products, many=True, context=products_context
         ).data
         paginated_products = paginator.get_paginated_response(products_data).data
+
+        # نفس قاعدة `StoreProductListView.get`: العدّاداتُ بالصفحة الأولى فقط
+        # (أو `include_facets=1` صراحةً)، وتُحذَف من الصفحات التالية.
+        page_param = (request.query_params.get("page") or "").strip()
+        is_first_page = page_param in ("", "1")
+        if is_first_page or list_view._truthy(request.query_params.get("include_facets")):
+            paginated_products["facets"] = list_view._build_facets(
+                base_qs, request.query_params, tenant, prices_public
+            )
+            if prices_public:
+                paginated_products["price_range"] = list_view._price_range_facet(
+                    base_qs, request.query_params, tenant
+                )
 
         return Response({
             "collection": collection_data,

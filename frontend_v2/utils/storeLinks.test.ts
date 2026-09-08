@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  parseLeadingId,
   productInquiryMessage,
+  slugifyForUrl,
+  storeCategoryPath,
   storeHomePath,
   storeHomeUrl,
   storeProductPath,
@@ -21,6 +24,24 @@ test("رابط المتجر الذي ينسخه صاحبه: مسار واحد ت
 test("مسار المنتج يرمّز المعرّف والـslug فلا يكسره حرف عربي أو مسافة", () => {
   assert.equal(storeProductPath("alpha", 12), "/store/alpha/p/12");
   assert.equal(storeProductPath("متجر ألف", 3), `/store/${encodeURIComponent("متجر ألف")}/p/3`);
+});
+
+test("مع اسمٍ: الرابط يحمل شقاً زخرفياً، والمعرّف يبقى في المقدّمة", () => {
+  assert.equal(storeProductPath("alpha", 12, "حذاء رياضي"), `/store/alpha/p/${encodeURIComponent("12-حذاء-رياضي")}`);
+  assert.equal(storeProductPath("alpha", 12, "  "), "/store/alpha/p/12");
+  assert.equal(storeCategoryPath("alpha", 5, "هواتف ذكية"), `/store/alpha/cat/${encodeURIComponent("5-هواتف-ذكية")}`);
+  assert.equal(storeCategoryPath("alpha", 5), "/store/alpha/cat/5");
+});
+
+test("المعرّف الحاكم يُقرأ من مقدّمة الجزء ويتجاهل الشقّ الزخرفي أو غيابه", () => {
+  assert.equal(parseLeadingId("12"), "12");
+  assert.equal(parseLeadingId("12-حذاء-رياضي"), "12");
+  assert.equal(parseLeadingId(encodeURIComponent("12-حذاء-رياضي")), "12");
+});
+
+test("تحويل الاسم إلى شقّ رابط: مسافات ورموز تُحذف، ولا يبقى شرطتان متتاليتان", () => {
+  assert.equal(slugifyForUrl("حذاء  رياضي!!"), "حذاء-رياضي");
+  assert.equal(slugifyForUrl("  "), "");
 });
 
 test("الرابط المطلق لا يضاعف الشرطة المائلة عند أصلٍ منتهٍ بها", () => {

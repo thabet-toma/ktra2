@@ -101,13 +101,15 @@ export const StoreImageOverlay: React.FC<StoreImageOverlayProps> = ({
     OVERLAY_COLOR_PRESETS.find((c) => c.key === colorKey) ||
     OVERLAY_COLOR_PRESETS[0];
 
+  // خانةُ نهايةِ الصورة (يسارُها في RTL) — الشارةُ الحرّة للتاجر (قسم أ من
+  // مواصفة #166 م٧)؛ `bottom_banner` وحدها بعرض الصورة كاملاً فلا جهة لها.
   if (style === "diagonal_ribbon") {
     return (
       <div
-        className={`pointer-events-none absolute -top-1 -right-1 z-10 overflow-hidden w-28 h-28 ${className}`}
+        className={`pointer-events-none absolute -top-1 -end-1 z-10 overflow-hidden w-28 h-28 ${className}`}
       >
         <div
-          className={`absolute top-5 -right-7 w-32 py-1 text-center font-black text-[10px] sm:text-[11px] shadow-lg shadow-black/25 transform rotate-45 tracking-wide ${color.badgeBg} ${color.badgeText}`}
+          className={`absolute top-5 -end-7 w-32 py-1 text-center font-black text-[10px] sm:text-[11px] shadow-lg shadow-black/25 transform -rotate-45 tracking-wide ${color.badgeBg} ${color.badgeText}`}
         >
           {text}
         </div>
@@ -129,7 +131,7 @@ export const StoreImageOverlay: React.FC<StoreImageOverlayProps> = ({
   if (style === "pill_badge") {
     return (
       <div
-        className={`pointer-events-none absolute top-2 right-2 z-10 flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black shadow-md ${color.badgeBg} ${color.badgeText} ${className}`}
+        className={`pointer-events-none absolute top-2 end-2 z-10 flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black shadow-md ${color.badgeBg} ${color.badgeText} ${className}`}
       >
         <Sparkles className="h-3 w-3 shrink-0 fill-current" />
         <span>{text}</span>
@@ -140,7 +142,7 @@ export const StoreImageOverlay: React.FC<StoreImageOverlayProps> = ({
   // glass_tag
   return (
     <div
-      className={`pointer-events-none absolute top-2 right-2 z-10 flex items-center gap-1 rounded-xl px-2.5 py-1 text-[11px] font-black backdrop-blur-md shadow-md ${color.badgeBg} ${color.badgeText} ${className}`}
+      className={`pointer-events-none absolute top-2 end-2 z-10 flex items-center gap-1 rounded-xl px-2.5 py-1 text-[11px] font-black backdrop-blur-md shadow-md ${color.badgeBg} ${color.badgeText} ${className}`}
     >
       <Zap className="h-3 w-3 shrink-0 fill-current" />
       <span>{text}</span>
