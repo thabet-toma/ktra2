@@ -17,7 +17,7 @@ from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 from rest_framework.test import APIClient
 
 from accountant_portal.models import (
@@ -75,7 +75,7 @@ def make_office(username, tax_number):
 
 def api_for(user):
     client = APIClient()
-    client.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=user).key}")
+    client.credentials(HTTP_AUTHORIZATION=f"Token {UserDevice.objects.create(user=user).key}")
     return client
 
 

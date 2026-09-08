@@ -4,7 +4,7 @@ from tenants.models import Tenant, Currency
 from logistics.models import LogisticsDeal
 from partners.models import Partner
 from django.contrib.auth.models import User
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 
 
 def _set_tenant_on_client(client, tenant_id):
@@ -21,7 +21,7 @@ class TenantIsolationDealTest(TestCase):
         cls.tenant_b = Tenant.objects.create(TenantID=20, CompanyName='Tenant B')
         cur, _ = Currency.objects.get_or_create(Code='ILS', defaults={'Symbol': '₪', 'IsBaseCurrency': True})
         cls.user = User.objects.create_user(username='testuser', password='pass123')
-        Token.objects.create(user=cls.user)
+        UserDevice.objects.create(user=cls.user)
         from tenants.models import UserCompanyMembership
         UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant_a, role="manager")
         UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant_b, role="manager")

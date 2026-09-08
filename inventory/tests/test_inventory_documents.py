@@ -288,12 +288,12 @@ class StockValuationActionTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         from django.contrib.auth.models import User
-        from rest_framework.authtoken.models import Token
+        from hr.models import UserDevice
         from tenants.services import create_company
 
         cls.user = User.objects.create_user(username="valuator", password="x")
         cls.tenant = create_company("شركة التقييم", cls.user)
-        cls.token = Token.objects.create(user=cls.user)
+        cls.token = UserDevice.objects.create(user=cls.user)
         cls.product = Product.objects.create(
             tenant=cls.tenant, sku="VAL-1", name_ar="منتج التقييم",
             quantity_on_hand=Decimal("7"), avg_cost=Decimal("12"))

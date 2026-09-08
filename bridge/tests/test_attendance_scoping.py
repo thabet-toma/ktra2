@@ -11,7 +11,7 @@
      وهي المحتوى العام الذي كان يُخلط بالتسريب فيؤجّل إغلاقه.
 """
 from django.contrib.auth.models import User
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 from rest_framework.test import APITestCase
 
 from bridge.models import FirestoreMirrorDoc
@@ -35,8 +35,8 @@ class AttendanceScopingTest(APITestCase):
         UserCompanyMembership.objects.create(
             user=cls.user_b, tenant=cls.tenant_b, role="manager", is_default=True,
         )
-        cls.token_a = Token.objects.create(user=cls.user_a)
-        cls.token_b = Token.objects.create(user=cls.user_b)
+        cls.token_a = UserDevice.objects.create(user=cls.user_a)
+        cls.token_b = UserDevice.objects.create(user=cls.user_b)
 
         # سجل حضور مملوك لشركة أ (كما تنتجه الهجرة أو الكتابة الجديدة).
         FirestoreMirrorDoc.objects.create(

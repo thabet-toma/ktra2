@@ -7,7 +7,7 @@
 from django.contrib.auth.models import User
 from django.test import TestCase
 from rest_framework.test import APIClient
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 
 from tenants.models import Tenant, UserCompanyMembership
 
@@ -26,7 +26,7 @@ class CompanyAdminTest(TestCase):
             username='root', password='x', email='root@x.co'
         )
         for u in (cls.manager, cls.staff, cls.outsider, cls.platform_user, cls.superuser):
-            Token.objects.create(user=u)
+            UserDevice.objects.create(user=u)
         cls.mgr_membership = UserCompanyMembership.objects.create(
             user=cls.manager, tenant=cls.tenant, role='manager'
         )
@@ -42,7 +42,7 @@ class CompanyAdminTest(TestCase):
 
     def _token_client(self, user):
         c = APIClient()
-        token = Token.objects.get(user=user)
+        token = UserDevice.objects.get(user=user)
         c.credentials(HTTP_AUTHORIZATION=f'Token {token.key}')
         return c
 

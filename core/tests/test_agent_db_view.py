@@ -8,7 +8,7 @@
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.test import override_settings
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 from rest_framework.test import APIClient, APITestCase
 
 from tenants.models import Tenant, UserCompanyMembership
@@ -28,9 +28,9 @@ class AgentQuerySecurityTest(APITestCase):
         cls.member = User.objects.create_user(username="m", password="x")
         UserCompanyMembership.objects.create(
             user=cls.member, tenant=cls.tenant, role="manager", is_default=True)
-        cls.root_token = Token.objects.create(user=cls.root)
-        cls.staff_token = Token.objects.create(user=cls.staff)
-        cls.member_token = Token.objects.create(user=cls.member)
+        cls.root_token = UserDevice.objects.create(user=cls.root)
+        cls.staff_token = UserDevice.objects.create(user=cls.staff)
+        cls.member_token = UserDevice.objects.create(user=cls.member)
 
     def setUp(self):
         cache.clear()  # عدّادات الـthrottle

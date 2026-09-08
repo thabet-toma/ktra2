@@ -11,7 +11,7 @@ from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 from rest_framework.test import APIClient
 
 from core.models import TenantAsset
@@ -27,7 +27,7 @@ class MediaUploadTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="uploader", password="x")
-        cls.token = Token.objects.create(user=cls.user)
+        cls.token = UserDevice.objects.create(user=cls.user)
 
     def setUp(self):
         cache.clear()  # عدّادات الـthrottle بين الاختبارات
@@ -83,10 +83,10 @@ class MediaUploadLedgerTest(TestCase):
         cls.member = User.objects.create_user(username="ledger-member", password="x")
         UserCompanyMembership.objects.create(
             user=cls.member, tenant=cls.tenant, role="manager")
-        cls.member_token = Token.objects.create(user=cls.member)
+        cls.member_token = UserDevice.objects.create(user=cls.member)
         cls.admin = User.objects.create_superuser(
             username="ledger-root", email="ledger-root@example.com", password="x")
-        cls.admin_token = Token.objects.create(user=cls.admin)
+        cls.admin_token = UserDevice.objects.create(user=cls.admin)
 
     def setUp(self):
         cache.clear()

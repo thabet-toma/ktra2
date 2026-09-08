@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
 from tenants.models import Tenant
 
 class Task(models.Model):
@@ -1394,3 +1395,64 @@ class ContractComponent(models.Model):
 
     def __str__(self):
         return f"{self.name} {self.amount}"
+
+
+class UserDevice(models.Model):
+    """
+    سجل جهاز الدخول (GitHub #168).
+    مفتاح مصادقة مستقل لكل جهاز دخول بدل المفتاح المشترك الواحد للمستخدم.
+    ملاحظة: هذا النموذج يتبع المستخدم (User) حصراً لا الشركة (Tenant)،
+    لأن جهاز الدخول والمفتاح يخصان حساب المستخدم عبر كل الشركات المصرح له بها.
+    """
+    id = models.AutoField(primary_key=True)
+    key = models.CharField(max_length=40, unique=True, db_index=True)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='login_devices',
+    )
+    device_name = models.CharField(max_length=255, default="جهازٌ غير معروف")
+    label = models.CharField(max_length=255, blank=True, default="")
+    user_agent = models.TextField(blank=True, default="")
+    ip_address = models.CharField(max_length=45, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_active_at = models.DateTimeField(default=timezone.now)
+    is_primary = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'hr_userdevice'
+        ordering = ['-is_primary', '-last_active_at', '-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user'],
+                condition=models.Q(is_primary=True),
+                name='unique_primary_device_per_user',
+            ),
+        ]
+
+    @classmethod
+    def generate_key(cls):
+        import binascii
+        import os
+        return binascii.hexlify(os.urandom(20)).decode()
+
+    def save(self, *args, **kwargs):
+        if not self.key:
+            self.key = self.generate_key()
+        # حماية تطبيقية لجهاز أساسي واحد لكل مستخدم:
+        # محرك MySQL يتجاهل قيود الفهرس الجزئي (condition=) بصمت،
+        # لذا نفرض تفريغ أي جهاز أساسي سابق داخل التطبيق قبل الحفظ.
+        if self.is_primary and self.user_id:
+            UserDevice.objects.filter(user_id=self.user_id, is_primary=True).exclude(pk=self.pk).update(is_primary=False)
+        super().save(*args, **kwargs)
+
+    @property
+    def display_name(self) -> str:
+        if self.label and self.label.strip():
+            return self.label.strip()
+        return self.device_name or "جهازٌ غير معروف"
+
+    def __str__(self):
+        return f"{self.user} - {self.display_name} ({self.key[:8]}...)"
+
+

@@ -13,7 +13,7 @@ from decimal import Decimal
 from django.test import TestCase
 from rest_framework.test import APIClient
 from django.contrib.auth.models import User
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 
 from accounting.models import Account, JournalHeader, JournalLine
 from tenants.models import Tenant, Currency, UserCompanyMembership
@@ -30,7 +30,7 @@ class _Base(TestCase):
             Code='ILS', defaults={'Symbol': '₪', 'IsBaseCurrency': True}
         )
         cls.user = User.objects.create_user(username='pay_user', password='x')
-        Token.objects.create(user=cls.user)
+        UserDevice.objects.create(user=cls.user)
         UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant, role='manager')
         cls.partner = Partner.objects.create(
             tenant=cls.tenant, name='Supplier P', partner_type='Supplier'

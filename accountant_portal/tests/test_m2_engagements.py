@@ -104,16 +104,16 @@ class EngagementServiceTest(TestCase):
         self.assertEqual(after, before)
 
     def test_revoke_is_immediate_final_and_does_not_delete_auth_token(self):
-        from rest_framework.authtoken.models import Token
+        from hr.models import UserDevice
 
         engagement, invitation = self._invite()
         accept_company_invitation(accountant=self.accountant, token=invitation)
-        auth_token = Token.objects.create(user=self.accountant)
+        auth_token = UserDevice.objects.create(user=self.accountant)
 
         revoke_engagement(engagement=engagement, actor=self.manager, reason="انتهاء العقد")
 
         self.assertFalse(UserCompanyMembership.objects.filter(user=self.accountant, tenant=self.tenant).exists())
-        self.assertTrue(Token.objects.filter(pk=auth_token.pk).exists())
+        self.assertTrue(UserDevice.objects.filter(pk=auth_token.pk).exists())
         with self.assertRaises(EngagementConflict) as final:
             resume_engagement(engagement=engagement, actor=self.manager)
         self.assertEqual(final.exception.code, "already_revoked")

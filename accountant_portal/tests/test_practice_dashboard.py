@@ -17,7 +17,7 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 from rest_framework.test import APIClient, APITestCase
 
 from accountant_portal.models import AccountantEngagement, AccountantProfile
@@ -46,7 +46,7 @@ def make_client(tenant, name, **extra):
 
 def api_for(user):
     client = APIClient()
-    client.credentials(HTTP_AUTHORIZATION=f"Token {Token.objects.create(user=user).key}")
+    client.credentials(HTTP_AUTHORIZATION=f"Token {UserDevice.objects.create(user=user).key}")
     return client
 
 

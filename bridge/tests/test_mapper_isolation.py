@@ -7,7 +7,7 @@ These tests pin the three M1 guarantees:
   3. `isHistorical__exact=true` matches boolean True stored in JSON.
 """
 from django.contrib.auth.models import User
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 from rest_framework.test import APITestCase
 
 from bridge.models import FirestoreMirrorDoc
@@ -27,9 +27,9 @@ class MapperIsolationTest(APITestCase):
         cls.superuser = User.objects.create_superuser(username="root", password="x")
         UserCompanyMembership.objects.create(user=cls.user_a, tenant=cls.tenant_a, role="manager", is_default=True)
         UserCompanyMembership.objects.create(user=cls.user_b, tenant=cls.tenant_b, role="manager", is_default=True)
-        cls.token_a = Token.objects.create(user=cls.user_a)
-        cls.token_b = Token.objects.create(user=cls.user_b)
-        cls.super_token = Token.objects.create(user=cls.superuser)
+        cls.token_a = UserDevice.objects.create(user=cls.user_a)
+        cls.token_b = UserDevice.objects.create(user=cls.user_b)
+        cls.super_token = UserDevice.objects.create(user=cls.superuser)
 
     def _as(self, token, tenant_id=None):
         self.client.credentials(

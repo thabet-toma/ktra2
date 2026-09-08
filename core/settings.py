@@ -480,7 +480,7 @@ REST_FRAMEWORK = {
         ["rest_framework.renderers.JSONRenderer"]
     ),
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",
+        "hr.authentication.DeviceTokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     # task11 R2-B: دور «مستعرض» قراءة فقط — يشمل الـ viewsets التي لا تعرّف

@@ -15,7 +15,7 @@ from unittest import mock
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.test import override_settings
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 from rest_framework.test import APIClient, APITestCase
 from rest_framework.throttling import SimpleRateThrottle
 
@@ -53,7 +53,7 @@ class GlobalThrottleTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="throttled", password="x")
-        cls.token = Token.objects.create(user=cls.user)
+        cls.token = UserDevice.objects.create(user=cls.user)
         cls.tenant = create_company("شركة الحدّ المعدّل", cls.user)
 
     def setUp(self):
@@ -104,7 +104,7 @@ class GlobalThrottleTest(APITestCase):
     def test_rate_is_per_user_not_global(self):
         """سقف مستخدم مستنفَد لا يمنع مستخدماً آخر — الحدّ عزلٌ لا قاطع خدمة."""
         other = User.objects.create_user(username="throttled2", password="x")
-        other_token = Token.objects.create(user=other)
+        other_token = UserDevice.objects.create(user=other)
         other_tenant = create_company("شركة ثانية للحدّ", other)
         other_client = APIClient()
         other_client.credentials(HTTP_AUTHORIZATION=f"Token {other_token.key}")

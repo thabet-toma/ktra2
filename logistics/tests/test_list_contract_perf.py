@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 from rest_framework.test import APIClient
 
 from accounting.models import Account, JournalHeader, JournalLine
@@ -32,7 +32,7 @@ class LogisticsListContractPerformanceTest(TestCase):
         cls.other_tenant = Tenant.objects.create(TenantID=971, CompanyName="Other List Perf")
         cls.currency = Currency.objects.create(Code="LPF", Symbol="$", IsBaseCurrency=False)
         cls.user = User.objects.create_user(username="list_perf", password="x")
-        Token.objects.create(user=cls.user)
+        UserDevice.objects.create(user=cls.user)
         UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant, role="manager")
         UserCompanyMembership.objects.create(
             user=cls.user, tenant=cls.other_tenant, role="manager"

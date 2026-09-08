@@ -240,6 +240,82 @@ def posted_allocations_total(invoice_id: int) -> Decimal:
     return total.quantize(DEC)
 
 
+def calculate_sales_return_refund_caps(
+    original_invoice: SalesInvoice | None,
+    *,
+    current_return: SalesInvoice | None = None,
+) -> dict:
+    """issue #167: حساب سقفَي الردّ لمرتجع البيع (نقد وورق) على الفاتورة الأصلية.
+
+    - cash_cap: مجموع توزيعات الفاتورة الأصلية المرحّلة ناقصاً قيمة الشيكات التي
+      لم تُحصَّل بعد (حالتها 'Received' في المحفظة أو 'Under_Collection' في البنك)،
+      وناقصاً أي مبالغ نقدية رُدّت سابقاً لمراجيع أخرى على نفس الفاتورة الأصلية.
+      الهدف الجوهري: الزبون الذي دفع بشيك مؤجل لا يسحب نقداً حقيقياً من الصندوق.
+    - paper_cap: قيمة الشيكات التي ما زالت في المحفظة (بحالة 'Received' تحديداً)،
+      مرتّبة حسب أقدم تاريخ استحقاق (oldest due date first).
+    - paper_cheques: قائمة كائنات الشيكات المؤهلة للرد الورقي.
+    """
+    if original_invoice is None:
+        return {
+            "cash_cap": Decimal("0.00"),
+            "paper_cap": Decimal("0.00"),
+            "paper_cheques": [],
+            "posted_allocations": Decimal("0.00"),
+            "uncollected_cheques_total": Decimal("0.00"),
+        }
+
+    from accounting.models import Cheque
+
+    orig_posted = posted_allocations_total(original_invoice.pk)
+
+    orig_cheques = list(
+        Cheque.objects.filter(tenant_id=original_invoice.tenant_id).filter(
+            Q(sales_invoice_id=original_invoice.pk)
+            | Q(customer_payment__allocations__invoice_id=original_invoice.pk)
+        ).distinct()
+    )
+
+    uncollected_cheques = [
+        c for c in orig_cheques if c.status in ("Received", "Under_Collection")
+    ]
+    uncollected_total = sum(
+        (Decimal(str(c.amount or 0)) for c in uncollected_cheques),
+        Decimal("0.00"),
+    ).quantize(DEC)
+
+    prior_refunds_qs = CustomerPayment.objects.filter(
+        tenant_id=original_invoice.tenant_id,
+        kind=CustomerPayment.KIND_REFUND,
+        is_posted=True,
+        refund_for_invoice__original_invoice_id=original_invoice.pk,
+    )
+    if current_return and current_return.pk:
+        prior_refunds_qs = prior_refunds_qs.exclude(refund_for_invoice_id=current_return.pk)
+    prior_refunded_cash = prior_refunds_qs.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
+
+    cash_cap = max(
+        orig_posted - uncollected_total - Decimal(str(prior_refunded_cash)),
+        Decimal("0.00"),
+    ).quantize(DEC)
+
+    paper_cheques = sorted(
+        [c for c in orig_cheques if c.status == "Received"],
+        key=lambda c: (c.due_date is None, c.due_date, c.id),
+    )
+    paper_cap = sum(
+        (Decimal(str(c.amount or 0)) for c in paper_cheques),
+        Decimal("0.00"),
+    ).quantize(DEC)
+
+    return {
+        "cash_cap": cash_cap,
+        "paper_cap": paper_cap,
+        "paper_cheques": paper_cheques,
+        "posted_allocations": orig_posted,
+        "uncollected_cheques_total": uncollected_total,
+    }
+
+
 def invoice_pending_payment_total(invoice: SalesInvoice) -> Decimal:
     """T-INTENT: الدفعة المرفقة بمسودة — نقدٌ منويّ + شيكات مسودة، بلا ترحيل.
 
@@ -275,6 +351,11 @@ def guard_invoice_allocation_total(invoice: SalesInvoice, *, incoming: Decimal) 
     grand = Decimal(str(invoice.grand_total or 0)).quantize(DEC)
     total = (posted_allocations_total(invoice.pk) + Decimal(str(incoming))).quantize(DEC)
     if total > grand + DEC:
+        if invoice.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+            raise ValidationError(
+                f"مجموع مبالغ ردّ الدفعة الموزّعة على مرتجع البيع #{invoice.invoice_number} "
+                f"({total}) يتجاوز إجمالي المرتجع ({grand})."
+            )
         raise ValidationError(
             f"مجموع التوزيعات المرحّلة على الفاتورة #{invoice.invoice_number} "
             f"({total}) يتجاوز إجماليها ({grand}). راجع سندات القبض المرتبطة بها."
@@ -544,6 +625,87 @@ def release_auto_cash_settlement(invoice: SalesInvoice, *, user=None) -> list[in
             payment_id, invoice.invoice_number,
         )
     return released
+
+
+def release_auto_sales_return_refund(invoice: SalesInvoice, *, user=None) -> dict:
+    """T-ARINT / issue #167: يحرّر سند ردّ الدفعة التلقائي والشيكات المُعادة مع مرتجع البيع.
+
+    يُستدعى قبل إلغاء ترحيل مرتجع البيع وقبل `guard_invoice_payments_before_unpost`:
+      1. يحذف سند ردّ الدفعة التلقائي (المملوك للمرتجع عبر `refund_for_invoice`)
+         مع قيوده عبر `unpost_document`.
+      2. يعيد الشيكات التي أُرجعت تلقائياً بهذا الترحيل إلى حالة «وارد في المحفظة»
+         ('Received') ويحذف قيد حركة الإرجاع (CHEQUE_RETURN_TO_CUSTOMER).
+    سندات ردّ الدفعة التي أنشأها المستخدم لا تُمَسّ — يحرسها فحص الذمم التالي.
+    """
+    released_vouchers: list[int] = []
+    auto_refund_payments = list(
+        CustomerPayment.objects.filter(
+            tenant_id=invoice.tenant_id,
+            refund_for_invoice_id=invoice.pk,
+        )
+    )
+    for payment in auto_refund_payments:
+        if payment.is_posted:
+            unpost_document(
+                tenant_id=payment.tenant_id,
+                reference_id=payment.id,
+                journal_reference_types=["CUSTOMER_PAYMENT"],
+                user=user,
+                document_label=f"سند ردّ دفعة تلقائي #{payment.id}",
+            )
+        payment_id = payment.id
+        payment.delete()  # صفوف التوزيع تُحذف تلقائياً (CASCADE)
+        released_vouchers.append(payment_id)
+        logger.info(
+            "Released auto refund payment %s of return invoice %s (unpost).",
+            payment_id, invoice.invoice_number,
+        )
+
+    restored_cheques: list[int] = []
+    from accounting.models import ChequeMovement
+
+    # الوسمُ البنيويّ وحدَه يحدّد ما أعاده **هذا** الترحيل. وتفريغُه بعد التحرير
+    # (لا حذفُ الصفّ) يجعل إعادةَ الترحيل تختم حركةً جديدة ولا تلتقط القديمة.
+    movements = list(
+        ChequeMovement.objects.filter(
+            sales_return_id=invoice.pk,
+            movement_type="return_to_customer",
+        ).select_related("cheque", "journal")
+    )
+    for m in movements:
+        if m.journal_id:
+            unpost_document(
+                tenant_id=invoice.tenant_id,
+                reference_id=m.pk,
+                journal_reference_types=["CHEQUE_RETURN_TO_CUSTOMER"],
+                user=user,
+                document_label=f"حركة إرجاع شيك #{m.cheque.cheque_number}",
+            )
+        chq = m.cheque
+        chq.status = "Received"
+        chq.save(update_fields=["status"])
+        restored_cheques.append(chq.pk)
+        # سجلُّ الشيك لا يُمحى: الرجوعُ يُكتب حركةً كما يفعل
+        # `record_document_cheque_unposting` عند تحرير شيكات السند. حذفُ الصفّ
+        # كان يمحو أهمَّ حلقةٍ في حياة الورقة — خرجت للعميل ثم عادت — فيقرأ
+        # السجلُّ كأنّ شيئاً لم يقع.
+        ChequeMovement.objects.create(
+            cheque=chq,
+            movement_type="revert",
+            notes=f"إلغاء ترحيل مرتجع البيع {invoice.invoice_number} — عادت الورقة للمحفظة",
+            created_by=user,
+        )
+        m.sales_return = None
+        m.save(update_fields=["sales_return"])
+        logger.info(
+            "Restored cheque %s to Received from return invoice %s (unpost).",
+            chq.cheque_number, invoice.invoice_number,
+        )
+
+    return {
+        "released_vouchers": released_vouchers,
+        "restored_cheques": restored_cheques,
+    }
 
 
 def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:
@@ -851,11 +1013,227 @@ def _settle_attached_cheques(invoice: SalesInvoice, *, user=None) -> None:
     )
 
 
+def _process_sales_return_refund(
+    invoice: SalesInvoice,
+    *,
+    user=None,
+    refund_choice: dict | None = None,
+) -> None:
+    """T-ARINT / issue #167: ردّ ما دفعه الزبون عند ترحيل مرتجع البيع.
+
+    يُنفَّذ داخل نفس معاملة ترحيل مرتجع البيع:
+      1. الورق أولاً: إرجاع شيكات الفاتورة الأصلية التي ما زالت في المحفظة ('Received')
+         أقدم استحقاقاً أولاً، بما لا يتجاوز إجمالي المرتجع (الشيك كاملاً أو لا شيء).
+      2. النقد ثانياً: ضمن سقف النقد (cash_cap)، يُنشأ سند ردّ دفعة (CustomerPayment)
+         بـ kind=refund على صندوق الشركة الافتراضي ومملوكاً للمرتجع (refund_for_invoice).
+      3. ما لم يُغطّه النقد ولا الورق يبقى رصيداً دائناً للزبون، ويُسجَّل في ملخص الردّ.
+    """
+    if (invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE) != SalesInvoice.INVOICE_KIND_SALE_RETURN:
+        return
+
+    # تفادي التكرار عند وجود سند رد مسبق أو توزيعات مرحلة
+    if CustomerPayment.objects.filter(
+        tenant_id=invoice.tenant_id, refund_for_invoice_id=invoice.pk, is_posted=True
+    ).exists():
+        return
+    if posted_allocations_total(invoice.pk) > 0:
+        return
+
+    orig = invoice.original_invoice
+    return_total = Decimal(str(invoice.grand_total or 0)).quantize(DEC)
+
+    # التحقق من وجود فاتورة أصلية
+    if not orig:
+        if refund_choice is not None:
+            chosen_cheque_ids = refund_choice.get("cheque_ids") or []
+            chosen_cash = Decimal(str(refund_choice.get("cash_amount") or 0)).quantize(DEC)
+            if chosen_cheque_ids or chosen_cash > 0:
+                raise ValidationError("لا يمكن ردّ دفعة لمرتجع بيع غير مربوط بفاتورة بيع أصلية.")
+        invoice._refund_summary = {
+            "paper_amount": "0.00",
+            "cheque_numbers": [],
+            "cheque_ids": [],
+            "cash_amount": "0.00",
+            "credit_balance": str(return_total),
+            "voucher_id": None,
+        }
+        return
+
+    # حساب سقفَي النقد والورق
+    caps = calculate_sales_return_refund_caps(orig, current_return=invoice)
+    cash_cap = caps["cash_cap"]
+    paper_cheques = caps["paper_cheques"]
+
+    if refund_choice is None:
+        ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
+        auto_refund = ss.auto_refund_on_sales_return if ss else False
+        if not auto_refund:
+            # الإعداد معطّل ولم يُرسل اختيار صريح: لا شيء يُردّ الآن
+            invoice._refund_summary = {
+                "paper_amount": "0.00",
+                "cheque_numbers": [],
+                "cheque_ids": [],
+                "cash_amount": "0.00",
+                "credit_balance": str(return_total),
+                "voucher_id": None,
+            }
+            return
+        is_automatic = True
+    else:
+        is_automatic = False
+
+    if is_automatic:
+        # الورق أولاً، أقدم استحقاقاً أولاً، الشيك كاملاً أو لا شيء
+        selected_cheques = []
+        paper_total = Decimal("0.00")
+        running_needed = return_total
+        for chq in paper_cheques:
+            chq_amt = Decimal(str(chq.amount or 0)).quantize(DEC)
+            if chq_amt <= running_needed:
+                selected_cheques.append(chq)
+                paper_total += chq_amt
+                running_needed -= chq_amt
+            else:
+                # شيك أكبر من المتبقي يُتخطّى كاملاً
+                continue
+
+        # النقد ثانياً: للمتبقي ضمن سقف النقد
+        cash_to_refund = min(running_needed, cash_cap)
+    else:
+        if not isinstance(refund_choice, dict):
+            raise ValidationError("بيانات الرد يجب أن تكون كائناً يحتوي على cheque_ids و cash_amount.")
+
+        chosen_cheque_ids = refund_choice.get("cheque_ids") or []
+        try:
+            chosen_cash = Decimal(str(refund_choice.get("cash_amount") or 0)).quantize(DEC)
+        except Exception:
+            raise ValidationError("مبلغ الرد النقدي غير صالح.")
+
+        if not chosen_cheque_ids and chosen_cash == Decimal("0.00"):
+            # اختيار صريح بعدم رد شيء الآن
+            invoice._refund_summary = {
+                "paper_amount": "0.00",
+                "cheque_numbers": [],
+                "cheque_ids": [],
+                "cash_amount": "0.00",
+                "credit_balance": str(return_total),
+                "voucher_id": None,
+            }
+            return
+
+        available_map = {c.pk: c for c in paper_cheques}
+        selected_cheques = []
+        for cid in chosen_cheque_ids:
+            if cid not in available_map:
+                raise ValidationError(
+                    f"الشيك رقم #{cid} ليس في المحفظة (بحالة وارد) أو لا يتبع الفاتورة الأصلية #{orig.invoice_number}."
+                )
+            selected_cheques.append(available_map[cid])
+
+        paper_total = sum(
+            (Decimal(str(c.amount or 0)) for c in selected_cheques), Decimal("0.00")
+        ).quantize(DEC)
+        if paper_total > return_total:
+            raise ValidationError(
+                f"مجموع الشيكات المختارة ({paper_total}) يتجاوز إجمالي مرتجع البيع ({return_total})."
+            )
+
+        if chosen_cash < 0:
+            raise ValidationError("مبلغ الرد النقدي لا يجوز أن يكون سالباً.")
+        if chosen_cash > cash_cap:
+            raise ValidationError(
+                f"المبلغ النقدي المطلوب رده ({chosen_cash}) يتجاوز سقف النقد المقبوض فعلاً ({cash_cap})."
+            )
+        if paper_total + chosen_cash > return_total:
+            raise ValidationError(
+                f"مجموع الرد (شيكات {paper_total} + نقد {chosen_cash}) يتجاوز إجمالي مرتجع البيع ({return_total})."
+            )
+        cash_to_refund = chosen_cash
+
+    # تنفيذ تحويل الشيكات عبر transfer_cheque
+    from accounting.services import transfer_cheque
+
+    for chq in selected_cheques:
+        transfer_cheque(
+            chq.pk,
+            "return_to_customer",
+            user=user,
+            notes=f"إرجاع شيك للعميل بموجب مرتجع البيع {invoice.invoice_number}",
+            # الوسمُ بنيويٌّ لا نصّيّ — عليه وحدَه يعتمد فكُّ الترحيل.
+            sales_return_id=invoice.pk,
+        )
+
+    # تنفيذ الرد النقدي إن وُجد مبلغ
+    payment = None
+    if cash_to_refund > 0:
+        cash_account_id = _resolve_settlement_cash_account_id(invoice)
+        if not cash_account_id:
+            logger.warning(
+                "Sales return %s cannot be posted: cash refund required (%s) but "
+                "no cash/bank account on the return, in SalesSettings, nor in COA.",
+                invoice.invoice_number, cash_to_refund,
+            )
+            raise ValidationError(
+                "المرتجع يتطلب ردّ دفعة نقدية للزبون ولا صندوق محدَّد على المرتجع ولا صندوق افتراضي للشركة — "
+                "اختر حساب الصندوق/البنك أو اضبط الصندوق الافتراضي في إعدادات المبيعات."
+            )
+
+        cheque_nums = [c.cheque_number for c in selected_cheques]
+        cheque_note_part = f" (مع إعادة الشيكات: {', '.join(cheque_nums)})" if cheque_nums else ""
+        notes = f"ردّ دفعة لمرتجع البيع {invoice.invoice_number}{cheque_note_part}"
+
+        payment = CustomerPayment.objects.create(
+            tenant_id=invoice.tenant_id,
+            partner_id=invoice.customer_id,
+            payment_date=invoice.invoice_date,
+            amount=cash_to_refund,
+            currency_id=invoice.currency_id,
+            exchange_rate=invoice.exchange_rate or Decimal("1"),
+            cash_or_bank_account_id=cash_account_id,
+            kind=CustomerPayment.KIND_REFUND,
+            refund_for_invoice=invoice,
+            notes=notes,
+        )
+        PaymentAllocation.objects.create(
+            tenant_id=invoice.tenant_id,
+            payment=payment,
+            invoice=invoice,
+            amount=cash_to_refund,
+        )
+        post_customer_payment(payment, user=user)
+        from core.activity import log_activity
+        log_activity(
+            action="payment", entity_type="customer_payment", entity_id=payment.id,
+            entity_label=f"#{payment.id}", description="سند ردّ دفعة تلقائي",
+            partner_ids=[payment.partner_id], tenant=invoice.tenant, user=user,
+        )
+        log_activity(
+            action="post", entity_type="customer_payment", entity_id=payment.id,
+            entity_label=f"#{payment.id}", description="ترحيل سند ردّ دفعة تلقائي",
+            partner_ids=[payment.partner_id], tenant=invoice.tenant, user=user,
+        )
+        logger.info(
+            "Auto-refunded sales return %s via customer payment %s (amount %s).",
+            invoice.invoice_number, payment.id, cash_to_refund,
+        )
+
+    credit_balance = (return_total - paper_total - cash_to_refund).quantize(DEC)
+    invoice._refund_summary = {
+        "paper_amount": str(paper_total),
+        "cheque_numbers": [c.cheque_number for c in selected_cheques],
+        "cheque_ids": [c.pk for c in selected_cheques],
+        "cash_amount": str(cash_to_refund),
+        "credit_balance": str(credit_balance),
+        "voucher_id": payment.id if payment else None,
+    }
+
+
 def post_sales_invoice(
     invoice: SalesInvoice,
     *,
     user=None,
     suppress_auto_settlement: bool = False,
+    refund_choice: dict | None = None,
 ) -> SalesInvoice:
     """ترحيل فاتورة: قيد محاسبي + (اختياري) خصم مخزون.
 
@@ -1269,6 +1647,11 @@ def post_sales_invoice(
             # المعاملة (ذرّياً مع الترحيل) فلا يبقى العميل مديناً. (يُلغي نفسه إن
             # كان سند الشيكات أعلاه قد غطّى الفاتورة.)
             _auto_settle_cash_sale(invoice, user=user)
+            # issue #167: ردّ ما دفعه الزبون عند ترحيل مرتجع البيع (ورقاً ثم نقداً)
+            if kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+                _process_sales_return_refund(
+                    invoice, user=user, refund_choice=refund_choice
+                )
 
     return invoice
 
@@ -2218,6 +2601,10 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
 
     validate_fiscal_period(payment.tenant_id, payment.payment_date)
 
+    is_refund = (getattr(payment, "kind", None) or CustomerPayment.KIND_RECEIPT) == CustomerPayment.KIND_REFUND
+    if is_refund and payment.pk and payment.cheques.exists():
+        raise ValidationError("سند ردّ الدفعة لا يقبل شيكات مرفقة — إعادة الشيكات تتم كأوراق بحركتها الخاصة.")
+
     allocated = (
         PaymentAllocation.objects.filter(payment=payment).aggregate(t=Sum("amount"))["t"]
         or Decimal("0")
@@ -2234,9 +2621,19 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
 
     for alloc in payment.allocations.select_related("invoice", "invoice__currency"):
         if alloc.invoice.customer_id != payment.partner_id:
-            raise ValidationError("توزيع الدفعة على فاتورة لا تخص نفس العميل.")
+            msg = (
+                "توزيع ردّ الدفعة على مرتجع لا يخص نفس العميل."
+                if is_refund
+                else "توزيع الدفعة على فاتورة لا تخص نفس العميل."
+            )
+            raise ValidationError(msg)
+        if is_refund and alloc.invoice.invoice_kind != SalesInvoice.INVOICE_KIND_SALE_RETURN:
+            raise ValidationError(
+                f"سند ردّ الدفعة لا يُوزَّع إلا على مرتجع بيع (المستند #{alloc.invoice.invoice_number} ليس مرتجع بيع)."
+            )
         if alloc.invoice.status != SalesInvoice.STATUS_POSTED:
-            raise ValidationError(f"الفاتورة #{alloc.invoice.invoice_number} غير مرحّلة.")
+            prefix = "مرتجع البيع" if is_refund else "الفاتورة"
+            raise ValidationError(f"{prefix} #{alloc.invoice.invoice_number} غير مرحّل.")
 
         inv = alloc.invoice
         inv_currency_id = inv.currency_id
@@ -2359,6 +2756,10 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             inv = locked_invoices[inv_id]
             remaining = inv.grand_total - Decimal(str(inv.amount_paid))
             if total_increment > remaining + DEC:
+                if is_refund:
+                    raise ValidationError(
+                        f"مبلغ ردّ الدفعة الموزّع ({total_increment}) يتجاوز المتبقي على مرتجع البيع #{inv.invoice_number} ({remaining})."
+                    )
                 raise ValidationError(
                     f"مبلغ التوزيع المحوّل ({total_increment} بعملة الفاتورة) "
                     f"يتجاوز المتبقي على الفاتورة #{inv.invoice_number} ({remaining})."
@@ -2427,48 +2828,84 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             cash_amt = cash_by_invoice[inv_id].quantize(DEC)
             ar_amt = ar_by_invoice[inv_id].quantize(DEC)
             forex_diff = (cash_amt - ar_amt).quantize(DEC)  # >0 ربح، <0 خسارة
-            inv_lines: list[dict] = _debit_lines(
-                cash_amt, f"تحصيل عميل — فاتورة {inv.invoice_number}"
-            )
-            if forex_acc and abs(forex_diff) > DEC:
-                # الذمم تُسدَّد بقيمة الفاتورة المحوّلة، والفرق لحساب فروقات العملة.
-                inv_lines.append({
-                    "account": ar.id,
-                    "partner": payment.partner_id,
-                    "debit": Decimal("0"),
-                    "credit": ar_amt,
-                    "description": f"تسديد ذمم — فاتورة {inv.invoice_number}",
-                })
-                if forex_diff > 0:
-                    inv_lines.append({
-                        "account": forex_acc.id, "partner": None,
-                        "debit": Decimal("0"), "credit": forex_diff,
-                        "description": f"ربح فروق عملة — فاتورة {inv.invoice_number}",
-                    })
-                else:
-                    inv_lines.append({
-                        "account": forex_acc.id, "partner": None,
-                        "debit": abs(forex_diff), "credit": Decimal("0"),
-                        "description": f"خسارة فروق عملة — فاتورة {inv.invoice_number}",
-                    })
+            if is_refund:
+                inv_lines: list[dict] = [
+                    {
+                        "account": ar.id,
+                        "partner": payment.partner_id,
+                        "debit": ar_amt,
+                        "credit": Decimal("0"),
+                        "description": f"ردّ ذمم — مرتجع {inv.invoice_number}",
+                    },
+                    {
+                        "account": payment.cash_or_bank_account_id,
+                        "partner": None,
+                        "debit": Decimal("0"),
+                        "credit": cash_amt,
+                        "description": f"ردّ دفعة نقداً — مرتجع {inv.invoice_number}",
+                    },
+                ]
+                if forex_acc and abs(forex_diff) > DEC:
+                    if forex_diff > 0:
+                        inv_lines.append({
+                            "account": forex_acc.id, "partner": None,
+                            "debit": abs(forex_diff), "credit": Decimal("0"),
+                            "description": f"خسارة فروق عملة — مرتجع {inv.invoice_number}",
+                        })
+                    else:
+                        inv_lines.append({
+                            "account": forex_acc.id, "partner": None,
+                            "debit": Decimal("0"), "credit": abs(forex_diff),
+                            "description": f"ربح فروق عملة — مرتجع {inv.invoice_number}",
+                        })
+                jh_desc = (
+                    (payment.notes or f"ردّ دفعة للعميل {payment.partner.name}")
+                    + f" — مرتجع {inv.invoice_number}"
+                )[:500]
             else:
-                # نفس العملة (الشائع) — الذمم تُسدَّد بمبلغ الصندوق تماماً.
-                inv_lines.append({
-                    "account": ar.id,
-                    "partner": payment.partner_id,
-                    "debit": Decimal("0"),
-                    "credit": cash_amt,
-                    "description": f"تسديد ذمم — فاتورة {inv.invoice_number}",
-                })
+                inv_lines: list[dict] = _debit_lines(
+                    cash_amt, f"تحصيل عميل — فاتورة {inv.invoice_number}"
+                )
+                if forex_acc and abs(forex_diff) > DEC:
+                    # الذمم تُسدَّد بقيمة الفاتورة المحوّلة، والفرق لحساب فروقات العملة.
+                    inv_lines.append({
+                        "account": ar.id,
+                        "partner": payment.partner_id,
+                        "debit": Decimal("0"),
+                        "credit": ar_amt,
+                        "description": f"تسديد ذمم — فاتورة {inv.invoice_number}",
+                    })
+                    if forex_diff > 0:
+                        inv_lines.append({
+                            "account": forex_acc.id, "partner": None,
+                            "debit": Decimal("0"), "credit": forex_diff,
+                            "description": f"ربح فروق عملة — فاتورة {inv.invoice_number}",
+                        })
+                    else:
+                        inv_lines.append({
+                            "account": forex_acc.id, "partner": None,
+                            "debit": abs(forex_diff), "credit": Decimal("0"),
+                            "description": f"خسارة فروق عملة — فاتورة {inv.invoice_number}",
+                        })
+                else:
+                    # نفس العملة (الشائع) — الذمم تُسدَّد بمبلغ الصندوق تماماً.
+                    inv_lines.append({
+                        "account": ar.id,
+                        "partner": payment.partner_id,
+                        "debit": Decimal("0"),
+                        "credit": cash_amt,
+                        "description": f"تسديد ذمم — فاتورة {inv.invoice_number}",
+                    })
+                jh_desc = (
+                    (payment.notes or f"تحصيل عميل {payment.partner.name}")
+                    + f" — فاتورة {inv.invoice_number}"
+                )[:500]
             jh = post_journal(
                 tenant_id=payment.tenant_id,
                 transaction_date=payment.payment_date,
                 reference_type="CUSTOMER_PAYMENT",
                 reference_id=payment.id,
-                description=(
-                    (payment.notes or f"تحصيل عميل {payment.partner.name}")
-                    + f" — فاتورة {inv.invoice_number}"
-                )[:500],
+                description=jh_desc,
                 lines_data=inv_lines,
                 currency=payment.currency,
                 exchange_rate=payment.exchange_rate,
@@ -2482,16 +2919,29 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         # كرصيد لصالح العميل ويُوزَّع على الفواتير لاحقاً بلا قيد إضافي.
         unallocated = (Decimal(str(payment.amount)) - allocated).quantize(DEC)
         if unallocated >= DEC:
-            jh = post_journal(
-                tenant_id=payment.tenant_id,
-                transaction_date=payment.payment_date,
-                reference_type="CUSTOMER_PAYMENT",
-                reference_id=payment.id,
-                description=(
-                    (payment.notes or f"تحصيل عميل {payment.partner.name}")
+            if is_refund:
+                unalloc_lines = [
+                    {
+                        "account": ar.id,
+                        "partner": payment.partner_id,
+                        "debit": unallocated,
+                        "credit": Decimal("0"),
+                        "description": f"ردّ دفعة على الحساب — {payment.partner.name}",
+                    },
+                    {
+                        "account": payment.cash_or_bank_account_id,
+                        "partner": None,
+                        "debit": Decimal("0"),
+                        "credit": unallocated,
+                        "description": f"ردّ دفعة نقداً على الحساب — {payment.partner.name}",
+                    },
+                ]
+                unalloc_desc = (
+                    (payment.notes or f"ردّ دفعة للعميل {payment.partner.name}")
                     + " — على الحساب"
-                )[:500],
-                lines_data=[
+                )[:500]
+            else:
+                unalloc_lines = [
                     *_debit_lines(
                         unallocated, f"تحصيل على الحساب — {payment.partner.name}"
                     ),
@@ -2502,7 +2952,18 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                         "credit": unallocated,
                         "description": f"دفعة على الحساب — {payment.partner.name}",
                     },
-                ],
+                ]
+                unalloc_desc = (
+                    (payment.notes or f"تحصيل عميل {payment.partner.name}")
+                    + " — على الحساب"
+                )[:500]
+            jh = post_journal(
+                tenant_id=payment.tenant_id,
+                transaction_date=payment.payment_date,
+                reference_type="CUSTOMER_PAYMENT",
+                reference_id=payment.id,
+                description=unalloc_desc,
+                lines_data=unalloc_lines,
                 currency=payment.currency,
                 exchange_rate=payment.exchange_rate,
                 user=user,

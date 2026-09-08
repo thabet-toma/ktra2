@@ -10,7 +10,7 @@
 """
 from django.contrib.auth.models import User
 from django.test import TestCase
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 
 from tenants.models import Tenant, UserCompanyMembership
 
@@ -46,12 +46,12 @@ class UserDetailScopeTest(TestCase):
         )
 
         for user in (cls.staff_of_a, cls.member_of_a, cls.member_of_b, cls.root):
-            Token.objects.create(user=user)
+            UserDevice.objects.create(user=user)
 
     def _get(self, requester, target):
         return self.client.get(
             f"/api/hr/users/{target.pk}/",
-            HTTP_AUTHORIZATION=f"Token {Token.objects.get(user=requester).key}",
+            HTTP_AUTHORIZATION=f"Token {UserDevice.objects.get(user=requester).key}",
         )
 
     def test_is_staff_alone_cannot_read_across_companies(self):

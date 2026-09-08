@@ -11,7 +11,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from rest_framework.test import APIClient
 from django.contrib.auth.models import User
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 
 from tenants.models import Tenant, Currency, UserCompanyMembership
 from partners.models import Partner
@@ -29,7 +29,7 @@ class _Base(TestCase):
         cls.cur, _ = Currency.objects.get_or_create(
             Code='ILS', defaults={'Symbol': '₪', 'IsBaseCurrency': True})
         cls.user = User.objects.create_user(username='m3_user', password='x')
-        Token.objects.create(user=cls.user)
+        UserDevice.objects.create(user=cls.user)
         UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant, role='manager')
         cls.partner = Partner.objects.create(tenant=cls.tenant, name='Supplier', partner_type='Supplier')
 

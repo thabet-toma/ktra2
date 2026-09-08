@@ -11,7 +11,7 @@ from accountant_portal.models import AccountantProfile
     EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
     REST_FRAMEWORK={
         "DEFAULT_AUTHENTICATION_CLASSES": [
-            "rest_framework.authentication.TokenAuthentication",
+            "hr.authentication.DeviceTokenAuthentication",
             "rest_framework.authentication.SessionAuthentication",
         ],
         "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],

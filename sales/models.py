@@ -204,6 +204,16 @@ class SalesSettings(models.Model):
         db_column="AutoPostPayments",
         help_text="ترحيل تلقائي لسندات القبض والصرف بعد الحفظ",
     )
+    # issue #167: ردّ ما دفعه الزبون عند ترحيل مرتجع البيع تلقائياً (ورقاً ثم نقداً)
+    auto_refund_on_sales_return = models.BooleanField(
+        default=False,
+        db_column="AutoRefundOnSalesReturn",
+        help_text=(
+            "عند ترحيل مرتجع البيع يُردّ للزبون ما دفعه: الشيكُ الذي ما زال في المحفظة "
+            "يعود إليه ورقةً، وما وصل الصندوقَ يعود نقداً من الصندوق الافتراضيّ. وما يقابله "
+            "شيكٌ عند البنك لم يُحصَّل بعدُ لا يُردّ — يبقى رصيداً دائناً للزبون. مطفأً: تُسأل عند كل ترحيل."
+        ),
+    )
     show_journal_preview = models.BooleanField(
         default=True,
         db_column="ShowJournalPreview",
@@ -800,6 +810,13 @@ class DeliveryOrderLine(models.Model):
 
 
 class CustomerPayment(models.Model):
+    KIND_RECEIPT = "receipt"
+    KIND_REFUND = "refund"
+    KIND_CHOICES = [
+        (KIND_RECEIPT, "قبض"),
+        (KIND_REFUND, "ردّ دفعة"),
+    ]
+
     id = models.AutoField(primary_key=True, db_column="CustomerPaymentID")
     tenant = models.ForeignKey(
         Tenant,
@@ -812,6 +829,13 @@ class CustomerPayment(models.Model):
         on_delete=models.PROTECT,
         db_column="PartnerID",
         related_name="customer_payments",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=KIND_CHOICES,
+        default=KIND_RECEIPT,
+        db_column="Kind",
+        help_text="قبض (عادي) أو ردّ دفعة — يقلب اتجاه القيد ويُبقي المبلغ موجباً.",
     )
     payment_date = models.DateField(db_column="PaymentDate")
     amount = models.DecimalField(max_digits=18, decimal_places=2, db_column="Amount")
@@ -857,6 +881,16 @@ class CustomerPayment(models.Model):
         null=True, blank=True,
         db_column="AutoSettledInvoiceID",
         related_name="auto_settlements",
+    )
+    # T-ARINT / issue #167: سند ردّ الدفعة التلقائي عند ترحيل مرتجع البيع يملكه
+    # قيدُ المرتجع نفسه — العلامة تُميّزه عن سندات المستخدم، فيُحرَّر تلقائياً
+    # مع إلغاء ترحيل المرتجع بدل أن يبقى معلّقاً أو يتكرّر عند إعادة الترحيل.
+    refund_for_invoice = models.ForeignKey(
+        "SalesInvoice",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="RefundForInvoiceID",
+        related_name="auto_refunds",
     )
     notes = models.CharField(max_length=500, blank=True, default="", db_column="Notes")
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")

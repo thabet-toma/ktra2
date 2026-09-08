@@ -12,7 +12,7 @@
 from decimal import Decimal
 
 from django.contrib.auth.models import User
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 from rest_framework.test import APIClient, APITestCase
 
 from accounting.models import Account, JournalHeader, JournalLine
@@ -33,7 +33,7 @@ class _TwoTenantBase(APITestCase):
         cls.other_tenant = create_company("شركة العزل ب", cls.other_user)
         create_fiscal_year(cls.tenant, 2026)
         create_fiscal_year(cls.other_tenant, 2026)
-        cls.token = Token.objects.create(user=cls.user)
+        cls.token = UserDevice.objects.create(user=cls.user)
 
     def setUp(self):
         self.client = APIClient()

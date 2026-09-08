@@ -64,8 +64,8 @@ class ReadIsolationTest(APITestCase):
     def test_mapper_tasks_scoped(self):
         """الصفحة الرئيسية تقرأ المهام من mapper «tasks» — يجب أن تكون فارغة."""
         # mapper auth uses real tokens, not force_authenticate
-        from rest_framework.authtoken.models import Token
-        token = Token.objects.create(user=self.owner_b)
+        from hr.models import UserDevice
+        token = UserDevice.objects.create(user=self.owner_b)
         self.client.credentials(
             HTTP_AUTHORIZATION=f"Token {token.key}",
             HTTP_X_TENANT_ID=str(self.t_b.TenantID),

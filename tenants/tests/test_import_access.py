@@ -7,7 +7,7 @@
 from django.contrib.auth.models import User
 from django.test import TestCase
 from rest_framework.test import APIClient
-from rest_framework.authtoken.models import Token
+from hr.models import UserDevice
 
 from accounting.models import Account
 from core.import_access import is_super_admin, user_can_access_import
@@ -65,7 +65,7 @@ class CoaImportGatingTest(TestCase):
         cls.manager = User.objects.create_user(username='cmgr', password='x', email='cmgr@x.co')
         cls.staff = User.objects.create_user(username='cstf', password='x', email='cstf@x.co')
         for u in (cls.manager, cls.staff):
-            Token.objects.create(user=u)
+            UserDevice.objects.create(user=u)
         UserCompanyMembership.objects.create(user=cls.manager, tenant=cls.tenant, role='manager')
         cls.staff_m = UserCompanyMembership.objects.create(
             user=cls.staff, tenant=cls.tenant, role='staff'

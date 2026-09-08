@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **611**
+عدد النقاط: **617**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -212,6 +212,12 @@
 | `/api/hr/attendance/` | `AttendanceRecordViewSet` | `hr/views.py` |
 | `/api/hr/attendance/{pk}/` | `AttendanceRecordViewSet` | `hr/views.py` |
 | `/api/hr/auth/change-password/` | `change_password_view` | `hr/auth_api.py` |
+| `/api/hr/auth/devices/` | `list_devices_view` | `hr/device_api.py` |
+| `/api/hr/auth/devices/<int:pk>/` | `device_detail_view` | `hr/device_api.py` |
+| `/api/hr/auth/devices/<int:pk>/evict/` | `evict_device_view` | `hr/device_api.py` |
+| `/api/hr/auth/devices/<int:pk>/rename/` | `rename_device_view` | `hr/device_api.py` |
+| `/api/hr/auth/devices/evict-others/` | `evict_others_view` | `hr/device_api.py` |
+| `/api/hr/auth/devices/set-primary/` | `set_primary_view` | `hr/device_api.py` |
 | `/api/hr/auth/login/` | `login_view` | `hr/auth_api.py` |
 | `/api/hr/auth/logout/` | `logout_view` | `hr/auth_api.py` |
 | `/api/hr/auth/resend-verification/` | `resend_view` | `hr/auth_api.py` |

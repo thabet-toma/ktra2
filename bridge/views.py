@@ -283,11 +283,16 @@ def _resolve_user(request):
     token_key = request.headers.get('Authorization', '').replace('Token ', '').strip()
     if not token_key:
         return None
-    token = Token.objects.select_related('user').filter(key=token_key).first()
-    if token is None:
+    # ISSUE #168: مفتاحٌ لكلّ جهاز — والقراءةُ من جدول الأجهزة وحدَه. الصفُّ
+    # الباقي في `authtoken_token` بعد الهجرة الصامتة ليس اعتماداً: قبولُه هنا
+    # يفتح باباً خلفيّاً يتجاوز إبطالَ الجهاز.
+    from hr.models import UserDevice
+
+    device = UserDevice.objects.select_related('user').filter(key=token_key).first()
+    if device is None:
         return None
-    request.user = token.user
-    return token.user
+    request.user = device.user
+    return device.user
 
 
 def _resolve_tenant(request):

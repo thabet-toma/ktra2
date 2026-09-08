@@ -1979,7 +1979,7 @@ _CHEQUE_GL_FROM_RECEIVED_ONLY = frozenset({'deposit', 'return_to_customer'})
 
 def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
                     account_id=None, movement_date=None, bank_account_id=None,
-                    endorsed_to_id=None):
+                    endorsed_to_id=None, sales_return_id=None):
     """task11 R2-A3 — تحويل حالة شيك مع القيد المحاسبي المرافق.
 
     كانت آلة الحالات بلا قيود محاسبية (والواجهة تتجاوزها أصلاً بـ PATCH خام)
@@ -2134,6 +2134,9 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             movement_type=movement_type,
             notes=notes,
             created_by=user,
+            # ISSUE #167: حين يُنتج ترحيلُ مرتجع بيعٍ هذه الحركةَ، تُختَم بمرتجعها
+            # هنا — عند الإنشاء، لا بالبحث عن الصفّ بعد كتابته.
+            sales_return_id=sales_return_id,
         )
         if needs_gl:
             journal = post_cheque_movement_journal(

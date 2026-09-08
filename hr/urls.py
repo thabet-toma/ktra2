@@ -29,6 +29,14 @@ from .auth_api import (
     change_password_view,
 )
 from .user_api import user_detail, list_users
+from .device_api import (
+    list_devices_view,
+    evict_device_view,
+    evict_others_view,
+    set_primary_view,
+    rename_device_view,
+    device_detail_view,
+)
 
 router = DefaultRouter()
 router.register(r'tasks', TaskViewSet)
@@ -74,6 +82,12 @@ urlpatterns = [
     path('auth/signup/', signup_view),
     path('auth/resend-verification/', resend_view),
     path('auth/change-password/', change_password_view),
+    path('auth/devices/', list_devices_view),
+    path('auth/devices/evict-others/', evict_others_view),
+    path('auth/devices/set-primary/', set_primary_view),
+    path('auth/devices/<int:pk>/evict/', evict_device_view),
+    path('auth/devices/<int:pk>/rename/', rename_device_view),
+    path('auth/devices/<int:pk>/', device_detail_view),
     path('users/', list_users),
     path('users/<str:pk>/', user_detail),
     # الخدمة الذاتية — الموظف يُحلّ من الجلسة، فلا معرّف في أي مسار هنا.

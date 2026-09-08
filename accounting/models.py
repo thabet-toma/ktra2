@@ -449,6 +449,16 @@ class ChequeMovement(models.Model):
         db_column='JournalID', related_name='cheque_movements',
     )
     notes = models.TextField(null=True, blank=True, db_column='Notes')
+    # ISSUE #167: مرتجعُ البيع الذي أنتج هذه الحركة — وسمُ ملكيّةٍ بنيويّ لا
+    # نصٌّ في `notes`. الوسمُ النصّيّ يُعرَّف بـ`contains` فيَعِد بما لا يضمن:
+    # يكفي أن يكتب مستخدمٌ الجملةَ نفسها ليصير فكُّ الترحيل يتصرّف بورقته.
+    # ويُفرَّغ عند التحرير فلا تلتقطه إعادةُ الترحيل مرّتين — مرآةُ
+    # `CustomerPayment.refund_for_invoice`.
+    sales_return = models.ForeignKey(
+        'sales.SalesInvoice', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='SalesReturnID', related_name='auto_returned_cheque_movements',
+        help_text='مرتجع البيع الذي أعاد هذه الورقة تلقائياً عند ترحيله',
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
     created_by = models.ForeignKey(
         'auth.User', on_delete=models.SET_NULL, null=True, blank=True,

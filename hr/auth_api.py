@@ -10,6 +10,7 @@ from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.http import JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.authtoken.models import Token
 
@@ -239,10 +240,24 @@ def login_view(request):
             {"detail": "Account not approved", "code": "NOT_APPROVED"},
             status=403,
         )
-    token, _ = Token.objects.get_or_create(user=user)
+    from core.tenant_utils import _get_client_ip
+    from hr.device_utils import derive_device_name
+    from hr.models import UserDevice
+
+    raw_ua = request.META.get("HTTP_USER_AGENT", "")
+    ip = _get_client_ip(request)
+    dev_name = derive_device_name(raw_ua)
+
+    device = UserDevice.objects.create(
+        user=user,
+        device_name=dev_name,
+        user_agent=raw_ua,
+        ip_address=ip,
+        last_active_at=timezone.now(),
+    )
     _sync_user_mirror(user)
     _log_session_event(request, user, "login")
-    return JsonResponse({"token": token.key, "user": _user_payload(user)})
+    return JsonResponse({"token": device.key, "user": _user_payload(user)})
 
 
 @csrf_exempt
@@ -251,10 +266,15 @@ def logout_view(request):
         return JsonResponse({"detail": "Method not allowed"}, status=405)
     auth = request.headers.get("Authorization", "").replace("Token ", "").strip()
     if auth:
-        tok = Token.objects.filter(key=auth).select_related("user").first()
-        if tok is not None:
-            _log_session_event(request, tok.user, "logout")
-            tok.delete()
+        from hr.models import UserDevice
+
+        # ISSUE #168: الخروجُ يحذف **جهازَه وحدَه** لا مفتاحاً مشتركاً — وهذا
+        # إصلاحُ العطب المشتكى منه لا أثرٌ جانبيّ. ولا ارتدادَ إلى
+        # `authtoken_token`: صفٌّ قديمٌ يُقبل هنا يعني خروجاً لا يُخرِج.
+        dev = UserDevice.objects.filter(key=auth).select_related("user").first()
+        if dev is not None:
+            _log_session_event(request, dev.user, "logout")
+            dev.delete()
     return JsonResponse({"ok": True})
 
 
@@ -359,10 +379,13 @@ def change_password_view(request):
     if body is None:
         return JsonResponse({"detail": "Invalid JSON"}, status=400)
     auth = request.headers.get("Authorization", "").replace("Token ", "").strip()
-    token = Token.objects.filter(key=auth).first()
-    if not token:
+    from hr.models import UserDevice
+
+    # ISSUE #168: جدولُ الأجهزة وحدَه مصدرُ الحقيقة — لا ارتدادَ إلى الصفّ القديم.
+    current_device = UserDevice.objects.filter(key=auth).select_related("user").first()
+    if not current_device:
         return JsonResponse({"detail": "Unauthorized"}, status=401)
-    user = token.user
+    user = current_device.user
     old = body.get("oldPassword") or ""
     new_p = body.get("newPassword") or ""
     if not user.check_password(old):
@@ -373,4 +396,15 @@ def change_password_view(request):
         return JsonResponse({"detail": "; ".join(e.messages)}, status=400)
     user.set_password(new_p)
     user.save()
+
+    # ISSUE #168: تغييرُ كلمة المرور يُنهي كلَّ جهازٍ آخر ويُبقي الحاليّ — من
+    # يغيّرها غالباً يشكّ، ومن يشكّ لا يُطالَب بخطوةٍ ثانية.
+    others = UserDevice.objects.filter(user=user).exclude(pk=current_device.pk)
+    count = others.count()
+    others.delete()
+    if count > 0:
+        from hr.device_api import _log_device_eviction
+        _log_device_eviction(request, user, "جميع الأجهزة الأخرى", count=count)
+
     return JsonResponse({"ok": True})
+

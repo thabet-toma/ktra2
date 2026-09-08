@@ -80,6 +80,7 @@ from .services import (
     post_sales_invoice,
     recalculate_invoice_amounts,
     release_auto_cash_settlement,
+    release_auto_sales_return_refund,
     release_sales_serials,
     remaining_delivery_lines,
     suggest_fifo_allocations,
@@ -421,6 +422,8 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                 # يُحرَّر (قيوده + صفوفه) ذرّياً معه، فلا يبقى معلّقاً ولا يتكرّر
                 # عند إعادة الترحيل. سندات المستخدم يحرسها الفحص التالي فتُمنع.
                 released = release_auto_cash_settlement(invoice, user=request.user)
+                # issue #167: تحرير سند ردّ الدفعة التلقائي وإرجاع الشيكات إلى المحفظة
+                release_auto_sales_return_refund(invoice, user=request.user)
                 guard_invoice_payments_before_unpost(invoice)
                 # الوحدات المُرقَّمة تعود للمخزن مع مخزونها؛ ما اختاره المستخدم يبقى
                 # على البند فتستهلك إعادة الترحيل الوحدات ذاتها.
@@ -601,8 +604,13 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
     @requires_perm("sales.invoice.post")
     def post_invoice(self, request, pk=None):
         invoice = self.get_object()
+        refund_choice = (
+            request.data.get("refund")
+            if isinstance(request.data, dict) and "refund" in request.data
+            else None
+        )
         try:
-            post_sales_invoice(invoice, user=request.user)
+            post_sales_invoice(invoice, user=request.user, refund_choice=refund_choice)
         except ValidationError as e:
             # `str(ValidationError)` يطبع تمثيل بايثون (`['…']`) — أول رسالة يراها
             # المستخدم من الحارس يجب أن تكون جملةً، كما في جانب الشراء.
@@ -620,7 +628,11 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
             request=request,
         )
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
-        return Response(ser.data)
+        data = dict(ser.data)
+        refund_summary = getattr(invoice, "_refund_summary", None)
+        if refund_summary is not None:
+            data["refund_summary"] = refund_summary
+        return Response(data)
 
     @action(detail=True, methods=["post"], url_path="collect")
     @requires_perm("sales.payment.create")
