@@ -23,6 +23,7 @@ from hr.models import Employee
 
 from .models import (
     EmployeeInvitation,
+    EmployeeNote,
     EmployeeProfile,
     PointEntry,
     Task,
@@ -31,9 +32,12 @@ from .models import (
 )
 from .serializers import (
     AcceptInvitationSerializer,
+    ActivityRangeSerializer,
     EmployeeCreateSerializer,
     EmployeeInvitationSerializer,
     EmployeeListSerializer,
+    EmployeeNoteInputSerializer,
+    EmployeeNoteSerializer,
     EmployeeOpsSettingsSerializer,
     EmployeeUpdateSerializer,
     ManualPointEntrySerializer,
@@ -48,14 +52,19 @@ from .serializers import (
     UnreviewSubmissionSerializer,
 )
 from .services import (
+    ACTIVITY_TAB_LIMIT,
     MODULE_KEY,
+    NOTES_LIST_LIMIT,
     parse_month_bounds,
     accept_invitation,
     attendance_check_in,
     cancel_invitation,
+    create_employee_note,
     create_employee_with_invitation,
     create_task,
     deactivate_employee,
+    employee_activity,
+    employee_card,
     delete_task,
     get_leaderboard_data,
     get_or_create_settings,
@@ -91,6 +100,19 @@ _EMPLOYEE_ACTION_PERMS = {
     "invite": PERM_MANAGE,
     "deactivate": PERM_MANAGE,
     "reactivate": PERM_MANAGE,
+    "activity": PERM_MANAGE,
+    "card": PERM_MANAGE,
+}
+
+# الملاحظةُ لا يقرؤها إلا حاملُ `employee_ops.manage` — **لا «مديرُه المباشر»**:
+# حقلُ `manager` في هذه الوحدة معلومةٌ لا حارس، ولا يُفلتَر به استعلامٌ في أيّ
+# مكان. **ولا تعديلَ ولا حذف**: العيبُ الذي
+# وُجد هذا الجدولُ لإزالته هو حقلٌ «يُدهَس بكلّ حفظ»، وتحريرُ النصّ في مكانه هو
+# الدهسُ نفسُه بنطاقٍ أضيق. والمواصفة (§٧ · القصّة ٣٤) تريدها **دليلاً لا انطباعاً**،
+# ولم تطلب أيّاً منهما. من أخطأ يكتب ملاحظةً تصحّحه — والتاريخُ يبقى كاملاً.
+_NOTE_ACTION_PERMS = {
+    "list": PERM_MANAGE,
+    "create": PERM_MANAGE,
 }
 
 _INVITATION_ACTION_PERMS = {
@@ -206,15 +228,13 @@ class EmployeeViewSet(viewsets.ViewSet):
             .select_related("employee_ops_profile__manager")
             .annotate(raw_inv_status=latest_inv_status)
             .annotate(
+                # مرآةُ `EmployeeInvitation.VISIBLE_STATUSES` في SQL — تُبنى منها
+                # لا تُكتب بجانبها، فلا تفترقان.
                 annotated_invitation_status=Case(
-                    When(
-                        raw_inv_status=EmployeeInvitation.STATUS_PENDING,
-                        then=Value(EmployeeInvitation.STATUS_PENDING),
-                    ),
-                    When(
-                        raw_inv_status=EmployeeInvitation.STATUS_ACCEPTED,
-                        then=Value(EmployeeInvitation.STATUS_ACCEPTED),
-                    ),
+                    *[
+                        When(raw_inv_status=value, then=Value(value))
+                        for value in EmployeeInvitation.VISIBLE_STATUSES
+                    ],
                     default=Value("none"),
                     output_field=CharField(),
                 )
@@ -269,10 +289,7 @@ class EmployeeViewSet(viewsets.ViewSet):
             .first()
         )
         status_val = "none"
-        if inv and inv.status in (
-            EmployeeInvitation.STATUS_PENDING,
-            EmployeeInvitation.STATUS_ACCEPTED,
-        ):
+        if inv and inv.status in EmployeeInvitation.VISIBLE_STATUSES:
             status_val = inv.status
         setattr(employee, "annotated_invitation_status", status_val)
         serializer = EmployeeListSerializer(employee)
@@ -330,6 +347,45 @@ class EmployeeViewSet(viewsets.ViewSet):
         employee = get_object_or_404(Employee.objects.filter(tenant=self.tenant), pk=pk)
         deactivate_employee(employee=employee, actor=request.user)
         return Response({"status": "deactivated", "id": employee.id})
+
+    @action(detail=True, methods=["get"])
+    def card(self, request, pk=None):
+        employee = get_object_or_404(
+            Employee.objects.filter(tenant=self.tenant).select_related(
+                "employee_ops_profile__manager"
+            ),
+            pk=pk,
+        )
+        return Response(employee_card(tenant=self.tenant, employee=employee))
+
+    @action(detail=True, methods=["get"])
+    def activity(self, request, pk=None):
+        employee = get_object_or_404(
+            Employee.objects.filter(tenant=self.tenant), pk=pk
+        )
+        window = ActivityRangeSerializer(data=request.query_params)
+        window.is_valid(raise_exception=True)
+        events = employee_activity(
+            tenant=self.tenant,
+            employee=employee,
+            date_from=window.validated_data["date_from"],
+            date_to=window.validated_data["date_to"],
+        )
+        return Response({
+            "limit": ACTIVITY_TAB_LIMIT,
+            "results": [
+                {
+                    "id": e.id,
+                    "action": e.action,
+                    "entity_type": e.entity_type,
+                    "entity_id": e.entity_id,
+                    "entity_label": e.entity_label,
+                    "description": e.description,
+                    "timestamp": e.timestamp,
+                }
+                for e in events
+            ],
+        })
 
     @action(detail=True, methods=["post"])
     def reactivate(self, request, pk=None):
@@ -428,6 +484,57 @@ class AcceptInvitationPublicView(APIView):
                 "username": user.username,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class EmployeeNoteViewSet(viewsets.ViewSet):
+    """ملاحظاتُ المديرين على الموظفين — تبويبٌ في كرت الموظف لا شاشةٌ عامّة.
+
+    مجموعةٌ مسطّحةٌ بفلترِ `?employee=` لا مسارٌ متداخلٌ بتعبيرٍ نمطيّ: الحارسُ
+    المعمَّم في `test_module_gate.py` يعدّ المسارات من `urls.py` ويتخطّى ما لا
+    يستطيع تعويض معاملاته — فمسارٌ متداخلٌ يخرج من حراسته بصمت.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.tenant = require_module(request, MODULE_KEY)
+        if self.action not in _NOTE_ACTION_PERMS:
+            raise Http404
+        require_perm(request, _NOTE_ACTION_PERMS[self.action], tenant=self.tenant)
+
+    def _employee_or_404(self, employee_id):
+        return get_object_or_404(
+            Employee.objects.filter(tenant=self.tenant), pk=employee_id
+        )
+
+    def list(self, request):
+        employee_id = request.query_params.get("employee")
+        if not (employee_id or "").isdigit():
+            raise ValidationError({"employee": "معرّف الموظف مطلوب."})
+        employee = self._employee_or_404(int(employee_id))
+        qs = EmployeeNote.objects.filter(
+            tenant=self.tenant, employee=employee
+        ).select_related("author")[:NOTES_LIST_LIMIT]
+        return Response(EmployeeNoteSerializer(qs, many=True).data)
+
+    def create(self, request):
+        serializer = EmployeeNoteInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        employee_id = serializer.validated_data.get("employee")
+        if employee_id is None:
+            raise ValidationError({"employee": "معرّف الموظف مطلوب."})
+        employee = self._employee_or_404(employee_id)
+        note = create_employee_note(
+            tenant=self.tenant,
+            employee=employee,
+            actor=request.user,
+            body=serializer.validated_data["body"],
+        )
+        return Response(
+            EmployeeNoteSerializer(note).data, status=status.HTTP_201_CREATED
         )
 
 

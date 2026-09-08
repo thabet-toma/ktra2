@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **644**
+عدد النقاط: **647**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -196,6 +196,8 @@
 | `/api/employee-ops/attendance/check-in/` | `AttendanceCheckInView` | `employee_ops/views.py` |
 | `/api/employee-ops/employees/` | `EmployeeViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/employees/{pk}/` | `EmployeeViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/employees/{pk}/activity/` | `EmployeeViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/employees/{pk}/card/` | `EmployeeViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/employees/{pk}/deactivate/` | `EmployeeViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/employees/{pk}/invite/` | `EmployeeViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/employees/{pk}/reactivate/` | `EmployeeViewSet` | `employee_ops/views.py` |
@@ -205,6 +207,7 @@
 | `/api/employee-ops/invitations/{pk}/cancel/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/invitations/{pk}/resend/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/leaderboard/` | `LeaderboardView` | `employee_ops/views.py` |
+| `/api/employee-ops/notes/` | `EmployeeNoteViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/points/` | `PointViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/points/manual/` | `PointViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/points/summary/` | `PointViewSet` | `employee_ops/views.py` |

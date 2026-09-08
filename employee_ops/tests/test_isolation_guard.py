@@ -47,6 +47,9 @@ ALLOWLISTED_PLATFORM_MODULES = frozenset({
     # المباشرة، وفشلُ تسجيلٍ داخل معاملةٍ كان سيُسقط إنشاءَ الموظف.
     "core.activity",      # `log_activity`
     "core.api_defaults",  # `ApiAuthAndUser`
+    # مدى التاريخ **المصدرُ الموحَّد**: `timestamp__date=...` يُعيد صفر صفوفٍ بصمت
+    # على MySQL حين تكون جداولُ المناطق الزمنيّة فارغة، وهذه الدالّة تتجنّبه.
+    "core.date_ranges",   # `filter_local_date_range`
     "core.models",        # `TenantModule` في الاختبارات
     "core.modules",       # `require_module`
     # حدُّ المقاعد يعيش في محرّك الحدود بحكم بنيته، والوحدة تستدعيه عند الإنشاء

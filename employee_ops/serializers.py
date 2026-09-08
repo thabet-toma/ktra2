@@ -3,6 +3,7 @@ from rest_framework import serializers
 
 from .models import (
     EmployeeInvitation,
+    EmployeeNote,
     EmployeeOpsSettings,
     EmployeeProfile,
     PointEntry,
@@ -486,3 +487,55 @@ class ManualPointEntrySerializer(serializers.Serializer):
         if not val:
             raise serializers.ValidationError("سبب منح أو خصم النقاط مطلوب.")
         return val
+
+
+class EmployeeNoteSerializer(serializers.ModelSerializer):
+    """عرضُ الملاحظة — الكاتبُ للقراءة فقط: يُحلّ من الجلسة لا من الجسم."""
+
+    author_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EmployeeNote
+        fields = [
+            "id",
+            "employee",
+            "body",
+            "author",
+            "author_name",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_author_name(self, obj):
+        if not obj.author_id:
+            return None
+        return obj.author.get_full_name() or obj.author.username
+
+
+class EmployeeNoteInputSerializer(serializers.Serializer):
+    """مدخلاتُ كتابة ملاحظة — النصُّ وحده، و`employee` عند الإنشاء.
+
+    **لا حقلَ كاتبٍ هنا**: تمريرُه من العميل يعني ملاحظةً منسوبةً لغير قائلها.
+    """
+
+    employee = serializers.IntegerField(required=False)
+    body = serializers.CharField(required=True, allow_blank=False)
+
+    def validate_body(self, value):
+        val = (value or "").strip()
+        if not val:
+            raise serializers.ValidationError("نصّ الملاحظة مطلوب.")
+        return val
+
+
+class ActivityRangeSerializer(serializers.Serializer):
+    """مدى تبويب النشاط.
+
+    `core.date_ranges.filter_local_date_range` تتوقّع كائنَ **تاريخ** لا نصّاً؛
+    تمريرُ النصّ خاماً كان يرمي `TypeError` ⇒ **٥٠٠ على مُدخَلٍ من المستخدم**.
+    والتحقّقُ هنا يجعله ٤٠٠ برسالةٍ مفهومة.
+    """
+
+    date_from = serializers.DateField(required=False, allow_null=True, default=None)
+    date_to = serializers.DateField(required=False, allow_null=True, default=None)

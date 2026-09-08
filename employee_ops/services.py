@@ -8,13 +8,14 @@ from datetime import timedelta
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Sum, Value
+from django.db.models import Count, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework.exceptions import APIException, NotFound, PermissionDenied, ValidationError
 
 from core.access import FIELD_STAFF_ROLE
 from core.activity import log_activity
+from core.date_ranges import filter_local_date_range
 from core.modules import module_enabled
 from core.plans import (
     current_usage,
@@ -27,6 +28,7 @@ from tenants.models import UserCompanyMembership
 
 from .models import (
     EmployeeInvitation,
+    EmployeeNote,
     EmployeeOpsSettings,
     EmployeeProfile,
     PointEntry,
@@ -1253,3 +1255,104 @@ def get_points_summary(*, tenant, employee: Employee) -> dict:
         "open_tasks_count": open_tasks_count,
     }
 
+
+
+#: سقفُ تبويب النشاط. جدولٌ كبير، والتبويبُ **تحرٍّ لا تصدير** — من أراد الكلّ
+#: فمكانُه شاشةُ سجلّ النشاط العامّة لا كرتُ الموظف.
+ACTIVITY_TAB_LIMIT = 200
+
+#: سقفُ قائمة الملاحظات — نفسُ مبدأ سجلّ النقاط وتبويب النشاط: قائمةٌ بلا نافذةٍ
+#: تنمو بلا حدٍّ على موظفٍ قديم.
+NOTES_LIST_LIMIT = 200
+
+
+@transaction.atomic
+def create_employee_note(*, tenant, employee: Employee, actor, body: str) -> EmployeeNote:
+    """ملاحظةٌ جديدة — **الكاتبُ من الجلسة**، ولا تُدهَس سابقتُها."""
+    # **ولا سطرَ نشاطٍ هنا** لسببين: §٩ تمنع إضافة نقاطِ تسجيلٍ جديدةٍ في v1؛
+    # والأهمّ أنّ حدثَ «كُتبت ملاحظةٌ عن فلان» يظهر في شاشة النشاط العامّة لمن
+    # يملك `admin.activity.view` بلا `employee_ops.manage` — فيتسرّب **وجودُ**
+    # رأيٍ سرّيٍّ عن موظفٍ باسمه، ولو بقي نصُّه محجوباً.
+    return EmployeeNote.objects.create(
+        tenant=tenant,
+        employee=employee,
+        body=body.strip(),
+        author=_actor_or_none(actor),
+    )
+
+
+def employee_activity(*, tenant, employee: Employee, date_from=None, date_to=None):
+    """أحداثُ الموظف في المنصة — قراءةٌ من نقطة النشاط القائمة، **بلا إضافةِ شيء**.
+
+    التبويبُ **تحرٍّ لا قياس**: تغطيةُ السجلّ ناقصةٌ أصلاً (إنشاءُ العميل/المورّد من
+    الواجهة، والترحيلُ التلقائيُّ عند الإنشاء، و`accounting` كلُّها غير مسجَّلة)،
+    والنقاطُ صارت من المهامّ المقبولة فلم يعد السجلُّ مصدرَ قياس. فلا نقاطَ تسجيلٍ
+    جديدةً ولا فهرسٌ جديدٌ على جدولٍ كبير — الفهرسُ `act_tenant_user_ts_idx` موجود.
+
+    والمدى عبر `core.date_ranges.filter_local_date_range`: كتابةُ
+    `timestamp__date=...` تُعيد **صفر صفوفٍ بصمت** على MySQL حين تكون جداولُ المناطق
+    الزمنيّة فارغة — فخٌّ موثَّقٌ في هذا المستودع.
+    """
+    from core.models import ActivityLog
+
+    if not employee.user_id:
+        return []  # موظفٌ بلا حسابِ دخول: لا نشاطَ له — قائمةٌ فارغة لا خطأ.
+
+    qs = ActivityLog.objects.filter(tenant=tenant, user_id=employee.user_id)
+    qs = filter_local_date_range(qs, "timestamp", date_from, date_to)
+    return list(qs.order_by("-timestamp", "-id")[:ACTIVITY_TAB_LIMIT])
+
+
+def employee_card(*, tenant, employee: Employee) -> dict:
+    """بياناتُ كرت الموظف وعدّاداتُه — **بعددٍ ثابتٍ من الاستعلامات**.
+
+    لا يُعيد الملاحظاتِ ولا النشاطَ: لكلٍّ نقطتُه، وتبويبٌ يُفتح عند الحاجة لا
+    حمولةٌ تُجلب مع كلّ فتحة.
+    """
+    profile = getattr(employee, "employee_ops_profile", None)
+    invitation = (
+        EmployeeInvitation.objects.filter(tenant=tenant, employee=employee)
+        .order_by("-id")
+        .first()
+    )
+    invitation_status = "none"
+    if invitation and invitation.status in EmployeeInvitation.VISIBLE_STATUSES:
+        invitation_status = invitation.status
+
+    today = timezone.localdate()
+    open_assignments = TaskAssignment.objects.filter(
+        tenant=tenant, employee=employee
+    ).exclude(status=TaskAssignment.STATUS_COMPLETED)
+    counts = open_assignments.aggregate(
+        open_tasks=Count("id"),
+        overdue_tasks=Count("id", filter=Q(task__due_date__lt=today)),
+    )
+
+    start_date, end_date, _ = parse_month_bounds(None)
+    month_points = (
+        PointEntry.objects.filter(
+            tenant=tenant,
+            employee=employee,
+            awarded_on__gte=start_date,
+            awarded_on__lte=end_date,
+        ).aggregate(total=Sum("points"))["total"]
+        or 0
+    )
+
+    return {
+        "id": employee.pk,
+        "name": employee.name,
+        "code": employee.code,
+        "phone": employee.phone,
+        "job_title": employee.job_title,
+        "is_active": employee.is_active,
+        "has_account": bool(employee.user_id),
+        "manager": profile.manager_id if profile else None,
+        "manager_name": (
+            profile.manager.name if (profile and profile.manager_id) else None
+        ),
+        "invitation_status": invitation_status,
+        "open_tasks": counts["open_tasks"] or 0,
+        "overdue_tasks": counts["overdue_tasks"] or 0,
+        "month_points": month_points,
+    }

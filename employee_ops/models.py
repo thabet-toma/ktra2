@@ -142,6 +142,12 @@ class EmployeeInvitation(models.Model):
         related_name="+",
     )
 
+    #: الحالتان اللتان تُعرضان على الموظف؛ وما عداهما (`cancelled`/`expired`)
+    #: يُقرأ **«لا دعوة»**. القاعدةُ هنا وحدها: كانت مكرّرةً في ثلاثة مواضع
+    #: (استعلامُ القائمة · قراءةُ المفرد · كرتُ الموظف) — وقاعدةُ احتسابٍ في
+    #: مواضعَ يجب أن تتفق هي فخٌّ معروفٌ في هذا المستودع.
+    VISIBLE_STATUSES = ("pending", "accepted")
+
     class Meta:
         verbose_name = "دعوة موظف"
         verbose_name_plural = "دعوات الموظفين"
@@ -547,3 +553,59 @@ class PointEntry(models.Model):
     def __str__(self):
         return f"نقاط {self.employee_id}: {self.points} ({self.source})"
 
+
+
+class EmployeeNote(models.Model):
+    """ملاحظةُ مديرٍ على موظف — **بكاتبٍ وتاريخٍ ونصّ**، وتتعدّد على الموظف الواحد.
+
+    اليوم «ملاحظات الموظفين» حقلُ نصٍّ واحدٌ على سجلّ المستخدم يُدهَس بكلّ حفظ، بلا
+    كاتبٍ ولا تاريخ — فملاحظةُ مديرٍ عن موظفٍ لا تصلح دليلاً على شيء. وحقلُ
+    `hr.Employee.notes` القديم **لا يُلمس هنا**: قراءتُه مرّةً واحدةً وظيفةُ الهجرة.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="employee_ops_notes",
+    )
+    employee = models.ForeignKey(
+        "hr.Employee",
+        on_delete=models.CASCADE,
+        related_name="employee_ops_notes",
+    )
+    body = models.TextField(verbose_name="نص الملاحظة")
+    # الكاتبُ قد يُحذف حسابُه وتبقى ملاحظتُه — نصُّها دليلٌ ولو غاب قائلُه.
+    author = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="الكاتب",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+    source_path = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        default=None,
+        verbose_name="مسار المصدر",
+    )
+
+    class Meta:
+        verbose_name = "ملاحظة على موظف"
+        verbose_name_plural = "ملاحظات الموظفين"
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "source_path"],
+                name="employee_ops_note_source_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "employee", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"ملاحظة على {self.employee_id}"

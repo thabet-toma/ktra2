@@ -10,6 +10,7 @@ from employee_ops.views import (
     AcceptInvitationPublicView,
     AttendanceCheckInView,
     EmployeeInvitationViewSet,
+    EmployeeNoteViewSet,
     EmployeeOpsSettingsViewSet,
     EmployeeViewSet,
     LeaderboardView,
@@ -21,6 +22,7 @@ from employee_ops.views import (
 router = SimpleRouter()
 router.register("employees", EmployeeViewSet, basename="employee-ops-employees")
 router.register("invitations", EmployeeInvitationViewSet, basename="employee-ops-invitations")
+router.register("notes", EmployeeNoteViewSet, basename="employee-ops-notes")
 router.register("tasks", TaskViewSet, basename="employee-ops-tasks")
 router.register("submissions", TaskSubmissionViewSet, basename="employee-ops-submissions")
 router.register("points", PointViewSet, basename="employee-ops-points")
