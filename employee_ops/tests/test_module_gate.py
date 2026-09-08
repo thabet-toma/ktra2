@@ -77,6 +77,7 @@ class EmployeeOpsModuleGateTest(APITestCase):
         self.assertEqual(res.data["attendance_daily_cap"], 5)
         self.assertEqual(res.data["leaderboard_highlight_count"], 5)
         self.assertEqual(res.data["rejected_retention_months"], 12)
+        self.assertEqual(res.data["invitation_expiry_days"], 7)
 
     def test_settings_closed_to_the_narrow_role_in_both_directions(self):
         """الموظف الميداني لا يقرأ إعدادات الشركة ولا يكتبها — ٤٠٣ لا ٤٠٤.
@@ -171,7 +172,11 @@ class EmployeeOpsModuleGateTest(APITestCase):
         و`'settings/<pk>/'`، فيسقط هذا التأكيد فوراً.
         """
         registered = {str(p.pattern) for p in urlpatterns}
-        self.assertEqual(registered, {"settings/"}, f"مسارات غير متوقّعة: {registered}")
+        self.assertEqual(
+            registered,
+            {"settings/", "invitations/accept/<str:token>/", ""},
+            f"مسارات غير متوقّعة: {registered}",
+        )
         for pattern in urlpatterns:
             name = getattr(pattern, "name", None)
             if name:

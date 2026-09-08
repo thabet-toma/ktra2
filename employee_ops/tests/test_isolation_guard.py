@@ -43,9 +43,17 @@ PLATFORM_PACKAGES = frozenset({
 #: القائمة البيضاء الصريحة — **ما تستورده الوحدة فعلاً اليوم، لا ما قد تحتاجه**.
 ALLOWLISTED_PLATFORM_MODULES = frozenset({
     "core.access",        # `require_perm`
+    # سجلّ النشاط **غير الحاظر**: عقدُ `core.models.ActivityLog` يمنع الكتابة
+    # المباشرة، وفشلُ تسجيلٍ داخل معاملةٍ كان سيُسقط إنشاءَ الموظف.
+    "core.activity",      # `log_activity`
     "core.api_defaults",  # `ApiAuthAndUser`
     "core.models",        # `TenantModule` في الاختبارات
     "core.modules",       # `require_module`
+    # حدُّ المقاعد يعيش في محرّك الحدود بحكم بنيته، والوحدة تستدعيه عند الإنشاء
+    # والدعوة والقبول. **يُستورَد صراحةً**: إخفاءُ الاستيراد عن الحارس
+    # (`importlib.import_module`) أسوأُ من إعلانه — يجعل الحارس يكذب بدل أن يحرس.
+    "core.plans",         # `enforce_limits` وتوابعها
+    "hr.models",          # `Employee`
     "tenants.models",     # `Tenant` والعضويّة
     "tenants.services",   # `create_company` في الاختبارات
 })
@@ -69,6 +77,26 @@ def check_source_for_disallowed_imports(source: str, filepath: str = "<string>")
 
     violations = []
     for node in ast.walk(tree):
+        # الاستيرادُ الديناميكيّ يُفحص كالساكن. **ليس افتراضاً**: وكيلٌ مفوَّضٌ
+        # احتاج `core.plans` فكتب `importlib.import_module("core.plans")` بدل أن
+        # يُعلنها، فمرّ من الحارس. إخفاءُ الاستيراد أسوأُ من إعلانه — يجعل
+        # الحارسَ يكذب بدل أن يحرس.
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = None
+            if isinstance(func, ast.Attribute) and func.attr == "import_module":
+                name = "importlib.import_module"
+            elif isinstance(func, ast.Name) and func.id == "__import__":
+                name = "__import__"
+            if name and node.args and isinstance(node.args[0], ast.Constant):
+                target = node.args[0].value
+                if (
+                    isinstance(target, str)
+                    and target.split(".")[0] in PLATFORM_PACKAGES
+                    and not allowed(target)
+                ):
+                    violations.append(f"{filepath}:{node.lineno} → {name}({target!r})")
+            continue
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if alias.name.split(".")[0] in PLATFORM_PACKAGES and not allowed(alias.name):
@@ -205,6 +233,29 @@ class EmployeeOpsIsolationGuardTest(SimpleTestCase):
         self.assertEqual(
             check_source_for_disallowed_imports(
                 "from core.access import require_perm\nfrom tenants.models import Tenant\n"
+            ),
+            [],
+        )
+
+    def test_dynamic_import_does_not_slip_past_the_guard(self):
+        """`importlib.import_module("sales.services")` مخالفةٌ كالاستيراد الصريح.
+
+        هذه الثغرةُ استُعملت فعلاً في هذا المستودع لا افتراضاً: احتاج منفِّذٌ
+        `core.plans` فاستوردها ديناميكياً بدل أن يُعلنها في القائمة البيضاء.
+        """
+        violations = check_source_for_disallowed_imports(
+            'import importlib\nx = importlib.import_module("sales.services")\n'
+            'y = __import__("accounting.models")\n',
+            filepath="synthetic.py",
+        )
+        self.assertEqual(len(violations), 2, violations)
+        self.assertIn("sales.services", violations[0])
+        self.assertIn("accounting.models", violations[1])
+
+        # والمسموحُ ديناميكياً يبقى مسموحاً — الحارس يفحص الوجهة لا الأسلوب.
+        self.assertEqual(
+            check_source_for_disallowed_imports(
+                'import importlib\nimportlib.import_module("core.plans")\n'
             ),
             [],
         )

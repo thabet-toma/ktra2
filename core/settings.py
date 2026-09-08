@@ -547,6 +547,9 @@ REST_FRAMEWORK = {
         # زرّ التسجيل تُنتج صفوفاً في سجلٍّ لا يُحذف منه شيء.
         "ess": os.environ.get("THROTTLE_RATE_ESS", "120/min"),
         "ess_punch": os.environ.get("THROTTLE_RATE_ESS_PUNCH", "10/min"),
+        # متابعة الموظفين (`employee_ops`): رابط الدعوة العام — سقف تقنين لحماية
+        # الرابط العام من تخمين الرموز وإنشاء الحسابات المتكرر.
+        "employee_ops_invite": os.environ.get("THROTTLE_RATE_EMPLOYEE_INVITE", "10/min"),
     },
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }

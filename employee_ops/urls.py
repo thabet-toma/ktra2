@@ -1,20 +1,28 @@
 """مسارات متابعة الموظفين.
 
-**لا راوتر في هذه المرحلة، وسبب ذلك مزدوج:**
-
-1. `DefaultRouter` يولّد صفحة جذرٍ قابلة للتصفح **غير محروسة** بـ`require_module`،
-   فتكشف وجود الوحدة لشركةٍ غير مرخّصة (نفس السبب مكتوب في `after_sales/urls.py`).
-2. والإعدادات **موردٌ مفردٌ لكل شركة** لا مجموعة: راوترٌ من أيّ نوع يولّد لها
-   مساراً تفصيلياً `settings/<pk>/` يقبل أيّ رقمٍ ثمّ يتجاهله ويعيد إعدادات
-   الشركة الحالية — مسارٌ يكذب على من يقرأه.
-
-الشركة تأتي من `require_module` في `initial()`، لا من المسار ولا من جسم الطلب.
+SimpleRouter (لا DefaultRouter — الأخير يولّد فهرساً غير محروس بـ require_module).
+الإعدادات موردٌ مفردٌ بمسارٍ صريح، والمسار العام لقبول الدعوة صريح كذلك.
 """
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import SimpleRouter
 
-from employee_ops.views import EmployeeOpsSettingsViewSet
+from employee_ops.views import (
+    AcceptInvitationPublicView,
+    EmployeeInvitationViewSet,
+    EmployeeOpsSettingsViewSet,
+    EmployeeViewSet,
+)
+
+router = SimpleRouter()
+router.register("employees", EmployeeViewSet, basename="employee-ops-employees")
+router.register("invitations", EmployeeInvitationViewSet, basename="employee-ops-invitations")
 
 urlpatterns = [
+    path(
+        "invitations/accept/<str:token>/",
+        AcceptInvitationPublicView.as_view(),
+        name="employee-ops-invitation-accept",
+    ),
     path(
         "settings/",
         EmployeeOpsSettingsViewSet.as_view(
@@ -22,4 +30,5 @@ urlpatterns = [
         ),
         name="employee-ops-settings",
     ),
+    path("", include(router.urls)),
 ]

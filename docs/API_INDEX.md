@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **619**
+عدد النقاط: **629**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -193,6 +193,16 @@
 | `/api/document-shares/` | `DocumentShareViewSet` | `docshare/views.py` |
 | `/api/document-shares/{pk}/` | `DocumentShareViewSet` | `docshare/views.py` |
 | `/api/document-shares/{pk}/revoke/` | `DocumentShareViewSet` | `docshare/views.py` |
+| `/api/employee-ops/employees/` | `EmployeeViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/employees/{pk}/` | `EmployeeViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/employees/{pk}/deactivate/` | `EmployeeViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/employees/{pk}/invite/` | `EmployeeViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/employees/{pk}/reactivate/` | `EmployeeViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/invitations/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/invitations/accept/<str:token>/` | `AcceptInvitationPublicView` | `employee_ops/views.py` |
+| `/api/employee-ops/invitations/{pk}/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/invitations/{pk}/cancel/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/invitations/{pk}/resend/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/settings/` | `EmployeeOpsSettingsViewSet` | `employee_ops/views.py` |
 | `/api/health/` | `health_check` | `core/health.py` |
 | `/api/hr/` | `APIRootView` | `rest_framework/routers.py` |

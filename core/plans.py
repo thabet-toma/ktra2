@@ -20,6 +20,7 @@ from django.core.cache import cache
 from django.db.models import Count
 from django.utils import timezone
 
+from core.access import FIELD_STAFF_ROLE
 from core.date_ranges import local_day_start
 
 logger = logging.getLogger(__name__)
@@ -154,13 +155,60 @@ def _bulk_hr_employees(tenant_ids, since):
 def _count_members(tenant_id, since):
     from tenants.models import UserCompanyMembership
 
-    return UserCompanyMembership.objects.filter(tenant_id=tenant_id).count()
+    return (
+        UserCompanyMembership.objects.filter(tenant_id=tenant_id)
+        .exclude(role=FIELD_STAFF_ROLE)
+        .count()
+    )
 
 
 def _bulk_members(tenant_ids, since):
     from tenants.models import UserCompanyMembership
 
-    return _grouped_count(UserCompanyMembership.objects.all(), tenant_ids)
+    return _grouped_count(
+        UserCompanyMembership.objects.exclude(role=FIELD_STAFF_ROLE),
+        tenant_ids,
+    )
+
+
+def _count_employee_ops_seats(tenant_id, since):
+    from django.apps import apps
+    from tenants.models import UserCompanyMembership
+
+    # النموذج بـ`get_model` لا باستيراد: `core` لا يستورد من الوحدة (الاتّجاه
+    # ممنوع ويحرسه اختبارٌ في `employee_ops/tests/`). و`"pending"` هنا نصٌّ لأنّ
+    # الثابت `EmployeeInvitation.STATUS_PENDING` لا يُبلَغ بلا استيراد.
+    Invitation = apps.get_model("employee_ops", "EmployeeInvitation")
+    now = timezone.now()
+    members_count = UserCompanyMembership.objects.filter(
+        tenant_id=tenant_id, role=FIELD_STAFF_ROLE
+    ).count()
+    invitations_count = Invitation.objects.filter(
+        tenant_id=tenant_id,
+        status="pending",
+        expires_at__gt=now,
+    ).count()
+    return members_count + invitations_count
+
+
+def _bulk_employee_ops_seats(tenant_ids, since):
+    from django.apps import apps
+    from tenants.models import UserCompanyMembership
+
+    Invitation = apps.get_model("employee_ops", "EmployeeInvitation")
+    now = timezone.now()
+    members_qs = UserCompanyMembership.objects.filter(role=FIELD_STAFF_ROLE)
+    invitations_qs = Invitation.objects.filter(
+        status="pending",
+        expires_at__gt=now,
+    )
+    members_grouped = _grouped_count(members_qs, tenant_ids)
+    invitations_grouped = _grouped_count(invitations_qs, tenant_ids)
+    all_tenants = set(members_grouped.keys()) | set(invitations_grouped.keys())
+    return {
+        tid: members_grouped.get(tid, 0) + invitations_grouped.get(tid, 0)
+        for tid in all_tenants
+    }
 
 
 def _count_branches(tenant_id, since):
@@ -302,6 +350,14 @@ LIMITS = {
             count=_count_managed_books,
             bulk=_bulk_managed_books,
         ),
+        LimitSpec(
+            key="employee_ops.seats",
+            label="مقاعد متابعة الموظفين",
+            unit="مقعد",
+            period=PERIOD_TOTAL,
+            count=_count_employee_ops_seats,
+            bulk=_bulk_employee_ops_seats,
+        ),
     )
 }
 
@@ -320,6 +376,7 @@ PLAN_DEFAULTS = {
         "inventory.products": 500,
         "partners.records": 200,
         "office.managed_books": 3,
+        "employee_ops.seats": 0,
     },
     "Pro": {
         "sales.invoices": 1500,
@@ -332,6 +389,7 @@ PLAN_DEFAULTS = {
         "inventory.products": 5000,
         "partners.records": 2000,
         "office.managed_books": 25,
+        "employee_ops.seats": 50,
     },
     "Enterprise": {
         "sales.invoices": None,
@@ -344,6 +402,7 @@ PLAN_DEFAULTS = {
         "inventory.products": None,
         "partners.records": None,
         "office.managed_books": None,
+        "employee_ops.seats": None,
     },
 }
 
