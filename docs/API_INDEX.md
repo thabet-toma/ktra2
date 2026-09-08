@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **638**
+عدد النقاط: **644**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -193,6 +193,7 @@
 | `/api/document-shares/` | `DocumentShareViewSet` | `docshare/views.py` |
 | `/api/document-shares/{pk}/` | `DocumentShareViewSet` | `docshare/views.py` |
 | `/api/document-shares/{pk}/revoke/` | `DocumentShareViewSet` | `docshare/views.py` |
+| `/api/employee-ops/attendance/check-in/` | `AttendanceCheckInView` | `employee_ops/views.py` |
 | `/api/employee-ops/employees/` | `EmployeeViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/employees/{pk}/` | `EmployeeViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/employees/{pk}/deactivate/` | `EmployeeViewSet` | `employee_ops/views.py` |
@@ -203,10 +204,15 @@
 | `/api/employee-ops/invitations/{pk}/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/invitations/{pk}/cancel/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/invitations/{pk}/resend/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/leaderboard/` | `LeaderboardView` | `employee_ops/views.py` |
+| `/api/employee-ops/points/` | `PointViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/points/manual/` | `PointViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/points/summary/` | `PointViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/settings/` | `EmployeeOpsSettingsViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/submissions/` | `TaskSubmissionViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/submissions/{pk}/` | `TaskSubmissionViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/submissions/{pk}/review/` | `TaskSubmissionViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/submissions/{pk}/unreview/` | `TaskSubmissionViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/tasks/` | `TaskViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/tasks/mine/` | `TaskViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/tasks/{pk}/` | `TaskViewSet` | `employee_ops/views.py` |

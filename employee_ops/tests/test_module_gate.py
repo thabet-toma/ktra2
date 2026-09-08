@@ -1,5 +1,8 @@
 """اختبارات بوابات وترخيص وصلاحيات وحدة متابعة الموظفين."""
+import re
+
 from django.contrib.auth.models import User
+from django.urls import Resolver404, resolve
 from rest_framework.test import APITestCase
 
 from core.access import (
@@ -164,19 +167,19 @@ class EmployeeOpsModuleGateTest(APITestCase):
         self.assertEqual(res_cross.status_code, 403)
 
     def test_module_registers_no_browsable_root_index(self):
-        """الوحدة تسجّل مسارَها الوحيد ولا تسجّل فهرساً على جذرها.
+        """جذرُ الوحدة لا يُحلّ إلى عرضٍ أصلاً.
 
-        `DefaultRouter` يولّد صفحة جذرٍ قابلة للتصفح **غير محروسة** بـ
-        `require_module`، فتسرد مسارات الوحدة لشركةٍ لم تشترِها. والتأكيد على
-        **مجموعة المسارات المسجَّلة بعينها**: راوترٌ من أيّ نوع كان سيضيف `''`
-        و`'settings/<pk>/'`، فيسقط هذا التأكيد فوراً.
+        `DefaultRouter` يسجّل عرضاً على الجذر، فيصير `/api/employee-ops/` صفحةً
+        تسرد كلّ مسارات الوحدة — **وهي غير محروسة** بـ`require_module`، فتكشف
+        وجودَ الوحدة لشركةٍ لم تشترِها.
+
+        والتأكيدُ **سلوكيّ لا جدولُ مساراتٍ يُحدَّث مع كلّ مرحلة**: قائمةٌ حرفيّةٌ
+        بالمسارات المتوقَّعة تصير عبئاً يُعدَّل بلا تفكير، وتفقد معناها. هنا: لو
+        أُدخل راوترٌ كامل سقط الاختبارُ فوراً ولو أُضيفت عشرُ نقاطٍ مشروعة مرّ.
         """
-        registered = {str(p.pattern) for p in urlpatterns}
-        self.assertEqual(
-            registered,
-            {"settings/", "invitations/accept/<str:token>/", ""},
-            f"مسارات غير متوقّعة: {registered}",
-        )
+        with self.assertRaises(Resolver404):
+            resolve("/api/employee-ops/")
+
         for pattern in urlpatterns:
             name = getattr(pattern, "name", None)
             if name:
@@ -241,3 +244,81 @@ class EmployeeOpsModuleGateTest(APITestCase):
             FIELD_STAFF_ROLE,
             {role for role, _ in UserCompanyMembership.ROLE_CHOICES},
         )
+
+
+class EmployeeOpsEveryRouteIsGatedTest(APITestCase):
+    """**حارسٌ معمَّم**: كلُّ مسارٍ تسجّله الوحدة يختفي بإطفائها — بلا قائمةٍ يدويّة.
+
+    القوائمُ اليدويّة في ملفّات الاختبار تحرس ما كُتب فيها يومَ كُتبت؛ ونقطةٌ
+    تُضاف في مرحلةٍ لاحقة وتُنسى تمرّ بلا حارس. هذا الاختبار **يعدّ المسارات من
+    `employee_ops.urls` نفسِها**، فيغطّي ما لم يُكتب بعد.
+    """
+
+    #: المُعفى الوحيد — بسببٍ مكتوب. نقطةُ قبول الدعوة **عامّةٌ بلا مصادقة**
+    #: وحارسُها الرمز: رمزٌ لا وجود له يُردّ 400 قبل أن يُعرف صاحبُ الشركة أصلاً،
+    #: فلا سبيل لبلوغ فحص الترخيص برمزٍ وهميّ. وحالتُها الحقيقيّة (رمزٌ صالحٌ
+    #: لشركةٍ سُحب ترخيصُها ⇒ 404) مُختبَرةٌ في `test_seats_and_invitations.py`.
+    EXEMPT = {"employee-ops-invitation-accept"}
+
+    @classmethod
+    def setUpTestData(cls):
+        Currency.objects.get_or_create(
+            Code="ILS", defaults={"Name": "شيكل", "IsBaseCurrency": True}
+        )
+        cls.manager = User.objects.create_user(username="gate_all_mgr", password="x")
+        cls.tenant = create_company("شركة الحارس المعمَّم", cls.manager)
+        invalidate_module_cache(cls.tenant.pk)
+
+    def _concrete_paths(self):
+        """مساراتٌ حقيقيّةٌ من `urlpatterns` مع تعويض المعاملات برقمٍ ورمزٍ صالحين."""
+        from employee_ops import urls as module_urls
+
+        paths = []
+        for entry in module_urls.urlpatterns:
+            sub = getattr(entry, "url_patterns", None)
+            children = sub if sub is not None else [entry]
+            prefix = str(entry.pattern) if sub is not None else ""
+            for child in children:
+                name = getattr(child, "name", None)
+                if name in self.EXEMPT:
+                    continue
+                route = prefix + str(child.pattern)
+                route = re.sub(r"<[^>]*pk>", "1", route)
+                route = re.sub(r"<[^>]+>", "x", route)
+                if "(?" in route or "\\" in route:  # تعبيرٌ نمطيّ لا نستطيع تعويضه
+                    continue
+                paths.append("/api/employee-ops/" + route)
+        return sorted(set(paths))
+
+    def test_every_registered_route_is_404_while_the_module_is_disabled(self):
+        paths = self._concrete_paths()
+        self.assertGreaterEqual(
+            len(paths), 8, f"لم يُلتقط إلا {len(paths)} مساراً — الماشي لا يرى المسارات.",
+        )
+        self.client.force_authenticate(user=self.manager)
+        headers = {"HTTP_X_TENANT_ID": str(self.tenant.pk)}
+        for path in paths:
+            for method in ("get", "post"):
+                res = getattr(self.client, method)(path, {}, format="json", **headers)
+                if res.status_code == 405:
+                    continue  # الفعلُ غير مسموحٍ على هذا المسار — لا يقول شيئاً عن البوّابة
+                with self.subTest(path=path, method=method):
+                    self.assertEqual(
+                        res.status_code, 404,
+                        f"{method.upper()} {path} ردّ {res.status_code} والوحدة مطفأة.",
+                    )
+
+    def test_the_same_routes_stop_returning_404_once_the_module_is_enabled(self):
+        """وإلا كان الاختبارُ أعلاه يمرّ لأنّ المسارات غير موجودةٍ أصلاً."""
+        TenantModule.objects.create(
+            tenant=self.tenant, module_key="employee_ops", enabled=True
+        )
+        invalidate_module_cache(self.tenant.pk)
+        self.client.force_authenticate(user=self.manager)
+        headers = {"HTTP_X_TENANT_ID": str(self.tenant.pk)}
+
+        live = [
+            self.client.get(path, **headers).status_code
+            for path in ("/api/employee-ops/settings/", "/api/employee-ops/tasks/")
+        ]
+        self.assertEqual(live, [200, 200])

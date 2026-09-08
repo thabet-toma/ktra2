@@ -8,9 +8,12 @@ from rest_framework.routers import SimpleRouter
 
 from employee_ops.views import (
     AcceptInvitationPublicView,
+    AttendanceCheckInView,
     EmployeeInvitationViewSet,
     EmployeeOpsSettingsViewSet,
     EmployeeViewSet,
+    LeaderboardView,
+    PointViewSet,
     TaskSubmissionViewSet,
     TaskViewSet,
 )
@@ -20,12 +23,23 @@ router.register("employees", EmployeeViewSet, basename="employee-ops-employees")
 router.register("invitations", EmployeeInvitationViewSet, basename="employee-ops-invitations")
 router.register("tasks", TaskViewSet, basename="employee-ops-tasks")
 router.register("submissions", TaskSubmissionViewSet, basename="employee-ops-submissions")
+router.register("points", PointViewSet, basename="employee-ops-points")
 
 urlpatterns = [
     path(
         "invitations/accept/<str:token>/",
         AcceptInvitationPublicView.as_view(),
         name="employee-ops-invitation-accept",
+    ),
+    path(
+        "attendance/check-in/",
+        AttendanceCheckInView.as_view(),
+        name="employee-ops-attendance-check-in",
+    ),
+    path(
+        "leaderboard/",
+        LeaderboardView.as_view(),
+        name="employee-ops-leaderboard",
     ),
     path(
         "settings/",

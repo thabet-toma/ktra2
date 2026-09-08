@@ -24,6 +24,7 @@ from hr.models import Employee
 from .models import (
     EmployeeInvitation,
     EmployeeProfile,
+    PointEntry,
     Task,
     TaskAssignment,
     TaskSubmission,
@@ -35,6 +36,8 @@ from .serializers import (
     EmployeeListSerializer,
     EmployeeOpsSettingsSerializer,
     EmployeeUpdateSerializer,
+    ManualPointEntrySerializer,
+    PointEntrySerializer,
     TaskAssignmentSerializer,
     TaskCreateSerializer,
     TaskSerializer,
@@ -42,25 +45,32 @@ from .serializers import (
     TaskSubmissionReviewSerializer,
     TaskSubmissionSerializer,
     TaskUpdateSerializer,
+    UnreviewSubmissionSerializer,
 )
 from .services import (
     MODULE_KEY,
+    parse_month_bounds,
     accept_invitation,
+    attendance_check_in,
     cancel_invitation,
     create_employee_with_invitation,
     create_task,
     deactivate_employee,
     delete_task,
+    get_leaderboard_data,
     get_or_create_settings,
+    get_points_summary,
     invite_employee,
     load_pending_invitation,
     reactivate_employee,
+    record_manual_points,
     resend_invitation,
     review_submission,
     settings_for_read,
     start_task_timer,
     stop_task_timer,
     submit_task,
+    unreview_submission,
     update_task,
 )
 
@@ -114,6 +124,13 @@ _SUBMISSION_ACTION_PERMS = {
     "list": None,
     "retrieve": None,
     "review": PERM_MANAGE,
+    "unreview": PERM_MANAGE,
+}
+
+_POINT_ACTION_PERMS = {
+    "list": None,
+    "summary": PERM_SELF,
+    "manual": PERM_MANAGE,
 }
 
 
@@ -633,4 +650,150 @@ class TaskSubmissionViewSet(viewsets.ViewSet):
             .first()
         )
         return Response(TaskSubmissionSerializer(reviewed).data)
+
+    @action(detail=True, methods=["post"])
+    def unreview(self, request, pk=None):
+        submission = get_object_or_404(
+            TaskSubmission.objects.filter(tenant=self.tenant)
+            .select_related("task", "employee"),
+            pk=pk,
+        )
+        serializer = UnreviewSubmissionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        unreviewed, _ = unreview_submission(
+            submission=submission,
+            actor=request.user,
+            reason=serializer.validated_data["reason"],
+        )
+        unreviewed = (
+            TaskSubmission.objects.filter(tenant=self.tenant, pk=unreviewed.pk)
+            .select_related("task", "employee", "reviewer")
+            .prefetch_related("items", "attachments")
+            .first()
+        )
+        return Response(TaskSubmissionSerializer(unreviewed).data)
+
+
+class PointViewSet(viewsets.ViewSet):
+    """سجل النقاط والنقاط اليدوية وملخص شاشة يومي."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.tenant = require_module(request, MODULE_KEY)
+        if self.action not in _POINT_ACTION_PERMS:
+            raise Http404
+        required = _POINT_ACTION_PERMS[self.action]
+        if required:
+            require_perm(request, required, tenant=self.tenant)
+        else:
+            has_manage = user_has_perm(request.user, self.tenant, PERM_MANAGE)
+            has_self = user_has_perm(request.user, self.tenant, PERM_SELF)
+            if not (has_manage or has_self):
+                require_perm(request, PERM_SELF, tenant=self.tenant)
+
+    def list(self, request):
+        has_manage = user_has_perm(request.user, self.tenant, PERM_MANAGE)
+        if has_manage:
+            qs = PointEntry.objects.filter(tenant=self.tenant)
+            emp_id = request.query_params.get("employee")
+            if emp_id and emp_id.isdigit():
+                qs = qs.filter(employee_id=int(emp_id))
+        else:
+            employee = Employee.objects.filter(tenant=self.tenant, user=request.user).first()
+            if not employee:
+                return Response([])
+            qs = PointEntry.objects.filter(tenant=self.tenant, employee=employee)
+
+        # **الشهرُ الحاليّ افتراضاً**: سجلٌّ بلا نافذةٍ ينمو بلا سقفٍ لمديرٍ يفتحه
+        # بعد سنة. و`?month=YYYY-MM` تفتح شهراً بعينه.
+        start_date, end_date, _ = parse_month_bounds(request.query_params.get("month"))
+        qs = qs.filter(awarded_on__gte=start_date, awarded_on__lte=end_date)
+
+        qs = (
+            qs.select_related("employee", "created_by")
+            .order_by("-awarded_on", "-created_at", "-id")
+        )
+        serializer = PointEntrySerializer(qs, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def summary(self, request):
+        employee = Employee.objects.filter(tenant=self.tenant, user=request.user).first()
+        if not employee:
+            # من لا سجلَّ موظفٍ له: صفرُ نقاطٍ **وبلا رتبة** — `rank: 0` رقمٌ
+            # يُقرأ رتبةً، و`None` تقول «خارج اللوحة» بلا لبس.
+            return Response({
+                "employee": None,
+                "employee_name": "",
+                "points": 0,
+                "rank": None,
+                "open_tasks_count": 0,
+            })
+        data = get_points_summary(tenant=self.tenant, employee=employee)
+        return Response(data)
+
+    @action(detail=False, methods=["post"])
+    def manual(self, request):
+        serializer = ManualPointEntrySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+        entry = record_manual_points(
+            tenant=self.tenant,
+            actor=request.user,
+            employee_id=validated["employee"],
+            points=validated["points"],
+            reason=validated["reason"],
+        )
+        return Response(PointEntrySerializer(entry).data, status=status.HTTP_201_CREATED)
+
+
+class AttendanceCheckInView(APIView):
+    """زر تأكيد الحضور لكسب نقاط النشاط اليومي (مفتاح employee_ops.self).
+
+    ملاحظة: هذا ليس حضورَ الدوام: `hr` فيه حضورٌ حقيقيّ بمفتاح `ess.self`.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.tenant = require_module(request, MODULE_KEY)
+        require_perm(request, PERM_SELF, tenant=self.tenant)
+
+    def post(self, request):
+        employee = Employee.objects.filter(tenant=self.tenant, user=request.user).first()
+        if not employee:
+            raise NotFound("سجل الموظف غير موجود في هذه الشركة.")
+        res = attendance_check_in(
+            tenant=self.tenant,
+            employee=employee,
+            actor=request.user,
+        )
+        return Response(res, status=status.HTTP_200_OK)
+
+
+class LeaderboardView(APIView):
+    """لوحة الشرف الشهرية — يراها الجميع كاملة من أولها لآخرها."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.tenant = require_module(request, MODULE_KEY)
+        require_perm(request, PERM_SELF, tenant=self.tenant)
+
+    def get(self, request):
+        month_str = request.query_params.get("month")
+        results, month = get_leaderboard_data(tenant=self.tenant, month_str=month_str)
+        settings = settings_for_read(self.tenant)
+        return Response({
+            "month": month,
+            "highlight_count": settings.leaderboard_highlight_count,
+            "results": results,
+        })
 

@@ -5,6 +5,7 @@ from .models import (
     EmployeeInvitation,
     EmployeeOpsSettings,
     EmployeeProfile,
+    PointEntry,
     Task,
     TaskAssignment,
     TaskSubmission,
@@ -436,3 +437,52 @@ class TaskSubmissionReviewSerializer(serializers.Serializer):
         attrs["reviewer_notes"] = notes
         return attrs
 
+
+class UnreviewSubmissionSerializer(serializers.Serializer):
+    """مدخلات إلغاء مراجعة تسليم المهمة — يلزم سبب مكتوب."""
+
+    reason = serializers.CharField(required=True, allow_blank=False)
+
+    def validate_reason(self, value):
+        val = (value or "").strip()
+        if not val:
+            raise serializers.ValidationError("سبب إلغاء المراجعة مطلوب.")
+        return val
+
+
+class PointEntrySerializer(serializers.ModelSerializer):
+    """عرض قيد النقاط."""
+
+    employee_name = serializers.CharField(source="employee.name", read_only=True)
+
+    class Meta:
+        model = PointEntry
+        fields = [
+            "id",
+            "employee",
+            "employee_name",
+            "points",
+            "source",
+            "awarded_on",
+            "submission",
+            "reverses",
+            "reason",
+            "created_by",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class ManualPointEntrySerializer(serializers.Serializer):
+    """مدخلات إضافة أو خصم النقاط يدوياً."""
+
+    employee = serializers.IntegerField(required=True)
+    points = serializers.IntegerField(required=True)
+    # لا `awarded_on`: النقاطُ اليدويّة بتاريخ اليوم — انظر `record_manual_points`.
+    reason = serializers.CharField(required=True, allow_blank=False)
+
+    def validate_reason(self, value):
+        val = (value or "").strip()
+        if not val:
+            raise serializers.ValidationError("سبب منح أو خصم النقاط مطلوب.")
+        return val

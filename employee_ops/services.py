@@ -1,4 +1,6 @@
 """خدمات متابعة الموظفين."""
+import calendar
+import datetime
 import hashlib
 import secrets
 from datetime import timedelta
@@ -6,6 +8,8 @@ from datetime import timedelta
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.db import IntegrityError, transaction
+from django.db.models import Q, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework.exceptions import APIException, NotFound, PermissionDenied, ValidationError
 
@@ -25,6 +29,7 @@ from .models import (
     EmployeeInvitation,
     EmployeeOpsSettings,
     EmployeeProfile,
+    PointEntry,
     Task,
     TaskAssignment,
     TaskSubmission,
@@ -33,6 +38,11 @@ from .models import (
 )
 
 MODULE_KEY = "employee_ops"
+
+
+def _actor_or_none(actor):
+    """المستخدمُ المصادَق أو `None` — كان مكرَّراً حرفياً في أربعة مواضع."""
+    return actor if (actor and getattr(actor, "is_authenticated", False)) else None
 
 
 def _token_hash(token: str) -> str:
@@ -556,7 +566,7 @@ def create_task(
         tags=tags or [],
         target_price=target_price,
         allowed_sites=allowed_sites or [],
-        created_by=actor if (actor and getattr(actor, "is_authenticated", False)) else None,
+        created_by=_actor_or_none(actor),
         extra=extra or {},
     )
 
@@ -830,6 +840,15 @@ def review_submission(
     ):
         raise ValidationError({"decision": "قرار المراجعة غير صالح."})
 
+    # **قفلُ صفّ التسليم قبل قراءة قراره.** بلا قفلٍ يمرّ طلبان متزامنان من فحص
+    # «هل هو `pending`؟» معاً — فيُنشأ قيدَا نقاطٍ لعملٍ واحد. الفحصُ بلا قفلٍ
+    # وعدٌ لا حارس.
+    submission = (
+        TaskSubmission.objects.select_for_update()
+        .select_related("task", "employee", "tenant")
+        .get(pk=submission.pk)
+    )
+
     # **التسليمُ يُراجَع مرّةً واحدة.** بدون هذا الحارس يستطيع المدير قلبَ قراره
     # على نفس التسليم مراراً — ومحرّكُ النقاط (مرحلةٌ تالية) يمنح على كلّ قرار،
     # فتُمنح النقطةُ مرّتين لعملٍ واحد. وإلغاءُ القبول له مسارُه: قيدٌ مضادّ.
@@ -843,7 +862,7 @@ def review_submission(
         raise ValidationError({"reviewer_notes": "سبب الرفض مطلوب عند رفض التسليم."})
 
     submission.decision = decision
-    submission.reviewer = actor if (actor and getattr(actor, "is_authenticated", False)) else None
+    submission.reviewer = _actor_or_none(actor)
     submission.reviewed_at = timezone.now()
     submission.reviewer_notes = notes
     submission.save(update_fields=["decision", "reviewer", "reviewed_at", "reviewer_notes", "updated_at"])
@@ -864,6 +883,34 @@ def review_submission(
             assignment.status = TaskAssignment.STATUS_REJECTED
             assignment.save(update_fields=["status", "updated_at"])
 
+    # منح النقاط حسب القرار في نفس المعاملة
+    # approved_full -> settings.points_full (10)
+    # approved_partial -> settings.points_partial (5)
+    # rejected -> لا قيد إطلاقاً (صفرٌ لا صفَّ بصفر)
+    if decision in (
+        TaskSubmission.DECISION_APPROVED_FULL,
+        TaskSubmission.DECISION_APPROVED_PARTIAL,
+    ):
+        ops_settings = settings_for_read(submission.tenant)
+        if decision == TaskSubmission.DECISION_APPROVED_FULL:
+            pts = ops_settings.points_full
+            src = PointEntry.SOURCE_TASK_FULL
+        else:
+            pts = ops_settings.points_partial
+            src = PointEntry.SOURCE_TASK_PARTIAL
+
+        today = timezone.localdate()
+        PointEntry.objects.create(
+            tenant=submission.tenant,
+            employee=submission.employee,
+            points=pts,
+            source=src,
+            awarded_on=today,
+            submission=submission,
+            reason=notes or f"مراجعة تسليم: {decision}",
+            created_by=_actor_or_none(actor),
+        )
+
     _recompute_task_status(submission.task)
 
     _log_activity(
@@ -877,4 +924,332 @@ def review_submission(
     )
 
     return submission
+
+
+@transaction.atomic
+def unreview_submission(
+    *,
+    submission: TaskSubmission,
+    actor,
+    reason: str,
+) -> tuple[TaskSubmission, PointEntry]:
+    """إلغاء مراجعة تسليم: إنشاء قيد مضاد (reversal) وإعادة التسليم إلى pending.
+
+    - سبب الإلغاء مكتوب وإلزامي (reason).
+    - التسليم بحالة pending لا يُلغى (400).
+    - القيد المضاد يأخذ تاريخ اليوم (يوم الإلغاء لا يوم الأصل).
+    - القيد المضاد reversal لا يُلغى هو نفسه.
+    - الأصلي لا يُحذف ولا يُعدّل.
+    """
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValidationError({"reason": "سبب إلغاء المراجعة مطلوب."})
+
+    # نفسُ سبب القفل في المراجعة: إلغاءان متزامنان كانا يلتقطان القيدَ الأصليّ
+    # نفسَه فيُنشئان مضادَّين لأصلٍ واحد — والمجموعُ يصير سالباً.
+    submission = (
+        TaskSubmission.objects.select_for_update()
+        .select_related("task", "employee", "tenant")
+        .get(pk=submission.pk)
+    )
+    if submission.decision == TaskSubmission.DECISION_PENDING:
+        raise ValidationError({"decision": "لا يمكن إلغاء مراجعة تسليم قيد الانتظار."})
+
+    # العثور على قيد النقاط النشط غير المُلغى المرتبط بهذا التسليم
+    original = (
+        PointEntry.objects.filter(
+            tenant=submission.tenant,
+            submission=submission,
+            reversed_by__isnull=True,
+        )
+        .exclude(source=PointEntry.SOURCE_REVERSAL)
+        .order_by("-id")
+        .first()
+    )
+
+    if not original:
+        raise ValidationError({"decision": "لا يوجد قيد نقاط أصلي نشط لإلغائه لهذا التسليم."})
+
+    today = timezone.localdate()
+    reversal_entry = PointEntry.objects.create(
+        tenant=submission.tenant,
+        employee=submission.employee,
+        points=-original.points,
+        source=PointEntry.SOURCE_REVERSAL,
+        awarded_on=today,
+        submission=submission,
+        reverses=original,
+        reason=reason,
+        created_by=_actor_or_none(actor),
+    )
+
+    # **`decision` وحدها تعود `pending`.** تصفيرُ `reviewer`/`reviewed_at`/
+    # `reviewer_notes` كان يمحو «من قبِل ومتى وبأيّ ملاحظة» — وهو نقيضُ القاعدة
+    # التي بُني عليها القيدُ المضادّ: الماضي لا يُعاد كتابتُه. تبقى الحقولُ شاهدةً
+    # على القرار الملغى، والقيدُ المضادُّ هو ما يقول إنّه أُلغي.
+    submission.decision = TaskSubmission.DECISION_PENDING
+    submission.save(update_fields=["decision", "updated_at"])
+
+    assignment = TaskAssignment.objects.filter(
+        tenant=submission.tenant, task=submission.task, employee=submission.employee
+    ).first()
+    if assignment:
+        assignment.status = TaskAssignment.STATUS_SUBMITTED
+        assignment.save(update_fields=["status", "updated_at"])
+
+    _recompute_task_status(submission.task)
+
+    _log_activity(
+        tenant=submission.tenant,
+        actor=actor,
+        action="update",
+        entity_type="task_submission",
+        entity_id=submission.pk,
+        entity_label=f"إلغاء مراجعة تسليم: {submission.task.title}",
+        description=f"إلغاء مراجعة: {reason}",
+    )
+
+    return submission, reversal_entry
+
+
+@transaction.atomic
+def attendance_check_in(*, tenant, employee: Employee, actor) -> dict:
+    """زر تأكيد الحضور لكسب نقاط النشاط اليومي.
+
+    ملاحظة هامة: هذا ليس حضورَ الدوام: `hr` فيه حضورٌ حقيقيّ بمفتاح `ess.self`.
+    لا تلمسه ولا تخلط بينهما.
+    """
+    # قفلُ صفّ الموظف يُسلسِل ضغطاته: ضغطتان متزامنتان كانتا تتجاوزان حارسَ
+    # الدقيقة والسقفَ اليوميّ معاً، لأنّ كلتيهما تقرأ قبل أن تكتب الأخرى.
+    Employee.objects.select_for_update().filter(pk=employee.pk).first()
+
+    # 1. منع التكرار خلال دقيقة (60 ثانية)
+    last_checkin = (
+        PointEntry.objects.filter(
+            tenant=tenant,
+            employee=employee,
+            source=PointEntry.SOURCE_ATTENDANCE,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if last_checkin is not None:
+        elapsed = (timezone.now() - last_checkin.created_at).total_seconds()
+        if elapsed < 60:
+            raise ValidationError("يرجى الانتظار لمدة دقيقة واحدة على الأقل بين كل تأكيد حضور.")
+
+    ops_settings = settings_for_read(tenant)
+    today = timezone.localdate()
+
+    # 2. السقف اليومي (settings.attendance_daily_cap - الافتراضي 5 لا 50)
+    today_attendance_points = (
+        PointEntry.objects.filter(
+            tenant=tenant,
+            employee=employee,
+            source=PointEntry.SOURCE_ATTENDANCE,
+            awarded_on=today,
+        ).aggregate(total=Sum("points"))["total"]
+        or 0
+    )
+
+    cap = ops_settings.attendance_daily_cap
+    award = ops_settings.points_attendance
+    # **نقطةٌ كاملةٌ أو لا شيء.** `min(award, cap - today)` كان يمنح منحةً مبتورة
+    # لشركةٍ ضبطت نقطةَ الحضور بثلاثٍ وسقفَها بخمس (٣ ثمّ ٢) — سلوكٌ لم تطلبه
+    # المواصفة ولا يفهمه من يقرأ سجلّه.
+    if today_attendance_points + award > cap:
+        points_awarded = 0
+        new_today_points = today_attendance_points
+        capped = True
+    else:
+        points_awarded = award
+        new_today_points = today_attendance_points + award
+        capped = (new_today_points + award > cap)
+
+    entry = PointEntry.objects.create(
+        tenant=tenant,
+        employee=employee,
+        points=points_awarded,
+        source=PointEntry.SOURCE_ATTENDANCE,
+        awarded_on=today,
+        reason="تسجيل حضور نشاط",
+        created_by=_actor_or_none(actor),
+    )
+
+    _log_activity(
+        tenant=tenant,
+        actor=actor,
+        action="create",
+        entity_type="point_entry",
+        entity_id=entry.pk,
+        entity_label=f"حضور نشاط: {employee.name}",
+        description=f"تسجيل حضور نشاط ({points_awarded} نقطة)",
+    )
+
+    return {
+        "points_awarded": points_awarded,
+        "today_points": new_today_points,
+        "daily_cap": cap,
+        "capped": capped,
+    }
+
+
+@transaction.atomic
+def record_manual_points(
+    *,
+    tenant,
+    actor,
+    employee_id: int,
+    points: int,
+    reason: str,
+) -> PointEntry:
+    """إضافة أو خصم نقاط يدوياً للموظف (بصلاحية manage).
+
+    **بتاريخ اليوم دائماً.** قبولُ تاريخٍ من المدير يعني كتابةً في شهرٍ أُغلق
+    وترتيباً يتبدّل بأثرٍ رجعيّ — نقيضُ «الماضي لا يتبدّل بعد مضيّه».
+    """
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValidationError({"reason": "سبب منح أو خصم النقاط اليدوية مطلوب."})
+
+    employee = Employee.objects.filter(tenant=tenant, pk=employee_id).first()
+    if not employee:
+        raise ValidationError({"employee": "الموظف غير موجود في هذه الشركة."})
+
+    entry = PointEntry.objects.create(
+        tenant=tenant,
+        employee=employee,
+        points=points,
+        source=PointEntry.SOURCE_MANUAL,
+        awarded_on=timezone.localdate(),
+        reason=reason,
+        created_by=_actor_or_none(actor),
+    )
+
+    _log_activity(
+        tenant=tenant,
+        actor=actor,
+        action="create",
+        entity_type="point_entry",
+        entity_id=entry.pk,
+        entity_label=f"نقاط يدوية: {employee.name}",
+        description=f"منح/خصم {points} نقطة يدويّاً: {reason}",
+    )
+
+    return entry
+
+
+def parse_month_bounds(month_str: str = None) -> tuple[datetime.date, datetime.date, str]:
+    if month_str:
+        month_str = month_str.strip()
+        parts = month_str.split("-")
+        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+            raise ValidationError({"month": "صيغة الشهر غير صالحة، يجب أن تكون YYYY-MM."})
+        year, month = int(parts[0]), int(parts[1])
+        # `isdigit()` وحدها تقبل `99999-12` و`0000-12`، فيرمي بناءُ التاريخ
+        # `ValueError` غيرَ ملتقَطة ⇒ **٥٠٠ على مُدخَلٍ خاطئ** لا ٤٠٠.
+        if not (1 <= month <= 12) or not (1970 <= year <= 9999):
+            raise ValidationError({"month": "شهرٌ غير صالح — الصيغة YYYY-MM."})
+    else:
+        today = timezone.localdate()
+        year, month = today.year, today.month
+        month_str = f"{year:04d}-{month:02d}"
+
+    start_date = datetime.date(year, month, 1)
+    _, last_day = calendar.monthrange(year, month)
+    end_date = datetime.date(year, month, last_day)
+    return start_date, end_date, month_str
+
+
+def get_leaderboard_data(*, tenant, month_str: str = None) -> tuple[list[dict], str]:
+    """لوحة الشرف الشهرية — استعلام واحد لكل اللوحة (values(...).annotate(Sum)).
+
+    - الموظف بلا نقاط هذا الشهر يظهر بصفر — لا يختفي.
+    - الترتيب تنازلياً والمتساوون يأخذون نفس الرتبة.
+    """
+    start_date, end_date, formatted_month = parse_month_bounds(month_str)
+
+    # المُعطَّلُ يظهر **إن كسب في هذا الشهر** ولا يظهر بصفرٍ بعد مغادرته: تاريخُه
+    # يبقى منسوباً إليه (قاعدةُ «المغادرة تعطيلٌ لا حذف»)، ولوحةُ الشهر الحاليّ
+    # ليست دفترَ أسماءٍ للجميع.
+    qs = (
+        Employee.objects.filter(tenant=tenant)
+        .filter(
+            Q(is_active=True)
+            | Q(
+                employee_ops_points__awarded_on__gte=start_date,
+                employee_ops_points__awarded_on__lte=end_date,
+            )
+        )
+        .distinct()
+        .annotate(
+            total_points=Coalesce(
+                Sum(
+                    "employee_ops_points__points",
+                    filter=Q(
+                        employee_ops_points__tenant=tenant,
+                        employee_ops_points__awarded_on__gte=start_date,
+                        employee_ops_points__awarded_on__lte=end_date,
+                    ),
+                ),
+                Value(0),
+            )
+        )
+        .values("id", "name", "total_points")
+        .order_by("-total_points", "name", "id")
+    )
+
+    entries = []
+    current_rank = 1
+    for idx, row in enumerate(qs):
+        pts = row["total_points"]
+        if idx > 0 and pts < entries[idx - 1]["points"]:
+            current_rank = idx + 1
+        entries.append({
+            "employee": row["id"],
+            "employee_name": row["name"],
+            "points": pts,
+            "rank": current_rank,
+        })
+
+    return entries, formatted_month
+
+
+def get_points_summary(*, tenant, employee: Employee) -> dict:
+    """نقاط الشهر الحالي لصاحب الطلب وترتيبه وعدد مهامه المفتوحة."""
+    # **لا تُبنى اللوحةُ كلُّها لقراءة صفٍّ واحد**: شركةٌ بمئتي موظفٍ كانت تُجمَّع
+    # كاملةً في كلّ فتحةٍ لشاشة «يومي».
+    start_date, end_date, _ = parse_month_bounds(None)
+    month_points = Q(awarded_on__gte=start_date, awarded_on__lte=end_date)
+    my_points = (
+        PointEntry.objects.filter(month_points, tenant=tenant, employee=employee)
+        .aggregate(total=Sum("points"))["total"]
+        or 0
+    )
+    ahead = (
+        PointEntry.objects.filter(month_points, tenant=tenant)
+        .exclude(employee=employee)
+        .values("employee")
+        .annotate(total=Sum("points"))
+        .filter(total__gt=my_points)
+        .count()
+    )
+    my_rank = ahead + 1
+
+    open_tasks_count = (
+        TaskAssignment.objects.filter(
+            tenant=tenant,
+            employee=employee,
+        )
+        .exclude(status=TaskAssignment.STATUS_COMPLETED)
+        .count()
+    )
+
+    return {
+        "employee": employee.id,
+        "employee_name": employee.name,
+        "points": my_points,
+        "rank": my_rank,
+        "open_tasks_count": open_tasks_count,
+    }
 

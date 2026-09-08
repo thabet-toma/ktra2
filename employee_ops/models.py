@@ -457,3 +457,93 @@ class TaskSubmissionAttachment(models.Model):
     def __str__(self):
         return f"مرفق {self.name or self.url} لتسليم {self.submission_id}"
 
+
+class PointEntry(models.Model):
+    """سجل نقاط الموظف — سجلٌّ يُضاف إليه لا صفٌّ يوميٌّ يُدهَس.
+
+    يقبل السالب (للقيد المضاد عند الإلغاء أو التصحيح اليدوي).
+    ملاحظة: هذا ليس حضورَ الدوام: `hr` فيه حضورٌ حقيقيّ بمفتاح `ess.self`.
+    لا تلمسه ولا تخلط بينهما.
+    """
+
+    SOURCE_TASK_FULL = "task_full"
+    SOURCE_TASK_PARTIAL = "task_partial"
+    SOURCE_ATTENDANCE = "attendance"
+    SOURCE_MANUAL = "manual"
+    SOURCE_REVERSAL = "reversal"
+
+    SOURCE_CHOICES = [
+        (SOURCE_TASK_FULL, "مهمة كاملة"),
+        (SOURCE_TASK_PARTIAL, "مهمة جزئية"),
+        (SOURCE_ATTENDANCE, "حضور"),
+        (SOURCE_MANUAL, "يدوي"),
+        (SOURCE_REVERSAL, "إلغاء"),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="employee_ops_points",
+    )
+    employee = models.ForeignKey(
+        "hr.Employee",
+        on_delete=models.CASCADE,
+        related_name="employee_ops_points",
+    )
+    points = models.IntegerField(verbose_name="النقاط")
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        verbose_name="المصدر",
+    )
+    awarded_on = models.DateField(verbose_name="تاريخ الاستحقاق")
+    submission = models.ForeignKey(
+        "TaskSubmission",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="point_entries",
+        verbose_name="التسليم المرتبط",
+    )
+    reverses = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reversed_by",
+        verbose_name="القيد المُلغى",
+    )
+    reason = models.TextField(blank=True, default="", verbose_name="السبب")
+    created_by = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="أنشئ بواسطة",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    source_path = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        default=None,
+        verbose_name="مسار المصدر",
+    )
+
+    class Meta:
+        verbose_name = "قيد نقاط"
+        verbose_name_plural = "قيود النقاط"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "source_path"],
+                name="employee_ops_point_source_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "awarded_on", "employee"]),
+        ]
+
+    def __str__(self):
+        return f"نقاط {self.employee_id}: {self.points} ({self.source})"
+
