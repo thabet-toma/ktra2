@@ -280,15 +280,11 @@ def _resolve_user(request):
     would otherwise stay AnonymousUser and get_tenant() would skip the
     membership validation entirely.
     """
-    token_key = request.headers.get('Authorization', '').replace('Token ', '').strip()
-    if not token_key:
-        return None
-    # ISSUE #168: مفتاحٌ لكلّ جهاز — والقراءةُ من جدول الأجهزة وحدَه. الصفُّ
-    # الباقي في `authtoken_token` بعد الهجرة الصامتة ليس اعتماداً: قبولُه هنا
-    # يفتح باباً خلفيّاً يتجاوز إبطالَ الجهاز.
-    from hr.models import UserDevice
+    # ISSUE #168: مفتاحٌ لكلّ جهاز — والحلُّ من `hr.authentication` وحدَه، فلا
+    # نسخةَ ثانيةً من قاعدة القراءة تتباعد عن أصلها.
+    from hr.authentication import resolve_device
 
-    device = UserDevice.objects.select_related('user').filter(key=token_key).first()
+    device = resolve_device(request)
     if device is None:
         return None
     request.user = device.user

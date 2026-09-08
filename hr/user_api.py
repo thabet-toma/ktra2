@@ -3,28 +3,20 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from hr.auth_api import _user_payload
-from hr.models import UserDevice
+from hr.authentication import resolve_device, touch_last_active
 
 User = get_user_model()
 
 
-def _resolve_auth_device(auth_key):
-    """جهازُ الدخول صاحبُ هذا المفتاح — أو `None`.
+def _resolve_auth_device(request):
+    """جهازُ الدخول صاحبُ مفتاح هذا الطلب — أو `None`، مع تحديث «آخر نشاط».
 
-    ISSUE #168: **لا ارتدادَ إلى `authtoken_token`.** الصفُّ القديمُ الباقي بعد
-    الهجرة الصامتة ليس اعتماداً؛ قبولُه هنا يجعله مفتاحاً يُحيي جهازاً أُبطل.
+    الحلُّ والنافذةُ من `hr.authentication` — مصدرٌ واحدٌ للقاعدتين، فلا تتباعد
+    نسختان منهما بصمت.
     """
-    if not auth_key:
-        return None
-    device = UserDevice.objects.filter(key=auth_key).select_related("user").first()
-    if device is None:
-        return None
-    # نافذةُ الخمس دقائق — الكتابةُ تسقط من المسار الحارّ (انظر صنف المصادقة).
-    from django.utils import timezone
-    now = timezone.now()
-    if not device.last_active_at or (now - device.last_active_at).total_seconds() >= 300:
-        UserDevice.objects.filter(pk=device.pk).update(last_active_at=now)
-        device.last_active_at = now
+    device = resolve_device(request)
+    if device is not None:
+        touch_last_active(device)
     return device
 
 
@@ -32,8 +24,7 @@ def _resolve_auth_device(auth_key):
 def user_detail(request, pk):
     if request.method != "GET":
         return JsonResponse({"detail": "Method not allowed"}, status=405)
-    auth = request.headers.get("Authorization", "").replace("Token ", "").strip()
-    device = _resolve_auth_device(auth)
+    device = _resolve_auth_device(request)
     if not device:
         return JsonResponse({"detail": "Unauthorized"}, status=401)
     try:
@@ -67,8 +58,7 @@ def user_detail(request, pk):
 def list_users(request):
     if request.method != "GET":
         return JsonResponse({"detail": "Method not allowed"}, status=405)
-    auth = request.headers.get("Authorization", "").replace("Token ", "").strip()
-    device = _resolve_auth_device(auth)
+    device = _resolve_auth_device(request)
     if not device:
         return JsonResponse({"detail": "Unauthorized"}, status=401)
 

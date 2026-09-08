@@ -169,7 +169,14 @@ export function describeRefundOutcome(
   if (!summary) return null;
   const paper = Number(summary.paper_amount) || 0;
   const cash = Number(summary.cash_amount) || 0;
-  if (paper <= 0 && cash <= 0) return null;
+  const creditOnly = Number(summary.credit_balance) || 0;
+  // لا ردَّ وقع ولا رصيدَ باقٍ ⇒ لا رسالة (لا يُدَّعى ما لم يحدث).
+  if (paper <= 0 && cash <= 0 && creditOnly <= 0) return null;
+  // لا ردَّ وقع ولكن بقي رصيدٌ ⇒ **يُقال صراحةً**. ابتلاعُه صامتاً يترك المستخدم
+  // لا يعرف أنّه ما زال مديناً للزبون، وهو ما تمنعه المواصفة نصّاً.
+  if (paper <= 0 && cash <= 0) {
+    return `لم يُردّ شيءٌ الآن — بقي ${formatMoney(creditOnly)} رصيداً دائناً للزبون.`;
+  }
 
   const parts: string[] = [];
   if (paper > 0) {

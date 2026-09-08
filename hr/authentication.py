@@ -8,6 +8,47 @@ from django.utils import timezone
 from rest_framework import exceptions
 from rest_framework.authentication import TokenAuthentication as DRFTokenAuthentication
 
+#: نافذةُ تحديث «آخر نشاط» بالثواني. الكتابةُ مع كل طلبٍ تعني كتابةً في القاعدة
+#: على **كل نداءٍ في النظام كلِّه** لأجل عمودٍ يُقرأ في شاشةٍ واحدة. والدقّةُ
+#: المعروضة تصير «خلال خمس دقائق» — أدقُّ ممّا يحتاجه من يقرأ «نشِط قبل ساعتين».
+LAST_ACTIVE_WINDOW_SECONDS = 300
+
+
+def read_device_key(request) -> str:
+    """المفتاحُ من ترويسة `Authorization: Token <مفتاح>` — أو نصٌّ فارغ."""
+    return request.headers.get("Authorization", "").replace("Token ", "").strip()
+
+
+def touch_last_active(device) -> None:
+    """يُحدِّث «آخر نشاط» إن تجاوز عمرُه النافذة — وإلّا يسقط من المسار الحارّ.
+
+    مصدرٌ واحدٌ للقاعدة: كانت النافذةُ مكتوبةً في موضعين، وقاعدةٌ في مكانين
+    تتباعد بصمت (سابقةٌ في هذا المستودع: قاعدةُ احتساب رصيد المورّد).
+    """
+    from hr.models import UserDevice
+
+    now = timezone.now()
+    if device.last_active_at and (now - device.last_active_at).total_seconds() < LAST_ACTIVE_WINDOW_SECONDS:
+        return
+    UserDevice.objects.filter(pk=device.pk).update(last_active_at=now)
+    device.last_active_at = now
+
+
+def resolve_device(request):
+    """جهازُ الدخول صاحبُ مفتاح هذا الطلب — أو `None`.
+
+    **لا ارتدادَ إلى `authtoken_token`.** الهجرةُ الصامتة تترك الصفَّ القديم
+    قائماً بنفس المفتاح إلى جانب صفِّ الجهاز — وهي حالُ كلِّ مستخدمٍ قائمٍ يوم
+    النشر. فقبولُه هنا يجعله مفتاحاً هيكليّاً يُحيي جهازاً أُبطل: يخرج المستخدمُ
+    فلا يخرج، ويُخرج جهازاً فيعود. جدولُ الأجهزة وحدَه مصدرُ الحقيقة.
+    """
+    from hr.models import UserDevice
+
+    key = read_device_key(request)
+    if not key:
+        return None
+    return UserDevice.objects.filter(key=key).select_related("user").first()
+
 
 class DeviceTokenAuthentication(DRFTokenAuthentication):
     """
@@ -35,14 +76,5 @@ class DeviceTokenAuthentication(DRFTokenAuthentication):
         if not device.user.is_active:
             raise exceptions.AuthenticationFailed('User inactive or deleted.')
 
-        # 8. صيانة الأداء: تحديث last_active_at فقط إذا كان القيمة أقدم من 5 دقائق (300 ثانية)
-        now = timezone.now()
-        if not device.last_active_at or (now - device.last_active_at).total_seconds() >= 300:
-            model.objects.filter(pk=device.pk).update(last_active_at=now)
-            device.last_active_at = now
-
+        touch_last_active(device)
         return (device.user, device)
-
-
-# الاسم المستعار للتوافق مع المواضع التي تستورد TokenAuthentication صراحةً
-TokenAuthentication = DeviceTokenAuthentication

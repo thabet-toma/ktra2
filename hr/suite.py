@@ -13,7 +13,7 @@
 import logging
 
 from rest_framework.authentication import SessionAuthentication
-from hr.authentication import TokenAuthentication
+from hr.authentication import DeviceTokenAuthentication as TokenAuthentication
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 

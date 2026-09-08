@@ -275,8 +275,16 @@ def calculate_sales_return_refund_caps(
         ).distinct()
     )
 
+    # الطرحُ بحالة **الوصول** لا بحالة الانتظار: كلُّ ورقةٍ لم تصر مالاً في
+    # الصندوق تُطرح، أيّاً كانت حالتُها الآن. القراءةُ المعكوسة («اطرح ما هو في
+    # المحفظة أو برسم التحصيل») كانت تُسقط الورقةَ من الطرح متى غادرت الحالتين
+    # — رُدَّت لصاحبها أو ارتدّت أو ظُهِّرت — بينما تبقى داخل «التوزيعات
+    # المرحّلة»، فتتحوّل قيمتُها إلى نقدٍ قابلٍ للصرف. وهو عينُ ما وُضع السقفُ
+    # ليمنعه، بل أسوأ: نقدٌ يخرج مقابل ورقةٍ أعدناها بأيدينا.
+    CHEQUE_STATUSES_MEANING_MONEY_ARRIVED = ("Collected", "Settled")
     uncollected_cheques = [
-        c for c in orig_cheques if c.status in ("Received", "Under_Collection")
+        c for c in orig_cheques
+        if c.status not in CHEQUE_STATUSES_MEANING_MONEY_ARRIVED
     ]
     uncollected_total = sum(
         (Decimal(str(c.amount or 0)) for c in uncollected_cheques),

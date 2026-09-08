@@ -20,6 +20,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
 from hr.models import UserDevice
+from hr.authentication import resolve_device
 from hr.auth_api import _default_tenant_for, _json_body
 
 
@@ -28,12 +29,7 @@ def _authenticate_request(request):
     التحقق من ترويسة المصادقة وإرجاع (user, current_device).
     إذا كانت الترويسة غير صالحة أو غير موجودة يرجع (None, None).
     """
-    auth = request.headers.get("Authorization", "").replace("Token ", "").strip()
-    if not auth:
-        return None, None
-    # ISSUE #168: جدولُ الأجهزة وحدَه — لا ارتدادَ إلى `authtoken_token`، وإلّا
-    # صار الصفُّ القديمُ الباقي بعد الهجرة مفتاحاً يُحيي جهازاً أُبطل.
-    device = UserDevice.objects.filter(key=auth).select_related("user").first()
+    device = resolve_device(request)
     if not device or not device.user.is_active:
         return None, None
     return device.user, device

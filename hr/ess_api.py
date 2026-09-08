@@ -19,7 +19,7 @@ from rest_framework.decorators import (
     api_view, authentication_classes, permission_classes, throttle_classes,
 )
 from rest_framework.authentication import SessionAuthentication
-from hr.authentication import TokenAuthentication
+from hr.authentication import DeviceTokenAuthentication as TokenAuthentication
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response

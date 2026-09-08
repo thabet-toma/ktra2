@@ -51,7 +51,7 @@ from rest_framework.decorators import (
     permission_classes,
     throttle_classes,
 )
-from hr.authentication import TokenAuthentication
+from hr.authentication import DeviceTokenAuthentication as TokenAuthentication
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle

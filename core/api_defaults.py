@@ -4,7 +4,7 @@
 """
 from rest_framework import serializers
 from rest_framework.authentication import SessionAuthentication
-from hr.authentication import TokenAuthentication
+from hr.authentication import DeviceTokenAuthentication as TokenAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 

@@ -3848,6 +3848,24 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
                 by_payment.setdefault(pay_id, []).append(inv_id)
         invoice_ids.update(inv_id for links in by_payment.values() for inv_id in links)
 
+    # ISSUE #167 (قصة ١٢): مرتجعُ البيع ينضمّ إلى مجموعة **فاتورته الأصليّة**، لا
+    # يصنع مجموعةً ثانية. وإلّا قرأ صاحبُ الحساب ثلاثةَ مستنداتٍ متفرّقة —
+    # الفاتورةُ هنا والمرتجعُ هناك وسندُ الردّ ثالثاً — وهي في الحقيقة حكايةٌ
+    # واحدة. وسندُ الردّ يتبع المرتجعَ بتوزيعه فينضمّ معه تلقائياً.
+    # استعلامٌ واحدٌ بالدفعة: رصيدُ الطرف في القوائم سبق أن كلّف هذا المستودع
+    # جدولاً مؤقّتاً لكل صفّ.
+    return_to_original: dict[int, int] = {}
+    if invoice_ids and not is_supplier:
+        from sales.models import SalesInvoice
+        return_to_original = dict(
+            SalesInvoice.objects
+            .filter(id__in=invoice_ids,
+                    invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+                    original_invoice__isnull=False)
+            .values_list("id", "original_invoice_id")
+        )
+        invoice_ids.update(return_to_original.values())
+
     numbers: dict[int, str] = {}
     if invoice_ids:
         if is_supplier:
@@ -3868,15 +3886,18 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
             continue
         if row["reference_type"] == invoice_type:
             row["document_number"] = numbers.get(ref_id) or f"#{ref_id}"
-            row["link_key"] = f"{invoice_type}:{ref_id}"
-            row["link_label"] = row["document_number"]
+            # المرتجعُ يرسو على أصله؛ وغيرُه على نفسه كما كان.
+            anchor_id = return_to_original.get(ref_id, ref_id)
+            row["link_key"] = f"{invoice_type}:{anchor_id}"
+            row["link_label"] = numbers.get(anchor_id) or f"#{anchor_id}"
             row["link_count"] = 1
         elif row["reference_type"] == payment_type:
             links = by_payment.get(ref_id, [])
             row["link_count"] = len(links)
             if len(links) == 1:
-                row["link_key"] = f"{invoice_type}:{links[0]}"
-                row["link_label"] = numbers.get(links[0]) or f"#{links[0]}"
+                anchor_id = return_to_original.get(links[0], links[0])
+                row["link_key"] = f"{invoice_type}:{anchor_id}"
+                row["link_label"] = numbers.get(anchor_id) or f"#{anchor_id}"
             elif links:
                 row["link_label"] = f"{len(links)} فواتير"
 

@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import serializers, status, viewsets
 from rest_framework.authentication import SessionAuthentication
-from hr.authentication import TokenAuthentication
+from hr.authentication import DeviceTokenAuthentication as TokenAuthentication
 from rest_framework.decorators import (
     action, api_view, authentication_classes, permission_classes,
 )

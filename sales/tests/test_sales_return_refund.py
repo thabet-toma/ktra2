@@ -925,3 +925,91 @@ def test_unpost_keeps_cheque_history_and_writes_revert(env):
     assert chq.status == "Returned"
     assert ChequeMovement.objects.filter(
         cheque=chq, movement_type="return_to_customer").count() == 2
+
+
+# ── 18. الورقةُ المُعادةُ لا تصير نقداً في مرتجعٍ لاحق ────────────────────────
+def test_returned_cheque_does_not_become_spendable_cash(env):
+    """ورقةٌ رُدَّت في مرتجعٍ سابق لا تفتح سقفَ نقدٍ في المرتجع التالي.
+
+    العطب: سقفُ النقد كان يطرح ما حالتُه 'Received' أو 'Under_Collection' فقط.
+    فمتى خرجت الورقةُ من الحالتين — رُدَّت للعميل أو ارتدّت — سقطت من الطرح
+    وبقي مبلغُها داخل «التوزيعات المرحّلة»، فتحوّلت قيمتُها إلى نقدٍ قابلٍ
+    للصرف. وهو عينُ ما وُضع السقفُ ليمنعه: نقدٌ حقيقيٌّ يخرج مقابل ورقةٍ لم
+    تُقبض قطّ — بل ورقةٍ أعدناها لصاحبها بأيدينا.
+    """
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    orig = _invoice(tenant, customer, product, total="1100", number="SI-LEAK-1")
+    post_sales_invoice(orig)
+    pay, [chq_a, chq_b] = _pay_invoice_cheques_and_cash(
+        tenant, customer, orig, cash,
+        cheques_data=[
+            {"cheque_number": "CHQ-A", "amount": "500", "due_date": "2026-07-01"},
+            {"cheque_number": "CHQ-B", "amount": "600", "due_date": "2026-08-01"},
+        ],
+    )
+    # لا نقدَ إطلاقاً: كلُّ ما وصلنا ورقتان لم تُحصَّل واحدةٌ منهما.
+    assert calculate_sales_return_refund_caps(orig)["cash_cap"] == Decimal("0.00")
+
+    c = _client(owner, tenant)
+    ret1 = _invoice(
+        tenant, customer, product, total="500", kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-LEAK-1"
+    )
+    assert c.post(f"/api/sales/invoices/{ret1.id}/post/", {}, format="json").status_code == 200
+    chq_a.refresh_from_db()
+    assert chq_a.status == "Returned"  # الورقة الأقدم عادت لصاحبها
+
+    # والآن: الورقةُ الثانية ما زالت في المحفظة غيرَ محصَّلة، والأولى خرجت من
+    # دفاترنا ورقةً. فلا نقدَ في الصندوق يخصّ هذه الفاتورة إطلاقاً.
+    assert calculate_sales_return_refund_caps(orig)["cash_cap"] == Decimal("0.00")
+
+    ret2 = _invoice(
+        tenant, customer, product, total="500", kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-LEAK-2"
+    )
+    resp = c.post(f"/api/sales/invoices/{ret2.id}/post/", {}, format="json")
+    assert resp.status_code == 200, resp.data
+
+    chq_b.refresh_from_db()
+    assert chq_b.status == "Received"  # 600 أكبر من 500 فلا تُجزَّأ ولا تُردّ
+    assert resp.data["refund_summary"]["cash_amount"] == "0.00", (
+        "خرج نقدٌ من الصندوق مقابل ورقةٍ لم تُقبض — تسريبُ سقف النقد."
+    )
+    assert resp.data["refund_summary"]["credit_balance"] == "500.00"
+    assert not CustomerPayment.objects.filter(refund_for_invoice=ret2).exists()
+
+
+# ── 19. المستنداتُ الثلاثة مرتبطةٌ في كشف حساب الزبون ─────────────────────────
+def test_statement_links_invoice_return_and_refund_together(env):
+    """الفاتورةُ والمرتجعُ وسندُ الردّ في مجموعةٍ واحدة، مرساتُها الفاتورةُ الأصليّة.
+
+    قصّة ١٢: «أرى في بطاقة الزبون الفاتورةَ والمرتجعَ وسندَ الردّ مرتبطةً
+    ثلاثتَها، لا أرقاماً متفرّقة». المرتجعُ كان يصنع مجموعةً ثانية فتُقرأ
+    الحكايةُ الواحدةُ مبعثرةً على مجموعتين.
+    """
+    from accounting.services import partner_account_statement
+
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    orig = _invoice(tenant, customer, product, total="500", number="SI-LINK-1")
+    post_sales_invoice(orig)
+    _pay_invoice_cash(tenant, customer, orig, cash, "500")
+
+    ret = _invoice(
+        tenant, customer, product, total="200", kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-LINK-1"
+    )
+    c = _client(owner, tenant)
+    assert c.post(f"/api/sales/invoices/{ret.id}/post/", {}, format="json").status_code == 200
+    voucher = CustomerPayment.objects.get(refund_for_invoice=ret)
+
+    out = partner_account_statement(
+        tenant_id=tenant.TenantID, partner_id=customer.pk, is_supplier=False, limit=200,
+    )
+    keys = {}
+    for r in out["results"]:
+        keys.setdefault((r["reference_type"], r["reference_id"]), r["link_key"])
+
+    anchor = f"SALES_INVOICE:{orig.pk}"
+    assert keys[("SALES_INVOICE", orig.pk)] == anchor
+    assert keys[("SALES_INVOICE", ret.pk)] == anchor, "المرتجع صنع مجموعةً ثانية"
+    assert keys[("CUSTOMER_PAYMENT", voucher.pk)] == anchor, "سند الردّ خارج المجموعة"

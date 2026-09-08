@@ -36,6 +36,7 @@
 | `PersonalExpenseSheet` | `name`، `position` | `user`؛ `unique_together = [['user','name']]` |
 | `PersonalExpenseCategory` | `key`، `label`، `position` | `user`؛ `unique_together = [['user','key']]` |
 | `Task` / `TaskSubmission` | `status`، `priority`، `total_work_time` | `assigned_to`/`created_by` → User، `tenant` |
+| `UserDevice` (#168) | `key` (فريد ومفهرس — وهو ما ترسله الواجهة كما هو اليوم)، `device_name` المشتقّ، `label` يكتبه المستخدم ويعلو المشتقّ، `user_agent` للتشخيص، `ip_address`، `last_active_at`، `is_primary` | `user` فقط — **بلا tenant** كـ`PersonalExpense`: الجهازُ والمفتاحُ يخصّان **حسابَ المستخدم عبر كل شركاته**، والشركةُ تُحسم في كل طلبٍ بترويسة `X-Tenant-Id`؛ فربطُه بشركةٍ واحدة يحبس جهازَ المستخدم عن بقيّة شركاته. قيدٌ شرطيّ: أساسيٌّ واحدٌ على الأكثر لكل مستخدم — **ويفرضه التطبيقُ أيضاً** في `hr/models.py` (`UserDevice.save`) لأن MySQL يتجاهل الفهرس الجزئي المشروط بصمت |
 | `AttendanceRecord` | `date`، `punch_in_time`، `punch_out_time`، `status` | `user`؛ `unique_together = [['user','date']]` |
 | `PointsHistory` | `task_points`، `attendance_points`، `total_points` | `user`؛ `unique_together = [['user','date']]` |
 
