@@ -116,6 +116,8 @@ urlpatterns = [
     path('api/devices/', include('device_registry.urls')),
     # THA-24: خدمة ما بعد البيع — كل نقطة خلفها ترد 404 لشركة غير مرخّصة.
     path('api/after-sales/', include('after_sales.urls')),
+    # موديول متابعة الموظفين — كل نقطة خلفه ترد 404 لشركة غير مرخّصة.
+    path('api/employee-ops/', include('employee_ops.urls')),
     # THA-114: ملف الاستيراد — كل نقطة خلفها ترد 404 لشركة غير مرخّصة.
     path('api/import-file/', include('import_file.urls')),
     # N0-T4: Group Constants (F11) — tenant-level settings + books + currencies

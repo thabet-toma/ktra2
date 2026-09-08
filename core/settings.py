@@ -121,6 +121,7 @@ INSTALLED_APPS = [
     'accountant_portal.apps.AccountantPortalConfig',
     'device_registry.apps.DeviceRegistryConfig',
     'after_sales.apps.AfterSalesConfig',
+    'employee_ops.apps.EmployeeOpsConfig',
     'import_file.apps.ImportFileConfig',
     'store.apps.StoreConfig',
     'docshare.apps.DocShareConfig',

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **618**
+عدد النقاط: **619**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -193,6 +193,7 @@
 | `/api/document-shares/` | `DocumentShareViewSet` | `docshare/views.py` |
 | `/api/document-shares/{pk}/` | `DocumentShareViewSet` | `docshare/views.py` |
 | `/api/document-shares/{pk}/revoke/` | `DocumentShareViewSet` | `docshare/views.py` |
+| `/api/employee-ops/settings/` | `EmployeeOpsSettingsViewSet` | `employee_ops/views.py` |
 | `/api/health/` | `health_check` | `core/health.py` |
 | `/api/hr/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/hr/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |

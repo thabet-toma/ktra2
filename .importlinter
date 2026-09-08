@@ -22,6 +22,7 @@ root_packages =
     core
     device_registry
     docshare
+    employee_ops
     hr
     inventory
     logistics
@@ -47,6 +48,7 @@ source_modules =
     core
     device_registry
     docshare
+    employee_ops
     hr
     inventory
     logistics
@@ -123,6 +125,7 @@ source_modules =
     core
     device_registry
     docshare
+    employee_ops
     hr
     inventory
     logistics

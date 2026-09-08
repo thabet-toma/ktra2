@@ -16,6 +16,11 @@ MODULES = {
         "plans": ("Pro", "Enterprise"),
         "legacy_flag": None,
     },
+    "employee_ops": {
+        "label": "متابعة الموظفين — المهامّ والنقاط والتوظيف",
+        "plans": ("Pro", "Enterprise"),
+        "legacy_flag": None,
+    },
     "hr_suite": {
         "label": "الموارد البشرية — الحضور والورديات والعقود والطلبات",
         "plans": ("Pro", "Enterprise"),

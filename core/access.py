@@ -38,6 +38,7 @@ GROUP_ADMIN = "الإدارة والإعدادات"
 GROUP_TAX = "الضريبة والمراجعة"
 GROUP_DEVICES = "الأجهزة الحساسة"
 GROUP_AFTERSALES = "خدمة ما بعد البيع"
+GROUP_EMPLOYEE_OPS = "متابعة الموظفين"
 
 PERMISSIONS: list[dict] = [
     # المبيعات
@@ -172,6 +173,9 @@ PERMISSIONS: list[dict] = [
     {"key": "aftersales.order.edit", "label": "تعديل أمر صيانة ونقل حالته", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.order.post", "label": "ترحيل قطع الكفالة وتوليد فاتورة الصيانة", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.order.unpost", "label": "التراجع عن ترحيل قطع الكفالة", "group": GROUP_AFTERSALES, "module": "after_sales"},
+    # متابعة الموظفين — لا تظهر إلا للشركات المرخّصة للوحدة.
+    {"key": "employee_ops.self", "label": "متابعة الموظفين — مهامّي ونقاطي", "group": GROUP_EMPLOYEE_OPS, "module": "employee_ops"},
+    {"key": "employee_ops.manage", "label": "إدارة متابعة الموظفين — الإسناد والمراجعة والتوظيف", "group": GROUP_EMPLOYEE_OPS, "module": "employee_ops"},
 ]
 
 # القراءة المجرّدة — ما يملكه «المستعرض» ويرثه كل دور أعلى منه.
@@ -219,6 +223,7 @@ _SALES_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | _EMPLOYEE_SELF | {
     "aftersales.warranty.manage",
     "aftersales.order.create",
     "aftersales.order.edit",
+    "employee_ops.self",
 }
 
 _PROCUREMENT_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | _EMPLOYEE_SELF | {
@@ -241,6 +246,7 @@ _PROCUREMENT_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | _EMPLOYEE_SELF | {
     # `import.*`، فهي وحدها التي ترفع أوراقها وتغلق بنودها.
     "importfile.file.view",
     "importfile.file.manage",
+    "employee_ops.self",
 }
 
 _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | _EMPLOYEE_SELF | {
@@ -289,6 +295,7 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | _EMPLOYEE_SELF 
     # المحاسب ليعرف من أين جاء الرقم، ولا يعتمد ولا يحرّر.
     "hr.contracts.view",
     "hr.requests.view",
+    "employee_ops.self",
 }
 
 _LEGAL_ACCOUNTANT = {
@@ -316,6 +323,7 @@ _STAFF = _VIEW_ONLY | _AFTERSALES_READ | _EMPLOYEE_SELF | {
     "devices.registry.create",
     # استقبال جهاز للصيانة عملُ كاونتر كذلك — بلا تعديل ولا ترحيل.
     "aftersales.order.create",
+    "employee_ops.self",
 }
 
 # «موظف خدمة ذاتية» — أضيق دور في النظام: يسجّل حضوره ويقدّم طلباته ويرى قسائم
@@ -331,6 +339,20 @@ _STAFF = _VIEW_ONLY | _AFTERSALES_READ | _EMPLOYEE_SELF | {
 # البابين بلا لمس أيٍّ من المسارين القديمين.
 _ESS_EMPLOYEE = set(_EMPLOYEE_SELF)
 
+# «موظف ميداني» — دور ضيّق لمتابعة الموظفين: يرى مهامّه ويسجّل نقاطه فقط،
+# ولا يرى مبيعات ولا مشتريات ولا فواتير ولا زملاء. دورُ من يُعطى حساباً لمتابعة
+# الميدان فقط، ولذلك لا يبني على `_VIEW_ONLY`: منحُه قراءةَ المبيعات لأجل مهمّةٍ إفراطٌ.
+#
+# **ومفتاحه `field_staff` لا `employee`**: القيمة الأخيرة محجوزة تاريخياً
+# وتترجمها `user_tenant_role` إلى `staff` (فترقّي الموظف الميداني إلى موظف عام
+# يملك إنشاء الفواتير وتعديلها)، وسقوطها في `ROLE_DEFAULTS` كان سيهبط بمستخدمٍ
+# قديمٍ بلا عضوية. اسمٌ مستقل يُغلق البابين ويمنع أي تصعيد للصلاحيات.
+#: اسمُ الدور الضيّق كنصّاً واحداً — يُقرأ من هنا في `ROLE_DEFAULTS` و`ROLE_LABELS`
+#: و`ROLE_MODULES`، فلا يتكرّر حرفياً في أربعة مواضع تفترق واحدةٌ منها بصمت.
+FIELD_STAFF_ROLE = "field_staff"
+
+_FIELD_STAFF = frozenset({"employee_ops.self"})
+
 ROLE_DEFAULTS: dict[str, object] = {
     "manager": "*",
     "accountant": _ACCOUNTANT,
@@ -339,6 +361,7 @@ ROLE_DEFAULTS: dict[str, object] = {
     "procurement": _PROCUREMENT_EMPLOYEE,
     "staff": _STAFF,
     "ess": _ESS_EMPLOYEE,
+    FIELD_STAFF_ROLE: _FIELD_STAFF,
     "viewer": _VIEW_ONLY,
 }
 
@@ -351,6 +374,7 @@ ROLE_LABELS = (
     ("procurement", "موظف مشتريات"),
     ("staff", "موظف"),
     ("ess", "موظف خدمة ذاتية"),
+    (FIELD_STAFF_ROLE, "موظف ميداني"),
     ("viewer", "مستعرض"),
 )
 ROLE_ORDER = tuple(r for r, _ in ROLE_LABELS)
@@ -358,6 +382,8 @@ ROLE_MODULES = {
     "legal_accountant": "accountant_portal",
     # دور الخدمة الذاتية بلا معنى بلا وحدة الموارد البشرية — يختفي معها.
     "ess": "hr_suite",
+    # دور الموظف الميداني بلا معنى بلا وحدة متابعة الموظفين — يختفي معها.
+    FIELD_STAFF_ROLE: "employee_ops",
 }
 
 

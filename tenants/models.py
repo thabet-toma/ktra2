@@ -446,6 +446,9 @@ class UserCompanyMembership(models.Model):
         # `ess` لا `employee`: الأخيرة محجوزة لدور التطبيق القديم (انظر
         # `core/access.py` عند `_ESS_EMPLOYEE` و`user_tenant_role`).
         ('ess', 'موظف خدمة ذاتية (ESS)'),
+        # موظف وحدة متابعة الموظفين — يسلّم مهامّه ويرى نقاطه، ولا يرى ERP.
+        # `field_staff` لا `employee` للسبب نفسه المذكور فوق `ess`.
+        ('field_staff', 'موظف ميداني (Field staff)'),
         ('viewer', 'مستعرض (Viewer)'),
     ]
 
