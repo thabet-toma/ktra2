@@ -1,7 +1,16 @@
 """مُسلسِلات متابعة الموظفين (المرحلة الأولى: الأساس)."""
 from rest_framework import serializers
 
-from .models import EmployeeInvitation, EmployeeOpsSettings, EmployeeProfile
+from .models import (
+    EmployeeInvitation,
+    EmployeeOpsSettings,
+    EmployeeProfile,
+    Task,
+    TaskAssignment,
+    TaskSubmission,
+    TaskSubmissionAttachment,
+    TaskSubmissionItem,
+)
 
 
 class EmployeeOpsSettingsSerializer(serializers.ModelSerializer):
@@ -125,3 +134,305 @@ class AcceptInvitationSerializer(serializers.Serializer):
     password = serializers.CharField(max_length=128, required=False, allow_blank=True, default="", write_only=True)
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
     last_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
+
+
+class TaskAssignmentSerializer(serializers.ModelSerializer):
+    """إسناد المهمة لموظف مع تفاصيل حالته ومؤقته."""
+
+    employee_name = serializers.CharField(source="employee.name", read_only=True)
+    employee_code = serializers.CharField(source="employee.code", read_only=True)
+
+    class Meta:
+        model = TaskAssignment
+        fields = [
+            "id",
+            "tenant",
+            "task",
+            "employee",
+            "employee_name",
+            "employee_code",
+            "status",
+            "started_at",
+            "completed_at",
+            "work_started_at",
+            "total_work_seconds",
+            "extra",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class TaskSubmissionAttachmentSerializer(serializers.ModelSerializer):
+    """مرفق تسليم المهمة."""
+
+    class Meta:
+        model = TaskSubmissionAttachment
+        fields = [
+            "id",
+            "url",
+            "name",
+            "position",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+
+class TaskSubmissionItemSerializer(serializers.ModelSerializer):
+    """بند بحث عن منتج في تسليم المهمة."""
+
+    class Meta:
+        model = TaskSubmissionItem
+        fields = [
+            "id",
+            "product_link",
+            "product_price",
+            "notes",
+            "attachment_url",
+            "attachment_name",
+            "images",
+            "position",
+            "extra",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+
+class TaskSubmissionSerializer(serializers.ModelSerializer):
+    """عرض تسليم المهمة مع بنوده ومرفقاته وتفاصيل المراجعة."""
+
+    employee_name = serializers.CharField(source="employee.name", read_only=True)
+    reviewer_name = serializers.SerializerMethodField()
+    items = TaskSubmissionItemSerializer(many=True, read_only=True)
+    attachments = TaskSubmissionAttachmentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = TaskSubmission
+        fields = [
+            "id",
+            "tenant",
+            "task",
+            "employee",
+            "employee_name",
+            "body",
+            "decision",
+            "reviewer",
+            "reviewer_name",
+            "reviewed_at",
+            "reviewer_notes",
+            "items",
+            "attachments",
+            "extra",
+            "source_path",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_reviewer_name(self, obj):
+        if not obj.reviewer_id:
+            return None
+        return obj.reviewer.get_full_name() or obj.reviewer.username
+
+
+class TaskSerializer(serializers.ModelSerializer):
+    """عرض المهمة مع إسناداتها وحالة إسناد المستخدم الحالي."""
+
+    created_by_name = serializers.SerializerMethodField()
+    assignments = TaskAssignmentSerializer(many=True, read_only=True)
+    my_assignment = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Task
+        fields = [
+            "id",
+            "tenant",
+            "title",
+            "description",
+            "priority",
+            "status",
+            "due_date",
+            "category",
+            "tags",
+            "target_price",
+            "allowed_sites",
+            "created_by",
+            "created_by_name",
+            "completed_at",
+            "extra",
+            "source_path",
+            "assignments",
+            "my_assignment",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "tenant",
+            "created_by",
+            "created_by_name",
+            "completed_at",
+            "assignments",
+            "my_assignment",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_created_by_name(self, obj):
+        if not obj.created_by_id:
+            return None
+        return obj.created_by.get_full_name() or obj.created_by.username
+
+    def get_my_assignment(self, obj):
+        employee_id = self.context.get("employee_id")
+        if not employee_id:
+            return None
+        for a in obj.assignments.all():
+            if a.employee_id == employee_id:
+                return TaskAssignmentSerializer(a).data
+        return None
+
+
+#: أقصى ما يُقبل في تسليمٍ واحد. السقفُ على المرفقات وحده كان يُلتفّ عليه:
+#: البنودُ بلا عدد، وكلُّ بندٍ يحمل مرفقاً وقائمةَ صورٍ بلا حدّ — فتسليمٌ بمئة
+#: صورةٍ يمرّ من باب «المرفقات ٥».
+MAX_SUBMISSION_ATTACHMENTS = 5
+MAX_SUBMISSION_ITEMS = 50
+MAX_ITEM_IMAGES = 5
+
+_PRIORITY_VALUES = frozenset(value for value, _ in Task.PRIORITY_CHOICES)
+
+
+def _normalize_priority(value):
+    """الحيُّ يكتبها صغيرةً (`low`) والنموذجُ كبيرةً — الترجمةُ هنا مرّةً واحدة."""
+    val = str(value).upper()
+    if val in _PRIORITY_VALUES:
+        return val
+    raise serializers.ValidationError("أولوية غير صالحة.")
+
+
+def _validate_media_url(value):
+    """رابطٌ لا نصٌّ حرّ: مرفقٌ بمحتوىً غير رابطٍ يكسر كلّ شاشةٍ تعرضه."""
+    val = (value or "").strip()
+    if not val:
+        raise serializers.ValidationError("رابط المرفق مطلوب.")
+    if not (val.startswith("http://") or val.startswith("https://") or val.startswith("/")):
+        raise serializers.ValidationError("رابط المرفق غير صالح.")
+    return val
+
+
+class TaskCreateSerializer(serializers.Serializer):
+    """إنشاء مهمة جديدة مع إسناداتها."""
+
+    title = serializers.CharField(max_length=255, required=True)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    priority = serializers.CharField(required=False, default="MEDIUM")
+    due_date = serializers.DateField(required=False, allow_null=True, default=None)
+    category = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    tags = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    target_price = serializers.DecimalField(
+        max_digits=15, decimal_places=2, required=False, allow_null=True, default=None
+    )
+    allowed_sites = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    assignee_ids = serializers.ListField(child=serializers.IntegerField(), required=False, default=list)
+
+    def validate_priority(self, value):
+        return _normalize_priority(value)
+
+
+class TaskUpdateSerializer(serializers.Serializer):
+    """تعديل مهمة."""
+
+    title = serializers.CharField(max_length=255, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    priority = serializers.CharField(required=False)
+    due_date = serializers.DateField(required=False, allow_null=True)
+    category = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    tags = serializers.ListField(child=serializers.CharField(), required=False)
+    target_price = serializers.DecimalField(
+        max_digits=15, decimal_places=2, required=False, allow_null=True
+    )
+    allowed_sites = serializers.ListField(child=serializers.CharField(), required=False)
+    assignee_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
+
+    def validate_priority(self, value):
+        return _normalize_priority(value)
+
+
+class TaskSubmissionItemInputSerializer(serializers.Serializer):
+    """مدخل بند في تسليم المهمة."""
+
+    product_link = serializers.CharField(required=False, allow_blank=True, default="")
+    product_price = serializers.DecimalField(
+        max_digits=15, decimal_places=2, required=False, allow_null=True, default=None
+    )
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+    attachment_url = serializers.CharField(required=False, allow_blank=True, default="")
+    attachment_name = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    images = serializers.ListField(child=serializers.CharField(), required=False, default=list)
+    position = serializers.IntegerField(required=False, default=0)
+
+    def validate_images(self, value):
+        if value and len(value) > MAX_ITEM_IMAGES:
+            raise serializers.ValidationError(
+                f"الحد الأقصى للصور في البند الواحد هو {MAX_ITEM_IMAGES} صور."
+            )
+        return value
+
+
+class TaskSubmissionAttachmentInputSerializer(serializers.Serializer):
+    """مدخل مرفق في تسليم المهمة."""
+
+    url = serializers.CharField(required=True, validators=[_validate_media_url])
+    name = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    position = serializers.IntegerField(required=False, default=0)
+
+
+class TaskSubmissionCreateSerializer(serializers.Serializer):
+    """مدخلات تسليم المهمة (حتى 5 مرفقات)."""
+
+    body = serializers.CharField(required=False, allow_blank=True, default="")
+    items = serializers.ListField(child=TaskSubmissionItemInputSerializer(), required=False, default=list)
+    attachments = serializers.ListField(
+        child=TaskSubmissionAttachmentInputSerializer(), required=False, default=list
+    )
+
+    def validate_attachments(self, value):
+        if value and len(value) > MAX_SUBMISSION_ATTACHMENTS:
+            raise serializers.ValidationError(
+                f"الحد الأقصى للمرفقات هو {MAX_SUBMISSION_ATTACHMENTS} مرفقات فقط."
+            )
+        return value
+
+    def validate_items(self, value):
+        if value and len(value) > MAX_SUBMISSION_ITEMS:
+            raise serializers.ValidationError(
+                f"الحد الأقصى لبنود التسليم هو {MAX_SUBMISSION_ITEMS} بنداً."
+            )
+        return value
+
+
+class TaskSubmissionReviewSerializer(serializers.Serializer):
+    """مدخلات مراجعة تسليم المهمة."""
+
+    # القراراتُ الثلاثة من النموذج لا نصوصاً مكرّرة — و`pending` ليست قراراً.
+    decision = serializers.ChoiceField(
+        choices=[
+            TaskSubmission.DECISION_APPROVED_FULL,
+            TaskSubmission.DECISION_APPROVED_PARTIAL,
+            TaskSubmission.DECISION_REJECTED,
+        ],
+        required=True,
+    )
+    reviewer_notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        decision = attrs.get("decision")
+        notes = (attrs.get("reviewer_notes") or "").strip()
+        if decision == "rejected" and not notes:
+            raise serializers.ValidationError({
+                "reviewer_notes": "سبب الرفض مطلوب عند رفض التسليم."
+            })
+        attrs["reviewer_notes"] = notes
+        return attrs
+

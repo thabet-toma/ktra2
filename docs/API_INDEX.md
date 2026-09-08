@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **629**
+عدد النقاط: **638**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -204,6 +204,15 @@
 | `/api/employee-ops/invitations/{pk}/cancel/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/invitations/{pk}/resend/` | `EmployeeInvitationViewSet` | `employee_ops/views.py` |
 | `/api/employee-ops/settings/` | `EmployeeOpsSettingsViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/submissions/` | `TaskSubmissionViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/submissions/{pk}/` | `TaskSubmissionViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/submissions/{pk}/review/` | `TaskSubmissionViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/tasks/` | `TaskViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/tasks/mine/` | `TaskViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/tasks/{pk}/` | `TaskViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/tasks/{pk}/start/` | `TaskViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/tasks/{pk}/stop/` | `TaskViewSet` | `employee_ops/views.py` |
+| `/api/employee-ops/tasks/{pk}/submit/` | `TaskViewSet` | `employee_ops/views.py` |
 | `/api/health/` | `health_check` | `core/health.py` |
 | `/api/hr/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/hr/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |

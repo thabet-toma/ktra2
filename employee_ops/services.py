@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.db import IntegrityError, transaction
 from django.utils import timezone
-from rest_framework.exceptions import APIException, NotFound, ValidationError
+from rest_framework.exceptions import APIException, NotFound, PermissionDenied, ValidationError
 
 from core.access import FIELD_STAFF_ROLE
 from core.activity import log_activity
@@ -21,7 +21,16 @@ from core.plans import (
 from hr.models import Employee
 from tenants.models import UserCompanyMembership
 
-from .models import EmployeeInvitation, EmployeeOpsSettings, EmployeeProfile
+from .models import (
+    EmployeeInvitation,
+    EmployeeOpsSettings,
+    EmployeeProfile,
+    Task,
+    TaskAssignment,
+    TaskSubmission,
+    TaskSubmissionAttachment,
+    TaskSubmissionItem,
+)
 
 MODULE_KEY = "employee_ops"
 
@@ -478,3 +487,394 @@ def reactivate_employee(*, employee: Employee, actor) -> Employee:
     )
 
     return employee
+
+
+def _recompute_task_status(task: Task) -> Task:
+    """حالةُ المهمّة العامّة مشتقّةٌ من إسناداتها عند كلّ مراجعة:
+
+    - كلُّ الإسنادات completed ⇒ COMPLETED وcompleted_at يُضبط.
+    - وإلا إن بقي تسليمٌ ينتظر (decision="pending") ⇒ WAITING_FOR_REVIEW.
+    - وإلا ⇒ IN_PROGRESS.
+    """
+    assignments = list(task.assignments.all())
+    if not assignments:
+        # مهمّةٌ بلا مُسنَدٍ إليها لم تبدأ بعد — «قيد التنفيذ» تكذب على قارئها.
+        task.status = Task.STATUS_NEW
+        task.completed_at = None
+    elif all(a.status == TaskAssignment.STATUS_COMPLETED for a in assignments):
+        task.status = Task.STATUS_COMPLETED
+        if not task.completed_at:
+            task.completed_at = timezone.now()
+    elif all(a.status == TaskAssignment.STATUS_REJECTED for a in assignments):
+        # كلُّ من أُسندت إليه رُفض عملُه ⇒ المهمّة مرفوضة. بدون هذا الفرع كانت
+        # `REJECTED` حالةً معلَنةً لا يبلغها شيء، والمهمّةُ المرفوضةُ بالكامل
+        # تُعرض «قيد التنفيذ» — والإعادةُ بعد الرفض تُخرجها منها تلقائياً.
+        task.status = Task.STATUS_REJECTED
+        task.completed_at = None
+    elif task.submissions.filter(decision=TaskSubmission.DECISION_PENDING).exists():
+        task.status = Task.STATUS_WAITING_FOR_REVIEW
+        task.completed_at = None
+    else:
+        task.status = Task.STATUS_IN_PROGRESS
+        task.completed_at = None
+    task.save(update_fields=["status", "completed_at", "updated_at"])
+    return task
+
+
+@transaction.atomic
+def create_task(
+    *,
+    tenant,
+    actor,
+    title: str,
+    description: str = "",
+    priority: str = "MEDIUM",
+    due_date=None,
+    category: str = "",
+    tags=None,
+    target_price=None,
+    allowed_sites=None,
+    extra=None,
+    assignee_ids=None,
+) -> Task:
+    """إنشاء مهمة جديدة مع إسناداتها لموظفي هذه الشركة حصراً."""
+    employees = []
+    if assignee_ids:
+        unique_ids = list(dict.fromkeys(assignee_ids))
+        employees = list(Employee.objects.filter(tenant=tenant, id__in=unique_ids))
+        if len(employees) != len(unique_ids):
+            raise ValidationError({"assignee_ids": "أحد الموظفين المحددين غير موجود في هذه الشركة."})
+
+    task = Task.objects.create(
+        tenant=tenant,
+        title=title.strip(),
+        description=(description or "").strip(),
+        priority=priority,
+        status=Task.STATUS_NEW,
+        due_date=due_date,
+        category=(category or "").strip(),
+        tags=tags or [],
+        target_price=target_price,
+        allowed_sites=allowed_sites or [],
+        created_by=actor if (actor and getattr(actor, "is_authenticated", False)) else None,
+        extra=extra or {},
+    )
+
+    for emp in employees:
+        TaskAssignment.objects.create(
+            tenant=tenant,
+            task=task,
+            employee=emp,
+            status=TaskAssignment.STATUS_NOT_STARTED,
+        )
+
+    _log_activity(
+        tenant=tenant,
+        actor=actor,
+        action="create",
+        entity_type="task",
+        entity_id=task.pk,
+        entity_label=task.title,
+        description="إنشاء مهمة جديدة",
+    )
+
+    return task
+
+
+@transaction.atomic
+def update_task(*, task: Task, actor, **kwargs) -> Task:
+    """تعديل مهمة ومزامنة إسناداتها إن لزم."""
+    tenant = task.tenant
+    assignee_ids = kwargs.pop("assignee_ids", None)
+    if assignee_ids is not None:
+        unique_ids = list(dict.fromkeys(assignee_ids))
+        employees = list(Employee.objects.filter(tenant=tenant, id__in=unique_ids))
+        if len(employees) != len(unique_ids):
+            raise ValidationError({"assignee_ids": "أحد الموظفين المحددين غير موجود في هذه الشركة."})
+
+        existing = {a.employee_id: a for a in task.assignments.all()}
+        new_ids = set(unique_ids)
+        # نزعُ مُسنَدٍ **سلّم فعلاً** يحذف صفَّ حالته ويترك تسليماتِه معلّقةً على
+        # مهمّةٍ لم يعد مُسنَداً إليها — عملٌ أُنجز ولا يظهر لأحد. من انتهى دورُه
+        # وقد سلّم يُراجَع لا يُنزع.
+        submitters = set(
+            TaskSubmission.objects.filter(task=task).values_list("employee_id", flat=True)
+        )
+        blocked = sorted(submitters - new_ids)
+        if blocked:
+            raise ValidationError(
+                {"assignee_ids": "لا يمكن نزعُ موظفٍ سلّم على هذه المهمّة — راجع تسليمَه أوّلاً."}
+            )
+        for emp_id, a in existing.items():
+            if emp_id not in new_ids:
+                a.delete()
+        for emp in employees:
+            if emp.id not in existing:
+                TaskAssignment.objects.create(
+                    tenant=tenant,
+                    task=task,
+                    employee=emp,
+                    status=TaskAssignment.STATUS_NOT_STARTED,
+                )
+
+    update_fields = ["updated_at"]
+    for field in (
+        "title",
+        "description",
+        "priority",
+        "due_date",
+        "category",
+        "tags",
+        "target_price",
+        "allowed_sites",
+        "extra",
+    ):
+        if field in kwargs:
+            val = kwargs[field]
+            if isinstance(val, str):
+                val = val.strip()
+            setattr(task, field, val)
+            update_fields.append(field)
+
+    if len(update_fields) > 1:
+        task.save(update_fields=update_fields)
+
+    if assignee_ids is not None:
+        # الحالةُ تصف الإسنادات، فتبديلُها يوجب إعادةَ اشتقاقها — وإلا بقيت مهمّةٌ
+        # نُزع آخرُ غيرِ المكتملين منها «قيد التنفيذ» إلى الأبد.
+        task.refresh_from_db()
+        _recompute_task_status(task)
+
+    _log_activity(
+        tenant=tenant,
+        actor=actor,
+        action="update",
+        entity_type="task",
+        entity_id=task.pk,
+        entity_label=task.title,
+        description="تعديل مهمة",
+    )
+
+    return task
+
+
+@transaction.atomic
+def delete_task(*, task: Task, actor) -> None:
+    """حذف مهمة وتسجيل النشاط."""
+    tenant = task.tenant
+    # مهمّةٌ سُلِّم عليها تحمل عملَ موظفٍ ومراجعةَ مديرٍ — وحذفُها يمحوهما معاً
+    # (وسيمحو معهما مصدرَ النقاط في المرحلة التالية). تُحذف المهمّةُ الفارغةُ وحدها.
+    if TaskSubmission.objects.filter(task=task).exists():
+        raise ValidationError("لا تُحذف مهمّةٌ لها تسليمات — فيها عملُ موظفٍ ومراجعتُه.")
+    task_id = task.pk
+    task_title = task.title
+    task.delete()
+    _log_activity(
+        tenant=tenant,
+        actor=actor,
+        action="delete",
+        entity_type="task",
+        entity_id=task_id,
+        entity_label=task_title,
+        description="حذف مهمة",
+    )
+
+
+@transaction.atomic
+def start_task_timer(*, task: Task, employee: Employee) -> TaskAssignment:
+    """بدء مؤقت العمل للموظف على المهمة — متكرر بلا أثر مضاعف (idempotent)."""
+    assignment = TaskAssignment.objects.filter(
+        tenant=task.tenant, task=task, employee=employee
+    ).first()
+    if not assignment:
+        raise PermissionDenied("المهمة غير مسندة إلى هذا الموظف.")
+
+    # المكتملُ والمُسلَّمُ كلاهما مغلق: تسليمٌ ينتظر في طابور المدير يعود
+    # «قيد التنفيذ» بضغطةٍ واحدة — وهو الكذبُ نفسُه الذي بُني الحارس ضدّه.
+    if assignment.status in (
+        TaskAssignment.STATUS_COMPLETED,
+        TaskAssignment.STATUS_SUBMITTED,
+    ):
+        raise ValidationError("لا يُشغَّل المؤقّت على تسليمٍ ينتظر المراجعة أو عملٍ قُبِل.")
+
+    update_fields = ["status", "updated_at"]
+    assignment.status = TaskAssignment.STATUS_IN_PROGRESS
+    if not assignment.started_at:
+        assignment.started_at = timezone.now()
+        update_fields.append("started_at")
+    if assignment.work_started_at is None:
+        assignment.work_started_at = timezone.now()
+        update_fields.append("work_started_at")
+    assignment.save(update_fields=update_fields)
+
+    _recompute_task_status(task)
+
+    return assignment
+
+
+@transaction.atomic
+def stop_task_timer(*, task: Task, employee: Employee) -> TaskAssignment:
+    """إيقاف مؤقت العمل وإضافة الفارق إلى إجمالي ثواني العمل."""
+    assignment = TaskAssignment.objects.filter(
+        tenant=task.tenant, task=task, employee=employee
+    ).first()
+    if not assignment:
+        raise PermissionDenied("المهمة غير مسندة إلى هذا الموظف.")
+
+    if assignment.work_started_at is not None:
+        elapsed = int((timezone.now() - assignment.work_started_at).total_seconds())
+        if elapsed > 0:
+            assignment.total_work_seconds += elapsed
+        assignment.work_started_at = None
+        assignment.save(update_fields=["total_work_seconds", "work_started_at", "updated_at"])
+
+    return assignment
+
+
+@transaction.atomic
+def submit_task(
+    *,
+    task: Task,
+    employee: Employee,
+    actor,
+    body: str = "",
+    items: list = None,
+    attachments: list = None,
+) -> TaskSubmission:
+    """تسليم مهمة من موظف مسند إليه: يرفع حالة الإسناد إلى submitted والمهمة إلى WAITING_FOR_REVIEW."""
+    assignment = TaskAssignment.objects.filter(
+        tenant=task.tenant, task=task, employee=employee
+    ).first()
+    if not assignment:
+        raise PermissionDenied("المهمة غير مسندة إلى هذا الموظف.")
+
+    # إعادةُ التسليم بعد **الرفض** مسموحة وهي المقصودة؛ أمّا بعد القبول فلا —
+    # تسليمٌ ثانٍ على عملٍ قُبِل يعيد المهمّة للطابور ويكرّر نقاطه لاحقاً.
+    if assignment.status == TaskAssignment.STATUS_COMPLETED:
+        raise ValidationError("هذه المهمّة قُبلت منك بالفعل — لا تُسلَّم مرّةً أخرى.")
+    # ولا تسليمَ ثانٍ ينتظر بجانب أوّلَ ينتظر: طابورٌ فيه تسليمان لعملٍ واحدٍ
+    # يجعل المدير يراجع ما استُبدل.
+    if TaskSubmission.objects.filter(
+        tenant=task.tenant,
+        task=task,
+        employee=employee,
+        decision=TaskSubmission.DECISION_PENDING,
+    ).exists():
+        raise ValidationError("لك تسليمٌ على هذه المهمّة ينتظر المراجعة.")
+
+    submission = TaskSubmission.objects.create(
+        tenant=task.tenant,
+        task=task,
+        employee=employee,
+        body=(body or "").strip(),
+        decision=TaskSubmission.DECISION_PENDING,
+    )
+
+    for pos, it in enumerate(items or []):
+        TaskSubmissionItem.objects.create(
+            tenant=task.tenant,
+            submission=submission,
+            product_link=(it.get("product_link") or "").strip(),
+            product_price=it.get("product_price"),
+            notes=(it.get("notes") or "").strip(),
+            attachment_url=(it.get("attachment_url") or "").strip(),
+            attachment_name=(it.get("attachment_name") or "").strip(),
+            images=it.get("images") or [],
+            position=it.get("position", pos),
+            extra=it.get("extra") or {},
+        )
+
+    for pos, att in enumerate(attachments or []):
+        TaskSubmissionAttachment.objects.create(
+            tenant=task.tenant,
+            submission=submission,
+            url=att["url"].strip(),
+            name=(att.get("name") or "").strip(),
+            position=att.get("position", pos),
+        )
+
+    assignment.status = TaskAssignment.STATUS_SUBMITTED
+    assignment.save(update_fields=["status", "updated_at"])
+
+    # **الاشتقاق هو الكاتب الوحيد لحالة المهمّة.** كتابةُ `WAITING_FOR_REVIEW`
+    # باليد هنا كانت تترك `completed_at` كما هو، فيصير صفٌّ «بانتظار المراجعة»
+    # يحمل تاريخَ اكتمال — رقمٌ يكذب على كلّ من يقرؤه.
+    _recompute_task_status(task)
+
+    _log_activity(
+        tenant=task.tenant,
+        actor=actor,
+        action="create",
+        entity_type="task_submission",
+        entity_id=submission.pk,
+        entity_label=f"تسليم مهمة: {task.title}",
+        description="تسليم مهمة للمراجعة",
+    )
+
+    return submission
+
+
+@transaction.atomic
+def review_submission(
+    *,
+    submission: TaskSubmission,
+    actor,
+    decision: str,
+    reviewer_notes: str = "",
+) -> TaskSubmission:
+    """مراجعة تسليم مهمة: اعتماد كامل أو جزئي (completed) أو رفض (rejected يلزم سبب)."""
+    if decision not in (
+        TaskSubmission.DECISION_APPROVED_FULL,
+        TaskSubmission.DECISION_APPROVED_PARTIAL,
+        TaskSubmission.DECISION_REJECTED,
+    ):
+        raise ValidationError({"decision": "قرار المراجعة غير صالح."})
+
+    # **التسليمُ يُراجَع مرّةً واحدة.** بدون هذا الحارس يستطيع المدير قلبَ قراره
+    # على نفس التسليم مراراً — ومحرّكُ النقاط (مرحلةٌ تالية) يمنح على كلّ قرار،
+    # فتُمنح النقطةُ مرّتين لعملٍ واحد. وإلغاءُ القبول له مسارُه: قيدٌ مضادّ.
+    if submission.decision != TaskSubmission.DECISION_PENDING:
+        raise ValidationError(
+            {"decision": "هذا التسليم روجع سابقاً — لا يُراجَع مرّتين."}
+        )
+
+    notes = (reviewer_notes or "").strip()
+    if decision == TaskSubmission.DECISION_REJECTED and not notes:
+        raise ValidationError({"reviewer_notes": "سبب الرفض مطلوب عند رفض التسليم."})
+
+    submission.decision = decision
+    submission.reviewer = actor if (actor and getattr(actor, "is_authenticated", False)) else None
+    submission.reviewed_at = timezone.now()
+    submission.reviewer_notes = notes
+    submission.save(update_fields=["decision", "reviewer", "reviewed_at", "reviewer_notes", "updated_at"])
+
+    assignment = TaskAssignment.objects.filter(
+        tenant=submission.tenant, task=submission.task, employee=submission.employee
+    ).first()
+    if assignment:
+        if decision in (
+            TaskSubmission.DECISION_APPROVED_FULL,
+            TaskSubmission.DECISION_APPROVED_PARTIAL,
+        ):
+            assignment.status = TaskAssignment.STATUS_COMPLETED
+            if not assignment.completed_at:
+                assignment.completed_at = timezone.now()
+            assignment.save(update_fields=["status", "completed_at", "updated_at"])
+        elif decision == TaskSubmission.DECISION_REJECTED:
+            assignment.status = TaskAssignment.STATUS_REJECTED
+            assignment.save(update_fields=["status", "updated_at"])
+
+    _recompute_task_status(submission.task)
+
+    _log_activity(
+        tenant=submission.tenant,
+        actor=actor,
+        action="update",
+        entity_type="task_submission",
+        entity_id=submission.pk,
+        entity_label=f"مراجعة تسليم: {submission.task.title}",
+        description=f"قرار المراجعة: {decision}",
+    )
+
+    return submission
+
