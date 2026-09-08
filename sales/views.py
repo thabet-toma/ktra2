@@ -902,6 +902,54 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
             ),
         })
 
+    @action(detail=True, methods=["get"], url_path="refund-options")
+    def refund_options(self, request, pk=None):
+        """issue #167 م٤: بيانات حوار اختيار ردّ الدفعة عند ترحيل مرتجع البيع.
+
+        مبنيّة على `calculate_sales_return_refund_caps` وحدها — لا تُعاد حساب
+        السقوف هنا؛ نفس القاعدة التي يقيس بها الترحيل نفسه. مرآة `returnable-lines`
+        في الشكل والصلاحية.
+        """
+        from sales.services import calculate_sales_return_refund_caps, recalculate_invoice_amounts
+
+        invoice = self.get_object()
+        if invoice.invoice_kind != SalesInvoice.INVOICE_KIND_SALE_RETURN:
+            return Response({
+                "applicable": False,
+                "auto_refund_on_sales_return": False,
+                "cash_cap": "0.00",
+                "paper_cheques": [],
+                "bank_uncollected_total": "0.00",
+                "return_total": "0.00",
+            })
+
+        ss = get_or_create_sales_settings(invoice.tenant)
+        recalculate_invoice_amounts(invoice)  # مسودّة قد لا يُخزَّن إجماليها بعد
+        caps = calculate_sales_return_refund_caps(
+            invoice.original_invoice, current_return=invoice,
+        )
+        # ما عند البنك ولا يُردّ الآن = ما لم يُحصَّل ناقصاً ما لا يزال ورقةً في
+        # المحفظة (paper_cap) — الفرق هو حصراً الشيكات «برسم التحصيل».
+        bank_uncollected_total = (
+            caps["uncollected_cheques_total"] - caps["paper_cap"]
+        )
+        return Response({
+            "applicable": invoice.original_invoice_id is not None,
+            "auto_refund_on_sales_return": bool(ss.auto_refund_on_sales_return),
+            "cash_cap": str(caps["cash_cap"]),
+            "paper_cheques": [
+                {
+                    "id": c.id,
+                    "cheque_number": c.cheque_number,
+                    "amount": str(Decimal(str(c.amount or 0))),
+                    "due_date": c.due_date.isoformat() if c.due_date else None,
+                }
+                for c in caps["paper_cheques"]
+            ],
+            "bank_uncollected_total": str(bank_uncollected_total),
+            "return_total": str(Decimal(str(invoice.grand_total or 0))),
+        })
+
     @action(detail=True, methods=["get"], url_path="stock-movements")
     def stock_movements(self, request, pk=None):
         """THA-132: أثر هذه الفاتورة على المخزون — تبويب «حركة المخزون».

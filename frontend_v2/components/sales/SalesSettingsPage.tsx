@@ -168,6 +168,7 @@ export const SalesSettingsPage: React.FC = () => {
         prices_include_tax: rest.prices_include_tax,
         auto_post_invoices: rest.auto_post_invoices,
         auto_post_payments: rest.auto_post_payments,
+        auto_refund_on_sales_return: rest.auto_refund_on_sales_return,
         show_journal_preview: rest.show_journal_preview,
         warn_on_duplicate_item: rest.warn_on_duplicate_item,
         block_loss_invoices: rest.block_loss_invoices,
@@ -524,6 +525,25 @@ export const SalesSettingsPage: React.FC = () => {
             <option value="yes">إظهار معاينة القيد</option>
             <option value="no">إخفاء معاينة القيد</option>
           </select>
+        </FieldLabel>
+
+        <FieldLabel label="ردّ دفعة مرتجع البيع تلقائياً">
+          <select
+            className={input}
+            value={settings.auto_refund_on_sales_return ? "yes" : "no"}
+            onChange={(e) =>
+              setField("auto_refund_on_sales_return", e.target.value === "yes")
+            }
+          >
+            <option value="no">مطفأ — تُسأل عند كل ترحيل</option>
+            <option value="yes">مفعّل — ردّ تلقائي بلا سؤال</option>
+          </select>
+          <p className="text-xs ktra-text-soft dark:ktra-text-soft mt-1">
+            عند ترحيل مرتجع البيع يُردّ للزبون ما دفعه: الشيكُ الذي ما زال في
+            المحفظة يعود إليه ورقةً، وما وصل الصندوقَ يعود نقداً من الصندوق
+            الافتراضيّ. وما يقابله شيكٌ عند البنك لم يُحصَّل بعدُ لا يُردّ —
+            يبقى رصيداً دائناً للزبون. مطفأً: تُسأل عند كل ترحيل.
+          </p>
         </FieldLabel>
       </Section>
 

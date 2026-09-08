@@ -767,6 +767,71 @@ def test_return_without_original_invoice_handles_refund(env):
 
 
 # ── 16. حارسا توزيع سند الردّ ────────────────────────────────────────────────
+# ── 18. نقطة refund-options (م٤): بيانات حوار الردّ ────────────────────────────
+def test_refund_options_endpoint_reports_wallet_and_bank_split(env):
+    """المرتجع على فاتورة دُفعت جزئياً بشيك في المحفظة وجزئياً نقداً: النقطة
+    تُعيد سقف النقد وشيك المحفظة والمبلغ عند البنك غير القابل للردّ الآن."""
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    ss.auto_refund_on_sales_return = False
+    ss.save()
+
+    orig = _invoice(tenant, customer, product, total="1000", number="SI-OPT-1")
+    post_sales_invoice(orig)
+    pay, [chq_wallet] = _pay_invoice_cheques_and_cash(
+        tenant, customer, orig, cash, cash_amount="300",
+        cheques_data=[{"cheque_number": "CHQ-OPT-1", "amount": "400", "due_date": "2026-08-01"}]
+    )
+    pay2, [chq_bank] = _pay_invoice_cheques_and_cash(
+        tenant, customer, orig, cash,
+        cheques_data=[{"cheque_number": "CHQ-OPT-2", "amount": "300", "due_date": "2026-08-15"}]
+    )
+    transfer_cheque(chq_bank.pk, "deposit", user=owner)
+    chq_bank.refresh_from_db()
+    assert chq_bank.status == "Under_Collection"
+
+    ret = _invoice(
+        tenant, customer, product, total="700", kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-OPT-1"
+    )
+    c = _client(owner, tenant)
+    resp = c.get(f"/api/sales/invoices/{ret.id}/refund-options/")
+    assert resp.status_code == 200, resp.data
+    data = resp.data
+    assert data["applicable"] is True
+    assert data["auto_refund_on_sales_return"] is False
+    assert data["cash_cap"] == "300.00"
+    assert data["return_total"] == "700.00"
+    assert data["bank_uncollected_total"] == "300.00"
+    assert len(data["paper_cheques"]) == 1
+    wallet = data["paper_cheques"][0]
+    assert wallet["id"] == chq_wallet.id
+    assert wallet["cheque_number"] == "CHQ-OPT-1"
+    assert wallet["amount"] == "400.00"
+    assert wallet["due_date"] == "2026-08-01"
+
+
+def test_refund_options_endpoint_non_return_and_no_original(env):
+    """فاتورة بيع عادية أو مرتجع بلا فاتورة أصلية: النقطة تردّ بسلاسة بلا خطأ."""
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    inv = _invoice(tenant, customer, product, total="500", number="SI-OPT-2")
+    post_sales_invoice(inv)
+    c = _client(owner, tenant)
+
+    resp = c.get(f"/api/sales/invoices/{inv.id}/refund-options/")
+    assert resp.status_code == 200, resp.data
+    assert resp.data["applicable"] is False
+    assert resp.data["paper_cheques"] == []
+
+    ret = _invoice(
+        tenant, customer, product, total="200", kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=None, number="SR-OPT-2"
+    )
+    resp2 = c.get(f"/api/sales/invoices/{ret.id}/refund-options/")
+    assert resp2.status_code == 200, resp2.data
+    assert resp2.data["applicable"] is False
+    assert resp2.data["cash_cap"] == "0.00"
+
+
 def test_refund_voucher_rejected_on_non_return_document(env):
     """سندُ ردٍّ يُوزَّع على فاتورة بيعٍ عاديّة يُرفض — الردُّ لا يُسدَّد به بيعٌ."""
     tenant, owner, cur, ar, cash, rev, customer, product, ss = env

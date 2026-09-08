@@ -204,8 +204,58 @@ export async function patchSalesInvoice(
   return apiPatchObject(`${BASE}/invoices/${id}/`, body, { tenantId: tid() });
 }
 
-export async function postSalesInvoice(id: number): Promise<SalesInvoiceDetail> {
-  return apiPostObject(`${BASE}/invoices/${id}/post/`, {}, { tenantId: tid() });
+/** issue #167 م٤: بيانات حوار اختيار ردّ الدفعة عند ترحيل مرتجع البيع. */
+export type SalesReturnRefundOptions = {
+  /** فاتورةٌ ليست مرجع بيع، أو مرجع بلا فاتورة أصلية — لا حوار يُفتح. */
+  applicable: boolean;
+  auto_refund_on_sales_return: boolean;
+  cash_cap: string;
+  paper_cheques: Array<{
+    id: number;
+    cheque_number: string;
+    amount: string;
+    due_date: string | null;
+  }>;
+  /** ما زال عند البنك برسم التحصيل — لا يُردّ الآن. */
+  bank_uncollected_total: string;
+  return_total: string;
+};
+
+export async function getSalesReturnRefundOptions(
+  id: number,
+): Promise<SalesReturnRefundOptions> {
+  return apiGetObject(`${BASE}/invoices/${id}/refund-options/`, { tenantId: tid() });
+}
+
+/** اختيار المستخدم الصريح لردّ دفعة مرتجع البيع — راجع `_process_sales_return_refund`. */
+export type SalesReturnRefundChoice = {
+  cheque_ids: number[];
+  cash_amount: string;
+};
+
+/** ما نفّذه الخادم فعلاً عند ترحيل مرتجع البيع — يرافق ردّ `postSalesInvoice`. */
+export type SalesReturnRefundSummary = {
+  paper_amount: string;
+  cheque_numbers: string[];
+  cheque_ids: number[];
+  cash_amount: string;
+  credit_balance: string;
+  voucher_id: number | null;
+};
+
+/**
+ * `refund` غائبٌ افتراضياً فيقرأ الخادم إعداد الشركة بنفسه — العقد المستقرّ
+ * لمرتجع البيع (issue #167): الواجهة لا تُلفِّق هذا الحقل قطّ.
+ */
+export async function postSalesInvoice(
+  id: number,
+  refund?: SalesReturnRefundChoice,
+): Promise<SalesInvoiceDetail & { refund_summary?: SalesReturnRefundSummary }> {
+  return apiPostObject(
+    `${BASE}/invoices/${id}/post/`,
+    refund ? { refund } : {},
+    { tenantId: tid() },
+  );
 }
 
 /** T4: شيك داخل تحصيل الفاتورة — تاريخ الاستحقاق إلزامي (يفرضه الخادم أيضاً). */
@@ -890,6 +940,8 @@ export type SalesSettings = {
   auto_post_invoices: boolean;
   /** T-AUTOPOST: ترحيل سندات القبض/الصرف فور الحفظ (الافتراضي: مُفعَّل). */
   auto_post_payments: boolean;
+  /** issue #167 م٤: ردّ دفعة مرتجع البيع تلقائياً عند الترحيل (الافتراضي: مُعطَّل). */
+  auto_refund_on_sales_return: boolean;
   show_journal_preview: boolean;
   /** T-S2: تنبيه عند تكرار المنتج (يقود T-R3). */
   warn_on_duplicate_item: boolean;

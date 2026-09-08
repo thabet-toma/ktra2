@@ -15,13 +15,20 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   listSalesInvoicesPage,
   postSalesInvoice,
+  getSalesReturnRefundOptions,
   deleteSalesInvoice,
   getSalesSettings,
   repeatLastMonthInvoice,
   type DeliveryStatus,
   type SalesInvoiceRow,
+  type SalesReturnRefundChoice,
+  type SalesReturnRefundOptions,
   type SalesSettings,
 } from "../../services/salesApi";
+import {
+  SalesReturnRefundDialog,
+  describeRefundOutcome,
+} from "./SalesReturnRefundDialog";
 import { DeliverGoodsModal } from "./DeliverGoodsModal";
 import { apiGetList } from "../../services/restApi";
 import { listPickerProducts } from "../../services/inventoryApi";
@@ -118,6 +125,17 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  /** issue #167 م٤: نفس حوار المحرِّر — هذه القائمة مسارُ ترحيلٍ ثانٍ يستدعي
+   *  نفس القاعدة الخادميّة، فالحوار هنا لا يُعيد حسابها. */
+  const [refundDialog, setRefundDialog] = useState<{
+    options: SalesReturnRefundOptions;
+    resolve: (choice: SalesReturnRefundChoice | null) => void;
+  } | null>(null);
+  const askRefundChoice = useCallback(
+    (options: SalesReturnRefundOptions): Promise<SalesReturnRefundChoice | null> =>
+      new Promise((resolve) => setRefundDialog({ options, resolve })),
+    [],
+  );
 
   const [draftToEditId, setDraftToEditId] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -350,12 +368,31 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     },
   });
 
-  const handlePostRow = async (id: number) => {
+  const handlePostRow = async (row: ExtRow) => {
     setErr(null);
     setMsg(null);
+    // issue #167 م٤: مرجع البيع فقط، وحين الإعداد التلقائي مطفأ — غيره يُرحَّل
+    // كما كان بلا حقل `refund` (غيابه يعني «الخادم يقرّر»).
+    let refundChoice: SalesReturnRefundChoice | undefined;
+    if (row.invoice_kind === "sale_return") {
+      try {
+        const opts = await getSalesReturnRefundOptions(row.id);
+        if (opts.applicable && !opts.auto_refund_on_sales_return) {
+          const choice = await askRefundChoice(opts);
+          if (!choice) return; // المستخدم أغلق الحوار — لا ترحيل أصلاً
+          refundChoice = choice;
+        }
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : "تعذّر جلب خيارات ردّ الدفعة");
+        return;
+      }
+    }
     try {
-      await postSalesInvoice(id);
-      setMsg(`تم ترحيل الفاتورة #${id}`);
+      const posted = await postSalesInvoice(row.id, refundChoice);
+      const refundMsg = describeRefundOutcome(posted.refund_summary);
+      setMsg(
+        refundMsg ? `تم ترحيل الفاتورة #${row.id}. ${refundMsg}` : `تم ترحيل الفاتورة #${row.id}`,
+      );
       await loadRows();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الترحيل");
@@ -623,7 +660,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
                 type="button"
                 className="ktra-toolbtn"
                 style={{ fontSize: "10px", padding: "2px 6px" }}
-                onClick={(e) => { e.stopPropagation(); handlePostRow(r.id); }}
+                onClick={(e) => { e.stopPropagation(); void handlePostRow(r); }}
                 title="ترحيل"
               >
                 <Send className="w-3 h-3" />
@@ -859,6 +896,19 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           invoiceNumber={deliverFor.invoice_number}
           onClose={() => setDeliverFor(null)}
           onDelivered={handleDelivered}
+        />
+      )}
+      {refundDialog && (
+        <SalesReturnRefundDialog
+          options={refundDialog.options}
+          onConfirm={(choice) => {
+            refundDialog.resolve(choice);
+            setRefundDialog(null);
+          }}
+          onCancel={() => {
+            refundDialog.resolve(null);
+            setRefundDialog(null);
+          }}
         />
       )}
     </div>

@@ -11,6 +11,7 @@ import {
   resolveSalePrice,
   getNextInvoiceNumber,
   getSalesInvoice,
+  getSalesReturnRefundOptions,
   patchSalesInvoice,
   postSalesInvoice,
   unpostSalesInvoice,
@@ -20,8 +21,14 @@ import {
   type ReservedStockRow,
   type SalesInvoiceDetail,
   type SalesInvoiceRow,
+  type SalesReturnRefundChoice,
+  type SalesReturnRefundOptions,
   salesInvoiceContextApi,
 } from "../../services/salesApi";
+import {
+  SalesReturnRefundDialog,
+  describeRefundOutcome,
+} from "./SalesReturnRefundDialog";
 import { accountingApi, type CashBoxLedgerLink } from "../../services/accountingApi";
 import { pickDefaultCashAccount } from "../../utils/cashBox";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
@@ -520,6 +527,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const [saving, setSaving] = useState(false);
   const [posting, setPosting] = useState(false);
+  /** issue #167 م٤: حوار اختيار ردّ الدفعة — يُفتح فقط عند ترحيل مرتجع بيع
+   *  والإعداد التلقائي مطفأ. `resolve` يُكمل `handlePost` بانتظار اختيار المستخدم. */
+  const [refundDialog, setRefundDialog] = useState<{
+    options: SalesReturnRefundOptions;
+    resolve: (choice: SalesReturnRefundChoice | null) => void;
+  } | null>(null);
+  const askRefundChoice = useCallback(
+    (options: SalesReturnRefundOptions): Promise<SalesReturnRefundChoice | null> =>
+      new Promise((resolve) => setRefundDialog({ options, resolve })),
+    [],
+  );
   const [msg, setMsg] = useState<string | null>(null);
   const [localErr, setLocalErr] = useState<string | null>(null);
   // SAVE-3 (إضافة لا إعادة هيكلة): المحرّر كان يعرض سبب الفشل في لافتة ويبقى
@@ -1657,19 +1675,35 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       );
       return false;
     }
+
     setPosting(true);
     try {
       if (dirtyRef.current) await patchSalesInvoice(targetId, buildPayload());
-      const posted = await postSalesInvoice(targetId);
+
+      // issue #167 م٤: مرجع البيع فقط، وحين الإعداد التلقائي مطفأ — غيره
+      // يُرحَّل بالمسار القديم حرفياً بلا حقل `refund` (غيابه يعني «الخادم
+      // يقرّر»). بعد الحفظ لا قبله: إجمالي المرتجع المعروض في الحوار يجب أن
+      // يطابق ما سيُرحَّل فعلاً لا نسخةً سابقة له.
+      let refundChoice: SalesReturnRefundChoice | undefined;
+      if (isReturn) {
+        const opts = await getSalesReturnRefundOptions(targetId);
+        if (opts.applicable && !opts.auto_refund_on_sales_return) {
+          const choice = await askRefundChoice(opts);
+          if (!choice) return false; // المستخدم أغلق الحوار — لا ترحيل أصلاً
+          refundChoice = choice;
+        }
+      }
+
+      const posted = await postSalesInvoice(targetId, refundChoice);
       // T-CASH2: تسوية البيع النقدي تتمّ خادمياً ذرّياً مع الترحيل (سند قبض مستقل)،
       // فالردّ يحمل المحصَّل وحالة الدفع الجديدين — نطبّقه كاملاً لا حالةً وقيداً فقط،
       // وإلا بقيت الشاشة تقول «غير مدفوعة» حتى إعادة التحميل.
       applyDetail(posted);
-      setMsg(
-        posted.journal
-          ? `تم الترحيل — القيد #${posted.journal}`
-          : "تم الترحيل بنجاح."
-      );
+      const postedMsg = posted.journal
+        ? `تم الترحيل — القيد #${posted.journal}`
+        : "تم الترحيل بنجاح.";
+      const refundMsg = describeRefundOutcome(posted.refund_summary);
+      setMsg(refundMsg ? `${postedMsg} ${refundMsg}` : postedMsg);
       void discardDraft();
       onInvoiceSaved();
       return true;
@@ -4619,6 +4653,19 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             setShowDeliver(false);
             setMsg(message);
             void loadInvoice(draftId);
+          }}
+        />
+      )}
+      {refundDialog && (
+        <SalesReturnRefundDialog
+          options={refundDialog.options}
+          onConfirm={(choice) => {
+            refundDialog.resolve(choice);
+            setRefundDialog(null);
+          }}
+          onCancel={() => {
+            refundDialog.resolve(null);
+            setRefundDialog(null);
           }}
         />
       )}
