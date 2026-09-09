@@ -120,6 +120,11 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   // الطلبات: يراها كل موظف (طلباته هو) — الفلترة خادمية.
   "hr-requests": "ess.self",
   "hr-contracts": "hr.contracts.view",
+  // متابعة الموظفين (employee_ops) — مهامّي ونقاطي للجميع، والمدير يدير الكل.
+  "employee-ops-daily": "employee_ops.self",
+  "employee-ops-tasks": "employee_ops.self",
+  "employee-ops-people": "employee_ops.manage",
+  "employee-ops-points": "employee_ops.self",
   // «الرئيسية» تختار بين اللوحة التجارية والشخصية — لا تُدرَج هنا كي لا تُحجب
   // الشاشة كلياً؛ الاختيار يتم بدور manager الفعلي في App.tsx.
 };
@@ -153,6 +158,12 @@ export const VIEW_MODULES: Record<string, string> = {
   "hr-check-in": "hr_suite",
   "hr-requests": "hr_suite",
   "hr-contracts": "hr_suite",
+  // متابعة الموظفين: المهام والنقاط والتوظيف — وحدة مرخّصة (employee_ops).
+  // وبلا ترخيص لا يُطلب chunk الشاشة أصلاً (نفس عقد after_sales وsensitive_devices).
+  "employee-ops-daily": "employee_ops",
+  "employee-ops-tasks": "employee_ops",
+  "employee-ops-people": "employee_ops",
+  "employee-ops-points": "employee_ops",
 };
 
 /**

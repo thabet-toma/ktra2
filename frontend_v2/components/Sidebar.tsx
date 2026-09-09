@@ -32,6 +32,7 @@ import { SIMPLE_VIEWS } from "../utils/uiMode";
 import { FieldHint } from "./ui/FieldHint";
 import type { SimpleHintKey } from "../constants/simpleHints";
 import { permForView } from "../utils/viewPermissions";
+import { employeeOpsNavLabels } from "../utils/employeeOps";
 import { useTenantSettings } from "../hooks/useTenantSettings";
 import { listPurchaseRfqs, type PurchaseRFQDto } from "../services/procurementDocumentsApi";
 
@@ -72,6 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const hiddenByTemplate = (view: AppView) => templateHidesView(String(view), template);
   const isSimpleMode = uiMode === 'simple';
   const { identity } = useTenantSettings();
+  const hasEmployeeOps = moduleAllowsView("employee-ops-daily", modules);
 
   // ISSUE #115 قصّة ٣٠ §٦: عدّاد ردود الطلبية غير المطّلَع عليها — لكلا بندي
   // «العروض والطلبيات» (الشراء المحلي والاستيراد، لكلٍّ نطاقه الخاص في
@@ -135,6 +137,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   // A5: في «وضع المحاسب» تبدأ المحاسبة مفتوحة — وهي أول ما جاء المستخدم لأجله.
   const [accountingExpanded, setAccountingExpanded] = useState(accountantMode);
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
+  const [employeeOpsExpanded, setEmployeeOpsExpanded] = useState(true);
   const [afterSalesExpanded, setAfterSalesExpanded] = useState(false);
   const [platformExpanded, setPlatformExpanded] = useState(true);
   // ISSUE #83: مجموعات بيان الشريط تُوسَّع بمفتاحها (id) لا بفهرسها — إدراج
@@ -181,9 +184,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
         { view: "hr-org" as AppView, label: "الهيكل التنظيمي", icon: <Network className="h-5 w-5" /> },
       ]
       : []),
-    { view: "employee-notes" as AppView, label: "ملاحظات الموظفين", icon: <NoteIcon className="h-5 w-5" /> },
-    { view: "points-management" as AppView, label: "إدارة النقاط", icon: <PointsIcon className="h-5 w-5" /> },
-    { view: "points-history" as AppView, label: "سجل نقاطي", icon: <PointsIcon className="h-5 w-5" />, roles: ['employee', 'procurement', 'manager'] },
+    ...(!hasEmployeeOps
+      ? [
+        { view: "employee-notes" as AppView, label: "ملاحظات الموظفين", icon: <NoteIcon className="h-5 w-5" /> },
+        { view: "points-management" as AppView, label: "إدارة النقاط", icon: <PointsIcon className="h-5 w-5" /> },
+        { view: "points-history" as AppView, label: "سجل نقاطي", icon: <PointsIcon className="h-5 w-5" />, roles: ['employee', 'procurement', 'manager'] },
+      ]
+      : []),
   ];
 
   type NavLink = { view: AppView; label: string; icon: React.ReactNode; path?: string; newTab?: boolean; roles?: string[]; perm?: string; badge?: number };
@@ -285,6 +292,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   ];
   const afterSalesLinks = afterSalesLinksAll.filter((l) => !hiddenByTemplate(l.view));
 
+  // وحدة متابعة الموظفين — قسم مرخّص (يومي، المهام، الموظفون، النقاط)
+  const opsLabels = employeeOpsNavLabels(can("employee_ops.manage"));
+  const employeeOpsLinks: NavLink[] = [
+    { view: "employee-ops-daily", label: opsLabels.daily, icon: <CalendarCheck className="h-4 w-4" /> },
+    { view: "employee-ops-tasks", label: opsLabels.tasks, icon: <TasksIcon className="h-4 w-4" /> },
+    { view: "employee-ops-people", label: opsLabels.people, icon: <UsersIcon className="h-4 w-4" /> },
+    { view: "employee-ops-points", label: opsLabels.points, icon: <PointsIcon className="h-4 w-4" /> },
+  ];
+
   // THA-110: بنود «الوضع السهل» — لا شاشة جديدة، بل نفس الشاشات القائمة بعنوانها
   // وأيقونتها المعتادتين. الخريطة `Record` فوق `SIMPLE_VIEWS`: أي بندٍ يُضاف أو
   // يُحذف في `utils/uiMode.ts` يكسر البناء هنا بدل أن يمرّ صامتاً، والترتيب من
@@ -320,7 +336,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   ([
     ...accountingLinks, ...salesLinksAll, ...customersLinks, ...purchasesLinksAll,
     ...importLinksAll, ...inventoryLinksAll, ...financeLinks, ...reportsLinksAll,
-    ...userManagementLinks, ...afterSalesLinksAll,
+    ...userManagementLinks, ...afterSalesLinksAll, ...employeeOpsLinks,
   ] as { view: AppView; label: string; icon: React.ReactNode }[]).forEach((l) => {
     if (!manifestLinkMeta[String(l.view)]) manifestLinkMeta[String(l.view)] = { label: l.label, icon: l.icon };
   });
@@ -342,6 +358,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     if (inAny(financeLinks)) setFinanceExpanded(true);
     if (activeView.startsWith("accounting-") || activeView === "property-rental") setAccountingExpanded(true);
     if (inAny(afterSalesLinks)) setAfterSalesExpanded(true);
+    if (activeView.startsWith("employee-ops-")) setEmployeeOpsExpanded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView]);
 
@@ -733,6 +750,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           </button>
           )}
 
+          {/* وحدة متابعة الموظفين — قسم مرخّص يضمّ (يومي، المهام، الموظفون، النقاط) */}
+          {hasEmployeeOps && groupVisible(withPerms(employeeOpsLinks), can, user.role) &&
+            renderGroup("الموظفون", <Users className="h-5 w-5 flex-shrink-0" />, employeeOpsExpanded, () => setEmployeeOpsExpanded(!employeeOpsExpanded), employeeOpsLinks)}
+
           {/* task16 E19: إدارة الموظفين */}
           <div className="space-y-0.5">
             <button
@@ -780,7 +801,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             {showText && <span className="mr-3 text-right flex-1">تواصل معنا</span>}
           </button>
 
-          {/* 8) إدارة المهام — في الأسفل تماماً (Section 9) */}
+          {/* 8) إدارة المهام — في الأسفل تماماً (Section 9) — تختفي إذا رُخِّصَت وحدة متابعة الموظفين */}
+          {!hasEmployeeOps && (
           <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
             <button
               onClick={() => { setView(can("hr.tasks.manage") ? "task-management" : "tasks"); if (isMobile) setIsMobileMenuOpen(false); }}
@@ -791,6 +813,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
               {showText && <span className="mr-3 text-right flex-1 font-semibold">{can("hr.tasks.manage") ? "إدارة المهام" : "مهامي"}</span>}
             </button>
           </div>
+          )}
           </>)}
         </nav>
 

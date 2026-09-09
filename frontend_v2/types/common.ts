@@ -115,6 +115,10 @@ export type AppView =
     | "hr-check-in"
     | "hr-requests"
     | "hr-contracts"
+    | "employee-ops-daily"
+    | "employee-ops-tasks"
+    | "employee-ops-people"
+    | "employee-ops-points"
     | "about-us"
     | "contact";
 

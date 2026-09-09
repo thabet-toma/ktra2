@@ -1,6 +1,8 @@
 """مُسلسِلات متابعة الموظفين (المرحلة الأولى: الأساس)."""
 from rest_framework import serializers
 
+from tenants.models import UserCompanyMembership
+
 from .models import (
     EmployeeInvitation,
     EmployeeNote,
@@ -56,12 +58,48 @@ class EmployeeListSerializer(serializers.Serializer):
     job_title = serializers.CharField(read_only=True)
     is_active = serializers.BooleanField(read_only=True)
     has_account = serializers.SerializerMethodField()
+    # العضويّةُ لا الحساب: هي ما يجيب «أيستطيع هذا الموظف الدخول الآن؟».
+    has_membership = serializers.SerializerMethodField()
     manager = serializers.SerializerMethodField()
     manager_name = serializers.SerializerMethodField()
     invitation_status = serializers.SerializerMethodField()
+    # عدّاداتٌ تأتي محسوبةً من استعلام القائمة (`_employee_open_task_count` و
+    # `_employee_month_points`) — لا نداءَ لكرتِ كلّ موظف على حدة: صفٌّ لخمسين
+    # موظفاً كان يعني خمسين طلبَ HTTP، وهو العطبُ الذي عضّ كرتَ المجموعة سابقاً.
+    # `SerializerMethodField` لا `IntegerField`: نفسُ المُسلسِل يخدم صفَّاً واحداً
+    # غيرَ مُعلَّمٍ في `retrieve`، وحقلٌ يقرأ سمةً غائبةً يرمي بدل أن يعود بصفر.
+    open_tasks = serializers.SerializerMethodField()
+    overdue_tasks = serializers.SerializerMethodField()
+    month_points = serializers.SerializerMethodField()
+    # آخرُ نشاطٍ للموظف — يُعلَّم في القائمة، وNULL لمن لا حسابَ له.
+    last_activity = serializers.SerializerMethodField()
 
     def get_has_account(self, obj) -> bool:
         return bool(obj.user_id)
+
+    def get_has_membership(self, obj) -> bool:
+        # يُعلَّم في استعلام القائمة؛ وفي `retrieve` يُحسب صفّاً واحداً.
+        annotated = getattr(obj, "has_membership", None)
+        if annotated is not None:
+            return bool(annotated)
+        if not obj.user_id:
+            return False
+        return UserCompanyMembership.objects.filter(
+            tenant=obj.tenant, user_id=obj.user_id
+        ).exists()
+
+    def get_open_tasks(self, obj) -> int:
+        return int(getattr(obj, "open_tasks", 0) or 0)
+
+    def get_overdue_tasks(self, obj) -> int:
+        return int(getattr(obj, "overdue_tasks", 0) or 0)
+
+    def get_month_points(self, obj) -> int:
+        return int(getattr(obj, "month_points", 0) or 0)
+
+    def get_last_activity(self, obj):
+        value = getattr(obj, "last_activity", None)
+        return value.isoformat() if value else None
 
     def _get_profile(self, obj):
         # علاقةٌ عكسيّةٌ واحدٌ-لواحد ترفع `RelatedObjectDoesNotExist` لا تُعيد None،

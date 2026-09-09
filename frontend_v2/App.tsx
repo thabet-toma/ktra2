@@ -187,6 +187,20 @@ const HrAttendancePage = lazyPage(() => import("./components/hr/AttendancePage")
 const HrCheckInPage = lazyPage(() => import("./components/hr/CheckInPage").then((m) => ({ default: m.CheckInPage })));
 const HrRequestsPage = lazyPage(() => import("./components/hr/RequestsPage").then((m) => ({ default: m.RequestsPage })));
 const HrContractsPage = lazyPage(() => import("./components/hr/ContractsPage").then((m) => ({ default: m.ContractsPage })));
+// وحدة متابعة الموظفين — شاشات المرحلة ٦
+const EmployeeOpsDailyScreen = lazyPage(() => import("./components/employee-ops/EmployeeOpsDailyScreen").then((m) => ({ default: m.EmployeeOpsDailyScreen })));
+const EmployeeOpsTasksScreen = lazyPage(() => import("./components/employee-ops/EmployeeOpsTasksScreen").then((m) => ({ default: m.EmployeeOpsTasksScreen })));
+const EmployeeOpsPeopleScreen = lazyPage(() => import("./components/employee-ops/EmployeeOpsPeopleScreen").then((m) => ({ default: m.EmployeeOpsPeopleScreen })));
+const EmployeeOpsPointsScreen = lazyPage(() => import("./components/employee-ops/EmployeeOpsPointsScreen").then((m) => ({ default: m.EmployeeOpsPointsScreen })));
+
+/** الشاشةُ القديمة ← مقابلُها في وحدة متابعة الموظفين حين تكون مرخّصة. */
+const LEGACY_EMPLOYEE_VIEWS: Record<string, AppView> = {
+  "tasks": "employee-ops-daily",
+  "task-management": "employee-ops-tasks",
+  "employee-notes": "employee-ops-people",
+  "points-history": "employee-ops-points",
+  "points-management": "employee-ops-points",
+};
 
 type SourcingView = "search" | "loading" | "results";
 type AuthView = "landing" | "login" | "signup";
@@ -239,6 +253,10 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "hr-check-in": "/hr/check-in",
   "hr-requests": "/hr/requests",
   "hr-contracts": "/hr/contracts",
+  "employee-ops-daily": "/employee-ops",
+  "employee-ops-tasks": "/employee-ops/tasks",
+  "employee-ops-people": "/employee-ops/people",
+  "employee-ops-points": "/employee-ops/points",
   "sales-invoices": "/sales/invoices",
   "sales-quotations": "/sales/quotations",
   "sales-orders": "/sales/orders",
@@ -346,6 +364,9 @@ const App: React.FC = () => {
   const canManagePermissions = canPerm("admin.permissions.manage");
   // T-PERM: حارس الدخول المباشر بالرابط — نفس خريطة الشريط الجانبي، فلا يظهر
   // رابطٌ يقود إلى لوحة التحكم. الشاشة بلا صلاحية في الخريطة مفتوحة للجميع.
+  // مفتاحُ التبديل بين القديم والجديد: الترخيصُ لا الصلاحية.
+  const hasEmployeeOps = moduleAllowsView("employee-ops-daily", licensedModules);
+
   const canView = (view: AppView): boolean => {
     const perm = permForView(String(view));
     return !perm || canPerm(perm);
@@ -756,9 +777,37 @@ const App: React.FC = () => {
     if (params.get("view")) return;
     const roleDefault: AppView =
       currentUser.isSuperAdmin ? "super-admin"
-        : currentUser.role === "manager" ? "dashboard" : "tasks";
+        : currentUser.role === "manager" ? "dashboard"
+        // شركةٌ مرخّصةٌ تهبط على «يومي» الجديدة لا على شاشة المهامّ القديمة:
+        // إخفاءُ البند من الشريط وحده كان يترك الهبوطَ الافتراضيّ عليها، فيكتب
+        // الموظفُ في المصدر القديم بينما مديرُه يقرأ الجديد.
+        // والهبوطُ كذلك مشروطٌ بالصلاحية: شاشةُ «٤٠٣» ليست صفحةَ دخول.
+        : hasEmployeeOps && canView("employee-ops-daily") ? "employee-ops-daily" : "tasks";
     setAppView(roleDefault);
-  }, [currentUser]);
+  }, [currentUser, hasEmployeeOps]);
+
+  // الشاشاتُ القديمةُ الخمسُ تُحوَّل إلى مقابلاتها حين تكون الوحدة مرخّصة —
+  // إخفاؤها من الشريط لا يمنع الوصولَ إليها برابطٍ محفوظٍ أو زرِّ رجوع.
+  useEffect(() => {
+    if (!hasEmployeeOps) return;
+    const mapped = LEGACY_EMPLOYEE_VIEWS[appView as string];
+    if (!mapped) return;
+
+    // لا يُحوَّل إلى شاشةٍ لا يملك صلاحيتَها — شاشةُ «٤٠٣» أسوأُ من الشاشة
+    // القديمة. لكنّ «يومي» بديلٌ يملكه كلُّ من له `employee_ops.self`، فلا يبقى
+    // على المصدر القديم إلا من هو خارجَ الوحدة كلّها أصلاً.
+    const target: AppView | null = canView(mapped)
+      ? mapped
+      : canView("employee-ops-daily")
+        ? "employee-ops-daily"
+        : null;
+    if (!target) return;
+
+    // **استبدالٌ لا إضافة**: `setViewAndSyncPath` تدفع مدخلاً في التاريخ، فيصير
+    // زرُّ الرجوع حلقةً — يعود إلى `/tasks` فيُدفع إلى الجديدة من جديد.
+    navigate(VIEW_PATHS[target] ?? "/", { replace: true });
+    setAppView(target);
+  }, [hasEmployeeOps, appView, navigate]);
 
   // Data Subscription
   useEffect(() => {
@@ -1572,6 +1621,42 @@ const App: React.FC = () => {
             {canView(appView)
               ? <ImportFileGuideScreen />
               : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض ملف الاستيراد (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "employee-ops-daily":
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة متابعة الموظفين غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <EmployeeOpsDailyScreen />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض شاشة يومي (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "employee-ops-tasks":
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة متابعة الموظفين غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <EmployeeOpsTasksScreen />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض شاشة المهام (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "employee-ops-people":
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة متابعة الموظفين غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <EmployeeOpsPeopleScreen />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض شاشة الموظفين (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "employee-ops-points":
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة متابعة الموظفين غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <EmployeeOpsPointsScreen />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض شاشة النقاط (403).</div>}
           </ModuleLicenseGuard>
         );
 

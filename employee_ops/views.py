@@ -4,7 +4,21 @@
 فترد الشركة غير المرخّصة **404 لا 403** — 403 يُثبت وجود الوحدة، و404 لا يُثبت شيئاً.
 والشركة تأتي من الحارس نفسه، لا من جسم الطلب.
 """
-from django.db.models import Case, CharField, OuterRef, Subquery, Value, When
+from django.db.models import (
+    Case,
+    CharField,
+    Count,
+    Exists,
+    IntegerField,
+    OuterRef,
+    Q,
+    Subquery,
+    Sum,
+    Value,
+    When,
+)
+from django.db.models.functions import Coalesce
+from django.utils import timezone
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -20,6 +34,7 @@ from core.access import require_perm, user_has_perm
 from core.api_defaults import ApiAuthAndUser
 from core.modules import require_module
 from hr.models import Employee
+from tenants.models import UserCompanyMembership
 
 from .models import (
     EmployeeInvitation,
@@ -199,6 +214,74 @@ class EmployeeOpsSettingsViewSet(viewsets.ViewSet):
         return Response(serializer.data)
 
 
+def _employee_open_task_count(tenant, *, overdue_only: bool = False):
+    """عدّادُ مهامّ الموظف المفتوحة كاستعلامٍ فرعيّ لا كضمّ.
+
+    ضمُّ `TaskAssignment` و`PointEntry` في نفس الاستعلام يضاعف الصفوف فيتضخّم
+    كلا العدّادين — العطبُ الكلاسيكيّ لتجميعين على علاقتين. فكلُّ عدّادٍ هنا
+    استعلامٌ فرعيّ مستقلّ: صفٌّ واحدٌ لكلّ موظف، بلا تقاطع.
+
+    والشركةُ في الفلتر صراحةً: الإسنادُ يحمل `tenant` بذاته، فلا يكفي أن يكون
+    الموظفُ الخارجيُّ مفلتراً.
+    """
+    predicate = Q(tenant=tenant, employee=OuterRef("pk"))
+    predicate &= ~Q(status=TaskAssignment.STATUS_COMPLETED)
+    if overdue_only:
+        predicate &= Q(task__due_date__lt=timezone.localdate())
+    return Coalesce(
+        Subquery(
+            TaskAssignment.objects.filter(predicate)
+            .order_by()
+            .values("employee")
+            .annotate(n=Count("id"))
+            .values("n")[:1],
+            output_field=IntegerField(),
+        ),
+        Value(0),
+    )
+
+
+def _employee_last_activity(tenant):
+    """وقتُ آخر حدثٍ للموظف في المنصة — استعلامٌ فرعيٌّ على نقطة النشاط القائمة.
+
+    قراءةٌ فقط، بلا نقطةِ تسجيلٍ جديدةٍ ولا فهرسٍ جديد: الفهرسُ
+    `act_tenant_user_ts_idx` على (شركة، مستخدم، وقت) موجودٌ ويخدم هذا الترتيب.
+    وموظفٌ بلا حسابٍ يعود بـNULL — لا نشاطَ لمن لا يدخل.
+    """
+    from core.models import ActivityLog
+
+    return Subquery(
+        ActivityLog.objects.filter(tenant=tenant, user_id=OuterRef("user_id"))
+        .order_by("-timestamp", "-id")
+        .values("timestamp")[:1]
+    )
+
+
+def _employee_month_points(tenant):
+    """مجموعُ نقاط الشهر الجاري للموظف — نفسُ حدودِ الشهر التي يستعملها كرتُه.
+
+    `parse_month_bounds(None)` هي مصدرُ الحدود الوحيد، فلا يفترق رقمُ القائمة
+    عن رقمِ الكرت لأنّ أحدهما حسب الشهرَ بطريقته.
+    """
+    start_date, end_date, _ = parse_month_bounds(None)
+    return Coalesce(
+        Subquery(
+            PointEntry.objects.filter(
+                tenant=tenant,
+                employee=OuterRef("pk"),
+                awarded_on__gte=start_date,
+                awarded_on__lte=end_date,
+            )
+            .order_by()
+            .values("employee")
+            .annotate(total=Sum("points"))
+            .values("total")[:1],
+            output_field=IntegerField(),
+        ),
+        Value(0),
+    )
+
+
 class EmployeeViewSet(viewsets.ViewSet):
     """إدارة موظفي الشركة في وحدة متابعة الموظفين."""
 
@@ -238,6 +321,20 @@ class EmployeeViewSet(viewsets.ViewSet):
                     default=Value("none"),
                     output_field=CharField(),
                 )
+            )
+            .annotate(
+                # «هل يستطيع الدخول اليوم؟» لا «هل له صفُّ مستخدمٍ يوماً ما؟».
+                # العائدُ إلى العمل يحتفظ بـ`user` وتُحذف عضويّتُه، فبناءُ زرِّ
+                # الدعوة على `has_account` كان يحرمه من دعوةٍ يقبلها الخادم.
+                has_membership=Exists(
+                    UserCompanyMembership.objects.filter(
+                        tenant=self.tenant, user_id=OuterRef("user_id")
+                    )
+                ),
+                open_tasks=_employee_open_task_count(self.tenant),
+                overdue_tasks=_employee_open_task_count(self.tenant, overdue_only=True),
+                month_points=_employee_month_points(self.tenant),
+                last_activity=_employee_last_activity(self.tenant),
             )
             .order_by("id")
         )
@@ -712,6 +809,21 @@ class TaskSubmissionViewSet(viewsets.ViewSet):
             if not employee:
                 return Response([])
             qs = TaskSubmission.objects.filter(tenant=self.tenant, employee=employee)
+
+        # فلترةٌ في الخادم لا في المتصفّح: فتحُ مهمّةٍ واحدةٍ كان يُنزل سجلَّ
+        # تسليمات الشركة كلَّه — بنصوصه وبنوده ومرفقاته — ثمّ يرمي ما لا يخصّها.
+        task_id = request.query_params.get("task")
+        if task_id:
+            if not str(task_id).isdigit():
+                raise ValidationError({"task": "معرّف المهمّة يجب أن يكون رقماً."})
+            qs = qs.filter(task_id=int(task_id))
+
+        decision = request.query_params.get("decision")
+        if decision:
+            valid = {value for value, _ in TaskSubmission.DECISION_CHOICES}
+            if decision not in valid:
+                raise ValidationError({"decision": "قرارُ مراجعةٍ غيرُ معروف."})
+            qs = qs.filter(decision=decision)
 
         qs = (
             qs.select_related("task", "employee", "reviewer")
