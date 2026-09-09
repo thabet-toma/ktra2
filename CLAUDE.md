@@ -28,7 +28,7 @@
 
 المتاح:
 <!-- AUTO:module_index:START -->
-`accountant_portal` · `accounting` · `after_sales` · `core` · `docshare` · `employee_ops` · `frontend` · `hr` · `import_file` · `inventory` · `logistics` · `partners` · `sales` · `store` · `tenants`
+`accountant_portal` · `accounting` · `after_sales` · `core` · `docshare` · `employee_ops` · `frontend` · `hr` · `import_file` · `inventory` · `logistics` · `partners` · `platform_ops` · `sales` · `store` · `tenants`
 <!-- AUTO:module_index:END -->
 
 عند الحاجة فقط:

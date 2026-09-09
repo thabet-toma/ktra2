@@ -6,6 +6,8 @@
 - IsPlatformOperationsStaff يقبل موظف المنصة حتى لو لم يكن superuser، ويرفض من لا صف له حتى لو كان superuser.
 - موظف المنصة لا يُمنح IsPlatformAdmin.
 """
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.test import TestCase
@@ -158,3 +160,18 @@ class ServiceSubscriptionActiveTest(TestCase):
         self.assertEqual(
             ServiceSubscription.objects.filter(tenant=self.tenant_cancelled).count(), 1
         )
+
+    def test_subscription_snapshots_monthly_and_overage_prices(self):
+        """الاشتراك يحمل السعر الشهري وسعر كل عملية تتجاوز الباقة."""
+        tenant = Tenant.objects.create(TenantID=955, CompanyName="Priced Service Co")
+        subscription = ServiceSubscription.objects.create(
+            tenant=tenant,
+            plan="growth",
+            included_quota=500,
+            monthly_fee=Decimal("1200.00"),
+            overage_unit_price=Decimal("3.50"),
+        )
+
+        subscription.refresh_from_db()
+        self.assertEqual(subscription.monthly_fee, Decimal("1200.00"))
+        self.assertEqual(subscription.overage_unit_price, Decimal("3.50"))

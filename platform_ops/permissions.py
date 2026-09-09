@@ -3,7 +3,7 @@ from rest_framework.permissions import BasePermission
 
 from core.platform_admin_api import IsPlatformAdmin
 
-from .models import PlatformEmployee
+from .services import is_platform_employee
 
 
 class IsPlatformOperationsManager(BasePermission):
@@ -31,7 +31,4 @@ class IsPlatformOperationsStaff(BasePermission):
         user = getattr(request, "user", None)
         if not user or not user.is_authenticated:
             return False
-        return PlatformEmployee.objects.filter(
-            user=user,
-            status=PlatformEmployee.Status.ACTIVE,
-        ).exists()
+        return is_platform_employee(user)

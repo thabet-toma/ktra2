@@ -39,7 +39,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | `realestate` | العمارات والوحدات وعدادات الكهرباء | 600 | 0 | `/api/realestate/` |
 | `device_registry` | سجل الأجهزة الحساسة — **وحدة مرخّصة، محايدة مالياً بالكامل** | 600 | 500 | `/api/devices/` |
 | `bridge` | جسر مزامنة Firestore القديم (`FirestoreMirrorDoc`) | 600 | 400 | `/api/mapper/` |
-| `platform_ops` | عمليات المنصة: إسناد موظفي المنصة وإدارة الخدمة واشتراكاتها — **وحدة منصة غير مرخصة للشركات** | 300 | 400 | `/api/platform/ops/` |
+| `platform_ops` | عمليات المنصة: إسناد موظفي المنصة وإدارة الخدمة واشتراكاتها — **وحدة منصة غير مرخصة للشركات** | 300 | 500 | `/api/platform/ops/` |
 <!-- AUTO:apps_table:END -->
 
 ## مخطط الاعتماديات
@@ -64,6 +64,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
                   └──────────────┘
 
 hr · accountant_portal · after_sales · core  ──►  accounting (+ غيره)
+platform_ops ──► core · tenants
 ```
 
 **`accounting` هو الـgod module**: مستورد مباشرةً من `sales`, `logistics`, `inventory`, `partners`, `hr`, `tenants`, `accountant_portal`, `core`.

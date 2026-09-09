@@ -96,9 +96,23 @@ class ServiceSubscription(models.Model):
         default="standard",
         verbose_name="الباقة",
     )
+    monthly_fee = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="الرسم الشهري",
+    )
     included_quota = models.PositiveIntegerField(
         default=0,
         verbose_name="العمليات المشمولة",
+    )
+    overage_unit_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="سعر العملية الزائدة",
     )
     consumed_quota = models.PositiveIntegerField(
         default=0,

@@ -6,7 +6,6 @@
 """
 import ast
 from pathlib import Path
-import re
 import shutil
 import tempfile
 
@@ -34,10 +33,6 @@ ALLOWLISTED_PLATFORM_MODULES = frozenset({
     "core.platform_admin_api",  # IsPlatformAdmin لحراسة الصلاحيات
     "tenants.models",           # Tenant لربط اشتراك الخدمة
 })
-
-#: تعبير القاعدة الأولى: استيراد حقيقي للوحدة، لا ذكر نصي لاسمها.
-INBOUND_IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+platform_ops\b")
-
 
 def check_source_for_disallowed_imports(source: str, filepath: str = "<string>") -> list[str]:
     """تفحص نص كود بايثون وتستخرج أي استيراد لحزم المنصة خارج القائمة البيضاء."""
@@ -89,6 +84,64 @@ def check_source_for_disallowed_imports(source: str, filepath: str = "<string>")
     return violations
 
 
+def check_source_for_inbound_imports(source: str, filepath: str = "<string>") -> list[str]:
+    """تستخرج كل استيراد صريح أو ديناميكي لـplatform_ops من ملف خارجي."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+
+    importlib_module_names = set()
+    import_module_function_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "importlib":
+                    importlib_module_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "importlib":
+            for alias in node.names:
+                if alias.name == "import_module":
+                    import_module_function_names.add(alias.asname or alias.name)
+
+    offenders = []
+    for node in ast.walk(tree):
+        target = None
+        rendered = None
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] == "platform_ops":
+                    offenders.append(
+                        f"{filepath}:{node.lineno} → import {alias.name}"
+                    )
+            continue
+        if isinstance(node, ast.ImportFrom):
+            if not node.level and node.module and node.module.split(".")[0] == "platform_ops":
+                offenders.append(
+                    f"{filepath}:{node.lineno} → from {node.module} import ..."
+                )
+            continue
+        if isinstance(node, ast.Call):
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "import_module"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in importlib_module_names
+            ):
+                rendered = "importlib.import_module"
+            elif isinstance(node.func, ast.Name):
+                if node.func.id == "__import__":
+                    rendered = "__import__"
+                elif node.func.id in import_module_function_names:
+                    rendered = node.func.id
+            if rendered and node.args and isinstance(node.args[0], ast.Constant):
+                target = node.args[0].value
+            if isinstance(target, str) and target.split(".")[0] == "platform_ops":
+                offenders.append(
+                    f"{filepath}:{node.lineno} → {rendered}({target!r})"
+                )
+    return offenders
+
+
 def _walk_py_files(root: Path):
     """كل ملفات .py تحت root مع تقليم PRUNED_DIRS."""
     if root.is_file():
@@ -111,13 +164,11 @@ def find_inbound_import_offenders(repo_root: Path) -> list[str]:
             continue
         for path in _walk_py_files(entry):
             try:
-                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                source = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            for lineno, line in enumerate(lines, 1):
-                if INBOUND_IMPORT_RE.search(line):
-                    rel = path.relative_to(repo_root).as_posix()
-                    offenders.append(f"{rel}:{lineno} → {line.strip()}")
+            rel = path.relative_to(repo_root).as_posix()
+            offenders.extend(check_source_for_inbound_imports(source, rel))
     return offenders
 
 
@@ -180,6 +231,28 @@ class PlatformOpsIsolationGuardTest(SimpleTestCase):
                 ["manage.py", "sales/sub/views.py"],
                 f"الحارس الوارد لم يلتقط ما يجب أو التقط ما لا يجب: {offenders}",
             )
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_inbound_guard_catches_dynamic_imports(self):
+        """الاستيراد الديناميكي من خارج الوحدة خرقٌ كالصريح تماماً."""
+        root = Path(tempfile.mkdtemp())
+        try:
+            (root / "worker.py").write_text(
+                'import importlib\n'
+                'from importlib import import_module as load_module\n'
+                'x = importlib.import_module("platform_ops.models")\n'
+                'y = __import__("platform_ops.services")\n'
+                'z = load_module("platform_ops.permissions")\n',
+                encoding="utf-8",
+            )
+
+            offenders = find_inbound_import_offenders(root)
+            self.assertEqual(len(offenders), 3, offenders)
+            self.assertTrue(all(item.startswith("worker.py:") for item in offenders))
+            self.assertTrue(any("platform_ops.models" in item for item in offenders))
+            self.assertTrue(any("platform_ops.services" in item for item in offenders))
+            self.assertTrue(any("platform_ops.permissions" in item for item in offenders))
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
