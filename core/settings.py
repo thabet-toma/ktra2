@@ -125,6 +125,7 @@ INSTALLED_APPS = [
     'import_file.apps.ImportFileConfig',
     'store.apps.StoreConfig',
     'docshare.apps.DocShareConfig',
+    'platform_ops.apps.PlatformOpsConfig',
 ]
 
 MIDDLEWARE = [

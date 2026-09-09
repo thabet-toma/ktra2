@@ -11,6 +11,7 @@ from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
 from core.access import require_perm
+from core.activity import log_activity
 from core.plans import enforce_limits
 from core.tenant_utils import get_tenant
 from .models import Branch, BookHandoverRequest, Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
@@ -347,6 +348,16 @@ class TenantViewSet(viewsets.ModelViewSet):
         )
         if not created:
             raise DRFValidationError({"username_or_email": "المستخدم عضو في الشركة بالفعل."})
+        log_activity(
+            action="create",
+            entity_type="company_member",
+            entity_id=membership.id,
+            entity_label=target.username,
+            description=f"إضافة العضو «{target.username}» بدور «{membership.get_role_display()}»",
+            tenant=tenant,
+            request=request,
+            user=request.user,
+        )
         return Response(self._member_payload(membership), status=status.HTTP_201_CREATED)
 
     def _get_member_or_400(self, tenant, request):
@@ -382,8 +393,20 @@ class TenantViewSet(viewsets.ModelViewSet):
             })
         if role != "manager":
             self._assert_not_last_manager(tenant, m)
+        old_role_display = m.get_role_display()
         m.role = role
         m.save(update_fields=["role"])
+        new_role_display = m.get_role_display()
+        log_activity(
+            action="update",
+            entity_type="company_member",
+            entity_id=m.id,
+            entity_label=m.user.username,
+            description=f"تعديل دور العضو «{m.user.username}» من «{old_role_display}» إلى «{new_role_display}»",
+            tenant=tenant,
+            request=request,
+            user=request.user,
+        )
         return Response(self._member_payload(m))
 
     @action(detail=True, methods=["post"], url_path="members/remove")
@@ -393,7 +416,20 @@ class TenantViewSet(viewsets.ModelViewSet):
         self._require_company_manager(request, tenant)
         m = self._get_member_or_400(tenant, request)
         self._assert_not_last_manager(tenant, m)
+        member_id = m.id
+        member_username = m.user.username
+        role_display = m.get_role_display()
         m.delete()
+        log_activity(
+            action="delete",
+            entity_type="company_member",
+            entity_id=member_id,
+            entity_label=member_username,
+            description=f"إزالة العضو «{member_username}» (الدور: «{role_display}»)",
+            tenant=tenant,
+            request=request,
+            user=request.user,
+        )
         return Response({"ok": True})
 
     # ── صلاحية وحدة الاستيراد (نموذج من مستويين) ──
