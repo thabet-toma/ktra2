@@ -1,9 +1,13 @@
-"""خدمات عمليات المنصة (المرحلتان الأولى والثانية: الأساس ودورة الارتباط).
+"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة: الأساس ودورة الارتباط وأوامر العمل).
 
 ترتيب الأقفال الصارم لمنع التعارضات والـ Deadlocks على MySQL:
-ServiceSubscription -> PlatformEmployee -> Engagement -> UserCompanyMembership
+ServiceSubscription -> PlatformEmployee -> Engagement -> WorkOrder
+-> WorkOrderDeliverable -> UserCompanyMembership
 ملاحظة: لا يُستعمل select_related مع select_for_update لتجنب قفل جداول غير مقصودة.
 """
+import copy
+import datetime
+
 from django.db import transaction
 from django.utils import timezone
 
@@ -14,6 +18,9 @@ from .models import (
     Engagement,
     PlatformEmployee,
     ServiceSubscription,
+    WorkOrder,
+    WorkOrderComment,
+    WorkOrderDeliverable,
 )
 
 
@@ -25,6 +32,18 @@ class PlatformOpsError(Exception):
         self.detail = detail
         self.status_code = status_code
         super().__init__(detail)
+
+
+class WorkOrderError(PlatformOpsError):
+    """خطأ في عمليات أو أوامر العمل."""
+
+    pass
+
+
+class WorkOrderTransitionError(WorkOrderError):
+    """خطأ في انتقال حالة أمر العمل غير المسموح به."""
+
+    pass
 
 
 class EngagementError(PlatformOpsError):
@@ -563,3 +582,393 @@ def offboard_platform_employee(
         )
 
     return locked_employee
+
+
+# ==============================================================================
+# المرحلة الثالثة (م٣): أوامر العمل ومحطاتها وأجلها وتسليمها وتعليقاتها
+# ==============================================================================
+
+DEFAULT_WORK_ORDER_SLA_POLICY = {
+    "version": 1,
+    "sla_hours_by_kind": {
+        "data_entry": 24,
+        "review": 12,
+        "sales": 48,
+        "service": 24,
+        "inquiry": 4,
+        "admin_directive": 8,
+    },
+    "default_sla_hours": 24,
+}
+
+#: خريطة الانتقالات الصريحة لآلة حالات أمر العمل (المحطة ← مجموعة المحطات التالية المسموحة)
+WORK_ORDER_TRANSITIONS: dict[str, set[str]] = {
+    WorkOrder.Status.RECEIVED: {
+        WorkOrder.Status.SCREENING,
+    },
+    WorkOrder.Status.SCREENING: {
+        WorkOrder.Status.DATA_ENTRY,
+        WorkOrder.Status.WAITING_CUSTOMER,
+    },
+    WorkOrder.Status.DATA_ENTRY: {
+        WorkOrder.Status.REVIEW,
+        WorkOrder.Status.WAITING_CUSTOMER,
+    },
+    WorkOrder.Status.REVIEW: {
+        WorkOrder.Status.APPROVAL,
+        WorkOrder.Status.WAITING_CUSTOMER,
+    },
+    WorkOrder.Status.APPROVAL: {
+        WorkOrder.Status.CLOSED,
+        WorkOrder.Status.WAITING_CUSTOMER,
+    },
+    WorkOrder.Status.WAITING_CUSTOMER: {
+        WorkOrder.Status.SCREENING,
+        WorkOrder.Status.DATA_ENTRY,
+        WorkOrder.Status.REVIEW,
+        WorkOrder.Status.APPROVAL,
+        WorkOrder.Status.CANCELLED,
+    },
+    WorkOrder.Status.CLOSED: set(),
+    WorkOrder.Status.CANCELLED: set(),
+}
+
+#: الحالات التي يُسمح منها بالدخول في انتظار العميل
+WAITING_CUSTOMER_ENTRY_STATUSES = frozenset({
+    WorkOrder.Status.SCREENING,
+    WorkOrder.Status.DATA_ENTRY,
+    WorkOrder.Status.REVIEW,
+    WorkOrder.Status.APPROVAL,
+})
+
+
+def resolve_policy_snapshot_for_work_order(kind: str, custom_policy: dict | None = None) -> dict:
+    """استخراج لقطة سياسة الأجل السارية لأمر العمل وقت الإنشاء.
+
+    في م٣: المصدر هو السياسة الافتراضية المعلنة في الوحدة.
+    صُمِّم الحقل ليتكامل مع م٥ (PolicyProfile) لاحقاً بتمرير سياسة مخصصة دون حاجة لهجرة جديدة.
+    """
+    base = custom_policy or DEFAULT_WORK_ORDER_SLA_POLICY
+    hours_map = base.get("sla_hours_by_kind", {})
+    sla_hours = int(hours_map.get(kind, base.get("default_sla_hours", 24)))
+    return {
+        "version": base.get("version", 1),
+        "source": "default_module_policy" if custom_policy is None else "custom_policy",
+        "kind": kind,
+        "sla_hours": sla_hours,
+        "captured_at": timezone.now().isoformat(),
+    }
+
+
+@transaction.atomic
+def create_work_order(
+    *,
+    tenant: Tenant,
+    title: str,
+    kind: str = WorkOrder.Kind.DATA_ENTRY,
+    source: str = WorkOrder.Source.STAFF,
+    description: str = "",
+    assignee: PlatformEmployee | None = None,
+    received_at=None,
+    created_by=None,
+    custom_policy: dict | None = None,
+) -> WorkOrder:
+    """إنشاء أمر عمل جديد مع حفظ لقطة سياسة الأجل فوراً على الصف.
+
+    ترتيب القفل: PlatformEmployee (إن وُجد) -> WorkOrder
+    """
+    tenant_obj = tenant if isinstance(tenant, Tenant) else Tenant.objects.get(pk=tenant)
+    if not title or not title.strip():
+        raise WorkOrderError("title_required", "عنوان أمر العمل إلزامي.")
+
+    if kind not in WorkOrder.Kind.values:
+        raise WorkOrderError("invalid_kind", f"نوع أمر العمل غير صالح: {kind}")
+
+    if source not in WorkOrder.Source.values:
+        raise WorkOrderError("invalid_source", f"مصدر أمر العمل غير صالح: {source}")
+
+    locked_assignee = None
+    if assignee:
+        emp_pk = getattr(assignee, "pk", assignee)
+        locked_assignee = PlatformEmployee.objects.select_for_update().get(pk=emp_pk)
+        if locked_assignee.status != PlatformEmployee.Status.ACTIVE:
+            raise WorkOrderError("assignee_not_active", "موظف المنصة المسؤول غير نشط.")
+
+    rec_at = received_at or timezone.now()
+    policy_snapshot = resolve_policy_snapshot_for_work_order(kind, custom_policy)
+    sla_hours = policy_snapshot.get("sla_hours", 24)
+    deadline_at = rec_at + datetime.timedelta(hours=sla_hours)
+
+    return WorkOrder.objects.create(
+        tenant=tenant_obj,
+        title=title.strip(),
+        description=description.strip() if description else "",
+        kind=kind,
+        source=source,
+        assignee=locked_assignee,
+        status=WorkOrder.Status.RECEIVED,
+        received_at=rec_at,
+        policy_snapshot=policy_snapshot,
+        deadline_at=deadline_at,
+        created_by=created_by,
+    )
+
+
+@transaction.atomic
+def assign_work_order(
+    *,
+    work_order: WorkOrder,
+    assignee: PlatformEmployee | None,
+) -> WorkOrder:
+    """إسناد أمر العمل لمسؤول واحد أو إعادته للطابور.
+
+    ترتيب القفل الصارم: PlatformEmployee -> WorkOrder
+    """
+    wo_pk = getattr(work_order, "pk", work_order)
+
+    locked_assignee = None
+    if assignee is not None:
+        emp_pk = getattr(assignee, "pk", assignee)
+        # 1. قفل موظف المنصة
+        locked_assignee = PlatformEmployee.objects.select_for_update().get(pk=emp_pk)
+        if locked_assignee.status != PlatformEmployee.Status.ACTIVE:
+            raise WorkOrderError("assignee_not_active", "موظف المنصة المسؤول غير نشط.")
+
+    # 2. قفل أمر العمل
+    locked_wo = WorkOrder.objects.select_for_update().get(pk=wo_pk)
+    locked_wo.assignee = locked_assignee
+    locked_wo.save(update_fields=["assignee", "updated_at"])
+    return locked_wo
+
+
+@transaction.atomic
+def transition_work_order_status(
+    *,
+    work_order: WorkOrder,
+    target_status: str,
+    now=None,
+) -> WorkOrder:
+    """نقل حالة أمر العمل وفق آلة الحالات الصارمة.
+
+    ترتيب القفل: WorkOrder
+    القواعد:
+    1. الانتقال مسموح فقط إذا كان target_status ضمن الحالات التالية لـ current_status.
+    2. الدخول إلى waiting_customer يحفظ return_status وطابع waiting_entered_at.
+    3. الخروج من waiting_customer:
+       - إذا كان إلى cancelled: يجمع ثواني الانتظار ويصفر waiting_entered_at و return_status.
+       - إذا كان إلى حالة تشغيل: يجب أن تكون مطابقة تماماً لـ return_status. يجمع ثواني الانتظار،
+         ويمدد deadline_at بمقدار الانتظار، ويصفر waiting_entered_at و return_status.
+    4. الانتقال إلى approval يسجل approved_at.
+    5. الانتقال إلى closed يسجل closed_at.
+    """
+    wo_pk = getattr(work_order, "pk", work_order)
+    current_time = now or timezone.now()
+
+    # قفل أمر العمل
+    locked_wo = WorkOrder.objects.select_for_update().get(pk=wo_pk)
+    current_status = locked_wo.status
+
+    allowed_next = WORK_ORDER_TRANSITIONS.get(current_status, set())
+    if target_status not in allowed_next:
+        raise WorkOrderTransitionError(
+            "invalid_transition",
+            f"الانتقال من {current_status} إلى {target_status} غير مسموح به.",
+            status_code=400,
+        )
+
+    # معالجة الدخول إلى انتظار العميل
+    if target_status == WorkOrder.Status.WAITING_CUSTOMER:
+        locked_wo.return_status = current_status
+        locked_wo.waiting_entered_at = current_time
+
+    # معالجة الخروج من انتظار العميل
+    elif current_status == WorkOrder.Status.WAITING_CUSTOMER:
+        elapsed = 0
+        if locked_wo.waiting_entered_at:
+            if current_time > locked_wo.waiting_entered_at:
+                elapsed = int((current_time - locked_wo.waiting_entered_at).total_seconds())
+        locked_wo.waiting_seconds_total += elapsed
+        locked_wo.waiting_entered_at = None
+
+        if target_status == WorkOrder.Status.CANCELLED:
+            locked_wo.return_status = ""
+        else:
+            # استئناف العمل للحالة السابقة
+            if target_status != locked_wo.return_status:
+                raise WorkOrderTransitionError(
+                    "invalid_return_status",
+                    f"لا يمكن استئناف أمر العمل إلى {target_status}؛ حالة العودة المسجلة هي {locked_wo.return_status}.",
+                    status_code=400,
+                )
+            if locked_wo.deadline_at and elapsed > 0:
+                locked_wo.deadline_at += datetime.timedelta(seconds=elapsed)
+            locked_wo.return_status = ""
+
+    # معالجة الاعتماد
+    if target_status == WorkOrder.Status.APPROVAL:
+        locked_wo.approved_at = current_time
+
+    # معالجة الإغلاق
+    elif target_status == WorkOrder.Status.CLOSED:
+        locked_wo.closed_at = current_time
+
+    locked_wo.status = target_status
+    locked_wo.save(
+        update_fields=[
+            "status",
+            "return_status",
+            "waiting_entered_at",
+            "waiting_seconds_total",
+            "approved_at",
+            "closed_at",
+            "deadline_at",
+            "updated_at",
+        ]
+    )
+    return locked_wo
+
+
+@transaction.atomic
+def submit_work_order_deliverable(
+    *,
+    work_order: WorkOrder,
+    kind: str = WorkOrderDeliverable.Kind.NOTE,
+    content: str = "",
+    payload: dict | None = None,
+    file_url: str = "",
+    submitted_by=None,
+) -> WorkOrderDeliverable:
+    """تسليم مخرج لأمر العمل مع حفظ لقطة ثابتة غير قابلة للتعديل اللاحق."""
+    if kind not in WorkOrderDeliverable.Kind.values:
+        raise WorkOrderError("invalid_kind", f"نوع المُسلَّم غير صالح: {kind}")
+
+    payload_copy = copy.deepcopy(payload) if payload else {}
+    content_snapshot = {
+        "kind": kind,
+        "content": content or "",
+        "payload": payload_copy,
+        "file_url": file_url or "",
+        "submitted_at": timezone.now().isoformat(),
+        "submitted_by_id": getattr(submitted_by, "pk", None),
+    }
+
+    return WorkOrderDeliverable.objects.create(
+        tenant=work_order.tenant,
+        work_order=work_order,
+        kind=kind,
+        review_status=WorkOrderDeliverable.ReviewStatus.PENDING,
+        content=content or "",
+        payload=payload_copy,
+        file_url=file_url or "",
+        content_snapshot=content_snapshot,
+        submitted_by=submitted_by,
+    )
+
+
+@transaction.atomic
+def review_work_order_deliverable(
+    *,
+    deliverable: WorkOrderDeliverable,
+    review_status: str,
+    reviewed_by,
+    rejection_reason: str = "",
+) -> WorkOrderDeliverable:
+    """مراجعة مُسلَّم أمر العمل (قبول أو رفض مع سبب صريح)."""
+    if review_status not in (
+        WorkOrderDeliverable.ReviewStatus.APPROVED,
+        WorkOrderDeliverable.ReviewStatus.REJECTED,
+    ):
+        raise WorkOrderError(
+            "invalid_review_status",
+            f"حالة المراجعة يجب أن تكون مقبول أو مرفوض: {review_status}",
+        )
+
+    if review_status == WorkOrderDeliverable.ReviewStatus.REJECTED and not (rejection_reason and rejection_reason.strip()):
+        raise WorkOrderError("rejection_reason_required", "سبب الرفض إلزامي عند رفض المُسلَّم.")
+
+    deliv_pk = getattr(deliverable, "pk", deliverable)
+    locked_deliv = WorkOrderDeliverable.objects.select_for_update().get(pk=deliv_pk)
+    locked_deliv.review_status = review_status
+    locked_deliv.reviewed_by = reviewed_by
+    locked_deliv.reviewed_at = timezone.now()
+    locked_deliv.rejection_reason = (rejection_reason or "").strip()
+    locked_deliv.save(
+        update_fields=[
+            "review_status",
+            "reviewed_by",
+            "reviewed_at",
+            "rejection_reason",
+            "updated_at",
+        ]
+    )
+    return locked_deliv
+
+
+@transaction.atomic
+def add_work_order_comment(
+    *,
+    work_order: WorkOrder,
+    author,
+    content: str,
+    visibility: str,
+) -> WorkOrderComment:
+    """إضافة تعليق أو استفسار على أمر العمل مع التحقق الصارم من حقل visibility."""
+    if visibility not in (
+        WorkOrderComment.Visibility.INTERNAL,
+        WorkOrderComment.Visibility.CLIENT_VISIBLE,
+    ):
+        raise WorkOrderError(
+            "visibility_required",
+            f"مستوى الظهور (visibility) إلزامي ويجب أن يكون internal أو client_visible: {visibility}",
+        )
+
+    if not content or not content.strip():
+        raise WorkOrderError("content_required", "نص التعليق إلزامي.")
+
+    if not author:
+        raise WorkOrderError("author_required", "كاتب التعليق إلزامي.")
+
+    return WorkOrderComment.objects.create(
+        tenant=work_order.tenant,
+        work_order=work_order,
+        author=author,
+        content=content.strip(),
+        visibility=visibility,
+    )
+
+
+def list_work_order_comments(
+    *,
+    work_order: WorkOrder,
+    for_client: bool = False,
+):
+    """استرجاع تعليقات أمر العمل مع حجب التعليقات الداخلية عن الزبون."""
+    qs = WorkOrderComment.objects.filter(work_order=work_order).order_by("created_at")
+    if for_client:
+        qs = qs.filter(visibility=WorkOrderComment.Visibility.CLIENT_VISIBLE)
+    return qs
+
+
+def calculate_work_order_sla(*, work_order: WorkOrder, now=None) -> dict:
+    """حساب تفاصيل الأجل الفعلي وحالة تجاوزه (SLA) لأمر العمل."""
+    cur_now = now or timezone.now()
+    effective_seconds = work_order.calculate_effective_duration_seconds(now=cur_now)
+    policy = work_order.policy_snapshot or {}
+    sla_hours = policy.get("sla_hours", 24)
+    target_seconds = sla_hours * 3600
+    is_overdue = effective_seconds > target_seconds
+
+    waiting_total = work_order.waiting_seconds_total
+    current_waiting = work_order.open_waiting_seconds(now=cur_now)
+
+    return {
+        "received_at": work_order.received_at,
+        "approved_at": work_order.approved_at,
+        "waiting_seconds_total": waiting_total,
+        "current_waiting_seconds": current_waiting,
+        "effective_duration_seconds": effective_seconds,
+        "sla_hours": sla_hours,
+        "target_seconds": target_seconds,
+        "is_overdue": is_overdue,
+        "deadline_at": work_order.deadline_at,
+    }

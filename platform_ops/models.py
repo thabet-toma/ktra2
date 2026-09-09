@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 from tenants.models import Tenant, UserCompanyMembership
 
@@ -346,3 +347,351 @@ class AgentGrantedMembership(models.Model):
     def __str__(self):
         username = self.identity_snapshot.get("username") or str(self.target_user_id or self.user_id)
         return f"{self.tenant}: {username} ({self.role_before or 'جديد'} → {self.role_after})"
+
+
+class WorkOrder(models.Model):
+    """أمر عمل في مركز قيادة عمليات المنصة (المرحلة الثالثة: م٣).
+
+    يمثل مهمة أو طلب عمل تنفذه المنصة لشركة الزبون (إدخال بيانات، مراجعة، مبيعات، إلخ).
+    - كيان واحد محكوم بنوع (kind) ومصدر (source).
+    - tenant FK إلزامي (شركة واحدة فقط لكل أمر عمل).
+    - مسؤول واحد فقط (assignee FK إلى PlatformEmployee، يقبل NULL إذا كان في الطابور).
+    - آلة حالات صارمة محكومة بطبقة الخدمات.
+    - الأجل يُقاس من received_at إلى approved_at مع إيقاف العداد عند waiting_customer.
+    - لقطة سياسة الأجل (policy_snapshot) تُحفظ على الصف عند الإنشاء لمنع تأثر الماضي بتعديل الإعدادات.
+    """
+
+    class Kind(models.TextChoices):
+        DATA_ENTRY = "data_entry", "إدخال بيانات"
+        REVIEW = "review", "مراجعة"
+        SALES = "sales", "مبيعات"
+        SERVICE = "service", "خدمة"
+        INQUIRY = "inquiry", "استفسار"
+        ADMIN_DIRECTIVE = "admin_directive", "توجيه إداري"
+
+    class Source(models.TextChoices):
+        CHANNEL = "channel", "قناة"
+        STAFF = "staff", "موظف"
+        ADMIN = "admin", "إدارة"
+
+    class Status(models.TextChoices):
+        RECEIVED = "received", "مستلم"
+        SCREENING = "screening", "فرز وفحص"
+        DATA_ENTRY = "data_entry", "إدخال بيانات"
+        REVIEW = "review", "مراجعة"
+        APPROVAL = "approval", "اعتماد"
+        CLOSED = "closed", "مغلق"
+        WAITING_CUSTOMER = "waiting_customer", "بانتظار العميل"
+        CANCELLED = "cancelled", "ملغى"
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="platform_work_orders",
+        verbose_name="الشركة",
+    )
+    title = models.CharField(
+        max_length=255,
+        verbose_name="عنوان أمر العمل",
+    )
+    description = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="الوصف",
+    )
+    kind = models.CharField(
+        max_length=30,
+        choices=Kind.choices,
+        default=Kind.DATA_ENTRY,
+        verbose_name="نوع أمر العمل",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=Source.choices,
+        default=Source.STAFF,
+        verbose_name="المصدر",
+    )
+    assignee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_work_orders",
+        verbose_name="المسؤول",
+        help_text="مسؤول واحد فقط عن أمر العمل (يقبل فارغاً = في الطابور)",
+    )
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.RECEIVED,
+        verbose_name="الحالة",
+    )
+    return_status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        blank=True,
+        default="",
+        verbose_name="حالة العودة بعد الانتظار",
+        help_text="الحالة التي كان عليها أمر العمل قبل دخوله في انتظار العميل",
+    )
+    waiting_entered_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="وقت دخول فترة الانتظار الحالية",
+    )
+    waiting_seconds_total = models.PositiveIntegerField(
+        default=0,
+        verbose_name="إجمالي ثواني الانتظار المتراكمة",
+        help_text="مجموع فترات انتظار رد العميل المحسومة من حساب الأجل",
+    )
+    received_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name="وقت الاستلام",
+        help_text="نقطة بداية قياس الأجل (SLA)",
+    )
+    approved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="وقت الاعتماد",
+        help_text="نقطة نهاية قياس الأجل (SLA)",
+    )
+    closed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="وقت الإغلاق",
+    )
+    policy_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="لقطة سياسة الأجل",
+        help_text="نسخة ثابتة من سياسة الأجل السارية وقت الإنشاء",
+    )
+    deadline_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="موعد الأجل النهائي",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="أنشئ بواسطة",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "أمر عمل"
+        verbose_name_plural = "أوامر العمل"
+        indexes = [
+            models.Index(fields=["tenant", "status"]),
+            models.Index(fields=["tenant", "kind"]),
+            models.Index(fields=["assignee", "status"]),
+            models.Index(fields=["tenant", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.get_kind_display()}] {self.title} ({self.get_status_display()})"
+
+    def open_waiting_seconds(self, now=None) -> int:
+        """ثواني فترةِ الانتظار **المفتوحة** الآن — صفرٌ إن لم يكن الأمرُ منتظِراً.
+
+        مصدرٌ واحدٌ لهذا الحساب: كان مكرَّراً في ثلاثة مواضع، وحسابٌ مكرَّرٌ يعني
+        أنّ تصحيحَ أحدِها لا يصحّح أخوَيه.
+        """
+        if self.approved_at or self.status != self.Status.WAITING_CUSTOMER:
+            return 0
+        if not self.waiting_entered_at:
+            return 0
+        cur_now = now or timezone.now()
+        if cur_now <= self.waiting_entered_at:
+            return 0
+        return int((cur_now - self.waiting_entered_at).total_seconds())
+
+    def calculate_effective_duration_seconds(self, now=None) -> int:
+        """حساب الزمن الفعلي المحتسب من received_at إلى approved_at بعد خصم فترات الانتظار."""
+        end_time = self.approved_at or (now or timezone.now())
+        if not self.received_at or end_time < self.received_at:
+            return 0
+        total_seconds = (end_time - self.received_at).total_seconds()
+        waiting = self.waiting_seconds_total + self.open_waiting_seconds(now=now)
+        effective = total_seconds - waiting
+        return max(0, int(effective))
+
+
+class WorkOrderDeliverable(models.Model):
+    """مُسلَّم أمر العمل.
+
+    يمثل مخرجات أمر العمل المنجزة (ملاحظة، تقرير هيكلي، مرفق).
+    - محتوى التسليم يُحفظ كلقطة غير قابلة للتعديل اللاحق.
+    - يدعم دورة المراجعة والاعتماد أو الرفض مع سبب صريح.
+    """
+
+    class Kind(models.TextChoices):
+        NOTE = "note", "ملاحظة"
+        STRUCTURED_REPORT = "structured_report", "تقرير هيكلي"
+        ATTACHMENT = "attachment", "مرفق"
+
+    class ReviewStatus(models.TextChoices):
+        PENDING = "pending", "بانتظار المراجعة"
+        APPROVED = "approved", "مقبول"
+        REJECTED = "rejected", "مرفوض"
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="platform_work_order_deliverables",
+        verbose_name="الشركة",
+    )
+    work_order = models.ForeignKey(
+        WorkOrder,
+        on_delete=models.CASCADE,
+        related_name="deliverables",
+        verbose_name="أمر العمل",
+    )
+    kind = models.CharField(
+        max_length=30,
+        choices=Kind.choices,
+        default=Kind.NOTE,
+        verbose_name="نوع المُسلَّم",
+    )
+    review_status = models.CharField(
+        max_length=20,
+        choices=ReviewStatus.choices,
+        default=ReviewStatus.PENDING,
+        verbose_name="حالة المراجعة",
+    )
+    content = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="المحتوى النصي",
+    )
+    payload = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="البيانات الهيكلية",
+    )
+    file_url = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="رابط المرفق",
+    )
+    content_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="لقطة التسليم الثابتة",
+        help_text="لقطة محتوى التسليم وقت التقديم لا تتغير بتحرير المصدر لاحقاً",
+    )
+    rejection_reason = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="سبب الرفض",
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="المراجع",
+    )
+    reviewed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ المراجعة",
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="المُسلِّم",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ التسليم",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "مُسلَّم أمر العمل"
+        verbose_name_plural = "مُسلَّمات أوامر العمل"
+        indexes = [
+            models.Index(fields=["work_order", "review_status"]),
+            models.Index(fields=["tenant", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.work_order}: {self.get_kind_display()} ({self.get_review_status_display()})"
+
+
+class WorkOrderComment(models.Model):
+    """تعليق أو استفسار على أمر العمل.
+
+    - حقل visibility إلزامي على كل تعليق (internal أو client_visible).
+    - التعليق الداخلي محجوب تماماً عن أي مسار موجه للزبون.
+    """
+
+    class Visibility(models.TextChoices):
+        INTERNAL = "internal", "داخلي"
+        CLIENT_VISIBLE = "client_visible", "مرئي للزبون"
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="platform_work_order_comments",
+        verbose_name="الشركة",
+    )
+    work_order = models.ForeignKey(
+        WorkOrder,
+        on_delete=models.CASCADE,
+        related_name="comments",
+        verbose_name="أمر العمل",
+    )
+    visibility = models.CharField(
+        max_length=20,
+        choices=Visibility.choices,
+        verbose_name="مستوى الظهور",
+        help_text="إلزامي: داخلي لموظفي المنصة أو مرئي للزبون",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="+",
+        verbose_name="الكاتب",
+    )
+    content = models.TextField(
+        verbose_name="نص التعليق",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "تعليق أمر العمل"
+        verbose_name_plural = "تعليقات أوامر العمل"
+        indexes = [
+            models.Index(fields=["work_order", "visibility", "created_at"]),
+            models.Index(fields=["tenant", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.work_order} - {self.author} [{self.get_visibility_display()}]"

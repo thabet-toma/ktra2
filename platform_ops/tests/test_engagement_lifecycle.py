@@ -554,6 +554,8 @@ DECLARED_LOCK_ORDER = (
     "ServiceSubscription",
     "PlatformEmployee",
     "Engagement",
+    "WorkOrder",
+    "WorkOrderDeliverable",
     "UserCompanyMembership",
 )
 
