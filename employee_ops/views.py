@@ -19,12 +19,15 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce
 from django.utils import timezone
-from django.http import Http404
+import logging
+
+import requests
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
-from django.urls import reverse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import APIException, NotFound, ValidationError
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -32,14 +35,35 @@ from rest_framework.views import APIView
 
 from core.access import require_perm, user_has_perm
 from core.api_defaults import ApiAuthAndUser
-from core.modules import require_module
+from core.media_views import MediaUploadError, upload_media_file
+from core.modules import module_enabled, require_module
 from hr.models import Employee
 from tenants.models import UserCompanyMembership
 
+from .hiring import (
+    MAGIC_HEAD_BYTES,
+    MAX_APPLICATION_BYTES,
+    ApplicationTooLarge,
+    JobGone,
+    close_job,
+    create_job,
+    mark_applicant_hired,
+    rate_applicant,
+    regenerate_job_token,
+    reopen_job,
+    guess_cv_content_type,
+    resolve_public_job,
+    set_applicant_status,
+    submit_application,
+    validate_cv_upload,
+)
+from .throttles import ClientIpScopedThrottle
 from .models import (
     EmployeeInvitation,
     EmployeeNote,
     EmployeeProfile,
+    JobApplicant,
+    JobPosting,
     PointEntry,
     Task,
     TaskAssignment,
@@ -55,8 +79,14 @@ from .serializers import (
     EmployeeNoteSerializer,
     EmployeeOpsSettingsSerializer,
     EmployeeUpdateSerializer,
+    JobApplicantSerializer,
+    JobApplicantUpdateSerializer,
+    JobPostingInputSerializer,
+    JobPostingSerializer,
     ManualPointEntrySerializer,
     PointEntrySerializer,
+    PublicApplicationSerializer,
+    PublicJobSerializer,
     TaskAssignmentSerializer,
     TaskCreateSerializer,
     TaskSerializer,
@@ -97,6 +127,8 @@ from .services import (
     unreview_submission,
     update_task,
 )
+
+logger = logging.getLogger(__name__)
 
 PERM_MANAGE = "employee_ops.manage"
 PERM_SELF = "employee_ops.self"
@@ -171,15 +203,20 @@ _POINT_ACTION_PERMS = {
 }
 
 
-def _invitation_url(request, raw_token: str) -> str:
-    """رابطُ الدعوة من جدول المسارات لا من نصٍّ مكرّر — تغييرُ المسار يتبعه وحده.
+#: صفحةُ قبول الدعوة في الواجهة (`frontend_v2/index.tsx` ← `PublicJoinPage`).
+#: كان الرابطُ يشير إلى نقطة الـAPI مباشرةً، فيفتحه الموظفُ فيرى JSON لا نموذجَ
+#: كلمةِ مرور — أي أنّ الوحدةَ لم تكن تعمل من طرفٍ إلى طرف رغم خضرةِ ما تحتها.
+INVITE_PAGE_PATH = "/join/"
 
-    ملاحظة: يشير اليوم إلى نقطة الـAPI مباشرةً؛ صفحةُ الواجهة مرحلةٌ لاحقة
-    (مذكورةٌ في `docs/modules/employee_ops.md`).
+
+def _invitation_url(request, raw_token: str) -> str:
+    """رابطُ الدعوة كما يُرسل للموظف — صفحةُ الواجهة لا نقطةُ الـAPI.
+
+    والمسارُ ثابتٌ هنا لا `reverse`: الصفحةُ يخدمها راوترُ React لا جانغو، فلا
+    اسمَ مسارٍ في جدول العناوين يُشتقّ منه. ويحرسه اختبارٌ يقارن الرابطَ بالمسار
+    الذي يسجّله الراوتر.
     """
-    return request.build_absolute_uri(
-        reverse("employee-ops-invitation-accept", kwargs={"token": raw_token})
-    )
+    return request.build_absolute_uri(f"{INVITE_PAGE_PATH}{raw_token}")
 
 
 class EmployeeOpsSettingsViewSet(viewsets.ViewSet):
@@ -1016,3 +1053,354 @@ class LeaderboardView(APIView):
             "results": results,
         })
 
+
+# ═══════════════════════ بوابة التوظيف (المرحلة ٧) ═══════════════════════
+
+_JOB_ACTION_PERMS = {
+    "list": PERM_MANAGE,
+    "create": PERM_MANAGE,
+    "retrieve": PERM_MANAGE,
+    "partial_update": PERM_MANAGE,
+    "destroy": PERM_MANAGE,
+    "regenerate_token": PERM_MANAGE,
+    "close": PERM_MANAGE,
+    "reopen": PERM_MANAGE,
+}
+
+_APPLICANT_ACTION_PERMS = {
+    "list": PERM_MANAGE,
+    "retrieve": PERM_MANAGE,
+    "partial_update": PERM_MANAGE,
+    "hire": PERM_MANAGE,
+    "cv": PERM_MANAGE,
+}
+
+
+class JobPostingViewSet(viewsets.ViewSet):
+    """إدارةُ الوظائف — `employee_ops.manage` وحده، وفشلٌ مغلقٌ لفعلٍ لا مفتاحَ له."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.tenant = require_module(request, MODULE_KEY)
+        required = _JOB_ACTION_PERMS.get(self.action)
+        if required is None:
+            raise Http404
+        require_perm(request, required, tenant=self.tenant)
+
+    def _get(self, pk):
+        return get_object_or_404(JobPosting.objects.filter(tenant=self.tenant), pk=pk)
+
+    def list(self, request):
+        qs = (
+            JobPosting.objects.filter(tenant=self.tenant)
+            .annotate(applicant_count=Count("applicants"))
+            .order_by("-created_at", "-id")
+        )
+        return Response(JobPostingSerializer(qs, many=True).data)
+
+    def create(self, request):
+        serializer = JobPostingInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        job = create_job(
+            tenant=self.tenant, actor=request.user, **serializer.validated_data
+        )
+        return Response(JobPostingSerializer(job).data, status=status.HTTP_201_CREATED)
+
+    def retrieve(self, request, pk=None):
+        return Response(JobPostingSerializer(self._get(pk)).data)
+
+    def partial_update(self, request, pk=None):
+        job = self._get(pk)
+        serializer = JobPostingInputSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        fields = ["updated_at"]
+        for key, value in serializer.validated_data.items():
+            setattr(job, key, value)
+            fields.append(key)
+        job.save(update_fields=fields)
+        return Response(JobPostingSerializer(job).data)
+
+    def destroy(self, request, pk=None):
+        job = self._get(pk)
+        # وظيفةٌ تقدّم عليها ناسٌ لا تُحذف: الحذفُ يمحو بياناتِ أشخاصٍ لم يخطئوا،
+        # والإغلاقُ يفعل ما أراده المالكُ فعلاً — إيقافَ التقديم.
+        if job.applicants.exists():
+            raise ValidationError(
+                {"detail": "لا يمكن حذف وظيفة لها متقدّمون — أغلقها بدل حذفها."}
+            )
+        job.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"], url_path="regenerate-token")
+    def regenerate_token(self, request, pk=None):
+        job = regenerate_job_token(job=self._get(pk))
+        return Response(JobPostingSerializer(job).data)
+
+    @action(detail=True, methods=["post"])
+    def close(self, request, pk=None):
+        return Response(JobPostingSerializer(close_job(job=self._get(pk))).data)
+
+    @action(detail=True, methods=["post"])
+    def reopen(self, request, pk=None):
+        return Response(JobPostingSerializer(reopen_job(job=self._get(pk))).data)
+
+
+class JobApplicantViewSet(viewsets.ViewSet):
+    """المتقدّمون — الأحدثُ أوّلاً، فلتران وبحثٌ واحد."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.tenant = require_module(request, MODULE_KEY)
+        required = _APPLICANT_ACTION_PERMS.get(self.action)
+        if required is None:
+            raise Http404
+        require_perm(request, required, tenant=self.tenant)
+
+    def _get(self, pk):
+        return get_object_or_404(
+            JobApplicant.objects.filter(tenant=self.tenant).select_related("job"), pk=pk
+        )
+
+    def list(self, request):
+        qs = JobApplicant.objects.filter(tenant=self.tenant).select_related("job")
+
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            valid = {value for value, _ in JobApplicant.STATUS_CHOICES}
+            if status_filter not in valid:
+                raise ValidationError({"status": "حالةُ متقدّمٍ غيرُ معروفة."})
+            qs = qs.filter(status=status_filter)
+
+        job_filter = request.query_params.get("job")
+        if job_filter:
+            if not str(job_filter).isdigit():
+                raise ValidationError({"job": "معرّف الوظيفة يجب أن يكون رقماً."})
+            qs = qs.filter(job_id=int(job_filter))
+
+        # بحثٌ واحدٌ يطابق الاسمَ أو الرقم — لا نموذجَ بحثٍ معقّد.
+        search = (request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(Q(name__icontains=search) | Q(phone__icontains=search))
+
+        qs = qs.order_by("-created_at", "-id")
+        return Response(JobApplicantSerializer(qs, many=True).data)
+
+    def retrieve(self, request, pk=None):
+        return Response(JobApplicantSerializer(self._get(pk)).data)
+
+    def partial_update(self, request, pk=None):
+        applicant = self._get(pk)
+        serializer = JobApplicantUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if "status" in data:
+            set_applicant_status(applicant=applicant, status=data["status"])
+        if "rating" in data or "notes" in data:
+            rate_applicant(
+                applicant=applicant,
+                rating=data.get("rating"),
+                notes=data.get("notes"),
+            )
+        applicant.refresh_from_db()
+        return Response(JobApplicantSerializer(applicant).data)
+
+    @action(detail=True, methods=["get"])
+    def cv(self, request, pk=None):
+        """**الشرط السادس** — السيرةُ خلف صلاحية، ورابطُ التخزين لا يُسلَّم لأحد.
+
+        **بايتاتٌ لا إعادةُ توجيه.** كان هنا `HttpResponseRedirect`، وترويسةُ
+        `Location` **هي** رابطُ التخزين حرفيّاً — أي أنّ الردَّ كان يحمل ما تقول
+        المواصفةُ إنّه «لا يُسلَّم بأيّ حال»، ويبقى في سجلّ المتصفّح صالحاً للنسخ
+        بعد انتهاء الجلسة. والرابطُ عند المزوّد **هو** الصلاحية، فتسليمُه تسليمٌ
+        دائم. فالخادمُ يجلبه ويمرّره، ولا يغادر الرابطُ الخادمَ أبداً.
+        """
+        applicant = self._get(pk)
+        if not applicant.cv_url:
+            raise NotFound("لا سيرة ذاتية مرفوعة لهذا المتقدّم.")
+
+        try:
+            upstream = requests.get(applicant.cv_url, stream=True, timeout=20)
+            upstream.raise_for_status()
+        except requests.RequestException:
+            raise APIException("تعذّر جلب السيرة الذاتية من التخزين.")
+
+        response = FileResponse(
+            upstream.raw,
+            content_type=upstream.headers.get("Content-Type")
+            or guess_cv_content_type(applicant.cv_url),
+        )
+        # `inline` لا `attachment`: المديرُ يقرؤها في تبويب. والاسمُ من سجلّنا لا
+        # من ترويسة المزوّد — وهو اسمٌ رفعه مجهولٌ فيُنظَّف من محارف الاقتباس.
+        safe_name = (applicant.cv_name or "cv").replace('"', "").replace("\\", "")
+        response["Content-Disposition"] = f'inline; filename="{safe_name}"'
+        return response
+
+    @action(detail=True, methods=["post"])
+    def hire(self, request, pk=None):
+        """يُستدعى **بعد** إنشاء سجلّ الموظف — لا تحويلَ آليّ من هنا.
+
+        الإنشاءُ يستهلك مقعداً ويطلق دعوة، فالشاشةُ تفتح نموذجَ «أضف موظفاً»
+        مملوءاً بالاسم والرقم، وتنادي هذه النقطةَ بمعرّف الموظف عند الحفظ.
+        """
+        applicant = self._get(pk)
+        employee_id = request.data.get("employee")
+        if not str(employee_id or "").isdigit():
+            raise ValidationError({"employee": "معرّف الموظف مطلوب."})
+        employee = get_object_or_404(
+            Employee.objects.filter(tenant=self.tenant), pk=int(employee_id)
+        )
+        mark_applicant_hired(applicant=applicant, employee=employee)
+        return Response(JobApplicantSerializer(applicant).data)
+
+
+class PublicJobView(APIView):
+    """`GET /api/employee-ops/public/jobs/<token>/` — الوظيفةُ بلا تسجيل دخول.
+
+    ٤١٠ للمغلقة أو المنتهية، و٤٠٤ لمفتاحٍ لا وجودَ له: الفرقُ بين «كان هنا
+    وانتهى» و«لم يكن هنا قطّ» يهمّ من فتح الرابط.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "employee_ops_job_public"
+
+    def get(self, request, token):
+        try:
+            job = resolve_public_job(token)
+        except JobGone:
+            return Response(
+                {"detail": "انتهى التقديم على هذه الوظيفة."},
+                status=status.HTTP_410_GONE,
+            )
+        # **القراءةُ توافق الكتابة**: كانت تعرض وظيفةً حيّةً لشركةٍ سُحب ترخيصُها،
+        # فيملأ المتقدّمُ النموذجَ ويرفع سيرتَه ثمّ يُقال له «انتهى التقديم».
+        # الحالةُ المغلقةُ تُرى قبل العمل لا بعده.
+        if not module_enabled(job.tenant, MODULE_KEY):
+            return Response(
+                {"detail": "انتهى التقديم على هذه الوظيفة."},
+                status=status.HTTP_410_GONE,
+            )
+        return Response(PublicJobSerializer(job).data)
+
+
+class PublicJobApplyView(APIView):
+    """`POST …/public/jobs/<token>/apply/` — تقديمُ مجهولٍ محجورٌ بحالة «جديد».
+
+    خانقُها `employee_ops_apply` — **أضيقُ خانقٍ في المنصة**: كتابةٌ من مجهولٍ
+    تفتح ملفاً وتُنشئ صفّاً، لا قراءةٌ تُعاد.
+
+    **والسيرةُ ترفع مع هذا الطلب نفسِه** لا عبر نقطةِ رفعٍ يستدعيها المجهولُ ثمّ
+    يُسلَّم رابطَها: رابطُ التخزين **هو** الصلاحية عند المزوّد الخارجيّ، فتسليمُه
+    لمن رفعه يعني تسليمَه لمن شارَكه به. الرابطُ يُكتب في الصفّ ولا يعود في الردّ.
+
+    والرفعُ يمرّ بمخنق الوسائط القائم (`core.media_views.upload_media_file`) —
+    **لا مسارَ رفعٍ جديد**: هناك يُكتب استهلاكُ تخزين الشركة، ومسارٌ ثانٍ يعني
+    محاسبةً ناقصة. والفحصُ الصارمُ يسبقه، فلا يبلغ المخنقَ ملفٌّ مرفوض.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ClientIpScopedThrottle]
+    throttle_scope = "employee_ops_apply"
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    @staticmethod
+    def _reject_oversized_body(request) -> None:
+        """**قبل لمس `request.data`** — لمسُها يحلّل الجسم كلَّه ويسكبه على القرص.
+
+        الفحصُ السابقُ كان يقيس حقلَ السيرة وحده بعد التحليل، فطلبٌ بسيرةٍ سليمةٍ
+        ومئةِ حقلٍ حشواً يمرّ من كلّ فحوصنا ويقفل الـworkers.
+        """
+        raw = request.META.get("CONTENT_LENGTH") or 0
+        try:
+            length = int(raw)
+        except (TypeError, ValueError):
+            length = 0
+        if length > MAX_APPLICATION_BYTES:
+            raise ApplicationTooLarge()
+
+    def post(self, request, token):
+        try:
+            self._reject_oversized_body(request)
+        except ApplicationTooLarge:
+            return Response(
+                {"detail": "حجم الطلب يتجاوز الحد المسموح."},
+                status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+
+        try:
+            job = resolve_public_job(token)
+        except JobGone:
+            return Response(
+                {"detail": "انتهى التقديم على هذه الوظيفة."},
+                status=status.HTTP_410_GONE,
+            )
+
+        # الوحدةُ مطفأةٌ ⇒ لا تقديمَ جديد. القراءةُ تبقى (رابطٌ نُشر لا يخصّ
+        # اشتراكَ صاحبه)، أمّا **الكتابةُ** فكانت ستُكدّس متقدّمين في وحدةٍ لا
+        # يستطيع المالكُ فتحَها — فلا هو يراهم ولا هم يعرفون أنّهم في العدم.
+        if not module_enabled(job.tenant, MODULE_KEY):
+            return Response(
+                {"detail": "انتهى التقديم على هذه الوظيفة."},
+                status=status.HTTP_410_GONE,
+            )
+
+        serializer = PublicApplicationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        upload = data.pop("cv", None)
+
+        cv_url, cv_name = "", ""
+        if upload is not None:
+            # يُقرأ الملفُّ مرّةً واحدة: الحجمُ محدودٌ سلفاً بـ`MAX_CV_BYTES`،
+            # وفحصا `.docx`/`.doc` يحتاجان بنيةَ الملفّ لا أوّلَ بايتاته.
+            payload = upload.read()
+            upload.seek(0)
+            validate_cv_upload(
+                size=getattr(upload, "size", 0) or len(payload),
+                filename=getattr(upload, "name", "") or "",
+                content_type=getattr(upload, "content_type", "") or "",
+                head=payload[:MAGIC_HEAD_BYTES],
+                payload=payload,
+            )
+            try:
+                cv_url = upload_media_file(
+                    upload, folder="employee_ops_cv", tenant=job.tenant
+                )
+            except MediaUploadError as exc:
+                # نصُّ الاستثناء يحمل مجلّدَ الشركة (`employee_ops_cv/t<id>`)
+                # واسمَ حساب التخزين. كان يبلغ مستخدماً مصادَقاً؛ وقد صار يبلغ
+                # مجهولاً يستطيع استفزازَه — فالتفصيلُ للسجلّ والعامُّ للردّ.
+                logger.warning(
+                    "employee_ops cv upload failed job=%s err=%s", job.pk, exc.detail
+                )
+                return Response(
+                    {"cv": "تعذّر رفع السيرة الذاتية. حاول مرة أخرى."},
+                    status=exc.status_code,
+                )
+            cv_name = (getattr(upload, "name", "") or "")[:255]
+
+        try:
+            applicant = submit_application(
+                job=job, cv_url=cv_url, cv_name=cv_name, **data
+            )
+        except JobGone:
+            return Response(
+                {"detail": "انتهى التقديم على هذه الوظيفة."},
+                status=status.HTTP_410_GONE,
+            )
+
+        # شاشةُ شكرٍ برقم مرجع — ولا شيءَ غيرَه: لا معرّفٌ داخليّ ولا اسمُ شركةٍ
+        # ولا **رابطُ السيرة** الذي رفعه للتوّ.
+        return Response(
+            {"reference_code": applicant.reference_code},
+            status=status.HTTP_201_CREATED,
+        )

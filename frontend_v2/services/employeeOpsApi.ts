@@ -6,6 +6,7 @@
  * كل دالة تمرر الأخطاء دون ابتلاع لتظهر في رسائل useToast.
  */
 import {
+  API_BASE,
   apiDelete,
   apiGetList,
   apiGetObject,
@@ -525,4 +526,149 @@ export async function getLeaderboard(
     ...tenantOpts(tenantId),
     query: params,
   });
+}
+
+
+// 8) بوابة التوظيف — الوظائف والمتقدّمون (المرحلة ٧)
+
+export interface JobPostingDto {
+  id: number;
+  title: string;
+  description: string;
+  requirements: string;
+  location: string;
+  employment_type: "" | "full_time" | "part_time" | "contract" | "temporary";
+  salary_range: string;
+  /** مفتاحُ الرابط العامّ — تعرضه شاشةُ المدير وحدها (النقطة خلف `manage`). */
+  token: string;
+  is_open: boolean;
+  is_live: boolean;
+  expires_at: string | null;
+  closed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  applicant_count: number;
+}
+
+export type ApplicantStatus = "new" | "interview" | "hired" | "rejected";
+
+export interface JobApplicantDto {
+  id: number;
+  job: number;
+  job_title: string;
+  name: string;
+  phone: string;
+  email: string;
+  about: string;
+  /** **لا `cv_url` هنا ولا في الخادم**: الرابطُ هو الصلاحيةُ عند المزوّد. */
+  has_cv: boolean;
+  cv_name: string;
+  status: ApplicantStatus;
+  rating: number;
+  notes: string;
+  hired_employee: number | null;
+  reference_code: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listJobs(tenantId?: number): Promise<JobPostingDto[]> {
+  return apiGetList<JobPostingDto>(`${BASE}/jobs/`, tenantOpts(tenantId));
+}
+
+export async function createJob(
+  data: {
+    title: string;
+    description: string;
+    requirements?: string;
+    location?: string;
+    employment_type?: string;
+    salary_range?: string;
+    expires_at?: string | null;
+  },
+  tenantId?: number,
+): Promise<JobPostingDto> {
+  return apiPostObject<JobPostingDto>(`${BASE}/jobs/`, data, tenantOpts(tenantId));
+}
+
+export async function updateJob(
+  id: number,
+  data: Partial<JobPostingDto>,
+  tenantId?: number,
+): Promise<JobPostingDto> {
+  return apiPatchObject<JobPostingDto>(`${BASE}/jobs/${id}/`, data, tenantOpts(tenantId));
+}
+
+export async function deleteJob(id: number, tenantId?: number): Promise<void> {
+  await apiDelete(`${BASE}/jobs/${id}/`, tenantOpts(tenantId));
+}
+
+export async function closeJob(id: number, tenantId?: number): Promise<JobPostingDto> {
+  return apiPostObject<JobPostingDto>(`${BASE}/jobs/${id}/close/`, {}, tenantOpts(tenantId));
+}
+
+export async function reopenJob(id: number, tenantId?: number): Promise<JobPostingDto> {
+  return apiPostObject<JobPostingDto>(`${BASE}/jobs/${id}/reopen/`, {}, tenantOpts(tenantId));
+}
+
+export async function regenerateJobToken(
+  id: number,
+  tenantId?: number,
+): Promise<JobPostingDto> {
+  return apiPostObject<JobPostingDto>(
+    `${BASE}/jobs/${id}/regenerate-token/`,
+    {},
+    tenantOpts(tenantId),
+  );
+}
+
+export async function listApplicants(
+  params?: { status?: ApplicantStatus; job?: number; search?: string },
+  tenantId?: number,
+): Promise<JobApplicantDto[]> {
+  return apiGetList<JobApplicantDto>(`${BASE}/applicants/`, {
+    ...tenantOpts(tenantId),
+    query: params,
+  });
+}
+
+export async function updateApplicant(
+  id: number,
+  data: { status?: ApplicantStatus; rating?: number; notes?: string },
+  tenantId?: number,
+): Promise<JobApplicantDto> {
+  return apiPatchObject<JobApplicantDto>(
+    `${BASE}/applicants/${id}/`,
+    data,
+    tenantOpts(tenantId),
+  );
+}
+
+export async function markApplicantHired(
+  id: number,
+  employeeId: number,
+  tenantId?: number,
+): Promise<JobApplicantDto> {
+  return apiPostObject<JobApplicantDto>(
+    `${BASE}/applicants/${id}/hire/`,
+    { employee: employeeId },
+    tenantOpts(tenantId),
+  );
+}
+
+/**
+ * مسارُ قراءة السيرة — **إعادةُ توجيهٍ خلف الصلاحية**، لا رابطُ تخزينٍ يُسلَّم.
+ * يُفتح في تبويبٍ جديد؛ لا يُجلب بـ`fetch` كي لا يعود الرابطُ إلى الشيفرة أصلاً.
+ */
+export function applicantCvPath(id: number): string {
+  // **`API_BASE` لا نصٌّ مثبَّت**: `BASE` وحده نسبيٌّ («employee-ops») لأنّ
+  // `restApi` يضيف البادئة، وهذا الرابط يذهب إلى `href` مباشرةً — فبلا بادئةٍ
+  // كان المتصفّح يحلّه إلى `/employee-ops/employee-ops/…`. و`API_BASE` قد يكون
+  // أصلاً آخر في التطوير، فبادئةٌ مكتوبةٌ يدوياً تصيب خادمَ Vite لا جانغو.
+  return `${API_BASE}/${BASE}/applicants/${id}/cv/`;
+}
+
+/** رابطُ الوظيفة العامّ كما يُنسخ ويُنشر. */
+export function publicJobUrl(token: string): string {
+  return `${window.location.origin}/jobs/${token}`;
 }

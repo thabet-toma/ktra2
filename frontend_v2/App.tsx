@@ -192,6 +192,7 @@ const EmployeeOpsDailyScreen = lazyPage(() => import("./components/employee-ops/
 const EmployeeOpsTasksScreen = lazyPage(() => import("./components/employee-ops/EmployeeOpsTasksScreen").then((m) => ({ default: m.EmployeeOpsTasksScreen })));
 const EmployeeOpsPeopleScreen = lazyPage(() => import("./components/employee-ops/EmployeeOpsPeopleScreen").then((m) => ({ default: m.EmployeeOpsPeopleScreen })));
 const EmployeeOpsPointsScreen = lazyPage(() => import("./components/employee-ops/EmployeeOpsPointsScreen").then((m) => ({ default: m.EmployeeOpsPointsScreen })));
+const EmployeeOpsHiringScreen = lazyPage(() => import("./components/employee-ops/EmployeeOpsHiringScreen").then((m) => ({ default: m.EmployeeOpsHiringScreen })));
 
 /** الشاشةُ القديمة ← مقابلُها في وحدة متابعة الموظفين حين تكون مرخّصة. */
 const LEGACY_EMPLOYEE_VIEWS: Record<string, AppView> = {
@@ -257,6 +258,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "employee-ops-tasks": "/employee-ops/tasks",
   "employee-ops-people": "/employee-ops/people",
   "employee-ops-points": "/employee-ops/points",
+  "employee-ops-hiring": "/employee-ops/hiring",
   "sales-invoices": "/sales/invoices",
   "sales-quotations": "/sales/quotations",
   "sales-orders": "/sales/orders",
@@ -1657,6 +1659,15 @@ const App: React.FC = () => {
             {canView(appView)
               ? <EmployeeOpsPointsScreen />
               : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض شاشة النقاط (403).</div>}
+          </ModuleLicenseGuard>
+        );
+
+      case "employee-ops-hiring":
+        return (
+          <ModuleLicenseGuard view={appView} message="وحدة متابعة الموظفين غير مفعّلة لهذه الشركة.">
+            {canView(appView)
+              ? <EmployeeOpsHiringScreen />
+              : <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض شاشة التوظيف (403).</div>}
           </ModuleLicenseGuard>
         );
 

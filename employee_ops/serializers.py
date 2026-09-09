@@ -1,10 +1,13 @@
 """مُسلسِلات متابعة الموظفين (المرحلة الأولى: الأساس)."""
+from django.utils import timezone
 from rest_framework import serializers
 
 from tenants.models import UserCompanyMembership
 
 from .models import (
     EmployeeInvitation,
+    JobApplicant,
+    JobPosting,
     EmployeeNote,
     EmployeeOpsSettings,
     EmployeeProfile,
@@ -343,7 +346,7 @@ MAX_ITEM_IMAGES = 5
 _PRIORITY_VALUES = frozenset(value for value, _ in Task.PRIORITY_CHOICES)
 
 
-def _normalize_priority(value):
+def normalize_priority(value):
     """الحيُّ يكتبها صغيرةً (`low`) والنموذجُ كبيرةً — الترجمةُ هنا مرّةً واحدة."""
     val = str(value).upper()
     if val in _PRIORITY_VALUES:
@@ -377,7 +380,7 @@ class TaskCreateSerializer(serializers.Serializer):
     assignee_ids = serializers.ListField(child=serializers.IntegerField(), required=False, default=list)
 
     def validate_priority(self, value):
-        return _normalize_priority(value)
+        return normalize_priority(value)
 
 
 class TaskUpdateSerializer(serializers.Serializer):
@@ -396,7 +399,7 @@ class TaskUpdateSerializer(serializers.Serializer):
     assignee_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
 
     def validate_priority(self, value):
-        return _normalize_priority(value)
+        return normalize_priority(value)
 
 
 class TaskSubmissionItemInputSerializer(serializers.Serializer):
@@ -577,3 +580,192 @@ class ActivityRangeSerializer(serializers.Serializer):
 
     date_from = serializers.DateField(required=False, allow_null=True, default=None)
     date_to = serializers.DateField(required=False, allow_null=True, default=None)
+
+
+class JobPostingSerializer(serializers.ModelSerializer):
+    """عرضُ الوظيفة للمدير — **المفتاحُ يُعرض هنا عمداً**: صاحبُ الوظيفة ينسخه.
+
+    وهذه النقطةُ محروسةٌ بـ`employee_ops.manage`، فالمفتاحُ لا يخرج لغيره.
+    """
+
+    applicant_count = serializers.SerializerMethodField()
+    is_live = serializers.SerializerMethodField()
+
+    class Meta:
+        model = JobPosting
+        fields = [
+            "id",
+            "title",
+            "description",
+            "requirements",
+            "location",
+            "employment_type",
+            "salary_range",
+            "token",
+            "is_open",
+            "is_live",
+            "expires_at",
+            "closed_at",
+            "created_at",
+            "updated_at",
+            "applicant_count",
+        ]
+        read_only_fields = [
+            "id", "token", "closed_at", "created_at", "updated_at",
+            "applicant_count", "is_live",
+        ]
+
+    def get_applicant_count(self, obj) -> int:
+        return int(getattr(obj, "applicant_count", 0) or 0)
+
+    def get_is_live(self, obj) -> bool:
+        from .hiring import job_is_live
+
+        return job_is_live(obj)
+
+
+class JobPostingInputSerializer(serializers.Serializer):
+    """مدخلاتُ الوظيفة — العنوانُ والوصفُ إلزاميّان وما عداهما اختياريّ.
+
+    `fields = "__all__"` ممنوعٌ في هذا المستودع، والمفتاحُ والشركةُ ليسا حقلَي
+    إدخالٍ أصلاً: الأوّلُ يُولَّد والثانية تأتي من الحارس.
+    """
+
+    title = serializers.CharField(max_length=200)
+    description = serializers.CharField()
+    requirements = serializers.CharField(required=False, allow_blank=True, default="")
+    location = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=200
+    )
+    employment_type = serializers.ChoiceField(
+        choices=JobPosting.EMPLOYMENT_TYPE_CHOICES,
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+    salary_range = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=120
+    )
+    expires_at = serializers.DateTimeField(required=False, allow_null=True, default=None)
+
+    def validate_title(self, value):
+        val = (value or "").strip()
+        if not val:
+            raise serializers.ValidationError("عنوان الوظيفة مطلوب.")
+        return val
+
+    def validate_description(self, value):
+        val = (value or "").strip()
+        if not val:
+            raise serializers.ValidationError("وصف الوظيفة مطلوب.")
+        return val
+
+    def validate_expires_at(self, value):
+        # أجلٌ في الماضي رابطٌ ميّتٌ لحظةَ إنشائه — يُمنع هنا لا يُكتشَف لاحقاً.
+        if value is not None and value <= timezone.now():
+            raise serializers.ValidationError("تاريخ الانتهاء يجب أن يكون في المستقبل.")
+        return value
+
+
+class PublicJobSerializer(serializers.ModelSerializer):
+    """ما يراه **المجهول** خلف الرابط — قائمةٌ بيضاءُ صريحةٌ لا استثناءات.
+
+    لا `token` (يملكه أصلاً)، ولا `id`، ولا شيءَ عن الشركة، ولا عدّادَ متقدّمين:
+    كم تقدّم على وظيفةٍ معلومةٌ تجاريّةٌ لصاحبها لا لكلّ من فتح الرابط.
+    """
+
+    class Meta:
+        model = JobPosting
+        fields = [
+            "title",
+            "description",
+            "requirements",
+            "location",
+            "employment_type",
+            "salary_range",
+        ]
+        read_only_fields = fields
+
+
+class PublicApplicationSerializer(serializers.Serializer):
+    """مدخلاتُ المتقدّم المجهول.
+
+    **لا حقلَ حالةٍ ولا تقييمٍ ولا وظيفةٍ هنا**: الحالةُ محجورةٌ على «جديد»،
+    والوظيفةُ تأتي من مفتاح المسار. حقلٌ يقبله المُسلسِل بابٌ يُفتح.
+    """
+
+    name = serializers.CharField(max_length=200)
+    phone = serializers.CharField(max_length=40)
+    email = serializers.EmailField(required=False, allow_blank=True, default="")
+    about = serializers.CharField(required=False, allow_blank=True, default="")
+    # **لا `cv_url` من العميل.** الملفُّ يُرفع مع هذا الطلب نفسِه (`cv`)، ويُخزَّن
+    # الرابطُ في الخادم ولا يعود للمتقدّم — فلا يُسلَّم رابطُ تخزينٍ لمجهولٍ ولا
+    # يُقبل رابطٌ يشير إلى ما لم نرفعه نحن.
+    cv = serializers.FileField(required=False, allow_null=True)
+
+    def validate_name(self, value):
+        val = (value or "").strip()
+        if not val:
+            raise serializers.ValidationError("الاسم مطلوب.")
+        return val
+
+    def validate_phone(self, value):
+        val = (value or "").strip()
+        if not val:
+            raise serializers.ValidationError("رقم التواصل مطلوب.")
+        return val
+
+    def validate_about(self, value):
+        # سقفٌ على النصّ الحرّ: حقلُ نصٍّ مفتوحٌ لمجهولٍ سطحُ إغراقٍ بلا حدّ.
+        val = (value or "").strip()
+        if len(val) > 5000:
+            raise serializers.ValidationError("النبذة أطول من المسموح.")
+        return val
+
+
+class JobApplicantSerializer(serializers.ModelSerializer):
+    """عرضُ المتقدّم للمدير — **بلا `cv_url` بأيّ حال**.
+
+    الملفّاتُ على مزوّدٍ خارجيّ حيث **الرابطُ هو الصلاحية**: من يقرأ الرابطَ يقرأ
+    السيرة كائناً من كان. وسيرةُ متقدّمٍ بيانٌ شخصيٌّ لإنسانٍ خارج الشركة، فلا
+    تُطبع في ردٍّ يُخزَّن في سجلٍّ أو يُنسخ في رسالة. `has_cv` تكفي الشاشةَ لتعرف
+    أنّ هناك ملفاً، والفتحُ عبر نقطةٍ تفحص الصلاحية وتُعيد التوجيه.
+    """
+
+    job_title = serializers.CharField(source="job.title", read_only=True)
+    has_cv = serializers.SerializerMethodField()
+
+    class Meta:
+        model = JobApplicant
+        fields = [
+            "id",
+            "job",
+            "job_title",
+            "name",
+            "phone",
+            "email",
+            "about",
+            "has_cv",
+            "cv_name",
+            "status",
+            "rating",
+            "notes",
+            "hired_employee",
+            "reference_code",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_has_cv(self, obj) -> bool:
+        return bool(obj.cv_url)
+
+
+class JobApplicantUpdateSerializer(serializers.Serializer):
+    """ما يملك المديرُ تغييرَه: الحالةُ والتقييمُ والملاحظة — لا غير."""
+
+    status = serializers.ChoiceField(
+        choices=JobApplicant.STATUS_CHOICES, required=False
+    )
+    rating = serializers.IntegerField(required=False, min_value=0, max_value=5)
+    notes = serializers.CharField(required=False, allow_blank=True)

@@ -18,6 +18,7 @@ import {
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck,
   Gauge, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
   PlayCircle, Network, Fingerprint, CalendarCheck, Inbox, FileSignature, Layers,
+  Briefcase as BriefcaseIcon,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { enterOfficeShell } from "../utils/officeShell";
@@ -299,6 +300,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "employee-ops-tasks", label: opsLabels.tasks, icon: <TasksIcon className="h-4 w-4" /> },
     { view: "employee-ops-people", label: opsLabels.people, icon: <UsersIcon className="h-4 w-4" /> },
     { view: "employee-ops-points", label: opsLabels.points, icon: <PointsIcon className="h-4 w-4" /> },
+    // «التوظيف» آخرَ البنود: من اليوميّ إلى النادر — لا يوظّف المالك كلّ يوم.
+    { view: "employee-ops-hiring", label: "التوظيف", icon: <BriefcaseIcon className="h-4 w-4" /> },
   ];
 
   // THA-110: بنود «الوضع السهل» — لا شاشة جديدة، بل نفس الشاشات القائمة بعنوانها

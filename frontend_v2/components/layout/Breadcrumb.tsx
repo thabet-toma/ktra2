@@ -32,6 +32,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'employee-ops-tasks': 'المهام',
   'employee-ops-people': 'الموظفون',
   'employee-ops-points': 'النقاط',
+  'employee-ops-hiring': 'التوظيف',
   'points-management': 'إدارة النقاط',
   settings: 'الإعدادات',
   attendance: 'الحضور والغياب',

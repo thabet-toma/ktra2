@@ -50,6 +50,10 @@ ALLOWLISTED_PLATFORM_MODULES = frozenset({
     # مدى التاريخ **المصدرُ الموحَّد**: `timestamp__date=...` يُعيد صفر صفوفٍ بصمت
     # على MySQL حين تكون جداولُ المناطق الزمنيّة فارغة، وهذه الدالّة تتجنّبه.
     "core.date_ranges",   # `filter_local_date_range`
+    # مخنقُ الرفع الوحيد في المنصة. بوابةُ التوظيف تحتاج رفعاً، و**مسارُ رفعٍ
+    # ثانٍ** كان يعني محاسبةَ تخزينٍ ناقصةً للشركة: هناك وحده يُكتب
+    # `core.TenantAsset`. والوحدةُ تستدعيه بعد فحصِها الصارم لا قبله.
+    "core.media_views",   # `upload_media_file` و`MediaUploadError`
     "core.models",        # `TenantModule` في الاختبارات
     "core.modules",       # `require_module`
     # حدُّ المقاعد يعيش في محرّك الحدود بحكم بنيته، والوحدة تستدعيه عند الإنشاء

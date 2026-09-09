@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   Award,
@@ -9,6 +10,7 @@ import {
   ListTodo,
   Loader2,
   Play,
+  UserPlus,
   Square,
   TrendingUp,
   UserCheck,
@@ -17,12 +19,15 @@ import {
 import {
   getPointsSummary,
   listMyTasks,
-  listTasks,
-  listSubmissions,
+  listApplicants,
   listEmployees,
+  listJobs,
+  listSubmissions,
+  listTasks,
   startTaskTimer,
   stopTaskTimer,
   type EmployeeCardDto,
+  type JobApplicantDto,
   type PointsSummaryDto,
   type TaskDto,
   type TaskSubmissionDto,
@@ -47,6 +52,9 @@ export const EmployeeOpsDailyScreen: React.FC = () => {
   const { can } = usePermissions();
   const canManage = can("employee_ops.manage");
   const toast = useToast();
+  // التنقّلُ بالراوتر مباشرةً: هذه الشاشةُ بلا خصائص، و`tsc` هنا لا يفحص
+  // خصائصَ JSX — فخاصّيّةٌ مخترعةٌ كانت ستبقى خضراءَ وميّتة.
+  const navigate = useNavigate();
 
   const [summary, setSummary] = useState<PointsSummaryDto | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(true);
@@ -64,6 +72,9 @@ export const EmployeeOpsDailyScreen: React.FC = () => {
   // لوحة المدير
   const [pendingSubmissions, setPendingSubmissions] = useState<TaskSubmissionDto[]>([]);
   const [overdueTasks, setOverdueTasks] = useState<TaskDto[]>([]);
+  // المتقدّمون الجدد — يُجلبون **فقط** حين توجد وظيفةٌ مفتوحة، فلا طلبٌ ولا
+  // قسمٌ في شهورٍ لا يوظّف فيها المالك.
+  const [newApplicants, setNewApplicants] = useState<JobApplicantDto[]>([]);
   const [teamCards, setTeamCards] = useState<EmployeeCardDto[]>([]);
   const [loadingManagerQueue, setLoadingManagerQueue] = useState(false);
   const [reviewSubmissionTarget, setReviewSubmissionTarget] = useState<TaskSubmissionDto | null>(null);
@@ -122,6 +133,14 @@ export const EmployeeOpsDailyScreen: React.FC = () => {
       // كانت هنا نداءةُ كرتٍ لكلّ موظف: خمسون موظفاً = خمسون طلبَ HTTP على
       // شاشةِ الدخول. صارت طلباً واحداً باستعلاماتٍ فرعيّة في الخادم.
       setTeamCards(emps.filter((e) => e.is_active));
+
+      // (٣) المتقدّمون الجدد — الشرطُ أوّلاً: وظيفةٌ مفتوحةٌ واحدةٌ تكفي.
+      const jobs = await listJobs();
+      if (jobs.some((job) => job.is_live)) {
+        setNewApplicants(await listApplicants({ status: "new" }));
+      } else {
+        setNewApplicants([]);
+      }
     } catch (err: any) {
       toast(err?.message || "فشل جلب طابور مراجعة المدير", "error");
     } finally {
@@ -381,6 +400,36 @@ export const EmployeeOpsDailyScreen: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* (٣) المتقدّمون الجدد — يظهر القسم فقط إن كانت هناك وظيفةٌ مفتوحة. */}
+          {newApplicants.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 border-t border-blue-200 dark:border-blue-900/50 pt-3">
+                <UserPlus className="h-4 w-4 text-blue-700 dark:text-blue-400" />
+                <h3 className="text-xs font-bold text-blue-900 dark:text-blue-200">
+                  المتقدمون الجدد ({formatNumber(newApplicants.length)})
+                </h3>
+              </div>
+
+              <div className="space-y-1.5">
+                {newApplicants.slice(0, 5).map((applicant) => (
+                  <button
+                    key={applicant.id}
+                    type="button"
+                    onClick={() => navigate("/employee-ops/hiring")}
+                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5 text-right hover:bg-[var(--color-surface-2)]"
+                  >
+                    <span className="text-xs font-bold text-[var(--color-text)]">
+                      {applicant.name}
+                    </span>
+                    <span className="text-[11px] text-[var(--color-text-muted)]">
+                      {applicant.job_title} • {formatDateTimeValue(applicant.created_at)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

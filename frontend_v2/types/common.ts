@@ -119,6 +119,7 @@ export type AppView =
     | "employee-ops-tasks"
     | "employee-ops-people"
     | "employee-ops-points"
+    | "employee-ops-hiring"
     | "about-us"
     | "contact";
 

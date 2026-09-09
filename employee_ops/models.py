@@ -609,3 +609,166 @@ class EmployeeNote(models.Model):
 
     def __str__(self):
         return f"ملاحظة على {self.employee_id}"
+
+
+class JobPosting(models.Model):
+    """وظيفةٌ برابطٍ عامٍّ يُنشر — نمطُ `docshare`: مفتاحٌ عشوائيٌّ لا معرّفٌ متسلسل.
+
+    المعرّفُ المتسلسل يُخمَّن بالعدّ، فيصير «رابطٌ عامٌّ لوظيفةٍ واحدة» جولةً على
+    وظائف الشركات كلِّها. والمفتاحُ `secrets.token_urlsafe(32)` = ٤٣ محرفاً،
+    والعمودُ ٦٤ ليتّسع لتغيير الطول لاحقاً (نفسُ حسابِ `docshare`).
+
+    وتاريخُ الانتهاء **اختياريّ** هنا خلافاً لـ`docshare`: إعلانُ وظيفةٍ يُنشر
+    مرّةً ويُنسى، وانتهاءٌ إجباريٌّ يقتله بلا أن ينتبه أحد. والإغلاقُ يدويٌّ أو
+    بالتاريخ إن ضُبط — **ولا إغلاقَ بعدد المتقدّمين**.
+    """
+
+    EMPLOYMENT_TYPE_CHOICES = [
+        ("full_time", "دوام كامل"),
+        ("part_time", "دوام جزئي"),
+        ("contract", "عقد"),
+        ("temporary", "مؤقت"),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="employee_ops_jobs",
+    )
+    title = models.CharField(max_length=200, verbose_name="عنوان الوظيفة")
+    description = models.TextField(verbose_name="وصف الوظيفة")
+    # اختياريّاتٌ كلُّها: «إلزاميّ: العنوان · الوصف» لا غير.
+    requirements = models.TextField(blank=True, default="", verbose_name="المتطلبات")
+    location = models.CharField(max_length=200, blank=True, default="", verbose_name="المكان")
+    employment_type = models.CharField(
+        max_length=20,
+        choices=EMPLOYMENT_TYPE_CHOICES,
+        blank=True,
+        default="",
+        verbose_name="نوع الدوام",
+    )
+    salary_range = models.CharField(
+        max_length=120, blank=True, default="", verbose_name="نطاق الراتب"
+    )
+
+    token = models.CharField(
+        max_length=64, unique=True, db_index=True, verbose_name="مفتاح الرابط العام"
+    )
+    is_open = models.BooleanField(default=True, verbose_name="مفتوحة للتقديم")
+    # فارغٌ = بلا انتهاء، وهو الوضعُ الطبيعيُّ لإعلان وظيفة.
+    expires_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="تاريخ انتهاء الرابط"
+    )
+    closed_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ الإغلاق")
+
+    created_by = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "وظيفة"
+        verbose_name_plural = "الوظائف"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["tenant", "is_open", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return self.title
+
+
+class JobApplicant(models.Model):
+    """متقدّمٌ على وظيفة — **مُدخَلُ مجهولٍ محجورٌ بحالة «جديد»**.
+
+    أربعُ حالاتٍ فقط تصف **المتقدّم** لا عملَ المالك: جديد ← للمقابلة ← موظَّف،
+    و«مرفوض» من أيّ نقطة. وما حُذف من الاقتراح الأصليّ (أربعَ عشرةَ حالة) كان
+    يصف عملَ المالك، ومكانُه الملاحظة.
+
+    و`cv_url` **لا يُسلَّم لأحدٍ في أيّ ردّ**: سيرةُ متقدّمٍ بيانٌ شخصيٌّ لإنسانٍ
+    خارج الشركة، والملفّاتُ على مزوّدٍ خارجيّ حيث **الرابطُ هو الصلاحية** — فمن
+    يقرأ الرابطَ يقرأ السيرة كائناً من كان. تُقدَّم عبر مسارٍ يفحص
+    `employee_ops.manage` ويُعيد التوجيهَ لحظيّاً، ولا يُطبع الحقلُ في مُسلسِل.
+    """
+
+    STATUS_NEW = "new"
+    STATUS_INTERVIEW = "interview"
+    STATUS_HIRED = "hired"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (STATUS_NEW, "جديد"),
+        (STATUS_INTERVIEW, "للمقابلة"),
+        (STATUS_HIRED, "موظَّف"),
+        (STATUS_REJECTED, "مرفوض"),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="employee_ops_applicants",
+    )
+    job = models.ForeignKey(
+        JobPosting,
+        on_delete=models.CASCADE,
+        related_name="applicants",
+    )
+    # إلزاميّان: الاسمُ ورقمُ التواصل — وهو كلُّ ما يحتاجه المالك ليتّصل.
+    name = models.CharField(max_length=200, verbose_name="اسم المتقدم")
+    phone = models.CharField(max_length=40, verbose_name="رقم التواصل")
+    email = models.EmailField(blank=True, default="", verbose_name="البريد")
+    about = models.TextField(blank=True, default="", verbose_name="نبذة")
+    # اختياريّةٌ عمداً: كلُّ ملفٍّ مرفوعٍ من مجهولٍ سطحُ هجوم، ومتقدّمٌ بلا ملفٍّ
+    # جاهزٍ يملأ النبذةَ ويترك رقمَه. الإلزامُ يخسر متقدّمين ويشتري خطراً.
+    cv_url = models.URLField(max_length=500, blank=True, default="", verbose_name="رابط السيرة")
+    cv_name = models.CharField(max_length=255, blank=True, default="", verbose_name="اسم ملف السيرة")
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_NEW,
+        verbose_name="الحالة",
+    )
+    # نجومٌ من خمس: صفرٌ = بلا تقييم. لمن يملك `employee_ops.manage` بلا صلاحيةٍ
+    # منفصلة — التقييمُ جزءٌ من إدارة التوظيف لا بابٌ ثانٍ يُحرس.
+    rating = models.PositiveSmallIntegerField(default=0, verbose_name="التقييم")
+    notes = models.TextField(blank=True, default="", verbose_name="ملاحظات المدير")
+
+    # يُربط عند إنشاء الموظف من المتقدّم — **إنشاءٌ يدويٌّ مملوءٌ مسبقاً** لا
+    # تحويلٌ آليّ: الإنشاء يستهلك مقعداً ويطلق دعوة، وكلاهما أثقلُ من ضغطة.
+    hired_employee = models.ForeignKey(
+        "hr.Employee",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="سجل الموظف",
+    )
+
+    reference_code = models.CharField(
+        max_length=32, verbose_name="رقم المرجع"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "متقدم على وظيفة"
+        verbose_name_plural = "المتقدمون"
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "reference_code"],
+                name="employee_ops_applicant_reference_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status", "-created_at"]),
+            models.Index(fields=["tenant", "job", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.name} — {self.reference_code}"

@@ -550,6 +550,14 @@ REST_FRAMEWORK = {
         # متابعة الموظفين (`employee_ops`): رابط الدعوة العام — سقف تقنين لحماية
         # الرابط العام من تخمين الرموز وإنشاء الحسابات المتكرر.
         "employee_ops_invite": os.environ.get("THROTTLE_RATE_EMPLOYEE_INVITE", "10/min"),
+        # المواصفة #186 (بوابة التوظيف): **الشرط الثالث** — خانقٌ خاصٌّ على نقطة
+        # التقديم أضيقُ من أضيقِ خانقٍ قائم. كتابةٌ من مجهولٍ تفتح ملفاً وتُنشئ
+        # صفّاً، لا قراءةٌ تُعاد. والقراءةُ العامّة لصفحة الوظيفة أوسع: الرابطُ
+        # يُفتح ويُعاد تحميلُه، وليس وراءه كتابة.
+        # وهذان المقبضان **زينةٌ بلا `DRF_NUM_PROXIES`** — يحرس ذلك فحصُ النظام
+        # `employee_ops.W001`/`E001`.
+        "employee_ops_apply": os.environ.get("THROTTLE_RATE_EMPLOYEE_APPLY", "5/hour"),
+        "employee_ops_job_public": os.environ.get("THROTTLE_RATE_EMPLOYEE_JOB", "60/min"),
     },
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }

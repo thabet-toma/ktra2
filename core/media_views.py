@@ -168,7 +168,14 @@ def upload_media_file(
         )
 
     _record_asset(result, folder=target_folder, tenant=tenant, uploaded_by=uploaded_by)
-    logger.info("media_upload ok name=%s -> %s", getattr(f, "name", "?"), url[:80])
+    # **المعرّفُ لا الرابط**: رابطُ Cloudinary صلاحيةٌ بذاته — من قرأ السطرَ قرأ
+    # الملفّ. صار هذا يهمّ فعلاً بعد أن دخلت سِيَرُ المتقدّمين (وهم أشخاصٌ خارج
+    # الشركة) من هذا المخنق نفسِه.
+    logger.info(
+        "media_upload ok name=%s public_id=%s",
+        getattr(f, "name", "?"),
+        result.get("public_id", "?"),
+    )
     return url
 
 

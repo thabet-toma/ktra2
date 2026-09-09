@@ -125,6 +125,8 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "employee-ops-tasks": "employee_ops.self",
   "employee-ops-people": "employee_ops.manage",
   "employee-ops-points": "employee_ops.self",
+  // التوظيفُ إدارةٌ خالصة: وظائفُ الشركة وبياناتُ أشخاصٍ خارجها.
+  "employee-ops-hiring": "employee_ops.manage",
   // «الرئيسية» تختار بين اللوحة التجارية والشخصية — لا تُدرَج هنا كي لا تُحجب
   // الشاشة كلياً؛ الاختيار يتم بدور manager الفعلي في App.tsx.
 };
@@ -164,6 +166,7 @@ export const VIEW_MODULES: Record<string, string> = {
   "employee-ops-tasks": "employee_ops",
   "employee-ops-people": "employee_ops",
   "employee-ops-points": "employee_ops",
+  "employee-ops-hiring": "employee_ops",
 };
 
 /**

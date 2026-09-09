@@ -39,6 +39,10 @@ captureTabHandoffOnBoot();
 import { StoreCartProvider } from './contexts/StoreCartContext';
 
 const StoreIndexPage = React.lazy(() => import('./components/store/StoreIndexPage').then((module) => ({ default: module.StoreIndexPage })));
+// متابعة الموظفين — الصفحتان العامّتان الوحيدتان في الوحدة: قبولُ الدعوة
+// والتقديمُ على وظيفة. كلتاهما خارج مزوّد المصادقة كصفحة المتجر العامّة.
+const PublicJoinPage = React.lazy(() => import('./components/employee-ops/PublicJoinPage').then((module) => ({ default: module.PublicJoinPage })));
+const PublicJobPage = React.lazy(() => import('./components/employee-ops/PublicJobPage').then((module) => ({ default: module.PublicJobPage })));
 const StorefrontPage = React.lazy(() => import('./components/store/StorefrontPage').then((module) => ({ default: module.StorefrontPage })));
 const StoreProductPage = React.lazy(() => import('./components/store/StoreProductPage').then((module) => ({ default: module.StoreProductPage })));
 const StoreCampaignPage = React.lazy(() => import('./components/store/StoreCampaignPage').then((module) => ({ default: module.StoreCampaignPage })));
@@ -209,6 +213,10 @@ root.render(
           <Route path="/store/:slug/p/:productId" element={<PublicStoreShell><StoreProductRoute /></PublicStoreShell>} />
           <Route path="/store/:slug/c/:collectionSlug" element={<PublicStoreShell><StoreCampaignRoute /></PublicStoreShell>} />
           <Route path="/store/:slug/cat/:categoryParam" element={<PublicStoreShell><StoreCategoryRoute /></PublicStoreShell>} />
+
+          {/* متابعة الموظفين: دعوةُ موظف · وظيفةٌ عامّة — بلا مصادقةٍ ولا شركةِ جلسة */}
+          <Route path="/join/:token" element={<ToastProvider><PublicJoinPage /></ToastProvider>} />
+          <Route path="/jobs/:token" element={<ToastProvider><PublicJobPage /></ToastProvider>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
