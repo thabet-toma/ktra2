@@ -28,8 +28,9 @@ PLATFORM_PACKAGES = frozenset({
     "tenants",
 })
 
-#: القائمة البيضاء الصريحة — ما تستورده الوحدة فعلاً في المراحل الأولى والثانية والثالثة.
+#: القائمة البيضاء الصريحة — ما تستورده الوحدة فعلاً في المراحل الأولى والثانية والثالثة والرابعة.
 ALLOWLISTED_PLATFORM_MODULES = frozenset({
+    "core.models",              # TenantAsset للتحقق من المرفقات المرفوعة عبر خدمة الوسائط القائمة
     "core.platform_admin_api",  # IsPlatformAdmin لحراسة الصلاحيات
     "core.signals",             # company_member_changed إشارة تغيير عضوية الشركة
     "tenants.models",           # Tenant وUserCompanyMembership

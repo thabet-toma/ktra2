@@ -551,6 +551,7 @@ class ConcurrencyLockOrderTest(TransactionTestCase):
 
 #: ترتيبُ الأقفال المعلَن في رأس `platform_ops/services.py`.
 DECLARED_LOCK_ORDER = (
+    "IntegrationKey",
     "ServiceSubscription",
     "PlatformEmployee",
     "Engagement",

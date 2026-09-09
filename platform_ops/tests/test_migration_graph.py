@@ -63,3 +63,21 @@ class PlatformOpsMigrationGraphTest(SimpleTestCase):
         plan = self.loader.graph.forwards_plan((APP, migration_0003_name))
         self.assertEqual(plan[-1], (APP, migration_0003_name))
         self.assertIn((APP, "0002_engagement_agentgrantedmembership_and_more"), plan[:-1])
+
+    def test_migration_0004_exists_and_depends_on_0003(self):
+        """هجرة المرحلة الرابعة موجودة وتعتمد على 0003."""
+        migration_0004_name = "0004_workorder_attachment_ids_workorder_channel_and_more"
+        self.assertIn((APP, migration_0004_name), self.loader.graph.nodes)
+        migration = self.loader.disk_migrations[(APP, migration_0004_name)]
+        self.assertIn(
+            (APP, "0003_workorder_workordercomment_workorderdeliverable_and_more"),
+            migration.dependencies,
+        )
+
+    def test_forwards_plan_for_0004_places_all_dependencies_before_it(self):
+        """خطة البناء للأمام حتى 0004 تضع الاعتمادات قبلها وتختم بـ 0004."""
+        migration_0004_name = "0004_workorder_attachment_ids_workorder_channel_and_more"
+        plan = self.loader.graph.forwards_plan((APP, migration_0004_name))
+        self.assertEqual(plan[-1], (APP, migration_0004_name))
+        self.assertIn((APP, "0003_workorder_workordercomment_workorderdeliverable_and_more"), plan[:-1])
+

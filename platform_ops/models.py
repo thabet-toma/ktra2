@@ -9,6 +9,122 @@ from django.utils import timezone
 from tenants.models import Tenant, UserCompanyMembership
 
 
+class IntegrationKey(models.Model):
+    """مفتاح قناة الاستقبال لعمليات المنصة (المرحلة الرابعة: م٤).
+
+    صف لكل (شركة × قناة).
+    - المفتاح يُخزَّن مهشَّراً فقط (SHA-256)؛ الرمز الخام يظهر مرة واحدة لحظة التوليد.
+    - قابل للإبطال والتدوير مع طوابع الإبطال والتدوير.
+    - فرادة غير مشروطة لكل (tenant, channel) تفرضها MySQL بقيد غير شرطي.
+    """
+
+    class Channel(models.TextChoices):
+        WHATSAPP = "whatsapp", "واتساب"
+        TELEGRAM = "telegram", "تيليجرام"
+        EMAIL = "email", "بريد إلكتروني"
+        API = "api", "واجهة برمجية (API)"
+        WEBHOOK = "webhook", "ويب هوك"
+        PORTAL = "portal", "بوابة"
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "نشط"
+        REVOKED = "revoked", "مبطل"
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="platform_integration_keys",
+        verbose_name="الشركة",
+    )
+    channel = models.CharField(
+        max_length=50,
+        choices=Channel.choices,
+        default=Channel.WHATSAPP,
+        verbose_name="القناة",
+    )
+    token_hash = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        verbose_name="مهشر الرمز",
+        help_text="تجزئة SHA-256 للرمز الخام؛ الرمز الأصلي لا يُحفظ في القاعدة أبداً",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        verbose_name="الحالة",
+    )
+    name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name="تسمية المفتاح",
+    )
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ الإبطال",
+    )
+    revoked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="مُبطِل المفتاح",
+    )
+    revocation_reason = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="سبب الإبطال",
+    )
+    rotated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ التدوير",
+    )
+    revocation_history = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="سجل الإبطالات السابقة",
+        help_text=(
+            "كل إبطال سابق لهذا الصف: متى وبأمر من ولماذا. الفرادة على (شركة، قناة) "
+            "غير مشروطة فالصف واحد، ولولا هذا السجل لمحا إصدارُ مفتاحٍ جديد سببَ إبطال سابقه."
+        ),
+    )
+    last_used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ آخر استخدام",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "مفتاح قناة الاستقبال"
+        verbose_name_plural = "مفاتيح قنوات الاستقبال"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "channel"],
+                name="platform_ops_integrationkey_tenant_channel_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status"]),
+            models.Index(fields=["channel", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant} - {self.get_channel_display()} ({self.get_status_display()})"
+
+
 class PlatformEmployee(models.Model):
     """موظف عمليات المنصة.
 
@@ -471,6 +587,39 @@ class WorkOrder(models.Model):
         blank=True,
         verbose_name="موعد الأجل النهائي",
     )
+    channel = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        choices=IntegrationKey.Channel.choices,
+        verbose_name="قناة الاستقبال",
+    )
+    external_ref = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="المرجع الخارجي",
+        help_text="معرف فريد للرسالة/الطلب من القناة الخارجية لضمان idempotency",
+    )
+    integration_key = models.ForeignKey(
+        IntegrationKey,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_orders",
+        verbose_name="مفتاح التكامل",
+    )
+    intake_payload = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="حمولة الاستقبال الأصلية",
+    )
+    attachment_ids = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name="معرفات المرفقات",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -491,11 +640,18 @@ class WorkOrder(models.Model):
     class Meta:
         verbose_name = "أمر عمل"
         verbose_name_plural = "أوامر العمل"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "channel", "external_ref"],
+                name="platform_ops_workorder_tenant_channel_extref_uniq",
+            ),
+        ]
         indexes = [
             models.Index(fields=["tenant", "status"]),
             models.Index(fields=["tenant", "kind"]),
             models.Index(fields=["assignee", "status"]),
             models.Index(fields=["tenant", "created_at"]),
+            models.Index(fields=["channel", "external_ref"]),
         ]
 
     def __str__(self):

@@ -1,7 +1,7 @@
 """محولات بيانات عمليات المنصة."""
 from rest_framework import serializers
 
-from .models import PlatformEmployee, ServiceSubscription, WorkOrder
+from .models import IntegrationKey, PlatformEmployee, ServiceSubscription, WorkOrder
 
 
 class PlatformEmployeeSerializer(serializers.ModelSerializer):
@@ -62,6 +62,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "description",
             "kind",
             "source",
+            "channel",
+            "external_ref",
+            "attachment_ids",
             "assignee",
             "assignee_name",
             "status",
@@ -80,6 +83,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "channel",
+            "external_ref",
+            "attachment_ids",
             "status",
             "return_status",
             "waiting_seconds_total",
@@ -100,3 +106,32 @@ class WorkOrderSerializer(serializers.ModelSerializer):
 
     def get_effective_duration_seconds(self, obj):
         return obj.calculate_effective_duration_seconds()
+
+
+class IntegrationKeySerializer(serializers.ModelSerializer):
+    """عرضُ مفتاح القناة — **بلا رمزٍ ولا تجزئة**.
+
+    `token_hash` نفسُه لا يُعرَض: هو المادّةُ التي تُقارَن بها المحاولات، وعرضُه
+    يمنح المهاجمَ هدفاً يعمل عليه دون داعٍ. والرمزُ الخامُّ لا يُحفَظ أصلاً فلا
+    سبيلَ لعرضه بعد لحظةِ التوليد.
+    """
+
+    company_name = serializers.CharField(source="tenant.CompanyName", read_only=True)
+
+    class Meta:
+        model = IntegrationKey
+        fields = [
+            "id",
+            "tenant",
+            "company_name",
+            "channel",
+            "status",
+            "name",
+            "revoked_at",
+            "revocation_reason",
+            "rotated_at",
+            "last_used_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields

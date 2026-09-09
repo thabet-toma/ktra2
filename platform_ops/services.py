@@ -1,14 +1,16 @@
-"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة: الأساس ودورة الارتباط وأوامر العمل).
+"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة: الأساس ودورة الارتباط وأوامر العمل وقناة الاستقبال).
 
 ترتيب الأقفال الصارم لمنع التعارضات والـ Deadlocks على MySQL:
-ServiceSubscription -> PlatformEmployee -> Engagement -> WorkOrder
+IntegrationKey -> ServiceSubscription -> PlatformEmployee -> Engagement -> WorkOrder
 -> WorkOrderDeliverable -> UserCompanyMembership
 ملاحظة: لا يُستعمل select_related مع select_for_update لتجنب قفل جداول غير مقصودة.
 """
 import copy
 import datetime
+import hashlib
+import secrets
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from tenants.models import Tenant, UserCompanyMembership
@@ -16,6 +18,7 @@ from tenants.models import Tenant, UserCompanyMembership
 from .models import (
     AgentGrantedMembership,
     Engagement,
+    IntegrationKey,
     PlatformEmployee,
     ServiceSubscription,
     WorkOrder,
@@ -32,6 +35,19 @@ class PlatformOpsError(Exception):
         self.detail = detail
         self.status_code = status_code
         super().__init__(detail)
+
+
+class IntegrationKeyError(PlatformOpsError):
+    """خطأ في عمليات مفاتيح قنوات الاستقبال."""
+
+    pass
+
+
+class IntegrationKeyConflict(IntegrationKeyError):
+    """تعارض في مفتاح قناة الاستقبال (موجود مسبقاً أو غير متوافق)."""
+
+    def __init__(self, code: str, detail: str, status_code: int = 409):
+        super().__init__(code, detail, status_code=status_code)
 
 
 class WorkOrderError(PlatformOpsError):
@@ -972,3 +988,303 @@ def calculate_work_order_sla(*, work_order: WorkOrder, now=None) -> dict:
         "is_overdue": is_overdue,
         "deadline_at": work_order.deadline_at,
     }
+
+
+# ==============================================================================
+# المرحلة الرابعة (م٤): مفاتيح القنوات وقناة الاستقبال وIdempotency واحتساب الفوترة
+# ==============================================================================
+
+def hash_integration_token(raw_token: str) -> str:
+    """تجزئة الرمز الخام لمفتاح القناة باستخدام SHA-256."""
+    if not raw_token or not isinstance(raw_token, str):
+        return ""
+    return hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+
+
+@transaction.atomic
+def generate_integration_key(
+    *,
+    tenant: Tenant,
+    channel: str = IntegrationKey.Channel.WHATSAPP,
+    name: str = "",
+    created_by=None,
+) -> tuple[IntegrationKey, str]:
+    """توليد مفتاح قناة جديد لشركة زبون.
+
+    القواعد:
+    1. صف لكل (شركة × قناة). إذا وُجد مفتاح مسبق لنفس القناة والشركة، يُرفع خطأ تعارض.
+    2. المفتاح يُخزَّن مهشَّراً فقط (SHA-256)؛ الرمز الخام يظهر مرة واحدة فقط لحظة التوليد.
+    3. الخدمة يجب أن تكون نشطة للشركة لتوليد المفتاح.
+    """
+    tenant_obj = tenant if isinstance(tenant, Tenant) else Tenant.objects.get(pk=tenant)
+
+    if channel not in IntegrationKey.Channel.values:
+        raise IntegrationKeyError("invalid_channel", f"قناة الاستقبال غير صالحة: {channel}")
+
+    if not is_service_active(tenant_obj):
+        raise IntegrationKeyError(
+            "subscription_not_active",
+            "خدمة المتابعة والإدخال غير نشطة لهذه الشركة.",
+            status_code=403,
+        )
+
+    # صفٌّ واحدٌ لكلّ (شركة، قناة) — والفرادةُ **غيرُ مشروطة** فتفرضها MySQL فعلاً،
+    # بخلاف `UniqueConstraint(condition=…)` التي تتجاهلها بصمت. ولذلك لا يمكن أن
+    # يتعايش صفٌّ مبطَلٌ وآخرُ نشطٌ للقناة نفسِها: **المفتاحُ المبطَل يُعاد إصدارُه على
+    # صفِّه** بسرٍّ جديدٍ لا يُنشأ صفٌّ ثانٍ. ولولا ذلك لصارت قناةٌ أُبطل مفتاحُها
+    # عاجزةً عن الحصول على مفتاحٍ جديدٍ إلى الأبد.
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hash_integration_token(raw_token)
+
+    existing = (
+        IntegrationKey.objects.select_for_update()
+        .filter(tenant=tenant_obj, channel=channel)
+        .first()
+    )
+    if existing:
+        if existing.status == IntegrationKey.Status.ACTIVE:
+            raise IntegrationKeyConflict(
+                "already_exists",
+                f"يوجد مفتاح تكامل نشط مسبق لقناة {channel} لهذه الشركة.",
+            )
+
+        # إعادةُ الإصدار على الصفّ نفسِه — وأثرُ الإبطال السابق يُحفَظ ولا يُمحى.
+        existing.revocation_history = list(existing.revocation_history or []) + [
+            {
+                "revoked_at": existing.revoked_at.isoformat() if existing.revoked_at else None,
+                "revoked_by_id": existing.revoked_by_id,
+                "reason": existing.revocation_reason,
+            }
+        ]
+        existing.token_hash = token_hash
+        existing.status = IntegrationKey.Status.ACTIVE
+        existing.rotated_at = timezone.now()
+        existing.revoked_at = None
+        existing.revoked_by = None
+        existing.revocation_reason = ""
+        if name:
+            existing.name = name.strip()
+        existing.save(
+            update_fields=[
+                "token_hash",
+                "status",
+                "rotated_at",
+                "revoked_at",
+                "revoked_by",
+                "revocation_reason",
+                "revocation_history",
+                "name",
+                "updated_at",
+            ]
+        )
+        return existing, raw_token
+
+    # **والقفلُ لا يُغني هنا**: `select_for_update` على صفٍّ غيرِ موجودٍ لا يقفل شيئاً،
+    # فإصداران متزامنان لقناةٍ بكرٍ يمرّان معاً ويصطدمان عند الكتابة. القيدُ في القاعدة
+    # هو الحارسُ الحقيقيّ، وواجبُ الخدمة أن تترجم اصطدامَه تعارضاً مفهوماً لا خطأَ ٥٠٠.
+    try:
+        with transaction.atomic():
+            key = IntegrationKey.objects.create(
+                tenant=tenant_obj,
+                channel=channel,
+                token_hash=token_hash,
+                status=IntegrationKey.Status.ACTIVE,
+                name=name.strip() if name else "",
+            )
+    except IntegrityError:
+        raise IntegrationKeyConflict(
+            "already_exists",
+            f"يوجد مفتاح تكامل نشط مسبق لقناة {channel} لهذه الشركة.",
+        )
+
+    return key, raw_token
+
+
+@transaction.atomic
+def rotate_integration_key(
+    *,
+    key: IntegrationKey,
+    rotated_by=None,
+) -> tuple[IntegrationKey, str]:
+    """تدوير مفتاح القناة: توليد رمز خام جديد وإبطال القديم فوراً.
+
+    ترتيب القفل: IntegrationKey
+    يقبل الجديد ويرفض القديم؛ الرمز الخام الجديد يظهر مرة واحدة فقط.
+    """
+    key_pk = getattr(key, "pk", key)
+    locked_key = IntegrationKey.objects.select_for_update().get(pk=key_pk)
+
+    # **المبطَلُ لا يُدوَّر**: التدويرُ كان يقلب الحالةَ إلى نشطٍ ويمسح `revoked_at`
+    # و`revoked_by` و`revocation_reason` — فيُحيي مفتاحاً أُبطل لأنّه تسرّب **ويمحو
+    # سببَ إبطاله**، وهو نقضٌ لما تَعِد به الدالّةُ المجاورة: «الصفُّ لا يُحذف لضمان
+    # أثر المراجعة». وإعادةُ الإصدار بابُها `generate_integration_key` وهي تحفظ الأثر.
+    if locked_key.status == IntegrationKey.Status.REVOKED:
+        raise IntegrationKeyError(
+            "key_revoked",
+            "المفتاح مبطل ولا يُدوَّر — أصدِر مفتاحاً جديداً لهذه القناة.",
+        )
+
+    new_raw_token = secrets.token_urlsafe(32)
+    new_hash = hash_integration_token(new_raw_token)
+
+    locked_key.token_hash = new_hash
+    locked_key.rotated_at = timezone.now()
+    locked_key.save(
+        update_fields=["token_hash", "rotated_at", "updated_at"]
+    )
+
+    return locked_key, new_raw_token
+
+
+@transaction.atomic
+def revoke_integration_key(
+    *,
+    key: IntegrationKey,
+    revoked_by=None,
+    reason: str = "",
+) -> IntegrationKey:
+    """إبطال مفتاح القناة نهائياً.
+
+    ترتيب القفل: IntegrationKey
+    الصف لا يُحذف لضمان أثر المراجعة والمساءلة.
+    """
+    key_pk = getattr(key, "pk", key)
+    locked_key = IntegrationKey.objects.select_for_update().get(pk=key_pk)
+
+    if locked_key.status == IntegrationKey.Status.REVOKED:
+        raise IntegrationKeyError("already_revoked", "مفتاح التكامل مبطل مسبقاً.")
+
+    locked_key.status = IntegrationKey.Status.REVOKED
+    locked_key.revoked_at = timezone.now()
+    locked_key.revoked_by = revoked_by
+    locked_key.revocation_reason = (reason or "").strip()[:2000]
+    locked_key.save(
+        update_fields=[
+            "status",
+            "revoked_at",
+            "revoked_by",
+            "revocation_reason",
+            "updated_at",
+        ]
+    )
+
+    return locked_key
+
+
+def authenticate_integration_key(raw_token: str) -> tuple[IntegrationKey | None, str]:
+    """مصادقة الرمز الخام لمفتاح القناة والتحقق من حالته.
+
+    يعيد (المفتاح, "ok") أو (None, سبب_الرفض).
+    """
+    if not raw_token or not isinstance(raw_token, str):
+        return None, "missing"
+
+    token_hash = hash_integration_token(raw_token)
+    key = (
+        IntegrationKey.objects.select_related("tenant")
+        .filter(token_hash=token_hash)
+        .first()
+    )
+
+    if not key:
+        return None, "invalid"
+
+    if key.status == IntegrationKey.Status.REVOKED:
+        return None, "revoked"
+
+    if key.status != IntegrationKey.Status.ACTIVE:
+        return None, "inactive"
+
+    return key, "ok"
+
+
+@transaction.atomic
+def receive_channel_work_order(
+    *,
+    key: IntegrationKey,
+    title: str,
+    external_ref: str,
+    description: str = "",
+    kind: str = WorkOrder.Kind.DATA_ENTRY,
+    attachment_ids: list[int] | None = None,
+    intake_payload: dict | None = None,
+    custom_policy: dict | None = None,
+) -> tuple[WorkOrder, bool]:
+    """استقبال وقبول أمر عمل من قناة التكامل واحتساب العملية المفوترة تحت قفل.
+
+    ترتيب القفل الصارم: ServiceSubscription -> WorkOrder
+    القواعد:
+    1. الشركة تُستنتج حصراً من المفتاح (key.tenant).
+    2. فرادة (tenant, channel, external_ref) تمنع التكرار (idempotency):
+       إعادة إرسال نفس المرجع الخارجي تُعيد أمر العمل نفسه دون إنشاء جديد،
+       ودون احتساب عملية ثانية.
+    3. احتساب العملية يزيد consumed_quota تحت قفل وفي نفس المعاملة الذرية
+       فقط عند إنشاء أمر عمل جديد.
+    """
+    clean_ref = str(external_ref or "").strip()
+    if not clean_ref:
+        raise WorkOrderError("external_ref_required", "حقل المرجع الخارجي (external_ref) إلزامي.")
+
+    clean_title = str(title or "").strip()
+    if not clean_title:
+        clean_title = f"طلب من قناة {key.get_channel_display()} ({clean_ref})"
+
+    if kind not in WorkOrder.Kind.values:
+        raise WorkOrderError("invalid_kind", f"نوع أمر العمل غير صالح: {kind}")
+
+    # 1. قفل اشتراك الخدمة للتأكد من نشاطه وحماية عداد العمليات
+    subscription = (
+        ServiceSubscription.objects.select_for_update()
+        .filter(tenant_id=key.tenant_id)
+        .first()
+    )
+    if not subscription or subscription.status != ServiceSubscription.Status.ACTIVE:
+        raise PlatformOpsError(
+            "subscription_not_active",
+            "خدمة المتابعة والإدخال غير نشطة لهذه الشركة.",
+            status_code=403,
+        )
+
+    # 2. فحص idempotency تحت قفل الاشتراك لتجنب التكرار المتزامن
+    existing_wo = WorkOrder.objects.filter(
+        tenant_id=key.tenant_id,
+        channel=key.channel,
+        external_ref=clean_ref,
+    ).first()
+
+    if existing_wo:
+        # إعادة نفس أمر العمل دون احتساب عملية ثانية
+        return existing_wo, False
+
+    # 3. احتساب العملية المفوترة بزيادة العداد تحت القفل
+    subscription.consumed_quota += 1
+    subscription.save(update_fields=["consumed_quota", "updated_at"])
+
+    # 4. إنشاء أمر العمل الجديد
+    rec_at = timezone.now()
+    policy_snapshot = resolve_policy_snapshot_for_work_order(kind, custom_policy)
+    sla_hours = policy_snapshot.get("sla_hours", 24)
+    deadline_at = rec_at + datetime.timedelta(hours=sla_hours)
+
+    work_order = WorkOrder.objects.create(
+        tenant=key.tenant,
+        title=clean_title,
+        description=description.strip() if description else "",
+        kind=kind,
+        source=WorkOrder.Source.CHANNEL,
+        channel=key.channel,
+        external_ref=clean_ref,
+        integration_key=key,
+        status=WorkOrder.Status.RECEIVED,
+        received_at=rec_at,
+        policy_snapshot=policy_snapshot,
+        deadline_at=deadline_at,
+        intake_payload=intake_payload or {},
+        attachment_ids=attachment_ids or [],
+    )
+
+    # تحديث وقت آخر استخدام للمفتاح
+    key.last_used_at = rec_at
+    key.save(update_fields=["last_used_at"])
+
+    return work_order, True
