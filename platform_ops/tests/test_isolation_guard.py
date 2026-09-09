@@ -28,10 +28,11 @@ PLATFORM_PACKAGES = frozenset({
     "tenants",
 })
 
-#: القائمة البيضاء الصريحة — ما تستورده الوحدة فعلاً في المرحلة الأولى.
+#: القائمة البيضاء الصريحة — ما تستورده الوحدة فعلاً في المرحلتين الأولى والثانية.
 ALLOWLISTED_PLATFORM_MODULES = frozenset({
     "core.platform_admin_api",  # IsPlatformAdmin لحراسة الصلاحيات
-    "tenants.models",           # Tenant لربط اشتراك الخدمة
+    "core.signals",             # company_member_changed إشارة تغيير عضوية الشركة
+    "tenants.models",           # Tenant وUserCompanyMembership
 })
 
 def check_source_for_disallowed_imports(source: str, filepath: str = "<string>") -> list[str]:

@@ -13,6 +13,7 @@ from core.api_defaults import ApiAuthAndUser
 from core.access import require_perm
 from core.activity import log_activity
 from core.plans import enforce_limits
+from core.signals import company_member_changed
 from core.tenant_utils import get_tenant
 from .models import Branch, BookHandoverRequest, Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
 from .serializers import BookHandoverRequestSerializer, BranchSerializer, TenantBookSerializer, TenantSettingsSerializer, TenantSerializer, UserCompanyMembershipSerializer
@@ -358,6 +359,15 @@ class TenantViewSet(viewsets.ModelViewSet):
             request=request,
             user=request.user,
         )
+        company_member_changed.send(
+            sender=UserCompanyMembership,
+            actor=request.user,
+            membership=membership,
+            role_before="",
+            role_after=membership.role,
+            tenant=tenant,
+            request=request,
+        )
         return Response(self._member_payload(membership), status=status.HTTP_201_CREATED)
 
     def _get_member_or_400(self, tenant, request):
@@ -393,6 +403,7 @@ class TenantViewSet(viewsets.ModelViewSet):
             })
         if role != "manager":
             self._assert_not_last_manager(tenant, m)
+        old_role = m.role
         old_role_display = m.get_role_display()
         m.role = role
         m.save(update_fields=["role"])
@@ -406,6 +417,15 @@ class TenantViewSet(viewsets.ModelViewSet):
             tenant=tenant,
             request=request,
             user=request.user,
+        )
+        company_member_changed.send(
+            sender=UserCompanyMembership,
+            actor=request.user,
+            membership=m,
+            role_before=old_role,
+            role_after=m.role,
+            tenant=tenant,
+            request=request,
         )
         return Response(self._member_payload(m))
 

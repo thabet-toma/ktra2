@@ -32,3 +32,17 @@ class PlatformOpsMigrationGraphTest(SimpleTestCase):
         self.assertEqual(plan[-1], (APP, "0001_initial"))
         preceding_apps = {app for app, _ in plan[:-1]}
         self.assertIn("tenants", preceding_apps)
+
+    def test_migration_0002_exists_and_depends_on_0001(self):
+        """هجرة المرحلة الثانية موجودة وتعتمد على 0001_initial."""
+        migration_0002_name = "0002_engagement_agentgrantedmembership_and_more"
+        self.assertIn((APP, migration_0002_name), self.loader.graph.nodes)
+        migration = self.loader.disk_migrations[(APP, migration_0002_name)]
+        self.assertIn((APP, "0001_initial"), migration.dependencies)
+
+    def test_forwards_plan_for_0002_places_all_dependencies_before_it(self):
+        """خطة البناء للأمام حتى 0002 تضع الاعتمادات قبلها وتختم بـ 0002."""
+        migration_0002_name = "0002_engagement_agentgrantedmembership_and_more"
+        plan = self.loader.graph.forwards_plan((APP, migration_0002_name))
+        self.assertEqual(plan[-1], (APP, migration_0002_name))
+        self.assertIn((APP, "0001_initial"), plan[:-1])
