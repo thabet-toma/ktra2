@@ -37,6 +37,7 @@ __all__ = [
     "unpost_document",
     "purge_journals",
     "get_account_by_code",
+    "get_accounts_by_codes",
     "ensure_account",
     "ensure_partner_account",
     "sync_partner_accounting",
@@ -253,6 +254,16 @@ def get_account_by_code(tenant, code: str, *, active_only: bool = False) -> Opti
     if active_only:
         qs = qs.filter(is_active=True)
     return qs.first()
+
+
+def get_accounts_by_codes(tenant, codes):
+    """حساباتُ الشركة التي تطابق أكوادَ المجموعة — قراءةٌ جماعيّةٌ باستعلامٍ واحد.
+
+    `get_account_by_code` تخدم الكودَ المفرد؛ ونداؤها في حلقةٍ على عشرات الأكواد
+    استعلامٌ لكلّ كود. تُعيد `QuerySet` كي يبقى للمنادي أن يختار الأعمدة
+    (`values_list("code", ...)` مثلاً) بلا تحميلِ الصفوف كاملة.
+    """
+    return Account.objects.filter(tenant=tenant, code__in=list(codes))
 
 
 def ensure_account(

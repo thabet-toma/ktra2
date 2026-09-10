@@ -108,6 +108,12 @@ forbidden_modules =
 ignore_imports =
     logistics.serializers.* -> partners.serializers
     logistics.serializers.* -> sales.serializers
+    # 2026-09-10: الاختبارات مستثناة كما في العقدين 2 و3 (`*.tests.*` هناك).
+    # العقد يحرس **تشابك الإنتاج**: أن يعتمد تشغيلُ app على داخليّات أخرى.
+    # واختبارٌ يؤكّد ضمانةً في app أخرى (هنا: `supplier_note` للقراءة فقط في
+    # مُسلسِل عرض المورّد — حارس T-132) يقصد ذلك الاعتماد قصداً، وهو ما يُراد.
+    *.tests.* -> logistics.serializers
+    *.tests.* -> logistics.serializers.*
 
 # ─────────────────────────────────────────────────────────────────────────────
 # العقد 2 — ممنوع استيراد accounting.models من خارج accounting

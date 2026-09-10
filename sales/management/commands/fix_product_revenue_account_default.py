@@ -23,7 +23,6 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from accounting.models import Account
 from sales.models import SalesSettings
 from sales.services import resolve_product_revenue_account
 

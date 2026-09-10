@@ -53,14 +53,13 @@ class Command(BaseCommand):
         except Tenant.DoesNotExist:
             raise CommandError(f"لا توجد شركة TenantID={tenant_id}")
 
-        from accounting.models import Account
+        from accounting.api import get_accounts_by_codes
         from tenants.services import COA_DATA
 
         coa_rows = template_config["coa"] or COA_DATA
         wanted_codes = {row[0] for row in coa_rows}
         existing_codes = set(
-            Account.objects.filter(tenant=tenant, code__in=wanted_codes)
-            .values_list("code", flat=True)
+            get_accounts_by_codes(tenant, wanted_codes).values_list("code", flat=True)
         )
         accounts_to_create = sorted(wanted_codes - existing_codes)
 

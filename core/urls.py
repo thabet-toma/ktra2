@@ -25,7 +25,6 @@ from core import (
 from core.activity_views import ActivityLogViewSet
 from core.platform_admin_api import DevelopmentNoteViewSet, PlatformRouter
 from inventory import agent_api as inventory_agent_api
-from inventory.views import ProductLookupViewSet
 from partners import agent_api as partners_agent_api
 from sales import agent_api as sales_agent_api
 
@@ -74,7 +73,9 @@ urlpatterns = [
     # ISSUE #88: منتقي المستندات — عقد `view=lookup` وحده، خارج بادئة
     # `/api/inventory/` كي لا يبتلعه قناع قالب المكتب (`TemplateSurfacePermission`
     # يفحص بادئة المسار لا معاملات الاستعلام). راجع `ProductLookupViewSet`.
-    path('api/lookup/products/', ProductLookupViewSet.as_view({'get': 'list'})),
+    # المسارُ نفسُه حرفيّاً، لكن بـ`include` نصّيٍّ لا باستيرادِ `inventory.views`:
+    # داخليّاتُ الـapps ليست واجهاتٍ عامّة (عقدُ `.importlinter`).
+    path('api/lookup/products/', include('inventory.urls_lookup')),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.
     path('api/reports/', reports_api.reports_catalog),

@@ -1007,7 +1007,7 @@ class PublicSupplierQuoteRequestViewSet(TenantQuerySetMixin, viewsets.ReadOnlyMo
     @action(detail=True, methods=['get'])
     def matches(self, request, pk=None):
         """اقتراحاتُ مطابقةٍ لطرفٍ قائم — لا تُلزم ولا تحجب الاعتماد."""
-        from partners.serializers import suggest_partner_matches
+        from partners.services import suggest_partner_matches
 
         row = self.get_object()
         tenant = get_tenant(request)
