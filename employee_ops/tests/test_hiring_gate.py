@@ -626,6 +626,66 @@ class ThrottleIdentityCannotBeForgedTest(HiringBaseTest):
         self.assertEqual(codes[2], 429, "تزويرُ الترويسة لا يجدّد الدلو")
 
 
+class TheOtherTwoPublicEndpointsCannotBeForgedEither(HiringBaseTest):
+    """القضيّة #208: نقطتان من ثلاثٍ كانتا على `ScopedRateThrottle` المجرَّد.
+
+    `PublicJobApplyView` وحدَها كانت على `ClientIpScopedThrottle`. أمّا
+    `PublicJobView` (قراءةُ الوظيفة) و`AcceptInvitationPublicView` (قبولُ الدعوة)
+    فبقيتا على الصنف المجرَّد — وهويّتُه من `X-Forwarded-For` حين يكون
+    `NUM_PROXIES` غيرَ مضبوط، وهو غيرُ مضبوطٍ هنا. فترويسةٌ جديدةٌ لكلّ طلبٍ
+    تشتري دلواً جديداً، ويصير الحدُّ بلا حدّ.
+
+    **وهذان التأكيدان كانا يسقطان قبل الإصلاح.**
+    """
+
+    @override_settings(
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+    )
+    def test_public_job_read_ignores_a_forged_forwarded_for(self):
+        from django.core.cache import cache
+        from rest_framework.throttling import ScopedRateThrottle
+
+        cache.clear()
+        job = self.make_job()
+        self.client.force_authenticate(user=None)
+        path = f"/api/employee-ops/public/jobs/{job['token']}/"
+
+        with mock.patch.dict(
+            ScopedRateThrottle.THROTTLE_RATES, {"employee_ops_job_public": "2/hour"}
+        ):
+            codes = [
+                self.client.get(path, HTTP_X_FORWARDED_FOR=f"10.0.0.{i}").status_code
+                for i in range(3)
+            ]
+
+        self.assertEqual(codes[:2], [200, 200], codes)
+        self.assertEqual(codes[2], 429, "تزويرُ الترويسة اشترى دلواً جديداً لقراءة الوظيفة")
+
+    @override_settings(
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+    )
+    def test_invitation_acceptance_ignores_a_forged_forwarded_for(self):
+        from django.core.cache import cache
+        from rest_framework.throttling import ScopedRateThrottle
+
+        cache.clear()
+        self.client.force_authenticate(user=None)
+        # رمزٌ لا وجودَ له: المهمُّ أن يمرّ الطلبُ بالخانق قبل أن يُردّ،
+        # فالخنقُ يقع قبل حلّ الرمز لا بعده.
+        path = "/api/employee-ops/invitations/accept/no-such-token-208/"
+
+        with mock.patch.dict(
+            ScopedRateThrottle.THROTTLE_RATES, {"employee_ops_invite": "2/hour"}
+        ):
+            codes = [
+                self.client.get(path, HTTP_X_FORWARDED_FOR=f"10.0.1.{i}").status_code
+                for i in range(3)
+            ]
+
+        self.assertNotIn(429, codes[:2], codes)
+        self.assertEqual(codes[2], 429, "تزويرُ الترويسة اشترى دلواً جديداً لقبول الدعوة")
+
+
 class WordContainerSignaturesAreNotEnoughTest(HiringBaseTest):
     """توقيعُ ZIP يطابق كلَّ أرشيف، وتوقيعُ OLE يطابق **`.msi`**.
 

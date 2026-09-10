@@ -30,7 +30,6 @@ from rest_framework.exceptions import APIException, NotFound, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from core.access import require_perm, user_has_perm
@@ -585,7 +584,10 @@ class AcceptInvitationPublicView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    # `ClientIpScopedThrottle` لا `ScopedRateThrottle`: الثاني يبني الهويّةَ من
+    # `X-Forwarded-For` حين يكون `NUM_PROXIES` غيرَ مضبوطٍ — وهو غيرُ مضبوطٍ هنا —
+    # فترويسةٌ واحدةٌ يكتبها العميلُ تعطيه دلواً جديداً في كلّ طلبٍ ويصير الحدُّ بلا حدّ.
+    throttle_classes = [ClientIpScopedThrottle]
     throttle_scope = "employee_ops_invite"
 
     def get(self, request, token):
@@ -1269,7 +1271,8 @@ class PublicJobView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    # كسابقتها: الهويّةُ من `REMOTE_ADDR` لا من ترويسةٍ يرسلها العميل.
+    throttle_classes = [ClientIpScopedThrottle]
     throttle_scope = "employee_ops_job_public"
 
     def get(self, request, token):
