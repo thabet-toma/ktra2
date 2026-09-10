@@ -19,11 +19,11 @@ import {
 } from "lucide-react";
 
 import {
-  applicantCvPath,
   closeJob,
   createEmployee,
   createJob,
   deleteJob,
+  getApplicantCv,
   listApplicants,
   listJobs,
   markApplicantHired,
@@ -105,6 +105,7 @@ export const EmployeeOpsHiringScreen: React.FC = () => {
   });
 
   const [openApplicant, setOpenApplicant] = useState<JobApplicantDto | null>(null);
+  const [openingCvId, setOpeningCvId] = useState<number | null>(null);
 
   // «من متقدّمٍ إلى موظف» — **إنشاءٌ يدويٌّ مملوءٌ مسبقاً لا تحويلٌ آليّ**:
   // الإنشاء يستهلك مقعداً ويطلق دعوة، وكلاهما أثقلُ من أن يقع بضغطةٍ بلا مراجعة.
@@ -301,6 +302,37 @@ export const EmployeeOpsHiringScreen: React.FC = () => {
       setOpenApplicant((prev) => (prev && prev.id === updated.id ? updated : prev));
     } catch (err: any) {
       toast(err?.message || "فشل تحديث المتقدم", "error");
+    }
+  };
+
+  const handleOpenCv = async (applicant: JobApplicantDto) => {
+    // افتح التبويب داخل حدث النقرة نفسه كي لا يحجبه مانع النوافذ المنبثقة أثناء
+    // انتظار طلب الشبكة. ثم انزع علاقة opener قبل تحميل أي محتوى فيه.
+    const popup = window.open("about:blank", "_blank");
+    if (!popup) {
+      toast("تعذّر فتح تبويب السيرة — اسمح بالنوافذ المنبثقة ثم حاول مجدداً", "error");
+      return;
+    }
+    setOpeningCvId(applicant.id);
+    try {
+      const cv = await getApplicantCv(applicant.id);
+      const objectUrl = URL.createObjectURL(cv);
+      popup.document.title = applicant.cv_name || "السيرة الذاتية";
+      const viewer = popup.document.createElement("iframe");
+      viewer.src = objectUrl;
+      viewer.title = applicant.cv_name || "السيرة الذاتية";
+      viewer.width = "100%";
+      viewer.height = String(Math.max(popup.innerHeight - 24, 480));
+      viewer.setAttribute("frameborder", "0");
+      popup.document.body.replaceChildren(viewer);
+      popup.opener = null;
+      // الرابط محليّ لذا يُحرَّر بعد أن يحصل التبويب على وقتٍ كافٍ لقراءة البايتات.
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (err: any) {
+      popup.close();
+      toast(err?.message || "تعذّر فتح السيرة الذاتية", "error");
+    } finally {
+      setOpeningCvId(null);
     }
   };
 
@@ -747,18 +779,20 @@ export const EmployeeOpsHiringScreen: React.FC = () => {
               </div>
             )}
 
-            {/* السيرةُ تُفتح عبر مسارٍ يفحص الصلاحية ويعيد التوجيه — ولا يحمل
-                الردُّ رابطَ التخزين المباشر بأيّ حال. */}
+            {/* السيرةُ تُجلب بطلبٍ مصادَق عليه، ثم تُفتح من Blob محلي. رابطُ
+                التخزين الحقيقي لا يصل المتصفح بأيّ حال. */}
             {openApplicant.has_cv && (
-              <a
-                href={applicantCvPath(openApplicant.id)}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                onClick={() => void handleOpenCv(openApplicant)}
+                disabled={openingCvId === openApplicant.id}
                 className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-xs font-semibold text-[var(--color-primary)] hover:bg-[var(--color-surface-2)] w-fit"
               >
-                <ExternalLink className="h-3.5 w-3.5" />
+                {openingCvId === openApplicant.id
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <ExternalLink className="h-3.5 w-3.5" />}
                 فتح السيرة الذاتية {openApplicant.cv_name && `(${openApplicant.cv_name})`}
-              </a>
+              </button>
             )}
 
             <div>

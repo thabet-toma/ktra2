@@ -6,8 +6,8 @@
  * كل دالة تمرر الأخطاء دون ابتلاع لتظهر في رسائل useToast.
  */
 import {
-  API_BASE,
   apiDelete,
+  apiGetForBlob,
   apiGetList,
   apiGetObject,
   apiPatchObject,
@@ -657,15 +657,11 @@ export async function markApplicantHired(
 }
 
 /**
- * مسارُ قراءة السيرة — **إعادةُ توجيهٍ خلف الصلاحية**، لا رابطُ تخزينٍ يُسلَّم.
- * يُفتح في تبويبٍ جديد؛ لا يُجلب بـ`fetch` كي لا يعود الرابطُ إلى الشيفرة أصلاً.
+ * يمرّر الخادمُ بايتات السيرة بعد فحص الشركة والصلاحية؛ رابطُ التخزين لا يصل
+ * إلى المتصفح، والطلب يمرّ بعميل المنصة كي يحمل المصادقة والشركة النشطة.
  */
-export function applicantCvPath(id: number): string {
-  // **`API_BASE` لا نصٌّ مثبَّت**: `BASE` وحده نسبيٌّ («employee-ops») لأنّ
-  // `restApi` يضيف البادئة، وهذا الرابط يذهب إلى `href` مباشرةً — فبلا بادئةٍ
-  // كان المتصفّح يحلّه إلى `/employee-ops/employee-ops/…`. و`API_BASE` قد يكون
-  // أصلاً آخر في التطوير، فبادئةٌ مكتوبةٌ يدوياً تصيب خادمَ Vite لا جانغو.
-  return `${API_BASE}/${BASE}/applicants/${id}/cv/`;
+export function getApplicantCv(id: number, tenantId?: number): Promise<Blob> {
+  return apiGetForBlob(`${BASE}/applicants/${id}/cv/`, tenantOpts(tenantId));
 }
 
 /** رابطُ الوظيفة العامّ كما يُنسخ ويُنشر. */

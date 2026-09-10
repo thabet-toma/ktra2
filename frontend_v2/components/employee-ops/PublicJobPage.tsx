@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { API_BASE } from "../../services/restApi";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import {
   Briefcase,
   CheckCircle2,
@@ -47,6 +48,7 @@ type Phase = "loading" | "open" | "closed" | "missing" | "submitted";
 
 export const PublicJobPage: React.FC = () => {
   const { token = "" } = useParams();
+  const confirm = useConfirm();
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [job, setJob] = useState<PublicJob | null>(null);
@@ -102,6 +104,16 @@ export const PublicJobPage: React.FC = () => {
     if (!name.trim() || !phone.trim()) {
       setFormError("الاسم ورقم التواصل مطلوبان.");
       return;
+    }
+    if (!cv) {
+      const proceed = await confirm({
+        title: "إرسال الطلب دون سيرة ذاتية؟",
+        message: "لم تُرفق سيرة ذاتية. هل أنت متأكد من إرسال الطلب من دونها؟",
+        confirmText: "إرسال دون سيرة",
+        cancelText: "إضافة السيرة",
+        danger: false,
+      });
+      if (!proceed) return;
     }
 
     const body = new FormData();

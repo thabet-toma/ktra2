@@ -454,6 +454,26 @@ export async function apiPostFormData<T = any>(
   return (await res.json()) as T;
 }
 
+/** GET يُعيد ملفاً بدل JSON — بنفس مصادقة وفلترة بقية قراءات التطبيق. */
+export async function apiGetForBlob(
+  path: string,
+  opts?: { tenantId?: number }
+): Promise<Blob> {
+  const url = `${API_BASE}/${path.replace(/^\/+/, "")}`;
+  const res = await apiFetch(url, {
+    headers: getHeaders(
+      opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : undefined,
+      false
+    ),
+  });
+
+  if (!res.ok) {
+    await handleResponseError(res, path);
+  }
+
+  return await res.blob();
+}
+
 /** POST يُعيد ملفاً (CSV مثلاً) بدل JSON — نفس ترويسات المصادقة والشركة. */
 export async function apiPostForBlob(
   path: string,

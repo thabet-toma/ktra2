@@ -216,7 +216,7 @@ root.render(
 
           {/* متابعة الموظفين: دعوةُ موظف · وظيفةٌ عامّة — بلا مصادقةٍ ولا شركةِ جلسة */}
           <Route path="/join/:token" element={<ToastProvider><PublicJoinPage /></ToastProvider>} />
-          <Route path="/jobs/:token" element={<ToastProvider><PublicJobPage /></ToastProvider>} />
+          <Route path="/jobs/:token" element={<ToastProvider><ConfirmProvider><PublicJobPage /></ConfirmProvider></ToastProvider>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
