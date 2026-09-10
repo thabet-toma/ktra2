@@ -5,21 +5,26 @@ IntegrationKey -> ServiceSubscription -> PlatformEmployee -> Engagement -> WorkO
 -> WorkOrderDeliverable -> UserCompanyMembership
 ملاحظة: لا يُستعمل select_related مع select_for_update لتجنب قفل جداول غير مقصودة.
 """
+import calendar
 import copy
 import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 import secrets
 
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from core.date_ranges import filter_local_date_range
 from tenants.models import Tenant, UserCompanyMembership
 
 from .models import (
     AgentGrantedMembership,
     Engagement,
     IntegrationKey,
+    PerformanceSnapshot,
     PlatformEmployee,
+    PolicyProfile,
     ServiceSubscription,
     WorkOrder,
     WorkOrderComment,
@@ -828,6 +833,10 @@ def transition_work_order_status(
     elif target_status == WorkOrder.Status.CLOSED:
         locked_wo.closed_at = current_time
 
+    # معالجة الإلغاء
+    elif target_status == WorkOrder.Status.CANCELLED:
+        locked_wo.cancelled_at = current_time
+
     locked_wo.status = target_status
     locked_wo.save(
         update_fields=[
@@ -837,6 +846,7 @@ def transition_work_order_status(
             "waiting_seconds_total",
             "approved_at",
             "closed_at",
+            "cancelled_at",
             "deadline_at",
             "updated_at",
         ]
@@ -1288,3 +1298,677 @@ def receive_channel_work_order(
     key.save(update_fields=["last_used_at"])
 
     return work_order, True
+
+
+# ==============================================================================
+# المرحلة الخامسة (م٥): المقاييس الستة، ملفات السياسات، الدرجة المركبة، واللقطات الشهرية
+# ==============================================================================
+
+# المحاور الخمسة الرسمية للتقييم
+AXIS_QUALITY = "quality"                    # محور الجودة (نسبة القبول من أول مراجعة)
+AXIS_SLA_COMPLIANCE = "sla_compliance"      # محور الالتزام بالأجل
+AXIS_PRODUCTIVITY = "productivity"          # محور الإنتاجية والـKPI
+AXIS_SPEED_EFFICIENCY = "speed_efficiency"  # محور الكفاءة وسرعة الإنجاز
+AXIS_SALES_VALUE = "sales_value"            # محور قيمة المبيعات المعالجة
+
+ALL_PERFORMANCE_AXES = (
+    AXIS_QUALITY,
+    AXIS_SLA_COMPLIANCE,
+    AXIS_PRODUCTIVITY,
+    AXIS_SPEED_EFFICIENCY,
+    AXIS_SALES_VALUE,
+)
+
+DEFAULT_AXIS_WEIGHTS: dict[str, Decimal] = {
+    AXIS_QUALITY: Decimal("30.00"),
+    AXIS_SLA_COMPLIANCE: Decimal("25.00"),
+    AXIS_PRODUCTIVITY: Decimal("20.00"),
+    AXIS_SPEED_EFFICIENCY: Decimal("15.00"),
+    AXIS_SALES_VALUE: Decimal("10.00"),
+}
+
+# المقاييس الستة — قائمة مغلقة ولا سابع
+METRIC_FIRST_TIME_APPROVAL = "first_time_approval_rate"  # نسبة القبول من أول مراجعة
+METRIC_SLA_COMPLIANCE = "sla_compliance_rate"            # الالتزام بالأجل
+METRIC_COMPLETED_WORK_VOLUME = "completed_work_volume"    # الإنتاجية المنجزة
+METRIC_REWORK_RATE = "rework_rate"                        # معدل إعادة العمل (تشخيصي منفصل لا يخصم)
+METRIC_PROCESSED_SALES_VALUE = "processed_sales_value"    # قيمة مبيعات عالجها (مؤشر عرض لا استحقاق)
+METRIC_AVERAGE_HANDLING_TIME = "average_handling_time"    # متوسط سرعة الإنجاز
+
+ALL_SIX_METRICS = (
+    METRIC_FIRST_TIME_APPROVAL,
+    METRIC_SLA_COMPLIANCE,
+    METRIC_COMPLETED_WORK_VOLUME,
+    METRIC_REWORK_RATE,
+    METRIC_PROCESSED_SALES_VALUE,
+    METRIC_AVERAGE_HANDLING_TIME,
+)
+
+
+def redistribute_axis_weights(
+    raw_weights: dict[str, Decimal | float | int | str],
+    applicable_axes: set[str],
+) -> dict[str, Decimal]:
+    """إعادة توزيع الأوزان على المحاور المنطبقة بالتناسب ليكون المجموع 100.00% بالضبط.
+
+    القاعدة:
+    - المحور غير المنطبق يُسقط ويعاد توزيع وزنه على الباقي.
+    - المجموع يبقى 100% بالضبط دون أي كسور تقريب ضائعة؛ يُضاف فرق التقريب للمحور الأكبر وزناً.
+    """
+    # **محورٌ منطبقٌ غائبٌ عن أوزان السياسة يأخذ وزنَه الافتراضيَّ لا صفراً**: كان
+    # `axis in raw_weights` يُسقطه من التوزيع فيبقى «منطبقاً» بوزنٍ صفريّ — المجموعُ
+    # يبقى ١٠٠ فيمرّ الاختبارُ المفروض، والتفصيلُ يعرض محوراً منطبقاً لا يساهم بشيء.
+    applicable = [axis for axis in ALL_PERFORMANCE_AXES if axis in applicable_axes]
+    if not applicable:
+        return {}
+
+    def _weight_of(axis: str) -> Decimal:
+        raw = raw_weights.get(axis, DEFAULT_AXIS_WEIGHTS.get(axis, Decimal("0.00")))
+        try:
+            return Decimal(str(raw))
+        except (InvalidOperation, TypeError, ValueError):
+            return DEFAULT_AXIS_WEIGHTS.get(axis, Decimal("0.00"))
+
+    weights_dec = {axis: _weight_of(axis) for axis in applicable}
+    total_w = sum(weights_dec.values())
+
+    if total_w <= Decimal("0.00"):
+        n = Decimal(len(applicable))
+        base = (Decimal("100.00") / n).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        res = {axis: base for axis in applicable}
+        diff = Decimal("100.00") - sum(res.values())
+        if diff:
+            res[applicable[0]] += diff
+        return res
+
+    result: dict[str, Decimal] = {}
+    for axis in applicable:
+        w_norm = (weights_dec[axis] / total_w * Decimal("100.00")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        result[axis] = w_norm
+
+    diff = Decimal("100.00") - sum(result.values())
+    if diff != Decimal("0.00"):
+        max_axis = max(result, key=lambda k: (result[k], k))
+        result[max_axis] += diff
+
+    return result
+
+
+def resolve_policy_profile_for_employee(employee: PlatformEmployee) -> PolicyProfile | None:
+    """استرجاع ملف السياسة النشط لتخصص موظف المنصة."""
+    if not employee or not employee.specialty:
+        return None
+    return PolicyProfile.objects.filter(
+        specialty=employee.specialty,
+        is_active=True,
+    ).first()
+
+
+def get_default_policy_dict(specialty: str = "") -> dict:
+    """الحصول على قاموس السياسة الافتراضية للمنصة عند غياب ملف مخصص."""
+    return {
+        "specialty": specialty,
+        "name": "السياسة الافتراضية للمنصة",
+        "weights": {k: float(v) for k, v in DEFAULT_AXIS_WEIGHTS.items()},
+        "targets": {
+            "capacity_target": 100,
+            "sales_target": None,
+            "quality_target_pct": 95,
+            "sla_target_pct": 95,
+        },
+        "sla_hours_by_kind": copy.deepcopy(DEFAULT_WORK_ORDER_SLA_POLICY.get("sla_hours_by_kind", {})),
+        "min_sample_size": 5,
+        "default_sla_hours": 24,
+    }
+
+
+#: مفاتيحُ القيمة الماليّة المقبولةُ في تقرير المُسلَّم المنظَّم.
+SALES_VALUE_PAYLOAD_KEYS = ("sales_value", "total_sales", "invoice_total", "deal_value", "amount")
+
+
+def _extract_work_order_sales_value(work_order: WorkOrder) -> Decimal:
+    """«قيمةُ مبيعاتٍ عالجها» — **من مُسلَّمٍ اعتُمد، لا من حمولة الزبون**.
+
+    كانت الدالّةُ تقرأ `intake_payload` أوّلاً، وهو JSON يكتبه المرسِلُ عبر القناة.
+    ومنذ م٤ صار `amount` **مسموحاً** في الحمولة عن قصد، لأنّ الفاتورةَ تحمله بطبيعتها
+    وردُّها كان يُبطل القناة. فاجتماعُ القرارين يفتح ثغرةً حقيقيّة: **حاملُ مفتاح
+    القناة يرفع درجةَ موظّفٍ بكتابة رقمٍ أكبر** — ومقياسُ أداءٍ يمليه الطرفُ المقيَّسُ
+    لصالحه ليس مقياساً.
+
+    والمصدرُ هنا مُسلَّماتُ الموظّف التي **راجعها غيرُه واعتمدها** (`approved`): رقمٌ
+    كتبه موظّفُنا ووقّع عليه مراجعٌ ثانٍ. وهذا يوافق المواصفة: «مؤشّرُ عرضٍ لا استحقاق»،
+    و«كلُّ عمليّةٍ تبقى داخل مبيعات الشركة ومحاسبتها» — لا في حمولةٍ خارجيّة.
+    """
+    total = Decimal("0.00")
+    for deliv in work_order.deliverables.all():
+        if deliv.review_status != WorkOrderDeliverable.ReviewStatus.APPROVED:
+            continue
+        payload = deliv.payload or {}
+        if not isinstance(payload, dict):
+            continue
+        # قيمةٌ واحدةٌ لكلّ مُسلَّم (أوّلُ مفتاحٍ يحمل رقماً موجباً)، **ومجموعُها** عبر
+        # المُسلَّمات — لا أوّلُ قيمةٍ ثمّ توقُّف، وإلا خالف الرقمُ اسمَه «مجموع».
+        for key in SALES_VALUE_PAYLOAD_KEYS:
+            val = payload.get(key)
+            if val is None:
+                continue
+            try:
+                dec = Decimal(str(val))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+            if dec > 0:
+                total += dec
+                break
+    return total
+
+
+def calculate_employee_performance(
+    *,
+    employee: PlatformEmployee,
+    period_year: int | None = None,
+    period_month: int | None = None,
+    date_from: datetime.date | None = None,
+    date_to: datetime.date | None = None,
+    policy_dict: dict | None = None,
+) -> dict:
+    """حساب أداء موظف المنصة عبر المقاييس الستة والمحاور الخمسة والدرجة المركبة.
+
+    القواعد الصارمة (م٥):
+    1. الاستعلام العابر للشركات مشروع ومحصور بالشركات المشتقة من الارتباطات (Engagement) فقط.
+    2. العرض والدخول لا يُعدّان عملاً إطلاقاً؛ الإنجاز يُحسب فقط لأوامر العمل المعتمدة (approved_at).
+    3. الإنشاء لا يدخل الأداء إلا بعد الاعتماد (لا عند التسليم).
+    4. الإلغاء (cancelled) لا يعاقب آلياً بل يظهر معدل إعادة عمل منفصلاً كمعيار تشخيصي.
+    5. الجودة اسمها الصادق «نسبة القبول من أول مراجعة» وتُعرض بمقام معلن وحجم عينة.
+    6. الرقم المالي اسمه «قيمة مبيعات عالجها» كمؤشر عرض لا استحقاق.
+    7. العينة الناقصة (< min_sample_size) تُخرج الموظف من الترتيب وتُعيد حالة 'insufficient_data'
+       مع composite_score=None صراحة وليس رقماً مضللاً.
+    8. المحور غير المنطبق يُسقط ويُعاد توزيع وزنه بالتناسب مع بقاء المجموع 100% بالضبط.
+    9. الفلترة الزمنية عبر core.date_ranges ولا وجود لـ __date إطلاقاً.
+    """
+    # 1. تحديد النطاق الزمني عبر date_from و date_to
+    if period_year is not None and period_month is not None:
+        start_date = datetime.date(period_year, period_month, 1)
+        _, last_day = calendar.monthrange(period_year, period_month)
+        end_date = datetime.date(period_year, period_month, last_day)
+    else:
+        start_date = date_from
+        end_date = date_to
+
+    # 2. الشركات تُشتق حصراً من الارتباطات (Engagement)
+    #
+    # **وبلا فلترِ حالة، عن قصد**: هذا قياسُ ماضٍ لا بوّابةُ وصول. عملٌ أنجزه الموظّفُ
+    # في شركةٍ انتهى ارتباطُه بها اليومَ يبقى عملاً أنجزه، وإسقاطُه يُفقد الشهرَ الملتقَط
+    # نصفَه. أمّا **الوصولُ** فمحروسٌ بالارتباط النشط وحدَه في `WorkOrderViewSet`.
+    engaged_tenant_ids = list(
+        Engagement.objects.filter(employee=employee).values_list("tenant_id", flat=True)
+    )
+
+    # أوامر العمل للموظف ضمن شركات ارتباطاته المشروعة فقط
+    base_wo_qs = WorkOrder.objects.filter(
+        assignee=employee,
+        tenant_id__in=engaged_tenant_ids,
+    )
+
+    # أوامر العمل المعتمدة فعلياً (الإنشاء والتسليم غير المعتمد لا يدخلان في الأداء)
+    approved_wo_qs = base_wo_qs.filter(
+        status__in=[WorkOrder.Status.APPROVAL, WorkOrder.Status.CLOSED],
+        approved_at__isnull=False,
+    )
+    if start_date or end_date:
+        approved_wo_qs = filter_local_date_range(
+            approved_wo_qs, "approved_at", date_from=start_date, date_to=end_date
+        )
+
+    # أوامر العمل الملغاة (لمعدل إعادة العمل المنفصل)
+    # **بـ`cancelled_at` لا `updated_at`**: الثاني `auto_now`، فلمسةٌ لاحقةٌ لصفٍّ ملغىً
+    # تنقله بين الشهور ويتغيّر معدّلُ إعادة العمل لشهرٍ التُقطت لقطتُه — واللقطةُ يُفترَض
+    # أنّها مجمَّدة. وبه أيضاً يصير طرفا الكسر على ساعتَي **حدثٍ** لا ساعةِ حدثٍ وساعةِ تعديل.
+    cancelled_wo_qs = base_wo_qs.filter(
+        status=WorkOrder.Status.CANCELLED, cancelled_at__isnull=False
+    )
+    if start_date or end_date:
+        cancelled_wo_qs = filter_local_date_range(
+            cancelled_wo_qs, "cancelled_at", date_from=start_date, date_to=end_date
+        )
+
+    # `prefetch_related` لا `select_related`: المُسلَّماتُ علاقةٌ عكسيّةٌ متعدّدة،
+    # وبدونها يُصدِر حسابُ القيمة الماليّة استعلاماً لكلّ أمرِ عمل.
+    completed_orders = list(approved_wo_qs.prefetch_related("deliverables"))
+    sample_size = len(completed_orders)
+    cancelled_count = cancelled_wo_qs.count()
+    total_processed = sample_size + cancelled_count
+
+    # 3. إعداد السياسة والمستهدفات
+    if policy_dict is None:
+        p_profile = resolve_policy_profile_for_employee(employee)
+        if p_profile:
+            policy_dict = {
+                "specialty": p_profile.specialty,
+                "name": p_profile.name,
+                "weights": p_profile.weights or {k: float(v) for k, v in DEFAULT_AXIS_WEIGHTS.items()},
+                "targets": p_profile.targets or {},
+                "sla_hours_by_kind": p_profile.sla_hours_by_kind or {},
+                "min_sample_size": p_profile.min_sample_size,
+            }
+        else:
+            policy_dict = get_default_policy_dict(employee.specialty)
+
+    min_sample_size = int(policy_dict.get("min_sample_size", 5))
+    raw_weights = policy_dict.get("weights") or {k: float(v) for k, v in DEFAULT_AXIS_WEIGHTS.items()}
+    targets = policy_dict.get("targets") or {}
+
+    # 4. حساب المقاييس الستة
+    # مقياس 1: نسبة القبول من أول مراجعة (First-Time Approval Rate)
+    # أمر العمل معتمد من أول مراجعة إذا لم يُرفض أي من مُسلَّماته
+    order_ids = [wo.id for wo in completed_orders]
+    rejected_order_ids = set(
+        WorkOrderDeliverable.objects.filter(
+            work_order_id__in=order_ids,
+            review_status=WorkOrderDeliverable.ReviewStatus.REJECTED,
+        ).values_list("work_order_id", flat=True)
+    )
+    first_time_approved_count = len([wo for wo in completed_orders if wo.id not in rejected_order_ids])
+    if sample_size > 0:
+        first_time_rate = (Decimal(first_time_approved_count) / Decimal(sample_size) * Decimal("100.00")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    else:
+        first_time_rate = Decimal("0.00")
+
+    metric_first_time = {
+        "name": "نسبة القبول من أول مراجعة",
+        "key": METRIC_FIRST_TIME_APPROVAL,
+        "numerator": first_time_approved_count,
+        "denominator": sample_size,
+        "sample_size": sample_size,
+        "rate": first_time_rate,
+        "rate_pct": float(first_time_rate),
+    }
+
+    # مقياس 2: الالتزام بالأجل (SLA Compliance Rate)
+    sla_met_count = 0
+    total_effective_seconds = 0
+    total_sla_target_seconds = 0
+    for wo in completed_orders:
+        sla_info = calculate_work_order_sla(work_order=wo)
+        if not sla_info["is_overdue"]:
+            sla_met_count += 1
+        total_effective_seconds += sla_info["effective_duration_seconds"]
+        total_sla_target_seconds += sla_info["target_seconds"]
+
+    if sample_size > 0:
+        sla_compliance_rate = (Decimal(sla_met_count) / Decimal(sample_size) * Decimal("100.00")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    else:
+        sla_compliance_rate = Decimal("0.00")
+
+    metric_sla = {
+        "name": "الالتزام بالأجل",
+        "key": METRIC_SLA_COMPLIANCE,
+        "numerator": sla_met_count,
+        "denominator": sample_size,
+        "sample_size": sample_size,
+        "rate": sla_compliance_rate,
+        "rate_pct": float(sla_compliance_rate),
+    }
+
+    # مقياس 3: الإنتاجية المنجزة (Completed Work Volume)
+    # مستهدف السعة من الموظف أو السياسة
+    capacity_target_val = targets.get("capacity_target") or employee.capacity_target or Decimal("100.00")
+    try:
+        capacity_target_dec = Decimal(str(capacity_target_val))
+    except Exception:
+        capacity_target_dec = Decimal("100.00")
+
+    if capacity_target_dec > Decimal("0.00"):
+        volume_rate = min(
+            Decimal("100.00"),
+            (Decimal(sample_size) / capacity_target_dec * Decimal("100.00")),
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    else:
+        volume_rate = Decimal("100.00")
+
+    metric_volume = {
+        "name": "الإنتاجية المنجزة",
+        "key": METRIC_COMPLETED_WORK_VOLUME,
+        "numerator": sample_size,
+        # المقامُ المعلَن هو القاسمُ نفسُه: `int()` كان يعرض ٢٠ ويقسم على ٢٠٫٥٠
+        "denominator": float(capacity_target_dec),
+        "sample_size": sample_size,
+        "rate": volume_rate,
+        "rate_pct": float(volume_rate),
+    }
+
+    # مقياس 4: معدل إعادة العمل (Rework Rate) — تشخيصي منفصل لا يُخصم من الدرجة
+    if total_processed > 0:
+        rework_rate = (Decimal(cancelled_count) / Decimal(total_processed) * Decimal("100.00")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    else:
+        rework_rate = Decimal("0.00")
+
+    metric_rework = {
+        "name": "معدل إعادة العمل",
+        "key": METRIC_REWORK_RATE,
+        "numerator": cancelled_count,
+        "denominator": total_processed,
+        "sample_size": total_processed,
+        "rate": rework_rate,
+        "rate_pct": float(rework_rate),
+        "is_diagnostic_only": True,
+    }
+
+    # مقياس 5: قيمة مبيعات عالجها (Processed Sales Value) — مؤشر عرض لا استحقاق
+    total_sales_value = Decimal("0.00")
+    sales_orders_count = 0
+    for wo in completed_orders:
+        s_val = _extract_work_order_sales_value(wo)
+        if s_val > Decimal("0.00") or wo.kind == WorkOrder.Kind.SALES:
+            sales_orders_count += 1
+            total_sales_value += s_val
+
+    sales_target_val = targets.get("sales_target")
+    sales_target_dec = None
+    if sales_target_val is not None:
+        try:
+            sales_target_dec = Decimal(str(sales_target_val))
+        except Exception:
+            sales_target_dec = None
+
+    if sales_target_dec and sales_target_dec > Decimal("0.00"):
+        sales_score = min(
+            Decimal("100.00"),
+            (total_sales_value / sales_target_dec * Decimal("100.00")),
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    else:
+        sales_score = Decimal("100.00") if total_sales_value > Decimal("0.00") else Decimal("0.00")
+
+    metric_sales = {
+        "name": "قيمة مبيعات عالجها",
+        "key": METRIC_PROCESSED_SALES_VALUE,
+        "numerator": float(total_sales_value),
+        "denominator": float(sales_target_dec) if sales_target_dec else None,
+        "sample_size": sales_orders_count,
+        "total_value": total_sales_value,
+        "is_display_only": True,
+    }
+
+    # مقياس 6: متوسط سرعة الإنجاز (Average Handling Time)
+    if sample_size > 0:
+        avg_handling_seconds = int(total_effective_seconds / sample_size)
+    else:
+        avg_handling_seconds = 0
+
+    if total_sla_target_seconds > 0 and total_effective_seconds > 0:
+        # الكفاءة: إذا كان الزمن الفعلي أقل من المستهدف فالكفاءة 100%
+        speed_efficiency_score = min(
+            Decimal("100.00"),
+            (Decimal(total_sla_target_seconds) / Decimal(total_effective_seconds) * Decimal("100.00")),
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    elif sample_size > 0:
+        speed_efficiency_score = Decimal("100.00")
+    else:
+        speed_efficiency_score = Decimal("0.00")
+
+    metric_speed = {
+        "name": "متوسط سرعة الإنجاز",
+        "key": METRIC_AVERAGE_HANDLING_TIME,
+        "numerator": total_effective_seconds,
+        "denominator": sample_size,
+        "sample_size": sample_size,
+        "average_seconds": avg_handling_seconds,
+        "efficiency_score": speed_efficiency_score,
+    }
+
+    all_metrics = {
+        METRIC_FIRST_TIME_APPROVAL: metric_first_time,
+        METRIC_SLA_COMPLIANCE: metric_sla,
+        METRIC_COMPLETED_WORK_VOLUME: metric_volume,
+        METRIC_REWORK_RATE: metric_rework,
+        METRIC_PROCESSED_SALES_VALUE: metric_sales,
+        METRIC_AVERAGE_HANDLING_TIME: metric_speed,
+    }
+
+    # 5. تحديد المحاور المنطبقة وإعادة توزيع الأوزان
+    # قاعدة: محور المبيعات يسقط إذا لم يكن للموظف مبيعات ولم يُحدد مستهدف مبيعات في السياسة
+    applicable_axes: set[str] = set()
+    axis_raw_scores: dict[str, Decimal] = {}
+
+    # محور الجودة
+    applicable_axes.add(AXIS_QUALITY)
+    axis_raw_scores[AXIS_QUALITY] = first_time_rate
+
+    # محور الالتزام بالأجل
+    applicable_axes.add(AXIS_SLA_COMPLIANCE)
+    axis_raw_scores[AXIS_SLA_COMPLIANCE] = sla_compliance_rate
+
+    # محور الإنتاجية والـKPI
+    applicable_axes.add(AXIS_PRODUCTIVITY)
+    axis_raw_scores[AXIS_PRODUCTIVITY] = volume_rate
+
+    # محور الكفاءة والسرعة
+    applicable_axes.add(AXIS_SPEED_EFFICIENCY)
+    axis_raw_scores[AXIS_SPEED_EFFICIENCY] = speed_efficiency_score
+
+    # محور المبيعات
+    # **السياسةُ تقرّر لا قائمةٌ مثبَّتةٌ في الكود**: تخصّصاتٌ محشورةٌ هنا تعني أنّ
+    # إضافةَ تخصّصِ مبيعاتٍ جديدٍ تلزمها هجرةُ كود — بينما `PolicyProfile` وُجد ليحمل
+    # هذا القرارَ لكلّ تخصّص. فالمحورُ ينطبق إن أعلنت السياسةُ له هدفاً أو وزناً موجباً،
+    # أو إن كان للموظّف عملُ مبيعاتٍ فعليٌّ في الفترة.
+    declared_sales_weight = Decimal(str(raw_weights.get(AXIS_SALES_VALUE, 0) or 0))
+    has_sales_target = sales_target_dec is not None and sales_target_dec > Decimal("0.00")
+    if has_sales_target or declared_sales_weight > Decimal("0.00") or sales_orders_count > 0:
+        applicable_axes.add(AXIS_SALES_VALUE)
+        axis_raw_scores[AXIS_SALES_VALUE] = sales_score
+
+    # إذا كانت السياسة تحدد أوزاناً صفرية لمحور معين، يُسقط المحور
+    for axis, w in raw_weights.items():
+        try:
+            declared = Decimal(str(w))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        if declared <= Decimal("0.00") and axis in applicable_axes:
+            applicable_axes.remove(axis)
+
+    # إعادة توزيع الأوزان لضمان أن المجموع 100.00% بالضبط
+    redistributed_weights = redistribute_axis_weights(raw_weights, applicable_axes)
+
+    axes_breakdown = {}
+    weighted_sum = Decimal("0.00")
+    for axis in ALL_PERFORMANCE_AXES:
+        is_app = axis in applicable_axes
+        w = redistributed_weights.get(axis, Decimal("0.00"))
+        sc = axis_raw_scores.get(axis, Decimal("0.00"))
+        contrib = (w * sc / Decimal("100.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if is_app:
+            weighted_sum += contrib
+        axes_breakdown[axis] = {
+            "applicable": is_app,
+            "weight": w,
+            "weight_pct": float(w),
+            "score": sc,
+            "score_pct": float(sc),
+            "weighted_contribution": contrib,
+        }
+
+    # 6. فحص كفاية العينة وتحديد الحالة والدرجة المركبة
+    if sample_size < min_sample_size:
+        status = PerformanceSnapshot.Status.INSUFFICIENT_DATA
+        composite_score = None
+        status_message = "بيانات غير كافية"
+    else:
+        status = PerformanceSnapshot.Status.CALCULATED
+        composite_score = min(Decimal("100.00"), max(Decimal("0.00"), weighted_sum)).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        status_message = "محسوبة"
+
+    return {
+        "status": status,
+        "status_message": status_message,
+        "composite_score": composite_score,
+        "sample_size": sample_size,
+        "min_sample_size": min_sample_size,
+        "rework_rate": rework_rate,
+        "processed_sales_value": total_sales_value,
+        "metrics": all_metrics,
+        "axes": axes_breakdown,
+        "weights_sum": sum(redistributed_weights.values()),
+        "policy_used": policy_dict,
+    }
+
+
+def rank_employees_performance(
+    *,
+    employees: list[PlatformEmployee] | None = None,
+    period_year: int | None = None,
+    period_month: int | None = None,
+    date_from: datetime.date | None = None,
+    date_to: datetime.date | None = None,
+) -> list[dict]:
+    """ترتيب موظفي المنصة وفق أدائهم مع استبعاد العينات الناقصة من الترتيب الرقمي.
+
+    القاعدة الصارمة:
+    - العينة الناقصة (< min_sample_size) تُخرج الموظف من الترتيب (rank = None).
+    - الموظفون الذين لديهم بيانات كافية يرتبون تصاعدياً برقم ترتيب رسمي (1, 2, 3...).
+    """
+    if employees is None:
+        employees = list(
+            PlatformEmployee.objects.select_related("user").filter(
+                status=PlatformEmployee.Status.ACTIVE
+            )
+        )
+
+    calculated_list = []
+    insufficient_list = []
+
+    for emp in employees:
+        perf = calculate_employee_performance(
+            employee=emp,
+            period_year=period_year,
+            period_month=period_month,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        entry = {
+            "employee_id": emp.id,
+            "employee_name": str(emp.user),
+            "specialty": emp.specialty,
+            "performance": perf,
+        }
+        if perf["status"] == PerformanceSnapshot.Status.CALCULATED and perf["composite_score"] is not None:
+            calculated_list.append(entry)
+        else:
+            entry["rank"] = None
+            insufficient_list.append(entry)
+
+    # ترتيب المحسوبين تنازلياً حسب الدرجة المركبة
+    calculated_list.sort(key=lambda x: x["performance"]["composite_score"], reverse=True)
+    for index, entry in enumerate(calculated_list, start=1):
+        entry["rank"] = index
+
+    return calculated_list + insufficient_list
+
+
+def _make_json_safe(obj):
+    """تحويل أي كائن Decimal أو كائنات غير قابلة للتسلسل إلى أنواع قياسية لـ JSON."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, dict):
+        return {k: _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_safe(v) for v in obj]
+    return obj
+
+
+@transaction.atomic
+def capture_performance_snapshot(
+    *,
+    employee: PlatformEmployee,
+    period_year: int,
+    period_month: int,
+    captured_by=None,
+    force_refresh: bool = False,
+) -> PerformanceSnapshot:
+    """التقاط لقطة أداء شهرية لموظف منصة (عملية idempotent).
+
+    ترتيب القفل الصارم: PlatformEmployee
+    القواعد:
+    1. القفل على PlatformEmployee لمنع إنشاء لقطتين متزامنتين لنفس الموظف والشهر.
+    2. فرادة (employee, period_year, period_month) تضمن عدم وجود تكرار.
+    3. إذا وُجدت لقطة سابقة ولم يُطلب force_refresh: تُعاد اللقطة السابقة كما هي (Idempotent).
+    4. اللقطة تحفظ نسخة مجمدة من السياسة والأوزان السارية وقت الالتقاط (policy_snapshot).
+       تعديل PolicyProfile لاحقاً لا يغير شهراً تم التقاطه.
+    """
+    emp_pk = getattr(employee, "pk", employee)
+    # قفل موظف المنصة وفق ترتيب الأقفال المعلن
+    locked_emp = PlatformEmployee.objects.select_for_update().get(pk=emp_pk)
+
+    existing = PerformanceSnapshot.objects.filter(
+        employee=locked_emp,
+        period_year=period_year,
+        period_month=period_month,
+    ).first()
+
+    if existing and not force_refresh:
+        return existing
+
+    # استخراج ملف السياسة النشط
+    p_profile = resolve_policy_profile_for_employee(locked_emp)
+    if p_profile:
+        policy_dict = {
+            "specialty": p_profile.specialty,
+            "name": p_profile.name,
+            "weights": p_profile.weights or {k: float(v) for k, v in DEFAULT_AXIS_WEIGHTS.items()},
+            "targets": p_profile.targets or {},
+            "sla_hours_by_kind": p_profile.sla_hours_by_kind or {},
+            "min_sample_size": p_profile.min_sample_size,
+        }
+    else:
+        policy_dict = get_default_policy_dict(locked_emp.specialty)
+
+    # حساب الأداء للشهر المعني
+    perf_result = calculate_employee_performance(
+        employee=locked_emp,
+        period_year=period_year,
+        period_month=period_month,
+        policy_dict=policy_dict,
+    )
+
+    now = timezone.now()
+    if existing and force_refresh:
+        existing.status = perf_result["status"]
+        existing.composite_score = perf_result["composite_score"]
+        existing.sample_size = perf_result["sample_size"]
+        existing.policy_profile = p_profile
+        existing.policy_snapshot = _make_json_safe(policy_dict)
+        existing.metrics_data = _make_json_safe(perf_result["metrics"])
+        existing.axes_data = _make_json_safe(perf_result["axes"])
+        existing.rework_rate = perf_result["rework_rate"]
+        existing.processed_sales_value = perf_result["processed_sales_value"]
+        existing.captured_by = captured_by
+        existing.captured_at = now
+        existing.save()
+        return existing
+
+    snapshot = PerformanceSnapshot.objects.create(
+        employee=locked_emp,
+        period_year=period_year,
+        period_month=period_month,
+        status=perf_result["status"],
+        composite_score=perf_result["composite_score"],
+        sample_size=perf_result["sample_size"],
+        policy_profile=p_profile,
+        policy_snapshot=_make_json_safe(policy_dict),
+        metrics_data=_make_json_safe(perf_result["metrics"]),
+        axes_data=_make_json_safe(perf_result["axes"]),
+        rework_rate=perf_result["rework_rate"],
+        processed_sales_value=perf_result["processed_sales_value"],
+        captured_by=captured_by,
+        captured_at=now,
+    )
+    return snapshot
+

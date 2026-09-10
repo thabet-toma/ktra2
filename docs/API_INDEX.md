@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **670**
+عدد النقاط: **677**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -532,13 +532,20 @@
 | `/api/platform/development-notes/{pk}/comments/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
 | `/api/platform/development-notes/{pk}/comments/{comment_id}/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
 | `/api/platform/ops/employees/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employees/ranking/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employees/{pk}/performance/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/intake/` | `WorkOrderIntakeView` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/issue/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/{pk}/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/{pk}/revoke/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/{pk}/rotate/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-snapshots/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-snapshots/capture/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-snapshots/{pk}/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/policy-profiles/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/policy-profiles/{pk}/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/{pk}/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/work-orders/` | `WorkOrderViewSet` | `platform_ops/views.py` |

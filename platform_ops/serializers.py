@@ -1,7 +1,14 @@
 """محولات بيانات عمليات المنصة."""
 from rest_framework import serializers
 
-from .models import IntegrationKey, PlatformEmployee, ServiceSubscription, WorkOrder
+from .models import (
+    IntegrationKey,
+    PerformanceSnapshot,
+    PlatformEmployee,
+    PolicyProfile,
+    ServiceSubscription,
+    WorkOrder,
+)
 
 
 class PlatformEmployeeSerializer(serializers.ModelSerializer):
@@ -135,3 +142,57 @@ class IntegrationKeySerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+
+class PolicyProfileSerializer(serializers.ModelSerializer):
+    """محول بيانات ملف سياسة الأداء — قراءة للمدير وفريق العمليات."""
+
+    class Meta:
+        model = PolicyProfile
+        fields = [
+            "id",
+            "specialty",
+            "name",
+            "description",
+            "weights",
+            "targets",
+            "sla_hours_by_kind",
+            "min_sample_size",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class PerformanceSnapshotSerializer(serializers.ModelSerializer):
+    """محول بيانات لقطة الأداء الشهرية — قراءة فقط."""
+
+    employee_name = serializers.CharField(source="employee.user.username", read_only=True)
+    specialty = serializers.CharField(source="employee.specialty", read_only=True)
+
+    class Meta:
+        model = PerformanceSnapshot
+        fields = [
+            "id",
+            "employee",
+            "employee_name",
+            "specialty",
+            "period_year",
+            "period_month",
+            "status",
+            "composite_score",
+            "sample_size",
+            "policy_profile",
+            "policy_snapshot",
+            "metrics_data",
+            "axes_data",
+            "rework_rate",
+            "processed_sales_value",
+            "captured_at",
+            "captured_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+

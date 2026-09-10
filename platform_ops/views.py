@@ -23,7 +23,10 @@ from .services import (
     IntegrationKeyError,
     PlatformOpsError,
     WorkOrderError,
+    calculate_employee_performance,
+    capture_performance_snapshot,
     generate_integration_key,
+    rank_employees_performance,
     receive_channel_work_order,
     revoke_integration_key,
     rotate_integration_key,
@@ -33,25 +36,127 @@ from .throttles import IntegrationKeyThrottle
 from .models import (
     Engagement,
     IntegrationKey,
+    PerformanceSnapshot,
     PlatformEmployee,
+    PolicyProfile,
     ServiceSubscription,
     WorkOrder,
 )
 from .permissions import IsPlatformOperationsManager, IsPlatformOperationsStaff
 from .serializers import (
     IntegrationKeySerializer,
+    PerformanceSnapshotSerializer,
     PlatformEmployeeSerializer,
+    PolicyProfileSerializer,
     ServiceSubscriptionSerializer,
     WorkOrderSerializer,
 )
 
 
-class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
-    """عرضُ موظفي عمليات المنصة — مدير العمليات فقط."""
+#: رسالةُ رفضِ تحديدِ الشركات من الطلب — الشركاتُ تُشتقّ من الارتباطات وحدَها.
+CROSS_TENANT_FROM_REQUEST_KEYS = ("tenant", "tenants", "tenant_ids", "tenant_id")
 
-    permission_classes = [IsPlatformOperationsManager]
+
+def _resolve_period(raw_year, raw_month):
+    """(سنة، شهر) أو خطأٌ صريح — **ولا فترةَ نصفَ محدَّدة**.
+
+    كان `?year=2026` بلا شهرٍ يسقط في الفرع الافتراضيّ فيُعيد أداءَ **كلّ الأزمان**
+    وكأنّه أداءُ تلك السنة — إجابةٌ خاطئةٌ صامتة، وهي أسوأُ من خطأ.
+    """
+    if raw_year in (None, "") and raw_month in (None, ""):
+        return None, None, None
+    if raw_year in (None, "") or raw_month in (None, ""):
+        return None, None, "السنة والشهر يُمرَّران معاً أو لا يُمرَّران — لا أحدُهما وحدَه."
+    try:
+        year = int(raw_year)
+        month = int(raw_month)
+    except (TypeError, ValueError):
+        return None, None, "السنة والشهر يجب أن يكونا رقمين صحيحين."
+    if not (1 <= month <= 12):
+        return None, None, "الشهر يجب أن يكون بين ١ و١٢."
+    if not (2000 <= year <= 2100):
+        return None, None, "السنة خارج المدى المقبول."
+    return year, month, None
+
+
+class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
+    """عرضُ موظفي عمليات المنصة وتقييم الأداء — مدير العمليات وفريق العمليات."""
+
+    permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
     serializer_class = PlatformEmployeeSerializer
     queryset = PlatformEmployee.objects.select_related("user").all().order_by("-created_at")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if IsPlatformOperationsManager().has_permission(self.request, self):
+            return qs
+        return qs.filter(user=self.request.user)
+
+    @action(detail=True, methods=["get"], url_path="performance")
+    def performance(self, request, pk=None):
+        """استعلام أداء الموظف عبر المقاييس الستة والمحاور الخمسة والدرجة المركبة.
+
+        قاعدة عزل الشركات:
+        - الاستعلام العابر للشركات مشروع، لكن الشركات تُشتق من الارتباطات حصراً.
+        - لا يُقبل أي وسيط شركة (tenant, tenant_ids, tenants) من الطلب؛ والمحاولة الصريحة تُرفض بـ 400.
+        """
+        params = request.query_params
+        for forbidden_key in CROSS_TENANT_FROM_REQUEST_KEYS:
+            if forbidden_key in params:
+                return Response(
+                    {
+                        "detail": "تحديد الشركات غير مسموح؛ تُشتق الشركات تلقائياً من الارتباطات.",
+                        "code": "cross_tenant_query_disallowed_from_request",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        emp = self.get_object()
+        # موظف المنصة العادي لا يرى إلا أداءه فقط
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        if not is_manager and emp.user_id != request.user.id:
+            return Response(
+                {"detail": "غير مصرح لك باستعراض أداء موظف آخر."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        year, month, period_error = _resolve_period(
+            params.get("year") or params.get("period_year"),
+            params.get("month") or params.get("period_month"),
+        )
+        if period_error:
+            return Response({"detail": period_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        perf_data = calculate_employee_performance(
+            employee=emp,
+            period_year=year,
+            period_month=month,
+        )
+        return Response(perf_data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="ranking")
+    def ranking(self, request):
+        """ترتيب موظفي المنصة — مدير العمليات فقط."""
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "ترتيب الموظفين متاح لمدير العمليات فقط."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        params = request.query_params
+        year, month, period_error = _resolve_period(
+            params.get("year") or params.get("period_year"),
+            params.get("month") or params.get("period_month"),
+        )
+        if period_error:
+            return Response({"detail": period_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        ranking_data = rank_employees_performance(
+            period_year=year,
+            period_month=month,
+        )
+        return Response(ranking_data, status=status.HTTP_200_OK)
+
 
 
 class ServiceSubscriptionViewSet(viewsets.ReadOnlyModelViewSet):
@@ -161,6 +266,93 @@ class WorkOrderViewSet(viewsets.ReadOnlyModelViewSet):
             status=Engagement.Status.ACTIVE,
         ).values_list("tenant_id", flat=True)
         return qs.filter(tenant_id__in=engaged_tenant_ids)
+
+
+class PolicyProfileViewSet(viewsets.ReadOnlyModelViewSet):
+    """عرض ملفات سياسات الأداء — مدير العمليات وفريق العمليات."""
+
+    permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
+    serializer_class = PolicyProfileSerializer
+    queryset = PolicyProfile.objects.all().order_by("specialty")
+
+
+class PerformanceSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
+    """عرض اللقطات الشهرية المجمدة — قراءة فقط للموظف، والتقاط للمدير."""
+
+    permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
+    serializer_class = PerformanceSnapshotSerializer
+    queryset = (
+        PerformanceSnapshot.objects.select_related("employee__user", "policy_profile", "captured_by")
+        .all()
+        .order_by("-period_year", "-period_month")
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if IsPlatformOperationsManager().has_permission(self.request, self):
+            return qs
+        return qs.filter(employee__user=self.request.user)
+
+    @action(detail=False, methods=["post"], url_path="capture")
+    def capture(self, request):
+        """التقاط لقطة أداء شهرية (idempotent) — مدير العمليات فقط."""
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "التقاط لقطة الأداء متاح لمدير العمليات فقط."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        data = request.data
+        for forbidden_key in CROSS_TENANT_FROM_REQUEST_KEYS:
+            if forbidden_key in data or forbidden_key in request.query_params:
+                return Response(
+                    {
+                        "detail": "تحديد الشركات غير مسموح؛ تُشتق الشركات تلقائياً من الارتباطات.",
+                        "code": "cross_tenant_query_disallowed_from_request",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        emp_id = data.get("employee") or data.get("employee_id")
+        force = bool(data.get("force_refresh", False))
+
+        if not emp_id:
+            return Response(
+                {"detail": "الموظف حقل إلزامي لالتقاط اللقطة."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # سنةٌ أو شهرٌ فاسدان كانا يبلغان `datetime.date(y, 13, 1)` فيرتدّان ٥٠٠
+        year, month, period_error = _resolve_period(
+            data.get("period_year") or data.get("year"),
+            data.get("period_month") or data.get("month"),
+        )
+        if period_error or year is None:
+            return Response(
+                {"detail": period_error or "السنة والشهر حقلان إلزاميان لالتقاط اللقطة."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            employee = PlatformEmployee.objects.get(pk=emp_id)
+        except (PlatformEmployee.DoesNotExist, TypeError, ValueError):
+            return Response({"detail": "موظف المنصة غير موجود."}, status=status.HTTP_404_NOT_FOUND)
+
+        existed = PerformanceSnapshot.objects.filter(
+            employee=employee, period_year=year, period_month=month
+        ).exists()
+        snapshot = capture_performance_snapshot(
+            employee=employee,
+            period_year=year,
+            period_month=month,
+            captured_by=request.user,
+            force_refresh=force,
+        )
+        # ٢٠١ تعني «أُنشئ». إعادةُ لقطةٍ قائمةٍ ليست إنشاءً، والعمليّةُ idempotent.
+        return Response(
+            PerformanceSnapshotSerializer(snapshot).data,
+            status=status.HTTP_200_OK if existed else status.HTTP_201_CREATED,
+        )
 
 
 # ==============================================================================

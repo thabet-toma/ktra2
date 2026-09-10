@@ -576,6 +576,15 @@ class WorkOrder(models.Model):
         blank=True,
         verbose_name="وقت الإغلاق",
     )
+    cancelled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="وقت الإلغاء",
+        help_text=(
+            "طابعُ حدثٍ ثابت. ومعدّلُ إعادة العمل كان يُنسَب للشهر عبر `updated_at` وهو "
+            "`auto_now`: لمسةٌ لاحقةٌ للصفّ تنقله بين الشهور فيتغيّر رقمُ شهرٍ التُقط."
+        ),
+    )
     policy_snapshot = models.JSONField(
         default=dict,
         blank=True,
@@ -851,3 +860,199 @@ class WorkOrderComment(models.Model):
 
     def __str__(self):
         return f"{self.work_order} - {self.author} [{self.get_visibility_display()}]"
+
+
+class PolicyProfile(models.Model):
+    """ملف سياسة أداء تخصص عمليات المنصة (المرحلة الخامسة: م٥).
+
+    - صف لكل تخصص (PlatformEmployee.specialty) يحمل أوزان المحاور وأهدافها.
+    - لا أوزان لكل موظف على حدة؛ السياسة على مستوى التخصص المنصي.
+    - التعديل اللاحق لا يغير لقطات الأشهر السابقة الملتقطة في PerformanceSnapshot.
+    - التخصص فريد على مستوى المنصة (unique=True).
+    """
+
+    specialty = models.CharField(
+        max_length=100,
+        unique=True,
+        db_index=True,
+        verbose_name="التخصص",
+        help_text="تخصص موظفي المنصة المطبق عليه هذا الملف التعريفي",
+    )
+    name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name="تسمية السياسة",
+    )
+    description = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="الوصف",
+    )
+    weights = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="أوزان المحاور الخمسة",
+        help_text="أوزان المحاور الخمسة: quality, sla_compliance, productivity, speed_efficiency, sales_value",
+    )
+    targets = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="مستهدفات المقاييس",
+        help_text="المستهدفات الرقمية للمقاييس (مثل مستهدف السعة، مستهدف المبيعات، إلخ)",
+    )
+    sla_hours_by_kind = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="ساعات الأجل حسب نوع أمر العمل",
+        help_text="خريطة ساعات الأجل الافتراضية لكل نوع أمر عمل",
+    )
+    min_sample_size = models.PositiveIntegerField(
+        default=5,
+        verbose_name="الحد الأدنى لحجم العينة",
+        help_text="الحد الأدنى لحجم العينة لتوليد درجة مركبة وترتيب رسمي",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name="نشط",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "ملف سياسة الأداء"
+        verbose_name_plural = "ملفات سياسات الأداء"
+
+    def __str__(self):
+        return f"سياسة {self.specialty} ({self.name or 'افتراضية'})"
+
+
+class PerformanceSnapshot(models.Model):
+    """لقطة أداء شهرية لموظف المنصة (المرحلة الخامسة: م٥).
+
+    - لقطة شهرية مجمدة تُحفظ بالأوزان والمستهدفات السارية وقتها (policy_snapshot).
+    - تعديل PolicyProfile لاحقاً لا يغير شهراً ملتقطاً.
+    - التقاطها دالة خدمة idempotent: تشغيلها مرتين لنفس الموظف والشهر لا ينتج لقطتين ولا يضاعف أثراً.
+    - فرادة غير مشروطة لكل (employee, period_year, period_month) تفرضها MySQL.
+    """
+
+    class Status(models.TextChoices):
+        CALCULATED = "calculated", "محسوبة"
+        INSUFFICIENT_DATA = "insufficient_data", "بيانات غير كافية"
+
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        related_name="performance_snapshots",
+        verbose_name="موظف العمليات",
+    )
+    period_year = models.PositiveSmallIntegerField(
+        verbose_name="سنة التقييم",
+    )
+    period_month = models.PositiveSmallIntegerField(
+        verbose_name="شهر التقييم",
+    )
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.CALCULATED,
+        verbose_name="حالة اللقطة",
+    )
+    composite_score = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="الدرجة المركبة",
+        help_text="الدرجة المركبة الرسمية من 100؛ تكون NULL إذا كانت البيانات غير كافية",
+    )
+    sample_size = models.PositiveIntegerField(
+        default=0,
+        verbose_name="حجم العينة الفعلي",
+        help_text="عدد أوامر العمل المعتمدة الداخلة في التقييم",
+    )
+    policy_profile = models.ForeignKey(
+        PolicyProfile,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="snapshots",
+        verbose_name="ملف السياسة المعتمد",
+    )
+    policy_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="لقطة السياسة والأوزان",
+        help_text="لقطة مجمدة من أوزان المحاور ومستهدفاتها السارية وقت الالتقاط",
+    )
+    metrics_data = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="بيانات المقاييس الستة ومقاماتها",
+        help_text="تفاصيل المقاييس الستة مع البسط والمقام المعلن وحجم العينة",
+    )
+    axes_data = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="بيانات المحاور وتوزيع الأوزان",
+        help_text="تفاصيل المحاور الخمسة ودرجاتها وأوزانها بعد إعادة التوزيع",
+    )
+    rework_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        verbose_name="معدل إعادة العمل",
+        help_text="نسبة أوامر العمل الملغاة كرقم تشخيصي منفصل لا يُخصم من الدرجة المركبة",
+    )
+    processed_sales_value = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        verbose_name="قيمة مبيعات عالجها",
+        help_text="مجموع مبيعات أوامر العمل المعتمدة كمؤشر عرض لا استحقاق",
+    )
+    captured_at = models.DateTimeField(
+        default=timezone.now,
+        verbose_name="وقت الالتقاط",
+    )
+    captured_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="ملتقط التقرير",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "لقطة أداء موظف المنصة"
+        verbose_name_plural = "لقطات أداء موظفي المنصة"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["employee", "period_year", "period_month"],
+                name="platform_ops_perfsnapshot_employee_period_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["employee", "period_year", "period_month"]),
+            models.Index(fields=["period_year", "period_month"]),
+        ]
+
+    def __str__(self):
+        score_str = f"{self.composite_score}%" if self.composite_score is not None else self.get_status_display()
+        return f"لقطة {self.employee} ({self.period_year}/{self.period_month}): {score_str}"
+
