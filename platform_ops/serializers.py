@@ -4,7 +4,9 @@ from rest_framework import serializers
 from .models import (
     IntegrationKey,
     PerformanceSnapshot,
+    PlatformActivityLog,
     PlatformEmployee,
+    PlatformNotification,
     PolicyProfile,
     ServiceSubscription,
     WorkOrder,
@@ -56,6 +58,11 @@ class ServiceSubscriptionSerializer(serializers.ModelSerializer):
 
 class WorkOrderSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source="tenant.CompanyName", read_only=True)
+    # التسمياتُ المقروءة: الواجهةُ كانت تعرض `data_entry` و`waiting_customer` خامّةً
+    # لأنّ الخادمَ لا يُعلن نصّاً لها، ولا يجوز أن تُترجمها الواجهةُ بجدولٍ ثانٍ يتباعد.
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    source_display = serializers.CharField(source="get_source_display", read_only=True)
     assignee_name = serializers.SerializerMethodField()
     effective_duration_seconds = serializers.SerializerMethodField()
 
@@ -68,13 +75,16 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "kind",
+            "kind_display",
             "source",
+            "source_display",
             "channel",
             "external_ref",
             "attachment_ids",
             "assignee",
             "assignee_name",
             "status",
+            "status_display",
             "return_status",
             "waiting_seconds_total",
             "waiting_entered_at",
@@ -90,6 +100,9 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
+            "kind_display",
+            "source_display",
+            "status_display",
             "channel",
             "external_ref",
             "attachment_ids",
@@ -168,6 +181,9 @@ class PolicyProfileSerializer(serializers.ModelSerializer):
 class PerformanceSnapshotSerializer(serializers.ModelSerializer):
     """محول بيانات لقطة الأداء الشهرية — قراءة فقط."""
 
+    specialty = serializers.CharField(
+        source="employee.specialty", read_only=True, default=""
+    )
     employee_name = serializers.CharField(source="employee.user.username", read_only=True)
     specialty = serializers.CharField(source="employee.specialty", read_only=True)
 
@@ -177,6 +193,7 @@ class PerformanceSnapshotSerializer(serializers.ModelSerializer):
             "id",
             "employee",
             "employee_name",
+            "specialty",
             "specialty",
             "period_year",
             "period_month",
@@ -193,6 +210,78 @@ class PerformanceSnapshotSerializer(serializers.ModelSerializer):
             "captured_by",
             "created_at",
             "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class PlatformNotificationSerializer(serializers.ModelSerializer):
+    """محول بيانات إشعارات عمليات المنصة (م٦)."""
+
+    notification_type_display = serializers.CharField(
+        source="get_notification_type_display", read_only=True
+    )
+    company_name = serializers.CharField(
+        source="tenant.CompanyName", read_only=True, default=None
+    )
+
+    class Meta:
+        model = PlatformNotification
+        fields = [
+            "id",
+            "notification_type",
+            "notification_type_display",
+            "title",
+            "message",
+            "is_read",
+            "read_at",
+            "tenant",
+            "company_name",
+            "data",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "notification_type",
+            "notification_type_display",
+            "title",
+            "message",
+            "tenant",
+            "company_name",
+            "data",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class PlatformActivityLogSerializer(serializers.ModelSerializer):
+    """محول بيانات سجل أنشطة موظفي المنصة عبر الشركات (م٦)."""
+
+    employee_name = serializers.CharField(
+        source="employee.user.username", read_only=True
+    )
+    company_name = serializers.CharField(
+        source="tenant.CompanyName", read_only=True, default=None
+    )
+    action_display = serializers.CharField(
+        source="get_action_display", read_only=True
+    )
+
+    class Meta:
+        model = PlatformActivityLog
+        fields = [
+            "id",
+            "employee",
+            "employee_name",
+            "tenant",
+            "company_name",
+            "action",
+            "action_display",
+            "entity_type",
+            "entity_id",
+            "description",
+            "details",
+            "created_at",
         ]
         read_only_fields = fields
 

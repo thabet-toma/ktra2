@@ -11,6 +11,7 @@ export type AppView =
     | "dashboard"
     | "super-admin"
     | "development-notes"
+    | "platform-ops"
     | "tasks"
     | "task-management"
     | "users"

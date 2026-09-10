@@ -13,9 +13,11 @@ import hashlib
 import secrets
 
 from django.db import IntegrityError, transaction
+from django.db.models import Max
 from django.utils import timezone
 
 from core.date_ranges import filter_local_date_range
+from hr.models import UserDevice
 from tenants.models import Tenant, UserCompanyMembership
 
 from .models import (
@@ -23,7 +25,9 @@ from .models import (
     Engagement,
     IntegrationKey,
     PerformanceSnapshot,
+    PlatformActivityLog,
     PlatformEmployee,
+    PlatformNotification,
     PolicyProfile,
     ServiceSubscription,
     WorkOrder,
@@ -797,6 +801,8 @@ def transition_work_order_status(
             status_code=400,
         )
 
+    breached_deadline = False
+
     # معالجة الدخول إلى انتظار العميل
     if target_status == WorkOrder.Status.WAITING_CUSTOMER:
         locked_wo.return_status = current_status
@@ -828,6 +834,9 @@ def transition_work_order_status(
     # معالجة الاعتماد
     if target_status == WorkOrder.Status.APPROVAL:
         locked_wo.approved_at = current_time
+        breached_deadline = bool(
+            locked_wo.deadline_at and current_time > locked_wo.deadline_at
+        )
 
     # معالجة الإغلاق
     elif target_status == WorkOrder.Status.CLOSED:
@@ -851,6 +860,25 @@ def transition_work_order_status(
             "updated_at",
         ]
     )
+
+    if locked_wo.assignee:
+        log_platform_activity(
+            employee=locked_wo.assignee,
+            tenant=locked_wo.tenant,
+            action=PlatformActivityLog.Action.WORK_ORDER_TRANSITION,
+            entity_type="work_order",
+            entity_id=locked_wo.pk,
+            description=f"تغيير حالة أمر العمل '{locked_wo.title}' إلى {locked_wo.get_status_display()}",
+            details={"from_status": current_status, "to_status": target_status},
+            created_at=current_time,
+        )
+
+    # **إشعارُ «تجاوزُ أجل» عند الاعتماد**: هذه اللحظةُ التي يُحسَم فيها الأجلُ
+    # نهائيّاً (الأجلُ من `received_at` إلى `approved_at`)، فيُطلَق مرّةً واحدةً
+    # لا في كلّ قراءةٍ للوحة.
+    if breached_deadline:
+        notify_sla_breach(work_order=locked_wo)
+
     return locked_wo
 
 
@@ -878,7 +906,7 @@ def submit_work_order_deliverable(
         "submitted_by_id": getattr(submitted_by, "pk", None),
     }
 
-    return WorkOrderDeliverable.objects.create(
+    deliv = WorkOrderDeliverable.objects.create(
         tenant=work_order.tenant,
         work_order=work_order,
         kind=kind,
@@ -889,6 +917,23 @@ def submit_work_order_deliverable(
         content_snapshot=content_snapshot,
         submitted_by=submitted_by,
     )
+
+    if submitted_by:
+        emp = getattr(submitted_by, "platform_employee", None)
+        if not emp:
+            emp = PlatformEmployee.objects.filter(user=submitted_by).first()
+        if emp:
+            log_platform_activity(
+                employee=emp,
+                tenant=work_order.tenant,
+                action=PlatformActivityLog.Action.DELIVERABLE_SUBMIT,
+                entity_type="deliverable",
+                entity_id=deliv.pk,
+                description=f"تسليم مُسلَّم لأمر العمل '{work_order.title}'",
+                details={"work_order_id": work_order.pk, "kind": kind},
+            )
+
+    return deliv
 
 
 @transaction.atomic
@@ -927,6 +972,22 @@ def review_work_order_deliverable(
             "updated_at",
         ]
     )
+
+    if reviewed_by:
+        emp = getattr(reviewed_by, "platform_employee", None)
+        if not emp:
+            emp = PlatformEmployee.objects.filter(user=reviewed_by).first()
+        if emp:
+            log_platform_activity(
+                employee=emp,
+                tenant=locked_deliv.tenant,
+                action=PlatformActivityLog.Action.DELIVERABLE_REVIEW,
+                entity_type="deliverable",
+                entity_id=locked_deliv.pk,
+                description=f"مراجعة مُسلَّم لأمر العمل: {locked_deliv.get_review_status_display()}",
+                details={"work_order_id": locked_deliv.work_order_id, "review_status": review_status},
+            )
+
     return locked_deliv
 
 
@@ -954,13 +1015,30 @@ def add_work_order_comment(
     if not author:
         raise WorkOrderError("author_required", "كاتب التعليق إلزامي.")
 
-    return WorkOrderComment.objects.create(
+    comment = WorkOrderComment.objects.create(
         tenant=work_order.tenant,
         work_order=work_order,
         author=author,
         content=content.strip(),
         visibility=visibility,
     )
+
+    if author:
+        emp = getattr(author, "platform_employee", None)
+        if not emp:
+            emp = PlatformEmployee.objects.filter(user=author).first()
+        if emp:
+            log_platform_activity(
+                employee=emp,
+                tenant=work_order.tenant,
+                action=PlatformActivityLog.Action.COMMENT_ADDED,
+                entity_type="comment",
+                entity_id=comment.pk,
+                description=f"إضافة تعليق [{visibility}] على أمر العمل '{work_order.title}'",
+                details={"work_order_id": work_order.pk, "visibility": visibility},
+            )
+
+    return comment
 
 
 def list_work_order_comments(
@@ -1267,8 +1345,21 @@ def receive_channel_work_order(
         return existing_wo, False
 
     # 3. احتساب العملية المفوترة بزيادة العداد تحت القفل
+    # `<=` لا `<`: لحظةَ العبور يكون المستهلَكُ **مساوياً** للحدّ قبل الزيادة
+    # (٢ من ٢)، فشرطُ `<` يُفوّت العبورَ نفسَه فلا يُطلَق الإشعارُ أبداً.
+    was_within_quota = (
+        subscription.included_quota > 0
+        and subscription.consumed_quota <= subscription.included_quota
+    )
     subscription.consumed_quota += 1
     subscription.save(update_fields=["consumed_quota", "updated_at"])
+
+    # **وهنا يُولَد إشعارُ «تجاوزُ باقة»**: صندوقُ الإشعارات كان بلا مُنتِجٍ واحدٍ في
+    # الكود — دالّةُ الإنشاء لا يستدعيها إلا الاختبار، فالصندوقُ فارغٌ أبداً في
+    # الإنتاج. وهذه هي اللحظةُ الوحيدةُ التي يُعرَف فيها التجاوزُ يقيناً: عبورُ
+    # الحدّ، مرّةً واحدةً، لا في كلّ طلبٍ بعده.
+    if was_within_quota and subscription.consumed_quota > subscription.included_quota:
+        notify_quota_exceeded(subscription=subscription)
 
     # 4. إنشاء أمر العمل الجديد
     rec_at = timezone.now()
@@ -1970,5 +2061,591 @@ def capture_performance_snapshot(
         captured_by=captured_by,
         captured_at=now,
     )
+
+    log_platform_activity(
+        employee=locked_emp,
+        tenant=None,
+        action=PlatformActivityLog.Action.SNAPSHOT_CAPTURED,
+        entity_type="performance_snapshot",
+        entity_id=snapshot.pk,
+        description=f"التقاط لقطة أداء لشهر {period_year}/{period_month}",
+        details={
+            "period_year": period_year,
+            "period_month": period_month,
+            "status": snapshot.status,
+            "composite_score": str(snapshot.composite_score) if snapshot.composite_score is not None else None,
+        },
+        created_at=now,
+    )
+
     return snapshot
+
+
+# ==============================================================================
+# خدمات المرحلة السادسة (م٦): الإشعارات، النشاط العابر، اللوحة وشريط التدخل
+# ==============================================================================
+
+ANOMALY_CRITICAL_DELAY = "critical_delay"
+ANOMALY_OVERLOADED = "overloaded"
+ANOMALY_ABSENT_WITH_WORK = "absent_with_work"
+ANOMALY_LOW_SCORE = "low_score"
+
+
+def log_platform_activity(
+    *,
+    employee: PlatformEmployee,
+    action: str,
+    description: str = "",
+    tenant: Tenant | None = None,
+    entity_type: str = "",
+    entity_id: str | int = "",
+    details: dict | None = None,
+    created_at: datetime.datetime | None = None,
+) -> PlatformActivityLog:
+    """تسجيل نشاط موظف المنصة عابراً كل الشركات في جدول واحد (القصة رقم ١٣ - م٦).
+
+    - بنية خاصة بوحدة عمليات المنصة وليست توسيعاً لـ ActivityLog؛
+      لأن ActivityLog لا يتسع لحدث بلا شركة وفهارسه تبدأ بـ tenant.
+    - مفهرس زمنياً للقراءة العابرة للشركات: (employee, -created_at) و(-created_at).
+    """
+    if details is None:
+        details = {}
+    return PlatformActivityLog.objects.create(
+        employee=employee,
+        tenant=tenant,
+        action=action,
+        entity_type=entity_type,
+        entity_id=str(entity_id) if entity_id else "",
+        description=description,
+        details=details,
+        created_at=created_at or timezone.now(),
+    )
+
+
+def create_platform_notification(
+    *,
+    recipient,
+    notification_type: str,
+    title: str,
+    message: str = "",
+    tenant: Tenant | None = None,
+    data: dict | None = None,
+) -> PlatformNotification:
+    """إنشاء إشعار منصي لموظف أو مدير عمليات المنصة (م٦).
+
+    - الفلترة على الخادم حصراً: المستخدم لا يستقبل إلا إشعاراته.
+    - أنواع مغلقة: sla_breach, low_score, quota_exceeded.
+    """
+    if data is None:
+        data = {}
+    return PlatformNotification.objects.create(
+        recipient=recipient,
+        tenant=tenant,
+        notification_type=notification_type,
+        title=title,
+        message=message,
+        data=data,
+    )
+
+
+def _platform_operations_managers():
+    """مديرو المنصّة — مستقبِلو إشعارات ما يخصّ المنصّةَ كلَّها."""
+    from django.contrib.auth import get_user_model
+
+    return get_user_model().objects.filter(is_superuser=True, is_active=True)
+
+
+def notify_quota_exceeded(*, subscription: ServiceSubscription) -> int:
+    """إشعارُ تجاوزِ الباقة لمديري المنصّة — مرّةً عند العبور لا في كلّ عمليّة."""
+    created = 0
+    for manager in _platform_operations_managers():
+        create_platform_notification(
+            recipient=manager,
+            notification_type=PlatformNotification.NotificationType.QUOTA_EXCEEDED,
+            title=f"تجاوزت {subscription.tenant.CompanyName} باقتها",
+            message=(
+                f"المستهلَك {subscription.consumed_quota} من {subscription.included_quota} "
+                "عمليّةً مشمولة."
+            ),
+            tenant=subscription.tenant,
+            data={
+                "subscription_id": subscription.pk,
+                "consumed_quota": subscription.consumed_quota,
+                "included_quota": subscription.included_quota,
+            },
+        )
+        created += 1
+    return created
+
+
+def notify_sla_breach(*, work_order: WorkOrder) -> int:
+    """إشعارُ تجاوزِ الأجل — للمسؤول عن الأمر ولمديري المنصّة."""
+    recipients = []
+    if work_order.assignee_id:
+        assignee_user = (
+            PlatformEmployee.objects.select_related("user")
+            .filter(pk=work_order.assignee_id)
+            .first()
+        )
+        if assignee_user and assignee_user.user:
+            recipients.append(assignee_user.user)
+    recipients.extend(_platform_operations_managers())
+
+    seen = set()
+    created = 0
+    for user in recipients:
+        if user.pk in seen:
+            continue
+        seen.add(user.pk)
+        create_platform_notification(
+            recipient=user,
+            notification_type=PlatformNotification.NotificationType.SLA_BREACH,
+            title=f"تجاوزَ الأجلَ: {work_order.title}",
+            message=(
+                f"اعتُمد أمرُ العمل بعد أجله لدى {work_order.tenant.CompanyName}."
+            ),
+            tenant=work_order.tenant,
+            data={"work_order_id": work_order.pk, "deadline_at": work_order.deadline_at.isoformat()
+                  if work_order.deadline_at else None},
+        )
+        created += 1
+    return created
+
+
+def get_employee_last_active(target) -> datetime.datetime | None:
+    """قراءة طابع آخر ظهور (last_active_at) للمستخدم من hr.models.UserDevice.
+
+    - لا نبضة جديدة: UserDevice.last_active_at يُكتب أصلاً على كل طلب مصادق بنافذة 5 دقائق.
+    - طابع وقت حقيقي وليس مصباحاً أخضر.
+    """
+    if not target:
+        return None
+    user = getattr(target, "user", target)
+    return (
+        UserDevice.objects.filter(user=user)
+        .order_by("-last_active_at")
+        .values_list("last_active_at", flat=True)
+        .first()
+    )
+
+
+def is_recently_active(target, now=None, threshold_minutes: int = 15) -> bool:
+    """فحص عتبة النشاط (15 دقيقة).
+
+    يقبل target كـ datetime أو PlatformEmployee أو User.
+    إذا كان آخر ظهور خلال 15 دقيقة = نشط مؤخراً.
+    أكثر من 15 دقيقة = غير نشط.
+    """
+    if target is None:
+        return False
+    if isinstance(target, datetime.datetime):
+        last_active_at = target
+    elif hasattr(target, "user"):
+        last_active_at = get_employee_last_active(target.user)
+    elif hasattr(target, "pk"):
+        last_active_at = get_employee_last_active(target)
+    else:
+        last_active_at = target
+
+    if not last_active_at:
+        return False
+    current_time = now or timezone.now()
+    if last_active_at > current_time:
+        return True
+    return (current_time - last_active_at).total_seconds() <= threshold_minutes * 60
+
+
+def detect_platform_anomalies(
+    *,
+    employee: PlatformEmployee | None = None,
+    last_active_by_user: dict | None = None,
+    tenant_ids: list[int] | None = None,
+    now=None,
+) -> list[dict]:
+    """كشف الشذوذ في مركز قيادة العمليات (أربعة أنواع لا أكثر — م٦).
+
+    1. تأخر حرج (critical_delay): أمر عمل تجاوز الأجل النهائي (deadline_at < now) وهو قيد التشغيل.
+    2. حمل زائد (overloaded): حجم العمل النشط يتجاوز مستهدف السعة الموزون (capacity_target).
+    3. موظف غائب وعليه عمل (absent_with_work): آخر ظهور > 15 دقيقة ولديه أوامر عمل معلقة.
+    4. درجة هابطة (low_score): الدرجة المركبة أقل من 70%.
+
+    الترتيب: الأسوأ أولاً.
+    """
+    current_time = now or timezone.now()
+    anomalies = []
+
+    # 1. الموظفون المفحوصون
+    emp_qs = PlatformEmployee.objects.select_related("user").filter(
+        status=PlatformEmployee.Status.ACTIVE
+    )
+    if employee:
+        emp_qs = emp_qs.filter(pk=employee.pk)
+
+    active_employees = list(emp_qs)
+
+    # 2. فحص أوامر العمل المتأخرة (تأخر حرج)
+    wo_qs = WorkOrder.objects.select_related("tenant", "assignee__user").filter(
+        status__in=[
+            WorkOrder.Status.RECEIVED,
+            WorkOrder.Status.SCREENING,
+            WorkOrder.Status.DATA_ENTRY,
+            WorkOrder.Status.REVIEW,
+        ],
+        deadline_at__isnull=False,
+        deadline_at__lt=current_time,
+    )
+    if employee:
+        wo_qs = wo_qs.filter(assignee=employee)
+    if tenant_ids is not None:
+        wo_qs = wo_qs.filter(tenant_id__in=tenant_ids)
+
+    for wo in wo_qs:
+        delay_seconds = int((current_time - wo.deadline_at).total_seconds())
+        delay_hours = round(delay_seconds / 3600, 1)
+        anomalies.append({
+            "type": ANOMALY_CRITICAL_DELAY,
+            "anomaly_type": ANOMALY_CRITICAL_DELAY,
+            "type_display": "تأخر حرج",
+            "severity": "critical",
+            "severity_weight": 100,
+            "sort_metric": delay_seconds,
+            "employee_id": wo.assignee_id,
+            "employee_name": wo.assignee.user.username if wo.assignee and wo.assignee.user else "غير مسند",
+            "tenant_id": wo.tenant_id,
+            "tenant_name": wo.tenant.CompanyName if wo.tenant else "",
+            "work_order_id": wo.pk,
+            "work_order_title": wo.title,
+            "message": f"أمر العمل '{wo.title}' متأخر عن موعده بـ {delay_hours} ساعة",
+            "created_at": wo.deadline_at.isoformat(),
+        })
+
+    # 3. فحص الموظفين
+    for emp in active_employees:
+        emp_work_orders = WorkOrder.objects.filter(
+            assignee=emp,
+            status__in=[
+                WorkOrder.Status.RECEIVED,
+                WorkOrder.Status.SCREENING,
+                WorkOrder.Status.DATA_ENTRY,
+                WorkOrder.Status.REVIEW,
+                WorkOrder.Status.WAITING_CUSTOMER,
+            ],
+        )
+        if tenant_ids is not None:
+            emp_work_orders = emp_work_orders.filter(tenant_id__in=tenant_ids)
+
+        active_count = emp_work_orders.count()
+
+        # أ) حمل زائد: موزون بهدف سعة التخصص
+        if emp.capacity_target and emp.capacity_target > Decimal("0.00"):
+            if Decimal(active_count) > emp.capacity_target:
+                overload_diff = float(Decimal(active_count) - emp.capacity_target)
+                anomalies.append({
+                    "type": ANOMALY_OVERLOADED,
+                    "anomaly_type": ANOMALY_OVERLOADED,
+                    "type_display": "حمل زائد",
+                    "severity": "high",
+                    "severity_weight": 80,
+                    "sort_metric": overload_diff,
+                    "employee_id": emp.pk,
+                    "employee_name": emp.user.username if emp.user else "",
+                    "tenant_id": None,
+                    "tenant_name": None,
+                    "work_order_id": None,
+                    "work_order_title": None,
+                    "message": f"الموظف يحمل {active_count} أمر عمل وتجاوز سعته المستهدفة ({emp.capacity_target})",
+                    "created_at": current_time.isoformat(),
+                })
+
+        # ب) موظف غائب وعليه عمل (عتبة 15 دقيقة)
+        # الخريطةُ المحسوبةُ مرّةً واحدةً تُمرَّر من اللوحة؛ وبلاها يُستعلَم لموظّفٍ واحد.
+        if last_active_by_user is not None:
+            last_active = last_active_by_user.get(emp.user_id)
+        else:
+            last_active = get_employee_last_active(emp.user)
+        active_recently = is_recently_active(last_active, now=current_time, threshold_minutes=15)
+        if not active_recently and active_count > 0:
+            if last_active:
+                absent_minutes = int((current_time - last_active).total_seconds() / 60)
+                absent_text = f"غائب منذ {absent_minutes} دقيقة"
+            else:
+                absent_minutes = 999999
+                absent_text = "لم يسجل دخولاً بعد"
+
+            anomalies.append({
+                "type": ANOMALY_ABSENT_WITH_WORK,
+                "anomaly_type": ANOMALY_ABSENT_WITH_WORK,
+                "type_display": "موظف غائب وعليه عمل",
+                "severity": "high",
+                "severity_weight": 85,
+                "sort_metric": absent_minutes,
+                "employee_id": emp.pk,
+                "employee_name": emp.user.username if emp.user else "",
+                "tenant_id": None,
+                "tenant_name": None,
+                "work_order_id": None,
+                "work_order_title": None,
+                "message": f"الموظف {absent_text} ولديه {active_count} أمر عمل معلق",
+                "created_at": current_time.isoformat(),
+            })
+
+        # ج) درجة هابطة (أداء أقل من 70%)
+        perf = calculate_employee_performance(employee=emp)
+        score = perf.get("composite_score")
+        if score is None:
+            latest_snapshot = (
+                PerformanceSnapshot.objects.filter(employee=emp)
+                .order_by("-period_year", "-period_month")
+                .first()
+            )
+            if latest_snapshot and latest_snapshot.composite_score is not None:
+                score = latest_snapshot.composite_score
+
+        if score is not None and score < Decimal("70.00"):
+            score_deficit = float(Decimal("70.00") - score)
+            anomalies.append({
+                "type": ANOMALY_LOW_SCORE,
+                "anomaly_type": ANOMALY_LOW_SCORE,
+                "type_display": "درجة هابطة",
+                "severity": "medium" if score >= Decimal("50.00") else "high",
+                "severity_weight": 60 if score >= Decimal("50.00") else 75,
+                "sort_metric": score_deficit,
+                "employee_id": emp.pk,
+                "employee_name": emp.user.username if emp.user else "",
+                "tenant_id": None,
+                "tenant_name": None,
+                "work_order_id": None,
+                "work_order_title": None,
+                "message": f"درجة الأداء المركبة هبطت إلى {score}% (الحد المستهدف 70%)",
+                "created_at": current_time.isoformat(),
+            })
+
+    # ترتيب الأسوأ أولاً: severity_weight تنازلياً ثم sort_metric تنازلياً
+    anomalies.sort(key=lambda a: (a["severity_weight"], a["sort_metric"]), reverse=True)
+    return anomalies
+
+
+def get_platform_dashboard_summary(*, user, now=None) -> dict:
+    """توليد ملخص اللوحة التفاعلية لمركز قيادة العمليات (م٦).
+
+    القواعد:
+    - الوحدة الموظف لا الشركة (المبدل موظف/شركة متاح).
+    - الترتيب الأسوأ أولاً.
+    - شريط التدخل: شذوذ فقط (أربعة أنواع لا أكثر).
+    - عزل الشركات: موظف المنصة يرى شركات ارتباطاته النشطة فقط، والمدير يرى الكل.
+    - استخراج آخر ظهور من hr.models.UserDevice (طابع وقت، لا مصباح، عتبة 15 دقيقة).
+    - لا نقاط لموظفي المنصة.
+    """
+    from .permissions import IsPlatformOperationsManager
+
+    current_time = now or timezone.now()
+    is_manager = IsPlatformOperationsManager().has_permission(
+        type("DummyRequest", (), {"user": user})(), None
+    ) if hasattr(user, "is_authenticated") and user.is_authenticated else False
+
+    # تحديد نطاق الموظفين والشركات
+    if is_manager:
+        emp_qs = PlatformEmployee.objects.select_related("user").filter(
+            status=PlatformEmployee.Status.ACTIVE
+        )
+        engaged_tenant_ids = None
+    else:
+        emp_qs = PlatformEmployee.objects.select_related("user").filter(
+            user=user,
+            status=PlatformEmployee.Status.ACTIVE,
+        )
+        engaged_tenant_ids = list(
+            Engagement.objects.filter(
+                employee__user=user,
+                status=Engagement.Status.ACTIVE,
+            ).values_list("tenant_id", flat=True)
+        )
+
+    active_employees = list(emp_qs)
+
+    # **آخرُ ظهورٍ للجميع باستعلامٍ واحد**: `get_employee_last_active` تُصدِر استعلاماً
+    # لكلّ موظّف، وهذه شاشةٌ تُفتَح على عشرات البطاقات. والدرسُ مسجَّلٌ في هذا المستودع
+    # (٣٥٠١ استعلامٍ صارت ٣): الدمجُ في SQL لا في بايثون.
+    last_active_by_user = dict(
+        UserDevice.objects.filter(user_id__in=[e.user_id for e in active_employees])
+        .values_list("user_id")
+        .annotate(latest=Max("last_active_at"))
+    )
+
+    # 1. بطاقات الموظفين
+    employee_cards = []
+    for emp in active_employees:
+        wo_qs = WorkOrder.objects.filter(
+            assignee=emp,
+            status__in=[
+                WorkOrder.Status.RECEIVED,
+                WorkOrder.Status.SCREENING,
+                WorkOrder.Status.DATA_ENTRY,
+                WorkOrder.Status.REVIEW,
+                WorkOrder.Status.APPROVAL,
+                WorkOrder.Status.WAITING_CUSTOMER,
+            ],
+        )
+        if engaged_tenant_ids is not None:
+            wo_qs = wo_qs.filter(tenant_id__in=engaged_tenant_ids)
+
+        active_count = wo_qs.count()
+        overdue_count = wo_qs.filter(
+            deadline_at__isnull=False,
+            deadline_at__lt=current_time,
+        ).exclude(status__in=[WorkOrder.Status.CLOSED, WorkOrder.Status.CANCELLED, WorkOrder.Status.APPROVAL]).count()
+
+        perf = calculate_employee_performance(employee=emp)
+        last_active = last_active_by_user.get(emp.user_id)
+        active_recently = is_recently_active(last_active, now=current_time, threshold_minutes=15)
+
+        emp_anomalies = detect_platform_anomalies(
+            employee=emp,
+            tenant_ids=engaged_tenant_ids,
+            now=current_time,
+            last_active_by_user=last_active_by_user,
+        )
+
+        engagements = Engagement.objects.filter(
+            employee=emp,
+            status=Engagement.Status.ACTIVE,
+        ).select_related("tenant")
+        if engaged_tenant_ids is not None:
+            engagements = engagements.filter(tenant_id__in=engaged_tenant_ids)
+
+        companies_list = [
+            {"id": eng.tenant_id, "name": eng.tenant.CompanyName}
+            for eng in engagements
+        ]
+
+        score_val = perf.get("composite_score")
+        # **«بيانات غير كافية» ليست مئةً**: كان الغيابُ يُترجَم `100.0` في مفتاح
+        # الترتيب، فيبدو موظّفٌ لا بياناتِ له **كاملَ الدرجة** ويُدفَع إلى ذيل
+        # «الأسوأ أوّلاً» حيث لا يراه أحد — وهو عكسُ ما تقوله المواصفة: العيّنةُ
+        # الناقصةُ **تُخرجه من الترتيب** لا تضعه على قمّته. فيُفصَل المرتَّبون عن
+        # غيرِ المرتَّبين بدل تلفيقِ رقمٍ لهم.
+        has_score = score_val is not None
+        numeric_score = float(score_val) if has_score else 0.0
+
+        employee_cards.append({
+            "id": emp.pk,
+            "user_id": emp.user_id,
+            "name": emp.user.get_full_name() or emp.user.username,
+            "username": emp.user.username,
+            "email": emp.user.email,
+            "specialty": emp.specialty,
+            "capacity_target": float(emp.capacity_target),
+            "status": emp.status,
+            "active_work_orders_count": active_count,
+            "overdue_work_orders_count": overdue_count,
+            "last_active_at": last_active.isoformat() if last_active else None,
+            "is_recently_active": active_recently,
+            "is_active_now": active_recently,
+            "performance": {
+                "status": perf.get("status"),
+                "status_message": perf.get("status_message"),
+                "composite_score": float(score_val) if score_val is not None else None,
+                "sample_size": perf.get("sample_size", 0),
+                "min_sample_size": perf.get("min_sample_size", 5),
+                "rework_rate": float(perf.get("rework_rate", 0)),
+                "processed_sales_value": float(perf.get("processed_sales_value", 0)),
+            },
+            "anomalies_count": len(emp_anomalies),
+            "anomalies": emp_anomalies,
+            "engaged_tenants_count": len(companies_list),
+            "companies": companies_list,
+            "is_ranked": has_score,
+            "_sort_key": (
+                -len(emp_anomalies),
+                -overdue_count,
+                # المرتَّبون أوّلاً (الأسوأُ درجةً قبل الأفضل)، ثمّ غيرُ المرتَّبين
+                # مجموعين في ذيلٍ واحدٍ بلا رقمٍ ملفَّق.
+                0 if has_score else 1,
+                numeric_score,
+            ),
+        })
+
+    # ترتيب الموظفين: الأسوأ أولاً
+    employee_cards.sort(key=lambda c: c["_sort_key"])
+    for c in employee_cards:
+        c.pop("_sort_key", None)
+
+    # 2. بطاقات الشركات (لمبدل العرض)
+    if is_manager:
+        tenant_qs = Tenant.objects.all()
+    else:
+        tenant_qs = Tenant.objects.filter(pk__in=engaged_tenant_ids or [])
+
+    company_cards = []
+    subscriptions = {
+        sub.tenant_id: sub
+        for sub in ServiceSubscription.objects.filter(tenant__in=tenant_qs)
+    }
+    active_engagements = {
+        eng.tenant_id: eng
+        for eng in Engagement.objects.filter(
+            tenant__in=tenant_qs,
+            status=Engagement.Status.ACTIVE,
+        ).select_related("employee__user")
+    }
+
+    for t in tenant_qs:
+        t_active_wo = WorkOrder.objects.filter(
+            tenant=t,
+            status__in=[
+                WorkOrder.Status.RECEIVED,
+                WorkOrder.Status.SCREENING,
+                WorkOrder.Status.DATA_ENTRY,
+                WorkOrder.Status.REVIEW,
+                WorkOrder.Status.APPROVAL,
+                WorkOrder.Status.WAITING_CUSTOMER,
+            ],
+        )
+        t_active_count = t_active_wo.count()
+        t_overdue_count = t_active_wo.filter(
+            deadline_at__isnull=False,
+            deadline_at__lt=current_time,
+        ).exclude(status__in=[WorkOrder.Status.CLOSED, WorkOrder.Status.CANCELLED, WorkOrder.Status.APPROVAL]).count()
+
+        sub = subscriptions.get(t.pk)
+        eng = active_engagements.get(t.pk)
+
+        assigned_emp = None
+        if eng and eng.employee and eng.employee.user:
+            assigned_emp = {
+                "id": eng.employee_id,
+                "name": eng.employee.user.get_full_name() or eng.employee.user.username,
+                "specialty": eng.employee.specialty,
+            }
+
+        company_cards.append({
+            "id": t.pk,
+            "name": t.CompanyName,
+            "subscription_status": sub.status if sub else "unknown",
+            "subscription_plan": sub.plan if sub else "",
+            "active_work_orders_count": t_active_count,
+            "overdue_work_orders_count": t_overdue_count,
+            "assigned_employee": assigned_emp,
+            "_sort_key": (-t_overdue_count, -t_active_count),
+        })
+
+    company_cards.sort(key=lambda c: c["_sort_key"])
+    for c in company_cards:
+        c.pop("_sort_key", None)
+
+    # 3. شريط التدخل: جميع الشذوذ
+    all_anomalies = detect_platform_anomalies(
+        tenant_ids=engaged_tenant_ids,
+        now=current_time,
+        last_active_by_user=last_active_by_user,
+    )
+
+    return {
+        "view_unit": "employee",
+        "employees": employee_cards,
+        "companies": company_cards,
+        "anomalies": all_anomalies,
+        "total_anomalies_count": len(all_anomalies),
+        "generated_at": current_time.isoformat(),
+    }
 

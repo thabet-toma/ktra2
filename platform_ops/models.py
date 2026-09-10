@@ -1056,3 +1056,159 @@ class PerformanceSnapshot(models.Model):
         score_str = f"{self.composite_score}%" if self.composite_score is not None else self.get_status_display()
         return f"لقطة {self.employee} ({self.period_year}/{self.period_month}): {score_str}"
 
+
+class PlatformNotification(models.Model):
+    """إشعار منصي لموظف أو مدير عمليات المنصة (المرحلة السادسة: م٦).
+
+    - الفلترة على الخادم حصراً: المستخدم لا يستقبل إلا إشعاراته.
+    - أنواع مغلقة: تجاوز أجل (sla_breach)، تقييم منخفض (low_score)، تجاوز باقة (quota_exceeded).
+    """
+
+    class NotificationType(models.TextChoices):
+        SLA_BREACH = "sla_breach", "تجاوز أجل"
+        LOW_SCORE = "low_score", "تقييم منخفض"
+        QUOTA_EXCEEDED = "quota_exceeded", "تجاوز باقة"
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="platform_notifications",
+        verbose_name="المستلم",
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="platform_notifications",
+        verbose_name="الشركة",
+    )
+    notification_type = models.CharField(
+        max_length=50,
+        choices=NotificationType.choices,
+        verbose_name="نوع الإشعار",
+    )
+    title = models.CharField(
+        max_length=255,
+        verbose_name="العنوان",
+    )
+    message = models.TextField(
+        verbose_name="نص الإشعار",
+    )
+    is_read = models.BooleanField(
+        default=False,
+        verbose_name="مقروء",
+    )
+    read_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="وقت القراءة",
+    )
+    data = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="بيانات إضافية",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "إشعار عمليات المنصة"
+        verbose_name_plural = "إشعارات عمليات المنصة"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["recipient", "is_read", "-created_at"]),
+            models.Index(fields=["recipient", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"[{self.get_notification_type_display()}] {self.title} ({self.recipient})"
+
+
+class PlatformActivityLog(models.Model):
+    """سجل نشاط موظف المنصة عابراً كل الشركات في جدول واحد (القصة رقم ١٣ - م٦).
+
+    - بنية خاصة بوحدة عمليات المنصة وليست توسيعاً لـ ActivityLog؛
+      لأن ActivityLog لا يتسع لحدث بلا شركة وفهارسه تبدأ بـ tenant.
+    - مفهرس زمنياً للقراءة العابرة للشركات: (employee, -created_at) و(-created_at).
+    """
+
+    class Action(models.TextChoices):
+        WORK_ORDER_TRANSITION = "work_order_transition", "تغيير حالة أمر العمل"
+        DELIVERABLE_SUBMIT = "deliverable_submit", "تقديم مُسلَّم"
+        DELIVERABLE_REVIEW = "deliverable_review", "مراجعة مُسلَّم"
+        COMMENT_ADDED = "comment_added", "إضافة تعليق"
+        ENGAGEMENT_ASSIGNED = "engagement_assigned", "إسناد ارتباط"
+        ENGAGEMENT_SUSPENDED = "engagement_suspended", "تعليق ارتباط"
+        ENGAGEMENT_REVOKED = "engagement_revoked", "إلغاء ارتباط"
+        SNAPSHOT_CAPTURED = "snapshot_captured", "التقاط لقطة أداء"
+        OTHER = "other", "أخرى"
+
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        related_name="activity_logs",
+        verbose_name="موظف العمليات",
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="platform_activity_logs",
+        verbose_name="الشركة",
+    )
+    action = models.CharField(
+        max_length=50,
+        choices=Action.choices,
+        verbose_name="نوع النشاط",
+    )
+    entity_type = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        verbose_name="نوع الكيان",
+    )
+    entity_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name="معرف الكيان",
+    )
+    description = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="وصف النشاط",
+    )
+    details = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="تفاصيل إضافية",
+    )
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+        verbose_name="تاريخ ووقت النشاط",
+    )
+
+    class Meta:
+        verbose_name = "سجل نشاط عمليات المنصة"
+        verbose_name_plural = "سجلات أنشطة عمليات المنصة"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["employee", "-created_at"]),
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["tenant", "-created_at"]),
+            models.Index(fields=["action", "-created_at"]),
+        ]
+
+    def __str__(self):
+        tenant_str = f" [{self.tenant}]" if self.tenant else " [منصة]"
+        return f"{self.employee}: {self.get_action_display()}{tenant_str} - {self.description[:40]}"
+

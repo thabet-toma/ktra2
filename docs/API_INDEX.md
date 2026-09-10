@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **677**
+عدد النقاط: **686**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -531,9 +531,13 @@
 | `/api/platform/development-notes/{pk}/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
 | `/api/platform/development-notes/{pk}/comments/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
 | `/api/platform/development-notes/{pk}/comments/{comment_id}/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
+| `/api/platform/ops/activity-logs/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/activity-logs/{pk}/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/dashboard/` | `PlatformDashboardView` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/ranking/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employees/{pk}/activity/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/performance/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/intake/` | `WorkOrderIntakeView` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
@@ -541,6 +545,11 @@
 | `/api/platform/ops/integration-keys/{pk}/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/{pk}/revoke/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/{pk}/rotate/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/notifications/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/notifications/mark-all-read/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/notifications/unread-count/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/notifications/{pk}/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/notifications/{pk}/mark-read/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/capture/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/{pk}/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |

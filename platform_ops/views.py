@@ -10,6 +10,7 @@
 `/api/platform/` بلا `X-Tenant-Id` أصلاً، محروسةٌ بـ`IsPlatformOperationsManager`،
 وغرضُها بالضبط أن يرى مديرُ العمليات كلَّ الشركات في جدولٍ واحد.
 """
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -26,6 +27,7 @@ from .services import (
     calculate_employee_performance,
     capture_performance_snapshot,
     generate_integration_key,
+    get_platform_dashboard_summary,
     rank_employees_performance,
     receive_channel_work_order,
     revoke_integration_key,
@@ -37,7 +39,9 @@ from .models import (
     Engagement,
     IntegrationKey,
     PerformanceSnapshot,
+    PlatformActivityLog,
     PlatformEmployee,
+    PlatformNotification,
     PolicyProfile,
     ServiceSubscription,
     WorkOrder,
@@ -46,7 +50,9 @@ from .permissions import IsPlatformOperationsManager, IsPlatformOperationsStaff
 from .serializers import (
     IntegrationKeySerializer,
     PerformanceSnapshotSerializer,
+    PlatformActivityLogSerializer,
     PlatformEmployeeSerializer,
+    PlatformNotificationSerializer,
     PolicyProfileSerializer,
     ServiceSubscriptionSerializer,
     WorkOrderSerializer,
@@ -54,6 +60,9 @@ from .serializers import (
 
 
 #: رسالةُ رفضِ تحديدِ الشركات من الطلب — الشركاتُ تُشتقّ من الارتباطات وحدَها.
+#: سقفُ صفوفِ سجلّ النشاط في استجابةٍ واحدة — تحرٍّ لا تفريغُ جدول.
+PLATFORM_ACTIVITY_PAGE_CAP = 200
+
 CROSS_TENANT_FROM_REQUEST_KEYS = ("tenant", "tenants", "tenant_ids", "tenant_id")
 
 
@@ -157,6 +166,38 @@ class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
         )
         return Response(ranking_data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get"], url_path="activity")
+    def activity(self, request, pk=None):
+        """سجل نشاط الموظف عابراً كل الشركات — للمدير أو الموظف نفسه."""
+        params = request.query_params
+        for forbidden_key in CROSS_TENANT_FROM_REQUEST_KEYS:
+            if forbidden_key in params:
+                return Response(
+                    {
+                        "detail": "تحديد الشركات غير مسموح؛ تُشتق الشركات تلقائياً من الارتباطات.",
+                        "code": "cross_tenant_query_disallowed_from_request",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        emp = self.get_object()
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        if not is_manager and emp.user_id != request.user.id:
+            return Response(
+                {"detail": "غير مصرح لك باستعراض سجل نشاط موظف آخر."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # **بسقفٍ صريح**: القائمةُ كانت تُسلسِل كلَّ صفوف الموظّف بلا حدّ، والصفحةُ
+        # غيرُ مصفَّحةٍ افتراضياً (`OptionalPageNumberPagination` اختياريّة). موظّفٌ
+        # بعامٍ من العمل يعني آلافَ الصفوف في استجابةٍ واحدة. والسقفُ نفسُه المعمولُ
+        # به في تبويب نشاط `employee_ops`.
+        logs = PlatformActivityLog.objects.filter(employee=emp).order_by(
+            "-created_at"
+        )[:PLATFORM_ACTIVITY_PAGE_CAP]
+        serializer = PlatformActivityLogSerializer(logs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 
 class ServiceSubscriptionViewSet(viewsets.ReadOnlyModelViewSet):
@@ -253,19 +294,88 @@ class WorkOrderViewSet(viewsets.ReadOnlyModelViewSet):
     )
 
     def get_queryset(self):
+        # 1. فحص وسائط الشركات الممنوعة من الطلب
+        params = self.request.query_params
+        for forbidden_key in CROSS_TENANT_FROM_REQUEST_KEYS:
+            if forbidden_key in params:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({
+                    "detail": "تحديد الشركات غير مسموح؛ تُشتق الشركات تلقائياً من الارتباطات.",
+                    "code": "cross_tenant_query_disallowed_from_request",
+                })
+
         qs = super().get_queryset()
         user = self.request.user
 
         # مديرُ المنصّة يرى كلَّ شيء — هو صاحبُ المنصّة لا موظّفٌ فيها.
         if IsPlatformOperationsManager().has_permission(self.request, self):
-            return qs
+            base_qs = qs
+        else:
+            # وموظّفُ المنصّة يرى شركاتِ ارتباطاتِه النشطة وحدَها.
+            engaged_tenant_ids = Engagement.objects.filter(
+                employee__user=user,
+                status=Engagement.Status.ACTIVE,
+            ).values_list("tenant_id", flat=True)
+            base_qs = qs.filter(tenant_id__in=engaged_tenant_ids)
 
-        # وموظّفُ المنصّة يرى شركاتِ ارتباطاتِه النشطة وحدَها.
-        engaged_tenant_ids = Engagement.objects.filter(
-            employee__user=user,
-            status=Engagement.Status.ACTIVE,
-        ).values_list("tenant_id", flat=True)
-        return qs.filter(tenant_id__in=engaged_tenant_ids)
+        # 2. فلاتر التنقيب (company, work_order, assignee, status, is_overdue, metric, kind)
+        #
+        # **تضييقٌ داخل نطاقٍ مشتقٍّ لا اختيارُ شركةٍ من الطلب**: بطاقةُ الشركة كانت
+        # تنقر على رقمِها فتصل قائمةَ **كلّ** الشركات، لأنّ المسارَ يرفض `tenant*` كلَّها.
+        # والرفضُ في محلّه — الشركاتُ لا تُختار من الطلب — لكنّ التنقيبَ يلزمه أن يقول
+        # «هذه الشركة». فالمفتاحُ اسمُه `company` ويُطبَّق **بعد** الفلترة بالنطاق:
+        # شركةٌ خارجَ ارتباطاتك تُعيد صفراً لا تسريباً، فالخاصّيّةُ الأمنيّةُ باقية.
+        company_id = params.get("company")
+        if company_id:
+            base_qs = base_qs.filter(tenant_id=company_id)
+
+        # ورقمُ أمرِ عملٍ بعينه: شذوذُ «تأخّرٌ حرج» ينقر على أمرٍ واحدٍ لا على قائمة.
+        work_order_id = params.get("work_order")
+        if work_order_id:
+            base_qs = base_qs.filter(pk=work_order_id)
+
+        assignee_id = params.get("assignee") or params.get("employee_id")
+        if assignee_id:
+            base_qs = base_qs.filter(assignee_id=assignee_id)
+
+        status_param = params.get("status")
+        if status_param:
+            base_qs = base_qs.filter(status=status_param)
+
+        kind_param = params.get("kind")
+        if kind_param:
+            base_qs = base_qs.filter(kind=kind_param)
+
+        is_overdue = params.get("is_overdue")
+        if is_overdue in ("true", "1", True):
+            now = timezone.now()
+            base_qs = base_qs.filter(
+                deadline_at__isnull=False,
+                deadline_at__lt=now,
+            ).exclude(status__in=[WorkOrder.Status.CLOSED, WorkOrder.Status.CANCELLED, WorkOrder.Status.APPROVAL])
+
+        metric = params.get("metric")
+        if metric == "active":
+            base_qs = base_qs.filter(status__in=[
+                WorkOrder.Status.RECEIVED,
+                WorkOrder.Status.SCREENING,
+                WorkOrder.Status.DATA_ENTRY,
+                WorkOrder.Status.REVIEW,
+                WorkOrder.Status.APPROVAL,
+                WorkOrder.Status.WAITING_CUSTOMER,
+            ])
+        elif metric == "overdue":
+            now = timezone.now()
+            base_qs = base_qs.filter(
+                deadline_at__isnull=False,
+                deadline_at__lt=now,
+            ).exclude(status__in=[WorkOrder.Status.CLOSED, WorkOrder.Status.CANCELLED, WorkOrder.Status.APPROVAL])
+        elif metric == "completed":
+            base_qs = base_qs.filter(status__in=[WorkOrder.Status.APPROVAL, WorkOrder.Status.CLOSED])
+        elif metric in ("cancelled", "rework"):
+            base_qs = base_qs.filter(status=WorkOrder.Status.CANCELLED)
+
+        return base_qs
 
 
 class PolicyProfileViewSet(viewsets.ReadOnlyModelViewSet):
@@ -548,3 +658,133 @@ class WorkOrderIntakeView(APIView):
         }
         response_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
         return Response(data, status=response_status)
+
+
+# ==============================================================================
+# المرحلة السادسة (م٦): صندوق الإشعارات، السجل العابر، واللوحة التفاعلية
+# ==============================================================================
+
+class PlatformNotificationViewSet(viewsets.ReadOnlyModelViewSet):
+    """صندوق إشعارات منصي مفلتر على الخادم حصراً (م٦).
+
+    - الفلترة على الخادم حصراً: المستخدم لا يستقبل إلا إشعاراته.
+    - أنواع مغلقة: تجاوز أجل (sla_breach)، تقييم منخفض (low_score)، تجاوز باقة (quota_exceeded).
+    - تحديث كل 60 ثانية ما دام التبويب ظاهراً في الواجهة.
+    """
+
+    permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
+    serializer_class = PlatformNotificationSerializer
+    queryset = (
+        PlatformNotification.objects.select_related("recipient", "tenant")
+        .all()
+        .order_by("-created_at")
+    )
+
+    def get_queryset(self):
+        params = self.request.query_params
+        for forbidden_key in CROSS_TENANT_FROM_REQUEST_KEYS:
+            if forbidden_key in params:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({
+                    "detail": "تحديد الشركات غير مسموح؛ تُشتق الشركات تلقائياً من الارتباطات.",
+                    "code": "cross_tenant_query_disallowed_from_request",
+                })
+        # فلترة خادمية صارمة لا استثناء فيها: لا يرى المستخدم إلا إشعاراته
+        return super().get_queryset().filter(recipient=self.request.user)
+
+    @action(detail=True, methods=["post"], url_path="mark-read")
+    def mark_read(self, request, pk=None):
+        """تعليم إشعار واحد كمقروء."""
+        notification = self.get_object()
+        if not notification.is_read:
+            notification.is_read = True
+            notification.read_at = timezone.now()
+            notification.save(update_fields=["is_read", "read_at", "updated_at"])
+        return Response(PlatformNotificationSerializer(notification).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="mark-all-read")
+    def mark_all_read(self, request):
+        """تعليم كافة إشعارات المستخدم كمقروءة."""
+        now = timezone.now()
+        count = self.get_queryset().filter(is_read=False).update(
+            is_read=True, read_at=now, updated_at=now
+        )
+        return Response({"marked_count": count}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="unread-count")
+    def unread_count(self, request):
+        """عدد الإشعارات غير المقروءة للمستخدم الحالي."""
+        count = self.get_queryset().filter(is_read=False).count()
+        return Response({"unread_count": count}, status=status.HTTP_200_OK)
+
+
+class PlatformActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """سجل نشاط موظف المنصة عابراً كل الشركات في جدول واحد (القصة رقم ١٣ - م٦).
+
+    - بنية خاصة بوحدة عمليات المنصة وليست توسيعاً لـ ActivityLog.
+    - مفهرس زمنياً للقراءة العابرة للشركات.
+    - يرفض وسائط الشركات من الطلب بـ 400.
+    """
+
+    permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
+    serializer_class = PlatformActivityLogSerializer
+    queryset = (
+        PlatformActivityLog.objects.select_related("employee__user", "tenant")
+        .all()
+        .order_by("-created_at")
+    )
+
+    def get_queryset(self):
+        params = self.request.query_params
+        for forbidden_key in CROSS_TENANT_FROM_REQUEST_KEYS:
+            if forbidden_key in params:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({
+                    "detail": "تحديد الشركات غير مسموح؛ تُشتق الشركات تلقائياً من الارتباطات.",
+                    "code": "cross_tenant_query_disallowed_from_request",
+                })
+
+        qs = super().get_queryset()
+        user = self.request.user
+        is_manager = IsPlatformOperationsManager().has_permission(self.request, self)
+
+        if not is_manager:
+            qs = qs.filter(employee__user=user)
+        else:
+            employee_id = params.get("employee") or params.get("employee_id")
+            if employee_id:
+                qs = qs.filter(employee_id=employee_id)
+
+        action_param = params.get("action")
+        if action_param:
+            qs = qs.filter(action=action_param)
+
+        return qs
+
+
+class PlatformDashboardView(APIView):
+    """اللوحة التفاعلية وشريط التدخل والتنقيب (م٦).
+
+    - بطاقة لكل موظف افتراضاً، مع مبدل (موظف / شركة).
+    - الترتيب الأسوأ أولاً.
+    - شريط التدخل: شذوذ فقط (أربعة أنواع لا أكثر).
+    - التنقيب: كل رقم ينقر إلى صفوفه.
+    - عزل الشركات: مشتقة من الارتباطات، وتحديد الشركات من الطلب مرفوض بـ 400.
+    """
+
+    permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
+
+    def get(self, request):
+        params = request.query_params
+        for forbidden_key in CROSS_TENANT_FROM_REQUEST_KEYS:
+            if forbidden_key in params:
+                return Response(
+                    {
+                        "detail": "تحديد الشركات غير مسموح؛ تُشتق الشركات تلقائياً من الارتباطات.",
+                        "code": "cross_tenant_query_disallowed_from_request",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        data = get_platform_dashboard_summary(user=request.user)
+        return Response(data, status=status.HTTP_200_OK)
