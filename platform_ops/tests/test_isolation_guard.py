@@ -28,12 +28,15 @@ PLATFORM_PACKAGES = frozenset({
     "tenants",
 })
 
-#: القائمة البيضاء الصريحة — ما تستورده الوحدة فعلاً في المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة.
+#: القائمة البيضاء الصريحة — ما تستورده الوحدة فعلاً في المراحل الأولى حتى السابعة.
 ALLOWLISTED_PLATFORM_MODULES = frozenset({
+    "core.activity",           # describe_activity_changes — واصفُ الفروقات القائم لا نسخةٌ عنه (م٧)
     "core.date_ranges",         # مدى زمني محلي آمن لتحليلات الأداء ولقطات الشهور (م٥)
-    "core.models",              # TenantAsset للتحقق من المرفقات المرفوعة عبر خدمة الوسائط القائمة
+    "core.models",              # TenantAsset للمرفقات، وActivityLog لسجل «من يمسك دفاتري» (م٧)
     "core.platform_admin_api",  # IsPlatformAdmin لحراسة الصلاحيات
     "core.signals",             # company_member_changed إشارة تغيير عضوية الشركة
+    "core.terminology",         # term(tenant, key) — اسمُ المستند بمعجم الشركة لا حرفياً (م٧)
+    "core.tenant_utils",        # get_tenant — المصدر الواحد لحلّ شركة المستخدم على نقاط م٧ الموجَّهة للزبون
     "hr.models",                # UserDevice لقراءة طابع آخر ظهور (last_active_at) في لوحة العمليات المنصية (م٦)
     "tenants.models",           # Tenant وUserCompanyMembership
 })

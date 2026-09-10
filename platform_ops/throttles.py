@@ -1,7 +1,14 @@
-"""خوانق عمليات المنصة (المرحلة الرابعة: م٤)."""
-from rest_framework.throttling import SimpleRateThrottle
+"""خوانق عمليات المنصة (مشتركة بين المراحل م٤ وم٧)."""
+from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
 
 from .models import IntegrationKey
+
+
+class ClientIpScopedThrottle(ScopedRateThrottle):
+    """نطاقٌ مسمّىً بهويّةٍ من `REMOTE_ADDR` حصراً لا من ترويسةٍ يرسلها العميل (م٧)."""
+
+    def get_ident(self, request):
+        return request.META.get("REMOTE_ADDR")
 
 
 class IntegrationKeyThrottle(SimpleRateThrottle):

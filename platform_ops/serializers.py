@@ -2,6 +2,8 @@
 from rest_framework import serializers
 
 from .models import (
+    DailyRating,
+    DailyRatingToken,
     IntegrationKey,
     PerformanceSnapshot,
     PlatformActivityLog,
@@ -284,4 +286,90 @@ class PlatformActivityLogSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class DailyRatingSerializer(serializers.ModelSerializer):
+    """محول بيانات التقييم اليومي (م٧)."""
+
+    company_name = serializers.CharField(source="tenant.CompanyName", read_only=True)
+    employee_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DailyRating
+        fields = [
+            "id",
+            "tenant",
+            "company_name",
+            "employee",
+            "employee_name",
+            "service_date",
+            "stars",
+            "note",
+            "edited_once",
+            "source",
+            "rated_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "tenant",
+            "company_name",
+            "employee_name",
+            "edited_once",
+            "source",
+            "rated_by",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_employee_name(self, obj) -> str:
+        if obj.employee and obj.employee.user:
+            return obj.employee.user.get_full_name() or obj.employee.user.username
+        return ""
+
+
+class DailyRatingCreateSerializer(serializers.Serializer):
+    """بيانات إدخال التقييم اليومي من داخل التطبيق."""
+
+    employee_id = serializers.IntegerField(required=True)
+    service_date = serializers.DateField(required=True)
+    stars = serializers.IntegerField(min_value=1, max_value=5, required=True)
+    note = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class DailyRatingUpdateSerializer(serializers.Serializer):
+    """تعديل التقييم اليومي لمرة واحدة.
+
+    `stars` إلزاميّةٌ في `PUT` واختياريّةٌ في `PATCH` — والمُنشئُ يمرّر `partial`
+    فيرفعُ الإلزامَ من تلقاء `Serializer`، فلا يُردّ تعديلُ الملاحظةِ وحدَها بـ400.
+    """
+
+    stars = serializers.IntegerField(min_value=1, max_value=5, required=True)
+    note = serializers.CharField(required=False, allow_blank=True)
+
+
+class GenerateRatingLinkSerializer(serializers.Serializer):
+    """طلب توليد رابط التقييم اليومي المهشر."""
+
+    employee_id = serializers.IntegerField(required=True)
+    service_date = serializers.DateField(required=True)
+
+
+#: سقفُ ملاحظةِ التقييم على السطح **العام** — حقلٌ بلا حدٍّ يصبّ في `TextField`
+#: على نقطةٍ بلا مصادقة، والمواصفة تسمّي «الحجمَ والفحصَ بالبايتات» على الأسطح العامة.
+PUBLIC_RATING_NOTE_MAX_LENGTH = 2000
+
+
+class PublicRatingSubmitSerializer(serializers.Serializer):
+    """إرسال التقييم من الرابط العام."""
+
+    stars = serializers.IntegerField(min_value=1, max_value=5, required=True)
+    note = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=PUBLIC_RATING_NOTE_MAX_LENGTH,
+    )
+
 

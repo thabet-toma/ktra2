@@ -2,7 +2,7 @@
 from decimal import Decimal
 
 from django.conf import settings
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -1211,4 +1211,170 @@ class PlatformActivityLog(models.Model):
     def __str__(self):
         tenant_str = f" [{self.tenant}]" if self.tenant else " [منصة]"
         return f"{self.employee}: {self.get_action_display()}{tenant_str} - {self.description[:40]}"
+
+
+class DailyRating(models.Model):
+    """التقييم اليومي لأداء موظف المنصة في شركة معينة (المرحلة السابعة: م٧).
+
+    المفتاح المنطقي الصارم: (tenant, employee, service_date).
+    - service_date: حقل تاريخ صريح (DateField) لا مشتق من وقت، لتجنب مشاكل المناطق الزمنية على MySQL.
+    - stars: من 1 إلى 5 نجوم.
+    - edited_once: يسمح بالتعديل مرة واحدة فقط، والمحاولة الثانية تُرفض.
+    - الفرادة غير مشروطة تفرضها قاعدة البيانات بقيد UniqueConstraint.
+    """
+
+    class Source(models.TextChoices):
+        TOKEN = "token", "رابط يومي"
+        IN_APP = "in_app", "داخل التطبيق"
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="daily_ratings",
+        verbose_name="الشركة",
+    )
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        related_name="daily_ratings",
+        verbose_name="موظف العمليات",
+    )
+    service_date = models.DateField(
+        db_index=True,
+        verbose_name="تاريخ الخدمة",
+        help_text="حقل تاريخ صريح ليوم العمل المُقيَّم",
+    )
+    stars = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        verbose_name="التقييم بالنجوم",
+        help_text="من 1 إلى 5 نجوم",
+    )
+    note = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="ملاحظة التقييم",
+    )
+    edited_once = models.BooleanField(
+        default=False,
+        verbose_name="عُدّل مرة واحدة",
+        help_text="يسمح بالتعديل مرة واحدة فقط وتُرفض المحاولة الثانية",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=Source.choices,
+        default=Source.IN_APP,
+        verbose_name="مصدر التقييم",
+    )
+    rated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="المقيِّم",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "تقييم يومي"
+        verbose_name_plural = "تقييمات يومية"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "employee", "service_date"],
+                name="platform_ops_dailyrating_tenant_employee_date_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "service_date"]),
+            models.Index(fields=["employee", "service_date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant} - {self.employee} ({self.service_date}): {self.stars}★"
+
+
+class DailyRatingToken(models.Model):
+    """الرابط اليومي المهشر للتقييم العام بلا تسجيل دخول (المرحلة السابعة: م٧).
+
+    - الرمز الخام لا يُحفظ في القاعدة إطلاقاً، بل يُخزن مهشراً (SHA-256) كنمط docshare وIntegrationKey.
+    - الرابط صالح لمدة 72 ساعة من لحظة التوليد.
+    - انتهاء الصلاحية يُرد بحالة 410 Gone صريحة.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="daily_rating_tokens",
+        verbose_name="الشركة",
+    )
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        related_name="daily_rating_tokens",
+        verbose_name="موظف العمليات",
+    )
+    service_date = models.DateField(
+        db_index=True,
+        verbose_name="تاريخ الخدمة",
+    )
+    token_hash = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        verbose_name="مهشر الرمز",
+        help_text="تجزئة SHA-256 للرمز الخام؛ الرمز الأصلي لا يُحفظ في القاعدة أبداً",
+    )
+    expires_at = models.DateTimeField(
+        db_index=True,
+        verbose_name="تاريخ الانتهاء",
+    )
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ الإبطال",
+    )
+    rating = models.ForeignKey(
+        DailyRating,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tokens",
+        verbose_name="التقييم المرتبط",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+
+    class Meta:
+        verbose_name = "رمز التقييم اليومي"
+        verbose_name_plural = "رموز التقييم اليومي"
+        indexes = [
+            models.Index(fields=["tenant", "service_date"]),
+            models.Index(fields=["employee", "service_date"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    def __str__(self):
+        return f"Token for {self.tenant} - {self.employee} ({self.service_date})"
+
+    @property
+    def is_expired(self) -> bool:
+        return self.expires_at <= timezone.now()
+
+    @property
+    def is_revoked(self) -> bool:
+        return self.revoked_at is not None
+
+    @property
+    def is_live(self) -> bool:
+        return not self.is_revoked and not self.is_expired
+
 

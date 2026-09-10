@@ -530,6 +530,8 @@ REST_FRAMEWORK = {
         # #207 م٤: نقطة استقبال أوامر العمل من القنوات — الهويّة **مفتاحُ القناة**
         # لا عنوانُ IP، فالسقف لكل (شركة × قناة). ومن البيئة كي يُوسَّع بلا نشر كود.
         "platform_ops_intake": os.environ.get("THROTTLE_RATE_PLATFORM_INTAKE", "60/min"),
+        # #207 م٧: خانق الرابط اليومي العام للتقييم — الهوية REMOTE_ADDR حصراً
+        "platform_ops_public_rating": os.environ.get("THROTTLE_RATE_PLATFORM_RATING", "30/min"),
         # الجلسة الأمنية 2026-08-11 (P0-8): رفع الوسائط — كل رفع يقفل worker
         # طوال رفع Cloudinary المتزامن، فالسقف يمنع إشباع الـworkers الثلاثة.
         "media_upload": "120/hour",

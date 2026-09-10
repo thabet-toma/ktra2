@@ -10,32 +10,48 @@
 `/api/platform/` بلا `X-Tenant-Id` أصلاً، محروسةٌ بـ`IsPlatformOperationsManager`،
 وغرضُها بالضبط أن يرى مديرُ العمليات كلَّ الشركات في جدولٍ واحد.
 """
+from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.models import TenantAsset
-from tenants.models import Tenant
+from core.tenant_utils import get_tenant
+from tenants.models import Tenant, UserCompanyMembership
 
 from .authentication import HasValidIntegrationKey, IntegrationKeyAuthentication
 from .services import (
+    DailyRatingError,
     IntegrationKeyError,
     PlatformOpsError,
+    RatingTokenGone,
+    RatingTokenNotFound,
     WorkOrderError,
     calculate_employee_performance,
+    calculate_employee_ratings_summary,
+    calculate_two_health_scores,
     capture_performance_snapshot,
+    generate_daily_rating_token,
     generate_integration_key,
+    get_my_books_tab_data,
     get_platform_dashboard_summary,
     rank_employees_performance,
     receive_channel_work_order,
+    resolve_daily_rating_token,
     revoke_integration_key,
     rotate_integration_key,
+    submit_daily_rating,
+    suspend_engagement,
+    update_daily_rating,
 )
-from .throttles import IntegrationKeyThrottle
+from .throttles import ClientIpScopedThrottle, IntegrationKeyThrottle
 
 from .models import (
+    DailyRating,
     Engagement,
     IntegrationKey,
     PerformanceSnapshot,
@@ -48,12 +64,17 @@ from .models import (
 )
 from .permissions import IsPlatformOperationsManager, IsPlatformOperationsStaff
 from .serializers import (
+    DailyRatingCreateSerializer,
+    DailyRatingSerializer,
+    DailyRatingUpdateSerializer,
+    GenerateRatingLinkSerializer,
     IntegrationKeySerializer,
     PerformanceSnapshotSerializer,
     PlatformActivityLogSerializer,
     PlatformEmployeeSerializer,
     PlatformNotificationSerializer,
     PolicyProfileSerializer,
+    PublicRatingSubmitSerializer,
     ServiceSubscriptionSerializer,
     WorkOrderSerializer,
 )
@@ -64,6 +85,70 @@ from .serializers import (
 PLATFORM_ACTIVITY_PAGE_CAP = 200
 
 CROSS_TENANT_FROM_REQUEST_KEYS = ("tenant", "tenants", "tenant_ids", "tenant_id")
+
+#: نقاطُ **سطح المستأجر** (م٧) تُضيف `company`/`companies` إلى المرفوض: شركتُها
+#: من الجلسة لا من الطلب، فأيُّ تسميةٍ للشركة فيه محاولةُ عبور.
+#: **ولا تُضاف إلى التُّرسانة المشتركة**: `WorkOrderViewSet` يقبل `company`
+#: **تضييقاً داخل النطاق المشتقّ** — عقدُ م٦ («كلُّ رقمٍ يصل إلى صفوفه»)، وإدراجُها
+#: هناك يجعل كلَّ نقرةِ بطاقةِ شركةٍ تردّ 400 ويُميت الفرعَ الذي يقرؤها بعد أسطر.
+TENANT_SURFACE_FORBIDDEN_KEYS = CROSS_TENANT_FROM_REQUEST_KEYS + ("company", "companies")
+
+
+def _service_error(exc):
+    """ردُّ خطأِ خدمةٍ بعقدِ الوحدة: الرمزُ في الجسم، والحالةُ من الاستثناء لا مثبّتة."""
+    return Response({"detail": exc.detail, "code": exc.code}, status=exc.status_code)
+
+
+def _reject_cross_tenant_from_request(request):
+    """رفضُ أيِّ وسيطِ شركةٍ يرسله العميل — في المسار أو الجسم — بـ400 لا بتجاهلٍ صامت."""
+    body = request.data if isinstance(getattr(request, "data", None), dict) else {}
+    for forbidden_key in TENANT_SURFACE_FORBIDDEN_KEYS:
+        if forbidden_key in request.query_params or forbidden_key in body:
+            raise ValidationError({
+                "detail": "تحديد وسائط الشركات غير مسموح.",
+                "code": "cross_tenant_query_disallowed_from_request",
+            })
+
+
+def _resolve_caller_tenant(request):
+    """حلُّ شركةِ المستخدم عبر المصدر الواحد `core.tenant_utils.get_tenant`.
+
+    لا تُلفَّق الشركةُ أبداً: `get_tenant` يتحقّق من العضوية ويرفض شركةً موقوفةً أو
+    ترويسةً مشوَّهة. وحين لا تُرسَل الترويسةُ **ولا** يملك المستخدمُ إلا عضويّةً
+    واحدة، تُتَّخذ هي — وإن تعدّدت عضويّاتُه لزمته الترويسةُ صراحةً، فاختيارُ
+    «أوّلِ صفٍّ يعيده المحرّك» انقلابُ شركةٍ صامت.
+
+    **وترويسةٌ أُرسلت ولم تُحَلّ تُرَدّ ولا تسقط على البديل**: `get_tenant` بلا
+    `raise_on_missing` يكتفي بسطرِ تحذيرٍ ويعيد `None` عند الترويسة المشوَّهة أو
+    المجهولة — فلو تلاها البديلُ لعاد 200 ببياناتِ شركةٍ غيرِ التي طُلبت.
+    """
+    header_sent = bool(request.headers.get("X-Tenant-Id") or request.META.get("HTTP_X_TENANT_ID"))
+    tenant = get_tenant(request, raise_on_missing=header_sent)
+    if tenant is not None:
+        return tenant
+
+    memberships = list(
+        UserCompanyMembership.objects.filter(user=request.user)
+        .select_related("tenant")
+        .order_by("tenant_id")[:2]
+    )
+    if len(memberships) == 1:
+        return memberships[0].tenant
+    if len(memberships) > 1:
+        raise PermissionDenied("لديك أكثر من شركة؛ أرسل X-Tenant-Id لتحديد الشركة المقصودة.")
+    raise PermissionDenied("لا توجد شركة مرتبطة بهذا الحساب.")
+
+
+def _require_tenant_manager(request, tenant):
+    """صاحبُ الشركة (`manager`) وحده — أو السوبر أدمن. عضويّةٌ عاديّةٌ لا تكفي."""
+    user = request.user
+    if user.is_superuser or IsPlatformOperationsManager().has_permission(request, None):
+        return
+    is_manager = UserCompanyMembership.objects.filter(
+        user=user, tenant=tenant, role="manager",
+    ).exists()
+    if not is_manager:
+        raise PermissionDenied("هذا الإجراء متاح لصاحب الشركة وحده.")
 
 
 def _resolve_period(raw_year, raw_month):
@@ -788,3 +873,337 @@ class PlatformDashboardView(APIView):
 
         data = get_platform_dashboard_summary(user=request.user)
         return Response(data, status=status.HTTP_200_OK)
+
+
+def _rating_for_token(token_obj):
+    """التقييمُ القائمُ لمفتاح (شركة، موظف، يوم) — مصدرُ حقيقةٍ واحدٌ للرابط العام."""
+    return DailyRating.objects.filter(
+        tenant_id=token_obj.tenant_id,
+        employee_id=token_obj.employee_id,
+        service_date=token_obj.service_date,
+    ).first()
+
+
+class PublicDailyRatingView(APIView):
+    """الرابط اليومي العام للتقييم المهشر بلا تسجيل دخول (م٧).
+
+    - لا يتطلب مصادقة (AllowAny).
+    - محمي بالخانق ClientIpScopedThrottle (بربط REMOTE_ADDR حصراً).
+    - يعيد 404 للرمز غير الصالح، و410 صريحة للرمز المنتهي أو المبطل.
+    - حمولة الرد مقيدة بقائمة بيضاء صارمة لمنع أي تسريب لمعلومات الشركة أو الموظف.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ClientIpScopedThrottle]
+    throttle_scope = "platform_ops_public_rating"
+
+    def get(self, request, token):
+        try:
+            token_obj = resolve_daily_rating_token(token)
+        except RatingTokenNotFound:
+            return Response(
+                {"detail": "الرابط غير صالح أو غير موجود."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except RatingTokenGone:
+            return Response(
+                {"detail": "انتهت صلاحية هذا الرابط."},
+                status=status.HTTP_410_GONE,
+            )
+
+        emp = token_obj.employee
+        # **لا `token_obj.rating`**: الرمزُ يُولَّد فارغاً، فتقييمٌ سُجّل من داخل
+        # التطبيق لنفس (الشركة، الموظف، اليوم) كان يبدو للرابط «لم يُقيَّم بعد» —
+        # فيصفه فاتحُ الرابط تعديلاً يمحو نجماتِ صاحب الشركة **ويحرق** حقَّ التعديل.
+        rating = _rating_for_token(token_obj)
+        payload = {
+            "company_name": token_obj.tenant.CompanyName,
+            "employee_name": emp.user.get_full_name() or emp.user.username if emp and emp.user else "",
+            "service_date": token_obj.service_date.isoformat(),
+            "stars": rating.stars if rating else None,
+            "note": rating.note if rating else "",
+            "already_rated": bool(rating),
+            "can_rate": not bool(rating),
+            "can_edit": bool(rating and not rating.edited_once),
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+    def post(self, request, token):
+        try:
+            token_obj = resolve_daily_rating_token(token)
+        except RatingTokenNotFound:
+            return Response(
+                {"detail": "الرابط غير صالح أو غير موجود."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except RatingTokenGone:
+            return Response(
+                {"detail": "انتهت صلاحية هذا الرابط."},
+                status=status.HTTP_410_GONE,
+            )
+
+        serializer = PublicRatingSubmitSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        stars = serializer.validated_data["stars"]
+        note = serializer.validated_data.get("note", "")
+
+        try:
+            rating = submit_daily_rating(
+                tenant=token_obj.tenant,
+                employee=token_obj.employee,
+                service_date=token_obj.service_date,
+                stars=stars,
+                note=note,
+                source=DailyRating.Source.TOKEN,
+                token_obj=token_obj,
+            )
+        except DailyRatingError as exc:
+            return _service_error(exc)
+
+        emp = token_obj.employee
+        payload = {
+            "company_name": token_obj.tenant.CompanyName,
+            "employee_name": emp.user.get_full_name() or emp.user.username if emp and emp.user else "",
+            "service_date": token_obj.service_date.isoformat(),
+            "stars": rating.stars,
+            "note": rating.note,
+            "already_rated": True,
+            "can_rate": False,
+            "can_edit": not rating.edited_once,
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+
+class DailyRatingViewSet(viewsets.ModelViewSet):
+    """التقييم اليومي لموظفي المنصة داخل التطبيق (م٧).
+
+    - لصاحب الشركة وهو مسجل الدخول، أو موظفي/مديري المنصة.
+    - ترفض وسائط الشركات الصريحة بـ 400.
+    - تعتمد عزل الشركة والتحقق من العمل الفعلي في اليوم المقيم.
+    - التعديل مسموح مرة واحدة فقط.
+
+    **التقييمُ شهادةُ الزبون لا سجلٌّ داخليّ**: موظّفُ المنصّة يقرأ تقييماتِه ولا
+    يكتبها، ولا يحذفها أحد — فمقياسٌ يملك المُقاسُ محوَه ليس مقياساً.
+    """
+
+    serializer_class = DailyRatingSerializer
+    permission_classes = [IsAuthenticated]
+    queryset = DailyRating.objects.select_related("tenant", "employee__user", "rated_by").all().order_by("-service_date")
+
+    def _resolve_tenant(self, request):
+        _reject_cross_tenant_from_request(request)
+        if IsPlatformOperationsManager().has_permission(request, self):
+            return get_tenant(request)
+        return _resolve_caller_tenant(request)
+
+    def _is_rated_employee(self, request):
+        """هل المستخدمُ موظَّفَ منصّةٍ يقرأ تقييماتِ نفسِه؟ فحينها لا يكتب ولا يحذف."""
+        return (
+            not IsPlatformOperationsManager().has_permission(request, self)
+            and IsPlatformOperationsStaff().has_permission(request, self)
+            and hasattr(request.user, "platform_employee")
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        """التقييمُ لا يُحذَف — لا من المنصّة ولا من الشركة."""
+        return Response(
+            {"detail": "لا يجوز حذف تقييم يومي.", "code": "rating_delete_forbidden"},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    def get_queryset(self):
+        _reject_cross_tenant_from_request(self.request)
+
+        user = self.request.user
+        qs = super().get_queryset()
+
+        if IsPlatformOperationsManager().has_permission(self.request, self):
+            employee_id = self.request.query_params.get("employee") or self.request.query_params.get("employee_id")
+            if employee_id:
+                qs = qs.filter(employee_id=employee_id)
+            return qs
+
+        if IsPlatformOperationsStaff().has_permission(self.request, self) and hasattr(user, "platform_employee"):
+            return qs.filter(employee=user.platform_employee)
+
+        tenant = self._resolve_tenant(self.request)
+        if tenant:
+            return qs.filter(tenant=tenant)
+        return qs.none()
+
+    def create(self, request, *args, **kwargs):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({"detail": "يجب تحديد شركة صالحة لإرسال التقييم."}, status=status.HTTP_400_BAD_REQUEST)
+        _require_tenant_manager(request, tenant)
+
+        serializer = DailyRatingCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            emp = PlatformEmployee.objects.get(pk=data["employee_id"])
+        except PlatformEmployee.DoesNotExist:
+            return Response({"detail": "موظف المنصة غير موجود."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            rating = submit_daily_rating(
+                tenant=tenant,
+                employee=emp,
+                service_date=data["service_date"],
+                stars=data["stars"],
+                note=data.get("note", ""),
+                source=DailyRating.Source.IN_APP,
+                user=request.user,
+            )
+        except DailyRatingError as exc:
+            return _service_error(exc)
+
+        return Response(DailyRatingSerializer(rating).data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        if self._is_rated_employee(request):
+            raise PermissionDenied("موظف المنصة لا يعدّل التقييم الصادر بحقه.")
+        instance = self.get_object()
+        # الشهادةُ شهادةُ صاحب الشركة: عضوٌ عاديٌّ لا يملك إنشاءها فلا يملك إعادةَ كتابتها.
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            _require_tenant_manager(request, instance.tenant)
+        serializer = DailyRatingUpdateSerializer(data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            rating = update_daily_rating(
+                rating_id=instance.pk,
+                stars=data.get("stars", instance.stars),
+                note=data.get("note", instance.note),
+            )
+        except DailyRatingError as exc:
+            return _service_error(exc)
+
+        return Response(DailyRatingSerializer(rating).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="generate-link")
+    def generate_link(self, request):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({"detail": "يجب تحديد شركة صالحة."}, status=status.HTTP_400_BAD_REQUEST)
+        # الرابطُ يفتح سطحاً **بلا مصادقة** يكشف اسمَ الشركة واسمَ الموظف — فسكّه
+        # لصاحب الشركة وحدَه، لا لكلّ من يملك عضويّةً فيها.
+        _require_tenant_manager(request, tenant)
+
+        serializer = GenerateRatingLinkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            emp = PlatformEmployee.objects.get(pk=data["employee_id"])
+        except PlatformEmployee.DoesNotExist:
+            return Response({"detail": "موظف المنصة غير موجود."}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            token_obj, raw_token = generate_daily_rating_token(
+                tenant=tenant,
+                employee=emp,
+                service_date=data["service_date"],
+            )
+        except DailyRatingError as exc:
+            return _service_error(exc)
+
+        return Response({
+            "token": raw_token,
+            # من `reverse` لا من نصٍّ مكتوب: النصُّ بقي يشير إلى الموضع القديم
+            # بعد نقل المسار، فكان الرابطُ المُسلَّم للزبون 404 — ولا اختبار يقرؤه.
+            "public_url": reverse("tenant-public-rating", kwargs={"token": raw_token}),
+            "expires_at": token_obj.expires_at.isoformat(),
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"], url_path="summary")
+    def summary(self, request):
+        employee_id = request.query_params.get("employee") or request.query_params.get("employee_id")
+        if not employee_id:
+            return Response({"detail": "معرف الموظف مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # `get(pk="abc")` يرفع `ValueError` لا `DoesNotExist` — أي 500 على وسيطٍ من المستخدم.
+        try:
+            employee_id = int(employee_id)
+        except (TypeError, ValueError):
+            return Response({"detail": "معرف الموظف يجب أن يكون رقماً."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            emp = PlatformEmployee.objects.get(pk=employee_id)
+        except PlatformEmployee.DoesNotExist:
+            return Response({"detail": "موظف المنصة غير موجود."}, status=status.HTTP_404_NOT_FOUND)
+
+        tenant = None
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            tenant = self._resolve_tenant(request)
+
+        summary_data = calculate_employee_ratings_summary(
+            employee=emp,
+            tenant=tenant,
+        )
+        return Response(summary_data, status=status.HTTP_200_OK)
+
+
+class TenantAgentBooksViewSet(viewsets.ViewSet):
+    """تبويب «من يمسك دفاتري» لصاحب الشركة (م٧).
+
+    - المصدر الوحيد لمعرفة الوكيل هو صف Engagement النشط (لا جدول العضويات).
+    - يقال للزبون صراحةً إن الوكيل يعمل بصلاحية مدير.
+    - نشاط الوكيل داخل هذه الشركة وحدها، مع استبعاد view و login.
+    - التغيير المالي يظهر «من ماذا إلى ماذا».
+    - تظهر قائمة AgentGrantedMembership.
+    - لصاحب الشركة تعليق وصول الوكيل بنفسه عبر نقطة suspend.
+    - درجتا الصحة منفصلتان (صحة الخدمة، وتعاون الزبون) دون خلط وبأعلى 3 أسباب.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def _resolve_tenant(self, request):
+        _reject_cross_tenant_from_request(request)
+        return _resolve_caller_tenant(request)
+
+    def list(self, request):
+        tenant = self._resolve_tenant(request)
+        # التبويبُ يعرض نشاطَ الوكيل الماليَّ «من ماذا إلى ماذا» ودرجتَي الصحّة —
+        # قصصُ المواصفة ٤٩–٥٥ كلُّها «كصاحب شركة»، فلا يفتحه `viewer`.
+        _require_tenant_manager(request, tenant)
+        books_data = get_my_books_tab_data(tenant)
+        health_scores = calculate_two_health_scores(tenant)
+
+        payload = {
+            "tenant_id": tenant.pk,
+            "tenant_name": tenant.CompanyName,
+            "agent": books_data["agent"],
+            "granted_memberships": books_data["granted_memberships"],
+            "activity_log": books_data["activity_log"],
+            "total_activities_count": books_data["total_activities_count"],
+            "activity_page_cap": books_data["activity_page_cap"],
+            "health_scores": health_scores,
+            "can_suspend": books_data["can_suspend"],
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="suspend")
+    def suspend(self, request):
+        tenant = self._resolve_tenant(request)
+        _require_tenant_manager(request, tenant)
+        active_engagement = Engagement.objects.filter(
+            tenant=tenant, status=Engagement.Status.ACTIVE
+        ).first()
+        if not active_engagement:
+            return Response(
+                {"detail": "لا يوجد ارتباط وكيل نشط لهذه الشركة ليتم تعليقه."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reason = str(request.data.get("reason", "تعليق وصول الوكيل بطلب من صاحب الشركة")).strip()
+        suspend_engagement(engagement=active_engagement, reason=reason)
+        return Response(
+            {"detail": "تم تعليق وصول الوكيل للشركة بنجاح."},
+            status=status.HTTP_200_OK,
+        )
+

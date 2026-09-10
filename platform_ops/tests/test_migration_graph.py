@@ -115,4 +115,21 @@ class PlatformOpsMigrationGraphTest(SimpleTestCase):
         self.assertEqual(plan[-1], (APP, migration_0006_name))
         self.assertIn((APP, "0005_policyprofile_workorder_cancelled_at_and_more"), plan[:-1])
 
+    def test_migration_0007_exists_and_depends_on_0006(self):
+        """هجرة المرحلة السابعة موجودة وتعتمد على 0006."""
+        migration_0007_name = "0007_dailyrating_dailyratingtoken_and_more"
+        self.assertIn((APP, migration_0007_name), self.loader.graph.nodes)
+        migration = self.loader.disk_migrations[(APP, migration_0007_name)]
+        self.assertIn(
+            (APP, "0006_platformactivitylog_platformnotification"),
+            migration.dependencies,
+        )
+
+    def test_forwards_plan_for_0007_places_all_dependencies_before_it(self):
+        """خطة البناء للأمام حتى 0007 تضع الاعتمادات قبلها وتختم بـ 0007."""
+        migration_0007_name = "0007_dailyrating_dailyratingtoken_and_more"
+        plan = self.loader.graph.forwards_plan((APP, migration_0007_name))
+        self.assertEqual(plan[-1], (APP, migration_0007_name))
+        self.assertIn((APP, "0006_platformactivitylog_platformnotification"), plan[:-1])
+
 

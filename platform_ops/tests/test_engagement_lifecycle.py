@@ -558,6 +558,7 @@ DECLARED_LOCK_ORDER = (
     "WorkOrder",
     "WorkOrderDeliverable",
     "UserCompanyMembership",
+    "DailyRating",
 )
 
 

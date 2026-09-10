@@ -1,8 +1,8 @@
-"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة: الأساس ودورة الارتباط وأوامر العمل وقناة الاستقبال).
+"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة والسابعة).
 
 ترتيب الأقفال الصارم لمنع التعارضات والـ Deadlocks على MySQL:
 IntegrationKey -> ServiceSubscription -> PlatformEmployee -> Engagement -> WorkOrder
--> WorkOrderDeliverable -> UserCompanyMembership
+-> WorkOrderDeliverable -> UserCompanyMembership -> DailyRating
 ملاحظة: لا يُستعمل select_related مع select_for_update لتجنب قفل جداول غير مقصودة.
 """
 import calendar
@@ -12,16 +12,21 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 import secrets
 
-from django.db import IntegrityError, transaction
-from django.db.models import Max
+from django.db import IntegrityError, models, transaction
+from django.db.models import Avg, Max
 from django.utils import timezone
 
 from core.date_ranges import filter_local_date_range
+from core.activity import describe_activity_changes
+from core.models import ActivityLog
+from core.terminology import term
 from hr.models import UserDevice
 from tenants.models import Tenant, UserCompanyMembership
 
 from .models import (
     AgentGrantedMembership,
+    DailyRating,
+    DailyRatingToken,
     Engagement,
     IntegrationKey,
     PerformanceSnapshot,
@@ -82,6 +87,33 @@ class EngagementConflict(EngagementError):
 
     def __init__(self, code: str, detail: str, status_code: int = 409):
         super().__init__(code, detail, status_code=status_code)
+
+
+class DailyRatingError(PlatformOpsError):
+    """خطأ في التقييم اليومي."""
+
+    pass
+
+
+class DailyRatingConflict(DailyRatingError):
+    """تعارض في التقييم اليومي (مثل محاولة تعديل ثانية)."""
+
+    def __init__(self, code: str, detail: str, status_code: int = 400):
+        super().__init__(code, detail, status_code=status_code)
+
+
+class RatingTokenNotFound(PlatformOpsError):
+    """الرمز غير موجود أو غير صالح => 404 (طابق سابقة docshare)."""
+
+    def __init__(self, detail: str = "الرابط غير صالح أو غير موجود."):
+        super().__init__("token_not_found", detail, status_code=404)
+
+
+class RatingTokenGone(PlatformOpsError):
+    """الرمز انتهت صلاحيته أو أُبطل => 410 (طابق سابقة docshare)."""
+
+    def __init__(self, detail: str = "انتهت صلاحية هذا الرابط."):
+        super().__init__("token_expired", detail, status_code=410)
 
 
 def is_service_active(tenant) -> bool:
@@ -2648,4 +2680,674 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
         "total_anomalies_count": len(all_anomalies),
         "generated_at": current_time.isoformat(),
     }
+
+
+# ==============================================================================
+# المرحلة السابعة (م٧): التقييم اليومي وتبويب «من يمسك دفاتري» ودرجتا الصحة
+# ==============================================================================
+
+#: عمرُ الرابط اليوميّ — رقمُ المواصفة نفسُه، ومصدرٌ واحدٌ يستطيع اختبارٌ قياسَه.
+RATING_TOKEN_LIFETIME = datetime.timedelta(hours=72)
+
+#: حدُّ العيّنة الأدنى قبل أن تخصم التقييماتُ من «صحّة الخدمة» (§١٠).
+RATING_HEALTH_MIN_SAMPLE = 5
+
+#: سقفُ صفوفِ سجلّ نشاطِ الوكيل في تبويب «من يمسك دفاتري» — تحرٍّ لا تفريغُ جدول.
+MY_BOOKS_ACTIVITY_PAGE_CAP = 100
+
+
+def has_employee_worked_on_date(tenant, employee, service_date: datetime.date) -> bool:
+    """التحقق من أن موظف المنصة عمل فعلياً في الشركة في هذا اليوم.
+
+    شرط حاسم: لا يُنشأ تقييم ليوم لم يعمل فيه الموظف فعلياً في تلك الشركة
+    (أوامر عمل تحركت ذلك اليوم)، وليس مجرد وجود ارتباط.
+    تُفحص حركات أوامر العمل ومُسلَّماتها وسجل النشاط الزمني المحلي الآمن (دون __date).
+    """
+    tenant_id = getattr(tenant, "pk", tenant)
+    employee_id = getattr(employee, "pk", employee)
+
+    # 1. نشاط مسجل في PlatformActivityLog لهذا الموظف والشركة في تاريخ الخدمة
+    act_qs = PlatformActivityLog.objects.filter(
+        employee_id=employee_id,
+        tenant_id=tenant_id,
+        action__in=[
+            PlatformActivityLog.Action.WORK_ORDER_TRANSITION,
+            PlatformActivityLog.Action.DELIVERABLE_SUBMIT,
+            PlatformActivityLog.Action.DELIVERABLE_REVIEW,
+            PlatformActivityLog.Action.COMMENT_ADDED,
+        ],
+    )
+    if filter_local_date_range(act_qs, "created_at", date_from=service_date, date_to=service_date).exists():
+        return True
+
+    # 2. حركات أوامر عمل مباشرة في هذا اليوم
+    #
+    # **`received_at` و`cancelled_at` ليسا عملاً**: الأوّلُ يُختم لحظةَ إرسالِ
+    # **الزبون** عبر القناة (م٤)، فرفعُه مستنداً يصنع «يومَ عملٍ» لموظّفٍ لم يلمس
+    # شيئاً ثمّ يُطلب منه تقييمُه. والثاني إلغاءٌ قد لا يكون من الموظف أصلاً.
+    wo_qs = WorkOrder.objects.filter(assignee_id=employee_id, tenant_id=tenant_id)
+    for field in ("approved_at", "closed_at", "waiting_entered_at"):
+        if filter_local_date_range(wo_qs, field, date_from=service_date, date_to=service_date).exists():
+            return True
+
+    # 3. تسليم أو مراجعة مُسلَّم في هذا اليوم
+    deliv_qs = WorkOrderDeliverable.objects.filter(
+        tenant_id=tenant_id,
+        work_order__assignee_id=employee_id,
+    )
+    if filter_local_date_range(deliv_qs, "created_at", date_from=service_date, date_to=service_date).exists():
+        return True
+    if filter_local_date_range(deliv_qs, "reviewed_at", date_from=service_date, date_to=service_date).exists():
+        return True
+
+    return False
+
+
+@transaction.atomic
+def generate_daily_rating_token(
+    *,
+    tenant: Tenant,
+    employee: PlatformEmployee,
+    service_date: datetime.date,
+) -> tuple[DailyRatingToken, str]:
+    """توليد رابط يومي مهشر صالح 72 ساعة لتقييم يوم عمل.
+
+    - يتحقق من العمل الفعلي في هذا اليوم؛ ويرفض إذا لم يعمل.
+    - الرمز الخام لا يُحفظ في القاعدة إطلاقاً، بل يُخزن مهشراً (SHA-256).
+    - يعيد (كائن الرمز في القاعدة، الرمز الخام للرابط).
+    """
+    tenant_obj = tenant if isinstance(tenant, Tenant) else Tenant.objects.get(pk=tenant)
+    emp_obj = employee if isinstance(employee, PlatformEmployee) else PlatformEmployee.objects.get(pk=employee)
+
+    if not has_employee_worked_on_date(tenant_obj, emp_obj, service_date):
+        raise DailyRatingError(
+            "no_work_on_date",
+            "لا يمكن إنشاء تقييم ليوم لم يعمل فيه الموظف في هذه الشركة.",
+            status_code=400,
+        )
+
+    now = timezone.now()
+
+    # **إبطالُ ما سبق لليوم نفسِه**: رابطان حيّان لنفس (شركة، موظف، يوم) يعني
+    # نافذتَي كتابةٍ على شهادةٍ واحدة. وهذا هو الكاتبُ الوحيدُ لـ`revoked_at`،
+    # فالحقلُ الذي لا يكتبه أحدٌ وعدٌ في توثيقٍ لا سلوكٌ في كود.
+    DailyRatingToken.objects.filter(
+        tenant=tenant_obj,
+        employee=emp_obj,
+        service_date=service_date,
+        revoked_at__isnull=True,
+        expires_at__gt=now,
+    ).update(revoked_at=now)
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    expires_at = now + RATING_TOKEN_LIFETIME
+
+    token_obj = DailyRatingToken.objects.create(
+        tenant=tenant_obj,
+        employee=emp_obj,
+        service_date=service_date,
+        token_hash=token_hash,
+        expires_at=expires_at,
+        # ربطُ تقييمِ اليومِ القائم إن وُجد — كي لا يبدأ الرابطُ من فراغٍ ويعده تعديلاً.
+        rating=DailyRating.objects.filter(
+            tenant=tenant_obj, employee=emp_obj, service_date=service_date,
+        ).first(),
+    )
+    return token_obj, raw_token
+
+
+def resolve_daily_rating_token(raw_token: str) -> DailyRatingToken:
+    """حل الرمز الخام والتحقق من صلاحيته.
+
+    يرفع RatingTokenNotFound (404) إذا لم يوجد، أو RatingTokenGone (410) إذا انتهت صلاحيته.
+    طابق سابقة المستودع في docshare.
+    """
+    token_hash = hashlib.sha256((raw_token or "").encode("utf-8")).hexdigest()
+    token_obj = (
+        DailyRatingToken.objects.select_related("tenant", "employee__user", "rating")
+        .filter(token_hash=token_hash)
+        .first()
+    )
+    if not token_obj:
+        raise RatingTokenNotFound("الرابط غير صالح أو غير موجود.")
+
+    if not token_obj.is_live:
+        raise RatingTokenGone("انتهت صلاحية هذا الرابط.")
+
+    return token_obj
+
+
+@transaction.atomic
+def submit_daily_rating(
+    *,
+    tenant: Tenant,
+    employee: PlatformEmployee,
+    service_date: datetime.date,
+    stars: int,
+    note: str = "",
+    source: str = DailyRating.Source.IN_APP,
+    user=None,
+    token_obj: DailyRatingToken | None = None,
+) -> DailyRating:
+    """إنشاء أو تعديل التقييم اليومي وفق القواعد الصارمة.
+
+    ترتيب القفل: DailyRating
+    - النجوم 1..5 إلزامية.
+    - التحقق من العمل الفعلي في هذا اليوم (يرفض إذا لم يكن هناك عمل).
+    - التعديل مسموح مرة واحدة فقط (edited_once) والمحاولة الثانية تُرفض فوراً.
+    - فرادة (tenant, employee, service_date) غير مشروطة.
+    """
+    if stars < 1 or stars > 5:
+        raise DailyRatingError("invalid_stars", "التقييم يجب أن يكون بين 1 و 5 نجوم.", status_code=400)
+
+    tenant_obj = tenant if isinstance(tenant, Tenant) else Tenant.objects.get(pk=tenant)
+    emp_obj = employee if isinstance(employee, PlatformEmployee) else PlatformEmployee.objects.get(pk=employee)
+
+    # 1. التحقق من العمل الفعلي في ذلك اليوم
+    if not has_employee_worked_on_date(tenant_obj, emp_obj, service_date):
+        raise DailyRatingError(
+            "no_work_on_date",
+            "لا يمكن إنشاء تقييم ليوم لم يعمل فيه الموظف في هذه الشركة.",
+            status_code=400,
+        )
+
+    # 2. قفل التقييم الحالي إن وُجد لمنع سباق التعديل
+    existing = (
+        DailyRating.objects.select_for_update()
+        .filter(tenant=tenant_obj, employee=emp_obj, service_date=service_date)
+        .first()
+    )
+
+    clean_note = note.strip() if note else ""
+
+    if existing:
+        # التعديل مسموح مرة واحدة فقط
+        if existing.edited_once:
+            raise DailyRatingConflict(
+                "already_edited",
+                "تم تعديل هذا التقييم مسبقاً ولا يمكن تعديله مرة ثانية.",
+                status_code=400,
+            )
+        existing.stars = stars
+        existing.note = clean_note
+        existing.edited_once = True
+        existing.save(update_fields=["stars", "note", "edited_once", "updated_at"])
+
+        if token_obj and not token_obj.rating_id:
+            token_obj.rating = existing
+            token_obj.save(update_fields=["rating"])
+
+        return existing
+
+    # إنشاء تقييم جديد.
+    #
+    # **والقفلُ لا يُغني هنا**: `select_for_update` على صفٍّ غيرِ موجودٍ لا يقفل
+    # شيئاً، فإرسالان متزامنان لنفس اليوم يمرّان معاً ويصطدمان بالقيد. القيدُ في
+    # القاعدة هو الحارس، وواجبُ الخدمة ترجمةُ اصطدامه — كما في `generate_integration_key`.
+    try:
+        with transaction.atomic():
+            rating = DailyRating.objects.create(
+                tenant=tenant_obj,
+                employee=emp_obj,
+                service_date=service_date,
+                stars=stars,
+                note=clean_note,
+                source=source,
+                rated_by=user if getattr(user, "is_authenticated", False) else None,
+                edited_once=False,
+            )
+    except IntegrityError:
+        raise DailyRatingConflict(
+            "already_rated",
+            "سُجّل تقييمٌ لهذا اليوم لتوّه؛ أعد المحاولة لتعديله.",
+            status_code=409,
+        )
+    if token_obj:
+        token_obj.rating = rating
+        token_obj.save(update_fields=["rating"])
+
+    return rating
+
+
+@transaction.atomic
+def update_daily_rating(
+    *,
+    rating_id: int,
+    stars: int,
+    note: str = "",
+) -> DailyRating:
+    """تعديل تقييم قائم لمرة واحدة فقط."""
+    if stars < 1 or stars > 5:
+        raise DailyRatingError("invalid_stars", "التقييم يجب أن يكون بين 1 و 5 نجوم.", status_code=400)
+
+    locked = DailyRating.objects.select_for_update().filter(pk=rating_id).first()
+    if not locked:
+        raise DailyRatingError("not_found", "التقييم غير موجود.", status_code=404)
+
+    if locked.edited_once:
+        raise DailyRatingConflict(
+            "already_edited",
+            "تم تعديل هذا التقييم مسبقاً ولا يمكن تعديله مرة ثانية.",
+            status_code=400,
+        )
+
+    locked.stars = stars
+    locked.note = note.strip() if note else ""
+    locked.edited_once = True
+    locked.save(update_fields=["stars", "note", "edited_once", "updated_at"])
+    return locked
+
+
+def calculate_employee_ratings_summary(
+    *,
+    employee: PlatformEmployee,
+    tenant: Tenant | None = None,
+    date_from: datetime.date | None = None,
+    date_to: datetime.date | None = None,
+    min_sample_size: int = 5,
+) -> dict:
+    """حساب ملخص تقييمات الموظف مع اشتراط حد أدنى للعينة لدخول الأداء."""
+    emp_id = getattr(employee, "pk", employee)
+    qs = DailyRating.objects.filter(employee_id=emp_id)
+    if tenant:
+        t_id = getattr(tenant, "pk", tenant)
+        qs = qs.filter(tenant_id=t_id)
+    if date_from:
+        qs = qs.filter(service_date__gte=date_from)
+    if date_to:
+        qs = qs.filter(service_date__lte=date_to)
+
+    sample_size = qs.count()
+    if sample_size < min_sample_size:
+        return {
+            "status": "insufficient_data",
+            "average_stars": None,
+            "sample_size": sample_size,
+            "min_sample_size": min_sample_size,
+        }
+
+    avg_stars = qs.aggregate(Avg("stars"))["stars__avg"] or 0.0
+    return {
+        "status": "sufficient_data",
+        "average_stars": round(float(avg_stars), 2),
+        "sample_size": sample_size,
+        "min_sample_size": min_sample_size,
+    }
+
+
+#: أسماءُ الكيانات التي **لا** مفتاحَ لها في معجم الشركة — تُكتب هنا وحدَها.
+#: وما له مفتاحٌ (`doc.sales_invoice` مثلاً) يُقرأ من `term()` لا من هنا: قوالبُ
+#: الشركات تسمّيه أسماءً مختلفة، وكتابتُه حرفياً تُري الزبونَ معجمَ شركةٍ غيرِه.
+STATIC_ENTITY_LABELS = {
+    "sales_quotation": "عرض سعر",
+    "sales_order": "طلبية مبيعات",
+    "purchase_invoice": "فاتورة مشتريات",
+    "purchase_order": "أمر شراء",
+    "local_purchase_invoice": "فاتورة شراء محلية",
+    "customer_payment": "سند قبض",
+    "supplier_payment": "سند صرف",
+    "payment": "سند مالي",
+    "journal_entry": "قيد محاسبي",
+    "journal_header": "قيد محاسبي",
+    "work_order": "أمر عمل",
+    "deliverable": "مُسلَّم عمل",
+    "partner": "طرف تعامل",
+    "customer": "عميل",
+    "supplier": "مورد",
+    "product": "منتج",
+    "document_share": "رابط مشاركة",
+    "membership": "عضوية",
+    "user": "مستخدم",
+}
+
+
+def _entity_label_for(tenant, entity_type: str) -> str:
+    """اسمُ نوعِ المستند بمعجمِ هذه الشركة، وإلا فالثابتُ، وإلا «مستند»."""
+    key = f"doc.{entity_type}"
+    resolved = term(tenant, key)
+    if resolved != key:  # `term` تُعيد المفتاحَ نفسَه حين لا تعرفه
+        return resolved
+    return STATIC_ENTITY_LABELS.get(entity_type, "مستند")
+
+
+def _human_readable_activity_description(log: ActivityLog, tenant=None) -> str:
+    """صياغة وصف النشاط بلغة عربية مفهومة دون JSON ولا أسماء جداول، وإظهار التغيير المالي من ماذا إلى ماذا."""
+    actions_map = {
+        "create": "إنشاء",
+        "update": "تعديل",
+        "delete": "حذف",
+        "post": "ترحيل",
+        "unpost": "إلغاء ترحيل",
+        "duplicate": "نسخ",
+        "payment": "تسجيل دفعة",
+    }
+
+    entity_name = _entity_label_for(tenant if tenant is not None else log.tenant, log.entity_type)
+    action_name = actions_map.get(log.action, log.action)
+    label = f" {log.entity_label}" if log.entity_label else ""
+
+    meta = log.metadata if isinstance(log.metadata, dict) else {}
+
+    # فحص التغيير المالي من ماذا إلى ماذا.
+    #
+    # **الواصفُ واصفُ المستودع لا نسخةٌ عنه**: المنتِجون الحقيقيّون (`sales/views.py`
+    # وغيرُها) يكتبون `build_activity_changes(...) + build_line_changes(...)`، وبنودُ
+    # الأسطر منها `{"kind": "line_changed", "changes": [...]}` — وهناك يسكن المال.
+    # وقراءةُ `old`/`new` من المستوى الأعلى وحدَه كانت تُسقطها كلَّها بصمت.
+    financial_change_str = ""
+    changes = meta.get("changes") or meta.get("diff") or []
+    if isinstance(changes, list) and changes:
+        try:
+            described = describe_activity_changes(
+                [c for c in changes if isinstance(c, dict) and c.get("label")]
+            )
+        except (KeyError, TypeError):
+            described = ""
+        if described:
+            financial_change_str = f" ({described})"
+
+    # حالة 2: مفاتيح مالية مباشرة في metadata
+    if not financial_change_str:
+        for old_k, new_k, lbl in (
+            ("old_total", "new_total", "الإجمالي"),
+            ("old_amount", "new_amount", "المبلغ"),
+            ("from_amount", "to_amount", "المبلغ"),
+            ("old_price", "new_price", "السعر"),
+            ("amount_before", "amount_after", "المبلغ"),
+            ("before", "after", "القيمة"),
+        ):
+            if old_k in meta and new_k in meta:
+                financial_change_str = f" (تغيير {lbl} من {meta[old_k]} إلى {meta[new_k]})"
+                break
+
+    if financial_change_str:
+        return f"{action_name} {entity_name}{label}:{financial_change_str}"
+
+    if log.description and not any(k in log.description for k in ("{", "}", '":', "table")):
+        return log.description
+
+    return f"{action_name} {entity_name}{label}".strip()
+
+
+def get_my_books_tab_data(tenant: Tenant) -> dict:
+    """بيانات تبويب «من يمسك دفاتري» لصاحب الشركة.
+
+    القواعد الصارمة:
+    1. المصدر الوحيد لمعرفة الوكيل هو صف Engagement النشط — لا قراءة لجدول العضويات.
+    2. يقال للزبون صراحةً إن الوكيل يعمل بصلاحية مدير بلا تلطيف.
+    3. نشاط الوكيل داخل هذه الشركة وحدها — لا يرى شيئاً من شركات أخرى.
+    4. العرض والدخول مستبعدان من السجل (view و login).
+    5. التغيير المالي يظهر «من ماذا إلى ماذا».
+    6. بلغة مفهومة: لا JSON ولا أسماء جداول.
+    7. قائمة AgentGrantedMembership (من أضافه الوكيل أو عدل دوره).
+    """
+    tenant_obj = tenant if isinstance(tenant, Tenant) else Tenant.objects.get(pk=tenant)
+
+    # 1. استخراج الوكيل النشط حصراً من Engagement
+    active_engagement = (
+        Engagement.objects.filter(tenant=tenant_obj, status=Engagement.Status.ACTIVE)
+        .select_related("employee__user")
+        .first()
+    )
+
+    agent_info = None
+    agent_user_ids = []
+    if active_engagement:
+        emp = active_engagement.employee
+        user = emp.user
+        agent_user_ids.append(user.pk)
+        agent_info = {
+            "id": emp.pk,
+            "user_id": user.pk,
+            "name": user.get_full_name() or user.username,
+            "username": user.username,
+            "specialty": emp.specialty,
+            "assigned_at": active_engagement.assigned_at.isoformat(),
+            "role_title": "مدير النظام والعمليات",
+            "authority_notice": "يعمل وكيل المنصة بصلاحية مدير كاملة على حساب الشركة لإدارة الدفاتر المحاسبية والعمليات التشغيلية.",
+            "engagement_id": active_engagement.pk,
+            "engagement_status": active_engagement.status,
+        }
+
+    # إذا لم يكن هناك ارتباط نشط، نجمع موظفي المنصة الذين ارتبطوا سابقاً بهذه الشركة لعرض سجلهم التاريخي
+    all_past_emp_user_ids = list(
+        PlatformEmployee.objects.filter(engagements__tenant=tenant_obj)
+        .values_list("user_id", flat=True)
+        .distinct()
+    )
+    for uid in all_past_emp_user_ids:
+        if uid not in agent_user_ids:
+            agent_user_ids.append(uid)
+
+    # 2. سجل العضويات الممنوحة أو المعدلة بواسطة وكيل داخل هذه الشركة
+    granted_qs = (
+        AgentGrantedMembership.objects.filter(tenant=tenant_obj)
+        .select_related("acting_employee__user", "user")
+        .order_by("-created_at")
+    )
+    granted_memberships = []
+    for record in granted_qs:
+        snap = record.identity_snapshot or {}
+        target_name = snap.get("full_name") or snap.get("username") or ""
+        if not target_name and record.user:
+            target_name = record.user.get_full_name() or record.user.username
+
+        roles_ar = {
+            "manager": "مدير",
+            "accountant": "محاسب",
+            "cashier": "أمين صندوق",
+            "sales": "مسؤول مبيعات",
+            "purchases": "مسؤول مشتريات",
+            "inventory": "أمين مخزن",
+            "viewer": "مشاهد",
+            "": "عضو جديد",
+        }
+        role_before_display = roles_ar.get(record.role_before, record.role_before or "عضو جديد")
+        role_after_display = roles_ar.get(record.role_after, record.role_after)
+
+        granted_memberships.append({
+            "id": record.pk,
+            "target_user_name": target_name,
+            "role_before": record.role_before,
+            "role_before_display": role_before_display,
+            "role_after": record.role_after,
+            "role_after_display": role_after_display,
+            "created_at": record.created_at.isoformat(),
+            "acting_employee_name": (
+                record.acting_employee.user.get_full_name() or record.acting_employee.user.username
+                if record.acting_employee and record.acting_employee.user
+                else "وكيل المنصة"
+            ),
+        })
+
+    # 3. سجل نشاط الوكيل داخل هذه الشركة وحدها (مستبعد منه view و login)
+    activity_base_qs = (
+        ActivityLog.objects.filter(
+            tenant=tenant_obj,
+            user_id__in=agent_user_ids,
+        )
+        .exclude(action__in=["view", "login", "logout"])
+        .exclude(is_view=True)
+    )
+    total_activities_count = activity_base_qs.count()
+    # `select_related("user")` لا زينة: الحلقةُ أدناه تقرأ `log.user` لكلّ صفّ،
+    # فبدونها مئةُ صفٍّ = مئةُ استعلامٍ إضافيّ.
+    activity_qs = activity_base_qs.select_related("user").order_by("-timestamp")[:MY_BOOKS_ACTIVITY_PAGE_CAP]
+
+    activity_items = []
+    for log in activity_qs:
+        desc = _human_readable_activity_description(log, tenant_obj)
+        activity_items.append({
+            "id": log.pk,
+            "timestamp": log.timestamp.isoformat(),
+            "action": log.action,
+            "entity_type": log.entity_type,
+            "description": desc,
+            "actor_name": log.user.get_full_name() or log.user.username if log.user else "الوكيل",
+        })
+
+    return {
+        "agent": agent_info,
+        "granted_memberships": granted_memberships,
+        "activity_log": activity_items,
+        # العددُ الكلّيُّ من القاعدة لا `len` بعد القصّ — وإلا جمد على السقف وكذب.
+        "total_activities_count": total_activities_count,
+        "returned_activities_count": len(activity_items),
+        "activity_page_cap": MY_BOOKS_ACTIVITY_PAGE_CAP,
+        "can_suspend": bool(active_engagement),
+    }
+
+
+def calculate_two_health_scores(tenant: Tenant) -> dict:
+    """احتساب درجتي الصحة المنفصلتين للشركة (المرحلة السابعة: م٧).
+
+    القواعد الصارمة:
+    1. «صحة الخدمة» = تقصيرنا (تجاوز أجل، إعادة عمل، مُسلَّمات مرفوضة، تقييمات منخفضة).
+    2. «تعاون الزبون» = تقصيره (أعمال بانتظار العميل، ردود متأخرة، استفسارات معلقة).
+    3. الخلط ممنوع: لا تدمج الدرجتين ولا تحسب متوسطاً.
+    4. استهلاك الباقة وحالة الاشتراك خارج الصحة تماماً.
+    5. أعلى 3 أسباب بقوالب ثابتة مسماة الجهة دون أي نموذج لغة.
+    """
+    tenant_obj = tenant if isinstance(tenant, Tenant) else Tenant.objects.get(pk=tenant)
+    now = timezone.now()
+
+    # --------------------------------------------------------------------------
+    # 1. صحة الخدمة (تقصير المنصة والوكيل)
+    # --------------------------------------------------------------------------
+    service_deductions = 0
+    service_reasons = []
+
+    # أ. أوامر عمل تجاوزت الأجل المحدد من طرفنا
+    sla_breaches_count = (
+        WorkOrder.objects.filter(tenant=tenant_obj)
+        .filter(
+            (models.Q(approved_at__gt=models.F("deadline_at")) & models.Q(deadline_at__isnull=False))
+            | (models.Q(approved_at__isnull=True) & models.Q(deadline_at__lt=now) & models.Q(deadline_at__isnull=False))
+        )
+        .exclude(status__in=[WorkOrder.Status.CLOSED, WorkOrder.Status.CANCELLED, WorkOrder.Status.WAITING_CUSTOMER])
+        .count()
+    )
+    if sla_breaches_count > 0:
+        deduction = sla_breaches_count * 15
+        service_deductions += deduction
+        service_reasons.append({
+            "deduction": deduction,
+            "text": f"علينا: {sla_breaches_count} أعمالٍ تجاوزت الأجل",
+        })
+
+    # ب. أوامر عمل ملغاة — **رقمٌ تشخيصيٌّ لا خصم**.
+    #
+    # المواصفة (§٨) تحسمها: «الإلغاءُ يظهر معدَّلَ إعادةِ عملٍ منفصلاً **لا عقوبةً
+    # آليّة**، لأنّ سببَ الإلغاء قد لا يكون من الموظف» — وقد التزمت بها م٥ في
+    # الدرجة المركّبة، فإعادتُها هنا تحت اسمٍ آخرَ خرقٌ لها بالباب الخلفيّ.
+    cancelled_count = WorkOrder.objects.filter(
+        tenant=tenant_obj, status=WorkOrder.Status.CANCELLED
+    ).count()
+
+    # ج. مُسلَّمات رُفضت في المراجعة
+    rejected_deliv_count = WorkOrderDeliverable.objects.filter(
+        tenant=tenant_obj,
+        review_status=WorkOrderDeliverable.ReviewStatus.REJECTED,
+    ).count()
+    if rejected_deliv_count > 0:
+        deduction = rejected_deliv_count * 10
+        service_deductions += deduction
+        service_reasons.append({
+            "deduction": deduction,
+            "text": f"علينا: {rejected_deliv_count} مُسلَّماتٍ رُفضت في المراجعة",
+        })
+
+    # د. تقييمات يومية منخفضة (نجمتان أو أقل) — **بعد حدٍّ أدنى للعيّنة**.
+    #
+    # المواصفة (§١٠): «تقييمٌ منفردٌ لا يُستعمل لعقوبةٍ ولا قرارٍ وظيفيّ — يدخل
+    # الأداءَ بعد حدٍّ أدنى من العيّنة». فنقرةٌ واحدةٌ بنجمتين كانت تُنزل صحّةَ
+    # الخدمة عشرَ درجاتٍ فوراً، وهي بالضبط ما نهت عنه.
+    ratings_qs = DailyRating.objects.filter(tenant=tenant_obj)
+    ratings_sample = ratings_qs.count()
+    low_ratings_count = ratings_qs.filter(stars__lte=2).count()
+    if ratings_sample >= RATING_HEALTH_MIN_SAMPLE and low_ratings_count > 0:
+        deduction = low_ratings_count * 10
+        service_deductions += deduction
+        service_reasons.append({
+            "deduction": deduction,
+            "text": f"علينا: {low_ratings_count} تقييماتٍ يوميةٍ منخفضة",
+        })
+
+    service_health_score = max(0, 100 - service_deductions)
+    service_reasons.sort(key=lambda r: r["deduction"], reverse=True)
+    top_service_reasons = [r["text"] for r in service_reasons[:3]]
+
+    # --------------------------------------------------------------------------
+    # 2. تعاون الزبون (تقصير وتأخيرات الزبون)
+    # --------------------------------------------------------------------------
+    customer_deductions = 0
+    customer_reasons = []
+
+    # أ. أوامر عمل متوقفة بانتظار العميل حالياً
+    waiting_customer_count = WorkOrder.objects.filter(
+        tenant=tenant_obj, status=WorkOrder.Status.WAITING_CUSTOMER
+    ).count()
+    if waiting_customer_count > 0:
+        deduction = waiting_customer_count * 15
+        customer_deductions += deduction
+        customer_reasons.append({
+            "deduction": deduction,
+            "text": f"بانتظار الزبون: {waiting_customer_count} أعمالٍ بانتظار الرد",
+        })
+
+    # ب. أوامر عمل تراكم فيها انتظار الزبون لأكثر من 48 ساعة
+    long_waiting_count = WorkOrder.objects.filter(
+        tenant=tenant_obj,
+        waiting_seconds_total__gte=48 * 3600,
+    ).count()
+    if long_waiting_count > 0:
+        deduction = long_waiting_count * 10
+        customer_deductions += deduction
+        customer_reasons.append({
+            "deduction": deduction,
+            "text": f"بانتظار الزبون: {long_waiting_count} أعمالٍ تأخّر ردّه عليها أكثر من ٤٨ ساعة",
+        })
+
+    # ج. استفسارات مرئية للزبون معلقة في أوامر عمل بانتظار العميل
+    pending_comments_count = WorkOrderComment.objects.filter(
+        tenant=tenant_obj,
+        visibility=WorkOrderComment.Visibility.CLIENT_VISIBLE,
+        work_order__status=WorkOrder.Status.WAITING_CUSTOMER,
+    ).count()
+    if pending_comments_count > 0:
+        deduction = pending_comments_count * 5
+        customer_deductions += deduction
+        customer_reasons.append({
+            "deduction": deduction,
+            "text": f"بانتظار الزبون: {pending_comments_count} استفساراتٍ معلّقة",
+        })
+
+    customer_cooperation_score = max(0, 100 - customer_deductions)
+    customer_reasons.sort(key=lambda r: r["deduction"], reverse=True)
+    top_customer_reasons = [r["text"] for r in customer_reasons[:3]]
+
+    return {
+        # رقمٌ تشخيصيٌّ يُعرَض ولا يُخصَم — قرارُ المواصفة §٨.
+        "rework_diagnostic": {
+            "cancelled_work_orders": cancelled_count,
+            "counts_against_score": False,
+        },
+        "ratings_sample": {
+            "size": ratings_sample,
+            "min_sample_size": RATING_HEALTH_MIN_SAMPLE,
+            "counts_against_score": ratings_sample >= RATING_HEALTH_MIN_SAMPLE,
+        },
+        "service_health": {
+            "score": service_health_score,
+            "status": "excellent" if service_health_score >= 90 else "good" if service_health_score >= 70 else "needs_attention",
+            "top_reasons": top_service_reasons,
+        },
+        "customer_cooperation": {
+            "score": customer_cooperation_score,
+            "status": "excellent" if customer_cooperation_score >= 90 else "good" if customer_cooperation_score >= 70 else "needs_attention",
+            "top_reasons": top_customer_reasons,
+        },
+    }
+
 

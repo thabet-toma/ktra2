@@ -97,6 +97,9 @@ urlpatterns = [
          platform_admin_api.platform_company_member_detail),
     path('api/platform/users/<int:pk>/set-active/', platform_admin_api.platform_user_set_active),
     path('api/platform/ops/', include('platform_ops.urls')),
+    # سطحُ المستأجر من الوحدة نفسِها — خارج `/api/platform/` لأنّ ذلك الجذر
+    # محروسٌ بالسوبر أدمن وحده، وهذه نقاطُ صاحبِ الشركة ورابطٌ عامٌّ بلا دخول.
+    path('api/my-agent/', include('platform_ops.urls_tenant')),
     path('api/platform/', include(_platform_router.urls)),
     # T-PERM: محرّك الصلاحيات (صلاحياتي + مصفوفة الأدوار لكل شركة)
     path('api/permissions/me/', permissions_api.my_permissions),

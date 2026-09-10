@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **686**
+عدد النقاط: **693**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -500,6 +500,13 @@
 | `/api/lookup/products/` | `ProductLookupViewSet` | `inventory/views.py` |
 | `/api/mapper/{subpath}/?` | `MapperView` | `bridge/views.py` |
 | `/api/media/upload/` | `media_upload` | `core/media_views.py` |
+| `/api/my-agent/` | `TenantAgentBooksViewSet` | `platform_ops/views.py` |
+| `/api/my-agent/daily-ratings/` | `DailyRatingViewSet` | `platform_ops/views.py` |
+| `/api/my-agent/daily-ratings/generate-link/` | `DailyRatingViewSet` | `platform_ops/views.py` |
+| `/api/my-agent/daily-ratings/summary/` | `DailyRatingViewSet` | `platform_ops/views.py` |
+| `/api/my-agent/daily-ratings/{pk}/` | `DailyRatingViewSet` | `platform_ops/views.py` |
+| `/api/my-agent/ratings/public/<str:token>/` | `PublicDailyRatingView` | `platform_ops/views.py` |
+| `/api/my-agent/suspend/` | `TenantAgentBooksViewSet` | `platform_ops/views.py` |
 | `/api/partners/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/lookup/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/{pk}/` | `PartnerViewSet` | `partners/views.py` |

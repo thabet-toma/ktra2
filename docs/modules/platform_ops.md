@@ -13,14 +13,16 @@
 
 | الملف | الغرض |
 |---|---|
-| `platform_ops/models.py` | هوية موظف المنصة، اشتراك الخدمة، الارتباطات (`Engagement`)، سجل العضويات (`AgentGrantedMembership`)، وأوامر العمل (`WorkOrder`) ومُسلَّماتها (`WorkOrderDeliverable`) وتعليقاتها (`WorkOrderComment`)، ومفاتيح قنوات الاستقبال (`IntegrationKey`)، وملف سياسة الأداء (`PolicyProfile`)، ولقطة الأداء الشهرية (`PerformanceSnapshot`)، وإشعارات المنصة (`PlatformNotification`)، وسجل النشاط العابر (`PlatformActivityLog`) |
-| `platform_ops/services.py` | بوابة الاشتراك، دورة حياة الارتباط، تعليق الاشتراكات والمغادرة، إدارة دورة حياة أمر العمل وآلة حالاته، حساب وإيقاف الأجل (SLA)، اعتماد ورفض المُسلَّمات، وإدارة التعليقات بمستويات الظهور، وتوليد وتدوير وإبطال مفاتيح القنوات واستقبال طلبات القنوات واحتساب الفوترة، وحساب أداء الموظف عبر المقاييس الستة والمحاور الخمسة وإعادة توزيع الأوزان بالتناسب، والتقاط لقطات الأداء الشهرية المجمدة بطريقة idempotent وترتيب الموظفين، وكشف الشذوذات الأربعة لشريط التدخل، وتوليد ملخص اللوحة التفاعلية، وتسجيل النشاط العابر للشركات |
+| `platform_ops/models.py` | هوية موظف المنصة، اشتراك الخدمة، الارتباطات (`Engagement`)، سجل العضويات (`AgentGrantedMembership`)، وأوامر العمل (`WorkOrder`) ومُسلَّماتها (`WorkOrderDeliverable`) وتعليقاتها (`WorkOrderComment`)، ومفاتيح قنوات الاستقبال (`IntegrationKey`)، وملف سياسة الأداء (`PolicyProfile`)، ولقطة الأداء الشهرية (`PerformanceSnapshot`)، وإشعارات المنصة (`PlatformNotification`)، وسجل النشاط العابر (`PlatformActivityLog`)، والتقييم اليومي (`DailyRating`) ورمزه العام (`DailyRatingToken`) |
+| `platform_ops/services.py` | بوابة الاشتراك، دورة حياة الارتباط، تعليق الاشتراكات والمغادرة، إدارة دورة حياة أمر العمل وآلة حالاته، حساب وإيقاف الأجل (SLA)، اعتماد ورفض المُسلَّمات، وإدارة التعليقات بمستويات الظهور، وتوليد وتدوير وإبطال مفاتيح القنوات واستقبال طلبات القنوات واحتساب الفوترة، وحساب أداء الموظف عبر المقاييس الستة والمحاور الخمسة وإعادة توزيع الأوزان بالتناسب، والتقاط لقطات الأداء الشهرية المجمدة بطريقة idempotent وترتيب الموظفين، وكشف الشذوذات الأربعة لشريط التدخل، وتوليد ملخص اللوحة التفاعلية، وتسجيل النشاط العابر للشركات، والتقييم اليومي وتوليد رمزه المهشر وحله، وبيانات تبويب «من يمسك دفاتري»، ودرجتَي الصحة المنفصلتين |
 | `platform_ops/authentication.py` | مصادقة مفتاح قناة الاستقبال (`IntegrationKeyAuthentication`) وحارس التحقق (`HasValidIntegrationKey`) |
-| `platform_ops/throttles.py` | خانق استقبال أوامر العمل المربوط بمفتاح القناة (`IntegrationKeyThrottle`) |
+| `platform_ops/throttles.py` | خانق استقبال أوامر العمل المربوط بمفتاح القناة (`IntegrationKeyThrottle`)، وخانق النطاق المربوط بـ`REMOTE_ADDR` لا بترويسة يرسلها العميل (`ClientIpScopedThrottle`) |
 | `platform_ops/permissions.py` | حارسا موظف العمليات ومدير العمليات |
-| `platform_ops/views.py` | نقاط القراءة الإدارية والتشغيلية، ونقطة استقبال أوامر العمل من القنوات الخارجية (`WorkOrderIntakeView`)، ومسار استعلام الأداء وترتيب الموظفين، ومسار سياسات الأداء واللقطات الشهرية، وصندوق الإشعارات المفلتر خادمياً (`PlatformNotificationViewSet`)، وسجل النشاط العابر (`PlatformActivityLogViewSet`)، واللوحة التفاعلية وشريط التدخل (`PlatformDashboardView`) |
+| `platform_ops/views.py` | نقاط القراءة الإدارية والتشغيلية، ونقطة استقبال أوامر العمل من القنوات الخارجية (`WorkOrderIntakeView`)، ومسار استعلام الأداء وترتيب الموظفين، ومسار سياسات الأداء واللقطات الشهرية، وصندوق الإشعارات المفلتر خادمياً (`PlatformNotificationViewSet`)، وسجل النشاط العابر (`PlatformActivityLogViewSet`)، واللوحة التفاعلية وشريط التدخل (`PlatformDashboardView`)، والتقييم اليومي (`DailyRatingViewSet`) وتبويب «من يمسك دفاتري» (`TenantAgentBooksViewSet`) والرابط العام (`PublicDailyRatingView`) |
+| `platform_ops/urls.py` · `platform_ops/urls_tenant.py` | مساران منفصلان: الأول سطح المنصة تحت `/api/platform/ops/`، والثاني سطح المستأجر تحت `/api/my-agent/` |
 | `platform_ops/tests/test_isolation_guard.py` | قائمة الاستيراد البيضاء وحارس الاتجاهين |
-| `platform_ops/tests/test_migration_graph.py` | سلامة رسم الهجرات (0001 و0002 و0003 و0004 و0005 و0006) واعتمادها على `tenants` |
+| `platform_ops/tests/test_migration_graph.py` | سلامة رسم الهجرات (0001 حتى 0007) واعتمادها على `tenants` |
+| `platform_ops/tests/test_daily_ratings_and_books.py` | التقييم اليومي وحدّ التعديل الواحد، انتهاء الرمز بـ410، عدم حفظ الرمز الخام، القائمة البيضاء للرد العام، خانق الرابط العام بـ429، تبويب «من يمسك دفاتري»، درجتا الصحة، وعيوب المراجعة الاثنا عشر |
 | `platform_ops/tests/test_engagement_lifecycle.py` | دورة حياة الارتباط، فرادة الإسناد تحت قفل، حفظ عضوية الزبون، الاستئناف، والمغادرة، وحارس ترتيب الأقفال |
 | `platform_ops/tests/test_work_orders.py` | آلة حالات أمر العمل، إيقاف الأجل عند انتظار العميل، لقطة السياسة والتسليم، إلزامية مستوى ظهور التعليق، والعزل بالشركة |
 | `platform_ops/tests/test_channel_intake.py` | استقبال القنوات، فرادة المرجع الخارجي (idempotency)، احتساب الفوترة تحت قفل، رفض الحقول الممنوعة، التحقق من المرفقات، الخانق، وفحص الحجم بالبايتات |
@@ -43,6 +45,8 @@
 | `PerformanceSnapshot` | لقطة أداء شهرية لموظف المنصة لكل `(employee, period_year, period_month)` بفرادة غير مشروطة. تحفظ نسخة مجمدة من السياسة والأوزان (`policy_snapshot`) والمقاييس الستة والمحاور، والتقاطها دالة خدمة idempotent لا تكرر الصفوف ولا تضاعف الآثار. |
 | `PlatformNotification` | إشعار منصي موجه لمستخدم (`recipient` إلزامي، `tenant` اختياري). مفلتر خادمياً حصراً فلا يرى المستخدم إلا إشعاراته. أنواع مغلقة (`sla_breach`, `low_score`, `quota_exceeded`). يدعم تعليم إشعار أو الكل كمقروء وعدّ غير المقروء. |
 | `PlatformActivityLog` | سجل نشاط منصي عابر للشركات مستقل تماماً عن `ActivityLog` المستأجر؛ لأن `ActivityLog` لا يتسع لحدث بلا شركة وفهارسه تبدأ بالشركة. يحمل `employee` إلزامي، و`tenant` اختياري للأنشطة العامة، ومفهرس زمنياً `(employee, -created_at)` و`(-created_at)`. |
+| `DailyRating` | تقييم يوم عمل واحد بمفتاح منطقي `(tenant, employee, service_date)` بفرادة **غير مشروطة**. `service_date` حقل `DateField` صريح لا مشتق من وقت. `stars` من 1 إلى 5. `edited_once` يسمح بتعديل واحد لا غير. `source` يميز الرابط العام من داخل التطبيق. |
+| `DailyRatingToken` | الرابط اليومي العام: `token_hash` مهشر SHA-256 وفريد، والرمز الخام لا يُحفظ في القاعدة أبداً ويظهر مرة واحدة عند التوليد. صالح 72 ساعة (`expires_at`)، وقابل للإبطال (`revoked_at`). |
 
 النماذج المنصية المخطط لها في مرحلة التوظيف، `JobPosting` و`JobApplicant`، ستكون
 هي أيضاً بلا `tenant` بقرار #207 الموثق؛ هذا استثناء محصور لأن الوظائف
@@ -68,6 +72,13 @@
 | GET | `/api/platform/ops/notifications/` · `unread-count/` | `IsPlatformOperationsStaff` أو `IsPlatformOperationsManager` (مفلتر خادمياً) |
 | POST | `/api/platform/ops/notifications/{id}/mark-read/` · `mark-all-read/` | `IsPlatformOperationsStaff` أو `IsPlatformOperationsManager` |
 | GET | `/api/platform/ops/activity-logs/` | `IsPlatformOperationsStaff` (لنفسه) أو `IsPlatformOperationsManager` (لكل الشركات) |
+| GET | `/api/my-agent/` | صاحب الشركة (`role="manager"`) وحده — التبويب يعرض نشاط الوكيل المالي ودرجتَي الصحة |
+| POST | `/api/my-agent/suspend/` | صاحب الشركة (`role="manager"`) وحده — لا أي عضو |
+| GET | `/api/my-agent/daily-ratings/summary/` | ملخّص تقييمات موظف؛ مفلتر بالشركة لغير مدير المنصة |
+| GET · POST | `/api/my-agent/daily-ratings/` | قراءة بعضوية الشركة؛ والإنشاء لصاحبها وحده. `DELETE` مرفوض دائماً بـ405 |
+| PATCH | `/api/my-agent/daily-ratings/{id}/` | صاحب الشركة وحده؛ ومحظور على موظف المنصة المُقيَّم نفسه |
+| POST | `/api/my-agent/daily-ratings/generate-link/` | صاحب الشركة وحده |
+| GET · POST | `/api/my-agent/ratings/public/{token}/` | **بلا مصادقة** — الرمز وحده، مع `ClientIpScopedThrottle` |
 
 ## الاعتماديات
 
@@ -75,6 +86,8 @@
 
 - `core.platform_admin_api` — `IsPlatformAdmin` كأساس لحارس مدير العمليات.
 - `core.models` — `TenantAsset` للتحقق من المرفقات المرفوعة عبر خدمة الوسائط القائمة.
+- `core.tenant_utils` — `get_tenant` المصدر الواحد لحل شركة المستخدم على نقاط سطح المستأجر.
+- `core.terminology` — `term(tenant, key)` لاسم نوع المستند بمعجم الشركة لا حرفياً.
 - `tenants.models` — `Tenant` لاشتراك الخدمة والارتباطات وأوامر العمل والمفاتيح، و`UserCompanyMembership` لإدارة صلاحية المدير.
 
 **يعتمد عليه:** لا شيء حالياً؛ حارس العزل يمنع الاستيراد الوارد من التطبيقات
@@ -141,6 +154,45 @@
 - شريط التدخل يعرض أربعة شذوذات فقط لا غير (`critical_delay`, `absent_with_work`, `overloaded`, `low_score`) مرتبة الأسوأ أولاً.
 - عتبة النشاط الأخير للموظف 15 دقيقة صارمة مشتقة من `hr.models.UserDevice.last_active_at`.
 - التنقيب في لوحة القيادة يرفض وسائط الشركات الصريحة من الطلب (`tenant`, `tenants`, `tenant_id`, `tenant_ids`) بـ 400 Bad Request، ويعتمد الاشتقاق الخادمي للشركات.
+- **سطح المستأجر خارج `/api/platform/` قطعاً.** عقد ذلك الجذر — المكتوب في
+  `core/urls.py` والمحروس بـ`core/tests/test_platform_admin.py::PlatformRouteGuardTest` —
+  أن لا نقطة تحته تُقرأ بغير سوبر أدمن. فنقاط م٧ الموجهة للزبون (ومنها رابط
+  يُفتح بلا تسجيل دخول أصلاً) مكانها `/api/my-agent/` عبر `urls_tenant.py`،
+  تماماً كما فصلت `docshare` مساراتها العامة عن المحروسة.
+- **التقييم شهادة الزبون لا سجل داخلي.** موظف المنصة يقرأ تقييماته ولا يكتبها،
+  ولا يحذفها أحد إطلاقاً (`DELETE` يرد 405) — مقياس يملك المُقاس محوه ليس مقياساً.
+- **لا تقييم ليوم لم يُعمل فيه.** `has_employee_worked_on_date` شرط سابق لتوليد
+  الرابط ولإرسال التقييم معاً؛ ووجود الارتباط وحده لا يكفي.
+- **التعديل مرة واحدة.** `edited_once` يحسم، والثانية ترد بـ400 ورمز `already_edited`.
+  والرابط العام يقرأ **تقييم اليوم الحقيقي** بمفتاح `(tenant, employee, service_date)`
+  لا `token.rating` (يُولَّد فارغاً)، وإلا بدا التقييم المُسجَّل داخل التطبيق «غير موجود»
+  لفاتح الرابط فمحاه وأحرق حق التعديل الوحيد.
+- **رابط واحد حيّ لليوم الواحد.** توليد رابط جديد يُبطل سابقه (`revoked_at`) — وهو
+  الكاتب الوحيد لذلك الحقل، فرابطان حيّان نافذتا كتابة على شهادة واحدة.
+- **«عمل فعلي» لا يشمل ما يختمه الزبون.** `received_at` (تُختم لحظة إرسال الزبون عبر
+  القناة) و`cancelled_at` ليسا دليل عمل؛ الأدلة `approved_at` و`closed_at`
+  و`waiting_entered_at` وحركات المُسلَّمات وسجل النشاط المنصي.
+- **الإلغاء لا يخصم من صحة الخدمة** — رقم تشخيصي في `rework_diagnostic` وحده،
+  التزاماً بالقرار نفسه في §٨ («سبب الإلغاء قد لا يكون من الموظف»).
+- **تقييم منفرد لا يعاقب**: التقييمات المنخفضة لا تخصم إلا بعد
+  `RATING_HEALTH_MIN_SAMPLE`، وحالة العيّنة معلنة في `ratings_sample`.
+- **اصطدام إنشاءين متزامنين تعارض لا 500**: القفل على صف غير موجود لا يقفل شيئاً،
+  فالقيد في القاعدة هو الحارس والخدمة تترجم اصطدامه (`already_rated` / 409).
+- **الرمز الخام لا يُحفظ أبداً**، والمنتهي يرد 410 صريحة لا 404 (سابقة `docshare`).
+- **حل الشركة عبر `core.tenant_utils.get_tenant` وحده** — لا `UserCompanyMembership.first()`
+  مكتوبة باليد: ترويسة أُرسلت ولم تُحَل تُرَد ولا تسقط على شركة أخرى، وشركة موقوفة
+  لا تُفتح، وأكثر من عضوية تلزمها `X-Tenant-Id` صراحة.
+- **الدرجتان لا تُخلطان ولا يُؤخذ متوسطهما**، ولا يدخل استهلاك الباقة أو حالة
+  الاشتراك في أي منهما إطلاقاً.
+- **أسماء أنواع المستندات من `term(tenant, key)`** لا حرفياً — قوالب الشركات
+  تسمّي المستند أسماء مختلفة، ويحرس ذلك `core/tests/test_terminology_guard.py`.
+- **«من ماذا إلى ماذا» عبر `core.activity.describe_activity_changes`** لا بواصف ثانٍ:
+  المنتِجون الحقيقيون يكتبون بنود أسطر (`line_changed` / `line_added`) وفيها يسكن
+  المال، وقراءة `old`/`new` من المستوى الأعلى وحده كانت تُسقطها كلها بصمت.
+- **`company` تضييق مشروع لا وسيط شركة.** `CROSS_TENANT_FROM_REQUEST_KEYS` تبقى
+  `tenant*` وحدها لأن `WorkOrderViewSet` يقرأ `company` تضييقاً داخل النطاق المشتق
+  (عقد م٦: «كل رقم يصل إلى صفوفه»). ونقاط سطح المستأجر تستعمل
+  `TENANT_SURFACE_FORBIDDEN_KEYS` التي تضيف `company`/`companies` — شركتها من الجلسة.
 - لا نقاط تحفيزية (gamification) في لوحة عمليات المنصة.
 
 ## الاختبارات المهمة
@@ -154,7 +206,8 @@
 | `platform_ops/tests/test_performance_metrics.py` | كفاية العينة، إعادة توزيع الأوزان (سقوط محور ومحورين = 100%)، تجميد اللقطة والسياسة، Idempotency، عدم عد العرض عملاً، الدخول بعد الاعتماد، عدم خصم الإلغاء، رفض وسائط الشركات، وعرض أعمدة الخيارات |
 | `platform_ops/tests/test_dashboard_and_notifications.py` | اللوحة التفاعلية، شريط التدخل (الشذوذات الأربعة)، عتبة الـ 15 دقيقة، الفلترة الخادمية للإشعارات، سجل النشاط العابر، ورفض وسائط الشركات بـ 400 |
 | `platform_ops/tests/test_isolation_guard.py` | الاستيراد الصريح والديناميكي في الاتجاهين والقائمة البيضاء الصريحة |
-| `platform_ops/tests/test_migration_graph.py` | وجود الهجرات (0001، 0002، 0003، 0004، 0005، 0006) وترتيب الاعتماديات |
+| `platform_ops/tests/test_migration_graph.py` | وجود الهجرات (0001 حتى 0007) وترتيب الاعتماديات |
+| `platform_ops/tests/test_daily_ratings_and_books.py` | العمل الفعلي شرطاً، انتهاء الرمز بـ410، التعديل الواحد، عدم حفظ الرمز الخام، القائمة البيضاء للرد العام، الخانق بـ429 مع ترويسة مزوَّرة، استبعاد العرض والدخول، عزل الشركة، اشتقاق الوكيل من `Engagement` حصراً، فصل الدرجتين، ومنع المُقيَّم من تعديل تقييمه أو حذفه |
 | `tenants/tests/test_member_activity_log.py` | تسجيل إضافة عضو وتغيير دوره وحذفه في `ActivityLog` |
 
 
