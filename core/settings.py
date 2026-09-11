@@ -329,6 +329,34 @@ DOCSHARE_PUBLIC_PATH = "/" + os.environ.get(
     "DOCSHARE_PUBLIC_PATH", "/s",
 ).strip("/")
 
+# PLATFORM-OPS: أساس الرابط العام لتقييم يوم عمل الوكيل ووجهته (#207 م٧).
+# الأساس يسقط إلى `DOCSHARE_PUBLIC_BASE_URL` **المحسوبة أعلاه** لا إلى متغيّر بيئتها:
+# الرابطان يخرجان من الخادم نفسه، فضبطُ نطاقٍ واحدٍ يجب أن يحرّكهما معاً.
+PLATFORM_RATING_PUBLIC_BASE_URL = os.environ.get(
+    "PLATFORM_RATING_PUBLIC_BASE_URL", DOCSHARE_PUBLIC_BASE_URL,
+).rstrip("/")
+
+PLATFORM_RATING_PUBLIC_PATH = "/" + os.environ.get(
+    "PLATFORM_RATING_PUBLIC_PATH", "rate",
+).strip("/")
+
+# #207 م٨: روابط بوابة التوظيف المنصية ودعوات المرشحين
+PLATFORM_JOB_PUBLIC_BASE_URL = os.environ.get(
+    "PLATFORM_JOB_PUBLIC_BASE_URL", DOCSHARE_PUBLIC_BASE_URL,
+).rstrip("/")
+
+PLATFORM_JOB_PUBLIC_PATH = "/" + os.environ.get(
+    "PLATFORM_JOB_PUBLIC_PATH", "careers/job",
+).strip("/")
+
+PLATFORM_HIRING_INVITATION_BASE_URL = os.environ.get(
+    "PLATFORM_HIRING_INVITATION_BASE_URL", DOCSHARE_PUBLIC_BASE_URL,
+).rstrip("/")
+
+PLATFORM_HIRING_INVITATION_PATH = "/" + os.environ.get(
+    "PLATFORM_HIRING_INVITATION_PATH", "careers/invite",
+).strip("/")
+
 # المساعد الذكي (OpenClaw على سيرفر منفصل — ليس نفس خادم Django).
 # Django يتصل به عبر HTTP (صادر من هذا السيرفر)؛ على سيرفر OpenClaw يجب أن يكون المنفذ (مثل 18789)
 # مفتوحاً للوارد (Inbound) من الإنترنت إن أردت الوصول من خارج الشبكة الداخلية.
@@ -564,6 +592,10 @@ REST_FRAMEWORK = {
         # `employee_ops.W001`/`E001`.
         "employee_ops_apply": os.environ.get("THROTTLE_RATE_EMPLOYEE_APPLY", "5/hour"),
         "employee_ops_job_public": os.environ.get("THROTTLE_RATE_EMPLOYEE_JOB", "60/min"),
+        # #207 م٨: بوابة التوظيف المنصية — قراءة عامة للوظيفة، تقديم طلب، ودعوة المرشح
+        "platform_ops_public_hiring": os.environ.get("THROTTLE_RATE_PLATFORM_HIRING", "60/min"),
+        "platform_ops_apply": os.environ.get("THROTTLE_RATE_PLATFORM_APPLY", "10/hour"),
+        "platform_ops_invitation": os.environ.get("THROTTLE_RATE_PLATFORM_INVITATION", "20/hour"),
     },
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }

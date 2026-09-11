@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **693**
+عدد النقاط: **715**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -178,6 +178,10 @@
 | `/api/assistant/whatsapp/webhook/<str:secret>/` | `whatsapp_webhook` | `core/whatsapp_views.py` |
 | `/api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>` | `whatsapp_webhook` | `core/whatsapp_views.py` |
 | `/api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>/` | `whatsapp_webhook` | `core/whatsapp_views.py` |
+| `/api/careers/invitations/<str:token>/` | `PublicInvitationDetailView` | `platform_ops/public_hiring/views.py` |
+| `/api/careers/invitations/<str:token>/accept/` | `PublicInvitationAcceptView` | `platform_ops/public_hiring/views.py` |
+| `/api/careers/jobs/<str:token>/` | `PublicJobDetailView` | `platform_ops/public_hiring/views.py` |
+| `/api/careers/jobs/<str:token>/apply/` | `PublicJobApplyView` | `platform_ops/public_hiring/views.py` |
 | `/api/client-logs/` | `client_logs` | `core/health.py` |
 | `/api/customer-notes/` | `CustomerNoteViewSet` | `partners/views.py` |
 | `/api/customer-notes/alerts/` | `CustomerNoteViewSet` | `partners/views.py` |
@@ -505,6 +509,7 @@
 | `/api/my-agent/daily-ratings/generate-link/` | `DailyRatingViewSet` | `platform_ops/views.py` |
 | `/api/my-agent/daily-ratings/summary/` | `DailyRatingViewSet` | `platform_ops/views.py` |
 | `/api/my-agent/daily-ratings/{pk}/` | `DailyRatingViewSet` | `platform_ops/views.py` |
+| `/api/my-agent/quota/` | `TenantAgentBooksViewSet` | `platform_ops/views.py` |
 | `/api/my-agent/ratings/public/<str:token>/` | `PublicDailyRatingView` | `platform_ops/views.py` |
 | `/api/my-agent/suspend/` | `TenantAgentBooksViewSet` | `platform_ops/views.py` |
 | `/api/partners/` | `PartnerViewSet` | `partners/views.py` |
@@ -522,6 +527,7 @@
 | `/api/permissions/member/` | `member_permissions` | `core/permissions_api.py` |
 | `/api/permissions/members/` | `permission_members` | `core/permissions_api.py` |
 | `/api/permissions/roles/` | `permission_roles` | `core/permissions_api.py` |
+| `/api/platform-staff/me/` | `PlatformStaffCapabilitiesView` | `platform_ops/views.py` |
 | `/api/platform/` | `PlatformAPIRootView` | `core/platform_admin_api.py` |
 | `/api/platform/<drf_format_suffix:format>` | `PlatformAPIRootView` | `core/platform_admin_api.py` |
 | `/api/platform/accountant-workspace/` | `platform_accountant_workspace` | `core/platform_admin_api.py` |
@@ -540,6 +546,9 @@
 | `/api/platform/development-notes/{pk}/comments/{comment_id}/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
 | `/api/platform/ops/activity-logs/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/activity-logs/{pk}/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/billing-records/` | `SubscriptionBillingRecordViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/billing-records/{pk}/` | `SubscriptionBillingRecordViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/companies/<int:tenant_id>/health/` | `CompanyHealthView` | `platform_ops/views.py` |
 | `/api/platform/ops/dashboard/` | `PlatformDashboardView` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/ranking/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
@@ -552,6 +561,17 @@
 | `/api/platform/ops/integration-keys/{pk}/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/{pk}/revoke/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/{pk}/rotate/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-applicants/` | `JobApplicantViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-applicants/{pk}/` | `JobApplicantViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-applicants/{pk}/cv/` | `JobApplicantViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-applicants/{pk}/invite/` | `JobApplicantViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-applicants/{pk}/rate/` | `JobApplicantViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-applicants/{pk}/transition-status/` | `JobApplicantViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-postings/` | `JobPostingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-postings/{pk}/` | `JobPostingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-postings/{pk}/close/` | `JobPostingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-postings/{pk}/regenerate-link/` | `JobPostingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-postings/{pk}/reopen/` | `JobPostingViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/notifications/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/notifications/mark-all-read/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/notifications/unread-count/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
@@ -562,6 +582,8 @@
 | `/api/platform/ops/performance-snapshots/{pk}/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/policy-profiles/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/policy-profiles/{pk}/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/recruiters/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/recruiters/{pk}/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/{pk}/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/work-orders/` | `WorkOrderViewSet` | `platform_ops/views.py` |

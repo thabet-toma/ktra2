@@ -28,17 +28,23 @@ PLATFORM_PACKAGES = frozenset({
     "tenants",
 })
 
-#: القائمة البيضاء الصريحة — ما تستورده الوحدة فعلاً في المراحل الأولى حتى السابعة.
+#: القائمة البيضاء الصريحة — ما تستورده الوحدة فعلاً في المراحل الأولى حتى الثامنة (أ).
 ALLOWLISTED_PLATFORM_MODULES = frozenset({
     "core.activity",           # describe_activity_changes — واصفُ الفروقات القائم لا نسخةٌ عنه (م٧)
     "core.date_ranges",         # مدى زمني محلي آمن لتحليلات الأداء ولقطات الشهور (م٥)
+    "core.media_views",         # upload_media_file لحفظ السيرة الذاتية للمتقدمين (م٨-ب)
     "core.models",              # TenantAsset للمرفقات، وActivityLog لسجل «من يمسك دفاتري» (م٧)
     "core.platform_admin_api",  # IsPlatformAdmin لحراسة الصلاحيات
     "core.signals",             # company_member_changed إشارة تغيير عضوية الشركة
     "core.terminology",         # term(tenant, key) — اسمُ المستند بمعجم الشركة لا حرفياً (م٧)
     "core.tenant_utils",        # get_tenant — المصدر الواحد لحلّ شركة المستخدم على نقاط م٧ الموجَّهة للزبون
     "hr.models",                # UserDevice لقراءة طابع آخر ظهور (last_active_at) في لوحة العمليات المنصية (م٦)
-    "tenants.models",           # Tenant وUserCompanyMembership
+    "inventory.models",         # Product لأصناف الخدمات في سطور الفاتورة (م٨-أ)
+    "partners.models",          # Partner لعميل الفوترة billing_customer (م٨-أ)
+    "sales.models",             # SalesInvoice وSalesSettings لفاتورة الفوترة (م٨-أ)
+    "sales.serializers",        # SalesInvoiceSerializer لإنشاء الفاتورة بمسارها المعتمد (م٨-أ)
+    "sales.services",           # post_sales_invoice لترحيل الفاتورة محاسبياً (م٨-أ)
+    "tenants.models",           # Tenant وUserCompanyMembership والعملات (Currency)
 })
 
 def check_source_for_disallowed_imports(source: str, filepath: str = "<string>") -> list[str]:

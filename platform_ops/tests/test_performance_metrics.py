@@ -35,6 +35,8 @@ from platform_ops.models import (
 from platform_ops.services import (
     ALL_PERFORMANCE_AXES,
     ALL_SIX_METRICS,
+    AXIS_ATTENDANCE_REGULARITY,
+    AXIS_CUSTOMER_RATING,
     AXIS_PRODUCTIVITY,
     AXIS_QUALITY,
     AXIS_SALES_VALUE,
@@ -77,23 +79,19 @@ class PerformanceChoiceColumnWidthTest(SimpleTestCase):
 class AxisWeightRedistributionTest(SimpleTestCase):
     """اختبار إعادة توزيع الأوزان عند سقوط المحاور غير المنطبقة."""
 
-    def test_all_five_axes_sum_to_exact_one_hundred_percent(self):
-        """المحاور الخمسة مجتمعة مجموع أوزانها 100% بالضبط.
-
-        **وبأوزانٍ لا تجمع مئةً أصلاً**: تمريرُ `DEFAULT_AXIS_WEIGHTS` وحدَها يمرّ عبر
-        طريقِ الهُويّة (مجموعُها مئةٌ ابتداءً)، فلا يُثبت أنّ التطبيعَ يعمل.
-        """
+    def test_all_axes_sum_to_exact_one_hundred_percent(self):
+        """محاور التقييم مجتمعة مجموع أوزانها 100% بالضبط."""
         weights = redistribute_axis_weights(
             DEFAULT_AXIS_WEIGHTS,
             set(ALL_PERFORMANCE_AXES),
         )
-        self.assertEqual(len(weights), 5)
+        self.assertEqual(len(weights), len(ALL_PERFORMANCE_AXES))
         self.assertEqual(sum(weights.values()), Decimal("100.00"))
 
-        # أوزانٌ خامٌّ مجموعُها ٧ لا ١٠٠ — التطبيعُ هو ما يُختبَر هنا
+        # أوزانٌ خامٌّ مجموعُها لا يساوي ١٠٠ — التطبيعُ هو ما يُختبَر هنا
         odd = {axis: Decimal(str(i + 1)) for i, axis in enumerate(ALL_PERFORMANCE_AXES)}
         normalized = redistribute_axis_weights(odd, set(ALL_PERFORMANCE_AXES))
-        self.assertEqual(len(normalized), 5)
+        self.assertEqual(len(normalized), len(ALL_PERFORMANCE_AXES))
         self.assertEqual(sum(normalized.values()), Decimal("100.00"))
         # والترتيبُ النسبيُّ محفوظ: الأثقلُ خاماً يبقى الأثقلَ بعد التطبيع
         heaviest_raw = max(odd, key=lambda k: odd[k])
@@ -107,17 +105,17 @@ class AxisWeightRedistributionTest(SimpleTestCase):
         """
         partial = {AXIS_QUALITY: Decimal("50.00")}
         weights = redistribute_axis_weights(partial, set(ALL_PERFORMANCE_AXES))
-        self.assertEqual(len(weights), 5)
+        self.assertEqual(len(weights), len(ALL_PERFORMANCE_AXES))
         self.assertEqual(sum(weights.values()), Decimal("100.00"))
         for axis in ALL_PERFORMANCE_AXES:
             self.assertGreater(weights[axis], Decimal("0.00"), f"المحور {axis} بوزن صفريّ")
 
     def test_redistribution_with_one_dropped_axis_sums_to_exact_one_hundred_percent(self):
-        """سقوط محور واحد (مثل مبيعات) يعيد توزيع وزنه ليبقى المجموع 100.00% بالضبط."""
-        applicable = set(ALL_PERFORMANCE_AXES) - {AXIS_SALES_VALUE}
+        """سقوط محور واحد (مثل تقييم الزبون دون عينة كافية) يعيد توزيع وزنه ليبقى المجموع 100.00% بالضبط."""
+        applicable = set(ALL_PERFORMANCE_AXES) - {AXIS_CUSTOMER_RATING}
         weights = redistribute_axis_weights(DEFAULT_AXIS_WEIGHTS, applicable)
-        self.assertEqual(len(weights), 4)
-        self.assertNotIn(AXIS_SALES_VALUE, weights)
+        self.assertEqual(len(weights), len(ALL_PERFORMANCE_AXES) - 1)
+        self.assertNotIn(AXIS_CUSTOMER_RATING, weights)
         total = sum(weights.values())
         self.assertEqual(
             total,
@@ -126,12 +124,12 @@ class AxisWeightRedistributionTest(SimpleTestCase):
         )
 
     def test_redistribution_with_two_dropped_axes_sums_to_exact_one_hundred_percent(self):
-        """سقوط محورين (مثل مبيعات وكفاءة سرعة) يعيد توزيع وزنهما ليبقى المجموع 100.00% بالضبط."""
-        applicable = set(ALL_PERFORMANCE_AXES) - {AXIS_SALES_VALUE, AXIS_SPEED_EFFICIENCY}
+        """سقوط محورين (مثل تقييم الزبون والانضباط) يعيد توزيع وزنهما ليبقى المجموع 100.00% بالضبط."""
+        applicable = set(ALL_PERFORMANCE_AXES) - {AXIS_CUSTOMER_RATING, AXIS_ATTENDANCE_REGULARITY}
         weights = redistribute_axis_weights(DEFAULT_AXIS_WEIGHTS, applicable)
-        self.assertEqual(len(weights), 3)
-        self.assertNotIn(AXIS_SALES_VALUE, weights)
-        self.assertNotIn(AXIS_SPEED_EFFICIENCY, weights)
+        self.assertEqual(len(weights), len(ALL_PERFORMANCE_AXES) - 2)
+        self.assertNotIn(AXIS_CUSTOMER_RATING, weights)
+        self.assertNotIn(AXIS_ATTENDANCE_REGULARITY, weights)
         total = sum(weights.values())
         self.assertEqual(
             total,

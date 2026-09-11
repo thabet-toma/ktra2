@@ -559,7 +559,11 @@ DECLARED_LOCK_ORDER = (
     "WorkOrderDeliverable",
     "UserCompanyMembership",
     "DailyRating",
+    "JobPosting",
+    "JobApplicantInvitation",
+    "JobApplicant",
 )
+
 
 
 def find_lock_order_violations(source: str) -> list[str]:

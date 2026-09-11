@@ -26,30 +26,36 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from core.models import ActivityLog
+from hr.models import AttendanceDay, Employee
 from tenants.models import Tenant, UserCompanyMembership
 
 from platform_ops.models import (
-    AgentGrantedMembership,
     DailyRating,
     DailyRatingToken,
     Engagement,
-    PlatformActivityLog,
     PlatformEmployee,
+    PolicyProfile,
     ServiceSubscription,
     WorkOrder,
-    WorkOrderComment,
-    WorkOrderDeliverable,
 )
 from platform_ops.services import (
+    ALL_PERFORMANCE_AXES,
+    AXIS_ATTENDANCE_REGULARITY,
+    AXIS_CUSTOMER_RATING,
+    AXIS_KPI_RESULTS,
+    AXIS_QUALITY,
+    AXIS_SLA_COMPLIANCE,
+    DEFAULT_AXIS_WEIGHTS,
     DailyRatingConflict,
     DailyRatingError,
     RatingTokenGone,
-    RatingTokenNotFound,
+    calculate_employee_performance,
     calculate_employee_ratings_summary,
     calculate_two_health_scores,
     generate_daily_rating_token,
     get_my_books_tab_data,
     has_employee_worked_on_date,
+    rating_public_url,
     resolve_daily_rating_token,
     submit_daily_rating,
     suspend_engagement,
@@ -447,7 +453,8 @@ class DailyRatingsAndBooksTest(TestCase):
         )
 
         data = get_my_books_tab_data(self.tenant_a)
-        agent = data["agent"]
+        self.assertEqual(len(data["agents"]), 1)
+        agent = data["agents"][0]
         self.assertIsNotNone(agent)
         # الوكيل هو موظف المنصة المرتبط بـ Engagement حصراً
         self.assertEqual(agent["user_id"], self.agent_user.pk)
@@ -460,7 +467,7 @@ class DailyRatingsAndBooksTest(TestCase):
 
         # بعد التعليق، لا يوجد وكيل نشط
         data_after = get_my_books_tab_data(self.tenant_a)
-        self.assertIsNone(data_after["agent"])
+        self.assertEqual(data_after["agents"], [])
         self.assertFalse(data_after["can_suspend"])
 
     # --------------------------------------------------------------------------
@@ -954,11 +961,12 @@ class DailyRatingsReviewFixesTest(TestCase):
         self.assertEqual(rating.stars, 5)
         self.assertFalse(rating.edited_once)
 
-    # -- ب: الرابطُ المُسلَّم يصل فعلاً ---------------------------------------
+    # -- ب: الرابطُ المُسلَّم رابطُ صفحةٍ لا نقطةَ API ---------------------------
     def test_generate_link_returns_a_url_that_actually_resolves(self):
-        """كان يُسلِّم `/api/platform/ops/ratings/public/…` وهو 404 بعد نقل المسار،
-        ويشير إلى جذر السوبر أدمن الذي نُقلت منه عمداً. ولا اختبارَ كان يقرأ الحقل.
-        """
+        """الرابط المُسلَّم رابط صفحة عامّة يبدأ بالأساس من الإعدادات ويحوي /rate/، وapi_path يطابق reverse."""
+        from django.conf import settings
+        from django.urls import reverse
+
         self._work()
         self.client.force_authenticate(user=self.owner)
         resp = self.client.post(
@@ -968,8 +976,12 @@ class DailyRatingsReviewFixesTest(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
 
         public_url = resp.data["public_url"]
+        api_path = resp.data["api_path"]
         self.assertNotIn("/api/platform/", public_url)
-        self.assertEqual(APIClient().get(public_url).status_code, status.HTTP_200_OK, public_url)
+        self.assertIn("/rate/", public_url)
+        self.assertTrue(public_url.startswith(settings.PLATFORM_RATING_PUBLIC_BASE_URL))
+        self.assertEqual(api_path, reverse("tenant-public-rating", kwargs={"token": resp.data["token"]}))
+        self.assertEqual(APIClient().get(api_path).status_code, status.HTTP_200_OK, api_path)
 
     # -- ت: عمرُ الرابط ٧٢ ساعةً مقيسٌ لا مفترَض ----------------------------
     def test_token_lifetime_is_actually_seventy_two_hours(self):
@@ -1163,3 +1175,598 @@ class DailyRatingsReviewFixesTest(TestCase):
         )
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST, resp.data)
         self.assertFalse(DailyRating.objects.filter(tenant=self.tenant_a).exists())
+
+
+class Stage7PartBTests(TestCase):
+    """اختبارات إضافية للجزء (ب) من المرحلة السابعة: صلاحيات صحة الشركة وتعليق الوكيل المختار."""
+
+    def setUp(self):
+        self.tenant_a = Tenant.objects.create(
+            TenantID=7001,
+            CompanyName="شركة التجارة الأولى ب",
+        )
+        self.tenant_b = Tenant.objects.create(
+            TenantID=7002,
+            CompanyName="شركة المقاولات الثانية ب",
+        )
+        self.owner_user_a = User.objects.create_user(
+            username="partb_owner_a",
+            email="owner_a@test.local",
+            first_name="مالك",
+            last_name="الأولى",
+        )
+        UserCompanyMembership.objects.create(
+            user=self.owner_user_a,
+            tenant=self.tenant_a,
+            role="manager",
+        )
+        self.agent_user = User.objects.create_user(
+            username="partb_agent",
+            email="agent@test.local",
+            first_name="سعيد",
+            last_name="المحاسب",
+        )
+        self.employee = PlatformEmployee.objects.create(
+            user=self.agent_user,
+            specialty="accountant",
+            status=PlatformEmployee.Status.ACTIVE,
+        )
+        self.engagement_a = Engagement.objects.create(
+            tenant=self.tenant_a,
+            employee=self.employee,
+            status=Engagement.Status.ACTIVE,
+        )
+        self.client = APIClient()
+
+    # 1. صلاحيات ونطاق نقطة صحة الشركة للسوبر أدمن وموظفي المنصة
+    def test_super_admin_health_endpoint_permissions_and_scoping(self):
+        """نقطة صحة الشركة محصورة بمدير المنصة وموظفيها للشركات المرتبطة فقط."""
+        # مستخدم عادي ليس موظف منصة ولا مدير يرفض بـ 403
+        self.client.force_authenticate(user=self.owner_user_a)
+        resp = self.client.get(f"/api/platform/ops/companies/{self.tenant_a.pk}/health/")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+
+        # مدير المنصة (سوبر أدمن) يرى أي شركة (200)
+        admin = User.objects.create_superuser(
+            username="ops_mgr_test", email="mgr@ops.test", password="pass"
+        )
+        self.client.force_authenticate(user=admin)
+        resp_admin = self.client.get(f"/api/platform/ops/companies/{self.tenant_a.pk}/health/")
+        self.assertEqual(resp_admin.status_code, status.HTTP_200_OK)
+        self.assertIn("service_health", resp_admin.data["health_scores"])
+        self.assertIn("customer_cooperation", resp_admin.data["health_scores"])
+
+        # موظف المنصة يرى الشركة المرتبطة بنشاط (200)
+        self.client.force_authenticate(user=self.agent_user)
+        resp_staff_a = self.client.get(f"/api/platform/ops/companies/{self.tenant_a.pk}/health/")
+        self.assertEqual(resp_staff_a.status_code, status.HTTP_200_OK)
+
+        # موظف المنصة لا يرى شركة غير مرتبط بها (404 صريحة)
+        resp_staff_b = self.client.get(f"/api/platform/ops/companies/{self.tenant_b.pk}/health/")
+        self.assertEqual(resp_staff_b.status_code, status.HTTP_404_NOT_FOUND)
+
+    # 2. تعليق الارتباط يستهدف الوكيل المختار ويبقي الوكيل الآخر نشطاً ومديراً
+    def test_suspend_targets_chosen_agent_and_keeps_other_agent_active_and_manager(self):
+        """عند وجود وكيلين نشطين، تعليق أحدهما عبر engagement_id يعلقه وحده ويبقي الآخر نشطاً ومديراً."""
+        emp2_user = User.objects.create_user(
+            username="partb_agent2", email="agent2@test.local"
+        )
+        emp2 = PlatformEmployee.objects.create(
+            user=emp2_user,
+            specialty="accountant",
+            status=PlatformEmployee.Status.ACTIVE,
+        )
+        eng2 = Engagement.objects.create(
+            tenant=self.tenant_a,
+            employee=emp2,
+            status=Engagement.Status.ACTIVE,
+        )
+        mem2 = UserCompanyMembership.objects.create(
+            user=emp2_user,
+            tenant=self.tenant_a,
+            role="manager",
+        )
+        eng2.managed_membership = mem2
+        eng2.created_membership = True
+        eng2.save(update_fields=["managed_membership", "created_membership"])
+        mem1 = UserCompanyMembership.objects.create(
+            user=self.agent_user,
+            tenant=self.tenant_a,
+            role="manager",
+        )
+        self.engagement_a.managed_membership = mem1
+        self.engagement_a.created_membership = True
+        self.engagement_a.save(update_fields=["managed_membership", "created_membership"])
+
+        self.client.force_authenticate(user=self.owner_user_a)
+
+        # محاولة التعليق دون تحديد engagement_id مع وجود أكثر من وكيل تُرفض بـ 400
+        resp_ambiguous = self.client.post(
+            "/api/my-agent/suspend/",
+            {"reason": "تعليق غير محدد"},
+        )
+        self.assertEqual(resp_ambiguous.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp_ambiguous.data.get("code"), "engagement_id_required")
+
+        # محاولة تمرير engagement_id لشركة أخرى تُرفض بـ 404
+        other_tenant = Tenant.objects.create(TenantID=9999, CompanyName="Other Corp")
+        other_eng = Engagement.objects.create(
+            tenant=other_tenant,
+            employee=emp2,
+            status=Engagement.Status.ACTIVE,
+        )
+        resp_cross = self.client.post(
+            "/api/my-agent/suspend/",
+            {"engagement_id": other_eng.pk},
+        )
+        self.assertEqual(resp_cross.status_code, status.HTTP_404_NOT_FOUND)
+
+        # تعليق الوكيل الثاني eng2 تحديداً
+        resp = self.client.post(
+            "/api/my-agent/suspend/",
+            {"engagement_id": eng2.pk, "reason": "إيقاف العمليات للتدقيق الداخلي"},
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["suspended_count"], 1)
+        self.assertEqual(resp.data["engagement_id"], eng2.pk)
+
+        # الوكيل الثاني عُلّق وحُذفت عضويته
+        eng2.refresh_from_db()
+        self.assertEqual(eng2.status, Engagement.Status.SUSPENDED)
+        self.assertFalse(UserCompanyMembership.objects.filter(pk=mem2.pk).exists())
+
+        # الوكيل الأول بقي نشطاً وعضويته مديرة دون مساس!
+        self.engagement_a.refresh_from_db()
+        self.assertEqual(self.engagement_a.status, Engagement.Status.ACTIVE)
+        mem1 = UserCompanyMembership.objects.get(user=self.agent_user, tenant=self.tenant_a)
+        self.assertEqual(mem1.role, "manager")
+
+
+class Stage7PartBReviewFixesTest(TestCase):
+    """عيوبٌ وجدتُها بقراءة تسليم م٧-ب سطراً سطراً — لكلٍّ اختبارٌ أُثبت سقوطُه قبل إصلاحه."""
+
+    def setUp(self):
+        self.tenant = Tenant.objects.create(
+            TenantID=7101,
+            CompanyName="شركة المراجعة السابعة ب",
+        )
+        self.other_tenant = Tenant.objects.create(
+            TenantID=7102,
+            CompanyName="شركة أخرى للمراجعة",
+        )
+        self.owner = User.objects.create_user(
+            username="partb_fix_owner", email="fixowner@test.local",
+        )
+        UserCompanyMembership.objects.create(
+            user=self.owner, tenant=self.tenant, role="manager",
+        )
+        self.agent_user = User.objects.create_user(
+            username="partb_fix_agent", email="fixagent@test.local",
+            first_name="نادر", last_name="الوكيل",
+        )
+        self.employee = PlatformEmployee.objects.create(
+            user=self.agent_user,
+            specialty="accountant",
+            status=PlatformEmployee.Status.ACTIVE,
+        )
+        self.engagement = Engagement.objects.create(
+            tenant=self.tenant, employee=self.employee,
+            status=Engagement.Status.ACTIVE,
+        )
+        self.manager_user = User.objects.create_user(
+            username="partb_fix_manager", email="fixmanager@test.local",
+            is_staff=True, is_superuser=True,
+        )
+        self.client = APIClient()
+        self.today = timezone.localdate()
+
+    def _work(self, date=None):
+        target_date = date or self.today
+        moment = timezone.make_aware(
+            datetime.datetime.combine(target_date, datetime.time(9, 30))
+        )
+        return WorkOrder.objects.create(
+            tenant=self.tenant,
+            assignee=self.employee,
+            title="مراجعة دفاتر اليوم",
+            status=WorkOrder.Status.APPROVAL,
+            approved_at=moment,
+            received_at=moment,
+        )
+
+    # ── ١. تقييمُ اليوم يصل مع التبويب ───────────────────────────────────
+    def test_books_tab_carries_todays_rating_so_a_click_is_not_a_blind_edit(self):
+        """التبويبُ يحمل تقييمَ اليوم إن وُجد.
+
+        بدونه تفتح الشاشةُ بنجماتٍ فارغةٍ لصاحب شركةٍ قيّم صباحاً من الرابط، فتُرسل
+        نقرتُه التاليةُ إنشاءً — والخادمُ يقرؤها **تعديلاً يحرق حقَّه الوحيد** صامتاً.
+        """
+        self._work()
+        self.client.force_authenticate(user=self.owner)
+
+        empty = self.client.get("/api/my-agent/")
+        self.assertEqual(empty.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(empty.data["agents"]), 1)
+        self.assertIsNone(
+            empty.data["agents"][0]["today_rating"], "لا تقييمَ اليومَ ومع ذلك عاد صفّ",
+        )
+        self.assertTrue(empty.data["agents"][0]["worked_today"])
+        self.assertEqual(empty.data["service_date"], self.today.isoformat())
+
+        rating = submit_daily_rating(
+            tenant=self.tenant, employee=self.employee,
+            service_date=self.today, stars=4, note="",
+        )
+
+        filled = self.client.get("/api/my-agent/")
+        payload = filled.data["agents"][0]["today_rating"]
+        self.assertIsNotNone(payload, "قيّم صاحبُ الشركة اليومَ والتبويبُ لا يعرف")
+        self.assertEqual(payload["id"], rating.pk)
+        self.assertEqual(payload["stars"], 4)
+        self.assertFalse(payload["edited_once"])
+        self.assertEqual(payload["service_date"], self.today.isoformat())
+
+    def test_books_tab_todays_rating_ignores_other_days(self):
+        """تقييمُ أمسِ ليس تقييمَ اليوم — وإلا فُتحت الشاشةُ على نجماتٍ ليست لهذا اليوم."""
+        yesterday = self.today - datetime.timedelta(days=1)
+        self._work(date=yesterday)
+        submit_daily_rating(
+            tenant=self.tenant, employee=self.employee,
+            service_date=yesterday, stars=2, note="",
+        )
+        self.client.force_authenticate(user=self.owner)
+        resp = self.client.get("/api/my-agent/")
+        self.assertIsNone(resp.data["agents"][0]["today_rating"])
+        self.assertFalse(
+            resp.data["agents"][0]["worked_today"],
+            "لا عملَ اليومَ ومع ذلك تطلب الشاشةُ تقييمَه (قصّة ٦٠)",
+        )
+
+    # ── ٢. الرابطُ المُسلَّم من الإعدادات ─────────────────────────────────
+    @override_settings(
+        PLATFORM_RATING_PUBLIC_BASE_URL="https://books.example.test",
+        PLATFORM_RATING_PUBLIC_PATH="/rate",
+    )
+    def test_public_link_base_follows_settings_not_the_request_host(self):
+        """أساسُ الرابط إعدادٌ صريح — لا نصٌّ مثبَّتٌ ولا ترويسةُ `Host` من العميل.
+
+        الرابطُ يُلصَق في واتساب ويعيش ثلاثة أيّام، فبناؤه ممّا يرسله العميلُ يعني
+        رابطاً يعمل من جهازٍ ويفشل من آخر.
+        """
+        self._work()
+        self.client.force_authenticate(user=self.owner)
+        resp = self.client.post(
+            "/api/my-agent/daily-ratings/generate-link/",
+            {"employee_id": self.employee.pk, "service_date": self.today.isoformat()},
+            HTTP_HOST="testserver",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        raw = resp.data["token"]
+        self.assertEqual(
+            resp.data["public_url"], f"https://books.example.test/rate/{raw}",
+        )
+        self.assertEqual(rating_public_url(raw), resp.data["public_url"])
+        self.assertTrue(resp.data["api_path"].startswith("/api/my-agent/ratings/public/"))
+
+    # ── ٣. حمولةُ الصحّة نسخةٌ واحدة ─────────────────────────────────────
+    def test_company_health_payload_carries_one_copy_of_the_scores(self):
+        """الرقمُ مرّةً واحدةً في الحمولة: نسختان تدعوان قارئاً لأن يقرأ النسخةَ الأخرى."""
+        self.client.force_authenticate(user=self.manager_user)
+        resp = self.client.get(f"/api/platform/ops/companies/{self.tenant.pk}/health/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            set(resp.data.keys()), {"tenant_id", "company_name", "health_scores"},
+        )
+        self.assertEqual(
+            set(resp.data["health_scores"].keys()),
+            {"service_health", "customer_cooperation", "ratings_sample", "rework_diagnostic"},
+        )
+
+    # ── ٦. نقطةُ الملخّص التي تستدعيها الشاشة ────────────────────────────
+    def test_ratings_summary_endpoint_answers_the_company_owner(self):
+        """شاشةُ «من يمسك دفاتري» تستدعي `summary/`، فلتُختبَر النقطةُ لا الخدمةُ وحدَها.
+
+        كانت مغطّاةً على مستوى الدالّة فقط؛ ونقطةٌ تردّ 403 أو 400 لصاحب الشركة
+        تُخفيها الشاشةُ في `catch` صامت — فيبقى الرقمُ غائباً بلا سبب.
+        """
+        start = self.today - datetime.timedelta(days=2)
+        for offset in range(3):
+            day = start + datetime.timedelta(days=offset)
+            self._work(date=day)
+            DailyRating.objects.create(
+                tenant=self.tenant, employee=self.employee,
+                service_date=day, stars=4,
+            )
+
+        self.client.force_authenticate(user=self.owner)
+        resp = self.client.get(
+            "/api/my-agent/daily-ratings/summary/", {"employee_id": self.employee.pk},
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        self.assertEqual(
+            set(resp.data.keys()),
+            {"status", "average_stars", "sample_size", "min_sample_size"},
+        )
+        self.assertEqual(resp.data["sample_size"], 3)
+
+    def test_ratings_summary_endpoint_counts_only_the_callers_company(self):
+        """تقييماتُ شركةٍ أخرى للوكيل نفسِه لا تدخل ملخّصَ هذه الشركة."""
+        other_owner = User.objects.create_user(
+            username="partb_fix_other_owner", email="other@test.local",
+        )
+        UserCompanyMembership.objects.create(
+            user=other_owner, tenant=self.other_tenant, role="manager",
+        )
+        Engagement.objects.create(
+            tenant=self.other_tenant, employee=self.employee,
+            status=Engagement.Status.ACTIVE,
+        )
+        DailyRating.objects.create(
+            tenant=self.other_tenant, employee=self.employee,
+            service_date=self.today, stars=1,
+        )
+        self._work()
+        DailyRating.objects.create(
+            tenant=self.tenant, employee=self.employee,
+            service_date=self.today, stars=5,
+        )
+
+        self.client.force_authenticate(user=self.owner)
+        resp = self.client.get(
+            "/api/my-agent/daily-ratings/summary/", {"employee_id": self.employee.pk},
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        self.assertEqual(resp.data["sample_size"], 1, "عيّنةُ الملخّص عبرت حدودَ الشركة")
+
+    # ── ٥. الحدُّ الأدنى الافتراضيُّ حين لا سياسة ─────────────────────────
+    def test_min_sample_size_falls_back_to_five_without_a_policy_profile(self):
+        """**بنفس البيانات**: ثلاثةُ تقييماتٍ «كافيةٌ» بسياسةٍ حدُّها ٣، و«غيرُ كافيةٍ» بلا سياسة."""
+        start = self.today - datetime.timedelta(days=3)
+        for offset in range(3):
+            day = start + datetime.timedelta(days=offset)
+            self._work(date=day)
+            DailyRating.objects.create(
+                tenant=self.tenant, employee=self.employee,
+                service_date=day, stars=5,
+            )
+
+        bare = calculate_employee_ratings_summary(employee=self.employee)
+        self.assertEqual(bare["min_sample_size"], 5)
+        self.assertEqual(bare["status"], "insufficient_data")
+        self.assertIsNone(bare["average_stars"])
+
+        PolicyProfile.objects.create(
+            specialty=self.employee.specialty, name="سياسة الحدّ الثلاثيّ",
+            min_sample_size=3,
+        )
+        with_policy = calculate_employee_ratings_summary(employee=self.employee)
+        self.assertEqual(with_policy["min_sample_size"], 3)
+        self.assertEqual(with_policy["status"], "sufficient_data")
+
+
+class PerformanceAxesFiveAxesBehavioralTest(TestCase):
+    """اختبارات سلوكية للمحاور الخمسة الرسمية ومحور الحضور والانضباط الفعلي وفق #207 و#203."""
+
+    def setUp(self):
+        self.tenant = Tenant.objects.create(TenantID=7711, CompanyName="Behavioral Tenant")
+        self.other_tenant = Tenant.objects.create(TenantID=7712, CompanyName="Other Tenant")
+        ServiceSubscription.objects.create(tenant=self.tenant, status=ServiceSubscription.Status.ACTIVE)
+        self.user = User.objects.create_user(username="beh_agent", email="beh@test.local")
+        self.employee = PlatformEmployee.objects.create(
+            user=self.user,
+            specialty="accountant",
+            status=PlatformEmployee.Status.ACTIVE,
+        )
+        self.engagement = Engagement.objects.create(
+            tenant=self.tenant,
+            employee=self.employee,
+            status=Engagement.Status.ACTIVE,
+        )
+        self.membership = UserCompanyMembership.objects.create(
+            user=self.user,
+            tenant=self.tenant,
+            role="manager",
+        )
+        self.engagement.managed_membership = self.membership
+        self.engagement.save(update_fields=["managed_membership"])
+        self.hr_employee = Employee.objects.create(
+            tenant=self.tenant,
+            user=self.user,
+            name="موظف الموارد البشرية",
+            code="BEH_EMP_01",
+        )
+        self.today = timezone.localdate()
+
+    def _complete_work(self, date=None):
+        work_date = date or self.today
+        wo = WorkOrder.objects.create(
+            tenant=self.tenant,
+            assignee=self.employee,
+            kind=WorkOrder.Kind.DATA_ENTRY,
+            title="عمل تجريبي",
+            status=WorkOrder.Status.APPROVAL,
+        )
+        now_ts = timezone.make_aware(datetime.datetime.combine(work_date, datetime.time(12, 0)))
+        WorkOrder.objects.filter(pk=wo.pk).update(
+            approved_at=now_ts,
+            closed_at=now_ts,
+            received_at=now_ts,
+        )
+        return wo
+
+
+    def test_absent_and_late_impact_attendance_regularity_score(self):
+        """الغياب والتأخير يخفضان درجة الحضور: حاضر / (حاضر + متأخر + غائب) * 100، والإجازات لا تؤثر على المقام."""
+        start = self.today - datetime.timedelta(days=15)
+        for i in range(5):
+            self._complete_work(date=start + datetime.timedelta(days=i))
+
+        # 8 أيام حضور، 1 يوم تأخر، 1 يوم غياب = 10 أيام مجدولة
+        for i in range(8):
+            AttendanceDay.objects.create(
+                tenant=self.tenant,
+                employee=self.hr_employee,
+                date=start + datetime.timedelta(days=i),
+                status=AttendanceDay.STATUS_PRESENT,
+            )
+        AttendanceDay.objects.create(
+            tenant=self.tenant,
+            employee=self.hr_employee,
+            date=start + datetime.timedelta(days=8),
+            status=AttendanceDay.STATUS_LATE,
+        )
+        AttendanceDay.objects.create(
+            tenant=self.tenant,
+            employee=self.hr_employee,
+            date=start + datetime.timedelta(days=9),
+            status=AttendanceDay.STATUS_ABSENT,
+        )
+        # يوم إجازة (غير مجدول) لا يدخل في المقام
+        AttendanceDay.objects.create(
+            tenant=self.tenant,
+            employee=self.hr_employee,
+            date=start + datetime.timedelta(days=10),
+            status=AttendanceDay.STATUS_LEAVE,
+        )
+
+        perf = calculate_employee_performance(
+            employee=self.employee,
+            date_from=start,
+            date_to=self.today,
+        )
+        att_axis = perf["axes"][AXIS_ATTENDANCE_REGULARITY]
+        self.assertTrue(att_axis["applicable"])
+        # حاضر: 8 من أصل 10 مجدولة (8 حاضر + 1 متأخر + 1 غائب) => 80.00%
+        self.assertEqual(att_axis["score"], Decimal("80.00"))
+
+    def test_attendance_date_and_tenant_isolation(self):
+        """حضور الموظف في شركات أخرى غير مرتبطة أو خارج النطاق الزمني يُعزل ولا يدخل الحساب."""
+        start = self.today - datetime.timedelta(days=10)
+        for i in range(5):
+            self._complete_work(date=start + datetime.timedelta(days=i))
+
+        # 1. حضور داخل النطاق والشركة المرتبطة (5 أيام حاضر)
+        for i in range(5):
+            AttendanceDay.objects.create(
+                tenant=self.tenant,
+                employee=self.hr_employee,
+                date=start + datetime.timedelta(days=i),
+                status=AttendanceDay.STATUS_PRESENT,
+            )
+
+        # 2. غياب في شركة أخرى غير مرتبطة (يجب ألا يؤثر)
+        other_hr_emp = Employee.objects.create(
+            tenant=self.other_tenant,
+            user=self.user,
+            name="موظف شركة أخرى",
+            code="BEH_EMP_OTHER",
+        )
+        AttendanceDay.objects.create(
+            tenant=self.other_tenant,
+            employee=other_hr_emp,
+            date=start + datetime.timedelta(days=1),
+            status=AttendanceDay.STATUS_ABSENT,
+        )
+
+        # 3. غياب لموظف آخر في نفس الشركة (يجب ألا يؤثر)
+        other_user = User.objects.create_user(username="other_beh", email="other_beh@test.local")
+        other_company_emp = Employee.objects.create(
+            tenant=self.tenant,
+            user=other_user,
+            name="زميل في العمل",
+            code="BEH_EMP_COLLEAGUE",
+        )
+        AttendanceDay.objects.create(
+            tenant=self.tenant,
+            employee=other_company_emp,
+            date=start + datetime.timedelta(days=2),
+            status=AttendanceDay.STATUS_ABSENT,
+        )
+
+        # 4. غياب خارج النطاق الزمني (قبل start) (يجب ألا يؤثر)
+        AttendanceDay.objects.create(
+            tenant=self.tenant,
+            employee=self.hr_employee,
+            date=start - datetime.timedelta(days=2),
+            status=AttendanceDay.STATUS_ABSENT,
+        )
+
+        perf = calculate_employee_performance(
+            employee=self.employee,
+            date_from=start,
+            date_to=self.today,
+        )
+        att_axis = perf["axes"][AXIS_ATTENDANCE_REGULARITY]
+        self.assertTrue(att_axis["applicable"])
+        # 5 حاضر من أصل 5 مجدولة => 100.00%
+        self.assertEqual(att_axis["score"], Decimal("100.00"))
+
+    def test_no_attendance_data_axis_excluded_and_weight_redistributed(self):
+        """عند انعدام سجلات الحضور المجدولة، يُسقط محور الحضور ويُعاد توزيع وزنه الـ 10% بالتناسب."""
+        start = self.today - datetime.timedelta(days=10)
+        for i in range(5):
+            self._complete_work(date=start + datetime.timedelta(days=i))
+
+        # لا يوجد أي صف في AttendanceDay
+        perf = calculate_employee_performance(
+            employee=self.employee,
+            date_from=start,
+            date_to=self.today,
+        )
+        att_axis = perf["axes"][AXIS_ATTENDANCE_REGULARITY]
+        self.assertFalse(att_axis["applicable"])
+        self.assertEqual(att_axis["weight"], Decimal("0.00"))
+        # مع غياب محور التقييم لعدم وجود تقييمات، الأوزان الثلاثة الباقية:
+        # KPI: 30 / 70 * 100 = 42.86%
+        # Quality: 25 / 70 * 100 = 35.71%
+        # SLA: 15 / 70 * 100 = 21.43%
+        # مجموعها 100.00% بالضبط
+        self.assertEqual(perf["axes"][AXIS_KPI_RESULTS]["weight"], Decimal("42.86"))
+        self.assertEqual(perf["axes"][AXIS_QUALITY]["weight"], Decimal("35.71"))
+        self.assertEqual(perf["axes"][AXIS_SLA_COMPLIANCE]["weight"], Decimal("21.43"))
+        self.assertEqual(perf["weights_sum"], Decimal("100.00"))
+
+    def test_applicable_customer_rating_and_attendance_weights_sum_100(self):
+        """عند انطباق المحاور الخمسة (حضور + تقييم زبون >= الحد الأدنى)، أوزانها تطابق الرسمية ومجموعها 100%."""
+        self.assertEqual(len(ALL_PERFORMANCE_AXES), 5)
+        self.assertEqual(
+            set(ALL_PERFORMANCE_AXES),
+            {
+                AXIS_KPI_RESULTS,
+                AXIS_QUALITY,
+                AXIS_CUSTOMER_RATING,
+                AXIS_SLA_COMPLIANCE,
+                AXIS_ATTENDANCE_REGULARITY,
+            },
+        )
+        self.assertEqual(sum(DEFAULT_AXIS_WEIGHTS.values()), Decimal("100.00"))
+
+        start = self.today - datetime.timedelta(days=10)
+        for i in range(5):
+            self._complete_work(date=start + datetime.timedelta(days=i))
+            AttendanceDay.objects.create(
+                tenant=self.tenant,
+                employee=self.hr_employee,
+                date=start + datetime.timedelta(days=i),
+                status=AttendanceDay.STATUS_PRESENT,
+            )
+            DailyRating.objects.create(
+                tenant=self.tenant,
+                employee=self.employee,
+                service_date=start + datetime.timedelta(days=i),
+                stars=5,
+            )
+
+        perf = calculate_employee_performance(
+            employee=self.employee,
+            date_from=start,
+            date_to=self.today,
+        )
+        self.assertTrue(perf["axes"][AXIS_CUSTOMER_RATING]["applicable"])
+        self.assertTrue(perf["axes"][AXIS_ATTENDANCE_REGULARITY]["applicable"])
+        self.assertEqual(perf["axes"][AXIS_KPI_RESULTS]["weight"], Decimal("30.00"))
+        self.assertEqual(perf["axes"][AXIS_QUALITY]["weight"], Decimal("25.00"))
+        self.assertEqual(perf["axes"][AXIS_CUSTOMER_RATING]["weight"], Decimal("20.00"))
+        self.assertEqual(perf["axes"][AXIS_SLA_COMPLIANCE]["weight"], Decimal("15.00"))
+        self.assertEqual(perf["axes"][AXIS_ATTENDANCE_REGULARITY]["weight"], Decimal("10.00"))
+        self.assertEqual(perf["weights_sum"], Decimal("100.00"))

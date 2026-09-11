@@ -235,6 +235,15 @@ class ServiceSubscription(models.Model):
         default=0,
         verbose_name="العمليات المستهلكة",
     )
+    billing_customer = models.ForeignKey(
+        "partners.Partner",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="platform_service_subscriptions",
+        verbose_name="عميل الفوترة في شركة المنصة",
+        help_text="سجل العميل التابع لشركة المنصة المفوترة الذي تصدر باسمه فواتير الخدمة",
+    )
     period_start = models.DateField(
         null=True,
         blank=True,
@@ -260,6 +269,97 @@ class ServiceSubscription(models.Model):
 
     def __str__(self):
         return f"{self.tenant} - {self.plan} ({self.get_status_display()})"
+
+
+class SubscriptionBillingRecord(models.Model):
+    """سجل تدقيق وفوترة دورة اشتراك الخدمة الشهرية (المرحلة 8A).
+
+    - يربط دورة فوترة اشتراك الخدمة بفاتورة المبيعات الصادرة في شركة المنصة.
+    - يحفظ لقطة مجمدة من الكميات والأسعار والإجمالي وقت الفوترة.
+    - يفرض عدم التكرار (idempotency) على مستوى قاعدة البيانات عبر قيد فريد
+      على (subscription, period_start, period_end).
+    - ليس دفتراً ثانياً ولا يُنشئ قيوداً محاسبية بنفسه، بل يربط الفاتورة الحقيقية.
+    - يُشتق نطاق الشركة من اشتراك الخدمة (subscription.tenant) لشركة الزبون،
+      ومن الفاتورة (invoice.tenant) لشركة المنصة المفوترة.
+    """
+
+    subscription = models.ForeignKey(
+        ServiceSubscription,
+        on_delete=models.CASCADE,
+        related_name="billing_records",
+        verbose_name="اشتراك الخدمة",
+    )
+    period_start = models.DateField(
+        verbose_name="بداية دورة الفوترة",
+    )
+    period_end = models.DateField(
+        verbose_name="نهاية دورة الفوترة",
+    )
+    invoice = models.ForeignKey(
+        "sales.SalesInvoice",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="subscription_billing_records",
+        verbose_name="فاتورة المبيعات",
+    )
+    monthly_fee = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="الرسم الشهري الثابت",
+    )
+    included_quota = models.PositiveIntegerField(
+        default=0,
+        verbose_name="العمليات المشمولة",
+    )
+    consumed_quota = models.PositiveIntegerField(
+        default=0,
+        verbose_name="العمليات المستهلكة",
+    )
+    overage_units = models.PositiveIntegerField(
+        default=0,
+        verbose_name="العمليات الزائدة",
+    )
+    overage_unit_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="سعر العملية الزائدة",
+    )
+    overage_fee = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="رسوم العمليات الزائدة",
+    )
+    total_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="إجمالي الفاتورة",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+
+    class Meta:
+        verbose_name = "سجل فوترة اشتراك"
+        verbose_name_plural = "سجلات فوترة الاشتراكات"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["subscription", "period_start", "period_end"],
+                name="platform_ops_sub_billing_sub_period_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.subscription} ({self.period_start} -> {self.period_end}) -> {self.total_amount}"
 
 
 class Engagement(models.Model):
@@ -892,8 +992,12 @@ class PolicyProfile(models.Model):
     weights = models.JSONField(
         default=dict,
         blank=True,
-        verbose_name="أوزان المحاور الخمسة",
-        help_text="أوزان المحاور الخمسة: quality, sla_compliance, productivity, speed_efficiency, sales_value",
+        verbose_name="أوزان محاور التقييم",
+        help_text=(
+            "أوزان المحاور الرسمية الخمسة: kpi_results, quality, customer_rating, "
+            "sla_compliance, attendance_regularity. المحور غير المنطبق يُسقط ويُعاد "
+            "توزيع وزنه بالتناسب، فلا يلزم أن يجمع المكتوب هنا مئةً بالضبط."
+        ),
     )
     targets = models.JSONField(
         default=dict,
@@ -1001,7 +1105,7 @@ class PerformanceSnapshot(models.Model):
         default=dict,
         blank=True,
         verbose_name="بيانات المحاور وتوزيع الأوزان",
-        help_text="تفاصيل المحاور الخمسة ودرجاتها وأوزانها بعد إعادة التوزيع",
+        help_text="تفاصيل المحاور ودرجاتها وأوزانها بعد إعادة التوزيع",
     )
     rework_rate = models.DecimalField(
         max_digits=5,
@@ -1376,5 +1480,342 @@ class DailyRatingToken(models.Model):
     @property
     def is_live(self) -> bool:
         return not self.is_revoked and not self.is_expired
+
+
+# ==============================================================================
+# المرحلة الثامنة (م٨-ب): بوّابة التوظيف المنصّيّة
+# ==============================================================================
+
+
+class PlatformRecruiter(models.Model):
+    """مسؤول توظيف في المنصة (المرحلة الثامنة: بوّابة التوظيف المنصّيّة).
+
+    استثناء موثَّق من قاعدة وجود مفتاح الشركة (tenant FK)؛ فمسؤول التوظيف يتبع المنصة نفسها.
+    يفتح صلاحيات التوظيف وحدها بلا بقية صلاحيات عمليات المنصة ولا IsPlatformAdmin.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="platform_recruiter",
+        verbose_name="المستخدم",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name="نشط",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "مسؤول توظيف المنصة"
+        verbose_name_plural = "مسؤولو توظيف المنصة"
+
+    def __str__(self):
+        return f"Recruiter: {self.user} ({'نشط' if self.is_active else 'معطل'})"
+
+
+class JobPosting(models.Model):
+    """إعلان وظيفة منصي (المرحلة الثامنة: بوّابة التوظيف المنصّيّة).
+
+    استثناء موثَّق من قاعدة وجود مفتاح الشركة (tenant FK) بقرار #207؛
+    الوظائف والمتقدمون يتبعون المنصة نفسها لا شركة زبون.
+    الرابط العام مبني بمفتاح عشوائي غير قابل للتخمين (token_urlsafe).
+    """
+
+    class EmploymentType(models.TextChoices):
+        FULL_TIME = "full_time", "دوام كامل"
+        PART_TIME = "part_time", "دوام جزئي"
+        CONTRACT = "contract", "عقد"
+        TEMPORARY = "temporary", "مؤقت"
+
+    title = models.CharField(
+        max_length=200,
+        verbose_name="عنوان الوظيفة",
+    )
+    #: التخصّصُ المنصّيُّ الذي تُوظّف له — **لا عنوانُ الإعلان**.
+    #: يُنسخ إلى `PlatformEmployee.specialty` عند قبول الدعوة، وعليه تُبنى مطابقةُ
+    #: `PolicyProfile.specialty` في احتساب الأداء. ولذلك طولُه طولُ العمود الهدف
+    #: (١٠٠) لا طولَ العنوان (٢٠٠): عنوانٌ حرٌّ في عمودٍ أقصرَ يُخطئ على MySQL
+    #: ويُبتَر صامتاً على SQLite.
+    specialty = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name="التخصص المنصي",
+        help_text="يجب أن يطابق تخصصاً في ملفات السياسة (PolicyProfile.specialty) ليُحتسب الأداء بسياسته",
+    )
+    description = models.TextField(
+        verbose_name="وصف الوظيفة",
+    )
+    requirements = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="المتطلبات",
+    )
+    location = models.CharField(
+        max_length=200,
+        blank=True,
+        default="",
+        verbose_name="المكان",
+    )
+    employment_type = models.CharField(
+        max_length=30,
+        choices=EmploymentType.choices,
+        blank=True,
+        default="",
+        verbose_name="نوع الدوام",
+    )
+    salary_range = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        verbose_name="نطاق الراتب",
+    )
+    token = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        verbose_name="مفتاح الرابط العام",
+    )
+    is_open = models.BooleanField(
+        default=True,
+        db_index=True,
+        verbose_name="مفتوحة للتقديم",
+    )
+    expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name="تاريخ انتهاء الرابط",
+    )
+    closed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ الإغلاق",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="مُنشئ الإعلان",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        db_index=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "إعلان وظيفة منصي"
+        verbose_name_plural = "إعلانات الوظائف المنصية"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["is_open", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return self.title
+
+    def is_live(self, now=None) -> bool:
+        if not self.is_open:
+            return False
+        if self.expires_at is None:
+            return True
+        return self.expires_at > (now or timezone.now())
+
+
+class JobApplicant(models.Model):
+    """متقدم على وظيفة منصية (المرحلة الثامنة: بوّابة التوظيف المنصّيّة).
+
+    استثناء موثَّق من قاعدة وجود مفتاح الشركة (tenant FK) بقرار #207.
+    مُدخل المجهول محجور بحالة 'new' ولا يمس شيئاً آخر.
+    رابط السيرة cv_url محمي بالكامل ولا يُطبع في أي مُسلسِل.
+    """
+
+    class Status(models.TextChoices):
+        NEW = "new", "جديد"
+        SCREENING = "screening", "فرز أولي"
+        INTERVIEW = "interview", "مقابلة"
+        OFFERED = "offered", "عرض عمل"
+        HIRED = "hired", "مقبول"
+        REJECTED = "rejected", "مرفوض"
+
+    job = models.ForeignKey(
+        JobPosting,
+        on_delete=models.CASCADE,
+        related_name="applicants",
+        verbose_name="الوظيفة",
+    )
+    name = models.CharField(
+        max_length=200,
+        verbose_name="اسم المتقدم",
+    )
+    phone = models.CharField(
+        max_length=40,
+        verbose_name="رقم التواصل",
+    )
+    email = models.EmailField(
+        blank=True,
+        default="",
+        verbose_name="البريد الإلكتروني",
+    )
+    about = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="نبذة عن المتقدم",
+    )
+    cv_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="رابط السيرة",
+    )
+    cv_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name="اسم ملف السيرة",
+    )
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.NEW,
+        db_index=True,
+        verbose_name="الحالة",
+    )
+    rating = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name="التقييم",
+    )
+    notes = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="ملاحظات مسؤول التوظيف",
+    )
+    reference_code = models.CharField(
+        max_length=32,
+        unique=True,
+        db_index=True,
+        verbose_name="رقم المرجع",
+    )
+    hired_employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="سجل موظف المنصة",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        db_index=True,
+        verbose_name="تاريخ التقديم",
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name="تاريخ التحديث",
+    )
+
+    class Meta:
+        verbose_name = "متقدم على وظيفة منصية"
+        verbose_name_plural = "المتقدمون على الوظائف المنصية"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["job", "status", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.name} - {self.job.title} ({self.get_status_display()})"
+
+
+class JobApplicantInvitation(models.Model):
+    """دعوة قبول التوظيف المنصية المهشرة (المرحلة الثامنة: بوّابة التوظيف المنصّيّة).
+
+    - الرمز الخام لا يُحفظ في القاعدة إطلاقاً، بل يُخزن مهشراً (SHA-256) كنمط docshare وDailyRatingToken.
+    - رابط الدعوة يقود إلى صفحة ويب لا نقطة API.
+    - حساب المقبول (User + PlatformEmployee) يُنشأ عند قبول الدعوة لا قبلها.
+    - الرابط المستهلك أو المنتهي يرد بـ 410 Gone صريحة.
+    """
+
+    applicant = models.ForeignKey(
+        JobApplicant,
+        on_delete=models.CASCADE,
+        related_name="invitations",
+        verbose_name="المتقدم",
+    )
+    token_hash = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        verbose_name="مهشر الرمز",
+        help_text="تجزئة SHA-256 للرمز الخام؛ الرمز الأصلي لا يُحفظ في القاعدة أبداً",
+    )
+    expires_at = models.DateTimeField(
+        db_index=True,
+        verbose_name="تاريخ الانتهاء",
+    )
+    accepted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ القبول",
+    )
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ الإبطال",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="مُرسل الدعوة",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name="تاريخ الإنشاء",
+    )
+
+    class Meta:
+        verbose_name = "دعوة توظيف منصية"
+        verbose_name_plural = "دعوات التوظيف المنصية"
+
+    def __str__(self):
+        return f"Invitation for {self.applicant.name} ({self.applicant.job.title})"
+
+    @property
+    def is_expired(self) -> bool:
+        return self.expires_at <= timezone.now()
+
+    @property
+    def is_accepted(self) -> bool:
+        return self.accepted_at is not None
+
+    @property
+    def is_revoked(self) -> bool:
+        return self.revoked_at is not None
+
+    @property
+    def is_consumed(self) -> bool:
+        return self.is_accepted or self.is_revoked or self.is_expired
+
+    @property
+    def is_live(self) -> bool:
+        return not self.is_consumed
+
 
 

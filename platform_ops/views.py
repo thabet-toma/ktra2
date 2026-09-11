@@ -10,11 +10,14 @@
 `/api/platform/` بلا `X-Tenant-Id` أصلاً، محروسةٌ بـ`IsPlatformOperationsManager`،
 وغرضُها بالضبط أن يرى مديرُ العمليات كلَّ الشركات في جدولٍ واحد.
 """
+import requests
+from django.http import FileResponse, Http404
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status, viewsets
+
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -35,47 +38,76 @@ from .services import (
     calculate_employee_ratings_summary,
     calculate_two_health_scores,
     capture_performance_snapshot,
+    close_job_posting,
+    create_applicant_invitation,
+    create_job_posting,
+    create_platform_recruiter,
     generate_daily_rating_token,
     generate_integration_key,
     get_my_books_tab_data,
+    get_tenant_quota_usage,
     get_platform_dashboard_summary,
+    invitation_public_url,
     rank_employees_performance,
+    rate_applicant,
     receive_channel_work_order,
+    regenerate_job_posting_token,
+    reopen_job_posting,
     resolve_daily_rating_token,
+    rating_public_url,
     revoke_integration_key,
+    revoke_platform_recruiter,
     rotate_integration_key,
     submit_daily_rating,
     suspend_engagement,
+    transition_applicant_status,
     update_daily_rating,
+    is_platform_employee,
+    is_platform_recruiter,
 )
 from .throttles import ClientIpScopedThrottle, IntegrationKeyThrottle
+
+from core.platform_admin_api import IsPlatformAdmin
 
 from .models import (
     DailyRating,
     Engagement,
     IntegrationKey,
+    JobApplicant,
+    JobPosting,
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
     PlatformNotification,
+    PlatformRecruiter,
     PolicyProfile,
     ServiceSubscription,
+    SubscriptionBillingRecord,
     WorkOrder,
 )
-from .permissions import IsPlatformOperationsManager, IsPlatformOperationsStaff
+from .permissions import (
+    IsPlatformOperationsManager,
+    IsPlatformOperationsStaff,
+    IsPlatformRecruiter,
+)
+from .public_hiring.cv_validation import guess_cv_content_type
 from .serializers import (
     DailyRatingCreateSerializer,
     DailyRatingSerializer,
     DailyRatingUpdateSerializer,
     GenerateRatingLinkSerializer,
     IntegrationKeySerializer,
+    JobApplicantSerializer,
+    JobPostingSerializer,
     PerformanceSnapshotSerializer,
     PlatformActivityLogSerializer,
     PlatformEmployeeSerializer,
     PlatformNotificationSerializer,
+    PlatformRecruiterSerializer,
     PolicyProfileSerializer,
     PublicRatingSubmitSerializer,
     ServiceSubscriptionSerializer,
+    SubscriptionBillingRecordSerializer,
     WorkOrderSerializer,
 )
 
@@ -291,6 +323,36 @@ class ServiceSubscriptionViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsPlatformOperationsManager]
     serializer_class = ServiceSubscriptionSerializer
     queryset = ServiceSubscription.objects.select_related("tenant").all().order_by("-created_at")
+
+
+class SubscriptionBillingRecordViewSet(viewsets.ReadOnlyModelViewSet):
+    """سجلُّ ما فُوتر فعلاً — قراءةٌ لمدير العمليات وحدَه.
+
+    **قراءةٌ لا كتابة**: الفواتيرُ تُصدَر بأمر الإدارة `bill_service_subscriptions`
+    وحدَه (المواصفة: «التوليدُ أمرُ إدارةٍ idempotent — لا توليدٌ كسولٌ عند فتح
+    شاشة»)، وهذه النقطةُ نافذةٌ على الناتج لا بابٌ ثانٍ لإنتاجه.
+    """
+
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = SubscriptionBillingRecordSerializer
+    queryset = (
+        SubscriptionBillingRecord.objects.select_related("invoice", "subscription__tenant")
+        .all()
+        .order_by("-period_end", "-id")
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        subscription_id = self.request.query_params.get("subscription")
+        if subscription_id:
+            qs = qs.filter(subscription_id=subscription_id)
+        # `company` لا `tenant`: عميلُ الواجهة يُسقط مفاتيحَ `tenant*` من كلّ نداءٍ
+        # لهذه الوحدة عمداً (`buildCleanQueryString`)، فمرشِّحٌ باسمها لا يصل أبداً.
+        # والتسميةُ نفسُها سابقةُ التنقيب في لوحة القيادة.
+        company_id = self.request.query_params.get("company")
+        if company_id:
+            qs = qs.filter(subscription__tenant_id=company_id)
+        return qs
 
 
 class IntegrationKeyViewSet(viewsets.ReadOnlyModelViewSet):
@@ -1114,9 +1176,10 @@ class DailyRatingViewSet(viewsets.ModelViewSet):
 
         return Response({
             "token": raw_token,
-            # من `reverse` لا من نصٍّ مكتوب: النصُّ بقي يشير إلى الموضع القديم
-            # بعد نقل المسار، فكان الرابطُ المُسلَّم للزبون 404 — ولا اختبار يقرؤه.
-            "public_url": reverse("tenant-public-rating", kwargs={"token": raw_token}),
+            # بناءُ الرابط في الخدمة لا هنا: النقطةُ تُسلّم ما تحسبه الخدمة (عقدُ الوحدة
+            # في رأس `services.py`)، وأساسُه إعدادٌ صريحٌ لا ترويسةُ `Host`.
+            "public_url": rating_public_url(raw_token),
+            "api_path": reverse("tenant-public-rating", kwargs={"token": raw_token}),
             "expires_at": token_obj.expires_at.isoformat(),
         }, status=status.HTTP_201_CREATED)
 
@@ -1177,7 +1240,8 @@ class TenantAgentBooksViewSet(viewsets.ViewSet):
         payload = {
             "tenant_id": tenant.pk,
             "tenant_name": tenant.CompanyName,
-            "agent": books_data["agent"],
+            "agents": books_data["agents"],
+            "service_date": books_data["service_date"],
             "granted_memberships": books_data["granted_memberships"],
             "activity_log": books_data["activity_log"],
             "total_activities_count": books_data["total_activities_count"],
@@ -1187,23 +1251,350 @@ class TenantAgentBooksViewSet(viewsets.ViewSet):
         }
         return Response(payload, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["get"], url_path="quota")
+    def quota(self, request):
+        """استهلاكُ الشركة من باقتها — القصّة ٦٢، «حتى لا تفاجئني الفاتورة».
+
+        الأرقامُ من دالّة الفوترة نفسِها لا من حسبةٍ ثانية، و`viewer` لا يفتحها:
+        قيمةُ الفاتورة شأنُ صاحب الشركة.
+        """
+        tenant = self._resolve_tenant(request)
+        _require_tenant_manager(request, tenant)
+        return Response(get_tenant_quota_usage(tenant), status=status.HTTP_200_OK)
+
     @action(detail=False, methods=["post"], url_path="suspend")
     def suspend(self, request):
         tenant = self._resolve_tenant(request)
         _require_tenant_manager(request, tenant)
-        active_engagement = Engagement.objects.filter(
-            tenant=tenant, status=Engagement.Status.ACTIVE
-        ).first()
-        if not active_engagement:
+        reason = str(request.data.get("reason", "تعليق وصول الوكيل بطلب من صاحب الشركة")).strip()
+        engagement_id = request.data.get("engagement_id")
+
+        if engagement_id is not None:
+            try:
+                engagement_id_int = int(engagement_id)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "معرف الارتباط غير صالح.", "code": "invalid_engagement_id"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            engagement = Engagement.objects.filter(pk=engagement_id_int, tenant=tenant).first()
+            if not engagement:
+                return Response(
+                    {"detail": "الارتباط غير موجود لهذه الشركة.", "code": "engagement_not_found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            if engagement.status != Engagement.Status.ACTIVE:
+                return Response(
+                    {"detail": "الارتباط ليس نشطاً ليتم تعليقه.", "code": "engagement_not_active"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            suspend_engagement(engagement=engagement, reason=reason)
+            return Response(
+                {
+                    "detail": "تم تعليق وصول الوكيل للشركة بنجاح.",
+                    "suspended_count": 1,
+                    "engagement_id": engagement.pk,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        active_engagements = list(
+            Engagement.objects.filter(tenant=tenant, status=Engagement.Status.ACTIVE).order_by("pk")
+        )
+        if not active_engagements:
             return Response(
                 {"detail": "لا يوجد ارتباط وكيل نشط لهذه الشركة ليتم تعليقه."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if len(active_engagements) > 1:
+            return Response(
+                {
+                    "detail": "يوجد أكثر من وكيل نشط لهذه الشركة، يجب تحديد معرف الارتباط (engagement_id) لتعليقه.",
+                    "code": "engagement_id_required",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        reason = str(request.data.get("reason", "تعليق وصول الوكيل بطلب من صاحب الشركة")).strip()
-        suspend_engagement(engagement=active_engagement, reason=reason)
+        single_engagement = active_engagements[0]
+        suspend_engagement(engagement=single_engagement, reason=reason)
         return Response(
-            {"detail": "تم تعليق وصول الوكيل للشركة بنجاح."},
+            {
+                "detail": "تم تعليق وصول الوكيل للشركة بنجاح.",
+                "suspended_count": 1,
+                "engagement_id": single_engagement.pk,
+            },
             status=status.HTTP_200_OK,
         )
 
+
+class CompanyHealthView(APIView):
+    """عرض درجتي الصحة لشركة معينة في مسار السوبر أدمن (م٧ - قصص ٢٣-٢٤).
+
+    - صلاحيتها كصلاحية WorkOrderViewSet: موظف المنصة يقرأ شركات ارتباطاته النشطة وحدها،
+      والمدير يقرأ جميع الشركات.
+    - شركة خارج نطاق الموظف أو غير موجودة ⇒ 404 (دون تلميح لوجودها).
+    - مستخدم مصادق عادي ليس موظفاً ولا مديراً ⇒ 403 (حارس الجذر).
+    - تُطلب عند الفتح لتجنب N+1 في اللوحة.
+    """
+
+    permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
+
+    def get(self, request, tenant_id: int):
+        user = request.user
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+
+        if not is_manager:
+            has_active_engagement = Engagement.objects.filter(
+                employee__user=user,
+                tenant_id=tenant_id,
+                status=Engagement.Status.ACTIVE,
+            ).exists()
+            if not has_active_engagement:
+                raise Http404("الشركة غير موجودة أو خارج نطاق العمليات.")
+
+        try:
+            tenant = Tenant.objects.get(pk=tenant_id)
+        except Tenant.DoesNotExist:
+            raise Http404("الشركة غير موجودة.")
+
+        # `health_scores` مفتاحاً واحداً بنفس شكله في `/api/my-agent/` — لا نسخةً ثانيةً
+        # مسطّحةً بجانبه: حمولةٌ تحمل الرقمَ مرّتين تدعو قارئاً لأن يقرأ النسخةَ الأخرى.
+        return Response({
+            "tenant_id": tenant.pk,
+            "company_name": tenant.CompanyName,
+            "health_scores": calculate_two_health_scores(tenant),
+        }, status=status.HTTP_200_OK)
+
+
+class PlatformRecruiterViewSet(viewsets.ModelViewSet):
+    """إدارة مسؤولي التوظيف المنصي — محصورة بمدير العمليات المنصية / السوبر أدمن.
+
+    الإسنادُ والإلغاءُ يمرّان بطبقة الخدمات لا بـCRUD عامّ: `create_platform_recruiter`
+    تُعيد تفعيلَ صفٍّ مُلغىً بدل أن تسقط بتصادم الفرادة، و`revoke_platform_recruiter`
+    **تُعطّل ولا تحذف** فيبقى أثرُ من أُسند إليه الدور.
+    """
+
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = PlatformRecruiterSerializer
+    queryset = PlatformRecruiter.objects.select_related("user").order_by("-created_at")
+    #: لا `PUT`/`PATCH`: تفعيلُ الدور بكتابة `is_active` مباشرةً يلتفّ على الخدمة.
+    #: الإسنادُ `POST` والإلغاءُ `DELETE`، وإعادةُ الإسناد `POST` ثانيةً تُعيد التفعيل.
+    http_method_names = ["get", "post", "delete", "head", "options"]
+
+    def perform_create(self, serializer):
+        # `identifier` حُلَّ إلى مستخدمٍ في `validate_identifier`.
+        user = serializer.validated_data["identifier"]
+        serializer.instance = create_platform_recruiter(user)
+
+    def perform_destroy(self, instance):
+        revoke_platform_recruiter(instance.user)
+
+
+class JobPostingViewSet(viewsets.ModelViewSet):
+    """إدارة إعلانات الوظائف المنصية — متاحة لمسؤولي التوظيف ومديري المنصة."""
+
+    permission_classes = [IsPlatformRecruiter]
+    serializer_class = JobPostingSerializer
+
+    def get_queryset(self):
+        qs = JobPosting.objects.prefetch_related("applicants").order_by("-created_at")
+        is_open = self.request.query_params.get("is_open")
+        if is_open is not None:
+            if str(is_open).lower() in ("true", "1"):
+                qs = qs.filter(is_open=True)
+            elif str(is_open).lower() in ("false", "0"):
+                qs = qs.filter(is_open=False)
+        return qs
+
+    def perform_create(self, serializer):
+        # الكتابةُ عبر الخدمة لا عبر المُسلسِل: توليدُ المفتاح ونصُّ الإلزام
+        # يسكنان `create_job_posting` وحدَها، فلا تتباعد نسختان.
+        user = self.request.user if getattr(self.request, "user", None) and self.request.user.is_authenticated else None
+        data = serializer.validated_data
+        serializer.instance = create_job_posting(
+            title=data.get("title", ""),
+            description=data.get("description", ""),
+            created_by=user,
+            specialty=data.get("specialty", ""),
+            requirements=data.get("requirements", ""),
+            location=data.get("location", ""),
+            employment_type=data.get("employment_type", ""),
+            salary_range=data.get("salary_range", ""),
+            expires_at=data.get("expires_at"),
+        )
+
+    def perform_destroy(self, instance):
+        if instance.applicants.exists():
+            raise ValidationError("لا يمكن حذف إعلان وظيفة له متقدمون. أغلق الإعلانَ بدل حذفه.")
+        instance.delete()
+
+    @action(detail=True, methods=["post"])
+    def close(self, request, pk=None):
+        job = self.get_object()
+        job = close_job_posting(job=job)
+        return Response(self.get_serializer(job).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def reopen(self, request, pk=None):
+        job = self.get_object()
+        job = reopen_job_posting(job=job)
+        return Response(self.get_serializer(job).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="regenerate-link")
+    def regenerate_link(self, request, pk=None):
+        job = self.get_object()
+        job = regenerate_job_posting_token(job=job)
+        return Response(self.get_serializer(job).data, status=status.HTTP_200_OK)
+
+
+class JobApplicantViewSet(viewsets.ReadOnlyModelViewSet):
+    """متابعةُ المتقدّمين على الوظائف المنصّية — **قراءةٌ وأفعالٌ لا CRUD**.
+
+    - متاحة لمسؤولي التوظيف ومديري المنصة (`IsPlatformRecruiter`).
+    - **لا إنشاءَ ولا حذفَ من هنا**: المتقدّمُ يولد من الصفحة العامّة وحدَها
+      («التقديمُ من صفحةٍ عامّةٍ بلا حساب»)، وقد كان `POST` هنا يسقط بـ500 أصلاً
+      لأنّ `job` قراءةٌ فقط فيُنشأ الصفُّ بلا وظيفة.
+    - **ولا تحريرَ مباشراً**: الحالةُ تتحرّك بـ`transition-status` والتقييمُ بـ`rate`،
+      فيمرّان بجدول الانتقالات وبحارس «حالةُ المقبول تُبلَغ بقبول الدعوة».
+    - رابط السيرة الذاتية لا يُعاد في البيانات؛ الوصول له عبر `cv/` الذي يمرّر
+      البايتاتِ ولا يسلّم رابطَ التخزين.
+    """
+
+    permission_classes = [IsPlatformRecruiter]
+    serializer_class = JobApplicantSerializer
+
+    def get_queryset(self):
+        qs = JobApplicant.objects.select_related("job", "hired_employee__user").order_by("-created_at")
+        job_id = self.request.query_params.get("job") or self.request.query_params.get("job_id")
+        if job_id:
+            qs = qs.filter(job_id=job_id)
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return qs
+
+    @action(detail=True, methods=["post"], url_path="transition-status")
+    def transition_status(self, request, pk=None):
+        applicant = self.get_object()
+        target_status = request.data.get("status")
+        if not target_status:
+            return Response({"status": "الحالة المستهدفة مطلوبة."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            applicant = transition_applicant_status(
+                applicant=applicant,
+                target_status=target_status,
+                actor=request.user,
+            )
+        except ValidationError as exc:
+            return Response(exc.detail if hasattr(exc, "detail") else str(exc), status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(applicant).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def rate(self, request, pk=None):
+        applicant = self.get_object()
+        rating = request.data.get("rating")
+        notes = request.data.get("notes")
+        try:
+            applicant = rate_applicant(applicant=applicant, rating=rating, notes=notes)
+        except ValidationError as exc:
+            return Response(exc.detail if hasattr(exc, "detail") else str(exc), status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(applicant).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def invite(self, request, pk=None):
+        applicant = self.get_object()
+        raw_hours = request.data.get("expires_in_hours", 72)
+        if raw_hours is None or raw_hours == "":
+            raw_hours = 72
+        try:
+            expires_in_hours = int(raw_hours)
+        except (ValueError, TypeError):
+            return Response(
+                {"expires_in_hours": "مدة الصلاحية يجب أن تكون عدداً صحيحاً بالساعات بين 1 و168."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= expires_in_hours <= 168:
+            return Response(
+                {"expires_in_hours": "مدة الصلاحية يجب أن تكون بين 1 و168 ساعة (أسبوع كحد أقصى)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            invitation, raw_token = create_applicant_invitation(
+                applicant=applicant,
+                created_by=request.user,
+                expires_in_hours=expires_in_hours,
+            )
+        except ValidationError as exc:
+            return Response(
+                exc.detail if hasattr(exc, "detail") else str(exc),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "detail": "تم إصدار رابط الدعوة بنجاح.",
+                "invitation_id": invitation.pk,
+                "token": raw_token,
+                "invite_url": invitation_public_url(raw_token),
+                "expires_at": invitation.expires_at.isoformat(),
+                "applicant_id": applicant.pk,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["get"])
+    def cv(self, request, pk=None):
+        """السيرةُ خلف صلاحية، **ورابطُ التخزين لا يغادر الخادم**.
+
+        **بايتاتٌ لا إعادةُ توجيه**: ترويسةُ `Location` **هي** رابطُ التخزين
+        حرفيّاً، فالردُّ يحمل ما تقول المواصفةُ إنّه «لا يُسلَّم بأيّ حال»، ويبقى
+        في سجلّ المتصفّح صالحاً للنسخ بعد انتهاء الجلسة — والرابطُ عند المزوّد
+        **هو** الصلاحية، فتسليمُه تسليمٌ دائم. هذا العيبُ وقع في `employee_ops`
+        وأُصلح هناك بالنمط نفسِه، فلا يُعاد هنا.
+        """
+        applicant = self.get_object()
+        if not applicant.cv_url:
+            raise Http404("لا توجد سيرة ذاتية لهذا المتقدم.")
+
+        try:
+            upstream = requests.get(applicant.cv_url, stream=True, timeout=20)
+            upstream.raise_for_status()
+        except requests.RequestException:
+            raise APIException("تعذّر جلب السيرة الذاتية من التخزين.")
+
+        safe_name = (applicant.cv_name or "cv").replace('"', "").replace("\\", "")
+        response = FileResponse(
+            upstream.raw,
+            as_attachment=False,
+            filename=safe_name,
+            content_type=upstream.headers.get("Content-Type")
+            or guess_cv_content_type(applicant.cv_url),
+        )
+        return response
+
+
+class PlatformStaffCapabilitiesView(APIView):
+    """قدراتُ المستخدم الحاليّ على المنصّة — لتعرف الواجهةُ أيَّ بابٍ تُظهر له (م٨-ب).
+
+    **خارج `/api/platform/` عمداً**: ذلك الجذرُ يردّ 403 لكلّ من ليس سوبر أدمن،
+    وحارسُه يعدّ مساراتِه كلَّها، وهذا سؤالٌ يطرحه **كلُّ** مستخدمٍ عن نفسه. وبدونه
+    لا تعرف الواجهةُ أنّ مسؤولَ التوظيف — وليس سوبر أدمن — له شاشةٌ يدخلها، فيبقى
+    الدورُ الذي بُني له الاستثناءُ الوحيدُ بلا باب: حمولةُ المصادقة تسكن `hr` التي
+    يمنعها حارسُ العزل من استيراد هذه الوحدة.
+
+    يُجيب عن المستخدم نفسِه وحدَه ولا يقبل معرّفاً من الطلب.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        return Response(
+            {
+                "is_platform_admin": bool(IsPlatformAdmin().has_permission(request, self)),
+                "is_platform_recruiter": bool(is_platform_recruiter(user)),
+                "is_platform_employee": bool(is_platform_employee(user)),
+            },
+            status=status.HTTP_200_OK,
+        )

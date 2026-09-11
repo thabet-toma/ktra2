@@ -132,4 +132,54 @@ class PlatformOpsMigrationGraphTest(SimpleTestCase):
         self.assertEqual(plan[-1], (APP, migration_0007_name))
         self.assertIn((APP, "0006_platformactivitylog_platformnotification"), plan[:-1])
 
+    def test_migration_0008_exists_and_depends_on_0007(self):
+        """هجرة المرحلة السابعة (ب) موجودة وتعتمد على 0007."""
+        migration_0008_name = "0008_axis_weights_help_text"
+        self.assertIn((APP, migration_0008_name), self.loader.graph.nodes)
+        migration = self.loader.disk_migrations[(APP, migration_0008_name)]
+        self.assertIn(
+            (APP, "0007_dailyrating_dailyratingtoken_and_more"),
+            migration.dependencies,
+        )
+
+    def test_migration_0009_exists_and_declares_dependencies(self):
+        """هجرة المرحلة الثامنة (أ) موجودة وتعتمد على 0008 وpartners وsales."""
+        migration_0009_name = "0009_servicesubscription_billing_customer_and_more"
+        self.assertIn((APP, migration_0009_name), self.loader.graph.nodes)
+        migration = self.loader.disk_migrations[(APP, migration_0009_name)]
+        depended_apps = {app for app, _ in migration.dependencies}
+        self.assertIn(APP, depended_apps)
+        self.assertIn("partners", depended_apps)
+        self.assertIn("sales", depended_apps)
+        self.assertIn(
+            (APP, "0008_axis_weights_help_text"),
+            migration.dependencies,
+        )
+
+    def test_forwards_plan_for_0009_places_all_dependencies_before_it(self):
+        """خطة البناء للأمام حتى 0009 تضع الاعتمادات قبلها وتختم بـ 0009."""
+        migration_0009_name = "0009_servicesubscription_billing_customer_and_more"
+        plan = self.loader.graph.forwards_plan((APP, migration_0009_name))
+        self.assertEqual(plan[-1], (APP, migration_0009_name))
+        self.assertIn((APP, "0008_axis_weights_help_text"), plan[:-1])
+
+    def test_migration_0010_exists_and_declares_dependencies(self):
+        """هجرة المرحلة الثامنة (ب) موجودة وتعتمد على 0009."""
+        migration_0010_name = "0010_jobposting_jobapplicant_platformrecruiter_and_more"
+        self.assertIn((APP, migration_0010_name), self.loader.graph.nodes)
+        migration = self.loader.disk_migrations[(APP, migration_0010_name)]
+        self.assertIn(
+            (APP, "0009_servicesubscription_billing_customer_and_more"),
+            migration.dependencies,
+        )
+
+    def test_forwards_plan_for_0010_places_all_dependencies_before_it(self):
+        """خطة البناء للأمام حتى 0010 تضع الاعتمادات قبلها وتختم بـ 0010."""
+        migration_0010_name = "0010_jobposting_jobapplicant_platformrecruiter_and_more"
+        plan = self.loader.graph.forwards_plan((APP, migration_0010_name))
+        self.assertEqual(plan[-1], (APP, migration_0010_name))
+        self.assertIn((APP, "0009_servicesubscription_billing_customer_and_more"), plan[:-1])
+
+
+
 

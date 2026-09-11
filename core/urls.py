@@ -30,7 +30,10 @@ from sales import agent_api as sales_agent_api
 
 _activity_router = DefaultRouter()
 _activity_router.register(r'', ActivityLogViewSet, basename='activity')
-# راوتر المنصة بجذرٍ محروس — لا نقطة تحت `/api/platform/` تُقرأ بغير سوبر أدمن.
+# راوتر المنصة بجذرٍ محروس — لا نقطة تحت `/api/platform/` تُقرأ بغير سوبر أدمن،
+# **باستثناءٍ واحدٍ معلَن**: دورُ التوظيف المنصّيّ (`PlatformRecruiter`) يقرأ
+# `ops/job-postings/` و`ops/job-applicants/` وحدهما (م٨-ب). ويحرس حدَّ الاستثناء
+# `PlatformRecruiterRouteScopeTest.test_a_platform_recruiter_reaches_the_hiring_routes_and_nothing_else`.
 _platform_router = PlatformRouter()
 _platform_router.register(
     r'development-notes', DevelopmentNoteViewSet, basename='platform-development-notes',
@@ -101,6 +104,11 @@ urlpatterns = [
     # سطحُ المستأجر من الوحدة نفسِها — خارج `/api/platform/` لأنّ ذلك الجذر
     # محروسٌ بالسوبر أدمن وحده، وهذه نقاطُ صاحبِ الشركة ورابطٌ عامٌّ بلا دخول.
     path('api/my-agent/', include('platform_ops.urls_tenant')),
+    # بوّابة التوظيف المنصية ودعوات المرشحين — خارج /api/platform/ لأنها عامة
+    path('api/careers/', include('platform_ops.public_hiring.urls')),
+    # قدراتُ المستخدم الحاليّ على المنصّة — يسألها كلُّ مصادَقٍ عن نفسه فمكانُها
+    # خارج `/api/platform/` المحروس بالسوبر أدمن (`platform_ops/urls_staff.py`).
+    path('api/platform-staff/', include('platform_ops.urls_staff')),
     path('api/platform/', include(_platform_router.urls)),
     # T-PERM: محرّك الصلاحيات (صلاحياتي + مصفوفة الأدوار لكل شركة)
     path('api/permissions/me/', permissions_api.my_permissions),

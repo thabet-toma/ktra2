@@ -35,6 +35,7 @@ import type { SimpleHintKey } from "../constants/simpleHints";
 import { permForView } from "../utils/viewPermissions";
 import { employeeOpsNavLabels } from "../utils/employeeOps";
 import { useTenantSettings } from "../hooks/useTenantSettings";
+import { usePlatformStaffCapabilities } from "../hooks/usePlatformStaffCapabilities";
 import { listPurchaseRfqs, type PurchaseRFQDto } from "../services/procurementDocumentsApi";
 
 // ISSUE #115 قصّة ٣٠ §٦: شارة «ردٌّ جديد» على بند «العروض والطلبيات» — بلا
@@ -75,6 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const isSimpleMode = uiMode === 'simple';
   const { identity } = useTenantSettings();
   const hasEmployeeOps = moduleAllowsView("employee-ops-daily", modules);
+  const platformStaff = usePlatformStaffCapabilities(user?.id ? String(user.id) : undefined, !!user?.isSuperAdmin);
 
   // ISSUE #115 قصّة ٣٠ §٦: عدّاد ردود الطلبية غير المطّلَع عليها — لكلا بندي
   // «العروض والطلبيات» (الشراء المحلي والاستيراد، لكلٍّ نطاقه الخاص في
@@ -572,6 +574,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                     className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("development-notes") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
                     <TableProperties className="h-4 w-4" /> ملاحظات التطوير
                   </button>
+                  <button type="button" onClick={() => { setView("platform-hiring"); if (isMobile) setIsMobileMenuOpen(false); }}
+                    className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("platform-hiring") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
+                    <BriefcaseIcon className="h-4 w-4" /> التوظيف المنصّي
+                  </button>
+                  <button type="button" onClick={() => { setView("platform-billing"); if (isMobile) setIsMobileMenuOpen(false); }}
+                    className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("platform-billing") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
+                    <Receipt className="h-4 w-4" /> فواتير خدمة المتابعة
+                  </button>
                   {/* T-EXTACCT: طريق العودة لقشرة المكتب — «العودة للوحة المنصة»
                       رحلة ذهاب وإياب، فمن خرج منها يجدها هنا حيث خرج. */}
                   {user.accountType === "legal_accountant" && (
@@ -587,6 +597,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {!user.isSuperAdmin && platformStaff.is_platform_recruiter && (
+            <div className="mb-2 rounded-lg border border-purple-200 bg-purple-50/70 p-1 dark:border-purple-900 dark:bg-purple-950/20">
+              <button
+                type="button"
+                onClick={() => { setView("platform-hiring"); if (isMobile) setIsMobileMenuOpen(false); }}
+                className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("platform-hiring") ? "bg-purple-600 text-white" : "text-purple-800 hover:bg-purple-100 dark:text-purple-300 dark:hover:bg-purple-900/30"}`}
+                title="التوظيف المنصّي"
+              >
+                <BriefcaseIcon className="h-5 w-5 flex-shrink-0" />
+                {showText && <span className="font-bold">التوظيف المنصّي</span>}
+              </button>
             </div>
           )}
 
@@ -685,6 +709,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             >
               <ShieldCheck className="h-5 w-5 flex-shrink-0" />
               {showText && <span className="mr-3 text-right flex-1">واجهة المحاسب القانوني</span>}
+            </button>
+          )}
+
+          {/* #207 م٧: «مَن يمسك دفاتري» — توأمُ زرِّ المحاسب القانونيّ أعلاه لكنّ
+              الماسكَ هنا وكيلُ المنصّة. لصاحب الشركة وحدَه: الخادمُ يردّ 403 لغيره
+              (`_require_tenant_manager`)، فالبندُ لا يظهر لمن لا يفتحه. ويظهر ولو
+              لم يكن للشركة وكيلٌ اليوم — للشاشة حالةُ فراغٍ صريحةٌ تقولها. */}
+          {isManager && (
+            <button
+              onClick={() => { setView("my-agent"); if (isMobile) setIsMobileMenuOpen(false); }}
+              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("my-agent") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+              title="من يمسك دفاتري"
+            >
+              <BookOpenCheck className="h-5 w-5 flex-shrink-0" />
+              {showText && <span className="mr-3 text-right flex-1">من يمسك دفاتري</span>}
             </button>
           )}
 

@@ -77,6 +77,9 @@ const TradeDashboard = lazyPage(() => import("./components/dashboard/TradeDashbo
 const SuperAdminDashboard = lazyPage(() => import("./components/superadmin/SuperAdminDashboard").then((m) => ({ default: m.SuperAdminDashboard })));
 const DevelopmentNotesPage = lazyPage(() => import("./components/superadmin/DevelopmentNotesPage").then((m) => ({ default: m.DevelopmentNotesPage })));
 const PlatformOpsDashboard = lazyPage(() => import("./components/platform/PlatformOpsDashboard").then((m) => ({ default: m.PlatformOpsDashboard })));
+const MyAgentBooksPage = lazyPage(() => import("./components/my-agent/MyAgentBooksPage").then((m) => ({ default: m.MyAgentBooksPage })));
+const PlatformHiringScreen = lazyPage(() => import("./components/platform-hiring/PlatformHiringScreen").then((m) => ({ default: m.PlatformHiringScreen })));
+const BillingRecordsScreen = lazyPage(() => import("./components/platform/BillingRecordsScreen").then((m) => ({ default: m.BillingRecordsScreen })));
 const TaskManagement = lazyPage(() => import("./components/TaskManagement").then((m) => ({ default: m.TaskManagement })));
 const UserManagement = lazyPage(() => import("./components/UserManagement").then((m) => ({ default: m.UserManagement })));
 const ActivityLogPage = lazyPage(() => import("./components/ActivityLogPage").then((m) => ({ default: m.ActivityLogPage })));
@@ -237,6 +240,9 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "super-admin": "/super-admin",
   "development-notes": "/super-admin/development-notes",
   "platform-ops": "/super-admin/platform-ops",
+  "platform-billing": "/super-admin/platform-billing",
+  "platform-hiring": "/platform/hiring",
+  "my-agent": "/my-agent",
   tasks: "/tasks",
   "task-management": "/task-management",
   "smart-assistant": "/assistant",
@@ -759,7 +765,7 @@ const App: React.FC = () => {
     if (mappedView) {
       if (
         (mappedView === "super-admin" || mappedView === "development-notes"
-          || mappedView === "platform-ops")
+          || mappedView === "platform-ops" || mappedView === "platform-billing")
         && !currentUser.isSuperAdmin
       ) {
         setAppView("dashboard");
@@ -1689,11 +1695,25 @@ const App: React.FC = () => {
       // #207 م٦ — «مركز قيادة كترا». **والتركيبُ جزءٌ من التسليم لا زينةٌ بعده**:
       // المواصفةُ نفسُها تسجّل مصباحَ الحضور في `UserManagement.tsx` ميّتاً لأنّ
       // `Header.tsx` لا يستورده ملفٌّ واحد. شاشةٌ بلا مسارٍ شاشةٌ غيرُ مسلَّمة.
+      // #207 م٧ — تبويبُ «مَن يمسك دفاتري» لصاحب الشركة. الخادمُ يردّ 403 لغير
+      // صاحب الشركة (`_require_tenant_manager`)، والشريطُ يخفي البند لغيره.
+      case "my-agent":
+        return <MyAgentBooksPage />;
+
       case "platform-ops":
         if (!currentUser!.isSuperAdmin) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <PlatformOpsDashboard />;
+
+      case "platform-billing":
+        if (!currentUser!.isSuperAdmin) {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <BillingRecordsScreen />;
+
+      case "platform-hiring":
+        return <PlatformHiringScreen canManageRecruiters={!!currentUser!.isSuperAdmin} />;
 
       case "dashboard": {
         // ISSUE #87: شاشتا بداية القالبين — تسبقان فرع isManager فكلا القالبين

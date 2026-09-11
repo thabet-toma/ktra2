@@ -43,6 +43,9 @@ const StoreIndexPage = React.lazy(() => import('./components/store/StoreIndexPag
 // والتقديمُ على وظيفة. كلتاهما خارج مزوّد المصادقة كصفحة المتجر العامّة.
 const PublicJoinPage = React.lazy(() => import('./components/employee-ops/PublicJoinPage').then((module) => ({ default: module.PublicJoinPage })));
 const PublicJobPage = React.lazy(() => import('./components/employee-ops/PublicJobPage').then((module) => ({ default: module.PublicJobPage })));
+const PlatformPublicJobPage = React.lazy(() => import('./components/platform-hiring/PlatformPublicJobPage').then((module) => ({ default: module.PlatformPublicJobPage })));
+const PlatformInvitationPage = React.lazy(() => import('./components/platform-hiring/PlatformInvitationPage').then((module) => ({ default: module.PlatformInvitationPage })));
+const PublicRatingPage = React.lazy(() => import('./components/my-agent/PublicRatingPage').then((module) => ({ default: module.PublicRatingPage })));
 const StorefrontPage = React.lazy(() => import('./components/store/StorefrontPage').then((module) => ({ default: module.StorefrontPage })));
 const StoreProductPage = React.lazy(() => import('./components/store/StoreProductPage').then((module) => ({ default: module.StoreProductPage })));
 const StoreCampaignPage = React.lazy(() => import('./components/store/StoreCampaignPage').then((module) => ({ default: module.StoreCampaignPage })));
@@ -217,6 +220,13 @@ root.render(
           {/* متابعة الموظفين: دعوةُ موظف · وظيفةٌ عامّة — بلا مصادقةٍ ولا شركةِ جلسة */}
           <Route path="/join/:token" element={<ToastProvider><PublicJoinPage /></ToastProvider>} />
           <Route path="/jobs/:token" element={<ToastProvider><ConfirmProvider><PublicJobPage /></ConfirmProvider></ToastProvider>} />
+
+          {/* تقييمُ يوم عمل الوكيل برابطٍ مهشَّر — يفتحه صاحبُ الشركة بلا تسجيل دخول (#207 م٧) */}
+          <Route path="/rate/:token" element={<ToastProvider><PublicRatingPage /></ToastProvider>} />
+
+          {/* توظيف المنصة: رابط وظيفة عامة · قبول دعوة توظيف — خارج المصادقة والشركة (#207 م٨) */}
+          <Route path="/careers/job/:token" element={<ToastProvider><ConfirmProvider><PlatformPublicJobPage /></ConfirmProvider></ToastProvider>} />
+          <Route path="/careers/invite/:token" element={<ToastProvider><PlatformInvitationPage /></ToastProvider>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

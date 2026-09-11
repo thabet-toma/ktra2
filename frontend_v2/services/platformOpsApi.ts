@@ -7,6 +7,7 @@
  */
 import { apiGetObject, apiPostObject } from "./restApi";
 import type { PlatformAnomaly } from "../utils/interventionAnomalies";
+import type { TwoHealthScores } from "../utils/agentBooks";
 import type { PlatformDashboardCompany, PlatformDashboardEmployee } from "../utils/dashboardRanking";
 
 export interface PlatformOpsDashboardData {
@@ -137,3 +138,51 @@ export const getPlatformActivityLogs = (params: { employee?: number | string; ac
 /** استرجاع سجل نشاط موظف محدد عبر كل الشركات. */
 export const getEmployeeActivity = (employeeId: number) =>
   apiGetObject<PlatformActivityLog[]>(`platform/ops/employees/${employeeId}/activity/`);
+
+/**
+ * حمولةُ `platform_ops/views.py` (`CompanyHealthView`) — و`health_scores` نفسُ شكلِ
+ * `/api/my-agent/` لأنّ مصدرَهما دالّةٌ واحدة (`calculate_two_health_scores`).
+ */
+export interface CompanyHealthData {
+  tenant_id: number;
+  company_name: string;
+  health_scores: TwoHealthScores;
+}
+
+/** استرجاع درجتي الصحة لشركة معينة في مسار السوبر أدمن والعمليات المنصية (عند الطلب لمنع N+1). */
+export const getCompanyHealth = (tenantId: number) =>
+  apiGetObject<CompanyHealthData>(`platform/ops/companies/${tenantId}/health/`);
+
+/** سجلُّ تدقيق الفوترة الشهرية لاشتراك الخدمة (#207 م٨). */
+export interface SubscriptionBillingRecordRow {
+  id: number;
+  subscription: number;
+  tenant_id: number;
+  company_name: string;
+  period_start: string;
+  period_end: string;
+  invoice: number | null;
+  invoice_number: string | null;
+  monthly_fee: string;
+  included_quota: number;
+  consumed_quota: number;
+  overage_units: number;
+  overage_unit_price: string;
+  overage_fee: string;
+  total_amount: string;
+  created_at: string;
+}
+
+/** استرجاع سجلات الفوترة الشهرية لاشتراكات الخدمة المنصية. */
+export const listBillingRecords = async (
+  filter: { company?: number; subscription?: number } = {},
+): Promise<SubscriptionBillingRecordRow[]> => {
+  const data = await apiGetObject<
+    { results: SubscriptionBillingRecordRow[]; count?: number } | SubscriptionBillingRecordRow[]
+  >(`platform/ops/billing-records/${buildCleanQueryString(filter)}`);
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return data?.results || [];
+};
+

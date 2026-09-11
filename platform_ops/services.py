@@ -1,8 +1,8 @@
-"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة والسابعة).
+"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة والسابعة والثامنة).
 
 ترتيب الأقفال الصارم لمنع التعارضات والـ Deadlocks على MySQL:
 IntegrationKey -> ServiceSubscription -> PlatformEmployee -> Engagement -> WorkOrder
--> WorkOrderDeliverable -> UserCompanyMembership -> DailyRating
+-> WorkOrderDeliverable -> UserCompanyMembership -> DailyRating -> JobPosting -> JobApplicantInvitation -> JobApplicant
 ملاحظة: لا يُستعمل select_related مع select_for_update لتجنب قفل جداول غير مقصودة.
 """
 import calendar
@@ -12,16 +12,19 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
 import secrets
 
+from django.conf import settings
+from django.contrib.auth.models import User
 from django.db import IntegrityError, models, transaction
 from django.db.models import Avg, Max
 from django.utils import timezone
+from rest_framework.exceptions import NotFound, ValidationError
 
 from core.date_ranges import filter_local_date_range
 from core.activity import describe_activity_changes
 from core.models import ActivityLog
 from core.terminology import term
-from hr.models import UserDevice
-from tenants.models import Tenant, UserCompanyMembership
+from hr.models import AttendanceDay, UserDevice
+from tenants.models import Currency, Tenant, UserCompanyMembership
 
 from .models import (
     AgentGrantedMembership,
@@ -29,16 +32,22 @@ from .models import (
     DailyRatingToken,
     Engagement,
     IntegrationKey,
+    JobApplicant,
+    JobApplicantInvitation,
+    JobPosting,
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
     PlatformNotification,
+    PlatformRecruiter,
     PolicyProfile,
     ServiceSubscription,
+    SubscriptionBillingRecord,
     WorkOrder,
     WorkOrderComment,
     WorkOrderDeliverable,
 )
+
 
 
 class PlatformOpsError(Exception):
@@ -102,6 +111,24 @@ class DailyRatingConflict(DailyRatingError):
         super().__init__(code, detail, status_code=status_code)
 
 
+class BillingError(PlatformOpsError):
+    """خطأ عام في عمليات فوترة اشتراكات المنصة (المرحلة 8A)."""
+
+    pass
+
+
+class BillingConfigurationError(BillingError):
+    """خطأ في إعدادات الفوترة (عميل الفوترة أو الأصناف الخدمية أو العملة)."""
+
+    pass
+
+
+class BillingPeriodError(BillingError):
+    """خطأ في دورة الفوترة (طلب دورة غير مطابقة لدورة الاشتراك أو اشتراك غير نشط)."""
+
+    pass
+
+
 class RatingTokenNotFound(PlatformOpsError):
     """الرمز غير موجود أو غير صالح => 404 (طابق سابقة docshare)."""
 
@@ -114,6 +141,15 @@ class RatingTokenGone(PlatformOpsError):
 
     def __init__(self, detail: str = "انتهت صلاحية هذا الرابط."):
         super().__init__("token_expired", detail, status_code=410)
+
+
+class JobGone(Exception):
+    """انتهت فترة التقديم على الوظيفة أو أُغلقت (410)."""
+
+
+class InvitationGone(Exception):
+    """رابط الدعوة مستهلك أو منتهي الصلاحية (410)."""
+
 
 
 def is_service_active(tenant) -> bool:
@@ -1427,30 +1463,38 @@ def receive_channel_work_order(
 # المرحلة الخامسة (م٥): المقاييس الستة، ملفات السياسات، الدرجة المركبة، واللقطات الشهرية
 # ==============================================================================
 
-# المحاور الخمسة الرسمية للتقييم
-AXIS_QUALITY = "quality"                    # محور الجودة (نسبة القبول من أول مراجعة)
-AXIS_SLA_COMPLIANCE = "sla_compliance"      # محور الالتزام بالأجل
-AXIS_PRODUCTIVITY = "productivity"          # محور الإنتاجية والـKPI
-AXIS_SPEED_EFFICIENCY = "speed_efficiency"  # محور الكفاءة وسرعة الإنجاز
-AXIS_SALES_VALUE = "sales_value"            # محور قيمة المبيعات المعالجة
+# محاور التقييم الرسمية الخمسة حرفياً وفق #207 §8 و#203
+AXIS_KPI_RESULTS = "kpi_results"                  # محور نتائج الأداء والـKPI (الإنتاجية المنجزة) - 30%
+AXIS_QUALITY = "quality"                          # محور الجودة (نسبة القبول من أول مراجعة) - 25%
+AXIS_CUSTOMER_RATING = "customer_rating"          # محور تقييم الزبون (المرحلة السابعة §١٠) - 20%
+AXIS_SLA_COMPLIANCE = "sla_compliance"            # محور الالتزام بالأجل - 15%
+AXIS_ATTENDANCE_REGULARITY = "attendance_regularity"  # محور الحضور والانضباط الفعلي - 10%
+
+# توافق رجعي مع التسميات السابقة
+AXIS_PRODUCTIVITY = AXIS_KPI_RESULTS
+AXIS_ATTENDANCE = AXIS_ATTENDANCE_REGULARITY
+
+# المقاييس التشخيصية القديمة تبقى كثوابت لمن يستوردها ولكن ليست محاور رسمية
+AXIS_SPEED_EFFICIENCY = "speed_efficiency"
+AXIS_SALES_VALUE = "sales_value"
 
 ALL_PERFORMANCE_AXES = (
+    AXIS_KPI_RESULTS,
     AXIS_QUALITY,
+    AXIS_CUSTOMER_RATING,
     AXIS_SLA_COMPLIANCE,
-    AXIS_PRODUCTIVITY,
-    AXIS_SPEED_EFFICIENCY,
-    AXIS_SALES_VALUE,
+    AXIS_ATTENDANCE_REGULARITY,
 )
 
 DEFAULT_AXIS_WEIGHTS: dict[str, Decimal] = {
-    AXIS_QUALITY: Decimal("30.00"),
-    AXIS_SLA_COMPLIANCE: Decimal("25.00"),
-    AXIS_PRODUCTIVITY: Decimal("20.00"),
-    AXIS_SPEED_EFFICIENCY: Decimal("15.00"),
-    AXIS_SALES_VALUE: Decimal("10.00"),
+    AXIS_KPI_RESULTS: Decimal("30.00"),
+    AXIS_QUALITY: Decimal("25.00"),
+    AXIS_CUSTOMER_RATING: Decimal("20.00"),
+    AXIS_SLA_COMPLIANCE: Decimal("15.00"),
+    AXIS_ATTENDANCE_REGULARITY: Decimal("10.00"),
 }
 
-# المقاييس الستة — قائمة مغلقة ولا سابع
+# المقاييس الستة — قائمة مغلقة لأوامر العمل ومُسلَّماتها (والتقييم محورٌ لا مقياس أمر عمل)
 METRIC_FIRST_TIME_APPROVAL = "first_time_approval_rate"  # نسبة القبول من أول مراجعة
 METRIC_SLA_COMPLIANCE = "sla_compliance_rate"            # الالتزام بالأجل
 METRIC_COMPLETED_WORK_VOLUME = "completed_work_volume"    # الإنتاجية المنجزة
@@ -1486,7 +1530,14 @@ def redistribute_axis_weights(
         return {}
 
     def _weight_of(axis: str) -> Decimal:
-        raw = raw_weights.get(axis, DEFAULT_AXIS_WEIGHTS.get(axis, Decimal("0.00")))
+        raw = raw_weights.get(axis)
+        if raw is None:
+            if axis == AXIS_KPI_RESULTS:
+                raw = raw_weights.get("productivity")
+            elif axis == AXIS_ATTENDANCE_REGULARITY:
+                raw = raw_weights.get("attendance")
+        if raw is None:
+            raw = DEFAULT_AXIS_WEIGHTS.get(axis, Decimal("0.00"))
         try:
             return Decimal(str(raw))
         except (InvalidOperation, TypeError, ValueError):
@@ -1855,46 +1906,94 @@ def calculate_employee_performance(
         METRIC_AVERAGE_HANDLING_TIME: metric_speed,
     }
 
-    # 5. تحديد المحاور المنطبقة وإعادة توزيع الأوزان
-    # قاعدة: محور المبيعات يسقط إذا لم يكن للموظف مبيعات ولم يُحدد مستهدف مبيعات في السياسة
+    # 5. تحديد المحاور المنطبقة وإعادة توزيع الأوزان (المحاور الخمسة الرسمية وفق #207 §8 و#203)
     applicable_axes: set[str] = set()
     axis_raw_scores: dict[str, Decimal] = {}
 
-    # محور الجودة
+    # 1) محور نتائج الأداء والـKPI (الإنتاجية المنجزة) - 30%
+    applicable_axes.add(AXIS_KPI_RESULTS)
+    axis_raw_scores[AXIS_KPI_RESULTS] = volume_rate
+
+    # 2) محور الجودة (نسبة القبول من أول مراجعة) - 25%
     applicable_axes.add(AXIS_QUALITY)
     axis_raw_scores[AXIS_QUALITY] = first_time_rate
 
-    # محور الالتزام بالأجل
+    # 3) محور الالتزام بالأجل - 15%
     applicable_axes.add(AXIS_SLA_COMPLIANCE)
     axis_raw_scores[AXIS_SLA_COMPLIANCE] = sla_compliance_rate
 
-    # محور الإنتاجية والـKPI
-    applicable_axes.add(AXIS_PRODUCTIVITY)
-    axis_raw_scores[AXIS_PRODUCTIVITY] = volume_rate
+    # 4) محور الحضور والانضباط الفعلي - 10%
+    # ينطبق من صفوف الحضور الفعلية (hr.AttendanceDay) للموظف ضمن شركات ارتباطاته وفترته.
+    # الحالات المجدولة: حاضر (present)، متأخر (late)، غائب (absent).
+    # الدرجة = حاضر / (حاضر + متأخر + غائب) * 100، محصورة بين 0 و100.
+    # إن لم توجد أيام حضور مجدولة، يُسقط المحور ويُعاد توزيع وزنه (10%) بالتناسب.
+    attendance_base_qs = AttendanceDay.objects.filter(
+        employee__user=employee.user,
+        tenant_id__in=engaged_tenant_ids,
+    )
+    if start_date:
+        attendance_base_qs = attendance_base_qs.filter(date__gte=start_date)
+    if end_date:
+        attendance_base_qs = attendance_base_qs.filter(date__lte=end_date)
 
-    # محور الكفاءة والسرعة
-    applicable_axes.add(AXIS_SPEED_EFFICIENCY)
-    axis_raw_scores[AXIS_SPEED_EFFICIENCY] = speed_efficiency_score
+    scheduled_qs = attendance_base_qs.filter(
+        status__in=[
+            AttendanceDay.STATUS_PRESENT,
+            AttendanceDay.STATUS_LATE,
+            AttendanceDay.STATUS_ABSENT,
+        ]
+    )
+    att_agg = scheduled_qs.aggregate(
+        scheduled_count=models.Count("id"),
+        present_count=models.Count("id", filter=models.Q(status=AttendanceDay.STATUS_PRESENT)),
+    )
+    scheduled_count = att_agg["scheduled_count"] or 0
+    present_count = att_agg["present_count"] or 0
+    if scheduled_count > 0:
+        attendance_score = min(
+            Decimal("100.00"),
+            max(
+                Decimal("0.00"),
+                (Decimal(present_count) / Decimal(scheduled_count) * Decimal("100.00")),
+            ),
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        applicable_axes.add(AXIS_ATTENDANCE_REGULARITY)
+        axis_raw_scores[AXIS_ATTENDANCE_REGULARITY] = attendance_score
 
-    # محور المبيعات
-    # **السياسةُ تقرّر لا قائمةٌ مثبَّتةٌ في الكود**: تخصّصاتٌ محشورةٌ هنا تعني أنّ
-    # إضافةَ تخصّصِ مبيعاتٍ جديدٍ تلزمها هجرةُ كود — بينما `PolicyProfile` وُجد ليحمل
-    # هذا القرارَ لكلّ تخصّص. فالمحورُ ينطبق إن أعلنت السياسةُ له هدفاً أو وزناً موجباً،
-    # أو إن كان للموظّف عملُ مبيعاتٍ فعليٌّ في الفترة.
-    declared_sales_weight = Decimal(str(raw_weights.get(AXIS_SALES_VALUE, 0) or 0))
-    has_sales_target = sales_target_dec is not None and sales_target_dec > Decimal("0.00")
-    if has_sales_target or declared_sales_weight > Decimal("0.00") or sales_orders_count > 0:
-        applicable_axes.add(AXIS_SALES_VALUE)
-        axis_raw_scores[AXIS_SALES_VALUE] = sales_score
+    # 5) محور تقييم الزبون (المرحلة السابعة §١٠) - 20%
+    # ينطبق فقط إن كانت عينة تقييمات الموظف في الفترة >= min_sample_size (من PolicyProfile)
+    # ودونها يُسقط ويُعاد توزيع وزنه بالتناسب مع بقية المحاور.
+    ratings_base_qs = DailyRating.objects.filter(
+        employee=employee,
+        tenant_id__in=engaged_tenant_ids,
+    )
+    if start_date:
+        ratings_base_qs = ratings_base_qs.filter(service_date__gte=start_date)
+    if end_date:
+        ratings_base_qs = ratings_base_qs.filter(service_date__lte=end_date)
+    ratings_sample_size = ratings_base_qs.count()
+    if ratings_sample_size >= min_sample_size:
+        avg_stars = ratings_base_qs.aggregate(Avg("stars"))["stars__avg"] or 0.0
+        rating_score = (
+            (Decimal(str(avg_stars)) / Decimal("5.00")) * Decimal("100.00")
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        applicable_axes.add(AXIS_CUSTOMER_RATING)
+        axis_raw_scores[AXIS_CUSTOMER_RATING] = rating_score
 
     # إذا كانت السياسة تحدد أوزاناً صفرية لمحور معين، يُسقط المحور
-    for axis, w in raw_weights.items():
-        try:
-            declared = Decimal(str(w))
-        except (InvalidOperation, TypeError, ValueError):
-            continue
-        if declared <= Decimal("0.00") and axis in applicable_axes:
-            applicable_axes.remove(axis)
+    for axis in list(applicable_axes):
+        w = raw_weights.get(axis)
+        if w is None and axis == AXIS_KPI_RESULTS:
+            w = raw_weights.get("productivity")
+        elif w is None and axis == AXIS_ATTENDANCE_REGULARITY:
+            w = raw_weights.get("attendance")
+        if w is not None:
+            try:
+                declared = Decimal(str(w))
+                if declared <= Decimal("0.00"):
+                    applicable_axes.remove(axis)
+            except (InvalidOperation, TypeError, ValueError):
+                pass
 
     # إعادة توزيع الأوزان لضمان أن المجموع 100.00% بالضبط
     redistributed_weights = redistribute_axis_weights(raw_weights, applicable_axes)
@@ -2743,6 +2842,20 @@ def has_employee_worked_on_date(tenant, employee, service_date: datetime.date) -
     return False
 
 
+def rating_public_url(raw_token: str) -> str:
+    """رابطُ صفحةِ التقييم المُسلَّم لصاحب الشركة — من إعدادٍ صريحٍ لا من ترويسة الطلب.
+
+    نمطُ `docshare.services.public_url` حرفياً: `request.build_absolute_uri` يبني من
+    ترويسة `Host` التي يرسلها العميل، وهذا رابطٌ يُلصَق في واتساب ويعيش ثلاثة أيّام.
+
+    والوجهةُ **صفحةُ الواجهة** (`/rate/<token>`) لا نقطةُ الـAPI: من يفتح الرابط زبونٌ
+    يريد نجماتٍ ينقرها، لا JSON.
+    """
+    base = str(getattr(settings, "PLATFORM_RATING_PUBLIC_BASE_URL", "")).rstrip("/")
+    path = str(getattr(settings, "PLATFORM_RATING_PUBLIC_PATH", "/rate")).rstrip("/")
+    return f"{base}{path}/{raw_token}"
+
+
 @transaction.atomic
 def generate_daily_rating_token(
     *,
@@ -2818,6 +2931,45 @@ def resolve_daily_rating_token(raw_token: str) -> DailyRatingToken:
     return token_obj
 
 
+def decide_rating_update(
+    *,
+    existing: DailyRating,
+    new_stars: int,
+    new_note: str,
+) -> tuple[bool, bool]:
+    """تقرير ما إذا كان التحديث تغييراً، وهل يستهلك حق التعديل الواحد (edited_once).
+
+    القواعد الحرفية (المرحلة السابعة §١٠):
+    1. إرسالٌ لا يغيّر شيئاً (نفس النجمات ونفس الملاحظة) ⇒ ليس تغييراً ولا يستهلك التعديل
+       (حتى لو كان edited_once=True مسبقاً، فالنقرة المكررة أو إعادة الإرسال لا تسقط بـ 400).
+    2. إن كان تغييراً وسبق تعديله (edited_once=True) ⇒ يرفع DailyRatingConflict('already_edited').
+    3. إلحاق ملاحظة بتقييم ملاحظته فارغة والنجمات نفسها ⇒ تغيير، ولكن لا يستهلك التعديل (تبقى edited_once=False).
+    4. تغيير النجمات، أو تغيير ملاحظة غير فارغة ⇒ تغيير يستهلك التعديل (تصبح edited_once=True).
+
+    يعيد: (is_changed: bool, consume_edit: bool)
+    """
+    clean_existing_note = (existing.note or "").strip()
+    clean_new_note = (new_note or "").strip()
+
+    stars_match = (new_stars == existing.stars)
+    notes_match = (clean_new_note == clean_existing_note)
+
+    if stars_match and notes_match:
+        return False, False
+
+    if existing.edited_once:
+        raise DailyRatingConflict(
+            "already_edited",
+            "تم تعديل هذا التقييم مسبقاً ولا يمكن تعديله مرة ثانية.",
+            status_code=400,
+        )
+
+    if stars_match and not clean_existing_note and clean_new_note:
+        return True, False
+
+    return True, True
+
+
 @transaction.atomic
 def submit_daily_rating(
     *,
@@ -2862,17 +3014,17 @@ def submit_daily_rating(
     clean_note = note.strip() if note else ""
 
     if existing:
-        # التعديل مسموح مرة واحدة فقط
-        if existing.edited_once:
-            raise DailyRatingConflict(
-                "already_edited",
-                "تم تعديل هذا التقييم مسبقاً ولا يمكن تعديله مرة ثانية.",
-                status_code=400,
-            )
-        existing.stars = stars
-        existing.note = clean_note
-        existing.edited_once = True
-        existing.save(update_fields=["stars", "note", "edited_once", "updated_at"])
+        is_changed, consume_edit = decide_rating_update(
+            existing=existing,
+            new_stars=stars,
+            new_note=clean_note,
+        )
+        if is_changed:
+            existing.stars = stars
+            existing.note = clean_note
+            if consume_edit:
+                existing.edited_once = True
+            existing.save(update_fields=["stars", "note", "edited_once", "updated_at"])
 
         if token_obj and not token_obj.rating_id:
             token_obj.rating = existing
@@ -2917,7 +3069,7 @@ def update_daily_rating(
     stars: int,
     note: str = "",
 ) -> DailyRating:
-    """تعديل تقييم قائم لمرة واحدة فقط."""
+    """تعديل تقييم قائم لمرة واحدة فقط وفق قاعدة decide_rating_update الموحدة."""
     if stars < 1 or stars > 5:
         raise DailyRatingError("invalid_stars", "التقييم يجب أن يكون بين 1 و 5 نجوم.", status_code=400)
 
@@ -2925,17 +3077,18 @@ def update_daily_rating(
     if not locked:
         raise DailyRatingError("not_found", "التقييم غير موجود.", status_code=404)
 
-    if locked.edited_once:
-        raise DailyRatingConflict(
-            "already_edited",
-            "تم تعديل هذا التقييم مسبقاً ولا يمكن تعديله مرة ثانية.",
-            status_code=400,
-        )
-
-    locked.stars = stars
-    locked.note = note.strip() if note else ""
-    locked.edited_once = True
-    locked.save(update_fields=["stars", "note", "edited_once", "updated_at"])
+    clean_note = note.strip() if note else ""
+    is_changed, consume_edit = decide_rating_update(
+        existing=locked,
+        new_stars=stars,
+        new_note=clean_note,
+    )
+    if is_changed:
+        locked.stars = stars
+        locked.note = clean_note
+        if consume_edit:
+            locked.edited_once = True
+        locked.save(update_fields=["stars", "note", "edited_once", "updated_at"])
     return locked
 
 
@@ -2945,9 +3098,12 @@ def calculate_employee_ratings_summary(
     tenant: Tenant | None = None,
     date_from: datetime.date | None = None,
     date_to: datetime.date | None = None,
-    min_sample_size: int = 5,
+    min_sample_size: int | None = None,
 ) -> dict:
     """حساب ملخص تقييمات الموظف مع اشتراط حد أدنى للعينة لدخول الأداء."""
+    if min_sample_size is None:
+        policy = resolve_policy_profile_for_employee(employee)
+        min_sample_size = policy.min_sample_size if policy else 5
     emp_id = getattr(employee, "pk", employee)
     qs = DailyRating.objects.filter(employee_id=emp_id)
     if tenant:
@@ -3084,31 +3240,54 @@ def get_my_books_tab_data(tenant: Tenant) -> dict:
     """
     tenant_obj = tenant if isinstance(tenant, Tenant) else Tenant.objects.get(pk=tenant)
 
-    # 1. استخراج الوكيل النشط حصراً من Engagement
-    active_engagement = (
+    # 1. استخراج الوكلاء النشطين حصراً من Engagement
+    #
+    # **جمعٌ لا مفرد**: فرادةُ الارتباط على (موظف، شركة) لا على الشركة وحدَها
+    # (`assign_platform_employee`)، فشركةٌ يعمل عليها وكيلان حالةٌ مشروعة. وكان
+    # التبويبُ يعرض `first()` وحدَه — فيرى صاحبُ الشركة اسماً واحداً بينما اثنان
+    # يملكان صلاحيةَ مديرٍ على دفاتره؛ وهذا نقيضُ ما وُجد التبويبُ له (قصة ٤٩).
+    active_engagements = list(
         Engagement.objects.filter(tenant=tenant_obj, status=Engagement.Status.ACTIVE)
         .select_related("employee__user")
-        .first()
+        .order_by("pk")
     )
 
-    agent_info = None
+    today = timezone.localdate()
+    agents = []
     agent_user_ids = []
-    if active_engagement:
-        emp = active_engagement.employee
+    for engagement in active_engagements:
+        emp = engagement.employee
         user = emp.user
-        agent_user_ids.append(user.pk)
-        agent_info = {
+        if user.pk not in agent_user_ids:
+            agent_user_ids.append(user.pk)
+        # تقييمُ اليوم لهذا الوكيل — **يُرسَل مع التبويب لا تُترَك الواجهةُ تخمّنه**.
+        # بدونه تفتح الشاشةُ بنجماتٍ فارغةٍ لصاحب شركةٍ قيّم صباحاً من الرابط، فتظنّ
+        # نقرتُه التاليةَ إنشاءً وهي **تعديلٌ يستهلك حقَّه الوحيد** بلا أن يُقال له.
+        row = DailyRating.objects.filter(
+            tenant=tenant_obj, employee_id=emp.pk, service_date=today,
+        ).first()
+        agents.append({
             "id": emp.pk,
             "user_id": user.pk,
             "name": user.get_full_name() or user.username,
             "username": user.username,
             "specialty": emp.specialty,
-            "assigned_at": active_engagement.assigned_at.isoformat(),
+            "assigned_at": engagement.assigned_at.isoformat(),
             "role_title": "مدير النظام والعمليات",
             "authority_notice": "يعمل وكيل المنصة بصلاحية مدير كاملة على حساب الشركة لإدارة الدفاتر المحاسبية والعمليات التشغيلية.",
-            "engagement_id": active_engagement.pk,
-            "engagement_status": active_engagement.status,
-        }
+            "engagement_id": engagement.pk,
+            "engagement_status": engagement.status,
+            # قصّة ٦٠: «لا يُطلَب منّي تقييمُ يومٍ لم يعمل فيه أحد» — **لا يُطلَب**،
+            # لا «يُطلَب ثمّ يُرفَض بـ400». فالشاشةُ تعرف قبل أن تسأل.
+            "worked_today": has_employee_worked_on_date(tenant_obj, emp, today),
+            "today_rating": {
+                "id": row.pk,
+                "service_date": row.service_date.isoformat(),
+                "stars": row.stars,
+                "note": row.note,
+                "edited_once": row.edited_once,
+            } if row else None,
+        })
 
     # إذا لم يكن هناك ارتباط نشط، نجمع موظفي المنصة الذين ارتبطوا سابقاً بهذه الشركة لعرض سجلهم التاريخي
     all_past_emp_user_ids = list(
@@ -3188,14 +3367,19 @@ def get_my_books_tab_data(tenant: Tenant) -> dict:
         })
 
     return {
-        "agent": agent_info,
+        "agents": agents,
+        # **اليومُ من الخادم لا من المتصفّح**: الواجهةُ كانت ترسل تاريخَ جهاز الزبون،
+        # فمن يفتحها من خارج المنطقة — أو قبل منتصف الليل بقليل — يُنشئ تقييماً ليومٍ
+        # غيرِ الذي عُرض عليه، فينقسم حقُّ التعديل الواحد على صفَّين. والتوقيت
+        # `Asia/Hebron` من الإعدادات (`timezone.localdate`).
+        "service_date": today.isoformat(),
         "granted_memberships": granted_memberships,
         "activity_log": activity_items,
         # العددُ الكلّيُّ من القاعدة لا `len` بعد القصّ — وإلا جمد على السقف وكذب.
         "total_activities_count": total_activities_count,
         "returned_activities_count": len(activity_items),
         "activity_page_cap": MY_BOOKS_ACTIVITY_PAGE_CAP,
-        "can_suspend": bool(active_engagement),
+        "can_suspend": bool(active_engagements),
     }
 
 
@@ -3217,6 +3401,7 @@ def calculate_two_health_scores(tenant: Tenant) -> dict:
     # --------------------------------------------------------------------------
     service_deductions = 0
     service_reasons = []
+    service_breakdown = []
 
     # أ. أوامر عمل تجاوزت الأجل المحدد من طرفنا
     sla_breaches_count = (
@@ -3231,9 +3416,16 @@ def calculate_two_health_scores(tenant: Tenant) -> dict:
     if sla_breaches_count > 0:
         deduction = sla_breaches_count * 15
         service_deductions += deduction
+        text = f"علينا: {sla_breaches_count} أعمالٍ تجاوزت الأجل"
         service_reasons.append({
             "deduction": deduction,
-            "text": f"علينا: {sla_breaches_count} أعمالٍ تجاوزت الأجل",
+            "text": text,
+        })
+        service_breakdown.append({
+            "reason_key": "sla_breaches",
+            "label": text,
+            "count": sla_breaches_count,
+            "deduction": deduction,
         })
 
     # ب. أوامر عمل ملغاة — **رقمٌ تشخيصيٌّ لا خصم**.
@@ -3253,9 +3445,16 @@ def calculate_two_health_scores(tenant: Tenant) -> dict:
     if rejected_deliv_count > 0:
         deduction = rejected_deliv_count * 10
         service_deductions += deduction
+        text = f"علينا: {rejected_deliv_count} مُسلَّماتٍ رُفضت في المراجعة"
         service_reasons.append({
             "deduction": deduction,
-            "text": f"علينا: {rejected_deliv_count} مُسلَّماتٍ رُفضت في المراجعة",
+            "text": text,
+        })
+        service_breakdown.append({
+            "reason_key": "rejected_deliverables",
+            "label": text,
+            "count": rejected_deliv_count,
+            "deduction": deduction,
         })
 
     # د. تقييمات يومية منخفضة (نجمتان أو أقل) — **بعد حدٍّ أدنى للعيّنة**.
@@ -3269,13 +3468,21 @@ def calculate_two_health_scores(tenant: Tenant) -> dict:
     if ratings_sample >= RATING_HEALTH_MIN_SAMPLE and low_ratings_count > 0:
         deduction = low_ratings_count * 10
         service_deductions += deduction
+        text = f"علينا: {low_ratings_count} تقييماتٍ يوميةٍ منخفضة"
         service_reasons.append({
             "deduction": deduction,
-            "text": f"علينا: {low_ratings_count} تقييماتٍ يوميةٍ منخفضة",
+            "text": text,
+        })
+        service_breakdown.append({
+            "reason_key": "low_ratings",
+            "label": text,
+            "count": low_ratings_count,
+            "deduction": deduction,
         })
 
     service_health_score = max(0, 100 - service_deductions)
     service_reasons.sort(key=lambda r: r["deduction"], reverse=True)
+    service_breakdown.sort(key=lambda r: (r["deduction"], r["count"]), reverse=True)
     top_service_reasons = [r["text"] for r in service_reasons[:3]]
 
     # --------------------------------------------------------------------------
@@ -3283,6 +3490,7 @@ def calculate_two_health_scores(tenant: Tenant) -> dict:
     # --------------------------------------------------------------------------
     customer_deductions = 0
     customer_reasons = []
+    customer_breakdown = []
 
     # أ. أوامر عمل متوقفة بانتظار العميل حالياً
     waiting_customer_count = WorkOrder.objects.filter(
@@ -3291,9 +3499,16 @@ def calculate_two_health_scores(tenant: Tenant) -> dict:
     if waiting_customer_count > 0:
         deduction = waiting_customer_count * 15
         customer_deductions += deduction
+        text = f"بانتظار الزبون: {waiting_customer_count} أعمالٍ بانتظار الرد"
         customer_reasons.append({
             "deduction": deduction,
-            "text": f"بانتظار الزبون: {waiting_customer_count} أعمالٍ بانتظار الرد",
+            "text": text,
+        })
+        customer_breakdown.append({
+            "reason_key": "waiting_customer",
+            "label": text,
+            "count": waiting_customer_count,
+            "deduction": deduction,
         })
 
     # ب. أوامر عمل تراكم فيها انتظار الزبون لأكثر من 48 ساعة
@@ -3304,9 +3519,16 @@ def calculate_two_health_scores(tenant: Tenant) -> dict:
     if long_waiting_count > 0:
         deduction = long_waiting_count * 10
         customer_deductions += deduction
+        text = f"بانتظار الزبون: {long_waiting_count} أعمالٍ تأخّر ردّه عليها أكثر من ٤٨ ساعة"
         customer_reasons.append({
             "deduction": deduction,
-            "text": f"بانتظار الزبون: {long_waiting_count} أعمالٍ تأخّر ردّه عليها أكثر من ٤٨ ساعة",
+            "text": text,
+        })
+        customer_breakdown.append({
+            "reason_key": "long_waiting",
+            "label": text,
+            "count": long_waiting_count,
+            "deduction": deduction,
         })
 
     # ج. استفسارات مرئية للزبون معلقة في أوامر عمل بانتظار العميل
@@ -3318,13 +3540,21 @@ def calculate_two_health_scores(tenant: Tenant) -> dict:
     if pending_comments_count > 0:
         deduction = pending_comments_count * 5
         customer_deductions += deduction
+        text = f"بانتظار الزبون: {pending_comments_count} استفساراتٍ معلّقة"
         customer_reasons.append({
             "deduction": deduction,
-            "text": f"بانتظار الزبون: {pending_comments_count} استفساراتٍ معلّقة",
+            "text": text,
+        })
+        customer_breakdown.append({
+            "reason_key": "pending_comments",
+            "label": text,
+            "count": pending_comments_count,
+            "deduction": deduction,
         })
 
     customer_cooperation_score = max(0, 100 - customer_deductions)
     customer_reasons.sort(key=lambda r: r["deduction"], reverse=True)
+    customer_breakdown.sort(key=lambda r: (r["deduction"], r["count"]), reverse=True)
     top_customer_reasons = [r["text"] for r in customer_reasons[:3]]
 
     return {
@@ -3342,12 +3572,1065 @@ def calculate_two_health_scores(tenant: Tenant) -> dict:
             "score": service_health_score,
             "status": "excellent" if service_health_score >= 90 else "good" if service_health_score >= 70 else "needs_attention",
             "top_reasons": top_service_reasons,
+            "breakdown": service_breakdown,
         },
         "customer_cooperation": {
             "score": customer_cooperation_score,
             "status": "excellent" if customer_cooperation_score >= 90 else "good" if customer_cooperation_score >= 70 else "needs_attention",
             "top_reasons": top_customer_reasons,
+            "breakdown": customer_breakdown,
         },
     }
+
+
+# ==============================================================================
+# المرحلة 8A: فوترة اشتراكات الخدمة الشهرية (Issue #207 Stage 8A)
+# ==============================================================================
+
+
+def calculate_subscription_billing(
+    subscription: ServiceSubscription,
+) -> dict:
+    """حساب مستحقات الفوترة لاشتراك الخدمة وفق المعادلة المعتمدة:
+
+    Monthly charge = monthly_fee + max(consumed_quota - included_quota, 0) * overage_unit_price
+    """
+    monthly_fee = Decimal(str(subscription.monthly_fee or 0)).quantize(Decimal("0.01"))
+    included_quota = int(subscription.included_quota or 0)
+    consumed_quota = int(subscription.consumed_quota or 0)
+    overage_unit_price = Decimal(str(subscription.overage_unit_price or 0)).quantize(Decimal("0.01"))
+
+    overage_units = max(consumed_quota - included_quota, 0)
+    overage_fee = (Decimal(overage_units) * overage_unit_price).quantize(Decimal("0.01"))
+    total_amount = (monthly_fee + overage_fee).quantize(Decimal("0.01"))
+
+    return {
+        "monthly_fee": monthly_fee,
+        "included_quota": included_quota,
+        "consumed_quota": consumed_quota,
+        "overage_units": overage_units,
+        "overage_unit_price": overage_unit_price,
+        "overage_fee": overage_fee,
+        "total_amount": total_amount,
+    }
+
+
+def get_tenant_quota_usage(tenant) -> dict:
+    """استهلاكُ الشركة من باقتها واقترابُها من الحدّ — **للزبون نفسِه**.
+
+    القصّة ٦٢: «أريد أن أرى استهلاكي من الباقة واقترابي من الحدّ، حتى لا تفاجئني
+    الفاتورة». فالأرقامُ المعروضةُ هي أرقامُ الفوترة نفسُها (`calculate_subscription_billing`)
+    لا حسبةٌ ثانيةٌ تتباعد عنها.
+
+    شركةٌ بلا اشتراكٍ تُعيد `has_subscription=False` بدل أن تسقط — الشاشةُ تعرض
+    حالةً لا خطأً.
+    """
+    subscription = ServiceSubscription.objects.filter(tenant=tenant).first()
+    if subscription is None:
+        return {"has_subscription": False}
+
+    calc = calculate_subscription_billing(subscription)
+    included = calc["included_quota"]
+    consumed = calc["consumed_quota"]
+    remaining = max(included - consumed, 0)
+    # نسبةُ الاستهلاك بلا قسمةٍ على صفر: باقةٌ بلا حدٍّ تعني أنّ كلّ عمليّةٍ زائدة.
+    usage_percent = round((consumed / included) * 100, 2) if included > 0 else None
+
+    # المبالغُ نصوصٌ عشريّةٌ مقرَّبة ("290.00") كما تُسلسلها حقولُ `DecimalField` في
+    # بقيّة الوحدة — لا أعدادٌ عائمةٌ يُقرّبها المتصفّحُ على هواه.
+    return {
+        "has_subscription": True,
+        "status": subscription.status,
+        "status_display": subscription.get_status_display(),
+        "plan": subscription.plan,
+        "period_start": subscription.period_start,
+        "period_end": subscription.period_end,
+        "monthly_fee": str(calc["monthly_fee"]),
+        "included_quota": included,
+        "consumed_quota": consumed,
+        "remaining_quota": remaining,
+        "usage_percent": usage_percent,
+        "overage_units": calc["overage_units"],
+        "overage_unit_price": str(calc["overage_unit_price"]),
+        "overage_fee": str(calc["overage_fee"]),
+        "projected_total": str(calc["total_amount"]),
+    }
+
+
+def resolve_billing_period_bounds(period_str: str) -> tuple[datetime.date, datetime.date]:
+    """تحليل نص الفترة بصيغة YYYY-MM واستخراج تاريخ البداية والنهاية الميلاديين بأمان."""
+    raw = str(period_str or "").strip()
+    import re
+    m = re.match(r"^(\d{4})-(\d{2})$", raw)
+    if not m:
+        raise BillingPeriodError(
+            "invalid_period_format",
+            f"صيغة الفترة «{period_str}» غير صالحة؛ يجب أن تكون YYYY-MM (مثال: 2026-08).",
+            status_code=400,
+        )
+    year, month = int(m.group(1)), int(m.group(2))
+    if not (1 <= month <= 12):
+        raise BillingPeriodError(
+            "invalid_period_month",
+            f"الشهر {month} غير صالح؛ يجب أن يكون بين 1 و 12.",
+            status_code=400,
+        )
+    _, last_day = calendar.monthrange(year, month)
+    return datetime.date(year, month, 1), datetime.date(year, month, last_day)
+
+
+def billing_preflight(
+    *,
+    subscription: ServiceSubscription,
+    period_start: datetime.date,
+    period_end: datetime.date,
+    fixed_fee_product_id: int | None = None,
+    overage_product_id: int | None = None,
+    check_already_billed: bool = True,
+    raise_exception: bool = False,
+) -> BillingError | None:
+    """فحص مسبق موحد لصلاحية فوترة اشتراك خدمة لدورة معينة.
+
+    يتحقق من:
+    1. حالة الاشتراك نشطة.
+    2. عدم الفوترة مسبقاً لنفس الدورة (إن طُلبت).
+    3. مطابقة دورة الاشتراك للدورة المطلوبة.
+    4. ربط الاشتراك بعميل فوترة.
+    5. أن عميل الفوترة لا يتبع نفس شركة الاشتراك (أ٥).
+    6. وجود صنف الرسم الثابت وأنه خدمي ويتبع شركة المنصة.
+    7. إذا وُجد استهلاك زائد، التحقق من تحديد صنف العمليات الزائدة ووجوده وأنه خدمي ويتبع شركة المنصة.
+    """
+    from inventory.models import Product
+
+    if subscription.status != ServiceSubscription.Status.ACTIVE:
+        err = BillingPeriodError(
+            "subscription_inactive",
+            f"اشتراك الشركة «{subscription.tenant}» غير نشط ({subscription.get_status_display()}).",
+            status_code=400,
+        )
+        if raise_exception:
+            raise err
+        return err
+
+    if check_already_billed:
+        if SubscriptionBillingRecord.objects.filter(
+            subscription=subscription,
+            period_start=period_start,
+            period_end=period_end,
+        ).exists():
+            err = BillingPeriodError(
+                "already_billed",
+                f"تمت فوترة اشتراك الشركة «{subscription.tenant}» للدورة ({period_start} إلى {period_end}) مسبقاً.",
+                status_code=400,
+            )
+            if raise_exception:
+                raise err
+            return err
+
+    if subscription.period_start and subscription.period_end:
+        if (
+            subscription.period_start != period_start
+            or subscription.period_end != period_end
+        ):
+            err = BillingPeriodError(
+                "period_mismatch",
+                f"دورة الاشتراك الحالية ({subscription.period_start} إلى {subscription.period_end}) "
+                f"لا تطابق دورة الفوترة المطلوبة ({period_start} إلى {period_end}).",
+                status_code=400,
+            )
+            if raise_exception:
+                raise err
+            return err
+
+    if not subscription.billing_customer_id:
+        err = BillingConfigurationError(
+            "missing_billing_customer",
+            f"الاشتراك للشركة «{subscription.tenant}» غير مربوط بعميل فوترة في شركة المنصة.",
+            status_code=400,
+        )
+        if raise_exception:
+            raise err
+        return err
+
+    customer = subscription.billing_customer
+    if customer.tenant_id == subscription.tenant_id:
+        err = BillingPeriodError(
+            "billing_customer_same_tenant",
+            f"عميل الفوترة يتبع نفس شركة الاشتراك ({subscription.tenant_id})؛ يجب أن يكون في شركة المنصة.",
+            status_code=400,
+        )
+        if raise_exception:
+            raise err
+        return err
+
+    platform_tenant = customer.tenant
+
+    if not fixed_fee_product_id:
+        err = BillingConfigurationError(
+            "missing_fixed_fee_product",
+            "يجب تحديد معرّف صنف الرسم الثابت (fixed_fee_product_id).",
+            status_code=400,
+        )
+        if raise_exception:
+            raise err
+        return err
+
+    fixed_product = Product.objects.filter(pk=fixed_fee_product_id).first()
+    if not fixed_product:
+        err = BillingConfigurationError(
+            "fixed_fee_product_not_found",
+            f"صنف الرسم الثابت برقم {fixed_fee_product_id} غير موجود.",
+            status_code=400,
+        )
+        if raise_exception:
+            raise err
+        return err
+
+    if fixed_product.tenant_id != platform_tenant.TenantID:
+        err = BillingConfigurationError(
+            "fixed_fee_product_cross_tenant",
+            f"صنف الرسم الثابت يتبع شركة أخرى ({fixed_product.tenant_id}) غير شركة المنصة المفوترة ({platform_tenant.TenantID}).",
+            status_code=400,
+        )
+        if raise_exception:
+            raise err
+        return err
+
+    if not getattr(fixed_product, "is_service", False):
+        err = BillingConfigurationError(
+            "fixed_fee_product_not_service",
+            f"صنف الرسم الثابت «{fixed_product.sku}» ليس صنفاً خدمياً (is_service=True).",
+            status_code=400,
+        )
+        if raise_exception:
+            raise err
+        return err
+
+    calc = calculate_subscription_billing(subscription)
+    if calc["overage_units"] > 0 and not overage_product_id:
+        err = BillingConfigurationError(
+            "missing_overage_product",
+            f"توجد عمليات زائدة ({calc['overage_units']}) ولكن لم يُحدد صنف للعمليات الزائدة.",
+            status_code=400,
+        )
+        if raise_exception:
+            raise err
+        return err
+
+    if overage_product_id:
+        overage_product = Product.objects.filter(pk=overage_product_id).first()
+        if not overage_product:
+            err = BillingConfigurationError(
+                "overage_product_not_found",
+                f"صنف العمليات الزائدة برقم {overage_product_id} غير موجود.",
+                status_code=400,
+            )
+            if raise_exception:
+                raise err
+            return err
+
+        if overage_product.tenant_id != platform_tenant.TenantID:
+            err = BillingConfigurationError(
+                "overage_product_cross_tenant",
+                f"صنف العمليات الزائدة يتبع شركة أخرى ({overage_product.tenant_id}) غير شركة المنصة المفوترة ({platform_tenant.TenantID}).",
+                status_code=400,
+            )
+            if raise_exception:
+                raise err
+            return err
+
+        if not getattr(overage_product, "is_service", False):
+            err = BillingConfigurationError(
+                "overage_product_not_service",
+                f"صنف العمليات الزائدة «{overage_product.sku}» ليس صنفاً خدمياً (is_service=True).",
+                status_code=400,
+            )
+            if raise_exception:
+                raise err
+            return err
+
+    return None
+
+
+@transaction.atomic
+def bill_subscription_for_period(
+    *,
+    subscription_id: int,
+    period_start: datetime.date,
+    period_end: datetime.date,
+    fixed_fee_product_id: int,
+    overage_product_id: int | None = None,
+    currency_id: int | None = None,
+    user=None,
+) -> tuple[SubscriptionBillingRecord, bool]:
+    """إصدار فاتورة بيعٍ حقيقيّة لاشتراك خدمة المتابعة والإدخال عن دورة محددة وترحيلها.
+
+    الضمانات الصارمة:
+    1. الذرية التامة (transaction.atomic): نجاح كل شيء أو لا شيء.
+    2. عدم التكرار (Idempotency): التحقق من وجود SubscriptionBillingRecord لنفس الدورة،
+       والقيد الفريد في قاعدة البيانات يحمي من التسابق (race condition).
+    3. عزل الشركات: لا تخمين لشركة المنصة، بل تُستنتج حصراً من billing_customer.tenant.
+       تُرفض الأصناف التابعة لشركة أخرى أو غير الخدمية قبل أي تعديل.
+    4. ترحيل حقيقي: عبر SalesInvoiceSerializer ثم post_sales_invoice الذي يمر عبر post_journal.
+       لا كتابة مباشرة لقيود المحاسبة إطلاقاً.
+    5. إعادة ضبط العداد والدورة: فقط بعد نجاح الترحيل، يُعاد consumed_quota إلى 0
+       وتتقدّم الدورة إلى الشهر التالي.
+    """
+    from inventory.models import Product
+    from sales.models import SalesInvoice, SalesSettings
+    from sales.serializers import SalesInvoiceSerializer
+    from sales.services import post_sales_invoice
+
+    # 1. قفل صف الاشتراك بدون select_related
+    try:
+        subscription = ServiceSubscription.objects.select_for_update().get(pk=subscription_id)
+    except ServiceSubscription.DoesNotExist:
+        raise BillingConfigurationError(
+            "subscription_not_found",
+            f"اشتراك الخدمة برقم {subscription_id} غير موجود.",
+            status_code=404,
+        )
+
+    # 2. فحص idempotency السريع
+    existing_record = (
+        SubscriptionBillingRecord.objects.select_related("invoice")
+        .filter(
+            subscription=subscription,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        .first()
+    )
+    if existing_record:
+        return existing_record, False
+
+    # 3. الفحص الشامل الموحد
+    billing_preflight(
+        subscription=subscription,
+        period_start=period_start,
+        period_end=period_end,
+        fixed_fee_product_id=fixed_fee_product_id,
+        overage_product_id=overage_product_id,
+        check_already_billed=False,
+        raise_exception=True,
+    )
+
+    customer = subscription.billing_customer
+    platform_tenant = customer.tenant
+    fixed_product = Product.objects.filter(pk=fixed_fee_product_id).first()
+    overage_product = Product.objects.filter(pk=overage_product_id).first() if overage_product_id else None
+
+    calc = calculate_subscription_billing(subscription)
+
+    # أ٤: إذا كان المبلغ الإجمالي صفراً أو دون الحد وبلا رسم ثابت:
+    # إنشاء سجل فوترة بدون فاتورة، وتقديم الدورة، وتصفير العداد ضمن المعاملة الذرية
+    if calc["total_amount"] <= 0:
+        try:
+            with transaction.atomic():
+                billing_record = SubscriptionBillingRecord.objects.create(
+                    subscription=subscription,
+                    period_start=period_start,
+                    period_end=period_end,
+                    invoice=None,
+                    monthly_fee=calc["monthly_fee"],
+                    included_quota=calc["included_quota"],
+                    consumed_quota=calc["consumed_quota"],
+                    overage_units=calc["overage_units"],
+                    overage_unit_price=calc["overage_unit_price"],
+                    overage_fee=calc["overage_fee"],
+                    total_amount=Decimal("0.00"),
+                )
+        except IntegrityError:
+            raise BillingPeriodError(
+                "billing_record_conflict",
+                f"دورة الفوترة ({period_start} إلى {period_end}) لهذا الاشتراك فُوترت "
+                f"في معاملةٍ متزامنة؛ أُلغيت الفاتورة المكرّرة ولم تُعتمد.",
+                status_code=409,
+            )
+
+        next_start = period_end + datetime.timedelta(days=1)
+        _, last_day = calendar.monthrange(next_start.year, next_start.month)
+        next_end = datetime.date(next_start.year, next_start.month, last_day)
+
+        subscription.consumed_quota = 0
+        subscription.period_start = next_start
+        subscription.period_end = next_end
+        subscription.save(
+            update_fields=["consumed_quota", "period_start", "period_end", "updated_at"]
+        )
+
+        return billing_record, True
+
+    # 7. حل العملة
+    curr = None
+    if currency_id:
+        curr = Currency.objects.filter(pk=currency_id).first()
+    if not curr:
+        ss = SalesSettings.objects.filter(tenant=platform_tenant).first()
+        if ss and ss.default_currency:
+            curr = ss.default_currency
+    if not curr:
+        curr = Currency.objects.filter(IsBaseCurrency=True).first() or Currency.objects.first()
+    if not curr:
+        raise BillingConfigurationError(
+            "missing_currency",
+            "لم يتم العثور على عملة صالحة لإصدار الفاتورة.",
+            status_code=400,
+        )
+
+    # 8. بناء سطور الفاتورة
+    lines_data = []
+    # سطر الرسم الشهري الثابت
+    if calc["monthly_fee"] > 0 or calc["overage_units"] == 0:
+        lines_data.append({
+            "product": fixed_product.pk,
+            "quantity": Decimal("1.00"),
+            "unit_price": calc["monthly_fee"],
+            "customer_note": f"اشتراك خدمة المتابعة والإدخال - باقة {subscription.plan} ({period_start} إلى {period_end})",
+        })
+
+    # سطر العمليات الزائدة (يُحذف تماماً إن كانت 0)
+    if calc["overage_units"] > 0 and overage_product:
+        lines_data.append({
+            "product": overage_product.pk,
+            "quantity": Decimal(str(calc["overage_units"])),
+            "unit_price": calc["overage_unit_price"],
+            "customer_note": f"عمليات إضافية زائدة عن الباقة ({calc['overage_units']} عملية × {calc['overage_unit_price']})",
+        })
+
+    # 9. إنشاء الفاتورة عبر SalesInvoiceSerializer
+    invoice_payload = {
+        "invoice_kind": SalesInvoice.INVOICE_KIND_SALE,
+        "invoice_type": SalesInvoice.INVOICE_CREDIT,
+        "customer": customer.pk,
+        "currency": curr.pk,
+        "invoice_date": period_end,
+        "due_date": period_end,
+        "stock_on_post": False,
+        "notes": f"فاتورة خدمة المتابعة والإدخال لشركة «{subscription.tenant}» عن الفترة {period_start} إلى {period_end}",
+        "lines": lines_data,
+    }
+
+    serializer = SalesInvoiceSerializer(data=invoice_payload)
+    serializer.is_valid(raise_exception=True)
+    invoice = serializer.save(tenant=platform_tenant)
+
+    # 10. ترحيل الفاتورة محاسبياً عبر الخدمة المعتمدة
+    posted_invoice = post_sales_invoice(invoice, user=user)
+
+    # 11. تسجيل سجل التدقيق والفوترة (مع حماية DB UniqueConstraint)
+    #
+    # الحارسُ الأوّلُ لعدم التكرار هو القفلُ على صفّ الاشتراك في الخطوة ١: معاملتان
+    # متزامنتان تصطفّان، فترى الثانيةُ سجلَّ الأولى في الخطوة ٢ وتعود بلا فاتورة.
+    # والقيدُ الفريدُ في القاعدة هو الحارسُ الأخير. فإن سقط الأخيرُ رغم الأوّل فهذا
+    # **ليس موضعَ تعافٍ صامت**: الفاتورةُ رُحّلت للتوّ في هذه المعاملة نفسِها، فالعودةُ
+    # بـ«السجلّ القائم» تعني اعتمادَ المعاملة وتركَ فاتورةٍ مرحَّلةٍ في الدفاتر لا
+    # يذكرها أيُّ سجلِّ فوترة — أي فاتورةٌ مكرَّرةٌ صامتةٌ على الزبون. ولذلك نرفع
+    # الخطأ فترتدّ المعاملةُ كاملةً بالفاتورة وقيدِها.
+    #
+    # و`transaction.atomic` الداخليّةُ نقطةُ حفظ: بدونها يترك خطأُ القاعدة المعاملةَ
+    # الخارجيّةَ في حالةٍ معطوبةٍ فيرتدّ أيُّ استعلامٍ لاحقٍ بـ`TransactionManagementError`
+    # بدل الخطأ الحقيقيّ.
+    try:
+        with transaction.atomic():
+            billing_record = SubscriptionBillingRecord.objects.create(
+                subscription=subscription,
+                period_start=period_start,
+                period_end=period_end,
+                invoice=posted_invoice,
+                monthly_fee=calc["monthly_fee"],
+                included_quota=calc["included_quota"],
+                consumed_quota=calc["consumed_quota"],
+                overage_units=calc["overage_units"],
+                overage_unit_price=calc["overage_unit_price"],
+                overage_fee=calc["overage_fee"],
+                total_amount=calc["total_amount"],
+            )
+    except IntegrityError:
+        raise BillingPeriodError(
+            "billing_record_conflict",
+            f"دورة الفوترة ({period_start} إلى {period_end}) لهذا الاشتراك فُوترت "
+            f"في معاملةٍ متزامنة؛ أُلغيت الفاتورة المكرّرة ولم تُعتمد.",
+            status_code=409,
+        )
+
+    # 12. تدوير دورة الاشتراك وتصفير العداد بأمان
+    next_start = period_end + datetime.timedelta(days=1)
+    _, last_day = calendar.monthrange(next_start.year, next_start.month)
+    next_end = datetime.date(next_start.year, next_start.month, last_day)
+
+    subscription.consumed_quota = 0
+    subscription.period_start = next_start
+    subscription.period_end = next_end
+    subscription.save(
+        update_fields=["consumed_quota", "period_start", "period_end", "updated_at"]
+    )
+
+    return billing_record, True
+
+
+def bill_subscriptions_for_period(
+    *,
+    period_start: datetime.date,
+    period_end: datetime.date,
+    fixed_fee_product_id: int,
+    overage_product_id: int | None = None,
+    currency_id: int | None = None,
+    subscription_id: int | None = None,
+    tenant_id: int | None = None,
+    user=None,
+) -> dict:
+    """تشغيل الفوترة لمجموعة الاشتراكات المستحقة للدورة المحددة.
+
+    - تفلتر الاشتراكات النشطة فقط.
+    - تقبل التصفية باشتراك بعينه أو شركة بعينها.
+    - تتجاهل الاشتراكات غير المستحقة أو التي فُوّترت مسبقاً دون إيقاف باقي الدفعة.
+    """
+    qs = ServiceSubscription.objects.all()
+    if subscription_id:
+        qs = qs.filter(pk=subscription_id)
+    if tenant_id:
+        qs = qs.filter(tenant_id=tenant_id)
+
+    billed = []
+    already_billed = []
+    skipped = []
+    errors = []
+
+    candidates = list(qs.order_by("id"))
+    for sub in candidates:
+        # فحص مسبق للاشتراكات غير المحددة صراحة
+        is_targeted = bool(subscription_id or tenant_id)
+
+        if sub.status != ServiceSubscription.Status.ACTIVE:
+            if is_targeted:
+                errors.append({
+                    "subscription_id": sub.id,
+                    "tenant_id": sub.tenant_id,
+                    "error": f"الاشتراك غير نشط ({sub.get_status_display()})",
+                })
+            else:
+                skipped.append({
+                    "subscription_id": sub.id,
+                    "tenant_id": sub.tenant_id,
+                    "reason": f"غير نشط ({sub.get_status_display()})",
+                })
+            continue
+
+        # فحص الدورة إن كان مسجلاً
+        if sub.period_start and sub.period_end:
+            if sub.period_start != period_start or sub.period_end != period_end:
+                # تحقق مما إذا كان قد فُوّتر لهذه الدورة مسبقاً
+                existing = (
+                    SubscriptionBillingRecord.objects.select_related("invoice")
+                    .filter(
+                        subscription=sub,
+                        period_start=period_start,
+                        period_end=period_end,
+                    )
+                    .first()
+                )
+                if existing:
+                    already_billed.append({
+                        "subscription_id": sub.id,
+                        "tenant_id": sub.tenant_id,
+                        "invoice_id": existing.invoice_id,
+                        "invoice_number": existing.invoice.invoice_number if existing.invoice else "",
+                        "total_amount": str(existing.total_amount),
+                    })
+                    continue
+                if is_targeted:
+                    errors.append({
+                        "subscription_id": sub.id,
+                        "tenant_id": sub.tenant_id,
+                        "error": (
+                            f"دورة الاشتراك ({sub.period_start} إلى {sub.period_end}) "
+                            f"لا تطابق دورة الفوترة ({period_start} إلى {period_end})"
+                        ),
+                    })
+                else:
+                    skipped.append({
+                        "subscription_id": sub.id,
+                        "tenant_id": sub.tenant_id,
+                        "reason": f"دورة الاشتراك ({sub.period_start} إلى {sub.period_end}) لا تطابق الدورة المطلوبة",
+                    })
+                continue
+
+        # محاولة الفوترة
+        try:
+            record, created = bill_subscription_for_period(
+                subscription_id=sub.id,
+                period_start=period_start,
+                period_end=period_end,
+                fixed_fee_product_id=fixed_fee_product_id,
+                overage_product_id=overage_product_id,
+                currency_id=currency_id,
+                user=user,
+            )
+            item = {
+                "subscription_id": sub.id,
+                "tenant_id": sub.tenant_id,
+                "invoice_id": record.invoice_id,
+                "invoice_number": record.invoice.invoice_number if record.invoice else "",
+                "total_amount": str(record.total_amount),
+            }
+            if created:
+                billed.append(item)
+            else:
+                already_billed.append(item)
+        except Exception as exc:
+            errors.append({
+                "subscription_id": sub.id,
+                "tenant_id": sub.tenant_id,
+                "error": str(exc),
+            })
+
+    return {
+        "period_start": str(period_start),
+        "period_end": str(period_end),
+        "candidates_count": len(candidates),
+        "billed_count": len(billed),
+        "already_billed_count": len(already_billed),
+        "skipped_count": len(skipped),
+        "error_count": len(errors),
+        "billed": billed,
+        "already_billed": already_billed,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
+# ==============================================================================
+# المرحلة الثامنة (م٨-ب): بوّابة التوظيف المنصّيّة
+# ==============================================================================
+
+#: انتقالات آلة حالات المتقدم المعلنة والصريحة
+APPLICANT_TRANSITIONS: dict[str, set[str]] = {
+    JobApplicant.Status.NEW: {
+        JobApplicant.Status.SCREENING,
+        JobApplicant.Status.REJECTED,
+    },
+    JobApplicant.Status.SCREENING: {
+        JobApplicant.Status.INTERVIEW,
+        JobApplicant.Status.REJECTED,
+    },
+    JobApplicant.Status.INTERVIEW: {
+        JobApplicant.Status.OFFERED,
+        JobApplicant.Status.REJECTED,
+    },
+    JobApplicant.Status.OFFERED: {
+        JobApplicant.Status.HIRED,
+        JobApplicant.Status.REJECTED,
+    },
+    JobApplicant.Status.HIRED: set(),
+    JobApplicant.Status.REJECTED: {
+        JobApplicant.Status.SCREENING,
+    },
+}
+
+
+def is_platform_recruiter(user) -> bool:
+    """هل المستخدم مسؤول توظيف في المنصة؟"""
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    return PlatformRecruiter.objects.filter(user=user, is_active=True).exists()
+
+
+def create_platform_recruiter(user: User) -> PlatformRecruiter:
+    """تعيين مستخدم كمسؤول توظيف للمنصة."""
+    recruiter, _ = PlatformRecruiter.objects.get_or_create(user=user, defaults={"is_active": True})
+    if not recruiter.is_active:
+        recruiter.is_active = True
+        recruiter.save(update_fields=["is_active", "updated_at"])
+    return recruiter
+
+
+def revoke_platform_recruiter(user: User) -> None:
+    """إلغاء صلاحية مسؤول توظيف المنصة."""
+    PlatformRecruiter.objects.filter(user=user).update(is_active=False)
+
+
+def create_job_posting(
+    *,
+    title: str,
+    description: str,
+    created_by=None,
+    specialty: str = "",
+    requirements: str = "",
+    location: str = "",
+    employment_type: str = "",
+    salary_range: str = "",
+    expires_at=None,
+) -> JobPosting:
+    """إنشاء إعلان وظيفة منصي مع توليد مفتاح عشوائي غير قابل للتخمين.
+
+    **نقطةُ الكتابة الوحيدة** لإعلان الوظيفة: توليدُ المفتاح هنا لا في الـview،
+    فلا تتباعد نسختان من التوليد ولا يبقى سلوكٌ يُختبَر عبر HTTP وحدَه.
+    """
+    if not title or not title.strip():
+        raise ValidationError({"title": "عنوان الوظيفة إلزامي."})
+    if not description or not description.strip():
+        raise ValidationError({"description": "وصف الوظيفة إلزامي."})
+
+    token = secrets.token_urlsafe(32)
+    return JobPosting.objects.create(
+        title=title.strip(),
+        specialty=(specialty or "").strip()[:100],
+        description=description.strip(),
+        requirements=(requirements or "").strip(),
+        location=(location or "").strip(),
+        employment_type=employment_type or "",
+        salary_range=(salary_range or "").strip(),
+        token=token,
+        is_open=True,
+        expires_at=expires_at,
+        created_by=created_by if getattr(created_by, "is_authenticated", False) else None,
+    )
+
+
+def close_job_posting(*, job: JobPosting) -> JobPosting:
+    """إغلاق التقديم على الوظيفة يدوياً."""
+    if job.is_open:
+        job.is_open = False
+        job.closed_at = timezone.now()
+        job.save(update_fields=["is_open", "closed_at", "updated_at"])
+    return job
+
+
+def reopen_job_posting(*, job: JobPosting) -> JobPosting:
+    """إعادة فتح التقديم على الوظيفة."""
+    if not job.is_open:
+        job.is_open = True
+        job.closed_at = None
+        job.save(update_fields=["is_open", "closed_at", "updated_at"])
+    return job
+
+
+def regenerate_job_posting_token(*, job: JobPosting) -> JobPosting:
+    """إبطال الرابط العام السابق وتوليد رابط جديد فوراً."""
+    job.token = secrets.token_urlsafe(32)
+    job.save(update_fields=["token", "updated_at"])
+    return job
+
+
+def job_is_live(job: JobPosting, *, now=None) -> bool:
+    """هل الوظيفةُ مفتوحةٌ وصالحةٌ للتقديم — **بتفويضٍ للنموذج لا بنسخةٍ عنه**.
+
+    القاعدةُ تسكن `JobPosting.is_live` لأنّ المُسلسِلَ والقوالبَ تسألها هناك؛
+    ونسخةٌ ثانيةٌ هنا تتباعد بصمت. ويبقى المُغلِّفُ لأنّه يقبل `now` للاختبار.
+    """
+    return job.is_live(now=now)
+
+
+def resolve_public_job(token: str) -> JobPosting:
+    """جلب الوظيفة خلف المفتاح العام أو إطلاق استثناء بحسب حالتها."""
+    job = JobPosting.objects.filter(token=token).first()
+    if job is None:
+        raise NotFound("لا توجد وظيفة خلف هذا الرابط.")
+    if not job_is_live(job):
+        raise JobGone("انتهت فترة التقديم على هذه الوظيفة أو تم إغلاقها.")
+    return job
+
+
+def job_public_url(token: str) -> str:
+    """بناء الرابط العام لصفحة عرض الوظيفة (صفحة ويب لا نقطة API)."""
+    base = str(getattr(settings, "PLATFORM_JOB_PUBLIC_BASE_URL", "")).rstrip("/")
+    path = str(getattr(settings, "PLATFORM_JOB_PUBLIC_PATH", "/careers/job")).rstrip("/")
+    return f"{base}{path}/{token}"
+
+
+def invitation_public_url(raw_token: str) -> str:
+    """بناء الرابط العام لصفحة قبول الدعوة (صفحة ويب لا نقطة API)."""
+    base = str(getattr(settings, "PLATFORM_HIRING_INVITATION_BASE_URL", "")).rstrip("/")
+    path = str(getattr(settings, "PLATFORM_HIRING_INVITATION_PATH", "/careers/invite")).rstrip("/")
+    return f"{base}{path}/{raw_token}"
+
+
+@transaction.atomic
+def submit_application(
+    *,
+    job: JobPosting,
+    name: str,
+    phone: str,
+    email: str = "",
+    about: str = "",
+    cv_url: str = "",
+    cv_name: str = "",
+) -> JobApplicant:
+    """تقديم طلب توظيف على وظيفة منصية بحالة 'new' محجورة."""
+    if not job_is_live(job):
+        raise JobGone("انتهت فترة التقديم على هذه الوظيفة.")
+
+    clean_name = (name or "").strip()
+    clean_phone = (phone or "").strip()
+    if not clean_name:
+        raise ValidationError({"name": "اسم المتقدم إلزامي."})
+    if not clean_phone:
+        raise ValidationError({"phone": "رقم التواصل إلزامي."})
+
+    for _ in range(5):
+        try:
+            with transaction.atomic():
+                return JobApplicant.objects.create(
+                    job=job,
+                    name=clean_name,
+                    phone=clean_phone,
+                    email=(email or "").strip(),
+                    about=(about or "").strip(),
+                    cv_url=(cv_url or "").strip(),
+                    cv_name=(cv_name or "").strip(),
+                    status=JobApplicant.Status.NEW,
+                    reference_code=secrets.token_hex(4).upper(),
+                )
+        except IntegrityError:
+            continue
+    raise ValidationError({"detail": "تعذّر تسجيل الطلب، حاول مرة أخرى."})
+
+
+@transaction.atomic
+def transition_applicant_status(
+    *,
+    applicant: JobApplicant,
+    target_status: str,
+    actor=None,
+) -> JobApplicant:
+    """تحريك المتقدم بين مراحل الفرز المعلنة في آلة الحالات.
+
+    ترتيب القفل الصارم:
+    JobApplicantInvitation -> JobApplicant.
+    ملاحظة: لا select_related مع select_for_update.
+    """
+    if target_status == JobApplicant.Status.HIRED:
+        raise ValidationError(
+            {"status": "حالة «مقبول» تُبلَغ بقبول المتقدّم للدعوة وإنشاء حسابه."}
+        )
+
+    # 1. قفل الدعوات النشطة أولاً بحسب ترتيب القفل المعلَن
+    active_invitations = list(
+        JobApplicantInvitation.objects.select_for_update().filter(
+            applicant_id=applicant.pk,
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+        )
+    )
+
+    # 2. قفل المتقدم والتحقق من الانتقال المسموح
+    locked_applicant = JobApplicant.objects.select_for_update().get(pk=applicant.pk)
+
+    allowed = APPLICANT_TRANSITIONS.get(locked_applicant.status, set())
+    if target_status not in allowed:
+        raise ValidationError(
+            {"status": f"الانتقال من {locked_applicant.status} إلى {target_status} غير مسموح به."}
+        )
+
+    # إبطال أي دعوات نشطة إذا خرج المتقدم من حالة العرض
+    if locked_applicant.status == JobApplicant.Status.OFFERED and target_status != JobApplicant.Status.OFFERED:
+        now = timezone.now()
+        for inv in active_invitations:
+            inv.revoked_at = now
+            inv.save(update_fields=["revoked_at"])
+
+    locked_applicant.status = target_status
+    locked_applicant.save(update_fields=["status", "updated_at"])
+    applicant.status = locked_applicant.status
+    applicant.updated_at = locked_applicant.updated_at
+    return locked_applicant
+
+
+def rate_applicant(
+    *,
+    applicant: JobApplicant,
+    rating=None,
+    notes=None,
+) -> JobApplicant:
+    """تقييم المتقدم وتسجيل ملاحظات مسؤول التوظيف."""
+    fields = ["updated_at"]
+    if rating is not None:
+        try:
+            r = int(rating)
+        except (ValueError, TypeError):
+            raise ValidationError({"rating": "التقييم يجب أن يكون عدداً صحيحاً."})
+        if not 0 <= r <= 5:
+            raise ValidationError({"rating": "التقييم من صفر إلى 5 نجوم."})
+        applicant.rating = r
+        fields.append("rating")
+    if notes is not None:
+        applicant.notes = str(notes)
+        fields.append("notes")
+    applicant.save(update_fields=fields)
+    return applicant
+
+
+@transaction.atomic
+def create_applicant_invitation(
+    *,
+    applicant: JobApplicant,
+    created_by=None,
+    expires_in_hours: int = 72,
+) -> tuple[JobApplicantInvitation, str]:
+    """إصدار دعوة قبول التوظيف للمرشح مع توليد رمز مهشر (SHA-256) وإبطال الدعوات السابقة.
+
+    ترتيب القفل الصارم:
+    `JobApplicantInvitation -> JobApplicant`.
+    ملاحظة: لا يُستعمل select_related مع select_for_update.
+    """
+    if not isinstance(expires_in_hours, int) or not (1 <= expires_in_hours <= 168):
+        raise ValidationError({"expires_in_hours": "مدة صلاحية الدعوة يجب أن تكون بين 1 و168 ساعة."})
+
+    now = timezone.now()
+
+    # 1. قفل الدعوات السابقة غير المستهلكة وإبطالها
+    # بترتيب الأقفال الصارم المعلَن: JobApplicantInvitation -> JobApplicant
+    active_invitations = list(
+        JobApplicantInvitation.objects.select_for_update()
+        .filter(
+            applicant_id=applicant.pk,
+            accepted_at__isnull=True,
+            revoked_at__isnull=True,
+        )
+    )
+    for prev_inv in active_invitations:
+        prev_inv.revoked_at = now
+        prev_inv.save(update_fields=["revoked_at"])
+
+    # 2. قفل المتقدم والتحقق من حالته
+    locked_applicant = (
+        JobApplicant.objects.select_for_update()
+        .get(pk=applicant.pk)
+    )
+
+    if locked_applicant.hired_employee_id is not None:
+        raise ValidationError({"status": "تم توظيف هذا المتقدم مسبقاً ولا يمكن إصدار دعوة له."})
+
+    if locked_applicant.status != JobApplicant.Status.OFFERED:
+        raise ValidationError({"status": "لا يمكن إصدار دعوة إلا لمتقدم في حالة عرض عمل (offered)."})
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    expires_at = now + datetime.timedelta(hours=expires_in_hours)
+
+    invitation = JobApplicantInvitation.objects.create(
+        applicant=locked_applicant,
+        token_hash=token_hash,
+        expires_at=expires_at,
+        created_by=created_by if getattr(created_by, "is_authenticated", False) else None,
+    )
+
+    return invitation, raw_token
+
+
+def resolve_public_invitation(token: str) -> JobApplicantInvitation:
+    """التحقق من رابط الدعوة وإعادته أو إطلاق استثناء 404 أو 410."""
+    token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+    inv = JobApplicantInvitation.objects.select_related("applicant__job").filter(
+        token_hash=token_hash
+    ).first()
+
+    if inv is None:
+        raise NotFound("رمز الدعوة غير موجود.")
+
+    if inv.is_consumed:
+        raise InvitationGone("انتهت صلاحية رابط الدعوة أو تم استخدامه مسبقاً.")
+
+    return inv
+
+
+@transaction.atomic
+def accept_applicant_invitation(
+    *,
+    token: str,
+    password: str,
+    username: str = "",
+) -> tuple[User, PlatformEmployee, JobApplicant]:
+    """قبول دعوة المرشح وإنشاء حسابه وموظف المنصة ومتابعة حالته.
+
+    ترتيب القفل الصارم: JobApplicantInvitation -> JobApplicant
+    ملاحظة: لا select_related مع select_for_update.
+    """
+    token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+
+    # 1. قفل الدعوة
+    locked_inv = (
+        JobApplicantInvitation.objects.select_for_update()
+        .filter(token_hash=token_hash)
+        .first()
+    )
+    if locked_inv is None:
+        raise NotFound("رمز الدعوة غير موجود.")
+
+    if locked_inv.is_consumed:
+        raise InvitationGone("انتهت صلاحية رابط الدعوة أو تم استخدامه مسبقاً.")
+
+    # 2. قفل المتقدم
+    locked_applicant = (
+        JobApplicant.objects.select_for_update()
+        .get(pk=locked_inv.applicant_id)
+    )
+    if locked_applicant.status == JobApplicant.Status.HIRED:
+        raise InvitationGone("تم قبول هذا الطلب مسبقاً.")
+    if locked_applicant.status != JobApplicant.Status.OFFERED:
+        raise InvitationGone("طلب التوظيف ليس في حالة عرض عمل.")
+
+    # 3. التحقق من كلمة المرور واسم المستخدم
+    chosen_username = (username or "").strip()
+    if not chosen_username:
+        if locked_applicant.email and not User.objects.filter(username=locked_applicant.email).exists():
+            chosen_username = locked_applicant.email
+        else:
+            base_user = (locked_applicant.email.split("@")[0] if locked_applicant.email else "staff").replace(".", "_")
+            chosen_username = f"{base_user}_{secrets.token_hex(3)}"
+
+    if User.objects.filter(username=chosen_username).exists():
+        raise ValidationError({"username": "اسم المستخدم موجود بالفعل."})
+
+    if not password:
+        raise ValidationError({"password": "كلمة المرور مطلوبة."})
+
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError as DjangoValidationError
+
+    user_for_validation = User(username=chosen_username, email=locked_applicant.email)
+    try:
+        validate_password(password, user=user_for_validation)
+    except DjangoValidationError as exc:
+        raise ValidationError({"password": list(exc.messages)})
+
+    # 4. إنشاء المستخدم داخل نقطة ذرية لحماية المعاملة من فشل سباق اسم المستخدم
+    try:
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=chosen_username,
+                email=locked_applicant.email,
+                password=password,
+            )
+    except IntegrityError:
+        raise ValidationError({"username": "اسم المستخدم موجود بالفعل."})
+
+    # 5. إنشاء موظف المنصة
+    #
+    # **التخصّصُ من حقل الوظيفة لا من عنوانها**: العنوانُ نصٌّ حرٌّ بطول ٢٠٠ محرف
+    # والعمودُ الهدفُ ١٠٠، فكتابتُه فيه تُخطئ على MySQL وتُبتَر صامتاً على SQLite.
+    # وأهمُّ منه أنّ `PolicyProfile` يُطابَق بالتخصّص: عنوانٌ حرٌّ لا يطابق شيئاً
+    # فيُحتسب أداءُ الموظّف الجديد بسياسةٍ افتراضيّةٍ بلا أن يلاحظ أحد.
+    job = locked_applicant.job
+    specialty = ((job.specialty if job else "") or "").strip()[:100]
+    employee = PlatformEmployee.objects.create(
+        user=user,
+        specialty=specialty,
+        status=PlatformEmployee.Status.ACTIVE,
+    )
+
+    # 6. تحديث المتقدم
+    locked_applicant.status = JobApplicant.Status.HIRED
+    locked_applicant.hired_employee = employee
+    locked_applicant.save(update_fields=["status", "hired_employee", "updated_at"])
+
+    # 7. استهلاك الدعوة
+    locked_inv.accepted_at = timezone.now()
+    locked_inv.save(update_fields=["accepted_at"])
+
+    return user, employee, locked_applicant
+
+
 
 

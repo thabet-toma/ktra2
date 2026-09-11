@@ -1,5 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import { PlatformDashboardCompany } from "../../utils/dashboardRanking";
+import { CompanyHealthPanel } from "./CompanyHealthPanel";
+import { Activity, ChevronDown, ChevronUp } from "lucide-react";
+import { formatNumber } from "../../utils/formatNumber";
 
 interface CompanyCardProps {
   company: PlatformDashboardCompany;
@@ -10,6 +13,7 @@ export const CompanyCard: React.FC<CompanyCardProps> = ({
   company,
   onDrilldown,
 }) => {
+  const [showHealth, setShowHealth] = useState<boolean>(false);
   const hasOverdue = company.overdue_work_orders_count > 0;
 
   return (
@@ -51,7 +55,7 @@ export const CompanyCard: React.FC<CompanyCardProps> = ({
             <span className="text-xs text-slate-500 group-hover:text-blue-700 block">أوامر العمل النشطة</span>
             <div className="flex items-baseline justify-between mt-1">
               <span className="text-xl font-black text-slate-900 group-hover:text-blue-700">
-                {company.active_work_orders_count}
+                {formatNumber(company.active_work_orders_count)}
               </span>
             </div>
           </button>
@@ -78,7 +82,7 @@ export const CompanyCard: React.FC<CompanyCardProps> = ({
                   hasOverdue ? "text-rose-700" : "text-slate-700"
                 }`}
               >
-                {company.overdue_work_orders_count}
+                {formatNumber(company.overdue_work_orders_count)}
               </span>
               {hasOverdue && (
                 <span className="text-[10px] font-bold text-rose-600 bg-rose-200/70 px-1.5 py-0.5 rounded">
@@ -102,6 +106,22 @@ export const CompanyCard: React.FC<CompanyCardProps> = ({
           ) : (
             <span className="text-amber-700 font-medium">غير مسند لموظف بعد</span>
           )}
+        </div>
+
+        {/* مؤشرات صحة الخدمة وتعاون الزبون (تُطلب عند النقر) */}
+        <div className="mt-3 pt-2 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={() => setShowHealth((prev) => !prev)}
+            className="w-full py-1.5 px-2.5 rounded-lg text-xs font-semibold text-slate-700 hover:text-emerald-700 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 flex items-center justify-between transition"
+          >
+            <span className="flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-emerald-600" />
+              مؤشرات صحة الخدمة والتعاون
+            </span>
+            {showHealth ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+          {showHealth && <CompanyHealthPanel tenantId={company.id} onDrilldown={onDrilldown} />}
         </div>
       </div>
     </div>
