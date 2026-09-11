@@ -10,7 +10,12 @@
 `/api/platform/` بلا `X-Tenant-Id` أصلاً، محروسةٌ بـ`IsPlatformOperationsManager`،
 وغرضُها بالضبط أن يرى مديرُ العمليات كلَّ الشركات في جدولٍ واحد.
 """
+import re
+import uuid
+
 import requests
+from django.db.models import Count, IntegerField, OuterRef, Subquery, Value
+from django.db.models.functions import Coalesce
 from django.http import FileResponse, Http404
 from django.urls import reverse
 from django.utils import timezone
@@ -42,11 +47,16 @@ from .services import (
     create_applicant_invitation,
     create_job_posting,
     create_platform_recruiter,
+    activate_paid_subscription,
+    activate_subscription_policy,
+    clone_subscription_policy_to_draft,
+    create_subscription_policy_draft,
     generate_daily_rating_token,
     generate_integration_key,
     get_my_books_tab_data,
     get_tenant_quota_usage,
     get_platform_dashboard_summary,
+    eligible_service_tenant_ids,
     invitation_public_url,
     rank_employees_performance,
     rate_applicant,
@@ -55,15 +65,25 @@ from .services import (
     reopen_job_posting,
     resolve_daily_rating_token,
     rating_public_url,
+    resume_service_subscription,
     revoke_integration_key,
     revoke_platform_recruiter,
     rotate_integration_key,
+    schedule_service_subscription_cancellation,
+    search_platform_billing_customers,
+    start_service_trial,
     submit_daily_rating,
     suspend_engagement,
+    suspend_service_subscription,
     transition_applicant_status,
     update_daily_rating,
+    update_subscription_policy_draft,
+    update_subscription_commercial_settings,
+    withdraw_scheduled_service_cancellation,
     is_platform_employee,
     is_platform_recruiter,
+    preview_subscription_policy,
+    search_policy_billing_products,
 )
 from .throttles import ClientIpScopedThrottle, IntegrationKeyThrottle
 
@@ -82,6 +102,8 @@ from .models import (
     PlatformRecruiter,
     PolicyProfile,
     ServiceSubscription,
+    ServiceSubscriptionEvent,
+    ServiceSubscriptionPolicy,
     SubscriptionBillingRecord,
     WorkOrder,
 )
@@ -106,7 +128,17 @@ from .serializers import (
     PlatformRecruiterSerializer,
     PolicyProfileSerializer,
     PublicRatingSubmitSerializer,
+    ActivatePaidNewSubscriptionSerializer,
+    ActivatePaidSubscriptionSerializer,
+    ActivateSubscriptionPolicySerializer,
+    ServiceSubscriptionCancelSerializer,
+    ServiceSubscriptionEventSerializer,
     ServiceSubscriptionSerializer,
+    ServiceSubscriptionSettingsSerializer,
+    SubscriptionPolicyDraftSerializer,
+    SubscriptionPolicySerializer,
+    StartServiceTrialSerializer,
+    SubscriptionReasonSerializer,
     SubscriptionBillingRecordSerializer,
     WorkOrderSerializer,
 )
@@ -317,12 +349,299 @@ class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 
+#: ترويسةُ الارتباط تُقبل بمجموعة أحرف قصيرة وآمنة، وإلا وُلّد `uuid4` بدلاً منها.
+_CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def _resolve_correlation_id(request) -> str:
+    supplied = request.headers.get("X-Correlation-ID", "")
+    if supplied and _CORRELATION_ID_PATTERN.match(supplied):
+        return supplied
+    return str(uuid.uuid4())
+
+
 class ServiceSubscriptionViewSet(viewsets.ReadOnlyModelViewSet):
-    """عرضُ اشتراكات خدمة المتابعة — مدير العمليات فقط."""
+    """قراءة اشتراكات الخدمة وأفعال دورة حياتها — مدير العمليات فقط."""
 
     permission_classes = [IsPlatformOperationsManager]
     serializer_class = ServiceSubscriptionSerializer
-    queryset = ServiceSubscription.objects.select_related("tenant").all().order_by("-created_at")
+    queryset = ServiceSubscription.objects.select_related("tenant", "billing_customer").all().order_by("-created_at")
+
+    def get_queryset(self):
+        active_engagements = (
+            Engagement.objects.filter(
+                tenant_id=OuterRef("tenant_id"),
+                status=Engagement.Status.ACTIVE,
+            )
+            .order_by()
+            .values("tenant_id")
+            .annotate(total=Count("pk"))
+            .values("total")
+        )
+        qs = super().get_queryset().annotate(
+            active_engagements_count=Coalesce(
+                Subquery(active_engagements, output_field=IntegerField()),
+                Value(0),
+            )
+        )
+        # `company` تضييق مشروع (نمط `SubscriptionBillingRecordViewSet`) — بطاقة
+        # الشركة تجلب اشتراكها الواحد بلا سحب كل الاشتراكات إلى المتصفح.
+        company_id = self.request.query_params.get("company")
+        if company_id:
+            try:
+                qs = qs.filter(tenant_id=int(company_id))
+            except (TypeError, ValueError):
+                raise ValidationError({"company": ["يجب أن يكون معرّف الشركة رقماً صحيحاً."]})
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            # حالةٌ مجهولة كانت تعيد 200 فارغةً فتُقرأ «لا اشتراكات» — تُرفض كما يُرفض
+            # معرّفُ شركةٍ غيرُ رقميّ، لأن الصمتَ هنا يكذب.
+            if status_param not in ServiceSubscription.Status.values:
+                raise ValidationError({"status": ["حالة اشتراك غير معروفة."]})
+            qs = qs.filter(status=status_param)
+        return qs
+
+    def _response(self, subscription, response_status=status.HTTP_200_OK):
+        return Response(self.get_serializer(subscription).data, status=response_status)
+
+    @action(detail=False, methods=["post"], url_path="start-trial")
+    def start_trial(self, request):
+        payload = StartServiceTrialSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            tenant = Tenant.objects.get(pk=payload.validated_data["tenant"])
+        except Tenant.DoesNotExist:
+            return Response({"tenant": ["الشركة غير موجودة."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            subscription = start_service_trial(
+                tenant=tenant,
+                plan=payload.validated_data.get("plan"),
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return self._response(subscription, status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="activate-paid")
+    def activate_paid_new(self, request):
+        activation = ActivatePaidNewSubscriptionSerializer(data=request.data)
+        activation.is_valid(raise_exception=True)
+        try:
+            tenant = Tenant.objects.get(pk=activation.validated_data["tenant"])
+        except Tenant.DoesNotExist:
+            return Response({"tenant": ["الشركة غير موجودة."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            subscription = activate_paid_subscription(
+                tenant=tenant,
+                billing_customer=activation.validated_data["billing_customer"],
+                plan=activation.validated_data.get("plan"),
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return self._response(subscription, status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="activate-paid")
+    def activate_paid_existing(self, request, pk=None):
+        subscription = self.get_object()
+        payload = ActivatePaidSubscriptionSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            subscription = activate_paid_subscription(
+                tenant=subscription.tenant,
+                billing_customer=payload.validated_data.get("billing_customer"),
+                plan=payload.validated_data.get("plan"),
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return self._response(subscription)
+
+    @action(detail=True, methods=["post"], url_path="suspend")
+    def suspend(self, request, pk=None):
+        payload = SubscriptionReasonSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            subscription = suspend_service_subscription(
+                subscription=self.get_object(),
+                reason=payload.validated_data["reason"],
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return self._response(subscription)
+
+    @action(detail=True, methods=["post"], url_path="resume")
+    def resume(self, request, pk=None):
+        try:
+            subscription = resume_service_subscription(
+                subscription=self.get_object(), actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return self._response(subscription)
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        payload = ServiceSubscriptionCancelSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            subscription = schedule_service_subscription_cancellation(
+                subscription=self.get_object(),
+                reason=payload.validated_data["reason"],
+                immediate=payload.validated_data["immediate"],
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return self._response(subscription)
+
+    @action(detail=True, methods=["post"], url_path="withdraw-cancellation")
+    def withdraw_cancellation(self, request, pk=None):
+        try:
+            subscription = withdraw_scheduled_service_cancellation(
+                subscription=self.get_object(), actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return self._response(subscription)
+
+    @action(detail=True, methods=["post"], url_path="update-settings")
+    def update_settings(self, request, pk=None):
+        subscription = self.get_object()
+        payload = ServiceSubscriptionSettingsSerializer(data=request.data, partial=True)
+        payload.is_valid(raise_exception=True)
+        try:
+            subscription = update_subscription_commercial_settings(
+                subscription=subscription,
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+                **payload.validated_data,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return self._response(subscription)
+
+    @action(detail=True, methods=["get"], url_path="events")
+    def events(self, request, pk=None):
+        subscription = self.get_object()
+        events = ServiceSubscriptionEvent.objects.select_related("actor").filter(subscription=subscription)
+        return Response(ServiceSubscriptionEventSerializer(events, many=True).data)
+
+    @action(detail=False, methods=["get"], url_path="billing-customers")
+    def billing_customers(self, request):
+        query = request.query_params.get("q", "")
+        subscription_id = request.query_params.get("subscription")
+        if subscription_id:
+            try:
+                subscription_id = int(subscription_id)
+            except (TypeError, ValueError):
+                raise ValidationError({"subscription": ["يجب أن يكون معرّف الاشتراك رقماً صحيحاً."]})
+        # `plan`: نطاقُ الخطة الذي سيتحقّق منه الحفظ — بدونه يعرض المنتقي عملاء شركة
+        # فوترةٍ أخرى ثم يرفضهم التفعيل بـ`billing_customer_wrong_platform_tenant`.
+        customers = search_platform_billing_customers(
+            query=query,
+            subscription=subscription_id,
+            plan=request.query_params.get("plan", ""),
+        )
+        return Response([
+            {"id": customer.pk, "name": customer.name, "phone": customer.phone, "email": customer.email}
+            for customer in customers
+        ])
+
+
+class SubscriptionPolicyViewSet(viewsets.ReadOnlyModelViewSet):
+    """سجل سياسات افتراضيات الاشتراك وأفعال المسودة/الاستنساخ/المعاينة/التفعيل."""
+
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = SubscriptionPolicySerializer
+    queryset = ServiceSubscriptionPolicy.objects.select_related(
+        "billing_tenant", "created_by", "activated_by", "fixed_fee_product", "overage_product",
+    ).all().order_by("-version")
+
+    @action(detail=False, methods=["post"], url_path="draft")
+    def create_draft(self, request):
+        payload = SubscriptionPolicyDraftSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        if "billing_tenant" not in payload.validated_data:
+            return Response(
+                {"billing_tenant": ["هذا الحقل مطلوب لإنشاء سياسة الاشتراك."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            policy = create_subscription_policy_draft(
+                actor=request.user, correlation_id=_resolve_correlation_id(request), **payload.validated_data,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(policy).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="update-draft")
+    def update_draft(self, request, pk=None):
+        payload = SubscriptionPolicyDraftSerializer(data=request.data, partial=True)
+        payload.is_valid(raise_exception=True)
+        try:
+            policy = update_subscription_policy_draft(
+                policy=self.get_object(), actor=request.user,
+                correlation_id=_resolve_correlation_id(request), **payload.validated_data
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(policy).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="clone")
+    def clone(self, request, pk=None):
+        try:
+            policy = clone_subscription_policy_to_draft(
+                policy=self.get_object(), actor=request.user, correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(policy).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="preview")
+    def preview(self, request, pk=None):
+        try:
+            impact = preview_subscription_policy(policy=self.get_object())
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response({
+            "draft": self.get_serializer(impact["draft"]).data,
+            "active": self.get_serializer(impact["active"]).data if impact["active"] else None,
+            "diff": impact["diff"],
+            "note": impact["note"],
+        })
+
+    @action(detail=True, methods=["get"], url_path="billing-products")
+    def billing_products(self, request, pk=None):
+        """أصناف خدمية في شركة فوترة هذه النسخة وحدها — لمنتقي صنفَي الفوترة في المسودة."""
+        products = search_policy_billing_products(policy=self.get_object(), query=request.query_params.get("q", ""))
+        return Response([
+            {"id": product.pk, "sku": product.sku, "name": product.name_ar or product.sku}
+            for product in products
+        ])
+
+    @action(detail=True, methods=["post"], url_path="activate")
+    def activate(self, request, pk=None):
+        payload = ActivateSubscriptionPolicySerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            policy = activate_subscription_policy(
+                policy=self.get_object(), actor=request.user,
+                change_reason=payload.validated_data["change_reason"],
+                effective_from=payload.validated_data.get("effective_from"),
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(policy).data, status=status.HTTP_200_OK)
 
 
 class SubscriptionBillingRecordViewSet(viewsets.ReadOnlyModelViewSet):
@@ -371,9 +690,6 @@ class IntegrationKeyViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = IntegrationKeySerializer
     queryset = IntegrationKey.objects.select_related("tenant").all().order_by("-created_at")
 
-    def _service_error(self, exc):
-        return Response({"detail": exc.detail, "code": exc.code}, status=exc.status_code)
-
     @action(detail=False, methods=["post"], url_path="issue")
     def issue(self, request):
         """إصدارُ مفتاحٍ لقناةِ شركة. الرمزُ الخامُّ في الردّ ولن يظهر ثانيةً."""
@@ -384,7 +700,7 @@ class IntegrationKeyViewSet(viewsets.ReadOnlyModelViewSet):
                 name=str(request.data.get("name", "")).strip(),
             )
         except IntegrationKeyError as exc:
-            return self._service_error(exc)
+            return _service_error(exc)
         except Tenant.DoesNotExist:
             return Response({"detail": "الشركة غير موجودة."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -398,7 +714,7 @@ class IntegrationKeyViewSet(viewsets.ReadOnlyModelViewSet):
         try:
             key, raw_token = rotate_integration_key(key=self.get_object())
         except IntegrationKeyError as exc:
-            return self._service_error(exc)
+            return _service_error(exc)
 
         data = IntegrationKeySerializer(key).data
         data["raw_token"] = raw_token
@@ -414,7 +730,7 @@ class IntegrationKeyViewSet(viewsets.ReadOnlyModelViewSet):
                 reason=str(request.data.get("reason", "")).strip(),
             )
         except IntegrationKeyError as exc:
-            return self._service_error(exc)
+            return _service_error(exc)
 
         return Response(IntegrationKeySerializer(key).data, status=status.HTTP_200_OK)
 
@@ -454,14 +770,18 @@ class WorkOrderViewSet(viewsets.ReadOnlyModelViewSet):
         qs = super().get_queryset()
         user = self.request.user
 
-        # مديرُ المنصّة يرى كلَّ شيء — هو صاحبُ المنصّة لا موظّفٌ فيها.
+        # لا تدخل أوامرَ العمل شركةٌ بلا اشتراكٍ مؤهَّل (§١) — للمدير والموظّف معاً؛
+        # فالتجربةُ المنتهية تُبقي ارتباطاتِها نشطةً لكنها تخرج من هنا.
+        eligible_tenant_ids = eligible_service_tenant_ids()
         if IsPlatformOperationsManager().has_permission(self.request, self):
-            base_qs = qs
+            # مديرُ المنصّة يرى كلَّ الشركات المؤهَّلة — هو صاحبُ المنصّة لا موظّفٌ فيها.
+            base_qs = qs.filter(tenant_id__in=eligible_tenant_ids)
         else:
             # وموظّفُ المنصّة يرى شركاتِ ارتباطاتِه النشطة وحدَها.
             engaged_tenant_ids = Engagement.objects.filter(
                 employee__user=user,
                 status=Engagement.Status.ACTIVE,
+                tenant_id__in=eligible_tenant_ids,
             ).values_list("tenant_id", flat=True)
             base_qs = qs.filter(tenant_id__in=engaged_tenant_ids)
 
@@ -1331,7 +1651,7 @@ class CompanyHealthView(APIView):
     """عرض درجتي الصحة لشركة معينة في مسار السوبر أدمن (م٧ - قصص ٢٣-٢٤).
 
     - صلاحيتها كصلاحية WorkOrderViewSet: موظف المنصة يقرأ شركات ارتباطاته النشطة وحدها،
-      والمدير يقرأ جميع الشركات.
+      والمدير يقرأ جميع الشركات — وكلاهما داخل الشركات المؤهَّلة للخدمة وحدها.
     - شركة خارج نطاق الموظف أو غير موجودة ⇒ 404 (دون تلميح لوجودها).
     - مستخدم مصادق عادي ليس موظفاً ولا مديراً ⇒ 403 (حارس الجذر).
     - تُطلب عند الفتح لتجنب N+1 في اللوحة.
@@ -1342,20 +1662,19 @@ class CompanyHealthView(APIView):
     def get(self, request, tenant_id: int):
         user = request.user
         is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        # شركةٌ بلا اشتراكٍ مؤهَّل (لا صفّ، معلّق، ملغى، تجربةٌ منتهية) خارجُ النطاق للدورين (§١).
+        tenant = Tenant.objects.filter(pk=tenant_id, pk__in=eligible_service_tenant_ids()).first()
+        if tenant is None:
+            raise Http404("الشركة غير موجودة أو خارج نطاق العمليات.")
 
         if not is_manager:
             has_active_engagement = Engagement.objects.filter(
                 employee__user=user,
-                tenant_id=tenant_id,
+                tenant_id=tenant.pk,
                 status=Engagement.Status.ACTIVE,
             ).exists()
             if not has_active_engagement:
                 raise Http404("الشركة غير موجودة أو خارج نطاق العمليات.")
-
-        try:
-            tenant = Tenant.objects.get(pk=tenant_id)
-        except Tenant.DoesNotExist:
-            raise Http404("الشركة غير موجودة.")
 
         # `health_scores` مفتاحاً واحداً بنفس شكله في `/api/my-agent/` — لا نسخةً ثانيةً
         # مسطّحةً بجانبه: حمولةٌ تحمل الرقمَ مرّتين تدعو قارئاً لأن يقرأ النسخةَ الأخرى.

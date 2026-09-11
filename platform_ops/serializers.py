@@ -1,9 +1,16 @@
 """محولات بيانات عمليات المنصة."""
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 from rest_framework import serializers
 
+from inventory.models import Product
+from partners.models import Partner
+from tenants.models import Tenant
+
 from .models import (
+    MAX_SERVICE_TRIAL_DAYS,
     DailyRating,
     DailyRatingToken,
     IntegrationKey,
@@ -17,6 +24,8 @@ from .models import (
     PlatformRecruiter,
     PolicyProfile,
     ServiceSubscription,
+    ServiceSubscriptionEvent,
+    ServiceSubscriptionPolicy,
     SubscriptionBillingRecord,
     WorkOrder,
 )
@@ -46,6 +55,10 @@ class PlatformEmployeeSerializer(serializers.ModelSerializer):
 class ServiceSubscriptionSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source="tenant.CompanyName", read_only=True)
     billing_customer_name = serializers.CharField(source="billing_customer.name", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    is_trial = serializers.SerializerMethodField()
+    is_eligible = serializers.SerializerMethodField()
+    active_engagements_count = serializers.SerializerMethodField()
 
     class Meta:
         model = ServiceSubscription
@@ -56,6 +69,7 @@ class ServiceSubscriptionSerializer(serializers.ModelSerializer):
             "billing_customer",
             "billing_customer_name",
             "status",
+            "status_display",
             "plan",
             "monthly_fee",
             "included_quota",
@@ -63,10 +77,176 @@ class ServiceSubscriptionSerializer(serializers.ModelSerializer):
             "consumed_quota",
             "period_start",
             "period_end",
+            "trial_started_at",
+            "trial_ends_at",
+            "is_trial",
+            "is_eligible",
+            "active_engagements_count",
+            "pre_suspension_status",
+            "scheduled_cancellation_date",
+            "cancellation_reason",
+            "subscription_policy_version",
+            "fixed_fee_product",
+            "overage_product",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at"]
+        read_only_fields = fields
+
+    def get_is_trial(self, obj):
+        from .services import is_service_trial
+
+        return is_service_trial(obj)
+
+    def get_is_eligible(self, obj):
+        from .services import is_service_subscription_eligible
+
+        return is_service_subscription_eligible(obj)
+
+    def get_active_engagements_count(self, obj):
+        annotated_count = getattr(obj, "active_engagements_count", None)
+        if annotated_count is not None:
+            return annotated_count
+
+        from .models import Engagement
+
+        return Engagement.objects.filter(tenant_id=obj.tenant_id, status=Engagement.Status.ACTIVE).count()
+
+
+class ServiceSubscriptionEventSerializer(serializers.ModelSerializer):
+    action_display = serializers.CharField(source="get_action_display", read_only=True)
+    actor_name = serializers.CharField(source="actor.get_full_name", read_only=True, default="")
+
+    class Meta:
+        model = ServiceSubscriptionEvent
+        fields = [
+            "id",
+            "action",
+            "action_display",
+            "from_status",
+            "to_status",
+            "reason",
+            "actor",
+            "actor_name",
+            "correlation_id",
+            "details",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class StartServiceTrialSerializer(serializers.Serializer):
+    """بدء تجربة لشركة لا صفّ اشتراك لها بعد — الشركة والخطة وحدهما."""
+
+    tenant = serializers.IntegerField(min_value=1)
+    plan = serializers.CharField(required=False, allow_blank=True, max_length=50)
+
+
+class ActivatePaidSubscriptionSerializer(serializers.Serializer):
+    """تفعيل مدفوع لصفّ اشتراك قائم — الشركة تأتي من الصفّ نفسه لا من الطلب."""
+
+    billing_customer = serializers.PrimaryKeyRelatedField(
+        queryset=Partner.objects.all(), required=True, allow_null=False,
+    )
+    plan = serializers.CharField(required=False, max_length=50)
+
+
+class ActivatePaidNewSubscriptionSerializer(ActivatePaidSubscriptionSerializer):
+    """تفعيل مدفوع لشركة بلا صفّ اشتراك — تحقّقٌ واحد يحمل الشركة والعميل والخطة معاً."""
+
+    tenant = serializers.IntegerField(min_value=1)
+
+
+class ServiceSubscriptionSettingsSerializer(serializers.Serializer):
+    plan = serializers.CharField(required=False, max_length=50)
+    monthly_fee = serializers.DecimalField(required=False, max_digits=12, decimal_places=2, min_value=Decimal("0.00"))
+    included_quota = serializers.IntegerField(required=False, min_value=0)
+    overage_unit_price = serializers.DecimalField(required=False, max_digits=12, decimal_places=2, min_value=Decimal("0.00"))
+    billing_customer = serializers.PrimaryKeyRelatedField(
+        queryset=Partner.objects.all(), required=False, allow_null=True
+    )
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+
+class SubscriptionReasonSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=True, allow_blank=False, max_length=500)
+
+
+class ServiceSubscriptionCancelSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=True, allow_blank=False, max_length=500)
+    immediate = serializers.BooleanField(required=False, default=False)
+
+
+class SubscriptionPolicySerializer(serializers.ModelSerializer):
+    billing_tenant_name = serializers.CharField(source="billing_tenant.CompanyName", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    fixed_fee_product_name = serializers.CharField(
+        source="fixed_fee_product.name_ar", read_only=True, default=None, allow_null=True,
+    )
+    overage_product_name = serializers.CharField(
+        source="overage_product.name_ar", read_only=True, default=None, allow_null=True,
+    )
+    effective_state = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ServiceSubscriptionPolicy
+        fields = [
+            "id",
+            "version",
+            "status",
+            "status_display",
+            "effective_state",
+            "plan",
+            "billing_tenant",
+            "billing_tenant_name",
+            "monthly_fee",
+            "included_quota",
+            "trial_days",
+            "overage_unit_price",
+            "fixed_fee_product",
+            "fixed_fee_product_name",
+            "overage_product",
+            "overage_product_name",
+            "activation_reason",
+            "effective_from",
+            "effective_to",
+            "created_by",
+            "activated_by",
+            "activated_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_effective_state(self, obj):
+        return obj.effective_state()
+
+
+class SubscriptionPolicyDraftSerializer(serializers.Serializer):
+    billing_tenant = serializers.PrimaryKeyRelatedField(queryset=Tenant.objects.all(), required=False)
+    monthly_fee = serializers.DecimalField(
+        required=False,
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal("0.00"),
+    )
+    included_quota = serializers.IntegerField(required=False, min_value=0)
+    trial_days = serializers.IntegerField(required=False, min_value=0, max_value=MAX_SERVICE_TRIAL_DAYS)
+    overage_unit_price = serializers.DecimalField(
+        required=False, max_digits=12, decimal_places=2, min_value=Decimal("0.00"),
+    )
+    plan = serializers.CharField(required=False, allow_blank=True, max_length=50)
+    fixed_fee_product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.all(), required=False, allow_null=True,
+    )
+    overage_product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.all(), required=False, allow_null=True,
+    )
+
+
+class ActivateSubscriptionPolicySerializer(serializers.Serializer):
+    change_reason = serializers.CharField(required=True, allow_blank=False, max_length=500)
+    effective_from = serializers.DateTimeField(required=False, allow_null=True)
 
 
 class SubscriptionBillingRecordSerializer(serializers.ModelSerializer):
@@ -605,7 +785,3 @@ class JobApplicantInvitationSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
-
-
-
-

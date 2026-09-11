@@ -8,6 +8,9 @@ from django.utils import timezone
 
 from tenants.models import Tenant, UserCompanyMembership
 
+#: أقصى أيام تجربة لخدمة الإدخال — حدّ أمان واحد تقرؤه النماذج والخدمات والمُسلسِلات.
+MAX_SERVICE_TRIAL_DAYS = 30
+
 
 class IntegrationKey(models.Model):
     """مفتاح قناة الاستقبال لعمليات المنصة (المرحلة الرابعة: م٤).
@@ -179,6 +182,136 @@ class PlatformEmployee(models.Model):
         return f"{self.user} ({self.get_status_display()})"
 
 
+class ServiceSubscriptionPolicy(models.Model):
+    """نسخة مؤرخة من افتراضيات اشتراك خدمة المنصة.
+
+    النسخة النشطة لا تُعدّل؛ تُنشأ نسخة مسودة جديدة ثم تُفعّل لتصبح مرجعاً
+    تاريخياً. `billing_tenant` هو شركة المنصة المفوترة التي يجب أن ينتمي إليها
+    عميل الفوترة وصنفا الفوترة عند إنشاء اشتراك جديد.
+
+    `plan` نطاق النسخة: فارغ = عامة لكل الخطط، أو اسم خطة بعينها تغلب العامة.
+    السريان تحدده نافذة `effective_from`/`effective_to` لا حقل الحالة وحده: نسخة
+    `active` بتاريخ سريان لاحق «مجدولة»، ونسخة انتهت نافذتها «منتهية» حتى قبل أن
+    يُحدَّث حقل حالتها في التفعيل التالي (`effective_state`).
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "مسودة"
+        ACTIVE = "active", "نشطة"
+        RETIRED = "retired", "منتهية"
+
+    version = models.PositiveIntegerField(unique=True, verbose_name="رقم النسخة")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        verbose_name="الحالة",
+    )
+    plan = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        verbose_name="نطاق الخطة",
+        help_text="فارغ = نسخة عامة لكل الخطط؛ اسم خطة = نسخة خاصة بها تغلب العامة.",
+    )
+    billing_tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        related_name="platform_subscription_policies",
+        verbose_name="شركة فوترة المنصة",
+    )
+    monthly_fee = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("300.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="الرسم الشهري الافتراضي",
+    )
+    included_quota = models.PositiveIntegerField(
+        default=300,
+        verbose_name="الحصة الافتراضية المشمولة",
+    )
+    trial_days = models.PositiveSmallIntegerField(
+        default=7,
+        validators=[MaxValueValidator(MAX_SERVICE_TRIAL_DAYS)],
+        verbose_name="أيام التجربة الافتراضية",
+    )
+    overage_unit_price = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="سعر العملية الزائدة الافتراضي",
+    )
+    fixed_fee_product = models.ForeignKey(
+        "inventory.Product",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="صنف الرسم الشهري",
+        help_text="صنف خدمي في شركة فوترة المنصة؛ إلزامي لحظة التفعيل.",
+    )
+    overage_product = models.ForeignKey(
+        "inventory.Product",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="صنف العمليات الزائدة",
+        help_text="صنف خدمي في شركة فوترة المنصة؛ إلزامي عند سعر تجاوز أكبر من صفر.",
+    )
+    activation_reason = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="سبب التفعيل",
+        help_text="إلزامي لحظة تفعيل المسودة؛ يبقى في الصف بعد التفعيل.",
+    )
+    effective_from = models.DateTimeField(null=True, blank=True, verbose_name="سريان النسخة من")
+    effective_to = models.DateTimeField(null=True, blank=True, verbose_name="سريان النسخة إلى")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_platform_subscription_policies",
+        verbose_name="أنشأها",
+    )
+    activated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="activated_platform_subscription_policies",
+        verbose_name="فعّلها",
+    )
+    activated_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت التفعيل")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        ordering = ["-version"]
+        verbose_name = "سياسة اشتراك خدمة المنصة"
+        verbose_name_plural = "سياسات اشتراك خدمة المنصة"
+
+    def __str__(self):
+        return f"سياسة الاشتراك v{self.version} ({self.get_status_display()})"
+
+    def effective_state(self, at=None) -> str:
+        """draft / scheduled / current / retired — من نافذة السريان لا من حقل الحالة وحده."""
+        if self.status == self.Status.DRAFT:
+            return "draft"
+        if self.status == self.Status.RETIRED:
+            return "retired"
+        moment = at or timezone.now()
+        if self.effective_from and self.effective_from > moment:
+            return "scheduled"
+        if self.effective_to and self.effective_to <= moment:
+            return "retired"
+        return "current"
+
+
 class ServiceSubscription(models.Model):
     """اشتراك الشركة في خدمة المتابعة والإدخال.
 
@@ -186,6 +319,7 @@ class ServiceSubscription(models.Model):
     """
 
     class Status(models.TextChoices):
+        TRIAL = "trial", "تجربة"
         ACTIVE = "active", "نشط"
         SUSPENDED = "suspended", "معلق"
         CANCELLED = "cancelled", "ملغى"
@@ -235,6 +369,29 @@ class ServiceSubscription(models.Model):
         default=0,
         verbose_name="العمليات المستهلكة",
     )
+    trial_days = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MaxValueValidator(MAX_SERVICE_TRIAL_DAYS)],
+        verbose_name="أيام التجربة الملتقطة",
+    )
+    trial_started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="بداية التجربة",
+    )
+    trial_ends_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="نهاية التجربة",
+    )
+    billing_tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="platform_service_billing_subscriptions",
+        verbose_name="شركة فوترة المنصة الملتقطة",
+    )
     billing_customer = models.ForeignKey(
         "partners.Partner",
         on_delete=models.SET_NULL,
@@ -243,6 +400,47 @@ class ServiceSubscription(models.Model):
         related_name="platform_service_subscriptions",
         verbose_name="عميل الفوترة في شركة المنصة",
         help_text="سجل العميل التابع لشركة المنصة المفوترة الذي تصدر باسمه فواتير الخدمة",
+    )
+    subscription_policy_version = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="نسخة سياسة الاشتراك الملتقطة",
+    )
+    fixed_fee_product = models.ForeignKey(
+        "inventory.Product",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="صنف الرسم الشهري الملتقط",
+        help_text="يُلتقط من السياسة لحظة بدء التجربة أو التفعيل؛ الفوترة الشهرية تقرؤه ما لم يُمرَّر تجاوز صريح.",
+    )
+    overage_product = models.ForeignKey(
+        "inventory.Product",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="صنف العمليات الزائدة الملتقط",
+    )
+    pre_suspension_status = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        verbose_name="الحالة قبل التعليق",
+        help_text="تحفظ لحظة التعليق كي يعيدها الاستئناف؛ لا تُقرأ إلا من خدمة الاستئناف.",
+    )
+    scheduled_cancellation_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ الإلغاء المجدول",
+        help_text="نهاية الدورة أو التجربة الحالية؛ يُطبَّق تلقائياً بأمر الفوترة الشهري.",
+    )
+    cancellation_reason = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="سبب الإلغاء",
     )
     period_start = models.DateField(
         null=True,
@@ -269,6 +467,107 @@ class ServiceSubscription(models.Model):
 
     def __str__(self):
         return f"{self.tenant} - {self.plan} ({self.get_status_display()})"
+
+
+class ServiceSubscriptionEvent(models.Model):
+    """سجل تدقيق غير قابل للمحو لكل انتقال أو تعديل تجاري على اشتراك الخدمة.
+
+    لا مسار تعديل أو حذف عليه عمداً — الصفّ يُكتب مرة واحدة داخل نفس معاملة
+    الانتقال ولا يُعاد لمسه. `subscription` بحماية `PROTECT` كي لا يُحذف
+    الاشتراك فيسقط تاريخه، و`actor` بـ`SET_NULL` لأن هوية الفاعل معلومة ثانوية
+    لا تبرر منع حذف حساب مستخدم قديم. `details` حقل JSON بلا PII ولا أسرار.
+    """
+
+    class Action(models.TextChoices):
+        TRIAL_STARTED = "trial_started", "بدء تجربة"
+        ACTIVATED = "activated", "تفعيل مدفوع"
+        TRIAL_CONVERTED = "trial_converted", "تحويل التجربة إلى مدفوع"
+        SETTINGS_UPDATED = "settings_updated", "تعديل إعدادات تجارية"
+        SUSPENDED = "suspended", "تعليق"
+        RESUMED = "resumed", "استئناف"
+        CANCELLATION_SCHEDULED = "cancellation_scheduled", "جدولة إلغاء"
+        CANCELLATION_WITHDRAWN = "cancellation_withdrawn", "سحب جدولة الإلغاء"
+        CANCELLED = "cancelled", "إلغاء"
+
+    subscription = models.ForeignKey(
+        ServiceSubscription,
+        on_delete=models.PROTECT,
+        related_name="events",
+        verbose_name="اشتراك الخدمة",
+    )
+    action = models.CharField(max_length=30, choices=Action.choices, verbose_name="الإجراء")
+    from_status = models.CharField(max_length=20, blank=True, default="", verbose_name="من حالة")
+    to_status = models.CharField(max_length=20, blank=True, default="", verbose_name="إلى حالة")
+    reason = models.CharField(max_length=500, blank=True, default="", verbose_name="السبب")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="platform_subscription_events",
+        verbose_name="الفاعل",
+    )
+    correlation_id = models.CharField(max_length=64, blank=True, default="", verbose_name="معرّف الارتباط")
+    details = models.JSONField(default=dict, blank=True, verbose_name="تفاصيل بلا بيانات شخصية")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "حدث اشتراك خدمة المنصة"
+        verbose_name_plural = "أحداث اشتراك خدمة المنصة"
+        indexes = [
+            models.Index(fields=["subscription", "-created_at"]),
+            models.Index(fields=["correlation_id"]),
+        ]
+
+    def __str__(self):
+        return f"{self.subscription_id}: {self.get_action_display()}"
+
+
+class ServiceSubscriptionPolicyEvent(models.Model):
+    """سجل تدقيق غير قابل للمحو لكل كتابة على نسخ سياسة الاشتراك (§١١).
+
+    على مستوى المنصة بلا `tenant` — كالسياسة نفسها. `policy` بـ`PROTECT` كي لا
+    تُحذف نسخةٌ فيسقط تاريخها، و`details` تحمل قبل/بعد للتعديل بلا بيانات شخصية.
+    """
+
+    class Action(models.TextChoices):
+        CREATED = "created", "إنشاء مسودة"
+        UPDATED = "updated", "تعديل مسودة"
+        CLONED = "cloned", "استنساخ مسودة"
+        ACTIVATED = "activated", "تفعيل سياسة"
+        RETIRED = "retired", "إنهاء سياسة"
+
+    policy = models.ForeignKey(
+        ServiceSubscriptionPolicy,
+        on_delete=models.PROTECT,
+        related_name="events",
+        verbose_name="سياسة الاشتراك",
+    )
+    action = models.CharField(max_length=20, choices=Action.choices, verbose_name="الإجراء")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="platform_subscription_policy_events",
+        verbose_name="الفاعل",
+    )
+    correlation_id = models.CharField(max_length=64, blank=True, default="", verbose_name="معرّف الارتباط")
+    details = models.JSONField(default=dict, blank=True, verbose_name="تفاصيل بلا بيانات شخصية")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "حدث سياسة اشتراك خدمة المنصة"
+        verbose_name_plural = "أحداث سياسات اشتراك خدمة المنصة"
+        indexes = [
+            models.Index(fields=["policy", "-created_at"]),
+            models.Index(fields=["correlation_id"]),
+        ]
+
+    def __str__(self):
+        return f"{self.policy_id}: {self.get_action_display()}"
 
 
 class SubscriptionBillingRecord(models.Model):
@@ -1816,6 +2115,4 @@ class JobApplicantInvitation(models.Model):
     @property
     def is_live(self) -> bool:
         return not self.is_consumed
-
-
 

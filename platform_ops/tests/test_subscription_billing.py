@@ -23,6 +23,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import IntegrityError
 from django.test import TestCase
+from django.utils import timezone
 
 from inventory.models import Product
 from partners.models import Partner
@@ -332,6 +333,77 @@ class SubscriptionBillingServiceTests(TestCase):
         # 20 عملية × 3.00 = 60.00
         self.assertEqual(record_sept.total_amount, Decimal("60.00"))
         self.assertEqual(SubscriptionBillingRecord.objects.filter(subscription=self.sub_a).count(), 2)
+
+    def test_command_bills_final_period_before_applying_scheduled_cancellation(self):
+        FiscalPeriod = apps.get_model("accounting", "FiscalPeriod")
+        FiscalPeriod.objects.create(
+            tenant=self.platform_tenant,
+            name="FY 2026-01",
+            start_date=datetime.date(2026, 1, 1),
+            end_date=datetime.date(2026, 1, 31),
+            is_closed=False,
+        )
+        self.sub_a.period_start = datetime.date(2026, 1, 1)
+        self.sub_a.period_end = datetime.date(2026, 1, 31)
+        self.sub_a.consumed_quota = 0
+        self.sub_a.scheduled_cancellation_date = datetime.date(2026, 1, 31)
+        self.sub_a.cancellation_reason = "نهاية الخدمة"
+        self.sub_a.save(
+            update_fields=[
+                "period_start",
+                "period_end",
+                "consumed_quota",
+                "scheduled_cancellation_date",
+                "cancellation_reason",
+            ]
+        )
+        command_now = timezone.make_aware(datetime.datetime(2026, 2, 1, 10, 0, 0))
+
+        with patch("platform_ops.services.timezone.now", return_value=command_now):
+            call_command(
+                "bill_service_subscriptions",
+                period="2026-01",
+                fixed_fee_product_id=self.fixed_fee_product.pk,
+                dry_run=True,
+            )
+        self.assertFalse(
+            SubscriptionBillingRecord.objects.filter(
+                subscription=self.sub_a,
+                period_start=datetime.date(2026, 1, 1),
+                period_end=datetime.date(2026, 1, 31),
+            ).exists()
+        )
+        self.sub_a.refresh_from_db()
+        self.assertEqual(self.sub_a.status, ServiceSubscription.Status.ACTIVE)
+
+        with patch("platform_ops.services.timezone.now", return_value=command_now):
+            call_command(
+                "bill_service_subscriptions",
+                period="2026-01",
+                fixed_fee_product_id=self.fixed_fee_product.pk,
+            )
+
+        record = SubscriptionBillingRecord.objects.get(
+            subscription=self.sub_a,
+            period_start=datetime.date(2026, 1, 1),
+            period_end=datetime.date(2026, 1, 31),
+        )
+        self.assertIsNotNone(record.invoice)
+        self.sub_a.refresh_from_db()
+        self.assertEqual(self.sub_a.status, ServiceSubscription.Status.CANCELLED)
+
+    def test_billing_uses_the_products_snapshotted_on_the_subscription_when_none_are_passed(self):
+        """أصناف الفوترة تأتي من لقطة الاشتراك (سياسته) لا من معامل الأمر — لا إعداد يدوي لكل تشغيل."""
+        self.sub_a.fixed_fee_product = self.fixed_fee_product
+        self.sub_a.overage_product = self.overage_product
+        self.sub_a.save(update_fields=["fixed_fee_product", "overage_product"])
+        record, created = bill_subscription_for_period(
+            subscription_id=self.sub_a.id,
+            period_start=datetime.date(2026, 8, 1),
+            period_end=datetime.date(2026, 8, 31),
+        )
+        self.assertTrue(created)
+        self.assertEqual(record.total_amount, Decimal("290.00"))
 
     def test_4_idempotency_running_service_and_command_twice_creates_single_invoice(self):
         """4. تشغيل الخدمة والأمر مرتين لنفس الدورة يُنتج فاتورة وسجل تدقيق واحداً ولا يكرر التدوير."""
@@ -777,4 +849,3 @@ class SubscriptionBillingServiceTests(TestCase):
                 stdout=out_real,
             )
         self.assertFalse(SubscriptionBillingRecord.objects.exists())
-

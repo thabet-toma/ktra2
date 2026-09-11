@@ -907,6 +907,10 @@ class DailyRatingsReviewFixesTest(TestCase):
         root = User.objects.create_superuser(
             username="rev_root", email="rev_root@k.local", password="x",
         )
+        # 210-A §١: أوامرُ العمل لا تدخلها إلا شركةٌ مؤهَّلة — كلتا الشركتين مشتركتان
+        # كي يبقى هذا الاختبارُ عن التضييق بـ`company` لا عن الأهلية.
+        for tenant in (self.tenant_a, self.tenant_b):
+            ServiceSubscription.objects.create(tenant=tenant, status=ServiceSubscription.Status.ACTIVE)
         WorkOrder.objects.create(
             tenant=self.tenant_a, assignee=self.employee, title="أمرٌ في أ",
             status=WorkOrder.Status.DATA_ENTRY,
@@ -1221,6 +1225,10 @@ class Stage7PartBTests(TestCase):
     # 1. صلاحيات ونطاق نقطة صحة الشركة للسوبر أدمن وموظفي المنصة
     def test_super_admin_health_endpoint_permissions_and_scoping(self):
         """نقطة صحة الشركة محصورة بمدير المنصة وموظفيها للشركات المرتبطة فقط."""
+        # 210-A §١ غيّر العقد: لا تُفتح صحةُ شركةٍ بلا اشتراكٍ مؤهَّل — الشركتان مشتركتان
+        # كي يبقى الرفضُ لـ`tenant_b` عن غياب الارتباط وحده لا عن الأهلية.
+        for tenant in (self.tenant_a, self.tenant_b):
+            ServiceSubscription.objects.create(tenant=tenant, status=ServiceSubscription.Status.ACTIVE)
         # مستخدم عادي ليس موظف منصة ولا مدير يرفض بـ 403
         self.client.force_authenticate(user=self.owner_user_a)
         resp = self.client.get(f"/api/platform/ops/companies/{self.tenant_a.pk}/health/")
@@ -1451,6 +1459,7 @@ class Stage7PartBReviewFixesTest(TestCase):
     # ── ٣. حمولةُ الصحّة نسخةٌ واحدة ─────────────────────────────────────
     def test_company_health_payload_carries_one_copy_of_the_scores(self):
         """الرقمُ مرّةً واحدةً في الحمولة: نسختان تدعوان قارئاً لأن يقرأ النسخةَ الأخرى."""
+        ServiceSubscription.objects.create(tenant=self.tenant, status=ServiceSubscription.Status.ACTIVE)
         self.client.force_authenticate(user=self.manager_user)
         resp = self.client.get(f"/api/platform/ops/companies/{self.tenant.pk}/health/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)

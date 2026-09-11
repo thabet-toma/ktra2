@@ -3,14 +3,15 @@
 يقوم بفوترة الاشتراكات المستحقة وإصدار فواتير مبيعات حقيقية في شركة المنصة
 وترحيلها محاسبياً، وتدوير دورة الاشتراك بأمان وذرية تامة.
 """
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from platform_ops.services import (
     BillingError,
+    apply_due_subscription_cancellations,
     billing_preflight,
     bill_subscriptions_for_period,
     resolve_billing_period_bounds,
+    resolve_subscription_billing_products,
 )
 
 
@@ -26,14 +27,17 @@ class Command(BaseCommand):
         parser.add_argument(
             "--fixed-fee-product-id",
             type=int,
-            default=getattr(settings, "PLATFORM_OPS_BILLING_FIXED_FEE_PRODUCT_ID", None),
-            help="معرّف صنف الرسم الشهري الثابت في شركة المنصة",
+            default=None,
+            help=(
+                "تجاوز صريح لصنف الرسم الشهري لكل اشتراكات هذا التشغيل؛ بدونه يُقرأ صنف لقطة كل اشتراك "
+                "من سياسته، ثم PLATFORM_OPS_BILLING_FIXED_FEE_PRODUCT_ID للصفوف القديمة"
+            ),
         )
         parser.add_argument(
             "--overage-product-id",
             type=int,
-            default=getattr(settings, "PLATFORM_OPS_BILLING_OVERAGE_PRODUCT_ID", None),
-            help="معرّف صنف العمليات الزائدة في شركة المنصة",
+            default=None,
+            help="تجاوز صريح لصنف العمليات الزائدة؛ بدونه لقطة الاشتراك ثم PLATFORM_OPS_BILLING_OVERAGE_PRODUCT_ID",
         )
         parser.add_argument(
             "--subscription-id",
@@ -66,11 +70,9 @@ class Command(BaseCommand):
         except BillingError as e:
             raise CommandError(f"خطأ في تحديد دورة الفوترة: {e.detail}")
 
+        # غياب الصنف لم يعد خطأ تشغيل عاماً: كل اشتراك يحمل صنفَي سياسته، ومن ينقصه يُبلَّغ عنه
+        # بكود `missing_fixed_fee_product` من `billing_preflight` نفسه.
         fixed_fee_product_id = options.get("fixed_fee_product_id")
-        if not fixed_fee_product_id:
-            raise CommandError(
-                "يجب تحديد --fixed-fee-product-id أو ضبط PLATFORM_OPS_BILLING_FIXED_FEE_PRODUCT_ID في الإعدادات."
-            )
 
         overage_product_id = options.get("overage_product_id")
         subscription_id = options.get("subscription_id")
@@ -98,12 +100,15 @@ class Command(BaseCommand):
             self.stdout.write(f"عدد الاشتراكات المرشحة: {len(candidates)}")
             would_bill = 0
             for sub in candidates:
+                sub_fixed_fee_product_id, sub_overage_product_id = resolve_subscription_billing_products(
+                    sub, fixed_fee_product_id=fixed_fee_product_id, overage_product_id=overage_product_id,
+                )
                 err = billing_preflight(
                     subscription=sub,
                     period_start=period_start,
                     period_end=period_end,
-                    fixed_fee_product_id=fixed_fee_product_id,
-                    overage_product_id=overage_product_id,
+                    fixed_fee_product_id=sub_fixed_fee_product_id,
+                    overage_product_id=sub_overage_product_id,
                     check_already_billed=True,
                 )
                 if err is not None:
@@ -131,6 +136,28 @@ class Command(BaseCommand):
             subscription_id=subscription_id,
             tenant_id=tenant_id,
         )
+
+        # الإلغاءاتُ المجدولة تُطبَّق **بعد** تمرير الفوترة لا قبله: الأمر يُشغَّل
+        # صباح أوّل يومٍ من الشهر ليفوتر الدورة المنتهية للتوّ، وشركةٌ جُدول
+        # إلغاؤها لنهاية تلك الدورة نفسها لا تزال تستحقّ فاتورتها الأخيرة —
+        # §١ يمنع أيّ استرداد أو إسقاط جزئي لآخر شهرٍ خدمَته الخدمة فعلاً.
+        applied = apply_due_subscription_cancellations()
+        if applied["applied_count"]:
+            self.stdout.write(
+                f"تم تطبيق {applied['applied_count']} إلغاء مجدولاً بعد الفوترة: "
+                f"{applied['applied_subscription_ids']}"
+            )
+        if applied["failed"]:
+            self.stdout.write(
+                self.style.ERROR(f"تعذّر تطبيق إلغاءات مجدولة: {applied['failed']}")
+            )
+        if applied["awaiting_final_billing_subscription_ids"]:
+            self.stdout.write(
+                self.style.WARNING(
+                    "إلغاءات مؤجلة لأن دورتها الأخيرة لم تُفوتر بعد: "
+                    f"{applied['awaiting_final_billing_subscription_ids']}"
+                )
+            )
 
         self.stdout.write(
             self.style.SUCCESS(

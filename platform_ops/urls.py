@@ -14,6 +14,7 @@ from .views import (
     PlatformRecruiterViewSet,
     PolicyProfileViewSet,
     ServiceSubscriptionViewSet,
+    SubscriptionPolicyViewSet,
     SubscriptionBillingRecordViewSet,
     WorkOrderIntakeView,
     WorkOrderViewSet,
@@ -22,6 +23,7 @@ from .views import (
 router = SimpleRouter()
 router.register("employees", PlatformEmployeeViewSet, basename="platform-ops-employees")
 router.register("subscriptions", ServiceSubscriptionViewSet, basename="platform-ops-subscriptions")
+router.register("subscription-policies", SubscriptionPolicyViewSet, basename="platform-ops-subscription-policies")
 router.register("billing-records", SubscriptionBillingRecordViewSet, basename="platform-ops-billing-records")
 router.register("work-orders", WorkOrderViewSet, basename="platform-ops-work-orders")
 router.register("integration-keys", IntegrationKeyViewSet, basename="platform-ops-integration-keys")
@@ -39,4 +41,3 @@ urlpatterns = [
     path("dashboard/", PlatformDashboardView.as_view(), name="platform-ops-dashboard"),
     path("", include(router.urls)),
 ]
-

@@ -32,6 +32,7 @@ from platform_ops.models import (
     DailyRating,
     Engagement,
     PlatformEmployee,
+    ServiceSubscription,
     WorkOrder,
     WorkOrderDeliverable,
 )
@@ -240,6 +241,8 @@ class MyAgentFrontendContractTest(TestCase):
         )
         admin_client = APIClient()
         admin_client.force_authenticate(user=admin)
+        # 210-A §١: صحةُ الشركة على سطح السوبر أدمن لا تُفتح إلا لشركةٍ مؤهَّلة.
+        ServiceSubscription.objects.create(tenant=self.tenant, status=ServiceSubscription.Status.ACTIVE)
         resp = admin_client.get(f"/api/platform/ops/companies/{self.tenant.pk}/health/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self._assert_declared_fields_exist(

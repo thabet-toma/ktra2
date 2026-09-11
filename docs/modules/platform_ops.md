@@ -1,6 +1,6 @@
 # platform_ops — مركز قيادة كترا وعمليات المنصة
 
-> مبني على قراءة الكود مباشرةً بتاريخ 2026-09-09. عند تعارض هذا الملف مع الكود، الكود هو المرجع.
+> مبني على قراءة الكود مباشرةً بتاريخ 2026-09-11. عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
 ## الغرض
 
@@ -22,7 +22,11 @@
 | `platform_ops/views.py` | نقاط القراءة الإدارية والتشغيلية، واستقبال أوامر العمل، ومسار استعلام الأداء واللقطات، وصندوق الإشعارات، وسجل النشاط العابر، واللوحة التفاعلية، والتقييم اليومي (`DailyRatingViewSet`)، وتبويب «من يمسك دفاتري» (`TenantAgentBooksViewSet`)، والرابط العام (`PublicDailyRatingView`)، وعرض صحة الشركة الإداري (`CompanyHealthView`) |
 | `platform_ops/urls.py` · `platform_ops/urls_tenant.py` · `platform_ops/urls_staff.py` | ثلاثة مسارات منفصلة: الأول سطح المنصة تحت `/api/platform/ops/`، والثاني سطح المستأجر تحت `/api/my-agent/`، والثالث قدرات موظفي المنصة تحت `/api/platform-staff/` |
 | `frontend_v2/components/platform-hiring/` | شاشة التوظيف المنصي وتبويباتها الثلاث (الوظائف، المتقدمون، مسؤولو التوظيف، ولوحة تفاصيل المتقدم) وصفحتا التقديم العام وقبول الدعوة |
-| `frontend_v2/components/platform/BillingRecordsScreen.tsx` | شاشة سجلات تدقيق الفوترة الشهرية للقراءة فقط بلا زر توليد: بحث محلي باسم الشركة أو رقم الفاتورة، وصف مجموع بالسنتات، والدورة الصفرية تظهر بلا رقم فاتورة |
+| `frontend_v2/components/platform/BillingRecordsScreen.tsx` | شاشة سياسة اشتراك الـpilot (`SubscriptionPolicyPanel`) ونظرة عامة على الاشتراكات (`SubscriptionsPanel`) للقراءة، مع نافذة سجلات الفوترة للقراءة فقط والبحث المحلي وصف المجموع بالسنتات — التفعيل والانتقالات على بطاقة الشركة |
+| `frontend_v2/components/platform/ServiceSubscriptionSection.tsx` | بطاقة خدمة الإدخال داخل `PlatformCompanyPanel.tsx`: الحالة وتبقّي التجربة والأفعال المسموحة لكل حالة وعميل الفوترة وسجل الأحداث |
+| `frontend_v2/components/platform/SearchPicker.tsx` | هيكل منتقي البحث المشترك (تأجيل 250ms، قائمة نتائج، شريحة المختار)؛ حصر النتائج يبقى خادمياً داخل دالّة `search` التي يمرّرها المستدعي |
+| `frontend_v2/components/platform/BillingCustomerPicker.tsx` · `BillingProductPicker.tsx` · `CompanyPicker.tsx` | منتقيات بحث بلا كتابة معرّفات خام فوق `SearchPicker`: عملاء الفوترة (`searchBillingCustomers`)، وأصناف فوترة نسخة السياسة (`searchPolicyBillingProducts`)، وشركات المنصة (`getPlatformDashboard` — لا نداء ثانٍ) |
+| `frontend_v2/utils/platformSubscriptionManagement.ts` · `.test.ts` | دوال نصية خالصة: الأفعال المسموحة لكل حالة اشتراك ونص تبقّي التجربة — بوابة `node --test` |
 | `frontend_v2/components/my-agent/QuotaUsageCard.tsx` | بطاقة استهلاك باقة الخدمة والعمليات المشمولة والزائدة لصاحب الشركة داخل التطبيق |
 | `frontend_v2/components/my-agent/MyAgentBooksPage.tsx` | شاشة «من يمسك دفاتري» لصاحب الشركة داخل التطبيق: بطاقة الوكيل، التقييم بنقرة واحدة، درجتا الصحة، جدول الصلاحيات، وسجل النشاط المالي |
 | `frontend_v2/components/my-agent/PublicRatingPage.tsx` | صفحة التقييم اليومي العامة المهشرة بلا تسجيل دخول بحالاتها الثلاث (التقييم، 410 المنتهي، و404 غير الصالح) |
@@ -55,7 +59,10 @@
 | Model | الحقول والقواعد المهمة |
 |---|---|
 | `PlatformEmployee` | `user` واحد لواحد، `specialty`، `capacity_target`، وحالة `active/on_leave/offboarded`. بلا `tenant` عمداً لأنه موظف للمنصة لا لشركة. |
-| `ServiceSubscription` | صف واحد لكل شركة، الحالة والباقة والرسم الشهري والحد والعداد وسعر العملية الزائدة ودورة الفوترة، مع عميل الفوترة (`billing_customer`) المربوط ببطاقة الطرف في شركة المنصة. `tenant` علاقة OneToOne تفرضها MySQL. |
+| `ServiceSubscription` | صف واحد لكل شركة، الحالة (`trial/active/suspended/cancelled` — `INACTIVE` بلا صفّ أصلاً) والباقة والرسم الشهري والحد والعداد وسعر العملية الزائدة ودورة الفوترة ونافذة التجربة (`trial_started_at`/`trial_ends_at`)، مع عميل الفوترة (`billing_customer`) وشركة الفوترة الملتقطة (`billing_tenant`) ونسخة السياسة الملتقطة (`subscription_policy_version`) وصنفا الفوترة الملتقطان منها (`fixed_fee_product`/`overage_product`)، والحالة قبل التعليق (`pre_suspension_status`) وجدولة الإلغاء (`scheduled_cancellation_date`/`cancellation_reason`). `tenant` علاقة OneToOne تفرضها MySQL. |
+| `ServiceSubscriptionPolicy` | نسخة مؤرَّخة من افتراضيات الاشتراك (`draft/active/retired`) بنطاق خطة (`plan` فارغ = عامة، أو اسم خطة تغلب العامة) — الرسم الشهري والحصة وسعر الزائد وأيام التجربة وشركة الفوترة وصنفا الفوترة (`fixed_fee_product`/`overage_product`) وسبب التفعيل الإلزامي وتاريخ السريان. `effective_state` (`draft/scheduled/current/retired`) يُحسب من نافذة السريان لا من الحالة وحدها. النسخة غير المسودة لا تُعدَّل أبداً — تُستنسخ إلى مسودة جديدة. |
+| `ServiceSubscriptionEvent` | سجلّ تدقيق غير قابل للمحو (`PROTECT` على الاشتراك) لكل انتقال حالة أو تعديل تجاري: الإجراء، من/إلى حالة، السبب، الفاعل (`SET_NULL`)، معرّف ارتباط (`correlation_id`)، وتفاصيل JSON بلا بيانات شخصية. لا مسار تعديل أو حذف. |
+| `ServiceSubscriptionPolicyEvent` | سجلّ تدقيق غير قابل للمحو (`PROTECT` على النسخة) لكل كتابة على سياسة الاشتراك: `created/updated/cloned/activated/retired`، الفاعل (`SET_NULL`)، معرّف الارتباط، وتفاصيل قبل/بعد للتعديل بلا بيانات شخصية. الاستنساخ حدث `cloned` واحد يحمل `source_policy_id` لا `created` معه. |
 | `Engagement` | ارتباط موظف بشركة: `active/suspended/revoked`، من أسند ومتى، طوابع التعليق والإلغاء، وحقل `created_membership` للتمييز بين العضوية المنشأة وعضوية الزبون المسبقة. فرادة النشط تحت قفل برمجي لا قيد شرطي. |
 | `AgentGrantedMembership` | سجل العضويات الممنوحة أو المعدلة بواسطة وكيل: الشركة، الوكيل الفاعل، الارتباط، `role_before/role_after`، ولقطة هوية ثابتة (`identity_snapshot`) تبقى مقروءة ومفيدة حتى لو حُذفت العضوية لاحقاً. |
 | `WorkOrder` | أمر عمل موجه لشركة (`tenant` إلزامي). يتميز بـ `kind` و `source` و `channel` و `external_ref`. مسؤول واحد فقط (`assignee`). آلة حالات صارمة (`received -> screening -> data_entry -> review -> approval -> closed` مع تفريعة `waiting_customer` و `cancelled`). الأجل يُقاس من `received_at` إلى `approved_at`، مع حسم فترات الانتظار المتراكمة (`waiting_seconds_total`). لقطة السياسة (`policy_snapshot`) ثابتة على الصف. فرادة غير مشروطة لكل `(tenant, channel, external_ref)` لضمان idempotency. |
@@ -79,6 +86,12 @@
 `tenant` بقرار #207 الموثق — استثناء محصور لأن الوظائف والمتقدمين للمنصة نفسها لا
 لشركة زبون، ويحرسه `platform_ops/tests/test_isolation_guard.py`.
 
+وبقرار #210-A: `ServiceSubscriptionPolicy` و`ServiceSubscriptionPolicyEvent` بلا
+`tenant` لأن السياسة افتراضيات تجارية على مستوى المنصة كلها لا تخص شركة (و`billing_tenant`
+فيها شركة المنصة المفوترة لا شركة زبون)، و`ServiceSubscriptionEvent` بلا حقل مباشر
+لأن شركته مشتقة عبر `subscription.tenant` كحال `SubscriptionBillingRecord`. كلها تحت
+`/api/platform/ops/` لمدير العمليات وحده.
+
 ## أهم نقاط الـAPI
 
 | Method | المسار | الحارس |
@@ -88,7 +101,20 @@
 | GET | `/api/platform/ops/employees/{id}/performance/` | `IsPlatformOperationsManager` أو الموظف نفسه (عزل عابر مشتق من الارتباطات) |
 | GET | `/api/platform/ops/employees/{id}/activity/` | `IsPlatformOperationsManager` أو الموظف نفسه |
 | GET | `/api/platform/ops/employees/ranking/` | `IsPlatformOperationsManager` |
-| GET | `/api/platform/ops/subscriptions/` | `IsPlatformOperationsManager` |
+| GET | `/api/platform/ops/subscriptions/` | `IsPlatformOperationsManager` — قائمة الاشتراكات (تصفية `?company=` و`?status=`) |
+| POST | `/api/platform/ops/subscriptions/start-trial/` | `IsPlatformOperationsManager` — تجربة واحدة مدى حياة الشركة عبر `start_service_trial`، بخطة اختيارية (`plan`، افتراضياً `standard`) وأيام نسخة السياسة السارية لها |
+| POST | `/api/platform/ops/subscriptions/activate-paid/` · `/{id}/activate-paid/` | `IsPlatformOperationsManager` — تفعيل مدفوع من لا شيء أو تجربة أو ملغى عبر `activate_paid_subscription`؛ `billing_customer` إلزامي و`plan` اختياري (`standard`)، ولا يمنح تجربة ثانية أبداً |
+| POST | `/api/platform/ops/subscriptions/{id}/suspend/` · `/{id}/resume/` | `IsPlatformOperationsManager` — تعليق بسبب إلزامي يحفظ الحالة السابقة، واستئناف يعيدها |
+| POST | `/api/platform/ops/subscriptions/{id}/cancel/` · `/{id}/withdraw-cancellation/` | `IsPlatformOperationsManager` — إلغاء مجدول لنهاية الدورة افتراضياً أو فوري بـ`immediate=true`، وسحب الجدولة قبل تطبيقها |
+| POST | `/api/platform/ops/subscriptions/{id}/update-settings/` | `IsPlatformOperationsManager` — تعديل شروط اشتراك بعينه (الباقة والرسم والحصة وعميل الفوترة) بسبب إلزامي (`reason`) متى تغيّر حقل فعلاً؛ الحقول غير المتغيرة لا تُحفظ ولا تُدقَّق، والملغى مرفوض (409). العميل يُتحقق منه cross-tenant فقط حين يرد في الطلب، ولا يُفرَّغ على اشتراك مدفوع. يسري على أول فوترة شهرية تصدر بعد الحفظ |
+| GET | `/api/platform/ops/subscriptions/{id}/events/` | `IsPlatformOperationsManager` — سجل `ServiceSubscriptionEvent` الكامل للاشتراك |
+| GET | `/api/platform/ops/subscriptions/billing-customers/` | `IsPlatformOperationsManager` — بحث عملاء الفوترة (`?q=`) محصور خادمياً بشركة الفوترة التي سيتحقق منها الحفظ: الملتقطة على الاشتراك مع `?subscription=<id>` (تعديل العميل أو تحويل التجربة)، وإلا شركة فوترة نسخة السياسة السارية لنطاق `?plan=` المطلوب — لا العامّة، وإلا عرَض المنتقي عملاءَ شركةٍ يرفضها الحفظ |
+| GET | `/api/platform/ops/subscription-policies/` · `/{id}/` | `IsPlatformOperationsManager` — سجل نسخ السياسة |
+| POST | `/api/platform/ops/subscription-policies/draft/` · `/{id}/update-draft/` | `IsPlatformOperationsManager` — مسودة جديدة (`billing_tenant` وحده يكفي؛ الغائب يأخذ افتراضيات النموذج) أو تعديلها؛ النشطة/المنتهية ترفض التعديل |
+| POST | `/api/platform/ops/subscription-policies/{id}/clone/` | `IsPlatformOperationsManager` — استنساخ نسخة نشطة/منتهية إلى مسودة جديدة |
+| POST | `/api/platform/ops/subscription-policies/{id}/preview/` | `IsPlatformOperationsManager` — أثر المسودة: النسخة النشطة، فروق الحقول، وتصريح بعدم مسّ الاشتراكات القائمة |
+| POST | `/api/platform/ops/subscription-policies/{id}/activate/` | `IsPlatformOperationsManager` — تفعيل بسبب إلزامي (`change_reason`) وتاريخ سريان اختياري (`effective_from`، فوري افتراضياً؛ لاحقاً ⇒ مجدولة)؛ يلزمه صنفا الفوترة الصالحان |
+| GET | `/api/platform/ops/subscription-policies/{id}/billing-products/` | `IsPlatformOperationsManager` — بحث الأصناف الخدمية (`?q=`) في شركة فوترة هذه النسخة وحدها، لمنتقي صنفَي الفوترة |
 | GET | `/api/platform/ops/billing-records/` | `IsPlatformOperationsManager` — نافذة قراءة على ما فُوتر فعلاً (تصفية `?company=` أو `?subscription=`). الفواتير تُصدَر بأمر الإدارة وحده، لا من هنا. |
 | GET · POST · PATCH · DELETE | `/api/platform/ops/job-postings/` | `IsPlatformRecruiter` — إدارة إعلانات الوظائف المنصية: الأفعال `close` و`reopen` و`regenerate-link`؛ و`DELETE` مرفوض بـ400 لإعلان له متقدمون. **الاستثناء الوحيد المعلن** يحرسه `PlatformRecruiterRouteScopeTest`. |
 | GET | `/api/platform/ops/job-applicants/` | `IsPlatformRecruiter` — متابعة المتقدمين (قراءة وأفعال لا CRUD): الأفعال `transition-status` و`rate` و`invite` و`cv` (يمرر البايتات بلا تسليم رابط التخزين). |
@@ -100,7 +126,7 @@
 | POST | `/api/platform/ops/intake/` | `HasValidIntegrationKey` (بمفتاح القناة لا بجلسة ولا بتوكن مستخدم) |
 | GET | `/api/platform/ops/integration-keys/` | `IsPlatformOperationsManager` |
 | POST | `/api/platform/ops/integration-keys/issue/` · `{id}/rotate/` · `{id}/revoke/` | `IsPlatformOperationsManager` |
-| GET | `/api/platform/ops/policy-profiles/` | `IsPlatformOperationsManager` أو `IsPlatformOperationsStaff` |
+| GET | `/api/platform/ops/policy-profiles/` · `/{id}/` | `IsPlatformOperationsManager` أو `IsPlatformOperationsStaff` — قراءة فقط؛ محرّر الأوزان المُصدَّر يأتي مع #210-د (والأوزان الرسمية هي الخمسة أعلاه حتى يُحسم غيرها هناك) |
 | GET | `/api/platform/ops/performance-snapshots/` | `IsPlatformOperationsManager` أو `IsPlatformOperationsStaff` (مفلتر للموظف على لقطاته) |
 | POST | `/api/platform/ops/performance-snapshots/capture/` | `IsPlatformOperationsManager` |
 | GET | `/api/platform/ops/notifications/` · `unread-count/` | `IsPlatformOperationsStaff` أو `IsPlatformOperationsManager` (مفلتر خادمياً) |
@@ -137,20 +163,33 @@
 - `PlatformEmployee` هوية صريحة؛ لا تُستنتج من `is_superuser` أو من دور داخل شركة.
 - موظف العمليات لا يحصل على `IsPlatformAdmin`، ومدير العمليات وحده يستعمل الحارس الإداري.
 - `ServiceSubscription` صف واحد لكل شركة، والاشتراك النشط هو بوابة الإسناد الوحيدة.
-- الأسعار تُحفظ على الاشتراك كي تبقى الفوترة قابلة للحساب حتى لو تغيّر تعريف الباقة لاحقاً.
+- **`trial` حالة صريحة منفصلة عن `active`** (`platform_ops/models.py` (`ServiceSubscription.Status`))؛ `INACTIVE` يعني بلا صفّ اشتراك أصلاً لا حالة مخزَّنة. الأهلية محورٌ واحد (`platform_ops/services.py` (`is_service_active` · `is_service_subscription_eligible` · `eligible_service_tenant_ids`)): `active` دائماً مؤهّلة، و`trial` مؤهّلة ما دام `now < trial_ends_at`، و`suspended`/`cancelled` غير مؤهلتين أبداً. بطاقات مركز القيادة وارتباطات الموظف وشريط التدخل وقائمة أوامر العمل (`WorkOrderViewSet`) وصحة الشركة (`CompanyHealthView`) لا تستعلم إلا الشركات المؤهلة في SQL — للمدير والموظف معاً، فالتجربة المنتهية تُبقي ارتباطها نشطاً لكنها تخرج من هذه الأسطح (404 على الصحة). وكل موضع تشغيلي آخر يمر بهذا المحور لا بمقارنة `status == ACTIVE` مباشرة.
+- **تجربة واحدة مدى حياة الشركة**: `start_service_trial` يرفض أي شركة لها صفّ اشتراك سابق (`trial_already_used`/`subscription_already_exists`)، و`activate_paid_subscription` (من لا شيء أو تجربة أو ملغى) لا يمنح تجربة ثانية أبداً ولا يعيد ضبط نافذة تجربة محفوظة.
+- **الاستئناف يعيد الحالة السابقة لا `active` دائماً**: `suspend_service_subscription` يحفظ `pre_suspension_status` قبل التعليق (من `trial`/`active` فقط)، و`resume_service_subscription` يعيده ولا يُحيي اشتراكاً `cancelled` إطلاقاً.
+- **والاستئناف يعيد الارتباطات التي علّقها ذلك التعليق وحدها**: التعليق يسجّل `suspended_engagement_ids` في حدثه، والاستئناف يمرّ عليها بـ`resume_engagement` فقط — ما علّقه مديرٌ يدوياً قبله يبقى معلَّقاً، وفشلُ ارتباطٍ بعينه (موظفٌ خرج من الخدمة) يُسجَّل في `failed_engagements` بحدث الاستئناف ولا يُسقط العملية. بلا هذا كانت الشركة تعود مؤهَّلةً وبلا أي ارتباط بصمت.
+- **الإلغاء يُجدول افتراضياً لا يُنفَّذ فوراً**: `schedule_service_subscription_cancellation` يضبط `scheduled_cancellation_date` (آخر يوم خدمة شامل في نهاية الدورة أو التجربة، بلا prorating؛ وفي شهر التفعيل قبل بدء أول دورة مفوترة هو `period_start - 1` كي لا يُفوتر شهر كامل لم يُخدم) ويحفظ السبب؛ `immediate=True` يمر عبر `deactivate_service_subscription` فوراً. `apply_due_subscription_cancellations` idempotent وتعمل بعد تمرير الفوترة في `bill_service_subscriptions`، ولا تعمل في `--dry-run`، فلا تضيع فاتورة الدورة الأخيرة. **الإلغاء المجدول لا يُطبَّق إلا بتشغيل `bill_service_subscriptions` الشهري، وخطأ نطاق في صف واحد يُسجَّل في `failed` ولا يوقف الدفعة، ولا يُطبَّق على اشتراك نشط قبل فوترة الدورة التي تضم آخر يوم خدمة (`period_start <= scheduled_cancellation_date` ⇒ مؤجَّل ويُبلَّغ به) كي لا يُسقط تشغيلٌ محصور أو فاشل فاتورتَها** — تواريخه نهايات دورات فتكفيه جولة شهرية، والتجربة المنتهية غير مؤهلة أصلاً قبل تطبيق إلغائها.
+- **كل انتقال اشتراك يكتب `ServiceSubscriptionEvent` واحداً** في نفس المعاملة الذرية، يحمل معرّف ارتباط (`X-Correlation-ID` أو `uuid4` مولَّد) — لا مسار تعديل أو حذف للحدث.
+- كل كتابة اشتراك تمر بخدمات `start_service_trial` أو `activate_paid_subscription` أو `suspend_service_subscription` أو `resume_service_subscription` أو `schedule_service_subscription_cancellation` أو `withdraw_scheduled_service_cancellation` أو `update_subscription_commercial_settings`؛ لا CRUD عام، وعميل الفوترة لا يجوز أن يتبع الشركة المشتركة نفسها. **التفعيل المدفوع وتحويل التجربة يلزمهما `billing_customer`** (`billing_customer_required`) — لا اشتراك مدفوع لا يمكن فوترته؛ والتجربة وحدها تبدأ بلا عميل. تعديلات الإعدادات التجارية على اشتراك حي تسري على أول فوترة شهرية تصدر بعد الحفظ (الفوترة تقرأ قيم الصف لحظة التشغيل).
+- **سياسة الاشتراك (`ServiceSubscriptionPolicy`) بلا تداخل نوافذ سريان لكل نطاق خطة، تحت قفل صريح على كل صفوفها** لا `UniqueConstraint(condition=…)` — MySQL تتجاهلها بصمت. `get_active_subscription_policy(at, plan)` يعيد نسخة الخطة السارية وإلا العامة. التفعيل يتطلب `change_reason` غير فارغ ومحفوظ وتاريخ سريان غير ماضٍ (فوري افتراضياً): نسخة النطاق السابقة تُغلق نافذتها عند تاريخ الجديدة، وتُرفض الجديدة (`subscription_policy_overlap`، 409) إن سبق تاريخُها نسخةً مجدولة لنفس النطاق؛ ما انقضت نافذته يُعلَّم `retired` عند التفعيل التالي و`effective_state` يعكس الحقيقة بينهما. **التفعيل يلزمه صنف رسم شهري خدمي في شركة فوترة النسخة، وصنف تجاوز متى كان سعر التجاوز أكبر من صفر** — كي لا يُنشأ اشتراك لا يمكن فوترته. النسخة النشطة أو المنتهية لا تُعدَّل أبداً — `clone_subscription_policy_to_draft` ينسخها إلى مسودة جديدة. معرّف شركة فوترة غير صالح يرد 400 عبر `SubscriptionManagementError` لا 500. كل كتابة على السياسة تكتب `ServiceSubscriptionPolicyEvent` في نفس المعاملة بمعرّف الارتباط. رقم نسخة المسودة يُحسب بلا `select_for_update` (قفل مدى فارغ على MySQL = gap lock وتشابك 1213)؛ القيد الفريد على `version` يرد التزامن 409.
+- **التسلسل على MySQL بقفل صف موجود**: `start_service_trial` و`activate_paid_subscription` يقفلان صف `Tenant` قبل صف الاشتراك (قفل صف اشتراك غير موجود = gap lock وتشابك)، و`activate_subscription_policy` يقفل كل صفوف السياسة مرتبة بالمفتاح (المسودة نفسها تضمن صفاً واحداً على الأقل). `IntegrityError` يبقى 409.
+- **SLA لكل خطة مؤجل صراحةً إلى #210-C** (SLA أوامر العمل) — الخطة في 210-A نطاقُ نسخة سياسة يحدد أسعارها وصنفيها وأيام تجربتها، والفوترة شهرية وحدها. نطاق «موظف» لإعدادات التعويض يأتي مع مجموعته في #210-D.
+- **أصناف الفوترة من لقطة الاشتراك لا من سطر الأمر**: بدء التجربة والتفعيل يلتقطان صنفَي نسخة السياسة، و`bill_service_subscriptions` يقرأ لكل اشتراك (`resolve_subscription_billing_products`) التجاوز الصريح `--fixed-fee-product-id`/`--overage-product-id` إن مُرِّر، ثم لقطة الاشتراك، ثم `PLATFORM_OPS_BILLING_*_PRODUCT_ID` للصفوف القديمة؛ ومن ينقصه صنف يُبلَّغ عنه بكود `billing_preflight` لا بخطأ تشغيل عام.
+- **شروط اشتراك بعينه تُعدَّل استثناءً بسبب**: `update_subscription_commercial_settings` يرفض بلا `reason` متى تغيّر حقل، ويرفض الملغى، و`subscription_policy_version` يبقى مصدر اللقطة الأصلية والانحراف في حدث `settings_updated`. تحويل التجربة يُبقي خطتها ولقطتها (`plan_fixed_by_trial` عند طلب خطة أخرى)، وإعادة تفعيل الملغى تحفظ الشروط المستبدلة في `previous_terms` بحدث التفعيل. قيم نموذج السياسة الافتراضية (300/300/7) بذرة لمسودة جديدة فقط؛ القيم السارية تأتي دائماً من نسخة مفعّلة.
+- الأسعار تُحفظ على الاشتراك كي تبقى الفوترة قابلة للحساب حتى لو تغيّر تعريف الباقة لاحقاً؛ التفعيل المدفوع أو إعادة التفعيل يبدأان أول الشهر الميلادي التالي بلا prorating، لذلك لا تُفوتر بقية شهر التفعيل وتُتخطى الدورة الأسبق بكود `subscription_not_yet_billable`. تحويل التجربة يحفظ لقطة التجربة، وإعادة التفعيل من `cancelled` تلتقط السياسة النشطة الجديدة.
 - لا `require_module` ولا `get_tenant` على مسارات المنصة العابرة للشركات.
 - أي كيان لاحق يخص شركة يحمل `tenant` ويُفلتر عليه؛ الاستثناءات الوحيدة بلا
   `tenant` هي `PlatformEmployee` و`JobPosting` و`JobApplicant` و`JobApplicantInvitation`
-  و`PlatformRecruiter`، و`SubscriptionBillingRecord` شركته مشتقة عبر `subscription.tenant`
-  لا بحقل مباشر.
+  و`PlatformRecruiter` و`ServiceSubscriptionPolicy` و`ServiceSubscriptionPolicyEvent` (افتراضيات
+  منصة لا شركة)، و`SubscriptionBillingRecord` و`ServiceSubscriptionEvent` شركتهما مشتقة عبر
+  `subscription.tenant` لا بحقل مباشر.
 - فرادة الارتباط النشط لنفس (الموظف، الشركة) تُفرض تحت قفل `select_for_update` في الخدمة داخل `transaction.atomic` لأن MySQL تتجاهل القيود الشرطية.
 - الإلغاء والتعليق يسحبان فقط العضوية التي أنشأها الارتباط (`created_membership=True`)، ولا يمسّان أي عضوية مسبقة للزبون.
 - إيقاف أو تعليق اشتراك الخدمة يُعلّق الارتباطات النشطة ولا يحذفها.
-- نقطة أوامر العمل مفلترة بخلاف أختيها: موظف المنصة يرى شركات ارتباطاته النشطة وحدها، والشركات تُشتق من `Engagement` لا من الطلب. ومدير المنصة وحده يرى الكل.
+- نقطة أوامر العمل مفلترة بخلاف أختيها: موظف المنصة يرى شركات ارتباطاته النشطة وحدها، والشركات تُشتق من `Engagement` لا من الطلب. ومدير المنصة وحده يرى كل الشركات — المؤهلة للخدمة منها فقط.
 - كل تغيير حالة لأمر العمل يمر بـ`transition_work_order_status` وفق خريطة `WORK_ORDER_TRANSITIONS` وحدها — لا كتابة مباشرة على `status`.
 - مغادرة موظف المنصة (`offboard_platform_employee`) عملية ذرية idempotent لا تفشل ولا تكرر الآثار عند تكرار الاستدعاء.
 - قائمة الاستيراد البيضاء تتوسع فقط عند حاجة مرحلة موثقة، ولا تستورد الوحدة `employee_ops`؛ اتسعت في م٨ عمّا يسمّيه §١ من المواصفة بـ`sales.models` · `sales.serializers` · `sales.services` · `inventory.models`، لأن §٥ يفرض أن تمر فاتورة الخدمة بمسار المبيعات — قرار مسجّل.
-- ترتيب الأقفال الصارم: `IntegrationKey -> ServiceSubscription -> PlatformEmployee -> Engagement -> WorkOrder -> WorkOrderDeliverable -> UserCompanyMembership -> DailyRating -> JobPosting -> JobApplicantInvitation -> JobApplicant`.
+- ترتيب الأقفال الصارم: `Tenant -> ServiceSubscriptionPolicy -> IntegrationKey -> ServiceSubscription -> PlatformEmployee -> Engagement -> WorkOrder -> WorkOrderDeliverable -> UserCompanyMembership -> DailyRating -> JobPosting -> JobApplicantInvitation -> JobApplicant`.
 - كل انتقال في حالة أمر العمل يمر حصراً بدالة `transition_work_order_status` في `platform_ops/services.py` وتُفرض الانتقالات عبر بنية `WORK_ORDER_TRANSITIONS` الصريحة.
 - الأجل يُقاس من `received_at` إلى `approved_at`؛ و`waiting_customer` يوقف العداد ويُسجل التراكم في `waiting_seconds_total` ويمدد الأجل النهائي.
 - لقطة سياسة الأجل (`policy_snapshot`) تُحفظ وقت الإنشاء، ولقطة التسليم (`content_snapshot`) تُحفظ وقت التقديم؛ كلاهما غير قابل للتعديل بتحرير خارجي لاحق.
@@ -255,8 +294,7 @@
 
 **قيودٌ معروفةٌ مقبولةٌ للإطلاق التجريبيّ (م٨)** — قرارٌ واعٍ لا سهو، يُعاد النظرُ فيه بعد الـpilot:
 
-- **ربطُ عميل الفوترة يدويّ:** لا نقطةَ ولا شاشةَ تكتب `ServiceSubscription.billing_customer`؛ يُضبط من `manage.py shell` لشركة الـpilot الواحدة.
-  ولا حارسَ عند الكتابة نفسِها؛ الحارسُ عند الفوترة في `platform_ops/services.py` (`billing_preflight`) — عميلٌ من شركة الاشتراك يُرفض قبل أيّ فاتورة.
+- **ربطُ عميل الفوترة محروسٌ من الشاشة:** تكتب شاشة السوبر أدمن `ServiceSubscription.billing_customer` عبر خدمة الإعدادات فقط، وتُرفض قيمة من شركة الاشتراك نفسها قبل الحفظ؛ وتبقى بوابة الفوترة `billing_preflight` الحارس النهائي قبل أي فاتورة.
 - **العدّادُ بلا تاريخ:** `consumed_quota` يُحسب على الدورة الجارية لحظةَ القبول، فعمليّةٌ تُقبل بين `period_end` وتشغيل الأمر تُفوتَر على الدورة المنتهية.
   لذلك يُشغَّل `bill_service_subscriptions` صباحَ أوّل يومٍ من الشهر.
 - **مسؤولُ التوظيف يرى رابطَ الدعوة الخامّ** لأنّه مَن يسلّمه للمرشّح؛ فيستطيع تقنيّاً قبولَها بنفسه. الحسابُ الناتج يظهر `PlatformEmployee`
@@ -275,6 +313,7 @@
 | `platform_ops/tests/test_isolation_guard.py` | الاستيراد الصريح والديناميكي في الاتجاهين والقائمة البيضاء الصريحة |
 | `platform_ops/tests/test_migration_graph.py` | وجود الهجرات وترتيب الاعتماديات |
 | `platform_ops/tests/test_subscription_billing.py` | فوترة الاشتراكات الشهرية: الحساب وفصل السطور وترحيل الفواتير وعدم التكرار والذرية وعزل الشركات وسلامة الحقول، والدورة الصفرية بلا فاتورة، ورفض عميل من شركة الاشتراك، والمعاينة تساوي التشغيل و`CommandError` |
+| `platform_ops/tests/test_subscription_management.py` | جدول انتقالات كامل (تجربة/تفعيل مدفوع/تعليق/استئناف/إلغاء مجدول أو فوري/سحب الجدولة)، تجربة واحدة مدى الحياة، انتهاء التجربة يُسقط الأهلية، رفض فوترة `trial`، تطبيق الإلغاء المجدول مرة واحدة idempotent، تعارض تفعيل متزامن 409، عزل عميل الفوترة وبحثه بشركة فوترة الاشتراك الملتقطة، عميل الفوترة إلزامي للتفعيل المدفوع، الإلغاء في شهر التفعيل قبل أول دورة، حدث واحد بمعرّف ارتباط لكل إجراء اشتراك وسياسة، قاعدة نسخة السياسة النشطة الواحدة ومعاينة الفروق بالمال نصاً، خروج التجربة المنتهية والملغى من أوامر العمل والصحة للدورين، صلاحيات 403 لغير السوبر أدمن (بمن فيهم موظف المنصة) على كل مسار، وعقد API الواجهة |
 | `platform_ops/tests/test_daily_ratings_and_books.py` | العمل الفعلي شرطاً، انتهاء الرمز بـ410، التعديل الواحد، عدم حفظ الرمز الخام، القائمة البيضاء للرد العام، الخانق بـ429 مع ترويسة مزوَّرة، استبعاد العرض والدخول، عزل الشركة، اشتقاق الوكيل من `Engagement` حصراً، فصل الدرجتين، ومنع المُقيَّم من تعديل تقييمه أو حذفه |
 | `platform_ops/tests/test_hiring_portal.py` | بوابة التوظيف والسطح الإداري (`PlatformHiringAdminSurfaceTests`): النماذج بلا `tenant`، فحص السيرة بالبايتات والبنية، التقديم العام، 410 للمغلق، تهشير رمز الدعوة، إنشاء الحساب عند القبول لا قبله، منع تحريك الحالة بكتابة مباشرة، رفض حذف إعلان له متقدمون، تمرير بايتات السيرة بلا تسليم رابط التخزين، عزل دور التوظيف عن كل مسارات المنصة، وجرد السطح العام بخانقه ومصادقته، ورفض المتقدم يبطل الدعوة، و`PATCH is_open` متجاهل، واسم السيرة العربي `filename*=`، وقوة كلمة المرور وسباق اسم المستخدم |
 | `platform_ops/tests/test_hiring_frontend_contract.py` | حارس العقد بين واجهات التوظيف والفوترة بالـ frontend وحمولات الخادم الحقيقية للـ 13 واجهة، ومطابقة `APPLICANT_STATUS_OPTIONS`/`EMPLOYMENT_TYPE_OPTIONS` لـ`choices` الخادم |

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **715**
+عدد النقاط: **733**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -584,8 +584,26 @@
 | `/api/platform/ops/policy-profiles/{pk}/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/recruiters/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/recruiters/{pk}/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscription-policies/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscription-policies/draft/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscription-policies/{pk}/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscription-policies/{pk}/activate/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscription-policies/{pk}/billing-products/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscription-policies/{pk}/clone/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscription-policies/{pk}/preview/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscription-policies/{pk}/update-draft/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscriptions/activate-paid/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscriptions/billing-customers/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscriptions/start-trial/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/{pk}/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscriptions/{pk}/activate-paid/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscriptions/{pk}/cancel/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscriptions/{pk}/events/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscriptions/{pk}/resume/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscriptions/{pk}/suspend/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscriptions/{pk}/update-settings/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/subscriptions/{pk}/withdraw-cancellation/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/work-orders/` | `WorkOrderViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/work-orders/{pk}/` | `WorkOrderViewSet` | `platform_ops/views.py` |
 | `/api/platform/super-admins/` | `platform_super_admins` | `core/platform_admin_api.py` |

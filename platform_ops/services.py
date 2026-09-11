@@ -1,7 +1,7 @@
 """خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة والسابعة والثامنة).
 
 ترتيب الأقفال الصارم لمنع التعارضات والـ Deadlocks على MySQL:
-IntegrationKey -> ServiceSubscription -> PlatformEmployee -> Engagement -> WorkOrder
+Tenant -> ServiceSubscriptionPolicy -> IntegrationKey -> ServiceSubscription -> PlatformEmployee -> Engagement -> WorkOrder
 -> WorkOrderDeliverable -> UserCompanyMembership -> DailyRating -> JobPosting -> JobApplicantInvitation -> JobApplicant
 ملاحظة: لا يُستعمل select_related مع select_for_update لتجنب قفل جداول غير مقصودة.
 """
@@ -10,12 +10,13 @@ import copy
 import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
+import logging
 import secrets
 
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import IntegrityError, models, transaction
-from django.db.models import Avg, Max
+from django.db.models import Avg, Max, Q
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
 
@@ -27,6 +28,7 @@ from hr.models import AttendanceDay, UserDevice
 from tenants.models import Currency, Tenant, UserCompanyMembership
 
 from .models import (
+    MAX_SERVICE_TRIAL_DAYS,
     AgentGrantedMembership,
     DailyRating,
     DailyRatingToken,
@@ -41,12 +43,20 @@ from .models import (
     PlatformNotification,
     PlatformRecruiter,
     PolicyProfile,
+    ServiceSubscriptionEvent,
+    ServiceSubscriptionPolicyEvent,
+    ServiceSubscriptionPolicy,
     ServiceSubscription,
     SubscriptionBillingRecord,
     WorkOrder,
     WorkOrderComment,
     WorkOrderDeliverable,
 )
+
+logger = logging.getLogger(__name__)
+
+_UNSET = object()
+DEFAULT_SERVICE_PLAN = "standard"
 
 
 
@@ -123,6 +133,1110 @@ class BillingConfigurationError(BillingError):
     pass
 
 
+class SubscriptionManagementError(PlatformOpsError):
+    """خطأ في تفعيل أو إعداد اشتراك خدمة المنصة."""
+
+
+class SubscriptionManagementConflict(SubscriptionManagementError):
+    """تعارض في انتقال أو إنشاء اشتراك خدمة."""
+
+    def __init__(self, code: str, detail: str):
+        super().__init__(code, detail, status_code=409)
+
+
+def _validate_subscription_decimal(value, field_name: str) -> Decimal:
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise SubscriptionManagementError(field_name, f"قيمة {field_name} غير صالحة.")
+    if not result.is_finite() or result < Decimal("0.00"):
+        raise SubscriptionManagementError(field_name, f"قيمة {field_name} يجب أن تكون صفراً أو أكبر.")
+    return result.quantize(Decimal("0.01"))
+
+
+def _validate_included_quota(value) -> int:
+    # `bool` فرعٌ من `int` في بايثون — `True` ليست حصّة.
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise SubscriptionManagementError(
+            "included_quota",
+            "الحصة المشمولة يجب أن تكون عدداً صحيحاً غير سالب.",
+        )
+    return value
+
+
+def _log_subscription_event(
+    subscription: ServiceSubscription,
+    *,
+    action: str,
+    from_status: str = "",
+    to_status: str = "",
+    reason: str = "",
+    actor=None,
+    correlation_id: str = "",
+    details: dict | None = None,
+):
+    """يكتب حدث تدقيق واحد داخل معاملة الانتقال الحالية — لا مسار تعديل أو حذف له لاحقاً."""
+    return ServiceSubscriptionEvent.objects.create(
+        subscription=subscription,
+        action=action,
+        from_status=from_status or "",
+        to_status=to_status or "",
+        reason=str(reason or "")[:500],
+        actor=actor if getattr(actor, "pk", None) else None,
+        correlation_id=str(correlation_id or "")[:64],
+        details=details or {},
+    )
+
+
+def _normalize_plan(plan) -> str:
+    return str(plan or "").strip()[:50]
+
+
+def get_active_subscription_policy(at: datetime.datetime | None = None, plan: str = ""):
+    """يعيد نسخة السياسة السارية لخطة في لحظة محددة، دون تخمين افتراضي.
+
+    النسخة الخاصة بالخطة تغلب العامة (`plan` فارغ)، والسريان من نافذة
+    `effective_from`/`effective_to` — فالنسخة المجدولة لتاريخ لاحق لا تسري قبله.
+    """
+    moment = at or timezone.now()
+    in_effect = (
+        ServiceSubscriptionPolicy.objects
+        .filter(status=ServiceSubscriptionPolicy.Status.ACTIVE, effective_from__lte=moment)
+        .filter(Q(effective_to__isnull=True) | Q(effective_to__gt=moment))
+    )
+    plan = _normalize_plan(plan)
+    if plan:
+        specific = in_effect.filter(plan=plan).order_by("-version").first()
+        if specific is not None:
+            return specific
+    return in_effect.filter(plan="").order_by("-version").first()
+
+
+def _resolve_billing_product(value, field_name: str):
+    """يقبل صنفاً أو معرّفه أو لا شيء؛ المعرّف غير الموجود خطأ نطاق 400 لا 500."""
+    from inventory.models import Product
+
+    if value is None or value == "":
+        return None
+    if isinstance(value, Product):
+        return value
+    product = Product.objects.filter(pk=value).first()
+    if product is None:
+        raise SubscriptionManagementError(f"{field_name}_not_found", "صنف الفوترة المحدد غير موجود.")
+    return product
+
+
+def _validate_policy_billing_products(
+    *, billing_tenant_id, fixed_fee_product, overage_product, overage_unit_price, require_complete: bool,
+):
+    """صنفا الفوترة خدميان ويتبعان شركة فوترة المنصة نفسها — القاعدة التي يفرضها `billing_preflight` لاحقاً.
+
+    `require_complete` لحظة التفعيل: صنف الرسم إلزامي، وصنف التجاوز إلزامي متى كان سعر التجاوز أكبر من صفر،
+    كي لا تُنشأ اشتراكات لا يمكن فوترتها.
+    """
+    for field_name, product in (("fixed_fee_product", fixed_fee_product), ("overage_product", overage_product)):
+        if product is None:
+            continue
+        if product.tenant_id != billing_tenant_id:
+            raise SubscriptionManagementError(
+                f"{field_name}_cross_tenant", "صنف الفوترة يجب أن يتبع شركة فوترة المنصة المحددة في السياسة.",
+            )
+        if not getattr(product, "is_service", False):
+            raise SubscriptionManagementError(f"{field_name}_not_service", "صنف الفوترة يجب أن يكون صنفاً خدمياً.")
+    if require_complete and fixed_fee_product is None:
+        raise SubscriptionManagementError("fixed_fee_product_required", "حدّد صنف الرسم الشهري قبل تفعيل السياسة.")
+    if require_complete and overage_unit_price > Decimal("0.00") and overage_product is None:
+        raise SubscriptionManagementError(
+            "overage_product_required", "حدّد صنف العمليات الزائدة لسياسة سعر تجاوزها أكبر من صفر.",
+        )
+
+
+def search_policy_billing_products(*, policy, query: str = "", limit: int = 20):
+    """أصناف خدمية في شركة فوترة السياسة وحدها — لا معامل شركة من الطالب."""
+    from inventory.models import Product
+
+    billing_tenant_id = ServiceSubscriptionPolicy.objects.filter(
+        pk=getattr(policy, "pk", policy),
+    ).values_list("billing_tenant_id", flat=True).first()
+    if billing_tenant_id is None:
+        return Product.objects.none()
+    qs = Product.objects.filter(tenant_id=billing_tenant_id, is_service=True)
+    query = str(query or "").strip()
+    if query:
+        qs = qs.filter(Q(sku__icontains=query) | Q(name_ar__icontains=query))
+    return qs.order_by("sku")[:limit]
+
+
+def _resolve_billing_tenant(billing_tenant):
+    if billing_tenant is None:
+        raise SubscriptionManagementError(
+            "billing_tenant_required",
+            "شركة فوترة المنصة مطلوبة قبل تفعيل سياسة الاشتراك.",
+        )
+    if isinstance(billing_tenant, Tenant):
+        return billing_tenant
+    try:
+        return Tenant.objects.get(pk=billing_tenant)
+    except (Tenant.DoesNotExist, ValueError, TypeError):
+        raise SubscriptionManagementError(
+            "billing_tenant_not_found",
+            "شركة فوترة المنصة غير موجودة.",
+        )
+
+
+def _validate_subscription_policy_values(
+    *, monthly_fee, included_quota, trial_days, billing_tenant, overage_unit_price=Decimal("0.00"),
+):
+    billing_tenant = _resolve_billing_tenant(billing_tenant)
+    monthly_fee = _validate_subscription_decimal(monthly_fee, "monthly_fee")
+    overage_unit_price = _validate_subscription_decimal(overage_unit_price, "overage_unit_price")
+    included_quota = _validate_included_quota(included_quota)
+    try:
+        trial_days = int(trial_days)
+    except (TypeError, ValueError):
+        raise SubscriptionManagementError("trial_days", "مدة التجربة يجب أن تكون عدداً صحيحاً.")
+    if not 0 <= trial_days <= MAX_SERVICE_TRIAL_DAYS:
+        raise SubscriptionManagementError(
+            "trial_days",
+            f"مدة التجربة يجب أن تكون بين 0 و{MAX_SERVICE_TRIAL_DAYS} يوماً.",
+        )
+    return monthly_fee, included_quota, trial_days, billing_tenant, overage_unit_price
+
+
+def _policy_event_details(policy):
+    return {
+        "plan": policy.plan,
+        "fixed_fee_product_id": policy.fixed_fee_product_id,
+        "overage_product_id": policy.overage_product_id,
+        "billing_tenant_id": policy.billing_tenant_id,
+        "monthly_fee": str(policy.monthly_fee),
+        "included_quota": policy.included_quota,
+        "trial_days": policy.trial_days,
+        "overage_unit_price": str(policy.overage_unit_price),
+    }
+
+
+def _log_subscription_policy_event(policy, *, action, actor=None, correlation_id="", details=None):
+    """حدثُ تدقيقٍ للسياسة داخل معاملة الكتابة نفسها — لا مسار تعديل أو حذف له."""
+    return ServiceSubscriptionPolicyEvent.objects.create(
+        policy=policy,
+        action=action,
+        actor=actor if getattr(actor, "pk", None) else None,
+        correlation_id=str(correlation_id or "")[:64],
+        details=details or {},
+    )
+
+
+def create_subscription_policy_draft(
+    *,
+    actor=None,
+    billing_tenant,
+    monthly_fee=_UNSET,
+    included_quota=_UNSET,
+    trial_days=_UNSET,
+    overage_unit_price=_UNSET,
+    plan: str = "",
+    fixed_fee_product=None,
+    overage_product=None,
+    correlation_id: str = "",
+    cloned_from=None,
+):
+    """ينشئ نسخة مسودة مؤرخة من افتراضيات الاشتراك.
+
+    الحقول الغائبة تأخذ افتراضيات النموذج — الواجهة لا تحمل أرقام الـpilot.
+    `cloned_from` يجعل حدث التدقيق `cloned` بمصدره بدل `created`.
+
+    لا `select_for_update` لحساب رقم النسخة: قفلُ مدى فارغ على MySQL يأخذ
+    gap lock فتتشابك معاملتان تُدرجان معاً (1213، لا IntegrityError). القيدُ
+    الفريد على `version` هو الحارس: المعاملة الثانية تنتظر ثم تُرفض بتكرار
+    المفتاح ← 409 «أعد المحاولة».
+    """
+    if monthly_fee is _UNSET:
+        monthly_fee = ServiceSubscriptionPolicy._meta.get_field("monthly_fee").default
+    if included_quota is _UNSET:
+        included_quota = ServiceSubscriptionPolicy._meta.get_field("included_quota").default
+    if trial_days is _UNSET:
+        trial_days = ServiceSubscriptionPolicy._meta.get_field("trial_days").default
+    if overage_unit_price is _UNSET:
+        overage_unit_price = ServiceSubscriptionPolicy._meta.get_field("overage_unit_price").default
+    monthly_fee, included_quota, trial_days, billing_tenant, overage_unit_price = (
+        _validate_subscription_policy_values(
+            monthly_fee=monthly_fee,
+            included_quota=included_quota,
+            trial_days=trial_days,
+            billing_tenant=billing_tenant,
+            overage_unit_price=overage_unit_price,
+        )
+    )
+    fixed_fee_product = _resolve_billing_product(fixed_fee_product, "fixed_fee_product")
+    overage_product = _resolve_billing_product(overage_product, "overage_product")
+    _validate_policy_billing_products(
+        billing_tenant_id=billing_tenant.pk,
+        fixed_fee_product=fixed_fee_product,
+        overage_product=overage_product,
+        overage_unit_price=overage_unit_price,
+        require_complete=False,
+    )
+    with transaction.atomic():
+        last_version = ServiceSubscriptionPolicy.objects.aggregate(Max("version"))["version__max"] or 0
+        try:
+            # نقطةُ حفظٍ حول الإدراج كي لا تبقى المعاملةُ الخارجية معطوبةً بعد IntegrityError.
+            with transaction.atomic():
+                policy = ServiceSubscriptionPolicy.objects.create(
+                    version=last_version + 1,
+                    status=ServiceSubscriptionPolicy.Status.DRAFT,
+                    plan=_normalize_plan(plan),
+                    billing_tenant=billing_tenant,
+                    fixed_fee_product=fixed_fee_product,
+                    overage_product=overage_product,
+                    monthly_fee=monthly_fee,
+                    included_quota=included_quota,
+                    trial_days=trial_days,
+                    overage_unit_price=overage_unit_price,
+                    created_by=actor if getattr(actor, "pk", None) else None,
+                )
+        except IntegrityError:
+            raise SubscriptionManagementConflict(
+                "subscription_policy_version_conflict",
+                "تعذر إنشاء نسخة سياسة جديدة؛ أعد المحاولة.",
+            )
+        details = {"after": _policy_event_details(policy)}
+        if cloned_from is not None:
+            details["source_policy_id"] = cloned_from.pk
+        _log_subscription_policy_event(
+            policy,
+            action=(
+                ServiceSubscriptionPolicyEvent.Action.CLONED
+                if cloned_from is not None
+                else ServiceSubscriptionPolicyEvent.Action.CREATED
+            ),
+            actor=actor,
+            correlation_id=correlation_id,
+            details=details,
+        )
+    logger.info(
+        "platform.subscription_policy_draft_created policy=%s version=%s actor=%s",
+        policy.pk,
+        policy.version,
+        getattr(actor, "pk", None),
+    )
+    return policy
+
+
+def clone_subscription_policy_to_draft(*, policy, actor=None, correlation_id: str = ""):
+    """ينسخ نسخة نشطة أو منتهية إلى مسودة جديدة قابلة للتعديل — النسخ الأخرى لا تُعدَّل أبداً."""
+    source = ServiceSubscriptionPolicy.objects.get(pk=getattr(policy, "pk", policy))
+    return create_subscription_policy_draft(
+        actor=actor,
+        billing_tenant=source.billing_tenant_id,
+        monthly_fee=source.monthly_fee,
+        included_quota=source.included_quota,
+        trial_days=source.trial_days,
+        overage_unit_price=source.overage_unit_price,
+        plan=source.plan,
+        fixed_fee_product=source.fixed_fee_product_id,
+        overage_product=source.overage_product_id,
+        correlation_id=correlation_id,
+        cloned_from=source,
+    )
+
+
+@transaction.atomic
+def update_subscription_policy_draft(*, policy, actor=None, correlation_id: str = "", **changes):
+    """يعدّل المسودة فقط؛ النسخ النشطة والمنتهية غير قابلة للتغيير."""
+    allowed = {
+        "billing_tenant", "monthly_fee", "included_quota", "trial_days", "overage_unit_price",
+        "plan", "fixed_fee_product", "overage_product",
+    }
+    if set(changes) - allowed:
+        raise SubscriptionManagementError("unsupported_field", "يوجد حقل سياسة غير مسموح بتعديله.")
+    locked = ServiceSubscriptionPolicy.objects.select_for_update().get(pk=getattr(policy, "pk", policy))
+    if locked.status != ServiceSubscriptionPolicy.Status.DRAFT:
+        raise SubscriptionManagementConflict("subscription_policy_immutable", "لا يمكن تعديل سياسة مفعلة أو منتهية.")
+    monthly_fee, included_quota, trial_days, billing_tenant, overage_unit_price = (
+        _validate_subscription_policy_values(
+            monthly_fee=changes.get("monthly_fee", locked.monthly_fee),
+            included_quota=changes.get("included_quota", locked.included_quota),
+            trial_days=changes.get("trial_days", locked.trial_days),
+            billing_tenant=changes.get("billing_tenant", locked.billing_tenant),
+            overage_unit_price=changes.get("overage_unit_price", locked.overage_unit_price),
+        )
+    )
+    fixed_fee_product = _resolve_billing_product(
+        changes.get("fixed_fee_product", locked.fixed_fee_product_id), "fixed_fee_product",
+    )
+    overage_product = _resolve_billing_product(
+        changes.get("overage_product", locked.overage_product_id), "overage_product",
+    )
+    _validate_policy_billing_products(
+        billing_tenant_id=billing_tenant.pk,
+        fixed_fee_product=fixed_fee_product,
+        overage_product=overage_product,
+        overage_unit_price=overage_unit_price,
+        require_complete=False,
+    )
+    before = _policy_event_details(locked)
+    locked.monthly_fee = monthly_fee
+    locked.included_quota = included_quota
+    locked.trial_days = trial_days
+    locked.billing_tenant = billing_tenant
+    locked.overage_unit_price = overage_unit_price
+    locked.plan = _normalize_plan(changes.get("plan", locked.plan))
+    locked.fixed_fee_product = fixed_fee_product
+    locked.overage_product = overage_product
+    locked.save(update_fields=[
+        "monthly_fee", "included_quota", "trial_days", "billing_tenant", "overage_unit_price",
+        "plan", "fixed_fee_product", "overage_product", "updated_at",
+    ])
+    _log_subscription_policy_event(
+        locked, action=ServiceSubscriptionPolicyEvent.Action.UPDATED, actor=actor,
+        correlation_id=correlation_id,
+        details={"before": before, "after": _policy_event_details(locked)},
+    )
+    logger.info(
+        "platform.subscription_policy_draft_updated policy=%s version=%s fields=%s actor=%s",
+        locked.pk,
+        locked.version,
+        ",".join(sorted(changes)),
+        getattr(actor, "pk", None),
+    )
+    return locked
+
+
+def preview_subscription_policy(*, policy) -> dict:
+    """يعيد أثر المسودة: النسخة النشطة الحالية، فروق الحقول، وتصريحاً بعدم مس القائم.
+
+    لا يغيّر حالة السياسة ولا أي اشتراك — قراءة صرفة.
+    """
+    draft = ServiceSubscriptionPolicy.objects.select_related("billing_tenant").get(
+        pk=getattr(policy, "pk", policy)
+    )
+    # تُقارن المسودة بالنسخة السارية لنطاقها (الخاصة بخطتها وإلا العامة).
+    active = get_active_subscription_policy(plan=draft.plan)
+    compared_fields = (
+        "plan", "billing_tenant_id", "monthly_fee", "included_quota", "trial_days", "overage_unit_price",
+        "fixed_fee_product_id", "overage_product_id",
+    )
+    diff = {}
+    for field in compared_fields:
+        draft_value = getattr(draft, field)
+        active_value = getattr(active, field) if active else None
+        if draft_value != active_value:
+            money = field in {"monthly_fee", "overage_unit_price"}
+            diff[field] = {
+                "active": str(active_value) if money and active_value is not None else active_value,
+                "draft": str(draft_value) if money and draft_value is not None else draft_value,
+            }
+    return {
+        "draft": draft,
+        "active": active,
+        "diff": diff,
+        "note": "معاينة فقط: لا يتغيّر أي اشتراك قائم؛ الأثر يسري على التفعيلات الجديدة من تاريخ سريان النسخة.",
+    }
+
+
+@transaction.atomic
+def activate_subscription_policy(
+    *, policy, actor=None, change_reason: str = "", correlation_id: str = "", effective_from=None,
+):
+    """يفعّل مسودة بسبب إلزامي وتاريخ سريان (الآن افتراضياً، أو لاحقاً فتصير «مجدولة»).
+
+    منع التداخل لكل نطاق (`plan`) تحت قفل صريح على كل صفوف السياسة — لا بقيد
+    شرطي تتجاهله MySQL: نسخة النطاق السارية أو المجدولة تُغلق نافذتها عند تاريخ
+    سريان الجديدة، وتُرفض الجديدة إن سبق تاريخُها نسخةً مجدولة لنفس النطاق.
+    النسخ التي انقضت نافذتها تُعلَّم `retired` هنا، و`effective_state` يعكس
+    الحقيقة بين تفعيلين. التفعيل يلزمه صنفا الفوترة الصالحان.
+    """
+    change_reason = str(change_reason or "").strip()
+    if not change_reason:
+        raise SubscriptionManagementError("change_reason_required", "سبب التفعيل مطلوب.")
+    locked_policies = list(ServiceSubscriptionPolicy.objects.select_for_update().order_by("pk"))
+    locked = next((row for row in locked_policies if row.pk == getattr(policy, "pk", policy)), None)
+    if locked is None:
+        raise SubscriptionManagementError("subscription_policy_not_found", "سياسة الاشتراك غير موجودة.")
+    if locked.status != ServiceSubscriptionPolicy.Status.DRAFT:
+        raise SubscriptionManagementConflict("subscription_policy_not_draft", "لا يمكن تفعيل هذه السياسة مرة أخرى.")
+
+    now = timezone.now()
+    starts_at = effective_from or now
+    if timezone.is_naive(starts_at):
+        starts_at = timezone.make_aware(starts_at)
+    # هامش دقيقة لفرق الساعة بين المتصفح والخادم؛ ما قبله ماضٍ مرفوض.
+    if starts_at < now - datetime.timedelta(minutes=1):
+        raise SubscriptionManagementError("effective_from_in_past", "تاريخ السريان لا يكون في الماضي.")
+    starts_at = max(starts_at, now)
+
+    _validate_policy_billing_products(
+        billing_tenant_id=locked.billing_tenant_id,
+        fixed_fee_product=locked.fixed_fee_product,
+        overage_product=locked.overage_product,
+        overage_unit_price=locked.overage_unit_price,
+        require_complete=True,
+    )
+
+    same_scope = [
+        row for row in locked_policies
+        if row.pk != locked.pk and row.status == ServiceSubscriptionPolicy.Status.ACTIVE and row.plan == locked.plan
+    ]
+    later = [row for row in same_scope if row.effective_from and row.effective_from >= starts_at]
+    if later:
+        raise SubscriptionManagementConflict(
+            "subscription_policy_overlap",
+            f"النسخة v{later[0].version} لنفس النطاق تسري من تاريخ لاحق أو مساوٍ؛ اختر تاريخ سريان بعده.",
+        )
+    superseded = []
+    for previous in same_scope:
+        if previous.effective_to is None or previous.effective_to > starts_at:
+            previous.effective_to = starts_at
+            previous.save(update_fields=["effective_to", "updated_at"])
+            superseded.append(previous.pk)
+
+    locked.status = ServiceSubscriptionPolicy.Status.ACTIVE
+    locked.effective_from = starts_at
+    locked.effective_to = None
+    locked.activated_at = now
+    locked.activated_by = actor if getattr(actor, "pk", None) else None
+    locked.activation_reason = change_reason
+    locked.save(update_fields=[
+        "status", "effective_from", "effective_to",
+        "activated_at", "activated_by", "activation_reason", "updated_at",
+    ])
+    _log_subscription_policy_event(
+        locked, action=ServiceSubscriptionPolicyEvent.Action.ACTIVATED, actor=actor,
+        correlation_id=correlation_id,
+        details={
+            "reason": change_reason,
+            "effective_from": starts_at.isoformat(),
+            "superseded_policy_ids": superseded,
+            "after": _policy_event_details(locked),
+        },
+    )
+
+    for row in locked_policies:
+        if (
+            row.pk != locked.pk
+            and row.status == ServiceSubscriptionPolicy.Status.ACTIVE
+            and row.effective_to is not None
+            and row.effective_to <= now
+        ):
+            row.status = ServiceSubscriptionPolicy.Status.RETIRED
+            row.save(update_fields=["status", "updated_at"])
+            _log_subscription_policy_event(
+                row, action=ServiceSubscriptionPolicyEvent.Action.RETIRED, actor=actor,
+                correlation_id=correlation_id,
+                details={"reason": change_reason, "effective_to": row.effective_to.isoformat()},
+            )
+    logger.info(
+        "platform.subscription_policy_activated policy=%s version=%s plan=%s effective_from=%s actor=%s",
+        locked.pk,
+        locked.version,
+        locked.plan,
+        starts_at.isoformat(),
+        getattr(actor, "pk", None),
+    )
+    return locked
+
+
+def validate_billing_customer_for_subscription(*, customer, tenant_id: int | None, billing_tenant_id: int | None):
+    """يحصر عميل الفوترة في شركة المنصة الملتقطة للسياسة."""
+    if customer is None:
+        return None
+    if billing_tenant_id is None:
+        raise BillingConfigurationError(
+            "platform_billing_tenant_unconfigured",
+            "لم تُضبط شركة فوترة المنصة في سياسة الاشتراك الفعالة.",
+            status_code=400,
+        )
+    if getattr(customer, "tenant_id", None) == tenant_id:
+        raise BillingConfigurationError(
+            "billing_customer_same_tenant",
+            "عميل الفوترة يجب أن يتبع شركة المنصة المفوترة المنفصلة عن الشركة المشتركة.",
+            status_code=400,
+        )
+    if getattr(customer, "tenant_id", None) != billing_tenant_id:
+        raise BillingConfigurationError(
+            "billing_customer_wrong_platform_tenant",
+            "عميل الفوترة لا يتبع شركة فوترة المنصة المحددة في سياسة الاشتراك.",
+            status_code=400,
+        )
+    return customer
+
+
+def search_platform_billing_customers(*, query: str = "", subscription=None, plan: str = "", limit: int = 20):
+    """يبحث عن عملاء الفوترة داخل شركة الفوترة التي سيتحقّق منها الحفظ نفسه.
+
+    لا معامل شركة من الطالب — الشركة مشتقة خادمياً: `billing_tenant` الملتقط على
+    الاشتراك إن مُرِّر (تعديل عميله أو تحويل تجربته)، وإلا — أو لصفٍّ قديم بلا لقطة —
+    شركة فوترة **نسخة السياسة السارية لنفس نطاق الخطة**. و`plan` هنا ليس زينة: الحفظ
+    يتحقّق بسياسة الخطة المطلوبة، فبحثٌ بلا خطة كان يعرض عملاء شركةٍ أخرى ثم يرفضهم
+    الحفظُ بـ`billing_customer_wrong_platform_tenant`. وخطةُ الاشتراك المُمرَّر تُستعمل
+    حين لا لقطة عليه. بلا شركة فوترة معروفة تعود قائمة فارغة بدل تخمين شركة.
+    """
+    from partners.models import Partner
+
+    billing_tenant_id = None
+    plan = str(plan or "")
+    if subscription is not None:
+        subscription_id = getattr(subscription, "pk", subscription)
+        snapshot = ServiceSubscription.objects.filter(pk=subscription_id).values("billing_tenant_id", "plan").first()
+        if snapshot:
+            billing_tenant_id = snapshot["billing_tenant_id"]
+            plan = plan or snapshot["plan"] or ""
+    if billing_tenant_id is None:
+        active_policy = get_active_subscription_policy(plan=plan)
+        billing_tenant_id = active_policy.billing_tenant_id if active_policy else None
+    if billing_tenant_id is None:
+        return Partner.objects.none()
+    qs = Partner.objects.filter(tenant_id=billing_tenant_id, partner_type="Customer")
+    query = str(query or "").strip()
+    if query:
+        qs = qs.filter(Q(name__icontains=query) | Q(phone__icontains=query) | Q(email__icontains=query))
+    return qs.order_by("name")[:limit]
+
+
+def is_service_subscription_eligible(subscription, at: datetime.datetime | None = None) -> bool:
+    """محور الأهلية الوحيد: نشط دوماً مؤهَّل، وتجربة لم تنتهِ بعد مؤهَّلة أيضاً."""
+    if not subscription:
+        return False
+    if subscription.status == ServiceSubscription.Status.ACTIVE:
+        return True
+    if subscription.status == ServiceSubscription.Status.TRIAL:
+        moment = at or timezone.now()
+        return bool(subscription.trial_ends_at and moment < subscription.trial_ends_at)
+    return False
+
+
+def eligible_service_tenant_ids(at: datetime.datetime | None = None):
+    """معرّفات الشركات المؤهلة للخدمة باستعلام SQL واحد."""
+    moment = at or timezone.now()
+    return ServiceSubscription.objects.filter(
+        Q(status=ServiceSubscription.Status.ACTIVE)
+        | Q(status=ServiceSubscription.Status.TRIAL, trial_ends_at__gt=moment)
+    ).values_list("tenant_id", flat=True)
+
+
+def is_service_active(tenant, at: datetime.datetime | None = None) -> bool:
+    """هل خدمة المتابعة والإدخال نشطة (فعلياً نشطة أو داخل نافذة تجربة) لهذه الشركة؟
+
+    تفعيل الخدمة هو البوابة الوحيدة لإسناد موظف منصة للشركة، ولدخولها أوامر
+    العمل والصحة والاستخدام والتقييم ومركز القيادة.
+    """
+    if tenant is None:
+        return False
+    tenant_id = getattr(tenant, "pk", tenant)
+    subscription = ServiceSubscription.objects.filter(tenant_id=tenant_id).first()
+    return is_service_subscription_eligible(subscription, at=at)
+
+
+def is_service_trial(subscription, at: datetime.datetime | None = None) -> bool:
+    """هل الاشتراك في حالة تجربة لم تنتهِ بعد؟"""
+    return bool(subscription and subscription.status == ServiceSubscription.Status.TRIAL and is_service_subscription_eligible(subscription, at))
+
+
+def _default_scheduled_cancellation_date(subscription) -> datetime.date:
+    """نهاية الدورة الحالية أو التجربة — بلا prorating في الـpilot (قرار §1)."""
+    in_trial = subscription.status == ServiceSubscription.Status.TRIAL or (
+        subscription.status == ServiceSubscription.Status.SUSPENDED
+        and subscription.pre_suspension_status == ServiceSubscription.Status.TRIAL
+    )
+    if in_trial and subscription.trial_ends_at:
+        return timezone.localtime(subscription.trial_ends_at).date()
+    if subscription.period_start and timezone.localdate() < subscription.period_start:
+        return subscription.period_start - datetime.timedelta(days=1)
+    if subscription.period_end:
+        return subscription.period_end
+    return timezone.localdate()
+
+
+@transaction.atomic
+def start_service_trial(
+    *, tenant, plan: str | None = None, actor=None, correlation_id: str = "",
+) -> ServiceSubscription:
+    """يبدأ تجربة مجانية لشركة بلا أي صف اشتراك سابق — تجربة واحدة مدى حياة الشركة."""
+    # قفلُ صفّ الشركة الموجود أولاً يُسلسل التفعيل: قفلُ صفّ اشتراكٍ غير موجود على MySQL
+    # يأخذ gap lock فتتشابك معاملتان تُدرجان معاً (1213) بدل أن تنتظر إحداهما الأخرى.
+    try:
+        tenant_obj = Tenant.objects.select_for_update().get(pk=getattr(tenant, "pk", tenant))
+    except Tenant.DoesNotExist:
+        raise SubscriptionManagementError("tenant_not_found", "الشركة غير موجودة.")
+    existing = ServiceSubscription.objects.select_for_update().filter(tenant_id=tenant_obj.pk).first()
+    if existing:
+        code = "trial_already_used" if existing.trial_started_at else "subscription_already_exists"
+        raise SubscriptionManagementConflict(code, "لا يمكن بدء تجربة جديدة لهذه الشركة.")
+
+    plan_name = _normalize_plan(plan) or DEFAULT_SERVICE_PLAN
+    active_policy = get_active_subscription_policy(plan=plan_name)
+    if active_policy is None:
+        raise SubscriptionManagementError("subscription_policy_missing", "فعّل سياسة اشتراك قبل بدء تجربة.")
+    if not active_policy.trial_days:
+        raise SubscriptionManagementError("trial_not_configured", "السياسة الفعالة لا تمنح أيام تجربة.")
+
+    now = timezone.now()
+    try:
+        subscription = ServiceSubscription.objects.create(
+            tenant=tenant_obj,
+            status=ServiceSubscription.Status.TRIAL,
+            plan=plan_name,
+            fixed_fee_product_id=active_policy.fixed_fee_product_id,
+            overage_product_id=active_policy.overage_product_id,
+            monthly_fee=active_policy.monthly_fee,
+            included_quota=active_policy.included_quota,
+            overage_unit_price=active_policy.overage_unit_price,
+            trial_days=active_policy.trial_days,
+            trial_started_at=now,
+            trial_ends_at=now + datetime.timedelta(days=active_policy.trial_days),
+            billing_tenant=active_policy.billing_tenant,
+            subscription_policy_version=active_policy.version,
+        )
+    except IntegrityError:
+        raise SubscriptionManagementConflict(
+            "subscription_activation_conflict",
+            "يوجد تفعيل متزامن لهذه الشركة؛ أعد تحميل الاشتراك.",
+        )
+    _log_subscription_event(
+        subscription,
+        action=ServiceSubscriptionEvent.Action.TRIAL_STARTED,
+        from_status="",
+        to_status=ServiceSubscription.Status.TRIAL,
+        actor=actor,
+        correlation_id=correlation_id,
+        details={"trial_days": active_policy.trial_days},
+    )
+    return subscription
+
+
+@transaction.atomic
+def activate_paid_subscription(
+    *, tenant, billing_customer=None, plan: str | None = None, actor=None, correlation_id: str = "",
+) -> ServiceSubscription:
+    """يفعّل اشتراكاً مدفوعاً من لا شيء أو من تجربة أو من ملغى — لا يمنح تجربة ثانية أبداً.
+
+    يخدم هذا المسار كلاً من «تفعيل مدفوع مباشر» و«تحويل التجربة إلى مدفوع»:
+    الفارق بينهما حالة المصدر وحدها، والانتقال والسجل نفسهما. تحويل التجربة
+    **يبقي لقطة أسعارها** كما التُقطت لحظة بدئها، بينما التفعيل من لا شيء أو
+    من اشتراكٍ ملغىً يلتقط نسخة السياسة الفعّالة الآن (§٣: الأسعار القديمة
+    المجمَّدة على صفٍّ ملغىً لا تصحّ لإحيائه). وكل دخولٍ إلى `active` هنا يضبط
+    دورة فوترة أولى جديدة تبدأ أول الشهر الميلادي التالي بلا استثناء
+    (`_first_billing_period_after_activation`) — لا فوترة جزئية لبقيّة شهر
+    التفعيل نفسه.
+    """
+    # قفلُ صفّ الشركة الموجود أولاً يُسلسل التفعيل: قفلُ صفّ اشتراكٍ غير موجود على MySQL
+    # يأخذ gap lock فتتشابك معاملتان تُدرجان معاً (1213) بدل أن تنتظر إحداهما الأخرى.
+    try:
+        tenant_obj = Tenant.objects.select_for_update().get(pk=getattr(tenant, "pk", tenant))
+    except Tenant.DoesNotExist:
+        raise SubscriptionManagementError("tenant_not_found", "الشركة غير موجودة.")
+    locked = ServiceSubscription.objects.select_for_update().filter(tenant_id=tenant_obj.pk).first()
+    if locked and locked.status == ServiceSubscription.Status.ACTIVE:
+        raise SubscriptionManagementConflict("subscription_already_active", "اشتراك الشركة نشط بالفعل.")
+    if locked and locked.status == ServiceSubscription.Status.SUSPENDED:
+        raise SubscriptionManagementConflict("subscription_suspended", "استأنف الاشتراك المعلق أولاً.")
+
+    previous_status = locked.status if locked else ""
+    is_trial_conversion = previous_status == ServiceSubscription.Status.TRIAL
+    cleared_scheduled_cancellation_date = locked.scheduled_cancellation_date if locked else None
+    # إعادة التفعيل من "لا شيء" أو من "ملغى" تلتقط سياسة اليوم؛ تحويل التجربة وحده يُبقي لقطتها.
+    needs_fresh_snapshot = not is_trial_conversion
+    requested_plan = _normalize_plan(plan)
+    if is_trial_conversion and requested_plan and requested_plan != locked.plan:
+        raise SubscriptionManagementError(
+            "plan_fixed_by_trial",
+            "تحويل التجربة يُبقي خطتها وأسعارها الملتقطة؛ لتغيير الخطة ألغِ التجربة ثم فعّل اشتراكاً جديداً.",
+        )
+    plan_name = (
+        locked.plan if is_trial_conversion
+        else requested_plan or (locked.plan if locked else "") or DEFAULT_SERVICE_PLAN
+    )
+
+    active_policy = get_active_subscription_policy(plan=plan_name) if needs_fresh_snapshot else None
+    if needs_fresh_snapshot and active_policy is None:
+        raise SubscriptionManagementError(
+            "subscription_policy_missing", "فعّل سياسة اشتراك قبل إنشاء اشتراك خدمة جديد.",
+        )
+
+    billing_tenant_id = active_policy.billing_tenant_id if needs_fresh_snapshot else locked.billing_tenant_id
+    if billing_customer is None:
+        raise BillingConfigurationError("billing_customer_required", "عميل الفوترة مطلوب للتفعيل المدفوع.", status_code=400)
+    validate_billing_customer_for_subscription(
+        customer=billing_customer, tenant_id=tenant_obj.pk, billing_tenant_id=billing_tenant_id,
+    )
+
+    period_start, period_end = _first_billing_period_after_activation(timezone.localdate())
+
+    locked_existed = locked is not None
+    if locked is None:
+        try:
+            locked = ServiceSubscription.objects.create(
+                tenant=tenant_obj,
+                status=ServiceSubscription.Status.ACTIVE,
+                plan=plan_name,
+                monthly_fee=active_policy.monthly_fee,
+                included_quota=active_policy.included_quota,
+                overage_unit_price=active_policy.overage_unit_price,
+                billing_customer=billing_customer,
+                billing_tenant=active_policy.billing_tenant,
+                subscription_policy_version=active_policy.version,
+                fixed_fee_product_id=active_policy.fixed_fee_product_id,
+                overage_product_id=active_policy.overage_product_id,
+                period_start=period_start,
+                period_end=period_end,
+            )
+        except IntegrityError:
+            raise SubscriptionManagementConflict(
+                "subscription_activation_conflict",
+                "يوجد تفعيل متزامن لهذه الشركة؛ أعد تحميل الاشتراك.",
+            )
+    else:
+        previous_terms = {
+            "plan": locked.plan,
+            "monthly_fee": str(locked.monthly_fee),
+            "included_quota": locked.included_quota,
+            "overage_unit_price": str(locked.overage_unit_price),
+            "billing_tenant_id": locked.billing_tenant_id,
+            "billing_customer_id": locked.billing_customer_id,
+            "subscription_policy_version": locked.subscription_policy_version,
+        }
+        locked.status = ServiceSubscription.Status.ACTIVE
+        locked.scheduled_cancellation_date = None
+        locked.cancellation_reason = ""
+        locked.pre_suspension_status = ""
+        locked.consumed_quota = 0
+        locked.period_start = period_start
+        locked.period_end = period_end
+        update_fields = [
+            "status", "scheduled_cancellation_date", "cancellation_reason", "pre_suspension_status",
+            "consumed_quota", "period_start", "period_end", "updated_at",
+        ]
+        locked.billing_customer = billing_customer
+        locked.plan = plan_name
+        update_fields += ["billing_customer", "plan"]
+        if needs_fresh_snapshot:
+            locked.monthly_fee = active_policy.monthly_fee
+            locked.included_quota = active_policy.included_quota
+            locked.overage_unit_price = active_policy.overage_unit_price
+            locked.billing_tenant = active_policy.billing_tenant
+            locked.subscription_policy_version = active_policy.version
+            locked.fixed_fee_product_id = active_policy.fixed_fee_product_id
+            locked.overage_product_id = active_policy.overage_product_id
+            update_fields += [
+                "monthly_fee", "included_quota", "overage_unit_price",
+                "billing_tenant", "subscription_policy_version", "fixed_fee_product", "overage_product",
+            ]
+        locked.save(update_fields=update_fields)
+
+    action = (
+        ServiceSubscriptionEvent.Action.TRIAL_CONVERTED
+        if is_trial_conversion
+        else ServiceSubscriptionEvent.Action.ACTIVATED
+    )
+    _log_subscription_event(
+        locked,
+        action=action,
+        from_status=previous_status,
+        to_status=ServiceSubscription.Status.ACTIVE,
+        actor=actor,
+        correlation_id=correlation_id,
+        details={
+            "period_start": period_start.isoformat(),
+            "period_end": period_end.isoformat(),
+            **({"cleared_scheduled_cancellation_date": cleared_scheduled_cancellation_date.isoformat()}
+               if is_trial_conversion and cleared_scheduled_cancellation_date else {}),
+            # إعادة تفعيل صفٍّ ملغى تستبدل شروطه التجارية — الشروط السابقة تبقى هنا لا تُمحى.
+            **({"previous_terms": previous_terms} if locked_existed and needs_fresh_snapshot else {}),
+        },
+    )
+    return locked
+
+
+@transaction.atomic
+def suspend_service_subscription(
+    *, subscription, reason: str, actor=None, correlation_id: str = "",
+) -> ServiceSubscription:
+    """يعلّق تجربة أو اشتراكاً نشطاً فوراً — يوقف عملاً جديداً ويحفظ الدورة والتاريخ."""
+    reason = str(reason or "").strip()
+    if not reason:
+        raise SubscriptionManagementError("reason_required", "سبب التعليق مطلوب.")
+    return deactivate_service_subscription(
+        subscription=subscription,
+        new_status=ServiceSubscription.Status.SUSPENDED,
+        reason=reason,
+        actor=actor,
+        correlation_id=correlation_id,
+    )
+
+
+@transaction.atomic
+def resume_service_subscription(*, subscription, actor=None, correlation_id: str = "") -> ServiceSubscription:
+    """يعيد اشتراكاً معلقاً إلى حالته السابقة الصالحة ويستأنف ما علّقه ذلك التعليق — لا يحيي ملغى.
+
+    الاستئناف مقصور على الارتباطات التي سجّلها حدث التعليق الأخير
+    (`suspended_engagement_ids`): ما علّقه مديرٌ يدوياً قبل تعليق الاشتراك يبقى معلَّقاً.
+    وفشلُ ارتباطٍ بعينه (موظف خرج من الخدمة مثلاً) لا يُسقط الاستئناف — يُسجَّل في الحدث.
+    """
+    locked = ServiceSubscription.objects.select_for_update().get(pk=getattr(subscription, "pk", subscription))
+    if locked.status != ServiceSubscription.Status.SUSPENDED:
+        raise SubscriptionManagementConflict("subscription_not_suspended", "الاشتراك ليس معلقاً.")
+    target_status = locked.pre_suspension_status or ServiceSubscription.Status.ACTIVE
+    locked.status = target_status
+    locked.pre_suspension_status = ""
+    locked.save(update_fields=["status", "pre_suspension_status", "updated_at"])
+
+    last_suspension = (
+        ServiceSubscriptionEvent.objects.filter(
+            subscription=locked, action=ServiceSubscriptionEvent.Action.SUSPENDED,
+        )
+        .order_by("-pk")
+        .first()
+    )
+    to_resume = list((last_suspension.details or {}).get("suspended_engagement_ids", []) if last_suspension else [])
+    resumed_engagement_ids, failed_engagements = [], []
+    for engagement_id in to_resume:
+        try:
+            resume_engagement(engagement=engagement_id)
+            resumed_engagement_ids.append(engagement_id)
+        except PlatformOpsError as exc:
+            failed_engagements.append({"engagement": engagement_id, "code": exc.code})
+
+    _log_subscription_event(
+        locked,
+        action=ServiceSubscriptionEvent.Action.RESUMED,
+        from_status=ServiceSubscription.Status.SUSPENDED,
+        to_status=target_status,
+        actor=actor,
+        correlation_id=correlation_id,
+        details={
+            "resumed_engagement_ids": resumed_engagement_ids,
+            "failed_engagements": failed_engagements,
+        },
+    )
+    return locked
+
+
+@transaction.atomic
+def schedule_service_subscription_cancellation(
+    *, subscription, reason: str, actor=None, correlation_id: str = "", immediate: bool = False,
+) -> ServiceSubscription:
+    """يجدول الإلغاء لنهاية الدورة/التجربة افتراضياً، أو يلغي فوراً إن طُلب صراحةً."""
+    reason = str(reason or "").strip()
+    if not reason:
+        raise SubscriptionManagementError("reason_required", "سبب الإلغاء مطلوب.")
+    locked = ServiceSubscription.objects.select_for_update().get(pk=getattr(subscription, "pk", subscription))
+    if locked.status == ServiceSubscription.Status.CANCELLED:
+        raise SubscriptionManagementConflict("subscription_already_cancelled", "الاشتراك ملغى بالفعل.")
+
+    if immediate:
+        return deactivate_service_subscription(
+            subscription=locked,
+            new_status=ServiceSubscription.Status.CANCELLED,
+            reason=reason,
+            actor=actor,
+            correlation_id=correlation_id,
+        )
+
+    scheduled_for = _default_scheduled_cancellation_date(locked)
+    locked.scheduled_cancellation_date = scheduled_for
+    locked.cancellation_reason = reason
+    locked.save(update_fields=["scheduled_cancellation_date", "cancellation_reason", "updated_at"])
+    _log_subscription_event(
+        locked,
+        action=ServiceSubscriptionEvent.Action.CANCELLATION_SCHEDULED,
+        from_status=locked.status,
+        to_status=locked.status,
+        reason=reason,
+        actor=actor,
+        correlation_id=correlation_id,
+        details={"scheduled_cancellation_date": scheduled_for.isoformat()},
+    )
+    return locked
+
+
+@transaction.atomic
+def withdraw_scheduled_service_cancellation(
+    *, subscription, actor=None, correlation_id: str = "",
+) -> ServiceSubscription:
+    """يسحب إلغاءً مجدولاً لم يُطبَّق بعد."""
+    locked = ServiceSubscription.objects.select_for_update().get(pk=getattr(subscription, "pk", subscription))
+    if not locked.scheduled_cancellation_date:
+        raise SubscriptionManagementError("no_scheduled_cancellation", "لا يوجد إلغاء مجدول لسحبه.")
+    locked.scheduled_cancellation_date = None
+    locked.cancellation_reason = ""
+    locked.save(update_fields=["scheduled_cancellation_date", "cancellation_reason", "updated_at"])
+    _log_subscription_event(
+        locked,
+        action=ServiceSubscriptionEvent.Action.CANCELLATION_WITHDRAWN,
+        from_status=locked.status,
+        to_status=locked.status,
+        actor=actor,
+        correlation_id=correlation_id,
+    )
+    return locked
+
+
+def apply_due_subscription_cancellations(now: datetime.datetime | None = None) -> dict:
+    """يطبّق كل إلغاء مجدول حان أجله — idempotent، ولا يُستدعى من مسار dry-run.
+
+    `scheduled_cancellation_date` هو **آخر يوم خدمةٍ يشمله**، فيُطبَّق الإلغاء
+    بعد انقضائه فعلاً (`< اليوم` لا `<=`) — وإلا سقطت الخدمة قبل نهاية اليوم
+    الذي لا يزال العميل يملك حقاً فيه. يُستدعى هذا **بعد** تمرير الفوترة الشهرية
+    لا قبله: تجميدُ الاشتراك أولاً كان يُسقط فاتورة آخر شهرٍ مستحقّ بالكامل رغم
+    أن المواصفة §١ تنصّ على بقاء الخدمة حتى نهاية الدورة بلا استرداد جزئي.
+
+    **ولا يُلغى اشتراك نشط قبل فوترة دورته الأخيرة**: الفوترة الناجحة تنقل
+    `period_start` إلى الشهر التالي، فإن بقي `period_start <= scheduled_cancellation_date`
+    فالدورة التي تضم آخر يوم خدمة لم تُفوتر بعد (تشغيل محصور بـ`--tenant`/`--subscription`،
+    أو خطأ إعداد، أو دورة خاطئة) — يُؤجَّل الإلغاء إلى تشغيل لاحق بدل أن يُسقط فاتورتها
+    للأبد (`billing_preflight` لا يفوتر إلا `active`). المعلّق والتجربة لا يُفوتران أصلاً.
+
+    كل صف يُقفل ويُعاد فحصه في معاملته، وخطأ النطاق (`PlatformOpsError`) في صف واحد يُسجَّل
+    في `failed` ولا يوقف بقية الدفعة.
+    """
+    moment = now or timezone.now()
+    today = timezone.localtime(moment).date() if timezone.is_aware(moment) else moment.date()
+    candidates = ServiceSubscription.objects.filter(
+        scheduled_cancellation_date__isnull=False,
+        scheduled_cancellation_date__lt=today,
+    ).exclude(status=ServiceSubscription.Status.CANCELLED)
+
+    applied_ids = []
+    awaiting_final_billing_ids = []
+    failed = []
+    for sub in candidates:
+        try:
+            with transaction.atomic():
+                locked = ServiceSubscription.objects.select_for_update().get(pk=sub.pk)
+                if locked.status == ServiceSubscription.Status.CANCELLED:
+                    continue
+                if not locked.scheduled_cancellation_date or locked.scheduled_cancellation_date >= today:
+                    continue
+                if (
+                    locked.status == ServiceSubscription.Status.ACTIVE
+                    and locked.period_start
+                    and locked.period_start <= locked.scheduled_cancellation_date
+                ):
+                    awaiting_final_billing_ids.append(locked.pk)
+                    continue
+                reason = locked.cancellation_reason or "تطبيق إلغاء مجدول تلقائياً عند نهاية الدورة"
+                deactivate_service_subscription(
+                    subscription=locked,
+                    new_status=ServiceSubscription.Status.CANCELLED,
+                    reason=reason,
+                    actor=None,
+                    correlation_id=f"auto-cancel-{locked.pk}",
+                )
+                applied_ids.append(locked.pk)
+        except PlatformOpsError as exc:
+            # خطأ نطاق في صفّ واحد (مثل تعارض حالة) لا يوقف بقية الدفعة ولا يُسقط الأمر بعد فوترةٍ اعتُمدت.
+            failed.append({"subscription_id": sub.pk, "code": exc.code})
+            logger.warning(
+                "platform.subscription_auto_cancel_failed subscription=%s code=%s", sub.pk, exc.code,
+            )
+    return {
+        "applied_count": len(applied_ids),
+        "applied_subscription_ids": applied_ids,
+        "awaiting_final_billing_subscription_ids": awaiting_final_billing_ids,
+        "failed": failed,
+    }
+
+
+@transaction.atomic
+def update_subscription_commercial_settings(
+    *, subscription, actor=None, correlation_id: str = "", reason: str = "", **changes,
+) -> ServiceSubscription:
+    """يحدّث شروط اشتراك بعينه (تفاوض خاص) بسبب إلزامي دون تغيير حالته.
+
+    تعديل الأسعار هنا استثناء لهذا الصف لا تعديلٌ للسياسة: `subscription_policy_version`
+    يبقى مصدر اللقطة الأصلية، والانحراف عنها وسببه في حدث `settings_updated`.
+    الاشتراك الملغى لا تُعدَّل شروطه — إعادة تفعيله تلتقط السياسة السارية.
+    """
+    subscription_id = getattr(subscription, "pk", subscription)
+    locked = ServiceSubscription.objects.select_for_update().get(pk=subscription_id)
+    allowed = {"plan", "monthly_fee", "included_quota", "overage_unit_price", "billing_customer"}
+    unknown = set(changes) - allowed
+    if unknown:
+        raise SubscriptionManagementError("unsupported_field", "يوجد حقل تجاري غير مسموح بتعديله.")
+    if not changes:
+        return locked
+    if locked.status == ServiceSubscription.Status.CANCELLED:
+        raise SubscriptionManagementConflict(
+            "subscription_cancelled", "لا تُعدَّل شروط اشتراك ملغى؛ أعد تفعيله باشتراك مدفوع جديد.",
+        )
+    if "billing_customer" in changes:
+        if changes["billing_customer"] is None and locked.status != ServiceSubscription.Status.TRIAL:
+            # اشتراكٌ مدفوع بلا عميل فوترة لا يُفوتَر أبداً — لا يُسمح بتفريغه.
+            raise SubscriptionManagementError("billing_customer_required", "عميل الفوترة مطلوب للاشتراك المدفوع.")
+        # سياسةُ نطاق الخطة نفسِها لا العامّة — وإلا تحقّقنا بشركةِ فوترةٍ غير التي يبحث فيها المنتقي.
+        billing_tenant_id = locked.billing_tenant_id or getattr(
+            get_active_subscription_policy(plan=locked.plan), "billing_tenant_id", None,
+        )
+        validate_billing_customer_for_subscription(
+            customer=changes["billing_customer"],
+            tenant_id=locked.tenant_id,
+            billing_tenant_id=billing_tenant_id,
+        )
+    if "plan" in changes:
+        changes["plan"] = str(changes["plan"] or "").strip()
+        if not changes["plan"]:
+            raise SubscriptionManagementError("plan", "اسم الباقة مطلوب.")
+    if "monthly_fee" in changes:
+        changes["monthly_fee"] = _validate_subscription_decimal(changes["monthly_fee"], "monthly_fee")
+    if "overage_unit_price" in changes:
+        changes["overage_unit_price"] = _validate_subscription_decimal(changes["overage_unit_price"], "overage_unit_price")
+    if "included_quota" in changes:
+        changes["included_quota"] = _validate_included_quota(changes["included_quota"])
+    def audit_value(field, value):
+        # JSONField لا يشفّر Decimal؛ نمثل المال نصاً دقيقاً لا float.
+        return str(value) if field in {"monthly_fee", "overage_unit_price"} and value is not None else value
+
+    def stored_value(field):
+        return getattr(locked, f"{field}_id" if field == "billing_customer" else field)
+
+    def incoming_value(field):
+        value = changes[field]
+        return getattr(value, "pk", value) if field == "billing_customer" else value
+
+    # حقلٌ أُرسل بقيمته الحالية ليس تعديلاً: لا يدخل الحفظ ولا حدث التدقيق.
+    changes = {field: value for field, value in changes.items() if incoming_value(field) != stored_value(field)}
+    if not changes:
+        return locked
+    reason = str(reason or "").strip()
+    if not reason:
+        raise SubscriptionManagementError("reason_required", "سبب تعديل شروط الاشتراك مطلوب.")
+
+    before = {field: audit_value(field, stored_value(field)) for field in changes}
+    for field, value in changes.items():
+        setattr(locked, field, value)
+    locked.save(update_fields=[*changes.keys(), "updated_at"])
+    _log_subscription_event(
+        locked,
+        action=ServiceSubscriptionEvent.Action.SETTINGS_UPDATED,
+        from_status=locked.status,
+        to_status=locked.status,
+        reason=reason,
+        actor=actor,
+        correlation_id=correlation_id,
+        details={
+            "changes": {
+                field: {
+                    "before": before[field],
+                    "after": audit_value(
+                        field,
+                        getattr(locked, f"{field}_id" if field == "billing_customer" else field),
+                    ),
+                }
+                for field in sorted(changes)
+            },
+        },
+    )
+    logger.info(
+        "platform.subscription_settings_updated subscription=%s tenant=%s fields=%s actor=%s",
+        locked.pk,
+        locked.tenant_id,
+        ",".join(sorted(changes)),
+        getattr(actor, "pk", None),
+    )
+    return locked
+
+
 class BillingPeriodError(BillingError):
     """خطأ في دورة الفوترة (طلب دورة غير مطابقة لدورة الاشتراك أو اشتراك غير نشط)."""
 
@@ -150,20 +1264,6 @@ class JobGone(Exception):
 class InvitationGone(Exception):
     """رابط الدعوة مستهلك أو منتهي الصلاحية (410)."""
 
-
-
-def is_service_active(tenant) -> bool:
-    """هل خدمة المتابعة والإدخال نشطة لهذه الشركة؟
-
-    تفعيل الخدمة هو البوابة الوحيدة لإسناد موظف منصة للشركة.
-    """
-    if tenant is None:
-        return False
-    tenant_id = getattr(tenant, "pk", tenant)
-    return ServiceSubscription.objects.filter(
-        tenant_id=tenant_id,
-        status=ServiceSubscription.Status.ACTIVE,
-    ).exists()
 
 
 def is_platform_employee(user, active_only: bool = True) -> bool:
@@ -359,7 +1459,7 @@ def assign_platform_employee(
         .filter(tenant=tenant_obj)
         .first()
     )
-    if not subscription or subscription.status != ServiceSubscription.Status.ACTIVE:
+    if not is_service_subscription_eligible(subscription):
         raise EngagementError(
             "subscription_not_active",
             "خدمة المتابعة والإدخال غير نشطة لهذه الشركة.",
@@ -483,7 +1583,7 @@ def resume_engagement(
         .filter(tenant_id=pre_eng["tenant_id"])
         .first()
     )
-    if not subscription or subscription.status != ServiceSubscription.Status.ACTIVE:
+    if not is_service_subscription_eligible(subscription):
         raise EngagementError(
             "subscription_not_active",
             "خدمة المتابعة والإدخال غير نشطة لهذه الشركة.",
@@ -596,11 +1696,15 @@ def deactivate_service_subscription(
     subscription,
     new_status: str = ServiceSubscription.Status.SUSPENDED,
     reason: str = "تعليق/إلغاء اشتراك الخدمة",
+    actor=None,
+    correlation_id: str = "",
 ) -> ServiceSubscription:
     """إيقاف أو تعليق اشتراك خدمة المتابعة مع تعليق ارتباطاتها النشطة دون حذفها.
 
     ترتيب القفل: Subscription -> Engagements -> Memberships
     يستدعي _execute_suspend مباشرة على الارتباطات المقفولة لتجنب إعادة طلب الأقفال.
+    المسار المنخفض المشترك بين تعليق مباشر وإلغاء فوري (مجدولاً كان أو مباشراً)؛
+    الجدولة لنهاية الدورة تمر بـ`schedule_service_subscription_cancellation` لا هنا.
     """
     sub_obj = subscription
     if isinstance(subscription, Tenant):
@@ -621,8 +1725,24 @@ def deactivate_service_subscription(
         ServiceSubscription.objects.select_for_update()
         .get(pk=sub_obj.pk)
     )
+    previous_status = locked_sub.status
+    if new_status == ServiceSubscription.Status.CANCELLED and previous_status == ServiceSubscription.Status.CANCELLED:
+        raise SubscriptionManagementConflict("subscription_already_cancelled", "الاشتراك ملغى بالفعل.")
+    if new_status == ServiceSubscription.Status.SUSPENDED and previous_status not in (
+        ServiceSubscription.Status.TRIAL, ServiceSubscription.Status.ACTIVE,
+    ):
+        raise SubscriptionManagementConflict("subscription_not_suspendable", "لا يمكن تعليق اشتراك بهذه الحالة.")
+
+    update_fields = ["status", "updated_at"]
+    if new_status == ServiceSubscription.Status.SUSPENDED:
+        locked_sub.pre_suspension_status = previous_status
+        update_fields.append("pre_suspension_status")
+    if new_status == ServiceSubscription.Status.CANCELLED:
+        locked_sub.scheduled_cancellation_date = None
+        locked_sub.cancellation_reason = reason
+        update_fields.extend(["scheduled_cancellation_date", "cancellation_reason"])
     locked_sub.status = new_status
-    locked_sub.save(update_fields=["status", "updated_at"])
+    locked_sub.save(update_fields=update_fields)
 
     # قفل وتعليق كافة الارتباطات النشطة لهذه الشركة
     active_engagements = (
@@ -630,8 +1750,35 @@ def deactivate_service_subscription(
         .filter(tenant_id=locked_sub.tenant_id, status=Engagement.Status.ACTIVE)
         .order_by("pk")
     )
+    # المعرّفات تُحفظ في الحدث كي يستأنف `resume_service_subscription` ما علّقه التعليق
+    # وحده — لا كلَّ ارتباطٍ معلَّق، فالمعلَّق يدوياً قبله يبقى معلَّقاً.
+    suspended_engagement_ids = []
     for eng in active_engagements:
         _execute_suspend(eng, reason=reason)
+        suspended_engagement_ids.append(eng.pk)
+
+    _log_subscription_event(
+        locked_sub,
+        action=(
+            ServiceSubscriptionEvent.Action.SUSPENDED
+            if new_status == ServiceSubscription.Status.SUSPENDED
+            else ServiceSubscriptionEvent.Action.CANCELLED
+        ),
+        from_status=previous_status,
+        to_status=new_status,
+        reason=reason,
+        actor=actor,
+        correlation_id=correlation_id,
+        details={"suspended_engagement_ids": suspended_engagement_ids},
+    )
+    logger.info(
+        "platform.subscription_status_changed subscription=%s tenant=%s from_status=%s to_status=%s actor=%s",
+        locked_sub.pk,
+        locked_sub.tenant_id,
+        previous_status,
+        new_status,
+        getattr(actor, "pk", None),
+    )
 
     return locked_sub
 
@@ -1394,7 +2541,7 @@ def receive_channel_work_order(
         .filter(tenant_id=key.tenant_id)
         .first()
     )
-    if not subscription or subscription.status != ServiceSubscription.Status.ACTIVE:
+    if not is_service_subscription_eligible(subscription):
         raise PlatformOpsError(
             "subscription_not_active",
             "خدمة المتابعة والإدخال غير نشطة لهذه الشركة.",
@@ -2574,12 +3721,15 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
         type("DummyRequest", (), {"user": user})(), None
     ) if hasattr(user, "is_authenticated") and user.is_authenticated else False
 
+    # نطاق مركز القيادة لا يدخل إلا الشركات المؤهلة، باستعلام SQL واحد.
+    eligible_tenant_ids = eligible_service_tenant_ids(current_time)
+
     # تحديد نطاق الموظفين والشركات
     if is_manager:
         emp_qs = PlatformEmployee.objects.select_related("user").filter(
             status=PlatformEmployee.Status.ACTIVE
         )
-        engaged_tenant_ids = None
+        engaged_tenant_ids = eligible_tenant_ids
     else:
         emp_qs = PlatformEmployee.objects.select_related("user").filter(
             user=user,
@@ -2589,6 +3739,7 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
             Engagement.objects.filter(
                 employee__user=user,
                 status=Engagement.Status.ACTIVE,
+                tenant_id__in=eligible_tenant_ids,
             ).values_list("tenant_id", flat=True)
         )
 
@@ -2617,8 +3768,7 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
                 WorkOrder.Status.WAITING_CUSTOMER,
             ],
         )
-        if engaged_tenant_ids is not None:
-            wo_qs = wo_qs.filter(tenant_id__in=engaged_tenant_ids)
+        wo_qs = wo_qs.filter(tenant_id__in=engaged_tenant_ids)
 
         active_count = wo_qs.count()
         overdue_count = wo_qs.filter(
@@ -2641,8 +3791,7 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
             employee=emp,
             status=Engagement.Status.ACTIVE,
         ).select_related("tenant")
-        if engaged_tenant_ids is not None:
-            engagements = engagements.filter(tenant_id__in=engaged_tenant_ids)
+        engagements = engagements.filter(tenant_id__in=engaged_tenant_ids)
 
         companies_list = [
             {"id": eng.tenant_id, "name": eng.tenant.CompanyName}
@@ -2702,10 +3851,7 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
         c.pop("_sort_key", None)
 
     # 2. بطاقات الشركات (لمبدل العرض)
-    if is_manager:
-        tenant_qs = Tenant.objects.all()
-    else:
-        tenant_qs = Tenant.objects.filter(pk__in=engaged_tenant_ids or [])
+    tenant_qs = Tenant.objects.filter(pk__in=engaged_tenant_ids)
 
     company_cards = []
     subscriptions = {
@@ -3657,6 +4803,49 @@ def get_tenant_quota_usage(tenant) -> dict:
     }
 
 
+def _calendar_month_bounds(day: datetime.date) -> tuple[datetime.date, datetime.date]:
+    """أول وآخر يوم في الشهر الميلادي المحتوي على `day` — حاسبة الشهر الوحيدة.
+
+    تستعملها الفوترة لتقديم الدورة بعد كل تحصيل، والتفعيل المدفوع لضبط أول
+    دورة فوترة قبل أي تحصيل — بدل حاسبتين قد تختلفان لاحقاً.
+    """
+    _, last_day = calendar.monthrange(day.year, day.month)
+    return datetime.date(day.year, day.month, 1), datetime.date(day.year, day.month, last_day)
+
+
+def _first_day_of_next_month(day: datetime.date) -> datetime.date:
+    if day.month == 12:
+        return datetime.date(day.year + 1, 1, 1)
+    return datetime.date(day.year, day.month + 1, 1)
+
+
+def _first_billing_period_after_activation(activation_day: datetime.date) -> tuple[datetime.date, datetime.date]:
+    """دورة الفوترة الأولى لاشتراك مدفوع: الشهر الميلادي التالي لشهر التفعيل كاملاً.
+
+    قرارٌ صريحٌ للـpilot بلا prorating (§١): بقيّة شهر التفعيل لا تُفوتَر، وأول
+    دورةٍ حقيقيّة تبدأ في اليوم الأول من الشهر التالي — فشركةٌ فُعِّلت في ٣٠ من
+    الشهر لا تُحاسَب على شهرٍ كامل لم تستهلكه.
+    """
+    return _calendar_month_bounds(_first_day_of_next_month(activation_day))
+
+
+def resolve_subscription_billing_products(
+    subscription, *, fixed_fee_product_id: int | None = None, overage_product_id: int | None = None,
+) -> tuple[int | None, int | None]:
+    """أصناف فوترة الاشتراك: تجاوز صريح من الأمر، ثم لقطة الاشتراك من سياسته، ثم إعدادات الخادم للصفوف القديمة."""
+    fixed = (
+        fixed_fee_product_id
+        or subscription.fixed_fee_product_id
+        or getattr(settings, "PLATFORM_OPS_BILLING_FIXED_FEE_PRODUCT_ID", None)
+    )
+    overage = (
+        overage_product_id
+        or subscription.overage_product_id
+        or getattr(settings, "PLATFORM_OPS_BILLING_OVERAGE_PRODUCT_ID", None)
+    )
+    return fixed, overage
+
+
 def resolve_billing_period_bounds(period_str: str) -> tuple[datetime.date, datetime.date]:
     """تحليل نص الفترة بصيغة YYYY-MM واستخراج تاريخ البداية والنهاية الميلاديين بأمان."""
     raw = str(period_str or "").strip()
@@ -3702,6 +4891,16 @@ def billing_preflight(
     """
     from inventory.models import Product
 
+    if subscription.status == ServiceSubscription.Status.TRIAL:
+        err = BillingPeriodError(
+            "subscription_in_trial",
+            f"اشتراك الشركة «{subscription.tenant}» في فترة تجربة ولا يجوز فوترته.",
+            status_code=400,
+        )
+        if raise_exception:
+            raise err
+        return err
+
     if subscription.status != ServiceSubscription.Status.ACTIVE:
         err = BillingPeriodError(
             "subscription_inactive",
@@ -3726,6 +4925,17 @@ def billing_preflight(
             if raise_exception:
                 raise err
             return err
+
+    if subscription.period_start and subscription.period_start > period_end:
+        err = BillingPeriodError(
+            "subscription_not_yet_billable",
+            f"دورة اشتراك الشركة «{subscription.tenant}» تبدأ في {subscription.period_start}، "
+            f"بعد نهاية الدورة المطلوبة ({period_end}) — لم تحن دورته الأولى بعد.",
+            status_code=400,
+        )
+        if raise_exception:
+            raise err
+        return err
 
     if subscription.period_start and subscription.period_end:
         if (
@@ -3858,7 +5068,7 @@ def bill_subscription_for_period(
     subscription_id: int,
     period_start: datetime.date,
     period_end: datetime.date,
-    fixed_fee_product_id: int,
+    fixed_fee_product_id: int | None = None,
     overage_product_id: int | None = None,
     currency_id: int | None = None,
     user=None,
@@ -3890,6 +5100,11 @@ def bill_subscription_for_period(
             f"اشتراك الخدمة برقم {subscription_id} غير موجود.",
             status_code=404,
         )
+
+    # الأصناف: تجاوز صريح، وإلا لقطة الاشتراك من سياسته، وإلا إعدادات الخادم للصفوف القديمة.
+    fixed_fee_product_id, overage_product_id = resolve_subscription_billing_products(
+        subscription, fixed_fee_product_id=fixed_fee_product_id, overage_product_id=overage_product_id,
+    )
 
     # 2. فحص idempotency السريع
     existing_record = (
@@ -3948,9 +5163,7 @@ def bill_subscription_for_period(
                 status_code=409,
             )
 
-        next_start = period_end + datetime.timedelta(days=1)
-        _, last_day = calendar.monthrange(next_start.year, next_start.month)
-        next_end = datetime.date(next_start.year, next_start.month, last_day)
+        next_start, next_end = _calendar_month_bounds(period_end + datetime.timedelta(days=1))
 
         subscription.consumed_quota = 0
         subscription.period_start = next_start
@@ -4055,9 +5268,7 @@ def bill_subscription_for_period(
         )
 
     # 12. تدوير دورة الاشتراك وتصفير العداد بأمان
-    next_start = period_end + datetime.timedelta(days=1)
-    _, last_day = calendar.monthrange(next_start.year, next_start.month)
-    next_end = datetime.date(next_start.year, next_start.month, last_day)
+    next_start, next_end = _calendar_month_bounds(period_end + datetime.timedelta(days=1))
 
     subscription.consumed_quota = 0
     subscription.period_start = next_start
@@ -4073,7 +5284,7 @@ def bill_subscriptions_for_period(
     *,
     period_start: datetime.date,
     period_end: datetime.date,
-    fixed_fee_product_id: int,
+    fixed_fee_product_id: int | None = None,
     overage_product_id: int | None = None,
     currency_id: int | None = None,
     subscription_id: int | None = None,
@@ -4630,7 +5841,3 @@ def accept_applicant_invitation(
     locked_inv.save(update_fields=["accepted_at"])
 
     return user, employee, locked_applicant
-
-
-
-

@@ -608,6 +608,10 @@ class WorkOrderApiScopeTest(TestCase):
         self.client = APIClient()
         self.tenant_a = Tenant.objects.create(TenantID=971, CompanyName="Scope A Co")
         self.tenant_b = Tenant.objects.create(TenantID=972, CompanyName="Scope B Co")
+        # 210-A §١: أوامرُ العمل لا تدخلها إلا شركةٌ مؤهَّلة — الشركتان مشتركتان كي يبقى
+        # هذا الاختبارُ عن العزل بالارتباط وحده لا عن الأهلية.
+        for tenant in (self.tenant_a, self.tenant_b):
+            ServiceSubscription.objects.create(tenant=tenant, status=ServiceSubscription.Status.ACTIVE)
 
         self.staff_user = User.objects.create_user(
             username="scoped_staff", email="scoped_staff@platform.local", password="x"

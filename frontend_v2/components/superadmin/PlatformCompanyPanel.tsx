@@ -20,6 +20,7 @@ import { formatNumber } from "../../utils/formatNumber";
 // شكل الحركة الواحدة (شارة الإجراء · اسم النوع · صيغة الوقت) مصدره واحد مع سجل
 // المستند والصفحة العامة — لا صيغة ثالثة تخصّ لوحة المنصة.
 import { actionMeta, entityLabel, formatActivityTime } from "../activity/activityMeta";
+import { ServiceSubscriptionSection } from "../platform/ServiceSubscriptionSection";
 
 /** لوحة تحكم الشركة — سوبر أدمن المنصة فقط.
  * كانت صلاحيات المنصة موزّعة على «إدارة الشركة» (نافذة المدير) فلا يطال السوبر
@@ -409,6 +410,8 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                   </button>
                 </div>
               </section>
+
+              <ServiceSubscriptionSection companyId={companyId} />
 
               <section aria-label="وحدات الشركة المرخَّصة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
                 <h3 className="mb-3 text-sm font-bold text-[var(--color-text)]">الوحدات المرخَّصة</h3>
