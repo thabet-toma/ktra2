@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PRUNED_DIRS = {
     "venv", ".venv", "node_modules", "__pycache__", ".git", ".claude",
     ".multica", ".pytest_cache", "dist", "test-results", ".clone",
-    ".agent_context", "playwright-report",
+    ".agent_context", "playwright-report", "django_cache",
 }
 
 #: حزم المنصة التي تخضع للفحص.
