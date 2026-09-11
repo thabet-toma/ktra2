@@ -16,7 +16,7 @@ import {
   CalendarDays, CalendarX, ArrowLeftRight, Boxes, BarChart3, Building2,
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck,
-  Gauge, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
+  Gauge, Radar, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
   PlayCircle, Network, Fingerprint, CalendarCheck, Inbox, FileSignature, Layers,
   Briefcase as BriefcaseIcon,
 } from 'lucide-react';
@@ -569,6 +569,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                   <button type="button" onClick={() => { setView("super-admin"); if (isMobile) setIsMobileMenuOpen(false); }}
                     className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("super-admin") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
                     <Gauge className="h-4 w-4" /> لوحة السوبر أدمن
+                  </button>
+                  <button type="button" onClick={() => { setView("platform-ops"); if (isMobile) setIsMobileMenuOpen(false); }}
+                    className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("platform-ops") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
+                    <Radar className="h-4 w-4" /> مركز قيادة كترا
                   </button>
                   <button type="button" onClick={() => { setView("development-notes"); if (isMobile) setIsMobileMenuOpen(false); }}
                     className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("development-notes") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
